@@ -1,43 +1,36 @@
 // GeoscientistToolkit/Data/Dataset.cs
-// This file defines the base class for all datasets handled by the application,
-// as well as the enumeration for the different types of datasets.
+// Base class for all dataset types
 
 namespace GeoscientistToolkit.Data
 {
     public enum DatasetType
     {
         CtImageStack,
-        CtSegmentedVolume,
         CtBinaryFile,
-        SingleImage,
+        MicroXrf,
         PointCloud,
-        Mesh
+        Mesh,
+        SingleImage // New Type
     }
 
     public abstract class Dataset
     {
         public string Name { get; set; }
-        public DatasetType Type { get; }
         public string FilePath { get; set; }
+        public DatasetType Type { get; protected set; }
+        public DateTime DateCreated { get; set; }
+        public DateTime DateModified { get; set; }
 
-        protected Dataset(string name, DatasetType type, string filePath)
+        protected Dataset(string name, string filePath)
         {
-            Name = name;
-            Type = type;
-            FilePath = filePath;
+            Name = name ?? throw new ArgumentNullException(nameof(name));
+            FilePath = filePath ?? throw new ArgumentNullException(nameof(filePath));
+            DateCreated = DateTime.Now;
+            DateModified = DateTime.Now;
         }
-    }
 
-    // Example of a specific dataset implementation
-    public class CtImageStackDataset : Dataset
-    {
-        public int BinningSize { get; set; }
-        public bool LoadFullInMemory { get; set; }
-        public float PixelSize { get; set; }
-        public string Unit { get; set; } = "micrometers";
-
-        public CtImageStackDataset(string name, string filePath) : base(name, DatasetType.CtImageStack, filePath)
-        {
-        }
+        public abstract long GetSizeInBytes();
+        public abstract void Load();
+        public abstract void Unload();
     }
 }

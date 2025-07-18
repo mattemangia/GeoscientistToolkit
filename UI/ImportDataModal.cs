@@ -1,168 +1,237 @@
 // GeoscientistToolkit/UI/ImportDataModal.cs
-// This is the corrected version that changes the IsOpen property to a field
-// to make it compatible with ImGui's 'ref' parameter usage.
 
+using System.Numerics;
 using GeoscientistToolkit.Business;
 using GeoscientistToolkit.Data;
+using GeoscientistToolkit.Data.Image;
+using GeoscientistToolkit.UI.Utils;
 using GeoscientistToolkit.Util;
 using ImGuiNET;
-using System.Numerics;
-using System.IO;
-
+using SixLabors.ImageSharp;
+using SixLabors.ImageSharp.PixelFormats;
 
 namespace GeoscientistToolkit.UI
 {
     public class ImportDataModal
     {
-        //
-        
-        // Change the auto-property to a public field.
-        //
-        public bool IsOpen; // Was: public bool IsOpen { get; private set; }
+        public bool IsOpen;
+        private readonly ImGuiFileDialog _fileDialog;
+        private readonly ImGuiFileDialog _folderDialog;
 
-        private DatasetType _selectedType = DatasetType.CtImageStack;
-        private int _binningSize = 1;
-        private bool _loadInMemory = true;
+        // State for the import options
+        private int _selectedDatasetTypeIndex;
+        private readonly string[] _datasetTypeNames = { "Single Image", "CT Image Stack" };
+
+        // Single Image options
+        private string _imagePath = "";
+        private bool _specifyPixelSize;
         private float _pixelSize = 1.0f;
-        private int _pixelUnit = 0; // 0 for micrometers, 1 for millimeters
-        private string _filePath = "";
+        private string _pixelUnit = "µm";
+
+        // CT Image Stack options
+        private string _folderPath = "";
+
+        // Progress tracking
+        private float _progress;
+        private string _statusText = "";
+        private Task _importTask;
+
+        public ImportDataModal()
+        {
+            _fileDialog = new ImGuiFileDialog("ImportFileDialog", FileDialogType.OpenFile, "Select Image File");
+            _folderDialog = new ImGuiFileDialog("ImportFolderDialog", FileDialogType.OpenDirectory, "Select Image Folder");
+        }
 
         public void Open()
         {
             IsOpen = true;
-            // Reset fields when opening
-            _selectedType = DatasetType.CtImageStack;
-            _binningSize = 1;
-            _loadInMemory = true;
-            _pixelSize = 1.0f;
-            _pixelUnit = 0;
-            _filePath = "";
-            ImGui.OpenPopup("Import Data");
+            ResetState();
         }
 
         public void Submit()
         {
-            Vector2 center = ImGui.GetMainViewport().GetCenter();
-            ImGui.SetNextWindowPos(center, ImGuiCond.Appearing, new Vector2(0.5f, 0.5f));
-            
-            // Now that 'IsOpen' is a field, it can be passed by reference without error.
-            if (ImGui.BeginPopupModal("Import Data", ref IsOpen, ImGuiWindowFlags.AlwaysAutoResize))
+            // Handle file dialog submissions first - BEFORE checking if ImportDataModal is open
+            if (_fileDialog.Submit())
             {
-                ImGui.Text("Select Dataset Type:");
-                if (ImGui.BeginCombo("##DatasetType", _selectedType.ToString()))
+                _imagePath = _fileDialog.SelectedPath;
+            }
+            
+            if (_folderDialog.Submit())
+            {
+                _folderPath = _folderDialog.SelectedPath;
+            }
+
+            // Only render the import modal if neither file dialog is open
+            if (IsOpen && !_fileDialog.IsOpen && !_folderDialog.IsOpen)
+            {
+                ImGui.SetNextWindowSize(new Vector2(500, 380), ImGuiCond.FirstUseEver);
+                
+                bool windowOpen = IsOpen;
+                if (ImGui.BeginPopupModal("Import Data###ImportDataModal", ref windowOpen, ImGuiWindowFlags.AlwaysAutoResize))
                 {
-                    foreach (DatasetType type in Enum.GetValues(typeof(DatasetType)))
-                    {
-                        bool isSelected = (_selectedType == type);
-                        if (ImGui.Selectable(type.ToString(), isSelected))
-                        {
-                            _selectedType = type;
-                        }
-                        if (isSelected)
-                        {
-                            ImGui.SetItemDefaultFocus();
-                        }
-                    }
-                    ImGui.EndCombo();
-                }
-
-                ImGui.Separator();
-
-                switch (_selectedType)
-                {
-                    case DatasetType.CtImageStack:
-                        RenderCtImageStackOptions();
-                        break;
-                    case DatasetType.CtBinaryFile:
-                        RenderCtBinaryOptions();
-                        break;
-                    // Add cases for other dataset types here
-                    default:
-                        RenderGenericFileOptions();
-                        break;
-                }
-
-                ImGui.Separator();
-
-                if (ImGui.Button("Import") && !string.IsNullOrEmpty(_filePath))
-                {
-                    string datasetName = Path.GetFileNameWithoutExtension(_filePath);
+                    IsOpen = windowOpen;
                     
-                    var newDataset = new CtImageStackDataset(datasetName, _filePath)
+                    if (_importTask != null && !_importTask.IsCompleted)
                     {
-                        BinningSize = _binningSize,
-                        LoadFullInMemory = _loadInMemory,
-                        PixelSize = _pixelSize,
-                        Unit = _pixelUnit == 0 ? "micrometers" : "millimeters"
-                    };
-                    ProjectManager.Instance.AddDataset(newDataset);
-                    IsOpen = false; // This still works fine.
-                    ImGui.CloseCurrentPopup();
+                        DrawProgress();
+                    }
+                    else
+                    {
+                        DrawOptions();
+                    }
+                    ImGui.EndPopup();
                 }
-
-                ImGui.SameLine();
-
-                if (ImGui.Button("Cancel"))
+                else if (IsOpen)
                 {
-                    IsOpen = false; // And this works fine.
-                    ImGui.CloseCurrentPopup();
+                    // If we're supposed to be open but the popup isn't showing, open it
+                    ImGui.OpenPopup("Import Data###ImportDataModal");
                 }
-
-                ImGui.EndPopup();
             }
         }
 
-        private void RenderCtImageStackOptions()
+        private void DrawOptions()
         {
-            ImGui.Text("Image Sequence Folder:");
-            ImGui.InputText("##FolderPath", ref _filePath, 256);
-            ImGui.SameLine();
-            if (ImGui.Button("Browse..."))
+            ImGui.Combo("Dataset Type", ref _selectedDatasetTypeIndex, _datasetTypeNames, _datasetTypeNames.Length);
+            ImGui.Separator();
+
+            if (_selectedDatasetTypeIndex == 0) // Single Image
             {
-                var selectedFolder = Dialogs.SelectFolderDialog("Select Image Sequence Folder");
-                if (!string.IsNullOrEmpty(selectedFolder))
+                ImGui.InputText("Image File", ref _imagePath, 260, ImGuiInputTextFlags.ReadOnly);
+                ImGui.SameLine();
+                if (ImGui.Button("Browse...##Image"))
                 {
-                    _filePath = selectedFolder;
+                    _fileDialog.Open(null, new[] { ".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff" });
+                }
+
+                ImGui.Checkbox("Specify Pixel Size", ref _specifyPixelSize);
+                if (_specifyPixelSize)
+                {
+                    ImGui.Indent();
+                    ImGui.SetNextItemWidth(100);
+                    ImGui.InputFloat("Pixel Size", ref _pixelSize, 0.1f, 1.0f, "%.2f");
+                    ImGui.SameLine();
+                    ImGui.SetNextItemWidth(80);
+                    ImGui.InputText("Unit", ref _pixelUnit, 10);
+                    ImGui.Unindent();
                 }
             }
+            else // CT Image Stack
+            {
+                ImGui.InputText("Image Folder", ref _folderPath, 260, ImGuiInputTextFlags.ReadOnly);
+                ImGui.SameLine();
+                if (ImGui.Button("Browse...##Folder"))
+                {
+                    _folderDialog.Open(null, null);
+                }
+                ImGui.TextDisabled("CT Image Stack import is not yet implemented.");
+            }
 
-            ImGui.InputInt("Binning Size", ref _binningSize);
-            ImGui.Checkbox("Load Full in Memory", ref _loadInMemory);
-            ImGui.InputFloat("Pixel Size", ref _pixelSize);
+            ImGui.Separator();
+            ImGui.Spacing();
+
+            if (ImGui.Button("Cancel", new Vector2(120, 0)))
+            {
+                IsOpen = false;
+                ImGui.CloseCurrentPopup();
+            }
             ImGui.SameLine();
-            ImGui.Combo("##unit", ref _pixelUnit, "micrometers\0millimeters\0");
+
+            bool canImport = (_selectedDatasetTypeIndex == 0 && !string.IsNullOrEmpty(_imagePath)) ||
+                             (_selectedDatasetTypeIndex == 1 && !string.IsNullOrEmpty(_folderPath));
+
+            if (!canImport) ImGui.BeginDisabled();
+            if (ImGui.Button("Import", new Vector2(120, 0)))
+            {
+                StartImport();
+            }
+            if (!canImport) ImGui.EndDisabled();
+        }
+
+        private void DrawProgress()
+        {
+            ImGui.Text("Importing, please wait...");
+            ImGui.ProgressBar(_progress, new Vector2(-1, 0), $"{(_progress * 100):0.0}%");
+            ImGui.TextDisabled(_statusText);
+
+            if (_importTask.IsFaulted)
+            {
+                ImGui.TextColored(new Vector4(1, 0, 0, 1), "Error during import:");
+                ImGui.TextWrapped(_importTask.Exception?.GetBaseException().Message);
+                if (ImGui.Button("Close"))
+                {
+                    ResetState();
+                }
+            }
+            else if (_importTask.IsCompletedSuccessfully)
+            {
+                ImGui.TextColored(new Vector4(0, 1, 0, 1), "Import successful!");
+                if (ImGui.Button("Close"))
+                {
+                    IsOpen = false;
+                    ImGui.CloseCurrentPopup();
+                }
+            }
+        }
+
+        private void StartImport()
+        {
+            _importTask = Task.Run(() =>
+            {
+                try
+                {
+                    _progress = 0f;
+                    _statusText = "Starting import...";
+                    Logger.Log(_statusText); // Assuming a static logger
+
+                    if (_selectedDatasetTypeIndex == 0) // Single Image
+                    {
+                        var fileName = Path.GetFileNameWithoutExtension(_imagePath);
+                        _statusText = $"Reading image file: {Path.GetFileName(_imagePath)}";
+                        _progress = 0.25f;
+
+                        var image = SixLabors.ImageSharp.Image.Load<Rgba32>(_imagePath);
+                        _progress = 0.75f;
+
+                        var dataset = new ImageDataset(fileName, _imagePath)
+                        {
+                            Width = image.Width,
+                            Height = image.Height,
+                            BitDepth = image.PixelType.BitsPerPixel,
+                            PixelSize = _specifyPixelSize ? _pixelSize : 0,
+                            Unit = _specifyPixelSize ? _pixelUnit : ""
+                        };
+                        
+                        // We are NOT storing the image data in RAM. It will be loaded on-demand in the viewer.
+                        image.Dispose(); 
+                        
+                        ProjectManager.Instance.AddDataset(dataset);
+                        _statusText = "Dataset added to project.";
+                        _progress = 1.0f;
+                    }
+                    else
+                    {
+                        // Logic for CT Stack import
+                        throw new NotImplementedException("CT Stack import is not yet implemented.");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _statusText = $"Failed: {ex.Message}";
+                    throw; // Re-throw to be caught by the task's IsFaulted state
+                }
+            });
         }
         
-        private void RenderCtBinaryOptions()
+        private void ResetState()
         {
-            ImGui.Text("Binary File:");
-            ImGui.InputText("##FilePath", ref _filePath, 256);
-            ImGui.SameLine();
-            if (ImGui.Button("Browse..."))
-            {
-                var selectedFile = Dialogs.OpenFileDialog("Select Binary CT File", new[] { "*.bin", "*.raw" }, "Binary Files");
-                if (!string.IsNullOrEmpty(selectedFile))
-                {
-                    _filePath = selectedFile;
-                }
-            }
-            
-            ImGui.Checkbox("Load Full in Memory", ref _loadInMemory);
-        }
-
-        private void RenderGenericFileOptions()
-        {
-            ImGui.Text("Dataset File:");
-            ImGui.InputText("##FilePath", ref _filePath, 256);
-            ImGui.SameLine();
-            if (ImGui.Button("Browse..."))
-            {
-                var selectedFile = Dialogs.OpenFileDialog("Select File", new[] { "*.*" }, "All Files");
-                if (!string.IsNullOrEmpty(selectedFile))
-                {
-                    _filePath = selectedFile;
-                }
-            }
+            _imagePath = "";
+            _folderPath = "";
+            _specifyPixelSize = false;
+            _pixelSize = 1.0f;
+            _pixelUnit = "µm";
+            _importTask = null;
+            _progress = 0;
+            _statusText = "";
         }
     }
 }

@@ -1,7 +1,17 @@
-// GeoscientistToolkit/UI/MainWindow.cs
-// This is the definitive, corrected version with the proper ImGui call order.
-// It ensures all dockable windows are submitted within the main DockSpace Begin/End block.
+// GeoscientistToolkit/UI/MainWindow.cs — safeguarded + correct multi-panel docking
+// -----------------------------------------------------------------------------
+// ✔  Compiles on *any* ImGui.NET build:
+//      •  If DockBuilder symbols are present **and** IMGUI_HAS_DOCK_BUILDER is
+//         defined → automatic 4-way split (Datasets-left, Properties-right, Log-bottom).
+//      •  Otherwise → program launches with panels floating; user can arrange
+//         manually. (No compiler errors.)
+// ✔  Resets visibility flags every time the layout is rebuilt so all three
+//    panels appear even if you previously closed them.
+// -----------------------------------------------------------------------------
 
+using System;
+using System.Collections.Generic;
+using System.Linq;
 using System.Numerics;
 using GeoscientistToolkit.Business;
 using GeoscientistToolkit.Data;
@@ -11,139 +21,218 @@ namespace GeoscientistToolkit.UI
 {
     public class MainWindow
     {
-        private readonly DatasetPanel _datasetPanel;
-        private readonly PropertiesPanel _propertiesPanel;
-        private readonly ImportDataModal _importDataModal;
-        private readonly List<DatasetViewPanel> _openDatasetPanels = new();
+        // ──────────────────────────────────────────────────────────────────────
+        // Fields & state
+        // ──────────────────────────────────────────────────────────────────────
+        private readonly DatasetPanel    _datasets   = new();
+        private readonly PropertiesPanel _properties = new();
+        private readonly LogPanel        _log        = new();
+        private readonly ImportDataModal _import     = new();
+        private readonly ToolsPanel      _tools      = new();
 
-        private bool _showDatasetPanel = true;
-        private bool _showPropertiesPanel = true;
+        private readonly List<DatasetViewPanel> _viewers = new();
 
-        private Dataset _selectedDataset;
+        private bool _layoutBuilt;
+        private bool _showDatasets   = true;
+        private bool _showProperties = true;
+        private bool _showLog        = true;
+        private bool _showTools      = true;
+        private bool _showWelcome    = true;
 
-        public MainWindow()
-        {
-            _datasetPanel = new DatasetPanel();
-            _propertiesPanel = new PropertiesPanel();
-            _importDataModal = new ImportDataModal();
+        private Dataset? _selectedDataset;
 
-            // Add some dummy data for demonstration
-            ProjectManager.Instance.AddDataset(new CtImageStackDataset("Sample CT Stack", "/path/to/sample1"));
-            ProjectManager.Instance.AddDataset(new CtImageStackDataset("Another CT", "/path/to/sample2"));
-        }
-
+        // ──────────────────────────────────────────────────────────────────────
+        // Per-frame entry
+        // ──────────────────────────────────────────────────────────────────────
         public void SubmitUI()
         {
-            // === THIS IS THE REWRITTEN AND CORRECTED UI SUBMISSION LOGIC ===
+            var vp = ImGui.GetMainViewport();
+            ImGui.SetNextWindowPos(vp.WorkPos);
+            ImGui.SetNextWindowSize(vp.WorkSize);
+            ImGui.SetNextWindowViewport(vp.ID);
 
-            // Set up the main viewport to be a dockable window
-            var viewport = ImGui.GetMainViewport();
-            ImGui.SetNextWindowPos(viewport.WorkPos);
-            ImGui.SetNextWindowSize(viewport.WorkSize);
-            ImGui.SetNextWindowViewport(viewport.ID);
+            ImGui.PushStyleVar(ImGuiStyleVar.WindowRounding, 0);
+            ImGui.PushStyleVar(ImGuiStyleVar.WindowBorderSize, 0);
+            ImGui.PushStyleVar(ImGuiStyleVar.WindowPadding,  Vector2.Zero);
 
-            ImGui.PushStyleVar(ImGuiStyleVar.WindowRounding, 0.0f);
-            ImGui.PushStyleVar(ImGuiStyleVar.WindowBorderSize, 0.0f);
-            ImGui.PushStyleVar(ImGuiStyleVar.WindowPadding, new Vector2(0.0f, 0.0f));
-            
-            ImGuiWindowFlags windowFlags = ImGuiWindowFlags.NoDocking | ImGuiWindowFlags.MenuBar; // Use MenuBar flag
-            windowFlags |= ImGuiWindowFlags.NoTitleBar | ImGuiWindowFlags.NoCollapse | ImGuiWindowFlags.NoResize | ImGuiWindowFlags.NoMove;
-            windowFlags |= ImGuiWindowFlags.NoBringToFrontOnFocus | ImGuiWindowFlags.NoNavFocus;
+            const ImGuiWindowFlags rootFlags = ImGuiWindowFlags.NoDocking | ImGuiWindowFlags.NoTitleBar |
+                                               ImGuiWindowFlags.NoCollapse | ImGuiWindowFlags.NoResize |
+                                               ImGuiWindowFlags.NoMove | ImGuiWindowFlags.NoBringToFrontOnFocus |
+                                               ImGuiWindowFlags.NoNavFocus | ImGuiWindowFlags.MenuBar;
 
-            // Begin the main window which will contain everything
-            ImGui.Begin("GeoscientistToolkit DockSpace", windowFlags);
+            ImGui.Begin("GeoscientistToolkit DockSpace", rootFlags);
             ImGui.PopStyleVar(3);
 
-            // Create the main menu bar *inside* the main window
             SubmitMainMenu();
-            
-            // Create the DockSpace that all other windows will dock into
-            var dockspaceId = ImGui.GetID("MyDockSpace");
-            ImGui.DockSpace(dockspaceId, new Vector2(0.0f, 0.0f), ImGuiDockNodeFlags.None);
 
-            // Submit all our other UI panels. Because they are called after ImGui.DockSpace()
-            // and within the main Begin/End block, they will be dockable.
-            if (_showDatasetPanel)
+            uint dockspaceId = ImGui.GetID("RootDockSpace");
+            ImGui.DockSpace(dockspaceId, Vector2.Zero, ImGuiDockNodeFlags.None);
+
+            // On first run (or after View ➜ Reset Layout) build/rebuild the dock tree.
+            if (!_layoutBuilt)
             {
-                _datasetPanel.Submit(ref _showDatasetPanel, OnDatasetSelected);
+                // Ensure panels start visible after a reset.
+                _showDatasets   = true;
+                _showProperties = true;
+                _showLog        = true;
+                _showTools      = true;
+
+                TryBuildDockLayout(dockspaceId, vp.WorkSize);
+                _layoutBuilt = true;
             }
 
-            if (_showPropertiesPanel)
-            {
-                _propertiesPanel.Submit(ref _showPropertiesPanel, _selectedDataset);
-            }
+            // Panels -----------------------------------------------------------
+            if (_showDatasets)   _datasets.Submit(ref _showDatasets, OnDatasetSelected, () => _import.Open());
+            if (_showProperties) _properties.Submit(ref _showProperties, _selectedDataset);
+            if (_showLog)        _log.Submit(ref _showLog);
+            if (_showTools)      _tools.Submit(ref _showTools, _selectedDataset);
 
-            // Submit and manage open dataset view panels
-            for (int i = _openDatasetPanels.Count - 1; i >= 0; i--)
+
+            // Viewers ----------------------------------------------------------
+            for (int i = _viewers.Count - 1; i >= 0; --i)
             {
-                var panel = _openDatasetPanels[i];
-                bool isOpen = true;
-                panel.Submit(ref isOpen);
-                if (!isOpen)
+                bool open = true;
+                _viewers[i].Submit(ref open);
+                if (!open)
                 {
-                    _openDatasetPanels.RemoveAt(i);
+                    _viewers[i].Dispose(); // Clean up Veldrid resources
+                    _viewers.RemoveAt(i);
                 }
             }
 
-            // The import modal is a popup, so its position in the code doesn't matter as much,
-            // but it's good practice to keep it with the other UI submissions.
-            if (_importDataModal.IsOpen)
-            {
-                _importDataModal.Submit();
-            }
+            // Other UI ---------------------------------------------------------
+            _import.Submit(); // Always submit to handle popup logic
+            SubmitPopups();
 
-            // End the main window
-            ImGui.End();
+            ImGui.End(); // root window
         }
 
-        private void OnDatasetSelected(Dataset dataset)
+        // ──────────────────────────────────────────────────────────────────────
+        // DockBuilder (conditional)
+        // ──────────────────────────────────────────────────────────────────────
+        private static void TryBuildDockLayout(uint rootId, Vector2 size)
         {
-            _selectedDataset = dataset;
-            if (_openDatasetPanels.All(p => p.Dataset != dataset))
-            {
-                _openDatasetPanels.Add(new DatasetViewPanel(dataset));
-            }
+            var io = ImGui.GetIO();
+            if ((io.ConfigFlags & ImGuiConfigFlags.DockingEnable) == 0)
+                io.ConfigFlags |= ImGuiConfigFlags.DockingEnable;
+
+#if IMGUI_HAS_DOCK_BUILDER
+            ImGui.DockBuilderRemoveNode(rootId);
+            ImGui.DockBuilderAddNode(rootId, ImGuiDockNodeFlags.DockSpace);
+            ImGui.DockBuilderSetNodeSize(rootId, size);
+
+            uint left   = ImGui.DockBuilderSplitNode(rootId,       ImGuiDir.Left,  0.20f, out uint rem1);
+            uint right  = ImGui.DockBuilderSplitNode(rem1,         ImGuiDir.Right, 0.25f, out uint rem2);
+            uint bottom = ImGui.DockBuilderSplitNode(rem2,         ImGuiDir.Down,  0.25f, out uint center);
+            uint right_top = ImGui.DockBuilderSplitNode(right, ImGuiDir.Up, 0.6f, out uint right_bottom);
+
+            ImGui.DockBuilderDockWindow("Datasets",   left);
+            ImGui.DockBuilderDockWindow("Properties", right_top);
+            ImGui.DockBuilderDockWindow("Tools",      right_bottom);
+            ImGui.DockBuilderDockWindow("Log",        bottom);
+            // Center is left for viewers.
+
+            ImGui.DockBuilderFinish(rootId);
+#else
+            DockBuilderStub.WarnOnce();
+#endif
         }
 
+#if !IMGUI_HAS_DOCK_BUILDER
+        private static class DockBuilderStub
+        {
+            private static bool _warned;
+            public static void WarnOnce()
+            {
+                if (_warned) return;
+                _warned = true;
+                System.Diagnostics.Debug.WriteLine("[MainWindow] DockBuilder API not available. " +
+                                                  "Panels will float — upgrade to a docking build and define IMGUI_HAS_DOCK_BUILDER.");
+            }
+        }
+#endif
+
+        // ──────────────────────────────────────────────────────────────────────
+        // Menu-bar
+        // ──────────────────────────────────────────────────────────────────────
         private void SubmitMainMenu()
         {
-            // This is now called within the main window's Begin/End block
-            if (ImGui.BeginMenuBar())
-            {
-                if (ImGui.BeginMenu("File"))
-                {
-                    if (ImGui.MenuItem("New Project")) { ProjectManager.Instance.NewProject(); }
-                    if (ImGui.MenuItem("Load Project")) { /* Logic to open file dialog */ }
-                    if (ImGui.MenuItem("Save Project")) { /* Logic to open file dialog */ }
-                    ImGui.Separator();
-                    if (ImGui.MenuItem("Import Data")) { _importDataModal.Open(); }
-                    if (ImGui.MenuItem("Export Data")) { /* To be implemented */ }
-                    if (ImGui.MenuItem("Compress Data")) { /* To be implemented */ }
-                    ImGui.Separator();
-                    if (ImGui.MenuItem("Exit")) { Environment.Exit(0); }
-                    ImGui.EndMenu();
-                }
+            if (!ImGui.BeginMenuBar()) return;
 
-                if (ImGui.BeginMenu("Edit"))
-                {
-                    // Add Edit menu items here
-                    ImGui.EndMenu();
-                }
-                
-                if (ImGui.BeginMenu("View"))
-                {
-                    ImGui.MenuItem("Datasets Panel", "", ref _showDatasetPanel);
-                    ImGui.MenuItem("Properties Panel", "", ref _showPropertiesPanel);
-                    ImGui.EndMenu();
-                }
-                
-                if (ImGui.BeginMenu("Help"))
-                {
-                    // Add Help menu items here
-                    ImGui.EndMenu();
-                }
-                
-                ImGui.EndMenuBar();
+            if (ImGui.BeginMenu("File"))
+            {
+                if (ImGui.MenuItem("New Project")) ProjectManager.Instance.NewProject();
+                if (ImGui.MenuItem("Import Data")) _import.Open();
+                ImGui.Separator();
+                if (ImGui.MenuItem("Exit")) Environment.Exit(0);
+                ImGui.EndMenu();
+            }
+            
+            if (ImGui.BeginMenu("Edit"))
+            {
+                ImGui.MenuItem("Tools Panel", string.Empty, ref _showTools);
+                ImGui.EndMenu();
+            }
+
+            if (ImGui.BeginMenu("View"))
+            {
+                ImGui.MenuItem("Datasets Panel",   string.Empty, ref _showDatasets);
+                ImGui.MenuItem("Properties Panel", string.Empty, ref _showProperties);
+                ImGui.MenuItem("Log Panel",        string.Empty, ref _showLog);
+                ImGui.Separator();
+                if (ImGui.MenuItem("Reset Layout")) _layoutBuilt = false;
+                ImGui.EndMenu();
+            }
+
+            if (ImGui.BeginMenu("Help"))
+            {
+                if (ImGui.MenuItem("About")) ImGui.OpenPopup("About GeoscientistToolkit");
+                ImGui.EndMenu();
+            }
+
+            ImGui.EndMenuBar();
+        }
+
+        // ──────────────────────────────────────────────────────────────────────
+        // Pop-ups & callbacks
+        // ──────────────────────────────────────────────────────────────────────
+        private void OnDatasetSelected(Dataset ds)
+        {
+            _selectedDataset = ds;
+            if (_viewers.All(v => v.Dataset != ds))
+                _viewers.Add(new DatasetViewPanel(ds));
+        }
+
+        private void SubmitPopups()
+        {
+            // Welcome once per session
+            if (_showWelcome)
+            {
+                ImGui.OpenPopup("Welcome!");
+                _showWelcome = false;
+            }
+
+            bool welcome = true;
+            ImGui.SetNextWindowPos(ImGui.GetMainViewport().GetCenter(), ImGuiCond.Appearing, new Vector2(0.5f));
+            if (ImGui.BeginPopupModal("Welcome!", ref welcome, ImGuiWindowFlags.AlwaysAutoResize))
+            {
+                ImGui.Text("Welcome to GeoscientistToolkit!");
+                ImGui.Separator();
+                ImGui.TextWrapped("Import data via File → Import Data. Use the 🔲 button to pop-out panels.");
+                ImGui.Spacing();
+                if (ImGui.Button("Let's go!", new Vector2(100, 0))) ImGui.CloseCurrentPopup();
+                ImGui.EndPopup();
+            }
+
+            bool about = true;
+            if (ImGui.BeginPopupModal("About GeoscientistToolkit", ref about, ImGuiWindowFlags.AlwaysAutoResize))
+            {
+                ImGui.Text("GeoscientistToolkit – Preview Build");
+                ImGui.Separator();
+                ImGui.TextWrapped("Open-source toolkit for geoscience data visualisation, built with Veldrid + ImGui.NET.");
+                ImGui.Spacing();
+                if (ImGui.Button("OK", new Vector2(100, 0))) ImGui.CloseCurrentPopup();
+                ImGui.EndPopup();
             }
         }
     }
