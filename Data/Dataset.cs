@@ -1,6 +1,4 @@
 // GeoscientistToolkit/Data/Dataset.cs
-// Base class for all dataset types
-
 namespace GeoscientistToolkit.Data
 {
     public enum DatasetType
@@ -10,7 +8,7 @@ namespace GeoscientistToolkit.Data
         MicroXrf,
         PointCloud,
         Mesh,
-        SingleImage // New Type
+        SingleImage
     }
 
     public abstract class Dataset
@@ -20,13 +18,30 @@ namespace GeoscientistToolkit.Data
         public DatasetType Type { get; protected set; }
         public DateTime DateCreated { get; set; }
         public DateTime DateModified { get; set; }
+        public Dictionary<string, object> Metadata { get; set; } = new Dictionary<string, object>();
 
         protected Dataset(string name, string filePath)
         {
-            Name = name ?? throw new ArgumentNullException(nameof(name));
-            FilePath = filePath ?? throw new ArgumentNullException(nameof(filePath));
-            DateCreated = DateTime.Now;
-            DateModified = DateTime.Now;
+            Name = name;
+            FilePath = filePath;
+            
+            if (File.Exists(filePath))
+            {
+                var info = new FileInfo(filePath);
+                DateCreated = info.CreationTime;
+                DateModified = info.LastWriteTime;
+            }
+            else if (Directory.Exists(filePath))
+            {
+                var info = new DirectoryInfo(filePath);
+                DateCreated = info.CreationTime;
+                DateModified = info.LastWriteTime;
+            }
+            else
+            {
+                DateCreated = DateTime.Now;
+                DateModified = DateTime.Now;
+            }
         }
 
         public abstract long GetSizeInBytes();

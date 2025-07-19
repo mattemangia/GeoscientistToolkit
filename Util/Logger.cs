@@ -1,67 +1,58 @@
 ﻿// GeoscientistToolkit/Util/Logger.cs
-// A simple static logger for application-wide message logging.
-
-using System;
-using System.Collections.Generic;
-using System.IO;
-using System.Runtime.CompilerServices;
-using System.Text;
+using System.Collections.Concurrent;
 
 namespace GeoscientistToolkit.Util
 {
     public static class Logger
     {
-        private static readonly List<string> _logMessages = new List<string>();
-        private static readonly string _logFilePath = "log.nfo";
-        private static readonly object _lock = new object();
+        private static readonly ConcurrentQueue<LogEntry> _logEntries = new();
+        private static readonly int MaxEntries = 1000;
 
-        static Logger()
-        {
-            // Clear the log file on startup
-            File.WriteAllText(_logFilePath, string.Empty);
-        }
+        public static event Action<LogEntry> OnLogAdded;
 
-        /// <summary>
-        /// Logs a message to the in-memory list and the log file.
-        /// </summary>
-        /// <param name="message">The message to log.</param>
-        /// <param name="methodName">The calling method, automatically populated.</param>
-        public static void Log(string message, [CallerMemberName] string methodName = "")
+        public static void Log(string message, LogLevel level = LogLevel.Info)
         {
-            lock (_lock)
+            var entry = new LogEntry
             {
-                string formattedMessage = $"[{DateTime.Now:HH:mm:ss.fff}] [{methodName}]: {message}";
-                _logMessages.Add(formattedMessage);
-                try
-                {
-                    File.AppendAllText(_logFilePath, formattedMessage + Environment.NewLine);
-                }
-                catch (Exception ex)
-                {
-                    _logMessages.Add($"[ERROR] Failed to write to log file: {ex.Message}");
-                }
+                Timestamp = DateTime.Now,
+                Level = level,
+                Message = message
+            };
+
+            _logEntries.Enqueue(entry);
+
+            // Keep log size manageable
+            while (_logEntries.Count > MaxEntries)
+            {
+                _logEntries.TryDequeue(out _);
             }
+
+            OnLogAdded?.Invoke(entry);
         }
 
-        /// <summary>
-        /// Gets a read-only list of all current log messages.
-        /// </summary>
-        public static IReadOnlyList<string> GetMessages()
-        {
-            return _logMessages;
-        }
+        public static void LogError(string message) => Log(message, LogLevel.Error);
+        public static void LogWarning(string message) => Log(message, LogLevel.Warning);
 
-        /// <summary>
-        /// Clears all messages from memory and the log file.
-        /// </summary>
+        public static IEnumerable<LogEntry> GetEntries() => _logEntries;
+
         public static void Clear()
         {
-            lock (_lock)
-            {
-                _logMessages.Clear();
-                File.WriteAllText(_logFilePath, string.Empty);
-                Log("Log cleared.");
-            }
+            while (_logEntries.TryDequeue(out _)) { }
         }
+    }
+
+    public enum LogLevel
+    {
+        Debug,
+        Info,
+        Warning,
+        Error
+    }
+
+    public class LogEntry
+    {
+        public DateTime Timestamp { get; set; }
+        public LogLevel Level { get; set; }
+        public string Message { get; set; }
     }
 }

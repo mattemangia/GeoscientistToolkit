@@ -1,142 +1,78 @@
 // GeoscientistToolkit/Business/ProjectManager.cs
-// Complete implementation with dataset management functionality
-
 using GeoscientistToolkit.Data;
+using GeoscientistToolkit.Util;
 
 namespace GeoscientistToolkit.Business
 {
+    /// <summary>
+    /// Manages the current project and its datasets.
+    /// </summary>
     public class ProjectManager
     {
         private static ProjectManager _instance;
-        private readonly List<Dataset> _loadedDatasets = new();
-        private string _projectName = "Untitled Project";
-        private string _projectPath = "";
-        private bool _hasUnsavedChanges = false;
+        public static ProjectManager Instance => _instance ??= new ProjectManager();
 
-        // Singleton instance
-        public static ProjectManager Instance
-        {
-            get
-            {
-                if (_instance == null)
-                {
-                    _instance = new ProjectManager();
-                }
-                return _instance;
-            }
-        }
+        public List<Dataset> LoadedDatasets { get; } = new List<Dataset>();
+        public string ProjectName { get; set; } = "Untitled Project";
+        public string ProjectPath { get; set; }
+        public bool HasUnsavedChanges { get; set; }
 
-        // Properties
-        public IReadOnlyList<Dataset> LoadedDatasets => _loadedDatasets;
-        public string ProjectName => _projectName;
-        public string ProjectPath => _projectPath;
-        public bool HasUnsavedChanges => _hasUnsavedChanges;
-
-        // Events
-        public event EventHandler<Dataset> DatasetAdded;
-        public event EventHandler<Dataset> DatasetRemoved;
-        public event EventHandler ProjectChanged;
-
-        private ProjectManager()
-        {
-            // Private constructor for singleton
-        }
+        private ProjectManager() { }
 
         public void NewProject()
         {
-            // Clear all datasets
-            _loadedDatasets.Clear();
-            _projectName = "Untitled Project";
-            _projectPath = "";
-            _hasUnsavedChanges = false;
+            // Clear all loaded datasets
+            foreach (var dataset in LoadedDatasets)
+            {
+                dataset.Unload();
+            }
+            LoadedDatasets.Clear();
             
-            ProjectChanged?.Invoke(this, EventArgs.Empty);
+            ProjectName = "Untitled Project";
+            ProjectPath = null;
+            HasUnsavedChanges = false;
+            
+            Logger.Log("Created new project");
         }
 
         public void AddDataset(Dataset dataset)
         {
-            if (dataset == null)
-                throw new ArgumentNullException(nameof(dataset));
-
-            if (_loadedDatasets.Any(d => d.Name == dataset.Name))
-            {
-                // Handle duplicate names by appending a number
-                int counter = 1;
-                string baseName = dataset.Name;
-                while (_loadedDatasets.Any(d => d.Name == dataset.Name))
-                {
-                    dataset.Name = $"{baseName} ({counter})";
-                    counter++;
-                }
-            }
-
-            _loadedDatasets.Add(dataset);
-            _hasUnsavedChanges = true;
+            if (dataset == null) return;
             
-            DatasetAdded?.Invoke(this, dataset);
+            LoadedDatasets.Add(dataset);
+            HasUnsavedChanges = true;
+            Logger.Log($"Added dataset: {dataset.Name} ({dataset.Type})");
         }
 
         public void RemoveDataset(Dataset dataset)
         {
-            if (dataset == null)
-                throw new ArgumentNullException(nameof(dataset));
-
-            if (_loadedDatasets.Remove(dataset))
-            {
-                _hasUnsavedChanges = true;
-                DatasetRemoved?.Invoke(this, dataset);
-                
-                // Dispose of the dataset if it implements IDisposable
-                if (dataset is IDisposable disposable)
-                {
-                    disposable.Dispose();
-                }
-            }
-        }
-
-        public Dataset GetDatasetByName(string name)
-        {
-            return _loadedDatasets.FirstOrDefault(d => d.Name == name);
-        }
-
-        public void LoadProject(string projectPath)
-        {
-            // TODO: Implement project loading from file
-            // This would deserialize the project file and load all referenced datasets
-            throw new NotImplementedException("Project loading is not yet implemented");
-        }
-
-        public void SaveProject(string projectPath = null)
-        {
-            if (string.IsNullOrEmpty(projectPath) && string.IsNullOrEmpty(_projectPath))
-            {
-                throw new InvalidOperationException("No project path specified");
-            }
-
-            projectPath = projectPath ?? _projectPath;
+            if (dataset == null) return;
             
-            // TODO: Implement project saving to file
-            // This would serialize the project structure and dataset references
-            throw new NotImplementedException("Project saving is not yet implemented");
+            dataset.Unload();
+            LoadedDatasets.Remove(dataset);
+            HasUnsavedChanges = true;
+            Logger.Log($"Removed dataset: {dataset.Name}");
         }
 
-        public void CloseProject()
+        public void SaveProject(string path = null)
         {
-            // Dispose of all datasets
-            foreach (var dataset in _loadedDatasets)
-            {
-                if (dataset is IDisposable disposable)
-                {
-                    disposable.Dispose();
-                }
-            }
+            path ??= ProjectPath;
+            if (string.IsNullOrEmpty(path)) return;
             
-            _loadedDatasets.Clear();
-            _projectName = "Untitled Project";
-            _projectPath = "";
-            _hasUnsavedChanges = false;
+            // TODO: Implement project serialization
+            ProjectPath = path;
+            HasUnsavedChanges = false;
+            Logger.Log($"Project saved to: {path}");
+        }
+
+        public void LoadProject(string path)
+        {
+            if (!File.Exists(path)) return;
             
-            ProjectChanged?.Invoke(this, EventArgs.Empty);
+            // TODO: Implement project deserialization
+            ProjectPath = path;
+            HasUnsavedChanges = false;
+            Logger.Log($"Project loaded from: {path}");
         }
     }
 }

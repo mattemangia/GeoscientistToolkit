@@ -1,6 +1,6 @@
 ﻿// GeoscientistToolkit/Data/Image/ImageViewer.cs
 // A fully functional dataset viewer for single images, using Veldrid for GPU texture management.
-// It supports panning, zooming, and displays a dynamic scale bar if pixel size is specified.
+// It supports panning, zooming with mouse wheel, and a customizable, draggable scale bar.
 
 using GeoscientistToolkit.UI.Interfaces;
 using GeoscientistToolkit.Util;
@@ -21,15 +21,44 @@ namespace GeoscientistToolkit.Data.Image
         private TextureView _textureView;
         private IntPtr _textureId = IntPtr.Zero;
 
+        // Scale bar state
+        private Vector2 _scaleBarRelativePos = new Vector2(0.85f, 0.9f); // Relative position (0-1)
+        private bool _isDraggingScaleBar = false;
+        private Vector2 _dragOffset;
+        private bool _showScaleBarProperties = false;
+        
+        // Scale bar customization
+        private float _scaleBarHeight = 8f;
+        private float _scaleBarTargetWidth = 120f;
+        private Vector4 _scaleBarColor = new Vector4(1, 1, 1, 1);
+        private float _scaleBarFontSize = 1.0f;
+        private bool _showScaleBarBackground = true;
+        private Vector4 _scaleBarBgColor = new Vector4(0, 0, 0, 0.5f);
+        private int _scaleBarPosition = 3; // 0=TL, 1=TR, 2=BL, 3=BR, 4=Custom
+        
+        // Stored pixel size for editing
+        private float _editablePixelSize;
+        private string _editableUnit;
+        private bool _pixelSizeChanged = false;
+
         public ImageViewer(ImageDataset dataset)
         {
             _dataset = dataset;
+            _editablePixelSize = dataset.PixelSize;
+            _editableUnit = dataset.Unit ?? "µm";
         }
 
         /// <summary>
-        /// Draws viewer-specific controls in the toolbar. None are needed for this viewer.
+        /// Draws viewer-specific controls in the toolbar.
         /// </summary>
-        public void DrawToolbarControls() { }
+        public void DrawToolbarControls() 
+        {
+            if (_dataset.PixelSize > 0)
+            {
+                ImGui.SameLine();
+                ImGui.TextDisabled($"Scale: {_editablePixelSize:F2} {_editableUnit}/pixel");
+            }
+        }
 
         /// <summary>
         /// Draws the main content of the viewer.
@@ -53,6 +82,33 @@ namespace GeoscientistToolkit.Data.Image
             var canvasPos = ImGui.GetCursorScreenPos();
             var canvasSize = ImGui.GetContentRegionAvail();
             var dl = ImGui.GetWindowDrawList();
+            var io = ImGui.GetIO();
+
+            // Create an invisible button to capture mouse input for the canvas
+            ImGui.InvisibleButton("canvas", canvasSize);
+            bool isHovered = ImGui.IsItemHovered();
+            bool isActive = ImGui.IsItemActive();
+
+            // Handle mouse wheel zoom
+            if (isHovered && io.MouseWheel != 0)
+            {
+                float zoomDelta = io.MouseWheel * 0.1f;
+                float newZoom = Math.Clamp(zoom + zoomDelta * zoom, 0.1f, 10.0f);
+                
+                // Zoom towards mouse position
+                if (newZoom != zoom)
+                {
+                    Vector2 mousePos = io.MousePos - canvasPos - canvasSize * 0.5f;
+                    pan -= mousePos * (newZoom / zoom - 1.0f);
+                    zoom = newZoom;
+                }
+            }
+
+            // Handle panning with middle mouse button
+            if (isActive && ImGui.IsMouseDragging(ImGuiMouseButton.Middle))
+            {
+                pan += io.MouseDelta;
+            }
 
             // Draw a dark background for the viewport.
             dl.AddRectFilled(canvasPos, canvasPos + canvasSize, 0xFF202020);
@@ -76,11 +132,14 @@ namespace GeoscientistToolkit.Data.Image
             // Add the image to ImGui's draw list.
             dl.AddImage(_textureId, imagePos, imagePos + displaySize);
 
-            // If the dataset has a defined pixel size, draw the scale bar.
-            if (_dataset.PixelSize > 0)
+            // Draw scale bar if dataset has pixel size
+            if (_dataset.PixelSize > 0 || _pixelSizeChanged)
             {
                 DrawScaleBar(dl, canvasPos, canvasSize, zoom);
             }
+
+            // Draw scale bar properties window if open
+            DrawScaleBarProperties();
         }
 
         /// <summary>
@@ -93,7 +152,6 @@ namespace GeoscientistToolkit.Data.Image
             _dataset.Load();
             if (_dataset.ImageData == null)
             {
-                // Logger.Log("Failed to load image from disk."); // Optional logging
                 return;
             }
             var image = _dataset.ImageData;
@@ -122,25 +180,21 @@ namespace GeoscientistToolkit.Data.Image
         }
 
         /// <summary>
-        /// Calculates and draws a dynamic scale bar in the bottom-right corner of the viewport.
+        /// Calculates and draws a dynamic, interactive scale bar.
         /// </summary>
         private void DrawScaleBar(ImDrawListPtr dl, Vector2 canvasPos, Vector2 canvasSize, float zoom)
         {
-            // --- Configuration ---
-            const float barHeight = 8f;
-            const float textPadding = 4f;
-            Vector2 margin = new Vector2(20, 20);
-            uint barColor = 0xFFFFFFFF; // White
-
-            // --- Calculation ---
-            // Calculate the size of one screen pixel in the dataset's real-world units (e.g., micrometers).
-            float realWorldUnitsPerPixel = _dataset.PixelSize / zoom;
+            var io = ImGui.GetIO();
+            float pixelSize = _pixelSizeChanged ? _editablePixelSize : _dataset.PixelSize;
+            string unit = _pixelSizeChanged ? _editableUnit : (_dataset.Unit ?? "µm");
             
-            // Aim for a scale bar that is roughly 120 pixels wide on screen.
-            float targetBarLengthPixels = 120f;
-            float barLengthInRealUnits = targetBarLengthPixels * realWorldUnitsPerPixel;
+            if (pixelSize <= 0) return;
 
-            // Find a "nice" round number for the label (e.g., 1, 2, 5, 10, 20, 50...).
+            // Calculate scale bar dimensions
+            float realWorldUnitsPerPixel = pixelSize / zoom;
+            float barLengthInRealUnits = _scaleBarTargetWidth * realWorldUnitsPerPixel;
+
+            // Find a "nice" round number for the label
             double magnitude = Math.Pow(10, Math.Floor(Math.Log10(barLengthInRealUnits)));
             double mostSignificantDigit = Math.Round(barLengthInRealUnits / magnitude);
 
@@ -149,32 +203,227 @@ namespace GeoscientistToolkit.Data.Image
             else if (mostSignificantDigit > 1) mostSignificantDigit = 2;
             
             float niceLengthInRealUnits = (float)(mostSignificantDigit * magnitude);
-
-            // Convert this "nice" real-world length back into the exact number of pixels it should occupy on screen.
             float finalBarLengthPixels = niceLengthInRealUnits / realWorldUnitsPerPixel;
 
-            string label = $"{niceLengthInRealUnits.ToString("G", CultureInfo.InvariantCulture)} {_dataset.Unit}";
-            Vector2 textSize = ImGui.CalcTextSize(label);
+            string label = $"{niceLengthInRealUnits.ToString("G", CultureInfo.InvariantCulture)} {unit}";
+            Vector2 textSize = ImGui.CalcTextSize(label) * _scaleBarFontSize;
 
-            // --- Drawing ---
-            // Position the bar in the bottom-right corner.
-            Vector2 barStart = new Vector2(
-                canvasPos.X + canvasSize.X - margin.X - finalBarLengthPixels,
-                canvasPos.Y + canvasSize.Y - margin.Y - barHeight
-            );
-            Vector2 barEnd = new Vector2(barStart.X + finalBarLengthPixels, barStart.Y + barHeight);
+            // Calculate position based on preset or custom position
+            Vector2 margin = new Vector2(20, 20);
+            Vector2 barPos;
             
-            // Center the text above the bar.
+            if (_scaleBarPosition < 4) // Preset positions
+            {
+                switch (_scaleBarPosition)
+                {
+                    case 0: // Top-left
+                        _scaleBarRelativePos = new Vector2(0.05f, 0.05f);
+                        break;
+                    case 1: // Top-right
+                        _scaleBarRelativePos = new Vector2(0.95f - finalBarLengthPixels / canvasSize.X, 0.05f);
+                        break;
+                    case 2: // Bottom-left
+                        _scaleBarRelativePos = new Vector2(0.05f, 0.95f);
+                        break;
+                    case 3: // Bottom-right
+                        _scaleBarRelativePos = new Vector2(0.95f - finalBarLengthPixels / canvasSize.X, 0.95f);
+                        break;
+                }
+            }
+            
+            barPos = canvasPos + _scaleBarRelativePos * canvasSize;
+
+            // Define the scale bar rectangle
+            Vector2 barStart = barPos;
+            Vector2 barEnd = new Vector2(barStart.X + finalBarLengthPixels, barStart.Y + _scaleBarHeight);
+            
+            // Define clickable area (includes text above bar)
+            Vector2 clickAreaMin = new Vector2(barStart.X - 5, barStart.Y - textSize.Y - 8);
+            Vector2 clickAreaMax = new Vector2(barEnd.X + 5, barEnd.Y + 5);
+
+            // Check if mouse is over scale bar
+            bool isMouseOverScaleBar = io.MousePos.X >= clickAreaMin.X && io.MousePos.X <= clickAreaMax.X &&
+                                      io.MousePos.Y >= clickAreaMin.Y && io.MousePos.Y <= clickAreaMax.Y;
+
+            // Handle dragging
+            if (isMouseOverScaleBar && ImGui.IsMouseClicked(ImGuiMouseButton.Left))
+            {
+                _isDraggingScaleBar = true;
+                _dragOffset = io.MousePos - barPos;
+                _scaleBarPosition = 4; // Switch to custom position when dragging
+            }
+
+            if (_isDraggingScaleBar)
+            {
+                if (ImGui.IsMouseDragging(ImGuiMouseButton.Left))
+                {
+                    Vector2 newPos = io.MousePos - _dragOffset - canvasPos;
+                    _scaleBarRelativePos = newPos / canvasSize;
+                    _scaleBarRelativePos.X = Math.Clamp(_scaleBarRelativePos.X, 0, 1);
+                    _scaleBarRelativePos.Y = Math.Clamp(_scaleBarRelativePos.Y, 0, 1);
+                }
+                else
+                {
+                    _isDraggingScaleBar = false;
+                }
+            }
+
+            // Handle right-click context menu
+            if (isMouseOverScaleBar && ImGui.IsMouseClicked(ImGuiMouseButton.Right))
+            {
+                ImGui.OpenPopup("ScaleBarContext");
+            }
+
+            // Draw scale bar background if enabled
+            if (_showScaleBarBackground)
+            {
+                uint bgColor = ImGui.ColorConvertFloat4ToU32(_scaleBarBgColor);
+                dl.AddRectFilled(
+                    clickAreaMin - new Vector2(3, 3),
+                    clickAreaMax + new Vector2(3, 3),
+                    bgColor,
+                    3.0f
+                );
+            }
+
+            // Draw the scale bar
+            uint barColor = ImGui.ColorConvertFloat4ToU32(_scaleBarColor);
             Vector2 textPos = new Vector2(
                 barStart.X + (finalBarLengthPixels - textSize.X) * 0.5f,
-                barStart.Y - textSize.Y - textPadding
+                barStart.Y - textSize.Y - 4
             );
 
-            // Draw a drop shadow for the text for better readability on any background.
-            dl.AddText(textPos + Vector2.One, 0x90000000, label); 
-            // Draw the main text and the filled rectangle for the bar.
-            dl.AddText(textPos, barColor, label);
+            // Draw shadow for better readability
+            if (!_showScaleBarBackground)
+            {
+                dl.AddText(ImGui.GetFont(), ImGui.GetFontSize() * _scaleBarFontSize, 
+                          textPos + Vector2.One, 0x90000000, label);
+            }
+            
+            // Draw text and bar
+            dl.AddText(ImGui.GetFont(), ImGui.GetFontSize() * _scaleBarFontSize, 
+                      textPos, barColor, label);
             dl.AddRectFilled(barStart, barEnd, barColor);
+
+            // Draw hover highlight
+            if (isMouseOverScaleBar && !_isDraggingScaleBar)
+            {
+                dl.AddRect(clickAreaMin, clickAreaMax, 0x80FFFFFF, 2.0f);
+            }
+
+            // Context menu
+            if (ImGui.BeginPopup("ScaleBarContext"))
+            {
+                if (ImGui.MenuItem("Properties..."))
+                {
+                    _showScaleBarProperties = true;
+                }
+                ImGui.Separator();
+                if (ImGui.MenuItem("Hide"))
+                {
+                    _dataset.PixelSize = 0; // Hide by setting to 0
+                }
+                ImGui.EndPopup();
+            }
+        }
+
+        /// <summary>
+        /// Draws the scale bar properties window.
+        /// </summary>
+        private void DrawScaleBarProperties()
+        {
+            if (!_showScaleBarProperties) return;
+
+            ImGui.SetNextWindowSize(new Vector2(350, 400), ImGuiCond.FirstUseEver);
+            if (ImGui.Begin("Scale Bar Properties", ref _showScaleBarProperties))
+            {
+                // Pixel size settings
+                if (ImGui.CollapsingHeader("Measurement", ImGuiTreeNodeFlags.DefaultOpen))
+                {
+                    ImGui.Indent();
+                    if (ImGui.InputFloat("Pixel Size", ref _editablePixelSize, 0.01f, 0.1f, "%.3f"))
+                    {
+                        _pixelSizeChanged = true;
+                    }
+                    
+                    if (ImGui.InputText("Unit", ref _editableUnit, 20))
+                    {
+                        _pixelSizeChanged = true;
+                    }
+                    
+                    if (_pixelSizeChanged)
+                    {
+                        if (ImGui.Button("Apply Changes"))
+                        {
+                            _dataset.PixelSize = _editablePixelSize;
+                            _dataset.Unit = _editableUnit;
+                            _pixelSizeChanged = false;
+                        }
+                        ImGui.SameLine();
+                        if (ImGui.Button("Revert"))
+                        {
+                            _editablePixelSize = _dataset.PixelSize;
+                            _editableUnit = _dataset.Unit ?? "µm";
+                            _pixelSizeChanged = false;
+                        }
+                    }
+                    ImGui.Unindent();
+                }
+
+                // Appearance settings
+                if (ImGui.CollapsingHeader("Appearance", ImGuiTreeNodeFlags.DefaultOpen))
+                {
+                    ImGui.Indent();
+                    
+                    ImGui.SliderFloat("Bar Height", ref _scaleBarHeight, 4.0f, 20.0f, "%.0f pixels");
+                    ImGui.SliderFloat("Target Width", ref _scaleBarTargetWidth, 50.0f, 300.0f, "%.0f pixels");
+                    ImGui.SliderFloat("Font Size", ref _scaleBarFontSize, 0.5f, 2.0f, "%.1fx");
+                    
+                    ImGui.ColorEdit4("Bar Color", ref _scaleBarColor);
+                    
+                    ImGui.Checkbox("Show Background", ref _showScaleBarBackground);
+                    if (_showScaleBarBackground)
+                    {
+                        ImGui.ColorEdit4("Background Color", ref _scaleBarBgColor);
+                    }
+                    
+                    ImGui.Unindent();
+                }
+
+                // Position settings
+                if (ImGui.CollapsingHeader("Position", ImGuiTreeNodeFlags.DefaultOpen))
+                {
+                    ImGui.Indent();
+                    
+                    string[] positions = { "Top-Left", "Top-Right", "Bottom-Left", "Bottom-Right", "Custom" };
+                    ImGui.Combo("Position", ref _scaleBarPosition, positions, positions.Length);
+                    
+                    if (_scaleBarPosition == 4) // Custom
+                    {
+                        float x = _scaleBarRelativePos.X * 100;
+                        float y = _scaleBarRelativePos.Y * 100;
+                        
+                        if (ImGui.SliderFloat("X Position", ref x, 0, 100, "%.0f%%"))
+                        {
+                            _scaleBarRelativePos.X = x / 100.0f;
+                        }
+                        
+                        if (ImGui.SliderFloat("Y Position", ref y, 0, 100, "%.0f%%"))
+                        {
+                            _scaleBarRelativePos.Y = y / 100.0f;
+                        }
+                    }
+                    
+                    ImGui.Unindent();
+                }
+
+                ImGui.Separator();
+                if (ImGui.Button("Close", new Vector2(100, 0)))
+                {
+                    _showScaleBarProperties = false;
+                }
+            }
+            ImGui.End();
         }
         
         /// <summary>

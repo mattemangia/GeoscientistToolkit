@@ -1,4 +1,6 @@
 ﻿// GeoscientistToolkit/Data/CtImageStack/CtImageStackViewer.cs
+// Viewer for CT image stacks with similar scale bar functionality
+
 using GeoscientistToolkit.UI.Interfaces;
 using ImGuiNET;
 using System.Numerics;
@@ -7,68 +9,72 @@ namespace GeoscientistToolkit.Data.CtImageStack
 {
     public class CtImageStackViewer : IDatasetViewer
     {
-        private int _selectedView; // 0 = 3D, 1 = X, 2 = Y, 3 = Z, 4 = Quad layout
-
+        private int _currentSlice = 0;
+        private int _viewMode = 0; // 0=Axial, 1=Coronal, 2=Sagittal
+        
         public void DrawToolbarControls()
         {
-            string[] viewNames = { "3D", "X", "Y", "Z", "All" };
-            for (int i = 0; i < viewNames.Length; ++i)
-            {
-                if (i > 0) ImGui.SameLine();
-
-                bool selected = _selectedView == i;
-                if (selected)
-                    ImGui.PushStyleColor(ImGuiCol.Button, ImGui.GetStyle().Colors[(int)ImGuiCol.ButtonActive]);
-
-                if (ImGui.Button(viewNames[i], new Vector2(40, 0)))
-                    _selectedView = i;
-
-                if (selected)
-                    ImGui.PopStyleColor();
-            }
-
+            // View mode selection
+            string[] modes = { "Axial", "Coronal", "Sagittal" };
+            ImGui.SetNextItemWidth(100);
+            ImGui.Combo("##ViewMode", ref _viewMode, modes, modes.Length);
+            
             ImGui.SameLine();
-            ImGui.TextUnformatted("|");
-            ImGui.SameLine();
+            ImGui.Text($"Slice: {_currentSlice}");
         }
 
         public void DrawContent(ref float zoom, ref Vector2 pan)
         {
-            if (_selectedView == 4)
+            var io = ImGui.GetIO();
+            var canvasPos = ImGui.GetCursorScreenPos();
+            var canvasSize = ImGui.GetContentRegionAvail();
+            var dl = ImGui.GetWindowDrawList();
+
+            // Create invisible button for mouse interaction
+            ImGui.InvisibleButton("ct_canvas", canvasSize);
+            bool isHovered = ImGui.IsItemHovered();
+
+            // Handle mouse wheel zoom
+            if (isHovered && io.MouseWheel != 0)
             {
-                SubmitCtQuadViewport(ref zoom, ref pan);
+                float zoomDelta = io.MouseWheel * 0.1f;
+                float newZoom = Math.Clamp(zoom + zoomDelta * zoom, 0.1f, 10.0f);
+                
+                // Zoom towards mouse position
+                if (newZoom != zoom)
+                {
+                    Vector2 mousePos = io.MousePos - canvasPos - canvasSize * 0.5f;
+                    pan -= mousePos * (newZoom / zoom - 1.0f);
+                    zoom = newZoom;
+                }
             }
-            else
+
+            // Handle slice scrolling with Ctrl+MouseWheel
+            if (isHovered && io.MouseWheel != 0 && io.KeyCtrl)
             {
-                SubmitSingleViewport(ref zoom, ref pan);
+                _currentSlice += (int)io.MouseWheel;
+                _currentSlice = Math.Max(0, _currentSlice);
             }
-        }
-        
-        private void SubmitSingleViewport(ref float zoom, ref Vector2 pan)
-        {
-            ImGui.PushStyleVar(ImGuiStyleVar.WindowPadding, Vector2.Zero);
-            if (ImGui.BeginChild("Viewport", ImGui.GetContentRegionAvail(), ImGuiChildFlags.Border, ImGuiWindowFlags.NoScrollbar))
+
+            // Handle panning with middle mouse button
+            if (ImGui.IsItemActive() && ImGui.IsMouseDragging(ImGuiMouseButton.Middle))
             {
-                 // Placeholder drawing logic
-                ImGui.GetWindowDrawList().AddRectFilled(ImGui.GetCursorScreenPos(), ImGui.GetCursorScreenPos() + ImGui.GetContentRegionAvail(), 0xFF302020);
-                ImGui.Text("  Single Viewport (CT)");
+                pan += io.MouseDelta;
             }
-            ImGui.EndChild();
-            ImGui.PopStyleVar();
+
+            // Draw background
+            dl.AddRectFilled(canvasPos, canvasPos + canvasSize, 0xFF202020);
+            
+            // Placeholder for CT rendering
+            string text = "CT Stack Viewer\n(Not yet implemented)\n\nUse mouse wheel to zoom\nCtrl+wheel to change slice\nMiddle button to pan";
+            var textSize = ImGui.CalcTextSize(text);
+            var textPos = canvasPos + (canvasSize - textSize) * 0.5f;
+            dl.AddText(textPos, 0xFFFFFFFF, text);
         }
 
-        private void SubmitCtQuadViewport(ref float zoom, ref Vector2 pan)
-        {
-            // Placeholder drawing logic
-            ImGui.Text("Quad Viewport (CT)");
-        }
-
-        /// <summary>
-        /// Fulfills the IDisposable contract from the interface. No resources to clean up yet.
-        /// </summary>
         public void Dispose()
         {
-            // Nothing to dispose of yet for this viewer.
+            // Clean up any resources when the viewer is closed
         }
     }
 }

@@ -1,20 +1,26 @@
 ﻿// GeoscientistToolkit/Data/CtImageStack/CtImageStackDataset.cs
 namespace GeoscientistToolkit.Data.CtImageStack
 {
-    public class CtImageStackDataset : Dataset, IDisposable
+    public class CtImageStackDataset : Dataset
     {
+        // Dimensions
+        public int Width { get; set; }
+        public int Height { get; set; }
+        public int Depth { get; set; } // Number of slices
+        
+        // Pixel/Voxel information
+        public float PixelSize { get; set; } // In-plane pixel size
+        public float SliceThickness { get; set; } // Distance between slices
+        public string Unit { get; set; } = "mm";
+        public int BitDepth { get; set; } = 16;
+        
+        // CT-specific properties
         public int BinningSize { get; set; } = 1;
-        public bool LoadFullInMemory { get; set; } = true;
-        public float PixelSize { get; set; } = 1.0f;
-        public string Unit { get; set; } = "micrometers";
+        public float MinValue { get; set; }
+        public float MaxValue { get; set; }
         
-        public int Width { get; private set; }
-        public int Height { get; private set; }
-        public int Depth { get; private set; }
-        public int BytesPerPixel { get; private set; }
-        
-        private byte[] _imageData;
-        private bool _isLoaded = false;
+        // File paths for the image stack
+        public List<string> ImagePaths { get; set; } = new List<string>();
 
         public CtImageStackDataset(string name, string folderPath) : base(name, folderPath)
         {
@@ -23,44 +29,27 @@ namespace GeoscientistToolkit.Data.CtImageStack
 
         public override long GetSizeInBytes()
         {
-            if (!_isLoaded)
-                return EstimateSize();
-            
-            return _imageData?.Length ?? 0;
-        }
-
-        private long EstimateSize()
-        {
-            if (Directory.Exists(FilePath))
+            // Calculate total size of all image files
+            long totalSize = 0;
+            foreach (var path in ImagePaths)
             {
-                var imageFiles = Directory.GetFiles(FilePath, "*.tif*")
-                    .Concat(Directory.GetFiles(FilePath, "*.png"))
-                    .Concat(Directory.GetFiles(FilePath, "*.jpg"))
-                    .ToArray();
-                
-                if (imageFiles.Length > 0)
+                if (File.Exists(path))
                 {
-                    var firstFileSize = new FileInfo(imageFiles[0]).Length;
-                    return firstFileSize * imageFiles.Length;
+                    totalSize += new FileInfo(path).Length;
                 }
             }
-            return 0;
+            return totalSize;
         }
 
         public override void Load()
         {
-            if (_isLoaded) return;
-            // TODO: Implement image loading logic.
-            _isLoaded = true;
+            // Load metadata or prepare for slice loading
+            // Actual image data loading would be done on-demand per slice
         }
 
         public override void Unload()
         {
-            _imageData = null;
-            _isLoaded = false;
-            GC.Collect();
+            // Clean up any cached data
         }
-
-        public void Dispose() => Unload();
     }
 }

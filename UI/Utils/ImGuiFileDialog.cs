@@ -100,11 +100,19 @@ namespace GeoscientistToolkit.UI.Utils
                         {
                             if (_dialogType == FileDialogType.OpenDirectory)
                             {
+                                // Single click selects the directory
                                 _selectedFileName = dirName;
+                                
+                                // Double click opens the directory
+                                if (ImGui.IsMouseDoubleClicked(ImGuiMouseButton.Left))
+                                {
+                                    CurrentDirectory = dir;
+                                    _selectedFileName = ""; // Reset file selection when changing directory
+                                }
                             }
-                            
-                            if (ImGui.IsMouseDoubleClicked(ImGuiMouseButton.Left))
+                            else
                             {
+                                // For OpenFile mode, single click opens the directory
                                 CurrentDirectory = dir;
                                 _selectedFileName = ""; // Reset file selection when changing directory
                             }

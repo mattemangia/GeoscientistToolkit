@@ -61,16 +61,16 @@ namespace GeoscientistToolkit.UI
                 _folderPath = _folderDialog.SelectedPath;
             }
 
-            // Only render the import modal if neither file dialog is open
+            // Only render the import window if neither file dialog is open
             if (IsOpen && !_fileDialog.IsOpen && !_folderDialog.IsOpen)
             {
                 ImGui.SetNextWindowSize(new Vector2(500, 380), ImGuiCond.FirstUseEver);
+                var center = ImGui.GetMainViewport().GetCenter();
+                ImGui.SetNextWindowPos(center, ImGuiCond.FirstUseEver, new Vector2(0.5f, 0.5f));
                 
-                bool windowOpen = IsOpen;
-                if (ImGui.BeginPopupModal("Import Data###ImportDataModal", ref windowOpen, ImGuiWindowFlags.AlwaysAutoResize))
+                // Use Begin with ref IsOpen to properly handle the X button
+                if (ImGui.Begin("Import Data", ref IsOpen, ImGuiWindowFlags.NoDocking))
                 {
-                    IsOpen = windowOpen;
-                    
                     if (_importTask != null && !_importTask.IsCompleted)
                     {
                         DrawProgress();
@@ -79,12 +79,7 @@ namespace GeoscientistToolkit.UI
                     {
                         DrawOptions();
                     }
-                    ImGui.EndPopup();
-                }
-                else if (IsOpen)
-                {
-                    // If we're supposed to be open but the popup isn't showing, open it
-                    ImGui.OpenPopup("Import Data###ImportDataModal");
+                    ImGui.End();
                 }
             }
         }
@@ -132,7 +127,6 @@ namespace GeoscientistToolkit.UI
             if (ImGui.Button("Cancel", new Vector2(120, 0)))
             {
                 IsOpen = false;
-                ImGui.CloseCurrentPopup();
             }
             ImGui.SameLine();
 
@@ -168,7 +162,6 @@ namespace GeoscientistToolkit.UI
                 if (ImGui.Button("Close"))
                 {
                     IsOpen = false;
-                    ImGui.CloseCurrentPopup();
                 }
             }
         }
