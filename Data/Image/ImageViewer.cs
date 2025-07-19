@@ -1,7 +1,4 @@
-﻿// GeoscientistToolkit/Data/Image/ImageViewer.cs
-// A fully functional dataset viewer for single images, using Veldrid for GPU texture management.
-// It supports panning, zooming with mouse wheel, and a customizable, draggable scale bar.
-
+﻿// GeoscientistToolkit/Data/Image/ImageViewer.cs (Fixed mouse wheel zoom)
 using GeoscientistToolkit.UI.Interfaces;
 using GeoscientistToolkit.Util;
 using ImGuiNET;
@@ -22,7 +19,7 @@ namespace GeoscientistToolkit.Data.Image
         private IntPtr _textureId = IntPtr.Zero;
 
         // Scale bar state
-        private Vector2 _scaleBarRelativePos = new Vector2(0.85f, 0.9f); // Relative position (0-1)
+        private Vector2 _scaleBarRelativePos = new Vector2(0.85f, 0.9f);
         private bool _isDraggingScaleBar = false;
         private Vector2 _dragOffset;
         private bool _showScaleBarProperties = false;
@@ -34,7 +31,7 @@ namespace GeoscientistToolkit.Data.Image
         private float _scaleBarFontSize = 1.0f;
         private bool _showScaleBarBackground = true;
         private Vector4 _scaleBarBgColor = new Vector4(0, 0, 0, 0.5f);
-        private int _scaleBarPosition = 3; // 0=TL, 1=TR, 2=BL, 3=BR, 4=Custom
+        private int _scaleBarPosition = 3;
         
         // Stored pixel size for editing
         private float _editablePixelSize;
@@ -48,9 +45,6 @@ namespace GeoscientistToolkit.Data.Image
             _editableUnit = dataset.Unit ?? "µm";
         }
 
-        /// <summary>
-        /// Draws viewer-specific controls in the toolbar.
-        /// </summary>
         public void DrawToolbarControls() 
         {
             if (_dataset.PixelSize > 0)
@@ -60,18 +54,14 @@ namespace GeoscientistToolkit.Data.Image
             }
         }
 
-        /// <summary>
-        /// Draws the main content of the viewer.
-        /// </summary>
         public void DrawContent(ref float zoom, ref Vector2 pan)
         {
-            // Lazily create the GPU texture on the first draw call.
+            // Lazily create the GPU texture
             if (_textureId == IntPtr.Zero)
             {
                 CreateDeviceTexture();
             }
 
-            // If texture creation failed, display an error and exit.
             if (_textureId == IntPtr.Zero)
             {
                 ImGui.TextColored(new Vector4(1.0f, 0.2f, 0.2f, 1.0f), "Error: Could not create GPU texture for image.");
@@ -84,19 +74,31 @@ namespace GeoscientistToolkit.Data.Image
             var dl = ImGui.GetWindowDrawList();
             var io = ImGui.GetIO();
 
-            // Create an invisible button to capture mouse input for the canvas
-            ImGui.InvisibleButton("canvas", canvasSize);
-            bool isHovered = ImGui.IsItemHovered();
-            bool isActive = ImGui.IsItemActive();
+            // Draw background
+            dl.AddRectFilled(canvasPos, canvasPos + canvasSize, 0xFF202020);
+
+            // Calculate image display
+            float aspectRatio = (float)_dataset.Width / _dataset.Height;
+            Vector2 displaySize = new Vector2(canvasSize.X, canvasSize.X / aspectRatio);
+            if (displaySize.Y > canvasSize.Y)
+            {
+                displaySize = new Vector2(canvasSize.Y * aspectRatio, canvasSize.Y);
+            }
+            displaySize *= zoom;
+
+            Vector2 imagePos = canvasPos + (canvasSize - displaySize) * 0.5f + pan;
+
+            // Check if mouse is over the image area for zoom handling
+            bool isMouseOverImage = io.MousePos.X >= canvasPos.X && io.MousePos.X <= canvasPos.X + canvasSize.X &&
+                                   io.MousePos.Y >= canvasPos.Y && io.MousePos.Y <= canvasPos.Y + canvasSize.Y;
 
             // Handle mouse wheel zoom
-            if (isHovered && io.MouseWheel != 0)
+            if (isMouseOverImage && Math.Abs(io.MouseWheel) > 0.0f)
             {
                 float zoomDelta = io.MouseWheel * 0.1f;
                 float newZoom = Math.Clamp(zoom + zoomDelta * zoom, 0.1f, 10.0f);
                 
-                // Zoom towards mouse position
-                if (newZoom != zoom)
+                if (Math.Abs(newZoom - zoom) > 0.001f)
                 {
                     Vector2 mousePos = io.MousePos - canvasPos - canvasSize * 0.5f;
                     pan -= mousePos * (newZoom / zoom - 1.0f);
@@ -105,83 +107,49 @@ namespace GeoscientistToolkit.Data.Image
             }
 
             // Handle panning with middle mouse button
-            if (isActive && ImGui.IsMouseDragging(ImGuiMouseButton.Middle))
+            if (isMouseOverImage && ImGui.IsMouseDragging(ImGuiMouseButton.Middle))
             {
                 pan += io.MouseDelta;
             }
 
-            // Draw a dark background for the viewport.
-            dl.AddRectFilled(canvasPos, canvasPos + canvasSize, 0xFF202020);
-
-            // Calculate the image's aspect ratio to maintain proportions.
-            float aspectRatio = (float)_dataset.Width / _dataset.Height;
-
-            // Fit image to the canvas while maintaining aspect ratio.
-            Vector2 displaySize = new Vector2(canvasSize.X, canvasSize.X / aspectRatio);
-            if (displaySize.Y > canvasSize.Y)
-            {
-                displaySize = new Vector2(canvasSize.Y * aspectRatio, canvasSize.Y);
-            }
-
-            // Apply zoom to the calculated display size.
-            displaySize *= zoom;
-
-            // Center the image within the canvas and apply the user's pan vector.
-            Vector2 imagePos = canvasPos + (canvasSize - displaySize) * 0.5f + pan;
-
-            // Add the image to ImGui's draw list.
+            // Draw the image
             dl.AddImage(_textureId, imagePos, imagePos + displaySize);
 
-            // Draw scale bar if dataset has pixel size
+            // Draw scale bar
             if (_dataset.PixelSize > 0 || _pixelSizeChanged)
             {
                 DrawScaleBar(dl, canvasPos, canvasSize, zoom);
             }
 
-            // Draw scale bar properties window if open
+            // Draw scale bar properties window
             DrawScaleBarProperties();
         }
 
-        /// <summary>
-        /// Loads the image from disk, creates a Veldrid texture, uploads the pixel data,
-        /// and frees the CPU-side memory.
-        /// </summary>
         private void CreateDeviceTexture()
         {
-            // 1. Load the image file from disk into RAM.
             _dataset.Load();
-            if (_dataset.ImageData == null)
-            {
-                return;
-            }
+            if (_dataset.ImageData == null) return;
+            
             var image = _dataset.ImageData;
 
-            // 2. Create a Veldrid Texture on the GPU.
             Texture texture = VeldridManager.Factory.CreateTexture(TextureDescription.Texture2D(
                 (uint)image.Width, (uint)image.Height, 1, 1,
                 PixelFormat.R8_G8_B8_A8_UNorm, TextureUsage.Sampled));
 
-            // 3. Copy pixel data from ImageSharp to a byte array.
             byte[] pixelData = new byte[4 * image.Width * image.Height];
             image.CopyPixelDataTo(pixelData);
 
-            // 4. Upload the byte array to the GPU Texture.
             VeldridManager.GraphicsDevice.UpdateTexture(
                 texture,
                 pixelData,
                 0, 0, 0, (uint)image.Width, (uint)image.Height, 1, 0, 0);
 
-            // 5. Create a TextureView and bind it for ImGui to use.
             _textureView = VeldridManager.Factory.CreateTextureView(texture);
             _textureId = VeldridManager.ImGuiController.GetOrCreateImGuiBinding(VeldridManager.Factory, _textureView);
 
-            // 6. Free the RAM copy of the image now that it's on the GPU.
             _dataset.Unload();
         }
 
-        /// <summary>
-        /// Calculates and draws a dynamic, interactive scale bar.
-        /// </summary>
         private void DrawScaleBar(ImDrawListPtr dl, Vector2 canvasPos, Vector2 canvasSize, float zoom)
         {
             var io = ImGui.GetIO();
@@ -194,7 +162,7 @@ namespace GeoscientistToolkit.Data.Image
             float realWorldUnitsPerPixel = pixelSize / zoom;
             float barLengthInRealUnits = _scaleBarTargetWidth * realWorldUnitsPerPixel;
 
-            // Find a "nice" round number for the label
+            // Find a nice round number
             double magnitude = Math.Pow(10, Math.Floor(Math.Log10(barLengthInRealUnits)));
             double mostSignificantDigit = Math.Round(barLengthInRealUnits / magnitude);
 
@@ -208,11 +176,11 @@ namespace GeoscientistToolkit.Data.Image
             string label = $"{niceLengthInRealUnits.ToString("G", CultureInfo.InvariantCulture)} {unit}";
             Vector2 textSize = ImGui.CalcTextSize(label) * _scaleBarFontSize;
 
-            // Calculate position based on preset or custom position
+            // Calculate position
             Vector2 margin = new Vector2(20, 20);
             Vector2 barPos;
             
-            if (_scaleBarPosition < 4) // Preset positions
+            if (_scaleBarPosition < 4)
             {
                 switch (_scaleBarPosition)
                 {
@@ -233,15 +201,14 @@ namespace GeoscientistToolkit.Data.Image
             
             barPos = canvasPos + _scaleBarRelativePos * canvasSize;
 
-            // Define the scale bar rectangle
+            // Define rectangles
             Vector2 barStart = barPos;
             Vector2 barEnd = new Vector2(barStart.X + finalBarLengthPixels, barStart.Y + _scaleBarHeight);
             
-            // Define clickable area (includes text above bar)
             Vector2 clickAreaMin = new Vector2(barStart.X - 5, barStart.Y - textSize.Y - 8);
             Vector2 clickAreaMax = new Vector2(barEnd.X + 5, barEnd.Y + 5);
 
-            // Check if mouse is over scale bar
+            // Check mouse interaction
             bool isMouseOverScaleBar = io.MousePos.X >= clickAreaMin.X && io.MousePos.X <= clickAreaMax.X &&
                                       io.MousePos.Y >= clickAreaMin.Y && io.MousePos.Y <= clickAreaMax.Y;
 
@@ -250,7 +217,7 @@ namespace GeoscientistToolkit.Data.Image
             {
                 _isDraggingScaleBar = true;
                 _dragOffset = io.MousePos - barPos;
-                _scaleBarPosition = 4; // Switch to custom position when dragging
+                _scaleBarPosition = 4;
             }
 
             if (_isDraggingScaleBar)
@@ -268,13 +235,13 @@ namespace GeoscientistToolkit.Data.Image
                 }
             }
 
-            // Handle right-click context menu
+            // Handle right-click
             if (isMouseOverScaleBar && ImGui.IsMouseClicked(ImGuiMouseButton.Right))
             {
                 ImGui.OpenPopup("ScaleBarContext");
             }
 
-            // Draw scale bar background if enabled
+            // Draw background
             if (_showScaleBarBackground)
             {
                 uint bgColor = ImGui.ColorConvertFloat4ToU32(_scaleBarBgColor);
@@ -286,26 +253,23 @@ namespace GeoscientistToolkit.Data.Image
                 );
             }
 
-            // Draw the scale bar
+            // Draw scale bar
             uint barColor = ImGui.ColorConvertFloat4ToU32(_scaleBarColor);
             Vector2 textPos = new Vector2(
                 barStart.X + (finalBarLengthPixels - textSize.X) * 0.5f,
                 barStart.Y - textSize.Y - 4
             );
 
-            // Draw shadow for better readability
             if (!_showScaleBarBackground)
             {
                 dl.AddText(ImGui.GetFont(), ImGui.GetFontSize() * _scaleBarFontSize, 
                           textPos + Vector2.One, 0x90000000, label);
             }
             
-            // Draw text and bar
             dl.AddText(ImGui.GetFont(), ImGui.GetFontSize() * _scaleBarFontSize, 
                       textPos, barColor, label);
             dl.AddRectFilled(barStart, barEnd, barColor);
 
-            // Draw hover highlight
             if (isMouseOverScaleBar && !_isDraggingScaleBar)
             {
                 dl.AddRect(clickAreaMin, clickAreaMax, 0x80FFFFFF, 2.0f);
@@ -321,15 +285,12 @@ namespace GeoscientistToolkit.Data.Image
                 ImGui.Separator();
                 if (ImGui.MenuItem("Hide"))
                 {
-                    _dataset.PixelSize = 0; // Hide by setting to 0
+                    _dataset.PixelSize = 0;
                 }
                 ImGui.EndPopup();
             }
         }
 
-        /// <summary>
-        /// Draws the scale bar properties window.
-        /// </summary>
         private void DrawScaleBarProperties()
         {
             if (!_showScaleBarProperties) return;
@@ -337,7 +298,6 @@ namespace GeoscientistToolkit.Data.Image
             ImGui.SetNextWindowSize(new Vector2(350, 400), ImGuiCond.FirstUseEver);
             if (ImGui.Begin("Scale Bar Properties", ref _showScaleBarProperties))
             {
-                // Pixel size settings
                 if (ImGui.CollapsingHeader("Measurement", ImGuiTreeNodeFlags.DefaultOpen))
                 {
                     ImGui.Indent();
@@ -370,7 +330,6 @@ namespace GeoscientistToolkit.Data.Image
                     ImGui.Unindent();
                 }
 
-                // Appearance settings
                 if (ImGui.CollapsingHeader("Appearance", ImGuiTreeNodeFlags.DefaultOpen))
                 {
                     ImGui.Indent();
@@ -390,7 +349,6 @@ namespace GeoscientistToolkit.Data.Image
                     ImGui.Unindent();
                 }
 
-                // Position settings
                 if (ImGui.CollapsingHeader("Position", ImGuiTreeNodeFlags.DefaultOpen))
                 {
                     ImGui.Indent();
@@ -398,7 +356,7 @@ namespace GeoscientistToolkit.Data.Image
                     string[] positions = { "Top-Left", "Top-Right", "Bottom-Left", "Bottom-Right", "Custom" };
                     ImGui.Combo("Position", ref _scaleBarPosition, positions, positions.Length);
                     
-                    if (_scaleBarPosition == 4) // Custom
+                    if (_scaleBarPosition == 4)
                     {
                         float x = _scaleBarRelativePos.X * 100;
                         float y = _scaleBarRelativePos.Y * 100;
@@ -426,16 +384,12 @@ namespace GeoscientistToolkit.Data.Image
             ImGui.End();
         }
         
-        /// <summary>
-        /// Cleans up unmanaged Veldrid resources to prevent memory leaks.
-        /// </summary>
         public void Dispose()
         {
             if (_textureView != null)
             {
-                // Unregister from ImGui, then dispose the Veldrid objects.
                 VeldridManager.ImGuiController.RemoveImGuiBinding(_textureView);
-                _textureView.Target.Dispose(); // Dispose the underlying Texture
+                _textureView.Target.Dispose();
                 _textureView.Dispose();
                 _textureView = null;
                 _textureId = IntPtr.Zero;

@@ -1,4 +1,4 @@
-// GeoscientistToolkit/ImGuiController.cs
+// GeoscientistToolkit/ImGuiController.cs (Updated with Context property)
 using System;
 using System.Numerics;
 using System.Runtime.CompilerServices;
@@ -12,6 +12,7 @@ namespace GeoscientistToolkit
     {
         private GraphicsDevice  _gd;
         private bool            _frameBegun;
+        private IntPtr          _context;
 
         private DeviceBuffer _vb, _ib, _ub;
         private Texture      _fontTex;
@@ -30,6 +31,8 @@ namespace GeoscientistToolkit
         private readonly Dictionary<IntPtr, ResourceSet> _setsById = new();
         private IntPtr _nextTextureId = (IntPtr)100;
 
+        public IntPtr Context => _context;
+
         // ------------------------------------------------------------------
         public ImGuiController(GraphicsDevice gd,
                                OutputDescription fbDesc,
@@ -39,7 +42,9 @@ namespace GeoscientistToolkit
             _winW = width;
             _winH = height;
 
-            ImGui.CreateContext();
+            _context = ImGui.CreateContext();
+            ImGui.SetCurrentContext(_context);
+            
             var io = ImGui.GetIO();
             io.Fonts.AddFontDefault();
             io.BackendFlags |= ImGuiBackendFlags.RendererHasVtxOffset;
@@ -114,6 +119,7 @@ namespace GeoscientistToolkit
         
         private void RecreateFontTexture(GraphicsDevice gd)
         {
+            ImGui.SetCurrentContext(_context);
             var io = ImGui.GetIO();
             io.Fonts.GetTexDataAsRGBA32(out IntPtr pixels, out int w, out int h, out int bpp);
             io.Fonts.SetTexID(_fontID);
@@ -173,6 +179,8 @@ namespace GeoscientistToolkit
         // ------------------------------------------------------------------
         public void Update(float dt, InputSnapshot snap)
         {
+            ImGui.SetCurrentContext(_context);
+            
             if (_frameBegun) 
             {
                 ImGui.Render();
@@ -188,6 +196,8 @@ namespace GeoscientistToolkit
         // ------------------------------------------------------------------
         public void Render(GraphicsDevice gd, CommandList cl)
         {
+            ImGui.SetCurrentContext(_context);
+            
             if (!_frameBegun) return;
             
             ImGui.Render();
@@ -197,128 +207,128 @@ namespace GeoscientistToolkit
 
         // ------------------------------------------------------------------
         private void DrawImGui(ImDrawDataPtr dd, GraphicsDevice gd, CommandList cl)
-{
-    // If there's nothing to draw, don't do anything.
-    if (dd.CmdListsCount == 0 || dd.TotalVtxCount == 0)
-    {
-        return;
-    }
-
-    // --- 1. Resize and Update Buffers ---
-
-    // Ensure our vertex buffer is large enough.
-    uint vbSize = (uint)(dd.TotalVtxCount * Unsafe.SizeOf<ImDrawVert>());
-    if (vbSize > _vb.SizeInBytes)
-    {
-        _vb.Dispose();
-        // Double the size to avoid frequent re-allocations.
-        _vb = gd.ResourceFactory.CreateBuffer(new BufferDescription(vbSize * 2, BufferUsage.VertexBuffer | BufferUsage.Dynamic));
-    }
-
-    // Ensure our index buffer is large enough.
-    uint ibSize = (uint)(dd.TotalIdxCount * sizeof(ushort));
-    if (ibSize > _ib.SizeInBytes)
-    {
-        _ib.Dispose();
-        // Double the size.
-        _ib = gd.ResourceFactory.CreateBuffer(new BufferDescription(ibSize * 2, BufferUsage.IndexBuffer | BufferUsage.Dynamic));
-    }
-
-    // Upload the vertex and index data for all command lists into our single GPU buffers.
-    uint vOffset = 0;
-    uint iOffset = 0;
-    for (int n = 0; n < dd.CmdListsCount; ++n)
-    {
-        ImDrawListPtr clist = dd.CmdLists[n];
-        
-        // Copy vertex data
-        cl.UpdateBuffer(
-            _vb,
-            vOffset * (uint)Unsafe.SizeOf<ImDrawVert>(),
-            clist.VtxBuffer.Data,
-            (uint)(clist.VtxBuffer.Size * Unsafe.SizeOf<ImDrawVert>()));
-
-        // Copy index data
-        cl.UpdateBuffer(
-            _ib,
-            iOffset * sizeof(ushort),
-            clist.IdxBuffer.Data,
-            (uint)(clist.IdxBuffer.Size * sizeof(ushort)));
-
-        vOffset += (uint)clist.VtxBuffer.Size;
-        iOffset += (uint)clist.IdxBuffer.Size;
-    }
-
-    // --- 2. Setup Graphics State ---
-
-    cl.SetVertexBuffer(0, _vb);
-    cl.SetIndexBuffer(_ib, IndexFormat.UInt16);
-    cl.SetPipeline(_pipe);
-
-    // Update the projection matrix uniform.
-    var io = ImGui.GetIO();
-    Matrix4x4 mvp = Matrix4x4.CreateOrthographicOffCenter(
-        0f,
-        io.DisplaySize.X,
-        io.DisplaySize.Y,
-        0f,
-        -1.0f,
-        1.0f);
-    gd.UpdateBuffer(_ub, 0, ref mvp);
-
-    // Scale clip rectangles for HiDPI displays.
-    dd.ScaleClipRects(io.DisplayFramebufferScale);
-
-    // --- 3. Render a-ll Command Lists ---
-
-    int baseVtx = 0;
-    int baseIdx = 0;
-    for (int n = 0; n < dd.CmdListsCount; ++n)
-    {
-        ImDrawListPtr clist = dd.CmdLists[n];
-        for (int cmd_i = 0; cmd_i < clist.CmdBuffer.Size; ++cmd_i)
         {
-            ImDrawCmdPtr pcmd = clist.CmdBuffer[cmd_i];
-            
-            // Skip user-defined callbacks.
-            if (pcmd.UserCallback != IntPtr.Zero)
+            // If there's nothing to draw, don't do anything.
+            if (dd.CmdListsCount == 0 || dd.TotalVtxCount == 0)
             {
-                continue;
+                return;
             }
 
-            // Set the correct texture resource set for this draw command.
-            if (_setsById.TryGetValue(pcmd.TextureId, out ResourceSet resourceSet))
+            // --- 1. Resize and Update Buffers ---
+
+            // Ensure our vertex buffer is large enough.
+            uint vbSize = (uint)(dd.TotalVtxCount * Unsafe.SizeOf<ImDrawVert>());
+            if (vbSize > _vb.SizeInBytes)
             {
-                cl.SetGraphicsResourceSet(0, resourceSet);
-            }
-            else
-            {
-                // This can happen if a texture is destroyed but ImGui still tries to render it.
-                // In our case, we always set the font texture, so this should be safe.
-                cl.SetGraphicsResourceSet(0, _set); // Fallback to font texture.
+                _vb.Dispose();
+                // Double the size to avoid frequent re-allocations.
+                _vb = gd.ResourceFactory.CreateBuffer(new BufferDescription(vbSize * 2, BufferUsage.VertexBuffer | BufferUsage.Dynamic));
             }
 
-            // Set the scissor rectangle to clip rendering.
-            cl.SetScissorRect(
-                0,
-                (uint)pcmd.ClipRect.X,
-                (uint)pcmd.ClipRect.Y,
-                (uint)(pcmd.ClipRect.Z - pcmd.ClipRect.X),
-                (uint)(pcmd.ClipRect.W - pcmd.ClipRect.Y));
+            // Ensure our index buffer is large enough.
+            uint ibSize = (uint)(dd.TotalIdxCount * sizeof(ushort));
+            if (ibSize > _ib.SizeInBytes)
+            {
+                _ib.Dispose();
+                // Double the size.
+                _ib = gd.ResourceFactory.CreateBuffer(new BufferDescription(ibSize * 2, BufferUsage.IndexBuffer | BufferUsage.Dynamic));
+            }
 
-            // Issue the draw call.
-            cl.DrawIndexed(
-                indexCount: pcmd.ElemCount,
-                instanceCount: 1,
-                indexStart: pcmd.IdxOffset + (uint)baseIdx,
-                vertexOffset: (int)pcmd.VtxOffset + baseVtx,
-                instanceStart: 0);
+            // Upload the vertex and index data for all command lists into our single GPU buffers.
+            uint vOffset = 0;
+            uint iOffset = 0;
+            for (int n = 0; n < dd.CmdListsCount; ++n)
+            {
+                ImDrawListPtr clist = dd.CmdLists[n];
+                
+                // Copy vertex data
+                cl.UpdateBuffer(
+                    _vb,
+                    vOffset * (uint)Unsafe.SizeOf<ImDrawVert>(),
+                    clist.VtxBuffer.Data,
+                    (uint)(clist.VtxBuffer.Size * Unsafe.SizeOf<ImDrawVert>()));
+
+                // Copy index data
+                cl.UpdateBuffer(
+                    _ib,
+                    iOffset * sizeof(ushort),
+                    clist.IdxBuffer.Data,
+                    (uint)(clist.IdxBuffer.Size * sizeof(ushort)));
+
+                vOffset += (uint)clist.VtxBuffer.Size;
+                iOffset += (uint)clist.IdxBuffer.Size;
+            }
+
+            // --- 2. Setup Graphics State ---
+
+            cl.SetVertexBuffer(0, _vb);
+            cl.SetIndexBuffer(_ib, IndexFormat.UInt16);
+            cl.SetPipeline(_pipe);
+
+            // Update the projection matrix uniform.
+            var io = ImGui.GetIO();
+            Matrix4x4 mvp = Matrix4x4.CreateOrthographicOffCenter(
+                0f,
+                io.DisplaySize.X,
+                io.DisplaySize.Y,
+                0f,
+                -1.0f,
+                1.0f);
+            gd.UpdateBuffer(_ub, 0, ref mvp);
+
+            // Scale clip rectangles for HiDPI displays.
+            dd.ScaleClipRects(io.DisplayFramebufferScale);
+
+            // --- 3. Render all Command Lists ---
+
+            int baseVtx = 0;
+            int baseIdx = 0;
+            for (int n = 0; n < dd.CmdListsCount; ++n)
+            {
+                ImDrawListPtr clist = dd.CmdLists[n];
+                for (int cmd_i = 0; cmd_i < clist.CmdBuffer.Size; ++cmd_i)
+                {
+                    ImDrawCmdPtr pcmd = clist.CmdBuffer[cmd_i];
+                    
+                    // Skip user-defined callbacks.
+                    if (pcmd.UserCallback != IntPtr.Zero)
+                    {
+                        continue;
+                    }
+
+                    // Set the correct texture resource set for this draw command.
+                    if (_setsById.TryGetValue(pcmd.TextureId, out ResourceSet resourceSet))
+                    {
+                        cl.SetGraphicsResourceSet(0, resourceSet);
+                    }
+                    else
+                    {
+                        // This can happen if a texture is destroyed but ImGui still tries to render it.
+                        // In our case, we always set the font texture, so this should be safe.
+                        cl.SetGraphicsResourceSet(0, _set); // Fallback to font texture.
+                    }
+
+                    // Set the scissor rectangle to clip rendering.
+                    cl.SetScissorRect(
+                        0,
+                        (uint)pcmd.ClipRect.X,
+                        (uint)pcmd.ClipRect.Y,
+                        (uint)(pcmd.ClipRect.Z - pcmd.ClipRect.X),
+                        (uint)(pcmd.ClipRect.W - pcmd.ClipRect.Y));
+
+                    // Issue the draw call.
+                    cl.DrawIndexed(
+                        indexCount: pcmd.ElemCount,
+                        instanceCount: 1,
+                        indexStart: pcmd.IdxOffset + (uint)baseIdx,
+                        vertexOffset: (int)pcmd.VtxOffset + baseVtx,
+                        instanceStart: 0);
+                }
+                // Update the base offsets for the next command list.
+                baseIdx += clist.IdxBuffer.Size;
+                baseVtx += clist.VtxBuffer.Size;
+            }
         }
-        // Update the base offsets for the next command list.
-        baseIdx += clist.IdxBuffer.Size;
-        baseVtx += clist.VtxBuffer.Size;
-    }
-}
 
         // ------------------------------------------------------------------
         private void SetPerFrameImGuiData(float dt)
@@ -547,6 +557,11 @@ fragment float4 FS(FSin  inp [[stage_in]],
             _fs?.Dispose(); 
             _layout?.Dispose(); 
             _pipe?.Dispose();
+            
+            if (_context != IntPtr.Zero)
+            {
+                ImGui.DestroyContext(_context);
+            }
         }
     }
 }

@@ -1,4 +1,4 @@
-﻿// GeoscientistToolkit/UI/ToolsPanel.cs
+﻿// GeoscientistToolkit/UI/ToolsPanel.cs (Updated to inherit from BasePanel)
 using GeoscientistToolkit.Data;
 using GeoscientistToolkit.UI.Interfaces;
 using ImGuiNET;
@@ -6,23 +6,26 @@ using System.Numerics;
 
 namespace GeoscientistToolkit.UI
 {
-    public class ToolsPanel
+    public class ToolsPanel : BasePanel
     {
+        private Dataset _selectedDataset;
+        
+        public ToolsPanel() : base("Tools", new Vector2(280, 350))
+        {
+        }
+        
         public void Submit(ref bool pOpen, Dataset selectedDataset)
         {
-            ImGui.SetNextWindowSize(new Vector2(280, 350), ImGuiCond.FirstUseEver);
-
-            if (!ImGui.Begin("Tools", ref pOpen))
+            _selectedDataset = selectedDataset;
+            base.Submit(ref pOpen);
+        }
+        
+        protected override void DrawContent()
+        {
+            if (_selectedDataset != null)
             {
-                ImGui.End();
-                return;
-            }
-
-            if (selectedDataset != null)
-            {
-                // Get the appropriate tools UI renderer for the dataset type
-                var toolsRenderer = DatasetUIFactory.CreateTools(selectedDataset);
-                toolsRenderer.Draw(selectedDataset);
+                var toolsRenderer = DatasetUIFactory.CreateTools(_selectedDataset);
+                toolsRenderer.Draw(_selectedDataset);
             }
             else
             {
@@ -32,8 +35,6 @@ namespace GeoscientistToolkit.UI
                 ImGui.SetCursorPos(new Vector2((windowSize.X - textSize.X) * 0.5f, (windowSize.Y - textSize.Y) * 0.5f));
                 ImGui.TextDisabled(text);
             }
-
-            ImGui.End();
         }
     }
 }

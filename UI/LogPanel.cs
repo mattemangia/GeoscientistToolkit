@@ -1,25 +1,26 @@
-﻿// GeoscientistToolkit/UI/LogPanel.cs
+﻿// GeoscientistToolkit/UI/LogPanel.cs (Updated to inherit from BasePanel)
 using GeoscientistToolkit.Util;
 using ImGuiNET;
 using System.Numerics;
 
 namespace GeoscientistToolkit.UI
 {
-    public class LogPanel
+    public class LogPanel : BasePanel
     {
         private bool _autoScroll = true;
         private string _filter = "";
-
+        
+        public LogPanel() : base("Log", new Vector2(600, 200))
+        {
+        }
+        
         public void Submit(ref bool pOpen)
         {
-            ImGui.SetNextWindowSize(new Vector2(600, 200), ImGuiCond.FirstUseEver);
-            
-            if (!ImGui.Begin("Log", ref pOpen))
-            {
-                ImGui.End();
-                return;
-            }
-
+            base.Submit(ref pOpen);
+        }
+        
+        protected override void DrawContent()
+        {
             // Toolbar
             if (ImGui.Button("Clear"))
             {
@@ -65,8 +66,6 @@ namespace GeoscientistToolkit.UI
                 }
             }
             ImGui.EndChild();
-
-            ImGui.End();
         }
 
         private Vector4 GetLogLevelColor(LogLevel level)

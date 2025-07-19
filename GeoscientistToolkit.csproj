@@ -10,7 +10,7 @@
         <ImplicitUsings>enable</ImplicitUsings>
         <Nullable>disable</Nullable>
         <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
-
+        <ShaderVariantDef>shader-variants.json</ShaderVariantDef>
         <RuntimeIdentifiers>osx-arm64;osx-x64;win-x64;linux-x64</RuntimeIdentifiers>
 
     </PropertyGroup>
@@ -29,9 +29,7 @@
         <PackageReference Include="Veldrid.ImGui" Version="5.72.0" />
         <PackageReference Include="Veldrid.MetalBindings" Version="4.9.0" />
         <PackageReference Include="Veldrid.SDL2" Version="4.9.0" />
-        <PackageReference Include="Veldrid.SPIRV" Version="1.0.15" />
-        <PackageReference Include="Veldrid.SPIRV.BuildTools" Version="1.0.14" />
-        <PackageReference Include="Veldrid.SPIRV.DesktopNativeAsset" Version="4.9.2" />
+       
         <PackageReference Include="Veldrid.StartupUtilities" Version="4.9.0" />
     </ItemGroup>
 
