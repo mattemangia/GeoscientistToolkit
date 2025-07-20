@@ -1,5 +1,7 @@
-﻿using SixLabors.ImageSharp;
-using SixLabors.ImageSharp.PixelFormats;
+﻿// GeoscientistToolkit/Data/Image/ImageDataset.cs
+using System;
+using System.IO;
+using GeoscientistToolkit.Util;
 
 namespace GeoscientistToolkit.Data.Image
 {
@@ -11,7 +13,7 @@ namespace GeoscientistToolkit.Data.Image
         public float PixelSize { get; set; } // In micrometers, or 0 if not specified
         public string Unit { get; set; }
 
-        public Image<Rgba32> ImageData { get; private set; }
+        public byte[] ImageData { get; private set; }
 
         public ImageDataset(string name, string filePath) : base(name, filePath)
         {
@@ -27,13 +29,19 @@ namespace GeoscientistToolkit.Data.Image
         public override void Load()
         {
             if (ImageData != null) return;
-            // Load the image into memory only when needed by the viewer.
-            ImageData = SixLabors.ImageSharp.Image.Load<Rgba32>(FilePath);
+            
+            // Load the image into memory using the StbImageSharp loader.
+            var imageInfo = ImageLoader.LoadImage(FilePath);
+            if (imageInfo != null)
+            {
+                ImageData = imageInfo.Data;
+                Width = imageInfo.Width;
+                Height = imageInfo.Height;
+            }
         }
 
         public override void Unload()
         {
-            ImageData?.Dispose();
             ImageData = null;
             GC.Collect();
         }

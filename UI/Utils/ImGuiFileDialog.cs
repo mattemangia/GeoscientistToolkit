@@ -48,12 +48,15 @@ namespace GeoscientistToolkit.UI.Utils
                 var center = ImGui.GetMainViewport().GetCenter();
                 ImGui.SetNextWindowPos(center, ImGuiCond.FirstUseEver, new Vector2(0.5f, 0.5f));
                 
-                // Use a regular window instead of a modal
                 if (ImGui.Begin(_title + "###" + _id, ref IsOpen, 
                     ImGuiWindowFlags.NoCollapse | ImGuiWindowFlags.NoDocking))
                 {
                     DrawPathNavigation();
-                    DrawFileList(ref selectionMade);
+                    
+                    float bottomBarHeight = ImGui.GetFrameHeightWithSpacing() + ImGui.GetStyle().WindowPadding.Y;
+                    Vector2 fileListSize = new Vector2(0, -bottomBarHeight);
+
+                    DrawFileList(ref selectionMade, fileListSize);
                     DrawBottomButtons(ref selectionMade);
                     ImGui.End();
                 }
@@ -84,38 +87,20 @@ namespace GeoscientistToolkit.UI.Utils
             ImGui.Separator();
         }
 
-        private void DrawFileList(ref bool selectionMade)
+        private void DrawFileList(ref bool selectionMade, Vector2 size)
         {
-            if (ImGui.BeginChild("##FileList", new Vector2(-1, -40), ImGuiChildFlags.Border))
+            if (ImGui.BeginChild("##FileList", size, ImGuiChildFlags.Border))
             {
                 try
                 {
                     foreach (var dir in Directory.GetDirectories(CurrentDirectory))
                     {
                         var dirName = Path.GetFileName(dir);
-                        bool isSelected = _dialogType == FileDialogType.OpenDirectory && _selectedFileName == dirName;
                         
-                        // Use [D] for directories
-                        if (ImGui.Selectable($"[D] {dirName}", isSelected, ImGuiSelectableFlags.AllowDoubleClick))
+                        if (ImGui.Selectable($"[D] {dirName}", false, ImGuiSelectableFlags.AllowDoubleClick))
                         {
-                            if (_dialogType == FileDialogType.OpenDirectory)
-                            {
-                                // Single click selects the directory
-                                _selectedFileName = dirName;
-                                
-                                // Double click opens the directory
-                                if (ImGui.IsMouseDoubleClicked(ImGuiMouseButton.Left))
-                                {
-                                    CurrentDirectory = dir;
-                                    _selectedFileName = ""; // Reset file selection when changing directory
-                                }
-                            }
-                            else
-                            {
-                                // For OpenFile mode, single click opens the directory
-                                CurrentDirectory = dir;
-                                _selectedFileName = ""; // Reset file selection when changing directory
-                            }
+                            CurrentDirectory = dir;
+                            _selectedFileName = "";
                         }
                     }
 
@@ -130,7 +115,6 @@ namespace GeoscientistToolkit.UI.Utils
                             if (!isAllowed) continue;
 
                             bool isSelected = _selectedFileName == fileName;
-                            // Use [F] for files or show the extension
                             string filePrefix = "[F]";
                             string ext = Path.GetExtension(file).ToUpper();
                             if (!string.IsNullOrEmpty(ext) && ext.Length <= 5)
@@ -162,23 +146,45 @@ namespace GeoscientistToolkit.UI.Utils
 
         private void DrawBottomButtons(ref bool selectionMade)
         {
+            ImGui.Separator();
+            
+            var style = ImGui.GetStyle();
+            Vector2 buttonSize = new Vector2(80, 0);
+            float buttonsTotalWidth = (buttonSize.X * 2) + style.ItemSpacing.X;
+            float buttonsPosX = ImGui.GetWindowContentRegionMax().X - buttonsTotalWidth;
+
             if (_dialogType == FileDialogType.OpenFile)
             {
-                ImGui.SetNextItemWidth(ImGui.GetContentRegionAvail().X * 0.7f);
-                ImGui.InputText("File name", ref _selectedFileName, 260);
-            }
+                // FIX: Manually render the label, then calculate the input box width.
+                // This prevents the label from overlapping the buttons.
+                ImGui.Text("File name");
+                ImGui.SameLine();
 
-            ImGui.SameLine();
-            if (ImGui.Button("Cancel"))
+                float inputTextWidth = buttonsPosX - ImGui.GetCursorPosX() - (style.ItemSpacing.X * 2);
+                ImGui.SetNextItemWidth(inputTextWidth);
+                ImGui.InputText("##FileNameInput", ref _selectedFileName, 260);
+                ImGui.SameLine();
+            }
+            else // OpenDirectory mode
+            {
+                // Push the cursor to the right for button alignment.
+                ImGui.SetCursorPosX(buttonsPosX);
+            }
+            
+            // Explicitly set cursor position for buttons in both cases to ensure alignment.
+            ImGui.SetCursorPosX(buttonsPosX);
+
+            if (ImGui.Button("Cancel", buttonSize))
             {
                 IsOpen = false;
                 SelectedPath = "";
             }
 
             ImGui.SameLine();
-            bool canSelect = !string.IsNullOrEmpty(_selectedFileName) || _dialogType == FileDialogType.OpenDirectory;
+            
+            bool canSelect = _dialogType == FileDialogType.OpenDirectory || !string.IsNullOrEmpty(_selectedFileName);
             if (!canSelect) ImGui.BeginDisabled();
-            if (ImGui.Button("Select"))
+            if (ImGui.Button("Select", buttonSize))
             {
                 selectionMade = HandleSelection();
             }
@@ -190,8 +196,12 @@ namespace GeoscientistToolkit.UI.Utils
             if (_dialogType == FileDialogType.OpenDirectory)
             {
                 SelectedPath = CurrentDirectory;
-                IsOpen = false;
-                return true;
+                if (Directory.Exists(SelectedPath))
+                {
+                    IsOpen = false;
+                    return true;
+                }
+                return false;
             }
             else // OpenFile
             {

@@ -25,6 +25,7 @@ namespace GeoscientistToolkit.UI
         private Vector2 _lastMainWindowSize;
         private static List<BasePanel> _allPanels = new List<BasePanel>();
         private bool _popOutWindowWantsClosed = false;
+        private bool _wantsToPopIn = false;
         private IntPtr _mainContext;
 
         protected BasePanel(string title, Vector2 defaultSize)
@@ -52,7 +53,14 @@ namespace GeoscientistToolkit.UI
                     {
                         panel._popOutWindowWantsClosed = false;
                         panel._isOpen = false;
-                        panel.PopIn();
+                        panel.DoPopIn();
+                    }
+                    
+                    // Check if window wants to pop in after processing
+                    if (panel._wantsToPopIn)
+                    {
+                        panel._wantsToPopIn = false;
+                        panel.DoPopIn();
                     }
                 }
             }
@@ -127,9 +135,14 @@ namespace GeoscientistToolkit.UI
             if (ImGui.Button(_isPoppedOut ? "Dock ↩" : "Pop Out ↗", new Vector2(60, 20)))
             {
                 if (_isPoppedOut)
-                    PopIn();
+                {
+                    // Set flag to pop in after frame completes
+                    _wantsToPopIn = true;
+                }
                 else
+                {
                     PopOut();
+                }
             }
             
             ImGui.PopStyleColor(4);
@@ -198,9 +211,17 @@ namespace GeoscientistToolkit.UI
         }
 
         /// <summary>
-        /// Returns the panel to the main window
+        /// Request to return the panel to the main window (deferred until after frame)
         /// </summary>
         protected virtual void PopIn()
+        {
+            _wantsToPopIn = true;
+        }
+
+        /// <summary>
+        /// Actually performs the pop-in (called after frame completes)
+        /// </summary>
+        private void DoPopIn()
         {
             if (!_isPoppedOut) return;
             

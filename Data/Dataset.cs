@@ -8,7 +8,8 @@ namespace GeoscientistToolkit.Data
         MicroXrf,
         PointCloud,
         Mesh,
-        SingleImage
+        SingleImage,
+        Group
     }
 
     public abstract class Dataset

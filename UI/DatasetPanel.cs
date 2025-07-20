@@ -1,9 +1,11 @@
-// GeoscientistToolkit/UI/DatasetPanel.cs (Updated to inherit from BasePanel)
+// GeoscientistToolkit/UI/DatasetPanel.cs (Updated with grouping and multi-close support)
 using GeoscientistToolkit.Business;
 using GeoscientistToolkit.Data;
 using GeoscientistToolkit.Data.CtImageStack;
 using ImGuiNET;
 using System.Numerics;
+using System.Collections.Generic;
+using System.Linq;
 
 namespace GeoscientistToolkit.UI
 {
@@ -12,6 +14,11 @@ namespace GeoscientistToolkit.UI
         private string _searchFilter = "";
         private Action<Dataset> _onDatasetSelected;
         private Action _onImportClicked;
+        
+        // Multi-selection state
+        private HashSet<Dataset> _selectedDatasets = new HashSet<Dataset>();
+        private Dataset _lastSelectedDataset = null;
+        private List<Dataset> _orderedDatasets = new List<Dataset>(); // To maintain order for shift-selection
         
         public DatasetPanel() : base("Datasets", new Vector2(250, 400))
         {
@@ -31,6 +38,14 @@ namespace GeoscientistToolkit.UI
             ImGui.Separator();
 
             var datasets = ProjectManager.Instance.LoadedDatasets;
+            
+            // Update ordered datasets list for shift-selection
+            _orderedDatasets = datasets
+                .Where(d => string.IsNullOrEmpty(_searchFilter) || 
+                           d.Name.Contains(_searchFilter, StringComparison.OrdinalIgnoreCase))
+                .OrderBy(d => d.Type)
+                .ThenBy(d => d.Name)
+                .ToList();
             
             if (datasets.Count == 0)
             {
@@ -53,10 +68,15 @@ namespace GeoscientistToolkit.UI
             }
             else
             {
+                // Check for clicks outside any dataset to clear selection
+                if (ImGui.IsMouseClicked(ImGuiMouseButton.Left) && ImGui.IsWindowHovered() && 
+                    !ImGui.IsAnyItemHovered())
+                {
+                    _selectedDatasets.Clear();
+                }
+                
                 // --- Group datasets by type ---
-                var datasetsByType = datasets
-                    .Where(d => string.IsNullOrEmpty(_searchFilter) || 
-                               d.Name.Contains(_searchFilter, StringComparison.OrdinalIgnoreCase))
+                var datasetsByType = _orderedDatasets
                     .GroupBy(d => d.Type)
                     .OrderBy(g => g.Key.ToString());
 
@@ -78,38 +98,7 @@ namespace GeoscientistToolkit.UI
                             
                             foreach (var dataset in group.OrderBy(d => d.Name))
                             {
-                                ImGui.PushID(dataset.GetHashCode());
-                                
-                                bool isSelected = false;
-                                if (ImGui.Selectable(dataset.Name, isSelected))
-                                {
-                                    _onDatasetSelected?.Invoke(dataset);
-                                }
-                                
-                                if (ImGui.IsItemHovered())
-                                {
-                                    ImGui.BeginTooltip();
-                                    ImGui.TextUnformatted($"Name: {dataset.Name}");
-                                    ImGui.TextUnformatted($"Type: {dataset.Type}");
-                                    ImGui.TextUnformatted($"Path: {dataset.FilePath}");
-                                    
-                                    if (dataset is CtImageStackDataset ctDataset)
-                                    {
-                                        ImGui.Separator();
-                                        ImGui.TextUnformatted($"Binning: {ctDataset.BinningSize}");
-                                        ImGui.TextUnformatted($"Pixel Size: {ctDataset.PixelSize} {ctDataset.Unit}");
-                                    }
-                                    ImGui.EndTooltip();
-                                }
-                                
-                                if (ImGui.BeginPopupContextItem())
-                                {
-                                    if (ImGui.MenuItem("View")) { _onDatasetSelected?.Invoke(dataset); }
-                                    if (ImGui.MenuItem("Remove")) { ProjectManager.Instance.RemoveDataset(dataset); }
-                                    ImGui.EndPopup();
-                                }
-                                
-                                ImGui.PopID();
+                                DrawDatasetItem(dataset);
                             }
                             ImGui.TreePop();
                         }
@@ -123,6 +112,228 @@ namespace GeoscientistToolkit.UI
             
             ImGui.Separator();
             ImGui.TextDisabled($"{datasets.Count} dataset(s) loaded");
+            if (_selectedDatasets.Count > 1)
+            {
+                ImGui.TextDisabled($"{_selectedDatasets.Count} selected");
+            }
+        }
+        
+        private void DrawDatasetItem(Dataset dataset, int indentLevel = 0)
+        {
+            ImGui.PushID(dataset.GetHashCode());
+            
+            // Apply indentation for grouped items
+            if (indentLevel > 0)
+            {
+                ImGui.Indent(20f * indentLevel);
+            }
+            
+            bool isSelected = _selectedDatasets.Contains(dataset);
+            
+            // Handle selection
+            if (ImGui.Selectable(dataset.Name, isSelected))
+            {
+                HandleDatasetSelection(dataset);
+            }
+            
+            // Show tooltip
+            if (ImGui.IsItemHovered())
+            {
+                ShowDatasetTooltip(dataset);
+            }
+            
+            // Context menu
+            if (ImGui.BeginPopupContextItem())
+            {
+                // If right-clicking on an item that is not selected, clear 
+                // the current selection and select only this one.
+                if (!isSelected)
+                {
+                    _selectedDatasets.Clear();
+                    _selectedDatasets.Add(dataset);
+                    _lastSelectedDataset = dataset;
+                }
+                DrawContextMenu(dataset);
+                ImGui.EndPopup();
+            }
+            
+            // If this is a group, draw its children
+            if (dataset is DatasetGroup group)
+            {
+                foreach (var child in group.Datasets)
+                {
+                    DrawDatasetItem(child, indentLevel + 1);
+                }
+            }
+            
+            if (indentLevel > 0)
+            {
+                ImGui.Unindent(20f * indentLevel);
+            }
+            
+            ImGui.PopID();
+        }
+        
+        private void HandleDatasetSelection(Dataset dataset)
+        {
+            bool ctrlHeld = ImGui.GetIO().KeyCtrl;
+            bool shiftHeld = ImGui.GetIO().KeyShift;
+            
+            if (ctrlHeld)
+            {
+                // Toggle selection
+                if (_selectedDatasets.Contains(dataset))
+                    _selectedDatasets.Remove(dataset);
+                else
+                    _selectedDatasets.Add(dataset);
+            }
+            else if (shiftHeld && _lastSelectedDataset != null)
+            {
+                // Range selection
+                int startIdx = _orderedDatasets.IndexOf(_lastSelectedDataset);
+                int endIdx = _orderedDatasets.IndexOf(dataset);
+                
+                if (startIdx != -1 && endIdx != -1)
+                {
+                    int minIdx = Math.Min(startIdx, endIdx);
+                    int maxIdx = Math.Max(startIdx, endIdx);
+                    
+                    for (int i = minIdx; i <= maxIdx; i++)
+                    {
+                        _selectedDatasets.Add(_orderedDatasets[i]);
+                    }
+                }
+            }
+            else
+            {
+                // Single selection
+                _selectedDatasets.Clear();
+                _selectedDatasets.Add(dataset);
+                _onDatasetSelected?.Invoke(dataset);
+            }
+            
+            _lastSelectedDataset = dataset;
+        }
+        
+        private void ShowDatasetTooltip(Dataset dataset)
+        {
+            ImGui.BeginTooltip();
+            ImGui.TextUnformatted($"Name: {dataset.Name}");
+            ImGui.TextUnformatted($"Type: {dataset.Type}");
+            ImGui.TextUnformatted($"Path: {dataset.FilePath}");
+            
+            if (dataset is CtImageStackDataset ctDataset)
+            {
+                ImGui.Separator();
+                ImGui.TextUnformatted($"Binning: {ctDataset.BinningSize}");
+                ImGui.TextUnformatted($"Pixel Size: {ctDataset.PixelSize} {ctDataset.Unit}");
+            }
+            else if (dataset is DatasetGroup group)
+            {
+                ImGui.Separator();
+                ImGui.TextUnformatted($"Contains {group.Datasets.Count} datasets:");
+                foreach (var child in group.Datasets)
+                {
+                    ImGui.TextUnformatted($"  • {child.Name}");
+                }
+            }
+            
+            ImGui.EndTooltip();
+        }
+        
+        private void DrawContextMenu(Dataset dataset)
+        {
+            // View option
+            if (ImGui.MenuItem("View", null, false, !(dataset is DatasetGroup)))
+            {
+                _onDatasetSelected?.Invoke(dataset);
+            }
+            
+            // Group-specific options
+            if (dataset is DatasetGroup group)
+            {
+                if (ImGui.MenuItem("View Thumbnails"))
+                {
+                    // Signal to open thumbnail viewer
+                    OnOpenThumbnailViewer?.Invoke(group);
+                }
+                
+                if (ImGui.MenuItem("Ungroup"))
+                {
+                    UngroupDataset(group);
+                }
+            }
+            
+            // Multi-selection grouping
+            if (_selectedDatasets.Count > 1 && _selectedDatasets.Contains(dataset))
+            {
+                if (ImGui.MenuItem("Group Selected"))
+                {
+                    CreateGroup();
+                }
+            }
+            
+            ImGui.Separator();
+            
+            // Close/Remove option - now acts on all selected items
+            if (ImGui.MenuItem("Close"))
+            {
+                var itemsToClose = _selectedDatasets.ToList();
+                
+                foreach (var item in itemsToClose)
+                {
+                    if (item is DatasetGroup grp)
+                    {
+                        // Also remove all datasets within the group
+                        foreach (var child in grp.Datasets.ToList())
+                        {
+                            ProjectManager.Instance.RemoveDataset(child);
+                        }
+                    }
+                    ProjectManager.Instance.RemoveDataset(item);
+                }
+                
+                _selectedDatasets.Clear();
+            }
+        }
+        
+        // Add this event at the top of the class with other fields
+        public event Action<DatasetGroup> OnOpenThumbnailViewer;
+        
+        private void CreateGroup()
+        {
+            if (_selectedDatasets.Count < 2) return;
+            
+            // Create group name
+            string groupName = $"Group {ProjectManager.Instance.LoadedDatasets.Count(d => d is DatasetGroup) + 1}";
+            
+            // Create the group
+            var group = new DatasetGroup(groupName, _selectedDatasets.ToList());
+            
+            // Remove individual datasets from the project
+            foreach (var dataset in _selectedDatasets)
+            {
+                ProjectManager.Instance.RemoveDataset(dataset);
+            }
+            
+            // Add the group
+            ProjectManager.Instance.AddDataset(group);
+            
+            // Clear selection
+            _selectedDatasets.Clear();
+        }
+        
+        private void UngroupDataset(DatasetGroup group)
+        {
+            // Add all datasets back to the project
+            foreach (var dataset in group.Datasets)
+            {
+                ProjectManager.Instance.AddDataset(dataset);
+            }
+            
+            // Remove the group
+            ProjectManager.Instance.RemoveDataset(group);
+            _selectedDatasets.Remove(group);
         }
         
         private string GetIconForDatasetType(DatasetType type)
@@ -135,6 +346,7 @@ namespace GeoscientistToolkit.UI
                 DatasetType.PointCloud => "[PCD]",
                 DatasetType.Mesh => "[MESH]",
                 DatasetType.SingleImage => "[IMG]",
+                DatasetType.Group => "[GROUP]",
                 _ => "[DATA]"
             };
         }

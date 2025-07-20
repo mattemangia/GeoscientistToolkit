@@ -23,7 +23,7 @@
       
         <PackageReference Include="sdl2" Version="2.0.5" />
       
-        <PackageReference Include="SixLabors.ImageSharp" Version="3.1.10" />
+        <PackageReference Include="StbImageSharp" Version="2.30.15" />
         <PackageReference Include="TinyDialogsNet" Version="1.0.2" />
         <PackageReference Include="Veldrid" Version="4.9.0" />
         <PackageReference Include="Veldrid.ImGui" Version="5.72.0" />

@@ -1,20 +1,12 @@
 // GeoscientistToolkit/UI/MainWindow.cs — safeguarded + correct multi-panel docking
-// -----------------------------------------------------------------------------
-// ✔  Compiles on *any* ImGui.NET build:
-//      •  If DockBuilder symbols are present **and** IMGUI_HAS_DOCK_BUILDER is
-//         defined → automatic 4-way split (Datasets-left, Properties-right, Log-bottom).
-//      •  Otherwise → program launches with panels floating; user can arrange
-//         manually. (No compiler errors.)
-// ✔  Resets visibility flags every time the layout is rebuilt so all three
-//    panels appear even if you previously closed them.
-// -----------------------------------------------------------------------------
-
 using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Numerics;
 using GeoscientistToolkit.Business;
 using GeoscientistToolkit.Data;
+using GeoscientistToolkit.Data.Image; // Required for DatasetGroup
+using GeoscientistToolkit.Util; // Required for VeldridManager
 using ImGuiNET;
 
 namespace GeoscientistToolkit.UI
@@ -31,6 +23,9 @@ namespace GeoscientistToolkit.UI
         private readonly ToolsPanel      _tools      = new();
 
         private readonly List<DatasetViewPanel> _viewers = new();
+        // FIX: Add a separate list to manage ThumbnailViewerPanel instances.
+        private readonly List<ThumbnailViewerPanel> _thumbnailViewers = new();
+
 
         private bool _layoutBuilt;
         private bool _showDatasets   = true;
@@ -46,6 +41,9 @@ namespace GeoscientistToolkit.UI
         // ──────────────────────────────────────────────────────────────────────
         public void SubmitUI()
         {
+            // FIX: Process actions queued from other threads. This must be called once per frame.
+            VeldridManager.ProcessMainThreadActions();
+
             var vp = ImGui.GetMainViewport();
             ImGui.SetNextWindowPos(vp.WorkPos);
             ImGui.SetNextWindowSize(vp.WorkSize);
@@ -100,6 +98,20 @@ namespace GeoscientistToolkit.UI
                 }
             }
 
+            // FIX: Add logic to submit and manage ThumbnailViewerPanel instances.
+            for (int i = _thumbnailViewers.Count - 1; i >= 0; --i)
+            {
+                bool open = true;
+                var viewer = _thumbnailViewers[i];
+                viewer.Submit(ref open, OnDatasetSelected); // Pass the selection handler back
+                if (!open)
+                {
+                    viewer.Dispose(); // Clean up Veldrid resources
+                    _thumbnailViewers.RemoveAt(i);
+                }
+            }
+
+
             // Other UI ---------------------------------------------------------
             _import.Submit(); // Always submit to handle popup logic
             SubmitPopups();
@@ -130,7 +142,9 @@ namespace GeoscientistToolkit.UI
             ImGui.DockBuilderDockWindow("Properties", right_top);
             ImGui.DockBuilderDockWindow("Tools",      right_bottom);
             ImGui.DockBuilderDockWindow("Log",        bottom);
-            // Center is left for viewers.
+            // Center is left for viewers and thumbnail panels.
+            ImGui.DockBuilderDockWindow("Thumbnails:*", center);
+
 
             ImGui.DockBuilderFinish(rootId);
 #else
@@ -161,7 +175,7 @@ namespace GeoscientistToolkit.UI
 
             if (ImGui.BeginMenu("File"))
             {
-                if (ImGui.MenuItem("New Project")) ProjectManager.Instance.NewProject();
+                if (ImGui.MenuItem("New Project")) OnNewProject();
                 if (ImGui.MenuItem("Import Data")) _import.Open();
                 ImGui.Separator();
                 if (ImGui.MenuItem("Exit")) Environment.Exit(0);
@@ -196,11 +210,48 @@ namespace GeoscientistToolkit.UI
         // ──────────────────────────────────────────────────────────────────────
         // Pop-ups & callbacks
         // ──────────────────────────────────────────────────────────────────────
+        
+        /// <summary>
+        /// Handles the logic for creating a new project and resetting the UI.
+        /// </summary>
+        private void OnNewProject()
+        {
+            // Notify the business layer to create a new project.
+            ProjectManager.Instance.NewProject();
+        
+            // Clear the currently selected dataset to update the PropertiesPanel.
+            _selectedDataset = null;
+        
+            // Dispose and remove all active dataset viewers.
+            _viewers.ForEach(v => v.Dispose());
+            _viewers.Clear();
+        
+            // Dispose and remove all active thumbnail viewers.
+            _thumbnailViewers.ForEach(v => v.Dispose());
+            _thumbnailViewers.Clear();
+        }
+
         private void OnDatasetSelected(Dataset ds)
         {
             _selectedDataset = ds;
-            if (_viewers.All(v => v.Dataset != ds))
-                _viewers.Add(new DatasetViewPanel(ds));
+
+            // FIX: Add logic to open the correct viewer based on the dataset type.
+            if (ds is DatasetGroup group)
+            {
+                // If a thumbnail viewer for this group isn't already open, create one.
+                if (_thumbnailViewers.All(v => v.Group != group))
+                {
+                    _thumbnailViewers.Add(new ThumbnailViewerPanel(group));
+                }
+            }
+            else
+            {
+                // For all other dataset types, open the standard DatasetViewPanel.
+                if (_viewers.All(v => v.Dataset != ds))
+                {
+                    _viewers.Add(new DatasetViewPanel(ds));
+                }
+            }
         }
 
         private void SubmitPopups()

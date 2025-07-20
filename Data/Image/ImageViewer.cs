@@ -1,9 +1,9 @@
+﻿
+
 ﻿// GeoscientistToolkit/Data/Image/ImageViewer.cs (Fixed mouse wheel zoom)
 using GeoscientistToolkit.UI.Interfaces;
 using GeoscientistToolkit.Util;
 using ImGuiNET;
-using SixLabors.ImageSharp;
-using SixLabors.ImageSharp.PixelFormats;
 using System.Globalization;
 using System.Numerics;
 using Veldrid;
@@ -77,6 +77,9 @@ namespace GeoscientistToolkit.Data.Image
             // Draw background
             dl.AddRectFilled(canvasPos, canvasPos + canvasSize, 0xFF202020);
 
+            // Set a clipping region to stop the image from drawing over other controls
+            dl.PushClipRect(canvasPos, canvasPos + canvasSize, true);
+
             // Calculate image display
             float aspectRatio = (float)_dataset.Width / _dataset.Height;
             Vector2 displaySize = new Vector2(canvasSize.X, canvasSize.X / aspectRatio);
@@ -121,6 +124,9 @@ namespace GeoscientistToolkit.Data.Image
                 DrawScaleBar(dl, canvasPos, canvasSize, zoom);
             }
 
+            // Pop the clipping region
+            dl.PopClipRect();
+
             // Draw scale bar properties window
             DrawScaleBarProperties();
         }
@@ -130,19 +136,16 @@ namespace GeoscientistToolkit.Data.Image
             _dataset.Load();
             if (_dataset.ImageData == null) return;
             
-            var image = _dataset.ImageData;
-
             Texture texture = VeldridManager.Factory.CreateTexture(TextureDescription.Texture2D(
-                (uint)image.Width, (uint)image.Height, 1, 1,
+                (uint)_dataset.Width, (uint)_dataset.Height, 1, 1,
                 PixelFormat.R8_G8_B8_A8_UNorm, TextureUsage.Sampled));
 
-            byte[] pixelData = new byte[4 * image.Width * image.Height];
-            image.CopyPixelDataTo(pixelData);
+            byte[] pixelData = _dataset.ImageData;
 
             VeldridManager.GraphicsDevice.UpdateTexture(
                 texture,
                 pixelData,
-                0, 0, 0, (uint)image.Width, (uint)image.Height, 1, 0, 0);
+                0, 0, 0, (uint)_dataset.Width, (uint)_dataset.Height, 1, 0, 0);
 
             _textureView = VeldridManager.Factory.CreateTextureView(texture);
             _textureId = VeldridManager.ImGuiController.GetOrCreateImGuiBinding(VeldridManager.Factory, _textureView);

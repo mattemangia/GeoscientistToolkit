@@ -7,8 +7,6 @@ using GeoscientistToolkit.Data.Image;
 using GeoscientistToolkit.UI.Utils;
 using GeoscientistToolkit.Util;
 using ImGuiNET;
-using SixLabors.ImageSharp;
-using SixLabors.ImageSharp.PixelFormats;
 
 namespace GeoscientistToolkit.UI
 {
@@ -17,10 +15,11 @@ namespace GeoscientistToolkit.UI
         public bool IsOpen;
         private readonly ImGuiFileDialog _fileDialog;
         private readonly ImGuiFileDialog _folderDialog;
+        private readonly ImageStackOrganizerDialog _organizerDialog;
 
         // State for the import options
         private int _selectedDatasetTypeIndex;
-        private readonly string[] _datasetTypeNames = { "Single Image", "CT Image Stack" };
+        private readonly string[] _datasetTypeNames = { "Single Image", "Generic Image Stack", "CT Image Stack" };
 
         // Single Image options
         private string _imagePath = "";
@@ -28,8 +27,11 @@ namespace GeoscientistToolkit.UI
         private float _pixelSize = 1.0f;
         private string _pixelUnit = "µm";
 
+        // Generic Image Stack options
+        private string _imageStackFolderPath = "";
+
         // CT Image Stack options
-        private string _folderPath = "";
+        private string _ctFolderPath = "";
 
         // Progress tracking
         private float _progress;
@@ -40,6 +42,7 @@ namespace GeoscientistToolkit.UI
         {
             _fileDialog = new ImGuiFileDialog("ImportFileDialog", FileDialogType.OpenFile, "Select Image File");
             _folderDialog = new ImGuiFileDialog("ImportFolderDialog", FileDialogType.OpenDirectory, "Select Image Folder");
+            _organizerDialog = new ImageStackOrganizerDialog();
         }
 
         public void Open()
@@ -58,13 +61,25 @@ namespace GeoscientistToolkit.UI
             
             if (_folderDialog.Submit())
             {
-                _folderPath = _folderDialog.SelectedPath;
+                if (_selectedDatasetTypeIndex == 1) // Generic Image Stack
+                {
+                    _imageStackFolderPath = _folderDialog.SelectedPath;
+                    // Open the organizer dialog
+                    _organizerDialog.Open(_imageStackFolderPath);
+                }
+                else if (_selectedDatasetTypeIndex == 2) // CT Image Stack
+                {
+                    _ctFolderPath = _folderDialog.SelectedPath;
+                }
             }
+            
+            // Handle the organizer dialog
+            _organizerDialog.Submit();
 
-            // Only render the import window if neither file dialog is open
-            if (IsOpen && !_fileDialog.IsOpen && !_folderDialog.IsOpen)
+            // Only render the import window if neither file dialog is open and organizer is not open
+            if (IsOpen && !_fileDialog.IsOpen && !_folderDialog.IsOpen && !_organizerDialog.IsOpen)
             {
-                ImGui.SetNextWindowSize(new Vector2(500, 380), ImGuiCond.FirstUseEver);
+                ImGui.SetNextWindowSize(new Vector2(500, 400), ImGuiCond.FirstUseEver);
                 var center = ImGui.GetMainViewport().GetCenter();
                 ImGui.SetNextWindowPos(center, ImGuiCond.FirstUseEver, new Vector2(0.5f, 0.5f));
                 
@@ -95,7 +110,7 @@ namespace GeoscientistToolkit.UI
                 ImGui.SameLine();
                 if (ImGui.Button("Browse...##Image"))
                 {
-                    _fileDialog.Open(null, new[] { ".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff" });
+                    _fileDialog.Open(null, GetSupportedExtensions());
                 }
 
                 ImGui.Checkbox("Specify Pixel Size", ref _specifyPixelSize);
@@ -110,11 +125,29 @@ namespace GeoscientistToolkit.UI
                     ImGui.Unindent();
                 }
             }
+            else if (_selectedDatasetTypeIndex == 1) // Generic Image Stack
+            {
+                ImGui.InputText("Image Folder", ref _imageStackFolderPath, 260, ImGuiInputTextFlags.ReadOnly);
+                ImGui.SameLine();
+                if (ImGui.Button("Browse...##Stack"))
+                {
+                    _folderDialog.Open(null, null);
+                }
+                
+                ImGui.TextWrapped("Select a folder containing images. You'll be able to organize them into groups in the next step.");
+                
+                if (!string.IsNullOrEmpty(_imageStackFolderPath))
+                {
+                    // Count images in folder
+                    int imageCount = CountImagesInFolder(_imageStackFolderPath);
+                    ImGui.TextDisabled($"Found {imageCount} images in folder");
+                }
+            }
             else // CT Image Stack
             {
-                ImGui.InputText("Image Folder", ref _folderPath, 260, ImGuiInputTextFlags.ReadOnly);
+                ImGui.InputText("Image Folder", ref _ctFolderPath, 260, ImGuiInputTextFlags.ReadOnly);
                 ImGui.SameLine();
-                if (ImGui.Button("Browse...##Folder"))
+                if (ImGui.Button("Browse...##CTFolder"))
                 {
                     _folderDialog.Open(null, null);
                 }
@@ -131,12 +164,23 @@ namespace GeoscientistToolkit.UI
             ImGui.SameLine();
 
             bool canImport = (_selectedDatasetTypeIndex == 0 && !string.IsNullOrEmpty(_imagePath)) ||
-                             (_selectedDatasetTypeIndex == 1 && !string.IsNullOrEmpty(_folderPath));
+                             (_selectedDatasetTypeIndex == 1 && !string.IsNullOrEmpty(_imageStackFolderPath)) ||
+                             (_selectedDatasetTypeIndex == 2 && !string.IsNullOrEmpty(_ctFolderPath));
 
             if (!canImport) ImGui.BeginDisabled();
-            if (ImGui.Button("Import", new Vector2(120, 0)))
+            
+            string buttonText = _selectedDatasetTypeIndex == 1 ? "Organize..." : "Import";
+            if (ImGui.Button(buttonText, new Vector2(120, 0)))
             {
-                StartImport();
+                if (_selectedDatasetTypeIndex == 1)
+                {
+                    // Open organizer for Generic Image Stack
+                    _organizerDialog.Open(_imageStackFolderPath);
+                }
+                else
+                {
+                    StartImport();
+                }
             }
             if (!canImport) ImGui.EndDisabled();
         }
@@ -174,7 +218,7 @@ namespace GeoscientistToolkit.UI
                 {
                     _progress = 0f;
                     _statusText = "Starting import...";
-                    Logger.Log(_statusText); // Assuming a static logger
+                    Logger.Log(_statusText);
 
                     if (_selectedDatasetTypeIndex == 0) // Single Image
                     {
@@ -182,28 +226,24 @@ namespace GeoscientistToolkit.UI
                         _statusText = $"Reading image file: {Path.GetFileName(_imagePath)}";
                         _progress = 0.25f;
 
-                        var image = SixLabors.ImageSharp.Image.Load<Rgba32>(_imagePath);
+                        var imageInfo = ImageLoader.LoadImageInfo(_imagePath);
                         _progress = 0.75f;
 
                         var dataset = new ImageDataset(fileName, _imagePath)
                         {
-                            Width = image.Width,
-                            Height = image.Height,
-                            BitDepth = image.PixelType.BitsPerPixel,
+                            Width = imageInfo.Width,
+                            Height = imageInfo.Height,
+                            BitDepth = imageInfo.BitsPerChannel * imageInfo.Channels,
                             PixelSize = _specifyPixelSize ? _pixelSize : 0,
                             Unit = _specifyPixelSize ? _pixelUnit : ""
                         };
-                        
-                        // We are NOT storing the image data in RAM. It will be loaded on-demand in the viewer.
-                        image.Dispose(); 
                         
                         ProjectManager.Instance.AddDataset(dataset);
                         _statusText = "Dataset added to project.";
                         _progress = 1.0f;
                     }
-                    else
+                    else if (_selectedDatasetTypeIndex == 2) // CT Stack
                     {
-                        // Logic for CT Stack import
                         throw new NotImplementedException("CT Stack import is not yet implemented.");
                     }
                 }
@@ -214,11 +254,30 @@ namespace GeoscientistToolkit.UI
                 }
             });
         }
+
+        private string[] GetSupportedExtensions()
+        {
+            return new[] { ".png", ".jpg", ".jpeg", ".bmp", ".tga", ".psd", ".gif", ".hdr", ".pic", ".pnm", ".ppm", ".pgm" };
+        }
+
+        private int CountImagesInFolder(string folderPath)
+        {
+            try
+            {
+                return Directory.GetFiles(folderPath)
+                    .Count(file => ImageLoader.IsSupportedImageFile(file));
+            }
+            catch
+            {
+                return 0;
+            }
+        }
         
         private void ResetState()
         {
             _imagePath = "";
-            _folderPath = "";
+            _imageStackFolderPath = "";
+            _ctFolderPath = "";
             _specifyPixelSize = false;
             _pixelSize = 1.0f;
             _pixelUnit = "µm";
