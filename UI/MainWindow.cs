@@ -22,6 +22,7 @@ namespace GeoscientistToolkit.UI
         private readonly LogPanel        _log        = new();
         private readonly ImportDataModal _import     = new();
         private readonly ToolsPanel      _tools      = new();
+        private readonly SystemInfoWindow _systemInfoWindow = new(); // ADDED
         
         // File Dialogs
         private readonly ImGuiFileDialog _loadProjectDialog = new("LoadProjectDlg", FileDialogType.OpenFile, "Load Project");
@@ -122,6 +123,7 @@ namespace GeoscientistToolkit.UI
             _import.Submit();
             SubmitFileDialogs();
             SubmitPopups();
+            _systemInfoWindow.Submit(); // ADDED
 
             ImGui.End();
         }
@@ -211,6 +213,12 @@ namespace GeoscientistToolkit.UI
             if (ImGui.BeginMenu("Help"))
             {
                 if (ImGui.MenuItem("About")) _showAboutPopup = true;
+                // --- ADDED ---
+                if (ImGui.MenuItem("System Info..."))
+                {
+                    _systemInfoWindow.Open(VeldridManager.GraphicsDevice);
+                }
+                // --- END ADDED ---
                 ImGui.EndMenu();
             }
 
@@ -347,6 +355,13 @@ namespace GeoscientistToolkit.UI
                 ImGui.TextWrapped("Import data via File → Import Data. Use the 🔲 button to pop-out panels.");
                 ImGui.Spacing();
                 if (ImGui.Button("Let's go!", new Vector2(100, 0))) ImGui.CloseCurrentPopup();
+
+                // Handle Enter/Escape to close
+                if (ImGui.IsKeyReleased(ImGuiKey.Enter) || ImGui.IsKeyReleased(ImGuiKey.KeypadEnter) || ImGui.IsKeyReleased(ImGuiKey.Escape))
+                {
+                    ImGui.CloseCurrentPopup();
+                }
+
                 ImGui.EndPopup();
             }
             
@@ -386,6 +401,22 @@ namespace GeoscientistToolkit.UI
                     _pendingAction = null;
                     ImGui.CloseCurrentPopup();
                 }
+
+                // Handle Enter for "Save" and Escape for "Cancel"
+                if (ImGui.IsKeyReleased(ImGuiKey.Enter) || ImGui.IsKeyReleased(ImGuiKey.KeypadEnter))
+                {
+                    OnSaveProject();
+                    _pendingAction?.Invoke();
+                    _pendingAction = null;
+                    ImGui.CloseCurrentPopup();
+                }
+                
+                if (ImGui.IsKeyReleased(ImGuiKey.Escape))
+                {
+                    _pendingAction = null;
+                    ImGui.CloseCurrentPopup();
+                }
+
                 ImGui.EndPopup();
             }
 
@@ -407,6 +438,14 @@ namespace GeoscientistToolkit.UI
                     _showAboutPopup = false;
                     ImGui.CloseCurrentPopup();
                 }
+
+                // Handle Enter/Escape to close
+                if (ImGui.IsKeyReleased(ImGuiKey.Enter) || ImGui.IsKeyReleased(ImGuiKey.KeypadEnter) || ImGui.IsKeyReleased(ImGuiKey.Escape))
+                {
+                     _showAboutPopup = false;
+                    ImGui.CloseCurrentPopup();
+                }
+
                 ImGui.EndPopup();
             }
         }

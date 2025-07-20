@@ -24,6 +24,8 @@
         <PackageReference Include="sdl2" Version="2.0.5" />
       
         <PackageReference Include="StbImageSharp" Version="2.30.15" />
+      
+        <PackageReference Include="System.Management" Version="10.0.0-preview.6.25358.103" />
         <PackageReference Include="TinyDialogsNet" Version="1.0.2" />
         <PackageReference Include="Veldrid" Version="4.9.0" />
         <PackageReference Include="Veldrid.ImGui" Version="5.72.0" />
