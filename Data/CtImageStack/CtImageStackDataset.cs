@@ -1,7 +1,7 @@
 ﻿// GeoscientistToolkit/Data/CtImageStack/CtImageStackDataset.cs
 namespace GeoscientistToolkit.Data.CtImageStack
 {
-    public class CtImageStackDataset : Dataset
+    public class CtImageStackDataset : Dataset, ISerializableDataset
     {
         // Dimensions
         public int Width { get; set; }
@@ -50,6 +50,20 @@ namespace GeoscientistToolkit.Data.CtImageStack
         public override void Unload()
         {
             // Clean up any cached data
+        }
+        
+        public object ToSerializableObject()
+        {
+            return new CtImageStackDatasetDTO
+            {
+                TypeName = nameof(CtImageStackDataset),
+                Name = this.Name,
+                FilePath = this.FilePath,
+                PixelSize = this.PixelSize,
+                SliceThickness = this.SliceThickness,
+                Unit = this.Unit,
+                BinningSize = this.BinningSize
+            };
         }
     }
 }

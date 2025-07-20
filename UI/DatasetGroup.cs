@@ -4,7 +4,7 @@ using System.Linq;
 
 namespace GeoscientistToolkit.Data
 {
-    public class DatasetGroup : Dataset
+    public class DatasetGroup : Dataset, ISerializableDataset
     {
         public List<Dataset> Datasets { get; private set; }
         
@@ -48,6 +48,26 @@ namespace GeoscientistToolkit.Data
         public bool Contains(Dataset dataset)
         {
             return Datasets.Contains(dataset);
+        }
+
+        public object ToSerializableObject()
+        {
+            var dto = new DatasetGroupDTO
+            {
+                TypeName = nameof(DatasetGroup),
+                Name = this.Name,
+                FilePath = this.FilePath
+            };
+
+            foreach (var dataset in Datasets)
+            {
+                if (dataset is ISerializableDataset serializable)
+                {
+                    dto.Datasets.Add((DatasetDTO)serializable.ToSerializableObject());
+                }
+            }
+
+            return dto;
         }
     }
 }

@@ -130,10 +130,21 @@ namespace GeoscientistToolkit.UI
             
             bool isSelected = _selectedDatasets.Contains(dataset);
             
+            // Change color if dataset is missing
+            if (dataset.IsMissing)
+            {
+                ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(1.0f, 0.4f, 0.4f, 1.0f));
+            }
+            
             // Handle selection
             if (ImGui.Selectable(dataset.Name, isSelected))
             {
                 HandleDatasetSelection(dataset);
+            }
+            
+            if (dataset.IsMissing)
+            {
+                ImGui.PopStyleColor();
             }
             
             // Show tooltip
@@ -176,6 +187,12 @@ namespace GeoscientistToolkit.UI
         
         private void HandleDatasetSelection(Dataset dataset)
         {
+            if (dataset.IsMissing)
+            {
+                // Optionally prevent interaction with missing datasets
+                return;
+            }
+
             bool ctrlHeld = ImGui.GetIO().KeyCtrl;
             bool shiftHeld = ImGui.GetIO().KeyShift;
             
@@ -200,7 +217,8 @@ namespace GeoscientistToolkit.UI
                     
                     for (int i = minIdx; i <= maxIdx; i++)
                     {
-                        _selectedDatasets.Add(_orderedDatasets[i]);
+                        if (!_orderedDatasets[i].IsMissing) // Don't select missing items in range
+                            _selectedDatasets.Add(_orderedDatasets[i]);
                     }
                 }
             }
@@ -218,6 +236,10 @@ namespace GeoscientistToolkit.UI
         private void ShowDatasetTooltip(Dataset dataset)
         {
             ImGui.BeginTooltip();
+            if (dataset.IsMissing)
+            {
+                ImGui.TextColored(new Vector4(1.0f, 0.4f, 0.4f, 1.0f), "Source file or directory not found!");
+            }
             ImGui.TextUnformatted($"Name: {dataset.Name}");
             ImGui.TextUnformatted($"Type: {dataset.Type}");
             ImGui.TextUnformatted($"Path: {dataset.FilePath}");
@@ -244,7 +266,7 @@ namespace GeoscientistToolkit.UI
         private void DrawContextMenu(Dataset dataset)
         {
             // View option
-            if (ImGui.MenuItem("View", null, false, !(dataset is DatasetGroup)))
+            if (ImGui.MenuItem("View", null, false, !(dataset is DatasetGroup) && !dataset.IsMissing))
             {
                 _onDatasetSelected?.Invoke(dataset);
             }

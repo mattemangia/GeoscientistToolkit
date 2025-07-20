@@ -22,10 +22,47 @@ namespace GeoscientistToolkit.Data.Image
 
             if (ImGui.CollapsingHeader("Histogram", ImGuiTreeNodeFlags.DefaultOpen))
             {
-                // Placeholder for histogram plot
-                var region = ImGui.GetContentRegionAvail();
-                ImGui.Text("Histogram plot (not implemented)");
-                ImGui.Dummy(new Vector2(region.X, 100)); // Reserve space
+                // Check if histogram data is available. Loading is now automatic on selection.
+                if (image.HistogramLuminance == null)
+                {
+                    ImGui.TextDisabled("Histogram data not available.");
+                    return;
+                }
+
+                var plotSize = new Vector2(ImGui.GetContentRegionAvail().X, 100);
+
+                if (ImGui.BeginTabBar("HistogramTabs"))
+                {
+                    if (ImGui.BeginTabItem("Luminance"))
+                    {
+                        ImGui.PushStyleColor(ImGuiCol.PlotHistogram, new Vector4(0.9f, 0.9f, 0.9f, 1.0f));
+                        ImGui.PlotHistogram("##Luminance", ref image.HistogramLuminance[0], image.HistogramLuminance.Length, 0, null, 0.0f, float.MaxValue, plotSize);
+                        ImGui.PopStyleColor();
+                        ImGui.EndTabItem();
+                    }
+                    if (ImGui.BeginTabItem("Red"))
+                    {
+                        ImGui.PushStyleColor(ImGuiCol.PlotHistogram, new Vector4(1.0f, 0.3f, 0.3f, 1.0f));
+                        ImGui.PlotHistogram("##Red", ref image.HistogramR[0], image.HistogramR.Length, 0, null, 0.0f, float.MaxValue, plotSize);
+                        ImGui.PopStyleColor();
+                        ImGui.EndTabItem();
+                    }
+                    if (ImGui.BeginTabItem("Green"))
+                    {
+                        ImGui.PushStyleColor(ImGuiCol.PlotHistogram, new Vector4(0.3f, 1.0f, 0.3f, 1.0f));
+                        ImGui.PlotHistogram("##Green", ref image.HistogramG[0], image.HistogramG.Length, 0, null, 0.0f, float.MaxValue, plotSize);
+                        ImGui.PopStyleColor();
+                        ImGui.EndTabItem();
+                    }
+                    if (ImGui.BeginTabItem("Blue"))
+                    {
+                        ImGui.PushStyleColor(ImGuiCol.PlotHistogram, new Vector4(0.3f, 0.3f, 1.0f, 1.0f));
+                        ImGui.PlotHistogram("##Blue", ref image.HistogramB[0], image.HistogramB.Length, 0, null, 0.0f, float.MaxValue, plotSize);
+                        ImGui.PopStyleColor();
+                        ImGui.EndTabItem();
+                    }
+                    ImGui.EndTabBar();
+                }
             }
         }
     }

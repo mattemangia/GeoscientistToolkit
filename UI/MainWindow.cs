@@ -6,6 +6,7 @@ using System.Numerics;
 using GeoscientistToolkit.Business;
 using GeoscientistToolkit.Data;
 using GeoscientistToolkit.Data.Image; // Required for DatasetGroup
+using GeoscientistToolkit.UI.Utils; // Required for ImGuiFileDialog
 using GeoscientistToolkit.Util; // Required for VeldridManager
 using ImGuiNET;
 
@@ -21,9 +22,13 @@ namespace GeoscientistToolkit.UI
         private readonly LogPanel        _log        = new();
         private readonly ImportDataModal _import     = new();
         private readonly ToolsPanel      _tools      = new();
+        
+        // File Dialogs
+        private readonly ImGuiFileDialog _loadProjectDialog = new("LoadProjectDlg", FileDialogType.OpenFile, "Load Project");
+        private readonly ImGuiFileDialog _saveProjectDialog = new("SaveProjectDlg", FileDialogType.OpenFile, "Save Project As");
+
 
         private readonly List<DatasetViewPanel> _viewers = new();
-        // FIX: Add a separate list to manage ThumbnailViewerPanel instances.
         private readonly List<ThumbnailViewerPanel> _thumbnailViewers = new();
 
 
@@ -33,6 +38,11 @@ namespace GeoscientistToolkit.UI
         private bool _showLog        = true;
         private bool _showTools      = true;
         private bool _showWelcome    = true;
+        private bool _saveAsMode = false;
+        private bool _showAboutPopup = false; 
+        private bool _showUnsavedChangesPopup = false;
+        private Action _pendingAction; // Stores the action to run after the unsaved changes dialog.
+
 
         private Dataset? _selectedDataset;
 
@@ -41,7 +51,6 @@ namespace GeoscientistToolkit.UI
         // ──────────────────────────────────────────────────────────────────────
         public void SubmitUI()
         {
-            // FIX: Process actions queued from other threads. This must be called once per frame.
             VeldridManager.ProcessMainThreadActions();
 
             var vp = ImGui.GetMainViewport();
@@ -66,10 +75,8 @@ namespace GeoscientistToolkit.UI
             uint dockspaceId = ImGui.GetID("RootDockSpace");
             ImGui.DockSpace(dockspaceId, Vector2.Zero, ImGuiDockNodeFlags.None);
 
-            // On first run (or after View ➜ Reset Layout) build/rebuild the dock tree.
             if (!_layoutBuilt)
             {
-                // Ensure panels start visible after a reset.
                 _showDatasets   = true;
                 _showProperties = true;
                 _showLog        = true;
@@ -79,44 +86,44 @@ namespace GeoscientistToolkit.UI
                 _layoutBuilt = true;
             }
 
-            // Panels -----------------------------------------------------------
+            // Panels
             if (_showDatasets)   _datasets.Submit(ref _showDatasets, OnDatasetSelected, () => _import.Open());
             if (_showProperties) _properties.Submit(ref _showProperties, _selectedDataset);
-            if (_showLog)        _log.Submit(ref _showLog);
+            if (_showLog) _log.Submit(ref _showLog);
             if (_showTools)      _tools.Submit(ref _showTools, _selectedDataset);
 
 
-            // Viewers ----------------------------------------------------------
+            // Viewers
             for (int i = _viewers.Count - 1; i >= 0; --i)
             {
                 bool open = true;
                 _viewers[i].Submit(ref open);
                 if (!open)
                 {
-                    _viewers[i].Dispose(); // Clean up Veldrid resources
+                    _viewers[i].Dispose();
                     _viewers.RemoveAt(i);
                 }
             }
 
-            // FIX: Add logic to submit and manage ThumbnailViewerPanel instances.
             for (int i = _thumbnailViewers.Count - 1; i >= 0; --i)
             {
                 bool open = true;
                 var viewer = _thumbnailViewers[i];
-                viewer.Submit(ref open, OnDatasetSelected); // Pass the selection handler back
+                viewer.Submit(ref open, OnDatasetSelected);
                 if (!open)
                 {
-                    viewer.Dispose(); // Clean up Veldrid resources
+                    viewer.Dispose();
                     _thumbnailViewers.RemoveAt(i);
                 }
             }
 
 
-            // Other UI ---------------------------------------------------------
-            _import.Submit(); // Always submit to handle popup logic
+            // Other UI
+            _import.Submit();
+            SubmitFileDialogs();
             SubmitPopups();
 
-            ImGui.End(); // root window
+            ImGui.End();
         }
 
         // ──────────────────────────────────────────────────────────────────────
@@ -142,7 +149,6 @@ namespace GeoscientistToolkit.UI
             ImGui.DockBuilderDockWindow("Properties", right_top);
             ImGui.DockBuilderDockWindow("Tools",      right_bottom);
             ImGui.DockBuilderDockWindow("Log",        bottom);
-            // Center is left for viewers and thumbnail panels.
             ImGui.DockBuilderDockWindow("Thumbnails:*", center);
 
 
@@ -175,10 +181,14 @@ namespace GeoscientistToolkit.UI
 
             if (ImGui.BeginMenu("File"))
             {
-                if (ImGui.MenuItem("New Project")) OnNewProject();
-                if (ImGui.MenuItem("Import Data")) _import.Open();
+                if (ImGui.MenuItem("New Project")) TryOnNewProject();
+                if (ImGui.MenuItem("Load Project...")) TryOnLoadProject();
+                if (ImGui.MenuItem("Save Project")) OnSaveProject();
+                if (ImGui.MenuItem("Save Project As...")) OnSaveProjectAs();
                 ImGui.Separator();
-                if (ImGui.MenuItem("Exit")) Environment.Exit(0);
+                if (ImGui.MenuItem("Import Data...")) _import.Open();
+                ImGui.Separator();
+                if (ImGui.MenuItem("Exit")) TryExit();
                 ImGui.EndMenu();
             }
             
@@ -200,7 +210,7 @@ namespace GeoscientistToolkit.UI
 
             if (ImGui.BeginMenu("Help"))
             {
-                if (ImGui.MenuItem("About")) ImGui.OpenPopup("About GeoscientistToolkit");
+                if (ImGui.MenuItem("About")) _showAboutPopup = true;
                 ImGui.EndMenu();
             }
 
@@ -210,35 +220,79 @@ namespace GeoscientistToolkit.UI
         // ──────────────────────────────────────────────────────────────────────
         // Pop-ups & callbacks
         // ──────────────────────────────────────────────────────────────────────
-        
-        /// <summary>
-        /// Handles the logic for creating a new project and resetting the UI.
-        /// </summary>
+        private void TryOnNewProject()
+        {
+            CheckForUnsavedChanges(OnNewProject);
+        }
+
         private void OnNewProject()
         {
-            // Notify the business layer to create a new project.
             ProjectManager.Instance.NewProject();
-        
-            // Clear the currently selected dataset to update the PropertiesPanel.
             _selectedDataset = null;
-        
-            // Dispose and remove all active dataset viewers.
             _viewers.ForEach(v => v.Dispose());
             _viewers.Clear();
-        
-            // Dispose and remove all active thumbnail viewers.
             _thumbnailViewers.ForEach(v => v.Dispose());
             _thumbnailViewers.Clear();
+        }
+        
+        private void TryOnLoadProject()
+        {
+            CheckForUnsavedChanges(() => _loadProjectDialog.Open(null, new [] { ".gtp" }));
+        }
+
+        private void OnLoadProject(string path)
+        {
+            ProjectManager.Instance.LoadProject(path);
+            _viewers.ForEach(v => v.Dispose());
+            _viewers.Clear();
+            _thumbnailViewers.ForEach(v => v.Dispose());
+            _thumbnailViewers.Clear();
+            _selectedDataset = null;
+        }
+
+        private void OnSaveProject()
+        {
+            if (string.IsNullOrEmpty(ProjectManager.Instance.ProjectPath))
+            {
+                OnSaveProjectAs();
+            }
+            else
+            {
+                ProjectManager.Instance.SaveProject();
+            }
+        }
+
+        private void OnSaveProjectAs()
+        {
+            _saveAsMode = true;
+            _saveProjectDialog.Open(null, new [] { ".gtp" });
+        }
+        
+        private void TryExit()
+        {
+            CheckForUnsavedChanges(() => Environment.Exit(0));
+        }
+
+        private void CheckForUnsavedChanges(Action actionToPerform)
+        {
+            if (ProjectManager.Instance.HasUnsavedChanges)
+            {
+                _pendingAction = actionToPerform;
+                _showUnsavedChangesPopup = true;
+            }
+            else
+            {
+                actionToPerform(); // No unsaved changes, proceed immediately.
+            }
         }
 
         private void OnDatasetSelected(Dataset ds)
         {
             _selectedDataset = ds;
+            _selectedDataset?.Load();
 
-            // FIX: Add logic to open the correct viewer based on the dataset type.
             if (ds is DatasetGroup group)
             {
-                // If a thumbnail viewer for this group isn't already open, create one.
                 if (_thumbnailViewers.All(v => v.Group != group))
                 {
                     _thumbnailViewers.Add(new ThumbnailViewerPanel(group));
@@ -246,10 +300,31 @@ namespace GeoscientistToolkit.UI
             }
             else
             {
-                // For all other dataset types, open the standard DatasetViewPanel.
                 if (_viewers.All(v => v.Dataset != ds))
                 {
                     _viewers.Add(new DatasetViewPanel(ds));
+                }
+            }
+        }
+        
+        private void SubmitFileDialogs()
+        {
+            if (_loadProjectDialog.Submit())
+            {
+                OnLoadProject(_loadProjectDialog.SelectedPath);
+            }
+
+            if (_saveProjectDialog.Submit())
+            {
+                if (_saveAsMode)
+                {
+                    string path = _saveProjectDialog.SelectedPath;
+                    if (!path.EndsWith(".gtp", StringComparison.OrdinalIgnoreCase))
+                    {
+                        path += ".gtp";
+                    }
+                    ProjectManager.Instance.SaveProject(path);
+                    _saveAsMode = false;
                 }
             }
         }
@@ -264,7 +339,7 @@ namespace GeoscientistToolkit.UI
             }
 
             bool welcome = true;
-            ImGui.SetNextWindowPos(ImGui.GetMainViewport().GetCenter(), ImGuiCond.Appearing, new Vector2(0.5f));
+            ImGui.SetNextWindowPos(ImGui.GetMainViewport().GetCenter(), ImGuiCond.Appearing, new Vector2(0.5f, 0.5f));
             if (ImGui.BeginPopupModal("Welcome!", ref welcome, ImGuiWindowFlags.AlwaysAutoResize))
             {
                 ImGui.Text("Welcome to GeoscientistToolkit!");
@@ -274,15 +349,64 @@ namespace GeoscientistToolkit.UI
                 if (ImGui.Button("Let's go!", new Vector2(100, 0))) ImGui.CloseCurrentPopup();
                 ImGui.EndPopup();
             }
+            
+            // Unsaved changes popup
+            if (_showUnsavedChangesPopup)
+            {
+                ImGui.OpenPopup("Unsaved Changes");
+                _showUnsavedChangesPopup = false;
+            }
 
-            bool about = true;
-            if (ImGui.BeginPopupModal("About GeoscientistToolkit", ref about, ImGuiWindowFlags.AlwaysAutoResize))
+            ImGui.SetNextWindowPos(ImGui.GetMainViewport().GetCenter(), ImGuiCond.Appearing, new Vector2(0.5f, 0.5f));
+            if (ImGui.BeginPopupModal("Unsaved Changes", ImGuiWindowFlags.AlwaysAutoResize))
+            {
+                ImGui.Text("Your project has unsaved changes. Do you want to save them?");
+                ImGui.Spacing();
+                
+                if (ImGui.Button("Save", new Vector2(100, 0)))
+                {
+                    OnSaveProject();
+                    _pendingAction?.Invoke();
+                    _pendingAction = null;
+                    ImGui.CloseCurrentPopup();
+                }
+
+                ImGui.SameLine();
+                if (ImGui.Button("Don't Save", new Vector2(100, 0)))
+                {
+                    ProjectManager.Instance.HasUnsavedChanges = false; // Mark as resolved
+                    _pendingAction?.Invoke();
+                    _pendingAction = null;
+                    ImGui.CloseCurrentPopup();
+                }
+
+                ImGui.SameLine();
+                if (ImGui.Button("Cancel", new Vector2(100, 0)))
+                {
+                    _pendingAction = null;
+                    ImGui.CloseCurrentPopup();
+                }
+                ImGui.EndPopup();
+            }
+
+            // About popup
+            if (_showAboutPopup)
+            {
+                ImGui.OpenPopup("About GeoscientistToolkit");
+            }
+            
+            ImGui.SetNextWindowPos(ImGui.GetMainViewport().GetCenter(), ImGuiCond.Appearing, new Vector2(0.5f, 0.5f));
+            if (ImGui.BeginPopupModal("About GeoscientistToolkit", ref _showAboutPopup, ImGuiWindowFlags.AlwaysAutoResize))
             {
                 ImGui.Text("GeoscientistToolkit – Preview Build");
                 ImGui.Separator();
-                ImGui.TextWrapped("Open-source toolkit for geoscience data visualisation, built with Veldrid + ImGui.NET.");
+                ImGui.TextWrapped("Open-source toolkit for geoscience data visualisation and analysis, built with Veldrid + ImGui.NET.");
                 ImGui.Spacing();
-                if (ImGui.Button("OK", new Vector2(100, 0))) ImGui.CloseCurrentPopup();
+                if (ImGui.Button("OK", new Vector2(100, 0)))
+                {
+                    _showAboutPopup = false;
+                    ImGui.CloseCurrentPopup();
+                }
                 ImGui.EndPopup();
             }
         }

@@ -181,10 +181,14 @@ namespace GeoscientistToolkit
         {
             ImGui.SetCurrentContext(_context);
             
-            if (_frameBegun) 
-            {
-                ImGui.Render();
-            }
+            // FIX: This call was incorrect. ImGui.Render() should only be called once per frame,
+            // after all the UI has been submitted. The call in the Render() method is the correct one.
+            // Removing this fixes the state corruption that caused popups to fail.
+            //
+            // if (_frameBegun) 
+            // {
+            //     ImGui.Render();
+            // }
 
             SetPerFrameImGuiData(dt);
             UpdateInputs(snap);

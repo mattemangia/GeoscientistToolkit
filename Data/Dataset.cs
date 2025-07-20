@@ -20,6 +20,7 @@ namespace GeoscientistToolkit.Data
         public DateTime DateCreated { get; set; }
         public DateTime DateModified { get; set; }
         public Dictionary<string, object> Metadata { get; set; } = new Dictionary<string, object>();
+        public bool IsMissing { get; set; } = false; // To mark if the source file is not found on load
 
         protected Dataset(string name, string filePath)
         {
