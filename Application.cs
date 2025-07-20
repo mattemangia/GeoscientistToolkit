@@ -124,7 +124,13 @@ namespace GeoscientistToolkit
                     HandleDpiChange();
                 }
 
+                // Make sure we're using the main window's ImGui context
+                ImGui.SetCurrentContext(_imGuiController.Context);
+
                 _imGuiController.Update(1f / 60f, snapshot);
+
+                // Ensure context is still set after update
+                ImGui.SetCurrentContext(_imGuiController.Context);
 
                 _mainWindow.SubmitUI();
 
@@ -139,8 +145,13 @@ namespace GeoscientistToolkit
 
                 if ((io.ConfigFlags & ImGuiConfigFlags.ViewportsEnable) != 0)
                 {
+                    // Ensure main context before platform window update
+                    ImGui.SetCurrentContext(_imGuiController.Context);
                     ImGui.UpdatePlatformWindows();
                 }
+
+                // Process all pop-out windows AFTER main window rendering
+                BasePanel.ProcessAllPopOutWindows();
             }
 
             // Cleanup

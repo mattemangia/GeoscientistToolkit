@@ -1,5 +1,6 @@
 ﻿// GeoscientistToolkit/UI/BasePanel.cs
 using System;
+using System.Collections.Generic;
 using System.Numerics;
 using ImGuiNET;
 using Veldrid;
@@ -22,11 +23,39 @@ namespace GeoscientistToolkit.UI
         
         private Vector2 _lastMainWindowPos;
         private Vector2 _lastMainWindowSize;
+        private static List<BasePanel> _allPanels = new List<BasePanel>();
+        private bool _popOutWindowWantsClosed = false;
+        private IntPtr _mainContext;
 
         protected BasePanel(string title, Vector2 defaultSize)
         {
             _title = title;
             _defaultSize = defaultSize;
+            _allPanels.Add(this);
+            // Store the main window's ImGui context
+            _mainContext = VeldridManager.ImGuiController.Context;
+        }
+
+        /// <summary>
+        /// Process all popped out windows
+        /// </summary>
+        public static void ProcessAllPopOutWindows()
+        {
+            foreach (var panel in _allPanels)
+            {
+                if (panel._isPoppedOut && panel._popOutWindow != null)
+                {
+                    panel._popOutWindow.ProcessFrame();
+                    
+                    // Check if window should be closed after processing
+                    if (panel._popOutWindowWantsClosed)
+                    {
+                        panel._popOutWindowWantsClosed = false;
+                        panel._isOpen = false;
+                        panel.PopIn();
+                    }
+                }
+            }
         }
 
         /// <summary>
@@ -34,6 +63,8 @@ namespace GeoscientistToolkit.UI
         /// </summary>
         public void Submit(ref bool pOpen)
         {
+            _isOpen = pOpen;
+            
             if (_isPoppedOut && _popOutWindow != null)
             {
                 // If window was closed externally, clean up
@@ -45,34 +76,17 @@ namespace GeoscientistToolkit.UI
                     return;
                 }
                 
-                // Use a local copy for the lambda
-                bool localOpen = pOpen;
-                
-                // Render in the pop-out window
-                _popOutWindow.Render(() => {
-                    ImGui.SetNextWindowPos(Vector2.Zero);
-                    ImGui.SetNextWindowSize(ImGui.GetIO().DisplaySize);
-                    
-                    if (ImGui.Begin(_title + "##PopOut", ref localOpen, 
-                        ImGuiWindowFlags.NoTitleBar | ImGuiWindowFlags.NoResize | 
-                        ImGuiWindowFlags.NoMove | ImGuiWindowFlags.NoCollapse))
-                    {
-                        DrawPopOutButton();
-                        DrawContent();
-                    }
-                    ImGui.End();
-                });
-                
-                // Update the ref parameter from the local copy
-                pOpen = localOpen;
-                
-                if (!pOpen)
-                {
-                    PopIn();
-                }
+                // Don't draw anything in the main window when popped out
+                // The drawing happens in the pop-out window's ProcessFrame
+                return;
             }
-            else
+            
+            // Only draw in main window if not popped out
+            if (!_isPoppedOut)
             {
+                // Ensure we're using the main context
+                ImGui.SetCurrentContext(_mainContext);
+                
                 // Render in the main window
                 ImGui.SetNextWindowSize(_defaultSize, ImGuiCond.FirstUseEver);
                 
@@ -85,9 +99,9 @@ namespace GeoscientistToolkit.UI
                     DrawContent();
                 }
                 ImGui.End();
+                
+                _isOpen = pOpen;
             }
-            
-            _isOpen = pOpen;
         }
 
         /// <summary>
@@ -100,9 +114,6 @@ namespace GeoscientistToolkit.UI
         /// </summary>
         protected virtual void DrawPopOutButton()
         {
-            // Save current cursor position
-            var originalCursorPos = ImGui.GetCursorPos();
-            
             // Draw the button at the beginning of the content area
             ImGui.PushStyleColor(ImGuiCol.Button, new Vector4(0.2f, 0.2f, 0.2f, 0.8f));
             ImGui.PushStyleColor(ImGuiCol.ButtonHovered, new Vector4(0.26f, 0.59f, 0.98f, 0.8f));
@@ -129,7 +140,34 @@ namespace GeoscientistToolkit.UI
             }
             
             // Add some spacing after the button
+            ImGui.Separator();
             ImGui.Spacing();
+        }
+
+        /// <summary>
+        /// Draws content in the pop-out window (called from PopOutWindow with correct context)
+        /// </summary>
+        private void DrawInPopOutWindow()
+        {
+            ImGui.SetNextWindowPos(Vector2.Zero);
+            ImGui.SetNextWindowSize(ImGui.GetIO().DisplaySize);
+            
+            // Use local variable to avoid ref in lambda
+            bool localOpen = true;
+            if (ImGui.Begin(_title + "##PopOut", ref localOpen, 
+                ImGuiWindowFlags.NoTitleBar | ImGuiWindowFlags.NoResize | 
+                ImGuiWindowFlags.NoMove | ImGuiWindowFlags.NoCollapse))
+            {
+                DrawPopOutButton();
+                DrawContent();
+            }
+            ImGui.End();
+            
+            // Set flag if window wants to close
+            if (!localOpen)
+            {
+                _popOutWindowWantsClosed = true;
+            }
         }
 
         /// <summary>
@@ -139,10 +177,10 @@ namespace GeoscientistToolkit.UI
         {
             if (_isPoppedOut) return;
             
-            // Calculate position for new window
+            // Calculate position for new window (offset a bit to make it obvious)
             var mainVp = ImGui.GetMainViewport();
-            var newX = (int)(_lastMainWindowPos.X + mainVp.Pos.X);
-            var newY = (int)(_lastMainWindowPos.Y + mainVp.Pos.Y);
+            var newX = (int)(_lastMainWindowPos.X + mainVp.Pos.X + 20);
+            var newY = (int)(_lastMainWindowPos.Y + mainVp.Pos.Y + 20);
             
             // Create the pop-out window
             _popOutWindow = new PopOutWindow(
@@ -152,6 +190,9 @@ namespace GeoscientistToolkit.UI
                 (int)_lastMainWindowSize.X, 
                 (int)_lastMainWindowSize.Y
             );
+            
+            // Set the draw callback - use method reference instead of lambda
+            _popOutWindow.SetDrawCallback(DrawInPopOutWindow);
             
             _isPoppedOut = true;
         }
@@ -170,6 +211,7 @@ namespace GeoscientistToolkit.UI
 
         public virtual void Dispose()
         {
+            _allPanels.Remove(this);
             _popOutWindow?.Dispose();
         }
     }
