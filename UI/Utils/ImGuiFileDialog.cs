@@ -1,6 +1,7 @@
 ﻿// GeoscientistToolkit/UI/Utils/ImGuiFileDialog.cs
 using ImGuiNET;
 using System.Numerics;
+using GeoscientistToolkit.Util;
 
 namespace GeoscientistToolkit.UI.Utils
 {
@@ -195,7 +196,9 @@ namespace GeoscientistToolkit.UI.Utils
         {
             if (_dialogType == FileDialogType.OpenDirectory)
             {
+                
                 SelectedPath = CurrentDirectory;
+                Logger.Log("Opening directory "+CurrentDirectory);
                 if (Directory.Exists(SelectedPath))
                 {
                     IsOpen = false;
@@ -208,6 +211,7 @@ namespace GeoscientistToolkit.UI.Utils
                 if (!string.IsNullOrEmpty(_selectedFileName))
                 {
                     SelectedPath = Path.Combine(CurrentDirectory, _selectedFileName);
+                    Logger.Log("Opening file "+SelectedPath);
                     if (File.Exists(SelectedPath))
                     {
                         IsOpen = false;

@@ -1,14 +1,14 @@
-// GeoscientistToolkit/UI/MainWindow.cs — safeguarded + correct multi-panel docking + settings integration
+// GeoscientistToolkit/UI/MainWindow.cs — Fixed to properly handle dataset removal
 using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Numerics;
 using GeoscientistToolkit.Business;
 using GeoscientistToolkit.Data;
-using GeoscientistToolkit.Data.Image; // Required for DatasetGroup
-using GeoscientistToolkit.UI.Utils; // Required for ImGuiFileDialog
-using GeoscientistToolkit.Util; // Required for VeldridManager
-using GeoscientistToolkit.Settings; // Required for Settings integration
+using GeoscientistToolkit.Data.Image;
+using GeoscientistToolkit.UI.Utils;
+using GeoscientistToolkit.Util;
+using GeoscientistToolkit.Settings;
 using ImGuiNET;
 
 namespace GeoscientistToolkit.UI
@@ -23,17 +23,15 @@ namespace GeoscientistToolkit.UI
         private readonly LogPanel        _log        = new();
         private readonly ImportDataModal _import     = new();
         private readonly ToolsPanel      _tools      = new();
-        private readonly SystemInfoWindow _systemInfoWindow = new(); // ADDED
-        private readonly SettingsWindow _settingsWindow = new(); // ADDED for Settings
+        private readonly SystemInfoWindow _systemInfoWindow = new();
+        private readonly SettingsWindow _settingsWindow = new();
         
         // File Dialogs
         private readonly ImGuiFileDialog _loadProjectDialog = new("LoadProjectDlg", FileDialogType.OpenFile, "Load Project");
         private readonly ImGuiFileDialog _saveProjectDialog = new("SaveProjectDlg", FileDialogType.OpenFile, "Save Project As");
 
-
         private readonly List<DatasetViewPanel> _viewers = new();
         private readonly List<ThumbnailViewerPanel> _thumbnailViewers = new();
-
 
         private bool _layoutBuilt;
         private bool _showDatasets   = true;
@@ -44,14 +42,54 @@ namespace GeoscientistToolkit.UI
         private bool _saveAsMode = false;
         private bool _showAboutPopup = false; 
         private bool _showUnsavedChangesPopup = false;
-        private Action _pendingAction; // Stores the action to run after the unsaved changes dialog.
+        private Action _pendingAction;
 
         // Timers for auto-save and backup
         private float _autoSaveTimer = 0f;
         private float _autoBackupTimer = 0f;
 
-
         private Dataset? _selectedDataset;
+
+        public MainWindow()
+        {
+            // Subscribe to dataset removal events
+            ProjectManager.Instance.DatasetRemoved += OnDatasetRemoved;
+        }
+
+        // ──────────────────────────────────────────────────────────────────────
+        // Dataset removal handler
+        // ──────────────────────────────────────────────────────────────────────
+        private void OnDatasetRemoved(Dataset dataset)
+        {
+            // Close any viewers showing this dataset
+            for (int i = _viewers.Count - 1; i >= 0; i--)
+            {
+                if (_viewers[i].Dataset == dataset)
+                {
+                    _viewers[i].Dispose();
+                    _viewers.RemoveAt(i);
+                }
+            }
+            
+            // Close thumbnail viewers if the dataset is a group
+            if (dataset is DatasetGroup group)
+            {
+                for (int i = _thumbnailViewers.Count - 1; i >= 0; i--)
+                {
+                    if (_thumbnailViewers[i].Group == group)
+                    {
+                        _thumbnailViewers[i].Dispose();
+                        _thumbnailViewers.RemoveAt(i);
+                    }
+                }
+            }
+            
+            // Clear selection if the removed dataset was selected
+            if (_selectedDataset == dataset)
+            {
+                _selectedDataset = null;
+            }
+        }
 
         // ──────────────────────────────────────────────────────────────────────
         // Per-frame entry
@@ -89,6 +127,7 @@ namespace GeoscientistToolkit.UI
                 _showProperties = true;
                 _showLog        = true;
                 _showTools      = true;
+                _showWelcome = SettingsManager.Instance.Settings.Appearance.ShowWelcomeOnStartup;
 
                 TryBuildDockLayout(dockspaceId, vp.WorkSize);
                 _layoutBuilt = true;
@@ -99,7 +138,6 @@ namespace GeoscientistToolkit.UI
             if (_showProperties) _properties.Submit(ref _showProperties, _selectedDataset);
             if (_showLog) _log.Submit(ref _showLog);
             if (_showTools)      _tools.Submit(ref _showTools, _selectedDataset);
-
 
             // Viewers
             for (int i = _viewers.Count - 1; i >= 0; --i)
@@ -125,21 +163,14 @@ namespace GeoscientistToolkit.UI
                 }
             }
 
-
             // Other UI
             _import.Submit();
             SubmitFileDialogs();
             SubmitPopups();
-            _systemInfoWindow.Submit(); // ADDED
-            _settingsWindow.Submit(); // ADDED for Settings
+            _systemInfoWindow.Submit();
+            _settingsWindow.Submit();
 
             ImGui.End();
-            
-            // Update _showWelcome based on settings
-            if (!_layoutBuilt)
-            {
-                _showWelcome = SettingsManager.Instance.Settings.Appearance.ShowWelcomeOnStartup;
-            }
         }
         
         private void HandleTimers()
@@ -199,7 +230,6 @@ namespace GeoscientistToolkit.UI
             ImGui.DockBuilderDockWindow("Tools",      right_bottom);
             ImGui.DockBuilderDockWindow("Log",        bottom);
             ImGui.DockBuilderDockWindow("Thumbnails:*", center);
-
 
             ImGui.DockBuilderFinish(rootId);
 #else
@@ -313,12 +343,10 @@ namespace GeoscientistToolkit.UI
             if (ImGui.BeginMenu("Help"))
             {
                 if (ImGui.MenuItem("About")) _showAboutPopup = true;
-                // --- ADDED ---
                 if (ImGui.MenuItem("System Info..."))
                 {
                     _systemInfoWindow.Open(VeldridManager.GraphicsDevice);
                 }
-                // --- END ADDED ---
                 ImGui.EndMenu();
             }
 
@@ -395,13 +423,15 @@ namespace GeoscientistToolkit.UI
             }
             else
             {
-                actionToPerform(); // No unsaved changes, proceed immediately.
+                actionToPerform();
             }
         }
 
         private void OnDatasetSelected(Dataset ds)
         {
             _selectedDataset = ds;
+            
+            // Force load the dataset to ensure histogram data is available
             _selectedDataset?.Load();
 
             if (ds is DatasetGroup group)
@@ -494,7 +524,7 @@ namespace GeoscientistToolkit.UI
                 ImGui.SameLine();
                 if (ImGui.Button("Don't Save", new Vector2(100, 0)))
                 {
-                    ProjectManager.Instance.HasUnsavedChanges = false; // Mark as resolved
+                    ProjectManager.Instance.HasUnsavedChanges = false;
                     _pendingAction?.Invoke();
                     _pendingAction = null;
                     ImGui.CloseCurrentPopup();

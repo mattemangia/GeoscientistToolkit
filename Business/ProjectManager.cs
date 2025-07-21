@@ -25,6 +25,11 @@ namespace GeoscientistToolkit.Business
         public string ProjectPath { get; set; }
         public bool HasUnsavedChanges { get; set; }
 
+        /// <summary>
+        /// Fired when a dataset is removed from the project.
+        /// </summary>
+        public event Action<Dataset> DatasetRemoved;
+
         private ProjectManager() { }
 
         public void NewProject()
@@ -33,6 +38,7 @@ namespace GeoscientistToolkit.Business
             foreach (var dataset in LoadedDatasets)
             {
                 dataset.Unload();
+                // No need to fire event here, as the whole project is cleared
             }
             LoadedDatasets.Clear();
             
@@ -56,10 +62,17 @@ namespace GeoscientistToolkit.Business
         {
             if (dataset == null) return;
             
-            dataset.Unload();
-            LoadedDatasets.Remove(dataset);
-            HasUnsavedChanges = true;
-            Logger.Log($"Removed dataset: {dataset.Name}");
+            bool removed = LoadedDatasets.Remove(dataset);
+
+            if (removed)
+            {
+                dataset.Unload();
+                HasUnsavedChanges = true;
+                Logger.Log($"Removed dataset: {dataset.Name}");
+                
+                // Invoke the event to notify listeners
+                DatasetRemoved?.Invoke(dataset);
+            }
         }
 
         public void SaveProject(string path = null)
