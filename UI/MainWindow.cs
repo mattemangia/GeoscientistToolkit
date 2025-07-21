@@ -1,4 +1,4 @@
-// GeoscientistToolkit/UI/MainWindow.cs — safeguarded + correct multi-panel docking
+// GeoscientistToolkit/UI/MainWindow.cs — safeguarded + correct multi-panel docking + settings integration
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -8,6 +8,7 @@ using GeoscientistToolkit.Data;
 using GeoscientistToolkit.Data.Image; // Required for DatasetGroup
 using GeoscientistToolkit.UI.Utils; // Required for ImGuiFileDialog
 using GeoscientistToolkit.Util; // Required for VeldridManager
+using GeoscientistToolkit.Settings; // Required for Settings integration
 using ImGuiNET;
 
 namespace GeoscientistToolkit.UI
@@ -23,6 +24,7 @@ namespace GeoscientistToolkit.UI
         private readonly ImportDataModal _import     = new();
         private readonly ToolsPanel      _tools      = new();
         private readonly SystemInfoWindow _systemInfoWindow = new(); // ADDED
+        private readonly SettingsWindow _settingsWindow = new(); // ADDED for Settings
         
         // File Dialogs
         private readonly ImGuiFileDialog _loadProjectDialog = new("LoadProjectDlg", FileDialogType.OpenFile, "Load Project");
@@ -44,6 +46,10 @@ namespace GeoscientistToolkit.UI
         private bool _showUnsavedChangesPopup = false;
         private Action _pendingAction; // Stores the action to run after the unsaved changes dialog.
 
+        // Timers for auto-save and backup
+        private float _autoSaveTimer = 0f;
+        private float _autoBackupTimer = 0f;
+
 
         private Dataset? _selectedDataset;
 
@@ -53,6 +59,7 @@ namespace GeoscientistToolkit.UI
         public void SubmitUI()
         {
             VeldridManager.ProcessMainThreadActions();
+            HandleTimers();
 
             var vp = ImGui.GetMainViewport();
             ImGui.SetNextWindowPos(vp.WorkPos);
@@ -124,8 +131,48 @@ namespace GeoscientistToolkit.UI
             SubmitFileDialogs();
             SubmitPopups();
             _systemInfoWindow.Submit(); // ADDED
+            _settingsWindow.Submit(); // ADDED for Settings
 
             ImGui.End();
+            
+            // Update _showWelcome based on settings
+            if (!_layoutBuilt)
+            {
+                _showWelcome = SettingsManager.Instance.Settings.Appearance.ShowWelcomeOnStartup;
+            }
+        }
+        
+        private void HandleTimers()
+        {
+            var io = ImGui.GetIO();
+            var settings = SettingsManager.Instance.Settings;
+
+            // Auto-save timer
+            if (settings.Performance.AutoSaveInterval > 0 && !string.IsNullOrEmpty(ProjectManager.Instance.ProjectPath))
+            {
+                _autoSaveTimer += io.DeltaTime;
+                if (_autoSaveTimer >= settings.Performance.AutoSaveInterval * 60)
+                {
+                    if (ProjectManager.Instance.HasUnsavedChanges)
+                    {
+                        Logger.Log("Auto-saving project...");
+                        ProjectManager.Instance.SaveProject();
+                    }
+                    _autoSaveTimer = 0f;
+                }
+            }
+            
+            // Auto-backup timer
+            if (settings.Backup.EnableAutoBackup && settings.Backup.BackupInterval > 0 && !string.IsNullOrEmpty(ProjectManager.Instance.ProjectPath))
+            {
+                _autoBackupTimer += io.DeltaTime;
+                if (_autoBackupTimer >= settings.Backup.BackupInterval * 60)
+                {
+                    Logger.Log("Auto-backing up project...");
+                    ProjectManager.Instance.BackupProject();
+                    _autoBackupTimer = 0f;
+                }
+            }
         }
 
         // ──────────────────────────────────────────────────────────────────────
@@ -188,6 +235,44 @@ namespace GeoscientistToolkit.UI
                 if (ImGui.MenuItem("Save Project")) OnSaveProject();
                 if (ImGui.MenuItem("Save Project As...")) OnSaveProjectAs();
                 ImGui.Separator();
+                
+                // Recent Projects submenu
+                if (ImGui.BeginMenu("Recent Projects"))
+                {
+                    var recentProjects = ProjectManager.GetRecentProjects();
+                    if (recentProjects.Count == 0)
+                    {
+                        ImGui.MenuItem("No recent projects", false);
+                    }
+                    else
+                    {
+                        for (int i = 0; i < recentProjects.Count; i++)
+                        {
+                            var projectPath = recentProjects[i];
+                            var projectName = System.IO.Path.GetFileNameWithoutExtension(projectPath);
+                            
+                            if (ImGui.MenuItem($"{i + 1}. {projectName}"))
+                            {
+                                TryLoadRecentProject(projectPath);
+                            }
+                            
+                            if (ImGui.IsItemHovered())
+                            {
+                                ImGui.SetTooltip(projectPath);
+                            }
+                        }
+                        
+                        ImGui.Separator();
+                        if (ImGui.MenuItem("Clear Recent Projects"))
+                        {
+                            SettingsManager.Instance.Settings.FileAssociations.RecentProjects.Clear();
+                            SettingsManager.Instance.SaveSettings();
+                        }
+                    }
+                    ImGui.EndMenu();
+                }
+                
+                ImGui.Separator();
                 if (ImGui.MenuItem("Import Data...")) _import.Open();
                 ImGui.Separator();
                 if (ImGui.MenuItem("Exit")) TryExit();
@@ -196,6 +281,21 @@ namespace GeoscientistToolkit.UI
             
             if (ImGui.BeginMenu("Edit"))
             {
+                bool canUndo = GlobalPerformanceManager.Instance.UndoManager.CanUndo;
+                if (ImGui.MenuItem("Undo", "Ctrl+Z", false, canUndo))
+                {
+                    GlobalPerformanceManager.Instance.UndoManager.Undo();
+                }
+
+                bool canRedo = GlobalPerformanceManager.Instance.UndoManager.CanRedo;
+                if (ImGui.MenuItem("Redo", "Ctrl+Y", false, canRedo))
+                {
+                    GlobalPerformanceManager.Instance.UndoManager.Redo();
+                }
+
+                ImGui.Separator();
+                if (ImGui.MenuItem("Settings...", "Ctrl+,")) _settingsWindow.Open();
+                ImGui.Separator();
                 ImGui.MenuItem("Tools Panel", string.Empty, ref _showTools);
                 ImGui.EndMenu();
             }
@@ -246,6 +346,11 @@ namespace GeoscientistToolkit.UI
         private void TryOnLoadProject()
         {
             CheckForUnsavedChanges(() => _loadProjectDialog.Open(null, new [] { ".gtp" }));
+        }
+        
+        private void TryLoadRecentProject(string projectPath)
+        {
+            CheckForUnsavedChanges(() => OnLoadProject(projectPath));
         }
 
         private void OnLoadProject(string path)
@@ -339,8 +444,8 @@ namespace GeoscientistToolkit.UI
 
         private void SubmitPopups()
         {
-            // Welcome once per session
-            if (_showWelcome)
+            // Welcome once per session - check settings
+            if (_showWelcome && SettingsManager.Instance.Settings.Appearance.ShowWelcomeOnStartup)
             {
                 ImGui.OpenPopup("Welcome!");
                 _showWelcome = false;

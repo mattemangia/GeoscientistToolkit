@@ -1,9 +1,9 @@
-﻿
-
-﻿// GeoscientistToolkit/Data/Image/ImageViewer.cs (Fixed mouse wheel zoom)
+﻿// GeoscientistToolkit/Data/Image/ImageViewer.cs (Updated with TextureManager)
+using GeoscientistToolkit.Business;
 using GeoscientistToolkit.UI.Interfaces;
 using GeoscientistToolkit.Util;
 using ImGuiNET;
+using System;
 using System.Globalization;
 using System.Numerics;
 using Veldrid;
@@ -13,11 +13,7 @@ namespace GeoscientistToolkit.Data.Image
     public class ImageViewer : IDatasetViewer
     {
         private readonly ImageDataset _dataset;
-
-        // Veldrid resources
-        private TextureView _textureView;
-        private IntPtr _textureId = IntPtr.Zero;
-
+        
         // Scale bar state
         private Vector2 _scaleBarRelativePos = new Vector2(0.85f, 0.9f);
         private bool _isDraggingScaleBar = false;
@@ -56,15 +52,34 @@ namespace GeoscientistToolkit.Data.Image
 
         public void DrawContent(ref float zoom, ref Vector2 pan)
         {
-            // Lazily create the GPU texture
-            if (_textureId == IntPtr.Zero)
+            // --- TEXTURE CACHE LOGIC ---
+            TextureManager textureManager = GlobalPerformanceManager.Instance.TextureCache.GetTexture(_dataset.FilePath, () =>
             {
-                CreateDeviceTexture();
+                _dataset.Load(); // Ensure pixel data is loaded
+                if (_dataset.ImageData == null) return (null, 0);
+
+                var manager = TextureManager.CreateFromPixelData(
+                    _dataset.ImageData,
+                    (uint)_dataset.Width,
+                    (uint)_dataset.Height);
+                
+                long size = (long)_dataset.Width * _dataset.Height * 4; // 4 bytes per pixel (RGBA)
+                
+                _dataset.Unload(); // Unload pixel data if lazy loading is on
+                return (manager, size);
+            });
+
+            if (textureManager == null || !textureManager.IsValid)
+            {
+                ImGui.TextColored(new Vector4(1.0f, 0.2f, 0.2f, 1.0f), "Error: Could not create/cache GPU texture for image.");
+                return;
             }
 
-            if (_textureId == IntPtr.Zero)
+            // Get texture ID for current context
+            var textureId = textureManager.GetImGuiTextureId();
+            if (textureId == IntPtr.Zero)
             {
-                ImGui.TextColored(new Vector4(1.0f, 0.2f, 0.2f, 1.0f), "Error: Could not create GPU texture for image.");
+                ImGui.TextColored(new Vector4(1.0f, 0.2f, 0.2f, 1.0f), "Error: Could not get texture for current context.");
                 return;
             }
 
@@ -116,7 +131,7 @@ namespace GeoscientistToolkit.Data.Image
             }
 
             // Draw the image
-            dl.AddImage(_textureId, imagePos, imagePos + displaySize);
+            dl.AddImage(textureId, imagePos, imagePos + displaySize);
 
             // Draw scale bar
             if (_dataset.PixelSize > 0 || _pixelSizeChanged)
@@ -130,29 +145,7 @@ namespace GeoscientistToolkit.Data.Image
             // Draw scale bar properties window
             DrawScaleBarProperties();
         }
-
-        private void CreateDeviceTexture()
-        {
-            _dataset.Load();
-            if (_dataset.ImageData == null) return;
-            
-            Texture texture = VeldridManager.Factory.CreateTexture(TextureDescription.Texture2D(
-                (uint)_dataset.Width, (uint)_dataset.Height, 1, 1,
-                PixelFormat.R8_G8_B8_A8_UNorm, TextureUsage.Sampled));
-
-            byte[] pixelData = _dataset.ImageData;
-
-            VeldridManager.GraphicsDevice.UpdateTexture(
-                texture,
-                pixelData,
-                0, 0, 0, (uint)_dataset.Width, (uint)_dataset.Height, 1, 0, 0);
-
-            _textureView = VeldridManager.Factory.CreateTextureView(texture);
-            _textureId = VeldridManager.ImGuiController.GetOrCreateImGuiBinding(VeldridManager.Factory, _textureView);
-
-            _dataset.Unload();
-        }
-
+        
         private void DrawScaleBar(ImDrawListPtr dl, Vector2 canvasPos, Vector2 canvasSize, float zoom)
         {
             var io = ImGui.GetIO();
@@ -293,7 +286,7 @@ namespace GeoscientistToolkit.Data.Image
                 ImGui.EndPopup();
             }
         }
-
+        
         private void DrawScaleBarProperties()
         {
             if (!_showScaleBarProperties) return;
@@ -389,14 +382,8 @@ namespace GeoscientistToolkit.Data.Image
         
         public void Dispose()
         {
-            if (_textureView != null)
-            {
-                VeldridManager.ImGuiController.RemoveImGuiBinding(_textureView);
-                _textureView.Target.Dispose();
-                _textureView.Dispose();
-                _textureView = null;
-                _textureId = IntPtr.Zero;
-            }
+            // Release the texture from the cache instead of disposing it directly
+            GlobalPerformanceManager.Instance.TextureCache.ReleaseTexture(_dataset.FilePath);
         }
     }
 }

@@ -2,6 +2,7 @@
 using System;
 using System.Collections.Concurrent;
 using Veldrid;
+using ImGuiNET;
 
 namespace GeoscientistToolkit.Util
 {
@@ -11,28 +12,69 @@ namespace GeoscientistToolkit.Util
     /// </summary>
     public static class VeldridManager
     {
+        // Core Veldrid objects - these must be set by Application.cs after creation
         public static GraphicsDevice GraphicsDevice { get; set; }
-        public static ResourceFactory Factory => GraphicsDevice.ResourceFactory;
         public static ImGuiController ImGuiController { get; set; }
+        
+        // Convenience property for the ResourceFactory
+        public static ResourceFactory Factory => GraphicsDevice?.ResourceFactory;
 
-        private static readonly ConcurrentQueue<Action> MainThreadActions = new ConcurrentQueue<Action>();
+        // Thread-safe queue for actions that must run on the main thread
+        private static readonly ConcurrentQueue<Action> _mainThreadActions = new ConcurrentQueue<Action>();
+
+        // Track ImGuiControllers by their context
+        private static readonly Dictionary<IntPtr, ImGuiController> _controllersByContext = new Dictionary<IntPtr, ImGuiController>();
 
         /// <summary>
-        /// Queues an action to be executed on the main UI thread during the next frame.
+        /// Registers an ImGuiController with its context
         /// </summary>
-        public static void ExecuteOnMainThread(Action action)
+        public static void RegisterImGuiController(ImGuiController controller)
         {
-            MainThreadActions.Enqueue(action);
+            if (controller?.Context != IntPtr.Zero)
+            {
+                _controllersByContext[controller.Context] = controller;
+            }
         }
 
         /// <summary>
-        /// Executes all queued main-thread actions. Should be called once per frame in the main loop.
+        /// Gets the ImGuiController for the current ImGui context
+        /// </summary>
+        public static ImGuiController GetCurrentImGuiController()
+        {
+            var currentContext = ImGui.GetCurrentContext();
+            if (_controllersByContext.TryGetValue(currentContext, out var controller))
+            {
+                return controller;
+            }
+            
+            // Fallback to main controller
+            return ImGuiController;
+        }
+
+        /// <summary>
+        /// Enqueues an action to be executed on the main thread during the next frame.
+        /// This is useful for OpenGL operations that must happen on the rendering thread.
+        /// </summary>
+        public static void ExecuteOnMainThread(Action action)
+        {
+            _mainThreadActions.Enqueue(action);
+        }
+
+        /// <summary>
+        /// Processes all pending main thread actions. Called once per frame by MainWindow.
         /// </summary>
         public static void ProcessMainThreadActions()
         {
-            while (MainThreadActions.TryDequeue(out var action))
+            while (_mainThreadActions.TryDequeue(out var action))
             {
-                action?.Invoke();
+                try
+                {
+                    action();
+                }
+                catch (Exception ex)
+                {
+                    Logger.Log($"Error executing main thread action: {ex.Message}");
+                }
             }
         }
     }

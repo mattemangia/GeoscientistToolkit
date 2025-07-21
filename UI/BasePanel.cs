@@ -27,6 +27,11 @@ namespace GeoscientistToolkit.UI
         private bool _popOutWindowWantsClosed = false;
         private bool _wantsToPopIn = false;
         private IntPtr _mainContext;
+        
+        /// <summary>
+        /// Provides read-only access to the list of all created panels.
+        /// </summary>
+        public static IReadOnlyList<BasePanel> AllPanels => _allPanels;
 
         protected BasePanel(string title, Vector2 defaultSize)
         {
@@ -67,38 +72,52 @@ namespace GeoscientistToolkit.UI
         }
 
         /// <summary>
-        /// Main submit method that handles both docked and popped-out states
+        /// Main submit method that handles both docked and popped-out states.
+        /// This version uses the internal _isOpen flag as the source of truth for the panel's state.
         /// </summary>
         public void Submit(ref bool pOpen)
         {
-            _isOpen = pOpen;
-            
-            if (_isPoppedOut && _popOutWindow != null)
+            // Sync our state with the caller. If they pass false, we close.
+            if (!pOpen)
             {
-                // If window was closed externally, clean up
-                if (!_popOutWindow.Exists)
+                _isOpen = false;
+            }
+
+            // If we've been closed (programmatically or by caller), report it and clean up.
+            if (!_isOpen)
+            {
+                pOpen = false;
+                if (_isPoppedOut)
                 {
-                    _isPoppedOut = false;
-                    _popOutWindow.Dispose();
-                    _popOutWindow = null;
-                    return;
+                    DoPopIn(); // This disposes the popout window.
                 }
-                
-                // Don't draw anything in the main window when popped out
-                // The drawing happens in the pop-out window's ProcessFrame
                 return;
             }
+
+            // --- Panel is considered open at this point ---
+
+            if (_isPoppedOut && _popOutWindow != null)
+            {
+                // For popped-out panels, we just check if the OS window still exists.
+                // Drawing is handled by ProcessAllPopOutWindows().
+                if (!_popOutWindow.Exists)
+                {
+                    // The window was closed by the user.
+                    _isOpen = false; // Mark as closed.
+                    pOpen = false;   // Report back to the caller.
+                    DoPopIn();       // Clean up resources.
+                }
+                return; // Don't draw in the main window.
+            }
             
-            // Only draw in main window if not popped out
+            // If not popped out, render the panel as a window in the main UI.
             if (!_isPoppedOut)
             {
-                // Ensure we're using the main context
                 ImGui.SetCurrentContext(_mainContext);
-                
-                // Render in the main window
                 ImGui.SetNextWindowSize(_defaultSize, ImGuiCond.FirstUseEver);
                 
-                if (ImGui.Begin(_title, ref pOpen))
+                // Pass our authoritative _isOpen flag to ImGui. It will be set to false if the user closes the window.
+                if (ImGui.Begin(_title, ref _isOpen))
                 {
                     _lastMainWindowPos = ImGui.GetWindowPos();
                     _lastMainWindowSize = ImGui.GetWindowSize();
@@ -108,8 +127,17 @@ namespace GeoscientistToolkit.UI
                 }
                 ImGui.End();
                 
-                _isOpen = pOpen;
+                // After rendering, ensure the caller's flag is in sync with our state.
+                pOpen = _isOpen;
             }
+        }
+
+        /// <summary>
+        /// Programmatically closes the panel. The panel will be removed on the next UI loop.
+        /// </summary>
+        public void Close()
+        {
+            _isOpen = false;
         }
 
         /// <summary>

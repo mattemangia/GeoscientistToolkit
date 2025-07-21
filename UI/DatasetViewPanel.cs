@@ -3,6 +3,7 @@ using GeoscientistToolkit.Data;
 using GeoscientistToolkit.Data.CtImageStack;
 using GeoscientistToolkit.UI.Interfaces;
 using ImGuiNET;
+using System.Linq;
 using System.Numerics;
 
 namespace GeoscientistToolkit.UI
@@ -19,6 +20,24 @@ namespace GeoscientistToolkit.UI
         {
             Dataset = dataset;
             _viewer = DatasetUIFactory.CreateViewer(dataset);
+        }
+        
+        /// <summary>
+        /// Finds and closes the view panel associated with the given dataset.
+        /// Call this from your code that handles closing a dataset (e.g., a right-click menu action).
+        /// </summary>
+        /// <param name="datasetToClose">The dataset whose panel should be closed.</param>
+        public static void CloseViewFor(Dataset datasetToClose)
+        {
+            // Find the panel associated with the dataset and call the new Close() method.
+            // We iterate a copy of the list to prevent issues if the collection is modified.
+            foreach (var panel in AllPanels.ToList())
+            {
+                if (panel is DatasetViewPanel dvp && dvp.Dataset == datasetToClose)
+                {
+                    dvp.Close();
+                }
+            }
         }
         
         public void Submit(ref bool pOpen)

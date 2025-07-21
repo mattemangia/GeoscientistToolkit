@@ -1,6 +1,7 @@
 ﻿// GeoscientistToolkit/Data/Image/ImageDataset.cs
 using System;
 using System.IO;
+using GeoscientistToolkit.Settings;
 using GeoscientistToolkit.Util;
 
 namespace GeoscientistToolkit.Data.Image
@@ -52,15 +53,19 @@ namespace GeoscientistToolkit.Data.Image
 
         public override void Unload()
         {
-            ImageData = null;
-            
-            // Clear histogram data
-            HistogramLuminance = null;
-            HistogramR = null;
-            HistogramG = null;
-            HistogramB = null;
+            // Respect the lazy loading setting. If enabled, we dump the image data from memory.
+            if (SettingsManager.Instance.Settings.Performance.EnableLazyLoading)
+            {
+                ImageData = null;
+                
+                // Clear histogram data
+                HistogramLuminance = null;
+                HistogramR = null;
+                HistogramG = null;
+                HistogramB = null;
 
-            GC.Collect();
+                GC.Collect();
+            }
         }
         
         private void CalculateHistograms()

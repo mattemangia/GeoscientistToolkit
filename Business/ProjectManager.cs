@@ -1,7 +1,13 @@
 // GeoscientistToolkit/Business/ProjectManager.cs
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.IO.Compression;
+using System.Linq;
 using GeoscientistToolkit.Data;
 using GeoscientistToolkit.Data.CtImageStack;
 using GeoscientistToolkit.Data.Image;
+using GeoscientistToolkit.Settings;
 using GeoscientistToolkit.Util;
 
 namespace GeoscientistToolkit.Business
@@ -69,13 +75,72 @@ namespace GeoscientistToolkit.Business
             ProjectPath = path;
             ProjectName = Path.GetFileNameWithoutExtension(path);
             HasUnsavedChanges = false;
+            
+            // Update recent projects list
+            UpdateRecentProjects(path);
         }
+
+        public void BackupProject()
+        {
+            var settings = SettingsManager.Instance.Settings.Backup;
+            if (string.IsNullOrEmpty(ProjectPath) || !settings.EnableAutoBackup) return;
+
+            try
+            {
+                Directory.CreateDirectory(settings.BackupDirectory);
+                
+                string timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
+                string backupFileName = $"{ProjectName}_{timestamp}.bak";
+                string backupFilePath = Path.Combine(settings.BackupDirectory, backupFileName);
+
+                if (settings.CompressBackups)
+                {
+                    backupFilePath += ".gz";
+                    using FileStream backupFileStream = File.Create(backupFilePath);
+                    using GZipStream compressionStream = new GZipStream(backupFileStream, CompressionMode.Compress);
+                    using StreamWriter writer = new StreamWriter(compressionStream);
+                    
+                    var tempPath = Path.GetTempFileName();
+                    ProjectSerializer.SaveProject(this, tempPath);
+                    writer.Write(File.ReadAllText(tempPath));
+                    File.Delete(tempPath);
+                }
+                else
+                {
+                    File.Copy(ProjectPath, backupFilePath, true);
+                }
+
+                Logger.Log($"Project backed up to {backupFilePath}");
+
+                // Clean up old backups
+                var backupFiles = new DirectoryInfo(settings.BackupDirectory)
+                    .GetFiles($"{ProjectName}_*.bak*")
+                    .OrderByDescending(f => f.CreationTime)
+                    .ToList();
+                
+                while (backupFiles.Count > settings.MaxBackupCount)
+                {
+                    var fileToDelete = backupFiles.Last();
+                    fileToDelete.Delete();
+                    backupFiles.Remove(fileToDelete);
+                    Logger.Log($"Removed old backup: {fileToDelete.Name}");
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError($"Failed to create project backup: {ex.Message}");
+            }
+        }
+
 
         public void LoadProject(string path)
         {
             if (!File.Exists(path))
             {
                 Logger.LogError($"Project file not found: {path}");
+                var recentProjects = SettingsManager.Instance.Settings.FileAssociations.RecentProjects;
+                recentProjects.RemoveAll(p => string.Equals(p, path, StringComparison.OrdinalIgnoreCase));
+                SettingsManager.Instance.SaveSettings();
                 return;
             }
             
@@ -98,6 +163,9 @@ namespace GeoscientistToolkit.Business
 
             HasUnsavedChanges = false;
             Logger.Log($"Project '{ProjectName}' loaded from: {path}");
+            
+            // Update recent projects list
+            UpdateRecentProjects(path);
         }
 
         private Dataset CreateDatasetFromDTO(DatasetDTO dto)
@@ -142,6 +210,52 @@ namespace GeoscientistToolkit.Business
                     Logger.LogError($"Unknown dataset type '{dto.TypeName}' encountered during project load.");
                     return null;
             }
+        }
+
+        /// <summary>
+        /// Updates the recent projects list in settings
+        /// </summary>
+        private void UpdateRecentProjects(string projectPath)
+        {
+            var settings = SettingsManager.Instance.Settings;
+            var recentProjects = settings.FileAssociations.RecentProjects;
+            
+            // Remove the path if it already exists (to move it to the top)
+            recentProjects.RemoveAll(p => string.Equals(p, projectPath, StringComparison.OrdinalIgnoreCase));
+            
+            // Add to the beginning of the list
+            recentProjects.Insert(0, projectPath);
+            
+            // Limit the list size based on settings
+            int maxRecent = settings.Appearance.MaxRecentProjects;
+            if (maxRecent < 0) maxRecent = 10; // safety check
+            while (recentProjects.Count > maxRecent)
+            {
+                recentProjects.RemoveAt(recentProjects.Count - 1);
+            }
+            
+            // Save the updated settings
+            SettingsManager.Instance.SaveSettings();
+        }
+
+        /// <summary>
+        /// Gets the list of recent projects from settings
+        /// </summary>
+        public static List<string> GetRecentProjects()
+        {
+            var settings = SettingsManager.Instance.Settings;
+            // Filter out projects that no longer exist
+            var existingProjects = settings.FileAssociations.RecentProjects
+                .Where(File.Exists)
+                .ToList();
+            
+            if (existingProjects.Count != settings.FileAssociations.RecentProjects.Count)
+            {
+                settings.FileAssociations.RecentProjects = existingProjects;
+                SettingsManager.Instance.SaveSettings();
+            }
+
+            return existingProjects;
         }
     }
 }

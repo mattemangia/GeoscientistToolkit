@@ -1,4 +1,4 @@
-﻿// GeoscientistToolkit/UI/PopOutWindow.cs
+﻿// GeoscientistToolkit/UI/PopOutWindow.cs (Fixed to share GraphicsDevice)
 using System;
 using System.Numerics;
 using ImGuiNET;
@@ -15,7 +15,7 @@ namespace GeoscientistToolkit.UI
     public class PopOutWindow : IDisposable
     {
         private Sdl2Window _window;
-        private GraphicsDevice _graphicsDevice;
+        private Swapchain _swapchain;
         private CommandList _commandList;
         private ImGuiController _imGuiController;
         private Action _drawCallback;
@@ -41,27 +41,30 @@ namespace GeoscientistToolkit.UI
 
             _window = VeldridStartup.CreateWindow(windowCI);
             
-            var graphicsDeviceOptions = new GraphicsDeviceOptions(
-                debug: false,
-                swapchainDepthFormat: null,
-                syncToVerticalBlank: true,
-                resourceBindingModel: ResourceBindingModel.Improved,
-                preferStandardClipSpaceYDirection: true,
-                preferDepthRangeZeroToOne: true);
-
-            _graphicsDevice = VeldridStartup.CreateGraphicsDevice(
-                _window, 
-                graphicsDeviceOptions, 
-                VeldridManager.GraphicsDevice.BackendType); // Use the same backend as main window
+            // Create a swapchain for this window using the SHARED graphics device
+            var swapchainDesc = new SwapchainDescription(
+                VeldridStartup.GetSwapchainSource(_window),
+                (uint)width,
+                (uint)height,
+                null,
+                true,
+                false);
             
-            _commandList = _graphicsDevice.ResourceFactory.CreateCommandList();
+            // Use the existing graphics device from VeldridManager
+            var graphicsDevice = VeldridManager.GraphicsDevice;
+            _swapchain = graphicsDevice.ResourceFactory.CreateSwapchain(swapchainDesc);
+            
+            _commandList = graphicsDevice.ResourceFactory.CreateCommandList();
             
             // Create ImGuiController which will create its own context
             _imGuiController = new ImGuiController(
-                _graphicsDevice,
-                _graphicsDevice.MainSwapchain.Framebuffer.OutputDescription,
+                graphicsDevice,
+                _swapchain.Framebuffer.OutputDescription,
                 _window.Width,
                 _window.Height);
+            
+            // Register this controller with VeldridManager
+            VeldridManager.RegisterImGuiController(_imGuiController);
             
             // Restore main context after creating the controller
             ImGui.SetCurrentContext(_mainContext);
@@ -71,7 +74,7 @@ namespace GeoscientistToolkit.UI
             {
                 if (_isDisposed) return;
                 
-                _graphicsDevice.MainSwapchain.Resize((uint)_window.Width, (uint)_window.Height);
+                _swapchain.Resize((uint)_window.Width, (uint)_window.Height);
                 
                 // Ensure we use the pop-out context for resize
                 var prevContext = ImGui.GetCurrentContext();
@@ -99,6 +102,8 @@ namespace GeoscientistToolkit.UI
             
             try
             {
+                var graphicsDevice = VeldridManager.GraphicsDevice;
+                
                 _imGuiController.Update(1f / 60f, snapshot);
                 
                 // Draw the UI - context is already set correctly
@@ -106,18 +111,18 @@ namespace GeoscientistToolkit.UI
                 
                 // Render
                 _commandList.Begin();
-                _commandList.SetFramebuffer(_graphicsDevice.MainSwapchain.Framebuffer);
+                _commandList.SetFramebuffer(_swapchain.Framebuffer);
                 _commandList.ClearColorTarget(0, new RgbaFloat(0.1f, 0.1f, 0.12f, 1.0f));
-                _imGuiController.Render(_graphicsDevice, _commandList);
+                _imGuiController.Render(graphicsDevice, _commandList);
                 _commandList.End();
                 
-                _graphicsDevice.SubmitCommands(_commandList);
-                _graphicsDevice.SwapBuffers(_graphicsDevice.MainSwapchain);
+                graphicsDevice.SubmitCommands(_commandList);
+                graphicsDevice.SwapBuffers(_swapchain);
             }
             catch (Exception ex)
             {
                 // Log error but don't crash the application
-                Console.WriteLine($"Error in PopOutWindow.ProcessFrame: {ex.Message}");
+                Logger.Log($"Error in PopOutWindow.ProcessFrame: {ex.Message}");
             }
             finally
             {
@@ -134,7 +139,8 @@ namespace GeoscientistToolkit.UI
             if (_isDisposed) return;
             _isDisposed = true;
             
-            _graphicsDevice?.WaitForIdle();
+            var graphicsDevice = VeldridManager.GraphicsDevice;
+            graphicsDevice?.WaitForIdle();
             
             // Dispose in correct context
             if (_imGuiController != null && _imGuiController.Context != IntPtr.Zero)
@@ -146,7 +152,7 @@ namespace GeoscientistToolkit.UI
             }
             
             _commandList?.Dispose();
-            _graphicsDevice?.Dispose();
+            _swapchain?.Dispose();
             _window?.Close();
         }
     }
