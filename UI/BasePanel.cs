@@ -150,21 +150,25 @@ namespace GeoscientistToolkit.UI
         /// </summary>
         protected virtual void DrawPopOutButton()
         {
-            // Draw the button at the beginning of the content area
-            ImGui.PushStyleColor(ImGuiCol.Button, new Vector4(0.2f, 0.2f, 0.2f, 0.8f));
+            // Save current cursor position
+            var cursorPos = ImGui.GetCursorPos();
+            
+            // Position button at top-right of content area
+            var contentWidth = ImGui.GetContentRegionAvail().X;
+            var buttonSize = new Vector2(30, 24);
+            ImGui.SetCursorPos(new Vector2(contentWidth - buttonSize.X - 5, cursorPos.Y));
+            
+            ImGui.PushStyleColor(ImGuiCol.Button, new Vector4(0.25f, 0.25f, 0.25f, 0.8f));
             ImGui.PushStyleColor(ImGuiCol.ButtonHovered, new Vector4(0.26f, 0.59f, 0.98f, 0.8f));
             ImGui.PushStyleColor(ImGuiCol.ButtonActive, new Vector4(0.26f, 0.59f, 0.98f, 1.0f));
-            ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(1.0f, 1.0f, 1.0f, 1.0f));
+            ImGui.PushStyleVar(ImGuiStyleVar.FramePadding, new Vector2(3, 3));
+            ImGui.PushStyleVar(ImGuiStyleVar.FrameRounding, 3.0f);
             
-            // Position the button at the top-right of the content area
-            var contentWidth = ImGui.GetContentRegionAvail().X;
-            ImGui.SameLine(contentWidth - 60);
-            
-            if (ImGui.Button(_isPoppedOut ? "Dock ↩" : "Pop Out ↗", new Vector2(60, 20)))
+            // Use a regular button instead of invisible button for better visibility
+            if (ImGui.Button($"##PopOutBtn{_title}", buttonSize))
             {
                 if (_isPoppedOut)
                 {
-                    // Set flag to pop in after frame completes
                     _wantsToPopIn = true;
                 }
                 else
@@ -173,14 +177,75 @@ namespace GeoscientistToolkit.UI
                 }
             }
             
-            ImGui.PopStyleColor(4);
+            ImGui.PopStyleVar(2);
+            
+            // Draw custom icon on top of the button
+            var drawList = ImGui.GetWindowDrawList();
+            var buttonMin = ImGui.GetItemRectMin();
+            var buttonMax = ImGui.GetItemRectMax();
+            var buttonCenter = new Vector2((buttonMin.X + buttonMax.X) * 0.5f, (buttonMin.Y + buttonMax.Y) * 0.5f);
+            
+            var iconColor = ImGui.IsItemHovered() ? 
+                ImGui.GetColorU32(new Vector4(1.0f, 1.0f, 1.0f, 1.0f)) : 
+                ImGui.GetColorU32(new Vector4(0.9f, 0.9f, 0.9f, 1.0f));
+            
+            if (_isPoppedOut)
+            {
+                // Draw "dock" icon - simplified version
+                var size = 8.0f;
+                var p1 = buttonCenter + new Vector2(-size, -size);
+                var p2 = buttonCenter + new Vector2(size, size);
+                
+                // Window frame
+                drawList.AddRect(p1, p2, iconColor, 0.0f, ImDrawFlags.None, 1.5f);
+                
+                // Arrow pointing inward
+                var arrowStart = buttonCenter + new Vector2(0, -size - 3);
+                var arrowEnd = buttonCenter;
+                drawList.AddLine(arrowStart, arrowEnd, iconColor, 2.0f);
+                
+                // Arrow head
+                drawList.AddLine(arrowEnd, arrowEnd + new Vector2(-3, -3), iconColor, 2.0f);
+                drawList.AddLine(arrowEnd, arrowEnd + new Vector2(3, -3), iconColor, 2.0f);
+            }
+            else
+            {
+                // Draw "pop out" icon - two overlapping windows
+                var size = 6.0f;
+                
+                // Back window
+                var p1 = buttonCenter + new Vector2(-size + 2, -size + 2);
+                var p2 = buttonCenter + new Vector2(size + 2, size + 2);
+                drawList.AddRect(p1, p2, iconColor, 0.0f, ImDrawFlags.None, 1.5f);
+                
+                // Front window
+                var p3 = buttonCenter + new Vector2(-size - 2, -size - 2);
+                var p4 = buttonCenter + new Vector2(size - 2, size - 2);
+                drawList.AddRectFilled(p3, p4, ImGui.GetColorU32(ImGuiCol.Button), 0.0f);
+                drawList.AddRect(p3, p4, iconColor, 0.0f, ImDrawFlags.None, 1.5f);
+                
+                // Arrow pointing outward
+                var arrowStart = buttonCenter;
+                var arrowEnd = buttonCenter + new Vector2(size + 3, -size - 3);
+                drawList.AddLine(arrowStart, arrowEnd, iconColor, 2.0f);
+                
+                // Arrow head
+                drawList.AddLine(arrowEnd, arrowEnd + new Vector2(-3, 0), iconColor, 2.0f);
+                drawList.AddLine(arrowEnd, arrowEnd + new Vector2(0, 3), iconColor, 2.0f);
+            }
+            
+            ImGui.PopStyleColor(3);
             
             if (ImGui.IsItemHovered())
             {
                 ImGui.SetTooltip(_isPoppedOut ? "Return panel to main window" : "Pop out to separate window");
             }
             
-            // Add some spacing after the button
+            // Restore cursor position
+            ImGui.SetCursorPos(cursorPos);
+            
+            // Add spacing to push content down below the button
+            ImGui.Dummy(new Vector2(0, buttonSize.Y + 5));
             ImGui.Separator();
             ImGui.Spacing();
         }

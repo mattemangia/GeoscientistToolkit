@@ -1,10 +1,11 @@
-// GeoscientistToolkit/UI/DatasetViewPanel.cs (Updated to inherit from BasePanel)
+// GeoscientistToolkit/UI/DatasetViewPanel.cs (Updated with Status Bar Background)
 using GeoscientistToolkit.Data;
 using GeoscientistToolkit.Data.CtImageStack;
 using GeoscientistToolkit.UI.Interfaces;
 using ImGuiNET;
 using System.Linq;
 using System.Numerics;
+using System; // For Math
 
 namespace GeoscientistToolkit.UI
 {
@@ -22,15 +23,8 @@ namespace GeoscientistToolkit.UI
             _viewer = DatasetUIFactory.CreateViewer(dataset);
         }
         
-        /// <summary>
-        /// Finds and closes the view panel associated with the given dataset.
-        /// Call this from your code that handles closing a dataset (e.g., a right-click menu action).
-        /// </summary>
-        /// <param name="datasetToClose">The dataset whose panel should be closed.</param>
         public static void CloseViewFor(Dataset datasetToClose)
         {
-            // Find the panel associated with the dataset and call the new Close() method.
-            // We iterate a copy of the list to prevent issues if the collection is modified.
             foreach (var panel in AllPanels.ToList())
             {
                 if (panel is DatasetViewPanel dvp && dvp.Dataset == datasetToClose)
@@ -50,6 +44,8 @@ namespace GeoscientistToolkit.UI
             DrawToolbar();
             ImGui.Separator();
             
+            // The main content area where the image is drawn.
+            // By placing the status bar drawing after this, we ensure it's at the bottom.
             _viewer.DrawContent(ref _zoom, ref _pan);
             
             DrawStatusBar();
@@ -59,12 +55,20 @@ namespace GeoscientistToolkit.UI
         {
             _viewer.DrawToolbarControls();
 
+            // Add some spacing if the viewer has controls
+            if (ImGui.GetCursorPosX() > 10) // Simple check if anything was drawn
+            {
+                 ImGui.SameLine();
+                 ImGui.Spacing();
+                 ImGui.SameLine();
+            }
+
             if (ImGui.Button("-", new Vector2(25, 0))) _zoom = Math.Max(0.1f, _zoom - 0.1f);
             ImGui.SameLine();
             ImGui.SetNextItemWidth(100);
-            ImGui.SliderFloat("##zoom", ref _zoom, 0.1f, 5.0f, "%.1fx");
+            ImGui.SliderFloat("##zoom", ref _zoom, 0.1f, 10.0f, "%.1fx");
             ImGui.SameLine();
-            if (ImGui.Button("+", new Vector2(25, 0))) _zoom = Math.Min(5.0f, _zoom + 0.1f);
+            if (ImGui.Button("+", new Vector2(25, 0))) _zoom = Math.Min(10.0f, _zoom + 0.1f);
             ImGui.SameLine();
             if (ImGui.Button("Fit", new Vector2(40, 0)))
             {
@@ -76,14 +80,33 @@ namespace GeoscientistToolkit.UI
         private void DrawStatusBar()
         {
             ImGui.Separator();
-            ImGui.TextUnformatted($"Dataset: {Dataset.Name} | Type: {Dataset.Type} | Zoom: {_zoom:F1}×");
 
+            // Prepare text content
+            string statusBarText = $"Dataset: {Dataset.Name} | Type: {Dataset.Type} | Zoom: {_zoom:F1}×";
             if (Dataset is CtImageStackDataset ct && ct.Width > 0)
             {
-                ImGui.SameLine();
-                ImGui.TextUnformatted($"| Size: {ct.Width}×{ct.Height}×{ct.Depth}");
+                statusBarText += $" | Size: {ct.Width}×{ct.Height}×{ct.Depth}";
             }
+
+            // --- Draw a background for the status bar text ---
+            float padding = 4f;
+            float lineHeight = ImGui.GetTextLineHeight();
+            var contentRegionAvail = ImGui.GetContentRegionAvail();
+            
+            Vector2 startPos = ImGui.GetCursorScreenPos();
+            Vector2 bgSize = new Vector2(contentRegionAvail.X, lineHeight + padding * 2);
+
+            // Draw background rectangle using a standard theme color for consistency
+            var drawList = ImGui.GetWindowDrawList();
+            drawList.AddRectFilled(startPos, startPos + bgSize, ImGui.GetColorU32(ImGuiCol.FrameBg));
+
+            // Draw the text on top of the background, with padding
+            drawList.AddText(startPos + new Vector2(padding, padding), ImGui.GetColorU32(ImGuiCol.Text), statusBarText);
+
+            // Advance the ImGui cursor manually since we used the low-level draw list
+            ImGui.Dummy(bgSize);
         }
+
 
         public override void Dispose()
         {

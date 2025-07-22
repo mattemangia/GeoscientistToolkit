@@ -1,25 +1,32 @@
-// GeoscientistToolkit/UI/PropertiesPanel.cs (Updated to inherit from BasePanel)
+// GeoscientistToolkit/UI/PropertiesPanel.cs (Updated to inherit from BasePanel and handle image export)
 using GeoscientistToolkit.Data;
 using GeoscientistToolkit.UI.Interfaces;
 using ImGuiNET;
 using System.Numerics;
+using GeoscientistToolkit.Data.Image; // Added for ImageDataset and ImageExportDialog
+using GeoscientistToolkit.Util; // Added for Logger
 
 namespace GeoscientistToolkit.UI
 {
     public class PropertiesPanel : BasePanel
     {
         private Dataset _selectedDataset;
-        
+        private readonly ImageExportDialog _imageExportDialog; // Added to handle image export
+
         public PropertiesPanel() : base("Properties", new Vector2(300, 400))
         {
+            _imageExportDialog = new ImageExportDialog(); // Initialize the dialog
         }
-        
+
         public void Submit(ref bool pOpen, Dataset selectedDataset)
         {
             _selectedDataset = selectedDataset;
             base.Submit(ref pOpen);
+            
+            // Submit the dialog every frame. It will only draw when it's open.
+            _imageExportDialog.Submit();
         }
-        
+
         protected override void DrawContent()
         {
             if (_selectedDataset != null)
@@ -59,7 +66,16 @@ namespace GeoscientistToolkit.UI
 
                 if (ImGui.Button("Export...", new Vector2(-1, 0)))
                 {
-                    // TODO: Implement export functionality.
+                    // FIX: Implemented export functionality for ImageDataset
+                    if (_selectedDataset is ImageDataset imageDataset)
+                    {
+                        _imageExportDialog.Open(imageDataset);
+                    }
+                    else
+                    {
+                        // Optionally, handle cases where the dataset type is not exportable from this panel.
+                        Logger.Log($"Export from this panel is not implemented for dataset type: {_selectedDataset.Type}");
+                    }
                 }
             }
             else
@@ -98,7 +114,7 @@ namespace GeoscientistToolkit.UI
         {
             if (bytes < 0) return "N/A";
             if (bytes == 0) return "0 B";
-            
+
             string[] sizes = { "B", "KB", "MB", "GB", "TB" };
             double len = bytes;
             int order = 0;

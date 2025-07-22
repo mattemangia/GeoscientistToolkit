@@ -33,6 +33,18 @@
         <PackageReference Include="Veldrid.SDL2" Version="4.9.0" />
        
         <PackageReference Include="Veldrid.StartupUtilities" Version="4.9.0" />
+        <!-- Added for open-source, cross-platform TIFF file support -->
+        <PackageReference Include="BitMiracle.LibTiff.NET" Version="2.4.649" />
+        <!-- Core SkiaSharp library for 2D graphics -->
+        <PackageReference Include="SkiaSharp" Version="2.88.8" />
+
+        <!-- Native assets for Windows, macOS, and Linux to ensure cross-platform compatibility -->
+        <PackageReference Include="SkiaSharp.NativeAssets.Win32" Version="2.88.8" />
+        <PackageReference Include="SkiaSharp.NativeAssets.macOS" Version="2.88.8" />
+        <PackageReference Include="SkiaSharp.NativeAssets.Linux" Version="2.88.8" />
+
+        <!-- Recommended for advanced text shaping and layout, ensuring consistent text rendering -->
+        <PackageReference Include="SkiaSharp.HarfBuzz" Version="2.88.8" />
     </ItemGroup>
 
 </Project>
