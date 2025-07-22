@@ -1,59 +1,71 @@
 ﻿// GeoscientistToolkit/UI/DatasetUIFactory.cs
-// Creates UI components based on dataset type.
-
 using GeoscientistToolkit.Data;
 using GeoscientistToolkit.Data.CtImageStack;
 using GeoscientistToolkit.Data.Image;
 using GeoscientistToolkit.UI.Interfaces;
-using ImGuiNET;
-using System.Numerics;
+using GeoscientistToolkit.UI;
 
 namespace GeoscientistToolkit.UI
 {
-    // Fallback implementations for unsupported features.
-    internal class UnsupportedPropertiesRenderer : IDatasetPropertiesRenderer { public void Draw(Dataset dataset) { } }
-    internal class UnsupportedTools : IDatasetTools { public void Draw(Dataset dataset) { ImGui.TextDisabled("No tools for this dataset type."); } }
-    
-    // This now needs a Dispose method to satisfy the interface.
-    internal class UnsupportedViewer : IDatasetViewer 
-    { 
-        public void DrawToolbarControls() { } 
-        public void DrawContent(ref float zoom, ref Vector2 pan) { ImGui.TextDisabled("Viewer not available."); }
-        public void Dispose() { } // Empty implementation is fine here.
-    }
-
     /// <summary>
-    /// Creates UI components based on dataset type.
+    /// Factory for creating dataset-specific UI components
     /// </summary>
     public static class DatasetUIFactory
     {
+        /// <summary>
+        /// Creates a viewer appropriate for the given dataset type
+        /// </summary>
         public static IDatasetViewer CreateViewer(Dataset dataset)
         {
-            return dataset.Type switch
+            return dataset switch
             {
-                DatasetType.CtImageStack => new CtImageStackViewer(),
-                DatasetType.SingleImage => new ImageViewer((ImageDataset)dataset),
-                _ => new UnsupportedViewer()
+                ImageDataset imageDataset => new ImageViewer(imageDataset),
+                CtImageStackDataset ctDataset => new CtImageStackViewer(ctDataset),
+                _ => throw new NotSupportedException($"No viewer available for dataset type: {dataset.GetType().Name}")
             };
         }
-
+        
+        /// <summary>
+        /// Creates a properties renderer appropriate for the given dataset type
+        /// </summary>
         public static IDatasetPropertiesRenderer CreatePropertiesRenderer(Dataset dataset)
         {
-            return dataset.Type switch
+            return dataset switch
             {
-                DatasetType.CtImageStack => new CtImageStackPropertiesRenderer(),
-                DatasetType.SingleImage => new ImagePropertiesRenderer(),
-                _ => new UnsupportedPropertiesRenderer()
+                ImageDataset => new ImagePropertiesRenderer(),
+                CtImageStackDataset => new CtImageStackPropertiesRenderer(),
+                _ => new DefaultPropertiesRenderer()
             };
         }
-
+        
+        /// <summary>
+        /// Creates tools appropriate for the given dataset type
+        /// </summary>
         public static IDatasetTools CreateTools(Dataset dataset)
         {
-            return dataset.Type switch
+            return dataset switch
             {
-                DatasetType.SingleImage => new ImageTools(),
-                _ => new UnsupportedTools()
+                ImageDataset => new ImageTools(),
+                CtImageStackDataset => new CtImageStackTools(),
+                _ => new DefaultTools()
             };
+        }
+    }
+    
+    // Default implementations
+    internal class DefaultPropertiesRenderer : IDatasetPropertiesRenderer
+    {
+        public void Draw(Dataset dataset)
+        {
+            // Default implementation shows no additional properties
+        }
+    }
+    
+    internal class DefaultTools : IDatasetTools
+    {
+        public void Draw(Dataset dataset)
+        {
+            ImGuiNET.ImGui.TextDisabled("No tools available for this dataset type");
         }
     }
 }

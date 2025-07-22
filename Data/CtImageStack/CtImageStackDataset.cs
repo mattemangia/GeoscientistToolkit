@@ -1,4 +1,6 @@
 ﻿// GeoscientistToolkit/Data/CtImageStack/CtImageStackDataset.cs
+using GeoscientistToolkit.Data.VolumeData;
+
 namespace GeoscientistToolkit.Data.CtImageStack
 {
     public class CtImageStackDataset : Dataset, ISerializableDataset
@@ -21,6 +23,10 @@ namespace GeoscientistToolkit.Data.CtImageStack
         
         // File paths for the image stack
         public List<string> ImagePaths { get; set; } = new List<string>();
+        
+        // Volume data
+        private ChunkedVolume _volumeData;
+        public ChunkedVolume VolumeData => _volumeData;
 
         public CtImageStackDataset(string name, string folderPath) : base(name, folderPath)
         {
@@ -29,27 +35,56 @@ namespace GeoscientistToolkit.Data.CtImageStack
 
         public override long GetSizeInBytes()
         {
-            // Calculate total size of all image files
-            long totalSize = 0;
-            foreach (var path in ImagePaths)
+            // Check for volume file first
+            string volumePath = GetVolumePath();
+            if (File.Exists(volumePath))
             {
-                if (File.Exists(path))
+                return new FileInfo(volumePath).Length;
+            }
+            
+            // Otherwise calculate total size of all image files
+            long totalSize = 0;
+            
+            if (Directory.Exists(FilePath))
+            {
+                var imageFiles = Directory.GetFiles(FilePath)
+                    .Where(f => IsImageFile(f))
+                    .ToList();
+                    
+                foreach (var file in imageFiles)
                 {
-                    totalSize += new FileInfo(path).Length;
+                    totalSize += new FileInfo(file).Length;
                 }
             }
+            
             return totalSize;
         }
 
         public override void Load()
         {
-            // Load metadata or prepare for slice loading
-            // Actual image data loading would be done on-demand per slice
+            if (_volumeData != null) return; // Already loaded
+            
+            var volumePath = GetVolumePath();
+            if (File.Exists(volumePath))
+            {
+                // Load the volume asynchronously
+                var loadTask = ChunkedVolume.LoadFromBinAsync(volumePath, false);
+                _volumeData = loadTask.GetAwaiter().GetResult();
+                
+                // Update dimensions if needed
+                if (_volumeData != null)
+                {
+                    Width = _volumeData.Width;
+                    Height = _volumeData.Height;
+                    Depth = _volumeData.Depth;
+                }
+            }
         }
 
         public override void Unload()
         {
-            // Clean up any cached data
+            _volumeData?.Dispose();
+            _volumeData = null;
         }
         
         public object ToSerializableObject()
@@ -64,6 +99,20 @@ namespace GeoscientistToolkit.Data.CtImageStack
                 Unit = this.Unit,
                 BinningSize = this.BinningSize
             };
+        }
+        
+        private string GetVolumePath()
+        {
+            string folderName = Path.GetFileName(FilePath);
+            return Path.Combine(FilePath, $"{folderName}.Volume.bin");
+        }
+        
+        private bool IsImageFile(string path)
+        {
+            string ext = Path.GetExtension(path).ToLower();
+            return ext == ".png" || ext == ".jpg" || ext == ".jpeg" || 
+                   ext == ".bmp" || ext == ".tif" || ext == ".tiff" || 
+                   ext == ".tga" || ext == ".gif";
         }
     }
 }
