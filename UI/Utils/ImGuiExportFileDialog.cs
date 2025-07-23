@@ -2,9 +2,22 @@
 using ImGuiNET;
 using System.Numerics;
 using GeoscientistToolkit.Util;
+using System.Collections.Generic;
+using System.IO;
+using System;
 
 namespace GeoscientistToolkit.UI.Utils
 {
+    // ADDED ENUM
+    public enum FileDialogType
+    {
+        OpenFile,
+        SaveFile,
+        OpenDirectory,
+        SaveStack,
+        SaveLabelStack
+    }
+    
     public class ImGuiExportFileDialog
     {
         public bool IsOpen;
@@ -15,7 +28,7 @@ namespace GeoscientistToolkit.UI.Utils
         private readonly string _id;
         private readonly string _title;
         private string _fileName = "";
-        private string _selectedFileName = "";
+        private string _selectedFileNameInList = "";
         private List<ExtensionOption> _extensionOptions = new List<ExtensionOption>();
         private int _selectedExtensionIndex = 0;
 
@@ -40,9 +53,6 @@ namespace GeoscientistToolkit.UI.Utils
             CurrentDirectory = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
         }
 
-        /// <summary>
-        /// Sets the available file extensions for export
-        /// </summary>
         public void SetExtensions(params ExtensionOption[] options)
         {
             _extensionOptions.Clear();
@@ -54,9 +64,6 @@ namespace GeoscientistToolkit.UI.Utils
             }
         }
 
-        /// <summary>
-        /// Convenience method to set extensions with just string pairs
-        /// </summary>
         public void SetExtensions(params (string extension, string description)[] options)
         {
             _extensionOptions.Clear();
@@ -76,7 +83,7 @@ namespace GeoscientistToolkit.UI.Utils
             IsOpen = true;
             SelectedPath = "";
             _fileName = defaultFileName;
-            _selectedFileName = "";
+            _selectedFileNameInList = "";
 
             if (!string.IsNullOrEmpty(startingPath) && Directory.Exists(startingPath))
                 CurrentDirectory = startingPath;
@@ -98,8 +105,7 @@ namespace GeoscientistToolkit.UI.Utils
                 {
                     DrawPathNavigation();
                     
-                    // Calculate the height for the file list
-                    float bottomBarHeight = (ImGui.GetFrameHeightWithSpacing() * 3) + (ImGui.GetStyle().ItemSpacing.Y * 2) + ImGui.GetStyle().WindowPadding.Y;
+                    float bottomBarHeight = ImGui.GetFrameHeightWithSpacing() * 2.5f + ImGui.GetStyle().ItemSpacing.Y * 3;
                     Vector2 fileListSize = new Vector2(0, -bottomBarHeight);
 
                     DrawFileList(fileListSize);
@@ -140,29 +146,29 @@ namespace GeoscientistToolkit.UI.Utils
             {
                 try
                 {
-                    // Draw directories
                     foreach (var dir in Directory.GetDirectories(CurrentDirectory))
                     {
                         var dirName = Path.GetFileName(dir);
-                        
-                        ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(1.0f, 1.0f, 0.5f, 1.0f)); // Yellow for directories
-                        if (ImGui.Selectable($"[D] {dirName}", false))
+                        ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(1.0f, 1.0f, 0.5f, 1.0f));
+                        if (ImGui.Selectable($"[D] {dirName}", false, ImGuiSelectableFlags.AllowDoubleClick))
                         {
-                            CurrentDirectory = dir;
-                            _selectedFileName = "";
+                            if (ImGui.IsMouseDoubleClicked(0))
+                            {
+                                CurrentDirectory = dir;
+                                _selectedFileNameInList = "";
+                            }
                         }
                         ImGui.PopStyleColor();
                     }
 
-                    // Draw files (to show existing files that might be overwritten)
                     foreach (var file in Directory.GetFiles(CurrentDirectory))
                     {
                         var fileName = Path.GetFileName(file);
-                        bool isSelected = _selectedFileName == fileName;
+                        bool isSelected = _selectedFileNameInList == fileName;
                         
                         if (ImGui.Selectable($"[F] {fileName}", isSelected))
                         {
-                            _selectedFileName = fileName;
+                            _selectedFileNameInList = fileName;
                             _fileName = Path.GetFileNameWithoutExtension(fileName);
                         }
                     }
@@ -179,74 +185,48 @@ namespace GeoscientistToolkit.UI.Utils
         {
             ImGui.Separator();
             
-            var style = ImGui.GetStyle();
-            
-            // File name input
-            ImGui.AlignTextToFramePadding();
             ImGui.Text("File name:");
             ImGui.SameLine();
-            float inputWidth = ImGui.GetContentRegionAvail().X * 0.6f;
-            ImGui.SetNextItemWidth(inputWidth);
+            ImGui.SetNextItemWidth(ImGui.GetContentRegionAvail().X - 120);
             ImGui.InputText("##FileNameInput", ref _fileName, 260);
             
-            // Extension dropdown
-            ImGui.AlignTextToFramePadding();
             ImGui.Text("Save as type:");
             ImGui.SameLine();
-            ImGui.SetNextItemWidth(ImGui.GetContentRegionAvail().X * 0.6f);
-            
+             ImGui.SetNextItemWidth(ImGui.GetContentRegionAvail().X - 120);
             if (_extensionOptions.Count > 0)
             {
                 if (ImGui.BeginCombo("##ExtensionCombo", _extensionOptions[_selectedExtensionIndex].ToString()))
                 {
                     for (int i = 0; i < _extensionOptions.Count; i++)
                     {
-                        bool isSelected = (_selectedExtensionIndex == i);
-                        if (ImGui.Selectable(_extensionOptions[i].ToString(), isSelected))
+                        if (ImGui.Selectable(_extensionOptions[i].ToString(), _selectedExtensionIndex == i))
                         {
                             _selectedExtensionIndex = i;
                             SelectedExtension = _extensionOptions[i].Extension;
                         }
-                        
-                        if (isSelected)
-                            ImGui.SetItemDefaultFocus();
                     }
                     ImGui.EndCombo();
                 }
             }
             
-            // Buttons
             ImGui.Spacing();
-            Vector2 buttonSize = new Vector2(80, 0);
-            float buttonsTotalWidth = (buttonSize.X * 2) + style.ItemSpacing.X;
-            float buttonsPosX = ImGui.GetWindowContentRegionMax().X - buttonsTotalWidth;
-            
-            ImGui.SetCursorPosX(buttonsPosX);
-            
-            if (ImGui.Button("Cancel", buttonSize))
-            {
-                IsOpen = false;
-                SelectedPath = "";
-            }
+            float buttonPosX = ImGui.GetContentRegionAvail().X - 170;
+            ImGui.SetCursorPosX(buttonPosX);
 
-            ImGui.SameLine();
-            
-            bool canExport = !string.IsNullOrWhiteSpace(_fileName);
-            if (!canExport) ImGui.BeginDisabled();
-            if (ImGui.Button("Export", buttonSize))
+            if (ImGui.Button("Export", new Vector2(80, 0)))
             {
                 selectionMade = HandleExport();
             }
-            if (!canExport) ImGui.EndDisabled();
-            
-            // Show warning if file exists
-            if (!string.IsNullOrWhiteSpace(_fileName) && _extensionOptions.Count > 0)
+            ImGui.SameLine();
+            if (ImGui.Button("Cancel", new Vector2(80, 0)))
             {
-                string potentialPath = Path.Combine(CurrentDirectory, _fileName + SelectedExtension);
-                if (File.Exists(potentialPath))
-                {
-                    ImGui.TextColored(new Vector4(1.0f, 0.8f, 0.0f, 1.0f), "Warning: File already exists and will be overwritten!");
-                }
+                IsOpen = false;
+            }
+
+            string potentialPath = Path.Combine(CurrentDirectory, _fileName + SelectedExtension);
+            if (File.Exists(potentialPath))
+            {
+                ImGui.TextColored(new Vector4(1.0f, 0.8f, 0.0f, 1.0f), "Warning: File will be overwritten!");
             }
         }
         
@@ -255,25 +235,13 @@ namespace GeoscientistToolkit.UI.Utils
             if (string.IsNullOrWhiteSpace(_fileName))
                 return false;
                 
-            // Ensure the filename doesn't already have the extension
-            string cleanFileName = _fileName;
-            if (!string.IsNullOrEmpty(SelectedExtension) && cleanFileName.EndsWith(SelectedExtension))
-            {
-                cleanFileName = cleanFileName.Substring(0, cleanFileName.Length - SelectedExtension.Length);
-            }
+            string cleanFileName = _fileName.EndsWith(SelectedExtension, StringComparison.OrdinalIgnoreCase)
+                ? _fileName.Substring(0, _fileName.Length - SelectedExtension.Length)
+                : _fileName;
             
-            // Build the full path
             SelectedPath = Path.Combine(CurrentDirectory, cleanFileName + SelectedExtension);
             
-            // Check if we need to confirm overwrite
-            if (File.Exists(SelectedPath))
-            {
-                // In a real implementation, you might want to show a confirmation dialog
-                // For now, we'll just proceed
-                Logger.Log($"Overwriting existing file: {SelectedPath}");
-            }
-            
-            Logger.Log($"Exporting to: {SelectedPath}");
+            Logger.Log($"[ImGuiExportFileDialog] Exporting to: {SelectedPath}");
             IsOpen = false;
             return true;
         }

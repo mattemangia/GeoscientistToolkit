@@ -1,216 +1,206 @@
 ﻿// GeoscientistToolkit/Data/CtImageStack/CtImageStackTools.cs
-using GeoscientistToolkit.Data;
 using GeoscientistToolkit.UI.Interfaces;
 using GeoscientistToolkit.UI.Utils;
 using GeoscientistToolkit.Util;
-using GeoscientistToolkit.UI;
 using ImGuiNET;
 using System.Numerics;
+using System;
+using System.Linq;
+using System.Collections.Generic;
 
 namespace GeoscientistToolkit.Data.CtImageStack
 {
     public class CtImageStackTools : IDatasetTools
     {
-        private readonly ImGuiFileDialog _exportDialog;
-        private readonly ProgressBarDialog _progressDialog;
         private CtImageStackDataset _currentDataset;
-        private int _exportStartSlice = 0;
-        private int _exportEndSlice = 0;
-        private bool _exportAllSlices = true;
         
-        public CtImageStackTools()
-        {
-            _exportDialog = new ImGuiFileDialog("CTExportDialog", FileDialogType.OpenDirectory, "Select Export Folder");
-            _progressDialog = new ProgressBarDialog("Exporting Slices");
-        }
+        // Thresholding state
+        private byte _minThreshold = 30;
+        private byte _maxThreshold = 200;
         
+        // Material selection state
+        private Material _selectedMaterialForEditing;
+        private Material _selectedMaterialForThresholding;
+
         public void Draw(Dataset dataset)
         {
             if (dataset is not CtImageStackDataset ctDataset) return;
-            
             _currentDataset = ctDataset;
-            
-            if (_exportEndSlice == 0 && ctDataset.Depth > 0)
-            {
-                _exportEndSlice = ctDataset.Depth - 1;
-            }
-            
-            ImGui.Text("CT Stack Tools");
+
+            // Initialize selection if null
+            if (_selectedMaterialForEditing == null && _currentDataset.Materials.Count > 1)
+                _selectedMaterialForEditing = _currentDataset.Materials[1];
+            if (_selectedMaterialForThresholding == null && _currentDataset.Materials.Count > 1)
+                _selectedMaterialForThresholding = _currentDataset.Materials[1];
+
+            DrawVolumeInfo();
             ImGui.Separator();
-            
-            // Volume information
+            DrawMaterialEditor();
+            ImGui.Separator();
+            DrawSegmentationTools();
+        }
+
+        private void DrawVolumeInfo()
+        {
             if (ImGui.CollapsingHeader("Volume Information", ImGuiTreeNodeFlags.DefaultOpen))
             {
                 ImGui.Indent();
-                ImGui.Text($"Dimensions: {ctDataset.Width} × {ctDataset.Height} × {ctDataset.Depth}");
-                ImGui.Text($"Voxel Size: {ctDataset.PixelSize:F2} × {ctDataset.PixelSize:F2} × {ctDataset.SliceThickness:F2} {ctDataset.Unit}");
+                ImGui.Text($"Dimensions: {_currentDataset.Width} × {_currentDataset.Height} × {_currentDataset.Depth}");
+                ImGui.Text($"Voxel Size: {_currentDataset.PixelSize:F2} × {_currentDataset.PixelSize:F2} × {_currentDataset.SliceThickness:F2} {_currentDataset.Unit}");
                 
-                if (ctDataset.BinningSize > 1)
+                if (_currentDataset.BinningSize > 1)
                 {
-                    ImGui.Text($"Binning: {ctDataset.BinningSize}×{ctDataset.BinningSize}×{ctDataset.BinningSize}");
+                    ImGui.Text($"Binning: {_currentDataset.BinningSize}×{_currentDataset.BinningSize}");
                 }
                 
-                // Calculate volume size
-                float volumeMm3 = (ctDataset.Width * ctDataset.PixelSize / 1000f) * 
-                                 (ctDataset.Height * ctDataset.PixelSize / 1000f) * 
-                                 (ctDataset.Depth * ctDataset.SliceThickness / 1000f);
-                ImGui.Text($"Volume: {volumeMm3:F2} mm³");
+                float volumeMm3 = (_currentDataset.Width * _currentDataset.PixelSize / 1000f) * 
+                                 (_currentDataset.Height * _currentDataset.PixelSize / 1000f) * 
+                                 (_currentDataset.Depth * _currentDataset.SliceThickness / 1000f);
+                ImGui.Text($"Physical Volume: {volumeMm3:F2} mm³");
                 
                 ImGui.Unindent();
             }
-            
-            // Export options
-            if (ImGui.CollapsingHeader("Export Slices"))
+        }
+
+        private void DrawMaterialEditor()
+        {
+            if (ImGui.CollapsingHeader("Material Editor", ImGuiTreeNodeFlags.DefaultOpen))
             {
                 ImGui.Indent();
-                
-                ImGui.Checkbox("Export all slices", ref _exportAllSlices);
-                
-                if (!_exportAllSlices)
+
+                // --- Material List ---
+                if (ImGui.BeginChild("MaterialList", new Vector2(0, 150), ImGuiChildFlags.Border))
                 {
-                    ImGui.SetNextItemWidth(100);
-                    ImGui.InputInt("Start slice", ref _exportStartSlice);
-                    _exportStartSlice = Math.Clamp(_exportStartSlice, 0, ctDataset.Depth - 1);
-                    
-                    ImGui.SetNextItemWidth(100);
-                    ImGui.InputInt("End slice", ref _exportEndSlice);
-                    _exportEndSlice = Math.Clamp(_exportEndSlice, _exportStartSlice, ctDataset.Depth - 1);
-                    
-                    ImGui.Text($"Will export {_exportEndSlice - _exportStartSlice + 1} slices");
-                }
-                
-                if (ImGui.Button("Export as PNG sequence..."))
-                {
-                    _exportDialog.Open();
-                }
-                
-                ImGui.Unindent();
-            }
-            
-            // Histogram
-            if (ImGui.CollapsingHeader("Histogram"))
-            {
-                ImGui.Indent();
-                DrawHistogram(ctDataset);
-                ImGui.Unindent();
-            }
-            
-            // Handle dialogs
-            HandleExportDialog();
-            _progressDialog.Submit();
-        }
-        
-        private void DrawHistogram(CtImageStackDataset dataset)
-        {
-            // For now, show a placeholder
-            ImGui.Text("Histogram visualization coming soon...");
-            ImGui.TextDisabled("Min value: 0");
-            ImGui.TextDisabled("Max value: 255");
-            ImGui.TextDisabled("Mean value: ~128");
-        }
-        
-        private void HandleExportDialog()
-        {
-            if (_exportDialog.Submit())
-            {
-                string outputFolder = _exportDialog.SelectedPath;
-                if (!string.IsNullOrEmpty(outputFolder) && Directory.Exists(outputFolder))
-                {
-                    StartExportSlices(outputFolder);
-                }
-            }
-        }
-        
-        private void StartExportSlices(string outputFolder)
-        {
-            if (_currentDataset?.VolumeData == null)
-            {
-                Logger.Log("[CtImageStackTools] No volume data to export");
-                return;
-            }
-            
-            int startSlice = _exportAllSlices ? 0 : _exportStartSlice;
-            int endSlice = _exportAllSlices ? _currentDataset.Depth - 1 : _exportEndSlice;
-            int totalSlices = endSlice - startSlice + 1;
-            
-            _progressDialog.Open($"Exporting {totalSlices} slices...");
-            
-            Task.Run(async () =>
-            {
-                try
-                {
-                    for (int i = startSlice; i <= endSlice; i++)
+                    foreach (var material in _currentDataset.Materials.ToList())
                     {
-                        if (_progressDialog.IsCancellationRequested)
-                            break;
-                        
-                        // Export slice
-                        await ExportSliceAsync(outputFolder, i);
-                        
-                        // Update progress
-                        float progress = (float)(i - startSlice + 1) / totalSlices;
-                        string status = $"Exported slice {i + 1} of {_currentDataset.Depth}";
-                        
-                        VeldridManager.ExecuteOnMainThread(() =>
+                        if (material.ID == 0) continue; // Skip exterior
+
+                        bool isSelected = _selectedMaterialForEditing == material;
+                        if (ImGui.Selectable($"{material.Name}##{material.ID}", isSelected))
                         {
-                            _progressDialog.Update(progress, status);
-                        });
+                            _selectedMaterialForEditing = material;
+                        }
+
+                        ImGui.SameLine(ImGui.GetContentRegionAvail().X - 80);
+
+                        // --- CORRECTED Color Edit ---
+                        Vector4 color = material.Color;
+                        if (ImGui.ColorEdit4($"##color{material.ID}", ref color, ImGuiColorEditFlags.NoInputs | ImGuiColorEditFlags.NoLabel))
+                        {
+                            material.Color = color;
+                        }
+
+                        ImGui.SameLine();
+                        bool isVisible = material.IsVisible;
+                        if (ImGui.Checkbox($"##visibility{material.ID}", ref isVisible))
+                        {
+                            material.IsVisible = isVisible;
+                        }
                     }
-                    
-                    Logger.Log($"[CtImageStackTools] Exported {totalSlices} slices to {outputFolder}");
                 }
-                catch (Exception ex)
+                ImGui.EndChild();
+
+                // --- Material Buttons ---
+                if (ImGui.Button("Add Material"))
                 {
-                    Logger.Log($"[CtImageStackTools] Export error: {ex.Message}");
+                    byte newId = MaterialOperations.GetNextMaterialID(_currentDataset.Materials);
+                    // Generate a random color for the new material
+                    var random = new Random();
+                    var color = new Vector4((float)random.NextDouble(), (float)random.NextDouble(), (float)random.NextDouble(), 1.0f);
+                    var newMaterial = new Material(newId, $"Material {newId}", color);
+                    _currentDataset.Materials.Add(newMaterial);
+                    _selectedMaterialForEditing = newMaterial;
                 }
-                finally
+                ImGui.SameLine();
+
+                if (_selectedMaterialForEditing == null || _selectedMaterialForEditing.ID == 0) ImGui.BeginDisabled();
+                if (ImGui.Button("Remove Selected"))
                 {
-                    VeldridManager.ExecuteOnMainThread(() =>
+                    _currentDataset.Materials.Remove(_selectedMaterialForEditing);
+                    _selectedMaterialForEditing = _currentDataset.Materials.FirstOrDefault(m => m.ID != 0);
+                }
+                if (_selectedMaterialForEditing == null || _selectedMaterialForEditing.ID == 0) ImGui.EndDisabled();
+                
+                ImGui.SameLine();
+                if (_selectedMaterialForEditing == null || _selectedMaterialForEditing.ID == 0) ImGui.BeginDisabled();
+                if (ImGui.Button("Rename"))
+                {
+                    // Simple rename popup logic
+                    ImGui.OpenPopup("Rename Material");
+                }
+                if (_selectedMaterialForEditing == null || _selectedMaterialForEditing.ID == 0) ImGui.EndDisabled();
+                
+                // Handle the rename popup
+                if (ImGui.BeginPopup("Rename Material"))
+                {
+                    string name = _selectedMaterialForEditing.Name;
+                    if (ImGui.InputText("New Name", ref name, 100, ImGuiInputTextFlags.EnterReturnsTrue))
                     {
-                        _progressDialog.Close();
-                    });
+                        _selectedMaterialForEditing.Name = name;
+                        ImGui.CloseCurrentPopup();
+                    }
+                    ImGui.EndPopup();
                 }
-            }, _progressDialog.CancellationToken);
+
+                ImGui.Unindent();
+            }
         }
         
-        private async Task ExportSliceAsync(string outputFolder, int sliceIndex)
+        private void DrawSegmentationTools()
         {
-            await Task.Run(() =>
+            if (ImGui.CollapsingHeader("Segmentation Tools", ImGuiTreeNodeFlags.DefaultOpen))
             {
-                int width = _currentDataset.Width;
-                int height = _currentDataset.Height;
-                byte[] sliceData = new byte[width * height];
-                
-                // Read slice data
-                for (int y = 0; y < height; y++)
+                ImGui.Indent();
+                ImGui.Text("Thresholding:");
+
+                int min = _minThreshold;
+                int max = _maxThreshold;
+
+                ImGui.SetNextItemWidth(ImGui.GetContentRegionAvail().X);
+                if (ImGui.DragIntRange2("##threshold", ref min, ref max, 1.0f, 0, 255, "Min: %d", "Max: %d"))
                 {
-                    for (int x = 0; x < width; x++)
+                    _minThreshold = (byte)min;
+                    _maxThreshold = (byte)max;
+                }
+                
+                string preview = _selectedMaterialForThresholding != null ? _selectedMaterialForThresholding.Name : "Select a material...";
+                if (ImGui.BeginCombo("Target Material", preview))
+                {
+                    foreach(var mat in _currentDataset.Materials.Where(m => m.ID != 0))
                     {
-                        sliceData[y * width + x] = _currentDataset.VolumeData[x, y, sliceIndex];
+                        if (ImGui.Selectable(mat.Name, mat == _selectedMaterialForThresholding))
+                        {
+                            _selectedMaterialForThresholding = mat;
+                        }
                     }
+                    ImGui.EndCombo();
                 }
-                
-                // Save as PNG using StbImageWrite
-                string filename = Path.Combine(outputFolder, $"slice_{sliceIndex:D5}.png");
-                
-                // Convert to RGBA for StbImageWrite
-                byte[] rgbaData = new byte[width * height * 4];
-                for (int i = 0; i < width * height; i++)
+
+                if (_selectedMaterialForThresholding == null)
                 {
-                    byte gray = sliceData[i];
-                    rgbaData[i * 4] = gray;
-                    rgbaData[i * 4 + 1] = gray;
-                    rgbaData[i * 4 + 2] = gray;
-                    rgbaData[i * 4 + 3] = 255;
+                    ImGui.TextColored(new Vector4(1, 0.5f, 0.5f, 1), "Create a material to enable thresholding.");
+                    ImGui.BeginDisabled();
+                }
+
+                if (ImGui.Button("Add by Threshold [+]"))
+                {
+                    _selectedMaterialForThresholding.MinValue = _minThreshold;
+                    _selectedMaterialForThresholding.MaxValue = _maxThreshold;
+                    MaterialOperations.AddVoxelsByThresholdAsync(_currentDataset.VolumeData, _currentDataset.LabelData, _selectedMaterialForThresholding.ID, _minThreshold, _maxThreshold);
+                }
+                ImGui.SameLine();
+                if (ImGui.Button("Remove by Threshold [-]"))
+                {
+                    MaterialOperations.RemoveVoxelsByThresholdAsync(_currentDataset.VolumeData, _currentDataset.LabelData, _selectedMaterialForThresholding.ID, _minThreshold, _maxThreshold);
                 }
                 
-                using (var stream = File.Create(filename))
+                if (_selectedMaterialForThresholding == null)
                 {
-                    var writer = new StbImageWriteSharp.ImageWriter();
-                    writer.WritePng(rgbaData, width, height, 
-                        StbImageWriteSharp.ColorComponents.RedGreenBlueAlpha, stream);
+                    ImGui.EndDisabled();
                 }
-            });
+
+                ImGui.Unindent();
+            }
         }
     }
 }

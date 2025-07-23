@@ -13,7 +13,8 @@ using GeoscientistToolkit.Util;
 namespace GeoscientistToolkit.Business
 {
     /// <summary>
-    /// Manages the current project and its datasets.
+    /// Manages the current project state, including loading, saving, and handling datasets.
+    /// Implements a singleton pattern.
     /// </summary>
     public class ProjectManager
     {
@@ -25,20 +26,18 @@ namespace GeoscientistToolkit.Business
         public string ProjectPath { get; set; }
         public bool HasUnsavedChanges { get; set; }
 
-        /// <summary>
-        /// Fired when a dataset is removed from the project.
-        /// </summary>
         public event Action<Dataset> DatasetRemoved;
+        public event Action<Dataset> DatasetDataChanged;
+
+        public void NotifyDatasetDataChanged(Dataset dataset) => DatasetDataChanged?.Invoke(dataset);
 
         private ProjectManager() { }
 
         public void NewProject()
         {
-            // Clear all loaded datasets
-            foreach (var dataset in LoadedDatasets)
+            for (int i = LoadedDatasets.Count - 1; i >= 0; i--)
             {
-                dataset.Unload();
-                // No need to fire event here, as the whole project is cleared
+                LoadedDatasets[i].Unload();
             }
             LoadedDatasets.Clear();
             
@@ -51,7 +50,7 @@ namespace GeoscientistToolkit.Business
 
         public void AddDataset(Dataset dataset)
         {
-            if (dataset == null) return;
+            if (dataset == null || LoadedDatasets.Contains(dataset)) return;
             
             LoadedDatasets.Add(dataset);
             HasUnsavedChanges = true;
@@ -60,18 +59,42 @@ namespace GeoscientistToolkit.Business
 
         public void RemoveDataset(Dataset dataset)
         {
-            if (dataset == null) return;
-            
-            bool removed = LoadedDatasets.Remove(dataset);
+            if (dataset == null || !LoadedDatasets.Contains(dataset)) return;
 
-            if (removed)
+            var partnersToRemove = new List<Dataset>();
+
+            if (dataset is StreamingCtVolumeDataset streamingDs && streamingDs.EditablePartner != null)
             {
-                dataset.Unload();
-                HasUnsavedChanges = true;
-                Logger.Log($"Removed dataset: {dataset.Name}");
-                
-                // Invoke the event to notify listeners
-                DatasetRemoved?.Invoke(dataset);
+                if (LoadedDatasets.Contains(streamingDs.EditablePartner))
+                {
+                    partnersToRemove.Add(streamingDs.EditablePartner);
+                }
+            }
+            else if (dataset is CtImageStackDataset editableDs)
+            {
+                var streamingPartner = LoadedDatasets
+                    .OfType<StreamingCtVolumeDataset>()
+                    .FirstOrDefault(s => s.EditablePartner == editableDs);
+                if (streamingPartner != null)
+                {
+                    partnersToRemove.Add(streamingPartner);
+                }
+            }
+
+            LoadedDatasets.Remove(dataset);
+            dataset.Unload();
+            Logger.Log($"Removed dataset: {dataset.Name}");
+            DatasetRemoved?.Invoke(dataset);
+            HasUnsavedChanges = true;
+
+            foreach (var partner in partnersToRemove)
+            {
+                if (LoadedDatasets.Remove(partner))
+                {
+                    partner.Unload();
+                    Logger.Log($"Removed linked partner dataset: {partner.Name}");
+                    DatasetRemoved?.Invoke(partner);
+                }
             }
         }
 
@@ -89,10 +112,10 @@ namespace GeoscientistToolkit.Business
             ProjectName = Path.GetFileNameWithoutExtension(path);
             HasUnsavedChanges = false;
             
-            // Update recent projects list
             UpdateRecentProjects(path);
         }
 
+        // --- BACKUPPROJECT METHOD RESTORED ---
         public void BackupProject()
         {
             var settings = SettingsManager.Instance.Settings.Backup;
@@ -111,16 +134,22 @@ namespace GeoscientistToolkit.Business
                     backupFilePath += ".gz";
                     using FileStream backupFileStream = File.Create(backupFilePath);
                     using GZipStream compressionStream = new GZipStream(backupFileStream, CompressionMode.Compress);
-                    using StreamWriter writer = new StreamWriter(compressionStream);
                     
+                    // Create a temporary file for the serialized project
                     var tempPath = Path.GetTempFileName();
                     ProjectSerializer.SaveProject(this, tempPath);
-                    writer.Write(File.ReadAllText(tempPath));
+
+                    // Copy the contents of the temporary file to the compression stream
+                    using (var tempFileStream = File.OpenRead(tempPath))
+                    {
+                        tempFileStream.CopyTo(compressionStream);
+                    }
                     File.Delete(tempPath);
                 }
                 else
                 {
-                    File.Copy(ProjectPath, backupFilePath, true);
+                    // For non-compressed backup, we just save a new copy with a timestamp
+                    ProjectSerializer.SaveProject(this, backupFilePath);
                 }
 
                 Logger.Log($"Project backed up to {backupFilePath}");
@@ -144,57 +173,89 @@ namespace GeoscientistToolkit.Business
                 Logger.LogError($"Failed to create project backup: {ex.Message}");
             }
         }
-
+        // --- END OF RESTORED METHOD ---
 
         public void LoadProject(string path)
         {
             if (!File.Exists(path))
             {
                 Logger.LogError($"Project file not found: {path}");
-                var recentProjects = SettingsManager.Instance.Settings.FileAssociations.RecentProjects;
-                recentProjects.RemoveAll(p => string.Equals(p, path, StringComparison.OrdinalIgnoreCase));
-                SettingsManager.Instance.SaveSettings();
+                RemoveFromRecentProjects(path);
                 return;
             }
             
             var projectDto = ProjectSerializer.LoadProject(path);
             if (projectDto == null) return;
 
-            NewProject(); // Clear current project before loading
+            NewProject(); 
 
             ProjectName = projectDto.ProjectName;
             ProjectPath = path;
 
+            var createdDatasets = new Dictionary<string, Dataset>();
+            var streamingDtos = new List<StreamingCtVolumeDatasetDTO>();
+
+            // PASS 1: Create all non-streaming datasets.
             foreach (var datasetDto in projectDto.Datasets)
             {
-                var dataset = CreateDatasetFromDTO(datasetDto);
-                if (dataset != null)
+                if (datasetDto is StreamingCtVolumeDatasetDTO sDto)
                 {
-                    LoadedDatasets.Add(dataset);
+                    streamingDtos.Add(sDto);
+                }
+                else
+                {
+                    var dataset = CreateDatasetFromDTO(datasetDto, null);
+                    if (dataset != null)
+                    {
+                        createdDatasets[dataset.FilePath] = dataset;
+                    }
                 }
             }
 
+            // PASS 2: Create streaming datasets and link partners.
+            foreach (var sDto in streamingDtos)
+            {
+                var dataset = CreateDatasetFromDTO(sDto, createdDatasets);
+                if (dataset != null)
+                {
+                    createdDatasets[sDto.FilePath] = dataset;
+                }
+            }
+            
+            LoadedDatasets.AddRange(createdDatasets.Values);
+
             HasUnsavedChanges = false;
             Logger.Log($"Project '{ProjectName}' loaded from: {path}");
-            
-            // Update recent projects list
             UpdateRecentProjects(path);
         }
 
-        private Dataset CreateDatasetFromDTO(DatasetDTO dto)
+        private Dataset CreateDatasetFromDTO(DatasetDTO dto, IReadOnlyDictionary<string, Dataset> partners)
         {
             switch (dto)
             {
-                case ImageDatasetDTO imgDto:
-                    var imgDataset = new ImageDataset(imgDto.Name, imgDto.FilePath)
+                case StreamingCtVolumeDatasetDTO sDto:
+                    var streamingDataset = new StreamingCtVolumeDataset(sDto.Name, sDto.FilePath)
                     {
-                        PixelSize = imgDto.PixelSize,
-                        Unit = imgDto.Unit,
-                        IsMissing = !File.Exists(imgDto.FilePath)
+                        IsMissing = !File.Exists(sDto.FilePath)
                     };
-                    if (imgDataset.IsMissing) Logger.LogWarning($"Source file not found for dataset: {imgDataset.Name} at {imgDataset.FilePath}");
-                    return imgDataset;
-                
+                    if (streamingDataset.IsMissing)
+                    {
+                        Logger.LogWarning($"Source file not found for streaming dataset: {sDto.Name} at {sDto.FilePath}");
+                    }
+                    else if (partners != null && partners.TryGetValue(sDto.PartnerFilePath, out var partner))
+                    {
+                        streamingDataset.EditablePartner = partner as CtImageStackDataset;
+                        if (streamingDataset.EditablePartner == null)
+                        {
+                            Logger.LogError($"Could not link streaming dataset '{sDto.Name}'. Partner at '{sDto.PartnerFilePath}' is not an editable CtImageStackDataset.");
+                        }
+                    }
+                    else
+                    {
+                        Logger.LogError($"Could not find editable partner for streaming dataset '{sDto.Name}' at path '{sDto.PartnerFilePath}'.");
+                    }
+                    return streamingDataset;
+
                 case CtImageStackDatasetDTO ctDto:
                     var ctDataset = new CtImageStackDataset(ctDto.Name, ctDto.FilePath)
                     {
@@ -204,18 +265,27 @@ namespace GeoscientistToolkit.Business
                         BinningSize = ctDto.BinningSize,
                         IsMissing = !Directory.Exists(ctDto.FilePath)
                     };
-                    if (ctDataset.IsMissing) Logger.LogWarning($"Source folder not found for dataset: {ctDataset.Name} at {ctDataset.FilePath}");
+                    if (ctDataset.IsMissing) Logger.LogWarning($"Source folder not found for dataset: {ctDto.Name} at {ctDto.FilePath}");
                     return ctDataset;
                     
+                case ImageDatasetDTO imgDto:
+                    var imgDataset = new ImageDataset(imgDto.Name, imgDto.FilePath)
+                    {
+                         PixelSize = imgDto.PixelSize,
+                         Unit = imgDto.Unit,
+                         IsMissing = !File.Exists(imgDto.FilePath)
+                    };
+                     if (imgDataset.IsMissing) Logger.LogWarning($"Source file not found for dataset: {imgDataset.Name} at {imgDataset.FilePath}");
+                    return imgDataset;
+
                 case DatasetGroupDTO groupDto:
                     var childDatasets = new List<Dataset>();
                     foreach (var childDto in groupDto.Datasets)
                     {
-                        var childDataset = CreateDatasetFromDTO(childDto);
-                        if (childDataset != null)
-                        {
-                            childDatasets.Add(childDataset);
-                        }
+                         if (partners != null && partners.TryGetValue(childDto.FilePath, out var child))
+                         {
+                             childDatasets.Add(child);
+                         }
                     }
                     return new DatasetGroup(groupDto.Name, childDatasets);
 
@@ -224,40 +294,31 @@ namespace GeoscientistToolkit.Business
                     return null;
             }
         }
-
-        /// <summary>
-        /// Updates the recent projects list in settings
-        /// </summary>
+        
         private void UpdateRecentProjects(string projectPath)
         {
             var settings = SettingsManager.Instance.Settings;
             var recentProjects = settings.FileAssociations.RecentProjects;
-            
-            // Remove the path if it already exists (to move it to the top)
             recentProjects.RemoveAll(p => string.Equals(p, projectPath, StringComparison.OrdinalIgnoreCase));
-            
-            // Add to the beginning of the list
             recentProjects.Insert(0, projectPath);
-            
-            // Limit the list size based on settings
             int maxRecent = settings.Appearance.MaxRecentProjects;
-            if (maxRecent < 0) maxRecent = 10; // safety check
             while (recentProjects.Count > maxRecent)
             {
                 recentProjects.RemoveAt(recentProjects.Count - 1);
             }
-            
-            // Save the updated settings
             SettingsManager.Instance.SaveSettings();
         }
 
-        /// <summary>
-        /// Gets the list of recent projects from settings
-        /// </summary>
+        private void RemoveFromRecentProjects(string projectPath)
+        {
+            var recentProjects = SettingsManager.Instance.Settings.FileAssociations.RecentProjects;
+            recentProjects.RemoveAll(p => string.Equals(p, projectPath, StringComparison.OrdinalIgnoreCase));
+            SettingsManager.Instance.SaveSettings();
+        }
+
         public static List<string> GetRecentProjects()
         {
             var settings = SettingsManager.Instance.Settings;
-            // Filter out projects that no longer exist
             var existingProjects = settings.FileAssociations.RecentProjects
                 .Where(File.Exists)
                 .ToList();

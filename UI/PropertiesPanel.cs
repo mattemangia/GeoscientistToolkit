@@ -1,26 +1,29 @@
-// GeoscientistToolkit/UI/PropertiesPanel.cs (Updated to inherit from BasePanel and handle image export)
+// GeoscientistToolkit/UI/PropertiesPanel.cs (Fixed to handle pop-out state correctly)
 using GeoscientistToolkit.Data;
 using GeoscientistToolkit.UI.Interfaces;
 using ImGuiNET;
 using System.Numerics;
-using GeoscientistToolkit.Data.Image; // Added for ImageDataset and ImageExportDialog
-using GeoscientistToolkit.Util; // Added for Logger
+using GeoscientistToolkit.Data.Image;
+using GeoscientistToolkit.Util;
 
 namespace GeoscientistToolkit.UI
 {
     public class PropertiesPanel : BasePanel
     {
         private Dataset _selectedDataset;
-        private readonly ImageExportDialog _imageExportDialog; // Added to handle image export
+        private readonly ImageExportDialog _imageExportDialog;
 
         public PropertiesPanel() : base("Properties", new Vector2(300, 400))
         {
-            _imageExportDialog = new ImageExportDialog(); // Initialize the dialog
+            _imageExportDialog = new ImageExportDialog();
         }
 
         public void Submit(ref bool pOpen, Dataset selectedDataset)
         {
+            // CRITICAL: Update the dataset BEFORE calling base.Submit()
+            // This ensures the dataset is available even when popped out
             _selectedDataset = selectedDataset;
+            
             base.Submit(ref pOpen);
             
             // Submit the dialog every frame. It will only draw when it's open.
@@ -66,14 +69,12 @@ namespace GeoscientistToolkit.UI
 
                 if (ImGui.Button("Export...", new Vector2(-1, 0)))
                 {
-                    // FIX: Implemented export functionality for ImageDataset
                     if (_selectedDataset is ImageDataset imageDataset)
                     {
                         _imageExportDialog.Open(imageDataset);
                     }
                     else
                     {
-                        // Optionally, handle cases where the dataset type is not exportable from this panel.
                         Logger.Log($"Export from this panel is not implemented for dataset type: {_selectedDataset.Type}");
                     }
                 }

@@ -1,4 +1,4 @@
-﻿// GeoscientistToolkit/UI/BasePanel.cs
+﻿// GeoscientistToolkit/UI/BasePanel.cs (Fixed pop-out window rendering)
 using System;
 using System.Collections.Generic;
 using System.Numerics;
@@ -255,14 +255,16 @@ namespace GeoscientistToolkit.UI
         /// </summary>
         private void DrawInPopOutWindow()
         {
-            ImGui.SetNextWindowPos(Vector2.Zero);
-            ImGui.SetNextWindowSize(ImGui.GetIO().DisplaySize);
+            // FIXED: Create a properly positioned and sized window instead of full-screen
+            var displaySize = ImGui.GetIO().DisplaySize;
+            var windowPadding = ImGui.GetStyle().WindowPadding;
             
-            // Use local variable to avoid ref in lambda
-            bool localOpen = true;
-            if (ImGui.Begin(_title + "##PopOut", ref localOpen, 
-                ImGuiWindowFlags.NoTitleBar | ImGuiWindowFlags.NoResize | 
-                ImGuiWindowFlags.NoMove | ImGuiWindowFlags.NoCollapse))
+            // Set window to take most of the display but with some padding
+            ImGui.SetNextWindowPos(windowPadding);
+            ImGui.SetNextWindowSize(displaySize - windowPadding * 2);
+            
+            // Use proper window flags - keep the title bar and allow resizing
+            if (ImGui.Begin(_title, ref _isOpen, ImGuiWindowFlags.NoCollapse | ImGuiWindowFlags.NoSavedSettings))
             {
                 DrawPopOutButton();
                 DrawContent();
@@ -270,7 +272,7 @@ namespace GeoscientistToolkit.UI
             ImGui.End();
             
             // Set flag if window wants to close
-            if (!localOpen)
+            if (!_isOpen)
             {
                 _popOutWindowWantsClosed = true;
             }

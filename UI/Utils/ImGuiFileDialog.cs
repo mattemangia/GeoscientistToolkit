@@ -5,7 +5,7 @@ using GeoscientistToolkit.Util;
 
 namespace GeoscientistToolkit.UI.Utils
 {
-    public enum FileDialogType { OpenFile, OpenDirectory }
+  
 
     public class ImGuiFileDialog
     {

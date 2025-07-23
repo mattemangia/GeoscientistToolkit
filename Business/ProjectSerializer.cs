@@ -82,6 +82,10 @@ namespace GeoscientistToolkit.Business
                         nameof(ImageDataset) => JsonSerializer.Deserialize<ImageDatasetDTO>(rawText, options),
                         nameof(CtImageStackDataset) => JsonSerializer.Deserialize<CtImageStackDatasetDTO>(rawText, options),
                         nameof(DatasetGroup) => JsonSerializer.Deserialize<DatasetGroupDTO>(rawText, options),
+
+                        // --- ADDED CASE FOR THE NEW DATASET TYPE ---
+                        nameof(StreamingCtVolumeDataset) => JsonSerializer.Deserialize<StreamingCtVolumeDatasetDTO>(rawText, options),
+
                         _ => throw new JsonException($"Unknown dataset type: {typeName}")
                     };
                 }

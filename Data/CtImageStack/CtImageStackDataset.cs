@@ -1,5 +1,10 @@
 ﻿// GeoscientistToolkit/Data/CtImageStack/CtImageStackDataset.cs
 using GeoscientistToolkit.Data.VolumeData;
+using GeoscientistToolkit.Util;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Numerics;
 
 namespace GeoscientistToolkit.Data.CtImageStack
 {
@@ -13,7 +18,7 @@ namespace GeoscientistToolkit.Data.CtImageStack
         // Pixel/Voxel information
         public float PixelSize { get; set; } // In-plane pixel size
         public float SliceThickness { get; set; } // Distance between slices
-        public string Unit { get; set; } = "mm";
+        public string Unit { get; set; } = "µm";
         public int BitDepth { get; set; } = 16;
         
         // CT-specific properties
@@ -28,24 +33,35 @@ namespace GeoscientistToolkit.Data.CtImageStack
         private ChunkedVolume _volumeData;
         public ChunkedVolume VolumeData => _volumeData;
 
+        // --- NEW PROPERTIES FOR MATERIALS AND LABELS ---
+        public ChunkedLabelVolume LabelData { get; private set; }
+        public List<Material> Materials { get; set; } = new List<Material>();
+
+
         public CtImageStackDataset(string name, string folderPath) : base(name, folderPath)
         {
             Type = DatasetType.CtImageStack;
+            // Add a default "Exterior" material
+            Materials.Add(new Material(0, "Exterior", new Vector4(0, 0, 0, 0)));
         }
 
         public override long GetSizeInBytes()
         {
-            // Check for volume file first
+            long totalSize = 0;
             string volumePath = GetVolumePath();
             if (File.Exists(volumePath))
             {
-                return new FileInfo(volumePath).Length;
+                totalSize += new FileInfo(volumePath).Length;
+            }
+
+            string labelPath = GetLabelPath();
+            if (File.Exists(labelPath))
+            {
+                totalSize += new FileInfo(labelPath).Length;
             }
             
-            // Otherwise calculate total size of all image files
-            long totalSize = 0;
-            
-            if (Directory.Exists(FilePath))
+            // If binary files don't exist, calculate from images
+            if (totalSize == 0 && Directory.Exists(FilePath))
             {
                 var imageFiles = Directory.GetFiles(FilePath)
                     .Where(f => IsImageFile(f))
@@ -62,21 +78,37 @@ namespace GeoscientistToolkit.Data.CtImageStack
 
         public override void Load()
         {
-            if (_volumeData != null) return; // Already loaded
-            
-            var volumePath = GetVolumePath();
-            if (File.Exists(volumePath))
+            // Load Grayscale Data
+            if (_volumeData == null)
             {
-                // Load the volume asynchronously
-                var loadTask = ChunkedVolume.LoadFromBinAsync(volumePath, false);
-                _volumeData = loadTask.GetAwaiter().GetResult();
-                
-                // Update dimensions if needed
-                if (_volumeData != null)
+                var volumePath = GetVolumePath();
+                if (File.Exists(volumePath))
                 {
-                    Width = _volumeData.Width;
-                    Height = _volumeData.Height;
-                    Depth = _volumeData.Depth;
+                    var loadTask = ChunkedVolume.LoadFromBinAsync(volumePath, false);
+                    _volumeData = loadTask.GetAwaiter().GetResult();
+                    if (_volumeData != null)
+                    {
+                        Width = _volumeData.Width;
+                        Height = _volumeData.Height;
+                        Depth = _volumeData.Depth;
+                    }
+                }
+            }
+
+            // Load Label Data
+            if (LabelData == null)
+            {
+                var labelPath = GetLabelPath();
+                if (File.Exists(labelPath))
+                {
+                    LabelData = ChunkedLabelVolume.LoadFromBin(labelPath, false);
+                }
+                // If label file doesn't exist, create an empty one
+                else if (_volumeData != null)
+                {
+                    Logger.Log($"[CtImageStackDataset] No label file found for {Name}. Creating a new empty one.");
+                    LabelData = new ChunkedLabelVolume(Width, Height, Depth, _volumeData.ChunkDim, false, labelPath);
+                    LabelData.SaveAsBin(labelPath);
                 }
             }
         }
@@ -85,6 +117,8 @@ namespace GeoscientistToolkit.Data.CtImageStack
         {
             _volumeData?.Dispose();
             _volumeData = null;
+            LabelData?.Dispose();
+            LabelData = null;
         }
         
         public object ToSerializableObject()
@@ -97,7 +131,8 @@ namespace GeoscientistToolkit.Data.CtImageStack
                 PixelSize = this.PixelSize,
                 SliceThickness = this.SliceThickness,
                 Unit = this.Unit,
-                BinningSize = this.BinningSize
+                BinningSize = this.BinningSize,
+                // TODO: Serialize materials
             };
         }
         
@@ -105,6 +140,12 @@ namespace GeoscientistToolkit.Data.CtImageStack
         {
             string folderName = Path.GetFileName(FilePath);
             return Path.Combine(FilePath, $"{folderName}.Volume.bin");
+        }
+        
+        private string GetLabelPath()
+        {
+            string folderName = Path.GetFileName(FilePath);
+            return Path.Combine(FilePath, $"{folderName}.Labels.bin");
         }
         
         private bool IsImageFile(string path)

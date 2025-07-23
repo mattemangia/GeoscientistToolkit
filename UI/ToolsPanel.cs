@@ -1,4 +1,4 @@
-﻿// GeoscientistToolkit/UI/ToolsPanel.cs (Updated to inherit from BasePanel)
+﻿// GeoscientistToolkit/UI/ToolsPanel.cs (Fixed to handle pop-out state correctly)
 using GeoscientistToolkit.Data;
 using GeoscientistToolkit.UI.Interfaces;
 using ImGuiNET;
@@ -16,7 +16,10 @@ namespace GeoscientistToolkit.UI
         
         public void Submit(ref bool pOpen, Dataset selectedDataset)
         {
+            // CRITICAL: Update the dataset BEFORE calling base.Submit()
+            // This ensures the dataset is available even when popped out
             _selectedDataset = selectedDataset;
+            
             base.Submit(ref pOpen);
         }
         

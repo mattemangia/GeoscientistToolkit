@@ -584,6 +584,32 @@ namespace GeoscientistToolkit.Data.VolumeData
             if (chunkDim <= 0 || chunkDim > 1024)
                 throw new ArgumentException("Chunk dimension must be between 1 and 1024");
         }
+        /// <summary>
+        /// Retrieves all volume data as a single flat byte array.
+        /// WARNING: This is a memory-intensive operation and may fail for very large datasets.
+        /// </summary>
+        public byte[] GetAllData()
+        {
+            long requiredMemory = (long)Width * Height * Depth;
+            Logger.LogWarning($"[ChunkedVolume] GetAllData() called. Allocating {requiredMemory / (1024 * 1024)} MB of RAM. This may be slow or fail on large datasets.");
+
+            byte[] fullVolume = new byte[requiredMemory];
+            
+            Parallel.For(0, Depth, z =>
+            {
+                long zOffset = (long)z * Width * Height;
+                for (int y = 0; y < Height; y++)
+                {
+                    long yzOffset = zOffset + (long)y * Width;
+                    for (int x = 0; x < Width; x++)
+                    {
+                        fullVolume[yzOffset + x] = this[x, y, z];
+                    }
+                }
+            });
+
+            return fullVolume;
+        }
         #endregion
 
         #region IDisposable Implementation

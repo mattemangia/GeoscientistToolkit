@@ -39,4 +39,11 @@ namespace GeoscientistToolkit.Data
         public string ProjectName { get; set; }
         public List<DatasetDTO> Datasets { get; set; } = new List<DatasetDTO>();
     }
+    public class StreamingCtVolumeDatasetDTO : DatasetDTO
+    {
+        /// <summary>
+        /// The file path to the corresponding CtImageStackDataset's folder, used to link the editable partner.
+        /// </summary>
+        public string PartnerFilePath { get; set; }
+    }
 }
