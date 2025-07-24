@@ -1,5 +1,6 @@
 ﻿// GeoscientistToolkit/Data/CtImageStack/CtImageStackDataset.cs
 using GeoscientistToolkit.Data.VolumeData;
+using GeoscientistToolkit.UI.Interfaces;
 using GeoscientistToolkit.Util;
 using System.Collections.Generic;
 using System.IO;
@@ -14,21 +15,21 @@ namespace GeoscientistToolkit.Data.CtImageStack
         public int Width { get; set; }
         public int Height { get; set; }
         public int Depth { get; set; } // Number of slices
-        
+
         // Pixel/Voxel information
         public float PixelSize { get; set; } // In-plane pixel size
         public float SliceThickness { get; set; } // Distance between slices
         public string Unit { get; set; } = "µm";
         public int BitDepth { get; set; } = 16;
-        
+
         // CT-specific properties
         public int BinningSize { get; set; } = 1;
         public float MinValue { get; set; }
         public float MaxValue { get; set; }
-        
+
         // File paths for the image stack
         public List<string> ImagePaths { get; set; } = new List<string>();
-        
+
         // Volume data
         private ChunkedVolume _volumeData;
         public ChunkedVolume VolumeData => _volumeData;
@@ -36,7 +37,6 @@ namespace GeoscientistToolkit.Data.CtImageStack
         // --- NEW PROPERTIES FOR MATERIALS AND LABELS ---
         public ChunkedLabelVolume LabelData { get; private set; }
         public List<Material> Materials { get; set; } = new List<Material>();
-
 
         public CtImageStackDataset(string name, string folderPath) : base(name, folderPath)
         {
@@ -59,20 +59,20 @@ namespace GeoscientistToolkit.Data.CtImageStack
             {
                 totalSize += new FileInfo(labelPath).Length;
             }
-            
+
             // If binary files don't exist, calculate from images
             if (totalSize == 0 && Directory.Exists(FilePath))
             {
                 var imageFiles = Directory.GetFiles(FilePath)
                     .Where(f => IsImageFile(f))
                     .ToList();
-                    
+
                 foreach (var file in imageFiles)
                 {
                     totalSize += new FileInfo(file).Length;
                 }
             }
-            
+
             return totalSize;
         }
 
@@ -101,9 +101,23 @@ namespace GeoscientistToolkit.Data.CtImageStack
                 var labelPath = GetLabelPath();
                 if (File.Exists(labelPath))
                 {
-                    LabelData = ChunkedLabelVolume.LoadFromBin(labelPath, false);
+                    var loadedLabels = ChunkedLabelVolume.LoadFromBin(labelPath, false);
+                    if (_volumeData != null &&
+                        (loadedLabels.Width != _volumeData.Width ||
+                         loadedLabels.Height != _volumeData.Height ||
+                         loadedLabels.Depth != _volumeData.Depth))
+                    {
+                        Logger.LogWarning($"[CtImageStackDataset] Mismatched dimensions for '{Name}'. Recreating empty label file.");
+                        loadedLabels.Dispose();
+                        try { File.Delete(labelPath); } catch { }
+                        LabelData = new ChunkedLabelVolume(Width, Height, Depth, _volumeData.ChunkDim, false, labelPath);
+                        LabelData.SaveAsBin(labelPath);
+                    }
+                    else
+                    {
+                        LabelData = loadedLabels;
+                    }
                 }
-                // If label file doesn't exist, create an empty one
                 else if (_volumeData != null)
                 {
                     Logger.Log($"[CtImageStackDataset] No label file found for {Name}. Creating a new empty one.");
@@ -120,10 +134,10 @@ namespace GeoscientistToolkit.Data.CtImageStack
             LabelData?.Dispose();
             LabelData = null;
         }
-        
+
         public object ToSerializableObject()
         {
-            return new CtImageStackDatasetDTO
+            var dto = new CtImageStackDatasetDTO
             {
                 TypeName = nameof(CtImageStackDataset),
                 Name = this.Name,
@@ -132,27 +146,45 @@ namespace GeoscientistToolkit.Data.CtImageStack
                 SliceThickness = this.SliceThickness,
                 Unit = this.Unit,
                 BinningSize = this.BinningSize,
-                // TODO: Serialize materials
             };
+
+            if (this.Materials != null)
+            {
+                foreach (var material in this.Materials)
+                {
+                    dto.Materials.Add(new MaterialDTO
+                    {
+                        ID = material.ID,
+                        Name = material.Name,
+                        Color = material.Color,
+                        MinValue = material.MinValue,
+                        MaxValue = material.MaxValue,
+                        IsVisible = material.IsVisible,
+                        IsExterior = material.IsExterior,
+                        Density = material.Density
+                    });
+                }
+            }
+            return dto;
         }
-        
+
         private string GetVolumePath()
         {
             string folderName = Path.GetFileName(FilePath);
             return Path.Combine(FilePath, $"{folderName}.Volume.bin");
         }
-        
+
         private string GetLabelPath()
         {
             string folderName = Path.GetFileName(FilePath);
             return Path.Combine(FilePath, $"{folderName}.Labels.bin");
         }
-        
+
         private bool IsImageFile(string path)
         {
             string ext = Path.GetExtension(path).ToLower();
-            return ext == ".png" || ext == ".jpg" || ext == ".jpeg" || 
-                   ext == ".bmp" || ext == ".tif" || ext == ".tiff" || 
+            return ext == ".png" || ext == ".jpg" || ext == ".jpeg" ||
+                   ext == ".bmp" || ext == ".tif" || ext == ".tiff" ||
                    ext == ".tga" || ext == ".gif";
         }
     }

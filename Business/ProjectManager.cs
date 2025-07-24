@@ -40,18 +40,18 @@ namespace GeoscientistToolkit.Business
                 LoadedDatasets[i].Unload();
             }
             LoadedDatasets.Clear();
-            
+
             ProjectName = "Untitled Project";
             ProjectPath = null;
             HasUnsavedChanges = false;
-            
+
             Logger.Log("Created new project");
         }
 
         public void AddDataset(Dataset dataset)
         {
             if (dataset == null || LoadedDatasets.Contains(dataset)) return;
-            
+
             LoadedDatasets.Add(dataset);
             HasUnsavedChanges = true;
             Logger.Log($"Added dataset: {dataset.Name} ({dataset.Type})");
@@ -106,12 +106,12 @@ namespace GeoscientistToolkit.Business
                 Logger.LogWarning("Save path is not specified. Cannot save project.");
                 return;
             }
-            
+
             ProjectSerializer.SaveProject(this, path);
             ProjectPath = path;
             ProjectName = Path.GetFileNameWithoutExtension(path);
             HasUnsavedChanges = false;
-            
+
             UpdateRecentProjects(path);
         }
 
@@ -124,7 +124,7 @@ namespace GeoscientistToolkit.Business
             try
             {
                 Directory.CreateDirectory(settings.BackupDirectory);
-                
+
                 string timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
                 string backupFileName = $"{ProjectName}_{timestamp}.bak";
                 string backupFilePath = Path.Combine(settings.BackupDirectory, backupFileName);
@@ -134,7 +134,7 @@ namespace GeoscientistToolkit.Business
                     backupFilePath += ".gz";
                     using FileStream backupFileStream = File.Create(backupFilePath);
                     using GZipStream compressionStream = new GZipStream(backupFileStream, CompressionMode.Compress);
-                    
+
                     // Create a temporary file for the serialized project
                     var tempPath = Path.GetTempFileName();
                     ProjectSerializer.SaveProject(this, tempPath);
@@ -159,7 +159,7 @@ namespace GeoscientistToolkit.Business
                     .GetFiles($"{ProjectName}_*.bak*")
                     .OrderByDescending(f => f.CreationTime)
                     .ToList();
-                
+
                 while (backupFiles.Count > settings.MaxBackupCount)
                 {
                     var fileToDelete = backupFiles.Last();
@@ -183,11 +183,11 @@ namespace GeoscientistToolkit.Business
                 RemoveFromRecentProjects(path);
                 return;
             }
-            
+
             var projectDto = ProjectSerializer.LoadProject(path);
             if (projectDto == null) return;
 
-            NewProject(); 
+            NewProject();
 
             ProjectName = projectDto.ProjectName;
             ProjectPath = path;
@@ -221,7 +221,7 @@ namespace GeoscientistToolkit.Business
                     createdDatasets[sDto.FilePath] = dataset;
                 }
             }
-            
+
             LoadedDatasets.AddRange(createdDatasets.Values);
 
             HasUnsavedChanges = false;
@@ -229,6 +229,7 @@ namespace GeoscientistToolkit.Business
             UpdateRecentProjects(path);
         }
 
+        // --- MODIFIED ---
         private Dataset CreateDatasetFromDTO(DatasetDTO dto, IReadOnlyDictionary<string, Dataset> partners)
         {
             switch (dto)
@@ -265,27 +266,48 @@ namespace GeoscientistToolkit.Business
                         BinningSize = ctDto.BinningSize,
                         IsMissing = !Directory.Exists(ctDto.FilePath)
                     };
+
+                    // --- DESERIALIZATION LOGIC FOR MATERIALS ---
+                    if (ctDto.Materials != null && ctDto.Materials.Count > 0)
+                    {
+                        // Clear the default materials and load from the file to ensure a perfect state restoration.
+                        ctDataset.Materials.Clear();
+                        foreach (var matDto in ctDto.Materials)
+                        {
+                            var material = new Material(matDto.ID, matDto.Name, matDto.Color)
+                            {
+                                MinValue = matDto.MinValue,
+                                MaxValue = matDto.MaxValue,
+                                IsVisible = matDto.IsVisible,
+                                IsExterior = matDto.IsExterior,
+                                Density = matDto.Density
+                            };
+                            ctDataset.Materials.Add(material);
+                        }
+                    }
+                    // --- END OF DESERIALIZATION LOGIC ---
+
                     if (ctDataset.IsMissing) Logger.LogWarning($"Source folder not found for dataset: {ctDto.Name} at {ctDto.FilePath}");
                     return ctDataset;
-                    
+
                 case ImageDatasetDTO imgDto:
                     var imgDataset = new ImageDataset(imgDto.Name, imgDto.FilePath)
                     {
-                         PixelSize = imgDto.PixelSize,
-                         Unit = imgDto.Unit,
-                         IsMissing = !File.Exists(imgDto.FilePath)
+                        PixelSize = imgDto.PixelSize,
+                        Unit = imgDto.Unit,
+                        IsMissing = !File.Exists(imgDto.FilePath)
                     };
-                     if (imgDataset.IsMissing) Logger.LogWarning($"Source file not found for dataset: {imgDataset.Name} at {imgDataset.FilePath}");
+                    if (imgDataset.IsMissing) Logger.LogWarning($"Source file not found for dataset: {imgDataset.Name} at {imgDataset.FilePath}");
                     return imgDataset;
 
                 case DatasetGroupDTO groupDto:
                     var childDatasets = new List<Dataset>();
                     foreach (var childDto in groupDto.Datasets)
                     {
-                         if (partners != null && partners.TryGetValue(childDto.FilePath, out var child))
-                         {
-                             childDatasets.Add(child);
-                         }
+                        if (partners != null && partners.TryGetValue(childDto.FilePath, out var child))
+                        {
+                            childDatasets.Add(child);
+                        }
                     }
                     return new DatasetGroup(groupDto.Name, childDatasets);
 
@@ -294,7 +316,7 @@ namespace GeoscientistToolkit.Business
                     return null;
             }
         }
-        
+
         private void UpdateRecentProjects(string projectPath)
         {
             var settings = SettingsManager.Instance.Settings;
@@ -322,7 +344,7 @@ namespace GeoscientistToolkit.Business
             var existingProjects = settings.FileAssociations.RecentProjects
                 .Where(File.Exists)
                 .ToList();
-            
+
             if (existingProjects.Count != settings.FileAssociations.RecentProjects.Count)
             {
                 settings.FileAssociations.RecentProjects = existingProjects;

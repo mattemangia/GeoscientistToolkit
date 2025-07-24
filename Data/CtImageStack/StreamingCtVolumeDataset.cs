@@ -1,4 +1,5 @@
 ﻿// GeoscientistToolkit/Data/CtImageStack/StreamingCtVolumeDataset.cs
+using GeoscientistToolkit.UI.Interfaces;
 using GeoscientistToolkit.Util;
 using System.IO;
 
@@ -49,9 +50,9 @@ namespace GeoscientistToolkit.Data.CtImageStack
                 FullDepth = reader.ReadInt32();
                 BrickSize = reader.ReadInt32();
                 LodCount = reader.ReadInt32();
-                
+
                 LodInfos = new GvtLodInfo[LodCount];
-                for(int i = 0; i < LodCount; i++)
+                for (int i = 0; i < LodCount; i++)
                 {
                     LodInfos[i] = new GvtLodInfo
                     {
@@ -61,13 +62,13 @@ namespace GeoscientistToolkit.Data.CtImageStack
                         FileOffset = reader.ReadInt64()
                     };
                 }
-                
+
                 var baseLodInfo = BaseLod;
                 int bricksX = (baseLodInfo.Width + BrickSize - 1) / BrickSize;
                 int bricksY = (baseLodInfo.Height + BrickSize - 1) / BrickSize;
                 int bricksZ = (baseLodInfo.Depth + BrickSize - 1) / BrickSize;
                 long baseLodByteSize = (long)bricksX * bricksY * bricksZ * BrickSize * BrickSize * BrickSize;
-                
+
                 BaseLodVolumeData = new byte[baseLodByteSize];
                 fs.Seek(baseLodInfo.FileOffset, SeekOrigin.Begin);
                 fs.Read(BaseLodVolumeData, 0, (int)baseLodByteSize);

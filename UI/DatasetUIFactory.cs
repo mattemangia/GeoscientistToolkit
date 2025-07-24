@@ -13,17 +13,21 @@ namespace GeoscientistToolkit.UI
         {
             return dataset switch
             {
-                // The .gvt file opens the high-performance 3D viewer. This is now correct.
-                StreamingCtVolumeDataset streamingDataset => new CtVolume3DViewer(streamingDataset),
+                StreamingCtVolumeDataset streamingDataset =>
+                    streamingDataset.EditablePartner != null
+                        ? new CtCombinedViewer(streamingDataset.EditablePartner)
+                        : new CtVolume3DViewer(streamingDataset),
 
-                // The legacy .bin dataset opens the 2D slice-by-slice viewer for editing.
                 CtImageStackDataset ctDataset => new CtImageStackViewer(ctDataset),
 
                 ImageDataset imageDataset => new ImageViewer(imageDataset),
+
+                DatasetGroup => throw new InvalidOperationException("Cannot open a DatasetGroup in a viewer. Please open individual datasets."),
+
                 _ => throw new NotSupportedException($"No viewer available for dataset type: {dataset.GetType().Name}")
             };
         }
-        
+
         public static IDatasetPropertiesRenderer CreatePropertiesRenderer(Dataset dataset)
         {
             return dataset switch
@@ -33,26 +37,31 @@ namespace GeoscientistToolkit.UI
                 _ => new DefaultPropertiesRenderer()
             };
         }
-        
+
+        // --- MODIFIED ---
         public static IDatasetTools CreateTools(Dataset dataset)
         {
+            // This logic determines which tools panel to show based on the active dataset.
             return dataset switch
             {
-                // Tools for segmentation ONLY apply to the editable CtImageStackDataset.
+                // If the active dataset is the editable stack, show the segmentation tools.
                 CtImageStackDataset => new CtImageStackTools(),
 
-                // The StreamingCtVolumeDataset's controls are built into its viewer panel.
+                // If the active dataset is the 3D view, check its partner.
+                // If the partner is an editable stack, show the segmentation tools for that partner.
+                StreamingCtVolumeDataset sds when sds.EditablePartner != null => new CtImageStackTools(),
+
+                // For any other dataset type, show the default empty tools panel.
                 _ => new DefaultTools()
             };
         }
     }
-    
-    // Default implementations are unchanged
+
     internal class DefaultPropertiesRenderer : IDatasetPropertiesRenderer
     {
         public void Draw(Dataset dataset) { }
     }
-    
+
     internal class DefaultTools : IDatasetTools
     {
         public void Draw(Dataset dataset)

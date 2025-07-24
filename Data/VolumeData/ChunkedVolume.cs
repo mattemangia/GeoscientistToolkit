@@ -196,7 +196,7 @@ namespace GeoscientistToolkit.Data.VolumeData
         /// <summary>
         /// Creates a volume from a folder of image slices
         /// </summary>
-        public static async Task<ChunkedVolume> FromFolderAsync(string folder, int chunkDim, 
+        public static async Task<ChunkedVolume> FromFolderAsync(string folder, int chunkDim,
             bool useMemoryMapping, IProgress<float> progress = null, string datasetName = null)
         {
             Logger.Log($"[ChunkedVolume] Loading volume from folder: {folder}");
@@ -227,19 +227,19 @@ namespace GeoscientistToolkit.Data.VolumeData
                 // Create memory-mapped volume
                 string volumeName = datasetName ?? Path.GetFileName(folder);
                 string volumePath = Path.Combine(folder, $"{volumeName}.Volume.bin");
-                
+
                 // Calculate file size
                 int cntX = (width + chunkDim - 1) / chunkDim;
                 int cntY = (height + chunkDim - 1) / chunkDim;
                 int cntZ = (depth + chunkDim - 1) / chunkDim;
                 long chunkSize = (long)chunkDim * chunkDim * chunkDim;
                 long totalSize = HEADER_SIZE + (cntX * cntY * cntZ * chunkSize);
-                
+
                 // Create the file
                 using (var fs = new FileStream(volumePath, FileMode.Create, FileAccess.Write))
                 {
                     fs.SetLength(totalSize);
-                    
+
                     // Write header
                     using (var bw = new BinaryWriter(fs))
                     {
@@ -254,14 +254,14 @@ namespace GeoscientistToolkit.Data.VolumeData
                         bw.Write(cntZ);
                     }
                 }
-                
+
                 // Create memory mapped file
                 var mmf = MemoryMappedFile.CreateFromFile(volumePath, FileMode.Open, null, 0, MemoryMappedFileAccess.ReadWrite);
                 var accessor = mmf.CreateViewAccessor(0, 0, MemoryMappedFileAccess.ReadWrite);
-                
+
                 var volume = new ChunkedVolume(width, height, depth, chunkDim, mmf, accessor, HEADER_SIZE);
                 await ProcessImagesParallelAsync(volume, imageFiles, progress);
-                
+
                 return volume;
             }
         }
@@ -321,7 +321,7 @@ namespace GeoscientistToolkit.Data.VolumeData
                 // Create memory-mapped volume
                 var mmf = MemoryMappedFile.CreateFromFile(path, FileMode.Open, null, 0, MemoryMappedFileAccess.ReadWrite);
                 var accessor = mmf.CreateViewAccessor(0, 0, MemoryMappedFileAccess.ReadWrite);
-                
+
                 // Read header
                 int width = accessor.ReadInt32(0);
                 int height = accessor.ReadInt32(4);
@@ -329,12 +329,12 @@ namespace GeoscientistToolkit.Data.VolumeData
                 int chunkDim = accessor.ReadInt32(12);
                 accessor.ReadInt32(16); // bits per pixel
                 double pixelSize = accessor.ReadDouble(20);
-                
+
                 var volume = new ChunkedVolume(width, height, depth, chunkDim, mmf, accessor, HEADER_SIZE)
                 {
                     PixelSize = pixelSize
                 };
-                
+
                 return volume;
             }
         }
@@ -368,7 +368,7 @@ namespace GeoscientistToolkit.Data.VolumeData
 
             int chunkSize = _chunkDim * _chunkDim * _chunkDim;
             byte[] template = new byte[chunkSize];
-            
+
             if (value != 0)
             {
                 for (int i = 0; i < chunkSize; i++)
@@ -398,7 +398,7 @@ namespace GeoscientistToolkit.Data.VolumeData
             if (_chunks == null) return;
 
             int chunkSize = _chunkDim * _chunkDim * _chunkDim;
-            
+
             Parallel.For(0, _chunks.Length, i =>
             {
                 _chunks[i] = new byte[chunkSize];
@@ -513,25 +513,24 @@ namespace GeoscientistToolkit.Data.VolumeData
             }).ToList();
         }
 
+        // --- FIXED METHOD ---
         private static async Task<(int width, int height)> GetImageDimensionsAsync(string imagePath)
         {
             return await Task.Run(() =>
             {
-                using (var stream = File.OpenRead(imagePath))
-                {
-                    var info = ImageResult.FromStream(stream, ColorComponents.Grey);
-                    return (info.Width, info.Height);
-                }
+                // Use the shared ImageLoader utility which correctly handles TIFF files.
+                var info = ImageLoader.LoadImageInfo(imagePath);
+                return (info.Width, info.Height);
             });
         }
 
-        private static async Task ProcessImagesParallelAsync(ChunkedVolume volume, List<string> imageFiles, 
+        private static async Task ProcessImagesParallelAsync(ChunkedVolume volume, List<string> imageFiles,
             IProgress<float> progress)
         {
             int totalImages = imageFiles.Count;
             int processed = 0;
             int maxDegreeOfParallelism = Math.Max(1, Environment.ProcessorCount - 1);
-            
+
             // Use semaphore to limit parallelism
             using (var semaphore = new SemaphoreSlim(maxDegreeOfParallelism))
             {
@@ -541,7 +540,7 @@ namespace GeoscientistToolkit.Data.VolumeData
                     try
                     {
                         await ProcessSingleImageAsync(volume, file, index);
-                        
+
                         var currentProgress = Interlocked.Increment(ref processed);
                         progress?.Report((float)currentProgress / totalImages);
                     }
@@ -559,18 +558,15 @@ namespace GeoscientistToolkit.Data.VolumeData
         {
             await Task.Run(() =>
             {
-                using (var stream = File.OpenRead(imagePath))
+                var imageData = ImageLoader.LoadGrayscaleImage(imagePath, out int width, out int height);
+
+                // Write image data to volume
+                int index = 0;
+                for (int y = 0; y < volume.Height && y < height; y++)
                 {
-                    var image = ImageResult.FromStream(stream, ColorComponents.Grey);
-                    
-                    // Write image data to volume
-                    int index = 0;
-                    for (int y = 0; y < volume.Height; y++)
+                    for (int x = 0; x < volume.Width && x < width; x++)
                     {
-                        for (int x = 0; x < volume.Width; x++)
-                        {
-                            volume[x, y, z] = image.Data[index++];
-                        }
+                        volume[x, y, z] = imageData[index++];
                     }
                 }
             });
@@ -580,7 +576,7 @@ namespace GeoscientistToolkit.Data.VolumeData
         {
             if (width <= 0 || height <= 0 || depth <= 0)
                 throw new ArgumentException("Volume dimensions must be positive");
-            
+
             if (chunkDim <= 0 || chunkDim > 1024)
                 throw new ArgumentException("Chunk dimension must be between 1 and 1024");
         }
@@ -594,7 +590,7 @@ namespace GeoscientistToolkit.Data.VolumeData
             Logger.LogWarning($"[ChunkedVolume] GetAllData() called. Allocating {requiredMemory / (1024 * 1024)} MB of RAM. This may be slow or fail on large datasets.");
 
             byte[] fullVolume = new byte[requiredMemory];
-            
+
             Parallel.For(0, Depth, z =>
             {
                 long zOffset = (long)z * Width * Height;

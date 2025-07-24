@@ -1,5 +1,6 @@
 ﻿// GeoscientistToolkit/Data/DatasetDTO.cs
 using System.Collections.Generic;
+using System.Numerics; // Added for Vector4
 
 namespace GeoscientistToolkit.Data
 {
@@ -11,6 +12,19 @@ namespace GeoscientistToolkit.Data
         public string FilePath { get; set; }
     }
 
+    // --- NEW --- DTO for Material
+    public class MaterialDTO
+    {
+        public byte ID { get; set; }
+        public string Name { get; set; }
+        public Vector4 Color { get; set; }
+        public byte MinValue { get; set; }
+        public byte MaxValue { get; set; }
+        public bool IsExterior { get; set; }
+        public double Density { get; set; }
+        public bool IsVisible { get; set; }
+    }
+
     // DTO for ImageDataset
     public class ImageDatasetDTO : DatasetDTO
     {
@@ -18,21 +32,24 @@ namespace GeoscientistToolkit.Data
         public string Unit { get; set; }
     }
 
-    // DTO for CtImageStackDataset
+    // --- MODIFIED --- DTO for CtImageStackDataset
     public class CtImageStackDatasetDTO : DatasetDTO
     {
         public float PixelSize { get; set; }
         public float SliceThickness { get; set; }
         public string Unit { get; set; }
         public int BinningSize { get; set; }
+
+        // List of materials associated with this dataset
+        public List<MaterialDTO> Materials { get; set; } = new List<MaterialDTO>();
     }
-    
+
     // DTO for DatasetGroup
     public class DatasetGroupDTO : DatasetDTO
     {
         public List<DatasetDTO> Datasets { get; set; } = new List<DatasetDTO>();
     }
-    
+
     // Main project file structure
     public class ProjectFileDTO
     {

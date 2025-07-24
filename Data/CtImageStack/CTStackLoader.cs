@@ -275,50 +275,48 @@ namespace GeoscientistToolkit.Data.CtImageStack
         /// Accumulate a source image into the binning accumulator
         /// </summary>
         private static async Task AccumulateSliceAsync(
-            string imagePath,
-            float[,] accumulator,
-            int[,] counts,
-            int binFactor)
+    string imagePath,
+    float[,] accumulator,
+    int[,] counts,
+    int binFactor)
         {
             await Task.Run(() =>
             {
-                using (var stream = File.OpenRead(imagePath))
+                // Use the new ImageLoader that supports TIF
+                var imageData = ImageLoader.LoadGrayscaleImage(imagePath, out int imageWidth, out int imageHeight);
+
+                int newWidth = accumulator.GetLength(0);
+                int newHeight = accumulator.GetLength(1);
+
+                // Accumulate binned pixels
+                for (int y = 0; y < newHeight; y++)
                 {
-                    var image = ImageResult.FromStream(stream, ColorComponents.Grey);
-
-                    int newWidth = accumulator.GetLength(0);
-                    int newHeight = accumulator.GetLength(1);
-
-                    // Accumulate binned pixels
-                    for (int y = 0; y < newHeight; y++)
+                    for (int x = 0; x < newWidth; x++)
                     {
-                        for (int x = 0; x < newWidth; x++)
+                        // Sum pixels in the XY bin
+                        float sum = 0;
+                        int count = 0;
+
+                        for (int by = 0; by < binFactor; by++)
                         {
-                            // Sum pixels in the XY bin
-                            float sum = 0;
-                            int count = 0;
+                            int srcY = y * binFactor + by;
+                            if (srcY >= imageHeight) continue;
 
-                            for (int by = 0; by < binFactor; by++)
+                            for (int bx = 0; bx < binFactor; bx++)
                             {
-                                int srcY = y * binFactor + by;
-                                if (srcY >= image.Height) continue;
+                                int srcX = x * binFactor + bx;
+                                if (srcX >= imageWidth) continue;
 
-                                for (int bx = 0; bx < binFactor; bx++)
-                                {
-                                    int srcX = x * binFactor + bx;
-                                    if (srcX >= image.Width) continue;
-
-                                    int index = srcY * image.Width + srcX;
-                                    sum += image.Data[index];
-                                    count++;
-                                }
+                                int index = srcY * imageWidth + srcX;
+                                sum += imageData[index];
+                                count++;
                             }
+                        }
 
-                            if (count > 0)
-                            {
-                                accumulator[x, y] += sum;
-                                counts[x, y] += count;
-                            }
+                        if (count > 0)
+                        {
+                            accumulator[x, y] += sum;
+                            counts[x, y] += count;
                         }
                     }
                 }
@@ -394,11 +392,8 @@ namespace GeoscientistToolkit.Data.CtImageStack
         {
             return await Task.Run(() =>
             {
-                using (var stream = File.OpenRead(imagePath))
-                {
-                    var info = ImageResult.FromStream(stream, ColorComponents.Grey);
-                    return (info.Width, info.Height);
-                }
+                var info = ImageLoader.LoadImageInfo(imagePath);
+                return (info.Width, info.Height);
             });
         }
 
@@ -407,10 +402,8 @@ namespace GeoscientistToolkit.Data.CtImageStack
         /// </summary>
         private static List<string> GetSupportedImageFiles(string folderPath)
         {
-            var supportedExtensions = new[] { ".png", ".jpg", ".jpeg", ".bmp", ".tga", ".tif", ".tiff", ".gif" };
-            
             return Directory.GetFiles(folderPath)
-                .Where(f => supportedExtensions.Contains(Path.GetExtension(f).ToLower()))
+                .Where(f => ImageLoader.IsSupportedImageFile(f))
                 .ToList();
         }
 
