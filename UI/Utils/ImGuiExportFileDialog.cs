@@ -5,6 +5,8 @@ using GeoscientistToolkit.Util;
 using System.Collections.Generic;
 using System.IO;
 using System;
+using System.Runtime.InteropServices;
+using System.Linq;
 
 namespace GeoscientistToolkit.UI.Utils
 {
@@ -17,7 +19,7 @@ namespace GeoscientistToolkit.UI.Utils
         SaveStack,
         SaveLabelStack
     }
-    
+
     public class ImGuiExportFileDialog
     {
         public bool IsOpen;
@@ -31,18 +33,31 @@ namespace GeoscientistToolkit.UI.Utils
         private string _selectedFileNameInList = "";
         private List<ExtensionOption> _extensionOptions = new List<ExtensionOption>();
         private int _selectedExtensionIndex = 0;
+        private List<VolumeInfo> _availableVolumes = new List<VolumeInfo>();
+        private float _drivePanelWidth = 180f;
+
+        private class VolumeInfo
+        {
+            public string Path { get; set; }
+            public string DisplayName { get; set; }
+            public string VolumeLabel { get; set; }
+            public DriveType DriveType { get; set; }
+            public long TotalBytes { get; set; }
+            public long AvailableBytes { get; set; }
+            public bool IsReady { get; set; }
+        }
 
         public class ExtensionOption
         {
             public string Extension { get; set; }
             public string Description { get; set; }
-            
+
             public ExtensionOption(string extension, string description)
             {
                 Extension = extension;
                 Description = description;
             }
-            
+
             public override string ToString() => $"{Description} (*{Extension})";
         }
 
@@ -51,6 +66,140 @@ namespace GeoscientistToolkit.UI.Utils
             _id = id;
             _title = title;
             CurrentDirectory = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+            RefreshDrives();
+        }
+
+        private void RefreshDrives()
+        {
+            _availableVolumes.Clear();
+
+            if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+            {
+                // Windows: Use DriveInfo
+                foreach (var drive in DriveInfo.GetDrives())
+                {
+                    try
+                    {
+                        var volume = new VolumeInfo
+                        {
+                            Path = drive.RootDirectory.FullName,
+                            DisplayName = drive.Name.TrimEnd('\\'),
+                            DriveType = drive.DriveType,
+                            IsReady = drive.IsReady
+                        };
+
+                        if (drive.IsReady)
+                        {
+                            volume.VolumeLabel = string.IsNullOrEmpty(drive.VolumeLabel) ? "Local Disk" : drive.VolumeLabel;
+                            volume.TotalBytes = drive.TotalSize;
+                            volume.AvailableBytes = drive.AvailableFreeSpace;
+                        }
+                        else
+                        {
+                            volume.VolumeLabel = GetDriveTypeLabel(drive.DriveType);
+                        }
+
+                        _availableVolumes.Add(volume);
+                    }
+                    catch { }
+                }
+            }
+            else if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
+            {
+                // macOS: Common mount points
+                AddUnixVolume("/", "Root");
+                AddUnixVolume(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Home");
+
+                // Check for mounted volumes
+                if (Directory.Exists("/Volumes"))
+                {
+                    foreach (var dir in Directory.GetDirectories("/Volumes"))
+                    {
+                        AddUnixVolume(dir, Path.GetFileName(dir));
+                    }
+                }
+            }
+            else if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
+            {
+                // Linux: Common mount points
+                AddUnixVolume("/", "Root");
+                AddUnixVolume(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Home");
+
+                // Check common mount directories
+                string[] mountDirs = { "/media", "/mnt", "/run/media" };
+                foreach (var mountDir in mountDirs)
+                {
+                    if (Directory.Exists(mountDir))
+                    {
+                        try
+                        {
+                            foreach (var dir in Directory.GetDirectories(mountDir))
+                            {
+                                AddUnixVolume(dir, Path.GetFileName(dir));
+                            }
+                        }
+                        catch { }
+                    }
+                }
+            }
+        }
+
+        private void AddUnixVolume(string path, string name)
+        {
+            if (!Directory.Exists(path)) return;
+
+            try
+            {
+                var volume = new VolumeInfo
+                {
+                    Path = path,
+                    DisplayName = name,
+                    VolumeLabel = name,
+                    DriveType = DriveType.Fixed,
+                    IsReady = true
+                };
+
+                // Try to get disk space info
+                try
+                {
+                    var driveInfo = new DriveInfo(path);
+                    if (driveInfo.IsReady)
+                    {
+                        volume.TotalBytes = driveInfo.TotalSize;
+                        volume.AvailableBytes = driveInfo.AvailableFreeSpace;
+                    }
+                }
+                catch { }
+
+                _availableVolumes.Add(volume);
+            }
+            catch { }
+        }
+
+        private string GetDriveTypeLabel(DriveType type)
+        {
+            return type switch
+            {
+                DriveType.Removable => "Removable",
+                DriveType.Fixed => "Local Disk",
+                DriveType.Network => "Network Drive",
+                DriveType.CDRom => "CD/DVD",
+                DriveType.Ram => "RAM Disk",
+                _ => "Unknown"
+            };
+        }
+
+        private string FormatBytes(long bytes)
+        {
+            string[] sizes = { "B", "KB", "MB", "GB", "TB" };
+            int order = 0;
+            double size = bytes;
+            while (size >= 1024 && order < sizes.Length - 1)
+            {
+                order++;
+                size /= 1024;
+            }
+            return $"{size:0.##} {sizes[order]}";
         }
 
         public void SetExtensions(params ExtensionOption[] options)
@@ -89,6 +238,8 @@ namespace GeoscientistToolkit.UI.Utils
                 CurrentDirectory = startingPath;
             else
                 CurrentDirectory = Directory.GetCurrentDirectory();
+
+            RefreshDrives();
         }
 
         public bool Submit()
@@ -96,19 +247,34 @@ namespace GeoscientistToolkit.UI.Utils
             bool selectionMade = false;
             if (IsOpen)
             {
-                ImGui.SetNextWindowSize(new Vector2(700, 450), ImGuiCond.FirstUseEver);
+                ImGui.SetNextWindowSize(new Vector2(900, 550), ImGuiCond.FirstUseEver);
                 var center = ImGui.GetMainViewport().GetCenter();
                 ImGui.SetNextWindowPos(center, ImGuiCond.FirstUseEver, new Vector2(0.5f, 0.5f));
-                
-                if (ImGui.Begin(_title + "###" + _id, ref IsOpen, 
+
+                if (ImGui.Begin(_title + "###" + _id, ref IsOpen,
                     ImGuiWindowFlags.NoCollapse | ImGuiWindowFlags.NoDocking))
                 {
                     DrawPathNavigation();
-                    
-                    float bottomBarHeight = ImGui.GetFrameHeightWithSpacing() * 2.5f + ImGui.GetStyle().ItemSpacing.Y * 3;
-                    Vector2 fileListSize = new Vector2(0, -bottomBarHeight);
 
-                    DrawFileList(fileListSize);
+                    float bottomBarHeight = ImGui.GetFrameHeightWithSpacing() * 2.5f + ImGui.GetStyle().ItemSpacing.Y * 3;
+                    float contentHeight = ImGui.GetContentRegionAvail().Y - bottomBarHeight;
+
+                    // Draw drive panel and file list side by side
+                    if (ImGui.BeginTable("##ExportFileDialogLayout", 2, ImGuiTableFlags.BordersInnerV | ImGuiTableFlags.Resizable))
+                    {
+                        ImGui.TableSetupColumn("##DrivePanel", ImGuiTableColumnFlags.WidthFixed, _drivePanelWidth);
+                        ImGui.TableSetupColumn("##FileList", ImGuiTableColumnFlags.WidthStretch);
+
+                        ImGui.TableNextRow();
+                        ImGui.TableNextColumn();
+                        DrawDrivePanel(new Vector2(0, contentHeight));
+
+                        ImGui.TableNextColumn();
+                        DrawFileList(new Vector2(0, contentHeight));
+
+                        ImGui.EndTable();
+                    }
+
                     DrawBottomControls(ref selectionMade);
                     ImGui.End();
                 }
@@ -116,10 +282,73 @@ namespace GeoscientistToolkit.UI.Utils
             return selectionMade;
         }
 
+        private void DrawDrivePanel(Vector2 size)
+        {
+            if (ImGui.BeginChild("##DrivePanel", size, ImGuiChildFlags.None))
+            {
+                ImGui.Text("Drives");
+                ImGui.Separator();
+
+                foreach (var volume in _availableVolumes)
+                {
+                    bool isCurrentDrive = CurrentDirectory.StartsWith(volume.Path,
+                        RuntimeInformation.IsOSPlatform(OSPlatform.Windows) ?
+                        StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal);
+
+                    if (isCurrentDrive)
+                        ImGui.PushStyleColor(ImGuiCol.Button, ImGui.GetStyle().Colors[(int)ImGuiCol.ButtonActive]);
+
+                    string buttonLabel = volume.DisplayName;
+                    if (!string.IsNullOrEmpty(volume.VolumeLabel) && volume.VolumeLabel != volume.DisplayName)
+                    {
+                        buttonLabel = $"{volume.DisplayName} ({volume.VolumeLabel})";
+                    }
+
+                    if (ImGui.Button($"{buttonLabel}###{volume.Path}", new Vector2(-1, 0)))
+                    {
+                        if (volume.IsReady && Directory.Exists(volume.Path))
+                        {
+                            CurrentDirectory = volume.Path;
+                            _selectedFileNameInList = "";
+                        }
+                    }
+
+                    if (isCurrentDrive)
+                        ImGui.PopStyleColor();
+
+                    // Show space info if available
+                    if (volume.IsReady && volume.TotalBytes > 0)
+                    {
+                        float ratio = 1.0f - ((float)volume.AvailableBytes / volume.TotalBytes);
+                        ImGui.ProgressBar(ratio, new Vector2(-1, 4), "");
+
+                        ImGui.Text($"{FormatBytes(volume.AvailableBytes)} free");
+                        ImGui.Text($"of {FormatBytes(volume.TotalBytes)}");
+                    }
+                    else if (!volume.IsReady)
+                    {
+                        ImGui.TextDisabled("Not ready");
+                    }
+
+                    ImGui.Spacing();
+                }
+
+                // Refresh button
+                ImGui.Separator();
+                if (ImGui.Button("Refresh Drives", new Vector2(-1, 0)))
+                {
+                    RefreshDrives();
+                }
+
+                ImGui.EndChild();
+            }
+        }
+
         private void DrawPathNavigation()
         {
             string tempPath = CurrentDirectory;
-            ImGui.SetNextItemWidth(ImGui.GetContentRegionAvail().X - 50);
+            float upButtonWidth = 40f;
+            ImGui.SetNextItemWidth(ImGui.GetContentRegionAvail().X - upButtonWidth - ImGui.GetStyle().ItemSpacing.X);
             if (ImGui.InputText("##Path", ref tempPath, 260))
             {
                 if (Directory.Exists(tempPath))
@@ -129,7 +358,7 @@ namespace GeoscientistToolkit.UI.Utils
             }
 
             ImGui.SameLine();
-            if (ImGui.Button("Up", new Vector2(40, 0)))
+            if (ImGui.Button("Up", new Vector2(upButtonWidth, 0)))
             {
                 var parent = Directory.GetParent(CurrentDirectory);
                 if (parent != null)
@@ -165,7 +394,7 @@ namespace GeoscientistToolkit.UI.Utils
                     {
                         var fileName = Path.GetFileName(file);
                         bool isSelected = _selectedFileNameInList == fileName;
-                        
+
                         if (ImGui.Selectable($"[F] {fileName}", isSelected))
                         {
                             _selectedFileNameInList = fileName;
@@ -184,15 +413,15 @@ namespace GeoscientistToolkit.UI.Utils
         private void DrawBottomControls(ref bool selectionMade)
         {
             ImGui.Separator();
-            
+
             ImGui.Text("File name:");
             ImGui.SameLine();
             ImGui.SetNextItemWidth(ImGui.GetContentRegionAvail().X - 120);
             ImGui.InputText("##FileNameInput", ref _fileName, 260);
-            
+
             ImGui.Text("Save as type:");
             ImGui.SameLine();
-             ImGui.SetNextItemWidth(ImGui.GetContentRegionAvail().X - 120);
+            ImGui.SetNextItemWidth(ImGui.GetContentRegionAvail().X - 120);
             if (_extensionOptions.Count > 0)
             {
                 if (ImGui.BeginCombo("##ExtensionCombo", _extensionOptions[_selectedExtensionIndex].ToString()))
@@ -208,7 +437,7 @@ namespace GeoscientistToolkit.UI.Utils
                     ImGui.EndCombo();
                 }
             }
-            
+
             ImGui.Spacing();
             float buttonPosX = ImGui.GetContentRegionAvail().X - 170;
             ImGui.SetCursorPosX(buttonPosX);
@@ -229,18 +458,18 @@ namespace GeoscientistToolkit.UI.Utils
                 ImGui.TextColored(new Vector4(1.0f, 0.8f, 0.0f, 1.0f), "Warning: File will be overwritten!");
             }
         }
-        
+
         private bool HandleExport()
         {
             if (string.IsNullOrWhiteSpace(_fileName))
                 return false;
-                
+
             string cleanFileName = _fileName.EndsWith(SelectedExtension, StringComparison.OrdinalIgnoreCase)
                 ? _fileName.Substring(0, _fileName.Length - SelectedExtension.Length)
                 : _fileName;
-            
+
             SelectedPath = Path.Combine(CurrentDirectory, cleanFileName + SelectedExtension);
-            
+
             Logger.Log($"[ImGuiExportFileDialog] Exporting to: {SelectedPath}");
             IsOpen = false;
             return true;

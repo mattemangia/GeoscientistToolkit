@@ -23,7 +23,7 @@ namespace GeoscientistToolkit.UI
         private readonly ImGuiFileDialog _folderDialog;
         
         private int _selectedDatasetTypeIndex = 1;
-        private readonly string[] _datasetTypeNames = { "Single Image (Not Implemented)", "CT Image Stack (Optimized for 3D Streaming)", "CT Image Stack (Legacy for 2D Editing)" };
+        private readonly string[] _datasetTypeNames = { "Single Image", "CT Image Stack (Optimized for 3D Streaming)", "CT Image Stack (Legacy for 2D Editing)" };
         
         private string _ctFolderPath = "";
         private float _ctPixelSize = 1.0f;
