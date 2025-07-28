@@ -41,14 +41,20 @@ namespace GeoscientistToolkit.UI
         
         protected override void DrawContent()
         {
-            DrawToolbar();
+            if (_viewer == null) return;
+
+            // --- FIX START ---
+            // Removed the section that notified the viewer of the pop-out state.
+            // This allows child panels to manage their own state.
+            // --- FIX END ---
+    
+            _viewer.DrawToolbarControls();
             ImGui.Separator();
-            
-            // The main content area where the image is drawn.
-            // By placing the status bar drawing after this, we ensure it's at the bottom.
+    
+            var contentSize = ImGui.GetContentRegionAvail();
+            ImGui.BeginChild("ViewerContent", contentSize);
             _viewer.DrawContent(ref _zoom, ref _pan);
-            
-            DrawStatusBar();
+            ImGui.EndChild();
         }
 
         private void DrawToolbar()

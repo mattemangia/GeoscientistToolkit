@@ -1,5 +1,4 @@
 ﻿// GeoscientistToolkit/Data/CtImageStack/StreamingCtVolumeDataset.cs
-using GeoscientistToolkit.UI.Interfaces;
 using GeoscientistToolkit.Util;
 using System.IO;
 
@@ -13,7 +12,8 @@ namespace GeoscientistToolkit.Data.CtImageStack
         public long FileOffset { get; set; }
     }
 
-    public class StreamingCtVolumeDataset : Dataset
+    // THE FIX: Add ISerializableDataset interface
+    public class StreamingCtVolumeDataset : Dataset, ISerializableDataset
     {
         public int FullWidth { get; private set; }
         public int FullHeight { get; private set; }
@@ -50,9 +50,9 @@ namespace GeoscientistToolkit.Data.CtImageStack
                 FullDepth = reader.ReadInt32();
                 BrickSize = reader.ReadInt32();
                 LodCount = reader.ReadInt32();
-
+                
                 LodInfos = new GvtLodInfo[LodCount];
-                for (int i = 0; i < LodCount; i++)
+                for(int i = 0; i < LodCount; i++)
                 {
                     LodInfos[i] = new GvtLodInfo
                     {
@@ -62,18 +62,19 @@ namespace GeoscientistToolkit.Data.CtImageStack
                         FileOffset = reader.ReadInt64()
                     };
                 }
-
+                
                 var baseLodInfo = BaseLod;
                 int bricksX = (baseLodInfo.Width + BrickSize - 1) / BrickSize;
                 int bricksY = (baseLodInfo.Height + BrickSize - 1) / BrickSize;
                 int bricksZ = (baseLodInfo.Depth + BrickSize - 1) / BrickSize;
                 long baseLodByteSize = (long)bricksX * bricksY * bricksZ * BrickSize * BrickSize * BrickSize;
-
+                
                 BaseLodVolumeData = new byte[baseLodByteSize];
                 fs.Seek(baseLodInfo.FileOffset, SeekOrigin.Begin);
                 fs.Read(BaseLodVolumeData, 0, (int)baseLodByteSize);
             }
         }
+        
         public object ToSerializableObject()
         {
             if (EditablePartner == null)
@@ -90,6 +91,7 @@ namespace GeoscientistToolkit.Data.CtImageStack
                 PartnerFilePath = this.EditablePartner.FilePath
             };
         }
+        
         public override void Unload()
         {
             BaseLodVolumeData = null;

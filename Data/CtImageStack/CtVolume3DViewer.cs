@@ -17,7 +17,7 @@ namespace GeoscientistToolkit.Data.CtImageStack
 {
     public class CtVolume3DViewer : IDatasetViewer, IDisposable
     {
-        // --- DATASET REFERENCES (THE CORE FIX) ---
+        // --- DATASET REFERENCES ---
         private readonly StreamingCtVolumeDataset _streamingDataset;
         private readonly CtImageStackDataset _editableDataset;
 
@@ -29,7 +29,7 @@ namespace GeoscientistToolkit.Data.CtImageStack
         private ResourceLayout _resourceLayout;
         private ResourceSet _resourceSet;
         private Shader[] _shaders;
-        private Texture _volumeTexture; // This will now be the base LOD texture from the .gvt file
+        private Texture _volumeTexture;
         private Texture _labelTexture;
         private Texture _colorMapTexture;
         private Texture _materialParamsTexture;
@@ -53,9 +53,9 @@ namespace GeoscientistToolkit.Data.CtImageStack
         private Vector2 _lastMousePos;
 
         // Rendering parameters
-        public float StepSize = 1.0f;
-        public float MinThreshold = 0.1f;
-        public float MaxThreshold = 1.0f;
+        public float StepSize = 2.0f;
+        public float MinThreshold = 0.05f;
+        public float MaxThreshold = 0.8f;
         public bool ShowGrayscale = true;
         public int ColorMapIndex = 0;
         public bool ShowSlices = false;
@@ -96,7 +96,6 @@ namespace GeoscientistToolkit.Data.CtImageStack
             public Vector4 ClippingParams;
         }
 
-        // --- THE FIX IS HERE: THE CONSTRUCTOR SIGNATURE IS NOW CORRECT ---
         public CtVolume3DViewer(StreamingCtVolumeDataset dataset)
         {
             _streamingDataset = dataset;
@@ -108,6 +107,9 @@ namespace GeoscientistToolkit.Data.CtImageStack
 
             _streamingDataset.Load();
             _editableDataset.Load();
+            
+            Logger.Log($"[CtVolume3DViewer] Streaming dataset LOD dimensions: {_streamingDataset.BaseLod.Width}x{_streamingDataset.BaseLod.Height}x{_streamingDataset.BaseLod.Depth}");
+            Logger.Log($"[CtVolume3DViewer] Editable dataset dimensions: {_editableDataset.Width}x{_editableDataset.Height}x{_editableDataset.Depth}");
             
             // The control panel needs the editable dataset to access the material list
             _controlPanel = new CtVolume3DControlPanel(this, _editableDataset);
@@ -130,6 +132,14 @@ namespace GeoscientistToolkit.Data.CtImageStack
         private void InitializeVeldridResources()
         {
             var factory = VeldridManager.Factory;
+            
+            // Check backend for compatibility adjustments
+            bool isDirect3D = VeldridManager.GraphicsDevice?.BackendType == GraphicsBackend.Direct3D11;
+            if (isDirect3D && StepSize < 4.0f)
+            {
+                StepSize = 4.0f; // Ensure we use a larger step size for Direct3D
+            }
+            
             _renderTexture = factory.CreateTexture(TextureDescription.Texture2D(1280, 720, 1, 1, PixelFormat.R8_G8_B8_A8_UNorm, TextureUsage.RenderTarget | TextureUsage.Sampled));
             _framebuffer = factory.CreateFramebuffer(new FramebufferDescription(null, _renderTexture));
             _renderTextureManager = TextureManager.CreateFromTexture(_renderTexture);
@@ -145,18 +155,81 @@ namespace GeoscientistToolkit.Data.CtImageStack
 
         private void CreateVolumeTextures(ResourceFactory factory)
         {
-            // Grayscale texture comes from the streaming dataset's pre-calculated base LOD
+            // Create grayscale volume texture from streaming dataset's base LOD
             var baseLodInfo = _streamingDataset.BaseLod;
+            
+            Logger.Log($"[CtVolume3DViewer] Creating volume texture from base LOD: {baseLodInfo.Width}x{baseLodInfo.Height}x{baseLodInfo.Depth}");
+            
+            // Reconstruct the volume from bricked data
+            byte[] volumeData = ReconstructVolumeFromBricks(baseLodInfo, _streamingDataset.BaseLodVolumeData, _streamingDataset.BrickSize);
+            
             var desc = TextureDescription.Texture3D((uint)baseLodInfo.Width, (uint)baseLodInfo.Height, (uint)baseLodInfo.Depth, 1, PixelFormat.R8_UNorm, TextureUsage.Sampled);
             _volumeTexture = factory.CreateTexture(desc);
-            VeldridManager.GraphicsDevice.UpdateTexture(_volumeTexture, _streamingDataset.BaseLodVolumeData, 0, 0, 0, (uint)baseLodInfo.Width, (uint)baseLodInfo.Height, (uint)baseLodInfo.Depth, 0, 0);
+            VeldridManager.GraphicsDevice.UpdateTexture(_volumeTexture, volumeData, 0, 0, 0, (uint)baseLodInfo.Width, (uint)baseLodInfo.Height, (uint)baseLodInfo.Depth, 0, 0);
             
             // Label texture comes from the editable partner dataset
             _labelTexture = CreateDownsampledTexture3D(factory, _editableDataset.LabelData, VRAM_BUDGET_LABELS);
             
-            _volumeSampler = factory.CreateSampler(new SamplerDescription(SamplerAddressMode.Clamp, SamplerAddressMode.Clamp, SamplerAddressMode.Clamp, SamplerFilter.MinLinear_MagLinear_MipPoint, null, 0, 0, 0, 0, SamplerBorderColor.TransparentBlack));
+            _volumeSampler = factory.CreateSampler(new SamplerDescription(
+                SamplerAddressMode.Clamp, SamplerAddressMode.Clamp, SamplerAddressMode.Clamp, 
+                SamplerFilter.MinLinear_MagLinear_MipLinear, // Use trilinear filtering
+                null, 0, 0, 0, 0, SamplerBorderColor.TransparentBlack));
+                
             CreateColorMapTexture(factory);
             CreateMaterialTextures(factory);
+        }
+        
+        private byte[] ReconstructVolumeFromBricks(GvtLodInfo lodInfo, byte[] brickData, int brickSize)
+        {
+            int width = lodInfo.Width;
+            int height = lodInfo.Height;
+            int depth = lodInfo.Depth;
+            
+            byte[] volumeData = new byte[width * height * depth];
+            
+            int bricksX = (width + brickSize - 1) / brickSize;
+            int bricksY = (height + brickSize - 1) / brickSize;
+            int bricksZ = (depth + brickSize - 1) / brickSize;
+            
+            int brickVolumeSize = brickSize * brickSize * brickSize;
+            
+            Parallel.For(0, bricksZ, bz =>
+            {
+                for (int by = 0; by < bricksY; by++)
+                {
+                    for (int bx = 0; bx < bricksX; bx++)
+                    {
+                        int brickIndex = (bz * bricksY + by) * bricksX + bx;
+                        int brickOffset = brickIndex * brickVolumeSize;
+                        
+                        // Copy data from brick to volume
+                        for (int z = 0; z < brickSize; z++)
+                        {
+                            int gz = bz * brickSize + z;
+                            if (gz >= depth) continue;
+                            
+                            for (int y = 0; y < brickSize; y++)
+                            {
+                                int gy = by * brickSize + y;
+                                if (gy >= height) continue;
+                                
+                                for (int x = 0; x < brickSize; x++)
+                                {
+                                    int gx = bx * brickSize + x;
+                                    if (gx >= width) continue;
+                                    
+                                    int brickLocalIndex = (z * brickSize * brickSize) + (y * brickSize) + x;
+                                    int volumeIndex = (gz * height * width) + (gy * width) + gx;
+                                    
+                                    volumeData[volumeIndex] = brickData[brickOffset + brickLocalIndex];
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+            
+            return volumeData;
         }
         
         private void CreateCubeGeometry(ResourceFactory factory)
@@ -170,9 +243,8 @@ namespace GeoscientistToolkit.Data.CtImageStack
         }
 
        private void CreateShaders(ResourceFactory factory)
-{
-    // Embed shaders directly in code to avoid file path issues
-    string vertexShaderGlsl = @"
+        {
+            string vertexShaderGlsl = @"
 #version 450
 
 layout(location = 0) in vec3 in_Position;
@@ -185,7 +257,9 @@ void main()
     gl_Position.y = -gl_Position.y;
 }";
 
-    string fragmentShaderGlsl = @"
+            // FIX: Replaced the entire fragment shader with a new, unified, and corrected version.
+            // This version correctly handles step-size-based opacity and increases loop limits.
+            string fragmentShaderGlsl = @"
 #version 450
 
 layout(location = 0) in vec3 in_TexCoord;
@@ -196,9 +270,9 @@ layout(set = 0, binding = 0) uniform Constants
     mat4 InvViewProj;
     vec4 CameraPosition;
     vec4 VolumeSize;
-    vec4 ThresholdParams;
-    vec4 SliceParams;
-    vec4 RenderParams;
+    vec4 ThresholdParams; // .x=min, .y=max, .z=stepSize, .w=showGrayscale
+    vec4 SliceParams;     // .xyz=positions, .w=showSlices
+    vec4 RenderParams;    // .x=colorMapIndex
     vec4 CutPlaneX;
     vec4 CutPlaneY;
     vec4 CutPlaneZ;
@@ -215,14 +289,14 @@ layout(set = 0, binding = 6) uniform texture1D MaterialColorsTexture;
 
 bool IntersectBox(vec3 rayOrigin, vec3 rayDir, vec3 boxMin, vec3 boxMax, out float tNear, out float tFar)
 {
-    vec3 invRayDir = 1.0 / rayDir;
+    vec3 invRayDir = 1.0 / (rayDir + 1e-8);
     vec3 t1 = (boxMin - rayOrigin) * invRayDir;
     vec3 t2 = (boxMax - rayOrigin) * invRayDir;
     vec3 tMin = min(t1, t2);
     vec3 tMax = max(t1, t2);
     tNear = max(max(tMin.x, tMin.y), tMin.z);
     tFar = min(min(tMax.x, tMax.y), tMax.z);
-    return tFar > tNear && tFar > 0.0;
+    return tFar >= tNear && tFar > 0.0;
 }
 
 bool IsCutByPlanes(vec3 pos)
@@ -236,14 +310,14 @@ bool IsCutByPlanes(vec3 pos)
 bool IsClipped(vec3 pos)
 {
     if (ClippingParams.x < 0.5) return false;
-    float dist = dot(pos, ClippingPlane.xyz) - ClippingPlane.w;
+    float dist = dot(pos - vec3(0.5), ClippingPlane.xyz) - (ClippingPlane.w - 0.5);
     return ClippingParams.y > 0.5 ? dist < 0.0 : dist > 0.0;
 }
 
 vec4 ApplyColorMap(float intensity)
 {
     float mapOffset = RenderParams.x * 256.0;
-    float samplePos = (mapOffset + intensity * 255.0) / 1024.0;
+    float samplePos = clamp((mapOffset + intensity * 255.0) / 1024.0, 0.0, 1.0);
     return textureLod(sampler1D(ColorMapTexture, VolumeSampler), samplePos, 0.0);
 }
 
@@ -259,22 +333,21 @@ void main()
     {
         discard;
     }
+    
     tNear = max(tNear, 0.0);
-
     vec4 accumulatedColor = vec4(0.0);
-    float t = tNear;
-    float step = ThresholdParams.z / length(VolumeSize.xyz);
     
-    // Calculate texture dimensions for texelFetch
-    ivec3 volumeTexSize = textureSize(sampler3D(VolumeTexture, VolumeSampler), 0);
-    ivec3 labelTexSize = textureSize(sampler3D(LabelTexture, VolumeSampler), 0);
+    float maxDim = max(VolumeSize.x, max(VolumeSize.y, VolumeSize.z));
+    float baseStepSize = 1.0 / maxDim;
+    float step = baseStepSize * ThresholdParams.z;
+    
+    int maxSteps = int((tFar - tNear) / step);
+    float opacityScalar = 40.0; // Controls overall density
 
-    // Limit iterations to prevent unroll issues
-    int maxSteps = min(512, int((tFar - tNear) / step) + 1);
-    
-    for (int i = 0; i < maxSteps; i++)
+    float t = tNear;
+    for (int i = 0; i < 768; i++) // Increased loop limit for better quality
     {
-        if (t > tFar || accumulatedColor.a > 0.99) break;
+        if (i >= maxSteps || t > tFar || accumulatedColor.a > 0.95) break;
 
         vec3 currentPos = rayOrigin + t * rayDir;
         
@@ -286,44 +359,40 @@ void main()
         }
 
         vec4 sampledColor = vec4(0.0);
-        
-        // Use texelFetch instead of texture to avoid gradient issues
-        ivec3 labelCoord = ivec3(currentPos * vec3(labelTexSize));
-        labelCoord = clamp(labelCoord, ivec3(0), labelTexSize - 1);
-        int materialId = int(texelFetch(sampler3D(LabelTexture, VolumeSampler), labelCoord, 0).r * 255.0 + 0.5);
-        
+        float baseOpacity = 0.0;
+
+        int materialId = int(textureLod(sampler3D(LabelTexture, VolumeSampler), currentPos, 0.0).r * 255.0 + 0.5);
         vec2 materialParams = texelFetch(sampler1D(MaterialParamsTexture, VolumeSampler), materialId, 0).xy;
 
         if (materialId > 0 && materialParams.x > 0.5)
         {
-            vec4 materialColor = texelFetch(sampler1D(MaterialColorsTexture, VolumeSampler), materialId, 0);
-            materialColor.a *= materialParams.y;
-            sampledColor = materialColor;
+            sampledColor = texelFetch(sampler1D(MaterialColorsTexture, VolumeSampler), materialId, 0);
+            baseOpacity = materialParams.y; // Opacity from UI
+            sampledColor.a = baseOpacity * 5.0; // Make materials more prominent
         }
         else if (ThresholdParams.w > 0.5)
         {
-            // Use texelFetch for volume texture too
-            ivec3 volumeCoord = ivec3(currentPos * vec3(volumeTexSize));
-            volumeCoord = clamp(volumeCoord, ivec3(0), volumeTexSize - 1);
-            float intensity = texelFetch(sampler3D(VolumeTexture, VolumeSampler), volumeCoord, 0).r;
+            float intensity = textureLod(sampler3D(VolumeTexture, VolumeSampler), currentPos, 0.0).r;
             
             if (intensity >= ThresholdParams.x && intensity <= ThresholdParams.y)
             {
-                float normIntensity = (intensity - ThresholdParams.x) / (ThresholdParams.y - ThresholdParams.x);
-                if (RenderParams.x > 0)
-                {
+                float normIntensity = (intensity - ThresholdParams.x) / (ThresholdParams.y - ThresholdParams.x + 0.001);
+                
+                if (RenderParams.x > 0.5) {
                     sampledColor = ApplyColorMap(normIntensity);
-                }
-                else
-                {
+                } else {
                     sampledColor = vec4(vec3(normIntensity), normIntensity);
                 }
-                sampledColor.a *= 0.1;
+                
+                baseOpacity = pow(sampledColor.a, 2.0); // Transfer function for opacity
+                sampledColor.a = baseOpacity;
             }
         }
         
         if (sampledColor.a > 0.0)
         {
+            float correctedAlpha = sampledColor.a * step * opacityScalar;
+            sampledColor.a = clamp(correctedAlpha, 0.0, 1.0);
             sampledColor.rgb *= sampledColor.a;
             accumulatedColor += (1.0 - accumulatedColor.a) * sampledColor;
         }
@@ -331,20 +400,22 @@ void main()
         t += step;
     }
 
-    if (SliceParams.w > 0.5)
+    if (SliceParams.w > 0.5 && accumulatedColor.a < 0.95)
     {
-        vec3 invDir = 1.0 / rayDir;
+        vec3 invDir = 1.0 / (abs(rayDir) + 1e-8);
         vec3 tSlice = (SliceParams.xyz - rayOrigin) * invDir;
-        float tIntersect = min(tSlice.x, min(tSlice.y, tSlice.z));
-        if (tIntersect > tNear && tIntersect < tFar)
+        float tMin = min(min(tSlice.x, tSlice.y), tSlice.z);
+        
+        if (tMin > tNear && tMin < tFar)
         {
-            vec3 intersectPos = rayOrigin + tIntersect * rayDir;
-            if (!IsCutByPlanes(intersectPos) && !IsClipped(intersectPos))
+            vec3 intersectPos = rayOrigin + tMin * rayDir;
+            if (all(greaterThanEqual(intersectPos, vec3(0.0))) && 
+                all(lessThanEqual(intersectPos, vec3(1.0))) &&
+                !IsCutByPlanes(intersectPos) && !IsClipped(intersectPos))
             {
-                // Use textureLod for the slice visualization
                 float intensity = textureLod(sampler3D(VolumeTexture, VolumeSampler), intersectPos, 0.0).r;
-                out_Color = vec4(vec3(intensity), 1.0);
-                return;
+                vec4 sliceColor = vec4(vec3(intensity), 1.0);
+                accumulatedColor = mix(accumulatedColor, sliceColor, 0.5);
             }
         }
     }
@@ -352,22 +423,23 @@ void main()
     out_Color = accumulatedColor;
 }";
 
-    try
-    {
-        // Use CreateFromSpirv with GLSL source - Veldrid.SPIRV will compile it
-        _shaders = factory.CreateFromSpirv(
-            new ShaderDescription(ShaderStages.Vertex, 
-                System.Text.Encoding.UTF8.GetBytes(vertexShaderGlsl), "main"),
-            new ShaderDescription(ShaderStages.Fragment, 
-                System.Text.Encoding.UTF8.GetBytes(fragmentShaderGlsl), "main")
-        );
-    }
-    catch (Exception ex)
-    {
-        Logger.LogError($"[CtVolume3DViewer] Failed to create shaders: {ex.Message}");
-        throw new InvalidOperationException("Failed to create shaders for 3D volume rendering", ex);
-    }
-}
+            try
+            {
+                _shaders = factory.CreateFromSpirv(
+                    new ShaderDescription(ShaderStages.Vertex, 
+                        System.Text.Encoding.UTF8.GetBytes(vertexShaderGlsl), "main"),
+                    new ShaderDescription(ShaderStages.Fragment, 
+                        System.Text.Encoding.UTF8.GetBytes(fragmentShaderGlsl), "main")
+                );
+                
+                Logger.Log($"[CtVolume3DViewer] Shaders compiled successfully for backend: {VeldridManager.GraphicsDevice.BackendType}");
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError($"[CtVolume3DViewer] Failed to create shaders: {ex.Message}");
+                throw new InvalidOperationException("Failed to create shaders for 3D volume rendering", ex);
+            }
+        }
 
         private void CreatePipeline(ResourceFactory factory)
         {
@@ -515,6 +587,12 @@ void main()
                 _cameraDistance = 2.0f;
                 UpdateCameraMatrices();
             }
+            
+            ImGui.SameLine();
+            ImGui.Text($"Step: {StepSize:F1}");
+            
+            ImGui.SameLine();
+            ImGui.Text($"Threshold: {MinThreshold:F2}-{MaxThreshold:F2}");
         }
 
         public void DrawContent(ref float zoom, ref Vector2 pan)
@@ -532,16 +610,59 @@ void main()
         private void HandleMouseInput()
         {
             var io = ImGui.GetIO();
-            if (io.MouseWheel != 0) _cameraDistance = Math.Clamp(_cameraDistance * (1.0f - io.MouseWheel * 0.1f), 0.5f, 20.0f);
-            if (ImGui.IsMouseDown(ImGuiMouseButton.Left) || ImGui.IsMouseDown(ImGuiMouseButton.Right))
+
+            // --- Zooming ---
+            if (io.MouseWheel != 0)
             {
-                if (!_isDragging && !_isPanning) { _isDragging = ImGui.IsMouseDown(ImGuiMouseButton.Left); _isPanning = ImGui.IsMouseDown(ImGuiMouseButton.Right); _lastMousePos = io.MousePos; }
+                _cameraDistance = Math.Clamp(_cameraDistance * (1.0f - io.MouseWheel * 0.1f), 0.5f, 20.0f);
+            }
+
+            // --- FIX START: Corrected mouse input logic for panning ---
+            // Check for any mouse button being pressed to start interaction
+            if (ImGui.IsMouseDown(ImGuiMouseButton.Left) || ImGui.IsMouseDown(ImGuiMouseButton.Right) || ImGui.IsMouseDown(ImGuiMouseButton.Middle))
+            {
+                // If this is the start of a drag, determine the action
+                if (!_isDragging && !_isPanning)
+                {
+                    _isDragging = ImGui.IsMouseDown(ImGuiMouseButton.Left);     // Left mouse rotates
+                    _isPanning = ImGui.IsMouseDown(ImGuiMouseButton.Middle) || ImGui.IsMouseDown(ImGuiMouseButton.Right); // Middle or Right pans
+                    _lastMousePos = io.MousePos;
+                }
+
                 var delta = io.MousePos - _lastMousePos;
-                if (_isDragging) { _cameraYaw -= delta.X * 0.01f; _cameraPitch = Math.Clamp(_cameraPitch - delta.Y * 0.01f, -MathF.PI / 2.01f, MathF.PI / 2.01f); }
-                if (_isPanning) { Matrix4x4.Invert(_viewMatrix, out var invView); var right = Vector3.Normalize(new Vector3(invView.M11, invView.M12, invView.M13)); var up = Vector3.Normalize(new Vector3(invView.M21, invView.M22, invView.M23)); float panSpeed = _cameraDistance * 0.001f; _cameraTarget -= right * delta.X * panSpeed; _cameraTarget += up * delta.Y * panSpeed; }
+
+                // Apply rotation (dragging with left mouse)
+                if (_isDragging)
+                {
+                    _cameraYaw -= delta.X * 0.01f;
+                    _cameraPitch = Math.Clamp(_cameraPitch - delta.Y * 0.01f, -MathF.PI / 2.01f, MathF.PI / 2.01f);
+                }
+
+                // Apply panning (dragging with middle or right mouse)
+                if (_isPanning)
+                {
+                    // Invert the view matrix to get camera orientation vectors
+                    Matrix4x4.Invert(_viewMatrix, out var invView);
+                    var right = Vector3.Normalize(new Vector3(invView.M11, invView.M12, invView.M13));
+                    var up = Vector3.Normalize(new Vector3(invView.M21, invView.M22, invView.M23));
+
+                    // Pan speed is proportional to the camera distance
+                    float panSpeed = _cameraDistance * 0.001f;
+                    _cameraTarget -= right * delta.X * panSpeed;
+                    _cameraTarget += up * delta.Y * panSpeed;
+                }
+
                 _lastMousePos = io.MousePos;
             }
-            else { _isDragging = _isPanning = false; }
+            else
+            {
+                // Reset flags when no buttons are pressed
+                _isDragging = false;
+                _isPanning = false;
+            }
+            // --- FIX END ---
+
+            // Always update the camera matrices after handling input
             UpdateCameraMatrices();
         }
 
@@ -606,34 +727,46 @@ void main()
                 return dummy;
             }
 
-            long neededMemory = (long)volume.Width * volume.Height * volume.Depth;
-            int factor = 1;
-            while (neededMemory / (factor * factor * factor) > budget && factor < 16) { factor *= 2; }
-
-            uint w = (uint)Math.Max(1, volume.Width / factor);
-            uint h = (uint)Math.Max(1, volume.Height / factor);
-            uint d = (uint)Math.Max(1, volume.Depth / factor);
+            // Match the LOD size of the volume texture for consistency
+            var baseLod = _streamingDataset.BaseLod;
+            int targetWidth = baseLod.Width;
+            int targetHeight = baseLod.Height;
+            int targetDepth = baseLod.Depth;
+            
+            Logger.Log($"[CtVolume3DViewer] Creating label texture to match volume LOD: {targetWidth}x{targetHeight}x{targetDepth}");
+            
+            // Calculate downsampling factor
+            int factorX = Math.Max(1, volume.Width / targetWidth);
+            int factorY = Math.Max(1, volume.Height / targetHeight);
+            int factorZ = Math.Max(1, volume.Depth / targetDepth);
+            
+            uint w = (uint)targetWidth;
+            uint h = (uint)targetHeight;
+            uint d = (uint)targetDepth;
+            
             var desc = TextureDescription.Texture3D(w, h, d, 1, PixelFormat.R8_UNorm, TextureUsage.Sampled);
             var texture = factory.CreateTexture(desc);
 
-            if (factor == 1)
+            byte[] downsampledData = new byte[w * h * d];
+            
+            Parallel.For(0, targetDepth, z =>
             {
-                Logger.Log($"[CtVolume3DViewer] Uploading {volume.GetType().Name} at full resolution ({w}x{h}x{d}).");
-                var fullData = (volume as ChunkedVolume)?.GetAllData() ?? (volume as ChunkedLabelVolume)?.GetAllData();
-                VeldridManager.GraphicsDevice.UpdateTexture(texture, fullData, 0, 0, 0, w, h, d, 0, 0);
-            }
-            else
-            {
-                Logger.LogWarning($"[CtVolume3DViewer] Volume is too large. Downsampling by {factor}x to {w}x{h}x{d}.");
-                byte[] downsampledData = new byte[w * h * d];
-                Parallel.For(0, d, z =>
+                for (int y = 0; y < targetHeight; y++)
                 {
-                    for (int y = 0; y < h; y++)
-                    for (int x = 0; x < w; x++)
-                        downsampledData[z * w * h + y * w + x] = volume[x * factor, y * factor, (int)z * factor];
-                });
-                VeldridManager.GraphicsDevice.UpdateTexture(texture, downsampledData, 0, 0, 0, w, h, d, 0, 0);
-            }
+                    for (int x = 0; x < targetWidth; x++)
+                    {
+                        // Use nearest neighbor sampling
+                        int srcX = Math.Min(x * factorX, volume.Width - 1);
+                        int srcY = Math.Min(y * factorY, volume.Height - 1);
+                        int srcZ = Math.Min(z * factorZ, volume.Depth - 1);
+                        
+                        downsampledData[z * targetWidth * targetHeight + y * targetWidth + x] = volume[srcX, srcY, srcZ];
+                    }
+                }
+            });
+            
+            VeldridManager.GraphicsDevice.UpdateTexture(texture, downsampledData, 0, 0, 0, w, h, d, 0, 0);
+            
             return texture;
         }
 

@@ -53,13 +53,21 @@ namespace GeoscientistToolkit.Data.CtImageStack
             
             // Ensure data is loaded
             _dataset.Load();
-            
+            CtImageStackTools.PreviewChanged += OnPreviewChanged;
             // Initialize to center slices
             _sliceX = _dataset.Width / 2;
             _sliceY = _dataset.Height / 2;
             _sliceZ = _dataset.Depth / 2;
         }
-        
+        private void OnPreviewChanged(CtImageStackDataset dataset)
+        {
+            if (dataset == _dataset)
+            {
+                _needsUpdateXY = true;
+                _needsUpdateXZ = true;
+                _needsUpdateYZ = true;
+            }
+        }
         public void DrawToolbarControls()
         {
             // Layout selection
@@ -245,7 +253,6 @@ namespace GeoscientistToolkit.Data.CtImageStack
             // Create invisible button for mouse interaction
             ImGui.InvisibleButton($"canvas{viewIndex}", canvasSize);
             bool isHovered = ImGui.IsItemHovered();
-            bool isActive = ImGui.IsItemActive();
             
             // Handle mouse wheel zoom
             if (isHovered && io.MouseWheel != 0)
@@ -267,17 +274,20 @@ namespace GeoscientistToolkit.Data.CtImageStack
                 }
             }
             
-            // Handle panning
-            if (isActive && ImGui.IsMouseDragging(ImGuiMouseButton.Middle))
+            // --- FIX START: Changed from IsItemActive to IsItemHovered for panning ---
+            if (isHovered && ImGui.IsMouseDragging(ImGuiMouseButton.Middle))
             {
                 pan += io.MouseDelta;
                 
-                // Sync pan across views if enabled (with aspect ratio adjustment)
+                // Sync pan across views if enabled
                 if (_syncViews)
                 {
-                    // TODO: Implement aspect-aware pan sync
+                    _panXY = pan;
+                    _panXZ = pan;
+                    _panYZ = pan;
                 }
             }
+            // --- FIX END ---
             
             // Handle slice scrolling with Ctrl+Wheel
             if (isHovered && io.MouseWheel != 0 && io.KeyCtrl)
@@ -629,6 +639,7 @@ namespace GeoscientistToolkit.Data.CtImageStack
 
         public void Dispose()
         {
+            CtImageStackTools.PreviewChanged -= OnPreviewChanged;
             _textureXY?.Dispose();
             _textureXZ?.Dispose();
             _textureYZ?.Dispose();

@@ -7,6 +7,7 @@ using System.Numerics;
 using System;
 using System.Linq;
 using System.Collections.Generic;
+using System.Threading.Tasks;
 
 namespace GeoscientistToolkit.Data.CtImageStack
 {
@@ -17,15 +18,32 @@ namespace GeoscientistToolkit.Data.CtImageStack
         // Thresholding state
         private byte _minThreshold = 30;
         private byte _maxThreshold = 200;
+        private bool _showPreview = false;
+        private byte[] _previewMask = null;
+        private bool _previewNeedsUpdate = true;
+        private int _previewSlice = -1;
         
         // Material selection state
         private Material _selectedMaterialForEditing;
         private Material _selectedMaterialForThresholding;
 
+        // Preview change event
+        public static event Action<CtImageStackDataset> PreviewChanged;
+        
+        // Static instance tracking for accessing preview data
+        private static readonly Dictionary<CtImageStackDataset, CtImageStackTools> _activeTools = new Dictionary<CtImageStackDataset, CtImageStackTools>();
+
+        public CtImageStackTools()
+        {
+        }
+
         public void Draw(Dataset dataset)
         {
             if (dataset is not CtImageStackDataset ctDataset) return;
             _currentDataset = ctDataset;
+            
+            // Register this instance
+            _activeTools[ctDataset] = this;
 
             // Initialize selection if null
             if (_selectedMaterialForEditing == null && _currentDataset.Materials.Count > 1)
@@ -38,6 +56,17 @@ namespace GeoscientistToolkit.Data.CtImageStack
             DrawMaterialEditor();
             ImGui.Separator();
             DrawSegmentationTools();
+        }
+
+        // Static method to get preview data for a specific dataset
+        public static (bool isActive, byte[] mask, Vector4 color) GetPreviewData(CtImageStackDataset dataset, int sliceZ)
+        {
+            if (_activeTools.TryGetValue(dataset, out var tools))
+            {
+                tools.UpdatePreviewForSlice(sliceZ);
+                return (tools.IsPreviewActive(), tools.GetPreviewMask(), tools.GetPreviewColor());
+            }
+            return (false, null, Vector4.Zero);
         }
 
         private void DrawVolumeInfo()
@@ -71,31 +100,53 @@ namespace GeoscientistToolkit.Data.CtImageStack
                 // --- Material List ---
                 if (ImGui.BeginChild("MaterialList", new Vector2(0, 150), ImGuiChildFlags.Border))
                 {
-                    foreach (var material in _currentDataset.Materials.ToList())
+                    // Use a table for better layout control
+                    if (ImGui.BeginTable("MaterialTable", 4, ImGuiTableFlags.RowBg | ImGuiTableFlags.ScrollY))
                     {
-                        if (material.ID == 0) continue; // Skip exterior
-
-                        bool isSelected = _selectedMaterialForEditing == material;
-                        if (ImGui.Selectable($"{material.Name}##{material.ID}", isSelected))
+                        // Setup columns
+                        ImGui.TableSetupColumn("Name", ImGuiTableColumnFlags.WidthStretch);
+                        ImGui.TableSetupColumn("Color", ImGuiTableColumnFlags.WidthFixed, 30);
+                        ImGui.TableSetupColumn("Visible", ImGuiTableColumnFlags.WidthFixed, 50);
+                        ImGui.TableSetupColumn("Actions", ImGuiTableColumnFlags.WidthFixed, 20);
+                        
+                        ImGui.TableSetupScrollFreeze(0, 1); // Freeze header row
+                        ImGui.TableHeadersRow();
+                        
+                        foreach (var material in _currentDataset.Materials.ToList())
                         {
-                            _selectedMaterialForEditing = material;
+                            if (material.ID == 0) continue; // Skip exterior
+                            
+                            ImGui.TableNextRow();
+                            ImGui.PushID((int)material.ID);
+                            
+                            // Name column
+                            ImGui.TableSetColumnIndex(0);
+                            bool isSelected = _selectedMaterialForEditing == material;
+                            if (ImGui.Selectable(material.Name, isSelected, ImGuiSelectableFlags.SpanAllColumns | ImGuiSelectableFlags.AllowOverlap))
+                            {
+                                _selectedMaterialForEditing = material;
+                            }
+                            
+                            // Color column
+                            ImGui.TableSetColumnIndex(1);
+                            Vector4 color = material.Color;
+                            if (ImGui.ColorEdit4($"##color", ref color, ImGuiColorEditFlags.NoInputs | ImGuiColorEditFlags.NoLabel))
+                            {
+                                material.Color = color;
+                            }
+                            
+                            // Visibility column
+                            ImGui.TableSetColumnIndex(2);
+                            bool isVisible = material.IsVisible;
+                            if (ImGui.Checkbox($"##vis", ref isVisible))
+                            {
+                                material.IsVisible = isVisible;
+                            }
+                            
+                            ImGui.PopID();
                         }
-
-                        ImGui.SameLine(ImGui.GetContentRegionAvail().X - 80);
-
-                        // --- CORRECTED Color Edit ---
-                        Vector4 color = material.Color;
-                        if (ImGui.ColorEdit4($"##color{material.ID}", ref color, ImGuiColorEditFlags.NoInputs | ImGuiColorEditFlags.NoLabel))
-                        {
-                            material.Color = color;
-                        }
-
-                        ImGui.SameLine();
-                        bool isVisible = material.IsVisible;
-                        if (ImGui.Checkbox($"##visibility{material.ID}", ref isVisible))
-                        {
-                            material.IsVisible = isVisible;
-                        }
+                        
+                        ImGui.EndTable();
                     }
                 }
                 ImGui.EndChild();
@@ -161,6 +212,11 @@ namespace GeoscientistToolkit.Data.CtImageStack
                 {
                     _minThreshold = (byte)min;
                     _maxThreshold = (byte)max;
+                    _previewNeedsUpdate = true;
+                    if (_showPreview)
+                    {
+                        NotifyViewersOfPreviewChange();
+                    }
                 }
                 
                 string preview = _selectedMaterialForThresholding != null ? _selectedMaterialForThresholding.Name : "Select a material...";
@@ -171,9 +227,21 @@ namespace GeoscientistToolkit.Data.CtImageStack
                         if (ImGui.Selectable(mat.Name, mat == _selectedMaterialForThresholding))
                         {
                             _selectedMaterialForThresholding = mat;
+                            if (_showPreview)
+                            {
+                                _previewNeedsUpdate = true;
+                                NotifyViewersOfPreviewChange();
+                            }
                         }
                     }
                     ImGui.EndCombo();
+                }
+
+                // Preview toggle
+                if (ImGui.Checkbox("Preview Threshold", ref _showPreview))
+                {
+                    _previewNeedsUpdate = true;
+                    NotifyViewersOfPreviewChange();
                 }
 
                 if (_selectedMaterialForThresholding == null)
@@ -186,12 +254,20 @@ namespace GeoscientistToolkit.Data.CtImageStack
                 {
                     _selectedMaterialForThresholding.MinValue = _minThreshold;
                     _selectedMaterialForThresholding.MaxValue = _maxThreshold;
-                    MaterialOperations.AddVoxelsByThresholdAsync(_currentDataset.VolumeData, _currentDataset.LabelData, _selectedMaterialForThresholding.ID, _minThreshold, _maxThreshold);
+                    _ = MaterialOperations.AddVoxelsByThresholdAsync(_currentDataset.VolumeData, _currentDataset.LabelData, 
+                        _selectedMaterialForThresholding.ID, _minThreshold, _maxThreshold, _currentDataset);
+                    _showPreview = false;
+                    _previewMask = null;
+                    NotifyViewersOfPreviewChange();
                 }
                 ImGui.SameLine();
                 if (ImGui.Button("Remove by Threshold [-]"))
                 {
-                    MaterialOperations.RemoveVoxelsByThresholdAsync(_currentDataset.VolumeData, _currentDataset.LabelData, _selectedMaterialForThresholding.ID, _minThreshold, _maxThreshold);
+                    _ = MaterialOperations.RemoveVoxelsByThresholdAsync(_currentDataset.VolumeData, _currentDataset.LabelData, 
+                        _selectedMaterialForThresholding.ID, _minThreshold, _maxThreshold, _currentDataset);
+                    _showPreview = false;
+                    _previewMask = null;
+                    NotifyViewersOfPreviewChange();
                 }
                 
                 if (_selectedMaterialForThresholding == null)
@@ -201,6 +277,50 @@ namespace GeoscientistToolkit.Data.CtImageStack
 
                 ImGui.Unindent();
             }
+        }
+
+        public void UpdatePreviewForSlice(int sliceZ)
+        {
+            if (!_showPreview || _currentDataset.VolumeData == null) 
+            {
+                _previewMask = null;
+                return;
+            }
+
+            if (_previewSlice != sliceZ || _previewNeedsUpdate)
+            {
+                _previewSlice = sliceZ;
+                _previewNeedsUpdate = false;
+                
+                int width = _currentDataset.Width;
+                int height = _currentDataset.Height;
+                _previewMask = new byte[width * height];
+                var graySlice = new byte[width * height];
+                
+                _currentDataset.VolumeData.ReadSliceZ(sliceZ, graySlice);
+                
+                for (int i = 0; i < graySlice.Length; i++)
+                {
+                    byte gray = graySlice[i];
+                    _previewMask[i] = (gray >= _minThreshold && gray <= _maxThreshold) ? (byte)255 : (byte)0;
+                }
+            }
+        }
+
+        public byte[] GetPreviewMask() => _previewMask;
+        public bool IsPreviewActive() => _showPreview;
+        public Vector4 GetPreviewColor() => _selectedMaterialForThresholding?.Color ?? new Vector4(1, 0, 0, 0.5f);
+
+        private void NotifyViewersOfPreviewChange()
+        {
+            // Fire the event to notify all viewers
+            PreviewChanged?.Invoke(_currentDataset);
+        }
+
+        // Cleanup when tools are no longer used
+        public static void CleanupTools(CtImageStackDataset dataset)
+        {
+            _activeTools.Remove(dataset);
         }
     }
 }

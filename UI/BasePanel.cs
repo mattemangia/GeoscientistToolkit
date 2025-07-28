@@ -26,8 +26,9 @@ namespace GeoscientistToolkit.UI
         private static List<BasePanel> _allPanels = new List<BasePanel>();
         private bool _popOutWindowWantsClosed = false;
         private bool _wantsToPopIn = false;
-        private IntPtr _mainContext;
         
+        // --- FIX: _mainContext field is removed as it's the source of the bug. ---
+
         /// <summary>
         /// Provides read-only access to the list of all created panels.
         /// </summary>
@@ -38,8 +39,7 @@ namespace GeoscientistToolkit.UI
             _title = title;
             _defaultSize = defaultSize;
             _allPanels.Add(this);
-            // Store the main window's ImGui context
-            _mainContext = VeldridManager.ImGuiController.Context;
+            // --- FIX: No longer need to store the main context here. ---
         }
 
         /// <summary>
@@ -113,7 +113,9 @@ namespace GeoscientistToolkit.UI
             // If not popped out, render the panel as a window in the main UI.
             if (!_isPoppedOut)
             {
-                ImGui.SetCurrentContext(_mainContext);
+                // --- FIX: REMOVED the call to ImGui.SetCurrentContext(_mainContext); ---
+                // The panel should render in whatever context is currently active.
+                
                 ImGui.SetNextWindowSize(_defaultSize, ImGuiCond.FirstUseEver);
                 
                 // Pass our authoritative _isOpen flag to ImGui. It will be set to false if the user closes the window.

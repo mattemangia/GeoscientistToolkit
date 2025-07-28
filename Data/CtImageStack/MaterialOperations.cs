@@ -1,4 +1,5 @@
 ﻿// GeoscientistToolkit/Data/CtImageStack/MaterialOperations.cs
+using GeoscientistToolkit.Business;
 using GeoscientistToolkit.Data.VolumeData;
 using GeoscientistToolkit.Util;
 using System;
@@ -36,25 +37,28 @@ namespace GeoscientistToolkit.Data.CtImageStack
         /// <summary>
         /// Labels every voxel whose grayscale value is within the specified threshold with the given material ID.
         /// </summary>
-        public static Task AddVoxelsByThresholdAsync(IGrayscaleVolumeData grayscaleVolume, ILabelVolumeData labelVolume, byte materialID, byte minVal, byte maxVal)
+        public static Task AddVoxelsByThresholdAsync(IGrayscaleVolumeData grayscaleVolume, ILabelVolumeData labelVolume, 
+            byte materialID, byte minVal, byte maxVal, CtImageStackDataset dataset = null)
         {
             Logger.Log($"[MaterialOperations] Adding voxels to material {materialID} (Threshold: {minVal}-{maxVal})");
-            return ProcessVolumeByThresholdAsync(grayscaleVolume, labelVolume, materialID, minVal, maxVal, true);
+            return ProcessVolumeByThresholdAsync(grayscaleVolume, labelVolume, materialID, minVal, maxVal, true, dataset);
         }
 
         /// <summary>
         /// Clears voxels that belong to a specific material and are within a grayscale threshold.
         /// </summary>
-        public static Task RemoveVoxelsByThresholdAsync(IGrayscaleVolumeData grayscaleVolume, ILabelVolumeData labelVolume, byte materialID, byte minVal, byte maxVal)
+        public static Task RemoveVoxelsByThresholdAsync(IGrayscaleVolumeData grayscaleVolume, ILabelVolumeData labelVolume, 
+            byte materialID, byte minVal, byte maxVal, CtImageStackDataset dataset = null)
         {
             Logger.Log($"[MaterialOperations] Removing voxels from material {materialID} (Threshold: {minVal}-{maxVal})");
-            return ProcessVolumeByThresholdAsync(grayscaleVolume, labelVolume, materialID, minVal, maxVal, false);
+            return ProcessVolumeByThresholdAsync(grayscaleVolume, labelVolume, materialID, minVal, maxVal, false, dataset);
         }
 
         /// <summary>
         /// Core processing logic that operates on the volume slice by slice in parallel.
         /// </summary>
-        private static Task ProcessVolumeByThresholdAsync(IGrayscaleVolumeData grayscaleVolume, ILabelVolumeData labelVolume, byte materialID, byte minVal, byte maxVal, bool isAddOperation)
+        private static Task ProcessVolumeByThresholdAsync(IGrayscaleVolumeData grayscaleVolume, ILabelVolumeData labelVolume, 
+            byte materialID, byte minVal, byte maxVal, bool isAddOperation, CtImageStackDataset dataset)
         {
             if (grayscaleVolume == null || labelVolume == null)
             {
@@ -68,6 +72,8 @@ namespace GeoscientistToolkit.Data.CtImageStack
 
             return Task.Run(() =>
             {
+                bool anyModified = false;
+                
                 Parallel.For(0, depth, new ParallelOptions { MaxDegreeOfParallelism = _optimalThreadCount }, z =>
                 {
                     var graySlice = new byte[width * height];
@@ -109,8 +115,17 @@ namespace GeoscientistToolkit.Data.CtImageStack
                     if (modified)
                     {
                         labelVolume.WriteSliceZ(z, labelSlice);
+                        anyModified = true;
                     }
                 });
+                
+                // Notify ProjectManager that data has changed
+                if (anyModified && dataset != null)
+                {
+                    ProjectManager.Instance.NotifyDatasetDataChanged(dataset);
+                    ProjectManager.Instance.HasUnsavedChanges = true;
+                }
+                
                 Logger.Log($"[MaterialOperations] Finished processing for material {materialID}.");
             });
         }
