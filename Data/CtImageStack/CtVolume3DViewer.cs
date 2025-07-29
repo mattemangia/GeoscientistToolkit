@@ -12,9 +12,32 @@ using Veldrid.SPIRV;
 using System.IO;
 using System.Linq;
 using StbImageWriteSharp;
+using System.Collections.Generic;
+using GeoscientistToolkit.UI.Utils;
 
 namespace GeoscientistToolkit.Data.CtImageStack
 {
+    public class ClippingPlane
+    {
+        public string Name { get; set; }
+        public Vector3 Normal { get; set; }
+        public float Distance { get; set; }
+        public bool Enabled { get; set; }
+        public bool Mirror { get; set; }
+        public Vector3 Rotation { get; set; } // Euler angles for UI
+        public bool IsVisualizationVisible { get; set; } = true;
+        
+        public ClippingPlane(string name)
+        {
+            Name = name;
+            Normal = -Vector3.UnitZ;
+            Distance = 0.5f;
+            Enabled = true;
+            Mirror = false;
+            Rotation = Vector3.Zero;
+        }
+    }
+
     public class CtVolume3DViewer : IDatasetViewer, IDisposable
     {
         // --- DATASET REFERENCES ---
@@ -25,10 +48,17 @@ namespace GeoscientistToolkit.Data.CtImageStack
         private DeviceBuffer _vertexBuffer;
         private DeviceBuffer _indexBuffer;
         private DeviceBuffer _constantBuffer;
+        private DeviceBuffer _planeVisualizationVertexBuffer;
+        private DeviceBuffer _planeVisualizationIndexBuffer;
+        private DeviceBuffer _planeVisualizationConstantBuffer;
         private Pipeline _pipeline;
+        private Pipeline _planeVisualizationPipeline;
         private ResourceLayout _resourceLayout;
+        private ResourceLayout _planeVisualizationResourceLayout;
         private ResourceSet _resourceSet;
+        private ResourceSet _planeVisualizationResourceSet;
         private Shader[] _shaders;
+        private Shader[] _planeVisualizationShaders;
         private Texture _volumeTexture;
         private Texture _labelTexture;
         private Texture _colorMapTexture;
@@ -39,6 +69,7 @@ namespace GeoscientistToolkit.Data.CtImageStack
         private Texture _renderTexture;
         private Framebuffer _framebuffer;
         private TextureManager _renderTextureManager;
+        private readonly ImGuiExportFileDialog _screenshotDialog;
 
         // Camera and interaction
         private Matrix4x4 _viewMatrix;
@@ -60,6 +91,8 @@ namespace GeoscientistToolkit.Data.CtImageStack
         public int ColorMapIndex = 0;
         public bool ShowSlices = false;
         public Vector3 SlicePositions = new(0.5f);
+        
+        // Axis-aligned cutting planes
         public bool CutXEnabled;
         public bool CutYEnabled;
         public bool CutZEnabled;
@@ -69,19 +102,23 @@ namespace GeoscientistToolkit.Data.CtImageStack
         public float CutXPosition = 0.5f;
         public float CutYPosition = 0.5f;
         public float CutZPosition = 0.5f;
-        public bool ClippingEnabled;
-        public Vector3 ClippingNormal = -Vector3.UnitZ;
-        public float ClippingDistance = 0.5f;
-        public bool ClippingMirror;
+        public bool ShowCutXPlaneVisual { get; set; } = true;
+        public bool ShowCutYPlaneVisual { get; set; } = true;
+        public bool ShowCutZPlaneVisual { get; set; } = true;
+        
+        // Multiple arbitrary clipping planes
+        public List<ClippingPlane> ClippingPlanes { get; } = new List<ClippingPlane>();
+        public bool ShowPlaneVisualizations { get; set; } = true;
 
         private bool _materialParamsDirty = true;
         private bool _labelsDirty = true;
         private readonly CtVolume3DControlPanel _controlPanel;
         
         private const long VRAM_BUDGET_LABELS = 512L * 1024 * 1024;
+        private const int MAX_CLIPPING_PLANES = 8;
 
         [StructLayout(LayoutKind.Sequential)]
-        private struct VolumeConstants
+        private unsafe struct VolumeConstants
         {
             public Matrix4x4 InvViewProj;
             public Vector4 CameraPosition;
@@ -92,8 +129,15 @@ namespace GeoscientistToolkit.Data.CtImageStack
             public Vector4 CutPlaneX;
             public Vector4 CutPlaneY;
             public Vector4 CutPlaneZ;
-            public Vector4 ClippingPlane;
-            public Vector4 ClippingParams;
+            public fixed float ClippingPlanesData[32]; // 8 planes * 4 floats each
+            public Vector4 ClippingPlanesInfo;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct PlaneVisualizationConstants
+        {
+            public Matrix4x4 ViewProj;
+            public Vector4 PlaneColor;
         }
 
         public CtVolume3DViewer(StreamingCtVolumeDataset dataset)
@@ -111,8 +155,10 @@ namespace GeoscientistToolkit.Data.CtImageStack
             Logger.Log($"[CtVolume3DViewer] Streaming dataset LOD dimensions: {_streamingDataset.BaseLod.Width}x{_streamingDataset.BaseLod.Height}x{_streamingDataset.BaseLod.Depth}");
             Logger.Log($"[CtVolume3DViewer] Editable dataset dimensions: {_editableDataset.Width}x{_editableDataset.Height}x{_editableDataset.Depth}");
             
-            // The control panel needs the editable dataset to access the material list
             _controlPanel = new CtVolume3DControlPanel(this, _editableDataset);
+            _screenshotDialog = new ImGuiExportFileDialog("ScreenshotDialog3D", "Save Screenshot");
+            _screenshotDialog.SetExtensions((".png", "PNG Image"));
+
             InitializeVeldridResources();
 
             ProjectManager.Instance.DatasetDataChanged += OnDatasetDataChanged;
@@ -133,17 +179,17 @@ namespace GeoscientistToolkit.Data.CtImageStack
         {
             var factory = VeldridManager.Factory;
             
-            // Check backend for compatibility adjustments
             bool isDirect3D = VeldridManager.GraphicsDevice?.BackendType == GraphicsBackend.Direct3D11;
             if (isDirect3D && StepSize < 4.0f)
             {
-                StepSize = 4.0f; // Ensure we use a larger step size for Direct3D
+                StepSize = 4.0f;
             }
             
             _renderTexture = factory.CreateTexture(TextureDescription.Texture2D(1280, 720, 1, 1, PixelFormat.R8_G8_B8_A8_UNorm, TextureUsage.RenderTarget | TextureUsage.Sampled));
             _framebuffer = factory.CreateFramebuffer(new FramebufferDescription(null, _renderTexture));
             _renderTextureManager = TextureManager.CreateFromTexture(_renderTexture);
             CreateCubeGeometry(factory);
+            CreatePlaneVisualizationGeometry(factory);
             CreateShaders(factory);
             CreatePipeline(factory);
             CreateVolumeTextures(factory);
@@ -155,24 +201,21 @@ namespace GeoscientistToolkit.Data.CtImageStack
 
         private void CreateVolumeTextures(ResourceFactory factory)
         {
-            // Create grayscale volume texture from streaming dataset's base LOD
             var baseLodInfo = _streamingDataset.BaseLod;
             
             Logger.Log($"[CtVolume3DViewer] Creating volume texture from base LOD: {baseLodInfo.Width}x{baseLodInfo.Height}x{baseLodInfo.Depth}");
             
-            // Reconstruct the volume from bricked data
             byte[] volumeData = ReconstructVolumeFromBricks(baseLodInfo, _streamingDataset.BaseLodVolumeData, _streamingDataset.BrickSize);
             
             var desc = TextureDescription.Texture3D((uint)baseLodInfo.Width, (uint)baseLodInfo.Height, (uint)baseLodInfo.Depth, 1, PixelFormat.R8_UNorm, TextureUsage.Sampled);
             _volumeTexture = factory.CreateTexture(desc);
             VeldridManager.GraphicsDevice.UpdateTexture(_volumeTexture, volumeData, 0, 0, 0, (uint)baseLodInfo.Width, (uint)baseLodInfo.Height, (uint)baseLodInfo.Depth, 0, 0);
             
-            // Label texture comes from the editable partner dataset
             _labelTexture = CreateDownsampledTexture3D(factory, _editableDataset.LabelData, VRAM_BUDGET_LABELS);
             
             _volumeSampler = factory.CreateSampler(new SamplerDescription(
                 SamplerAddressMode.Clamp, SamplerAddressMode.Clamp, SamplerAddressMode.Clamp, 
-                SamplerFilter.MinLinear_MagLinear_MipLinear, // Use trilinear filtering
+                SamplerFilter.MinLinear_MagLinear_MipLinear,
                 null, 0, 0, 0, 0, SamplerBorderColor.TransparentBlack));
                 
             CreateColorMapTexture(factory);
@@ -202,7 +245,6 @@ namespace GeoscientistToolkit.Data.CtImageStack
                         int brickIndex = (bz * bricksY + by) * bricksX + bx;
                         int brickOffset = brickIndex * brickVolumeSize;
                         
-                        // Copy data from brick to volume
                         for (int z = 0; z < brickSize; z++)
                         {
                             int gz = bz * brickSize + z;
@@ -242,7 +284,24 @@ namespace GeoscientistToolkit.Data.CtImageStack
             VeldridManager.GraphicsDevice.UpdateBuffer(_indexBuffer, 0, indices);
         }
 
-       private void CreateShaders(ResourceFactory factory)
+        private void CreatePlaneVisualizationGeometry(ResourceFactory factory)
+        {
+            // Create a quad for plane visualization
+            Vector3[] vertices = {
+                new(-0.5f, -0.5f, 0),
+                new(0.5f, -0.5f, 0),
+                new(0.5f, 0.5f, 0),
+                new(-0.5f, 0.5f, 0)
+            };
+            _planeVisualizationVertexBuffer = factory.CreateBuffer(new BufferDescription((uint)(vertices.Length * 12), BufferUsage.VertexBuffer));
+            VeldridManager.GraphicsDevice.UpdateBuffer(_planeVisualizationVertexBuffer, 0, vertices);
+            
+            ushort[] indices = { 0, 1, 2, 0, 2, 3 };
+            _planeVisualizationIndexBuffer = factory.CreateBuffer(new BufferDescription((uint)(indices.Length * 2), BufferUsage.IndexBuffer));
+            VeldridManager.GraphicsDevice.UpdateBuffer(_planeVisualizationIndexBuffer, 0, indices);
+        }
+
+        private void CreateShaders(ResourceFactory factory)
         {
             string vertexShaderGlsl = @"
 #version 450
@@ -257,8 +316,6 @@ void main()
     gl_Position.y = -gl_Position.y;
 }";
 
-            // FIX: Replaced the entire fragment shader with a new, unified, and corrected version.
-            // This version correctly handles step-size-based opacity and increases loop limits.
             string fragmentShaderGlsl = @"
 #version 450
 
@@ -270,14 +327,14 @@ layout(set = 0, binding = 0) uniform Constants
     mat4 InvViewProj;
     vec4 CameraPosition;
     vec4 VolumeSize;
-    vec4 ThresholdParams; // .x=min, .y=max, .z=stepSize, .w=showGrayscale
-    vec4 SliceParams;     // .xyz=positions, .w=showSlices
-    vec4 RenderParams;    // .x=colorMapIndex
+    vec4 ThresholdParams;
+    vec4 SliceParams;
+    vec4 RenderParams;
     vec4 CutPlaneX;
     vec4 CutPlaneY;
     vec4 CutPlaneZ;
-    vec4 ClippingPlane;
-    vec4 ClippingParams;
+    vec4 ClippingPlanesData[8];
+    vec4 ClippingPlanesInfo;
 };
 
 layout(set = 0, binding = 1) uniform sampler VolumeSampler;
@@ -301,17 +358,32 @@ bool IntersectBox(vec3 rayOrigin, vec3 rayDir, vec3 boxMin, vec3 boxMax, out flo
 
 bool IsCutByPlanes(vec3 pos)
 {
+    // Axis-aligned cutting planes
     if (CutPlaneX.x > 0.5 && (pos.x - CutPlaneX.z) * CutPlaneX.y > 0.0) return true;
     if (CutPlaneY.x > 0.5 && (pos.y - CutPlaneY.z) * CutPlaneY.y > 0.0) return true;
     if (CutPlaneZ.x > 0.5 && (pos.z - CutPlaneZ.z) * CutPlaneZ.y > 0.0) return true;
+    
+    // Multiple arbitrary clipping planes
+    int numPlanes = int(ClippingPlanesInfo.x);
+    for (int i = 0; i < numPlanes; i++)
+    {
+        vec4 planeData = ClippingPlanesData[i];
+        if (planeData.w > 0.5) // enabled
+        {
+            vec3 normal = planeData.xyz;
+            float dist = length(normal);
+            if (dist > 0.001)
+            {
+                normal /= dist;
+                float mirror = step(1.5, dist); // if length > 1.5, mirror is true
+                float planeDist = dot(pos - vec3(0.5), normal) - (dist - 0.5 - mirror);
+                if (mirror > 0.5 ? planeDist < 0.0 : planeDist > 0.0)
+                    return true;
+            }
+        }
+    }
+    
     return false;
-}
-
-bool IsClipped(vec3 pos)
-{
-    if (ClippingParams.x < 0.5) return false;
-    float dist = dot(pos - vec3(0.5), ClippingPlane.xyz) - (ClippingPlane.w - 0.5);
-    return ClippingParams.y > 0.5 ? dist < 0.0 : dist > 0.0;
 }
 
 vec4 ApplyColorMap(float intensity)
@@ -342,17 +414,17 @@ void main()
     float step = baseStepSize * ThresholdParams.z;
     
     int maxSteps = int((tFar - tNear) / step);
-    float opacityScalar = 40.0; // Controls overall density
+    float opacityScalar = 40.0;
 
     float t = tNear;
-    for (int i = 0; i < 768; i++) // Increased loop limit for better quality
+    for (int i = 0; i < 768; i++)
     {
         if (i >= maxSteps || t > tFar || accumulatedColor.a > 0.95) break;
 
         vec3 currentPos = rayOrigin + t * rayDir;
         
         if (any(lessThan(currentPos, vec3(0.0))) || any(greaterThan(currentPos, vec3(1.0))) || 
-            IsCutByPlanes(currentPos) || IsClipped(currentPos))
+            IsCutByPlanes(currentPos))
         {
             t += step;
             continue;
@@ -367,8 +439,8 @@ void main()
         if (materialId > 0 && materialParams.x > 0.5)
         {
             sampledColor = texelFetch(sampler1D(MaterialColorsTexture, VolumeSampler), materialId, 0);
-            baseOpacity = materialParams.y; // Opacity from UI
-            sampledColor.a = baseOpacity * 5.0; // Make materials more prominent
+            baseOpacity = materialParams.y;
+            sampledColor.a = baseOpacity * 5.0;
         }
         else if (ThresholdParams.w > 0.5)
         {
@@ -384,7 +456,7 @@ void main()
                     sampledColor = vec4(vec3(normIntensity), normIntensity);
                 }
                 
-                baseOpacity = pow(sampledColor.a, 2.0); // Transfer function for opacity
+                baseOpacity = pow(sampledColor.a, 2.0);
                 sampledColor.a = baseOpacity;
             }
         }
@@ -411,7 +483,7 @@ void main()
             vec3 intersectPos = rayOrigin + tMin * rayDir;
             if (all(greaterThanEqual(intersectPos, vec3(0.0))) && 
                 all(lessThanEqual(intersectPos, vec3(1.0))) &&
-                !IsCutByPlanes(intersectPos) && !IsClipped(intersectPos))
+                !IsCutByPlanes(intersectPos))
             {
                 float intensity = textureLod(sampler3D(VolumeTexture, VolumeSampler), intersectPos, 0.0).r;
                 vec4 sliceColor = vec4(vec3(intensity), 1.0);
@@ -423,6 +495,39 @@ void main()
     out_Color = accumulatedColor;
 }";
 
+            // Plane visualization shaders
+            string planeVertexShaderGlsl = @"
+#version 450
+
+layout(location = 0) in vec3 in_Position;
+
+layout(set = 0, binding = 0) uniform Constants
+{
+    mat4 ViewProj;
+    vec4 PlaneColor;
+};
+
+void main()
+{
+    gl_Position = ViewProj * vec4(in_Position, 1.0);
+}";
+
+            string planeFragmentShaderGlsl = @"
+#version 450
+
+layout(location = 0) out vec4 out_Color;
+
+layout(set = 0, binding = 0) uniform Constants
+{
+    mat4 ViewProj;
+    vec4 PlaneColor;
+};
+
+void main()
+{
+    out_Color = PlaneColor;
+}";
+
             try
             {
                 _shaders = factory.CreateFromSpirv(
@@ -430,6 +535,13 @@ void main()
                         System.Text.Encoding.UTF8.GetBytes(vertexShaderGlsl), "main"),
                     new ShaderDescription(ShaderStages.Fragment, 
                         System.Text.Encoding.UTF8.GetBytes(fragmentShaderGlsl), "main")
+                );
+                
+                _planeVisualizationShaders = factory.CreateFromSpirv(
+                    new ShaderDescription(ShaderStages.Vertex,
+                        System.Text.Encoding.UTF8.GetBytes(planeVertexShaderGlsl), "main"),
+                    new ShaderDescription(ShaderStages.Fragment,
+                        System.Text.Encoding.UTF8.GetBytes(planeFragmentShaderGlsl), "main")
                 );
                 
                 Logger.Log($"[CtVolume3DViewer] Shaders compiled successfully for backend: {VeldridManager.GraphicsDevice.BackendType}");
@@ -451,6 +563,7 @@ void main()
                 new ResourceLayoutElementDescription("ColorMapTexture", ResourceKind.TextureReadOnly, ShaderStages.Fragment),
                 new ResourceLayoutElementDescription("MaterialParamsTexture", ResourceKind.TextureReadOnly, ShaderStages.Fragment),
                 new ResourceLayoutElementDescription("MaterialColorsTexture", ResourceKind.TextureReadOnly, ShaderStages.Fragment)));
+            
             _pipeline = factory.CreateGraphicsPipeline(new GraphicsPipelineDescription(
                 BlendStateDescription.SingleAlphaBlend,
                 new DepthStencilStateDescription(false, false, ComparisonKind.Always),
@@ -458,6 +571,31 @@ void main()
                 PrimitiveTopology.TriangleList,
                 new ShaderSetDescription(new[] { new VertexLayoutDescription(new VertexElementDescription("Position", VertexElementSemantic.TextureCoordinate, VertexElementFormat.Float3)) }, _shaders),
                 new[] { _resourceLayout }, _framebuffer.OutputDescription));
+            
+            // Plane visualization pipeline
+            _planeVisualizationResourceLayout = factory.CreateResourceLayout(new ResourceLayoutDescription(
+                new ResourceLayoutElementDescription("Constants", ResourceKind.UniformBuffer, ShaderStages.Vertex | ShaderStages.Fragment)));
+            
+            _planeVisualizationPipeline = factory.CreateGraphicsPipeline(new GraphicsPipelineDescription(
+                new BlendStateDescription(
+                    RgbaFloat.Black,
+                    BlendAttachmentDescription.AlphaBlend),
+                new DepthStencilStateDescription(true, false, ComparisonKind.Less),
+                new RasterizerStateDescription(FaceCullMode.None, PolygonFillMode.Solid, FrontFace.Clockwise, true, false),
+                PrimitiveTopology.TriangleList,
+                new ShaderSetDescription(new[] { new VertexLayoutDescription(new VertexElementDescription("Position", VertexElementSemantic.TextureCoordinate, VertexElementFormat.Float3)) }, 
+                    _planeVisualizationShaders),
+                new[] { _planeVisualizationResourceLayout }, 
+                _framebuffer.OutputDescription));
+            
+            // Create constant buffer for plane visualization
+            _planeVisualizationConstantBuffer = factory.CreateBuffer(new BufferDescription(
+                (uint)Marshal.SizeOf<PlaneVisualizationConstants>(), 
+                BufferUsage.UniformBuffer | BufferUsage.Dynamic));
+            
+            _planeVisualizationResourceSet = factory.CreateResourceSet(new ResourceSetDescription(
+                _planeVisualizationResourceLayout,
+                _planeVisualizationConstantBuffer));
         }
         
         private void CreateColorMapTexture(ResourceFactory factory) 
@@ -501,9 +639,10 @@ void main()
             _projMatrix = Matrix4x4.CreatePerspectiveFieldOfView(MathF.PI / 4f, _renderTexture.Width / (float)_renderTexture.Height, 0.1f, 1000f);
         }
 
-        private void UpdateConstantBuffer()
+        private unsafe void UpdateConstantBuffer()
         {
             if (!Matrix4x4.Invert(_viewMatrix * _projMatrix, out var invViewProj)) { invViewProj = Matrix4x4.Identity; }
+            
             var constants = new VolumeConstants
             {
                 InvViewProj = invViewProj,
@@ -515,9 +654,29 @@ void main()
                 CutPlaneX = new Vector4(CutXEnabled ? 1 : 0, CutXForward ? 1 : -1, CutXPosition, 0),
                 CutPlaneY = new Vector4(CutYEnabled ? 1 : 0, CutYForward ? 1 : -1, CutYPosition, 0),
                 CutPlaneZ = new Vector4(CutZEnabled ? 1 : 0, CutZForward ? 1 : -1, CutZPosition, 0),
-                ClippingPlane = new Vector4(ClippingNormal, ClippingDistance),
-                ClippingParams = new Vector4(ClippingEnabled ? 1 : 0, ClippingMirror ? 1 : 0, 0, 0)
+                ClippingPlanesInfo = new Vector4(0, ShowPlaneVisualizations ? 1 : 0, 0, 0)
             };
+            
+            // Pack clipping planes into the fixed buffer
+            int enabledPlanes = 0;
+            for (int i = 0; i < Math.Min(ClippingPlanes.Count, MAX_CLIPPING_PLANES); i++)
+            {
+                var plane = ClippingPlanes[i];
+                if (plane.Enabled)
+                {
+                    float dist = plane.Distance + (plane.Mirror ? 1.0f : 0.0f);
+                    var normal = plane.Normal * dist;
+                    
+                    constants.ClippingPlanesData[enabledPlanes * 4] = normal.X;
+                    constants.ClippingPlanesData[enabledPlanes * 4 + 1] = normal.Y;
+                    constants.ClippingPlanesData[enabledPlanes * 4 + 2] = normal.Z;
+                    constants.ClippingPlanesData[enabledPlanes * 4 + 3] = 1; // enabled flag
+                    
+                    enabledPlanes++;
+                }
+            }
+            constants.ClippingPlanesInfo.X = enabledPlanes;
+            
             VeldridManager.GraphicsDevice.UpdateBuffer(_constantBuffer, 0, ref constants);
         }
 
@@ -565,6 +724,8 @@ void main()
             _commandList.Begin();
             _commandList.SetFramebuffer(_framebuffer);
             _commandList.ClearColorTarget(0, RgbaFloat.Black);
+            
+            // Render volume
             UpdateConstantBuffer();
             if (_materialParamsDirty) UpdateMaterialTextures();
             _commandList.SetPipeline(_pipeline);
@@ -572,20 +733,121 @@ void main()
             _commandList.SetIndexBuffer(_indexBuffer, IndexFormat.UInt16);
             _commandList.SetGraphicsResourceSet(0, _resourceSet);
             _commandList.DrawIndexed(36, 1, 0, 0, 0);
+            
+            // Render plane visualizations
+            if (ShowPlaneVisualizations)
+            {
+                RenderPlaneVisualizations();
+            }
+            
             _commandList.End();
             VeldridManager.GraphicsDevice.SubmitCommands(_commandList);
             VeldridManager.GraphicsDevice.WaitForIdle();
+        }
+
+        private void RenderPlaneVisualizations()
+        {
+            _commandList.SetPipeline(_planeVisualizationPipeline);
+            _commandList.SetVertexBuffer(0, _planeVisualizationVertexBuffer);
+            _commandList.SetIndexBuffer(_planeVisualizationIndexBuffer, IndexFormat.UInt16);
+            
+            var viewProj = _viewMatrix * _projMatrix;
+            
+            // Render axis-aligned cutting planes
+            if (CutXEnabled && ShowCutXPlaneVisual)
+            {
+                RenderCuttingPlane(viewProj, Vector3.UnitX, CutXPosition, new Vector4(1, 0.2f, 0.2f, 0.3f));
+            }
+            if (CutYEnabled && ShowCutYPlaneVisual)
+            {
+                RenderCuttingPlane(viewProj, Vector3.UnitY, CutYPosition, new Vector4(0.2f, 1, 0.2f, 0.3f));
+            }
+            if (CutZEnabled && ShowCutZPlaneVisual)
+            {
+                RenderCuttingPlane(viewProj, Vector3.UnitZ, CutZPosition, new Vector4(0.2f, 0.2f, 1, 0.3f));
+            }
+            
+            // Render arbitrary clipping planes
+            foreach (var plane in ClippingPlanes.Where(p => p.Enabled && p.IsVisualizationVisible))
+            {
+                RenderClippingPlane(viewProj, plane, new Vector4(1, 1, 0.2f, 0.3f));
+            }
+        }
+
+        private void RenderCuttingPlane(Matrix4x4 viewProj, Vector3 normal, float position, Vector4 color)
+        {
+            var transform = Matrix4x4.CreateScale(1.5f);
+            
+            if (normal == Vector3.UnitX)
+            {
+                transform *= Matrix4x4.CreateRotationY(MathF.PI / 2);
+                transform *= Matrix4x4.CreateTranslation(position, 0.5f, 0.5f);
+            }
+            else if (normal == Vector3.UnitY)
+            {
+                transform *= Matrix4x4.CreateRotationX(-MathF.PI / 2);
+                transform *= Matrix4x4.CreateTranslation(0.5f, position, 0.5f);
+            }
+            else if (normal == Vector3.UnitZ)
+            {
+                transform *= Matrix4x4.CreateTranslation(0.5f, 0.5f, position);
+            }
+            
+            var constants = new PlaneVisualizationConstants
+            {
+                ViewProj = transform * viewProj,
+                PlaneColor = color
+            };
+            
+            VeldridManager.GraphicsDevice.UpdateBuffer(_planeVisualizationConstantBuffer, 0, ref constants);
+            
+            _commandList.SetGraphicsResourceSet(0, _planeVisualizationResourceSet);
+            _commandList.DrawIndexed(6, 1, 0, 0, 0);
+        }
+
+        private void RenderClippingPlane(Matrix4x4 viewProj, ClippingPlane plane, Vector4 color)
+        {
+            // Calculate rotation matrix from normal
+            var forward = plane.Normal;
+            var right = Vector3.Cross(Vector3.UnitY, forward);
+            if (right.LengthSquared() < 0.001f)
+                right = Vector3.Cross(Vector3.UnitX, forward);
+            right = Vector3.Normalize(right);
+            var up = Vector3.Cross(forward, right);
+            
+            var rotation = new Matrix4x4(
+                right.X, right.Y, right.Z, 0,
+                up.X, up.Y, up.Z, 0,
+                forward.X, forward.Y, forward.Z, 0,
+                0, 0, 0, 1);
+            
+            var transform = Matrix4x4.CreateScale(1.5f) * rotation * 
+                           Matrix4x4.CreateTranslation(Vector3.One * 0.5f + plane.Normal * (plane.Distance - 0.5f));
+            
+            var constants = new PlaneVisualizationConstants
+            {
+                ViewProj = transform * viewProj,
+                PlaneColor = color
+            };
+            
+            VeldridManager.GraphicsDevice.UpdateBuffer(_planeVisualizationConstantBuffer, 0, ref constants);
+            
+            _commandList.SetGraphicsResourceSet(0, _planeVisualizationResourceSet);
+            _commandList.DrawIndexed(6, 1, 0, 0, 0);
         }
 
         public void DrawToolbarControls()
         {
             if (ImGui.Button("Reset Camera"))
             {
-                _cameraTarget = new Vector3(0.5f);
-                _cameraYaw = -MathF.PI / 4f;
-                _cameraPitch = MathF.PI / 6f;
-                _cameraDistance = 2.0f;
-                UpdateCameraMatrices();
+                ResetCamera();
+            }
+            
+            ImGui.SameLine();
+            bool showPlanes = ShowPlaneVisualizations;
+            if (ImGui.Checkbox("Show Planes", ref showPlanes))
+            {
+                ShowPlaneVisualizations = showPlanes;
             }
             
             ImGui.SameLine();
@@ -603,7 +865,41 @@ void main()
             {
                 var availableSize = ImGui.GetContentRegionAvail();
                 ImGui.Image(textureId, availableSize, new Vector2(0, 1), new Vector2(1, 0));
-                if (ImGui.IsItemHovered()) HandleMouseInput();
+                
+                if (ImGui.IsItemHovered()) 
+                    HandleMouseInput();
+
+                if (ImGui.BeginPopupContextItem("3DViewerContextMenu"))
+                {
+                    if (ImGui.MenuItem("Reset Camera"))
+                    {
+                        ResetCamera();
+                    }
+                    if (ImGui.MenuItem("Reset View"))
+                    {
+                        ResetView();
+                    }
+                    ImGui.Separator();
+                    if (ImGui.MenuItem("Toggle Plane Visualizations", null, ShowPlaneVisualizations))
+                    {
+                        ShowPlaneVisualizations = !ShowPlaneVisualizations;
+                    }
+                    if (ImGui.MenuItem("Clear All Clipping Planes"))
+                    {
+                        ClippingPlanes.Clear();
+                    }
+                    ImGui.Separator();
+                    if (ImGui.MenuItem("Save Screenshot..."))
+                    {
+                        _screenshotDialog.Open("screenshot_" + DateTime.Now.ToString("yyyyMMdd_HHmmss"));
+                    }
+                    ImGui.EndPopup();
+                }
+            }
+
+            if (_screenshotDialog.Submit())
+            {
+                SaveScreenshot(_screenshotDialog.SelectedPath);
             }
         }
 
@@ -611,42 +907,34 @@ void main()
         {
             var io = ImGui.GetIO();
 
-            // --- Zooming ---
             if (io.MouseWheel != 0)
             {
                 _cameraDistance = Math.Clamp(_cameraDistance * (1.0f - io.MouseWheel * 0.1f), 0.5f, 20.0f);
             }
 
-            // --- FIX START: Corrected mouse input logic for panning ---
-            // Check for any mouse button being pressed to start interaction
             if (ImGui.IsMouseDown(ImGuiMouseButton.Left) || ImGui.IsMouseDown(ImGuiMouseButton.Right) || ImGui.IsMouseDown(ImGuiMouseButton.Middle))
             {
-                // If this is the start of a drag, determine the action
                 if (!_isDragging && !_isPanning)
                 {
-                    _isDragging = ImGui.IsMouseDown(ImGuiMouseButton.Left);     // Left mouse rotates
-                    _isPanning = ImGui.IsMouseDown(ImGuiMouseButton.Middle) || ImGui.IsMouseDown(ImGuiMouseButton.Right); // Middle or Right pans
+                    _isDragging = ImGui.IsMouseDown(ImGuiMouseButton.Left);
+                    _isPanning = ImGui.IsMouseDown(ImGuiMouseButton.Middle) || ImGui.IsMouseDown(ImGuiMouseButton.Right);
                     _lastMousePos = io.MousePos;
                 }
 
                 var delta = io.MousePos - _lastMousePos;
 
-                // Apply rotation (dragging with left mouse)
                 if (_isDragging)
                 {
                     _cameraYaw -= delta.X * 0.01f;
                     _cameraPitch = Math.Clamp(_cameraPitch - delta.Y * 0.01f, -MathF.PI / 2.01f, MathF.PI / 2.01f);
                 }
 
-                // Apply panning (dragging with middle or right mouse)
                 if (_isPanning)
                 {
-                    // Invert the view matrix to get camera orientation vectors
                     Matrix4x4.Invert(_viewMatrix, out var invView);
                     var right = Vector3.Normalize(new Vector3(invView.M11, invView.M12, invView.M13));
                     var up = Vector3.Normalize(new Vector3(invView.M21, invView.M22, invView.M23));
 
-                    // Pan speed is proportional to the camera distance
                     float panSpeed = _cameraDistance * 0.001f;
                     _cameraTarget -= right * delta.X * panSpeed;
                     _cameraTarget += up * delta.Y * panSpeed;
@@ -656,19 +944,30 @@ void main()
             }
             else
             {
-                // Reset flags when no buttons are pressed
                 _isDragging = false;
                 _isPanning = false;
             }
-            // --- FIX END ---
 
-            // Always update the camera matrices after handling input
             UpdateCameraMatrices();
         }
 
         #endregion
 
         #region Public Control Methods
+
+        public void UpdateClippingPlaneNormal(ClippingPlane plane)
+        {
+            float pitchRad = plane.Rotation.X * MathF.PI / 180.0f;
+            float yawRad = plane.Rotation.Y * MathF.PI / 180.0f;
+            float rollRad = plane.Rotation.Z * MathF.PI / 180.0f;
+            
+            var rotX = Matrix4x4.CreateRotationX(pitchRad);
+            var rotY = Matrix4x4.CreateRotationY(yawRad);
+            var rotZ = Matrix4x4.CreateRotationZ(rollRad);
+            var rotation = rotZ * rotY * rotX;
+            
+            plane.Normal = Vector3.Normalize(Vector3.Transform(-Vector3.UnitZ, rotation));
+        }
 
         public void MarkLabelsAsDirty() => _labelsDirty = true;
         public bool GetMaterialVisibility(byte id) => _editableDataset.Materials.FirstOrDefault(m => m.ID == id)?.IsVisible ?? false;
@@ -677,8 +976,10 @@ void main()
         public void SetMaterialOpacity(byte id, float opacity) { _materialParamsDirty = true; }
         public void SetAllMaterialsVisibility(bool visible) { foreach (var mat in _editableDataset.Materials.Where(m => m.ID != 0)) mat.IsVisible = visible; _materialParamsDirty = true; }
         public void ResetAllMaterialOpacities() { _materialParamsDirty = true; }
-
+        
+        // --- FIX START: Made method public to be called by dialogs ---
         public void SaveScreenshot(string filePath)
+        // --- FIX END ---
         {
             var device = VeldridManager.GraphicsDevice;
             var stagingDesc = new TextureDescription(_renderTexture.Width, _renderTexture.Height, 1, 1, 1, _renderTexture.Format, TextureUsage.Staging, TextureType.Texture2D);
@@ -714,6 +1015,27 @@ void main()
             finally { device.Unmap(stagingTexture); stagingTexture.Dispose(); cl.Dispose(); }
         }
         
+        public void ResetCamera()
+        {
+            _cameraTarget = new Vector3(0.5f);
+            _cameraYaw = -MathF.PI / 4f;
+            _cameraPitch = MathF.PI / 6f;
+            _cameraDistance = 2.0f;
+            UpdateCameraMatrices();
+        }
+
+        public void ResetView()
+        {
+            ResetCamera();
+
+            // Reset axis-aligned cuts
+            CutXEnabled = CutYEnabled = CutZEnabled = false;
+            CutXPosition = CutYPosition = CutZPosition = 0.5f;
+
+            // Clear arbitrary planes
+            ClippingPlanes.Clear();
+        }
+        
         #endregion
         
         #region Helpers
@@ -727,7 +1049,6 @@ void main()
                 return dummy;
             }
 
-            // Match the LOD size of the volume texture for consistency
             var baseLod = _streamingDataset.BaseLod;
             int targetWidth = baseLod.Width;
             int targetHeight = baseLod.Height;
@@ -735,7 +1056,6 @@ void main()
             
             Logger.Log($"[CtVolume3DViewer] Creating label texture to match volume LOD: {targetWidth}x{targetHeight}x{targetDepth}");
             
-            // Calculate downsampling factor
             int factorX = Math.Max(1, volume.Width / targetWidth);
             int factorY = Math.Max(1, volume.Height / targetHeight);
             int factorZ = Math.Max(1, volume.Depth / targetDepth);
@@ -755,7 +1075,6 @@ void main()
                 {
                     for (int x = 0; x < targetWidth; x++)
                     {
-                        // Use nearest neighbor sampling
                         int srcX = Math.Min(x * factorX, volume.Width - 1);
                         int srcY = Math.Min(y * factorY, volume.Height - 1);
                         int srcZ = Math.Min(z * factorZ, volume.Depth - 1);
@@ -798,6 +1117,13 @@ void main()
             _controlPanel?.Dispose();
             _commandList?.Dispose();
             _renderTextureManager?.Dispose();
+            _planeVisualizationResourceSet?.Dispose();
+            _planeVisualizationResourceLayout?.Dispose();
+            _planeVisualizationPipeline?.Dispose();
+            if (_planeVisualizationShaders != null) { foreach (var shader in _planeVisualizationShaders) shader?.Dispose(); }
+            _planeVisualizationIndexBuffer?.Dispose();
+            _planeVisualizationVertexBuffer?.Dispose();
+            _planeVisualizationConstantBuffer?.Dispose();
             _resourceSet?.Dispose();
             _resourceLayout?.Dispose();
             _volumeSampler?.Dispose();

@@ -18,6 +18,11 @@ namespace GeoscientistToolkit.UI
         private CancellationTokenSource _cancellationTokenSource;
 
         /// <summary>
+        /// Gets a value indicating whether the dialog is currently open and being displayed.
+        /// </summary>
+        public bool IsActive => _isOpen;
+        
+        /// <summary>
         /// Gets a value indicating whether the user has requested cancellation.
         /// </summary>
         public bool IsCancellationRequested => _cancellationTokenSource?.IsCancellationRequested ?? false;

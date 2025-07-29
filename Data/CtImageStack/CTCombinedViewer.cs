@@ -15,12 +15,17 @@ namespace GeoscientistToolkit.Data.CtImageStack
 {
     /// <summary>
     /// Combined viewer showing 3 orthogonal slices + 3D volume rendering
+    /// Enhanced with cutting plane visualization
     /// </summary>
     public class CtCombinedViewer : IDatasetViewer, IDisposable
     {
         private readonly CtImageStackDataset _dataset;
         private StreamingCtVolumeDataset _streamingDataset;
-        private CtVolume3DViewer _volumeViewer;
+        
+        // --- FIX START: Made VolumeViewer a public property ---
+        public CtVolume3DViewer VolumeViewer { get; private set; }
+        // --- FIX END ---
+        
         private readonly CtRenderingPanel _renderingPanel;
         private bool _renderingPanelOpen = true;
         private bool _isInitialized = false;
@@ -82,28 +87,29 @@ namespace GeoscientistToolkit.Data.CtImageStack
         public bool ShowCrosshairs { get; set; } = true;
         public bool SyncViews { get; set; } = true;
         public bool ShowScaleBar { get; set; } = true;
+        public bool ShowCuttingPlanes { get; set; } = true;
 
         // Volume rendering settings
         public bool ShowVolumeData { get; set; } = true;
         public float VolumeStepSize 
         { 
-            get => _volumeViewer?.StepSize ?? 1.0f;
-            set { if (_volumeViewer != null) _volumeViewer.StepSize = value; }
+            get => VolumeViewer?.StepSize ?? 1.0f;
+            set { if (VolumeViewer != null) VolumeViewer.StepSize = value; }
         }
         public float MinThreshold 
         { 
-            get => _volumeViewer?.MinThreshold ?? 0.1f;
-            set { if (_volumeViewer != null) _volumeViewer.MinThreshold = value; }
+            get => VolumeViewer?.MinThreshold ?? 0.1f;
+            set { if (VolumeViewer != null) VolumeViewer.MinThreshold = value; }
         }
         public float MaxThreshold 
         { 
-            get => _volumeViewer?.MaxThreshold ?? 1.0f;
-            set { if (_volumeViewer != null) _volumeViewer.MaxThreshold = value; }
+            get => VolumeViewer?.MaxThreshold ?? 1.0f;
+            set { if (VolumeViewer != null) VolumeViewer.MaxThreshold = value; }
         }
         public int ColorMapIndex 
         { 
-            get => _volumeViewer?.ColorMapIndex ?? 0;
-            set { if (_volumeViewer != null) _volumeViewer.ColorMapIndex = value; }
+            get => VolumeViewer?.ColorMapIndex ?? 0;
+            set { if (VolumeViewer != null) VolumeViewer.ColorMapIndex = value; }
         }
 
         // Material visibility and opacity tracking
@@ -169,16 +175,16 @@ namespace GeoscientistToolkit.Data.CtImageStack
                 if (_streamingDataset != null)
                 {
                     _progressDialog.Update(0.5f, "Creating 3D volume viewer...");
-                    _volumeViewer = new CtVolume3DViewer(_streamingDataset);
+                    VolumeViewer = new CtVolume3DViewer(_streamingDataset);
                     
                     // Sync initial volume rendering settings
-                    if (_volumeViewer != null)
+                    if (VolumeViewer != null)
                     {
                         _progressDialog.Update(0.8f, "Configuring volume renderer...");
-                        _volumeViewer.ShowGrayscale = ShowVolumeData;
-                        _volumeViewer.StepSize = 2.0f; // Start with a reasonable step size
-                        _volumeViewer.MinThreshold = 0.05f; // Lower initial threshold
-                        _volumeViewer.MaxThreshold = 0.8f; // More reasonable range
+                        VolumeViewer.ShowGrayscale = ShowVolumeData;
+                        VolumeViewer.StepSize = 2.0f; // Start with a reasonable step size
+                        VolumeViewer.MinThreshold = 0.05f; // Lower initial threshold
+                        VolumeViewer.MaxThreshold = 0.8f; // More reasonable range
                         UpdateVolumeViewerSlices(); // Set initial slice positions
                     }
                 }
@@ -233,9 +239,9 @@ namespace GeoscientistToolkit.Data.CtImageStack
                     DrawSlicesOnlyView();
                     break;
                 case ViewModeEnum.VolumeOnly:
-                    if (_volumeViewer != null)
+                    if (VolumeViewer != null)
                     {
-                        _volumeViewer.DrawContent(ref zoom, ref pan);
+                        VolumeViewer.DrawContent(ref zoom, ref pan);
                     }
                     else
                     {
@@ -344,7 +350,7 @@ namespace GeoscientistToolkit.Data.CtImageStack
                 _needsUpdateXY = _needsUpdateXZ = _needsUpdateYZ = true;
                 
                 // Sync with volume viewer
-                _volumeViewer?.SetMaterialVisibility(id, visible);
+                VolumeViewer?.SetMaterialVisibility(id, visible);
             }
         }
 
@@ -358,7 +364,7 @@ namespace GeoscientistToolkit.Data.CtImageStack
         public void SetMaterialOpacity(byte id, float opacity)
         {
             _materialOpacity[id] = opacity;
-            _volumeViewer?.SetMaterialOpacity(id, opacity);
+            VolumeViewer?.SetMaterialOpacity(id, opacity);
         }
 
         public void ResetAllViews()
@@ -376,17 +382,17 @@ namespace GeoscientistToolkit.Data.CtImageStack
 
         private void UpdateVolumeViewerSlices()
         {
-            if (_volumeViewer != null && SyncViews)
+            if (VolumeViewer != null && SyncViews)
             {
                 // Ensure slice positions are valid normalized values (0-1)
-                _volumeViewer.SlicePositions = new Vector3(
+                VolumeViewer.SlicePositions = new Vector3(
                     Math.Clamp((float)_sliceX / Math.Max(1, _dataset.Width - 1), 0f, 1f),
                     Math.Clamp((float)_sliceY / Math.Max(1, _dataset.Height - 1), 0f, 1f),
                     Math.Clamp((float)_sliceZ / Math.Max(1, _dataset.Depth - 1), 0f, 1f)
                 );
                 
                 // Force update of the 3D viewer
-                _volumeViewer.ShowSlices = SyncViews;
+                VolumeViewer.ShowSlices = SyncViews;
             }
         }
 
@@ -413,7 +419,7 @@ namespace GeoscientistToolkit.Data.CtImageStack
             ImGui.SameLine(0, 2);
 
             ImGui.BeginChild("3D_View", new Vector2(viewWidth, viewHeight), ImGuiChildFlags.Border);
-            if (_volumeViewer != null)
+            if (VolumeViewer != null)
             {
                 ImGui.Text("3D Volume");
                 ImGui.Separator();
@@ -423,9 +429,9 @@ namespace GeoscientistToolkit.Data.CtImageStack
                 var dummyPan = Vector2.Zero;
                 
                 // Sync volume viewer settings
-                _volumeViewer.ShowGrayscale = ShowVolumeData;
+                VolumeViewer.ShowGrayscale = ShowVolumeData;
                 
-                _volumeViewer.DrawContent(ref dummyZoom, ref dummyPan);
+                VolumeViewer.DrawContent(ref dummyZoom, ref dummyPan);
                 ImGui.EndChild();
             }
             else
@@ -552,6 +558,14 @@ namespace GeoscientistToolkit.Data.CtImageStack
                     ImGui.SetClipboardText(posText);
                 }
                 
+                ImGui.Separator();
+                
+                bool showCuttingPlanes = ShowCuttingPlanes;
+                if (ImGui.Checkbox("Show Cutting Planes", ref showCuttingPlanes))
+                {
+                    ShowCuttingPlanes = showCuttingPlanes;
+                }
+                
                 ImGui.EndPopup();
             }
             
@@ -572,7 +586,6 @@ namespace GeoscientistToolkit.Data.CtImageStack
                 }
             }
             
-            // --- FIX START: Changed from IsItemActive to IsItemHovered for panning ---
             if (isHovered && ImGui.IsMouseDragging(ImGuiMouseButton.Middle)) 
             { 
                 pan += io.MouseDelta; 
@@ -583,7 +596,6 @@ namespace GeoscientistToolkit.Data.CtImageStack
                     _panYZ = pan;
                 }
             }
-            // --- FIX END ---
             
             if (isHovered && io.MouseWheel != 0 && io.KeyCtrl)
             {
@@ -645,9 +657,159 @@ namespace GeoscientistToolkit.Data.CtImageStack
                 { 
                     DrawScaleBar(dl, canvasPos, canvasSize, zoom, width, height, viewIndex); 
                 }
+                if (ShowCuttingPlanes && VolumeViewer != null)
+                {
+                    DrawCuttingPlanes(dl, viewIndex, canvasPos, canvasSize, imagePos, imageSize, width, height);
+                }
                 
                 dl.PopClipRect();
             }
+        }
+
+        private void DrawCuttingPlanes(ImDrawListPtr dl, int viewIndex, Vector2 canvasPos, Vector2 canvasSize, 
+            Vector2 imagePos, Vector2 imageSize, int imageWidth, int imageHeight)
+        {
+            if (VolumeViewer == null) return;
+            
+            // Draw axis-aligned cutting planes
+            if (VolumeViewer.CutXEnabled && (viewIndex == 0 || viewIndex == 1)) // Show X cut on XY and XZ views
+            {
+                float normalizedX = VolumeViewer.CutXPosition;
+                float screenX = imagePos.X + normalizedX * imageSize.X;
+                
+                if (screenX >= imagePos.X && screenX <= imagePos.X + imageSize.X)
+                {
+                    uint color = 0x6060FF60; // Semi-transparent red
+                    dl.AddLine(new Vector2(screenX, Math.Max(imagePos.Y, canvasPos.Y)), 
+                              new Vector2(screenX, Math.Min(imagePos.Y + imageSize.Y, canvasPos.Y + canvasSize.Y)), 
+                              color, 2.0f);
+                    
+                    // Draw arrow indicating cut direction
+                    Vector2 arrowPos = new Vector2(screenX, imagePos.Y + imageSize.Y * 0.5f);
+                    Vector2 arrowDir = VolumeViewer.CutXForward ? new Vector2(10, 0) : new Vector2(-10, 0);
+                    DrawArrow(dl, arrowPos, arrowDir, color);
+                }
+            }
+            
+            if (VolumeViewer.CutYEnabled && (viewIndex == 0 || viewIndex == 2)) // Show Y cut on XY and YZ views
+            {
+                float normalizedY = VolumeViewer.CutYPosition;
+                float screenY = imagePos.Y + (1.0f - normalizedY) * imageSize.Y; // Flip Y coordinate
+                
+                if (screenY >= imagePos.Y && screenY <= imagePos.Y + imageSize.Y)
+                {
+                    uint color = 0x6060FF60; // Semi-transparent green
+                    dl.AddLine(new Vector2(Math.Max(imagePos.X, canvasPos.X), screenY), 
+                              new Vector2(Math.Min(imagePos.X + imageSize.X, canvasPos.X + canvasSize.X), screenY), 
+                              color, 2.0f);
+                    
+                    // Draw arrow
+                    Vector2 arrowPos = new Vector2(imagePos.X + imageSize.X * 0.5f, screenY);
+                    Vector2 arrowDir = VolumeViewer.CutYForward ? new Vector2(0, -10) : new Vector2(0, 10);
+                    DrawArrow(dl, arrowPos, arrowDir, color);
+                }
+            }
+            
+            if (VolumeViewer.CutZEnabled && (viewIndex == 1 || viewIndex == 2)) // Show Z cut on XZ and YZ views
+            {
+                float normalizedZ = VolumeViewer.CutZPosition;
+                float screenPos = viewIndex == 1 ? 
+                    imagePos.Y + (1.0f - normalizedZ) * imageSize.Y : // For XZ view
+                    imagePos.X + normalizedZ * imageSize.X; // For YZ view
+                
+                if (viewIndex == 1) // XZ view
+                {
+                    if (screenPos >= imagePos.Y && screenPos <= imagePos.Y + imageSize.Y)
+                    {
+                        uint color = 0x60FF6060; // Semi-transparent blue
+                        dl.AddLine(new Vector2(Math.Max(imagePos.X, canvasPos.X), screenPos), 
+                                  new Vector2(Math.Min(imagePos.X + imageSize.X, canvasPos.X + canvasSize.X), screenPos), 
+                                  color, 2.0f);
+                        
+                        Vector2 arrowPos = new Vector2(imagePos.X + imageSize.X * 0.5f, screenPos);
+                        Vector2 arrowDir = VolumeViewer.CutZForward ? new Vector2(0, -10) : new Vector2(0, 10);
+                        DrawArrow(dl, arrowPos, arrowDir, color);
+                    }
+                }
+                else if (viewIndex == 2) // YZ view
+                {
+                    if (screenPos >= imagePos.X && screenPos <= imagePos.X + imageSize.X)
+                    {
+                        uint color = 0x60FF6060; // Semi-transparent blue
+                        dl.AddLine(new Vector2(screenPos, Math.Max(imagePos.Y, canvasPos.Y)), 
+                                  new Vector2(screenPos, Math.Min(imagePos.Y + imageSize.Y, canvasPos.Y + canvasSize.Y)), 
+                                  color, 2.0f);
+                        
+                        Vector2 arrowPos = new Vector2(screenPos, imagePos.Y + imageSize.Y * 0.5f);
+                        Vector2 arrowDir = VolumeViewer.CutZForward ? new Vector2(10, 0) : new Vector2(-10, 0);
+                        DrawArrow(dl, arrowPos, arrowDir, color);
+                    }
+                }
+            }
+            
+            // Draw arbitrary clipping planes
+            if (VolumeViewer.ClippingPlanes != null)
+            {
+                foreach (var plane in VolumeViewer.ClippingPlanes.Where(p => p.Enabled))
+                {
+                    DrawClippingPlaneIntersection(dl, plane, viewIndex, canvasPos, canvasSize, imagePos, imageSize);
+                }
+            }
+        }
+
+        private void DrawClippingPlaneIntersection(ImDrawListPtr dl, ClippingPlane plane, int viewIndex, 
+            Vector2 canvasPos, Vector2 canvasSize, Vector2 imagePos, Vector2 imageSize)
+        {
+            // Calculate the intersection of the clipping plane with the current slice
+            // This is a simplified visualization - in reality you'd need proper 3D math
+            Vector3 planeNormal = plane.Normal;
+            float planeDistance = plane.Distance;
+            
+            // For now, just draw a diagonal line as a placeholder
+            // In a real implementation, you'd calculate the actual intersection
+            uint color = 0x60FFFF60; // Semi-transparent yellow
+            
+            Vector2 start, end;
+            switch (viewIndex)
+            {
+                case 0: // XY view
+                    if (Math.Abs(planeNormal.Z) > 0.1f)
+                    {
+                        // Plane intersects this view
+                        start = imagePos;
+                        end = imagePos + imageSize;
+                        dl.AddLine(start, end, color, 2.0f);
+                    }
+                    break;
+                case 1: // XZ view
+                    if (Math.Abs(planeNormal.Y) > 0.1f)
+                    {
+                        start = imagePos + new Vector2(0, imageSize.Y);
+                        end = imagePos + new Vector2(imageSize.X, 0);
+                        dl.AddLine(start, end, color, 2.0f);
+                    }
+                    break;
+                case 2: // YZ view
+                    if (Math.Abs(planeNormal.X) > 0.1f)
+                    {
+                        start = imagePos;
+                        end = imagePos + imageSize;
+                        dl.AddLine(start, end, color, 2.0f);
+                    }
+                    break;
+            }
+        }
+
+        private void DrawArrow(ImDrawListPtr dl, Vector2 position, Vector2 direction, uint color)
+        {
+            Vector2 normalized = Vector2.Normalize(direction);
+            Vector2 perpendicular = new Vector2(-normalized.Y, normalized.X);
+            
+            Vector2 tip = position + direction;
+            Vector2 wing1 = tip - normalized * 8 + perpendicular * 4;
+            Vector2 wing2 = tip - normalized * 8 - perpendicular * 4;
+            
+            dl.AddTriangleFilled(tip, wing1, wing2, color);
         }
 
         private void UpdateTexture(int viewIndex, ref TextureManager texture)
@@ -969,7 +1131,7 @@ namespace GeoscientistToolkit.Data.CtImageStack
             _textureXY?.Dispose();
             _textureXZ?.Dispose();
             _textureYZ?.Dispose();
-            _volumeViewer?.Dispose();
+            VolumeViewer?.Dispose();
         }
     }
 }

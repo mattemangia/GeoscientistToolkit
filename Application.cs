@@ -26,15 +26,77 @@ namespace GeoscientistToolkit
         private ImGuiController _imGuiController;
         private MainWindow _mainWindow;
         private bool _windowMoved = false;
+        private LoadingScreen _loadingScreen;
 
         public void Run()
         {
+            // Create window and graphics device first for loading screen
+            try
+            {
+                Environment.SetEnvironmentVariable("SDL_WINDOWS_DPI_AWARENESS", "permonitorv2");
+            }
+            catch { /* Ignore */ }
+            
+            var windowCI = new WindowCreateInfo
+            {
+                X = 50, Y = 50,
+                WindowWidth = 1280, WindowHeight = 720,
+                WindowTitle = "GeoscientistToolkit"
+            };
+            
+            // Basic graphics options for initial creation
+            var basicGraphicsOptions = new GraphicsDeviceOptions(
+                debug: true,
+                swapchainDepthFormat: null,
+                syncToVerticalBlank: true,
+                resourceBindingModel: ResourceBindingModel.Improved,
+                preferStandardClipSpaceYDirection: true,
+                preferDepthRangeZeroToOne: true);
+            
+            try
+            {
+                // Create window and graphics device with default backend
+                VeldridStartup.CreateWindowAndGraphicsDevice(
+                    windowCI,
+                    basicGraphicsOptions,
+                    GetPlatformDefaultBackend(),
+                    out _window,
+                    out _graphicsDevice);
+                
+                _commandList = _graphicsDevice.ResourceFactory.CreateCommandList();
+                
+                // Create minimal ImGui controller for loading screen
+                _imGuiController = new ImGuiController(
+                    _graphicsDevice,
+                    _graphicsDevice.MainSwapchain.Framebuffer.OutputDescription,
+                    _window.Width, _window.Height);
+                
+                // Create and show loading screen
+                _loadingScreen = new LoadingScreen(_graphicsDevice, _commandList, _imGuiController, _window);
+                _loadingScreen.UpdateStatus("Starting GeoscientistToolkit...", 0.0f);
+            }
+            catch (Exception ex)
+            {
+                // If we can't even create a basic window, show error and exit
+                Logger.LogError($"Failed to create window: {ex.Message}");
+                CrossPlatformMessageBox.Show(
+                    $"Failed to create application window.\n\nError: {ex.Message}",
+                    "Startup Error",
+                    MessageBoxType.Error);
+                Environment.Exit(1);
+                return;
+            }
+            
+            // Now continue with normal initialization
+            _loadingScreen.UpdateStatus("Loading settings...", 0.1f);
             SettingsManager.Instance.LoadSettings();
             var appSettings = SettingsManager.Instance.Settings;
 
+            _loadingScreen.UpdateStatus("Initializing logger...", 0.15f);
             Logger.Initialize(appSettings.Logging);
             
             // Check if we should use failsafe mode
+            _loadingScreen.UpdateStatus("Checking graphics configuration...", 0.2f);
             string failsafeReason;
             if (GraphicsFailsafe.ShouldUseFailsafe(out failsafeReason))
             {
@@ -51,30 +113,11 @@ namespace GeoscientistToolkit
                     MessageBoxType.Warning);
             }
             
+            _loadingScreen.UpdateStatus("Initializing performance manager...", 0.25f);
             GlobalPerformanceManager.Instance.Initialize(appSettings);
             
-            try
-            {
-                Environment.SetEnvironmentVariable("SDL_WINDOWS_DPI_AWARENESS", "permonitorv2");
-            }
-            catch { /* Ignore */ }
-            
-            var windowCI = new WindowCreateInfo
-            {
-                X = 50, Y = 50,
-                WindowWidth = 1280, WindowHeight = 720,
-                WindowTitle = "GeoscientistToolkit"
-            };
-
+            // Check if we need to recreate graphics device with user preferences
             var hardwareSettings = appSettings.Hardware;
-            var graphicsDeviceOptions = new GraphicsDeviceOptions(
-                debug: true,
-                swapchainDepthFormat: null,
-                syncToVerticalBlank: hardwareSettings.EnableVSync,
-                resourceBindingModel: ResourceBindingModel.Improved,
-                preferStandardClipSpaceYDirection: true,
-                preferDepthRangeZeroToOne: true);
-
             GraphicsBackend preferredBackend;
             if (hardwareSettings.PreferredGraphicsBackend != "Auto")
             {
@@ -85,106 +128,80 @@ namespace GeoscientistToolkit
                 preferredBackend = GetPlatformDefaultBackend();
             }
             
-            // Try to create graphics device with error handling
-            bool graphicsInitialized = false;
-            Exception lastException = null;
-            
-            try
+            // If user has specific graphics preferences, recreate the device
+            if (hardwareSettings.PreferredGraphicsBackend != "Auto" || hardwareSettings.VisualizationGPU != "Auto")
             {
-                Logger.Log($"Attempting to initialize graphics with backend: {preferredBackend}");
+                _loadingScreen.UpdateStatus("Configuring graphics device...", 0.3f);
                 
-                VeldridStartup.CreateWindowAndGraphicsDevice(
-                    windowCI,
-                    graphicsDeviceOptions,
-                    preferredBackend,
-                    out _window,
-                    out _graphicsDevice);
+                var graphicsDeviceOptions = new GraphicsDeviceOptions(
+                    debug: true,
+                    swapchainDepthFormat: null,
+                    syncToVerticalBlank: hardwareSettings.EnableVSync,
+                    resourceBindingModel: ResourceBindingModel.Improved,
+                    preferStandardClipSpaceYDirection: true,
+                    preferDepthRangeZeroToOne: true);
                 
-                graphicsInitialized = true;
-                
-                // Log the actual device Veldrid chose for user feedback
-                Logger.Log($"Veldrid initialized successfully on device: {_graphicsDevice.DeviceName}");
-                if (hardwareSettings.VisualizationGPU != "Auto" && 
-                    !_graphicsDevice.DeviceName.Contains(hardwareSettings.VisualizationGPU, StringComparison.OrdinalIgnoreCase))
+                try
                 {
-                    Logger.LogWarning($"User preferred GPU '{hardwareSettings.VisualizationGPU}' but Veldrid selected '{_graphicsDevice.DeviceName}'. This may depend on the selected backend.");
+                    // Dispose current resources
+                    _imGuiController.Dispose();
+                    _commandList.Dispose();
+                    _graphicsDevice.Dispose();
+                    
+                    Logger.Log($"Attempting to initialize graphics with backend: {preferredBackend}");
+                    
+                    // Recreate with preferred settings
+                    VeldridStartup.CreateWindowAndGraphicsDevice(
+                        windowCI,
+                        graphicsDeviceOptions,
+                        preferredBackend,
+                        out _window,
+                        out _graphicsDevice);
+                    
+                    Logger.Log($"Veldrid initialized successfully on device: {_graphicsDevice.DeviceName}");
+                    if (hardwareSettings.VisualizationGPU != "Auto" && 
+                        !_graphicsDevice.DeviceName.Contains(hardwareSettings.VisualizationGPU, StringComparison.OrdinalIgnoreCase))
+                    {
+                        Logger.LogWarning($"User preferred GPU '{hardwareSettings.VisualizationGPU}' but Veldrid selected '{_graphicsDevice.DeviceName}'. This may depend on the selected backend.");
+                    }
+                    
+                    _commandList = _graphicsDevice.ResourceFactory.CreateCommandList();
+                    _imGuiController = new ImGuiController(
+                        _graphicsDevice,
+                        _graphicsDevice.MainSwapchain.Framebuffer.OutputDescription,
+                        _window.Width, _window.Height);
+                    
+                    // Recreate loading screen with new controller
+                    _loadingScreen = new LoadingScreen(_graphicsDevice, _commandList, _imGuiController, _window);
+                    
+                    GraphicsFailsafe.RecordSuccess(hardwareSettings);
                 }
-            }
-            catch (Exception ex)
-            {
-                lastException = ex;
-                Logger.LogError($"Failed to initialize graphics with backend {preferredBackend}: {ex.Message}");
-                
-                // Record the failure
-                GraphicsFailsafe.RecordFailure(preferredBackend.ToString(), hardwareSettings.VisualizationGPU);
-                
-                // Try fallback to most compatible settings
-                if (!GraphicsFailsafe.ShouldUseFailsafe(out _))
+                catch (Exception ex)
                 {
-                    // Not yet in failsafe mode, try one more time with Auto settings
-                    try
-                    {
-                        Logger.Log("Attempting graphics initialization with Auto settings...");
-                        preferredBackend = GetPlatformDefaultBackend();
-                        
-                        VeldridStartup.CreateWindowAndGraphicsDevice(
-                            windowCI,
-                            graphicsDeviceOptions,
-                            preferredBackend,
-                            out _window,
-                            out _graphicsDevice);
-                        
-                        graphicsInitialized = true;
-                        Logger.Log($"Veldrid initialized successfully on fallback device: {_graphicsDevice.DeviceName}");
-                    }
-                    catch (Exception fallbackEx)
-                    {
-                        lastException = fallbackEx;
-                        Logger.LogError($"Fallback graphics initialization also failed: {fallbackEx.Message}");
-                        GraphicsFailsafe.RecordFailure("Auto", "Auto");
-                    }
+                    Logger.LogError($"Failed to initialize graphics with backend {preferredBackend}: {ex.Message}");
+                    GraphicsFailsafe.RecordFailure(preferredBackend.ToString(), hardwareSettings.VisualizationGPU);
+                    
+                    // Keep using the basic device we already have
+                    Logger.Log("Continuing with default graphics configuration");
                 }
             }
             
-            if (!graphicsInitialized)
-            {
-                // Graphics initialization failed completely
-                Logger.LogError("Failed to initialize graphics device. The application cannot start.");
-                
-                CrossPlatformMessageBox.Show(
-                    $"Failed to initialize graphics device.\n\n" +
-                    $"Error: {lastException?.Message}\n\n" +
-                    $"Please try:\n" +
-                    $"1. Updating your graphics drivers\n" +
-                    $"2. Restarting the application (it will use safe settings after 3 failures)\n" +
-                    $"3. Checking that your GPU supports the selected backend ({preferredBackend})",
-                    "Graphics Initialization Failed",
-                    MessageBoxType.Error);
-                
-                Environment.Exit(1);
-                return;
-            }
-            
-            // Graphics initialized successfully - record success
-            GraphicsFailsafe.RecordSuccess(hardwareSettings);
-
-            _commandList = _graphicsDevice.ResourceFactory.CreateCommandList();
-            _imGuiController = new ImGuiController(
-                _graphicsDevice,
-                _graphicsDevice.MainSwapchain.Framebuffer.OutputDescription,
-                _window.Width, _window.Height);
-                
+            _loadingScreen.UpdateStatus("Setting up Veldrid manager...", 0.4f);
             VeldridManager.GraphicsDevice = _graphicsDevice;
             VeldridManager.ImGuiController = _imGuiController;
             VeldridManager.RegisterImGuiController(_imGuiController);
 
+            _loadingScreen.UpdateStatus("Loading add-ins...", 0.5f);
             AddInManager.Instance.Initialize();
+            
+            _loadingScreen.UpdateStatus("Initializing UI...", 0.6f);
             SettingsManager.Instance.SettingsChanged += OnSettingsChanged;
             _mainWindow = new MainWindow();
 
             var io = ImGui.GetIO();
             io.ConfigFlags |= ImGuiConfigFlags.ViewportsEnable | ImGuiConfigFlags.DockingEnable;
             
+            _loadingScreen.UpdateStatus("Applying theme...", 0.7f);
             ThemeManager.ApplyTheme(appSettings.Appearance);
             io.FontGlobalScale = appSettings.Appearance.UIScale;
 
@@ -196,6 +213,7 @@ namespace GeoscientistToolkit
             
             _window.Moved += (Point newPosition) => { _windowMoved = true; };
             
+            _loadingScreen.UpdateStatus("Loading project...", 0.8f);
             string projectToLoad = Program.StartingProjectPath;
             if (string.IsNullOrEmpty(projectToLoad))
             {
@@ -218,6 +236,12 @@ namespace GeoscientistToolkit
                 }
             }
             
+            _loadingScreen.UpdateStatus("Starting application...", 1.0f);
+            
+            // Give a moment to see the completed loading screen
+            Thread.Sleep(200);
+            
+            // Main application loop
             var clearColor = new Vector4(0.1f, 0.1f, 0.12f, 1.0f);
             var stopwatch = Stopwatch.StartNew();
             float frameTime = 0;
@@ -266,6 +290,7 @@ namespace GeoscientistToolkit
                 BasePanel.ProcessAllPopOutWindows();
             }
             
+            // Cleanup
             if (appSettings.Backup.BackupOnProjectClose && !string.IsNullOrEmpty(ProjectManager.Instance.ProjectPath))
             {
                 ProjectManager.Instance.BackupProject();

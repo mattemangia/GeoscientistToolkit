@@ -13,27 +13,22 @@ namespace GeoscientistToolkit.Data.CtImageStack
     public class CtVolume3DControlPanel : BasePanel
     {
         private readonly CtVolume3DViewer _viewer;
-        // --- THE FIX: ADD A FIELD TO HOLD THE DATASET ---
         private readonly CtImageStackDataset _dataset; 
 
         private readonly ImGuiExportFileDialog _screenshotDialog;
         private readonly ImGuiExportFileDialog _exportModelDialog;
         
-        private int _cutXForward = 1;
-        private int _cutYForward = 1;
-        private int _cutZForward = 1;
         private int _exportFileFormat = 0;
         
-        private float _rotationX = 0;
-        private float _rotationY = 0;
-        private float _rotationZ = 0;
+        // UI state for clipping plane editing
+        private int _selectedPlaneIndex = -1;
+        private string _newPlaneName = "Plane";
 
-        // --- THE FIX: UPDATE THE CONSTRUCTOR SIGNATURE ---
         public CtVolume3DControlPanel(CtVolume3DViewer viewer, CtImageStackDataset dataset)
             : base("3D Volume Controls", new Vector2(400, 600))
         {
             _viewer = viewer;
-            _dataset = dataset; // Assign the dataset
+            _dataset = dataset;
             
             _screenshotDialog = new ImGuiExportFileDialog("ScreenshotDialog", "Save Screenshot");
             _screenshotDialog.SetExtensions((".png", "PNG Image"));
@@ -47,9 +42,7 @@ namespace GeoscientistToolkit.Data.CtImageStack
             {
                 if (ImGui.BeginTabItem("Rendering")) { DrawRenderingTab(); ImGui.EndTabItem(); }
                 if (ImGui.BeginTabItem("Materials")) { DrawMaterialsTab(); ImGui.EndTabItem(); }
-                if (ImGui.BeginTabItem("Slices")) { DrawSlicesTab(); ImGui.EndTabItem(); }
-                if (ImGui.BeginTabItem("Cutting")) { DrawCuttingTab(); ImGui.EndTabItem(); }
-                if (ImGui.BeginTabItem("Clipping")) { DrawClippingTab(); ImGui.EndTabItem(); }
+                if (ImGui.BeginTabItem("Slicing")) { DrawSlicingTab(); ImGui.EndTabItem(); }
                 if (ImGui.BeginTabItem("Export")) { DrawExportTab(); ImGui.EndTabItem(); }
                 ImGui.EndTabBar();
             }
@@ -86,7 +79,6 @@ namespace GeoscientistToolkit.Data.CtImageStack
             ImGui.Text("Material Visibility & Opacity");
             ImGui.Separator();
 
-            // --- THE FIX: USE THE LOCAL _dataset FIELD ---
             if (_dataset.Materials.Count <= 1)
             {
                 ImGui.TextDisabled("No material labels loaded for this dataset.");
@@ -101,7 +93,6 @@ namespace GeoscientistToolkit.Data.CtImageStack
 
             if (ImGui.BeginChild("MaterialList", new Vector2(0, -50), ImGuiChildFlags.Border))
             {
-                // --- THE FIX: USE THE LOCAL _dataset FIELD ---
                 foreach (var material in _dataset.Materials)
                 {
                     if (material.ID == 0) continue;
@@ -136,96 +127,277 @@ namespace GeoscientistToolkit.Data.CtImageStack
             ImGui.EndChild();
         }
 
-        private void DrawSlicesTab()
+        private void DrawSlicingTab()
         {
-            ImGui.Text("Orthogonal Slice Controls");
+            ImGui.Text("Volume Slicing Controls");
             ImGui.Separator();
-            ImGui.Checkbox("Enable Orthogonal Slices", ref _viewer.ShowSlices);
-
-            if (_viewer.ShowSlices)
+            
+            // Visual aid toggle
+            bool showPlaneVis = _viewer.ShowPlaneVisualizations;
+            if (ImGui.Checkbox("Show Plane Visualizations", ref showPlaneVis))
             {
-                ImGui.Spacing();
-                ImGui.Indent();
-                ImGui.Text("X Slice (Red)");
-                ImGui.SliderFloat("##xslice", ref _viewer.SlicePositions.X, 0.0f, 1.0f, "%.3f");
-                ImGui.Text("Y Slice (Green)");
-                ImGui.SliderFloat("##yslice", ref _viewer.SlicePositions.Y, 0.0f, 1.0f, "%.3f");
-                ImGui.Text("Z Slice (Blue)");
-                ImGui.SliderFloat("##zslice", ref _viewer.SlicePositions.Z, 0.0f, 1.0f, "%.3f");
-                ImGui.Spacing();
-                if (ImGui.Button("Reset to Center")) _viewer.SlicePositions = new Vector3(0.5f);
-                ImGui.Unindent();
+                _viewer.ShowPlaneVisualizations = showPlaneVis;
             }
-        }
-
-        private void DrawCuttingTab()
-        {
-            ImGui.Text("Dataset Cutting Controls");
+            if (ImGui.IsItemHovered())
+                ImGui.SetTooltip("Toggle visual representation of cutting and clipping planes in the 3D view");
+            
             ImGui.Separator();
-
-            if (ImGui.CollapsingHeader("X Cutting Plane", ImGuiTreeNodeFlags.DefaultOpen))
+            
+            // Orthogonal Slices
+            if (ImGui.CollapsingHeader("Orthogonal Slices", ImGuiTreeNodeFlags.DefaultOpen))
             {
+                ImGui.Checkbox("Enable Orthogonal Slices", ref _viewer.ShowSlices);
+
+                if (_viewer.ShowSlices)
+                {
+                    ImGui.Spacing();
+                    ImGui.Indent();
+                    ImGui.Text("X Slice (Red)");
+                    ImGui.SliderFloat("##xslice", ref _viewer.SlicePositions.X, 0.0f, 1.0f, "%.3f");
+                    ImGui.Text("Y Slice (Green)");
+                    ImGui.SliderFloat("##yslice", ref _viewer.SlicePositions.Y, 0.0f, 1.0f, "%.3f");
+                    ImGui.Text("Z Slice (Blue)");
+                    ImGui.SliderFloat("##zslice", ref _viewer.SlicePositions.Z, 0.0f, 1.0f, "%.3f");
+                    ImGui.Spacing();
+                    if (ImGui.Button("Reset to Center")) _viewer.SlicePositions = new Vector3(0.5f);
+                    ImGui.Unindent();
+                }
+            }
+            
+            // Axis-Aligned Cutting Planes
+            if (ImGui.CollapsingHeader("Axis-Aligned Cutting Planes", ImGuiTreeNodeFlags.DefaultOpen))
+            {
+                ImGui.Indent();
+                
+                // X Cutting Plane
+                ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(1, 0.3f, 0.3f, 1));
+                ImGui.Text("X Cutting Plane");
+                ImGui.PopStyleColor();
+                
                 ImGui.Checkbox("Enable X Cut", ref _viewer.CutXEnabled);
                 if (_viewer.CutXEnabled)
                 {
-                    ImGui.RadioButton("Forward##X", ref _cutXForward, 1); ImGui.SameLine();
-                    ImGui.RadioButton("Backward##X", ref _cutXForward, 0);
-                    _viewer.CutXForward = _cutXForward == 1;
-                    ImGui.SliderFloat("Position##X", ref _viewer.CutXPosition, 0.0f, 1.0f);
+                    ImGui.Indent();
+                    ImGui.SliderFloat("Position##X", ref _viewer.CutXPosition, 0.0f, 1.0f, "%.3f");
+                    bool forward = _viewer.CutXForward;
+                    if (ImGui.Checkbox("Cut Forward##X", ref forward))
+                        _viewer.CutXForward = forward;
+                    ImGui.SameLine();
+                    if (ImGui.Button("Mirror##X"))
+                        _viewer.CutXForward = !_viewer.CutXForward;
+                    ImGui.Unindent();
                 }
-            }
-            if (ImGui.CollapsingHeader("Y Cutting Plane", ImGuiTreeNodeFlags.DefaultOpen))
-            {
+                
+                ImGui.Spacing();
+                
+                // Y Cutting Plane
+                ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(0.3f, 1, 0.3f, 1));
+                ImGui.Text("Y Cutting Plane");
+                ImGui.PopStyleColor();
+                
                 ImGui.Checkbox("Enable Y Cut", ref _viewer.CutYEnabled);
-                 if (_viewer.CutYEnabled)
+                if (_viewer.CutYEnabled)
                 {
-                    ImGui.RadioButton("Forward##Y", ref _cutYForward, 1); ImGui.SameLine();
-                    ImGui.RadioButton("Backward##Y", ref _cutYForward, 0);
-                    _viewer.CutYForward = _cutYForward == 1;
-                    ImGui.SliderFloat("Position##Y", ref _viewer.CutYPosition, 0.0f, 1.0f);
+                    ImGui.Indent();
+                    ImGui.SliderFloat("Position##Y", ref _viewer.CutYPosition, 0.0f, 1.0f, "%.3f");
+                    bool forward = _viewer.CutYForward;
+                    if (ImGui.Checkbox("Cut Forward##Y", ref forward))
+                        _viewer.CutYForward = forward;
+                    ImGui.SameLine();
+                    if (ImGui.Button("Mirror##Y"))
+                        _viewer.CutYForward = !_viewer.CutYForward;
+                    ImGui.Unindent();
                 }
-            }
-             if (ImGui.CollapsingHeader("Z Cutting Plane", ImGuiTreeNodeFlags.DefaultOpen))
-            {
+                
+                ImGui.Spacing();
+                
+                // Z Cutting Plane
+                ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(0.3f, 0.3f, 1, 1));
+                ImGui.Text("Z Cutting Plane");
+                ImGui.PopStyleColor();
+                
                 ImGui.Checkbox("Enable Z Cut", ref _viewer.CutZEnabled);
-                 if (_viewer.CutZEnabled)
+                if (_viewer.CutZEnabled)
                 {
-                    ImGui.RadioButton("Forward##Z", ref _cutZForward, 1); ImGui.SameLine();
-                    ImGui.RadioButton("Backward##Z", ref _cutZForward, 0);
-                    _viewer.CutZForward = _cutZForward == 1;
-                    ImGui.SliderFloat("Position##Z", ref _viewer.CutZPosition, 0.0f, 1.0f);
+                    ImGui.Indent();
+                    ImGui.SliderFloat("Position##Z", ref _viewer.CutZPosition, 0.0f, 1.0f, "%.3f");
+                    bool forward = _viewer.CutZForward;
+                    if (ImGui.Checkbox("Cut Forward##Z", ref forward))
+                        _viewer.CutZForward = forward;
+                    ImGui.SameLine();
+                    if (ImGui.Button("Mirror##Z"))
+                        _viewer.CutZForward = !_viewer.CutZForward;
+                    ImGui.Unindent();
                 }
-            }
-        }
-        
-        private void DrawClippingTab()
-        {
-            ImGui.Text("Arbitrary Clipping Plane");
-            ImGui.Separator();
-            ImGui.Checkbox("Enable Clipping Plane", ref _viewer.ClippingEnabled);
-
-            if (_viewer.ClippingEnabled)
-            {
-                ImGui.Spacing();
-                ImGui.Text("Plane Orientation (Euler Angles):");
-                ImGui.Indent();
-                bool changed = false;
-                if (ImGui.SliderFloat("Pitch (X rot)", ref _rotationX, -180, 180, "%.0f°")) changed = true;
-                if (ImGui.SliderFloat("Yaw (Y rot)", ref _rotationY, -180, 180, "%.0f°")) changed = true;
-                if (ImGui.SliderFloat("Roll (Z rot)", ref _rotationZ, -180, 180, "%.0f°")) changed = true;
-                if (changed) UpdateClippingPlaneNormal();
+                
                 ImGui.Unindent();
-                ImGui.Spacing();
-                ImGui.Text("Position along normal:");
-                ImGui.SliderFloat("##distance", ref _viewer.ClippingDistance, 0.0f, 1.0f, "%.3f");
-                ImGui.Checkbox("Mirror (cut other side)", ref _viewer.ClippingMirror);
-                ImGui.Spacing();
+            }
+            
+            // Arbitrary Clipping Planes
+            if (ImGui.CollapsingHeader("Arbitrary Clipping Planes", ImGuiTreeNodeFlags.DefaultOpen))
+            {
+                ImGui.Indent();
+                
+                // Add new plane
+                ImGui.InputText("Name", ref _newPlaneName, 50);
+                ImGui.SameLine();
+                if (ImGui.Button("Add Plane"))
+                {
+                    _viewer.ClippingPlanes.Add(new ClippingPlane(_newPlaneName));
+                    _newPlaneName = $"Plane {_viewer.ClippingPlanes.Count + 1}";
+                }
+                
                 ImGui.Separator();
-                ImGui.Text("Quick Presets:");
-                if (ImGui.Button("XY")) SetClippingPreset(0, 0, 0); ImGui.SameLine();
-                if (ImGui.Button("XZ")) SetClippingPreset(-90, 0, 0); ImGui.SameLine();
-                if (ImGui.Button("YZ")) SetClippingPreset(0, 90, 0); ImGui.SameLine();
-                if (ImGui.Button("Diagonal")) SetClippingPreset(-45, 45, 0);
+                
+                // List of clipping planes
+                if (_viewer.ClippingPlanes.Count == 0)
+                {
+                    ImGui.TextDisabled("No clipping planes defined.");
+                    ImGui.TextWrapped("Click 'Add Plane' to create a new clipping plane.");
+                }
+                else
+                {
+                    // Quick actions
+                    if (ImGui.Button("Enable All"))
+                    {
+                        foreach (var plane in _viewer.ClippingPlanes)
+                            plane.Enabled = true;
+                    }
+                    ImGui.SameLine();
+                    if (ImGui.Button("Disable All"))
+                    {
+                        foreach (var plane in _viewer.ClippingPlanes)
+                            plane.Enabled = false;
+                    }
+                    ImGui.SameLine();
+                    if (ImGui.Button("Clear All"))
+                    {
+                        _viewer.ClippingPlanes.Clear();
+                        _selectedPlaneIndex = -1;
+                    }
+                    
+                    ImGui.Spacing();
+                    
+                    // Plane list
+                    if (ImGui.BeginChild("PlaneList", new Vector2(0, 150), ImGuiChildFlags.Border))
+                    {
+                        for (int i = 0; i < _viewer.ClippingPlanes.Count; i++)
+                        {
+                            var plane = _viewer.ClippingPlanes[i];
+                            ImGui.PushID(i);
+                            
+                            bool isSelected = _selectedPlaneIndex == i;
+                            if (ImGui.Selectable($"{plane.Name}##plane", isSelected))
+                            {
+                                _selectedPlaneIndex = i;
+                            }
+                            
+                            ImGui.SameLine();
+                            ImGui.SetCursorPosX(ImGui.GetContentRegionAvail().X - 80);
+                            
+                            bool enabled = plane.Enabled;
+                            if (ImGui.Checkbox("##enabled", ref enabled))
+                            {
+                                plane.Enabled = enabled;
+                            }
+                            
+                            ImGui.SameLine();
+                            if (ImGui.SmallButton("X"))
+                            {
+                                _viewer.ClippingPlanes.RemoveAt(i);
+                                if (_selectedPlaneIndex >= _viewer.ClippingPlanes.Count)
+                                    _selectedPlaneIndex = _viewer.ClippingPlanes.Count - 1;
+                                ImGui.PopID();
+                                break;
+                            }
+                            
+                            ImGui.PopID();
+                        }
+                    }
+                    ImGui.EndChild();
+                    
+                    // Edit selected plane
+                    if (_selectedPlaneIndex >= 0 && _selectedPlaneIndex < _viewer.ClippingPlanes.Count)
+                    {
+                        ImGui.Separator();
+                        ImGui.Text("Edit Clipping Plane");
+                        
+                        var plane = _viewer.ClippingPlanes[_selectedPlaneIndex];
+                        
+                        ImGui.PushID(_selectedPlaneIndex);
+                        
+                        // Name
+                        string name = plane.Name;
+                        if (ImGui.InputText("Name", ref name, 50))
+                        {
+                            plane.Name = name;
+                        }
+                        
+                        // Rotation controls
+                        ImGui.Text("Orientation (Euler Angles):");
+                        bool rotationChanged = false;
+                        
+                        var rotation = plane.Rotation;
+                        if (ImGui.DragFloat("Pitch (X)", ref rotation.X, 1.0f, -180, 180, "%.0f°"))
+                            rotationChanged = true;
+                        if (ImGui.DragFloat("Yaw (Y)", ref rotation.Y, 1.0f, -180, 180, "%.0f°"))
+                            rotationChanged = true;
+                        if (ImGui.DragFloat("Roll (Z)", ref rotation.Z, 1.0f, -180, 180, "%.0f°"))
+                            rotationChanged = true;
+
+                        if (rotationChanged)
+                        {
+                            plane.Rotation = rotation;
+                            _viewer.UpdateClippingPlaneNormal(plane);
+                        }
+                        
+                        // Position
+                        ImGui.Text("Distance from Center:");
+                        float distance = plane.Distance;
+                        if (ImGui.SliderFloat("##distance", ref distance, -0.5f, 1.5f, "%.3f"))
+                        {
+                            plane.Distance = distance;
+                        }
+                        
+                        // Mirror
+                        bool mirror = plane.Mirror;
+                        if (ImGui.Checkbox("Mirror (Cut Opposite Side)", ref mirror))
+                        {
+                            plane.Mirror = mirror;
+                        }
+                        
+                        // Presets
+                        ImGui.Spacing();
+                        ImGui.Text("Quick Presets:");
+                        if (ImGui.Button("XY", new Vector2(40, 0)))
+                        {
+                            plane.Rotation = new Vector3(0, 0, 0);
+                            _viewer.UpdateClippingPlaneNormal(plane);
+                        }
+                        ImGui.SameLine();
+                        if (ImGui.Button("XZ", new Vector2(40, 0)))
+                        {
+                            plane.Rotation = new Vector3(-90, 0, 0);
+                            _viewer.UpdateClippingPlaneNormal(plane);
+                        }
+                        ImGui.SameLine();
+                        if (ImGui.Button("YZ", new Vector2(40, 0)))
+                        {
+                            plane.Rotation = new Vector3(0, 90, 0);
+                            _viewer.UpdateClippingPlaneNormal(plane);
+                        }
+                        ImGui.SameLine();
+                        if (ImGui.Button("Diagonal", new Vector2(60, 0)))
+                        {
+                            plane.Rotation = new Vector3(-45, 45, 0);
+                            _viewer.UpdateClippingPlaneNormal(plane);
+                        }
+                        
+                        ImGui.PopID();
+                    }
+                }
+                
+                ImGui.Unindent();
             }
         }
 
@@ -248,26 +420,6 @@ namespace GeoscientistToolkit.Data.CtImageStack
             {
                  _exportModelDialog.Open("model_" + DateTime.Now.ToString("yyyyMMdd_HHmmss"));
             }
-        }
-        
-        private void SetClippingPreset(float x, float y, float z)
-        {
-            _rotationX = x;
-            _rotationY = y;
-            _rotationZ = z;
-            UpdateClippingPlaneNormal();
-        }
-
-        private void UpdateClippingPlaneNormal()
-        {
-            float pitchRad = _rotationX * MathF.PI / 180.0f;
-            float yawRad = _rotationY * MathF.PI / 180.0f;
-            float rollRad = _rotationZ * MathF.PI / 180.0f;
-            var rotX = Matrix4x4.CreateRotationX(pitchRad);
-            var rotY = Matrix4x4.CreateRotationY(yawRad);
-            var rotZ = Matrix4x4.CreateRotationZ(rollRad);
-            var rotation = rotZ * rotY * rotX; 
-            _viewer.ClippingNormal = Vector3.Normalize(Vector3.Transform(-Vector3.UnitZ, rotation));
         }
 
         private void HandleFileDialogs()
