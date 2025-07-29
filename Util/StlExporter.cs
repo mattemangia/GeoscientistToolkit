@@ -8,6 +8,7 @@ using System.IO;
 using System.Numerics;
 using System.Text;
 using System.Threading.Tasks;
+using System.Linq;
 
 namespace GeoscientistToolkit.Util
 {
@@ -39,7 +40,7 @@ namespace GeoscientistToolkit.Util
                     var vertices = new List<Vector3>();
                     var normals = new List<Vector3>();
 
-                    var volume = dataset.LabelData; // Primarily use label data for materials
+                    var volume = dataset.LabelData;
                     if (volume == null)
                     {
                         throw new InvalidOperationException("Label data is not loaded and is required for STL export.");
@@ -48,7 +49,19 @@ namespace GeoscientistToolkit.Util
                     int width = volume.Width;
                     int height = volume.Height;
                     int depth = volume.Depth;
-                    var mask = new bool[width * height * depth];
+
+                    Logger.Log($"[StlExporter] Starting export: Volume dimensions {width}x{height}x{depth}");
+                    
+                    // Count visible materials
+                    var visibleMaterials = dataset.Materials
+                        .Where(m => m.ID != 0 && viewer.GetMaterialVisibility(m.ID))
+                        .ToList();
+                    
+                    Logger.Log($"[StlExporter] Found {visibleMaterials.Count} visible materials");
+                    if (visibleMaterials.Count == 0)
+                    {
+                        throw new InvalidOperationException("No visible materials found. Please ensure at least one material is visible.");
+                    }
 
                     // Iterate over each of the 3 axes (X, Y, Z)
                     for (int d = 0; d < 3; ++d)
@@ -60,22 +73,28 @@ namespace GeoscientistToolkit.Util
                         var q = new int[3];
                         q[d] = 1;
 
-                        float totalIterations = depth;
+                        // Get the size along each axis
+                        int[] dims = { width, height, depth };
+                        int maxD = dims[d];
+                        int maxU = dims[u];
+                        int maxV = dims[v];
+
+                        float totalIterations = maxD + 1;
                         float currentIteration = 0;
 
                         // Sweep a plane across the volume for the current axis
-                        for (x[d] = -1; x[d] < depth; ++x[d])
+                        for (x[d] = -1; x[d] < maxD; ++x[d])
                         {
                             onProgress?.Invoke(0.1f + (0.8f * (d * totalIterations + currentIteration) / (totalIterations * 3)),
-                                $"Processing Axis {d + 1}/3, Slice {x[d] + 2}/{depth + 1}");
+                                $"Processing Axis {d + 1}/3, Slice {x[d] + 2}/{maxD + 1}");
 
                             int n = 0;
-                            var sliceMask = new byte[width * height];
+                            var sliceMask = new byte[maxU * maxV];
 
                             // Create a 2D mask of the surface on the current slice
-                            for (x[v] = 0; x[v] < height; ++x[v])
+                            for (x[v] = 0; x[v] < maxV; ++x[v])
                             {
-                                for (x[u] = 0; x[u] < width; ++x[u])
+                                for (x[u] = 0; x[u] < maxU; ++x[u])
                                 {
                                     bool isVoxel1Solid = IsVoxelVisible(dataset, viewer, x[0], x[1], x[2]);
                                     bool isVoxel2Solid = IsVoxelVisible(dataset, viewer, x[0] + q[0], x[1] + q[1], x[2] + q[2]);
@@ -89,9 +108,9 @@ namespace GeoscientistToolkit.Util
 
                             n = 0;
                             // Generate quads from the 2D mask using a greedy approach
-                            for (int j = 0; j < height; ++j)
+                            for (int j = 0; j < maxV; ++j)
                             {
-                                for (int i = 0; i < width; )
+                                for (int i = 0; i < maxU; )
                                 {
                                     if (sliceMask[n] != 0)
                                     {
@@ -99,15 +118,15 @@ namespace GeoscientistToolkit.Util
                                         byte currentFace = sliceMask[n];
 
                                         // Calculate width of the quad
-                                        for (w = 1; i + w < width && sliceMask[n + w] == currentFace; ++w) { }
+                                        for (w = 1; i + w < maxU && sliceMask[n + w] == currentFace; ++w) { }
 
                                         // Calculate height of the quad
                                         bool done = false;
-                                        for (h = 1; j + h < height; ++h)
+                                        for (h = 1; j + h < maxV; ++h)
                                         {
                                             for (int k = 0; k < w; ++k)
                                             {
-                                                if (sliceMask[n + k + h * width] != currentFace)
+                                                if (sliceMask[n + k + h * maxU] != currentFace)
                                                 {
                                                     done = true;
                                                     break;
@@ -133,9 +152,11 @@ namespace GeoscientistToolkit.Util
                                         var v3 = new Vector3(x[0] + du[0] + dv[0], x[1] + du[1] + dv[1], x[2] + du[2] + dv[2]);
                                         var v4 = new Vector3(x[0] + dv[0], x[1] + dv[1], x[2] + dv[2]);
                                         
+                                        // First triangle
                                         vertices.Add(v1); vertices.Add(v2); vertices.Add(v3);
                                         normals.Add(normal); normals.Add(normal); normals.Add(normal);
                                         
+                                        // Second triangle
                                         vertices.Add(v1); vertices.Add(v3); vertices.Add(v4);
                                         normals.Add(normal); normals.Add(normal); normals.Add(normal);
                                         
@@ -144,7 +165,7 @@ namespace GeoscientistToolkit.Util
                                         {
                                             for (int k = 0; k < w; ++k)
                                             {
-                                                sliceMask[n + k + l * width] = 0;
+                                                sliceMask[n + k + l * maxU] = 0;
                                             }
                                         }
                                         i += w;
@@ -160,9 +181,16 @@ namespace GeoscientistToolkit.Util
                         }
                     }
 
+                    Logger.Log($"[StlExporter] Generated {vertices.Count / 3} triangles");
+                    
+                    if (vertices.Count == 0)
+                    {
+                        throw new InvalidOperationException("No triangles were generated. Check material visibility and clipping planes.");
+                    }
+
                     onProgress?.Invoke(0.95f, "Writing STL file...");
-                    WriteStlFile(filePath, vertices, normals);
-                    onProgress?.Invoke(1.0f, "Export complete!");
+                    WriteStlFile(filePath, vertices, normals, dataset.PixelSize);
+                    onProgress?.Invoke(1.0f, $"Export complete! {vertices.Count / 3} triangles exported.");
                 }
                 catch (Exception ex)
                 {
@@ -190,7 +218,12 @@ namespace GeoscientistToolkit.Util
 
             // Check material visibility
             byte materialId = dataset.LabelData[x, y, z];
-            if (materialId == 0 || !viewer.GetMaterialVisibility(materialId))
+            if (materialId == 0) // Exterior material
+            {
+                return false;
+            }
+            
+            if (!viewer.GetMaterialVisibility(materialId))
             {
                 return false;
             }
@@ -230,25 +263,34 @@ namespace GeoscientistToolkit.Util
         /// <summary>
         /// Writes the mesh data to an STL file in ASCII format.
         /// </summary>
-        private static void WriteStlFile(string filePath, List<Vector3> vertices, List<Vector3> normals)
+        private static void WriteStlFile(string filePath, List<Vector3> vertices, List<Vector3> normals, float pixelSize)
         {
             var sb = new StringBuilder();
             sb.AppendLine("solid GeoscientistToolkitExport");
 
+            // Convert voxel coordinates to physical units
+            float scale = pixelSize / 1000.0f; // Convert to mm if pixelSize is in micrometers
+
             for (int i = 0; i < vertices.Count; i += 3)
             {
                 Vector3 n = normals[i];
-                sb.AppendLine($"  facet normal {n.X} {n.Y} {n.Z}");
+                Vector3 v1 = vertices[i] * scale;
+                Vector3 v2 = vertices[i + 1] * scale;
+                Vector3 v3 = vertices[i + 2] * scale;
+                
+                sb.AppendLine($"  facet normal {n.X:E6} {n.Y:E6} {n.Z:E6}");
                 sb.AppendLine("    outer loop");
-                sb.AppendLine($"      vertex {vertices[i].X} {vertices[i].Y} {vertices[i].Z}");
-                sb.AppendLine($"      vertex {vertices[i+1].X} {vertices[i+1].Y} {vertices[i+1].Z}");
-                sb.AppendLine($"      vertex {vertices[i+2].X} {vertices[i+2].Y} {vertices[i+2].Z}");
+                sb.AppendLine($"      vertex {v1.X:E6} {v1.Y:E6} {v1.Z:E6}");
+                sb.AppendLine($"      vertex {v2.X:E6} {v2.Y:E6} {v2.Z:E6}");
+                sb.AppendLine($"      vertex {v3.X:E6} {v3.Y:E6} {v3.Z:E6}");
                 sb.AppendLine("    endloop");
                 sb.AppendLine("  endfacet");
             }
 
             sb.AppendLine("endsolid GeoscientistToolkitExport");
             File.WriteAllText(filePath, sb.ToString());
+            
+            Logger.Log($"[StlExporter] STL file written to: {filePath}");
         }
     }
 }
