@@ -215,7 +215,7 @@ namespace GeoscientistToolkit.UI
             if ((io.ConfigFlags & ImGuiConfigFlags.DockingEnable) == 0)
                 io.ConfigFlags |= ImGuiConfigFlags.DockingEnable;
 
-#if IMGUI_HAS_DOCK_BUILDER
+/*#if IMGUI_HAS_DOCK_BUILDER
             ImGui.DockBuilderRemoveNode(rootId);
             ImGui.DockBuilderAddNode(rootId, ImGuiDockNodeFlags.DockSpace);
             ImGui.DockBuilderSetNodeSize(rootId, size);
@@ -234,7 +234,7 @@ namespace GeoscientistToolkit.UI
             ImGui.DockBuilderFinish(rootId);
 #else
             DockBuilderStub.WarnOnce();
-#endif
+#endif*/
         }
 
 #if !IMGUI_HAS_DOCK_BUILDER

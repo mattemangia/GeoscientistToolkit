@@ -1,8 +1,4 @@
-﻿<!-- GeoscientistToolkit/GeoscientistToolkit.csproj -->
-<!-- This is the definitive, corrected project file. -->
-<!-- It adds RuntimeIdentifiers to ensure native libraries are copied correctly. -->
-
-<Project Sdk="Microsoft.NET.Sdk">
+﻿<Project Sdk="Microsoft.NET.Sdk">
 
     <PropertyGroup>
         <OutputType>Exe</OutputType>
@@ -12,44 +8,84 @@
         <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
         <ShaderVariantDef>shader-variants.json</ShaderVariantDef>
         <RuntimeIdentifiers>osx-arm64;osx-x64;win-x64;linux-x64</RuntimeIdentifiers>
-
+        <DefineConstants>IMGUI_HAS_DOCK_BUILDER;$(DefineConstants)</DefineConstants>
     </PropertyGroup>
 
+    <!-- 
+      FIX 1: Exclude the nested AddInExtractor project's source code 
+      from the main project's compilation. This resolves the duplicate attribute errors.
+    -->
     <ItemGroup>
-      
-        <PackageReference Include="ImGui.NET" Version="1.90.8.1" />
+        <Compile Remove="AddInExtractor\**" />
+        <EmbeddedResource Remove="AddInExtractor\**" />
+        <None Remove="AddInExtractor\**" />
+    </ItemGroup>
 
+    <!-- FIX 2: All PackageReference items are correctly placed within a single ItemGroup -->
+    <ItemGroup>
+        <PackageReference Include="ImGui.NET" Version="1.90.8.1" />
         <PackageReference Include="ImGui.NET.Branches.Docking" Version="1.88.0" />
-      
         <PackageReference Include="sdl2" Version="2.0.5" />
-      
         <PackageReference Include="StbImageSharp" Version="2.30.15" />
-      
         <PackageReference Include="StbImageWriteSharp" Version="1.16.7" />
-      
         <PackageReference Include="System.Drawing.Primitives" Version="4.3.0" />
-      
-        <PackageReference Include="System.Management" Version="10.0.0-preview.6.25358.103" />
+        <PackageReference Include="System.Management" Version="8.0.0" />
         <PackageReference Include="TinyDialogsNet" Version="1.0.2" />
         <PackageReference Include="Veldrid" Version="4.9.0" />
         <PackageReference Include="Veldrid.ImGui" Version="5.72.0" />
         <PackageReference Include="Veldrid.MetalBindings" Version="4.9.0" />
         <PackageReference Include="Veldrid.SDL2" Version="4.9.0" />
         <PackageReference Include="Veldrid.SPIRV" Version="1.0.15" />
-       
         <PackageReference Include="Veldrid.StartupUtilities" Version="4.9.0" />
-        <!-- Added for open-source, cross-platform TIFF file support -->
         <PackageReference Include="BitMiracle.LibTiff.NET" Version="2.4.649" />
-        <!-- Core SkiaSharp library for 2D graphics -->
         <PackageReference Include="SkiaSharp" Version="2.88.8" />
-
-        <!-- Native assets for Windows, macOS, and Linux to ensure cross-platform compatibility -->
         <PackageReference Include="SkiaSharp.NativeAssets.Win32" Version="2.88.8" />
         <PackageReference Include="SkiaSharp.NativeAssets.macOS" Version="2.88.8" />
         <PackageReference Include="SkiaSharp.NativeAssets.Linux" Version="2.88.8" />
-
-        <!-- Recommended for advanced text shaping and layout, ensuring consistent text rendering -->
         <PackageReference Include="SkiaSharp.HarfBuzz" Version="2.88.8" />
     </ItemGroup>
+
+    <!-- The ProjectReference to the extractor tool, correctly in its own ItemGroup -->
+    <ItemGroup>
+        <ProjectReference Include="AddInExtractor\AddInExtractor.csproj"
+                          ReferenceOutputAssembly="false"
+                          OutputItemType="AddInExtractorPath" />
+    </ItemGroup>
+
+    <!-- In Release mode, we must EXCLUDE the add-in source from the main compile. -->
+    <ItemGroup Condition="'$(Configuration)' == 'Release'">
+        <Compile Remove="AddIns\Development\**\*.cs" />
+    </ItemGroup>
+
+    <!-- Target to extract add-ins after build in Release mode -->
+    <Target Name="ExtractAddIns" AfterTargets="Build" Condition="'$(Configuration)' == 'Release'">
+        <PropertyGroup>
+            <!-- Determine the extractor executable path based on OS -->
+            <ExtractorPath>$([MSBuild]::NormalizePath('$(MSBuildProjectDirectory)', 'AddInExtractor', 'bin', '$(Configuration)', 'net8.0', 'AddInExtractor'))</ExtractorPath>
+            <ExtractorPath Condition="'$(OS)' == 'Windows_NT'">$(ExtractorPath).exe</ExtractorPath>
+
+            <AddInExtractorCommand>"$(ExtractorPath)" --source "$(MSBuildProjectDirectory)\AddIns\Development" --output "$(OutputPath)AddIns" --core "$(OutputPath)GeoscientistToolkit.dll" --main "$(OutputPath)$(AssemblyName).exe"</AddInExtractorCommand>
+        </PropertyGroup>
+
+        <ItemGroup>
+            <AddInSourceFiles Include="$(MSBuildProjectDirectory)\AddIns\Development\*.cs" />
+        </ItemGroup>
+
+        <Message Text="Checking for add-ins to extract..." Importance="high" />
+        <Message Text="Executing command: $(AddInExtractorCommand)" Importance="normal" Condition="'@(AddInSourceFiles)' != ''" />
+
+        <Exec Condition="'@(AddInSourceFiles)' != ''"
+              Command="$(AddInExtractorCommand)"
+              WorkingDirectory="$(MSBuildProjectDirectory)" />
+
+        <Message Condition="'@(AddInSourceFiles)' != ''" Text="Add-in extraction complete!" Importance="high" />
+        <Message Condition="'@(AddInSourceFiles)' == ''" Text="No add-ins found in AddIns\Development directory." Importance="high" />
+    </Target>
+
+    <!-- Optional: Create the add-in development directory structure on first build -->
+    <Target Name="EnsureAddInDirectory" BeforeTargets="BeforeBuild">
+        <MakeDir Directories="$(MSBuildProjectDirectory)\AddIns\Development"
+                 Condition="!Exists('$(MSBuildProjectDirectory)\AddIns\Development')" />
+    </Target>
 
 </Project>
