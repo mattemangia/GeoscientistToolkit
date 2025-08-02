@@ -1,10 +1,14 @@
-// GeoscientistToolkit/ImGuiController.cs (Updated with Context property)
+// GeoscientistToolkit/ImGuiController.cs (Fixed SPIR-V Cross-Compilation)
 using System;
+using System.Collections.Generic;
+using System.Linq;
 using System.Numerics;
 using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 using System.Text;
 using ImGuiNET;
 using Veldrid;
+using Veldrid.SPIRV;
 
 namespace GeoscientistToolkit
 {
@@ -70,11 +74,8 @@ namespace GeoscientistToolkit
             _ub = factory.CreateBuffer(new BufferDescription(64,
                                   BufferUsage.UniformBuffer | BufferUsage.Dynamic));
 
-            (string vsSrc, string fsSrc) = GetShaders(gd.BackendType);
-            _vs = factory.CreateShader(new ShaderDescription(ShaderStages.Vertex,
-                        Encoding.UTF8.GetBytes(vsSrc), "VS"));
-            _fs = factory.CreateShader(new ShaderDescription(ShaderStages.Fragment,
-                        Encoding.UTF8.GetBytes(fsSrc), "FS"));
+            // Create shaders using SPIR-V cross-compilation
+            CreateShadersWithSpirvCrossCompilation(factory);
 
             var vLayout = new VertexLayoutDescription(
                 new VertexElementDescription("in_position", VertexElementSemantic.Position,          VertexElementFormat.Float2),
@@ -104,6 +105,106 @@ namespace GeoscientistToolkit
                 ResourceBindingModel.Improved));
 
             RecreateFontTexture(gd);      // creates _fontTex *and* _set
+        }
+
+        private void CreateShadersWithSpirvCrossCompilation(ResourceFactory factory)
+        {
+            // Fixed GLSL shaders with proper coordinate handling
+            string vertexShaderGlsl = @"
+#version 450
+layout(location = 0) in vec2 in_position;
+layout(location = 1) in vec2 in_texCoord;
+layout(location = 2) in vec4 in_color;
+
+layout(set = 0, binding = 0) uniform ProjectionBuffer
+{
+    mat4 Projection;
+};
+
+layout(location = 0) out vec2 frag_texCoord;
+layout(location = 1) out vec4 frag_color;
+
+void main()
+{
+    frag_texCoord = in_texCoord;
+    frag_color = in_color;
+    gl_Position = Projection * vec4(in_position, 0, 1);
+}";
+
+            string fragmentShaderGlsl = @"
+#version 450
+layout(location = 0) in vec2 frag_texCoord;
+layout(location = 1) in vec4 frag_color;
+
+layout(location = 0) out vec4 out_Color;
+
+layout(set = 0, binding = 1) uniform texture2D MainTexture;
+layout(set = 0, binding = 2) uniform sampler MainSampler;
+
+void main()
+{
+    out_Color = frag_color * texture(sampler2D(MainTexture, MainSampler), frag_texCoord);
+}";
+
+            try
+            {
+                // Use SPIR-V cross compilation extension methods
+                var vertexShaderDesc = new ShaderDescription(
+                    ShaderStages.Vertex,
+                    Encoding.UTF8.GetBytes(vertexShaderGlsl),
+                    "main");
+                    
+                var fragmentShaderDesc = new ShaderDescription(
+                    ShaderStages.Fragment,
+                    Encoding.UTF8.GetBytes(fragmentShaderGlsl),
+                    "main");
+
+                var options = new CrossCompileOptions();
+                
+                // Configure options based on backend - FIXED coordinate handling
+                if (_gd.BackendType == GraphicsBackend.Metal)
+                {
+                    options.FixClipSpaceZ = true;
+                    options.InvertVertexOutputY = false; // Changed to false to fix inversion
+                }
+                else if (_gd.BackendType == GraphicsBackend.Direct3D11)
+                {
+                    // D3D has different clip space conventions
+                    options.FixClipSpaceZ = true;
+                    options.InvertVertexOutputY = false;
+                }
+                
+                // Use the CreateFromSpirv extension method on ResourceFactory
+                var shaders = factory.CreateFromSpirv(vertexShaderDesc, fragmentShaderDesc, options);
+                _vs = shaders[0];
+                _fs = shaders[1];
+                
+                Util.Logger.Log($"Successfully created shaders using SPIR-V cross-compilation for {_gd.BackendType}");
+            }
+            catch (Exception ex)
+            {
+                // Fallback to backend-specific shaders if SPIR-V cross compilation fails
+                Util.Logger.LogError($"SPIR-V cross-compilation failed: {ex.Message}. Falling back to backend-specific shaders.");
+                CreateBackendSpecificShaders(factory);
+            }
+        }
+
+        private void CreateBackendSpecificShaders(ResourceFactory factory)
+        {
+            // Fallback method with backend-specific shaders
+            (string vsSrc, string fsSrc) = GetBackendSpecificShaders(_gd.BackendType);
+            
+            // Metal shaders use "main0" as entry point, others use "main"
+            string entryPoint = _gd.BackendType == GraphicsBackend.Metal ? "main0" : "main";
+            
+            _vs = factory.CreateShader(new ShaderDescription(
+                ShaderStages.Vertex,
+                Encoding.UTF8.GetBytes(vsSrc), 
+                entryPoint));
+            _fs = factory.CreateShader(new ShaderDescription(
+                ShaderStages.Fragment,
+                Encoding.UTF8.GetBytes(fsSrc), 
+                entryPoint));
         }
 
         // ------------------------------------------------------------------
@@ -140,6 +241,7 @@ namespace GeoscientistToolkit
 
             io.Fonts.ClearTexData();
         }
+        
         /// <summary>
         /// Gets or creates a handle for a texture to be displayed with ImGui.
         /// Pass the returned handle to Image() or ImageButton().
@@ -157,6 +259,7 @@ namespace GeoscientistToolkit
             // Find the existing ID
             return _setsById.First(kvp => kvp.Value == resourceSet).Key;
         }
+        
         /// <summary>
         /// Retrieves the shader texture binding for the given helper handle.
         /// </summary>
@@ -164,6 +267,7 @@ namespace GeoscientistToolkit
         {
             return _setsById[imGuiBinding];
         }
+        
         /// <summary>
         /// Removes a particular texture binding.
         /// </summary>
@@ -176,20 +280,12 @@ namespace GeoscientistToolkit
                 resourceSet.Dispose();
             }
         }
+        
         // ------------------------------------------------------------------
         public void Update(float dt, InputSnapshot snap)
         {
             ImGui.SetCurrentContext(_context);
             
-            // FIX: This call was incorrect. ImGui.Render() should only be called once per frame,
-            // after all the UI has been submitted. The call in the Render() method is the correct one.
-            // Removing this fixes the state corruption that caused popups to fail.
-            //
-            // if (_frameBegun) 
-            // {
-            //     ImGui.Render();
-            // }
-
             SetPerFrameImGuiData(dt);
             UpdateInputs(snap);
 
@@ -269,15 +365,35 @@ namespace GeoscientistToolkit
             cl.SetIndexBuffer(_ib, IndexFormat.UInt16);
             cl.SetPipeline(_pipe);
 
-            // Update the projection matrix uniform.
+            // Update the projection matrix uniform - FIXED for correct coordinate system
             var io = ImGui.GetIO();
-            Matrix4x4 mvp = Matrix4x4.CreateOrthographicOffCenter(
-                0f,
-                io.DisplaySize.X,
-                io.DisplaySize.Y,
-                0f,
-                -1.0f,
-                1.0f);
+            Matrix4x4 mvp;
+            
+            // Adjust projection based on backend
+            if (_gd.BackendType == GraphicsBackend.Direct3D11 )
+            {
+                // D3D uses top-left origin with Y pointing down
+                mvp = Matrix4x4.CreateOrthographicOffCenter(
+                    0f,
+                    io.DisplaySize.X,
+                    io.DisplaySize.Y,
+                    0f,
+                    -1.0f,
+                    1.0f);
+            }
+            else
+            {
+                // OpenGL/Vulkan/Metal use bottom-left origin with Y pointing up by default
+                // But ImGui expects top-left origin, so we still use the same projection
+                mvp = Matrix4x4.CreateOrthographicOffCenter(
+                    0f,
+                    io.DisplaySize.X,
+                    io.DisplaySize.Y,
+                    0f,
+                    -1.0f,
+                    1.0f);
+            }
+            
             gd.UpdateBuffer(_ub, 0, ref mvp);
 
             // Scale clip rectangles for HiDPI displays.
@@ -397,16 +513,17 @@ namespace GeoscientistToolkit
         }
 
         // ------------------------------------------------------------------
-        private (string, string) GetShaders(GraphicsBackend backend)
+        // Fallback shaders for when SPIR-V cross-compilation fails
+        private (string, string) GetBackendSpecificShaders(GraphicsBackend backend)
         {
             switch (backend)
             {
                 case GraphicsBackend.Direct3D11:
                     return (VsHlsl, FsHlsl);
                 case GraphicsBackend.Metal:
-                    return (VsMetal, FsMetal);
+                    return (VsMetalFixed, FsMetalFixed);
                 case GraphicsBackend.Vulkan:
-                    return (VsSpirv, FsSpirv);
+                    return (VsGlsl, FsGlsl);
                 case GraphicsBackend.OpenGL:
                 case GraphicsBackend.OpenGLES:
                 default:
@@ -439,31 +556,6 @@ void main()
     out_Color = fs_Col * texture(sampler2D(MainTex,MainSamp), fs_Tex);
 }";
 
-        private const string VsSpirv = @"#version 450
-layout(location=0) in vec2 in_position;
-layout(location=1) in vec2 in_texCoord;
-layout(location=2) in vec4 in_color;
-layout(set=0,binding=0) uniform Projection { mat4 M; };
-layout(location=0) out vec2 fs_Tex;
-layout(location=1) out vec4 fs_Col;
-void main()
-{
-    fs_Tex = in_texCoord;
-    fs_Col = in_color;
-    gl_Position = M * vec4(in_position,0,1);
-}";
-
-        private const string FsSpirv = @"#version 450
-layout(location=0) in vec2 fs_Tex;
-layout(location=1) in vec4 fs_Col;
-layout(location=0) out vec4 out_Color;
-layout(set=0,binding=1) uniform texture2D MainTex;
-layout(set=0,binding=2) uniform sampler   MainSamp;
-void main()
-{
-    out_Color = fs_Col * texture(sampler2D(MainTex,MainSamp), fs_Tex);
-}";
-
         private const string VsHlsl = @"
 cbuffer Projection : register(b0)
 {
@@ -484,7 +576,7 @@ struct PS_INPUT
     float2 uv  : TEXCOORD0;
 };
 
-PS_INPUT VS(VS_INPUT input)
+PS_INPUT main(VS_INPUT input)
 {
     PS_INPUT output;
     output.pos = mul(M, float4(input.pos.xy, 0.0, 1.0));
@@ -504,49 +596,62 @@ struct PS_INPUT
 sampler sampler0 : register(s0);
 Texture2D texture0 : register(t0);
 
-float4 FS(PS_INPUT input) : SV_Target
+float4 main(PS_INPUT input) : SV_Target
 {
     float4 out_col = input.col * texture0.Sample(sampler0, input.uv);
     return out_col;
 }";
 
-        private const string VsMetal = @"
+        // Fixed Metal shaders that handle coordinate system correctly
+        private const string VsMetalFixed = @"
 #include <metal_stdlib>
 using namespace metal;
 
-struct UBO  { float4x4 M; };
-
-struct VIN  { float2 pos [[attribute(0)]];
-              float2 uv  [[attribute(1)]];
-              float4 col [[attribute(2)]]; };
-
-struct VOUT { float4 pos [[position]];
-              float2 uv;
-              float4 col; };
-
-vertex VOUT VS(VIN v [[stage_in]],
-               constant UBO& u [[buffer(0)]])
+struct ProjectionBuffer
 {
-    VOUT o;
-    o.pos = u.M * float4(v.pos,0,1);
-    o.uv  = v.uv;
-    o.col = v.col;
-    return o;
+    float4x4 projection;
+};
+
+struct VertexIn
+{
+    float2 position [[attribute(0)]];
+    float2 texCoord [[attribute(1)]];
+    float4 color    [[attribute(2)]];
+};
+
+struct VertexOut
+{
+    float4 position [[position]];
+    float2 texCoord;
+    float4 color;
+};
+
+vertex VertexOut main0(VertexIn in [[stage_in]],
+                       constant ProjectionBuffer& proj [[buffer(0)]])
+{
+    VertexOut out;
+    out.position = proj.projection * float4(in.position, 0.0, 1.0);
+    out.texCoord = in.texCoord;
+    out.color = in.color;
+    return out;
 }";
 
-        private const string FsMetal = @"
+        private const string FsMetalFixed = @"
 #include <metal_stdlib>
 using namespace metal;
 
-struct FSin { float4 pos [[position]];
-              float2 uv;
-              float4 col; };
-
-fragment float4 FS(FSin  inp [[stage_in]],
-                   texture2d<float> tex [[texture(1)]],
-                   sampler          smp [[sampler(2)]])
+struct VertexOut
 {
-    return inp.col * tex.sample(smp, inp.uv);
+    float4 position [[position]];
+    float2 texCoord;
+    float4 color;
+};
+
+fragment float4 main0(VertexOut in [[stage_in]],
+                      texture2d<float> tex [[texture(1)]],
+                      sampler samp [[sampler(2)]])
+{
+    return in.color * tex.sample(samp, in.texCoord);
 }";
 
         // ------------------------------------------------------------------
@@ -561,6 +666,11 @@ fragment float4 FS(FSin  inp [[stage_in]],
             _fs?.Dispose(); 
             _layout?.Dispose(); 
             _pipe?.Dispose();
+            
+            foreach (var kvp in _setsByView)
+            {
+                kvp.Value?.Dispose();
+            }
             
             if (_context != IntPtr.Zero)
             {
