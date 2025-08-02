@@ -22,6 +22,7 @@ namespace GeoscientistToolkit.UI
 
         private readonly ImGuiFileDialog _folderDialog;
         private readonly ImGuiFileDialog _fileDialog;
+        private readonly ImGuiFileDialog _ctFileDialog; // New dialog for CT TIFF files
         private readonly ImageStackOrganizerDialog _organizerDialog;
 
         private int _selectedDatasetTypeIndex = 0;
@@ -44,7 +45,8 @@ namespace GeoscientistToolkit.UI
         private bool _shouldOpenOrganizer = false;
 
         // CT stack properties
-        private string _ctFolderPath = "";
+        private string _ctPath = ""; // Can be either folder or TIFF file
+        private bool _ctIsMultiPageTiff = false;
         private float _ctPixelSize = 1.0f;
         private int _ctPixelSizeUnit = 0;
         private int _ctBinningFactor = 1;
@@ -59,6 +61,7 @@ namespace GeoscientistToolkit.UI
         {
             _folderDialog = new ImGuiFileDialog("ImportFolderDialog", FileDialogType.OpenDirectory, "Select Image Folder");
             _fileDialog = new ImGuiFileDialog("ImportFileDialog", FileDialogType.OpenFile, "Select Image File");
+            _ctFileDialog = new ImGuiFileDialog("ImportCTFileDialog", FileDialogType.OpenFile, "Select Multi-Page TIFF File");
             _organizerDialog = new ImageStackOrganizerDialog();
         }
 
@@ -98,9 +101,17 @@ namespace GeoscientistToolkit.UI
                 if (_selectedDatasetTypeIndex == 1) // Image Folder
                     _imageFolderPath = _folderDialog.SelectedPath;
                 else // CT Stack
-                    _ctFolderPath = _folderDialog.SelectedPath;
+                {
+                    _ctPath = _folderDialog.SelectedPath;
+                    _ctIsMultiPageTiff = false;
+                }
             }
             if (_fileDialog.Submit()) _singleImagePath = _fileDialog.SelectedPath;
+            if (_ctFileDialog.Submit())
+            {
+                _ctPath = _ctFileDialog.SelectedPath;
+                _ctIsMultiPageTiff = true;
+            }
 
             ImGui.SetNextWindowSize(new Vector2(600, 550), ImGuiCond.FirstUseEver);
             var center = ImGui.GetMainViewport().GetCenter();
@@ -231,10 +242,46 @@ namespace GeoscientistToolkit.UI
 
         private void DrawCTImageStackOptions()
         {
-            ImGui.Text("Image Folder:");
-            ImGui.InputText("##CTPath", ref _ctFolderPath, 260, ImGuiInputTextFlags.ReadOnly);
+            ImGui.Text("CT Stack Source:");
+            
+            // Radio buttons for folder vs file selection
+            bool isFolderMode = !_ctIsMultiPageTiff;
+            if (ImGui.RadioButton("Image Folder", isFolderMode))
+            {
+                _ctIsMultiPageTiff = false;
+                _ctPath = "";
+            }
             ImGui.SameLine();
-            if (ImGui.Button("Browse...##CTFolder")) _folderDialog.Open();
+            if (ImGui.RadioButton("Multi-Page TIFF File", !isFolderMode))
+            {
+                _ctIsMultiPageTiff = true;
+                _ctPath = "";
+            }
+
+            ImGui.Spacing();
+
+            // Show appropriate input based on selection
+            if (_ctIsMultiPageTiff)
+            {
+                ImGui.Text("TIFF File:");
+                ImGui.InputText("##CTFilePath", ref _ctPath, 260, ImGuiInputTextFlags.ReadOnly);
+                ImGui.SameLine();
+                if (ImGui.Button("Browse...##CTFile"))
+                {
+                    string[] tiffExtensions = { ".tif", ".tiff" };
+                    _ctFileDialog.Open(null, tiffExtensions);
+                }
+            }
+            else
+            {
+                ImGui.Text("Image Folder:");
+                ImGui.InputText("##CTFolderPath", ref _ctPath, 260, ImGuiInputTextFlags.ReadOnly);
+                ImGui.SameLine();
+                if (ImGui.Button("Browse...##CTFolder"))
+                {
+                    _folderDialog.Open();
+                }
+            }
 
             ImGui.Spacing();
             ImGui.Text("Voxel Size:");
@@ -260,17 +307,47 @@ namespace GeoscientistToolkit.UI
                 ImGui.SetTooltip("Reduces dataset size by averaging voxels. A factor of 2 makes the data 8 times smaller. This is a pre-processing step.");
             }
 
-            // Show folder information if available
-            if (!string.IsNullOrEmpty(_ctFolderPath) && Directory.Exists(_ctFolderPath))
+            // Show information if available
+            if (!string.IsNullOrEmpty(_ctPath))
             {
                 ImGui.Spacing();
                 ImGui.Separator();
                 ImGui.Spacing();
 
-                var (count, totalSize) = CountImagesInFolder(_ctFolderPath);
-                ImGui.Text("Folder Information:");
-                ImGui.BulletText($"Image Count: {count}");
-                ImGui.BulletText($"Total Size: {totalSize / (1024 * 1024)} MB");
+                if (_ctIsMultiPageTiff && File.Exists(_ctPath))
+                {
+                    try
+                    {
+                        if (ImageLoader.IsMultiPageTiff(_ctPath))
+                        {
+                            int pageCount = ImageLoader.GetTiffPageCount(_ctPath);
+                            var info = ImageLoader.LoadImageInfo(_ctPath);
+                            long fileSize = new FileInfo(_ctPath).Length;
+                            
+                            ImGui.Text("Multi-Page TIFF Information:");
+                            ImGui.BulletText($"Pages (Slices): {pageCount}");
+                            ImGui.BulletText($"Resolution: {info.Width} x {info.Height}");
+                            ImGui.BulletText($"Total Size: {fileSize / (1024 * 1024)} MB");
+                            ImGui.BulletText($"File: {Path.GetFileName(_ctPath)}");
+                        }
+                        else
+                        {
+                            ImGui.TextColored(new Vector4(1.0f, 0.8f, 0.0f, 1.0f), 
+                                "Warning: Selected TIFF file contains only one page. CT stacks require multiple pages.");
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        ImGui.TextColored(new Vector4(1, 0, 0, 1), $"Error reading TIFF: {ex.Message}");
+                    }
+                }
+                else if (!_ctIsMultiPageTiff && Directory.Exists(_ctPath))
+                {
+                    var (count, totalSize) = CountImagesInFolder(_ctPath);
+                    ImGui.Text("Folder Information:");
+                    ImGui.BulletText($"Image Count: {count}");
+                    ImGui.BulletText($"Total Size: {totalSize / (1024 * 1024)} MB");
+                }
             }
         }
 
@@ -289,7 +366,15 @@ namespace GeoscientistToolkit.UI
                     break;
                 case 2: // CT Stack Optimized
                 case 3: // CT Stack Legacy
-                    canImport = !string.IsNullOrEmpty(_ctFolderPath) && Directory.Exists(_ctFolderPath);
+                    if (_ctIsMultiPageTiff)
+                    {
+                        canImport = !string.IsNullOrEmpty(_ctPath) && File.Exists(_ctPath) && 
+                                   ImageLoader.IsMultiPageTiff(_ctPath);
+                    }
+                    else
+                    {
+                        canImport = !string.IsNullOrEmpty(_ctPath) && Directory.Exists(_ctPath);
+                    }
                     break;
             }
 
@@ -380,7 +465,6 @@ namespace GeoscientistToolkit.UI
             }
             else if (_importTask.IsCompletedSuccessfully)
             {
-                // --- FIXED LOGIC ---
                 // Add pending datasets to project manager now that we're back on UI thread
                 if (_pendingSingleImageDataset != null)
                 {
@@ -402,7 +486,6 @@ namespace GeoscientistToolkit.UI
                     _pendingLegacyDataset = null;
                     _pendingStreamingDataset = null;
                 }
-                // --- END OF FIX ---
 
                 ImGui.TextColored(new Vector4(0, 1, 0, 1), "Import successful!");
                 if (ImGui.Button("Close")) _currentState = ImportState.Idle;
@@ -411,12 +494,13 @@ namespace GeoscientistToolkit.UI
 
         private async Task ConvertAndImportOptimizedCTStack()
         {
-            var folderName = Path.GetFileName(_ctFolderPath);
-            string gvtFileName = _ctBinningFactor > 1 ? $"{folderName}_bin{_ctBinningFactor}.gvt" : $"{folderName}.gvt";
-            string gvtPath = Path.Combine(_ctFolderPath, gvtFileName);
+            string name = _ctIsMultiPageTiff ? Path.GetFileNameWithoutExtension(_ctPath) : Path.GetFileName(_ctPath);
+            string outputDir = _ctIsMultiPageTiff ? Path.GetDirectoryName(_ctPath) : _ctPath;
+            string gvtFileName = _ctBinningFactor > 1 ? $"{name}_bin{_ctBinningFactor}.gvt" : $"{name}.gvt";
+            string gvtPath = Path.Combine(outputDir, gvtFileName);
 
-            var binnedVolume = await CTStackLoader.LoadCTStackAsync(_ctFolderPath, 0, _ctBinningFactor, false,
-                new Progress<float>(p => { _progress = p * 0.5f; _statusText = $"Step 1/2: Binning and loading images... {(int)(p * 100)}%"; }), folderName);
+            var binnedVolume = await CTStackLoader.LoadCTStackAsync(_ctPath, GetPixelSizeInMeters(), _ctBinningFactor, false,
+                new Progress<float>(p => { _progress = p * 0.5f; _statusText = $"Step 1/2: Loading and processing images... {(int)(p * 100)}%"; }), name);
 
             if (!File.Exists(gvtPath))
             {
@@ -430,7 +514,7 @@ namespace GeoscientistToolkit.UI
 
             var legacyDataset = await CreateLegacyDatasetForEditing(binnedVolume);
 
-            var streamingDataset = new StreamingCtVolumeDataset($"{folderName} (3D View)", gvtPath)
+            var streamingDataset = new StreamingCtVolumeDataset($"{name} (3D View)", gvtPath)
             {
                 EditablePartner = legacyDataset
             };
@@ -446,20 +530,20 @@ namespace GeoscientistToolkit.UI
         {
             await Task.Run(async () =>
             {
-                var folderName = Path.GetFileName(_ctFolderPath);
+                string name = _ctIsMultiPageTiff ? Path.GetFileNameWithoutExtension(_ctPath) : Path.GetFileName(_ctPath);
                 var progressReporter = new Progress<float>(p =>
                 {
                     _progress = p;
                     _statusText = $"Processing images... {(int)(p * 100)}%";
                 });
 
-                // Load the volume from images
-                var volume = await CTStackLoader.LoadCTStackAsync(_ctFolderPath, 0, _ctBinningFactor, false, progressReporter, folderName);
+                // Load the volume from images or TIFF
+                var volume = await CTStackLoader.LoadCTStackAsync(_ctPath, GetPixelSizeInMeters(), _ctBinningFactor, false, progressReporter, name);
 
                 double pixelSizeMicrons = (_ctPixelSizeUnit == 0 ? _ctPixelSize : _ctPixelSize * 1000) * _ctBinningFactor;
 
                 // Create the dataset object
-                _pendingLegacyDataset = new CtImageStackDataset($"{folderName} (2D Edit & Segment)", _ctFolderPath)
+                _pendingLegacyDataset = new CtImageStackDataset($"{name} (2D Edit & Segment)", _ctPath)
                 {
                     Width = volume.Width,
                     Height = volume.Height,
@@ -476,7 +560,7 @@ namespace GeoscientistToolkit.UI
 
         private async Task<CtImageStackDataset> CreateLegacyDatasetForEditing(ChunkedVolume preloadedVolume)
         {
-            var folderName = Path.GetFileName(_ctFolderPath);
+            string name = _ctIsMultiPageTiff ? Path.GetFileNameWithoutExtension(_ctPath) : Path.GetFileName(_ctPath);
             CtImageStackDataset dataset = null;
 
             await Task.Run(async () =>
@@ -489,12 +573,12 @@ namespace GeoscientistToolkit.UI
                         _progress = p;
                         _statusText = $"Processing images... {(int)(p * 100)}%";
                     });
-                    volume = await CTStackLoader.LoadCTStackAsync(_ctFolderPath, 0, _ctBinningFactor, false, progressReporter, folderName);
+                    volume = await CTStackLoader.LoadCTStackAsync(_ctPath, GetPixelSizeInMeters(), _ctBinningFactor, false, progressReporter, name);
                 }
 
                 double pixelSizeMicrons = (_ctPixelSizeUnit == 0 ? _ctPixelSize : _ctPixelSize * 1000) * _ctBinningFactor;
 
-                dataset = new CtImageStackDataset($"{folderName} (2D Edit & Segment)", _ctFolderPath)
+                dataset = new CtImageStackDataset($"{name} (2D Edit & Segment)", _ctPath)
                 {
                     Width = volume.Width,
                     Height = volume.Height,
@@ -506,6 +590,14 @@ namespace GeoscientistToolkit.UI
                 };
             });
             return dataset;
+        }
+
+        private double GetPixelSizeInMeters()
+        {
+            // Convert to meters based on unit selection
+            return _ctPixelSizeUnit == 0 ? 
+                _ctPixelSize * 1e-6 :  // micrometers to meters
+                _ctPixelSize * 1e-3;   // millimeters to meters
         }
 
         private (int count, long totalSize) CountImagesInFolder(string folderPath)
@@ -524,7 +616,8 @@ namespace GeoscientistToolkit.UI
             _singleImagePixelSize = 1.0f;
             _singleImagePixelSizeUnit = 0;
             _imageFolderPath = "";
-            _ctFolderPath = "";
+            _ctPath = "";
+            _ctIsMultiPageTiff = false;
             _ctPixelSize = 1.0f;
             _ctPixelSizeUnit = 0;
             _ctBinningFactor = 1;

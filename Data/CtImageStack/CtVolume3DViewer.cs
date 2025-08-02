@@ -64,6 +64,7 @@ namespace GeoscientistToolkit.Data.CtImageStack
         private Texture _colorMapTexture;
         private Texture _materialParamsTexture;
         private Texture _materialColorsTexture;
+        private Texture _previewTexture; // New: texture for preview mask
         private Sampler _volumeSampler;
         private CommandList _commandList;
         private Texture _renderTexture;
@@ -91,6 +92,11 @@ namespace GeoscientistToolkit.Data.CtImageStack
         public int ColorMapIndex = 0;
         public bool ShowSlices = false;
         public Vector3 SlicePositions = new(0.5f);
+        
+        // Preview state
+        private bool _showPreview = false;
+        private Vector4 _previewColor = new Vector4(1, 0, 0, 0.5f);
+        private bool _previewDirty = false;
         
         // Axis-aligned cutting planes
         public bool CutXEnabled;
@@ -131,6 +137,8 @@ namespace GeoscientistToolkit.Data.CtImageStack
             public Vector4 CutPlaneZ;
             public fixed float ClippingPlanesData[32]; // 8 planes * 4 floats each
             public Vector4 ClippingPlanesInfo;
+            public Vector4 PreviewParams; // New: x=enabled, y=r, z=g, w=b
+            public Vector4 PreviewAlpha; // New: x=alpha
         }
 
         [StructLayout(LayoutKind.Sequential)]
@@ -162,6 +170,7 @@ namespace GeoscientistToolkit.Data.CtImageStack
             InitializeVeldridResources();
 
             ProjectManager.Instance.DatasetDataChanged += OnDatasetDataChanged;
+            CtImageStackTools.Preview3DChanged += OnPreview3DChanged;
         }
 
         private void OnDatasetDataChanged(Dataset dataset)
@@ -170,6 +179,21 @@ namespace GeoscientistToolkit.Data.CtImageStack
             {
                 Logger.Log("[CtVolume3DViewer] Received notification that labels have changed. Marking for re-upload.");
                 MarkLabelsAsDirty();
+            }
+        }
+
+        private void OnPreview3DChanged(CtImageStackDataset dataset, byte[] previewMask, Vector4 color)
+        {
+            if (dataset == _editableDataset)
+            {
+                _showPreview = previewMask != null;
+                _previewColor = color;
+                _previewDirty = true;
+                
+                if (previewMask != null)
+                {
+                    UpdatePreviewTexture(previewMask);
+                }
             }
         }
 
@@ -213,6 +237,11 @@ namespace GeoscientistToolkit.Data.CtImageStack
             
             _labelTexture = CreateDownsampledTexture3D(factory, _editableDataset.LabelData, VRAM_BUDGET_LABELS);
             
+            // Create empty preview texture initially
+            _previewTexture = factory.CreateTexture(desc);
+            byte[] emptyData = new byte[baseLodInfo.Width * baseLodInfo.Height * baseLodInfo.Depth];
+            VeldridManager.GraphicsDevice.UpdateTexture(_previewTexture, emptyData, 0, 0, 0, (uint)baseLodInfo.Width, (uint)baseLodInfo.Height, (uint)baseLodInfo.Depth, 0, 0);
+            
             _volumeSampler = factory.CreateSampler(new SamplerDescription(
                 SamplerAddressMode.Clamp, SamplerAddressMode.Clamp, SamplerAddressMode.Clamp, 
                 SamplerFilter.MinLinear_MagLinear_MipLinear,
@@ -220,6 +249,72 @@ namespace GeoscientistToolkit.Data.CtImageStack
                 
             CreateColorMapTexture(factory);
             CreateMaterialTextures(factory);
+        }
+
+        private void UpdatePreviewTexture(byte[] previewMask)
+        {
+            if (previewMask == null || _previewTexture == null) return;
+            
+            var baseLod = _streamingDataset.BaseLod;
+            int targetWidth = baseLod.Width;
+            int targetHeight = baseLod.Height;
+            int targetDepth = baseLod.Depth;
+            
+            // Downsample the preview mask to match the volume LOD
+            byte[] downsampledPreview = DownsampleVolumeData(
+                previewMask, 
+                _editableDataset.Width, 
+                _editableDataset.Height, 
+                _editableDataset.Depth,
+                targetWidth, 
+                targetHeight, 
+                targetDepth
+            );
+            
+            VeldridManager.GraphicsDevice.UpdateTexture(
+                _previewTexture, 
+                downsampledPreview, 
+                0, 0, 0, 
+                (uint)targetWidth, 
+                (uint)targetHeight, 
+                (uint)targetDepth, 
+                0, 0
+            );
+            
+            _previewDirty = false;
+        }
+
+        private byte[] DownsampleVolumeData(byte[] sourceData, int srcW, int srcH, int srcD, int dstW, int dstH, int dstD)
+        {
+            byte[] result = new byte[dstW * dstH * dstD];
+            
+            float scaleX = (float)srcW / dstW;
+            float scaleY = (float)srcH / dstH;
+            float scaleZ = (float)srcD / dstD;
+            
+            Parallel.For(0, dstD, z =>
+            {
+                for (int y = 0; y < dstH; y++)
+                {
+                    for (int x = 0; x < dstW; x++)
+                    {
+                        int srcX = (int)(x * scaleX);
+                        int srcY = (int)(y * scaleY);
+                        int srcZ = (int)(z * scaleZ);
+                        
+                        srcX = Math.Min(srcX, srcW - 1);
+                        srcY = Math.Min(srcY, srcH - 1);
+                        srcZ = Math.Min(srcZ, srcD - 1);
+                        
+                        int srcIndex = srcZ * srcW * srcH + srcY * srcW + srcX;
+                        int dstIndex = z * dstW * dstH + y * dstW + x;
+                        
+                        result[dstIndex] = sourceData[srcIndex];
+                    }
+                }
+            });
+            
+            return result;
         }
         
         private byte[] ReconstructVolumeFromBricks(GvtLodInfo lodInfo, byte[] brickData, int brickSize)
@@ -335,6 +430,8 @@ layout(set = 0, binding = 0) uniform Constants
     vec4 CutPlaneZ;
     vec4 ClippingPlanesData[8];
     vec4 ClippingPlanesInfo;
+    vec4 PreviewParams;
+    vec4 PreviewAlpha;
 };
 
 layout(set = 0, binding = 1) uniform sampler VolumeSampler;
@@ -343,6 +440,7 @@ layout(set = 0, binding = 3) uniform texture3D LabelTexture;
 layout(set = 0, binding = 4) uniform texture1D ColorMapTexture;
 layout(set = 0, binding = 5) uniform texture1D MaterialParamsTexture;
 layout(set = 0, binding = 6) uniform texture1D MaterialColorsTexture;
+layout(set = 0, binding = 7) uniform texture3D PreviewTexture;
 
 bool IntersectBox(vec3 rayOrigin, vec3 rayDir, vec3 boxMin, vec3 boxMax, out float tNear, out float tFar)
 {
@@ -433,31 +531,47 @@ void main()
         vec4 sampledColor = vec4(0.0);
         float baseOpacity = 0.0;
 
-        int materialId = int(textureLod(sampler3D(LabelTexture, VolumeSampler), currentPos, 0.0).r * 255.0 + 0.5);
-        vec2 materialParams = texelFetch(sampler1D(MaterialParamsTexture, VolumeSampler), materialId, 0).xy;
-
-        if (materialId > 0 && materialParams.x > 0.5)
+        // Check for preview first
+        if (PreviewParams.x > 0.5)
         {
-            sampledColor = texelFetch(sampler1D(MaterialColorsTexture, VolumeSampler), materialId, 0);
-            baseOpacity = materialParams.y;
-            sampledColor.a = baseOpacity * 5.0;
-        }
-        else if (ThresholdParams.w > 0.5)
-        {
-            float intensity = textureLod(sampler3D(VolumeTexture, VolumeSampler), currentPos, 0.0).r;
-            
-            if (intensity >= ThresholdParams.x && intensity <= ThresholdParams.y)
+            float previewValue = textureLod(sampler3D(PreviewTexture, VolumeSampler), currentPos, 0.0).r;
+            if (previewValue > 0.5)
             {
-                float normIntensity = (intensity - ThresholdParams.x) / (ThresholdParams.y - ThresholdParams.x + 0.001);
+                sampledColor = vec4(PreviewParams.yzw, 1.0);
+                baseOpacity = PreviewAlpha.x;
+                sampledColor.a = baseOpacity * 5.0;
+            }
+        }
+
+        // If no preview or preview is transparent, check materials and grayscale
+        if (sampledColor.a == 0.0)
+        {
+            int materialId = int(textureLod(sampler3D(LabelTexture, VolumeSampler), currentPos, 0.0).r * 255.0 + 0.5);
+            vec2 materialParams = texelFetch(sampler1D(MaterialParamsTexture, VolumeSampler), materialId, 0).xy;
+
+            if (materialId > 0 && materialParams.x > 0.5)
+            {
+                sampledColor = texelFetch(sampler1D(MaterialColorsTexture, VolumeSampler), materialId, 0);
+                baseOpacity = materialParams.y;
+                sampledColor.a = baseOpacity * 5.0;
+            }
+            else if (ThresholdParams.w > 0.5)
+            {
+                float intensity = textureLod(sampler3D(VolumeTexture, VolumeSampler), currentPos, 0.0).r;
                 
-                if (RenderParams.x > 0.5) {
-                    sampledColor = ApplyColorMap(normIntensity);
-                } else {
-                    sampledColor = vec4(vec3(normIntensity), normIntensity);
+                if (intensity >= ThresholdParams.x && intensity <= ThresholdParams.y)
+                {
+                    float normIntensity = (intensity - ThresholdParams.x) / (ThresholdParams.y - ThresholdParams.x + 0.001);
+                    
+                    if (RenderParams.x > 0.5) {
+                        sampledColor = ApplyColorMap(normIntensity);
+                    } else {
+                        sampledColor = vec4(vec3(normIntensity), normIntensity);
+                    }
+                    
+                    baseOpacity = pow(sampledColor.a, 2.0);
+                    sampledColor.a = baseOpacity;
                 }
-                
-                baseOpacity = pow(sampledColor.a, 2.0);
-                sampledColor.a = baseOpacity;
             }
         }
         
@@ -562,7 +676,8 @@ void main()
                 new ResourceLayoutElementDescription("LabelTexture", ResourceKind.TextureReadOnly, ShaderStages.Fragment),
                 new ResourceLayoutElementDescription("ColorMapTexture", ResourceKind.TextureReadOnly, ShaderStages.Fragment),
                 new ResourceLayoutElementDescription("MaterialParamsTexture", ResourceKind.TextureReadOnly, ShaderStages.Fragment),
-                new ResourceLayoutElementDescription("MaterialColorsTexture", ResourceKind.TextureReadOnly, ShaderStages.Fragment)));
+                new ResourceLayoutElementDescription("MaterialColorsTexture", ResourceKind.TextureReadOnly, ShaderStages.Fragment),
+                new ResourceLayoutElementDescription("PreviewTexture", ResourceKind.TextureReadOnly, ShaderStages.Fragment)));
             
             _pipeline = factory.CreateGraphicsPipeline(new GraphicsPipelineDescription(
                 BlendStateDescription.SingleAlphaBlend,
@@ -621,7 +736,8 @@ void main()
         private void CreateResourceSet(ResourceFactory factory)
         {
             _resourceSet = factory.CreateResourceSet(new ResourceSetDescription(_resourceLayout,
-                _constantBuffer, _volumeSampler, _volumeTexture, _labelTexture, _colorMapTexture, _materialParamsTexture, _materialColorsTexture));
+                _constantBuffer, _volumeSampler, _volumeTexture, _labelTexture, _colorMapTexture, 
+                _materialParamsTexture, _materialColorsTexture, _previewTexture));
         }
 
         #endregion
@@ -654,7 +770,9 @@ void main()
                 CutPlaneX = new Vector4(CutXEnabled ? 1 : 0, CutXForward ? 1 : -1, CutXPosition, 0),
                 CutPlaneY = new Vector4(CutYEnabled ? 1 : 0, CutYForward ? 1 : -1, CutYPosition, 0),
                 CutPlaneZ = new Vector4(CutZEnabled ? 1 : 0, CutZForward ? 1 : -1, CutZPosition, 0),
-                ClippingPlanesInfo = new Vector4(0, ShowPlaneVisualizations ? 1 : 0, 0, 0)
+                ClippingPlanesInfo = new Vector4(0, ShowPlaneVisualizations ? 1 : 0, 0, 0),
+                PreviewParams = new Vector4(_showPreview ? 1 : 0, _previewColor.X, _previewColor.Y, _previewColor.Z),
+                PreviewAlpha = new Vector4(_previewColor.W, 0, 0, 0)
             };
             
             // Pack clipping planes into the fixed buffer
@@ -855,6 +973,12 @@ void main()
             
             ImGui.SameLine();
             ImGui.Text($"Threshold: {MinThreshold:F2}-{MaxThreshold:F2}");
+            
+            if (_showPreview)
+            {
+                ImGui.SameLine();
+                ImGui.TextColored(new Vector4(0.5f, 1.0f, 0.5f, 1.0f), "Preview Active");
+            }
         }
 
         public void DrawContent(ref float zoom, ref Vector2 pan)
@@ -1114,6 +1238,7 @@ void main()
         public void Dispose()
         {
             ProjectManager.Instance.DatasetDataChanged -= OnDatasetDataChanged;
+            CtImageStackTools.Preview3DChanged -= OnPreview3DChanged;
             _controlPanel?.Dispose();
             _commandList?.Dispose();
             _renderTextureManager?.Dispose();
@@ -1130,6 +1255,7 @@ void main()
             _materialColorsTexture?.Dispose();
             _materialParamsTexture?.Dispose();
             _labelTexture?.Dispose();
+            _previewTexture?.Dispose();
             _colorMapTexture?.Dispose();
             _volumeTexture?.Dispose();
             _framebuffer?.Dispose();

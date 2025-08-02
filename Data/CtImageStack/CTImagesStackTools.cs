@@ -19,16 +19,20 @@ namespace GeoscientistToolkit.Data.CtImageStack
         private byte _minThreshold = 30;
         private byte _maxThreshold = 200;
         private bool _showPreview = false;
+        private bool _show3DPreview = false; // New: separate control for 3D preview
         private byte[] _previewMask = null;
+        private byte[] _preview3DMask = null; // New: full 3D preview mask
         private bool _previewNeedsUpdate = true;
+        private bool _preview3DNeedsUpdate = true;
         private int _previewSlice = -1;
         
         // Material selection state
         private Material _selectedMaterialForEditing;
         private Material _selectedMaterialForThresholding;
 
-        // Preview change event
+        // Preview change events
         public static event Action<CtImageStackDataset> PreviewChanged;
+        public static event Action<CtImageStackDataset, byte[], Vector4> Preview3DChanged; // New event for 3D preview
         
         // Static instance tracking for accessing preview data
         private static readonly Dictionary<CtImageStackDataset, CtImageStackTools> _activeTools = new Dictionary<CtImageStackDataset, CtImageStackTools>();
@@ -65,6 +69,16 @@ namespace GeoscientistToolkit.Data.CtImageStack
             {
                 tools.UpdatePreviewForSlice(sliceZ);
                 return (tools.IsPreviewActive(), tools.GetPreviewMask(), tools.GetPreviewColor());
+            }
+            return (false, null, Vector4.Zero);
+        }
+
+        // New: Static method to get 3D preview data
+        public static (bool isActive, byte[] mask, Vector4 color) Get3DPreviewData(CtImageStackDataset dataset)
+        {
+            if (_activeTools.TryGetValue(dataset, out var tools))
+            {
+                return (tools.Is3DPreviewActive(), tools.Get3DPreviewMask(), tools.GetPreviewColor());
             }
             return (false, null, Vector4.Zero);
         }
@@ -213,6 +227,7 @@ namespace GeoscientistToolkit.Data.CtImageStack
                     _minThreshold = (byte)min;
                     _maxThreshold = (byte)max;
                     _previewNeedsUpdate = true;
+                    _preview3DNeedsUpdate = true;
                     if (_showPreview)
                     {
                         NotifyViewersOfPreviewChange();
@@ -230,6 +245,7 @@ namespace GeoscientistToolkit.Data.CtImageStack
                             if (_showPreview)
                             {
                                 _previewNeedsUpdate = true;
+                                _preview3DNeedsUpdate = true;
                                 NotifyViewersOfPreviewChange();
                             }
                         }
@@ -237,12 +253,30 @@ namespace GeoscientistToolkit.Data.CtImageStack
                     ImGui.EndCombo();
                 }
 
-                // Preview toggle
-                if (ImGui.Checkbox("Preview Threshold", ref _showPreview))
+                // Preview toggles
+                if (ImGui.Checkbox("Preview Threshold (2D)", ref _showPreview))
                 {
                     _previewNeedsUpdate = true;
+                    if (!_showPreview)
+                    {
+                        _show3DPreview = false; // Disable 3D preview when 2D is disabled
+                    }
                     NotifyViewersOfPreviewChange();
                 }
+
+                // 3D preview checkbox (only enabled if 2D preview is on)
+                if (!_showPreview) ImGui.BeginDisabled();
+                ImGui.SameLine();
+                if (ImGui.Checkbox("3D Preview", ref _show3DPreview))
+                {
+                    _preview3DNeedsUpdate = true;
+                    NotifyViewersOf3DPreviewChange();
+                }
+                if (ImGui.IsItemHovered())
+                {
+                    ImGui.SetTooltip("Enable real-time 3D preview (may impact performance)");
+                }
+                if (!_showPreview) ImGui.EndDisabled();
 
                 if (_selectedMaterialForThresholding == null)
                 {
@@ -257,8 +291,11 @@ namespace GeoscientistToolkit.Data.CtImageStack
                     _ = MaterialOperations.AddVoxelsByThresholdAsync(_currentDataset.VolumeData, _currentDataset.LabelData, 
                         _selectedMaterialForThresholding.ID, _minThreshold, _maxThreshold, _currentDataset);
                     _showPreview = false;
+                    _show3DPreview = false;
                     _previewMask = null;
+                    _preview3DMask = null;
                     NotifyViewersOfPreviewChange();
+                    NotifyViewersOf3DPreviewChange();
                 }
                 ImGui.SameLine();
                 if (ImGui.Button("Remove by Threshold [-]"))
@@ -266,13 +303,27 @@ namespace GeoscientistToolkit.Data.CtImageStack
                     _ = MaterialOperations.RemoveVoxelsByThresholdAsync(_currentDataset.VolumeData, _currentDataset.LabelData, 
                         _selectedMaterialForThresholding.ID, _minThreshold, _maxThreshold, _currentDataset);
                     _showPreview = false;
+                    _show3DPreview = false;
                     _previewMask = null;
+                    _preview3DMask = null;
                     NotifyViewersOfPreviewChange();
+                    NotifyViewersOf3DPreviewChange();
                 }
                 
                 if (_selectedMaterialForThresholding == null)
                 {
                     ImGui.EndDisabled();
+                }
+
+                // Show preview info
+                if (_showPreview || _show3DPreview)
+                {
+                    ImGui.Spacing();
+                    ImGui.TextColored(new Vector4(0.5f, 1.0f, 0.5f, 1.0f), "Preview Active");
+                    if (_show3DPreview)
+                    {
+                        ImGui.TextWrapped("3D preview may impact performance. Disable if experiencing slowdowns.");
+                    }
                 }
 
                 ImGui.Unindent();
@@ -307,14 +358,73 @@ namespace GeoscientistToolkit.Data.CtImageStack
             }
         }
 
+        private void Update3DPreview()
+        {
+            if (!_show3DPreview || _currentDataset.VolumeData == null)
+            {
+                _preview3DMask = null;
+                return;
+            }
+
+            if (_preview3DNeedsUpdate)
+            {
+                _preview3DNeedsUpdate = false;
+                
+                int width = _currentDataset.Width;
+                int height = _currentDataset.Height;
+                int depth = _currentDataset.Depth;
+                
+                _preview3DMask = new byte[width * height * depth];
+                
+                // Generate 3D preview mask
+                Parallel.For(0, depth, z =>
+                {
+                    for (int y = 0; y < height; y++)
+                    {
+                        for (int x = 0; x < width; x++)
+                        {
+                            byte gray = _currentDataset.VolumeData[x, y, z];
+                            int index = z * width * height + y * width + x;
+                            _preview3DMask[index] = (gray >= _minThreshold && gray <= _maxThreshold) ? (byte)255 : (byte)0;
+                        }
+                    }
+                });
+                
+                // Notify 3D viewer
+                Preview3DChanged?.Invoke(_currentDataset, _preview3DMask, GetPreviewColor());
+            }
+        }
+
         public byte[] GetPreviewMask() => _previewMask;
+        public byte[] Get3DPreviewMask() 
+        {
+            if (_show3DPreview && _preview3DNeedsUpdate)
+            {
+                Update3DPreview();
+            }
+            return _preview3DMask;
+        }
         public bool IsPreviewActive() => _showPreview;
+        public bool Is3DPreviewActive() => _show3DPreview;
         public Vector4 GetPreviewColor() => _selectedMaterialForThresholding?.Color ?? new Vector4(1, 0, 0, 0.5f);
 
         private void NotifyViewersOfPreviewChange()
         {
             // Fire the event to notify all viewers
             PreviewChanged?.Invoke(_currentDataset);
+        }
+
+        private void NotifyViewersOf3DPreviewChange()
+        {
+            if (_show3DPreview)
+            {
+                Update3DPreview();
+            }
+            else
+            {
+                _preview3DMask = null;
+                Preview3DChanged?.Invoke(_currentDataset, null, Vector4.Zero);
+            }
         }
 
         // Cleanup when tools are no longer used

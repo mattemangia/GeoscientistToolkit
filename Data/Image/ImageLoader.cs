@@ -1,6 +1,7 @@
 ﻿// GeoscientistToolkit/Util/ImageLoader.cs
 using System;
 using System.IO;
+using System.Collections.Generic;
 using StbImageSharp;
 using BitMiracle.LibTiff.Classic;
 
@@ -109,6 +110,185 @@ namespace GeoscientistToolkit.Util
                     return ConvertToGrayscale(result.Data, width, height);
                 }
             }
+        }
+
+        /// <summary>
+        /// Check if a TIFF file contains multiple pages (for CT stacks)
+        /// </summary>
+        public static bool IsMultiPageTiff(string path)
+        {
+            string ext = Path.GetExtension(path).ToLowerInvariant();
+            if (ext != ".tif" && ext != ".tiff") return false;
+
+            try
+            {
+                using (Tiff tiff = Tiff.Open(path, "r"))
+                {
+                    if (tiff == null) return false;
+                    
+                    int pageCount = 0;
+                    do
+                    {
+                        pageCount++;
+                        if (pageCount > 1) return true; // Early exit if we find more than one page
+                    } while (tiff.ReadDirectory());
+                    
+                    return false;
+                }
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// Get the number of pages in a multi-page TIFF
+        /// </summary>
+        public static int GetTiffPageCount(string path)
+        {
+            using (Tiff tiff = Tiff.Open(path, "r"))
+            {
+                if (tiff == null)
+                    throw new InvalidOperationException($"Failed to open TIFF file: {path}");
+
+                int pageCount = 0;
+                do
+                {
+                    pageCount++;
+                } while (tiff.ReadDirectory());
+
+                return pageCount;
+            }
+        }
+
+        /// <summary>
+        /// Load a specific page from a multi-page TIFF as grayscale
+        /// </summary>
+        public static byte[] LoadTiffPageAsGrayscale(string path, int pageIndex, out int width, out int height)
+        {
+            using (Tiff tiff = Tiff.Open(path, "r"))
+            {
+                if (tiff == null)
+                    throw new InvalidOperationException($"Failed to open TIFF file: {path}");
+
+                // Navigate to the requested page
+                if (!tiff.SetDirectory((short)pageIndex))
+                    throw new ArgumentOutOfRangeException(nameof(pageIndex), $"Page {pageIndex} does not exist in the TIFF file");
+
+                width = tiff.GetField(TiffTag.IMAGEWIDTH)[0].ToInt();
+                height = tiff.GetField(TiffTag.IMAGELENGTH)[0].ToInt();
+                int bitsPerSample = tiff.GetField(TiffTag.BITSPERSAMPLE)?[0].ToInt() ?? 8;
+                int samplesPerPixel = tiff.GetField(TiffTag.SAMPLESPERPIXEL)?[0].ToInt() ?? 1;
+
+                byte[] grayscaleData = new byte[width * height];
+
+                // Check if it's already a grayscale image
+                if (samplesPerPixel == 1)
+                {
+                    // Direct grayscale reading
+                    if (bitsPerSample == 8)
+                    {
+                        // 8-bit grayscale
+                        byte[] scanline = new byte[tiff.ScanlineSize()];
+                        for (int row = 0; row < height; row++)
+                        {
+                            tiff.ReadScanline(scanline, row);
+                            Array.Copy(scanline, 0, grayscaleData, row * width, width);
+                        }
+                    }
+                    else if (bitsPerSample == 16)
+                    {
+                        // 16-bit grayscale - read and convert to 8-bit
+                        byte[] scanline = new byte[tiff.ScanlineSize()];
+                        for (int row = 0; row < height; row++)
+                        {
+                            tiff.ReadScanline(scanline, row);
+
+                            // Convert 16-bit to 8-bit
+                            for (int x = 0; x < width; x++)
+                            {
+                                ushort value16 = (ushort)(scanline[x * 2] | (scanline[x * 2 + 1] << 8));
+                                grayscaleData[row * width + x] = (byte)(value16 >> 8); // Take high byte
+                            }
+                        }
+                    }
+                    else
+                    {
+                        throw new NotSupportedException($"Unsupported bits per sample: {bitsPerSample}");
+                    }
+                }
+                else
+                {
+                    // Color image - read as RGBA and convert to grayscale
+                    int[] raster = new int[width * height];
+
+                    if (!tiff.ReadRGBAImageOriented(width, height, raster, Orientation.TOPLEFT))
+                    {
+                        throw new InvalidOperationException("Failed to read TIFF image data");
+                    }
+
+                    // Convert int RGBA to grayscale
+                    for (int i = 0; i < width * height; i++)
+                    {
+                        int pixel = raster[i];
+                        byte r = (byte)((pixel >> 16) & 0xFF);
+                        byte g = (byte)((pixel >> 8) & 0xFF);
+                        byte b = (byte)(pixel & 0xFF);
+
+                        // Standard grayscale conversion
+                        grayscaleData[i] = (byte)(0.299 * r + 0.587 * g + 0.114 * b);
+                    }
+                }
+
+                return grayscaleData;
+            }
+        }
+
+        /// <summary>
+        /// Load all pages from a multi-page TIFF as a list of grayscale images
+        /// </summary>
+        public static List<byte[]> LoadAllTiffPagesAsGrayscale(string path, out int width, out int height, IProgress<float> progress = null)
+        {
+            var pages = new List<byte[]>();
+            width = 0;
+            height = 0;
+
+            using (Tiff tiff = Tiff.Open(path, "r"))
+            {
+                if (tiff == null)
+                    throw new InvalidOperationException($"Failed to open TIFF file: {path}");
+
+                int pageIndex = 0;
+                int totalPages = GetTiffPageCount(path);
+
+                do
+                {
+                    int pageWidth = tiff.GetField(TiffTag.IMAGEWIDTH)[0].ToInt();
+                    int pageHeight = tiff.GetField(TiffTag.IMAGELENGTH)[0].ToInt();
+
+                    // Set dimensions from first page
+                    if (pageIndex == 0)
+                    {
+                        width = pageWidth;
+                        height = pageHeight;
+                    }
+                    else if (pageWidth != width || pageHeight != height)
+                    {
+                        throw new InvalidOperationException($"All pages must have the same dimensions. Page {pageIndex} has different dimensions.");
+                    }
+
+                    // Load this page
+                    var pageData = LoadTiffPageAsGrayscale(path, pageIndex, out _, out _);
+                    pages.Add(pageData);
+
+                    progress?.Report((float)(pageIndex + 1) / totalPages);
+                    pageIndex++;
+
+                } while (tiff.ReadDirectory());
+            }
+
+            return pages;
         }
 
         private static ImageInfo LoadTiffInfo(string path)

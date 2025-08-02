@@ -16,9 +16,82 @@ namespace GeoscientistToolkit.Data.CtImageStack
     public static class CTStackLoader
     {
         /// <summary>
-        /// Loads a CT stack from a folder of images
+        /// Loads a CT stack from either a folder of images or a single multi-page TIFF file
         /// </summary>
         public static async Task<ChunkedVolume> LoadCTStackAsync(
+            string path, 
+            double pixelSize, 
+            int binningFactor,
+            bool useMemoryMapping,
+            IProgress<float> progress = null,
+            string datasetName = null)
+        {
+            // Check if path is a file or directory
+            if (File.Exists(path))
+            {
+                // Check if it's a multi-page TIFF
+                string ext = Path.GetExtension(path).ToLowerInvariant();
+                if ((ext == ".tif" || ext == ".tiff") && ImageLoader.IsMultiPageTiff(path))
+                {
+                    return await LoadCTStackFromMultiPageTiffAsync(path, pixelSize, binningFactor, 
+                        useMemoryMapping, progress, datasetName);
+                }
+                else
+                {
+                    throw new ArgumentException("The specified file is not a multi-page TIFF file.");
+                }
+            }
+            else if (Directory.Exists(path))
+            {
+                return await LoadCTStackFromFolderAsync(path, pixelSize, binningFactor, 
+                    useMemoryMapping, progress, datasetName);
+            }
+            else
+            {
+                throw new FileNotFoundException("The specified path does not exist.");
+            }
+        }
+
+        /// <summary>
+        /// Loads a CT stack from a multi-page TIFF file
+        /// </summary>
+        private static async Task<ChunkedVolume> LoadCTStackFromMultiPageTiffAsync(
+            string tiffPath, 
+            double pixelSize, 
+            int binningFactor,
+            bool useMemoryMapping,
+            IProgress<float> progress = null,
+            string datasetName = null)
+        {
+            Logger.Log($"[CTStackLoader] Loading CT stack from multi-page TIFF: {tiffPath}");
+            Logger.Log($"[CTStackLoader] Pixel size: {pixelSize * 1e6} µm, Binning: {binningFactor}×, Memory mapping: {useMemoryMapping}");
+
+            // Get dataset name
+            if (string.IsNullOrEmpty(datasetName))
+            {
+                datasetName = Path.GetFileNameWithoutExtension(tiffPath);
+            }
+
+            // Get the parent directory for storing processed files
+            string parentDir = Path.GetDirectoryName(tiffPath);
+
+            // Check if binning is needed
+            if (binningFactor > 1)
+            {
+                return await LoadMultiPageTiffWith3DBinningAsync(tiffPath, parentDir, pixelSize, binningFactor, 
+                    useMemoryMapping, progress, datasetName);
+            }
+            else
+            {
+                return await LoadMultiPageTiffDirectAsync(tiffPath, parentDir, pixelSize, useMemoryMapping, 
+                    progress, datasetName);
+            }
+        }
+
+        /// <summary>
+        /// Loads a CT stack from a folder of images
+        /// </summary>
+        private static async Task<ChunkedVolume> LoadCTStackFromFolderAsync(
             string folderPath, 
             double pixelSize, 
             int binningFactor,
@@ -26,7 +99,7 @@ namespace GeoscientistToolkit.Data.CtImageStack
             IProgress<float> progress = null,
             string datasetName = null)
         {
-            Logger.Log($"[CTStackLoader] Loading CT stack from: {folderPath}");
+            Logger.Log($"[CTStackLoader] Loading CT stack from folder: {folderPath}");
             Logger.Log($"[CTStackLoader] Pixel size: {pixelSize * 1e6} µm, Binning: {binningFactor}×, Memory mapping: {useMemoryMapping}");
 
             // Get dataset name
@@ -56,6 +129,277 @@ namespace GeoscientistToolkit.Data.CtImageStack
             {
                 return await LoadDirectAsync(folderPath, imageFiles, pixelSize, useMemoryMapping, 
                     progress, datasetName);
+            }
+        }
+
+        /// <summary>
+        /// Loads multi-page TIFF directly without binning
+        /// </summary>
+        private static async Task<ChunkedVolume> LoadMultiPageTiffDirectAsync(
+            string tiffPath,
+            string outputDir,
+            double pixelSize,
+            bool useMemoryMapping,
+            IProgress<float> progress,
+            string datasetName)
+        {
+            // Check for existing volume file
+            string volumePath = Path.Combine(outputDir, $"{datasetName}.Volume.bin");
+
+            if (File.Exists(volumePath))
+            {
+                Logger.Log($"[CTStackLoader] Found existing volume file: {volumePath}");
+                try
+                {
+                    var volume = await ChunkedVolume.LoadFromBinAsync(volumePath, useMemoryMapping);
+                    volume.PixelSize = pixelSize;
+                    progress?.Report(1.0f);
+                    return volume;
+                }
+                catch (Exception ex)
+                {
+                    Logger.Log($"[CTStackLoader] Error loading existing volume: {ex.Message}");
+                    Logger.Log("[CTStackLoader] Regenerating volume from TIFF file...");
+                }
+            }
+
+            // Load from multi-page TIFF
+            return await Task.Run(async () =>
+            {
+                // Get dimensions and page count
+                int pageCount = ImageLoader.GetTiffPageCount(tiffPath);
+                var firstPageInfo = ImageLoader.LoadImageInfo(tiffPath);
+                int width = firstPageInfo.Width;
+                int height = firstPageInfo.Height;
+                int depth = pageCount;
+
+                Logger.Log($"[CTStackLoader] Multi-page TIFF dimensions: {width}×{height}×{depth}");
+
+                ChunkedVolume newVolume;
+                
+                if (useMemoryMapping)
+                {
+                    // Create memory-mapped file
+                    await CreateMemoryMappedFileAsync(volumePath, width, height, depth, 
+                        ChunkedVolume.DEFAULT_CHUNK_DIM, pixelSize);
+                        
+                    newVolume = await ChunkedVolume.LoadFromBinAsync(volumePath, true);
+                }
+                else
+                {
+                    newVolume = new ChunkedVolume(width, height, depth, ChunkedVolume.DEFAULT_CHUNK_DIM)
+                    {
+                        PixelSize = pixelSize
+                    };
+                }
+
+                // Load all pages
+                var progressReporter = new Progress<float>(p => progress?.Report(p));
+                var pages = ImageLoader.LoadAllTiffPagesAsGrayscale(tiffPath, out _, out _, progressReporter);
+
+                // Write pages to volume
+                for (int z = 0; z < pages.Count; z++)
+                {
+                    newVolume.WriteSliceZ(z, pages[z]);
+                }
+
+                // Save for future use (only if not memory mapped - it's already saved)
+                if (!useMemoryMapping)
+                {
+                    await newVolume.SaveAsBinAsync(volumePath);
+                }
+                
+                // Create empty labels file
+                await CreateEmptyLabelsFileAsync(outputDir, newVolume, datasetName);
+                
+                return newVolume;
+            });
+        }
+
+        /// <summary>
+        /// Loads multi-page TIFF with 3D binning applied
+        /// </summary>
+        private static async Task<ChunkedVolume> LoadMultiPageTiffWith3DBinningAsync(
+            string tiffPath,
+            string outputDir,
+            double pixelSize,
+            int binningFactor,
+            bool useMemoryMapping,
+            IProgress<float> progress,
+            string datasetName)
+        {
+            Logger.Log($"[CTStackLoader] Applying {binningFactor}× 3D binning to multi-page TIFF");
+
+            // Check for existing binned volume
+            string binnedMarker = Path.Combine(outputDir, $"{datasetName}_binned_{binningFactor}x3d.marker");
+            string volumePath = Path.Combine(outputDir, $"{datasetName}.Volume.bin");
+
+            if (File.Exists(binnedMarker) && File.Exists(volumePath))
+            {
+                Logger.Log($"[CTStackLoader] Found existing binned volume");
+                try
+                {
+                    var volume = await ChunkedVolume.LoadFromBinAsync(volumePath, useMemoryMapping);
+                    volume.PixelSize = pixelSize * binningFactor;
+                    progress?.Report(1.0f);
+                    return volume;
+                }
+                catch (Exception ex)
+                {
+                    Logger.Log($"[CTStackLoader] Error loading existing binned volume: {ex.Message}");
+                }
+            }
+
+            return await Task.Run(async () =>
+            {
+                // Get original dimensions
+                int pageCount = ImageLoader.GetTiffPageCount(tiffPath);
+                var firstPageInfo = ImageLoader.LoadImageInfo(tiffPath);
+                int origWidth = firstPageInfo.Width;
+                int origHeight = firstPageInfo.Height;
+                int origDepth = pageCount;
+
+                // Calculate binned dimensions - true 3D binning
+                int newWidth = Math.Max(1, origWidth / binningFactor);
+                int newHeight = Math.Max(1, origHeight / binningFactor);
+                int newDepth = Math.Max(1, (origDepth + binningFactor - 1) / binningFactor);
+
+                Logger.Log($"[CTStackLoader] 3D Binning {origWidth}×{origHeight}×{origDepth} → {newWidth}×{newHeight}×{newDepth}");
+
+                // Create binned volume
+                ChunkedVolume binnedVolume;
+                
+                if (useMemoryMapping)
+                {
+                    // Create memory-mapped file
+                    await CreateMemoryMappedFileAsync(volumePath, newWidth, newHeight, newDepth, 
+                        ChunkedVolume.DEFAULT_CHUNK_DIM, pixelSize * binningFactor);
+                        
+                    binnedVolume = await ChunkedVolume.LoadFromBinAsync(volumePath, true);
+                }
+                else
+                {
+                    binnedVolume = new ChunkedVolume(newWidth, newHeight, newDepth, ChunkedVolume.DEFAULT_CHUNK_DIM)
+                    {
+                        PixelSize = pixelSize * binningFactor
+                    };
+                }
+
+                // Process TIFF pages with 3D binning
+                await ProcessMultiPageTiff3DBinningAsync(binnedVolume, tiffPath, binningFactor, progress);
+
+                // Save the binned volume (if not memory mapped)
+                if (!useMemoryMapping)
+                {
+                    await binnedVolume.SaveAsBinAsync(volumePath);
+                }
+
+                // Create marker file
+                await File.WriteAllTextAsync(binnedMarker, 
+                    $"3D Binned with factor {binningFactor} at {DateTime.Now:yyyy-MM-dd HH:mm:ss}\n" +
+                    $"Original: {origWidth}×{origHeight}×{origDepth}\n" +
+                    $"Binned: {newWidth}×{newHeight}×{newDepth}");
+                    
+                // Create empty labels file
+                await CreateEmptyLabelsFileAsync(outputDir, binnedVolume, datasetName);
+
+                return binnedVolume;
+            });
+        }
+
+        /// <summary>
+        /// Process multi-page TIFF with true 3D binning
+        /// </summary>
+        private static async Task ProcessMultiPageTiff3DBinningAsync(
+            ChunkedVolume volume,
+            string tiffPath,
+            int binFactor,
+            IProgress<float> progress)
+        {
+            int newDepth = volume.Depth;
+            int pageCount = ImageLoader.GetTiffPageCount(tiffPath);
+
+            // Process each output slice
+            for (int newZ = 0; newZ < newDepth; newZ++)
+            {
+                int srcZStart = newZ * binFactor;
+                int srcZEnd = Math.Min(srcZStart + binFactor, pageCount);
+
+                // Create accumulator for this slice
+                float[,] accumulator = new float[volume.Width, volume.Height];
+                int[,] counts = new int[volume.Width, volume.Height];
+
+                // Process each source slice in the Z bin
+                for (int srcZ = srcZStart; srcZ < srcZEnd; srcZ++)
+                {
+                    var pageData = ImageLoader.LoadTiffPageAsGrayscale(tiffPath, srcZ, out int width, out int height);
+                    AccumulateSliceData(pageData, width, height, accumulator, counts, binFactor);
+                }
+
+                // Average and write to volume
+                for (int y = 0; y < volume.Height; y++)
+                {
+                    for (int x = 0; x < volume.Width; x++)
+                    {
+                        byte value = 0;
+                        if (counts[x, y] > 0)
+                        {
+                            value = (byte)Math.Min(255, Math.Max(0, 
+                                Math.Round(accumulator[x, y] / counts[x, y])));
+                        }
+                        volume[x, y, newZ] = value;
+                    }
+                }
+
+                progress?.Report((float)(newZ + 1) / newDepth);
+            }
+        }
+
+        /// <summary>
+        /// Accumulate slice data into the binning accumulator
+        /// </summary>
+        private static void AccumulateSliceData(
+            byte[] imageData,
+            int imageWidth,
+            int imageHeight,
+            float[,] accumulator,
+            int[,] counts,
+            int binFactor)
+        {
+            int newWidth = accumulator.GetLength(0);
+            int newHeight = accumulator.GetLength(1);
+
+            // Accumulate binned pixels
+            for (int y = 0; y < newHeight; y++)
+            {
+                for (int x = 0; x < newWidth; x++)
+                {
+                    // Sum pixels in the XY bin
+                    float sum = 0;
+                    int count = 0;
+
+                    for (int by = 0; by < binFactor; by++)
+                    {
+                        int srcY = y * binFactor + by;
+                        if (srcY >= imageHeight) continue;
+
+                        for (int bx = 0; bx < binFactor; bx++)
+                        {
+                            int srcX = x * binFactor + bx;
+                            if (srcX >= imageWidth) continue;
+
+                            int index = srcY * imageWidth + srcX;
+                            sum += imageData[index];
+                            count++;
+                        }
+                    }
+
+                    if (count > 0)
+                    {
+                        accumulator[x, y] += sum;
+                        counts[x, y] += count;
+                    }
+                }
             }
         }
 
@@ -275,10 +619,10 @@ namespace GeoscientistToolkit.Data.CtImageStack
         /// Accumulate a source image into the binning accumulator
         /// </summary>
         private static async Task AccumulateSliceAsync(
-    string imagePath,
-    float[,] accumulator,
-    int[,] counts,
-    int binFactor)
+            string imagePath,
+            float[,] accumulator,
+            int[,] counts,
+            int binFactor)
         {
             await Task.Run(() =>
             {

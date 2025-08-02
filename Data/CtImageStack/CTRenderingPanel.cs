@@ -2,523 +2,231 @@
 using System;
 using System.Numerics;
 using GeoscientistToolkit.UI;
-using ImGuiNET;
-using System.Linq;
+using GeoscientistToolkit.UI.Interfaces;
 using GeoscientistToolkit.UI.Utils;
 using GeoscientistToolkit.Util;
+using ImGuiNET;
+using System.Linq;
 
 namespace GeoscientistToolkit.Data.CtImageStack
 {
     /// <summary>
-    /// Rendering control panel for the combined CT viewer (2D+3D)
+    /// Control panel for CT rendering settings in the combined viewer
+    /// Now includes segmentation tools for integrated workflow
     /// </summary>
     public class CtRenderingPanel : BasePanel
     {
         private readonly CtCombinedViewer _viewer;
         private readonly CtImageStackDataset _dataset;
+        private readonly CtImageStackTools _segmentationTools;
+        private bool _showSegmentationTools = true;
+        private int _currentViewMode = 0;
         
-        // UI state
-        private string[] _viewModes = { "Combined", "Slices Only", "3D Only", "XY (Axial) Only", "XZ (Coronal) Only", "YZ (Sagittal) Only" };
-        private string[] _colorMaps = { "Grayscale", "Hot", "Cool", "Rainbow" };
-
-        // State for the clipping plane editor
-        private int _selectedPlaneIndex = -1;
-        private string _newPlaneName = "Plane";
-
-        private int _planeToRenameIndex = -1;
-        private string _renameBuffer = "";
-        private bool _isRenamePopupOpen = false;
-        
-        private readonly ImGuiExportFileDialog _stlExportDialog;
-        private static ProgressBarDialog _exportProgressDialog = new ProgressBarDialog("Exporting STL");
-
-
-        public CtRenderingPanel(CtCombinedViewer viewer, CtImageStackDataset dataset)
-            : base("Rendering Controls", new Vector2(350, 500))
+        public CtRenderingPanel(CtCombinedViewer viewer, CtImageStackDataset dataset) 
+            : base("CT Rendering Controls", new Vector2(400, 600))
         {
-            _viewer = viewer ?? throw new ArgumentNullException(nameof(viewer));
-            _dataset = dataset ?? throw new ArgumentNullException(nameof(dataset));
-            
-            _stlExportDialog = new ImGuiExportFileDialog("ExportStlDialog", "Export Visible Volume as STL");
-            _stlExportDialog.SetExtensions((".stl", "STL Mesh File"));
+            _viewer = viewer;
+            _dataset = dataset;
+            _segmentationTools = new CtImageStackTools();
+            _currentViewMode = (int)_viewer.ViewMode;
         }
-        
+
         protected override void DrawContent()
         {
-            // Submit the progress dialog if it's active. It will handle its own visibility.
-            _exportProgressDialog.Submit();
-
             if (ImGui.BeginTabBar("RenderingTabs"))
             {
-                if (ImGui.BeginTabItem("View"))
+                if (ImGui.BeginTabItem("View Settings"))
                 {
-                    DrawViewTab();
-                    ImGui.EndTabItem();
-                }
-                
-                if (ImGui.BeginTabItem("Volume"))
-                {
-                    DrawVolumeTab();
+                    DrawViewSettings();
                     ImGui.EndTabItem();
                 }
 
-                if (ImGui.BeginTabItem("Slicing"))
+                if (ImGui.BeginTabItem("3D Rendering"))
                 {
-                    DrawSlicingTab();
+                    Draw3DSettings();
                     ImGui.EndTabItem();
                 }
-                
+
                 if (ImGui.BeginTabItem("Materials"))
                 {
                     DrawMaterialsTab();
                     ImGui.EndTabItem();
                 }
-                
-                if (ImGui.BeginTabItem("Display"))
+
+                if (ImGui.BeginTabItem("Segmentation"))
                 {
-                    DrawDisplayTab();
+                    DrawSegmentationTab();
                     ImGui.EndTabItem();
                 }
-                
-                if (ImGui.BeginTabItem("Export"))
+
+                if (ImGui.BeginTabItem("Cutting Planes"))
                 {
-                    DrawExportTab();
+                    DrawCuttingPlanesTab();
                     ImGui.EndTabItem();
                 }
-                
+
                 ImGui.EndTabBar();
             }
-            
-            if (_stlExportDialog.Submit())
-            {
-                HandleStlExport(_stlExportDialog.SelectedPath);
-            }
         }
-        
-        private void DrawViewTab()
-        {
-            ImGui.Text("View Mode");
-            ImGui.Separator();
-            
-            // View mode selection
-            int currentMode = (int)_viewer.ViewMode;
-            ImGui.SetNextItemWidth(-1);
-            if (ImGui.Combo("##ViewMode", ref currentMode, _viewModes, _viewModes.Length))
-            {
-                _viewer.ViewMode = (CtCombinedViewer.ViewModeEnum)currentMode;
-            }
-            
-            ImGui.Spacing();
-            ImGui.Separator();
-            ImGui.Spacing();
-            
-            // Slice positions
-            if (_viewer.ViewMode != CtCombinedViewer.ViewModeEnum.VolumeOnly)
-            {
-                ImGui.Text("Slice Positions");
-                ImGui.Spacing();
-                
-                int sliceX = _viewer.SliceX;
-                int sliceY = _viewer.SliceY;
-                int sliceZ = _viewer.SliceZ;
-                
-                ImGui.PushItemWidth(-60);
-                
-                if (ImGui.SliderInt("X (Sagittal)", ref sliceX, 0, _dataset.Width - 1))
-                {
-                    _viewer.SliceX = sliceX;
-                }
-                ImGui.SameLine();
-                ImGui.Text($"{sliceX + 1}/{_dataset.Width}");
-                
-                if (ImGui.SliderInt("Y (Coronal)", ref sliceY, 0, _dataset.Height - 1))
-                {
-                    _viewer.SliceY = sliceY;
-                }
-                ImGui.SameLine();
-                ImGui.Text($"{sliceY + 1}/{_dataset.Height}");
-                
-                if (ImGui.SliderInt("Z (Axial)", ref sliceZ, 0, _dataset.Depth - 1))
-                {
-                    _viewer.SliceZ = sliceZ;
-                }
-                ImGui.SameLine();
-                ImGui.Text($"{sliceZ + 1}/{_dataset.Depth}");
-                
-                ImGui.PopItemWidth();
-                
-                ImGui.Spacing();
-                if (ImGui.Button("Center Slices"))
-                {
-                    _viewer.SliceX = _dataset.Width / 2;
-                    _viewer.SliceY = _dataset.Height / 2;
-                    _viewer.SliceZ = _dataset.Depth / 2;
-                }
-                
-                ImGui.Spacing();
-                ImGui.Separator();
-                ImGui.Spacing();
-                
-                // Add zoom controls here
-                ImGui.Text("Zoom Controls");
-                ImGui.Spacing();
-                
-                if (ImGui.Button("Zoom In", new Vector2(80, 0)))
-                {
-                    _viewer.ZoomAllViews(1.25f);
-                }
-                ImGui.SameLine();
-                if (ImGui.Button("Zoom Out", new Vector2(80, 0)))
-                {
-                    _viewer.ZoomAllViews(0.8f);
-                }
-                ImGui.SameLine();
-                if (ImGui.Button("Fit to Window", new Vector2(-1, 0)))
-                {
-                    _viewer.ResetAllViews();
-                }
-            }
-        }
+
+        // Add this method to allow inline drawing when popped out
         public void DrawContentInline()
         {
-            // Draw the content directly without window management
             DrawContent();
         }
-        
-        private void DrawVolumeTab()
+
+        private void DrawViewSettings()
         {
-            ImGui.Text("Volume Rendering");
+            ImGui.Text("View Mode:");
+            ImGui.RadioButton("Combined", ref _currentViewMode, 0);
+            ImGui.SameLine();
+            ImGui.RadioButton("Slices Only", ref _currentViewMode, 1);
+            ImGui.SameLine();
+            ImGui.RadioButton("3D Only", ref _currentViewMode, 2);
+
+            if (_currentViewMode != (int)_viewer.ViewMode)
+            {
+                _viewer.ViewMode = (CtCombinedViewer.ViewModeEnum)_currentViewMode;
+            }
+
             ImGui.Separator();
+
+            ImGui.Text("Display Options:");
+            ImGui.Indent();
             
-            // Enable/disable volume rendering
-            bool showVolume = _viewer.ShowVolumeData;
-            if (ImGui.Checkbox("Show Volume Data", ref showVolume))
+            bool showCrosshairs = _viewer.ShowCrosshairs;
+            if (ImGui.Checkbox("Show Crosshairs", ref showCrosshairs))
+                _viewer.ShowCrosshairs = showCrosshairs;
+
+            bool syncViews = _viewer.SyncViews;
+            if (ImGui.Checkbox("Sync Views", ref syncViews))
+                _viewer.SyncViews = syncViews;
+
+            bool showScaleBar = _viewer.ShowScaleBar;
+            if (ImGui.Checkbox("Show Scale Bar", ref showScaleBar))
+                _viewer.ShowScaleBar = showScaleBar;
+
+            bool showCuttingPlanes = _viewer.ShowCuttingPlanes;
+            if (ImGui.Checkbox("Show Cutting Planes", ref showCuttingPlanes))
+                _viewer.ShowCuttingPlanes = showCuttingPlanes;
+
+            ImGui.Unindent();
+
+            ImGui.Separator();
+
+            ImGui.Text("Window/Level:");
+            float windowLevel = _viewer.WindowLevel;
+            float windowWidth = _viewer.WindowWidth;
+
+            if (ImGui.DragFloat("Level", ref windowLevel, 1f, 0f, 255f))
+                _viewer.WindowLevel = windowLevel;
+
+            if (ImGui.DragFloat("Width", ref windowWidth, 1f, 1f, 255f))
+                _viewer.WindowWidth = windowWidth;
+
+            if (ImGui.Button("Auto W/L"))
             {
-                _viewer.ShowVolumeData = showVolume;
+                _viewer.WindowLevel = 128;
+                _viewer.WindowWidth = 255;
             }
-            
-            if (!showVolume)
+
+            ImGui.Separator();
+
+            ImGui.Text("Slice Positions:");
+            int sliceX = _viewer.SliceX;
+            int sliceY = _viewer.SliceY;
+            int sliceZ = _viewer.SliceZ;
+
+            if (ImGui.SliderInt("X", ref sliceX, 0, _dataset.Width - 1))
+                _viewer.SliceX = sliceX;
+
+            if (ImGui.SliderInt("Y", ref sliceY, 0, _dataset.Height - 1))
+                _viewer.SliceY = sliceY;
+
+            if (ImGui.SliderInt("Z", ref sliceZ, 0, _dataset.Depth - 1))
+                _viewer.SliceZ = sliceZ;
+
+            if (ImGui.Button("Center All"))
             {
-                ImGui.BeginDisabled();
+                _viewer.SliceX = _dataset.Width / 2;
+                _viewer.SliceY = _dataset.Height / 2;
+                _viewer.SliceZ = _dataset.Depth / 2;
             }
+        }
+
+        private void Draw3DSettings()
+        {
+            if (_viewer.VolumeViewer == null)
+            {
+                ImGui.TextColored(new Vector4(1, 0.5f, 0.5f, 1), "3D viewer not available");
+                ImGui.TextWrapped("Import dataset with 'Optimized for 3D' option to enable volume rendering.");
+                return;
+            }
+
+            ImGui.Text("Volume Rendering:");
             
-            ImGui.Spacing();
-            
-            // Rendering quality
-            ImGui.Text("Rendering Quality");
+            bool showVolumeData = _viewer.ShowVolumeData;
+            if (ImGui.Checkbox("Show Grayscale", ref showVolumeData))
+            {
+                _viewer.ShowVolumeData = showVolumeData;
+            }
+
+            ImGui.Separator();
+
             float stepSize = _viewer.VolumeStepSize;
-            if (ImGui.SliderFloat("Step Size", ref stepSize, 0.1f, 5.0f, "%.2f"))
+            if (ImGui.SliderFloat("Step Size", ref stepSize, 0.5f, 10.0f, "%.1f"))
             {
                 _viewer.VolumeStepSize = stepSize;
             }
             if (ImGui.IsItemHovered())
-            {
-                ImGui.SetTooltip("Lower values = higher quality but slower rendering");
-            }
-            
-            ImGui.Spacing();
-            ImGui.Separator();
-            ImGui.Spacing();
-            
-            // Threshold range
-            ImGui.Text("Density Threshold");
+                ImGui.SetTooltip("Lower values = higher quality but slower performance");
+
             float minThreshold = _viewer.MinThreshold;
             float maxThreshold = _viewer.MaxThreshold;
-            
-            if (ImGui.DragFloatRange2("Range", ref minThreshold, ref maxThreshold, 0.005f, 0.0f, 1.0f, "Min: %.3f", "Max: %.3f"))
+
+            if (ImGui.DragFloatRange2("Threshold", ref minThreshold, ref maxThreshold, 0.01f, 0.0f, 1.0f, 
+                "Min: %.2f", "Max: %.2f"))
             {
                 _viewer.MinThreshold = minThreshold;
                 _viewer.MaxThreshold = maxThreshold;
             }
-            
-            ImGui.Spacing();
-            
-            // Quick presets
-            if (ImGui.Button("Low Density"))
-            {
-                _viewer.MinThreshold = 0.0f;
-                _viewer.MaxThreshold = 0.3f;
-            }
-            ImGui.SameLine();
-            if (ImGui.Button("Medium Density"))
-            {
-                _viewer.MinThreshold = 0.2f;
-                _viewer.MaxThreshold = 0.6f;
-            }
-            ImGui.SameLine();
-            if (ImGui.Button("High Density"))
-            {
-                _viewer.MinThreshold = 0.5f;
-                _viewer.MaxThreshold = 1.0f;
-            }
-            
-            ImGui.Spacing();
+
             ImGui.Separator();
-            ImGui.Spacing();
-            
-            // Color map
-            ImGui.Text("Color Map");
+
+            ImGui.Text("Color Map:");
+            string[] colorMapNames = { "Grayscale", "Hot", "Cool", "Rainbow" };
             int colorMapIndex = _viewer.ColorMapIndex;
-            ImGui.SetNextItemWidth(-1);
-            if (ImGui.Combo("##ColorMap", ref colorMapIndex, _colorMaps, _colorMaps.Length))
+            if (ImGui.Combo("##ColorMap", ref colorMapIndex, colorMapNames, colorMapNames.Length))
             {
                 _viewer.ColorMapIndex = colorMapIndex;
             }
-            
-            if (!showVolume)
-            {
-                ImGui.EndDisabled();
-            }
-        }
-        
-        private void DrawSlicingTab()
-        {
-            var volumeViewer = _viewer.VolumeViewer;
-            if (volumeViewer == null)
-            {
-                ImGui.TextDisabled("3D Volume Viewer not available or not yet initialized.");
-                ImGui.TextWrapped("To enable 3D slicing, import this dataset with the 'Optimized for 3D' option.");
-                return;
-            }
-
-            ImGui.Text("Volume Slicing & Clipping");
-            ImGui.Separator();
-
-            // Visual aid toggle
-            bool showPlaneVis = volumeViewer.ShowPlaneVisualizations;
-            if (ImGui.Checkbox("Show All Visual Aids", ref showPlaneVis))
-            {
-                volumeViewer.ShowPlaneVisualizations = showPlaneVis;
-            }
-            if (ImGui.IsItemHovered())
-                ImGui.SetTooltip("Toggle visual representation of ALL cutting and clipping planes in the 3D view");
 
             ImGui.Separator();
 
-            // Orthogonal Slices
-            if (ImGui.CollapsingHeader("Orthogonal Slices (2D Views)", ImGuiTreeNodeFlags.DefaultOpen))
+            if (ImGui.Button("Reset Camera"))
             {
-                bool syncViews = _viewer.SyncViews;
-                if (ImGui.Checkbox("Sync with 2D Views", ref syncViews))
-                {
-                    _viewer.SyncViews = syncViews;
-                }
-
-                if (!syncViews)
-                {
-                    ImGui.Indent();
-                    ImGui.Text("X Slice (Red)");
-                    ImGui.SliderFloat("##xslice", ref volumeViewer.SlicePositions.X, 0.0f, 1.0f, "%.3f");
-                    ImGui.Text("Y Slice (Green)");
-                    ImGui.SliderFloat("##yslice", ref volumeViewer.SlicePositions.Y, 0.0f, 1.0f, "%.3f");
-                    ImGui.Text("Z Slice (Blue)");
-                    ImGui.SliderFloat("##zslice", ref volumeViewer.SlicePositions.Z, 0.0f, 1.0f, "%.3f");
-                    ImGui.Spacing();
-                    if (ImGui.Button("Reset to Center")) volumeViewer.SlicePositions = new Vector3(0.5f);
-                    ImGui.Unindent();
-                }
+                _viewer.VolumeViewer?.ResetCamera();
             }
 
-            // Axis-Aligned Cutting Planes
-            if (ImGui.CollapsingHeader("Axis-Aligned Cutting Planes", ImGuiTreeNodeFlags.DefaultOpen))
+            ImGui.SameLine();
+
+            if (ImGui.Button("Save Screenshot..."))
             {
-                ImGui.Indent();
-
-                // X Cutting Plane
-                ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(1, 0.3f, 0.3f, 1)); ImGui.Text("X Cutting Plane"); ImGui.PopStyleColor();
-                ImGui.Checkbox("Enable X Cut", ref volumeViewer.CutXEnabled);
-                ImGui.SameLine();
-                bool showAidX = volumeViewer.ShowCutXPlaneVisual;
-                if (ImGui.Checkbox("Show Aid##X", ref showAidX)) volumeViewer.ShowCutXPlaneVisual = showAidX;
-                if (volumeViewer.CutXEnabled)
+                // Use the volume viewer's screenshot functionality directly
+                if (_viewer.VolumeViewer != null)
                 {
-                    ImGui.Indent();
-                    ImGui.SliderFloat("Position##X", ref volumeViewer.CutXPosition, 0.0f, 1.0f, "%.3f");
-                    bool forward = volumeViewer.CutXForward;
-                    if (ImGui.Checkbox("Cut Forward##X", ref forward)) volumeViewer.CutXForward = forward;
-                    ImGui.SameLine();
-                    if (ImGui.Button("Mirror##X")) volumeViewer.CutXForward = !volumeViewer.CutXForward;
-                    ImGui.Unindent();
-                }
-
-                ImGui.Spacing();
-
-                // Y Cutting Plane
-                ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(0.3f, 1, 0.3f, 1)); ImGui.Text("Y Cutting Plane"); ImGui.PopStyleColor();
-                ImGui.Checkbox("Enable Y Cut", ref volumeViewer.CutYEnabled);
-                ImGui.SameLine();
-                bool showAidY = volumeViewer.ShowCutYPlaneVisual;
-                if(ImGui.Checkbox("Show Aid##Y", ref showAidY)) volumeViewer.ShowCutYPlaneVisual = showAidY;
-                if (volumeViewer.CutYEnabled)
-                {
-                    ImGui.Indent();
-                    ImGui.SliderFloat("Position##Y", ref volumeViewer.CutYPosition, 0.0f, 1.0f, "%.3f");
-                    bool forward = volumeViewer.CutYForward;
-                    if (ImGui.Checkbox("Cut Forward##Y", ref forward)) volumeViewer.CutYForward = forward;
-                    ImGui.SameLine();
-                    if (ImGui.Button("Mirror##Y")) volumeViewer.CutYForward = !volumeViewer.CutYForward;
-                    ImGui.Unindent();
-                }
-
-                ImGui.Spacing();
-
-                // Z Cutting Plane
-                ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(0.3f, 0.3f, 1, 1)); ImGui.Text("Z Cutting Plane"); ImGui.PopStyleColor();
-                ImGui.Checkbox("Enable Z Cut", ref volumeViewer.CutZEnabled);
-                ImGui.SameLine();
-                bool showAidZ = volumeViewer.ShowCutZPlaneVisual;
-                if(ImGui.Checkbox("Show Aid##Z", ref showAidZ)) volumeViewer.ShowCutZPlaneVisual = showAidZ;
-                if (volumeViewer.CutZEnabled)
-                {
-                    ImGui.Indent();
-                    ImGui.SliderFloat("Position##Z", ref volumeViewer.CutZPosition, 0.0f, 1.0f, "%.3f");
-                    bool forward = volumeViewer.CutZForward;
-                    if (ImGui.Checkbox("Cut Forward##Z", ref forward)) volumeViewer.CutZForward = forward;
-                    ImGui.SameLine();
-                    if (ImGui.Button("Mirror##Z")) volumeViewer.CutZForward = !volumeViewer.CutZForward;
-                    ImGui.Unindent();
-                }
-
-                ImGui.Unindent();
-            }
-            
-            // Arbitrary Clipping Planes
-            if (ImGui.CollapsingHeader("Arbitrary Clipping Planes"))
-            {
-                ImGui.Indent();
-                
-                ImGui.SetNextItemWidth(ImGui.GetContentRegionAvail().X - ImGui.GetStyle().ItemSpacing.X - 80);
-                ImGui.InputText("##NewPlaneName", ref _newPlaneName, 50);
-                ImGui.SameLine();
-                if (ImGui.Button("Add Plane", new Vector2(80, 0)))
-                {
-                    volumeViewer.ClippingPlanes.Add(new ClippingPlane(_newPlaneName));
-                    _newPlaneName = $"Plane {volumeViewer.ClippingPlanes.Count + 1}";
-                }
-                
-                ImGui.Separator();
-                
-                if (volumeViewer.ClippingPlanes.Count > 0)
-                {
-                    if (ImGui.BeginChild("PlaneList", new Vector2(0, 100), ImGuiChildFlags.Border))
-                    {
-                        for (int i = 0; i < volumeViewer.ClippingPlanes.Count; i++)
-                        {
-                            var plane = volumeViewer.ClippingPlanes[i];
-                            ImGui.PushID(i);
-                            
-                            if (ImGui.Selectable(plane.Name, _selectedPlaneIndex == i, ImGuiSelectableFlags.AllowOverlap))
-                                _selectedPlaneIndex = i;
-
-                            if (ImGui.BeginPopupContextItem($"PlaneContext_{i}"))
-                            {
-                                if (ImGui.MenuItem("Rename"))
-                                {
-                                    _planeToRenameIndex = i;
-                                    _renameBuffer = plane.Name;
-                                    _isRenamePopupOpen = true; 
-                                    ImGui.OpenPopup("Rename Clipping Plane");
-                                }
-                                if (ImGui.MenuItem("Remove"))
-                                {
-                                    volumeViewer.ClippingPlanes.RemoveAt(i);
-                                    if (_selectedPlaneIndex >= i) _selectedPlaneIndex--;
-                                    ImGui.PopID();
-                                    ImGui.EndPopup();
-                                    break; 
-                                }
-                                ImGui.EndPopup();
-                            }
-                            
-                            ImGui.SameLine(ImGui.GetWindowContentRegionMax().X - 25);
-                            bool enabled = plane.Enabled;
-                            if (ImGui.Checkbox("##enabled", ref enabled))
-                            {
-                                plane.Enabled = enabled;
-                            }
-                            
-                            ImGui.PopID();
-                        }
-                    }
-                    ImGui.EndChild();
-                    
-                    if (_selectedPlaneIndex >= 0 && _selectedPlaneIndex < volumeViewer.ClippingPlanes.Count)
-                    {
-                        ImGui.Separator();
-                        ImGui.Text("Edit Selected Plane");
-                        var plane = volumeViewer.ClippingPlanes[_selectedPlaneIndex];
-                        
-                        string name = plane.Name;
-                        if (ImGui.InputText("Name##edit", ref name, 50)) plane.Name = name;
-                        
-                        var rotation = plane.Rotation;
-                        if (ImGui.DragFloat3("Rotation", ref rotation, 1.0f))
-                        {
-                            plane.Rotation = rotation;
-                            volumeViewer.UpdateClippingPlaneNormal(plane);
-                        }
-                        
-                        float distance = plane.Distance;
-                        if (ImGui.SliderFloat("Distance", ref distance, -0.5f, 1.5f, "%.3f")) plane.Distance = distance;
-                        
-                        bool mirror = plane.Mirror;
-                        if (ImGui.Checkbox("Mirror", ref mirror)) plane.Mirror = mirror;
-
-                        ImGui.SameLine();
-                        bool vis = plane.IsVisualizationVisible;
-                        if (ImGui.Checkbox("Show Visual Aid", ref vis)) plane.IsVisualizationVisible = vis;
-                    }
-                }
-                else
-                {
-                    ImGui.TextDisabled("No clipping planes defined.");
-                }
-                
-                ImGui.Unindent();
-            }
-
-            if (_isRenamePopupOpen)
-            {
-                ImGui.SetNextWindowSize(new Vector2(300, 0));
-                if (ImGui.BeginPopupModal("Rename Clipping Plane", ref _isRenamePopupOpen, ImGuiWindowFlags.AlwaysAutoResize))
-                {
-                    ImGui.Text("Enter a new name for the plane:");
-                    ImGui.InputText("##rename", ref _renameBuffer, 100);
-                    if (ImGui.Button("OK", new Vector2(120, 0)))
-                    {
-                        if (_planeToRenameIndex != -1 && _planeToRenameIndex < volumeViewer.ClippingPlanes.Count)
-                        {
-                            volumeViewer.ClippingPlanes[_planeToRenameIndex].Name = _renameBuffer;
-                        }
-                        _planeToRenameIndex = -1;
-                        _isRenamePopupOpen = false;
-                        ImGui.CloseCurrentPopup();
-                    }
-                    ImGui.SameLine();
-                    if (ImGui.Button("Cancel", new Vector2(120, 0)))
-                    {
-                        _planeToRenameIndex = -1;
-                        _isRenamePopupOpen = false;
-                        ImGui.CloseCurrentPopup();
-                    }
-                    ImGui.EndPopup();
+                    string filename = "volume_screenshot_" + DateTime.Now.ToString("yyyyMMdd_HHmmss") + ".png";
+                    string path = System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Desktop), filename);
+                    _viewer.VolumeViewer.SaveScreenshot(path);
+                    Logger.Log($"Screenshot saved to: {path}");
                 }
             }
         }
-        
+
         private void DrawMaterialsTab()
         {
-            ImGui.Text("Material Visibility & Opacity");
-            ImGui.Separator();
+            ImGui.Text("Material Visibility:");
             
-            if (_dataset.Materials.Count <= 1)
-            {
-                ImGui.TextDisabled("No materials defined for this dataset.");
-                ImGui.TextWrapped("Use the segmentation tools to create materials based on density thresholds.");
-                return;
-            }
-            
-            // Quick actions
             if (ImGui.Button("Show All"))
             {
                 foreach (var mat in _dataset.Materials.Where(m => m.ID != 0))
@@ -526,7 +234,9 @@ namespace GeoscientistToolkit.Data.CtImageStack
                     _viewer.SetMaterialVisibility(mat.ID, true);
                 }
             }
+            
             ImGui.SameLine();
+            
             if (ImGui.Button("Hide All"))
             {
                 foreach (var mat in _dataset.Materials.Where(m => m.ID != 0))
@@ -534,58 +244,42 @@ namespace GeoscientistToolkit.Data.CtImageStack
                     _viewer.SetMaterialVisibility(mat.ID, false);
                 }
             }
-            ImGui.SameLine();
-            if (ImGui.Button("Reset Opacity"))
-            {
-                foreach (var mat in _dataset.Materials.Where(m => m.ID != 0))
-                {
-                    _viewer.SetMaterialOpacity(mat.ID, 1.0f);
-                }
-            }
-            
-            ImGui.Spacing();
+
             ImGui.Separator();
-            ImGui.Spacing();
-            
-            // Material list
+
             if (ImGui.BeginChild("MaterialList", new Vector2(0, -1), ImGuiChildFlags.Border))
             {
-                foreach (var material in _dataset.Materials)
+                foreach (var material in _dataset.Materials.Where(m => m.ID != 0))
                 {
-                    if (material.ID == 0) continue; // Skip exterior
-                    
                     ImGui.PushID((int)material.ID);
                     
-                    // Color indicator
-                    Vector4 color = material.Color;
-                    ImGui.ColorButton("##color", color, ImGuiColorEditFlags.NoTooltip | ImGuiColorEditFlags.NoAlpha, new Vector2(20, 20));
-                    ImGui.SameLine();
-                    
-                    // Visibility checkbox
-                    bool visible = _viewer.GetMaterialVisibility(material.ID);
-                    if (ImGui.Checkbox($"##visible", ref visible))
+                    bool isVisible = _viewer.GetMaterialVisibility(material.ID);
+                    if (ImGui.Checkbox($"##vis{material.ID}", ref isVisible))
                     {
-                        _viewer.SetMaterialVisibility(material.ID, visible);
+                        _viewer.SetMaterialVisibility(material.ID, isVisible);
                     }
+                    
                     ImGui.SameLine();
                     
-                    // Material name
+                    Vector4 color = material.Color;
+                    Vector3 color3 = new Vector3(color.X, color.Y, color.Z);
+                    if (ImGui.ColorEdit3($"##color{material.ID}", ref color3, 
+                        ImGuiColorEditFlags.NoInputs | ImGuiColorEditFlags.NoLabel))
+                    {
+                        material.Color = new Vector4(color3, color.W);
+                        _viewer.VolumeViewer?.SetMaterialVisibility(material.ID, isVisible); // Force update
+                    }
+                    
+                    ImGui.SameLine();
                     ImGui.Text(material.Name);
                     
-                    // Opacity slider (only if visible)
-                    if (visible)
+                    if (_viewer.VolumeViewer != null)
                     {
-                        ImGui.SameLine();
-                        ImGui.SetNextItemWidth(100);
                         float opacity = _viewer.GetMaterialOpacity(material.ID);
-                        if (ImGui.SliderFloat("##opacity", ref opacity, 0.0f, 1.0f, "%.2f"))
+                        ImGui.SetNextItemWidth(100);
+                        if (ImGui.SliderFloat($"##opacity{material.ID}", ref opacity, 0.0f, 1.0f, "%.2f"))
                         {
                             _viewer.SetMaterialOpacity(material.ID, opacity);
-                        }
-                        
-                        if (ImGui.IsItemHovered())
-                        {
-                            ImGui.SetTooltip("Opacity: 0 = transparent, 1 = opaque");
                         }
                     }
                     
@@ -594,139 +288,178 @@ namespace GeoscientistToolkit.Data.CtImageStack
             }
             ImGui.EndChild();
         }
-        
-        private void DrawDisplayTab()
+
+        private void DrawSegmentationTab()
         {
-            ImGui.Text("Display Options");
-            ImGui.Separator();
-            
-            // Window/Level controls
-            if (_viewer.ViewMode != CtCombinedViewer.ViewModeEnum.VolumeOnly)
+            if (_showSegmentationTools)
             {
-                ImGui.Text("Contrast (Window/Level)");
-                float windowWidth = _viewer.WindowWidth;
-                float windowLevel = _viewer.WindowLevel;
-                
-                ImGui.PushItemWidth(-60);
-                if (ImGui.DragFloat("Window", ref windowWidth, 1f, 1f, 255f, "%.0f"))
+                // Draw the segmentation tools directly
+                _segmentationTools.Draw(_dataset);
+            }
+            else
+            {
+                ImGui.TextDisabled("Segmentation tools are disabled.");
+                if (ImGui.Button("Enable Segmentation Tools"))
                 {
-                    _viewer.WindowWidth = windowWidth;
+                    _showSegmentationTools = true;
                 }
-                
-                if (ImGui.DragFloat("Level", ref windowLevel, 1f, 0f, 255f, "%.0f"))
-                {
-                    _viewer.WindowLevel = windowLevel;
-                }
-                ImGui.PopItemWidth();
-                
-                // Presets
-                ImGui.Text("Presets:");
-                if (ImGui.Button("Soft Tissue"))
-                {
-                    _viewer.WindowWidth = 200;
-                    _viewer.WindowLevel = 100;
-                }
-                ImGui.SameLine();
-                if (ImGui.Button("Rock"))
-                {
-                    _viewer.WindowWidth = 255;
-                    _viewer.WindowLevel = 128;
-                }
-                ImGui.SameLine();
-                if (ImGui.Button("High Contrast"))
-                {
-                    _viewer.WindowWidth = 100;
-                    _viewer.WindowLevel = 128;
-                }
-                
-                ImGui.Spacing();
-                ImGui.Separator();
-                ImGui.Spacing();
-            }
-            
-            // View options
-            ImGui.Text("View Options");
-            
-            bool showCrosshairs = _viewer.ShowCrosshairs;
-            if (ImGui.Checkbox("Show Crosshairs", ref showCrosshairs))
-            {
-                _viewer.ShowCrosshairs = showCrosshairs;
-            }
-            
-            bool showScaleBar = _viewer.ShowScaleBar;
-            if (ImGui.Checkbox("Show Scale Bar", ref showScaleBar))
-            {
-                _viewer.ShowScaleBar = showScaleBar;
-            }
-            
-            bool syncViews = _viewer.SyncViews;
-            if (ImGui.Checkbox("Synchronize Views", ref syncViews))
-            {
-                _viewer.SyncViews = syncViews;
-            }
-            
-            ImGui.Spacing();
-            ImGui.Separator();
-            ImGui.Spacing();
-            
-            // Reset button
-            if (ImGui.Button("Reset All Views", new Vector2(-1, 0)))
-            {
-                _viewer.ResetAllViews();
-            }
-        }
-        
-        private void DrawExportTab()
-        {
-            ImGui.Text("3D Model Export (STL)");
-            ImGui.Separator();
-            ImGui.TextWrapped("This will export the currently visible 3D model to an STL file using a Greedy Meshing algorithm. This process can be slow for large or complex volumes.");
-            ImGui.Spacing();
-
-            // Check if export is possible
-            bool canExport = _viewer.VolumeViewer != null && _dataset.LabelData != null;
-            if (!canExport)
-            {
-                ImGui.TextColored(new Vector4(1, 0.5f, 0.5f, 1), "Cannot export:");
-                if (_viewer.VolumeViewer == null) ImGui.BulletText("3D Viewer is not initialized.");
-                if (_dataset.LabelData == null) ImGui.BulletText("Dataset has no label data.");
-                ImGui.BeginDisabled();
-            }
-
-            if (ImGui.Button("Export Visible Volume as STL..."))
-            {
-                string defaultName = $"{_dataset.Name}_Export_{DateTime.Now:yyyyMMdd_HHmmss}";
-                _stlExportDialog.Open(defaultName);
-            }
-
-            if (!canExport)
-            {
-                ImGui.EndDisabled();
             }
         }
 
-        private void HandleStlExport(string filePath)
+        private void DrawCuttingPlanesTab()
         {
-            if (string.IsNullOrEmpty(filePath) || _viewer.VolumeViewer == null)
+            if (_viewer.VolumeViewer == null)
             {
+                ImGui.TextColored(new Vector4(1, 0.5f, 0.5f, 1), "3D viewer not available");
                 return;
             }
 
-            // Define the progress reporting action
-            Action<float, string> onProgress = (progress, message) =>
-            {
-                _exportProgressDialog.Update(progress, message);
-                if (progress >= 1.0f)
-                {
-                    // Delay closing the dialog to allow the user to see the final message
-                    System.Threading.Thread.Sleep(1500); 
-                    _exportProgressDialog.Close();
-                }
-            };
+            ImGui.Text("Axis-Aligned Cutting Planes:");
+            ImGui.Separator();
 
-            // Start the export process by opening the dialog
-            _exportProgressDialog.Open("Initializing export...");
-            _ = StlExporter.ExportVisibleToStlAsync(_dataset, _viewer, filePath, onProgress);
+            // X-axis cutting plane
+            bool cutXEnabled = _viewer.VolumeViewer.CutXEnabled;
+            float cutXPosition = _viewer.VolumeViewer.CutXPosition;
+            bool cutXForward = _viewer.VolumeViewer.CutXForward;
+            bool showCutXVisual = _viewer.VolumeViewer.ShowCutXPlaneVisual;
+            
+            DrawAxisCuttingPlane("X", ref cutXEnabled, ref cutXPosition, ref cutXForward, ref showCutXVisual);
+            
+            _viewer.VolumeViewer.CutXEnabled = cutXEnabled;
+            _viewer.VolumeViewer.CutXPosition = cutXPosition;
+            _viewer.VolumeViewer.CutXForward = cutXForward;
+            _viewer.VolumeViewer.ShowCutXPlaneVisual = showCutXVisual;
+
+            ImGui.Separator();
+
+            // Y-axis cutting plane
+            bool cutYEnabled = _viewer.VolumeViewer.CutYEnabled;
+            float cutYPosition = _viewer.VolumeViewer.CutYPosition;
+            bool cutYForward = _viewer.VolumeViewer.CutYForward;
+            bool showCutYVisual = _viewer.VolumeViewer.ShowCutYPlaneVisual;
+            
+            DrawAxisCuttingPlane("Y", ref cutYEnabled, ref cutYPosition, ref cutYForward, ref showCutYVisual);
+            
+            _viewer.VolumeViewer.CutYEnabled = cutYEnabled;
+            _viewer.VolumeViewer.CutYPosition = cutYPosition;
+            _viewer.VolumeViewer.CutYForward = cutYForward;
+            _viewer.VolumeViewer.ShowCutYPlaneVisual = showCutYVisual;
+
+            ImGui.Separator();
+
+            // Z-axis cutting plane
+            bool cutZEnabled = _viewer.VolumeViewer.CutZEnabled;
+            float cutZPosition = _viewer.VolumeViewer.CutZPosition;
+            bool cutZForward = _viewer.VolumeViewer.CutZForward;
+            bool showCutZVisual = _viewer.VolumeViewer.ShowCutZPlaneVisual;
+            
+            DrawAxisCuttingPlane("Z", ref cutZEnabled, ref cutZPosition, ref cutZForward, ref showCutZVisual);
+            
+            _viewer.VolumeViewer.CutZEnabled = cutZEnabled;
+            _viewer.VolumeViewer.CutZPosition = cutZPosition;
+            _viewer.VolumeViewer.CutZForward = cutZForward;
+            _viewer.VolumeViewer.ShowCutZPlaneVisual = showCutZVisual;
+
+            ImGui.Separator();
+            ImGui.Separator();
+
+            // Arbitrary clipping planes
+            ImGui.Text("Arbitrary Clipping Planes:");
+            
+            if (ImGui.Button("Add Plane"))
+            {
+                _viewer.VolumeViewer.ClippingPlanes.Add(
+                    new ClippingPlane($"Plane {_viewer.VolumeViewer.ClippingPlanes.Count + 1}"));
+            }
+
+            ImGui.SameLine();
+            
+            bool showVisualizations = _viewer.VolumeViewer.ShowPlaneVisualizations;
+            if (ImGui.Checkbox("Show All Visualizations", ref showVisualizations))
+            {
+                _viewer.VolumeViewer.ShowPlaneVisualizations = showVisualizations;
+            }
+
+            if (_viewer.VolumeViewer.ClippingPlanes.Count > 0)
+            {
+                ImGui.Separator();
+                
+                for (int i = 0; i < _viewer.VolumeViewer.ClippingPlanes.Count; i++)
+                {
+                    var plane = _viewer.VolumeViewer.ClippingPlanes[i];
+                    ImGui.PushID($"Plane{i}");
+                    
+                    if (ImGui.CollapsingHeader(plane.Name))
+                    {
+                        bool enabled = plane.Enabled;
+                        if (ImGui.Checkbox("Enabled", ref enabled))
+                        {
+                            plane.Enabled = enabled;
+                        }
+                        
+                        ImGui.SameLine();
+                        bool showVisualization = plane.IsVisualizationVisible;
+                        if (ImGui.Checkbox("Show Visualization", ref showVisualization))
+                        {
+                            plane.IsVisualizationVisible = showVisualization;
+                        }
+                        
+                        ImGui.SameLine();
+                        if (ImGui.Button("Remove"))
+                        {
+                            _viewer.VolumeViewer.ClippingPlanes.RemoveAt(i);
+                            ImGui.PopID();
+                            break;
+                        }
+
+                        float distance = plane.Distance;
+                        if (ImGui.DragFloat("Distance", ref distance, 0.01f, -1.0f, 1.0f))
+                        {
+                            plane.Distance = distance;
+                        }
+                        
+                        bool mirror = plane.Mirror;
+                        if (ImGui.Checkbox("Mirror", ref mirror))
+                        {
+                            plane.Mirror = mirror;
+                        }
+
+                        Vector3 rotation = plane.Rotation;
+                        if (ImGui.DragFloat3("Rotation", ref rotation, 1.0f, -180.0f, 180.0f))
+                        {
+                            plane.Rotation = rotation;
+                            _viewer.VolumeViewer.UpdateClippingPlaneNormal(plane);
+                        }
+                    }
+                    
+                    ImGui.PopID();
+                }
+            }
+        }
+
+        private void DrawAxisCuttingPlane(string axis, ref bool enabled, ref float position, 
+            ref bool forward, ref bool showVisual)
+        {
+            ImGui.Checkbox($"{axis}-Axis Cut", ref enabled);
+            
+            if (enabled)
+            {
+                ImGui.SameLine();
+                ImGui.Checkbox($"Show##{axis}", ref showVisual);
+                
+                ImGui.DragFloat($"Position##{axis}", ref position, 0.01f, 0.0f, 1.0f);
+                
+                if (ImGui.RadioButton($"Forward##{axis}", forward))
+                    forward = true;
+                ImGui.SameLine();
+                if (ImGui.RadioButton($"Backward##{axis}", !forward))
+                    forward = false;
+            }
+        }
+
+        public override void Dispose()
+        {
+            base.Dispose();
         }
     }
 }
