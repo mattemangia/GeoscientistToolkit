@@ -136,85 +136,94 @@ namespace GeoscientistToolkit.Data.CtImageStack
         /// Loads multi-page TIFF directly without binning
         /// </summary>
         private static async Task<ChunkedVolume> LoadMultiPageTiffDirectAsync(
-            string tiffPath,
-            string outputDir,
-            double pixelSize,
-            bool useMemoryMapping,
-            IProgress<float> progress,
-            string datasetName)
+    string tiffPath,
+    string outputDir,
+    double pixelSize,
+    bool useMemoryMapping,
+    IProgress<float> progress,
+    string datasetName)
+{
+    // Check for existing volume file
+    string volumePath = Path.Combine(outputDir, $"{datasetName}.Volume.bin");
+
+    if (File.Exists(volumePath))
+    {
+        Logger.Log($"[CTStackLoader] Found existing volume file: {volumePath}");
+        try
         {
-            // Check for existing volume file
-            string volumePath = Path.Combine(outputDir, $"{datasetName}.Volume.bin");
-
-            if (File.Exists(volumePath))
-            {
-                Logger.Log($"[CTStackLoader] Found existing volume file: {volumePath}");
-                try
-                {
-                    var volume = await ChunkedVolume.LoadFromBinAsync(volumePath, useMemoryMapping);
-                    volume.PixelSize = pixelSize;
-                    progress?.Report(1.0f);
-                    return volume;
-                }
-                catch (Exception ex)
-                {
-                    Logger.Log($"[CTStackLoader] Error loading existing volume: {ex.Message}");
-                    Logger.Log("[CTStackLoader] Regenerating volume from TIFF file...");
-                }
-            }
-
-            // Load from multi-page TIFF
-            return await Task.Run(async () =>
-            {
-                // Get dimensions and page count
-                int pageCount = ImageLoader.GetTiffPageCount(tiffPath);
-                var firstPageInfo = ImageLoader.LoadImageInfo(tiffPath);
-                int width = firstPageInfo.Width;
-                int height = firstPageInfo.Height;
-                int depth = pageCount;
-
-                Logger.Log($"[CTStackLoader] Multi-page TIFF dimensions: {width}×{height}×{depth}");
-
-                ChunkedVolume newVolume;
-                
-                if (useMemoryMapping)
-                {
-                    // Create memory-mapped file
-                    await CreateMemoryMappedFileAsync(volumePath, width, height, depth, 
-                        ChunkedVolume.DEFAULT_CHUNK_DIM, pixelSize);
-                        
-                    newVolume = await ChunkedVolume.LoadFromBinAsync(volumePath, true);
-                }
-                else
-                {
-                    newVolume = new ChunkedVolume(width, height, depth, ChunkedVolume.DEFAULT_CHUNK_DIM)
-                    {
-                        PixelSize = pixelSize
-                    };
-                }
-
-                // Load all pages
-                var progressReporter = new Progress<float>(p => progress?.Report(p));
-                var pages = ImageLoader.LoadAllTiffPagesAsGrayscale(tiffPath, out _, out _, progressReporter);
-
-                // Write pages to volume
-                for (int z = 0; z < pages.Count; z++)
-                {
-                    newVolume.WriteSliceZ(z, pages[z]);
-                }
-
-                // Save for future use (only if not memory mapped - it's already saved)
-                if (!useMemoryMapping)
-                {
-                    await newVolume.SaveAsBinAsync(volumePath);
-                }
-                
-                // Create empty labels file
-                await CreateEmptyLabelsFileAsync(outputDir, newVolume, datasetName);
-                
-                return newVolume;
-            });
+            var volume = await ChunkedVolume.LoadFromBinAsync(volumePath, useMemoryMapping);
+            volume.PixelSize = pixelSize;
+            progress?.Report(1.0f);
+            return volume;
         }
+        catch (Exception ex)
+        {
+            Logger.Log($"[CTStackLoader] Error loading existing volume: {ex.Message}");
+            Logger.Log("[CTStackLoader] Regenerating volume from TIFF file...");
+        }
+    }
+
+    // Load from multi-page TIFF
+    // Get dimensions and page count
+    int pageCount = ImageLoader.GetTiffPageCount(tiffPath);
+    var firstPageInfo = ImageLoader.LoadImageInfo(tiffPath);
+    int width = firstPageInfo.Width;
+    int height = firstPageInfo.Height;
+    int depth = pageCount;
+
+    Logger.Log($"[CTStackLoader] Multi-page TIFF dimensions: {width}×{height}×{depth}");
+
+    ChunkedVolume newVolume;
+    
+    if (useMemoryMapping)
+    {
+        // Create memory-mapped file
+        await CreateMemoryMappedFileAsync(volumePath, width, height, depth, 
+            ChunkedVolume.DEFAULT_CHUNK_DIM, pixelSize);
+            
+        newVolume = await ChunkedVolume.LoadFromBinAsync(volumePath, true);
+    }
+    else
+    {
+        newVolume = new ChunkedVolume(width, height, depth, ChunkedVolume.DEFAULT_CHUNK_DIM)
+        {
+            PixelSize = pixelSize
+        };
+    }
+
+    // Load pages directly into the volume
+    await Task.Run(() =>
+    {
+        for (int z = 0; z < pageCount; z++)
+        {
+            var pageData = ImageLoader.LoadTiffPageAsGrayscale(tiffPath, z, out int pageWidth, out int pageHeight);
+            
+            // Ensure page dimensions match
+            if (pageWidth != width || pageHeight != height)
+            {
+                Logger.LogError($"[CTStackLoader] Page {z} has different dimensions ({pageWidth}×{pageHeight}) than expected ({width}×{height})");
+                continue;
+            }
+            
+            // Write the page data directly to the volume using WriteSliceZ
+            newVolume.WriteSliceZ(z, pageData);
+            
+            // Report progress
+            progress?.Report((float)(z + 1) / pageCount);
+        }
+    });
+
+    // Save for future use (only if not memory mapped - it's already saved)
+    if (!useMemoryMapping)
+    {
+        await newVolume.SaveAsBinAsync(volumePath);
+    }
+    
+    // Create empty labels file
+    await CreateEmptyLabelsFileAsync(outputDir, newVolume, datasetName);
+    
+    return newVolume;
+}
 
         /// <summary>
         /// Loads multi-page TIFF with 3D binning applied

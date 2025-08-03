@@ -493,38 +493,77 @@ namespace GeoscientistToolkit.UI
         }
 
         private async Task ConvertAndImportOptimizedCTStack()
+{
+    string name = _ctIsMultiPageTiff ? Path.GetFileNameWithoutExtension(_ctPath) : Path.GetFileName(_ctPath);
+    string outputDir = _ctIsMultiPageTiff ? Path.GetDirectoryName(_ctPath) : _ctPath;
+    string gvtFileName = _ctBinningFactor > 1 ? $"{name}_bin{_ctBinningFactor}.gvt" : $"{name}.gvt";
+    string gvtPath = Path.Combine(outputDir, gvtFileName);
+
+    // First load the volume data
+    _statusText = "Loading volume data...";
+    var binnedVolume = await CTStackLoader.LoadCTStackAsync(_ctPath, GetPixelSizeInMeters(), _ctBinningFactor, false,
+        new Progress<float>(p => { _progress = p * 0.5f; _statusText = $"Step 1/2: Loading and processing images... {(int)(p * 100)}%"; }), name);
+
+    // IMPORTANT: Ensure the volume is fully loaded before conversion
+    if (binnedVolume == null || binnedVolume.Width == 0 || binnedVolume.Height == 0 || binnedVolume.Depth == 0)
+    {
+        throw new InvalidOperationException("Failed to load volume data from TIFF file");
+    }
+
+    // Log volume info to verify it's loaded
+    Logger.Log($"[ImportDataModal] Loaded volume for conversion: {binnedVolume.Width}×{binnedVolume.Height}×{binnedVolume.Depth}");
+
+    // Check if we need to create the .gvt file
+    if (!File.Exists(gvtPath))
+    {
+        _statusText = "Converting to optimized format...";
+        
+        // Verify volume has actual data before conversion
+        bool hasData = false;
+        for (int z = 0; z < Math.Min(5, binnedVolume.Depth); z++)
         {
-            string name = _ctIsMultiPageTiff ? Path.GetFileNameWithoutExtension(_ctPath) : Path.GetFileName(_ctPath);
-            string outputDir = _ctIsMultiPageTiff ? Path.GetDirectoryName(_ctPath) : _ctPath;
-            string gvtFileName = _ctBinningFactor > 1 ? $"{name}_bin{_ctBinningFactor}.gvt" : $"{name}.gvt";
-            string gvtPath = Path.Combine(outputDir, gvtFileName);
-
-            var binnedVolume = await CTStackLoader.LoadCTStackAsync(_ctPath, GetPixelSizeInMeters(), _ctBinningFactor, false,
-                new Progress<float>(p => { _progress = p * 0.5f; _statusText = $"Step 1/2: Loading and processing images... {(int)(p * 100)}%"; }), name);
-
-            if (!File.Exists(gvtPath))
+            for (int y = 0; y < Math.Min(5, binnedVolume.Height); y++)
             {
-                await CtStackConverter.ConvertToStreamableFormat(binnedVolume, gvtPath,
-                    (p, s) => { _progress = 0.5f + (p * 0.5f); _statusText = $"Step 2/2: {s}"; });
+                for (int x = 0; x < Math.Min(5, binnedVolume.Width); x++)
+                {
+                    if (binnedVolume[x, y, z] > 0)
+                    {
+                        hasData = true;
+                        break;
+                    }
+                }
+                if (hasData) break;
             }
-            else
-            {
-                _statusText = "Found existing optimized file. Loading..."; _progress = 1.0f;
-            }
-
-            var legacyDataset = await CreateLegacyDatasetForEditing(binnedVolume);
-
-            var streamingDataset = new StreamingCtVolumeDataset($"{name} (3D View)", gvtPath)
-            {
-                EditablePartner = legacyDataset
-            };
-
-            // Store datasets to be added when task completes
-            _pendingStreamingDataset = streamingDataset;
-            _pendingLegacyDataset = legacyDataset;
-
-            _statusText = "Optimized dataset and editable partner added to project!";
+            if (hasData) break;
         }
+        
+        if (!hasData)
+        {
+            Logger.LogError("[ImportDataModal] Volume appears to be empty!");
+        }
+        
+        await CtStackConverter.ConvertToStreamableFormat(binnedVolume, gvtPath,
+            (p, s) => { _progress = 0.5f + (p * 0.5f); _statusText = $"Step 2/2: {s}"; });
+    }
+    else
+    {
+        _statusText = "Found existing optimized file. Loading..."; 
+        _progress = 1.0f;
+    }
+
+    var legacyDataset = await CreateLegacyDatasetForEditing(binnedVolume);
+
+    var streamingDataset = new StreamingCtVolumeDataset($"{name} (3D View)", gvtPath)
+    {
+        EditablePartner = legacyDataset
+    };
+
+    // Store datasets to be added when task completes
+    _pendingStreamingDataset = streamingDataset;
+    _pendingLegacyDataset = legacyDataset;
+
+    _statusText = "Optimized dataset and editable partner added to project!";
+}
 
         private async Task ImportLegacyCTStack()
         {

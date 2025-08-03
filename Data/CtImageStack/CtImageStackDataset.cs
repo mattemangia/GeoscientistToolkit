@@ -170,14 +170,38 @@ namespace GeoscientistToolkit.Data.CtImageStack
 
         private string GetVolumePath()
         {
-            string folderName = Path.GetFileName(FilePath);
-            return Path.Combine(FilePath, $"{folderName}.Volume.bin");
+            // Handle both folder paths and file paths (e.g., multi-page TIFF)
+            if (File.Exists(FilePath))
+            {
+                // FilePath is a file (e.g., multi-page TIFF)
+                string directory = Path.GetDirectoryName(FilePath);
+                string nameWithoutExt = Path.GetFileNameWithoutExtension(FilePath);
+                return Path.Combine(directory, $"{nameWithoutExt}.Volume.bin");
+            }
+            else
+            {
+                // FilePath is a directory
+                string folderName = Path.GetFileName(FilePath);
+                return Path.Combine(FilePath, $"{folderName}.Volume.bin");
+            }
         }
 
         private string GetLabelPath()
         {
-            string folderName = Path.GetFileName(FilePath);
-            return Path.Combine(FilePath, $"{folderName}.Labels.bin");
+            // Handle both folder paths and file paths (e.g., multi-page TIFF)
+            if (File.Exists(FilePath))
+            {
+                // FilePath is a file (e.g., multi-page TIFF)
+                string directory = Path.GetDirectoryName(FilePath);
+                string nameWithoutExt = Path.GetFileNameWithoutExtension(FilePath);
+                return Path.Combine(directory, $"{nameWithoutExt}.Labels.bin");
+            }
+            else
+            {
+                // FilePath is a directory
+                string folderName = Path.GetFileName(FilePath);
+                return Path.Combine(FilePath, $"{folderName}.Labels.bin");
+            }
         }
 
         private bool IsImageFile(string path)

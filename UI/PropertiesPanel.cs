@@ -1,9 +1,10 @@
-// GeoscientistToolkit/UI/PropertiesPanel.cs (Fixed to handle pop-out state correctly)
+// GeoscientistToolkit/UI/PropertiesPanel.cs
 using GeoscientistToolkit.Data;
 using GeoscientistToolkit.UI.Interfaces;
 using ImGuiNET;
 using System.Numerics;
 using GeoscientistToolkit.Data.Image;
+using GeoscientistToolkit.Data.CtImageStack;
 using GeoscientistToolkit.Util;
 
 namespace GeoscientistToolkit.UI
@@ -12,10 +13,12 @@ namespace GeoscientistToolkit.UI
     {
         private Dataset _selectedDataset;
         private readonly ImageExportDialog _imageExportDialog;
+        private readonly CtImageStackExportDialog _ctExportDialog;
 
         public PropertiesPanel() : base("Properties", new Vector2(300, 400))
         {
             _imageExportDialog = new ImageExportDialog();
+            _ctExportDialog = new CtImageStackExportDialog(); // This line was missing!
         }
 
         public void Submit(ref bool pOpen, Dataset selectedDataset)
@@ -28,6 +31,7 @@ namespace GeoscientistToolkit.UI
             
             // Submit the dialog every frame. It will only draw when it's open.
             _imageExportDialog.Submit();
+            _ctExportDialog.Submit();
         }
 
         protected override void DrawContent()
@@ -72,6 +76,14 @@ namespace GeoscientistToolkit.UI
                     if (_selectedDataset is ImageDataset imageDataset)
                     {
                         _imageExportDialog.Open(imageDataset);
+                    }
+                    else if (_selectedDataset is CtImageStackDataset ctDataset)
+                    {
+                        _ctExportDialog.Open(ctDataset);
+                    }
+                    else if (_selectedDataset is StreamingCtVolumeDataset streamingDataset)
+                    {
+                        _ctExportDialog.Open(streamingDataset);
                     }
                     else
                     {
