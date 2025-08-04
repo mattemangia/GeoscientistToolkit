@@ -124,6 +124,7 @@ namespace GeoscientistToolkit.Data.CtImageStack
         private const long VRAM_BUDGET_LABELS = 512L * 1024 * 1024;
         private const int MAX_CLIPPING_PLANES = 8;
 
+        // Metal-specific uniform buffer structure with proper alignment
         [StructLayout(LayoutKind.Sequential)]
         private unsafe struct VolumeConstants
         {
@@ -240,7 +241,20 @@ namespace GeoscientistToolkit.Data.CtImageStack
             _previewTexture = factory.CreateTexture(desc);
             byte[] emptyData = new byte[baseLodInfo.Width * baseLodInfo.Height * baseLodInfo.Depth];
             VeldridManager.GraphicsDevice.UpdateTexture(_previewTexture, emptyData, 0, 0, 0, (uint)baseLodInfo.Width, (uint)baseLodInfo.Height, (uint)baseLodInfo.Depth, 0, 0);
-            _volumeSampler = factory.CreateSampler(new SamplerDescription(SamplerAddressMode.Clamp, SamplerAddressMode.Clamp, SamplerAddressMode.Clamp, SamplerFilter.MinLinear_MagLinear_MipLinear, null, 0, 0, 0, 0, SamplerBorderColor.TransparentBlack));
+
+            // Create sampler with Metal-compatible settings
+            _volumeSampler = factory.CreateSampler(new SamplerDescription(
+                SamplerAddressMode.Clamp,
+                SamplerAddressMode.Clamp,
+                SamplerAddressMode.Clamp,
+                SamplerFilter.MinLinear_MagLinear_MipLinear,
+                null,
+                0,
+                0,
+                0,
+                0,
+                SamplerBorderColor.TransparentBlack));
+
             CreateColorMapTexture(factory);
             CreateMaterialTextures(factory);
         }
@@ -329,6 +343,240 @@ namespace GeoscientistToolkit.Data.CtImageStack
 
         private void CreateShaders(ResourceFactory factory)
         {
+            // METAL-SPECIFIC FIX: Use different shader code for Metal
+            var backend = VeldridManager.GraphicsDevice.BackendType;
+
+            if (backend == GraphicsBackend.Metal)
+            {
+                CreateMetalShaders(factory);
+            }
+            else
+            {
+                // ORIGINAL CODE FOR ALL OTHER BACKENDS (Windows Direct3D, OpenGL, Vulkan)
+                CreateStandardShaders(factory);
+            }
+        }
+
+        private void CreateMetalShaders(ResourceFactory factory)
+        {
+            // Metal-specific vertex shader with proper coordinate handling
+            string metalVertexShaderGlsl = @"
+#version 450
+layout(location = 0) in vec3 in_Position;
+
+layout(set = 0, binding = 0) uniform Constants
+{
+    mat4 ViewProj;
+    mat4 InvView;
+    vec4 CameraPosition;
+};
+
+layout(location = 0) out vec3 out_ModelPos;
+
+void main() 
+{
+    out_ModelPos = in_Position;
+    vec4 clipPos = ViewProj * vec4(in_Position, 1.0);
+    // Metal-specific: ensure proper depth range
+    clipPos.z = clipPos.z * 0.5 + clipPos.w * 0.5;
+    gl_Position = clipPos;
+}";
+
+            // Metal-optimized fragment shader
+            string metalFragmentShaderGlsl = @"
+#version 450
+#extension GL_EXT_samplerless_texture_functions : enable
+
+layout(location = 0) in vec3 in_ModelPos;
+layout(location = 0) out vec4 out_Color;
+
+layout(set = 0, binding = 0) uniform Constants
+{
+    mat4 ViewProj;
+    mat4 InvView;
+    vec4 CameraPosition;
+    vec4 VolumeSize;
+    vec4 ThresholdParams;
+    vec4 SliceParams;
+    vec4 RenderParams;
+    vec4 CutPlaneX;
+    vec4 CutPlaneY;
+    vec4 CutPlaneZ;
+    vec4 ClippingPlanesData[8];
+    vec4 ClippingPlanesInfo;
+    vec4 PreviewParams;
+    vec4 PreviewAlpha;
+};
+
+layout(set = 0, binding = 1) uniform sampler VolumeSampler;
+layout(set = 0, binding = 2) uniform texture3D VolumeTexture;
+layout(set = 0, binding = 3) uniform texture3D LabelTexture;
+layout(set = 0, binding = 4) uniform texture2D ColorMapTexture; // Changed to 2D for Metal
+layout(set = 0, binding = 5) uniform texture2D MaterialParamsTexture; // Changed to 2D for Metal
+layout(set = 0, binding = 6) uniform texture2D MaterialColorsTexture; // Changed to 2D for Metal
+layout(set = 0, binding = 7) uniform texture3D PreviewTexture;
+
+bool IntersectBox(vec3 rayOrigin, vec3 rayDir, vec3 boxMin, vec3 boxMax, out float tNear, out float tFar)
+{
+    vec3 invRayDir = 1.0 / (rayDir + 1e-8);
+    vec3 t1 = (boxMin - rayOrigin) * invRayDir;
+    vec3 t2 = (boxMax - rayOrigin) * invRayDir;
+    vec3 tMin = min(t1, t2);
+    vec3 tMax = max(t1, t2);
+    tNear = max(max(tMin.x, tMin.y), tMin.z);
+    tFar = min(min(tMax.x, tMax.y), tMax.z);
+    return tFar >= tNear && tFar > 0.0;
+}
+
+bool IsCutByPlanes(vec3 pos)
+{
+    if (CutPlaneX.x > 0.5 && (pos.x - CutPlaneX.z) * CutPlaneX.y > 0.0) return true;
+    if (CutPlaneY.x > 0.5 && (pos.y - CutPlaneY.z) * CutPlaneY.y > 0.0) return true;
+    if (CutPlaneZ.x > 0.5 && (pos.z - CutPlaneZ.z) * CutPlaneZ.y > 0.0) return true;
+    int numPlanes = int(ClippingPlanesInfo.x);
+    for (int i = 0; i < numPlanes; i++)
+    {
+        vec4 planeData = ClippingPlanesData[i];
+        if (planeData.w > 0.5)
+        {
+            vec3 normal = planeData.xyz; 
+            float dist = length(normal);
+            if (dist > 0.001)
+            {
+                normal /= dist; 
+                float mirror = step(1.5, dist);
+                float planeDist = dot(pos - vec3(0.5), normal) - (dist - 0.5 - mirror);
+                if (mirror > 0.5 ? planeDist < 0.0 : planeDist > 0.0) return true;
+            }
+        }
+    }
+    return false;
+}
+
+vec4 ApplyColorMap(float intensity)
+{
+    float mapOffset = RenderParams.x * 256.0;
+    float samplePos = clamp((mapOffset + intensity * 255.0) / 1024.0, 0.0, 1.0);
+    // Use 2D texture for Metal (1 pixel height)
+    return textureLod(sampler2D(ColorMapTexture, VolumeSampler), vec2(samplePos, 0.5), 0.0);
+}
+
+void main()
+{
+    vec3 rayOrigin = CameraPosition.xyz;
+    vec3 rayDir = normalize(in_ModelPos - rayOrigin);
+
+    float tNear, tFar;
+    if (!IntersectBox(rayOrigin, rayDir, vec3(0.0), vec3(1.0), tNear, tFar))
+    {
+        discard;
+    }
+    
+    tNear = max(tNear, 0.0);
+    vec4 accumulatedColor = vec4(0.0);
+    
+    float maxDim = max(VolumeSize.x, max(VolumeSize.y, VolumeSize.z));
+    float baseStepSize = 1.0 / maxDim;
+    float step = baseStepSize * ThresholdParams.z;
+    
+    int maxSteps = int((tFar - tNear) / step);
+    float opacityScalar = 40.0;
+    float t = tNear;
+
+    for (int i = 0; i < 768; i++)
+    {
+        if (i >= maxSteps || t > tFar || accumulatedColor.a > 0.95) break;
+
+        vec3 currentPos = rayOrigin + t * rayDir;
+        if (any(lessThan(currentPos, vec3(0.0))) || any(greaterThan(currentPos, vec3(1.0))) || IsCutByPlanes(currentPos))
+        {
+            t += step;
+            continue;
+        }
+
+        vec4 sampledColor = vec4(0.0);
+        if (PreviewParams.x > 0.5 && textureLod(sampler3D(PreviewTexture, VolumeSampler), currentPos, 0.0).r > 0.5)
+        {
+            sampledColor = vec4(PreviewParams.yzw, PreviewAlpha.x * 5.0);
+        }
+        else
+        {
+            int materialId = int(textureLod(sampler3D(LabelTexture, VolumeSampler), currentPos, 0.0).r * 255.0 + 0.5);
+            // Use 2D textures for Metal (1 pixel height)
+            vec2 materialParams = texelFetch(sampler2D(MaterialParamsTexture, VolumeSampler), ivec2(materialId, 0), 0).xy;
+
+            if (materialId > 0 && materialParams.x > 0.5)
+            {
+                sampledColor = texelFetch(sampler2D(MaterialColorsTexture, VolumeSampler), ivec2(materialId, 0), 0);
+                sampledColor.a = materialParams.y * 5.0;
+            }
+            else if (ThresholdParams.w > 0.5)
+            {
+                float intensity = textureLod(sampler3D(VolumeTexture, VolumeSampler), currentPos, 0.0).r;
+                if (intensity >= ThresholdParams.x && intensity <= ThresholdParams.y)
+                {
+                    float normIntensity = (intensity - ThresholdParams.x) / (ThresholdParams.y - ThresholdParams.x + 0.001);
+                    sampledColor = (RenderParams.x > 0.5) ? ApplyColorMap(normIntensity) : vec4(vec3(normIntensity), normIntensity);
+                    sampledColor.a = pow(sampledColor.a, 2.0);
+                }
+            }
+        }
+        
+        if (sampledColor.a > 0.0)
+        {
+            float correctedAlpha = clamp(sampledColor.a * step * opacityScalar, 0.0, 1.0);
+            accumulatedColor += (1.0 - accumulatedColor.a) * vec4(sampledColor.rgb * correctedAlpha, correctedAlpha);
+        }
+        t += step;
+    }
+    out_Color = accumulatedColor;
+}";
+
+            // Plane visualization shaders for Metal
+            string planeVertexShaderGlsl = @"
+#version 450
+layout(location = 0) in vec3 in_Position;
+layout(set = 0, binding = 0) uniform Constants { mat4 ViewProj; vec4 PlaneColor; };
+void main() { 
+    vec4 clipPos = ViewProj * vec4(in_Position, 1.0);
+    clipPos.z = clipPos.z * 0.5 + clipPos.w * 0.5; // Metal depth range fix
+    gl_Position = clipPos;
+}";
+
+            string planeFragmentShaderGlsl = @"
+#version 450
+layout(location = 0) out vec4 out_Color;
+layout(set = 0, binding = 0) uniform Constants { mat4 ViewProj; vec4 PlaneColor; };
+void main() { out_Color = PlaneColor; }";
+
+            try
+            {
+                // Metal-specific cross-compilation options
+                var options = new CrossCompileOptions();
+                options.FixClipSpaceZ = false; // We handle this manually in the shader
+                options.InvertVertexOutputY = false; // Metal already has inverted Y
+                options.NormalizeResourceNames = true;
+
+                var mainVertexDesc = new ShaderDescription(ShaderStages.Vertex, System.Text.Encoding.UTF8.GetBytes(metalVertexShaderGlsl), "main");
+                var mainFragmentDesc = new ShaderDescription(ShaderStages.Fragment, System.Text.Encoding.UTF8.GetBytes(metalFragmentShaderGlsl), "main");
+                _shaders = factory.CreateFromSpirv(mainVertexDesc, mainFragmentDesc, options);
+
+                var planeVertexDesc = new ShaderDescription(ShaderStages.Vertex, System.Text.Encoding.UTF8.GetBytes(planeVertexShaderGlsl), "main");
+                var planeFragmentDesc = new ShaderDescription(ShaderStages.Fragment, System.Text.Encoding.UTF8.GetBytes(planeFragmentShaderGlsl), "main");
+                _planeVisualizationShaders = factory.CreateFromSpirv(planeVertexDesc, planeFragmentDesc, options);
+
+                Logger.Log($"[CtVolume3DViewer] Metal shaders compiled successfully");
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError($"[CtVolume3DViewer] Failed to create Metal shaders: {ex.Message}");
+                throw new InvalidOperationException("Failed to create Metal shaders for 3D volume rendering", ex);
+            }
+        }
+
+        private void CreateStandardShaders(ResourceFactory factory)
+        {
+            // ORIGINAL SHADER CODE - UNCHANGED FOR WINDOWS/DIRECT3D
             string vertexShaderGlsl = @"
 #version 450
 layout(location = 0) in vec3 in_Position;
@@ -503,17 +751,9 @@ void main() { out_Color = PlaneColor; }";
 
             try
             {
-                // --- FIX START: Add robust cross-compilation options for cross-platform rendering ---
+                // Original cross-compilation options for non-Metal backends
                 var options = new CrossCompileOptions();
-
-                // This tells the compiler to map the GLSL shader's output Z-coordinate (which is -1 to 1)
-                // to the coordinate system expected by the backend (e.g., 0 to 1 for Direct3D and Metal).
                 options.FixClipSpaceZ = true;
-
-                // This corrects for differences in the Y-coordinate origin between graphics APIs.
-                // Veldrid's IsClipSpaceYInverted is true for Metal/Vulkan and false for D3D/OpenGL.
-                // We tell the shader compiler to invert the Y-axis only when the target backend *doesn't*
-                // have an inverted Y-axis, ensuring the final image is always correctly oriented.
                 options.InvertVertexOutputY = !VeldridManager.GraphicsDevice.IsClipSpaceYInverted;
 
                 var mainVertexDesc = new ShaderDescription(ShaderStages.Vertex, System.Text.Encoding.UTF8.GetBytes(vertexShaderGlsl), "main");
@@ -524,12 +764,11 @@ void main() { out_Color = PlaneColor; }";
                 var planeFragmentDesc = new ShaderDescription(ShaderStages.Fragment, System.Text.Encoding.UTF8.GetBytes(planeFragmentShaderGlsl), "main");
                 _planeVisualizationShaders = factory.CreateFromSpirv(planeVertexDesc, planeFragmentDesc, options);
 
-                Logger.Log($"[CtVolume3DViewer] Shaders compiled successfully for backend: {VeldridManager.GraphicsDevice.BackendType}. Using InvertY: {options.InvertVertexOutputY}");
-                // --- FIX END ---
+                Logger.Log($"[CtVolume3DViewer] Standard shaders compiled successfully for backend: {VeldridManager.GraphicsDevice.BackendType}. Using InvertY: {options.InvertVertexOutputY}");
             }
             catch (Exception ex)
             {
-                Logger.LogError($"[CtVolume3DViewer] Failed to create shaders: {ex.Message}");
+                Logger.LogError($"[CtVolume3DViewer] Failed to create standard shaders: {ex.Message}");
                 throw new InvalidOperationException("Failed to create shaders for 3D volume rendering", ex);
             }
         }
@@ -571,20 +810,43 @@ void main() { out_Color = PlaneColor; }";
 
         private void CreateColorMapTexture(ResourceFactory factory)
         {
-            const int mapSize = 256; const int numMaps = 4;
+            const int mapSize = 256;
+            const int numMaps = 4;
             var colorMapData = new RgbaFloat[mapSize * numMaps];
+
             for (int i = 0; i < mapSize; i++) { float v = i / (float)(mapSize - 1); colorMapData[i] = new RgbaFloat(v, v, v, 1); }
             for (int i = 0; i < mapSize; i++) { float t = i / (float)(mapSize - 1); float r = Math.Min(1.0f, 3.0f * t); float g = Math.Clamp(3.0f * t - 1.0f, 0.0f, 1.0f); float b = Math.Clamp(3.0f * t - 2.0f, 0.0f, 1.0f); colorMapData[mapSize * 1 + i] = new RgbaFloat(r, g, b, 1); }
             for (int i = 0; i < mapSize; i++) { float t = i / (float)(mapSize - 1); colorMapData[mapSize * 2 + i] = new RgbaFloat(t, 1 - t, 1, 1); }
             for (int i = 0; i < mapSize; i++) { float h = (i / (float)(mapSize - 1)) * 0.7f; colorMapData[mapSize * 3 + i] = HsvToRgb(h, 1.0f, 1.0f); }
-            _colorMapTexture = factory.CreateTexture(TextureDescription.Texture1D((uint)(mapSize * numMaps), 1, 1, PixelFormat.R32_G32_B32_A32_Float, TextureUsage.Sampled));
-            VeldridManager.GraphicsDevice.UpdateTexture(_colorMapTexture, colorMapData, 0, 0, 0, (uint)(mapSize * numMaps), 1, 1, 0, 0);
+
+            if (VeldridManager.GraphicsDevice.BackendType == GraphicsBackend.Metal)
+            {
+                // Use 2D texture for Metal (1 pixel height)
+                _colorMapTexture = factory.CreateTexture(TextureDescription.Texture2D((uint)(mapSize * numMaps), 1, 1, 1, PixelFormat.R32_G32_B32_A32_Float, TextureUsage.Sampled));
+                VeldridManager.GraphicsDevice.UpdateTexture(_colorMapTexture, colorMapData, 0, 0, 0, (uint)(mapSize * numMaps), 1, 1, 0, 0);
+            }
+            else
+            {
+                // Use 1D texture for other backends
+                _colorMapTexture = factory.CreateTexture(TextureDescription.Texture1D((uint)(mapSize * numMaps), 1, 1, PixelFormat.R32_G32_B32_A32_Float, TextureUsage.Sampled));
+                VeldridManager.GraphicsDevice.UpdateTexture(_colorMapTexture, colorMapData, 0, 0, 0, (uint)(mapSize * numMaps), 1, 1, 0, 0);
+            }
         }
 
         private void CreateMaterialTextures(ResourceFactory factory)
         {
-            _materialParamsTexture = factory.CreateTexture(TextureDescription.Texture1D(256, 1, 1, PixelFormat.R32_G32_Float, TextureUsage.Sampled));
-            _materialColorsTexture = factory.CreateTexture(TextureDescription.Texture1D(256, 1, 1, PixelFormat.R32_G32_B32_A32_Float, TextureUsage.Sampled));
+            if (VeldridManager.GraphicsDevice.BackendType == GraphicsBackend.Metal)
+            {
+                // Use 2D textures for Metal (1 pixel height)
+                _materialParamsTexture = factory.CreateTexture(TextureDescription.Texture2D(256, 1, 1, 1, PixelFormat.R32_G32_Float, TextureUsage.Sampled));
+                _materialColorsTexture = factory.CreateTexture(TextureDescription.Texture2D(256, 1, 1, 1, PixelFormat.R32_G32_B32_A32_Float, TextureUsage.Sampled));
+            }
+            else
+            {
+                // Use 1D textures for other backends
+                _materialParamsTexture = factory.CreateTexture(TextureDescription.Texture1D(256, 1, 1, PixelFormat.R32_G32_Float, TextureUsage.Sampled));
+                _materialColorsTexture = factory.CreateTexture(TextureDescription.Texture1D(256, 1, 1, PixelFormat.R32_G32_B32_A32_Float, TextureUsage.Sampled));
+            }
             UpdateMaterialTextures();
         }
 
