@@ -8,15 +8,12 @@ using System.Threading.Tasks;
 using GeoscientistToolkit.Data;
 using GeoscientistToolkit.Data.CtImageStack;
 using GeoscientistToolkit.Data.VolumeData;
-using GeoscientistToolkit.UI.Utils; // Added to use ImGuiExportFileDialog
+using GeoscientistToolkit.UI.Utils;
 using GeoscientistToolkit.Util;
 using ImGuiNET;
 
 namespace GeoscientistToolkit.UI
 {
-    /// <summary>
-    /// An enumeration of available test patterns for the debug volume.
-    /// </summary>
     internal enum TestPattern
     {
         Sphere,
@@ -26,9 +23,6 @@ namespace GeoscientistToolkit.UI
         Noise
     }
 
-    /// <summary>
-    /// A debug window for creating and inspecting 3D volume viewers with various test patterns.
-    /// </summary>
     internal class Volume3DDebugWindow
     {
         private bool _isOpen;
@@ -38,6 +32,7 @@ namespace GeoscientistToolkit.UI
 
         // UI State
         private TestPattern _selectedPattern = TestPattern.Sphere;
+        private bool _generateLabels = false;
         private readonly ImGuiExportFileDialog _logExportDialog;
 
         // Debug data
@@ -45,22 +40,44 @@ namespace GeoscientistToolkit.UI
         private StreamingCtVolumeDataset _debugDataset;
         private CtVolume3DViewer _debugViewer;
 
+        // Thread-safe handoff mechanism
+        private (CtVolume3DViewer viewer, CtImageStackDataset editable, StreamingCtVolumeDataset streaming) _newViewerData;
+        private readonly object _viewerLock = new object();
+        private volatile bool _isCreating = false;
+
         private const int _volumeSize = 128;
 
         public Volume3DDebugWindow()
         {
-            // Initialize the export dialog
             _logExportDialog = new ImGuiExportFileDialog("DebugLogExport", "Export Debug Log");
-            _logExportDialog.SetExtensions(
-                (".log", "Log File"),
-                (".txt", "Text File")
-            );
+            _logExportDialog.SetExtensions((".log", "Log File"), (".txt", "Text File"));
         }
 
         public void Submit()
         {
             if (!_isOpen)
                 return;
+
+            // Perform the thread-safe swap on the main UI thread
+            lock (_viewerLock)
+            {
+                if (_newViewerData.viewer != null)
+                {
+                    AddLog("Swapping to new debug viewer...");
+                    _debugViewer?.Dispose();
+                    _editableDataset?.Unload();
+                    _debugDataset?.Unload();
+
+                    _debugViewer = _newViewerData.viewer;
+                    _editableDataset = _newViewerData.editable;
+                    _debugDataset = _newViewerData.streaming;
+
+                    _isViewerOpen = true;
+                    _newViewerData = (null, null, null);
+                    _isCreating = false;
+                    AddLog("Swap complete.");
+                }
+            }
 
             ImGui.SetNextWindowSize(new Vector2(600, 400), ImGuiCond.FirstUseEver);
             if (ImGui.Begin("3D Volume Debugger", ref _isOpen))
@@ -77,17 +94,27 @@ namespace GeoscientistToolkit.UI
                 if (ImGui.RadioButton("Noise", _selectedPattern == TestPattern.Noise)) { _selectedPattern = TestPattern.Noise; }
 
                 ImGui.Separator();
+                ImGui.Checkbox("Generate Test Labels", ref _generateLabels);
+                ImGui.Separator();
 
-                if (ImGui.Button("Create Debug Viewer"))
+                if (_isCreating)
                 {
-                    _ = Task.Run(async () => {
-                        await CreateDebugViewer();
-                    });
+                    ImGui.BeginDisabled();
+                    ImGui.Button("Creating...");
+                    ImGui.EndDisabled();
+                }
+                else
+                {
+                    if (ImGui.Button("Create Debug Viewer"))
+                    {
+                        _isCreating = true;
+                        Task.Run(async () => {
+                            await CreateDebugViewer();
+                        });
+                    }
                 }
 
                 ImGui.SameLine();
-
-                // Button to open the export dialog
                 if (ImGui.Button("Export Log..."))
                 {
                     _logExportDialog.Open($"debug_log_{DateTime.Now:yyyyMMdd_HHmmss}");
@@ -107,7 +134,6 @@ namespace GeoscientistToolkit.UI
             }
             ImGui.End();
 
-            // Handle the dialog submission outside the main window Begin/End
             if (_logExportDialog.Submit())
             {
                 ExportLogToFile(_logExportDialog.SelectedPath);
@@ -134,6 +160,10 @@ namespace GeoscientistToolkit.UI
             {
                 _debugViewer.Dispose();
                 _debugViewer = null;
+                _editableDataset?.Unload();
+                _editableDataset = null;
+                _debugDataset?.Unload();
+                _debugDataset = null;
                 AddLog("Debug viewer closed and disposed.");
             }
         }
@@ -155,15 +185,11 @@ namespace GeoscientistToolkit.UI
         private void ExportLogToFile(string filePath)
         {
             if (string.IsNullOrWhiteSpace(filePath)) return;
-
             AddLog($"Exporting log to {filePath}...");
             try
             {
                 string[] logLines;
-                lock (_logs)
-                {
-                    logLines = _logs.ToArray();
-                }
+                lock (_logs) { logLines = _logs.ToArray(); }
                 File.WriteAllLines(filePath, logLines);
                 AddLog("Log export successful.");
             }
@@ -173,40 +199,70 @@ namespace GeoscientistToolkit.UI
             }
         }
 
-        /// <summary>
-        /// Generates a test volume based on the selected pattern.
-        /// </summary>
-        private void GenerateTestVolume(ChunkedVolume volume, TestPattern pattern)
+        private void GenerateTestVolume(ChunkedVolume volume, ChunkedLabelVolume labels, TestPattern pattern, bool generateLabels)
         {
             AddLog($"Generating '{pattern}' test volume data...");
+
+            if (generateLabels && labels != null)
+            {
+                AddLog("Clearing old label data...");
+                Parallel.For(0, labels.Depth, z =>
+                {
+                    for (int y = 0; y < labels.Height; y++)
+                    {
+                        for (int x = 0; x < labels.Width; x++)
+                        {
+                            labels[x, y, z] = 0;
+                        }
+                    }
+                });
+                AddLog("Finished clearing labels.");
+            }
 
             switch (pattern)
             {
                 case TestPattern.Sphere:
                     var center = new Vector3(_volumeSize / 2f);
                     var radius = _volumeSize / 3f;
-                    for (int z = 0; z < _volumeSize; z++)
+                    var innerRadius = _volumeSize / 6f;
+                    Parallel.For(0, _volumeSize, z =>
+                    {
                         for (int y = 0; y < _volumeSize; y++)
                             for (int x = 0; x < _volumeSize; x++)
                             {
                                 float dist = Vector3.Distance(new Vector3(x, y, z), center);
                                 byte value = (dist < radius) ? (byte)(255 * (1.0f - dist / radius)) : (byte)0;
                                 volume[x, y, z] = value;
+                                if (generateLabels)
+                                {
+                                    if (dist < innerRadius) labels[x, y, z] = 1;
+                                    else if (dist < radius) labels[x, y, z] = 2;
+                                }
                             }
+                    });
                     break;
 
                 case TestPattern.Cube:
                     int start = _volumeSize / 4;
                     int end = _volumeSize * 3 / 4;
+                    int innerStart = _volumeSize / 3;
+                    int innerEnd = _volumeSize * 2 / 3;
                     for (int z = 0; z < _volumeSize; z++)
                         for (int y = 0; y < _volumeSize; y++)
                             for (int x = 0; x < _volumeSize; x++)
                             {
                                 bool isInCube = (x > start && x < end && y > start && y < end && z > start && z < end);
                                 volume[x, y, z] = isInCube ? (byte)200 : (byte)0;
+
+                                if (generateLabels && isInCube)
+                                {
+                                    bool isInInnerCube = (x > innerStart && x < innerEnd && y > innerStart && y < innerEnd && z > innerStart && z < innerEnd);
+                                    labels[x, y, z] = isInInnerCube ? (byte)1 : (byte)2;
+                                }
                             }
                     break;
 
+                // --- FIX: Restored the logic for the missing patterns ---
                 case TestPattern.Checkerboard:
                     int boardSize = _volumeSize / 8;
                     for (int z = 0; z < _volumeSize; z++)
@@ -214,7 +270,12 @@ namespace GeoscientistToolkit.UI
                             for (int x = 0; x < _volumeSize; x++)
                             {
                                 int cell = (x / boardSize) + (y / boardSize) + (z / boardSize);
-                                volume[x, y, z] = (cell % 2 == 0) ? (byte)220 : (byte)80;
+                                bool isHigh = cell % 2 == 0;
+                                volume[x, y, z] = isHigh ? (byte)220 : (byte)80;
+                                if (generateLabels)
+                                {
+                                    labels[x, y, z] = isHigh ? (byte)1 : (byte)2;
+                                }
                             }
                     break;
 
@@ -224,6 +285,10 @@ namespace GeoscientistToolkit.UI
                             for (int x = 0; x < _volumeSize; x++)
                             {
                                 volume[x, y, z] = (byte)(255 * (x / (float)(_volumeSize - 1)));
+                                if (generateLabels && x > _volumeSize / 2)
+                                {
+                                    labels[x, y, z] = 1;
+                                }
                             }
                     break;
 
@@ -235,7 +300,12 @@ namespace GeoscientistToolkit.UI
                         for (int y = 0; y < _volumeSize; y++)
                             for (int x = 0; x < _volumeSize; x++)
                             {
-                                volume[x, y, z] = noiseData[i++];
+                                byte val = noiseData[i++];
+                                volume[x, y, z] = val;
+                                if (generateLabels && val > 128)
+                                {
+                                    labels[x, y, z] = (byte)(val > 192 ? 1 : 2);
+                                }
                             }
                     break;
             }
@@ -244,29 +314,20 @@ namespace GeoscientistToolkit.UI
 
         private async Task CreateDebugViewer()
         {
+            CtVolume3DViewer newViewer = null;
+            CtImageStackDataset newEditableDataset = null;
+            StreamingCtVolumeDataset newStreamingDataset = null;
+
             try
             {
-                _debugViewer?.Dispose();
-                _debugViewer = null;
-
-                AddLog("Creating debug viewer...");
-
+                AddLog("BG Task: Creating debug resources...");
                 var dummyVolume = new ChunkedVolume(_volumeSize, _volumeSize, _volumeSize, ChunkedVolume.DEFAULT_CHUNK_DIM);
-                GenerateTestVolume(dummyVolume, _selectedPattern);
 
                 string tempDir = Path.Combine(Path.GetTempPath(), "GeoscientistDebug");
                 Directory.CreateDirectory(tempDir);
                 string datasetName = "DebugDataset";
-                string gvtPath = Path.Combine(tempDir, $"{datasetName}.gvt");
 
-                AddLog($"Converting volume to GVT file at: {gvtPath}");
-                await CtStackConverter.ConvertToStreamableFormat(dummyVolume, gvtPath,
-                    (progress, message) => AddLog($"Conversion: {progress * 100:F1}% - {message}"));
-                AddLog("GVT file created successfully.");
-
-                dummyVolume.Dispose(); // Free up memory from the in-memory volume
-
-                _editableDataset = new CtImageStackDataset(datasetName, tempDir)
+                newEditableDataset = new CtImageStackDataset(datasetName, tempDir)
                 {
                     Width = _volumeSize,
                     Height = _volumeSize,
@@ -274,21 +335,45 @@ namespace GeoscientistToolkit.UI
                     LabelData = new ChunkedLabelVolume(_volumeSize, _volumeSize, _volumeSize, ChunkedVolume.DEFAULT_CHUNK_DIM, false)
                 };
 
-                _debugDataset = new StreamingCtVolumeDataset("DebugStreamingVolume", gvtPath)
+                if (_generateLabels)
                 {
-                    EditablePartner = _editableDataset
+                    AddLog("BG Task: Adding test materials...");
+                    newEditableDataset.Materials.Add(new Material(1, "Material 1 (Red)", new Vector4(1, 0.2f, 0.2f, 1)));
+                    newEditableDataset.Materials.Add(new Material(2, "Material 2 (Green)", new Vector4(0.2f, 1, 0.2f, 1)));
+                }
+
+                GenerateTestVolume(dummyVolume, newEditableDataset.LabelData, _selectedPattern, _generateLabels);
+
+                string gvtPath = Path.Combine(tempDir, $"{datasetName}.gvt");
+                AddLog($"BG Task: Converting volume to GVT file at: {gvtPath}");
+                await CtStackConverter.ConvertToStreamableFormat(dummyVolume, gvtPath, (p, m) => { /* quiet log */ });
+                AddLog("BG Task: GVT file created.");
+
+                dummyVolume.Dispose();
+
+                newStreamingDataset = new StreamingCtVolumeDataset("DebugStreamingVolume", gvtPath)
+                {
+                    EditablePartner = newEditableDataset
                 };
 
-                AddLog("Creating viewer with standard implementation...");
-                _debugViewer = new CtVolume3DViewer(_debugDataset);
-                _isViewerOpen = true;
+                AddLog("BG Task: Creating viewer instance...");
+                newViewer = new CtVolume3DViewer(newStreamingDataset);
 
-                AddLog("Debug viewer created successfully");
+                lock (_viewerLock)
+                {
+                    _newViewerData = (newViewer, newEditableDataset, newStreamingDataset);
+                }
+
+                AddLog("BG Task: Handoff complete. Task finished.");
             }
             catch (Exception ex)
             {
-                AddLog($"ERROR: Failed to create debug viewer: {ex.Message}");
+                AddLog($"ERROR in background task: {ex.Message}");
                 AddLog($"Stack trace: {ex.StackTrace}");
+                newViewer?.Dispose();
+                newEditableDataset?.Unload();
+                newStreamingDataset?.Unload();
+                _isCreating = false;
             }
         }
     }
