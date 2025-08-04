@@ -36,41 +36,113 @@ namespace GeoscientistToolkit
                 Environment.SetEnvironmentVariable("SDL_WINDOWS_DPI_AWARENESS", "permonitorv2");
             }
             catch { /* Ignore */ }
-            
+
             var windowCI = new WindowCreateInfo
             {
-                X = 50, Y = 50,
-                WindowWidth = 1280, WindowHeight = 720,
+                X = 50,
+                Y = 50,
+                WindowWidth = 1280,
+                WindowHeight = 720,
                 WindowTitle = "GeoscientistToolkit"
             };
-            
-            // Basic graphics options for initial creation
-            var basicGraphicsOptions = new GraphicsDeviceOptions(
-                debug: true,
-                swapchainDepthFormat: null,
-                syncToVerticalBlank: true,
-                resourceBindingModel: ResourceBindingModel.Improved,
-                preferStandardClipSpaceYDirection: true,
-                preferDepthRangeZeroToOne: true);
-            
+
+            // Use safer graphics options for initial creation on Windows
+            GraphicsDeviceOptions basicGraphicsOptions;
+            if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+            {
+                // Use more conservative options for Windows to avoid E_INVALIDARG
+                basicGraphicsOptions = new GraphicsDeviceOptions(
+                    debug: false, // Disable debug mode initially
+                    swapchainDepthFormat: PixelFormat.D24_UNorm_S8_UInt, // Specify a common depth format
+                    syncToVerticalBlank: true,
+                    resourceBindingModel: ResourceBindingModel.Default, // Use Default instead of Improved
+                    preferStandardClipSpaceYDirection: false, // Don't force clip space changes
+                    preferDepthRangeZeroToOne: false); // Use platform defaults
+            }
+            else
+            {
+                basicGraphicsOptions = new GraphicsDeviceOptions(
+                    debug: true,
+                    swapchainDepthFormat: null,
+                    syncToVerticalBlank: true,
+                    resourceBindingModel: ResourceBindingModel.Improved,
+                    preferStandardClipSpaceYDirection: true,
+                    preferDepthRangeZeroToOne: true);
+            }
+
             try
             {
-                // Create window and graphics device with default backend
-                VeldridStartup.CreateWindowAndGraphicsDevice(
-                    windowCI,
-                    basicGraphicsOptions,
-                    GetPlatformDefaultBackend(),
-                    out _window,
-                    out _graphicsDevice);
-                
+                // Try to create with platform default backend first
+                GraphicsBackend backend = GetPlatformDefaultBackend();
+
+                // On Windows, try multiple backends if D3D11 fails
+                if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+                {
+                    try
+                    {
+                        VeldridStartup.CreateWindowAndGraphicsDevice(
+                            windowCI,
+                            basicGraphicsOptions,
+                            backend,
+                            out _window,
+                            out _graphicsDevice);
+                    }
+                    catch (Exception d3dEx)
+                    {
+                        Logger.LogError($"Failed to create D3D11 device: {d3dEx.Message}. Trying Vulkan...");
+
+                        // Try Vulkan as fallback
+                        try
+                        {
+                            backend = GraphicsBackend.Vulkan;
+                            VeldridStartup.CreateWindowAndGraphicsDevice(
+                                windowCI,
+                                basicGraphicsOptions,
+                                backend,
+                                out _window,
+                                out _graphicsDevice);
+                        }
+                        catch (Exception vkEx)
+                        {
+                            Logger.LogError($"Failed to create Vulkan device: {vkEx.Message}. Trying OpenGL...");
+
+                            // Last resort: OpenGL
+                            backend = GraphicsBackend.OpenGL;
+                            basicGraphicsOptions = new GraphicsDeviceOptions(
+                                debug: false,
+                                swapchainDepthFormat: PixelFormat.D24_UNorm_S8_UInt,
+                                syncToVerticalBlank: true,
+                                resourceBindingModel: ResourceBindingModel.Default,
+                                preferStandardClipSpaceYDirection: false,
+                                preferDepthRangeZeroToOne: false);
+
+                            VeldridStartup.CreateWindowAndGraphicsDevice(
+                                windowCI,
+                                basicGraphicsOptions,
+                                backend,
+                                out _window,
+                                out _graphicsDevice);
+                        }
+                    }
+                }
+                else
+                {
+                    VeldridStartup.CreateWindowAndGraphicsDevice(
+                        windowCI,
+                        basicGraphicsOptions,
+                        backend,
+                        out _window,
+                        out _graphicsDevice);
+                }
+
                 _commandList = _graphicsDevice.ResourceFactory.CreateCommandList();
-                
+
                 // Create minimal ImGui controller for loading screen
                 _imGuiController = new ImGuiController(
                     _graphicsDevice,
                     _graphicsDevice.MainSwapchain.Framebuffer.OutputDescription,
                     _window.Width, _window.Height);
-                
+
                 // Create and show loading screen
                 _loadingScreen = new LoadingScreen(_graphicsDevice, _commandList, _imGuiController, _window);
                 _loadingScreen.UpdateStatus("Starting GeoscientistToolkit...", 0.0f);
@@ -80,13 +152,18 @@ namespace GeoscientistToolkit
                 // If we can't even create a basic window, show error and exit
                 Logger.LogError($"Failed to create window: {ex.Message}");
                 CrossPlatformMessageBox.Show(
-                    $"Failed to create application window.\n\nError: {ex.Message}",
+                    $"Failed to create application window.\n\nError: {ex.Message}\n\n" +
+                    "Possible solutions:\n" +
+                    "1. Update your graphics drivers\n" +
+                    "2. Install Visual C++ Redistributables\n" +
+                    "3. Try running in compatibility mode\n" +
+                    "4. Ensure DirectX is up to date",
                     "Startup Error",
                     MessageBoxType.Error);
                 Environment.Exit(1);
                 return;
             }
-            
+
             // Now continue with normal initialization
             _loadingScreen.UpdateStatus("Loading settings...", 0.1f);
             SettingsManager.Instance.LoadSettings();
@@ -94,17 +171,16 @@ namespace GeoscientistToolkit
 
             _loadingScreen.UpdateStatus("Initializing logger...", 0.15f);
             Logger.Initialize(appSettings.Logging);
-            
+
             // Check if we should use failsafe mode
             _loadingScreen.UpdateStatus("Checking graphics configuration...", 0.2f);
             string failsafeReason;
             if (GraphicsFailsafe.ShouldUseFailsafe(out failsafeReason))
             {
                 Logger.LogWarning($"Starting in graphics failsafe mode: {failsafeReason}");
-                
-                // Corrected line: Pass the Hardware property to the method and assign the result back to it.
+
                 appSettings.Hardware = GraphicsFailsafe.GetSafeSettings(appSettings.Hardware);
-                
+
                 // Show user a warning about failsafe mode
                 CrossPlatformMessageBox.Show(
                     failsafeReason + "\n\nThe application will start with safe graphics settings. " +
@@ -112,10 +188,10 @@ namespace GeoscientistToolkit
                     "Graphics Failsafe Mode",
                     MessageBoxType.Warning);
             }
-            
+
             _loadingScreen.UpdateStatus("Initializing performance manager...", 0.25f);
             GlobalPerformanceManager.Instance.Initialize(appSettings);
-            
+
             // Check if we need to recreate graphics device with user preferences
             var hardwareSettings = appSettings.Hardware;
             GraphicsBackend preferredBackend;
@@ -125,31 +201,47 @@ namespace GeoscientistToolkit
             }
             else
             {
-                preferredBackend = GetPlatformDefaultBackend();
+                preferredBackend = _graphicsDevice.BackendType; // Keep current working backend
             }
-            
-            // If user has specific graphics preferences, recreate the device
-            if (hardwareSettings.PreferredGraphicsBackend != "Auto" || hardwareSettings.VisualizationGPU != "Auto")
+
+            // Only recreate if user has specific preferences different from current
+            if ((hardwareSettings.PreferredGraphicsBackend != "Auto" && preferredBackend != _graphicsDevice.BackendType) ||
+                hardwareSettings.VisualizationGPU != "Auto")
             {
                 _loadingScreen.UpdateStatus("Configuring graphics device...", 0.3f);
-                
-                var graphicsDeviceOptions = new GraphicsDeviceOptions(
-                    debug: true,
-                    swapchainDepthFormat: null,
-                    syncToVerticalBlank: hardwareSettings.EnableVSync,
-                    resourceBindingModel: ResourceBindingModel.Improved,
-                    preferStandardClipSpaceYDirection: true,
-                    preferDepthRangeZeroToOne: true);
-                
+
+                // Create options based on what's currently working
+                GraphicsDeviceOptions graphicsDeviceOptions;
+                if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows) && preferredBackend == GraphicsBackend.Direct3D11)
+                {
+                    graphicsDeviceOptions = new GraphicsDeviceOptions(
+                        debug: false,
+                        swapchainDepthFormat: PixelFormat.D24_UNorm_S8_UInt,
+                        syncToVerticalBlank: hardwareSettings.EnableVSync,
+                        resourceBindingModel: ResourceBindingModel.Default,
+                        preferStandardClipSpaceYDirection: false,
+                        preferDepthRangeZeroToOne: false);
+                }
+                else
+                {
+                    graphicsDeviceOptions = new GraphicsDeviceOptions(
+                        debug: true,
+                        swapchainDepthFormat: null,
+                        syncToVerticalBlank: hardwareSettings.EnableVSync,
+                        resourceBindingModel: ResourceBindingModel.Improved,
+                        preferStandardClipSpaceYDirection: true,
+                        preferDepthRangeZeroToOne: true);
+                }
+
                 try
                 {
                     // Dispose current resources
                     _imGuiController.Dispose();
                     _commandList.Dispose();
                     _graphicsDevice.Dispose();
-                    
+
                     Logger.Log($"Attempting to initialize graphics with backend: {preferredBackend}");
-                    
+
                     // Recreate with preferred settings
                     VeldridStartup.CreateWindowAndGraphicsDevice(
                         windowCI,
@@ -157,35 +249,35 @@ namespace GeoscientistToolkit
                         preferredBackend,
                         out _window,
                         out _graphicsDevice);
-                    
+
                     Logger.Log($"Veldrid initialized successfully on device: {_graphicsDevice.DeviceName}");
-                    if (hardwareSettings.VisualizationGPU != "Auto" && 
+                    if (hardwareSettings.VisualizationGPU != "Auto" &&
                         !_graphicsDevice.DeviceName.Contains(hardwareSettings.VisualizationGPU, StringComparison.OrdinalIgnoreCase))
                     {
                         Logger.LogWarning($"User preferred GPU '{hardwareSettings.VisualizationGPU}' but Veldrid selected '{_graphicsDevice.DeviceName}'. This may depend on the selected backend.");
                     }
-                    
+
                     _commandList = _graphicsDevice.ResourceFactory.CreateCommandList();
                     _imGuiController = new ImGuiController(
                         _graphicsDevice,
                         _graphicsDevice.MainSwapchain.Framebuffer.OutputDescription,
                         _window.Width, _window.Height);
-                    
+
                     // Recreate loading screen with new controller
                     _loadingScreen = new LoadingScreen(_graphicsDevice, _commandList, _imGuiController, _window);
-                    
+
                     GraphicsFailsafe.RecordSuccess(hardwareSettings);
                 }
                 catch (Exception ex)
                 {
                     Logger.LogError($"Failed to initialize graphics with backend {preferredBackend}: {ex.Message}");
                     GraphicsFailsafe.RecordFailure(preferredBackend.ToString(), hardwareSettings.VisualizationGPU);
-                    
+
                     // Keep using the basic device we already have
                     Logger.Log("Continuing with default graphics configuration");
                 }
             }
-            
+
             _loadingScreen.UpdateStatus("Setting up Veldrid manager...", 0.4f);
             VeldridManager.GraphicsDevice = _graphicsDevice;
             VeldridManager.ImGuiController = _imGuiController;
@@ -193,14 +285,14 @@ namespace GeoscientistToolkit
 
             _loadingScreen.UpdateStatus("Loading add-ins...", 0.5f);
             AddInManager.Instance.Initialize();
-            
+
             _loadingScreen.UpdateStatus("Initializing UI...", 0.6f);
             SettingsManager.Instance.SettingsChanged += OnSettingsChanged;
             _mainWindow = new MainWindow();
 
             var io = ImGui.GetIO();
             io.ConfigFlags |= ImGuiConfigFlags.ViewportsEnable | ImGuiConfigFlags.DockingEnable;
-            
+
             _loadingScreen.UpdateStatus("Applying theme...", 0.7f);
             ThemeManager.ApplyTheme(appSettings.Appearance);
             io.FontGlobalScale = appSettings.Appearance.UIScale;
@@ -210,9 +302,9 @@ namespace GeoscientistToolkit
                 _graphicsDevice.MainSwapchain.Resize((uint)_window.Width, (uint)_window.Height);
                 _imGuiController.WindowResized(_window.Width, _window.Height);
             };
-            
+
             _window.Moved += (Point newPosition) => { _windowMoved = true; };
-            
+
             _loadingScreen.UpdateStatus("Loading project...", 0.8f);
             string projectToLoad = Program.StartingProjectPath;
             if (string.IsNullOrEmpty(projectToLoad))
@@ -235,12 +327,12 @@ namespace GeoscientistToolkit
                     Logger.LogError($"Failed to auto-load project: {ex.Message}");
                 }
             }
-            
+
             _loadingScreen.UpdateStatus("Starting application...", 1.0f);
-            
+
             // Give a moment to see the completed loading screen
             Thread.Sleep(200);
-            
+
             // Main application loop
             var clearColor = new Vector4(0.1f, 0.1f, 0.12f, 1.0f);
             var stopwatch = Stopwatch.StartNew();
@@ -256,7 +348,7 @@ namespace GeoscientistToolkit
                         Thread.Sleep((int)(targetFrameTime - frameTime));
                     }
                 }
-                
+
                 frameTime = stopwatch.ElapsedMilliseconds;
                 stopwatch.Restart();
                 float deltaTime = frameTime / 1000f;
@@ -286,10 +378,10 @@ namespace GeoscientistToolkit
                 {
                     ImGui.UpdatePlatformWindows();
                 }
-                
+
                 BasePanel.ProcessAllPopOutWindows();
             }
-            
+
             // Cleanup
             if (appSettings.Backup.BackupOnProjectClose && !string.IsNullOrEmpty(ProjectManager.Instance.ProjectPath))
             {
@@ -328,10 +420,10 @@ namespace GeoscientistToolkit
             {
                 _graphicsDevice.SyncToVerticalBlank = settings.Hardware.EnableVSync;
             }
-            
+
             ThemeManager.ApplyTheme(settings.Appearance);
             ImGui.GetIO().FontGlobalScale = settings.Appearance.UIScale;
-            
+
             Logger.Log("Runtime settings applied");
         }
     }

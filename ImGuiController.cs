@@ -1,4 +1,4 @@
-// GeoscientistToolkit/ImGuiController.cs (Fixed SPIR-V Cross-Compilation)
+// GeoscientistToolkit/ImGuiController.cs (Fixed SPIR-V Cross-Compilation and Windows Compatibility)
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -14,22 +14,22 @@ namespace GeoscientistToolkit
 {
     public sealed class ImGuiController : IDisposable
     {
-        private GraphicsDevice  _gd;
-        private bool            _frameBegun;
-        private IntPtr          _context;
+        private GraphicsDevice _gd;
+        private bool _frameBegun;
+        private IntPtr _context;
 
         private DeviceBuffer _vb, _ib, _ub;
-        private Texture      _fontTex;
-        private ResourceSet  _set;
+        private Texture _fontTex;
+        private ResourceSet _set;
 
-        private Shader        _vs, _fs;
+        private Shader _vs, _fs;
         private ResourceLayout _layout;
-        private Pipeline       _pipe;
+        private Pipeline _pipe;
 
         private readonly IntPtr _fontID = (IntPtr)1;
-        private int  _winW, _winH;
+        private int _winW, _winH;
         private Vector2 _scale = Vector2.One;
-        
+
         private readonly Dictionary<TextureView, ResourceSet> _setsByView = new();
         private readonly Dictionary<Texture, TextureView> _autoViewsByTexture = new();
         private readonly Dictionary<IntPtr, ResourceSet> _setsById = new();
@@ -42,17 +42,17 @@ namespace GeoscientistToolkit
                                OutputDescription fbDesc,
                                int width, int height)
         {
-            _gd   = gd;
+            _gd = gd;
             _winW = width;
             _winH = height;
 
             _context = ImGui.CreateContext();
             ImGui.SetCurrentContext(_context);
-            
+
             var io = ImGui.GetIO();
             io.Fonts.AddFontDefault();
             io.BackendFlags |= ImGuiBackendFlags.RendererHasVtxOffset;
-            io.ConfigFlags  |= ImGuiConfigFlags.DockingEnable | ImGuiConfigFlags.NavEnableKeyboard;
+            io.ConfigFlags |= ImGuiConfigFlags.DockingEnable | ImGuiConfigFlags.NavEnableKeyboard;
 
             CreateDeviceResources(gd, fbDesc);
             SetPerFrameImGuiData(1f / 60f);
@@ -70,22 +70,42 @@ namespace GeoscientistToolkit
             _vb = factory.CreateBuffer(new BufferDescription(10_000,
                                   BufferUsage.VertexBuffer | BufferUsage.Dynamic));
             _ib = factory.CreateBuffer(new BufferDescription(2_000,
-                                  BufferUsage.IndexBuffer  | BufferUsage.Dynamic));
+                                  BufferUsage.IndexBuffer | BufferUsage.Dynamic));
             _ub = factory.CreateBuffer(new BufferDescription(64,
                                   BufferUsage.UniformBuffer | BufferUsage.Dynamic));
 
-            // Create shaders using SPIR-V cross-compilation
-            CreateShadersWithSpirvCrossCompilation(factory);
+            // Create shaders - try SPIR-V first, fall back to backend-specific if needed
+            bool shadersCreated = false;
+
+            // Only try SPIR-V cross-compilation if not on Windows D3D11 
+            // (it has known issues with SPIR-V tools on some systems)
+            if (!(RuntimeInformation.IsOSPlatform(OSPlatform.Windows) && gd.BackendType == GraphicsBackend.Direct3D11))
+            {
+                try
+                {
+                    CreateShadersWithSpirvCrossCompilation(factory);
+                    shadersCreated = true;
+                }
+                catch (Exception ex)
+                {
+                    Util.Logger.LogWarning($"SPIR-V cross-compilation failed: {ex.Message}. Will use backend-specific shaders.");
+                }
+            }
+
+            if (!shadersCreated)
+            {
+                CreateBackendSpecificShaders(factory);
+            }
 
             var vLayout = new VertexLayoutDescription(
-                new VertexElementDescription("in_position", VertexElementSemantic.Position,          VertexElementFormat.Float2),
+                new VertexElementDescription("in_position", VertexElementSemantic.Position, VertexElementFormat.Float2),
                 new VertexElementDescription("in_texCoord", VertexElementSemantic.TextureCoordinate, VertexElementFormat.Float2),
-                new VertexElementDescription("in_color",    VertexElementSemantic.Color,             VertexElementFormat.Byte4_Norm));
+                new VertexElementDescription("in_color", VertexElementSemantic.Color, VertexElementFormat.Byte4_Norm));
 
             _layout = factory.CreateResourceLayout(new ResourceLayoutDescription(
-                new ResourceLayoutElementDescription("Projection",  ResourceKind.UniformBuffer,   ShaderStages.Vertex),
+                new ResourceLayoutElementDescription("Projection", ResourceKind.UniformBuffer, ShaderStages.Vertex),
                 new ResourceLayoutElementDescription("MainTexture", ResourceKind.TextureReadOnly, ShaderStages.Fragment),
-                new ResourceLayoutElementDescription("MainSampler", ResourceKind.Sampler,         ShaderStages.Fragment)));
+                new ResourceLayoutElementDescription("MainSampler", ResourceKind.Sampler, ShaderStages.Fragment)));
 
             var blendState = BlendStateDescription.SingleAlphaBlend;
             var depthState = DepthStencilStateDescription.Disabled;
@@ -102,14 +122,14 @@ namespace GeoscientistToolkit
                 new ShaderSetDescription(new[] { vLayout }, new[] { _vs, _fs }),
                 new[] { _layout },
                 fbDesc,
-                ResourceBindingModel.Improved));
+                gd.BackendType == GraphicsBackend.Direct3D11 ? ResourceBindingModel.Default : ResourceBindingModel.Improved));
 
             RecreateFontTexture(gd);      // creates _fontTex *and* _set
         }
 
         private void CreateShadersWithSpirvCrossCompilation(ResourceFactory factory)
         {
-            // Fixed GLSL shaders with proper coordinate handling
+            // GLSL shaders - simplified for better compatibility
             string vertexShaderGlsl = @"
 #version 450
 layout(location = 0) in vec2 in_position;
@@ -146,65 +166,54 @@ void main()
     out_Color = frag_color * texture(sampler2D(MainTexture, MainSampler), frag_texCoord);
 }";
 
-            try
-            {
-                // Use SPIR-V cross compilation extension methods
-                var vertexShaderDesc = new ShaderDescription(
-                    ShaderStages.Vertex,
-                    Encoding.UTF8.GetBytes(vertexShaderGlsl),
-                    "main");
-                    
-                var fragmentShaderDesc = new ShaderDescription(
-                    ShaderStages.Fragment,
-                    Encoding.UTF8.GetBytes(fragmentShaderGlsl),
-                    "main");
+            // Use SPIR-V cross compilation extension methods
+            var vertexShaderDesc = new ShaderDescription(
+                ShaderStages.Vertex,
+                Encoding.UTF8.GetBytes(vertexShaderGlsl),
+                "main");
 
-                var options = new CrossCompileOptions();
-                
-                // Configure options based on backend - FIXED coordinate handling
-                if (_gd.BackendType == GraphicsBackend.Metal)
-                {
-                    options.FixClipSpaceZ = true;
-                    options.InvertVertexOutputY = false; // Changed to false to fix inversion
-                }
-                else if (_gd.BackendType == GraphicsBackend.Direct3D11)
-                {
-                    // D3D has different clip space conventions
-                    options.FixClipSpaceZ = true;
-                    options.InvertVertexOutputY = false;
-                }
-                
-                // Use the CreateFromSpirv extension method on ResourceFactory
-                var shaders = factory.CreateFromSpirv(vertexShaderDesc, fragmentShaderDesc, options);
-                _vs = shaders[0];
-                _fs = shaders[1];
-                
-                Util.Logger.Log($"Successfully created shaders using SPIR-V cross-compilation for {_gd.BackendType}");
-            }
-            catch (Exception ex)
+            var fragmentShaderDesc = new ShaderDescription(
+                ShaderStages.Fragment,
+                Encoding.UTF8.GetBytes(fragmentShaderGlsl),
+                "main");
+
+            var options = new CrossCompileOptions();
+
+            // Configure options based on backend
+            if (_gd.BackendType == GraphicsBackend.Metal)
             {
-                // Fallback to backend-specific shaders if SPIR-V cross compilation fails
-                Util.Logger.LogError($"SPIR-V cross-compilation failed: {ex.Message}. Falling back to backend-specific shaders.");
-                CreateBackendSpecificShaders(factory);
+                options.FixClipSpaceZ = true;
+                options.InvertVertexOutputY = false;
             }
+            else if (_gd.BackendType == GraphicsBackend.Direct3D11)
+            {
+                options.FixClipSpaceZ = true;
+                options.InvertVertexOutputY = false;
+            }
+
+            // Use the CreateFromSpirv extension method on ResourceFactory
+            var shaders = factory.CreateFromSpirv(vertexShaderDesc, fragmentShaderDesc, options);
+            _vs = shaders[0];
+            _fs = shaders[1];
+
+            Util.Logger.Log($"Successfully created shaders using SPIR-V cross-compilation for {_gd.BackendType}");
         }
 
         private void CreateBackendSpecificShaders(ResourceFactory factory)
         {
-            // Fallback method with backend-specific shaders
-            (string vsSrc, string fsSrc) = GetBackendSpecificShaders(_gd.BackendType);
-            
-            // Metal shaders use "main0" as entry point, others use "main"
-            string entryPoint = _gd.BackendType == GraphicsBackend.Metal ? "main0" : "main";
-            
+            // Get backend-specific shaders based on the graphics backend
+            (string vsSrc, string fsSrc, string vsEntry, string fsEntry) = GetBackendSpecificShaders(_gd.BackendType);
+
             _vs = factory.CreateShader(new ShaderDescription(
                 ShaderStages.Vertex,
-                Encoding.UTF8.GetBytes(vsSrc), 
-                entryPoint));
+                Encoding.UTF8.GetBytes(vsSrc),
+                vsEntry));
             _fs = factory.CreateShader(new ShaderDescription(
                 ShaderStages.Fragment,
-                Encoding.UTF8.GetBytes(fsSrc), 
-                entryPoint));
+                Encoding.UTF8.GetBytes(fsSrc),
+                fsEntry));
+
+            Util.Logger.Log($"Created backend-specific shaders for {_gd.BackendType}");
         }
 
         // ------------------------------------------------------------------
@@ -213,11 +222,8 @@ void main()
             // store the new size so SetPerFrameImGuiData() will publish it
             _winW = width;
             _winH = height;
-
-            // If you handle Hi-DPI later you can also update _scale here,
-            // but for now the pixel size change alone is enough.
         }
-        
+
         private void RecreateFontTexture(GraphicsDevice gd)
         {
             ImGui.SetCurrentContext(_context);
@@ -241,7 +247,7 @@ void main()
 
             io.Fonts.ClearTexData();
         }
-        
+
         /// <summary>
         /// Gets or creates a handle for a texture to be displayed with ImGui.
         /// Pass the returned handle to Image() or ImageButton().
@@ -259,7 +265,7 @@ void main()
             // Find the existing ID
             return _setsById.First(kvp => kvp.Value == resourceSet).Key;
         }
-        
+
         /// <summary>
         /// Retrieves the shader texture binding for the given helper handle.
         /// </summary>
@@ -267,7 +273,7 @@ void main()
         {
             return _setsById[imGuiBinding];
         }
-        
+
         /// <summary>
         /// Removes a particular texture binding.
         /// </summary>
@@ -280,12 +286,12 @@ void main()
                 resourceSet.Dispose();
             }
         }
-        
+
         // ------------------------------------------------------------------
         public void Update(float dt, InputSnapshot snap)
         {
             ImGui.SetCurrentContext(_context);
-            
+
             SetPerFrameImGuiData(dt);
             UpdateInputs(snap);
 
@@ -297,9 +303,9 @@ void main()
         public void Render(GraphicsDevice gd, CommandList cl)
         {
             ImGui.SetCurrentContext(_context);
-            
+
             if (!_frameBegun) return;
-            
+
             ImGui.Render();
             DrawImGui(ImGui.GetDrawData(), gd, cl);
             _frameBegun = false;
@@ -340,7 +346,7 @@ void main()
             for (int n = 0; n < dd.CmdListsCount; ++n)
             {
                 ImDrawListPtr clist = dd.CmdLists[n];
-                
+
                 // Copy vertex data
                 cl.UpdateBuffer(
                     _vb,
@@ -365,35 +371,16 @@ void main()
             cl.SetIndexBuffer(_ib, IndexFormat.UInt16);
             cl.SetPipeline(_pipe);
 
-            // Update the projection matrix uniform - FIXED for correct coordinate system
+            // Update the projection matrix uniform
             var io = ImGui.GetIO();
-            Matrix4x4 mvp;
-            
-            // Adjust projection based on backend
-            if (_gd.BackendType == GraphicsBackend.Direct3D11 )
-            {
-                // D3D uses top-left origin with Y pointing down
-                mvp = Matrix4x4.CreateOrthographicOffCenter(
-                    0f,
-                    io.DisplaySize.X,
-                    io.DisplaySize.Y,
-                    0f,
-                    -1.0f,
-                    1.0f);
-            }
-            else
-            {
-                // OpenGL/Vulkan/Metal use bottom-left origin with Y pointing up by default
-                // But ImGui expects top-left origin, so we still use the same projection
-                mvp = Matrix4x4.CreateOrthographicOffCenter(
-                    0f,
-                    io.DisplaySize.X,
-                    io.DisplaySize.Y,
-                    0f,
-                    -1.0f,
-                    1.0f);
-            }
-            
+            Matrix4x4 mvp = Matrix4x4.CreateOrthographicOffCenter(
+                0f,
+                io.DisplaySize.X,
+                io.DisplaySize.Y,
+                0f,
+                -1.0f,
+                1.0f);
+
             gd.UpdateBuffer(_ub, 0, ref mvp);
 
             // Scale clip rectangles for HiDPI displays.
@@ -409,7 +396,7 @@ void main()
                 for (int cmd_i = 0; cmd_i < clist.CmdBuffer.Size; ++cmd_i)
                 {
                     ImDrawCmdPtr pcmd = clist.CmdBuffer[cmd_i];
-                    
+
                     // Skip user-defined callbacks.
                     if (pcmd.UserCallback != IntPtr.Zero)
                     {
@@ -423,9 +410,8 @@ void main()
                     }
                     else
                     {
-                        // This can happen if a texture is destroyed but ImGui still tries to render it.
-                        // In our case, we always set the font texture, so this should be safe.
-                        cl.SetGraphicsResourceSet(0, _set); // Fallback to font texture.
+                        // Fallback to font texture if texture not found
+                        cl.SetGraphicsResourceSet(0, _set);
                     }
 
                     // Set the scissor rectangle to clip rendering.
@@ -454,7 +440,7 @@ void main()
         private void SetPerFrameImGuiData(float dt)
         {
             var io = ImGui.GetIO();
-            io.DisplaySize            = new Vector2(_winW / _scale.X, _winH / _scale.Y);
+            io.DisplaySize = new Vector2(_winW / _scale.X, _winH / _scale.Y);
             io.DisplayFramebufferScale = _scale;
             io.DeltaTime = dt;
         }
@@ -465,11 +451,11 @@ void main()
             io.MouseDown[0] = s.IsMouseDown(MouseButton.Left);
             io.MouseDown[1] = s.IsMouseDown(MouseButton.Right);
             io.MouseDown[2] = s.IsMouseDown(MouseButton.Middle);
-            io.MouseWheel   = s.WheelDelta;
-            io.MousePos     = s.MousePosition;
+            io.MouseWheel = s.WheelDelta;
+            io.MousePos = s.MousePosition;
 
             foreach (char c in s.KeyCharPresses) io.AddInputCharacter(c);
-            foreach (var e in s.KeyEvents) 
+            foreach (var e in s.KeyEvents)
             {
                 if (e.Key == Key.ControlLeft || e.Key == Key.ControlRight)
                     io.AddKeyEvent(ImGuiKey.ModCtrl, e.Down);
@@ -513,53 +499,81 @@ void main()
         }
 
         // ------------------------------------------------------------------
-        // Fallback shaders for when SPIR-V cross-compilation fails
-        private (string, string) GetBackendSpecificShaders(GraphicsBackend backend)
+        // Backend-specific shaders with proper entry points
+        private (string vs, string fs, string vsEntry, string fsEntry) GetBackendSpecificShaders(GraphicsBackend backend)
         {
             switch (backend)
             {
                 case GraphicsBackend.Direct3D11:
-                    return (VsHlsl, FsHlsl);
+                    return (VsHlsl, FsHlsl, "VS", "PS");
                 case GraphicsBackend.Metal:
-                    return (VsMetalFixed, FsMetalFixed);
+                    return (VsMetalFixed, FsMetalFixed, "main0", "main0");
                 case GraphicsBackend.Vulkan:
-                    return (VsGlsl, FsGlsl);
+                    return (VsSpirv450, FsSpirv450, "main", "main");
                 case GraphicsBackend.OpenGL:
                 case GraphicsBackend.OpenGLES:
                 default:
-                    return (VsGlsl, FsGlsl);
+                    // For OpenGL, use GLSL 330 which is more compatible
+                    return (VsGlsl330, FsGlsl330, "main", "main");
             }
         }
 
-        private const string VsGlsl = @"#version 450
+        // GLSL 330 for better OpenGL compatibility
+        private const string VsGlsl330 = @"#version 330 core
 layout(location=0) in vec2 in_position;
 layout(location=1) in vec2 in_texCoord;
 layout(location=2) in vec4 in_color;
-layout(set=0,binding=0) uniform Projection { mat4 M; };
+uniform mat4 Projection;
+out vec2 fs_Tex;
+out vec4 fs_Col;
+void main()
+{
+    fs_Tex = in_texCoord;
+    fs_Col = in_color;
+    gl_Position = Projection * vec4(in_position,0,1);
+}";
+
+        private const string FsGlsl330 = @"#version 330 core
+in vec2 fs_Tex;
+in vec4 fs_Col;
+out vec4 out_Color;
+uniform sampler2D MainTexture;
+void main()
+{
+    out_Color = fs_Col * texture(MainTexture, fs_Tex);
+}";
+
+        // SPIR-V 450 for Vulkan
+        private const string VsSpirv450 = @"#version 450
+layout(location=0) in vec2 in_position;
+layout(location=1) in vec2 in_texCoord;
+layout(location=2) in vec4 in_color;
+layout(set=0,binding=0) uniform ProjectionBuffer { mat4 Projection; };
 layout(location=0) out vec2 fs_Tex;
 layout(location=1) out vec4 fs_Col;
 void main()
 {
     fs_Tex = in_texCoord;
     fs_Col = in_color;
-    gl_Position = M * vec4(in_position,0,1);
+    gl_Position = Projection * vec4(in_position,0,1);
 }";
 
-        private const string FsGlsl = @"#version 450
+        private const string FsSpirv450 = @"#version 450
 layout(location=0) in vec2 fs_Tex;
 layout(location=1) in vec4 fs_Col;
 layout(location=0) out vec4 out_Color;
-layout(set=0,binding=1) uniform texture2D MainTex;
-layout(set=0,binding=2) uniform sampler   MainSamp;
+layout(set=0,binding=1) uniform texture2D MainTexture;
+layout(set=0,binding=2) uniform sampler MainSampler;
 void main()
 {
-    out_Color = fs_Col * texture(sampler2D(MainTex,MainSamp), fs_Tex);
+    out_Color = fs_Col * texture(sampler2D(MainTexture,MainSampler), fs_Tex);
 }";
 
+        // HLSL for Direct3D11 with proper semantics
         private const string VsHlsl = @"
-cbuffer Projection : register(b0)
+cbuffer ProjectionBuffer : register(b0)
 {
-    float4x4 M;
+    float4x4 Projection;
 };
 
 struct VS_INPUT
@@ -576,10 +590,10 @@ struct PS_INPUT
     float2 uv  : TEXCOORD0;
 };
 
-PS_INPUT main(VS_INPUT input)
+PS_INPUT VS(VS_INPUT input)
 {
     PS_INPUT output;
-    output.pos = mul(M, float4(input.pos.xy, 0.0, 1.0));
+    output.pos = mul(Projection, float4(input.pos.xy, 0.0, 1.0));
     output.col = input.col;
     output.uv  = input.uv;
     return output;
@@ -596,13 +610,13 @@ struct PS_INPUT
 sampler sampler0 : register(s0);
 Texture2D texture0 : register(t0);
 
-float4 main(PS_INPUT input) : SV_Target
+float4 PS(PS_INPUT input) : SV_Target
 {
     float4 out_col = input.col * texture0.Sample(sampler0, input.uv);
     return out_col;
 }";
 
-        // Fixed Metal shaders that handle coordinate system correctly
+        // Metal shaders with fixed coordinate system
         private const string VsMetalFixed = @"
 #include <metal_stdlib>
 using namespace metal;
@@ -648,8 +662,8 @@ struct VertexOut
 };
 
 fragment float4 main0(VertexOut in [[stage_in]],
-                      texture2d<float> tex [[texture(1)]],
-                      sampler samp [[sampler(2)]])
+                      texture2d<float> tex [[texture(0)]],
+                      sampler samp [[sampler(0)]])
 {
     return in.color * tex.sample(samp, in.texCoord);
 }";
@@ -657,21 +671,21 @@ fragment float4 main0(VertexOut in [[stage_in]],
         // ------------------------------------------------------------------
         public void Dispose()
         {
-            _vb?.Dispose(); 
-            _ib?.Dispose(); 
+            _vb?.Dispose();
+            _ib?.Dispose();
             _ub?.Dispose();
-            _fontTex?.Dispose(); 
+            _fontTex?.Dispose();
             _set?.Dispose();
-            _vs?.Dispose(); 
-            _fs?.Dispose(); 
-            _layout?.Dispose(); 
+            _vs?.Dispose();
+            _fs?.Dispose();
+            _layout?.Dispose();
             _pipe?.Dispose();
-            
+
             foreach (var kvp in _setsByView)
             {
                 kvp.Value?.Dispose();
             }
-            
+
             if (_context != IntPtr.Zero)
             {
                 ImGui.DestroyContext(_context);
