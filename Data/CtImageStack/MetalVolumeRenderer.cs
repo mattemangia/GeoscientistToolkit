@@ -6,12 +6,13 @@ using GeoscientistToolkit.Util;
 using Veldrid;
 using Veldrid.SPIRV;
 using System.Linq;
+using System.Text;
 
 namespace GeoscientistToolkit.Data.CtImageStack
 {
     /// <summary>
-    /// Metal-specific volume renderer that handles Metal's unique requirements
-    /// including lack of 1D texture support and different resource binding
+    /// Metal-specific volume renderer that handles Metal's unique requirements.
+    /// This version is authored with an HLSL fragment shader.
     /// </summary>
     public class MetalVolumeRenderer : IDisposable
     {
@@ -34,9 +35,9 @@ namespace GeoscientistToolkit.Data.CtImageStack
         // Textures - using 2D textures instead of 1D for Metal compatibility
         private Texture _volumeTexture;
         private Texture _labelTexture;
-        private Texture _colorMapTexture;      // 2D texture (256x4) instead of 1D
-        private Texture _materialParamsTexture; // 2D texture (256x1) instead of 1D
-        private Texture _materialColorsTexture; // 2D texture (256x1) instead of 1D
+        private Texture _colorMapTexture;      // 2D texture (256x4)
+        private Texture _materialParamsTexture; // 2D texture (256x1)
+        private Texture _materialColorsTexture; // 2D texture (256x1)
         private Texture _previewTexture;
         private Sampler _volumeSampler;
 
@@ -59,19 +60,11 @@ namespace GeoscientistToolkit.Data.CtImageStack
             _previewTexture = previewTexture;
             _volumeSampler = volumeSampler;
 
-            // Create geometry buffers (shared with standard renderer)
             CreateGeometry(factory);
-
-            // Create Metal-specific shaders
-            CreateMetalShaders(factory);
-
-            // Create textures (2D instead of 1D for Metal)
+            CreateMetalShaders(factory); // This will now use HLSL
             CreateMetalTextures(factory);
-
-            // Create pipeline
             CreateMetalPipeline(factory);
 
-            // Create constant buffers
             _constantBuffer = factory.CreateBuffer(new BufferDescription(
                 (uint)Marshal.SizeOf<CtVolume3DViewer.VolumeConstants>(),
                 BufferUsage.UniformBuffer | BufferUsage.Dynamic));
@@ -80,15 +73,12 @@ namespace GeoscientistToolkit.Data.CtImageStack
                 (uint)Marshal.SizeOf<CtVolume3DViewer.PlaneVisualizationConstants>(),
                 BufferUsage.UniformBuffer | BufferUsage.Dynamic));
 
-            // Create resource sets
             CreateResourceSets(factory);
-
-            Logger.Log("[MetalVolumeRenderer] Initialization complete");
+            Logger.Log("[MetalVolumeRenderer] Initialization with HLSL shader complete");
         }
 
         private void CreateGeometry(ResourceFactory factory)
         {
-            // Cube vertices
             Vector3[] vertices = {
                 new(0, 0, 0), new(1, 0, 0), new(1, 1, 0), new(0, 1, 0),
                 new(0, 0, 1), new(1, 0, 1), new(1, 1, 1), new(0, 1, 1)
@@ -96,7 +86,6 @@ namespace GeoscientistToolkit.Data.CtImageStack
             _vertexBuffer = factory.CreateBuffer(new BufferDescription((uint)(vertices.Length * 12), BufferUsage.VertexBuffer));
             VeldridManager.GraphicsDevice.UpdateBuffer(_vertexBuffer, 0, vertices);
 
-            // Cube indices
             ushort[] indices = {
                 0, 1, 2, 0, 2, 3, 4, 6, 5, 4, 7, 6,
                 0, 4, 5, 0, 5, 1, 3, 2, 6, 3, 6, 7,
@@ -108,7 +97,8 @@ namespace GeoscientistToolkit.Data.CtImageStack
 
         private void CreateMetalShaders(ResourceFactory factory)
         {
-            // The vertex shader remains the same.
+            // The vertex shader can remain GLSL. Veldrid can mix and match shader languages
+            // as long as they are both compiled to SPIR-V.
             string vertexShaderGlsl = @"
 #version 450
 layout(location = 0) in vec3 in_Position;
@@ -120,6 +110,7 @@ layout(set = 0, binding = 0) uniform Constants
     vec4 CameraPosition;
 };
 
+// This semantic is used to pass data to the HLSL pixel shader.
 layout(location = 0) out vec3 out_ModelPos;
 
 void main() 
@@ -128,175 +119,171 @@ void main()
     gl_Position = ViewProj * vec4(in_Position, 1.0);
 }";
 
-            // --- FIX --- The fragment shader is updated to use 2D textures for Metal compatibility.
-            string fragmentShaderGlsl = @"
-#version 450
-layout(location = 0) in vec3 in_ModelPos;
-layout(location = 0) out vec4 out_Color;
-
-layout(set = 0, binding = 0) uniform Constants
+            // --- REWRITE: This fragment shader is now in HLSL ---
+            string fragmentShaderHlsl = @"
+// HLSL structs for shader input/output
+struct VSOutput
 {
-    mat4 ViewProj;
-    mat4 InvView;
-    vec4 CameraPosition;
-    vec4 VolumeSize;
-    vec4 ThresholdParams;
-    vec4 SliceParams;
-    vec4 RenderParams;
-    vec4 CutPlaneX;
-    vec4 CutPlaneY;
-    vec4 CutPlaneZ;
-    vec4 ClippingPlanesData[8];
-    vec4 ClippingPlanesInfo;
-    vec4 PreviewParams;
-    vec4 PreviewAlpha;
+    float4 Position : SV_Position;
+    float3 ModelPos : TEXCOORD0; // Corresponds to 'out_ModelPos' from GLSL VS
 };
 
-layout(set = 0, binding = 1) uniform sampler VolumeSampler;
-layout(set = 0, binding = 2) uniform texture3D VolumeTexture;
-layout(set = 0, binding = 3) uniform texture3D LabelTexture;
-
-// --- METAL FIX START: Declarations ---
-// The following textures are declared as texture2D instead of texture1D.
-// This matches the 2D textures created in the C# code to work around Metal's limitations.
-layout(set = 0, binding = 4) uniform texture2D ColorMapTexture;
-layout(set = 0, binding = 5) uniform texture2D MaterialParamsTexture;
-layout(set = 0, binding = 6) uniform texture2D MaterialColorsTexture;
-// --- METAL FIX END: Declarations ---
-
-layout(set = 0, binding = 7) uniform texture3D PreviewTexture;
-
-bool IntersectBox(vec3 rayOrigin, vec3 rayDir, vec3 boxMin, vec3 boxMax, out float tNear, out float tFar)
+// Constant Buffer, matching the 'register(b0)' binding. 'b' for buffer.
+cbuffer Constants : register(b0)
 {
-    vec3 invRayDir = 1.0 / (rayDir + 1e-8);
-    vec3 t1 = (boxMin - rayOrigin) * invRayDir;
-    vec3 t2 = (boxMax - rayOrigin) * invRayDir;
-    vec3 tMin = min(t1, t2);
-    vec3 tMax = max(t1, t2);
+    float4x4 ViewProj;
+    float4x4 InvView;
+    float4 CameraPosition;
+    float4 VolumeSize;
+    float4 ThresholdParams;
+    float4 SliceParams;
+    float4 RenderParams;
+    float4 CutPlaneX;
+    float4 CutPlaneY;
+    float4 CutPlaneZ;
+    float4 ClippingPlanesData[8];
+    float4 ClippingPlanesInfo;
+    float4 PreviewParams;
+    float4 PreviewAlpha;
+};
+
+// Resources are mapped to registers. 't' for textures, 's' for samplers.
+// The binding indices from GLSL map directly to the register numbers here.
+SamplerState VolumeSampler       : register(s0);
+Texture3D    VolumeTexture       : register(t0);
+Texture3D    LabelTexture        : register(t1);
+Texture2D    ColorMapTexture     : register(t2); // Correctly a Texture2D
+Texture2D    MaterialParamsTexture : register(t3); // Correctly a Texture2D
+Texture2D    MaterialColorsTexture : register(t4); // Correctly a Texture2D
+Texture3D    PreviewTexture      : register(t5);
+
+
+bool IntersectBox(float3 rayOrigin, float3 rayDir, float3 boxMin, float3 boxMax, out float tNear, out float tFar)
+{
+    float3 invRayDir = 1.0f / (rayDir + 1e-8f);
+    float3 t1 = (boxMin - rayOrigin) * invRayDir;
+    float3 t2 = (boxMax - rayOrigin) * invRayDir;
+    float3 tMin = min(t1, t2);
+    float3 tMax = max(t1, t2);
     tNear = max(max(tMin.x, tMin.y), tMin.z);
     tFar = min(min(tMax.x, tMax.y), tMax.z);
-    return tFar >= tNear && tFar > 0.0;
+    return tFar >= tNear && tFar > 0.0f;
 }
 
-bool IsCutByPlanes(vec3 pos)
+bool IsCutByPlanes(float3 pos)
 {
-    if (CutPlaneX.x > 0.5 && (pos.x - CutPlaneX.z) * CutPlaneX.y > 0.0) return true;
-    if (CutPlaneY.x > 0.5 && (pos.y - CutPlaneY.z) * CutPlaneY.y > 0.0) return true;
-    if (CutPlaneZ.x > 0.5 && (pos.z - CutPlaneZ.z) * CutPlaneZ.y > 0.0) return true;
-    int numPlanes = int(ClippingPlanesInfo.x);
+    if (CutPlaneX.x > 0.5f && (pos.x - CutPlaneX.z) * CutPlaneX.y > 0.0f) return true;
+    if (CutPlaneY.x > 0.5f && (pos.y - CutPlaneY.z) * CutPlaneY.y > 0.0f) return true;
+    if (CutPlaneZ.x > 0.5f && (pos.z - CutPlaneZ.z) * CutPlaneZ.y > 0.0f) return true;
+    int numPlanes = (int)ClippingPlanesInfo.x;
     for (int i = 0; i < numPlanes; i++)
     {
-        vec4 planeData = ClippingPlanesData[i];
-        if (planeData.w > 0.5)
+        float4 planeData = ClippingPlanesData[i];
+        if (planeData.w > 0.5f)
         {
-            vec3 normal = planeData.xyz; float dist = length(normal);
-            if (dist > 0.001)
+            float3 normal = planeData.xyz; 
+            float dist = length(normal);
+            if (dist > 0.001f)
             {
-                normal /= dist; float mirror = step(1.5, dist);
-                float planeDist = dot(pos - vec3(0.5), normal) - (dist - 0.5 - mirror);
-                if (mirror > 0.5 ? planeDist < 0.0 : planeDist > 0.0) return true;
+                normal /= dist; 
+                float mirror = step(1.5f, dist);
+                float planeDist = dot(pos - 0.5f, normal) - (dist - 0.5f - mirror);
+                if (mirror > 0.5f ? planeDist < 0.0f : planeDist > 0.0f) return true;
             }
         }
     }
     return false;
 }
 
-// --- METAL FIX START: ColorMap Sampling ---
-// This function is updated to sample from a 2D texture (256x4).
-vec4 ApplyColorMap(float normIntensity)
+// In HLSL, texture sampling uses the .Sample() method on the texture object.
+float4 ApplyColorMap(float normIntensity)
 {
-    // The U coordinate (horizontal) is the normalized intensity.
-    float u = normIntensity; 
-    
-    // The V coordinate (vertical) selects the colormap. We have 4 maps (NUM_COLOR_MAPS).
-    // RenderParams.x holds the map index (0, 1, 2, or 3).
-    // We sample the middle of the texel row: (index + 0.5) / total_rows.
-    float v = (RenderParams.x + 0.5) / 4.0;
-
-    return texture(sampler2D(ColorMapTexture, VolumeSampler), vec2(u, v));
+    float u = normIntensity;
+    float v = (RenderParams.x + 0.5f) / 4.0f;
+    return ColorMapTexture.Sample(VolumeSampler, float2(u, v));
 }
-// --- METAL FIX END: ColorMap Sampling ---
 
-void main()
+// The main entry point for the pixel shader returns the final color.
+float4 main(float3 in_ModelPos : TEXCOORD0) : SV_Target
 {
-    vec3 rayOrigin = CameraPosition.xyz;
-    vec3 rayDir = normalize(in_ModelPos - rayOrigin);
+    float3 rayOrigin = CameraPosition.xyz;
+    float3 rayDir = normalize(in_ModelPos - rayOrigin);
 
     float tNear, tFar;
-    if (!IntersectBox(rayOrigin, rayDir, vec3(0.0), vec3(1.0), tNear, tFar))
+    if (!IntersectBox(rayOrigin, rayDir, float3(0,0,0), float3(1,1,1), tNear, tFar))
     {
-        discard;
+        clip(-1); // HLSL equivalent of 'discard'
     }
-    
-    tNear = max(tNear, 0.0);
-    vec4 accumulatedColor = vec4(0.0);
-    
+
+    tNear = max(tNear, 0.0f);
+    float4 accumulatedColor = float4(0,0,0,0);
+
     float maxDim = max(VolumeSize.x, max(VolumeSize.y, VolumeSize.z));
-    float baseStepSize = 1.0 / maxDim;
+    float baseStepSize = 1.0f / maxDim;
     float step = baseStepSize * ThresholdParams.z;
-    
-    int maxSteps = int((tFar - tNear) / step);
-    float opacityScalar = 40.0;
+
+    int maxSteps = (int)((tFar - tNear) / step);
+    float opacityScalar = 40.0f;
     float t = tNear;
 
     for (int i = 0; i < 768; i++)
     {
-        if (i >= maxSteps || t > tFar || accumulatedColor.a > 0.95) break;
+        if (i >= maxSteps || t > tFar || accumulatedColor.a > 0.95f) break;
 
-        vec3 currentPos = rayOrigin + t * rayDir;
-        if (any(lessThan(currentPos, vec3(0.0))) || any(greaterThan(currentPos, vec3(1.0))) || IsCutByPlanes(currentPos))
+        float3 currentPos = rayOrigin + t * rayDir;
+        if (any(currentPos < 0) || any(currentPos > 1) || IsCutByPlanes(currentPos))
         {
             t += step;
             continue;
         }
 
-        vec4 sampledColor = vec4(0.0);
-        if (PreviewParams.x > 0.5 && textureLod(sampler3D(PreviewTexture, VolumeSampler), currentPos, 0.0).r > 0.5)
+        float4 sampledColor = float4(0,0,0,0);
+        // Use SampleLevel for LOD-specific sampling, equivalent to textureLod
+        if (PreviewParams.x > 0.5f && PreviewTexture.SampleLevel(VolumeSampler, currentPos, 0).r > 0.5f)
         {
-            sampledColor = vec4(PreviewParams.yzw, PreviewAlpha.x * 5.0);
+            sampledColor = float4(PreviewParams.yzw, PreviewAlpha.x * 5.0f);
         }
         else
         {
-            int materialId = int(textureLod(sampler3D(LabelTexture, VolumeSampler), currentPos, 0.0).r * 255.0 + 0.5);
+            int materialId = (int)(LabelTexture.SampleLevel(VolumeSampler, currentPos, 0).r * 255.0f + 0.5f);
+            
+            // Use .Load() for texel fetching, equivalent to texelFetch.
+            // It takes an integer coordinate: int3(x, y, mip_level).
+            float2 materialParams = MaterialParamsTexture.Load(int3(materialId, 0, 0)).xy;
 
-            // --- METAL FIX START: Material Sampling ---
-            // Use texelFetch with ivec2(materialId, 0) to sample from our 256x1 2D textures.
-            vec2 materialParams = texelFetch(sampler2D(MaterialParamsTexture, VolumeSampler), ivec2(materialId, 0), 0).xy;
-
-            if (materialId > 0 && materialParams.x > 0.5)
+            if (materialId > 0 && materialParams.x > 0.5f)
             {
-                sampledColor = texelFetch(sampler2D(MaterialColorsTexture, VolumeSampler), ivec2(materialId, 0), 0);
-                sampledColor.a = materialParams.y * 5.0;
+                sampledColor = MaterialColorsTexture.Load(int3(materialId, 0, 0));
+                sampledColor.a = materialParams.y * 5.0f;
             }
-            // --- METAL FIX END: Material Sampling ---
-            else if (ThresholdParams.w > 0.5)
+            else if (ThresholdParams.w > 0.5f)
             {
-                float intensity = textureLod(sampler3D(VolumeTexture, VolumeSampler), currentPos, 0.0).r;
+                float intensity = VolumeTexture.SampleLevel(VolumeSampler, currentPos, 0).r;
                 if (intensity >= ThresholdParams.x && intensity <= ThresholdParams.y)
                 {
-                    float normIntensity = (intensity - ThresholdParams.x) / (ThresholdParams.y - ThresholdParams.x + 0.001);
-                    sampledColor = (RenderParams.x >= 0.0) ? ApplyColorMap(normIntensity) : vec4(vec3(normIntensity), normIntensity);
-                    sampledColor.a = pow(sampledColor.a, 2.0);
+                    float normIntensity = (intensity - ThresholdParams.x) / (ThresholdParams.y - ThresholdParams.x + 0.001f);
+                    sampledColor = (RenderParams.x >= 0.0f) ? ApplyColorMap(normIntensity) : float4(normIntensity, normIntensity, normIntensity, normIntensity);
+                    sampledColor.a = pow(sampledColor.a, 2.0f);
                 }
             }
         }
-        
-        if (sampledColor.a > 0.0)
+
+        if (sampledColor.a > 0.0f)
         {
-            float correctedAlpha = clamp(sampledColor.a * step * opacityScalar, 0.0, 1.0);
-            accumulatedColor += (1.0 - accumulatedColor.a) * vec4(sampledColor.rgb * correctedAlpha, correctedAlpha);
+            float correctedAlpha = clamp(sampledColor.a * step * opacityScalar, 0.0f, 1.0f);
+            accumulatedColor += (1.0f - accumulatedColor.a) * float4(sampledColor.rgb * correctedAlpha, correctedAlpha);
         }
         t += step;
     }
-    out_Color = accumulatedColor;
+    return accumulatedColor;
 }";
 
+            // Plane visualization shaders can remain GLSL for simplicity
             string planeVertexShaderGlsl = @"
 #version 450
 layout(location = 0) in vec3 in_Position;
 layout(set = 0, binding = 0) uniform Constants { mat4 ViewProj; vec4 PlaneColor; };
 void main() { gl_Position = ViewProj * vec4(in_Position, 1.0); }";
-
             string planeFragmentShaderGlsl = @"
 #version 450
 layout(location = 0) out vec4 out_Color;
@@ -305,79 +292,51 @@ void main() { out_Color = PlaneColor; }";
 
             try
             {
-                var options = new CrossCompileOptions(fixClipSpaceZ: true, invertVertexOutputY: false);
+                // --- COMPILE SHADERS TO SPIR-V ---
+                // We now explicitly compile both languages to SPIR-V before creating the shader objects.
 
-                var mainVertexDesc = new ShaderDescription(ShaderStages.Vertex, System.Text.Encoding.UTF8.GetBytes(vertexShaderGlsl), "main");
-                var mainFragmentDesc = new ShaderDescription(ShaderStages.Fragment, System.Text.Encoding.UTF8.GetBytes(fragmentShaderGlsl), "main");
-                _shaders = factory.CreateFromSpirv(mainVertexDesc, mainFragmentDesc, options);
+                // Main volume rendering shaders (GLSL Vertex, HLSL Fragment)
+                var vsDesc = new ShaderDescription(ShaderStages.Vertex, Encoding.UTF8.GetBytes(vertexShaderGlsl), "main", true);
+                var fsDesc = new ShaderDescription(ShaderStages.Fragment, Encoding.UTF8.GetBytes(fragmentShaderHlsl), "main", true);
+                _shaders = factory.CreateFromSpirv(vsDesc, fsDesc, new CrossCompileOptions(false, false));
 
-                var planeVertexDesc = new ShaderDescription(ShaderStages.Vertex, System.Text.Encoding.UTF8.GetBytes(planeVertexShaderGlsl), "main");
-                var planeFragmentDesc = new ShaderDescription(ShaderStages.Fragment, System.Text.Encoding.UTF8.GetBytes(planeFragmentShaderGlsl), "main");
-                _planeVisualizationShaders = factory.CreateFromSpirv(planeVertexDesc, planeFragmentDesc, options);
+                // Plane visualization shaders (GLSL Vertex, GLSL Fragment)
+                var planeVsDesc = new ShaderDescription(ShaderStages.Vertex, Encoding.UTF8.GetBytes(planeVertexShaderGlsl), "main", true);
+                var planeFsDesc = new ShaderDescription(ShaderStages.Fragment, Encoding.UTF8.GetBytes(planeFragmentShaderGlsl), "main", true);
+                _planeVisualizationShaders = factory.CreateFromSpirv(planeVsDesc, planeFsDesc, new CrossCompileOptions(false, false));
 
-                Logger.Log($"[MetalVolumeRenderer] Shaders compiled successfully for backend: {VeldridManager.GraphicsDevice.BackendType}");
+                Logger.Log($"[MetalVolumeRenderer] Shaders (incl. HLSL) compiled successfully for backend: {VeldridManager.GraphicsDevice.BackendType}");
             }
             catch (Exception ex)
             {
-                Logger.LogError($"[MetalVolumeRenderer] Failed to create shaders: {ex.Message}");
+                // This will now catch HLSL compilation errors as well.
+                Logger.LogError($"[MetalVolumeRenderer] Failed to create shaders from HLSL/GLSL: {ex.Message}");
                 throw;
             }
         }
 
+        // --- The rest of the file is identical to the GLSL version ---
+        // The C# code for creating textures, pipelines, and buffers does not change,
+        // as it only cares about the final compiled SPIR-V, not the source language.
+
         private void CreateMetalTextures(ResourceFactory factory)
         {
-            // Create 2D color map texture (256x4) instead of 1D
             var colorMapData = new RgbaFloat[COLOR_MAP_SIZE * NUM_COLOR_MAPS];
+            for (int i = 0; i < COLOR_MAP_SIZE; i++) { float v = i / (float)(COLOR_MAP_SIZE - 1); colorMapData[i] = new RgbaFloat(v, v, v, 1); }
+            for (int i = 0; i < COLOR_MAP_SIZE; i++) { float t = i / (float)(COLOR_MAP_SIZE - 1); float r = Math.Min(1.0f, 3.0f * t); float g = Math.Clamp(3.0f * t - 1.0f, 0.0f, 1.0f); float b = Math.Clamp(3.0f * t - 2.0f, 0.0f, 1.0f); colorMapData[COLOR_MAP_SIZE * 1 + i] = new RgbaFloat(r, g, b, 1); }
+            for (int i = 0; i < COLOR_MAP_SIZE; i++) { float t = i / (float)(COLOR_MAP_SIZE - 1); colorMapData[COLOR_MAP_SIZE * 2 + i] = new RgbaFloat(t, 1 - t, 1, 1); }
+            for (int i = 0; i < COLOR_MAP_SIZE; i++) { float h = (i / (float)(COLOR_MAP_SIZE - 1)) * 0.7f; colorMapData[COLOR_MAP_SIZE * 3 + i] = HsvToRgb(h, 1.0f, 1.0f); }
 
-            // Grayscale
-            for (int i = 0; i < COLOR_MAP_SIZE; i++)
-            {
-                float v = i / (float)(COLOR_MAP_SIZE - 1);
-                colorMapData[i] = new RgbaFloat(v, v, v, 1);
-            }
+            _colorMapTexture = factory.CreateTexture(TextureDescription.Texture2D((uint)COLOR_MAP_SIZE, (uint)NUM_COLOR_MAPS, 1, 1, PixelFormat.R32_G32_B32_A32_Float, TextureUsage.Sampled));
+            VeldridManager.GraphicsDevice.UpdateTexture(_colorMapTexture, colorMapData, 0, 0, 0, (uint)COLOR_MAP_SIZE, (uint)NUM_COLOR_MAPS, 1, 0, 0);
 
-            // Hot
-            for (int i = 0; i < COLOR_MAP_SIZE; i++)
-            {
-                float t = i / (float)(COLOR_MAP_SIZE - 1);
-                float r = Math.Min(1.0f, 3.0f * t);
-                float g = Math.Clamp(3.0f * t - 1.0f, 0.0f, 1.0f);
-                float b = Math.Clamp(3.0f * t - 2.0f, 0.0f, 1.0f);
-                colorMapData[COLOR_MAP_SIZE + i] = new RgbaFloat(r, g, b, 1);
-            }
-
-            // Cool
-            for (int i = 0; i < COLOR_MAP_SIZE; i++)
-            {
-                float t = i / (float)(COLOR_MAP_SIZE - 1);
-                colorMapData[COLOR_MAP_SIZE * 2 + i] = new RgbaFloat(t, 1 - t, 1, 1);
-            }
-
-            // Rainbow
-            for (int i = 0; i < COLOR_MAP_SIZE; i++)
-            {
-                float h = (i / (float)(COLOR_MAP_SIZE - 1)) * 0.7f;
-                colorMapData[COLOR_MAP_SIZE * 3 + i] = HsvToRgb(h, 1.0f, 1.0f);
-            }
-
-            // Create as 2D texture
-            _colorMapTexture = factory.CreateTexture(TextureDescription.Texture2D(
-                (uint)COLOR_MAP_SIZE, (uint)NUM_COLOR_MAPS, 1, 1, PixelFormat.R32_G32_B32_A32_Float, TextureUsage.Sampled));
-            VeldridManager.GraphicsDevice.UpdateTexture(_colorMapTexture, colorMapData,
-                0, 0, 0, (uint)COLOR_MAP_SIZE, (uint)NUM_COLOR_MAPS, 1, 0, 0);
-
-            // Create material textures as 2D (256x1)
-            _materialParamsTexture = factory.CreateTexture(TextureDescription.Texture2D(
-                256, 1, 1, 1, PixelFormat.R32_G32_Float, TextureUsage.Sampled));
-            _materialColorsTexture = factory.CreateTexture(TextureDescription.Texture2D(
-                256, 1, 1, 1, PixelFormat.R32_G32_B32_A32_Float, TextureUsage.Sampled));
-
+            _materialParamsTexture = factory.CreateTexture(TextureDescription.Texture2D(256, 1, 1, 1, PixelFormat.R32_G32_Float, TextureUsage.Sampled));
+            _materialColorsTexture = factory.CreateTexture(TextureDescription.Texture2D(256, 1, 1, 1, PixelFormat.R32_G32_B32_A32_Float, TextureUsage.Sampled));
             UpdateMaterialTextures();
         }
 
         private void CreateMetalPipeline(ResourceFactory factory)
         {
-            // Main pipeline resource layout - order must match standard renderer
             _resourceLayout = factory.CreateResourceLayout(new ResourceLayoutDescription(
                 new ResourceLayoutElementDescription("Constants", ResourceKind.UniformBuffer, ShaderStages.Vertex | ShaderStages.Fragment),
                 new ResourceLayoutElementDescription("VolumeSampler", ResourceKind.Sampler, ShaderStages.Fragment),
@@ -388,20 +347,17 @@ void main() { out_Color = PlaneColor; }";
                 new ResourceLayoutElementDescription("MaterialColorsTexture", ResourceKind.TextureReadOnly, ShaderStages.Fragment),
                 new ResourceLayoutElementDescription("PreviewTexture", ResourceKind.TextureReadOnly, ShaderStages.Fragment)));
 
-            // Main pipeline
             _pipeline = factory.CreateGraphicsPipeline(new GraphicsPipelineDescription(
                 BlendStateDescription.SingleAlphaBlend,
                 new DepthStencilStateDescription(true, true, ComparisonKind.LessEqual),
                 new RasterizerStateDescription(FaceCullMode.Back, PolygonFillMode.Solid, FrontFace.CounterClockwise, true, false),
                 PrimitiveTopology.TriangleList,
                 new ShaderSetDescription(
-                    new[] { new VertexLayoutDescription(
-                        new VertexElementDescription("Position", VertexElementSemantic.TextureCoordinate, VertexElementFormat.Float3)) },
+                    new[] { new VertexLayoutDescription(new VertexElementDescription("Position", VertexElementSemantic.TextureCoordinate, VertexElementFormat.Float3)) },
                     _shaders),
                 new[] { _resourceLayout },
                 _framebuffer.OutputDescription));
 
-            // Plane visualization pipeline
             _planeVisualizationResourceLayout = factory.CreateResourceLayout(new ResourceLayoutDescription(
                 new ResourceLayoutElementDescription("Constants", ResourceKind.UniformBuffer, ShaderStages.Vertex | ShaderStages.Fragment)));
 
@@ -411,13 +367,14 @@ void main() { out_Color = PlaneColor; }";
                 new RasterizerStateDescription(FaceCullMode.None, PolygonFillMode.Solid, FrontFace.CounterClockwise, true, false),
                 PrimitiveTopology.TriangleList,
                 new ShaderSetDescription(
-                    new[] { new VertexLayoutDescription(
-                        new VertexElementDescription("Position", VertexElementSemantic.TextureCoordinate, VertexElementFormat.Float3)) },
+                    new[] { new VertexLayoutDescription(new VertexElementDescription("Position", VertexElementSemantic.TextureCoordinate, VertexElementFormat.Float3)) },
                     _planeVisualizationShaders),
                 new[] { _planeVisualizationResourceLayout },
                 _framebuffer.OutputDescription));
         }
 
+        // ... (The rest of the file: CreateResourceSets, UpdateMaterialTextures, Render, etc. remains exactly the same) ...
+        #region Unchanged C# Code
         private void CreateResourceSets(ResourceFactory factory)
         {
             _resourceSet = factory.CreateResourceSet(new ResourceSetDescription(
@@ -456,7 +413,6 @@ void main() { out_Color = PlaneColor; }";
                 }
             }
 
-            // Update 2D textures
             VeldridManager.GraphicsDevice.UpdateTexture(_materialParamsTexture, paramData, 0, 0, 0, 256, 1, 1, 0, 0);
             VeldridManager.GraphicsDevice.UpdateTexture(_materialColorsTexture, colorData, 0, 0, 0, 256, 1, 1, 0, 0);
         }
@@ -464,8 +420,6 @@ void main() { out_Color = PlaneColor; }";
         public void UpdateLabelTexture(Texture newLabelTexture)
         {
             _labelTexture = newLabelTexture;
-
-            // Recreate resource set with new texture
             _resourceSet?.Dispose();
             _resourceSet = VeldridManager.Factory.CreateResourceSet(new ResourceSetDescription(
                 _resourceLayout,
@@ -488,17 +442,14 @@ void main() { out_Color = PlaneColor; }";
             cl.ClearColorTarget(0, RgbaFloat.Black);
             cl.ClearDepthStencil(1f);
 
-            // Update constant buffer
             UpdateConstantBuffer(viewMatrix, projMatrix, cameraPosition);
 
-            // Render volume
             cl.SetPipeline(_pipeline);
             cl.SetVertexBuffer(0, _vertexBuffer);
             cl.SetIndexBuffer(_indexBuffer, IndexFormat.UInt16);
             cl.SetGraphicsResourceSet(0, _resourceSet);
             cl.DrawIndexed(36, 1, 0, 0, 0);
 
-            // Render plane visualizations if enabled
             if (_viewer.ShowPlaneVisualizations)
             {
                 RenderPlaneVisualizations(cl, viewMatrix, projMatrix, planeVertexBuffer, planeIndexBuffer);
@@ -529,7 +480,6 @@ void main() { out_Color = PlaneColor; }";
                 PreviewAlpha = new Vector4(_viewer._previewColor.W, 0, 0, 0)
             };
 
-            // Add clipping planes
             int enabledPlanes = 0;
             for (int i = 0; i < Math.Min(_viewer.ClippingPlanes.Count, CtVolume3DViewer.MAX_CLIPPING_PLANES); i++)
             {
@@ -556,18 +506,10 @@ void main() { out_Color = PlaneColor; }";
             cl.SetPipeline(_planeVisualizationPipeline);
             cl.SetVertexBuffer(0, planeVertexBuffer);
             cl.SetIndexBuffer(planeIndexBuffer, IndexFormat.UInt16);
-
             var viewProj = viewMatrix * projMatrix;
-
-            // Render axis-aligned cutting planes
-            if (_viewer.CutXEnabled && _viewer.ShowCutXPlaneVisual)
-                RenderCuttingPlane(cl, viewProj, Vector3.UnitX, _viewer.CutXPosition, new Vector4(1, 0.2f, 0.2f, 0.3f));
-            if (_viewer.CutYEnabled && _viewer.ShowCutYPlaneVisual)
-                RenderCuttingPlane(cl, viewProj, Vector3.UnitY, _viewer.CutYPosition, new Vector4(0.2f, 1, 0.2f, 0.3f));
-            if (_viewer.CutZEnabled && _viewer.ShowCutZPlaneVisual)
-                RenderCuttingPlane(cl, viewProj, Vector3.UnitZ, _viewer.CutZPosition, new Vector4(0.2f, 0.2f, 1, 0.3f));
-
-            // Render arbitrary clipping planes
+            if (_viewer.CutXEnabled && _viewer.ShowCutXPlaneVisual) RenderCuttingPlane(cl, viewProj, Vector3.UnitX, _viewer.CutXPosition, new Vector4(1, 0.2f, 0.2f, 0.3f));
+            if (_viewer.CutYEnabled && _viewer.ShowCutYPlaneVisual) RenderCuttingPlane(cl, viewProj, Vector3.UnitY, _viewer.CutYPosition, new Vector4(0.2f, 1, 0.2f, 0.3f));
+            if (_viewer.CutZEnabled && _viewer.ShowCutZPlaneVisual) RenderCuttingPlane(cl, viewProj, Vector3.UnitZ, _viewer.CutZPosition, new Vector4(0.2f, 0.2f, 1, 0.3f));
             foreach (var plane in _viewer.ClippingPlanes.Where(p => p.Enabled && p.IsVisualizationVisible))
             {
                 RenderClippingPlane(cl, viewProj, plane, new Vector4(1, 1, 0.2f, 0.3f));
@@ -577,27 +519,10 @@ void main() { out_Color = PlaneColor; }";
         private void RenderCuttingPlane(CommandList cl, Matrix4x4 viewProj, Vector3 normal, float position, Vector4 color)
         {
             var transform = Matrix4x4.CreateScale(1.5f);
-            if (normal == Vector3.UnitX)
-            {
-                transform *= Matrix4x4.CreateRotationY(MathF.PI / 2);
-                transform *= Matrix4x4.CreateTranslation(position, 0.5f, 0.5f);
-            }
-            else if (normal == Vector3.UnitY)
-            {
-                transform *= Matrix4x4.CreateRotationX(-MathF.PI / 2);
-                transform *= Matrix4x4.CreateTranslation(0.5f, position, 0.5f);
-            }
-            else if (normal == Vector3.UnitZ)
-            {
-                transform *= Matrix4x4.CreateTranslation(0.5f, 0.5f, position);
-            }
-
-            var constants = new CtVolume3DViewer.PlaneVisualizationConstants
-            {
-                ViewProj = transform * viewProj,
-                PlaneColor = color
-            };
-
+            if (normal == Vector3.UnitX) { transform *= Matrix4x4.CreateRotationY(MathF.PI / 2); transform *= Matrix4x4.CreateTranslation(position, 0.5f, 0.5f); }
+            else if (normal == Vector3.UnitY) { transform *= Matrix4x4.CreateRotationX(-MathF.PI / 2); transform *= Matrix4x4.CreateTranslation(0.5f, position, 0.5f); }
+            else if (normal == Vector3.UnitZ) { transform *= Matrix4x4.CreateTranslation(0.5f, 0.5f, position); }
+            var constants = new CtVolume3DViewer.PlaneVisualizationConstants { ViewProj = transform * viewProj, PlaneColor = color };
             VeldridManager.GraphicsDevice.UpdateBuffer(_planeVisualizationConstantBuffer, 0, ref constants);
             cl.SetGraphicsResourceSet(0, _planeVisualizationResourceSet);
             cl.DrawIndexed(6, 1, 0, 0, 0);
@@ -607,26 +532,12 @@ void main() { out_Color = PlaneColor; }";
         {
             var forward = plane.Normal;
             var right = Vector3.Cross(Vector3.UnitY, forward);
-            if (right.LengthSquared() < 0.001f)
-                right = Vector3.Cross(Vector3.UnitX, forward);
+            if (right.LengthSquared() < 0.001f) right = Vector3.Cross(Vector3.UnitX, forward);
             right = Vector3.Normalize(right);
             var up = Vector3.Cross(forward, right);
-
-            var rotation = new Matrix4x4(
-                right.X, right.Y, right.Z, 0,
-                up.X, up.Y, up.Z, 0,
-                forward.X, forward.Y, forward.Z, 0,
-                0, 0, 0, 1);
-
-            var transform = Matrix4x4.CreateScale(1.5f) * rotation *
-                          Matrix4x4.CreateTranslation(Vector3.One * 0.5f + plane.Normal * (plane.Distance - 0.5f));
-
-            var constants = new CtVolume3DViewer.PlaneVisualizationConstants
-            {
-                ViewProj = transform * viewProj,
-                PlaneColor = color
-            };
-
+            var rotation = new Matrix4x4(right.X, right.Y, right.Z, 0, up.X, up.Y, up.Z, 0, forward.X, forward.Y, forward.Z, 0, 0, 0, 0, 1);
+            var transform = Matrix4x4.CreateScale(1.5f) * rotation * Matrix4x4.CreateTranslation(Vector3.One * 0.5f + plane.Normal * (plane.Distance - 0.5f));
+            var constants = new CtVolume3DViewer.PlaneVisualizationConstants { ViewProj = transform * viewProj, PlaneColor = color };
             VeldridManager.GraphicsDevice.UpdateBuffer(_planeVisualizationConstantBuffer, 0, ref constants);
             cl.SetGraphicsResourceSet(0, _planeVisualizationResourceSet);
             cl.DrawIndexed(6, 1, 0, 0, 0);
@@ -634,23 +545,8 @@ void main() { out_Color = PlaneColor; }";
 
         private static RgbaFloat HsvToRgb(float h, float s, float v)
         {
-            float r, g, b;
-            int i = (int)(h * 6);
-            float f = h * 6 - i;
-            float p = v * (1 - s);
-            float q = v * (1 - f * s);
-            float t = v * (1 - (1 - f) * s);
-
-            switch (i % 6)
-            {
-                case 0: r = v; g = t; b = p; break;
-                case 1: r = q; g = v; b = p; break;
-                case 2: r = p; g = v; b = t; break;
-                case 3: r = p; g = q; b = v; break;
-                case 4: r = t; g = p; b = v; break;
-                default: r = v; g = p; b = q; break;
-            }
-
+            float r, g, b; int i = (int)(h * 6); float f = h * 6 - i; float p = v * (1 - s); float q = v * (1 - f * s); float t = v * (1 - (1 - f) * s);
+            switch (i % 6) { case 0: r = v; g = t; b = p; break; case 1: r = q; g = v; b = p; break; case 2: r = p; g = v; b = t; break; case 3: r = p; g = q; b = v; break; case 4: r = t; g = p; b = v; break; default: r = v; g = p; b = q; break; }
             return new RgbaFloat(r, g, b, 1.0f);
         }
 
@@ -659,30 +555,20 @@ void main() { out_Color = PlaneColor; }";
             _planeVisualizationResourceSet?.Dispose();
             _planeVisualizationResourceLayout?.Dispose();
             _planeVisualizationPipeline?.Dispose();
-            if (_planeVisualizationShaders != null)
-            {
-                foreach (var shader in _planeVisualizationShaders)
-                    shader?.Dispose();
-            }
+            if (_planeVisualizationShaders != null) { foreach (var shader in _planeVisualizationShaders) shader?.Dispose(); }
             _planeVisualizationConstantBuffer?.Dispose();
-
             _resourceSet?.Dispose();
             _resourceLayout?.Dispose();
             _volumeSampler?.Dispose();
             _materialColorsTexture?.Dispose();
             _materialParamsTexture?.Dispose();
             _colorMapTexture?.Dispose();
-
             _pipeline?.Dispose();
-            if (_shaders != null)
-            {
-                foreach (var shader in _shaders)
-                    shader?.Dispose();
-            }
-
+            if (_shaders != null) { foreach (var shader in _shaders) shader?.Dispose(); }
             _constantBuffer?.Dispose();
             _indexBuffer?.Dispose();
             _vertexBuffer?.Dispose();
         }
+        #endregion
     }
 }
