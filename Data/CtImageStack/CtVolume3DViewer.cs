@@ -293,36 +293,109 @@ namespace GeoscientistToolkit.Data.CtImageStack
             return result;
         }
 
+        // In CtVolume3DViewer.cs
+
         private byte[] ReconstructVolumeFromBricks(GvtLodInfo lodInfo, byte[] brickData, int brickSize)
         {
-            int width = lodInfo.Width; int height = lodInfo.Height; int depth = lodInfo.Depth;
-            byte[] volumeData = new byte[width * height * depth];
-            int bricksX = (width + brickSize - 1) / brickSize; int bricksY = (height + brickSize - 1) / brickSize; int bricksZ = (depth + brickSize - 1) / brickSize;
+            int width = lodInfo.Width;
+            int height = lodInfo.Height;
+            int depth = lodInfo.Depth;
+            int bricksX = (width + brickSize - 1) / brickSize;
+            int bricksY = (height + brickSize - 1) / brickSize;
+            int bricksZ = (depth + brickSize - 1) / brickSize;
             int brickVolumeSize = brickSize * brickSize * brickSize;
-            System.Threading.Tasks.Parallel.For(0, bricksZ, bz => {
+
+            // --- SOLUTION: Parallel-Safe Reconstruction ---
+            // Instead of all threads writing to one large shared array (which causes race conditions),
+            // we parallelize the reconstruction of independent chunks (Z-slices of bricks).
+            // Each thread produces a result, and a final, fast copy assembles these results.
+            // This maintains performance while guaranteeing correctness on all platforms.
+
+            // Step 1: Create a container for the independent results from each parallel task.
+            var reconstructedSlices = new byte[bricksZ][];
+
+            // Step 2: Process each Z-slice of bricks in parallel.
+            Parallel.For(0, bricksZ, bz =>
+            {
+                // Calculate the dimensions and data for THIS slice only.
+                int sliceStartX = 0;
+                int sliceStartY = 0;
+                int sliceStartZ = bz * brickSize;
+
+                // This is the output buffer for the current thread ONLY. No other thread will touch this.
+                var sliceData = new byte[width * height * brickSize];
+
                 for (int by = 0; by < bricksY; by++)
                 {
                     for (int bx = 0; bx < bricksX; bx++)
                     {
-                        int brickIndex = (bz * bricksY + by) * bricksX + bx; int brickOffset = brickIndex * brickVolumeSize;
+                        int brickIndex = (bz * bricksY + by) * bricksX + bx;
+                        int brickOffset = brickIndex * brickVolumeSize;
+
+                        if (brickOffset >= brickData.Length) continue; // Safety check
+
+                        // Reconstruct one brick into the thread-local sliceData buffer.
                         for (int z = 0; z < brickSize; z++)
                         {
-                            int gz = bz * brickSize + z; if (gz >= depth) continue;
+                            int gz = sliceStartZ + z;
+                            if (gz >= depth) continue;
+
                             for (int y = 0; y < brickSize; y++)
                             {
-                                int gy = by * brickSize + y; if (gy >= height) continue;
+                                int gy = by * brickSize + y;
+                                if (gy >= height) continue;
+
                                 for (int x = 0; x < brickSize; x++)
                                 {
-                                    int gx = bx * brickSize + x; if (gx >= width) continue;
+                                    int gx = bx * brickSize + x;
+                                    if (gx >= width) continue;
+
                                     int brickLocalIndex = (z * brickSize * brickSize) + (y * brickSize) + x;
-                                    volumeData[(gz * height * width) + (gy * width) + gx] = brickData[brickOffset + brickLocalIndex];
+
+                                    if (brickOffset + brickLocalIndex < brickData.Length)
+                                    {
+                                        // Calculate the destination index within the local slice buffer
+                                        int sliceIndex = (z * height * width) + (gy * width) + gx;
+                                        if (sliceIndex < sliceData.Length)
+                                        {
+                                            sliceData[sliceIndex] = brickData[brickOffset + brickLocalIndex];
+                                        }
+                                    }
                                 }
                             }
                         }
                     }
                 }
+
+                // The parallel task is done. Store its result in the shared container.
+                // This is a safe write, as each thread has a unique 'bz' index.
+                reconstructedSlices[bz] = sliceData;
             });
-            return volumeData;
+
+            // Step 3: All parallel work is finished. Now, assemble the final volume.
+            // This is a fast, single-threaded copy from the reconstructed slices into the final array.
+            var finalVolumeData = new byte[width * height * depth];
+            for (int bz = 0; bz < bricksZ; bz++)
+            {
+                byte[] slice = reconstructedSlices[bz];
+                if (slice == null) continue;
+
+                int sliceDepth = Math.Min(brickSize, depth - bz * brickSize);
+                long bytesToCopy = (long)width * height * sliceDepth;
+                long destinationOffset = (long)bz * brickSize * width * height;
+
+                if (destinationOffset + bytesToCopy > finalVolumeData.Length)
+                {
+                    bytesToCopy = finalVolumeData.Length - destinationOffset;
+                }
+
+                if (bytesToCopy > 0 && bytesToCopy <= slice.Length)
+                {
+                    Buffer.BlockCopy(slice, 0, finalVolumeData, (int)destinationOffset, (int)bytesToCopy);
+                }
+            }
+
+            return finalVolumeData;
         }
 
         private void CreateCubeGeometry(ResourceFactory factory)
