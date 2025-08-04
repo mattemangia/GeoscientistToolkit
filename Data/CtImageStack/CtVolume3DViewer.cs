@@ -503,18 +503,17 @@ void main() { out_Color = PlaneColor; }";
 
             try
             {
-                // --- ROBUST FIX for cross-platform rendering ---
+                // --- FIX START: Add robust cross-compilation options for cross-platform rendering ---
                 var options = new CrossCompileOptions();
 
                 // This tells the compiler to map the GLSL shader's output Z-coordinate (which is -1 to 1)
-                // to the coordinate system expected by the backend (e.g., 0 to 1 for Direct3D).
+                // to the coordinate system expected by the backend (e.g., 0 to 1 for Direct3D and Metal).
                 options.FixClipSpaceZ = true;
 
-                // This is the key fix. We ask the graphics device if its normalized Y-coordinate is inverted 
-                // (like in Metal and Vulkan) or not (like in Direct3D). We then tell the shader compiler
-                // to do the opposite, ensuring the final image is always correctly oriented.
-                // If device Y is inverted (IsClipSpaceYInverted=true), compiler should not invert (InvertVertexOutputY=false).
-                // If device Y is not inverted (IsClipSpaceYInverted=false), compiler should invert (InvertVertexOutputY=true).
+                // This corrects for differences in the Y-coordinate origin between graphics APIs.
+                // Veldrid's IsClipSpaceYInverted is true for Metal/Vulkan and false for D3D/OpenGL.
+                // We tell the shader compiler to invert the Y-axis only when the target backend *doesn't*
+                // have an inverted Y-axis, ensuring the final image is always correctly oriented.
                 options.InvertVertexOutputY = !VeldridManager.GraphicsDevice.IsClipSpaceYInverted;
 
                 var mainVertexDesc = new ShaderDescription(ShaderStages.Vertex, System.Text.Encoding.UTF8.GetBytes(vertexShaderGlsl), "main");
@@ -526,6 +525,7 @@ void main() { out_Color = PlaneColor; }";
                 _planeVisualizationShaders = factory.CreateFromSpirv(planeVertexDesc, planeFragmentDesc, options);
 
                 Logger.Log($"[CtVolume3DViewer] Shaders compiled successfully for backend: {VeldridManager.GraphicsDevice.BackendType}. Using InvertY: {options.InvertVertexOutputY}");
+                // --- FIX END ---
             }
             catch (Exception ex)
             {
