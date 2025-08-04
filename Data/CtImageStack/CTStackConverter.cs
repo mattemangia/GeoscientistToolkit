@@ -245,25 +245,63 @@ private static byte[] GetBrickDebug(ChunkedVolume volume, int brickX, int brickY
             return brickData;
         }
 
+        // In CtStackConverter.cs
+
         private static ChunkedVolume Downsample(ChunkedVolume input)
         {
             int newW = Math.Max(1, input.Width / 2);
             int newH = Math.Max(1, input.Height / 2);
             int newD = Math.Max(1, input.Depth / 2);
-            var output = new ChunkedVolume(newW, newH, newD, input.ChunkDim);
+
+            // --- FIX: Step 1 ---
+            // Create a simple, flat byte array. Writes to this array are thread-safe 
+            // as long as each thread accesses a unique index, which Parallel.For guarantees here.
+            var outputData = new byte[newW * newH * newD];
 
             Parallel.For(0, newD, z =>
             {
                 for (int y = 0; y < newH; y++)
-                for (int x = 0; x < newW; x++)
                 {
-                    int sum = 0;
-                    for(int i = 0; i < 8; i++)
-                        sum += input[x * 2 + (i & 1), y * 2 + ((i >> 1) & 1), z * 2 + ((i >> 2) & 1)];
-                    output[x, y, z] = (byte)(sum / 8);
+                    for (int x = 0; x < newW; x++)
+                    {
+                        // Kernel 2x2x2 averaging from the input volume
+                        int sum = 0;
+                        for (int i = 0; i < 8; i++)
+                        {
+                            sum += input[x * 2 + (i & 1), y * 2 + ((i >> 1) & 1), z * 2 + ((i >> 2) & 1)];
+                        }
+
+                        // Write to the thread-safe flat array, not the complex ChunkedVolume object.
+                        outputData[(z * newH + y) * newW + x] = (byte)(sum / 8);
+                    }
                 }
             });
-            return output;
+
+            // --- FIX: Step 2 ---
+            // Now that all parallel computation is done and the data is safely in outputData,
+            // create the new ChunkedVolume and populate it in a fast, single-threaded copy.
+            var outputVolume = new ChunkedVolume(newW, newH, newD, input.ChunkDim);
+            for (int z = 0; z < newD; z++)
+            {
+                for (int y = 0; y < newH; y++)
+                {
+                    for (int x = 0; x < newW; x++)
+                    {
+                        // This copy is now safe and correct.
+                        outputVolume[x, y, z] = outputData[(z * newH + y) * newW + x];
+                    }
+                }
+            }
+
+            // Optional but recommended: Log to confirm the fix
+            long nonZeroValues = 0;
+            foreach (byte val in outputData)
+            {
+                if (val != 0) nonZeroValues++;
+            }
+            Logger.Log($"[CtStackConverter] Downsampled LOD ({newW}x{newH}x{newD}) safely generated with {nonZeroValues} non-zero values.");
+
+            return outputVolume;
         }
     }
 }
