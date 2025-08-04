@@ -262,7 +262,6 @@ namespace GeoscientistToolkit.UI
                             }
                     break;
 
-                // --- FIX: Restored the logic for the missing patterns ---
                 case TestPattern.Checkerboard:
                     int boardSize = _volumeSize / 8;
                     for (int z = 0; z < _volumeSize; z++)

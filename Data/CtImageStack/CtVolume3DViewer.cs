@@ -68,7 +68,7 @@ namespace GeoscientistToolkit.Data.CtImageStack
         private Sampler _volumeSampler;
         private CommandList _commandList;
         private Texture _renderTexture;
-        private Texture _depthTexture; // --- FIX 1: Declare the depth texture ---
+        private Texture _depthTexture;
         private Framebuffer _framebuffer;
         private TextureManager _renderTextureManager;
         private readonly ImGuiExportFileDialog _screenshotDialog;
@@ -207,7 +207,6 @@ namespace GeoscientistToolkit.Data.CtImageStack
 
             _renderTexture = factory.CreateTexture(TextureDescription.Texture2D(1280, 720, 1, 1, PixelFormat.R8_G8_B8_A8_UNorm, TextureUsage.RenderTarget | TextureUsage.Sampled));
 
-            // --- FIX 2: Create the depth texture ---
             var depthDesc = TextureDescription.Texture2D(
                 _renderTexture.Width,
                 _renderTexture.Height,
@@ -216,7 +215,6 @@ namespace GeoscientistToolkit.Data.CtImageStack
                 TextureUsage.DepthStencil);
             _depthTexture = factory.CreateTexture(depthDesc);
 
-            // --- FIX 3: Attach the depth texture to the framebuffer description ---
             _framebuffer = factory.CreateFramebuffer(new FramebufferDescription(_depthTexture, _renderTexture));
 
             _renderTextureManager = TextureManager.CreateFromTexture(_renderTexture);
@@ -505,12 +503,19 @@ void main() { out_Color = PlaneColor; }";
 
             try
             {
+                // --- ROBUST FIX for cross-platform rendering ---
                 var options = new CrossCompileOptions();
-                if (VeldridManager.GraphicsDevice.BackendType == GraphicsBackend.Metal || VeldridManager.GraphicsDevice.BackendType == GraphicsBackend.Direct3D11)
-                {
-                    options.FixClipSpaceZ = true;
-                    options.InvertVertexOutputY = true;
-                }
+
+                // This tells the compiler to map the GLSL shader's output Z-coordinate (which is -1 to 1)
+                // to the coordinate system expected by the backend (e.g., 0 to 1 for Direct3D).
+                options.FixClipSpaceZ = true;
+
+                // This is the key fix. We ask the graphics device if its normalized Y-coordinate is inverted 
+                // (like in Metal and Vulkan) or not (like in Direct3D). We then tell the shader compiler
+                // to do the opposite, ensuring the final image is always correctly oriented.
+                // If device Y is inverted (IsClipSpaceYInverted=true), compiler should not invert (InvertVertexOutputY=false).
+                // If device Y is not inverted (IsClipSpaceYInverted=false), compiler should invert (InvertVertexOutputY=true).
+                options.InvertVertexOutputY = !VeldridManager.GraphicsDevice.IsClipSpaceYInverted;
 
                 var mainVertexDesc = new ShaderDescription(ShaderStages.Vertex, System.Text.Encoding.UTF8.GetBytes(vertexShaderGlsl), "main");
                 var mainFragmentDesc = new ShaderDescription(ShaderStages.Fragment, System.Text.Encoding.UTF8.GetBytes(fragmentShaderGlsl), "main");
@@ -520,7 +525,7 @@ void main() { out_Color = PlaneColor; }";
                 var planeFragmentDesc = new ShaderDescription(ShaderStages.Fragment, System.Text.Encoding.UTF8.GetBytes(planeFragmentShaderGlsl), "main");
                 _planeVisualizationShaders = factory.CreateFromSpirv(planeVertexDesc, planeFragmentDesc, options);
 
-                Logger.Log($"[CtVolume3DViewer] Shaders compiled successfully for backend: {VeldridManager.GraphicsDevice.BackendType}");
+                Logger.Log($"[CtVolume3DViewer] Shaders compiled successfully for backend: {VeldridManager.GraphicsDevice.BackendType}. Using InvertY: {options.InvertVertexOutputY}");
             }
             catch (Exception ex)
             {
@@ -924,7 +929,6 @@ void main() { out_Color = PlaneColor; }";
             _planeVisualizationIndexBuffer?.Dispose(); _planeVisualizationVertexBuffer?.Dispose(); _planeVisualizationConstantBuffer?.Dispose(); _resourceSet?.Dispose();
             _resourceLayout?.Dispose(); _volumeSampler?.Dispose(); _materialColorsTexture?.Dispose(); _materialParamsTexture?.Dispose(); _labelTexture?.Dispose();
             _previewTexture?.Dispose(); _colorMapTexture?.Dispose(); _volumeTexture?.Dispose();
-            // --- FIX 4: Dispose the depth texture ---
             _depthTexture?.Dispose();
             _framebuffer?.Dispose(); _renderTexture?.Dispose(); _pipeline?.Dispose();
             if (_shaders != null) { foreach (var shader in _shaders) shader?.Dispose(); }

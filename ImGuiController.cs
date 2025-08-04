@@ -77,6 +77,7 @@ namespace GeoscientistToolkit
             // Create shaders - try SPIR-V first, fall back to backend-specific if needed
             bool shadersCreated = false;
 
+            // --- FIX RESTORED ---
             // Only try SPIR-V cross-compilation if not on Windows D3D11 
             // (it has known issues with SPIR-V tools on some systems)
             if (!(RuntimeInformation.IsOSPlatform(OSPlatform.Windows) && gd.BackendType == GraphicsBackend.Direct3D11))

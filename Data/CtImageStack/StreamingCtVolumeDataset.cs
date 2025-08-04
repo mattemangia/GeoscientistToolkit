@@ -2,6 +2,8 @@
 using GeoscientistToolkit.Util;
 using System.IO;
 using GeoscientistToolkit.Data.VolumeData;
+using System.Collections.Generic;
+using GeoscientistToolkit.Business;
 
 namespace GeoscientistToolkit.Data.CtImageStack
 {
@@ -13,7 +15,6 @@ namespace GeoscientistToolkit.Data.CtImageStack
         public long FileOffset { get; set; }
     }
 
-    // THE FIX: Add ISerializableDataset interface
     public class StreamingCtVolumeDataset : Dataset, ISerializableDataset
     {
         public int FullWidth { get; private set; }
@@ -31,7 +32,6 @@ namespace GeoscientistToolkit.Data.CtImageStack
         public int Height { get; set; }
         public int Depth { get; set; }
 
-        // --- THE CRUCIAL LINK ---
         /// <summary>
         /// A reference to the corresponding CtImageStackDataset that holds the editable labels and materials.
         /// </summary>
@@ -45,73 +45,73 @@ namespace GeoscientistToolkit.Data.CtImageStack
         public override long GetSizeInBytes() => File.Exists(FilePath) ? new FileInfo(FilePath).Length : 0;
 
         public override void Load()
-{
-    if (BaseLodVolumeData != null) return;
-    Logger.Log($"[StreamingCtVolumeDataset] Loading header and base LOD from '{FilePath}'");
+        {
+            if (BaseLodVolumeData != null) return;
+            Logger.Log($"[StreamingCtVolumeDataset] Loading header and base LOD from '{FilePath}'");
 
-    using (var fs = new FileStream(FilePath, FileMode.Open, FileAccess.Read, FileShare.Read))
-    using (var reader = new BinaryReader(fs))
-    {
-        FullWidth = reader.ReadInt32();
-        FullHeight = reader.ReadInt32();
-        FullDepth = reader.ReadInt32();
-        BrickSize = reader.ReadInt32();
-        LodCount = reader.ReadInt32();
-        
-        Logger.Log($"[StreamingCtVolumeDataset] Header: {FullWidth}×{FullHeight}×{FullDepth}, BrickSize={BrickSize}, LODs={LodCount}");
-        
-        LodInfos = new GvtLodInfo[LodCount];
-        for(int i = 0; i < LodCount; i++)
-        {
-            LodInfos[i] = new GvtLodInfo
+            using (var fs = new FileStream(FilePath, FileMode.Open, FileAccess.Read, FileShare.Read))
+            using (var reader = new BinaryReader(fs))
             {
-                Width = reader.ReadInt32(),
-                Height = reader.ReadInt32(),
-                Depth = reader.ReadInt32(),
-                FileOffset = reader.ReadInt64()
-            };
-            Logger.Log($"[StreamingCtVolumeDataset] LOD {i}: {LodInfos[i].Width}×{LodInfos[i].Height}×{LodInfos[i].Depth} at offset {LodInfos[i].FileOffset}");
-        }
-        
-        var baseLodInfo = BaseLod;
-        int bricksX = (baseLodInfo.Width + BrickSize - 1) / BrickSize;
-        int bricksY = (baseLodInfo.Height + BrickSize - 1) / BrickSize;
-        int bricksZ = (baseLodInfo.Depth + BrickSize - 1) / BrickSize;
-        long baseLodByteSize = (long)bricksX * bricksY * bricksZ * BrickSize * BrickSize * BrickSize;
-        
-        Logger.Log($"[StreamingCtVolumeDataset] Base LOD has {bricksX}×{bricksY}×{bricksZ} bricks, total size: {baseLodByteSize} bytes");
-        
-        BaseLodVolumeData = new byte[baseLodByteSize];
-        fs.Seek(baseLodInfo.FileOffset, SeekOrigin.Begin);
-        int bytesRead = fs.Read(BaseLodVolumeData, 0, (int)baseLodByteSize);
-        
-        Logger.Log($"[StreamingCtVolumeDataset] Read {bytesRead} bytes for base LOD");
-        
-        // Check if base LOD has any data
-        int nonZeroCount = 0;
-        for (int i = 0; i < Math.Min(1000, BaseLodVolumeData.Length); i++)
-        {
-            if (BaseLodVolumeData[i] > 0)
-            {
-                nonZeroCount++;
-                if (nonZeroCount <= 10)
+                FullWidth = reader.ReadInt32();
+                FullHeight = reader.ReadInt32();
+                FullDepth = reader.ReadInt32();
+                BrickSize = reader.ReadInt32();
+                LodCount = reader.ReadInt32();
+
+                Logger.Log($"[StreamingCtVolumeDataset] Header: {FullWidth}×{FullHeight}×{FullDepth}, BrickSize={BrickSize}, LODs={LodCount}");
+
+                LodInfos = new GvtLodInfo[LodCount];
+                for (int i = 0; i < LodCount; i++)
                 {
-                    Logger.Log($"[StreamingCtVolumeDataset] Found non-zero value {BaseLodVolumeData[i]} at index {i}");
+                    LodInfos[i] = new GvtLodInfo
+                    {
+                        Width = reader.ReadInt32(),
+                        Height = reader.ReadInt32(),
+                        Depth = reader.ReadInt32(),
+                        FileOffset = reader.ReadInt64()
+                    };
+                    Logger.Log($"[StreamingCtVolumeDataset] LOD {i}: {LodInfos[i].Width}×{LodInfos[i].Height}×{LodInfos[i].Depth} at offset {LodInfos[i].FileOffset}");
+                }
+
+                var baseLodInfo = BaseLod;
+                int bricksX = (baseLodInfo.Width + BrickSize - 1) / BrickSize;
+                int bricksY = (baseLodInfo.Height + BrickSize - 1) / BrickSize;
+                int bricksZ = (baseLodInfo.Depth + BrickSize - 1) / BrickSize;
+                long baseLodByteSize = (long)bricksX * bricksY * bricksZ * BrickSize * BrickSize * BrickSize;
+
+                Logger.Log($"[StreamingCtVolumeDataset] Base LOD has {bricksX}×{bricksY}×{bricksZ} bricks, total size: {baseLodByteSize} bytes");
+
+                BaseLodVolumeData = new byte[baseLodByteSize];
+                fs.Seek(baseLodInfo.FileOffset, SeekOrigin.Begin);
+                int bytesRead = fs.Read(BaseLodVolumeData, 0, (int)baseLodByteSize);
+
+                Logger.Log($"[StreamingCtVolumeDataset] Read {bytesRead} bytes for base LOD");
+
+                // Check if base LOD has any data
+                int nonZeroCount = 0;
+                for (int i = 0; i < Math.Min(1000, BaseLodVolumeData.Length); i++)
+                {
+                    if (BaseLodVolumeData[i] > 0)
+                    {
+                        nonZeroCount++;
+                        if (nonZeroCount <= 10)
+                        {
+                            Logger.Log($"[StreamingCtVolumeDataset] Found non-zero value {BaseLodVolumeData[i]} at index {i}");
+                        }
+                    }
+                }
+
+                if (nonZeroCount == 0)
+                {
+                    Logger.LogError("[StreamingCtVolumeDataset] WARNING: Base LOD appears to be empty!");
+                }
+                else
+                {
+                    Logger.Log($"[StreamingCtVolumeDataset] Base LOD has {nonZeroCount} non-zero values in first 1000 bytes");
                 }
             }
         }
-        
-        if (nonZeroCount == 0)
-        {
-            Logger.LogError("[StreamingCtVolumeDataset] WARNING: Base LOD appears to be empty!");
-        }
-        else
-        {
-            Logger.Log($"[StreamingCtVolumeDataset] Base LOD has {nonZeroCount} non-zero values in first 1000 bytes");
-        }
-    }
-}
-        
+
         public object ToSerializableObject()
         {
             if (EditablePartner == null)
@@ -128,7 +128,7 @@ namespace GeoscientistToolkit.Data.CtImageStack
                 PartnerFilePath = this.EditablePartner.FilePath
             };
         }
-        
+
         public override void Unload()
         {
             BaseLodVolumeData = null;
