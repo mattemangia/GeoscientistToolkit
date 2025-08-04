@@ -68,7 +68,10 @@ namespace GeoscientistToolkit.Data.CtImageStack
 
         private void CreateMetalShaders(ResourceFactory factory)
         {
-            Logger.Log("[MetalVolumeRenderer] Compiling Metal shaders...");
+            Logger.Log("[MetalVolumeRenderer] Compiling Metal shaders the Veldrid-recommended way...");
+
+            // --- FIX: Standard, platform-agnostic vertex shader ---
+            // We remove the manual Z-coordinate manipulation. We will let Veldrid handle it.
             string metalVertexShaderGlsl = @"
 #version 450
 layout(location = 0) in vec3 in_Position;
@@ -85,12 +88,10 @@ layout(location = 0) out vec3 out_ModelPos;
 void main() 
 {
     out_ModelPos = in_Position;
-    vec4 clipPos = ViewProj * vec4(in_Position, 1.0);
-    // Metal-specific: ensure proper depth range
-    clipPos.z = clipPos.z * 0.5 + clipPos.w * 0.5;
-    gl_Position = clipPos;
+    gl_Position = ViewProj * vec4(in_Position, 1.0);
 }";
 
+            // The fragment shader remains identical.
             string metalFragmentShaderGlsl = @"
 #version 450
 #extension GL_EXT_samplerless_texture_functions : enable
@@ -119,9 +120,9 @@ layout(set = 0, binding = 0) uniform Constants
 layout(set = 0, binding = 1) uniform sampler VolumeSampler;
 layout(set = 0, binding = 2) uniform texture3D VolumeTexture;
 layout(set = 0, binding = 3) uniform texture3D LabelTexture;
-layout(set = 0, binding = 4) uniform texture2D ColorMapTexture; // Changed to 2D for Metal
-layout(set = 0, binding = 5) uniform texture2D MaterialParamsTexture; // Changed to 2D for Metal
-layout(set = 0, binding = 6) uniform texture2D MaterialColorsTexture; // Changed to 2D for Metal
+layout(set = 0, binding = 4) uniform texture2D ColorMapTexture;
+layout(set = 0, binding = 5) uniform texture2D MaterialParamsTexture;
+layout(set = 0, binding = 6) uniform texture2D MaterialColorsTexture;
 layout(set = 0, binding = 7) uniform texture3D PreviewTexture;
 
 bool IntersectBox(vec3 rayOrigin, vec3 rayDir, vec3 boxMin, vec3 boxMax, out float tNear, out float tFar)
@@ -165,7 +166,6 @@ vec4 ApplyColorMap(float intensity)
 {
     float mapOffset = RenderParams.x * 256.0;
     float samplePos = clamp((mapOffset + intensity * 255.0) / 1024.0, 0.0, 1.0);
-    // Use 2D texture for Metal (1 pixel height)
     return textureLod(sampler2D(ColorMapTexture, VolumeSampler), vec2(samplePos, 0.5), 0.0);
 }
 
@@ -177,7 +177,7 @@ void main()
     float tNear, tFar;
     if (!IntersectBox(rayOrigin, rayDir, vec3(0.0), vec3(1.0), tNear, tFar))
     {
-        discard; // This will result in a black (or clear color) pixel if hit for every fragment.
+        discard;
     }
     
     tNear = max(tNear, 0.0);
@@ -212,12 +212,12 @@ void main()
             int materialId = int(textureLod(sampler3D(LabelTexture, VolumeSampler), currentPos, 0.0).r * 255.0 + 0.5);
             vec2 materialParams = texelFetch(sampler2D(MaterialParamsTexture, VolumeSampler), ivec2(materialId, 0), 0).xy;
 
-            if (materialId > 0 && materialParams.x > 0.5) // materialParams.x is IsVisible
+            if (materialId > 0 && materialParams.x > 0.5)
             {
                 sampledColor = texelFetch(sampler2D(MaterialColorsTexture, VolumeSampler), ivec2(materialId, 0), 0);
                 sampledColor.a = materialParams.y * 5.0;
             }
-            else if (ThresholdParams.w > 0.5) // ShowGrayscale
+            else if (ThresholdParams.w > 0.5)
             {
                 float intensity = textureLod(sampler3D(VolumeTexture, VolumeSampler), currentPos, 0.0).r;
                 if (intensity >= ThresholdParams.x && intensity <= ThresholdParams.y)
@@ -236,22 +236,17 @@ void main()
         }
         t += step;
     }
-
-    if (accumulatedColor.a == 0.0) {
-        // If alpha is still 0, the pixel will be black.
-        // This is not a real log, but a comment to highlight a key point for debugging.
-    }
-
     out_Color = accumulatedColor;
 }";
 
+            // The plane shaders do not need to change as they use the same logic.
             string planeVertexShaderGlsl = @"
 #version 450
 layout(location = 0) in vec3 in_Position;
 layout(set = 0, binding = 0) uniform Constants { mat4 ViewProj; vec4 PlaneColor; };
 void main() { 
     vec4 clipPos = ViewProj * vec4(in_Position, 1.0);
-    clipPos.z = clipPos.z * 0.5 + clipPos.w * 0.5; // Metal depth range fix
+    // Let Veldrid handle this transformation automatically for Metal
     gl_Position = clipPos;
 }";
 
@@ -263,9 +258,11 @@ void main() { out_Color = PlaneColor; }";
 
             try
             {
-                // DEBUG: Verify Metal-specific compilation options
-                var options = new CrossCompileOptions(fixClipSpaceZ: false, invertVertexOutputY: false, normalizeResourceNames: true);
-                Logger.Log($"[MetalVolumeRenderer] CrossCompileOptions: FixClipSpaceZ={options.FixClipSpaceZ}, InvertY={options.InvertVertexOutputY}");
+                // --- FIX: Tell Veldrid to handle the platform differences for us. ---
+                // fixClipSpaceZ: true -> Veldrid will automatically add the z * 0.5 + w * 0.5 logic for Metal.
+                // invertVertexOutputY: false -> Correct for Metal's top-left origin.
+                var options = new CrossCompileOptions(fixClipSpaceZ: true, invertVertexOutputY: false, normalizeResourceNames: true);
+                Logger.Log($"[MetalVolumeRenderer] CrossCompileOptions: FixClipSpaceZ={options.FixClipSpaceZ}, InvertY={options.InvertVertexOutputY} (This is the recommended approach)");
 
                 var mainVertexDesc = new ShaderDescription(ShaderStages.Vertex, System.Text.Encoding.UTF8.GetBytes(metalVertexShaderGlsl), "main");
                 var mainFragmentDesc = new ShaderDescription(ShaderStages.Fragment, System.Text.Encoding.UTF8.GetBytes(metalFragmentShaderGlsl), "main");
@@ -273,13 +270,15 @@ void main() { out_Color = PlaneColor; }";
 
                 var planeVertexDesc = new ShaderDescription(ShaderStages.Vertex, System.Text.Encoding.UTF8.GetBytes(planeVertexShaderGlsl), "main");
                 var planeFragmentDesc = new ShaderDescription(ShaderStages.Fragment, System.Text.Encoding.UTF8.GetBytes(planeFragmentShaderGlsl), "main");
-                _planeVisualizationShaders = factory.CreateFromSpirv(planeVertexDesc, planeFragmentDesc, options);
+                // We need to apply the same logic to the plane shaders
+                var planeOptions = new CrossCompileOptions(fixClipSpaceZ: true, invertVertexOutputY: false, normalizeResourceNames: true);
+                _planeVisualizationShaders = factory.CreateFromSpirv(planeVertexDesc, planeFragmentDesc, planeOptions);
 
-                Logger.Log($"[MetalVolumeRenderer] Metal shaders compiled successfully.");
+                Logger.Log($"[MetalVolumeRenderer] Metal shaders compiled successfully with automatic platform correction.");
             }
             catch (Exception ex)
             {
-                Logger.LogError($"[MetalVolumeRenderer] FATAL: Failed to create Metal shaders. This is a primary cause for a black screen. Error: {ex.Message}\n{ex.StackTrace}");
+                Logger.LogError($"[MetalVolumeRenderer] FATAL: Failed to create Metal shaders: {ex.Message}\n{ex.StackTrace}");
                 throw new InvalidOperationException("Failed to create Metal shaders for 3D volume rendering", ex);
             }
         }
