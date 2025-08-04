@@ -10,7 +10,7 @@ using System.Linq;
 namespace GeoscientistToolkit.Data.CtImageStack
 {
     /// <summary>
-    /// Metal-specific volume renderer with robust fallback and debugging
+    /// Metal-specific volume renderer with material support
     /// </summary>
     public class MetalVolumeRenderer : IDisposable
     {
@@ -140,7 +140,7 @@ namespace GeoscientistToolkit.Data.CtImageStack
 
         private void CreateShaders(ResourceFactory factory)
         {
-            // Simplified Metal shader that should definitely work
+            // Metal shader with material support
             const string metalShaderSource = @"
 #include <metal_stdlib>
 using namespace metal;
@@ -180,10 +180,13 @@ vertex VertexOut vertex_main(VertexIn in [[stage_in]],
     return out;
 }
 
-// Fragment shader - simplified for debugging
+// Fragment shader with material support
 fragment float4 fragment_main(VertexOut in [[stage_in]],
                              constant Constants& constants [[buffer(0)]],
                              texture3d<float> volumeTex [[texture(0)]],
+                             texture3d<float> labelTex [[texture(1)]],
+                             texture2d<float> materialParams [[texture(2)]],
+                             texture2d<float> materialColors [[texture(3)]],
                              sampler volumeSampler [[sampler(0)]]) {
     // Ray setup
     float3 rayOrigin = constants.CameraPosition.xyz;
@@ -204,10 +207,10 @@ fragment float4 fragment_main(VertexOut in [[stage_in]],
     
     tNear = max(tNear, 0.0);
     
-    // Simple volume rendering
+    // Volume rendering with materials
     float4 color = float4(0.0);
     float stepSize = 0.01;
-    int maxSteps = 200;
+    int maxSteps = 300;
     
     for (int i = 0; i < maxSteps; i++) {
         float t = tNear + float(i) * stepSize;
@@ -216,13 +219,37 @@ fragment float4 fragment_main(VertexOut in [[stage_in]],
         float3 pos = rayOrigin + t * rayDir;
         if (any(pos < 0.0) || any(pos > 1.0)) continue;
         
-        // Sample volume
-        float density = volumeTex.sample(volumeSampler, pos).r;
+        // Check for materials first
+        float labelValue = labelTex.sample(volumeSampler, pos).r;
+        int materialId = int(labelValue * 255.0 + 0.5);
         
-        // Simple threshold
-        if (density > constants.ThresholdParams.x && density < constants.ThresholdParams.y) {
-            float opacity = density * 0.1;
-            color.rgb += (1.0 - color.a) * density * opacity;
+        float4 sampleColor = float4(0.0);
+        
+        if (materialId > 0) {
+            // Sample material parameters and colors
+            float2 params = materialParams.read(uint2(materialId, 0), 0).xy;
+            bool isVisible = params.x > 0.5;
+            
+            if (isVisible) {
+                float4 matColor = materialColors.read(uint2(materialId, 0), 0);
+                sampleColor = float4(matColor.rgb, matColor.a * 0.5);
+            }
+        } else if (constants.ThresholdParams.w > 0.5) {
+            // Sample grayscale volume
+            float density = volumeTex.sample(volumeSampler, pos).r;
+            
+            if (density > constants.ThresholdParams.x && density < constants.ThresholdParams.y) {
+                float normalizedDensity = (density - constants.ThresholdParams.x) / 
+                                        (constants.ThresholdParams.y - constants.ThresholdParams.x + 0.001);
+                sampleColor = float4(normalizedDensity, normalizedDensity, normalizedDensity, normalizedDensity * 0.3);
+            }
+        }
+        
+        // Accumulate color
+        if (sampleColor.a > 0.0) {
+            float opacity = sampleColor.a * stepSize * 50.0;
+            opacity = clamp(opacity, 0.0, 1.0);
+            color.rgb += (1.0 - color.a) * sampleColor.rgb * opacity;
             color.a += (1.0 - color.a) * opacity;
             
             if (color.a > 0.95) break;
@@ -272,44 +299,8 @@ fragment float4 plane_fragment_main(constant float4& color [[buffer(0)]]) {
             catch (Exception ex)
             {
                 Logger.LogError($"[MetalVolumeRenderer] Shader creation failed: {ex.Message}");
-
-                // Try even simpler shaders as fallback
-                CreateFallbackShaders(factory);
+                throw;
             }
-        }
-
-        private void CreateFallbackShaders(ResourceFactory factory)
-        {
-            // Ultra-simple shader that just outputs a color
-            const string fallbackShader = @"
-#include <metal_stdlib>
-using namespace metal;
-
-struct VertexIn {
-    float3 Position [[attribute(0)]];
-};
-
-vertex float4 vertex_fallback(VertexIn in [[stage_in]],
-                             constant float4x4& mvp [[buffer(0)]]) {
-    return mvp * float4(in.Position, 1.0);
-}
-
-fragment float4 fragment_fallback() {
-    return float4(1.0, 0.0, 1.0, 1.0); // Magenta for visibility
-}
-";
-
-            _vertexShader = factory.CreateShader(new ShaderDescription(
-                ShaderStages.Vertex,
-                Encoding.UTF8.GetBytes(fallbackShader),
-                "vertex_fallback"));
-
-            _fragmentShader = factory.CreateShader(new ShaderDescription(
-                ShaderStages.Fragment,
-                Encoding.UTF8.GetBytes(fallbackShader),
-                "fragment_fallback"));
-
-            Logger.LogWarning("[MetalVolumeRenderer] Using fallback shaders");
         }
 
         private void CreateTextures(ResourceFactory factory)
@@ -333,7 +324,7 @@ fragment float4 fragment_fallback() {
             VeldridManager.GraphicsDevice.UpdateTexture(_colorMapTexture, colorMapData,
                 0, 0, 0, size, 4, 1, 0, 0);
 
-            // Material textures
+            // Material textures - 2D for Metal
             _materialParamsTexture = factory.CreateTexture(TextureDescription.Texture2D(
                 256, 1, 1, 1, PixelFormat.R32_G32_Float, TextureUsage.Sampled));
             _materialColorsTexture = factory.CreateTexture(TextureDescription.Texture2D(
@@ -346,10 +337,13 @@ fragment float4 fragment_fallback() {
 
         private void CreatePipeline(ResourceFactory factory)
         {
-            // Create resource layout - simplified for debugging
+            // Create resource layout with all textures
             _resourceLayout = factory.CreateResourceLayout(new ResourceLayoutDescription(
                 new ResourceLayoutElementDescription("Constants", ResourceKind.UniformBuffer, ShaderStages.Vertex | ShaderStages.Fragment),
                 new ResourceLayoutElementDescription("VolumeTexture", ResourceKind.TextureReadOnly, ShaderStages.Fragment),
+                new ResourceLayoutElementDescription("LabelTexture", ResourceKind.TextureReadOnly, ShaderStages.Fragment),
+                new ResourceLayoutElementDescription("MaterialParamsTexture", ResourceKind.TextureReadOnly, ShaderStages.Fragment),
+                new ResourceLayoutElementDescription("MaterialColorsTexture", ResourceKind.TextureReadOnly, ShaderStages.Fragment),
                 new ResourceLayoutElementDescription("VolumeSampler", ResourceKind.Sampler, ShaderStages.Fragment)));
 
             // Create pipeline
@@ -393,11 +387,14 @@ fragment float4 fragment_fallback() {
 
         private void CreateResourceSets(ResourceFactory factory)
         {
-            // Create main resource set - simplified
+            // Create main resource set with all resources
             _resourceSet = factory.CreateResourceSet(new ResourceSetDescription(
                 _resourceLayout,
                 _constantBuffer,
                 _volumeTexture,
+                _labelTexture,
+                _materialParamsTexture,
+                _materialColorsTexture,
                 _volumeSampler));
 
             // Plane visualization resource set
@@ -423,6 +420,11 @@ fragment float4 fragment_fallback() {
                 {
                     paramData[i] = new Vector2(material.IsVisible ? 1.0f : 0.0f, 1.0f);
                     colorData[i] = new RgbaFloat(material.Color);
+
+                    if (i > 0 && i < 10) // Debug log first few materials
+                    {
+                        Logger.Log($"[MetalVolumeRenderer] Material {i}: Visible={material.IsVisible}, Color={material.Color}");
+                    }
                 }
                 else
                 {
@@ -433,12 +435,26 @@ fragment float4 fragment_fallback() {
 
             VeldridManager.GraphicsDevice.UpdateTexture(_materialParamsTexture, paramData, 0, 0, 0, 256, 1, 1, 0, 0);
             VeldridManager.GraphicsDevice.UpdateTexture(_materialColorsTexture, colorData, 0, 0, 0, 256, 1, 1, 0, 0);
+
+            Logger.Log("[MetalVolumeRenderer] Material textures updated");
         }
 
         public void UpdateLabelTexture(Texture newLabelTexture)
         {
             _labelTexture = newLabelTexture;
-            // Recreate resource set if needed
+
+            // Recreate resource set with new label texture
+            _resourceSet?.Dispose();
+            _resourceSet = VeldridManager.Factory.CreateResourceSet(new ResourceSetDescription(
+                _resourceLayout,
+                _constantBuffer,
+                _volumeTexture,
+                _labelTexture,
+                _materialParamsTexture,
+                _materialColorsTexture,
+                _volumeSampler));
+
+            Logger.Log("[MetalVolumeRenderer] Label texture updated");
         }
 
         public void Render(CommandList cl, Framebuffer framebuffer,
@@ -455,7 +471,7 @@ fragment float4 fragment_fallback() {
             {
                 cl.Begin();
                 cl.SetFramebuffer(framebuffer);
-                cl.ClearColorTarget(0, new RgbaFloat(0.1f, 0.1f, 0.1f, 1.0f)); // Dark gray background
+                cl.ClearColorTarget(0, new RgbaFloat(0.1f, 0.1f, 0.1f, 1.0f));
                 cl.ClearDepthStencil(1f);
 
                 // Update constants
@@ -471,6 +487,9 @@ fragment float4 fragment_fallback() {
                 };
 
                 VeldridManager.GraphicsDevice.UpdateBuffer(_constantBuffer, 0, ref constants);
+
+                // Make sure material textures are up to date
+                _viewer.UpdateMaterialTextures();
 
                 // Draw volume
                 cl.SetPipeline(_pipeline);
