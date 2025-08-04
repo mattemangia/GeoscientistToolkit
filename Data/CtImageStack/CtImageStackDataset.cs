@@ -35,7 +35,7 @@ namespace GeoscientistToolkit.Data.CtImageStack
         public ChunkedVolume VolumeData => _volumeData;
 
         // --- NEW PROPERTIES FOR MATERIALS AND LABELS ---
-        public ChunkedLabelVolume LabelData { get; private set; }
+        public ChunkedLabelVolume LabelData { get; set; }
         public List<Material> Materials { get; set; } = new List<Material>();
 
         public CtImageStackDataset(string name, string folderPath) : base(name, folderPath)
