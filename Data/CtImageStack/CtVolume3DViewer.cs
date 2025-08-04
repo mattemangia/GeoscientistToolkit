@@ -399,6 +399,7 @@ namespace GeoscientistToolkit.Data.CtImageStack
 
         private void CreateShaders(ResourceFactory factory)
         {
+            // --- FIX 1: Remove manual Y-flip from the shader. Let Veldrid handle it. ---
             string vertexShaderGlsl = @"
 #version 450
 
@@ -408,8 +409,8 @@ layout(location = 0) out vec3 out_TexCoord;
 void main() 
 {
     out_TexCoord = in_Position;
+    // The Y-flip is now handled by Veldrid's CrossCompileOptions
     gl_Position = vec4(in_Position * 2.0 - 1.0, 1.0);
-    gl_Position.y = -gl_Position.y;
 }";
 
             string fragmentShaderGlsl = @"
@@ -645,49 +646,34 @@ void main()
 
             try
             {
+                // --- FIX 2: Define consistent cross-compile options for all shaders ---
+                var options = new CrossCompileOptions();
+                bool isMetalOrD3D = VeldridManager.GraphicsDevice.BackendType == GraphicsBackend.Metal ||
+                                    VeldridManager.GraphicsDevice.BackendType == GraphicsBackend.Direct3D11;
+
+                if (isMetalOrD3D)
+                {
+                    options.FixClipSpaceZ = true; // Correct depth from [-1, 1] to [0, 1]
+                    options.InvertVertexOutputY = true; // Correct Y from pointing up to pointing down
+                }
+
                 // Create descriptions for the main volume rendering shaders
                 var mainVertexDesc = new ShaderDescription(ShaderStages.Vertex, System.Text.Encoding.UTF8.GetBytes(vertexShaderGlsl), "main");
                 var mainFragmentDesc = new ShaderDescription(ShaderStages.Fragment, System.Text.Encoding.UTF8.GetBytes(fragmentShaderGlsl), "main");
-
-                // --- FIX: Use CrossCompileOptions for backend compatibility ---
-                // The main vertex shader manually flips Y, so InvertVertexOutputY must be false.
-                var mainOptions = new CrossCompileOptions();
-                if (VeldridManager.GraphicsDevice.BackendType == GraphicsBackend.Metal || VeldridManager.GraphicsDevice.BackendType == GraphicsBackend.Direct3D11)
-                {
-                    mainOptions.FixClipSpaceZ = true;
-                }
-                mainOptions.InvertVertexOutputY = false;
-
-                // Use the correct CreateFromSpirv overload that accepts options
-                _shaders = factory.CreateFromSpirv(mainVertexDesc, mainFragmentDesc, mainOptions);
+                _shaders = factory.CreateFromSpirv(mainVertexDesc, mainFragmentDesc, options);
 
 
                 // Create descriptions for the plane visualization shaders
                 var planeVertexDesc = new ShaderDescription(ShaderStages.Vertex, System.Text.Encoding.UTF8.GetBytes(planeVertexShaderGlsl), "main");
                 var planeFragmentDesc = new ShaderDescription(ShaderStages.Fragment, System.Text.Encoding.UTF8.GetBytes(planeFragmentShaderGlsl), "main");
-
-                // --- FIX: Use separate CrossCompileOptions for plane shaders ---
-                // The plane vertex shader uses a standard Y-up projection matrix and does not flip Y.
-                // Therefore, InvertVertexOutputY must be true for Metal/D3D11.
-                var planeOptions = new CrossCompileOptions();
-                if (VeldridManager.GraphicsDevice.BackendType == GraphicsBackend.Metal || VeldridManager.GraphicsDevice.BackendType == GraphicsBackend.Direct3D11)
-                {
-                    planeOptions.FixClipSpaceZ = true;
-                    planeOptions.InvertVertexOutputY = true;
-                }
-
-                _planeVisualizationShaders = factory.CreateFromSpirv(planeVertexDesc, planeFragmentDesc, planeOptions);
+                _planeVisualizationShaders = factory.CreateFromSpirv(planeVertexDesc, planeFragmentDesc, options);
 
                 Logger.Log($"[CtVolume3DViewer] Shaders compiled successfully for backend: {VeldridManager.GraphicsDevice.BackendType}");
             }
             catch (Exception ex)
             {
                 Logger.LogError($"[CtVolume3DViewer] Failed to create shaders: {ex.Message}");
-                // Fallback or throw
-                if (_shaders == null || _planeVisualizationShaders == null)
-                {
-                    throw new InvalidOperationException("Failed to create shaders for 3D volume rendering. Your GPU or driver may not be supported.", ex);
-                }
+                throw new InvalidOperationException("Failed to create shaders for 3D volume rendering", ex);
             }
         }
 
@@ -703,10 +689,11 @@ void main()
                 new ResourceLayoutElementDescription("MaterialColorsTexture", ResourceKind.TextureReadOnly, ShaderStages.Fragment),
                 new ResourceLayoutElementDescription("PreviewTexture", ResourceKind.TextureReadOnly, ShaderStages.Fragment)));
 
+            // --- FIX 3: Change winding order to Counter-Clockwise to match vertices ---
             _pipeline = factory.CreateGraphicsPipeline(new GraphicsPipelineDescription(
                 BlendStateDescription.SingleAlphaBlend,
                 new DepthStencilStateDescription(false, false, ComparisonKind.Always),
-                new RasterizerStateDescription(FaceCullMode.None, PolygonFillMode.Solid, FrontFace.Clockwise, true, false),
+                new RasterizerStateDescription(FaceCullMode.None, PolygonFillMode.Solid, FrontFace.CounterClockwise, true, false),
                 PrimitiveTopology.TriangleList,
                 new ShaderSetDescription(new[] { new VertexLayoutDescription(new VertexElementDescription("Position", VertexElementSemantic.TextureCoordinate, VertexElementFormat.Float3)) }, _shaders),
                 new[] { _resourceLayout }, _framebuffer.OutputDescription));
@@ -720,7 +707,7 @@ void main()
                     RgbaFloat.Black,
                     BlendAttachmentDescription.AlphaBlend),
                 new DepthStencilStateDescription(true, false, ComparisonKind.Less),
-                new RasterizerStateDescription(FaceCullMode.None, PolygonFillMode.Solid, FrontFace.Clockwise, true, false),
+                new RasterizerStateDescription(FaceCullMode.None, PolygonFillMode.Solid, FrontFace.CounterClockwise, true, false),
                 PrimitiveTopology.TriangleList,
                 new ShaderSetDescription(new[] { new VertexLayoutDescription(new VertexElementDescription("Position", VertexElementSemantic.TextureCoordinate, VertexElementFormat.Float3)) },
                     _planeVisualizationShaders),
