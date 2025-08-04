@@ -645,26 +645,49 @@ void main()
 
             try
             {
-                _shaders = factory.CreateFromSpirv(
-                    new ShaderDescription(ShaderStages.Vertex,
-                        System.Text.Encoding.UTF8.GetBytes(vertexShaderGlsl), "main"),
-                    new ShaderDescription(ShaderStages.Fragment,
-                        System.Text.Encoding.UTF8.GetBytes(fragmentShaderGlsl), "main")
-                );
+                // Create descriptions for the main volume rendering shaders
+                var mainVertexDesc = new ShaderDescription(ShaderStages.Vertex, System.Text.Encoding.UTF8.GetBytes(vertexShaderGlsl), "main");
+                var mainFragmentDesc = new ShaderDescription(ShaderStages.Fragment, System.Text.Encoding.UTF8.GetBytes(fragmentShaderGlsl), "main");
 
-                _planeVisualizationShaders = factory.CreateFromSpirv(
-                    new ShaderDescription(ShaderStages.Vertex,
-                        System.Text.Encoding.UTF8.GetBytes(planeVertexShaderGlsl), "main"),
-                    new ShaderDescription(ShaderStages.Fragment,
-                        System.Text.Encoding.UTF8.GetBytes(planeFragmentShaderGlsl), "main")
-                );
+                // --- FIX: Use CrossCompileOptions for backend compatibility ---
+                // The main vertex shader manually flips Y, so InvertVertexOutputY must be false.
+                var mainOptions = new CrossCompileOptions();
+                if (VeldridManager.GraphicsDevice.BackendType == GraphicsBackend.Metal || VeldridManager.GraphicsDevice.BackendType == GraphicsBackend.Direct3D11)
+                {
+                    mainOptions.FixClipSpaceZ = true;
+                }
+                mainOptions.InvertVertexOutputY = false;
+
+                // Use the correct CreateFromSpirv overload that accepts options
+                _shaders = factory.CreateFromSpirv(mainVertexDesc, mainFragmentDesc, mainOptions);
+
+
+                // Create descriptions for the plane visualization shaders
+                var planeVertexDesc = new ShaderDescription(ShaderStages.Vertex, System.Text.Encoding.UTF8.GetBytes(planeVertexShaderGlsl), "main");
+                var planeFragmentDesc = new ShaderDescription(ShaderStages.Fragment, System.Text.Encoding.UTF8.GetBytes(planeFragmentShaderGlsl), "main");
+
+                // --- FIX: Use separate CrossCompileOptions for plane shaders ---
+                // The plane vertex shader uses a standard Y-up projection matrix and does not flip Y.
+                // Therefore, InvertVertexOutputY must be true for Metal/D3D11.
+                var planeOptions = new CrossCompileOptions();
+                if (VeldridManager.GraphicsDevice.BackendType == GraphicsBackend.Metal || VeldridManager.GraphicsDevice.BackendType == GraphicsBackend.Direct3D11)
+                {
+                    planeOptions.FixClipSpaceZ = true;
+                    planeOptions.InvertVertexOutputY = true;
+                }
+
+                _planeVisualizationShaders = factory.CreateFromSpirv(planeVertexDesc, planeFragmentDesc, planeOptions);
 
                 Logger.Log($"[CtVolume3DViewer] Shaders compiled successfully for backend: {VeldridManager.GraphicsDevice.BackendType}");
             }
             catch (Exception ex)
             {
                 Logger.LogError($"[CtVolume3DViewer] Failed to create shaders: {ex.Message}");
-                throw new InvalidOperationException("Failed to create shaders for 3D volume rendering", ex);
+                // Fallback or throw
+                if (_shaders == null || _planeVisualizationShaders == null)
+                {
+                    throw new InvalidOperationException("Failed to create shaders for 3D volume rendering. Your GPU or driver may not be supported.", ex);
+                }
             }
         }
 
