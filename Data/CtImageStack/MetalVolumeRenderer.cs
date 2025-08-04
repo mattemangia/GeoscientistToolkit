@@ -7,6 +7,7 @@ using GeoscientistToolkit.Business;
 using GeoscientistToolkit.Util;
 using Veldrid;
 using Veldrid.SPIRV;
+using System.Reflection;
 
 namespace GeoscientistToolkit.Data.CtImageStack
 {
@@ -46,6 +47,7 @@ namespace GeoscientistToolkit.Data.CtImageStack
 
         public void InitializeResources(ResourceFactory factory, Framebuffer framebuffer, Texture volumeTexture, Texture labelTexture, Texture previewTexture, Sampler volumeSampler)
         {
+            Logger.Log("[MetalVolumeRenderer] Initializing Metal-specific resources...");
             // Store references to shared resources
             _volumeTexture = volumeTexture;
             _labelTexture = labelTexture;
@@ -61,10 +63,12 @@ namespace GeoscientistToolkit.Data.CtImageStack
             _planeVisualizationConstantBuffer = factory.CreateBuffer(new BufferDescription((uint)Marshal.SizeOf<CtVolume3DViewer.PlaneVisualizationConstants>(), BufferUsage.UniformBuffer | BufferUsage.Dynamic));
 
             CreateMetalResourceSet(factory);
+            Logger.Log("[MetalVolumeRenderer] Metal initialization complete.");
         }
 
         private void CreateMetalShaders(ResourceFactory factory)
         {
+            Logger.Log("[MetalVolumeRenderer] Compiling Metal shaders...");
             string metalVertexShaderGlsl = @"
 #version 450
 layout(location = 0) in vec3 in_Position;
@@ -173,7 +177,7 @@ void main()
     float tNear, tFar;
     if (!IntersectBox(rayOrigin, rayDir, vec3(0.0), vec3(1.0), tNear, tFar))
     {
-        discard;
+        discard; // This will result in a black (or clear color) pixel if hit for every fragment.
     }
     
     tNear = max(tNear, 0.0);
@@ -206,15 +210,14 @@ void main()
         else
         {
             int materialId = int(textureLod(sampler3D(LabelTexture, VolumeSampler), currentPos, 0.0).r * 255.0 + 0.5);
-            // Use 2D textures for Metal (1 pixel height)
             vec2 materialParams = texelFetch(sampler2D(MaterialParamsTexture, VolumeSampler), ivec2(materialId, 0), 0).xy;
 
-            if (materialId > 0 && materialParams.x > 0.5)
+            if (materialId > 0 && materialParams.x > 0.5) // materialParams.x is IsVisible
             {
                 sampledColor = texelFetch(sampler2D(MaterialColorsTexture, VolumeSampler), ivec2(materialId, 0), 0);
                 sampledColor.a = materialParams.y * 5.0;
             }
-            else if (ThresholdParams.w > 0.5)
+            else if (ThresholdParams.w > 0.5) // ShowGrayscale
             {
                 float intensity = textureLod(sampler3D(VolumeTexture, VolumeSampler), currentPos, 0.0).r;
                 if (intensity >= ThresholdParams.x && intensity <= ThresholdParams.y)
@@ -233,6 +236,12 @@ void main()
         }
         t += step;
     }
+
+    if (accumulatedColor.a == 0.0) {
+        // If alpha is still 0, the pixel will be black.
+        // This is not a real log, but a comment to highlight a key point for debugging.
+    }
+
     out_Color = accumulatedColor;
 }";
 
@@ -254,7 +263,9 @@ void main() { out_Color = PlaneColor; }";
 
             try
             {
+                // DEBUG: Verify Metal-specific compilation options
                 var options = new CrossCompileOptions(fixClipSpaceZ: false, invertVertexOutputY: false, normalizeResourceNames: true);
+                Logger.Log($"[MetalVolumeRenderer] CrossCompileOptions: FixClipSpaceZ={options.FixClipSpaceZ}, InvertY={options.InvertVertexOutputY}");
 
                 var mainVertexDesc = new ShaderDescription(ShaderStages.Vertex, System.Text.Encoding.UTF8.GetBytes(metalVertexShaderGlsl), "main");
                 var mainFragmentDesc = new ShaderDescription(ShaderStages.Fragment, System.Text.Encoding.UTF8.GetBytes(metalFragmentShaderGlsl), "main");
@@ -264,18 +275,19 @@ void main() { out_Color = PlaneColor; }";
                 var planeFragmentDesc = new ShaderDescription(ShaderStages.Fragment, System.Text.Encoding.UTF8.GetBytes(planeFragmentShaderGlsl), "main");
                 _planeVisualizationShaders = factory.CreateFromSpirv(planeVertexDesc, planeFragmentDesc, options);
 
-                Logger.Log($"[MetalVolumeRenderer] Metal shaders compiled successfully");
+                Logger.Log($"[MetalVolumeRenderer] Metal shaders compiled successfully.");
             }
             catch (Exception ex)
             {
-                Logger.LogError($"[MetalVolumeRenderer] Failed to create Metal shaders: {ex.Message}");
+                Logger.LogError($"[MetalVolumeRenderer] FATAL: Failed to create Metal shaders. This is a primary cause for a black screen. Error: {ex.Message}\n{ex.StackTrace}");
                 throw new InvalidOperationException("Failed to create Metal shaders for 3D volume rendering", ex);
             }
         }
 
         private void CreateMetalPipeline(ResourceFactory factory, Framebuffer framebuffer)
         {
-            _resourceLayout = factory.CreateResourceLayout(new ResourceLayoutDescription(
+            Logger.Log("[MetalVolumeRenderer] Creating Metal pipeline...");
+            var resourceLayoutDesc = new ResourceLayoutDescription(
                 new ResourceLayoutElementDescription("Constants", ResourceKind.UniformBuffer, ShaderStages.Vertex | ShaderStages.Fragment),
                 new ResourceLayoutElementDescription("VolumeSampler", ResourceKind.Sampler, ShaderStages.Fragment),
                 new ResourceLayoutElementDescription("VolumeTexture", ResourceKind.TextureReadOnly, ShaderStages.Fragment),
@@ -283,7 +295,15 @@ void main() { out_Color = PlaneColor; }";
                 new ResourceLayoutElementDescription("ColorMapTexture", ResourceKind.TextureReadOnly, ShaderStages.Fragment),
                 new ResourceLayoutElementDescription("MaterialParamsTexture", ResourceKind.TextureReadOnly, ShaderStages.Fragment),
                 new ResourceLayoutElementDescription("MaterialColorsTexture", ResourceKind.TextureReadOnly, ShaderStages.Fragment),
-                new ResourceLayoutElementDescription("PreviewTexture", ResourceKind.TextureReadOnly, ShaderStages.Fragment)));
+                new ResourceLayoutElementDescription("PreviewTexture", ResourceKind.TextureReadOnly, ShaderStages.Fragment));
+
+            // DEBUG: Log resource layout to check binding order against the shader.
+            for (int i = 0; i < resourceLayoutDesc.Elements.Length; i++)
+            {
+                Logger.Log($"[MetalVolumeRenderer] Main Layout Binding {i}: {resourceLayoutDesc.Elements[i].Name} ({resourceLayoutDesc.Elements[i].Kind})");
+            }
+
+            _resourceLayout = factory.CreateResourceLayout(resourceLayoutDesc);
 
             _pipeline = factory.CreateGraphicsPipeline(new GraphicsPipelineDescription(
                 BlendStateDescription.SingleAlphaBlend,
@@ -292,9 +312,19 @@ void main() { out_Color = PlaneColor; }";
                 PrimitiveTopology.TriangleList,
                 new ShaderSetDescription(new[] { new VertexLayoutDescription(new VertexElementDescription("Position", VertexElementSemantic.TextureCoordinate, VertexElementFormat.Float3)) }, _shaders),
                 new[] { _resourceLayout }, framebuffer.OutputDescription));
+            Logger.Log("[MetalVolumeRenderer] Main pipeline created.");
 
-            _planeVisualizationResourceLayout = factory.CreateResourceLayout(new ResourceLayoutDescription(
-                new ResourceLayoutElementDescription("Constants", ResourceKind.UniformBuffer, ShaderStages.Vertex | ShaderStages.Fragment)));
+            // --- FIX START ---
+            // First, create the description for the plane visualization layout.
+            var planeResourceLayoutDesc = new ResourceLayoutDescription(
+                new ResourceLayoutElementDescription("Constants", ResourceKind.UniformBuffer, ShaderStages.Vertex | ShaderStages.Fragment));
+
+            // DEBUG: Log the description's elements, not the final resource's.
+            Logger.Log($"[MetalVolumeRenderer] Plane Layout Binding 0: {planeResourceLayoutDesc.Elements[0].Name} ({planeResourceLayoutDesc.Elements[0].Kind})");
+
+            // Now, create the layout from the description.
+            _planeVisualizationResourceLayout = factory.CreateResourceLayout(planeResourceLayoutDesc);
+            // --- FIX END ---
 
             _planeVisualizationPipeline = factory.CreateGraphicsPipeline(new GraphicsPipelineDescription(
                 new BlendStateDescription(RgbaFloat.Black, BlendAttachmentDescription.AlphaBlend),
@@ -303,6 +333,7 @@ void main() { out_Color = PlaneColor; }";
                 PrimitiveTopology.TriangleList,
                 new ShaderSetDescription(new[] { new VertexLayoutDescription(new VertexElementDescription("Position", VertexElementSemantic.TextureCoordinate, VertexElementFormat.Float3)) }, _planeVisualizationShaders),
                 new[] { _planeVisualizationResourceLayout }, framebuffer.OutputDescription));
+            Logger.Log("[MetalVolumeRenderer] Plane visualization pipeline created.");
         }
 
         private void CreateMetalTextures(ResourceFactory factory)
@@ -310,7 +341,6 @@ void main() { out_Color = PlaneColor; }";
             const int mapSize = 256;
             const int numMaps = 4;
             var colorMapData = new RgbaFloat[mapSize * numMaps];
-            // ... (color map generation logic is identical) ...
             for (int i = 0; i < mapSize; i++) { float v = i / (float)(mapSize - 1); colorMapData[i] = new RgbaFloat(v, v, v, 1); }
             for (int i = 0; i < mapSize; i++) { float t = i / (float)(mapSize - 1); float r = Math.Min(1.0f, 3.0f * t); float g = Math.Clamp(3.0f * t - 1.0f, 0.0f, 1.0f); float b = Math.Clamp(3.0f * t - 2.0f, 0.0f, 1.0f); colorMapData[mapSize * 1 + i] = new RgbaFloat(r, g, b, 1); }
             for (int i = 0; i < mapSize; i++) { float t = i / (float)(mapSize - 1); colorMapData[mapSize * 2 + i] = new RgbaFloat(t, 1 - t, 1, 1); }
@@ -323,6 +353,8 @@ void main() { out_Color = PlaneColor; }";
             _materialParamsTexture = factory.CreateTexture(TextureDescription.Texture2D(256, 1, 1, 1, PixelFormat.R32_G32_Float, TextureUsage.Sampled));
             _materialColorsTexture = factory.CreateTexture(TextureDescription.Texture2D(256, 1, 1, 1, PixelFormat.R32_G32_B32_A32_Float, TextureUsage.Sampled));
 
+            Logger.Log($"[MetalVolumeRenderer] Metal-specific 2D textures created (ColorMap: {_colorMapTexture.Width}x{_colorMapTexture.Height}, MaterialParams: {_materialParamsTexture.Width}x{_materialParamsTexture.Height}).");
+
             _viewer.UpdateMaterialTextures();
         }
 
@@ -330,6 +362,7 @@ void main() { out_Color = PlaneColor; }";
         {
             _resourceSet = factory.CreateResourceSet(new ResourceSetDescription(_resourceLayout, _constantBuffer, _volumeSampler, _volumeTexture, _labelTexture, _colorMapTexture, _materialParamsTexture, _materialColorsTexture, _previewTexture));
             _planeVisualizationResourceSet = factory.CreateResourceSet(new ResourceSetDescription(_planeVisualizationResourceLayout, _planeVisualizationConstantBuffer));
+            Logger.Log("[MetalVolumeRenderer] Resource sets created.");
         }
 
         private unsafe void UpdateConstantBuffer(Matrix4x4 view, Matrix4x4 proj, Vector3 camPos)
@@ -369,15 +402,24 @@ void main() { out_Color = PlaneColor; }";
             }
             constants.ClippingPlanesInfo.X = enabledPlanes;
 
+            // DEBUG: Log key uniform values to check for bad data (NaN, etc.)
+            if (float.IsNaN(constants.ViewProj.M11))
+            {
+                Logger.LogError("[MetalVolumeRenderer] ViewProj matrix contains NaN. This will cause a black screen.");
+            }
+            Logger.Log($"[MetalVolumeRenderer] Updating UBO: CamPos={constants.CameraPosition}, Thresholds={constants.ThresholdParams.X:F2}-{constants.ThresholdParams.Y:F2}, ShowGrayscale={constants.ThresholdParams.W > 0.5f}");
+
             VeldridManager.GraphicsDevice.UpdateBuffer(_constantBuffer, 0, ref constants);
         }
 
         public void UpdateMaterialTextures()
         {
             if (_materialParamsTexture == null || _materialColorsTexture == null) return;
+            Logger.Log("[MetalVolumeRenderer] Updating material textures...");
 
             var paramData = new Vector2[256];
             var colorData = new RgbaFloat[256];
+            bool anyVisible = false;
             for (int i = 0; i < 256; i++)
             {
                 var material = _viewer._editableDataset.Materials.FirstOrDefault(m => m.ID == i);
@@ -385,6 +427,7 @@ void main() { out_Color = PlaneColor; }";
                 {
                     paramData[i] = new Vector2(material.IsVisible ? 1.0f : 0.0f, 1.0f);
                     colorData[i] = new RgbaFloat(material.Color);
+                    if (material.IsVisible && i > 0) anyVisible = true;
                 }
                 else
                 {
@@ -392,6 +435,13 @@ void main() { out_Color = PlaneColor; }";
                     colorData[i] = RgbaFloat.Black;
                 }
             }
+
+            // DEBUG: Warn if no materials are visible, as this would result in a black image (if ShowGrayscale is also off).
+            if (!anyVisible && !(_viewer.ShowGrayscale))
+            {
+                Logger.LogWarning("[MetalVolumeRenderer] No materials are marked as visible and ShowGrayscale is OFF. The volume will likely appear black.");
+            }
+
             VeldridManager.GraphicsDevice.UpdateTexture(_materialParamsTexture, paramData, 0, 0, 0, 256, 1, 1, 0, 0);
             VeldridManager.GraphicsDevice.UpdateTexture(_materialColorsTexture, colorData, 0, 0, 0, 256, 1, 1, 0, 0);
         }
@@ -400,11 +450,13 @@ void main() { out_Color = PlaneColor; }";
         {
             _labelTexture = newLabelTexture;
             _resourceSet?.Dispose();
+            Logger.LogWarning("[MetalVolumeRenderer] Label data changed, recreating resource set.");
             CreateMetalResourceSet(VeldridManager.Factory);
         }
 
         public void Render(CommandList cl, Framebuffer framebuffer, Matrix4x4 view, Matrix4x4 proj, Vector3 camPos, DeviceBuffer planeVtx, DeviceBuffer planeIdx)
         {
+            Logger.Log("[MetalVolumeRenderer] Frame Render Start.");
             cl.Begin();
             cl.SetFramebuffer(framebuffer);
             cl.ClearColorTarget(0, RgbaFloat.Black);
@@ -413,19 +465,35 @@ void main() { out_Color = PlaneColor; }";
             UpdateConstantBuffer(view, proj, camPos);
 
             cl.SetPipeline(_pipeline);
-            cl.SetVertexBuffer(0, (DeviceBuffer)typeof(CtVolume3DViewer).GetField("_vertexBuffer", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance).GetValue(_viewer));
-            cl.SetIndexBuffer((DeviceBuffer)typeof(CtVolume3DViewer).GetField("_indexBuffer", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance).GetValue(_viewer), IndexFormat.UInt16);
+
+            // DEBUG: Getting buffers via reflection is fragile. Warn if it fails.
+            var vertexBuffer = (DeviceBuffer)typeof(CtVolume3DViewer).GetField("_vertexBuffer", BindingFlags.NonPublic | BindingFlags.Instance).GetValue(_viewer);
+            var indexBuffer = (DeviceBuffer)typeof(CtVolume3DViewer).GetField("_indexBuffer", BindingFlags.NonPublic | BindingFlags.Instance).GetValue(_viewer);
+
+            if (vertexBuffer == null || indexBuffer == null)
+            {
+                Logger.LogError("[MetalVolumeRenderer] FATAL: Vertex or Index buffer is null. Cannot draw.");
+                cl.End();
+                VeldridManager.GraphicsDevice.SubmitCommands(cl); // Submit the clear command
+                return;
+            }
+
+            cl.SetVertexBuffer(0, vertexBuffer);
+            cl.SetIndexBuffer(indexBuffer, IndexFormat.UInt16);
             cl.SetGraphicsResourceSet(0, _resourceSet);
             cl.DrawIndexed(36, 1, 0, 0, 0);
+            Logger.Log("[MetalVolumeRenderer] Main volume cube drawn.");
 
             if (_viewer.ShowPlaneVisualizations)
             {
                 RenderPlaneVisualizations(cl, view * proj, planeVtx, planeIdx);
+                Logger.Log("[MetalVolumeRenderer] Plane visualizations drawn.");
             }
 
             cl.End();
             VeldridManager.GraphicsDevice.SubmitCommands(cl);
             VeldridManager.GraphicsDevice.WaitForIdle();
+            Logger.Log("[MetalVolumeRenderer] Frame Render End.");
         }
 
         private void RenderPlaneVisualizations(CommandList cl, Matrix4x4 viewProj, DeviceBuffer planeVtx, DeviceBuffer planeIdx)
@@ -476,6 +544,7 @@ void main() { out_Color = PlaneColor; }";
 
         public void Dispose()
         {
+            Logger.LogWarning("[MetalVolumeRenderer] Disposing Metal-specific resources.");
             _planeVisualizationResourceSet?.Dispose();
             _planeVisualizationResourceLayout?.Dispose();
             _planeVisualizationPipeline?.Dispose();
