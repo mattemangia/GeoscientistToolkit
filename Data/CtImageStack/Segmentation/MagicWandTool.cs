@@ -10,16 +10,17 @@ namespace GeoscientistToolkit.Data.CtImageStack.Segmentation
     {
         private SegmentationManager _manager;
         private byte[] _selectionMask;
-        private int _sliceIndex;
-        private int _viewIndex;
         private int _width;
         private int _height;
         private bool _isActive;
-        private bool _selectOnlyFromMaterial;
 
         public string Name => "Magic Wand";
         public string Icon => "✨";
         public bool HasActiveSelection => _isActive;
+
+        // --- ADDED: Public properties for the interface ---
+        public int SliceIndex { get; protected set; }
+        public int ViewIndex { get; protected set; }
 
         public byte Tolerance { get; set; } = 10;
         public bool SelectOnlyFromCurrentMaterial { get; set; } = false;
@@ -31,58 +32,35 @@ namespace GeoscientistToolkit.Data.CtImageStack.Segmentation
 
         public void StartSelection(Vector2 startPos, int sliceIndex, int viewIndex)
         {
-            _sliceIndex = sliceIndex;
-            _viewIndex = viewIndex;
+            this.SliceIndex = sliceIndex;
+            this.ViewIndex = viewIndex;
             (_width, _height) = _manager.GetSliceDimensions(viewIndex);
             _selectionMask = new byte[_width * _height];
             _isActive = true;
-            _selectOnlyFromMaterial = SelectOnlyFromCurrentMaterial;
 
             RunRegionGrowing((int)startPos.X, (int)startPos.Y);
-            
-            _manager.NotifyPreviewChanged(_selectionMask, _sliceIndex, _viewIndex);
+
+            _manager.NotifyPreviewChanged(_selectionMask, this.SliceIndex, this.ViewIndex);
         }
 
         private void RunRegionGrowing(int startX, int startY)
         {
             if (startX < 0 || startX >= _width || startY < 0 || startY >= _height) return;
 
-            var grayscale = _manager.GetGrayscaleSlice(_sliceIndex, _viewIndex);
+            var grayscale = _manager.GetGrayscaleSlice(this.SliceIndex, this.ViewIndex);
             var queue = new Queue<(int, int)>();
-            var visited = new bool[_width * _height];
 
             byte startValue = grayscale[startY * _width + startX];
             int minVal = Math.Max(0, startValue - Tolerance);
             int maxVal = Math.Min(255, startValue + Tolerance);
 
-            // If selecting only from material, get the label data
-            byte[] labelData = null;
-            byte targetMaterialId = _manager.TargetMaterialId;
-            if (_selectOnlyFromMaterial)
-            {
-                labelData = GetLabelSliceData();
-            }
-
             queue.Enqueue((startX, startY));
-            visited[startY * _width + startX] = true;
+            _selectionMask[startY * _width + startX] = 255;
 
             while (queue.Count > 0)
             {
                 var (x, y) = queue.Dequeue();
-                int currentIndex = y * _width + x;
-                
-                // Check if we should include this pixel based on material constraint
-                if (_selectOnlyFromMaterial && labelData != null)
-                {
-                    // In Add mode: only select from areas already labeled with target material
-                    // In Remove mode: only select from areas with target material
-                    if (labelData[currentIndex] != targetMaterialId)
-                        continue;
-                }
-                
-                _selectionMask[currentIndex] = 255;
 
-                // Check 4-connectivity neighbors
                 int[] dx = { 0, 0, 1, -1 };
                 int[] dy = { 1, -1, 0, 0 };
 
@@ -94,12 +72,12 @@ namespace GeoscientistToolkit.Data.CtImageStack.Segmentation
                     if (nx >= 0 && nx < _width && ny >= 0 && ny < _height)
                     {
                         int neighborIndex = ny * _width + nx;
-                        if (!visited[neighborIndex])
+                        if (_selectionMask[neighborIndex] == 0)
                         {
-                            visited[neighborIndex] = true;
                             byte neighborValue = grayscale[neighborIndex];
                             if (neighborValue >= minVal && neighborValue <= maxVal)
                             {
+                                _selectionMask[neighborIndex] = 255;
                                 queue.Enqueue((nx, ny));
                             }
                         }
@@ -108,54 +86,13 @@ namespace GeoscientistToolkit.Data.CtImageStack.Segmentation
             }
         }
 
-        private byte[] GetLabelSliceData()
-        {
-            // This is a simplified version - in real implementation, 
-            // you'd need to extract label data based on viewIndex
-            var dataset = _manager.GetDataset();
-            if (dataset?.LabelData == null) return null;
-
-            var (width, height) = _manager.GetSliceDimensions(_viewIndex);
-            byte[] labelData = new byte[width * height];
-
-            switch (_viewIndex)
-            {
-                case 0: // XY
-                    dataset.LabelData.ReadSliceZ(_sliceIndex, labelData);
-                    break;
-                case 1: // XZ
-                    for (int z = 0; z < height; z++)
-                    {
-                        for (int x = 0; x < width; x++)
-                        {
-                            labelData[z * width + x] = dataset.LabelData[x, _sliceIndex, z];
-                        }
-                    }
-                    break;
-                case 2: // YZ
-                    for (int z = 0; z < height; z++)
-                    {
-                        for (int y = 0; y < width; y++)
-                        {
-                            labelData[z * width + y] = dataset.LabelData[_sliceIndex, y, z];
-                        }
-                    }
-                    break;
-            }
-
-            return labelData;
-        }
-
-        public void UpdateSelection(Vector2 currentPos) 
-        { 
-            // Magic wand doesn't update continuously 
-        }
+        public void UpdateSelection(Vector2 currentPos) { /* Magic wand doesn't update continuously */ }
 
         public void EndSelection()
         {
             if (!_isActive) return;
-            _isActive = false;
-            _manager.ApplySelectionAsync(_selectionMask, _sliceIndex, _viewIndex);
+            // The selection is finalized.
+            // The manager will call GetSelectionMask() and then CancelSelection().
         }
 
         public void CancelSelection()

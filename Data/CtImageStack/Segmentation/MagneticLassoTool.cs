@@ -11,74 +11,80 @@ namespace GeoscientistToolkit.Data.CtImageStack.Segmentation
     {
         private byte[] _gradientMagnitude;
         private Vector2[] _gradientDirection;
-        private float[,] _costMap;
         private List<Vector2> _anchorPoints;
-        
+
         public override string Name => "Magnetic Lasso";
         public override string Icon => "🧲";
-        
+
         public float EdgeSensitivity { get; set; } = 0.5f;
         public float SearchRadius { get; set; } = 30.0f;
         public float AnchorThreshold { get; set; } = 20.0f;
-        
+
         public override void Initialize(SegmentationManager manager)
         {
             base.Initialize(manager);
             _anchorPoints = new List<Vector2>();
         }
-        
+
         public override void StartSelection(Vector2 startPos, int sliceIndex, int viewIndex)
         {
             base.StartSelection(startPos, sliceIndex, viewIndex);
-            
+
             // Compute gradient information for edge detection
             ComputeGradients();
             _anchorPoints.Clear();
             _anchorPoints.Add(startPos);
         }
-        
+
         public override void UpdateSelection(Vector2 currentPos)
         {
             if (!_isActive) return;
-            
-            // Check if we need a new anchor point
-            var lastAnchor = _anchorPoints.Last();
+
+            var lastAnchor = _anchorPoints.LastOrDefault();
             if (Vector2.Distance(lastAnchor, currentPos) > AnchorThreshold)
             {
-                _anchorPoints.Add(currentPos);
+                var optimalPathSegment = FindOptimalPath(lastAnchor, currentPos);
+                _points.AddRange(optimalPathSegment);
+                _anchorPoints.Add(_points.Last());
             }
-            
-            // Find the best path from the last anchor to current position
-            var path = FindOptimalPath(_anchorPoints.Last(), currentPos);
-            
-            // Update points with the optimal path
-            _points.Clear();
-            for (int i = 0; i < _anchorPoints.Count - 1; i++)
-            {
-                _points.Add(_anchorPoints[i]);
-            }
-            _points.AddRange(path);
-            
-            UpdateSelectionMask();
-            _manager.NotifyPreviewChanged(_selectionMask, _sliceIndex, _viewIndex);
+
+            // --- CORRECTED: Use public properties from the base class ---
+            var livePath = FindOptimalPath(_anchorPoints.Last(), currentPos);
+            var fullPath = new List<Vector2>(_points);
+            fullPath.AddRange(livePath);
+
+            UpdateSelectionMaskWithNewPath(fullPath);
+            _manager.NotifyPreviewChanged(_selectionMask, this.SliceIndex, this.ViewIndex);
         }
-        
+
+        private void UpdateSelectionMaskWithNewPath(List<Vector2> path)
+        {
+            if (path.Count < 2) return;
+
+            Array.Clear(_selectionMask, 0, _selectionMask.Length);
+
+            for (int i = 0; i < path.Count - 1; i++)
+            {
+                DrawLine(path[i], path[i + 1]);
+            }
+        }
+
         private void ComputeGradients()
         {
-            var grayscale = _manager.GetGrayscaleSlice(_sliceIndex, _viewIndex);
+            // --- CORRECTED: Use public properties from the base class ---
+            var grayscale = _manager.GetGrayscaleSlice(this.SliceIndex, this.ViewIndex);
             _gradientMagnitude = new byte[_width * _height];
             _gradientDirection = new Vector2[_width * _height];
-            
-            // Sobel edge detection
+
             int[,] sobelX = { { -1, 0, 1 }, { -2, 0, 2 }, { -1, 0, 1 } };
             int[,] sobelY = { { -1, -2, -1 }, { 0, 0, 0 }, { 1, 2, 1 } };
-            
+
             Parallel.For(1, _height - 1, y =>
             {
                 for (int x = 1; x < _width - 1; x++)
                 {
                     float gx = 0, gy = 0;
-                    
+
                     for (int dy = -1; dy <= 1; dy++)
                     {
                         for (int dx = -1; dx <= 1; dx++)
@@ -88,11 +94,11 @@ namespace GeoscientistToolkit.Data.CtImageStack.Segmentation
                             gy += grayscale[idx] * sobelY[dy + 1, dx + 1];
                         }
                     }
-                    
+
                     int index = y * _width + x;
                     float magnitude = MathF.Sqrt(gx * gx + gy * gy);
                     _gradientMagnitude[index] = (byte)Math.Min(255, magnitude);
-                    
+
                     if (magnitude > 0)
                     {
                         _gradientDirection[index] = Vector2.Normalize(new Vector2(gx, gy));
@@ -100,125 +106,94 @@ namespace GeoscientistToolkit.Data.CtImageStack.Segmentation
                 }
             });
         }
-        
+
         private List<Vector2> FindOptimalPath(Vector2 start, Vector2 end)
         {
-            // Simplified Dijkstra's algorithm for path finding
+            var path = new List<Vector2>();
             int startX = (int)start.X, startY = (int)start.Y;
             int endX = (int)end.X, endY = (int)end.Y;
-            
-            // Limit search area for performance
-            int minX = Math.Max(0, Math.Min(startX, endX) - (int)SearchRadius);
-            int maxX = Math.Min(_width - 1, Math.Max(startX, endX) + (int)SearchRadius);
-            int minY = Math.Max(0, Math.Min(startY, endY) - (int)SearchRadius);
-            int maxY = Math.Min(_height - 1, Math.Max(startY, endY) + (int)SearchRadius);
-            
-            int searchWidth = maxX - minX + 1;
-            int searchHeight = maxY - minY + 1;
-            
-            var distances = new float[searchHeight, searchWidth];
-            var visited = new bool[searchHeight, searchWidth];
-            var previous = new (int, int)[searchHeight, searchWidth];
-            
-            // Initialize distances
-            for (int y = 0; y < searchHeight; y++)
-            {
-                for (int x = 0; x < searchWidth; x++)
-                {
-                    distances[y, x] = float.MaxValue;
-                }
-            }
-            
-            distances[startY - minY, startX - minX] = 0;
-            
-            var queue = new SortedSet<(float dist, int x, int y)>(
-                Comparer<(float, int, int)>.Create((a, b) => 
-                    a.Item1 != b.Item1 ? a.Item1.CompareTo(b.Item1) : 
-                    a.Item2 != b.Item2 ? a.Item2.CompareTo(b.Item2) : 
-                    a.Item3.CompareTo(b.Item3)));
-            
-            queue.Add((0, startX - minX, startY - minY));
-            
-            // 8-connected neighbors
-            int[] dx = { -1, 0, 1, -1, 1, -1, 0, 1 };
-            int[] dy = { -1, -1, -1, 0, 0, 1, 1, 1 };
-            
+
+            if (startX == endX && startY == endY) return path;
+
+            // Simple Dijkstra's algorithm for path finding
+            var distances = new Dictionary<Point, float>();
+            var previous = new Dictionary<Point, Point>();
+            var queue = new PriorityQueue<Point, float>();
+
+            var startPoint = new Point(startX, startY);
+            distances[startPoint] = 0;
+            queue.Enqueue(startPoint, 0);
+
             while (queue.Count > 0)
             {
-                var current = queue.First();
-                queue.Remove(current);
-                
-                int cx = current.Item2;
-                int cy = current.Item3;
-                
-                if (visited[cy, cx]) continue;
-                visited[cy, cx] = true;
-                
-                if (cx + minX == endX && cy + minY == endY)
-                    break;
-                
-                for (int i = 0; i < 8; i++)
+                var current = queue.Dequeue();
+
+                if (current.X == endX && current.Y == endY) break;
+
+                for (int dy = -1; dy <= 1; dy++)
                 {
-                    int nx = cx + dx[i];
-                    int ny = cy + dy[i];
-                    
-                    if (nx < 0 || nx >= searchWidth || ny < 0 || ny >= searchHeight)
-                        continue;
-                    
-                    if (visited[ny, nx]) continue;
-                    
-                    float cost = CalculateEdgeCost(cx + minX, cy + minY, nx + minX, ny + minY);
-                    float newDist = distances[cy, cx] + cost;
-                    
-                    if (newDist < distances[ny, nx])
+                    for (int dx = -1; dx <= 1; dx++)
                     {
-                        distances[ny, nx] = newDist;
-                        previous[ny, nx] = (cx, cy);
-                        queue.Add((newDist, nx, ny));
+                        if (dx == 0 && dy == 0) continue;
+
+                        int nx = current.X + dx;
+                        int ny = current.Y + dy;
+
+                        if (nx < 0 || nx >= _width || ny < 0 || ny >= _height) continue;
+
+                        float cost = CalculateEdgeCost(nx, ny);
+                        float newDist = distances[current] + cost;
+
+                        var neighbor = new Point(nx, ny);
+                        if (!distances.ContainsKey(neighbor) || newDist < distances[neighbor])
+                        {
+                            distances[neighbor] = newDist;
+                            previous[neighbor] = current;
+                            queue.Enqueue(neighbor, newDist);
+                        }
                     }
                 }
             }
-            
+
             // Reconstruct path
-            var path = new List<Vector2>();
-            int px = endX - minX, py = endY - minY;
-            
-            while (px != startX - minX || py != startY - minY)
+            var pathPoint = new Point(endX, endY);
+            while (previous.ContainsKey(pathPoint))
             {
-                path.Add(new Vector2(px + minX, py + minY));
-                var prev = previous[py, px];
-                px = prev.Item1;
-                py = prev.Item2;
+                path.Add(new Vector2(pathPoint.X, pathPoint.Y));
+                pathPoint = previous[pathPoint];
             }
-            
             path.Reverse();
             return path;
         }
-        
-        private float CalculateEdgeCost(int x1, int y1, int x2, int y2)
+
+        private float CalculateEdgeCost(int x, int y)
         {
-            if (x2 < 0 || x2 >= _width || y2 < 0 || y2 >= _height)
-                return float.MaxValue;
-            
-            int idx = y2 * _width + x2;
+            if (x < 0 || x >= _width || y < 0 || y >= _height) return float.MaxValue;
+
+            int idx = y * _width + x;
             float edgeStrength = _gradientMagnitude[idx] / 255.0f;
-            
-            // Lower cost for stronger edges
-            float edgeCost = 1.0f - (edgeStrength * EdgeSensitivity);
-            
-            // Add distance cost
-            float dist = MathF.Sqrt((x2 - x1) * (x2 - x1) + (y2 - y1) * (y2 - y1));
-            
-            return edgeCost * dist;
+
+            // Cost is inversely proportional to edge strength
+            return 1.1f - (edgeStrength * EdgeSensitivity);
         }
-        
+
         public override void Dispose()
         {
             base.Dispose();
             _gradientMagnitude = null;
             _gradientDirection = null;
-            _costMap = null;
             _anchorPoints?.Clear();
+        }
+
+        // Helper struct for pathfinding
+        private readonly struct Point : IEquatable<Point>
+        {
+            public readonly int X;
+            public readonly int Y;
+            public Point(int x, int y) { X = x; Y = y; }
+            public bool Equals(Point other) => X == other.X && Y == other.Y;
+            public override bool Equals(object obj) => obj is Point other && Equals(other);
+            public override int GetHashCode() => HashCode.Combine(X, Y);
         }
     }
 }

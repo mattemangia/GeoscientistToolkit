@@ -6,19 +6,21 @@ using GeoscientistToolkit.Util;
 using ImGuiNET;
 using System.Numerics;
 using Veldrid;
-using System.Linq; // Added for Linq FirstOrDefault
+using System.Linq;
+using System;
+using GeoscientistToolkit.Business;
 
 namespace GeoscientistToolkit.Data.CtImageStack
 {
     public class CtImageStackViewer : IDatasetViewer
     {
         private readonly CtImageStackDataset _dataset;
-        
+
         // Slice positions
-        private int _sliceX; // Position in X (for YZ view)
-        private int _sliceY; // Position in Y (for XZ view)
-        private int _sliceZ; // Position in Z (for XY view)
-        
+        private int _sliceX;
+        private int _sliceY;
+        private int _sliceZ;
+
         // Textures for each view
         private TextureManager _textureXY;
         private TextureManager _textureXZ;
@@ -26,16 +28,16 @@ namespace GeoscientistToolkit.Data.CtImageStack
         private bool _needsUpdateXY = true;
         private bool _needsUpdateXZ = true;
         private bool _needsUpdateYZ = true;
-        
+
         // Window/Level (shared across views)
         private float _windowLevel = 128;
         private float _windowWidth = 255;
-        
+
         // View settings
         private bool _showScaleBar = true;
         private bool _showCrosshairs = true;
         private bool _syncViews = true;
-        
+
         // Zoom and pan for each view
         private float _zoomXY = 1.0f;
         private float _zoomXZ = 1.0f;
@@ -43,12 +45,11 @@ namespace GeoscientistToolkit.Data.CtImageStack
         private Vector2 _panXY = Vector2.Zero;
         private Vector2 _panXZ = Vector2.Zero;
         private Vector2 _panYZ = Vector2.Zero;
-        
+
         // Layout
         private enum Layout { Horizontal, Vertical, Grid2x2 }
         private Layout _layout = Layout.Grid2x2;
-        
-        // --- ADDED: Segmentation fields ---
+
         private readonly CtSegmentationIntegration _segmentationManager;
         private Material _selectedMaterialForSegmentation;
         private bool _showSegmentationWindow = false;
@@ -56,20 +57,30 @@ namespace GeoscientistToolkit.Data.CtImageStack
         public CtImageStackViewer(CtImageStackDataset dataset)
         {
             _dataset = dataset ?? throw new ArgumentNullException(nameof(dataset));
-            
-            // Ensure data is loaded
+
             _dataset.Load();
+            ProjectManager.Instance.DatasetDataChanged += OnDatasetDataChanged;
             CtImageStackTools.PreviewChanged += OnPreviewChanged;
-            // Initialize to center slices
+
             _sliceX = _dataset.Width / 2;
             _sliceY = _dataset.Height / 2;
             _sliceZ = _dataset.Depth / 2;
-            
-            // --- ADDED: Initialize segmentation tools ---
+
             CtSegmentationIntegration.Initialize(_dataset);
             _segmentationManager = CtSegmentationIntegration.GetInstance(_dataset);
             _selectedMaterialForSegmentation = _dataset.Materials.FirstOrDefault(m => m.ID != 0);
         }
+
+        private void OnDatasetDataChanged(Dataset dataset)
+        {
+            if (dataset == _dataset)
+            {
+                _needsUpdateXY = true;
+                _needsUpdateXZ = true;
+                _needsUpdateYZ = true;
+            }
+        }
+
         private void OnPreviewChanged(CtImageStackDataset dataset)
         {
             if (dataset == _dataset)
@@ -79,9 +90,9 @@ namespace GeoscientistToolkit.Data.CtImageStack
                 _needsUpdateYZ = true;
             }
         }
+
         public void DrawToolbarControls()
         {
-            // Layout selection
             ImGui.Text("Layout:");
             ImGui.SameLine();
             ImGui.SetNextItemWidth(100);
@@ -91,12 +102,9 @@ namespace GeoscientistToolkit.Data.CtImageStack
             {
                 _layout = (Layout)layoutIndex;
             }
-            
-            ImGui.SameLine();
-            ImGui.Separator();
-            ImGui.SameLine();
-            
-            // Window/Level controls
+
+            ImGui.SameLine(); ImGui.Separator(); ImGui.SameLine();
+
             ImGui.Text("W/L:");
             ImGui.SameLine();
             ImGui.SetNextItemWidth(100);
@@ -110,33 +118,24 @@ namespace GeoscientistToolkit.Data.CtImageStack
             {
                 _needsUpdateXY = _needsUpdateXZ = _needsUpdateYZ = true;
             }
-            
-            ImGui.SameLine();
-            ImGui.Separator();
-            ImGui.SameLine();
 
-            // --- ADDED: Button to open segmentation tools ---
+            ImGui.SameLine(); ImGui.Separator(); ImGui.SameLine();
+
             if (ImGui.Button("Segmentation"))
             {
                 _showSegmentationWindow = !_showSegmentationWindow;
             }
 
-            ImGui.SameLine();
-            ImGui.Separator();
-            ImGui.SameLine();
-            
-            // View options
+            ImGui.SameLine(); ImGui.Separator(); ImGui.SameLine();
+
             ImGui.Checkbox("Crosshairs", ref _showCrosshairs);
             ImGui.SameLine();
             ImGui.Checkbox("Scale Bar", ref _showScaleBar);
             ImGui.SameLine();
             ImGui.Checkbox("Sync Views", ref _syncViews);
-            
-            ImGui.SameLine();
-            ImGui.Separator();
-            ImGui.SameLine();
-            
-            // Reset button
+
+            ImGui.SameLine(); ImGui.Separator(); ImGui.SameLine();
+
             if (ImGui.Button("Reset Views"))
             {
                 ResetViews();
@@ -145,26 +144,18 @@ namespace GeoscientistToolkit.Data.CtImageStack
 
         public void DrawContent(ref float zoom, ref Vector2 pan)
         {
-            // --- ADDED: Draw segmentation window if open ---
             DrawSegmentationToolWindow();
-            
+
             var availableSize = ImGui.GetContentRegionAvail();
-            
+
             switch (_layout)
             {
-                case Layout.Horizontal:
-                    DrawHorizontalLayout(availableSize);
-                    break;
-                case Layout.Vertical:
-                    DrawVerticalLayout(availableSize);
-                    break;
-                case Layout.Grid2x2:
-                    DrawGrid2x2Layout(availableSize);
-                    break;
+                case Layout.Horizontal: DrawHorizontalLayout(availableSize); break;
+                case Layout.Vertical: DrawVerticalLayout(availableSize); break;
+                case Layout.Grid2x2: DrawGrid2x2Layout(availableSize); break;
             }
         }
 
-        // --- ADDED: Method to draw the segmentation tool window ---
         private void DrawSegmentationToolWindow()
         {
             if (!_showSegmentationWindow || _segmentationManager == null) return;
@@ -172,11 +163,10 @@ namespace GeoscientistToolkit.Data.CtImageStack
             ImGui.SetNextWindowSize(new Vector2(350, 450), ImGuiCond.FirstUseEver);
             if (ImGui.Begin("Segmentation Tools##SimpleViewer", ref _showSegmentationWindow))
             {
-                // Simple Material Selector
                 string preview = _selectedMaterialForSegmentation?.Name ?? "Select a material...";
                 if (ImGui.BeginCombo("Target Material", preview))
                 {
-                    foreach(var mat in _dataset.Materials.Where(m => m.ID != 0))
+                    foreach (var mat in _dataset.Materials.Where(m => m.ID != 0))
                     {
                         if (ImGui.Selectable(mat.Name, mat == _selectedMaterialForSegmentation))
                         {
@@ -192,145 +182,119 @@ namespace GeoscientistToolkit.Data.CtImageStack
             }
             ImGui.End();
         }
-        
+
         private void DrawHorizontalLayout(Vector2 availableSize)
         {
-            float viewWidth = (availableSize.X - 4) / 3; // 2px spacing between views
+            float viewWidth = (availableSize.X - 4) / 3;
             float viewHeight = availableSize.Y;
-            
-            // XY View
+
             DrawView(0, new Vector2(viewWidth, viewHeight), "XY (Axial)", ref _zoomXY, ref _panXY, ref _needsUpdateXY, ref _textureXY);
-            
             ImGui.SameLine(0, 2);
-            
-            // XZ View
             DrawView(1, new Vector2(viewWidth, viewHeight), "XZ (Coronal)", ref _zoomXZ, ref _panXZ, ref _needsUpdateXZ, ref _textureXZ);
-            
             ImGui.SameLine(0, 2);
-            
-            // YZ View
             DrawView(2, new Vector2(viewWidth, viewHeight), "YZ (Sagittal)", ref _zoomYZ, ref _panYZ, ref _needsUpdateYZ, ref _textureYZ);
         }
-        
+
         private void DrawVerticalLayout(Vector2 availableSize)
         {
             float viewWidth = availableSize.X;
             float viewHeight = (availableSize.Y - 4) / 3;
-            
+
             DrawView(0, new Vector2(viewWidth, viewHeight), "XY (Axial)", ref _zoomXY, ref _panXY, ref _needsUpdateXY, ref _textureXY);
             DrawView(1, new Vector2(viewWidth, viewHeight), "XZ (Coronal)", ref _zoomXZ, ref _panXZ, ref _needsUpdateXZ, ref _textureXZ);
             DrawView(2, new Vector2(viewWidth, viewHeight), "YZ (Sagittal)", ref _zoomYZ, ref _panYZ, ref _needsUpdateYZ, ref _textureYZ);
         }
-        
+
         private void DrawGrid2x2Layout(Vector2 availableSize)
         {
             float viewWidth = (availableSize.X - 2) / 2;
             float viewHeight = (availableSize.Y - 2) / 2;
-            
-            // Top row
+
             DrawView(0, new Vector2(viewWidth, viewHeight), "XY (Axial)", ref _zoomXY, ref _panXY, ref _needsUpdateXY, ref _textureXY);
             ImGui.SameLine(0, 2);
             DrawView(1, new Vector2(viewWidth, viewHeight), "XZ (Coronal)", ref _zoomXZ, ref _panXZ, ref _needsUpdateXZ, ref _textureXZ);
-            
-            // Bottom row
+
             DrawView(2, new Vector2(viewWidth, viewHeight), "YZ (Sagittal)", ref _zoomYZ, ref _panYZ, ref _needsUpdateYZ, ref _textureYZ);
             ImGui.SameLine(0, 2);
-            
-            // 3D info panel in 4th quadrant
+
             Draw3DInfoPanel(new Vector2(viewWidth, viewHeight));
         }
-        
-        private void DrawView(int viewIndex, Vector2 size, string title, ref float zoom, ref Vector2 pan, 
+
+        private void DrawView(int viewIndex, Vector2 size, string title, ref float zoom, ref Vector2 pan,
             ref bool needsUpdate, ref TextureManager texture)
         {
             ImGui.BeginChild($"View{viewIndex}", size, ImGuiChildFlags.Border);
-            
-            // Title bar
+
             ImGui.Text(title);
             ImGui.SameLine();
-            
-            // Slice control
-            int slice = viewIndex switch
-            {
-                0 => _sliceZ,
-                1 => _sliceY,
-                2 => _sliceX,
-                _ => 0
-            };
-            
-            int maxSlice = viewIndex switch
-            {
-                0 => _dataset.Depth - 1,
-                1 => _dataset.Height - 1,
-                2 => _dataset.Width - 1,
-                _ => 0
-            };
-            
+
+            int slice = viewIndex switch { 0 => _sliceZ, 1 => _sliceY, 2 => _sliceX, _ => 0 };
+            int maxSlice = viewIndex switch { 0 => _dataset.Depth - 1, 1 => _dataset.Height - 1, 2 => _dataset.Width - 1, _ => 0 };
+
             ImGui.SetNextItemWidth(150);
             if (ImGui.SliderInt($"##Slice{viewIndex}", ref slice, 0, maxSlice))
             {
                 switch (viewIndex)
                 {
-                    case 0: 
-                        _sliceZ = slice; 
-                        needsUpdate = true; 
-                        break;
-                    case 1: 
-                        _sliceY = slice; 
-                        needsUpdate = true; 
-                        break;
-                    case 2: 
-                        _sliceX = slice; 
-                        needsUpdate = true; 
-                        break;
+                    case 0: _sliceZ = slice; needsUpdate = true; break;
+                    case 1: _sliceY = slice; needsUpdate = true; break;
+                    case 2: _sliceX = slice; needsUpdate = true; break;
                 }
             }
-            
+
             ImGui.SameLine();
             ImGui.Text($"{slice + 1}/{maxSlice + 1}");
-            
-            // Draw the actual view content
+
             DrawSingleView(viewIndex, ref zoom, ref pan, ref needsUpdate, ref texture);
-            
+
             ImGui.EndChild();
         }
-        
-        // --- ADDED: Helper for image display size calculation ---
-        private Vector2 GetImageDisplaySize(Vector2 canvasSize, int imageWidth, int imageHeight, float zoom)
+
+        private (Vector2 pos, Vector2 size) GetImageDisplayMetrics(Vector2 canvasPos, Vector2 canvasSize, float zoom, Vector2 pan, int imageWidth, int imageHeight)
         {
             float imageAspect = (float)imageWidth / imageHeight;
             float canvasAspect = canvasSize.X / canvasSize.Y;
-            
-            Vector2 size;
-            if (imageAspect > canvasAspect) { size = new Vector2(canvasSize.X * zoom, canvasSize.X / imageAspect * zoom); }
-            else { size = new Vector2(canvasSize.Y * imageAspect * zoom, canvasSize.Y * zoom); }
-            return size;
+
+            Vector2 imageDisplaySize;
+            if (imageAspect > canvasAspect)
+                imageDisplaySize = new Vector2(canvasSize.X, canvasSize.X / imageAspect);
+            else
+                imageDisplaySize = new Vector2(canvasSize.Y * imageAspect, canvasSize.Y);
+
+            imageDisplaySize *= zoom;
+            Vector2 imageDisplayPos = canvasPos + (canvasSize - imageDisplaySize) * 0.5f + pan;
+
+            return (imageDisplayPos, imageDisplaySize);
         }
 
-        private void DrawSingleView(int viewIndex, ref float zoom, ref Vector2 pan, 
+        private Vector2 GetMousePosInImage(Vector2 mousePos, Vector2 imageDisplayPos, Vector2 imageDisplaySize, int imageWidth, int imageHeight)
+        {
+            Vector2 mouseRelativeToImage = mousePos - imageDisplayPos;
+
+            return new Vector2(
+                (mouseRelativeToImage.X / imageDisplaySize.X) * imageWidth,
+                (mouseRelativeToImage.Y / imageDisplaySize.Y) * imageHeight
+            );
+        }
+
+        private void DrawSingleView(int viewIndex, ref float zoom, ref Vector2 pan,
             ref bool needsUpdate, ref TextureManager texture)
         {
             var io = ImGui.GetIO();
             var canvasPos = ImGui.GetCursorScreenPos();
             var canvasSize = ImGui.GetContentRegionAvail();
             var dl = ImGui.GetWindowDrawList();
-            
-            // Create invisible button for mouse interaction
+
             ImGui.InvisibleButton($"canvas{viewIndex}", canvasSize);
             bool isHovered = ImGui.IsItemHovered();
 
-            // --- ADDED: Handle segmentation mouse input ---
+            var (width, height) = GetImageDimensionsForView(viewIndex);
+            var (imagePos, imageSize) = GetImageDisplayMetrics(canvasPos, canvasSize, zoom, pan, width, height);
+
             if (_segmentationManager != null && _showSegmentationWindow && isHovered)
             {
-                var (width, height) = GetImageDimensionsForView(viewIndex);
-                 var imageSize = GetImageDisplaySize(canvasSize, width, height, zoom);
-                 var imagePos = canvasPos + (canvasSize - imageSize) * 0.5f + pan;
-                 var mouseRelativeToImage = io.MousePos - imagePos;
-                 var mousePosInImage = new Vector2(
-                    (mouseRelativeToImage.X / imageSize.X) * width,
-                    (mouseRelativeToImage.Y / imageSize.Y) * height
-                 );
-                 
+                var mousePosInImage = GetMousePosInImage(io.MousePos, imagePos, imageSize, width, height);
+
                 _segmentationManager.HandleMouseInput(
                     mousePosInImage,
                     viewIndex switch { 0 => _sliceZ, 1 => _sliceY, 2 => _sliceX, _ => 0 },
@@ -339,39 +303,34 @@ namespace GeoscientistToolkit.Data.CtImageStack
                     ImGui.IsMouseDragging(ImGuiMouseButton.Left),
                     ImGui.IsMouseReleased(ImGuiMouseButton.Left)
                 );
-                
-                // Force update if segmentation is active
+
                 if (ImGui.IsMouseDragging(ImGuiMouseButton.Left) || ImGui.IsMouseReleased(ImGuiMouseButton.Left))
                 {
                     needsUpdate = true;
                 }
             }
-            
-            // Handle mouse wheel zoom
+
             if (isHovered && io.MouseWheel != 0)
             {
                 float zoomDelta = io.MouseWheel * 0.1f;
                 float newZoom = Math.Clamp(zoom + zoomDelta * zoom, 0.1f, 10.0f);
-                
+
                 if (newZoom != zoom)
                 {
-                    Vector2 mousePos = io.MousePos - canvasPos - canvasSize * 0.5f;
-                    pan -= mousePos * (newZoom / zoom - 1.0f);
+                    Vector2 mouseCanvasPos = io.MousePos - canvasPos - canvasSize * 0.5f;
+                    pan -= mouseCanvasPos * (newZoom / zoom - 1.0f);
                     zoom = newZoom;
-                    
-                    // Sync zoom across views if enabled
+
                     if (_syncViews)
                     {
                         _zoomXY = _zoomXZ = _zoomYZ = zoom;
                     }
                 }
             }
-            
+
             if (isHovered && ImGui.IsMouseDragging(ImGuiMouseButton.Middle))
             {
                 pan += io.MouseDelta;
-                
-                // Sync pan across views if enabled
                 if (_syncViews)
                 {
                     _panXY = pan;
@@ -379,87 +338,68 @@ namespace GeoscientistToolkit.Data.CtImageStack
                     _panYZ = pan;
                 }
             }
-            
-            // Handle slice scrolling with Ctrl+Wheel
+
             if (isHovered && io.MouseWheel != 0 && io.KeyCtrl)
             {
+                int wheel = (int)io.MouseWheel;
                 switch (viewIndex)
                 {
-                    case 0: // XY view - scroll Z
-                        _sliceZ = Math.Clamp(_sliceZ + (int)io.MouseWheel, 0, _dataset.Depth - 1);
-                        needsUpdate = true;
-                        break;
-                    case 1: // XZ view - scroll Y
-                        _sliceY = Math.Clamp(_sliceY + (int)io.MouseWheel, 0, _dataset.Height - 1);
-                        needsUpdate = true;
-                        break;
-                    case 2: // YZ view - scroll X
-                        _sliceX = Math.Clamp(_sliceX + (int)io.MouseWheel, 0, _dataset.Width - 1);
-                        needsUpdate = true;
-                        break;
+                    case 0: _sliceZ = Math.Clamp(_sliceZ + wheel, 0, _dataset.Depth - 1); needsUpdate = true; break;
+                    case 1: _sliceY = Math.Clamp(_sliceY + wheel, 0, _dataset.Height - 1); needsUpdate = true; break;
+                    case 2: _sliceX = Math.Clamp(_sliceX + wheel, 0, _dataset.Width - 1); needsUpdate = true; break;
                 }
             }
-            
-            // Handle click to set crosshair position
+
             if (isHovered && ImGui.IsMouseClicked(ImGuiMouseButton.Left) && !(_segmentationManager?.HasActiveSelection ?? false))
             {
                 UpdateCrosshairFromMouse(viewIndex, canvasPos, canvasSize, zoom, pan);
             }
-            
-            // Draw background
+
             dl.AddRectFilled(canvasPos, canvasPos + canvasSize, 0xFF202020);
-            
-            // Update texture if needed
+
             if (needsUpdate || texture == null || !texture.IsValid)
             {
                 UpdateTexture(viewIndex, ref texture);
                 needsUpdate = false;
             }
-            
-            // Draw the image
+
+            dl.PushClipRect(canvasPos, canvasPos + canvasSize, true);
+
             if (texture != null && texture.IsValid)
             {
-                var (width, height) = GetImageDimensionsForView(viewIndex);
-                float imageAspect = (float)width / height;
-                float canvasAspect = canvasSize.X / canvasSize.Y;
-                
-                Vector2 imageSize;
-                if (imageAspect > canvasAspect)
-                {
-                    imageSize = new Vector2(canvasSize.X * zoom, canvasSize.X / imageAspect * zoom);
-                }
-                else
-                {
-                    imageSize = new Vector2(canvasSize.Y * imageAspect * zoom, canvasSize.Y * zoom);
-                }
-                
-                Vector2 imagePos = canvasPos + canvasSize * 0.5f - imageSize * 0.5f + pan;
-                
-                // Draw the image
+                // 1. Draw the composited texture
                 dl.AddImage(texture.GetImGuiTextureId(), imagePos, imagePos + imageSize,
                     Vector2.Zero, Vector2.One, 0xFFFFFFFF);
-                
-                // Draw crosshairs
+
+                // 2. Draw UI elements on top
                 if (_showCrosshairs)
                 {
                     DrawCrosshairs(dl, viewIndex, canvasPos, canvasSize, imagePos, imageSize, width, height);
                 }
-                
-                // Draw scale bar
+
                 if (_showScaleBar)
                 {
                     DrawScaleBar(dl, canvasPos, canvasSize, zoom, width, height, viewIndex);
                 }
             }
+
+            // 3. Draw live tool cursor on the very top
+            if (isHovered && _showSegmentationWindow && _segmentationManager?.ActiveTool is Segmentation.BrushTool brushTool)
+            {
+                float brushRadiusPixels = brushTool.BrushSize * (imageSize.X / width);
+                dl.AddCircle(io.MousePos, brushRadiusPixels, 0xFF00FFFF, 12, 1.5f);
+            }
+
+            dl.PopClipRect();
         }
-        
+
         private void Draw3DInfoPanel(Vector2 size)
         {
             ImGui.BeginChild("3DInfo", size, ImGuiChildFlags.Border);
-            
+
             ImGui.Text("Volume Information");
             ImGui.Separator();
-            
+
             ImGui.Text($"Dimensions: {_dataset.Width} × {_dataset.Height} × {_dataset.Depth}");
             ImGui.Text($"Voxel Size: {_dataset.PixelSize:F2} × {_dataset.PixelSize:F2} × {_dataset.SliceThickness:F2} {_dataset.Unit}");
             ImGui.Text($"Current Position:");
@@ -468,7 +408,7 @@ namespace GeoscientistToolkit.Data.CtImageStack
             ImGui.Text($"Y: {_sliceY + 1} / {_dataset.Height}");
             ImGui.Text($"Z: {_sliceZ + 1} / {_dataset.Depth}");
             ImGui.Unindent();
-            
+
             ImGui.Spacing();
             ImGui.Separator();
             ImGui.Text("Mouse Controls:");
@@ -476,91 +416,62 @@ namespace GeoscientistToolkit.Data.CtImageStack
             ImGui.BulletText("Middle Drag: Pan");
             ImGui.BulletText("Ctrl+Wheel: Change slice");
             ImGui.BulletText("Left Click: Set crosshair / Use Tool");
-            
+
             ImGui.EndChild();
         }
-        
+
         private void UpdateCrosshairFromMouse(int viewIndex, Vector2 canvasPos, Vector2 canvasSize, float zoom, Vector2 pan)
         {
-            var mousePos = ImGui.GetMousePos() - canvasPos - canvasSize * 0.5f - pan;
             var (width, height) = GetImageDimensionsForView(viewIndex);
-            
-            float imageAspect = (float)width / height;
-            float canvasAspect = canvasSize.X / canvasSize.Y;
-            
-            Vector2 imageSize;
-            if (imageAspect > canvasAspect)
-            {
-                imageSize = new Vector2(canvasSize.X * zoom, canvasSize.X / imageAspect * zoom);
-            }
-            else
-            {
-                imageSize = new Vector2(canvasSize.Y * imageAspect * zoom, canvasSize.Y * zoom);
-            }
-            
-            // Convert mouse position to image coordinates
-            float x = (mousePos.X + imageSize.X * 0.5f) / imageSize.X * width;
-            float y = (mousePos.Y + imageSize.Y * 0.5f) / imageSize.Y * height;
-            
-            // Update slice positions based on view
+            var (imagePos, imageSize) = GetImageDisplayMetrics(canvasPos, canvasSize, zoom, pan, width, height);
+            var mousePosInImage = GetMousePosInImage(ImGui.GetMousePos(), imagePos, imageSize, width, height);
+
             switch (viewIndex)
             {
                 case 0: // XY view
-                    _sliceX = Math.Clamp((int)x, 0, _dataset.Width - 1);
-                    _sliceY = Math.Clamp((int)y, 0, _dataset.Height - 1);
+                    _sliceX = Math.Clamp((int)mousePosInImage.X, 0, _dataset.Width - 1);
+                    _sliceY = Math.Clamp((int)mousePosInImage.Y, 0, _dataset.Height - 1);
                     _needsUpdateXZ = _needsUpdateYZ = true;
                     break;
                 case 1: // XZ view
-                    _sliceX = Math.Clamp((int)x, 0, _dataset.Width - 1);
-                    _sliceZ = Math.Clamp((int)y, 0, _dataset.Depth - 1);
+                    _sliceX = Math.Clamp((int)mousePosInImage.X, 0, _dataset.Width - 1);
+                    _sliceZ = Math.Clamp((int)mousePosInImage.Y, 0, _dataset.Depth - 1);
                     _needsUpdateXY = _needsUpdateYZ = true;
                     break;
                 case 2: // YZ view
-                    _sliceY = Math.Clamp((int)x, 0, _dataset.Height - 1);
-                    _sliceZ = Math.Clamp((int)y, 0, _dataset.Depth - 1);
+                    _sliceY = Math.Clamp((int)mousePosInImage.X, 0, _dataset.Height - 1);
+                    _sliceZ = Math.Clamp((int)mousePosInImage.Y, 0, _dataset.Depth - 1);
                     _needsUpdateXY = _needsUpdateXZ = true;
                     break;
             }
         }
-        
+
         private void DrawCrosshairs(ImDrawListPtr dl, int viewIndex, Vector2 canvasPos, Vector2 canvasSize,
             Vector2 imagePos, Vector2 imageSize, int imageWidth, int imageHeight)
         {
-            uint color = 0xFF00FF00; // Green crosshairs
-            
+            uint color = 0xFF00FF00;
             float x1 = 0, y1 = 0;
-            
+
             switch (viewIndex)
             {
-                case 0: // XY view - show X and Y positions
-                    x1 = (float)_sliceX / imageWidth;
-                    y1 = (float)_sliceY / imageHeight;
-                    break;
-                case 1: // XZ view - show X and Z positions
-                    x1 = (float)_sliceX / imageWidth;
-                    y1 = (float)_sliceZ / imageHeight;
-                    break;
-                case 2: // YZ view - show Y and Z positions
-                    x1 = (float)_sliceY / imageWidth;
-                    y1 = (float)_sliceZ / imageHeight;
-                    break;
+                case 0: x1 = (float)_sliceX / imageWidth; y1 = (float)_sliceY / imageHeight; break;
+                case 1: x1 = (float)_sliceX / imageWidth; y1 = (float)_sliceZ / imageHeight; break;
+                case 2: x1 = (float)_sliceY / imageWidth; y1 = (float)_sliceZ / imageHeight; break;
             }
-            
-            // Convert to screen coordinates
+
             float screenX = imagePos.X + x1 * imageSize.X;
             float screenY = imagePos.Y + y1 * imageSize.Y;
-            
-            // Draw crosshairs (clipped to image bounds)
+
             if (screenX >= imagePos.X && screenX <= imagePos.X + imageSize.X)
             {
-                dl.AddLine(new Vector2(screenX, imagePos.Y), new Vector2(screenX, imagePos.Y + imageSize.Y), color, 1.0f);
+                dl.AddLine(new Vector2(screenX, Math.Max(imagePos.Y, canvasPos.Y)), new Vector2(screenX, Math.Min(imagePos.Y + imageSize.Y, canvasPos.Y + canvasSize.Y)), color, 1.0f);
             }
             if (screenY >= imagePos.Y && screenY <= imagePos.Y + imageSize.Y)
             {
-                dl.AddLine(new Vector2(imagePos.X, screenY), new Vector2(imagePos.X + imageSize.X, screenY), color, 1.0f);
+                dl.AddLine(new Vector2(Math.Max(imagePos.X, canvasPos.X), screenY), new Vector2(Math.Min(imagePos.X + imageSize.X, canvasPos.X + canvasSize.X), screenY), color, 1.0f);
             }
         }
-        
+
         private void UpdateTexture(int viewIndex, ref TextureManager texture)
         {
             if (_dataset.VolumeData == null)
@@ -568,49 +479,49 @@ namespace GeoscientistToolkit.Data.CtImageStack
                 Logger.Log("[CtImageStackViewer] No volume data available");
                 return;
             }
-            
+
             try
             {
                 var (width, height) = GetImageDimensionsForView(viewIndex);
                 byte[] imageData = ExtractSliceData(viewIndex, width, height);
-                
-                // Apply window/level
                 ApplyWindowLevel(imageData);
-                
-                // --- ADDED: Get segmentation preview mask ---
-                byte[] segmentationPreviewMask = _segmentationManager?.GetPreviewMask(
-                    viewIndex switch { 0 => _sliceZ, 1 => _sliceY, 2 => _sliceX, _ => 0 }, viewIndex
-                );
 
-                // Convert to RGBA
+                int currentSlice = viewIndex switch { 0 => _sliceZ, 1 => _sliceY, 2 => _sliceX, _ => -1 };
+                byte[] segmentationPreviewMask = _segmentationManager?.GetPreviewMask(currentSlice, viewIndex);
+                byte[] committedSelectionMask = _segmentationManager?.GetCommittedSelectionMask(currentSlice, viewIndex);
+
                 byte[] rgbaData = new byte[width * height * 4];
+                var targetMaterial = _selectedMaterialForSegmentation;
+
                 for (int i = 0; i < width * height; i++)
                 {
+                    // 1. Base Layer: Grayscale image
                     byte value = imageData[i];
+                    Vector4 finalColor = new Vector4(value / 255f, value / 255f, value / 255f, 1.0f);
 
-                    // --- ADDED: Render segmentation preview ---
+                    // 2. Committed Selection Layer
+                    if (committedSelectionMask != null && committedSelectionMask[i] > 0)
+                    {
+                        var selColor = targetMaterial?.Color ?? new Vector4(0.8f, 0.8f, 0.0f, 1.0f);
+                        float opacity = 0.4f;
+                        finalColor = Vector4.Lerp(finalColor, new Vector4(selColor.X, selColor.Y, selColor.Z, 1.0f), opacity);
+                    }
+
+                    // 3. Live Tool Preview Layer (Topmost overlay)
                     if (segmentationPreviewMask != null && segmentationPreviewMask[i] > 0)
                     {
-                        var segColor = _selectedMaterialForSegmentation?.Color ?? new Vector4(1, 0, 0, 1);
-                        float opacity = 0.5f;
-                        rgbaData[i * 4] = (byte)(value * (1 - opacity) + segColor.X * 255 * opacity);
-                        rgbaData[i * 4 + 1] = (byte)(value * (1 - opacity) + segColor.Y * 255 * opacity);
-                        rgbaData[i * 4 + 2] = (byte)(value * (1 - opacity) + segColor.Z * 255 * opacity);
-                        rgbaData[i * 4 + 3] = 255;
+                        var segColor = targetMaterial?.Color ?? new Vector4(1, 0, 0, 1);
+                        float opacity = 0.6f;
+                        finalColor = Vector4.Lerp(finalColor, new Vector4(segColor.X, segColor.Y, segColor.Z, 1.0f), opacity);
                     }
-                    else
-                    {
-                        rgbaData[i * 4] = value;
-                        rgbaData[i * 4 + 1] = value;
-                        rgbaData[i * 4 + 2] = value;
-                        rgbaData[i * 4 + 3] = 255;
-                    }
+
+                    rgbaData[i * 4] = (byte)(finalColor.X * 255);
+                    rgbaData[i * 4 + 1] = (byte)(finalColor.Y * 255);
+                    rgbaData[i * 4 + 2] = (byte)(finalColor.Z * 255);
+                    rgbaData[i * 4 + 3] = 255;
                 }
-                
-                // Dispose old texture
+
                 texture?.Dispose();
-                
-                // Create new texture
                 texture = TextureManager.CreateFromPixelData(rgbaData, (uint)width, (uint)height);
             }
             catch (Exception ex)
@@ -618,124 +529,83 @@ namespace GeoscientistToolkit.Data.CtImageStack
                 Logger.Log($"[CtImageStackViewer] Error updating texture: {ex.Message}");
             }
         }
-        
+
         private byte[] ExtractSliceData(int viewIndex, int width, int height)
         {
             byte[] data = new byte[width * height];
             var volume = _dataset.VolumeData;
-            
+
             switch (viewIndex)
             {
-                case 0: // XY plane at Z = _sliceZ
-                    for (int y = 0; y < height; y++)
-                    {
-                        for (int x = 0; x < width; x++)
-                        {
-                            data[y * width + x] = volume[x, y, _sliceZ];
-                        }
-                    }
-                    break;
-                    
-                case 1: // XZ plane at Y = _sliceY
-                    for (int z = 0; z < height; z++)
-                    {
-                        for (int x = 0; x < width; x++)
-                        {
-                            data[z * width + x] = volume[x, _sliceY, z];
-                        }
-                    }
-                    break;
-                    
-                case 2: // YZ plane at X = _sliceX
-                    for (int z = 0; z < height; z++)
-                    {
-                        for (int y = 0; y < width; y++)
-                        {
-                            data[z * width + y] = volume[_sliceX, y, z];
-                        }
-                    }
-                    break;
+                case 0: volume.ReadSliceZ(_sliceZ, data); break;
+                case 1: for (int z = 0; z < height; z++) for (int x = 0; x < width; x++) data[z * width + x] = volume[x, _sliceY, z]; break;
+                case 2: for (int z = 0; z < height; z++) for (int y = 0; y < width; y++) data[z * width + y] = volume[_sliceX, y, z]; break;
             }
-            
+
             return data;
         }
-        
+
         private void ApplyWindowLevel(byte[] data)
         {
             float min = _windowLevel - _windowWidth / 2;
             float max = _windowLevel + _windowWidth / 2;
-            
+            float range = max - min;
+            if (range < 1e-5) range = 1e-5f;
+
             for (int i = 0; i < data.Length; i++)
             {
-                float value = data[i];
-                value = (value - min) / (max - min) * 255;
+                float value = (data[i] - min) / range * 255;
                 data[i] = (byte)Math.Clamp(value, 0, 255);
             }
         }
-        
+
         private (int width, int height) GetImageDimensionsForView(int viewIndex)
         {
             return viewIndex switch
             {
-                0 => (_dataset.Width, _dataset.Height),  // XY plane
-                1 => (_dataset.Width, _dataset.Depth),   // XZ plane
-                2 => (_dataset.Height, _dataset.Depth),  // YZ plane
+                0 => (_dataset.Width, _dataset.Height),
+                1 => (_dataset.Width, _dataset.Depth),
+                2 => (_dataset.Height, _dataset.Depth),
                 _ => (_dataset.Width, _dataset.Height)
             };
         }
-        
-        private void DrawScaleBar(ImDrawListPtr dl, Vector2 canvasPos, Vector2 canvasSize, 
+
+        private void DrawScaleBar(ImDrawListPtr dl, Vector2 canvasPos, Vector2 canvasSize,
             float zoom, int imageWidth, int imageHeight, int viewIndex)
         {
-            // Calculate scale based on view
             float pixelSizeInUnits = viewIndex switch
             {
-                0 => _dataset.PixelSize,  // XY view
-                1 => (_dataset.PixelSize + _dataset.SliceThickness) / 2,  // XZ view (average)
-                2 => (_dataset.PixelSize + _dataset.SliceThickness) / 2,  // YZ view (average)
+                0 => _dataset.PixelSize,
+                1 => _dataset.PixelSize,
+                2 => _dataset.SliceThickness,
                 _ => _dataset.PixelSize
             };
-            
-            float scaleFactor = canvasSize.X / imageWidth * zoom;
-            
-            // Determine appropriate scale bar length
-            float[] possibleLengths = { 10, 20, 50, 100, 200, 500, 1000, 2000, 5000 };
-            
+
+            var (imagePos, imageSize) = GetImageDisplayMetrics(canvasPos, canvasSize, zoom, Vector2.Zero, imageWidth, imageHeight);
+            float scaleFactor = imageSize.X / imageWidth;
+            float[] possibleLengths = { 1, 2, 5, 10, 20, 50, 100, 200, 500, 1000, 2000, 5000 };
+            string unit = _dataset.Unit ?? "µm";
+
             float bestLength = possibleLengths[0];
             foreach (float length in possibleLengths)
             {
-                float pixelLength = length / pixelSizeInUnits * scaleFactor;
-                if (pixelLength <= 150)
-                    bestLength = length;
+                if (length / pixelSizeInUnits * scaleFactor <= 150) bestLength = length; else break;
             }
-            
-            // Calculate actual pixel length
+
             float barLengthPixels = bestLength / pixelSizeInUnits * scaleFactor;
-            
-            // Position (bottom-right corner)
             Vector2 barPos = canvasPos + new Vector2(canvasSize.X - barLengthPixels - 20, canvasSize.Y - 40);
-            
-            // Draw background
-            dl.AddRectFilled(barPos - new Vector2(5, 5), 
-                barPos + new Vector2(barLengthPixels + 5, 25), 
-                0xAA000000, 3.0f);
-            
-            // Draw scale bar
+
+            dl.AddRectFilled(barPos - new Vector2(5, 5), barPos + new Vector2(barLengthPixels + 5, 25), 0xAA000000, 3.0f);
             dl.AddLine(barPos, barPos + new Vector2(barLengthPixels, 0), 0xFFFFFFFF, 3.0f);
             dl.AddLine(barPos, barPos + new Vector2(0, 5), 0xFFFFFFFF, 3.0f);
-            dl.AddLine(barPos + new Vector2(barLengthPixels, 0), 
-                barPos + new Vector2(barLengthPixels, 5), 0xFFFFFFFF, 3.0f);
-            
-            // Draw text
-            string text = bestLength >= 1000 
-                ? $"{bestLength / 1000:F1} mm" 
-                : $"{bestLength:F0} {_dataset.Unit}";
-            
+            dl.AddLine(barPos + new Vector2(barLengthPixels, 0), barPos + new Vector2(barLengthPixels, 5), 0xFFFFFFFF, 3.0f);
+
+            string text = bestLength >= 1000 ? $"{bestLength / 1000:F0} mm" : $"{bestLength:F0} {unit}";
             Vector2 textSize = ImGui.CalcTextSize(text);
             Vector2 textPos = barPos + new Vector2((barLengthPixels - textSize.X) * 0.5f, 8);
             dl.AddText(textPos, 0xFFFFFFFF, text);
         }
-        
+
         private void ResetViews()
         {
             _sliceX = _dataset.Width / 2;
@@ -748,9 +618,9 @@ namespace GeoscientistToolkit.Data.CtImageStack
 
         public void Dispose()
         {
+            ProjectManager.Instance.DatasetDataChanged -= OnDatasetDataChanged;
             CtImageStackTools.PreviewChanged -= OnPreviewChanged;
-            
-            // --- ADDED: Cleanup static segmentation instance ---
+
             CtSegmentationIntegration.Cleanup(_dataset);
 
             _textureXY?.Dispose();
