@@ -394,7 +394,10 @@ namespace GeoscientistToolkit.Data.CtImageStack
                 Preview3DChanged?.Invoke(_currentDataset, _preview3DMask, GetPreviewColor());
             }
         }
-
+        public Material GetSelectedMaterialForThresholding()
+        {
+            return _selectedMaterialForThresholding;
+        }
         public byte[] GetPreviewMask() => _previewMask;
         public byte[] Get3DPreviewMask() 
         {
@@ -433,4 +436,5 @@ namespace GeoscientistToolkit.Data.CtImageStack
             _activeTools.Remove(dataset);
         }
     }
+    
 }

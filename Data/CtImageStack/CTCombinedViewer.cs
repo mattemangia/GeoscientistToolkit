@@ -132,12 +132,20 @@ namespace GeoscientistToolkit.Data.CtImageStack
         private byte[] _previewMaskYZ = null;
         private Vector4 _previewColor = new Vector4(1, 0, 0, 0.5f);
 
+        // --- ADDED: Reference to interactive segmentation tools for preview color ---
+        private readonly CtSegmentationIntegration _interactiveSegmentation;
+
+
         public CtCombinedViewer(CtImageStackDataset dataset)
         {
             _dataset = dataset ?? throw new ArgumentNullException(nameof(dataset));
 
             // Kick-off (potentially async) load.  This does **not** block.
             _dataset.Load();
+            
+            // --- MODIFIED: Initialize and get segmentation instance ---
+            CtSegmentationIntegration.Initialize(_dataset);
+            _interactiveSegmentation = CtSegmentationIntegration.GetInstance(_dataset);
 
             // Create the rendering panel *first* so the field is never null.
             _renderingPanel      = new CtRenderingPanel(this, _dataset);
@@ -229,100 +237,100 @@ namespace GeoscientistToolkit.Data.CtImageStack
         }
 
         public void DrawContent(ref float zoom, ref Vector2 pan)
-{
-    /*------------------------------------------------------------------------*/
-    /*  1.  Handle the auxiliary rendering-controls panel                    */
-    /*------------------------------------------------------------------------*/
-    if (!_isPoppedOut && _renderingPanel != null)
-    {
-        _renderingPanel.Submit(ref _renderingPanelOpen);
-    }
+		{
+			/*------------------------------------------------------------------------*/
+			/*  1.  Handle the auxiliary rendering-controls panel                    */
+			/*------------------------------------------------------------------------*/
+			if (!_isPoppedOut && _renderingPanel != null)
+			{
+				_renderingPanel.Submit(ref _renderingPanelOpen);
+			}
 
-    /*------------------------------------------------------------------------*/
-    /*  2.  Show the progress dialog while the heavy async init runs          */
-    /*------------------------------------------------------------------------*/
-    if (!_isInitialized)
-    {
-        _progressDialog.Submit();
-        ImGui.Text("Loading 3D viewer…");
-        return;
-    }
+			/*------------------------------------------------------------------------*/
+			/*  2.  Show the progress dialog while the heavy async init runs          */
+			/*------------------------------------------------------------------------*/
+			if (!_isInitialized)
+			{
+				_progressDialog.Submit();
+				ImGui.Text("Loading 3D viewer…");
+				return;
+			}
 
-    /*------------------------------------------------------------------------*/
-    /*  3.  Dispatch to the requested view mode                               */
-    /*------------------------------------------------------------------------*/
-    switch (_viewMode)
-    {
-        case ViewModeEnum.Combined:
-            DrawCombinedView();
-            break;
-        case ViewModeEnum.SlicesOnly:
-            DrawSlicesOnlyView();
-            break;
-        case ViewModeEnum.VolumeOnly:
-            if (VolumeViewer != null)
-            {
-                VolumeViewer.DrawContent(ref zoom, ref pan);
-            }
-            else
-            {
-                ImGui.Text("No 3-D volume dataset available.");
-                ImGui.TextWrapped("Import with the “Optimized for 3D” option to enable volume rendering.");
-            }
-            break;
-        case ViewModeEnum.XYOnly:
-            DrawSliceView(0, "XY (Axial)",     ref _zoomXY, ref _panXY, ref _needsUpdateXY, ref _textureXY);
-            break;
-        case ViewModeEnum.XZOnly:
-            DrawSliceView(1, "XZ (Coronal)",   ref _zoomXZ, ref _panXZ, ref _needsUpdateXZ, ref _textureXZ);
-            break;
-        case ViewModeEnum.YZOnly:
-            DrawSliceView(2, "YZ (Sagittal)",  ref _zoomYZ, ref _panYZ, ref _needsUpdateYZ, ref _textureYZ);
-            break;
-    }
+			/*------------------------------------------------------------------------*/
+			/*  3.  Dispatch to the requested view mode                               */
+			/*------------------------------------------------------------------------*/
+			switch (_viewMode)
+			{
+				case ViewModeEnum.Combined:
+					DrawCombinedView();
+					break;
+				case ViewModeEnum.SlicesOnly:
+					DrawSlicesOnlyView();
+					break;
+				case ViewModeEnum.VolumeOnly:
+					if (VolumeViewer != null)
+					{
+						VolumeViewer.DrawContent(ref zoom, ref pan);
+					}
+					else
+					{
+						ImGui.Text("No 3-D volume dataset available.");
+						ImGui.TextWrapped("Import with the “Optimized for 3D” option to enable volume rendering.");
+					}
+					break;
+				case ViewModeEnum.XYOnly:
+					DrawSliceView(0, "XY (Axial)",     ref _zoomXY, ref _panXY, ref _needsUpdateXY, ref _textureXY);
+					break;
+				case ViewModeEnum.XZOnly:
+					DrawSliceView(1, "XZ (Coronal)",   ref _zoomXZ, ref _panXZ, ref _needsUpdateXZ, ref _textureXZ);
+					break;
+				case ViewModeEnum.YZOnly:
+					DrawSliceView(2, "YZ (Sagittal)",  ref _zoomYZ, ref _panYZ, ref _needsUpdateYZ, ref _textureYZ);
+					break;
+			}
 
-    /*------------------------------------------------------------------------*/
-    /*  4.  Viewer-level context menu                                         */
-    /*------------------------------------------------------------------------*/
-    if (ImGui.BeginPopupContextWindow("ViewerContextMenu"))
-    {
-        if (ImGui.MenuItem("Open Rendering Panel", null, _renderingPanelOpen))
-            _renderingPanelOpen = true;
+			/*------------------------------------------------------------------------*/
+			/*  4.  Viewer-level context menu                                         */
+			/*------------------------------------------------------------------------*/
+			if (ImGui.BeginPopupContextWindow("ViewerContextMenu"))
+			{
+				if (ImGui.MenuItem("Open Rendering Panel", null, _renderingPanelOpen))
+					_renderingPanelOpen = true;
 
-        ImGui.Separator();
+				ImGui.Separator();
 
-        if (ImGui.MenuItem("Reset Views")) ResetAllViews();
+				if (ImGui.MenuItem("Reset Views")) ResetAllViews();
 
-        if (_viewMode != ViewModeEnum.VolumeOnly &&
-            ImGui.MenuItem("Center Slices"))
-        {
-            _sliceX = _dataset.Width  / 2;
-            _sliceY = _dataset.Height / 2;
-            _sliceZ = _dataset.Depth  / 2;
-            _needsUpdateXY = _needsUpdateXZ = _needsUpdateYZ = true;
-        }
+				if (_viewMode != ViewModeEnum.VolumeOnly &&
+					ImGui.MenuItem("Center Slices"))
+				{
+					_sliceX = _dataset.Width  / 2;
+					_sliceY = _dataset.Height / 2;
+					_sliceZ = _dataset.Depth  / 2;
+					_needsUpdateXY = _needsUpdateXZ = _needsUpdateYZ = true;
+				}
 
-        ImGui.Separator();
+				ImGui.Separator();
 
-        if (ImGui.MenuItem("Combined View", null, _viewMode == ViewModeEnum.Combined))     _viewMode = ViewModeEnum.Combined;
-        if (ImGui.MenuItem("Slices Only",  null, _viewMode == ViewModeEnum.SlicesOnly))    _viewMode = ViewModeEnum.SlicesOnly;
-        if (ImGui.MenuItem("3D Only",      null, _viewMode == ViewModeEnum.VolumeOnly))    _viewMode = ViewModeEnum.VolumeOnly;
+				if (ImGui.MenuItem("Combined View", null, _viewMode == ViewModeEnum.Combined))     _viewMode = ViewModeEnum.Combined;
+				if (ImGui.MenuItem("Slices Only",  null, _viewMode == ViewModeEnum.SlicesOnly))    _viewMode = ViewModeEnum.SlicesOnly;
+				if (ImGui.MenuItem("3D Only",      null, _viewMode == ViewModeEnum.VolumeOnly))    _viewMode = ViewModeEnum.VolumeOnly;
 
-        ImGui.EndPopup();
-    }
+				ImGui.EndPopup();
+			}
 
-    /*------------------------------------------------------------------------*/
-    /*  5.  When popped-out, draw the control panel inline below the viewer   */
-    /*------------------------------------------------------------------------*/
-    if (_isPoppedOut && _renderingPanelOpen && _renderingPanel != null)
-    {
-        ImGui.Separator();
-        if (ImGui.CollapsingHeader("Rendering Controls", ImGuiTreeNodeFlags.DefaultOpen))
-        {
-            _renderingPanel.DrawContentInline();
-        }
-    }
-}
+			/*------------------------------------------------------------------------*/
+			/*  5.  When popped-out, draw the control panel inline below the viewer   */
+			/*------------------------------------------------------------------------*/
+			if (_isPoppedOut && _renderingPanelOpen && _renderingPanel != null)
+			{
+				ImGui.Separator();
+				if (ImGui.CollapsingHeader("Rendering Controls", ImGuiTreeNodeFlags.DefaultOpen))
+				{
+					_renderingPanel.DrawContentInline();
+				}
+			}
+		}
 
         public void ZoomAllViews(float factor)
         {
@@ -519,6 +527,33 @@ namespace GeoscientistToolkit.Data.CtImageStack
             var contentRegion = ImGui.GetContentRegionAvail();
             DrawSingleSlice(viewIndex, ref zoom, ref pan, ref needsUpdate, ref texture, contentRegion);
         }
+        
+        // --- ADDED: Helper method to get mouse position in image coordinates ---
+        private Vector2 GetMousePosInImage(Vector2 canvasPos, Vector2 canvasSize, float zoom, Vector2 pan, int imageWidth, int imageHeight)
+        {
+            float imageAspect = (float)imageWidth / imageHeight;
+            float canvasAspect = canvasSize.X / canvasSize.Y;
+            
+            Vector2 imageDisplaySize;
+            if (imageAspect > canvasAspect)
+            {
+                imageDisplaySize = new Vector2(canvasSize.X, canvasSize.X / imageAspect);
+            }
+            else
+            {
+                imageDisplaySize = new Vector2(canvasSize.Y * imageAspect, canvasSize.Y);
+            }
+            
+            imageDisplaySize *= zoom;
+            Vector2 imageDisplayPos = canvasPos + (canvasSize - imageDisplaySize) * 0.5f + pan;
+            
+            Vector2 mouseRelativeToImage = ImGui.GetMousePos() - imageDisplayPos;
+            
+            return new Vector2(
+                (mouseRelativeToImage.X / imageDisplaySize.X) * imageWidth,
+                (mouseRelativeToImage.Y / imageDisplaySize.Y) * imageHeight
+            );
+        }
 
         private void DrawSingleSlice(int viewIndex, ref float zoom, ref Vector2 pan, ref bool needsUpdate, ref TextureManager texture, Vector2 availableSize)
         {
@@ -529,6 +564,28 @@ namespace GeoscientistToolkit.Data.CtImageStack
             
             ImGui.InvisibleButton($"canvas{viewIndex}", canvasSize);
             bool isHovered = ImGui.IsItemHovered();
+            
+            // --- ADDED: Handle segmentation mouse input ---
+            if (_interactiveSegmentation != null && isHovered)
+            {
+                 var (width, height) = GetImageDimensionsForView(viewIndex);
+                 var mousePosInImage = GetMousePosInImage(canvasPos, canvasSize, zoom, pan, width, height);
+
+                _interactiveSegmentation.HandleMouseInput(
+                    mousePosInImage,
+                    viewIndex switch { 0 => _sliceZ, 1 => _sliceY, 2 => _sliceX, _ => 0 },
+                    viewIndex,
+                    ImGui.IsItemClicked(ImGuiMouseButton.Left),
+                    ImGui.IsMouseDragging(ImGuiMouseButton.Left),
+                    ImGui.IsMouseReleased(ImGuiMouseButton.Left)
+                );
+                
+                // If segmentation is active, force updates
+                if (ImGui.IsMouseDragging(ImGuiMouseButton.Left) || ImGui.IsMouseReleased(ImGuiMouseButton.Left))
+                {
+                    _needsUpdateXY = _needsUpdateXZ = _needsUpdateYZ = true;
+                }
+            }
             
             // Individual slice context menu
             if (ImGui.BeginPopupContextItem($"SliceContext{viewIndex}"))
@@ -614,7 +671,8 @@ namespace GeoscientistToolkit.Data.CtImageStack
                 }
             }
             
-            if (isHovered && ImGui.IsMouseClicked(ImGuiMouseButton.Left)) 
+            // Only update crosshair from left click if not in an interactive segmentation mode
+            if (isHovered && ImGui.IsMouseClicked(ImGuiMouseButton.Left) && !(_interactiveSegmentation?.HasActiveSelection ?? false))
             { 
                 UpdateCrosshairFromMouse(viewIndex, canvasPos, canvasSize, zoom, pan); 
             }
@@ -842,16 +900,28 @@ namespace GeoscientistToolkit.Data.CtImageStack
                     labelData = ExtractLabelSliceData(viewIndex, width, height); 
                 }
                 
-                // Get preview data based on view
-                byte[] previewMask = GetPreviewMaskForView(viewIndex);
+                // --- MODIFIED: Get both threshold and segmentation previews ---
+                byte[] thresholdPreviewMask = GetPreviewMaskForView(viewIndex);
+                byte[] segmentationPreviewMask = _interactiveSegmentation?.GetPreviewMask(viewIndex switch { 0 => _sliceZ, 1 => _sliceY, 2 => _sliceX, _ => 0 }, viewIndex);
                 
                 byte[] rgbaData = new byte[width * height * 4];
                 for (int i = 0; i < width * height; i++)
                 {
                     byte value = imageData[i];
                     
-                    // Check preview mask first
-                    if (previewMask != null && previewMask[i] > 0)
+                    // PRIORITY: Interactive Segmentation > Threshold Preview > Label Data > Grayscale
+                    if (segmentationPreviewMask != null && segmentationPreviewMask[i] > 0)
+                    {
+                        var material = _dataset.Materials.FirstOrDefault(m => m.ID == _interactiveSegmentation.TargetMaterialId);
+                        var segColor = material?.Color ?? new Vector4(1,0,0,1);
+                        float opacity = 0.5f;
+
+                        rgbaData[i * 4]     = (byte)(value * (1 - opacity) + segColor.X * 255 * opacity);
+                        rgbaData[i * 4 + 1] = (byte)(value * (1 - opacity) + segColor.Y * 255 * opacity);
+                        rgbaData[i * 4 + 2] = (byte)(value * (1 - opacity) + segColor.Z * 255 * opacity);
+                        rgbaData[i * 4 + 3] = 255;
+                    }
+                    else if (thresholdPreviewMask != null && thresholdPreviewMask[i] > 0)
                     {
                         rgbaData[i * 4] = (byte)(value * 0.5f + _previewColor.X * 255 * 0.5f);
                         rgbaData[i * 4 + 1] = (byte)(value * 0.5f + _previewColor.Y * 255 * 0.5f);
@@ -1214,6 +1284,9 @@ namespace GeoscientistToolkit.Data.CtImageStack
             // Unsubscribe from preview changes
             CtImageStackTools.PreviewChanged -= OnPreviewChanged;
             CtImageStackTools.Preview3DChanged -= OnPreview3DChanged;
+
+            // --- MODIFIED: Cleanup static segmentation instance ---
+            CtSegmentationIntegration.Cleanup(_dataset);
     
             _renderingPanel?.Dispose();
             _textureXY?.Dispose();

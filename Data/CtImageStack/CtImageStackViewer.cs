@@ -6,6 +6,7 @@ using GeoscientistToolkit.Util;
 using ImGuiNET;
 using System.Numerics;
 using Veldrid;
+using System.Linq; // Added for Linq FirstOrDefault
 
 namespace GeoscientistToolkit.Data.CtImageStack
 {
@@ -47,6 +48,11 @@ namespace GeoscientistToolkit.Data.CtImageStack
         private enum Layout { Horizontal, Vertical, Grid2x2 }
         private Layout _layout = Layout.Grid2x2;
         
+        // --- ADDED: Segmentation fields ---
+        private readonly CtSegmentationIntegration _segmentationManager;
+        private Material _selectedMaterialForSegmentation;
+        private bool _showSegmentationWindow = false;
+
         public CtImageStackViewer(CtImageStackDataset dataset)
         {
             _dataset = dataset ?? throw new ArgumentNullException(nameof(dataset));
@@ -58,6 +64,11 @@ namespace GeoscientistToolkit.Data.CtImageStack
             _sliceX = _dataset.Width / 2;
             _sliceY = _dataset.Height / 2;
             _sliceZ = _dataset.Depth / 2;
+            
+            // --- ADDED: Initialize segmentation tools ---
+            CtSegmentationIntegration.Initialize(_dataset);
+            _segmentationManager = CtSegmentationIntegration.GetInstance(_dataset);
+            _selectedMaterialForSegmentation = _dataset.Materials.FirstOrDefault(m => m.ID != 0);
         }
         private void OnPreviewChanged(CtImageStackDataset dataset)
         {
@@ -103,6 +114,16 @@ namespace GeoscientistToolkit.Data.CtImageStack
             ImGui.SameLine();
             ImGui.Separator();
             ImGui.SameLine();
+
+            // --- ADDED: Button to open segmentation tools ---
+            if (ImGui.Button("Segmentation"))
+            {
+                _showSegmentationWindow = !_showSegmentationWindow;
+            }
+
+            ImGui.SameLine();
+            ImGui.Separator();
+            ImGui.SameLine();
             
             // View options
             ImGui.Checkbox("Crosshairs", ref _showCrosshairs);
@@ -124,6 +145,9 @@ namespace GeoscientistToolkit.Data.CtImageStack
 
         public void DrawContent(ref float zoom, ref Vector2 pan)
         {
+            // --- ADDED: Draw segmentation window if open ---
+            DrawSegmentationToolWindow();
+            
             var availableSize = ImGui.GetContentRegionAvail();
             
             switch (_layout)
@@ -138,6 +162,35 @@ namespace GeoscientistToolkit.Data.CtImageStack
                     DrawGrid2x2Layout(availableSize);
                     break;
             }
+        }
+
+        // --- ADDED: Method to draw the segmentation tool window ---
+        private void DrawSegmentationToolWindow()
+        {
+            if (!_showSegmentationWindow || _segmentationManager == null) return;
+
+            ImGui.SetNextWindowSize(new Vector2(350, 450), ImGuiCond.FirstUseEver);
+            if (ImGui.Begin("Segmentation Tools##SimpleViewer", ref _showSegmentationWindow))
+            {
+                // Simple Material Selector
+                string preview = _selectedMaterialForSegmentation?.Name ?? "Select a material...";
+                if (ImGui.BeginCombo("Target Material", preview))
+                {
+                    foreach(var mat in _dataset.Materials.Where(m => m.ID != 0))
+                    {
+                        if (ImGui.Selectable(mat.Name, mat == _selectedMaterialForSegmentation))
+                        {
+                            _selectedMaterialForSegmentation = mat;
+                        }
+                    }
+                    ImGui.EndCombo();
+                }
+
+                ImGui.Separator();
+
+                _segmentationManager.DrawSegmentationControls(_selectedMaterialForSegmentation);
+            }
+            ImGui.End();
         }
         
         private void DrawHorizontalLayout(Vector2 availableSize)
@@ -242,6 +295,18 @@ namespace GeoscientistToolkit.Data.CtImageStack
             ImGui.EndChild();
         }
         
+        // --- ADDED: Helper for image display size calculation ---
+        private Vector2 GetImageDisplaySize(Vector2 canvasSize, int imageWidth, int imageHeight, float zoom)
+        {
+            float imageAspect = (float)imageWidth / imageHeight;
+            float canvasAspect = canvasSize.X / canvasSize.Y;
+            
+            Vector2 size;
+            if (imageAspect > canvasAspect) { size = new Vector2(canvasSize.X * zoom, canvasSize.X / imageAspect * zoom); }
+            else { size = new Vector2(canvasSize.Y * imageAspect * zoom, canvasSize.Y * zoom); }
+            return size;
+        }
+
         private void DrawSingleView(int viewIndex, ref float zoom, ref Vector2 pan, 
             ref bool needsUpdate, ref TextureManager texture)
         {
@@ -253,6 +318,34 @@ namespace GeoscientistToolkit.Data.CtImageStack
             // Create invisible button for mouse interaction
             ImGui.InvisibleButton($"canvas{viewIndex}", canvasSize);
             bool isHovered = ImGui.IsItemHovered();
+
+            // --- ADDED: Handle segmentation mouse input ---
+            if (_segmentationManager != null && _showSegmentationWindow && isHovered)
+            {
+                var (width, height) = GetImageDimensionsForView(viewIndex);
+                 var imageSize = GetImageDisplaySize(canvasSize, width, height, zoom);
+                 var imagePos = canvasPos + (canvasSize - imageSize) * 0.5f + pan;
+                 var mouseRelativeToImage = io.MousePos - imagePos;
+                 var mousePosInImage = new Vector2(
+                    (mouseRelativeToImage.X / imageSize.X) * width,
+                    (mouseRelativeToImage.Y / imageSize.Y) * height
+                 );
+                 
+                _segmentationManager.HandleMouseInput(
+                    mousePosInImage,
+                    viewIndex switch { 0 => _sliceZ, 1 => _sliceY, 2 => _sliceX, _ => 0 },
+                    viewIndex,
+                    ImGui.IsItemClicked(ImGuiMouseButton.Left),
+                    ImGui.IsMouseDragging(ImGuiMouseButton.Left),
+                    ImGui.IsMouseReleased(ImGuiMouseButton.Left)
+                );
+                
+                // Force update if segmentation is active
+                if (ImGui.IsMouseDragging(ImGuiMouseButton.Left) || ImGui.IsMouseReleased(ImGuiMouseButton.Left))
+                {
+                    needsUpdate = true;
+                }
+            }
             
             // Handle mouse wheel zoom
             if (isHovered && io.MouseWheel != 0)
@@ -274,7 +367,6 @@ namespace GeoscientistToolkit.Data.CtImageStack
                 }
             }
             
-            // --- FIX START: Changed from IsItemActive to IsItemHovered for panning ---
             if (isHovered && ImGui.IsMouseDragging(ImGuiMouseButton.Middle))
             {
                 pan += io.MouseDelta;
@@ -287,7 +379,6 @@ namespace GeoscientistToolkit.Data.CtImageStack
                     _panYZ = pan;
                 }
             }
-            // --- FIX END ---
             
             // Handle slice scrolling with Ctrl+Wheel
             if (isHovered && io.MouseWheel != 0 && io.KeyCtrl)
@@ -310,7 +401,7 @@ namespace GeoscientistToolkit.Data.CtImageStack
             }
             
             // Handle click to set crosshair position
-            if (isHovered && ImGui.IsMouseClicked(ImGuiMouseButton.Left))
+            if (isHovered && ImGui.IsMouseClicked(ImGuiMouseButton.Left) && !(_segmentationManager?.HasActiveSelection ?? false))
             {
                 UpdateCrosshairFromMouse(viewIndex, canvasPos, canvasSize, zoom, pan);
             }
@@ -384,7 +475,7 @@ namespace GeoscientistToolkit.Data.CtImageStack
             ImGui.BulletText("Wheel: Zoom");
             ImGui.BulletText("Middle Drag: Pan");
             ImGui.BulletText("Ctrl+Wheel: Change slice");
-            ImGui.BulletText("Left Click: Set crosshair");
+            ImGui.BulletText("Left Click: Set crosshair / Use Tool");
             
             ImGui.EndChild();
         }
@@ -437,7 +528,7 @@ namespace GeoscientistToolkit.Data.CtImageStack
         {
             uint color = 0xFF00FF00; // Green crosshairs
             
-            float x1 = 0, y1 = 0, x2 = 0, y2 = 0;
+            float x1 = 0, y1 = 0;
             
             switch (viewIndex)
             {
@@ -486,15 +577,34 @@ namespace GeoscientistToolkit.Data.CtImageStack
                 // Apply window/level
                 ApplyWindowLevel(imageData);
                 
+                // --- ADDED: Get segmentation preview mask ---
+                byte[] segmentationPreviewMask = _segmentationManager?.GetPreviewMask(
+                    viewIndex switch { 0 => _sliceZ, 1 => _sliceY, 2 => _sliceX, _ => 0 }, viewIndex
+                );
+
                 // Convert to RGBA
                 byte[] rgbaData = new byte[width * height * 4];
                 for (int i = 0; i < width * height; i++)
                 {
                     byte value = imageData[i];
-                    rgbaData[i * 4] = value;
-                    rgbaData[i * 4 + 1] = value;
-                    rgbaData[i * 4 + 2] = value;
-                    rgbaData[i * 4 + 3] = 255;
+
+                    // --- ADDED: Render segmentation preview ---
+                    if (segmentationPreviewMask != null && segmentationPreviewMask[i] > 0)
+                    {
+                        var segColor = _selectedMaterialForSegmentation?.Color ?? new Vector4(1, 0, 0, 1);
+                        float opacity = 0.5f;
+                        rgbaData[i * 4] = (byte)(value * (1 - opacity) + segColor.X * 255 * opacity);
+                        rgbaData[i * 4 + 1] = (byte)(value * (1 - opacity) + segColor.Y * 255 * opacity);
+                        rgbaData[i * 4 + 2] = (byte)(value * (1 - opacity) + segColor.Z * 255 * opacity);
+                        rgbaData[i * 4 + 3] = 255;
+                    }
+                    else
+                    {
+                        rgbaData[i * 4] = value;
+                        rgbaData[i * 4 + 1] = value;
+                        rgbaData[i * 4 + 2] = value;
+                        rgbaData[i * 4 + 3] = 255;
+                    }
                 }
                 
                 // Dispose old texture
@@ -590,7 +700,6 @@ namespace GeoscientistToolkit.Data.CtImageStack
             
             // Determine appropriate scale bar length
             float[] possibleLengths = { 10, 20, 50, 100, 200, 500, 1000, 2000, 5000 };
-            float targetPixelLength = 100;
             
             float bestLength = possibleLengths[0];
             foreach (float length in possibleLengths)
@@ -640,6 +749,10 @@ namespace GeoscientistToolkit.Data.CtImageStack
         public void Dispose()
         {
             CtImageStackTools.PreviewChanged -= OnPreviewChanged;
+            
+            // --- ADDED: Cleanup static segmentation instance ---
+            CtSegmentationIntegration.Cleanup(_dataset);
+
             _textureXY?.Dispose();
             _textureXZ?.Dispose();
             _textureYZ?.Dispose();

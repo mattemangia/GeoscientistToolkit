@@ -18,16 +18,21 @@ namespace GeoscientistToolkit.Data.CtImageStack
     {
         private readonly CtCombinedViewer _viewer;
         private readonly CtImageStackDataset _dataset;
-        private readonly CtImageStackTools _segmentationTools;
-        private bool _showSegmentationTools = true;
+        private readonly CtImageStackTools _segmentationTools; // This is for thresholding
+        private readonly CtSegmentationIntegration _interactiveSegmentation; // This is for brush, lasso etc.
         private int _currentViewMode = 0;
         
         public CtRenderingPanel(CtCombinedViewer viewer, CtImageStackDataset dataset) 
-            : base("CT Rendering Controls", new Vector2(400, 600))
+            : base("CT Rendering Controls", new Vector2(400, 700)) // Increased default height
         {
             _viewer = viewer;
             _dataset = dataset;
             _segmentationTools = new CtImageStackTools();
+
+            // Initialize the new interactive segmentation tools
+            CtSegmentationIntegration.Initialize(_dataset);
+            _interactiveSegmentation = CtSegmentationIntegration.GetInstance(_dataset);
+
             _currentViewMode = (int)_viewer.ViewMode;
         }
 
@@ -291,18 +296,18 @@ namespace GeoscientistToolkit.Data.CtImageStack
 
         private void DrawSegmentationTab()
         {
-            if (_showSegmentationTools)
+            // Draw the existing thresholding tools
+            _segmentationTools.Draw(_dataset);
+
+            ImGui.Separator();
+            ImGui.Separator();
+
+            // Draw the new interactive segmentation tools
+            if (_interactiveSegmentation != null)
             {
-                // Draw the segmentation tools directly
-                _segmentationTools.Draw(_dataset);
-            }
-            else
-            {
-                ImGui.TextDisabled("Segmentation tools are disabled.");
-                if (ImGui.Button("Enable Segmentation Tools"))
-                {
-                    _showSegmentationTools = true;
-                }
+                // Get the material selected in the thresholding tool to link them
+                var selectedMaterial = _segmentationTools.GetSelectedMaterialForThresholding();
+                _interactiveSegmentation.DrawSegmentationControls(selectedMaterial);
             }
         }
 
@@ -459,6 +464,8 @@ namespace GeoscientistToolkit.Data.CtImageStack
 
         public override void Dispose()
         {
+            // Cleanup the static instance
+            CtSegmentationIntegration.Cleanup(_dataset);
             base.Dispose();
         }
     }
