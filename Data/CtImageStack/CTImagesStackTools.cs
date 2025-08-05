@@ -20,27 +20,26 @@ namespace GeoscientistToolkit.Data.CtImageStack
         private byte _maxThreshold = 200;
         private bool _showPreview = false;
         private bool _show3DPreview = false;
-        private byte[] _previewMask = null;
-        private byte[] _preview3DMask = null;
+
+        // --- MODIFIED: Renamed masks to represent full 3D volumes ---
+        private byte[] _preview2DMask_FullVolume = null;
+        private byte[] _preview3DMask_FullVolume = null;
+
         private bool _previewNeedsUpdate = true;
         private bool _preview3DNeedsUpdate = true;
-        private int _previewSlice = -1;
 
         // Material selection state
         private Material _selectedMaterialForEditing;
-        private Material _selectedMaterialForThresholding;
+        private Material _selectedTargetMaterial;
 
         // Preview change events
         public static event Action<CtImageStackDataset> PreviewChanged;
         public static event Action<CtImageStackDataset, byte[], Vector4> Preview3DChanged;
 
-        // Static instance tracking for accessing preview data
         private static readonly Dictionary<CtImageStackDataset, CtImageStackTools> _activeTools = new Dictionary<CtImageStackDataset, CtImageStackTools>();
 
-        // --- FIX: Statistics window management ---
         private MaterialStatisticsWindow _statisticsWindow;
         private bool _isStatsWindowOpen = false;
-
 
         public CtImageStackTools()
         {
@@ -53,40 +52,37 @@ namespace GeoscientistToolkit.Data.CtImageStack
             if (_currentDataset != ctDataset)
             {
                 _currentDataset = ctDataset;
-                // --- FIX: Initialize window instance, but don't show it yet ---
                 _statisticsWindow = new MaterialStatisticsWindow(_currentDataset);
-                _isStatsWindowOpen = false; // Ensure it's closed when switching datasets
+                _isStatsWindowOpen = false;
             }
 
-            // Register this instance for static access
             _activeTools[ctDataset] = this;
 
-            // Initialize material selections if they are null
             if (_selectedMaterialForEditing == null && _currentDataset.Materials.Any(m => m.ID != 0))
                 _selectedMaterialForEditing = _currentDataset.Materials.First(m => m.ID != 0);
-            if (_selectedMaterialForThresholding == null && _currentDataset.Materials.Any(m => m.ID != 0))
-                _selectedMaterialForThresholding = _currentDataset.Materials.First(m => m.ID != 0);
+            if (_selectedTargetMaterial == null && _currentDataset.Materials.Any(m => m.ID != 0))
+                _selectedTargetMaterial = _currentDataset.Materials.First(m => m.ID != 0);
 
             DrawVolumeInfo();
             ImGui.Separator();
             DrawMaterialEditor();
             ImGui.Separator();
             DrawSegmentationTools();
+            ImGui.Separator();
 
-            // --- FIX: Correctly submit the statistics window for drawing ---
-            // The Submit method from BasePanel handles everything (drawing, state, pop-out).
             if (_isStatsWindowOpen)
             {
                 _statisticsWindow?.Submit(ref _isStatsWindowOpen);
             }
         }
 
-        public static (bool isActive, byte[] mask, Vector4 color) GetPreviewData(CtImageStackDataset dataset, int sliceZ)
+        // --- MODIFIED: This now returns a full 3D mask for the 2D preview system ---
+        public static (bool isActive, byte[] full3DMask, Vector4 color) GetPreviewData(CtImageStackDataset dataset)
         {
             if (_activeTools.TryGetValue(dataset, out var tools))
             {
-                tools.UpdatePreviewForSlice(sliceZ);
-                return (tools.IsPreviewActive(), tools.GetPreviewMask(), tools.GetPreviewColor());
+                tools.Update2DPreviewVolume();
+                return (tools.IsPreviewActive(), tools._preview2DMask_FullVolume, tools.GetPreviewColor());
             }
             return (false, null, Vector4.Zero);
         }
@@ -119,7 +115,6 @@ namespace GeoscientistToolkit.Data.CtImageStack
                 ImGui.Text($"Physical Volume: {volumeMm3:F2} mm³");
                 ImGui.Spacing();
 
-                // --- FIX: Set state flag to true instead of calling Open() ---
                 if (ImGui.Button("Material Statistics..."))
                 {
                     _isStatsWindowOpen = true;
@@ -222,27 +217,17 @@ namespace GeoscientistToolkit.Data.CtImageStack
             if (ImGui.CollapsingHeader("Segmentation Tools", ImGuiTreeNodeFlags.DefaultOpen))
             {
                 ImGui.Indent();
-                ImGui.Text("Thresholding:");
-                int min = _minThreshold;
-                int max = _maxThreshold;
-                ImGui.SetNextItemWidth(ImGui.GetContentRegionAvail().X);
-                if (ImGui.DragIntRange2("##threshold", ref min, ref max, 1.0f, 0, 255, "Min: %d", "Max: %d"))
-                {
-                    _minThreshold = (byte)min;
-                    _maxThreshold = (byte)max;
-                    _previewNeedsUpdate = true;
-                    _preview3DNeedsUpdate = true;
-                    if (_showPreview) NotifyViewersOfPreviewChange();
-                }
 
-                string preview = _selectedMaterialForThresholding != null ? _selectedMaterialForThresholding.Name : "Select a material...";
-                if (ImGui.BeginCombo("Target Material", preview))
+                ImGui.Text("Target Material:");
+                ImGui.SetNextItemWidth(ImGui.GetContentRegionAvail().X);
+                string preview = _selectedTargetMaterial != null ? _selectedTargetMaterial.Name : "Select a material...";
+                if (ImGui.BeginCombo("##TargetMaterialCombo", preview))
                 {
                     foreach (var mat in _currentDataset.Materials.Where(m => m.ID != 0))
                     {
-                        if (ImGui.Selectable(mat.Name, mat == _selectedMaterialForThresholding))
+                        if (ImGui.Selectable(mat.Name, mat == _selectedTargetMaterial))
                         {
-                            _selectedMaterialForThresholding = mat;
+                            _selectedTargetMaterial = mat;
                             if (_showPreview)
                             {
                                 _previewNeedsUpdate = true;
@@ -253,64 +238,168 @@ namespace GeoscientistToolkit.Data.CtImageStack
                     }
                     ImGui.EndCombo();
                 }
+                if (ImGui.IsItemHovered())
+                {
+                    ImGui.SetTooltip("This material will be used for all segmentation operations.");
+                }
+
+                ImGui.Separator();
+
+                ImGui.Text("Threshold-based Segmentation");
+                ImGui.Indent();
+
+                int min = _minThreshold;
+                int max = _maxThreshold;
+                ImGui.SetNextItemWidth(ImGui.GetContentRegionAvail().X);
+                if (ImGui.DragIntRange2("##threshold", ref min, ref max, 1.0f, 0, 255, "Min: %d", "Max: %d"))
+                {
+                    _minThreshold = (byte)min;
+                    _maxThreshold = (byte)max;
+                    _previewNeedsUpdate = true;
+                    _preview3DNeedsUpdate = true;
+                    if (_showPreview) NotifyViewersOfPreviewChange();
+                    if (_show3DPreview) NotifyViewersOf3DPreviewChange();
+                }
 
                 if (ImGui.Checkbox("Preview Threshold (2D)", ref _showPreview))
                 {
-                    _previewNeedsUpdate = true;
-                    if (!_showPreview) _show3DPreview = false;
+                    if (_showPreview) _previewNeedsUpdate = true;
+                    else _preview2DMask_FullVolume = null; // Clear mask when turning off
                     NotifyViewersOfPreviewChange();
                 }
-                if (!_showPreview) ImGui.BeginDisabled();
+
+                if (ImGui.IsItemHovered()) ImGui.SetTooltip("Show a real-time preview of the threshold on the 2D slice viewers.");
+
                 ImGui.SameLine();
                 if (ImGui.Checkbox("3D Preview", ref _show3DPreview))
                 {
-                    _preview3DNeedsUpdate = true;
+                    if (_show3DPreview) _preview3DNeedsUpdate = true;
+                    else _preview3DMask_FullVolume = null; // Clear mask when turning off
                     NotifyViewersOf3DPreviewChange();
                 }
-                if (ImGui.IsItemHovered()) ImGui.SetTooltip("Enable real-time 3D preview (may impact performance)");
-                if (!_showPreview) ImGui.EndDisabled();
+                if (ImGui.IsItemHovered()) ImGui.SetTooltip("Enable real-time 3D preview of the threshold (may impact performance)");
 
-                if (_selectedMaterialForThresholding == null)
+                if (_selectedTargetMaterial == null)
                 {
-                    ImGui.TextColored(new Vector4(1, 0.5f, 0.5f, 1), "Create a material to enable thresholding.");
+                    ImGui.TextColored(new Vector4(1, 0.5f, 0.5f, 1), "Select a target material to enable thresholding.");
                     ImGui.BeginDisabled();
                 }
                 if (ImGui.Button("Add by Threshold [+]"))
                 {
-                    _selectedMaterialForThresholding.MinValue = _minThreshold;
-                    _selectedMaterialForThresholding.MaxValue = _maxThreshold;
-                    _ = MaterialOperations.AddVoxelsByThresholdAsync(_currentDataset.VolumeData, _currentDataset.LabelData, _selectedMaterialForThresholding.ID, _minThreshold, _maxThreshold, _currentDataset);
-                    _showPreview = false; _show3DPreview = false; _previewMask = null; _preview3DMask = null;
+                    _selectedTargetMaterial.MinValue = _minThreshold;
+                    _selectedTargetMaterial.MaxValue = _maxThreshold;
+                    _ = MaterialOperations.AddVoxelsByThresholdAsync(_currentDataset.VolumeData, _currentDataset.LabelData, _selectedTargetMaterial.ID, _minThreshold, _maxThreshold, _currentDataset);
+                    _showPreview = false; _show3DPreview = false; _preview2DMask_FullVolume = null; _preview3DMask_FullVolume = null;
                     NotifyViewersOfPreviewChange(); NotifyViewersOf3DPreviewChange();
                 }
                 ImGui.SameLine();
                 if (ImGui.Button("Remove by Threshold [-]"))
                 {
-                    _ = MaterialOperations.RemoveVoxelsByThresholdAsync(_currentDataset.VolumeData, _currentDataset.LabelData, _selectedMaterialForThresholding.ID, _minThreshold, _maxThreshold, _currentDataset);
-                    _showPreview = false; _show3DPreview = false; _previewMask = null; _preview3DMask = null;
+                    _ = MaterialOperations.RemoveVoxelsByThresholdAsync(_currentDataset.VolumeData, _currentDataset.LabelData, _selectedTargetMaterial.ID, _minThreshold, _maxThreshold, _currentDataset);
+                    _showPreview = false; _show3DPreview = false; _preview2DMask_FullVolume = null; _preview3DMask_FullVolume = null;
                     NotifyViewersOfPreviewChange(); NotifyViewersOf3DPreviewChange();
                 }
-                if (_selectedMaterialForThresholding == null) ImGui.EndDisabled();
-                if (_showPreview || _show3DPreview)
+                if (_selectedTargetMaterial == null) ImGui.EndDisabled();
+
+                if (_showPreview)
                 {
-                    ImGui.Spacing();
-                    ImGui.TextColored(new Vector4(0.5f, 1.0f, 0.5f, 1.0f), "Preview Active");
-                    if (_show3DPreview) ImGui.TextWrapped("3D preview may impact performance. Disable if experiencing slowdowns.");
+                    ImGui.TextColored(new Vector4(0.5f, 1.0f, 0.5f, 1.0f), "2D Preview Active");
                 }
+                if (_show3DPreview)
+                {
+                    ImGui.TextColored(new Vector4(0.5f, 1.0f, 0.5f, 1.0f), "3D Preview Active");
+                    ImGui.TextWrapped("3D preview may impact performance.");
+                }
+
+                ImGui.Unindent();
                 ImGui.Unindent();
             }
         }
 
-        public void UpdatePreviewForSlice(int sliceZ) { if (!_showPreview || _currentDataset.VolumeData == null) { _previewMask = null; return; } if (_previewSlice != sliceZ || _previewNeedsUpdate) { _previewSlice = sliceZ; _previewNeedsUpdate = false; int width = _currentDataset.Width; int height = _currentDataset.Height; _previewMask = new byte[width * height]; var graySlice = new byte[width * height]; _currentDataset.VolumeData.ReadSliceZ(sliceZ, graySlice); for (int i = 0; i < graySlice.Length; i++) { byte gray = graySlice[i]; _previewMask[i] = (gray >= _minThreshold && gray <= _maxThreshold) ? (byte)255 : (byte)0; } } }
-        private void Update3DPreview() { if (!_show3DPreview || _currentDataset.VolumeData == null) { _preview3DMask = null; return; } if (_preview3DNeedsUpdate) { _preview3DNeedsUpdate = false; int width = _currentDataset.Width; int height = _currentDataset.Height; int depth = _currentDataset.Depth; _preview3DMask = new byte[width * height * depth]; Parallel.For(0, depth, z => { for (int y = 0; y < height; y++) { for (int x = 0; x < width; x++) { byte gray = _currentDataset.VolumeData[x, y, z]; int index = z * width * height + y * width + x; _preview3DMask[index] = (gray >= _minThreshold && gray <= _maxThreshold) ? (byte)255 : (byte)0; } } }); Preview3DChanged?.Invoke(_currentDataset, _preview3DMask, GetPreviewColor()); } }
-        public Material GetSelectedMaterialForThresholding() => _selectedMaterialForThresholding;
-        public byte[] GetPreviewMask() => _previewMask;
-        public byte[] Get3DPreviewMask() { if (_show3DPreview && _preview3DNeedsUpdate) { Update3DPreview(); } return _preview3DMask; }
+        // --- MODIFIED: Generates a full 3D mask for the 2D preview system ---
+        private void Update2DPreviewVolume()
+        {
+            if (!_showPreview || _currentDataset.VolumeData == null)
+            {
+                _preview2DMask_FullVolume = null;
+                return;
+            }
+
+            if (_previewNeedsUpdate)
+            {
+                _previewNeedsUpdate = false;
+                int width = _currentDataset.Width;
+                int height = _currentDataset.Height;
+                int depth = _currentDataset.Depth;
+                _preview2DMask_FullVolume = new byte[width * height * depth];
+
+                Parallel.For(0, depth, z =>
+                {
+                    var graySlice = new byte[width * height];
+                    _currentDataset.VolumeData.ReadSliceZ(z, graySlice);
+                    int sliceOffset = z * width * height;
+                    for (int i = 0; i < graySlice.Length; i++)
+                    {
+                        byte gray = graySlice[i];
+                        if (gray >= _minThreshold && gray <= _maxThreshold)
+                        {
+                            _preview2DMask_FullVolume[sliceOffset + i] = 255;
+                        }
+                    }
+                });
+            }
+        }
+
+        private void Update3DPreview()
+        {
+            if (!_show3DPreview || _currentDataset.VolumeData == null)
+            {
+                _preview3DMask_FullVolume = null;
+                return;
+            }
+            if (_preview3DNeedsUpdate)
+            {
+                _preview3DNeedsUpdate = false;
+                int width = _currentDataset.Width;
+                int height = _currentDataset.Height;
+                int depth = _currentDataset.Depth;
+                _preview3DMask_FullVolume = new byte[width * height * depth];
+                Parallel.For(0, depth, z =>
+                {
+                    var graySlice = new byte[width * height];
+                    _currentDataset.VolumeData.ReadSliceZ(z, graySlice);
+                    int sliceOffset = z * width * height;
+                    for (int i = 0; i < graySlice.Length; i++)
+                    {
+                        byte gray = graySlice[i];
+                        _preview3DMask_FullVolume[sliceOffset + i] = (gray >= _minThreshold && gray <= _maxThreshold) ? (byte)255 : (byte)0;
+                    }
+                });
+                Preview3DChanged?.Invoke(_currentDataset, _preview3DMask_FullVolume, GetPreviewColor());
+            }
+        }
+
+        public Material GetSelectedMaterialForThresholding() => _selectedTargetMaterial;
+
+        public byte[] Get3DPreviewMask() { if (_show3DPreview && _preview3DNeedsUpdate) { Update3DPreview(); } return _preview3DMask_FullVolume; }
         public bool IsPreviewActive() => _showPreview;
         public bool Is3DPreviewActive() => _show3DPreview;
-        public Vector4 GetPreviewColor() => _selectedMaterialForThresholding?.Color ?? new Vector4(1, 0, 0, 0.5f);
-        private void NotifyViewersOfPreviewChange() => PreviewChanged?.Invoke(_currentDataset);
-        private void NotifyViewersOf3DPreviewChange() { if (_show3DPreview) { Update3DPreview(); } else { _preview3DMask = null; Preview3DChanged?.Invoke(_currentDataset, null, Vector4.Zero); } }
-        public static void CleanupTools(CtImageStackDataset dataset) => _activeTools.Remove(dataset);
+        public Vector4 GetPreviewColor() => _selectedTargetMaterial?.Color ?? new Vector4(1, 0, 0, 0.5f);
+
+        private void NotifyViewersOfPreviewChange()
+        {
+            if (_showPreview) { _previewNeedsUpdate = true; }
+            PreviewChanged?.Invoke(_currentDataset);
+        }
+
+        private void NotifyViewersOf3DPreviewChange()
+        {
+            if (_show3DPreview) { Update3DPreview(); }
+            else { _preview3DMask_FullVolume = null; Preview3DChanged?.Invoke(_currentDataset, null, Vector4.Zero); }
+        }
+        public static void CleanupTools(CtImageStackDataset dataset)
+        {
+            _activeTools.Remove(dataset);
+        }
     }
 }

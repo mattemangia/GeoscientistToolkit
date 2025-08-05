@@ -22,15 +22,17 @@ namespace GeoscientistToolkit.UI
 
         private readonly ImGuiFileDialog _folderDialog;
         private readonly ImGuiFileDialog _fileDialog;
-        private readonly ImGuiFileDialog _ctFileDialog; // New dialog for CT TIFF files
+        private readonly ImGuiFileDialog _ctFileDialog; // Dialog for CT TIFF files
         private readonly ImageStackOrganizerDialog _organizerDialog;
+        private readonly ProgressBarDialog _progressDialog;
 
         private int _selectedDatasetTypeIndex = 0;
         private readonly string[] _datasetTypeNames = {
             "Single Image",
             "Image Folder (Group)",
             "CT Image Stack (Optimized for 3D Streaming)",
-            "CT Image Stack (Legacy for 2D Editing)"
+            "CT Image Stack (Legacy for 2D Editing)",
+            "Label Stack from Images (Pre-segmented Data)"
         };
 
         // Single image properties
@@ -53,6 +55,13 @@ namespace GeoscientistToolkit.UI
         private StreamingCtVolumeDataset _pendingStreamingDataset = null;
         private CtImageStackDataset _pendingLegacyDataset = null;
 
+        // Label stack properties
+        private string _labelStackPath = "";
+        private float _labelPixelSize = 1.0f;
+        private int _labelPixelSizeUnit = 0;
+        private bool _createEmptyGrayscale = true;
+        private string _labelDatasetName = "";
+
         private float _progress;
         private string _statusText = "";
         private Task _importTask;
@@ -63,6 +72,7 @@ namespace GeoscientistToolkit.UI
             _fileDialog = new ImGuiFileDialog("ImportFileDialog", FileDialogType.OpenFile, "Select Image File");
             _ctFileDialog = new ImGuiFileDialog("ImportCTFileDialog", FileDialogType.OpenFile, "Select Multi-Page TIFF File");
             _organizerDialog = new ImageStackOrganizerDialog();
+            _progressDialog = new ProgressBarDialog("Importing Data");
         }
 
         public void Open()
@@ -74,6 +84,31 @@ namespace GeoscientistToolkit.UI
         public void Submit()
         {
             if (_currentState == ImportState.Idle) return;
+
+            // Handle progress dialog
+            if (_progressDialog.IsActive)
+            {
+                _progressDialog.Submit();
+
+                // Check if import task is complete
+                if (_importTask != null && _importTask.IsCompleted)
+                {
+                    if (_importTask.IsFaulted)
+                    {
+                        Logger.LogError($"Import failed: {_importTask.Exception?.GetBaseException().Message}");
+                    }
+                    else if (_importTask.IsCompletedSuccessfully)
+                    {
+                        // Add pending datasets to project manager
+                        AddPendingDatasets();
+                    }
+
+                    _progressDialog.Close();
+                    _currentState = ImportState.Idle;
+                    _importTask = null;
+                }
+                return;
+            }
 
             // Handle organizer dialog
             if (_organizerDialog.IsOpen)
@@ -100,6 +135,8 @@ namespace GeoscientistToolkit.UI
             {
                 if (_selectedDatasetTypeIndex == 1) // Image Folder
                     _imageFolderPath = _folderDialog.SelectedPath;
+                else if (_selectedDatasetTypeIndex == 4) // Label Stack
+                    _labelStackPath = _folderDialog.SelectedPath;
                 else // CT Stack
                 {
                     _ctPath = _folderDialog.SelectedPath;
@@ -153,11 +190,79 @@ namespace GeoscientistToolkit.UI
                 case 3: // CT Image Stack (Legacy)
                     DrawCTImageStackOptions();
                     break;
+                case 4: // Label Stack
+                    DrawLabelStackOptions();
+                    break;
             }
 
             ImGui.SetCursorPosY(ImGui.GetWindowHeight() - ImGui.GetFrameHeightWithSpacing() * 1.5f);
             ImGui.Separator();
             DrawButtons();
+        }
+
+        private void DrawLabelStackOptions()
+        {
+            ImGui.Text("Label Stack Folder:");
+            ImGui.InputText("##LabelStackPath", ref _labelStackPath, 260, ImGuiInputTextFlags.ReadOnly);
+            ImGui.SameLine();
+            if (ImGui.Button("Browse...##LabelFolder"))
+            {
+                _folderDialog.Open();
+            }
+
+            ImGui.Spacing();
+            ImGui.Text("Dataset Name:");
+            ImGui.InputText("##DatasetName", ref _labelDatasetName, 100);
+            if (ImGui.IsItemHovered())
+            {
+                ImGui.SetTooltip("Name for the imported dataset. Leave empty to use folder name.");
+            }
+
+            ImGui.Spacing();
+            ImGui.Text("Voxel Size:");
+            ImGui.SetNextItemWidth(150);
+            ImGui.InputFloat("##PixelSizeLabel", ref _labelPixelSize, 0.1f, 1.0f, "%.3f");
+            ImGui.SameLine();
+            ImGui.SetNextItemWidth(80);
+            ImGui.Combo("##UnitLabel", ref _labelPixelSizeUnit, _pixelSizeUnits, _pixelSizeUnits.Length);
+
+            ImGui.Spacing();
+            ImGui.Checkbox("Create Empty Grayscale Volume", ref _createEmptyGrayscale);
+            if (ImGui.IsItemHovered())
+            {
+                ImGui.SetTooltip("Creates an empty grayscale volume alongside the label data.\n" +
+                                "Useful if you only have segmentation data but want to maintain\n" +
+                                "compatibility with tools expecting both grayscale and label volumes.");
+            }
+
+            ImGui.Spacing();
+            ImGui.TextWrapped("This option imports a folder of colored images where each color represents a different material. " +
+                             "The importer will automatically detect unique colors and create materials for each.");
+
+            // Show folder information if available
+            if (!string.IsNullOrEmpty(_labelStackPath) && Directory.Exists(_labelStackPath))
+            {
+                ImGui.Spacing();
+                ImGui.Separator();
+                ImGui.Spacing();
+
+                var (count, totalSize) = CountImagesInFolder(_labelStackPath);
+                ImGui.Text("Folder Information:");
+                ImGui.BulletText($"Image Count: {count}");
+                ImGui.BulletText($"Total Size: {totalSize / (1024 * 1024)} MB");
+                ImGui.BulletText($"Folder: {Path.GetFileName(_labelStackPath)}");
+
+                if (count == 0)
+                {
+                    ImGui.TextColored(new Vector4(1.0f, 0.8f, 0.0f, 1.0f),
+                        "Warning: No supported image files found in this folder.");
+                }
+                else
+                {
+                    ImGui.TextColored(new Vector4(0.5f, 1.0f, 0.5f, 1.0f),
+                        $"Ready to analyze {count} images for unique colors and materials.");
+                }
+            }
         }
 
         private void DrawSingleImageOptions()
@@ -243,7 +348,7 @@ namespace GeoscientistToolkit.UI
         private void DrawCTImageStackOptions()
         {
             ImGui.Text("CT Stack Source:");
-            
+
             // Radio buttons for folder vs file selection
             bool isFolderMode = !_ctIsMultiPageTiff;
             if (ImGui.RadioButton("Image Folder", isFolderMode))
@@ -323,7 +428,7 @@ namespace GeoscientistToolkit.UI
                             int pageCount = ImageLoader.GetTiffPageCount(_ctPath);
                             var info = ImageLoader.LoadImageInfo(_ctPath);
                             long fileSize = new FileInfo(_ctPath).Length;
-                            
+
                             ImGui.Text("Multi-Page TIFF Information:");
                             ImGui.BulletText($"Pages (Slices): {pageCount}");
                             ImGui.BulletText($"Resolution: {info.Width} x {info.Height}");
@@ -332,7 +437,7 @@ namespace GeoscientistToolkit.UI
                         }
                         else
                         {
-                            ImGui.TextColored(new Vector4(1.0f, 0.8f, 0.0f, 1.0f), 
+                            ImGui.TextColored(new Vector4(1.0f, 0.8f, 0.0f, 1.0f),
                                 "Warning: Selected TIFF file contains only one page. CT stacks require multiple pages.");
                         }
                     }
@@ -347,6 +452,15 @@ namespace GeoscientistToolkit.UI
                     ImGui.Text("Folder Information:");
                     ImGui.BulletText($"Image Count: {count}");
                     ImGui.BulletText($"Total Size: {totalSize / (1024 * 1024)} MB");
+
+                    // Check for existing label file
+                    string folderName = Path.GetFileName(_ctPath);
+                    string labelPath = Path.Combine(_ctPath, $"{folderName}.Labels.bin");
+                    if (File.Exists(labelPath))
+                    {
+                        ImGui.TextColored(new Vector4(0.5f, 1.0f, 0.5f, 1.0f),
+                            "✓ Existing label data found and will be loaded");
+                    }
                 }
             }
         }
@@ -368,13 +482,16 @@ namespace GeoscientistToolkit.UI
                 case 3: // CT Stack Legacy
                     if (_ctIsMultiPageTiff)
                     {
-                        canImport = !string.IsNullOrEmpty(_ctPath) && File.Exists(_ctPath) && 
+                        canImport = !string.IsNullOrEmpty(_ctPath) && File.Exists(_ctPath) &&
                                    ImageLoader.IsMultiPageTiff(_ctPath);
                     }
                     else
                     {
                         canImport = !string.IsNullOrEmpty(_ctPath) && Directory.Exists(_ctPath);
                     }
+                    break;
+                case 4: // Label Stack
+                    canImport = !string.IsNullOrEmpty(_labelStackPath) && Directory.Exists(_labelStackPath);
                     break;
             }
 
@@ -405,6 +522,72 @@ namespace GeoscientistToolkit.UI
                     _currentState = ImportState.Processing;
                     _importTask = ImportLegacyCTStack();
                     break;
+                case 4: // Label Stack
+                    _progressDialog.Open("Loading label stack...");
+                    _importTask = ImportLabelStack();
+                    break;
+            }
+        }
+
+        private async Task ImportLabelStack()
+        {
+            try
+            {
+                string datasetName = string.IsNullOrEmpty(_labelDatasetName) ?
+                    Path.GetFileName(_labelStackPath) : _labelDatasetName;
+
+                var progress = new Progress<float>(p =>
+                {
+                    _progressDialog.Update(p, $"Processing images... {(int)(p * 100)}%");
+                });
+
+                // Load the label stack
+                var result = await LabelStackLoader.LoadLabelStackAsync(
+                    _labelStackPath,
+                    _createEmptyGrayscale,
+                    progress,
+                    _progressDialog.CancellationToken);
+
+                if (result == null || _progressDialog.IsCancellationRequested)
+                {
+                    Logger.LogWarning("Label stack import cancelled");
+                    return;
+                }
+
+                // Save the volumes to files
+                string outputPath = _labelStackPath;
+                LabelStackLoader.SaveAsDataset(result, outputPath, datasetName);
+
+                // Convert pixel size to micrometers
+                double pixelSizeMicrons = _labelPixelSizeUnit == 0 ? _labelPixelSize : _labelPixelSize * 1000;
+
+                // Create the dataset
+                var dataset = new CtImageStackDataset(datasetName, outputPath)
+                {
+                    Width = result.Width,
+                    Height = result.Height,
+                    Depth = result.Depth,
+                    PixelSize = (float)pixelSizeMicrons,
+                    SliceThickness = (float)pixelSizeMicrons,
+                    Unit = "µm",
+                    Materials = result.Materials
+                };
+
+                // The VolumeData and LabelData will be loaded from the saved .bin files
+                // when the dataset's Load() method is called
+
+                // Clean up the temporary volumes as they're now saved to disk
+                result.GrayscaleVolume?.Dispose();
+                result.LabelVolume?.Dispose();
+
+                _pendingLegacyDataset = dataset;
+
+                Logger.Log($"Label stack imported successfully with {result.Materials.Count} materials");
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError($"Failed to import label stack: {ex.Message}");
+                throw;
             }
         }
 
@@ -465,105 +648,118 @@ namespace GeoscientistToolkit.UI
             }
             else if (_importTask.IsCompletedSuccessfully)
             {
-                // Add pending datasets to project manager now that we're back on UI thread
-                if (_pendingSingleImageDataset != null)
-                {
-                    ProjectManager.Instance.AddDataset(_pendingSingleImageDataset);
-                    _pendingSingleImageDataset = null;
-                }
-
-                if (_pendingLegacyDataset != null)
-                {
-                    ProjectManager.Instance.AddDataset(_pendingLegacyDataset);
-
-                    // If there's also a streaming dataset, it's a partner
-                    if (_pendingStreamingDataset != null)
-                    {
-                        _pendingStreamingDataset.EditablePartner = _pendingLegacyDataset;
-                        ProjectManager.Instance.AddDataset(_pendingStreamingDataset);
-                    }
-
-                    _pendingLegacyDataset = null;
-                    _pendingStreamingDataset = null;
-                }
-
+                AddPendingDatasets();
                 ImGui.TextColored(new Vector4(0, 1, 0, 1), "Import successful!");
                 if (ImGui.Button("Close")) _currentState = ImportState.Idle;
             }
         }
 
-        private async Task ConvertAndImportOptimizedCTStack()
-{
-    string name = _ctIsMultiPageTiff ? Path.GetFileNameWithoutExtension(_ctPath) : Path.GetFileName(_ctPath);
-    string outputDir = _ctIsMultiPageTiff ? Path.GetDirectoryName(_ctPath) : _ctPath;
-    string gvtFileName = _ctBinningFactor > 1 ? $"{name}_bin{_ctBinningFactor}.gvt" : $"{name}.gvt";
-    string gvtPath = Path.Combine(outputDir, gvtFileName);
-
-    // First load the volume data
-    _statusText = "Loading volume data...";
-    var binnedVolume = await CTStackLoader.LoadCTStackAsync(_ctPath, GetPixelSizeInMeters(), _ctBinningFactor, false,
-        new Progress<float>(p => { _progress = p * 0.5f; _statusText = $"Step 1/2: Loading and processing images... {(int)(p * 100)}%"; }), name);
-
-    // IMPORTANT: Ensure the volume is fully loaded before conversion
-    if (binnedVolume == null || binnedVolume.Width == 0 || binnedVolume.Height == 0 || binnedVolume.Depth == 0)
-    {
-        throw new InvalidOperationException("Failed to load volume data from TIFF file");
-    }
-
-    // Log volume info to verify it's loaded
-    Logger.Log($"[ImportDataModal] Loaded volume for conversion: {binnedVolume.Width}×{binnedVolume.Height}×{binnedVolume.Depth}");
-
-    // Check if we need to create the .gvt file
-    if (!File.Exists(gvtPath))
-    {
-        _statusText = "Converting to optimized format...";
-        
-        // Verify volume has actual data before conversion
-        bool hasData = false;
-        for (int z = 0; z < Math.Min(5, binnedVolume.Depth); z++)
+        private void AddPendingDatasets()
         {
-            for (int y = 0; y < Math.Min(5, binnedVolume.Height); y++)
+            // Add pending datasets to project manager now that we're back on UI thread
+            if (_pendingSingleImageDataset != null)
             {
-                for (int x = 0; x < Math.Min(5, binnedVolume.Width); x++)
-                {
-                    if (binnedVolume[x, y, z] > 0)
-                    {
-                        hasData = true;
-                        break;
-                    }
-                }
-                if (hasData) break;
+                ProjectManager.Instance.AddDataset(_pendingSingleImageDataset);
+                _pendingSingleImageDataset = null;
             }
-            if (hasData) break;
+
+            if (_pendingLegacyDataset != null)
+            {
+                // IMPORTANT: Load the dataset to ensure existing labels are loaded
+                _pendingLegacyDataset.Load();
+
+                // Now check if materials were loaded from the labels file
+                if (_pendingLegacyDataset.Materials != null && _pendingLegacyDataset.Materials.Count > 0)
+                {
+                    Logger.Log($"[ImportDataModal] Loaded {_pendingLegacyDataset.Materials.Count} materials from existing labels");
+                }
+
+                ProjectManager.Instance.AddDataset(_pendingLegacyDataset);
+
+                // If there's also a streaming dataset, it's a partner
+                if (_pendingStreamingDataset != null)
+                {
+                    _pendingStreamingDataset.EditablePartner = _pendingLegacyDataset;
+                    ProjectManager.Instance.AddDataset(_pendingStreamingDataset);
+                }
+
+                _pendingLegacyDataset = null;
+                _pendingStreamingDataset = null;
+            }
         }
-        
-        if (!hasData)
+
+        private async Task ConvertAndImportOptimizedCTStack()
         {
-            Logger.LogError("[ImportDataModal] Volume appears to be empty!");
+            string name = _ctIsMultiPageTiff ? Path.GetFileNameWithoutExtension(_ctPath) : Path.GetFileName(_ctPath);
+            string outputDir = _ctIsMultiPageTiff ? Path.GetDirectoryName(_ctPath) : _ctPath;
+            string gvtFileName = _ctBinningFactor > 1 ? $"{name}_bin{_ctBinningFactor}.gvt" : $"{name}.gvt";
+            string gvtPath = Path.Combine(outputDir, gvtFileName);
+
+            // First load the volume data
+            _statusText = "Loading volume data...";
+            var binnedVolume = await CTStackLoader.LoadCTStackAsync(_ctPath, GetPixelSizeInMeters(), _ctBinningFactor, false,
+                new Progress<float>(p => { _progress = p * 0.5f; _statusText = $"Step 1/2: Loading and processing images... {(int)(p * 100)}%"; }), name);
+
+            // IMPORTANT: Ensure the volume is fully loaded before conversion
+            if (binnedVolume == null || binnedVolume.Width == 0 || binnedVolume.Height == 0 || binnedVolume.Depth == 0)
+            {
+                throw new InvalidOperationException("Failed to load volume data from TIFF file");
+            }
+
+            // Log volume info to verify it's loaded
+            Logger.Log($"[ImportDataModal] Loaded volume for conversion: {binnedVolume.Width}×{binnedVolume.Height}×{binnedVolume.Depth}");
+
+            // Check if we need to create the .gvt file
+            if (!File.Exists(gvtPath))
+            {
+                _statusText = "Converting to optimized format...";
+
+                // Verify volume has actual data before conversion
+                bool hasData = false;
+                for (int z = 0; z < Math.Min(5, binnedVolume.Depth); z++)
+                {
+                    for (int y = 0; y < Math.Min(5, binnedVolume.Height); y++)
+                    {
+                        for (int x = 0; x < Math.Min(5, binnedVolume.Width); x++)
+                        {
+                            if (binnedVolume[x, y, z] > 0)
+                            {
+                                hasData = true;
+                                break;
+                            }
+                        }
+                        if (hasData) break;
+                    }
+                    if (hasData) break;
+                }
+
+                if (!hasData)
+                {
+                    Logger.LogError("[ImportDataModal] Volume appears to be empty!");
+                }
+
+                await CtStackConverter.ConvertToStreamableFormat(binnedVolume, gvtPath,
+                    (p, s) => { _progress = 0.5f + (p * 0.5f); _statusText = $"Step 2/2: {s}"; });
+            }
+            else
+            {
+                _statusText = "Found existing optimized file. Loading...";
+                _progress = 1.0f;
+            }
+
+            var legacyDataset = await CreateLegacyDatasetForEditing(binnedVolume);
+
+            var streamingDataset = new StreamingCtVolumeDataset($"{name} (3D View)", gvtPath)
+            {
+                EditablePartner = legacyDataset
+            };
+
+            // Store datasets to be added when task completes
+            _pendingStreamingDataset = streamingDataset;
+            _pendingLegacyDataset = legacyDataset;
+
+            _statusText = "Optimized dataset and editable partner added to project!";
         }
-        
-        await CtStackConverter.ConvertToStreamableFormat(binnedVolume, gvtPath,
-            (p, s) => { _progress = 0.5f + (p * 0.5f); _statusText = $"Step 2/2: {s}"; });
-    }
-    else
-    {
-        _statusText = "Found existing optimized file. Loading..."; 
-        _progress = 1.0f;
-    }
-
-    var legacyDataset = await CreateLegacyDatasetForEditing(binnedVolume);
-
-    var streamingDataset = new StreamingCtVolumeDataset($"{name} (3D View)", gvtPath)
-    {
-        EditablePartner = legacyDataset
-    };
-
-    // Store datasets to be added when task completes
-    _pendingStreamingDataset = streamingDataset;
-    _pendingLegacyDataset = legacyDataset;
-
-    _statusText = "Optimized dataset and editable partner added to project!";
-}
 
         private async Task ImportLegacyCTStack()
         {
@@ -634,7 +830,7 @@ namespace GeoscientistToolkit.UI
         private double GetPixelSizeInMeters()
         {
             // Convert to meters based on unit selection
-            return _ctPixelSizeUnit == 0 ? 
+            return _ctPixelSizeUnit == 0 ?
                 _ctPixelSize * 1e-6 :  // micrometers to meters
                 _ctPixelSize * 1e-3;   // millimeters to meters
         }
@@ -660,6 +856,11 @@ namespace GeoscientistToolkit.UI
             _ctPixelSize = 1.0f;
             _ctPixelSizeUnit = 0;
             _ctBinningFactor = 1;
+            _labelStackPath = "";
+            _labelPixelSize = 1.0f;
+            _labelPixelSizeUnit = 0;
+            _createEmptyGrayscale = true;
+            _labelDatasetName = "";
             _importTask = null;
             _progress = 0;
             _statusText = "";

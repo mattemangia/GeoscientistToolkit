@@ -36,7 +36,32 @@ namespace GeoscientistToolkit.UI.Utils
         {
             _id = id;
             _dialogType = type;
-            _title = title ?? (type == FileDialogType.OpenFile ? "Open File" : "Select Folder");
+
+            // --- MODIFIED: Handle SaveFile title ---
+            if (title == null)
+            {
+                switch (type)
+                {
+                    case FileDialogType.OpenFile:
+                        _title = "Open File";
+                        break;
+                    case FileDialogType.SaveFile:
+                        _title = "Save File";
+                        break;
+                    case FileDialogType.OpenDirectory:
+                        _title = "Select Folder";
+                        break;
+                    default:
+                        _title = "File Dialog";
+                        break;
+                }
+            }
+            else
+            {
+                _title = title;
+            }
+            // --- END MODIFICATION ---
+
             CurrentDirectory = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
             RefreshDrives();
         }
@@ -338,7 +363,7 @@ namespace GeoscientistToolkit.UI.Utils
                         ImGui.PopStyleColor();
                     }
 
-                    if (_dialogType == FileDialogType.OpenFile)
+                    if (_dialogType == FileDialogType.OpenFile || _dialogType == FileDialogType.SaveFile)
                     {
                         foreach (var file in Directory.GetFiles(CurrentDirectory))
                         {
@@ -386,10 +411,12 @@ namespace GeoscientistToolkit.UI.Utils
             Vector2 buttonSize = new Vector2(80, 0);
             float buttonsTotalWidth = (buttonSize.X * 2) + style.ItemSpacing.X;
             float buttonsPosX = ImGui.GetWindowContentRegionMax().X - buttonsTotalWidth;
+            bool isSaveDialog = _dialogType == FileDialogType.SaveFile;
 
-            if (_dialogType == FileDialogType.OpenFile)
+            // --- MODIFIED: Show filename input for SaveFile as well ---
+            if (_dialogType == FileDialogType.OpenFile || isSaveDialog)
             {
-                ImGui.Text("File name");
+                ImGui.Text("File name:");
                 ImGui.SameLine();
 
                 float inputTextWidth = buttonsPosX - ImGui.GetCursorPosX() - (style.ItemSpacing.X * 2);
@@ -414,7 +441,10 @@ namespace GeoscientistToolkit.UI.Utils
 
             bool canSelect = _dialogType == FileDialogType.OpenDirectory || !string.IsNullOrEmpty(_selectedFileName);
             if (!canSelect) ImGui.BeginDisabled();
-            if (ImGui.Button("Select", buttonSize))
+
+            // --- MODIFIED: Change button text for SaveFile ---
+            string buttonText = isSaveDialog ? "Save" : "Select";
+            if (ImGui.Button(buttonText, buttonSize))
             {
                 selectionMade = HandleSelection();
             }
@@ -423,6 +453,7 @@ namespace GeoscientistToolkit.UI.Utils
 
         private bool HandleSelection()
         {
+            // --- MODIFIED: Handle SaveFile logic correctly ---
             if (_dialogType == FileDialogType.OpenDirectory)
             {
                 SelectedPath = CurrentDirectory;
@@ -434,18 +465,35 @@ namespace GeoscientistToolkit.UI.Utils
                 }
                 return false;
             }
-            else
+            else // Covers OpenFile and SaveFile
             {
-                if (!string.IsNullOrEmpty(_selectedFileName))
+                if (string.IsNullOrEmpty(_selectedFileName))
                 {
-                    SelectedPath = Path.Combine(CurrentDirectory, _selectedFileName);
+                    return false;
+                }
+
+                SelectedPath = Path.Combine(CurrentDirectory, _selectedFileName);
+
+                if (_dialogType == FileDialogType.SaveFile)
+                {
+                    Logger.Log("Saving file to " + SelectedPath);
+                    // For saving, we don't need to check if the file exists.
+                    // The ProjectManager will handle overwriting.
+                    IsOpen = false;
+                    return true;
+                }
+
+                if (_dialogType == FileDialogType.OpenFile)
+                {
                     Logger.Log("Opening file " + SelectedPath);
                     if (File.Exists(SelectedPath))
                     {
                         IsOpen = false;
                         return true;
                     }
+                    return false; // File not found, don't close the dialog.
                 }
+
                 return false;
             }
         }

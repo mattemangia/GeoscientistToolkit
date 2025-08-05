@@ -124,14 +124,6 @@ namespace GeoscientistToolkit.Data.CtImageStack
 
         // Track if we're in a popped-out window
         private bool _isPoppedOut = false;
-
-        // Preview state
-        private bool _isPreviewActive = false;
-        private byte[] _previewMaskXY = null;
-        private byte[] _previewMaskXZ = null;
-        private byte[] _previewMaskYZ = null;
-        private Vector4 _previewColor = new Vector4(1, 0, 0, 0.5f);
-
         private readonly CtSegmentationIntegration _interactiveSegmentation;
 
 
@@ -168,7 +160,6 @@ namespace GeoscientistToolkit.Data.CtImageStack
 
             ProjectManager.Instance.DatasetDataChanged += OnDatasetDataChanged;
             CtImageStackTools.PreviewChanged += OnPreviewChanged;
-            CtImageStackTools.Preview3DChanged += OnPreview3DChanged;
 
             _ = InitializeAsync();
         }
@@ -182,6 +173,17 @@ namespace GeoscientistToolkit.Data.CtImageStack
                 _needsUpdateYZ = true;
             }
         }
+
+        private void OnPreviewChanged(CtImageStackDataset dataset)
+        {
+            if (dataset == _dataset)
+            {
+                _needsUpdateXY = true;
+                _needsUpdateXZ = true;
+                _needsUpdateYZ = true;
+            }
+        }
+
 
         public void SetPoppedOutState(bool isPoppedOut)
         {
@@ -765,7 +767,11 @@ namespace GeoscientistToolkit.Data.CtImageStack
                 }
 
                 int currentSlice = viewIndex switch { 0 => _sliceZ, 1 => _sliceY, 2 => _sliceX, _ => -1 };
-                byte[] thresholdPreviewMask = GetPreviewMaskForView(viewIndex);
+
+                // --- MODIFIED: Fetch the full 3D preview mask and extract the relevant 2D slice ---
+                var (is2DPreviewActive, full3DPreviewMask, previewColor) = CtImageStackTools.GetPreviewData(_dataset);
+                byte[] thresholdPreviewMask = ExtractPreviewSlice(full3DPreviewMask, viewIndex, width, height);
+
                 byte[] segmentationPreviewMask = _interactiveSegmentation?.GetPreviewMask(currentSlice, viewIndex);
                 byte[] committedSelectionMask = _interactiveSegmentation?.GetCommittedSelectionMask(currentSlice, viewIndex);
 
@@ -774,11 +780,9 @@ namespace GeoscientistToolkit.Data.CtImageStack
 
                 for (int i = 0; i < width * height; i++)
                 {
-                    // 1. Base Layer: Grayscale image
                     byte value = imageData[i];
                     Vector4 finalColor = new Vector4(value / 255f, value / 255f, value / 255f, 1.0f);
 
-                    // 2. Material Layer: Applied material labels from the volume
                     if (labelData != null && labelData[i] > 0)
                     {
                         var material = _dataset.Materials.FirstOrDefault(m => m.ID == labelData[i]);
@@ -790,7 +794,6 @@ namespace GeoscientistToolkit.Data.CtImageStack
                         }
                     }
 
-                    // 3. Committed Selection Layer: Selections drawn but not yet applied to the volume
                     if (committedSelectionMask != null && committedSelectionMask[i] > 0)
                     {
                         var selColor = targetMaterial?.Color ?? new Vector4(0.8f, 0.8f, 0.0f, 1.0f);
@@ -798,15 +801,13 @@ namespace GeoscientistToolkit.Data.CtImageStack
                         finalColor = Vector4.Lerp(finalColor, new Vector4(selColor.X, selColor.Y, selColor.Z, 1.0f), opacity);
                     }
 
-                    // 4. Threshold Preview Layer
-                    if (thresholdPreviewMask != null && thresholdPreviewMask[i] > 0)
+                    if (is2DPreviewActive && thresholdPreviewMask != null && thresholdPreviewMask[i] > 0)
                     {
                         float opacity = 0.5f;
-                        Vector4 previewRgba = new Vector4(_previewColor.X, _previewColor.Y, _previewColor.Z, 1.0f);
+                        Vector4 previewRgba = new Vector4(previewColor.X, previewColor.Y, previewColor.Z, 1.0f);
                         finalColor = Vector4.Lerp(finalColor, previewRgba, opacity);
                     }
 
-                    // 5. Live Tool Preview Layer (Topmost overlay)
                     if (segmentationPreviewMask != null && segmentationPreviewMask[i] > 0)
                     {
                         var segColor = targetMaterial?.Color ?? new Vector4(1, 0, 0, 1);
@@ -829,59 +830,55 @@ namespace GeoscientistToolkit.Data.CtImageStack
             }
         }
 
-        private byte[] GetPreviewMaskForView(int viewIndex)
+        // --- NEW METHOD: Extracts the correct 2D slice from a full 3D mask ---
+        private byte[] ExtractPreviewSlice(byte[] full3DMask, int viewIndex, int sliceWidth, int sliceHeight)
         {
-            if (!_isPreviewActive) return null;
+            if (full3DMask == null) return null;
 
-            return viewIndex switch
-            {
-                0 => _previewMaskXY,
-                1 => _previewMaskXZ,
-                2 => _previewMaskYZ,
-                _ => null
-            };
-        }
+            byte[] sliceMask = new byte[sliceWidth * sliceHeight];
+            int fullWidth = _dataset.Width;
+            int fullHeight = _dataset.Height;
 
-        private void UpdatePreviewMaskForView(int viewIndex, int slicePos)
-        {
-            var (isActive, fullMask, color) = CtImageStackTools.Get3DPreviewData(_dataset);
-            if (!isActive || fullMask == null)
+            try
             {
-                _previewMaskXY = _previewMaskXZ = _previewMaskYZ = null;
-                return;
+                switch (viewIndex)
+                {
+                    case 0: // XY View (sliceWidth = fullWidth, sliceHeight = fullHeight)
+                        int offset = _sliceZ * fullWidth * fullHeight;
+                        if (offset + sliceMask.Length <= full3DMask.Length)
+                        {
+                            Buffer.BlockCopy(full3DMask, offset, sliceMask, 0, sliceMask.Length);
+                        }
+                        break;
+                    case 1: // XZ View (sliceWidth = fullWidth, sliceHeight = fullDepth)
+                        for (int z = 0; z < sliceHeight; z++)
+                        {
+                            for (int x = 0; x < sliceWidth; x++)
+                            {
+                                sliceMask[z * sliceWidth + x] = full3DMask[z * fullWidth * fullHeight + _sliceY * fullWidth + x];
+                            }
+                        }
+                        break;
+                    case 2: // YZ View (sliceWidth = fullHeight, sliceHeight = fullDepth)
+                        for (int z = 0; z < sliceHeight; z++)
+                        {
+                            for (int y = 0; y < sliceWidth; y++)
+                            {
+                                sliceMask[z * sliceWidth + y] = full3DMask[z * fullWidth * fullHeight + y * fullWidth + _sliceX];
+                            }
+                        }
+                        break;
+                }
+            }
+            catch (IndexOutOfRangeException ex)
+            {
+                Logger.LogError($"[CtCombinedViewer] Error extracting preview slice for view {viewIndex}: {ex.Message}. This may happen briefly while resizing or changing slices.");
+                return null; // Return null on error to prevent crashes
             }
 
-            _previewColor = color;
-
-            int width = _dataset.Width;
-            int height = _dataset.Height;
-            int depth = _dataset.Depth;
-
-            switch (viewIndex)
-            {
-                case 0: // XY view at Z = slicePos
-                    if (_previewMaskXY == null || _previewMaskXY.Length != width * height)
-                        _previewMaskXY = new byte[width * height];
-                    Buffer.BlockCopy(fullMask, slicePos * width * height, _previewMaskXY, 0, width * height);
-                    break;
-
-                case 1: // XZ view at Y = slicePos
-                    if (_previewMaskXZ == null || _previewMaskXZ.Length != width * depth)
-                        _previewMaskXZ = new byte[width * depth];
-                    for (int z = 0; z < depth; z++)
-                        for (int x = 0; x < width; x++)
-                            _previewMaskXZ[z * width + x] = fullMask[z * width * height + slicePos * width + x];
-                    break;
-
-                case 2: // YZ view at X = slicePos
-                    if (_previewMaskYZ == null || _previewMaskYZ.Length != height * depth)
-                        _previewMaskYZ = new byte[height * depth];
-                    for (int z = 0; z < depth; z++)
-                        for (int y = 0; y < height; y++)
-                            _previewMaskYZ[z * height + y] = fullMask[z * width * height + y * width + slicePos];
-                    break;
-            }
+            return sliceMask;
         }
+
 
         private byte[] ExtractSliceData(int viewIndex, int width, int height)
         {
@@ -890,9 +887,6 @@ namespace GeoscientistToolkit.Data.CtImageStack
 
             try
             {
-                int slicePos = viewIndex switch { 0 => _sliceZ, 1 => _sliceY, 2 => _sliceX, _ => 0 };
-                UpdatePreviewMaskForView(viewIndex, slicePos);
-
                 switch (viewIndex)
                 {
                     case 0: volume.ReadSliceZ(_sliceZ, data); break;
@@ -906,30 +900,6 @@ namespace GeoscientistToolkit.Data.CtImageStack
             }
 
             return data;
-        }
-
-        private void OnPreviewChanged(CtImageStackDataset dataset)
-        {
-            if (dataset == _dataset)
-            {
-                _isPreviewActive = CtImageStackTools.GetPreviewData(dataset, 0).isActive;
-                _needsUpdateXY = true;
-                _needsUpdateXZ = true;
-                _needsUpdateYZ = true;
-            }
-        }
-
-        private void OnPreview3DChanged(CtImageStackDataset dataset, byte[] previewMask, Vector4 color)
-        {
-            if (dataset == _dataset)
-            {
-                _isPreviewActive = previewMask != null;
-                _previewColor = color;
-
-                _needsUpdateXY = true;
-                _needsUpdateXZ = true;
-                _needsUpdateYZ = true;
-            }
         }
 
         private byte[] ExtractLabelSliceData(int viewIndex, int width, int height)
@@ -1059,7 +1029,6 @@ namespace GeoscientistToolkit.Data.CtImageStack
         {
             ProjectManager.Instance.DatasetDataChanged -= OnDatasetDataChanged;
             CtImageStackTools.PreviewChanged -= OnPreviewChanged;
-            CtImageStackTools.Preview3DChanged -= OnPreview3DChanged;
 
             CtSegmentationIntegration.Cleanup(_dataset);
 

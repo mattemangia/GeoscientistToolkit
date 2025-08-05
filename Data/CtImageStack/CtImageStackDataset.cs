@@ -6,6 +6,8 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Numerics;
+using System.Text.Json; // Added for material serialization
+using System;
 
 namespace GeoscientistToolkit.Data.CtImageStack
 {
@@ -41,7 +43,7 @@ namespace GeoscientistToolkit.Data.CtImageStack
         public CtImageStackDataset(string name, string folderPath) : base(name, folderPath)
         {
             Type = DatasetType.CtImageStack;
-            // Add a default "Exterior" material
+            // Add a default "Exterior" material that will be replaced if a local materials file is found
             Materials.Add(new Material(0, "Exterior", new Vector4(0, 0, 0, 0)));
         }
 
@@ -94,6 +96,9 @@ namespace GeoscientistToolkit.Data.CtImageStack
                     }
                 }
             }
+
+            // --- MODIFIED: Load materials from local file first ---
+            LoadMaterials();
 
             // Load Label Data
             if (LabelData == null)
@@ -168,38 +173,135 @@ namespace GeoscientistToolkit.Data.CtImageStack
             return dto;
         }
 
-        private string GetVolumePath()
+        // --- NEW METHOD: Save label data ---
+        public void SaveLabelData()
         {
-            // Handle both folder paths and file paths (e.g., multi-page TIFF)
+            if (LabelData != null)
+            {
+                string labelPath = GetLabelPath();
+                if (!string.IsNullOrEmpty(labelPath))
+                {
+                    Logger.Log($"[CtImageStackDataset] Saving label data for '{Name}' to {labelPath}");
+                    LabelData.SaveAsBin(labelPath);
+                }
+            }
+        }
+
+        // --- NEW METHOD: Save materials to a local JSON file ---
+        public void SaveMaterials()
+        {
+            if (Materials == null || Materials.Count == 0) return;
+
+            try
+            {
+                string materialsPath = GetMaterialsPath();
+                var options = new JsonSerializerOptions { WriteIndented = true };
+                var dtos = Materials.Select(m => new MaterialDTO
+                {
+                    ID = m.ID,
+                    Name = m.Name,
+                    Color = m.Color,
+                    MinValue = m.MinValue,
+                    MaxValue = m.MaxValue,
+                    IsVisible = m.IsVisible,
+                    IsExterior = m.IsExterior,
+                    Density = m.Density
+                }).ToList();
+
+                string jsonString = JsonSerializer.Serialize(dtos, options);
+                File.WriteAllText(materialsPath, jsonString);
+                Logger.Log($"[CtImageStackDataset] Saved {Materials.Count} materials to {materialsPath}");
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError($"[CtImageStackDataset] Failed to save materials: {ex.Message}");
+            }
+        }
+
+        // --- NEW METHOD: Load materials from a local JSON file ---
+        private void LoadMaterials()
+        {
+            string materialsPath = GetMaterialsPath();
+            if (File.Exists(materialsPath))
+            {
+                try
+                {
+                    string jsonString = File.ReadAllText(materialsPath);
+                    var options = new JsonSerializerOptions();
+                    var dtos = JsonSerializer.Deserialize<List<MaterialDTO>>(jsonString, options);
+
+                    if (dtos != null && dtos.Any())
+                    {
+                        Materials.Clear();
+                        foreach (var dto in dtos)
+                        {
+                            Materials.Add(new Material(dto.ID, dto.Name, dto.Color)
+                            {
+                                MinValue = dto.MinValue,
+                                MaxValue = dto.MaxValue,
+                                IsVisible = dto.IsVisible,
+                                IsExterior = dto.IsExterior,
+                                Density = dto.Density
+                            });
+                        }
+                        Logger.Log($"[CtImageStackDataset] Loaded {Materials.Count} materials from {materialsPath}");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Logger.LogError($"[CtImageStackDataset] Failed to load materials from {materialsPath}: {ex.Message}. Using default.");
+                    // Ensure default material exists if loading fails
+                    if (!Materials.Any(m => m.ID == 0))
+                    {
+                        Materials.Clear();
+                        Materials.Add(new Material(0, "Exterior", new Vector4(0, 0, 0, 0)));
+                    }
+                }
+            }
+        }
+
+        // --- NEW HELPER: Get path for the local materials file ---
+        private string GetMaterialsPath()
+        {
             if (File.Exists(FilePath))
             {
-                // FilePath is a file (e.g., multi-page TIFF)
+                string directory = Path.GetDirectoryName(FilePath);
+                string nameWithoutExt = Path.GetFileNameWithoutExtension(FilePath);
+                return Path.Combine(directory, $"{nameWithoutExt}.Materials.json");
+            }
+            else
+            {
+                string folderName = Path.GetFileName(FilePath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+                return Path.Combine(FilePath, $"{folderName}.Materials.json");
+            }
+        }
+
+        private string GetVolumePath()
+        {
+            if (File.Exists(FilePath))
+            {
                 string directory = Path.GetDirectoryName(FilePath);
                 string nameWithoutExt = Path.GetFileNameWithoutExtension(FilePath);
                 return Path.Combine(directory, $"{nameWithoutExt}.Volume.bin");
             }
             else
             {
-                // FilePath is a directory
-                string folderName = Path.GetFileName(FilePath);
+                string folderName = Path.GetFileName(FilePath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
                 return Path.Combine(FilePath, $"{folderName}.Volume.bin");
             }
         }
 
         private string GetLabelPath()
         {
-            // Handle both folder paths and file paths (e.g., multi-page TIFF)
             if (File.Exists(FilePath))
             {
-                // FilePath is a file (e.g., multi-page TIFF)
                 string directory = Path.GetDirectoryName(FilePath);
                 string nameWithoutExt = Path.GetFileNameWithoutExtension(FilePath);
                 return Path.Combine(directory, $"{nameWithoutExt}.Labels.bin");
             }
             else
             {
-                // FilePath is a directory
-                string folderName = Path.GetFileName(FilePath);
+                string folderName = Path.GetFileName(FilePath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
                 return Path.Combine(FilePath, $"{folderName}.Labels.bin");
             }
         }
