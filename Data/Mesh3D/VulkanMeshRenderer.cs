@@ -1,0 +1,389 @@
+using System;
+using System.Numerics;
+using System.Runtime.CompilerServices;
+using Veldrid;
+using System.Text;
+using GeoscientistToolkit.UI;
+using GeoscientistToolkit.Util;
+
+namespace GeoscientistToolkit.Data.Mesh3D
+{
+    /// <summary>
+    /// Vulkan-specific mesh renderer implementation for Linux.
+    /// </summary>
+    public class VulkanMeshRenderer : IDisposable
+    {
+        private DeviceBuffer _vertexBuffer;
+        private DeviceBuffer _indexBuffer;
+        private DeviceBuffer _constantBuffer;
+        private Pipeline _pipelineTriangles;
+        private Pipeline _pipelineLines;
+        private ResourceLayout _resourceLayout;
+        private ResourceSet _resourceSet;
+        private CommandList _commandList;
+        private Framebuffer _framebuffer;
+        private Texture _colorTarget;
+        private Texture _depthTarget;
+        private uint _indexCount;
+
+        public uint Width { get; private set; }
+        public uint Height { get; private set; }
+        public Texture ColorTarget => _colorTarget;  // expose for texture manager
+
+        // GLSL Vertex Shader for mesh
+        private const string GlslVertexShaderMesh = @"
+#version 450
+
+layout(set = 0, binding = 0) uniform Constants {
+    mat4 Model;
+    mat4 MVP;
+    vec4 Color;
+} constants;
+
+layout(location = 0) in vec3 Position;
+layout(location = 1) in vec3 Normal;
+
+layout(location = 0) out vec3 frag_Normal;
+
+void main() {
+    vec4 worldPos = constants.Model * vec4(Position, 1.0);
+    gl_Position = constants.MVP * vec4(Position, 1.0);
+    vec3 worldNormal = normalize((constants.Model * vec4(Normal, 0.0)).xyz);
+    frag_Normal = worldNormal;
+}
+";
+
+        // GLSL Fragment Shader for mesh
+        private const string GlslFragmentShaderMesh = @"
+#version 450
+
+layout(set = 0, binding = 0) uniform Constants {
+    mat4 Model;
+    mat4 MVP;
+    vec4 Color;
+} constants;
+
+layout(location = 0) in vec3 frag_Normal;
+layout(location = 0) out vec4 out_Color;
+
+void main() {
+    vec3 lightDir = normalize(vec3(-1.0, -1.0, -1.0));
+    float diff = max(dot(frag_Normal, lightDir), 0.0);
+    vec3 baseColor = constants.Color.xyz;
+    vec3 litColor = baseColor * (0.2 + 0.8 * diff);
+    out_Color = vec4(litColor, 1.0);
+}
+";
+
+        // GLSL Vertex Shader for lines (grid)
+        private const string GlslVertexShaderLine = @"
+#version 450
+
+layout(set = 0, binding = 0) uniform Constants {
+    mat4 Model;
+    mat4 MVP;
+    vec4 Color;
+} constants;
+
+layout(location = 0) in vec3 Position;
+
+void main() {
+    gl_Position = constants.MVP * vec4(Position, 1.0);
+}
+";
+
+        // GLSL Fragment Shader for lines (grid)
+        private const string GlslFragmentShaderLine = @"
+#version 450
+
+layout(set = 0, binding = 0) uniform Constants {
+    mat4 Model;
+    mat4 MVP;
+    vec4 Color;
+} constants;
+
+layout(location = 0) out vec4 out_Color;
+
+void main() {
+    out_Color = vec4(constants.Color.xyz, 1.0);
+}
+";
+
+        /// <summary>
+        /// Initialize rendering resources for the dataset (Vulkan backend).
+        /// </summary>
+        public void Initialize(Mesh3DDataset dataset)
+        {
+            Width = 1280;
+            Height = 720;
+            var factory = VeldridManager.Factory;
+            
+            // Create offscreen color and depth textures
+            _colorTarget = factory.CreateTexture(TextureDescription.Texture2D(
+                Width, Height, 1, 1, PixelFormat.B8_G8_R8_A8_UNorm, TextureUsage.RenderTarget | TextureUsage.Sampled));
+            
+            // Use Vulkan-compatible depth format
+            _depthTarget = factory.CreateTexture(TextureDescription.Texture2D(
+                Width, Height, 1, 1, PixelFormat.D32_Float_S8_UInt, TextureUsage.DepthStencil));
+            
+            _framebuffer = factory.CreateFramebuffer(new FramebufferDescription(_depthTarget, _colorTarget));
+            _commandList = factory.CreateCommandList();
+            
+            // Create constant buffer
+            uint constBufferSize = (uint)(Unsafe.SizeOf<MeshConstants>());
+            _constantBuffer = factory.CreateBuffer(new BufferDescription(constBufferSize, BufferUsage.UniformBuffer | BufferUsage.Dynamic));
+            
+            // Compile GLSL shaders to SPIR-V
+            Shader vsMain = factory.CreateShader(new ShaderDescription(
+                ShaderStages.Vertex, 
+                Encoding.UTF8.GetBytes(GlslVertexShaderMesh), 
+                "main"));
+            
+            Shader fsMain = factory.CreateShader(new ShaderDescription(
+                ShaderStages.Fragment, 
+                Encoding.UTF8.GetBytes(GlslFragmentShaderMesh), 
+                "main"));
+            
+            Shader vsLine = factory.CreateShader(new ShaderDescription(
+                ShaderStages.Vertex, 
+                Encoding.UTF8.GetBytes(GlslVertexShaderLine), 
+                "main"));
+            
+            Shader fsLine = factory.CreateShader(new ShaderDescription(
+                ShaderStages.Fragment, 
+                Encoding.UTF8.GetBytes(GlslFragmentShaderLine), 
+                "main"));
+            
+            // Create resource layout
+            _resourceLayout = factory.CreateResourceLayout(new ResourceLayoutDescription(
+                new ResourceLayoutElementDescription("Constants", ResourceKind.UniformBuffer, ShaderStages.Vertex | ShaderStages.Fragment)
+            ));
+            
+            // Create resource set
+            _resourceSet = factory.CreateResourceSet(new ResourceSetDescription(_resourceLayout, _constantBuffer));
+            
+            // Define vertex layouts
+            var vertexLayoutMain = new VertexLayoutDescription(
+                new VertexElementDescription("Position", VertexElementSemantic.TextureCoordinate, VertexElementFormat.Float3),
+                new VertexElementDescription("Normal", VertexElementSemantic.TextureCoordinate, VertexElementFormat.Float3)
+            );
+            
+            var vertexLayoutLine = new VertexLayoutDescription(
+                new VertexElementDescription("Position", VertexElementSemantic.TextureCoordinate, VertexElementFormat.Float3)
+            );
+            
+            // Create graphics pipelines
+            GraphicsPipelineDescription triDesc = new GraphicsPipelineDescription(
+                BlendStateDescription.SingleOverrideBlend,
+                new DepthStencilStateDescription(true, true, ComparisonKind.LessEqual),
+                new RasterizerStateDescription(FaceCullMode.Back, PolygonFillMode.Solid, FrontFace.CounterClockwise, true, false),
+                PrimitiveTopology.TriangleList,
+                new ShaderSetDescription(new[] { vertexLayoutMain }, new[] { vsMain, fsMain }),
+                new[] { _resourceLayout },
+                _framebuffer.OutputDescription
+            );
+            _pipelineTriangles = factory.CreateGraphicsPipeline(triDesc);
+            
+            GraphicsPipelineDescription lineDesc = new GraphicsPipelineDescription(
+                BlendStateDescription.SingleAlphaBlend,
+                new DepthStencilStateDescription(true, true, ComparisonKind.LessEqual),
+                new RasterizerStateDescription(FaceCullMode.None, PolygonFillMode.Solid, FrontFace.CounterClockwise, true, false),
+                PrimitiveTopology.LineList,
+                new ShaderSetDescription(new[] { vertexLayoutLine }, new[] { vsLine, fsLine }),
+                new[] { _resourceLayout },
+                _framebuffer.OutputDescription
+            );
+            _pipelineLines = factory.CreateGraphicsPipeline(lineDesc);
+            
+            // Create buffers for mesh vertices and indices
+            CreateMeshBuffers(dataset, factory);
+        }
+
+        public void Render(Mesh3DDataset dataset, Matrix4x4 viewMatrix, Matrix4x4 projMatrix, Vector3 cameraTarget, bool showGrid)
+        {
+            var device = VeldridManager.GraphicsDevice;
+            
+            _commandList.Begin();
+            _commandList.SetFramebuffer(_framebuffer);
+            _commandList.ClearColorTarget(0, RgbaFloat.Black);
+            _commandList.ClearDepthStencil(1f);
+            
+            // Compute model matrix and constants
+            Matrix4x4 model = ComputeModelMatrix(dataset);
+            MeshConstants consts;
+            consts.Model = model;
+            consts.MVP = model * viewMatrix * projMatrix;
+            consts.Color = ChooseColorForDataset(dataset);
+            device.UpdateBuffer(_constantBuffer, 0, ref consts);
+            
+            // Draw mesh triangles
+            _commandList.SetPipeline(_pipelineTriangles);
+            _commandList.SetGraphicsResourceSet(0, _resourceSet);
+            _commandList.SetVertexBuffer(0, _vertexBuffer);
+            _commandList.SetIndexBuffer(_indexBuffer, IndexFormat.UInt32);
+            _commandList.DrawIndexed(_indexCount, 1, 0, 0, 0);
+            
+            // Draw grid if needed
+            if (showGrid)
+            {
+                consts.Model = Matrix4x4.Identity;
+                consts.MVP = viewMatrix * projMatrix;
+                consts.Color = new Vector4(0.5f, 0.5f, 0.5f, 1.0f);
+                device.UpdateBuffer(_constantBuffer, 0, ref consts);
+                UpdateGridBuffers(dataset, cameraTarget);
+                _commandList.SetPipeline(_pipelineLines);
+                _commandList.SetGraphicsResourceSet(0, _resourceSet);
+                _commandList.SetVertexBuffer(0, _vertexBufferGrid);
+                _commandList.SetIndexBuffer(_indexBufferGrid, IndexFormat.UInt32);
+                _commandList.DrawIndexed(_gridIndexCount, 1, 0, 0, 0);
+            }
+            
+            _commandList.End();
+            device.SubmitCommands(_commandList);
+        }
+
+        public void Dispose()
+        {
+            _vertexBuffer?.Dispose();
+            _indexBuffer?.Dispose();
+            _vertexBufferGrid?.Dispose();
+            _indexBufferGrid?.Dispose();
+            _constantBuffer?.Dispose();
+            _pipelineTriangles?.Dispose();
+            _pipelineLines?.Dispose();
+            _resourceSet?.Dispose();
+            _resourceLayout?.Dispose();
+            _commandList?.Dispose();
+            _framebuffer?.Dispose();
+            _colorTarget?.Dispose();
+            _depthTarget?.Dispose();
+        }
+
+        private DeviceBuffer _vertexBufferGrid;
+        private DeviceBuffer _indexBufferGrid;
+        private uint _gridIndexCount;
+
+        private void CreateMeshBuffers(Mesh3DDataset dataset, ResourceFactory factory)
+        {
+            int vertexCount = dataset.Vertices.Count;
+            float[] vertexData = new float[vertexCount * 6];
+            for (int i = 0; i < vertexCount; i++)
+            {
+                Vector3 v = dataset.Vertices[i];
+                Vector3 n = (dataset.Normals.Count > i) ? dataset.Normals[i] : Vector3.UnitY;
+                vertexData[i * 6 + 0] = v.X;
+                vertexData[i * 6 + 1] = v.Y;
+                vertexData[i * 6 + 2] = v.Z;
+                vertexData[i * 6 + 3] = n.X;
+                vertexData[i * 6 + 4] = n.Y;
+                vertexData[i * 6 + 5] = n.Z;
+            }
+            _vertexBuffer = factory.CreateBuffer(new BufferDescription((uint)(vertexData.Length * sizeof(float)), BufferUsage.VertexBuffer));
+            VeldridManager.GraphicsDevice.UpdateBuffer(_vertexBuffer, 0, vertexData);
+            
+            // Create index buffer - properly handle triangulated and polygon faces
+            System.Collections.Generic.List<uint> indexList = new System.Collections.Generic.List<uint>();
+            foreach (var face in dataset.Faces)
+            {
+                if (face.Length == 3)
+                {
+                    // Triangle face - add directly
+                    indexList.Add((uint)face[0]);
+                    indexList.Add((uint)face[1]);
+                    indexList.Add((uint)face[2]);
+                }
+                else if (face.Length > 3)
+                {
+                    // Polygon face - triangulate using fan method
+                    for (int i = 0; i < face.Length - 2; i++)
+                    {
+                        indexList.Add((uint)face[0]);
+                        indexList.Add((uint)face[i + 1]);
+                        indexList.Add((uint)face[i + 2]);
+                    }
+                }
+            }
+            
+            uint[] indices = indexList.ToArray();
+            _indexCount = (uint)indices.Length;
+            _indexBuffer = factory.CreateBuffer(new BufferDescription((uint)(indices.Length * sizeof(uint)), BufferUsage.IndexBuffer));
+            VeldridManager.GraphicsDevice.UpdateBuffer(_indexBuffer, 0, indices);
+        }
+
+        private Matrix4x4 ComputeModelMatrix(Mesh3DDataset dataset)
+        {
+            Vector3 rotationDeg = Mesh3DTools.GetRotation(dataset);
+            float rx = MathF.PI * rotationDeg.X / 180f;
+            float ry = MathF.PI * rotationDeg.Y / 180f;
+            float rz = MathF.PI * rotationDeg.Z / 180f;
+            Matrix4x4 rotX = Matrix4x4.CreateRotationX(rx);
+            Matrix4x4 rotY = Matrix4x4.CreateRotationY(ry);
+            Matrix4x4 rotZ = Matrix4x4.CreateRotationZ(rz);
+            Matrix4x4 rotation = rotZ * rotY * rotX;
+            Matrix4x4 model = Matrix4x4.CreateScale(dataset.Scale) * rotation * Matrix4x4.CreateTranslation(-dataset.Center);
+            return model;
+        }
+
+        private Vector4 ChooseColorForDataset(Mesh3DDataset dataset)
+        {
+            return new Vector4(0.2f, 0.7f, 0.7f, 1.0f);
+        }
+
+        private void UpdateGridBuffers(Mesh3DDataset dataset, Vector3 cameraTarget)
+        {
+            Vector3 extents = dataset.BoundingBoxMax - dataset.BoundingBoxMin;
+            float halfSize = 0.5f * MathF.Max(extents.X, MathF.Max(extents.Y, extents.Z));
+            if (halfSize < 1f) halfSize = 1f;
+            int divisions = 10;
+            float spacing = halfSize / divisions;
+            float gridSize = spacing * divisions;
+            var vertices = new System.Collections.Generic.List<float>();
+            var indices = new System.Collections.Generic.List<uint>();
+            uint idx = 0;
+            
+            // Vertical lines (parallel to Z axis, varying X)
+            for (int i = -divisions; i <= divisions; i++)
+            {
+                float x = i * spacing;
+                vertices.Add(x); vertices.Add(0f); vertices.Add(-gridSize);
+                vertices.Add(x); vertices.Add(0f); vertices.Add(gridSize);
+                indices.Add(idx); indices.Add(idx + 1);
+                idx += 2;
+            }
+            
+            // Horizontal lines (parallel to X axis, varying Z)
+            for (int k = -divisions; k <= divisions; k++)
+            {
+                float z = k * spacing;
+                vertices.Add(-gridSize); vertices.Add(0f); vertices.Add(z);
+                vertices.Add(gridSize);  vertices.Add(0f); vertices.Add(z);
+                indices.Add(idx); indices.Add(idx + 1);
+                idx += 2;
+            }
+            
+            _gridIndexCount = (uint)indices.Count;
+            uint vbSize = (uint)(vertices.Count * sizeof(float));
+            if (_vertexBufferGrid == null || _vertexBufferGrid.SizeInBytes < vbSize)
+            {
+                _vertexBufferGrid?.Dispose();
+                _vertexBufferGrid = VeldridManager.Factory.CreateBuffer(new BufferDescription(vbSize, BufferUsage.VertexBuffer));
+            }
+            VeldridManager.GraphicsDevice.UpdateBuffer(_vertexBufferGrid, 0, vertices.ToArray());
+            
+            uint ibSize = (uint)(indices.Count * sizeof(uint));
+            if (_indexBufferGrid == null || _indexBufferGrid.SizeInBytes < ibSize)
+            {
+                _indexBufferGrid?.Dispose();
+                _indexBufferGrid = VeldridManager.Factory.CreateBuffer(new BufferDescription(ibSize, BufferUsage.IndexBuffer));
+            }
+            VeldridManager.GraphicsDevice.UpdateBuffer(_indexBufferGrid, 0, indices.ToArray());
+        }
+
+        private struct MeshConstants
+        {
+            public Matrix4x4 Model;
+            public Matrix4x4 MVP;
+            public Vector4 Color;
+        }
+    }
+}

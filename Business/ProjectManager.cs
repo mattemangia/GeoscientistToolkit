@@ -7,6 +7,7 @@ using System.Linq;
 using GeoscientistToolkit.Data;
 using GeoscientistToolkit.Data.CtImageStack;
 using GeoscientistToolkit.Data.Image;
+using GeoscientistToolkit.Data.Mesh3D;
 using GeoscientistToolkit.Settings;
 using GeoscientistToolkit.Util;
 
@@ -256,6 +257,22 @@ namespace GeoscientistToolkit.Business
                         Logger.LogError($"Could not find editable partner for streaming dataset '{sDto.Name}' at path '{sDto.PartnerFilePath}'.");
                     }
                     return streamingDataset;
+                case Mesh3DDatasetDTO mesh3DDto:
+                    var mesh3DDataset = new Mesh3DDataset(mesh3DDto.Name, mesh3DDto.FilePath)
+                    {
+                        FileFormat = mesh3DDto.FileFormat,
+                        Scale = mesh3DDto.Scale,
+                        VertexCount = mesh3DDto.VertexCount,
+                        FaceCount = mesh3DDto.FaceCount,
+                        BoundingBoxMin = mesh3DDto.BoundingBoxMin,
+                        BoundingBoxMax = mesh3DDto.BoundingBoxMax,
+                        Center = mesh3DDto.Center,
+                        IsMissing = !File.Exists(mesh3DDto.FilePath)
+                    };
+                    if (mesh3DDataset.IsMissing) 
+                        Logger.LogWarning($"Source file not found for 3D model: {mesh3DDto.Name} at {mesh3DDto.FilePath}");
+                    return mesh3DDataset;
+
 
                 case CtImageStackDatasetDTO ctDto:
                     var ctDataset = new CtImageStackDataset(ctDto.Name, ctDto.FilePath)

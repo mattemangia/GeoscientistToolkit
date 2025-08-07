@@ -8,6 +8,7 @@ using System.Text.Json.Serialization;
 using GeoscientistToolkit.Data;
 using GeoscientistToolkit.Data.CtImageStack;
 using GeoscientistToolkit.Data.Image;
+using GeoscientistToolkit.Data.Mesh3D;
 using GeoscientistToolkit.Util;
 
 namespace GeoscientistToolkit.Business
@@ -85,6 +86,7 @@ namespace GeoscientistToolkit.Business
 
                         // --- ADDED CASE FOR THE NEW DATASET TYPE ---
                         nameof(StreamingCtVolumeDataset) => JsonSerializer.Deserialize<StreamingCtVolumeDatasetDTO>(rawText, options),
+                        nameof(Mesh3DDataset) => JsonSerializer.Deserialize<Mesh3DDatasetDTO>(rawText, options),
 
                         _ => throw new JsonException($"Unknown dataset type: {typeName}")
                     };

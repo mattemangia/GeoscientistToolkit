@@ -6,6 +6,7 @@ using ImGuiNET;
 using System.Numerics;
 using System.Collections.Generic;
 using System.Linq;
+using GeoscientistToolkit.Data.Mesh3D;
 
 namespace GeoscientistToolkit.UI
 {
@@ -243,12 +244,23 @@ namespace GeoscientistToolkit.UI
             ImGui.TextUnformatted($"Name: {dataset.Name}");
             ImGui.TextUnformatted($"Type: {dataset.Type}");
             ImGui.TextUnformatted($"Path: {dataset.FilePath}");
-            
+    
             if (dataset is CtImageStackDataset ctDataset)
             {
                 ImGui.Separator();
                 ImGui.TextUnformatted($"Binning: {ctDataset.BinningSize}");
                 ImGui.TextUnformatted($"Pixel Size: {ctDataset.PixelSize} {ctDataset.Unit}");
+            }
+            else if (dataset is Mesh3DDataset mesh3D)
+            {
+                ImGui.Separator();
+                ImGui.TextUnformatted($"Format: {mesh3D.FileFormat}");
+                ImGui.TextUnformatted($"Vertices: {mesh3D.VertexCount:N0}");
+                ImGui.TextUnformatted($"Faces: {mesh3D.FaceCount:N0}");
+                if (mesh3D.Scale != 1.0f)
+                {
+                    ImGui.TextUnformatted($"Scale: {mesh3D.Scale:F2}x");
+                }
             }
             else if (dataset is DatasetGroup group)
             {
@@ -259,7 +271,7 @@ namespace GeoscientistToolkit.UI
                     ImGui.TextUnformatted($"  • {child.Name}");
                 }
             }
-            
+    
             ImGui.EndTooltip();
         }
         
@@ -369,6 +381,7 @@ namespace GeoscientistToolkit.UI
                 DatasetType.Mesh => "[MESH]",
                 DatasetType.SingleImage => "[IMG]",
                 DatasetType.Group => "[GROUP]",
+                DatasetType.Mesh3D => "[3D]",  
                 _ => "[DATA]"
             };
         }

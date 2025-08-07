@@ -1,0 +1,406 @@
+// GeoscientistToolkit/Data/Mesh3D/Mesh3DDataset.cs
+using System;
+using System.IO;
+using System.Numerics;
+using System.Collections.Generic;
+using System.Linq;
+using System.Globalization;
+using GeoscientistToolkit.Util;
+
+namespace GeoscientistToolkit.Data.Mesh3D
+{
+    /// <summary>
+    /// Dataset for 3D mesh objects (OBJ, STL files)
+    /// </summary>
+    public class Mesh3DDataset : Dataset, ISerializableDataset
+    {
+        public int VertexCount { get; set; }
+        public int FaceCount { get; set; }
+        public Vector3 BoundingBoxMin { get; set; }
+        public Vector3 BoundingBoxMax { get; set; }
+        public Vector3 Center { get; set; }
+        public float Scale { get; set; } = 1.0f;
+        public string FileFormat { get; set; } // "OBJ" or "STL"
+        
+        // Mesh data
+        public List<Vector3> Vertices { get; private set; }
+        public List<Vector3> Normals { get; private set; }
+        public List<Vector2> TextureCoordinates { get; private set; }
+        public List<int[]> Faces { get; private set; } // Each face is an array of vertex indices
+        public bool IsLoaded { get; private set; }
+
+        public Mesh3DDataset(string name, string filePath) : base(name, filePath)
+        {
+            Type = DatasetType.Mesh3D;
+            Vertices = new List<Vector3>();
+            Normals = new List<Vector3>();
+            TextureCoordinates = new List<Vector2>();
+            Faces = new List<int[]>();
+            
+            // Determine format from extension
+            string ext = Path.GetExtension(filePath).ToLower();
+            FileFormat = ext switch
+            {
+                ".obj" => "OBJ",
+                ".stl" => "STL",
+                _ => "Unknown"
+            };
+        }
+
+        public override long GetSizeInBytes()
+        {
+            if (File.Exists(FilePath))
+            {
+                return new FileInfo(FilePath).Length;
+            }
+            return 0;
+        }
+
+        public override void Load()
+        {
+            if (IsLoaded) return;
+            
+            if (!File.Exists(FilePath))
+            {
+                Logger.LogError($"3D model file not found: {FilePath}");
+                IsMissing = true;
+                return;
+            }
+
+            try
+            {
+                Logger.Log($"Loading 3D model: {FilePath}");
+                
+                switch (FileFormat)
+                {
+                    case "OBJ":
+                        LoadOBJ();
+                        break;
+                    case "STL":
+                        LoadSTL();
+                        break;
+                    default:
+                        throw new NotSupportedException($"Unsupported 3D file format: {FileFormat}");
+                }
+
+                CalculateBounds();
+                IsLoaded = true;
+                Logger.Log($"3D model loaded: {VertexCount} vertices, {FaceCount} faces");
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError($"Failed to load 3D model: {ex.Message}");
+                throw;
+            }
+        }
+
+        private void LoadOBJ()
+        {
+            Vertices.Clear();
+            Normals.Clear();
+            TextureCoordinates.Clear();
+            Faces.Clear();
+
+            var lines = File.ReadAllLines(FilePath);
+            var culture = CultureInfo.InvariantCulture;
+
+            foreach (var line in lines)
+            {
+                if (string.IsNullOrWhiteSpace(line) || line.StartsWith("#"))
+                    continue;
+
+                var parts = line.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
+                if (parts.Length == 0) continue;
+
+                switch (parts[0])
+                {
+                    case "v": // Vertex
+                        if (parts.Length >= 4)
+                        {
+                            float x = float.Parse(parts[1], culture);
+                            float y = float.Parse(parts[2], culture);
+                            float z = float.Parse(parts[3], culture);
+                            Vertices.Add(new Vector3(x, y, z));
+                        }
+                        break;
+
+                    case "vn": // Normal
+                        if (parts.Length >= 4)
+                        {
+                            float nx = float.Parse(parts[1], culture);
+                            float ny = float.Parse(parts[2], culture);
+                            float nz = float.Parse(parts[3], culture);
+                            Normals.Add(Vector3.Normalize(new Vector3(nx, ny, nz)));
+                        }
+                        break;
+
+                    case "vt": // Texture coordinate
+                        if (parts.Length >= 3)
+                        {
+                            float u = float.Parse(parts[1], culture);
+                            float v = float.Parse(parts[2], culture);
+                            TextureCoordinates.Add(new Vector2(u, v));
+                        }
+                        break;
+
+                    case "f": // Face
+                        var face = new List<int>();
+                        for (int i = 1; i < parts.Length; i++)
+                        {
+                            // Face indices can be in format: vertex/texture/normal
+                            var indices = parts[i].Split('/');
+                            if (int.TryParse(indices[0], out int vertexIndex))
+                            {
+                                // OBJ uses 1-based indexing, convert to 0-based
+                                face.Add(vertexIndex - 1);
+                            }
+                        }
+                        if (face.Count >= 3)
+                        {
+                            Faces.Add(face.ToArray());
+                        }
+                        break;
+                }
+            }
+
+            VertexCount = Vertices.Count;
+            FaceCount = Faces.Count;
+
+            // Generate normals if not present
+            if (Normals.Count == 0)
+            {
+                GenerateNormals();
+            }
+        }
+
+        private void LoadSTL()
+        {
+            Vertices.Clear();
+            Normals.Clear();
+            TextureCoordinates.Clear();
+            Faces.Clear();
+
+            // Check if it's ASCII or binary STL
+            bool isAscii = IsAsciiSTL(FilePath);
+
+            if (isAscii)
+            {
+                LoadAsciiSTL();
+            }
+            else
+            {
+                LoadBinarySTL();
+            }
+
+            VertexCount = Vertices.Count;
+            FaceCount = Faces.Count;
+        }
+
+        private bool IsAsciiSTL(string filePath)
+        {
+            try
+            {
+                using var stream = new FileStream(filePath, FileMode.Open, FileAccess.Read);
+                byte[] buffer = new byte[5];
+                stream.Read(buffer, 0, 5);
+                string start = System.Text.Encoding.ASCII.GetString(buffer);
+                return start == "solid";
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private void LoadAsciiSTL()
+        {
+            var lines = File.ReadAllLines(FilePath);
+            var culture = CultureInfo.InvariantCulture;
+            Vector3? currentNormal = null;
+            var currentVertices = new List<int>();
+
+            foreach (var line in lines)
+            {
+                var trimmed = line.Trim();
+                if (trimmed.StartsWith("facet normal"))
+                {
+                    var parts = trimmed.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
+                    if (parts.Length >= 5)
+                    {
+                        float nx = float.Parse(parts[2], culture);
+                        float ny = float.Parse(parts[3], culture);
+                        float nz = float.Parse(parts[4], culture);
+                        currentNormal = new Vector3(nx, ny, nz);
+                    }
+                    currentVertices.Clear();
+                }
+                else if (trimmed.StartsWith("vertex"))
+                {
+                    var parts = trimmed.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
+                    if (parts.Length >= 4)
+                    {
+                        float x = float.Parse(parts[1], culture);
+                        float y = float.Parse(parts[2], culture);
+                        float z = float.Parse(parts[3], culture);
+                        currentVertices.Add(Vertices.Count);
+                        Vertices.Add(new Vector3(x, y, z));
+                        if (currentNormal.HasValue)
+                        {
+                            Normals.Add(currentNormal.Value);
+                        }
+                    }
+                }
+                else if (trimmed.StartsWith("endfacet"))
+                {
+                    if (currentVertices.Count == 3)
+                    {
+                        Faces.Add(currentVertices.ToArray());
+                    }
+                }
+            }
+        }
+
+        private void LoadBinarySTL()
+        {
+            using var reader = new BinaryReader(File.Open(FilePath, FileMode.Open));
+            
+            // Skip 80-byte header
+            reader.ReadBytes(80);
+            
+            uint triangleCount = reader.ReadUInt32();
+            
+            for (uint i = 0; i < triangleCount; i++)
+            {
+                // Read normal
+                float nx = reader.ReadSingle();
+                float ny = reader.ReadSingle();
+                float nz = reader.ReadSingle();
+                Vector3 normal = new Vector3(nx, ny, nz);
+                
+                // Read vertices
+                var faceIndices = new int[3];
+                for (int j = 0; j < 3; j++)
+                {
+                    float x = reader.ReadSingle();
+                    float y = reader.ReadSingle();
+                    float z = reader.ReadSingle();
+                    
+                    faceIndices[j] = Vertices.Count;
+                    Vertices.Add(new Vector3(x, y, z));
+                    Normals.Add(normal);
+                }
+                
+                Faces.Add(faceIndices);
+                
+                // Skip attribute byte count
+                reader.ReadUInt16();
+            }
+        }
+
+        private void GenerateNormals()
+        {
+            // Initialize normals for each vertex
+            Normals.Clear();
+            for (int i = 0; i < Vertices.Count; i++)
+            {
+                Normals.Add(Vector3.Zero);
+            }
+
+            // Calculate face normals and add to vertex normals
+            foreach (var face in Faces)
+            {
+                if (face.Length >= 3)
+                {
+                    Vector3 v0 = Vertices[face[0]];
+                    Vector3 v1 = Vertices[face[1]];
+                    Vector3 v2 = Vertices[face[2]];
+
+                    Vector3 edge1 = v1 - v0;
+                    Vector3 edge2 = v2 - v0;
+                    Vector3 faceNormal = Vector3.Normalize(Vector3.Cross(edge1, edge2));
+
+                    // Add face normal to each vertex of the face
+                    foreach (int index in face)
+                    {
+                        Normals[index] = Normals[index] + faceNormal;
+                    }
+                }
+            }
+
+            // Normalize all vertex normals
+            for (int i = 0; i < Normals.Count; i++)
+            {
+                if (Normals[i].LengthSquared() > 0)
+                {
+                    Normals[i] = Vector3.Normalize(Normals[i]);
+                }
+            }
+        }
+
+        private void CalculateBounds()
+        {
+            if (Vertices.Count == 0)
+            {
+                BoundingBoxMin = Vector3.Zero;
+                BoundingBoxMax = Vector3.Zero;
+                Center = Vector3.Zero;
+                return;
+            }
+
+            BoundingBoxMin = new Vector3(float.MaxValue);
+            BoundingBoxMax = new Vector3(float.MinValue);
+
+            foreach (var vertex in Vertices)
+            {
+                BoundingBoxMin = Vector3.Min(BoundingBoxMin, vertex);
+                BoundingBoxMax = Vector3.Max(BoundingBoxMax, vertex);
+            }
+
+            Center = (BoundingBoxMin + BoundingBoxMax) * 0.5f;
+        }
+
+        public override void Unload()
+        {
+            if (!IsLoaded) return;
+            
+            Vertices.Clear();
+            Normals.Clear();
+            TextureCoordinates.Clear();
+            Faces.Clear();
+            IsLoaded = false;
+            
+            Logger.Log($"3D model unloaded: {Name}");
+        }
+
+        public object ToSerializableObject()
+        {
+            return new Mesh3DDatasetDTO
+            {
+                TypeName = nameof(Mesh3DDataset),
+                Name = Name,
+                FilePath = FilePath,
+                FileFormat = FileFormat,
+                Scale = Scale,
+                VertexCount = VertexCount,
+                FaceCount = FaceCount,
+                BoundingBoxMin = BoundingBoxMin,
+                BoundingBoxMax = BoundingBoxMax,
+                Center = Center
+            };
+        }
+    }
+    
+    /// <summary>
+    /// Data Transfer Object for Mesh3DDataset serialization
+    /// </summary>
+    public class Mesh3DDatasetDTO : DatasetDTO
+    {
+        public string FileFormat { get; set; }
+        public float Scale { get; set; }
+        public int VertexCount { get; set; }
+        public int FaceCount { get; set; }
+        public Vector3 BoundingBoxMin { get; set; }
+        public Vector3 BoundingBoxMax { get; set; }
+        public Vector3 Center { get; set; }
+    }
+}

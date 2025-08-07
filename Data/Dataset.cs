@@ -9,7 +9,8 @@ namespace GeoscientistToolkit.Data
         PointCloud,
         Mesh,
         SingleImage,
-        Group
+        Group,
+        Mesh3D
     }
 
     public abstract class Dataset

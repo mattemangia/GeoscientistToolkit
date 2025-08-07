@@ -7,6 +7,8 @@ using System.Linq;
 
 namespace GeoscientistToolkit.UI.Utils
 {
+    
+
     public class ImGuiFileDialog
     {
         public bool IsOpen;
@@ -20,6 +22,7 @@ namespace GeoscientistToolkit.UI.Utils
         private string[] _allowedExtensions = Array.Empty<string>();
         private List<VolumeInfo> _availableVolumes = new List<VolumeInfo>();
         private float _drivePanelWidth = 180f;
+        private string _defaultExtension = "";
 
         private class VolumeInfo
         {
@@ -36,7 +39,13 @@ namespace GeoscientistToolkit.UI.Utils
         {
             _id = id;
             _dialogType = type;
-            _title = title ?? (type == FileDialogType.OpenFile ? "Open File" : "Select Folder");
+            _title = title ?? type switch
+            {
+                FileDialogType.OpenFile => "Open File",
+                FileDialogType.SaveFile => "Save File",
+                FileDialogType.OpenDirectory => "Select Folder",
+                _ => "File Dialog"
+            };
             CurrentDirectory = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
             RefreshDrives();
         }
@@ -174,17 +183,39 @@ namespace GeoscientistToolkit.UI.Utils
             return $"{size:0.##} {sizes[order]}";
         }
 
-        public void Open(string startingPath = null, string[] allowedExtensions = null)
+        public void Open(string startingPath = null, string[] allowedExtensions = null, string defaultFileName = null)
         {
             IsOpen = true;
             SelectedPath = "";
-            _selectedFileName = "";
+            _selectedFileName = defaultFileName ?? "";
             _allowedExtensions = allowedExtensions ?? Array.Empty<string>();
+            
+            // Set default extension for save dialog
+            if (_dialogType == FileDialogType.SaveFile && _allowedExtensions.Length > 0)
+            {
+                _defaultExtension = _allowedExtensions[0];
+            }
 
-            if (!string.IsNullOrEmpty(startingPath) && Directory.Exists(startingPath))
-                CurrentDirectory = startingPath;
+            if (!string.IsNullOrEmpty(startingPath))
+            {
+                if (File.Exists(startingPath))
+                {
+                    CurrentDirectory = Path.GetDirectoryName(startingPath);
+                    _selectedFileName = Path.GetFileName(startingPath);
+                }
+                else if (Directory.Exists(startingPath))
+                {
+                    CurrentDirectory = startingPath;
+                }
+                else
+                {
+                    CurrentDirectory = Directory.GetCurrentDirectory();
+                }
+            }
             else
+            {
                 CurrentDirectory = Directory.GetCurrentDirectory();
+            }
 
             RefreshDrives();
         }
@@ -203,7 +234,7 @@ namespace GeoscientistToolkit.UI.Utils
                 {
                     DrawPathNavigation();
 
-                    float bottomBarHeight = ImGui.GetFrameHeightWithSpacing() + ImGui.GetStyle().WindowPadding.Y;
+                    float bottomBarHeight = ImGui.GetFrameHeightWithSpacing() * 2 + ImGui.GetStyle().WindowPadding.Y;
                     float contentHeight = ImGui.GetContentRegionAvail().Y - bottomBarHeight;
 
                     // Draw drive panel and file list side by side
@@ -256,7 +287,11 @@ namespace GeoscientistToolkit.UI.Utils
                         if (volume.IsReady && Directory.Exists(volume.Path))
                         {
                             CurrentDirectory = volume.Path;
-                            _selectedFileName = "";
+                            // Don't clear filename for save dialog
+                            if (_dialogType != FileDialogType.SaveFile)
+                            {
+                                _selectedFileName = "";
+                            }
                         }
                     }
 
@@ -332,21 +367,28 @@ namespace GeoscientistToolkit.UI.Utils
                             if (ImGui.IsMouseDoubleClicked(0))
                             {
                                 CurrentDirectory = dir;
-                                _selectedFileName = "";
+                                // Don't clear filename for save dialog
+                                if (_dialogType != FileDialogType.SaveFile)
+                                {
+                                    _selectedFileName = "";
+                                }
                             }
                         }
                         ImGui.PopStyleColor();
                     }
 
-                    if (_dialogType == FileDialogType.OpenFile)
+                    if (_dialogType != FileDialogType.OpenDirectory)
                     {
                         foreach (var file in Directory.GetFiles(CurrentDirectory))
                         {
                             var fileName = Path.GetFileName(file);
+                            
+                            // For save dialog, show all files but highlight those with matching extensions
                             bool isAllowed = _allowedExtensions.Length == 0 ||
                                            _allowedExtensions.Contains(Path.GetExtension(file).ToLower());
 
-                            if (!isAllowed) continue;
+                            // For open dialog, filter; for save dialog, show all
+                            if (_dialogType == FileDialogType.OpenFile && !isAllowed) continue;
 
                             bool isSelected = _selectedFileName == fileName;
                             string filePrefix = "[F]";
@@ -354,6 +396,12 @@ namespace GeoscientistToolkit.UI.Utils
                             if (!string.IsNullOrEmpty(ext) && ext.Length <= 5)
                             {
                                 filePrefix = $"[{ext.TrimStart('.')}]";
+                            }
+
+                            // Dim non-matching files in save dialog
+                            if (_dialogType == FileDialogType.SaveFile && !isAllowed)
+                            {
+                                ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(0.5f, 0.5f, 0.5f, 1.0f));
                             }
 
                             if (ImGui.Selectable($"{filePrefix} {fileName}", isSelected, ImGuiSelectableFlags.AllowDoubleClick))
@@ -366,6 +414,11 @@ namespace GeoscientistToolkit.UI.Utils
                                         selectionMade = true;
                                     }
                                 }
+                            }
+
+                            if (_dialogType == FileDialogType.SaveFile && !isAllowed)
+                            {
+                                ImGui.PopStyleColor();
                             }
                         }
                     }
@@ -382,23 +435,44 @@ namespace GeoscientistToolkit.UI.Utils
         {
             ImGui.Separator();
 
+            // Show file type filter for save/open file dialogs
+            if (_dialogType != FileDialogType.OpenDirectory && _allowedExtensions.Length > 0)
+            {
+                string filterText = "File type: ";
+                if (_allowedExtensions.Length == 1)
+                {
+                    filterText += $"*{_allowedExtensions[0]}";
+                }
+                else
+                {
+                    filterText += string.Join(", ", _allowedExtensions.Select(e => $"*{e}"));
+                }
+                ImGui.Text(filterText);
+            }
+
             var style = ImGui.GetStyle();
             Vector2 buttonSize = new Vector2(80, 0);
             float buttonsTotalWidth = (buttonSize.X * 2) + style.ItemSpacing.X;
             float buttonsPosX = ImGui.GetWindowContentRegionMax().X - buttonsTotalWidth;
 
-            if (_dialogType == FileDialogType.OpenFile)
+            if (_dialogType != FileDialogType.OpenDirectory)
             {
-                ImGui.Text("File name");
+                ImGui.Text("File name:");
                 ImGui.SameLine();
 
                 float inputTextWidth = buttonsPosX - ImGui.GetCursorPosX() - (style.ItemSpacing.X * 2);
                 ImGui.SetNextItemWidth(inputTextWidth);
-                ImGui.InputText("##FileNameInput", ref _selectedFileName, 260);
+                
+                if (ImGui.InputText("##FileNameInput", ref _selectedFileName, 260))
+                {
+                    // User is typing
+                }
+
                 ImGui.SameLine();
             }
             else
             {
+                ImGui.Text($"Current folder: {Path.GetFileName(CurrentDirectory)}");
                 ImGui.SetCursorPosX(buttonsPosX);
             }
 
@@ -412,9 +486,11 @@ namespace GeoscientistToolkit.UI.Utils
 
             ImGui.SameLine();
 
+            string buttonText = _dialogType == FileDialogType.SaveFile ? "Save" : "Select";
             bool canSelect = _dialogType == FileDialogType.OpenDirectory || !string.IsNullOrEmpty(_selectedFileName);
+            
             if (!canSelect) ImGui.BeginDisabled();
-            if (ImGui.Button("Select", buttonSize))
+            if (ImGui.Button(buttonText, buttonSize))
             {
                 selectionMade = HandleSelection();
             }
@@ -426,7 +502,7 @@ namespace GeoscientistToolkit.UI.Utils
             if (_dialogType == FileDialogType.OpenDirectory)
             {
                 SelectedPath = CurrentDirectory;
-                Logger.Log("Opening directory " + CurrentDirectory);
+                Logger.Log($"Selected directory: {CurrentDirectory}");
                 if (Directory.Exists(SelectedPath))
                 {
                     IsOpen = false;
@@ -434,12 +510,46 @@ namespace GeoscientistToolkit.UI.Utils
                 }
                 return false;
             }
-            else
+            else if (_dialogType == FileDialogType.SaveFile)
+            {
+                if (!string.IsNullOrEmpty(_selectedFileName))
+                {
+                    // Ensure the filename has the correct extension
+                    string fileName = _selectedFileName;
+                    if (!string.IsNullOrEmpty(_defaultExtension))
+                    {
+                        string currentExt = Path.GetExtension(fileName).ToLower();
+                        bool hasValidExt = _allowedExtensions.Contains(currentExt);
+                        
+                        if (!hasValidExt)
+                        {
+                            // Add the default extension if no valid extension present
+                            fileName = Path.GetFileNameWithoutExtension(fileName) + _defaultExtension;
+                        }
+                    }
+                    
+                    SelectedPath = Path.Combine(CurrentDirectory, fileName);
+                    Logger.Log($"Saving file: {SelectedPath}");
+                    
+                    // Check if file exists and prompt for overwrite
+                    if (File.Exists(SelectedPath))
+                    {
+                        // In a real implementation, you'd want a confirmation dialog here
+                        // For now, we'll just allow overwriting
+                        Logger.Log($"File will be overwritten: {SelectedPath}");
+                    }
+                    
+                    IsOpen = false;
+                    return true;
+                }
+                return false;
+            }
+            else // OpenFile
             {
                 if (!string.IsNullOrEmpty(_selectedFileName))
                 {
                     SelectedPath = Path.Combine(CurrentDirectory, _selectedFileName);
-                    Logger.Log("Opening file " + SelectedPath);
+                    Logger.Log($"Opening file: {SelectedPath}");
                     if (File.Exists(SelectedPath))
                     {
                         IsOpen = false;
