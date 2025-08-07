@@ -7,6 +7,8 @@ using GeoscientistToolkit.Business;
 using GeoscientistToolkit.Data.VolumeData;
 using GeoscientistToolkit.Util;
 using System.Linq;
+using System.Collections.Concurrent;
+using GeoscientistToolkit.Data.CtImageStack;
 
 namespace GeoscientistToolkit.Data.CtImageStack.Segmentation
 {
@@ -15,557 +17,289 @@ namespace GeoscientistToolkit.Data.CtImageStack.Segmentation
         private readonly CtImageStackDataset _dataset;
         private readonly Stack<SegmentationAction> _undoStack = new Stack<SegmentationAction>();
         private readonly Stack<SegmentationAction> _redoStack = new Stack<SegmentationAction>();
-        
-        // Current tool
+
         private ISegmentationTool _currentTool;
         private byte _targetMaterialId = 1;
         private bool _isAddMode = true;
-        
-        // Selection cache for performance
-        private readonly Dictionary<(int z, int viewIndex), byte[]> _selectionCache = new Dictionary<(int, int), byte[]>();
-        private const int MAX_CACHE_SLICES = 10;
-        
-        // Track active selections across multiple slices for bulk operations
-        private readonly Dictionary<(int slice, int view), byte[]> _activeSelections = new Dictionary<(int, int), byte[]>();
-        
+        private Vector2 _lastMousePosition;
+
+        private readonly ConcurrentDictionary<(int slice, int view), byte[]> _activeSelections = new ConcurrentDictionary<(int, int), byte[]>();
+
         public event Action<byte[], int, int> SelectionPreviewChanged;
         public event Action SelectionCompleted;
-        
-        public ISegmentationTool CurrentTool 
-        { 
+
+        public ISegmentationTool CurrentTool
+        {
             get => _currentTool;
             set
             {
+                _currentTool?.CancelSelection();
                 _currentTool?.Dispose();
                 _currentTool = value;
                 _currentTool?.Initialize(this);
             }
         }
-        
-        public byte TargetMaterialId
-        {
-            get => _targetMaterialId;
-            set => _targetMaterialId = value;
-        }
-        
-        public bool IsAddMode
-        {
-            get => _isAddMode;
-            set => _isAddMode = value;
-        }
-        
-        public SegmentationManager(CtImageStackDataset dataset)
-        {
-            _dataset = dataset ?? throw new ArgumentNullException(nameof(dataset));
-        }
-        
+
+        public byte TargetMaterialId { get => _targetMaterialId; set => _targetMaterialId = value; }
+        public bool IsAddMode { get => _isAddMode; set => _isAddMode = value; }
+        public bool HasActiveSelections => !_activeSelections.IsEmpty;
+
+        public SegmentationManager(CtImageStackDataset dataset) { _dataset = dataset ?? throw new ArgumentNullException(nameof(dataset)); }
         public CtImageStackDataset GetDataset() => _dataset;
-        
-        public void StartSelection(Vector2 startPos, int sliceIndex, int viewIndex)
+
+        public void StartSelection(Vector2 pos, int slice, int view)
         {
-            _currentTool?.StartSelection(startPos, sliceIndex, viewIndex);
+            _lastMousePosition = pos;
+            _currentTool?.StartSelection(pos, slice, view);
         }
-        
-        public void UpdateSelection(Vector2 currentPos)
+
+        public void UpdateSelection(Vector2 pos)
         {
-            _currentTool?.UpdateSelection(currentPos);
+            _lastMousePosition = pos;
+            _currentTool?.UpdateSelection(pos);
         }
-        
+
+        public Vector2 GetLastMousePosition() => _lastMousePosition;
+
+        public void CancelSelection() => _currentTool?.CancelSelection();
+
         public void EndSelection()
         {
-            _currentTool?.EndSelection();
-        }
-        
-        public void CancelSelection()
-        {
-            _currentTool?.CancelSelection();
-            ClearSelectionCache();
-        }
-        
-        public async Task ApplySelectionAsync(byte[] selectionMask, int sliceIndex, int viewIndex)
-        {
-            if (selectionMask == null) return;
-            
-            // Store this selection for potential bulk operations
-            _activeSelections[(sliceIndex, viewIndex)] = (byte[])selectionMask.Clone();
-            
-            var action = new SegmentationAction
+            if (_currentTool == null || !_currentTool.HasActiveSelection)
             {
-                MaterialId = _targetMaterialId,
-                IsAddOperation = _isAddMode,
-                SliceIndex = sliceIndex,
-                ViewIndex = viewIndex,
-                SelectionMask = (byte[])selectionMask.Clone()
-            };
-            
-            // Store current state for undo
-            action.StoreCurrentState(_dataset, sliceIndex, viewIndex);
-            
-            // Apply the selection
-            await ApplyMaskToVolumeAsync(selectionMask, sliceIndex, viewIndex);
-            
-            // Add to undo stack
-            _undoStack.Push(action);
-            _redoStack.Clear();
-            
+                SelectionCompleted?.Invoke();
+                return;
+            }
+
+            _currentTool.EndSelection(); // Allow tool to finalize its mask (e.g., closing a lasso)
+
+            var selectionMask = _currentTool.GetSelectionMask();
+            int sliceIndex = _currentTool.SliceIndex;
+            int viewIndex = _currentTool.ViewIndex;
+
+            if (selectionMask != null)
+            {
+                CommitSelectionToCache(selectionMask, sliceIndex, viewIndex);
+            }
+
+            // After committing, the tool's specific job is done, so we cancel its active state.
+            _currentTool.CancelSelection();
             SelectionCompleted?.Invoke();
         }
-        
-        /// <summary>
-        /// Extracts the current selection and creates a new material from it
-        /// </summary>
-        public async Task ExtractSelectionToNewMaterialAsync()
+
+        public void CommitSelectionToCache(byte[] selectionMask, int sliceIndex, int viewIndex)
         {
-            if (_activeSelections.Count == 0) return;
-            
-            // Get next available material ID
-            byte newMaterialId = MaterialOperations.GetNextMaterialID(_dataset.Materials);
-            
-            // Create new material with a distinct color
-            var random = new Random();
-            var newMaterial = new Material(newMaterialId, $"Extracted Material {newMaterialId}", 
-                new Vector4((float)random.NextDouble(), (float)random.NextDouble(), (float)random.NextDouble(), 1.0f));
-            _dataset.Materials.Add(newMaterial);
-            
-            // Apply all active selections with the new material ID
-            byte originalTargetId = _targetMaterialId;
-            _targetMaterialId = newMaterialId;
-            
-            foreach (var selection in _activeSelections)
+            if (selectionMask == null) return;
+            var key = (sliceIndex, viewIndex);
+            var clonedMask = (byte[])selectionMask.Clone();
+
+            _activeSelections.AddOrUpdate(key, clonedMask, (k, existingMask) =>
             {
-                await ApplyMaskToVolumeAsync(selection.Value, selection.Key.slice, selection.Key.view);
-            }
-            
-            _targetMaterialId = originalTargetId;
-            _activeSelections.Clear();
-            
-            Logger.Log($"[SegmentationManager] Extracted selection to new material: {newMaterial.Name}");
+                // Merge new selection into existing one for the same slice
+                for (int i = 0; i < existingMask.Length; i++) { if (clonedMask[i] > 0) existingMask[i] = 255; }
+                return existingMask;
+            });
+
+            ProjectManager.Instance.NotifyDatasetDataChanged(_dataset); // Notify viewers to redraw with the new committed mask
         }
-        
-        /// <summary>
-        /// Merges one material into another
-        /// </summary>
+
+        public void CommitMultipleSelectionsToCache(Dictionary<(int slice, int view), byte[]> selections)
+        {
+            foreach (var sel in selections) { CommitSelectionToCache(sel.Value, sel.Key.slice, sel.Key.view); }
+        }
+
+        public async Task ApplyActiveSelectionsToVolumeAsync()
+        {
+            if (_activeSelections.IsEmpty) return;
+            var compoundAction = new CompoundSegmentationAction();
+            compoundAction.StoreMultipleStates(_dataset, _activeSelections.Keys.ToList());
+
+            var selectionsToApply = new Dictionary<(int slice, int view), byte[]>(_activeSelections);
+
+            foreach (var sel in selectionsToApply)
+            {
+                await ApplyMaskToVolumeAsync(sel.Value, sel.Key.slice, sel.Key.view);
+            }
+
+            compoundAction.CaptureAfterStates(_dataset);
+            _undoStack.Push(compoundAction);
+            _redoStack.Clear();
+            Logger.Log($"[SegmentationManager] Applied {selectionsToApply.Count} selections to material {TargetMaterialId}");
+
+            ClearActiveSelections();
+        }
+
         public async Task MergeMaterialsAsync(byte sourceMaterialId, byte targetMaterialId)
         {
             if (sourceMaterialId == targetMaterialId) return;
-            
+
             await Task.Run(() =>
             {
                 var labels = _dataset.LabelData;
-                int width = _dataset.Width;
-                int height = _dataset.Height;
-                int depth = _dataset.Depth;
-                
-                // Create a compound action for undo
+                int width = _dataset.Width, height = _dataset.Height, depth = _dataset.Depth;
                 var mergeAction = new CompoundSegmentationAction();
-                
+
+                var allSlices = Enumerable.Range(0, depth).Select(z => (z, 0)).ToList();
+                mergeAction.StoreMultipleStates(_dataset, allSlices);
+
                 Parallel.For(0, depth, z =>
                 {
                     var labelSlice = new byte[width * height];
                     labels.ReadSliceZ(z, labelSlice);
-                    
                     bool modified = false;
-                    var originalSlice = (byte[])labelSlice.Clone();
-                    
-                    for (int i = 0; i < labelSlice.Length; i++)
-                    {
-                        if (labelSlice[i] == sourceMaterialId)
-                        {
-                            labelSlice[i] = targetMaterialId;
-                            modified = true;
-                        }
-                    }
-                    
-                    if (modified)
-                    {
-                        labels.WriteSliceZ(z, labelSlice);
-                        
-                        // Store the change for undo
-                        lock (mergeAction)
-                        {
-                            mergeAction.AddSliceChange(z, originalSlice, labelSlice);
-                        }
-                    }
+                    for (int i = 0; i < labelSlice.Length; i++) { if (labelSlice[i] == sourceMaterialId) { labelSlice[i] = targetMaterialId; modified = true; } }
+                    if (modified) labels.WriteSliceZ(z, labelSlice);
                 });
-                
-                // Remove the source material from the list
-                var materialToRemove = _dataset.Materials.FirstOrDefault(m => m.ID == sourceMaterialId);
-                if (materialToRemove != null)
-                {
-                    _dataset.Materials.Remove(materialToRemove);
-                }
-                
-                // Add to undo stack
+
+                mergeAction.CaptureAfterStates(_dataset);
                 _undoStack.Push(mergeAction);
                 _redoStack.Clear();
-                
+
+                var materialToRemove = _dataset.Materials.FirstOrDefault(m => m.ID == sourceMaterialId);
+                if (materialToRemove != null) _dataset.Materials.Remove(materialToRemove);
+
                 ProjectManager.Instance.NotifyDatasetDataChanged(_dataset);
             });
-            
             Logger.Log($"[SegmentationManager] Merged material {sourceMaterialId} into {targetMaterialId}");
         }
-        
-        /// <summary>
-        /// Erases all active selection masks from their respective slices
-        /// </summary>
-        public async Task EraseActiveSelectionsAsync()
-        {
-            if (_activeSelections.Count == 0)
-            {
-                Logger.Log("[SegmentationManager] No active selections to erase");
-                return;
-            }
-            
-            // Temporarily switch to remove mode
-            bool wasAddMode = _isAddMode;
-            _isAddMode = false;
-            
-            foreach (var selection in _activeSelections)
-            {
-                await ApplyMaskToVolumeAsync(selection.Value, selection.Key.slice, selection.Key.view);
-            }
-            
-            _isAddMode = wasAddMode;
-            _activeSelections.Clear();
-            
-            Logger.Log($"[SegmentationManager] Erased active selections");
-        }
-        
-        /// <summary>
-        /// Clears all active selections without applying them
-        /// </summary>
+
         public void ClearActiveSelections()
         {
+            if (_activeSelections.IsEmpty) return;
             _activeSelections.Clear();
+            ProjectManager.Instance.NotifyDatasetDataChanged(_dataset);
             Logger.Log("[SegmentationManager] Cleared active selections");
         }
-        
-        private async Task ApplyMaskToVolumeAsync(byte[] mask, int sliceIndex, int viewIndex)
+
+        private async Task ApplyMaskToVolumeAsync(byte[] mask, int slice, int view)
         {
-            await Task.Run(() =>
-            {
-                var labels = _dataset.LabelData;
-                
-                switch (viewIndex)
+            await Task.Run(() => {
+                switch (view)
                 {
-                    case 0: // XY view
-                        ApplyMaskToXYSlice(mask, sliceIndex);
-                        break;
-                    case 1: // XZ view
-                        ApplyMaskToXZSlice(mask, sliceIndex);
-                        break;
-                    case 2: // YZ view
-                        ApplyMaskToYZSlice(mask, sliceIndex);
-                        break;
+                    case 0: ApplyMaskToXYSlice(mask, slice); break;
+                    case 1: ApplyMaskToXZSlice(mask, slice); break;
+                    case 2: ApplyMaskToYZSlice(mask, slice); break;
                 }
-                
-                ProjectManager.Instance.NotifyDatasetDataChanged(_dataset);
             });
         }
-        
+
         private void ApplyMaskToXYSlice(byte[] mask, int z)
         {
-            var labelSlice = new byte[_dataset.Width * _dataset.Height];
-            _dataset.LabelData.ReadSliceZ(z, labelSlice);
-            
-            Parallel.For(0, mask.Length, i =>
-            {
-                if (mask[i] > 0)
-                {
-                    labelSlice[i] = _isAddMode ? _targetMaterialId : (byte)0;
-                }
-            });
-            
-            _dataset.LabelData.WriteSliceZ(z, labelSlice);
+            var s = new byte[_dataset.Width * _dataset.Height];
+            _dataset.LabelData.ReadSliceZ(z, s);
+            for (int i = 0; i < mask.Length; i++) { if (mask[i] > 0) s[i] = _isAddMode ? _targetMaterialId : (byte)0; }
+            _dataset.LabelData.WriteSliceZ(z, s);
         }
-        
+
         private void ApplyMaskToXZSlice(byte[] mask, int y)
         {
-            int width = _dataset.Width;
-            int depth = _dataset.Depth;
-            
-            Parallel.For(0, depth, z =>
-            {
-                for (int x = 0; x < width; x++)
-                {
-                    int maskIndex = z * width + x;
-                    if (mask[maskIndex] > 0)
-                    {
-                        _dataset.LabelData[x, y, z] = _isAddMode ? _targetMaterialId : (byte)0;
-                    }
-                }
-            });
+            for (int z = 0; z < _dataset.Depth; z++) for (int x = 0; x < _dataset.Width; x++)
+                    if (mask[z * _dataset.Width + x] > 0) _dataset.LabelData[x, y, z] = _isAddMode ? _targetMaterialId : (byte)0;
         }
-        
+
         private void ApplyMaskToYZSlice(byte[] mask, int x)
         {
-            int height = _dataset.Height;
-            int depth = _dataset.Depth;
-            
-            Parallel.For(0, depth, z =>
-            {
-                for (int y = 0; y < height; y++)
-                {
-                    int maskIndex = z * height + y;
-                    if (mask[maskIndex] > 0)
-                    {
-                        _dataset.LabelData[x, y, z] = _isAddMode ? _targetMaterialId : (byte)0;
-                    }
-                }
-            });
+            for (int z = 0; z < _dataset.Depth; z++) for (int y = 0; y < _dataset.Height; y++)
+                    if (mask[z * _dataset.Height + y] > 0) _dataset.LabelData[x, y, z] = _isAddMode ? _targetMaterialId : (byte)0;
         }
-        
-        public void Undo()
-        {
-            if (_undoStack.Count == 0) return;
-            
-            var action = _undoStack.Pop();
-            action.Restore(_dataset);
-            _redoStack.Push(action);
-            
-            ProjectManager.Instance.NotifyDatasetDataChanged(_dataset);
-        }
-        
-        public void Redo()
-        {
-            if (_redoStack.Count == 0) return;
-            
-            var action = _redoStack.Pop();
-            
-            if (action is SegmentationAction simpleAction)
-            {
-                simpleAction.StoreCurrentState(_dataset, simpleAction.SliceIndex, simpleAction.ViewIndex);
-                ApplyMaskToVolumeAsync(simpleAction.SelectionMask, simpleAction.SliceIndex, simpleAction.ViewIndex).Wait();
-            }
-            else if (action is CompoundSegmentationAction)
-            {
-                action.Restore(_dataset);
-            }
-            
-            _undoStack.Push(action);
-        }
-        
-        public void NotifyPreviewChanged(byte[] previewMask, int sliceIndex, int viewIndex)
-        {
-            SelectionPreviewChanged?.Invoke(previewMask, sliceIndex, viewIndex);
-        }
-        
-        public (int width, int height) GetSliceDimensions(int viewIndex)
-        {
-            return viewIndex switch
-            {
-                0 => (_dataset.Width, _dataset.Height),
-                1 => (_dataset.Width, _dataset.Depth),
-                2 => (_dataset.Height, _dataset.Depth),
-                _ => (_dataset.Width, _dataset.Height)
-            };
-        }
-        
-        public byte[] GetGrayscaleSlice(int sliceIndex, int viewIndex)
-        {
-            var key = (sliceIndex, viewIndex);
-            if (_selectionCache.TryGetValue(key, out var cached))
-                return cached;
-            
-            var (width, height) = GetSliceDimensions(viewIndex);
-            var slice = new byte[width * height];
-            
-            switch (viewIndex)
-            {
-                case 0: // XY
-                    _dataset.VolumeData.ReadSliceZ(sliceIndex, slice);
-                    break;
-                case 1: // XZ
-                    ExtractXZSlice(slice, sliceIndex);
-                    break;
-                case 2: // YZ
-                    ExtractYZSlice(slice, sliceIndex);
-                    break;
-            }
-            
-            // Cache management
-            if (_selectionCache.Count >= MAX_CACHE_SLICES)
-            {
-                var oldestKey = _selectionCache.Keys.First();
-                _selectionCache.Remove(oldestKey);
-            }
-            
-            _selectionCache[key] = slice;
-            return slice;
-        }
-        
-        private void ExtractXZSlice(byte[] buffer, int y)
-        {
-            int width = _dataset.Width;
-            int depth = _dataset.Depth;
-            
-            Parallel.For(0, depth, z =>
-            {
-                for (int x = 0; x < width; x++)
-                {
-                    buffer[z * width + x] = _dataset.VolumeData[x, y, z];
-                }
-            });
-        }
-        
-        private void ExtractYZSlice(byte[] buffer, int x)
-        {
-            int height = _dataset.Height;
-            int depth = _dataset.Depth;
-            
-            Parallel.For(0, depth, z =>
-            {
-                for (int y = 0; y < height; y++)
-                {
-                    buffer[z * height + y] = _dataset.VolumeData[x, y, z];
-                }
-            });
-        }
-        
-        private void ClearSelectionCache()
-        {
-            _selectionCache.Clear();
-        }
-        
-        public void Dispose()
-        {
-            _currentTool?.Dispose();
-            ClearSelectionCache();
-            ClearActiveSelections();
-        }
+
+        public void Undo() { if (_undoStack.Any()) { var a = _undoStack.Pop(); a.Restore(_dataset); _redoStack.Push(a); ProjectManager.Instance.NotifyDatasetDataChanged(_dataset); } }
+        public void Redo() { if (_redoStack.Any()) { var a = _redoStack.Pop(); a.ReApply(_dataset); _undoStack.Push(a); ProjectManager.Instance.NotifyDatasetDataChanged(_dataset); } }
+        public byte[] GetActiveSelectionMask(int slice, int view) { _activeSelections.TryGetValue((slice, view), out var m); return m; }
+        public void NotifyPreviewChanged(byte[] mask, int slice, int view) => SelectionPreviewChanged?.Invoke(mask, slice, view);
+        public (int w, int h) GetSliceDimensions(int v) => v switch { 0 => (_dataset.Width, _dataset.Height), 1 => (_dataset.Width, _dataset.Depth), 2 => (_dataset.Height, _dataset.Depth), _ => (0, 0) };
+        public byte[] GetGrayscaleSlice(int s, int v) { var (w, h) = GetSliceDimensions(v); var b = new byte[w * h]; switch (v) { case 0: _dataset.VolumeData.ReadSliceZ(s, b); break; case 1: ExtractXZSlice(b, s); break; case 2: ExtractYZSlice(b, s); break; } return b; }
+        private void ExtractXZSlice(byte[] b, int y) { for (int z = 0; z < _dataset.Depth; z++) for (int x = 0; x < _dataset.Width; x++) b[z * _dataset.Width + x] = _dataset.VolumeData[x, y, z]; }
+        private void ExtractYZSlice(byte[] b, int x) { for (int z = 0; z < _dataset.Depth; z++) for (int y = 0; y < _dataset.Height; y++) b[z * _dataset.Height + y] = _dataset.VolumeData[x, y, z]; }
+        public void Dispose() { _currentTool?.Dispose(); _activeSelections.Clear(); }
     }
-    
-    public class SegmentationAction
+
+    public abstract class SegmentationAction
     {
-        public byte MaterialId { get; set; }
-        public bool IsAddOperation { get; set; }
-        public int SliceIndex { get; set; }
-        public int ViewIndex { get; set; }
-        public byte[] SelectionMask { get; set; }
-        public byte[] PreviousState { get; set; }
-        
-        public virtual void StoreCurrentState(CtImageStackDataset dataset, int sliceIndex, int viewIndex)
-        {
-            var (width, height) = GetDimensions(dataset, viewIndex);
-            PreviousState = new byte[width * height];
-            
-            switch (viewIndex)
-            {
-                case 0: // XY
-                    dataset.LabelData.ReadSliceZ(sliceIndex, PreviousState);
-                    break;
-                case 1: // XZ
-                    ReadXZSlice(dataset, sliceIndex, PreviousState);
-                    break;
-                case 2: // YZ
-                    ReadYZSlice(dataset, sliceIndex, PreviousState);
-                    break;
-            }
-        }
-        
-        public virtual void Restore(CtImageStackDataset dataset)
-        {
-            if (PreviousState == null) return;
-            
-            switch (ViewIndex)
-            {
-                case 0: // XY
-                    dataset.LabelData.WriteSliceZ(SliceIndex, PreviousState);
-                    break;
-                case 1: // XZ
-                    WriteXZSlice(dataset, SliceIndex, PreviousState);
-                    break;
-                case 2: // YZ
-                    WriteYZSlice(dataset, SliceIndex, PreviousState);
-                    break;
-            }
-        }
-        
-        protected (int width, int height) GetDimensions(CtImageStackDataset dataset, int viewIndex)
-        {
-            return viewIndex switch
-            {
-                0 => (dataset.Width, dataset.Height),
-                1 => (dataset.Width, dataset.Depth),
-                2 => (dataset.Height, dataset.Depth),
-                _ => (dataset.Width, dataset.Height)
-            };
-        }
-        
-        private void ReadXZSlice(CtImageStackDataset dataset, int y, byte[] buffer)
-        {
-            int width = dataset.Width;
-            int depth = dataset.Depth;
-            
-            for (int z = 0; z < depth; z++)
-            {
-                for (int x = 0; x < width; x++)
-                {
-                    buffer[z * width + x] = dataset.LabelData[x, y, z];
-                }
-            }
-        }
-        
-        private void WriteXZSlice(CtImageStackDataset dataset, int y, byte[] buffer)
-        {
-            int width = dataset.Width;
-            int depth = dataset.Depth;
-            
-            for (int z = 0; z < depth; z++)
-            {
-                for (int x = 0; x < width; x++)
-                {
-                    dataset.LabelData[x, y, z] = buffer[z * width + x];
-                }
-            }
-        }
-        
-        private void ReadYZSlice(CtImageStackDataset dataset, int x, byte[] buffer)
-        {
-            int height = dataset.Height;
-            int depth = dataset.Depth;
-            
-            for (int z = 0; z < depth; z++)
-            {
-                for (int y = 0; y < height; y++)
-                {
-                    buffer[z * height + y] = dataset.LabelData[x, y, z];
-                }
-            }
-        }
-        
-        private void WriteYZSlice(CtImageStackDataset dataset, int x, byte[] buffer)
-        {
-            int height = dataset.Height;
-            int depth = dataset.Depth;
-            
-            for (int z = 0; z < depth; z++)
-            {
-                for (int y = 0; y < height; y++)
-                {
-                    dataset.LabelData[x, y, z] = buffer[z * height + y];
-                }
-            }
-        }
+        public abstract void Restore(CtImageStackDataset dataset);
+        public abstract void ReApply(CtImageStackDataset dataset);
     }
-    
-    /// <summary>
-    /// Represents a compound action that affects multiple slices (like merge)
-    /// </summary>
+
     public class CompoundSegmentationAction : SegmentationAction
     {
-        private readonly List<(int slice, byte[] before, byte[] after)> _sliceChanges = new List<(int, byte[], byte[])>();
-        
-        public void AddSliceChange(int slice, byte[] before, byte[] after)
+        private List<(int slice, int view, byte[] before, byte[] after)> _sliceChanges = new List<(int, int, byte[], byte[])>();
+
+        public void StoreMultipleStates(CtImageStackDataset dataset, List<(int slice, int view)> keys)
         {
-            _sliceChanges.Add((slice, before, after));
+            _sliceChanges = keys.Select(key =>
+            {
+                var (width, height) = GetDimensions(dataset, key.view);
+                var beforeState = new byte[width * height];
+                ReadSlice(dataset, key.slice, key.view, beforeState);
+                return (key.slice, key.view, beforeState, (byte[])null);
+            }).ToList();
         }
-        
+
+        public void CaptureAfterStates(CtImageStackDataset dataset)
+        {
+            for (int i = 0; i < _sliceChanges.Count; i++)
+            {
+                var change = _sliceChanges[i];
+                var (width, height) = GetDimensions(dataset, change.view);
+                var afterState = new byte[width * height];
+                ReadSlice(dataset, change.slice, change.view, afterState);
+                _sliceChanges[i] = (change.slice, change.view, change.before, afterState);
+            }
+        }
+
         public override void Restore(CtImageStackDataset dataset)
         {
-            foreach (var (slice, before, _) in _sliceChanges)
+            foreach (var (slice, view, before, _) in _sliceChanges)
             {
-                dataset.LabelData.WriteSliceZ(slice, before);
+                if (before != null) WriteSlice(dataset, slice, view, before);
+            }
+        }
+
+        public override void ReApply(CtImageStackDataset dataset)
+        {
+            foreach (var (slice, view, _, after) in _sliceChanges)
+            {
+                if (after != null) WriteSlice(dataset, slice, view, after);
+            }
+        }
+
+        private (int width, int height) GetDimensions(CtImageStackDataset d, int v) => v switch
+        {
+            0 => (d.Width, d.Height),
+            1 => (d.Width, d.Depth),
+            2 => (d.Height, d.Depth),
+            _ => (0, 0)
+        };
+
+        private void ReadSlice(CtImageStackDataset dataset, int sliceIndex, int viewIndex, byte[] buffer)
+        {
+            switch (viewIndex)
+            {
+                case 0: dataset.LabelData.ReadSliceZ(sliceIndex, buffer); break;
+                case 1:
+                    for (int z = 0; z < dataset.Depth; z++) for (int x = 0; x < dataset.Width; x++)
+                            buffer[z * dataset.Width + x] = dataset.LabelData[x, sliceIndex, z];
+                    break;
+                case 2:
+                    for (int z = 0; z < dataset.Depth; z++) for (int y = 0; y < dataset.Height; y++)
+                            buffer[z * dataset.Height + y] = dataset.LabelData[sliceIndex, y, z];
+                    break;
+            }
+        }
+
+        private void WriteSlice(CtImageStackDataset dataset, int sliceIndex, int viewIndex, byte[] buffer)
+        {
+            switch (viewIndex)
+            {
+                case 0: dataset.LabelData.WriteSliceZ(sliceIndex, buffer); break;
+                case 1:
+                    for (int z = 0; z < dataset.Depth; z++) for (int x = 0; x < dataset.Width; x++)
+                            dataset.LabelData[x, sliceIndex, z] = buffer[z * dataset.Width + x];
+                    break;
+                case 2:
+                    for (int z = 0; z < dataset.Depth; z++) for (int y = 0; y < dataset.Height; y++)
+                            dataset.LabelData[sliceIndex, y, z] = buffer[z * dataset.Height + y];
+                    break;
             }
         }
     }

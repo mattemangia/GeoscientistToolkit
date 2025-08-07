@@ -108,6 +108,18 @@ namespace GeoscientistToolkit.Business
                 return;
             }
 
+            // --- MODIFIED: Save associated binary data and materials ---
+            Logger.Log("Saving underlying binary data for all datasets...");
+            foreach (var dataset in LoadedDatasets)
+            {
+                if (dataset is CtImageStackDataset ctDataset)
+                {
+                    ctDataset.SaveLabelData();
+                    ctDataset.SaveMaterials();
+                }
+            }
+            // --- END MODIFICATION ---
+
             ProjectSerializer.SaveProject(this, path);
             ProjectPath = path;
             ProjectName = Path.GetFileNameWithoutExtension(path);
@@ -116,7 +128,6 @@ namespace GeoscientistToolkit.Business
             UpdateRecentProjects(path);
         }
 
-        // --- BACKUPPROJECT METHOD RESTORED ---
         public void BackupProject()
         {
             var settings = SettingsManager.Instance.Settings.Backup;
@@ -174,7 +185,6 @@ namespace GeoscientistToolkit.Business
                 Logger.LogError($"Failed to create project backup: {ex.Message}");
             }
         }
-        // --- END OF RESTORED METHOD ---
 
         public void LoadProject(string path)
         {
@@ -209,6 +219,20 @@ namespace GeoscientistToolkit.Business
                     if (dataset != null)
                     {
                         createdDatasets[dataset.FilePath] = dataset;
+
+                        // FIX: Load the dataset data (including labels) if it's not missing
+                        if (!dataset.IsMissing)
+                        {
+                            try
+                            {
+                                dataset.Load();
+                                Logger.Log($"Loaded data for dataset: {dataset.Name}");
+                            }
+                            catch (Exception ex)
+                            {
+                                Logger.LogError($"Failed to load data for dataset '{dataset.Name}': {ex.Message}");
+                            }
+                        }
                     }
                 }
             }
@@ -220,6 +244,20 @@ namespace GeoscientistToolkit.Business
                 if (dataset != null)
                 {
                     createdDatasets[sDto.FilePath] = dataset;
+
+                    // FIX: Load streaming dataset if not missing
+                    if (!dataset.IsMissing)
+                    {
+                        try
+                        {
+                            dataset.Load();
+                            Logger.Log($"Loaded data for streaming dataset: {dataset.Name}");
+                        }
+                        catch (Exception ex)
+                        {
+                            Logger.LogError($"Failed to load data for streaming dataset '{dataset.Name}': {ex.Message}");
+                        }
+                    }
                 }
             }
 
@@ -230,7 +268,6 @@ namespace GeoscientistToolkit.Business
             UpdateRecentProjects(path);
         }
 
-        // --- MODIFIED ---
         private Dataset CreateDatasetFromDTO(DatasetDTO dto, IReadOnlyDictionary<string, Dataset> partners)
         {
             switch (dto)
@@ -284,7 +321,7 @@ namespace GeoscientistToolkit.Business
                         IsMissing = !Directory.Exists(ctDto.FilePath)
                     };
 
-                    // --- DESERIALIZATION LOGIC FOR MATERIALS ---
+                    // Deserialize materials
                     if (ctDto.Materials != null && ctDto.Materials.Count > 0)
                     {
                         // Clear the default materials and load from the file to ensure a perfect state restoration.
@@ -301,10 +338,14 @@ namespace GeoscientistToolkit.Business
                             };
                             ctDataset.Materials.Add(material);
                         }
+                        Logger.Log($"Restored {ctDataset.Materials.Count} materials for dataset: {ctDto.Name}");
                     }
-                    // --- END OF DESERIALIZATION LOGIC ---
 
-                    if (ctDataset.IsMissing) Logger.LogWarning($"Source folder not found for dataset: {ctDto.Name} at {ctDto.FilePath}");
+                    if (ctDataset.IsMissing)
+                    {
+                        Logger.LogWarning($"Source folder not found for dataset: {ctDto.Name} at {ctDto.FilePath}");
+                    }
+
                     return ctDataset;
 
                 case ImageDatasetDTO imgDto:
@@ -314,7 +355,10 @@ namespace GeoscientistToolkit.Business
                         Unit = imgDto.Unit,
                         IsMissing = !File.Exists(imgDto.FilePath)
                     };
-                    if (imgDataset.IsMissing) Logger.LogWarning($"Source file not found for dataset: {imgDataset.Name} at {imgDataset.FilePath}");
+                    if (imgDataset.IsMissing)
+                    {
+                        Logger.LogWarning($"Source file not found for dataset: {imgDataset.Name} at {imgDataset.FilePath}");
+                    }
                     return imgDataset;
 
                 case DatasetGroupDTO groupDto:
