@@ -1,4 +1,4 @@
-// GeoscientistToolkit/UI/ImportDataModal.cs
+// Updated GeoscientistToolkit/UI/ImportDataModal.cs
 using System;
 using System.IO;
 using System.Linq;
@@ -9,7 +9,6 @@ using GeoscientistToolkit.Data;
 using GeoscientistToolkit.Data.Image;
 using GeoscientistToolkit.Data.CtImageStack;
 using GeoscientistToolkit.Data.VolumeData;
-using GeoscientistToolkit.Data.Mesh3D;
 using GeoscientistToolkit.Data.Mesh3D;
 using GeoscientistToolkit.UI.Utils;
 using GeoscientistToolkit.Util;
@@ -25,7 +24,8 @@ namespace GeoscientistToolkit.UI
         private readonly ImGuiFileDialog _folderDialog;
         private readonly ImGuiFileDialog _fileDialog;
         private readonly ImGuiFileDialog _ctFileDialog;
-        private readonly ImGuiFileDialog _mesh3DDialog; // New dialog for 3D models
+        private readonly ImGuiFileDialog _mesh3DDialog;
+        private readonly ImGuiFileDialog _labeledVolumeDialog;
         private readonly ImageStackOrganizerDialog _organizerDialog;
 
         private int _selectedDatasetTypeIndex = 0;
@@ -34,7 +34,8 @@ namespace GeoscientistToolkit.UI
             "Image Folder (Group)",
             "CT Image Stack (Optimized for 3D Streaming)",
             "CT Image Stack (Legacy for 2D Editing)",
-            "3D Object (OBJ/STL)"
+            "3D Object (OBJ/STL)",
+            "Labeled Volume Stack (Color-coded Materials)"
         };
 
         // Single image properties
@@ -62,6 +63,13 @@ namespace GeoscientistToolkit.UI
         private float _mesh3DScale = 1.0f;
         private Mesh3DDataset _pendingMesh3DDataset = null;
 
+        // Labeled Volume properties
+        private string _labeledVolumePath = "";
+        private bool _labeledIsMultiPageTiff = false;
+        private float _labeledPixelSize = 1.0f;
+        private int _labeledPixelSizeUnit = 0;
+        private CtImageStackDataset _pendingLabeledDataset = null;
+
         private float _progress;
         private string _statusText = "";
         private Task _importTask;
@@ -72,6 +80,7 @@ namespace GeoscientistToolkit.UI
             _fileDialog = new ImGuiFileDialog("ImportFileDialog", FileDialogType.OpenFile, "Select Image File");
             _ctFileDialog = new ImGuiFileDialog("ImportCTFileDialog", FileDialogType.OpenFile, "Select Multi-Page TIFF File");
             _mesh3DDialog = new ImGuiFileDialog("Import3DDialog", FileDialogType.OpenFile, "Select 3D Model File");
+            _labeledVolumeDialog = new ImGuiFileDialog("ImportLabeledDialog", FileDialogType.OpenFile, "Select Labeled Volume File");
             _organizerDialog = new ImageStackOrganizerDialog();
         }
 
@@ -109,6 +118,11 @@ namespace GeoscientistToolkit.UI
             {
                 if (_selectedDatasetTypeIndex == 1) // Image Folder
                     _imageFolderPath = _folderDialog.SelectedPath;
+                else if (_selectedDatasetTypeIndex == 5) // Labeled Volume
+                {
+                    _labeledVolumePath = _folderDialog.SelectedPath;
+                    _labeledIsMultiPageTiff = false;
+                }
                 else // CT Stack
                 {
                     _ctPath = _folderDialog.SelectedPath;
@@ -122,6 +136,11 @@ namespace GeoscientistToolkit.UI
                 _ctIsMultiPageTiff = true;
             }
             if (_mesh3DDialog.Submit()) _mesh3DPath = _mesh3DDialog.SelectedPath;
+            if (_labeledVolumeDialog.Submit())
+            {
+                _labeledVolumePath = _labeledVolumeDialog.SelectedPath;
+                _labeledIsMultiPageTiff = true;
+            }
 
             ImGui.SetNextWindowSize(new Vector2(600, 550), ImGuiCond.FirstUseEver);
             var center = ImGui.GetMainViewport().GetCenter();
@@ -166,6 +185,9 @@ namespace GeoscientistToolkit.UI
                 case 4: // 3D Object
                     Draw3DObjectOptions();
                     break;
+                case 5: // Labeled Volume Stack
+                    DrawLabeledVolumeOptions();
+                    break;
             }
 
             ImGui.SetCursorPosY(ImGui.GetWindowHeight() - ImGui.GetFrameHeightWithSpacing() * 1.5f);
@@ -173,61 +195,122 @@ namespace GeoscientistToolkit.UI
             DrawButtons();
         }
 
-        private void Draw3DObjectOptions()
+        private void DrawLabeledVolumeOptions()
         {
-            ImGui.Text("3D Model File:");
-            ImGui.InputText("##3DPath", ref _mesh3DPath, 260, ImGuiInputTextFlags.ReadOnly);
-            ImGui.SameLine();
-            if (ImGui.Button("Browse...##3DFile"))
+            ImGui.TextWrapped("Import a stack of labeled images where each unique color represents a different material. " +
+                            "This will automatically create materials and generate both label and grayscale volumes.");
+            
+            ImGui.Spacing();
+            ImGui.Separator();
+            ImGui.Spacing();
+            
+            ImGui.Text("Labeled Stack Source:");
+            
+            bool isFolderMode = !_labeledIsMultiPageTiff;
+            if (ImGui.RadioButton("Image Folder##Labeled", isFolderMode))
             {
-                // Set allowed extensions for 3D model files
-                string[] modelExtensions = { ".obj", ".stl" };
-                _mesh3DDialog.Open(null, modelExtensions);
+                _labeledIsMultiPageTiff = false;
+                _labeledVolumePath = "";
+            }
+            ImGui.SameLine();
+            if (ImGui.RadioButton("Multi-Page TIFF File##Labeled", !isFolderMode))
+            {
+                _labeledIsMultiPageTiff = true;
+                _labeledVolumePath = "";
             }
 
             ImGui.Spacing();
-            ImGui.Text("Scale Factor:");
-            ImGui.SetNextItemWidth(150);
-            ImGui.InputFloat("##3DScale", ref _mesh3DScale, 0.1f, 1.0f, "%.3f");
-            if (ImGui.IsItemHovered())
+
+            if (_labeledIsMultiPageTiff)
             {
-                ImGui.SetTooltip("Scale factor to apply when loading the model. 1.0 = original size.");
+                ImGui.Text("TIFF File:");
+                ImGui.InputText("##LabeledFilePath", ref _labeledVolumePath, 260, ImGuiInputTextFlags.ReadOnly);
+                ImGui.SameLine();
+                if (ImGui.Button("Browse...##LabeledFile"))
+                {
+                    string[] tiffExtensions = { ".tif", ".tiff" };
+                    _labeledVolumeDialog.Open(null, tiffExtensions);
+                }
+            }
+            else
+            {
+                ImGui.Text("Image Folder:");
+                ImGui.InputText("##LabeledFolderPath", ref _labeledVolumePath, 260, ImGuiInputTextFlags.ReadOnly);
+                ImGui.SameLine();
+                if (ImGui.Button("Browse...##LabeledFolder"))
+                {
+                    _folderDialog.Open();
+                }
             }
 
-            // Show model information if available
-            if (!string.IsNullOrEmpty(_mesh3DPath) && File.Exists(_mesh3DPath))
+            ImGui.Spacing();
+            ImGui.Text("Voxel Size:");
+            ImGui.SetNextItemWidth(150);
+            ImGui.InputFloat("##PixelSizeLabeled", ref _labeledPixelSize, 0.1f, 1.0f, "%.3f");
+            ImGui.SameLine();
+            ImGui.SetNextItemWidth(80);
+            ImGui.Combo("##UnitLabeled", ref _labeledPixelSizeUnit, _pixelSizeUnits, _pixelSizeUnits.Length);
+
+            if (ImGui.IsItemHovered())
+            {
+                ImGui.SetTooltip("Physical size of each voxel in the volume.");
+            }
+
+            if (!string.IsNullOrEmpty(_labeledVolumePath))
             {
                 ImGui.Spacing();
                 ImGui.Separator();
                 ImGui.Spacing();
 
-                try
+                if (_labeledIsMultiPageTiff && File.Exists(_labeledVolumePath))
                 {
-                    var fileInfo = new FileInfo(_mesh3DPath);
-                    string extension = fileInfo.Extension.ToLower();
-                    
-                    ImGui.Text("Model Information:");
-                    ImGui.BulletText($"File: {Path.GetFileName(_mesh3DPath)}");
-                    ImGui.BulletText($"Format: {extension.ToUpper().TrimStart('.')}");
-                    ImGui.BulletText($"Size: {fileInfo.Length / 1024} KB");
-                    
-                    // Try to get basic info about the model
-                    if (extension == ".obj" || extension == ".stl")
+                    try
                     {
-                        ImGui.BulletText("Supported format ✓");
-                        
-                        // For ASCII files, we could do a quick scan to count vertices/faces
-                        // but for now just indicate it's ready to import
-                        ImGui.TextColored(new Vector4(0, 1, 0, 1), "Ready to import");
+                        if (ImageLoader.IsMultiPageTiff(_labeledVolumePath))
+                        {
+                            int pageCount = ImageLoader.GetTiffPageCount(_labeledVolumePath);
+                            var info = ImageLoader.LoadImageInfo(_labeledVolumePath);
+                            long fileSize = new FileInfo(_labeledVolumePath).Length;
+                            
+                            ImGui.Text("Multi-Page TIFF Information:");
+                            ImGui.BulletText($"Pages (Slices): {pageCount}");
+                            ImGui.BulletText($"Resolution: {info.Width} x {info.Height}");
+                            ImGui.BulletText($"Total Size: {fileSize / (1024 * 1024)} MB");
+                            ImGui.BulletText($"File: {Path.GetFileName(_labeledVolumePath)}");
+                            
+                            ImGui.Spacing();
+                            ImGui.TextColored(new Vector4(0.0f, 1.0f, 0.5f, 1.0f), 
+                                "✓ Ready to import. Unique colors will be identified as materials.");
+                        }
+                        else
+                        {
+                            ImGui.TextColored(new Vector4(1.0f, 0.8f, 0.0f, 1.0f), 
+                                "Warning: Selected TIFF file contains only one page.");
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        ImGui.TextColored(new Vector4(1, 0, 0, 1), $"Error reading TIFF: {ex.Message}");
+                    }
+                }
+                else if (!_labeledIsMultiPageTiff && Directory.Exists(_labeledVolumePath))
+                {
+                    var (count, totalSize) = CountImagesInFolder(_labeledVolumePath);
+                    ImGui.Text("Folder Information:");
+                    ImGui.BulletText($"Image Count: {count}");
+                    ImGui.BulletText($"Total Size: {totalSize / (1024 * 1024)} MB");
+                    
+                    if (count > 0)
+                    {
+                        ImGui.Spacing();
+                        ImGui.TextColored(new Vector4(0.0f, 1.0f, 0.5f, 1.0f), 
+                            "✓ Ready to import. Unique colors will be identified as materials.");
                     }
                     else
                     {
-                        ImGui.TextColored(new Vector4(1, 0, 0, 1), "Unsupported format");
+                        ImGui.TextColored(new Vector4(1.0f, 0.8f, 0.0f, 1.0f), 
+                            "Warning: No supported image files found in this folder.");
                     }
-                }
-                catch (Exception ex)
-                {
-                    ImGui.TextColored(new Vector4(1, 0, 0, 1), $"Error reading file: {ex.Message}");
                 }
             }
         }
@@ -417,6 +500,59 @@ namespace GeoscientistToolkit.UI
             }
         }
 
+        private void Draw3DObjectOptions()
+        {
+            ImGui.Text("3D Model File:");
+            ImGui.InputText("##3DPath", ref _mesh3DPath, 260, ImGuiInputTextFlags.ReadOnly);
+            ImGui.SameLine();
+            if (ImGui.Button("Browse...##3DFile"))
+            {
+                string[] modelExtensions = { ".obj", ".stl" };
+                _mesh3DDialog.Open(null, modelExtensions);
+            }
+
+            ImGui.Spacing();
+            ImGui.Text("Scale Factor:");
+            ImGui.SetNextItemWidth(150);
+            ImGui.InputFloat("##3DScale", ref _mesh3DScale, 0.1f, 1.0f, "%.3f");
+            if (ImGui.IsItemHovered())
+            {
+                ImGui.SetTooltip("Scale factor to apply when loading the model. 1.0 = original size.");
+            }
+
+            if (!string.IsNullOrEmpty(_mesh3DPath) && File.Exists(_mesh3DPath))
+            {
+                ImGui.Spacing();
+                ImGui.Separator();
+                ImGui.Spacing();
+
+                try
+                {
+                    var fileInfo = new FileInfo(_mesh3DPath);
+                    string extension = fileInfo.Extension.ToLower();
+                    
+                    ImGui.Text("Model Information:");
+                    ImGui.BulletText($"File: {Path.GetFileName(_mesh3DPath)}");
+                    ImGui.BulletText($"Format: {extension.ToUpper().TrimStart('.')}");
+                    ImGui.BulletText($"Size: {fileInfo.Length / 1024} KB");
+                    
+                    if (extension == ".obj" || extension == ".stl")
+                    {
+                        ImGui.BulletText("Supported format ✓");
+                        ImGui.TextColored(new Vector4(0, 1, 0, 1), "Ready to import");
+                    }
+                    else
+                    {
+                        ImGui.TextColored(new Vector4(1, 0, 0, 1), "Unsupported format");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    ImGui.TextColored(new Vector4(1, 0, 0, 1), $"Error reading file: {ex.Message}");
+                }
+            }
+        }
+
         private void DrawButtons()
         {
             bool canImport = false;
@@ -443,6 +579,17 @@ namespace GeoscientistToolkit.UI
                     break;
                 case 4: // 3D Object
                     canImport = !string.IsNullOrEmpty(_mesh3DPath) && File.Exists(_mesh3DPath);
+                    break;
+                case 5: // Labeled Volume
+                    if (_labeledIsMultiPageTiff)
+                    {
+                        canImport = !string.IsNullOrEmpty(_labeledVolumePath) && File.Exists(_labeledVolumePath) && 
+                                   ImageLoader.IsMultiPageTiff(_labeledVolumePath);
+                    }
+                    else
+                    {
+                        canImport = !string.IsNullOrEmpty(_labeledVolumePath) && Directory.Exists(_labeledVolumePath);
+                    }
                     break;
             }
 
@@ -477,7 +624,77 @@ namespace GeoscientistToolkit.UI
                     _currentState = ImportState.Processing;
                     _importTask = Import3DObject();
                     break;
+                case 5: // Labeled Volume
+                    _currentState = ImportState.Processing;
+                    _importTask = ImportLabeledVolume();
+                    break;
             }
+        }
+
+        private async Task ImportLabeledVolume()
+        {
+            _statusText = "Loading labeled volume...";
+            _progress = 0.1f;
+
+            await Task.Run(async () =>
+            {
+                try
+                {
+                    string name = _labeledIsMultiPageTiff ? 
+                        Path.GetFileNameWithoutExtension(_labeledVolumePath) : 
+                        Path.GetFileName(_labeledVolumePath);
+
+                    double pixelSizeMeters = _labeledPixelSizeUnit == 0 ? 
+                        _labeledPixelSize * 1e-6 :  // micrometers to meters
+                        _labeledPixelSize * 1e-3;   // millimeters to meters
+
+                    // Load the labeled volume
+                    var progressReporter = new Progress<float>(p =>
+                    {
+                        _progress = p;
+                        _statusText = $"Processing labeled images... {(int)(p * 100)}%";
+                    });
+
+                    var (grayscaleVolume, labelVolume, materials) = await LabeledVolumeLoader.LoadLabeledVolumeAsync(
+                        _labeledVolumePath, 
+                        pixelSizeMeters, 
+                        false, // Don't use memory mapping for now
+                        progressReporter,
+                        name);
+
+                    _progress = 0.9f;
+                    _statusText = "Creating dataset...";
+
+                    // Create the dataset
+                    double pixelSizeMicrons = _labeledPixelSizeUnit == 0 ? _labeledPixelSize : _labeledPixelSize * 1000;
+                    
+                    _pendingLabeledDataset = new CtImageStackDataset($"{name} (Labeled)", _labeledVolumePath)
+                    {
+                        Width = grayscaleVolume.Width,
+                        Height = grayscaleVolume.Height,
+                        Depth = grayscaleVolume.Depth,
+                        PixelSize = (float)pixelSizeMicrons,
+                        SliceThickness = (float)pixelSizeMicrons,
+                        Unit = "µm",
+                        BinningSize = 1
+                    };
+
+                    // Assign the materials to the dataset
+                    _pendingLabeledDataset.Materials = materials;
+
+                    // Save materials to file so they persist
+                    _pendingLabeledDataset.SaveMaterials();
+
+                    _progress = 1.0f;
+                    _statusText = $"Labeled volume imported successfully! Found {materials.Count} unique materials.";
+                }
+                catch (Exception ex)
+                {
+                    _statusText = $"Error: {ex.Message}";
+                    Logger.LogError($"[ImportDataModal] Error importing labeled volume: {ex}");
+                    throw;
+                }
+            });
         }
 
         private async Task Import3DObject()
@@ -496,13 +713,11 @@ namespace GeoscientistToolkit.UI
                     _progress = 0.3f;
                     _statusText = "Reading model geometry...";
 
-                    // Load the model to get properties
                     dataset.Load();
 
                     _progress = 0.8f;
                     _statusText = "Adding to project...";
 
-                    // Store dataset to be added when task completes
                     _pendingMesh3DDataset = dataset;
 
                     _progress = 1.0f;
@@ -597,6 +812,12 @@ namespace GeoscientistToolkit.UI
                     _pendingStreamingDataset = null;
                 }
 
+                if (_pendingLabeledDataset != null)
+                {
+                    ProjectManager.Instance.AddDataset(_pendingLabeledDataset);
+                    _pendingLabeledDataset = null;
+                }
+
                 ImGui.TextColored(new Vector4(0, 1, 0, 1), "Import successful!");
                 if (ImGui.Button("Close")) _currentState = ImportState.Idle;
             }
@@ -623,29 +844,6 @@ namespace GeoscientistToolkit.UI
             if (!File.Exists(gvtPath))
             {
                 _statusText = "Converting to optimized format...";
-                
-                bool hasData = false;
-                for (int z = 0; z < Math.Min(5, binnedVolume.Depth); z++)
-                {
-                    for (int y = 0; y < Math.Min(5, binnedVolume.Height); y++)
-                    {
-                        for (int x = 0; x < Math.Min(5, binnedVolume.Width); x++)
-                        {
-                            if (binnedVolume[x, y, z] > 0)
-                            {
-                                hasData = true;
-                                break;
-                            }
-                        }
-                        if (hasData) break;
-                    }
-                    if (hasData) break;
-                }
-                
-                if (!hasData)
-                {
-                    Logger.LogError("[ImportDataModal] Volume appears to be empty!");
-                }
                 
                 await CtStackConverter.ConvertToStreamableFormat(binnedVolume, gvtPath,
                     (p, s) => { _progress = 0.5f + (p * 0.5f); _statusText = $"Step 2/2: {s}"; });
@@ -763,6 +961,10 @@ namespace GeoscientistToolkit.UI
             _ctBinningFactor = 1;
             _mesh3DPath = "";
             _mesh3DScale = 1.0f;
+            _labeledVolumePath = "";
+            _labeledIsMultiPageTiff = false;
+            _labeledPixelSize = 1.0f;
+            _labeledPixelSizeUnit = 0;
             _importTask = null;
             _progress = 0;
             _statusText = "";
@@ -771,6 +973,7 @@ namespace GeoscientistToolkit.UI
             _pendingStreamingDataset = null;
             _pendingLegacyDataset = null;
             _pendingMesh3DDataset = null;
+            _pendingLabeledDataset = null;
             _shouldOpenOrganizer = false;
         }
     }

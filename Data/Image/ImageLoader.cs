@@ -77,6 +77,125 @@ namespace GeoscientistToolkit.Util
         }
 
         /// <summary>
+        /// Load an image as color RGB/RGBA data.
+        /// Used for labeled volume import where colors represent materials.
+        /// </summary>
+        public static byte[] LoadColorImage(string path, out int width, out int height, out int channels)
+        {
+            try
+            {
+                string ext = Path.GetExtension(path).ToLowerInvariant();
+
+                if (ext == ".tif" || ext == ".tiff")
+                {
+                    // Use TIFF-specific loading
+                    using (Tiff tiff = Tiff.Open(path, "r"))
+                    {
+                        if (tiff == null)
+                            throw new InvalidOperationException($"Failed to open TIFF file: {path}");
+
+                        width = tiff.GetField(TiffTag.IMAGEWIDTH)[0].ToInt();
+                        height = tiff.GetField(TiffTag.IMAGELENGTH)[0].ToInt();
+                        
+                        // Read as RGBA
+                        int[] raster = new int[width * height];
+                        if (!tiff.ReadRGBAImageOriented(width, height, raster, Orientation.TOPLEFT))
+                        {
+                            throw new InvalidOperationException("Failed to read TIFF image data");
+                        }
+
+                        // Convert int[] to byte[] RGBA
+                        channels = 4;
+                        byte[] rgbaData = new byte[width * height * 4];
+                        for (int i = 0; i < width * height; i++)
+                        {
+                            int pixel = raster[i];
+                            rgbaData[i * 4] = (byte)((pixel >> 16) & 0xFF);     // R
+                            rgbaData[i * 4 + 1] = (byte)((pixel >> 8) & 0xFF);  // G
+                            rgbaData[i * 4 + 2] = (byte)(pixel & 0xFF);         // B
+                            rgbaData[i * 4 + 3] = (byte)((pixel >> 24) & 0xFF); // A
+                        }
+
+                        return rgbaData;
+                    }
+                }
+                else
+                {
+                    // Use StbImageSharp for other formats
+                    using (var stream = File.OpenRead(path))
+                    {
+                        StbImage.stbi_set_flip_vertically_on_load(0);
+                        var result = ImageResult.FromStream(stream, ColorComponents.RedGreenBlueAlpha);
+                        
+                        width = result.Width;
+                        height = result.Height;
+                        channels = 4; // RGBA
+                        
+                        return result.Data;
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError($"[ImageLoader] Failed to load color image from {path}: {ex.Message}");
+                width = height = channels = 0;
+                return new byte[0];
+            }
+        }
+
+        /// <summary>
+        /// Load a specific page from a multi-page TIFF as color data.
+        /// Used for labeled volume import where colors represent materials.
+        /// </summary>
+        public static byte[] LoadTiffPageAsColor(string path, int pageIndex, out int width, out int height, out int channels)
+        {
+            try
+            {
+                using (Tiff tiff = Tiff.Open(path, "r"))
+                {
+                    if (tiff == null)
+                        throw new InvalidOperationException($"Failed to open TIFF file: {path}");
+
+                    // Navigate to the requested page
+                    if (!tiff.SetDirectory((short)pageIndex))
+                        throw new ArgumentOutOfRangeException(nameof(pageIndex), 
+                            $"Page {pageIndex} does not exist in the TIFF file");
+
+                    width = tiff.GetField(TiffTag.IMAGEWIDTH)[0].ToInt();
+                    height = tiff.GetField(TiffTag.IMAGELENGTH)[0].ToInt();
+                    channels = 4; // We'll always return RGBA
+                    
+                    // Read the image data as RGBA
+                    int[] raster = new int[width * height];
+                    if (!tiff.ReadRGBAImageOriented(width, height, raster, Orientation.TOPLEFT))
+                    {
+                        throw new InvalidOperationException("Failed to read TIFF image data");
+                    }
+
+                    // Convert int[] to byte[] RGBA
+                    byte[] rgbaData = new byte[width * height * 4];
+                    for (int i = 0; i < width * height; i++)
+                    {
+                        int pixel = raster[i];
+                        // LibTiff stores as ABGR in int, we need RGBA in bytes
+                        rgbaData[i * 4] = (byte)((pixel >> 16) & 0xFF);     // R
+                        rgbaData[i * 4 + 1] = (byte)((pixel >> 8) & 0xFF);  // G
+                        rgbaData[i * 4 + 2] = (byte)(pixel & 0xFF);         // B
+                        rgbaData[i * 4 + 3] = (byte)((pixel >> 24) & 0xFF); // A
+                    }
+                    
+                    return rgbaData;
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError($"[ImageLoader] Failed to load TIFF page {pageIndex} as color from {path}: {ex.Message}");
+                width = height = channels = 0;
+                return new byte[0];
+            }
+        }
+
+        /// <summary>
         /// Load grayscale image data for CT stacks
         /// </summary>
         public static byte[] LoadGrayscaleImage(string path, out int width, out int height)
