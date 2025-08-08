@@ -7,6 +7,7 @@ using GeoscientistToolkit.UI.Interfaces;
 using ImGuiNET;
 using System;
 using System.Numerics;
+using GeoscientistToolkit.Data.Table;
 
 namespace GeoscientistToolkit.UI
 {
@@ -28,6 +29,8 @@ namespace GeoscientistToolkit.UI
                 Mesh3DDataset mesh3DDataset => new Mesh3DViewer(mesh3DDataset),
 
                 DatasetGroup => throw new InvalidOperationException("Cannot open a DatasetGroup in a viewer. Please open individual datasets."),
+                
+                TableDataset tableDataset => new TableViewer(tableDataset),
 
                 _ => throw new NotSupportedException($"No viewer available for dataset type: {dataset.GetType().Name}")
             };
@@ -40,6 +43,7 @@ namespace GeoscientistToolkit.UI
                 ImageDataset => new ImagePropertiesRenderer(),
                 CtImageStackDataset or StreamingCtVolumeDataset => new CtImageStackPropertiesRenderer(),
                 Mesh3DDataset => new Mesh3DProperties(),
+                TableDataset => new TableProperties(),
                 _ => new DefaultPropertiesRenderer()
             };
         }
@@ -51,6 +55,7 @@ namespace GeoscientistToolkit.UI
                 CtImageStackDataset => new CtImageStackTools(),
                 StreamingCtVolumeDataset sds when sds.EditablePartner != null => new CtImageStackTools(),
                 Mesh3DDataset => new Mesh3DTools(),
+                TableDataset => new TableTools(),
                 _ => new DefaultTools()
             };
         }

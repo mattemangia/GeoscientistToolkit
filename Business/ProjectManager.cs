@@ -8,6 +8,7 @@ using GeoscientistToolkit.Data;
 using GeoscientistToolkit.Data.CtImageStack;
 using GeoscientistToolkit.Data.Image;
 using GeoscientistToolkit.Data.Mesh3D;
+using GeoscientistToolkit.Data.Table;
 using GeoscientistToolkit.Settings;
 using GeoscientistToolkit.Util;
 
@@ -309,6 +310,18 @@ namespace GeoscientistToolkit.Business
                     if (mesh3DDataset.IsMissing) 
                         Logger.LogWarning($"Source file not found for 3D model: {mesh3DDto.Name} at {mesh3DDto.FilePath}");
                     return mesh3DDataset;
+                case TableDatasetDTO tableDto:
+                    var tableDataset = new TableDataset(tableDto.Name, tableDto.FilePath)
+                    {
+                        SourceFormat = tableDto.SourceFormat,
+                        Delimiter = tableDto.Delimiter,
+                        HasHeaders = tableDto.HasHeaders,
+                        Encoding = tableDto.Encoding,
+                        IsMissing = !File.Exists(tableDto.FilePath)
+                    };
+                    if (tableDataset.IsMissing)
+                        Logger.LogWarning($"Source file not found for table: {tableDto.Name} at {tableDto.FilePath}");
+                    return tableDataset;
 
 
                 case CtImageStackDatasetDTO ctDto:

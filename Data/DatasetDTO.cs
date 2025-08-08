@@ -11,7 +11,17 @@ namespace GeoscientistToolkit.Data
         public string Name { get; set; }
         public string FilePath { get; set; }
     }
-
+    public class TableDatasetDTO : DatasetDTO
+    {
+        public string SourceFormat { get; set; }
+        public string Delimiter { get; set; }
+        public bool HasHeaders { get; set; }
+        public string Encoding { get; set; }
+        public int RowCount { get; set; }
+        public int ColumnCount { get; set; }
+        public List<string> ColumnNames { get; set; }
+        public List<string> ColumnTypes { get; set; }
+    }
     // --- NEW --- DTO for Material
     public class MaterialDTO
     {
@@ -63,4 +73,5 @@ namespace GeoscientistToolkit.Data
         /// </summary>
         public string PartnerFilePath { get; set; }
     }
+    
 }

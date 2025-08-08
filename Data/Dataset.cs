@@ -10,7 +10,8 @@ namespace GeoscientistToolkit.Data
         Mesh,
         SingleImage,
         Group,
-        Mesh3D
+        Mesh3D,
+        Table
     }
 
     public abstract class Dataset
