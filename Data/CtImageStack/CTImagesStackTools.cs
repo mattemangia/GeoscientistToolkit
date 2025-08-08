@@ -1,12 +1,13 @@
 ﻿// GeoscientistToolkit/Data/CtImageStack/CtImageStackTools.cs
+using GeoscientistToolkit.AddIns;
 using GeoscientistToolkit.UI.Interfaces;
 using GeoscientistToolkit.UI.Utils;
 using GeoscientistToolkit.Util;
 using ImGuiNET;
-using System.Numerics;
 using System;
-using System.Linq;
 using System.Collections.Generic;
+using System.Linq;
+using System.Numerics;
 using System.Threading.Tasks;
 
 namespace GeoscientistToolkit.Data.CtImageStack
@@ -69,6 +70,75 @@ namespace GeoscientistToolkit.Data.CtImageStack
             ImGui.Separator();
             DrawSegmentationTools();
             ImGui.Separator();
+            ImGui.Separator();
+            if (ImGui.CollapsingHeader("Particle Separator"))
+            {
+                // Try to get the particle separator tool via reflection to avoid hard dependency
+                try
+                {
+                    var addInManager = AddInManager.Instance;
+                    if (addInManager != null)
+                    {
+                        // Look for the ParticleSeparator add-in
+                        foreach (var addIn in addInManager.LoadedAddIns.Values)
+                        {
+                            if (addIn.GetType().Name == "ParticleSeparatorAddIn")
+                            {
+                                // Use reflection to get the tool
+                                var getToolMethod = addIn.GetType().GetMethod("GetTool",
+                                    System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static);
+
+                                if (getToolMethod != null)
+                                {
+                                    var tool = getToolMethod.Invoke(null, null);
+                                    if (tool != null)
+                                    {
+                                        var drawPanelMethod = tool.GetType().GetMethod("DrawPanel");
+                                        if (drawPanelMethod != null)
+                                        {
+                                            drawPanelMethod.Invoke(tool, new object[] { ctDataset });
+                                        }
+                                    }
+                                }
+                                break;
+                            }
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    ImGui.TextWrapped($"Particle Separator not available: {ex.Message}");
+                }
+
+                // If add-in not found, show info
+                if (!ImGui.GetIO().WantTextInput)
+                {
+                    ImGui.TextWrapped("Place ParticleSeparatorAddIn.cs in the source folder and compile with AddInExtractor");
+                }
+            }
+            // --- FIX: Draw the RemoveSmallIslands tool if available ---
+            if (ImGui.CollapsingHeader("Remove Small Islands"))
+            {
+                try
+                {
+                    var addIn = AddInManager.Instance?.LoadedAddIns.Values.FirstOrDefault(a => a.Id == "com.geoscientisttoolkit.removesmallislands");
+                    if (addIn != null)
+                    {
+                        var tool = addIn.GetTools()?.FirstOrDefault();
+                        var drawPanelMethod = tool?.GetType().GetMethod("DrawPanel");
+                        drawPanelMethod?.Invoke(tool, new object[] { ctDataset });
+                    }
+                    else
+                    {
+                        ImGui.TextWrapped("Place RemoveSmallIslandsAddIn.cs in the source folder and compile with AddInExtractor.");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    ImGui.TextWrapped($"Remove Small Islands tool not available: {ex.Message}");
+                }
+            }
+
 
             if (_isStatsWindowOpen)
             {
@@ -95,6 +165,15 @@ namespace GeoscientistToolkit.Data.CtImageStack
             }
             return (false, null, Vector4.Zero);
         }
+
+        /// <summary>
+        /// Public method for external add-ins to trigger a 3D preview update.
+        /// </summary>
+        public static void Update3DPreviewFromExternal(CtImageStackDataset dataset, byte[] previewMask, Vector4 color)
+        {
+            Preview3DChanged?.Invoke(dataset, previewMask, color);
+        }
+
 
         private void DrawVolumeInfo()
         {
