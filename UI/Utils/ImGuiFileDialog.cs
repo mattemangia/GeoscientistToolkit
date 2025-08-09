@@ -658,8 +658,7 @@ namespace GeoscientistToolkit.UI.Utils
                     // Check if file exists and prompt for overwrite
                     if (File.Exists(SelectedPath))
                     {
-                        // In a real implementation, you'd want a confirmation dialog here
-                        // For now, we'll just allow overwriting
+                       
                         Logger.Log($"File will be overwritten: {SelectedPath}");
                     }
 

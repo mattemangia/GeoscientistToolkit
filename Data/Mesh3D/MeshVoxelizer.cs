@@ -225,8 +225,7 @@ namespace GeoscientistToolkit.Data.Mesh3D
             if (dist > projectedHalfSize)
                 return false;
 
-            // For simplicity, if we're close to the plane, consider it an intersection
-            // A more robust implementation would do full SAT (Separating Axis Theorem) test
+            
             return true;
         }
 
