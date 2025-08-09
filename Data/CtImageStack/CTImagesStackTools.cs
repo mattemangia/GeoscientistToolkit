@@ -138,7 +138,38 @@ namespace GeoscientistToolkit.Data.CtImageStack
                     ImGui.TextWrapped($"Remove Small Islands tool not available: {ex.Message}");
                 }
             }
-
+            if (ImGui.CollapsingHeader("Image Filtering"))
+            {
+                try
+                {
+                    // Find the add-in by its unique ID
+                    var addIn = AddInManager.Instance?.LoadedAddIns.Values.FirstOrDefault(a => a.Id == "com.geoscientisttoolkit.imagefilters");
+                    if (addIn != null)
+                    {
+                        // Find the specific tool from the add-in
+                        var tool = addIn.GetTools()?.FirstOrDefault(t => t.Name == "Image Filter");
+                        if (tool != null)
+                        {
+                            // Use reflection to call the public DrawPanel method on the tool instance
+                            var drawPanelMethod = tool.GetType().GetMethod("DrawPanel");
+                            drawPanelMethod?.Invoke(tool, new object[] { ctDataset });
+                        }
+                        else
+                        {
+                            ImGui.TextWrapped("Image Filter tool not found inside the add-in.");
+                        }
+                    }
+                    else
+                    {
+                        ImGui.TextWrapped("Image Filtering Add-In not found. Place FilterAddIn.dll in the AddIns folder.");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    ImGui.TextWrapped($"Image Filtering tool failed to load: {ex.Message}");
+                    Logger.LogError($"[CTImageStackTools] Filter Add-In Error: {ex.ToString()}");
+                }
+            }
 
             if (_isStatsWindowOpen)
             {

@@ -52,17 +52,17 @@ namespace GeoscientistToolkit.AddInExtractor
             rootCommand.SetHandler(async (source, output, core, main, verbose, diagnostics) =>
             {
                 var extractor = new AddInExtractor(verbose);
-                
+
                 if (diagnostics)
                 {
                     // Run diagnostics mode
                     RunDiagnostics(core ?? extractor.FindCoreAssembly());
                     return;
                 }
-                
+
                 // Use current directory as a fallback for source if not provided.
                 var sourceDir = string.IsNullOrEmpty(source) ? Directory.GetCurrentDirectory() : source;
-                
+
                 // Use a default output relative to the main project's build output if not provided.
                 var outputDir = string.IsNullOrEmpty(output) ? Path.Combine("bin", "Release", "net8.0", "AddIns") : output;
 
@@ -76,7 +76,7 @@ namespace GeoscientistToolkit.AddInExtractor
         {
             Console.WriteLine("Running AddInExtractor Diagnostics");
             Console.WriteLine("==================================");
-            
+
             if (string.IsNullOrEmpty(coreAssemblyPath))
             {
                 Console.WriteLine("Error: No core assembly path provided and could not find it automatically.");
@@ -90,40 +90,40 @@ namespace GeoscientistToolkit.AddInExtractor
             }
 
             Console.WriteLine($"\nCore Assembly: {coreAssemblyPath}");
-            
+
             try
             {
                 var assembly = System.Reflection.Assembly.LoadFrom(coreAssemblyPath);
                 Console.WriteLine($"Loaded: {assembly.GetName().Name} v{assembly.GetName().Version}");
-                
+
                 var allTypes = assembly.GetExportedTypes();
                 Console.WriteLine($"\nTotal exported types: {allTypes.Length}");
-                
+
                 // Group by namespace
                 var namespaces = allTypes.GroupBy(t => t.Namespace ?? "<no namespace>")
                     .OrderBy(g => g.Key)
                     .ToList();
-                
+
                 Console.WriteLine($"\nNamespaces ({namespaces.Count}):");
                 foreach (var ns in namespaces)
                 {
                     Console.WriteLine($"  {ns.Key} ({ns.Count()} types)");
                 }
-                
+
                 // Check for specific AddIn types
                 Console.WriteLine("\nAddIn-related types:");
                 var addInInterface = allTypes.FirstOrDefault(t => t.Name == "IAddIn");
                 Console.WriteLine($"  IAddIn: {addInInterface?.FullName ?? "NOT FOUND"}");
-                
+
                 var addInTool = allTypes.FirstOrDefault(t => t.Name == "AddInTool");
                 Console.WriteLine($"  AddInTool: {addInTool?.FullName ?? "NOT FOUND"}");
-                
+
                 var dataset = allTypes.FirstOrDefault(t => t.Name == "Dataset");
                 Console.WriteLine($"  Dataset: {dataset?.FullName ?? "NOT FOUND"}");
-                
+
                 var logger = allTypes.FirstOrDefault(t => t.Name == "Logger");
                 Console.WriteLine($"  Logger: {logger?.FullName ?? "NOT FOUND"}");
-                
+
                 // List all types in GeoscientistToolkit.AddIns namespace
                 var addInTypes = allTypes.Where(t => t.Namespace == "GeoscientistToolkit.AddIns").ToList();
                 if (addInTypes.Count > 0)
@@ -277,10 +277,10 @@ namespace GeoscientistToolkit.AddInExtractor
 
             // Load all necessary references
             var references = await LoadAllReferencesAsync(coreAssemblyPath, mainAssemblyPath);
-            
+
             // Verify critical references for the main packages
             VerifyCriticalReferences(references, Path.GetDirectoryName(coreAssemblyPath)!);
-            
+
             Console.WriteLine($"Loaded {references.Count} assembly references for compilation.");
 
             var tasks = sourceFiles.Select(file => CompileAddInAsync(file, outputDir, references)).ToList();
@@ -362,7 +362,7 @@ namespace GeoscientistToolkit.AddInExtractor
 
             // Get all DLL files, including from subdirectories (for runtime-specific libraries)
             var searchDirectories = new List<string> { appDirectory };
-            
+
             // Add runtime-specific directories if they exist
             var runtimesDir = Path.Combine(appDirectory, "runtimes");
             if (Directory.Exists(runtimesDir))
@@ -370,7 +370,7 @@ namespace GeoscientistToolkit.AddInExtractor
                 // Add native runtime directories for current platform
                 var currentRid = RuntimeInformation.RuntimeIdentifier;
                 var possibleRids = new[] { currentRid, "win-x64", "linux-x64", "osx-x64", "osx-arm64" };
-                
+
                 foreach (var rid in possibleRids)
                 {
                     var ridLibDir = Path.Combine(runtimesDir, rid, "lib", "net8.0");
@@ -389,11 +389,11 @@ namespace GeoscientistToolkit.AddInExtractor
                 foreach (var file in assemblies)
                 {
                     var fileName = Path.GetFileName(file);
-                    
+
                     // Skip native libraries and duplicates (including the core assembly we already added)
                     if (IsNativeLibrary(fileName) || referencedAssemblies.Contains(fileName))
                         continue;
-                    
+
                     if (referencedAssemblies.Add(fileName))
                     {
                         try
@@ -454,7 +454,7 @@ namespace GeoscientistToolkit.AddInExtractor
 
             // Log summary
             Log($"Total references loaded: {references.Count}");
-            
+
             // In verbose mode, list loaded assemblies
             if (_verbose)
             {
@@ -466,7 +466,7 @@ namespace GeoscientistToolkit.AddInExtractor
                         loadedAssemblies.Add(Path.GetFileName(peRef.FilePath));
                     }
                 }
-                
+
                 Log($"Loaded assemblies ({loadedAssemblies.Count}):");
                 foreach (var assembly in loadedAssemblies.OrderBy(a => a).Take(20))
                 {
@@ -486,11 +486,11 @@ namespace GeoscientistToolkit.AddInExtractor
             // Common patterns for native libraries
             var nativePatterns = new[]
             {
-                "native", "libskia", "libHarfBuzzSharp", "SDL2", "vulkan", "d3d", 
+                "native", "libskia", "libHarfBuzzSharp", "SDL2", "vulkan", "d3d",
                 "opengl", "metal", "avcodec", "avformat", "avutil", "swscale",
                 "e_sqlite3", "glfw", "freetype", "png", "jpeg", "tiff"
             };
-            
+
             var lowerFileName = fileName.ToLowerInvariant();
             return nativePatterns.Any(pattern => lowerFileName.Contains(pattern)) ||
                    lowerFileName.EndsWith(".so") ||
@@ -517,11 +517,12 @@ namespace GeoscientistToolkit.AddInExtractor
                 "StbImageWriteSharp.dll",
                 "TinyDialogsNet.dll",
                 "BitMiracle.LibTiff.NET.dll",
-                "System.Management.dll"
+                "System.Management.dll",
+                "Silk.NET.OpenCL.dll" // Added for GPU Compute
             };
 
             var loadedFiles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            
+
             // Extract file names from references
             foreach (var reference in references)
             {
@@ -530,7 +531,7 @@ namespace GeoscientistToolkit.AddInExtractor
                     loadedFiles.Add(Path.GetFileName(peRef.FilePath));
                 }
             }
-            
+
             var missingAssemblies = new List<string>();
 
             foreach (var assembly in criticalAssemblies)
@@ -624,23 +625,23 @@ namespace GeoscientistToolkit.AddInExtractor
                 {
                     Console.WriteLine("✗");
                     Console.Error.WriteLine($"\n  Compilation failed for {fileName}:");
-                    
+
                     var errors = emitResult.Diagnostics
                         .Where(d => d.IsWarningAsError || d.Severity == DiagnosticSeverity.Error)
                         .Take(20); // Limit error output
-                    
+
                     foreach (var diagnostic in errors)
                     {
                         var pos = diagnostic.Location.GetLineSpan();
                         Console.Error.WriteLine($"    {pos.Path}({pos.StartLinePosition.Line + 1},{pos.StartLinePosition.Character + 1}): error {diagnostic.Id}: {diagnostic.GetMessage()}");
                     }
-                    
+
                     var totalErrors = emitResult.Diagnostics.Count(d => d.IsWarningAsError || d.Severity == DiagnosticSeverity.Error);
                     if (totalErrors > 20)
                     {
                         Console.Error.WriteLine($"    ... and {totalErrors - 20} more errors");
                     }
-                    
+
                     Console.Error.WriteLine();
                 }
             }
@@ -676,8 +677,8 @@ namespace GeoscientistToolkit.AddInExtractor
 
         public override string FullName => _directoryInfo.FullName;
         public override string Name => _directoryInfo.Name;
-        public override DirectoryInfoBase? ParentDirectory => _directoryInfo.Parent != null 
-            ? new DirectoryInfoWrapper(_directoryInfo.Parent) 
+        public override DirectoryInfoBase? ParentDirectory => _directoryInfo.Parent != null
+            ? new DirectoryInfoWrapper(_directoryInfo.Parent)
             : null;
 
         public override IEnumerable<FileSystemInfoBase> EnumerateFileSystemInfos()

@@ -27,6 +27,7 @@
         <PackageReference Include="ImGui.NET" Version="1.90.8.1" />
         <PackageReference Include="ImGui.NET.Branches.Docking" Version="1.88.0" />
         <PackageReference Include="sdl2" Version="2.0.5" />
+        <PackageReference Include="Silk.NET.OpenCL" Version="2.21.0" />
         <PackageReference Include="StbImageSharp" Version="2.30.15" />
         <PackageReference Include="StbImageWriteSharp" Version="1.16.7" />
         <PackageReference Include="System.Drawing.Primitives" Version="4.3.0" />
@@ -48,9 +49,7 @@
 
     <!-- The ProjectReference to the extractor tool, correctly in its own ItemGroup -->
     <ItemGroup>
-        <ProjectReference Include="AddInExtractor\AddInExtractor.csproj"
-                          ReferenceOutputAssembly="false"
-                          OutputItemType="AddInExtractorPath" />
+        <ProjectReference Include="AddInExtractor\AddInExtractor.csproj" ReferenceOutputAssembly="false" OutputItemType="AddInExtractorPath" />
     </ItemGroup>
 
     <!-- In Release mode, we must EXCLUDE the add-in source from the main compile. -->
@@ -60,9 +59,7 @@
 
     <!-- First, ensure the AddInExtractor is built -->
     <Target Name="BuildAddInExtractor" BeforeTargets="ExtractAddIns" Condition="'$(Configuration)' == 'Release'">
-        <MSBuild Projects="AddInExtractor\AddInExtractor.csproj"
-                 Properties="Configuration=$(Configuration)"
-                 Targets="Build" />
+        <MSBuild Projects="AddInExtractor\AddInExtractor.csproj" Properties="Configuration=$(Configuration)" Targets="Build" />
     </Target>
 
     <!-- Target to extract add-ins after build in Release mode -->
@@ -85,9 +82,7 @@
         <Message Text="Core assembly: $(OutputPath)GeoscientistToolkit.dll" Importance="high" />
         <Message Text="Extractor command: $(ExtractorCommand)" Importance="normal" Condition="'@(AddInSourceFiles)' != ''" />
 
-        <Exec Condition="'@(AddInSourceFiles)' != ''"
-              Command="$(ExtractorCommand)"
-              WorkingDirectory="$(MSBuildProjectDirectory)" />
+        <Exec Condition="'@(AddInSourceFiles)' != ''" Command="$(ExtractorCommand)" WorkingDirectory="$(MSBuildProjectDirectory)" />
 
         <Message Condition="'@(AddInSourceFiles)' != ''" Text="Add-in extraction complete!" Importance="high" />
         <Message Condition="'@(AddInSourceFiles)' == ''" Text="No add-ins found in AddIns\Development directory." Importance="high" />
@@ -95,8 +90,7 @@
 
     <!-- Optional: Create the add-in development directory structure on first build -->
     <Target Name="EnsureAddInDirectory" BeforeTargets="BeforeBuild">
-        <MakeDir Directories="$(MSBuildProjectDirectory)\AddIns\Development"
-                 Condition="!Exists('$(MSBuildProjectDirectory)\AddIns\Development')" />
+        <MakeDir Directories="$(MSBuildProjectDirectory)\AddIns\Development" Condition="!Exists('$(MSBuildProjectDirectory)\AddIns\Development')" />
     </Target>
 
 </Project>
