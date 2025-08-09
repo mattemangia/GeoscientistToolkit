@@ -7,8 +7,6 @@ using System.Linq;
 
 namespace GeoscientistToolkit.UI.Utils
 {
-    
-
     public class ImGuiFileDialog
     {
         public bool IsOpen;
@@ -23,6 +21,11 @@ namespace GeoscientistToolkit.UI.Utils
         private List<VolumeInfo> _availableVolumes = new List<VolumeInfo>();
         private float _drivePanelWidth = 180f;
         private string _defaultExtension = "";
+
+        // New folder creation fields
+        private bool _showCreateFolderPopup = false;
+        private string _newFolderName = "";
+        private string _createFolderError = "";
 
         private class VolumeInfo
         {
@@ -189,7 +192,10 @@ namespace GeoscientistToolkit.UI.Utils
             SelectedPath = "";
             _selectedFileName = defaultFileName ?? "";
             _allowedExtensions = allowedExtensions ?? Array.Empty<string>();
-            
+            _newFolderName = "";
+            _createFolderError = "";
+            _showCreateFolderPopup = false;
+
             // Set default extension for save dialog
             if (_dialogType == FileDialogType.SaveFile && _allowedExtensions.Length > 0)
             {
@@ -256,8 +262,61 @@ namespace GeoscientistToolkit.UI.Utils
                     DrawBottomButtons(ref selectionMade);
                     ImGui.End();
                 }
+
+                // Handle create folder popup
+                if (_showCreateFolderPopup)
+                {
+                    DrawCreateFolderPopup();
+                }
             }
             return selectionMade;
+        }
+
+        private void DrawPathNavigation()
+        {
+            string tempPath = CurrentDirectory;
+            float buttonWidth = 40f;
+            float createFolderButtonWidth = 100f;
+            float totalButtonWidth = buttonWidth + ImGui.GetStyle().ItemSpacing.X;
+
+            // Add create folder button for directory selection mode
+            if (_dialogType == FileDialogType.OpenDirectory)
+            {
+                totalButtonWidth += createFolderButtonWidth + ImGui.GetStyle().ItemSpacing.X;
+            }
+
+            ImGui.SetNextItemWidth(ImGui.GetContentRegionAvail().X - totalButtonWidth);
+            if (ImGui.InputText("##Path", ref tempPath, 260))
+            {
+                if (Directory.Exists(tempPath))
+                {
+                    CurrentDirectory = tempPath;
+                }
+            }
+
+            ImGui.SameLine();
+            if (ImGui.Button("Up", new Vector2(buttonWidth, 0)))
+            {
+                var parent = Directory.GetParent(CurrentDirectory);
+                if (parent != null)
+                {
+                    CurrentDirectory = parent.FullName;
+                }
+            }
+
+            // Add "Create Folder" button for directory selection mode
+            if (_dialogType == FileDialogType.OpenDirectory)
+            {
+                ImGui.SameLine();
+                if (ImGui.Button("Create Folder", new Vector2(createFolderButtonWidth, 0)))
+                {
+                    _showCreateFolderPopup = true;
+                    _newFolderName = "New Folder";
+                    _createFolderError = "";
+                }
+            }
+
+            ImGui.Separator();
         }
 
         private void DrawDrivePanel(Vector2 size)
@@ -326,38 +385,14 @@ namespace GeoscientistToolkit.UI.Utils
             }
         }
 
-        private void DrawPathNavigation()
-        {
-            string tempPath = CurrentDirectory;
-            float upButtonWidth = 40f;
-            ImGui.SetNextItemWidth(ImGui.GetContentRegionAvail().X - upButtonWidth - ImGui.GetStyle().ItemSpacing.X);
-            if (ImGui.InputText("##Path", ref tempPath, 260))
-            {
-                if (Directory.Exists(tempPath))
-                {
-                    CurrentDirectory = tempPath;
-                }
-            }
-
-            ImGui.SameLine();
-            if (ImGui.Button("Up", new Vector2(upButtonWidth, 0)))
-            {
-                var parent = Directory.GetParent(CurrentDirectory);
-                if (parent != null)
-                {
-                    CurrentDirectory = parent.FullName;
-                }
-            }
-            ImGui.Separator();
-        }
-
         private void DrawFileList(ref bool selectionMade, Vector2 size)
         {
             if (ImGui.BeginChild("##FileList", size, ImGuiChildFlags.Border))
             {
                 try
                 {
-                    foreach (var dir in Directory.GetDirectories(CurrentDirectory))
+                    var directories = Directory.GetDirectories(CurrentDirectory).OrderBy(d => Path.GetFileName(d));
+                    foreach (var dir in directories)
                     {
                         var dirName = Path.GetFileName(dir);
 
@@ -379,10 +414,11 @@ namespace GeoscientistToolkit.UI.Utils
 
                     if (_dialogType != FileDialogType.OpenDirectory)
                     {
-                        foreach (var file in Directory.GetFiles(CurrentDirectory))
+                        var files = Directory.GetFiles(CurrentDirectory).OrderBy(f => Path.GetFileName(f));
+                        foreach (var file in files)
                         {
                             var fileName = Path.GetFileName(file);
-                            
+
                             // For save dialog, show all files but highlight those with matching extensions
                             bool isAllowed = _allowedExtensions.Length == 0 ||
                                            _allowedExtensions.Contains(Path.GetExtension(file).ToLower());
@@ -462,7 +498,7 @@ namespace GeoscientistToolkit.UI.Utils
 
                 float inputTextWidth = buttonsPosX - ImGui.GetCursorPosX() - (style.ItemSpacing.X * 2);
                 ImGui.SetNextItemWidth(inputTextWidth);
-                
+
                 if (ImGui.InputText("##FileNameInput", ref _selectedFileName, 260))
                 {
                     // User is typing
@@ -488,13 +524,101 @@ namespace GeoscientistToolkit.UI.Utils
 
             string buttonText = _dialogType == FileDialogType.SaveFile ? "Save" : "Select";
             bool canSelect = _dialogType == FileDialogType.OpenDirectory || !string.IsNullOrEmpty(_selectedFileName);
-            
+
             if (!canSelect) ImGui.BeginDisabled();
             if (ImGui.Button(buttonText, buttonSize))
             {
                 selectionMade = HandleSelection();
             }
             if (!canSelect) ImGui.EndDisabled();
+        }
+
+        private void DrawCreateFolderPopup()
+        {
+            ImGui.OpenPopup("Create New Folder");
+
+            var center = ImGui.GetMainViewport().GetCenter();
+            ImGui.SetNextWindowPos(center, ImGuiCond.Appearing, new Vector2(0.5f, 0.5f));
+
+            if (ImGui.BeginPopupModal("Create New Folder", ref _showCreateFolderPopup,
+                ImGuiWindowFlags.AlwaysAutoResize | ImGuiWindowFlags.NoMove))
+            {
+                ImGui.Text("Enter folder name:");
+
+                ImGui.SetNextItemWidth(300);
+                if (ImGui.InputText("##NewFolderName", ref _newFolderName, 256))
+                {
+                    _createFolderError = "";
+                }
+
+                if (!string.IsNullOrEmpty(_createFolderError))
+                {
+                    ImGui.TextColored(new Vector4(1, 0, 0, 1), _createFolderError);
+                }
+
+                ImGui.Separator();
+
+                if (ImGui.Button("Create", new Vector2(100, 0)))
+                {
+                    if (CreateNewFolder())
+                    {
+                        _showCreateFolderPopup = false;
+                    }
+                }
+
+                ImGui.SameLine();
+
+                if (ImGui.Button("Cancel", new Vector2(100, 0)))
+                {
+                    _showCreateFolderPopup = false;
+                    _createFolderError = "";
+                }
+
+                ImGui.EndPopup();
+            }
+        }
+
+        private bool CreateNewFolder()
+        {
+            if (string.IsNullOrWhiteSpace(_newFolderName))
+            {
+                _createFolderError = "Folder name cannot be empty";
+                return false;
+            }
+
+            // Check for invalid characters
+            char[] invalidChars = Path.GetInvalidFileNameChars();
+            if (_newFolderName.Any(c => invalidChars.Contains(c)))
+            {
+                _createFolderError = "Folder name contains invalid characters";
+                return false;
+            }
+
+            string newFolderPath = Path.Combine(CurrentDirectory, _newFolderName);
+
+            if (Directory.Exists(newFolderPath))
+            {
+                _createFolderError = "A folder with this name already exists";
+                return false;
+            }
+
+            try
+            {
+                Directory.CreateDirectory(newFolderPath);
+                Logger.Log($"[ImGuiFileDialog] Created new folder: {newFolderPath}");
+
+                // Navigate to the new folder
+                CurrentDirectory = newFolderPath;
+                _selectedFileName = "";
+
+                return true;
+            }
+            catch (Exception ex)
+            {
+                _createFolderError = $"Error: {ex.Message}";
+                Logger.LogError($"[ImGuiFileDialog] Failed to create folder: {ex.Message}");
+                return false;
+            }
         }
 
         private bool HandleSelection()
@@ -520,17 +644,17 @@ namespace GeoscientistToolkit.UI.Utils
                     {
                         string currentExt = Path.GetExtension(fileName).ToLower();
                         bool hasValidExt = _allowedExtensions.Contains(currentExt);
-                        
+
                         if (!hasValidExt)
                         {
                             // Add the default extension if no valid extension present
                             fileName = Path.GetFileNameWithoutExtension(fileName) + _defaultExtension;
                         }
                     }
-                    
+
                     SelectedPath = Path.Combine(CurrentDirectory, fileName);
                     Logger.Log($"Saving file: {SelectedPath}");
-                    
+
                     // Check if file exists and prompt for overwrite
                     if (File.Exists(SelectedPath))
                     {
@@ -538,7 +662,7 @@ namespace GeoscientistToolkit.UI.Utils
                         // For now, we'll just allow overwriting
                         Logger.Log($"File will be overwritten: {SelectedPath}");
                     }
-                    
+
                     IsOpen = false;
                     return true;
                 }
