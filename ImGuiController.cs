@@ -1,10 +1,11 @@
-// GeoscientistToolkit/ImGuiController.cs (Fixed SPIR-V Cross-Compilation and Windows Compatibility)
+﻿// GeoscientistToolkit/ImGuiController.cs (Fixed SPIR-V Cross-Compilation and Windows Compatibility)
 using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Numerics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
+using System.IO;
 using System.Text;
 using ImGuiNET;
 using Veldrid;
@@ -51,6 +52,83 @@ namespace GeoscientistToolkit
 
             var io = ImGui.GetIO();
             io.Fonts.AddFontDefault();
+            unsafe
+            {
+                // Ranges we actually need:
+                // - Basic Latin + Latin-1 (© ® ° ×, etc.)
+                // - General Punctuation (– — … • ‘ ’ “ ”)
+                // - Letterlike Symbols (™)
+                // - Symbols (⛶ and friends)
+                ushort[] ranges = new ushort[]
+{
+    0x0020, 0x00FF, // Basic Latin + Latin-1 (© ® ° × ÷ …)
+    0x2000, 0x206F, // General Punctuation (– — … • NBSP, ZWJ/ZWNJ)
+    0x20A0, 0x20CF, // Currency Symbols (€ etc.)
+    0x2100, 0x214F, // Letterlike Symbols (™ ℹ)
+    0x2150, 0x218F, // Number Forms (⅓, etc.)
+    0x2190, 0x21FF, // Arrows (→ ↗ …)
+    0x2200, 0x22FF, // Mathematical Operators (± √ ≤ ≥ …)
+    0x2300, 0x23FF, // Misc Technical (⌘ ⌥ ⌫ …)
+    0x2460, 0x24FF, // Enclosed Alphanumerics (① ② …)
+    0x2500, 0x257F, // Box Drawing (│ ─ ┌ ┐ …)
+    0x2580, 0x259F, // Block Elements
+    0x25A0, 0x25FF, // Geometric Shapes (◆ ● ▸ …)
+    0x2600, 0x26FF, // Misc Symbols (★ ☑ ⛶ …)
+    0x2700, 0x27BF, // Dingbats (✓ ✗ ❗ ✦ …)
+    0x2B00, 0x2BFF, // Misc Symbols & Arrows
+    0xFE00, 0xFE0F, // Variation Selectors (VS16 etc., prevents fallback '?')
+    0                // terminator
+};
+
+
+                // Try broad coverage fonts first, then symbol packs.
+                string[] candidates;
+                if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+                {
+                    candidates = new[]
+                    {
+            @"C:\Windows\Fonts\segoeui.ttf",    // great coverage for punctuation
+            @"C:\Windows\Fonts\seguisym.ttf",   // symbol extras
+            @"C:\Windows\Fonts\arialuni.ttf"    // if present
+        };
+                }
+                else if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
+                {
+                    candidates = new[]
+                    {
+            "/System/Library/Fonts/Supplemental/Arial Unicode.ttf",
+            "/System/Library/Fonts/Apple Symbols.ttf",
+            "/System/Library/Fonts/Supplemental/Symbol.ttf"
+        };
+                }
+                else
+                {
+                    candidates = new[]
+                    {
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+            "/usr/share/fonts/truetype/noto/NotoSansSymbols2-Regular.ttf",
+            "/usr/share/fonts/truetype/freefont/FreeSans.ttf"
+        };
+                }
+
+                ImFontConfigPtr cfg = ImGuiNative.ImFontConfig_ImFontConfig();
+                cfg.MergeMode = true;     // merge into default font
+                cfg.PixelSnapH = true;
+
+                fixed (ushort* pRanges = ranges)
+                {
+                    // Merge from any fonts we find (don’t break after the first);
+                    // this maximizes coverage and eliminates stray '?'.
+                    foreach (var path in candidates)
+                    {
+                        if (File.Exists(path))
+                        {
+                            ImGui.GetIO().Fonts.AddFontFromFileTTF(path, 16f, cfg, (nint)pRanges);
+                        }
+                    }
+                }
+                cfg.Destroy();
+            }
             io.BackendFlags |= ImGuiBackendFlags.RendererHasVtxOffset;
             io.ConfigFlags |= ImGuiConfigFlags.DockingEnable | ImGuiConfigFlags.NavEnableKeyboard;
 

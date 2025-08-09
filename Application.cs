@@ -134,7 +134,7 @@ namespace GeoscientistToolkit
                         out _window,
                         out _graphicsDevice);
                 }
-
+                VeldridManager.MainWindow = _window;
                 _commandList = _graphicsDevice.ResourceFactory.CreateCommandList();
 
                 // Create minimal ImGui controller for loading screen

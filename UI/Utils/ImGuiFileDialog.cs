@@ -275,49 +275,37 @@ namespace GeoscientistToolkit.UI.Utils
         private void DrawPathNavigation()
         {
             string tempPath = CurrentDirectory;
-            float buttonWidth = 40f;
-            float createFolderButtonWidth = 100f;
-            float totalButtonWidth = buttonWidth + ImGui.GetStyle().ItemSpacing.X;
+            float upButtonWidth = 40f;
+            float newFolderButtonWidth = 100f;
 
-            // Add create folder button for directory selection mode
-            if (_dialogType == FileDialogType.OpenDirectory)
-            {
-                totalButtonWidth += createFolderButtonWidth + ImGui.GetStyle().ItemSpacing.X;
-            }
+            float totalButtons = upButtonWidth + newFolderButtonWidth + ImGui.GetStyle().ItemSpacing.X * 2;
+            ImGui.SetNextItemWidth(ImGui.GetContentRegionAvail().X - totalButtons);
 
-            ImGui.SetNextItemWidth(ImGui.GetContentRegionAvail().X - totalButtonWidth);
             if (ImGui.InputText("##Path", ref tempPath, 260))
             {
                 if (Directory.Exists(tempPath))
-                {
                     CurrentDirectory = tempPath;
-                }
             }
 
             ImGui.SameLine();
-            if (ImGui.Button("Up", new Vector2(buttonWidth, 0)))
+            if (ImGui.Button("Up", new Vector2(upButtonWidth, 0)))
             {
                 var parent = Directory.GetParent(CurrentDirectory);
                 if (parent != null)
-                {
                     CurrentDirectory = parent.FullName;
-                }
             }
 
-            // Add "Create Folder" button for directory selection mode
-            if (_dialogType == FileDialogType.OpenDirectory)
+            ImGui.SameLine();
+            if (ImGui.Button("New Folder", new Vector2(newFolderButtonWidth, 0)))
             {
-                ImGui.SameLine();
-                if (ImGui.Button("Create Folder", new Vector2(createFolderButtonWidth, 0)))
-                {
-                    _showCreateFolderPopup = true;
-                    _newFolderName = "New Folder";
-                    _createFolderError = "";
-                }
+                _showCreateFolderPopup = true;
+                _newFolderName = "New Folder";
+                _createFolderError = "";
             }
 
             ImGui.Separator();
         }
+
 
         private void DrawDrivePanel(Vector2 size)
         {

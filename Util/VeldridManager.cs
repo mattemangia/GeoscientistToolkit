@@ -3,6 +3,9 @@ using System;
 using System.Collections.Concurrent;
 using Veldrid;
 using ImGuiNET;
+using System.Runtime.InteropServices;
+using Veldrid.Sdl2;
+
 
 namespace GeoscientistToolkit.Util
 {
@@ -24,6 +27,21 @@ namespace GeoscientistToolkit.Util
 
         // Track ImGuiControllers by their context
         private static readonly Dictionary<IntPtr, ImGuiController> _controllersByContext = new Dictionary<IntPtr, ImGuiController>();
+
+        public static Sdl2Window MainWindow { get; set; }
+
+        public static bool IsFullScreenSupported => !RuntimeInformation.IsOSPlatform(OSPlatform.OSX);
+
+        public static bool IsFullScreen
+        {
+            get
+            {
+                var w = MainWindow;
+                if (w == null) return false;
+                var st = w.WindowState;
+                return st == WindowState.BorderlessFullScreen || st == WindowState.FullScreen;
+            }
+        }
 
         /// <summary>
         /// Registers an ImGuiController with its context
@@ -76,6 +94,15 @@ namespace GeoscientistToolkit.Util
                     Logger.Log($"Error executing main thread action: {ex.Message}");
                 }
             }
+        }
+
+        public static void ToggleFullScreen()
+        {
+            var w = MainWindow;
+            if (w == null || RuntimeInformation.IsOSPlatform(OSPlatform.OSX)) return;
+
+            // Borderless is safer (no mode switch) and works on Win/Linux
+            w.WindowState = IsFullScreen ? WindowState.Normal : WindowState.BorderlessFullScreen;
         }
     }
 }

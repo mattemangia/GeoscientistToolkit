@@ -1,6 +1,7 @@
 // GeoscientistToolkit/UI/MainWindow.cs — Fixed to properly handle dataset removal
 using System;
 using System.Collections.Generic;
+using System.Runtime.InteropServices;
 using System.Linq;
 using System.Numerics;
 using GeoscientistToolkit.Business;
@@ -340,10 +341,18 @@ namespace GeoscientistToolkit.UI
                 ImGui.MenuItem("Properties Panel", string.Empty, ref _showProperties);
                 ImGui.MenuItem("Log Panel", string.Empty, ref _showLog);
                 ImGui.Separator();
+
+                // Full Screen toggle (disabled on macOS)
+                bool fsSupported = GeoscientistToolkit.Util.VeldridManager.IsFullScreenSupported;
+                bool isFs = GeoscientistToolkit.Util.VeldridManager.IsFullScreen;
+                if (ImGui.MenuItem("Full Screen (F11)", string.Empty, isFs, fsSupported))
+                {
+                    GeoscientistToolkit.Util.VeldridManager.ToggleFullScreen();
+                }
+
                 if (ImGui.MenuItem("Reset Layout")) _layoutBuilt = false;
                 ImGui.EndMenu();
             }
-
             if (ImGui.BeginMenu("Help"))
             {
                 if (ImGui.MenuItem("About")) _showAboutPopup = true;
@@ -363,7 +372,34 @@ namespace GeoscientistToolkit.UI
 
                 ImGui.EndMenu();
             }
+            if (GeoscientistToolkit.Util.VeldridManager.IsFullScreenSupported)
+            {
+                // Space to the far right
+                float frameH = ImGui.GetTextLineHeight() + ImGui.GetStyle().FramePadding.Y * 2f;
+                string icon = GeoscientistToolkit.Util.VeldridManager.IsFullScreen ? "🗗" : "⛶";
 
+                Vector2 iconSize = ImGui.CalcTextSize(icon);
+                float btnW = iconSize.X + ImGui.GetStyle().FramePadding.X * 2f;
+                float posX = ImGui.GetCursorPosX() + ImGui.GetContentRegionAvail().X - btnW;
+
+                ImGui.SameLine();
+                ImGui.SetCursorPosX(posX);
+
+                if (ImGui.Button(icon, new Vector2(btnW, frameH)))
+                {
+                    GeoscientistToolkit.Util.VeldridManager.ToggleFullScreen();
+                }
+                if (ImGui.IsItemHovered())
+                    ImGui.SetTooltip("Toggle Full Screen (F11)");
+            }
+
+            // Keyboard shortcut (F11)
+            if (ImGui.IsKeyPressed(ImGuiKey.F11))
+            {
+                GeoscientistToolkit.Util.VeldridManager.ToggleFullScreen();
+            }
+
+           
             ImGui.EndMenuBar();
         }
 
@@ -502,7 +538,7 @@ namespace GeoscientistToolkit.UI
             {
                 ImGui.Text("Welcome to GeoscientistToolkit!");
                 ImGui.Separator();
-                ImGui.TextWrapped("Import data via File → Import Data. Use the 🔲 button to pop-out panels.");
+                ImGui.TextWrapped("Import data via File → Import Data. Use the 'Pop-Out' button to pop-out panels.");
                 ImGui.Spacing();
                 if (ImGui.Button("Let's go!", new Vector2(100, 0))) ImGui.CloseCurrentPopup();
 

@@ -35,7 +35,10 @@ namespace GeoscientistToolkit.UI.Utils
         private int _selectedExtensionIndex = 0;
         private List<VolumeInfo> _availableVolumes = new List<VolumeInfo>();
         private float _drivePanelWidth = 180f;
-
+        
+        private bool _showCreateFolderPopup = false;
+        private string _newFolderName = "";
+        private string _createFolderError = "";
         private class VolumeInfo
         {
             public string Path { get; set; }
@@ -238,7 +241,9 @@ namespace GeoscientistToolkit.UI.Utils
                 CurrentDirectory = startingPath;
             else
                 CurrentDirectory = Directory.GetCurrentDirectory();
-
+            _showCreateFolderPopup = false;
+            _newFolderName = "";
+            _createFolderError = "";
             RefreshDrives();
         }
 
@@ -277,6 +282,10 @@ namespace GeoscientistToolkit.UI.Utils
 
                     DrawBottomControls(ref selectionMade);
                     ImGui.End();
+                }
+                if (_showCreateFolderPopup)
+                {
+                    DrawCreateFolderPopup();
                 }
             }
             return selectionMade;
@@ -348,13 +357,15 @@ namespace GeoscientistToolkit.UI.Utils
         {
             string tempPath = CurrentDirectory;
             float upButtonWidth = 40f;
-            ImGui.SetNextItemWidth(ImGui.GetContentRegionAvail().X - upButtonWidth - ImGui.GetStyle().ItemSpacing.X);
+            float newFolderButtonWidth = 100f;
+
+            float totalButtons = upButtonWidth + newFolderButtonWidth + ImGui.GetStyle().ItemSpacing.X * 2;
+            ImGui.SetNextItemWidth(ImGui.GetContentRegionAvail().X - totalButtons);
+
             if (ImGui.InputText("##Path", ref tempPath, 260))
             {
                 if (Directory.Exists(tempPath))
-                {
                     CurrentDirectory = tempPath;
-                }
             }
 
             ImGui.SameLine();
@@ -362,13 +373,101 @@ namespace GeoscientistToolkit.UI.Utils
             {
                 var parent = Directory.GetParent(CurrentDirectory);
                 if (parent != null)
-                {
                     CurrentDirectory = parent.FullName;
-                }
             }
+
+            ImGui.SameLine();
+            if (ImGui.Button("New Folder", new Vector2(newFolderButtonWidth, 0)))
+            {
+                _showCreateFolderPopup = true;
+                _newFolderName = "New Folder";
+                _createFolderError = "";
+            }
+
             ImGui.Separator();
         }
+        private void DrawCreateFolderPopup()
+        {
+            ImGui.OpenPopup("Create New Folder");
 
+            var center = ImGui.GetMainViewport().GetCenter();
+            ImGui.SetNextWindowPos(center, ImGuiCond.Appearing, new Vector2(0.5f, 0.5f));
+
+            if (ImGui.BeginPopupModal("Create New Folder", ref _showCreateFolderPopup,
+                ImGuiWindowFlags.AlwaysAutoResize | ImGuiWindowFlags.NoMove))
+            {
+                ImGui.Text("Enter folder name:");
+                ImGui.SetNextItemWidth(300);
+                if (ImGui.InputText("##NewFolderName", ref _newFolderName, 256))
+                {
+                    _createFolderError = "";
+                }
+
+                if (!string.IsNullOrEmpty(_createFolderError))
+                {
+                    ImGui.TextColored(new Vector4(1, 0, 0, 1), _createFolderError);
+                }
+
+                ImGui.Separator();
+
+                if (ImGui.Button("Create", new Vector2(100, 0)))
+                {
+                    if (CreateNewFolder())
+                        _showCreateFolderPopup = false;
+                }
+
+                ImGui.SameLine();
+
+                if (ImGui.Button("Cancel", new Vector2(100, 0)))
+                {
+                    _showCreateFolderPopup = false;
+                    _createFolderError = "";
+                }
+
+                ImGui.EndPopup();
+            }
+        }
+
+        private bool CreateNewFolder()
+        {
+            if (string.IsNullOrWhiteSpace(_newFolderName))
+            {
+                _createFolderError = "Folder name cannot be empty";
+                return false;
+            }
+
+            char[] invalidChars = Path.GetInvalidFileNameChars();
+            if (_newFolderName.Any(c => invalidChars.Contains(c)))
+            {
+                _createFolderError = "Folder name contains invalid characters";
+                return false;
+            }
+
+            string newFolderPath = Path.Combine(CurrentDirectory, _newFolderName);
+
+            if (Directory.Exists(newFolderPath))
+            {
+                _createFolderError = "A folder with this name already exists";
+                return false;
+            }
+
+            try
+            {
+                Directory.CreateDirectory(newFolderPath);
+                Logger.Log($"[ImGuiExportFileDialog] Created new folder: {newFolderPath}");
+
+                // Navigate into the new folder and clear selection
+                CurrentDirectory = newFolderPath;
+                _selectedFileNameInList = "";
+                return true;
+            }
+            catch (Exception ex)
+            {
+                _createFolderError = $"Error: {ex.Message}";
+                Logger.LogError($"[ImGuiExportFileDialog] Failed to create folder: {ex.Message}");
+                return false;
+            }
+        }
         private void DrawFileList(Vector2 size)
         {
             if (ImGui.BeginChild("##FileList", size, ImGuiChildFlags.Border))
