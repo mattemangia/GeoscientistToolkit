@@ -386,6 +386,7 @@ namespace GeoscientistToolkit.Data.Mesh3D
                 BoundingBoxMin = BoundingBoxMin,
                 BoundingBoxMax = BoundingBoxMax,
                 Center = Center
+                // Metadata will be handled by ProjectSerializer
             };
         }
     }

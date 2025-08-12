@@ -151,6 +151,7 @@ namespace GeoscientistToolkit.Data.CtImageStack
                 SliceThickness = this.SliceThickness,
                 Unit = this.Unit,
                 BinningSize = this.BinningSize,
+                // Metadata will be handled by ProjectSerializer
             };
 
             if (this.Materials != null)

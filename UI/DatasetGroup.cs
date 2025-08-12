@@ -57,13 +57,16 @@ namespace GeoscientistToolkit.Data
                 TypeName = nameof(DatasetGroup),
                 Name = this.Name,
                 FilePath = this.FilePath
+                // Metadata will be handled by ProjectSerializer
             };
 
             foreach (var dataset in Datasets)
             {
                 if (dataset is ISerializableDataset serializable)
                 {
-                    dto.Datasets.Add((DatasetDTO)serializable.ToSerializableObject());
+                    var childDto = (DatasetDTO)serializable.ToSerializableObject();
+                    // Child metadata will be handled by ProjectSerializer
+                    dto.Datasets.Add(childDto);
                 }
             }
 

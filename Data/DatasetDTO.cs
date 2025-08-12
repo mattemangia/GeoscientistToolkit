@@ -10,6 +10,38 @@ namespace GeoscientistToolkit.Data
         public string TypeName { get; set; }
         public string Name { get; set; }
         public string FilePath { get; set; }
+        public DatasetMetadataDTO Metadata { get; set; } = new DatasetMetadataDTO();
+        
+    }
+    public class ProjectMetadataDTO
+    {
+        public string Organisation { get; set; }
+        public string Department { get; set; }
+        public int? Year { get; set; }
+        public string Expedition { get; set; }
+        public string Author { get; set; }
+        public string ProjectDescription { get; set; }
+        public DateTime? StartDate { get; set; }
+        public DateTime? EndDate { get; set; }
+        public string FundingSource { get; set; }
+        public string License { get; set; }
+        public Dictionary<string, string> CustomFields { get; set; } = new Dictionary<string, string>();
+    }
+    public class DatasetMetadataDTO
+    {
+        public string SampleName { get; set; }
+        public string LocationName { get; set; }
+        public double? Latitude { get; set; }
+        public double? Longitude { get; set; }
+        public double? Depth { get; set; }
+        public float? SizeX { get; set; }
+        public float? SizeY { get; set; }
+        public float? SizeZ { get; set; }
+        public string SizeUnit { get; set; }
+        public DateTime? CollectionDate { get; set; }
+        public string Collector { get; set; }
+        public string Notes { get; set; }
+        public Dictionary<string, string> CustomFields { get; set; } = new Dictionary<string, string>();
     }
     public class TableDatasetDTO : DatasetDTO
     {
@@ -65,6 +97,7 @@ namespace GeoscientistToolkit.Data
     {
         public string ProjectName { get; set; }
         public List<DatasetDTO> Datasets { get; set; } = new List<DatasetDTO>();
+        public ProjectMetadataDTO ProjectMetadata { get; set; } = new ProjectMetadataDTO();
     }
     public class StreamingCtVolumeDatasetDTO : DatasetDTO
     {

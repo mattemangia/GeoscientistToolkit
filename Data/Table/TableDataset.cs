@@ -526,6 +526,7 @@ namespace GeoscientistToolkit.Data.Table
                 ColumnCount = ColumnCount,
                 ColumnNames = ColumnNames,
                 ColumnTypes = ColumnTypes.Select(t => t.FullName).ToList()
+                // Metadata will be handled by ProjectSerializer
             };
         }
     }

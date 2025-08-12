@@ -52,6 +52,9 @@ namespace GeoscientistToolkit.UI
         private float _autoBackupTimer = 0f;
 
         private Dataset? _selectedDataset;
+        
+        private readonly ProjectMetadataEditor _projectMetadataEditor = new();
+        private readonly MetadataTableViewer _metadataTableViewer = new();
 
         public MainWindow()
         {
@@ -116,10 +119,22 @@ namespace GeoscientistToolkit.UI
                                                ImGuiWindowFlags.NoMove | ImGuiWindowFlags.NoBringToFrontOnFocus |
                                                ImGuiWindowFlags.NoNavFocus | ImGuiWindowFlags.MenuBar;
 
-            ImGui.Begin("GeoscientistToolkit DockSpace", rootFlags);
+            // NEW: Add project name to window title
+            string windowTitle = "GeoscientistToolkit";
+            if (!string.IsNullOrEmpty(ProjectManager.Instance.ProjectName))
+            {
+                windowTitle = $"GeoscientistToolkit - {ProjectManager.Instance.ProjectName}";
+                if (ProjectManager.Instance.HasUnsavedChanges)
+                {
+                    windowTitle += " *";
+                }
+            }
+            
+            ImGui.Begin(windowTitle + "###GeoscientistToolkit DockSpace", rootFlags);
             ImGui.PopStyleVar(3);
 
             SubmitMainMenu();
+
 
             uint dockspaceId = ImGui.GetID("RootDockSpace");
             ImGui.DockSpace(dockspaceId, Vector2.Zero, ImGuiDockNodeFlags.None);
@@ -175,6 +190,9 @@ namespace GeoscientistToolkit.UI
             // --- ADD THIS LINE ---
             _volume3DDebugWindow.Submit();
 
+            _projectMetadataEditor.Submit();
+            _metadataTableViewer.Submit();
+            
             ImGui.End();
         }
 
@@ -262,7 +280,20 @@ namespace GeoscientistToolkit.UI
         private void SubmitMainMenu()
         {
             if (!ImGui.BeginMenuBar()) return;
-
+            
+            // NEW: Display project name in menu bar
+            ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(0.8f, 0.8f, 0.8f, 1.0f));
+            if (!string.IsNullOrEmpty(ProjectManager.Instance.ProjectName))
+            {
+                string projectDisplay = $"Project: {ProjectManager.Instance.ProjectName}";
+                if (ProjectManager.Instance.HasUnsavedChanges)
+                {
+                    projectDisplay += " *";
+                }
+                ImGui.Text(projectDisplay);
+                ImGui.Separator();
+            }
+            ImGui.PopStyleColor();
             if (ImGui.BeginMenu("File"))
             {
                 if (ImGui.MenuItem("New Project")) TryOnNewProject();
@@ -351,6 +382,36 @@ namespace GeoscientistToolkit.UI
                 }
 
                 if (ImGui.MenuItem("Reset Layout")) _layoutBuilt = false;
+                ImGui.EndMenu();
+            }
+            if (ImGui.BeginMenu("Metadata"))
+            {
+                if (ImGui.MenuItem("Edit Project Metadata..."))
+                {
+                    _projectMetadataEditor.Open();
+                }
+                
+                ImGui.Separator();
+                
+                if (ImGui.MenuItem("View All Dataset Metadata..."))
+                {
+                    _metadataTableViewer.Open();
+                }
+                
+                ImGui.Separator();
+                
+                if (ImGui.MenuItem("Export Metadata to CSV..."))
+                {
+                    _metadataTableViewer.Open();
+                    // The export dialog will be handled within the viewer
+                }
+                
+                if (ImGui.MenuItem("Export Metadata to Excel..."))
+                {
+                    _metadataTableViewer.Open();
+                    // The export dialog will be handled within the viewer
+                }
+                
                 ImGui.EndMenu();
             }
             if (ImGui.BeginMenu("Help"))

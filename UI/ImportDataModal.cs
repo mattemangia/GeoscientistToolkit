@@ -1,4 +1,4 @@
-// GeoscientistToolkit/UI/ImportDataModal.cs  
+// GeoscientistToolkit/UI/ImportDataModal.cs - Complete with GIS Integration
 using System;
 using System.Data;
 using System.IO;
@@ -23,6 +23,7 @@ namespace GeoscientistToolkit.UI
         private readonly ImGuiFileDialog _tiffDialog;
         private readonly ImGuiFileDialog _mesh3DDialog;
         private readonly ImGuiFileDialog _tableDialog;
+        private readonly ImGuiFileDialog _gisDialog;
         private readonly ImageStackOrganizerDialog _organizerDialog;
 
         // Loaders
@@ -32,6 +33,7 @@ namespace GeoscientistToolkit.UI
         private readonly Mesh3DLoader _mesh3DLoader;
         private readonly LabeledVolumeLoaderWrapper _labeledVolumeLoader;
         private readonly TableLoader _tableLoader;
+        private readonly GISLoader _gisLoader;
 
         private int _selectedDatasetTypeIndex = 0;
         private readonly string[] _datasetTypeNames = {
@@ -41,7 +43,8 @@ namespace GeoscientistToolkit.UI
             "CT Image Stack (Legacy for 2D Editing)",
             "3D Object (OBJ/STL)",
             "Labeled Volume Stack (Color-coded Materials)",
-            "Table/Spreadsheet (CSV/TSV)"
+            "Table/Spreadsheet (CSV/TSV)",
+            "GIS Map (Shapefile/GeoJSON/KML)"
         };
 
         private readonly string[] _pixelSizeUnits = { "µm", "mm" };
@@ -59,6 +62,7 @@ namespace GeoscientistToolkit.UI
             _tiffDialog = new ImGuiFileDialog("ImportTiffDialog", FileDialogType.OpenFile, "Select TIFF File");
             _mesh3DDialog = new ImGuiFileDialog("Import3DDialog", FileDialogType.OpenFile, "Select 3D Model");
             _tableDialog = new ImGuiFileDialog("ImportTableDialog", FileDialogType.OpenFile, "Select Table File");
+            _gisDialog = new ImGuiFileDialog("ImportGISDialog", FileDialogType.OpenFile, "Select GIS File");
             _organizerDialog = new ImageStackOrganizerDialog();
 
             // Initialize loaders
@@ -68,6 +72,7 @@ namespace GeoscientistToolkit.UI
             _mesh3DLoader = new Mesh3DLoader();
             _labeledVolumeLoader = new LabeledVolumeLoaderWrapper();
             _tableLoader = new TableLoader();
+            _gisLoader = new GISLoader();
         }
 
         public void Open()
@@ -177,6 +182,11 @@ namespace GeoscientistToolkit.UI
             {
                 _tableLoader.FilePath = _tableDialog.SelectedPath;
             }
+            
+            if (_gisDialog.Submit())
+            {
+                _gisLoader.FilePath = _gisDialog.SelectedPath;
+            }
         }
 
         private void DrawOptions()
@@ -212,6 +222,9 @@ namespace GeoscientistToolkit.UI
                 case 6: // Table/Spreadsheet
                     DrawTableOptions();
                     break;
+                case 7: // GIS Map
+                    DrawGISOptions();
+                    break;
             }
 
             ImGui.SetCursorPosY(ImGui.GetWindowHeight() - ImGui.GetFrameHeightWithSpacing() * 1.5f);
@@ -235,8 +248,9 @@ namespace GeoscientistToolkit.UI
             ImGui.Spacing();
             ImGui.Text("Pixel Size (optional):");
             ImGui.SetNextItemWidth(150);
-            float PixelSize = _singleImageLoader.PixelSize;
-            ImGui.InputFloat("##PixelSizeSingle", ref PixelSize, 0.1f, 1.0f, "%.3f");
+            float pixelSize = _singleImageLoader.PixelSize;
+            ImGui.InputFloat("##PixelSizeSingle", ref pixelSize, 0.1f, 1.0f, "%.3f");
+            _singleImageLoader.PixelSize = pixelSize;
             ImGui.SameLine();
             ImGui.SetNextItemWidth(80);
             int unitIndex = (int)_singleImageLoader.Unit;
@@ -336,8 +350,9 @@ namespace GeoscientistToolkit.UI
             ImGui.Spacing();
             ImGui.Text("Voxel Size:");
             ImGui.SetNextItemWidth(150);
-            float PixelSize = _ctStackLoader.PixelSize;
-            ImGui.InputFloat("##PixelSizeCT", ref PixelSize, 0.1f, 1.0f, "%.3f");
+            float pixelSize = _ctStackLoader.PixelSize;
+            ImGui.InputFloat("##PixelSizeCT", ref pixelSize, 0.1f, 1.0f, "%.3f");
+            _ctStackLoader.PixelSize = pixelSize;
             ImGui.SameLine();
             ImGui.SetNextItemWidth(80);
             int unitIndex = (int)_ctStackLoader.Unit;
@@ -392,8 +407,9 @@ namespace GeoscientistToolkit.UI
             ImGui.Spacing();
             ImGui.Text("Scale Factor:");
             ImGui.SetNextItemWidth(150);
-            float Scale = _mesh3DLoader.Scale;
-            ImGui.InputFloat("##3DScale", ref Scale, 0.1f, 1.0f, "%.3f");
+            float scale = _mesh3DLoader.Scale;
+            ImGui.InputFloat("##3DScale", ref scale, 0.1f, 1.0f, "%.3f");
+            _mesh3DLoader.Scale = scale;
             if (ImGui.IsItemHovered())
             {
                 ImGui.SetTooltip("Scale factor to apply when loading the model. 1.0 = original size.");
@@ -470,8 +486,9 @@ namespace GeoscientistToolkit.UI
             ImGui.Spacing();
             ImGui.Text("Voxel Size:");
             ImGui.SetNextItemWidth(150);
-            float PixelSize=_labeledVolumeLoader.PixelSize;
-            ImGui.InputFloat("##PixelSizeLabeled", ref PixelSize, 0.1f, 1.0f, "%.3f");
+            float pixelSize = _labeledVolumeLoader.PixelSize;
+            ImGui.InputFloat("##PixelSizeLabeled", ref pixelSize, 0.1f, 1.0f, "%.3f");
+            _labeledVolumeLoader.PixelSize = pixelSize;
             ImGui.SameLine();
             ImGui.SetNextItemWidth(80);
             int unitIndex = (int)_labeledVolumeLoader.Unit;
@@ -542,8 +559,9 @@ namespace GeoscientistToolkit.UI
             }
             
             ImGui.Spacing();
-            bool HasHeaders=_tableLoader.HasHeaders;
-            ImGui.Checkbox("First row contains headers", ref HasHeaders);
+            bool hasHeaders = _tableLoader.HasHeaders;
+            ImGui.Checkbox("First row contains headers", ref hasHeaders);
+            _tableLoader.HasHeaders = hasHeaders;
             
             ImGui.Text("Text Encoding:");
             ImGui.SameLine();
@@ -609,6 +627,99 @@ namespace GeoscientistToolkit.UI
                 }
             }
         }
+        
+        private void DrawGISOptions()
+        {
+            ImGui.TextWrapped("Import GIS data or create a new empty map for editing.");
+            
+            ImGui.Spacing();
+            ImGui.Separator();
+            ImGui.Spacing();
+            
+            // Create empty or load file
+            bool createEmpty = _gisLoader.CreateEmpty;
+            if (ImGui.RadioButton("Create Empty Map", createEmpty))
+            {
+                _gisLoader.CreateEmpty = true;
+                _gisLoader.FilePath = "";
+            }
+            ImGui.SameLine();
+            if (ImGui.RadioButton("Load GIS File", !createEmpty))
+            {
+                _gisLoader.CreateEmpty = false;
+            }
+            
+            ImGui.Spacing();
+            
+            if (_gisLoader.CreateEmpty)
+            {
+                ImGui.Text("Map Name:");
+                ImGui.SetNextItemWidth(300);
+                string name = _gisLoader.DatasetName ?? "New Map";
+                if (ImGui.InputText("##MapName", ref name, 256))
+                {
+                    _gisLoader.DatasetName = name;
+                }
+                
+                ImGui.Spacing();
+                ImGui.TextColored(new Vector4(0.0f, 1.0f, 0.5f, 1.0f), 
+                    "✓ Ready to create empty map");
+            }
+            else
+            {
+                ImGui.Text("GIS File:");
+                var path = _gisLoader.FilePath ?? "";
+                ImGui.InputText("##GISPath", ref path, 260, ImGuiInputTextFlags.ReadOnly);
+                ImGui.SameLine();
+                if (ImGui.Button("Browse...##GISFile"))
+                {
+                    string[] gisExtensions = { ".shp", ".geojson", ".json", ".kml", ".kmz", ".tif", ".tiff" };
+                    _gisDialog.Open(null, gisExtensions);
+                }
+                
+                var info = _gisLoader.GetFileInfo();
+                if (info != null && !string.IsNullOrEmpty(info.FileName))
+                {
+                    ImGui.Spacing();
+                    ImGui.Separator();
+                    ImGui.Spacing();
+                    ImGui.Text("File Information:");
+                    ImGui.BulletText($"File: {info.FileName}");
+                    ImGui.BulletText($"Type: {info.Type}");
+                    ImGui.BulletText($"Size: {info.FileSize / 1024} KB");
+                    
+                    if (info.Type == "Shapefile")
+                    {
+                        ImGui.Spacing();
+                        ImGui.Text("Shapefile Components:");
+                        DrawCheckmark(info.HasShx, ".shx (Index)");
+                        DrawCheckmark(info.HasDbf, ".dbf (Attributes)");
+                        DrawCheckmark(info.HasPrj, ".prj (Projection)");
+                    }
+                    
+                    if (info.IsValid)
+                    {
+                        ImGui.TextColored(new Vector4(0.0f, 1.0f, 0.5f, 1.0f), 
+                            "✓ Ready to import");
+                    }
+                   
+                }
+            }
+        }
+        
+        private void DrawCheckmark(bool hasComponent, string label)
+        {
+            if (hasComponent)
+            {
+                ImGui.TextColored(new Vector4(0.0f, 1.0f, 0.0f, 1.0f), "✓");
+            }
+            else
+            {
+                ImGui.TextColored(new Vector4(1.0f, 0.0f, 0.0f, 1.0f), "✗");
+            }
+            ImGui.SameLine();
+            ImGui.Text(label);
+        }
 
         private void DrawButtons()
         {
@@ -635,6 +746,7 @@ namespace GeoscientistToolkit.UI
                 4 => _mesh3DLoader,
                 5 => _labeledVolumeLoader,
                 6 => _tableLoader,
+                7 => _gisLoader,
                 _ => null
             };
         }
@@ -698,6 +810,7 @@ namespace GeoscientistToolkit.UI
             _mesh3DLoader.Reset();
             _labeledVolumeLoader.Reset();
             _tableLoader.Reset();
+            _gisLoader.Reset();
 
             // Reset state
             _importTask = null;

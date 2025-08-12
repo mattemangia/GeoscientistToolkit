@@ -108,6 +108,7 @@ namespace GeoscientistToolkit.Data.Image
                 FilePath = this.FilePath,
                 PixelSize = this.PixelSize,
                 Unit = this.Unit
+                // Metadata will be handled by ProjectSerializer
             };
         }
     }

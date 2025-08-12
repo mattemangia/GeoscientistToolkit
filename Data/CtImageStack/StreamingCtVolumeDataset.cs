@@ -114,18 +114,13 @@ namespace GeoscientistToolkit.Data.CtImageStack
 
         public object ToSerializableObject()
         {
-            if (EditablePartner == null)
-            {
-                Logger.LogWarning($"[StreamingCtVolumeDataset] Cannot serialize '{Name}' because its EditablePartner is not set.");
-                return null; // Or handle this case as needed
-            }
-
             return new StreamingCtVolumeDatasetDTO
             {
                 TypeName = nameof(StreamingCtVolumeDataset),
                 Name = this.Name,
                 FilePath = this.FilePath,
-                PartnerFilePath = this.EditablePartner.FilePath
+                PartnerFilePath = EditablePartner?.FilePath ?? ""
+                // Metadata will be handled by ProjectSerializer
             };
         }
 

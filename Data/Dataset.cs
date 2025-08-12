@@ -1,4 +1,8 @@
-// GeoscientistToolkit/Data/Dataset.cs
+// GeoscientistToolkit/Data/Dataset.cs (Modified)
+using System;
+using System.Collections.Generic;
+using System.IO;
+
 namespace GeoscientistToolkit.Data
 {
     public enum DatasetType
@@ -11,7 +15,8 @@ namespace GeoscientistToolkit.Data
         SingleImage,
         Group,
         Mesh3D,
-        Table
+        Table,
+        GIS
     }
 
     public abstract class Dataset
@@ -22,12 +27,18 @@ namespace GeoscientistToolkit.Data
         public DateTime DateCreated { get; set; }
         public DateTime DateModified { get; set; }
         public Dictionary<string, object> Metadata { get; set; } = new Dictionary<string, object>();
-        public bool IsMissing { get; set; } = false; // To mark if the source file is not found on load
+        public bool IsMissing { get; set; } = false;
+        
+        // NEW: Dataset-specific metadata
+        public DatasetMetadata DatasetMetadata { get; set; } = new DatasetMetadata();
 
         protected Dataset(string name, string filePath)
         {
             Name = name;
             FilePath = filePath;
+            
+            // Initialize DatasetMetadata with sample name
+            DatasetMetadata.SampleName = name;
             
             if (File.Exists(filePath))
             {

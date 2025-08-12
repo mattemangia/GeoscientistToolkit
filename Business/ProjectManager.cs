@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.IO.Compression;
 using System.Linq;
+using System.Numerics;
 using GeoscientistToolkit.Data;
 using GeoscientistToolkit.Data.CtImageStack;
 using GeoscientistToolkit.Data.Image;
@@ -27,6 +28,9 @@ namespace GeoscientistToolkit.Business
         public string ProjectName { get; set; } = "Untitled Project";
         public string ProjectPath { get; set; }
         public bool HasUnsavedChanges { get; set; }
+        
+        // NEW: Project-level metadata
+        public ProjectMetadata ProjectMetadata { get; set; } = new ProjectMetadata();
 
         public event Action<Dataset> DatasetRemoved;
         public event Action<Dataset> DatasetDataChanged;
@@ -46,6 +50,9 @@ namespace GeoscientistToolkit.Business
             ProjectName = "Untitled Project";
             ProjectPath = null;
             HasUnsavedChanges = false;
+            
+            // Reset project metadata
+            ProjectMetadata = new ProjectMetadata();
 
             Logger.Log("Created new project");
         }
@@ -109,7 +116,7 @@ namespace GeoscientistToolkit.Business
                 return;
             }
 
-            // --- MODIFIED: Save associated binary data and materials ---
+            // Save associated binary data and materials
             Logger.Log("Saving underlying binary data for all datasets...");
             foreach (var dataset in LoadedDatasets)
             {
@@ -119,7 +126,6 @@ namespace GeoscientistToolkit.Business
                     ctDataset.SaveMaterials();
                 }
             }
-            // --- END MODIFICATION ---
 
             ProjectSerializer.SaveProject(this, path);
             ProjectPath = path;
@@ -203,6 +209,12 @@ namespace GeoscientistToolkit.Business
 
             ProjectName = projectDto.ProjectName;
             ProjectPath = path;
+            
+            // Load project metadata
+            if (projectDto.ProjectMetadata != null)
+            {
+                ProjectMetadata = ConvertFromProjectMetadataDTO(projectDto.ProjectMetadata);
+            }
 
             var createdDatasets = new Dictionary<string, Dataset>();
             var streamingDtos = new List<StreamingCtVolumeDatasetDTO>();
@@ -221,7 +233,7 @@ namespace GeoscientistToolkit.Business
                     {
                         createdDatasets[dataset.FilePath] = dataset;
 
-                        // FIX: Load the dataset data (including labels) if it's not missing
+                        // Load the dataset data (including labels) if it's not missing
                         if (!dataset.IsMissing)
                         {
                             try
@@ -246,7 +258,7 @@ namespace GeoscientistToolkit.Business
                 {
                     createdDatasets[sDto.FilePath] = dataset;
 
-                    // FIX: Load streaming dataset if not missing
+                    // Load streaming dataset if not missing
                     if (!dataset.IsMissing)
                     {
                         try
@@ -271,6 +283,8 @@ namespace GeoscientistToolkit.Business
 
         private Dataset CreateDatasetFromDTO(DatasetDTO dto, IReadOnlyDictionary<string, Dataset> partners)
         {
+            Dataset dataset = null;
+            
             switch (dto)
             {
                 case StreamingCtVolumeDatasetDTO sDto:
@@ -294,7 +308,9 @@ namespace GeoscientistToolkit.Business
                     {
                         Logger.LogError($"Could not find editable partner for streaming dataset '{sDto.Name}' at path '{sDto.PartnerFilePath}'.");
                     }
-                    return streamingDataset;
+                    dataset = streamingDataset;
+                    break;
+                    
                 case Mesh3DDatasetDTO mesh3DDto:
                     var mesh3DDataset = new Mesh3DDataset(mesh3DDto.Name, mesh3DDto.FilePath)
                     {
@@ -309,7 +325,9 @@ namespace GeoscientistToolkit.Business
                     };
                     if (mesh3DDataset.IsMissing) 
                         Logger.LogWarning($"Source file not found for 3D model: {mesh3DDto.Name} at {mesh3DDto.FilePath}");
-                    return mesh3DDataset;
+                    dataset = mesh3DDataset;
+                    break;
+                    
                 case TableDatasetDTO tableDto:
                     var tableDataset = new TableDataset(tableDto.Name, tableDto.FilePath)
                     {
@@ -321,8 +339,8 @@ namespace GeoscientistToolkit.Business
                     };
                     if (tableDataset.IsMissing)
                         Logger.LogWarning($"Source file not found for table: {tableDto.Name} at {tableDto.FilePath}");
-                    return tableDataset;
-
+                    dataset = tableDataset;
+                    break;
 
                 case CtImageStackDatasetDTO ctDto:
                     var ctDataset = new CtImageStackDataset(ctDto.Name, ctDto.FilePath)
@@ -358,8 +376,8 @@ namespace GeoscientistToolkit.Business
                     {
                         Logger.LogWarning($"Source folder not found for dataset: {ctDto.Name} at {ctDto.FilePath}");
                     }
-
-                    return ctDataset;
+                    dataset = ctDataset;
+                    break;
 
                 case ImageDatasetDTO imgDto:
                     var imgDataset = new ImageDataset(imgDto.Name, imgDto.FilePath)
@@ -372,23 +390,80 @@ namespace GeoscientistToolkit.Business
                     {
                         Logger.LogWarning($"Source file not found for dataset: {imgDataset.Name} at {imgDataset.FilePath}");
                     }
-                    return imgDataset;
+                    dataset = imgDataset;
+                    break;
 
                 case DatasetGroupDTO groupDto:
                     var childDatasets = new List<Dataset>();
                     foreach (var childDto in groupDto.Datasets)
                     {
-                        if (partners != null && partners.TryGetValue(childDto.FilePath, out var child))
+                        var childDataset = CreateDatasetFromDTO(childDto, partners);
+                        if (childDataset != null)
                         {
-                            childDatasets.Add(child);
+                            childDatasets.Add(childDataset);
                         }
                     }
-                    return new DatasetGroup(groupDto.Name, childDatasets);
+                    dataset = new DatasetGroup(groupDto.Name, childDatasets);
+                    break;
 
                 default:
                     Logger.LogError($"Unknown dataset type '{dto.TypeName}' encountered during project load.");
                     return null;
             }
+            
+            // Apply metadata if dataset was created successfully
+            if (dataset != null && dto.Metadata != null)
+            {
+                dataset.DatasetMetadata = ConvertFromDatasetMetadataDTO(dto.Metadata);
+            }
+            
+            return dataset;
+        }
+        
+        private DatasetMetadata ConvertFromDatasetMetadataDTO(DatasetMetadataDTO dto)
+        {
+            if (dto == null) return new DatasetMetadata();
+            
+            var meta = new DatasetMetadata
+            {
+                SampleName = dto.SampleName,
+                LocationName = dto.LocationName,
+                Latitude = dto.Latitude,
+                Longitude = dto.Longitude,
+                Depth = dto.Depth,
+                SizeUnit = dto.SizeUnit,
+                CollectionDate = dto.CollectionDate,
+                Collector = dto.Collector,
+                Notes = dto.Notes,
+                CustomFields = new Dictionary<string, string>(dto.CustomFields ?? new Dictionary<string, string>())
+            };
+            
+            if (dto.SizeX.HasValue && dto.SizeY.HasValue && dto.SizeZ.HasValue)
+            {
+                meta.Size = new Vector3(dto.SizeX.Value, dto.SizeY.Value, dto.SizeZ.Value);
+            }
+            
+            return meta;
+        }
+        
+        private ProjectMetadata ConvertFromProjectMetadataDTO(ProjectMetadataDTO dto)
+        {
+            if (dto == null) return new ProjectMetadata();
+            
+            return new ProjectMetadata
+            {
+                Organisation = dto.Organisation,
+                Department = dto.Department,
+                Year = dto.Year,
+                Expedition = dto.Expedition,
+                Author = dto.Author,
+                ProjectDescription = dto.ProjectDescription,
+                StartDate = dto.StartDate,
+                EndDate = dto.EndDate,
+                FundingSource = dto.FundingSource,
+                License = dto.License,
+                CustomFields = new Dictionary<string, string>(dto.CustomFields ?? new Dictionary<string, string>())
+            };
         }
 
         private void UpdateRecentProjects(string projectPath)
@@ -426,6 +501,116 @@ namespace GeoscientistToolkit.Business
             }
 
             return existingProjects;
+        }
+        
+        /// <summary>
+        /// Export all dataset metadata to a CSV file
+        /// </summary>
+        public void ExportMetadataToCSV(string filePath)
+        {
+            try
+            {
+                using (var writer = new StreamWriter(filePath))
+                {
+                    // Write headers
+                    writer.WriteLine("Dataset Name,Dataset Type,Sample Name,Location Name,Latitude,Longitude,Depth (m),Size X,Size Y,Size Z,Size Unit,Collection Date,Collector,Notes");
+                    
+                    // Write data for each dataset
+                    foreach (var dataset in LoadedDatasets)
+                    {
+                        var meta = dataset.DatasetMetadata;
+                        writer.WriteLine($"{EscapeCSV(dataset.Name)}," +
+                                       $"{dataset.Type}," +
+                                       $"{EscapeCSV(meta?.SampleName ?? "")}," +
+                                       $"{EscapeCSV(meta?.LocationName ?? "")}," +
+                                       $"{meta?.Latitude?.ToString("F6") ?? ""}," +
+                                       $"{meta?.Longitude?.ToString("F6") ?? ""}," +
+                                       $"{meta?.Depth?.ToString("F2") ?? ""}," +
+                                       $"{meta?.Size?.X.ToString("F2") ?? ""}," +
+                                       $"{meta?.Size?.Y.ToString("F2") ?? ""}," +
+                                       $"{meta?.Size?.Z.ToString("F2") ?? ""}," +
+                                       $"{EscapeCSV(meta?.SizeUnit ?? "")}," +
+                                       $"{meta?.CollectionDate?.ToString("yyyy-MM-dd") ?? ""}," +
+                                       $"{EscapeCSV(meta?.Collector ?? "")}," +
+                                       $"{EscapeCSV(meta?.Notes ?? "")}");
+                    }
+                }
+                
+                Logger.Log($"Metadata exported to CSV: {filePath}");
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError($"Failed to export metadata to CSV: {ex.Message}");
+            }
+        }
+        
+        private string EscapeCSV(string field)
+        {
+            if (field.Contains(",") || field.Contains("\"") || field.Contains("\n") || field.Contains("\r"))
+            {
+                return $"\"{field.Replace("\"", "\"\"")}\"";
+            }
+            return field;
+        }
+        
+        /// <summary>
+        /// Get a summary of the project
+        /// </summary>
+        public string GetProjectSummary()
+        {
+            var summary = $"Project: {ProjectName}\n";
+            summary += $"Datasets: {LoadedDatasets.Count}\n";
+            
+            if (ProjectMetadata != null)
+            {
+                if (!string.IsNullOrEmpty(ProjectMetadata.Organisation))
+                    summary += $"Organisation: {ProjectMetadata.Organisation}\n";
+                if (!string.IsNullOrEmpty(ProjectMetadata.Author))
+                    summary += $"Author: {ProjectMetadata.Author}\n";
+                if (ProjectMetadata.Year.HasValue)
+                    summary += $"Year: {ProjectMetadata.Year}\n";
+            }
+            
+            var datasetsByType = LoadedDatasets.GroupBy(d => d.Type);
+            foreach (var group in datasetsByType)
+            {
+                summary += $"  {group.Key}: {group.Count()}\n";
+            }
+            
+            return summary;
+        }
+        
+        /// <summary>
+        /// Validate all dataset metadata
+        /// </summary>
+        public List<string> ValidateMetadata()
+        {
+            var issues = new List<string>();
+            
+            foreach (var dataset in LoadedDatasets)
+            {
+                var meta = dataset.DatasetMetadata;
+                if (meta == null) continue;
+                
+                // Validate coordinates
+                if (meta.Latitude.HasValue && (meta.Latitude < -90 || meta.Latitude > 90))
+                {
+                    issues.Add($"Dataset '{dataset.Name}': Invalid latitude {meta.Latitude}");
+                }
+                
+                if (meta.Longitude.HasValue && (meta.Longitude < -180 || meta.Longitude > 180))
+                {
+                    issues.Add($"Dataset '{dataset.Name}': Invalid longitude {meta.Longitude}");
+                }
+                
+                // Check for missing sample names
+                if (string.IsNullOrWhiteSpace(meta.SampleName))
+                {
+                    issues.Add($"Dataset '{dataset.Name}': Missing sample name");
+                }
+            }
+            
+            return issues;
         }
     }
 }

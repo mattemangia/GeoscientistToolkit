@@ -15,7 +15,7 @@ namespace GeoscientistToolkit.UI
         private string _searchFilter = "";
         private Action<Dataset> _onDatasetSelected;
         private Action _onImportClicked;
-        
+        private readonly MetadataEditor _metadataEditor = new();
         // Multi-selection state
         private HashSet<Dataset> _selectedDatasets = new HashSet<Dataset>();
         private Dataset _lastSelectedDataset = null;
@@ -110,7 +110,7 @@ namespace GeoscientistToolkit.UI
                     }
                 }
             }
-            
+            _metadataEditor.Submit();
             ImGui.Separator();
             ImGui.TextDisabled($"{datasets.Count} dataset(s) loaded");
             if (_selectedDatasets.Count > 1)
@@ -137,8 +137,20 @@ namespace GeoscientistToolkit.UI
                 ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(1.0f, 0.4f, 0.4f, 1.0f));
             }
             
+            // NEW: Show indicator if dataset has metadata
+            bool hasMetadata = !string.IsNullOrEmpty(dataset.DatasetMetadata?.SampleName) ||
+                              !string.IsNullOrEmpty(dataset.DatasetMetadata?.LocationName) ||
+                              dataset.DatasetMetadata?.Latitude.HasValue == true ||
+                              dataset.DatasetMetadata?.Longitude.HasValue == true;
+            
+            string displayName = dataset.Name;
+            if (hasMetadata)
+            {
+                displayName = "📋 " + displayName; // Add metadata indicator
+            }
+            
             // Handle selection
-            if (ImGui.Selectable(dataset.Name, isSelected))
+            if (ImGui.Selectable(displayName, isSelected))
             {
                 HandleDatasetSelection(dataset);
             }
@@ -148,10 +160,10 @@ namespace GeoscientistToolkit.UI
                 ImGui.PopStyleColor();
             }
             
-            // Show tooltip
+            // Show enhanced tooltip with metadata
             if (ImGui.IsItemHovered())
             {
-                ShowDatasetTooltip(dataset);
+                ShowDatasetTooltipWithMetadata(dataset);
             }
             
             // Context menu
@@ -165,7 +177,7 @@ namespace GeoscientistToolkit.UI
                     _selectedDatasets.Add(dataset);
                     _lastSelectedDataset = dataset;
                 }
-                DrawContextMenu(dataset);
+                DrawContextMenuWithMetadata(dataset);
                 ImGui.EndPopup();
             }
             
@@ -185,7 +197,163 @@ namespace GeoscientistToolkit.UI
             
             ImGui.PopID();
         }
+        private void ShowDatasetTooltipWithMetadata(Dataset dataset)
+        {
+            ImGui.BeginTooltip();
+            
+            if (dataset.IsMissing)
+            {
+                ImGui.TextColored(new Vector4(1.0f, 0.4f, 0.4f, 1.0f), "Source file or directory not found!");
+            }
+            
+            ImGui.TextUnformatted($"Name: {dataset.Name}");
+            ImGui.TextUnformatted($"Type: {dataset.Type}");
+            ImGui.TextUnformatted($"Path: {dataset.FilePath}");
+            
+            // NEW: Show metadata if available
+            var meta = dataset.DatasetMetadata;
+            if (meta != null)
+            {
+                bool hasAnyMetadata = false;
+                
+                if (!string.IsNullOrEmpty(meta.SampleName))
+                {
+                    if (!hasAnyMetadata)
+                    {
+                        ImGui.Separator();
+                        ImGui.Text("Metadata:");
+                        hasAnyMetadata = true;
+                    }
+                    ImGui.TextUnformatted($"  Sample: {meta.SampleName}");
+                }
+                
+                if (!string.IsNullOrEmpty(meta.LocationName))
+                {
+                    if (!hasAnyMetadata)
+                    {
+                        ImGui.Separator();
+                        ImGui.Text("Metadata:");
+                        hasAnyMetadata = true;
+                    }
+                    ImGui.TextUnformatted($"  Location: {meta.LocationName}");
+                }
+                
+                if (meta.Latitude.HasValue && meta.Longitude.HasValue)
+                {
+                    if (!hasAnyMetadata)
+                    {
+                        ImGui.Separator();
+                        ImGui.Text("Metadata:");
+                        hasAnyMetadata = true;
+                    }
+                    ImGui.TextUnformatted($"  Coordinates: {meta.Latitude:F6}°, {meta.Longitude:F6}°");
+                }
+                
+                if (meta.Depth.HasValue)
+                {
+                    if (!hasAnyMetadata)
+                    {
+                        ImGui.Separator();
+                        ImGui.Text("Metadata:");
+                        hasAnyMetadata = true;
+                    }
+                    ImGui.TextUnformatted($"  Depth: {meta.Depth:F2} m");
+                }
+            }
+            
+            // Show type-specific information
+            if (dataset is CtImageStackDataset ctDataset)
+            {
+                ImGui.Separator();
+                ImGui.TextUnformatted($"Binning: {ctDataset.BinningSize}");
+                ImGui.TextUnformatted($"Pixel Size: {ctDataset.PixelSize} {ctDataset.Unit}");
+            }
+            else if (dataset is Mesh3DDataset mesh3D)
+            {
+                ImGui.Separator();
+                ImGui.TextUnformatted($"Format: {mesh3D.FileFormat}");
+                ImGui.TextUnformatted($"Vertices: {mesh3D.VertexCount:N0}");
+                ImGui.TextUnformatted($"Faces: {mesh3D.FaceCount:N0}");
+                if (mesh3D.Scale != 1.0f)
+                {
+                    ImGui.TextUnformatted($"Scale: {mesh3D.Scale:F2}x");
+                }
+            }
+            else if (dataset is DatasetGroup group)
+            {
+                ImGui.Separator();
+                ImGui.TextUnformatted($"Contains {group.Datasets.Count} datasets:");
+                foreach (var child in group.Datasets)
+                {
+                    ImGui.TextUnformatted($"  • {child.Name}");
+                }
+            }
+            
+            ImGui.EndTooltip();
+        }
         
+        private void DrawContextMenuWithMetadata(Dataset dataset)
+        {
+            // View option
+            if (ImGui.MenuItem("View", null, false, !(dataset is DatasetGroup) && !dataset.IsMissing))
+            {
+                _onDatasetSelected?.Invoke(dataset);
+            }
+            
+            // NEW: Edit Metadata option
+            ImGui.Separator();
+            if (ImGui.MenuItem("Edit Metadata...", null, false, !(dataset is DatasetGroup)))
+            {
+                _metadataEditor.Open(dataset);
+            }
+            
+            // Group-specific options
+            if (dataset is DatasetGroup group)
+            {
+                if (ImGui.MenuItem("View Thumbnails"))
+                {
+                    // Signal to open thumbnail viewer
+                    OnOpenThumbnailViewer?.Invoke(group);
+                }
+                
+                if (ImGui.MenuItem("Ungroup"))
+                {
+                    UngroupDataset(group);
+                }
+            }
+            
+            // Multi-selection grouping
+            if (_selectedDatasets.Count > 1 && _selectedDatasets.Contains(dataset))
+            {
+                if (ImGui.MenuItem("Group Selected"))
+                {
+                    CreateGroup();
+                }
+            }
+            
+            ImGui.Separator();
+            
+            // Close/Remove option - now acts on all selected items
+            if (ImGui.MenuItem("Close"))
+            {
+                var itemsToClose = _selectedDatasets.ToList();
+                
+                foreach (var item in itemsToClose)
+                {
+                    if (item is DatasetGroup grp)
+                    {
+                        // Also remove all datasets within the group
+                        foreach (var child in grp.Datasets.ToList())
+                        {
+                            ProjectManager.Instance.RemoveDataset(child);
+                        }
+                    }
+                    ProjectManager.Instance.RemoveDataset(item);
+                }
+                
+                _selectedDatasets.Clear();
+            }
+        }
         private void HandleDatasetSelection(Dataset dataset)
         {
             if (dataset.IsMissing)

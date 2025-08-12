@@ -3,6 +3,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Numerics;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using GeoscientistToolkit.Data;
@@ -26,14 +27,20 @@ namespace GeoscientistToolkit.Business
         {
             var projectDto = new ProjectFileDTO
             {
-                ProjectName = project.ProjectName
+                ProjectName = project.ProjectName,
+                ProjectMetadata = ConvertToProjectMetadataDTO(project.ProjectMetadata)
             };
 
             foreach (var dataset in project.LoadedDatasets)
             {
                 if (dataset is ISerializableDataset serializable)
                 {
-                    projectDto.Datasets.Add((DatasetDTO)serializable.ToSerializableObject());
+                    var dto = (DatasetDTO)serializable.ToSerializableObject();
+                    
+                    // Add metadata to DTO
+                    dto.Metadata = ConvertToDatasetMetadataDTO(dataset.DatasetMetadata);
+                    
+                    projectDto.Datasets.Add(dto);
                 }
             }
 
@@ -55,6 +62,13 @@ namespace GeoscientistToolkit.Business
             {
                 string jsonString = File.ReadAllText(path);
                 var projectDto = JsonSerializer.Deserialize<ProjectFileDTO>(jsonString, _options);
+                
+                // Convert DTOs back to metadata objects
+                if (projectDto != null)
+                {
+                    ProjectManager.Instance.ProjectMetadata = ConvertFromProjectMetadataDTO(projectDto.ProjectMetadata);
+                }
+                
                 Logger.Log($"Project loaded successfully from {path}");
                 return projectDto;
             }
@@ -63,6 +77,94 @@ namespace GeoscientistToolkit.Business
                 Logger.LogError($"Failed to load project: {ex.Message}");
                 return null;
             }
+        }
+        
+        private static DatasetMetadataDTO ConvertToDatasetMetadataDTO(DatasetMetadata meta)
+        {
+            if (meta == null) return new DatasetMetadataDTO();
+            
+            return new DatasetMetadataDTO
+            {
+                SampleName = meta.SampleName,
+                LocationName = meta.LocationName,
+                Latitude = meta.Latitude,
+                Longitude = meta.Longitude,
+                Depth = meta.Depth,
+                SizeX = meta.Size?.X,
+                SizeY = meta.Size?.Y,
+                SizeZ = meta.Size?.Z,
+                SizeUnit = meta.SizeUnit,
+                CollectionDate = meta.CollectionDate,
+                Collector = meta.Collector,
+                Notes = meta.Notes,
+                CustomFields = new Dictionary<string, string>(meta.CustomFields)
+            };
+        }
+        
+        private static DatasetMetadata ConvertFromDatasetMetadataDTO(DatasetMetadataDTO dto)
+        {
+            if (dto == null) return new DatasetMetadata();
+            
+            var meta = new DatasetMetadata
+            {
+                SampleName = dto.SampleName,
+                LocationName = dto.LocationName,
+                Latitude = dto.Latitude,
+                Longitude = dto.Longitude,
+                Depth = dto.Depth,
+                SizeUnit = dto.SizeUnit,
+                CollectionDate = dto.CollectionDate,
+                Collector = dto.Collector,
+                Notes = dto.Notes,
+                CustomFields = new Dictionary<string, string>(dto.CustomFields ?? new Dictionary<string, string>())
+            };
+            
+            if (dto.SizeX.HasValue && dto.SizeY.HasValue && dto.SizeZ.HasValue)
+            {
+                meta.Size = new Vector3(dto.SizeX.Value, dto.SizeY.Value, dto.SizeZ.Value);
+            }
+            
+            return meta;
+        }
+        
+        private static ProjectMetadataDTO ConvertToProjectMetadataDTO(ProjectMetadata meta)
+        {
+            if (meta == null) return new ProjectMetadataDTO();
+            
+            return new ProjectMetadataDTO
+            {
+                Organisation = meta.Organisation,
+                Department = meta.Department,
+                Year = meta.Year,
+                Expedition = meta.Expedition,
+                Author = meta.Author,
+                ProjectDescription = meta.ProjectDescription,
+                StartDate = meta.StartDate,
+                EndDate = meta.EndDate,
+                FundingSource = meta.FundingSource,
+                License = meta.License,
+                CustomFields = new Dictionary<string, string>(meta.CustomFields)
+            };
+        }
+        
+        private static ProjectMetadata ConvertFromProjectMetadataDTO(ProjectMetadataDTO dto)
+        {
+            if (dto == null) return new ProjectMetadata();
+            
+            return new ProjectMetadata
+            {
+                Organisation = dto.Organisation,
+                Department = dto.Department,
+                Year = dto.Year,
+                Expedition = dto.Expedition,
+                Author = dto.Author,
+                ProjectDescription = dto.ProjectDescription,
+                StartDate = dto.StartDate,
+                EndDate = dto.EndDate,
+                FundingSource = dto.FundingSource,
+                License = dto.License,
+                CustomFields = new Dictionary<string, string>(dto.CustomFields ?? new Dictionary<string, string>())
+            };
         }
     }
 
