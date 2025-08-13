@@ -24,8 +24,15 @@
     <!-- FIX 2: All PackageReference items are correctly placed within a single ItemGroup -->
     <ItemGroup>
         <PackageReference Include="ClosedXML" Version="0.105.0" />
+        <PackageReference Include="GDAL" Version="3.11.3" />
         <PackageReference Include="ImGui.NET" Version="1.90.8.1" />
         <PackageReference Include="ImGui.NET.Branches.Docking" Version="1.88.0" />
+        <PackageReference Include="NetTopologySuite" Version="2.6.0" />
+        <PackageReference Include="NetTopologySuite.Features" Version="2.2.0" />
+        <PackageReference Include="NetTopologySuite.IO.Esri.Shapefile" Version="1.2.0" />
+        <PackageReference Include="NetTopologySuite.IO.GeoJSON" Version="4.0.0" />
+        <PackageReference Include="NetTopologySuite.IO.ShapeFile" Version="2.1.0" />
+        <PackageReference Include="ProjNET" Version="2.0.0" />
         <PackageReference Include="sdl2" Version="2.0.5" />
         <PackageReference Include="Silk.NET.OpenCL" Version="2.21.0" />
         <PackageReference Include="StbImageSharp" Version="2.30.15" />
