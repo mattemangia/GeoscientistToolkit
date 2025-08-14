@@ -7,11 +7,13 @@ using System.Numerics;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using GeoscientistToolkit.Data;
+using GeoscientistToolkit.Data.AcousticVolume;
 using GeoscientistToolkit.Data.CtImageStack;
 using GeoscientistToolkit.Data.Image;
 using GeoscientistToolkit.Data.Mesh3D;
 using GeoscientistToolkit.Util;
 using GeoscientistToolkit.Data.Table;
+using AcousticVolumeDatasetDTO = GeoscientistToolkit.Data.AcousticVolumeDatasetDTO;
 
 namespace GeoscientistToolkit.Business
 {
@@ -186,13 +188,13 @@ namespace GeoscientistToolkit.Business
                         nameof(ImageDataset) => JsonSerializer.Deserialize<ImageDatasetDTO>(rawText, options),
                         nameof(CtImageStackDataset) => JsonSerializer.Deserialize<CtImageStackDatasetDTO>(rawText, options),
                         nameof(DatasetGroup) => JsonSerializer.Deserialize<DatasetGroupDTO>(rawText, options),
-
-                        // --- ADDED CASE FOR THE NEW DATASET TYPE ---
                         nameof(StreamingCtVolumeDataset) => JsonSerializer.Deserialize<StreamingCtVolumeDatasetDTO>(rawText, options),
                         nameof(Mesh3DDataset) => JsonSerializer.Deserialize<Mesh3DDatasetDTO>(rawText, options),
                         nameof(TableDataset) => JsonSerializer.Deserialize<TableDatasetDTO>(rawText, options),
-                        
-
+                
+                        // ADD THIS LINE:
+                        nameof(AcousticVolumeDataset) => JsonSerializer.Deserialize<AcousticVolumeDatasetDTO>(rawText, options),
+                
                         _ => throw new JsonException($"Unknown dataset type: {typeName}")
                     };
                 }

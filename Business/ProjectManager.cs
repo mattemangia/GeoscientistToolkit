@@ -6,12 +6,14 @@ using System.IO.Compression;
 using System.Linq;
 using System.Numerics;
 using GeoscientistToolkit.Data;
+using GeoscientistToolkit.Data.AcousticVolume;
 using GeoscientistToolkit.Data.CtImageStack;
 using GeoscientistToolkit.Data.Image;
 using GeoscientistToolkit.Data.Mesh3D;
 using GeoscientistToolkit.Data.Table;
 using GeoscientistToolkit.Settings;
 using GeoscientistToolkit.Util;
+using AcousticVolumeDatasetDTO = GeoscientistToolkit.Data.AcousticVolumeDatasetDTO;
 
 namespace GeoscientistToolkit.Business
 {
@@ -378,7 +380,31 @@ namespace GeoscientistToolkit.Business
                     }
                     dataset = ctDataset;
                     break;
-
+                case AcousticVolumeDatasetDTO acousticDto:
+                    var acousticDataset = new AcousticVolumeDataset(acousticDto.Name, acousticDto.FilePath)
+                    {
+                        PWaveVelocity = acousticDto.PWaveVelocity,
+                        SWaveVelocity = acousticDto.SWaveVelocity,
+                        VpVsRatio = acousticDto.VpVsRatio,
+                        TimeSteps = acousticDto.TimeSteps,
+                        ComputationTime = TimeSpan.FromSeconds(acousticDto.ComputationTimeSeconds),
+                        YoungsModulusMPa = acousticDto.YoungsModulusMPa,
+                        PoissonRatio = acousticDto.PoissonRatio,
+                        ConfiningPressureMPa = acousticDto.ConfiningPressureMPa,
+                        SourceFrequencyKHz = acousticDto.SourceFrequencyKHz,
+                        SourceEnergyJ = acousticDto.SourceEnergyJ,
+                        SourceDatasetPath = acousticDto.SourceDatasetPath,
+                        SourceMaterialName = acousticDto.SourceMaterialName,
+                        IsMissing = !Directory.Exists(acousticDto.FilePath)
+                    };
+    
+                    if (acousticDataset.IsMissing)
+                    {
+                        Logger.LogWarning($"Source folder not found for acoustic dataset: {acousticDto.Name} at {acousticDto.FilePath}");
+                    }
+    
+                    dataset = acousticDataset;
+                    break;
                 case ImageDatasetDTO imgDto:
                     var imgDataset = new ImageDataset(imgDto.Name, imgDto.FilePath)
                     {

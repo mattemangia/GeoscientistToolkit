@@ -882,21 +882,43 @@ void main() { out_Color = PlaneColor; }";
             if (textureId != IntPtr.Zero)
             {
                 var availableSize = ImGui.GetContentRegionAvail();
+        
+                // Store the cursor position before drawing the image
+                var imagePos = ImGui.GetCursorScreenPos();
+        
+                // Draw the image
                 ImGui.Image(textureId, availableSize, new Vector2(0, 1), new Vector2(1, 0));
-                if (ImGui.IsItemHovered()) HandleMouseInput();
+        
+                // Create an invisible button over the image to capture mouse input
+                // This prevents the window from being dragged when interacting with the 3D view
+                ImGui.SetCursorScreenPos(imagePos);
+                ImGui.InvisibleButton("3DViewInteraction", availableSize);
+        
+                // Handle mouse input only when the invisible button is hovered
+                if (ImGui.IsItemHovered())
+                {
+                    HandleMouseInput();
+                }
+        
+                // Context menu on the invisible button
                 if (ImGui.BeginPopupContextItem("3DViewerContextMenu"))
                 {
                     if (ImGui.MenuItem("Reset Camera")) ResetCamera();
                     if (ImGui.MenuItem("Reset View")) ResetView();
                     ImGui.Separator();
-                    if (ImGui.MenuItem("Toggle Plane Visualizations", null, ShowPlaneVisualizations)) ShowPlaneVisualizations = !ShowPlaneVisualizations;
-                    if (ImGui.MenuItem("Clear All Clipping Planes")) ClippingPlanes.Clear();
+                    if (ImGui.MenuItem("Toggle Plane Visualizations", null, ShowPlaneVisualizations)) 
+                        ShowPlaneVisualizations = !ShowPlaneVisualizations;
+                    if (ImGui.MenuItem("Clear All Clipping Planes")) 
+                        ClippingPlanes.Clear();
                     ImGui.Separator();
-                    if (ImGui.MenuItem("Save Screenshot...")) _screenshotDialog.Open("screenshot_" + DateTime.Now.ToString("yyyyMMdd_HHmmss"));
+                    if (ImGui.MenuItem("Save Screenshot...")) 
+                        _screenshotDialog.Open("screenshot_" + DateTime.Now.ToString("yyyyMMdd_HHmmss"));
                     ImGui.EndPopup();
                 }
             }
-            if (_screenshotDialog.Submit()) SaveScreenshot(_screenshotDialog.SelectedPath);
+    
+            if (_screenshotDialog.Submit()) 
+                SaveScreenshot(_screenshotDialog.SelectedPath);
         }
 
         private void HandleMouseInput()

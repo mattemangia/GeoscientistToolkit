@@ -140,7 +140,7 @@ namespace GeoscientistToolkit.Data.CtImageStack
 
         private void CreateShaders(ResourceFactory factory)
         {
-            // Metal shader with material support
+            // Metal shader with material and preview support
             const string metalShaderSource = @"
 #include <metal_stdlib>
 using namespace metal;
@@ -180,13 +180,14 @@ vertex VertexOut vertex_main(VertexIn in [[stage_in]],
     return out;
 }
 
-// Fragment shader with material support
+// Fragment shader with material and preview support
 fragment float4 fragment_main(VertexOut in [[stage_in]],
                              constant Constants& constants [[buffer(0)]],
                              texture3d<float> volumeTex [[texture(0)]],
                              texture3d<float> labelTex [[texture(1)]],
                              texture2d<float> materialParams [[texture(2)]],
                              texture2d<float> materialColors [[texture(3)]],
+                             texture3d<float> previewTex [[texture(4)]],
                              sampler volumeSampler [[sampler(0)]]) {
     // Ray setup
     float3 rayOrigin = constants.CameraPosition.xyz;
@@ -207,10 +208,13 @@ fragment float4 fragment_main(VertexOut in [[stage_in]],
     
     tNear = max(tNear, 0.0);
     
+    // Check cutting planes
+    float3 cutPlanes[3] = {constants.CutPlaneX.xyz, constants.CutPlaneY.xyz, constants.CutPlaneZ.xyz};
+    
     // Volume rendering with materials
     float4 color = float4(0.0);
-    float stepSize = 0.01;
-    int maxSteps = 300;
+    float stepSize = 0.01 * constants.ThresholdParams.z;
+    int maxSteps = 500;
     
     for (int i = 0; i < maxSteps; i++) {
         float t = tNear + float(i) * stepSize;
@@ -219,29 +223,54 @@ fragment float4 fragment_main(VertexOut in [[stage_in]],
         float3 pos = rayOrigin + t * rayDir;
         if (any(pos < 0.0) || any(pos > 1.0)) continue;
         
-        // Check for materials first
-        float labelValue = labelTex.sample(volumeSampler, pos).r;
-        int materialId = int(labelValue * 255.0 + 0.5);
+        // Check cutting planes
+        bool cut = false;
+        if (constants.CutPlaneX.x > 0.5 && (pos.x - constants.CutPlaneX.z) * constants.CutPlaneX.y > 0.0) cut = true;
+        if (constants.CutPlaneY.x > 0.5 && (pos.y - constants.CutPlaneY.z) * constants.CutPlaneY.y > 0.0) cut = true;
+        if (constants.CutPlaneZ.x > 0.5 && (pos.z - constants.CutPlaneZ.z) * constants.CutPlaneZ.y > 0.0) cut = true;
+        
+        if (cut) continue;
         
         float4 sampleColor = float4(0.0);
         
-        if (materialId > 0) {
-            // Sample material parameters and colors
-            float2 params = materialParams.read(uint2(materialId, 0), 0).xy;
-            bool isVisible = params.x > 0.5;
-            
-            if (isVisible) {
-                float4 matColor = materialColors.read(uint2(materialId, 0), 0);
-                sampleColor = float4(matColor.rgb, matColor.a * 0.5);
+        // Check preview first (highest priority for acoustic simulation visualization)
+        if (constants.PreviewParams.x > 0.5) {
+            float previewValue = previewTex.sample(volumeSampler, pos).r;
+            if (previewValue > 0.01) {
+                // Acoustic wave visualization with intensity
+                float intensity = previewValue;
+                sampleColor = float4(
+                    constants.PreviewParams.y * intensity,
+                    constants.PreviewParams.z * intensity, 
+                    constants.PreviewParams.w * intensity,
+                    constants.PreviewAlpha.x * intensity
+                );
             }
-        } else if (constants.ThresholdParams.w > 0.5) {
-            // Sample grayscale volume
-            float density = volumeTex.sample(volumeSampler, pos).r;
+        }
+        
+        // If no preview, check for materials
+        if (sampleColor.a == 0.0) {
+            float labelValue = labelTex.sample(volumeSampler, pos).r;
+            int materialId = int(labelValue * 255.0 + 0.5);
             
-            if (density > constants.ThresholdParams.x && density < constants.ThresholdParams.y) {
-                float normalizedDensity = (density - constants.ThresholdParams.x) / 
-                                        (constants.ThresholdParams.y - constants.ThresholdParams.x + 0.001);
-                sampleColor = float4(normalizedDensity, normalizedDensity, normalizedDensity, normalizedDensity * 0.3);
+            if (materialId > 0) {
+                // Sample material parameters and colors
+                float2 params = materialParams.read(uint2(materialId, 0), 0).xy;
+                bool isVisible = params.x > 0.5;
+                
+                if (isVisible) {
+                    float4 matColor = materialColors.read(uint2(materialId, 0), 0);
+                    sampleColor = float4(matColor.rgb, matColor.a * 0.5);
+                }
+            } else if (constants.ThresholdParams.w > 0.5) {
+                // Sample grayscale volume
+                float density = volumeTex.sample(volumeSampler, pos).r;
+                
+                if (density > constants.ThresholdParams.x && density < constants.ThresholdParams.y) {
+                    float normalizedDensity = (density - constants.ThresholdParams.x) / 
+                                            (constants.ThresholdParams.y - constants.ThresholdParams.x + 0.001);
+                    sampleColor = float4(normalizedDensity, normalizedDensity, normalizedDensity, normalizedDensity * 0.3);
+                }
             }
         }
         
@@ -337,13 +366,14 @@ fragment float4 plane_fragment_main(constant float4& color [[buffer(0)]]) {
 
         private void CreatePipeline(ResourceFactory factory)
         {
-            // Create resource layout with all textures
+            // Create resource layout with all textures including preview
             _resourceLayout = factory.CreateResourceLayout(new ResourceLayoutDescription(
                 new ResourceLayoutElementDescription("Constants", ResourceKind.UniformBuffer, ShaderStages.Vertex | ShaderStages.Fragment),
                 new ResourceLayoutElementDescription("VolumeTexture", ResourceKind.TextureReadOnly, ShaderStages.Fragment),
                 new ResourceLayoutElementDescription("LabelTexture", ResourceKind.TextureReadOnly, ShaderStages.Fragment),
                 new ResourceLayoutElementDescription("MaterialParamsTexture", ResourceKind.TextureReadOnly, ShaderStages.Fragment),
                 new ResourceLayoutElementDescription("MaterialColorsTexture", ResourceKind.TextureReadOnly, ShaderStages.Fragment),
+                new ResourceLayoutElementDescription("PreviewTexture", ResourceKind.TextureReadOnly, ShaderStages.Fragment),
                 new ResourceLayoutElementDescription("VolumeSampler", ResourceKind.Sampler, ShaderStages.Fragment)));
 
             // Create pipeline
@@ -387,7 +417,7 @@ fragment float4 plane_fragment_main(constant float4& color [[buffer(0)]]) {
 
         private void CreateResourceSets(ResourceFactory factory)
         {
-            // Create main resource set with all resources
+            // Create main resource set with all resources including preview texture
             _resourceSet = factory.CreateResourceSet(new ResourceSetDescription(
                 _resourceLayout,
                 _constantBuffer,
@@ -395,6 +425,7 @@ fragment float4 plane_fragment_main(constant float4& color [[buffer(0)]]) {
                 _labelTexture,
                 _materialParamsTexture,
                 _materialColorsTexture,
+                _previewTexture,
                 _volumeSampler));
 
             // Plane visualization resource set
@@ -420,11 +451,6 @@ fragment float4 plane_fragment_main(constant float4& color [[buffer(0)]]) {
                 {
                     paramData[i] = new Vector2(material.IsVisible ? 1.0f : 0.0f, 1.0f);
                     colorData[i] = new RgbaFloat(material.Color);
-
-                    if (i > 0 && i < 10) // Debug log first few materials
-                    {
-                        Logger.Log($"[MetalVolumeRenderer] Material {i}: Visible={material.IsVisible}, Color={material.Color}");
-                    }
                 }
                 else
                 {
@@ -435,15 +461,13 @@ fragment float4 plane_fragment_main(constant float4& color [[buffer(0)]]) {
 
             VeldridManager.GraphicsDevice.UpdateTexture(_materialParamsTexture, paramData, 0, 0, 0, 256, 1, 1, 0, 0);
             VeldridManager.GraphicsDevice.UpdateTexture(_materialColorsTexture, colorData, 0, 0, 0, 256, 1, 1, 0, 0);
-
-            Logger.Log("[MetalVolumeRenderer] Material textures updated");
         }
 
         public void UpdateLabelTexture(Texture newLabelTexture)
         {
             _labelTexture = newLabelTexture;
 
-            // Recreate resource set with new label texture
+            // Recreate resource set with new label texture and preview texture
             _resourceSet?.Dispose();
             _resourceSet = VeldridManager.Factory.CreateResourceSet(new ResourceSetDescription(
                 _resourceLayout,
@@ -452,9 +476,29 @@ fragment float4 plane_fragment_main(constant float4& color [[buffer(0)]]) {
                 _labelTexture,
                 _materialParamsTexture,
                 _materialColorsTexture,
+                _previewTexture,
                 _volumeSampler));
 
             Logger.Log("[MetalVolumeRenderer] Label texture updated");
+        }
+
+        public void UpdatePreviewTexture(Texture newPreviewTexture)
+        {
+            _previewTexture = newPreviewTexture;
+
+            // Recreate resource set with new preview texture
+            _resourceSet?.Dispose();
+            _resourceSet = VeldridManager.Factory.CreateResourceSet(new ResourceSetDescription(
+                _resourceLayout,
+                _constantBuffer,
+                _volumeTexture,
+                _labelTexture,
+                _materialParamsTexture,
+                _materialColorsTexture,
+                _previewTexture,
+                _volumeSampler));
+
+            Logger.Log("[MetalVolumeRenderer] Preview texture updated");
         }
 
         public void Render(CommandList cl, Framebuffer framebuffer,
@@ -474,17 +518,46 @@ fragment float4 plane_fragment_main(constant float4& color [[buffer(0)]]) {
                 cl.ClearColorTarget(0, new RgbaFloat(0.1f, 0.1f, 0.1f, 1.0f));
                 cl.ClearDepthStencil(1f);
 
-                // Update constants
+                // Update constants with all parameters including preview
+                Matrix4x4.Invert(viewMatrix, out var invView);
+                
                 var constants = new CtVolume3DViewer.VolumeConstants
                 {
                     ViewProj = viewMatrix * projMatrix,
-                    InvView = Matrix4x4.Identity,
+                    InvView = invView,
                     CameraPosition = new Vector4(cameraPosition, 1),
                     VolumeSize = new Vector4(_viewer._editableDataset.Width, _viewer._editableDataset.Height, _viewer._editableDataset.Depth, 0),
                     ThresholdParams = new Vector4(_viewer.MinThreshold, _viewer.MaxThreshold, _viewer.StepSize, _viewer.ShowGrayscale ? 1 : 0),
                     SliceParams = new Vector4(_viewer.SlicePositions, _viewer.ShowSlices ? 1 : 0),
-                    RenderParams = new Vector4(_viewer.ColorMapIndex, 0, 0, 0)
+                    RenderParams = new Vector4(_viewer.ColorMapIndex, 0, 0, 0),
+                    CutPlaneX = new Vector4(_viewer.CutXEnabled ? 1 : 0, _viewer.CutXForward ? 1 : -1, _viewer.CutXPosition, 0),
+                    CutPlaneY = new Vector4(_viewer.CutYEnabled ? 1 : 0, _viewer.CutYForward ? 1 : -1, _viewer.CutYPosition, 0),
+                    CutPlaneZ = new Vector4(_viewer.CutZEnabled ? 1 : 0, _viewer.CutZForward ? 1 : -1, _viewer.CutZPosition, 0),
+                    ClippingPlanesInfo = new Vector4(0, _viewer.ShowPlaneVisualizations ? 1 : 0, 0, 0),
+                    PreviewParams = new Vector4(_viewer._showPreview ? 1 : 0, _viewer._previewColor.X, _viewer._previewColor.Y, _viewer._previewColor.Z),
+                    PreviewAlpha = new Vector4(_viewer._previewColor.W, 0, 0, 0)
                 };
+
+                // Set clipping planes data
+                unsafe
+                {
+                    int enabledPlanes = 0;
+                    for (int i = 0; i < Math.Min(_viewer.ClippingPlanes.Count, CtVolume3DViewer.MAX_CLIPPING_PLANES); i++)
+                    {
+                        var plane = _viewer.ClippingPlanes[i];
+                        if (plane.Enabled)
+                        {
+                            float dist = plane.Distance + (plane.Mirror ? 1.0f : 0.0f);
+                            var normal = plane.Normal * dist;
+                            constants.ClippingPlanesData[enabledPlanes * 4] = normal.X;
+                            constants.ClippingPlanesData[enabledPlanes * 4 + 1] = normal.Y;
+                            constants.ClippingPlanesData[enabledPlanes * 4 + 2] = normal.Z;
+                            constants.ClippingPlanesData[enabledPlanes * 4 + 3] = 1;
+                            enabledPlanes++;
+                        }
+                    }
+                    constants.ClippingPlanesInfo.X = enabledPlanes;
+                }
 
                 VeldridManager.GraphicsDevice.UpdateBuffer(_constantBuffer, 0, ref constants);
 
@@ -498,6 +571,12 @@ fragment float4 plane_fragment_main(constant float4& color [[buffer(0)]]) {
                 cl.SetGraphicsResourceSet(0, _resourceSet);
                 cl.DrawIndexed(36, 1, 0, 0, 0);
 
+                // Draw plane visualizations if enabled
+                if (_viewer.ShowPlaneVisualizations && planeVertexBuffer != null && planeIndexBuffer != null)
+                {
+                    RenderPlaneVisualizations(cl, viewMatrix, projMatrix, planeVertexBuffer, planeIndexBuffer);
+                }
+
                 cl.End();
                 VeldridManager.GraphicsDevice.SubmitCommands(cl);
                 VeldridManager.GraphicsDevice.WaitForIdle();
@@ -506,6 +585,91 @@ fragment float4 plane_fragment_main(constant float4& color [[buffer(0)]]) {
             {
                 Logger.LogError($"[MetalVolumeRenderer] Render error: {ex.Message}");
             }
+        }
+
+        private void RenderPlaneVisualizations(CommandList cl, Matrix4x4 viewMatrix, Matrix4x4 projMatrix,
+                                              DeviceBuffer planeVertexBuffer, DeviceBuffer planeIndexBuffer)
+        {
+            cl.SetPipeline(_planeVisualizationPipeline);
+            cl.SetVertexBuffer(0, planeVertexBuffer);
+            cl.SetIndexBuffer(planeIndexBuffer, IndexFormat.UInt16);
+
+            var viewProj = viewMatrix * projMatrix;
+
+            // Render cutting planes
+            if (_viewer.CutXEnabled && _viewer.ShowCutXPlaneVisual)
+            {
+                RenderCuttingPlane(cl, viewProj, Vector3.UnitX, _viewer.CutXPosition, new Vector4(1, 0.2f, 0.2f, 0.3f));
+            }
+
+            if (_viewer.CutYEnabled && _viewer.ShowCutYPlaneVisual)
+            {
+                RenderCuttingPlane(cl, viewProj, Vector3.UnitY, _viewer.CutYPosition, new Vector4(0.2f, 1, 0.2f, 0.3f));
+            }
+
+            if (_viewer.CutZEnabled && _viewer.ShowCutZPlaneVisual)
+            {
+                RenderCuttingPlane(cl, viewProj, Vector3.UnitZ, _viewer.CutZPosition, new Vector4(0.2f, 0.2f, 1, 0.3f));
+            }
+
+            // Render clipping planes
+            foreach (var plane in _viewer.ClippingPlanes.Where(p => p.Enabled && p.IsVisualizationVisible))
+            {
+                RenderClippingPlane(cl, viewProj, plane, new Vector4(1, 1, 0.2f, 0.3f));
+            }
+        }
+
+        private void RenderCuttingPlane(CommandList cl, Matrix4x4 viewProj, Vector3 normal, float position, Vector4 color)
+        {
+            var transform = Matrix4x4.CreateScale(1.5f);
+            
+            if (normal == Vector3.UnitX)
+            {
+                transform *= Matrix4x4.CreateRotationY(MathF.PI / 2);
+                transform *= Matrix4x4.CreateTranslation(position, 0.5f, 0.5f);
+            }
+            else if (normal == Vector3.UnitY)
+            {
+                transform *= Matrix4x4.CreateRotationX(-MathF.PI / 2);
+                transform *= Matrix4x4.CreateTranslation(0.5f, position, 0.5f);
+            }
+            else if (normal == Vector3.UnitZ)
+            {
+                transform *= Matrix4x4.CreateTranslation(0.5f, 0.5f, position);
+            }
+
+            var mvp = transform * viewProj;
+            VeldridManager.GraphicsDevice.UpdateBuffer(_planeVisualizationConstantBuffer, 0, ref mvp);
+            VeldridManager.GraphicsDevice.UpdateBuffer(_planeVisualizationConstantBuffer, (uint)Marshal.SizeOf<Matrix4x4>(), ref color);
+            
+            cl.SetGraphicsResourceSet(0, _planeVisualizationResourceSet);
+            cl.DrawIndexed(6, 1, 0, 0, 0);
+        }
+
+        private void RenderClippingPlane(CommandList cl, Matrix4x4 viewProj, ClippingPlane plane, Vector4 color)
+        {
+            var forward = plane.Normal;
+            var right = Vector3.Cross(Vector3.UnitY, forward);
+            if (right.LengthSquared() < 0.001f)
+                right = Vector3.Cross(Vector3.UnitX, forward);
+            right = Vector3.Normalize(right);
+            var up = Vector3.Cross(forward, right);
+
+            var rotation = new Matrix4x4(
+                right.X, right.Y, right.Z, 0,
+                up.X, up.Y, up.Z, 0,
+                forward.X, forward.Y, forward.Z, 0,
+                0, 0, 0, 1);
+
+            var transform = Matrix4x4.CreateScale(1.5f) * rotation * 
+                          Matrix4x4.CreateTranslation(Vector3.One * 0.5f + plane.Normal * (plane.Distance - 0.5f));
+
+            var mvp = transform * viewProj;
+            VeldridManager.GraphicsDevice.UpdateBuffer(_planeVisualizationConstantBuffer, 0, ref mvp);
+            VeldridManager.GraphicsDevice.UpdateBuffer(_planeVisualizationConstantBuffer, (uint)Marshal.SizeOf<Matrix4x4>(), ref color);
+            
+            cl.SetGraphicsResourceSet(0, _planeVisualizationResourceSet);
+            cl.DrawIndexed(6, 1, 0, 0, 0);
         }
 
         public void Dispose()

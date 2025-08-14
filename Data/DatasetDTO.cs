@@ -91,7 +91,23 @@ namespace GeoscientistToolkit.Data
     {
         public List<DatasetDTO> Datasets { get; set; } = new List<DatasetDTO>();
     }
-
+    public class AcousticVolumeDatasetDTO : DatasetDTO
+    {
+        public double PWaveVelocity { get; set; }
+        public double SWaveVelocity { get; set; }
+        public double VpVsRatio { get; set; }
+        public int TimeSteps { get; set; }
+        public double ComputationTimeSeconds { get; set; }
+        public float YoungsModulusMPa { get; set; }
+        public float PoissonRatio { get; set; }
+        public float ConfiningPressureMPa { get; set; }
+        public float SourceFrequencyKHz { get; set; }
+        public float SourceEnergyJ { get; set; }
+        public string SourceDatasetPath { get; set; }
+        public string SourceMaterialName { get; set; }
+        public bool HasTimeSeries { get; set; }
+        public int TimeSeriesCount { get; set; }
+    }
     // Main project file structure
     public class ProjectFileDTO
     {
