@@ -1,4 +1,4 @@
-// GeoscientistToolkit/UI/DatasetPanel.cs (Updated with grouping and multi-close support)
+// GeoscientistToolkit/UI/DatasetPanel.cs (Fixed Unicode Issue)
 using GeoscientistToolkit.Business;
 using GeoscientistToolkit.Data;
 using GeoscientistToolkit.Data.CtImageStack;
@@ -7,6 +7,9 @@ using System.Numerics;
 using System.Collections.Generic;
 using System.Linq;
 using GeoscientistToolkit.Data.Mesh3D;
+using GeoscientistToolkit.Data.Table;
+using GeoscientistToolkit.Data.GIS;
+using GeoscientistToolkit.Data.AcousticVolume;
 
 namespace GeoscientistToolkit.UI
 {
@@ -137,7 +140,7 @@ namespace GeoscientistToolkit.UI
                 ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(1.0f, 0.4f, 0.4f, 1.0f));
             }
             
-            // NEW: Show indicator if dataset has metadata
+            // Check if dataset has metadata
             bool hasMetadata = !string.IsNullOrEmpty(dataset.DatasetMetadata?.SampleName) ||
                               !string.IsNullOrEmpty(dataset.DatasetMetadata?.LocationName) ||
                               dataset.DatasetMetadata?.Latitude.HasValue == true ||
@@ -146,7 +149,8 @@ namespace GeoscientistToolkit.UI
             string displayName = dataset.Name;
             if (hasMetadata)
             {
-                displayName = "📋 " + displayName; // Add metadata indicator
+                // Use simple text indicator instead of Unicode emoji
+                displayName = "[M] " + displayName; // [M] for Metadata
             }
             
             // Handle selection
@@ -197,6 +201,7 @@ namespace GeoscientistToolkit.UI
             
             ImGui.PopID();
         }
+        
         private void ShowDatasetTooltipWithMetadata(Dataset dataset)
         {
             ImGui.BeginTooltip();
@@ -210,7 +215,7 @@ namespace GeoscientistToolkit.UI
             ImGui.TextUnformatted($"Type: {dataset.Type}");
             ImGui.TextUnformatted($"Path: {dataset.FilePath}");
             
-            // NEW: Show metadata if available
+            // Show metadata if available
             var meta = dataset.DatasetMetadata;
             if (meta != null)
             {
@@ -265,8 +270,21 @@ namespace GeoscientistToolkit.UI
             if (dataset is CtImageStackDataset ctDataset)
             {
                 ImGui.Separator();
+                ImGui.TextUnformatted($"Dimensions: {ctDataset.Width}x{ctDataset.Height}x{ctDataset.Depth}");
                 ImGui.TextUnformatted($"Binning: {ctDataset.BinningSize}");
                 ImGui.TextUnformatted($"Pixel Size: {ctDataset.PixelSize} {ctDataset.Unit}");
+                ImGui.TextUnformatted($"Materials: {ctDataset.Materials?.Count ?? 0}");
+            }
+            else if (dataset is StreamingCtVolumeDataset streamingCt)
+            {
+                ImGui.Separator();
+                ImGui.TextUnformatted($"Full Size: {streamingCt.FullWidth}x{streamingCt.FullHeight}x{streamingCt.FullDepth}");
+                ImGui.TextUnformatted($"LOD Levels: {streamingCt.LodCount}");
+                ImGui.TextUnformatted($"Brick Size: {streamingCt.BrickSize}");
+                if (streamingCt.EditablePartner != null)
+                {
+                    ImGui.TextUnformatted($"Editable Partner: {streamingCt.EditablePartner.Name}");
+                }
             }
             else if (dataset is Mesh3DDataset mesh3D)
             {
@@ -277,6 +295,38 @@ namespace GeoscientistToolkit.UI
                 if (mesh3D.Scale != 1.0f)
                 {
                     ImGui.TextUnformatted($"Scale: {mesh3D.Scale:F2}x");
+                }
+            }
+            else if (dataset is TableDataset table)
+            {
+                ImGui.Separator();
+                ImGui.TextUnformatted($"Format: {table.SourceFormat}");
+                ImGui.TextUnformatted($"Rows: {table.RowCount:N0}");
+                ImGui.TextUnformatted($"Columns: {table.ColumnCount}");
+                if (!string.IsNullOrEmpty(table.Delimiter))
+                {
+                    ImGui.TextUnformatted($"Delimiter: '{table.Delimiter}'");
+                }
+            }
+            else if (dataset is GISDataset gis)
+            {
+                ImGui.Separator();
+                ImGui.TextUnformatted($"Layers: {gis.Layers.Count}");
+                ImGui.TextUnformatted($"Projection: {gis.Projection?.Name ?? "Unknown"}");
+                ImGui.TextUnformatted($"Basemap: {gis.BasemapType}");
+                int totalFeatures = gis.Layers.Sum(l => l.Features.Count);
+                ImGui.TextUnformatted($"Total Features: {totalFeatures:N0}");
+            }
+            else if (dataset is AcousticVolumeDataset acoustic)
+            {
+                ImGui.Separator();
+                ImGui.TextUnformatted($"P-Wave Velocity: {acoustic.PWaveVelocity:F1} m/s");
+                ImGui.TextUnformatted($"S-Wave Velocity: {acoustic.SWaveVelocity:F1} m/s");
+                ImGui.TextUnformatted($"Vp/Vs Ratio: {acoustic.VpVsRatio:F2}");
+                ImGui.TextUnformatted($"Time Steps: {acoustic.TimeSteps}");
+                if (acoustic.TimeSeriesSnapshots?.Count > 0)
+                {
+                    ImGui.TextUnformatted($"Time Series: {acoustic.TimeSeriesSnapshots.Count} snapshots");
                 }
             }
             else if (dataset is DatasetGroup group)
@@ -300,7 +350,7 @@ namespace GeoscientistToolkit.UI
                 _onDatasetSelected?.Invoke(dataset);
             }
             
-            // NEW: Edit Metadata option
+            // Edit Metadata option
             ImGui.Separator();
             if (ImGui.MenuItem("Edit Metadata...", null, false, !(dataset is DatasetGroup)))
             {
@@ -354,6 +404,7 @@ namespace GeoscientistToolkit.UI
                 _selectedDatasets.Clear();
             }
         }
+        
         private void HandleDatasetSelection(Dataset dataset)
         {
             if (dataset.IsMissing)
@@ -400,103 +451,6 @@ namespace GeoscientistToolkit.UI
             }
             
             _lastSelectedDataset = dataset;
-        }
-        
-        private void ShowDatasetTooltip(Dataset dataset)
-        {
-            ImGui.BeginTooltip();
-            if (dataset.IsMissing)
-            {
-                ImGui.TextColored(new Vector4(1.0f, 0.4f, 0.4f, 1.0f), "Source file or directory not found!");
-            }
-            ImGui.TextUnformatted($"Name: {dataset.Name}");
-            ImGui.TextUnformatted($"Type: {dataset.Type}");
-            ImGui.TextUnformatted($"Path: {dataset.FilePath}");
-    
-            if (dataset is CtImageStackDataset ctDataset)
-            {
-                ImGui.Separator();
-                ImGui.TextUnformatted($"Binning: {ctDataset.BinningSize}");
-                ImGui.TextUnformatted($"Pixel Size: {ctDataset.PixelSize} {ctDataset.Unit}");
-            }
-            else if (dataset is Mesh3DDataset mesh3D)
-            {
-                ImGui.Separator();
-                ImGui.TextUnformatted($"Format: {mesh3D.FileFormat}");
-                ImGui.TextUnformatted($"Vertices: {mesh3D.VertexCount:N0}");
-                ImGui.TextUnformatted($"Faces: {mesh3D.FaceCount:N0}");
-                if (mesh3D.Scale != 1.0f)
-                {
-                    ImGui.TextUnformatted($"Scale: {mesh3D.Scale:F2}x");
-                }
-            }
-            else if (dataset is DatasetGroup group)
-            {
-                ImGui.Separator();
-                ImGui.TextUnformatted($"Contains {group.Datasets.Count} datasets:");
-                foreach (var child in group.Datasets)
-                {
-                    ImGui.TextUnformatted($"  • {child.Name}");
-                }
-            }
-    
-            ImGui.EndTooltip();
-        }
-        
-        private void DrawContextMenu(Dataset dataset)
-        {
-            // View option
-            if (ImGui.MenuItem("View", null, false, !(dataset is DatasetGroup) && !dataset.IsMissing))
-            {
-                _onDatasetSelected?.Invoke(dataset);
-            }
-            
-            // Group-specific options
-            if (dataset is DatasetGroup group)
-            {
-                if (ImGui.MenuItem("View Thumbnails"))
-                {
-                    // Signal to open thumbnail viewer
-                    OnOpenThumbnailViewer?.Invoke(group);
-                }
-                
-                if (ImGui.MenuItem("Ungroup"))
-                {
-                    UngroupDataset(group);
-                }
-            }
-            
-            // Multi-selection grouping
-            if (_selectedDatasets.Count > 1 && _selectedDatasets.Contains(dataset))
-            {
-                if (ImGui.MenuItem("Group Selected"))
-                {
-                    CreateGroup();
-                }
-            }
-            
-            ImGui.Separator();
-            
-            // Close/Remove option - now acts on all selected items
-            if (ImGui.MenuItem("Close"))
-            {
-                var itemsToClose = _selectedDatasets.ToList();
-                
-                foreach (var item in itemsToClose)
-                {
-                    if (item is DatasetGroup grp)
-                    {
-                        // Also remove all datasets within the group
-                        foreach (var child in grp.Datasets.ToList())
-                        {
-                            ProjectManager.Instance.RemoveDataset(child);
-                        }
-                    }
-                    ProjectManager.Instance.RemoveDataset(item);
-                }
-                
-                _selectedDatasets.Clear();
-            }
         }
         
         // Add this event at the top of the class with other fields
@@ -549,7 +503,10 @@ namespace GeoscientistToolkit.UI
                 DatasetType.Mesh => "[MESH]",
                 DatasetType.SingleImage => "[IMG]",
                 DatasetType.Group => "[GROUP]",
-                DatasetType.Mesh3D => "[3D]",  
+                DatasetType.Mesh3D => "[3D]",
+                DatasetType.Table => "[TABLE]",
+                DatasetType.GIS => "[GIS]",
+                DatasetType.AcousticVolume => "[ACOUSTIC]",
                 _ => "[DATA]"
             };
         }
