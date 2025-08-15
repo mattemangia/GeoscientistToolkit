@@ -1,4 +1,4 @@
-// GeoscientistToolkit/UI/ImportDataModal.cs - Complete with GIS Integration
+// GeoscientistToolkit/UI/ImportDataModal.cs - Updated with Acoustic Volume Import
 using System;
 using System.Data;
 using System.IO;
@@ -24,6 +24,7 @@ namespace GeoscientistToolkit.UI
         private readonly ImGuiFileDialog _mesh3DDialog;
         private readonly ImGuiFileDialog _tableDialog;
         private readonly ImGuiFileDialog _gisDialog;
+        private readonly ImGuiFileDialog _acousticDialog;
         private readonly ImageStackOrganizerDialog _organizerDialog;
 
         // Loaders
@@ -34,6 +35,7 @@ namespace GeoscientistToolkit.UI
         private readonly LabeledVolumeLoaderWrapper _labeledVolumeLoader;
         private readonly TableLoader _tableLoader;
         private readonly GISLoader _gisLoader;
+        private readonly AcousticVolumeLoader _acousticVolumeLoader;
 
         private int _selectedDatasetTypeIndex = 0;
         private readonly string[] _datasetTypeNames = {
@@ -44,7 +46,8 @@ namespace GeoscientistToolkit.UI
             "3D Object (OBJ/STL)",
             "Labeled Volume Stack (Color-coded Materials)",
             "Table/Spreadsheet (CSV/TSV)",
-            "GIS Map (Shapefile/GeoJSON/KML)"
+            "GIS Map (Shapefile/GeoJSON/KML)",
+            "Acoustic Volume (Simulation Results)"
         };
 
         private readonly string[] _pixelSizeUnits = { "µm", "mm" };
@@ -63,6 +66,7 @@ namespace GeoscientistToolkit.UI
             _mesh3DDialog = new ImGuiFileDialog("Import3DDialog", FileDialogType.OpenFile, "Select 3D Model");
             _tableDialog = new ImGuiFileDialog("ImportTableDialog", FileDialogType.OpenFile, "Select Table File");
             _gisDialog = new ImGuiFileDialog("ImportGISDialog", FileDialogType.OpenFile, "Select GIS File");
+            _acousticDialog = new ImGuiFileDialog("ImportAcousticDialog", FileDialogType.OpenDirectory, "Select Acoustic Volume Directory");
             _organizerDialog = new ImageStackOrganizerDialog();
 
             // Initialize loaders
@@ -73,6 +77,7 @@ namespace GeoscientistToolkit.UI
             _labeledVolumeLoader = new LabeledVolumeLoaderWrapper();
             _tableLoader = new TableLoader();
             _gisLoader = new GISLoader();
+            _acousticVolumeLoader = new AcousticVolumeLoader();
         }
 
         public void Open()
@@ -152,6 +157,11 @@ namespace GeoscientistToolkit.UI
                 }
             }
 
+            if (_acousticDialog.Submit())
+            {
+                _acousticVolumeLoader.DirectoryPath = _acousticDialog.SelectedPath;
+            }
+
             if (_fileDialog.Submit())
             {
                 _singleImageLoader.ImagePath = _fileDialog.SelectedPath;
@@ -225,11 +235,86 @@ namespace GeoscientistToolkit.UI
                 case 7: // GIS Map
                     DrawGISOptions();
                     break;
+                case 8: // Acoustic Volume
+                    DrawAcousticVolumeOptions();
+                    break;
             }
 
             ImGui.SetCursorPosY(ImGui.GetWindowHeight() - ImGui.GetFrameHeightWithSpacing() * 1.5f);
             ImGui.Separator();
             DrawButtons();
+        }
+
+        private void DrawAcousticVolumeOptions()
+        {
+            ImGui.TextWrapped("Import acoustic simulation results containing wave field data and time series. " +
+                            "These datasets are typically exported from acoustic simulations and contain P-wave, S-wave, " +
+                            "and combined wave field data along with time-series snapshots.");
+            
+            ImGui.Spacing();
+            ImGui.Separator();
+            ImGui.Spacing();
+            
+            ImGui.Text("Acoustic Volume Directory:");
+            var path = _acousticVolumeLoader.DirectoryPath ?? "";
+            ImGui.InputText("##AcousticPath", ref path, 260, ImGuiInputTextFlags.ReadOnly);
+            ImGui.SameLine();
+            if (ImGui.Button("Browse...##AcousticFolder"))
+            {
+                _acousticDialog.Open();
+            }
+            
+            var info = _acousticVolumeLoader.GetVolumeInfo();
+            if (info != null && !string.IsNullOrEmpty(info.DirectoryName))
+            {
+                ImGui.Spacing();
+                ImGui.Separator();
+                ImGui.Spacing();
+                
+                if (info.IsValid)
+                {
+                    ImGui.Text("Volume Information:");
+                    ImGui.BulletText($"Directory: {info.DirectoryName}");
+                    ImGui.BulletText($"Total Size: {info.TotalSize / (1024 * 1024)} MB");
+                    
+                    ImGui.Spacing();
+                    ImGui.Text("Available Data:");
+                    
+                    DrawCheckmark(info.HasMetadata, "Metadata");
+                    DrawCheckmark(info.HasPWaveField, "P-Wave Field");
+                    DrawCheckmark(info.HasSWaveField, "S-Wave Field");
+                    DrawCheckmark(info.HasCombinedField, "Combined Wave Field");
+                    
+                    if (info.HasTimeSeries)
+                    {
+                        DrawCheckmark(true, $"Time Series ({info.TimeSeriesFrameCount} frames)");
+                    }
+                    else
+                    {
+                        DrawCheckmark(false, "Time Series");
+                    }
+                    
+                    ImGui.Spacing();
+                    ImGui.TextColored(new Vector4(0.0f, 1.0f, 0.5f, 1.0f), 
+                        "✓ Ready to import acoustic volume");
+                }
+                else
+                {
+                    ImGui.TextColored(new Vector4(1.0f, 0.5f, 0.0f, 1.0f), 
+                        "⚠ Invalid acoustic volume directory");
+                    
+                    if (!string.IsNullOrEmpty(info.ErrorMessage))
+                    {
+                        ImGui.TextWrapped($"Error: {info.ErrorMessage}");
+                    }
+                    
+                    ImGui.Spacing();
+                    ImGui.Text("Expected structure:");
+                    ImGui.BulletText("metadata.json (required)");
+                    ImGui.BulletText("PWaveField.bin, SWaveField.bin, or CombinedField.bin");
+                    ImGui.BulletText("TimeSeries/ folder with snapshot_*.bin files (optional)");
+                }
+            }
         }
 
         private void DrawSingleImageOptions()
@@ -702,7 +787,6 @@ namespace GeoscientistToolkit.UI
                         ImGui.TextColored(new Vector4(0.0f, 1.0f, 0.5f, 1.0f), 
                             "✓ Ready to import");
                     }
-                   
                 }
             }
         }
@@ -747,6 +831,7 @@ namespace GeoscientistToolkit.UI
                 5 => _labeledVolumeLoader,
                 6 => _tableLoader,
                 7 => _gisLoader,
+                8 => _acousticVolumeLoader,
                 _ => null
             };
         }
@@ -811,6 +896,7 @@ namespace GeoscientistToolkit.UI
             _labeledVolumeLoader.Reset();
             _tableLoader.Reset();
             _gisLoader.Reset();
+            _acousticVolumeLoader.Reset();
 
             // Reset state
             _importTask = null;

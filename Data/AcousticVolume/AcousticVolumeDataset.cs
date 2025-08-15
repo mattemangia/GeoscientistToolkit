@@ -11,7 +11,7 @@ namespace GeoscientistToolkit.Data.AcousticVolume
 {
     /// <summary>
     /// Dataset type for acoustic simulation results containing wave field data,
-    /// velocity measurements, and material properties
+    /// velocity measurements, material properties, and damage field
     /// </summary>
     public class AcousticVolumeDataset : Dataset, ISerializableDataset
     {
@@ -19,6 +19,7 @@ namespace GeoscientistToolkit.Data.AcousticVolume
         public ChunkedVolume PWaveField { get; set; }
         public ChunkedVolume SWaveField { get; set; }
         public ChunkedVolume CombinedWaveField { get; set; }
+        public ChunkedVolume DamageField { get; set; } // NEW: Damage field from simulation
         
         // Simulation metadata
         public double PWaveVelocity { get; set; }
@@ -34,6 +35,12 @@ namespace GeoscientistToolkit.Data.AcousticVolume
         public float SourceFrequencyKHz { get; set; }
         public float SourceEnergyJ { get; set; }
         
+        // Damage model parameters
+        public float TensileStrengthMPa { get; set; }
+        public float CohesionMPa { get; set; }
+        public float FailureAngleDeg { get; set; }
+        public float MaxDamage { get; set; }
+        
         // Reference to source dataset
         public string SourceDatasetPath { get; set; }
         public string SourceMaterialName { get; set; }
@@ -41,10 +48,14 @@ namespace GeoscientistToolkit.Data.AcousticVolume
         // Time-series data for animation
         public List<WaveFieldSnapshot> TimeSeriesSnapshots { get; set; }
         
+        // Calibration data
+        public CalibrationData Calibration { get; set; }
+        
         public AcousticVolumeDataset(string name, string filePath) : base(name, filePath)
         {
             Type = DatasetType.AcousticVolume;
             TimeSeriesSnapshots = new List<WaveFieldSnapshot>();
+            Calibration = new CalibrationData();
         }
         
         public override long GetSizeInBytes()
@@ -57,6 +68,8 @@ namespace GeoscientistToolkit.Data.AcousticVolume
                 size += (long)SWaveField.Width * SWaveField.Height * SWaveField.Depth;
             if (CombinedWaveField != null)
                 size += (long)CombinedWaveField.Width * CombinedWaveField.Height * CombinedWaveField.Depth;
+            if (DamageField != null)
+                size += (long)DamageField.Width * DamageField.Height * DamageField.Depth;
                 
             // Add time series data size
             foreach (var snapshot in TimeSeriesSnapshots)
@@ -97,11 +110,25 @@ namespace GeoscientistToolkit.Data.AcousticVolume
                     CombinedWaveField = ChunkedVolume.LoadFromBinAsync(combinedPath, false).Result;
                 }
                 
+                // Load damage field
+                string damagePath = Path.Combine(FilePath, "DamageField.bin");
+                if (File.Exists(damagePath))
+                {
+                    DamageField = ChunkedVolume.LoadFromBinAsync(damagePath, false).Result;
+                }
+                
                 // Load metadata
                 string metadataPath = Path.Combine(FilePath, "metadata.json");
                 if (File.Exists(metadataPath))
                 {
                     LoadMetadata(metadataPath);
+                }
+                
+                // Load calibration data
+                string calibrationPath = Path.Combine(FilePath, "calibration.json");
+                if (File.Exists(calibrationPath))
+                {
+                    LoadCalibration(calibrationPath);
                 }
                 
                 // Load time series if available
@@ -121,11 +148,13 @@ namespace GeoscientistToolkit.Data.AcousticVolume
             PWaveField?.Dispose();
             SWaveField?.Dispose();
             CombinedWaveField?.Dispose();
+            DamageField?.Dispose();
             TimeSeriesSnapshots?.Clear();
             
             PWaveField = null;
             SWaveField = null;
             CombinedWaveField = null;
+            DamageField = null;
             
             Logger.Log($"[AcousticVolumeDataset] Unloaded: {Name}");
         }
@@ -157,7 +186,14 @@ namespace GeoscientistToolkit.Data.AcousticVolume
                     CombinedWaveField.SaveAsBin(combinedPath);
                 }
                 
+                if (DamageField != null)
+                {
+                    string damagePath = Path.Combine(FilePath, "DamageField.bin");
+                    DamageField.SaveAsBin(damagePath);
+                }
+                
                 SaveMetadata();
+                SaveCalibration();
                 SaveTimeSeries();
                 
                 Logger.Log($"[AcousticVolumeDataset] Saved wave fields to: {FilePath}");
@@ -187,6 +223,10 @@ namespace GeoscientistToolkit.Data.AcousticVolume
                 SourceEnergyJ = metadata.SourceEnergyJ;
                 SourceDatasetPath = metadata.SourceDatasetPath;
                 SourceMaterialName = metadata.SourceMaterialName;
+                TensileStrengthMPa = metadata.TensileStrengthMPa;
+                CohesionMPa = metadata.CohesionMPa;
+                FailureAngleDeg = metadata.FailureAngleDeg;
+                MaxDamage = metadata.MaxDamage;
             }
             catch (Exception ex)
             {
@@ -211,7 +251,11 @@ namespace GeoscientistToolkit.Data.AcousticVolume
                     SourceFrequencyKHz = SourceFrequencyKHz,
                     SourceEnergyJ = SourceEnergyJ,
                     SourceDatasetPath = SourceDatasetPath,
-                    SourceMaterialName = SourceMaterialName
+                    SourceMaterialName = SourceMaterialName,
+                    TensileStrengthMPa = TensileStrengthMPa,
+                    CohesionMPa = CohesionMPa,
+                    FailureAngleDeg = FailureAngleDeg,
+                    MaxDamage = MaxDamage
                 };
                 
                 string json = System.Text.Json.JsonSerializer.Serialize(metadata, new System.Text.Json.JsonSerializerOptions { WriteIndented = true });
@@ -221,6 +265,37 @@ namespace GeoscientistToolkit.Data.AcousticVolume
             catch (Exception ex)
             {
                 Logger.LogError($"[AcousticVolumeDataset] Failed to save metadata: {ex.Message}");
+            }
+        }
+        
+        private void LoadCalibration(string path)
+        {
+            try
+            {
+                string json = File.ReadAllText(path);
+                Calibration = System.Text.Json.JsonSerializer.Deserialize<CalibrationData>(json);
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError($"[AcousticVolumeDataset] Failed to load calibration: {ex.Message}");
+            }
+        }
+        
+        private void SaveCalibration()
+        {
+            if (Calibration == null || Calibration.Points.Count == 0)
+                return;
+                
+            try
+            {
+                string json = System.Text.Json.JsonSerializer.Serialize(Calibration, 
+                    new System.Text.Json.JsonSerializerOptions { WriteIndented = true });
+                string path = Path.Combine(FilePath, "calibration.json");
+                File.WriteAllText(path, json);
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError($"[AcousticVolumeDataset] Failed to save calibration: {ex.Message}");
             }
         }
         
@@ -315,15 +390,132 @@ namespace GeoscientistToolkit.Data.AcousticVolume
                 SourceEnergyJ = SourceEnergyJ,
                 SourceDatasetPath = SourceDatasetPath,
                 SourceMaterialName = SourceMaterialName,
-                HasTimeSeries = TimeSeriesSnapshots.Count > 0
+                HasTimeSeries = TimeSeriesSnapshots.Count > 0,
+                HasDamageField = DamageField != null,
+                HasCalibration = Calibration != null && Calibration.Points.Count > 0
             };
         }
     }
     
     /// <summary>
-    /// Represents a single time step snapshot of the wave field
+    /// Calibration data for acoustic simulations
     /// </summary>
-    public class WaveFieldSnapshot
+    public class CalibrationData
+    {
+        public List<CalibrationPoint> Points { get; set; } = new List<CalibrationPoint>();
+        public DateTime LastUpdated { get; set; }
+        public string CalibrationMethod { get; set; }
+        
+        public void AddPoint(CalibrationPoint point)
+        {
+            Points.Add(point);
+            LastUpdated = DateTime.Now;
+        }
+        
+        public CalibrationPoint GetClosestPoint(float density, float confiningPressure)
+        {
+            if (Points.Count == 0) return null;
+            
+            return Points
+                .OrderBy(p => Math.Abs(p.Density - density) + Math.Abs(p.ConfiningPressureMPa - confiningPressure))
+                .FirstOrDefault();
+        }
+        
+        public (float YoungsModulus, float PoissonRatio) InterpolateParameters(float density, float confiningPressure)
+        {
+            if (Points.Count == 0)
+                return (30000.0f, 0.25f); // Default values
+            
+            if (Points.Count == 1)
+                return (Points[0].YoungsModulusMPa, Points[0].PoissonRatio);
+            
+            // Find two closest points
+            var closestPoints = Points
+                .OrderBy(p => Math.Abs(p.Density - density) + Math.Abs(p.ConfiningPressureMPa - confiningPressure))
+                .Take(2)
+                .ToList();
+            
+            var p1 = closestPoints[0];
+            var p2 = closestPoints[1];
+            
+            float totalDist = Math.Abs(p1.Density - density) + Math.Abs(p2.Density - density);
+            if (totalDist < 0.001f)
+                return (p1.YoungsModulusMPa, p1.PoissonRatio);
+            
+            float weight1 = 1.0f - (Math.Abs(p1.Density - density) / totalDist);
+            float weight2 = 1.0f - weight1;
+            
+            float E = p1.YoungsModulusMPa * weight1 + p2.YoungsModulusMPa * weight2;
+            float nu = p1.PoissonRatio * weight1 + p2.PoissonRatio * weight2;
+            
+            return (E, nu);
+        }
+    }
+    
+    public class CalibrationPoint
+    {
+        public string MaterialName { get; set; }
+        public byte MaterialID { get; set; }
+        public float Density { get; set; }
+        public float ConfiningPressureMPa { get; set; }
+        public float YoungsModulusMPa { get; set; }
+        public float PoissonRatio { get; set; }
+        public double MeasuredVp { get; set; }
+        public double MeasuredVs { get; set; }
+        public double MeasuredVpVsRatio { get; set; }
+        public double SimulatedVp { get; set; }
+        public double SimulatedVs { get; set; }
+        public double SimulatedVpVsRatio { get; set; }
+        public DateTime Timestamp { get; set; }
+        public string Notes { get; set; }
+    }
+    
+    /// <summary>
+    /// Metadata structure for acoustic simulation
+    /// </summary>
+    public class AcousticMetadata
+    {
+        public double PWaveVelocity { get; set; }
+        public double SWaveVelocity { get; set; }
+        public double VpVsRatio { get; set; }
+        public int TimeSteps { get; set; }
+        public double ComputationTimeSeconds { get; set; }
+        public float YoungsModulusMPa { get; set; }
+        public float PoissonRatio { get; set; }
+        public float ConfiningPressureMPa { get; set; }
+        public float SourceFrequencyKHz { get; set; }
+        public float SourceEnergyJ { get; set; }
+        public string SourceDatasetPath { get; set; }
+        public string SourceMaterialName { get; set; }
+        public float TensileStrengthMPa { get; set; }
+        public float CohesionMPa { get; set; }
+        public float FailureAngleDeg { get; set; }
+        public float MaxDamage { get; set; }
+    }
+    
+    /// <summary>
+    /// DTO for serialization
+    /// </summary>
+    public class AcousticVolumeDatasetDTO : DatasetDTO
+    {
+        public double PWaveVelocity { get; set; }
+        public double SWaveVelocity { get; set; }
+        public double VpVsRatio { get; set; }
+        public int TimeSteps { get; set; }
+        public double ComputationTimeSeconds { get; set; }
+        public float YoungsModulusMPa { get; set; }
+        public float PoissonRatio { get; set; }
+        public float ConfiningPressureMPa { get; set; }
+        public float SourceFrequencyKHz { get; set; }
+        public float SourceEnergyJ { get; set; }
+        public string SourceDatasetPath { get; set; }
+        public string SourceMaterialName { get; set; }
+        public bool HasTimeSeries { get; set; }
+        public bool HasDamageField { get; set; }
+        public bool HasCalibration { get; set; }
+    }
+    
+   public class WaveFieldSnapshot
     {
         public int TimeStep { get; set; }
         public float SimulationTime { get; set; }
@@ -493,44 +685,5 @@ namespace GeoscientistToolkit.Data.AcousticVolume
                 return snapshot;
             }
         }
-    }
-    
-    /// <summary>
-    /// Metadata structure for acoustic simulation
-    /// </summary>
-    public class AcousticMetadata
-    {
-        public double PWaveVelocity { get; set; }
-        public double SWaveVelocity { get; set; }
-        public double VpVsRatio { get; set; }
-        public int TimeSteps { get; set; }
-        public double ComputationTimeSeconds { get; set; }
-        public float YoungsModulusMPa { get; set; }
-        public float PoissonRatio { get; set; }
-        public float ConfiningPressureMPa { get; set; }
-        public float SourceFrequencyKHz { get; set; }
-        public float SourceEnergyJ { get; set; }
-        public string SourceDatasetPath { get; set; }
-        public string SourceMaterialName { get; set; }
-    }
-    
-    /// <summary>
-    /// DTO for serialization
-    /// </summary>
-    public class AcousticVolumeDatasetDTO : DatasetDTO
-    {
-        public double PWaveVelocity { get; set; }
-        public double SWaveVelocity { get; set; }
-        public double VpVsRatio { get; set; }
-        public int TimeSteps { get; set; }
-        public double ComputationTimeSeconds { get; set; }
-        public float YoungsModulusMPa { get; set; }
-        public float PoissonRatio { get; set; }
-        public float ConfiningPressureMPa { get; set; }
-        public float SourceFrequencyKHz { get; set; }
-        public float SourceEnergyJ { get; set; }
-        public string SourceDatasetPath { get; set; }
-        public string SourceMaterialName { get; set; }
-        public bool HasTimeSeries { get; set; }
     }
 }

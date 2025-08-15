@@ -54,593 +54,7 @@ namespace GeoscientistToolkit.AddIns.AcousticSimulation
         public IEnumerable<IDataExporter> GetDataExporters() => null;
     }
 
-    /// <summary>
-    /// Main tool providing UI and simulation control
-    /// </summary>
-    internal class AcousticSimulationTool : AddInTool, IDisposable
-    {
-        public override string Name => "Acoustic Simulation";
-        public override string Icon => "🔊";
-        public override string Tooltip => "Simulate acoustic wave propagation through materials";
-
-        private UnifiedAcousticSimulator _simulator;
-        private SimulationParameters _parameters;
-        private SimulationResults _lastResults;
-        private CalibrationManager _calibrationManager;
-        private bool _isSimulating = false;
-        private CancellationTokenSource _cancellationTokenSource;
-
-        // Real-time visualization support
-        private bool _enableRealTimeVisualization = false;
-        private float _visualizationUpdateInterval = 0.1f; // seconds
-        private DateTime _lastVisualizationUpdate = DateTime.MinValue;
-        private byte[] _currentWaveFieldMask;
-        
-        // UI State
-        private int _selectedMaterialIndex = 0;
-        private int _selectedAxisIndex = 0; // 0=X, 1=Y, 2=Z
-        private float _confiningPressure = 1.0f;
-        private float _tensileStrength = 10.0f;
-        private float _failureAngle = 30.0f;
-        private float _cohesion = 5.0f;
-        private float _sourceEnergy = 1.0f;
-        private float _sourceFrequency = 500.0f; // kHz
-        private int _sourceAmplitude = 100;
-        private int _timeSteps = 1000;
-        private float _youngsModulus = 30000.0f; // MPa
-        private float _poissonRatio = 0.25f;
-        private bool _useElastic = true;
-        private bool _usePlastic = false;
-        private bool _useBrittle = false;
-        private bool _useGPU = true;
-        private bool _useFullFaceTransducers = false;
-        private bool _showAdvanced = false;
-        private bool _autoCalibrate = false;
-        private bool _saveTimeSeries = false;
-        private int _snapshotInterval = 10;
-
-        // Transducer positions
-        private Vector3 _txPosition = new Vector3(0, 0.5f, 0.5f);
-        private Vector3 _rxPosition = new Vector3(1, 0.5f, 0.5f);
-
-        public AcousticSimulationTool()
-        {
-            _parameters = new SimulationParameters();
-            _calibrationManager = new CalibrationManager();
-        }
-
-        public override bool CanExecute(Dataset dataset) => dataset is CtImageStackDataset;
-
-        public override void Execute(Dataset dataset)
-        {
-            // Tool execution is handled through the panel drawing
-        }
-
-        public void DrawPanel(CtImageStackDataset dataset)
-        {
-            if (dataset == null) return;
-
-            ImGui.Text($"Dataset: {dataset.Name}");
-            ImGui.Text($"Dimensions: {dataset.Width} × {dataset.Height} × {dataset.Depth}");
-            ImGui.Separator();
-
-            // Material Selection
-            ImGui.Text("Target Material:");
-            var materials = dataset.Materials.Where(m => m.ID != 0).Select(m => m.Name).ToArray();
-            if (materials.Length == 0)
-            {
-                ImGui.TextColored(new Vector4(1, 1, 0, 1), "No materials available for simulation.");
-                return;
-            }
-            ImGui.SetNextItemWidth(-1);
-            ImGui.Combo("##Material", ref _selectedMaterialIndex, materials, materials.Length);
-
-            ImGui.Separator();
-
-            // Simulation Axis
-            ImGui.Text("Wave Propagation Axis:");
-            string[] axes = { "X", "Y", "Z" };
-            ImGui.RadioButton("X", ref _selectedAxisIndex, 0); ImGui.SameLine();
-            ImGui.RadioButton("Y", ref _selectedAxisIndex, 1); ImGui.SameLine();
-            ImGui.RadioButton("Z", ref _selectedAxisIndex, 2);
-
-            // Transducer Type
-            ImGui.Checkbox("Full-Face Transducers", ref _useFullFaceTransducers);
-            if (ImGui.IsItemHovered())
-                ImGui.SetTooltip("Use entire face of volume as transducer (more realistic for ultrasonic testing)");
-
-            ImGui.Separator();
-
-            // Real-time visualization
-            if (ImGui.CollapsingHeader("Visualization"))
-            {
-                ImGui.Checkbox("Enable Real-Time Visualization", ref _enableRealTimeVisualization);
-                if (ImGui.IsItemHovered())
-                    ImGui.SetTooltip("Show wave propagation in real-time during simulation");
-                    
-                if (_enableRealTimeVisualization)
-                {
-                    ImGui.DragFloat("Update Interval (s)", ref _visualizationUpdateInterval, 0.01f, 0.01f, 1.0f);
-                }
-                
-                ImGui.Checkbox("Save Time Series", ref _saveTimeSeries);
-                if (_saveTimeSeries)
-                {
-                    ImGui.DragInt("Snapshot Interval", ref _snapshotInterval, 1, 1, 100);
-                }
-            }
-
-            // Physics Parameters
-            if (ImGui.CollapsingHeader("Material Properties"))
-            {
-                ImGui.DragFloat("Young's Modulus (MPa)", ref _youngsModulus, 100.0f, 100.0f, 200000.0f);
-                ImGui.DragFloat("Poisson's Ratio", ref _poissonRatio, 0.01f, 0.0f, 0.49f);
-                
-                if (_autoCalibrate && _calibrationManager.HasCalibration())
-                {
-                    if (ImGui.Button("Apply Calibration"))
-                    {
-                        ApplyCalibration(dataset);
-                    }
-                }
-            }
-
-            if (ImGui.CollapsingHeader("Stress Conditions"))
-            {
-                ImGui.DragFloat("Confining Pressure (MPa)", ref _confiningPressure, 0.1f, 0.0f, 100.0f);
-                ImGui.DragFloat("Tensile Strength (MPa)", ref _tensileStrength, 0.5f, 0.1f, 100.0f);
-                ImGui.DragFloat("Failure Angle (°)", ref _failureAngle, 1.0f, 0.0f, 90.0f);
-                ImGui.DragFloat("Cohesion (MPa)", ref _cohesion, 0.5f, 0.0f, 50.0f);
-            }
-
-            if (ImGui.CollapsingHeader("Source Parameters"))
-            {
-                ImGui.DragFloat("Source Energy (J)", ref _sourceEnergy, 0.1f, 0.01f, 10.0f);
-                ImGui.DragFloat("Frequency (kHz)", ref _sourceFrequency, 10.0f, 1.0f, 5000.0f);
-                ImGui.DragInt("Amplitude", ref _sourceAmplitude, 1, 1, 1000);
-                ImGui.DragInt("Time Steps", ref _timeSteps, 10, 100, 10000);
-            }
-
-            if (ImGui.CollapsingHeader("Physics Models"))
-            {
-                ImGui.Checkbox("Elastic", ref _useElastic);
-                ImGui.Checkbox("Plastic (Mohr-Coulomb)", ref _usePlastic);
-                ImGui.Checkbox("Brittle Damage", ref _useBrittle);
-            }
-
-            if (ImGui.CollapsingHeader("Advanced Settings"))
-            {
-                ImGui.Checkbox("Use GPU Acceleration", ref _useGPU);
-                if (ImGui.IsItemHovered())
-                    ImGui.SetTooltip("Use OpenCL for GPU acceleration when available");
-
-                ImGui.Checkbox("Auto-Calibrate", ref _autoCalibrate);
-                if (ImGui.IsItemHovered())
-                    ImGui.SetTooltip("Automatically calibrate elastic properties based on previous simulations");
-
-                // Custom transducer positions
-                ImGui.Text("Transmitter Position:");
-                ImGui.DragFloat3("TX", ref _txPosition, 0.01f, 0.0f, 1.0f);
-                
-                ImGui.Text("Receiver Position:");
-                ImGui.DragFloat3("RX", ref _rxPosition, 0.01f, 0.0f, 1.0f);
-            }
-
-            ImGui.Separator();
-
-            // Simulation Control
-            if (_isSimulating)
-            {
-                ImGui.ProgressBar(_simulator?.Progress ?? 0.0f, new Vector2(-1, 0), 
-                    $"Simulating... {(_simulator?.CurrentStep ?? 0)}/{_timeSteps} steps");
-                
-                if (ImGui.Button("Cancel Simulation", new Vector2(-1, 0)))
-                {
-                    CancelSimulation();
-                }
-            }
-            else
-            {
-                if (ImGui.Button("Run Simulation", new Vector2(-1, 0)))
-                {
-                    _ = RunSimulationAsync(dataset);
-                }
-            }
-
-            // Results Display
-            if (_lastResults != null)
-            {
-                ImGui.Separator();
-                if (ImGui.CollapsingHeader("Simulation Results", ImGuiTreeNodeFlags.DefaultOpen))
-                {
-                    ImGui.Text($"P-Wave Velocity: {_lastResults.PWaveVelocity:F2} m/s");
-                    ImGui.Text($"S-Wave Velocity: {_lastResults.SWaveVelocity:F2} m/s");
-                    ImGui.Text($"Vp/Vs Ratio: {_lastResults.VpVsRatio:F3}");
-                    ImGui.Text($"Total Time Steps: {_lastResults.TotalTimeSteps}");
-                    ImGui.Text($"Computation Time: {_lastResults.ComputationTime.TotalSeconds:F2} s");
-                    
-                    ImGui.Spacing();
-                    
-                    if (ImGui.Button("Export Results"))
-                    {
-                        ExportResults(dataset);
-                    }
-                    
-                    if (ImGui.Button("Create Acoustic Volume"))
-                    {
-                        CreateAcousticVolume(dataset);
-                    }
-                }
-            }
-        }
-
-        private async Task RunSimulationAsync(CtImageStackDataset dataset)
-        {
-            if (_isSimulating) return;
-
-            _isSimulating = true;
-            _cancellationTokenSource = new CancellationTokenSource();
-
-            try
-            {
-                // Prepare parameters
-                var material = dataset.Materials.Where(m => m.ID != 0).ElementAt(_selectedMaterialIndex);
-                
-                _parameters = new SimulationParameters
-                {
-                    Width = dataset.Width,
-                    Height = dataset.Height,
-                    Depth = dataset.Depth,
-                    PixelSize = (float)dataset.PixelSize / 1000.0f, // Convert to meters
-                    SelectedMaterialID = material.ID,
-                    Axis = _selectedAxisIndex,
-                    UseFullFaceTransducers = _useFullFaceTransducers,
-                    ConfiningPressureMPa = _confiningPressure,
-                    TensileStrengthMPa = _tensileStrength,
-                    FailureAngleDeg = _failureAngle,
-                    CohesionMPa = _cohesion,
-                    SourceEnergyJ = _sourceEnergy,
-                    SourceFrequencyKHz = _sourceFrequency,
-                    SourceAmplitude = _sourceAmplitude,
-                    TimeSteps = _timeSteps,
-                    YoungsModulusMPa = _youngsModulus,
-                    PoissonRatio = _poissonRatio,
-                    UseElasticModel = _useElastic,
-                    UsePlasticModel = _usePlastic,
-                    UseBrittleModel = _useBrittle,
-                    UseGPU = _useGPU,
-                    TxPosition = _txPosition,
-                    RxPosition = _rxPosition,
-                    EnableRealTimeVisualization = _enableRealTimeVisualization,
-                    SaveTimeSeries = _saveTimeSeries,
-                    SnapshotInterval = _snapshotInterval
-                };
-
-                // Extract volume data
-                var volumeLabels = ExtractVolumeLabels(dataset);
-                var densityVolume = ExtractDensityVolume(dataset, material);
-
-                // Create and run simulator
-                _simulator = new UnifiedAcousticSimulator(_parameters);
-                _simulator.ProgressUpdated += OnSimulationProgress;
-                
-                // Subscribe to real-time visualization updates
-                if (_enableRealTimeVisualization)
-                {
-                    _simulator.WaveFieldUpdated += OnWaveFieldUpdated;
-                }
-
-                _lastResults = await _simulator.RunAsync(
-                    volumeLabels, 
-                    densityVolume, 
-                    _cancellationTokenSource.Token);
-
-                if (_lastResults != null)
-                {
-                    Logger.Log($"[AcousticSimulation] Simulation completed: Vp={_lastResults.PWaveVelocity:F2} m/s, Vs={_lastResults.SWaveVelocity:F2} m/s");
-                    
-                    // Store wave field for visualization
-                    _lastResults.WaveFieldVx = _simulator.GetFinalWaveField(0);
-                    _lastResults.WaveFieldVy = _simulator.GetFinalWaveField(1);
-                    _lastResults.WaveFieldVz = _simulator.GetFinalWaveField(2);
-                }
-            }
-            catch (Exception ex)
-            {
-                Logger.LogError($"[AcousticSimulation] Simulation failed: {ex.Message}");
-            }
-            finally
-            {
-                _isSimulating = false;
-                _simulator?.Dispose();
-                _simulator = null;
-            }
-        }
-
-        private void OnWaveFieldUpdated(object sender, WaveFieldUpdateEventArgs e)
-        {
-            // Update visualization in real-time
-            if ((DateTime.Now - _lastVisualizationUpdate).TotalSeconds >= _visualizationUpdateInterval)
-            {
-                _lastVisualizationUpdate = DateTime.Now;
-                
-                // Convert wave field to mask for visualization
-                _currentWaveFieldMask = CreateWaveFieldMask(e.WaveField);
-                
-                // Send to visualization system
-                CtImageStackTools.Update3DPreviewFromExternal(
-                    e.Dataset as CtImageStackDataset, 
-                    _currentWaveFieldMask, 
-                    new Vector4(1, 0.5f, 0, 0.5f)); // Orange color for acoustic waves
-            }
-        }
-
-        private byte[] CreateWaveFieldMask(float[,,] waveField)
-        {
-            int width = waveField.GetLength(0);
-            int height = waveField.GetLength(1);
-            int depth = waveField.GetLength(2);
-            byte[] mask = new byte[width * height * depth];
-            
-            // Find max amplitude for normalization
-            float maxAmplitude = 0;
-            for (int z = 0; z < depth; z++)
-                for (int y = 0; y < height; y++)
-                    for (int x = 0; x < width; x++)
-                        maxAmplitude = Math.Max(maxAmplitude, Math.Abs(waveField[x, y, z]));
-            
-            if (maxAmplitude > 0)
-            {
-                int idx = 0;
-                for (int z = 0; z < depth; z++)
-                    for (int y = 0; y < height; y++)
-                        for (int x = 0; x < width; x++)
-                        {
-                            float normalized = Math.Abs(waveField[x, y, z]) / maxAmplitude;
-                            mask[idx++] = (byte)(normalized * 255);
-                        }
-            }
-            
-            return mask;
-        }
-
-        private void CancelSimulation()
-        {
-            _cancellationTokenSource?.Cancel();
-            Logger.Log("[AcousticSimulation] Simulation cancelled by user");
-        }
-
-        private void OnSimulationProgress(object sender, SimulationProgressEventArgs e)
-        {
-            // Progress is updated through the UI polling
-        }
-
-        private byte[,,] ExtractVolumeLabels(CtImageStackDataset dataset)
-        {
-            var labels = new byte[dataset.Width, dataset.Height, dataset.Depth];
-            
-            Parallel.For(0, dataset.Depth, z =>
-            {
-                for (int y = 0; y < dataset.Height; y++)
-                    for (int x = 0; x < dataset.Width; x++)
-                        labels[x, y, z] = dataset.LabelData[x, y, z];
-            });
-
-            return labels;
-        }
-
-        private float[,,] ExtractDensityVolume(CtImageStackDataset dataset, Material material)
-        {
-            var density = new float[dataset.Width, dataset.Height, dataset.Depth];
-            float materialDensity = (float)material.Density;
-
-            Parallel.For(0, dataset.Depth, z =>
-            {
-                for (int y = 0; y < dataset.Height; y++)
-                    for (int x = 0; x < dataset.Width; x++)
-                    {
-                        if (dataset.LabelData[x, y, z] == material.ID)
-                            density[x, y, z] = materialDensity;
-                        else
-                            density[x, y, z] = 1000.0f; // Default density for other materials
-                    }
-            });
-
-            return density;
-        }
-
-        private void CreateAcousticVolume(CtImageStackDataset dataset)
-        {
-            if (_lastResults == null || _lastResults.WaveFieldVx == null)
-            {
-                Logger.LogError("[AcousticSimulation] No wave field data available");
-                return;
-            }
-
-            try
-            {
-                // Create a new acoustic volume dataset
-                string acousticPath = Path.Combine(
-                    Path.GetDirectoryName(dataset.FilePath),
-                    $"{dataset.Name}_AcousticVolume_{DateTime.Now:yyyyMMdd_HHmmss}");
-
-                Directory.CreateDirectory(acousticPath);
-
-                var acousticDataset = new AcousticVolumeDataset(
-                    $"{dataset.Name} - Acoustic Volume",
-                    acousticPath)
-                {
-                    PWaveVelocity = _lastResults.PWaveVelocity,
-                    SWaveVelocity = _lastResults.SWaveVelocity,
-                    VpVsRatio = _lastResults.VpVsRatio,
-                    TimeSteps = _lastResults.TotalTimeSteps,
-                    ComputationTime = _lastResults.ComputationTime,
-                    YoungsModulusMPa = _youngsModulus,
-                    PoissonRatio = _poissonRatio,
-                    ConfiningPressureMPa = _confiningPressure,
-                    SourceFrequencyKHz = _sourceFrequency,
-                    SourceEnergyJ = _sourceEnergy,
-                    SourceDatasetPath = dataset.FilePath,
-                    SourceMaterialName = dataset.Materials.Where(m => m.ID != 0).ElementAt(_selectedMaterialIndex).Name
-                };
-
-                // Create wave field volumes
-                acousticDataset.PWaveField = CreateWaveFieldVolume(_lastResults.WaveFieldVx, "PWaveField");
-                acousticDataset.SWaveField = CreateWaveFieldVolume(_lastResults.WaveFieldVy, "SWaveField");
-                acousticDataset.CombinedWaveField = CreateCombinedWaveField(_lastResults);
-
-                // Add time series if available
-                if (_lastResults.TimeSeriesSnapshots != null)
-                {
-                    acousticDataset.TimeSeriesSnapshots = _lastResults.TimeSeriesSnapshots;
-                }
-
-                // Save the dataset
-                acousticDataset.SaveWaveFields();
-
-                // Add to project
-                ProjectManager.Instance.AddDataset(acousticDataset);
-                Logger.Log($"[AcousticSimulation] Created acoustic volume dataset: {acousticDataset.Name}");
-            }
-            catch (Exception ex)
-            {
-                Logger.LogError($"[AcousticSimulation] Failed to create acoustic volume: {ex.Message}");
-            }
-        }
-
-        private ChunkedVolume CreateWaveFieldVolume(float[,,] field, string name)
-        {
-            int width = field.GetLength(0);
-            int height = field.GetLength(1);
-            int depth = field.GetLength(2);
-            
-            var volume = new ChunkedVolume(width, height, depth);
-            
-            // Normalize and convert to byte
-            float maxValue = 0;
-            for (int z = 0; z < depth; z++)
-                for (int y = 0; y < height; y++)
-                    for (int x = 0; x < width; x++)
-                        maxValue = Math.Max(maxValue, Math.Abs(field[x, y, z]));
-            
-            if (maxValue > 0)
-            {
-                for (int z = 0; z < depth; z++)
-                {
-                    var slice = new byte[width * height];
-                    int idx = 0;
-                    for (int y = 0; y < height; y++)
-                        for (int x = 0; x < width; x++)
-                        {
-                            float normalized = (field[x, y, z] + maxValue) / (2 * maxValue);
-                            slice[idx++] = (byte)(normalized * 255);
-                        }
-                    volume.WriteSliceZ(z, slice);
-                }
-            }
-            
-            return volume;
-        }
-
-        private ChunkedVolume CreateCombinedWaveField(SimulationResults results)
-        {
-            int width = results.WaveFieldVx.GetLength(0);
-            int height = results.WaveFieldVx.GetLength(1);
-            int depth = results.WaveFieldVx.GetLength(2);
-            
-            var volume = new ChunkedVolume(width, height, depth);
-            
-            float maxMagnitude = 0;
-            for (int z = 0; z < depth; z++)
-                for (int y = 0; y < height; y++)
-                    for (int x = 0; x < width; x++)
-                    {
-                        float vx = results.WaveFieldVx[x, y, z];
-                        float vy = results.WaveFieldVy[x, y, z];
-                        float vz = results.WaveFieldVz[x, y, z];
-                        float magnitude = (float)Math.Sqrt(vx * vx + vy * vy + vz * vz);
-                        maxMagnitude = Math.Max(maxMagnitude, magnitude);
-                    }
-            
-            if (maxMagnitude > 0)
-            {
-                for (int z = 0; z < depth; z++)
-                {
-                    var slice = new byte[width * height];
-                    int idx = 0;
-                    for (int y = 0; y < height; y++)
-                        for (int x = 0; x < width; x++)
-                        {
-                            float vx = results.WaveFieldVx[x, y, z];
-                            float vy = results.WaveFieldVy[x, y, z];
-                            float vz = results.WaveFieldVz[x, y, z];
-                            float magnitude = (float)Math.Sqrt(vx * vx + vy * vy + vz * vz);
-                            slice[idx++] = (byte)(255 * magnitude / maxMagnitude);
-                        }
-                    volume.WriteSliceZ(z, slice);
-                }
-            }
-            
-            return volume;
-        }
-
-        private void ApplyCalibration(CtImageStackDataset dataset)
-        {
-            var material = dataset.Materials.Where(m => m.ID != 0).ElementAt(_selectedMaterialIndex);
-            var calibrated = _calibrationManager.GetCalibratedParameters((float)material.Density, _confiningPressure);
-            
-            _youngsModulus = calibrated.YoungsModulus;
-            _poissonRatio = calibrated.PoissonRatio;
-            
-            Logger.Log($"[AcousticSimulation] Applied calibration: E={_youngsModulus:F2} MPa, ν={_poissonRatio:F4}");
-        }
-
-        private void ExportResults(CtImageStackDataset dataset)
-        {
-            if (_lastResults == null) return;
-
-            try
-            {
-                string exportPath = Path.Combine(
-                    Path.GetDirectoryName(dataset.FilePath),
-                    $"{dataset.Name}_AcousticResults_{DateTime.Now:yyyyMMdd_HHmmss}.txt");
-
-                var sb = new StringBuilder();
-                sb.AppendLine("Acoustic Simulation Results");
-                sb.AppendLine("===========================");
-                sb.AppendLine($"Dataset: {dataset.Name}");
-                sb.AppendLine($"Date: {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
-                sb.AppendLine();
-                sb.AppendLine("Parameters:");
-                sb.AppendLine($"  Material: {dataset.Materials.Where(m => m.ID != 0).ElementAt(_selectedMaterialIndex).Name}");
-                sb.AppendLine($"  Young's Modulus: {_youngsModulus:F2} MPa");
-                sb.AppendLine($"  Poisson's Ratio: {_poissonRatio:F4}");
-                sb.AppendLine($"  Confining Pressure: {_confiningPressure:F2} MPa");
-                sb.AppendLine();
-                sb.AppendLine("Results:");
-                sb.AppendLine($"  P-Wave Velocity: {_lastResults.PWaveVelocity:F2} m/s");
-                sb.AppendLine($"  S-Wave Velocity: {_lastResults.SWaveVelocity:F2} m/s");
-                sb.AppendLine($"  Vp/Vs Ratio: {_lastResults.VpVsRatio:F3}");
-                sb.AppendLine($"  P-Wave Travel Time: {_lastResults.PWaveTravelTime} steps");
-                sb.AppendLine($"  S-Wave Travel Time: {_lastResults.SWaveTravelTime} steps");
-                sb.AppendLine($"  Total Time Steps: {_lastResults.TotalTimeSteps}");
-                sb.AppendLine($"  Computation Time: {_lastResults.ComputationTime.TotalSeconds:F2} s");
-
-                File.WriteAllText(exportPath, sb.ToString());
-                Logger.Log($"[AcousticSimulation] Results exported to: {exportPath}");
-            }
-            catch (Exception ex)
-            {
-                Logger.LogError($"[AcousticSimulation] Failed to export results: {ex.Message}");
-            }
-        }
-
-        public void Dispose()
-        {
-            _cancellationTokenSource?.Cancel();
-            _simulator?.Dispose();
-        }
-    }
+   
 
     #region Unified Simulator
 
@@ -668,7 +82,7 @@ namespace GeoscientistToolkit.AddIns.AcousticSimulation
         private float[,,] _vx, _vy, _vz;
         private float[,,] _sxx, _syy, _szz, _sxy, _sxz, _syz;
         private float[,,] _damage;
-
+        private float[,,] _rho;
         // Progress tracking
         public float Progress { get; private set; }
         public int CurrentStep { get; private set; }
@@ -789,6 +203,7 @@ namespace GeoscientistToolkit.AddIns.AcousticSimulation
             _sxz = new float[w, h, d];
             _syz = new float[w, h, d];
             _damage = new float[w, h, d];
+            _rho = new float[w, h, d];
         }
 
         private unsafe void BuildOpenCLProgram()
@@ -1080,26 +495,52 @@ namespace GeoscientistToolkit.AddIns.AcousticSimulation
 
         private void CalculateTimeStep(float[,,] densityVolume)
         {
-            // Find minimum density
+            // If we already have a cached density (CPU path), use it; else use the param.
             float rhoMin = float.MaxValue;
-            foreach (float d in densityVolume)
-                if (d > 0 && d < rhoMin)
-                    rhoMin = d;
+            if (_rho != null)
+            {
+                foreach (var r in _rho)
+                    if (r > 0 && r < rhoMin) rhoMin = r;
+            }
+            else
+            {
+                foreach (var r in densityVolume)
+                    if (r > 0 && r < rhoMin) rhoMin = r;
+            }
 
             rhoMin = Math.Max(rhoMin, 100.0f);
-
-            // Calculate maximum P-wave velocity
             float vpMax = (float)Math.Sqrt((_lambda + 2 * _mu) / rhoMin);
-            vpMax = Math.Min(vpMax, 6000.0f); // Cap for stability
-
-            // CFL condition
+            vpMax = Math.Min(vpMax, 6000.0f);
             const float SafetyCourant = 0.25f;
-            _dt = SafetyCourant * _params.PixelSize / vpMax;
-            _dt = Math.Max(_dt, 1e-8f);
-
+            _dt = Math.Max(SafetyCourant * _params.PixelSize / vpMax, 1e-8f);
             Logger.Log($"[AcousticSimulator] Time step: {_dt:E6} s, vpMax: {vpMax:F2} m/s");
         }
+        public float[,,] GetDensityVolume()
+        {
+            // CPU: return our copy
+            if (!_useGPU) return _rho;
 
+            // GPU: download once and return
+            var dst = new float[_params.Width, _params.Height, _params.Depth];
+            DownloadDensityFromGPU(dst);
+            return dst;
+        }
+
+        private unsafe void DownloadDensityFromGPU(float[,,] dst)
+        {
+            int size = _totalCells;
+            var tmp = new float[size];
+            fixed (float* p = tmp)
+            {
+                _cl.EnqueueReadBuffer(_commandQueue, _densityBuffer, true, 0,
+                    (nuint)(size * sizeof(float)), p, 0, null, null);
+            }
+            int idx = 0;
+            for (int z = 0; z < _params.Depth; z++)
+            for (int y = 0; y < _params.Height; y++)
+            for (int x = 0; x < _params.Width; x++)
+                dst[x, y, z] = tmp[idx++];
+        }
         private unsafe void ApplyInitialConditions(byte[,,] volumeLabels, float[,,] densityVolume)
         {
             if (_useGPU)
@@ -1135,6 +576,12 @@ namespace GeoscientistToolkit.AddIns.AcousticSimulation
             }
             else
             {
+                // ADD: own a copy of density for the whole simulation
+                for (int z = 0; z < _params.Depth; z++)
+                for (int y = 0; y < _params.Height; y++)
+                for (int x = 0; x < _params.Width; x++)
+                    _rho[x, y, z] = MathF.Max(100f, densityVolume[x, y, z]);
+
                 // Apply confining pressure and source pulse
                 ApplySourcePulseCPU(volumeLabels, densityVolume);
             }
@@ -1187,7 +634,8 @@ namespace GeoscientistToolkit.AddIns.AcousticSimulation
                             if (volumeLabels[0, y, z] == _params.SelectedMaterialID)
                             {
                                 _sxx[0, y, z] += pulse;
-                                _vx[0, y, z] = pulse / (densityVolume[0, y, z] * 10.0f);
+                                _vx[0, y, z] = pulse / (_rho[0, y, z] * 10.0f);    // axis X face
+                                
                             }
                     break;
                     
@@ -1197,7 +645,7 @@ namespace GeoscientistToolkit.AddIns.AcousticSimulation
                             if (volumeLabels[x, 0, z] == _params.SelectedMaterialID)
                             {
                                 _syy[x, 0, z] += pulse;
-                                _vy[x, 0, z] = pulse / (densityVolume[x, 0, z] * 10.0f);
+                                _vy[x, 0, z] = pulse / (_rho[x, 0, z] * 10.0f); 
                             }
                     break;
                     
@@ -1207,7 +655,7 @@ namespace GeoscientistToolkit.AddIns.AcousticSimulation
                             if (volumeLabels[x, y, 0] == _params.SelectedMaterialID)
                             {
                                 _szz[x, y, 0] += pulse;
-                                _vz[x, y, 0] = pulse / (densityVolume[x, y, 0] * 10.0f);
+                                _vz[x, y, 0] = pulse / (_rho[x, y, 0] * 10.0f);
                             }
                     break;
             }
@@ -1240,7 +688,7 @@ namespace GeoscientistToolkit.AddIns.AcousticSimulation
                         _szz[x, y, z] += localPulse;
 
                         // Add velocity kick
-                        float vKick = localPulse / (densityVolume[x, y, z] * 10.0f);
+                        float vKick = localPulse / (_rho[x, y, z] * 10.0f);
                         switch (_params.Axis)
                         {
                             case 0: _vx[x, y, z] += vKick; break;
@@ -1418,7 +866,7 @@ namespace GeoscientistToolkit.AddIns.AcousticSimulation
                     {
                         if (volumeLabels[x, y, z] != _params.SelectedMaterialID) continue;
 
-                        float rho = Math.Max(100.0f, densityVolume[x, y, z]);
+                        float rho = _rho[x, y, z];
 
                         // Calculate stress gradients
                         float dsxx_dx = (_sxx[x + 1, y, z] - _sxx[x - 1, y, z]) / (2 * _params.PixelSize);
@@ -1669,38 +1117,11 @@ namespace GeoscientistToolkit.AddIns.AcousticSimulation
 
     #region Supporting Classes
 
-    internal class SimulationParameters
-    {
-        public int Width { get; set; }
-        public int Height { get; set; }
-        public int Depth { get; set; }
-        public float PixelSize { get; set; }
-        public byte SelectedMaterialID { get; set; }
-        public int Axis { get; set; }
-        public bool UseFullFaceTransducers { get; set; }
-        public float ConfiningPressureMPa { get; set; }
-        public float TensileStrengthMPa { get; set; }
-        public float FailureAngleDeg { get; set; }
-        public float CohesionMPa { get; set; }
-        public float SourceEnergyJ { get; set; }
-        public float SourceFrequencyKHz { get; set; }
-        public int SourceAmplitude { get; set; }
-        public int TimeSteps { get; set; }
-        public float YoungsModulusMPa { get; set; }
-        public float PoissonRatio { get; set; }
-        public bool UseElasticModel { get; set; }
-        public bool UsePlasticModel { get; set; }
-        public bool UseBrittleModel { get; set; }
-        public bool UseGPU { get; set; }
-        public Vector3 TxPosition { get; set; }
-        public Vector3 RxPosition { get; set; }
-        public bool EnableRealTimeVisualization { get; set; }
-        public bool SaveTimeSeries { get; set; }
-        public int SnapshotInterval { get; set; }
-    }
+    
 
-    internal class SimulationResults
+    public class SimulationResults
     {
+        public float[,,] DamageField { get; set; }
         public double PWaveVelocity { get; set; }
         public double SWaveVelocity { get; set; }
         public double VpVsRatio { get; set; }
