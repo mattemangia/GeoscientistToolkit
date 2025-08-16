@@ -36,63 +36,92 @@ namespace GeoscientistToolkit.Data.Image.Segmentation
             });
         }
 
-        public static void ApplyBrush(ImageSegmentationData segmentation, int centerX, int centerY,
-            int radius, byte materialId, bool addMode = true)
+        public static void ApplyBrush(
+     ImageSegmentationData segmentation,
+     int centerX, int centerY,
+     int radius,
+     byte materialId,
+     bool addMode = true)
         {
+            if (segmentation == null || segmentation.LabelData == null) return;
+            if (radius <= 0) return;
+
+            int w = segmentation.Width;
+            int h = segmentation.Height;
+
             int minX = Math.Max(0, centerX - radius);
-            int maxX = Math.Min(segmentation.Width - 1, centerX + radius);
+            int maxX = Math.Min(w - 1, centerX + radius);
             int minY = Math.Max(0, centerY - radius);
-            int maxY = Math.Min(segmentation.Height - 1, centerY + radius);
-            float radiusSq = radius * radius;
+            int maxY = Math.Min(h - 1, centerY + radius);
+            int r2 = radius * radius;
+
             for (int y = minY; y <= maxY; y++)
             {
+                int dy = y - centerY;
                 for (int x = minX; x <= maxX; x++)
                 {
-                    float distSq = (x - centerX) * (x - centerX) + (y - centerY) * (y - centerY);
-                    if (distSq <= radiusSq)
+                    int dx = x - centerX;
+                    if (dx * dx + dy * dy <= r2)
                     {
-                        int idx = y * segmentation.Width + x;
-                        if (addMode)
-                            segmentation.LabelData[idx] = materialId;
-                        else
-                            segmentation.LabelData[idx] = 0;
+                        int idx = y * w + x;
+                        segmentation.LabelData[idx] = addMode ? materialId : (byte)0;
                     }
                 }
             }
         }
 
-        public static void ApplyMagicWand(byte[] imageData, ImageSegmentationData segmentation,
-            int seedX, int seedY, byte materialId, float tolerance, bool addMode = true)
+        public static void ApplyMagicWand(
+    byte[] imageData,
+    ImageSegmentationData segmentation,
+    int seedX, int seedY,
+    byte materialId,
+    float tolerance,
+    bool addMode = true)
         {
-            if (seedX < 0 || seedX >= segmentation.Width || seedY < 0 || seedY >= segmentation.Height) return;
+            if (imageData == null || segmentation == null) return;
+            int w = segmentation.Width;
+            int h = segmentation.Height;
+            if (seedX < 0 || seedX >= w || seedY < 0 || seedY >= h) return;
+
+            // One undo snapshot per click
             segmentation.SaveUndoState();
-            int seedIdx = (seedY * segmentation.Width + seedX) * 4;
-            Vector3 seedColor = new Vector3(imageData[seedIdx] / 255f, imageData[seedIdx + 1] / 255f, imageData[seedIdx + 2] / 255f);
-            bool[] visited = new bool[segmentation.Width * segmentation.Height];
-            Queue<(int x, int y)> queue = new Queue<(int, int)>();
-            queue.Enqueue((seedX, seedY));
-            visited[seedY * segmentation.Width + seedX] = true;
-            float toleranceSq = tolerance * tolerance;
-            while (queue.Count > 0)
+
+            // Seed color (normalize to 0..1)
+            int seedIdxPx = (seedY * w + seedX) * 4;
+            var seed = new Vector3(
+                imageData[seedIdxPx] / 255f,
+                imageData[seedIdxPx + 1] / 255f,
+                imageData[seedIdxPx + 2] / 255f);
+
+            float tol2 = tolerance * tolerance;
+            var visited = new bool[w * h];
+            var q = new Queue<(int x, int y)>();
+            q.Enqueue((seedX, seedY));
+            visited[seedY * w + seedX] = true;
+
+            while (q.Count > 0)
             {
-                var (x, y) = queue.Dequeue();
-                int idx = y * segmentation.Width + x;
-                int pixelIdx = idx * 4;
-                Vector3 pixelColor = new Vector3(imageData[pixelIdx] / 255f, imageData[pixelIdx + 1] / 255f, imageData[pixelIdx + 2] / 255f);
-                if (Vector3.DistanceSquared(seedColor, pixelColor) <= toleranceSq)
+                var (x, y) = q.Dequeue();
+                int idx = y * w + x;
+                int pix = idx * 4;
+
+                var col = new Vector3(
+                    imageData[pix] / 255f,
+                    imageData[pix + 1] / 255f,
+                    imageData[pix + 2] / 255f);
+
+                if (Vector3.DistanceSquared(seed, col) <= tol2)
                 {
-                    if (addMode)
-                        segmentation.LabelData[idx] = materialId;
-                    else if (segmentation.LabelData[idx] == materialId)
-                        segmentation.LabelData[idx] = 0;
-                    TryAddNeighbor(queue, visited, x - 1, y, segmentation.Width, segmentation.Height);
-                    TryAddNeighbor(queue, visited, x + 1, y, segmentation.Width, segmentation.Height);
-                    TryAddNeighbor(queue, visited, x, y - 1, segmentation.Width, segmentation.Height);
-                    TryAddNeighbor(queue, visited, x, y + 1, segmentation.Width, segmentation.Height);
+                    segmentation.LabelData[idx] = addMode ? materialId : (byte)0;
+
+                    // 4-connected neighborhood
+                    if (x > 0 && !visited[idx - 1]) { visited[idx - 1] = true; q.Enqueue((x - 1, y)); }
+                    if (x < w - 1 && !visited[idx + 1]) { visited[idx + 1] = true; q.Enqueue((x + 1, y)); }
+                    if (y > 0 && !visited[idx - w]) { visited[idx - w] = true; q.Enqueue((x, y - 1)); }
+                    if (y < h - 1 && !visited[idx + w]) { visited[idx + w] = true; q.Enqueue((x, y + 1)); }
                 }
             }
         }
-
         private static void TryAddNeighbor(Queue<(int, int)> queue, bool[] visited, int x, int y, int width, int height)
         {
             if (x >= 0 && x < width && y >= 0 && y < height)
@@ -527,12 +556,13 @@ namespace GeoscientistToolkit.Data.Image.Segmentation
         private void DrawBrushTool()
         {
             ImGui.Text("Brush Tool");
-            ImGui.SliderInt("Radius", ref _brushRadius, 1, 100);
+            ImGui.SliderInt("Radius", ref _brushRadius, 1, 200);
+
             int mode = _brushAddMode ? 0 : 1;
-            ImGui.RadioButton("Add##brushMode", ref mode, 0);
-            ImGui.SameLine();
+            ImGui.RadioButton("Add##brushMode", ref mode, 0); ImGui.SameLine();
             ImGui.RadioButton("Erase##brushMode", ref mode, 1);
             _brushAddMode = (mode == 0);
+
             ImGui.TextWrapped("Click and drag on the image to paint.");
         }
 
@@ -638,6 +668,7 @@ namespace GeoscientistToolkit.Data.Image.Segmentation
         public void HandleMouseClick(int x, int y)
         {
             if (_dataset == null) return;
+
             var segmentation = _dataset.GetOrCreateSegmentation();
             if (segmentation == null) return;
 
@@ -645,39 +676,91 @@ namespace GeoscientistToolkit.Data.Image.Segmentation
 
             switch (_selectedTool)
             {
-                case 1: // Brush
-                    if (ImGui.IsMouseDown(ImGuiMouseButton.Left))
+                case 0: // Threshold
+                        // Threshold is controlled via sliders/preview/apply in the panel.
+                        // Mouse click does nothing here by design.
+                    break;
+
+                case 1: // Brush (continuous painting while LMB/RMB is held)
+                    {
+                        // Left button = add/erase depending on _brushAddMode
+                        // Right button = force erase (set to 0)
+                        bool leftDown = ImGui.IsMouseDown(ImGuiMouseButton.Left);
+                        bool rightDown = ImGui.IsMouseDown(ImGuiMouseButton.Right);
+
+                        if (leftDown || rightDown)
+                        {
+                            // One undo snapshot at stroke start.
+                            if (ImGui.IsMouseClicked(ImGuiMouseButton.Left) || ImGui.IsMouseClicked(ImGuiMouseButton.Right))
+                                segmentation.SaveUndoState();
+
+                            bool addMode = _brushAddMode;
+                            if (rightDown) addMode = false; // RMB always erases
+
+                            ImageSegmentationTools.ApplyBrush(
+                                segmentation,
+                                x, y,
+                                _brushRadius,
+                                _selectedMaterialId,
+                                addMode);
+
+                            _dataset.ShowSegmentationOverlay = true;
+                            needsInvalidate = true;
+                        }
+                        break;
+                    }
+
+                case 2: // Magic Wand (single-click flood; LMB=add, RMB=erase)
+                    {
+                        if (ImGui.IsMouseClicked(ImGuiMouseButton.Left) || ImGui.IsMouseClicked(ImGuiMouseButton.Right))
+                        {
+                            _dataset.Load(); // ensure _dataset.ImageData is present
+
+                            bool addMode = ImGui.IsMouseClicked(ImGuiMouseButton.Left);
+
+                            ImageSegmentationTools.ApplyMagicWand(
+                                _dataset.ImageData,
+                                segmentation,
+                                x, y,
+                                _selectedMaterialId,
+                                _magicWandTolerance,
+                                addMode /* true=add to material, false=erase to 0 */);
+
+                            _dataset.ShowSegmentationOverlay = true;
+                            needsInvalidate = true;
+                        }
+                        break;
+                    }
+
+                case 3: // Top-Hat
+                        // Top-Hat is a filter with Apply button in the panel.
+                        // Mouse click does nothing here by design.
+                    break;
+
+                case 4: // Watershed (LMB places a seed of current material, RMB removes last seed)
                     {
                         if (ImGui.IsMouseClicked(ImGuiMouseButton.Left))
                         {
-                            segmentation.SaveUndoState();
+                            _watershedSeeds.Add((x, y, _selectedMaterialId));
+                            // Only placing seeds; overlay not changed yet.
                         }
-                        ImageSegmentationTools.ApplyBrush(segmentation, x, y, _brushRadius, _selectedMaterialId, _brushAddMode);
-                        needsInvalidate = true;
+                        else if (ImGui.IsMouseClicked(ImGuiMouseButton.Right))
+                        {
+                            if (_watershedSeeds.Count > 0)
+                                _watershedSeeds.RemoveAt(_watershedSeeds.Count - 1);
+                        }
+                        break;
                     }
-                    break;
 
-                case 2: // Magic Wand
-                    if (ImGui.IsMouseClicked(ImGuiMouseButton.Left))
-                    {
-                        _dataset.Load();
-                        ImageSegmentationTools.ApplyMagicWand(_dataset.ImageData, segmentation, x, y, _selectedMaterialId, _magicWandTolerance);
-                        needsInvalidate = true;
-                    }
-                    break;
-
-                case 4: // Watershed
-                    if (ImGui.IsMouseClicked(ImGuiMouseButton.Left))
-                    {
-                        _watershedSeeds.Add((x, y, _selectedMaterialId));
-                    }
+                default:
+                    // Unknown tool id: do nothing.
                     break;
             }
 
             if (needsInvalidate)
             {
                 ProjectManager.Instance.HasUnsavedChanges = true;
-                InvalidateSegmentationTexture();
+                InvalidateSegmentationTexture(); // force rebuild of overlay texture
             }
         }
 
@@ -735,7 +818,7 @@ namespace GeoscientistToolkit.Data.Image.Segmentation
                 return;
             }
 
-            // Fallback: robust invalidation even if FilePath is null
+            // Fallback: directly invalidate the cache by key if callback wasn't wired yet
             if (_dataset != null)
             {
                 string key = ((_dataset.FilePath ?? string.Empty) + "_segmentation");
