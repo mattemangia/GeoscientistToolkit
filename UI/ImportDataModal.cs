@@ -1,4 +1,4 @@
-// GeoscientistToolkit/UI/ImportDataModal.cs - Updated with Acoustic Volume Import
+// GeoscientistToolkit/UI/ImportDataModal.cs - Complete with Segmentation Import
 using System;
 using System.Data;
 using System.IO;
@@ -25,6 +25,7 @@ namespace GeoscientistToolkit.UI
         private readonly ImGuiFileDialog _tableDialog;
         private readonly ImGuiFileDialog _gisDialog;
         private readonly ImGuiFileDialog _acousticDialog;
+        private readonly ImGuiFileDialog _segmentationDialog;
         private readonly ImageStackOrganizerDialog _organizerDialog;
 
         // Loaders
@@ -36,6 +37,7 @@ namespace GeoscientistToolkit.UI
         private readonly TableLoader _tableLoader;
         private readonly GISLoader _gisLoader;
         private readonly AcousticVolumeLoader _acousticVolumeLoader;
+        private readonly SegmentationLoader _segmentationLoader;
 
         private int _selectedDatasetTypeIndex = 0;
         private readonly string[] _datasetTypeNames = {
@@ -47,7 +49,8 @@ namespace GeoscientistToolkit.UI
             "Labeled Volume Stack (Color-coded Materials)",
             "Table/Spreadsheet (CSV/TSV)",
             "GIS Map (Shapefile/GeoJSON/KML)",
-            "Acoustic Volume (Simulation Results)"
+            "Acoustic Volume (Simulation Results)",
+            "Segmentation/Labels (Standalone)"
         };
 
         private readonly string[] _pixelSizeUnits = { "µm", "mm" };
@@ -67,6 +70,7 @@ namespace GeoscientistToolkit.UI
             _tableDialog = new ImGuiFileDialog("ImportTableDialog", FileDialogType.OpenFile, "Select Table File");
             _gisDialog = new ImGuiFileDialog("ImportGISDialog", FileDialogType.OpenFile, "Select GIS File");
             _acousticDialog = new ImGuiFileDialog("ImportAcousticDialog", FileDialogType.OpenDirectory, "Select Acoustic Volume Directory");
+            _segmentationDialog = new ImGuiFileDialog("ImportSegmentationDialog", FileDialogType.OpenFile, "Select Segmentation File");
             _organizerDialog = new ImageStackOrganizerDialog();
 
             // Initialize loaders
@@ -78,6 +82,7 @@ namespace GeoscientistToolkit.UI
             _tableLoader = new TableLoader();
             _gisLoader = new GISLoader();
             _acousticVolumeLoader = new AcousticVolumeLoader();
+            _segmentationLoader = new SegmentationLoader();
         }
 
         public void Open()
@@ -161,6 +166,11 @@ namespace GeoscientistToolkit.UI
             {
                 _acousticVolumeLoader.DirectoryPath = _acousticDialog.SelectedPath;
             }
+            
+            if (_segmentationDialog.Submit())
+            {
+                _segmentationLoader.SegmentationPath = _segmentationDialog.SelectedPath;
+            }
 
             if (_fileDialog.Submit())
             {
@@ -238,11 +248,75 @@ namespace GeoscientistToolkit.UI
                 case 8: // Acoustic Volume
                     DrawAcousticVolumeOptions();
                     break;
+                case 9: // Segmentation/Labels
+                    DrawSegmentationOptions();
+                    break;
             }
 
             ImGui.SetCursorPosY(ImGui.GetWindowHeight() - ImGui.GetFrameHeightWithSpacing() * 1.5f);
             ImGui.Separator();
             DrawButtons();
+        }
+
+        private void DrawSegmentationOptions()
+        {
+            ImGui.TextWrapped("Import a standalone segmentation/label image. This can be used to load " +
+                            "segmentation data without requiring the original image. The segmentation " +
+                            "will be displayed with the labeled regions visible.");
+            
+            ImGui.Spacing();
+            ImGui.Separator();
+            ImGui.Spacing();
+            
+            ImGui.Text("Segmentation File:");
+            var path = _segmentationLoader.SegmentationPath ?? "";
+            ImGui.InputText("##SegmentationPath", ref path, 260, ImGuiInputTextFlags.ReadOnly);
+            ImGui.SameLine();
+            if (ImGui.Button("Browse...##SegmentationFile"))
+            {
+                string[] segmentationExtensions = { ".png", ".tiff", ".tif", ".labels.png", ".labels.tiff" };
+                _segmentationDialog.Open(null, segmentationExtensions);
+            }
+            
+            ImGui.Spacing();
+            ImGui.Text("Dataset Name:");
+            ImGui.SetNextItemWidth(300);
+            string name = _segmentationLoader.DatasetName ?? "";
+            if (ImGui.InputText("##SegmentationName", ref name, 256))
+            {
+                _segmentationLoader.DatasetName = name;
+            }
+            if (ImGui.IsItemHovered())
+            {
+                ImGui.SetTooltip("Optional: Leave empty to use the file name");
+            }
+            
+            var info = _segmentationLoader.GetSegmentationInfo();
+            if (info != null)
+            {
+                ImGui.Spacing();
+                ImGui.Separator();
+                ImGui.Spacing();
+                ImGui.Text("Segmentation Information:");
+                ImGui.BulletText($"File: {info.FileName}");
+                ImGui.BulletText($"Resolution: {info.Width} x {info.Height}");
+                ImGui.BulletText($"Size: {info.FileSize / 1024} KB");
+                
+                if (info.HasMaterialsFile)
+                {
+                    ImGui.TextColored(new Vector4(0.0f, 1.0f, 0.5f, 1.0f), 
+                        "✓ Material definitions found (.materials.json)");
+                }
+                else
+                {
+                    ImGui.TextColored(new Vector4(1.0f, 0.8f, 0.0f, 1.0f), 
+                        "⚠ No material definitions found - colors will be used to generate materials");
+                }
+                
+                ImGui.Spacing();
+                ImGui.TextColored(new Vector4(0.0f, 1.0f, 0.5f, 1.0f), 
+                    "✓ Ready to import segmentation");
+            }
         }
 
         private void DrawAcousticVolumeOptions()
@@ -320,7 +394,7 @@ namespace GeoscientistToolkit.UI
         private void DrawSingleImageOptions()
         {
             ImGui.Text("Image File:");
-            var path = _singleImageLoader.ImagePath;
+            var path = _singleImageLoader.ImagePath ?? "";
             ImGui.InputText("##ImagePath", ref path, 260, ImGuiInputTextFlags.ReadOnly);
             ImGui.SameLine();
             if (ImGui.Button("Browse...##ImageFile"))
@@ -365,7 +439,7 @@ namespace GeoscientistToolkit.UI
         private void DrawImageFolderOptions()
         {
             ImGui.Text("Image Folder:");
-            var path = _imageFolderLoader.FolderPath;
+            var path = _imageFolderLoader.FolderPath ?? "";
             ImGui.InputText("##ImageFolderPath", ref path, 260, ImGuiInputTextFlags.ReadOnly);
             ImGui.SameLine();
             if (ImGui.Button("Browse...##ImageFolder"))
@@ -411,7 +485,7 @@ namespace GeoscientistToolkit.UI
             if (_ctStackLoader.IsMultiPageTiff)
             {
                 ImGui.Text("TIFF File:");
-                var path = _ctStackLoader.SourcePath;
+                var path = _ctStackLoader.SourcePath ?? "";
                 ImGui.InputText("##CTFilePath", ref path, 260, ImGuiInputTextFlags.ReadOnly);
                 ImGui.SameLine();
                 if (ImGui.Button("Browse...##CTFile"))
@@ -423,7 +497,7 @@ namespace GeoscientistToolkit.UI
             else
             {
                 ImGui.Text("Image Folder:");
-                var path = _ctStackLoader.SourcePath;
+                var path = _ctStackLoader.SourcePath ?? "";
                 ImGui.InputText("##CTFolderPath", ref path, 260, ImGuiInputTextFlags.ReadOnly);
                 ImGui.SameLine();
                 if (ImGui.Button("Browse...##CTFolder"))
@@ -480,7 +554,7 @@ namespace GeoscientistToolkit.UI
         private void Draw3DObjectOptions()
         {
             ImGui.Text("3D Model File:");
-            var path = _mesh3DLoader.ModelPath;
+            var path = _mesh3DLoader.ModelPath ?? "";
             ImGui.InputText("##3DPath", ref path, 260, ImGuiInputTextFlags.ReadOnly);
             ImGui.SameLine();
             if (ImGui.Button("Browse...##3DFile"))
@@ -547,7 +621,7 @@ namespace GeoscientistToolkit.UI
             if (_labeledVolumeLoader.IsMultiPageTiff)
             {
                 ImGui.Text("TIFF File:");
-                var path = _labeledVolumeLoader.SourcePath;
+                var path = _labeledVolumeLoader.SourcePath ?? "";
                 ImGui.InputText("##LabeledFilePath", ref path, 260, ImGuiInputTextFlags.ReadOnly);
                 ImGui.SameLine();
                 if (ImGui.Button("Browse...##LabeledFile"))
@@ -559,7 +633,7 @@ namespace GeoscientistToolkit.UI
             else
             {
                 ImGui.Text("Image Folder:");
-                var path = _labeledVolumeLoader.SourcePath;
+                var path = _labeledVolumeLoader.SourcePath ?? "";
                 ImGui.InputText("##LabeledFolderPath", ref path, 260, ImGuiInputTextFlags.ReadOnly);
                 ImGui.SameLine();
                 if (ImGui.Button("Browse...##LabeledFolder"))
@@ -617,7 +691,7 @@ namespace GeoscientistToolkit.UI
             ImGui.Spacing();
             
             ImGui.Text("Table File:");
-            var path = _tableLoader.FilePath;
+            var path = _tableLoader.FilePath ?? "";
             ImGui.InputText("##TablePath", ref path, 260, ImGuiInputTextFlags.ReadOnly);
             ImGui.SameLine();
             if (ImGui.Button("Browse...##TableFile"))
@@ -832,6 +906,7 @@ namespace GeoscientistToolkit.UI
                 6 => _tableLoader,
                 7 => _gisLoader,
                 8 => _acousticVolumeLoader,
+                9 => _segmentationLoader,
                 _ => null
             };
         }
@@ -897,6 +972,7 @@ namespace GeoscientistToolkit.UI
             _tableLoader.Reset();
             _gisLoader.Reset();
             _acousticVolumeLoader.Reset();
+            _segmentationLoader.Reset();
 
             // Reset state
             _importTask = null;

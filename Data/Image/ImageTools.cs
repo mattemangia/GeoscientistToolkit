@@ -1,5 +1,6 @@
 ﻿// GeoscientistToolkit/Data/Image/ImageTools.cs
 using GeoscientistToolkit.Business;
+using GeoscientistToolkit.Data.Image.Segmentation;
 using GeoscientistToolkit.UI.Interfaces;
 using GeoscientistToolkit.Util;
 using ImGuiNET;
@@ -8,7 +9,6 @@ using System.Numerics;
 namespace GeoscientistToolkit.Data.Image
 {
     // A concrete command for changing brightness.
-    // In a real app, this would modify shader values or pixel data.
     public class AdjustBrightnessCommand : ICommand
     {
         private readonly ImageDataset _target;
@@ -16,48 +16,74 @@ namespace GeoscientistToolkit.Data.Image
         private readonly float _oldBrightness;
 
         // This static property is a stand-in for a real property on the viewer/image
-        // that would control a shader uniform or image processing effect.
         public static float CurrentBrightness { get; private set; } = 0;
 
         public AdjustBrightnessCommand(ImageDataset target, float newBrightness)
         {
             _target = target;
             _newBrightness = newBrightness;
-            _oldBrightness = CurrentBrightness; // Store the old value before changing
+            _oldBrightness = CurrentBrightness;
         }
 
         public void Execute()
         {
             CurrentBrightness = _newBrightness;
             Logger.Log($"Applied brightness {CurrentBrightness:F2} to {_target.Name}");
-            // In a real implementation, you would trigger a re-render or update a shader uniform here.
         }
 
         public void UnExecute()
         {
             CurrentBrightness = _oldBrightness;
             Logger.Log($"Reverted brightness to {CurrentBrightness:F2} for {_target.Name}");
-            // Revert the shader uniform or image processing effect.
         }
     }
-
 
     public class ImageTools : IDatasetTools
     {
         private float _brightness = AdjustBrightnessCommand.CurrentBrightness;
         private float _contrast = 1;
+        private ImageSegmentationToolsUI _segmentationTools;
+        private int _selectedToolTab = 0;
+
+        public ImageTools()
+        {
+            _segmentationTools = new ImageSegmentationToolsUI();
+        }
 
         public void Draw(Dataset dataset)
         {
             if (dataset is not ImageDataset imageDataset) return;
 
+            // Tab selection
+            if (ImGui.BeginTabBar("ImageToolsTabs"))
+            {
+                if (ImGui.BeginTabItem("Adjustments"))
+                {
+                    _selectedToolTab = 0;
+                    DrawAdjustments(imageDataset);
+                    ImGui.EndTabItem();
+                }
+
+                if (ImGui.BeginTabItem("Segmentation"))
+                {
+                    _selectedToolTab = 1;
+                    DrawSegmentation(imageDataset);
+                    ImGui.EndTabItem();
+                }
+
+                ImGui.EndTabBar();
+            }
+        }
+
+        private void DrawAdjustments(ImageDataset imageDataset)
+        {
             // Sync the slider with the actual current value
             _brightness = AdjustBrightnessCommand.CurrentBrightness;
 
             ImGui.Text("Image Adjustments");
             ImGui.Separator();
 
-            if(ImGui.SliderFloat("Brightness", ref _brightness, -1.0f, 1.0f))
+            if (ImGui.SliderFloat("Brightness", ref _brightness, -1.0f, 1.0f))
             {
                 // This would be for live-preview, not using the command pattern
             }
@@ -71,5 +97,12 @@ namespace GeoscientistToolkit.Data.Image
                 GlobalPerformanceManager.Instance.UndoManager.Do(command);
             }
         }
+
+        private void DrawSegmentation(ImageDataset imageDataset)
+        {
+            _segmentationTools.Draw(imageDataset);
+        }
+
+        public ImageSegmentationToolsUI GetSegmentationTools() => _segmentationTools;
     }
 }

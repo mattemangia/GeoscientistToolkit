@@ -76,7 +76,7 @@ namespace GeoscientistToolkit.UI
                 TableDataset => new TableTools(),
                 GISDataset => new GeoscientistToolkit.UI.GIS.GISTools(),
                 AcousticVolumeDataset => new GeoscientistToolkit.Data.AcousticVolume.AcousticVolumeTools(),
-                ImageDataset => new ImageTools(),
+                ImageDataset => new GeoscientistToolkit.Data.Image.ImageTools(),
                 _ => new DefaultTools()
             };
         }

@@ -68,10 +68,14 @@ namespace GeoscientistToolkit.Data
     }
 
     // DTO for ImageDataset
-    public class ImageDatasetDTO : DatasetDTO
+    public class ImageDatasetDTO:DatasetDTO
     {
+        public string TypeName { get; set; }
+        public string Name { get; set; }
+        public string FilePath { get; set; }
         public float PixelSize { get; set; }
         public string Unit { get; set; }
+        public string SegmentationPath { get; set; }
     }
 
     // --- MODIFIED --- DTO for CtImageStackDataset

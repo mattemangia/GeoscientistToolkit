@@ -1,11 +1,13 @@
-﻿// GeoscientistToolkit/Data/Image/ImageViewer.cs (Updated with TextureManager)
+﻿// GeoscientistToolkit/Data/Image/ImageViewer.cs
 using GeoscientistToolkit.Business;
+using GeoscientistToolkit.Data.Image.Segmentation;
 using GeoscientistToolkit.UI.Interfaces;
 using GeoscientistToolkit.Util;
 using ImGuiNET;
 using System;
 using System.Globalization;
 using System.Numerics;
+using System.Runtime.InteropServices;
 using Veldrid;
 
 namespace GeoscientistToolkit.Data.Image
@@ -13,6 +15,12 @@ namespace GeoscientistToolkit.Data.Image
     public class ImageViewer : IDatasetViewer
     {
         private readonly ImageDataset _dataset;
+        
+        // Segmentation
+        private TextureManager _segmentationTexture;
+        private bool _showSegmentation = true;
+        private float _segmentationOpacity = 0.5f;
+        private ImageSegmentationToolsUI _segmentationTools;
         
         // Scale bar state
         private Vector2 _scaleBarRelativePos = new Vector2(0.85f, 0.9f);
@@ -43,6 +51,20 @@ namespace GeoscientistToolkit.Data.Image
 
         public void DrawToolbarControls() 
         {
+            // Segmentation controls
+            if (_dataset.HasSegmentation || _dataset.ImageData != null)
+            {
+                ImGui.SameLine();
+                ImGui.Checkbox("Show Labels", ref _showSegmentation);
+                
+                if (_showSegmentation && _dataset.HasSegmentation)
+                {
+                    ImGui.SameLine();
+                    ImGui.SetNextItemWidth(100);
+                    ImGui.SliderFloat("Opacity", ref _segmentationOpacity, 0.0f, 1.0f, "%.2f");
+                }
+            }
+            
             if (_dataset.PixelSize > 0)
             {
                 ImGui.SameLine();
@@ -52,37 +74,6 @@ namespace GeoscientistToolkit.Data.Image
 
         public void DrawContent(ref float zoom, ref Vector2 pan)
         {
-            // --- TEXTURE CACHE LOGIC ---
-            TextureManager textureManager = GlobalPerformanceManager.Instance.TextureCache.GetTexture(_dataset.FilePath, () =>
-            {
-                _dataset.Load(); // Ensure pixel data is loaded
-                if (_dataset.ImageData == null) return (null, 0);
-
-                var manager = TextureManager.CreateFromPixelData(
-                    _dataset.ImageData,
-                    (uint)_dataset.Width,
-                    (uint)_dataset.Height);
-                
-                long size = (long)_dataset.Width * _dataset.Height * 4; // 4 bytes per pixel (RGBA)
-                
-                _dataset.Unload(); // Unload pixel data if lazy loading is on
-                return (manager, size);
-            });
-
-            if (textureManager == null || !textureManager.IsValid)
-            {
-                ImGui.TextColored(new Vector4(1.0f, 0.2f, 0.2f, 1.0f), "Error: Could not create/cache GPU texture for image.");
-                return;
-            }
-
-            // Get texture ID for current context
-            var textureId = textureManager.GetImGuiTextureId();
-            if (textureId == IntPtr.Zero)
-            {
-                ImGui.TextColored(new Vector4(1.0f, 0.2f, 0.2f, 1.0f), "Error: Could not get texture for current context.");
-                return;
-            }
-
             // Get drawing context
             var canvasPos = ImGui.GetCursorScreenPos();
             var canvasSize = ImGui.GetContentRegionAvail();
@@ -92,10 +83,10 @@ namespace GeoscientistToolkit.Data.Image
             // Draw background
             dl.AddRectFilled(canvasPos, canvasPos + canvasSize, 0xFF202020);
 
-            // Set a clipping region to stop the image from drawing over other controls
+            // Set a clipping region
             dl.PushClipRect(canvasPos, canvasPos + canvasSize, true);
 
-            // Calculate image display
+            // Calculate display dimensions
             float aspectRatio = (float)_dataset.Width / _dataset.Height;
             Vector2 displaySize = new Vector2(canvasSize.X, canvasSize.X / aspectRatio);
             if (displaySize.Y > canvasSize.Y)
@@ -106,7 +97,7 @@ namespace GeoscientistToolkit.Data.Image
 
             Vector2 imagePos = canvasPos + (canvasSize - displaySize) * 0.5f + pan;
 
-            // Check if mouse is over the image area for zoom handling
+            // Check if mouse is over the image area
             bool isMouseOverImage = io.MousePos.X >= canvasPos.X && io.MousePos.X <= canvasPos.X + canvasSize.X &&
                                    io.MousePos.Y >= canvasPos.Y && io.MousePos.Y <= canvasPos.Y + canvasSize.Y;
 
@@ -130,8 +121,51 @@ namespace GeoscientistToolkit.Data.Image
                 pan += io.MouseDelta;
             }
 
-            // Draw the image
-            dl.AddImage(textureId, imagePos, imagePos + displaySize);
+            // Draw the main image if available
+            if (_dataset.ImageData != null)
+            {
+                TextureManager textureManager = GlobalPerformanceManager.Instance.TextureCache.GetTexture(_dataset.FilePath, () =>
+                {
+                    _dataset.Load();
+                    if (_dataset.ImageData == null) return (null, 0);
+
+                    var manager = TextureManager.CreateFromPixelData(
+                        _dataset.ImageData,
+                        (uint)_dataset.Width,
+                        (uint)_dataset.Height);
+                    
+                    long size = (long)_dataset.Width * _dataset.Height * 4;
+                    
+                    _dataset.Unload();
+                    return (manager, size);
+                });
+
+                if (textureManager != null && textureManager.IsValid)
+                {
+                    var textureId = textureManager.GetImGuiTextureId();
+                    if (textureId != IntPtr.Zero)
+                    {
+                        dl.AddImage(textureId, imagePos, imagePos + displaySize);
+                    }
+                }
+            }
+            else if (_dataset.HasSegmentation)
+            {
+                // Draw a dark background if we only have segmentation
+                dl.AddRectFilled(imagePos, imagePos + displaySize, 0xFF101010);
+            }
+
+            // Draw segmentation overlay if available
+            if (_showSegmentation && _dataset.HasSegmentation)
+            {
+                DrawSegmentationOverlay(dl, imagePos, displaySize);
+            }
+
+            // Handle segmentation tool interactions
+            if (_segmentationTools != null && isMouseOverImage)
+            {
+                HandleSegmentationToolInteraction(imagePos, displaySize, zoom);
+            }
 
             // Draw scale bar
             if (_dataset.PixelSize > 0 || _pixelSizeChanged)
@@ -144,6 +178,111 @@ namespace GeoscientistToolkit.Data.Image
 
             // Draw scale bar properties window
             DrawScaleBarProperties();
+        }
+
+        private void DrawSegmentationOverlay(ImDrawListPtr dl, Vector2 imagePos, Vector2 displaySize)
+        {
+            if (_dataset.Segmentation == null) return;
+
+            // Create or update segmentation texture
+            string segTexKey = _dataset.FilePath + "_segmentation";
+            
+            _segmentationTexture = GlobalPerformanceManager.Instance.TextureCache.GetTexture(segTexKey, () =>
+            {
+                var rgbaData = CreateSegmentationRGBA();
+                if (rgbaData == null) return (null, 0);
+
+                var manager = TextureManager.CreateFromPixelData(
+                    rgbaData,
+                    (uint)_dataset.Width,
+                    (uint)_dataset.Height);
+                
+                long size = (long)_dataset.Width * _dataset.Height * 4;
+                return (manager, size);
+            });
+
+            if (_segmentationTexture != null && _segmentationTexture.IsValid)
+            {
+                var textureId = _segmentationTexture.GetImGuiTextureId();
+                if (textureId != IntPtr.Zero)
+                {
+                    // Draw with transparency
+                    dl.AddImage(textureId, imagePos, imagePos + displaySize, 
+                        Vector2.Zero, Vector2.One, 
+                        ImGui.ColorConvertFloat4ToU32(new Vector4(1, 1, 1, _segmentationOpacity)));
+                }
+            }
+        }
+
+        private byte[] CreateSegmentationRGBA()
+        {
+            if (_dataset.Segmentation == null) return null;
+
+            byte[] rgbaData = new byte[_dataset.Width * _dataset.Height * 4];
+            
+            for (int i = 0; i < _dataset.Segmentation.LabelData.Length; i++)
+            {
+                byte labelId = _dataset.Segmentation.LabelData[i];
+                var material = _dataset.Segmentation.GetMaterial(labelId);
+                
+                int pixelIdx = i * 4;
+                if (material != null && labelId != 0) // Don't render exterior (0)
+                {
+                    rgbaData[pixelIdx] = (byte)(material.Color.X * 255);
+                    rgbaData[pixelIdx + 1] = (byte)(material.Color.Y * 255);
+                    rgbaData[pixelIdx + 2] = (byte)(material.Color.Z * 255);
+                    rgbaData[pixelIdx + 3] = (byte)(material.Color.W * 255);
+                }
+                else
+                {
+                    // Transparent for exterior or unknown labels
+                    rgbaData[pixelIdx] = 0;
+                    rgbaData[pixelIdx + 1] = 0;
+                    rgbaData[pixelIdx + 2] = 0;
+                    rgbaData[pixelIdx + 3] = 0;
+                }
+            }
+            
+            return rgbaData;
+        }
+
+        private void HandleSegmentationToolInteraction(Vector2 imagePos, Vector2 displaySize, float zoom)
+        {
+            var io = ImGui.GetIO();
+            
+            // Convert mouse position to image coordinates
+            Vector2 relativePos = io.MousePos - imagePos;
+            int imageX = (int)(relativePos.X / displaySize.X * _dataset.Width);
+            int imageY = (int)(relativePos.Y / displaySize.Y * _dataset.Height);
+            
+            // Clamp to image bounds
+            imageX = Math.Clamp(imageX, 0, _dataset.Width - 1);
+            imageY = Math.Clamp(imageY, 0, _dataset.Height - 1);
+            
+            // Pass to segmentation tools
+            bool isDragging = ImGui.IsMouseDragging(ImGuiMouseButton.Left);
+            _segmentationTools?.HandleMouseClick(imageX, imageY, isDragging);
+            
+            // Invalidate segmentation texture if modified
+            if (isDragging || ImGui.IsMouseClicked(ImGuiMouseButton.Left))
+            {
+                InvalidateSegmentationTexture();
+            }
+        }
+
+        public void InvalidateSegmentationTexture()
+        {
+            if (_segmentationTexture != null)
+            {
+                string segTexKey = _dataset.FilePath + "_segmentation";
+                GlobalPerformanceManager.Instance.TextureCache.ReleaseTexture(segTexKey);
+                _segmentationTexture = null;
+            }
+        }
+
+        public void SetSegmentationTools(ImageSegmentationToolsUI tools)
+        {
+            _segmentationTools = tools;
         }
         
         private void DrawScaleBar(ImDrawListPtr dl, Vector2 canvasPos, Vector2 canvasSize, float zoom)
@@ -382,8 +521,13 @@ namespace GeoscientistToolkit.Data.Image
         
         public void Dispose()
         {
-            // Release the texture from the cache instead of disposing it directly
-            GlobalPerformanceManager.Instance.TextureCache.ReleaseTexture(_dataset.FilePath);
+            // Release textures from the cache
+            if (_dataset.FilePath != null)
+            {
+                GlobalPerformanceManager.Instance.TextureCache.ReleaseTexture(_dataset.FilePath);
+            }
+            
+            InvalidateSegmentationTexture();
         }
     }
 }
