@@ -670,99 +670,109 @@ namespace GeoscientistToolkit.Data.Image.Segmentation
             if (_dataset == null) return;
 
             var segmentation = _dataset.GetOrCreateSegmentation();
-            if (segmentation == null) return;
+            if (segmentation == null || segmentation.LabelData == null) return;
 
-            bool needsInvalidate = false;
+            // ImGui mouse state
+            bool lDown = ImGui.IsMouseDown(ImGuiMouseButton.Left);
+            bool rDown = ImGui.IsMouseDown(ImGuiMouseButton.Right);
+            bool lClicked = ImGui.IsMouseClicked(ImGuiMouseButton.Left);
+            bool rClicked = ImGui.IsMouseClicked(ImGuiMouseButton.Right);
+
+            bool changed = false;
 
             switch (_selectedTool)
             {
-                case 0: // Threshold
-                        // Threshold is controlled via sliders/preview/apply in the panel.
-                        // Mouse click does nothing here by design.
+                case 0: // Threshold: mouse does nothing (use the panel controls)
                     break;
 
-                case 1: // Brush (continuous painting while LMB/RMB is held)
+                case 1: // Brush — paint continuously while LMB/RMB is held
                     {
-                        // Left button = add/erase depending on _brushAddMode
-                        // Right button = force erase (set to 0)
-                        bool leftDown = ImGui.IsMouseDown(ImGuiMouseButton.Left);
-                        bool rightDown = ImGui.IsMouseDown(ImGuiMouseButton.Right);
-
-                        if (leftDown || rightDown)
+                        if (lDown || rDown)
                         {
-                            // One undo snapshot at stroke start.
-                            if (ImGui.IsMouseClicked(ImGuiMouseButton.Left) || ImGui.IsMouseClicked(ImGuiMouseButton.Right))
+                            // One undo snapshot at stroke start
+                            if (lClicked || rClicked)
                                 segmentation.SaveUndoState();
 
                             bool addMode = _brushAddMode;
-                            if (rightDown) addMode = false; // RMB always erases
+                            if (rDown) addMode = false; // RMB always erases to 0
 
                             ImageSegmentationTools.ApplyBrush(
                                 segmentation,
                                 x, y,
-                                _brushRadius,
+                                Math.Max(1, _brushRadius),
                                 _selectedMaterialId,
                                 addMode);
 
-                            _dataset.ShowSegmentationOverlay = true;
-                            needsInvalidate = true;
+                            changed = true;
                         }
                         break;
                     }
 
-                case 2: // Magic Wand (single-click flood; LMB=add, RMB=erase)
+                case 2: // Magic Wand — single-click flood (LMB=add, RMB=erase)
                     {
-                        if (ImGui.IsMouseClicked(ImGuiMouseButton.Left) || ImGui.IsMouseClicked(ImGuiMouseButton.Right))
+                        if (lClicked || rClicked)
                         {
-                            _dataset.Load(); // ensure _dataset.ImageData is present
+                            _dataset.Load(); // ensure ImageData is ready
 
-                            bool addMode = ImGui.IsMouseClicked(ImGuiMouseButton.Left);
-
+                            bool addMode = lClicked && !rClicked;
                             ImageSegmentationTools.ApplyMagicWand(
                                 _dataset.ImageData,
                                 segmentation,
                                 x, y,
                                 _selectedMaterialId,
-                                _magicWandTolerance,
-                                addMode /* true=add to material, false=erase to 0 */);
+                                Math.Clamp(_magicWandTolerance, 0.0f, 1.0f),
+                                addMode);
 
-                            _dataset.ShowSegmentationOverlay = true;
-                            needsInvalidate = true;
+                            changed = true;
                         }
                         break;
                     }
 
-                case 3: // Top-Hat
-                        // Top-Hat is a filter with Apply button in the panel.
-                        // Mouse click does nothing here by design.
+                case 3: // Top-Hat: mouse does nothing (use Apply in the panel)
                     break;
 
-                case 4: // Watershed (LMB places a seed of current material, RMB removes last seed)
+                case 4: // Watershed — LMB add seed, RMB remove last seed
                     {
-                        if (ImGui.IsMouseClicked(ImGuiMouseButton.Left))
+                        if (lClicked)
                         {
                             _watershedSeeds.Add((x, y, _selectedMaterialId));
-                            // Only placing seeds; overlay not changed yet.
+                            changed = true; // to refresh seed count in UI
                         }
-                        else if (ImGui.IsMouseClicked(ImGuiMouseButton.Right))
+                        else if (rClicked)
                         {
                             if (_watershedSeeds.Count > 0)
                                 _watershedSeeds.RemoveAt(_watershedSeeds.Count - 1);
+                            changed = true;
                         }
                         break;
                     }
 
                 default:
-                    // Unknown tool id: do nothing.
                     break;
             }
 
-            if (needsInvalidate)
+            if (changed)
             {
+                _dataset.ShowSegmentationOverlay = true;
                 ProjectManager.Instance.HasUnsavedChanges = true;
-                InvalidateSegmentationTexture(); // force rebuild of overlay texture
+
+                // Invalidate overlay now: prefer viewer callback, else fall back to cache-key invalidation.
+                try
+                {
+                    if (_invalidateTextureCallback != null)
+                    {
+                        _invalidateTextureCallback.Invoke();
+                    }
+                    else
+                    {
+                        string key = ((_dataset.FilePath ?? string.Empty) + "_segmentation");
+                        GlobalPerformanceManager.Instance.TextureCache.Invalidate(key);
+                    }
+                }
+                catch { /* ignore */ }
             }
         }
+
 
         private void ApplyThresholdPreview()
         {

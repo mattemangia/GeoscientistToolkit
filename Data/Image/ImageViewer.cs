@@ -298,11 +298,7 @@ namespace GeoscientistToolkit.Data.Image
         public void SetSegmentationTools(ImageSegmentationToolsUI tools)
         {
             _segmentationTools = tools;
-            if (_segmentationTools != null)
-            {
-                // Wire the viewer's texture invalidation so tool actions refresh the overlay instantly
-                _segmentationTools.SetInvalidateCallback(InvalidateSegmentationTexture);
-            }
+            _segmentationTools?.SetInvalidateCallback(InvalidateSegmentationTexture);
         }
 
         private void DrawScaleBar(ImDrawListPtr dl, Vector2 canvasPos, Vector2 canvasSize, float zoom)
