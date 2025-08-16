@@ -1,4 +1,4 @@
-﻿// GeoscientistToolkit/Data/Image/ImageViewer.cs
+﻿// GeoscientistToolkit/Data/Image/ImageViewer.cs (Updated with Scale Calibration)
 using GeoscientistToolkit.Business;
 using GeoscientistToolkit.Data.Image.Segmentation;
 using GeoscientistToolkit.UI.Interfaces;
@@ -15,6 +15,9 @@ namespace GeoscientistToolkit.Data.Image
     public class ImageViewer : IDatasetViewer
     {
         private readonly ImageDataset _dataset;
+        
+        // Scale calibration tool
+        private ScaleCalibrationTool _calibrationTool = new ScaleCalibrationTool();
         
         // Segmentation
         private TextureManager _segmentationTexture;
@@ -51,10 +54,26 @@ namespace GeoscientistToolkit.Data.Image
 
         public void DrawToolbarControls() 
         {
+            // Tag display
+            if (_dataset.Tags != ImageTag.None)
+            {
+                ImGui.TextColored(new Vector4(0.7f, 0.7f, 1.0f, 1.0f), $"[{GetTagsDisplay()}]");
+                ImGui.SameLine();
+            }
+
+            // Calibration button for appropriate image types
+            if (_dataset.Tags.RequiresCalibration() || _dataset.PixelSize == 0)
+            {
+                if (ImGui.Button("Calibrate Scale"))
+                {
+                    _calibrationTool.StartCalibration();
+                }
+                ImGui.SameLine();
+            }
+
             // Segmentation controls
             if (_dataset.HasSegmentation || _dataset.ImageData != null)
             {
-                ImGui.SameLine();
                 ImGui.Checkbox("Show Labels", ref _showSegmentation);
                 
                 if (_showSegmentation && _dataset.HasSegmentation)
@@ -63,30 +82,31 @@ namespace GeoscientistToolkit.Data.Image
                     ImGui.SetNextItemWidth(100);
                     ImGui.SliderFloat("Opacity", ref _segmentationOpacity, 0.0f, 1.0f, "%.2f");
                 }
+                ImGui.SameLine();
             }
             
             if (_dataset.PixelSize > 0)
             {
-                ImGui.SameLine();
                 ImGui.TextDisabled($"Scale: {_editablePixelSize:F2} {_editableUnit}/pixel");
             }
         }
 
+        private string GetTagsDisplay()
+        {
+            var tags = _dataset.Tags.GetFlags().Select(t => t.ToString());
+            return string.Join(", ", tags);
+        }
+
         public void DrawContent(ref float zoom, ref Vector2 pan)
         {
-            // Get drawing context
             var canvasPos = ImGui.GetCursorScreenPos();
             var canvasSize = ImGui.GetContentRegionAvail();
             var dl = ImGui.GetWindowDrawList();
             var io = ImGui.GetIO();
 
-            // Draw background
             dl.AddRectFilled(canvasPos, canvasPos + canvasSize, 0xFF202020);
-
-            // Set a clipping region
             dl.PushClipRect(canvasPos, canvasPos + canvasSize, true);
 
-            // Calculate display dimensions
             float aspectRatio = (float)_dataset.Width / _dataset.Height;
             Vector2 displaySize = new Vector2(canvasSize.X, canvasSize.X / aspectRatio);
             if (displaySize.Y > canvasSize.Y)
@@ -97,12 +117,20 @@ namespace GeoscientistToolkit.Data.Image
 
             Vector2 imagePos = canvasPos + (canvasSize - displaySize) * 0.5f + pan;
 
-            // Check if mouse is over the image area
             bool isMouseOverImage = io.MousePos.X >= canvasPos.X && io.MousePos.X <= canvasPos.X + canvasSize.X &&
                                    io.MousePos.Y >= canvasPos.Y && io.MousePos.Y <= canvasPos.Y + canvasSize.Y;
 
+            // Handle calibration tool
+            if (_calibrationTool.IsActive && ImGui.IsMouseClicked(ImGuiMouseButton.Left))
+            {
+                if (_calibrationTool.HandleMouseClick(imagePos, displaySize, _dataset.Width, _dataset.Height, io.MousePos))
+                {
+                    // Click was handled by calibration tool
+                }
+            }
+
             // Handle mouse wheel zoom
-            if (isMouseOverImage && Math.Abs(io.MouseWheel) > 0.0f)
+            if (isMouseOverImage && Math.Abs(io.MouseWheel) > 0.0f && !_calibrationTool.IsActive)
             {
                 float zoomDelta = io.MouseWheel * 0.1f;
                 float newZoom = Math.Clamp(zoom + zoomDelta * zoom, 0.1f, 10.0f);
@@ -116,7 +144,7 @@ namespace GeoscientistToolkit.Data.Image
             }
 
             // Handle panning with middle mouse button
-            if (isMouseOverImage && ImGui.IsMouseDragging(ImGuiMouseButton.Middle))
+            if (isMouseOverImage && ImGui.IsMouseDragging(ImGuiMouseButton.Middle) && !_calibrationTool.IsActive)
             {
                 pan += io.MouseDelta;
             }
@@ -151,18 +179,30 @@ namespace GeoscientistToolkit.Data.Image
             }
             else if (_dataset.HasSegmentation)
             {
-                // Draw a dark background if we only have segmentation
                 dl.AddRectFilled(imagePos, imagePos + displaySize, 0xFF101010);
             }
 
-            // Draw segmentation overlay if available
+            // Draw segmentation overlay
             if (_showSegmentation && _dataset.HasSegmentation)
             {
                 DrawSegmentationOverlay(dl, imagePos, displaySize);
             }
 
+            // Draw calibration tool overlay
+            _calibrationTool.DrawOverlay(dl, imagePos, displaySize, _dataset.Width, _dataset.Height);
+
+            // Handle calibration dialog
+            if (_calibrationTool.DrawCalibrationDialog(out float newPixelSize, out string newUnit))
+            {
+                _dataset.SetCalibration(newPixelSize, newUnit);
+                _editablePixelSize = newPixelSize;
+                _editableUnit = newUnit;
+                ProjectManager.Instance.HasUnsavedChanges = true;
+                Logger.Log($"Image calibrated: {newPixelSize:F3} {newUnit}/pixel");
+            }
+
             // Handle segmentation tool interactions
-            if (_segmentationTools != null && isMouseOverImage)
+            if (_segmentationTools != null && isMouseOverImage && !_calibrationTool.IsActive)
             {
                 HandleSegmentationToolInteraction(imagePos, displaySize, zoom);
             }
@@ -173,18 +213,15 @@ namespace GeoscientistToolkit.Data.Image
                 DrawScaleBar(dl, canvasPos, canvasSize, zoom);
             }
 
-            // Pop the clipping region
             dl.PopClipRect();
-
-            // Draw scale bar properties window
             DrawScaleBarProperties();
         }
 
+        // Rest of the methods remain the same...
         private void DrawSegmentationOverlay(ImDrawListPtr dl, Vector2 imagePos, Vector2 displaySize)
         {
             if (_dataset.Segmentation == null) return;
 
-            // Create or update segmentation texture
             string segTexKey = _dataset.FilePath + "_segmentation";
             
             _segmentationTexture = GlobalPerformanceManager.Instance.TextureCache.GetTexture(segTexKey, () =>
@@ -206,7 +243,6 @@ namespace GeoscientistToolkit.Data.Image
                 var textureId = _segmentationTexture.GetImGuiTextureId();
                 if (textureId != IntPtr.Zero)
                 {
-                    // Draw with transparency
                     dl.AddImage(textureId, imagePos, imagePos + displaySize, 
                         Vector2.Zero, Vector2.One, 
                         ImGui.ColorConvertFloat4ToU32(new Vector4(1, 1, 1, _segmentationOpacity)));
@@ -226,7 +262,7 @@ namespace GeoscientistToolkit.Data.Image
                 var material = _dataset.Segmentation.GetMaterial(labelId);
                 
                 int pixelIdx = i * 4;
-                if (material != null && labelId != 0) // Don't render exterior (0)
+                if (material != null && labelId != 0)
                 {
                     rgbaData[pixelIdx] = (byte)(material.Color.X * 255);
                     rgbaData[pixelIdx + 1] = (byte)(material.Color.Y * 255);
@@ -235,7 +271,6 @@ namespace GeoscientistToolkit.Data.Image
                 }
                 else
                 {
-                    // Transparent for exterior or unknown labels
                     rgbaData[pixelIdx] = 0;
                     rgbaData[pixelIdx + 1] = 0;
                     rgbaData[pixelIdx + 2] = 0;
@@ -250,20 +285,16 @@ namespace GeoscientistToolkit.Data.Image
         {
             var io = ImGui.GetIO();
             
-            // Convert mouse position to image coordinates
             Vector2 relativePos = io.MousePos - imagePos;
             int imageX = (int)(relativePos.X / displaySize.X * _dataset.Width);
             int imageY = (int)(relativePos.Y / displaySize.Y * _dataset.Height);
             
-            // Clamp to image bounds
             imageX = Math.Clamp(imageX, 0, _dataset.Width - 1);
             imageY = Math.Clamp(imageY, 0, _dataset.Height - 1);
             
-            // Pass to segmentation tools
             bool isDragging = ImGui.IsMouseDragging(ImGuiMouseButton.Left);
             _segmentationTools?.HandleMouseClick(imageX, imageY, isDragging);
             
-            // Invalidate segmentation texture if modified
             if (isDragging || ImGui.IsMouseClicked(ImGuiMouseButton.Left))
             {
                 InvalidateSegmentationTexture();
@@ -284,7 +315,7 @@ namespace GeoscientistToolkit.Data.Image
         {
             _segmentationTools = tools;
         }
-        
+
         private void DrawScaleBar(ImDrawListPtr dl, Vector2 canvasPos, Vector2 canvasSize, float zoom)
         {
             var io = ImGui.GetIO();
@@ -293,11 +324,9 @@ namespace GeoscientistToolkit.Data.Image
             
             if (pixelSize <= 0) return;
 
-            // Calculate scale bar dimensions
             float realWorldUnitsPerPixel = pixelSize / zoom;
             float barLengthInRealUnits = _scaleBarTargetWidth * realWorldUnitsPerPixel;
 
-            // Find a nice round number
             double magnitude = Math.Pow(10, Math.Floor(Math.Log10(barLengthInRealUnits)));
             double mostSignificantDigit = Math.Round(barLengthInRealUnits / magnitude);
 
@@ -311,7 +340,6 @@ namespace GeoscientistToolkit.Data.Image
             string label = $"{niceLengthInRealUnits.ToString("G", CultureInfo.InvariantCulture)} {unit}";
             Vector2 textSize = ImGui.CalcTextSize(label) * _scaleBarFontSize;
 
-            // Calculate position
             Vector2 margin = new Vector2(20, 20);
             Vector2 barPos;
             
@@ -336,18 +364,15 @@ namespace GeoscientistToolkit.Data.Image
             
             barPos = canvasPos + _scaleBarRelativePos * canvasSize;
 
-            // Define rectangles
             Vector2 barStart = barPos;
             Vector2 barEnd = new Vector2(barStart.X + finalBarLengthPixels, barStart.Y + _scaleBarHeight);
             
             Vector2 clickAreaMin = new Vector2(barStart.X - 5, barStart.Y - textSize.Y - 8);
             Vector2 clickAreaMax = new Vector2(barEnd.X + 5, barEnd.Y + 5);
 
-            // Check mouse interaction
             bool isMouseOverScaleBar = io.MousePos.X >= clickAreaMin.X && io.MousePos.X <= clickAreaMax.X &&
                                       io.MousePos.Y >= clickAreaMin.Y && io.MousePos.Y <= clickAreaMax.Y;
 
-            // Handle dragging
             if (isMouseOverScaleBar && ImGui.IsMouseClicked(ImGuiMouseButton.Left))
             {
                 _isDraggingScaleBar = true;
@@ -370,13 +395,11 @@ namespace GeoscientistToolkit.Data.Image
                 }
             }
 
-            // Handle right-click
             if (isMouseOverScaleBar && ImGui.IsMouseClicked(ImGuiMouseButton.Right))
             {
                 ImGui.OpenPopup("ScaleBarContext");
             }
 
-            // Draw background
             if (_showScaleBarBackground)
             {
                 uint bgColor = ImGui.ColorConvertFloat4ToU32(_scaleBarBgColor);
@@ -388,7 +411,6 @@ namespace GeoscientistToolkit.Data.Image
                 );
             }
 
-            // Draw scale bar
             uint barColor = ImGui.ColorConvertFloat4ToU32(_scaleBarColor);
             Vector2 textPos = new Vector2(
                 barStart.X + (finalBarLengthPixels - textSize.X) * 0.5f,
@@ -410,12 +432,15 @@ namespace GeoscientistToolkit.Data.Image
                 dl.AddRect(clickAreaMin, clickAreaMax, 0x80FFFFFF, 2.0f);
             }
 
-            // Context menu
             if (ImGui.BeginPopup("ScaleBarContext"))
             {
                 if (ImGui.MenuItem("Properties..."))
                 {
                     _showScaleBarProperties = true;
+                }
+                if (ImGui.MenuItem("Recalibrate"))
+                {
+                    _calibrationTool.StartCalibration();
                 }
                 ImGui.Separator();
                 if (ImGui.MenuItem("Hide"))
@@ -425,7 +450,7 @@ namespace GeoscientistToolkit.Data.Image
                 ImGui.EndPopup();
             }
         }
-        
+
         private void DrawScaleBarProperties()
         {
             if (!_showScaleBarProperties) return;
@@ -452,6 +477,7 @@ namespace GeoscientistToolkit.Data.Image
                         {
                             _dataset.PixelSize = _editablePixelSize;
                             _dataset.Unit = _editableUnit;
+                            _dataset.AddTag(ImageTag.Calibrated);
                             _pixelSizeChanged = false;
                         }
                         ImGui.SameLine();
@@ -468,26 +494,21 @@ namespace GeoscientistToolkit.Data.Image
                 if (ImGui.CollapsingHeader("Appearance", ImGuiTreeNodeFlags.DefaultOpen))
                 {
                     ImGui.Indent();
-                    
                     ImGui.SliderFloat("Bar Height", ref _scaleBarHeight, 4.0f, 20.0f, "%.0f pixels");
                     ImGui.SliderFloat("Target Width", ref _scaleBarTargetWidth, 50.0f, 300.0f, "%.0f pixels");
                     ImGui.SliderFloat("Font Size", ref _scaleBarFontSize, 0.5f, 2.0f, "%.1fx");
-                    
                     ImGui.ColorEdit4("Bar Color", ref _scaleBarColor);
-                    
                     ImGui.Checkbox("Show Background", ref _showScaleBarBackground);
                     if (_showScaleBarBackground)
                     {
                         ImGui.ColorEdit4("Background Color", ref _scaleBarBgColor);
                     }
-                    
                     ImGui.Unindent();
                 }
 
                 if (ImGui.CollapsingHeader("Position", ImGuiTreeNodeFlags.DefaultOpen))
                 {
                     ImGui.Indent();
-                    
                     string[] positions = { "Top-Left", "Top-Right", "Bottom-Left", "Bottom-Right", "Custom" };
                     ImGui.Combo("Position", ref _scaleBarPosition, positions, positions.Length);
                     
@@ -506,7 +527,6 @@ namespace GeoscientistToolkit.Data.Image
                             _scaleBarRelativePos.Y = y / 100.0f;
                         }
                     }
-                    
                     ImGui.Unindent();
                 }
 
@@ -518,15 +538,13 @@ namespace GeoscientistToolkit.Data.Image
             }
             ImGui.End();
         }
-        
+
         public void Dispose()
         {
-            // Release textures from the cache
             if (_dataset.FilePath != null)
             {
                 GlobalPerformanceManager.Instance.TextureCache.ReleaseTexture(_dataset.FilePath);
             }
-            
             InvalidateSegmentationTexture();
         }
     }

@@ -75,6 +75,8 @@ namespace GeoscientistToolkit.Data
         public string FilePath { get; set; }
         public float PixelSize { get; set; }
         public string Unit { get; set; }
+        public long Tags { get; set; } 
+        public Dictionary<string, string> ImageMetadata { get; set; }
         public string SegmentationPath { get; set; }
     }
 
