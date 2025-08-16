@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.CommandLine;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
@@ -64,7 +65,9 @@ namespace GeoscientistToolkit.AddInExtractor
                 var sourceDir = string.IsNullOrEmpty(source) ? Directory.GetCurrentDirectory() : source;
 
                 // Use a default output relative to the main project's build output if not provided.
-                var outputDir = string.IsNullOrEmpty(output) ? Path.Combine("bin", "Release", "net8.0", "AddIns") : output;
+                var outputDir = string.IsNullOrEmpty(output) 
+                    ? Path.Combine("bin", "Release", "net8.0", "AddIns") 
+                    : output;
 
                 await ExtractAddIns(sourceDir, outputDir, core, main, verbose);
             }, sourceOption, outputOption, coreAssemblyOption, mainAssemblyOption, verboseOption, diagnosticsOption);
@@ -76,6 +79,9 @@ namespace GeoscientistToolkit.AddInExtractor
         {
             Console.WriteLine("Running AddInExtractor Diagnostics");
             Console.WriteLine("==================================");
+            Console.WriteLine($"Operating System: {GetOSDescription()}");
+            Console.WriteLine($"Runtime: {RuntimeInformation.FrameworkDescription}");
+            Console.WriteLine($"Architecture: {RuntimeInformation.ProcessArchitecture}");
 
             if (string.IsNullOrEmpty(coreAssemblyPath))
             {
@@ -150,6 +156,18 @@ namespace GeoscientistToolkit.AddInExtractor
             }
         }
 
+        static string GetOSDescription()
+        {
+            if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+                return $"Windows {Environment.OSVersion.Version}";
+            else if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
+                return "Linux";
+            else if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
+                return "macOS";
+            else
+                return Environment.OSVersion.ToString();
+        }
+
         static async Task ExtractAddIns(string sourceDir, string outputDir, string? coreAssemblyPath, string? mainAssemblyPath, bool verbose)
         {
             var extractor = new AddInExtractor(verbose);
@@ -209,7 +227,7 @@ namespace GeoscientistToolkit.AddInExtractor
         public async Task ExtractAndCompileAsync(string sourceDir, string outputDir, string coreAssemblyPath, string? mainAssemblyPath)
         {
             Console.WriteLine("GeoscientistToolkit Add-In Extractor");
-            Console.WriteLine($"Platform: {RuntimeInformation.RuntimeIdentifier}");
+            Console.WriteLine($"Platform: {GetPlatformIdentifier()}");
             Console.WriteLine($"Source: {Path.GetFullPath(sourceDir)}");
             Console.WriteLine($"Output: {Path.GetFullPath(outputDir)}");
             Console.WriteLine($"Core Assembly: {Path.GetFullPath(coreAssemblyPath)}");
@@ -254,6 +272,10 @@ namespace GeoscientistToolkit.AddInExtractor
 
             Directory.CreateDirectory(outputDir);
 
+            // Verify native dependencies
+            var appDirectory = Path.GetDirectoryName(coreAssemblyPath)!;
+            VerifyNativeDependencies(appDirectory);
+
             var matcher = new Matcher();
             matcher.AddInclude("**/*.cs");
             matcher.AddExclude("**/obj/**");
@@ -268,7 +290,7 @@ namespace GeoscientistToolkit.AddInExtractor
                 return;
             }
 
-            Console.WriteLine($"Found {sourceFiles.Count} add-in source file(s):");
+            Console.WriteLine($"\nFound {sourceFiles.Count} add-in source file(s):");
             foreach (var file in sourceFiles)
             {
                 Console.WriteLine($"  - {Path.GetFileName(file)}");
@@ -279,15 +301,65 @@ namespace GeoscientistToolkit.AddInExtractor
             var references = await LoadAllReferencesAsync(coreAssemblyPath, mainAssemblyPath);
 
             // Verify critical references for the main packages
-            VerifyCriticalReferences(references, Path.GetDirectoryName(coreAssemblyPath)!);
+            VerifyCriticalReferences(references, appDirectory);
 
             Console.WriteLine($"Loaded {references.Count} assembly references for compilation.");
+
+            // Copy native libraries to output directory
+            Console.WriteLine("\nCopying native libraries...");
+            CopyNativeLibraries(appDirectory, outputDir);
 
             var tasks = sourceFiles.Select(file => CompileAddInAsync(file, outputDir, references)).ToList();
             await Task.WhenAll(tasks);
 
             Console.WriteLine();
             Console.WriteLine("Add-in extraction complete!");
+            
+            // Display platform library information if verbose
+            if (_verbose)
+            {
+                Console.WriteLine("\nPlatform Library Mappings:");
+                var mappings = GetPlatformLibraryMappings();
+                var platformName = RuntimeInformation.IsOSPlatform(OSPlatform.Windows) ? "Windows" :
+                                  RuntimeInformation.IsOSPlatform(OSPlatform.Linux) ? "Linux" :
+                                  RuntimeInformation.IsOSPlatform(OSPlatform.OSX) ? "macOS" : "Unknown";
+                
+                foreach (var lib in mappings)
+                {
+                    if (lib.Value.ContainsKey(platformName))
+                    {
+                        Console.WriteLine($"  {lib.Key}: {lib.Value[platformName]}");
+                    }
+                }
+            }
+        }
+
+        private string GetPlatformIdentifier()
+        {
+            var rid = RuntimeInformation.RuntimeIdentifier;
+            if (string.IsNullOrEmpty(rid))
+            {
+                // Fallback to constructing RID manually
+                string os = "";
+                if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+                    os = "win";
+                else if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
+                    os = "linux";
+                else if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
+                    os = "osx";
+                
+                string arch = RuntimeInformation.ProcessArchitecture switch
+                {
+                    Architecture.X64 => "x64",
+                    Architecture.X86 => "x86",
+                    Architecture.Arm => "arm",
+                    Architecture.Arm64 => "arm64",
+                    _ => RuntimeInformation.ProcessArchitecture.ToString().ToLower()
+                };
+
+                rid = $"{os}-{arch}";
+            }
+            return rid;
         }
 
         private async Task<List<MetadataReference>> LoadAllReferencesAsync(string coreAssemblyPath, string? mainAssemblyPath)
@@ -367,11 +439,30 @@ namespace GeoscientistToolkit.AddInExtractor
             var runtimesDir = Path.Combine(appDirectory, "runtimes");
             if (Directory.Exists(runtimesDir))
             {
-                // Add native runtime directories for current platform
-                var currentRid = RuntimeInformation.RuntimeIdentifier;
-                var possibleRids = new[] { currentRid, "win-x64", "linux-x64", "osx-x64", "osx-arm64" };
+                // Get current platform RID
+                var currentRid = GetPlatformIdentifier();
+                
+                // Build list of possible runtime identifiers to check
+                var possibleRids = new List<string> { currentRid };
+                
+                // Add generic platform RIDs based on current OS
+                if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+                {
+                    possibleRids.AddRange(new[] { "win-x64", "win-x86", "win" });
+                }
+                else if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
+                {
+                    possibleRids.AddRange(new[] { "linux-x64", "linux-arm64", "linux-arm", "linux" });
+                }
+                else if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
+                {
+                    possibleRids.AddRange(new[] { "osx-x64", "osx-arm64", "osx" });
+                }
 
-                foreach (var rid in possibleRids)
+                // Add any-rid fallback
+                possibleRids.Add("any");
+
+                foreach (var rid in possibleRids.Distinct())
                 {
                     var ridLibDir = Path.Combine(runtimesDir, rid, "lib", "net8.0");
                     if (Directory.Exists(ridLibDir))
@@ -379,13 +470,20 @@ namespace GeoscientistToolkit.AddInExtractor
                         searchDirectories.Add(ridLibDir);
                         Log($"Added runtime directory: {ridLibDir}");
                     }
+
+                    // Also check for native subdirectory
+                    var ridNativeDir = Path.Combine(runtimesDir, rid, "native");
+                    if (Directory.Exists(ridNativeDir))
+                    {
+                        Log($"Found native runtime directory: {ridNativeDir}");
+                    }
                 }
             }
 
             // Scan all directories for assemblies
             foreach (var directory in searchDirectories)
             {
-                var assemblies = Directory.GetFiles(directory, "*.dll", SearchOption.AllDirectories);
+                var assemblies = Directory.GetFiles(directory, "*.dll", SearchOption.TopDirectoryOnly);
                 foreach (var file in assemblies)
                 {
                     var fileName = Path.GetFileName(file);
@@ -430,7 +528,7 @@ namespace GeoscientistToolkit.AddInExtractor
                 typeof(System.Linq.Enumerable).Assembly.Location,   // System.Linq
                 typeof(System.Text.StringBuilder).Assembly.Location, // System.Runtime
                 typeof(System.IO.File).Assembly.Location,           // System.IO.FileSystem
-                typeof(System.Diagnostics.Debug).Assembly.Location, // System.Diagnostics.Debug
+                typeof(Debug).Assembly.Location,                    // System.Diagnostics.Debug
                 typeof(System.Drawing.Color).Assembly.Location,     // System.Drawing.Primitives
                 typeof(System.Numerics.Vector2).Assembly.Location   // System.Numerics
             };
@@ -483,42 +581,114 @@ namespace GeoscientistToolkit.AddInExtractor
 
         private bool IsNativeLibrary(string fileName)
         {
-            // Common patterns for native libraries
-            var nativePatterns = new[]
-            {
-                "native", "libskia", "libHarfBuzzSharp", "SDL2", "vulkan", "d3d",
-                "opengl", "metal", "avcodec", "avformat", "avutil", "swscale",
-                "e_sqlite3", "glfw", "freetype", "png", "jpeg", "tiff"
-            };
-
             var lowerFileName = fileName.ToLowerInvariant();
-            return nativePatterns.Any(pattern => lowerFileName.Contains(pattern)) ||
-                   lowerFileName.EndsWith(".so") ||
-                   lowerFileName.EndsWith(".dylib") ||
-                   (lowerFileName.EndsWith(".dll") && !lowerFileName.Contains(".net"));
+            
+            // Check file extensions first (most reliable)
+            if (lowerFileName.EndsWith(".so") ||        // Linux shared libraries
+                lowerFileName.EndsWith(".so.0") ||      // Versioned Linux libraries  
+                lowerFileName.EndsWith(".so.1") ||
+                lowerFileName.EndsWith(".so.2") ||
+                lowerFileName.Contains(".so.") ||       // Any versioned .so file
+                lowerFileName.EndsWith(".dylib") ||     // macOS dynamic libraries
+                lowerFileName.EndsWith(".a"))           // Static libraries
+            {
+                return true;
+            }
+
+            // For Windows DLLs, we need to check if it's a native or managed DLL
+            if (lowerFileName.EndsWith(".dll"))
+            {
+                // Known native library patterns
+                var nativePatterns = new[]
+                {
+                    // Graphics/Rendering
+                    "sdl2", "vulkan", "d3dcompiler", "d3d11", "d3d12", "dxgi", 
+                    "opengl32", "gdi32", "libmoltenvk", "metal",
+                    
+                    // Media libraries
+                    "avcodec", "avformat", "avutil", "swscale", "swresample",
+                    
+                    // Image processing
+                    "libskiasharp", "libharfbuzzsharp", "freetype", "libpng", 
+                    "libjpeg", "libtiff", "zlib", "harfbuzz",
+                    
+                    // Platform/System
+                    "kernel32", "user32", "advapi32", "shell32", "ole32",
+                    "msvcr", "msvcp", "vcruntime", "api-ms-win", "ucrtbase",
+                    
+                    // Audio
+                    "openal", "openal32", "soft_oal",
+                    
+                    // Compute
+                    "opencl", "cuda", "cudart",
+                    
+                    // Database
+                    "e_sqlite3", "sqlite3", "libe_sqlite3",
+                    
+                    // ImGui
+                    "cimgui",
+                    
+                    // Other
+                    "glfw", "glfw3", "native"
+                };
+
+                // Check if it matches any native pattern
+                if (nativePatterns.Any(pattern => lowerFileName.Contains(pattern)))
+                {
+                    return true;
+                }
+
+                // Additional check: files starting with "lib" are often native on Unix-like systems
+                if (lowerFileName.StartsWith("lib") && !lowerFileName.Contains(".net"))
+                {
+                    return true;
+                }
+            }
+
+            return false;
         }
 
         private void VerifyCriticalReferences(List<MetadataReference> references, string appDirectory)
         {
             // List of critical assemblies from your NuGet packages
-            var criticalAssemblies = new[]
+            // Platform-specific assemblies are marked with comments
+            var criticalAssemblies = new Dictionary<string, string[]>
             {
-                "ImGui.NET.dll",
-                "ImGui.NET-Docking.dll",
-                "Veldrid.dll",
-                "Veldrid.ImGui.dll",
-                "Veldrid.MetalBindings.dll",
-                "Veldrid.SDL2.dll",
-                "Veldrid.SPIRV.dll",
-                "Veldrid.StartupUtilities.dll",
-                "SkiaSharp.dll",
-                "SkiaSharp.HarfBuzz.dll",
-                "StbImageSharp.dll",
-                "StbImageWriteSharp.dll",
-                "TinyDialogsNet.dll",
-                "BitMiracle.LibTiff.NET.dll",
-                "System.Management.dll",
-                "Silk.NET.OpenCL.dll" // Added for GPU Compute
+                // Cross-platform managed assemblies (always .dll on all platforms)
+                ["all"] = new[]
+                {
+                    "ImGui.NET.dll",
+                    "Veldrid.dll",
+                    "Veldrid.ImGui.dll",
+                    "Veldrid.SPIRV.dll",
+                    "Veldrid.StartupUtilities.dll",
+                    "SkiaSharp.dll",
+                    "SkiaSharp.HarfBuzz.dll",
+                    "StbImageSharp.dll",
+                    "StbImageWriteSharp.dll",
+                    "TinyDialogsNet.dll",
+                    "BitMiracle.LibTiff.NET.dll",
+                    "Silk.NET.OpenCL.dll",
+                    "Silk.NET.Core.dll",
+                    "Silk.NET.Maths.dll"
+                },
+                // Windows-specific managed assemblies
+                ["win"] = new[]
+                {
+                    "System.Management.dll",
+                    "Veldrid.SDL2.dll"
+                },
+                // macOS-specific managed assemblies
+                ["osx"] = new[]
+                {
+                    "Veldrid.MetalBindings.dll",
+                    "Veldrid.SDL2.dll"
+                },
+                // Linux-specific managed assemblies
+                ["linux"] = new[]
+                {
+                    "Veldrid.SDL2.dll"
+                }
             };
 
             var loadedFiles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -534,42 +704,31 @@ namespace GeoscientistToolkit.AddInExtractor
 
             var missingAssemblies = new List<string>();
 
-            foreach (var assembly in criticalAssemblies)
+            // Check cross-platform assemblies
+            foreach (var assembly in criticalAssemblies["all"])
             {
                 if (!loadedFiles.Contains(assembly))
                 {
-                    // Try to find and load the missing assembly
-                    var possiblePaths = new[]
-                    {
-                        Path.Combine(appDirectory, assembly),
-                        Path.Combine(appDirectory, "runtimes", "win-x64", "lib", "net8.0", assembly),
-                        Path.Combine(appDirectory, "runtimes", "linux-x64", "lib", "net8.0", assembly),
-                        Path.Combine(appDirectory, "runtimes", "osx-x64", "lib", "net8.0", assembly),
-                        Path.Combine(appDirectory, "runtimes", "osx-arm64", "lib", "net8.0", assembly)
-                    };
+                    TryLoadMissingAssembly(assembly, appDirectory, references, loadedFiles, missingAssemblies);
+                }
+            }
 
-                    bool found = false;
-                    foreach (var path in possiblePaths)
-                    {
-                        if (File.Exists(path))
-                        {
-                            try
-                            {
-                                references.Add(MetadataReference.CreateFromFile(path));
-                                Log($"Added critical reference: {assembly}");
-                                found = true;
-                                break;
-                            }
-                            catch (Exception ex)
-                            {
-                                Log($"Warning: Could not load critical assembly '{assembly}': {ex.Message}");
-                            }
-                        }
-                    }
+            // Check platform-specific assemblies
+            string platformKey = "";
+            if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+                platformKey = "win";
+            else if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
+                platformKey = "osx";
+            else if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
+                platformKey = "linux";
 
-                    if (!found)
+            if (!string.IsNullOrEmpty(platformKey) && criticalAssemblies.ContainsKey(platformKey))
+            {
+                foreach (var assembly in criticalAssemblies[platformKey])
+                {
+                    if (!loadedFiles.Contains(assembly))
                     {
-                        missingAssemblies.Add(assembly);
+                        TryLoadMissingAssembly(assembly, appDirectory, references, loadedFiles, missingAssemblies);
                     }
                 }
             }
@@ -585,6 +744,278 @@ namespace GeoscientistToolkit.AddInExtractor
             }
         }
 
+        private void TryLoadMissingAssembly(string assembly, string appDirectory, List<MetadataReference> references, 
+            HashSet<string> loadedFiles, List<string> missingAssemblies)
+        {
+            // Build search paths based on current platform
+            var searchPaths = new List<string>
+            {
+                Path.Combine(appDirectory, assembly)
+            };
+
+            // Add platform-specific runtime paths
+            var currentRid = GetPlatformIdentifier();
+            searchPaths.Add(Path.Combine(appDirectory, "runtimes", currentRid, "lib", "net8.0", assembly));
+
+            // Add generic platform paths
+            if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+            {
+                searchPaths.Add(Path.Combine(appDirectory, "runtimes", "win-x64", "lib", "net8.0", assembly));
+                searchPaths.Add(Path.Combine(appDirectory, "runtimes", "win", "lib", "net8.0", assembly));
+            }
+            else if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
+            {
+                searchPaths.Add(Path.Combine(appDirectory, "runtimes", "linux-x64", "lib", "net8.0", assembly));
+                searchPaths.Add(Path.Combine(appDirectory, "runtimes", "linux", "lib", "net8.0", assembly));
+            }
+            else if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
+            {
+                searchPaths.Add(Path.Combine(appDirectory, "runtimes", "osx-x64", "lib", "net8.0", assembly));
+                searchPaths.Add(Path.Combine(appDirectory, "runtimes", "osx-arm64", "lib", "net8.0", assembly));
+                searchPaths.Add(Path.Combine(appDirectory, "runtimes", "osx", "lib", "net8.0", assembly));
+            }
+
+            // Add "any" RID fallback
+            searchPaths.Add(Path.Combine(appDirectory, "runtimes", "any", "lib", "net8.0", assembly));
+
+            bool found = false;
+            foreach (var path in searchPaths)
+            {
+                if (File.Exists(path))
+                {
+                    try
+                    {
+                        references.Add(MetadataReference.CreateFromFile(path));
+                        loadedFiles.Add(assembly);
+                        Log($"Added critical reference: {assembly}");
+                        found = true;
+                        break;
+                    }
+                    catch (Exception ex)
+                    {
+                        Log($"Warning: Could not load critical assembly '{assembly}': {ex.Message}");
+                    }
+                }
+            }
+
+            if (!found)
+            {
+                missingAssemblies.Add(assembly);
+            }
+        }
+
+        private void CopyNativeLibraries(string sourceDir, string outputDir)
+        {
+            // This method copies platform-specific native libraries to the output
+            var runtimesDir = Path.Combine(sourceDir, "runtimes");
+            if (!Directory.Exists(runtimesDir))
+            {
+                Log("No runtimes directory found, skipping native library copy");
+                return;
+            }
+
+            var currentRid = GetPlatformIdentifier();
+            var nativeSearchPaths = new List<string>();
+
+            // Build list of runtime paths to check for native libraries
+            if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+            {
+                nativeSearchPaths.AddRange(new[] {
+                    Path.Combine(runtimesDir, "win-x64", "native"),
+                    Path.Combine(runtimesDir, "win-x86", "native"),
+                    Path.Combine(runtimesDir, "win", "native")
+                });
+            }
+            else if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
+            {
+                nativeSearchPaths.AddRange(new[] {
+                    Path.Combine(runtimesDir, "linux-x64", "native"),
+                    Path.Combine(runtimesDir, "linux-arm64", "native"),
+                    Path.Combine(runtimesDir, "linux-musl-x64", "native"), // Alpine Linux
+                    Path.Combine(runtimesDir, "linux", "native")
+                });
+            }
+            else if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
+            {
+                nativeSearchPaths.AddRange(new[] {
+                    Path.Combine(runtimesDir, "osx-x64", "native"),
+                    Path.Combine(runtimesDir, "osx-arm64", "native"),
+                    Path.Combine(runtimesDir, "osx", "native")
+                });
+            }
+
+            // Copy native libraries to output
+            foreach (var nativePath in nativeSearchPaths.Where(Directory.Exists))
+            {
+                var files = Directory.GetFiles(nativePath);
+                foreach (var file in files)
+                {
+                    var fileName = Path.GetFileName(file);
+                    var destPath = Path.Combine(outputDir, fileName);
+                    
+                    try
+                    {
+                        File.Copy(file, destPath, overwrite: true);
+                        Log($"Copied native library: {fileName}");
+                        
+                        // On Unix-like systems, ensure the library is executable
+                        if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+                        {
+                            MakeFileExecutable(destPath);
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        Log($"Warning: Could not copy native library {fileName}: {ex.Message}");
+                    }
+                }
+            }
+        }
+
+        private void MakeFileExecutable(string filePath)
+        {
+            // Only works on Unix-like systems (Linux, macOS)
+            if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+                return;
+
+            try
+            {
+                using var process = new Process
+                {
+                    StartInfo = new ProcessStartInfo
+                    {
+                        FileName = "chmod",
+                        Arguments = $"+x \"{filePath}\"",
+                        UseShellExecute = false,
+                        CreateNoWindow = true,
+                        RedirectStandardOutput = true,
+                        RedirectStandardError = true
+                    }
+                };
+                process.Start();
+                process.WaitForExit();
+                
+                if (process.ExitCode != 0)
+                {
+                    var error = process.StandardError.ReadToEnd();
+                    Log($"chmod returned non-zero exit code for {Path.GetFileName(filePath)}: {error}");
+                }
+            }
+            catch (Exception ex)
+            {
+                // If chmod is not available, continue without setting permissions
+                Log($"Could not set executable permissions for {Path.GetFileName(filePath)}: {ex.Message}");
+            }
+        }
+
+        private void VerifyNativeDependencies(string appDirectory)
+        {
+            Console.WriteLine("\nVerifying native dependencies for current platform...");
+            
+            var requiredNativeLibs = new Dictionary<OSPlatform, string[]>
+            {
+                [OSPlatform.Windows] = new[] 
+                { 
+                    "SDL2.dll", "vulkan-1.dll", "libSkiaSharp.dll", 
+                    "libHarfBuzzSharp.dll", "cimgui.dll", "e_sqlite3.dll" 
+                },
+                [OSPlatform.Linux] = new[] 
+                { 
+                    "libSDL2-2.0.so.0", "libvulkan.so.1", "libSkiaSharp.so", 
+                    "libHarfBuzzSharp.so", "cimgui.so", "libe_sqlite3.so" 
+                },
+                [OSPlatform.OSX] = new[] 
+                { 
+                    "libSDL2.dylib", "libMoltenVK.dylib", "libSkiaSharp.dylib", 
+                    "libHarfBuzzSharp.dylib", "cimgui.dylib", "libe_sqlite3.dylib" 
+                }
+            };
+
+            var currentPlatform = RuntimeInformation.IsOSPlatform(OSPlatform.Windows) ? OSPlatform.Windows :
+                                 RuntimeInformation.IsOSPlatform(OSPlatform.Linux) ? OSPlatform.Linux :
+                                 RuntimeInformation.IsOSPlatform(OSPlatform.OSX) ? OSPlatform.OSX :
+                                 OSPlatform.Create("Unknown");
+
+            if (!requiredNativeLibs.ContainsKey(currentPlatform))
+            {
+                Console.WriteLine("Warning: Unknown platform, cannot verify native dependencies");
+                return;
+            }
+
+            var missingLibs = new List<string>();
+            var foundLibs = new List<string>();
+
+            foreach (var lib in requiredNativeLibs[currentPlatform])
+            {
+                var searchPaths = new[]
+                {
+                    Path.Combine(appDirectory, lib),
+                    Path.Combine(appDirectory, "runtimes", GetPlatformIdentifier(), "native", lib),
+                    Path.Combine(appDirectory, "native", lib)
+                };
+
+                bool found = searchPaths.Any(File.Exists);
+                
+                if (found)
+                    foundLibs.Add(lib);
+                else
+                    missingLibs.Add(lib);
+            }
+
+            if (foundLibs.Count > 0)
+            {
+                Console.WriteLine($"Found {foundLibs.Count} native dependencies:");
+                foreach (var lib in foundLibs)
+                    Console.WriteLine($"  ✓ {lib}");
+            }
+
+            if (missingLibs.Count > 0)
+            {
+                Console.WriteLine($"\nWarning: Missing {missingLibs.Count} native dependencies:");
+                foreach (var lib in missingLibs)
+                    Console.WriteLine($"  ✗ {lib}");
+                Console.WriteLine("\nThese libraries may be provided by the system or GPU drivers.");
+                Console.WriteLine("Or they may be in different locations. The application may still work.");
+            }
+        }
+
+        private Dictionary<string, Dictionary<string, string>> GetPlatformLibraryMappings()
+        {
+            return new Dictionary<string, Dictionary<string, string>>
+            {
+                ["Veldrid"] = new Dictionary<string, string>
+                {
+                    ["Windows"] = "Veldrid.dll (managed) + vulkan-1.dll, d3dcompiler_47.dll (native)",
+                    ["Linux"] = "Veldrid.dll (managed) + libvulkan.so.1 (native)",
+                    ["macOS"] = "Veldrid.dll (managed) + libMoltenVK.dylib (native)"
+                },
+                ["SkiaSharp"] = new Dictionary<string, string>
+                {
+                    ["Windows"] = "SkiaSharp.dll (managed) + libSkiaSharp.dll (native)",
+                    ["Linux"] = "SkiaSharp.dll (managed) + libSkiaSharp.so (native)",
+                    ["macOS"] = "SkiaSharp.dll (managed) + libSkiaSharp.dylib (native)"
+                },
+                ["ImGui.NET"] = new Dictionary<string, string>
+                {
+                    ["Windows"] = "ImGui.NET.dll (managed) + cimgui.dll (native)",
+                    ["Linux"] = "ImGui.NET.dll (managed) + cimgui.so (native)",
+                    ["macOS"] = "ImGui.NET.dll (managed) + cimgui.dylib (native)"
+                },
+                ["SDL2"] = new Dictionary<string, string>
+                {
+                    ["Windows"] = "Veldrid.SDL2.dll (managed) + SDL2.dll (native)",
+                    ["Linux"] = "Veldrid.SDL2.dll (managed) + libSDL2-2.0.so.0 (native)",
+                    ["macOS"] = "Veldrid.SDL2.dll (managed) + libSDL2.dylib (native)"
+                },
+                ["Silk.NET.OpenCL"] = new Dictionary<string, string>
+                {
+                    ["Windows"] = "Silk.NET.OpenCL.dll (managed) + OpenCL.dll (from GPU driver)",
+                    ["Linux"] = "Silk.NET.OpenCL.dll (managed) + libOpenCL.so (from GPU driver)",
+                    ["macOS"] = "Silk.NET.OpenCL.dll (managed) + OpenCL.framework (system)"
+                }
+            };
+        }
+
         private async Task CompileAddInAsync(string sourceFile, string outputDir, List<MetadataReference> references)
         {
             var fileName = Path.GetFileNameWithoutExtension(sourceFile);
@@ -595,7 +1026,7 @@ namespace GeoscientistToolkit.AddInExtractor
             try
             {
                 var sourceCode = await File.ReadAllTextAsync(sourceFile);
-                var parseOptions = CSharpParseOptions.Default.WithLanguageVersion(LanguageVersion.Latest);
+                var parseOptions = CSharpParseOptions.Default.WithLanguageVersion(LanguageVersion.CSharp11); // .NET 8 supports up to C# 12, but 11 is safer
                 var syntaxTree = CSharpSyntaxTree.ParseText(sourceCode, parseOptions, sourceFile, System.Text.Encoding.UTF8);
 
                 var compilationOptions = new CSharpCompilationOptions(
