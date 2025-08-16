@@ -2,6 +2,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq; // Added for Linq
 using GeoscientistToolkit.Settings;
 using GeoscientistToolkit.Util;
 
@@ -14,18 +15,21 @@ namespace GeoscientistToolkit.Data.Image
         public int BitDepth { get; set; }
         public float PixelSize { get; set; } // In micrometers
         public string Unit { get; set; }
-        
+
         // Tag system
         public ImageTag Tags { get; set; } = ImageTag.None;
         public Dictionary<string, object> ImageMetadata { get; set; } = new Dictionary<string, object>();
 
         public byte[] ImageData { get; private set; }
-        
+
+        // FIX: Added a shared property to control segmentation visibility across UI panels
+        public bool ShowSegmentationOverlay { get; set; } = true;
+
         // Segmentation Integration
         public ImageSegmentationData Segmentation { get; private set; }
         public bool HasSegmentation => Segmentation != null;
         private string _segmentationPath;
-        
+
         // Histogram
         public float[] HistogramLuminance { get; private set; }
         public float[] HistogramR { get; private set; }
@@ -63,26 +67,26 @@ namespace GeoscientistToolkit.Data.Image
         public override long GetSizeInBytes()
         {
             long size = 0;
-            if (File.Exists(FilePath)) 
+            if (File.Exists(FilePath))
                 size += new FileInfo(FilePath).Length;
-            
+
             if (!string.IsNullOrEmpty(_segmentationPath) && File.Exists(_segmentationPath))
                 size += new FileInfo(_segmentationPath).Length;
-                
+
             return size;
         }
 
         public override void Load()
         {
             if (ImageData != null) return;
-            
+
             var imageInfo = ImageLoader.LoadImage(FilePath);
             if (imageInfo != null)
             {
                 ImageData = imageInfo.Data;
                 Width = imageInfo.Width;
                 Height = imageInfo.Height;
-                
+
                 CalculateHistograms();
                 LoadSegmentation();
             }
@@ -120,7 +124,7 @@ namespace GeoscientistToolkit.Data.Image
                 Logger.LogWarning($"Segmentation file not found: {path}");
                 return;
             }
-            
+
             var imported = ImageSegmentationExporter.ImportLabeledImage(path, Width, Height);
             if (imported != null)
             {
@@ -137,7 +141,7 @@ namespace GeoscientistToolkit.Data.Image
                 Logger.LogWarning("No segmentation data to save");
                 return;
             }
-            
+
             ImageSegmentationExporter.ExportLabeledImage(Segmentation, path);
             _segmentationPath = path;
             Logger.Log($"Saved segmentation to: {path}");
@@ -146,7 +150,7 @@ namespace GeoscientistToolkit.Data.Image
         private void LoadSegmentation()
         {
             if (string.IsNullOrEmpty(FilePath)) return;
-            
+
             string defaultSegPath = Path.ChangeExtension(FilePath, ".labels.png");
             if (File.Exists(defaultSegPath))
             {
@@ -223,13 +227,13 @@ namespace GeoscientistToolkit.Data.Image
             {
                 throw new FileNotFoundException($"Segmentation file not found: {segmentationPath}");
             }
-            
+
             var imageInfo = ImageLoader.LoadImageInfo(segmentationPath);
             if (imageInfo == null)
             {
                 throw new InvalidOperationException($"Could not load segmentation file: {segmentationPath}");
             }
-            
+
             var dataset = new ImageDataset(name, null)
             {
                 Width = imageInfo.Width,
@@ -237,10 +241,10 @@ namespace GeoscientistToolkit.Data.Image
                 BitDepth = 32,
                 _segmentationPath = segmentationPath
             };
-            
+
             dataset.Segmentation = ImageSegmentationExporter.ImportLabeledImage(
                 segmentationPath, imageInfo.Width, imageInfo.Height);
-            
+
             return dataset;
         }
     }

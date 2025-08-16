@@ -64,7 +64,7 @@ namespace GeoscientistToolkit.Util
 
                 // Evict old textures if we're over budget
                 EnsureCacheCapacity(size);
-                
+
                 var newEntry = new CacheEntry(newManager, size)
                 {
                     ReferenceCount = 1,
@@ -73,7 +73,7 @@ namespace GeoscientistToolkit.Util
 
                 _cache[key] = newEntry;
                 _currentCacheSize += size;
-                
+
                 Logger.Log($"Cached new texture '{key}'. Current cache size: {_currentCacheSize / 1024 / 1024} MB");
 
                 return newManager;
@@ -96,13 +96,31 @@ namespace GeoscientistToolkit.Util
             }
         }
 
+        /// <summary>
+        /// Forces the immediate removal and disposal of a texture from the cache.
+        /// This guarantees it will be regenerated on the next GetTexture call.
+        /// </summary>
+        public void Invalidate(string key)
+        {
+            lock (_lock)
+            {
+                if (_cache.TryGetValue(key, out var entry))
+                {
+                    _currentCacheSize -= entry.SizeInBytes;
+                    entry.TextureManager.Dispose();
+                    _cache.Remove(key);
+                    Logger.Log($"Invalidated and removed texture '{key}' from cache.");
+                }
+            }
+        }
+
         private void EnsureCacheCapacity(long sizeOfNewTexture)
         {
             if (_currentCacheSize + sizeOfNewTexture <= _maxCacheSize)
             {
                 return;
             }
-            
+
             Logger.Log("Cache size exceeds limit. Evicting old textures...");
 
             // Find candidates for eviction (not currently in use)
@@ -128,7 +146,7 @@ namespace GeoscientistToolkit.Util
                 Logger.LogWarning("Could not free enough space in texture cache. The cache will exceed its limit.");
             }
         }
-        
+
         public void UpdateCacheSize(long newMaxCacheSizeBytes)
         {
             lock (_lock)
