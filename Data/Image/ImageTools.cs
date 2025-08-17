@@ -54,15 +54,20 @@ namespace GeoscientistToolkit.Data.Image
         private int _blueBandIndex = 2;
         private ClassificationResult _classificationResult;
 
+        // Store reference to the current dataset's viewer (if any)
+        private static Dictionary<ImageDataset, ImageViewer> _datasetViewers = new Dictionary<ImageDataset, ImageViewer>();
+
         public ImageTools()
         {
             _segmentationTools = new ImageSegmentationToolsUI();
         }
 
-
         public void Draw(Dataset dataset)
         {
             if (dataset is not ImageDataset imageDataset) return;
+
+            // CRITICAL FIX: Find and connect to the viewer for this dataset
+            ConnectToViewer(imageDataset);
 
             var availableTools = imageDataset.Tags.GetAvailableTools();
 
@@ -117,6 +122,32 @@ namespace GeoscientistToolkit.Data.Image
                 }
 
                 ImGui.EndTabBar();
+            }
+        }
+
+        private void ConnectToViewer(ImageDataset imageDataset)
+        {
+            // Try to find the viewer for this dataset
+            foreach (var panel in GeoscientistToolkit.UI.BasePanel.AllPanels)
+            {
+                if (panel is GeoscientistToolkit.UI.DatasetViewPanel dvp && dvp.Dataset == imageDataset)
+                {
+                    // Get the viewer via reflection (not ideal but necessary)
+                    var viewerField = dvp.GetType().GetField("_viewer", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+                    if (viewerField != null)
+                    {
+                        var viewer = viewerField.GetValue(dvp) as ImageViewer;
+                        if (viewer != null)
+                        {
+                            // Connect the segmentation tools to the viewer
+                            viewer.SetSegmentationTools(_segmentationTools);
+                            _segmentationTools.SetInvalidateCallback(() => viewer.InvalidateSegmentationTexture());
+
+                            // Store the connection
+                            _datasetViewers[imageDataset] = viewer;
+                        }
+                    }
+                }
             }
         }
 
@@ -277,17 +308,7 @@ namespace GeoscientistToolkit.Data.Image
         {
             _segmentationTools.Draw(imageDataset);
         }
-        private ImageViewer _currentViewer;
-        public void SetCurrentViewer(ImageViewer viewer)
-        {
-            _currentViewer = viewer;
-            if (_segmentationTools != null && viewer != null)
-            {
-                // Set the callback to use the viewer's invalidate method
-                _segmentationTools.SetInvalidateCallback(() => viewer.InvalidateSegmentationTexture());
-                viewer.SetSegmentationTools(_segmentationTools);
-            }
-        }
+
         private void DrawParticleAnalysis(ImageDataset imageDataset)
         {
             ImGui.Text("Particle Analysis");

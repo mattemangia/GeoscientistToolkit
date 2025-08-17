@@ -482,8 +482,7 @@ namespace GeoscientistToolkit.Data.Image.Segmentation
                 ImGui.EndPopup();
             }
 
-            ImGui.Separator();
-            DrawGeneralOperations(segmentation);
+            // REMOVED: DrawGeneralOperations call from here to avoid duplication
         }
 
 

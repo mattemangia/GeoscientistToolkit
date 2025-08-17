@@ -125,11 +125,13 @@ namespace GeoscientistToolkit.Data.Image
             bool isMouseOverImage = io.MousePos.X >= imagePos.X && io.MousePos.X < imagePos.X + displaySize.X &&
                                     io.MousePos.Y >= imagePos.Y && io.MousePos.Y < imagePos.Y + displaySize.Y;
 
+            // Handle calibration tool clicks
             if (_calibrationTool.IsActive && ImGui.IsMouseClicked(ImGuiMouseButton.Left))
             {
                 _calibrationTool.HandleMouseClick(imagePos, displaySize, _dataset.Width, _dataset.Height, io.MousePos);
             }
 
+            // Handle zoom with mouse wheel
             if (isMouseOverImage && Math.Abs(io.MouseWheel) > 0.0f && !_calibrationTool.IsActive)
             {
                 float zoomDelta = io.MouseWheel * 0.1f;
@@ -142,9 +144,26 @@ namespace GeoscientistToolkit.Data.Image
                 }
             }
 
+            // Handle pan with middle mouse button
             if (isMouseOverImage && ImGui.IsMouseDragging(ImGuiMouseButton.Middle) && !_calibrationTool.IsActive)
             {
                 pan += io.MouseDelta;
+            }
+
+            // FIXED: Handle segmentation tool interaction
+            // Just call the HandleMouseClick directly on every frame when mouse is over image
+            // The method internally checks for clicks and drag states
+            if (_segmentationTools != null && isMouseOverImage && !_calibrationTool.IsActive)
+            {
+                Vector2 relativePos = io.MousePos - imagePos;
+                int imageX = (int)(relativePos.X / displaySize.X * _dataset.Width);
+                int imageY = (int)(relativePos.Y / displaySize.Y * _dataset.Height);
+
+                imageX = Math.Clamp(imageX, 0, _dataset.Width - 1);
+                imageY = Math.Clamp(imageY, 0, _dataset.Height - 1);
+
+                // Call HandleMouseClick directly - it handles all the mouse state internally
+                _segmentationTools.HandleMouseClick(imageX, imageY);
             }
 
             // 1. Draw the main image
@@ -186,11 +205,6 @@ namespace GeoscientistToolkit.Data.Image
                 _editableUnit = newUnit;
                 ProjectManager.Instance.HasUnsavedChanges = true;
                 Logger.Log($"Image calibrated: {newPixelSize:F3} {newUnit}/pixel");
-            }
-
-            if (_segmentationTools != null && isMouseOverImage && !_calibrationTool.IsActive)
-            {
-                HandleSegmentationToolInteraction(imagePos, displaySize);
             }
 
             if (_dataset.PixelSize > 0 || _pixelSizeChanged)
@@ -263,10 +277,6 @@ namespace GeoscientistToolkit.Data.Image
                     rgbaData[pixelIdx] = (byte)(material.Color.X * 255);
                     rgbaData[pixelIdx + 1] = (byte)(material.Color.Y * 255);
                     rgbaData[pixelIdx + 2] = (byte)(material.Color.Z * 255);
-
-                    // ***** RESTORED ORIGINAL WORKING LOGIC *****
-                    // The texture itself is fully opaque. The viewer's main opacity slider
-                    // will control the final transparency during rendering.
                     rgbaData[pixelIdx + 3] = 255;
                 }
                 else
@@ -280,20 +290,6 @@ namespace GeoscientistToolkit.Data.Image
             }
             return rgbaData;
         }
-
-        private void HandleSegmentationToolInteraction(Vector2 imagePos, Vector2 displaySize)
-        {
-            var io = ImGui.GetIO();
-            Vector2 relativePos = io.MousePos - imagePos;
-            int imageX = (int)(relativePos.X / displaySize.X * _dataset.Width);
-            int imageY = (int)(relativePos.Y / displaySize.Y * _dataset.Height);
-
-            imageX = Math.Clamp(imageX, 0, _dataset.Width - 1);
-            imageY = Math.Clamp(imageY, 0, _dataset.Height - 1);
-
-            _segmentationTools?.HandleMouseClick(imageX, imageY);
-        }
-
 
         public void SetSegmentationTools(ImageSegmentationToolsUI tools)
         {
