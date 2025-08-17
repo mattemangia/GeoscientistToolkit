@@ -819,6 +819,28 @@ namespace GeoscientistToolkit.Data.Image.Segmentation
             _showThresholdPreview = false;
             _lastDatasetForPreview = null;
         }
+        public bool TryGetBrushOverlayInfo(out int radius, out bool addMode, out Vector4 color, out byte materialId)
+        {
+            radius = 0;
+            addMode = true;
+            color = new Vector4(1, 1, 1, 1);
+            materialId = _selectedMaterialId;
+
+            // Only when Brush tool is selected
+            if (_selectedTool != 1)
+                return false;
+
+            radius = Math.Max(1, _brushRadius);
+            addMode = _brushAddMode;
+
+            // Use the current material color if available
+            var seg = _dataset?.GetOrCreateSegmentation();
+            var mat = seg?.GetMaterial(_selectedMaterialId);
+            if (mat != null)
+                color = mat.Color;
+
+            return true;
+        }
         private void InvalidateSegmentationTexture()
         {
             if (_invalidateTextureCallback != null)

@@ -197,6 +197,10 @@ namespace GeoscientistToolkit.Data.Image
                 DrawSegmentationOverlay(dl, imagePos, displaySize);
             }
 
+            // 2b. Brush preview ring (only when Brush tool active and mouse over image)
+            DrawBrushPreviewOverlay(dl, imagePos, displaySize, isMouseOverImage);
+
+            // keep the rest as-is:
             _calibrationTool.DrawOverlay(dl, imagePos, displaySize, _dataset.Width, _dataset.Height);
             if (_calibrationTool.DrawCalibrationDialog(out float newPixelSize, out string newUnit))
             {
@@ -430,7 +434,59 @@ namespace GeoscientistToolkit.Data.Image
             }
             ImGui.End();
         }
+        private void DrawBrushPreviewOverlay(ImDrawListPtr dl, Vector2 imagePos, Vector2 displaySize, bool isMouseOverImage)
+        {
+            // No overlay while calibrating or when mouse is off image
+            if (_calibrationTool.IsActive || !isMouseOverImage || _dataset.Width <= 0 || _dataset.Height <= 0)
+                return;
 
+            if (_segmentationTools == null)
+                return;
+
+            if (!_segmentationTools.TryGetBrushOverlayInfo(out int radiusPx, out bool addMode, out Vector4 matColor, out _))
+                return;
+
+            var io = ImGui.GetIO();
+
+            // Map per-pixel scale (image space -> screen space)
+            float sx = displaySize.X / _dataset.Width;
+            float sy = displaySize.Y / _dataset.Height;
+            float scale = MathF.Min(sx, sy);                 // uniform, but safe if ever anisotropic
+            float rScreen = MathF.Max(1f, radiusPx * scale); // keep visible even when tiny
+
+            // Snap to pixel center under the mouse for WYSIWYP painting
+            Vector2 rel = io.MousePos - imagePos;
+            rel.X = Math.Clamp(rel.X, 0, displaySize.X - 1);
+            rel.Y = Math.Clamp(rel.Y, 0, displaySize.Y - 1);
+
+            float ix = MathF.Floor(rel.X / sx);
+            float iy = MathF.Floor(rel.Y / sy);
+
+            Vector2 center = new Vector2(
+                imagePos.X + (ix + 0.5f) * sx,
+                imagePos.Y + (iy + 0.5f) * sy
+            );
+
+            // Choose color: material color for Add, red for Erase
+            Vector4 col = addMode ? matColor : new Vector4(1f, 0.25f, 0.25f, 1f);
+            uint colOutline = ImGui.ColorConvertFloat4ToU32(new Vector4(col.X, col.Y, col.Z, 1f));
+            uint colFill = ImGui.ColorConvertFloat4ToU32(new Vector4(col.X, col.Y, col.Z, 0.15f));
+            uint colShadow = 0x90000000; // soft shadow for crosshair
+
+            // Draw filled disk for visibility + crisp outline
+            dl.AddCircleFilled(center, rScreen, colFill, 0);
+            dl.AddCircle(center, rScreen, colOutline, 0, 2.0f);
+
+            // Small crosshair to help aim the center
+            float ch = MathF.Min(6f, rScreen * 0.6f);
+            dl.AddLine(center + new Vector2(-ch, 0), center + new Vector2(ch, 0), colShadow, 1.0f);
+            dl.AddLine(center + new Vector2(0, -ch), center + new Vector2(0, ch), colShadow, 1.0f);
+
+            // Compact label with radius in image pixels
+            string label = $"{radiusPx}px";
+            Vector2 ts = ImGui.CalcTextSize(label);
+            dl.AddText(center + new Vector2(rScreen + 6, -ts.Y * 0.5f), colOutline, label);
+        }
         public void Dispose()
         {
             if (!string.IsNullOrEmpty(_dataset.FilePath))
