@@ -2,6 +2,7 @@
 using System;
 using System.Numerics;
 using System.Threading.Tasks;
+using GeoscientistToolkit;
 using GeoscientistToolkit.Business;
 using GeoscientistToolkit.UI;
 using GeoscientistToolkit.UI.Interfaces;
@@ -10,14 +11,12 @@ using ImGuiNET;
 using Veldrid;
 using System.Collections.Generic;
 using System.Linq;
-using GeoscientistToolkit.AddIns;
-using GeoscientistToolkit.AddIns.CtSimulation;
 
 namespace GeoscientistToolkit.Data.CtImageStack
 {
     /// <summary>
     /// Combined viewer showing 3 orthogonal slices + 3D volume rendering
-    /// Enhanced with cutting plane visualization, real-time segmentation preview, and simulation support
+    /// Enhanced with cutting plane visualization and real-time segmentation preview.
     /// </summary>
     public class CtCombinedViewer : IDatasetViewer, IDisposable
     {
@@ -123,21 +122,9 @@ namespace GeoscientistToolkit.Data.CtImageStack
         private Vector2 _panXY = Vector2.Zero;
         private Vector2 _panXZ = Vector2.Zero;
         private Vector2 _panYZ = Vector2.Zero;
-
-        // Track if we're in a popped-out window
+        
         private bool _isPoppedOut = false;
         private readonly CtSegmentationIntegration _interactiveSegmentation;
-
-        // ===== SIMULATION INTEGRATION =====
-        private bool _simulationPanelOpen = false;
-        private readonly Dictionary<string, ICtSimulationAddIn> _availableSimulations = new();
-        private readonly Dictionary<string, ICtSimulationProcessor> _activeProcessors = new();
-        private readonly Dictionary<string, SimulationResult> _simulationResults = new();
-        private readonly Dictionary<string, bool> _simulationPanelExpanded = new();
-        private readonly Dictionary<string, SimulationParameters> _simulationParameters = new();
-        private string _activeSimulationOverlay = null;
-        private float _overlayOpacity = 0.5f;
-        private bool _showSimulationOverlay = false;
 
         public CtCombinedViewer(CtImageStackDataset dataset)
         {
@@ -171,110 +158,10 @@ namespace GeoscientistToolkit.Data.CtImageStack
             }
 
             ProjectManager.Instance.DatasetDataChanged += OnDatasetDataChanged;
-            CtImageStackTools.PreviewChanged += OnPreviewChanged;
-
-            // Initialize simulation support
-            InitializeSimulationSupport();
-
+            
             _ = InitializeAsync();
         }
-
-        private void InitializeSimulationSupport()
-        {
-            try
-            {
-                // Check for available simulation add-ins through AddInManager
-                var addInManager = AddInManager.Instance;
-                
-                // Subscribe to add-in events
-                addInManager.AddInLoaded += OnAddInLoaded;
-                addInManager.AddInUnloaded += OnAddInUnloaded;
-                
-                // Check already loaded add-ins
-                foreach (var addIn in addInManager.LoadedAddIns.Values)
-                {
-                    if (addIn is ICtSimulationAddIn ctSimulation)
-                    {
-                        RegisterSimulation(ctSimulation);
-                    }
-                }
-
-                if (_availableSimulations.Count > 0)
-                {
-                    Logger.Log($"[CtCombinedViewer] Found {_availableSimulations.Count} simulation add-ins");
-                }
-            }
-            catch (Exception ex)
-            {
-                Logger.Log($"[CtCombinedViewer] Simulation support initialization: {ex.Message}");
-            }
-        }
-
-        private void OnAddInLoaded(IAddIn addIn)
-        {
-            if (addIn is ICtSimulationAddIn ctSimulation)
-            {
-                RegisterSimulation(ctSimulation);
-            }
-        }
-
-        private void OnAddInUnloaded(IAddIn addIn)
-        {
-            if (addIn is ICtSimulationAddIn ctSimulation)
-            {
-                UnregisterSimulation(ctSimulation);
-            }
-        }
-
-        private void RegisterSimulation(ICtSimulationAddIn simulation)
-        {
-            _availableSimulations[simulation.Id] = simulation;
-            _simulationPanelExpanded[simulation.Id] = false;
-    
-            // Create default parameters for this simulation
-            try
-            {
-                var processor = simulation.CreateProcessor(_dataset);
-                if (processor != null)
-                {
-                    var defaultParams = processor.CreateDefaultParameters() ?? new GenericSimulationParameters();
-                    _simulationParameters[simulation.Id] = defaultParams;
-                    processor.Dispose();
-                }
-                else
-                {
-                    _simulationParameters[simulation.Id] = new GenericSimulationParameters();
-                }
-            }
-            catch
-            {
-                _simulationParameters[simulation.Id] = new GenericSimulationParameters();
-            }
-    
-            Logger.Log($"[CtCombinedViewer] Registered simulation: {simulation.Name}");
-        }
-
-        private void UnregisterSimulation(ICtSimulationAddIn simulation)
-        {
-            // Clean up any active processor
-            if (_activeProcessors.TryGetValue(simulation.Id, out var processor))
-            {
-                processor.Dispose();
-                _activeProcessors.Remove(simulation.Id);
-            }
-            
-            _availableSimulations.Remove(simulation.Id);
-            _simulationResults.Remove(simulation.Id);
-            _simulationPanelExpanded.Remove(simulation.Id);
-            _simulationParameters.Remove(simulation.Id);
-            
-            if (_activeSimulationOverlay == simulation.Id)
-            {
-                _activeSimulationOverlay = null;
-                _showSimulationOverlay = false;
-            }
-        }
-
+        
         private void OnDatasetDataChanged(Dataset dataset)
         {
             if (dataset == _dataset)
@@ -284,17 +171,7 @@ namespace GeoscientistToolkit.Data.CtImageStack
                 _needsUpdateYZ = true;
             }
         }
-
-        private void OnPreviewChanged(CtImageStackDataset dataset)
-        {
-            if (dataset == _dataset)
-            {
-                _needsUpdateXY = true;
-                _needsUpdateXZ = true;
-                _needsUpdateYZ = true;
-            }
-        }
-
+        
         public void SetPoppedOutState(bool isPoppedOut)
         {
             _isPoppedOut = isPoppedOut;
@@ -344,23 +221,7 @@ namespace GeoscientistToolkit.Data.CtImageStack
 
         public void DrawToolbarControls()
         {
-            // Simulation button in toolbar
-            if (_availableSimulations.Count > 0)
-            {
-                if (ImGui.Button("🧪 Simulations"))
-                {
-                    _simulationPanelOpen = !_simulationPanelOpen;
-                }
-                ImGui.SameLine();
-                
-                if (_activeProcessors.Count > 0)
-                {
-                    ImGui.TextColored(new Vector4(0.2f, 1.0f, 0.2f, 1.0f), 
-                        $"({_activeProcessors.Count} active)");
-                    ImGui.SameLine();
-                }
-            }
-            
+            // Toolbar is kept simple, main tools are in the ToolsPanel
             ImGui.Dummy(new Vector2(0, 0));
         }
 
@@ -370,13 +231,7 @@ namespace GeoscientistToolkit.Data.CtImageStack
             {
                 _renderingPanel.Submit(ref _renderingPanelOpen);
             }
-
-            // Draw simulation panel if open
-            if (_simulationPanelOpen && _availableSimulations.Count > 0)
-            {
-                DrawSimulationPanel();
-            }
-
+            
             if (!_isInitialized)
             {
                 _progressDialog.Submit();
@@ -418,9 +273,6 @@ namespace GeoscientistToolkit.Data.CtImageStack
             {
                 if (ImGui.MenuItem("Open Rendering Panel", null, _renderingPanelOpen))
                     _renderingPanelOpen = true;
-                    
-                if (_availableSimulations.Count > 0 && ImGui.MenuItem("Open Simulation Panel", null, _simulationPanelOpen))
-                    _simulationPanelOpen = true;
 
                 ImGui.Separator();
 
@@ -453,389 +305,6 @@ namespace GeoscientistToolkit.Data.CtImageStack
                 }
             }
         }
-
-        private void DrawSimulationPanel()
-        {
-            ImGui.SetNextWindowSize(new Vector2(400, 600), ImGuiCond.FirstUseEver);
-            if (ImGui.Begin("CT Simulation Tools", ref _simulationPanelOpen))
-            {
-                ImGui.Text($"Dataset: {_dataset.Name}");
-                ImGui.Text($"Dimensions: {_dataset.Width}×{_dataset.Height}×{_dataset.Depth}");
-                ImGui.Separator();
-
-                // Overlay controls
-                if (_simulationResults.Count > 0)
-                {
-                    ImGui.Text("Visualization:");
-                    ImGui.Checkbox("Show Overlay", ref _showSimulationOverlay);
-                    
-                    if (_showSimulationOverlay)
-                    {
-                        ImGui.SameLine();
-                        ImGui.SetNextItemWidth(100);
-                        ImGui.SliderFloat("Opacity", ref _overlayOpacity, 0.0f, 1.0f);
-                        
-                        ImGui.SetNextItemWidth(200);
-                        if (ImGui.BeginCombo("Active Overlay", _activeSimulationOverlay ?? "None"))
-                        {
-                            if (ImGui.Selectable("None", _activeSimulationOverlay == null))
-                            {
-                                _activeSimulationOverlay = null;
-                            }
-                            
-                            foreach (var (simId, result) in _simulationResults)
-                            {
-                                if (ImGui.Selectable(simId, _activeSimulationOverlay == simId))
-                                {
-                                    _activeSimulationOverlay = simId;
-                                    _needsUpdateXY = _needsUpdateXZ = _needsUpdateYZ = true;
-                                }
-                            }
-                            ImGui.EndCombo();
-                        }
-                    }
-                    ImGui.Separator();
-                }
-
-                // List all available simulations
-                ImGui.Text("Available Simulations:");
-                
-                foreach (var simulation in _availableSimulations.Values)
-                {
-                    bool isExpanded = _simulationPanelExpanded[simulation.Id];
-                    var headerFlags = isExpanded ? ImGuiTreeNodeFlags.DefaultOpen : ImGuiTreeNodeFlags.None;
-                    
-                    if (ImGui.CollapsingHeader($"{simulation.Name}###{simulation.Id}", headerFlags))
-                    {
-                        _simulationPanelExpanded[simulation.Id] = true;
-                        ImGui.Indent();
-                        
-                        // Simulation info
-                        ImGui.TextWrapped(simulation.Description);
-                        ImGui.Text($"Version: {simulation.Version}");
-                        ImGui.Text($"Author: {simulation.Author}");
-                        
-                        // Capabilities
-                        var caps = simulation.GetCapabilities();
-                        ImGui.Text("Capabilities:");
-                        ImGui.Indent();
-                        if (caps.HasFlag(SimulationCapabilities.VolumeModification))
-                            ImGui.BulletText("Volume Modification");
-                        if (caps.HasFlag(SimulationCapabilities.MaterialAnalysis))
-                            ImGui.BulletText("Material Analysis");
-                        if (caps.HasFlag(SimulationCapabilities.FlowSimulation))
-                            ImGui.BulletText("Flow Simulation");
-                        if (caps.HasFlag(SimulationCapabilities.StructuralAnalysis))
-                            ImGui.BulletText("Structural Analysis");
-                        if (caps.HasFlag(SimulationCapabilities.RealTime))
-                            ImGui.BulletText("Real-time Preview");
-                        if (caps.HasFlag(SimulationCapabilities.RequiresGPU))
-                            ImGui.BulletText("GPU Accelerated");
-                        ImGui.Unindent();
-                        
-                        ImGui.Separator();
-                        
-                        // Check if processor is active
-                        if (_activeProcessors.TryGetValue(simulation.Id, out var processor))
-                        {
-                            // Show active processor status
-                            ImGui.Text($"Status: {processor.State}");
-                            ImGui.ProgressBar(processor.Progress, new Vector2(-1, 0), $"{(processor.Progress * 100):F1}%");
-                            
-                            if (processor.State == SimulationState.Running)
-                            {
-                                if (ImGui.Button($"Pause###{simulation.Id}"))
-                                {
-                                    processor.Pause();
-                                }
-                                ImGui.SameLine();
-                                if (ImGui.Button($"Cancel###{simulation.Id}"))
-                                {
-                                    CancelSimulation(simulation.Id);
-                                }
-                            }
-                            else if (processor.State == SimulationState.Paused)
-                            {
-                                if (ImGui.Button($"Resume###{simulation.Id}"))
-                                {
-                                    processor.Resume();
-                                }
-                                ImGui.SameLine();
-                                if (ImGui.Button($"Cancel###{simulation.Id}"))
-                                {
-                                    CancelSimulation(simulation.Id);
-                                }
-                            }
-                        }
-                        else
-                        {
-                            // Draw custom panels from the simulation
-                            var panels = simulation.GetPanels();
-                            if (panels != null)
-                            {
-                                foreach (var panel in panels)
-                                {
-                                    if (ImGui.TreeNode($"{panel.Title}###{simulation.Id}_{panel.Title}"))
-                                    {
-                                        panel.Draw();
-                                        ImGui.TreePop();
-                                    }
-                                }
-                            }
-                            
-                            // Parameter controls (if we have them)
-                            if (_simulationParameters.TryGetValue(simulation.Id, out var parameters))
-                            {
-                                DrawSimulationParameters(simulation.Id, parameters);
-                            }
-                            
-                            // Run button
-                            if (ImGui.Button($"Run {simulation.Name}###{simulation.Id}"))
-                            {
-                                _ = RunSimulationAsync(simulation.Id);
-                            }
-                            
-                            // Show results if available
-                            if (_simulationResults.TryGetValue(simulation.Id, out var result))
-                            {
-                                ImGui.SameLine();
-                                if (ImGui.Button($"Clear Results###{simulation.Id}"))
-                                {
-                                    _simulationResults.Remove(simulation.Id);
-                                    if (_activeSimulationOverlay == simulation.Id)
-                                    {
-                                        _activeSimulationOverlay = null;
-                                    }
-                                    _needsUpdateXY = _needsUpdateXZ = _needsUpdateYZ = true;
-                                }
-                                
-                                ImGui.Separator();
-                                ImGui.Text("Results:");
-                                ImGui.Indent();
-                                ImGui.Text($"Computed: {result.Timestamp:HH:mm:ss}");
-                                ImGui.Text($"Time: {result.ComputationTime.TotalSeconds:F2}s");
-                                
-                                // Display metadata
-                                foreach (var (key, value) in result.Metadata)
-                                {
-                                    ImGui.Text($"{key}: {value}");
-                                }
-                                
-                                if (ImGui.Button($"Export###{simulation.Id}"))
-                                {
-                                    ExportSimulationResult(simulation.Id, result);
-                                }
-                                ImGui.Unindent();
-                            }
-                        }
-                        
-                        ImGui.Unindent();
-                    }
-                    else
-                    {
-                        _simulationPanelExpanded[simulation.Id] = false;
-                    }
-                }
-                
-                if (_availableSimulations.Count == 0)
-                {
-                    ImGui.TextWrapped("No simulation add-ins are currently loaded. Place simulation DLLs in the AddIns folder and restart.");
-                }
-            }
-            ImGui.End();
-        }
-
-        private void DrawSimulationParameters(string simulationId, SimulationParameters parameters)
-{
-    ImGui.Text("Parameters:");
-    ImGui.Indent();
-    
-    // Common parameters - use local variables for ImGui
-    bool useFullVolume = parameters.UseFullVolume;
-    if (ImGui.Checkbox($"Use Full Volume###{simulationId}", ref useFullVolume))
-    {
-        parameters.UseFullVolume = useFullVolume;
-    }
-    
-    if (!parameters.UseFullVolume)
-    {
-        Vector3 roiStart = parameters.ROIStart;
-        if (ImGui.DragFloat3($"ROI Start###{simulationId}", ref roiStart, 1.0f, 0, _dataset.Width))
-        {
-            parameters.ROIStart = roiStart;
-        }
-        
-        Vector3 roiEnd = parameters.ROIEnd;
-        if (ImGui.DragFloat3($"ROI End###{simulationId}", ref roiEnd, 1.0f, 0, _dataset.Width))
-        {
-            parameters.ROIEnd = roiEnd;
-        }
-    }
-    
-    int maxIterations = parameters.MaxIterations;
-    if (ImGui.SliderInt($"Max Iterations###{simulationId}", ref maxIterations, 10, 10000))
-    {
-        parameters.MaxIterations = maxIterations;
-    }
-    
-    float tolerance = parameters.Tolerance;
-    if (ImGui.InputFloat($"Tolerance###{simulationId}", ref tolerance, 1e-8f, 1e-6f, "%.2e"))
-    {
-        parameters.Tolerance = tolerance;
-    }
-    
-    bool enableGPU = parameters.EnableGPU;
-    if (ImGui.Checkbox($"Enable GPU###{simulationId}", ref enableGPU))
-    {
-        parameters.EnableGPU = enableGPU;
-    }
-    
-    // Custom parameters (use reflection for dynamic properties)
-    var type = parameters.GetType();
-    if (type != typeof(SimulationParameters) && type != typeof(GenericSimulationParameters))
-    {
-        ImGui.Separator();
-        ImGui.Text("Specific Parameters:");
-        
-        foreach (var prop in type.GetProperties())
-        {
-            if (prop.DeclaringType == typeof(SimulationParameters))
-                continue;
-            
-            // Check if property is writable
-            if (!prop.CanWrite)
-                continue;
-                
-            if (prop.PropertyType == typeof(float))
-            {
-                float value = (float)prop.GetValue(parameters);
-                if (ImGui.InputFloat($"{prop.Name}###{simulationId}_{prop.Name}", ref value))
-                {
-                    prop.SetValue(parameters, value);
-                }
-            }
-            else if (prop.PropertyType == typeof(int))
-            {
-                int value = (int)prop.GetValue(parameters);
-                if (ImGui.InputInt($"{prop.Name}###{simulationId}_{prop.Name}", ref value))
-                {
-                    prop.SetValue(parameters, value);
-                }
-            }
-            else if (prop.PropertyType == typeof(bool))
-            {
-                bool value = (bool)prop.GetValue(parameters);
-                if (ImGui.Checkbox($"{prop.Name}###{simulationId}_{prop.Name}", ref value))
-                {
-                    prop.SetValue(parameters, value);
-                }
-            }
-            else if (prop.PropertyType == typeof(Vector3))
-            {
-                Vector3 value = (Vector3)prop.GetValue(parameters);
-                if (ImGui.DragFloat3($"{prop.Name}###{simulationId}_{prop.Name}", ref value))
-                {
-                    prop.SetValue(parameters, value);
-                }
-            }
-            else if (prop.PropertyType == typeof(Vector2))
-            {
-                Vector2 value = (Vector2)prop.GetValue(parameters);
-                if (ImGui.DragFloat2($"{prop.Name}###{simulationId}_{prop.Name}", ref value))
-                {
-                    prop.SetValue(parameters, value);
-                }
-            }
-        }
-    }
-    
-    ImGui.Unindent();
-}
-        private async Task RunSimulationAsync(string simulationId)
-        {
-            if (!_availableSimulations.TryGetValue(simulationId, out var simulation))
-                return;
-                
-            try
-            {
-                var processor = simulation.CreateProcessor(_dataset);
-                if (processor == null)
-                {
-                    Logger.LogError($"Failed to create processor for {simulationId}");
-                    return;
-                }
-                
-                _activeProcessors[simulationId] = processor;
-                
-                // Initialize processor
-                processor.Initialize(_dataset.VolumeData, _dataset.LabelData);
-                
-                // Subscribe to events
-                processor.ProgressChanged += progress =>
-                {
-                    // Progress is handled in UI
-                };
-                
-                processor.IntermediateResultAvailable += result =>
-                {
-                    _simulationResults[simulationId] = result;
-                    if (_showSimulationOverlay && _activeSimulationOverlay == simulationId)
-                    {
-                        _needsUpdateXY = _needsUpdateXZ = _needsUpdateYZ = true;
-                    }
-                };
-                
-                // Get parameters
-                var parameters = _simulationParameters[simulationId] ?? new GenericSimulationParameters();
-                
-                // Run simulation
-                var result = await processor.RunAsync(parameters);
-                
-                // Store result
-                _simulationResults[simulationId] = result;
-                
-                // Update display
-                if (_showSimulationOverlay && _activeSimulationOverlay == simulationId)
-                {
-                    _needsUpdateXY = _needsUpdateXZ = _needsUpdateYZ = true;
-                }
-                
-                Logger.Log($"Simulation {simulationId} completed successfully");
-            }
-            catch (Exception ex)
-            {
-                Logger.LogError($"Simulation {simulationId} failed: {ex.Message}");
-            }
-            finally
-            {
-                if (_activeProcessors.TryGetValue(simulationId, out var processor))
-                {
-                    processor.Dispose();
-                    _activeProcessors.Remove(simulationId);
-                }
-            }
-        }
-
-        private void CancelSimulation(string simulationId)
-        {
-            if (_activeProcessors.TryGetValue(simulationId, out var processor))
-            {
-                processor.Dispose();
-                _activeProcessors.Remove(simulationId);
-                Logger.Log($"Simulation {simulationId} cancelled");
-            }
-        }
-
-        private void ExportSimulationResult(string simulationId, SimulationResult result)
-        {
-            // Open file dialog for export
-            var filename = $"{_dataset.Name}_{simulationId}_{DateTime.Now:yyyyMMdd_HHmmss}.dat";
-            // TODO: Use file dialog
-            result.Export(filename);
-            Logger.Log($"Exported simulation results to {filename}");
-        }
-
-        // Rest of the existing methods remain the same...
         
         public void ZoomAllViews(float factor)
         {
@@ -1089,7 +558,6 @@ namespace GeoscientistToolkit.Data.CtImageStack
             if (ImGui.BeginPopupContextItem($"SliceContext{viewIndex}"))
             {
                 if (ImGui.MenuItem("Open Rendering Panel")) _renderingPanelOpen = true;
-                if (_availableSimulations.Count > 0 && ImGui.MenuItem("Open Simulation Panel")) _simulationPanelOpen = true;
                 ImGui.Separator();
                 string sliceName = viewIndex switch { 0 => "Z", 1 => "Y", 2 => "X", _ => "" };
                 if (ImGui.MenuItem($"Center {sliceName} Slice"))
@@ -1175,7 +643,7 @@ namespace GeoscientistToolkit.Data.CtImageStack
 
             dl.PopClipRect();
         }
-
+        
         private void UpdateTexture(int viewIndex, ref TextureManager texture)
         {
             if (_dataset.VolumeData == null)
@@ -1198,22 +666,12 @@ namespace GeoscientistToolkit.Data.CtImageStack
 
                 int currentSlice = viewIndex switch { 0 => _sliceZ, 1 => _sliceY, 2 => _sliceX, _ => -1 };
 
-                // Get preview data
-                var (is2DPreviewActive, full3DPreviewMask, previewColor) = CtImageStackTools.GetPreviewData(_dataset);
-                byte[] thresholdPreviewMask = ExtractPreviewSlice(full3DPreviewMask, viewIndex, width, height);
+                // Get preview data from external tools (like island removal)
+                var (isExternalPreviewActive, full3DPreviewMask, previewColor) = CtImageStackTools.GetPreviewData(_dataset);
+                byte[] externalPreviewMask = ExtractPreviewSlice(full3DPreviewMask, viewIndex, width, height);
 
                 byte[] segmentationPreviewMask = _interactiveSegmentation?.GetPreviewMask(currentSlice, viewIndex);
                 byte[] committedSelectionMask = _interactiveSegmentation?.GetCommittedSelectionMask(currentSlice, viewIndex);
-
-                // Get simulation overlay if active
-                byte[] simulationOverlay = null;
-                Vector4 simulationColor = Vector4.One;
-                if (_showSimulationOverlay && _activeSimulationOverlay != null)
-                {
-                    simulationOverlay = GetSimulationOverlay(viewIndex, width, height);
-                    // Use a colormap for simulation data
-                    simulationColor = new Vector4(1, 0.5f, 0, 1); // Orange for example
-                }
 
                 byte[] rgbaData = new byte[width * height * 4];
                 var targetMaterial = _dataset.Materials.FirstOrDefault(m => m.ID == _interactiveSegmentation.TargetMaterialId);
@@ -1241,7 +699,7 @@ namespace GeoscientistToolkit.Data.CtImageStack
                         finalColor = Vector4.Lerp(finalColor, new Vector4(selColor.X, selColor.Y, selColor.Z, 1.0f), opacity);
                     }
 
-                    if (is2DPreviewActive && thresholdPreviewMask != null && thresholdPreviewMask[i] > 0)
+                    if (isExternalPreviewActive && externalPreviewMask != null && externalPreviewMask[i] > 0)
                     {
                         float opacity = 0.5f;
                         Vector4 previewRgba = new Vector4(previewColor.X, previewColor.Y, previewColor.Z, 1.0f);
@@ -1254,15 +712,7 @@ namespace GeoscientistToolkit.Data.CtImageStack
                         float opacity = 0.6f;
                         finalColor = Vector4.Lerp(finalColor, new Vector4(segColor.X, segColor.Y, segColor.Z, 1.0f), opacity);
                     }
-
-                    // Apply simulation overlay
-                    if (simulationOverlay != null && simulationOverlay[i] > 0)
-                    {
-                        float simValue = simulationOverlay[i] / 255f;
-                        Vector4 simColor = simulationColor * simValue;
-                        finalColor = Vector4.Lerp(finalColor, simColor, _overlayOpacity);
-                    }
-
+                    
                     rgbaData[i * 4] = (byte)(finalColor.X * 255);
                     rgbaData[i * 4 + 1] = (byte)(finalColor.Y * 255);
                     rgbaData[i * 4 + 2] = (byte)(finalColor.Z * 255);
@@ -1277,75 +727,7 @@ namespace GeoscientistToolkit.Data.CtImageStack
                 Logger.LogError($"[CtCombinedViewer] Error updating texture: {ex.Message}");
             }
         }
-
-        private byte[] GetSimulationOverlay(int viewIndex, int width, int height)
-        {
-            if (!_simulationResults.TryGetValue(_activeSimulationOverlay, out var result))
-                return null;
-                
-            var scalarField = result.GetScalarField();
-            if (scalarField == null)
-                return null;
-                
-            byte[] overlay = new byte[width * height];
-            
-            try
-            {
-                switch (viewIndex)
-                {
-                    case 0: // XY slice
-                        for (int y = 0; y < height; y++)
-                        {
-                            for (int x = 0; x < width; x++)
-                            {
-                                if (x < scalarField.GetLength(0) && y < scalarField.GetLength(1) && _sliceZ < scalarField.GetLength(2))
-                                {
-                                    float value = scalarField[x, y, _sliceZ];
-                                    overlay[y * width + x] = (byte)(Math.Clamp(value * 255, 0, 255));
-                                }
-                            }
-                        }
-                        break;
-                        
-                    case 1: // XZ slice
-                        for (int z = 0; z < height; z++)
-                        {
-                            for (int x = 0; x < width; x++)
-                            {
-                                if (x < scalarField.GetLength(0) && _sliceY < scalarField.GetLength(1) && z < scalarField.GetLength(2))
-                                {
-                                    float value = scalarField[x, _sliceY, z];
-                                    overlay[z * width + x] = (byte)(Math.Clamp(value * 255, 0, 255));
-                                }
-                            }
-                        }
-                        break;
-                        
-                    case 2: // YZ slice
-                        for (int z = 0; z < height; z++)
-                        {
-                            for (int y = 0; y < width; y++)
-                            {
-                                if (_sliceX < scalarField.GetLength(0) && y < scalarField.GetLength(1) && z < scalarField.GetLength(2))
-                                {
-                                    float value = scalarField[_sliceX, y, z];
-                                    overlay[z * width + y] = (byte)(Math.Clamp(value * 255, 0, 255));
-                                }
-                            }
-                        }
-                        break;
-                }
-            }
-            catch (Exception ex)
-            {
-                Logger.LogError($"[CtCombinedViewer] Error extracting simulation overlay: {ex.Message}");
-                return null;
-            }
-            
-            return overlay;
-        }
-
-        // Rest of the existing methods remain unchanged...
+        
         private byte[] ExtractPreviewSlice(byte[] full3DMask, int viewIndex, int sliceWidth, int sliceHeight)
         {
             if (full3DMask == null) return null;
@@ -1631,18 +1013,6 @@ namespace GeoscientistToolkit.Data.CtImageStack
         public void Dispose()
         {
             ProjectManager.Instance.DatasetDataChanged -= OnDatasetDataChanged;
-            CtImageStackTools.PreviewChanged -= OnPreviewChanged;
-
-            // Clean up simulation resources
-            foreach (var processor in _activeProcessors.Values)
-            {
-                processor?.Dispose();
-            }
-            _activeProcessors.Clear();
-            
-            // Unsubscribe from add-in events
-            AddInManager.Instance.AddInLoaded -= OnAddInLoaded;
-            AddInManager.Instance.AddInUnloaded -= OnAddInUnloaded;
 
             CtSegmentationIntegration.Cleanup(_dataset);
 
@@ -1651,18 +1021,6 @@ namespace GeoscientistToolkit.Data.CtImageStack
             _textureXZ?.Dispose();
             _textureYZ?.Dispose();
             VolumeViewer?.Dispose();
-        }
-
-        // Generic simulation parameters for add-ins that don't provide their own
-        internal class GenericSimulationParameters : SimulationParameters
-        {
-            public GenericSimulationParameters()
-            {
-                UseFullVolume = true;
-                MaxIterations = 1000;
-                Tolerance = 1e-6f;
-                EnableGPU = true;
-            }
         }
     }
 }

@@ -22,7 +22,6 @@ namespace GeoscientistToolkit.UI
         private readonly ImGuiFileDialog _saveSettingsDialog;
         private readonly ImGuiFileDialog _logPathDialog;
         private readonly ImGuiFileDialog _backupPathDialog;
-        private readonly ImGuiFileDialog _addInPathDialog;
         
         // UI state
         private string _saveMessage = "";
@@ -36,7 +35,6 @@ namespace GeoscientistToolkit.UI
             Appearance,
             Hardware,
             Logging,
-            AddIns,
             Performance,
             FileAssociations,
             Backup
@@ -49,7 +47,6 @@ namespace GeoscientistToolkit.UI
             _saveSettingsDialog = new ImGuiFileDialog("SaveSettings", FileDialogType.OpenFile, "Save Settings");
             _logPathDialog = new ImGuiFileDialog("SelectLogPath", FileDialogType.OpenDirectory, "Select Log Directory");
             _backupPathDialog = new ImGuiFileDialog("SelectBackupPath", FileDialogType.OpenDirectory, "Select Backup Directory");
-            _addInPathDialog = new ImGuiFileDialog("SelectAddInPath", FileDialogType.OpenDirectory, "Select Add-In Directory");
         }
 
         public void Open()
@@ -136,7 +133,6 @@ namespace GeoscientistToolkit.UI
                 case SettingsCategory.Appearance: DrawAppearanceSettings(); break;
                 case SettingsCategory.Hardware: DrawHardwareSettings(); break;
                 case SettingsCategory.Logging: DrawLoggingSettings(); break;
-                case SettingsCategory.AddIns: DrawAddInSettings(); break;
                 case SettingsCategory.Performance: DrawPerformanceSettings(); break;
                 case SettingsCategory.FileAssociations: DrawFileAssociationSettings(); break;
                 case SettingsCategory.Backup: DrawBackupSettings(); break;
@@ -233,25 +229,6 @@ namespace GeoscientistToolkit.UI
             if (ImGui.Checkbox("Enable Console Logging", ref enableConsole)) logging.EnableConsoleLogging = enableConsole;
         }
 
-        private void DrawAddInSettings()
-        {
-            var addins = _editingSettings.AddIns;
-            ImGui.TextColored(new Vector4(0.26f, 0.59f, 0.98f, 1.0f), "Add-In Settings");
-            ImGui.Separator();
-
-            var addinDir = addins.AddInDirectory;
-            if (ImGui.InputText("Add-In Directory", ref addinDir, 512)) addins.AddInDirectory = addinDir;
-            ImGui.SameLine();
-            if (ImGui.Button("Browse...##AddinPath")) _addInPathDialog.Open(addins.AddInDirectory);
-
-            var loadOnStartup = addins.LoadAddInsOnStartup;
-            if (ImGui.Checkbox("Load Add-Ins on Startup", ref loadOnStartup))
-            {
-                addins.LoadAddInsOnStartup = loadOnStartup;
-                _restartRequired = true;
-            }
-        }
-
         private void DrawPerformanceSettings()
         {
             var perf = _editingSettings.Performance;
@@ -302,7 +279,7 @@ namespace GeoscientistToolkit.UI
             }
             else
             {
-                ImGui.TextDisabled("File association is only supported on non-Windows platforms.");
+                ImGui.TextDisabled("File association is only supported on Windows.");
             }
             
             ImGui.Separator();
@@ -336,7 +313,6 @@ namespace GeoscientistToolkit.UI
             var backupOnClose = backup.BackupOnProjectClose;
             if (ImGui.Checkbox("Backup on Project Close", ref backupOnClose)) backup.BackupOnProjectClose = backupOnClose;
         }
-
 
         private void DrawBottomButtons()
         {
@@ -405,12 +381,10 @@ namespace GeoscientistToolkit.UI
         {
             if (_logPathDialog.Submit()) _editingSettings.Logging.LogFilePath = _logPathDialog.SelectedPath;
             if (_backupPathDialog.Submit()) _editingSettings.Backup.BackupDirectory = _backupPathDialog.SelectedPath;
-            if (_addInPathDialog.Submit()) _editingSettings.AddIns.AddInDirectory = _addInPathDialog.SelectedPath;
         }
 
         private bool HasUnsavedChanges()
         {
-            // Simple comparison using JSON serialization
             var currentJson = System.Text.Json.JsonSerializer.Serialize(_settingsManager.Settings);
             var editingJson = System.Text.Json.JsonSerializer.Serialize(_editingSettings);
             return currentJson != editingJson;

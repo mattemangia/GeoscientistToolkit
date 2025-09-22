@@ -12,7 +12,6 @@ using Veldrid.StartupUtilities;
 using GeoscientistToolkit.UI;
 using GeoscientistToolkit.Util;
 using GeoscientistToolkit.Settings;
-using GeoscientistToolkit.AddIns;
 using GeoscientistToolkit.Business;
 using System.Diagnostics;
 
@@ -283,8 +282,7 @@ namespace GeoscientistToolkit
             VeldridManager.ImGuiController = _imGuiController;
             VeldridManager.RegisterImGuiController(_imGuiController);
 
-            _loadingScreen.UpdateStatus("Loading add-ins...", 0.5f);
-            AddInManager.Instance.Initialize();
+            // --- REMOVED AddInManager INITIALIZATION ---
 
             _loadingScreen.UpdateStatus("Initializing UI...", 0.6f);
             SettingsManager.Instance.SettingsChanged += OnSettingsChanged;
@@ -394,7 +392,7 @@ namespace GeoscientistToolkit
             }
 
             GlobalPerformanceManager.Instance.Shutdown();
-            AddInManager.Instance.Shutdown();
+            // --- REMOVED AddInManager SHUTDOWN ---
 
             _graphicsDevice.WaitForIdle();
             _imGuiController.Dispose();

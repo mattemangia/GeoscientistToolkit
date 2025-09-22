@@ -8,7 +8,7 @@ using GeoscientistToolkit.Data.GIS;
 using GeoscientistToolkit.Data.AcousticVolume;
 using GeoscientistToolkit.UI.Interfaces;
 using GeoscientistToolkit.UI.GIS;
-using GeoscientistToolkit.Data.AcousticVolume;
+using GeoscientistToolkit.UI.Tools; // Added for CompositeTool
 using ImGuiNET;
 using System;
 using System.Numerics;
@@ -27,7 +27,7 @@ namespace GeoscientistToolkit.UI
                         ? new CtCombinedViewer(streamingDataset.EditablePartner)
                         : new CtVolume3DViewer(streamingDataset),
 
-                CtImageStackDataset ctDataset => new CtImageStackViewer(ctDataset),
+                CtImageStackDataset ctDataset => new CtCombinedViewer(ctDataset),
 
                 // Image datasets
                 ImageDataset imageDataset => new ImageViewer(imageDataset),
@@ -38,11 +38,11 @@ namespace GeoscientistToolkit.UI
                 // Table datasets
                 TableDataset tableDataset => new TableViewer(tableDataset),
 
-                // GIS datasets - Use real implementations when available
-                GISDataset gisDataset => new GeoscientistToolkit.UI.GIS.GISViewer(gisDataset),
+                // GIS datasets
+                GISDataset gisDataset => new GISViewer(gisDataset),
 
-                // Acoustic Volume datasets - Use real implementations when available
-                AcousticVolumeDataset acousticDataset => new GeoscientistToolkit.Data.AcousticVolume.AcousticVolumeViewer(acousticDataset),
+                // Acoustic Volume datasets
+                AcousticVolumeDataset acousticDataset => new AcousticVolumeViewer(acousticDataset),
 
                 // Dataset groups cannot be opened in a viewer
                 DatasetGroup => throw new InvalidOperationException("Cannot open a DatasetGroup in a viewer. Please open individual datasets."),
@@ -59,8 +59,8 @@ namespace GeoscientistToolkit.UI
                 CtImageStackDataset or StreamingCtVolumeDataset => new CtImageStackPropertiesRenderer(),
                 Mesh3DDataset => new Mesh3DProperties(),
                 TableDataset => new TableProperties(),
-                GISDataset => new GeoscientistToolkit.UI.GIS.GISProperties(),
-                AcousticVolumeDataset => new GeoscientistToolkit.Data.AcousticVolume.AcousticVolumeProperties(),
+                GISDataset => new GISProperties(),
+                AcousticVolumeDataset => new AcousticVolumeProperties(),
                 DatasetGroup => new DatasetGroupProperties(),
                 _ => new DefaultPropertiesRenderer()
             };
@@ -70,17 +70,20 @@ namespace GeoscientistToolkit.UI
         {
             return dataset switch
             {
-                CtImageStackDataset => new CtImageStackTools(),
-                StreamingCtVolumeDataset sds when sds.EditablePartner != null => new CtImageStackTools(),
+                // --- MODIFIED: Use the composite tool for all CT-related tools ---
+                CtImageStackDataset => new CtImageStackCompositeTool(),
+                StreamingCtVolumeDataset sds when sds.EditablePartner != null => new CtImageStackCompositeTool(),
+                // --- END MODIFICATION ---
+                
                 Mesh3DDataset => new Mesh3DTools(),
                 TableDataset => new TableTools(),
-                GISDataset => new GeoscientistToolkit.UI.GIS.GISTools(),
-                AcousticVolumeDataset => new GeoscientistToolkit.Data.AcousticVolume.AcousticVolumeTools(),
-                ImageDataset => new GeoscientistToolkit.Data.Image.ImageTools(),
+                GISDataset => new GISTools(),
+                AcousticVolumeDataset => new AcousticVolumeTools(),
+                ImageDataset => new ImageTools(),
                 _ => new DefaultTools()
             };
         }
-
+        
         // Default implementations for datasets without specific UI components
         private class DefaultPropertiesRenderer : IDatasetPropertiesRenderer
         {
@@ -152,7 +155,7 @@ namespace GeoscientistToolkit.UI
                 return $"{size:0.##} {sizes[order]}";
             }
         }
-
+        
         // Image tools implementation
         private class ImageTools : IDatasetTools
         {
