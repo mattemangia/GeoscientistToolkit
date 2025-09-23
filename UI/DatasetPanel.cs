@@ -10,6 +10,7 @@ using GeoscientistToolkit.Data.Mesh3D;
 using GeoscientistToolkit.Data.Table;
 using GeoscientistToolkit.Data.GIS;
 using GeoscientistToolkit.Data.AcousticVolume;
+using GeoscientistToolkit.Data.Pnm; // Added for PNM
 
 namespace GeoscientistToolkit.UI
 {
@@ -329,6 +330,13 @@ namespace GeoscientistToolkit.UI
                     ImGui.TextUnformatted($"Time Series: {acoustic.TimeSeriesSnapshots.Count} snapshots");
                 }
             }
+            else if (dataset is PNMDataset pnm)
+            {
+                ImGui.Separator();
+                ImGui.TextUnformatted($"Pores: {pnm.Pores.Count:N0}");
+                ImGui.TextUnformatted($"Throats: {pnm.Throats.Count:N0}");
+                ImGui.TextUnformatted($"Darcy Permeability: {pnm.DarcyPermeability:F3} mD");
+            }
             else if (dataset is DatasetGroup group)
             {
                 ImGui.Separator();
@@ -507,6 +515,7 @@ namespace GeoscientistToolkit.UI
                 DatasetType.Table => "[TABLE]",
                 DatasetType.GIS => "[GIS]",
                 DatasetType.AcousticVolume => "[ACOUSTIC]",
+                DatasetType.PNM => "[PNM]", // Added for PNM
                 _ => "[DATA]"
             };
         }

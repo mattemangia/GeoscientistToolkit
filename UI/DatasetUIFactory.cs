@@ -6,6 +6,7 @@ using GeoscientistToolkit.Data.Mesh3D;
 using GeoscientistToolkit.Data.Table;
 using GeoscientistToolkit.Data.GIS;
 using GeoscientistToolkit.Data.AcousticVolume;
+using GeoscientistToolkit.Data.Pnm; // Added for PNM
 using GeoscientistToolkit.UI.Interfaces;
 using GeoscientistToolkit.UI.GIS;
 using GeoscientistToolkit.UI.Tools; // Added for CompositeTool
@@ -44,6 +45,9 @@ namespace GeoscientistToolkit.UI
                 // Acoustic Volume datasets
                 AcousticVolumeDataset acousticDataset => new AcousticVolumeViewer(acousticDataset),
 
+                // PNM Dataset
+                PNMDataset pnmDataset => new PNMViewer(pnmDataset),
+
                 // Dataset groups cannot be opened in a viewer
                 DatasetGroup => throw new InvalidOperationException("Cannot open a DatasetGroup in a viewer. Please open individual datasets."),
 
@@ -61,6 +65,7 @@ namespace GeoscientistToolkit.UI
                 TableDataset => new TableProperties(),
                 GISDataset => new GISProperties(),
                 AcousticVolumeDataset => new AcousticVolumeProperties(),
+                PNMDataset => new PNMPropertiesRenderer(), // Added for PNM
                 DatasetGroup => new DatasetGroupProperties(),
                 _ => new DefaultPropertiesRenderer()
             };
@@ -79,6 +84,7 @@ namespace GeoscientistToolkit.UI
                 TableDataset => new TableTools(),
                 GISDataset => new GISTools(),
                 AcousticVolumeDataset => new AcousticVolumeTools(),
+                PNMDataset => new PNMTools(), // Added for PNM
                 ImageDataset => new ImageTools(),
                 _ => new DefaultTools()
             };
@@ -168,12 +174,12 @@ namespace GeoscientistToolkit.UI
                     
                     if (ImGui.Button("Show Histogram"))
                     {
-                        // Implementation pending
+                       // Implementation pending
                     }
                     
                     if (ImGui.Button("Export"))
                     {
-                        // Implementation pending
+                       // Implementation pending
                     }
                     
                     ImGui.Separator();

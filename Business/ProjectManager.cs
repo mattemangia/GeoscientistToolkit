@@ -10,6 +10,7 @@ using GeoscientistToolkit.Data.AcousticVolume;
 using GeoscientistToolkit.Data.CtImageStack;
 using GeoscientistToolkit.Data.Image;
 using GeoscientistToolkit.Data.Mesh3D;
+using GeoscientistToolkit.Data.Pnm; // Added for PNM
 using GeoscientistToolkit.Data.Table;
 using GeoscientistToolkit.Settings;
 using GeoscientistToolkit.Util;
@@ -417,6 +418,33 @@ namespace GeoscientistToolkit.Business
                         Logger.LogWarning($"Source file not found for dataset: {imgDataset.Name} at {imgDataset.FilePath}");
                     }
                     dataset = imgDataset;
+                    break;
+                
+                // --- NEW CASE for PNMDataset ---
+                case PNMDatasetDTO pnmDto:
+                    var pnmDataset = new PNMDataset(pnmDto.Name, pnmDto.FilePath)
+                    {
+                        IsMissing = !File.Exists(pnmDto.FilePath),
+                        VoxelSize = pnmDto.VoxelSize,
+                        Tortuosity = pnmDto.Tortuosity,
+                        DarcyPermeability = pnmDto.DarcyPermeability,
+                        NavierStokesPermeability = pnmDto.NavierStokesPermeability,
+                        LatticeBoltzmannPermeability = pnmDto.LatticeBoltzmannPermeability,
+                        Pores = pnmDto.Pores.Select(p => new Pore
+                        {
+                            ID = p.ID, Position = p.Position, Area = p.Area, VolumeVoxels = p.VolumeVoxels,
+                            VolumePhysical = p.VolumePhysical, Connections = p.Connections, Radius = p.Radius
+                        }).ToList(),
+                        Throats = pnmDto.Throats.Select(t => new Throat
+                        {
+                            ID = t.ID, Pore1ID = t.Pore1ID, Pore2ID = t.Pore2ID, Radius = t.Radius
+                        }).ToList()
+                    };
+                    if (pnmDataset.IsMissing)
+                    {
+                        Logger.LogWarning($"Source file not found for PNM dataset: {pnmDto.Name} at {pnmDto.FilePath}");
+                    }
+                    dataset = pnmDataset;
                     break;
 
                 case DatasetGroupDTO groupDto:

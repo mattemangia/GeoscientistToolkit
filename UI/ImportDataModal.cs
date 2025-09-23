@@ -26,6 +26,7 @@ namespace GeoscientistToolkit.UI
         private readonly ImGuiFileDialog _gisDialog;
         private readonly ImGuiFileDialog _acousticDialog;
         private readonly ImGuiFileDialog _segmentationDialog;
+        private readonly ImGuiFileDialog _pnmDialog; // Added for PNM
         private readonly ImageStackOrganizerDialog _organizerDialog;
 
         // Loaders
@@ -38,6 +39,7 @@ namespace GeoscientistToolkit.UI
         private readonly GISLoader _gisLoader;
         private readonly AcousticVolumeLoader _acousticVolumeLoader;
         private readonly SegmentationLoader _segmentationLoader;
+        private readonly PNMLoader _pnmLoader; // Added for PNM
 
         private int _selectedDatasetTypeIndex = 0;
         private readonly string[] _datasetTypeNames = {
@@ -50,7 +52,8 @@ namespace GeoscientistToolkit.UI
             "Table/Spreadsheet (CSV/TSV)",
             "GIS Map (Shapefile/GeoJSON/KML)",
             "Acoustic Volume (Simulation Results)",
-            "Segmentation/Labels (Standalone)"
+            "Segmentation/Labels (Standalone)",
+            "Pore Network Model (PNM)" // Added for PNM
         };
 
         private readonly string[] _pixelSizeUnits = { "µm", "mm" };
@@ -71,6 +74,7 @@ namespace GeoscientistToolkit.UI
             _gisDialog = new ImGuiFileDialog("ImportGISDialog", FileDialogType.OpenFile, "Select GIS File");
             _acousticDialog = new ImGuiFileDialog("ImportAcousticDialog", FileDialogType.OpenDirectory, "Select Acoustic Volume Directory");
             _segmentationDialog = new ImGuiFileDialog("ImportSegmentationDialog", FileDialogType.OpenFile, "Select Segmentation File");
+            _pnmDialog = new ImGuiFileDialog("ImportPNMDialog", FileDialogType.OpenFile, "Select PNM File"); // Added for PNM
             _organizerDialog = new ImageStackOrganizerDialog();
 
             // Initialize loaders
@@ -83,6 +87,7 @@ namespace GeoscientistToolkit.UI
             _gisLoader = new GISLoader();
             _acousticVolumeLoader = new AcousticVolumeLoader();
             _segmentationLoader = new SegmentationLoader();
+            _pnmLoader = new PNMLoader(); // Added for PNM
         }
 
         public void Open()
@@ -207,6 +212,12 @@ namespace GeoscientistToolkit.UI
             {
                 _gisLoader.FilePath = _gisDialog.SelectedPath;
             }
+
+            // Added for PNM
+            if (_pnmDialog.Submit())
+            {
+                _pnmLoader.FilePath = _pnmDialog.SelectedPath;
+            }
         }
 
         private void DrawOptions()
@@ -251,11 +262,46 @@ namespace GeoscientistToolkit.UI
                 case 9: // Segmentation/Labels
                     DrawSegmentationOptions();
                     break;
+                case 10: // PNM
+                    DrawPNMOptions();
+                    break;
             }
 
             ImGui.SetCursorPosY(ImGui.GetWindowHeight() - ImGui.GetFrameHeightWithSpacing() * 1.5f);
             ImGui.Separator();
             DrawButtons();
+        }
+
+        private void DrawPNMOptions()
+        {
+            ImGui.TextWrapped("Import a Pore Network Model, typically generated from CT data. " +
+                            "This visualizes pores as spheres and throats as sticks in a 3D view.");
+            
+            ImGui.Spacing();
+            ImGui.Separator();
+            ImGui.Spacing();
+            
+            ImGui.Text("PNM File (.pnm.json):");
+            var path = _pnmLoader.FilePath ?? "";
+            ImGui.InputText("##PNMPath", ref path, 260, ImGuiInputTextFlags.ReadOnly);
+            ImGui.SameLine();
+            if (ImGui.Button("Browse...##PNMFile"))
+            {
+                string[] pnmExtensions = { ".pnm.json", ".json" };
+                _pnmDialog.Open(null, pnmExtensions);
+            }
+
+            if (!string.IsNullOrEmpty(_pnmLoader.FilePath) && File.Exists(_pnmLoader.FilePath))
+            {
+                ImGui.Spacing();
+                ImGui.Separator();
+                ImGui.Spacing();
+                ImGui.Text("File Information:");
+                var info = new FileInfo(_pnmLoader.FilePath);
+                ImGui.BulletText($"File: {info.Name}");
+                ImGui.BulletText($"Size: {info.Length / 1024} KB");
+                ImGui.TextColored(new Vector4(0.0f, 1.0f, 0.5f, 1.0f), "✓ Ready to import PNM dataset");
+            }
         }
 
         private void DrawSegmentationOptions()
@@ -907,6 +953,7 @@ namespace GeoscientistToolkit.UI
                 7 => _gisLoader,
                 8 => _acousticVolumeLoader,
                 9 => _segmentationLoader,
+                10 => _pnmLoader, // Added for PNM
                 _ => null
             };
         }
@@ -973,6 +1020,7 @@ namespace GeoscientistToolkit.UI
             _gisLoader.Reset();
             _acousticVolumeLoader.Reset();
             _segmentationLoader.Reset();
+            _pnmLoader.Reset(); // Added for PNM
 
             // Reset state
             _importTask = null;

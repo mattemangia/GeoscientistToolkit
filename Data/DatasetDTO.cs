@@ -128,5 +128,35 @@ namespace GeoscientistToolkit.Data
         /// </summary>
         public string PartnerFilePath { get; set; }
     }
-    
+
+    // --- NEW DTOs for PNM ---
+    public class PoreDTO
+    {
+        public int ID { get; set; }
+        public Vector3 Position { get; set; }
+        public float Area { get; set; }
+        public float VolumeVoxels { get; set; }
+        public float VolumePhysical { get; set; }
+        public int Connections { get; set; }
+        public float Radius { get; set; }
+    }
+
+    public class ThroatDTO
+    {
+        public int ID { get; set; }
+        public int Pore1ID { get; set; }
+        public int Pore2ID { get; set; }
+        public float Radius { get; set; }
+    }
+
+    public class PNMDatasetDTO : DatasetDTO
+    {
+        public float VoxelSize { get; set; }
+        public float Tortuosity { get; set; }
+        public float DarcyPermeability { get; set; }
+        public float NavierStokesPermeability { get; set; }
+        public float LatticeBoltzmannPermeability { get; set; }
+        public List<PoreDTO> Pores { get; set; } = new List<PoreDTO>();
+        public List<ThroatDTO> Throats { get; set; } = new List<ThroatDTO>();
+    }
 }

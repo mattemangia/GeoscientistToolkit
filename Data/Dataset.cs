@@ -17,7 +17,8 @@ namespace GeoscientistToolkit.Data
         Mesh3D,
         Table,
         GIS,
-        AcousticVolume
+        AcousticVolume,
+        PNM
     }
 
     public abstract class Dataset
