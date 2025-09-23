@@ -5,9 +5,11 @@ using GeoscientistToolkit.Analysis.AcousticSimulation;
 using GeoscientistToolkit.Analysis.Filtering;
 using GeoscientistToolkit.Analysis.ParticleSeparator;
 using GeoscientistToolkit.Analysis.RemoveSmallIslands;
+using GeoscientistToolkit.Analysis.Transform;
 using GeoscientistToolkit.Data;
 using GeoscientistToolkit.Data.CtImageStack;
 using GeoscientistToolkit.UI.Interfaces;
+using GeoscientistToolkit.UI.Tools; // Added
 using ImGuiNET;
 
 namespace GeoscientistToolkit.UI.Tools
@@ -26,18 +28,20 @@ namespace GeoscientistToolkit.UI.Tools
                 // Processing Tools
                 ("Segmentation", new CtImageStackTools()),
                 ("Advanced Filtering", new FilterTool()),
+                ("Transform Dataset", new TransformTool()), 
                 
                 // --- Analysis Separator ---
                 ("--- Object & Particle Analysis ---", new SeparatorTool()),
                 ("Particle Separation", new ParticleSeparatorTool()),
                 ("Island Removal", new RemoveSmallIslandsTool()),
+                ("Mesh Extraction", new MeshExtractionTool()),
 
                 // --- Simulation Separator ---
                 ("--- Physical Simulation ---", new SeparatorTool()),
                 ("Acoustic Simulation", new AcousticSimulationTool())
             };
         }
-
+        
         public void Draw(Dataset dataset)
         {
             if (dataset is not CtImageStackDataset ctDataset)
