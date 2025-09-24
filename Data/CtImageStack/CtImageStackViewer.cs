@@ -8,6 +8,8 @@ using System.Numerics;
 using Veldrid;
 using System.Linq;
 using System;
+using GeoscientistToolkit.Analysis.RockCoreExtractor;
+using GeoscientistToolkit.Analysis.Transform;
 using GeoscientistToolkit.Business;
 
 namespace GeoscientistToolkit.Data.CtImageStack
@@ -278,120 +280,109 @@ namespace GeoscientistToolkit.Data.CtImageStack
         }
 
         private void DrawSingleView(int viewIndex, ref float zoom, ref Vector2 pan,
-            ref bool needsUpdate, ref TextureManager texture)
+    ref bool needsUpdate, ref TextureManager texture)
+{
+    var io = ImGui.GetIO();
+    var canvasPos = ImGui.GetCursorScreenPos();
+    var canvasSize = ImGui.GetContentRegionAvail();
+    var dl = ImGui.GetWindowDrawList();
+
+    ImGui.InvisibleButton($"canvas{viewIndex}", canvasSize);
+    bool isHovered = ImGui.IsItemHovered();
+
+    var (width, height) = GetImageDimensionsForView(viewIndex);
+    var (imagePos, imageSize) = GetImageDisplayMetrics(canvasPos, canvasSize, zoom, pan, width, height);
+
+    // -------- Overlay-first input (RockCore, Transform) --------
+    bool inputHandled = false;
+    if (isHovered)
+    {
+        // Rock Core first
+        inputHandled = RockCoreIntegration.HandleMouseInput(_dataset, io.MousePos,
+            imagePos, imageSize, width, height, viewIndex,
+            ImGui.IsItemClicked(ImGuiMouseButton.Left),
+            ImGui.IsMouseDragging(ImGuiMouseButton.Left),
+            ImGui.IsMouseReleased(ImGuiMouseButton.Left));
+
+        // Then Transform
+        if (!inputHandled)
         {
-            var io = ImGui.GetIO();
-            var canvasPos = ImGui.GetCursorScreenPos();
-            var canvasSize = ImGui.GetContentRegionAvail();
-            var dl = ImGui.GetWindowDrawList();
-
-            ImGui.InvisibleButton($"canvas{viewIndex}", canvasSize);
-            bool isHovered = ImGui.IsItemHovered();
-
-            var (width, height) = GetImageDimensionsForView(viewIndex);
-            var (imagePos, imageSize) = GetImageDisplayMetrics(canvasPos, canvasSize, zoom, pan, width, height);
-
-            if (_segmentationManager != null && _showSegmentationWindow && isHovered)
-            {
-                var mousePosInImage = GetMousePosInImage(io.MousePos, imagePos, imageSize, width, height);
-
-                _segmentationManager.HandleMouseInput(
-                    mousePosInImage,
-                    viewIndex switch { 0 => _sliceZ, 1 => _sliceY, 2 => _sliceX, _ => 0 },
-                    viewIndex,
-                    ImGui.IsItemClicked(ImGuiMouseButton.Left),
-                    ImGui.IsMouseDragging(ImGuiMouseButton.Left),
-                    ImGui.IsMouseReleased(ImGuiMouseButton.Left)
-                );
-
-                if (ImGui.IsMouseDragging(ImGuiMouseButton.Left) || ImGui.IsMouseReleased(ImGuiMouseButton.Left))
-                {
-                    needsUpdate = true;
-                }
-            }
-
-            if (isHovered && io.MouseWheel != 0)
-            {
-                float zoomDelta = io.MouseWheel * 0.1f;
-                float newZoom = Math.Clamp(zoom + zoomDelta * zoom, 0.1f, 10.0f);
-
-                if (newZoom != zoom)
-                {
-                    Vector2 mouseCanvasPos = io.MousePos - canvasPos - canvasSize * 0.5f;
-                    pan -= mouseCanvasPos * (newZoom / zoom - 1.0f);
-                    zoom = newZoom;
-
-                    if (_syncViews)
-                    {
-                        _zoomXY = _zoomXZ = _zoomYZ = zoom;
-                    }
-                }
-            }
-
-            if (isHovered && ImGui.IsMouseDragging(ImGuiMouseButton.Middle))
-            {
-                pan += io.MouseDelta;
-                if (_syncViews)
-                {
-                    _panXY = pan;
-                    _panXZ = pan;
-                    _panYZ = pan;
-                }
-            }
-
-            if (isHovered && io.MouseWheel != 0 && io.KeyCtrl)
-            {
-                int wheel = (int)io.MouseWheel;
-                switch (viewIndex)
-                {
-                    case 0: _sliceZ = Math.Clamp(_sliceZ + wheel, 0, _dataset.Depth - 1); needsUpdate = true; break;
-                    case 1: _sliceY = Math.Clamp(_sliceY + wheel, 0, _dataset.Height - 1); needsUpdate = true; break;
-                    case 2: _sliceX = Math.Clamp(_sliceX + wheel, 0, _dataset.Width - 1); needsUpdate = true; break;
-                }
-            }
-
-            if (isHovered && ImGui.IsMouseClicked(ImGuiMouseButton.Left) && !(_segmentationManager?.HasActiveSelection ?? false))
-            {
-                UpdateCrosshairFromMouse(viewIndex, canvasPos, canvasSize, zoom, pan);
-            }
-
-            dl.AddRectFilled(canvasPos, canvasPos + canvasSize, 0xFF202020);
-
-            if (needsUpdate || texture == null || !texture.IsValid)
-            {
-                UpdateTexture(viewIndex, ref texture);
-                needsUpdate = false;
-            }
-
-            dl.PushClipRect(canvasPos, canvasPos + canvasSize, true);
-
-            if (texture != null && texture.IsValid)
-            {
-                // 1. Draw the composited texture
-                dl.AddImage(texture.GetImGuiTextureId(), imagePos, imagePos + imageSize,
-                    Vector2.Zero, Vector2.One, 0xFFFFFFFF);
-
-                // 2. Draw UI elements on top
-                if (_showCrosshairs)
-                {
-                    DrawCrosshairs(dl, viewIndex, canvasPos, canvasSize, imagePos, imageSize, width, height);
-                }
-
-                if (_showScaleBar)
-                {
-                    DrawScaleBar(dl, canvasPos, canvasSize, zoom, width, height, viewIndex);
-                }
-            }
-
-            // 3. Draw live tool cursor on the very top
-            if (isHovered && _showSegmentationWindow && _segmentationManager?.ActiveTool is Segmentation.BrushTool brushTool)
-            {
-                float brushRadiusPixels = brushTool.BrushSize * (imageSize.X / width);
-                dl.AddCircle(io.MousePos, brushRadiusPixels, 0xFF00FFFF, 12, 1.5f);
-            }
-
-            dl.PopClipRect();
+            inputHandled = TransformIntegration.HandleMouseInput(_dataset, io.MousePos,
+                imagePos, imageSize, width, height, viewIndex,
+                ImGui.IsItemClicked(ImGuiMouseButton.Left),
+                ImGui.IsMouseDragging(ImGuiMouseButton.Left),
+                ImGui.IsMouseReleased(ImGuiMouseButton.Left));
         }
+    }
+
+    // -------- Viewer interactions (zoom/pan/slice) --------
+    if (isHovered && io.MouseWheel != 0)
+    {
+        float zoomDelta = io.MouseWheel * 0.1f;
+        float newZoom = Math.Clamp(zoom + zoomDelta * zoom, 0.1f, 10.0f);
+        if (newZoom != zoom)
+        {
+            Vector2 mouseCanvasPos = io.MousePos - canvasPos - canvasSize * 0.5f;
+            pan -= mouseCanvasPos * (newZoom / zoom - 1.0f);
+            zoom = newZoom;
+            if (_syncViews) { _zoomXY = _zoomXZ = _zoomYZ = zoom; }
+        }
+    }
+
+    if (isHovered && ImGui.IsMouseDragging(ImGuiMouseButton.Middle))
+    {
+        pan += io.MouseDelta;
+        if (_syncViews)
+        {
+            _panXY = pan; _panXZ = pan; _panYZ = pan;
+        }
+    }
+
+    if (!inputHandled && isHovered && io.MouseWheel != 0 && io.KeyCtrl)
+    {
+        int wheel = (int)io.MouseWheel;
+        switch (viewIndex)
+        {
+            case 0: _sliceZ = Math.Clamp(_sliceZ + wheel, 0, _dataset.Depth - 1); needsUpdate = true; break;
+            case 1: _sliceY = Math.Clamp(_sliceY + wheel, 0, _dataset.Height - 1); needsUpdate = true; break;
+            case 2: _sliceX = Math.Clamp(_sliceX + wheel, 0, _dataset.Width - 1); needsUpdate = true; break;
+        }
+    }
+
+    if (!inputHandled && isHovered && ImGui.IsMouseClicked(ImGuiMouseButton.Left))
+    {
+        UpdateCrosshairFromMouse(viewIndex, canvasPos, canvasSize, zoom, pan);
+    }
+
+    // -------- Draw background & slice --------
+    dl.AddRectFilled(canvasPos, canvasPos + canvasSize, 0xFF202020);
+
+    if (needsUpdate || texture == null || !texture.IsValid)
+    {
+        UpdateTexture(viewIndex, ref texture);
+        needsUpdate = false;
+    }
+
+    dl.PushClipRect(canvasPos, canvasPos + canvasSize, true);
+
+    if (texture != null && texture.IsValid)
+    {
+        dl.AddImage(texture.GetImGuiTextureId(), imagePos, imagePos + imageSize,
+            Vector2.Zero, Vector2.One, 0xFFFFFFFF);
+
+        if (_showCrosshairs)
+            DrawCrosshairs(dl, viewIndex, canvasPos, canvasSize, imagePos, imageSize, width, height);
+        if (_showScaleBar)
+            DrawScaleBar(dl, canvasPos, canvasSize, zoom, width, height, viewIndex);
+
+        // -------- Draw overlays (now also in the simple viewer) --------
+        RockCoreIntegration.DrawOverlay(_dataset, dl, viewIndex, imagePos, imageSize, width, height,
+            _sliceX, _sliceY, _sliceZ);
+        TransformIntegration.DrawOverlay(dl, _dataset, viewIndex, imagePos, imageSize, width, height);
+    }
+
+    dl.PopClipRect();
+}
 
         private void Draw3DInfoPanel(Vector2 size)
         {

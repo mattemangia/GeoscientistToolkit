@@ -12,7 +12,8 @@ using ImGuiNET;
 namespace GeoscientistToolkit
 {
     /// <summary>
-    /// Provides segmentation tools and manages 3D previews for CtImageStackDataset.
+    /// Provides all segmentation tools (threshold and interactive) for CtImageStackDataset.
+    /// Manages 3D previews for segmentation and other analysis tools.
     /// </summary>
     public class CtImageStackTools : IDatasetTools
     {
@@ -32,13 +33,13 @@ namespace GeoscientistToolkit
         private byte _maxThreshold = 255;
         private int _selectedMaterialIndex = 0;
         private Material _selectedMaterialForThresholding;
+        private CtSegmentationIntegration _interactiveSegmentation;
+        private CtImageStackDataset _currentDataset;
+
 
         /// <summary>
         /// Allows external tools to update a 3D preview mask for a specific dataset.
         /// </summary>
-        /// <param name="dataset">The dataset to associate the preview with.</param>
-        /// <param name="mask">The 3D preview mask. A null mask will clear the preview.</param>
-        /// <param name="color">The color for the preview overlay.</param>
         public static void Update3DPreviewFromExternal(CtImageStackDataset dataset, byte[] mask, Vector4 color)
         {
             lock (_previewLock)
@@ -83,32 +84,43 @@ namespace GeoscientistToolkit
             return _selectedMaterialForThresholding;
         }
 
-
         /// <summary>
-        /// Draws the segmentation tools UI.
+        /// Draws the complete segmentation tools UI, including thresholding and interactive tools.
         /// </summary>
         public void Draw(Dataset dataset)
         {
             if (dataset is not CtImageStackDataset ctDataset) return;
-
-            ImGui.Text("Threshold-based Segmentation");
-            ImGui.Separator();
+            
+            // --- FIXED: Ensure we have the correct singleton instance for the current dataset ---
+            if (_currentDataset != ctDataset)
+            {
+                _currentDataset = ctDataset;
+                _interactiveSegmentation = CtSegmentationIntegration.GetInstance(ctDataset);
+            }
 
             var materials = ctDataset.Materials.Where(m => m.ID != 0).ToList();
             if (materials.Count == 0)
             {
-                ImGui.TextDisabled("No materials defined. Add materials in the Properties panel.");
+                ImGui.TextDisabled("No materials defined. Add/edit materials in the Properties panel.");
                 return;
             }
 
+            // --- THRESHOLD-BASED SEGMENTATION ---
+            ImGui.SeparatorText("Threshold-based Segmentation");
             string[] materialNames = materials.Select(m => m.Name).ToArray();
             ImGui.SetNextItemWidth(-1);
-            if (ImGui.Combo("Target Material", ref _selectedMaterialIndex, materialNames, materialNames.Length))
+
+            // Ensure index is valid
+            if (_selectedMaterialIndex >= materialNames.Length)
+            {
+                _selectedMaterialIndex = 0;
+            }
+
+            if (ImGui.Combo("Target Material##Threshold", ref _selectedMaterialIndex, materialNames, materialNames.Length))
             {
                 _selectedMaterialForThresholding = materials[_selectedMaterialIndex];
             }
             _selectedMaterialForThresholding ??= materials.FirstOrDefault();
-
 
             ImGui.Text("Grayscale Range:");
             int min = _minThreshold, max = _maxThreshold;
@@ -140,6 +152,18 @@ namespace GeoscientistToolkit
             if (_selectedMaterialForThresholding == null)
             {
                 ImGui.EndDisabled();
+            }
+
+            ImGui.Spacing();
+            ImGui.Separator();
+            ImGui.Spacing();
+
+            // --- INTERACTIVE SEGMENTATION ---
+            ImGui.SeparatorText("Interactive Segmentation Tools");
+            if (_interactiveSegmentation != null)
+            {
+                // Pass the material selected in the thresholding tool to link the two sections.
+                _interactiveSegmentation.DrawSegmentationControls(_selectedMaterialForThresholding);
             }
         }
     }

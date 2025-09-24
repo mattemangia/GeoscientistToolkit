@@ -1,327 +1,316 @@
 // GeoscientistToolkit/Analysis/RockCoreExtractor/RockCoreOverlay.cs
 using System;
+using System.Collections.Generic;
 using System.Numerics;
 using GeoscientistToolkit.Data.CtImageStack;
-using GeoscientistToolkit.Util;
 using ImGuiNET;
 
 namespace GeoscientistToolkit.Analysis.RockCoreExtractor
 {
     /// <summary>
-    /// Handles interactive overlay rendering for the Rock Core Extractor tool.
+    /// Interactive overlay for the Rock Core tool with defensive guards.
     /// </summary>
     public class RockCoreOverlay
     {
         private readonly RockCoreExtractorTool _tool;
-        private readonly CtImageStackDataset _dataset;
-        
-        // Public property for dataset access
-        public CtImageStackDataset Dataset => _dataset;
-        
-        // Interaction state
-        private bool _isDraggingCenter = false;
-        private bool _isDraggingDiameter = false;
-        private bool _isDraggingLength = false;
-        private Vector2 _dragStartPos;
-        private float _dragStartValue;
+        public CtImageStackDataset Dataset { get; }
+
+        // Simple handle map
+        private enum Handle { None, Center, LengthPos, LengthNeg, RadiusPos, RadiusNeg }
+        private readonly Dictionary<Handle, Vector2> _handles = new();
+
+        private const float HandleR = 7f;
+        private Handle _active = Handle.None;
+        private Vector2 _dragStartMouse;
         private Vector2 _dragStartCenter;
+        private float _dragStartLength, _dragStartDiameter, _dragStartStart;
 
         public RockCoreOverlay(RockCoreExtractorTool tool, CtImageStackDataset dataset)
         {
             _tool = tool ?? throw new ArgumentNullException(nameof(tool));
-            _dataset = dataset ?? throw new ArgumentNullException(nameof(dataset));
+            Dataset = dataset ?? throw new ArgumentNullException(nameof(dataset));
         }
 
-        /// <summary>
-        /// Draws the overlay on a slice view in the CtCombinedViewer.
-        /// </summary>
-        public void DrawOnSlice(ImDrawListPtr dl, int viewIndex, Vector2 imagePos, Vector2 imageSize, 
-            int imageWidth, int imageHeight, int currentSliceX, int currentSliceY, int currentSliceZ)
+        public void DrawOnSlice(ImDrawListPtr dl, int viewIndex, Vector2 imagePos, Vector2 imageSize,
+            int imageWidth, int imageHeight, int sliceX, int sliceY, int sliceZ)
         {
             if (!_tool.ShowPreview) return;
+            if (imageSize.X <= 0 || imageSize.Y <= 0 || imageWidth <= 0 || imageHeight <= 0) return;
 
-            var parameters = _tool.GetCoreParameters();
-            var view = parameters.View;
-            var coreDiameter = parameters.Diameter;
-            var coreLength = parameters.Length;
-            var coreCenter = parameters.Center;
-            var coreStartPos = parameters.StartPosition;
+            var p = _tool.GetCoreParameters();
+            _handles.Clear();
 
-            // Determine what to draw based on view index and selected core orientation
-            switch (view)
+            // Decide circular vs lateral in this view
+            bool circularHere = IsCircularView(p.View, viewIndex);
+
+            if (circularHere)
             {
-                case RockCoreExtractorTool.CircularView.XY_Circular_Z_Lateral:
-                    if (viewIndex == 0) // XY view - show circle
-                    {
-                        DrawCircularCrossSection(dl, imagePos, imageSize, imageWidth, imageHeight,
-                            coreCenter, coreDiameter);
-                    }
-                    else if (viewIndex == 1) // XZ view - show lateral rectangle
-                    {
-                        DrawLateralRectangle(dl, imagePos, imageSize, imageWidth, imageHeight,
-                            coreCenter.X, coreStartPos, coreDiameter, coreLength, true, false);
-                    }
-                    else if (viewIndex == 2) // YZ view - show lateral rectangle
-                    {
-                        DrawLateralRectangle(dl, imagePos, imageSize, imageWidth, imageHeight,
-                            coreCenter.Y, coreStartPos, coreDiameter, coreLength, false, false);
-                    }
-                    break;
+                // circle in this view
+                Vector2 centerPx = imagePos + new Vector2(p.Center.X * imageSize.X, p.Center.Y * imageSize.Y);
+                float radiusPx = (p.Diameter * 0.5f) * (imageSize.X / Math.Max(1, Dataset.Width));
+                dl.AddCircle(centerPx, radiusPx, 0xFF00FF00, 64, 2f);
 
-                case RockCoreExtractorTool.CircularView.XZ_Circular_Y_Lateral:
-                    if (viewIndex == 0) // XY view - show lateral rectangle
-                    {
-                        DrawLateralRectangle(dl, imagePos, imageSize, imageWidth, imageHeight,
-                            coreCenter.X, coreStartPos, coreDiameter, coreLength, true, true);
-                    }
-                    else if (viewIndex == 1) // XZ view - show circle
-                    {
-                        DrawCircularCrossSection(dl, imagePos, imageSize, imageWidth, imageHeight,
-                            coreCenter, coreDiameter);
-                    }
-                    else if (viewIndex == 2) // YZ view - show lateral rectangle
-                    {
-                        DrawLateralRectangle(dl, imagePos, imageSize, imageWidth, imageHeight,
-                            coreCenter.Y, coreStartPos, coreDiameter, coreLength, false, true);
-                    }
-                    break;
+                _handles[Handle.Center] = centerPx;
+                _handles[Handle.RadiusPos] = centerPx + new Vector2(radiusPx, 0);
+                _handles[Handle.RadiusNeg] = centerPx - new Vector2(radiusPx, 0);
 
-                case RockCoreExtractorTool.CircularView.YZ_Circular_X_Lateral:
-                    if (viewIndex == 0) // XY view - show lateral rectangle (vertical)
-                    {
-                        float startX = coreStartPos * imageWidth;
-                        float endX = Math.Min(imageWidth, startX + coreLength);
-                        float centerY = coreCenter.X * imageHeight; // Note: X component maps to Y in YZ view
-                        float halfDiameter = coreDiameter / 2f;
-                        
-                        Vector2 topLeft = imagePos + new Vector2(startX, centerY - halfDiameter) * (imageSize / new Vector2(imageWidth, imageHeight));
-                        Vector2 bottomRight = imagePos + new Vector2(endX, centerY + halfDiameter) * (imageSize / new Vector2(imageWidth, imageHeight));
-                        DrawRectangleWithHandles(dl, topLeft, bottomRight, false, true);
-                    }
-                    else if (viewIndex == 1) // XZ view - show lateral rectangle (horizontal)
-                    {
-                        float centerZ = coreCenter.Y * imageHeight; // Note: Y component maps to Z in YZ view
-                        float halfDiameter = coreDiameter / 2f;
-                        float startX = coreStartPos * imageWidth;
-                        float endX = Math.Min(imageWidth, startX + coreLength);
-                        
-                        Vector2 topLeft = imagePos + new Vector2(startX, centerZ - halfDiameter) * (imageSize / new Vector2(imageWidth, imageHeight));
-                        Vector2 bottomRight = imagePos + new Vector2(endX, centerZ + halfDiameter) * (imageSize / new Vector2(imageWidth, imageHeight));
-                        DrawRectangleWithHandles(dl, topLeft, bottomRight, false, true);
-                    }
-                    else if (viewIndex == 2) // YZ view - show circle
-                    {
-                        DrawCircularCrossSection(dl, imagePos, imageSize, imageWidth, imageHeight,
-                            coreCenter, coreDiameter);
-                    }
-                    break;
+                DrawHandles(dl);
+            }
+            else
+            {
+                // lateral rectangle (length along the lateral axis, diameter as thickness)
+                BuildLateralRectangle(p, viewIndex, imagePos, imageSize, out var tl, out var br);
+                dl.AddRect(tl, br, 0xFF00FF00, 0, ImDrawFlags.None, 2f);
+                DrawHandles(dl);
             }
         }
 
-        private void DrawCircularCrossSection(ImDrawListPtr dl, Vector2 imagePos, Vector2 imageSize,
-            int imageWidth, int imageHeight, Vector2 center, float diameter)
-        {
-            Vector2 centerScreen = imagePos + new Vector2(center.X * imageSize.X, center.Y * imageSize.Y);
-            float radiusScreen = (diameter / 2f) * (imageSize.X / imageWidth);
-            
-            // Draw circle
-            dl.AddCircle(centerScreen, radiusScreen, 0xFF00FF00, 32, 2.0f);
-            
-            // Draw center handle
-            dl.AddCircleFilled(centerScreen, 5, 0xFF00FF00);
-            
-            // Draw diameter handle
-            Vector2 handlePos = centerScreen + new Vector2(radiusScreen, 0);
-            dl.AddCircleFilled(handlePos, 5, 0xFF00FF00);
-        }
-
-        private void DrawLateralRectangle(ImDrawListPtr dl, Vector2 imagePos, Vector2 imageSize,
-            int imageWidth, int imageHeight, float centerNorm, float startPosNorm, 
-            float diameter, float length, bool isHorizontalCenter, bool isHorizontalLength)
-        {
-            float halfDiameter = diameter / 2f;
-            Vector2 topLeft, bottomRight;
-            
-            if (isHorizontalCenter && !isHorizontalLength) // Horizontal center, vertical length
-            {
-                float centerX = centerNorm * imageWidth;
-                float startZ = startPosNorm * imageHeight;
-                float endZ = Math.Min(imageHeight, startZ + length);
-                
-                topLeft = imagePos + new Vector2(centerX - halfDiameter, startZ) * (imageSize / new Vector2(imageWidth, imageHeight));
-                bottomRight = imagePos + new Vector2(centerX + halfDiameter, endZ) * (imageSize / new Vector2(imageWidth, imageHeight));
-            }
-            else if (!isHorizontalCenter && !isHorizontalLength) // Vertical center, vertical length
-            {
-                float centerY = centerNorm * imageWidth;
-                float startZ = startPosNorm * imageHeight;
-                float endZ = Math.Min(imageHeight, startZ + length);
-                
-                topLeft = imagePos + new Vector2(centerY - halfDiameter, startZ) * (imageSize / new Vector2(imageWidth, imageHeight));
-                bottomRight = imagePos + new Vector2(centerY + halfDiameter, endZ) * (imageSize / new Vector2(imageWidth, imageHeight));
-            }
-            else if (isHorizontalCenter && isHorizontalLength) // Horizontal center, horizontal length
-            {
-                float centerX = centerNorm * imageWidth;
-                float startY = startPosNorm * imageHeight;
-                float endY = Math.Min(imageHeight, startY + length);
-                
-                topLeft = imagePos + new Vector2(centerX - halfDiameter, startY) * (imageSize / new Vector2(imageWidth, imageHeight));
-                bottomRight = imagePos + new Vector2(centerX + halfDiameter, endY) * (imageSize / new Vector2(imageWidth, imageHeight));
-            }
-            else // Vertical center, horizontal length
-            {
-                float centerY = centerNorm * imageHeight;
-                float startX = startPosNorm * imageWidth;
-                float endX = Math.Min(imageWidth, startX + length);
-                
-                topLeft = imagePos + new Vector2(startX, centerY - halfDiameter) * (imageSize / new Vector2(imageWidth, imageHeight));
-                bottomRight = imagePos + new Vector2(endX, centerY + halfDiameter) * (imageSize / new Vector2(imageWidth, imageHeight));
-            }
-            
-            DrawRectangleWithHandles(dl, topLeft, bottomRight, isHorizontalCenter, isHorizontalLength);
-        }
-
-        private void DrawRectangleWithHandles(ImDrawListPtr dl, Vector2 topLeft, Vector2 bottomRight, 
-            bool isHorizontalCenter, bool isHorizontalLength)
-        {
-            // Draw rectangle
-            dl.AddRect(topLeft, bottomRight, 0xFF00FF00, 0, ImDrawFlags.None, 2.0f);
-            
-            // Draw corner handles for resizing
-            dl.AddCircleFilled(topLeft, 4, 0xFF00FF00);
-            dl.AddCircleFilled(bottomRight, 4, 0xFF00FF00);
-            dl.AddCircleFilled(new Vector2(topLeft.X, bottomRight.Y), 4, 0xFF00FF00);
-            dl.AddCircleFilled(new Vector2(bottomRight.X, topLeft.Y), 4, 0xFF00FF00);
-            
-            // Draw center handle
-            Vector2 center = (topLeft + bottomRight) * 0.5f;
-            dl.AddCircleFilled(center, 5, 0xFF00FF00);
-        }
-
-        /// <summary>
-        /// Handles mouse input for interactive manipulation of the core parameters.
-        /// </summary>
         public bool HandleMouseInput(Vector2 mousePos, Vector2 imagePos, Vector2 imageSize,
             int imageWidth, int imageHeight, int viewIndex, bool clicked, bool dragging, bool released)
         {
             if (!_tool.ShowPreview) return false;
+            if (imageSize.X <= 0 || imageSize.Y <= 0 || imageWidth <= 0 || imageHeight <= 0) return false;
 
-            var parameters = _tool.GetCoreParameters();
-            var view = parameters.View;
-            
-            // Convert mouse position to image coordinates
-            Vector2 mousePosInImage = (mousePos - imagePos) / imageSize;
-            mousePosInImage.X *= imageWidth;
-            mousePosInImage.Y *= imageHeight;
+            var p = _tool.GetCoreParameters();
+            bool circularHere = IsCircularView(p.View, viewIndex);
 
-            bool handled = false;
-
-            // Check which view should handle interaction
-            bool isCircularView = IsCircularView(view, viewIndex);
-            
-            if (isCircularView)
+            // Rebuild handles for this frame
+            _handles.Clear();
+            if (circularHere)
             {
-                handled = HandleCircularViewInput(mousePosInImage, imageWidth, imageHeight, clicked, dragging, released);
+                Vector2 centerPx = imagePos + new Vector2(p.Center.X * imageSize.X, p.Center.Y * imageSize.Y);
+                float radiusPx = (p.Diameter * 0.5f) * (imageSize.X / Math.Max(1, Dataset.Width));
+                _handles[Handle.Center] = centerPx;
+                _handles[Handle.RadiusPos] = centerPx + new Vector2(radiusPx, 0);
+                _handles[Handle.RadiusNeg] = centerPx - new Vector2(radiusPx, 0);
             }
             else
             {
-                handled = HandleLateralViewInput(mousePosInImage, imageWidth, imageHeight, viewIndex, clicked, dragging, released);
+                BuildLateralRectangle(p, viewIndex, imagePos, imageSize, out _, out _);
             }
-
-            if (released)
-            {
-                _isDraggingCenter = false;
-                _isDraggingDiameter = false;
-                _isDraggingLength = false;
-            }
-
-            return handled;
-        }
-
-        private bool IsCircularView(RockCoreExtractorTool.CircularView view, int viewIndex)
-        {
-            return (view == RockCoreExtractorTool.CircularView.XY_Circular_Z_Lateral && viewIndex == 0) ||
-                   (view == RockCoreExtractorTool.CircularView.XZ_Circular_Y_Lateral && viewIndex == 1) ||
-                   (view == RockCoreExtractorTool.CircularView.YZ_Circular_X_Lateral && viewIndex == 2);
-        }
-
-        private bool HandleCircularViewInput(Vector2 mousePos, int width, int height, bool clicked, bool dragging, bool released)
-        {
-            var parameters = _tool.GetCoreParameters();
-            Vector2 center = new Vector2(parameters.Center.X * width, parameters.Center.Y * height);
-            float radius = parameters.Diameter / 2f;
 
             if (clicked)
             {
-                float distToCenter = Vector2.Distance(mousePos, center);
-                
-                // Check if clicking near the edge (for diameter adjustment)
-                if (Math.Abs(distToCenter - radius) < 10f)
+                _active = Hit(mousePos);
+                if (_active != Handle.None)
                 {
-                    _isDraggingDiameter = true;
-                    _dragStartPos = mousePos;
-                    _dragStartValue = parameters.Diameter;
-                    return true;
-                }
-                // Check if clicking near the center (for position adjustment)
-                else if (distToCenter < 20f)
-                {
-                    _isDraggingCenter = true;
-                    _dragStartPos = mousePos;
-                    _dragStartCenter = parameters.Center;
+                    _dragStartMouse = mousePos;
+                    _dragStartCenter = p.Center;
+                    _dragStartLength = p.Length;
+                    _dragStartDiameter = p.Diameter;
+                    _dragStartStart = p.StartPosition;
                     return true;
                 }
             }
 
-            if (dragging)
+            if (dragging && _active != Handle.None)
             {
-                if (_isDraggingDiameter)
+                Vector2 d = mousePos - _dragStartMouse;
+
+                if (circularHere)
                 {
-                    float newRadius = Vector2.Distance(mousePos, center);
-                    _tool.SetCoreDiameter(newRadius * 2f);
-                    return true;
+                    if (_active == Handle.Center)
+                    {
+                        var newCenter = new Vector2(
+                            _dragStartCenter.X + d.X / Math.Max(1f, imageSize.X),
+                            _dragStartCenter.Y + d.Y / Math.Max(1f, imageSize.Y)
+                        );
+                        _tool.SetCoreCenter(newCenter);
+                        return true;
+                    }
+                    else
+                    {
+                        // radius change from horizontal motion
+                        float dRadiusPx = d.X;
+                        float dVox = 2f * dRadiusPx * (Dataset.Width / Math.Max(1f, imageSize.X));
+                        _tool.SetCoreDiameter(Math.Max(2f, _dragStartDiameter + (_active == Handle.RadiusPos ? dVox : -dVox)));
+                        return true;
+                    }
                 }
-                else if (_isDraggingCenter)
+                else
                 {
-                    Vector2 delta = mousePos - _dragStartPos;
-                    Vector2 newCenter = new Vector2(
-                        (_dragStartCenter.X * width + delta.X) / width,
-                        (_dragStartCenter.Y * height + delta.Y) / height
-                    );
-                    _tool.SetCoreCenter(newCenter);
-                    return true;
+                    // lateral: map to (U,V) where one axis is length, the other is diameter
+                    GetLateralAxes(p.View, viewIndex, out bool lengthIsU);
+
+                    float duVox = d.X * (GetAxisWidthVox(viewIndex) / Math.Max(1f, imageSize.X));
+                    float dvVox = d.Y * (GetAxisHeightVox(viewIndex) / Math.Max(1f, imageSize.Y));
+
+                    switch (_active)
+                    {
+                        case Handle.Center:
+                        {
+                            float dLen = lengthIsU ? duVox : dvVox;
+                            float dRad = lengthIsU ? dvVox : duVox;
+
+                            // move along length by changing start position, and move center along cross-axis
+                            float lenVox = Math.Max(1f, _dragStartLength);
+                            float newStart = _dragStartStart + (dLen / Math.Max(1f, GetMaxLengthForView()));
+                            Vector2 newCenter = _dragStartCenter;
+
+                            if (p.View == RockCoreExtractorTool.CircularView.XY_Circular_Z_Lateral)
+                            {
+                                // lateral = Z (affects start); center remains (X,Y) but we allow cross shift along V axis (mapped to Y)
+                                newCenter.Y = _dragStartCenter.Y + (dRad / Math.Max(1f, GetAxisHeightVox(viewIndex)));
+                            }
+                            else if (p.View == RockCoreExtractorTool.CircularView.XZ_Circular_Y_Lateral)
+                            {
+                                // lateral = Y ; cross axis is X or Z depending on view; map to center.X
+                                newCenter.X = _dragStartCenter.X + (dRad / Math.Max(1f, GetAxisWidthVox(viewIndex)));
+                            }
+                            else // YZ_Circular_X_Lateral
+                            {
+                                // lateral = X ; cross axis maps to center.Y (because circle plane is YZ)
+                                newCenter.Y = _dragStartCenter.Y + (dRad / Math.Max(1f, GetAxisHeightVox(viewIndex)));
+                            }
+
+                            _tool.SetCoreCenter(newCenter);
+                            _tool.SetCoreStartPosition(newStart);
+                            return true;
+                        }
+                        case Handle.LengthPos:
+                        case Handle.LengthNeg:
+                        {
+                            float dLen = (lengthIsU ? duVox : dvVox);
+                            if (_active == Handle.LengthNeg) dLen = -dLen;
+                            _tool.SetCoreLength(Math.Max(2f, _dragStartLength + 2f * dLen));
+                            return true;
+                        }
+                        case Handle.RadiusPos:
+                        case Handle.RadiusNeg:
+                        {
+                            float dRad = (lengthIsU ? dvVox : duVox);
+                            if (_active == Handle.RadiusNeg) dRad = -dRad;
+                            _tool.SetCoreDiameter(Math.Max(2f, _dragStartDiameter + 2f * dRad));
+                            return true;
+                        }
+                    }
                 }
             }
 
-            return false;
-        }
-
-        private bool HandleLateralViewInput(Vector2 mousePos, int width, int height, int viewIndex, bool clicked, bool dragging, bool released)
-        {
-            var parameters = _tool.GetCoreParameters();
-            
-            if (clicked)
+            if (released && _active != Handle.None)
             {
-                // Check if clicking near the length edge
-                float lengthEnd = parameters.StartPosition * width + parameters.Length;
-                if (Math.Abs(mousePos.X - lengthEnd) < 10f)
-                {
-                    _isDraggingLength = true;
-                    _dragStartPos = mousePos;
-                    _dragStartValue = parameters.Length;
-                    return true;
-                }
-            }
-
-            if (dragging && _isDraggingLength)
-            {
-                float delta = mousePos.X - _dragStartPos.X;
-                _tool.SetCoreLength(_dragStartValue + delta);
+                _active = Handle.None;
                 return true;
             }
 
-            return false;
+            // hover cursor
+            if (_active == Handle.None && Hit(mousePos) != Handle.None) ImGui.SetMouseCursor(ImGuiMouseCursor.Hand);
+            return _active != Handle.None;
+        }
+
+        // -------- helpers --------
+        private float GetAxisWidthVox(int viewIndex)  => viewIndex switch { 0 => Dataset.Width, 1 => Dataset.Width, 2 => Dataset.Height, _ => Dataset.Width };
+        private float GetAxisHeightVox(int viewIndex) => viewIndex switch { 0 => Dataset.Height, 1 => Dataset.Depth, 2 => Dataset.Depth,  _ => Dataset.Height };
+
+        private bool IsCircularView(RockCoreExtractorTool.CircularView v, int view) =>
+            (v == RockCoreExtractorTool.CircularView.XY_Circular_Z_Lateral && view == 0) ||
+            (v == RockCoreExtractorTool.CircularView.XZ_Circular_Y_Lateral && view == 1) ||
+            (v == RockCoreExtractorTool.CircularView.YZ_Circular_X_Lateral && view == 2);
+
+        private void GetLateralAxes(RockCoreExtractorTool.CircularView v, int view, out bool lengthIsU)
+        {
+            // U is horizontal axis of the view, V is vertical
+            // For our lateral rectangle, we decide if length runs along U or V
+            lengthIsU = v switch
+            {
+                RockCoreExtractorTool.CircularView.XY_Circular_Z_Lateral => false, // Z increases vertically in XZ/YZ views
+                RockCoreExtractorTool.CircularView.XZ_Circular_Y_Lateral => (view == 2), // in YZ, Y increases horizontally
+                RockCoreExtractorTool.CircularView.YZ_Circular_X_Lateral => true,  // X increases horizontally in XY/XZ
+                _ => true
+            };
+        }
+
+        private float GetMaxLengthForView()
+        {
+            return _tool.GetCoreParameters().View switch
+            {
+                RockCoreExtractorTool.CircularView.XY_Circular_Z_Lateral => Dataset.Depth,
+                RockCoreExtractorTool.CircularView.XZ_Circular_Y_Lateral => Dataset.Height,
+                RockCoreExtractorTool.CircularView.YZ_Circular_X_Lateral => Dataset.Width,
+                _ => 1f
+            };
+        }
+
+        private void BuildLateralRectangle(RockCoreExtractorTool.CoreParameters p, int viewIndex,
+            Vector2 imagePos, Vector2 imageSize, out Vector2 tl, out Vector2 br)
+        {
+            GetLateralAxes(p.View, viewIndex, out bool lengthIsU);
+
+            float halfD = p.Diameter * 0.5f;
+            float len = p.Length;
+
+            // Determine center in view pixels
+            float uCenter, vCenter;
+            switch (viewIndex)
+            {
+                case 1: // XZ
+                    if (p.View == RockCoreExtractorTool.CircularView.XY_Circular_Z_Lateral)
+                    { uCenter = p.Center.X * Dataset.Width; vCenter = (p.StartPosition * Dataset.Depth) + len * 0.5f; }
+                    else // Y lateral
+                    { uCenter = (p.StartPosition * Dataset.Width) + len * 0.5f; vCenter = p.Center.Y * Dataset.Depth; }
+                    break;
+
+                case 2: // YZ
+                    if (p.View == RockCoreExtractorTool.CircularView.XY_Circular_Z_Lateral)
+                    { uCenter = p.Center.Y * Dataset.Height; vCenter = (p.StartPosition * Dataset.Depth) + len * 0.5f; }
+                    else // X lateral
+                    { uCenter = (p.StartPosition * Dataset.Height) + len * 0.5f; vCenter = p.Center.Y * Dataset.Depth; }
+                    break;
+
+                default: // 0 => XY (lateral for Y or X)
+                    if (p.View == RockCoreExtractorTool.CircularView.YZ_Circular_X_Lateral)
+                    { uCenter = (p.StartPosition * Dataset.Width) + len * 0.5f; vCenter = p.Center.X * Dataset.Height; }
+                    else // XZ circular → Y lateral
+                    { uCenter = p.Center.X * Dataset.Width; vCenter = (p.StartPosition * Dataset.Height) + len * 0.5f; }
+                    break;
+            }
+
+            float halfU = lengthIsU ? len * 0.5f : halfD;
+            float halfV = lengthIsU ? halfD : len * 0.5f;
+
+            // Convert to screen
+            Vector2 uvToScreen(float u, float v) => imagePos + new Vector2(
+                (u / GetAxisWidthVox(viewIndex)) * imageSize.X,
+                (v / GetAxisHeightVox(viewIndex)) * imageSize.Y
+            );
+
+            tl = uvToScreen(uCenter - halfU, vCenter - halfV);
+            br = uvToScreen(uCenter + halfU, vCenter + halfV);
+
+            // Handles: center, ±length, ±radius
+            _handles[Handle.Center] = uvToScreen(uCenter, vCenter);
+            if (lengthIsU)
+            {
+                _handles[Handle.LengthNeg] = uvToScreen(uCenter - halfU, vCenter);
+                _handles[Handle.LengthPos] = uvToScreen(uCenter + halfU, vCenter);
+                _handles[Handle.RadiusNeg] = uvToScreen(uCenter, vCenter - halfV);
+                _handles[Handle.RadiusPos] = uvToScreen(uCenter, vCenter + halfV);
+            }
+            else
+            {
+                _handles[Handle.LengthNeg] = uvToScreen(uCenter, vCenter - halfV);
+                _handles[Handle.LengthPos] = uvToScreen(uCenter, vCenter + halfV);
+                _handles[Handle.RadiusNeg] = uvToScreen(uCenter - halfU, vCenter);
+                _handles[Handle.RadiusPos] = uvToScreen(uCenter + halfU, vCenter);
+            }
+        }
+
+        private void DrawHandles(ImDrawListPtr dl)
+        {
+            foreach (var kv in _handles)
+            {
+                dl.AddCircleFilled(kv.Value, HandleR, 0xFF00FF00);
+                dl.AddCircle(kv.Value, HandleR, 0xFFFFFFFF, 16, 1.5f);
+            }
+        }
+
+        private Handle Hit(Vector2 mouse)
+        {
+            foreach (var kv in _handles)
+            {
+                if (Vector2.Distance(mouse, kv.Value) <= HandleR + 2) return kv.Key;
+            }
+            return Handle.None;
         }
     }
 }
