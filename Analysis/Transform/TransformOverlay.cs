@@ -18,7 +18,14 @@ namespace GeoscientistToolkit.Analysis.Transform
     // -------------------------- TRANSFORM OVERLAY ------------------------------
     public class TransformOverlay : IOverlay
     {
-        private enum HandleType { None, TranslateX, TranslateY, TranslateZ, RotateX, RotateY, RotateZ, Scale }
+        private enum HandleType
+        {
+            None,
+            TranslateCenter,  // NEW: drag whole box
+            TranslateX, TranslateY, TranslateZ,
+            RotateX, RotateY, RotateZ,
+            Scale
+        }
 
         private readonly TransformTool _tool;
         public CtImageStackDataset Dataset { get; }
@@ -65,11 +72,14 @@ namespace GeoscientistToolkit.Analysis.Transform
             DrawEdge(dl, screenCorners[2], screenCorners[6], color); DrawEdge(dl, screenCorners[3], screenCorners[7], color);
 
             ComputeHandlePositions(corners, viewIndex, imagePos, imageSize);
+
+            // draw handles
             foreach (var kvp in _handlePositions2D)
             {
                 uint hc = GetHandleColor(kvp.Key);
-                dl.AddCircleFilled(kvp.Value, HandleSize, hc);
-                dl.AddCircle(kvp.Value, HandleSize, 0xFFFFFFFF, 12, 1.5f);
+                float r = kvp.Key == HandleType.TranslateCenter ? HandleSize + 2f : HandleSize;
+                dl.AddCircleFilled(kvp.Value, r, hc);
+                dl.AddCircle(kvp.Value, r, 0xFFFFFFFF, 12, 1.5f);
             }
         }
 
@@ -103,16 +113,29 @@ namespace GeoscientistToolkit.Analysis.Transform
             {
                 var mouseDelta = mousePos - _dragStartMousePos;
 
+                // Map mouse delta to world delta per view
                 Vector3 wDelta = viewIndex switch
                 {
-                    0 => new Vector3(mouseDelta.X / imageSize.X * imageWidth,  mouseDelta.Y / imageSize.Y * imageHeight, 0),
-                    1 => new Vector3(mouseDelta.X / imageSize.X * imageWidth,  0,                                     mouseDelta.Y / imageSize.Y * imageHeight),
-                    2 => new Vector3(0,                                      mouseDelta.X / imageSize.X * imageWidth,  mouseDelta.Y / imageSize.Y * imageHeight),
+                    0 => new Vector3(mouseDelta.X / imageSize.X * imageWidth,  mouseDelta.Y / imageSize.Y * imageHeight, 0), // XY
+                    1 => new Vector3(mouseDelta.X / imageSize.X * imageWidth,  0,                                     mouseDelta.Y / imageSize.Y * imageHeight), // XZ
+                    2 => new Vector3(0,                                      mouseDelta.X / imageSize.X * imageWidth,  mouseDelta.Y / imageSize.Y * imageHeight), // YZ
                     _ => Vector3.Zero
                 };
 
                 switch (_activeHandle)
                 {
+                    case HandleType.TranslateCenter:
+                    {
+                        var t = _dragStartTranslation + wDelta;
+                        if (_tool.SnapEnabled)
+                        {
+                            t.X = _tool.Snap(t.X, _tool.SnapTranslationStep);
+                            t.Y = _tool.Snap(t.Y, _tool.SnapTranslationStep);
+                            t.Z = _tool.Snap(t.Z, _tool.SnapTranslationStep);
+                        }
+                        _tool.SetTranslation(t);
+                        break;
+                    }
                     case HandleType.TranslateX:
                     case HandleType.TranslateY:
                     case HandleType.TranslateZ:
@@ -121,7 +144,6 @@ namespace GeoscientistToolkit.Analysis.Transform
                             _activeHandle == HandleType.TranslateX ? wDelta.X : 0,
                             _activeHandle == HandleType.TranslateY ? wDelta.Y : 0,
                             _activeHandle == HandleType.TranslateZ ? wDelta.Z : 0);
-
                         if (_tool.SnapEnabled)
                         {
                             t.X = _tool.Snap(t.X, _tool.SnapTranslationStep);
@@ -139,7 +161,6 @@ namespace GeoscientistToolkit.Analysis.Transform
                             _activeHandle == HandleType.RotateX ? mouseDelta.Y * 0.5f : 0,
                             _activeHandle == HandleType.RotateY ? -mouseDelta.X * 0.5f : 0,
                             _activeHandle == HandleType.RotateZ ? -mouseDelta.X * 0.5f : 0);
-
                         if (_tool.SnapEnabled)
                         {
                             r.X = _tool.Snap(r.X, _tool.SnapRotationStep);
@@ -181,20 +202,27 @@ namespace GeoscientistToolkit.Analysis.Transform
             return _activeHandle != HandleType.None;
         }
 
-        // ----- helpers
         private void ComputeHandlePositions(Vector3[] corners, int viewIndex, Vector2 imagePos, Vector2 imageSize)
         {
             _handlePositions3D.Clear();
             _handlePositions2D.Clear();
 
-            _handlePositions3D[HandleType.TranslateX] = (corners[1] + corners[2] + corners[5] + corners[6]) * 0.25f;
-            _handlePositions3D[HandleType.TranslateY] = (corners[2] + corners[3] + corners[6] + corners[7]) * 0.25f;
-            _handlePositions3D[HandleType.TranslateZ] = (corners[4] + corners[5] + corners[6] + corners[7]) * 0.25f;
+            // Box center (average of all corners)
+            var center3 = (corners[0] + corners[1] + corners[2] + corners[3] +
+                           corners[4] + corners[5] + corners[6] + corners[7]) * (1f / 8f);
+            _handlePositions3D[HandleType.TranslateCenter] = center3;
 
+            // Face centers (axis-constrained translations)
+            _handlePositions3D[HandleType.TranslateX] = (corners[1] + corners[2] + corners[5] + corners[6]) * 0.25f; // +X face
+            _handlePositions3D[HandleType.TranslateY] = (corners[2] + corners[3] + corners[6] + corners[7]) * 0.25f; // +Y face
+            _handlePositions3D[HandleType.TranslateZ] = (corners[4] + corners[5] + corners[6] + corners[7]) * 0.25f; // +Z face
+
+            // Representative edges for rotation
             _handlePositions3D[HandleType.RotateZ] = (corners[0] + corners[1]) * 0.5f;
             _handlePositions3D[HandleType.RotateY] = (corners[3] + corners[7]) * 0.5f;
             _handlePositions3D[HandleType.RotateX] = (corners[0] + corners[4]) * 0.5f;
 
+            // Corner for uniform scale
             _handlePositions3D[HandleType.Scale] = corners[6];
 
             foreach (var kvp in _handlePositions3D)
@@ -206,10 +234,13 @@ namespace GeoscientistToolkit.Analysis.Transform
 
         private HandleType HitTestHandles(Vector2 mousePos)
         {
-            foreach (var kvp in _handlePositions2D.Reverse())
+            // Prefer center (bigger) then others
+            var order = _handlePositions2D.Keys.OrderByDescending(k => k == HandleType.TranslateCenter).ToList();
+            foreach (var k in order)
             {
-                if (Vector2.Distance(mousePos, kvp.Value) <= HandleSize + 2)
-                    return kvp.Key;
+                var p = _handlePositions2D[k];
+                float r = k == HandleType.TranslateCenter ? HandleSize + 2f : HandleSize;
+                if (Vector2.Distance(mousePos, p) <= r + 2) return k;
             }
             return HandleType.None;
         }
@@ -219,13 +250,14 @@ namespace GeoscientistToolkit.Analysis.Transform
             if (t == _activeHandle || t == _hoveredHandle) return 0xFF00FFFF;
             return t switch
             {
+                HandleType.TranslateCenter => 0xFFFFFFFF, // white center
                 HandleType.TranslateX => 0xFF0000FF,
                 HandleType.TranslateY => 0xFF00FF00,
                 HandleType.TranslateZ => 0xFFFF0000,
                 HandleType.RotateX => 0xFF00008B,
                 HandleType.RotateY => 0xFF008B00,
                 HandleType.RotateZ => 0xFF8B0000,
-                HandleType.Scale => 0xFFFFFFFF,
+                HandleType.Scale     => 0xFFE0E000,
                 _ => 0xFF808080
             };
         }
@@ -250,9 +282,9 @@ namespace GeoscientistToolkit.Analysis.Transform
             Vector2 uv, norm;
             switch (viewIndex)
             {
-                case 0: uv = new Vector2(p3.X, p3.Y); norm = uv / new Vector2(Dataset.Width, Dataset.Height); break;
-                case 1: uv = new Vector2(p3.X, p3.Z); norm = uv / new Vector2(Dataset.Width, Dataset.Depth); break;
-                case 2: uv = new Vector2(p3.Y, p3.Z); norm = uv / new Vector2(Dataset.Height, Dataset.Depth); break;
+                case 0: uv = new Vector2(p3.X, p3.Y); norm = uv / new Vector2(Dataset.Width, Dataset.Height); break; // XY
+                case 1: uv = new Vector2(p3.X, p3.Z); norm = uv / new Vector2(Dataset.Width, Dataset.Depth); break;  // XZ
+                case 2: uv = new Vector2(p3.Y, p3.Z); norm = uv / new Vector2(Dataset.Height, Dataset.Depth); break; // YZ
                 default: return Vector2.Zero;
             }
             return imagePos + new Vector2(norm.X * imageSize.X, norm.Y * imageSize.Y);
@@ -267,6 +299,7 @@ namespace GeoscientistToolkit.Analysis.Transform
         private enum H
         {
             None,
+            Center,                  // NEW: drag whole crop box
             // Faces
             MinX, MaxX, MinY, MaxY, MinZ, MaxZ,
             // Edges (two axes)
@@ -320,9 +353,11 @@ namespace GeoscientistToolkit.Analysis.Transform
             ComputeHandles(min, max, viewIndex, imagePos, imageSize);
             foreach (var kv in _h2)
             {
-                uint hc = (kv.Key == _active || kv.Key == _hover) ? 0xFF00FFFF : 0xFFFFFFFF;
-                dl.AddCircleFilled(kv.Value, HandleSize, hc);
-                dl.AddCircle(kv.Value, HandleSize, 0xFF000000, 12, 1.5f);
+                bool isCenter = kv.Key == H.Center;
+                uint hc = (kv.Key == _active || kv.Key == _hover) ? 0xFF00FFFF : (isCenter ? 0xFFFFFFFFu : 0xFFFFFFFFu);
+                float r = isCenter ? HandleSize + 2f : HandleSize;
+                dl.AddCircleFilled(kv.Value, r, hc);
+                dl.AddCircle(kv.Value, r, 0xFF000000, 12, 1.5f);
             }
         }
 
@@ -330,6 +365,9 @@ namespace GeoscientistToolkit.Analysis.Transform
             int imageWidth, int imageHeight, int viewIndex, bool clicked, bool dragging, bool released)
         {
             var (minN, maxN) = _tool.GetCropBounds();
+            var min = new Vector3(Dataset.Width * minN.X, Dataset.Height * minN.Y, Dataset.Depth * minN.Z);
+            var max = new Vector3(Dataset.Width * maxN.X, Dataset.Height * maxN.Y, Dataset.Depth * maxN.Z);
+            ComputeHandles(min, max, viewIndex, imagePos, imageSize);
 
             if (clicked)
             {
@@ -350,76 +388,108 @@ namespace GeoscientistToolkit.Analysis.Transform
 
                 Vector3 wDelta = viewIndex switch
                 {
-                    0 => new Vector3(delta.X / imageSize.X * Dataset.Width,  delta.Y / imageSize.Y * Dataset.Height, 0),
-                    1 => new Vector3(delta.X / imageSize.X * Dataset.Width,  0,                                    delta.Y / imageSize.Y * Dataset.Depth),
-                    2 => new Vector3(0,                                    delta.X / imageSize.X * Dataset.Height, delta.Y / imageSize.Y * Dataset.Depth),
+                    0 => new Vector3(delta.X / imageSize.X * Dataset.Width,  delta.Y / imageSize.Y * Dataset.Height, 0), // XY
+                    1 => new Vector3(delta.X / imageSize.X * Dataset.Width,  0,                                    delta.Y / imageSize.Y * Dataset.Depth), // XZ
+                    2 => new Vector3(0,                                    delta.X / imageSize.X * Dataset.Height, delta.Y / imageSize.Y * Dataset.Depth), // YZ
                     _ => Vector3.Zero
                 };
 
                 var minV = new Vector3(_startMinNorm.X * Dataset.Width,  _startMinNorm.Y * Dataset.Height,  _startMinNorm.Z * Dataset.Depth);
                 var maxV = new Vector3(_startMaxNorm.X * Dataset.Width,  _startMaxNorm.Y * Dataset.Height,  _startMaxNorm.Z * Dataset.Depth);
 
-                void applyAxis(ref float min, ref float max, float d, bool isMin)
+                // Movement helpers
+                void applyAxis(ref float minA, ref float maxA, float d, bool isMin)
                 {
                     if (_tool.UniformCropFromCenter)
                     {
-                        // symmetric about center for that axis
-                        float c = (min + max) * 0.5f;
-                        float half = (max - min) * 0.5f + (isMin ? -d : d);
-                        half = MathF.Max(0.25f, half); // avoid collapse
-                        min = c - half; max = c + half;
+                        float c = (minA + maxA) * 0.5f;
+                        float half = (maxA - minA) * 0.5f + (isMin ? -d : d);
+                        half = MathF.Max(0.25f, half);
+                        minA = c - half; maxA = c + half;
                     }
                     else
                     {
-                        if (isMin) min += d; else max += d;
+                        if (isMin) minA += d; else maxA += d;
                     }
                 }
 
-                // Which axes are affected by the active handle?
-                switch (_active)
+                // Center translation: preserve size, move both min and max
+                if (_active == H.Center)
                 {
-                    // Faces
-                    case H.MinX: applyAxis(ref minV.X, ref maxV.X, wDelta.X, true); break;
-                    case H.MaxX: applyAxis(ref minV.X, ref maxV.X, wDelta.X, false); break;
-                    case H.MinY: applyAxis(ref minV.Y, ref maxV.Y, (viewIndex == 2 ? wDelta.X : wDelta.Y), true); break;
-                    case H.MaxY: applyAxis(ref minV.Y, ref maxV.Y, (viewIndex == 2 ? wDelta.X : wDelta.Y), false); break;
-                    case H.MinZ: applyAxis(ref minV.Z, ref maxV.Z, (viewIndex == 0 ? 0 : wDelta.Z), true); break;
-                    case H.MaxZ: applyAxis(ref minV.Z, ref maxV.Z, (viewIndex == 0 ? 0 : wDelta.Z), false); break;
+                    Vector3 size = maxV - minV;
 
-                    // Edges: two axes
-                    case H.Edge_MinX_MinY: applyAxis(ref minV.X, ref maxV.X, wDelta.X, true); applyAxis(ref minV.Y, ref maxV.Y, (viewIndex==2?wDelta.X:wDelta.Y), true); break;
-                    case H.Edge_MinX_MaxY: applyAxis(ref minV.X, ref maxV.X, wDelta.X, true); applyAxis(ref minV.Y, ref maxV.Y, (viewIndex==2?wDelta.X:wDelta.Y), false); break;
-                    case H.Edge_MaxX_MinY: applyAxis(ref minV.X, ref maxV.X, wDelta.X, false); applyAxis(ref minV.Y, ref maxV.Y, (viewIndex==2?wDelta.X:wDelta.Y), true); break;
-                    case H.Edge_MaxX_MaxY: applyAxis(ref minV.X, ref maxV.X, wDelta.X, false); applyAxis(ref minV.Y, ref maxV.Y, (viewIndex==2?wDelta.X:wDelta.Y), false); break;
+                    // Propose shifted box
+                    Vector3 d = wDelta;
 
-                    case H.Edge_MinX_MinZ: applyAxis(ref minV.X, ref maxV.X, wDelta.X, true);  applyAxis(ref minV.Z, ref maxV.Z, (viewIndex==0?0:wDelta.Z), true); break;
-                    case H.Edge_MinX_MaxZ: applyAxis(ref minV.X, ref maxV.X, wDelta.X, true);  applyAxis(ref minV.Z, ref maxV.Z, (viewIndex==0?0:wDelta.Z), false); break;
-                    case H.Edge_MaxX_MinZ: applyAxis(ref minV.X, ref maxV.X, wDelta.X, false); applyAxis(ref minV.Z, ref maxV.Z, (viewIndex==0?0:wDelta.Z), true); break;
-                    case H.Edge_MaxX_MaxZ: applyAxis(ref minV.X, ref maxV.X, wDelta.X, false); applyAxis(ref minV.Z, ref maxV.Z, (viewIndex==0?0:wDelta.Z), false); break;
+                    // Clamp shift so box stays inside bounds
+                    Vector3 dims = new(Dataset.Width, Dataset.Height, Dataset.Depth);
+                    Vector3 minC = minV + d, maxC = maxV + d;
 
-                    case H.Edge_MinY_MinZ: applyAxis(ref minV.Y, ref maxV.Y, (viewIndex==2?wDelta.X:wDelta.Y), true);  applyAxis(ref minV.Z, ref maxV.Z, (viewIndex==0?0:wDelta.Z), true); break;
-                    case H.Edge_MinY_MaxZ: applyAxis(ref minV.Y, ref maxV.Y, (viewIndex==2?wDelta.X:wDelta.Y), true);  applyAxis(ref minV.Z, ref maxV.Z, (viewIndex==0?0:wDelta.Z), false); break;
-                    case H.Edge_MaxY_MinZ: applyAxis(ref minV.Y, ref maxV.Y, (viewIndex==2?wDelta.X:wDelta.Y), false); applyAxis(ref minV.Z, ref maxV.Z, (viewIndex==0?0:wDelta.Z), true); break;
-                    case H.Edge_MaxY_MaxZ: applyAxis(ref minV.Y, ref maxV.Y, (viewIndex==2?wDelta.X:wDelta.Y), false); applyAxis(ref minV.Z, ref maxV.Z, (viewIndex==0?0:wDelta.Z), false); break;
+                    if (minC.X < 0) d.X += -minC.X;
+                    if (minC.Y < 0) d.Y += -minC.Y;
+                    if (minC.Z < 0) d.Z += -minC.Z;
+                    if (maxC.X > dims.X) d.X += dims.X - maxC.X;
+                    if (maxC.Y > dims.Y) d.Y += dims.Y - maxC.Y;
+                    if (maxC.Z > dims.Z) d.Z += dims.Z - maxC.Z;
 
-                    // Corners: three axes
-                    case H.Corner_MinX_MinY_MinZ:
-                    case H.Corner_MinX_MinY_MaxZ:
-                    case H.Corner_MinX_MaxY_MinZ:
-                    case H.Corner_MinX_MaxY_MaxZ:
-                    case H.Corner_MaxX_MinY_MinZ:
-                    case H.Corner_MaxX_MinY_MaxZ:
-                    case H.Corner_MaxX_MaxY_MinZ:
-                    case H.Corner_MaxX_MaxY_MaxZ:
+                    // Snap translation in voxel steps if enabled
+                    if (_tool.SnapEnabled)
                     {
-                        // Generic approach: push the respective min/max toward mouse deltas on each axis.
-                        bool minX = _active.ToString().Contains("MinX");
-                        bool minY = _active.ToString().Contains("MinY");
-                        bool minZ = _active.ToString().Contains("MinZ");
-                        applyAxis(ref minV.X, ref maxV.X, wDelta.X, minX);
-                        applyAxis(ref minV.Y, ref maxV.Y, (viewIndex==2?wDelta.X:wDelta.Y), minY);
-                        applyAxis(ref minV.Z, ref maxV.Z, (viewIndex==0?0:wDelta.Z), minZ);
-                        break;
+                        d.X = _tool.Snap(d.X, _tool.SnapCropVoxStepX);
+                        d.Y = _tool.Snap(d.Y, _tool.SnapCropVoxStepY);
+                        d.Z = _tool.Snap(d.Z, _tool.SnapCropVoxStepZ);
+                    }
+
+                    minV += d; maxV += d;
+                }
+                else
+                {
+                    // Faces/Edges/Corners: resize logic
+                    switch (_active)
+                    {
+                        case H.MinX: applyAxis(ref minV.X, ref maxV.X, wDelta.X, true); break;
+                        case H.MaxX: applyAxis(ref minV.X, ref maxV.X, wDelta.X, false); break;
+                        case H.MinY: applyAxis(ref minV.Y, ref maxV.Y, (viewIndex == 2 ? wDelta.X : wDelta.Y), true); break;
+                        case H.MaxY: applyAxis(ref minV.Y, ref maxV.Y, (viewIndex == 2 ? wDelta.X : wDelta.Y), false); break;
+                        case H.MinZ: applyAxis(ref minV.Z, ref maxV.Z, (viewIndex == 0 ? 0 : wDelta.Z), true); break;
+                        case H.MaxZ: applyAxis(ref minV.Z, ref maxV.Z, (viewIndex == 0 ? 0 : wDelta.Z), false); break;
+
+                        case H.Edge_MinX_MinY: applyAxis(ref minV.X, ref maxV.X, wDelta.X, true); applyAxis(ref minV.Y, ref maxV.Y, (viewIndex==2?wDelta.X:wDelta.Y), true); break;
+                        case H.Edge_MinX_MaxY: applyAxis(ref minV.X, ref maxV.X, wDelta.X, true); applyAxis(ref minV.Y, ref maxV.Y, (viewIndex==2?wDelta.X:wDelta.Y), false); break;
+                        case H.Edge_MaxX_MinY: applyAxis(ref minV.X, ref maxV.X, wDelta.X, false); applyAxis(ref minV.Y, ref maxV.Y, (viewIndex==2?wDelta.X:wDelta.Y), true); break;
+                        case H.Edge_MaxX_MaxY: applyAxis(ref minV.X, ref maxV.X, wDelta.X, false); applyAxis(ref minV.Y, ref maxV.Y, (viewIndex==2?wDelta.X:wDelta.Y), false); break;
+
+                        case H.Edge_MinX_MinZ: applyAxis(ref minV.X, ref maxV.X, wDelta.X, true);  applyAxis(ref minV.Z, ref maxV.Z, (viewIndex==0?0:wDelta.Z), true); break;
+                        case H.Edge_MinX_MaxZ: applyAxis(ref minV.X, ref maxV.X, wDelta.X, true);  applyAxis(ref minV.Z, ref maxV.Z, (viewIndex==0?0:wDelta.Z), false); break;
+                        case H.Edge_MaxX_MinZ: applyAxis(ref minV.X, ref maxV.X, wDelta.X, false); applyAxis(ref minV.Z, ref maxV.Z, (viewIndex==0?0:wDelta.Z), true); break;
+                        case H.Edge_MaxX_MaxZ: applyAxis(ref minV.X, ref maxV.X, wDelta.X, false); applyAxis(ref minV.Z, ref maxV.Z, (viewIndex==0?0:wDelta.Z), false); break;
+
+                        case H.Edge_MinY_MinZ: applyAxis(ref minV.Y, ref maxV.Y, (viewIndex==2?wDelta.X:wDelta.Y), true);  applyAxis(ref minV.Z, ref maxV.Z, (viewIndex==0?0:wDelta.Z), true); break;
+                        case H.Edge_MinY_MaxZ: applyAxis(ref minV.Y, ref maxV.Y, (viewIndex==2?wDelta.X:wDelta.Y), true);  applyAxis(ref minV.Z, ref maxV.Z, (viewIndex==0?0:wDelta.Z), false); break;
+                        case H.Edge_MaxY_MinZ: applyAxis(ref minV.Y, ref maxV.Y, (viewIndex==2?wDelta.X:wDelta.Y), false); applyAxis(ref minV.Z, ref maxV.Z, (viewIndex==0?0:wDelta.Z), true); break;
+                        case H.Edge_MaxY_MaxZ: applyAxis(ref minV.Y, ref maxV.Y, (viewIndex==2?wDelta.X:wDelta.Y), false); applyAxis(ref minV.Z, ref maxV.Z, (viewIndex==0?0:wDelta.Z), false); break;
+
+                        default:
+                        {
+                            bool minX = _active.ToString().Contains("MinX");
+                            bool minY = _active.ToString().Contains("MinY");
+                            bool minZ = _active.ToString().Contains("MinZ");
+                            applyAxis(ref minV.X, ref maxV.X, wDelta.X, minX);
+                            applyAxis(ref minV.Y, ref maxV.Y, (viewIndex==2?wDelta.X:wDelta.Y), minY);
+                            applyAxis(ref minV.Z, ref maxV.Z, (viewIndex==0?0:wDelta.Z), minZ);
+                            break;
+                        }
+                    }
+
+                    // Snap edges to voxel steps (keeps size changes aligned)
+                    if (_tool.SnapEnabled)
+                    {
+                        minV.X = _tool.Snap(minV.X, _tool.SnapCropVoxStepX);
+                        minV.Y = _tool.Snap(minV.Y, _tool.SnapCropVoxStepY);
+                        minV.Z = _tool.Snap(minV.Z, _tool.SnapCropVoxStepZ);
+                        maxV.X = _tool.Snap(maxV.X, _tool.SnapCropVoxStepX);
+                        maxV.Y = _tool.Snap(maxV.Y, _tool.SnapCropVoxStepY);
+                        maxV.Z = _tool.Snap(maxV.Z, _tool.SnapCropVoxStepZ);
                     }
                 }
 
@@ -431,17 +501,6 @@ namespace GeoscientistToolkit.Analysis.Transform
                 if (maxV.X - minV.X < eps) { if (minV.X > 0) minV.X = maxV.X - eps; else maxV.X = minV.X + eps; }
                 if (maxV.Y - minV.Y < eps) { if (minV.Y > 0) minV.Y = maxV.Y - eps; else maxV.Y = minV.Y + eps; }
                 if (maxV.Z - minV.Z < eps) { if (minV.Z > 0) minV.Z = maxV.Z - eps; else maxV.Z = minV.Z + eps; }
-
-                // Snapping (voxel steps)
-                if (_tool.SnapEnabled)
-                {
-                    minV.X = _tool.Snap(minV.X, _tool.SnapCropVoxStepX);
-                    minV.Y = _tool.Snap(minV.Y, _tool.SnapCropVoxStepY);
-                    minV.Z = _tool.Snap(minV.Z, _tool.SnapCropVoxStepZ);
-                    maxV.X = _tool.Snap(maxV.X, _tool.SnapCropVoxStepX);
-                    maxV.Y = _tool.Snap(maxV.Y, _tool.SnapCropVoxStepY);
-                    maxV.Z = _tool.Snap(maxV.Z, _tool.SnapCropVoxStepZ);
-                }
 
                 var minNew = new Vector3(minV.X / Dataset.Width, minV.Y / Dataset.Height, minV.Z / Dataset.Depth);
                 var maxNew = new Vector3(maxV.X / Dataset.Width, maxV.Y / Dataset.Height, maxV.Z / Dataset.Depth);
@@ -458,6 +517,8 @@ namespace GeoscientistToolkit.Analysis.Transform
 
             if (_active == H.None)
             {
+                // keep hover responsive
+                ComputeHandles(min, max, viewIndex, imagePos, imageSize);
                 _hover = Hit(mousePos);
                 if (_hover != H.None) ImGui.SetMouseCursor(ImGuiMouseCursor.Hand);
             }
@@ -469,6 +530,9 @@ namespace GeoscientistToolkit.Analysis.Transform
         {
             _h3.Clear();
             _h2.Clear();
+
+            // Center handle (move whole box)
+            _h3[H.Center] = (min + max) * 0.5f;
 
             // Faces
             _h3[H.MinX] = new(min.X, (min.Y + max.Y) * 0.5f, (min.Z + max.Z) * 0.5f);
@@ -513,10 +577,13 @@ namespace GeoscientistToolkit.Analysis.Transform
 
         private H Hit(Vector2 mouse)
         {
-            foreach (var kv in _h2.Reverse())
+            // prefer center first
+            var ordered = _h2.Keys.OrderByDescending(k => k == H.Center).ToList();
+            foreach (var k in ordered)
             {
-                if (Vector2.Distance(mouse, kv.Value) <= HandleSize + 2)
-                    return kv.Key;
+                var p = _h2[k];
+                float r = (k == H.Center) ? HandleSize + 2f : HandleSize;
+                if (Vector2.Distance(mouse, p) <= r + 2) return k;
             }
             return H.None;
         }
@@ -541,9 +608,9 @@ namespace GeoscientistToolkit.Analysis.Transform
             Vector2 uv, norm;
             switch (viewIndex)
             {
-                case 0: uv = new Vector2(p3.X, p3.Y); norm = uv / new Vector2(Dataset.Width, Dataset.Height); break;
-                case 1: uv = new Vector2(p3.X, p3.Z); norm = uv / new Vector2(Dataset.Width, Dataset.Depth); break;
-                case 2: uv = new Vector2(p3.Y, p3.Z); norm = uv / new Vector2(Dataset.Height, Dataset.Depth); break;
+                case 0: uv = new Vector2(p3.X, p3.Y); norm = uv / new Vector2(Dataset.Width, Dataset.Height); break; // XY
+                case 1: uv = new Vector2(p3.X, p3.Z); norm = uv / new Vector2(Dataset.Width, Dataset.Depth); break;  // XZ
+                case 2: uv = new Vector2(p3.Y, p3.Z); norm = uv / new Vector2(Dataset.Height, Dataset.Depth); break; // YZ
                 default: return Vector2.Zero;
             }
             return imagePos + new Vector2(norm.X * imageSize.X, norm.Y * imageSize.Y);
