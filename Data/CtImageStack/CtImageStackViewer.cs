@@ -11,6 +11,7 @@ using System;
 using GeoscientistToolkit.Analysis.RockCoreExtractor;
 using GeoscientistToolkit.Analysis.Transform;
 using GeoscientistToolkit.Business;
+using GeoscientistToolkit.UI.Utils;
 
 namespace GeoscientistToolkit.Data.CtImageStack
 {
@@ -227,14 +228,11 @@ namespace GeoscientistToolkit.Data.CtImageStack
         {
             ImGui.BeginChild($"View{viewIndex}", size, ImGuiChildFlags.Border);
 
-            ImGui.Text(title);
-            ImGui.SameLine();
-
+            // Use the enhanced slice navigation controls
             int slice = viewIndex switch { 0 => _sliceZ, 1 => _sliceY, 2 => _sliceX, _ => 0 };
             int maxSlice = viewIndex switch { 0 => _dataset.Depth - 1, 1 => _dataset.Height - 1, 2 => _dataset.Width - 1, _ => 0 };
 
-            ImGui.SetNextItemWidth(150);
-            if (ImGui.SliderInt($"##Slice{viewIndex}", ref slice, 0, maxSlice))
+            if (SliceNavigationHelper.DrawSliceControls(title, ref slice, maxSlice, $"View{viewIndex}"))
             {
                 switch (viewIndex)
                 {
@@ -243,9 +241,6 @@ namespace GeoscientistToolkit.Data.CtImageStack
                     case 2: _sliceX = slice; needsUpdate = true; break;
                 }
             }
-
-            ImGui.SameLine();
-            ImGui.Text($"{slice + 1}/{maxSlice + 1}");
 
             DrawSingleView(viewIndex, ref zoom, ref pan, ref needsUpdate, ref texture);
 
@@ -407,6 +402,17 @@ namespace GeoscientistToolkit.Data.CtImageStack
             ImGui.BulletText("Middle Drag: Pan");
             ImGui.BulletText("Ctrl+Wheel: Change slice");
             ImGui.BulletText("Left Click: Set crosshair / Use Tool");
+            
+            // Add quick navigation buttons
+            ImGui.Separator();
+            ImGui.Text("Quick Navigation:");
+            if (ImGui.Button("Go to Center"))
+            {
+                _sliceX = _dataset.Width / 2;
+                _sliceY = _dataset.Height / 2;
+                _sliceZ = _dataset.Depth / 2;
+                _needsUpdateXY = _needsUpdateXZ = _needsUpdateYZ = true;
+            }
 
             ImGui.EndChild();
         }

@@ -13,6 +13,7 @@ using System.Collections.Generic;
 using System.Linq;
 using GeoscientistToolkit.Analysis.RockCoreExtractor;
 using GeoscientistToolkit.Analysis.Transform;
+using GeoscientistToolkit.UI.Utils;
 
 namespace GeoscientistToolkit.Data.CtImageStack
 {
@@ -476,12 +477,11 @@ namespace GeoscientistToolkit.Data.CtImageStack
 
         private void DrawSliceView(int viewIndex, string title, ref float zoom, ref Vector2 pan, ref bool needsUpdate, ref TextureManager texture)
         {
-            ImGui.Text(title);
-            ImGui.SameLine();
+            // Use the enhanced slice navigation controls
             int slice = viewIndex switch { 0 => _sliceZ, 1 => _sliceY, 2 => _sliceX, _ => 0 };
             int maxSlice = viewIndex switch { 0 => _dataset.Depth - 1, 1 => _dataset.Height - 1, 2 => _dataset.Width - 1, _ => 0 };
-            ImGui.SetNextItemWidth(120);
-            if (ImGui.SliderInt($"##Slice{viewIndex}", ref slice, 0, maxSlice))
+            
+            if (SliceNavigationHelper.DrawSliceControls(title, ref slice, maxSlice, $"Slice{viewIndex}"))
             {
                 switch (viewIndex)
                 {
@@ -490,14 +490,12 @@ namespace GeoscientistToolkit.Data.CtImageStack
                     case 2: SliceX = slice; break;
                 }
             }
-            ImGui.SameLine();
-            ImGui.Text($"{slice + 1}/{maxSlice + 1}");
+            
             ImGui.Separator();
 
             var contentRegion = ImGui.GetContentRegionAvail();
             DrawSingleSlice(viewIndex, ref zoom, ref pan, ref needsUpdate, ref texture, contentRegion);
         }
-
         private (Vector2 pos, Vector2 size) GetImageDisplayMetrics(Vector2 canvasPos, Vector2 canvasSize, float zoom, Vector2 pan, int imageWidth, int imageHeight)
         {
             float imageAspect = (float)imageWidth / imageHeight;

@@ -3,6 +3,8 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Numerics;
+using System.Threading.Tasks;
+using GeoscientistToolkit.Business;
 using GeoscientistToolkit.Data;
 using GeoscientistToolkit.Data.CtImageStack;
 using GeoscientistToolkit.UI.Interfaces;
@@ -35,7 +37,13 @@ namespace GeoscientistToolkit
         private Material _selectedMaterialForThresholding;
         private CtSegmentationIntegration _interactiveSegmentation;
         private CtImageStackDataset _currentDataset;
-
+        
+        // --- Threshold preview state ---
+        private bool _showThresholdPreview = false;
+        private byte[] _thresholdPreviewMask;
+        private bool _isGeneratingPreview = false;
+        private DateTime _lastPreviewUpdate = DateTime.MinValue;
+        private const int PREVIEW_UPDATE_DELAY_MS = 250; // Debounce preview updates
 
         /// <summary>
         /// Allows external tools to update a 3D preview mask for a specific dataset.
@@ -85,6 +93,67 @@ namespace GeoscientistToolkit
         }
 
         /// <summary>
+        /// Updates the threshold preview mask based on current threshold values
+        /// </summary>
+        private async Task UpdateThresholdPreviewAsync(CtImageStackDataset dataset)
+        {
+            if (_isGeneratingPreview) return;
+            
+            _isGeneratingPreview = true;
+            
+            try
+            {
+                await Task.Run(() =>
+                {
+                    var volume = dataset.VolumeData;
+                    int width = dataset.Width;
+                    int height = dataset.Height;
+                    int depth = dataset.Depth;
+                    
+                    _thresholdPreviewMask = new byte[width * height * depth];
+                    
+                    Parallel.For(0, depth, z =>
+                    {
+                        var slice = new byte[width * height];
+                        volume.ReadSliceZ(z, slice);
+                        
+                        for (int i = 0; i < slice.Length; i++)
+                        {
+                            if (slice[i] >= _minThreshold && slice[i] <= _maxThreshold)
+                            {
+                                _thresholdPreviewMask[z * width * height + i] = 255;
+                            }
+                        }
+                    });
+                });
+                
+                // Update the 3D preview with the selected material's color
+                var previewColor = _selectedMaterialForThresholding?.Color ?? new Vector4(1, 0, 0, 0.5f);
+                previewColor.W = 0.5f; // Semi-transparent for preview
+                Update3DPreviewFromExternal(dataset, _thresholdPreviewMask, previewColor);
+                
+                _lastPreviewUpdate = DateTime.Now;
+            }
+            finally
+            {
+                _isGeneratingPreview = false;
+            }
+        }
+
+        /// <summary>
+        /// Clears the threshold preview
+        /// </summary>
+        private void ClearThresholdPreview()
+        {
+            if (_currentDataset != null && _showThresholdPreview)
+            {
+                Update3DPreviewFromExternal(_currentDataset, null, Vector4.Zero);
+                _thresholdPreviewMask = null;
+                _showThresholdPreview = false;
+            }
+        }
+
+        /// <summary>
         /// Draws the complete segmentation tools UI, including thresholding and interactive tools.
         /// </summary>
         public void Draw(Dataset dataset)
@@ -94,6 +163,9 @@ namespace GeoscientistToolkit
             // --- FIXED: Ensure we have the correct singleton instance for the current dataset ---
             if (_currentDataset != ctDataset)
             {
+                // Clear preview from previous dataset
+                ClearThresholdPreview();
+                
                 _currentDataset = ctDataset;
                 _interactiveSegmentation = CtSegmentationIntegration.GetInstance(ctDataset);
             }
@@ -123,12 +195,75 @@ namespace GeoscientistToolkit
             _selectedMaterialForThresholding ??= materials.FirstOrDefault();
 
             ImGui.Text("Grayscale Range:");
+            
+            bool thresholdChanged = false;
             int min = _minThreshold, max = _maxThreshold;
             ImGui.SetNextItemWidth(ImGui.GetContentRegionAvail().X * 0.5f - 5);
-            if (ImGui.DragInt("Min", ref min, 1, 0, 255)) _minThreshold = (byte)min;
+            if (ImGui.DragInt("Min", ref min, 1, 0, 255)) 
+            {
+                _minThreshold = (byte)min;
+                thresholdChanged = true;
+            }
             ImGui.SameLine();
             ImGui.SetNextItemWidth(ImGui.GetContentRegionAvail().X);
-            if (ImGui.DragInt("Max", ref max, 1, 0, 255)) _maxThreshold = (byte)max;
+            if (ImGui.DragInt("Max", ref max, 1, 0, 255)) 
+            {
+                _maxThreshold = (byte)max;
+                thresholdChanged = true;
+            }
+            
+            // Add range slider for easier adjustment
+            ImGui.SetNextItemWidth(-1);
+            int range1 = _minThreshold, range2 = _maxThreshold;
+            if (ImGui.DragIntRange2("Range", ref range1, ref range2, 1, 0, 255, "Min: %d", "Max: %d"))
+            {
+                _minThreshold = (byte)range1;
+                _maxThreshold = (byte)range2;
+                thresholdChanged = true;
+            }
+
+            // Preview checkbox and controls
+            ImGui.Spacing();
+            bool prevShowPreview = _showThresholdPreview;
+            if (ImGui.Checkbox("Show Preview", ref _showThresholdPreview))
+            {
+                if (_showThresholdPreview)
+                {
+                    // Enable preview
+                    _ = UpdateThresholdPreviewAsync(ctDataset);
+                }
+                else
+                {
+                    // Disable preview
+                    ClearThresholdPreview();
+                }
+            }
+            
+            if (_showThresholdPreview)
+            {
+                ImGui.SameLine();
+                if (_isGeneratingPreview)
+                {
+                    ImGui.TextColored(new Vector4(1, 1, 0, 1), "Generating...");
+                }
+                else
+                {
+                    ImGui.TextColored(new Vector4(0, 1, 0, 1), "Preview Active");
+                    
+                    // Update preview if threshold changed (with debouncing)
+                    if (thresholdChanged && (DateTime.Now - _lastPreviewUpdate).TotalMilliseconds > PREVIEW_UPDATE_DELAY_MS)
+                    {
+                        _ = UpdateThresholdPreviewAsync(ctDataset);
+                    }
+                }
+                
+                // Show voxel count in preview
+                if (_thresholdPreviewMask != null)
+                {
+                    int voxelCount = _thresholdPreviewMask.Count(v => v > 0);
+                    ImGui.Text($"Preview: {voxelCount:N0} voxels selected");
+                }
+            }
 
             ImGui.Spacing();
 
@@ -139,12 +274,14 @@ namespace GeoscientistToolkit
 
             if (ImGui.Button("Add to Material", new Vector2(ImGui.GetContentRegionAvail().X, 0)))
             {
+                ClearThresholdPreview(); // Clear preview before applying
                 _ = MaterialOperations.AddVoxelsByThresholdAsync(ctDataset.VolumeData, ctDataset.LabelData,
                     _selectedMaterialForThresholding.ID, _minThreshold, _maxThreshold, ctDataset);
             }
 
             if (ImGui.Button("Remove from Material", new Vector2(ImGui.GetContentRegionAvail().X, 0)))
             {
+                ClearThresholdPreview(); // Clear preview before applying
                 _ = MaterialOperations.RemoveVoxelsByThresholdAsync(ctDataset.VolumeData, ctDataset.LabelData,
                     _selectedMaterialForThresholding.ID, _minThreshold, _maxThreshold, ctDataset);
             }
