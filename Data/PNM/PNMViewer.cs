@@ -1,6 +1,7 @@
 // GeoscientistToolkit/UI/PNMViewer.cs - Metal-Compatible Version
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Numerics;
 using System.Runtime.InteropServices;
@@ -11,6 +12,7 @@ using GeoscientistToolkit.UI.Interfaces;
 using GeoscientistToolkit.UI.Utils;
 using GeoscientistToolkit.Util;
 using ImGuiNET;
+using StbImageWriteSharp;
 using Veldrid;
 using Veldrid.SPIRV;
 
@@ -86,6 +88,9 @@ namespace GeoscientistToolkit.UI
         private bool _showPores = true;
         private bool _showThroats = true;
 
+        // Screenshot functionality
+        private readonly ImGuiExportFileDialog _screenshotDialog;
+        
         public PNMViewer(PNMDataset dataset)
         {
             _dataset = dataset;
@@ -96,7 +101,13 @@ namespace GeoscientistToolkit.UI
                     _pendingGeometryRebuild = true;
                 }
             };
-            // Detect if we're running on Metal
+
+            _screenshotDialog = new ImGuiExportFileDialog($"Screenshot_{dataset.Name}", "Save Screenshot");
+            _screenshotDialog.SetExtensions(
+                (".png", "PNG Image"),
+                (".jpg", "JPEG Image")
+            );
+
             _isMetal = VeldridManager.GraphicsDevice.BackendType == GraphicsBackend.Metal;
             
             InitializeVeldridResources();
@@ -108,10 +119,9 @@ namespace GeoscientistToolkit.UI
             var factory = VeldridManager.Factory;
             _commandList = factory.CreateCommandList();
 
-            // Create render target
+            // --- FIX: Removed invalid 'CopySource' flag. Any texture can be a copy source. ---
             _renderTexture = factory.CreateTexture(TextureDescription.Texture2D(1280, 720, 1, 1, PixelFormat.R8_G8_B8_A8_UNorm, TextureUsage.RenderTarget | TextureUsage.Sampled));
             
-            // Use appropriate depth format for Metal
             var depthFormat = _isMetal ? PixelFormat.D32_Float_S8_UInt : PixelFormat.R32_Float;
             var depthDesc = TextureDescription.Texture2D(_renderTexture.Width, _renderTexture.Height, 1, 1, depthFormat, TextureUsage.DepthStencil);
             _depthTexture = factory.CreateTexture(depthDesc);
@@ -656,13 +666,11 @@ void main()
 
         private void CreateColorRampTexture(ResourceFactory factory)
         {
-            // Use 1D texture for Metal and 2D texture (256x1) for GLSL.
             const int mapSize = 256;
             var colorMapData = new RgbaFloat[mapSize];
             for (int i = 0; i < mapSize; i++)
             {
                 float t = i / (float)(mapSize - 1);
-                // "Jet" color map approximation
                 float r = Math.Clamp(1.5f - Math.Abs(4.0f * t - 3.0f), 0.0f, 1.0f);
                 float g = Math.Clamp(1.5f - Math.Abs(4.0f * t - 2.0f), 0.0f, 1.0f);
                 float b = Math.Clamp(1.5f - Math.Abs(4.0f * t - 1.0f), 0.0f, 1.0f);
@@ -721,8 +729,20 @@ void main()
             ImGui.SameLine();
             ImGui.SetNextItemWidth(100);
             ImGui.SliderFloat("##ThroatSize", ref _throatSizeMultiplier, 0.1f, 5.0f);
+
+            ImGui.SameLine();
+            ImGui.Separator();
+            ImGui.SameLine();
+            if (ImGui.Button("Screenshot..."))
+            {
+                _screenshotDialog.Open($"{_dataset.Name}_capture");
+            }
+
+            if (_screenshotDialog.Submit())
+            {
+                TakeAndSaveScreenshot(_screenshotDialog.SelectedPath);
+            }
             
-            // Platform indicator
             ImGui.SameLine();
             ImGui.Separator();
             ImGui.SameLine();
@@ -749,7 +769,6 @@ void main()
                 HandleMouseInput();
             }
 
-            // Draw Legend and Statistics
             DrawLegend(imagePos, availableSize);
             DrawStatistics(imagePos, availableSize);
         }
@@ -757,27 +776,20 @@ private void RebuildGeometryFromDataset()
 {
     var factory = VeldridManager.Factory;
 
-    // ---------- PORES (impostor quads, instanced) ----------
-    // Build instance data from *visible* pores
     var poreInstances = _dataset.Pores.Select(p => new PoreInstanceData
     {
         Position = p.Position,
-        ColorValue = _colorByIndex == 2 ? p.Connections : p.Radius, // keep in sync with UpdatePoreInstanceDataColor
+        ColorValue = _colorByIndex == 2 ? p.Connections : p.Radius,
         Radius = p.Radius
     }).ToArray();
     _poreInstanceCount = poreInstances.Length;
 
-    // Recreate instance buffer sized to new count
     _poreInstanceBuffer?.Dispose();
     uint instanceSize = (uint)System.Runtime.InteropServices.Marshal.SizeOf<PoreInstanceData>();
     _poreInstanceBuffer = factory.CreateBuffer(new BufferDescription((uint)(instanceSize * Math.Max(1, _poreInstanceCount)), BufferUsage.VertexBuffer));
     if (_poreInstanceCount > 0)
         VeldridManager.GraphicsDevice.UpdateBuffer(_poreInstanceBuffer, 0, poreInstances);
 
-    // (static quad + index buffers for the impostor are unchanged)
-
-    // ---------- THROATS (line list) ----------
-    // Build line vertices from *visible* throats by connecting pore positions
     var poreById = _dataset.Pores.ToDictionary(p => p.ID, p => p);
     var verts = new System.Collections.Generic.List<Vector3>(Math.Max(2, _dataset.Throats.Count * 2));
     foreach (var t in _dataset.Throats)
@@ -798,10 +810,9 @@ private void RebuildGeometryFromDataset()
     }
     else
     {
-        _throatVertexBuffer = factory.CreateBuffer(new BufferDescription(12, BufferUsage.VertexBuffer)); // tiny dummy
+        _throatVertexBuffer = factory.CreateBuffer(new BufferDescription(12, BufferUsage.VertexBuffer)); 
     }
 
-    // finally update color ramp min/max & size constants
     UpdateConstantBuffers();
 }
         private void Render()
@@ -818,7 +829,6 @@ private void RebuildGeometryFromDataset()
             _commandList.ClearColorTarget(0, new RgbaFloat(0.1f, 0.1f, 0.12f, 1.0f));
             _commandList.ClearDepthStencil(1f);
 
-            // Draw Throats
             if (_showThroats && _throatVertexCount > 0)
             {
                 _commandList.SetPipeline(_throatPipeline);
@@ -827,7 +837,6 @@ private void RebuildGeometryFromDataset()
                 _commandList.Draw(_throatVertexCount);
             }
 
-            // Draw Pores
             if (_showPores && _poreInstanceCount > 0)
             {
                 _commandList.SetPipeline(_porePipeline);
@@ -889,7 +898,6 @@ private void RebuildGeometryFromDataset()
                 viewPos.Y + padding
             );
             
-            // Draw gradient rectangle
             int numSteps = 20;
             float stepHeight = legendHeight / numSteps;
             for (int i = 0; i < numSteps; i++)
@@ -897,7 +905,6 @@ private void RebuildGeometryFromDataset()
                 float t1 = i / (float)numSteps;
                 float t2 = (i + 1) / (float)numSteps;
 
-                // "Jet" color map approximation
                 float r1 = Math.Clamp(1.5f - Math.Abs(4.0f * t1 - 3.0f), 0.0f, 1.0f);
                 float g1 = Math.Clamp(1.5f - Math.Abs(4.0f * t1 - 2.0f), 0.0f, 1.0f);
                 float b1 = Math.Clamp(1.5f - Math.Abs(4.0f * t1 - 1.0f), 0.0f, 1.0f);
@@ -915,7 +922,6 @@ private void RebuildGeometryFromDataset()
                     c2, c2, c1, c1);
             }
 
-            // Get current min/max for labels
             float minVal = 0, maxVal = 1;
             string unit = " voxels";
             switch (_colorByIndex)
@@ -926,7 +932,6 @@ private void RebuildGeometryFromDataset()
             }
             if (_colorByIndex < 2) { minVal *= _dataset.VoxelSize; maxVal *= _dataset.VoxelSize; }
 
-            // Draw labels
             string title = _colorByOptions[_colorByIndex];
             string maxLabel = $"{maxVal:F2}{unit}";
             string minLabel = $"{minVal:F2}{unit}";
@@ -939,24 +944,21 @@ private void RebuildGeometryFromDataset()
         private void DrawStatistics(Vector2 viewPos, Vector2 viewSize)
         {
             var padding = 10;
-            var statsPos = new Vector2(viewPos.X + padding, viewPos.Y + viewSize.Y - 140); // Increased height for new line
+            var statsPos = new Vector2(viewPos.X + padding, viewPos.Y + viewSize.Y - 140);
             var drawList = ImGui.GetForegroundDrawList();
-    
-            // Background
-            drawList.AddRectFilled(statsPos, new Vector2(statsPos.X + 380, statsPos.Y + 130), // Increased height
+            
+            drawList.AddRectFilled(statsPos, new Vector2(statsPos.X + 380, statsPos.Y + 130), 
                 ImGui.GetColorU32(new Vector4(0, 0, 0, 0.7f)), 5);
-    
-            // Statistics text
+            
             var textPos = statsPos + new Vector2(10, 10);
             uint textColor = 0xFFFFFFFF;
-    
+            
             drawList.AddText(textPos, textColor, $"Network Statistics:");
             textPos.Y += 20;
             drawList.AddText(textPos, textColor, $"Pores: {_dataset.Pores.Count:N0}  |  Throats: {_dataset.Throats.Count:N0}");
             textPos.Y += 18;
             drawList.AddText(textPos, textColor, $"Tortuosity: {_dataset.Tortuosity:F3}");
             textPos.Y += 18;
-            // --- MODIFIED SECTION ---
             drawList.AddText(textPos, textColor, $"Permeability (mD):");
             textPos.Y += 16;
             drawList.AddText(textPos, textColor, $"  - Darcy: {_dataset.DarcyPermeability:F2}");
@@ -964,7 +966,6 @@ private void RebuildGeometryFromDataset()
             drawList.AddText(textPos, textColor, $"  - Navier-Stokes: {_dataset.NavierStokesPermeability:F2}");
             textPos.Y += 16;
             drawList.AddText(textPos, textColor, $"  - Lattice-Boltzmann: {_dataset.LatticeBoltzmannPermeability:F2}");
-            // --- END MODIFICATION ---
         }
 
         private void UpdatePoreInstanceDataColor()
@@ -982,8 +983,8 @@ private void RebuildGeometryFromDataset()
                         Radius = p.Radius
                     }).ToArray();
                     break;
-                case 0: // Pore Radius (default)
-                case 1: // Throat Radius (color pores by their radius for consistency)
+                case 0: 
+                case 1: 
                 default:
                     instanceData = _dataset.Pores.Select(p => new PoreInstanceData
                     {
@@ -1081,6 +1082,169 @@ private void RebuildGeometryFromDataset()
         }
 
         #endregion
+
+        private void TakeAndSaveScreenshot(string path)
+        {
+            var gd = VeldridManager.GraphicsDevice;
+            var factory = VeldridManager.Factory;
+
+            var stagingDesc = TextureDescription.Texture2D(
+                _renderTexture.Width, _renderTexture.Height, 1, 1,
+                _renderTexture.Format, TextureUsage.Staging);
+            var stagingTexture = factory.CreateTexture(stagingDesc);
+
+            var cl = factory.CreateCommandList();
+            cl.Begin();
+            cl.CopyTexture(_renderTexture, stagingTexture);
+            cl.End();
+            gd.SubmitCommands(cl);
+            gd.WaitForIdle();
+
+            // --- FIX: Use MappedResourceView<T> correctly with AsSpan() ---
+            MappedResource mappedResource = gd.Map(stagingTexture, MapMode.Read, 0);
+            var rawBytes = new byte[mappedResource.SizeInBytes];
+            unsafe
+            {
+
+                try
+                {
+                    // Create a span that points to the raw GPU memory
+                    var sourceSpan = new ReadOnlySpan<byte>(mappedResource.Data.ToPointer(),
+                        (int)mappedResource.SizeInBytes);
+                    // Copy from the GPU memory span to our new managed byte array
+                    sourceSpan.CopyTo(rawBytes);
+                }
+                finally
+                {
+                    // Ensure the resource is always unmapped
+                    gd.Unmap(stagingTexture, 0);
+                }
+            }
+
+            var compositeBytes = CreateCompositeImage(rawBytes, (int)_renderTexture.Width, (int)_renderTexture.Height);
+            int compositeWidth = (int)_renderTexture.Width + 300;
+            int compositeHeight = (int)_renderTexture.Height;
+
+            try
+            {
+                using var stream = new MemoryStream();
+                var imageWriter = new ImageWriter();
+                var extension = Path.GetExtension(path).ToLower();
+
+                if (extension == ".png")
+                {
+                    imageWriter.WritePng(compositeBytes, compositeWidth, compositeHeight, ColorComponents.RedGreenBlueAlpha, stream);
+                }
+                else if (extension == ".jpg" || extension == ".jpeg")
+                {
+                    imageWriter.WriteJpg(compositeBytes, compositeWidth, compositeHeight, ColorComponents.RedGreenBlueAlpha, stream, 90);
+                }
+                else
+                {
+                    Logger.LogError($"[Screenshot] Unsupported file format: {extension}");
+                    return;
+                }
+                
+                File.WriteAllBytes(path, stream.ToArray());
+                Logger.Log($"[Screenshot] Saved to {path}");
+            }
+            catch(Exception ex)
+            {
+                Logger.LogError($"[Screenshot] Failed to save image: {ex.Message}");
+            }
+            finally
+            {
+                stagingTexture.Dispose();
+                cl.Dispose();
+            }
+        }
+
+        private byte[] CreateCompositeImage(byte[] renderBytes, int renderWidth, int renderHeight)
+        {
+            const int infoWidth = 300;
+            const int padding = 10;
+            int compositeWidth = renderWidth + infoWidth;
+            int compositeHeight = renderHeight;
+
+            var compositeBuffer = new byte[compositeWidth * compositeHeight * 4];
+            
+            uint bgColor = 0xFF1F1F1E;
+            for (int y = 0; y < compositeHeight; y++)
+            {
+                for (int x = renderWidth; x < compositeWidth; x++)
+                {
+                    int idx = (y * compositeWidth + x) * 4;
+                    compositeBuffer[idx] = (byte)(bgColor & 0xFF);
+                    compositeBuffer[idx + 1] = (byte)((bgColor >> 8) & 0xFF);
+                    compositeBuffer[idx + 2] = (byte)((bgColor >> 16) & 0xFF);
+                    compositeBuffer[idx + 3] = (byte)((bgColor >> 24) & 0xFF);
+                }
+            }
+
+            for (int y = 0; y < renderHeight; y++)
+            {
+                int srcOffset = y * renderWidth * 4;
+                int dstOffset = y * compositeWidth * 4;
+                Buffer.BlockCopy(renderBytes, srcOffset, compositeBuffer, dstOffset, renderWidth * 4);
+            }
+
+            int legendX = renderWidth + padding;
+            int legendY = padding;
+            int legendWidth = 20;
+            int legendHeight = 200;
+
+            for (int y = 0; y < legendHeight; y++)
+            {
+                float t = 1.0f - (y / (float)(legendHeight - 1));
+                float r = Math.Clamp(1.5f - Math.Abs(4.0f * t - 3.0f), 0.0f, 1.0f);
+                float g = Math.Clamp(1.5f - Math.Abs(4.0f * t - 2.0f), 0.0f, 1.0f);
+                float b = Math.Clamp(1.5f - Math.Abs(4.0f * t - 1.0f), 0.0f, 1.0f);
+                
+                for(int x = 0; x < legendWidth; x++)
+                {
+                    int idx = ((legendY + y) * compositeWidth + (legendX + x)) * 4;
+                    compositeBuffer[idx] = (byte)(r * 255);
+                    compositeBuffer[idx + 1] = (byte)(g * 255);
+                    compositeBuffer[idx + 2] = (byte)(b * 255);
+                    compositeBuffer[idx + 3] = 255;
+                }
+            }
+
+            float minVal = 0, maxVal = 1; string unit = " vox";
+            switch (_colorByIndex) {
+                case 0: minVal = _dataset.MinPoreRadius; maxVal = _dataset.MaxPoreRadius; unit = " um"; break;
+                case 1: minVal = _dataset.MinThroatRadius; maxVal = _dataset.MaxThroatRadius; unit = " um"; break;
+                case 2: minVal = _dataset.Pores.Any() ? _dataset.Pores.Min(p=>p.Connections) : 0; maxVal = _dataset.Pores.Any() ? _dataset.Pores.Max(p=>p.Connections):1; unit = ""; break;
+            }
+            if (_colorByIndex < 2) { minVal *= _dataset.VoxelSize; maxVal *= _dataset.VoxelSize; }
+
+            SimpleFontRenderer.DrawText(compositeBuffer, compositeWidth, legendX + legendWidth + 5, legendY, $"{maxVal:F2}{unit}", 0xFFFFFFFF);
+            SimpleFontRenderer.DrawText(compositeBuffer, compositeWidth, legendX + legendWidth + 5, legendY + legendHeight - 8, $"{minVal:F2}{unit}", 0xFFFFFFFF);
+            SimpleFontRenderer.DrawText(compositeBuffer, compositeWidth, legendX, legendY - 12, _colorByOptions[_colorByIndex], 0xFFFFFFFF);
+
+            int statsX = legendX;
+            int statsY = legendY + legendHeight + 30;
+            uint white = 0xFFFFFFFF;
+            
+            SimpleFontRenderer.DrawText(compositeBuffer, compositeWidth, statsX, statsY, "Network Statistics", white);
+            statsY += 12;
+            SimpleFontRenderer.DrawText(compositeBuffer, compositeWidth, statsX, statsY, $"Pores: {_dataset.Pores.Count:N0}", white);
+            statsY += 10;
+            SimpleFontRenderer.DrawText(compositeBuffer, compositeWidth, statsX, statsY, $"Throats: {_dataset.Throats.Count:N0}", white);
+            statsY += 12;
+            SimpleFontRenderer.DrawText(compositeBuffer, compositeWidth, statsX, statsY, $"Tortuosity: {_dataset.Tortuosity:F3}", white);
+            statsY += 12;
+            SimpleFontRenderer.DrawText(compositeBuffer, compositeWidth, statsX, statsY, "Permeability (MD):", white);
+            statsY += 10;
+            SimpleFontRenderer.DrawText(compositeBuffer, compositeWidth, statsX, statsY, $"- Darcy: {_dataset.DarcyPermeability:F2}", white);
+            statsY += 10;
+            SimpleFontRenderer.DrawText(compositeBuffer, compositeWidth, statsX, statsY, $"- N-S: {_dataset.NavierStokesPermeability:F2}", white);
+            statsY += 10;
+            SimpleFontRenderer.DrawText(compositeBuffer, compositeWidth, statsX, statsY, $"- LBM: {_dataset.LatticeBoltzmannPermeability:F2}", white);
+
+            return compositeBuffer;
+        }
+
 
         public void Dispose()
         {
