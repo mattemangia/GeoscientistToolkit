@@ -5,6 +5,7 @@ using System.Linq;
 using System.Numerics;
 using System.Runtime.InteropServices;
 using System.Text;
+using GeoscientistToolkit.Business;
 using GeoscientistToolkit.Data.Pnm;
 using GeoscientistToolkit.UI.Interfaces;
 using GeoscientistToolkit.UI.Utils;
@@ -42,6 +43,7 @@ namespace GeoscientistToolkit.UI
         private Framebuffer _framebuffer;
         private CommandList _commandList;
         private Texture _colorRampTexture;
+        private bool _pendingGeometryRebuild = false;
         
         // Platform detection
         private readonly bool _isMetal;
@@ -87,7 +89,13 @@ namespace GeoscientistToolkit.UI
         public PNMViewer(PNMDataset dataset)
         {
             _dataset = dataset;
-            
+            ProjectManager.Instance.DatasetDataChanged += d =>
+            {
+                if (ReferenceEquals(d, _dataset))
+                {
+                    _pendingGeometryRebuild = true;
+                }
+            };
             // Detect if we're running on Metal
             _isMetal = VeldridManager.GraphicsDevice.BackendType == GraphicsBackend.Metal;
             
@@ -745,9 +753,64 @@ void main()
             DrawLegend(imagePos, availableSize);
             DrawStatistics(imagePos, availableSize);
         }
+private void RebuildGeometryFromDataset()
+{
+    var factory = VeldridManager.Factory;
 
+    // ---------- PORES (impostor quads, instanced) ----------
+    // Build instance data from *visible* pores
+    var poreInstances = _dataset.Pores.Select(p => new PoreInstanceData
+    {
+        Position = p.Position,
+        ColorValue = _colorByIndex == 2 ? p.Connections : p.Radius, // keep in sync with UpdatePoreInstanceDataColor
+        Radius = p.Radius
+    }).ToArray();
+    _poreInstanceCount = poreInstances.Length;
+
+    // Recreate instance buffer sized to new count
+    _poreInstanceBuffer?.Dispose();
+    uint instanceSize = (uint)System.Runtime.InteropServices.Marshal.SizeOf<PoreInstanceData>();
+    _poreInstanceBuffer = factory.CreateBuffer(new BufferDescription((uint)(instanceSize * Math.Max(1, _poreInstanceCount)), BufferUsage.VertexBuffer));
+    if (_poreInstanceCount > 0)
+        VeldridManager.GraphicsDevice.UpdateBuffer(_poreInstanceBuffer, 0, poreInstances);
+
+    // (static quad + index buffers for the impostor are unchanged)
+
+    // ---------- THROATS (line list) ----------
+    // Build line vertices from *visible* throats by connecting pore positions
+    var poreById = _dataset.Pores.ToDictionary(p => p.ID, p => p);
+    var verts = new System.Collections.Generic.List<Vector3>(Math.Max(2, _dataset.Throats.Count * 2));
+    foreach (var t in _dataset.Throats)
+    {
+        if (poreById.TryGetValue(t.Pore1ID, out var p1) && poreById.TryGetValue(t.Pore2ID, out var p2))
+        {
+            verts.Add(p1.Position);
+            verts.Add(p2.Position);
+        }
+    }
+    _throatVertexCount = (uint)verts.Count;
+
+    _throatVertexBuffer?.Dispose();
+    if (_throatVertexCount > 0)
+    {
+        _throatVertexBuffer = factory.CreateBuffer(new BufferDescription((uint)(sizeof(float) * 3 * _throatVertexCount), BufferUsage.VertexBuffer));
+        VeldridManager.GraphicsDevice.UpdateBuffer(_throatVertexBuffer, 0, verts.ToArray());
+    }
+    else
+    {
+        _throatVertexBuffer = factory.CreateBuffer(new BufferDescription(12, BufferUsage.VertexBuffer)); // tiny dummy
+    }
+
+    // finally update color ramp min/max & size constants
+    UpdateConstantBuffers();
+}
         private void Render()
         {
+            if (_pendingGeometryRebuild)
+            {
+                RebuildGeometryFromDataset();
+                _pendingGeometryRebuild = false;
+            }
             UpdateConstantBuffers();
 
             _commandList.Begin();
@@ -876,26 +939,32 @@ void main()
         private void DrawStatistics(Vector2 viewPos, Vector2 viewSize)
         {
             var padding = 10;
-            var statsPos = new Vector2(viewPos.X + padding, viewPos.Y + viewSize.Y - 120);
+            var statsPos = new Vector2(viewPos.X + padding, viewPos.Y + viewSize.Y - 140); // Increased height for new line
             var drawList = ImGui.GetForegroundDrawList();
-            
+    
             // Background
-            drawList.AddRectFilled(statsPos, new Vector2(statsPos.X + 350, statsPos.Y + 110), 
+            drawList.AddRectFilled(statsPos, new Vector2(statsPos.X + 380, statsPos.Y + 130), // Increased height
                 ImGui.GetColorU32(new Vector4(0, 0, 0, 0.7f)), 5);
-            
+    
             // Statistics text
             var textPos = statsPos + new Vector2(10, 10);
             uint textColor = 0xFFFFFFFF;
-            
+    
             drawList.AddText(textPos, textColor, $"Network Statistics:");
             textPos.Y += 20;
             drawList.AddText(textPos, textColor, $"Pores: {_dataset.Pores.Count:N0}  |  Throats: {_dataset.Throats.Count:N0}");
             textPos.Y += 18;
             drawList.AddText(textPos, textColor, $"Tortuosity: {_dataset.Tortuosity:F3}");
             textPos.Y += 18;
-            drawList.AddText(textPos, textColor, $"Permeability (mD): Darcy={_dataset.DarcyPermeability:F1}, NS={_dataset.NavierStokesPermeability:F1}");
-            textPos.Y += 18;
-            drawList.AddText(textPos, textColor, $"Voxel Size: {_dataset.VoxelSize:F2} um");
+            // --- MODIFIED SECTION ---
+            drawList.AddText(textPos, textColor, $"Permeability (mD):");
+            textPos.Y += 16;
+            drawList.AddText(textPos, textColor, $"  - Darcy: {_dataset.DarcyPermeability:F2}");
+            textPos.Y += 16;
+            drawList.AddText(textPos, textColor, $"  - Navier-Stokes: {_dataset.NavierStokesPermeability:F2}");
+            textPos.Y += 16;
+            drawList.AddText(textPos, textColor, $"  - Lattice-Boltzmann: {_dataset.LatticeBoltzmannPermeability:F2}");
+            // --- END MODIFICATION ---
         }
 
         private void UpdatePoreInstanceDataColor()

@@ -1,7 +1,6 @@
 // GeoscientistToolkit/Data/Loaders/PNMLoader.cs
 using System;
 using System.IO;
-using System.Linq;
 using System.Text.Json;
 using System.Threading.Tasks;
 using GeoscientistToolkit.Business;
@@ -26,47 +25,24 @@ namespace GeoscientistToolkit.Data.Loaders
                 try
                 {
                     progressReporter?.Report((0.1f, "Reading PNM file..."));
-                    string jsonString = File.ReadAllText(FilePath);
 
+                    string jsonString = File.ReadAllText(FilePath);
                     var options = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
                     var dto = JsonSerializer.Deserialize<PNMDatasetDTO>(jsonString, options);
 
                     if (dto == null)
-                    {
                         throw new InvalidDataException("Failed to deserialize PNM file.");
-                    }
 
                     progressReporter?.Report((0.5f, "Creating dataset..."));
 
-                    var dataset = new PNMDataset(Path.GetFileNameWithoutExtension(FilePath), FilePath)
-                    {
-                        VoxelSize = dto.VoxelSize,
-                        Tortuosity = dto.Tortuosity,
-                        DarcyPermeability = dto.DarcyPermeability,
-                        NavierStokesPermeability = dto.NavierStokesPermeability,
-                        LatticeBoltzmannPermeability = dto.LatticeBoltzmannPermeability,
-                        Pores = dto.Pores.Select(p => new Pore
-                        {
-                            ID = p.ID,
-                            Position = p.Position,
-                            Area = p.Area,
-                            VolumeVoxels = p.VolumeVoxels,
-                            VolumePhysical = p.VolumePhysical,
-                            Connections = p.Connections,
-                            Radius = p.Radius
-                        }).ToList(),
-                        Throats = dto.Throats.Select(t => new Throat
-                        {
-                            ID = t.ID,
-                            Pore1ID = t.Pore1ID,
-                            Pore2ID = t.Pore2ID,
-                            Radius = t.Radius
-                        }).ToList()
-                    };
+                    // Create dataset and import via DTO helper (this calls InitializeFromCurrentLists()).
+                    var dataset = new PNMDataset(Path.GetFileNameWithoutExtension(FilePath), FilePath);
+                    dataset.ImportFromDTO(dto);
 
-                    dataset.Load(); // This calculates bounds
-
+                    // If any dataset-level initialization beyond bounds, put it here.
+                    // ImportFromDTO() already rebuilt visible/original lists and calculated bounds.
                     progressReporter?.Report((1.0f, "PNM dataset loaded successfully."));
+
                     return dataset;
                 }
                 catch (Exception ex)
