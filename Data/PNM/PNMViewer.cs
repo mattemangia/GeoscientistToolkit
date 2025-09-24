@@ -147,37 +147,37 @@ namespace GeoscientistToolkit.UI
         #region Metal Shader Resources
 
         private void CreatePoreResourcesMetal(ResourceFactory factory)
-        {
-            // Sphere Impostor (Billboard) Geometry
-            Vector3[] quadVertices =
-            {
-                new Vector3(-0.5f, -0.5f, 0),
-                new Vector3(0.5f, -0.5f, 0),
-                new Vector3(0.5f, 0.5f, 0),
-                new Vector3(-0.5f, 0.5f, 0)
-            };
-            ushort[] quadIndices = { 0, 1, 2, 0, 2, 3 };
+{
+    // Sphere Impostor (Billboard) Geometry
+    Vector3[] quadVertices =
+    {
+        new Vector3(-0.5f, -0.5f, 0),
+        new Vector3(0.5f, -0.5f, 0),
+        new Vector3(0.5f, 0.5f, 0),
+        new Vector3(-0.5f, 0.5f, 0)
+    };
+    ushort[] quadIndices = { 0, 1, 2, 0, 2, 3 };
 
-            _poreVertexBuffer = factory.CreateBuffer(new BufferDescription((uint)(quadVertices.Length * 12), BufferUsage.VertexBuffer));
-            VeldridManager.GraphicsDevice.UpdateBuffer(_poreVertexBuffer, 0, quadVertices);
-            _poreIndexBuffer = factory.CreateBuffer(new BufferDescription((uint)(quadIndices.Length * 2), BufferUsage.IndexBuffer));
-            VeldridManager.GraphicsDevice.UpdateBuffer(_poreIndexBuffer, 0, quadIndices);
+    _poreVertexBuffer = factory.CreateBuffer(new BufferDescription((uint)(quadVertices.Length * 12), BufferUsage.VertexBuffer));
+    VeldridManager.GraphicsDevice.UpdateBuffer(_poreVertexBuffer, 0, quadVertices);
+    _poreIndexBuffer = factory.CreateBuffer(new BufferDescription((uint)(quadIndices.Length * 2), BufferUsage.IndexBuffer));
+    VeldridManager.GraphicsDevice.UpdateBuffer(_poreIndexBuffer, 0, quadIndices);
 
-            var instanceData = _dataset.Pores.Select(p => new PoreInstanceData
-            {
-                Position = p.Position,
-                ColorValue = p.Radius,
-                Radius = p.Radius
-            }).ToArray();
+    var instanceData = _dataset.Pores.Select(p => new PoreInstanceData
+    {
+        Position = p.Position,
+        ColorValue = p.Radius,
+        Radius = p.Radius
+    }).ToArray();
 
-            _poreInstanceCount = instanceData.Length;
-            if (_poreInstanceCount == 0) return;
+    _poreInstanceCount = instanceData.Length;
+    if (_poreInstanceCount == 0) return;
 
-            _poreInstanceBuffer = factory.CreateBuffer(new BufferDescription((uint)(_poreInstanceCount * Marshal.SizeOf<PoreInstanceData>()), BufferUsage.VertexBuffer));
-            VeldridManager.GraphicsDevice.UpdateBuffer(_poreInstanceBuffer, 0, instanceData);
-            
-            // Metal Shaders (MSL)
-            string metalVertexShader = @"
+    _poreInstanceBuffer = factory.CreateBuffer(new BufferDescription((uint)(_poreInstanceCount * Marshal.SizeOf<PoreInstanceData>()), BufferUsage.VertexBuffer));
+    VeldridManager.GraphicsDevice.UpdateBuffer(_poreInstanceBuffer, 0, instanceData);
+    
+    // Metal Shaders (MSL) - Fixed to combine vertex and instance attributes
+    string metalVertexShader = @"
 #include <metal_stdlib>
 using namespace metal;
 
@@ -188,11 +188,9 @@ struct Constants {
     float4 SizeInfo;
 };
 
+// Combined vertex input structure
 struct VertexIn {
     float3 Position [[attribute(0)]];
-};
-
-struct InstanceIn {
     float3 InstancePosition [[attribute(1)]];
     float InstanceColorValue [[attribute(2)]];
     float InstanceRadius [[attribute(3)]];
@@ -206,30 +204,29 @@ struct VertexOut {
 };
 
 vertex VertexOut pore_vertex_main(
-    VertexIn vert [[stage_in]],
-    InstanceIn inst [[stage_in]],
+    VertexIn in [[stage_in]],
     constant Constants& constants [[buffer(0)]],
     uint instanceId [[instance_id]]
 ) {
     VertexOut out;
     
     // Billboard calculation
-    float3 toCamera = normalize(constants.CameraPosition.xyz - inst.InstancePosition);
+    float3 toCamera = normalize(constants.CameraPosition.xyz - in.InstancePosition);
     float3 right = normalize(cross(float3(0,1,0), toCamera));
     float3 up = cross(toCamera, right);
     
-    float radius = inst.InstanceRadius * constants.SizeInfo.x;
-    float3 worldPos = inst.InstancePosition + (right * vert.Position.x + up * vert.Position.y) * radius;
+    float radius = in.InstanceRadius * constants.SizeInfo.x;
+    float3 worldPos = in.InstancePosition + (right * in.Position.x + up * in.Position.y) * radius;
     
     out.Position = constants.ViewProjection * float4(worldPos, 1.0);
-    out.FragPos = vert.Position;
-    out.Normal = float3(vert.Position.xy, sqrt(max(0.0, 0.25 - dot(vert.Position.xy, vert.Position.xy))));
-    out.ColorValue = inst.InstanceColorValue;
+    out.FragPos = in.Position;
+    out.Normal = float3(in.Position.xy, sqrt(max(0.0, 0.25 - dot(in.Position.xy, in.Position.xy))));
+    out.ColorValue = in.InstanceColorValue;
     
     return out;
 }";
 
-            string metalFragmentShader = @"
+    string metalFragmentShader = @"
 #include <metal_stdlib>
 using namespace metal;
 
@@ -266,52 +263,52 @@ fragment float4 pore_fragment_main(
     return float4(color * diffuse, 1.0);
 }";
 
-            // Create shaders
-            var vsBytes = Encoding.UTF8.GetBytes(metalVertexShader);
-            var fsBytes = Encoding.UTF8.GetBytes(metalFragmentShader);
-            
-            var vertexShader = factory.CreateShader(new ShaderDescription(
-                ShaderStages.Vertex, vsBytes, "pore_vertex_main"));
-            var fragmentShader = factory.CreateShader(new ShaderDescription(
-                ShaderStages.Fragment, fsBytes, "pore_fragment_main"));
+    // Create shaders
+    var vsBytes = Encoding.UTF8.GetBytes(metalVertexShader);
+    var fsBytes = Encoding.UTF8.GetBytes(metalFragmentShader);
+    
+    var vertexShader = factory.CreateShader(new ShaderDescription(
+        ShaderStages.Vertex, vsBytes, "pore_vertex_main"));
+    var fragmentShader = factory.CreateShader(new ShaderDescription(
+        ShaderStages.Fragment, fsBytes, "pore_fragment_main"));
 
-            // Pipeline setup
-            _poreConstantsBuffer = factory.CreateBuffer(new BufferDescription((uint)Marshal.SizeOf<Constants>(), BufferUsage.UniformBuffer | BufferUsage.Dynamic));
+    // Pipeline setup
+    _poreConstantsBuffer = factory.CreateBuffer(new BufferDescription((uint)Marshal.SizeOf<Constants>(), BufferUsage.UniformBuffer | BufferUsage.Dynamic));
 
-            var sampler = factory.CreateSampler(new SamplerDescription(
-                SamplerAddressMode.Clamp, SamplerAddressMode.Clamp, SamplerAddressMode.Clamp,
-                SamplerFilter.MinLinear_MagLinear_MipLinear, null, 0, 0, 0, 0, SamplerBorderColor.TransparentBlack));
+    var sampler = factory.CreateSampler(new SamplerDescription(
+        SamplerAddressMode.Clamp, SamplerAddressMode.Clamp, SamplerAddressMode.Clamp,
+        SamplerFilter.MinLinear_MagLinear_MipLinear, null, 0, 0, 0, 0, SamplerBorderColor.TransparentBlack));
 
-            _poreResourceLayout = factory.CreateResourceLayout(new ResourceLayoutDescription(
-                new ResourceLayoutElementDescription("Constants", ResourceKind.UniformBuffer, ShaderStages.Vertex | ShaderStages.Fragment),
-                new ResourceLayoutElementDescription("ColorRamp", ResourceKind.TextureReadOnly, ShaderStages.Fragment),
-                new ResourceLayoutElementDescription("ColorSampler", ResourceKind.Sampler, ShaderStages.Fragment)
-            ));
+    _poreResourceLayout = factory.CreateResourceLayout(new ResourceLayoutDescription(
+        new ResourceLayoutElementDescription("Constants", ResourceKind.UniformBuffer, ShaderStages.Vertex | ShaderStages.Fragment),
+        new ResourceLayoutElementDescription("ColorRamp", ResourceKind.TextureReadOnly, ShaderStages.Fragment),
+        new ResourceLayoutElementDescription("ColorSampler", ResourceKind.Sampler, ShaderStages.Fragment)
+    ));
 
-            _poreResourceSet = factory.CreateResourceSet(new ResourceSetDescription(_poreResourceLayout, _poreConstantsBuffer, _colorRampTexture, sampler));
+    _poreResourceSet = factory.CreateResourceSet(new ResourceSetDescription(_poreResourceLayout, _poreConstantsBuffer, _colorRampTexture, sampler));
 
-            var poreVertexLayouts = new[]
-            {
-                new VertexLayoutDescription(
-                    new VertexElementDescription("Position", VertexElementSemantic.TextureCoordinate, VertexElementFormat.Float3)
-                ),
-                new VertexLayoutDescription(
-                    (uint)Marshal.SizeOf<PoreInstanceData>(), 1,
-                    new VertexElementDescription("InstancePosition", VertexElementSemantic.TextureCoordinate, VertexElementFormat.Float3),
-                    new VertexElementDescription("InstanceColorValue", VertexElementSemantic.TextureCoordinate, VertexElementFormat.Float1),
-                    new VertexElementDescription("InstanceRadius", VertexElementSemantic.TextureCoordinate, VertexElementFormat.Float1)
-                )
-            };
+    var poreVertexLayouts = new[]
+    {
+        new VertexLayoutDescription(
+            new VertexElementDescription("Position", VertexElementSemantic.TextureCoordinate, VertexElementFormat.Float3)
+        ),
+        new VertexLayoutDescription(
+            (uint)Marshal.SizeOf<PoreInstanceData>(), 1,
+            new VertexElementDescription("InstancePosition", VertexElementSemantic.TextureCoordinate, VertexElementFormat.Float3),
+            new VertexElementDescription("InstanceColorValue", VertexElementSemantic.TextureCoordinate, VertexElementFormat.Float1),
+            new VertexElementDescription("InstanceRadius", VertexElementSemantic.TextureCoordinate, VertexElementFormat.Float1)
+        )
+    };
 
-            _porePipeline = factory.CreateGraphicsPipeline(new GraphicsPipelineDescription(
-                BlendStateDescription.SingleAlphaBlend,
-                new DepthStencilStateDescription(true, true, ComparisonKind.LessEqual),
-                RasterizerStateDescription.Default,
-                PrimitiveTopology.TriangleList,
-                new ShaderSetDescription(poreVertexLayouts, new[] { vertexShader, fragmentShader }),
-                new[] { _poreResourceLayout },
-                _framebuffer.OutputDescription));
-        }
+    _porePipeline = factory.CreateGraphicsPipeline(new GraphicsPipelineDescription(
+        BlendStateDescription.SingleAlphaBlend,
+        new DepthStencilStateDescription(true, true, ComparisonKind.LessEqual),
+        RasterizerStateDescription.Default,
+        PrimitiveTopology.TriangleList,
+        new ShaderSetDescription(poreVertexLayouts, new[] { vertexShader, fragmentShader }),
+        new[] { _poreResourceLayout },
+        _framebuffer.OutputDescription));
+}
 
         private void CreateThroatResourcesMetal(ResourceFactory factory)
         {
