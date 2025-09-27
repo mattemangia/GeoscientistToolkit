@@ -324,13 +324,16 @@ namespace GeoscientistToolkit.Analysis.Pnm
                 var (idx, label) = queue.Dequeue();
                 processedVoxels++;
 
-                // Report progress
-                int currentPercent = (processedVoxels * 100) / Math.Max(1, totalVoxels);
-                if (currentPercent > lastReportedPercent + 5)
+                // Report progress every 10000 voxels to avoid overhead
+                if (processedVoxels % 10000 == 0)
                 {
-                    float prog = startProgress + (endProgress - startProgress) * processedVoxels / (float)Math.Max(1, totalVoxels);
-                    progress.Report(prog, $"Watershed expansion: {currentPercent}%...");
-                    lastReportedPercent = currentPercent;
+                    int currentPercent = (processedVoxels * 100) / Math.Max(1, totalVoxels);
+                    if (currentPercent > lastReportedPercent + 5)
+                    {
+                        float prog = startProgress + (endProgress - startProgress) * processedVoxels / (float)Math.Max(1, totalVoxels);
+                        progress?.Report(prog, $"Watershed expansion: {currentPercent}%...");
+                        lastReportedPercent = currentPercent;
+                    }
                 }
 
                 int z = idx / (W * H);
@@ -664,7 +667,7 @@ namespace GeoscientistToolkit.Analysis.Pnm
             out Dictionary<int, List<(int nb, float w)>> adjacency, DetailedProgressReporter progress, 
             float startProgress, float endProgress)
         {
-            var edges = new ConcurrentDictionary<(int a, int b), float>();
+            var edges = new ConcurrentDictionary<(int a, int b), (float radius, int count)>();
             int totalSlices = D;
             int processedSlices = 0;
 
@@ -686,9 +689,14 @@ namespace GeoscientistToolkit.Analysis.Pnm
                             int nidx = (nz * H + ny) * W + nx;
                             int b = lbl[nidx];
                             if (b == 0 || b == a) return;
+                            
                             var key = (a < b) ? (a, b) : (b, a);
+                            // Calculate throat radius at this interface point
                             float r = MathF.Min(edt[idx], edt[nidx]) * vEdge;
-                            edges.AddOrUpdate(key, r, (_, old) => MathF.Min(old, r));
+                            
+                            edges.AddOrUpdate(key, 
+                                k => (r, 1),
+                                (k, old) => (Math.Max(old.radius, r), old.count + 1)); // Use MAX radius instead of MIN
                         }
 
                         CheckNeighbor(x + 1, y, z);
@@ -712,14 +720,20 @@ namespace GeoscientistToolkit.Analysis.Pnm
             foreach (var kv in edges)
             {
                 var (a, b) = kv.Key;
-                float r = Math.Max(0.001f, kv.Value); // Ensure minimum radius
-                list.Add(new Throat { ID = tid++, Pore1ID = a, Pore2ID = b, Radius = r });
+                var (radius, count) = kv.Value;
+                
+                // Ensure minimum radius for numerical stability
+                float finalRadius = Math.Max(0.1f, radius);
+                
+                list.Add(new Throat { ID = tid++, Pore1ID = a, Pore2ID = b, Radius = finalRadius });
 
                 if (!adjacency.TryGetValue(a, out var la)) adjacency[a] = la = new List<(int nb, float w)>();
                 if (!adjacency.TryGetValue(b, out var lb)) adjacency[b] = lb = new List<(int nb, float w)>();
                 la.Add((b, 1));
                 lb.Add((a, 1));
             }
+            
+            Logger.Log($"[BuildThroats] Found {list.Count} unique throats with radius range {list.Min(t => t.Radius):F3} to {list.Max(t => t.Radius):F3} µm");
 
             return list;
         }
@@ -861,29 +875,33 @@ namespace GeoscientistToolkit.Analysis.Pnm
             int componentCount)
         {
             if (pores == null || pores.Length <= 1 || adjacency == null || adjacency.Count == 0)
-                return 0f;
+                return 1.0f; // Default tortuosity is 1.0 (straight path)
 
             var pos = new Vector3[pores.Length];
             for (int i = 1; i < pores.Length; i++)
                 pos[i] = pores[i]?.Position ?? new Vector3(-1);
 
-            Vector3 scale = new(vx, vy, vz);
-
-            foreach (var kv in adjacency)
+            // Update edge weights to be actual physical distances
+            foreach (var kv in adjacency.ToList())
             {
                 int u = kv.Key;
                 var list = kv.Value;
                 for (int i = 0; i < list.Count; i++)
                 {
                     int v = list[i].nb;
-                    float w = Vector3.Distance(pos[u] * scale, pos[v] * scale);
+                    // Calculate physical distance between pore centers
+                    float dx = Math.Abs(pos[u].X - pos[v].X) * vx;
+                    float dy = Math.Abs(pos[u].Y - pos[v].Y) * vy;
+                    float dz = Math.Abs(pos[u].Z - pos[v].Z) * vz;
+                    float w = MathF.Sqrt(dx * dx + dy * dy + dz * dz);
                     list[i] = (v, w);
                 }
+                adjacency[u] = list;
             }
 
             var contacts = ComputeFaceContacts(labels, W, H, D, componentCount);
-            var inlet = new List<int>();
-            var outlet = new List<int>();
+            var inlet = new HashSet<int>();
+            var outlet = new HashSet<int>();
 
             switch (axis)
             {
@@ -891,7 +909,7 @@ namespace GeoscientistToolkit.Analysis.Pnm
                     for (int i = 1; i < pores.Length; i++)
                     {
                         if (pores[i] == null) continue;
-                        if (inletMin  && contacts.XMin[i]) inlet.Add(i);
+                        if (inletMin && contacts.XMin[i]) inlet.Add(i);
                         if (outletMax && contacts.XMax[i]) outlet.Add(i);
                     }
                     break;
@@ -900,7 +918,7 @@ namespace GeoscientistToolkit.Analysis.Pnm
                     for (int i = 1; i < pores.Length; i++)
                     {
                         if (pores[i] == null) continue;
-                        if (inletMin  && contacts.YMin[i]) inlet.Add(i);
+                        if (inletMin && contacts.YMin[i]) inlet.Add(i);
                         if (outletMax && contacts.YMax[i]) outlet.Add(i);
                     }
                     break;
@@ -909,20 +927,24 @@ namespace GeoscientistToolkit.Analysis.Pnm
                     for (int i = 1; i < pores.Length; i++)
                     {
                         if (pores[i] == null) continue;
-                        if (inletMin  && contacts.ZMin[i]) inlet.Add(i);
+                        if (inletMin && contacts.ZMin[i]) inlet.Add(i);
                         if (outletMax && contacts.ZMax[i]) outlet.Add(i);
                     }
                     break;
             }
 
             if (inlet.Count == 0 || outlet.Count == 0)
-                return 0f;
+            {
+                Logger.LogWarning("[Tortuosity] No inlet or outlet pores found. Using default tortuosity of 1.0");
+                return 1.0f;
+            }
 
-            float best = float.MaxValue;
+            // Find shortest path from any inlet to any outlet
+            float shortestPath = float.MaxValue;
 
             foreach (int s in inlet)
             {
-                var dist = new Dictionary<int, float>(capacity: Math.Max(64, adjacency.Count));
+                var dist = new Dictionary<int, float>();
                 var visited = new HashSet<int>();
                 var pq = new PriorityQueue<int, float>();
 
@@ -934,34 +956,56 @@ namespace GeoscientistToolkit.Analysis.Pnm
                     pq.TryDequeue(out int u, out float du);
                     if (!visited.Add(u)) continue;
 
+                    // Check if we reached an outlet
                     if (outlet.Contains(u))
                     {
-                        if (du < best) best = du;
-                        break;
+                        if (du < shortestPath)
+                        {
+                            shortestPath = du;
+                            Logger.Log($"[Tortuosity] Found path from inlet {s} to outlet {u} with length {du:F3} µm");
+                        }
+                        break; // Found shortest from this inlet
                     }
 
-                    if (!adjacency.TryGetValue(u, out var list)) continue;
-                    for (int i = 0; i < list.Count; i++)
+                    if (!adjacency.TryGetValue(u, out var neighbors)) continue;
+                    
+                    foreach (var (v, weight) in neighbors)
                     {
-                        var (v, w) = list[i];
-                        float nd = du + w;
-                        if (!dist.TryGetValue(v, out float dv) || nd < dv)
+                        if (visited.Contains(v)) continue;
+                        
+                        float newDist = du + weight;
+                        if (!dist.ContainsKey(v) || newDist < dist[v])
                         {
-                            dist[v] = nd;
-                            pq.Enqueue(v, nd);
+                            dist[v] = newDist;
+                            pq.Enqueue(v, newDist);
                         }
                     }
                 }
             }
 
-            if (best == float.MaxValue)
-                return 0f;
+            if (shortestPath == float.MaxValue)
+            {
+                Logger.LogWarning("[Tortuosity] No path found between inlet and outlet. Using default tortuosity of 1.0");
+                return 1.0f;
+            }
 
-            float L = axis == FlowAxis.X ? vx * Math.Max(1, W - 1)
-                     : axis == FlowAxis.Y ? vy * Math.Max(1, H - 1)
-                     :                      vz * Math.Max(1, D - 1);
+            // Calculate straight-line distance (physical sample length along flow axis)
+            float straightLineDistance = axis switch
+            {
+                FlowAxis.X => W * vx,
+                FlowAxis.Y => H * vy,
+                _ => D * vz
+            };
 
-            return (L > 0f) ? (best / L) : 0f;
+            // Tortuosity = path length / straight-line distance
+            float tortuosity = (straightLineDistance > 0f) ? (shortestPath / straightLineDistance) : 1.0f;
+            
+            // Clamp to reasonable range (tortuosity should be >= 1.0)
+            tortuosity = Math.Max(1.0f, Math.Min(10.0f, tortuosity));
+            
+            Logger.Log($"[Tortuosity] Calculated: Path={shortestPath:F3} µm, Straight={straightLineDistance:F3} µm, Tortuosity={tortuosity:F3}");
+            
+            return tortuosity;
         }
 
         #endregion

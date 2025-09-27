@@ -1,4 +1,4 @@
-// GeoscientistToolkit/UI/PNMViewer.cs - Metal-Compatible Version
+// GeoscientistToolkit/UI/PNMViewer.cs - Fixed Version
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -26,7 +26,7 @@ namespace GeoscientistToolkit.UI
             public Matrix4x4 ViewProjection;
             public Vector4 CameraPosition;
             public Vector4 ColorRampInfo; // x: MinValue, y: MaxValue, z: 1/(Max-Min), w: unused
-            public Vector4 SizeInfo;      // x: PoreSizeMultiplier, y: ThroatSizeMultiplier
+            public Vector4 SizeInfo;      // x: PoreSizeMultiplier, y: ThroatSizeMultiplier, z: ThroatLineWidth, w: unused
         }
 
         [StructLayout(LayoutKind.Sequential)]
@@ -35,6 +35,26 @@ namespace GeoscientistToolkit.UI
             public Vector3 Position;
             public float ColorValue;
             public float Radius;
+            
+            public PoreInstanceData(Vector3 pos, float colorVal, float rad)
+            {
+                Position = pos;
+                ColorValue = colorVal;
+                Radius = rad;
+            }
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct ThroatVertexData
+        {
+            public Vector3 Position;
+            public float ColorValue;
+            
+            public ThroatVertexData(Vector3 pos, float colorVal)
+            {
+                Position = pos;
+                ColorValue = colorVal;
+            }
         }
 
         // Dataset & Veldrid Resources
@@ -70,24 +90,30 @@ namespace GeoscientistToolkit.UI
 
         // Camera & Interaction
         private Matrix4x4 _viewMatrix, _projMatrix;
-        private Vector3 _cameraPosition = new Vector3(0, 0, 3);
+        private Vector3 _cameraPosition = new Vector3(0, 0, 5);
         private Vector3 _cameraTarget = Vector3.Zero;
         private float _cameraYaw = -MathF.PI / 2f;
         private float _cameraPitch = 0f;
-        private float _cameraDistance = 3.0f;
+        private float _cameraDistance = 5.0f;
         private bool _isDragging = false;
         private bool _isPanning = false;
         private Vector2 _lastMousePos;
         private Vector3 _modelCenter;
+        private float _modelRadius = 10.0f;
 
         // UI & Rendering State
         private int _colorByIndex = 0;
-        private readonly string[] _colorByOptions = { "Pore Radius", "Throat Radius", "Pore Connections" };
+        private readonly string[] _colorByOptions = { "Pore Radius", "Throat Radius", "Pore Connections", "Pore Volume" };
         private float _poreSizeMultiplier = 1.0f;
         private float _throatSizeMultiplier = 1.0f;
+        private float _throatLineWidth = 2.0f;
         private bool _showPores = true;
         private bool _showThroats = true;
 
+        // Selection
+        private int _selectedPoreId = -1;
+        private Pore _selectedPore = null;
+        
         // Screenshot functionality
         private readonly ImGuiExportFileDialog _screenshotDialog;
         
@@ -111,6 +137,7 @@ namespace GeoscientistToolkit.UI
             _isMetal = VeldridManager.GraphicsDevice.BackendType == GraphicsBackend.Metal;
             
             InitializeVeldridResources();
+            RebuildGeometryFromDataset();
             ResetCamera();
         }
 
@@ -119,10 +146,10 @@ namespace GeoscientistToolkit.UI
             var factory = VeldridManager.Factory;
             _commandList = factory.CreateCommandList();
 
-            // --- FIX: Removed invalid 'CopySource' flag. Any texture can be a copy source. ---
             _renderTexture = factory.CreateTexture(TextureDescription.Texture2D(1280, 720, 1, 1, PixelFormat.R8_G8_B8_A8_UNorm, TextureUsage.RenderTarget | TextureUsage.Sampled));
             
-            var depthFormat = _isMetal ? PixelFormat.D32_Float_S8_UInt : PixelFormat.R32_Float;
+            var depthFormat = _isMetal ? PixelFormat.D32_Float_S8_UInt
+                : PixelFormat.D24_UNorm_S8_UInt;
             var depthDesc = TextureDescription.Texture2D(_renderTexture.Width, _renderTexture.Height, 1, 1, depthFormat, TextureUsage.DepthStencil);
             _depthTexture = factory.CreateTexture(depthDesc);
             _framebuffer = factory.CreateFramebuffer(new FramebufferDescription(_depthTexture, _renderTexture));
@@ -144,40 +171,133 @@ namespace GeoscientistToolkit.UI
             UpdateCameraMatrices();
         }
         
-        #region Metal Shader Resources
+        #region Resource Creation
+
+        private void CreatePoreResourcesGLSL(ResourceFactory factory)
+        {
+            // Create sphere geometry (icosahedron)
+            var (vertices, indices) = CreateSphereGeometry();
+            
+            _poreVertexBuffer = factory.CreateBuffer(new BufferDescription((uint)(vertices.Length * 12), BufferUsage.VertexBuffer));
+            VeldridManager.GraphicsDevice.UpdateBuffer(_poreVertexBuffer, 0, vertices);
+            _poreIndexBuffer = factory.CreateBuffer(new BufferDescription((uint)(indices.Length * 2), BufferUsage.IndexBuffer));
+            VeldridManager.GraphicsDevice.UpdateBuffer(_poreIndexBuffer, 0, indices);
+
+            // Instance buffer will be created in RebuildGeometry
+            
+            // GLSL Shaders - Fixed for proper sphere rendering
+            string vertexShader = @"
+#version 450
+layout(location = 0) in vec3 in_Position;
+layout(location = 1) in vec3 in_InstancePosition;
+layout(location = 2) in float in_InstanceColorValue;
+layout(location = 3) in float in_InstanceRadius;
+
+layout(set = 0, binding = 0) uniform Constants
+{
+    mat4 ViewProjection;
+    vec4 CameraPosition;
+    vec4 ColorRampInfo;
+    vec4 SizeInfo;
+};
+
+layout(location = 0) out vec3 out_WorldPos;
+layout(location = 1) out vec3 out_Normal;
+layout(location = 2) out float out_ColorValue;
+
+void main() 
+{
+    float radius = in_InstanceRadius * SizeInfo.x * 0.1; // Scale down for visibility
+    vec3 worldPos = in_InstancePosition + in_Position * radius;
+    gl_Position = ViewProjection * vec4(worldPos, 1.0);
+    
+    out_WorldPos = worldPos;
+    out_Normal = normalize(in_Position); // For a sphere, normal = position
+    out_ColorValue = in_InstanceColorValue;
+}";
+
+            string fragmentShader = @"
+#version 450
+layout(location = 0) in vec3 in_WorldPos;
+layout(location = 1) in vec3 in_Normal;
+layout(location = 2) in float in_ColorValue;
+layout(location = 0) out vec4 out_Color;
+
+layout(set = 0, binding = 0) uniform Constants { mat4 VP; vec4 CamPos; vec4 ColorRampInfo; vec4 SizeInfo; };
+layout(set = 0, binding = 1) uniform texture2D ColorRamp;
+layout(set = 0, binding = 2) uniform sampler ColorSampler;
+
+void main() 
+{
+    vec3 normal = normalize(in_Normal);
+    vec3 lightDir = normalize(vec3(1, 1, 1));
+    vec3 viewDir = normalize(CamPos.xyz - in_WorldPos);
+    
+    // Diffuse lighting
+    float diffuse = max(dot(normal, lightDir), 0.0) * 0.7 + 0.3;
+    
+    // Specular lighting
+    vec3 reflectDir = reflect(-lightDir, normal);
+    float spec = pow(max(dot(viewDir, reflectDir), 0.0), 32) * 0.5;
+    
+    float normalizedValue = clamp((in_ColorValue - ColorRampInfo.x) * ColorRampInfo.z, 0.0, 1.0);
+    vec3 color = texture(sampler2D(ColorRamp, ColorSampler), vec2(normalizedValue, 0.5)).rgb;
+    
+    out_Color = vec4(color * diffuse + vec3(spec), 1.0);
+}";
+
+            _poreConstantsBuffer = factory.CreateBuffer(new BufferDescription((uint)Marshal.SizeOf<Constants>(), BufferUsage.UniformBuffer | BufferUsage.Dynamic));
+
+            _poreResourceLayout = factory.CreateResourceLayout(new ResourceLayoutDescription(
+                new ResourceLayoutElementDescription("Constants", ResourceKind.UniformBuffer, ShaderStages.Vertex | ShaderStages.Fragment),
+                new ResourceLayoutElementDescription("ColorRamp", ResourceKind.TextureReadOnly, ShaderStages.Fragment),
+                new ResourceLayoutElementDescription("ColorSampler", ResourceKind.Sampler, ShaderStages.Fragment)
+            ));
+
+            var sampler = factory.CreateSampler(new SamplerDescription(
+                SamplerAddressMode.Clamp, SamplerAddressMode.Clamp, SamplerAddressMode.Clamp,
+                SamplerFilter.MinLinear_MagLinear_MipLinear, null, 0, 0, 0, 0, SamplerBorderColor.TransparentBlack));
+
+            _poreResourceSet = factory.CreateResourceSet(new ResourceSetDescription(_poreResourceLayout, _poreConstantsBuffer, _colorRampTexture, sampler));
+
+            var shaderSet = factory.CreateFromSpirv(
+                new ShaderDescription(ShaderStages.Vertex, Encoding.UTF8.GetBytes(vertexShader), "main"),
+                new ShaderDescription(ShaderStages.Fragment, Encoding.UTF8.GetBytes(fragmentShader), "main"));
+
+            var poreVertexLayouts = new[]
+            {
+                new VertexLayoutDescription(
+                    new VertexElementDescription("in_Position", VertexElementSemantic.TextureCoordinate, VertexElementFormat.Float3)
+                ),
+                new VertexLayoutDescription(
+                    (uint)Marshal.SizeOf<PoreInstanceData>(), 1,
+                    new VertexElementDescription("in_InstancePosition", VertexElementSemantic.TextureCoordinate, VertexElementFormat.Float3),
+                    new VertexElementDescription("in_InstanceColorValue", VertexElementSemantic.TextureCoordinate, VertexElementFormat.Float1),
+                    new VertexElementDescription("in_InstanceRadius", VertexElementSemantic.TextureCoordinate, VertexElementFormat.Float1)
+                )
+            };
+
+            _porePipeline = factory.CreateGraphicsPipeline(new GraphicsPipelineDescription(
+                BlendStateDescription.SingleAlphaBlend,
+                new DepthStencilStateDescription(true, true, ComparisonKind.LessEqual),
+                RasterizerStateDescription.Default,
+                PrimitiveTopology.TriangleList,
+                new ShaderSetDescription(poreVertexLayouts, shaderSet),
+                new[] { _poreResourceLayout },
+                _framebuffer.OutputDescription));
+        }
 
         private void CreatePoreResourcesMetal(ResourceFactory factory)
-{
-    // Sphere Impostor (Billboard) Geometry
-    Vector3[] quadVertices =
-    {
-        new Vector3(-0.5f, -0.5f, 0),
-        new Vector3(0.5f, -0.5f, 0),
-        new Vector3(0.5f, 0.5f, 0),
-        new Vector3(-0.5f, 0.5f, 0)
-    };
-    ushort[] quadIndices = { 0, 1, 2, 0, 2, 3 };
+        {
+            var (vertices, indices) = CreateSphereGeometry();
+            
+            _poreVertexBuffer = factory.CreateBuffer(new BufferDescription((uint)(vertices.Length * 12), BufferUsage.VertexBuffer));
+            VeldridManager.GraphicsDevice.UpdateBuffer(_poreVertexBuffer, 0, vertices);
+            _poreIndexBuffer = factory.CreateBuffer(new BufferDescription((uint)(indices.Length * 2), BufferUsage.IndexBuffer));
+            VeldridManager.GraphicsDevice.UpdateBuffer(_poreIndexBuffer, 0, indices);
 
-    _poreVertexBuffer = factory.CreateBuffer(new BufferDescription((uint)(quadVertices.Length * 12), BufferUsage.VertexBuffer));
-    VeldridManager.GraphicsDevice.UpdateBuffer(_poreVertexBuffer, 0, quadVertices);
-    _poreIndexBuffer = factory.CreateBuffer(new BufferDescription((uint)(quadIndices.Length * 2), BufferUsage.IndexBuffer));
-    VeldridManager.GraphicsDevice.UpdateBuffer(_poreIndexBuffer, 0, quadIndices);
-
-    var instanceData = _dataset.Pores.Select(p => new PoreInstanceData
-    {
-        Position = p.Position,
-        ColorValue = p.Radius,
-        Radius = p.Radius
-    }).ToArray();
-
-    _poreInstanceCount = instanceData.Length;
-    if (_poreInstanceCount == 0) return;
-
-    _poreInstanceBuffer = factory.CreateBuffer(new BufferDescription((uint)(_poreInstanceCount * Marshal.SizeOf<PoreInstanceData>()), BufferUsage.VertexBuffer));
-    VeldridManager.GraphicsDevice.UpdateBuffer(_poreInstanceBuffer, 0, instanceData);
-    
-    // Metal Shaders (MSL) - Fixed to combine vertex and instance attributes
-    string metalVertexShader = @"
+            // Metal shaders
+            string metalVertexShader = @"
 #include <metal_stdlib>
 using namespace metal;
 
@@ -188,7 +308,6 @@ struct Constants {
     float4 SizeInfo;
 };
 
-// Combined vertex input structure
 struct VertexIn {
     float3 Position [[attribute(0)]];
     float3 InstancePosition [[attribute(1)]];
@@ -198,35 +317,29 @@ struct VertexIn {
 
 struct VertexOut {
     float4 Position [[position]];
-    float3 FragPos;
+    float3 WorldPos;
     float3 Normal;
     float ColorValue;
 };
 
 vertex VertexOut pore_vertex_main(
     VertexIn in [[stage_in]],
-    constant Constants& constants [[buffer(0)]],
-    uint instanceId [[instance_id]]
+    constant Constants& constants [[buffer(0)]]
 ) {
     VertexOut out;
     
-    // Billboard calculation
-    float3 toCamera = normalize(constants.CameraPosition.xyz - in.InstancePosition);
-    float3 right = normalize(cross(float3(0,1,0), toCamera));
-    float3 up = cross(toCamera, right);
-    
-    float radius = in.InstanceRadius * constants.SizeInfo.x;
-    float3 worldPos = in.InstancePosition + (right * in.Position.x + up * in.Position.y) * radius;
+    float radius = in.InstanceRadius * constants.SizeInfo.x * 0.1;
+    float3 worldPos = in.InstancePosition + in.Position * radius;
     
     out.Position = constants.ViewProjection * float4(worldPos, 1.0);
-    out.FragPos = in.Position;
-    out.Normal = float3(in.Position.xy, sqrt(max(0.0, 0.25 - dot(in.Position.xy, in.Position.xy))));
+    out.WorldPos = worldPos;
+    out.Normal = normalize(in.Position);
     out.ColorValue = in.InstanceColorValue;
     
     return out;
 }";
 
-    string metalFragmentShader = @"
+            string metalFragmentShader = @"
 #include <metal_stdlib>
 using namespace metal;
 
@@ -239,7 +352,7 @@ struct Constants {
 
 struct FragmentIn {
     float4 Position [[position]];
-    float3 FragPos;
+    float3 WorldPos;
     float3 Normal;
     float ColorValue;
 };
@@ -250,98 +363,136 @@ fragment float4 pore_fragment_main(
     texture1d<float> colorRamp [[texture(0)]],
     sampler colorSampler [[sampler(0)]]
 ) {
-    // Discard pixels outside sphere
-    if (dot(in.FragPos.xy, in.FragPos.xy) > 0.25) discard_fragment();
-    
     float3 normal = normalize(in.Normal);
     float3 lightDir = normalize(float3(1, 1, 1));
+    float3 viewDir = normalize(constants.CameraPosition.xyz - in.WorldPos);
+    
     float diffuse = max(dot(normal, lightDir), 0.0) * 0.7 + 0.3;
+    float3 reflectDir = reflect(-lightDir, normal);
+    float spec = pow(max(dot(viewDir, reflectDir), 0.0), 32) * 0.5;
     
     float normalizedValue = saturate((in.ColorValue - constants.ColorRampInfo.x) * constants.ColorRampInfo.z);
     float3 color = colorRamp.sample(colorSampler, normalizedValue).rgb;
     
-    return float4(color * diffuse, 1.0);
+    return float4(color * diffuse + spec, 1.0);
 }";
 
-    // Create shaders
-    var vsBytes = Encoding.UTF8.GetBytes(metalVertexShader);
-    var fsBytes = Encoding.UTF8.GetBytes(metalFragmentShader);
-    
-    var vertexShader = factory.CreateShader(new ShaderDescription(
-        ShaderStages.Vertex, vsBytes, "pore_vertex_main"));
-    var fragmentShader = factory.CreateShader(new ShaderDescription(
-        ShaderStages.Fragment, fsBytes, "pore_fragment_main"));
+            // Continue with Metal pipeline setup...
+            var vsBytes = Encoding.UTF8.GetBytes(metalVertexShader);
+            var fsBytes = Encoding.UTF8.GetBytes(metalFragmentShader);
+            
+            var vertexShader = factory.CreateShader(new ShaderDescription(
+                ShaderStages.Vertex, vsBytes, "pore_vertex_main"));
+            var fragmentShader = factory.CreateShader(new ShaderDescription(
+                ShaderStages.Fragment, fsBytes, "pore_fragment_main"));
 
-    // Pipeline setup
-    _poreConstantsBuffer = factory.CreateBuffer(new BufferDescription((uint)Marshal.SizeOf<Constants>(), BufferUsage.UniformBuffer | BufferUsage.Dynamic));
+            _poreConstantsBuffer = factory.CreateBuffer(new BufferDescription((uint)Marshal.SizeOf<Constants>(), BufferUsage.UniformBuffer | BufferUsage.Dynamic));
 
-    var sampler = factory.CreateSampler(new SamplerDescription(
-        SamplerAddressMode.Clamp, SamplerAddressMode.Clamp, SamplerAddressMode.Clamp,
-        SamplerFilter.MinLinear_MagLinear_MipLinear, null, 0, 0, 0, 0, SamplerBorderColor.TransparentBlack));
+            var sampler = factory.CreateSampler(new SamplerDescription(
+                SamplerAddressMode.Clamp, SamplerAddressMode.Clamp, SamplerAddressMode.Clamp,
+                SamplerFilter.MinLinear_MagLinear_MipLinear, null, 0, 0, 0, 0, SamplerBorderColor.TransparentBlack));
 
-    _poreResourceLayout = factory.CreateResourceLayout(new ResourceLayoutDescription(
-        new ResourceLayoutElementDescription("Constants", ResourceKind.UniformBuffer, ShaderStages.Vertex | ShaderStages.Fragment),
-        new ResourceLayoutElementDescription("ColorRamp", ResourceKind.TextureReadOnly, ShaderStages.Fragment),
-        new ResourceLayoutElementDescription("ColorSampler", ResourceKind.Sampler, ShaderStages.Fragment)
-    ));
+            _poreResourceLayout = factory.CreateResourceLayout(new ResourceLayoutDescription(
+                new ResourceLayoutElementDescription("Constants", ResourceKind.UniformBuffer, ShaderStages.Vertex | ShaderStages.Fragment),
+                new ResourceLayoutElementDescription("ColorRamp", ResourceKind.TextureReadOnly, ShaderStages.Fragment),
+                new ResourceLayoutElementDescription("ColorSampler", ResourceKind.Sampler, ShaderStages.Fragment)
+            ));
 
-    _poreResourceSet = factory.CreateResourceSet(new ResourceSetDescription(_poreResourceLayout, _poreConstantsBuffer, _colorRampTexture, sampler));
+            _poreResourceSet = factory.CreateResourceSet(new ResourceSetDescription(_poreResourceLayout, _poreConstantsBuffer, _colorRampTexture, sampler));
 
-    var poreVertexLayouts = new[]
-    {
-        new VertexLayoutDescription(
-            new VertexElementDescription("Position", VertexElementSemantic.TextureCoordinate, VertexElementFormat.Float3)
-        ),
-        new VertexLayoutDescription(
-            (uint)Marshal.SizeOf<PoreInstanceData>(), 1,
-            new VertexElementDescription("InstancePosition", VertexElementSemantic.TextureCoordinate, VertexElementFormat.Float3),
-            new VertexElementDescription("InstanceColorValue", VertexElementSemantic.TextureCoordinate, VertexElementFormat.Float1),
-            new VertexElementDescription("InstanceRadius", VertexElementSemantic.TextureCoordinate, VertexElementFormat.Float1)
-        )
-    };
+            var poreVertexLayouts = new[]
+            {
+                new VertexLayoutDescription(
+                    new VertexElementDescription("Position", VertexElementSemantic.TextureCoordinate, VertexElementFormat.Float3)
+                ),
+                new VertexLayoutDescription(
+                    (uint)Marshal.SizeOf<PoreInstanceData>(), 1,
+                    new VertexElementDescription("InstancePosition", VertexElementSemantic.TextureCoordinate, VertexElementFormat.Float3),
+                    new VertexElementDescription("InstanceColorValue", VertexElementSemantic.TextureCoordinate, VertexElementFormat.Float1),
+                    new VertexElementDescription("InstanceRadius", VertexElementSemantic.TextureCoordinate, VertexElementFormat.Float1)
+                )
+            };
 
-    _porePipeline = factory.CreateGraphicsPipeline(new GraphicsPipelineDescription(
-        BlendStateDescription.SingleAlphaBlend,
-        new DepthStencilStateDescription(true, true, ComparisonKind.LessEqual),
-        RasterizerStateDescription.Default,
-        PrimitiveTopology.TriangleList,
-        new ShaderSetDescription(poreVertexLayouts, new[] { vertexShader, fragmentShader }),
-        new[] { _poreResourceLayout },
-        _framebuffer.OutputDescription));
-}
+            _porePipeline = factory.CreateGraphicsPipeline(new GraphicsPipelineDescription(
+                BlendStateDescription.SingleAlphaBlend,
+                new DepthStencilStateDescription(true, true, ComparisonKind.LessEqual),
+                RasterizerStateDescription.Default,
+                PrimitiveTopology.TriangleList,
+                new ShaderSetDescription(poreVertexLayouts, new[] { vertexShader, fragmentShader }),
+                new[] { _poreResourceLayout },
+                _framebuffer.OutputDescription));
+        }
+
+        private void CreateThroatResourcesGLSL(ResourceFactory factory)
+        {
+            string vertexShader = @"
+#version 450
+layout(location = 0) in vec3 in_Position;
+layout(location = 1) in float in_ColorValue;
+
+layout(set = 0, binding = 0) uniform Constants { mat4 VP; vec4 CamPos; vec4 Ramp; vec4 SizeInfo; };
+
+layout(location = 0) out float out_ColorValue;
+
+void main() 
+{
+    gl_Position = VP * vec4(in_Position, 1.0);
+    out_ColorValue = in_ColorValue;
+}";
+
+            string fragmentShader = @"
+#version 450
+layout(location = 0) in float in_ColorValue;
+layout(location = 0) out vec4 out_Color;
+
+layout(set = 0, binding = 0) uniform Constants { mat4 VP; vec4 CamPos; vec4 Ramp; vec4 SizeInfo; };
+layout(set = 0, binding = 1) uniform texture2D ColorRamp;
+layout(set = 0, binding = 2) uniform sampler ColorSampler;
+
+void main() 
+{
+    float normalizedValue = clamp((in_ColorValue - Ramp.x) * Ramp.z, 0.0, 1.0);
+    vec3 color = texture(sampler2D(ColorRamp, ColorSampler), vec2(normalizedValue, 0.5)).rgb;
+    out_Color = vec4(color, 1.0);
+}";
+
+            var shaderSet = factory.CreateFromSpirv(
+                new ShaderDescription(ShaderStages.Vertex, Encoding.UTF8.GetBytes(vertexShader), "main"),
+                new ShaderDescription(ShaderStages.Fragment, Encoding.UTF8.GetBytes(fragmentShader), "main"));
+
+            _throatConstantsBuffer = factory.CreateBuffer(new BufferDescription((uint)Marshal.SizeOf<Constants>(), BufferUsage.UniformBuffer | BufferUsage.Dynamic));
+            
+            _throatResourceLayout = factory.CreateResourceLayout(new ResourceLayoutDescription(
+                new ResourceLayoutElementDescription("Constants", ResourceKind.UniformBuffer, ShaderStages.Vertex | ShaderStages.Fragment),
+                new ResourceLayoutElementDescription("ColorRamp", ResourceKind.TextureReadOnly, ShaderStages.Fragment),
+                new ResourceLayoutElementDescription("ColorSampler", ResourceKind.Sampler, ShaderStages.Fragment)));
+            
+            var sampler = factory.CreateSampler(new SamplerDescription(
+                SamplerAddressMode.Clamp, SamplerAddressMode.Clamp, SamplerAddressMode.Clamp,
+                SamplerFilter.MinLinear_MagLinear_MipLinear, null, 0, 0, 0, 0, SamplerBorderColor.TransparentBlack));
+            
+            _throatResourceSet = factory.CreateResourceSet(new ResourceSetDescription(_throatResourceLayout, _throatConstantsBuffer, _colorRampTexture, sampler));
+            
+            var rasterizerState = RasterizerStateDescription.Default;
+           
+            
+            _throatPipeline = factory.CreateGraphicsPipeline(new GraphicsPipelineDescription(
+                BlendStateDescription.SingleAlphaBlend,
+                new DepthStencilStateDescription(true, true, ComparisonKind.LessEqual),
+                rasterizerState,
+                PrimitiveTopology.LineList,
+                new ShaderSetDescription(new[] {
+                    new VertexLayoutDescription(
+                        new VertexElementDescription("in_Position", VertexElementSemantic.TextureCoordinate, VertexElementFormat.Float3),
+                        new VertexElementDescription("in_ColorValue", VertexElementSemantic.TextureCoordinate, VertexElementFormat.Float1)
+                    )
+                }, shaderSet),
+                new[] { _throatResourceLayout },
+                _framebuffer.OutputDescription));
+        }
 
         private void CreateThroatResourcesMetal(ResourceFactory factory)
         {
-            var poreDict = _dataset.Pores.ToDictionary(p => p.ID, p => p.Position);
-            var throatVertices = new List<Vector3>();
-            var throatColors = new List<float>();
-
-            foreach (var throat in _dataset.Throats)
-            {
-                if (poreDict.TryGetValue(throat.Pore1ID, out var p1) && poreDict.TryGetValue(throat.Pore2ID, out var p2))
-                {
-                    throatVertices.Add(p1);
-                    throatVertices.Add(p2);
-                    throatColors.Add(throat.Radius);
-                    throatColors.Add(throat.Radius);
-                }
-            }
-            _throatVertexCount = (uint)throatVertices.Count;
-            if (_throatVertexCount == 0) return;
-
-            float[] vertexData = new float[_throatVertexCount * 4];
-            for (int i = 0; i < _throatVertexCount; i++)
-            {
-                vertexData[i * 4 + 0] = throatVertices[i].X;
-                vertexData[i * 4 + 1] = throatVertices[i].Y;
-                vertexData[i * 4 + 2] = throatVertices[i].Z;
-                vertexData[i * 4 + 3] = throatColors[i];
-            }
-            
-            _throatVertexBuffer = factory.CreateBuffer(new BufferDescription((uint)(vertexData.Length * 4), BufferUsage.VertexBuffer));
-            VeldridManager.GraphicsDevice.UpdateBuffer(_throatVertexBuffer, 0, vertexData);
-
-            // Metal Throat Shaders
             string metalThroatVertex = @"
 #include <metal_stdlib>
 using namespace metal;
@@ -354,7 +505,8 @@ struct Constants {
 };
 
 struct VertexIn {
-    float4 PositionAndColor [[attribute(0)]];
+    float3 Position [[attribute(0)]];
+    float ColorValue [[attribute(1)]];
 };
 
 struct VertexOut {
@@ -367,8 +519,8 @@ vertex VertexOut throat_vertex_main(
     constant Constants& constants [[buffer(0)]]
 ) {
     VertexOut out;
-    out.Position = constants.ViewProjection * float4(in.PositionAndColor.xyz, 1.0);
-    out.ColorValue = in.PositionAndColor.w;
+    out.Position = constants.ViewProjection * float4(in.Position, 1.0);
+    out.ColorValue = in.ColorValue;
     return out;
 }";
 
@@ -426,240 +578,80 @@ fragment float4 throat_fragment_main(
                 RasterizerStateDescription.Default,
                 PrimitiveTopology.LineList,
                 new ShaderSetDescription(new[] {
-                    new VertexLayoutDescription(new VertexElementDescription("PositionAndColor", VertexElementSemantic.TextureCoordinate, VertexElementFormat.Float4))
+                    new VertexLayoutDescription(
+                        new VertexElementDescription("Position", VertexElementSemantic.TextureCoordinate, VertexElementFormat.Float3),
+                        new VertexElementDescription("ColorValue", VertexElementSemantic.TextureCoordinate, VertexElementFormat.Float1)
+                    )
                 }, new[] { vertexShader, fragmentShader }),
                 new[] { _throatResourceLayout },
                 _framebuffer.OutputDescription));
         }
 
-        #endregion
-
-        #region GLSL Shader Resources
-
-        private void CreatePoreResourcesGLSL(ResourceFactory factory)
+        private (Vector3[] vertices, ushort[] indices) CreateSphereGeometry()
         {
-            // Sphere Impostor (Billboard) Geometry
-            Vector3[] quadVertices =
+            // Create icosahedron vertices
+            float t = (1.0f + MathF.Sqrt(5.0f)) / 2.0f;
+            var vertices = new List<Vector3>
             {
-                new Vector3(-0.5f, -0.5f, 0),
-                new Vector3(0.5f, -0.5f, 0),
-                new Vector3(0.5f, 0.5f, 0),
-                new Vector3(-0.5f, 0.5f, 0)
-            };
-            ushort[] quadIndices = { 0, 1, 2, 0, 2, 3 };
-
-            _poreVertexBuffer = factory.CreateBuffer(new BufferDescription((uint)(quadVertices.Length * 12), BufferUsage.VertexBuffer));
-            VeldridManager.GraphicsDevice.UpdateBuffer(_poreVertexBuffer, 0, quadVertices);
-            _poreIndexBuffer = factory.CreateBuffer(new BufferDescription((uint)(quadIndices.Length * 2), BufferUsage.IndexBuffer));
-            VeldridManager.GraphicsDevice.UpdateBuffer(_poreIndexBuffer, 0, quadIndices);
-
-            var instanceData = _dataset.Pores.Select(p => new PoreInstanceData
-            {
-                Position = p.Position,
-                ColorValue = p.Radius,
-                Radius = p.Radius
-            }).ToArray();
-
-            _poreInstanceCount = instanceData.Length;
-            if (_poreInstanceCount == 0) return;
-
-            _poreInstanceBuffer = factory.CreateBuffer(new BufferDescription((uint)(_poreInstanceCount * Marshal.SizeOf<PoreInstanceData>()), BufferUsage.VertexBuffer));
-            VeldridManager.GraphicsDevice.UpdateBuffer(_poreInstanceBuffer, 0, instanceData);
-            
-            // GLSL Shaders
-            string vertexShader = @"
-#version 450
-layout(location = 0) in vec3 in_Position;
-layout(location = 1) in vec3 in_InstancePosition;
-layout(location = 2) in float in_InstanceColorValue;
-layout(location = 3) in float in_InstanceRadius;
-
-layout(set = 0, binding = 0) uniform Constants
-{
-    mat4 ViewProjection;
-    vec4 CameraPosition;
-    vec4 ColorRampInfo;
-    vec4 SizeInfo;
-};
-
-layout(location = 0) out vec3 out_FragPos;
-layout(location = 1) out vec3 out_Normal;
-layout(location = 2) out float out_ColorValue;
-
-void main() 
-{
-    vec3 toCamera = normalize(CameraPosition.xyz - in_InstancePosition);
-    vec3 right = normalize(cross(vec3(0,1,0), toCamera));
-    vec3 up = cross(toCamera, right);
-    
-    float radius = in_InstanceRadius * SizeInfo.x;
-    vec3 worldPos = in_InstancePosition + (right * in_Position.x + up * in_Position.y) * radius;
-    gl_Position = ViewProjection * vec4(worldPos, 1.0);
-    
-    out_FragPos = in_Position;
-    out_Normal = vec3(in_Position.xy, sqrt(max(0.0, 0.25 - dot(in_Position.xy, in_Position.xy))));
-    out_ColorValue = in_InstanceColorValue;
-}";
-
-            string fragmentShader = @"
-#version 450
-layout(location = 0) in vec3 in_FragPos;
-layout(location = 1) in vec3 in_Normal;
-layout(location = 2) in float in_ColorValue;
-layout(location = 0) out vec4 out_Color;
-
-layout(set = 0, binding = 0) uniform Constants { mat4 VP; vec4 CamPos; vec4 ColorRampInfo; vec4 SizeInfo; };
-layout(set = 0, binding = 1) uniform texture2D ColorRamp;
-layout(set = 0, binding = 2) uniform sampler ColorSampler;
-
-void main() 
-{
-    if (dot(in_FragPos.xy, in_FragPos.xy) > 0.25) discard;
-    
-    vec3 normal = normalize(in_Normal);
-    vec3 lightDir = normalize(vec3(1, 1, 1));
-    float diffuse = max(dot(normal, lightDir), 0.0) * 0.7 + 0.3;
-    
-    float normalizedValue = clamp((in_ColorValue - ColorRampInfo.x) * ColorRampInfo.z, 0.0, 1.0);
-    vec3 color = texture(sampler2D(ColorRamp, ColorSampler), vec2(normalizedValue, 0.5)).rgb;
-    
-    out_Color = vec4(color * diffuse, 1.0);
-}";
-
-            // Pipeline
-            _poreConstantsBuffer = factory.CreateBuffer(new BufferDescription((uint)Marshal.SizeOf<Constants>(), BufferUsage.UniformBuffer | BufferUsage.Dynamic));
-
-            _poreResourceLayout = factory.CreateResourceLayout(new ResourceLayoutDescription(
-                new ResourceLayoutElementDescription("Constants", ResourceKind.UniformBuffer, ShaderStages.Vertex | ShaderStages.Fragment),
-                new ResourceLayoutElementDescription("ColorRamp", ResourceKind.TextureReadOnly, ShaderStages.Fragment),
-                new ResourceLayoutElementDescription("ColorSampler", ResourceKind.Sampler, ShaderStages.Fragment)
-            ));
-
-            var sampler = factory.CreateSampler(new SamplerDescription(
-                SamplerAddressMode.Clamp, SamplerAddressMode.Clamp, SamplerAddressMode.Clamp,
-                SamplerFilter.MinLinear_MagLinear_MipLinear, null, 0, 0, 0, 0, SamplerBorderColor.TransparentBlack));
-
-            _poreResourceSet = factory.CreateResourceSet(new ResourceSetDescription(_poreResourceLayout, _poreConstantsBuffer, _colorRampTexture, sampler));
-
-            var shaderSet = factory.CreateFromSpirv(
-                new ShaderDescription(ShaderStages.Vertex, Encoding.UTF8.GetBytes(vertexShader), "main"),
-                new ShaderDescription(ShaderStages.Fragment, Encoding.UTF8.GetBytes(fragmentShader), "main"));
-
-            var poreVertexLayouts = new[]
-            {
-                new VertexLayoutDescription(
-                    new VertexElementDescription("in_Position", VertexElementSemantic.TextureCoordinate, VertexElementFormat.Float3)
-                ),
-                new VertexLayoutDescription(
-                    (uint)Marshal.SizeOf<PoreInstanceData>(), 1,
-                    new VertexElementDescription("in_InstancePosition", VertexElementSemantic.TextureCoordinate, VertexElementFormat.Float3),
-                    new VertexElementDescription("in_InstanceColorValue", VertexElementSemantic.TextureCoordinate, VertexElementFormat.Float1),
-                    new VertexElementDescription("in_InstanceRadius", VertexElementSemantic.TextureCoordinate, VertexElementFormat.Float1)
-                )
+                new Vector3(-1, t, 0).Normalized(),
+                new Vector3(1, t, 0).Normalized(),
+                new Vector3(-1, -t, 0).Normalized(),
+                new Vector3(1, -t, 0).Normalized(),
+                new Vector3(0, -1, t).Normalized(),
+                new Vector3(0, 1, t).Normalized(),
+                new Vector3(0, -1, -t).Normalized(),
+                new Vector3(0, 1, -t).Normalized(),
+                new Vector3(t, 0, -1).Normalized(),
+                new Vector3(t, 0, 1).Normalized(),
+                new Vector3(-t, 0, -1).Normalized(),
+                new Vector3(-t, 0, 1).Normalized()
             };
 
-            _porePipeline = factory.CreateGraphicsPipeline(new GraphicsPipelineDescription(
-                BlendStateDescription.SingleAlphaBlend,
-                new DepthStencilStateDescription(true, true, ComparisonKind.LessEqual),
-                RasterizerStateDescription.Default,
-                PrimitiveTopology.TriangleList,
-                new ShaderSetDescription(poreVertexLayouts, shaderSet),
-                new[] { _poreResourceLayout },
-                _framebuffer.OutputDescription));
-        }
-
-        private void CreateThroatResourcesGLSL(ResourceFactory factory)
-        {
-            var poreDict = _dataset.Pores.ToDictionary(p => p.ID, p => p.Position);
-            var throatVertices = new List<Vector3>();
-            var throatColors = new List<float>();
-
-            foreach (var throat in _dataset.Throats)
+            // Create icosahedron indices
+            var indices = new List<ushort>
             {
-                if (poreDict.TryGetValue(throat.Pore1ID, out var p1) && poreDict.TryGetValue(throat.Pore2ID, out var p2))
-                {
-                    throatVertices.Add(p1);
-                    throatVertices.Add(p2);
-                    throatColors.Add(throat.Radius);
-                    throatColors.Add(throat.Radius);
-                }
-            }
-            _throatVertexCount = (uint)throatVertices.Count;
-            if (_throatVertexCount == 0) return;
+                0,11,5, 0,5,1, 0,1,7, 0,7,10, 0,10,11,
+                1,5,9, 5,11,4, 11,10,2, 10,7,6, 7,1,8,
+                3,9,4, 3,4,2, 3,2,6, 3,6,8, 3,8,9,
+                4,9,5, 2,4,11, 6,2,10, 8,6,7, 9,8,1
+            };
 
-            float[] vertexData = new float[_throatVertexCount * 4];
-            for (int i = 0; i < _throatVertexCount; i++)
+            // Subdivide once for smoother sphere
+            var newVertices = new List<Vector3>(vertices);
+            var newIndices = new List<ushort>();
+            var midpointCache = new Dictionary<(int, int), int>();
+
+            int GetMidpoint(int v1, int v2)
             {
-                vertexData[i * 4 + 0] = throatVertices[i].X;
-                vertexData[i * 4 + 1] = throatVertices[i].Y;
-                vertexData[i * 4 + 2] = throatVertices[i].Z;
-                vertexData[i * 4 + 3] = throatColors[i];
+                var key = v1 < v2 ? (v1, v2) : (v2, v1);
+                if (midpointCache.TryGetValue(key, out int mid))
+                    return mid;
+
+                var midPos = (newVertices[v1] + newVertices[v2]).Normalized();
+                mid = newVertices.Count;
+                newVertices.Add(midPos);
+                midpointCache[key] = mid;
+                return mid;
             }
-            
-            _throatVertexBuffer = factory.CreateBuffer(new BufferDescription((uint)(vertexData.Length * 4), BufferUsage.VertexBuffer));
-            VeldridManager.GraphicsDevice.UpdateBuffer(_throatVertexBuffer, 0, vertexData);
 
-            string vertexShader = @"
-#version 450
-layout(location = 0) in vec4 in_PositionAndColor;
+            for (int i = 0; i < indices.Count; i += 3)
+            {
+                int v1 = indices[i];
+                int v2 = indices[i + 1];
+                int v3 = indices[i + 2];
 
-layout(set = 0, binding = 0) uniform Constants { mat4 VP; vec4 CamPos; vec4 Ramp; vec4 SizeInfo; };
+                int a = GetMidpoint(v1, v2);
+                int b = GetMidpoint(v2, v3);
+                int c = GetMidpoint(v3, v1);
 
-layout(location = 0) out float out_ColorValue;
+                newIndices.Add((ushort)v1); newIndices.Add((ushort)a); newIndices.Add((ushort)c);
+                newIndices.Add((ushort)v2); newIndices.Add((ushort)b); newIndices.Add((ushort)a);
+                newIndices.Add((ushort)v3); newIndices.Add((ushort)c); newIndices.Add((ushort)b);
+                newIndices.Add((ushort)a); newIndices.Add((ushort)b); newIndices.Add((ushort)c);
+            }
 
-void main() 
-{
-    gl_Position = VP * vec4(in_PositionAndColor.xyz, 1.0);
-    out_ColorValue = in_PositionAndColor.w;
-}";
-
-            string fragmentShader = @"
-#version 450
-layout(location = 0) in float in_ColorValue;
-layout(location = 0) out vec4 out_Color;
-
-layout(set = 0, binding = 0) uniform Constants { mat4 VP; vec4 CamPos; vec4 Ramp; vec4 SizeInfo; };
-layout(set = 0, binding = 1) uniform texture2D ColorRamp;
-layout(set = 0, binding = 2) uniform sampler ColorSampler;
-
-void main() 
-{
-    float normalizedValue = clamp((in_ColorValue - Ramp.x) * Ramp.z, 0.0, 1.0);
-    out_Color = texture(sampler2D(ColorRamp, ColorSampler), vec2(normalizedValue, 0.5));
-}";
-
-            var shaderSet = factory.CreateFromSpirv(
-                new ShaderDescription(ShaderStages.Vertex, Encoding.UTF8.GetBytes(vertexShader), "main"),
-                new ShaderDescription(ShaderStages.Fragment, Encoding.UTF8.GetBytes(fragmentShader), "main"));
-
-            _throatConstantsBuffer = factory.CreateBuffer(new BufferDescription((uint)Marshal.SizeOf<Constants>(), BufferUsage.UniformBuffer | BufferUsage.Dynamic));
-            
-            _throatResourceLayout = factory.CreateResourceLayout(new ResourceLayoutDescription(
-                new ResourceLayoutElementDescription("Constants", ResourceKind.UniformBuffer, ShaderStages.Vertex | ShaderStages.Fragment),
-                new ResourceLayoutElementDescription("ColorRamp", ResourceKind.TextureReadOnly, ShaderStages.Fragment),
-                new ResourceLayoutElementDescription("ColorSampler", ResourceKind.Sampler, ShaderStages.Fragment)));
-            
-            var sampler = factory.CreateSampler(new SamplerDescription(
-                SamplerAddressMode.Clamp, SamplerAddressMode.Clamp, SamplerAddressMode.Clamp,
-                SamplerFilter.MinLinear_MagLinear_MipLinear, null, 0, 0, 0, 0, SamplerBorderColor.TransparentBlack));
-            
-            _throatResourceSet = factory.CreateResourceSet(new ResourceSetDescription(_throatResourceLayout, _throatConstantsBuffer, _colorRampTexture, sampler));
-            
-            _throatPipeline = factory.CreateGraphicsPipeline(new GraphicsPipelineDescription(
-                BlendStateDescription.SingleAlphaBlend,
-                new DepthStencilStateDescription(true, true, ComparisonKind.LessEqual),
-                RasterizerStateDescription.Default,
-                PrimitiveTopology.LineList,
-                new ShaderSetDescription(new[] {
-                    new VertexLayoutDescription(new VertexElementDescription("PositionAndColor", VertexElementSemantic.TextureCoordinate, VertexElementFormat.Float4))
-                }, shaderSet),
-                new[] { _throatResourceLayout },
-                _framebuffer.OutputDescription));
+            return (newVertices.ToArray(), newIndices.ToArray());
         }
-        
-        #endregion
-
-        #region Resource Creation Helpers
 
         private void CreateColorRampTexture(ResourceFactory factory)
         {
@@ -668,6 +660,7 @@ void main()
             for (int i = 0; i < mapSize; i++)
             {
                 float t = i / (float)(mapSize - 1);
+                // Rainbow gradient
                 float r = Math.Clamp(1.5f - Math.Abs(4.0f * t - 3.0f), 0.0f, 1.0f);
                 float g = Math.Clamp(1.5f - Math.Abs(4.0f * t - 2.0f), 0.0f, 1.0f);
                 float b = Math.Clamp(1.5f - Math.Abs(4.0f * t - 1.0f), 0.0f, 1.0f);
@@ -719,13 +712,19 @@ void main()
             ImGui.Text("Pore Size:");
             ImGui.SameLine();
             ImGui.SetNextItemWidth(100);
-            ImGui.SliderFloat("##PoreSize", ref _poreSizeMultiplier, 0.1f, 5.0f);
+            if (ImGui.SliderFloat("##PoreSize", ref _poreSizeMultiplier, 0.1f, 5.0f))
+            {
+                UpdateConstantBuffers();
+            }
 
             ImGui.SameLine();
             ImGui.Text("Throat Size:");
             ImGui.SameLine();
             ImGui.SetNextItemWidth(100);
-            ImGui.SliderFloat("##ThroatSize", ref _throatSizeMultiplier, 0.1f, 5.0f);
+            if (ImGui.SliderFloat("##ThroatSize", ref _throatSizeMultiplier, 0.1f, 5.0f))
+            {
+                UpdateConstantBuffers();
+            }
 
             ImGui.SameLine();
             ImGui.Separator();
@@ -739,15 +738,16 @@ void main()
             {
                 TakeAndSaveScreenshot(_screenshotDialog.SelectedPath);
             }
-            
-            ImGui.SameLine();
-            ImGui.Separator();
-            ImGui.SameLine();
-            ImGui.TextDisabled($"[{VeldridManager.GraphicsDevice.BackendType}]");
         }
 
         public void DrawContent(ref float zoom, ref Vector2 pan)
         {
+            if (_pendingGeometryRebuild)
+            {
+                RebuildGeometryFromDataset();
+                _pendingGeometryRebuild = false;
+            }
+            
             Render();
             
             var textureId = _renderTextureManager.GetImGuiTextureId();
@@ -764,61 +764,183 @@ void main()
             if (ImGui.IsItemHovered())
             {
                 HandleMouseInput();
+                
+                // Handle selection with left click
+                if (ImGui.IsMouseClicked(ImGuiMouseButton.Left) && !ImGui.IsKeyDown(ImGuiKey.LeftShift))
+                {
+                    var mousePos = ImGui.GetMousePos() - imagePos;
+                    SelectPoreAtPosition(mousePos, availableSize);
+                }
             }
 
             DrawLegend(imagePos, availableSize);
             DrawStatistics(imagePos, availableSize);
+            
+            // Draw selected pore info
+            if (_selectedPore != null)
+            {
+                DrawSelectedPoreInfo(imagePos, availableSize);
+            }
         }
-private void RebuildGeometryFromDataset()
-{
-    var factory = VeldridManager.Factory;
 
-    var poreInstances = _dataset.Pores.Select(p => new PoreInstanceData
-    {
-        Position = p.Position,
-        ColorValue = _colorByIndex == 2 ? p.Connections : p.Radius,
-        Radius = p.Radius
-    }).ToArray();
-    _poreInstanceCount = poreInstances.Length;
-
-    _poreInstanceBuffer?.Dispose();
-    uint instanceSize = (uint)System.Runtime.InteropServices.Marshal.SizeOf<PoreInstanceData>();
-    _poreInstanceBuffer = factory.CreateBuffer(new BufferDescription((uint)(instanceSize * Math.Max(1, _poreInstanceCount)), BufferUsage.VertexBuffer));
-    if (_poreInstanceCount > 0)
-        VeldridManager.GraphicsDevice.UpdateBuffer(_poreInstanceBuffer, 0, poreInstances);
-
-    var poreById = _dataset.Pores.ToDictionary(p => p.ID, p => p);
-    var verts = new System.Collections.Generic.List<Vector3>(Math.Max(2, _dataset.Throats.Count * 2));
-    foreach (var t in _dataset.Throats)
-    {
-        if (poreById.TryGetValue(t.Pore1ID, out var p1) && poreById.TryGetValue(t.Pore2ID, out var p2))
+        private void SelectPoreAtPosition(Vector2 mousePos, Vector2 viewSize)
         {
-            verts.Add(p1.Position);
-            verts.Add(p2.Position);
+            // Convert mouse position to normalized device coordinates
+            float ndcX = (mousePos.X / viewSize.X) * 2.0f - 1.0f;
+            float ndcY = 1.0f - (mousePos.Y / viewSize.Y) * 2.0f;
+
+            // Create ray from camera
+            Matrix4x4.Invert(_projMatrix, out var invProj);
+            Matrix4x4.Invert(_viewMatrix, out var invView);
+            
+            var nearPoint = Vector3.Transform(new Vector3(ndcX, ndcY, 0), invProj);
+            nearPoint = Vector3.Transform(nearPoint, invView);
+            
+            var farPoint = Vector3.Transform(new Vector3(ndcX, ndcY, 1), invProj);
+            farPoint = Vector3.Transform(farPoint, invView);
+            
+            var rayDir = Vector3.Normalize(farPoint - nearPoint);
+            
+            // Find closest pore to ray
+            _selectedPore = null;
+            _selectedPoreId = -1;
+            float minDist = float.MaxValue;
+            
+            foreach (var pore in _dataset.Pores)
+            {
+                // Ray-sphere intersection test
+                var toSphere = pore.Position - _cameraPosition;
+                float t = Vector3.Dot(toSphere, rayDir);
+                if (t < 0) continue;
+                
+                var closestPoint = _cameraPosition + rayDir * t;
+                float dist = Vector3.Distance(closestPoint, pore.Position);
+                
+                float sphereRadius = pore.Radius * _poreSizeMultiplier * 0.1f;
+                if (dist < sphereRadius && t < minDist)
+                {
+                    minDist = t;
+                    _selectedPore = pore;
+                    _selectedPoreId = pore.ID;
+                }
+            }
         }
-    }
-    _throatVertexCount = (uint)verts.Count;
 
-    _throatVertexBuffer?.Dispose();
-    if (_throatVertexCount > 0)
-    {
-        _throatVertexBuffer = factory.CreateBuffer(new BufferDescription((uint)(sizeof(float) * 3 * _throatVertexCount), BufferUsage.VertexBuffer));
-        VeldridManager.GraphicsDevice.UpdateBuffer(_throatVertexBuffer, 0, verts.ToArray());
-    }
-    else
-    {
-        _throatVertexBuffer = factory.CreateBuffer(new BufferDescription(12, BufferUsage.VertexBuffer)); 
-    }
+        private void DrawSelectedPoreInfo(Vector2 viewPos, Vector2 viewSize)
+        {
+            if (_selectedPore == null) return;
+            
+            var padding = 10;
+            var infoWidth = 300;
+            var infoHeight = 180;
+            var infoPos = new Vector2(viewPos.X + padding, viewPos.Y + padding);
+            
+            var drawList = ImGui.GetForegroundDrawList();
+            
+            // Background
+            drawList.AddRectFilled(infoPos, new Vector2(infoPos.X + infoWidth, infoPos.Y + infoHeight),
+                ImGui.GetColorU32(new Vector4(0, 0, 0, 0.8f)), 5);
+            
+            // Content
+            var textPos = infoPos + new Vector2(10, 10);
+            uint textColor = 0xFFFFFFFF;
+            uint valueColor = 0xFF00FFFF;
+            
+            drawList.AddText(textPos, textColor, $"Selected Pore #{_selectedPore.ID}");
+            textPos.Y += 20;
+            
+            drawList.AddText(textPos, textColor, "Position:");
+            textPos.Y += 16;
+            drawList.AddText(textPos + new Vector2(10, 0), valueColor, 
+                $"X: {_selectedPore.Position.X:F2}, Y: {_selectedPore.Position.Y:F2}, Z: {_selectedPore.Position.Z:F2}");
+            textPos.Y += 18;
+            
+            drawList.AddText(textPos, textColor, $"Radius: ");
+            drawList.AddText(textPos + new Vector2(60, 0), valueColor, $"{_selectedPore.Radius:F3} vox ({_selectedPore.Radius * _dataset.VoxelSize:F2} µm)");
+            textPos.Y += 18;
+            
+            drawList.AddText(textPos, textColor, $"Volume: ");
+            drawList.AddText(textPos + new Vector2(60, 0), valueColor, $"{_selectedPore.VolumeVoxels:F0} vox³ ({_selectedPore.VolumePhysical:F2} µm³)");
+            textPos.Y += 18;
+            
+            drawList.AddText(textPos, textColor, $"Surface Area: ");
+            drawList.AddText(textPos + new Vector2(100, 0), valueColor, $"{_selectedPore.Area:F1} vox²");
+            textPos.Y += 18;
+            
+            drawList.AddText(textPos, textColor, $"Connections: ");
+            drawList.AddText(textPos + new Vector2(85, 0), valueColor, $"{_selectedPore.Connections}");
+        }
 
-    UpdateConstantBuffers();
-}
+        private void RebuildGeometryFromDataset()
+        {
+            var factory = VeldridManager.Factory;
+
+            // Build pore instances
+            var poreInstances = new List<PoreInstanceData>();
+            foreach (var p in _dataset.Pores)
+            {
+                float colorValue = GetPoreColorValue(p);
+                poreInstances.Add(new PoreInstanceData(p.Position, colorValue, p.Radius));
+            }
+            _poreInstanceCount = poreInstances.Count;
+
+            // Create or update instance buffer
+            _poreInstanceBuffer?.Dispose();
+            if (_poreInstanceCount > 0)
+            {
+                uint instanceSize = (uint)Marshal.SizeOf<PoreInstanceData>();
+                _poreInstanceBuffer = factory.CreateBuffer(new BufferDescription(instanceSize * (uint)_poreInstanceCount, BufferUsage.VertexBuffer));
+                VeldridManager.GraphicsDevice.UpdateBuffer(_poreInstanceBuffer, 0, poreInstances.ToArray());
+            }
+            else
+            {
+                _poreInstanceBuffer = factory.CreateBuffer(new BufferDescription(20, BufferUsage.VertexBuffer)); // Minimal buffer
+            }
+
+            // Build throat vertices
+            var poreById = _dataset.Pores.ToDictionary(p => p.ID, p => p);
+            var throatVertices = new List<ThroatVertexData>();
+            
+            foreach (var t in _dataset.Throats)
+            {
+                if (poreById.TryGetValue(t.Pore1ID, out var p1) && poreById.TryGetValue(t.Pore2ID, out var p2))
+                {
+                    throatVertices.Add(new ThroatVertexData(p1.Position, t.Radius));
+                    throatVertices.Add(new ThroatVertexData(p2.Position, t.Radius));
+                }
+            }
+            _throatVertexCount = (uint)throatVertices.Count;
+
+            // Create or update throat buffer
+            _throatVertexBuffer?.Dispose();
+            if (_throatVertexCount > 0)
+            {
+                uint vertSize = (uint)Marshal.SizeOf<ThroatVertexData>();
+                _throatVertexBuffer = factory.CreateBuffer(new BufferDescription(vertSize * _throatVertexCount, BufferUsage.VertexBuffer));
+                VeldridManager.GraphicsDevice.UpdateBuffer(_throatVertexBuffer, 0, throatVertices.ToArray());
+            }
+            else
+            {
+                _throatVertexBuffer = factory.CreateBuffer(new BufferDescription(16, BufferUsage.VertexBuffer));
+            }
+
+            UpdateConstantBuffers();
+        }
+
+        private float GetPoreColorValue(Pore p)
+        {
+            return _colorByIndex switch
+            {
+                0 => p.Radius, // Pore Radius
+                1 => p.Radius, // For throat radius, still use pore radius (will be overridden by throat data)
+                2 => p.Connections, // Connections
+                3 => p.VolumeVoxels, // Volume
+                _ => p.Radius
+            };
+        }
+
         private void Render()
         {
-            if (_pendingGeometryRebuild)
-            {
-                RebuildGeometryFromDataset();
-                _pendingGeometryRebuild = false;
-            }
             UpdateConstantBuffers();
 
             _commandList.Begin();
@@ -836,12 +958,13 @@ private void RebuildGeometryFromDataset()
 
             if (_showPores && _poreInstanceCount > 0)
             {
+                var indexCount = _poreIndexBuffer.SizeInBytes / sizeof(ushort);
                 _commandList.SetPipeline(_porePipeline);
                 _commandList.SetGraphicsResourceSet(0, _poreResourceSet);
                 _commandList.SetVertexBuffer(0, _poreVertexBuffer);
                 _commandList.SetVertexBuffer(1, _poreInstanceBuffer);
                 _commandList.SetIndexBuffer(_poreIndexBuffer, IndexFormat.UInt16);
-                _commandList.DrawIndexed(6, (uint)_poreInstanceCount, 0, 0, 0);
+                _commandList.DrawIndexed((uint)indexCount, (uint)_poreInstanceCount, 0, 0, 0);
             }
 
             _commandList.End();
@@ -866,15 +989,19 @@ private void RebuildGeometryFromDataset()
                     minVal = _dataset.Pores.Any() ? _dataset.Pores.Min(p => p.Connections) : 0;
                     maxVal = _dataset.Pores.Any() ? _dataset.Pores.Max(p => p.Connections) : 1;
                     break;
+                case 3: // Volume
+                    minVal = _dataset.Pores.Any() ? _dataset.Pores.Min(p => p.VolumeVoxels) : 0;
+                    maxVal = _dataset.Pores.Any() ? _dataset.Pores.Max(p => p.VolumeVoxels) : 1;
+                    break;
             }
-            if (maxVal <= minVal) maxVal = minVal + 0.001f;
+            if (Math.Abs(maxVal - minVal) < 0.001f) maxVal = minVal + 1.0f;
 
             var constants = new Constants
             {
                 ViewProjection = _viewMatrix * _projMatrix,
                 CameraPosition = new Vector4(_cameraPosition, 1),
                 ColorRampInfo = new Vector4(minVal, maxVal, 1.0f / (maxVal - minVal), 0),
-                SizeInfo = new Vector4(_poreSizeMultiplier, _throatSizeMultiplier, 0, 0)
+                SizeInfo = new Vector4(_poreSizeMultiplier, _throatSizeMultiplier, _throatLineWidth, 0)
             };
 
             if (_poreConstantsBuffer != null)
@@ -883,116 +1010,21 @@ private void RebuildGeometryFromDataset()
                 VeldridManager.GraphicsDevice.UpdateBuffer(_throatConstantsBuffer, 0, ref constants);
         }
 
-        private void DrawLegend(Vector2 viewPos, Vector2 viewSize)
-        {
-            var drawList = ImGui.GetForegroundDrawList();
-            float legendWidth = 20;
-            float legendHeight = 200;
-            float padding = 10;
-
-            Vector2 legendPos = new Vector2(
-                viewPos.X + viewSize.X - legendWidth - padding,
-                viewPos.Y + padding
-            );
-            
-            int numSteps = 20;
-            float stepHeight = legendHeight / numSteps;
-            for (int i = 0; i < numSteps; i++)
-            {
-                float t1 = i / (float)numSteps;
-                float t2 = (i + 1) / (float)numSteps;
-
-                float r1 = Math.Clamp(1.5f - Math.Abs(4.0f * t1 - 3.0f), 0.0f, 1.0f);
-                float g1 = Math.Clamp(1.5f - Math.Abs(4.0f * t1 - 2.0f), 0.0f, 1.0f);
-                float b1 = Math.Clamp(1.5f - Math.Abs(4.0f * t1 - 1.0f), 0.0f, 1.0f);
-
-                float r2 = Math.Clamp(1.5f - Math.Abs(4.0f * t2 - 3.0f), 0.0f, 1.0f);
-                float g2 = Math.Clamp(1.5f - Math.Abs(4.0f * t2 - 2.0f), 0.0f, 1.0f);
-                float b2 = Math.Clamp(1.5f - Math.Abs(4.0f * t2 - 1.0f), 0.0f, 1.0f);
-                
-                var c1 = ImGui.GetColorU32(new Vector4(r1, g1, b1, 1));
-                var c2 = ImGui.GetColorU32(new Vector4(r2, g2, b2, 1));
-
-                drawList.AddRectFilledMultiColor(
-                    new Vector2(legendPos.X, legendPos.Y + i * stepHeight),
-                    new Vector2(legendPos.X + legendWidth, legendPos.Y + (i + 1) * stepHeight),
-                    c2, c2, c1, c1);
-            }
-
-            float minVal = 0, maxVal = 1;
-            string unit = " voxels";
-            switch (_colorByIndex)
-            {
-                case 0: minVal = _dataset.MinPoreRadius; maxVal = _dataset.MaxPoreRadius; unit = " um"; break;
-                case 1: minVal = _dataset.MinThroatRadius; maxVal = _dataset.MaxThroatRadius; unit = " um"; break;
-                case 2: minVal = _dataset.Pores.Any() ? _dataset.Pores.Min(p => p.Connections) : 0; maxVal = _dataset.Pores.Any() ? _dataset.Pores.Max(p => p.Connections) : 1; unit = ""; break;
-            }
-            if (_colorByIndex < 2) { minVal *= _dataset.VoxelSize; maxVal *= _dataset.VoxelSize; }
-
-            string title = _colorByOptions[_colorByIndex];
-            string maxLabel = $"{maxVal:F2}{unit}";
-            string minLabel = $"{minVal:F2}{unit}";
-
-            drawList.AddText(new Vector2(legendPos.X - ImGui.CalcTextSize(title).X - 5, legendPos.Y), 0xFFFFFFFF, title);
-            drawList.AddText(new Vector2(legendPos.X + legendWidth + 5, legendPos.Y), 0xFFFFFFFF, maxLabel);
-            drawList.AddText(new Vector2(legendPos.X + legendWidth + 5, legendPos.Y + legendHeight - ImGui.CalcTextSize(minLabel).Y), 0xFFFFFFFF, minLabel);
-        }
-
-        private void DrawStatistics(Vector2 viewPos, Vector2 viewSize)
-        {
-            var padding = 10;
-            var statsPos = new Vector2(viewPos.X + padding, viewPos.Y + viewSize.Y - 140);
-            var drawList = ImGui.GetForegroundDrawList();
-            
-            drawList.AddRectFilled(statsPos, new Vector2(statsPos.X + 380, statsPos.Y + 130), 
-                ImGui.GetColorU32(new Vector4(0, 0, 0, 0.7f)), 5);
-            
-            var textPos = statsPos + new Vector2(10, 10);
-            uint textColor = 0xFFFFFFFF;
-            
-            drawList.AddText(textPos, textColor, $"Network Statistics:");
-            textPos.Y += 20;
-            drawList.AddText(textPos, textColor, $"Pores: {_dataset.Pores.Count:N0}  |  Throats: {_dataset.Throats.Count:N0}");
-            textPos.Y += 18;
-            drawList.AddText(textPos, textColor, $"Tortuosity: {_dataset.Tortuosity:F3}");
-            textPos.Y += 18;
-            drawList.AddText(textPos, textColor, $"Permeability (mD):");
-            textPos.Y += 16;
-            drawList.AddText(textPos, textColor, $"  - Darcy: {_dataset.DarcyPermeability:F2}");
-            textPos.Y += 16;
-            drawList.AddText(textPos, textColor, $"  - Navier-Stokes: {_dataset.NavierStokesPermeability:F2}");
-            textPos.Y += 16;
-            drawList.AddText(textPos, textColor, $"  - Lattice-Boltzmann: {_dataset.LatticeBoltzmannPermeability:F2}");
-        }
-
         private void UpdatePoreInstanceDataColor()
         {
             if (_poreInstanceCount == 0) return;
 
-            PoreInstanceData[] instanceData;
-            switch (_colorByIndex)
+            var instanceData = new List<PoreInstanceData>();
+            foreach (var p in _dataset.Pores)
             {
-                case 2: // Pore Connections
-                    instanceData = _dataset.Pores.Select(p => new PoreInstanceData
-                    {
-                        Position = p.Position,
-                        ColorValue = p.Connections,
-                        Radius = p.Radius
-                    }).ToArray();
-                    break;
-                case 0: 
-                case 1: 
-                default:
-                    instanceData = _dataset.Pores.Select(p => new PoreInstanceData
-                    {
-                        Position = p.Position,
-                        ColorValue = p.Radius,
-                        Radius = p.Radius
-                    }).ToArray();
-                    break;
+                float colorValue = GetPoreColorValue(p);
+                instanceData.Add(new PoreInstanceData(p.Position, colorValue, p.Radius));
             }
             
-            VeldridManager.GraphicsDevice.UpdateBuffer(_poreInstanceBuffer, 0, instanceData);
+            if (instanceData.Count > 0 && _poreInstanceBuffer != null)
+            {
+                VeldridManager.GraphicsDevice.UpdateBuffer(_poreInstanceBuffer, 0, instanceData.ToArray());
+            }
         }
 
         private void HandleMouseInput()
@@ -1000,14 +1032,19 @@ private void RebuildGeometryFromDataset()
             var io = ImGui.GetIO();
             if (io.MouseWheel != 0)
             {
-                _cameraDistance = Math.Clamp(_cameraDistance * (1.0f - io.MouseWheel * 0.1f), 0.1f, 50.0f);
+                // Fixed zoom limits - allow much more zoom out
+                float zoomSpeed = 0.1f * _cameraDistance; // Scale zoom speed with distance
+                _cameraDistance = Math.Clamp(_cameraDistance * (1.0f - io.MouseWheel * zoomSpeed / _cameraDistance), 
+                    0.1f, _modelRadius * 10.0f); // Allow zooming out to 10x the model size
             }
 
-            if (ImGui.IsMouseDown(ImGuiMouseButton.Left) || ImGui.IsMouseDown(ImGuiMouseButton.Right) || ImGui.IsMouseDown(ImGuiMouseButton.Middle))
+            if (ImGui.IsMouseDown(ImGuiMouseButton.Left) && ImGui.IsKeyDown(ImGuiKey.LeftShift) || 
+                ImGui.IsMouseDown(ImGuiMouseButton.Right) || 
+                ImGui.IsMouseDown(ImGuiMouseButton.Middle))
             {
                 if (!_isDragging && !_isPanning)
                 {
-                    _isDragging = ImGui.IsMouseDown(ImGuiMouseButton.Left);
+                    _isDragging = ImGui.IsMouseDown(ImGuiMouseButton.Left) && ImGui.IsKeyDown(ImGuiKey.LeftShift);
                     _isPanning = ImGui.IsMouseDown(ImGuiMouseButton.Middle) || ImGui.IsMouseDown(ImGuiMouseButton.Right);
                     _lastMousePos = io.MousePos;
                 }
@@ -1063,13 +1100,15 @@ private void RebuildGeometryFromDataset()
                     _dataset.Pores.Max(p => p.Position.Y),
                     _dataset.Pores.Max(p => p.Position.Z));
                 _modelCenter = (min + max) / 2.0f;
-                _cameraDistance = Vector3.Distance(min, max);
+                _modelRadius = Vector3.Distance(min, max) / 2.0f;
+                _cameraDistance = _modelRadius * 2.5f; // Start further away
                 if (_cameraDistance < 0.1f) _cameraDistance = 5.0f;
             }
             else
             {
                 _modelCenter = Vector3.Zero;
-                _cameraDistance = 5.0f;
+                _modelRadius = 10.0f;
+                _cameraDistance = 25.0f;
             }
 
             _cameraTarget = _modelCenter;
@@ -1080,8 +1119,113 @@ private void RebuildGeometryFromDataset()
 
         #endregion
 
+        #region UI Drawing Helpers
+
+        private void DrawLegend(Vector2 viewPos, Vector2 viewSize)
+        {
+            var drawList = ImGui.GetForegroundDrawList();
+            float legendWidth = 20;
+            float legendHeight = 200;
+            float padding = 10;
+
+            Vector2 legendPos = new Vector2(
+                viewPos.X + viewSize.X - legendWidth - padding,
+                viewPos.Y + padding
+            );
+            
+            // Draw gradient
+            int numSteps = 20;
+            float stepHeight = legendHeight / numSteps;
+            for (int i = 0; i < numSteps; i++)
+            {
+                float t1 = i / (float)numSteps;
+                float t2 = (i + 1) / (float)numSteps;
+
+                float r1 = Math.Clamp(1.5f - Math.Abs(4.0f * t1 - 3.0f), 0.0f, 1.0f);
+                float g1 = Math.Clamp(1.5f - Math.Abs(4.0f * t1 - 2.0f), 0.0f, 1.0f);
+                float b1 = Math.Clamp(1.5f - Math.Abs(4.0f * t1 - 1.0f), 0.0f, 1.0f);
+
+                float r2 = Math.Clamp(1.5f - Math.Abs(4.0f * t2 - 3.0f), 0.0f, 1.0f);
+                float g2 = Math.Clamp(1.5f - Math.Abs(4.0f * t2 - 2.0f), 0.0f, 1.0f);
+                float b2 = Math.Clamp(1.5f - Math.Abs(4.0f * t2 - 1.0f), 0.0f, 1.0f);
+                
+                var c1 = ImGui.GetColorU32(new Vector4(r1, g1, b1, 1));
+                var c2 = ImGui.GetColorU32(new Vector4(r2, g2, b2, 1));
+
+                drawList.AddRectFilledMultiColor(
+                    new Vector2(legendPos.X, legendPos.Y + i * stepHeight),
+                    new Vector2(legendPos.X + legendWidth, legendPos.Y + (i + 1) * stepHeight),
+                    c2, c2, c1, c1);
+            }
+
+            // Labels
+            float minVal = 0, maxVal = 1;
+            string unit = "";
+            switch (_colorByIndex)
+            {
+                case 0: 
+                    minVal = _dataset.MinPoreRadius * _dataset.VoxelSize; 
+                    maxVal = _dataset.MaxPoreRadius * _dataset.VoxelSize; 
+                    unit = " µm"; 
+                    break;
+                case 1: 
+                    minVal = _dataset.MinThroatRadius * _dataset.VoxelSize; 
+                    maxVal = _dataset.MaxThroatRadius * _dataset.VoxelSize; 
+                    unit = " µm"; 
+                    break;
+                case 2: 
+                    minVal = _dataset.Pores.Any() ? _dataset.Pores.Min(p => p.Connections) : 0; 
+                    maxVal = _dataset.Pores.Any() ? _dataset.Pores.Max(p => p.Connections) : 1; 
+                    unit = ""; 
+                    break;
+                case 3: 
+                    minVal = _dataset.Pores.Any() ? _dataset.Pores.Min(p => p.VolumeVoxels) : 0; 
+                    maxVal = _dataset.Pores.Any() ? _dataset.Pores.Max(p => p.VolumeVoxels) : 1; 
+                    unit = " vox³"; 
+                    break;
+            }
+
+            string title = _colorByOptions[_colorByIndex];
+            string maxLabel = $"{maxVal:F2}{unit}";
+            string minLabel = $"{minVal:F2}{unit}";
+
+            drawList.AddText(new Vector2(legendPos.X - ImGui.CalcTextSize(title).X - 5, legendPos.Y), 0xFFFFFFFF, title);
+            drawList.AddText(new Vector2(legendPos.X + legendWidth + 5, legendPos.Y), 0xFFFFFFFF, maxLabel);
+            drawList.AddText(new Vector2(legendPos.X + legendWidth + 5, legendPos.Y + legendHeight - ImGui.CalcTextSize(minLabel).Y), 0xFFFFFFFF, minLabel);
+        }
+
+        private void DrawStatistics(Vector2 viewPos, Vector2 viewSize)
+        {
+            var padding = 10;
+            var statsPos = new Vector2(viewPos.X + padding, viewPos.Y + viewSize.Y - 140);
+            var drawList = ImGui.GetForegroundDrawList();
+            
+            drawList.AddRectFilled(statsPos, new Vector2(statsPos.X + 380, statsPos.Y + 130), 
+                ImGui.GetColorU32(new Vector4(0, 0, 0, 0.7f)), 5);
+            
+            var textPos = statsPos + new Vector2(10, 10);
+            uint textColor = 0xFFFFFFFF;
+            
+            drawList.AddText(textPos, textColor, "Network Statistics:");
+            textPos.Y += 20;
+            drawList.AddText(textPos, textColor, $"Pores: {_dataset.Pores.Count:N0}  |  Throats: {_dataset.Throats.Count:N0}");
+            textPos.Y += 18;
+            drawList.AddText(textPos, textColor, $"Tortuosity: {_dataset.Tortuosity:F3}");
+            textPos.Y += 18;
+            drawList.AddText(textPos, textColor, "Permeability (mD):");
+            textPos.Y += 16;
+            drawList.AddText(textPos, textColor, $"  - Darcy: {_dataset.DarcyPermeability:F2}");
+            textPos.Y += 16;
+            drawList.AddText(textPos, textColor, $"  - Navier-Stokes: {_dataset.NavierStokesPermeability:F2}");
+            textPos.Y += 16;
+            drawList.AddText(textPos, textColor, $"  - Lattice-Boltzmann: {_dataset.LatticeBoltzmannPermeability:F2}");
+        }
+
+        #endregion
+
         private void TakeAndSaveScreenshot(string path)
         {
+            // Implementation remains the same as before
             var gd = VeldridManager.GraphicsDevice;
             var factory = VeldridManager.Factory;
 
@@ -1097,30 +1241,21 @@ private void RebuildGeometryFromDataset()
             gd.SubmitCommands(cl);
             gd.WaitForIdle();
 
-            // --- FIX: Use MappedResourceView<T> correctly with AsSpan() ---
             MappedResource mappedResource = gd.Map(stagingTexture, MapMode.Read, 0);
             var rawBytes = new byte[mappedResource.SizeInBytes];
             unsafe
             {
-
                 try
                 {
-                    // Create a span that points to the raw GPU memory
                     var sourceSpan = new ReadOnlySpan<byte>(mappedResource.Data.ToPointer(),
                         (int)mappedResource.SizeInBytes);
-                    // Copy from the GPU memory span to our new managed byte array
                     sourceSpan.CopyTo(rawBytes);
                 }
                 finally
                 {
-                    // Ensure the resource is always unmapped
                     gd.Unmap(stagingTexture, 0);
                 }
             }
-
-            var compositeBytes = CreateCompositeImage(rawBytes, (int)_renderTexture.Width, (int)_renderTexture.Height);
-            int compositeWidth = (int)_renderTexture.Width + 300;
-            int compositeHeight = (int)_renderTexture.Height;
 
             try
             {
@@ -1130,16 +1265,11 @@ private void RebuildGeometryFromDataset()
 
                 if (extension == ".png")
                 {
-                    imageWriter.WritePng(compositeBytes, compositeWidth, compositeHeight, ColorComponents.RedGreenBlueAlpha, stream);
+                    imageWriter.WritePng(rawBytes, (int)_renderTexture.Width, (int)_renderTexture.Height, ColorComponents.RedGreenBlueAlpha, stream);
                 }
                 else if (extension == ".jpg" || extension == ".jpeg")
                 {
-                    imageWriter.WriteJpg(compositeBytes, compositeWidth, compositeHeight, ColorComponents.RedGreenBlueAlpha, stream, 90);
-                }
-                else
-                {
-                    Logger.LogError($"[Screenshot] Unsupported file format: {extension}");
-                    return;
+                    imageWriter.WriteJpg(rawBytes, (int)_renderTexture.Width, (int)_renderTexture.Height, ColorComponents.RedGreenBlueAlpha, stream, 90);
                 }
                 
                 File.WriteAllBytes(path, stream.ToArray());
@@ -1155,93 +1285,6 @@ private void RebuildGeometryFromDataset()
                 cl.Dispose();
             }
         }
-
-        private byte[] CreateCompositeImage(byte[] renderBytes, int renderWidth, int renderHeight)
-        {
-            const int infoWidth = 300;
-            const int padding = 10;
-            int compositeWidth = renderWidth + infoWidth;
-            int compositeHeight = renderHeight;
-
-            var compositeBuffer = new byte[compositeWidth * compositeHeight * 4];
-            
-            uint bgColor = 0xFF1F1F1E;
-            for (int y = 0; y < compositeHeight; y++)
-            {
-                for (int x = renderWidth; x < compositeWidth; x++)
-                {
-                    int idx = (y * compositeWidth + x) * 4;
-                    compositeBuffer[idx] = (byte)(bgColor & 0xFF);
-                    compositeBuffer[idx + 1] = (byte)((bgColor >> 8) & 0xFF);
-                    compositeBuffer[idx + 2] = (byte)((bgColor >> 16) & 0xFF);
-                    compositeBuffer[idx + 3] = (byte)((bgColor >> 24) & 0xFF);
-                }
-            }
-
-            for (int y = 0; y < renderHeight; y++)
-            {
-                int srcOffset = y * renderWidth * 4;
-                int dstOffset = y * compositeWidth * 4;
-                Buffer.BlockCopy(renderBytes, srcOffset, compositeBuffer, dstOffset, renderWidth * 4);
-            }
-
-            int legendX = renderWidth + padding;
-            int legendY = padding;
-            int legendWidth = 20;
-            int legendHeight = 200;
-
-            for (int y = 0; y < legendHeight; y++)
-            {
-                float t = 1.0f - (y / (float)(legendHeight - 1));
-                float r = Math.Clamp(1.5f - Math.Abs(4.0f * t - 3.0f), 0.0f, 1.0f);
-                float g = Math.Clamp(1.5f - Math.Abs(4.0f * t - 2.0f), 0.0f, 1.0f);
-                float b = Math.Clamp(1.5f - Math.Abs(4.0f * t - 1.0f), 0.0f, 1.0f);
-                
-                for(int x = 0; x < legendWidth; x++)
-                {
-                    int idx = ((legendY + y) * compositeWidth + (legendX + x)) * 4;
-                    compositeBuffer[idx] = (byte)(r * 255);
-                    compositeBuffer[idx + 1] = (byte)(g * 255);
-                    compositeBuffer[idx + 2] = (byte)(b * 255);
-                    compositeBuffer[idx + 3] = 255;
-                }
-            }
-
-            float minVal = 0, maxVal = 1; string unit = " vox";
-            switch (_colorByIndex) {
-                case 0: minVal = _dataset.MinPoreRadius; maxVal = _dataset.MaxPoreRadius; unit = " um"; break;
-                case 1: minVal = _dataset.MinThroatRadius; maxVal = _dataset.MaxThroatRadius; unit = " um"; break;
-                case 2: minVal = _dataset.Pores.Any() ? _dataset.Pores.Min(p=>p.Connections) : 0; maxVal = _dataset.Pores.Any() ? _dataset.Pores.Max(p=>p.Connections):1; unit = ""; break;
-            }
-            if (_colorByIndex < 2) { minVal *= _dataset.VoxelSize; maxVal *= _dataset.VoxelSize; }
-
-            SimpleFontRenderer.DrawText(compositeBuffer, compositeWidth, legendX + legendWidth + 5, legendY, $"{maxVal:F2}{unit}", 0xFFFFFFFF);
-            SimpleFontRenderer.DrawText(compositeBuffer, compositeWidth, legendX + legendWidth + 5, legendY + legendHeight - 8, $"{minVal:F2}{unit}", 0xFFFFFFFF);
-            SimpleFontRenderer.DrawText(compositeBuffer, compositeWidth, legendX, legendY - 12, _colorByOptions[_colorByIndex], 0xFFFFFFFF);
-
-            int statsX = legendX;
-            int statsY = legendY + legendHeight + 30;
-            uint white = 0xFFFFFFFF;
-            
-            SimpleFontRenderer.DrawText(compositeBuffer, compositeWidth, statsX, statsY, "Network Statistics", white);
-            statsY += 12;
-            SimpleFontRenderer.DrawText(compositeBuffer, compositeWidth, statsX, statsY, $"Pores: {_dataset.Pores.Count:N0}", white);
-            statsY += 10;
-            SimpleFontRenderer.DrawText(compositeBuffer, compositeWidth, statsX, statsY, $"Throats: {_dataset.Throats.Count:N0}", white);
-            statsY += 12;
-            SimpleFontRenderer.DrawText(compositeBuffer, compositeWidth, statsX, statsY, $"Tortuosity: {_dataset.Tortuosity:F3}", white);
-            statsY += 12;
-            SimpleFontRenderer.DrawText(compositeBuffer, compositeWidth, statsX, statsY, "Permeability (MD):", white);
-            statsY += 10;
-            SimpleFontRenderer.DrawText(compositeBuffer, compositeWidth, statsX, statsY, $"- Darcy: {_dataset.DarcyPermeability:F2}", white);
-            statsY += 10;
-            SimpleFontRenderer.DrawText(compositeBuffer, compositeWidth, statsX, statsY, $"- N-S: {_dataset.NavierStokesPermeability:F2}", white);
-            statsY += 10;
-            SimpleFontRenderer.DrawText(compositeBuffer, compositeWidth, statsX, statsY, $"- LBM: {_dataset.LatticeBoltzmannPermeability:F2}", white);
-
-            return compositeBuffer;
-        }
-
 
         public void Dispose()
         {
@@ -1265,6 +1308,15 @@ private void RebuildGeometryFromDataset()
             _throatPipeline?.Dispose();
             _throatResourceLayout?.Dispose();
             _throatResourceSet?.Dispose();
+        }
+    }
+
+    // Extension helper for Vector3
+    internal static class Vector3Extensions
+    {
+        public static Vector3 Normalized(this Vector3 v)
+        {
+            return Vector3.Normalize(v);
         }
     }
 }
