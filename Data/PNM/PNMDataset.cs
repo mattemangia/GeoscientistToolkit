@@ -1,13 +1,16 @@
 // GeoscientistToolkit/Data/Pnm/PNMDataset.cs
+// Fixed to handle in-memory PNMs correctly
 using System;
 using System.Collections.Generic;
 using System.Data;
 using System.IO;
 using System.Linq;
 using System.Numerics;
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json;
 using GeoscientistToolkit.Business;
+using GeoscientistToolkit.Util;
 
 namespace GeoscientistToolkit.Data.Pnm
 {
@@ -102,16 +105,50 @@ namespace GeoscientistToolkit.Data.Pnm
 
         public override long GetSizeInBytes()
         {
-            if (File.Exists(FilePath))
+            // If saved to disk, report file size
+            if (!string.IsNullOrEmpty(FilePath) && File.Exists(FilePath))
                 return new FileInfo(FilePath).Length;
-            return 0;
+
+            // Otherwise estimate size from in-memory data
+            long estimatedSize = 0;
+            
+            // Estimate based on data structure sizes
+            // Each Pore: ID(4) + Position(12) + Area(4) + VolumeVoxels(4) + VolumePhysical(4) + Connections(4) + Radius(4) = 36 bytes
+            estimatedSize += Pores.Count * 36;
+            
+            // Each Throat: ID(4) + Pore1ID(4) + Pore2ID(4) + Radius(4) = 16 bytes
+            estimatedSize += Throats.Count * 16;
+            
+            // Add some overhead for properties and metadata
+            estimatedSize += 1024; // Properties, metadata, etc.
+            
+            return estimatedSize;
         }
 
         public override void Load()
         {
-            // If you load this dataset through a loader that fills Pores/Throats,
-            // make sure to call InitializeFromCurrentLists() right after.
-            // Here we just (re)compute bounds for current visible lists.
+            // If a file exists, load from it
+            if (!string.IsNullOrEmpty(FilePath) && File.Exists(FilePath))
+            {
+                try
+                {
+                    string jsonString = File.ReadAllText(FilePath);
+                    var options = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
+                    var dto = JsonSerializer.Deserialize<PNMDatasetDTO>(jsonString, options);
+                    
+                    if (dto != null)
+                    {
+                        ImportFromDTO(dto);
+                        return;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Logger.LogError($"[PNMDataset] Failed to load from file: {ex.Message}");
+                }
+            }
+
+            // If no file or loading failed, just ensure bounds are calculated
             CalculateBounds();
         }
 
@@ -138,6 +175,9 @@ namespace GeoscientistToolkit.Data.Pnm
             Throats = _throatsOriginal.ToList();
             ActiveFilter = null;
             CalculateBounds();
+            
+            // Mark as not missing since we have data
+            IsMissing = false;
         }
 
         /// <summary>
@@ -211,24 +251,24 @@ namespace GeoscientistToolkit.Data.Pnm
         /// <summary>Re-calc min/max for *visible* subsets.</summary>
         public void CalculateBounds()
         {
-            if (Pores.Any())
+            if (Pores != null && Pores.Any())
             {
                 MinPoreRadius = Pores.Min(p => p.Radius);
                 MaxPoreRadius = Pores.Max(p => p.Radius);
             }
             else
             {
-                MinPoreRadius = 0; MaxPoreRadius = 0;
+                MinPoreRadius = 0; MaxPoreRadius = 1; // Default range to prevent division by zero
             }
 
-            if (Throats.Any())
+            if (Throats != null && Throats.Any())
             {
                 MinThroatRadius = Throats.Min(t => t.Radius);
                 MaxThroatRadius = Throats.Max(t => t.Radius);
             }
             else
             {
-                MinThroatRadius = 0; MaxThroatRadius = 0;
+                MinThroatRadius = 0; MaxThroatRadius = 1; // Default range to prevent division by zero
             }
         }
 
@@ -265,6 +305,9 @@ namespace GeoscientistToolkit.Data.Pnm
             var options = new JsonSerializerOptions { WriteIndented = true };
             string jsonString = JsonSerializer.Serialize(dto, options);
             File.WriteAllText(path, jsonString);
+            
+            // Update the FilePath after successful export
+            this.FilePath = path;
         }
 
         // -------------------- TABLE BUILDERS & CSV EXPORT --------------------
@@ -304,7 +347,7 @@ namespace GeoscientistToolkit.Data.Pnm
                 {
                     double r_um = p.Radius * VoxelSize;
                     double a_um2 = p.Area * VoxelSize * VoxelSize;
-                    double v_um3 = p.VolumePhysical; // already physical if you set it so; fallback if zero:
+                    double v_um3 = p.VolumePhysical;
                     if (v_um3 == 0) v_um3 = p.VolumeVoxels * Math.Pow(VoxelSize, 3);
 
                     row["Radius_um"] = r_um;
@@ -410,7 +453,7 @@ namespace GeoscientistToolkit.Data.Pnm
             return s;
         }
 
-        // -------------------- DTO EXPORT --------------------
+        // -------------------- DTO IMPORT/EXPORT --------------------
 
         public void ImportFromDTO(PNMDatasetDTO dto)
         {
@@ -421,7 +464,7 @@ namespace GeoscientistToolkit.Data.Pnm
             LatticeBoltzmannPermeability = dto.LatticeBoltzmannPermeability;
 
             // Fill visible first:
-            Pores = dto.Pores.Select(p => new Pore
+            Pores = dto.Pores?.Select(p => new Pore
             {
                 ID = p.ID,
                 Position = p.Position,
@@ -430,15 +473,15 @@ namespace GeoscientistToolkit.Data.Pnm
                 VolumePhysical = p.VolumePhysical,
                 Connections = p.Connections,
                 Radius = p.Radius
-            }).ToList();
+            }).ToList() ?? new List<Pore>();
 
-            Throats = dto.Throats.Select(t => new Throat
+            Throats = dto.Throats?.Select(t => new Throat
             {
                 ID = t.ID,
                 Pore1ID = t.Pore1ID,
                 Pore2ID = t.Pore2ID,
                 Radius = t.Radius
-            }).ToList();
+            }).ToList() ?? new List<Throat>();
 
             InitializeFromCurrentLists();
         }
@@ -470,6 +513,9 @@ namespace GeoscientistToolkit.Data.Pnm
             };
             var options = new JsonSerializerOptions { WriteIndented = indented };
             File.WriteAllText(path, JsonSerializer.Serialize(dto, options));
+            
+            // Update the FilePath after successful export
+            this.FilePath = path;
         }
     }
 }

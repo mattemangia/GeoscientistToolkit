@@ -1,7 +1,5 @@
 // GeoscientistToolkit/Analysis/Pnm/PNMGenerator.cs
-// .NET 8, cross-platform (Win/macOS/Linux). Optional GPU acceleration via Silk.NET.OpenCL.
-// Depends on existing types in main repo: CtImageStackDataset, ChunkedLabelVolume, PNMDataset, Dataset, ProjectManager, ImGui, etc.
-
+// Fixed version with proper throat detection and detailed progress reporting
 using System;
 using System.Buffers;
 using System.Collections.Concurrent;
@@ -19,8 +17,6 @@ using GeoscientistToolkit.Util;
 using GeoscientistToolkit.UI.Interfaces;
 using ImGuiNET;
 using Silk.NET.Core.Native;
-
-// Optional GPU
 using Silk.NET.OpenCL;
 
 namespace GeoscientistToolkit.Analysis.Pnm
@@ -40,14 +36,13 @@ namespace GeoscientistToolkit.Analysis.Pnm
 
         // inlet↔outlet path options for absolute perm setups
         public bool EnforceInletOutletConnectivity { get; set; } = false;
-        public FlowAxis Axis { get; set; } = FlowAxis.Z;      // default Z-flow
-        public bool InletIsMinSide { get; set; } = true;      // min-face is inlet
-        public bool OutletIsMaxSide { get; set; } = true;     // max-face is outlet
+        public FlowAxis Axis { get; set; } = FlowAxis.Z;
+        public bool InletIsMinSide { get; set; } = true;
+        public bool OutletIsMaxSide { get; set; } = true;
 
         // Aggressiveness controls (number of erosions to split constrictions)
         public int ConservativeErosions { get; set; } = 1;
         public int AggressiveErosions { get; set; } = 3;
-        
     }
 
     #endregion
@@ -60,6 +55,7 @@ namespace GeoscientistToolkit.Analysis.Pnm
         {
             public bool[] XMin, XMax, YMin, YMax, ZMin, ZMax;
         }
+
         // GPU kernels (small, well-scoped): binary erosion & 1-pass EDT relax
         private const string OpenCLKernels = @"
         __kernel void binary_erosion(
@@ -80,11 +76,6 @@ namespace GeoscientistToolkit.Analysis.Pnm
             int dxs[26] = { -1,1,0,0,0,0, -1,-1,-1, 1,1,1, 0,0,0,  0,0,  -1,-1,1,1,  -1,1,-1,1 };
             int dys[26] = { 0,0,-1,1,0,0, -1,0,1, -1,0,1, -1,0,1, -1,1,  0,0,  -1,1,-1,1 };
             int dzs[26] = { 0,0,0,0,-1,1,  0,0,0,  0,0,0, -1,-1,-1, 1,1, -1,1,  0,0,  0,0,0,0 };
-
-            int needCount = neighMode; // treat as number of neighbor directions
-            // 6-neigh: only axis-aligned (first 6 in lists)
-            // 18: include axis + edge neighbors (first 18)
-            // 26: include all
 
             int N = (neighMode==6) ? 6 : (neighMode==18 ? 18 : 26);
 
@@ -135,6 +126,9 @@ namespace GeoscientistToolkit.Analysis.Pnm
             if (ct.LabelData == null) throw new InvalidOperationException("CtImageStackDataset has no LabelData loaded.");
             if (opt.MaterialId == 0) throw new ArgumentException("Please select a non-zero material ID (0 is reserved for Exterior).");
 
+            var progressReporter = new DetailedProgressReporter(progress);
+            progressReporter.Report(0.01f, "Initializing PNM generation...");
+
             // Voxel geometry (µm) — we take geometric mean if anisotropic spacing
             double vx = Math.Max(1e-9, ct.PixelSize);
             double vy = Math.Max(1e-9, ct.PixelSize);
@@ -142,11 +136,11 @@ namespace GeoscientistToolkit.Analysis.Pnm
             double vEdge = Math.Pow(vx * vy * vz, 1.0 / 3.0);
 
             int W = ct.Width, H = ct.Height, D = ct.Depth;
-            var labels = ct.LabelData; // ChunkedLabelVolume with indexer & fast slice read. :contentReference[oaicite:3]{index=3}
+            var labels = ct.LabelData;
 
-            // Step 1: extract material mask
-            progress?.Report(0.02f);
-            var mask = new byte[W * H * D];
+            // Step 1: Extract material mask
+            progressReporter.Report(0.05f, "Extracting material mask...");
+            var originalMask = new byte[W * H * D];
             Parallel.For(0, D, z =>
             {
                 int plane = W * H;
@@ -155,103 +149,123 @@ namespace GeoscientistToolkit.Analysis.Pnm
                     int row = (z * H + y) * W;
                     for (int x = 0; x < W; x++)
                     {
-                        mask[row + x] = (labels[x, y, z] == (byte)opt.MaterialId) ? (byte)1 : (byte)0;
+                        originalMask[row + x] = (labels[x, y, z] == (byte)opt.MaterialId) ? (byte)1 : (byte)0;
                     }
                 }
+                if (z % 10 == 0)
+                    progressReporter.Report(0.05f + 0.05f * z / D, $"Extracting slice {z}/{D}...");
             });
 
             token.ThrowIfCancellationRequested();
-            progress?.Report(0.08f);
 
-            // Step 2: split constrictions by a small number of erosions (conservative/aggressive)
+            // Step 2: Split constrictions by erosion (work on a copy)
+            byte[] erodedMask = (byte[])originalMask.Clone();
             int erosions = opt.Mode == GenerationMode.Conservative ? opt.ConservativeErosions : opt.AggressiveErosions;
+            
             if (erosions > 0)
             {
-                var tmp = new byte[mask.Length];
+                progressReporter.Report(0.10f, $"Applying {erosions} erosion(s) to identify pore centers...");
+                var tmp = new byte[erodedMask.Length];
                 for (int i = 0; i < erosions; i++)
                 {
-                    if (opt.UseOpenCL && TryBinaryErosionOpenCL(mask, tmp, W, H, D, (int)opt.Neighborhood))
+                    progressReporter.Report(0.10f + 0.05f * i / erosions, $"Erosion pass {i + 1}/{erosions}...");
+                    
+                    if (opt.UseOpenCL && TryBinaryErosionOpenCL(erodedMask, tmp, W, H, D, (int)opt.Neighborhood))
                     {
-                        // swap
-                        var t = mask; mask = tmp; tmp = t;
+                        var t = erodedMask; erodedMask = tmp; tmp = t;
                     }
                     else
                     {
-                        BinaryErosionCPU(mask, tmp, W, H, D, opt.Neighborhood);
-                        var t = mask; mask = tmp; tmp = t;
+                        BinaryErosionCPU(erodedMask, tmp, W, H, D, opt.Neighborhood);
+                        var t = erodedMask; erodedMask = tmp; tmp = t;
                     }
-                    progress?.Report(0.08f + 0.02f * (i + 1));
                     token.ThrowIfCancellationRequested();
                 }
             }
 
-            // Step 3: connected-component labeling on eroded mask → provisional pores
-            progress?.Report(0.15f);
-            var labelsPores = ConnectedComponents3D(mask, W, H, D, opt.Neighborhood);
-            int poreCount = labelsPores.ComponentCount;
+            // Step 3: Connected-component labeling on ERODED mask → pore centers
+            progressReporter.Report(0.20f, "Identifying pore centers via connected components...");
+            var ccResult = ConnectedComponents3D(erodedMask, W, H, D, opt.Neighborhood);
+            int poreCount = ccResult.ComponentCount;
+            Logger.Log($"[PNMGenerator] Found {poreCount} pore centers after erosion");
+
+            if (poreCount == 0)
+            {
+                Logger.LogWarning("[PNMGenerator] No pores found. Try reducing erosion count or using a different mode.");
+                return new PNMDataset($"PNM_{ct.Name}_{opt.MaterialId}_Empty", "")
+                {
+                    VoxelSize = (float)vEdge,
+                    Tortuosity = 0
+                };
+            }
 
             token.ThrowIfCancellationRequested();
-            progress?.Report(0.35f);
 
-            // Step 4: pore stats (volume voxels, centroid, surface area approx) — on original material mask
-            var pores = new Pore[poreCount + 1]; // index from 1..N
-            ComputePoreStats(labelsPores.Labels, mask, W, H, D, vx, vy, vz, pores);
+            // Step 4: Watershed expansion to recover full pore volumes in original mask
+            progressReporter.Report(0.30f, "Expanding pores back to original boundaries (watershed)...");
+            var fullPoreLabels = WatershedExpansion(ccResult.Labels, originalMask, W, H, D, progressReporter, 0.30f, 0.45f);
 
-            // Step 5: estimate pore radii via EDT (distance-to-solid-boundary) on original mask; CPU or CL
-            progress?.Report(0.55f);
+            token.ThrowIfCancellationRequested();
+
+            // Step 5: Compute pore statistics on the EXPANDED regions
+            progressReporter.Report(0.45f, "Computing pore statistics...");
+            var pores = new Pore[poreCount + 1];
+            ComputePoreStats(fullPoreLabels, originalMask, W, H, D, vx, vy, vz, pores);
+
+            // Step 6: Estimate pore radii via EDT on original mask
+            progressReporter.Report(0.55f, "Calculating distance transform for pore radii...");
             float[] edt = null;
             try
             {
-                edt = (opt.UseOpenCL && TryDistanceRelaxOpenCL(mask, W, H, D))
-                    ? _lastDist // filled by TryDistanceRelaxOpenCL
-                    : DistanceTransformApproxCPU(mask, W, H, D);
+                edt = (opt.UseOpenCL && TryDistanceRelaxOpenCL(originalMask, W, H, D))
+                    ? _lastDist
+                    : DistanceTransformApproxCPU(originalMask, W, H, D);
             }
-            finally { }
-            // assign pore radius as max EDT value observed within the component (× edge size)
-            AssignPoreRadiiFromEDT(pores, labelsPores.Labels, edt, (float)vEdge);
+            catch { edt = DistanceTransformApproxCPU(originalMask, W, H, D); }
+            
+            AssignPoreRadiiFromEDT(pores, fullPoreLabels, edt, (float)vEdge);
 
             token.ThrowIfCancellationRequested();
-            progress?.Report(0.7f);
 
-            // Step 6: build throats (adjacency of components along original, non-eroded mask)
-            var throats = BuildThroats(labelsPores.Labels, W, H, D, edt, (float)vEdge, out var adjacency);
-            // connections count:
+            // Step 7: Build throats from EXPANDED pore labels
+            progressReporter.Report(0.70f, "Building throat network...");
+            var throats = BuildThroats(fullPoreLabels, W, H, D, edt, (float)vEdge, out var adjacency, progressReporter, 0.70f, 0.80f);
+            
+            // Update connection counts
             foreach (var th in throats)
             {
                 if (th.Pore1ID > 0 && th.Pore1ID < pores.Length) pores[th.Pore1ID].Connections++;
                 if (th.Pore2ID > 0 && th.Pore2ID < pores.Length) pores[th.Pore2ID].Connections++;
             }
+            
+            Logger.Log($"[PNMGenerator] Found {throats.Count} throats connecting pores");
 
             token.ThrowIfCancellationRequested();
-            progress?.Report(0.82f);
 
-            // Step 7: optional inlet↔outlet path enforcement (add synthetic throats if needed)
+            // Step 8: Optional inlet↔outlet path enforcement
             if (opt.EnforceInletOutletConnectivity && poreCount > 0)
             {
-                EnforceInOutConnectivity(pores, adjacency, opt.Axis, opt.InletIsMinSide, opt.OutletIsMaxSide, W, H, D, (float)vx, (float)vy, (float)vz, throats);
+                progressReporter.Report(0.82f, "Enforcing inlet-outlet connectivity...");
+                EnforceInOutConnectivity(pores, adjacency, opt.Axis, opt.InletIsMinSide, opt.OutletIsMaxSide, 
+                    W, H, D, (float)vx, (float)vy, (float)vz, throats);
             }
 
-            // Step 8: tortuosity (shortest path between any inlet & outlet pores / physical length)
+            // Step 9: Calculate tortuosity
+            progressReporter.Report(0.90f, "Calculating tortuosity...");
             float tort = ComputeTortuosity(
-                pores,
-                adjacency,
-                opt.Axis,
-                opt.InletIsMinSide,
-                opt.OutletIsMaxSide,
-                W, H, D,
-                (float)vx, (float)vy, (float)vz,
-                labelsPores.Labels,
-                labelsPores.ComponentCount);
+                pores, adjacency, opt.Axis, opt.InletIsMinSide, opt.OutletIsMaxSide,
+                W, H, D, (float)vx, (float)vy, (float)vz,
+                fullPoreLabels, poreCount);
 
-            progress?.Report(0.92f);
-
-            // Step 9: pack PNMDataset
-            var pnm = new PNMDataset($"PNM_{ct.Name}_{opt.MaterialId}", System.IO.Path.Combine(System.IO.Path.GetTempPath(), $"PNM_{Guid.NewGuid()}.pnm.json"))
+            // Step 10: Package into PNMDataset
+            progressReporter.Report(0.95f, "Creating PNM dataset...");
+            var pnm = new PNMDataset($"PNM_{ct.Name}_Mat{opt.MaterialId}", "")
             {
-                VoxelSize = (float)vEdge, // um
+                VoxelSize = (float)vEdge,
                 Tortuosity = tort,
             };
-            // Add pores & throats (skip 0)
+
+            // Add non-null pores & throats
             for (int i = 1; i < pores.Length; i++)
                 if (pores[i] != null) pnm.Pores.Add(pores[i]);
 
@@ -261,95 +275,158 @@ namespace GeoscientistToolkit.Analysis.Pnm
                 t.ID = tid++;
                 pnm.Throats.Add(t);
             }
+            
+            pnm.InitializeFromCurrentLists();
             pnm.CalculateBounds();
 
-            // Register to project, so the existing PNM viewer & property panel can show it.
+            // Register with ProjectManager
             try
             {
                 GeoscientistToolkit.Business.ProjectManager.Instance.AddDataset(pnm);
                 GeoscientistToolkit.Business.ProjectManager.Instance.NotifyDatasetDataChanged(pnm);
+                Logger.Log($"[PNMGenerator] Successfully created PNM with {pnm.Pores.Count} pores and {pnm.Throats.Count} throats");
             }
             catch (Exception ex)
             {
-                Logger.LogWarning($"[PNMGenerator] Could not auto-add PNMDataset to ProjectManager: {ex.Message}. You can add it manually.");
+                Logger.LogWarning($"[PNMGenerator] Could not auto-add PNMDataset to ProjectManager: {ex.Message}");
             }
 
-            progress?.Report(1.0f);
+            progressReporter.Report(1.0f, "PNM generation complete!");
             return pnm;
+        }
+
+        // NEW: Watershed expansion to recover full pore volumes
+        private static int[] WatershedExpansion(int[] seedLabels, byte[] mask, int W, int H, int D, 
+            DetailedProgressReporter progress, float startProgress, float endProgress)
+        {
+            var expanded = new int[seedLabels.Length];
+            Array.Copy(seedLabels, expanded, seedLabels.Length);
+
+            // Priority queue for wavefront expansion
+            var queue = new Queue<(int idx, int label)>();
+            
+            // Initialize with all labeled seed voxels
+            for (int i = 0; i < seedLabels.Length; i++)
+            {
+                if (seedLabels[i] > 0 && mask[i] > 0)
+                {
+                    queue.Enqueue((i, seedLabels[i]));
+                }
+            }
+
+            int totalVoxels = queue.Count;
+            int processedVoxels = 0;
+            int lastReportedPercent = 0;
+
+            // Expand labels to neighboring unlabeled voxels within the mask
+            while (queue.Count > 0)
+            {
+                var (idx, label) = queue.Dequeue();
+                processedVoxels++;
+
+                // Report progress
+                int currentPercent = (processedVoxels * 100) / Math.Max(1, totalVoxels);
+                if (currentPercent > lastReportedPercent + 5)
+                {
+                    float prog = startProgress + (endProgress - startProgress) * processedVoxels / (float)Math.Max(1, totalVoxels);
+                    progress.Report(prog, $"Watershed expansion: {currentPercent}%...");
+                    lastReportedPercent = currentPercent;
+                }
+
+                int z = idx / (W * H);
+                int y = (idx % (W * H)) / W;
+                int x = idx % W;
+
+                // Check 6-neighbors
+                int[] dx = { -1, 1, 0, 0, 0, 0 };
+                int[] dy = { 0, 0, -1, 1, 0, 0 };
+                int[] dz = { 0, 0, 0, 0, -1, 1 };
+
+                for (int i = 0; i < 6; i++)
+                {
+                    int nx = x + dx[i];
+                    int ny = y + dy[i];
+                    int nz = z + dz[i];
+
+                    if (nx >= 0 && nx < W && ny >= 0 && ny < H && nz >= 0 && nz < D)
+                    {
+                        int nidx = (nz * H + ny) * W + nx;
+                        
+                        // If neighbor is in mask but not labeled, assign current label
+                        if (mask[nidx] > 0 && expanded[nidx] == 0)
+                        {
+                            expanded[nidx] = label;
+                            queue.Enqueue((nidx, label));
+                            totalVoxels++; // Update total for progress calculation
+                        }
+                    }
+                }
+            }
+
+            return expanded;
         }
         
         #region CPU morphology & CCL
 
         private static void BinaryErosionCPU(byte[] src, byte[] dst, int W, int H, int D, Neighborhood3D nbh)
-{
-    // Clear destination first
-    Array.Clear(dst, 0, dst.Length);
-
-    // Full 26-neighbourhood deltas (faces + edges + corners).
-    // The first 6 entries are the 6-neighbourhood (faces).
-    // The first 18 entries are the 18-neighbourhood (faces + edges).
-    var OFF26 = new (int dx, int dy, int dz)[]
-    {
-        // 6-neigh (faces)
-        (-1, 0, 0), ( 1, 0, 0), ( 0,-1, 0), ( 0, 1, 0), ( 0, 0,-1), ( 0, 0, 1),
-
-        // edges (12)
-        (-1,-1, 0), (-1, 1, 0), ( 1,-1, 0), ( 1, 1, 0),
-        (-1, 0,-1), (-1, 0, 1), ( 1, 0,-1), ( 1, 0, 1),
-        ( 0,-1,-1), ( 0,-1, 1), ( 0, 1,-1), ( 0, 1, 1),
-
-        // corners (8)
-        (-1,-1,-1), (-1,-1, 1), (-1, 1,-1), (-1, 1, 1),
-        ( 1,-1,-1), ( 1,-1, 1), ( 1, 1,-1), ( 1, 1, 1)
-    };
-
-    int useCount = nbh == Neighborhood3D.N6 ? 6 : (nbh == Neighborhood3D.N18 ? 18 : 26);
-
-    // Main parallel sweep
-    System.Threading.Tasks.Parallel.For(0, D, z =>
-    {
-        for (int y = 0; y < H; y++)
         {
-            int row = (z * H + y) * W;
-            for (int x = 0; x < W; x++)
+            Array.Clear(dst, 0, dst.Length);
+
+            var OFF26 = new (int dx, int dy, int dz)[]
             {
-                int idx = row + x;
+                // 6-neigh (faces)
+                (-1, 0, 0), ( 1, 0, 0), ( 0,-1, 0), ( 0, 1, 0), ( 0, 0,-1), ( 0, 0, 1),
+                // edges (12)
+                (-1,-1, 0), (-1, 1, 0), ( 1,-1, 0), ( 1, 1, 0),
+                (-1, 0,-1), (-1, 0, 1), ( 1, 0,-1), ( 1, 0, 1),
+                ( 0,-1,-1), ( 0,-1, 1), ( 0, 1,-1), ( 0, 1, 1),
+                // corners (8)
+                (-1,-1,-1), (-1,-1, 1), (-1, 1,-1), (-1, 1, 1),
+                ( 1,-1,-1), ( 1,-1, 1), ( 1, 1,-1), ( 1, 1, 1)
+            };
 
-                // If source voxel is background, erosion result is background
-                if (src[idx] == 0) { dst[idx] = 0; continue; }
+            int useCount = nbh == Neighborhood3D.N6 ? 6 : (nbh == Neighborhood3D.N18 ? 18 : 26);
 
-                bool keep = true;
-
-                if (useCount == 6)
+            Parallel.For(0, D, z =>
+            {
+                for (int y = 0; y < H; y++)
                 {
-                    // Explicit fast path for 6-neighbourhood
-                    if (Get(src, x - 1, y    , z    , W, H, D) == 0) keep = false;
-                    else if (Get(src, x + 1, y    , z    , W, H, D) == 0) keep = false;
-                    else if (Get(src, x    , y - 1, z    , W, H, D) == 0) keep = false;
-                    else if (Get(src, x    , y + 1, z    , W, H, D) == 0) keep = false;
-                    else if (Get(src, x    , y    , z - 1, W, H, D) == 0) keep = false;
-                    else if (Get(src, x    , y    , z + 1, W, H, D) == 0) keep = false;
-                }
-                else
-                {
-                    // 18- or 26-neighbourhood via the OFF26 table
-                    for (int i = 0; i < useCount; i++)
+                    int row = (z * H + y) * W;
+                    for (int x = 0; x < W; x++)
                     {
-                        var n = OFF26[i];
-                        if (Get(src, x + n.dx, y + n.dy, z + n.dz, W, H, D) == 0)
+                        int idx = row + x;
+
+                        if (src[idx] == 0) { dst[idx] = 0; continue; }
+
+                        bool keep = true;
+
+                        if (useCount == 6)
                         {
-                            keep = false;
-                            break;
+                            if (Get(src, x - 1, y    , z    , W, H, D) == 0) keep = false;
+                            else if (Get(src, x + 1, y    , z    , W, H, D) == 0) keep = false;
+                            else if (Get(src, x    , y - 1, z    , W, H, D) == 0) keep = false;
+                            else if (Get(src, x    , y + 1, z    , W, H, D) == 0) keep = false;
+                            else if (Get(src, x    , y    , z - 1, W, H, D) == 0) keep = false;
+                            else if (Get(src, x    , y    , z + 1, W, H, D) == 0) keep = false;
                         }
+                        else
+                        {
+                            for (int i = 0; i < useCount; i++)
+                            {
+                                var n = OFF26[i];
+                                if (Get(src, x + n.dx, y + n.dy, z + n.dz, W, H, D) == 0)
+                                {
+                                    keep = false;
+                                    break;
+                                }
+                            }
+                        }
+
+                        dst[idx] = (byte)(keep ? 1 : 0);
                     }
                 }
-
-                dst[idx] = (byte)(keep ? 1 : 0);
-            }
+            });
         }
-    });
-}
-
 
         private static byte Get(byte[] a, int x, int y, int z, int W, int H, int D)
         {
@@ -366,18 +443,11 @@ namespace GeoscientistToolkit.Analysis.Pnm
         private static LabelResult ConnectedComponents3D(byte[] mask, int W, int H, int D, Neighborhood3D nbh)
         {
             var labels = new int[mask.Length];
-            var parent = new List<int> { 0 }; // 0 unused
-            parent.Add(1); // first comp id 1
+            var parent = new List<int> { 0 };
+            parent.Add(1);
             int next = 1;
 
-            int[] neighOffsets6 = new int[]
-            {
-                -1, // x-1
-                -W, // y-1
-                -W*H // z-1
-            };
-
-            // 1st pass (RASTER, union-find)
+            // 1st pass
             for (int z = 0; z < D; z++)
             for (int y = 0; y < H; y++)
             for (int x = 0; x < W; x++)
@@ -386,9 +456,6 @@ namespace GeoscientistToolkit.Analysis.Pnm
                 if (mask[idx] == 0) continue;
 
                 int minLabel = int.MaxValue;
-                // check previous neighbors depending on nbh — use restricted set for speed
-                // We only check predecessors (x-1, y-1, z-1 and their combos).
-                // For robustness we include diagonals when using 18/26.
                 foreach (var offset in NeighborBackOffsets(x, y, z, W, H, D, nbh))
                 {
                     int nlab = labels[idx + offset];
@@ -402,7 +469,6 @@ namespace GeoscientistToolkit.Analysis.Pnm
                 }
                 labels[idx] = minLabel;
 
-                // union with any different neighbor labels
                 foreach (var offset in NeighborBackOffsets(x, y, z, W, H, D, nbh))
                 {
                     int nlab = labels[idx + offset];
@@ -413,7 +479,7 @@ namespace GeoscientistToolkit.Analysis.Pnm
                 }
             }
 
-            // 2nd pass: flatten labels
+            // 2nd pass: flatten
             var map = new Dictionary<int, int>();
             int comp = 0;
             for (int i = 0; i < labels.Length; i++)
@@ -434,22 +500,18 @@ namespace GeoscientistToolkit.Analysis.Pnm
 
         private static IEnumerable<int> NeighborBackOffsets(int x, int y, int z, int W, int H, int D, Neighborhood3D nbh)
         {
-            // only predecessors to avoid double visiting
-            // axis
             if (x > 0) yield return -1;
             if (y > 0) yield return -W;
             if (z > 0) yield return -W * H;
 
             if (nbh == Neighborhood3D.N6) yield break;
 
-            // 18: edges (two axis negative)
             if (x > 0 && y > 0) yield return -1 - W;
             if (x > 0 && z > 0) yield return -1 - W * H;
             if (y > 0 && z > 0) yield return -W - W * H;
 
             if (nbh == Neighborhood3D.N18) yield break;
 
-            // 26: corners (three axis negative)
             if (x > 0 && y > 0 && z > 0) yield return -1 - W - W * H;
         }
 
@@ -458,6 +520,7 @@ namespace GeoscientistToolkit.Analysis.Pnm
             while (parent[x] != x) x = parent[x] = parent[parent[x]];
             return x;
         }
+        
         private static void Union(List<int> parent, int a, int b)
         {
             int ra = Find(parent, a), rb = Find(parent, b);
@@ -484,9 +547,7 @@ namespace GeoscientistToolkit.Analysis.Pnm
                         int idx = row + x;
                         int id = lbl[idx];
                         if (id <= 0) continue;
-                        bool isSolid = mask[idx] == 1;
 
-                        // peripheral face count (approx surface area in voxel faces)
                         int openFaces = 0;
                         if (x == 0 || mask[idx - 1] == 0) openFaces++;
                         if (x == W - 1 || mask[idx + 1] == 0) openFaces++;
@@ -511,11 +572,11 @@ namespace GeoscientistToolkit.Analysis.Pnm
                 {
                     ID = id,
                     Position = new Vector3((float)(cx / vox), (float)(cy / vox), (float)(cz / vox)),
-                    Area = (float)area, // voxel-face count, not physical yet (viewer scales by voxel size) 
+                    Area = (float)area,
                     VolumeVoxels = vox,
                     VolumePhysical = (float)(vox * vx * vy * vz),
                     Connections = 0,
-                    Radius = 0 // filled later
+                    Radius = 0
                 };
                 pores[id] = p;
             }
@@ -524,7 +585,6 @@ namespace GeoscientistToolkit.Analysis.Pnm
         private static float[] DistanceTransformApproxCPU(byte[] mask, int W, int H, int D)
         {
             var dist = new float[mask.Length];
-            // init
             for (int i = 0; i < dist.Length; i++) dist[i] = mask[i] == 0 ? 0f : 1e6f;
 
             // forward pass
@@ -549,6 +609,7 @@ namespace GeoscientistToolkit.Analysis.Pnm
                 }
                 dist[idx] = best;
             }
+            
             // backward pass
             for (int z = D - 1; z >= 0; z--)
             for (int y = H - 1; y >= 0; y--)
@@ -590,7 +651,6 @@ namespace GeoscientistToolkit.Analysis.Pnm
             {
                 if (pores[id] != null)
                 {
-                    // EDT is in voxel-steps; convert to physical (approx radius ~ dist to boundary)
                     pores[id].Radius = maxByComp[id] * vEdge;
                 }
             }
@@ -600,9 +660,14 @@ namespace GeoscientistToolkit.Analysis.Pnm
 
         #region Throats & adjacency
 
-        private static List<Throat> BuildThroats(int[] lbl, int W, int H, int D, float[] edt, float vEdge, out Dictionary<int, List<(int nb, float w)>> adjacency)
+        private static List<Throat> BuildThroats(int[] lbl, int W, int H, int D, float[] edt, float vEdge, 
+            out Dictionary<int, List<(int nb, float w)>> adjacency, DetailedProgressReporter progress, 
+            float startProgress, float endProgress)
         {
-            var edges = new ConcurrentDictionary<(int a, int b), float>(); // min radius along boundary
+            var edges = new ConcurrentDictionary<(int a, int b), float>();
+            int totalSlices = D;
+            int processedSlices = 0;
+
             Parallel.For(0, D, z =>
             {
                 int plane = W * H;
@@ -615,7 +680,6 @@ namespace GeoscientistToolkit.Analysis.Pnm
                         int a = lbl[idx];
                         if (a == 0) continue;
 
-                        // Check 6-neighbors for cross-component contacts
                         void CheckNeighbor(int nx, int ny, int nz)
                         {
                             if ((uint)nx >= W || (uint)ny >= H || (uint)nz >= D) return;
@@ -623,7 +687,6 @@ namespace GeoscientistToolkit.Analysis.Pnm
                             int b = lbl[nidx];
                             if (b == 0 || b == a) return;
                             var key = (a < b) ? (a, b) : (b, a);
-                            // throat radius at this constriction ≈ min(edt at interface voxels) * vEdge
                             float r = MathF.Min(edt[idx], edt[nidx]) * vEdge;
                             edges.AddOrUpdate(key, r, (_, old) => MathF.Min(old, r));
                         }
@@ -633,20 +696,27 @@ namespace GeoscientistToolkit.Analysis.Pnm
                         CheckNeighbor(x, y, z + 1);
                     }
                 }
+
+                int current = Interlocked.Increment(ref processedSlices);
+                if (current % 10 == 0)
+                {
+                    float prog = startProgress + (endProgress - startProgress) * current / (float)totalSlices;
+                    progress?.Report(prog, $"Finding throats: slice {current}/{totalSlices}...");
+                }
             });
 
             var list = new List<Throat>(edges.Count);
             adjacency = new Dictionary<int, List<(int nb, float w)>>();
             int tid = 1;
+            
             foreach (var kv in edges)
             {
                 var (a, b) = kv.Key;
-                float r = Math.Max(0.0f, kv.Value);
+                float r = Math.Max(0.001f, kv.Value); // Ensure minimum radius
                 list.Add(new Throat { ID = tid++, Pore1ID = a, Pore2ID = b, Radius = r });
 
                 if (!adjacency.TryGetValue(a, out var la)) adjacency[a] = la = new List<(int nb, float w)>();
                 if (!adjacency.TryGetValue(b, out var lb)) adjacency[b] = lb = new List<(int nb, float w)>();
-                // weight as Euclidean between centroids will be used for tortuosity; store here as 1 (we'll replace later)
                 la.Add((b, 1));
                 lb.Add((a, 1));
             }
@@ -659,10 +729,9 @@ namespace GeoscientistToolkit.Analysis.Pnm
         {
             if (pores.Length <= 1) return;
 
-            // Identify inlet/outlet pore sets by touching dataset faces in chosen axis
             var inlet = new HashSet<int>();
             var outlet = new HashSet<int>();
-            float minFace = 0, maxFace = 0, tol = 0.5f; // in vox units
+            float minFace = 0, maxFace = 0, tol = 0.5f;
             switch (axis)
             {
                 case FlowAxis.X: minFace = 0; maxFace = W - 1; break;
@@ -672,31 +741,28 @@ namespace GeoscientistToolkit.Analysis.Pnm
 
             for (int i = 1; i < pores.Length; i++)
             {
-                var p = pores[i]; if (p == null) continue;
+                var p = pores[i]; 
+                if (p == null) continue;
                 float coord = axis == FlowAxis.X ? p.Position.X : axis == FlowAxis.Y ? p.Position.Y : p.Position.Z;
                 if (Math.Abs(coord - minFace) <= tol && inletMin) inlet.Add(i);
                 if (Math.Abs(coord - maxFace) <= tol && outletMax) outlet.Add(i);
             }
+            
             if (inlet.Count == 0 || outlet.Count == 0) return;
 
-            // Check connectivity; if disconnected, iteratively connect nearest pairs
             var comp = ConnectedSets(adj, pores.Length - 1);
             int inletComp = -1;
             var outletComps = new HashSet<int>();
             foreach (var id in inlet) inletComp = comp[id];
             foreach (var od in outlet) outletComps.Add(comp[od]);
 
-            if (inletComp != -1 && outletComps.Contains(inletComp)) return; // already connected
+            if (inletComp != -1 && outletComps.Contains(inletComp)) return;
 
-            // Build quick centroid array
             var centers = new Vector3[pores.Length];
             for (int i = 1; i < pores.Length; i++) centers[i] = pores[i]?.Position ?? new Vector3(-1, -1, -1);
 
-            // Greedy: connect nearest components (inlet comp to any outlet comp) until connected
-            // Weight (edge) is Euclidean distance in physical space (scaled by voxel edges).
             Vector3 scale = new((float)vx, (float)vy, (float)vz);
 
-            // Compile component→members
             var compMembers = new Dictionary<int, List<int>>();
             for (int i = 1; i < pores.Length; i++)
             {
@@ -709,7 +775,6 @@ namespace GeoscientistToolkit.Analysis.Pnm
             int safety = 0;
             while (safety++ < 1000)
             {
-                // Recompute comps
                 comp = ConnectedSets(adj, pores.Length - 1);
                 inletComp = comp[inlet.First()];
                 bool ok = false;
@@ -719,13 +784,13 @@ namespace GeoscientistToolkit.Analysis.Pnm
                 }
                 if (ok) break;
 
-                // Find nearest pair between any member of inletComp and any member of (one) outlet comp
-                float bestDist = float.MaxValue; (int a, int b) best = default;
+                float bestDist = float.MaxValue; 
+                (int a, int b) best = default;
                 foreach (var kv in compMembers)
                 {
                     int c = kv.Key;
                     if (c == inletComp) continue;
-                    if (!kv.Value.Any(v => outlet.Contains(v))) continue; // only outlet-side comps
+                    if (!kv.Value.Any(v => outlet.Contains(v))) continue;
 
                     foreach (var ai in compMembers[inletComp])
                     foreach (var bi in kv.Value)
@@ -739,7 +804,6 @@ namespace GeoscientistToolkit.Analysis.Pnm
                 }
                 if (best.a == 0) break;
 
-                // Add synthetic throat
                 var newT = new Throat
                 {
                     Pore1ID = best.a,
@@ -750,7 +814,8 @@ namespace GeoscientistToolkit.Analysis.Pnm
                 if (!adj.TryGetValue(best.a, out var la)) adj[best.a] = la = new List<(int nb, float w)>();
                 if (!adj.TryGetValue(best.b, out var lb)) adj[best.b] = lb = new List<(int nb, float w)>();
                 float wght = Vector3.Distance(centers[best.a] * scale, centers[best.b] * scale);
-                la.Add((best.b, wght)); lb.Add((best.a, wght));
+                la.Add((best.b, wght)); 
+                lb.Add((best.a, wght));
             }
         }
 
@@ -764,7 +829,9 @@ namespace GeoscientistToolkit.Analysis.Pnm
                 if (visited.Contains(i) || !adj.ContainsKey(i)) continue;
                 cid++;
                 var q = new Queue<int>();
-                q.Enqueue(i); visited.Add(i); comp[i] = cid;
+                q.Enqueue(i); 
+                visited.Add(i); 
+                comp[i] = cid;
                 while (q.Count > 0)
                 {
                     int u = q.Dequeue();
@@ -773,7 +840,8 @@ namespace GeoscientistToolkit.Analysis.Pnm
                     {
                         if (visited.Add(v))
                         {
-                            comp[v] = cid; q.Enqueue(v);
+                            comp[v] = cid; 
+                            q.Enqueue(v);
                         }
                     }
                 }
@@ -782,124 +850,119 @@ namespace GeoscientistToolkit.Analysis.Pnm
         }
 
         private static float ComputeTortuosity(
-    Pore[] pores,
-    Dictionary<int, List<(int nb, float w)>> adjacency,
-    FlowAxis axis,
-    bool inletMin,
-    bool outletMax,
-    int W, int H, int D,
-    float vx, float vy, float vz,
-    int[] labels,              // NEW: full label field (for contacts)
-    int componentCount)        // NEW: number of pore components
-{
-    if (pores == null || pores.Length <= 1 || adjacency == null || adjacency.Count == 0)
-        return 0f;
-
-    // 1) Build/refresh edge weights = physical centroid distance
-    var pos = new Vector3[pores.Length];
-    for (int i = 1; i < pores.Length; i++)
-        pos[i] = pores[i]?.Position ?? new Vector3(-1);
-
-    Vector3 scale = new(vx, vy, vz);
-
-    foreach (var kv in adjacency)
-    {
-        int u = kv.Key;
-        var list = kv.Value;
-        for (int i = 0; i < list.Count; i++)
+            Pore[] pores,
+            Dictionary<int, List<(int nb, float w)>> adjacency,
+            FlowAxis axis,
+            bool inletMin,
+            bool outletMax,
+            int W, int H, int D,
+            float vx, float vy, float vz,
+            int[] labels,
+            int componentCount)
         {
-            int v = list[i].nb;
-            float w = Vector3.Distance(pos[u] * scale, pos[v] * scale);
-            list[i] = (v, w);
-        }
-    }
+            if (pores == null || pores.Length <= 1 || adjacency == null || adjacency.Count == 0)
+                return 0f;
 
-    // 2) Determine inlet/outlet nodes based on *face contacts* (robust for macropores)
-    var contacts = ComputeFaceContacts(labels, W, H, D, componentCount);
-    var inlet = new List<int>();
-    var outlet = new List<int>();
-
-    switch (axis)
-    {
-        case FlowAxis.X:
+            var pos = new Vector3[pores.Length];
             for (int i = 1; i < pores.Length; i++)
+                pos[i] = pores[i]?.Position ?? new Vector3(-1);
+
+            Vector3 scale = new(vx, vy, vz);
+
+            foreach (var kv in adjacency)
             {
-                if (pores[i] == null) continue;
-                if (inletMin  && contacts.XMin[i]) inlet.Add(i);
-                if (outletMax && contacts.XMax[i]) outlet.Add(i);
-            }
-            break;
-
-        case FlowAxis.Y:
-            for (int i = 1; i < pores.Length; i++)
-            {
-                if (pores[i] == null) continue;
-                if (inletMin  && contacts.YMin[i]) inlet.Add(i);
-                if (outletMax && contacts.YMax[i]) outlet.Add(i);
-            }
-            break;
-
-        default: // FlowAxis.Z
-            for (int i = 1; i < pores.Length; i++)
-            {
-                if (pores[i] == null) continue;
-                if (inletMin  && contacts.ZMin[i]) inlet.Add(i);
-                if (outletMax && contacts.ZMax[i]) outlet.Add(i);
-            }
-            break;
-    }
-
-    if (inlet.Count == 0 || outlet.Count == 0)
-        return 0f; // no valid path endpoints
-
-    // 3) Dijkstra from each inlet to closest outlet
-    float best = float.MaxValue;
-
-    foreach (int s in inlet)
-    {
-        var dist = new Dictionary<int, float>(capacity: Math.Max(64, adjacency.Count));
-        var visited = new HashSet<int>();
-        var pq = new PriorityQueue<int, float>();
-
-        dist[s] = 0f;
-        pq.Enqueue(s, 0f);
-
-        while (pq.Count > 0)
-        {
-            pq.TryDequeue(out int u, out float du);
-            if (!visited.Add(u)) continue;
-
-            if (outlet.Contains(u))
-            {
-                if (du < best) best = du;
-                break;
-            }
-
-            if (!adjacency.TryGetValue(u, out var list)) continue;
-            for (int i = 0; i < list.Count; i++)
-            {
-                var (v, w) = list[i];
-                float nd = du + w;
-                if (!dist.TryGetValue(v, out float dv) || nd < dv)
+                int u = kv.Key;
+                var list = kv.Value;
+                for (int i = 0; i < list.Count; i++)
                 {
-                    dist[v] = nd;
-                    pq.Enqueue(v, nd);
+                    int v = list[i].nb;
+                    float w = Vector3.Distance(pos[u] * scale, pos[v] * scale);
+                    list[i] = (v, w);
                 }
             }
+
+            var contacts = ComputeFaceContacts(labels, W, H, D, componentCount);
+            var inlet = new List<int>();
+            var outlet = new List<int>();
+
+            switch (axis)
+            {
+                case FlowAxis.X:
+                    for (int i = 1; i < pores.Length; i++)
+                    {
+                        if (pores[i] == null) continue;
+                        if (inletMin  && contacts.XMin[i]) inlet.Add(i);
+                        if (outletMax && contacts.XMax[i]) outlet.Add(i);
+                    }
+                    break;
+
+                case FlowAxis.Y:
+                    for (int i = 1; i < pores.Length; i++)
+                    {
+                        if (pores[i] == null) continue;
+                        if (inletMin  && contacts.YMin[i]) inlet.Add(i);
+                        if (outletMax && contacts.YMax[i]) outlet.Add(i);
+                    }
+                    break;
+
+                default: // FlowAxis.Z
+                    for (int i = 1; i < pores.Length; i++)
+                    {
+                        if (pores[i] == null) continue;
+                        if (inletMin  && contacts.ZMin[i]) inlet.Add(i);
+                        if (outletMax && contacts.ZMax[i]) outlet.Add(i);
+                    }
+                    break;
+            }
+
+            if (inlet.Count == 0 || outlet.Count == 0)
+                return 0f;
+
+            float best = float.MaxValue;
+
+            foreach (int s in inlet)
+            {
+                var dist = new Dictionary<int, float>(capacity: Math.Max(64, adjacency.Count));
+                var visited = new HashSet<int>();
+                var pq = new PriorityQueue<int, float>();
+
+                dist[s] = 0f;
+                pq.Enqueue(s, 0f);
+
+                while (pq.Count > 0)
+                {
+                    pq.TryDequeue(out int u, out float du);
+                    if (!visited.Add(u)) continue;
+
+                    if (outlet.Contains(u))
+                    {
+                        if (du < best) best = du;
+                        break;
+                    }
+
+                    if (!adjacency.TryGetValue(u, out var list)) continue;
+                    for (int i = 0; i < list.Count; i++)
+                    {
+                        var (v, w) = list[i];
+                        float nd = du + w;
+                        if (!dist.TryGetValue(v, out float dv) || nd < dv)
+                        {
+                            dist[v] = nd;
+                            pq.Enqueue(v, nd);
+                        }
+                    }
+                }
+            }
+
+            if (best == float.MaxValue)
+                return 0f;
+
+            float L = axis == FlowAxis.X ? vx * Math.Max(1, W - 1)
+                     : axis == FlowAxis.Y ? vy * Math.Max(1, H - 1)
+                     :                      vz * Math.Max(1, D - 1);
+
+            return (L > 0f) ? (best / L) : 0f;
         }
-    }
-
-    if (best == float.MaxValue)
-        return 0f; // disconnected
-
-    // 4) Normalize by physical sample length along the flow axis
-    float L = axis == FlowAxis.X ? vx * Math.Max(1, W - 1)
-             : axis == FlowAxis.Y ? vy * Math.Max(1, H - 1)
-             :                      vz * Math.Max(1, D - 1);
-
-    return (L > 0f) ? (best / L) : 0f;
-}
-
 
         #endregion
 
@@ -952,7 +1015,6 @@ namespace GeoscientistToolkit.Analysis.Pnm
                 _queue = _cl.CreateCommandQueue(_ctx, device, CommandQueueProperties.None, &err);
                 if (err != 0) throw new Exception("clCreateCommandQueue failed: " + err);
 
-                // Build program from string source
                 string[] sources = new[] { OpenCLKernels };
                 var srcLen = (nuint)OpenCLKernels.Length;
                 _prog = _cl.CreateProgramWithSource(_ctx, 1, sources, in srcLen, &err);
@@ -964,143 +1026,138 @@ namespace GeoscientistToolkit.Analysis.Pnm
                 _clReady = true;
             }
         }
-private static bool TryBinaryErosionOpenCL(byte[] src, byte[] dst, int W, int H, int D, int neigh)
-{
-    try
-    {
-        EnsureCL();
-        unsafe
+
+        private static bool TryBinaryErosionOpenCL(byte[] src, byte[] dst, int W, int H, int D, int neigh)
         {
-            int err;
-            nuint count = (nuint)((long)W * H * D);
-
-            // Allocate device buffers (no CopyHostPtr to avoid pinning issues)
-            var srcBuf = _cl.CreateBuffer(_ctx, MemFlags.ReadOnly, count, null, &err);
-            if (err != 0) throw new Exception("CreateBuffer src failed: " + err);
-            var dstBuf = _cl.CreateBuffer(_ctx, MemFlags.WriteOnly, count, null, &err);
-            if (err != 0) throw new Exception("CreateBuffer dst failed: " + err);
-
-            fixed (byte* pSrc = src)
+            try
             {
-                err = _cl.EnqueueWriteBuffer(_queue, srcBuf, true, 0, count, pSrc, 0, null, null);
-                if (err != 0) throw new Exception("EnqueueWriteBuffer src failed: " + err);
-            }
-
-            int kernelErr;
-            var kernel = _cl.CreateKernel(_prog, "binary_erosion", &kernelErr);
-            if (kernelErr != 0) throw new Exception("CreateKernel failed: " + kernelErr);
-
-            // Set args (use generic overloads with sizes)
-            _cl.SetKernelArg(kernel, 0, (nuint)IntPtr.Size, in srcBuf);
-            _cl.SetKernelArg(kernel, 1, (nuint)IntPtr.Size, in dstBuf);
-            _cl.SetKernelArg(kernel, 2, (nuint)sizeof(int), in W);
-            _cl.SetKernelArg(kernel, 3, (nuint)sizeof(int), in H);
-            _cl.SetKernelArg(kernel, 4, (nuint)sizeof(int), in D);
-            _cl.SetKernelArg(kernel, 5, (nuint)sizeof(int), in neigh);
-
-            nuint[] gws = { (nuint)W, (nuint)H, (nuint)D };
-            fixed (nuint* pg = gws)
-            {
-                err = _cl.EnqueueNdrangeKernel(_queue, kernel, 3, null, pg, null, 0, null, null);
-                if (err != 0) throw new Exception("EnqueueNdrangeKernel failed: " + err);
-            }
-
-            _cl.Finish(_queue);
-
-            fixed (byte* pDst = dst)
-            {
-                err = _cl.EnqueueReadBuffer(_queue, dstBuf, true, 0, count, pDst, 0, null, null);
-                if (err != 0) throw new Exception("EnqueueReadBuffer failed: " + err);
-            }
-
-            _cl.ReleaseKernel(kernel);
-            _cl.ReleaseMemObject(srcBuf);
-            _cl.ReleaseMemObject(dstBuf);
-            return true;
-        }
-    }
-    catch (Exception ex)
-    {
-        Logger.LogWarning($"[OpenCL] Erosion fallback to CPU: {ex.Message}");
-        return false;
-    }
-}
-
-
-        private static bool TryDistanceRelaxOpenCL(byte[] mask, int W, int H, int D)
-{
-    try
-    {
-        EnsureCL();
-        unsafe
-        {
-            int err;
-            long n = (long)W * H * D;
-            nuint bytesMask = (nuint)n;
-            nuint bytesDist = (nuint)(n * sizeof(float));
-
-            // Host dist init
-            var distHost = new float[n];
-            for (long i = 0; i < n; i++) distHost[i] = (mask[i] == 0) ? 0f : 1e6f;
-
-            var distBuf = _cl.CreateBuffer(_ctx, MemFlags.ReadWrite, bytesDist, null, &err);
-            if (err != 0) throw new Exception("CreateBuffer dist failed: " + err);
-
-            var maskBuf = _cl.CreateBuffer(_ctx, MemFlags.ReadOnly, bytesMask, null, &err);
-            if (err != 0) throw new Exception("CreateBuffer mask failed: " + err);
-
-            fixed (float* pd = distHost)
-            fixed (byte* pm = mask)
-            {
-                err = _cl.EnqueueWriteBuffer(_queue, distBuf, true, 0, bytesDist, pd, 0, null, null);
-                if (err != 0) throw new Exception("Write dist failed: " + err);
-                err = _cl.EnqueueWriteBuffer(_queue, maskBuf, true, 0, bytesMask, pm, 0, null, null);
-                if (err != 0) throw new Exception("Write mask failed: " + err);
-            }
-
-            int kernelErr;
-            var kernel = _cl.CreateKernel(_prog, "edt_relax", &kernelErr);
-            if (kernelErr != 0) throw new Exception("CreateKernel edt_relax failed: " + kernelErr);
-
-            _cl.SetKernelArg(kernel, 0, (nuint)IntPtr.Size, in distBuf);
-            _cl.SetKernelArg(kernel, 1, (nuint)IntPtr.Size, in maskBuf);
-            _cl.SetKernelArg(kernel, 2, (nuint)sizeof(int), in W);
-            _cl.SetKernelArg(kernel, 3, (nuint)sizeof(int), in H);
-            _cl.SetKernelArg(kernel, 4, (nuint)sizeof(int), in D);
-
-            nuint[] gws = { (nuint)W, (nuint)H, (nuint)D };
-            fixed (nuint* pg = gws)
-            {
-                // a few relaxation sweeps
-                for (int it = 0; it < 4; it++)
+                EnsureCL();
+                unsafe
                 {
-                    int e1 = _cl.EnqueueNdrangeKernel(_queue, kernel, 3, null, pg, null, 0, null, null);
-                    if (e1 != 0) throw new Exception("EnqueueNdrangeKernel edt failed: " + e1);
+                    int err;
+                    nuint count = (nuint)((long)W * H * D);
+
+                    var srcBuf = _cl.CreateBuffer(_ctx, MemFlags.ReadOnly, count, null, &err);
+                    if (err != 0) throw new Exception("CreateBuffer src failed: " + err);
+                    var dstBuf = _cl.CreateBuffer(_ctx, MemFlags.WriteOnly, count, null, &err);
+                    if (err != 0) throw new Exception("CreateBuffer dst failed: " + err);
+
+                    fixed (byte* pSrc = src)
+                    {
+                        err = _cl.EnqueueWriteBuffer(_queue, srcBuf, true, 0, count, pSrc, 0, null, null);
+                        if (err != 0) throw new Exception("EnqueueWriteBuffer src failed: " + err);
+                    }
+
+                    int kernelErr;
+                    var kernel = _cl.CreateKernel(_prog, "binary_erosion", &kernelErr);
+                    if (kernelErr != 0) throw new Exception("CreateKernel failed: " + kernelErr);
+
+                    _cl.SetKernelArg(kernel, 0, (nuint)IntPtr.Size, in srcBuf);
+                    _cl.SetKernelArg(kernel, 1, (nuint)IntPtr.Size, in dstBuf);
+                    _cl.SetKernelArg(kernel, 2, (nuint)sizeof(int), in W);
+                    _cl.SetKernelArg(kernel, 3, (nuint)sizeof(int), in H);
+                    _cl.SetKernelArg(kernel, 4, (nuint)sizeof(int), in D);
+                    _cl.SetKernelArg(kernel, 5, (nuint)sizeof(int), in neigh);
+
+                    nuint[] gws = { (nuint)W, (nuint)H, (nuint)D };
+                    fixed (nuint* pg = gws)
+                    {
+                        err = _cl.EnqueueNdrangeKernel(_queue, kernel, 3, null, pg, null, 0, null, null);
+                        if (err != 0) throw new Exception("EnqueueNdrangeKernel failed: " + err);
+                    }
+
                     _cl.Finish(_queue);
+
+                    fixed (byte* pDst = dst)
+                    {
+                        err = _cl.EnqueueReadBuffer(_queue, dstBuf, true, 0, count, pDst, 0, null, null);
+                        if (err != 0) throw new Exception("EnqueueReadBuffer failed: " + err);
+                    }
+
+                    _cl.ReleaseKernel(kernel);
+                    _cl.ReleaseMemObject(srcBuf);
+                    _cl.ReleaseMemObject(dstBuf);
+                    return true;
                 }
             }
-
-            _lastDist = new float[n];
-            fixed (float* pr = _lastDist)
+            catch (Exception ex)
             {
-                int e2 = _cl.EnqueueReadBuffer(_queue, distBuf, true, 0, bytesDist, pr, 0, null, null);
-                if (e2 != 0) throw new Exception("Read dist failed: " + e2);
+                Logger.LogWarning($"[OpenCL] Erosion fallback to CPU: {ex.Message}");
+                return false;
             }
-
-            _cl.ReleaseKernel(kernel);
-            _cl.ReleaseMemObject(distBuf);
-            _cl.ReleaseMemObject(maskBuf);
-            return true;
         }
-    }
-    catch (Exception ex)
-    {
-        Logger.LogWarning($"[OpenCL] EDT fallback to CPU: {ex.Message}");
-        _lastDist = null;
-        return false;
-    }
-}
 
+        private static bool TryDistanceRelaxOpenCL(byte[] mask, int W, int H, int D)
+        {
+            try
+            {
+                EnsureCL();
+                unsafe
+                {
+                    int err;
+                    long n = (long)W * H * D;
+                    nuint bytesMask = (nuint)n;
+                    nuint bytesDist = (nuint)(n * sizeof(float));
+
+                    var distHost = new float[n];
+                    for (long i = 0; i < n; i++) distHost[i] = (mask[i] == 0) ? 0f : 1e6f;
+
+                    var distBuf = _cl.CreateBuffer(_ctx, MemFlags.ReadWrite, bytesDist, null, &err);
+                    if (err != 0) throw new Exception("CreateBuffer dist failed: " + err);
+
+                    var maskBuf = _cl.CreateBuffer(_ctx, MemFlags.ReadOnly, bytesMask, null, &err);
+                    if (err != 0) throw new Exception("CreateBuffer mask failed: " + err);
+
+                    fixed (float* pd = distHost)
+                    fixed (byte* pm = mask)
+                    {
+                        err = _cl.EnqueueWriteBuffer(_queue, distBuf, true, 0, bytesDist, pd, 0, null, null);
+                        if (err != 0) throw new Exception("Write dist failed: " + err);
+                        err = _cl.EnqueueWriteBuffer(_queue, maskBuf, true, 0, bytesMask, pm, 0, null, null);
+                        if (err != 0) throw new Exception("Write mask failed: " + err);
+                    }
+
+                    int kernelErr;
+                    var kernel = _cl.CreateKernel(_prog, "edt_relax", &kernelErr);
+                    if (kernelErr != 0) throw new Exception("CreateKernel edt_relax failed: " + kernelErr);
+
+                    _cl.SetKernelArg(kernel, 0, (nuint)IntPtr.Size, in distBuf);
+                    _cl.SetKernelArg(kernel, 1, (nuint)IntPtr.Size, in maskBuf);
+                    _cl.SetKernelArg(kernel, 2, (nuint)sizeof(int), in W);
+                    _cl.SetKernelArg(kernel, 3, (nuint)sizeof(int), in H);
+                    _cl.SetKernelArg(kernel, 4, (nuint)sizeof(int), in D);
+
+                    nuint[] gws = { (nuint)W, (nuint)H, (nuint)D };
+                    fixed (nuint* pg = gws)
+                    {
+                        for (int it = 0; it < 4; it++)
+                        {
+                            int e1 = _cl.EnqueueNdrangeKernel(_queue, kernel, 3, null, pg, null, 0, null, null);
+                            if (e1 != 0) throw new Exception("EnqueueNdrangeKernel edt failed: " + e1);
+                            _cl.Finish(_queue);
+                        }
+                    }
+
+                    _lastDist = new float[n];
+                    fixed (float* pr = _lastDist)
+                    {
+                        int e2 = _cl.EnqueueReadBuffer(_queue, distBuf, true, 0, bytesDist, pr, 0, null, null);
+                        if (e2 != 0) throw new Exception("Read dist failed: " + e2);
+                    }
+
+                    _cl.ReleaseKernel(kernel);
+                    _cl.ReleaseMemObject(distBuf);
+                    _cl.ReleaseMemObject(maskBuf);
+                    return true;
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.LogWarning($"[OpenCL] EDT fallback to CPU: {ex.Message}");
+                _lastDist = null;
+                return false;
+            }
+        }
 
         #endregion
        
@@ -1116,7 +1173,7 @@ private static bool TryBinaryErosionOpenCL(byte[] src, byte[] dst, int W, int H,
                 ZMax = new bool[maxLabel + 1]
             };
 
-            // X faces (x=0 and x=W-1)
+            // X faces
             for (int z = 0; z < D; z++)
             {
                 for (int y = 0; y < H; y++)
@@ -1128,7 +1185,7 @@ private static bool TryBinaryErosionOpenCL(byte[] src, byte[] dst, int W, int H,
                 }
             }
 
-            // Y faces (y=0 and y=H-1)
+            // Y faces
             for (int z = 0; z < D; z++)
             {
                 int rowTop = (z * H + 0) * W;
@@ -1140,7 +1197,7 @@ private static bool TryBinaryErosionOpenCL(byte[] src, byte[] dst, int W, int H,
                 }
             }
 
-            // Z faces (z=0 and z=D-1)
+            // Z faces
             for (int y = 0; y < H; y++)
             {
                 int slabF = (0 * H + y) * W;
@@ -1154,12 +1211,37 @@ private static bool TryBinaryErosionOpenCL(byte[] src, byte[] dst, int W, int H,
 
             return c;
         }
+    }
 
+    // Helper class for detailed progress reporting
+    public class DetailedProgressReporter
+    {
+        private readonly IProgress<float> _progress;
+        private float _lastReportedProgress;
+
+        public DetailedProgressReporter(IProgress<float> progress)
+        {
+            _progress = progress;
+            _lastReportedProgress = 0;
+        }
+
+        public void Report(float progress, string message)
+        {
+            if (_progress != null && Math.Abs(progress - _lastReportedProgress) > 0.001f)
+            {
+                _progress.Report(progress);
+                _lastReportedProgress = progress;
+            }
+            if (!string.IsNullOrEmpty(message))
+            {
+                Logger.Log($"[PNMGenerator] {message}");
+            }
+        }
     }
 
     #endregion
 
-    #region UI Tool (ImGui): runs generator with a progress bar and adds PNMDataset
+    #region UI Tool with Progress Bar
 
     public sealed class PNMGenerationTool : IDatasetTools
     {
@@ -1173,10 +1255,14 @@ private static bool TryBinaryErosionOpenCL(byte[] src, byte[] dst, int W, int H,
         private bool _inMin = true;
         private bool _outMax = true;
 
-        // live state
-        private float _progress = 0f;
-        private bool _isRunning = false;
-        private string _status = "";
+        // Progress dialog
+        private readonly GeoscientistToolkit.UI.ProgressBarDialog _progressDialog;
+        private CancellationTokenSource _cancellationTokenSource;
+
+        public PNMGenerationTool()
+        {
+            _progressDialog = new GeoscientistToolkit.UI.ProgressBarDialog("PNM Generation");
+        }
 
         public void Draw(Dataset dataset)
         {
@@ -1202,15 +1288,15 @@ private static bool TryBinaryErosionOpenCL(byte[] src, byte[] dst, int W, int H,
             ImGui.Combo("Neighborhood", ref _neighIndex, neighs, neighs.Length);
 
             // Mode
-            string[] modes = { "Conservative", "Aggressive" };
+            string[] modes = { "Conservative (1 erosion)", "Aggressive (3 erosions)" };
             ImGui.SetNextItemWidth(-1);
             ImGui.Combo("Generation Mode", ref _modeIndex, modes, modes.Length);
 
-            ImGui.Checkbox("Use OpenCL (Silk.NET)", ref _useOpenCL);
+            ImGui.Checkbox("Use OpenCL (GPU acceleration)", ref _useOpenCL);
 
             // Inlet/Outlet
             ImGui.Separator();
-            ImGui.Text("Inlet–Outlet (absolute perm setup)");
+            ImGui.Text("Inlet—Outlet (for permeability)");
             ImGui.Checkbox("Enforce inlet↔outlet connectivity", ref _enforce);
             string[] axes = { "X", "Y", "Z" };
             ImGui.Combo("Flow Axis", ref _axisIndex, axes, axes.Length);
@@ -1220,13 +1306,11 @@ private static bool TryBinaryErosionOpenCL(byte[] src, byte[] dst, int W, int H,
 
             ImGui.Separator();
 
-            // Buttons
-            if (_isRunning)
+            // Generate button
+            if (_progressDialog.IsActive)
             {
-                ImGui.ProgressBar(_progress, new System.Numerics.Vector2(-1, 0));
-                if (!string.IsNullOrWhiteSpace(_status)) ImGui.TextDisabled(_status);
                 ImGui.BeginDisabled();
-                ImGui.Button("Generate PNM", new System.Numerics.Vector2(-1, 0));
+                ImGui.Button("Generating...", new System.Numerics.Vector2(-1, 0));
                 ImGui.EndDisabled();
             }
             else
@@ -1245,26 +1329,50 @@ private static bool TryBinaryErosionOpenCL(byte[] src, byte[] dst, int W, int H,
                         OutletIsMaxSide = _outMax
                     };
 
-                    _isRunning = true; _progress = 0f; _status = "Starting…";
-                    var cts = new CancellationTokenSource();
-                    var progress = new Progress<float>(p => _progress = Math.Clamp(p, 0f, 1f));
-
-                    Task.Run(() =>
-                    {
-                        try
-                        {
-                            var pnm = PNMGenerator.Generate(ct, opt, progress, cts.Token);
-                            _status = $"PNM generated: {pnm.Pores.Count:N0} pores, {pnm.Throats.Count:N0} throats.";
-                        }
-                        catch (Exception ex)
-                        {
-                            Logger.LogError("[PNMGenerationTool] " + ex);
-                            _status = "Error: " + ex.Message;
-                        }
-                        finally { _isRunning = false; }
-                    });
+                    StartGeneration(ct, opt);
                 }
             }
+
+            // Render progress dialog
+            _progressDialog.Submit();
+        }
+
+        private void StartGeneration(CtImageStackDataset ct, PNMGeneratorOptions options)
+        {
+            _cancellationTokenSource = new CancellationTokenSource();
+            _progressDialog.Open("Starting PNM generation...");
+
+            var progress = new Progress<float>(value =>
+            {
+                string status = value < 0.1f ? "Extracting material mask..." :
+                               value < 0.2f ? "Identifying pore centers..." :
+                               value < 0.35f ? "Expanding pore regions..." :
+                               value < 0.55f ? "Computing pore statistics..." :
+                               value < 0.7f ? "Building throat network..." :
+                               value < 0.9f ? "Calculating flow properties..." :
+                               "Finalizing PNM dataset...";
+                _progressDialog.Update(value, status);
+            });
+
+            Task.Run(() =>
+            {
+                try
+                {
+                    var pnm = PNMGenerator.Generate(ct, options, progress, _cancellationTokenSource.Token);
+                    _progressDialog.Close();
+                    Logger.Log($"[PNMGenerationTool] Successfully generated PNM with {pnm.Pores.Count} pores and {pnm.Throats.Count} throats");
+                }
+                catch (OperationCanceledException)
+                {
+                    _progressDialog.Close();
+                    Logger.Log("[PNMGenerationTool] Generation cancelled by user");
+                }
+                catch (Exception ex)
+                {
+                    _progressDialog.Close();
+                    Logger.LogError($"[PNMGenerationTool] Generation failed: {ex.Message}");
+                }
+            });
         }
     }
 
