@@ -119,14 +119,80 @@ namespace GeoscientistToolkit.Data.CtImageStack
                     }
                 });
                 
-                // Notify ProjectManager that data has changed
+                // FIXED: Auto-save label data after modification
                 if (anyModified && dataset != null)
                 {
+                    Logger.Log($"[MaterialOperations] Saving label data for material {materialID}...");
+                    dataset.SaveLabelData(); // Save the label volume
+                    dataset.SaveMaterials(); // Save material definitions
+                    
                     ProjectManager.Instance.NotifyDatasetDataChanged(dataset);
                     ProjectManager.Instance.HasUnsavedChanges = true;
                 }
                 
                 Logger.Log($"[MaterialOperations] Finished processing for material {materialID}.");
+            });
+        }
+
+        /// <summary>
+        /// Applies material assignment from interactive segmentation with auto-save
+        /// </summary>
+        public static async Task ApplySegmentationMaskAsync(ILabelVolumeData labelVolume, byte[] mask, 
+            byte materialID, int sliceIndex, int viewType, int width, int height, int depth, 
+            CtImageStackDataset dataset = null)
+        {
+            await Task.Run(() =>
+            {
+                byte[] currentSlice = new byte[width * height];
+                
+                switch (viewType)
+                {
+                    case 0: // XY view
+                        labelVolume.ReadSliceZ(sliceIndex, currentSlice);
+                        for (int i = 0; i < mask.Length && i < currentSlice.Length; i++)
+                        {
+                            if (mask[i] > 0) currentSlice[i] = materialID;
+                        }
+                        labelVolume.WriteSliceZ(sliceIndex, currentSlice);
+                        break;
+                        
+                    case 1: // XZ view
+                        for (int z = 0; z < depth; z++)
+                        {
+                            for (int x = 0; x < width; x++)
+                            {
+                                int maskIdx = z * width + x;
+                                if (maskIdx < mask.Length && mask[maskIdx] > 0)
+                                {
+                                    labelVolume[x, sliceIndex, z] = materialID;
+                                }
+                            }
+                        }
+                        break;
+                        
+                    case 2: // YZ view
+                        for (int z = 0; z < depth; z++)
+                        {
+                            for (int y = 0; y < height; y++)
+                            {
+                                int maskIdx = z * height + y;
+                                if (maskIdx < mask.Length && mask[maskIdx] > 0)
+                                {
+                                    labelVolume[sliceIndex, y, z] = materialID;
+                                }
+                            }
+                        }
+                        break;
+                }
+                
+                // FIXED: Auto-save after interactive segmentation
+                if (dataset != null)
+                {
+                    Logger.Log($"[MaterialOperations] Auto-saving segmentation for material {materialID}...");
+                    dataset.SaveLabelData();
+                    dataset.SaveMaterials();
+                    ProjectManager.Instance.NotifyDatasetDataChanged(dataset);
+                }
             });
         }
     }

@@ -172,6 +172,7 @@ namespace GeoscientistToolkit.Data.CtImageStack
                 }
             }
         }
+        
 
         private void HandleInterpolation(int sliceIndex, int viewIndex)
         {

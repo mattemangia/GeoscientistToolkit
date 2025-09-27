@@ -2,6 +2,8 @@
 using System;
 using System.Collections.Generic;
 using GeoscientistToolkit.Analysis.Filtering;
+using GeoscientistToolkit.Analysis.ImageAdjustment;
+using GeoscientistToolkit.Analysis.MaterialManager;
 using GeoscientistToolkit.Analysis.Pnm;
 using GeoscientistToolkit.Analysis.RemoveSmallIslands;
 using GeoscientistToolkit.Analysis.Transform;
@@ -41,7 +43,7 @@ namespace GeoscientistToolkit.UI.Tools
         private readonly HashSet<(CtImageStackDataset ds, object toolKey)> _registered = new();
         
         private CtImageStackDataset _lastDataset;
-        private ToolCategory _selectedCategory = ToolCategory.Preprocessing;
+        private ToolCategory _selectedCategory = ToolCategory.Segmentation; // Default to segmentation
         private int _selectedToolIndex = 0;
         private bool _disposed;
 
@@ -105,6 +107,13 @@ namespace GeoscientistToolkit.UI.Tools
                     {
                         new ToolEntry
                         {
+                            Name = "Brightness/Contrast",
+                            Description = "Adjust brightness and contrast with live preview",
+                            Tool = new BrightnessContrastTool(),
+                            Category = ToolCategory.Preprocessing
+                        },
+                        new ToolEntry
+                        {
                             Name = "Filtering",
                             Description = "Advanced image filtering, noise reduction, and enhancement",
                             Tool = new FilterTool(),
@@ -130,6 +139,13 @@ namespace GeoscientistToolkit.UI.Tools
                     ToolCategory.Segmentation,
                     new List<ToolEntry>
                     {
+                        new ToolEntry
+                        {
+                            Name = "Material Manager",
+                            Description = "Create and manage materials for segmentation",
+                            Tool = new MaterialManagerTool(),
+                            Category = ToolCategory.Segmentation
+                        },
                         new ToolEntry
                         {
                             Name = "Segmentation",
