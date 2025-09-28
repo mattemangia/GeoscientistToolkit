@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
 using System.Numerics;
+using System.Runtime.InteropServices;
 using System.Threading.Tasks;
 using GeoscientistToolkit.Data.Pnm;
 using GeoscientistToolkit.Util;
@@ -23,9 +24,23 @@ namespace GeoscientistToolkit.Analysis.Pnm
         public bool CalculateLatticeBoltzmann { get; set; }
     }
 
+    public sealed class PermeabilityResults
+    {
+        public float DarcyUncorrected { get; set; }
+        public float DarcyCorrected { get; set; }
+        public float NavierStokesUncorrected { get; set; }
+        public float NavierStokesCorrected { get; set; }
+        public float LatticeBoltzmannUncorrected { get; set; }
+        public float LatticeBoltzmannCorrected { get; set; }
+        public float Tortuosity { get; set; }
+    }
+
     public static class AbsolutePermeability
     {
-        // --- PUBLIC API ---
+        // Store results for display
+        private static PermeabilityResults _lastResults = new PermeabilityResults();
+        
+        public static PermeabilityResults GetLastResults() => _lastResults;
 
         public static void Calculate(PermeabilityOptions options)
         {
@@ -36,6 +51,10 @@ namespace GeoscientistToolkit.Analysis.Pnm
                 return;
             }
 
+            // Calculate pixel size in meters (important for correct units)
+            float pixelSize_m = pnm.VoxelSize * 1e-6f; // μm to meters
+            Logger.Log($"[Permeability] Using pixel size: {pnm.VoxelSize} μm = {pixelSize_m} m");
+
             // First, ensure tortuosity is calculated
             if (pnm.Tortuosity <= 0 || pnm.Tortuosity == 1.0f)
             {
@@ -44,29 +63,46 @@ namespace GeoscientistToolkit.Analysis.Pnm
                 Logger.Log($"[Permeability] Tortuosity = {pnm.Tortuosity:F3}");
             }
 
+            _lastResults.Tortuosity = pnm.Tortuosity;
+            float tau2 = pnm.Tortuosity * pnm.Tortuosity;
+
             if (options.CalculateDarcy)
             {
-                pnm.DarcyPermeability = RunEngine(options, "Darcy");
-                Logger.Log($"[Permeability] Darcy permeability = {pnm.DarcyPermeability:F3} mD (apparent)");
+                float darcyUncorrected = RunEngine(options, "Darcy");
+                pnm.DarcyPermeability = darcyUncorrected; // Store uncorrected in dataset
                 
-                // Store both corrected and uncorrected
-                if (options.CorrectForTortuosity && pnm.Tortuosity > 1.0f)
-                {
-                    float corrected = pnm.DarcyPermeability / (pnm.Tortuosity * pnm.Tortuosity);
-                    Logger.Log($"[Permeability] Darcy permeability = {corrected:F3} mD (τ²-corrected)");
-                }
+                _lastResults.DarcyUncorrected = darcyUncorrected;
+                _lastResults.DarcyCorrected = darcyUncorrected / tau2;
+                
+                Logger.Log($"[Permeability] Darcy permeability:");
+                Logger.Log($"  Uncorrected: {darcyUncorrected:F3} mD");
+                Logger.Log($"  τ²-corrected: {_lastResults.DarcyCorrected:F3} mD");
             }
 
             if (options.CalculateNavierStokes)
             {
-                pnm.NavierStokesPermeability = RunEngine(options, "NavierStokes");
-                Logger.Log($"[Permeability] Navier-Stokes permeability = {pnm.NavierStokesPermeability:F3} mD");
+                float nsUncorrected = RunEngine(options, "NavierStokes");
+                pnm.NavierStokesPermeability = nsUncorrected;
+                
+                _lastResults.NavierStokesUncorrected = nsUncorrected;
+                _lastResults.NavierStokesCorrected = nsUncorrected / tau2;
+                
+                Logger.Log($"[Permeability] Navier-Stokes permeability:");
+                Logger.Log($"  Uncorrected: {nsUncorrected:F3} mD");
+                Logger.Log($"  τ²-corrected: {_lastResults.NavierStokesCorrected:F3} mD");
             }
 
             if (options.CalculateLatticeBoltzmann)
             {
-                pnm.LatticeBoltzmannPermeability = RunEngine(options, "LatticeBoltzmann");
-                Logger.Log($"[Permeability] Lattice-Boltzmann permeability = {pnm.LatticeBoltzmannPermeability:F3} mD");
+                float lbmUncorrected = RunEngine(options, "LatticeBoltzmann");
+                pnm.LatticeBoltzmannPermeability = lbmUncorrected;
+                
+                _lastResults.LatticeBoltzmannUncorrected = lbmUncorrected;
+                _lastResults.LatticeBoltzmannCorrected = lbmUncorrected / tau2;
+                
+                Logger.Log($"[Permeability] Lattice-Boltzmann permeability:");
+                Logger.Log($"  Uncorrected: {lbmUncorrected:F3} mD");
+                Logger.Log($"  τ²-corrected: {_lastResults.LatticeBoltzmannCorrected:F3} mD");
             }
 
             Logger.Log("[Permeability] Calculations complete.");
@@ -174,6 +210,9 @@ namespace GeoscientistToolkit.Analysis.Pnm
             var stopwatch = Stopwatch.StartNew();
             var pnm = options.Dataset;
             
+            // CRITICAL: Use actual pixel size from dataset
+            float pixelSize_m = pnm.VoxelSize * 1e-6f; // μm to m
+            
             // 1. Identify boundary pores (inlets/outlets)
             var (inletPores, outletPores, modelLength, crossSectionalArea) = GetBoundaryPores(pnm, options.Axis);
             if (inletPores.Count == 0 || outletPores.Count == 0)
@@ -183,9 +222,10 @@ namespace GeoscientistToolkit.Analysis.Pnm
             }
 
             Logger.Log($"[Permeability] Found {inletPores.Count} inlet and {outletPores.Count} outlet pores");
+            Logger.Log($"[Permeability] Model dimensions: Length={modelLength:E3} m, Area={crossSectionalArea:E3} m²");
 
             // 2. Build the linear system Ax=b representing the pressure network
-            var (matrix, b) = BuildLinearSystem(pnm, engine, inletPores, outletPores, options.FluidViscosity);
+            var (matrix, b) = BuildLinearSystem(pnm, engine, inletPores, outletPores, options.FluidViscosity, pixelSize_m);
 
             // 3. Solve for pore pressures (x)
             float[] pressures = options.UseGpu && OpenCLContext.IsAvailable
@@ -199,26 +239,22 @@ namespace GeoscientistToolkit.Analysis.Pnm
             }
             
             // 4. Calculate total flow rate Q
-            float totalFlowRate = CalculateTotalFlow(pnm, engine, pressures, inletPores, options.FluidViscosity);
+            float totalFlowRate = CalculateTotalFlow(pnm, engine, pressures, inletPores, options.FluidViscosity, pixelSize_m);
             
             Logger.Log($"[Permeability] Total flow rate Q = {totalFlowRate:E3} m³/s");
 
-            // 5. Calculate APPARENT permeability K using Darcy's law
+            // 5. Calculate permeability K using Darcy's law
             // K = Q * μ * L / (A * ΔP)
             float viscosityPaS = options.FluidViscosity * 0.001f; // cP to Pa·s
             float pressureDrop = 1.0f; // Pa (we set inlet=1, outlet=0)
             
             float permeability_m2 = (totalFlowRate * viscosityPaS * modelLength) / (crossSectionalArea * pressureDrop);
             
-            // NOTE: We do NOT apply tortuosity correction here anymore
-            // The returned value is the APPARENT permeability
-            // Tortuosity correction is applied in the viewer when displaying
-            
             // Convert from m² to milliDarcy (mD)
             float permeability_mD = permeability_m2 * 1.01325e15f;
             
             stopwatch.Stop();
-            Logger.Log($"[Permeability] Engine '{engine}' took {stopwatch.ElapsedMilliseconds}ms. Result: {permeability_mD:F3} mD (apparent)");
+            Logger.Log($"[Permeability] Engine '{engine}' took {stopwatch.ElapsedMilliseconds}ms. Result: {permeability_mD:F3} mD");
             
             return permeability_mD;
         }
@@ -279,7 +315,8 @@ namespace GeoscientistToolkit.Analysis.Pnm
             return (inlets, outlets, L, A);
         }
 
-        private static (SparseMatrix, float[]) BuildLinearSystem(PNMDataset pnm, string engine, HashSet<int> inlets, HashSet<int> outlets, float viscosity_cP)
+        private static (SparseMatrix, float[]) BuildLinearSystem(PNMDataset pnm, string engine, 
+            HashSet<int> inlets, HashSet<int> outlets, float viscosity_cP, float voxelSize_m)
         {
             int maxId = pnm.Pores.Max(p => p.ID);
             var poreMap = pnm.Pores.ToDictionary(p => p.ID);
@@ -295,7 +332,7 @@ namespace GeoscientistToolkit.Analysis.Pnm
                     !poreMap.TryGetValue(throat.Pore2ID, out var p2)) 
                     continue;
 
-                float conductance = CalculateConductance(p1, p2, throat, engine, pnm.VoxelSize, viscosity_PaS);
+                float conductance = CalculateConductance(p1, p2, throat, engine, voxelSize_m, viscosity_PaS);
 
                 // Build the system matrix (Kirchhoff's current law at each pore)
                 matrix.Add(p1.ID, p1.ID, conductance);
@@ -322,47 +359,51 @@ namespace GeoscientistToolkit.Analysis.Pnm
             return (matrix, b);
         }
 
-        private static float CalculateConductance(Pore p1, Pore p2, Throat t, string engine, float voxelSize_um, float viscosity_PaS)
+        private static float CalculateConductance(Pore p1, Pore p2, Throat t, string engine, 
+            float voxelSize_m, float viscosity_PaS)
         {
-            float voxelSize_m = voxelSize_um * 1e-6f;
-            float r_t = t.Radius * voxelSize_m; // Throat radius in meters
+            // Convert all dimensions to meters
+            float r_t = t.Radius * voxelSize_m;  // Throat radius in meters
             float r_p1 = p1.Radius * voxelSize_m;
             float r_p2 = p2.Radius * voxelSize_m;
             float length = Vector3.Distance(p1.Position, p2.Position) * voxelSize_m;
 
             if (length < 1e-9f) return 0f;
 
-            // Hagen-Poiseuille conductance for a cylindrical tube: g = πr⁴/(8μL)
-            float g_throat = (float)(Math.PI * Math.Pow(r_t, 4)) / (8 * viscosity_PaS * length);
+            // Different models for different engines
+            switch (engine)
+            {
+                case "Darcy":
+                    // Simple Hagen-Poiseuille for throat only
+                    return (float)(Math.PI * Math.Pow(r_t, 4)) / (8 * viscosity_PaS * length);
 
-            if (engine == "Darcy")
-            {
-                // Simplified model - only throat resistance
-                return g_throat;
-            }
-            else // NavierStokes and LatticeBoltzmann use more detailed models
-            {
-                // Model as three segments in series: pore1 → throat → pore2
-                // Each segment has its own conductance
-                
-                // Effective lengths for each segment
-                float l_p1 = r_p1; // Pore body length approximated by its radius
-                float l_p2 = r_p2;
-                float l_t = Math.Max(1e-9f, length - l_p1 - l_p2);
-                
-                // Conductance of each segment
-                float g_p1 = (float)(Math.PI * Math.Pow(r_p1, 4)) / (8 * viscosity_PaS * l_p1);
-                float g_p2 = (float)(Math.PI * Math.Pow(r_p2, 4)) / (8 * viscosity_PaS * l_p2);
-                float g_t_segment = (float)(Math.PI * Math.Pow(r_t, 4)) / (8 * viscosity_PaS * l_t);
-                
-                // Total conductance (resistances in series)
-                float totalResistance = (1 / g_p1) + (1 / g_t_segment) + (1 / g_p2);
-                
-                return 1 / totalResistance;
+                case "NavierStokes":
+                    // Include entrance/exit effects
+                    float entranceLength = 0.06f * r_t * 2000; // Approximate entrance length
+                    float effectiveLength = length + entranceLength;
+                    return (float)(Math.PI * Math.Pow(r_t, 4)) / (8 * viscosity_PaS * effectiveLength);
+
+                case "LatticeBoltzmann":
+                    // More complex model with pore body resistance
+                    float l_p1 = r_p1 * 0.5f; // Pore body effective length
+                    float l_p2 = r_p2 * 0.5f;
+                    float l_t = Math.Max(1e-9f, length - l_p1 - l_p2);
+                    
+                    // Conductances in series
+                    float g_p1 = (float)(Math.PI * Math.Pow(r_p1, 4)) / (8 * viscosity_PaS * l_p1);
+                    float g_p2 = (float)(Math.PI * Math.Pow(r_p2, 4)) / (8 * viscosity_PaS * l_p2);
+                    float g_t = (float)(Math.PI * Math.Pow(r_t, 4)) / (8 * viscosity_PaS * l_t);
+                    
+                    // Total resistance = sum of resistances
+                    float totalResistance = (1 / g_p1) + (1 / g_t) + (1 / g_p2);
+                    return 1 / totalResistance;
+
+                default:
+                    return (float)(Math.PI * Math.Pow(r_t, 4)) / (8 * viscosity_PaS * length);
             }
         }
-
-        private static float CalculateTotalFlow(PNMDataset pnm, string engine, float[] pressures, HashSet<int> inletPores, float viscosity_cP)
+        private static float CalculateTotalFlow(PNMDataset pnm, string engine, float[] pressures, 
+            HashSet<int> inletPores, float viscosity_cP, float voxelSize_m)
         {
             float totalFlow = 0;
             var poreMap = pnm.Pores.ToDictionary(p => p.ID);
@@ -381,7 +422,7 @@ namespace GeoscientistToolkit.Analysis.Pnm
                         !poreMap.TryGetValue(throat.Pore2ID, out var p2)) 
                         continue;
                     
-                    float conductance = CalculateConductance(p1, p2, throat, engine, pnm.VoxelSize, viscosity_PaS);
+                    float conductance = CalculateConductance(p1, p2, throat, engine, voxelSize_m, viscosity_PaS);
                     float pressure_p1 = pressures[p1.ID];
                     float pressure_p2 = pressures[p2.ID];
                     float flow = conductance * (pressure_p1 - pressure_p2);
@@ -393,7 +434,7 @@ namespace GeoscientistToolkit.Analysis.Pnm
                         !poreMap.TryGetValue(throat.Pore2ID, out var p2)) 
                         continue;
                     
-                    float conductance = CalculateConductance(p1, p2, throat, engine, pnm.VoxelSize, viscosity_PaS);
+                    float conductance = CalculateConductance(p1, p2, throat, engine, voxelSize_m, viscosity_PaS);
                     float pressure_p1 = pressures[p1.ID];
                     float pressure_p2 = pressures[p2.ID];
                     float flow = conductance * (pressure_p2 - pressure_p1);
@@ -403,7 +444,6 @@ namespace GeoscientistToolkit.Analysis.Pnm
             
             return totalFlow;
         }
-
         // --- CPU CONJUGATE GRADIENT SOLVER ---
 
         private static float[] SolveWithCpu(SparseMatrix A, float[] b, float tolerance = 1e-6f, int maxIterations = 5000)
@@ -539,18 +579,31 @@ namespace GeoscientistToolkit.Analysis.Pnm
     internal static class OpenCLContext
     {
         private static readonly Lazy<bool> _isAvailable = new(CheckAvailability);
-        public static bool IsAvailable { get; set; } = _isAvailable.Value;
+        private static CL _cl;
+        private static nint _context;
+        private static nint _device;
+        private static nint _queue;
+        private static nint _program;
+        private static bool _initialized = false;
+
+        public static bool IsAvailable 
+        { 
+            get 
+            { 
+                EnsureInitialized();
+                return _isAvailable.Value && _initialized; 
+            } 
+        }
 
         private static bool CheckAvailability()
         {
             try
             {
-                // Check if OpenCL is available
-                var cl = CL.GetApi();
+                _cl = CL.GetApi();
                 unsafe
                 {
                     uint numPlatforms;
-                    cl.GetPlatformIDs(0, null, &numPlatforms);
+                    _cl.GetPlatformIDs(0, null, &numPlatforms);
                     return numPlatforms > 0;
                 }
             }
@@ -560,10 +613,431 @@ namespace GeoscientistToolkit.Analysis.Pnm
             }
         }
 
+        private static void EnsureInitialized()
+        {
+            if (_initialized) return;
+            
+            try
+            {
+                _cl = CL.GetApi();
+                
+                unsafe
+                {
+                    // Get platforms
+                    uint numPlatforms;
+                    _cl.GetPlatformIDs(0, null, &numPlatforms);
+                    if (numPlatforms == 0) return;
+                    
+                    var platforms = stackalloc nint[(int)numPlatforms];
+                    _cl.GetPlatformIDs(numPlatforms, platforms, null);
+                    
+                    // Find a device (prefer GPU)
+                    nint selectedPlatform = 0;
+                    _device = 0;
+                    
+                    for (int i = 0; i < numPlatforms; i++)
+                    {
+                        uint numDevices;
+                        _cl.GetDeviceIDs(platforms[i], DeviceType.Gpu, 0, null, &numDevices);
+                        
+                        if (numDevices == 0)
+                            _cl.GetDeviceIDs(platforms[i], DeviceType.Cpu, 0, null, &numDevices);
+                        
+                        if (numDevices > 0)
+                        {
+                            selectedPlatform = platforms[i];
+                            var devices = stackalloc nint[(int)numDevices];
+                            _cl.GetDeviceIDs(selectedPlatform, DeviceType.All, numDevices, devices, null);
+                            _device = devices[0];
+                            break;
+                        }
+                    }
+                    
+                    if (_device == 0) return;
+                    
+                    // Create context and command queue
+                    int err;
+                    nint* devicePtr = stackalloc nint[1];
+                    devicePtr[0] = _device;
+                    _context = _cl.CreateContext(null, 1, devicePtr, null, null, &err);
+                    if (err != 0) return;
+                    
+                    _queue = _cl.CreateCommandQueue(_context, _device, CommandQueueProperties.None, &err);
+                    if (err != 0) return;
+                    
+                    // Create program with CG kernel
+                    string kernelSource = @"
+                    __kernel void spmv_csr(
+                        __global const int* row_ptr,
+                        __global const int* col_idx,
+                        __global const float* values,
+                        __global const float* x,
+                        __global float* y,
+                        const int num_rows)
+                    {
+                        int row = get_global_id(0);
+                        if (row >= num_rows) return;
+                        
+                        float sum = 0.0f;
+                        int row_start = row_ptr[row];
+                        int row_end = row_ptr[row + 1];
+                        
+                        for (int j = row_start; j < row_end; j++) {
+                            sum += values[j] * x[col_idx[j]];
+                        }
+                        
+                        y[row] = sum;
+                    }
+                    
+                    __kernel void vector_ops(
+                        __global float* y,
+                        __global const float* x,
+                        const float alpha,
+                        const int n,
+                        const int op) // 0=copy, 1=axpy, 2=scale
+                    {
+                        int i = get_global_id(0);
+                        if (i >= n) return;
+                        
+                        if (op == 0) y[i] = x[i];
+                        else if (op == 1) y[i] += alpha * x[i];
+                        else if (op == 2) y[i] = alpha * x[i];
+                    }
+                    
+                    __kernel void dot_product(
+                        __global const float* a,
+                        __global const float* b,
+                        __global float* result,
+                        __local float* scratch,
+                        const int n)
+                    {
+                        int global_id = get_global_id(0);
+                        int local_id = get_local_id(0);
+                        int group_size = get_local_size(0);
+                        
+                        float accumulator = 0;
+                        while (global_id < n) {
+                            accumulator += a[global_id] * b[global_id];
+                            global_id += get_global_size(0);
+                        }
+                        
+                        scratch[local_id] = accumulator;
+                        barrier(CLK_LOCAL_MEM_FENCE);
+                        
+                        for (int offset = group_size / 2; offset > 0; offset /= 2) {
+                            if (local_id < offset) {
+                                scratch[local_id] += scratch[local_id + offset];
+                            }
+                            barrier(CLK_LOCAL_MEM_FENCE);
+                        }
+                        
+                        if (local_id == 0) {
+                            result[get_group_id(0)] = scratch[0];
+                        }
+                    }";
+                    
+                    var sourcePtr = kernelSource;
+                    var sourceLen = (nuint)kernelSource.Length;
+                    _program = _cl.CreateProgramWithSource(_context, 1, new[] { sourcePtr }, in sourceLen, &err);
+                    if (err != 0) return;
+                    
+                    nint* devicePtr2 = stackalloc nint[1];
+                    devicePtr2[0] = _device;
+                    err = _cl.BuildProgram(_program, 1, devicePtr2, string.Empty, null, null);
+                    
+                    if (err != 0)
+                    {
+                        // Get build log
+                        nuint logSize;
+                        _cl.GetProgramBuildInfo(_program, _device, ProgramBuildInfo.BuildLog, 0, null, &logSize);
+                        if (logSize > 0)
+                        {
+                            var log = new byte[logSize];
+                            fixed (byte* logPtr = log)
+                            {
+                                _cl.GetProgramBuildInfo(_program, _device, ProgramBuildInfo.BuildLog, logSize, logPtr, null);
+                                string logStr = System.Text.Encoding.ASCII.GetString(log);
+                                Logger.LogError($"[OpenCL] Build failed: {logStr}");
+                            }
+                        }
+                        return;
+                    }
+                    
+                    _initialized = true;
+                    Logger.Log("[OpenCL] Context initialized successfully");
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError($"[OpenCL] Initialization failed: {ex.Message}");
+                _initialized = false;
+            }
+        }
+
         public static float[] Solve(SparseMatrix A, float[] b, float tolerance, int maxIterations)
         {
-            // Simplified placeholder - in production, implement full OpenCL solver
-            throw new NotImplementedException("OpenCL solver not fully implemented");
+            EnsureInitialized();
+            if (!_initialized) throw new InvalidOperationException("OpenCL not initialized");
+            
+            unsafe
+            {
+                int n = b.Length;
+                
+                // Convert sparse matrix to CSR format
+                var (rowPtr, colIdx, values) = ConvertToCSR(A);
+                
+                // Create OpenCL buffers
+                int err;
+                nint clRowPtr, clColIdx, clValues, clB, clX, clR, clP, clAp, clDotResult;
+                
+                // Pin arrays and create buffers
+                fixed (int* rowPtrPtr = rowPtr)
+                fixed (int* colIdxPtr = colIdx)
+                fixed (float* valuesPtr = values)
+                fixed (float* bPtr = b)
+                {
+                    clRowPtr = _cl.CreateBuffer(_context, MemFlags.ReadOnly | MemFlags.CopyHostPtr, 
+                        (nuint)(rowPtr.Length * sizeof(int)), rowPtrPtr, &err);
+                    if (err != 0) throw new Exception($"Failed to create rowPtr buffer: {err}");
+                    
+                    clColIdx = _cl.CreateBuffer(_context, MemFlags.ReadOnly | MemFlags.CopyHostPtr,
+                        (nuint)(colIdx.Length * sizeof(int)), colIdxPtr, &err);
+                    if (err != 0) throw new Exception($"Failed to create colIdx buffer: {err}");
+                    
+                    clValues = _cl.CreateBuffer(_context, MemFlags.ReadOnly | MemFlags.CopyHostPtr,
+                        (nuint)(values.Length * sizeof(float)), valuesPtr, &err);
+                    if (err != 0) throw new Exception($"Failed to create values buffer: {err}");
+                    
+                    clB = _cl.CreateBuffer(_context, MemFlags.ReadOnly | MemFlags.CopyHostPtr,
+                        (nuint)(b.Length * sizeof(float)), bPtr, &err);
+                    if (err != 0) throw new Exception($"Failed to create b buffer: {err}");
+                }
+                
+                clX = _cl.CreateBuffer(_context, MemFlags.ReadWrite,
+                    (nuint)(n * sizeof(float)), null, &err);
+                if (err != 0) throw new Exception($"Failed to create x buffer: {err}");
+                
+                clR = _cl.CreateBuffer(_context, MemFlags.ReadWrite,
+                    (nuint)(n * sizeof(float)), null, &err);
+                if (err != 0) throw new Exception($"Failed to create r buffer: {err}");
+                
+                clP = _cl.CreateBuffer(_context, MemFlags.ReadWrite,
+                    (nuint)(n * sizeof(float)), null, &err);
+                if (err != 0) throw new Exception($"Failed to create p buffer: {err}");
+                
+                clAp = _cl.CreateBuffer(_context, MemFlags.ReadWrite,
+                    (nuint)(n * sizeof(float)), null, &err);
+                if (err != 0) throw new Exception($"Failed to create Ap buffer: {err}");
+                
+                clDotResult = _cl.CreateBuffer(_context, MemFlags.ReadWrite,
+                    (nuint)(256 * sizeof(float)), null, &err);
+                if (err != 0) throw new Exception($"Failed to create dot result buffer: {err}");
+                
+                // Create kernels
+                var spmvKernel = _cl.CreateKernel(_program, "spmv_csr", &err);
+                if (err != 0) throw new Exception($"Failed to create spmv kernel: {err}");
+                
+                var vectorOpsKernel = _cl.CreateKernel(_program, "vector_ops", &err);
+                if (err != 0) throw new Exception($"Failed to create vector_ops kernel: {err}");
+                
+                var dotKernel = _cl.CreateKernel(_program, "dot_product", &err);
+                if (err != 0) throw new Exception($"Failed to create dot kernel: {err}");
+                
+                // Initialize x = 0, r = b, p = r
+                float zero = 0.0f;
+                _cl.EnqueueFillBuffer(_queue, clX, &zero, (nuint)sizeof(float), 0, (nuint)(n * sizeof(float)), 0, null, null);
+                _cl.EnqueueCopyBuffer(_queue, clB, clR, 0, 0, (nuint)(n * sizeof(float)), 0, null, null);
+                _cl.EnqueueCopyBuffer(_queue, clR, clP, 0, 0, (nuint)(n * sizeof(float)), 0, null, null);
+                
+                // CG iteration
+                float rsold = ComputeDotProduct(clR, clR, n, dotKernel, clDotResult);
+                
+                if (Math.Sqrt(rsold) < tolerance)
+                {
+                    // Already converged
+                    float[] result = new float[n];
+                    fixed (float* resultPtr = result)
+                    {
+                        _cl.EnqueueReadBuffer(_queue, clX, true, 0, (nuint)(n * sizeof(float)), resultPtr, 0, null, null);
+                    }
+                    
+                    // Cleanup
+                    CleanupBuffers(clRowPtr, clColIdx, clValues, clB, clX, clR, clP, clAp, clDotResult);
+                    CleanupKernels(spmvKernel, vectorOpsKernel, dotKernel);
+                    
+                    return result;
+                }
+                
+                for (int iter = 0; iter < maxIterations; iter++)
+                {
+                    // Ap = A * p
+                    ComputeSpmv(spmvKernel, clRowPtr, clColIdx, clValues, clP, clAp, n);
+                    
+                    // pAp = dot(p, Ap)
+                    float pAp = ComputeDotProduct(clP, clAp, n, dotKernel, clDotResult);
+                    
+                    if (Math.Abs(pAp) < 1e-10f) break;
+                    
+                    float alpha = rsold / pAp;
+                    
+                    // x = x + alpha * p
+                    ComputeAxpy(vectorOpsKernel, clX, clP, alpha, n, 1);
+                    
+                    // r = r - alpha * Ap
+                    ComputeAxpy(vectorOpsKernel, clR, clAp, -alpha, n, 1);
+                    
+                    // rsnew = dot(r, r)
+                    float rsnew = ComputeDotProduct(clR, clR, n, dotKernel, clDotResult);
+                    
+                    if (Math.Sqrt(rsnew) < tolerance)
+                    {
+                        Logger.Log($"[OpenCL CG] Converged in {iter + 1} iterations");
+                        break;
+                    }
+                    
+                    float beta = rsnew / rsold;
+                    
+                    // p = r + beta * p
+                    ComputeScale(vectorOpsKernel, clP, beta, n);
+                    ComputeAxpy(vectorOpsKernel, clP, clR, 1.0f, n, 1);
+                    
+                    rsold = rsnew;
+                    
+                    if (iter % 50 == 0)
+                    {
+                        Logger.Log($"[OpenCL CG] Iteration {iter}, residual: {Math.Sqrt(rsnew):E3}");
+                    }
+                }
+                
+                // Read result
+                float[] solution = new float[n];
+                fixed (float* solutionPtr = solution)
+                {
+                    _cl.EnqueueReadBuffer(_queue, clX, true, 0, (nuint)(n * sizeof(float)), solutionPtr, 0, null, null);
+                }
+                
+                // Cleanup
+                CleanupBuffers(clRowPtr, clColIdx, clValues, clB, clX, clR, clP, clAp, clDotResult);
+                CleanupKernels(spmvKernel, vectorOpsKernel, dotKernel);
+                
+                return solution;
+            }
+        }
+        
+
+        private static unsafe void ComputeSpmv(nint kernel, nint rowPtr, nint colIdx, nint values, 
+            nint x, nint y, int numRows)
+        {
+            _cl.SetKernelArg(kernel, 0, (nuint)sizeof(nint), &rowPtr);
+            _cl.SetKernelArg(kernel, 1, (nuint)sizeof(nint), &colIdx);
+            _cl.SetKernelArg(kernel, 2, (nuint)sizeof(nint), &values);
+            _cl.SetKernelArg(kernel, 3, (nuint)sizeof(nint), &x);
+            _cl.SetKernelArg(kernel, 4, (nuint)sizeof(nint), &y);
+            _cl.SetKernelArg(kernel, 5, (nuint)sizeof(int), &numRows);
+            
+            nuint globalSize = (nuint)numRows;
+            _cl.EnqueueNdrangeKernel(_queue, kernel, 1, null, &globalSize, null, 0, null, null);
+            _cl.Finish(_queue);
+        }
+
+        private static unsafe void ComputeAxpy(nint kernel, nint y, nint x, float alpha, int n, int op)
+        {
+            _cl.SetKernelArg(kernel, 0, (nuint)sizeof(nint), &y);
+            _cl.SetKernelArg(kernel, 1, (nuint)sizeof(nint), &x);
+            _cl.SetKernelArg(kernel, 2, (nuint)sizeof(float), &alpha);
+            _cl.SetKernelArg(kernel, 3, (nuint)sizeof(int), &n);
+            _cl.SetKernelArg(kernel, 4, (nuint)sizeof(int), &op);
+            
+            nuint globalSize = (nuint)n;
+            _cl.EnqueueNdrangeKernel(_queue, kernel, 1, null, &globalSize, null, 0, null, null);
+            _cl.Finish(_queue);
+        }
+
+        private static unsafe void ComputeScale(nint kernel, nint x, float alpha, int n)
+        {
+            int op = 2; // scale operation
+            _cl.SetKernelArg(kernel, 0, (nuint)sizeof(nint), &x);
+            _cl.SetKernelArg(kernel, 1, (nuint)sizeof(nint), &x); // input and output same for scaling
+            _cl.SetKernelArg(kernel, 2, (nuint)sizeof(float), &alpha);
+            _cl.SetKernelArg(kernel, 3, (nuint)sizeof(int), &n);
+            _cl.SetKernelArg(kernel, 4, (nuint)sizeof(int), &op);
+            
+            nuint globalSize = (nuint)n;
+            _cl.EnqueueNdrangeKernel(_queue, kernel, 1, null, &globalSize, null, 0, null, null);
+            _cl.Finish(_queue);
+        }
+
+        private static unsafe float ComputeDotProduct(nint a, nint b, int n, nint kernel, nint result)
+        {
+            int localSize = 256;
+            int numGroups = (n + localSize - 1) / localSize;
+            
+            _cl.SetKernelArg(kernel, 0, (nuint)sizeof(nint), &a);
+            _cl.SetKernelArg(kernel, 1, (nuint)sizeof(nint), &b);
+            _cl.SetKernelArg(kernel, 2, (nuint)sizeof(nint), &result);
+            _cl.SetKernelArg(kernel, 3, (nuint)(localSize * sizeof(float)), null); // local memory
+            _cl.SetKernelArg(kernel, 4, (nuint)sizeof(int), &n);
+            
+            nuint globalSize = (nuint)(numGroups * localSize);
+            nuint localSizePtr = (nuint)localSize;
+            _cl.EnqueueNdrangeKernel(_queue, kernel, 1, null, &globalSize, &localSizePtr, 0, null, null);
+            _cl.Finish(_queue);
+            
+            // Read partial results and sum
+            float[] partialResults = new float[numGroups];
+            fixed (float* ptr = partialResults)
+            {
+                _cl.EnqueueReadBuffer(_queue, result, true, 0, (nuint)(numGroups * sizeof(float)), ptr, 0, null, null);
+            }
+            
+            float sum = 0;
+            for (int i = 0; i < numGroups; i++)
+                sum += partialResults[i];
+            
+            return sum;
+        }
+
+        private static (int[] rowPtr, int[] colIdx, float[] values) ConvertToCSR(SparseMatrix matrix)
+        {
+            var rowPtr = new List<int>();
+            var colIdx = new List<int>();
+            var values = new List<float>();
+            
+            rowPtr.Add(0);
+            
+            for (int row = 0; row < matrix.Size; row++)
+            {
+                var rowData = matrix.GetRow(row);
+                var sortedCols = rowData.OrderBy(kvp => kvp.Key);
+                
+                foreach (var kvp in sortedCols)
+                {
+                    colIdx.Add(kvp.Key);
+                    values.Add(kvp.Value);
+                }
+                
+                rowPtr.Add(values.Count);
+            }
+            
+            return (rowPtr.ToArray(), colIdx.ToArray(), values.ToArray());
+        }
+
+        private static unsafe void CleanupBuffers(params nint[] buffers)
+        {
+            foreach (var buffer in buffers)
+            {
+                if (buffer != 0)
+                    _cl.ReleaseMemObject(buffer);
+            }
+        }
+
+        private static unsafe void CleanupKernels(params nint[] kernels)
+        {
+            foreach (var kernel in kernels)
+            {
+                if (kernel != 0)
+                    _cl.ReleaseKernel(kernel);
+            }
         }
     }
 }
