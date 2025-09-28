@@ -23,7 +23,6 @@ namespace GeoscientistToolkit.Analysis.Pnm
         public bool CalculateNavierStokes { get; set; }
         public bool CalculateLatticeBoltzmann { get; set; }
         
-        // NEW: User-defined pressure parameters
         public float InletPressure { get; set; } = 1.0f; // Pa
         public float OutletPressure { get; set; } = 0.0f; // Pa
     }
@@ -38,7 +37,6 @@ namespace GeoscientistToolkit.Analysis.Pnm
         public float LatticeBoltzmannCorrected { get; set; }
         public float Tortuosity { get; set; }
         
-        // NEW: Store calculation parameters for export
         public float UsedViscosity { get; set; } // cP
         public float UsedPressureDrop { get; set; } // Pa
         public float ModelLength { get; set; } // m
@@ -50,12 +48,21 @@ namespace GeoscientistToolkit.Analysis.Pnm
         public int ThroatCount { get; set; }
     }
 
+    // NEW: Flow data for visualization
+    public sealed class FlowData
+    {
+        public Dictionary<int, float> PorePressures { get; set; } = new Dictionary<int, float>();
+        public Dictionary<int, float> ThroatFlowRates { get; set; } = new Dictionary<int, float>();
+    }
+
     public static class AbsolutePermeability
     {
         // Store results for display
         private static PermeabilityResults _lastResults = new PermeabilityResults();
+        private static FlowData _lastFlowData = new FlowData(); // NEW: Store flow field data
         
         public static PermeabilityResults GetLastResults() => _lastResults;
+        public static FlowData GetLastFlowData() => _lastFlowData; // NEW: Access flow data
 
         public static void Calculate(PermeabilityOptions options)
         {
@@ -66,11 +73,10 @@ namespace GeoscientistToolkit.Analysis.Pnm
                 return;
             }
 
-            // CRITICAL FIX: Verify voxel size is reasonable (should be in μm)
             if (pnm.VoxelSize <= 0 || pnm.VoxelSize > 1000)
             {
                 Logger.LogWarning($"[Permeability] Suspicious voxel size: {pnm.VoxelSize} μm. Using default 1.0 μm");
-                pnm.VoxelSize = 1.0f; // Default to 1 μm if unreasonable
+                pnm.VoxelSize = 1.0f;
             }
 
             float pixelSize_m = pnm.VoxelSize * 1e-6f; // μm to meters
@@ -93,6 +99,10 @@ namespace GeoscientistToolkit.Analysis.Pnm
             _lastResults.FlowAxis = options.Axis.ToString();
             _lastResults.PoreCount = pnm.Pores.Count;
             _lastResults.ThroatCount = pnm.Throats.Count;
+            
+            // Clear previous flow data
+            _lastFlowData.PorePressures.Clear();
+            _lastFlowData.ThroatFlowRates.Clear();
             
             float tau2 = pnm.Tortuosity * pnm.Tortuosity;
 
@@ -135,17 +145,14 @@ namespace GeoscientistToolkit.Analysis.Pnm
                 Logger.Log($"  τ²-corrected: {_lastResults.LatticeBoltzmannCorrected:E3} mD");
             }
 
-            // Validate results
             ValidateAndWarnResults();
             
             Logger.Log("[Permeability] Calculations complete.");
+            Logger.Log($"[Permeability] Flow data contains {_lastFlowData.PorePressures.Count} pore pressures");
         }
 
         private static void ValidateAndWarnResults()
         {
-            // Typical rock permeabilities range from 0.01 mD to 10,000 mD
-            // Warn if outside reasonable range
-            
             void CheckValue(string name, float value)
             {
                 if (value > 100000) // > 100 Darcy
@@ -164,80 +171,133 @@ namespace GeoscientistToolkit.Analysis.Pnm
         }
 
         private static float RunEngine(PermeabilityOptions options, string engine)
-{
-    var stopwatch = Stopwatch.StartNew();
-    var pnm = options.Dataset;
-    
-    float pixelSize_m = pnm.VoxelSize * 1e-6f; // μm to m
-    
-    // Get boundary pores
-    var (inletPores, outletPores, modelLength, crossSectionalArea) = GetBoundaryPores(pnm, options.Axis);
-    
-    if (inletPores.Count == 0 || outletPores.Count == 0)
-    {
-        Logger.LogWarning($"[Permeability] No inlet/outlet pores found for axis {options.Axis}.");
-        return 0f;
-    }
-
-    // Store for results
-    _lastResults.ModelLength = modelLength;
-    _lastResults.CrossSectionalArea = crossSectionalArea;
-
-    Logger.Log($"[Permeability] Found {inletPores.Count} inlet and {outletPores.Count} outlet pores");
-    Logger.Log($"[Permeability] Model: Length={modelLength*1e6:F1} μm, Area={crossSectionalArea*1e12:F3} μm²");
-
-    // Build linear system with user-defined pressures
-    var (matrix, b) = BuildLinearSystem(pnm, engine, inletPores, outletPores, 
-        options.FluidViscosity, pixelSize_m, options.InletPressure, options.OutletPressure);
-
-    // Solve for pore pressures
-    float[] pressures = options.UseGpu && OpenCLContext.IsAvailable
-        ? SolveWithGpu(matrix, b)
-        : SolveWithCpu(matrix, b);
-
-    if (pressures == null)
-    {
-        Logger.LogError($"[Permeability] Linear system solver failed for '{engine}'.");
-        return 0f;
-    }
-    
-    // Calculate total flow rate
-    float totalFlowRate = CalculateTotalFlow(pnm, engine, pressures, inletPores, 
-        options.FluidViscosity, pixelSize_m);
-    
-    _lastResults.TotalFlowRate = totalFlowRate;
-    
-    Logger.Log($"[Permeability] Total flow rate Q = {totalFlowRate:E3} m³/s");
-
-    // Calculate permeability using Darcy's law
-    // K = Q * μ * L / (A * ΔP)
-    float viscosityPaS = options.FluidViscosity * 0.001f; // cP to Pa·s
-    float pressureDrop = Math.Abs(options.InletPressure - options.OutletPressure);
-    
-    if (pressureDrop <= 0)
-    {
-        Logger.LogError("[Permeability] Invalid pressure drop (must be > 0)");
-        return 0f;
-    }
-    
-    float permeability_m2 = (totalFlowRate * viscosityPaS * modelLength) / 
-                            (crossSectionalArea * pressureDrop);
-    
-    // Correct conversion from m² to milliDarcy:
-    // 1 Darcy = 9.869233e-13 m²  =>  1 m² = 1/9.869233e-13 D ≈ 1.01325e12 D
-    // Therefore 1 m² = 1.01325e15 mD
-    float permeability_mD = permeability_m2 * 1.01325e15f;
-    
-    stopwatch.Stop();
-    Logger.Log($"[Permeability] {engine} calculation took {stopwatch.ElapsedMilliseconds}ms");
-    Logger.Log($"[Permeability] K = {permeability_m2:E3} m² = {permeability_mD:E3} mD");
-    
-    return permeability_mD;
-}
-
-private static float CalculateGeometricTortuosity(PNMDataset pnm, FlowAxis axis)
         {
-            // Implementation remains the same as in original
+            var stopwatch = Stopwatch.StartNew();
+            var pnm = options.Dataset;
+            
+            float pixelSize_m = pnm.VoxelSize * 1e-6f; // μm to m
+            
+            // Get boundary pores
+            var (inletPores, outletPores, modelLength, crossSectionalArea) = GetBoundaryPores(pnm, options.Axis);
+            
+            if (inletPores.Count == 0 || outletPores.Count == 0)
+            {
+                Logger.LogWarning($"[Permeability] No inlet/outlet pores found for axis {options.Axis}.");
+                return 0f;
+            }
+
+            _lastResults.ModelLength = modelLength;
+            _lastResults.CrossSectionalArea = crossSectionalArea;
+
+            Logger.Log($"[Permeability] Found {inletPores.Count} inlet and {outletPores.Count} outlet pores");
+            Logger.Log($"[Permeability] Model: Length={modelLength*1e6:F1} μm, Area={crossSectionalArea*1e12:F3} μm²");
+
+            // Build linear system with user-defined pressures
+            var (matrix, b) = BuildLinearSystem(pnm, engine, inletPores, outletPores, 
+                options.FluidViscosity, pixelSize_m, options.InletPressure, options.OutletPressure);
+
+            // Solve for pore pressures
+            float[] pressures = options.UseGpu && OpenCLContext.IsAvailable
+                ? SolveWithGpu(matrix, b)
+                : SolveWithCpu(matrix, b);
+
+            if (pressures == null)
+            {
+                Logger.LogError($"[Permeability] Linear system solver failed for '{engine}'.");
+                return 0f;
+            }
+            
+            // NEW: Store pore pressures for visualization
+            StorePorePressures(pnm, pressures);
+            
+            // Calculate total flow rate and store throat flow rates
+            float totalFlowRate = CalculateTotalFlowWithStorage(pnm, engine, pressures, inletPores, 
+                options.FluidViscosity, pixelSize_m);
+            
+            _lastResults.TotalFlowRate = totalFlowRate;
+            
+            Logger.Log($"[Permeability] Total flow rate Q = {totalFlowRate:E3} m³/s");
+
+            // Calculate permeability using Darcy's law
+            float viscosityPaS = options.FluidViscosity * 0.001f; // cP to Pa·s
+            float pressureDrop = Math.Abs(options.InletPressure - options.OutletPressure);
+            
+            if (pressureDrop <= 0)
+            {
+                Logger.LogError("[Permeability] Invalid pressure drop (must be > 0)");
+                return 0f;
+            }
+            
+            float permeability_m2 = (totalFlowRate * viscosityPaS * modelLength) / 
+                                    (crossSectionalArea * pressureDrop);
+            
+            // 1 Darcy = 9.869233e-13 m² => 1 m² = 1.01325e15 mD
+            float permeability_mD = permeability_m2 * 1.01325e15f;
+            
+            stopwatch.Stop();
+            Logger.Log($"[Permeability] {engine} calculation took {stopwatch.ElapsedMilliseconds}ms");
+            Logger.Log($"[Permeability] K = {permeability_m2:E3} m² = {permeability_mD:E3} mD");
+            
+            return permeability_mD;
+        }
+
+        // NEW: Store pore pressures for visualization
+        private static void StorePorePressures(PNMDataset pnm, float[] pressures)
+        {
+            _lastFlowData.PorePressures.Clear();
+            
+            foreach (var pore in pnm.Pores)
+            {
+                if (pore.ID < pressures.Length)
+                {
+                    _lastFlowData.PorePressures[pore.ID] = pressures[pore.ID];
+                }
+            }
+        }
+
+        // Modified to store throat flow rates
+        private static float CalculateTotalFlowWithStorage(PNMDataset pnm, string engine, float[] pressures, 
+            HashSet<int> inletPores, float viscosity_cP, float voxelSize_m)
+        {
+            float totalFlow = 0;
+            var poreMap = pnm.Pores.ToDictionary(p => p.ID);
+            float viscosity_PaS = viscosity_cP * 0.001f;
+            
+            _lastFlowData.ThroatFlowRates.Clear();
+            int throatId = 0;
+
+            foreach (var throat in pnm.Throats)
+            {
+                throatId++;
+                bool p1_inlet = inletPores.Contains(throat.Pore1ID);
+                bool p2_inlet = inletPores.Contains(throat.Pore2ID);
+
+                if (!poreMap.TryGetValue(throat.Pore1ID, out var p1) || 
+                    !poreMap.TryGetValue(throat.Pore2ID, out var p2)) 
+                    continue;
+                
+                float conductance = CalculateConductance(p1, p2, throat, engine, voxelSize_m, viscosity_PaS);
+                float deltaP = pressures[p1.ID] - pressures[p2.ID];
+                float flowRate = conductance * deltaP;
+                
+                // Store throat flow rate for visualization
+                _lastFlowData.ThroatFlowRates[throatId] = Math.Abs(flowRate);
+                
+                if (p1_inlet && !p2_inlet)
+                {
+                    totalFlow += Math.Max(0, flowRate); // Only positive flow from inlet
+                }
+                else if (!p1_inlet && p2_inlet)
+                {
+                    totalFlow += Math.Max(0, -flowRate); // Reverse flow
+                }
+            }
+            
+            return totalFlow;
+        }
+
+        private static float CalculateGeometricTortuosity(PNMDataset pnm, FlowAxis axis)
+        {
             if (pnm.Pores.Count == 0) return 1.0f;
             
             var (inletPores, outletPores, modelLength, _) = GetBoundaryPores(pnm, axis);
@@ -293,6 +353,7 @@ private static float CalculateGeometricTortuosity(PNMDataset pnm, FlowAxis axis)
             
             return Math.Max(1.0f, Math.Min(10.0f, tortuosity));
         }
+
         private static Dictionary<int, float> DijkstraShortestPath(Dictionary<int, List<(int neighbor, float distance)>> adjacency, int start, int maxId)
         {
             var distances = new Dictionary<int, float>();
@@ -349,7 +410,7 @@ private static float CalculateGeometricTortuosity(PNMDataset pnm, FlowAxis axis)
             var inlets = new HashSet<int>();
             var outlets = new HashSet<int>();
             float L = 0, A = 0;
-            float tolerance = 2.0f; // Tolerance in voxels (increased for better detection)
+            float tolerance = 2.0f; // Tolerance in voxels
 
             switch (axis)
             {
@@ -389,7 +450,6 @@ private static float CalculateGeometricTortuosity(PNMDataset pnm, FlowAxis axis)
             
             return (inlets, outlets, L, A);
         }
-
         private static (SparseMatrix, float[]) BuildLinearSystem(PNMDataset pnm, string engine, 
             HashSet<int> inlets, HashSet<int> outlets, float viscosity_cP, float voxelSize_m,
             float inletPressure, float outletPressure)
@@ -491,7 +551,6 @@ private static float CalculateGeometricTortuosity(PNMDataset pnm, FlowAxis axis)
             var poreMap = pnm.Pores.ToDictionary(p => p.ID);
             float viscosity_PaS = viscosity_cP * 0.001f;
 
-            // Calculate flow from inlet pores
             foreach (var throat in pnm.Throats)
             {
                 bool p1_inlet = inletPores.Contains(throat.Pore1ID);
@@ -586,7 +645,7 @@ private static float CalculateGeometricTortuosity(PNMDataset pnm, FlowAxis axis)
                 y[i] += alpha * x[i];
         }
 
-        // --- GPU SOLVER (simplified placeholder) ---
+        // --- GPU SOLVER ---
         
         private static float[] SolveWithGpu(SparseMatrix A, float[] b, float tolerance = 1e-6f, int maxIterations = 5000)
         {
@@ -738,7 +797,7 @@ private static float CalculateGeometricTortuosity(PNMDataset pnm, FlowAxis axis)
                     
                     // Create program with CG kernel
                     string kernelSource = @"
-                    // --- spmv_csr: y = A * x (CSR) ---
+// --- spmv_csr: y = A * x (CSR) ---
 __kernel void spmv_csr(__global const int* rowPtr,
                        __global const int* colIdx,
                        __global const float* values,

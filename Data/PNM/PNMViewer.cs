@@ -1,4 +1,4 @@
-// GeoscientistToolkit/UI/PNMViewer.cs - Fixed Version with All Issues Resolved
+// GeoscientistToolkit/UI/PNMViewer.cs - Enhanced Version with Pressure and Tortuosity
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -11,8 +11,8 @@ using GeoscientistToolkit.Data.Pnm;
 using GeoscientistToolkit.UI.Interfaces;
 using GeoscientistToolkit.UI.Utils;
 using GeoscientistToolkit.Util;
+using GeoscientistToolkit.Analysis.Pnm;
 using ImGuiNET;
-using StbImageWriteSharp;
 using Veldrid;
 using Veldrid.SPIRV;
 
@@ -101,12 +101,25 @@ namespace GeoscientistToolkit.UI
         private Vector3 _modelCenter;
         private float _modelRadius = 10.0f;
 
-        // UI & Rendering State
+        // UI & Rendering State - ENHANCED with new options
         private int _colorByIndex = 0;
-        private readonly string[] _colorByOptions = { "Pore Radius", "Pore Connections", "Pore Volume" };
+        private readonly string[] _colorByOptions = { 
+            "Pore Radius", 
+            "Pore Connections", 
+            "Pore Volume",
+            "Pressure (Pores)",      // NEW: Shows pressure at each pore
+            "Pressure Drop (Throats)", // NEW: Shows pressure gradient across throats  
+            "Local Tortuosity"        // NEW: Shows path tortuosity
+        };
         private float _poreSizeMultiplier = 1.0f;
         private bool _showPores = true;
         private bool _showThroats = true;
+
+        // NEW: Store pressure/flow results for visualization
+        private Dictionary<int, float> _porePressures = new Dictionary<int, float>();
+        private Dictionary<int, float> _throatFlowRates = new Dictionary<int, float>();
+        private Dictionary<int, float> _localTortuosity = new Dictionary<int, float>();
+        private bool _hasFlowData = false;
 
         // Selection
         private int _selectedPoreId = -1;
@@ -114,6 +127,9 @@ namespace GeoscientistToolkit.UI
         
         // Screenshot functionality
         private readonly ImGuiExportFileDialog _screenshotDialog;
+        private bool _showScreenshotNotification = false;
+        private float _screenshotNotificationTimer = 0f;
+        private string _lastScreenshotPath = "";
         
         // Stats window ID for proper layering
         private readonly string _statsWindowId = "##PNMStats";
@@ -128,6 +144,8 @@ namespace GeoscientistToolkit.UI
                 if (ReferenceEquals(d, _dataset))
                 {
                     _pendingGeometryRebuild = true;
+                    // Check if we have new flow data
+                    UpdateFlowData();
                 }
             };
 
@@ -140,8 +158,105 @@ namespace GeoscientistToolkit.UI
             _isMetal = VeldridManager.GraphicsDevice.BackendType == GraphicsBackend.Metal;
             
             InitializeVeldridResources();
+            UpdateFlowData();
             RebuildGeometryFromDataset();
             ResetCamera();
+        }
+
+        // NEW: Update flow data from last permeability calculation
+        private void UpdateFlowData()
+        {
+            var results = AbsolutePermeability.GetLastResults();
+            var flowData = AbsolutePermeability.GetLastFlowData();
+            
+            if (flowData != null && flowData.PorePressures != null && flowData.PorePressures.Count > 0)
+            {
+                _porePressures = flowData.PorePressures;
+                _throatFlowRates = flowData.ThroatFlowRates ?? new Dictionary<int, float>();
+                _hasFlowData = true;
+                
+                // Calculate local tortuosity (simplified - based on connectivity patterns)
+                CalculateLocalTortuosity();
+                
+                Logger.Log($"[PNMViewer] Loaded flow data with {_porePressures.Count} pore pressures");
+            }
+            else
+            {
+                _hasFlowData = false;
+            }
+        }
+
+        // NEW: Calculate local tortuosity metric for visualization
+        private void CalculateLocalTortuosity()
+        {
+            _localTortuosity.Clear();
+            
+            // Build adjacency map
+            var adjacency = new Dictionary<int, List<int>>();
+            foreach (var throat in _dataset.Throats)
+            {
+                if (!adjacency.ContainsKey(throat.Pore1ID))
+                    adjacency[throat.Pore1ID] = new List<int>();
+                if (!adjacency.ContainsKey(throat.Pore2ID))
+                    adjacency[throat.Pore2ID] = new List<int>();
+                    
+                adjacency[throat.Pore1ID].Add(throat.Pore2ID);
+                adjacency[throat.Pore2ID].Add(throat.Pore1ID);
+            }
+            
+            // For each pore, calculate average path deviation
+            foreach (var pore in _dataset.Pores)
+            {
+                if (!adjacency.ContainsKey(pore.ID))
+                {
+                    _localTortuosity[pore.ID] = 1.0f;
+                    continue;
+                }
+                
+                var neighbors = adjacency[pore.ID];
+                if (neighbors.Count < 2)
+                {
+                    _localTortuosity[pore.ID] = 1.0f;
+                    continue;
+                }
+                
+                // Calculate angle variance between connections
+                float totalDeviation = 0f;
+                int comparisons = 0;
+                
+                for (int i = 0; i < neighbors.Count - 1; i++)
+                {
+                    var n1 = _dataset.Pores.FirstOrDefault(p => p.ID == neighbors[i]);
+                    if (n1 == null) continue;
+                    
+                    for (int j = i + 1; j < neighbors.Count; j++)
+                    {
+                        var n2 = _dataset.Pores.FirstOrDefault(p => p.ID == neighbors[j]);
+                        if (n2 == null) continue;
+                        
+                        // Calculate angle between the two connections
+                        var v1 = Vector3.Normalize(n1.Position - pore.Position);
+                        var v2 = Vector3.Normalize(n2.Position - pore.Position);
+                        float angle = MathF.Acos(Math.Clamp(Vector3.Dot(v1, v2), -1f, 1f));
+                        
+                        // Deviation from straight line (π radians)
+                        float deviation = MathF.Abs(MathF.PI - angle) / MathF.PI;
+                        totalDeviation += deviation;
+                        comparisons++;
+                    }
+                }
+                
+                if (comparisons > 0)
+                {
+                    float avgDeviation = totalDeviation / comparisons;
+                    // Convert to tortuosity-like metric (1.0 = straight, higher = more tortuous)
+                    _localTortuosity[pore.ID] = 1.0f + avgDeviation * 2.0f;
+                }
+                else
+                {
+                    _localTortuosity[pore.ID] = 1.0f;
+                }
+            }
         }
 
         private void InitializeVeldridResources()
@@ -177,7 +292,6 @@ namespace GeoscientistToolkit.UI
 
         private void CreatePoreResourcesGLSL(ResourceFactory factory)
         {
-            // Create sphere geometry (icosahedron)
             var (vertices, indices) = CreateSphereGeometry();
             
             _poreVertexBuffer = factory.CreateBuffer(new BufferDescription((uint)(vertices.Length * 12), BufferUsage.VertexBuffer));
@@ -185,7 +299,6 @@ namespace GeoscientistToolkit.UI
             _poreIndexBuffer = factory.CreateBuffer(new BufferDescription((uint)(indices.Length * 2), BufferUsage.IndexBuffer));
             VeldridManager.GraphicsDevice.UpdateBuffer(_poreIndexBuffer, 0, indices);
 
-            // GLSL Shaders
             string vertexShader = @"
 #version 450
 layout(location = 0) in vec3 in_Position;
@@ -207,12 +320,12 @@ layout(location = 2) out float out_ColorValue;
 
 void main() 
 {
-    float radius = in_InstanceRadius * SizeInfo.x * 0.1; // Scale for visibility
+    float radius = in_InstanceRadius * SizeInfo.x * 0.1;
     vec3 worldPos = in_InstancePosition + in_Position * radius;
     gl_Position = ViewProjection * vec4(worldPos, 1.0);
     
     out_WorldPos = worldPos;
-    out_Normal = normalize(in_Position); // For a sphere, normal = position
+    out_Normal = normalize(in_Position);
     out_ColorValue = in_InstanceColorValue;
 }";
 
@@ -233,10 +346,7 @@ void main()
     vec3 lightDir = normalize(vec3(1, 1, 1));
     vec3 viewDir = normalize(CamPos.xyz - in_WorldPos);
     
-    // Diffuse lighting
     float diffuse = max(dot(normal, lightDir), 0.0) * 0.7 + 0.3;
-    
-    // Specular lighting
     vec3 reflectDir = reflect(-lightDir, normal);
     float spec = pow(max(dot(viewDir, reflectDir), 0.0), 32) * 0.5;
     
@@ -296,9 +406,6 @@ void main()
             _poreIndexBuffer = factory.CreateBuffer(new BufferDescription((uint)(indices.Length * 2), BufferUsage.IndexBuffer));
             VeldridManager.GraphicsDevice.UpdateBuffer(_poreIndexBuffer, 0, indices);
 
-            // Metal shaders - simplified for brevity
-            // In real implementation, you'd have the full Metal shader code here
-            // For now, using the existing pipeline setup
             CreatePoreResourcesGLSL(factory); // Fallback for now
         }
 
@@ -369,13 +476,11 @@ void main()
 
         private void CreateThroatResourcesMetal(ResourceFactory factory)
         {
-            // Simplified - use GLSL version for now
             CreateThroatResourcesGLSL(factory);
         }
 
         private (Vector3[] vertices, ushort[] indices) CreateSphereGeometry()
         {
-            // Create icosahedron vertices
             float t = (1.0f + MathF.Sqrt(5.0f)) / 2.0f;
             var vertices = new List<Vector3>
             {
@@ -393,7 +498,6 @@ void main()
                 new Vector3(-t, 0, 1).Normalized()
             };
 
-            // Create icosahedron indices
             var indices = new List<ushort>
             {
                 0,11,5, 0,5,1, 0,1,7, 0,7,10, 0,10,11,
@@ -402,7 +506,6 @@ void main()
                 4,9,5, 2,4,11, 6,2,10, 8,6,7, 9,8,1
             };
 
-            // Subdivide once for smoother sphere
             var newVertices = new List<Vector3>(vertices);
             var newIndices = new List<ushort>();
             var midpointCache = new Dictionary<(int, int), int>();
@@ -446,11 +549,32 @@ void main()
             for (int i = 0; i < mapSize; i++)
             {
                 float t = i / (float)(mapSize - 1);
-                // Viridis-like colormap for better visibility
-                float r = Math.Clamp(0.267f + 0.004780f * i - 0.329f * t + 1.781f * t * t, 0.0f, 1.0f);
-                float g = Math.Clamp(0.0f + 1.069f * t - 0.170f * t * t, 0.0f, 1.0f);
-                float b = Math.Clamp(0.329f + 1.515f * t - 1.965f * t * t + 0.621f * t * t * t, 0.0f, 1.0f);
-                colorMapData[i] = new RgbaFloat(r, g, b, 1.0f);
+                
+                // Different colormaps based on what we're visualizing
+                if (_colorByIndex == 3 || _colorByIndex == 4) // Pressure-based
+                {
+                    // Blue-white-red for pressure (low to high)
+                    float r = t;
+                    float g = 1.0f - Math.Abs(2.0f * t - 1.0f);
+                    float b = 1.0f - t;
+                    colorMapData[i] = new RgbaFloat(r, g, b, 1.0f);
+                }
+                else if (_colorByIndex == 5) // Tortuosity
+                {
+                    // Green-yellow-red for tortuosity (low to high)
+                    float r = Math.Min(1.0f, 2.0f * t);
+                    float g = Math.Min(1.0f, 2.0f * (1.0f - t));
+                    float b = 0.0f;
+                    colorMapData[i] = new RgbaFloat(r, g, b, 1.0f);
+                }
+                else
+                {
+                    // Viridis for general properties
+                    float r = Math.Clamp(0.267f + 0.004780f * i - 0.329f * t + 1.781f * t * t, 0.0f, 1.0f);
+                    float g = Math.Clamp(0.0f + 1.069f * t - 0.170f * t * t, 0.0f, 1.0f);
+                    float b = Math.Clamp(0.329f + 1.515f * t - 1.965f * t * t + 0.621f * t * t * t, 0.0f, 1.0f);
+                    colorMapData[i] = new RgbaFloat(r, g, b, 1.0f);
+                }
             }
             
             _colorRampTexture = factory.CreateTexture(TextureDescription.Texture2D((uint)mapSize, 1, 1, 1, PixelFormat.R32_G32_B32_A32_Float, TextureUsage.Sampled));
@@ -477,10 +601,40 @@ void main()
             
             ImGui.Text("Color by:");
             ImGui.SameLine();
-            ImGui.SetNextItemWidth(150);
-            if (ImGui.Combo("##ColorBy", ref _colorByIndex, _colorByOptions, _colorByOptions.Length))
+            
+            // Filter options based on available data
+            var availableOptions = new List<string>();
+            var optionIndices = new List<int>();
+            
+            // Always available options
+            availableOptions.Add("Pore Radius");
+            optionIndices.Add(0);
+            availableOptions.Add("Pore Connections");
+            optionIndices.Add(1);
+            availableOptions.Add("Pore Volume");
+            optionIndices.Add(2);
+            
+            // Conditionally available options
+            if (_hasFlowData)
             {
+                availableOptions.Add("Pressure (Pores)");
+                optionIndices.Add(3);
+                availableOptions.Add("Pressure Drop (Throats)");
+                optionIndices.Add(4);
+                availableOptions.Add("Local Tortuosity");
+                optionIndices.Add(5);
+            }
+            
+            int localIndex = optionIndices.IndexOf(_colorByIndex);
+            if (localIndex < 0) localIndex = 0;
+            
+            ImGui.SetNextItemWidth(200);
+            if (ImGui.Combo("##ColorBy", ref localIndex, availableOptions.ToArray(), availableOptions.Count))
+            {
+                _colorByIndex = optionIndices[localIndex];
+                CreateColorRampTexture(VeldridManager.Factory); // Recreate colormap for new mode
                 UpdatePoreInstanceDataColor();
+                RebuildGeometryFromDataset(); // Rebuild to update throat colors
             }
             
             ImGui.SameLine();
@@ -513,6 +667,7 @@ void main()
         {
             if (_pendingGeometryRebuild)
             {
+                UpdateFlowData(); // Check for new flow data
                 RebuildGeometryFromDataset();
                 _pendingGeometryRebuild = false;
             }
@@ -525,156 +680,96 @@ void main()
             var availableSize = ImGui.GetContentRegionAvail();
             var imagePos = ImGui.GetCursorScreenPos();
 
-            // Draw the rendered 3D image
             ImGui.Image(textureId, availableSize, new Vector2(0, 1), new Vector2(1, 0));
 
-            // Invisible interaction layer over the image
             ImGui.SetCursorScreenPos(imagePos);
             ImGui.InvisibleButton("PNMViewInteraction", availableSize);
 
             bool isHovered = ImGui.IsItemHovered();
             if (isHovered)
             {
-                // Let your existing camera controls run (rotate/pan/zoom)
                 HandleMouseInput();
 
-                // Selection: trigger on mouse RELEASE (click), and only if the mouse did not drag.
-                // This avoids fighting with rotate/pan operations.
-                const float dragThresholdPx = 4.0f; // treat movements under 4 px as a click
+                const float dragThresholdPx = 4.0f;
                 bool leftReleased = ImGui.IsMouseReleased(ImGuiMouseButton.Left);
                 bool wasDragging  = ImGui.IsMouseDragging(ImGuiMouseButton.Left, dragThresholdPx);
                 bool shiftHeld    = ImGui.IsKeyDown(ImGuiKey.LeftShift) || ImGui.IsKeyDown(ImGuiKey.RightShift);
 
                 if (leftReleased && !wasDragging && !shiftHeld)
                 {
-                    var mousePos = ImGui.GetMousePos() - imagePos; // position inside the image widget
+                    var mousePos = ImGui.GetMousePos() - imagePos;
                     SelectPoreAtPosition(mousePos, availableSize);
                 }
             }
 
-            // Draw overlay windows (legend, stats, selection details)
             DrawOverlayWindows(imagePos, availableSize);
-        }
-
-        private void DrawSelectionOverlay(Vector2 imagePos, Vector2 imageSize)
-        {
-            if (_selectedPoreId < 0 && _selectedPore == null) return;
-
-            // Resolve fresh reference if needed (survive filtering/rebuilds)
-            var pore = _selectedPore ?? _dataset.Pores.FirstOrDefault(p => p.ID == _selectedPoreId);
-            if (pore == null) return;
-
-            // Project pore center to screen (within the rendered image rect)
-            var vp = _viewMatrix * _projMatrix;
-            var centerScreen = WorldToScreen(pore.Position, vp, imagePos, imageSize);
-            if (centerScreen == null) return;
-
-            // Estimate a projected radius by offsetting a small vector in model space and projecting
-            float rModel = pore.Radius * _poreSizeMultiplier * 0.1f;
-            if (rModel <= 0) rModel = 0.1f;
-
-            // Offset along +X in model space to approximate the on-screen radius
-            var edgeScreen = WorldToScreen(pore.Position + new Vector3(rModel, 0, 0), vp, imagePos, imageSize);
-            if (edgeScreen == null) return;
-
-            float radiusPx = Vector2.Distance(centerScreen.Value, edgeScreen.Value);
-            radiusPx = MathF.Max(radiusPx, 5f); // visible minimum
-
-            // Draw ring (two strokes for readability)
-            var dl = ImGui.GetWindowDrawList();
-            uint innerCol = ImGui.GetColorU32(new Vector4(1f, 0.95f, 0.2f, 0.95f)); // warm yellow
-            uint outerCol = ImGui.GetColorU32(new Vector4(0f, 0f, 0f, 0.9f));       // shadow
-
-            // Outer shadow
-            dl.AddCircle(centerScreen.Value, radiusPx + 2.0f, outerCol, 48, 3.0f);
-            // Main ring
-            dl.AddCircle(centerScreen.Value, radiusPx, innerCol, 64, 2.5f);
-
-            // Crosshair (optional, subtle)
-            float cross = MathF.Min(10f, radiusPx * 0.6f);
-            dl.AddLine(centerScreen.Value + new Vector2(-cross, 0), centerScreen.Value + new Vector2(cross, 0), innerCol, 1.5f);
-            dl.AddLine(centerScreen.Value + new Vector2(0, -cross), centerScreen.Value + new Vector2(0, cross), innerCol, 1.5f);
-        }
-        private Vector2? WorldToScreen(in Vector3 world, in Matrix4x4 viewProj, in Vector2 imagePos, in Vector2 imageSize)
-        {
-            // Transform to clip space
-            var clip = Vector4.Transform(new Vector4(world, 1f), viewProj);
-            if (clip.W <= 0.00001f) return null; // behind camera / not projectable
-
-            // Normalized device coordinates
-            float invW = 1f / clip.W;
-            float ndcX = clip.X * invW;
-            float ndcY = clip.Y * invW;
-
-            // Outside of the view frustum? (Optional clip)
-            if (ndcX < -1.2f || ndcX > 1.2f || ndcY < -1.2f || ndcY > 1.2f)
-                return null;
-
-            // Convert NDC to pixel coords inside the image quad
-            float u = (ndcX * 0.5f) + 0.5f;          // 0..1
-            float v = 1.0f - ((ndcY * 0.5f) + 0.5f); // flip Y to match ImGui.Image UVs
-
-            var px = new Vector2(imagePos.X + u * imageSize.X, imagePos.Y + v * imageSize.Y);
-            return px;
+            
+            // Draw screenshot notification if active
+            if (_showScreenshotNotification && _screenshotNotificationTimer > 0)
+            {
+                DrawScreenshotNotification(imagePos, availableSize);
+                _screenshotNotificationTimer -= ImGui.GetIO().DeltaTime;
+                if (_screenshotNotificationTimer <= 0)
+                {
+                    _showScreenshotNotification = false;
+                }
+            }
         }
 
         private void DrawOverlayWindows(Vector2 viewPos, Vector2 viewSize)
-{
-    // Legend Window
-    ImGui.SetNextWindowPos(new Vector2(viewPos.X + viewSize.X - 200, viewPos.Y + 10), ImGuiCond.Always);
-    ImGui.SetNextWindowSize(new Vector2(180, 250), ImGuiCond.Always);
-    ImGui.SetNextWindowBgAlpha(0.8f);
-    ImGui.Begin(_legendWindowId,
-        ImGuiWindowFlags.NoTitleBar | ImGuiWindowFlags.NoResize | ImGuiWindowFlags.NoMove |
-        ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoCollapse | ImGuiWindowFlags.NoSavedSettings);
-    DrawLegendContent();
-    ImGui.End();
-
-    // Statistics Window
-    ImGui.SetNextWindowPos(new Vector2(viewPos.X + 10, viewPos.Y + viewSize.Y - 180), ImGuiCond.Always);
-    ImGui.SetNextWindowSize(new Vector2(400, 170), ImGuiCond.Always);
-    ImGui.SetNextWindowBgAlpha(0.8f);
-    ImGui.Begin(_statsWindowId,
-        ImGuiWindowFlags.NoTitleBar | ImGuiWindowFlags.NoResize | ImGuiWindowFlags.NoMove |
-        ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoCollapse | ImGuiWindowFlags.NoSavedSettings);
-    DrawStatisticsContent();
-    ImGui.End();
-
-    // Selected Pore Window (resolved by ID each frame)
-    if (_selectedPoreId >= 0)
-    {
-        // Resolve the current pore from the dataset; if it no longer exists, clear selection
-        _selectedPore = FindPoreById(_selectedPoreId);
-        if (_selectedPore == null)
         {
-            _selectedPoreId = -1;
-            return;
+            // Legend Window
+            ImGui.SetNextWindowPos(new Vector2(viewPos.X + viewSize.X - 200, viewPos.Y + 10), ImGuiCond.Always);
+            ImGui.SetNextWindowSize(new Vector2(180, 280), ImGuiCond.Always); // Increased height for flow legends
+            ImGui.SetNextWindowBgAlpha(0.8f);
+            ImGui.Begin(_legendWindowId,
+                ImGuiWindowFlags.NoTitleBar | ImGuiWindowFlags.NoResize | ImGuiWindowFlags.NoMove |
+                ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoCollapse | ImGuiWindowFlags.NoSavedSettings);
+            DrawLegendContent();
+            ImGui.End();
+
+            // Statistics Window
+            ImGui.SetNextWindowPos(new Vector2(viewPos.X + 10, viewPos.Y + viewSize.Y - 180), ImGuiCond.Always);
+            ImGui.SetNextWindowSize(new Vector2(400, 170), ImGuiCond.Always);
+            ImGui.SetNextWindowBgAlpha(0.8f);
+            ImGui.Begin(_statsWindowId,
+                ImGuiWindowFlags.NoTitleBar | ImGuiWindowFlags.NoResize | ImGuiWindowFlags.NoMove |
+                ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoCollapse | ImGuiWindowFlags.NoSavedSettings);
+            DrawStatisticsContent();
+            ImGui.End();
+
+            // Selected Pore Window
+            if (_selectedPoreId >= 0)
+            {
+                _selectedPore = FindPoreById(_selectedPoreId);
+                if (_selectedPore == null)
+                {
+                    _selectedPoreId = -1;
+                    return;
+                }
+
+                ImGui.SetNextWindowPos(new Vector2(viewPos.X + 10, viewPos.Y + 10), ImGuiCond.Always);
+                ImGui.SetNextWindowSize(new Vector2(320, 250), ImGuiCond.Always); // Increased for pressure info
+                ImGui.SetNextWindowBgAlpha(0.85f);
+                ImGui.SetNextWindowFocus();
+
+                ImGui.Begin(_selectedWindowId,
+                    ImGuiWindowFlags.NoTitleBar | ImGuiWindowFlags.NoResize | ImGuiWindowFlags.NoMove |
+                    ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoCollapse | ImGuiWindowFlags.NoSavedSettings);
+                DrawSelectedPoreContent();
+                ImGui.End();
+            }
         }
-
-        // Keep the selection window pinned to the view and always visible
-        ImGui.SetNextWindowPos(new Vector2(viewPos.X + 10, viewPos.Y + 10), ImGuiCond.Always);
-        ImGui.SetNextWindowSize(new Vector2(320, 200), ImGuiCond.Always);
-        ImGui.SetNextWindowBgAlpha(0.85f);
-        ImGui.SetNextWindowFocus(); // ensure visibility after user interaction / camera moves
-
-        ImGui.Begin(_selectedWindowId,
-            ImGuiWindowFlags.NoTitleBar | ImGuiWindowFlags.NoResize | ImGuiWindowFlags.NoMove |
-            ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoCollapse | ImGuiWindowFlags.NoSavedSettings);
-        DrawSelectedPoreContent();
-        ImGui.End();
-    }
-}
-
 
         private void DrawLegendContent()
         {
-            string title = _colorByOptions[_colorByIndex];
+            string title = _colorByIndex < _colorByOptions.Length ? _colorByOptions[_colorByIndex] : "Unknown";
             ImGui.Text(title);
             ImGui.Separator();
 
-            // Get value range
             float minVal = 0, maxVal = 1;
             string unit = "";
+            
             switch (_colorByIndex)
             {
                 case 0: // Pore Radius
@@ -692,24 +787,58 @@ void main()
                     maxVal = _dataset.Pores.Any() ? _dataset.Pores.Max(p => p.VolumePhysical) : 1;
                     unit = " µm³";
                     break;
+                case 3: // Pressure (Pores)
+                    if (_porePressures.Any())
+                    {
+                        minVal = _porePressures.Values.Min();
+                        maxVal = _porePressures.Values.Max();
+                        unit = " Pa";
+                    }
+                    break;
+                case 4: // Pressure Drop (Throats)
+                    if (_throatFlowRates.Any())
+                    {
+                        // Calculate pressure drops across throats
+                        float minDrop = float.MaxValue, maxDrop = 0;
+                        foreach (var throat in _dataset.Throats)
+                        {
+                            if (_porePressures.TryGetValue(throat.Pore1ID, out float p1) &&
+                                _porePressures.TryGetValue(throat.Pore2ID, out float p2))
+                            {
+                                float drop = Math.Abs(p1 - p2);
+                                minDrop = Math.Min(minDrop, drop);
+                                maxDrop = Math.Max(maxDrop, drop);
+                            }
+                        }
+                        minVal = minDrop != float.MaxValue ? minDrop : 0;
+                        maxVal = maxDrop;
+                        unit = " Pa";
+                    }
+                    break;
+                case 5: // Local Tortuosity
+                    if (_localTortuosity.Any())
+                    {
+                        minVal = _localTortuosity.Values.Min();
+                        maxVal = _localTortuosity.Values.Max();
+                        unit = "";
+                    }
+                    break;
             }
 
-            // Draw gradient using ImGui
+            // Draw gradient
             var drawList = ImGui.GetWindowDrawList();
             var pos = ImGui.GetCursorScreenPos();
             float width = 30;
-            float height = 150;
+            float height = 180;
             
-            // Draw gradient rectangles
             int steps = 20;
             for (int i = 0; i < steps; i++)
             {
                 float t1 = (float)(steps - i - 1) / steps;
                 float t2 = (float)(steps - i) / steps;
                 
-                // Viridis colormap
-                var c1 = GetViridisColor(t1);
-                var c2 = GetViridisColor(t2);
+                var c1 = GetColorForMode(t1);
+                var c2 = GetColorForMode(t2);
                 
                 drawList.AddRectFilledMultiColor(
                     new Vector2(pos.X, pos.Y + i * height / steps),
@@ -722,26 +851,43 @@ void main()
             ImGui.SetCursorScreenPos(new Vector2(pos.X + width + 5, pos.Y));
             ImGui.Text($"{maxVal:F2}{unit}");
             
+            ImGui.SetCursorScreenPos(new Vector2(pos.X + width + 5, pos.Y + height / 2 - ImGui.GetTextLineHeight()/2));
+            ImGui.Text($"{(minVal + maxVal)/2:F2}{unit}");
+            
             ImGui.SetCursorScreenPos(new Vector2(pos.X + width + 5, pos.Y + height - ImGui.GetTextLineHeight()));
             ImGui.Text($"{minVal:F2}{unit}");
-        }
-        private Pore FindPoreById(int id)
-        {
-            if (id < 0) return null;
-            // Pores list may be rebuilt/reordered; always resolve by ID at draw time
-            for (int i = 0; i < _dataset.Pores.Count; i++)
+
+            // Add info for flow modes
+            if (_colorByIndex >= 3 && _colorByIndex <= 5 && !_hasFlowData)
             {
-                if (_dataset.Pores[i].ID == id) return _dataset.Pores[i];
+                ImGui.Spacing();
+                ImGui.TextWrapped("Run permeability calculation to enable flow visualization");
             }
-            return null;
         }
 
-        private Vector4 GetViridisColor(float t)
+        private Vector4 GetColorForMode(float t)
         {
-            float r = Math.Clamp(0.267f + 0.004780f * t * 255 - 0.329f * t + 1.781f * t * t, 0.0f, 1.0f);
-            float g = Math.Clamp(0.0f + 1.069f * t - 0.170f * t * t, 0.0f, 1.0f);
-            float b = Math.Clamp(0.329f + 1.515f * t - 1.965f * t * t + 0.621f * t * t * t, 0.0f, 1.0f);
-            return new Vector4(r, g, b, 1.0f);
+            if (_colorByIndex == 3 || _colorByIndex == 4) // Pressure
+            {
+                float r = t;
+                float g = 1.0f - Math.Abs(2.0f * t - 1.0f);
+                float b = 1.0f - t;
+                return new Vector4(r, g, b, 1.0f);
+            }
+            else if (_colorByIndex == 5) // Tortuosity
+            {
+                float r = Math.Min(1.0f, 2.0f * t);
+                float g = Math.Min(1.0f, 2.0f * (1.0f - t));
+                float b = 0.0f;
+                return new Vector4(r, g, b, 1.0f);
+            }
+            else // Default Viridis
+            {
+                float r = Math.Clamp(0.267f + 0.004780f * t * 255 - 0.329f * t + 1.781f * t * t, 0.0f, 1.0f);
+                float g = Math.Clamp(0.0f + 1.069f * t - 0.170f * t * t, 0.0f, 1.0f);
+                float b = Math.Clamp(0.329f + 1.515f * t - 1.965f * t * t + 0.621f * t * t * t, 0.0f, 1.0f);
+                return new Vector4(r, g, b, 1.0f);
+            }
         }
 
         private void DrawStatisticsContent()
@@ -750,7 +896,6 @@ void main()
     
             ImGui.Columns(2);
     
-            // Left column - Network info
             ImGui.Text("Network Statistics");
             ImGui.Separator();
             ImGui.Text($"Pores: {_dataset.Pores.Count:N0}");
@@ -760,12 +905,10 @@ void main()
     
             ImGui.NextColumn();
     
-            // Right column - Permeability
             ImGui.Text("Permeability (mD):");
             ImGui.Text($"  Uncorrected: {_dataset.DarcyPermeability:F2}");
             if (_dataset.Tortuosity > 0)
             {
-                // Fix: τ²-corrected permeability is K/τ²
                 float corrected = _dataset.DarcyPermeability / (_dataset.Tortuosity * _dataset.Tortuosity);
                 ImGui.Text($"  τ² Corrected: {corrected:F2}");
             }
@@ -775,10 +918,8 @@ void main()
             ImGui.Columns(1);
         }
 
-
         private void DrawSelectedPoreContent()
         {
-            // Resolve again to be extra-safe if lists changed mid-frame
             if (_selectedPoreId >= 0)
                 _selectedPore = FindPoreById(_selectedPoreId);
 
@@ -806,6 +947,19 @@ void main()
             ImGui.Text($"Surface Area: {_selectedPore.Area:F1} vox²");
             ImGui.Text($"Connections: {_selectedPore.Connections}");
 
+            // Add flow information if available
+            if (_hasFlowData && _porePressures.TryGetValue(_selectedPore.ID, out float pressure))
+            {
+                ImGui.Separator();
+                ImGui.Text("Flow Properties:");
+                ImGui.Text($"Pressure: {pressure:F3} Pa");
+                
+                if (_localTortuosity.TryGetValue(_selectedPore.ID, out float tort))
+                {
+                    ImGui.Text($"Local Tortuosity: {tort:F3}");
+                }
+            }
+
             if (ImGui.Button("Deselect"))
             {
                 _selectedPoreId = -1;
@@ -813,90 +967,89 @@ void main()
             }
         }
 
+        private Pore FindPoreById(int id)
+        {
+            if (id < 0) return null;
+            for (int i = 0; i < _dataset.Pores.Count; i++)
+            {
+                if (_dataset.Pores[i].ID == id) return _dataset.Pores[i];
+            }
+            return null;
+        }
+
         private void SelectPoreAtPosition(Vector2 mousePos, Vector2 viewSize)
-{
-    if (_dataset == null || _dataset.Pores == null || _dataset.Pores.Count == 0)
-    {
-        _selectedPoreId = -1;
-        _selectedPore = null;
-        return;
-    }
-
-    // Build ViewProjection for projection to clip space
-    var viewProj = _viewMatrix * _projMatrix;
-
-    // Helper: project a world point to pixel coords within the image rect; returns false if behind camera
-    bool WorldToScreen(in Vector3 world, out Vector2 pixel)
-    {
-        var clip = Vector4.Transform(new Vector4(world, 1f), viewProj);
-        if (clip.W <= 1e-6f)
         {
-            pixel = default;
-            return false; // behind camera or invalid
+            if (_dataset == null || _dataset.Pores == null || _dataset.Pores.Count == 0)
+            {
+                _selectedPoreId = -1;
+                _selectedPore = null;
+                return;
+            }
+
+            var viewProj = _viewMatrix * _projMatrix;
+
+            bool WorldToScreen(in Vector3 world, out Vector2 pixel)
+            {
+                var clip = Vector4.Transform(new Vector4(world, 1f), viewProj);
+                if (clip.W <= 1e-6f)
+                {
+                    pixel = default;
+                    return false;
+                }
+                float invW = 1f / clip.W;
+                float ndcX = clip.X * invW;
+                float ndcY = clip.Y * invW;
+
+                float u = (ndcX * 0.5f) + 0.5f;
+                float v = 1.0f - ((ndcY * 0.5f) + 0.5f);
+                pixel = new Vector2(u * viewSize.X, v * viewSize.Y);
+                return (u >= -0.2f && u <= 1.2f && v >= -0.2f && v <= 1.2f);
+            }
+
+            int bestId = -1;
+            Pore bestPore = null;
+            float bestDist2 = float.MaxValue;
+
+            const float minPickPx = 8f;
+            const float maxPickPx = 28f;
+
+            for (int i = 0; i < _dataset.Pores.Count; i++)
+            {
+                var pore = _dataset.Pores[i];
+
+                if (!WorldToScreen(pore.Position, out var centerPx))
+                    continue;
+
+                float rModel = pore.Radius * _poreSizeMultiplier * 0.1f;
+                if (rModel <= 0) rModel = 0.1f;
+
+                Vector2 edgePx;
+                if (!WorldToScreen(pore.Position + new Vector3(rModel, 0, 0), out edgePx))
+                    continue;
+
+                float projectedRadiusPx = Vector2.Distance(centerPx, edgePx);
+                float pickRadiusPx = Math.Clamp(projectedRadiusPx * 1.15f, minPickPx, maxPickPx);
+
+                float dx = mousePos.X - centerPx.X;
+                float dy = mousePos.Y - centerPx.Y;
+                float dist2 = dx * dx + dy * dy;
+
+                if (dist2 <= pickRadiusPx * pickRadiusPx && dist2 < bestDist2)
+                {
+                    bestDist2 = dist2;
+                    bestId = pore.ID;
+                    bestPore = pore;
+                }
+            }
+
+            _selectedPoreId = bestId;
+            _selectedPore   = bestPore;
+
+            if (_selectedPore != null)
+            {
+                Logger.Log($"[PNMViewer] Selected pore #{_selectedPore.ID}");
+            }
         }
-        float invW = 1f / clip.W;
-        float ndcX = clip.X * invW;
-        float ndcY = clip.Y * invW;
-
-        // Convert NDC (-1..1) to pixel coords (0..viewSize)
-        float u = (ndcX * 0.5f) + 0.5f;
-        float v = 1.0f - ((ndcY * 0.5f) + 0.5f); // flip Y to match ImGui.Image UVs
-        pixel = new Vector2(u * viewSize.X, v * viewSize.Y);
-        return (u >= -0.2f && u <= 1.2f && v >= -0.2f && v <= 1.2f); // allow slight margin
-    }
-
-    // Iterate all pores: pick the one with the smallest screen-space distance to mouse,
-    // within a dynamic threshold based on the projected radius (so small/remote pores remain pickable).
-    int bestId = -1;
-    Pore bestPore = null;
-    float bestDist2 = float.MaxValue;
-
-    // Minimum and maximum selection radius in pixels
-    const float minPickPx = 8f;   // generous base for tiny or far pores
-    const float maxPickPx = 28f;  // cap for very large/near pores
-
-    for (int i = 0; i < _dataset.Pores.Count; i++)
-    {
-        var pore = _dataset.Pores[i];
-
-        // Project center
-        if (!WorldToScreen(pore.Position, out var centerPx))
-            continue;
-
-        // Estimate projected radius: project an offset along +X in world by the rendered sphere radius
-        float rModel = pore.Radius * _poreSizeMultiplier * 0.1f;
-        if (rModel <= 0) rModel = 0.1f;
-
-        Vector2 edgePx;
-        if (!WorldToScreen(pore.Position + new Vector3(rModel, 0, 0), out edgePx))
-            continue;
-
-        float projectedRadiusPx = Vector2.Distance(centerPx, edgePx);
-        // Dynamic pick radius: slightly larger than the projected disk; clamped to reasonable bounds
-        float pickRadiusPx = Math.Clamp(projectedRadiusPx * 1.15f, minPickPx, maxPickPx);
-
-        // Distance from mouse to projected center
-        float dx = mousePos.X - centerPx.X;
-        float dy = mousePos.Y - centerPx.Y;
-        float dist2 = dx * dx + dy * dy;
-
-        if (dist2 <= pickRadiusPx * pickRadiusPx && dist2 < bestDist2)
-        {
-            bestDist2 = dist2;
-            bestId = pore.ID;
-            bestPore = pore;
-        }
-    }
-
-    _selectedPoreId = bestId;
-    _selectedPore   = bestPore;
-
-    if (_selectedPore != null)
-    {
-        Logger.Log($"[PNMViewer] Selected pore #{_selectedPore.ID} @ ({_selectedPore.Position.X:F2}, {_selectedPore.Position.Y:F2}, {_selectedPore.Position.Z:F2})");
-    }
-}
-
 
         private void RebuildGeometryFromDataset()
         {
@@ -911,7 +1064,6 @@ void main()
             }
             _poreInstanceCount = poreInstances.Count;
 
-            // Create or update instance buffer
             _poreInstanceBuffer?.Dispose();
             if (_poreInstanceCount > 0)
             {
@@ -921,10 +1073,10 @@ void main()
             }
             else
             {
-                _poreInstanceBuffer = factory.CreateBuffer(new BufferDescription(20, BufferUsage.VertexBuffer)); // Minimal buffer
+                _poreInstanceBuffer = factory.CreateBuffer(new BufferDescription(20, BufferUsage.VertexBuffer));
             }
 
-            // Build throat vertices
+            // Build throat vertices with appropriate color values
             var poreById = _dataset.Pores.ToDictionary(p => p.ID, p => p);
             var throatVertices = new List<ThroatVertexData>();
             
@@ -932,13 +1084,13 @@ void main()
             {
                 if (poreById.TryGetValue(t.Pore1ID, out var p1) && poreById.TryGetValue(t.Pore2ID, out var p2))
                 {
-                    throatVertices.Add(new ThroatVertexData(p1.Position, t.Radius));
-                    throatVertices.Add(new ThroatVertexData(p2.Position, t.Radius));
+                    float colorValue = GetThroatColorValue(t, p1, p2);
+                    throatVertices.Add(new ThroatVertexData(p1.Position, colorValue));
+                    throatVertices.Add(new ThroatVertexData(p2.Position, colorValue));
                 }
             }
             _throatVertexCount = (uint)throatVertices.Count;
 
-            // Create or update throat buffer
             _throatVertexBuffer?.Dispose();
             if (_throatVertexCount > 0)
             {
@@ -956,13 +1108,41 @@ void main()
 
         private float GetPoreColorValue(Pore p)
         {
-            return _colorByIndex switch
+            switch (_colorByIndex)
             {
-                0 => p.Radius, // Pore Radius
-                1 => p.Connections, // Connections
-                2 => p.VolumePhysical, // Volume (physical)
-                _ => p.Radius
-            };
+                case 0: return p.Radius;
+                case 1: return p.Connections;
+                case 2: return p.VolumePhysical;
+                case 3: // Pressure at pore
+                    if (_porePressures.TryGetValue(p.ID, out float pressure))
+                        return pressure;
+                    return 0;
+                case 5: // Local tortuosity
+                    if (_localTortuosity.TryGetValue(p.ID, out float tort))
+                        return tort;
+                    return 1.0f;
+                default: return p.Radius;
+            }
+        }
+
+        private float GetThroatColorValue(Throat t, Pore p1, Pore p2)
+        {
+            switch (_colorByIndex)
+            {
+                case 4: // Pressure drop across throat
+                    if (_porePressures.TryGetValue(t.Pore1ID, out float pr1) &&
+                        _porePressures.TryGetValue(t.Pore2ID, out float pr2))
+                    {
+                        return Math.Abs(pr1 - pr2);
+                    }
+                    return 0;
+                case 5: // Average tortuosity of connected pores
+                    float tort1 = _localTortuosity.TryGetValue(p1.ID, out float t1) ? t1 : 1.0f;
+                    float tort2 = _localTortuosity.TryGetValue(p2.ID, out float t2) ? t2 : 1.0f;
+                    return (tort1 + tort2) / 2.0f;
+                default:
+                    return t.Radius; // Default to throat radius
+            }
         }
 
         private void Render()
@@ -1001,6 +1181,7 @@ void main()
         private void UpdateConstantBuffers()
         {
             float minVal = 0, maxVal = 1;
+            
             switch (_colorByIndex)
             {
                 case 0: // Pore Radius
@@ -1015,7 +1196,40 @@ void main()
                     minVal = _dataset.Pores.Any() ? _dataset.Pores.Min(p => p.VolumePhysical) : 0;
                     maxVal = _dataset.Pores.Any() ? _dataset.Pores.Max(p => p.VolumePhysical) : 1;
                     break;
+                case 3: // Pressure (Pores)
+                    if (_porePressures.Any())
+                    {
+                        minVal = _porePressures.Values.Min();
+                        maxVal = _porePressures.Values.Max();
+                    }
+                    break;
+                case 4: // Pressure Drop (Throats)
+                    if (_porePressures.Any())
+                    {
+                        float minDrop = float.MaxValue, maxDrop = 0;
+                        foreach (var throat in _dataset.Throats)
+                        {
+                            if (_porePressures.TryGetValue(throat.Pore1ID, out float p1) &&
+                                _porePressures.TryGetValue(throat.Pore2ID, out float p2))
+                            {
+                                float drop = Math.Abs(p1 - p2);
+                                if (drop < minDrop) minDrop = drop;
+                                if (drop > maxDrop) maxDrop = drop;
+                            }
+                        }
+                        minVal = minDrop != float.MaxValue ? minDrop : 0;
+                        maxVal = maxDrop;
+                    }
+                    break;
+                case 5: // Local Tortuosity
+                    if (_localTortuosity.Any())
+                    {
+                        minVal = _localTortuosity.Values.Min();
+                        maxVal = _localTortuosity.Values.Max();
+                    }
+                    break;
             }
+            
             if (Math.Abs(maxVal - minVal) < 0.001f) maxVal = minVal + 1.0f;
 
             var constants = new Constants
@@ -1053,7 +1267,6 @@ void main()
         {
             var io = ImGui.GetIO();
             
-            // Zoom with mouse wheel
             if (io.MouseWheel != 0)
             {
                 float zoomSpeed = 0.1f * _cameraDistance;
@@ -1062,11 +1275,9 @@ void main()
                 UpdateCameraMatrices();
             }
 
-            // Check for rotation (left button with shift OR right button)
             bool wantRotate = (ImGui.IsMouseDown(ImGuiMouseButton.Left) && ImGui.IsKeyDown(ImGuiKey.LeftShift)) ||
                              ImGui.IsMouseDown(ImGuiMouseButton.Right);
             
-            // Check for panning (middle button)
             bool wantPan = ImGui.IsMouseDown(ImGuiMouseButton.Middle);
             
             if (wantRotate)
@@ -1121,6 +1332,22 @@ void main()
             _projMatrix = Matrix4x4.CreatePerspectiveFieldOfView(MathF.PI / 4f, aspectRatio, 0.01f, 1000f);
         }
 
+        private void DrawScreenshotNotification(Vector2 viewPos, Vector2 viewSize)
+        {
+            // Display a temporary notification when screenshot is saved
+            ImGui.SetNextWindowPos(new Vector2(viewPos.X + viewSize.X / 2, viewPos.Y + 50), ImGuiCond.Always, new Vector2(0.5f, 0));
+            ImGui.SetNextWindowBgAlpha(0.9f * (_screenshotNotificationTimer / 3.0f)); // Fade out effect
+            
+            ImGui.Begin("##ScreenshotNotification", 
+                ImGuiWindowFlags.NoTitleBar | ImGuiWindowFlags.NoResize | ImGuiWindowFlags.NoMove |
+                ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.AlwaysAutoResize | ImGuiWindowFlags.NoFocusOnAppearing);
+            
+            ImGui.TextColored(new Vector4(0.2f, 1.0f, 0.2f, 1.0f), "✓ Screenshot saved!");
+            ImGui.Text(Path.GetFileName(_lastScreenshotPath));
+            
+            ImGui.End();
+        }
+
         public void ResetCamera()
         {
             if (_dataset.Pores.Any())
@@ -1157,58 +1384,37 @@ void main()
         {
             try
             {
-                var gd = VeldridManager.GraphicsDevice;
-                var factory = VeldridManager.Factory;
-
-                // Create staging texture
-                var stagingDesc = TextureDescription.Texture2D(
-                    _renderTexture.Width, _renderTexture.Height, 1, 1,
-                    _renderTexture.Format, TextureUsage.Staging);
-                var stagingTexture = factory.CreateTexture(stagingDesc);
-
-                // Copy render texture to staging
-                var cl = factory.CreateCommandList();
-                cl.Begin();
-                cl.CopyTexture(_renderTexture, stagingTexture);
-                cl.End();
-                gd.SubmitCommands(cl);
-                gd.WaitForIdle();
-
-                // Read pixel data
-                MappedResource mappedResource = gd.Map(stagingTexture, MapMode.Read, 0);
-                var rawBytes = new byte[mappedResource.SizeInBytes];
-                unsafe
+                // Determine image format from extension
+                var format = Path.GetExtension(path).ToLower() switch
                 {
-                    var sourceSpan = new ReadOnlySpan<byte>(mappedResource.Data.ToPointer(), (int)mappedResource.SizeInBytes);
-                    sourceSpan.CopyTo(rawBytes);
-                }
-                gd.Unmap(stagingTexture, 0);
+                    ".png" => ScreenshotUtility.ImageFormat.PNG,
+                    ".jpg" or ".jpeg" => ScreenshotUtility.ImageFormat.JPEG,
+                    ".bmp" => ScreenshotUtility.ImageFormat.BMP,
+                    ".tga" => ScreenshotUtility.ImageFormat.TGA,
+                    _ => ScreenshotUtility.ImageFormat.PNG
+                };
 
-                // Write image file
-                using var stream = new MemoryStream();
-                var imageWriter = new ImageWriter();
-                var extension = Path.GetExtension(path).ToLower();
-
-                if (extension == ".png")
-                {
-                    imageWriter.WritePng(rawBytes, (int)_renderTexture.Width, (int)_renderTexture.Height, 
-                        ColorComponents.RedGreenBlueAlpha, stream);
-                }
-                else if (extension == ".jpg" || extension == ".jpeg")
-                {
-                    imageWriter.WriteJpg(rawBytes, (int)_renderTexture.Width, (int)_renderTexture.Height, 
-                        ColorComponents.RedGreenBlueAlpha, stream, 90);
-                }
+                // Use the ScreenshotUtility to capture the render texture
+                bool success = ScreenshotUtility.CaptureTexture(_renderTexture, path, format, 90);
                 
-                File.WriteAllBytes(path, stream.ToArray());
-                Logger.Log($"[Screenshot] Saved to {path}");
-                
-                stagingTexture.Dispose();
-                cl.Dispose();
+                if (success)
+                {
+                    Logger.Log($"[PNMViewer] Screenshot saved to {path}");
+                    
+                    // Show a success notification in ImGui (optional)
+                    // You could store a flag here to show a notification in the next frame
+                    _lastScreenshotPath = path;
+                    _showScreenshotNotification = true;
+                    _screenshotNotificationTimer = 3.0f; // Show for 3 seconds
+                }
+                else
+                {
+                    Logger.LogError($"[PNMViewer] Failed to save screenshot to {path}");
+                }
             }
             catch(Exception ex)
             {
-                Logger.LogError($"[Screenshot] Failed to save: {ex.Message}");
+                Logger.LogError($"[PNMViewer] Screenshot error: {ex.Message}");
             }
         }
 
@@ -1237,7 +1443,6 @@ void main()
         }
     }
 
-    // Extension helper
     internal static class Vector3Extensions
     {
         public static Vector3 Normalized(this Vector3 v)
