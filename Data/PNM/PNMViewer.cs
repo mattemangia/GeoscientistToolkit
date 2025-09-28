@@ -516,78 +516,155 @@ void main()
                 RebuildGeometryFromDataset();
                 _pendingGeometryRebuild = false;
             }
-            
+    
             Render();
-            
+    
             var textureId = _renderTextureManager.GetImGuiTextureId();
             if (textureId == IntPtr.Zero) return;
 
             var availableSize = ImGui.GetContentRegionAvail();
             var imagePos = ImGui.GetCursorScreenPos();
 
+            // Draw the rendered 3D image
             ImGui.Image(textureId, availableSize, new Vector2(0, 1), new Vector2(1, 0));
-            
-            // Create invisible button for interaction
+
+            // Invisible interaction layer over the image
             ImGui.SetCursorScreenPos(imagePos);
             ImGui.InvisibleButton("PNMViewInteraction", availableSize);
 
             bool isHovered = ImGui.IsItemHovered();
             if (isHovered)
             {
+                // Let your existing camera controls run (rotate/pan/zoom)
                 HandleMouseInput();
-                
-                // Handle selection with left click (without shift)
-                if (ImGui.IsMouseClicked(ImGuiMouseButton.Left) && !ImGui.IsKeyDown(ImGuiKey.LeftShift))
+
+                // Selection: trigger on mouse RELEASE (click), and only if the mouse did not drag.
+                // This avoids fighting with rotate/pan operations.
+                const float dragThresholdPx = 4.0f; // treat movements under 4 px as a click
+                bool leftReleased = ImGui.IsMouseReleased(ImGuiMouseButton.Left);
+                bool wasDragging  = ImGui.IsMouseDragging(ImGuiMouseButton.Left, dragThresholdPx);
+                bool shiftHeld    = ImGui.IsKeyDown(ImGuiKey.LeftShift) || ImGui.IsKeyDown(ImGuiKey.RightShift);
+
+                if (leftReleased && !wasDragging && !shiftHeld)
                 {
-                    var mousePos = ImGui.GetMousePos() - imagePos;
+                    var mousePos = ImGui.GetMousePos() - imagePos; // position inside the image widget
                     SelectPoreAtPosition(mousePos, availableSize);
                 }
             }
 
-            // Draw overlay windows with proper layering
+            // Draw overlay windows (legend, stats, selection details)
             DrawOverlayWindows(imagePos, availableSize);
         }
 
-        private void DrawOverlayWindows(Vector2 viewPos, Vector2 viewSize)
+        private void DrawSelectionOverlay(Vector2 imagePos, Vector2 imageSize)
         {
-            // Use ImGui windows for proper layering instead of drawing directly to drawlist
-            
-            // Legend Window
-            ImGui.SetNextWindowPos(new Vector2(viewPos.X + viewSize.X - 200, viewPos.Y + 10));
-            ImGui.SetNextWindowSize(new Vector2(180, 250));
-            ImGui.SetNextWindowBgAlpha(0.8f);
-            ImGui.Begin(_legendWindowId, ImGuiWindowFlags.NoTitleBar | ImGuiWindowFlags.NoResize | 
-                        ImGuiWindowFlags.NoMove | ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoCollapse);
-            
-            DrawLegendContent();
-            
-            ImGui.End();
+            if (_selectedPoreId < 0 && _selectedPore == null) return;
 
-            // Statistics Window
-            ImGui.SetNextWindowPos(new Vector2(viewPos.X + 10, viewPos.Y + viewSize.Y - 180));
-            ImGui.SetNextWindowSize(new Vector2(400, 170));
-            ImGui.SetNextWindowBgAlpha(0.8f);
-            ImGui.Begin(_statsWindowId, ImGuiWindowFlags.NoTitleBar | ImGuiWindowFlags.NoResize | 
-                        ImGuiWindowFlags.NoMove | ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoCollapse);
-            
-            DrawStatisticsContent();
-            
-            ImGui.End();
+            // Resolve fresh reference if needed (survive filtering/rebuilds)
+            var pore = _selectedPore ?? _dataset.Pores.FirstOrDefault(p => p.ID == _selectedPoreId);
+            if (pore == null) return;
 
-            // Selected Pore Window (if applicable)
-            if (_selectedPore != null)
-            {
-                ImGui.SetNextWindowPos(new Vector2(viewPos.X + 10, viewPos.Y + 10));
-                ImGui.SetNextWindowSize(new Vector2(320, 200));
-                ImGui.SetNextWindowBgAlpha(0.85f);
-                ImGui.Begin(_selectedWindowId, ImGuiWindowFlags.NoTitleBar | ImGuiWindowFlags.NoResize | 
-                            ImGuiWindowFlags.NoMove | ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoCollapse);
-                
-                DrawSelectedPoreContent();
-                
-                ImGui.End();
-            }
+            // Project pore center to screen (within the rendered image rect)
+            var vp = _viewMatrix * _projMatrix;
+            var centerScreen = WorldToScreen(pore.Position, vp, imagePos, imageSize);
+            if (centerScreen == null) return;
+
+            // Estimate a projected radius by offsetting a small vector in model space and projecting
+            float rModel = pore.Radius * _poreSizeMultiplier * 0.1f;
+            if (rModel <= 0) rModel = 0.1f;
+
+            // Offset along +X in model space to approximate the on-screen radius
+            var edgeScreen = WorldToScreen(pore.Position + new Vector3(rModel, 0, 0), vp, imagePos, imageSize);
+            if (edgeScreen == null) return;
+
+            float radiusPx = Vector2.Distance(centerScreen.Value, edgeScreen.Value);
+            radiusPx = MathF.Max(radiusPx, 5f); // visible minimum
+
+            // Draw ring (two strokes for readability)
+            var dl = ImGui.GetWindowDrawList();
+            uint innerCol = ImGui.GetColorU32(new Vector4(1f, 0.95f, 0.2f, 0.95f)); // warm yellow
+            uint outerCol = ImGui.GetColorU32(new Vector4(0f, 0f, 0f, 0.9f));       // shadow
+
+            // Outer shadow
+            dl.AddCircle(centerScreen.Value, radiusPx + 2.0f, outerCol, 48, 3.0f);
+            // Main ring
+            dl.AddCircle(centerScreen.Value, radiusPx, innerCol, 64, 2.5f);
+
+            // Crosshair (optional, subtle)
+            float cross = MathF.Min(10f, radiusPx * 0.6f);
+            dl.AddLine(centerScreen.Value + new Vector2(-cross, 0), centerScreen.Value + new Vector2(cross, 0), innerCol, 1.5f);
+            dl.AddLine(centerScreen.Value + new Vector2(0, -cross), centerScreen.Value + new Vector2(0, cross), innerCol, 1.5f);
         }
+        private Vector2? WorldToScreen(in Vector3 world, in Matrix4x4 viewProj, in Vector2 imagePos, in Vector2 imageSize)
+        {
+            // Transform to clip space
+            var clip = Vector4.Transform(new Vector4(world, 1f), viewProj);
+            if (clip.W <= 0.00001f) return null; // behind camera / not projectable
+
+            // Normalized device coordinates
+            float invW = 1f / clip.W;
+            float ndcX = clip.X * invW;
+            float ndcY = clip.Y * invW;
+
+            // Outside of the view frustum? (Optional clip)
+            if (ndcX < -1.2f || ndcX > 1.2f || ndcY < -1.2f || ndcY > 1.2f)
+                return null;
+
+            // Convert NDC to pixel coords inside the image quad
+            float u = (ndcX * 0.5f) + 0.5f;          // 0..1
+            float v = 1.0f - ((ndcY * 0.5f) + 0.5f); // flip Y to match ImGui.Image UVs
+
+            var px = new Vector2(imagePos.X + u * imageSize.X, imagePos.Y + v * imageSize.Y);
+            return px;
+        }
+
+        private void DrawOverlayWindows(Vector2 viewPos, Vector2 viewSize)
+{
+    // Legend Window
+    ImGui.SetNextWindowPos(new Vector2(viewPos.X + viewSize.X - 200, viewPos.Y + 10), ImGuiCond.Always);
+    ImGui.SetNextWindowSize(new Vector2(180, 250), ImGuiCond.Always);
+    ImGui.SetNextWindowBgAlpha(0.8f);
+    ImGui.Begin(_legendWindowId,
+        ImGuiWindowFlags.NoTitleBar | ImGuiWindowFlags.NoResize | ImGuiWindowFlags.NoMove |
+        ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoCollapse | ImGuiWindowFlags.NoSavedSettings);
+    DrawLegendContent();
+    ImGui.End();
+
+    // Statistics Window
+    ImGui.SetNextWindowPos(new Vector2(viewPos.X + 10, viewPos.Y + viewSize.Y - 180), ImGuiCond.Always);
+    ImGui.SetNextWindowSize(new Vector2(400, 170), ImGuiCond.Always);
+    ImGui.SetNextWindowBgAlpha(0.8f);
+    ImGui.Begin(_statsWindowId,
+        ImGuiWindowFlags.NoTitleBar | ImGuiWindowFlags.NoResize | ImGuiWindowFlags.NoMove |
+        ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoCollapse | ImGuiWindowFlags.NoSavedSettings);
+    DrawStatisticsContent();
+    ImGui.End();
+
+    // Selected Pore Window (resolved by ID each frame)
+    if (_selectedPoreId >= 0)
+    {
+        // Resolve the current pore from the dataset; if it no longer exists, clear selection
+        _selectedPore = FindPoreById(_selectedPoreId);
+        if (_selectedPore == null)
+        {
+            _selectedPoreId = -1;
+            return;
+        }
+
+        // Keep the selection window pinned to the view and always visible
+        ImGui.SetNextWindowPos(new Vector2(viewPos.X + 10, viewPos.Y + 10), ImGuiCond.Always);
+        ImGui.SetNextWindowSize(new Vector2(320, 200), ImGuiCond.Always);
+        ImGui.SetNextWindowBgAlpha(0.85f);
+        ImGui.SetNextWindowFocus(); // ensure visibility after user interaction / camera moves
+
+        ImGui.Begin(_selectedWindowId,
+            ImGuiWindowFlags.NoTitleBar | ImGuiWindowFlags.NoResize | ImGuiWindowFlags.NoMove |
+            ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoCollapse | ImGuiWindowFlags.NoSavedSettings);
+        DrawSelectedPoreContent();
+        ImGui.End();
+    }
+}
+
 
         private void DrawLegendContent()
         {
@@ -648,6 +725,16 @@ void main()
             ImGui.SetCursorScreenPos(new Vector2(pos.X + width + 5, pos.Y + height - ImGui.GetTextLineHeight()));
             ImGui.Text($"{minVal:F2}{unit}");
         }
+        private Pore FindPoreById(int id)
+        {
+            if (id < 0) return null;
+            // Pores list may be rebuilt/reordered; always resolve by ID at draw time
+            for (int i = 0; i < _dataset.Pores.Count; i++)
+            {
+                if (_dataset.Pores[i].ID == id) return _dataset.Pores[i];
+            }
+            return null;
+        }
 
         private Vector4 GetViridisColor(float t)
         {
@@ -659,102 +746,157 @@ void main()
 
         private void DrawStatisticsContent()
         {
+            if (_dataset == null) return;
+    
+            ImGui.Columns(2);
+    
+            // Left column - Network info
             ImGui.Text("Network Statistics");
             ImGui.Separator();
-            
-            ImGui.Columns(2, "StatsColumns", false);
-            
-            // Left column
             ImGui.Text($"Pores: {_dataset.Pores.Count:N0}");
             ImGui.Text($"Throats: {_dataset.Throats.Count:N0}");
             ImGui.Text($"Voxel Size: {_dataset.VoxelSize:F2} µm");
             ImGui.Text($"Tortuosity: {_dataset.Tortuosity:F3}");
-            
+    
             ImGui.NextColumn();
-            
+    
             // Right column - Permeability
             ImGui.Text("Permeability (mD):");
             ImGui.Text($"  Uncorrected: {_dataset.DarcyPermeability:F2}");
             if (_dataset.Tortuosity > 0)
             {
-                float corrected = _dataset.DarcyPermeability * (_dataset.Tortuosity * _dataset.Tortuosity);
+                // Fix: τ²-corrected permeability is K/τ²
+                float corrected = _dataset.DarcyPermeability / (_dataset.Tortuosity * _dataset.Tortuosity);
                 ImGui.Text($"  τ² Corrected: {corrected:F2}");
             }
             ImGui.Text($"  NS: {_dataset.NavierStokesPermeability:F2}");
             ImGui.Text($"  LBM: {_dataset.LatticeBoltzmannPermeability:F2}");
-            
+    
             ImGui.Columns(1);
         }
 
+
         private void DrawSelectedPoreContent()
         {
+            // Resolve again to be extra-safe if lists changed mid-frame
+            if (_selectedPoreId >= 0)
+                _selectedPore = FindPoreById(_selectedPoreId);
+
+            if (_selectedPore == null)
+            {
+                ImGui.TextDisabled("No pore selected.");
+                if (ImGui.Button("Close"))
+                {
+                    _selectedPoreId = -1;
+                }
+                return;
+            }
+
             ImGui.Text($"Selected Pore #{_selectedPore.ID}");
             ImGui.Separator();
-            
-            ImGui.Text($"Position:");
+
+            ImGui.Text("Position:");
             ImGui.Text($"  X: {_selectedPore.Position.X:F2}");
             ImGui.Text($"  Y: {_selectedPore.Position.Y:F2}");
             ImGui.Text($"  Z: {_selectedPore.Position.Z:F2}");
-            
+
             ImGui.Text($"Radius: {_selectedPore.Radius:F3} vox ({_selectedPore.Radius * _dataset.VoxelSize:F2} µm)");
             ImGui.Text($"Volume: {_selectedPore.VolumeVoxels:F0} vox³");
             ImGui.Text($"        ({_selectedPore.VolumePhysical:F2} µm³)");
             ImGui.Text($"Surface Area: {_selectedPore.Area:F1} vox²");
             ImGui.Text($"Connections: {_selectedPore.Connections}");
-            
+
             if (ImGui.Button("Deselect"))
             {
-                _selectedPore = null;
                 _selectedPoreId = -1;
+                _selectedPore = null;
             }
         }
 
         private void SelectPoreAtPosition(Vector2 mousePos, Vector2 viewSize)
+{
+    if (_dataset == null || _dataset.Pores == null || _dataset.Pores.Count == 0)
+    {
+        _selectedPoreId = -1;
+        _selectedPore = null;
+        return;
+    }
+
+    // Build ViewProjection for projection to clip space
+    var viewProj = _viewMatrix * _projMatrix;
+
+    // Helper: project a world point to pixel coords within the image rect; returns false if behind camera
+    bool WorldToScreen(in Vector3 world, out Vector2 pixel)
+    {
+        var clip = Vector4.Transform(new Vector4(world, 1f), viewProj);
+        if (clip.W <= 1e-6f)
         {
-            // Convert mouse position to normalized device coordinates
-            float ndcX = (mousePos.X / viewSize.X) * 2.0f - 1.0f;
-            float ndcY = 1.0f - (mousePos.Y / viewSize.Y) * 2.0f;
-
-            // Unproject to get ray
-            Matrix4x4.Invert(_viewMatrix * _projMatrix, out var invVP);
-            
-            var nearPoint = Vector3.Transform(new Vector3(ndcX, ndcY, 0), invVP);
-            var farPoint = Vector3.Transform(new Vector3(ndcX, ndcY, 1), invVP);
-            
-            var rayOrigin = _cameraPosition;
-            var rayDir = Vector3.Normalize(farPoint - nearPoint);
-            
-            // Find closest pore to ray
-            _selectedPore = null;
-            _selectedPoreId = -1;
-            float minDist = float.MaxValue;
-            
-            foreach (var pore in _dataset.Pores)
-            {
-                // Ray-sphere intersection
-                var toSphere = pore.Position - rayOrigin;
-                float projection = Vector3.Dot(toSphere, rayDir);
-                
-                if (projection < 0) continue; // Behind camera
-                
-                var closestPoint = rayOrigin + rayDir * projection;
-                float distToCenter = Vector3.Distance(closestPoint, pore.Position);
-                
-                float sphereRadius = pore.Radius * _poreSizeMultiplier * 0.1f;
-                
-                if (distToCenter <= sphereRadius && projection < minDist)
-                {
-                    minDist = projection;
-                    _selectedPore = pore;
-                    _selectedPoreId = pore.ID;
-                }
-            }
-
-            if (_selectedPore != null)
-            {
-                Logger.Log($"[PNMViewer] Selected pore #{_selectedPore.ID} at position ({_selectedPore.Position.X:F2}, {_selectedPore.Position.Y:F2}, {_selectedPore.Position.Z:F2})");
-            }
+            pixel = default;
+            return false; // behind camera or invalid
         }
+        float invW = 1f / clip.W;
+        float ndcX = clip.X * invW;
+        float ndcY = clip.Y * invW;
+
+        // Convert NDC (-1..1) to pixel coords (0..viewSize)
+        float u = (ndcX * 0.5f) + 0.5f;
+        float v = 1.0f - ((ndcY * 0.5f) + 0.5f); // flip Y to match ImGui.Image UVs
+        pixel = new Vector2(u * viewSize.X, v * viewSize.Y);
+        return (u >= -0.2f && u <= 1.2f && v >= -0.2f && v <= 1.2f); // allow slight margin
+    }
+
+    // Iterate all pores: pick the one with the smallest screen-space distance to mouse,
+    // within a dynamic threshold based on the projected radius (so small/remote pores remain pickable).
+    int bestId = -1;
+    Pore bestPore = null;
+    float bestDist2 = float.MaxValue;
+
+    // Minimum and maximum selection radius in pixels
+    const float minPickPx = 8f;   // generous base for tiny or far pores
+    const float maxPickPx = 28f;  // cap for very large/near pores
+
+    for (int i = 0; i < _dataset.Pores.Count; i++)
+    {
+        var pore = _dataset.Pores[i];
+
+        // Project center
+        if (!WorldToScreen(pore.Position, out var centerPx))
+            continue;
+
+        // Estimate projected radius: project an offset along +X in world by the rendered sphere radius
+        float rModel = pore.Radius * _poreSizeMultiplier * 0.1f;
+        if (rModel <= 0) rModel = 0.1f;
+
+        Vector2 edgePx;
+        if (!WorldToScreen(pore.Position + new Vector3(rModel, 0, 0), out edgePx))
+            continue;
+
+        float projectedRadiusPx = Vector2.Distance(centerPx, edgePx);
+        // Dynamic pick radius: slightly larger than the projected disk; clamped to reasonable bounds
+        float pickRadiusPx = Math.Clamp(projectedRadiusPx * 1.15f, minPickPx, maxPickPx);
+
+        // Distance from mouse to projected center
+        float dx = mousePos.X - centerPx.X;
+        float dy = mousePos.Y - centerPx.Y;
+        float dist2 = dx * dx + dy * dy;
+
+        if (dist2 <= pickRadiusPx * pickRadiusPx && dist2 < bestDist2)
+        {
+            bestDist2 = dist2;
+            bestId = pore.ID;
+            bestPore = pore;
+        }
+    }
+
+    _selectedPoreId = bestId;
+    _selectedPore   = bestPore;
+
+    if (_selectedPore != null)
+    {
+        Logger.Log($"[PNMViewer] Selected pore #{_selectedPore.ID} @ ({_selectedPore.Position.X:F2}, {_selectedPore.Position.Y:F2}, {_selectedPore.Position.Z:F2})");
+    }
+}
+
 
         private void RebuildGeometryFromDataset()
         {

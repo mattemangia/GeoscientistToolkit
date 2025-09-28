@@ -164,76 +164,77 @@ namespace GeoscientistToolkit.Analysis.Pnm
         }
 
         private static float RunEngine(PermeabilityOptions options, string engine)
-        {
-            var stopwatch = Stopwatch.StartNew();
-            var pnm = options.Dataset;
-            
-            float pixelSize_m = pnm.VoxelSize * 1e-6f; // μm to m
-            
-            // Get boundary pores
-            var (inletPores, outletPores, modelLength, crossSectionalArea) = GetBoundaryPores(pnm, options.Axis);
-            
-            if (inletPores.Count == 0 || outletPores.Count == 0)
-            {
-                Logger.LogWarning($"[Permeability] No inlet/outlet pores found for axis {options.Axis}.");
-                return 0f;
-            }
+{
+    var stopwatch = Stopwatch.StartNew();
+    var pnm = options.Dataset;
+    
+    float pixelSize_m = pnm.VoxelSize * 1e-6f; // μm to m
+    
+    // Get boundary pores
+    var (inletPores, outletPores, modelLength, crossSectionalArea) = GetBoundaryPores(pnm, options.Axis);
+    
+    if (inletPores.Count == 0 || outletPores.Count == 0)
+    {
+        Logger.LogWarning($"[Permeability] No inlet/outlet pores found for axis {options.Axis}.");
+        return 0f;
+    }
 
-            // Store for results
-            _lastResults.ModelLength = modelLength;
-            _lastResults.CrossSectionalArea = crossSectionalArea;
+    // Store for results
+    _lastResults.ModelLength = modelLength;
+    _lastResults.CrossSectionalArea = crossSectionalArea;
 
-            Logger.Log($"[Permeability] Found {inletPores.Count} inlet and {outletPores.Count} outlet pores");
-            Logger.Log($"[Permeability] Model: Length={modelLength*1e6:F1} μm, Area={crossSectionalArea*1e12:F3} μm²");
+    Logger.Log($"[Permeability] Found {inletPores.Count} inlet and {outletPores.Count} outlet pores");
+    Logger.Log($"[Permeability] Model: Length={modelLength*1e6:F1} μm, Area={crossSectionalArea*1e12:F3} μm²");
 
-            // Build linear system with user-defined pressures
-            var (matrix, b) = BuildLinearSystem(pnm, engine, inletPores, outletPores, 
-                options.FluidViscosity, pixelSize_m, options.InletPressure, options.OutletPressure);
+    // Build linear system with user-defined pressures
+    var (matrix, b) = BuildLinearSystem(pnm, engine, inletPores, outletPores, 
+        options.FluidViscosity, pixelSize_m, options.InletPressure, options.OutletPressure);
 
-            // Solve for pore pressures
-            float[] pressures = options.UseGpu && OpenCLContext.IsAvailable
-                ? SolveWithGpu(matrix, b)
-                : SolveWithCpu(matrix, b);
+    // Solve for pore pressures
+    float[] pressures = options.UseGpu && OpenCLContext.IsAvailable
+        ? SolveWithGpu(matrix, b)
+        : SolveWithCpu(matrix, b);
 
-            if (pressures == null)
-            {
-                Logger.LogError($"[Permeability] Linear system solver failed for '{engine}'.");
-                return 0f;
-            }
-            
-            // Calculate total flow rate
-            float totalFlowRate = CalculateTotalFlow(pnm, engine, pressures, inletPores, 
-                options.FluidViscosity, pixelSize_m);
-            
-            _lastResults.TotalFlowRate = totalFlowRate;
-            
-            Logger.Log($"[Permeability] Total flow rate Q = {totalFlowRate:E3} m³/s");
+    if (pressures == null)
+    {
+        Logger.LogError($"[Permeability] Linear system solver failed for '{engine}'.");
+        return 0f;
+    }
+    
+    // Calculate total flow rate
+    float totalFlowRate = CalculateTotalFlow(pnm, engine, pressures, inletPores, 
+        options.FluidViscosity, pixelSize_m);
+    
+    _lastResults.TotalFlowRate = totalFlowRate;
+    
+    Logger.Log($"[Permeability] Total flow rate Q = {totalFlowRate:E3} m³/s");
 
-            // Calculate permeability using Darcy's law
-            // K = Q * μ * L / (A * ΔP)
-            float viscosityPaS = options.FluidViscosity * 0.001f; // cP to Pa·s
-            float pressureDrop = Math.Abs(options.InletPressure - options.OutletPressure);
-            
-            if (pressureDrop <= 0)
-            {
-                Logger.LogError("[Permeability] Invalid pressure drop (must be > 0)");
-                return 0f;
-            }
-            
-            float permeability_m2 = (totalFlowRate * viscosityPaS * modelLength) / 
-                                    (crossSectionalArea * pressureDrop);
-            
-            // CRITICAL FIX: Correct conversion from m² to milliDarcy
-            // 1 Darcy = 9.869233e-13 m²
-            // 1 m² = 1.01325e12 mD (NOT 1.01325e15!)
-            float permeability_mD = permeability_m2 * 1.01325e12f;
-            
-            stopwatch.Stop();
-            Logger.Log($"[Permeability] {engine} calculation took {stopwatch.ElapsedMilliseconds}ms");
-            Logger.Log($"[Permeability] K = {permeability_m2:E3} m² = {permeability_mD:E3} mD");
-            
-            return permeability_mD;
-        }
+    // Calculate permeability using Darcy's law
+    // K = Q * μ * L / (A * ΔP)
+    float viscosityPaS = options.FluidViscosity * 0.001f; // cP to Pa·s
+    float pressureDrop = Math.Abs(options.InletPressure - options.OutletPressure);
+    
+    if (pressureDrop <= 0)
+    {
+        Logger.LogError("[Permeability] Invalid pressure drop (must be > 0)");
+        return 0f;
+    }
+    
+    float permeability_m2 = (totalFlowRate * viscosityPaS * modelLength) / 
+                            (crossSectionalArea * pressureDrop);
+    
+    // Correct conversion from m² to milliDarcy:
+    // 1 Darcy = 9.869233e-13 m²  =>  1 m² = 1/9.869233e-13 D ≈ 1.01325e12 D
+    // Therefore 1 m² = 1.01325e15 mD
+    float permeability_mD = permeability_m2 * 1.01325e15f;
+    
+    stopwatch.Stop();
+    Logger.Log($"[Permeability] {engine} calculation took {stopwatch.ElapsedMilliseconds}ms");
+    Logger.Log($"[Permeability] K = {permeability_m2:E3} m² = {permeability_mD:E3} mD");
+    
+    return permeability_mD;
+}
+
 private static float CalculateGeometricTortuosity(PNMDataset pnm, FlowAxis axis)
         {
             // Implementation remains the same as in original
@@ -737,74 +738,80 @@ private static float CalculateGeometricTortuosity(PNMDataset pnm, FlowAxis axis)
                     
                     // Create program with CG kernel
                     string kernelSource = @"
-                    __kernel void spmv_csr(
-                        __global const int* row_ptr,
-                        __global const int* col_idx,
-                        __global const float* values,
-                        __global const float* x,
-                        __global float* y,
-                        const int num_rows)
-                    {
-                        int row = get_global_id(0);
-                        if (row >= num_rows) return;
-                        
-                        float sum = 0.0f;
-                        int row_start = row_ptr[row];
-                        int row_end = row_ptr[row + 1];
-                        
-                        for (int j = row_start; j < row_end; j++) {
-                            sum += values[j] * x[col_idx[j]];
-                        }
-                        
-                        y[row] = sum;
-                    }
-                    
-                    __kernel void vector_ops(
-                        __global float* y,
-                        __global const float* x,
-                        const float alpha,
-                        const int n,
-                        const int op) // 0=copy, 1=axpy, 2=scale
-                    {
-                        int i = get_global_id(0);
-                        if (i >= n) return;
-                        
-                        if (op == 0) y[i] = x[i];
-                        else if (op == 1) y[i] += alpha * x[i];
-                        else if (op == 2) y[i] = alpha * x[i];
-                    }
-                    
-                    __kernel void dot_product(
-                        __global const float* a,
-                        __global const float* b,
-                        __global float* result,
-                        __local float* scratch,
-                        const int n)
-                    {
-                        int global_id = get_global_id(0);
-                        int local_id = get_local_id(0);
-                        int group_size = get_local_size(0);
-                        
-                        float accumulator = 0;
-                        while (global_id < n) {
-                            accumulator += a[global_id] * b[global_id];
-                            global_id += get_global_size(0);
-                        }
-                        
-                        scratch[local_id] = accumulator;
-                        barrier(CLK_LOCAL_MEM_FENCE);
-                        
-                        for (int offset = group_size / 2; offset > 0; offset /= 2) {
-                            if (local_id < offset) {
-                                scratch[local_id] += scratch[local_id + offset];
-                            }
-                            barrier(CLK_LOCAL_MEM_FENCE);
-                        }
-                        
-                        if (local_id == 0) {
-                            result[get_group_id(0)] = scratch[0];
-                        }
-                    }";
+                    // --- spmv_csr: y = A * x (CSR) ---
+__kernel void spmv_csr(__global const int* rowPtr,
+                       __global const int* colIdx,
+                       __global const float* values,
+                       __global const float* x,
+                       __global float* y,
+                       const int numRows)
+{
+    int row = get_global_id(0);
+    if (row >= numRows) return;
+
+    int start = rowPtr[row];
+    int end   = rowPtr[row + 1];
+
+    float sum = 0.0f;
+    for (int jj = start; jj < end; ++jj) {
+        sum += values[jj] * x[colIdx[jj]];
+    }
+    y[row] = sum;
+}
+
+// --- vector_ops: axpy / scale ---
+// op == 1: y = y + alpha * x
+// op == 2: y = alpha * y  (x is ignored; host passes x=y)
+__kernel void vector_ops(__global float* y,
+                         __global const float* x,
+                         const float alpha,
+                         const int n,
+                         const int op)
+{
+    int i = get_global_id(0);
+    if (i >= n) return;
+
+    if (op == 1) {
+        y[i] = y[i] + alpha * x[i];
+    } else if (op == 2) {
+        y[i] = alpha * y[i];
+    }
+}
+
+// --- dot_product with local reduction ---
+// result length must be >= number of work-groups
+__kernel void dot_product(__global const float* a,
+                          __global const float* b,
+                          __global float* result,
+                          __local float* scratch,
+                          const int n)
+{
+    int global_id = get_global_id(0);
+    int local_id  = get_local_id(0);
+    int group_sz  = get_local_size(0);
+
+    float acc = 0.0f;
+    // grid-stride loop
+    while (global_id < n) {
+        acc += a[global_id] * b[global_id];
+        global_id += get_global_size(0);
+    }
+
+    scratch[local_id] = acc;
+    barrier(CLK_LOCAL_MEM_FENCE);
+
+    for (int offset = group_sz >> 1; offset > 0; offset >>= 1) {
+        if (local_id < offset) {
+            scratch[local_id] += scratch[local_id + offset];
+        }
+        barrier(CLK_LOCAL_MEM_FENCE);
+    }
+
+    if (local_id == 0) {
+        result[get_group_id(0)] = scratch[0];
+    }
+}
+";
                     
                     var sourcePtr = kernelSource;
                     var sourceLen = (nuint)kernelSource.Length;
@@ -845,154 +852,150 @@ private static float CalculateGeometricTortuosity(PNMDataset pnm, FlowAxis axis)
         }
 
         public static float[] Solve(SparseMatrix A, float[] b, float tolerance, int maxIterations)
+{
+    EnsureInitialized();
+    if (!_initialized) throw new InvalidOperationException("OpenCL not initialized");
+
+    unsafe
+    {
+        int n = b.Length;
+
+        // Convert sparse matrix to CSR format
+        var (rowPtr, colIdx, values) = ConvertToCSR(A);
+
+        // Create OpenCL buffers
+        int err;
+        nint clRowPtr, clColIdx, clValues, clB, clX, clR, clP, clAp, clDotResult;
+
+        // Pin arrays and create buffers
+        fixed (int* rowPtrPtr = rowPtr)
+        fixed (int* colIdxPtr = colIdx)
+        fixed (float* valuesPtr = values)
+        fixed (float* bPtr = b)
         {
-            EnsureInitialized();
-            if (!_initialized) throw new InvalidOperationException("OpenCL not initialized");
-            
-            unsafe
+            clRowPtr = _cl.CreateBuffer(_context, MemFlags.ReadOnly | MemFlags.CopyHostPtr,
+                (nuint)(rowPtr.Length * sizeof(int)), rowPtrPtr, &err);
+            if (err != 0) throw new Exception($"Failed to create rowPtr buffer: {err}");
+
+            clColIdx = _cl.CreateBuffer(_context, MemFlags.ReadOnly | MemFlags.CopyHostPtr,
+                (nuint)(colIdx.Length * sizeof(int)), colIdxPtr, &err);
+            if (err != 0) throw new Exception($"Failed to create colIdx buffer: {err}");
+
+            clValues = _cl.CreateBuffer(_context, MemFlags.ReadOnly | MemFlags.CopyHostPtr,
+                (nuint)(values.Length * sizeof(float)), valuesPtr, &err);
+            if (err != 0) throw new Exception($"Failed to create values buffer: {err}");
+
+            clB = _cl.CreateBuffer(_context, MemFlags.ReadOnly | MemFlags.CopyHostPtr,
+                (nuint)(b.Length * sizeof(float)), bPtr, &err);
+            if (err != 0) throw new Exception($"Failed to create b buffer: {err}");
+        }
+
+        clX = _cl.CreateBuffer(_context, MemFlags.ReadWrite, (nuint)(n * sizeof(float)), null, &err);
+        if (err != 0) throw new Exception($"Failed to create x buffer: {err}");
+
+        clR = _cl.CreateBuffer(_context, MemFlags.ReadWrite, (nuint)(n * sizeof(float)), null, &err);
+        if (err != 0) throw new Exception($"Failed to create r buffer: {err}");
+
+        clP = _cl.CreateBuffer(_context, MemFlags.ReadWrite, (nuint)(n * sizeof(float)), null, &err);
+        if (err != 0) throw new Exception($"Failed to create p buffer: {err}");
+
+        clAp = _cl.CreateBuffer(_context, MemFlags.ReadWrite, (nuint)(n * sizeof(float)), null, &err);
+        if (err != 0) throw new Exception($"Failed to create Ap buffer: {err}");
+
+        // IMPORTANT FIX: the partial-results buffer must be sized to the number of work-groups
+        const int localSize = 256;
+        int numGroups = (n + localSize - 1) / localSize;
+        if (numGroups < 1) numGroups = 1;
+
+        clDotResult = _cl.CreateBuffer(_context, MemFlags.ReadWrite,
+            (nuint)(numGroups * sizeof(float)), null, &err);
+        if (err != 0) throw new Exception($"Failed to create dot result buffer: {err}");
+
+        // Create kernels
+        var spmvKernel = _cl.CreateKernel(_program, "spmv_csr", &err);
+        if (err != 0) throw new Exception($"Failed to create spmv kernel: {err}");
+
+        var vectorOpsKernel = _cl.CreateKernel(_program, "vector_ops", &err);
+        if (err != 0) throw new Exception($"Failed to create vector_ops kernel: {err}");
+
+        var dotKernel = _cl.CreateKernel(_program, "dot_product", &err);
+        if (err != 0) throw new Exception($"Failed to create dot kernel: {err}");
+
+        // Initialize x = 0, r = b, p = r
+        float zero = 0.0f;
+        _cl.EnqueueFillBuffer(_queue, clX, &zero, (nuint)sizeof(float), 0, (nuint)(n * sizeof(float)), 0, null, null);
+        _cl.EnqueueCopyBuffer(_queue, clB, clR, 0, 0, (nuint)(n * sizeof(float)), 0, null, null);
+        _cl.EnqueueCopyBuffer(_queue, clR, clP, 0, 0, (nuint)(n * sizeof(float)), 0, null, null);
+
+        // CG iteration
+        float rsold = ComputeDotProduct(clR, clR, n, dotKernel, clDotResult);
+        if (Math.Sqrt(rsold) < tolerance)
+        {
+            float[] result = new float[n];
+            fixed (float* resultPtr = result)
             {
-                int n = b.Length;
-                
-                // Convert sparse matrix to CSR format
-                var (rowPtr, colIdx, values) = ConvertToCSR(A);
-                
-                // Create OpenCL buffers
-                int err;
-                nint clRowPtr, clColIdx, clValues, clB, clX, clR, clP, clAp, clDotResult;
-                
-                // Pin arrays and create buffers
-                fixed (int* rowPtrPtr = rowPtr)
-                fixed (int* colIdxPtr = colIdx)
-                fixed (float* valuesPtr = values)
-                fixed (float* bPtr = b)
-                {
-                    clRowPtr = _cl.CreateBuffer(_context, MemFlags.ReadOnly | MemFlags.CopyHostPtr, 
-                        (nuint)(rowPtr.Length * sizeof(int)), rowPtrPtr, &err);
-                    if (err != 0) throw new Exception($"Failed to create rowPtr buffer: {err}");
-                    
-                    clColIdx = _cl.CreateBuffer(_context, MemFlags.ReadOnly | MemFlags.CopyHostPtr,
-                        (nuint)(colIdx.Length * sizeof(int)), colIdxPtr, &err);
-                    if (err != 0) throw new Exception($"Failed to create colIdx buffer: {err}");
-                    
-                    clValues = _cl.CreateBuffer(_context, MemFlags.ReadOnly | MemFlags.CopyHostPtr,
-                        (nuint)(values.Length * sizeof(float)), valuesPtr, &err);
-                    if (err != 0) throw new Exception($"Failed to create values buffer: {err}");
-                    
-                    clB = _cl.CreateBuffer(_context, MemFlags.ReadOnly | MemFlags.CopyHostPtr,
-                        (nuint)(b.Length * sizeof(float)), bPtr, &err);
-                    if (err != 0) throw new Exception($"Failed to create b buffer: {err}");
-                }
-                
-                clX = _cl.CreateBuffer(_context, MemFlags.ReadWrite,
-                    (nuint)(n * sizeof(float)), null, &err);
-                if (err != 0) throw new Exception($"Failed to create x buffer: {err}");
-                
-                clR = _cl.CreateBuffer(_context, MemFlags.ReadWrite,
-                    (nuint)(n * sizeof(float)), null, &err);
-                if (err != 0) throw new Exception($"Failed to create r buffer: {err}");
-                
-                clP = _cl.CreateBuffer(_context, MemFlags.ReadWrite,
-                    (nuint)(n * sizeof(float)), null, &err);
-                if (err != 0) throw new Exception($"Failed to create p buffer: {err}");
-                
-                clAp = _cl.CreateBuffer(_context, MemFlags.ReadWrite,
-                    (nuint)(n * sizeof(float)), null, &err);
-                if (err != 0) throw new Exception($"Failed to create Ap buffer: {err}");
-                
-                clDotResult = _cl.CreateBuffer(_context, MemFlags.ReadWrite,
-                    (nuint)(256 * sizeof(float)), null, &err);
-                if (err != 0) throw new Exception($"Failed to create dot result buffer: {err}");
-                
-                // Create kernels
-                var spmvKernel = _cl.CreateKernel(_program, "spmv_csr", &err);
-                if (err != 0) throw new Exception($"Failed to create spmv kernel: {err}");
-                
-                var vectorOpsKernel = _cl.CreateKernel(_program, "vector_ops", &err);
-                if (err != 0) throw new Exception($"Failed to create vector_ops kernel: {err}");
-                
-                var dotKernel = _cl.CreateKernel(_program, "dot_product", &err);
-                if (err != 0) throw new Exception($"Failed to create dot kernel: {err}");
-                
-                // Initialize x = 0, r = b, p = r
-                float zero = 0.0f;
-                _cl.EnqueueFillBuffer(_queue, clX, &zero, (nuint)sizeof(float), 0, (nuint)(n * sizeof(float)), 0, null, null);
-                _cl.EnqueueCopyBuffer(_queue, clB, clR, 0, 0, (nuint)(n * sizeof(float)), 0, null, null);
-                _cl.EnqueueCopyBuffer(_queue, clR, clP, 0, 0, (nuint)(n * sizeof(float)), 0, null, null);
-                
-                // CG iteration
-                float rsold = ComputeDotProduct(clR, clR, n, dotKernel, clDotResult);
-                
-                if (Math.Sqrt(rsold) < tolerance)
-                {
-                    // Already converged
-                    float[] result = new float[n];
-                    fixed (float* resultPtr = result)
-                    {
-                        _cl.EnqueueReadBuffer(_queue, clX, true, 0, (nuint)(n * sizeof(float)), resultPtr, 0, null, null);
-                    }
-                    
-                    // Cleanup
-                    CleanupBuffers(clRowPtr, clColIdx, clValues, clB, clX, clR, clP, clAp, clDotResult);
-                    CleanupKernels(spmvKernel, vectorOpsKernel, dotKernel);
-                    
-                    return result;
-                }
-                
-                for (int iter = 0; iter < maxIterations; iter++)
-                {
-                    // Ap = A * p
-                    ComputeSpmv(spmvKernel, clRowPtr, clColIdx, clValues, clP, clAp, n);
-                    
-                    // pAp = dot(p, Ap)
-                    float pAp = ComputeDotProduct(clP, clAp, n, dotKernel, clDotResult);
-                    
-                    if (Math.Abs(pAp) < 1e-10f) break;
-                    
-                    float alpha = rsold / pAp;
-                    
-                    // x = x + alpha * p
-                    ComputeAxpy(vectorOpsKernel, clX, clP, alpha, n, 1);
-                    
-                    // r = r - alpha * Ap
-                    ComputeAxpy(vectorOpsKernel, clR, clAp, -alpha, n, 1);
-                    
-                    // rsnew = dot(r, r)
-                    float rsnew = ComputeDotProduct(clR, clR, n, dotKernel, clDotResult);
-                    
-                    if (Math.Sqrt(rsnew) < tolerance)
-                    {
-                        Logger.Log($"[OpenCL CG] Converged in {iter + 1} iterations");
-                        break;
-                    }
-                    
-                    float beta = rsnew / rsold;
-                    
-                    // p = r + beta * p
-                    ComputeScale(vectorOpsKernel, clP, beta, n);
-                    ComputeAxpy(vectorOpsKernel, clP, clR, 1.0f, n, 1);
-                    
-                    rsold = rsnew;
-                    
-                    if (iter % 50 == 0)
-                    {
-                        Logger.Log($"[OpenCL CG] Iteration {iter}, residual: {Math.Sqrt(rsnew):E3}");
-                    }
-                }
-                
-                // Read result
-                float[] solution = new float[n];
-                fixed (float* solutionPtr = solution)
-                {
-                    _cl.EnqueueReadBuffer(_queue, clX, true, 0, (nuint)(n * sizeof(float)), solutionPtr, 0, null, null);
-                }
-                
-                // Cleanup
-                CleanupBuffers(clRowPtr, clColIdx, clValues, clB, clX, clR, clP, clAp, clDotResult);
-                CleanupKernels(spmvKernel, vectorOpsKernel, dotKernel);
-                
-                return solution;
+                _cl.EnqueueReadBuffer(_queue, clX, true, 0, (nuint)(n * sizeof(float)), resultPtr, 0, null, null);
+            }
+            CleanupBuffers(clRowPtr, clColIdx, clValues, clB, clX, clR, clP, clAp, clDotResult);
+            CleanupKernels(spmvKernel, vectorOpsKernel, dotKernel);
+            return result;
+        }
+
+        for (int iter = 0; iter < maxIterations; iter++)
+        {
+            // Ap = A * p
+            ComputeSpmv(spmvKernel, clRowPtr, clColIdx, clValues, clP, clAp, n);
+
+            // pAp = dot(p, Ap)
+            float pAp = ComputeDotProduct(clP, clAp, n, dotKernel, clDotResult);
+            if (Math.Abs(pAp) < 1e-10f) break;
+
+            float alpha = rsold / pAp;
+
+            // x = x + alpha * p
+            ComputeAxpy(vectorOpsKernel, clX, clP, alpha, n, 1);
+
+            // r = r - alpha * Ap
+            ComputeAxpy(vectorOpsKernel, clR, clAp, -alpha, n, 1);
+
+            // rsnew = dot(r, r)
+            float rsnew = ComputeDotProduct(clR, clR, n, dotKernel, clDotResult);
+
+            if (Math.Sqrt(rsnew) < tolerance)
+            {
+                Logger.Log($"[OpenCL CG] Converged in {iter + 1} iterations");
+                break;
+            }
+
+            float beta = rsnew / rsold;
+
+            // p = r + beta * p
+            ComputeScale(vectorOpsKernel, clP, beta, n);
+            ComputeAxpy(vectorOpsKernel, clP, clR, 1.0f, n, 1);
+
+            rsold = rsnew;
+
+            if (iter % 50 == 0)
+            {
+                Logger.Log($"[OpenCL CG] Iteration {iter}, residual: {Math.Sqrt(rsnew):E3}");
             }
         }
+
+        // Read result
+        float[] solution = new float[n];
+        fixed (float* solutionPtr = solution)
+        {
+            _cl.EnqueueReadBuffer(_queue, clX, true, 0, (nuint)(n * sizeof(float)), solutionPtr, 0, null, null);
+        }
+
+        // Cleanup
+        CleanupBuffers(clRowPtr, clColIdx, clValues, clB, clX, clR, clP, clAp, clDotResult);
+        CleanupKernels(spmvKernel, vectorOpsKernel, dotKernel);
+
+        return solution;
+    }
+}
+
         
 
         private static unsafe void ComputeSpmv(nint kernel, nint rowPtr, nint colIdx, nint values, 
