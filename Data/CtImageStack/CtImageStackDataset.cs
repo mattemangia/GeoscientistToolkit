@@ -237,7 +237,10 @@ namespace GeoscientistToolkit.Data.CtImageStack
     // we should not overwrite the correctly deserialized data from the project file.
     if (Materials.Any(m => m.ID != 0))
     {
-        Logger.Log($"[CtImageStackDataset] Materials for '{Name}' appear to be pre-loaded (e.g., from a project file). Skipping load from local .materials.json to preserve state.");
+        Logger.Log($"[CtImageStackDataset] Materials for '{Name}' appear to be pre-loaded (e.g., from a project file). Checking for black materials...");
+        
+        // FIX: Check for black materials and assign random colors
+        FixBlackMaterials();
         return;
     }
 
@@ -267,6 +270,9 @@ namespace GeoscientistToolkit.Data.CtImageStack
                     Materials.Add(material);
                 }
                 Logger.Log($"[CtImageStackDataset] Loaded {Materials.Count} materials from {materialsPath}");
+                
+                // Check for black materials after loading
+                FixBlackMaterials();
             }
         }
         catch (Exception ex)
@@ -289,6 +295,57 @@ namespace GeoscientistToolkit.Data.CtImageStack
         }
     }
 }
+        private void FixBlackMaterials()
+        {
+            var random = new Random();
+            bool anyFixed = false;
+    
+            foreach (var material in Materials)
+            {
+                // Skip exterior material (ID 0)
+                if (material.ID == 0)
+                {
+                    // Ensure exterior is transparent
+                    material.Color = new Vector4(0, 0, 0, 0);
+                    material.IsExterior = true;
+                    continue;
+                }
+        
+                // Check if material is black or nearly black (all RGB components < 0.1)
+                if (material.Color.X < 0.1f && material.Color.Y < 0.1f && material.Color.Z < 0.1f)
+                {
+                    // Generate a random, visually distinct color
+                    float hue = random.Next(0, 360) / 360f;
+                    var newColor = HsvToRgb(hue, 0.7f, 0.8f);
+                    material.Color = new Vector4(newColor.X, newColor.Y, newColor.Z, 1.0f);
+                    anyFixed = true;
+            
+                    Logger.Log($"[CtImageStackDataset] Assigned random color to material {material.ID} ({material.Name}): RGB({material.Color.X:F2}, {material.Color.Y:F2}, {material.Color.Z:F2})");
+                }
+            }
+    
+            if (anyFixed)
+            {
+                Logger.Log($"[CtImageStackDataset] Fixed black materials with random colors");
+                SaveMaterials(); // Save the fixed colors
+            }
+        }
+        private static Vector4 HsvToRgb(float h, float s, float v)
+        {
+            float c = v * s;
+            float x = c * (1 - Math.Abs((h * 6) % 2 - 1));
+            float m = v - c;
+    
+            float r, g, b;
+            if (h < 1f/6)      { r = c; g = x; b = 0; }
+            else if (h < 2f/6) { r = x; g = c; b = 0; }
+            else if (h < 3f/6) { r = 0; g = c; b = x; }
+            else if (h < 4f/6) { r = 0; g = x; b = c; }
+            else if (h < 5f/6) { r = x; g = 0; b = c; }
+            else               { r = c; g = 0; b = x; }
+    
+            return new Vector4(r + m, g + m, b + m, 1.0f);
+        }
 
         // --- NEW HELPER: Get path for the local materials file ---
         private string GetMaterialsPath()

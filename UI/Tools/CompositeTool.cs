@@ -13,6 +13,7 @@ using GeoscientistToolkit.Data.CtImageStack;
 using GeoscientistToolkit.UI.Interfaces;
 using ImGuiNET;
 using System.Numerics;
+using GeoscientistToolkit.Analysis.MaterialStatistics;
 
 namespace GeoscientistToolkit.UI.Tools
 {
@@ -173,6 +174,13 @@ namespace GeoscientistToolkit.UI.Tools
                     ToolCategory.Analysis,
                     new List<ToolEntry>
                     {
+                        new ToolEntry
+                        {
+                            Name = "Material Statistics",
+                            Description = "Analyze material volumes, distributions, and export statistics",
+                            Tool = new MaterialStatisticsTool(),
+                            Category = ToolCategory.Analysis
+                        },
                         new ToolEntry
                         {
                             Name = "Acoustic Simulation",
