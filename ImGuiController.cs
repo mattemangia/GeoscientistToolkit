@@ -1,4 +1,4 @@
-﻿// GeoscientistToolkit/ImGuiController.cs (Fixed SPIR-V Cross-Compilation and Windows Compatibility)
+﻿// GeoscientistToolkit/ImGuiController.cs (Fixed Unicode Ranges for Scientific Characters)
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -55,61 +55,71 @@ namespace GeoscientistToolkit
             io.Fonts.AddFontDefault();
             unsafe
             {
-                // Ranges we actually need:
-                // - Basic Latin + Latin-1 (© ® ° ×, etc.)
-                // - General Punctuation (– — … • ‘ ’ “ ”)
-                // - Letterlike Symbols (™)
-                // - Symbols (⛶ and friends)
+                // Extended ranges for scientific notation and symbols:
+                // - Basic Latin + Latin-1 (© ® ° × ÷, ², ³, ¹, µ)
+                // - Greek and Coptic (α β γ δ μ π τ Ω etc.)
+                // - General Punctuation (– — … • ' ' " ")
+                // - Superscripts and Subscripts (₀ ₁ ₂ ₃ ₄ ₅ ₆ ₇ ₈ ₉)
+                // - Letterlike Symbols (™ ℹ Å)
+                // - Mathematical Operators (± √ ≤ ≥ ≈ ≠ ∞)
+                // - Miscellaneous Symbols (⛶ ☑ ✓ ✗ ⚡)
                 ushort[] ranges = new ushort[]
-{
-    0x0020, 0x00FF, // Basic Latin + Latin-1 (© ® ° × ÷ …)
-    0x2000, 0x206F, // General Punctuation (– — … • NBSP, ZWJ/ZWNJ)
-    0x20A0, 0x20CF, // Currency Symbols (€ etc.)
-    0x2100, 0x214F, // Letterlike Symbols (™ ℹ)
-    0x2150, 0x218F, // Number Forms (⅓, etc.)
-    0x2190, 0x21FF, // Arrows (→ ↗ …)
-    0x2200, 0x22FF, // Mathematical Operators (± √ ≤ ≥ …)
-    0x2300, 0x23FF, // Misc Technical (⌘ ⌥ ⌫ …)
-    0x2460, 0x24FF, // Enclosed Alphanumerics (① ② …)
-    0x2500, 0x257F, // Box Drawing (│ ─ ┌ ┐ …)
-    0x2580, 0x259F, // Block Elements
-    0x25A0, 0x25FF, // Geometric Shapes (◆ ● ▸ …)
-    0x2600, 0x26FF, // Misc Symbols (★ ☑ ⛶ …)
-    0x2700, 0x27BF, // Dingbats (✓ ✗ ❗ ✦ …)
-    0x2B00, 0x2BFF, // Misc Symbols & Arrows
-    0xFE00, 0xFE0F, // Variation Selectors (VS16 etc., prevents fallback '?')
-    0                // terminator
-};
+                {
+                    0x0020, 0x00FF, // Basic Latin + Latin-1 (includes ² ³ ¹ µ °)
+                    0x0370, 0x03FF, // Greek and Coptic (μ τ π α β γ δ etc.)
+                    0x2000, 0x206F, // General Punctuation
+                    0x2070, 0x209F, // Superscripts and Subscripts (₀₁₂₃ etc.)
+                    0x20A0, 0x20CF, // Currency Symbols (€ etc.)
+                    0x2100, 0x214F, // Letterlike Symbols (™ ℹ Å)
+                    0x2150, 0x218F, // Number Forms (⅓, etc.)
+                    0x2190, 0x21FF, // Arrows (→ ↗ …)
+                    0x2200, 0x22FF, // Mathematical Operators (± √ ≤ ≥ ∞)
+                    0x2300, 0x23FF, // Misc Technical (⌘ ⌥ ⌫)
+                    0x2460, 0x24FF, // Enclosed Alphanumerics (① ②)
+                    0x2500, 0x257F, // Box Drawing
+                    0x2580, 0x259F, // Block Elements
+                    0x25A0, 0x25FF, // Geometric Shapes (◆ ● ▸)
+                    0x2600, 0x26FF, // Misc Symbols (★ ☑ ⛶)
+                    0x2700, 0x27BF, // Dingbats (✓ ✗ ❗)
+                    0x2B00, 0x2BFF, // Misc Symbols & Arrows
+                    0x03BC, 0x03BC, // Ensure μ (mu) is included explicitly
+                    0x03C4, 0x03C4, // Ensure τ (tau) is included explicitly
+                    0                // terminator
+                };
 
-
-                // Try broad coverage fonts first, then symbol packs.
+                // Try fonts with good Unicode coverage
                 string[] candidates;
                 if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
                 {
                     candidates = new[]
                     {
-            @"C:\Windows\Fonts\segoeui.ttf",    // great coverage for punctuation
-            @"C:\Windows\Fonts\seguisym.ttf",   // symbol extras
-            @"C:\Windows\Fonts\arialuni.ttf"    // if present
-        };
+                        @"C:\Windows\Fonts\segoeui.ttf",     // Great Unicode coverage
+                        @"C:\Windows\Fonts\seguisym.ttf",    // Symbol extras
+                        @"C:\Windows\Fonts\cambria.ttc",     // Math symbols
+                        @"C:\Windows\Fonts\arial.ttf",       // Fallback
+                        @"C:\Windows\Fonts\arialuni.ttf"     // If present
+                    };
                 }
                 else if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
                 {
                     candidates = new[]
                     {
-            "/System/Library/Fonts/Supplemental/Arial Unicode.ttf",
-            "/System/Library/Fonts/Apple Symbols.ttf",
-            "/System/Library/Fonts/Supplemental/Symbol.ttf"
-        };
+                        "/System/Library/Fonts/Supplemental/Arial Unicode.ttf",
+                        "/System/Library/Fonts/Helvetica.ttc",
+                        "/System/Library/Fonts/Apple Symbols.ttf",
+                        "/System/Library/Fonts/Supplemental/Symbol.ttf"
+                    };
                 }
                 else
                 {
                     candidates = new[]
                     {
-            "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-            "/usr/share/fonts/truetype/noto/NotoSansSymbols2-Regular.ttf",
-            "/usr/share/fonts/truetype/freefont/FreeSans.ttf"
-        };
+                        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+                        "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+                        "/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf",
+                        "/usr/share/fonts/truetype/noto/NotoSansSymbols2-Regular.ttf",
+                        "/usr/share/fonts/truetype/freefont/FreeSans.ttf"
+                    };
                 }
 
                 ImFontConfigPtr cfg = ImGuiNative.ImFontConfig_ImFontConfig();
@@ -118,13 +128,13 @@ namespace GeoscientistToolkit
 
                 fixed (ushort* pRanges = ranges)
                 {
-                    // Merge from any fonts we find (don’t break after the first);
-                    // this maximizes coverage and eliminates stray '?'.
+                    // Load multiple fonts to maximize coverage
                     foreach (var path in candidates)
                     {
                         if (File.Exists(path))
                         {
                             ImGui.GetIO().Fonts.AddFontFromFileTTF(path, 16f, cfg, (nint)pRanges);
+                            Logger.Log($"[ImGuiController] Loaded font: {Path.GetFileName(path)} for extended Unicode support");
                         }
                     }
                 }
@@ -156,7 +166,6 @@ namespace GeoscientistToolkit
             // Create shaders - try SPIR-V first, fall back to backend-specific if needed
             bool shadersCreated = false;
 
-            // --- FIX RESTORED ---
             // Only try SPIR-V cross-compilation if not on Windows D3D11 
             // (it has known issues with SPIR-V tools on some systems)
             if (!(RuntimeInformation.IsOSPlatform(OSPlatform.Windows) && gd.BackendType == GraphicsBackend.Direct3D11))
