@@ -79,58 +79,68 @@ namespace GeoscientistToolkit.Data.CtImageStack
         }
 
         public override void Load()
+{
+    // Load Grayscale Data
+    if (_volumeData == null)
+    {
+        var volumePath = GetVolumePath();
+        if (File.Exists(volumePath))
         {
-            // Load Grayscale Data
-            if (_volumeData == null)
+            var loadTask = ChunkedVolume.LoadFromBinAsync(volumePath, false);
+            _volumeData = loadTask.GetAwaiter().GetResult();
+            if (_volumeData != null)
             {
-                var volumePath = GetVolumePath();
-                if (File.Exists(volumePath))
-                {
-                    var loadTask = ChunkedVolume.LoadFromBinAsync(volumePath, false);
-                    _volumeData = loadTask.GetAwaiter().GetResult();
-                    if (_volumeData != null)
-                    {
-                        Width = _volumeData.Width;
-                        Height = _volumeData.Height;
-                        Depth = _volumeData.Depth;
-                    }
-                }
+                Width = _volumeData.Width;
+                Height = _volumeData.Height;
+                Depth = _volumeData.Depth;
             }
+        }
+    }
 
-            // --- MODIFIED: Load materials from local file first ---
-            LoadMaterials();
+    // --- MODIFIED: Load materials from local file first ---
+    LoadMaterials();
 
-            // Load Label Data
-            if (LabelData == null)
+    // Load Label Data (non-destructively)
+    if (LabelData == null)
+    {
+        var labelPath = GetLabelPath();
+        if (File.Exists(labelPath))
+        {
+            try
             {
-                var labelPath = GetLabelPath();
-                if (File.Exists(labelPath))
+                var loadedLabels = ChunkedLabelVolume.LoadFromBin(labelPath, false);
+                if (_volumeData != null &&
+                    (loadedLabels.Width != _volumeData.Width ||
+                     loadedLabels.Height != _volumeData.Height ||
+                     loadedLabels.Depth != _volumeData.Depth))
                 {
-                    var loadedLabels = ChunkedLabelVolume.LoadFromBin(labelPath, false);
-                    if (_volumeData != null &&
-                        (loadedLabels.Width != _volumeData.Width ||
-                         loadedLabels.Height != _volumeData.Height ||
-                         loadedLabels.Depth != _volumeData.Depth))
-                    {
-                        Logger.LogWarning($"[CtImageStackDataset] Mismatched dimensions for '{Name}'. Recreating empty label file.");
-                        loadedLabels.Dispose();
-                        try { File.Delete(labelPath); } catch { }
-                        LabelData = new ChunkedLabelVolume(Width, Height, Depth, _volumeData.ChunkDim, false, labelPath);
-                        LabelData.SaveAsBin(labelPath);
-                    }
-                    else
-                    {
-                        LabelData = loadedLabels;
-                    }
+                    // Log a warning about the mismatch but still load the data.
+                    Logger.LogWarning($"[CtImageStackDataset] Mismatched dimensions for '{Name}'. Label data may not align with volume data. " +
+                                     $"Labels: {loadedLabels.Width}x{loadedLabels.Height}x{loadedLabels.Depth}, " +
+                                     $"Volume: {_volumeData.Width}x{_volumeData.Height}x{_volumeData.Depth}");
                 }
-                else if (_volumeData != null)
+                LabelData = loadedLabels;
+                Logger.Log($"[CtImageStackDataset] Loaded label data for '{Name}' from {labelPath}");
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError($"[CtImageStackDataset] Failed to load label file '{labelPath}': {ex.Message}. A new empty label volume will be used.");
+                if (_volumeData != null)
                 {
-                    Logger.Log($"[CtImageStackDataset] No label file found for {Name}. Creating a new empty one.");
                     LabelData = new ChunkedLabelVolume(Width, Height, Depth, _volumeData.ChunkDim, false, labelPath);
-                    LabelData.SaveAsBin(labelPath);
                 }
             }
         }
+        else if (_volumeData != null)
+        {
+            // If the label file doesn't exist, create an in-memory representation
+            // but DO NOT save it automatically. It will be saved when the user performs
+            // a segmentation action or saves the project.
+            Logger.Log($"[CtImageStackDataset] No label file found for {Name}. A new in-memory label volume will be used.");
+            LabelData = new ChunkedLabelVolume(Width, Height, Depth, _volumeData.ChunkDim, false, labelPath);
+        }
+    }
+}
 
         public override void Unload()
         {
@@ -221,55 +231,64 @@ namespace GeoscientistToolkit.Data.CtImageStack
 
         // --- NEW METHOD: Load materials from a local JSON file ---
         private void LoadMaterials()
-        {
-            string materialsPath = GetMaterialsPath();
-            if (File.Exists(materialsPath))
-            {
-                try
-                {
-                    string jsonString = File.ReadAllText(materialsPath);
-                    var options = new JsonSerializerOptions();
-                    var dtos = JsonSerializer.Deserialize<List<MaterialDTO>>(jsonString, options);
+{
+    // If the Materials list contains more than just the default 'Exterior' material,
+    // it means it has likely been populated by the project loader. In that case,
+    // we should not overwrite the correctly deserialized data from the project file.
+    if (Materials.Any(m => m.ID != 0))
+    {
+        Logger.Log($"[CtImageStackDataset] Materials for '{Name}' appear to be pre-loaded (e.g., from a project file). Skipping load from local .materials.json to preserve state.");
+        return;
+    }
 
-                    if (dtos != null && dtos.Any())
-                    {
-                        Materials.Clear();
-                        foreach (var dto in dtos)
-                        {
-                            // FIX: Ensure all properties are properly restored
-                            var material = new Material(dto.ID, dto.Name, dto.Color)
-                            {
-                                MinValue = dto.MinValue,
-                                MaxValue = dto.MaxValue,
-                                IsVisible = dto.IsVisible,
-                                IsExterior = dto.IsExterior,
-                                Density = dto.Density
-                            };
-                            Materials.Add(material);
-                        }
-                        Logger.Log($"[CtImageStackDataset] Loaded {Materials.Count} materials from {materialsPath}");
-                    }
-                }
-                catch (Exception ex)
-                {
-                    Logger.LogError($"[CtImageStackDataset] Failed to load materials: {ex.Message}");
-                    // Add default if loading fails
-                    if (!Materials.Any(m => m.ID == 0))
-                    {
-                        Materials.Clear();
-                        Materials.Add(new Material(0, "Exterior", new Vector4(0, 0, 0, 0)));
-                    }
-                }
-            }
-            else
+    string materialsPath = GetMaterialsPath();
+    if (File.Exists(materialsPath))
+    {
+        try
+        {
+            string jsonString = File.ReadAllText(materialsPath);
+            var options = new JsonSerializerOptions();
+            var dtos = JsonSerializer.Deserialize<List<MaterialDTO>>(jsonString, options);
+
+            if (dtos != null && dtos.Any())
             {
-                // No materials file - ensure default exists
-                if (!Materials.Any())
+                Materials.Clear();
+                foreach (var dto in dtos)
                 {
-                    Materials.Add(new Material(0, "Exterior", new Vector4(0, 0, 0, 0)));
+                    // FIX: Ensure all properties are properly restored
+                    var material = new Material(dto.ID, dto.Name, dto.Color)
+                    {
+                        MinValue = dto.MinValue,
+                        MaxValue = dto.MaxValue,
+                        IsVisible = dto.IsVisible,
+                        IsExterior = dto.IsExterior,
+                        Density = dto.Density
+                    };
+                    Materials.Add(material);
                 }
+                Logger.Log($"[CtImageStackDataset] Loaded {Materials.Count} materials from {materialsPath}");
             }
         }
+        catch (Exception ex)
+        {
+            Logger.LogError($"[CtImageStackDataset] Failed to load materials: {ex.Message}");
+            // Add default if loading fails
+            if (!Materials.Any(m => m.ID == 0))
+            {
+                Materials.Clear();
+                Materials.Add(new Material(0, "Exterior", new Vector4(0, 0, 0, 0)));
+            }
+        }
+    }
+    else
+    {
+        // No materials file - ensure default exists
+        if (!Materials.Any())
+        {
+            Materials.Add(new Material(0, "Exterior", new Vector4(0, 0, 0, 0)));
+        }
+    }
+}
 
         // --- NEW HELPER: Get path for the local materials file ---
         private string GetMaterialsPath()

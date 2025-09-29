@@ -1,5 +1,4 @@
 // GeoscientistToolkit/Data/Pnm/PNMDataset.cs
-// Fixed to handle in-memory PNMs correctly
 using System;
 using System.Collections.Generic;
 using System.Data;
@@ -10,6 +9,7 @@ using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json;
 using GeoscientistToolkit.Business;
+using GeoscientistToolkit.Data; // Added for ISerializableDataset
 using GeoscientistToolkit.Util;
 
 namespace GeoscientistToolkit.Data.Pnm
@@ -65,7 +65,7 @@ namespace GeoscientistToolkit.Data.Pnm
         }
     }
 
-    public class PNMDataset : Dataset
+    public class PNMDataset : Dataset, ISerializableDataset
     {
         // --- Physical/network properties ---
         public float VoxelSize { get; set; } // µm
@@ -123,6 +123,41 @@ namespace GeoscientistToolkit.Data.Pnm
             estimatedSize += 1024; // Properties, metadata, etc.
             
             return estimatedSize;
+        }
+        
+        /// <summary>
+        /// Creates a data transfer object (DTO) for serialization.
+        /// </summary>
+        public object ToSerializableObject()
+        {
+            return new PNMDatasetDTO
+            {
+                TypeName = nameof(PNMDataset),
+                Name = this.Name,
+                FilePath = this.FilePath,
+                VoxelSize = this.VoxelSize,
+                Tortuosity = this.Tortuosity,
+                DarcyPermeability = this.DarcyPermeability,
+                NavierStokesPermeability = this.NavierStokesPermeability,
+                LatticeBoltzmannPermeability = this.LatticeBoltzmannPermeability,
+                Pores = this._poresOriginal.Select(p => new PoreDTO
+                {
+                    ID = p.ID,
+                    Position = p.Position,
+                    Area = p.Area,
+                    VolumeVoxels = p.VolumeVoxels,
+                    VolumePhysical = p.VolumePhysical,
+                    Connections = p.Connections,
+                    Radius = p.Radius
+                }).ToList(),
+                Throats = this._throatsOriginal.Select(t => new ThroatDTO
+                {
+                    ID = t.ID,
+                    Pore1ID = t.Pore1ID,
+                    Pore2ID = t.Pore2ID,
+                    Radius = t.Radius
+                }).ToList()
+            };
         }
 
         public override void Load()

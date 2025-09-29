@@ -8,9 +8,10 @@ using System.Numerics;
 using GeoscientistToolkit.Data;
 using GeoscientistToolkit.Data.AcousticVolume;
 using GeoscientistToolkit.Data.CtImageStack;
+using GeoscientistToolkit.Data.GIS;
 using GeoscientistToolkit.Data.Image;
 using GeoscientistToolkit.Data.Mesh3D;
-using GeoscientistToolkit.Data.Pnm; // Added for PNM
+using GeoscientistToolkit.Data.Pnm;
 using GeoscientistToolkit.Data.Table;
 using GeoscientistToolkit.Settings;
 using GeoscientistToolkit.Util;
@@ -32,7 +33,6 @@ namespace GeoscientistToolkit.Business
         public string ProjectPath { get; set; }
         public bool HasUnsavedChanges { get; set; }
         
-        // NEW: Project-level metadata
         public ProjectMetadata ProjectMetadata { get; set; } = new ProjectMetadata();
 
         public event Action<Dataset> DatasetRemoved;
@@ -54,7 +54,6 @@ namespace GeoscientistToolkit.Business
             ProjectPath = null;
             HasUnsavedChanges = false;
             
-            // Reset project metadata
             ProjectMetadata = new ProjectMetadata();
 
             Logger.Log("Created new project");
@@ -157,11 +156,9 @@ namespace GeoscientistToolkit.Business
                     using FileStream backupFileStream = File.Create(backupFilePath);
                     using GZipStream compressionStream = new GZipStream(backupFileStream, CompressionMode.Compress);
 
-                    // Create a temporary file for the serialized project
                     var tempPath = Path.GetTempFileName();
                     ProjectSerializer.SaveProject(this, tempPath);
 
-                    // Copy the contents of the temporary file to the compression stream
                     using (var tempFileStream = File.OpenRead(tempPath))
                     {
                         tempFileStream.CopyTo(compressionStream);
@@ -170,13 +167,11 @@ namespace GeoscientistToolkit.Business
                 }
                 else
                 {
-                    // For non-compressed backup, we just save a new copy with a timestamp
                     ProjectSerializer.SaveProject(this, backupFilePath);
                 }
 
                 Logger.Log($"Project backed up to {backupFilePath}");
 
-                // Clean up old backups
                 var backupFiles = new DirectoryInfo(settings.BackupDirectory)
                     .GetFiles($"{ProjectName}_*.bak*")
                     .OrderByDescending(f => f.CreationTime)
@@ -213,7 +208,6 @@ namespace GeoscientistToolkit.Business
             ProjectName = projectDto.ProjectName;
             ProjectPath = path;
             
-            // Load project metadata
             if (projectDto.ProjectMetadata != null)
             {
                 ProjectMetadata = ConvertFromProjectMetadataDTO(projectDto.ProjectMetadata);
@@ -236,7 +230,6 @@ namespace GeoscientistToolkit.Business
                     {
                         createdDatasets[dataset.FilePath] = dataset;
 
-                        // Load the dataset data (including labels) if it's not missing
                         if (!dataset.IsMissing)
                         {
                             try
@@ -261,7 +254,6 @@ namespace GeoscientistToolkit.Business
                 {
                     createdDatasets[sDto.FilePath] = dataset;
 
-                    // Load streaming dataset if not missing
                     if (!dataset.IsMissing)
                     {
                         try
@@ -352,13 +344,11 @@ namespace GeoscientistToolkit.Business
                         SliceThickness = ctDto.SliceThickness,
                         Unit = ctDto.Unit,
                         BinningSize = ctDto.BinningSize,
-                        IsMissing = !Directory.Exists(ctDto.FilePath)
+                        IsMissing = !(Directory.Exists(ctDto.FilePath) || File.Exists(ctDto.FilePath))
                     };
 
-                    // Deserialize materials
                     if (ctDto.Materials != null && ctDto.Materials.Count > 0)
                     {
-                        // Clear the default materials and load from the file to ensure a perfect state restoration.
                         ctDataset.Materials.Clear();
                         foreach (var matDto in ctDto.Materials)
                         {
@@ -377,10 +367,11 @@ namespace GeoscientistToolkit.Business
 
                     if (ctDataset.IsMissing)
                     {
-                        Logger.LogWarning($"Source folder not found for dataset: {ctDto.Name} at {ctDto.FilePath}");
+                        Logger.LogWarning($"Source folder or file not found for dataset: {ctDto.Name} at {ctDto.FilePath}");
                     }
                     dataset = ctDataset;
                     break;
+                    
                 case AcousticVolumeDatasetDTO acousticDto:
                     var acousticDataset = new AcousticVolumeDataset(acousticDto.Name, acousticDto.FilePath)
                     {
@@ -406,6 +397,7 @@ namespace GeoscientistToolkit.Business
     
                     dataset = acousticDataset;
                     break;
+                    
                 case ImageDatasetDTO imgDto:
                     var imgDataset = new ImageDataset(imgDto.Name, imgDto.FilePath)
                     {
@@ -420,24 +412,42 @@ namespace GeoscientistToolkit.Business
                     dataset = imgDataset;
                     break;
                 
-                // --- NEW CASE for PNMDataset ---
                 case PNMDatasetDTO pnmDto:
                 {
                     var pnmDataset = new PNMDataset(pnmDto.Name, pnmDto.FilePath)
                     {
                         IsMissing = !File.Exists(pnmDto.FilePath)
                     };
-
-                    // Import via helper to populate properties, visible lists, originals and bounds.
-                    // This replaces the old "assign Pores/Throats manually" approach.
+                    
                     pnmDataset.ImportFromDTO(pnmDto);
 
                     if (pnmDataset.IsMissing)
                     {
-                        Logger.LogWarning($"Source file not found for PNM dataset: {pnmDto.Name} at {pnmDto.FilePath}");
+                        Logger.LogWarning($"Source file not found for PNM dataset: {pnmDto.Name} at {pnmDto.FilePath}. Data was restored from project file.");
                     }
 
                     dataset = pnmDataset;
+                    break;
+                }
+                
+                case GISDatasetDTO gisDto:
+                {
+                    var gisDataset = new GISDataset(gisDto.Name, gisDto.FilePath)
+                    {
+                        BasemapPath = gisDto.BasemapPath,
+                        Center = gisDto.Center,
+                        DefaultZoom = gisDto.DefaultZoom,
+                        IsMissing = !File.Exists(gisDto.FilePath)
+                    };
+                    if (Enum.TryParse<BasemapType>(gisDto.BasemapType, out var basemapType))
+                    {
+                        gisDataset.BasemapType = basemapType;
+                    }
+                    if (gisDataset.IsMissing)
+                    {
+                        Logger.LogWarning($"Source file not found for GIS dataset: {gisDto.Name} at {gisDto.FilePath}");
+                    }
+                    dataset = gisDataset;
                     break;
                 }
 
@@ -459,7 +469,6 @@ namespace GeoscientistToolkit.Business
                     return null;
             }
             
-            // Apply metadata if dataset was created successfully
             if (dataset != null && dto.Metadata != null)
             {
                 dataset.DatasetMetadata = ConvertFromDatasetMetadataDTO(dto.Metadata);
@@ -551,19 +560,14 @@ namespace GeoscientistToolkit.Business
             return existingProjects;
         }
         
-        /// <summary>
-        /// Export all dataset metadata to a CSV file
-        /// </summary>
         public void ExportMetadataToCSV(string filePath)
         {
             try
             {
                 using (var writer = new StreamWriter(filePath))
                 {
-                    // Write headers
                     writer.WriteLine("Dataset Name,Dataset Type,Sample Name,Location Name,Latitude,Longitude,Depth (m),Size X,Size Y,Size Z,Size Unit,Collection Date,Collector,Notes");
                     
-                    // Write data for each dataset
                     foreach (var dataset in LoadedDatasets)
                     {
                         var meta = dataset.DatasetMetadata;
@@ -601,9 +605,6 @@ namespace GeoscientistToolkit.Business
             return field;
         }
         
-        /// <summary>
-        /// Get a summary of the project
-        /// </summary>
         public string GetProjectSummary()
         {
             var summary = $"Project: {ProjectName}\n";
@@ -628,9 +629,6 @@ namespace GeoscientistToolkit.Business
             return summary;
         }
         
-        /// <summary>
-        /// Validate all dataset metadata
-        /// </summary>
         public List<string> ValidateMetadata()
         {
             var issues = new List<string>();
@@ -640,7 +638,6 @@ namespace GeoscientistToolkit.Business
                 var meta = dataset.DatasetMetadata;
                 if (meta == null) continue;
                 
-                // Validate coordinates
                 if (meta.Latitude.HasValue && (meta.Latitude < -90 || meta.Latitude > 90))
                 {
                     issues.Add($"Dataset '{dataset.Name}': Invalid latitude {meta.Latitude}");
@@ -651,7 +648,6 @@ namespace GeoscientistToolkit.Business
                     issues.Add($"Dataset '{dataset.Name}': Invalid longitude {meta.Longitude}");
                 }
                 
-                // Check for missing sample names
                 if (string.IsNullOrWhiteSpace(meta.SampleName))
                 {
                     issues.Add($"Dataset '{dataset.Name}': Missing sample name");

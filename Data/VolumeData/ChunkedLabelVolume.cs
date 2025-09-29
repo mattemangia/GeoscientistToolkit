@@ -262,7 +262,7 @@ namespace GeoscientistToolkit.Data.VolumeData
         }
 
         /// <summary>
-        /// Saves the label volume to a binary file.
+        /// Saves the label volume to a binary file with a complete header.
         /// </summary>
         public void SaveAsBin(string path)
         {
@@ -271,7 +271,10 @@ namespace GeoscientistToolkit.Data.VolumeData
                 using (FileStream fs = new FileStream(path, FileMode.Create, FileAccess.Write))
                 using (BinaryWriter bw = new BinaryWriter(fs))
                 {
-                    // Write header
+                    // Write a complete and unambiguous header
+                    bw.Write(Width);
+                    bw.Write(Height);
+                    bw.Write(Depth);
                     bw.Write(ChunkDim);
                     bw.Write(ChunkCountX);
                     bw.Write(ChunkCountY);
@@ -290,12 +293,15 @@ namespace GeoscientistToolkit.Data.VolumeData
                     }
                     else
                     {
-                        byte[] buffer = new byte[chunkSize];
-                        for (int i = 0; i < totalChunks; i++)
+                        // For memory-mapped files, read from the accessor and write to the stream
+                        long dataOffset = 28; // New header size
+                        long dataLength = (long)totalChunks * chunkSize;
+                        byte[] buffer = new byte[Math.Min(dataLength, 1024 * 1024)]; // Use a 1MB buffer
+                        for (long i = 0; i < dataLength; i += buffer.Length)
                         {
-                            long offset = CalculateGlobalOffset(i, 0);
-                            _viewAccessor.ReadArray(offset, buffer, 0, chunkSize);
-                            bw.Write(buffer);
+                            int toRead = (int)Math.Min(buffer.Length, dataLength - i);
+                            _viewAccessor.ReadArray(dataOffset + i, buffer, 0, toRead);
+                            bw.Write(buffer, 0, toRead);
                         }
                     }
                 }
@@ -309,47 +315,46 @@ namespace GeoscientistToolkit.Data.VolumeData
         }
 
         /// <summary>
-        /// Loads label volume from a binary file
+        /// Loads label volume from a binary file, reading the complete header.
         /// </summary>
         public static ChunkedLabelVolume LoadFromBin(string path, bool useMemoryMapping)
         {
-            using (var fs = new FileStream(path, FileMode.Open, FileAccess.Read))
+            using (var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read))
             using (var br = new BinaryReader(fs))
             {
-                // Read header
+                // Read the complete header
+                int width = br.ReadInt32();
+                int height = br.ReadInt32();
+                int depth = br.ReadInt32();
                 int chunkDim = br.ReadInt32();
-                int cntX = br.ReadInt32();
-                int cntY = br.ReadInt32();
-                int cntZ = br.ReadInt32();
-                
-                int width = cntX * chunkDim;
-                int height = cntY * chunkDim;
-                int depth = cntZ * chunkDim;
-                
+                // We can ignore the saved chunk counts as they can be recalculated
+                br.ReadInt32(); // cntX
+                br.ReadInt32(); // cntY
+                br.ReadInt32(); // cntZ
+        
                 var volume = new ChunkedLabelVolume(width, height, depth, chunkDim, useMemoryMapping, path);
-                
-                // Read chunks
-                int chunkSize = chunkDim * chunkDim * chunkDim;
-                int totalChunks = cntX * cntY * cntZ;
-                
+        
+                // Read chunks if not memory mapping
                 if (!useMemoryMapping)
                 {
+                    int chunkSize = chunkDim * chunkDim * chunkDim;
+                    int totalChunks = volume.ChunkCountX * volume.ChunkCountY * volume.ChunkCountZ;
+            
                     for (int i = 0; i < totalChunks; i++)
                     {
-                        volume._chunks[i] = br.ReadBytes(chunkSize);
+                        int bytesRead = br.Read(volume._chunks[i], 0, chunkSize);
+                        if (bytesRead < chunkSize && fs.Position != fs.Length)
+                        {
+                            Logger.LogWarning($"[ChunkedLabelVolume] Read fewer bytes than expected for chunk {i}. The file might be corrupt.");
+                        }
                     }
                 }
                 else
                 {
-                    // For memory mapping, data is already accessible through the file
-                    // Just verify file size
-                    long expectedSize = HEADER_SIZE + ((long)totalChunks * chunkSize);
-                    if (fs.Length < expectedSize)
-                    {
-                        throw new InvalidDataException("Label file is truncated");
-                    }
+                    // For memory mapping, data is already accessible through the file.
+                    // The constructor handles setting up the MMF.
                 }
-                
+        
                 return volume;
             }
         }

@@ -9,10 +9,12 @@ using System.Text.Json.Serialization;
 using GeoscientistToolkit.Data;
 using GeoscientistToolkit.Data.AcousticVolume;
 using GeoscientistToolkit.Data.CtImageStack;
+using GeoscientistToolkit.Data.GIS;
 using GeoscientistToolkit.Data.Image;
 using GeoscientistToolkit.Data.Mesh3D;
-using GeoscientistToolkit.Util;
+using GeoscientistToolkit.Data.Pnm;
 using GeoscientistToolkit.Data.Table;
+using GeoscientistToolkit.Util;
 using AcousticVolumeDatasetDTO = GeoscientistToolkit.Data.AcousticVolumeDatasetDTO;
 
 namespace GeoscientistToolkit.Business
@@ -24,8 +26,8 @@ namespace GeoscientistToolkit.Business
             WriteIndented = true,
             Converters = { 
                 new DatasetDTOConverter(),
-                new Vector4JsonConverter(),  // Add this line
-                new Vector3JsonConverter()   // Add this if you need Vector3 support too
+                new Vector4JsonConverter(),
+                new Vector3JsonConverter()
             }
         };
 
@@ -195,10 +197,9 @@ namespace GeoscientistToolkit.Business
                         nameof(StreamingCtVolumeDataset) => JsonSerializer.Deserialize<StreamingCtVolumeDatasetDTO>(rawText, options),
                         nameof(Mesh3DDataset) => JsonSerializer.Deserialize<Mesh3DDatasetDTO>(rawText, options),
                         nameof(TableDataset) => JsonSerializer.Deserialize<TableDatasetDTO>(rawText, options),
-                
-                        // ADD THIS LINE:
                         nameof(AcousticVolumeDataset) => JsonSerializer.Deserialize<AcousticVolumeDatasetDTO>(rawText, options),
-                
+                        nameof(PNMDataset) => JsonSerializer.Deserialize<PNMDatasetDTO>(rawText, options),
+                        nameof(GISDataset) => JsonSerializer.Deserialize<GISDatasetDTO>(rawText, options),
                         _ => throw new JsonException($"Unknown dataset type: {typeName}")
                     };
                 }
