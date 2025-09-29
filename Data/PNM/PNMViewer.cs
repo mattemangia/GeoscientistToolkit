@@ -1,5 +1,6 @@
-// GeoscientistToolkit/UI/PNMViewer.cs - Complete Implementation
+// GeoscientistToolkit/UI/PNMViewer.cs - Thread-Safe Version
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -117,13 +118,14 @@ namespace GeoscientistToolkit.UI
         private bool _showPores = true;
         private bool _showThroats = true;
 
-        // Flow visualization data
-        private Dictionary<int, float> _porePressures = new Dictionary<int, float>();
-        private Dictionary<int, float> _throatFlowRates = new Dictionary<int, float>();
-        private Dictionary<int, float> _localTortuosity = new Dictionary<int, float>();
-        private bool _hasFlowData = false;
-        private HashSet<int> _inletPoreIds = new HashSet<int>();
-        private HashSet<int> _outletPoreIds = new HashSet<int>();
+        // Flow visualization data - CHANGED TO THREAD-SAFE
+        private readonly ConcurrentDictionary<int, float> _porePressures = new ConcurrentDictionary<int, float>();
+        private readonly ConcurrentDictionary<int, float> _throatFlowRates = new ConcurrentDictionary<int, float>();
+        private readonly ConcurrentDictionary<int, float> _localTortuosity = new ConcurrentDictionary<int, float>();
+        private volatile bool _hasFlowData = false;
+        private readonly ConcurrentBag<int> _inletPoreIds = new ConcurrentBag<int>();
+        private readonly ConcurrentBag<int> _outletPoreIds = new ConcurrentBag<int>();
+        private readonly object _flowDataLock = new object();
 
         // Selection
         private int _selectedPoreId = -1;
@@ -147,8 +149,12 @@ namespace GeoscientistToolkit.UI
             {
                 if (ReferenceEquals(d, _dataset))
                 {
-                    _pendingGeometryRebuild = true;
-                    UpdateFlowData();
+                    // Ensure UI thread execution
+                    VeldridManager.ExecuteOnMainThread(() =>
+                    {
+                        _pendingGeometryRebuild = true;
+                        UpdateFlowData();
+                    });
                 }
             };
 
@@ -168,44 +174,57 @@ namespace GeoscientistToolkit.UI
 
         private void UpdateFlowData()
         {
-            var results = AbsolutePermeability.GetLastResults();
-            var flowData = AbsolutePermeability.GetLastFlowData();
-            
-            if (flowData != null && flowData.PorePressures != null && flowData.PorePressures.Count > 0)
+            lock (_flowDataLock)
             {
-                _porePressures = flowData.PorePressures;
-                _throatFlowRates = flowData.ThroatFlowRates ?? new Dictionary<int, float>();
-                _hasFlowData = true;
+                var results = AbsolutePermeability.GetLastResults();
+                var flowData = AbsolutePermeability.GetLastFlowData();
                 
-                // Identify inlet and outlet pores based on pressure values
-                if (_porePressures.Count > 0)
+                if (flowData != null && flowData.PorePressures != null && flowData.PorePressures.Count > 0)
                 {
-                    float maxPressure = _porePressures.Values.Max();
-                    float minPressure = _porePressures.Values.Min();
-                    float tolerance = (maxPressure - minPressure) * 0.01f; // 1% tolerance
+                    _porePressures.Clear();
+                    foreach (var kvp in flowData.PorePressures)
+                        _porePressures.TryAdd(kvp.Key, kvp.Value);
                     
-                    _inletPoreIds.Clear();
-                    _outletPoreIds.Clear();
-                    
-                    foreach (var kvp in _porePressures)
+                    _throatFlowRates.Clear();
+                    if (flowData.ThroatFlowRates != null)
                     {
-                        if (Math.Abs(kvp.Value - maxPressure) < tolerance)
-                            _inletPoreIds.Add(kvp.Key);
-                        else if (Math.Abs(kvp.Value - minPressure) < tolerance)
-                            _outletPoreIds.Add(kvp.Key);
+                        foreach (var kvp in flowData.ThroatFlowRates)
+                            _throatFlowRates.TryAdd(kvp.Key, kvp.Value);
                     }
                     
-                    Logger.Log($"[PNMViewer] Identified {_inletPoreIds.Count} inlet and {_outletPoreIds.Count} outlet pores");
+                    _hasFlowData = true;
+                    
+                    // Identify inlet and outlet pores based on pressure values
+                    if (_porePressures.Count > 0)
+                    {
+                        float maxPressure = _porePressures.Values.Max();
+                        float minPressure = _porePressures.Values.Min();
+                        float tolerance = (maxPressure - minPressure) * 0.01f; // 1% tolerance
+                        
+                        // Clear bags by creating new ones (ConcurrentBag doesn't have Clear in older versions)
+                        while (_inletPoreIds.TryTake(out _)) { }
+                        while (_outletPoreIds.TryTake(out _)) { }
+                        
+                        foreach (var kvp in _porePressures)
+                        {
+                            if (Math.Abs(kvp.Value - maxPressure) < tolerance)
+                                _inletPoreIds.Add(kvp.Key);
+                            else if (Math.Abs(kvp.Value - minPressure) < tolerance)
+                                _outletPoreIds.Add(kvp.Key);
+                        }
+                        
+                        Logger.Log($"[PNMViewer] Identified {_inletPoreIds.Count} inlet and {_outletPoreIds.Count} outlet pores");
+                    }
+                    
+                    CalculateLocalTortuosity();
+                    Logger.Log($"[PNMViewer] Loaded flow data with {_porePressures.Count} pore pressures");
                 }
-                
-                CalculateLocalTortuosity();
-                Logger.Log($"[PNMViewer] Loaded flow data with {_porePressures.Count} pore pressures");
-            }
-            else
-            {
-                _hasFlowData = false;
-                _inletPoreIds.Clear();
-                _outletPoreIds.Clear();
+                else
+                {
+                    _hasFlowData = false;
+                    while (_inletPoreIds.TryTake(out _)) { }
+                    while (_outletPoreIds.TryTake(out _)) { }
+                }
             }
         }
 
@@ -229,14 +248,14 @@ namespace GeoscientistToolkit.UI
             {
                 if (!adjacency.ContainsKey(pore.ID))
                 {
-                    _localTortuosity[pore.ID] = 1.0f;
+                    _localTortuosity.TryAdd(pore.ID, 1.0f);
                     continue;
                 }
                 
                 var neighbors = adjacency[pore.ID];
                 if (neighbors.Count < 2)
                 {
-                    _localTortuosity[pore.ID] = 1.0f;
+                    _localTortuosity.TryAdd(pore.ID, 1.0f);
                     continue;
                 }
                 
@@ -266,11 +285,11 @@ namespace GeoscientistToolkit.UI
                 if (comparisons > 0)
                 {
                     float avgDeviation = totalDeviation / comparisons;
-                    _localTortuosity[pore.ID] = 1.0f + avgDeviation * 2.0f;
+                    _localTortuosity.TryAdd(pore.ID, 1.0f + avgDeviation * 2.0f);
                 }
                 else
                 {
-                    _localTortuosity[pore.ID] = 1.0f;
+                    _localTortuosity.TryAdd(pore.ID, 1.0f);
                 }
             }
         }
