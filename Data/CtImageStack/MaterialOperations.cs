@@ -123,9 +123,22 @@ namespace GeoscientistToolkit.Data.CtImageStack
                 if (anyModified && dataset != null)
                 {
                     Logger.Log($"[MaterialOperations] Saving label data for material {materialID}...");
-                    dataset.SaveLabelData(); // Save the label volume
-                    dataset.SaveMaterials(); // Save material definitions
-                    
+            
+                    // Ensure material exists and is visible if we're adding voxels
+                    if (isAddOperation)
+                    {
+                        var material = dataset.Materials.FirstOrDefault(m => m.ID == materialID);
+                        if (material != null)
+                        {
+                            material.IsVisible = true;  // Force visibility on
+                            Logger.Log($"[MaterialOperations] Set material {materialID} ({material.Name}) to visible");
+                        }
+                    }
+            
+                    dataset.SaveLabelData();
+                    dataset.SaveMaterials();
+            
+                    // This notification should trigger the 3D viewer to update
                     ProjectManager.Instance.NotifyDatasetDataChanged(dataset);
                     ProjectManager.Instance.HasUnsavedChanges = true;
                 }

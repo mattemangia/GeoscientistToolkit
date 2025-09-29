@@ -22,7 +22,11 @@ namespace GeoscientistToolkit.Business
         private static readonly JsonSerializerOptions _options = new JsonSerializerOptions
         {
             WriteIndented = true,
-            Converters = { new DatasetDTOConverter() }
+            Converters = { 
+                new DatasetDTOConverter(),
+                new Vector4JsonConverter(),  // Add this line
+                new Vector3JsonConverter()   // Add this if you need Vector3 support too
+            }
         };
 
         public static void SaveProject(ProjectManager project, string path)

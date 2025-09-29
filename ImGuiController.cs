@@ -7,6 +7,7 @@ using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.IO;
 using System.Text;
+using GeoscientistToolkit.Util;
 using ImGuiNET;
 using Veldrid;
 using Veldrid.SPIRV;
@@ -387,6 +388,7 @@ void main()
 
             ImGui.Render();
             DrawImGui(ImGui.GetDrawData(), gd, cl);
+            ViewerScreenshotUtility.ProcessDeferredCaptures();
             _frameBegun = false;
         }
 

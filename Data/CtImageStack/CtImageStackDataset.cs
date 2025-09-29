@@ -236,27 +236,37 @@ namespace GeoscientistToolkit.Data.CtImageStack
                         Materials.Clear();
                         foreach (var dto in dtos)
                         {
-                            Materials.Add(new Material(dto.ID, dto.Name, dto.Color)
+                            // FIX: Ensure all properties are properly restored
+                            var material = new Material(dto.ID, dto.Name, dto.Color)
                             {
                                 MinValue = dto.MinValue,
                                 MaxValue = dto.MaxValue,
                                 IsVisible = dto.IsVisible,
                                 IsExterior = dto.IsExterior,
                                 Density = dto.Density
-                            });
+                            };
+                            Materials.Add(material);
                         }
                         Logger.Log($"[CtImageStackDataset] Loaded {Materials.Count} materials from {materialsPath}");
                     }
                 }
                 catch (Exception ex)
                 {
-                    Logger.LogError($"[CtImageStackDataset] Failed to load materials from {materialsPath}: {ex.Message}. Using default.");
-                    // Ensure default material exists if loading fails
+                    Logger.LogError($"[CtImageStackDataset] Failed to load materials: {ex.Message}");
+                    // Add default if loading fails
                     if (!Materials.Any(m => m.ID == 0))
                     {
                         Materials.Clear();
                         Materials.Add(new Material(0, "Exterior", new Vector4(0, 0, 0, 0)));
                     }
+                }
+            }
+            else
+            {
+                // No materials file - ensure default exists
+                if (!Materials.Any())
+                {
+                    Materials.Add(new Material(0, "Exterior", new Vector4(0, 0, 0, 0)));
                 }
             }
         }

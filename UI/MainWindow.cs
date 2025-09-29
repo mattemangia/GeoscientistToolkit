@@ -1,4 +1,4 @@
-// GeoscientistToolkit/UI/MainWindow.cs — Fixed to properly handle dataset removal
+// GeoscientistToolkit/UI/MainWindow.cs — Fixed save dialog type
 using System;
 using System.Collections.Generic;
 using System.Runtime.InteropServices;
@@ -26,12 +26,11 @@ namespace GeoscientistToolkit.UI
         private readonly ToolsPanel _tools = new();
         private readonly SystemInfoWindow _systemInfoWindow = new();
         private readonly SettingsWindow _settingsWindow = new();
-        // --- ADD THIS LINE ---
         private readonly Volume3DDebugWindow _volume3DDebugWindow = new();
 
-        // File Dialogs
+        // File Dialogs - FIXED: Changed SaveFile dialog to correct type
         private readonly ImGuiFileDialog _loadProjectDialog = new("LoadProjectDlg", FileDialogType.OpenFile, "Load Project");
-        private readonly ImGuiFileDialog _saveProjectDialog = new("SaveProjectDlg", FileDialogType.OpenFile, "Save Project As");
+        private readonly ImGuiFileDialog _saveProjectDialog = new("SaveProjectDlg", FileDialogType.SaveFile, "Save Project As");  // FIXED THIS LINE
 
         private readonly List<DatasetViewPanel> _viewers = new();
         private readonly List<ThumbnailViewerPanel> _thumbnailViewers = new();
@@ -119,7 +118,7 @@ namespace GeoscientistToolkit.UI
                                                ImGuiWindowFlags.NoMove | ImGuiWindowFlags.NoBringToFrontOnFocus |
                                                ImGuiWindowFlags.NoNavFocus | ImGuiWindowFlags.MenuBar;
 
-            // NEW: Add project name to window title
+            // Add project name to window title
             string windowTitle = "GeoscientistToolkit";
             if (!string.IsNullOrEmpty(ProjectManager.Instance.ProjectName))
             {
@@ -134,7 +133,6 @@ namespace GeoscientistToolkit.UI
             ImGui.PopStyleVar(3);
 
             SubmitMainMenu();
-
 
             uint dockspaceId = ImGui.GetID("RootDockSpace");
             ImGui.DockSpace(dockspaceId, Vector2.Zero, ImGuiDockNodeFlags.None);
@@ -187,9 +185,7 @@ namespace GeoscientistToolkit.UI
             SubmitPopups();
             _systemInfoWindow.Submit();
             _settingsWindow.Submit();
-            // --- ADD THIS LINE ---
             _volume3DDebugWindow.Submit();
-
             _projectMetadataEditor.Submit();
             _metadataTableViewer.Submit();
             
@@ -281,7 +277,7 @@ namespace GeoscientistToolkit.UI
         {
             if (!ImGui.BeginMenuBar()) return;
             
-            // NEW: Display project name in menu bar
+            // Display project name in menu bar
             ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(0.8f, 0.8f, 0.8f, 1.0f));
             if (!string.IsNullOrEmpty(ProjectManager.Instance.ProjectName))
             {
@@ -294,6 +290,7 @@ namespace GeoscientistToolkit.UI
                 ImGui.Separator();
             }
             ImGui.PopStyleColor();
+            
             if (ImGui.BeginMenu("File"))
             {
                 if (ImGui.MenuItem("New Project")) TryOnNewProject();
@@ -384,6 +381,7 @@ namespace GeoscientistToolkit.UI
                 if (ImGui.MenuItem("Reset Layout")) _layoutBuilt = false;
                 ImGui.EndMenu();
             }
+            
             if (ImGui.BeginMenu("Metadata"))
             {
                 if (ImGui.MenuItem("Edit Project Metadata..."))
@@ -414,6 +412,7 @@ namespace GeoscientistToolkit.UI
                 
                 ImGui.EndMenu();
             }
+            
             if (ImGui.BeginMenu("Help"))
             {
                 if (ImGui.MenuItem("About")) _showAboutPopup = true;
@@ -421,7 +420,6 @@ namespace GeoscientistToolkit.UI
                 {
                     _systemInfoWindow.Open(VeldridManager.GraphicsDevice);
                 }
-
                 
                 ImGui.Separator();
                 if (ImGui.MenuItem("3D Volume Debug..."))
@@ -429,10 +427,9 @@ namespace GeoscientistToolkit.UI
                     _volume3DDebugWindow.Show();
                 }
 
-                
-
                 ImGui.EndMenu();
             }
+            
             if (GeoscientistToolkit.Util.VeldridManager.IsFullScreenSupported)
             {
                 // Space to the far right
@@ -460,11 +457,9 @@ namespace GeoscientistToolkit.UI
                 GeoscientistToolkit.Util.VeldridManager.ToggleFullScreen();
             }
 
-           
             ImGui.EndMenuBar();
         }
 
-     
         // ──────────────────────────────────────────────────────────────────────
         // Pop-ups & callbacks
         // ──────────────────────────────────────────────────────────────────────
@@ -518,7 +513,11 @@ namespace GeoscientistToolkit.UI
         private void OnSaveProjectAs()
         {
             _saveAsMode = true;
-            _saveProjectDialog.Open(null, new[] { ".gtp" });
+            // IMPROVED: Open with default filename and .gtp extension
+            string defaultName = string.IsNullOrEmpty(ProjectManager.Instance.ProjectName) 
+                ? "NewProject" 
+                : ProjectManager.Instance.ProjectName;
+            _saveProjectDialog.Open(null, new[] { ".gtp" }, defaultName);
         }
 
         private void TryExit()
@@ -574,10 +573,14 @@ namespace GeoscientistToolkit.UI
                 if (_saveAsMode)
                 {
                     string path = _saveProjectDialog.SelectedPath;
+                    
+                    // Ensure the path has the .gtp extension
                     if (!path.EndsWith(".gtp", StringComparison.OrdinalIgnoreCase))
                     {
                         path += ".gtp";
                     }
+                    
+                    Logger.Log($"Saving project to: {path}");
                     ProjectManager.Instance.SaveProject(path);
                     _saveAsMode = false;
                 }

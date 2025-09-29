@@ -187,8 +187,23 @@ namespace GeoscientistToolkit.Data.CtImageStack
         {
             if (dataset == _editableDataset)
             {
-                Logger.Log("[CtVolume3DViewer] Received notification that labels have changed. Marking for re-upload.");
+                Logger.Log("[CtVolume3DViewer] Dataset changed - updating materials and labels");
+        
+                // Force reload of material parameters
+                _materialParamsDirty = true;
+        
+                // Mark labels for re-upload
                 MarkLabelsAsDirty();
+        
+                // Update material visibility from dataset
+                foreach (var material in _editableDataset.Materials)
+                {
+                    if (material.ID != 0) // Skip exterior
+                    {
+                        // Sync visibility state
+                        SetMaterialVisibility(material.ID, material.IsVisible);
+                    }
+                }
             }
         }
 

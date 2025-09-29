@@ -1,4 +1,4 @@
-// GeoscientistToolkit/UI/PNMViewer.cs - Enhanced Version with Pressure and Tortuosity
+// GeoscientistToolkit/UI/PNMViewer.cs - Fixed Version
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -66,6 +66,8 @@ namespace GeoscientistToolkit.UI
         private CommandList _commandList;
         private Texture _colorRampTexture;
         private bool _pendingGeometryRebuild = false;
+        private Vector2 _lastViewerScreenPos;
+        private Vector2 _lastViewerSize;
         
         // Platform detection
         private readonly bool _isMetal;
@@ -569,14 +571,16 @@ void main()
                 }
                 else
                 {
-                    // Viridis for general properties
-                    float r = Math.Clamp(0.267f + 0.004780f * i - 0.329f * t + 1.781f * t * t, 0.0f, 1.0f);
-                    float g = Math.Clamp(0.0f + 1.069f * t - 0.170f * t * t, 0.0f, 1.0f);
-                    float b = Math.Clamp(0.329f + 1.515f * t - 1.965f * t * t + 0.621f * t * t * t, 0.0f, 1.0f);
+                    // Plasma colormap for better visibility on dark backgrounds
+                    // This provides better contrast than Viridis
+                    float r = Math.Clamp(0.05f + 2.0f * t, 0.0f, 1.0f);
+                    float g = Math.Clamp(0.02f + 0.39f * t - 0.53f * t * t, 0.0f, 1.0f);  
+                    float b = Math.Clamp(0.53f + 1.58f * t - 2.24f * t * t + 0.90f * t * t * t, 0.0f, 1.0f);
                     colorMapData[i] = new RgbaFloat(r, g, b, 1.0f);
                 }
             }
             
+            _colorRampTexture?.Dispose();
             _colorRampTexture = factory.CreateTexture(TextureDescription.Texture2D((uint)mapSize, 1, 1, 1, PixelFormat.R32_G32_B32_A32_Float, TextureUsage.Sampled));
             VeldridManager.GraphicsDevice.UpdateTexture(_colorRampTexture, colorMapData, 0, 0, 0, (uint)mapSize, 1, 1, 0, 0);
         }
@@ -633,8 +637,7 @@ void main()
             {
                 _colorByIndex = optionIndices[localIndex];
                 CreateColorRampTexture(VeldridManager.Factory); // Recreate colormap for new mode
-                UpdatePoreInstanceDataColor();
-                RebuildGeometryFromDataset(); // Rebuild to update throat colors
+                RebuildGeometryFromDataset(); // FIX: Rebuild geometry to update colors
             }
             
             ImGui.SameLine();
@@ -679,7 +682,8 @@ void main()
 
             var availableSize = ImGui.GetContentRegionAvail();
             var imagePos = ImGui.GetCursorScreenPos();
-
+            _lastViewerScreenPos = imagePos;
+            _lastViewerSize = availableSize;
             ImGui.Image(textureId, availableSize, new Vector2(0, 1), new Vector2(1, 0));
 
             ImGui.SetCursorScreenPos(imagePos);
@@ -720,7 +724,7 @@ void main()
         {
             // Legend Window
             ImGui.SetNextWindowPos(new Vector2(viewPos.X + viewSize.X - 200, viewPos.Y + 10), ImGuiCond.Always);
-            ImGui.SetNextWindowSize(new Vector2(180, 280), ImGuiCond.Always); // Increased height for flow legends
+            ImGui.SetNextWindowSize(new Vector2(180, 280), ImGuiCond.Always);
             ImGui.SetNextWindowBgAlpha(0.8f);
             ImGui.Begin(_legendWindowId,
                 ImGuiWindowFlags.NoTitleBar | ImGuiWindowFlags.NoResize | ImGuiWindowFlags.NoMove |
@@ -749,7 +753,7 @@ void main()
                 }
 
                 ImGui.SetNextWindowPos(new Vector2(viewPos.X + 10, viewPos.Y + 10), ImGuiCond.Always);
-                ImGui.SetNextWindowSize(new Vector2(320, 250), ImGuiCond.Always); // Increased for pressure info
+                ImGui.SetNextWindowSize(new Vector2(320, 250), ImGuiCond.Always);
                 ImGui.SetNextWindowBgAlpha(0.85f);
                 ImGui.SetNextWindowFocus();
 
@@ -881,11 +885,11 @@ void main()
                 float b = 0.0f;
                 return new Vector4(r, g, b, 1.0f);
             }
-            else // Default Viridis
+            else // Plasma for better visibility
             {
-                float r = Math.Clamp(0.267f + 0.004780f * t * 255 - 0.329f * t + 1.781f * t * t, 0.0f, 1.0f);
-                float g = Math.Clamp(0.0f + 1.069f * t - 0.170f * t * t, 0.0f, 1.0f);
-                float b = Math.Clamp(0.329f + 1.515f * t - 1.965f * t * t + 0.621f * t * t * t, 0.0f, 1.0f);
+                float r = Math.Clamp(0.05f + 2.0f * t, 0.0f, 1.0f);
+                float g = Math.Clamp(0.02f + 0.39f * t - 0.53f * t * t, 0.0f, 1.0f);  
+                float b = Math.Clamp(0.53f + 1.58f * t - 2.24f * t * t + 0.90f * t * t * t, 0.0f, 1.0f);
                 return new Vector4(r, g, b, 1.0f);
             }
         }
@@ -986,6 +990,39 @@ void main()
                 return;
             }
 
+            // FIX: Use the correct viewport dimensions for the render target
+            float aspectRatio = _renderTexture.Width / (float)_renderTexture.Height;
+            float viewportAspect = viewSize.X / viewSize.Y;
+            
+            // Adjust mouse position to account for aspect ratio differences
+            Vector2 adjustedMousePos = mousePos;
+            if (Math.Abs(aspectRatio - viewportAspect) > 0.01f)
+            {
+                // The image might be letterboxed or pillarboxed
+                if (viewportAspect > aspectRatio)
+                {
+                    // Pillarboxed (black bars on sides)
+                    float imageWidth = viewSize.Y * aspectRatio;
+                    float offset = (viewSize.X - imageWidth) * 0.5f;
+                    adjustedMousePos.X = (mousePos.X - offset) * (_renderTexture.Width / imageWidth);
+                    adjustedMousePos.Y = mousePos.Y * (_renderTexture.Height / viewSize.Y);
+                }
+                else
+                {
+                    // Letterboxed (black bars on top/bottom)
+                    float imageHeight = viewSize.X / aspectRatio;
+                    float offset = (viewSize.Y - imageHeight) * 0.5f;
+                    adjustedMousePos.X = mousePos.X * (_renderTexture.Width / viewSize.X);
+                    adjustedMousePos.Y = (mousePos.Y - offset) * (_renderTexture.Height / imageHeight);
+                }
+            }
+            else
+            {
+                // Direct mapping
+                adjustedMousePos.X = mousePos.X * (_renderTexture.Width / viewSize.X);
+                adjustedMousePos.Y = mousePos.Y * (_renderTexture.Height / viewSize.Y);
+            }
+
             var viewProj = _viewMatrix * _projMatrix;
 
             bool WorldToScreen(in Vector3 world, out Vector2 pixel)
@@ -1000,18 +1037,20 @@ void main()
                 float ndcX = clip.X * invW;
                 float ndcY = clip.Y * invW;
 
+                // Convert from NDC to render target coordinates
                 float u = (ndcX * 0.5f) + 0.5f;
                 float v = 1.0f - ((ndcY * 0.5f) + 0.5f);
-                pixel = new Vector2(u * viewSize.X, v * viewSize.Y);
-                return (u >= -0.2f && u <= 1.2f && v >= -0.2f && v <= 1.2f);
+                pixel = new Vector2(u * _renderTexture.Width, v * _renderTexture.Height);
+                
+                return (u >= -0.1f && u <= 1.1f && v >= -0.1f && v <= 1.1f);
             }
 
             int bestId = -1;
             Pore bestPore = null;
             float bestDist2 = float.MaxValue;
 
-            const float minPickPx = 8f;
-            const float maxPickPx = 28f;
+            const float minPickPx = 5f;
+            const float maxPickPx = 25f;
 
             for (int i = 0; i < _dataset.Pores.Count; i++)
             {
@@ -1024,14 +1063,19 @@ void main()
                 if (rModel <= 0) rModel = 0.1f;
 
                 Vector2 edgePx;
-                if (!WorldToScreen(pore.Position + new Vector3(rModel, 0, 0), out edgePx))
-                    continue;
+                if (!WorldToScreen(pore.Position + _cameraPosition.Normalized() * rModel, out edgePx))
+                {
+                    // Try right vector instead
+                    var right = Vector3.Cross(Vector3.UnitY, (_cameraPosition - _cameraTarget).Normalized());
+                    if (!WorldToScreen(pore.Position + right * rModel, out edgePx))
+                        continue;
+                }
 
                 float projectedRadiusPx = Vector2.Distance(centerPx, edgePx);
-                float pickRadiusPx = Math.Clamp(projectedRadiusPx * 1.15f, minPickPx, maxPickPx);
+                float pickRadiusPx = Math.Clamp(projectedRadiusPx * 1.2f, minPickPx, maxPickPx);
 
-                float dx = mousePos.X - centerPx.X;
-                float dy = mousePos.Y - centerPx.Y;
+                float dx = adjustedMousePos.X - centerPx.X;
+                float dy = adjustedMousePos.Y - centerPx.Y;
                 float dist2 = dx * dx + dy * dy;
 
                 if (dist2 <= pickRadiusPx * pickRadiusPx && dist2 < bestDist2)
@@ -1043,7 +1087,7 @@ void main()
             }
 
             _selectedPoreId = bestId;
-            _selectedPore   = bestPore;
+            _selectedPore = bestPore;
 
             if (_selectedPore != null)
             {
@@ -1055,7 +1099,7 @@ void main()
         {
             var factory = VeldridManager.Factory;
 
-            // Build pore instances
+            // Build pore instances with updated color values
             var poreInstances = new List<PoreInstanceData>();
             foreach (var p in _dataset.Pores)
             {
@@ -1246,23 +1290,6 @@ void main()
                 VeldridManager.GraphicsDevice.UpdateBuffer(_throatConstantsBuffer, 0, ref constants);
         }
 
-        private void UpdatePoreInstanceDataColor()
-        {
-            if (_poreInstanceCount == 0) return;
-
-            var instanceData = new List<PoreInstanceData>();
-            foreach (var p in _dataset.Pores)
-            {
-                float colorValue = GetPoreColorValue(p);
-                instanceData.Add(new PoreInstanceData(p.Position, colorValue, p.Radius));
-            }
-            
-            if (instanceData.Count > 0 && _poreInstanceBuffer != null)
-            {
-                VeldridManager.GraphicsDevice.UpdateBuffer(_poreInstanceBuffer, 0, instanceData.ToArray());
-            }
-        }
-
         private void HandleMouseInput()
         {
             var io = ImGui.GetIO();
@@ -1384,7 +1411,6 @@ void main()
         {
             try
             {
-                // Determine image format from extension
                 var format = Path.GetExtension(path).ToLower() switch
                 {
                     ".png" => ScreenshotUtility.ImageFormat.PNG,
@@ -1394,25 +1420,28 @@ void main()
                     _ => ScreenshotUtility.ImageFormat.PNG
                 };
 
-                // Use the ScreenshotUtility to capture the render texture
-                bool success = ScreenshotUtility.CaptureTexture(_renderTexture, path, format, 90);
-                
-                if (success)
-                {
-                    Logger.Log($"[PNMViewer] Screenshot saved to {path}");
-                    
-                    // Show a success notification in ImGui (optional)
-                    // You could store a flag here to show a notification in the next frame
-                    _lastScreenshotPath = path;
-                    _showScreenshotNotification = true;
-                    _screenshotNotificationTimer = 3.0f; // Show for 3 seconds
-                }
-                else
-                {
-                    Logger.LogError($"[PNMViewer] Failed to save screenshot to {path}");
-                }
+                // Schedule deferred capture - will happen AFTER ImGui renders
+                ViewerScreenshotUtility.ScheduleRegionCapture(
+                    _lastViewerScreenPos,
+                    _lastViewerSize,
+                    path,
+                    format,
+                    (success, filePath) =>
+                    {
+                        if (success)
+                        {
+                            Logger.Log($"[PNMViewer] Screenshot with overlays saved to {filePath}");
+                            _lastScreenshotPath = filePath;
+                            _showScreenshotNotification = true;
+                            _screenshotNotificationTimer = 3.0f;
+                        }
+                        else
+                        {
+                            Logger.LogError($"[PNMViewer] Failed to save screenshot");
+                        }
+                    });
             }
-            catch(Exception ex)
+            catch (Exception ex)
             {
                 Logger.LogError($"[PNMViewer] Screenshot error: {ex.Message}");
             }
