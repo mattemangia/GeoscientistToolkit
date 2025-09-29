@@ -1,4 +1,4 @@
-// GeoscientistToolkit/UI/PNMTools.cs - UPDATED VERSION
+// GeoscientistToolkit/UI/PNMTools.cs - FIXED VERSION
 using GeoscientistToolkit.Data;
 using GeoscientistToolkit.Data.Pnm;
 using GeoscientistToolkit.UI.Interfaces;
@@ -32,7 +32,7 @@ namespace GeoscientistToolkit.UI
         private bool _calcNavierStokes = true;
         private bool _calcLatticeBoltzmann = false; // Default off (slowest)
         
-        // NEW: Pressure parameters
+        // Pressure parameters
         private float _inletPressure = 2.0f; // Pa (default 2 Pa)
         private float _outletPressure = 0.0f; // Pa (default 0 Pa)
         private int _pressureUnitIndex = 0; // 0=Pa, 1=kPa, 2=bar, 3=psi
@@ -226,7 +226,7 @@ namespace GeoscientistToolkit.UI
             ImGui.Separator();
             ImGui.Spacing();
 
-            // NEW: Pressure configuration section
+            // Pressure configuration section
             ImGui.Text("Pressure Configuration:");
             
             // Pressure unit selector
@@ -377,61 +377,76 @@ namespace GeoscientistToolkit.UI
             
             ImGui.PushStyleColor(ImGuiCol.ChildBg, new Vector4(0.1f, 0.1f, 0.15f, 0.5f));
             
-            // Make the results scrollable with both scrollbars
-            ImGui.BeginChild("PermeabilityResults", new Vector2(-1, 250), ImGuiChildFlags.Border, 
+            // FIXED: Increased height from 250 to 400 pixels for better visibility
+            ImGui.BeginChild("PermeabilityResults", new Vector2(-1, 400), ImGuiChildFlags.Border, 
                             ImGuiWindowFlags.HorizontalScrollbar);
             
             ImGui.Text("Permeability Results");
             ImGui.Separator();
             
-            // Parameters table
-            if (ImGui.BeginTable("ParamsTable", 2, ImGuiTableFlags.BordersInner | ImGuiTableFlags.RowBg))
+            // Parameters table - adjusted row height with spacing
+            if (ImGui.BeginTable("ParamsTable", 2, ImGuiTableFlags.BordersInner | ImGuiTableFlags.RowBg | ImGuiTableFlags.PadOuterX))
             {
                 ImGui.TableSetupColumn("Parameter", ImGuiTableColumnFlags.WidthFixed, 180);
                 ImGui.TableSetupColumn("Value", ImGuiTableColumnFlags.WidthFixed, 200);
                 
                 ImGui.TableHeadersRow();
                 
-                // Flow parameters
+                // Flow parameters with better spacing
                 ImGui.TableNextRow();
-                ImGui.TableSetColumnIndex(0); ImGui.Text("Flow Axis:");
-                ImGui.TableSetColumnIndex(1); ImGui.Text($"{results?.FlowAxis ?? "Z"}");
+                ImGui.TableSetColumnIndex(0); 
+                ImGui.Text("Flow Axis:");
+                ImGui.TableSetColumnIndex(1); 
+                ImGui.Text($"{results?.FlowAxis ?? "Z"}");
                 
                 ImGui.TableNextRow();
-                ImGui.TableSetColumnIndex(0); ImGui.Text("Model Length:");
-                ImGui.TableSetColumnIndex(1); ImGui.Text($"{(results?.ModelLength ?? 0) * 1e6:F1} μm");
+                ImGui.TableSetColumnIndex(0); 
+                ImGui.Text("Model Length:");
+                ImGui.TableSetColumnIndex(1); 
+                ImGui.Text($"{(results?.ModelLength ?? 0) * 1e6:F1} μm");
                 
                 ImGui.TableNextRow();
-                ImGui.TableSetColumnIndex(0); ImGui.Text("Cross-sectional Area:");
-                ImGui.TableSetColumnIndex(1); ImGui.Text($"{(results?.CrossSectionalArea ?? 0) * 1e12:F3} μm²");
+                ImGui.TableSetColumnIndex(0); 
+                ImGui.Text("Cross-sectional Area:");
+                ImGui.TableSetColumnIndex(1); 
+                ImGui.Text($"{(results?.CrossSectionalArea ?? 0) * 1e12:F3} μm²");
                 
                 ImGui.TableNextRow();
-                ImGui.TableSetColumnIndex(0); ImGui.Text("Pressure Drop:");
-                ImGui.TableSetColumnIndex(1); ImGui.Text($"{results?.UsedPressureDrop ?? 1.0f:F3} Pa");
+                ImGui.TableSetColumnIndex(0); 
+                ImGui.Text("Pressure Drop:");
+                ImGui.TableSetColumnIndex(1); 
+                ImGui.Text($"{results?.UsedPressureDrop ?? 1.0f:F3} Pa");
                 
                 ImGui.TableNextRow();
-                ImGui.TableSetColumnIndex(0); ImGui.Text("Viscosity:");
-                ImGui.TableSetColumnIndex(1); ImGui.Text($"{results?.UsedViscosity ?? 1.0f:F3} cP");
+                ImGui.TableSetColumnIndex(0); 
+                ImGui.Text("Viscosity:");
+                ImGui.TableSetColumnIndex(1); 
+                ImGui.Text($"{results?.UsedViscosity ?? 1.0f:F3} cP");
                 
                 ImGui.TableNextRow();
-                ImGui.TableSetColumnIndex(0); ImGui.Text("Total Flow Rate:");
-                ImGui.TableSetColumnIndex(1); ImGui.Text($"{(results?.TotalFlowRate ?? 0):E3} m³/s");
+                ImGui.TableSetColumnIndex(0); 
+                ImGui.Text("Total Flow Rate:");
+                ImGui.TableSetColumnIndex(1); 
+                ImGui.Text($"{(results?.TotalFlowRate ?? 0):E3} m³/s");
                 
                 ImGui.TableNextRow();
-                ImGui.TableSetColumnIndex(0); ImGui.Text("Tortuosity (τ):");
-                ImGui.TableSetColumnIndex(1); ImGui.Text($"{results?.Tortuosity ?? pnm.Tortuosity:F4}");
+                ImGui.TableSetColumnIndex(0); 
+                ImGui.Text("Tortuosity (τ):");
+                ImGui.TableSetColumnIndex(1); 
+                ImGui.Text($"{results?.Tortuosity ?? pnm.Tortuosity:F4}");
                 
                 ImGui.EndTable();
             }
             
             ImGui.Spacing();
             ImGui.Separator();
+            ImGui.Spacing();
             ImGui.Text("Permeability Values:");
             ImGui.Spacing();
             
-            // Permeability results table with horizontal scroll
+            // Permeability results table with better visibility
             if (ImGui.BeginTable("PermTable", 4, ImGuiTableFlags.BordersInner | ImGuiTableFlags.RowBg | 
-                                ImGuiTableFlags.ScrollX))
+                                ImGuiTableFlags.ScrollX | ImGuiTableFlags.PadOuterX))
             {
                 ImGui.TableSetupColumn("Method", ImGuiTableColumnFlags.WidthFixed, 150);
                 ImGui.TableSetupColumn("Uncorrected (mD)", ImGuiTableColumnFlags.WidthFixed, 150);
@@ -493,6 +508,7 @@ namespace GeoscientistToolkit.UI
                 ImGui.EndTable();
             }
             
+            ImGui.Spacing();
             ImGui.Spacing();
             
             // Export button
