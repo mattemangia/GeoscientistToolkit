@@ -184,75 +184,96 @@ namespace GeoscientistToolkit.UI
         }
 
         private void UpdateFlowData()
+{
+    lock (_flowDataLock)
+    {
+        var results = AbsolutePermeability.GetLastResults();
+        var flowData = AbsolutePermeability.GetLastFlowData();
+        
+        if (flowData != null && flowData.PorePressures != null && flowData.PorePressures.Count > 0)
         {
-            lock (_flowDataLock)
+            _porePressures.Clear();
+            foreach (var kvp in flowData.PorePressures)
+                _porePressures.TryAdd(kvp.Key, kvp.Value);
+            
+            _throatFlowRates.Clear();
+            if (flowData.ThroatFlowRates != null)
             {
-                var results = AbsolutePermeability.GetLastResults();
-                var flowData = AbsolutePermeability.GetLastFlowData();
-                
-                if (flowData != null && flowData.PorePressures != null && flowData.PorePressures.Count > 0)
-                {
-                    _porePressures.Clear();
-                    foreach (var kvp in flowData.PorePressures)
-                        _porePressures.TryAdd(kvp.Key, kvp.Value);
-                    
-                    _throatFlowRates.Clear();
-                    if (flowData.ThroatFlowRates != null)
-                    {
-                        foreach (var kvp in flowData.ThroatFlowRates)
-                            _throatFlowRates.TryAdd(kvp.Key, kvp.Value);
-                    }
-                    
-                    _hasFlowData = true;
-                    
-                    // Capture flow axis information
-                    if (results != null && !string.IsNullOrEmpty(results.FlowAxis))
-                    {
-                        _flowAxis = results.FlowAxis;
-                        _flowDirection = _flowAxis switch
-                        {
-                            "X" => new Vector3(1, 0, 0),
-                            "Y" => new Vector3(0, 1, 0),
-                            "Z" => new Vector3(0, 0, 1),
-                            _ => new Vector3(0, 0, 1)
-                        };
-                    }
-                    
-                    // Identify inlet and outlet pores based on pressure values
-                    if (_porePressures.Count > 0)
-                    {
-                        float maxPressure = _porePressures.Values.Max();
-                        float minPressure = _porePressures.Values.Min();
-                        float tolerance = (maxPressure - minPressure) * 0.01f; // 1% tolerance
-                        
-                        // Clear bags by creating new ones (ConcurrentBag doesn't have Clear in older versions)
-                        while (_inletPoreIds.TryTake(out _)) { }
-                        while (_outletPoreIds.TryTake(out _)) { }
-                        
-                        foreach (var kvp in _porePressures)
-                        {
-                            if (Math.Abs(kvp.Value - maxPressure) < tolerance)
-                                _inletPoreIds.Add(kvp.Key);
-                            else if (Math.Abs(kvp.Value - minPressure) < tolerance)
-                                _outletPoreIds.Add(kvp.Key);
-                        }
-                        
-                        Logger.Log($"[PNMViewer] Identified {_inletPoreIds.Count} inlet and {_outletPoreIds.Count} outlet pores");
-                        Logger.Log($"[PNMViewer] Flow axis: {_flowAxis}, direction: {_flowDirection}");
-                    }
-                    
-                    CalculateLocalTortuosity();
-                    Logger.Log($"[PNMViewer] Loaded flow data with {_porePressures.Count} pore pressures");
-                }
-                else
-                {
-                    _hasFlowData = false;
-                    _showFlowVisualization = false; // Disable flow viz if no data
-                    while (_inletPoreIds.TryTake(out _)) { }
-                    while (_outletPoreIds.TryTake(out _)) { }
-                }
+                foreach (var kvp in flowData.ThroatFlowRates)
+                    _throatFlowRates.TryAdd(kvp.Key, kvp.Value);
             }
+            
+            _hasFlowData = true;
+            
+            // Capture flow axis information
+            if (results != null && !string.IsNullOrEmpty(results.FlowAxis))
+            {
+                _flowAxis = results.FlowAxis;
+                _flowDirection = _flowAxis switch
+                {
+                    "X" => new Vector3(1, 0, 0),
+                    "Y" => new Vector3(0, 1, 0),
+                    "Z" => new Vector3(0, 0, 1),
+                    _   => new Vector3(0, 0, 1)
+                };
+            }
+
+            // --- NEW: Identify inlet and outlet pores by GEOMETRY (match solver logic) ---
+            // Compute dataset bounds
+            if (_dataset != null && _dataset.Pores != null && _dataset.Pores.Count > 0)
+            {
+                float tol = 2.0f; // voxels, same as AbsolutePermeability boundary detection
+                float minX = _dataset.Pores.Min(p => p.Position.X);
+                float maxX = _dataset.Pores.Max(p => p.Position.X);
+                float minY = _dataset.Pores.Min(p => p.Position.Y);
+                float maxY = _dataset.Pores.Max(p => p.Position.Y);
+                float minZ = _dataset.Pores.Min(p => p.Position.Z);
+                float maxZ = _dataset.Pores.Max(p => p.Position.Z);
+
+                // Clear existing IDs
+                while (_inletPoreIds.TryTake(out _)) { }
+                while (_outletPoreIds.TryTake(out _)) { }
+
+                string axis = (_flowAxis ?? "Z").ToUpperInvariant();
+                foreach (var pore in _dataset.Pores)
+                {
+                    switch (axis)
+                    {
+                        case "X":
+                            if (pore.Position.X <= minX + tol) _inletPoreIds.Add(pore.ID);
+                            if (pore.Position.X >= maxX - tol) _outletPoreIds.Add(pore.ID);
+                            break;
+
+                        case "Y":
+                            if (pore.Position.Y <= minY + tol) _inletPoreIds.Add(pore.ID);
+                            if (pore.Position.Y >= maxY - tol) _outletPoreIds.Add(pore.ID);
+                            break;
+
+                        default: // "Z"
+                            if (pore.Position.Z <= minZ + tol) _inletPoreIds.Add(pore.ID);
+                            if (pore.Position.Z >= maxZ - tol) _outletPoreIds.Add(pore.ID);
+                            break;
+                    }
+                }
+
+                Logger.Log($"[PNMViewer] Identified {_inletPoreIds.Count} inlet and {_outletPoreIds.Count} outlet pores (geom.)");
+                Logger.Log($"[PNMViewer] Flow axis: {axis}, direction: {_flowDirection}");
+            }
+            // --- END NEW ---
+
+            CalculateLocalTortuosity();
+            Logger.Log($"[PNMViewer] Loaded flow data with {_porePressures.Count} pore pressures");
         }
+        else
+        {
+            _hasFlowData = false;
+            _showFlowVisualization = false; // Disable flow viz if no data
+            while (_inletPoreIds.TryTake(out _)) { }
+            while (_outletPoreIds.TryTake(out _)) { }
+        }
+    }
+}
+
 
         private void CalculateLocalTortuosity()
         {
