@@ -27,6 +27,7 @@ namespace GeoscientistToolkit.UI
         private readonly SystemInfoWindow _systemInfoWindow = new();
         private readonly SettingsWindow _settingsWindow = new();
         private readonly Volume3DDebugWindow _volume3DDebugWindow = new();
+        private readonly MaterialLibraryWindow _materialLibraryWindow = new();
 
         // File Dialogs - FIXED: Changed SaveFile dialog to correct type
         private readonly ImGuiFileDialog _loadProjectDialog = new("LoadProjectDlg", FileDialogType.OpenFile, "Load Project");
@@ -188,6 +189,8 @@ namespace GeoscientistToolkit.UI
             _volume3DDebugWindow.Submit();
             _projectMetadataEditor.Submit();
             _metadataTableViewer.Submit();
+            _materialLibraryWindow.Submit();
+
             
             ImGui.End();
         }
@@ -359,6 +362,11 @@ namespace GeoscientistToolkit.UI
                 ImGui.Separator();
                 if (ImGui.MenuItem("Settings...", "Ctrl+,")) _settingsWindow.Open();
                 ImGui.Separator();
+                ImGui.Separator();
+                if (ImGui.MenuItem("Material Library..."))
+                {
+                    _materialLibraryWindow.Open();
+                }
                 ImGui.MenuItem("Tools Panel", string.Empty, ref _showTools);
                 ImGui.EndMenu();
             }
