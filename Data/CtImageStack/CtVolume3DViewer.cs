@@ -42,6 +42,8 @@ namespace GeoscientistToolkit.Data.CtImageStack
     {
         // --- Renderer specifico per piattaforma ---
         private readonly MetalVolumeRenderer _metalRenderer;
+        
+        private Dictionary<byte, float> _materialOpacity = new Dictionary<byte, float>();
 
         // --- DATASET REFERENCES ---
         private readonly StreamingCtVolumeDataset _streamingDataset;
@@ -167,6 +169,12 @@ namespace GeoscientistToolkit.Data.CtImageStack
 
             Logger.Log($"[CtVolume3DViewer] Streaming dataset LOD dimensions: {_streamingDataset.BaseLod.Width}x{_streamingDataset.BaseLod.Height}x{_streamingDataset.BaseLod.Depth}");
             Logger.Log($"[CtVolume3DViewer] Editable dataset dimensions: {_editableDataset.Width}x{_editableDataset.Height}x{_editableDataset.Depth}");
+
+            // Initialize material opacities
+            foreach (var material in _editableDataset.Materials)
+            {
+                _materialOpacity[material.ID] = 1.0f;
+            }
 
             _controlPanel = new CtVolume3DControlPanel(this, _editableDataset);
             _screenshotDialog = new ImGuiExportFileDialog("ScreenshotDialog3D", "Save Screenshot");
@@ -763,7 +771,9 @@ void main() { out_Color = PlaneColor; }";
                     var material = _editableDataset.Materials.FirstOrDefault(m => m.ID == i);
                     if (material != null)
                     {
-                        paramData[i] = new Vector2(material.IsVisible ? 1.0f : 0.0f, 1.0f);
+                        // Get the opacity value from our dictionary, default to 1.0f if not set
+                        float opacity = GetMaterialOpacity((byte)i);
+                        paramData[i] = new Vector2(material.IsVisible ? 1.0f : 0.0f, opacity);
                         colorData[i] = new RgbaFloat(material.Color);
                     }
                     else
@@ -983,11 +993,28 @@ void main() { out_Color = PlaneColor; }";
 
         public void MarkLabelsAsDirty() => _labelsDirty = true;
         public bool GetMaterialVisibility(byte id) => _editableDataset.Materials.FirstOrDefault(m => m.ID == id)?.IsVisible ?? false;
-        public float GetMaterialOpacity(byte id) => 1.0f;
+        public float GetMaterialOpacity(byte id) 
+        {
+            if (_materialOpacity.TryGetValue(id, out float opacity))
+                return opacity;
+            return 1.0f;
+        }
         public void SetMaterialVisibility(byte id, bool visible) { var mat = _editableDataset.Materials.FirstOrDefault(m => m.ID == id); if (mat != null) { mat.IsVisible = visible; _materialParamsDirty = true; } }
-        public void SetMaterialOpacity(byte id, float opacity) { _materialParamsDirty = true; }
+        public void SetMaterialOpacity(byte id, float opacity) 
+        { 
+            _materialOpacity[id] = opacity;
+            _materialParamsDirty = true; 
+        }
         public void SetAllMaterialsVisibility(bool visible) { foreach (var mat in _editableDataset.Materials.Where(m => m.ID != 0)) mat.IsVisible = visible; _materialParamsDirty = true; }
-        public void ResetAllMaterialOpacities() { _materialParamsDirty = true; }
+        public void ResetAllMaterialOpacities() 
+        { 
+            _materialOpacity.Clear();
+            foreach (var mat in _editableDataset.Materials.Where(m => m.ID != 0))
+            {
+                _materialOpacity[mat.ID] = 1.0f;
+            }
+            _materialParamsDirty = true; 
+        }
 
         public void SaveScreenshot(string filePath)
         {

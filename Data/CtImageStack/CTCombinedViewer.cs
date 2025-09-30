@@ -354,6 +354,7 @@ namespace GeoscientistToolkit.Data.CtImageStack
         public void SetMaterialOpacity(byte id, float opacity)
         {
             _materialOpacity[id] = opacity;
+            // Make sure to pass the opacity value to the VolumeViewer
             VolumeViewer?.SetMaterialOpacity(id, opacity);
         }
 

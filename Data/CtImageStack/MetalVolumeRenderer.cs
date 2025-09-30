@@ -449,7 +449,9 @@ fragment float4 plane_fragment_main(constant float4& color [[buffer(0)]]) {
                 var material = _viewer._editableDataset.Materials.FirstOrDefault(m => m.ID == i);
                 if (material != null)
                 {
-                    paramData[i] = new Vector2(material.IsVisible ? 1.0f : 0.0f, 1.0f);
+                    // Get the opacity value from the viewer
+                    float opacity = _viewer.GetMaterialOpacity((byte)i);
+                    paramData[i] = new Vector2(material.IsVisible ? 1.0f : 0.0f, opacity);
                     colorData[i] = new RgbaFloat(material.Color);
                 }
                 else

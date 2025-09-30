@@ -161,7 +161,6 @@ namespace GeoscientistToolkit.Data.CtImageStack
                 SliceThickness = this.SliceThickness,
                 Unit = this.Unit,
                 BinningSize = this.BinningSize,
-                // Metadata will be handled by ProjectSerializer
             };
 
             if (this.Materials != null)
@@ -177,7 +176,8 @@ namespace GeoscientistToolkit.Data.CtImageStack
                         MaxValue = material.MaxValue,
                         IsVisible = material.IsVisible,
                         IsExterior = material.IsExterior,
-                        Density = material.Density
+                        Density = material.Density,
+                        PhysicalMaterialName = material.PhysicalMaterialName  // NEW
                     });
                 }
             }
@@ -216,7 +216,8 @@ namespace GeoscientistToolkit.Data.CtImageStack
                     MaxValue = m.MaxValue,
                     IsVisible = m.IsVisible,
                     IsExterior = m.IsExterior,
-                    Density = m.Density
+                    Density = m.Density,
+                    PhysicalMaterialName = m.PhysicalMaterialName  // NEW
                 }).ToList();
 
                 string jsonString = JsonSerializer.Serialize(dtos, options);
@@ -258,14 +259,14 @@ namespace GeoscientistToolkit.Data.CtImageStack
                 Materials.Clear();
                 foreach (var dto in dtos)
                 {
-                    // FIX: Ensure all properties are properly restored
                     var material = new Material(dto.ID, dto.Name, dto.Color)
                     {
                         MinValue = dto.MinValue,
                         MaxValue = dto.MaxValue,
                         IsVisible = dto.IsVisible,
                         IsExterior = dto.IsExterior,
-                        Density = dto.Density
+                        Density = dto.Density,
+                        PhysicalMaterialName = dto.PhysicalMaterialName  // NEW
                     };
                     Materials.Add(material);
                 }

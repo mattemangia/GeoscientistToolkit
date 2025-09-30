@@ -65,6 +65,8 @@ namespace GeoscientistToolkit.Data
         public bool IsExterior { get; set; }
         public double Density { get; set; }
         public bool IsVisible { get; set; }
+        
+        public string PhysicalMaterialName { get; set; }
     }
 
     // DTO for ImageDataset
