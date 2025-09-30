@@ -2145,5 +2145,7 @@ internal class ChunkedAcousticSimulator : IDisposable
         public string OffloadDirectory { get; set; }
         public float TimeStepSeconds { get; set; } = 1e-6f; // Default 1 microsecond
         
+        public bool UsePerVoxelMaterialProperties { get; set; } = false;
+        
     }
 }
