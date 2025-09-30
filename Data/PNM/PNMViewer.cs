@@ -1333,10 +1333,6 @@ void main()
             var drawList = ImGui.GetWindowDrawList();
             var pos = ImGui.GetCursorScreenPos();
             
-            // Flow axis
-            ImGui.Text($"Flow Axis: {_flowAxis}");
-            ImGui.Spacing();
-            
             if (_showInletPores)
             {
                 // Inlet indicator (red/high pressure)
