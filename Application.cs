@@ -40,8 +40,8 @@ namespace GeoscientistToolkit
             {
                 X = 50,
                 Y = 50,
-                WindowWidth = 1280,
-                WindowHeight = 720,
+                WindowWidth = 1700,
+                WindowHeight = 950,
                 WindowTitle = "GeoscientistToolkit"
             };
 

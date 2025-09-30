@@ -1,4 +1,4 @@
-// GeoscientistToolkit/UI/PNMViewer.cs - Thread-Safe Version
+// GeoscientistToolkit/UI/PNMViewer.cs - Fixed Flow Visualization Version
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
@@ -117,6 +117,12 @@ namespace GeoscientistToolkit.UI
         private float _poreSizeMultiplier = 1.0f;
         private bool _showPores = true;
         private bool _showThroats = true;
+        
+        // FLOW VISUALIZATION CONTROLS
+        private bool _showFlowVisualization = false;
+        private bool _showFlowPath = false;
+        private bool _showInletPores = true;
+        private bool _showOutletPores = true;
 
         // Flow visualization data - CHANGED TO THREAD-SAFE
         private readonly ConcurrentDictionary<int, float> _porePressures = new ConcurrentDictionary<int, float>();
@@ -141,6 +147,7 @@ namespace GeoscientistToolkit.UI
         private readonly string _statsWindowId = "##PNMStats";
         private readonly string _legendWindowId = "##PNMLegend";
         private readonly string _selectedWindowId = "##PNMSelected";
+        private readonly string _flowLegendWindowId = "##PNMFlowLegend";
         
         // Flow direction info
         private string _flowAxis = "Z";
@@ -240,6 +247,7 @@ namespace GeoscientistToolkit.UI
                 else
                 {
                     _hasFlowData = false;
+                    _showFlowVisualization = false; // Disable flow viz if no data
                     while (_inletPoreIds.TryTake(out _)) { }
                     while (_outletPoreIds.TryTake(out _)) { }
                 }
@@ -684,6 +692,39 @@ void main()
             ImGui.SameLine();
             ImGui.Checkbox("Throats", ref _showThroats);
             ImGui.SameLine();
+            
+            // Flow visualization controls
+            if (_hasFlowData)
+            {
+                ImGui.Separator();
+                ImGui.SameLine();
+                
+                if (ImGui.Checkbox("Flow Viz", ref _showFlowVisualization))
+                {
+                    if (_showFlowVisualization)
+                    {
+                        // Enable default flow viz options
+                        _showInletPores = true;
+                        _showOutletPores = true;
+                    }
+                    RebuildGeometryFromDataset();
+                }
+                
+                if (_showFlowVisualization)
+                {
+                    ImGui.SameLine();
+                    if (ImGui.Checkbox("Inlet", ref _showInletPores))
+                        RebuildGeometryFromDataset();
+                    ImGui.SameLine();
+                    if (ImGui.Checkbox("Outlet", ref _showOutletPores))
+                        RebuildGeometryFromDataset();
+                    ImGui.SameLine();
+                    if (ImGui.Checkbox("Path", ref _showFlowPath))
+                        RebuildGeometryFromDataset();
+                }
+                ImGui.SameLine();
+            }
+            
             ImGui.Separator();
             ImGui.SameLine();
             
@@ -876,16 +917,33 @@ void main()
             var poreInstances = new List<PoreInstanceData>();
             foreach (var p in _dataset.Pores)
             {
-                float colorValue = GetPoreColorValue(p);
+                // Skip pores based on flow visualization settings
+                bool isInlet = _inletPoreIds.Contains(p.ID);
+                bool isOutlet = _outletPoreIds.Contains(p.ID);
                 
-                // For inlet/outlet pores, increase the size slightly for visibility
-                float radiusMultiplier = 1.0f;
-                if (_hasFlowData)
+                if (_showFlowVisualization)
                 {
-                    if (_inletPoreIds.Contains(p.ID))
-                        radiusMultiplier = 1.3f; // Make inlet pores 30% larger
-                    else if (_outletPoreIds.Contains(p.ID))
-                        radiusMultiplier = 1.3f; // Make outlet pores 30% larger
+                    if (isInlet && !_showInletPores) continue;
+                    if (isOutlet && !_showOutletPores) continue;
+                }
+                
+                float colorValue = GetPoreColorValue(p);
+                float radiusMultiplier = 1.0f;
+                
+                // For flow visualization, use distinct colors and sizes for inlet/outlet
+                if (_showFlowVisualization && _hasFlowData && (isInlet || isOutlet))
+                {
+                    radiusMultiplier = 1.5f; // Make inlet/outlet 50% larger
+                    
+                    // Override color for inlet/outlet when flow viz is active
+                    if (isInlet)
+                    {
+                        colorValue = 1.0f; // Maximum value for red
+                    }
+                    else if (isOutlet)
+                    {
+                        colorValue = 0.0f; // Minimum value for blue
+                    }
                 }
                 
                 poreInstances.Add(new PoreInstanceData(p.Position, colorValue, p.Radius * radiusMultiplier));
@@ -911,7 +969,40 @@ void main()
             {
                 if (poreById.TryGetValue(t.Pore1ID, out var p1) && poreById.TryGetValue(t.Pore2ID, out var p2))
                 {
+                    // Check if this throat is in the flow path
+                    bool isFlowPath = false;
+                    if (_showFlowVisualization && _showFlowPath && _hasFlowData)
+                    {
+                        bool p1Inlet = _inletPoreIds.Contains(p1.ID);
+                        bool p2Inlet = _inletPoreIds.Contains(p2.ID);
+                        bool p1Outlet = _outletPoreIds.Contains(p1.ID);
+                        bool p2Outlet = _outletPoreIds.Contains(p2.ID);
+                        
+                        // Show throats connected to inlet/outlet when flow path is enabled
+                        if ((p1Inlet || p2Inlet) && (p1Outlet || p2Outlet))
+                        {
+                            isFlowPath = true;
+                        }
+                        
+                        // Also show high flow rate throats
+                        if (_throatFlowRates.TryGetValue(t.ID, out float flowRate) && flowRate > 0)
+                        {
+                            float maxFlow = _throatFlowRates.Values.Max();
+                            if (flowRate > maxFlow * 0.5f) // Show throats with >50% of max flow
+                            {
+                                isFlowPath = true;
+                            }
+                        }
+                    }
+                    
                     float colorValue = GetThroatColorValue(t, p1, p2);
+                    
+                    // Override color for flow path
+                    if (isFlowPath)
+                    {
+                        colorValue = 0.5f; // Middle value for yellow/green
+                    }
+                    
                     throatVertices.Add(new ThroatVertexData(p1.Position, colorValue));
                     throatVertices.Add(new ThroatVertexData(p2.Position, colorValue));
                 }
@@ -935,20 +1026,6 @@ void main()
 
         private float GetPoreColorValue(Pore p)
         {
-            // For flow visualization modes, use special colors for inlet/outlet
-            bool isInlet = _inletPoreIds.Contains(p.ID);
-            bool isOutlet = _outletPoreIds.Contains(p.ID);
-            
-            // When we have flow data, always make inlet/outlet distinctive
-            if (_hasFlowData && (isInlet || isOutlet))
-            {
-                // Use extreme values to map to red (inlet/high) and blue (outlet/low) in color ramp
-                if (isInlet)
-                    return float.MaxValue; // Will map to red end of spectrum
-                else if (isOutlet)
-                    return float.MinValue; // Will map to blue end of spectrum
-            }
-            
             switch (_colorByIndex)
             {
                 case 0: return p.Radius;
@@ -1025,52 +1102,62 @@ void main()
         {
             float minVal = 0, maxVal = 1;
             
-            switch (_colorByIndex)
+            // When flow visualization is active, adjust color range
+            if (_showFlowVisualization && _hasFlowData && (_showInletPores || _showOutletPores))
             {
-                case 0:
-                    minVal = _dataset.MinPoreRadius;
-                    maxVal = _dataset.MaxPoreRadius;
-                    break;
-                case 1:
-                    minVal = _dataset.Pores.Any() ? _dataset.Pores.Min(p => p.Connections) : 0;
-                    maxVal = _dataset.Pores.Any() ? _dataset.Pores.Max(p => p.Connections) : 1;
-                    break;
-                case 2:
-                    minVal = _dataset.Pores.Any() ? _dataset.Pores.Min(p => p.VolumePhysical) : 0;
-                    maxVal = _dataset.Pores.Any() ? _dataset.Pores.Max(p => p.VolumePhysical) : 1;
-                    break;
-                case 3:
-                    if (_porePressures.Any())
-                    {
-                        minVal = _porePressures.Values.Min();
-                        maxVal = _porePressures.Values.Max();
-                    }
-                    break;
-                case 4:
-                    if (_porePressures.Any())
-                    {
-                        float minDrop = float.MaxValue, maxDrop = 0;
-                        foreach (var throat in _dataset.Throats)
+                // Force full color range for inlet/outlet distinction
+                minVal = 0;
+                maxVal = 1;
+            }
+            else
+            {
+                switch (_colorByIndex)
+                {
+                    case 0:
+                        minVal = _dataset.MinPoreRadius;
+                        maxVal = _dataset.MaxPoreRadius;
+                        break;
+                    case 1:
+                        minVal = _dataset.Pores.Any() ? _dataset.Pores.Min(p => p.Connections) : 0;
+                        maxVal = _dataset.Pores.Any() ? _dataset.Pores.Max(p => p.Connections) : 1;
+                        break;
+                    case 2:
+                        minVal = _dataset.Pores.Any() ? _dataset.Pores.Min(p => p.VolumePhysical) : 0;
+                        maxVal = _dataset.Pores.Any() ? _dataset.Pores.Max(p => p.VolumePhysical) : 1;
+                        break;
+                    case 3:
+                        if (_porePressures.Any())
                         {
-                            if (_porePressures.TryGetValue(throat.Pore1ID, out float p1) &&
-                                _porePressures.TryGetValue(throat.Pore2ID, out float p2))
-                            {
-                                float drop = Math.Abs(p1 - p2);
-                                if (drop < minDrop) minDrop = drop;
-                                if (drop > maxDrop) maxDrop = drop;
-                            }
+                            minVal = _porePressures.Values.Min();
+                            maxVal = _porePressures.Values.Max();
                         }
-                        minVal = minDrop != float.MaxValue ? minDrop : 0;
-                        maxVal = maxDrop;
-                    }
-                    break;
-                case 5:
-                    if (_localTortuosity.Any())
-                    {
-                        minVal = _localTortuosity.Values.Min();
-                        maxVal = _localTortuosity.Values.Max();
-                    }
-                    break;
+                        break;
+                    case 4:
+                        if (_porePressures.Any())
+                        {
+                            float minDrop = float.MaxValue, maxDrop = 0;
+                            foreach (var throat in _dataset.Throats)
+                            {
+                                if (_porePressures.TryGetValue(throat.Pore1ID, out float p1) &&
+                                    _porePressures.TryGetValue(throat.Pore2ID, out float p2))
+                                {
+                                    float drop = Math.Abs(p1 - p2);
+                                    if (drop < minDrop) minDrop = drop;
+                                    if (drop > maxDrop) maxDrop = drop;
+                                }
+                            }
+                            minVal = minDrop != float.MaxValue ? minDrop : 0;
+                            maxVal = maxDrop;
+                        }
+                        break;
+                    case 5:
+                        if (_localTortuosity.Any())
+                        {
+                            minVal = _localTortuosity.Values.Min();
+                            maxVal = _localTortuosity.Values.Max();
+                        }
+                        break;
+                }
             }
             
             if (Math.Abs(maxVal - minVal) < 0.001f) maxVal = minVal + 1.0f;
@@ -1158,97 +1245,9 @@ void main()
             _projMatrix = Matrix4x4.CreatePerspectiveFieldOfView(MathF.PI / 4f, aspectRatio, 0.01f, 1000f);
         }
 
-        private void DrawFlowDirectionIndicator(Vector2 viewPos, Vector2 viewSize)
-        {
-            // Flow direction indicator in top-left corner
-            ImGui.SetNextWindowPos(new Vector2(viewPos.X + 10, viewPos.Y + 300), ImGuiCond.Always);
-            ImGui.SetNextWindowSize(new Vector2(200, 150), ImGuiCond.Always);
-            ImGui.SetNextWindowBgAlpha(0.85f);
-            
-            ImGui.Begin("##FlowIndicator",
-                ImGuiWindowFlags.NoTitleBar | ImGuiWindowFlags.NoResize | ImGuiWindowFlags.NoMove |
-                ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoCollapse | ImGuiWindowFlags.NoSavedSettings);
-            
-            ImGui.Text("Flow Direction");
-            ImGui.Separator();
-            
-            // Draw flow axis and direction
-            ImGui.Text($"Axis: {_flowAxis}-axis");
-            
-            // Calculate inlet/outlet average positions for arrow direction
-            Vector3 inletCenter = Vector3.Zero;
-            Vector3 outletCenter = Vector3.Zero;
-            int inletCount = 0;
-            int outletCount = 0;
-            
-            foreach (var pore in _dataset.Pores)
-            {
-                if (_inletPoreIds.Contains(pore.ID))
-                {
-                    inletCenter += pore.Position;
-                    inletCount++;
-                }
-                else if (_outletPoreIds.Contains(pore.ID))
-                {
-                    outletCenter += pore.Position;
-                    outletCount++;
-                }
-            }
-            
-            if (inletCount > 0) inletCenter /= inletCount;
-            if (outletCount > 0) outletCenter /= outletCount;
-            
-            // Draw inlet/outlet legend
-            var drawList = ImGui.GetWindowDrawList();
-            var pos = ImGui.GetCursorScreenPos();
-            
-            // Inlet indicator (red/high pressure)
-            drawList.AddCircleFilled(new Vector2(pos.X + 10, pos.Y + 5), 6, ImGui.GetColorU32(new Vector4(1.0f, 0.2f, 0.2f, 1.0f)));
-            ImGui.SetCursorScreenPos(new Vector2(pos.X + 20, pos.Y));
-            ImGui.Text($"Inlet ({_inletPoreIds.Count} pores)");
-            ImGui.SetCursorScreenPos(new Vector2(pos.X + 20, pos.Y + 15));
-            ImGui.TextColored(new Vector4(0.7f, 0.7f, 0.7f, 1.0f), "High pressure");
-            
-            // Outlet indicator (blue/low pressure)
-            pos.Y += 40;
-            drawList.AddCircleFilled(new Vector2(pos.X + 10, pos.Y + 5), 6, ImGui.GetColorU32(new Vector4(0.2f, 0.2f, 1.0f, 1.0f)));
-            ImGui.SetCursorScreenPos(new Vector2(pos.X + 20, pos.Y));
-            ImGui.Text($"Outlet ({_outletPoreIds.Count} pores)");
-            ImGui.SetCursorScreenPos(new Vector2(pos.X + 20, pos.Y + 15));
-            ImGui.TextColored(new Vector4(0.7f, 0.7f, 0.7f, 1.0f), "Low pressure");
-            
-            // Draw flow direction arrow
-            pos.Y += 40;
-            Vector2 arrowStart = new Vector2(pos.X + 30, pos.Y + 10);
-            Vector2 arrowEnd = new Vector2(pos.X + 150, pos.Y + 10);
-            
-            // Arrow shaft
-            drawList.AddLine(arrowStart, arrowEnd, ImGui.GetColorU32(new Vector4(0.8f, 0.8f, 0.2f, 1.0f)), 3);
-            
-            // Arrow head
-            Vector2 arrowDir = Vector2.Normalize(arrowEnd - arrowStart);
-            Vector2 arrowPerp = new Vector2(-arrowDir.Y, arrowDir.X);
-            Vector2 arrowTip = arrowEnd;
-            Vector2 arrowLeft = arrowEnd - arrowDir * 15 + arrowPerp * 8;
-            Vector2 arrowRight = arrowEnd - arrowDir * 15 - arrowPerp * 8;
-            
-            drawList.AddTriangleFilled(arrowTip, arrowLeft, arrowRight, ImGui.GetColorU32(new Vector4(0.8f, 0.8f, 0.2f, 1.0f)));
-            
-            ImGui.SetCursorScreenPos(new Vector2(pos.X + 60, pos.Y + 20));
-            ImGui.TextColored(new Vector4(0.8f, 0.8f, 0.2f, 1.0f), "Flow Direction");
-            
-            ImGui.End();
-        }
-
         private void DrawOverlayWindows(Vector2 viewPos, Vector2 viewSize)
         {
-            // Flow Direction Indicator (if flow data available)
-            if (_hasFlowData && (_inletPoreIds.Count > 0 || _outletPoreIds.Count > 0))
-            {
-                DrawFlowDirectionIndicator(viewPos, viewSize);
-            }
-
-            // Legend Window
+            // Legend Window - Top Right
             ImGui.SetNextWindowPos(new Vector2(viewPos.X + viewSize.X - 200, viewPos.Y + 10), ImGuiCond.Always);
             ImGui.SetNextWindowSize(new Vector2(180, 280), ImGuiCond.Always);
             ImGui.SetNextWindowBgAlpha(0.8f);
@@ -1258,7 +1257,21 @@ void main()
             DrawLegendContent();
             ImGui.End();
 
-            // Statistics Window
+            // Flow Legend - Bottom Right (if flow viz is active)
+            if (_showFlowVisualization && _hasFlowData)
+            {
+                ImGui.SetNextWindowPos(new Vector2(viewPos.X + viewSize.X - 220, viewPos.Y + viewSize.Y - 150), ImGuiCond.Always);
+                ImGui.SetNextWindowSize(new Vector2(200, 140), ImGuiCond.Always);
+                ImGui.SetNextWindowBgAlpha(0.85f);
+                
+                ImGui.Begin(_flowLegendWindowId,
+                    ImGuiWindowFlags.NoTitleBar | ImGuiWindowFlags.NoResize | ImGuiWindowFlags.NoMove |
+                    ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoCollapse | ImGuiWindowFlags.NoSavedSettings);
+                DrawFlowLegend();
+                ImGui.End();
+            }
+
+            // Statistics Window - Bottom Left
             ImGui.SetNextWindowPos(new Vector2(viewPos.X + 10, viewPos.Y + viewSize.Y - 180), ImGuiCond.Always);
             ImGui.SetNextWindowSize(new Vector2(400, 170), ImGuiCond.Always);
             ImGui.SetNextWindowBgAlpha(0.8f);
@@ -1268,7 +1281,7 @@ void main()
             DrawStatisticsContent();
             ImGui.End();
 
-            // Selected Pore Window
+            // Selected Pore Window - Top Left
             if (_selectedPoreId >= 0)
             {
                 _selectedPore = FindPoreById(_selectedPoreId);
@@ -1291,128 +1304,161 @@ void main()
             }
         }
 
+        private void DrawFlowLegend()
+        {
+            ImGui.Text("Flow Visualization");
+            ImGui.Separator();
+            
+            var drawList = ImGui.GetWindowDrawList();
+            var pos = ImGui.GetCursorScreenPos();
+            
+            // Flow axis
+            ImGui.Text($"Flow Axis: {_flowAxis}");
+            ImGui.Spacing();
+            
+            if (_showInletPores)
+            {
+                // Inlet indicator (red/high pressure)
+                drawList.AddCircleFilled(new Vector2(pos.X + 10, pos.Y + 8), 7, ImGui.GetColorU32(new Vector4(1.0f, 0.2f, 0.2f, 1.0f)));
+                ImGui.SetCursorScreenPos(new Vector2(pos.X + 25, pos.Y + 2));
+                ImGui.Text($"Inlet: {_inletPoreIds.Count} pores");
+                ImGui.SetCursorScreenPos(new Vector2(pos.X + 25, pos.Y + 18));
+                ImGui.TextColored(new Vector4(0.7f, 0.7f, 0.7f, 1.0f), "High pressure");
+                pos.Y += 40;
+            }
+            
+            if (_showOutletPores)
+            {
+                // Outlet indicator (blue/low pressure)
+                drawList.AddCircleFilled(new Vector2(pos.X + 10, pos.Y + 8), 7, ImGui.GetColorU32(new Vector4(0.2f, 0.2f, 1.0f, 1.0f)));
+                ImGui.SetCursorScreenPos(new Vector2(pos.X + 25, pos.Y + 2));
+                ImGui.Text($"Outlet: {_outletPoreIds.Count} pores");
+                ImGui.SetCursorScreenPos(new Vector2(pos.X + 25, pos.Y + 18));
+                ImGui.TextColored(new Vector4(0.7f, 0.7f, 0.7f, 1.0f), "Low pressure");
+                pos.Y += 40;
+            }
+            
+            if (_showFlowPath)
+            {
+                // Flow path indicator (green)
+                drawList.AddLine(new Vector2(pos.X + 5, pos.Y + 8), new Vector2(pos.X + 15, pos.Y + 8), 
+                    ImGui.GetColorU32(new Vector4(0.2f, 1.0f, 0.2f, 1.0f)), 3);
+                ImGui.SetCursorScreenPos(new Vector2(pos.X + 25, pos.Y + 2));
+                ImGui.Text("High flow paths");
+            }
+        }
+
         private void DrawLegendContent()
-{
-    string title = _colorByIndex < _colorByOptions.Length ? _colorByOptions[_colorByIndex] : "Unknown";
-    ImGui.Text(title);
-    ImGui.Separator();
-    
-    // Show inlet/outlet color coding when flow data is available
-    if (_hasFlowData && (_inletPoreIds.Count > 0 || _outletPoreIds.Count > 0))
-    {
-        ImGui.TextColored(new Vector4(1, 0.8f, 0.2f, 1), "Flow Visualization Active");
-        
-        // Inlet indicator
-        var flowDrawList = ImGui.GetWindowDrawList();
-        var flowPos = ImGui.GetCursorScreenPos();
-        flowDrawList.AddCircleFilled(new Vector2(flowPos.X + 8, flowPos.Y + 8), 5, ImGui.GetColorU32(new Vector4(1.0f, 0.2f, 0.2f, 1.0f)));
-        ImGui.SetCursorScreenPos(new Vector2(flowPos.X + 20, flowPos.Y + 2));
-        ImGui.Text($"Inlet: {_inletPoreIds.Count} pores");
-        
-        // Outlet indicator
-        ImGui.SetCursorScreenPos(new Vector2(flowPos.X, flowPos.Y + 20));
-        flowPos.Y += 20;
-        flowDrawList.AddCircleFilled(new Vector2(flowPos.X + 8, flowPos.Y + 8), 5, ImGui.GetColorU32(new Vector4(0.2f, 0.2f, 1.0f, 1.0f)));
-        ImGui.SetCursorScreenPos(new Vector2(flowPos.X + 20, flowPos.Y + 2));
-        ImGui.Text($"Outlet: {_outletPoreIds.Count} pores");
-        
-        ImGui.SetCursorScreenPos(new Vector2(flowPos.X, flowPos.Y + 20));
-        ImGui.Separator();
-    }
+        {
+            string title = _colorByIndex < _colorByOptions.Length ? _colorByOptions[_colorByIndex] : "Unknown";
+            ImGui.Text(title);
+            ImGui.Separator();
 
-    float minVal = 0, maxVal = 1;
-    string unit = "";
-    
-    switch (_colorByIndex)
-    {
-        case 0:
-            minVal = _dataset.MinPoreRadius * _dataset.VoxelSize;
-            maxVal = _dataset.MaxPoreRadius * _dataset.VoxelSize;
-            unit = " μm";
-            break;
-        case 1:
-            minVal = _dataset.Pores.Any() ? _dataset.Pores.Min(p => p.Connections) : 0;
-            maxVal = _dataset.Pores.Any() ? _dataset.Pores.Max(p => p.Connections) : 1;
-            unit = "";
-            break;
-        case 2:
-            minVal = _dataset.Pores.Any() ? _dataset.Pores.Min(p => p.VolumePhysical) : 0;
-            maxVal = _dataset.Pores.Any() ? _dataset.Pores.Max(p => p.VolumePhysical) : 1;
-            unit = " μm³";
-            break;
-        case 3:
-            if (_porePressures.Any())
+            float minVal = 0, maxVal = 1;
+            string unit = "";
+            
+            // Adjust display based on flow visualization state
+            if (_showFlowVisualization && _hasFlowData && (_showInletPores || _showOutletPores))
             {
-                minVal = _porePressures.Values.Min();
-                maxVal = _porePressures.Values.Max();
-                unit = " Pa";
+                // When showing flow viz, use fixed color mapping
+                minVal = 0;
+                maxVal = 1;
+                unit = " (Flow)";
             }
-            break;
-        case 4:
-            if (_throatFlowRates.Any())
+            else
             {
-                float minDrop = float.MaxValue, maxDrop = 0;
-                foreach (var throat in _dataset.Throats)
+                switch (_colorByIndex)
                 {
-                    if (_porePressures.TryGetValue(throat.Pore1ID, out float p1) &&
-                        _porePressures.TryGetValue(throat.Pore2ID, out float p2))
-                    {
-                        float drop = Math.Abs(p1 - p2);
-                        minDrop = Math.Min(minDrop, drop);
-                        maxDrop = Math.Max(maxDrop, drop);
-                    }
+                    case 0:
+                        minVal = _dataset.MinPoreRadius * _dataset.VoxelSize;
+                        maxVal = _dataset.MaxPoreRadius * _dataset.VoxelSize;
+                        unit = " μm";
+                        break;
+                    case 1:
+                        minVal = _dataset.Pores.Any() ? _dataset.Pores.Min(p => p.Connections) : 0;
+                        maxVal = _dataset.Pores.Any() ? _dataset.Pores.Max(p => p.Connections) : 1;
+                        unit = "";
+                        break;
+                    case 2:
+                        minVal = _dataset.Pores.Any() ? _dataset.Pores.Min(p => p.VolumePhysical) : 0;
+                        maxVal = _dataset.Pores.Any() ? _dataset.Pores.Max(p => p.VolumePhysical) : 1;
+                        unit = " μm³";
+                        break;
+                    case 3:
+                        if (_porePressures.Any())
+                        {
+                            minVal = _porePressures.Values.Min();
+                            maxVal = _porePressures.Values.Max();
+                            unit = " Pa";
+                        }
+                        break;
+                    case 4:
+                        if (_throatFlowRates.Any())
+                        {
+                            float minDrop = float.MaxValue, maxDrop = 0;
+                            foreach (var throat in _dataset.Throats)
+                            {
+                                if (_porePressures.TryGetValue(throat.Pore1ID, out float p1) &&
+                                    _porePressures.TryGetValue(throat.Pore2ID, out float p2))
+                                {
+                                    float drop = Math.Abs(p1 - p2);
+                                    minDrop = Math.Min(minDrop, drop);
+                                    maxDrop = Math.Max(maxDrop, drop);
+                                }
+                            }
+                            minVal = minDrop != float.MaxValue ? minDrop : 0;
+                            maxVal = maxDrop;
+                            unit = " Pa";
+                        }
+                        break;
+                    case 5:
+                        if (_localTortuosity.Any())
+                        {
+                            minVal = _localTortuosity.Values.Min();
+                            maxVal = _localTortuosity.Values.Max();
+                            unit = "";
+                        }
+                        break;
                 }
-                minVal = minDrop != float.MaxValue ? minDrop : 0;
-                maxVal = maxDrop;
-                unit = " Pa";
             }
-            break;
-        case 5:
-            if (_localTortuosity.Any())
+
+            var drawList = ImGui.GetWindowDrawList();
+            var pos = ImGui.GetCursorScreenPos();
+            float width = 30;
+            float height = 180;
+            
+            int steps = 20;
+            for (int i = 0; i < steps; i++)
             {
-                minVal = _localTortuosity.Values.Min();
-                maxVal = _localTortuosity.Values.Max();
-                unit = "";
+                float t1 = (float)(steps - i - 1) / steps;
+                float t2 = (float)(steps - i) / steps;
+                
+                var c1 = GetColorForMode(t1);
+                var c2 = GetColorForMode(t2);
+                
+                drawList.AddRectFilledMultiColor(
+                    new Vector2(pos.X, pos.Y + i * height / steps),
+                    new Vector2(pos.X + width, pos.Y + (i + 1) * height / steps),
+                    ImGui.GetColorU32(c1), ImGui.GetColorU32(c1),
+                    ImGui.GetColorU32(c2), ImGui.GetColorU32(c2));
             }
-            break;
-    }
 
-    var drawList = ImGui.GetWindowDrawList();
-    var pos = ImGui.GetCursorScreenPos();
-    float width = 30;
-    float height = 180;
-    
-    int steps = 20;
-    for (int i = 0; i < steps; i++)
-    {
-        float t1 = (float)(steps - i - 1) / steps;
-        float t2 = (float)(steps - i) / steps;
-        
-        var c1 = GetColorForMode(t1);
-        var c2 = GetColorForMode(t2);
-        
-        drawList.AddRectFilledMultiColor(
-            new Vector2(pos.X, pos.Y + i * height / steps),
-            new Vector2(pos.X + width, pos.Y + (i + 1) * height / steps),
-            ImGui.GetColorU32(c1), ImGui.GetColorU32(c1),
-            ImGui.GetColorU32(c2), ImGui.GetColorU32(c2));
-    }
+            ImGui.SetCursorScreenPos(new Vector2(pos.X + width + 5, pos.Y));
+            ImGui.Text($"{maxVal:F2}{unit}");
+            
+            ImGui.SetCursorScreenPos(new Vector2(pos.X + width + 5, pos.Y + height / 2 - ImGui.GetTextLineHeight()/2));
+            ImGui.Text($"{(minVal + maxVal)/2:F2}{unit}");
+            
+            ImGui.SetCursorScreenPos(new Vector2(pos.X + width + 5, pos.Y + height - ImGui.GetTextLineHeight()));
+            ImGui.Text($"{minVal:F2}{unit}");
 
-    ImGui.SetCursorScreenPos(new Vector2(pos.X + width + 5, pos.Y));
-    ImGui.Text($"{maxVal:F2}{unit}");
-    
-    ImGui.SetCursorScreenPos(new Vector2(pos.X + width + 5, pos.Y + height / 2 - ImGui.GetTextLineHeight()/2));
-    ImGui.Text($"{(minVal + maxVal)/2:F2}{unit}");
-    
-    ImGui.SetCursorScreenPos(new Vector2(pos.X + width + 5, pos.Y + height - ImGui.GetTextLineHeight()));
-    ImGui.Text($"{minVal:F2}{unit}");
+            if (_colorByIndex >= 3 && _colorByIndex <= 5 && !_hasFlowData)
+            {
+                ImGui.Spacing();
+                ImGui.TextWrapped("Run permeability calculation to enable flow visualization");
+            }
+        }
 
-    if (_colorByIndex >= 3 && _colorByIndex <= 5 && !_hasFlowData)
-    {
-        ImGui.Spacing();
-        ImGui.TextWrapped("Run permeability calculation to enable flow visualization");
-    }
-}
         private Vector4 GetColorForMode(float t)
         {
             if (_colorByIndex == 3 || _colorByIndex == 4)
@@ -1609,7 +1655,7 @@ void main()
             }
             else
             {
-                ImGui.TextColored(new Vector4(0.2f, 1.0f, 0.2f, 1.0f), "✓ Screenshot saved!");
+                ImGui.TextColored(new Vector4(0.2f, 1.0f, 0.2f, 1.0f), "✔ Screenshot saved!");
                 ImGui.Text(Path.GetFileName(_lastScreenshotPath));
             }
             
