@@ -1,4 +1,4 @@
-// GeoscientistToolkit/UI/PNMTools.cs - FIXED VERSION
+// GeoscientistToolkit/UI/PNMTools.cs - Production Version with Confining Pressure
 using GeoscientistToolkit.Data;
 using GeoscientistToolkit.Data.Pnm;
 using GeoscientistToolkit.UI.Interfaces;
@@ -36,6 +36,13 @@ namespace GeoscientistToolkit.UI
         private float _inletPressure = 2.0f; // Pa (default 2 Pa)
         private float _outletPressure = 0.0f; // Pa (default 0 Pa)
         private int _pressureUnitIndex = 0; // 0=Pa, 1=kPa, 2=bar, 3=psi
+        
+        // Confining pressure parameters
+        private bool _useConfiningPressure = false;
+        private float _confiningPressure = 5.0f; // MPa (typical reservoir pressure)
+        private float _poreCompressibility = 0.015f; // 1/MPa (typical sandstone)
+        private float _throatCompressibility = 0.025f; // 1/MPa (throats more compressible)
+        private int _rockTypeIndex = 0; // For preset compressibility values
 
         private readonly string[] _pressureUnits = { "Pa", "kPa", "bar", "psi" };
         private readonly float[] _pressureConversions = { 1.0f, 1000.0f, 100000.0f, 6894.76f };
@@ -58,6 +65,25 @@ namespace GeoscientistToolkit.UI
             5.0f,    // Light oil
             100.0f,  // Heavy oil
             1.0f     // Custom default
+        };
+        
+        // Rock type presets for compressibility
+        private readonly string[] _rockTypes = {
+            "Sandstone (High Porosity)",
+            "Sandstone (Low Porosity)",
+            "Limestone",
+            "Shale",
+            "Granite",
+            "Custom"
+        };
+        
+        private readonly (float pore, float throat)[] _rockCompressibilities = {
+            (0.015f, 0.025f), // High porosity sandstone
+            (0.008f, 0.015f), // Low porosity sandstone
+            (0.005f, 0.010f), // Limestone
+            (0.020f, 0.035f), // Shale
+            (0.002f, 0.004f), // Granite
+            (0.015f, 0.025f)  // Custom default
         };
 
         // Store last results for display
@@ -272,6 +298,83 @@ namespace GeoscientistToolkit.UI
             ImGui.Separator();
             ImGui.Spacing();
 
+            // Confining Pressure Section
+            ImGui.Text("Confining Pressure (Stress Effects):");
+            
+            ImGui.Checkbox("Apply Confining Pressure", ref _useConfiningPressure);
+            ImGui.SameLine();
+            ImGui.TextDisabled("(?)");
+            if (ImGui.IsItemHovered())
+            {
+                ImGui.SetTooltip("Confining pressure simulates reservoir conditions.\n" +
+                                "Increases in pressure reduce pore/throat radii,\n" +
+                                "decreasing permeability.\n\n" +
+                                "Typical values:\n" +
+                                "Shallow reservoir: 5-15 MPa\n" +
+                                "Deep reservoir: 20-50 MPa\n" +
+                                "Ultra-deep: >50 MPa");
+            }
+
+            if (_useConfiningPressure)
+            {
+                ImGui.Indent();
+                
+                // Confining pressure value
+                ImGui.SetNextItemWidth(150);
+                ImGui.InputFloat("Confining Pressure (MPa)", ref _confiningPressure, 0.5f, 5.0f, "%.1f");
+                _confiningPressure = Math.Clamp(_confiningPressure, 0.0f, 200.0f);
+                
+                // Rock type selector for compressibility presets
+                ImGui.SetNextItemWidth(250);
+                if (ImGui.Combo("Rock Type", ref _rockTypeIndex, _rockTypes, _rockTypes.Length))
+                {
+                    if (_rockTypeIndex < _rockCompressibilities.Length - 1) // Not custom
+                    {
+                        _poreCompressibility = _rockCompressibilities[_rockTypeIndex].pore;
+                        _throatCompressibility = _rockCompressibilities[_rockTypeIndex].throat;
+                    }
+                }
+                
+                // Compressibility values
+                if (_rockTypeIndex == _rockTypes.Length - 1) // Custom
+                {
+                    ImGui.SetNextItemWidth(150);
+                    ImGui.InputFloat("Pore Compressibility (1/MPa)", ref _poreCompressibility, 0.001f, 0.01f, "%.4f");
+                    _poreCompressibility = Math.Clamp(_poreCompressibility, 0.001f, 0.1f);
+                    
+                    ImGui.SetNextItemWidth(150);
+                    ImGui.InputFloat("Throat Compressibility (1/MPa)", ref _throatCompressibility, 0.001f, 0.01f, "%.4f");
+                    _throatCompressibility = Math.Clamp(_throatCompressibility, 0.001f, 0.15f);
+                }
+                else
+                {
+                    ImGui.Text($"Pore Compressibility: {_poreCompressibility:F4} 1/MPa");
+                    ImGui.Text($"Throat Compressibility: {_throatCompressibility:F4} 1/MPa");
+                }
+                
+                // Estimate permeability reduction
+                if (_confiningPressure > 0)
+                {
+                    float poreReduction = 1.0f - MathF.Exp(-_poreCompressibility * _confiningPressure);
+                    float throatReduction = 1.0f - MathF.Exp(-_throatCompressibility * _confiningPressure);
+                    
+                    // Since K ∝ r^4, the permeability reduction is approximately
+                    float permReduction = MathF.Pow(1 - throatReduction, 4);
+                    
+                    ImGui.Spacing();
+                    ImGui.TextColored(new Vector4(1, 1, 0, 1), "Expected Effects:");
+                    ImGui.Text($"  Pore radius reduction: ~{poreReduction:P1}");
+                    ImGui.Text($"  Throat radius reduction: ~{throatReduction:P1}");
+                    ImGui.Text($"  Permeability reduction: ~{1-permReduction:P1}");
+                }
+                
+                ImGui.Unindent();
+            }
+
+            ImGui.Spacing();
+            ImGui.Separator();
+            ImGui.Spacing();
+
             // Flow direction
             ImGui.Text("Flow Configuration:");
             string[] axes = { "X-axis", "Y-axis", "Z-axis" };
@@ -360,7 +463,14 @@ namespace GeoscientistToolkit.UI
                         CalculateNavierStokes = _calcNavierStokes,
                         CalculateLatticeBoltzmann = _calcLatticeBoltzmann,
                         InletPressure = _inletPressure,
-                        OutletPressure = _outletPressure
+                        OutletPressure = _outletPressure,
+                        
+                        // Confining pressure parameters
+                        UseConfiningPressure = _useConfiningPressure,
+                        ConfiningPressure = _confiningPressure,
+                        PoreCompressibility = _poreCompressibility,
+                        ThroatCompressibility = _throatCompressibility,
+                        CriticalPressure = 100.0f // Could make this configurable
                     };
                     StartCalculation(options);
                 }
@@ -377,14 +487,13 @@ namespace GeoscientistToolkit.UI
             
             ImGui.PushStyleColor(ImGuiCol.ChildBg, new Vector4(0.1f, 0.1f, 0.15f, 0.5f));
             
-            // FIXED: Increased height from 250 to 400 pixels for better visibility
-            ImGui.BeginChild("PermeabilityResults", new Vector2(-1, 400), ImGuiChildFlags.Border, 
+            ImGui.BeginChild("PermeabilityResults", new Vector2(-1, 450), ImGuiChildFlags.Border, 
                             ImGuiWindowFlags.HorizontalScrollbar);
             
             ImGui.Text("Permeability Results");
             ImGui.Separator();
             
-            // Parameters table - adjusted row height with spacing
+            // Parameters table
             if (ImGui.BeginTable("ParamsTable", 2, ImGuiTableFlags.BordersInner | ImGuiTableFlags.RowBg | ImGuiTableFlags.PadOuterX))
             {
                 ImGui.TableSetupColumn("Parameter", ImGuiTableColumnFlags.WidthFixed, 180);
@@ -392,7 +501,7 @@ namespace GeoscientistToolkit.UI
                 
                 ImGui.TableHeadersRow();
                 
-                // Flow parameters with better spacing
+                // Flow parameters
                 ImGui.TableNextRow();
                 ImGui.TableSetColumnIndex(0); 
                 ImGui.Text("Flow Axis:");
@@ -435,6 +544,34 @@ namespace GeoscientistToolkit.UI
                 ImGui.TableSetColumnIndex(1); 
                 ImGui.Text($"{results?.Tortuosity ?? pnm.Tortuosity:F4}");
                 
+                // Confining pressure info if applicable
+                if (results?.AppliedConfiningPressure > 0)
+                {
+                    ImGui.TableNextRow();
+                    ImGui.TableSetColumnIndex(0);
+                    ImGui.TextColored(new Vector4(1, 0.8f, 0, 1), "Confining Pressure:");
+                    ImGui.TableSetColumnIndex(1);
+                    ImGui.TextColored(new Vector4(1, 0.8f, 0, 1), $"{results.AppliedConfiningPressure:F1} MPa");
+                    
+                    ImGui.TableNextRow();
+                    ImGui.TableSetColumnIndex(0);
+                    ImGui.Text("Pore Reduction:");
+                    ImGui.TableSetColumnIndex(1);
+                    ImGui.Text($"{results.EffectivePoreReduction:F1}%");
+                    
+                    ImGui.TableNextRow();
+                    ImGui.TableSetColumnIndex(0);
+                    ImGui.Text("Throat Reduction:");
+                    ImGui.TableSetColumnIndex(1);
+                    ImGui.Text($"{results.EffectiveThroatReduction:F1}%");
+                    
+                    ImGui.TableNextRow();
+                    ImGui.TableSetColumnIndex(0);
+                    ImGui.Text("Closed Throats:");
+                    ImGui.TableSetColumnIndex(1);
+                    ImGui.Text($"{results.ClosedThroats:N0}");
+                }
+                
                 ImGui.EndTable();
             }
             
@@ -444,7 +581,7 @@ namespace GeoscientistToolkit.UI
             ImGui.Text("Permeability Values:");
             ImGui.Spacing();
             
-            // Permeability results table with better visibility
+            // Permeability results table
             if (ImGui.BeginTable("PermTable", 4, ImGuiTableFlags.BordersInner | ImGuiTableFlags.RowBg | 
                                 ImGuiTableFlags.ScrollX | ImGuiTableFlags.PadOuterX))
             {
@@ -635,6 +772,15 @@ namespace GeoscientistToolkit.UI
                     writer.WriteLine($"Pore Count,{results.PoreCount},");
                     writer.WriteLine($"Throat Count,{results.ThroatCount},");
                     writer.WriteLine($"Tortuosity,{results.Tortuosity:F4},");
+                    
+                    if (results.AppliedConfiningPressure > 0)
+                    {
+                        writer.WriteLine($"Confining Pressure,{results.AppliedConfiningPressure:F1},MPa");
+                        writer.WriteLine($"Pore Reduction,{results.EffectivePoreReduction:F1},%");
+                        writer.WriteLine($"Throat Reduction,{results.EffectiveThroatReduction:F1},%");
+                        writer.WriteLine($"Closed Throats,{results.ClosedThroats},");
+                    }
+                    
                     writer.WriteLine();
                     
                     writer.WriteLine("Permeability Results");
@@ -683,6 +829,18 @@ namespace GeoscientistToolkit.UI
                     writer.WriteLine($"  Pressure Drop:        {results.UsedPressureDrop:F3} Pa");
                     writer.WriteLine($"  Fluid Viscosity:      {results.UsedViscosity:F3} cP");
                     writer.WriteLine($"  Total Flow Rate:      {results.TotalFlowRate:E3} m³/s");
+                    
+                    if (results.AppliedConfiningPressure > 0)
+                    {
+                        writer.WriteLine();
+                        writer.WriteLine("CONFINING PRESSURE EFFECTS");
+                        writer.WriteLine("--------------------------");
+                        writer.WriteLine($"  Applied Pressure:     {results.AppliedConfiningPressure:F1} MPa");
+                        writer.WriteLine($"  Pore Reduction:       {results.EffectivePoreReduction:F1}%");
+                        writer.WriteLine($"  Throat Reduction:     {results.EffectiveThroatReduction:F1}%");
+                        writer.WriteLine($"  Closed Throats:       {results.ClosedThroats:N0}");
+                    }
+                    
                     writer.WriteLine();
                     writer.WriteLine("PERMEABILITY RESULTS");
                     writer.WriteLine("--------------------");
@@ -723,6 +881,9 @@ namespace GeoscientistToolkit.UI
             {
                 try
                 {
+                    if (options.UseConfiningPressure)
+                        _calculationStatus = "Applying confining pressure effects...";
+                    
                     if (options.CalculateDarcy)
                         _calculationStatus = "Calculating Darcy permeability...";
                     

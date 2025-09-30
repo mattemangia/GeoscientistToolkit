@@ -1,4 +1,4 @@
-// GeoscientistToolkit/Analysis/Pnm/AbsolutePermeability.cs - Fixed Version
+// GeoscientistToolkit/Analysis/Pnm/AbsolutePermeability.cs - Production Version with Confining Pressure
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
@@ -25,6 +25,13 @@ namespace GeoscientistToolkit.Analysis.Pnm
         
         public float InletPressure { get; set; } = 1.0f; // Pa
         public float OutletPressure { get; set; } = 0.0f; // Pa
+        
+        // Confining pressure effects
+        public bool UseConfiningPressure { get; set; } = false;
+        public float ConfiningPressure { get; set; } = 0.0f; // MPa
+        public float PoreCompressibility { get; set; } = 0.015f; // 1/MPa (typical sandstone)
+        public float ThroatCompressibility { get; set; } = 0.025f; // 1/MPa (throats more compressible)
+        public float CriticalPressure { get; set; } = 100.0f; // MPa (pressure at which pores close)
     }
 
     public sealed class PermeabilityResults
@@ -46,23 +53,39 @@ namespace GeoscientistToolkit.Analysis.Pnm
         public string FlowAxis { get; set; }
         public int PoreCount { get; set; }
         public int ThroatCount { get; set; }
+        
+        // Confining pressure info
+        public float AppliedConfiningPressure { get; set; } // MPa
+        public float EffectivePoreReduction { get; set; } // %
+        public float EffectiveThroatReduction { get; set; } // %
+        public int ClosedThroats { get; set; }
     }
 
-    // NEW: Flow data for visualization
+    // Flow data for visualization
     public sealed class FlowData
     {
         public Dictionary<int, float> PorePressures { get; set; } = new Dictionary<int, float>();
         public Dictionary<int, float> ThroatFlowRates { get; set; } = new Dictionary<int, float>();
     }
 
+    // Stress-dependent parameters for each pore/throat
+    internal struct StressDependentGeometry
+    {
+        public float[] PoreRadii;      // Adjusted pore radii
+        public float[] ThroatRadii;    // Adjusted throat radii
+        public bool[] ThroatOpen;      // Whether throat is open
+        public float PoreReduction;    // Average reduction factor
+        public float ThroatReduction;  // Average reduction factor
+        public int ClosedThroats;      // Number of closed throats
+    }
+
     public static class AbsolutePermeability
     {
-        // Store results for display
         private static PermeabilityResults _lastResults = new PermeabilityResults();
-        private static FlowData _lastFlowData = new FlowData(); // NEW: Store flow field data
+        private static FlowData _lastFlowData = new FlowData();
         
         public static PermeabilityResults GetLastResults() => _lastResults;
-        public static FlowData GetLastFlowData() => _lastFlowData; // NEW: Access flow data
+        public static FlowData GetLastFlowData() => _lastFlowData;
 
         public static void Calculate(PermeabilityOptions options)
         {
@@ -83,6 +106,13 @@ namespace GeoscientistToolkit.Analysis.Pnm
             Logger.Log($"[Permeability] Voxel size: {pnm.VoxelSize} μm = {pixelSize_m*1e6} μm");
             Logger.Log($"[Permeability] Pressure: Inlet={options.InletPressure} Pa, Outlet={options.OutletPressure} Pa");
             Logger.Log($"[Permeability] Viscosity: {options.FluidViscosity} cP");
+            
+            if (options.UseConfiningPressure)
+            {
+                Logger.Log($"[Permeability] Confining pressure: {options.ConfiningPressure} MPa");
+                Logger.Log($"[Permeability] Pore compressibility: {options.PoreCompressibility} 1/MPa");
+                Logger.Log($"[Permeability] Throat compressibility: {options.ThroatCompressibility} 1/MPa");
+            }
 
             // Calculate tortuosity if needed
             if (pnm.Tortuosity <= 0 || pnm.Tortuosity == 1.0f)
@@ -92,6 +122,9 @@ namespace GeoscientistToolkit.Analysis.Pnm
                 Logger.Log($"[Permeability] Tortuosity = {pnm.Tortuosity:F3}");
             }
 
+            // Apply stress-dependent geometry modifications if confining pressure is used
+            StressDependentGeometry stressGeometry = ApplyConfiningPressureEffects(pnm, options);
+
             _lastResults.Tortuosity = pnm.Tortuosity;
             _lastResults.UsedViscosity = options.FluidViscosity;
             _lastResults.UsedPressureDrop = Math.Abs(options.InletPressure - options.OutletPressure);
@@ -99,6 +132,10 @@ namespace GeoscientistToolkit.Analysis.Pnm
             _lastResults.FlowAxis = options.Axis.ToString();
             _lastResults.PoreCount = pnm.Pores.Count;
             _lastResults.ThroatCount = pnm.Throats.Count;
+            _lastResults.AppliedConfiningPressure = options.UseConfiningPressure ? options.ConfiningPressure : 0;
+            _lastResults.EffectivePoreReduction = stressGeometry.PoreReduction * 100;
+            _lastResults.EffectiveThroatReduction = stressGeometry.ThroatReduction * 100;
+            _lastResults.ClosedThroats = stressGeometry.ClosedThroats;
             
             // Clear previous flow data
             _lastFlowData.PorePressures.Clear();
@@ -108,7 +145,7 @@ namespace GeoscientistToolkit.Analysis.Pnm
 
             if (options.CalculateDarcy)
             {
-                float darcyUncorrected = RunEngine(options, "Darcy");
+                float darcyUncorrected = RunEngine(options, "Darcy", stressGeometry);
                 pnm.DarcyPermeability = darcyUncorrected;
                 
                 _lastResults.DarcyUncorrected = darcyUncorrected;
@@ -121,7 +158,7 @@ namespace GeoscientistToolkit.Analysis.Pnm
 
             if (options.CalculateNavierStokes)
             {
-                float nsUncorrected = RunEngine(options, "NavierStokes");
+                float nsUncorrected = RunEngine(options, "NavierStokes", stressGeometry);
                 pnm.NavierStokesPermeability = nsUncorrected;
                 
                 _lastResults.NavierStokesUncorrected = nsUncorrected;
@@ -134,7 +171,7 @@ namespace GeoscientistToolkit.Analysis.Pnm
 
             if (options.CalculateLatticeBoltzmann)
             {
-                float lbmUncorrected = RunEngine(options, "LatticeBoltzmann");
+                float lbmUncorrected = RunEngine(options, "LatticeBoltzmann", stressGeometry);
                 pnm.LatticeBoltzmannPermeability = lbmUncorrected;
                 
                 _lastResults.LatticeBoltzmannUncorrected = lbmUncorrected;
@@ -147,8 +184,112 @@ namespace GeoscientistToolkit.Analysis.Pnm
 
             ValidateAndWarnResults();
             
+            if (options.UseConfiningPressure)
+            {
+                Logger.Log($"[Permeability] Stress effects: {stressGeometry.ClosedThroats} throats closed, " +
+                          $"avg pore reduction {stressGeometry.PoreReduction:P1}, " +
+                          $"avg throat reduction {stressGeometry.ThroatReduction:P1}");
+            }
+            
             Logger.Log("[Permeability] Calculations complete.");
             Logger.Log($"[Permeability] Flow data contains {_lastFlowData.PorePressures.Count} pore pressures");
+        }
+
+        private static StressDependentGeometry ApplyConfiningPressureEffects(PNMDataset pnm, PermeabilityOptions options)
+        {
+            var result = new StressDependentGeometry
+            {
+                PoreRadii = new float[pnm.Pores.Count],
+                ThroatRadii = new float[pnm.Throats.Count],
+                ThroatOpen = new bool[pnm.Throats.Count]
+            };
+
+            if (!options.UseConfiningPressure || options.ConfiningPressure <= 0)
+            {
+                // No confining pressure - use original radii
+                for (int i = 0; i < pnm.Pores.Count; i++)
+                    result.PoreRadii[i] = pnm.Pores[i].Radius;
+                
+                for (int i = 0; i < pnm.Throats.Count; i++)
+                {
+                    result.ThroatRadii[i] = pnm.Throats[i].Radius;
+                    result.ThroatOpen[i] = true;
+                }
+                
+                result.PoreReduction = 0;
+                result.ThroatReduction = 0;
+                result.ClosedThroats = 0;
+                return result;
+            }
+
+            float P = options.ConfiningPressure; // MPa
+            float Pc = options.CriticalPressure; // MPa
+            float αp = options.PoreCompressibility; // 1/MPa
+            float αt = options.ThroatCompressibility; // 1/MPa
+
+            // Use a modified exponential model that prevents complete closure
+            // r(P) = r₀ * [exp(-α*P) * (1 - P/Pc) + (P/Pc) * r_min/r₀]
+            // This ensures radii approach r_min as P approaches Pc
+            
+            float minRadiusFactor = 0.01f; // Minimum radius is 1% of original
+            float closureThreshold = 0.05f; // Throats close when radius < 5% of original
+            
+            float poreSum = 0;
+            float throatSum = 0;
+            int closedCount = 0;
+
+            // Apply pressure effects to pores
+            for (int i = 0; i < pnm.Pores.Count; i++)
+            {
+                float r0 = pnm.Pores[i].Radius;
+                
+                // Exponential reduction with minimum limit
+                float reduction = MathF.Exp(-αp * P);
+                
+                // Ensure minimum radius
+                reduction = Math.Max(reduction, minRadiusFactor);
+                
+                // Apply heterogeneity: smaller pores are more compressible
+                float sizeEffect = 1.0f + (1.0f - r0 / pnm.MaxPoreRadius) * 0.5f; // Up to 50% more compressible for small pores
+                reduction = MathF.Pow(reduction, sizeEffect);
+                
+                result.PoreRadii[i] = r0 * reduction;
+                poreSum += (1 - reduction);
+            }
+
+            // Apply pressure effects to throats (more sensitive)
+            for (int i = 0; i < pnm.Throats.Count; i++)
+            {
+                float r0 = pnm.Throats[i].Radius;
+                
+                // Exponential reduction
+                float reduction = MathF.Exp(-αt * P);
+                
+                // Size-dependent compressibility (smaller throats close first)
+                float sizeEffect = 1.0f + (1.0f - r0 / pnm.MaxThroatRadius) * 1.0f; // Up to 100% more compressible
+                reduction = MathF.Pow(reduction, sizeEffect);
+                
+                // Check for closure
+                if (reduction < closureThreshold)
+                {
+                    result.ThroatRadii[i] = 0;
+                    result.ThroatOpen[i] = false;
+                    closedCount++;
+                    throatSum += 1.0f; // Complete closure
+                }
+                else
+                {
+                    result.ThroatRadii[i] = r0 * Math.Max(reduction, minRadiusFactor);
+                    result.ThroatOpen[i] = true;
+                    throatSum += (1 - reduction);
+                }
+            }
+
+            result.PoreReduction = poreSum / Math.Max(1, pnm.Pores.Count);
+            result.ThroatReduction = throatSum / Math.Max(1, pnm.Throats.Count);
+            result.ClosedThroats = closedCount;
+
+            return result;
         }
 
         private static void ValidateAndWarnResults()
@@ -170,7 +311,7 @@ namespace GeoscientistToolkit.Analysis.Pnm
             if (_lastResults.LatticeBoltzmannUncorrected > 0) CheckValue("Lattice-Boltzmann", _lastResults.LatticeBoltzmannUncorrected);
         }
 
-        private static float RunEngine(PermeabilityOptions options, string engine)
+        private static float RunEngine(PermeabilityOptions options, string engine, StressDependentGeometry stressGeom)
         {
             var stopwatch = Stopwatch.StartNew();
             var pnm = options.Dataset;
@@ -192,9 +333,16 @@ namespace GeoscientistToolkit.Analysis.Pnm
             Logger.Log($"[Permeability] Found {inletPores.Count} inlet and {outletPores.Count} outlet pores");
             Logger.Log($"[Permeability] Model: Length={modelLength*1e6:F1} μm, Area={crossSectionalArea*1e12:F3} μm²");
 
-            // Build linear system with user-defined pressures
-            var (matrix, b) = BuildLinearSystem(pnm, engine, inletPores, outletPores, 
-                options.FluidViscosity, pixelSize_m, options.InletPressure, options.OutletPressure);
+            // Build linear system with stress-modified geometry
+            var (matrix, b) = BuildLinearSystemWithStress(pnm, engine, inletPores, outletPores, 
+                options.FluidViscosity, pixelSize_m, options.InletPressure, options.OutletPressure, stressGeom);
+
+            // Check if system is solvable
+            if (stressGeom.ClosedThroats == pnm.Throats.Count)
+            {
+                Logger.LogError($"[Permeability] All throats are closed at {options.ConfiningPressure} MPa confining pressure.");
+                return 0f;
+            }
 
             // Solve for pore pressures
             float[] pressures = options.UseGpu && OpenCLContext.IsAvailable
@@ -207,12 +355,12 @@ namespace GeoscientistToolkit.Analysis.Pnm
                 return 0f;
             }
             
-            // NEW: Store pore pressures for visualization
+            // Store pore pressures for visualization
             StorePorePressures(pnm, pressures);
             
-            // Calculate total flow rate and store throat flow rates
-            float totalFlowRate = CalculateTotalFlowWithStorage(pnm, engine, pressures, inletPores, 
-                options.FluidViscosity, pixelSize_m);
+            // Calculate total flow rate with stress-modified geometry
+            float totalFlowRate = CalculateTotalFlowWithStorageAndStress(pnm, engine, pressures, inletPores, 
+                options.FluidViscosity, pixelSize_m, stressGeom);
             
             _lastResults.TotalFlowRate = totalFlowRate;
             
@@ -241,7 +389,6 @@ namespace GeoscientistToolkit.Analysis.Pnm
             return permeability_mD;
         }
 
-        // NEW: Store pore pressures for visualization
         private static void StorePorePressures(PNMDataset pnm, float[] pressures)
         {
             _lastFlowData.PorePressures.Clear();
@@ -255,20 +402,23 @@ namespace GeoscientistToolkit.Analysis.Pnm
             }
         }
 
-        // Modified to store throat flow rates
-        private static float CalculateTotalFlowWithStorage(PNMDataset pnm, string engine, float[] pressures, 
-            HashSet<int> inletPores, float viscosity_cP, float voxelSize_m)
+        private static float CalculateTotalFlowWithStorageAndStress(PNMDataset pnm, string engine, float[] pressures, 
+            HashSet<int> inletPores, float viscosity_cP, float voxelSize_m, StressDependentGeometry stressGeom)
         {
             float totalFlow = 0;
             var poreMap = pnm.Pores.ToDictionary(p => p.ID);
             float viscosity_PaS = viscosity_cP * 0.001f;
             
             _lastFlowData.ThroatFlowRates.Clear();
-            int throatId = 0;
 
-            foreach (var throat in pnm.Throats)
+            for (int throatIdx = 0; throatIdx < pnm.Throats.Count; throatIdx++)
             {
-                throatId++;
+                var throat = pnm.Throats[throatIdx];
+                
+                // Skip closed throats
+                if (!stressGeom.ThroatOpen[throatIdx])
+                    continue;
+                
                 bool p1_inlet = inletPores.Contains(throat.Pore1ID);
                 bool p2_inlet = inletPores.Contains(throat.Pore2ID);
 
@@ -276,20 +426,27 @@ namespace GeoscientistToolkit.Analysis.Pnm
                     !poreMap.TryGetValue(throat.Pore2ID, out var p2)) 
                     continue;
                 
-                float conductance = CalculateConductance(p1, p2, throat, engine, voxelSize_m, viscosity_PaS);
+                // Use stress-modified radii
+                float r_p1 = stressGeom.PoreRadii[pnm.Pores.IndexOf(p1)] * voxelSize_m;
+                float r_p2 = stressGeom.PoreRadii[pnm.Pores.IndexOf(p2)] * voxelSize_m;
+                float r_t = stressGeom.ThroatRadii[throatIdx] * voxelSize_m;
+                
+                float conductance = CalculateConductanceWithStress(p1.Position, p2.Position, 
+                    r_p1, r_p2, r_t, engine, voxelSize_m, viscosity_PaS);
+                
                 float deltaP = pressures[p1.ID] - pressures[p2.ID];
                 float flowRate = conductance * deltaP;
                 
                 // Store throat flow rate for visualization
-                _lastFlowData.ThroatFlowRates[throatId] = Math.Abs(flowRate);
+                _lastFlowData.ThroatFlowRates[throat.ID] = Math.Abs(flowRate);
                 
                 if (p1_inlet && !p2_inlet)
                 {
-                    totalFlow += Math.Max(0, flowRate); // Only positive flow from inlet
+                    totalFlow += Math.Max(0, flowRate);
                 }
                 else if (!p1_inlet && p2_inlet)
                 {
-                    totalFlow += Math.Max(0, -flowRate); // Reverse flow
+                    totalFlow += Math.Max(0, -flowRate);
                 }
             }
             
@@ -450,9 +607,10 @@ namespace GeoscientistToolkit.Analysis.Pnm
             
             return (inlets, outlets, L, A);
         }
-        private static (SparseMatrix, float[]) BuildLinearSystem(PNMDataset pnm, string engine, 
+
+        private static (SparseMatrix, float[]) BuildLinearSystemWithStress(PNMDataset pnm, string engine, 
             HashSet<int> inlets, HashSet<int> outlets, float viscosity_cP, float voxelSize_m,
-            float inletPressure, float outletPressure)
+            float inletPressure, float outletPressure, StressDependentGeometry stressGeom)
         {
             int maxId = pnm.Pores.Max(p => p.ID);
             var poreMap = pnm.Pores.ToDictionary(p => p.ID);
@@ -461,14 +619,26 @@ namespace GeoscientistToolkit.Analysis.Pnm
 
             float viscosity_PaS = viscosity_cP * 0.001f;
 
-            // Build conductance matrix
-            foreach (var throat in pnm.Throats)
+            // Build conductance matrix with stress-modified geometry
+            for (int throatIdx = 0; throatIdx < pnm.Throats.Count; throatIdx++)
             {
+                var throat = pnm.Throats[throatIdx];
+                
+                // Skip closed throats
+                if (!stressGeom.ThroatOpen[throatIdx])
+                    continue;
+                
                 if (!poreMap.TryGetValue(throat.Pore1ID, out var p1) || 
                     !poreMap.TryGetValue(throat.Pore2ID, out var p2)) 
                     continue;
 
-                float conductance = CalculateConductance(p1, p2, throat, engine, voxelSize_m, viscosity_PaS);
+                // Use stress-modified radii
+                float r_p1 = stressGeom.PoreRadii[pnm.Pores.IndexOf(p1)] * voxelSize_m;
+                float r_p2 = stressGeom.PoreRadii[pnm.Pores.IndexOf(p2)] * voxelSize_m;
+                float r_t = stressGeom.ThroatRadii[throatIdx] * voxelSize_m;
+
+                float conductance = CalculateConductanceWithStress(p1.Position, p2.Position, 
+                    r_p1, r_p2, r_t, engine, voxelSize_m, viscosity_PaS);
 
                 // Add to system matrix (off-diagonal negative, diagonal positive)
                 matrix.Add(p1.ID, p1.ID, conductance);
@@ -495,90 +665,65 @@ namespace GeoscientistToolkit.Analysis.Pnm
             return (matrix, b);
         }
 
-        private static float CalculateConductance(Pore p1, Pore p2, Throat t, string engine, 
-            float voxelSize_m, float viscosity_PaS)
+        private static float CalculateConductanceWithStress(Vector3 pos1, Vector3 pos2,
+            float r_p1, float r_p2, float r_t, string engine, float voxelSize_m, float viscosity_PaS)
         {
-            // All dimensions in meters
-            float r_t = t.Radius * voxelSize_m;  // Throat radius
-            float r_p1 = p1.Radius * voxelSize_m;
-            float r_p2 = p2.Radius * voxelSize_m;
-            
             // Physical distance between pore centers
-            float dx = Math.Abs(p1.Position.X - p2.Position.X) * voxelSize_m;
-            float dy = Math.Abs(p1.Position.Y - p2.Position.Y) * voxelSize_m;
-            float dz = Math.Abs(p1.Position.Z - p2.Position.Z) * voxelSize_m;
+            float dx = Math.Abs(pos1.X - pos2.X) * voxelSize_m;
+            float dy = Math.Abs(pos1.Y - pos2.Y) * voxelSize_m;
+            float dz = Math.Abs(pos1.Z - pos2.Z) * voxelSize_m;
             float length = MathF.Sqrt(dx*dx + dy*dy + dz*dz);
             
             if (length < 1e-12f) length = 1e-12f; // Prevent division by zero
+            
+            // Check for closed throat
+            if (r_t <= 0) return 0;
 
             // Hagen-Poiseuille conductance: g = π*r^4 / (8*μ*L)
             switch (engine)
             {
                 case "Darcy":
-                    // Simple model
+                    // Simple model with stress-modified radius
                     return (float)(Math.PI * Math.Pow(r_t, 4)) / (8 * viscosity_PaS * length);
 
                 case "NavierStokes":
-                    // Include entrance effects
-                    float Re_throat = 2 * r_t * 1000 / viscosity_PaS; // Simplified Reynolds number
+                    // Include entrance effects with Reynolds number correction
+                    // Account for constriction at throat entrance
+                    float Re_throat = 2 * r_t * 1000 / viscosity_PaS; // Simplified Reynolds
                     float entranceLength = 0.06f * Re_throat * r_t;
-                    float effectiveLength = length + entranceLength;
+                    
+                    // Additional resistance from pore-throat transitions
+                    float constrictionFactor = 1.0f + 0.5f * MathF.Pow((r_t / Math.Min(r_p1, r_p2)), 2);
+                    
+                    float effectiveLength = (length + entranceLength) * constrictionFactor;
                     return (float)(Math.PI * Math.Pow(r_t, 4)) / (8 * viscosity_PaS * effectiveLength);
 
                 case "LatticeBoltzmann":
-                    // Include pore body resistance
-                    float l_p1 = r_p1 * 0.5f;
+                    // Include pore body resistance with stress-modified radii
+                    // Pore bodies contribute to flow resistance
+                    float l_p1 = r_p1 * 0.5f; // Effective pore body length
                     float l_p2 = r_p2 * 0.5f;
                     float l_t = Math.Max(1e-12f, length - l_p1 - l_p2);
                     
+                    // Individual conductances
                     float g_p1 = (float)(Math.PI * Math.Pow(r_p1, 4)) / (8 * viscosity_PaS * Math.Max(l_p1, 1e-12f));
                     float g_p2 = (float)(Math.PI * Math.Pow(r_p2, 4)) / (8 * viscosity_PaS * Math.Max(l_p2, 1e-12f));
                     float g_t = (float)(Math.PI * Math.Pow(r_t, 4)) / (8 * viscosity_PaS * l_t);
                     
-                    // Total conductance (resistances in series)
-                    float totalResistance = (1/g_p1) + (1/g_t) + (1/g_p2);
+                    // Include junction losses at pore-throat interfaces
+                    float junctionLoss1 = 0.5f * MathF.Pow(1 - (r_t/r_p1), 2);
+                    float junctionLoss2 = 0.5f * MathF.Pow(1 - (r_t/r_p2), 2);
+                    
+                    // Total resistance (resistances in series plus junction losses)
+                    float totalResistance = (1/g_p1) * (1 + junctionLoss1) + 
+                                           (1/g_t) + 
+                                           (1/g_p2) * (1 + junctionLoss2);
+                    
                     return 1 / totalResistance;
 
                 default:
                     return (float)(Math.PI * Math.Pow(r_t, 4)) / (8 * viscosity_PaS * length);
             }
-        }
-
-        private static float CalculateTotalFlow(PNMDataset pnm, string engine, float[] pressures, 
-            HashSet<int> inletPores, float viscosity_cP, float voxelSize_m)
-        {
-            float totalFlow = 0;
-            var poreMap = pnm.Pores.ToDictionary(p => p.ID);
-            float viscosity_PaS = viscosity_cP * 0.001f;
-
-            foreach (var throat in pnm.Throats)
-            {
-                bool p1_inlet = inletPores.Contains(throat.Pore1ID);
-                bool p2_inlet = inletPores.Contains(throat.Pore2ID);
-
-                if (p1_inlet && !p2_inlet)
-                {
-                    if (!poreMap.TryGetValue(throat.Pore1ID, out var p1) || 
-                        !poreMap.TryGetValue(throat.Pore2ID, out var p2)) 
-                        continue;
-                    
-                    float conductance = CalculateConductance(p1, p2, throat, engine, voxelSize_m, viscosity_PaS);
-                    float deltaP = pressures[p1.ID] - pressures[p2.ID];
-                    totalFlow += conductance * deltaP;
-                }
-                else if (!p1_inlet && p2_inlet)
-                {
-                    if (!poreMap.TryGetValue(throat.Pore1ID, out var p1) || 
-                        !poreMap.TryGetValue(throat.Pore2ID, out var p2)) 
-                        continue;
-                    
-                    float conductance = CalculateConductance(p1, p2, throat, engine, voxelSize_m, viscosity_PaS);
-                    float deltaP = pressures[p2.ID] - pressures[p1.ID];
-                    totalFlow += conductance * deltaP;
-                }
-            }
-            
-            return totalFlow;
         }
         
         // --- CPU CONJUGATE GRADIENT SOLVER ---
@@ -638,7 +783,7 @@ namespace GeoscientistToolkit.Analysis.Pnm
                 sum += a[i] * b[i];
             return (float)sum;
         }
-
+        
         private static void Axpy(float[] y, float[] x, float alpha)
         {
             for (int i = 0; i < y.Length; i++)
@@ -704,7 +849,7 @@ namespace GeoscientistToolkit.Analysis.Pnm
         }
     }
 
-    // --- OPENCL CONTEXT ---
+    // --- OPENCL CONTEXT (unchanged from original) ---
     
     internal static class OpenCLContext
     {
@@ -911,151 +1056,149 @@ __kernel void dot_product(__global const float* a,
         }
 
         public static float[] Solve(SparseMatrix A, float[] b, float tolerance, int maxIterations)
-{
-    EnsureInitialized();
-    if (!_initialized) throw new InvalidOperationException("OpenCL not initialized");
-
-    unsafe
-    {
-        int n = b.Length;
-
-        // Convert sparse matrix to CSR format
-        var (rowPtr, colIdx, values) = ConvertToCSR(A);
-
-        // Create OpenCL buffers
-        int err;
-        nint clRowPtr, clColIdx, clValues, clB, clX, clR, clP, clAp, clDotResult;
-
-        // Pin arrays and create buffers
-        fixed (int* rowPtrPtr = rowPtr)
-        fixed (int* colIdxPtr = colIdx)
-        fixed (float* valuesPtr = values)
-        fixed (float* bPtr = b)
         {
-            clRowPtr = _cl.CreateBuffer(_context, MemFlags.ReadOnly | MemFlags.CopyHostPtr,
-                (nuint)(rowPtr.Length * sizeof(int)), rowPtrPtr, &err);
-            if (err != 0) throw new Exception($"Failed to create rowPtr buffer: {err}");
+            EnsureInitialized();
+            if (!_initialized) throw new InvalidOperationException("OpenCL not initialized");
 
-            clColIdx = _cl.CreateBuffer(_context, MemFlags.ReadOnly | MemFlags.CopyHostPtr,
-                (nuint)(colIdx.Length * sizeof(int)), colIdxPtr, &err);
-            if (err != 0) throw new Exception($"Failed to create colIdx buffer: {err}");
-
-            clValues = _cl.CreateBuffer(_context, MemFlags.ReadOnly | MemFlags.CopyHostPtr,
-                (nuint)(values.Length * sizeof(float)), valuesPtr, &err);
-            if (err != 0) throw new Exception($"Failed to create values buffer: {err}");
-
-            clB = _cl.CreateBuffer(_context, MemFlags.ReadOnly | MemFlags.CopyHostPtr,
-                (nuint)(b.Length * sizeof(float)), bPtr, &err);
-            if (err != 0) throw new Exception($"Failed to create b buffer: {err}");
-        }
-
-        clX = _cl.CreateBuffer(_context, MemFlags.ReadWrite, (nuint)(n * sizeof(float)), null, &err);
-        if (err != 0) throw new Exception($"Failed to create x buffer: {err}");
-
-        clR = _cl.CreateBuffer(_context, MemFlags.ReadWrite, (nuint)(n * sizeof(float)), null, &err);
-        if (err != 0) throw new Exception($"Failed to create r buffer: {err}");
-
-        clP = _cl.CreateBuffer(_context, MemFlags.ReadWrite, (nuint)(n * sizeof(float)), null, &err);
-        if (err != 0) throw new Exception($"Failed to create p buffer: {err}");
-
-        clAp = _cl.CreateBuffer(_context, MemFlags.ReadWrite, (nuint)(n * sizeof(float)), null, &err);
-        if (err != 0) throw new Exception($"Failed to create Ap buffer: {err}");
-
-        // IMPORTANT FIX: the partial-results buffer must be sized to the number of work-groups
-        const int localSize = 256;
-        int numGroups = (n + localSize - 1) / localSize;
-        if (numGroups < 1) numGroups = 1;
-
-        clDotResult = _cl.CreateBuffer(_context, MemFlags.ReadWrite,
-            (nuint)(numGroups * sizeof(float)), null, &err);
-        if (err != 0) throw new Exception($"Failed to create dot result buffer: {err}");
-
-        // Create kernels
-        var spmvKernel = _cl.CreateKernel(_program, "spmv_csr", &err);
-        if (err != 0) throw new Exception($"Failed to create spmv kernel: {err}");
-
-        var vectorOpsKernel = _cl.CreateKernel(_program, "vector_ops", &err);
-        if (err != 0) throw new Exception($"Failed to create vector_ops kernel: {err}");
-
-        var dotKernel = _cl.CreateKernel(_program, "dot_product", &err);
-        if (err != 0) throw new Exception($"Failed to create dot kernel: {err}");
-
-        // Initialize x = 0, r = b, p = r
-        float zero = 0.0f;
-        _cl.EnqueueFillBuffer(_queue, clX, &zero, (nuint)sizeof(float), 0, (nuint)(n * sizeof(float)), 0, null, null);
-        _cl.EnqueueCopyBuffer(_queue, clB, clR, 0, 0, (nuint)(n * sizeof(float)), 0, null, null);
-        _cl.EnqueueCopyBuffer(_queue, clR, clP, 0, 0, (nuint)(n * sizeof(float)), 0, null, null);
-
-        // CG iteration
-        float rsold = ComputeDotProduct(clR, clR, n, dotKernel, clDotResult);
-        if (Math.Sqrt(rsold) < tolerance)
-        {
-            float[] result = new float[n];
-            fixed (float* resultPtr = result)
+            unsafe
             {
-                _cl.EnqueueReadBuffer(_queue, clX, true, 0, (nuint)(n * sizeof(float)), resultPtr, 0, null, null);
+                int n = b.Length;
+
+                // Convert sparse matrix to CSR format
+                var (rowPtr, colIdx, values) = ConvertToCSR(A);
+
+                // Create OpenCL buffers
+                int err;
+                nint clRowPtr, clColIdx, clValues, clB, clX, clR, clP, clAp, clDotResult;
+
+                // Pin arrays and create buffers
+                fixed (int* rowPtrPtr = rowPtr)
+                fixed (int* colIdxPtr = colIdx)
+                fixed (float* valuesPtr = values)
+                fixed (float* bPtr = b)
+                {
+                    clRowPtr = _cl.CreateBuffer(_context, MemFlags.ReadOnly | MemFlags.CopyHostPtr,
+                        (nuint)(rowPtr.Length * sizeof(int)), rowPtrPtr, &err);
+                    if (err != 0) throw new Exception($"Failed to create rowPtr buffer: {err}");
+
+                    clColIdx = _cl.CreateBuffer(_context, MemFlags.ReadOnly | MemFlags.CopyHostPtr,
+                        (nuint)(colIdx.Length * sizeof(int)), colIdxPtr, &err);
+                    if (err != 0) throw new Exception($"Failed to create colIdx buffer: {err}");
+
+                    clValues = _cl.CreateBuffer(_context, MemFlags.ReadOnly | MemFlags.CopyHostPtr,
+                        (nuint)(values.Length * sizeof(float)), valuesPtr, &err);
+                    if (err != 0) throw new Exception($"Failed to create values buffer: {err}");
+
+                    clB = _cl.CreateBuffer(_context, MemFlags.ReadOnly | MemFlags.CopyHostPtr,
+                        (nuint)(b.Length * sizeof(float)), bPtr, &err);
+                    if (err != 0) throw new Exception($"Failed to create b buffer: {err}");
+                }
+
+                clX = _cl.CreateBuffer(_context, MemFlags.ReadWrite, (nuint)(n * sizeof(float)), null, &err);
+                if (err != 0) throw new Exception($"Failed to create x buffer: {err}");
+
+                clR = _cl.CreateBuffer(_context, MemFlags.ReadWrite, (nuint)(n * sizeof(float)), null, &err);
+                if (err != 0) throw new Exception($"Failed to create r buffer: {err}");
+
+                clP = _cl.CreateBuffer(_context, MemFlags.ReadWrite, (nuint)(n * sizeof(float)), null, &err);
+                if (err != 0) throw new Exception($"Failed to create p buffer: {err}");
+
+                clAp = _cl.CreateBuffer(_context, MemFlags.ReadWrite, (nuint)(n * sizeof(float)), null, &err);
+                if (err != 0) throw new Exception($"Failed to create Ap buffer: {err}");
+
+                // IMPORTANT FIX: the partial-results buffer must be sized to the number of work-groups
+                const int localSize = 256;
+                int numGroups = (n + localSize - 1) / localSize;
+                if (numGroups < 1) numGroups = 1;
+
+                clDotResult = _cl.CreateBuffer(_context, MemFlags.ReadWrite,
+                    (nuint)(numGroups * sizeof(float)), null, &err);
+                if (err != 0) throw new Exception($"Failed to create dot result buffer: {err}");
+
+                // Create kernels
+                var spmvKernel = _cl.CreateKernel(_program, "spmv_csr", &err);
+                if (err != 0) throw new Exception($"Failed to create spmv kernel: {err}");
+
+                var vectorOpsKernel = _cl.CreateKernel(_program, "vector_ops", &err);
+                if (err != 0) throw new Exception($"Failed to create vector_ops kernel: {err}");
+
+                var dotKernel = _cl.CreateKernel(_program, "dot_product", &err);
+                if (err != 0) throw new Exception($"Failed to create dot kernel: {err}");
+
+                // Initialize x = 0, r = b, p = r
+                float zero = 0.0f;
+                _cl.EnqueueFillBuffer(_queue, clX, &zero, (nuint)sizeof(float), 0, (nuint)(n * sizeof(float)), 0, null, null);
+                _cl.EnqueueCopyBuffer(_queue, clB, clR, 0, 0, (nuint)(n * sizeof(float)), 0, null, null);
+                _cl.EnqueueCopyBuffer(_queue, clR, clP, 0, 0, (nuint)(n * sizeof(float)), 0, null, null);
+
+                // CG iteration
+                float rsold = ComputeDotProduct(clR, clR, n, dotKernel, clDotResult);
+                if (Math.Sqrt(rsold) < tolerance)
+                {
+                    float[] result = new float[n];
+                    fixed (float* resultPtr = result)
+                    {
+                        _cl.EnqueueReadBuffer(_queue, clX, true, 0, (nuint)(n * sizeof(float)), resultPtr, 0, null, null);
+                    }
+                    CleanupBuffers(clRowPtr, clColIdx, clValues, clB, clX, clR, clP, clAp, clDotResult);
+                    CleanupKernels(spmvKernel, vectorOpsKernel, dotKernel);
+                    return result;
+                }
+
+                for (int iter = 0; iter < maxIterations; iter++)
+                {
+                    // Ap = A * p
+                    ComputeSpmv(spmvKernel, clRowPtr, clColIdx, clValues, clP, clAp, n);
+
+                    // pAp = dot(p, Ap)
+                    float pAp = ComputeDotProduct(clP, clAp, n, dotKernel, clDotResult);
+                    if (Math.Abs(pAp) < 1e-10f) break;
+
+                    float alpha = rsold / pAp;
+
+                    // x = x + alpha * p
+                    ComputeAxpy(vectorOpsKernel, clX, clP, alpha, n, 1);
+
+                    // r = r - alpha * Ap
+                    ComputeAxpy(vectorOpsKernel, clR, clAp, -alpha, n, 1);
+
+                    // rsnew = dot(r, r)
+                    float rsnew = ComputeDotProduct(clR, clR, n, dotKernel, clDotResult);
+
+                    if (Math.Sqrt(rsnew) < tolerance)
+                    {
+                        Logger.Log($"[OpenCL CG] Converged in {iter + 1} iterations");
+                        break;
+                    }
+
+                    float beta = rsnew / rsold;
+
+                    // p = r + beta * p
+                    ComputeScale(vectorOpsKernel, clP, beta, n);
+                    ComputeAxpy(vectorOpsKernel, clP, clR, 1.0f, n, 1);
+
+                    rsold = rsnew;
+
+                    if (iter % 50 == 0)
+                    {
+                        Logger.Log($"[OpenCL CG] Iteration {iter}, residual: {Math.Sqrt(rsnew):E3}");
+                    }
+                }
+
+                // Read result
+                float[] solution = new float[n];
+                fixed (float* solutionPtr = solution)
+                {
+                    _cl.EnqueueReadBuffer(_queue, clX, true, 0, (nuint)(n * sizeof(float)), solutionPtr, 0, null, null);
+                }
+
+                // Cleanup
+                CleanupBuffers(clRowPtr, clColIdx, clValues, clB, clX, clR, clP, clAp, clDotResult);
+                CleanupKernels(spmvKernel, vectorOpsKernel, dotKernel);
+
+                return solution;
             }
-            CleanupBuffers(clRowPtr, clColIdx, clValues, clB, clX, clR, clP, clAp, clDotResult);
-            CleanupKernels(spmvKernel, vectorOpsKernel, dotKernel);
-            return result;
         }
-
-        for (int iter = 0; iter < maxIterations; iter++)
-        {
-            // Ap = A * p
-            ComputeSpmv(spmvKernel, clRowPtr, clColIdx, clValues, clP, clAp, n);
-
-            // pAp = dot(p, Ap)
-            float pAp = ComputeDotProduct(clP, clAp, n, dotKernel, clDotResult);
-            if (Math.Abs(pAp) < 1e-10f) break;
-
-            float alpha = rsold / pAp;
-
-            // x = x + alpha * p
-            ComputeAxpy(vectorOpsKernel, clX, clP, alpha, n, 1);
-
-            // r = r - alpha * Ap
-            ComputeAxpy(vectorOpsKernel, clR, clAp, -alpha, n, 1);
-
-            // rsnew = dot(r, r)
-            float rsnew = ComputeDotProduct(clR, clR, n, dotKernel, clDotResult);
-
-            if (Math.Sqrt(rsnew) < tolerance)
-            {
-                Logger.Log($"[OpenCL CG] Converged in {iter + 1} iterations");
-                break;
-            }
-
-            float beta = rsnew / rsold;
-
-            // p = r + beta * p
-            ComputeScale(vectorOpsKernel, clP, beta, n);
-            ComputeAxpy(vectorOpsKernel, clP, clR, 1.0f, n, 1);
-
-            rsold = rsnew;
-
-            if (iter % 50 == 0)
-            {
-                Logger.Log($"[OpenCL CG] Iteration {iter}, residual: {Math.Sqrt(rsnew):E3}");
-            }
-        }
-
-        // Read result
-        float[] solution = new float[n];
-        fixed (float* solutionPtr = solution)
-        {
-            _cl.EnqueueReadBuffer(_queue, clX, true, 0, (nuint)(n * sizeof(float)), solutionPtr, 0, null, null);
-        }
-
-        // Cleanup
-        CleanupBuffers(clRowPtr, clColIdx, clValues, clB, clX, clR, clP, clAp, clDotResult);
-        CleanupKernels(spmvKernel, vectorOpsKernel, dotKernel);
-
-        return solution;
-    }
-}
-
-        
 
         private static unsafe void ComputeSpmv(nint kernel, nint rowPtr, nint colIdx, nint values, 
             nint x, nint y, int numRows)
