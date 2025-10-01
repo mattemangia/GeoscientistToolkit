@@ -393,7 +393,7 @@ namespace GeoscientistToolkit.Business
                 Vp_m_s = 6320, Vs_m_s = 3130,
                 ElectricalResistivity_Ohm_m = 2.82e-8,
                 Notes = "Properties can vary significantly between alloys.",
-                Sources = new List<string>{ "Kloeckner Metals [7]", "GSA [21]", "Wikipedia [37]" },
+                Sources = new List<string>{ "Kloeckner Metals [7]", "GSA [21]" },
                 IsUserMaterial = false
             });
             _materials.Add(new PhysicalMaterial
@@ -410,7 +410,7 @@ namespace GeoscientistToolkit.Business
                 Vp_m_s = 4660, Vs_m_s = 2260,
                 ElectricalResistivity_Ohm_m = 1.68e-8,
                 Notes = "Pure, annealed copper.",
-                Sources = new List<string>{ "Wikipedia [4]", "C-FLO COPPER [11]", "ThoughtCo [34]" },
+                Sources = new List<string>{ "C-FLO COPPER [11]", "ThoughtCo [34]" },
                 IsUserMaterial = false
             });
              _materials.Add(new PhysicalMaterial
@@ -428,7 +428,7 @@ namespace GeoscientistToolkit.Business
                 Vp_m_s = 5840, Vs_m_s = 3430,
                 ElectricalResistivity_Ohm_m = 1e12,
                 Notes = "General purpose window and container glass.",
-                Sources = new List<string>{ "Abrisa Technologies [1]", "Study.com [14]", "Wikipedia [44]" },
+                Sources = new List<string>{ "Abrisa Technologies [1]", "Study.com [14]" },
                 IsUserMaterial = false
             });
         }
