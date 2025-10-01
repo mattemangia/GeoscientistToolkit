@@ -3,6 +3,7 @@ using System;
 using System.Numerics;
 using System.Runtime.InteropServices;
 using System.Text;
+using GeoscientistToolkit.Analysis.AcousticSimulation;
 using GeoscientistToolkit.Util;
 using Veldrid;
 using System.Linq;
@@ -162,6 +163,11 @@ struct Constants {
     float4 PreviewAlpha;
 };
 
+struct PlaneConstants {
+    float4x4 mvp;
+    float4 color;
+};
+
 struct VertexIn {
     float3 Position [[attribute(0)]];
 };
@@ -290,12 +296,12 @@ fragment float4 fragment_main(VertexOut in [[stage_in]],
 
 // Plane visualization shaders
 vertex float4 plane_vertex_main(VertexIn in [[stage_in]],
-                               constant float4x4& mvp [[buffer(0)]]) {
-    return mvp * float4(in.Position, 1.0);
+                               constant PlaneConstants& constants [[buffer(0)]]) {
+    return constants.mvp * float4(in.Position, 1.0);
 }
 
-fragment float4 plane_fragment_main(constant float4& color [[buffer(0)]]) {
-    return color;
+fragment float4 plane_fragment_main(constant PlaneConstants& constants [[buffer(0)]]) {
+    return constants.color;
 }
 ";
 
@@ -395,8 +401,7 @@ fragment float4 plane_fragment_main(constant float4& color [[buffer(0)]]) {
 
             // Create plane visualization pipeline
             _planeVisualizationResourceLayout = factory.CreateResourceLayout(new ResourceLayoutDescription(
-                new ResourceLayoutElementDescription("MVP", ResourceKind.UniformBuffer, ShaderStages.Vertex),
-                new ResourceLayoutElementDescription("Color", ResourceKind.UniformBuffer, ShaderStages.Fragment)));
+                new ResourceLayoutElementDescription("Constants", ResourceKind.UniformBuffer, ShaderStages.Vertex | ShaderStages.Fragment)));
 
             _planeVisualizationPipeline = factory.CreateGraphicsPipeline(new GraphicsPipelineDescription(
                 new BlendStateDescription(RgbaFloat.Black, BlendAttachmentDescription.AlphaBlend),
@@ -431,8 +436,7 @@ fragment float4 plane_fragment_main(constant float4& color [[buffer(0)]]) {
             // Plane visualization resource set
             _planeVisualizationResourceSet = factory.CreateResourceSet(new ResourceSetDescription(
                 _planeVisualizationResourceLayout,
-                _planeVisualizationConstantBuffer,
-                _planeVisualizationConstantBuffer)); // Reuse for color
+                _planeVisualizationConstantBuffer));
 
             Logger.Log("[MetalVolumeRenderer] Resource sets created");
         }
@@ -579,6 +583,12 @@ fragment float4 plane_fragment_main(constant float4& color [[buffer(0)]]) {
                     RenderPlaneVisualizations(cl, viewMatrix, projMatrix, planeVertexBuffer, planeIndexBuffer);
                 }
 
+                if (AcousticIntegration.IsActiveFor(_viewer._editableDataset))
+                {
+                    RenderTransducerMarkers(cl, viewMatrix, projMatrix);
+                }
+
+
                 cl.End();
                 VeldridManager.GraphicsDevice.SubmitCommands(cl);
                 VeldridManager.GraphicsDevice.WaitForIdle();
@@ -588,6 +598,28 @@ fragment float4 plane_fragment_main(constant float4& color [[buffer(0)]]) {
                 Logger.LogError($"[MetalVolumeRenderer] Render error: {ex.Message}");
             }
         }
+        
+        private void RenderTransducerMarkers(CommandList cl, Matrix4x4 viewMatrix, Matrix4x4 projMatrix)
+        {
+            cl.SetPipeline(_planeVisualizationPipeline);
+            cl.SetVertexBuffer(0, _vertexBuffer); // Use the cube vertex buffer
+            cl.SetIndexBuffer(_indexBuffer, IndexFormat.UInt16); // Use the cube index buffer
+            cl.SetGraphicsResourceSet(0, _planeVisualizationResourceSet);
+
+            var viewProj = viewMatrix * projMatrix;
+
+            // Draw TX Marker
+            var txTransform = Matrix4x4.CreateScale(0.02f) * Matrix4x4.CreateTranslation(AcousticIntegration.TxPosition);
+            var txConstants = new CtVolume3DViewer.PlaneVisualizationConstants { ViewProj = txTransform * viewProj, PlaneColor = new Vector4(0, 1, 1, 1) };
+            VeldridManager.GraphicsDevice.UpdateBuffer(_planeVisualizationConstantBuffer, 0, ref txConstants);
+            cl.DrawIndexed(36, 1, 0, 0, 0);
+
+            // Draw RX Marker
+            var rxTransform = Matrix4x4.CreateScale(0.02f) * Matrix4x4.CreateTranslation(AcousticIntegration.RxPosition);
+            var rxConstants = new CtVolume3DViewer.PlaneVisualizationConstants { ViewProj = rxTransform * viewProj, PlaneColor = new Vector4(0, 1, 0, 1) };
+            VeldridManager.GraphicsDevice.UpdateBuffer(_planeVisualizationConstantBuffer, 0, ref rxConstants);
+            cl.DrawIndexed(36, 1, 0, 0, 0);
+        }
 
         private void RenderPlaneVisualizations(CommandList cl, Matrix4x4 viewMatrix, Matrix4x4 projMatrix,
                                               DeviceBuffer planeVertexBuffer, DeviceBuffer planeIndexBuffer)
@@ -595,6 +627,7 @@ fragment float4 plane_fragment_main(constant float4& color [[buffer(0)]]) {
             cl.SetPipeline(_planeVisualizationPipeline);
             cl.SetVertexBuffer(0, planeVertexBuffer);
             cl.SetIndexBuffer(planeIndexBuffer, IndexFormat.UInt16);
+            cl.SetGraphicsResourceSet(0, _planeVisualizationResourceSet);
 
             var viewProj = viewMatrix * projMatrix;
 
@@ -640,11 +673,8 @@ fragment float4 plane_fragment_main(constant float4& color [[buffer(0)]]) {
                 transform *= Matrix4x4.CreateTranslation(0.5f, 0.5f, position);
             }
 
-            var mvp = transform * viewProj;
-            VeldridManager.GraphicsDevice.UpdateBuffer(_planeVisualizationConstantBuffer, 0, ref mvp);
-            VeldridManager.GraphicsDevice.UpdateBuffer(_planeVisualizationConstantBuffer, (uint)Marshal.SizeOf<Matrix4x4>(), ref color);
-            
-            cl.SetGraphicsResourceSet(0, _planeVisualizationResourceSet);
+            var constants = new CtVolume3DViewer.PlaneVisualizationConstants { ViewProj = transform * viewProj, PlaneColor = color };
+            VeldridManager.GraphicsDevice.UpdateBuffer(_planeVisualizationConstantBuffer, 0, ref constants);
             cl.DrawIndexed(6, 1, 0, 0, 0);
         }
 
@@ -666,11 +696,8 @@ fragment float4 plane_fragment_main(constant float4& color [[buffer(0)]]) {
             var transform = Matrix4x4.CreateScale(1.5f) * rotation * 
                           Matrix4x4.CreateTranslation(Vector3.One * 0.5f + plane.Normal * (plane.Distance - 0.5f));
 
-            var mvp = transform * viewProj;
-            VeldridManager.GraphicsDevice.UpdateBuffer(_planeVisualizationConstantBuffer, 0, ref mvp);
-            VeldridManager.GraphicsDevice.UpdateBuffer(_planeVisualizationConstantBuffer, (uint)Marshal.SizeOf<Matrix4x4>(), ref color);
-            
-            cl.SetGraphicsResourceSet(0, _planeVisualizationResourceSet);
+            var constants = new CtVolume3DViewer.PlaneVisualizationConstants { ViewProj = transform * viewProj, PlaneColor = color };
+            VeldridManager.GraphicsDevice.UpdateBuffer(_planeVisualizationConstantBuffer, 0, ref constants);
             cl.DrawIndexed(6, 1, 0, 0, 0);
         }
 

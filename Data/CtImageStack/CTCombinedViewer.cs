@@ -11,6 +11,7 @@ using ImGuiNET;
 using Veldrid;
 using System.Collections.Generic;
 using System.Linq;
+using GeoscientistToolkit.Analysis.AcousticSimulation;
 using GeoscientistToolkit.Analysis.RockCoreExtractor;
 using GeoscientistToolkit.Analysis.Transform;
 using GeoscientistToolkit.UI.Utils;
@@ -165,7 +166,30 @@ namespace GeoscientistToolkit.Data.CtImageStack
             {
                 _needsUpdateXY = _needsUpdateXZ = _needsUpdateYZ = true;
             };
+            
+            // Subscribe to the 3D preview update event
+            CtImageStackTools.Preview3DChanged += OnPreview3DChanged;
+            AcousticIntegration.OnPositionsChanged += OnAcousticPositionsChanged;
+            
             _ = InitializeAsync();
+        }
+        
+        private void OnAcousticPositionsChanged()
+        {
+            // When TX/RX positions change, force a redraw of all slices to show updated markers
+            _needsUpdateXY = _needsUpdateXZ = _needsUpdateYZ = true;
+        }
+
+
+        private void OnPreview3DChanged(CtImageStackDataset dataset, byte[] previewMask, Vector4 color)
+        {
+            // If the event is for our dataset, trigger a redraw of the 2D slices
+            if (dataset == _dataset)
+            {
+                _needsUpdateXY = true;
+                _needsUpdateXZ = true;
+                _needsUpdateYZ = true;
+            }
         }
         
         private void OnDatasetDataChanged(Dataset dataset)
@@ -542,7 +566,34 @@ namespace GeoscientistToolkit.Data.CtImageStack
 
             // --- FIXED INPUT HANDLING LOGIC ---
             bool inputHandled = false;
-            if (isHovered)
+            
+            // --- ACOUSTIC PLACEMENT INPUT ---
+            if (AcousticIntegration.IsPlacingFor(_dataset) && isHovered && (ImGui.IsMouseClicked(ImGuiMouseButton.Left) || ImGui.IsMouseDragging(ImGuiMouseButton.Left)))
+            {
+                var mousePosInImage = GetMousePosInImage(io.MousePos, imagePos, imageSize, width, height);
+                var currentTx = AcousticIntegration.TxPosition;
+                var currentRx = AcousticIntegration.RxPosition;
+                
+                // Convert 2D click in this view to a 3D normalized position
+                var newPos = new Vector3();
+                switch (viewIndex)
+                {
+                    case 0: // XY View
+                        newPos = new Vector3(mousePosInImage.X / width, mousePosInImage.Y / height, (float)_sliceZ / _dataset.Depth);
+                        break;
+                    case 1: // XZ View
+                        newPos = new Vector3(mousePosInImage.X / width, (float)_sliceY / _dataset.Height, mousePosInImage.Y / height);
+                        break;
+                    case 2: // YZ View
+                        newPos = new Vector3((float)_sliceX / _dataset.Width, mousePosInImage.X / width, mousePosInImage.Y / height);
+                        break;
+                }
+                AcousticIntegration.UpdatePosition(newPos);
+                inputHandled = true;
+            }
+
+
+            if (isHovered && !inputHandled)
             {
                 if (isHovered && ImGui.IsItemClicked(ImGuiMouseButton.Left)
                               && GeoscientistToolkit.UI.Tools.CalibrationIntegration.IsRegionSelectionEnabled(_dataset))
@@ -688,6 +739,12 @@ namespace GeoscientistToolkit.Data.CtImageStack
                 if (ShowScaleBar) DrawScaleBar(dl, canvasPos, canvasSize, zoom, width, height, viewIndex);
                 if (ShowCuttingPlanes && VolumeViewer != null) DrawCuttingPlanes(dl, viewIndex, canvasPos, canvasSize, imagePos, imageSize, width, height);
 
+                // Draw Acoustic Transducer markers
+                if (AcousticIntegration.IsActiveFor(_dataset))
+                {
+                    DrawTransducerMarkers(dl, viewIndex, imagePos, imageSize, width, height);
+                }
+
                 // Draw Rock Core Extractor overlay if active
                 RockCoreIntegration.DrawOverlay(_dataset, dl, viewIndex, imagePos, imageSize, width, height,
                     _sliceX, _sliceY, _sliceZ);
@@ -704,6 +761,53 @@ namespace GeoscientistToolkit.Data.CtImageStack
             }
 
             dl.PopClipRect();
+        }
+        
+        private void DrawTransducerMarkers(ImDrawListPtr dl, int viewIndex, Vector2 imagePos, Vector2 imageSize, int imageWidth, int imageHeight)
+        {
+            var tx = AcousticIntegration.TxPosition;
+            var rx = AcousticIntegration.RxPosition;
+
+            // Draw TX
+            DrawSingleTransducer(dl, viewIndex, imagePos, imageSize, imageWidth, imageHeight, tx, "TX", 0xFF00FFFF);
+            // Draw RX
+            DrawSingleTransducer(dl, viewIndex, imagePos, imageSize, imageWidth, imageHeight, rx, "RX", 0xFF00FF00);
+        }
+
+        private void DrawSingleTransducer(ImDrawListPtr dl, int viewIndex, Vector2 imagePos, Vector2 imageSize, int imageWidth, int imageHeight, Vector3 pos3D, string label, uint color)
+        {
+            float xNorm = -1, yNorm = -1;
+            bool onSlice = false;
+
+            switch (viewIndex)
+            {
+                case 0: // XY View
+                    xNorm = pos3D.X;
+                    yNorm = pos3D.Y;
+                    onSlice = Math.Abs(_sliceZ - pos3D.Z * _dataset.Depth) < 1.5f;
+                    break;
+                case 1: // XZ View
+                    xNorm = pos3D.X;
+                    yNorm = pos3D.Z;
+                    onSlice = Math.Abs(_sliceY - pos3D.Y * _dataset.Height) < 1.5f;
+                    break;
+                case 2: // YZ View
+                    xNorm = pos3D.Y;
+                    yNorm = pos3D.Z;
+                    onSlice = Math.Abs(_sliceX - pos3D.X * _dataset.Width) < 1.5f;
+                    break;
+            }
+
+            if (xNorm >= 0 && yNorm >= 0)
+            {
+                float screenX = imagePos.X + xNorm * imageSize.X;
+                float screenY = imagePos.Y + yNorm * imageSize.Y;
+                float radius = onSlice ? 6.0f : 4.0f;
+                uint finalColor = onSlice ? color : (color & 0x00FFFFFF) | 0x80000000; // Dim if not on slice
+
+                dl.AddCircleFilled(new Vector2(screenX, screenY), radius, finalColor);
+                dl.AddText(new Vector2(screenX + 8, screenY - 8), finalColor, label);
+            }
         }
         
         private void UpdateTexture(int viewIndex, ref TextureManager texture)
@@ -1075,6 +1179,8 @@ namespace GeoscientistToolkit.Data.CtImageStack
         public void Dispose()
         {
             ProjectManager.Instance.DatasetDataChanged -= OnDatasetDataChanged;
+            CtImageStackTools.Preview3DChanged -= OnPreview3DChanged;
+            AcousticIntegration.OnPositionsChanged -= OnAcousticPositionsChanged;
 
             CtSegmentationIntegration.Cleanup(_dataset);
     

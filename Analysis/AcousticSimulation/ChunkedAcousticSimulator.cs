@@ -570,10 +570,20 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
 
         private bool CheckPWaveArrival()
         {
-            int rx = (int)(_params.RxPosition.X * _params.Width); int ry = (int)(_params.RxPosition.Y * _params.Height); int rz = (int)(_params.RxPosition.Z * _params.Depth);
-            var c = _chunks.FirstOrDefault(k => rz >= k.StartZ && rz < k.EndZ); if (c == null) return false;
+            int rx = Math.Clamp((int)(_params.RxPosition.X * _params.Width), 0, _params.Width - 1);
+            int ry = Math.Clamp((int)(_params.RxPosition.Y * _params.Height), 0, _params.Height - 1);
+            int rz = Math.Clamp((int)(_params.RxPosition.Z * _params.Depth), 0, _params.Depth - 1);
+
+            var c = _chunks.FirstOrDefault(k => rz >= k.StartZ && rz < k.EndZ); 
+            if (c == null) return false;
+
             int lz = rz - c.StartZ;
-            float comp = _params.Axis switch { 0 => MathF.Abs(c.Vx[rx, ry, lz]), 1 => MathF.Abs(c.Vy[rx, ry, lz]), _ => MathF.Abs(c.Vz[rx, ry, lz]) };
+            float comp = _params.Axis switch 
+            { 
+                0 => MathF.Abs(c.Vx[rx, ry, lz]), 
+                1 => MathF.Abs(c.Vy[rx, ry, lz]), 
+                _ => MathF.Abs(c.Vz[rx, ry, lz]) 
+            };
             return comp > 1e-9f;
         }
 

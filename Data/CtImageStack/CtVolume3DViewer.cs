@@ -13,6 +13,7 @@ using System.IO;
 using System.Linq;
 using StbImageWriteSharp;
 using System.Collections.Generic;
+using GeoscientistToolkit.Analysis.AcousticSimulation;
 using GeoscientistToolkit.UI.Utils;
 
 namespace GeoscientistToolkit.Data.CtImageStack
@@ -837,10 +838,40 @@ void main() { out_Color = PlaneColor; }";
                     RenderPlaneVisualizations();
                 }
 
+                if (AcousticIntegration.IsActiveFor(_editableDataset))
+                {
+                    RenderTransducerMarkers();
+                }
+
+
                 _commandList.End();
                 VeldridManager.GraphicsDevice.SubmitCommands(_commandList);
                 VeldridManager.GraphicsDevice.WaitForIdle();
             }
+        }
+        
+        private void RenderTransducerMarkers()
+        {
+            // Use the plane visualization pipeline to draw simple cubes for TX/RX
+            _commandList.SetPipeline(_planeVisualizationPipeline);
+            _commandList.SetVertexBuffer(0, _vertexBuffer); // Use the cube vertex buffer
+            _commandList.SetIndexBuffer(_indexBuffer, IndexFormat.UInt16); // Use the cube index buffer
+            
+            var viewProj = _viewMatrix * _projMatrix;
+
+            // Draw TX Marker
+            var txTransform = Matrix4x4.CreateScale(0.02f) * Matrix4x4.CreateTranslation(AcousticIntegration.TxPosition);
+            var txConstants = new PlaneVisualizationConstants { ViewProj = txTransform * viewProj, PlaneColor = new Vector4(0, 1, 1, 1) };
+            VeldridManager.GraphicsDevice.UpdateBuffer(_planeVisualizationConstantBuffer, 0, ref txConstants);
+            _commandList.SetGraphicsResourceSet(0, _planeVisualizationResourceSet);
+            _commandList.DrawIndexed(36, 1, 0, 0, 0); // 36 indices for a cube
+
+            // Draw RX Marker
+            var rxTransform = Matrix4x4.CreateScale(0.02f) * Matrix4x4.CreateTranslation(AcousticIntegration.RxPosition);
+            var rxConstants = new PlaneVisualizationConstants { ViewProj = rxTransform * viewProj, PlaneColor = new Vector4(0, 1, 0, 1) };
+            VeldridManager.GraphicsDevice.UpdateBuffer(_planeVisualizationConstantBuffer, 0, ref rxConstants);
+            _commandList.SetGraphicsResourceSet(0, _planeVisualizationResourceSet);
+            _commandList.DrawIndexed(36, 1, 0, 0, 0);
         }
 
         private void RenderPlaneVisualizations()
@@ -922,7 +953,7 @@ void main() { out_Color = PlaneColor; }";
                 // Handle mouse input only when the invisible button is hovered
                 if (ImGui.IsItemHovered())
                 {
-                    HandleMouseInput();
+                    HandleMouseInput(imagePos, availableSize);
                 }
         
                 // Context menu on the invisible button
@@ -946,9 +977,21 @@ void main() { out_Color = PlaneColor; }";
                 SaveScreenshot(_screenshotDialog.SelectedPath);
         }
 
-        private void HandleMouseInput()
+        private void HandleMouseInput(Vector2 viewPos, Vector2 viewSize)
         {
             var io = ImGui.GetIO();
+
+            // Handle Acoustic Transducer Placement
+            if (AcousticIntegration.IsPlacingFor(_editableDataset) && (ImGui.IsMouseClicked(ImGuiMouseButton.Left) || ImGui.IsMouseDragging(ImGuiMouseButton.Left)))
+            {
+                var mousePos = io.MousePos - viewPos;
+                if (Raycast(mousePos, viewSize, out var intersectionPoint))
+                {
+                    AcousticIntegration.UpdatePosition(intersectionPoint);
+                }
+                return; // Prevent camera movement while placing
+            }
+
             if (io.MouseWheel != 0) _cameraDistance = Math.Clamp(_cameraDistance * (1.0f - io.MouseWheel * 0.1f), 0.5f, 20.0f);
             if (ImGui.IsMouseDown(ImGuiMouseButton.Left) || ImGui.IsMouseDown(ImGuiMouseButton.Right) || ImGui.IsMouseDown(ImGuiMouseButton.Middle))
             {
@@ -977,6 +1020,49 @@ void main() { out_Color = PlaneColor; }";
             }
             else { _isDragging = false; _isPanning = false; }
             UpdateCameraMatrices();
+        }
+
+        private bool Raycast(Vector2 mousePos, Vector2 viewSize, out Vector3 intersection)
+        {
+            intersection = Vector3.Zero;
+            
+            // 1. Unproject mouse coordinates to a 3D ray
+            var viewProj = _viewMatrix * _projMatrix;
+            if (!Matrix4x4.Invert(viewProj, out var invViewProj)) return false;
+
+            Vector2 ndc = new Vector2(
+                (mousePos.X / viewSize.X) * 2.0f - 1.0f,
+                1.0f - (mousePos.Y / viewSize.Y) * 2.0f
+            );
+
+            var nearPointH = Vector4.Transform(new Vector4(ndc.X, ndc.Y, 0.0f, 1.0f), invViewProj);
+            var farPointH = Vector4.Transform(new Vector4(ndc.X, ndc.Y, 1.0f, 1.0f), invViewProj);
+
+            if (nearPointH.W == 0 || farPointH.W == 0) return false;
+
+            var rayOrigin = new Vector3(nearPointH.X, nearPointH.Y, nearPointH.Z) / nearPointH.W;
+            var farPoint = new Vector3(farPointH.X, farPointH.Y, farPointH.Z) / farPointH.W;
+            var rayDir = Vector3.Normalize(farPoint - rayOrigin);
+
+            // 2. Intersect ray with the unit cube bounding box
+            float tNear, tFar;
+            var boxMin = Vector3.Zero;
+            var boxMax = Vector3.One;
+
+            var invRayDir = new Vector3(1.0f / rayDir.X, 1.0f / rayDir.Y, 1.0f / rayDir.Z);
+            var t1 = (boxMin - rayOrigin) * invRayDir;
+            var t2 = (boxMax - rayOrigin) * invRayDir;
+            var tMin = Vector3.Min(t1, t2);
+            var tMax = Vector3.Max(t1, t2);
+            
+            tNear = Math.Max(Math.Max(tMin.X, tMin.Y), tMin.Z);
+            tFar = Math.Min(Math.Min(tMax.X, tMax.Y), tMax.Z);
+
+            if (tFar < tNear || tFar < 0.0) return false;
+
+            intersection = rayOrigin + rayDir * tNear;
+            intersection = Vector3.Clamp(intersection, Vector3.Zero, Vector3.One); // Clamp to be safe
+            return true;
         }
 
         #endregion

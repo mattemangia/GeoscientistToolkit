@@ -18,6 +18,53 @@ using DensityTool = GeoscientistToolkit.UI.Tools.DensityCalibrationTool;
 namespace GeoscientistToolkit.Analysis.AcousticSimulation
 {
     /// <summary>
+    /// Static class to manage the state of interactive transducer placement across different viewers.
+    /// </summary>
+    internal static class AcousticIntegration
+    {
+        public static event Action OnPositionsChanged;
+        public static bool IsPlacing { get; private set; }
+        public static Vector3 TxPosition { get; private set; }
+        public static Vector3 RxPosition { get; private set; }
+
+        private static Dataset _targetDataset;
+        private static string _placingWhich; // "TX" or "RX"
+
+        public static void StartPlacement(Dataset target, string which, Vector3 currentTx, Vector3 currentRx)
+        {
+            IsPlacing = true;
+            _targetDataset = target;
+            _placingWhich = which;
+            TxPosition = currentTx;
+            RxPosition = currentRx;
+        }
+
+        public static void StopPlacement()
+        {
+            IsPlacing = false;
+            _targetDataset = null;
+            _placingWhich = null;
+        }
+
+        public static bool IsPlacingFor(Dataset d) => IsPlacing && _targetDataset == d;
+        public static bool IsActiveFor(Dataset d) => _targetDataset == d;
+        public static string GetPlacingTarget() => _placingWhich;
+
+        public static void UpdatePosition(Vector3 newNormalizedPos)
+        {
+            if (!IsPlacing) return;
+
+            if (_placingWhich == "TX")
+                TxPosition = newNormalizedPos;
+            else
+                RxPosition = newNormalizedPos;
+
+            OnPositionsChanged?.Invoke();
+        }
+    }
+
+
+    /// <summary>
     /// Main UI panel for controlling and displaying acoustic simulations.
     /// </summary>
     public class AcousticSimulationUI : IDisposable
@@ -45,10 +92,12 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
         private string _offloadDirectory;
         
         // Tomography settings
-        private bool _showTomography = false;
+        private bool _isTomographyWindowOpen = false;
         private int _tomographySliceAxis = 0;
         private int _tomographySliceIndex = 0;
         private TextureManager _tomographyTexture;
+        private int _lastTomographySliceAxis = -1;
+        private int _lastTomographySliceIndex = -1;
         
         // UI State
         private int _selectedMaterialIndex = 0;
@@ -73,6 +122,7 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
         private int _snapshotInterval = 10;
         private Vector3 _txPosition = new Vector3(0, 0.5f, 0.5f);
         private Vector3 _rxPosition = new Vector3(1, 0.5f, 0.5f);
+        private CtImageStackDataset _currentDataset;
 
         public AcousticSimulationUI()
         {
@@ -82,11 +132,27 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
             _tomographyGenerator = new VelocityTomographyGenerator();
             _offloadDirectory = Path.Combine(Path.GetTempPath(), "AcousticSimulation");
             Directory.CreateDirectory(_offloadDirectory);
+            AcousticIntegration.OnPositionsChanged += OnTransducerMoved;
+        }
+
+        private void OnTransducerMoved()
+        {
+            _txPosition = AcousticIntegration.TxPosition;
+            _rxPosition = AcousticIntegration.RxPosition;
         }
 
         public void DrawPanel(CtImageStackDataset dataset)
         {
             if (dataset == null) return;
+            
+            _currentDataset = dataset;
+            AcousticIntegration.StartPlacement(dataset, null, _txPosition, _rxPosition); // Ensure it's active for drawing
+
+            // Draw the separate tomography window if it's open
+            if (_isTomographyWindowOpen)
+            {
+                DrawTomographyWindow();
+            }
 
             ImGui.Text($"Dataset: {dataset.Name}");
             ImGui.Text($"Dimensions: {dataset.Width} × {dataset.Height} × {dataset.Depth}");
@@ -134,10 +200,18 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
             ImGui.Separator();
 
             ImGui.Text("Wave Propagation Axis:");
-            ImGui.RadioButton("X", ref _selectedAxisIndex, 0); ImGui.SameLine();
-            ImGui.RadioButton("Y", ref _selectedAxisIndex, 1); ImGui.SameLine();
-            ImGui.RadioButton("Z", ref _selectedAxisIndex, 2);
-    
+            
+            bool axisChanged = false;
+            axisChanged |= ImGui.RadioButton("X", ref _selectedAxisIndex, 0); ImGui.SameLine();
+            axisChanged |= ImGui.RadioButton("Y", ref _selectedAxisIndex, 1); ImGui.SameLine();
+            axisChanged |= ImGui.RadioButton("Z", ref _selectedAxisIndex, 2);
+
+            if (axisChanged)
+            {
+                ApplyAxisPreset(_selectedAxisIndex);
+                AcousticIntegration.StartPlacement(_currentDataset, null, _txPosition, _rxPosition);
+            }
+
             ImGui.Checkbox("Full-Face Transducers", ref _useFullFaceTransducers);
             if (ImGui.IsItemHovered())
                 ImGui.SetTooltip("Use entire face of volume as transducer instead of point source");
@@ -179,33 +253,26 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
             if (ImGui.CollapsingHeader("Visualization"))
             {
                 ImGui.Indent();
-                ImGui.Checkbox("Enable Real-Time Visualization", ref _enableRealTimeVisualization);
+                ImGui.Checkbox("Enable Real-Time 3D Visualization", ref _enableRealTimeVisualization);
                 if (_enableRealTimeVisualization)
                 {
                     ImGui.DragFloat("Update Interval (s)", ref _visualizationUpdateInterval, 0.01f, 0.01f, 1.0f);
                     if (ImGui.IsItemHovered())
                         ImGui.SetTooltip("How often to update the 3D visualization during simulation");
                 }
-        
+                
+                if (_lastResults != null)
+                {
+                    ImGui.Checkbox("Show Velocity Tomography", ref _isTomographyWindowOpen);
+                }
+
+                ImGui.Separator();
                 ImGui.Checkbox("Save Time Series", ref _saveTimeSeries);
                 if (_saveTimeSeries)
                 {
                     ImGui.DragInt("Snapshot Interval", ref _snapshotInterval, 1, 1, 100);
                     if (ImGui.IsItemHovered())
                         ImGui.SetTooltip("Save a snapshot every N time steps");
-                }
-                ImGui.Separator();
-        
-                ImGui.Checkbox("Show Velocity Tomography", ref _showTomography);
-                if (_showTomography && _lastResults != null)
-                {
-                    ImGui.Text("Tomography Slice:");
-                    ImGui.RadioButton("X Slice", ref _tomographySliceAxis, 0); ImGui.SameLine();
-                    ImGui.RadioButton("Y Slice", ref _tomographySliceAxis, 1); ImGui.SameLine();
-                    ImGui.RadioButton("Z Slice", ref _tomographySliceAxis, 2);
-            
-                    int maxSlice = _tomographySliceAxis switch { 0 => dataset.Width - 1, 1 => dataset.Height - 1, 2 => dataset.Depth - 1, _ => 0 };
-                    ImGui.SliderInt("Slice Index", ref _tomographySliceIndex, 0, maxSlice);
                 }
                 ImGui.Unindent();
             }
@@ -324,10 +391,36 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
                 if (!_useFullFaceTransducers)
                 {
                     ImGui.Spacing();
-                    ImGui.Text("Transmitter Position (normalized 0-1):");
-                    ImGui.DragFloat3("TX", ref _txPosition, 0.01f, 0.0f, 1.0f);
-                    ImGui.Text("Receiver Position (normalized 0-1):");
-                    ImGui.DragFloat3("RX", ref _rxPosition, 0.01f, 0.0f, 1.0f);
+                    ImGui.Text("Transducer Positions (normalized 0-1):");
+                    
+                    ImGui.Text($"TX: ({_txPosition.X:F3}, {_txPosition.Y:F3}, {_txPosition.Z:F3})");
+                    ImGui.Text($"RX: ({_rxPosition.X:F3}, {_rxPosition.Y:F3}, {_rxPosition.Z:F3})");
+
+                    bool isPlacingTx = AcousticIntegration.IsPlacing && AcousticIntegration.GetPlacingTarget() == "TX";
+                    bool isPlacingRx = AcousticIntegration.IsPlacing && AcousticIntegration.GetPlacingTarget() == "RX";
+
+                    if (isPlacingTx) ImGui.PushStyleColor(ImGuiCol.Button, new Vector4(0.4f, 0.8f, 0.4f, 1.0f));
+                    if (ImGui.Button("Place TX")) { AcousticIntegration.StartPlacement(dataset, "TX", _txPosition, _rxPosition); }
+                    if (isPlacingTx) ImGui.PopStyleColor();
+
+                    ImGui.SameLine();
+                    if (isPlacingRx) ImGui.PushStyleColor(ImGuiCol.Button, new Vector4(0.4f, 0.8f, 0.4f, 1.0f));
+                    if (ImGui.Button("Place RX")) { AcousticIntegration.StartPlacement(dataset, "RX", _txPosition, _rxPosition); }
+                    if (isPlacingRx) ImGui.PopStyleColor();
+
+                    if (AcousticIntegration.IsPlacing)
+                    {
+                        ImGui.SameLine();
+                        if (ImGui.Button("Stop Placing")) { AcousticIntegration.StopPlacement(); }
+                        ImGui.TextColored(new Vector4(1,1,0,1), $"Placing {AcousticIntegration.GetPlacingTarget()}... Click/drag in a viewer.");
+                    }
+                    
+                    if (ImGui.Button("Auto-place Transducers"))
+                    {
+                        AutoPlaceTransducers(dataset);
+                    }
+                    if(ImGui.IsItemHovered()) ImGui.SetTooltip("Automatically place TX/RX on opposite sides of the selected material, ensuring a valid path.");
+
                     float dx = (_rxPosition.X - _txPosition.X) * dataset.Width * dataset.PixelSize / 1000f;
                     float dy = (_rxPosition.Y - _txPosition.Y) * dataset.Height * dataset.PixelSize / 1000f;
                     float dz = (_rxPosition.Z - _txPosition.Z) * dataset.Depth * dataset.SliceThickness / 1000f;
@@ -425,16 +518,194 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
                         Logger.Log("[Simulation] Added results to calibration database");
                     }
                 }
-        
-                if (_showTomography && _tomographyTexture != null)
+                
+                if (ImGui.CollapsingHeader("Debug Information"))
                 {
+                    ImGui.Indent();
+                    DrawWaveDebugInfo("TX", _txPosition);
                     ImGui.Separator();
-                    if (ImGui.CollapsingHeader("Velocity Tomography"))
-                    {
-                        DrawTomographyView();
-                    }
+                    DrawWaveDebugInfo("RX", _rxPosition);
+                    ImGui.Separator();
+                    DrawWaveDebugInfo("Midpoint", (_txPosition + _rxPosition) * 0.5f);
+                    ImGui.Unindent();
                 }
             }
+        }
+
+        private void ApplyAxisPreset(int axis)
+        {
+            switch (axis)
+            {
+                case 0: // X-Axis
+                    _txPosition = new Vector3(0.0f, 0.5f, 0.5f);
+                    _rxPosition = new Vector3(1.0f, 0.5f, 0.5f);
+                    break;
+                case 1: // Y-Axis
+                    _txPosition = new Vector3(0.5f, 0.0f, 0.5f);
+                    _rxPosition = new Vector3(0.5f, 1.0f, 0.5f);
+                    break;
+                case 2: // Z-Axis
+                    _txPosition = new Vector3(0.5f, 0.5f, 0.0f);
+                    _rxPosition = new Vector3(0.5f, 0.5f, 1.0f);
+                    break;
+            }
+        }
+        
+        private void DrawWaveDebugInfo(string label, Vector3 normalizedPos)
+        {
+            if (_lastResults?.WaveFieldVx == null)
+            {
+                ImGui.Text($"{label}: No wave field data.");
+                return;
+            }
+
+            int w = _lastResults.WaveFieldVx.GetLength(0);
+            int h = _lastResults.WaveFieldVx.GetLength(1);
+            int d = _lastResults.WaveFieldVx.GetLength(2);
+
+            int x = (int)Math.Clamp(normalizedPos.X * w, 0, w - 1);
+            int y = (int)Math.Clamp(normalizedPos.Y * h, 0, h - 1);
+            int z = (int)Math.Clamp(normalizedPos.Z * d, 0, d - 1);
+
+            float vx = _lastResults.WaveFieldVx[x, y, z];
+            float vy = _lastResults.WaveFieldVy[x, y, z];
+            float vz = _lastResults.WaveFieldVz[x, y, z];
+            var velocity = new Vector3(vx, vy, vz);
+
+            ImGui.Text($"{label} at [{x}, {y}, {z}]");
+            ImGui.Indent();
+            ImGui.Text($"Velocity Vector: <{vx:G3}, {vy:G3}, {vz:G3}>");
+            ImGui.Text($"Total Magnitude: {velocity.Length():G4}");
+
+            // Calculate P and S components relative to TX->RX vector
+            if (label != "Midpoint")
+            {
+                Vector3 txVoxel = new Vector3(_txPosition.X * w, _txPosition.Y * h, _txPosition.Z * d);
+                Vector3 rxVoxel = new Vector3(_rxPosition.X * w, _rxPosition.Y * h, _rxPosition.Z * d);
+                Vector3 pathDir = Vector3.Normalize(rxVoxel - txVoxel);
+
+                if (pathDir.LengthSquared() > 0.1f)
+                {
+                    float p_component_mag = Vector3.Dot(velocity, pathDir);
+                    Vector3 p_component_vec = pathDir * p_component_mag;
+                    Vector3 s_component_vec = velocity - p_component_vec;
+
+                    ImGui.Text($"P-Wave Component: {p_component_mag:G4}");
+                    ImGui.Text($"S-Wave Component: {s_component_vec.Length():G4}");
+                }
+            }
+            ImGui.Unindent();
+        }
+        
+        private async void AutoPlaceTransducers(CtImageStackDataset dataset)
+        {
+            var material = dataset.Materials.Where(m => m.ID != 0).ElementAt(_selectedMaterialIndex);
+            if (material == null)
+            {
+                Logger.LogWarning("[AutoPlace] No material selected.");
+                return;
+            }
+
+            Logger.Log($"[AutoPlace] Finding bounds for material '{material.Name}' (ID: {material.ID})");
+
+            var boundsMin = new Vector3(dataset.Width, dataset.Height, dataset.Depth);
+            var boundsMax = new Vector3(0, 0, 0);
+            bool materialFound = false;
+
+            // This can be slow for large datasets, but is necessary. Could be optimized.
+            await Task.Run(() =>
+            {
+                for (int z = 0; z < dataset.Depth; z++)
+                {
+                    var slice = new byte[dataset.Width * dataset.Height];
+                    dataset.LabelData.ReadSliceZ(z, slice);
+                    for (int y = 0; y < dataset.Height; y++)
+                    {
+                        for (int x = 0; x < dataset.Width; x++)
+                        {
+                            if (slice[y * dataset.Width + x] == material.ID)
+                            {
+                                materialFound = true;
+                                boundsMin.X = Math.Min(boundsMin.X, x);
+                                boundsMin.Y = Math.Min(boundsMin.Y, y);
+                                boundsMin.Z = Math.Min(boundsMin.Z, z);
+                                boundsMax.X = Math.Max(boundsMax.X, x);
+                                boundsMax.Y = Math.Max(boundsMax.Y, y);
+                                boundsMax.Z = Math.Max(boundsMax.Z, z);
+                            }
+                        }
+                    }
+                }
+            });
+
+            if (!materialFound)
+            {
+                Logger.LogError($"[AutoPlace] Material ID {material.ID} not found in the dataset.");
+                return;
+            }
+            
+            Logger.Log($"[AutoPlace] Material bounds (voxels): Min({boundsMin}), Max({boundsMax})");
+
+            var center = (boundsMin + boundsMax) / 2.0f;
+
+            // Prioritize the currently selected axis for auto-placement
+            var otherAxes = new[] { 0, 1, 2 }.Where(a => a != _selectedAxisIndex);
+            var axes = new List<int> { _selectedAxisIndex };
+            axes.AddRange(otherAxes);
+
+            foreach (int axis in axes)
+            {
+                Vector3 tx = center;
+                Vector3 rx = center;
+                tx[axis] = boundsMin[axis] + 2; // Place slightly inside the material
+                rx[axis] = boundsMax[axis] - 2;
+
+                if (CheckPath(dataset, material.ID, tx, rx))
+                {
+                    _txPosition = new Vector3(tx.X / dataset.Width, tx.Y / dataset.Height, tx.Z / dataset.Depth);
+                    _rxPosition = new Vector3(rx.X / dataset.Width, rx.Y / dataset.Height, rx.Z / dataset.Depth);
+                    AcousticIntegration.StartPlacement(dataset, null, _txPosition, _rxPosition); // Update state
+                    OnTransducerMoved(); // Update UI
+                    Logger.Log($"[AutoPlace] Placed transducers along axis {axis} at TX:{tx} RX:{rx}");
+                    return;
+                }
+            }
+
+            Logger.LogWarning("[AutoPlace] Could not find a clear path through the material on any axis. Using bounding box center.");
+            _txPosition = new Vector3(boundsMin.X / dataset.Width, center.Y / dataset.Height, center.Z / dataset.Depth);
+            _rxPosition = new Vector3(boundsMax.X / dataset.Width, center.Y / dataset.Height, center.Z / dataset.Depth);
+            AcousticIntegration.StartPlacement(dataset, null, _txPosition, _rxPosition);
+            OnTransducerMoved();
+        }
+
+        private bool CheckPath(CtImageStackDataset dataset, byte materialId, Vector3 start, Vector3 end)
+        {
+            Vector3 p1 = start;
+            Vector3 p2 = end;
+            Vector3 d = p2 - p1;
+
+            int steps = (int)Math.Max(Math.Abs(d.X), Math.Max(Math.Abs(d.Y), Math.Abs(d.Z)));
+            if (steps == 0) return true;
+
+            Vector3 inc = d / steps;
+            Vector3 current = p1;
+
+            int materialHits = 0;
+            for (int i = 0; i <= steps; i++)
+            {
+                int x = (int)Math.Round(current.X);
+                int y = (int)Math.Round(current.Y);
+                int z = (int)Math.Round(current.Z);
+
+                if (dataset.LabelData[x, y, z] == materialId)
+                {
+                    materialHits++;
+                }
+                current += inc;
+            }
+
+            // Require 90% of the path to be within the material
+            return (float)materialHits / steps > 0.90f;
         }
         
         private float CalculatePixelSizeFromVelocities()
@@ -459,36 +730,143 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
             return (float)Math.Sqrt(dx * dx + dy * dy + dz * dz) * _parameters.PixelSize;
         }
 
-        private void DrawTomographyView()
+        private void DrawTomographyWindow()
         {
-            if (_tomographyTexture == null || !_tomographyTexture.IsValid) return;
-            var availableSize = ImGui.GetContentRegionAvail();
-            if (availableSize.X < 100 || availableSize.Y < 100) return;
-            float aspectRatio = _tomographySliceAxis switch { 0 => (float)_parameters.Height / _parameters.Depth, 1 => (float)_parameters.Width / _parameters.Depth, 2 => (float)_parameters.Width / _parameters.Height, _ => 1.0f };
-            Vector2 imageSize;
-            if (availableSize.X / availableSize.Y > aspectRatio) { imageSize = new Vector2(availableSize.Y * aspectRatio, availableSize.Y); }
-            else { imageSize = new Vector2(availableSize.X, availableSize.X / aspectRatio); }
-            ImGui.Image(_tomographyTexture.GetImGuiTextureId(), imageSize);
-            ImGui.SameLine();
-            DrawColorBar();
+            ImGui.SetNextWindowSize(new Vector2(500, 550), ImGuiCond.FirstUseEver);
+            if (ImGui.Begin("Velocity Tomography", ref _isTomographyWindowOpen))
+            {
+                if (_lastResults == null)
+                {
+                    ImGui.Text("No simulation results available. Run a simulation first.");
+                    ImGui.End();
+                    return;
+                }
+
+                // --- Tomography Controls ---
+                ImGui.Text("Tomography Slice:");
+                ImGui.RadioButton("X Slice", ref _tomographySliceAxis, 0); ImGui.SameLine();
+                ImGui.RadioButton("Y Slice", ref _tomographySliceAxis, 1); ImGui.SameLine();
+                ImGui.RadioButton("Z Slice", ref _tomographySliceAxis, 2);
+
+                int maxSlice = _tomographySliceAxis switch
+                {
+                    0 => _currentDataset.Width - 1,
+                    1 => _currentDataset.Height - 1,
+                    2 => _currentDataset.Depth - 1,
+                    _ => 0
+                };
+                ImGui.SliderInt("Slice Index", ref _tomographySliceIndex, 0, maxSlice);
+
+                // --- Regenerate texture if controls change ---
+                if (_tomographySliceIndex != _lastTomographySliceIndex || _tomographySliceAxis != _lastTomographySliceAxis)
+                {
+                    _ = GenerateTomographyAsync();
+                    _lastTomographySliceIndex = _tomographySliceIndex;
+                    _lastTomographySliceAxis = _tomographySliceAxis;
+                }
+                
+                ImGui.Separator();
+
+                // --- Tomography View ---
+                if (_tomographyTexture != null && _tomographyTexture.IsValid)
+                {
+                    var availableSize = ImGui.GetContentRegionAvail();
+                    availableSize.Y -= 40; // Space for color bar
+                    if (availableSize.X > 50 && availableSize.Y > 50)
+                    {
+                        var imagePos = ImGui.GetCursorScreenPos();
+                        float aspectRatio = _tomographySliceAxis switch
+                        {
+                            0 => (float)_parameters.Height / _parameters.Depth,
+                            1 => (float)_parameters.Width / _parameters.Depth,
+                            _ => (float)_parameters.Width / _parameters.Height
+                        };
+                        Vector2 imageSize;
+                        if (availableSize.X / availableSize.Y > aspectRatio)
+                        {
+                            imageSize = new Vector2(availableSize.Y * aspectRatio, availableSize.Y);
+                        }
+                        else
+                        {
+                            imageSize = new Vector2(availableSize.X, availableSize.X / aspectRatio);
+                        }
+
+                        // Draw image
+                        ImGui.Image(_tomographyTexture.GetImGuiTextureId(), imageSize);
+                        var drawList = ImGui.GetWindowDrawList();
+
+                        // --- Draw Wave Propagation Path ---
+                        DrawWavePathOverlay(drawList, imagePos, imageSize);
+                    }
+                    DrawColorBar();
+                }
+                else
+                {
+                    ImGui.Text("Generating tomography...");
+                }
+            }
+            ImGui.End();
+        }
+
+        private void DrawWavePathOverlay(ImDrawListPtr drawList, Vector2 imagePos, Vector2 imageSize)
+        {
+            if (_parameters == null) return;
+            
+            // Get TX and RX positions in normalized 2D coordinates for the current slice
+            Vector2 txPos2D = GetSliceCoordinates(_txPosition);
+            Vector2 rxPos2D = GetSliceCoordinates(_rxPosition);
+
+            // Convert to screen coordinates
+            var txScreen = imagePos + txPos2D * imageSize;
+            var rxScreen = imagePos + rxPos2D * imageSize;
+
+            // Draw the full path
+            drawList.AddLine(txScreen, rxScreen, 0x80FFFFFF, 1.5f);
+            drawList.AddCircleFilled(txScreen, 5, 0xFF00FFFF, 12); // TX marker
+            drawList.AddText(txScreen + new Vector2(8, -8), 0xFF00FFFF, "TX");
+            drawList.AddCircleFilled(rxScreen, 5, 0xFF00FF00, 12); // RX marker
+            drawList.AddText(rxScreen + new Vector2(8, -8), 0xFF00FF00, "RX");
+
+            // Draw current wave position if simulating
+            if (_isSimulating && _simulator != null && _lastResults != null && _lastResults.PWaveTravelTime > 0)
+            {
+                float progress = (float)_simulator.CurrentStep / _lastResults.PWaveTravelTime;
+                progress = Math.Clamp(progress, 0.0f, 1.0f);
+                var wavePosScreen = Vector2.Lerp(txScreen, rxScreen, progress);
+                drawList.AddCircle(wavePosScreen, 8, 0xFF0080FF, 12, 2.0f);
+            }
+        }
+
+        private Vector2 GetSliceCoordinates(Vector3 pos3D)
+        {
+            return _tomographySliceAxis switch
+            {
+                0 => new Vector2(pos3D.Y, pos3D.Z), // X-slice shows YZ plane
+                1 => new Vector2(pos3D.X, pos3D.Z), // Y-slice shows XZ plane
+                _ => new Vector2(pos3D.X, pos3D.Y), // Z-slice shows XY plane
+            };
         }
 
         private void DrawColorBar()
         {
             var drawList = ImGui.GetWindowDrawList();
             var pos = ImGui.GetCursorScreenPos();
-            float width = 30; float height = 200;
-            for (int i = 0; i < height; i++)
+            var region = ImGui.GetContentRegionAvail();
+            pos.X += region.X / 4; // Center it a bit
+            float width = region.X / 2;
+            float height = 20;
+
+            for (int i = 0; i < width; i++)
             {
-                float value = 1.0f - (float)i / height;
+                float value = (float)i / width;
                 Vector4 color = GetVelocityColor(value);
                 uint col = ImGui.GetColorU32(color);
-                drawList.AddRectFilled(new Vector2(pos.X, pos.Y + i), new Vector2(pos.X + width, pos.Y + i + 1), col);
+                drawList.AddRectFilled(new Vector2(pos.X + i, pos.Y), new Vector2(pos.X + i + 1, pos.Y + height), col);
             }
-            ImGui.SetCursorScreenPos(new Vector2(pos.X + width + 5, pos.Y - 5));
-            ImGui.Text($"{_lastResults?.PWaveVelocity ?? 6000:F0} m/s");
-            ImGui.SetCursorScreenPos(new Vector2(pos.X + width + 5, pos.Y + height - 5));
+            ImGui.SetCursorScreenPos(new Vector2(pos.X - 50, pos.Y));
             ImGui.Text($"{_lastResults?.SWaveVelocity ?? 3000:F0} m/s");
+            ImGui.SameLine(pos.X + width + 10);
+            ImGui.Text($"{_lastResults?.PWaveVelocity ?? 6000:F0} m/s");
         }
 
         private Vector4 GetVelocityColor(float normalized)
@@ -545,14 +923,9 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
         var volumeLabels = await ExtractVolumeLabelsAsync(dataset);
         var densityVolume = await ExtractDensityVolumeAsync(dataset);
         
-        // NEW: Extract material properties volume but pass them differently
-        // We'll modify the simulator to use per-voxel properties internally if available
         var (youngsModulusVolume, poissonRatioVolume) = await ExtractMaterialPropertiesVolumeAsync(dataset);
-        
-        // Store the per-voxel properties in the simulator before running
         _simulator.SetPerVoxelMaterialProperties(youngsModulusVolume, poissonRatioVolume);
         
-        // CORRECT: Use the original 3-parameter call
         _lastResults = await _simulator.RunAsync(volumeLabels, densityVolume, _cancellationTokenSource.Token);
         
         if (_lastResults != null)
@@ -564,9 +937,11 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
             
             _calibrationManager.AddSimulationResult(material.Name, material.ID, (float)material.Density, _confiningPressure, _youngsModulus, _poissonRatio, _lastResults.PWaveVelocity, _lastResults.SWaveVelocity);
             
-            if (_showTomography) { await GenerateTomographyAsync(); }
+            // Generate initial tomography for the window
+            await GenerateTomographyAsync();
         }
     }
+    catch (OperationCanceledException) { Logger.Log("[AcousticSimulation] Simulation was cancelled."); }
     catch (Exception ex) { Logger.LogError($"[AcousticSimulation] Simulation failed: {ex.Message}"); }
     finally { _isSimulating = false; _simulator?.Dispose(); _simulator = null; }
 }
@@ -682,7 +1057,6 @@ private async Task<(float[,,] youngsModulus, float[,,] poissonRatio)> ExtractMat
     {
         var density = new float[dataset.Width, dataset.Height, dataset.Depth];
         
-        // NEW: Use material properties from labels and material library
         if (_useChunkedProcessing)
         {
             int chunkDepth = Math.Max(1, _chunkSizeMB * 1024 * 1024 / (dataset.Width * dataset.Height * sizeof(float)));
@@ -700,11 +1074,9 @@ private async Task<(float[,,] youngsModulus, float[,,] poissonRatio)> ExtractMat
                         int y = i / dataset.Width;
                         byte label = labelSlice[i];
                         
-                        // Get material properties for this label
                         var material = dataset.Materials.FirstOrDefault(m => m.ID == label);
                         if (material != null)
                         {
-                            // Use density from material library if linked, otherwise from material definition
                             if (!string.IsNullOrEmpty(material.PhysicalMaterialName))
                             {
                                 var physMat = MaterialLibrary.Instance.Find(material.PhysicalMaterialName);
@@ -720,7 +1092,6 @@ private async Task<(float[,,] youngsModulus, float[,,] poissonRatio)> ExtractMat
                         }
                         else
                         {
-                            // Default density for unlabeled voxels
                             density[x, y, z] = 0f;
                         }
                     }
@@ -740,7 +1111,6 @@ private async Task<(float[,,] youngsModulus, float[,,] poissonRatio)> ExtractMat
                     int y = i / dataset.Width;
                     byte label = labelSlice[i];
                     
-                    // Get material properties for this label
                     var material = dataset.Materials.FirstOrDefault(m => m.ID == label);
                     if (material != null)
                     {
@@ -777,7 +1147,11 @@ private async Task<(float[,,] youngsModulus, float[,,] poissonRatio)> ExtractMat
                 if (tomography != null)
                 {
                     _tomographyTexture?.Dispose();
-                    _tomographyTexture = TextureManager.CreateFromPixelData(tomography, (uint)(_tomographySliceAxis == 2 ? _parameters.Width : _parameters.Width), (uint)(_tomographySliceAxis == 0 ? _parameters.Depth : _parameters.Height));
+                    
+                    int width = _tomographySliceAxis switch { 0 => _parameters.Height, 1 => _parameters.Width, _ => _parameters.Width };
+                    int height = _tomographySliceAxis switch { 0 => _parameters.Depth, 1 => _parameters.Depth, _ => _parameters.Height };
+                    
+                    _tomographyTexture = TextureManager.CreateFromPixelData(tomography, (uint)width, (uint)height);
                 }
             });
         }
@@ -788,7 +1162,8 @@ private async Task<(float[,,] youngsModulus, float[,,] poissonRatio)> ExtractMat
             {
                 _lastVisualizationUpdate = DateTime.Now;
                 _currentWaveFieldMask = CreateWaveFieldMask(e.WaveField);
-                CtImageStackTools.Update3DPreviewFromExternal(e.Dataset as CtImageStackDataset, _currentWaveFieldMask, new Vector4(1, 0.5f, 0, 0.5f));
+                // The third parameter (color) is now a bright orange for better visibility
+                CtImageStackTools.Update3DPreviewFromExternal(_currentDataset, _currentWaveFieldMask, new Vector4(1.0f, 0.5f, 0.0f, 0.5f));
             }
         }
 
@@ -816,6 +1191,12 @@ private async Task<(float[,,] youngsModulus, float[,,] poissonRatio)> ExtractMat
 
         public void Dispose()
         {
+            AcousticIntegration.OnPositionsChanged -= OnTransducerMoved;
+            if (AcousticIntegration.IsActiveFor(_currentDataset))
+            {
+                AcousticIntegration.StopPlacement();
+            }
+
             _cancellationTokenSource?.Cancel();
             _cancellationTokenSource?.Dispose();
             _simulator?.Dispose();

@@ -77,16 +77,15 @@ namespace GeoscientistToolkit.UI
         /// </summary>
         public void Submit(ref bool pOpen)
         {
-            // Sync our state with the caller. If they pass false, we close.
-            if (!pOpen)
-            {
-                _isOpen = false;
-            }
+            // FIX: Sync our internal state `_isOpen` with the external request `pOpen`.
+            // This allows the menu item in the main window to make the panel reappear
+            // by setting `pOpen` to true, which now correctly updates our internal state.
+            _isOpen = pOpen;
 
-            // If we've been closed (programmatically or by caller), report it and clean up.
+            // If the panel is now considered closed (either by the caller or from a previous frame),
+            // perform necessary cleanup and stop rendering it.
             if (!_isOpen)
             {
-                pOpen = false;
                 if (_isPoppedOut)
                 {
                     DoPopIn(); // This disposes the popout window.
@@ -130,6 +129,8 @@ namespace GeoscientistToolkit.UI
                 ImGui.End();
                 
                 // After rendering, ensure the caller's flag is in sync with our state.
+                // If the user closed the window with the 'X' button, _isOpen is now false,
+                // and this will update the caller's flag for the next frame.
                 pOpen = _isOpen;
             }
         }
