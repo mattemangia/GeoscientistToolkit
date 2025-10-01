@@ -11,7 +11,7 @@ using System.Linq;
 namespace GeoscientistToolkit.Data.CtImageStack
 {
     /// <summary>
-    /// Metal-specific volume renderer with material support
+    /// Metal-specific volume renderer with enhanced acoustic simulation support
     /// </summary>
     public class MetalVolumeRenderer : IDisposable
     {
@@ -50,7 +50,7 @@ namespace GeoscientistToolkit.Data.CtImageStack
         public MetalVolumeRenderer(CtVolume3DViewer viewer)
         {
             _viewer = viewer;
-            Logger.Log("[MetalVolumeRenderer] Created");
+            Logger.Log("[MetalVolumeRenderer] Created for acoustic simulation support");
         }
 
         public void InitializeResources(ResourceFactory factory, Framebuffer framebuffer,
@@ -59,7 +59,7 @@ namespace GeoscientistToolkit.Data.CtImageStack
         {
             try
             {
-                Logger.Log("[MetalVolumeRenderer] Starting initialization...");
+                Logger.Log("[MetalVolumeRenderer] Starting initialization with acoustic support...");
 
                 _framebuffer = framebuffer;
                 _volumeTexture = volumeTexture;
@@ -70,7 +70,7 @@ namespace GeoscientistToolkit.Data.CtImageStack
                 // Create geometry
                 CreateGeometry(factory);
 
-                // Create shaders
+                // Create shaders with enhanced acoustic support
                 CreateShaders(factory);
 
                 // Create textures
@@ -79,7 +79,7 @@ namespace GeoscientistToolkit.Data.CtImageStack
                 // Create pipeline
                 CreatePipeline(factory);
 
-                // Create constant buffer
+                // Create constant buffer with proper size for acoustic data
                 _constantBuffer = factory.CreateBuffer(new BufferDescription(
                     (uint)Marshal.SizeOf<CtVolume3DViewer.VolumeConstants>(),
                     BufferUsage.UniformBuffer | BufferUsage.Dynamic));
@@ -92,7 +92,7 @@ namespace GeoscientistToolkit.Data.CtImageStack
                 CreateResourceSets(factory);
 
                 _isInitialized = true;
-                Logger.Log("[MetalVolumeRenderer] Initialization complete!");
+                Logger.Log("[MetalVolumeRenderer] Initialization complete with acoustic simulation support!");
             }
             catch (Exception ex)
             {
@@ -103,7 +103,7 @@ namespace GeoscientistToolkit.Data.CtImageStack
 
         private void CreateGeometry(ResourceFactory factory)
         {
-            // Create cube vertices
+            // Create cube vertices for volume and transducer markers
             float[] vertices = {
                 // Position only (3 floats per vertex)
                 0, 0, 0,
@@ -141,7 +141,7 @@ namespace GeoscientistToolkit.Data.CtImageStack
 
         private void CreateShaders(ResourceFactory factory)
         {
-            // Metal shader with material and preview support
+            // Enhanced Metal shader with improved acoustic wave visualization
             const string metalShaderSource = @"
 #include <metal_stdlib>
 using namespace metal;
@@ -186,7 +186,7 @@ vertex VertexOut vertex_main(VertexIn in [[stage_in]],
     return out;
 }
 
-// Fragment shader with material and preview support
+// Enhanced fragment shader for acoustic simulation
 fragment float4 fragment_main(VertexOut in [[stage_in]],
                              constant Constants& constants [[buffer(0)]],
                              texture3d<float> volumeTex [[texture(0)]],
@@ -214,17 +214,19 @@ fragment float4 fragment_main(VertexOut in [[stage_in]],
     
     tNear = max(tNear, 0.0);
     
-    // Check cutting planes
-    float3 cutPlanes[3] = {constants.CutPlaneX.xyz, constants.CutPlaneY.xyz, constants.CutPlaneZ.xyz};
-    
-    // Volume rendering with materials
+    // Volume rendering with enhanced acoustic wave visualization
     float4 color = float4(0.0);
     float stepSize = 0.01 * constants.ThresholdParams.z;
-    int maxSteps = 500;
+    int maxSteps = 768; // Increased for better quality
+    float opacityScale = 40.0;
+    
+    // Track if we're visualizing acoustic waves
+    bool hasAcousticWave = false;
+    float maxWaveIntensity = 0.0;
     
     for (int i = 0; i < maxSteps; i++) {
         float t = tNear + float(i) * stepSize;
-        if (t > tFar) break;
+        if (t > tFar || color.a > 0.95) break;
         
         float3 pos = rayOrigin + t * rayDir;
         if (any(pos < 0.0) || any(pos > 1.0)) continue;
@@ -235,26 +237,59 @@ fragment float4 fragment_main(VertexOut in [[stage_in]],
         if (constants.CutPlaneY.x > 0.5 && (pos.y - constants.CutPlaneY.z) * constants.CutPlaneY.y > 0.0) cut = true;
         if (constants.CutPlaneZ.x > 0.5 && (pos.z - constants.CutPlaneZ.z) * constants.CutPlaneZ.y > 0.0) cut = true;
         
+        // Check clipping planes
+        int numPlanes = int(constants.ClippingPlanesInfo.x);
+        for (int p = 0; p < numPlanes && p < 8; p++) {
+            float4 planeData = constants.ClippingPlanesData[p];
+            if (planeData.w > 0.5) {
+                float3 normal = planeData.xyz;
+                float dist = length(normal);
+                if (dist > 0.001) {
+                    normal /= dist;
+                    float mirror = step(1.5, dist);
+                    float planeDist = dot(pos - float3(0.5), normal) - (dist - 0.5 - mirror);
+                    if (mirror > 0.5 ? planeDist < 0.0 : planeDist > 0.0) {
+                        cut = true;
+                        break;
+                    }
+                }
+            }
+        }
+        
         if (cut) continue;
         
         float4 sampleColor = float4(0.0);
         
-        // Check preview first (highest priority for acoustic simulation visualization)
+        // Enhanced acoustic wave visualization (highest priority)
         if (constants.PreviewParams.x > 0.5) {
             float previewValue = previewTex.sample(volumeSampler, pos).r;
-            if (previewValue > 0.01) {
-                // Acoustic wave visualization with intensity
-                float intensity = previewValue;
-                sampleColor = float4(
-                    constants.PreviewParams.y * intensity,
-                    constants.PreviewParams.z * intensity, 
-                    constants.PreviewParams.w * intensity,
-                    constants.PreviewAlpha.x * intensity
-                );
+            if (previewValue > 0.001) {
+                hasAcousticWave = true;
+                maxWaveIntensity = max(maxWaveIntensity, previewValue);
+                
+                // Enhanced wave visualization with better color gradient
+                float intensity = pow(previewValue, 0.5); // Non-linear scaling for better visibility
+                
+                // Create a color gradient from blue (low) to red (high) intensity
+                float3 waveColor;
+                if (intensity < 0.5) {
+                    // Blue to green
+                    waveColor = mix(float3(0.0, 0.0, 1.0), float3(0.0, 1.0, 0.0), intensity * 2.0);
+                } else {
+                    // Green to red
+                    waveColor = mix(float3(0.0, 1.0, 0.0), float3(1.0, 0.0, 0.0), (intensity - 0.5) * 2.0);
+                }
+                
+                // Apply the preview color tint
+                waveColor = mix(waveColor, float3(constants.PreviewParams.yzw), 0.5);
+                
+                // Calculate opacity based on intensity
+                float waveOpacity = constants.PreviewAlpha.x * intensity * 2.0;
+                sampleColor = float4(waveColor, waveOpacity);
             }
         }
         
-        // If no preview, check for materials
+        // Material rendering (if no acoustic wave at this position)
         if (sampleColor.a == 0.0) {
             float labelValue = labelTex.sample(volumeSampler, pos).r;
             int materialId = int(labelValue * 255.0 + 0.5);
@@ -263,27 +298,44 @@ fragment float4 fragment_main(VertexOut in [[stage_in]],
                 // Sample material parameters and colors
                 float2 params = materialParams.read(uint2(materialId, 0), 0).xy;
                 bool isVisible = params.x > 0.5;
+                float opacity = params.y;
                 
                 if (isVisible) {
                     float4 matColor = materialColors.read(uint2(materialId, 0), 0);
-                    sampleColor = float4(matColor.rgb, matColor.a * 0.5);
+                    
+                    // Reduce material opacity when acoustic waves are present
+                    if (hasAcousticWave) {
+                        opacity *= 0.3; // Make materials more transparent during wave visualization
+                    }
+                    
+                    sampleColor = float4(matColor.rgb, matColor.a * opacity * 0.5);
                 }
-            } else if (constants.ThresholdParams.w > 0.5) {
-                // Sample grayscale volume
+            } else if (constants.ThresholdParams.w > 0.5 && !hasAcousticWave) {
+                // Grayscale volume (only if no acoustic waves)
                 float density = volumeTex.sample(volumeSampler, pos).r;
                 
                 if (density > constants.ThresholdParams.x && density < constants.ThresholdParams.y) {
                     float normalizedDensity = (density - constants.ThresholdParams.x) / 
                                             (constants.ThresholdParams.y - constants.ThresholdParams.x + 0.001);
-                    sampleColor = float4(normalizedDensity, normalizedDensity, normalizedDensity, normalizedDensity * 0.3);
+                    
+                    // Apply color map if requested
+                    float3 volColor = float3(normalizedDensity);
+                    if (constants.RenderParams.x > 0.5) {
+                        // Simple color mapping for acoustic context
+                        volColor = mix(float3(0.1, 0.1, 0.3), float3(0.3, 0.3, 0.7), normalizedDensity);
+                    }
+                    
+                    sampleColor = float4(volColor, normalizedDensity * 0.3);
                 }
             }
         }
         
-        // Accumulate color
+        // Accumulate color with proper alpha blending
         if (sampleColor.a > 0.0) {
-            float opacity = sampleColor.a * stepSize * 50.0;
+            float opacity = sampleColor.a * stepSize * opacityScale;
             opacity = clamp(opacity, 0.0, 1.0);
+            
+            // Premultiply alpha for correct blending
             color.rgb += (1.0 - color.a) * sampleColor.rgb * opacity;
             color.a += (1.0 - color.a) * opacity;
             
@@ -291,10 +343,15 @@ fragment float4 fragment_main(VertexOut in [[stage_in]],
         }
     }
     
+    // Enhance brightness if acoustic waves are present
+    if (hasAcousticWave && color.a > 0.0) {
+        color.rgb = mix(color.rgb, color.rgb * 1.5, maxWaveIntensity);
+    }
+    
     return color;
 }
 
-// Plane visualization shaders
+// Plane visualization shaders for transducer markers
 vertex float4 plane_vertex_main(VertexIn in [[stage_in]],
                                constant PlaneConstants& constants [[buffer(0)]]) {
     return constants.mvp * float4(in.Position, 1.0);
@@ -329,7 +386,7 @@ fragment float4 plane_fragment_main(constant PlaneConstants& constants [[buffer(
                     Encoding.UTF8.GetBytes(metalShaderSource),
                     "plane_fragment_main"));
 
-                Logger.Log("[MetalVolumeRenderer] Shaders created successfully");
+                Logger.Log("[MetalVolumeRenderer] Enhanced acoustic shaders created successfully");
             }
             catch (Exception ex)
             {
@@ -343,15 +400,53 @@ fragment float4 plane_fragment_main(constant PlaneConstants& constants [[buffer(
             // Create 2D textures for Metal compatibility
             const int size = 256;
 
-            // Color map texture (grayscale for now)
+            // Enhanced color map for acoustic visualization
             var colorMapData = new RgbaFloat[size * 4];
+            
+            // Grayscale
             for (int i = 0; i < size; i++)
             {
                 float v = i / (float)(size - 1);
-                for (int j = 0; j < 4; j++)
-                {
-                    colorMapData[i + j * size] = new RgbaFloat(v, v, v, 1);
+                colorMapData[i] = new RgbaFloat(v, v, v, 1);
+            }
+            
+            // Jet colormap (good for wave visualization)
+            for (int i = 0; i < size; i++)
+            {
+                float t = i / (float)(size - 1);
+                float r, g, b;
+                if (t < 0.25f) {
+                    r = 0;
+                    g = 4 * t;
+                    b = 1;
+                } else if (t < 0.5f) {
+                    r = 0;
+                    g = 1;
+                    b = 1 - 4 * (t - 0.25f);
+                } else if (t < 0.75f) {
+                    r = 4 * (t - 0.5f);
+                    g = 1;
+                    b = 0;
+                } else {
+                    r = 1;
+                    g = 1 - 4 * (t - 0.75f);
+                    b = 0;
                 }
+                colorMapData[size + i] = new RgbaFloat(r, g, b, 1);
+            }
+            
+            // Cool-warm colormap
+            for (int i = 0; i < size; i++)
+            {
+                float t = i / (float)(size - 1);
+                colorMapData[size * 2 + i] = new RgbaFloat(t, 1 - t, 1 - Math.Abs(2 * t - 1), 1);
+            }
+            
+            // HSV rainbow
+            for (int i = 0; i < size; i++)
+            {
+                float h = (i / (float)(size - 1)) * 0.7f;
+                colorMapData[size * 3 + i] = HsvToRgb(h, 1.0f, 1.0f);
             }
 
             _colorMapTexture = factory.CreateTexture(TextureDescription.Texture2D(
@@ -367,12 +462,32 @@ fragment float4 plane_fragment_main(constant PlaneConstants& constants [[buffer(
 
             UpdateMaterialTextures();
 
-            Logger.Log("[MetalVolumeRenderer] Textures created");
+            Logger.Log("[MetalVolumeRenderer] Textures created for acoustic visualization");
+        }
+
+        private static RgbaFloat HsvToRgb(float h, float s, float v)
+        {
+            float r, g, b;
+            int i = (int)(h * 6);
+            float f = h * 6 - i;
+            float p = v * (1 - s);
+            float q = v * (1 - f * s);
+            float t = v * (1 - (1 - f) * s);
+            switch (i % 6)
+            {
+                case 0: r = v; g = t; b = p; break;
+                case 1: r = q; g = v; b = p; break;
+                case 2: r = p; g = v; b = t; break;
+                case 3: r = p; g = q; b = v; break;
+                case 4: r = t; g = p; b = v; break;
+                default: r = v; g = p; b = q; break;
+            }
+            return new RgbaFloat(r, g, b, 1.0f);
         }
 
         private void CreatePipeline(ResourceFactory factory)
         {
-            // Create resource layout with all textures including preview
+            // Create resource layout with all textures including preview for acoustic waves
             _resourceLayout = factory.CreateResourceLayout(new ResourceLayoutDescription(
                 new ResourceLayoutElementDescription("Constants", ResourceKind.UniformBuffer, ShaderStages.Vertex | ShaderStages.Fragment),
                 new ResourceLayoutElementDescription("VolumeTexture", ResourceKind.TextureReadOnly, ShaderStages.Fragment),
@@ -382,7 +497,7 @@ fragment float4 plane_fragment_main(constant PlaneConstants& constants [[buffer(
                 new ResourceLayoutElementDescription("PreviewTexture", ResourceKind.TextureReadOnly, ShaderStages.Fragment),
                 new ResourceLayoutElementDescription("VolumeSampler", ResourceKind.Sampler, ShaderStages.Fragment)));
 
-            // Create pipeline
+            // Create pipeline with proper blending for acoustic visualization
             var pipelineDesc = new GraphicsPipelineDescription(
                 BlendStateDescription.SingleAlphaBlend,
                 new DepthStencilStateDescription(true, true, ComparisonKind.LessEqual),
@@ -399,7 +514,7 @@ fragment float4 plane_fragment_main(constant PlaneConstants& constants [[buffer(
 
             _pipeline = factory.CreateGraphicsPipeline(pipelineDesc);
 
-            // Create plane visualization pipeline
+            // Create plane visualization pipeline for transducer markers
             _planeVisualizationResourceLayout = factory.CreateResourceLayout(new ResourceLayoutDescription(
                 new ResourceLayoutElementDescription("Constants", ResourceKind.UniformBuffer, ShaderStages.Vertex | ShaderStages.Fragment)));
 
@@ -417,12 +532,12 @@ fragment float4 plane_fragment_main(constant PlaneConstants& constants [[buffer(
                 new[] { _planeVisualizationResourceLayout },
                 _framebuffer.OutputDescription));
 
-            Logger.Log("[MetalVolumeRenderer] Pipeline created");
+            Logger.Log("[MetalVolumeRenderer] Pipeline created with acoustic support");
         }
 
         private void CreateResourceSets(ResourceFactory factory)
         {
-            // Create main resource set with all resources including preview texture
+            // Create main resource set with all resources including preview texture for acoustic waves
             _resourceSet = factory.CreateResourceSet(new ResourceSetDescription(
                 _resourceLayout,
                 _constantBuffer,
@@ -433,12 +548,12 @@ fragment float4 plane_fragment_main(constant PlaneConstants& constants [[buffer(
                 _previewTexture,
                 _volumeSampler));
 
-            // Plane visualization resource set
+            // Plane visualization resource set for transducers
             _planeVisualizationResourceSet = factory.CreateResourceSet(new ResourceSetDescription(
                 _planeVisualizationResourceLayout,
                 _planeVisualizationConstantBuffer));
 
-            Logger.Log("[MetalVolumeRenderer] Resource sets created");
+            Logger.Log("[MetalVolumeRenderer] Resource sets created with acoustic support");
         }
 
         public void UpdateMaterialTextures()
@@ -473,7 +588,7 @@ fragment float4 plane_fragment_main(constant PlaneConstants& constants [[buffer(
         {
             _labelTexture = newLabelTexture;
 
-            // Recreate resource set with new label texture and preview texture
+            // Recreate resource set with new label texture
             _resourceSet?.Dispose();
             _resourceSet = VeldridManager.Factory.CreateResourceSet(new ResourceSetDescription(
                 _resourceLayout,
@@ -504,7 +619,7 @@ fragment float4 plane_fragment_main(constant PlaneConstants& constants [[buffer(
                 _previewTexture,
                 _volumeSampler));
 
-            Logger.Log("[MetalVolumeRenderer] Preview texture updated");
+            Logger.Log("[MetalVolumeRenderer] Preview texture updated for acoustic wave visualization");
         }
 
         public void Render(CommandList cl, Framebuffer framebuffer,
@@ -521,10 +636,10 @@ fragment float4 plane_fragment_main(constant PlaneConstants& constants [[buffer(
             {
                 cl.Begin();
                 cl.SetFramebuffer(framebuffer);
-                cl.ClearColorTarget(0, new RgbaFloat(0.1f, 0.1f, 0.1f, 1.0f));
+                cl.ClearColorTarget(0, new RgbaFloat(0.05f, 0.05f, 0.1f, 1.0f)); // Darker background for better contrast
                 cl.ClearDepthStencil(1f);
 
-                // Update constants with all parameters including preview
+                // Update constants with all parameters including acoustic preview
                 Matrix4x4.Invert(viewMatrix, out var invView);
                 
                 var constants = new CtVolume3DViewer.VolumeConstants
@@ -583,11 +698,11 @@ fragment float4 plane_fragment_main(constant PlaneConstants& constants [[buffer(
                     RenderPlaneVisualizations(cl, viewMatrix, projMatrix, planeVertexBuffer, planeIndexBuffer);
                 }
 
+                // Draw acoustic transducer markers if active
                 if (AcousticIntegration.IsActiveFor(_viewer._editableDataset))
                 {
                     RenderTransducerMarkers(cl, viewMatrix, projMatrix);
                 }
-
 
                 cl.End();
                 VeldridManager.GraphicsDevice.SubmitCommands(cl);
@@ -608,17 +723,58 @@ fragment float4 plane_fragment_main(constant PlaneConstants& constants [[buffer(
 
             var viewProj = viewMatrix * projMatrix;
 
-            // Draw TX Marker
-            var txTransform = Matrix4x4.CreateScale(0.02f) * Matrix4x4.CreateTranslation(AcousticIntegration.TxPosition);
-            var txConstants = new CtVolume3DViewer.PlaneVisualizationConstants { ViewProj = txTransform * viewProj, PlaneColor = new Vector4(0, 1, 1, 1) };
+            // Draw TX Marker (cyan)
+            var txTransform = Matrix4x4.CreateScale(0.025f) * Matrix4x4.CreateTranslation(AcousticIntegration.TxPosition);
+            var txConstants = new CtVolume3DViewer.PlaneVisualizationConstants 
+            { 
+                ViewProj = txTransform * viewProj, 
+                PlaneColor = new Vector4(0, 0.8f, 1, 0.9f) // Bright cyan
+            };
             VeldridManager.GraphicsDevice.UpdateBuffer(_planeVisualizationConstantBuffer, 0, ref txConstants);
             cl.DrawIndexed(36, 1, 0, 0, 0);
 
-            // Draw RX Marker
-            var rxTransform = Matrix4x4.CreateScale(0.02f) * Matrix4x4.CreateTranslation(AcousticIntegration.RxPosition);
-            var rxConstants = new CtVolume3DViewer.PlaneVisualizationConstants { ViewProj = rxTransform * viewProj, PlaneColor = new Vector4(0, 1, 0, 1) };
+            // Draw RX Marker (green)
+            var rxTransform = Matrix4x4.CreateScale(0.025f) * Matrix4x4.CreateTranslation(AcousticIntegration.RxPosition);
+            var rxConstants = new CtVolume3DViewer.PlaneVisualizationConstants 
+            { 
+                ViewProj = rxTransform * viewProj, 
+                PlaneColor = new Vector4(0, 1, 0.2f, 0.9f) // Bright green
+            };
             VeldridManager.GraphicsDevice.UpdateBuffer(_planeVisualizationConstantBuffer, 0, ref rxConstants);
             cl.DrawIndexed(36, 1, 0, 0, 0);
+            
+            // Draw line between TX and RX (optional - using thin stretched cube)
+            var txPos = AcousticIntegration.TxPosition;
+            var rxPos = AcousticIntegration.RxPosition;
+            var midPoint = (txPos + rxPos) / 2;
+            var direction = rxPos - txPos;
+            float distance = direction.Length();
+            
+            if (distance > 0.01f)
+            {
+                // Create a thin line by scaling and orienting a cube
+                var lineTransform = Matrix4x4.CreateScale(0.002f, 0.002f, distance);
+                
+                // Calculate rotation to align with TX-RX direction
+                var normalizedDir = Vector3.Normalize(direction);
+                var rotAxis = Vector3.Cross(Vector3.UnitZ, normalizedDir);
+                float angle = MathF.Acos(Vector3.Dot(Vector3.UnitZ, normalizedDir));
+                
+                if (rotAxis.LengthSquared() > 0.001f)
+                {
+                    lineTransform *= Matrix4x4.CreateFromAxisAngle(Vector3.Normalize(rotAxis), angle);
+                }
+                
+                lineTransform *= Matrix4x4.CreateTranslation(txPos);
+                
+                var lineConstants = new CtVolume3DViewer.PlaneVisualizationConstants
+                {
+                    ViewProj = lineTransform * viewProj,
+                    PlaneColor = new Vector4(1, 1, 0, 0.3f) // Semi-transparent yellow
+                };
+                VeldridManager.GraphicsDevice.UpdateBuffer(_planeVisualizationConstantBuffer, 0, ref lineConstants);
+                cl.DrawIndexed(36, 1, 0, 0, 0);
+            }
         }
 
         private void RenderPlaneVisualizations(CommandList cl, Matrix4x4 viewMatrix, Matrix4x4 projMatrix,

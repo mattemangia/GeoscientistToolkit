@@ -429,9 +429,11 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
         for (int y = 1; y < _params.Height - 1; y++)
         for (int x = 1; x < _params.Width - 1; x++)
         {
-            if (labels[x, y, gz] != _params.SelectedMaterialID) continue;
+            // Allow wave propagation through ALL materials, not just selected
+            byte materialId = labels[x, y, gz];
+            if (materialId == 0) continue; // Skip air/background
             
-            // Get per-voxel material properties if available
+            // Get material-specific properties
             float localE, localNu, localLambda, localMu;
             if (_usePerVoxelProperties && _perVoxelYoungsModulus != null && _perVoxelPoissonRatio != null)
             {
@@ -440,33 +442,51 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
             }
             else
             {
-                // Use global parameters
-                localE = _params.YoungsModulusMPa * 1e6f; // Convert MPa to Pa
+                // Use global parameters for all materials (allows wave to propagate)
+                localE = _params.YoungsModulusMPa * 1e6f;
                 localNu = _params.PoissonRatio;
             }
             
-            // Calculate Lamé constants from local E and nu
+            // Calculate Lamé constants
             localMu = localE / (2f * (1f + localNu));
             localLambda = localE * localNu / ((1f + localNu) * (1f - 2f * localNu));
             
-            // Calculate velocity gradients
-            float dvx_dx = (c.Vx[x + 1, y, lz] - c.Vx[x - 1, y, lz]) / (2 * _params.PixelSize);
-            float dvy_dy = (c.Vy[x, y + 1, lz] - c.Vy[x, y - 1, lz]) / (2 * _params.PixelSize);
-            float dvz_dz = lz > 0 && lz < d - 1 ? 
-                (c.Vz[x, y, lz + 1] - c.Vz[x, y, lz - 1]) / (2 * _params.PixelSize) : 0;
-            float dvy_dx = (c.Vy[x + 1, y, lz] - c.Vy[x - 1, y, lz]) / (2 * _params.PixelSize);
-            float dvx_dy = (c.Vx[x, y + 1, lz] - c.Vx[x, y - 1, lz]) / (2 * _params.PixelSize);
-            float dvz_dx = (c.Vz[x + 1, y, lz] - c.Vz[x - 1, y, lz]) / (2 * _params.PixelSize);
-            float dvx_dz = lz > 0 && lz < d - 1 ? 
-                (c.Vx[x, y, lz + 1] - c.Vx[x, y, lz - 1]) / (2 * _params.PixelSize) : 0;
-            float dvz_dy = (c.Vz[x, y + 1, lz] - c.Vz[x, y - 1, lz]) / (2 * _params.PixelSize);
-            float dvy_dz = lz > 0 && lz < d - 1 ? 
-                (c.Vy[x, y, lz + 1] - c.Vy[x, y, lz - 1]) / (2 * _params.PixelSize) : 0;
+            // Calculate velocity gradients with boundary checks
+            float dvx_dx = (c.Vx[Math.Min(x + 1, _params.Width - 1), y, lz] - 
+                           c.Vx[Math.Max(x - 1, 0), y, lz]) / (2 * _params.PixelSize);
+            float dvy_dy = (c.Vy[x, Math.Min(y + 1, _params.Height - 1), lz] - 
+                           c.Vy[x, Math.Max(y - 1, 0), lz]) / (2 * _params.PixelSize);
+            float dvz_dz = 0;
+            if (lz > 0 && lz < d - 1)
+            {
+                dvz_dz = (c.Vz[x, y, lz + 1] - c.Vz[x, y, lz - 1]) / (2 * _params.PixelSize);
+            }
+            
+            float dvy_dx = (c.Vy[Math.Min(x + 1, _params.Width - 1), y, lz] - 
+                           c.Vy[Math.Max(x - 1, 0), y, lz]) / (2 * _params.PixelSize);
+            float dvx_dy = (c.Vx[x, Math.Min(y + 1, _params.Height - 1), lz] - 
+                           c.Vx[x, Math.Max(y - 1, 0), lz]) / (2 * _params.PixelSize);
+            float dvz_dx = (c.Vz[Math.Min(x + 1, _params.Width - 1), y, lz] - 
+                           c.Vz[Math.Max(x - 1, 0), y, lz]) / (2 * _params.PixelSize);
+            float dvx_dz = 0, dvz_dy = 0, dvy_dz = 0;
+            if (lz > 0 && lz < d - 1)
+            {
+                dvx_dz = (c.Vx[x, y, lz + 1] - c.Vx[x, y, lz - 1]) / (2 * _params.PixelSize);
+                dvz_dy = (c.Vz[x, Math.Min(y + 1, _params.Height - 1), lz] - 
+                         c.Vz[x, Math.Max(y - 1, 0), lz]) / (2 * _params.PixelSize);
+                dvy_dz = (c.Vy[x, y, lz + 1] - c.Vy[x, y, lz - 1]) / (2 * _params.PixelSize);
+            }
             
             float volumetric = dvx_dx + dvy_dy + dvz_dz;
-            float damp = 1f - c.Damage[x, y, lz] * 0.9f;
             
-            // Update stress components using local material properties
+            // Apply damage only to selected material
+            float damp = 1f;
+            if (materialId == _params.SelectedMaterialID)
+            {
+                damp = 1f - c.Damage[x, y, lz] * 0.5f; // Reduced damage effect
+            }
+            
+            // Update stress components
             c.Sxx[x, y, lz] += _dt * damp * (localLambda * volumetric + 2f * localMu * dvx_dx);
             c.Syy[x, y, lz] += _dt * damp * (localLambda * volumetric + 2f * localMu * dvy_dy);
             c.Szz[x, y, lz] += _dt * damp * (localLambda * volumetric + 2f * localMu * dvz_dz);
@@ -474,53 +494,86 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
             c.Sxz[x, y, lz] += _dt * damp * localMu * (dvz_dx + dvx_dz);
             c.Syz[x, y, lz] += _dt * damp * localMu * (dvz_dy + dvy_dz);
             
-            // Apply damage model with per-voxel limits based on local E
-            float localTensileLimit = 0.05f * localE;
-            float localShearLimit = 0.03f * localE;
-            
-            float tensileMax = MathF.Max(c.Sxx[x, y, lz], MathF.Max(c.Syy[x, y, lz], c.Szz[x, y, lz]));
-            float shearMag = MathF.Sqrt(c.Sxy[x, y, lz] * c.Sxy[x, y, lz] + 
-                                        c.Sxz[x, y, lz] * c.Sxz[x, y, lz] + 
-                                        c.Syz[x, y, lz] * c.Syz[x, y, lz]);
-            
-            float dInc = 0f;
-            if (tensileMax > localTensileLimit) 
-                dInc += _damageRatePerSec * _dt * (tensileMax / localTensileLimit - 1f);
-            if (shearMag > localShearLimit) 
-                dInc += _damageRatePerSec * _dt * (shearMag / localShearLimit - 1f);
-            
-            c.Damage[x, y, lz] = Math.Min(1f, Math.Max(0f, c.Damage[x, y, lz] + dInc));
+            // Apply damage model only for selected material
+            if (materialId == _params.SelectedMaterialID && _params.UseBrittleModel)
+            {
+                float localTensileLimit = 0.05f * localE;
+                float localShearLimit = 0.03f * localE;
+                
+                float tensileMax = MathF.Max(c.Sxx[x, y, lz], MathF.Max(c.Syy[x, y, lz], c.Szz[x, y, lz]));
+                float shearMag = MathF.Sqrt(c.Sxy[x, y, lz] * c.Sxy[x, y, lz] + 
+                                            c.Sxz[x, y, lz] * c.Sxz[x, y, lz] + 
+                                            c.Syz[x, y, lz] * c.Syz[x, y, lz]);
+                
+                float dInc = 0f;
+                if (tensileMax > localTensileLimit) 
+                    dInc += _damageRatePerSec * _dt * (tensileMax / localTensileLimit - 1f) * 0.1f; // Reduced damage rate
+                if (shearMag > localShearLimit) 
+                    dInc += _damageRatePerSec * _dt * (shearMag / localShearLimit - 1f) * 0.1f;
+                
+                c.Damage[x, y, lz] = Math.Min(0.9f, Math.Max(0f, c.Damage[x, y, lz] + dInc)); // Cap at 0.9
+            }
         }
     });
 }
 
         private void UpdateChunkVelocityCPU(WaveFieldChunk c, byte[,,] labels, float[,,] density)
+{
+    int d = c.EndZ - c.StartZ;
+    Parallel.For(1, d - 1, lz =>
+    {
+        int gz = c.StartZ + lz;
+        for (int y = 1; y < _params.Height - 1; y++)
+        for (int x = 1; x < _params.Width - 1; x++)
         {
-            int d = c.EndZ - c.StartZ;
-            Parallel.For(1, d - 1, lz =>
+            // Allow wave propagation through ALL materials
+            byte materialId = labels[x, y, gz];
+            if (materialId == 0) continue; // Skip air/background
+            
+            float rho = MathF.Max(100f, density[x, y, gz]);
+            
+            // Calculate stress gradients with boundary checks
+            float dsxx_dx = (c.Sxx[Math.Min(x + 1, _params.Width - 1), y, lz] - 
+                            c.Sxx[Math.Max(x - 1, 0), y, lz]) / (2 * _params.PixelSize);
+            float dsyy_dy = (c.Syy[x, Math.Min(y + 1, _params.Height - 1), lz] - 
+                            c.Syy[x, Math.Max(y - 1, 0), lz]) / (2 * _params.PixelSize);
+            float dszz_dz = 0;
+            if (lz > 0 && lz < d - 1)
             {
-                int gz = c.StartZ + lz;
-                for (int y = 1; y < _params.Height - 1; y++)
-                for (int x = 1; x < _params.Width - 1; x++)
-                {
-                    if (labels[x, y, gz] != _params.SelectedMaterialID) continue;
-                    float rho = MathF.Max(100f, density[x, y, gz]);
-                    float dsxx_dx = (c.Sxx[x + 1, y, lz] - c.Sxx[x - 1, y, lz]) / (2 * _params.PixelSize);
-                    float dsyy_dy = (c.Syy[x, y + 1, lz] - c.Syy[x, y - 1, lz]) / (2 * _params.PixelSize);
-                    float dszz_dz = (c.Szz[x, y, lz + 1] - c.Szz[x, y, lz - 1]) / (2 * _params.PixelSize);
-                    float dsxy_dy = (c.Sxy[x, y + 1, lz] - c.Sxy[x, y - 1, lz]) / (2 * _params.PixelSize);
-                    float dsxy_dx = (c.Sxy[x + 1, y, lz] - c.Sxy[x - 1, y, lz]) / (2 * _params.PixelSize);
-                    float dsxz_dz = (c.Sxz[x, y, lz + 1] - c.Sxz[x, y, lz - 1]) / (2 * _params.PixelSize);
-                    float dsxz_dx = (c.Sxz[x + 1, y, lz] - c.Sxz[x - 1, y, lz]) / (2 * _params.PixelSize);
-                    float dsyz_dz = (c.Syz[x, y, lz + 1] - c.Syz[x, y, lz - 1]) / (2 * _params.PixelSize);
-                    float dsyz_dy = (c.Syz[x, y + 1, lz] - c.Syz[x, y - 1, lz]) / (2 * _params.PixelSize);
-                    const float damping = 0.995f;
-                    c.Vx[x, y, lz] = c.Vx[x, y, lz] * damping + _dt * (dsxx_dx + dsxy_dy + dsxz_dz) / rho;
-                    c.Vy[x, y, lz] = c.Vy[x, y, lz] * damping + _dt * (dsxy_dx + dsyy_dy + dsyz_dz) / rho;
-                    c.Vz[x, y, lz] = c.Vz[x, y, lz] * damping + _dt * (dsxz_dx + dsyz_dy + dszz_dz) / rho;
-                }
-            });
+                dszz_dz = (c.Szz[x, y, lz + 1] - c.Szz[x, y, lz - 1]) / (2 * _params.PixelSize);
+            }
+            
+            float dsxy_dy = (c.Sxy[x, Math.Min(y + 1, _params.Height - 1), lz] - 
+                            c.Sxy[x, Math.Max(y - 1, 0), lz]) / (2 * _params.PixelSize);
+            float dsxy_dx = (c.Sxy[Math.Min(x + 1, _params.Width - 1), y, lz] - 
+                            c.Sxy[Math.Max(x - 1, 0), y, lz]) / (2 * _params.PixelSize);
+            float dsxz_dz = 0, dsxz_dx = 0, dsyz_dz = 0, dsyz_dy = 0;
+            if (lz > 0 && lz < d - 1)
+            {
+                dsxz_dz = (c.Sxz[x, y, lz + 1] - c.Sxz[x, y, lz - 1]) / (2 * _params.PixelSize);
+                dsyz_dz = (c.Syz[x, y, lz + 1] - c.Syz[x, y, lz - 1]) / (2 * _params.PixelSize);
+            }
+            dsxz_dx = (c.Sxz[Math.Min(x + 1, _params.Width - 1), y, lz] - 
+                      c.Sxz[Math.Max(x - 1, 0), y, lz]) / (2 * _params.PixelSize);
+            dsyz_dy = (c.Syz[x, Math.Min(y + 1, _params.Height - 1), lz] - 
+                      c.Syz[x, Math.Max(y - 1, 0), lz]) / (2 * _params.PixelSize);
+            
+            // Reduced damping for better propagation
+            const float damping = 0.999f; // Very light damping
+            
+            // Update velocities
+            c.Vx[x, y, lz] = c.Vx[x, y, lz] * damping + _dt * (dsxx_dx + dsxy_dy + dsxz_dz) / rho;
+            c.Vy[x, y, lz] = c.Vy[x, y, lz] * damping + _dt * (dsxy_dx + dsyy_dy + dsyz_dz) / rho;
+            c.Vz[x, y, lz] = c.Vz[x, y, lz] * damping + _dt * (dsxz_dx + dsyz_dy + dszz_dz) / rho;
+            
+            // Apply velocity limits to prevent instability
+            const float maxVel = 10000f; // 10 km/s
+            c.Vx[x, y, lz] = Math.Clamp(c.Vx[x, y, lz], -maxVel, maxVel);
+            c.Vy[x, y, lz] = Math.Clamp(c.Vy[x, y, lz], -maxVel, maxVel);
+            c.Vz[x, y, lz] = Math.Clamp(c.Vz[x, y, lz], -maxVel, maxVel);
         }
+    });
+}
 
         #endregion
 
@@ -538,20 +591,142 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
         }
 
         private void ApplyInitialSource(byte[,,] labels, float[,,] density)
+{
+    if (_params.UseFullFaceTransducers)
+    {
+        // Apply source to entire face of the selected material
+        switch (_params.Axis)
         {
-            int tx = (int)(_params.TxPosition.X * _params.Width);
-            int ty = (int)(_params.TxPosition.Y * _params.Height);
-            int tz = (int)(_params.TxPosition.Z * _params.Depth);
-            var c = _chunks.First(k => tz >= k.StartZ && tz < k.EndZ);
-            int lz = tz - c.StartZ;
-            float amp = MathF.Max(1e-4f, _params.SourceAmplitude);
-            switch (_params.Axis)
+            case 0: // X-axis: apply to YZ face at x=0
+                for (int z = 0; z < _params.Depth; z++)
+                {
+                    var chunk = _chunks.FirstOrDefault(c => z >= c.StartZ && z < c.EndZ);
+                    if (chunk == null) continue;
+                    int localZ = z - chunk.StartZ;
+                    
+                    for (int y = 0; y < _params.Height; y++)
+                    {
+                        // Apply source at the first X position where material is found
+                        for (int x = 0; x < Math.Min(5, _params.Width); x++)
+                        {
+                            if (labels[x, y, z] == _params.SelectedMaterialID)
+                            {
+                                float amp = MathF.Max(1e-4f, _params.SourceAmplitude);
+                                chunk.Vx[x, y, localZ] += amp;
+                                chunk.Sxx[x, y, localZ] += amp * 1e6f; // Add stress pulse
+                                break; // Only apply to first material voxel in X direction
+                            }
+                        }
+                    }
+                }
+                break;
+                
+            case 1: // Y-axis: apply to XZ face at y=0
+                for (int z = 0; z < _params.Depth; z++)
+                {
+                    var chunk = _chunks.FirstOrDefault(c => z >= c.StartZ && z < c.EndZ);
+                    if (chunk == null) continue;
+                    int localZ = z - chunk.StartZ;
+                    
+                    for (int x = 0; x < _params.Width; x++)
+                    {
+                        // Apply source at the first Y position where material is found
+                        for (int y = 0; y < Math.Min(5, _params.Height); y++)
+                        {
+                            if (labels[x, y, z] == _params.SelectedMaterialID)
+                            {
+                                float amp = MathF.Max(1e-4f, _params.SourceAmplitude);
+                                chunk.Vy[x, y, localZ] += amp;
+                                chunk.Syy[x, y, localZ] += amp * 1e6f; // Add stress pulse
+                                break; // Only apply to first material voxel in Y direction
+                            }
+                        }
+                    }
+                }
+                break;
+                
+            case 2: // Z-axis: apply to XY face at z=0
+                // Find the first chunk
+                var firstChunk = _chunks[0];
+                for (int x = 0; x < _params.Width; x++)
+                {
+                    for (int y = 0; y < _params.Height; y++)
+                    {
+                        // Apply source at the first Z position where material is found
+                        for (int z = 0; z < Math.Min(5, firstChunk.EndZ - firstChunk.StartZ); z++)
+                        {
+                            int globalZ = firstChunk.StartZ + z;
+                            if (labels[x, y, globalZ] == _params.SelectedMaterialID)
+                            {
+                                float amp = MathF.Max(1e-4f, _params.SourceAmplitude);
+                                firstChunk.Vz[x, y, z] += amp;
+                                firstChunk.Szz[x, y, z] += amp * 1e6f; // Add stress pulse
+                                break; // Only apply to first material voxel in Z direction
+                            }
+                        }
+                    }
+                }
+                break;
+        }
+    }
+    else
+    {
+        // Point source implementation
+        int tx = (int)(_params.TxPosition.X * _params.Width);
+        int ty = (int)(_params.TxPosition.Y * _params.Height);
+        int tz = (int)(_params.TxPosition.Z * _params.Depth);
+        
+        // Apply spherical source with proper amplitude
+        int radius = 3; // Slightly larger radius for better wave initiation
+        float amp = MathF.Max(1e-4f, _params.SourceAmplitude);
+        
+        for (int dz = -radius; dz <= radius; dz++)
+        {
+            int gz = tz + dz;
+            if (gz < 0 || gz >= _params.Depth) continue;
+            
+            var chunk = _chunks.FirstOrDefault(c => gz >= c.StartZ && gz < c.EndZ);
+            if (chunk == null) continue;
+            int localZ = gz - chunk.StartZ;
+            
+            for (int dy = -radius; dy <= radius; dy++)
             {
-                case 0: c.Vx[tx, ty, lz] += amp; break;
-                case 1: c.Vy[tx, ty, lz] += amp; break;
-                default: c.Vz[tx, ty, lz] += amp; break;
+                int gy = ty + dy;
+                if (gy < 0 || gy >= _params.Height) continue;
+                
+                for (int dx = -radius; dx <= radius; dx++)
+                {
+                    int gx = tx + dx;
+                    if (gx < 0 || gx >= _params.Width) continue;
+                    
+                    float dist = MathF.Sqrt(dx * dx + dy * dy + dz * dz);
+                    if (dist > radius) continue;
+                    
+                    // Apply Gaussian-like pulse
+                    float falloff = MathF.Exp(-(dist * dist) / (radius * radius * 0.5f));
+                    float localAmp = amp * falloff;
+                    
+                    // Apply velocity and stress perturbation
+                    switch (_params.Axis)
+                    {
+                        case 0:
+                            chunk.Vx[gx, gy, localZ] += localAmp;
+                            chunk.Sxx[gx, gy, localZ] += localAmp * 1e6f;
+                            break;
+                        case 1:
+                            chunk.Vy[gx, gy, localZ] += localAmp;
+                            chunk.Syy[gx, gy, localZ] += localAmp * 1e6f;
+                            break;
+                        case 2:
+                            chunk.Vz[gx, gy, localZ] += localAmp;
+                            chunk.Szz[gx, gy, localZ] += localAmp * 1e6f;
+                            break;
+                    }
+                }
             }
         }
+    }
+}
 
         private void ExchangeBoundaries()
         {
@@ -721,7 +896,6 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
         private string GetKernelSource()
 {
     return @"
-    // Kernel for stress update with optional per-voxel material properties
     __kernel void updateStress(
         __global const uchar* material, 
         __global const float* density,
@@ -729,7 +903,7 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
         __global float* sxx, __global float* syy, __global float* szz,
         __global float* sxy, __global float* sxz, __global float* syz,
         __global float* damage, 
-        const float lambda, const float mu,  // Global defaults
+        const float lambda, const float mu,
         const float dt, const float dx,
         const int width, const int height, const int depth, 
         const uchar selectedMaterial,
@@ -745,8 +919,9 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
         int y = rem / width;
         int x = rem % width;
         
-        // Check material and boundaries
-        if (material[idx] != selectedMaterial) return;
+        // Allow wave propagation through ALL non-zero materials
+        uchar mat = material[idx];
+        if (mat == 0) return; // Skip air/background
         if (x <= 0 || x >= width-1 || y <= 0 || y >= height-1 || z <= 0 || z >= depth-1) return;
         
         // Calculate neighbor indices
@@ -757,42 +932,39 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
         int zp1 = idx + width * height;
         int zm1 = idx - width * height;
         
-        // Validate neighbor indices to prevent out-of-bounds access
+        // Validate neighbor indices
         if (zp1 >= width * height * depth || zm1 < 0) return;
         
-        // Calculate velocity gradients with central differences
+        // Calculate velocity gradients
         float dvx_dx = (vx[xp1] - vx[xm1]) / (2.0f * dx);
         float dvy_dy = (vy[yp1] - vy[ym1]) / (2.0f * dx);
         float dvz_dz = (vz[zp1] - vz[zm1]) / (2.0f * dx);
         
         float dvy_dx = (vy[xp1] - vy[xm1]) / (2.0f * dx);
         float dvx_dy = (vx[yp1] - vx[ym1]) / (2.0f * dx);
-        
         float dvz_dx = (vz[xp1] - vz[xm1]) / (2.0f * dx);
         float dvx_dz = (vx[zp1] - vx[zm1]) / (2.0f * dx);
-        
         float dvz_dy = (vz[yp1] - vz[ym1]) / (2.0f * dx);
         float dvy_dz = (vy[zp1] - vy[zm1]) / (2.0f * dx);
         
-        // Calculate volumetric strain
         float volumetric_strain = dvx_dx + dvy_dy + dvz_dz;
         
-        // Apply damage reduction
-        float damage_factor = 1.0f - damage[idx] * 0.9f;
+        // Apply damage only to selected material
+        float damage_factor = 1.0f;
+        if (mat == selectedMaterial) {
+            damage_factor = 1.0f - damage[idx] * 0.5f; // Reduced damage effect
+        }
         
-        // Update stress components using Hooke's law
-        // σxx = λ(εxx + εyy + εzz) + 2μεxx
+        // Update stress components
         sxx[idx] += dt * damage_factor * (lambda * volumetric_strain + 2.0f * mu * dvx_dx);
         syy[idx] += dt * damage_factor * (lambda * volumetric_strain + 2.0f * mu * dvy_dy);
         szz[idx] += dt * damage_factor * (lambda * volumetric_strain + 2.0f * mu * dvz_dz);
-        
-        // Shear stress components
         sxy[idx] += dt * damage_factor * mu * (dvy_dx + dvx_dy);
         sxz[idx] += dt * damage_factor * mu * (dvz_dx + dvx_dz);
         syz[idx] += dt * damage_factor * mu * (dvz_dy + dvy_dz);
         
-        // Apply stress limiters to prevent numerical instability
-        float stress_limit = 1e9f; // 1 GPa max stress
+        // Apply stress limiters
+        float stress_limit = 1e9f;
         sxx[idx] = clamp(sxx[idx], -stress_limit, stress_limit);
         syy[idx] = clamp(syy[idx], -stress_limit, stress_limit);
         szz[idx] = clamp(szz[idx], -stress_limit, stress_limit);
@@ -800,27 +972,22 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
         sxz[idx] = clamp(sxz[idx], -stress_limit, stress_limit);
         syz[idx] = clamp(syz[idx], -stress_limit, stress_limit);
         
-        // Calculate damage based on failure criteria
-        float tensile_max = fmax(sxx[idx], fmax(syy[idx], szz[idx]));
-        float shear_magnitude = sqrt(sxy[idx]*sxy[idx] + sxz[idx]*sxz[idx] + syz[idx]*syz[idx]);
-        
-        float damage_increment = 0.0f;
-        
-        // Tensile failure criterion
-        if (tensile_max > tensileLimitPa) {
-            damage_increment += damageRatePerSec * dt * (tensile_max / tensileLimitPa - 1.0f);
+        // Apply damage only to selected material
+        if (mat == selectedMaterial) {
+            float tensile_max = fmax(sxx[idx], fmax(syy[idx], szz[idx]));
+            float shear_magnitude = sqrt(sxy[idx]*sxy[idx] + sxz[idx]*sxz[idx] + syz[idx]*syz[idx]);
+            
+            float damage_increment = 0.0f;
+            if (tensile_max > tensileLimitPa) {
+                damage_increment += damageRatePerSec * dt * (tensile_max / tensileLimitPa - 1.0f) * 0.1f;
+            }
+            if (shear_magnitude > shearLimitPa) {
+                damage_increment += damageRatePerSec * dt * (shear_magnitude / shearLimitPa - 1.0f) * 0.1f;
+            }
+            damage[idx] = clamp(damage[idx] + damage_increment, 0.0f, 0.9f);
         }
-        
-        // Shear failure criterion
-        if (shear_magnitude > shearLimitPa) {
-            damage_increment += damageRatePerSec * dt * (shear_magnitude / shearLimitPa - 1.0f);
-        }
-        
-        // Update damage with saturation at 1.0
-        damage[idx] = clamp(damage[idx] + damage_increment, 0.0f, 1.0f);
     }
     
-    // Kernel for velocity update
     __kernel void updateVelocity(
         __global const uchar* material, 
         __global const float* density,
@@ -840,8 +1007,8 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
         int y = rem / width;
         int x = rem % width;
         
-        // Check material and boundaries
-        if (material[idx] != selectedMaterial) return;
+        // Allow wave propagation through ALL non-zero materials
+        if (material[idx] == 0) return; // Skip air/background
         if (x <= 0 || x >= width-1 || y <= 0 || y >= height-1 || z <= 0 || z >= depth-1) return;
         
         // Calculate neighbor indices
@@ -852,36 +1019,31 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
         int zp1 = idx + width * height;
         int zm1 = idx - width * height;
         
-        // Validate neighbor indices
         if (zp1 >= width * height * depth || zm1 < 0) return;
         
-        // Get density with minimum threshold for numerical stability
         float rho = fmax(100.0f, density[idx]);
         
         // Calculate stress gradients
         float dsxx_dx = (sxx[xp1] - sxx[xm1]) / (2.0f * dx);
         float dsyy_dy = (syy[yp1] - syy[ym1]) / (2.0f * dx);
         float dszz_dz = (szz[zp1] - szz[zm1]) / (2.0f * dx);
-        
         float dsxy_dy = (sxy[yp1] - sxy[ym1]) / (2.0f * dx);
         float dsxy_dx = (sxy[xp1] - sxy[xm1]) / (2.0f * dx);
-        
         float dsxz_dz = (sxz[zp1] - sxz[zm1]) / (2.0f * dx);
         float dsxz_dx = (sxz[xp1] - sxz[xm1]) / (2.0f * dx);
-        
         float dsyz_dz = (syz[zp1] - syz[zm1]) / (2.0f * dx);
         float dsyz_dy = (syz[yp1] - syz[ym1]) / (2.0f * dx);
         
-        // Apply momentum equation with damping
-        const float damping = 0.995f;
+        // Very light damping for better propagation
+        const float damping = 0.999f;
         
-        // Update velocities: a = F/m = (∇·σ)/ρ
+        // Update velocities
         vx[idx] = vx[idx] * damping + dt * (dsxx_dx + dsxy_dy + dsxz_dz) / rho;
         vy[idx] = vy[idx] * damping + dt * (dsxy_dx + dsyy_dy + dsyz_dz) / rho;
         vz[idx] = vz[idx] * damping + dt * (dsxz_dx + dsyz_dy + dszz_dz) / rho;
         
-        // Apply velocity limiters to prevent numerical instability
-        float max_velocity = 10000.0f; // 10 km/s max velocity
+        // Apply velocity limiters
+        float max_velocity = 10000.0f;
         vx[idx] = clamp(vx[idx], -max_velocity, max_velocity);
         vy[idx] = clamp(vy[idx], -max_velocity, max_velocity);
         vz[idx] = clamp(vz[idx], -max_velocity, max_velocity);

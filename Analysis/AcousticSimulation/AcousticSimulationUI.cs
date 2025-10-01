@@ -123,6 +123,9 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
         private Vector3 _txPosition = new Vector3(0, 0.5f, 0.5f);
         private Vector3 _rxPosition = new Vector3(1, 0.5f, 0.5f);
         private CtImageStackDataset _currentDataset;
+        private bool _autoUpdateTomography = false;
+        private DateTime _lastTomographyUpdate = DateTime.MinValue;
+        private bool _tomographyWindowWasOpen = false;
 
         public AcousticSimulationUI()
         {
@@ -142,396 +145,503 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
         }
 
         public void DrawPanel(CtImageStackDataset dataset)
+{
+    if (dataset == null) return;
+    
+    _currentDataset = dataset;
+    AcousticIntegration.StartPlacement(dataset, null, _txPosition, _rxPosition); // Ensure it's active for drawing
+
+    // Draw the separate tomography window if it's open
+    if (_isTomographyWindowOpen)
+    {
+        DrawTomographyWindow();
+    }
+
+    ImGui.Text($"Dataset: {dataset.Name}");
+    ImGui.Text($"Dimensions: {dataset.Width} × {dataset.Height} × {dataset.Depth}");
+
+    long volumeMemory = (long)dataset.Width * dataset.Height * dataset.Depth * 3 * sizeof(float) * 2;
+    ImGui.Text($"Estimated Memory: {volumeMemory / (1024 * 1024)} MB");
+
+    if (volumeMemory > 4L * 1024 * 1024 * 1024)
+    {
+        ImGui.TextColored(new Vector4(1, 1, 0, 1), "⚠ Large dataset - chunked processing recommended");
+    }
+
+    ImGui.Separator();
+
+    // Density Calibration Section
+    if (ImGui.CollapsingHeader("Density Calibration", ImGuiTreeNodeFlags.DefaultOpen))
+    {
+        ImGui.Indent();
+        ImGui.TextWrapped("Use the 'Density Calibration' tool in the Preprocessing category to calibrate material densities.");
+        ImGui.TextWrapped("This simulation will use the calibrated densities stored in the dataset's materials.");
+
+        bool isCalibrated = dataset.Materials.Any(m => m.ID != 0 && m.Density > 0);
+        ImGui.Text("Status:");
+        ImGui.SameLine();
+        ImGui.TextColored(isCalibrated ? new Vector4(0,1,0,1) : new Vector4(1,1,0,1),
+            isCalibrated ? "✓ Material densities appear to be set." : "⚠ Using default material densities.");
+        ImGui.Unindent();
+    }
+
+    ImGui.Separator();
+
+    // Calibration Manager Controls
+    _calibrationManager.DrawCalibrationControls(ref _youngsModulus, ref _poissonRatio);
+    ImGui.Separator();
+
+    // Material Selection
+    ImGui.Text("Target Material:");
+    var materials = dataset.Materials.Where(m => m.ID != 0).Select(m => m.Name).ToArray();
+    if (materials.Length == 0)
+    {
+        ImGui.TextColored(new Vector4(1, 1, 0, 1), "No materials available for simulation.");
+        return;
+    }
+
+    ImGui.SetNextItemWidth(-1);
+    ImGui.Combo("##Material", ref _selectedMaterialIndex, materials, materials.Length);
+    ImGui.Separator();
+
+    // Wave Propagation Axis
+    ImGui.Text("Wave Propagation Axis:");
+    
+    bool axisChanged = false;
+    axisChanged |= ImGui.RadioButton("X", ref _selectedAxisIndex, 0); ImGui.SameLine();
+    axisChanged |= ImGui.RadioButton("Y", ref _selectedAxisIndex, 1); ImGui.SameLine();
+    axisChanged |= ImGui.RadioButton("Z", ref _selectedAxisIndex, 2);
+
+    if (axisChanged)
+    {
+        ApplyAxisPreset(_selectedAxisIndex);
+        AcousticIntegration.StartPlacement(_currentDataset, null, _txPosition, _rxPosition);
+    }
+
+    ImGui.Checkbox("Full-Face Transducers", ref _useFullFaceTransducers);
+    if (ImGui.IsItemHovered())
+        ImGui.SetTooltip("Use entire face of volume as transducer instead of point source");
+    ImGui.Separator();
+
+    // Memory Management
+    if (ImGui.CollapsingHeader("Memory Management"))
+    {
+        ImGui.Indent();
+        ImGui.Checkbox("Use Chunked Processing", ref _useChunkedProcessing);
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip("Process large volumes in chunks to avoid memory issues");
+
+        if (_useChunkedProcessing)
         {
-            if (dataset == null) return;
-            
-            _currentDataset = dataset;
-            AcousticIntegration.StartPlacement(dataset, null, _txPosition, _rxPosition); // Ensure it's active for drawing
-
-            // Draw the separate tomography window if it's open
-            if (_isTomographyWindowOpen)
+            ImGui.DragInt("Chunk Size (MB)", ref _chunkSizeMB, 1, 64, 2048);
+            ImGui.Checkbox("Enable Disk Offloading", ref _enableOffloading);
+            if (_enableOffloading)
             {
-                DrawTomographyWindow();
-            }
-
-            ImGui.Text($"Dataset: {dataset.Name}");
-            ImGui.Text($"Dimensions: {dataset.Width} × {dataset.Height} × {dataset.Depth}");
-    
-            long volumeMemory = (long)dataset.Width * dataset.Height * dataset.Depth * 3 * sizeof(float) * 2;
-            ImGui.Text($"Estimated Memory: {volumeMemory / (1024 * 1024)} MB");
-    
-            if (volumeMemory > 4L * 1024 * 1024 * 1024)
-            {
-                ImGui.TextColored(new Vector4(1, 1, 0, 1), "⚠ Large dataset - chunked processing recommended");
-            }
-    
-            ImGui.Separator();
-    
-            if (ImGui.CollapsingHeader("Density Calibration", ImGuiTreeNodeFlags.DefaultOpen))
-            {
-                ImGui.Indent();
-                ImGui.TextWrapped("Use the 'Density Calibration' tool in the Preprocessing category to calibrate material densities.");
-                ImGui.TextWrapped("This simulation will use the calibrated densities stored in the dataset's materials.");
-
-                // Let's check if any material (other than default) has a non-zero density.
-                bool isCalibrated = dataset.Materials.Any(m => m.ID != 0 && m.Density > 0);
-                ImGui.Text("Status:");
+                ImGui.Text($"Offload Dir: {_offloadDirectory}");
+                if (ImGui.Button("Change Directory..."))
+                {
+                    Logger.Log("[Simulation] Change offload directory not yet implemented");
+                }
+        
                 ImGui.SameLine();
-                ImGui.TextColored(isCalibrated ? new Vector4(0,1,0,1) : new Vector4(1,1,0,1),
-                    isCalibrated ? "✓ Material densities appear to be set." : "⚠ Using default material densities.");
-                ImGui.Unindent();
-            }
-    
-            ImGui.Separator();
-    
-            _calibrationManager.DrawCalibrationControls(ref _youngsModulus, ref _poissonRatio);
-            ImGui.Separator();
-
-            ImGui.Text("Target Material:");
-            var materials = dataset.Materials.Where(m => m.ID != 0).Select(m => m.Name).ToArray();
-            if (materials.Length == 0)
-            {
-                ImGui.TextColored(new Vector4(1, 1, 0, 1), "No materials available for simulation.");
-                return;
-            }
-    
-            ImGui.SetNextItemWidth(-1);
-            ImGui.Combo("##Material", ref _selectedMaterialIndex, materials, materials.Length);
-            ImGui.Separator();
-
-            ImGui.Text("Wave Propagation Axis:");
-            
-            bool axisChanged = false;
-            axisChanged |= ImGui.RadioButton("X", ref _selectedAxisIndex, 0); ImGui.SameLine();
-            axisChanged |= ImGui.RadioButton("Y", ref _selectedAxisIndex, 1); ImGui.SameLine();
-            axisChanged |= ImGui.RadioButton("Z", ref _selectedAxisIndex, 2);
-
-            if (axisChanged)
-            {
-                ApplyAxisPreset(_selectedAxisIndex);
-                AcousticIntegration.StartPlacement(_currentDataset, null, _txPosition, _rxPosition);
-            }
-
-            ImGui.Checkbox("Full-Face Transducers", ref _useFullFaceTransducers);
-            if (ImGui.IsItemHovered())
-                ImGui.SetTooltip("Use entire face of volume as transducer instead of point source");
-            ImGui.Separator();
-
-            if (ImGui.CollapsingHeader("Memory Management"))
-            {
-                ImGui.Indent();
-                ImGui.Checkbox("Use Chunked Processing", ref _useChunkedProcessing);
-                if (ImGui.IsItemHovered())
-                    ImGui.SetTooltip("Process large volumes in chunks to avoid memory issues");
-        
-                if (_useChunkedProcessing)
+                if (ImGui.Button("Clear Cache"))
                 {
-                    ImGui.DragInt("Chunk Size (MB)", ref _chunkSizeMB, 1, 64, 2048);
-                    ImGui.Checkbox("Enable Disk Offloading", ref _enableOffloading);
-                    if (_enableOffloading)
+                    if (Directory.Exists(_offloadDirectory))
                     {
-                        ImGui.Text($"Offload Dir: {_offloadDirectory}");
-                        if (ImGui.Button("Change Directory..."))
-                        {
-                            Logger.Log("[Simulation] Change offload directory not yet implemented");
-                        }
-                
-                        ImGui.SameLine();
-                        if (ImGui.Button("Clear Cache"))
-                        {
-                            if (Directory.Exists(_offloadDirectory))
-                            {
-                                try { Directory.Delete(_offloadDirectory, true); Directory.CreateDirectory(_offloadDirectory); Logger.Log("[Simulation] Cleared offload cache"); } 
-                                catch (Exception ex) { Logger.LogError($"Failed to clear cache: {ex.Message}"); }
-                            }
-                        }
+                        try { Directory.Delete(_offloadDirectory, true); Directory.CreateDirectory(_offloadDirectory); Logger.Log("[Simulation] Cleared offload cache"); } 
+                        catch (Exception ex) { Logger.LogError($"Failed to clear cache: {ex.Message}"); }
                     }
-                }
-                ImGui.Unindent();
-            }
-
-            if (ImGui.CollapsingHeader("Visualization"))
-            {
-                ImGui.Indent();
-                ImGui.Checkbox("Enable Real-Time 3D Visualization", ref _enableRealTimeVisualization);
-                if (_enableRealTimeVisualization)
-                {
-                    ImGui.DragFloat("Update Interval (s)", ref _visualizationUpdateInterval, 0.01f, 0.01f, 1.0f);
-                    if (ImGui.IsItemHovered())
-                        ImGui.SetTooltip("How often to update the 3D visualization during simulation");
-                }
-                
-                if (_lastResults != null)
-                {
-                    ImGui.Checkbox("Show Velocity Tomography", ref _isTomographyWindowOpen);
-                }
-
-                ImGui.Separator();
-                ImGui.Checkbox("Save Time Series", ref _saveTimeSeries);
-                if (_saveTimeSeries)
-                {
-                    ImGui.DragInt("Snapshot Interval", ref _snapshotInterval, 1, 1, 100);
-                    if (ImGui.IsItemHovered())
-                        ImGui.SetTooltip("Save a snapshot every N time steps");
-                }
-                ImGui.Unindent();
-            }
-
-            if (ImGui.CollapsingHeader("Material Properties"))
-            {
-                ImGui.Indent();
-    
-                // Show properties for selected material
-                var selectedMaterial = dataset.Materials.Where(m => m.ID != 0).ElementAt(_selectedMaterialIndex);
-                ImGui.TextColored(new Vector4(0.8f, 0.8f, 1.0f, 1), $"Selected Material: {selectedMaterial.Name}");
-    
-                if (!string.IsNullOrEmpty(selectedMaterial.PhysicalMaterialName))
-                {
-                    var physMat = MaterialLibrary.Instance.Find(selectedMaterial.PhysicalMaterialName);
-                    if (physMat != null)
-                    {
-                        ImGui.Text("Properties from Material Library:");
-                        ImGui.Indent();
-                        ImGui.Text($"Density: {physMat.Density_kg_m3 / 1000.0:F3} g/cm³");
-                        ImGui.Text($"Young's Modulus: {physMat.YoungModulus_GPa:F0} GPa");
-                        ImGui.Text($"Poisson's Ratio: {physMat.PoissonRatio:F3}");
-                        if (physMat.Vp_m_s.HasValue)
-                            ImGui.Text($"P-wave Velocity: {physMat.Vp_m_s:F0} m/s");
-                        if (physMat.Vs_m_s.HasValue)
-                            ImGui.Text($"S-wave Velocity: {physMat.Vs_m_s:F0} m/s");
-                        ImGui.Unindent();
-                    }
-                }
-    
-                ImGui.Separator();
-    
-                // Allow manual override
-                ImGui.Text("Simulation Parameters (override material library):");
-                ImGui.DragFloat("Young's Modulus (MPa)", ref _youngsModulus, 100.0f, 100.0f, 200000.0f);
-                ImGui.DragFloat("Poisson's Ratio", ref _poissonRatio, 0.01f, 0.0f, 0.49f);
-
-                if (_calibrationManager.HasCalibration)
-                {
-                    if (ImGui.Button("Apply Calibration from Lab Data"))
-                    {
-                        var material = dataset.Materials.Where(m => m.ID != 0).ElementAt(_selectedMaterialIndex);
-                        var (__calE, __calNu) = _calibrationManager.GetCalibratedParameters((float)material.Density, _confiningPressure);
-                        _youngsModulus = __calE;
-                        _poissonRatio  = __calNu;
-                        Logger.Log($"[Simulation] Applied calibration: E={_youngsModulus:F2} MPa, ν={_poissonRatio:F4}");
-                    }
-                }
-
-                ImGui.Spacing();
-                ImGui.Text("Derived Properties:");
-                ImGui.Indent();
-                float E  = _youngsModulus * 1e6f;
-                float nu = _poissonRatio;
-                float mu = E / (2.0f * (1.0f + nu));
-                float lambda = E * nu / ((1 + nu) * (1 - 2 * nu));
-                float bulkModulus = E / (3f * (1 - 2 * nu));
-                ImGui.Text($"Shear Modulus: {mu / 1e6f:F2} MPa");
-                ImGui.Text($"Bulk Modulus: {bulkModulus / 1e6f:F2} MPa");
-                ImGui.Text($"Lamé λ: {lambda / 1e6f:F2} MPa");
-                ImGui.Text($"Lamé μ: {mu / 1e6f:F2} MPa");
-        
-                if (_lastResults != null)
-                {
-                    // Get density from the currently selected material for the estimation
-                    float density = (float)selectedMaterial.Density; // in g/cm³
-                    if(density <= 0) density = 2.7f; // fallback
-                    density *= 1000f; // convert to kg/m³
-            
-                    float vpExpected = MathF.Sqrt((lambda + 2 * mu) / density);
-                    float vsExpected = MathF.Sqrt(mu / density);
-            
-                    ImGui.Spacing();
-                    ImGui.Text($"Expected Vp: {vpExpected:F0} m/s");
-                    ImGui.Text($"Expected Vs: {vsExpected:F0} m/s");
-                    ImGui.Text($"Expected Vp/Vs: {vpExpected / vsExpected:F3}");
-                }
-                ImGui.Unindent();
-
-                if (_lastResults != null)
-                {
-                    float calculatedPixelSize = CalculatePixelSizeFromVelocities();
-                    ImGui.Spacing();
-                    ImGui.TextColored(new Vector4(0.5f, 1.0f, 0.5f, 1.0f), $"Calculated Pixel Size: {calculatedPixelSize * 1000:F3} mm");
-                }
-                ImGui.Unindent();
-            }
-
-            if (ImGui.CollapsingHeader("Stress Conditions"))
-            {
-                ImGui.Indent();
-                ImGui.DragFloat("Confining Pressure (MPa)", ref _confiningPressure, 0.1f, 0.0f, 100.0f);
-                ImGui.DragFloat("Tensile Strength (MPa)", ref _tensileStrength, 0.5f, 0.1f, 100.0f);
-                ImGui.DragFloat("Failure Angle (°)", ref _failureAngle, 1.0f, 0.0f, 90.0f);
-                ImGui.DragFloat("Cohesion (MPa)", ref _cohesion, 0.5f, 0.0f, 50.0f);
-                if (ImGui.IsItemHovered())
-                    ImGui.SetTooltip("Material cohesion for Mohr-Coulomb plasticity model");
-                ImGui.Unindent();
-            }
-
-            if (ImGui.CollapsingHeader("Source Parameters"))
-            {
-                ImGui.Indent();
-                ImGui.DragFloat("Source Energy (J)", ref _sourceEnergy, 0.1f, 0.01f, 10.0f);
-                ImGui.DragFloat("Frequency (kHz)", ref _sourceFrequency, 10.0f, 1.0f, 5000.0f);
-                ImGui.DragInt("Amplitude", ref _sourceAmplitude, 1, 1, 1000);
-                ImGui.DragInt("Time Steps", ref _timeSteps, 10, 100, 10000);
-        
-                if (_lastResults != null)
-                {
-                    float vp = (float)(_lastResults?.PWaveVelocity ?? 5000.0);
-                    float wavelength = vp / (_sourceFrequency * 1000f);
-                    ImGui.Text($"P-Wave Wavelength: {wavelength * 1000:F2} mm");
-                }
-        
-                if (!_useFullFaceTransducers)
-                {
-                    ImGui.Spacing();
-                    ImGui.Text("Transducer Positions (normalized 0-1):");
-                    
-                    ImGui.Text($"TX: ({_txPosition.X:F3}, {_txPosition.Y:F3}, {_txPosition.Z:F3})");
-                    ImGui.Text($"RX: ({_rxPosition.X:F3}, {_rxPosition.Y:F3}, {_rxPosition.Z:F3})");
-
-                    bool isPlacingTx = AcousticIntegration.IsPlacing && AcousticIntegration.GetPlacingTarget() == "TX";
-                    bool isPlacingRx = AcousticIntegration.IsPlacing && AcousticIntegration.GetPlacingTarget() == "RX";
-
-                    if (isPlacingTx) ImGui.PushStyleColor(ImGuiCol.Button, new Vector4(0.4f, 0.8f, 0.4f, 1.0f));
-                    if (ImGui.Button("Place TX")) { AcousticIntegration.StartPlacement(dataset, "TX", _txPosition, _rxPosition); }
-                    if (isPlacingTx) ImGui.PopStyleColor();
-
-                    ImGui.SameLine();
-                    if (isPlacingRx) ImGui.PushStyleColor(ImGuiCol.Button, new Vector4(0.4f, 0.8f, 0.4f, 1.0f));
-                    if (ImGui.Button("Place RX")) { AcousticIntegration.StartPlacement(dataset, "RX", _txPosition, _rxPosition); }
-                    if (isPlacingRx) ImGui.PopStyleColor();
-
-                    if (AcousticIntegration.IsPlacing)
-                    {
-                        ImGui.SameLine();
-                        if (ImGui.Button("Stop Placing")) { AcousticIntegration.StopPlacement(); }
-                        ImGui.TextColored(new Vector4(1,1,0,1), $"Placing {AcousticIntegration.GetPlacingTarget()}... Click/drag in a viewer.");
-                    }
-                    
-                    if (ImGui.Button("Auto-place Transducers"))
-                    {
-                        AutoPlaceTransducers(dataset);
-                    }
-                    if(ImGui.IsItemHovered()) ImGui.SetTooltip("Automatically place TX/RX on opposite sides of the selected material, ensuring a valid path.");
-
-                    float dx = (_rxPosition.X - _txPosition.X) * dataset.Width * dataset.PixelSize / 1000f;
-                    float dy = (_rxPosition.Y - _txPosition.Y) * dataset.Height * dataset.PixelSize / 1000f;
-                    float dz = (_rxPosition.Z - _txPosition.Z) * dataset.Depth * dataset.SliceThickness / 1000f;
-                    float distance = MathF.Sqrt(dx * dx + dy * dy + dz * dz);
-                    ImGui.Text($"TX-RX Distance: {distance:F2} mm");
-                }
-                ImGui.Unindent();
-            }
-
-            if (ImGui.CollapsingHeader("Physics Models"))
-            {
-                ImGui.Indent();
-                ImGui.Checkbox("Elastic", ref _useElastic);
-                if (ImGui.IsItemHovered()) ImGui.SetTooltip("Standard elastic wave propagation");
-                ImGui.Checkbox("Plastic (Mohr-Coulomb)", ref _usePlastic);
-                if (ImGui.IsItemHovered()) ImGui.SetTooltip("Include plastic deformation using Mohr-Coulomb criterion");
-                ImGui.Checkbox("Brittle Damage", ref _useBrittle);
-                if (ImGui.IsItemHovered()) ImGui.SetTooltip("Model brittle damage accumulation");
-                ImGui.Checkbox("Use GPU Acceleration", ref _useGPU);
-                if (ImGui.IsItemHovered()) ImGui.SetTooltip("Use OpenCL for GPU acceleration (if available)");
-                ImGui.Checkbox("Auto-Calibrate", ref _autoCalibrate);
-                if (ImGui.IsItemHovered()) ImGui.SetTooltip("Automatically calibrate parameters based on previous simulations");
-                ImGui.Unindent();
-            }
-    
-            ImGui.Separator();
-    
-            if (_isSimulating)
-            {
-                ImGui.ProgressBar(_simulator?.Progress ?? 0.0f, new Vector2(-1, 0), $"Simulating... {(_simulator?.CurrentStep ?? 0)}/{_timeSteps} steps");
-                if (_simulator != null)
-                {
-                    ImGui.Text($"Memory Usage: {_simulator.CurrentMemoryUsageMB:F0} MB");
-                    ImGui.Text($"Time Elapsed: {(DateTime.Now - _simulationStartTime).TotalSeconds:F1} s");
-                }
-                if (ImGui.Button("Cancel Simulation", new Vector2(-1, 0)))
-                {
-                    CancelSimulation();
-                }
-            }
-            else
-            {
-                bool canSimulate = materials.Length > 0 && (!_useChunkedProcessing || volumeMemory < 8L * 1024 * 1024 * 1024);
-                if (!canSimulate)
-                {
-                    ImGui.BeginDisabled();
-                    if (volumeMemory >= 8L * 1024 * 1024 * 1024)
-                        ImGui.TextColored(new Vector4(1, 0.5f, 0, 1), "Enable chunked processing for large datasets");
-                }
-        
-                if (ImGui.Button("Run Simulation", new Vector2(-1, 0)))
-                {
-                    _simulationStartTime = DateTime.Now;
-                    _ = RunSimulationAsync(dataset);
-                }
-        
-                if (!canSimulate)
-                {
-                    ImGui.EndDisabled();
-                }
-            }
-    
-            if (_lastResults != null)
-            {
-                ImGui.Separator();
-                if (ImGui.CollapsingHeader("Simulation Results", ImGuiTreeNodeFlags.DefaultOpen))
-                {
-                    ImGui.Text($"P-Wave Velocity: {_lastResults.PWaveVelocity:F2} m/s");
-                    ImGui.Text($"S-Wave Velocity: {_lastResults.SWaveVelocity:F2} m/s");
-                    ImGui.Text($"Vp/Vs Ratio: {_lastResults.VpVsRatio:F3}");
-                    ImGui.Text($"Total Time Steps: {_lastResults.TotalTimeSteps}");
-                    ImGui.Text($"Computation Time: {_lastResults.ComputationTime.TotalSeconds:F2} s");
-            
-                    if (_lastResults.TotalTimeSteps > 0 && _lastResults.ComputationTime.TotalSeconds > 0)
-                    {
-                        double stepsPerSecond = _lastResults.TotalTimeSteps / _lastResults.ComputationTime.TotalSeconds;
-                        ImGui.Text($"Performance: {stepsPerSecond:F0} steps/second");
-                    }
-            
-                    ImGui.Spacing();
-                    _exportManager.SetCalibrationData(_calibrationManager.CalibrationData);
-                    if (_lastResults.DamageField != null)
-                    {
-                        _exportManager.SetDamageField(_lastResults.DamageField);
-                        ImGui.Text($"Damage Field: Available ({_lastResults.DamageField.Length} voxels)");
-                    }
-            
-                    _exportManager.DrawExportControls(_lastResults, _parameters, dataset);
-                    ImGui.Spacing();
-
-                    if (ImGui.Button("Add to Calibration Database"))
-                    {
-                        var material = dataset.Materials.Where(m => m.ID != 0).ElementAt(_selectedMaterialIndex);
-                        _calibrationManager.AddSimulationResult(material.Name, material.ID, (float)material.Density, _confiningPressure, _youngsModulus, _poissonRatio, _lastResults.PWaveVelocity, _lastResults.SWaveVelocity);
-                        Logger.Log("[Simulation] Added results to calibration database");
-                    }
-                }
-                
-                if (ImGui.CollapsingHeader("Debug Information"))
-                {
-                    ImGui.Indent();
-                    DrawWaveDebugInfo("TX", _txPosition);
-                    ImGui.Separator();
-                    DrawWaveDebugInfo("RX", _rxPosition);
-                    ImGui.Separator();
-                    DrawWaveDebugInfo("Midpoint", (_txPosition + _rxPosition) * 0.5f);
-                    ImGui.Unindent();
                 }
             }
         }
+        ImGui.Unindent();
+    }
 
+    // Visualization Options
+    if (ImGui.CollapsingHeader("Visualization"))
+    {
+        ImGui.Indent();
+        ImGui.Checkbox("Enable Real-Time 3D Visualization", ref _enableRealTimeVisualization);
+        if (_enableRealTimeVisualization)
+        {
+            ImGui.DragFloat("Update Interval (s)", ref _visualizationUpdateInterval, 0.01f, 0.01f, 1.0f);
+            if (ImGui.IsItemHovered())
+                ImGui.SetTooltip("How often to update the 3D visualization during simulation");
+        }
+        
+        // Tomography window control with regeneration on reopen
+        bool prevTomographyOpen = _isTomographyWindowOpen;
+        ImGui.Checkbox("Show Velocity Tomography", ref _isTomographyWindowOpen);
+        if (!prevTomographyOpen && _isTomographyWindowOpen && _lastResults != null)
+        {
+            // Window was just opened, regenerate tomography
+            _ = GenerateTomographyAsync();
+        }
+
+        ImGui.Separator();
+        ImGui.Checkbox("Save Time Series", ref _saveTimeSeries);
+        if (_saveTimeSeries)
+        {
+            ImGui.DragInt("Snapshot Interval", ref _snapshotInterval, 1, 1, 100);
+            if (ImGui.IsItemHovered())
+                ImGui.SetTooltip("Save a snapshot every N time steps");
+        }
+        ImGui.Unindent();
+    }
+
+    // Material Properties
+    if (ImGui.CollapsingHeader("Material Properties"))
+    {
+        ImGui.Indent();
+
+        // Show properties for selected material
+        var selectedMaterial = dataset.Materials.Where(m => m.ID != 0).ElementAt(_selectedMaterialIndex);
+        ImGui.TextColored(new Vector4(0.8f, 0.8f, 1.0f, 1), $"Selected Material: {selectedMaterial.Name}");
+
+        if (!string.IsNullOrEmpty(selectedMaterial.PhysicalMaterialName))
+        {
+            var physMat = MaterialLibrary.Instance.Find(selectedMaterial.PhysicalMaterialName);
+            if (physMat != null)
+            {
+                ImGui.Text("Properties from Material Library:");
+                ImGui.Indent();
+                ImGui.Text($"Density: {physMat.Density_kg_m3 / 1000.0:F3} g/cm³");
+                ImGui.Text($"Young's Modulus: {physMat.YoungModulus_GPa:F0} GPa");
+                ImGui.Text($"Poisson's Ratio: {physMat.PoissonRatio:F3}");
+                if (physMat.Vp_m_s.HasValue)
+                    ImGui.Text($"P-wave Velocity: {physMat.Vp_m_s:F0} m/s");
+                if (physMat.Vs_m_s.HasValue)
+                    ImGui.Text($"S-wave Velocity: {physMat.Vs_m_s:F0} m/s");
+                ImGui.Unindent();
+            }
+        }
+
+        ImGui.Separator();
+
+        // Allow manual override
+        ImGui.Text("Simulation Parameters (override material library):");
+        ImGui.DragFloat("Young's Modulus (MPa)", ref _youngsModulus, 100.0f, 100.0f, 200000.0f);
+        ImGui.DragFloat("Poisson's Ratio", ref _poissonRatio, 0.01f, 0.0f, 0.49f);
+
+        if (_calibrationManager.HasCalibration)
+        {
+            if (ImGui.Button("Apply Calibration from Lab Data"))
+            {
+                var material = dataset.Materials.Where(m => m.ID != 0).ElementAt(_selectedMaterialIndex);
+                var (__calE, __calNu) = _calibrationManager.GetCalibratedParameters((float)material.Density, _confiningPressure);
+                _youngsModulus = __calE;
+                _poissonRatio  = __calNu;
+                Logger.Log($"[Simulation] Applied calibration: E={_youngsModulus:F2} MPa, ν={_poissonRatio:F4}");
+            }
+        }
+
+        ImGui.Spacing();
+        ImGui.Text("Derived Properties:");
+        ImGui.Indent();
+        float E  = _youngsModulus * 1e6f;
+        float nu = _poissonRatio;
+        float mu = E / (2.0f * (1.0f + nu));
+        float lambda = E * nu / ((1 + nu) * (1 - 2 * nu));
+        float bulkModulus = E / (3f * (1 - 2 * nu));
+        ImGui.Text($"Shear Modulus: {mu / 1e6f:F2} MPa");
+        ImGui.Text($"Bulk Modulus: {bulkModulus / 1e6f:F2} MPa");
+        ImGui.Text($"Lamé λ: {lambda / 1e6f:F2} MPa");
+        ImGui.Text($"Lamé μ: {mu / 1e6f:F2} MPa");
+
+        if (_lastResults != null)
+        {
+            // Get density from the currently selected material for the estimation
+            float density = (float)selectedMaterial.Density; // in g/cm³
+            if(density <= 0) density = 2.7f; // fallback
+            density *= 1000f; // convert to kg/m³
+    
+            float vpExpected = MathF.Sqrt((lambda + 2 * mu) / density);
+            float vsExpected = MathF.Sqrt(mu / density);
+    
+            ImGui.Spacing();
+            ImGui.Text($"Expected Vp: {vpExpected:F0} m/s");
+            ImGui.Text($"Expected Vs: {vsExpected:F0} m/s");
+            ImGui.Text($"Expected Vp/Vs: {vpExpected / vsExpected:F3}");
+        }
+        ImGui.Unindent();
+
+        if (_lastResults != null)
+        {
+            float calculatedPixelSize = CalculatePixelSizeFromVelocities();
+            ImGui.Spacing();
+            ImGui.TextColored(new Vector4(0.5f, 1.0f, 0.5f, 1.0f), $"Calculated Pixel Size: {calculatedPixelSize * 1000:F3} mm");
+        }
+        ImGui.Unindent();
+    }
+
+    // Stress Conditions
+    if (ImGui.CollapsingHeader("Stress Conditions"))
+    {
+        ImGui.Indent();
+        ImGui.DragFloat("Confining Pressure (MPa)", ref _confiningPressure, 0.1f, 0.0f, 100.0f);
+        ImGui.DragFloat("Tensile Strength (MPa)", ref _tensileStrength, 0.5f, 0.1f, 100.0f);
+        ImGui.DragFloat("Failure Angle (°)", ref _failureAngle, 1.0f, 0.0f, 90.0f);
+        ImGui.DragFloat("Cohesion (MPa)", ref _cohesion, 0.5f, 0.0f, 50.0f);
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip("Material cohesion for Mohr-Coulomb plasticity model");
+        ImGui.Unindent();
+    }
+
+    // Source Parameters
+    if (ImGui.CollapsingHeader("Source Parameters"))
+    {
+        ImGui.Indent();
+        ImGui.DragFloat("Source Energy (J)", ref _sourceEnergy, 0.1f, 0.01f, 10.0f);
+        ImGui.DragFloat("Frequency (kHz)", ref _sourceFrequency, 10.0f, 1.0f, 5000.0f);
+        ImGui.DragInt("Amplitude", ref _sourceAmplitude, 1, 1, 1000);
+        ImGui.DragInt("Time Steps", ref _timeSteps, 10, 100, 10000);
+
+        if (_lastResults != null)
+        {
+            float vp = (float)(_lastResults?.PWaveVelocity ?? 5000.0);
+            float wavelength = vp / (_sourceFrequency * 1000f);
+            ImGui.Text($"P-Wave Wavelength: {wavelength * 1000:F2} mm");
+        }
+
+        // Transducer placement controls
+        if (!_useFullFaceTransducers)
+        {
+            ImGui.Spacing();
+            ImGui.Text("Transducer Positions (normalized 0-1):");
+            
+            ImGui.Text($"TX: ({_txPosition.X:F3}, {_txPosition.Y:F3}, {_txPosition.Z:F3})");
+            ImGui.Text($"RX: ({_rxPosition.X:F3}, {_rxPosition.Y:F3}, {_rxPosition.Z:F3})");
+
+            bool isPlacingTx = AcousticIntegration.IsPlacing && AcousticIntegration.GetPlacingTarget() == "TX";
+            bool isPlacingRx = AcousticIntegration.IsPlacing && AcousticIntegration.GetPlacingTarget() == "RX";
+
+            // TX Button
+            if (isPlacingTx) 
+            {
+                ImGui.PushStyleColor(ImGuiCol.Button, new Vector4(0.4f, 0.8f, 0.4f, 1.0f));
+                if (ImGui.Button("Stop Placing TX"))
+                {
+                    AcousticIntegration.StopPlacement();
+                }
+                ImGui.PopStyleColor();
+            }
+            else
+            {
+                if (ImGui.Button("Place TX"))
+                {
+                    AcousticIntegration.StopPlacement();
+                    AcousticIntegration.StartPlacement(dataset, "TX", _txPosition, _rxPosition);
+                }
+            }
+
+            ImGui.SameLine();
+            
+            // RX Button
+            if (isPlacingRx)
+            {
+                ImGui.PushStyleColor(ImGuiCol.Button, new Vector4(0.4f, 0.8f, 0.4f, 1.0f));
+                if (ImGui.Button("Stop Placing RX"))
+                {
+                    AcousticIntegration.StopPlacement();
+                }
+                ImGui.PopStyleColor();
+            }
+            else
+            {
+                if (ImGui.Button("Place RX"))
+                {
+                    AcousticIntegration.StopPlacement();
+                    AcousticIntegration.StartPlacement(dataset, "RX", _txPosition, _rxPosition);
+                }
+            }
+
+            if (AcousticIntegration.IsPlacing)
+            {
+                ImGui.TextColored(new Vector4(1,1,0,1), $"Placing {AcousticIntegration.GetPlacingTarget()}... Click in a viewer to place. Right-click to rotate 3D view.");
+            }
+            
+            if (ImGui.Button("Auto-place Transducers"))
+            {
+                AutoPlaceTransducers(dataset);
+            }
+            if(ImGui.IsItemHovered()) 
+                ImGui.SetTooltip("Automatically place TX/RX on opposite sides of the selected material's largest connected component.");
+
+            float dx = (_rxPosition.X - _txPosition.X) * dataset.Width * dataset.PixelSize / 1000f;
+            float dy = (_rxPosition.Y - _txPosition.Y) * dataset.Height * dataset.PixelSize / 1000f;
+            float dz = (_rxPosition.Z - _txPosition.Z) * dataset.Depth * dataset.SliceThickness / 1000f;
+            float distance = MathF.Sqrt(dx * dx + dy * dy + dz * dz);
+            ImGui.Text($"TX-RX Distance: {distance:F2} mm");
+        }
+        ImGui.Unindent();
+    }
+
+    // Physics Models
+    if (ImGui.CollapsingHeader("Physics Models"))
+    {
+        ImGui.Indent();
+        ImGui.Checkbox("Elastic", ref _useElastic);
+        if (ImGui.IsItemHovered()) ImGui.SetTooltip("Standard elastic wave propagation");
+        ImGui.Checkbox("Plastic (Mohr-Coulomb)", ref _usePlastic);
+        if (ImGui.IsItemHovered()) ImGui.SetTooltip("Include plastic deformation using Mohr-Coulomb criterion");
+        ImGui.Checkbox("Brittle Damage", ref _useBrittle);
+        if (ImGui.IsItemHovered()) ImGui.SetTooltip("Model brittle damage accumulation");
+        ImGui.Checkbox("Use GPU Acceleration", ref _useGPU);
+        if (ImGui.IsItemHovered()) ImGui.SetTooltip("Use OpenCL for GPU acceleration (if available)");
+        ImGui.Checkbox("Auto-Calibrate", ref _autoCalibrate);
+        if (ImGui.IsItemHovered()) ImGui.SetTooltip("Automatically calibrate parameters based on previous simulations");
+        ImGui.Unindent();
+    }
+
+    ImGui.Separator();
+
+    // Simulation Controls
+    if (_isSimulating)
+    {
+        ImGui.ProgressBar(_simulator?.Progress ?? 0.0f, new Vector2(-1, 0), $"Simulating... {(_simulator?.CurrentStep ?? 0)}/{_timeSteps} steps");
+        if (_simulator != null)
+        {
+            ImGui.Text($"Memory Usage: {_simulator.CurrentMemoryUsageMB:F0} MB");
+            ImGui.Text($"Time Elapsed: {(DateTime.Now - _simulationStartTime).TotalSeconds:F1} s");
+        }
+        if (ImGui.Button("Cancel Simulation", new Vector2(-1, 0)))
+        {
+            CancelSimulation();
+        }
+    }
+    else
+    {
+        bool canSimulate = materials.Length > 0 && (!_useChunkedProcessing || volumeMemory < 8L * 1024 * 1024 * 1024);
+        if (!canSimulate)
+        {
+            ImGui.BeginDisabled();
+            if (volumeMemory >= 8L * 1024 * 1024 * 1024)
+                ImGui.TextColored(new Vector4(1, 0.5f, 0, 1), "Enable chunked processing for large datasets");
+        }
+
+        if (ImGui.Button("Run Simulation", new Vector2(-1, 0)))
+        {
+            _simulationStartTime = DateTime.Now;
+            _ = RunSimulationAsync(dataset);
+        }
+
+        if (!canSimulate)
+        {
+            ImGui.EndDisabled();
+        }
+    }
+
+    // Simulation Results
+    if (_lastResults != null)
+    {
+        ImGui.Separator();
+        if (ImGui.CollapsingHeader("Simulation Results", ImGuiTreeNodeFlags.DefaultOpen))
+        {
+            ImGui.Text($"P-Wave Velocity: {_lastResults.PWaveVelocity:F2} m/s");
+            ImGui.Text($"S-Wave Velocity: {_lastResults.SWaveVelocity:F2} m/s");
+            ImGui.Text($"Vp/Vs Ratio: {_lastResults.VpVsRatio:F3}");
+            ImGui.Text($"Total Time Steps: {_lastResults.TotalTimeSteps}");
+            ImGui.Text($"Computation Time: {_lastResults.ComputationTime.TotalSeconds:F2} s");
+    
+            if (_lastResults.TotalTimeSteps > 0 && _lastResults.ComputationTime.TotalSeconds > 0)
+            {
+                double stepsPerSecond = _lastResults.TotalTimeSteps / _lastResults.ComputationTime.TotalSeconds;
+                ImGui.Text($"Performance: {stepsPerSecond:F0} steps/second");
+            }
+    
+            ImGui.Spacing();
+            _exportManager.SetCalibrationData(_calibrationManager.CalibrationData);
+            if (_lastResults.DamageField != null)
+            {
+                _exportManager.SetDamageField(_lastResults.DamageField);
+                ImGui.Text($"Damage Field: Available ({_lastResults.DamageField.Length} voxels)");
+            }
+    
+            _exportManager.DrawExportControls(_lastResults, _parameters, dataset);
+            ImGui.Spacing();
+
+            if (ImGui.Button("Add to Calibration Database"))
+            {
+                var material = dataset.Materials.Where(m => m.ID != 0).ElementAt(_selectedMaterialIndex);
+                _calibrationManager.AddSimulationResult(material.Name, material.ID, (float)material.Density, 
+                    _confiningPressure, _youngsModulus, _poissonRatio, 
+                    _lastResults.PWaveVelocity, _lastResults.SWaveVelocity);
+                Logger.Log("[Simulation] Added results to calibration database");
+            }
+        }
+        
+        // Debug Information
+        if (ImGui.CollapsingHeader("Debug Information"))
+        {
+            ImGui.Indent();
+            DrawWaveDebugInfo("TX", _txPosition);
+            ImGui.Separator();
+            DrawWaveDebugInfo("RX", _rxPosition);
+            ImGui.Separator();
+            DrawWaveDebugInfo("Midpoint", (_txPosition + _rxPosition) * 0.5f);
+            ImGui.Unindent();
+        }
+    }
+}
+private void ExportTomographyImage()
+{
+    if (_tomographyTexture == null || !_tomographyTexture.IsValid) return;
+    
+    string filename = $"Tomography_{_tomographySliceAxis}_{_tomographySliceIndex}_{DateTime.Now:yyyyMMdd_HHmmss}.png";
+    string path = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Desktop), filename);
+    
+    // This would require implementing texture export functionality
+    Logger.Log($"[Tomography] Export to {path} not yet implemented");
+    // TODO: Implement texture export to PNG
+}
+
+private void ExportAllTomographySlices()
+{
+    if (_lastResults == null) return;
+    
+    Task.Run(async () =>
+    {
+        Logger.Log("[Tomography] Starting export of all slices...");
+        string exportDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Desktop), 
+            $"Tomography_{DateTime.Now:yyyyMMdd_HHmmss}");
+        Directory.CreateDirectory(exportDir);
+        
+        // Export all X slices
+        for (int i = 0; i < _currentDataset.Width; i++)
+        {
+            var tomography = _tomographyGenerator.Generate2DTomography(_lastResults, 0, i);
+            if (tomography != null)
+            {
+                string path = Path.Combine(exportDir, $"X_slice_{i:D4}.bin");
+                File.WriteAllBytes(path, tomography);
+            }
+        }
+        
+        // Export all Y slices  
+        for (int i = 0; i < _currentDataset.Height; i++)
+        {
+            var tomography = _tomographyGenerator.Generate2DTomography(_lastResults, 1, i);
+            if (tomography != null)
+            {
+                string path = Path.Combine(exportDir, $"Y_slice_{i:D4}.bin");
+                File.WriteAllBytes(path, tomography);
+            }
+        }
+        
+        // Export all Z slices
+        for (int i = 0; i < _currentDataset.Depth; i++)
+        {
+            var tomography = _tomographyGenerator.Generate2DTomography(_lastResults, 2, i);
+            if (tomography != null)
+            {
+                string path = Path.Combine(exportDir, $"Z_slice_{i:D4}.bin");
+                File.WriteAllBytes(path, tomography);
+            }
+        }
+        
+        Logger.Log($"[Tomography] Exported all slices to {exportDir}");
+    });
+}
         private void ApplyAxisPreset(int axis)
         {
             switch (axis)
@@ -598,115 +708,254 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
         }
         
         private async void AutoPlaceTransducers(CtImageStackDataset dataset)
-        {
-            var material = dataset.Materials.Where(m => m.ID != 0).ElementAt(_selectedMaterialIndex);
-            if (material == null)
+{
+    var material = dataset.Materials.Where(m => m.ID != 0).ElementAtOrDefault(_selectedMaterialIndex);
+    if (material == null)
+    {
+        Logger.LogWarning("[AutoPlace] No material selected.");
+        return;
+    }
+
+    Logger.Log($"[AutoPlace] Finding optimal transducer positions for material '{material.Name}' (ID: {material.ID})...");
+
+    var autoPlacer = new TransducerAutoPlacer(dataset, material.ID);
+    var bounds = await Task.Run(() => autoPlacer.FindLargestIslandAndBounds());
+
+    if (!bounds.HasValue)
+    {
+        Logger.LogError($"[AutoPlace] Material ID {material.ID} not found or has no volume in the dataset.");
+        return;
+    }
+
+    var (min, max) = bounds.Value;
+    Logger.Log($"[AutoPlace] Largest connected component bounds: Min({min}), Max({max})");
+
+    // Calculate the extent along each axis
+    float xExtent = max.X - min.X;
+    float yExtent = max.Y - min.Y;
+    float zExtent = max.Z - min.Z;
+
+    // Place transducers along the selected axis with a small buffer to ensure they're inside the material
+    const int buffer = 3; // Place transducers 3 voxels inside the material bounds
+    Vector3 txVoxel, rxVoxel;
+
+    switch (_selectedAxisIndex)
+    {
+        case 0: // X-Axis - Place along X, centered in Y and Z
             {
-                Logger.LogWarning("[AutoPlace] No material selected.");
-                return;
-            }
-
-            Logger.Log($"[AutoPlace] Finding bounds for material '{material.Name}' (ID: {material.ID})");
-
-            var boundsMin = new Vector3(dataset.Width, dataset.Height, dataset.Depth);
-            var boundsMax = new Vector3(0, 0, 0);
-            bool materialFound = false;
-
-            // This can be slow for large datasets, but is necessary. Could be optimized.
-            await Task.Run(() =>
-            {
-                for (int z = 0; z < dataset.Depth; z++)
+                float centerY = (min.Y + max.Y) / 2.0f;
+                float centerZ = (min.Z + max.Z) / 2.0f;
+                txVoxel = new Vector3(min.X + buffer, centerY, centerZ);
+                rxVoxel = new Vector3(max.X - buffer, centerY, centerZ);
+                
+                // Ensure we have enough distance
+                if (rxVoxel.X - txVoxel.X < 10)
                 {
-                    var slice = new byte[dataset.Width * dataset.Height];
-                    dataset.LabelData.ReadSliceZ(z, slice);
-                    for (int y = 0; y < dataset.Height; y++)
+                    Logger.LogWarning($"[AutoPlace] Material too narrow along X-axis. Minimum placement distance.");
+                    txVoxel.X = min.X + 1;
+                    rxVoxel.X = max.X - 1;
+                }
+            }
+            break;
+            
+        case 1: // Y-Axis - Place along Y, centered in X and Z
+            {
+                float centerX = (min.X + max.X) / 2.0f;
+                float centerZ = (min.Z + max.Z) / 2.0f;
+                txVoxel = new Vector3(centerX, min.Y + buffer, centerZ);
+                rxVoxel = new Vector3(centerX, max.Y - buffer, centerZ);
+                
+                // Ensure we have enough distance
+                if (rxVoxel.Y - txVoxel.Y < 10)
+                {
+                    Logger.LogWarning($"[AutoPlace] Material too narrow along Y-axis. Minimum placement distance.");
+                    txVoxel.Y = min.Y + 1;
+                    rxVoxel.Y = max.Y - 1;
+                }
+            }
+            break;
+            
+        case 2: // Z-Axis - Place along Z, centered in X and Y
+            {
+                float centerX = (min.X + max.X) / 2.0f;
+                float centerY = (min.Y + max.Y) / 2.0f;
+                txVoxel = new Vector3(centerX, centerY, min.Z + buffer);
+                rxVoxel = new Vector3(centerX, centerY, max.Z - buffer);
+                
+                // Ensure we have enough distance
+                if (rxVoxel.Z - txVoxel.Z < 10)
+                {
+                    Logger.LogWarning($"[AutoPlace] Material too narrow along Z-axis. Minimum placement distance.");
+                    txVoxel.Z = min.Z + 1;
+                    rxVoxel.Z = max.Z - 1;
+                }
+            }
+            break;
+            
+        default:
+            return;
+    }
+
+    // Verify that both positions are actually within the material
+    bool txValid = IsPositionInMaterial(dataset, txVoxel, material.ID);
+    bool rxValid = IsPositionInMaterial(dataset, rxVoxel, material.ID);
+
+    if (!txValid || !rxValid)
+    {
+        Logger.LogWarning($"[AutoPlace] Initial positions not in material. Attempting to find valid positions...");
+        
+        // Try to find valid positions by searching inward from the bounds
+        (txVoxel, rxVoxel) = await Task.Run(() => 
+            FindValidTransducerPositions(dataset, material.ID, min, max, _selectedAxisIndex));
+        
+        txValid = IsPositionInMaterial(dataset, txVoxel, material.ID);
+        rxValid = IsPositionInMaterial(dataset, rxVoxel, material.ID);
+        
+        if (!txValid || !rxValid)
+        {
+            Logger.LogError($"[AutoPlace] Could not find valid positions within the material.");
+            return;
+        }
+    }
+
+    // Verify there's a path between TX and RX
+    Logger.Log($"[AutoPlace] Verifying path between TX and RX...");
+    bool hasPath = await Task.Run(() => autoPlacer.HasPath(txVoxel, rxVoxel));
+    
+    if (!hasPath)
+    {
+        Logger.LogWarning($"[AutoPlace] No direct path found between TX and RX. The material may be fragmented.");
+        // Continue anyway - the user can adjust manually if needed
+    }
+
+    // Normalize positions for the UI (0-1 range)
+    _txPosition = new Vector3(
+        Math.Clamp(txVoxel.X / dataset.Width, 0f, 1f),
+        Math.Clamp(txVoxel.Y / dataset.Height, 0f, 1f),
+        Math.Clamp(txVoxel.Z / dataset.Depth, 0f, 1f));
+
+    _rxPosition = new Vector3(
+        Math.Clamp(rxVoxel.X / dataset.Width, 0f, 1f),
+        Math.Clamp(rxVoxel.Y / dataset.Height, 0f, 1f),
+        Math.Clamp(rxVoxel.Z / dataset.Depth, 0f, 1f));
+
+    // Update the integration
+    AcousticIntegration.StartPlacement(dataset, null, _txPosition, _rxPosition);
+    OnTransducerMoved();
+    
+    // Calculate and log the distance
+    float dx = (rxVoxel.X - txVoxel.X) * dataset.PixelSize / 1000f;
+    float dy = (rxVoxel.Y - txVoxel.Y) * dataset.PixelSize / 1000f;
+    float dz = (rxVoxel.Z - txVoxel.Z) * dataset.SliceThickness / 1000f;
+    float distance = MathF.Sqrt(dx * dx + dy * dy + dz * dz);
+    
+    Logger.Log($"[AutoPlace] Successfully placed transducers:");
+    Logger.Log($"  TX: Voxel({txVoxel.X:F0},{txVoxel.Y:F0},{txVoxel.Z:F0}) -> Normalized({_txPosition.X:F3},{_txPosition.Y:F3},{_txPosition.Z:F3})");
+    Logger.Log($"  RX: Voxel({rxVoxel.X:F0},{rxVoxel.Y:F0},{rxVoxel.Z:F0}) -> Normalized({_rxPosition.X:F3},{_rxPosition.Y:F3},{_rxPosition.Z:F3})");
+    Logger.Log($"  Distance: {distance:F2} mm");
+    Logger.Log($"  Path verified: {(hasPath ? "Yes" : "No (fragmented material)")}");
+}
+        private bool IsPositionInMaterial(CtImageStackDataset dataset, Vector3 position, byte materialId)
+{
+    int x = Math.Clamp((int)position.X, 0, dataset.Width - 1);
+    int y = Math.Clamp((int)position.Y, 0, dataset.Height - 1);
+    int z = Math.Clamp((int)position.Z, 0, dataset.Depth - 1);
+    return dataset.LabelData[x, y, z] == materialId;
+}
+
+private (Vector3 tx, Vector3 rx) FindValidTransducerPositions(
+    CtImageStackDataset dataset, byte materialId, Vector3 min, Vector3 max, int axis)
+{
+    Vector3 txPos = new Vector3();
+    Vector3 rxPos = new Vector3();
+    
+    // Search for valid positions by scanning inward from the bounds
+    switch (axis)
+    {
+        case 0: // X-axis
+            {
+                float centerY = (min.Y + max.Y) / 2.0f;
+                float centerZ = (min.Z + max.Z) / 2.0f;
+                
+                // Find TX position (searching from min.X inward)
+                for (int x = (int)min.X; x <= (int)max.X; x++)
+                {
+                    if (IsPositionInMaterial(dataset, new Vector3(x, centerY, centerZ), materialId))
                     {
-                        for (int x = 0; x < dataset.Width; x++)
-                        {
-                            if (slice[y * dataset.Width + x] == material.ID)
-                            {
-                                materialFound = true;
-                                boundsMin.X = Math.Min(boundsMin.X, x);
-                                boundsMin.Y = Math.Min(boundsMin.Y, y);
-                                boundsMin.Z = Math.Min(boundsMin.Z, z);
-                                boundsMax.X = Math.Max(boundsMax.X, x);
-                                boundsMax.Y = Math.Max(boundsMax.Y, y);
-                                boundsMax.Z = Math.Max(boundsMax.Z, z);
-                            }
-                        }
+                        txPos = new Vector3(x, centerY, centerZ);
+                        break;
                     }
                 }
-            });
-
-            if (!materialFound)
-            {
-                Logger.LogError($"[AutoPlace] Material ID {material.ID} not found in the dataset.");
-                return;
+                
+                // Find RX position (searching from max.X inward)
+                for (int x = (int)max.X; x >= (int)min.X; x--)
+                {
+                    if (IsPositionInMaterial(dataset, new Vector3(x, centerY, centerZ), materialId))
+                    {
+                        rxPos = new Vector3(x, centerY, centerZ);
+                        break;
+                    }
+                }
             }
+            break;
             
-            Logger.Log($"[AutoPlace] Material bounds (voxels): Min({boundsMin}), Max({boundsMax})");
-
-            var center = (boundsMin + boundsMax) / 2.0f;
-
-            // Prioritize the currently selected axis for auto-placement
-            var otherAxes = new[] { 0, 1, 2 }.Where(a => a != _selectedAxisIndex);
-            var axes = new List<int> { _selectedAxisIndex };
-            axes.AddRange(otherAxes);
-
-            foreach (int axis in axes)
+        case 1: // Y-axis
             {
-                Vector3 tx = center;
-                Vector3 rx = center;
-                tx[axis] = boundsMin[axis] + 2; // Place slightly inside the material
-                rx[axis] = boundsMax[axis] - 2;
-
-                if (CheckPath(dataset, material.ID, tx, rx))
+                float centerX = (min.X + max.X) / 2.0f;
+                float centerZ = (min.Z + max.Z) / 2.0f;
+                
+                // Find TX position (searching from min.Y inward)
+                for (int y = (int)min.Y; y <= (int)max.Y; y++)
                 {
-                    _txPosition = new Vector3(tx.X / dataset.Width, tx.Y / dataset.Height, tx.Z / dataset.Depth);
-                    _rxPosition = new Vector3(rx.X / dataset.Width, rx.Y / dataset.Height, rx.Z / dataset.Depth);
-                    AcousticIntegration.StartPlacement(dataset, null, _txPosition, _rxPosition); // Update state
-                    OnTransducerMoved(); // Update UI
-                    Logger.Log($"[AutoPlace] Placed transducers along axis {axis} at TX:{tx} RX:{rx}");
-                    return;
+                    if (IsPositionInMaterial(dataset, new Vector3(centerX, y, centerZ), materialId))
+                    {
+                        txPos = new Vector3(centerX, y, centerZ);
+                        break;
+                    }
+                }
+                
+                // Find RX position (searching from max.Y inward)
+                for (int y = (int)max.Y; y >= (int)min.Y; y--)
+                {
+                    if (IsPositionInMaterial(dataset, new Vector3(centerX, y, centerZ), materialId))
+                    {
+                        rxPos = new Vector3(centerX, y, centerZ);
+                        break;
+                    }
                 }
             }
-
-            Logger.LogWarning("[AutoPlace] Could not find a clear path through the material on any axis. Using bounding box center.");
-            _txPosition = new Vector3(boundsMin.X / dataset.Width, center.Y / dataset.Height, center.Z / dataset.Depth);
-            _rxPosition = new Vector3(boundsMax.X / dataset.Width, center.Y / dataset.Height, center.Z / dataset.Depth);
-            AcousticIntegration.StartPlacement(dataset, null, _txPosition, _rxPosition);
-            OnTransducerMoved();
-        }
-
-        private bool CheckPath(CtImageStackDataset dataset, byte materialId, Vector3 start, Vector3 end)
-        {
-            Vector3 p1 = start;
-            Vector3 p2 = end;
-            Vector3 d = p2 - p1;
-
-            int steps = (int)Math.Max(Math.Abs(d.X), Math.Max(Math.Abs(d.Y), Math.Abs(d.Z)));
-            if (steps == 0) return true;
-
-            Vector3 inc = d / steps;
-            Vector3 current = p1;
-
-            int materialHits = 0;
-            for (int i = 0; i <= steps; i++)
+            break;
+            
+        case 2: // Z-axis
             {
-                int x = (int)Math.Round(current.X);
-                int y = (int)Math.Round(current.Y);
-                int z = (int)Math.Round(current.Z);
-
-                if (dataset.LabelData[x, y, z] == materialId)
+                float centerX = (min.X + max.X) / 2.0f;
+                float centerY = (min.Y + max.Y) / 2.0f;
+                
+                // Find TX position (searching from min.Z inward)
+                for (int z = (int)min.Z; z <= (int)max.Z; z++)
                 {
-                    materialHits++;
+                    if (IsPositionInMaterial(dataset, new Vector3(centerX, centerY, z), materialId))
+                    {
+                        txPos = new Vector3(centerX, centerY, z);
+                        break;
+                    }
                 }
-                current += inc;
+                
+                // Find RX position (searching from max.Z inward)
+                for (int z = (int)max.Z; z >= (int)min.Z; z--)
+                {
+                    if (IsPositionInMaterial(dataset, new Vector3(centerX, centerY, z), materialId))
+                    {
+                        rxPos = new Vector3(centerX, centerY, z);
+                        break;
+                    }
+                }
             }
-
-            // Require 90% of the path to be within the material
-            return (float)materialHits / steps > 0.90f;
-        }
+            break;
+    }
+    
+    return (txPos, rxPos);
+}
         
         private float CalculatePixelSizeFromVelocities()
         {
@@ -731,82 +980,152 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
         }
 
         private void DrawTomographyWindow()
+{
+    ImGui.SetNextWindowSize(new Vector2(500, 600), ImGuiCond.FirstUseEver);
+    if (ImGui.Begin("Velocity Tomography", ref _isTomographyWindowOpen))
+    {
+        if (_lastResults == null)
         {
-            ImGui.SetNextWindowSize(new Vector2(500, 550), ImGuiCond.FirstUseEver);
-            if (ImGui.Begin("Velocity Tomography", ref _isTomographyWindowOpen))
+            ImGui.Text("No simulation results available. Run a simulation first.");
+            ImGui.End();
+            return;
+        }
+
+        // Update button - regenerate tomography with current results
+        if (ImGui.Button("Update Tomography", new Vector2(-1, 0)))
+        {
+            _ = GenerateTomographyAsync();
+            Logger.Log("[Tomography] Manually updating tomography view");
+        }
+        
+        ImGui.Separator();
+
+        // --- Tomography Controls ---
+        ImGui.Text("Tomography Slice:");
+        ImGui.RadioButton("X Slice", ref _tomographySliceAxis, 0); ImGui.SameLine();
+        ImGui.RadioButton("Y Slice", ref _tomographySliceAxis, 1); ImGui.SameLine();
+        ImGui.RadioButton("Z Slice", ref _tomographySliceAxis, 2);
+
+        int maxSlice = _tomographySliceAxis switch
+        {
+            0 => _currentDataset.Width - 1,
+            1 => _currentDataset.Height - 1,
+            2 => _currentDataset.Depth - 1,
+            _ => 0
+        };
+        ImGui.SliderInt("Slice Index", ref _tomographySliceIndex, 0, maxSlice);
+
+        // --- Regenerate texture if controls change ---
+        if (_tomographySliceIndex != _lastTomographySliceIndex || _tomographySliceAxis != _lastTomographySliceAxis)
+        {
+            _ = GenerateTomographyAsync();
+            _lastTomographySliceIndex = _tomographySliceIndex;
+            _lastTomographySliceAxis = _tomographySliceAxis;
+        }
+        
+        // Auto-update checkbox
+        ImGui.Checkbox("Auto-update during simulation", ref _autoUpdateTomography);
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip("Automatically update tomography view while simulation is running");
+        
+        ImGui.Separator();
+
+        // Show current state info
+        if (_tomographyTexture != null && _tomographyTexture.IsValid)
+        {
+            ImGui.Text($"Current View: {(_tomographySliceAxis == 0 ? "YZ" : _tomographySliceAxis == 1 ? "XZ" : "XY")} plane at slice {_tomographySliceIndex}");
+            if (_lastResults != null)
             {
-                if (_lastResults == null)
-                {
-                    ImGui.Text("No simulation results available. Run a simulation first.");
-                    ImGui.End();
-                    return;
-                }
+                ImGui.Text($"Vp: {_lastResults.PWaveVelocity:F0} m/s | Vs: {_lastResults.SWaveVelocity:F0} m/s | Vp/Vs: {_lastResults.VpVsRatio:F3}");
+            }
+        }
+        else
+        {
+            ImGui.TextColored(new Vector4(1, 1, 0, 1), "Generating tomography...");
+        }
+        
+        ImGui.Separator();
 
-                // --- Tomography Controls ---
-                ImGui.Text("Tomography Slice:");
-                ImGui.RadioButton("X Slice", ref _tomographySliceAxis, 0); ImGui.SameLine();
-                ImGui.RadioButton("Y Slice", ref _tomographySliceAxis, 1); ImGui.SameLine();
-                ImGui.RadioButton("Z Slice", ref _tomographySliceAxis, 2);
-
-                int maxSlice = _tomographySliceAxis switch
+        // --- Tomography View ---
+        if (_tomographyTexture != null && _tomographyTexture.IsValid)
+        {
+            var availableSize = ImGui.GetContentRegionAvail();
+            availableSize.Y -= 40; // Space for color bar
+            if (availableSize.X > 50 && availableSize.Y > 50)
+            {
+                var imagePos = ImGui.GetCursorScreenPos();
+                float aspectRatio = _tomographySliceAxis switch
                 {
-                    0 => _currentDataset.Width - 1,
-                    1 => _currentDataset.Height - 1,
-                    2 => _currentDataset.Depth - 1,
-                    _ => 0
+                    0 => (float)_parameters.Height / _parameters.Depth,
+                    1 => (float)_parameters.Width / _parameters.Depth,
+                    _ => (float)_parameters.Width / _parameters.Height
                 };
-                ImGui.SliderInt("Slice Index", ref _tomographySliceIndex, 0, maxSlice);
-
-                // --- Regenerate texture if controls change ---
-                if (_tomographySliceIndex != _lastTomographySliceIndex || _tomographySliceAxis != _lastTomographySliceAxis)
+                Vector2 imageSize;
+                if (availableSize.X / availableSize.Y > aspectRatio)
                 {
-                    _ = GenerateTomographyAsync();
-                    _lastTomographySliceIndex = _tomographySliceIndex;
-                    _lastTomographySliceAxis = _tomographySliceAxis;
-                }
-                
-                ImGui.Separator();
-
-                // --- Tomography View ---
-                if (_tomographyTexture != null && _tomographyTexture.IsValid)
-                {
-                    var availableSize = ImGui.GetContentRegionAvail();
-                    availableSize.Y -= 40; // Space for color bar
-                    if (availableSize.X > 50 && availableSize.Y > 50)
-                    {
-                        var imagePos = ImGui.GetCursorScreenPos();
-                        float aspectRatio = _tomographySliceAxis switch
-                        {
-                            0 => (float)_parameters.Height / _parameters.Depth,
-                            1 => (float)_parameters.Width / _parameters.Depth,
-                            _ => (float)_parameters.Width / _parameters.Height
-                        };
-                        Vector2 imageSize;
-                        if (availableSize.X / availableSize.Y > aspectRatio)
-                        {
-                            imageSize = new Vector2(availableSize.Y * aspectRatio, availableSize.Y);
-                        }
-                        else
-                        {
-                            imageSize = new Vector2(availableSize.X, availableSize.X / aspectRatio);
-                        }
-
-                        // Draw image
-                        ImGui.Image(_tomographyTexture.GetImGuiTextureId(), imageSize);
-                        var drawList = ImGui.GetWindowDrawList();
-
-                        // --- Draw Wave Propagation Path ---
-                        DrawWavePathOverlay(drawList, imagePos, imageSize);
-                    }
-                    DrawColorBar();
+                    imageSize = new Vector2(availableSize.Y * aspectRatio, availableSize.Y);
                 }
                 else
                 {
-                    ImGui.Text("Generating tomography...");
+                    imageSize = new Vector2(availableSize.X, availableSize.X / aspectRatio);
+                }
+
+                // Draw image
+                ImGui.Image(_tomographyTexture.GetImGuiTextureId(), imageSize);
+                var drawList = ImGui.GetWindowDrawList();
+
+                // --- Draw Wave Propagation Path ---
+                DrawWavePathOverlay(drawList, imagePos, imageSize);
+                
+                // Show cursor position info when hovering
+                if (ImGui.IsItemHovered())
+                {
+                    var mousePos = ImGui.GetMousePos();
+                    var relPos = (mousePos - imagePos) / imageSize;
+                    if (relPos.X >= 0 && relPos.X <= 1 && relPos.Y >= 0 && relPos.Y <= 1)
+                    {
+                        int pixelX = (int)(relPos.X * (_tomographySliceAxis == 0 ? _parameters.Height : _parameters.Width));
+                        int pixelY = (int)(relPos.Y * (_tomographySliceAxis == 2 ? _parameters.Height : _parameters.Depth));
+                        ImGui.SetTooltip($"Position: ({pixelX}, {pixelY})");
+                    }
                 }
             }
-            ImGui.End();
+            DrawColorBar();
         }
+        else
+        {
+            ImGui.Text("Generating tomography...");
+            if (ImGui.Button("Retry Generation"))
+            {
+                _ = GenerateTomographyAsync();
+            }
+        }
+        
+        ImGui.Separator();
+        
+        // Export options
+        if (ImGui.Button("Export Tomography Image"))
+        {
+            ExportTomographyImage();
+        }
+        ImGui.SameLine();
+        if (ImGui.Button("Export All Slices"))
+        {
+            ExportAllTomographySlices();
+        }
+    }
+    ImGui.End();
+    
+    // Auto-update during simulation
+    if (_autoUpdateTomography && _isSimulating && _simulator != null)
+    {
+        if ((DateTime.Now - _lastTomographyUpdate).TotalSeconds > 1.0) // Update every second
+        {
+            _ = GenerateTomographyAsync();
+            _lastTomographyUpdate = DateTime.Now;
+        }
+    }
+}
 
         private void DrawWavePathOverlay(ImDrawListPtr drawList, Vector2 imagePos, Vector2 imageSize)
         {

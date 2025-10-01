@@ -978,49 +978,79 @@ void main() { out_Color = PlaneColor; }";
         }
 
         private void HandleMouseInput(Vector2 viewPos, Vector2 viewSize)
+{
+    var io = ImGui.GetIO();
+
+    // Handle Acoustic Transducer Placement (only on left click, not drag)
+    if (AcousticIntegration.IsPlacingFor(_editableDataset) && ImGui.IsMouseClicked(ImGuiMouseButton.Left))
+    {
+        var mousePos = io.MousePos - viewPos;
+        if (Raycast(mousePos, viewSize, out var intersectionPoint))
         {
-            var io = ImGui.GetIO();
+            AcousticIntegration.UpdatePosition(intersectionPoint);
+        }
+        return; // Prevent camera movement on the click that places the transducer
+    }
 
-            // Handle Acoustic Transducer Placement
-            if (AcousticIntegration.IsPlacingFor(_editableDataset) && (ImGui.IsMouseClicked(ImGuiMouseButton.Left) || ImGui.IsMouseDragging(ImGuiMouseButton.Left)))
+    // Allow zooming even when placing transducers
+    if (io.MouseWheel != 0) 
+    {
+        _cameraDistance = Math.Clamp(_cameraDistance * (1.0f - io.MouseWheel * 0.1f), 0.5f, 20.0f);
+    }
+    
+    // Handle camera rotation and panning
+    if (ImGui.IsMouseDown(ImGuiMouseButton.Left) || ImGui.IsMouseDown(ImGuiMouseButton.Right) || ImGui.IsMouseDown(ImGuiMouseButton.Middle))
+    {
+        // Allow rotation with right-click even when placing transducers
+        bool allowRotation = ImGui.IsMouseDown(ImGuiMouseButton.Right) || 
+                           (ImGui.IsMouseDown(ImGuiMouseButton.Left) && !AcousticIntegration.IsPlacingFor(_editableDataset));
+        bool allowPanning = ImGui.IsMouseDown(ImGuiMouseButton.Middle);
+        
+        if (!_isDragging && !_isPanning)
+        {
+            if (allowRotation)
             {
-                var mousePos = io.MousePos - viewPos;
-                if (Raycast(mousePos, viewSize, out var intersectionPoint))
-                {
-                    AcousticIntegration.UpdatePosition(intersectionPoint);
-                }
-                return; // Prevent camera movement while placing
-            }
-
-            if (io.MouseWheel != 0) _cameraDistance = Math.Clamp(_cameraDistance * (1.0f - io.MouseWheel * 0.1f), 0.5f, 20.0f);
-            if (ImGui.IsMouseDown(ImGuiMouseButton.Left) || ImGui.IsMouseDown(ImGuiMouseButton.Right) || ImGui.IsMouseDown(ImGuiMouseButton.Middle))
-            {
-                if (!_isDragging && !_isPanning)
-                {
-                    _isDragging = ImGui.IsMouseDown(ImGuiMouseButton.Left);
-                    _isPanning = ImGui.IsMouseDown(ImGuiMouseButton.Middle) || ImGui.IsMouseDown(ImGuiMouseButton.Right);
-                    _lastMousePos = io.MousePos;
-                }
-                var delta = io.MousePos - _lastMousePos;
-                if (_isDragging)
-                {
-                    _cameraYaw -= delta.X * 0.01f;
-                    _cameraPitch = Math.Clamp(_cameraPitch - delta.Y * 0.01f, -MathF.PI / 2.01f, MathF.PI / 2.01f);
-                }
-                if (_isPanning)
-                {
-                    Matrix4x4.Invert(_viewMatrix, out var invView);
-                    var right = Vector3.Normalize(new Vector3(invView.M11, invView.M12, invView.M13));
-                    var up = Vector3.Normalize(new Vector3(invView.M21, invView.M22, invView.M23));
-                    float panSpeed = _cameraDistance * 0.001f;
-                    _cameraTarget -= right * delta.X * panSpeed;
-                    _cameraTarget += up * delta.Y * panSpeed;
-                }
+                _isDragging = true;
                 _lastMousePos = io.MousePos;
             }
-            else { _isDragging = false; _isPanning = false; }
-            UpdateCameraMatrices();
+            else if (allowPanning)
+            {
+                _isPanning = true;
+                _lastMousePos = io.MousePos;
+            }
         }
+        
+        if (_isDragging || _isPanning)
+        {
+            var delta = io.MousePos - _lastMousePos;
+            
+            if (_isDragging)
+            {
+                _cameraYaw -= delta.X * 0.01f;
+                _cameraPitch = Math.Clamp(_cameraPitch - delta.Y * 0.01f, -MathF.PI / 2.01f, MathF.PI / 2.01f);
+            }
+            
+            if (_isPanning)
+            {
+                Matrix4x4.Invert(_viewMatrix, out var invView);
+                var right = Vector3.Normalize(new Vector3(invView.M11, invView.M12, invView.M13));
+                var up = Vector3.Normalize(new Vector3(invView.M21, invView.M22, invView.M23));
+                float panSpeed = _cameraDistance * 0.001f;
+                _cameraTarget -= right * delta.X * panSpeed;
+                _cameraTarget += up * delta.Y * panSpeed;
+            }
+            
+            _lastMousePos = io.MousePos;
+        }
+    }
+    else 
+    { 
+        _isDragging = false; 
+        _isPanning = false; 
+    }
+    
+    UpdateCameraMatrices();
+}
 
         private bool Raycast(Vector2 mousePos, Vector2 viewSize, out Vector3 intersection)
         {
