@@ -13,6 +13,7 @@ using GeoscientistToolkit.Data.CtImageStack;
 using GeoscientistToolkit.UI.Interfaces;
 using ImGuiNET;
 using System.Numerics;
+using GeoscientistToolkit.Analysis.AcousticSimulation;
 using GeoscientistToolkit.Analysis.Materials;
 using GeoscientistToolkit.Analysis.MaterialStatistics;
 
@@ -307,6 +308,18 @@ namespace GeoscientistToolkit.UI.Tools
             ImGui.Separator();
             ImGui.Spacing();
             
+            // Get the currently active tool
+            var activeToolEntry = (categoryTools.Count > 0 && _selectedToolIndex < categoryTools.Count) 
+                ? categoryTools[_selectedToolIndex] 
+                : null;
+            
+            // If the active tool is NOT the acoustic simulation, ensure the transducer placement state is stopped.
+            // The acoustic tool's own Draw() method will re-enable it when it becomes active.
+            if (activeToolEntry?.Tool is not AcousticSimulationTool)
+            {
+                AcousticIntegration.StopPlacement();
+            }
+
             // Tools in selected category as tabs (if multiple) or direct render (if single)
             if (categoryTools.Count == 0)
             {
