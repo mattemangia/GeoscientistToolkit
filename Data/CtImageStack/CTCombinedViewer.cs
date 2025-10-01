@@ -161,7 +161,10 @@ namespace GeoscientistToolkit.Data.CtImageStack
             }
 
             ProjectManager.Instance.DatasetDataChanged += OnDatasetDataChanged;
-            
+            GeoscientistToolkit.UI.Tools.CalibrationIntegration.PreviewChanged += _ =>
+            {
+                _needsUpdateXY = _needsUpdateXZ = _needsUpdateYZ = true;
+            };
             _ = InitializeAsync();
         }
         
@@ -541,6 +544,27 @@ namespace GeoscientistToolkit.Data.CtImageStack
             bool inputHandled = false;
             if (isHovered)
             {
+                if (isHovered && ImGui.IsItemClicked(ImGuiMouseButton.Left)
+                              && GeoscientistToolkit.UI.Tools.CalibrationIntegration.IsRegionSelectionEnabled(_dataset))
+                {
+                    // Map mouse to image coordinates
+                    var io0 = ImGui.GetIO();
+                    var mousePosInImage = GetMousePosInImage(io0.MousePos, imagePos, imageSize, width, height);
+                    int vx = Math.Clamp((int)mousePosInImage.X, 0, width - 1);
+                    int vy = Math.Clamp((int)mousePosInImage.Y, 0, height - 1);
+
+                    // XY -> “Z”, XZ -> “Y”, YZ -> “X”
+                    switch (viewIndex)
+                    {
+                        case 0: GeoscientistToolkit.UI.Tools.CalibrationIntegration.OnViewerClick(_dataset, "Z", _sliceZ, vx, vy); break;
+                        case 1: GeoscientistToolkit.UI.Tools.CalibrationIntegration.OnViewerClick(_dataset, "Y", _sliceY, vx, vy); break;
+                        case 2: GeoscientistToolkit.UI.Tools.CalibrationIntegration.OnViewerClick(_dataset, "X", _sliceX, vx, vy); break;
+                    }
+
+                    // Force a redraw and swallow the default click (prevents slice change / crosshair updates)
+                    _needsUpdateXY = _needsUpdateXZ = _needsUpdateYZ = true;
+                    return;
+                }
                 // Give input to the Rock Core tool first
                 inputHandled = RockCoreIntegration.HandleMouseInput(_dataset, io.MousePos,
                     imagePos, imageSize, width, height, viewIndex,

@@ -1,293 +1,739 @@
 // GeoscientistToolkit/UI/Tools/DensityCalibrationTool.cs
+//
+// Density calibration with working mini-preview + ROI selection,
+// and an integration shim so the main CT viewers can forward clicks
+// to this tool when "Region Selection" is enabled.
+//
+// Assumptions:
+// - Dataset type: CtImageStackDataset, with VolumeData (byte) and LabelData (byte) providing ReadSliceZ(z, buffer)
+// - TextureManager: utility that can create/dispose ImGui textures from RGBA byte[] (uint width/height)
+// - Materials collection available on dataset, with ID (byte) and Color (Vector4: 0..1)
+// - Logger class available
+// - ImGui.NET in use
+// - Viewers can (optionally) call CalibrationIntegration.OnViewerClick(dataset, axis, sliceZ, pixelX, pixelY)
+//   when CalibrationIntegration.IsRegionSelectionEnabled(dataset) is true.
+//
+// If your viewers already integrate via CtImageStackTools.PreviewChanged/GetPreviewData,
+// this class also publishes the preview there for backwards-compatibility.
+
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Numerics;
-using GeoscientistToolkit.Business;
-using GeoscientistToolkit.Data;
-using GeoscientistToolkit.Data.CtImageStack;
-using GeoscientistToolkit.UI.Interfaces;
+using System.Text;
 using ImGuiNET;
+using GeoscientistToolkit.UI.Interfaces;
+using GeoscientistToolkit.Data.CtImageStack;
+using GeoscientistToolkit.Business;
+using GeoscientistToolkit.Util;
 
 namespace GeoscientistToolkit.UI.Tools
 {
-    /// <summary>
-    /// Tool for calibrating material densities using physical measurements
-    /// </summary>
-    public class DensityCalibrationTool : IDatasetTools
+    public class DensityCalibrationTool : IDatasetTools, IDisposable
     {
-        private class CalibrationRecord
+        // ---------- Models ----------
+        private sealed class ManualRegion
         {
-            public string MaterialName { get; set; }
-            public DateTime Timestamp { get; set; }
-            public float MeasuredMass { get; set; } // grams
-            public float MeasuredVolume { get; set; } // cm³
-            public float CalculatedDensity { get; set; } // g/cm³
-            public string Notes { get; set; }
+            public string Name = "New Region";
+            public Vector4 Color = new(0.0f, 0.8f, 1.0f, 1.0f);
+            public float Density = 2700f;      // kg/m^3 or g/m^3 depending on your convention; shown as-is
+            public int SliceZ;                 // slice where ROI lives
+            public int X0, Y0, X1, Y1;         // inclusive rectangle in pixel coords (dataset space)
         }
 
-        private CtImageStackDataset _currentDataset;
-        private int _selectedMaterialIndex = 0;
-        private float _measuredMass = 100.0f;
-        private float _measuredVolume = 50.0f;
-        private float _calculatedDensity = 2.0f;
-        private bool _autoApplyToMaterial = true;
-        private string _calibrationNotes = "";
-        private List<CalibrationRecord> _calibrationHistory = new List<CalibrationRecord>();
-
-        public void Draw(Dataset dataset)
+        private sealed class DensitySample
         {
-            if (dataset is not CtImageStackDataset ctDataset)
+            public int SliceZ;
+            public Vector2 PosPx;
+            public int Radius = 5;
+            public float MeanGray;
+            public float StdGray;
+            public int Count;
+            public float KnownDensity;
+            public string Label;
+            public DateTime Timestamp;
+        }
+
+        // ---------- State ----------
+        private CtImageStackDataset _ds;
+        private readonly List<ManualRegion> _regions = new();
+        private readonly List<DensitySample> _samples = new();
+
+        // UI flags/state
+        private enum CalibMode { GrayscaleMapping, MeanDensity, ManualSelection }
+        private CalibMode _mode = CalibMode.ManualSelection;
+
+        private bool _showPreview = true;
+        private int _previewSliceZ = 0;
+        private float _wl = 128f;
+        private float _ww = 255f;
+
+        // mini-preview texture
+        private TextureManager _previewTex;
+        private bool _previewDirty = true;
+
+        // rectangle selection inside preview widget
+        private bool _dragging = false;
+        private Vector2 _dragStartPx;
+        private Vector2 _dragEndPx;
+
+        // selection enable for main viewers
+        private bool _viewerSelectionEnabled = false;
+
+        // stats cache by material id
+        private readonly Dictionary<byte, (float mean, float std, int count)> _matStats = new();
+
+        // curve points: X=gray, Y=density
+        private readonly List<Vector2> _curve = new();
+        private int _testGray = 128;
+
+        // ---------- Public Draw ----------
+        public void Draw(GeoscientistToolkit.Data.Dataset dataset)
+        {
+            if (dataset is not CtImageStackDataset ct)
             {
-                ImGui.TextDisabled("Density calibration requires a CT Image Stack dataset.");
+                ImGui.TextColored(new Vector4(1, 0.7f, 0.2f, 1), "Density calibration requires a CT Image Stack dataset.");
                 return;
             }
 
-            _currentDataset = ctDataset;
+            if (!ReferenceEquals(_ds, ct))
+            {
+                _ds = ct;
+                _regions.Clear();
+                _samples.Clear();
+                _matStats.Clear();
+                _curve.Clear();
+                _previewSliceZ = 0;
+                _previewDirty = true;
+            }
 
             ImGui.SeparatorText("Density Calibration");
 
-            // Material selection
-            var nonExteriorMaterials = _currentDataset.Materials.Where(m => m.ID != 0).ToList();
-            if (nonExteriorMaterials.Count == 0)
+            // --- Mode ---
+            ImGui.Text("Calibration Mode:");
+            ImGui.SameLine();
+            RadioMode("Grayscale Mapping", CalibMode.GrayscaleMapping);
+            ImGui.SameLine();
+            RadioMode("Mean Density", CalibMode.MeanDensity);
+            ImGui.SameLine();
+            RadioMode("Manual Selection", CalibMode.ManualSelection);
+
+            // --- Slice chooser for preview ---
+            ImGui.Text($"Slice: {_previewSliceZ}");
+            ImGui.SameLine();
+            if (ImGui.SmallButton("Previous"))
             {
-                ImGui.TextDisabled("No materials available for calibration. Create materials first.");
+                _previewSliceZ = Math.Max(0, _previewSliceZ - 1);
+                _previewDirty = true;
+            }
+            ImGui.SameLine();
+            if (ImGui.SmallButton("Next"))
+            {
+                _previewSliceZ = Math.Min(_ds.Depth - 1, _previewSliceZ + 1);
+                _previewDirty = true;
+            }
+
+            // --- Regions (manual mode) ---
+            if (_mode == CalibMode.ManualSelection)
+            {
+                ImGui.Separator();
+                ImGui.Text("Manual Regions:");
+                if (ImGui.SmallButton("Add Region"))
+                {
+                    _regions.Add(new ManualRegion
+                    {
+                        Name = $"Region {_regions.Count + 1}",
+                        SliceZ = _previewSliceZ,
+                        X0 = 0, Y0 = 0, X1 = Math.Min(_ds.Width - 1, 32), Y1 = Math.Min(_ds.Height - 1, 32)
+                    });
+                    _previewDirty = true;
+                    Publish3DPreviewMask(); // show something immediately
+                }
+
+                DrawRegionsTable();
+            }
+
+            // --- Selection in main viewers toggle ---
+            ImGui.Separator();
+            if (ImGui.Checkbox("Enable Region Selection in Main Viewers", ref _viewerSelectionEnabled))
+            {
+                if (_viewerSelectionEnabled)
+                    CalibrationIntegration.EnableRegionSelection(_ds, OnViewerRegionClick);
+                else
+                    CalibrationIntegration.DisableRegionSelection(_ds, OnViewerRegionClick);
+            }
+
+            // --- Curve & apply ---
+            ImGui.Separator();
+            DrawCalibrationSection();
+
+            // --- Actions ---
+            ImGui.Separator();
+            if (ImGui.Button("Apply Calibration"))
+            {
+                ApplyCalibration();
+            }
+            ImGui.SameLine();
+            if (ImGui.Button("Reset"))
+            {
+                _regions.Clear();
+                _samples.Clear();
+                _curve.Clear();
+                _matStats.Clear();
+                _previewDirty = true;
+                CalibrationIntegration.ClearPreview(_ds);
+            }
+        }
+
+        // ---------- UI helpers ----------
+        private void RadioMode(string label, CalibMode m)
+        {
+            bool selected = _mode == m;
+            if (ImGui.RadioButton(label, selected))
+            {
+                _mode = m;
+                _previewDirty = true;
+            }
+        }
+
+        private void DrawRegionsTable()
+        {
+            if (_regions.Count == 0)
+            {
+                ImGui.TextDisabled("No regions added yet.");
                 return;
             }
 
-            string[] materialNames = nonExteriorMaterials.Select(m => m.Name).ToArray();
-            if (_selectedMaterialIndex >= materialNames.Length)
-                _selectedMaterialIndex = 0;
-
-            ImGui.Text("Target Material:");
-            ImGui.SetNextItemWidth(-1);
-            if (ImGui.Combo("##CalibrationMaterial", ref _selectedMaterialIndex, materialNames, materialNames.Length))
+            if (ImGui.BeginTable("Regions", 6, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.Resizable))
             {
-                UpdateDensityDisplay(nonExteriorMaterials);
+                ImGui.TableSetupColumn("Name", ImGuiTableColumnFlags.WidthFixed, 140);
+                ImGui.TableSetupColumn("Slice", ImGuiTableColumnFlags.WidthFixed, 60);
+                ImGui.TableSetupColumn("Density", ImGuiTableColumnFlags.WidthFixed, 90);
+                ImGui.TableSetupColumn("Color", ImGuiTableColumnFlags.WidthFixed, 90);
+                ImGui.TableSetupColumn("Rect (x0,y0)-(x1,y1)", ImGuiTableColumnFlags.WidthStretch);
+                ImGui.TableSetupColumn("Actions", ImGuiTableColumnFlags.WidthFixed, 120);
+                ImGui.TableHeadersRow();
+
+                for (int i = 0; i < _regions.Count; i++)
+                {
+                    var r = _regions[i];
+                    ImGui.TableNextRow();
+
+                    // Name
+                    ImGui.TableNextColumn();
+                    ImGui.SetNextItemWidth(-1);
+                    ImGui.InputText($"##name{i}", ref r.Name, 128);
+
+                    // Slice
+                    ImGui.TableNextColumn();
+                    int s = r.SliceZ;
+                    if (ImGui.DragInt($"##slice{i}", ref s, 1, 0, Math.Max(0, _ds.Depth - 1)))
+                    {
+                        r.SliceZ = Math.Clamp(s, 0, _ds.Depth - 1);
+                        _previewDirty = true;
+                    }
+
+                    // Density
+                    ImGui.TableNextColumn();
+                    ImGui.SetNextItemWidth(-1);
+                    ImGui.InputFloat($"##dens{i}", ref r.Density, 0, 0, "%.1f");
+
+                    // Color
+                    ImGui.TableNextColumn();
+                    ImGui.ColorEdit4($"##col{i}", ref r.Color);
+
+                    // Rect
+                    ImGui.TableNextColumn();
+                    ImGui.Text($"{r.X0},{r.Y0} - {r.X1},{r.Y1}");
+
+                    // Actions
+                    ImGui.TableNextColumn();
+                    if (ImGui.SmallButton($"Select##sel{i}"))
+                    {
+                        // arm the main-viewer selection for this region (updates on next click)
+                        _viewerSelectionEnabled = true;
+                        CalibrationIntegration.EnableRegionSelection(_ds, OnViewerRegionClick, i);
+                        Logger.Log($"[DensityCalibration] Click a main viewer slice to set region #{i} rectangle.");
+                    }
+                    ImGui.SameLine();
+                    if (ImGui.SmallButton($"Remove##rem{i}"))
+                    {
+                        _regions.RemoveAt(i);
+                        _previewDirty = true;
+                        Publish3DPreviewMask();
+                        i--;
+                    }
+                }
+                ImGui.EndTable();
+            }
+        }
+
+        private void DrawPreviewWidget(int maxW, int maxH)
+        {
+            if (_ds == null || _ds.VolumeData == null) return;
+
+            int w = _ds.Width;
+            int h = _ds.Height;
+
+            // rebuild RGBA preview when needed
+            if (_previewDirty || _previewTex == null || !_previewTex.IsValid)
+            {
+                try
+                {
+                    var gray = new byte[w * h];
+                    _ds.VolumeData.ReadSliceZ(Math.Clamp(_previewSliceZ, 0, _ds.Depth - 1), gray);
+                    ApplyWindowLevel(gray, _wl, _ww);
+
+                    var rgba = new byte[w * h * 4];
+                    for (int i = 0; i < gray.Length; i++)
+                    {
+                        byte g = gray[i];
+                        int o = i * 4;
+                        rgba[o + 0] = g;
+                        rgba[o + 1] = g;
+                        rgba[o + 2] = g;
+                        rgba[o + 3] = 255;
+                    }
+
+                    // draw all regions that belong to this slice
+                    foreach (var r in _regions.Where(rr => rr.SliceZ == _previewSliceZ))
+                    {
+                        DrawRectOnRgba(rgba, w, h, r, thickness: 1);
+                    }
+
+                    _previewTex?.Dispose();
+                    _previewTex = TextureManager.CreateFromPixelData(rgba, (uint)w, (uint)h);
+                    _previewDirty = false;
+                }
+                catch (Exception ex)
+                {
+                    Logger.LogError($"[DensityCalibration] Preview build failed: {ex.Message}");
+                    return;
+                }
             }
 
-            var selectedMaterial = nonExteriorMaterials[_selectedMaterialIndex];
+            // geometry
+            var avail = ImGui.GetContentRegionAvail();
+            float scale = Math.Min(Math.Min(avail.X / w, avail.Y / h), Math.Min(maxW / (float)w, maxH / (float)h));
+            if (scale <= 0) scale = 1f;
 
-            // Current material info
-            ImGui.Spacing();
-            ImGui.TextColored(new Vector4(0.8f, 0.8f, 0.8f, 1), $"Current Density: {selectedMaterial.Density:F3} g/cm³");
-            
-            if (!string.IsNullOrEmpty(selectedMaterial.PhysicalMaterialName))
+            var draw = ImGui.GetWindowDrawList();
+            var imgSize = new Vector2(w * scale, h * scale);
+            var p0 = ImGui.GetCursorScreenPos();
+
+            // input surface
+            ImGui.InvisibleButton("##CalPrevCanvas", imgSize);
+            bool hovered = ImGui.IsItemHovered();
+
+            // image
+            draw.AddImage(_previewTex.GetImGuiTextureId(), p0, p0 + imgSize, Vector2.Zero, Vector2.One, 0xFFFFFFFF);
+
+            // mouse → image px
+            Vector2 MouseToPx(Vector2 m) =>
+                new(
+                    Math.Clamp((m.X - p0.X) / scale, 0, w - 1),
+                    Math.Clamp((m.Y - p0.Y) / scale, 0, h - 1));
+
+            // rect drag selection
+            if (hovered && ImGui.IsMouseClicked(ImGuiMouseButton.Left))
             {
+                _dragging = true;
+                _dragStartPx = _dragEndPx = MouseToPx(ImGui.GetIO().MousePos);
+            }
+            if (_dragging && hovered && ImGui.IsMouseDragging(ImGuiMouseButton.Left))
+            {
+                _dragEndPx = MouseToPx(ImGui.GetIO().MousePos);
+            }
+            if (_dragging && ImGui.IsMouseReleased(ImGuiMouseButton.Left))
+            {
+                _dragging = false;
+
+                var rect = NormalizeRect(_dragStartPx, _dragEndPx, w, h);
+                // create/update a region for this slice
+                _regions.Add(new ManualRegion
+                {
+                    Name = $"Region {_regions.Count + 1}",
+                    SliceZ = _previewSliceZ,
+                    X0 = rect.x0, Y0 = rect.y0, X1 = rect.x1, Y1 = rect.y1,
+                    Density = 2700f,
+                    Color = new Vector4(0.0f, 0.8f, 1.0f, 1.0f)
+                });
+                _previewDirty = true;
+                Publish3DPreviewMask();
+            }
+
+            // draw current drag rect overlay
+            if (_dragging)
+            {
+                var a = p0 + new Vector2(_dragStartPx.X * scale, _dragStartPx.Y * scale);
+                var b = p0 + new Vector2(_dragEndPx.X * scale, _dragEndPx.Y * scale);
+                draw.AddRect(a, b, 0xFF00FFFF, 0, 0, 2f);
+            }
+        }
+
+        private (int x0, int y0, int x1, int y1) NormalizeRect(Vector2 a, Vector2 b, int w, int h)
+        {
+            int x0 = (int)Math.Floor(Math.Min(a.X, b.X));
+            int y0 = (int)Math.Floor(Math.Min(a.Y, b.Y));
+            int x1 = (int)Math.Ceiling(Math.Max(a.X, b.X));
+            int y1 = (int)Math.Ceiling(Math.Max(a.Y, b.Y));
+            x0 = Math.Clamp(x0, 0, w - 1);
+            y0 = Math.Clamp(y0, 0, h - 1);
+            x1 = Math.Clamp(x1, 0, w - 1);
+            y1 = Math.Clamp(y1, 0, h - 1);
+            return (x0, y0, x1, y1);
+        }
+
+        private void DrawRectOnRgba(byte[] rgba, int w, int h, ManualRegion r, int thickness)
+        {
+            // Guard
+            int x0 = Math.Clamp(r.X0, 0, w - 1);
+            int x1 = Math.Clamp(r.X1, 0, w - 1);
+            int y0 = Math.Clamp(r.Y0, 0, h - 1);
+            int y1 = Math.Clamp(r.Y1, 0, h - 1);
+
+            byte rr = (byte)(r.Color.X * 255);
+            byte gg = (byte)(r.Color.Y * 255);
+            byte bb = (byte)(r.Color.Z * 255);
+
+            void SetPx(int x, int y)
+            {
+                int i = (y * w + x) * 4;
+                rgba[i + 0] = rr;
+                rgba[i + 1] = gg;
+                rgba[i + 2] = bb;
+                rgba[i + 3] = 255;
+            }
+
+            for (int t = 0; t < thickness; t++)
+            {
+                for (int x = x0; x <= x1; x++) { SetPx(x, y0 + t); SetPx(x, y1 - t); }
+                for (int y = y0; y <= y1; y++) { SetPx(x0 + t, y); SetPx(x1 - t, y); }
+            }
+        }
+
+        // ---------- Calibration curve & apply ----------
+        private void DrawCalibrationSection()
+        {
+            ImGui.Text("Calibration Curve");
+            if (ImGui.SmallButton("Build Curve From Regions"))
+            {
+                _curve.Clear();
+                foreach (var r in _regions)
+                {
+                    var (mean, _, count) = ComputeGrayStatsForRect(r.SliceZ, r.X0, r.Y0, r.X1, r.Y1);
+                    if (count > 0)
+                        _curve.Add(new Vector2(mean, r.Density));
+                }
+                Logger.Log($"[DensityCalibration] Built calibration curve with {_curve.Count} points.");
+            }
+
+            if (_curve.Count >= 2)
+            {
+                var (m, q) = LinearFit(_curve);
+                ImGui.Text($"Linear Fit: ρ = {m:F6} · Gray + {q:F3}");
+                ImGui.SetNextItemWidth(90);
+                ImGui.InputInt("Test Gray", ref _testGray);
+                _testGray = Math.Clamp(_testGray, 0, 255);
+                float pred = m * _testGray + q;
                 ImGui.SameLine();
-                ImGui.TextColored(new Vector4(0.6f, 0.8f, 0.6f, 1), $"(from {selectedMaterial.PhysicalMaterialName})");
+                ImGui.Text($"→ {pred:F3}");
             }
-
-            ImGui.Separator();
-            ImGui.Spacing();
-
-            // Measurement input
-            ImGui.Text("Physical Measurements:");
-            
-            bool measurementChanged = false;
-            
-            ImGui.SetNextItemWidth(120);
-            if (ImGui.InputFloat("Mass (g)##MassInput", ref _measuredMass, 0.1f, 1.0f, "%.1f"))
+            else
             {
-                measurementChanged = true;
-            }
-            
-            ImGui.SameLine();
-            ImGui.SetNextItemWidth(120);
-            if (ImGui.InputFloat("Volume (cm³)##VolumeInput", ref _measuredVolume, 0.1f, 1.0f, "%.1f"))
-            {
-                measurementChanged = true;
-            }
-
-            if (measurementChanged)
-            {
-                RecalculateDensity();
-                if (_autoApplyToMaterial)
-                {
-                    ApplyDensityToMaterial();
-                }
-            }
-
-            // Density result
-            ImGui.Spacing();
-            ImGui.Text("Calculated Density:");
-            ImGui.SameLine();
-            ImGui.TextColored(new Vector4(0, 1, 0, 1), $"{_calculatedDensity:F3} g/cm³");
-            
-            // Convert to kg/m³ for reference
-            float densityKgM3 = _calculatedDensity * 1000f;
-            ImGui.SameLine();
-            ImGui.TextDisabled($"(≈{densityKgM3:F0} kg/m³)");
-
-            // Notes
-            ImGui.Spacing();
-            ImGui.Text("Calibration Notes:");
-            ImGui.InputTextMultiline("##CalibrationNotes", ref _calibrationNotes, 256, new Vector2(-1, 60));
-
-            // Auto-apply option
-            ImGui.Spacing();
-            ImGui.Checkbox("Auto-apply to material", ref _autoApplyToMaterial);
-            if (ImGui.IsItemHovered())
-            {
-                ImGui.SetTooltip("Automatically update material density when measurements change");
-            }
-
-            // Action buttons
-            ImGui.Spacing();
-            if (ImGui.Button("Apply to Material", new Vector2(120, 0)))
-            {
-                ApplyDensityToMaterial();
-            }
-            
-            ImGui.SameLine();
-            if (ImGui.Button("Save Calibration Record", new Vector2(150, 0)))
-            {
-                SaveCalibrationRecord();
-            }
-
-            ImGui.SameLine();
-            if (ImGui.Button("Reset", new Vector2(80, 0)))
-            {
-                ResetMeasurements();
-            }
-
-            // Material Library Integration
-            ImGui.Separator();
-            ImGui.Spacing();
-            ImGui.Text("Material Library Integration:");
-            
-            var physicalMaterials = MaterialLibrary.Instance.Materials;
-            var libraryNames = new List<string> { "None (Custom Properties)" };
-            libraryNames.AddRange(physicalMaterials.Select(m => m.Name));
-            
-            int currentSelection = 0;
-            if (!string.IsNullOrEmpty(selectedMaterial.PhysicalMaterialName))
-            {
-                currentSelection = libraryNames.FindIndex(n => n == selectedMaterial.PhysicalMaterialName);
-                if (currentSelection < 0) currentSelection = 0;
-            }
-            
-            ImGui.SetNextItemWidth(-1);
-            if (ImGui.Combo("##LibraryMaterial", ref currentSelection, libraryNames.ToArray(), libraryNames.Count))
-            {
-                if (currentSelection == 0)
-                {
-                    selectedMaterial.PhysicalMaterialName = null;
-                }
-                else
-                {
-                    var physMat = physicalMaterials[currentSelection - 1];
-                    selectedMaterial.PhysicalMaterialName = physMat.Name;
-                    if (physMat.Density_kg_m3.HasValue)
-                    {
-                        selectedMaterial.Density = physMat.Density_kg_m3.Value / 1000.0;
-                        UpdateDensityDisplay(nonExteriorMaterials);
-                    }
-                    _currentDataset.SaveMaterials();
-                }
-            }
-
-            // Calibration history
-            if (_calibrationHistory.Count > 0)
-            {
-                ImGui.Separator();
-                ImGui.Spacing();
-                ImGui.Text("Calibration History:");
-                
-                if (ImGui.BeginChild("CalibrationHistory", new Vector2(0, 150), ImGuiChildFlags.AlwaysAutoResize))
-                {
-                    foreach (var record in _calibrationHistory)
-                    {
-                        ImGui.Text($"{record.Timestamp:MM/dd HH:mm} - {record.MaterialName}:");
-                        ImGui.SameLine();
-                        ImGui.TextColored(new Vector4(0, 1, 0, 1), $"{record.CalculatedDensity:F3} g/cm³");
-                        
-                        if (!string.IsNullOrEmpty(record.Notes))
-                        {
-                            ImGui.SameLine();
-                            ImGui.TextDisabled($"({record.Notes})");
-                        }
-                    }
-                }
-                ImGui.EndChild();
-                
-                if (ImGui.Button("Clear History", new Vector2(120, 0)))
-                {
-                    _calibrationHistory.Clear();
-                }
+                ImGui.TextDisabled("Need at least 2 regions to fit a line.");
             }
         }
 
-        private void UpdateDensityDisplay(List<Material> materials)
+        private void ApplyCalibration()
         {
-            if (_selectedMaterialIndex < materials.Count)
+            if (_curve.Count < 2)
             {
-                var material = materials[_selectedMaterialIndex];
-                _calculatedDensity = (float)material.Density;
+                Logger.LogWarning("[DensityCalibration] No calibration curve. Nothing to apply.");
+                return;
             }
+            var (m, q) = LinearFit(_curve);
+
+            // Use material label statistics to set density
+            foreach (var mat in _ds.Materials.Where(mm => mm.ID != 0))
+            {
+                var (mean, _, count) = GetMatStats(mat.ID);
+                if (count == 0) continue;
+                float d = Math.Max(0.001f, m * mean + q);
+                float old = (float)mat.Density;
+                mat.Density = d;
+                Logger.Log($"[DensityCalibration] {mat.Name}: gray={mean:F1} (n={count}) → ρ={d:F3} (was {old:F3})");
+            }
+            _ds.SaveMaterials();
         }
 
-        private void RecalculateDensity()
+        // ---------- Computation helpers ----------
+        private (float mean, float std, int count) GetMatStats(byte id)
         {
-            if (_measuredVolume > 0)
+            if (!_matStats.TryGetValue(id, out var s))
             {
-                _calculatedDensity = _measuredMass / _measuredVolume;
+                s = CalcMatStats(id);
+                _matStats[id] = s;
             }
+            return s;
         }
 
-        private void ApplyDensityToMaterial()
+        private (float mean, float std, int count) CalcMatStats(byte id)
         {
-            if (_currentDataset == null) return;
+            if (_ds?.VolumeData == null || _ds.LabelData == null) return (0, 0, 0);
+            var vals = new List<float>(4096);
 
-            var nonExteriorMaterials = _currentDataset.Materials.Where(m => m.ID != 0).ToList();
-            if (_selectedMaterialIndex < nonExteriorMaterials.Count)
+            int w = _ds.Width, h = _ds.Height, d = _ds.Depth;
+            int zStep = Math.Max(1, d / 50); // ~50 slices
+
+            for (int z = 0; z < d; z += zStep)
             {
-                var material = nonExteriorMaterials[_selectedMaterialIndex];
-                material.Density = _calculatedDensity;
-                
-                // Clear physical material assignment when manually setting density
-                if (!string.IsNullOrEmpty(material.PhysicalMaterialName))
+                var gray = new byte[w * h];
+                var lab = new byte[w * h];
+                _ds.VolumeData.ReadSliceZ(z, gray);
+                _ds.LabelData.ReadSliceZ(z, lab);
+
+                for (int i = 0; i < gray.Length; i++)
                 {
-                    material.PhysicalMaterialName = null;
+                    if (lab[i] == id) vals.Add(gray[i]);
                 }
-                
-                _currentDataset.SaveMaterials();
-                
-                GeoscientistToolkit.Util.Logger.Log($"[DensityCalibration] Set density for {material.Name}: {material.Density:F3} g/cm³");
             }
+
+            if (vals.Count == 0) return (0, 0, 0);
+            float mean = vals.Average();
+            float var = 0;
+            foreach (var v in vals) { float dlt = v - mean; var += dlt * dlt; }
+            var /= vals.Count;
+            return (mean, (float)Math.Sqrt(var), vals.Count);
         }
 
-        private void SaveCalibrationRecord()
+        private (float mean, float std, int count) ComputeGrayStatsForRect(int z, int x0, int y0, int x1, int y1)
         {
-            if (_currentDataset == null) return;
+            if (_ds?.VolumeData == null) return (0, 0, 0);
+            x0 = Math.Clamp(x0, 0, _ds.Width - 1);
+            x1 = Math.Clamp(x1, 0, _ds.Width - 1);
+            y0 = Math.Clamp(y0, 0, _ds.Height - 1);
+            y1 = Math.Clamp(y1, 0, _ds.Height - 1);
 
-            var nonExteriorMaterials = _currentDataset.Materials.Where(m => m.ID != 0).ToList();
-            if (_selectedMaterialIndex < nonExteriorMaterials.Count)
+            var gray = new byte[_ds.Width * _ds.Height];
+            _ds.VolumeData.ReadSliceZ(Math.Clamp(z, 0, _ds.Depth - 1), gray);
+
+            var vals = new List<float>((x1 - x0 + 1) * (y1 - y0 + 1));
+            for (int y = y0; y <= y1; y++)
             {
-                var material = nonExteriorMaterials[_selectedMaterialIndex];
-                
-                var record = new CalibrationRecord
-                {
-                    MaterialName = material.Name,
-                    Timestamp = DateTime.Now,
-                    MeasuredMass = _measuredMass,
-                    MeasuredVolume = _measuredVolume,
-                    CalculatedDensity = _calculatedDensity,
-                    Notes = _calibrationNotes
-                };
-                
-                _calibrationHistory.Insert(0, record);
-                _calibrationHistory = _calibrationHistory.Take(50).ToList(); // Keep only recent 50
-                
-                GeoscientistToolkit.Util.Logger.Log($"[DensityCalibration] Saved calibration record for {material.Name}");
+                int row = y * _ds.Width;
+                for (int x = x0; x <= x1; x++)
+                    vals.Add(gray[row + x]);
+            }
+
+            if (vals.Count == 0) return (0, 0, 0);
+            float mean = vals.Average();
+            float var = 0;
+            foreach (var v in vals) { float d = v - mean; var += d * d; }
+            var /= vals.Count;
+            return (mean, (float)Math.Sqrt(var), vals.Count);
+        }
+
+        private static (float m, float q) LinearFit(List<Vector2> pts)
+        {
+            float n = pts.Count;
+            float sx = 0, sy = 0, sxx = 0, sxy = 0;
+            foreach (var p in pts) { sx += p.X; sy += p.Y; sxx += p.X * p.X; sxy += p.X * p.Y; }
+            float denom = n * sxx - sx * sx;
+            if (Math.Abs(denom) < 1e-6f) return (0, sy / n);
+            float m = (n * sxy - sx * sy) / denom;
+            float q = (sy - m * sx) / n;
+            return (m, q);
+        }
+
+        private static void ApplyWindowLevel(byte[] data, float wl, float ww)
+        {
+            float min = wl - ww / 2f;
+            float max = wl + ww / 2f;
+            float range = Math.Max(1e-5f, max - min);
+            for (int i = 0; i < data.Length; i++)
+            {
+                float v = (data[i] - min) / range * 255f;
+                data[i] = (byte)Math.Clamp(v, 0f, 255f);
             }
         }
 
-        private void ResetMeasurements()
+        // ---------- Viewer click integration ----------
+        private void OnViewerRegionClick(CtImageStackDataset ds, string axis, int sliceZ, int xPx, int yPx, int? targetRegionIndex)
         {
-            _measuredMass = 100.0f;
-            _measuredVolume = 50.0f;
-            _calibrationNotes = "";
-            RecalculateDensity();
+            if (!ReferenceEquals(_ds, ds)) return;
+
+            // If a specific region index is requested (user clicked "Select" for that row),
+            // set that rectangle to a small box centered at click (user can refine later in preview).
+            if (targetRegionIndex.HasValue && targetRegionIndex.Value >= 0 && targetRegionIndex.Value < _regions.Count)
+            {
+                var r = _regions[targetRegionIndex.Value];
+                r.SliceZ = sliceZ;
+                int half = 8;
+                r.X0 = Math.Clamp(xPx - half, 0, _ds.Width - 1);
+                r.Y0 = Math.Clamp(yPx - half, 0, _ds.Height - 1);
+                r.X1 = Math.Clamp(xPx + half, 0, _ds.Width - 1);
+                r.Y1 = Math.Clamp(yPx + half, 0, _ds.Height - 1);
+                _previewSliceZ = sliceZ;
+            }
+            else
+            {
+                // Otherwise, create a new region centered at the click.
+                int half = 10;
+                _regions.Add(new ManualRegion
+                {
+                    Name = $"Region {_regions.Count + 1}",
+                    SliceZ = sliceZ,
+                    X0 = Math.Clamp(xPx - half, 0, _ds.Width - 1),
+                    Y0 = Math.Clamp(yPx - half, 0, _ds.Height - 1),
+                    X1 = Math.Clamp(xPx + half, 0, _ds.Width - 1),
+                    Y1 = Math.Clamp(yPx + half, 0, _ds.Height - 1),
+                    Color = new Vector4(0.0f, 0.8f, 1.0f, 1.0f),
+                    Density = 2700f
+                });
+                _previewSliceZ = sliceZ;
+            }
+
+            _previewDirty = true;
+            Publish3DPreviewMask();
+        }
+
+        private void Publish3DPreviewMask()
+        {
+            if (_ds == null) return;
+
+            int w = _ds.Width, h = _ds.Height, d = _ds.Depth;
+            var mask = new byte[w * h * d];
+
+            foreach (var r in _regions)
+            {
+                if (r.SliceZ < 0 || r.SliceZ >= d) continue;
+                int zOff = r.SliceZ * w * h;
+                int x0 = Math.Clamp(r.X0, 0, w - 1);
+                int x1 = Math.Clamp(r.X1, 0, w - 1);
+                int y0 = Math.Clamp(r.Y0, 0, h - 1);
+                int y1 = Math.Clamp(r.Y1, 0, h - 1);
+
+                for (int y = y0; y <= y1; y++)
+                {
+                    int row = zOff + y * w;
+                    for (int x = x0; x <= x1; x++)
+                        mask[row + x] = 255;
+                }
+            }
+
+            // publish preview via integration shim (and CtImageStackTools if present)
+            CalibrationIntegration.SetPreview(_ds, mask, new Vector4(0, 1, 1, 1));
+        }
+
+        // ---------- IDisposable ----------
+        public void Dispose()
+        {
+            _previewTex?.Dispose();
+            _previewTex = null;
+            if (_ds != null)
+            {
+                CalibrationIntegration.DisableRegionSelection(_ds, OnViewerRegionClick);
+                CalibrationIntegration.ClearPreview(_ds);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Integration shim between the tool and your viewers.
+    /// - Lets the tool enable/disable "region selection" mode.
+    /// - Provides a 3D preview mask the viewers can overlay.
+    /// - Mirrors to CtImageStackTools.* if that static class exists in your project already.
+    /// 
+    /// Viewers should:
+    ///  1) before processing a click normally, check CalibrationIntegration.IsRegionSelectionEnabled(dataset).
+    ///  2) if enabled, call CalibrationIntegration.OnViewerClick(dataset, axis, sliceZ, xPx, yPx).
+    ///     Return early to avoid the default behaviour.
+    ///  3) also subscribe/refresh when CalibrationIntegration.PreviewChanged is raised and call GetPreview(dataset).
+    /// </summary>
+    public static class CalibrationIntegration
+    {
+        public delegate void ViewerClickHandler(CtImageStackDataset ds, string axis, int sliceZ, int xPx, int yPx, int? targetRegionIndex);
+
+        private static readonly Dictionary<CtImageStackDataset, (bool enabled, ViewerClickHandler handler, int? targetIndex)> _sel
+            = new();
+
+        private static readonly Dictionary<CtImageStackDataset, (byte[] mask3D, Vector4 color, bool active)> _preview
+            = new();
+
+        public static event Action<CtImageStackDataset> PreviewChanged;
+
+        // ---- Selection enable/disable ----
+        public static void EnableRegionSelection(CtImageStackDataset ds, ViewerClickHandler handler, int? targetRegionIndex = null)
+        {
+            if (ds == null) return;
+            _sel[ds] = (true, handler, targetRegionIndex);
+        }
+
+        public static void DisableRegionSelection(CtImageStackDataset ds, ViewerClickHandler handler)
+        {
+            if (ds == null) return;
+            if (_sel.TryGetValue(ds, out var s) && s.handler == handler)
+                _sel[ds] = (false, null, null);
+        }
+
+        public static bool IsRegionSelectionEnabled(CtImageStackDataset ds)
+            => ds != null && _sel.TryGetValue(ds, out var s) && s.enabled && s.handler != null;
+
+        // Viewers should call this when a click occurs on a slice
+        public static void OnViewerClick(CtImageStackDataset ds, string axis, int sliceZ, int xPx, int yPx)
+        {
+            if (IsRegionSelectionEnabled(ds))
+            {
+                var (enabled, handler, targetIdx) = _sel[ds];
+                handler?.Invoke(ds, axis, sliceZ, xPx, yPx, targetIdx);
+                // disable targeted mode after first use
+                _sel[ds] = (enabled, handler, null);
+            }
+        }
+
+        // ---- Preview publishing ----
+        public static void SetPreview(CtImageStackDataset ds, byte[] mask3D, Vector4 color)
+        {
+            if (ds == null) return;
+            _preview[ds] = (mask3D, color, mask3D != null);
+            PreviewChanged?.Invoke(ds);
+
+            // Mirror to CtImageStackTools if your viewers already listen there
+            TryMirrorToCtImageStackTools(ds, mask3D, color);
+        }
+
+        public static (bool active, byte[] mask3D, Vector4 color) GetPreview(CtImageStackDataset ds)
+        {
+            if (ds != null && _preview.TryGetValue(ds, out var p) && p.active) return (true, p.mask3D, p.color);
+            return (false, null, default);
+        }
+
+        public static void ClearPreview(CtImageStackDataset ds)
+        {
+            if (ds == null) return;
+            _preview[ds] = (null, default, false);
+            PreviewChanged?.Invoke(ds);
+
+            TryMirrorToCtImageStackTools(ds, null, default);
+        }
+
+        // ---- Optional mirror to CtImageStackTools ----
+        private static void TryMirrorToCtImageStackTools(CtImageStackDataset ds, byte[] mask, Vector4 color)
+        {
+            // If your project defines GeoscientistToolkit.CtImageStackTools with SetPreviewData & RaisePreviewChanged,
+            // reflectively call those so existing viewers keep working with zero code changes.
+            var toolsType = Type.GetType("GeoscientistToolkit.CtImageStackTools, GeoscientistToolkit");
+            if (toolsType == null) return;
+
+            try
+            {
+                var setPrev = toolsType.GetMethod("SetPreviewData", new[] { typeof(CtImageStackDataset), typeof(byte[]), typeof(Vector4) });
+                var raise = toolsType.GetMethod("RaisePreviewChanged", new[] { typeof(CtImageStackDataset) });
+                setPrev?.Invoke(null, new object[] { ds, mask, color });
+                raise?.Invoke(null, new object[] { ds });
+            }
+            catch { /* best-effort mirror */ }
         }
     }
 }

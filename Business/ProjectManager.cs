@@ -358,7 +358,10 @@ namespace GeoscientistToolkit.Business
                                 MaxValue = matDto.MaxValue,
                                 IsVisible = matDto.IsVisible,
                                 IsExterior = matDto.IsExterior,
-                                Density = matDto.Density
+                                Density = matDto.Density,
+                                // --- FIX ---
+                                // Restore the link to the physical material library
+                                PhysicalMaterialName = matDto.PhysicalMaterialName 
                             };
                             ctDataset.Materials.Add(material);
                         }

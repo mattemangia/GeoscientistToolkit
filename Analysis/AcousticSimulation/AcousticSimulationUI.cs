@@ -13,6 +13,7 @@ using GeoscientistToolkit.Data.CtImageStack;
 using GeoscientistToolkit.UI.Utils;
 using GeoscientistToolkit.Util;
 using ImGuiNET;
+using DensityTool = GeoscientistToolkit.UI.Tools.DensityCalibrationTool;
 
 namespace GeoscientistToolkit.Analysis.AcousticSimulation
 {
@@ -72,8 +73,6 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
         private int _snapshotInterval = 10;
         private Vector3 _txPosition = new Vector3(0, 0.5f, 0.5f);
         private Vector3 _rxPosition = new Vector3(1, 0.5f, 0.5f);
-        private DensityCalibrationTool _densityTool;
-        private DensityVolume _calibratedDensity;
 
         public AcousticSimulationUI()
         {
@@ -105,50 +104,15 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
             if (ImGui.CollapsingHeader("Density Calibration", ImGuiTreeNodeFlags.DefaultOpen))
             {
                 ImGui.Indent();
-                if (ImGui.Button("Open Density Calibration Tool"))
-                {
-                    var tmp = new AcousticVolumeDataset($"{dataset.Name}-Calib", Path.GetTempPath());
-                    _densityTool ??= new DensityCalibrationTool(dataset, tmp);
-                    _densityTool.Show();
-                }
-        
+                ImGui.TextWrapped("Use the 'Density Calibration' tool in the Preprocessing category to calibrate material densities.");
+                ImGui.TextWrapped("This simulation will use the calibrated densities stored in the dataset's materials.");
+
+                // Let's check if any material (other than default) has a non-zero density.
+                bool isCalibrated = dataset.Materials.Any(m => m.ID != 0 && m.Density > 0);
+                ImGui.Text("Status:");
                 ImGui.SameLine();
-                bool hasDensityCalib = _calibratedDensity != null;
-                ImGui.TextColored(hasDensityCalib ? new Vector4(0,1,0,1) : new Vector4(1,1,0,1),
-                    hasDensityCalib ? "✓ Per-voxel density calibrated" : "⚠ Using default density mapping");
-        
-                if (_densityTool != null)
-                {
-                    ImGui.Spacing();
-                    if (ImGui.Button("Apply Current Calibration"))
-                    {
-                        _calibratedDensity = _densityTool.GetDensityVolume();
-                        if (_calibratedDensity != null)
-                        {
-                            _youngsModulus = _calibratedDensity.GetMeanYoungsModulus() / 1e6f;
-                            _poissonRatio = _calibratedDensity.GetMeanPoissonRatio();
-                            Logger.Log($"[Simulation] Applied density calibration: E={_youngsModulus:F2} MPa, ν={_poissonRatio:F4}");
-                        }
-                    }
-            
-                    ImGui.SameLine();
-                    if (ImGui.Button("Clear Density Calibration"))
-                    {
-                        _calibratedDensity = null;
-                        Logger.Log("[Simulation] Cleared density calibration");
-                    }
-            
-                    ImGui.SameLine();
-                    if (ImGui.Button("Export Density Volume"))
-                    {
-                        if (_calibratedDensity != null)
-                        {
-                            string path = $"{dataset.Name}_density_{DateTime.Now:yyyyMMdd_HHmmss}.den";
-                            Logger.Log($"[Simulation] Exported density volume to {path}");
-                        }
-                    }
-                    _densityTool.Draw();
-                }
+                ImGui.TextColored(isCalibrated ? new Vector4(0,1,0,1) : new Vector4(1,1,0,1),
+                    isCalibrated ? "✓ Material densities appear to be set." : "⚠ Using default material densities.");
                 ImGui.Unindent();
             }
     
@@ -304,18 +268,12 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
                 ImGui.Text($"Lamé λ: {lambda / 1e6f:F2} MPa");
                 ImGui.Text($"Lamé μ: {mu / 1e6f:F2} MPa");
         
-                if (_calibratedDensity != null || _lastResults != null)
+                if (_lastResults != null)
                 {
-                    float density = 2700f;
-                    if (_calibratedDensity != null)
-                    {
-                        float totalDensity = 0; int count = 0;
-                        for (int z = 0; z < Math.Min(10, _calibratedDensity.Depth); z++)
-                            for (int y = 0; y < Math.Min(10, _calibratedDensity.Height); y++)
-                                for (int x = 0; x < Math.Min(10, _calibratedDensity.Width); x++)
-                                { totalDensity += _calibratedDensity.GetDensity(x, y, z); count++; }
-                        if (count > 0) density = totalDensity / count;
-                    }
+                    // Get density from the currently selected material for the estimation
+                    float density = (float)selectedMaterial.Density; // in g/cm³
+                    if(density <= 0) density = 2.7f; // fallback
+                    density *= 1000f; // convert to kg/m³
             
                     float vpExpected = MathF.Sqrt((lambda + 2 * mu) / density);
                     float vsExpected = MathF.Sqrt(mu / density);
@@ -356,7 +314,7 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
                 ImGui.DragInt("Amplitude", ref _sourceAmplitude, 1, 1, 1000);
                 ImGui.DragInt("Time Steps", ref _timeSteps, 10, 100, 10000);
         
-                if (_lastResults != null || _calibratedDensity != null)
+                if (_lastResults != null)
                 {
                     float vp = (float)(_lastResults?.PWaveVelocity ?? 5000.0);
                     float wavelength = vp / (_sourceFrequency * 1000f);
@@ -479,16 +437,6 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
             }
         }
         
-        private float[,,] ConvertDensityVolume(DensityVolume densityVolume)
-        {
-            var result = new float[densityVolume.Width, densityVolume.Height, densityVolume.Depth];
-            for (int z = 0; z < densityVolume.Depth; z++)
-            for (int y = 0; y < densityVolume.Height; y++)
-            for (int x = 0; x < densityVolume.Width; x++)
-                result[x, y, z] = densityVolume.GetDensity(x, y, z);
-            return result;
-        }
-
         private float CalculatePixelSizeFromVelocities()
         {
             if (_lastResults == null) return _parameters.PixelSize;
@@ -734,33 +682,6 @@ private async Task<(float[,,] youngsModulus, float[,,] poissonRatio)> ExtractMat
     {
         var density = new float[dataset.Width, dataset.Height, dataset.Depth];
         
-        if (_calibratedDensity != null)
-        {
-            // Use calibrated density if available
-            if (_useChunkedProcessing)
-            {
-                int chunkDepth = Math.Max(1, _chunkSizeMB * 1024 * 1024 / (dataset.Width * dataset.Height * sizeof(float)));
-                for (int z0 = 0; z0 < dataset.Depth; z0 += chunkDepth)
-                {
-                    int z1 = Math.Min(z0 + chunkDepth, dataset.Depth);
-                    Parallel.For(z0, z1, z => { 
-                        for (int y = 0; y < dataset.Height; y++) 
-                            for (int x = 0; x < dataset.Width; x++) 
-                                density[x, y, z] = _calibratedDensity.GetDensity(x, y, z); 
-                    });
-                }
-            }
-            else 
-            { 
-                Parallel.For(0, dataset.Depth, z => { 
-                    for (int y = 0; y < dataset.Height; y++) 
-                        for (int x = 0; x < dataset.Width; x++) 
-                            density[x, y, z] = _calibratedDensity.GetDensity(x, y, z); 
-                }); 
-            }
-            return density;
-        }
-
         // NEW: Use material properties from labels and material library
         if (_useChunkedProcessing)
         {

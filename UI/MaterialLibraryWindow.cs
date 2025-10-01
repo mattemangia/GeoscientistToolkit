@@ -43,7 +43,7 @@ namespace GeoscientistToolkit.UI
         {
             if (!_open) return;
 
-            ImGui.SetNextWindowSize(new Vector2(900, 640), ImGuiCond.FirstUseEver);
+            ImGui.SetNextWindowSize(new Vector2(900, 700), ImGuiCond.FirstUseEver);
             if (!ImGui.Begin("Material Library", ref _open, ImGuiWindowFlags.NoDocking))
             {
                 ImGui.End();
@@ -198,14 +198,25 @@ namespace GeoscientistToolkit.UI
             ImGui.Separator();
 
             // Numeric fields via string buffers
-            Numeric("Viscosity (Pa·s)", ref _buf.Viscosity, m.Viscosity_Pa_s, v => m.Viscosity_Pa_s = v);
-            Numeric("Mohs Hardness", ref _buf.Mohs, m.MohsHardness, v => m.MohsHardness = v);
+            ImGui.Text("Core Properties");
             Numeric("Density (kg/m³)", ref _buf.Density, m.Density_kg_m3, v => m.Density_kg_m3 = v);
-            Numeric("Thermal Conductivity (W/m·K)", ref _buf.ThermalK, m.ThermalConductivity_W_mK, v => m.ThermalConductivity_W_mK = v);
+            Numeric("Mohs Hardness", ref _buf.Mohs, m.MohsHardness, v => m.MohsHardness = v);
+            Numeric("Viscosity (Pa·s)", ref _buf.Viscosity, m.Viscosity_Pa_s, v => m.Viscosity_Pa_s = v);
+            
+            ImGui.Separator();
+            ImGui.Text("Mechanical Properties");
+            Numeric("Young Modulus (GPa)", ref _buf.YoungGPa, m.YoungModulus_GPa, v => m.YoungModulus_GPa = v);
             Numeric("Poisson Ratio", ref _buf.Nu, m.PoissonRatio, v => m.PoissonRatio = v);
             Numeric("Friction Angle (°)", ref _buf.FrictionAngle, m.FrictionAngle_deg, v => m.FrictionAngle_deg = v);
-            Numeric("Young Modulus (GPa)", ref _buf.YoungGPa, m.YoungModulus_GPa, v => m.YoungModulus_GPa = v);
-            Numeric("Breaking Pressure (MPa)", ref _buf.BreakingMPa, m.BreakingPressure_MPa, v => m.BreakingPressure_MPa = v);
+            Numeric("Compressive Strength (MPa)", ref _buf.CompressiveMPa, m.CompressiveStrength_MPa, v => m.CompressiveStrength_MPa = v);
+            Numeric("Tensile Strength (MPa)", ref _buf.TensileMPa, m.TensileStrength_MPa, v => m.TensileStrength_MPa = v);
+            Numeric("Yield Strength (MPa)", ref _buf.YieldMPa, m.YieldStrength_MPa, v => m.YieldStrength_MPa = v);
+
+            ImGui.Separator();
+            ImGui.Text("Thermal Properties");
+            Numeric("Thermal Conductivity (W/m·K)", ref _buf.ThermalK, m.ThermalConductivity_W_mK, v => m.ThermalConductivity_W_mK = v);
+            Numeric("Specific Heat Capacity (J/kg·K)", ref _buf.SpecificHeat, m.SpecificHeatCapacity_J_kgK, v => m.SpecificHeatCapacity_J_kgK = v);
+            Numeric("Thermal Diffusivity (m²/s)", ref _buf.ThermalDiff, m.ThermalDiffusivity_m2_s, v => m.ThermalDiffusivity_m2_s = v);
 
             ImGui.Separator();
             ImGui.Text("Wettability / Porosity");
@@ -213,10 +224,16 @@ namespace GeoscientistToolkit.UI
             Numeric("Porosity (fraction 0–1)", ref _buf.Porosity, m.TypicalPorosity_fraction, v => m.TypicalPorosity_fraction = v);
 
             ImGui.Separator();
-            ImGui.Text("Acoustics");
-            Numeric("Vs (m/s)", ref _buf.Vs, m.Vs_m_s, v => m.Vs_m_s = v);
-            Numeric("Vp (m/s)", ref _buf.Vp, m.Vp_m_s, v => m.Vp_m_s = v);
-            Numeric("Vp/Vs", ref _buf.VpVs, m.VpVsRatio, v => m.VpVsRatio = v);
+            ImGui.Text("Acoustic Properties");
+            Numeric("Vp (P-wave, m/s)", ref _buf.Vp, m.Vp_m_s, v => m.Vp_m_s = v);
+            Numeric("Vs (S-wave, m/s)", ref _buf.Vs, m.Vs_m_s, v => m.Vs_m_s = v);
+            Numeric("Vp/Vs Ratio", ref _buf.VpVs, m.VpVsRatio, v => m.VpVsRatio = v);
+            Numeric("Acoustic Impedance (MRayl)", ref _buf.AcousticZ, m.AcousticImpedance_MRayl, v => m.AcousticImpedance_MRayl = v);
+
+            ImGui.Separator();
+            ImGui.Text("Electrical & Magnetic Properties");
+            Numeric("Electrical Resistivity (Ω·m)", ref _buf.Resistivity, m.ElectricalResistivity_Ohm_m, v => m.ElectricalResistivity_Ohm_m = v);
+            Numeric("Magnetic Susceptibility (SI)", ref _buf.MagSus, m.MagneticSusceptibility_SI, v => m.MagneticSusceptibility_SI = v);
 
             ImGui.Separator();
 
@@ -290,9 +307,13 @@ namespace GeoscientistToolkit.UI
                 m.Name = _nameBuf;
                 m.Notes = _notesBuf;
 
-                // ensure Vp/Vs if both present
-                if (!m.VpVsRatio.HasValue && m.Vp_m_s.HasValue && m.Vs_m_s.HasValue && m.Vs_m_s.Value > 0)
+                // Auto-calculate convenience fields if possible
+                if (!m.VpVsRatio.HasValue && m.Vp_m_s.HasValue && m.Vs_m_s.HasValue && m.Vs_m_s.Value > 1e-6)
                     m.VpVsRatio = m.Vp_m_s.Value / m.Vs_m_s.Value;
+                if (!m.AcousticImpedance_MRayl.HasValue && m.Density_kg_m3.HasValue && m.Vp_m_s.HasValue)
+                    m.AcousticImpedance_MRayl = (m.Density_kg_m3.Value * m.Vp_m_s.Value) / 1_000_000.0;
+                if (!m.ThermalDiffusivity_m2_s.HasValue && m.ThermalConductivity_W_mK.HasValue && m.Density_kg_m3.HasValue && m.SpecificHeatCapacity_J_kgK.HasValue && (m.Density_kg_m3 * m.SpecificHeatCapacity_J_kgK) > 1e-6)
+                    m.ThermalDiffusivity_m2_s = m.ThermalConductivity_W_mK.Value / (m.Density_kg_m3.Value * m.SpecificHeatCapacity_J_kgK.Value);
 
                 MaterialLibrary.Instance.AddOrUpdate(Clone(m));
                 _selectedIndex = FindIndexByName(m.Name);
@@ -306,7 +327,7 @@ namespace GeoscientistToolkit.UI
             }
 
             ImGui.SameLine();
-            bool canDelete = _selectedIndex >= 0;
+            bool canDelete = _selectedIndex >= 0 && _edit.IsUserMaterial;
             if (!canDelete) ImGui.BeginDisabled();
             if (ImGui.Button("Delete"))
             {
@@ -322,6 +343,10 @@ namespace GeoscientistToolkit.UI
                 }
             }
             if (!canDelete) ImGui.EndDisabled();
+            if (!canDelete && ImGui.IsItemHovered())
+            {
+                ImGui.SetTooltip("Default materials cannot be deleted.");
+            }
         }
 
         // ────────────────────────────────────────────────────────────
@@ -337,16 +362,29 @@ namespace GeoscientistToolkit.UI
                 Viscosity_Pa_s = m.Viscosity_Pa_s,
                 MohsHardness = m.MohsHardness,
                 Density_kg_m3 = m.Density_kg_m3,
-                ThermalConductivity_W_mK = m.ThermalConductivity_W_mK,
+                
+                YoungModulus_GPa = m.YoungModulus_GPa,
                 PoissonRatio = m.PoissonRatio,
                 FrictionAngle_deg = m.FrictionAngle_deg,
-                YoungModulus_GPa = m.YoungModulus_GPa,
-                BreakingPressure_MPa = m.BreakingPressure_MPa,
+                CompressiveStrength_MPa = m.CompressiveStrength_MPa,
+                TensileStrength_MPa = m.TensileStrength_MPa,
+                YieldStrength_MPa = m.YieldStrength_MPa,
+                
+                ThermalConductivity_W_mK = m.ThermalConductivity_W_mK,
+                SpecificHeatCapacity_J_kgK = m.SpecificHeatCapacity_J_kgK,
+                ThermalDiffusivity_m2_s = m.ThermalDiffusivity_m2_s,
+                
                 TypicalWettability_contactAngle_deg = m.TypicalWettability_contactAngle_deg,
                 TypicalPorosity_fraction = m.TypicalPorosity_fraction,
+                
                 Vs_m_s = m.Vs_m_s,
                 Vp_m_s = m.Vp_m_s,
                 VpVsRatio = m.VpVsRatio,
+                AcousticImpedance_MRayl = m.AcousticImpedance_MRayl,
+
+                ElectricalResistivity_Ohm_m = m.ElectricalResistivity_Ohm_m,
+                MagneticSusceptibility_SI = m.MagneticSusceptibility_SI,
+
                 Extra = new Dictionary<string, double>(m.Extra),
                 Notes = m.Notes,
                 Sources = m.Sources != null ? new List<string>(m.Sources) : new List<string>(),
@@ -420,9 +458,12 @@ namespace GeoscientistToolkit.UI
             {
                 var cols = new[]
                 {
-                    "Name","Phase","Viscosity_Pa_s","MohsHardness","Density_kg_m3","ThermalConductivity_W_mK",
-                    "PoissonRatio","FrictionAngle_deg","YoungModulus_GPa","BreakingPressure_MPa",
-                    "ContactAngle_deg","Porosity_fraction","Vs_m_s","Vp_m_s","VpVsRatio"
+                    "Name", "Phase", "Density_kg_m3", "MohsHardness", "Viscosity_Pa_s",
+                    "YoungModulus_GPa", "PoissonRatio", "FrictionAngle_deg", "CompressiveStrength_MPa", "TensileStrength_MPa", "YieldStrength_MPa",
+                    "ThermalConductivity_W_mK", "SpecificHeatCapacity_J_kgK", "ThermalDiffusivity_m2_s",
+                    "ContactAngle_deg", "Porosity_fraction",
+                    "Vp_m_s", "Vs_m_s", "VpVsRatio", "AcousticImpedance_MRayl",
+                    "ElectricalResistivity_Ohm_m", "MagneticSusceptibility_SI"
                 };
 
                 var mats = MaterialLibrary.Instance.Materials;
@@ -431,14 +472,14 @@ namespace GeoscientistToolkit.UI
 
                 foreach (var m in mats)
                 {
-                    string PhaseStr = m.Phase.ToString();
                     string[] vals =
                     {
-                        Esc(m.Name), PhaseStr,
-                        F(m.Viscosity_Pa_s), F(m.MohsHardness), F(m.Density_kg_m3), F(m.ThermalConductivity_W_mK),
-                        F(m.PoissonRatio), F(m.FrictionAngle_deg), F(m.YoungModulus_GPa), F(m.BreakingPressure_MPa),
-                        F(m.TypicalWettability_contactAngle_deg), F(m.TypicalPorosity_fraction), F(m.Vs_m_s),
-                        F(m.Vp_m_s), F(m.VpVsRatio)
+                        Esc(m.Name), m.Phase.ToString(), F(m.Density_kg_m3), F(m.MohsHardness), F(m.Viscosity_Pa_s),
+                        F(m.YoungModulus_GPa), F(m.PoissonRatio), F(m.FrictionAngle_deg), F(m.CompressiveStrength_MPa), F(m.TensileStrength_MPa), F(m.YieldStrength_MPa),
+                        F(m.ThermalConductivity_W_mK), F(m.SpecificHeatCapacity_J_kgK), F(m.ThermalDiffusivity_m2_s),
+                        F(m.TypicalWettability_contactAngle_deg), F(m.TypicalPorosity_fraction),
+                        F(m.Vp_m_s), F(m.Vs_m_s), F(m.VpVsRatio), F(m.AcousticImpedance_MRayl),
+                        F(m.ElectricalResistivity_Ohm_m), F(m.MagneticSusceptibility_SI)
                     };
                     sw.WriteLine(string.Join(",", vals));
                 }
@@ -449,7 +490,7 @@ namespace GeoscientistToolkit.UI
                 Logger.LogError($"[MaterialLibraryWindow] CSV export failed: {ex.Message}");
             }
 
-            static string Esc(string s) => $"\"{s.Replace("\"","\"\"")}\"";
+            static string Esc(string s) => $"\"{s.Replace("\"", "\"\"")}\"";
             static string F(double? v) => v.HasValue ? v.Value.ToString("G", CultureInfo.InvariantCulture) : "";
         }
 
@@ -463,18 +504,25 @@ namespace GeoscientistToolkit.UI
             public string Nu = "";
             public string FrictionAngle = "";
             public string YoungGPa = "";
-            public string BreakingMPa = "";
+            public string CompressiveMPa = "";
+            public string TensileMPa = "";
+            public string YieldMPa = "";
+            public string SpecificHeat = "";
+            public string ThermalDiff = "";
             public string ContactAngle = "";
             public string Porosity = "";
             public string Vs = "";
             public string Vp = "";
             public string VpVs = "";
+            public string AcousticZ = "";
+            public string Resistivity = "";
+            public string MagSus = "";
 
             public void Clear()
             {
-                Viscosity = Mohs = Density = ThermalK = Nu = FrictionAngle = YoungGPa = BreakingMPa = "";
-                ContactAngle = Porosity = "";
-                Vs = Vp = VpVs = "";
+                Viscosity = Mohs = Density = ThermalK = Nu = FrictionAngle = YoungGPa = CompressiveMPa = TensileMPa = YieldMPa = "";
+                SpecificHeat = ThermalDiff = ContactAngle = Porosity = "";
+                Vs = Vp = VpVs = AcousticZ = Resistivity = MagSus = "";
             }
 
             public void FromMaterial(PhysicalMaterial m)
@@ -487,12 +535,19 @@ namespace GeoscientistToolkit.UI
                 Nu          = S(m.PoissonRatio);
                 FrictionAngle = S(m.FrictionAngle_deg);
                 YoungGPa    = S(m.YoungModulus_GPa);
-                BreakingMPa = S(m.BreakingPressure_MPa);
+                CompressiveMPa = S(m.CompressiveStrength_MPa);
+                TensileMPa = S(m.TensileStrength_MPa);
+                YieldMPa = S(m.YieldStrength_MPa);
+                SpecificHeat = S(m.SpecificHeatCapacity_J_kgK);
+                ThermalDiff = S(m.ThermalDiffusivity_m2_s);
                 ContactAngle = S(m.TypicalWettability_contactAngle_deg);
                 Porosity     = S(m.TypicalPorosity_fraction);
                 Vs  = S(m.Vs_m_s);
                 Vp  = S(m.Vp_m_s);
                 VpVs= S(m.VpVsRatio);
+                AcousticZ = S(m.AcousticImpedance_MRayl);
+                Resistivity = S(m.ElectricalResistivity_Ohm_m);
+                MagSus = S(m.MagneticSusceptibility_SI);
             }
 
             private static string S(double? v) => v.HasValue

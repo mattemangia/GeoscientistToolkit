@@ -13,6 +13,7 @@ using GeoscientistToolkit.Data.CtImageStack;
 using GeoscientistToolkit.UI.Interfaces;
 using ImGuiNET;
 using System.Numerics;
+using GeoscientistToolkit.Analysis.Materials;
 using GeoscientistToolkit.Analysis.MaterialStatistics;
 
 namespace GeoscientistToolkit.UI.Tools
@@ -28,6 +29,7 @@ namespace GeoscientistToolkit.UI.Tools
         {
             Preprocessing,
             Segmentation,
+            PhysicalProperties,
             Analysis,
             Export
         }
@@ -87,6 +89,7 @@ namespace GeoscientistToolkit.UI.Tools
             {
                 { ToolCategory.Preprocessing, "Preprocessing" },
                 { ToolCategory.Segmentation, "Segmentation" },
+                { ToolCategory.PhysicalProperties, "Physical Properties" },
                 { ToolCategory.Analysis, "Analysis" },
                 { ToolCategory.Export, "Export" }
             };
@@ -95,6 +98,7 @@ namespace GeoscientistToolkit.UI.Tools
             {
                 { ToolCategory.Preprocessing, "Data preparation and enhancement" },
                 { ToolCategory.Segmentation, "Material identification and labeling" },
+                { ToolCategory.PhysicalProperties, "Assign density and other physical material properties" },
                 { ToolCategory.Analysis, "Quantitative analysis and measurements" },
                 { ToolCategory.Export, "3D model and simulation data generation" }
             };
@@ -151,7 +155,7 @@ namespace GeoscientistToolkit.UI.Tools
                         {
                             Name = "Segmentation",
                             Description = "Material segmentation using thresholding and interactive tools",
-                            Tool = new CtImageStackTools(),
+                            Tool = new GeoscientistToolkit.CtImageStackTools(),
                             Category = ToolCategory.Segmentation
                         },
                         new ToolEntry
@@ -167,6 +171,26 @@ namespace GeoscientistToolkit.UI.Tools
                             Description = "Separate touching particles using watershed algorithms",
                             Tool = new ParticleSeparatorTool(),
                             Category = ToolCategory.Segmentation
+                        }
+                    }
+                },
+                {
+                    ToolCategory.PhysicalProperties,
+                    new List<ToolEntry>
+                    {
+                        new ToolEntry
+                        {
+                            Name = "Property Assignment",
+                            Description = "Assign physical properties to materials from a library.",
+                            Tool = new PhysicalMaterialAssignmentTool(),
+                            Category = ToolCategory.PhysicalProperties
+                        },
+                        new ToolEntry
+                        {
+                            Name = "Density Calibration",
+                            Description = "Calibrate material densities from grayscale values using ROIs.",
+                            Tool = new DensityCalibrationTool(),
+                            Category = ToolCategory.PhysicalProperties
                         }
                     }
                 },
