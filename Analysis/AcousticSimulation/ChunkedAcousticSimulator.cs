@@ -145,7 +145,8 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
             CalculateTimeStep(density);
             ApplyInitialSource(labels, density);
 
-            int maxSteps = Math.Max(1, _params.TimeSteps) * 2;
+            // --- FIX: Run for the exact number of steps specified by the user ---
+            int maxSteps = Math.Max(1, _params.TimeSteps);
             int step = 0;
             bool pHit = false, sHit = false;
             int pStep = 0, sStep = 0;

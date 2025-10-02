@@ -30,6 +30,7 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
         private CtImageStackDataset _sourceDataset;
         private CalibrationData _calibrationData;
         private float[,,] _damageField; // Store damage field from simulation
+        private bool _isWaveformViewerOpen = false;
         
         public AcousticExportManager()
         {
@@ -76,13 +77,28 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
                     var tempDataset = CreateTemporaryDataset();
                     _waveformViewer = new WaveformViewer(tempDataset);
                 }
+                _isWaveformViewerOpen = true;
             }
             
             // Handle dialogs
             HandleDialogs();
             
             // Draw waveform viewer if open
-            _waveformViewer?.Draw();
+            if (_isWaveformViewerOpen)
+            {
+                ImGui.SetNextWindowSize(new System.Numerics.Vector2(600, 400), ImGuiCond.FirstUseEver);
+                if (ImGui.Begin("Waveform Viewer", ref _isWaveformViewerOpen))
+                {
+                    _waveformViewer?.Draw();
+                }
+                ImGui.End();
+            }
+
+            if (!_isWaveformViewerOpen && _waveformViewer != null)
+            {
+                _waveformViewer.Dispose();
+                _waveformViewer = null;
+            }
         }
         
         private void HandleDialogs()
