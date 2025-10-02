@@ -71,6 +71,10 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
         private readonly nint[] _bufVel = new nint[3];
         private readonly nint[] _bufStr = new nint[6];
         private nint _bufDmg;
+        // --- MODIFICATION: Buffers for per-voxel material properties ---
+        private nint _bufYoungsModulus;
+        private nint _bufPoissonRatio;
+
 
         public ChunkedAcousticSimulator(SimulationParameters parameters)
         {
@@ -278,6 +282,10 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
                 var mat = new byte[size]; var den = new float[size]; var vx = new float[size]; var vy = new float[size]; var vz = new float[size];
                 var sxx = new float[size]; var syy = new float[size]; var szz = new float[size]; var sxy = new float[size]; var sxz = new float[size]; var syz = new float[size];
                 var dmg = new float[size];
+                // --- MODIFICATION: Create host-side arrays for material properties ---
+                var ym = new float[size]; 
+                var pr = new float[size];
+
 
                 int k = 0;
                 for (int lz = 0; lz < d; lz++)
@@ -291,6 +299,19 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
                         sxx[k] = c.Sxx[x, y, lz]; syy[k] = c.Syy[x, y, lz]; szz[k] = c.Szz[x, y, lz];
                         sxy[k] = c.Sxy[x, y, lz]; sxz[k] = c.Sxz[x, y, lz]; syz[k] = c.Syz[x, y, lz];
                         dmg[k] = c.Damage[x, y, lz];
+                        // --- MODIFICATION: Populate material property arrays ---
+                        if (_usePerVoxelProperties)
+                        {
+                            ym[k] = _perVoxelYoungsModulus[x, y, gz];
+                            pr[k] = _perVoxelPoissonRatio[x, y, gz];
+                        }
+                        else
+                        {
+                            // Fallback to global properties if per-voxel not set
+                            ym[k] = _params.YoungsModulusMPa;
+                            pr[k] = _params.PoissonRatio;
+                        }
+
                     }
                 }
                 
@@ -299,6 +320,8 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
                     fixed (byte* pMat = mat) fixed (float* pDen = den) fixed (float* pVx = vx) fixed (float* pVy = vy) fixed (float* pVz = vz)
                     fixed (float* pSxx = sxx) fixed (float* pSyy = syy) fixed (float* pSzz = szz) fixed (float* pSxy = sxy) fixed (float* pSxz = sxz) fixed (float* pSyz = syz)
                     fixed (float* pDmg = dmg)
+                    // --- MODIFICATION: Pin memory for new arrays ---
+                    fixed (float* pYm = ym) fixed (float* pPr = pr)
                     {
                         _bufMat = _cl.CreateBuffer(_context, MemFlags.ReadOnly | MemFlags.CopyHostPtr, (nuint)(size * sizeof(byte)), pMat, out int err);
                         _bufDen = _cl.CreateBuffer(_context, MemFlags.ReadOnly | MemFlags.CopyHostPtr, (nuint)(size * sizeof(float)), pDen, out err);
@@ -312,8 +335,13 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
                         _bufStr[4] = _cl.CreateBuffer(_context, MemFlags.ReadWrite | MemFlags.CopyHostPtr, (nuint)(size * sizeof(float)), pSxz, out err);
                         _bufStr[5] = _cl.CreateBuffer(_context, MemFlags.ReadWrite | MemFlags.CopyHostPtr, (nuint)(size * sizeof(float)), pSyz, out err);
                         _bufDmg = _cl.CreateBuffer(_context, MemFlags.ReadWrite | MemFlags.CopyHostPtr, (nuint)(size * sizeof(float)), pDmg, out err);
+                        // --- MODIFICATION: Create new GPU buffers ---
+                        _bufYoungsModulus = _cl.CreateBuffer(_context, MemFlags.ReadOnly | MemFlags.CopyHostPtr, (nuint)(size * sizeof(float)), pYm, out err);
+                        _bufPoissonRatio = _cl.CreateBuffer(_context, MemFlags.ReadOnly | MemFlags.CopyHostPtr, (nuint)(size * sizeof(float)), pPr, out err);
+
                         
-                        _lastDeviceBytes = (long)size * (sizeof(byte) + sizeof(float) * 11);
+                        // --- MODIFICATION: Update memory usage calculation ---
+                        _lastDeviceBytes = (long)size * (sizeof(byte) + sizeof(float) * 13);
                         
                         SetKernelArgs(_kernelStress, w, h, d);
                         nuint gws = (nuint)size;
@@ -366,6 +394,10 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
             nint bufStr4Arg = _bufStr[4];
             nint bufStr5Arg = _bufStr[5];
             nint bufDmgArg = _bufDmg;
+            // --- MODIFICATION: Create handles for new buffer arguments ---
+            nint bufYmArg = _bufYoungsModulus;
+            nint bufPrArg = _bufPoissonRatio;
+
 
             var paramsPixelSize = _params.PixelSize;
             var paramsSelectedMaterialId = _params.SelectedMaterialID;
@@ -383,8 +415,9 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
                 _cl.SetKernelArg(kernel, a++, (nuint)sizeof(nint), in bufStr4Arg);
                 _cl.SetKernelArg(kernel, a++, (nuint)sizeof(nint), in bufStr5Arg);
                 _cl.SetKernelArg(kernel, a++, (nuint)sizeof(nint), in bufDmgArg);
-                _cl.SetKernelArg(kernel, a++, (nuint)sizeof(float), in _lambda);
-                _cl.SetKernelArg(kernel, a++, (nuint)sizeof(float), in _mu);
+                // --- MODIFICATION: Pass new buffers instead of uniform values ---
+                _cl.SetKernelArg(kernel, a++, (nuint)sizeof(nint), in bufYmArg);
+                _cl.SetKernelArg(kernel, a++, (nuint)sizeof(nint), in bufPrArg);
                 _cl.SetKernelArg(kernel, a++, (nuint)sizeof(float), in _dt);
                 _cl.SetKernelArg(kernel, a++, (nuint)sizeof(float), in paramsPixelSize);
                 _cl.SetKernelArg(kernel, a++, (nuint)sizeof(int), in w);
@@ -889,6 +922,9 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
             if (_bufMat != 0) { _cl.ReleaseMemObject(_bufMat); _bufMat = 0; }
             if (_bufDen != 0) { _cl.ReleaseMemObject(_bufDen); _bufDen = 0; }
             if (_bufDmg != 0) { _cl.ReleaseMemObject(_bufDmg); _bufDmg = 0; }
+            // --- MODIFICATION: Release new buffers ---
+            if (_bufYoungsModulus != 0) { _cl.ReleaseMemObject(_bufYoungsModulus); _bufYoungsModulus = 0; }
+            if (_bufPoissonRatio != 0) { _cl.ReleaseMemObject(_bufPoissonRatio); _bufPoissonRatio = 0; }
             for (int i = 0; i < 3; i++) if (_bufVel[i] != 0) { _cl.ReleaseMemObject(_bufVel[i]); _bufVel[i] = 0; }
             for (int i = 0; i < 6; i++) if (_bufStr[i] != 0) { _cl.ReleaseMemObject(_bufStr[i]); _bufStr[i] = 0; }
             _lastDeviceBytes = 0;
@@ -896,6 +932,7 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
 
         private string GetKernelSource()
 {
+    // --- MODIFICATION: Kernel updated for multi-material properties ---
     return @"
     __kernel void updateStress(
         __global const uchar* material, 
@@ -904,7 +941,8 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
         __global float* sxx, __global float* syy, __global float* szz,
         __global float* sxy, __global float* sxz, __global float* syz,
         __global float* damage, 
-        const float lambda, const float mu,
+        __global const float* youngsModulus,
+        __global const float* poissonRatio,
         const float dt, const float dx,
         const int width, const int height, const int depth, 
         const uchar selectedMaterial,
@@ -914,18 +952,21 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
         int idx = get_global_id(0); 
         if (idx >= width * height * depth) return;
         
-        // Calculate 3D coordinates
         int z = idx / (width * height);
         int rem = idx % (width * height);
         int y = rem / width;
         int x = rem % width;
         
-        // Allow wave propagation through ALL non-zero materials
         uchar mat = material[idx];
-        if (mat == 0) return; // Skip air/background
+        if (mat == 0) return;
         if (x <= 0 || x >= width-1 || y <= 0 || y >= height-1 || z <= 0 || z >= depth-1) return;
         
-        // Calculate neighbor indices
+        // Calculate material properties on-the-fly
+        float E = youngsModulus[idx] * 1e6f; // Convert MPa to Pa
+        float nu = poissonRatio[idx];
+        float mu = E / (2.0f * (1.0f + nu));
+        float lambda = E * nu / ((1.0f + nu) * (1.0f - 2.0f * nu));
+
         int xp1 = idx + 1;
         int xm1 = idx - 1;
         int yp1 = idx + width;
@@ -933,14 +974,11 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
         int zp1 = idx + width * height;
         int zm1 = idx - width * height;
         
-        // Validate neighbor indices
         if (zp1 >= width * height * depth || zm1 < 0) return;
         
-        // Calculate velocity gradients
         float dvx_dx = (vx[xp1] - vx[xm1]) / (2.0f * dx);
         float dvy_dy = (vy[yp1] - vy[ym1]) / (2.0f * dx);
         float dvz_dz = (vz[zp1] - vz[zm1]) / (2.0f * dx);
-        
         float dvy_dx = (vy[xp1] - vy[xm1]) / (2.0f * dx);
         float dvx_dy = (vx[yp1] - vx[ym1]) / (2.0f * dx);
         float dvz_dx = (vz[xp1] - vz[xm1]) / (2.0f * dx);
@@ -950,13 +988,11 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
         
         float volumetric_strain = dvx_dx + dvy_dy + dvz_dz;
         
-        // Apply damage only to selected material
         float damage_factor = 1.0f;
         if (mat == selectedMaterial) {
-            damage_factor = 1.0f - damage[idx] * 0.5f; // Reduced damage effect
+            damage_factor = 1.0f - damage[idx] * 0.5f;
         }
         
-        // Update stress components
         sxx[idx] += dt * damage_factor * (lambda * volumetric_strain + 2.0f * mu * dvx_dx);
         syy[idx] += dt * damage_factor * (lambda * volumetric_strain + 2.0f * mu * dvy_dy);
         szz[idx] += dt * damage_factor * (lambda * volumetric_strain + 2.0f * mu * dvz_dz);
@@ -964,7 +1000,6 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
         sxz[idx] += dt * damage_factor * mu * (dvz_dx + dvx_dz);
         syz[idx] += dt * damage_factor * mu * (dvz_dy + dvy_dz);
         
-        // Apply stress limiters
         float stress_limit = 1e9f;
         sxx[idx] = clamp(sxx[idx], -stress_limit, stress_limit);
         syy[idx] = clamp(syy[idx], -stress_limit, stress_limit);
@@ -973,7 +1008,6 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
         sxz[idx] = clamp(sxz[idx], -stress_limit, stress_limit);
         syz[idx] = clamp(syz[idx], -stress_limit, stress_limit);
         
-        // Apply damage only to selected material
         if (mat == selectedMaterial) {
             float tensile_max = fmax(sxx[idx], fmax(syy[idx], szz[idx]));
             float shear_magnitude = sqrt(sxy[idx]*sxy[idx] + sxz[idx]*sxz[idx] + syz[idx]*syz[idx]);
@@ -1002,17 +1036,14 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
         int idx = get_global_id(0);
         if (idx >= width * height * depth) return;
         
-        // Calculate 3D coordinates
         int z = idx / (width * height);
         int rem = idx % (width * height);
         int y = rem / width;
         int x = rem % width;
         
-        // Allow wave propagation through ALL non-zero materials
-        if (material[idx] == 0) return; // Skip air/background
+        if (material[idx] == 0) return;
         if (x <= 0 || x >= width-1 || y <= 0 || y >= height-1 || z <= 0 || z >= depth-1) return;
         
-        // Calculate neighbor indices
         int xp1 = idx + 1;
         int xm1 = idx - 1;
         int yp1 = idx + width;
@@ -1024,7 +1055,6 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
         
         float rho = fmax(100.0f, density[idx]);
         
-        // Calculate stress gradients
         float dsxx_dx = (sxx[xp1] - sxx[xm1]) / (2.0f * dx);
         float dsyy_dy = (syy[yp1] - syy[ym1]) / (2.0f * dx);
         float dszz_dz = (szz[zp1] - szz[zm1]) / (2.0f * dx);
@@ -1035,15 +1065,12 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
         float dsyz_dz = (syz[zp1] - syz[zm1]) / (2.0f * dx);
         float dsyz_dy = (syz[yp1] - syz[ym1]) / (2.0f * dx);
         
-        // Very light damping for better propagation
         const float damping = 0.999f;
         
-        // Update velocities
         vx[idx] = vx[idx] * damping + dt * (dsxx_dx + dsxy_dy + dsxz_dz) / rho;
         vy[idx] = vy[idx] * damping + dt * (dsxy_dx + dsyy_dy + dsyz_dz) / rho;
         vz[idx] = vz[idx] * damping + dt * (dsxz_dx + dsyz_dy + dszz_dz) / rho;
         
-        // Apply velocity limiters
         float max_velocity = 10000.0f;
         vx[idx] = clamp(vx[idx], -max_velocity, max_velocity);
         vy[idx] = clamp(vy[idx], -max_velocity, max_velocity);
