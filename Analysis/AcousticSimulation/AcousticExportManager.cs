@@ -182,8 +182,7 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
                 cancellationToken.ThrowIfCancellationRequested();
                 
                 string pWavePath = Path.Combine(volumeDir, "PWaveField.bin");
-                ExportWaveField(_results.WaveFieldVx, pWavePath, cancellationToken, 
-                    progressBase, progressPerField);
+                ExportWaveField(_results.WaveFieldVx, pWavePath);
                 progressBase += progressPerField;
             }
             
@@ -194,8 +193,7 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
                 cancellationToken.ThrowIfCancellationRequested();
                 
                 string sWavePath = Path.Combine(volumeDir, "SWaveField.bin");
-                ExportWaveField(_results.WaveFieldVy, sWavePath, cancellationToken,
-                    progressBase, progressPerField);
+                ExportWaveField(_results.WaveFieldVy, sWavePath);
                 progressBase += progressPerField;
             }
             
@@ -207,8 +205,7 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
                 
                 var combined = CreateCombinedField();
                 string combinedPath = Path.Combine(volumeDir, "CombinedField.bin");
-                ExportWaveField(combined, combinedPath, cancellationToken,
-                    progressBase, progressPerField);
+                ExportWaveField(combined, combinedPath);
                 progressBase += progressPerField;
             }
             
@@ -219,8 +216,7 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
                 cancellationToken.ThrowIfCancellationRequested();
                 
                 string damagePath = Path.Combine(volumeDir, "DamageField.bin");
-                ExportWaveField(_damageField, damagePath, cancellationToken,
-                    progressBase, progressPerField);
+                ExportWaveField(_damageField, damagePath);
                 progressBase += progressPerField;
             }
             
@@ -250,48 +246,15 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
             UpdateProgress(1.0f, "Export complete!");
         }
         
-        private void ExportWaveField(float[,,] field, string path, CancellationToken cancellationToken,
-            float baseProgress, float progressRange)
+        private void ExportWaveField(float[,,] field, string path)
         {
-            int width = field.GetLength(0);
-            int height = field.GetLength(1);
-            int depth = field.GetLength(2);
-            
-            using (var writer = new BinaryWriter(File.Create(path)))
+            if (field == null) return;
+        
+            // Create a ChunkedVolume from the float data. This normalizes it correctly.
+            using (var volume = CreateVolumeFromField(field))
             {
-                // Write dimensions
-                writer.Write(width);
-                writer.Write(height);
-                writer.Write(depth);
-                
-                // Normalize and write data
-                float maxValue = 0;
-                for (int z = 0; z < depth; z++)
-                    for (int y = 0; y < height; y++)
-                        for (int x = 0; x < width; x++)
-                            maxValue = Math.Max(maxValue, Math.Abs(field[x, y, z]));
-                
-                if (maxValue > 0)
-                {
-                    for (int z = 0; z < depth; z++)
-                    {
-                        cancellationToken.ThrowIfCancellationRequested();
-                        
-                        if (z % 10 == 0)
-                        {
-                            float progress = baseProgress + (progressRange * z / depth);
-                            UpdateProgress(progress, $"Writing slice {z + 1}/{depth}...");
-                        }
-                        
-                        for (int y = 0; y < height; y++)
-                            for (int x = 0; x < width; x++)
-                            {
-                                float normalized = (field[x, y, z] + maxValue) / (2 * maxValue);
-                                byte value = (byte)(normalized * 255);
-                                writer.Write(value);
-                            }
-                    }
-                }
+                // Use the built-in save method which writes a correct header.
+                volume?.SaveAsBin(path);
             }
         }
         

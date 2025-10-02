@@ -11,46 +11,159 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
 {
     /// <summary>
     /// Provides advanced logic for automatically placing transducers
-    /// by finding the largest connected component of a material.
+    /// by finding the largest connected component of a set of materials.
     /// </summary>
     public class TransducerAutoPlacer
     {
         private readonly CtImageStackDataset _dataset;
-        private readonly byte _materialId;
+        private readonly ISet<byte> _materialIds;
         private readonly int _width, _height, _depth;
 
-        public TransducerAutoPlacer(CtImageStackDataset dataset, byte materialId)
+        /// <summary>
+        /// Initializes a new instance of the TransducerAutoPlacer.
+        /// </summary>
+        /// <param name="dataset">The dataset to analyze.</param>
+        /// <param name="materialIds">A set of material IDs that are considered valid for placement and wave propagation.</param>
+        public TransducerAutoPlacer(CtImageStackDataset dataset, ISet<byte> materialIds)
         {
+            if (materialIds == null || !materialIds.Any())
+            {
+                throw new ArgumentException("At least one material ID must be provided.", nameof(materialIds));
+            }
             _dataset = dataset;
-            _materialId = materialId;
+            _materialIds = materialIds;
             _width = dataset.Width;
             _height = dataset.Height;
             _depth = dataset.Depth;
         }
 
         /// <summary>
-        /// Finds the largest connected component (island) of the selected material
-        /// and returns its bounding box.
+        /// Executes the full auto-placement process for a given propagation axis.
         /// </summary>
-        /// <returns>A tuple containing the min and max voxel coordinates of the largest island, or null if not found.</returns>
-        public (Vector3 min, Vector3 max)? FindLargestIslandAndBounds()
+        /// <param name="axis">The propagation axis (0=X, 1=Y, 2=Z).</param>
+        /// <returns>A tuple with normalized TX and RX positions, or null if placement fails.</returns>
+        public (Vector3 tx, Vector3 rx)? PlaceTransducersForAxis(int axis)
         {
-            Logger.Log($"[AutoPlace] Starting search for largest island of material ID {_materialId}");
-            
-            // Find all connected components and their sizes
-            var components = FindAllConnectedComponents();
-            
-            if (components.Count == 0)
+            var bounds = FindLargestIslandAndBounds();
+
+            if (!bounds.HasValue)
             {
-                Logger.LogWarning($"[AutoPlace] No connected components found for material ID {_materialId}.");
+                Logger.LogError($"[AutoPlace] No valid material volume found for the selected material(s).");
                 return null;
             }
 
-            // Find the largest component
+            var (min, max) = bounds.Value;
+            Logger.Log($"[AutoPlace] Largest connected component bounds: Min({min}), Max({max})");
+
+            const int buffer = 3; // Place transducers 3 voxels inside the material bounds
+            Vector3 txVoxel, rxVoxel;
+
+            // Calculate initial placement based on axis
+            switch (axis)
+            {
+                case 0: // X-Axis
+                    {
+                        float centerY = (min.Y + max.Y) / 2.0f;
+                        float centerZ = (min.Z + max.Z) / 2.0f;
+                        txVoxel = new Vector3(min.X + buffer, centerY, centerZ);
+                        rxVoxel = new Vector3(max.X - buffer, centerY, centerZ);
+                        if (rxVoxel.X - txVoxel.X < 10) { txVoxel.X = min.X + 1; rxVoxel.X = max.X - 1; }
+                    }
+                    break;
+                case 1: // Y-Axis
+                    {
+                        float centerX = (min.X + max.X) / 2.0f;
+                        float centerZ = (min.Z + max.Z) / 2.0f;
+                        txVoxel = new Vector3(centerX, min.Y + buffer, centerZ);
+                        rxVoxel = new Vector3(centerX, max.Y - buffer, centerZ);
+                        if (rxVoxel.Y - txVoxel.Y < 10) { txVoxel.Y = min.Y + 1; rxVoxel.Y = max.Y - 1; }
+                    }
+                    break;
+                case 2: // Z-Axis
+                    {
+                        float centerX = (min.X + max.X) / 2.0f;
+                        float centerY = (min.Y + max.Y) / 2.0f;
+                        txVoxel = new Vector3(centerX, centerY, min.Z + buffer);
+                        rxVoxel = new Vector3(centerX, centerY, max.Z - buffer);
+                        if (rxVoxel.Z - txVoxel.Z < 10) { txVoxel.Z = min.Z + 1; rxVoxel.Z = max.Z - 1; }
+                    }
+                    break;
+                default:
+                    return null;
+            }
+
+            // Verify and refine positions
+            bool txValid = IsPositionInMaterial(txVoxel);
+            bool rxValid = IsPositionInMaterial(rxVoxel);
+
+            if (!txValid || !rxValid)
+            {
+                Logger.LogWarning($"[AutoPlace] Initial positions not in material. Searching for valid positions...");
+                (txVoxel, rxVoxel) = FindValidTransducerPositions(min, max, axis);
+                if (!IsPositionInMaterial(txVoxel) || !IsPositionInMaterial(rxVoxel))
+                {
+                    Logger.LogError($"[AutoPlace] Could not find valid positions within the selected material(s).");
+                    return null;
+                }
+            }
+
+            // Verify path and log results
+            bool hasPath = HasPath(txVoxel, rxVoxel);
+            if (!hasPath)
+            {
+                Logger.LogWarning($"[AutoPlace] No direct path found between TX and RX. The material(s) may be fragmented.");
+            }
+
+            // Normalize positions for the UI
+            Vector3 txNormalized = new Vector3(
+                Math.Clamp(txVoxel.X / _width, 0f, 1f),
+                Math.Clamp(txVoxel.Y / _height, 0f, 1f),
+                Math.Clamp(txVoxel.Z / _depth, 0f, 1f));
+
+            Vector3 rxNormalized = new Vector3(
+                Math.Clamp(rxVoxel.X / _width, 0f, 1f),
+                Math.Clamp(rxVoxel.Y / _height, 0f, 1f),
+                Math.Clamp(rxVoxel.Z / _depth, 0f, 1f));
+
+            LogPlacementResults(txVoxel, rxVoxel, txNormalized, rxNormalized, hasPath);
+
+            return (txNormalized, rxNormalized);
+        }
+
+        private void LogPlacementResults(Vector3 txVoxel, Vector3 rxVoxel, Vector3 txNorm, Vector3 rxNorm, bool hasPath)
+        {
+            float dx = (rxVoxel.X - txVoxel.X) * _dataset.PixelSize / 1000f;
+            float dy = (rxVoxel.Y - txVoxel.Y) * _dataset.PixelSize / 1000f;
+            float dz = (rxVoxel.Z - txVoxel.Z) * _dataset.SliceThickness / 1000f;
+            float distance = MathF.Sqrt(dx * dx + dy * dy + dz * dz);
+
+            Logger.Log($"[AutoPlace] Successfully placed transducers:");
+            Logger.Log($"  TX: Voxel({txVoxel.X:F0},{txVoxel.Y:F0},{txVoxel.Z:F0}) -> Normalized({txNorm.X:F3},{txNorm.Y:F3},{txNorm.Z:F3})");
+            Logger.Log($"  RX: Voxel({rxVoxel.X:F0},{rxVoxel.Y:F0},{rxVoxel.Z:F0}) -> Normalized({rxNorm.X:F3},{rxNorm.Y:F3},{rxNorm.Z:F3})");
+            Logger.Log($"  Distance: {distance:F2} mm");
+            Logger.Log($"  Path verified: {(hasPath ? "Yes" : "No (fragmented material)")}");
+        }
+
+        /// <summary>
+        /// Finds the largest connected component (island) of the selected materials
+        /// and returns its bounding box.
+        /// </summary>
+        /// <returns>A tuple containing the min and max voxel coordinates of the largest island, or null if not found.</returns>
+        private (Vector3 min, Vector3 max)? FindLargestIslandAndBounds()
+        {
+            Logger.Log($"[AutoPlace] Starting search for largest island of material IDs [{string.Join(", ", _materialIds)}]");
+
+            var components = FindAllConnectedComponents();
+
+            if (components.Count == 0)
+            {
+                Logger.LogWarning($"[AutoPlace] No connected components found for the selected materials.");
+                return null;
+            }
+
             var largestComponent = components.OrderByDescending(c => c.Voxels.Count).First();
             Logger.Log($"[AutoPlace] Found {components.Count} islands. Largest has {largestComponent.Voxels.Count} voxels.");
-            
-            // Calculate bounds for the largest component
+
             return CalculateBounds(largestComponent);
         }
 
@@ -58,21 +171,15 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
         {
             var components = new List<ConnectedComponent>();
             var visited = new bool[_width, _height, _depth];
-            
-            // Scan through the entire volume
+
             for (int z = 0; z < _depth; z++)
             {
-                var labelSlice = new byte[_width * _height];
-                _dataset.LabelData.ReadSliceZ(z, labelSlice);
-                
                 for (int y = 0; y < _height; y++)
                 {
                     for (int x = 0; x < _width; x++)
                     {
-                        int sliceIdx = y * _width + x;
-                        if (labelSlice[sliceIdx] == _materialId && !visited[x, y, z])
+                        if (_materialIds.Contains(_dataset.LabelData[x, y, z]) && !visited[x, y, z])
                         {
-                            // Start a new component from this voxel
                             var component = FloodFill3D(x, y, z, visited);
                             if (component.Voxels.Count > 0)
                             {
@@ -82,7 +189,6 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
                     }
                 }
             }
-            
             return components;
         }
 
@@ -90,35 +196,28 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
         {
             var component = new ConnectedComponent();
             var queue = new Queue<(int x, int y, int z)>();
-            
+
             queue.Enqueue((startX, startY, startZ));
             visited[startX, startY, startZ] = true;
-            
-            // 6-connectivity directions (face neighbors only)
+
             int[] dx = { 1, -1, 0, 0, 0, 0 };
             int[] dy = { 0, 0, 1, -1, 0, 0 };
             int[] dz = { 0, 0, 0, 0, 1, -1 };
-            
+
             while (queue.Count > 0)
             {
                 var (x, y, z) = queue.Dequeue();
                 component.Voxels.Add(new Vector3(x, y, z));
-                
-                // Check all 6 neighbors
+
                 for (int i = 0; i < 6; i++)
                 {
                     int nx = x + dx[i];
                     int ny = y + dy[i];
                     int nz = z + dz[i];
-                    
-                    // Check bounds
-                    if (nx >= 0 && nx < _width && 
-                        ny >= 0 && ny < _height && 
-                        nz >= 0 && nz < _depth && 
-                        !visited[nx, ny, nz])
+
+                    if (nx >= 0 && nx < _width && ny >= 0 && ny < _height && nz >= 0 && nz < _depth && !visited[nx, ny, nz])
                     {
-                        // Check if this voxel has the target material
-                        if (_dataset.LabelData[nx, ny, nz] == _materialId)
+                        if (_materialIds.Contains(_dataset.LabelData[nx, ny, nz]))
                         {
                             visited[nx, ny, nz] = true;
                             queue.Enqueue((nx, ny, nz));
@@ -126,82 +225,60 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
                     }
                 }
             }
-            
             return component;
         }
 
         private (Vector3 min, Vector3 max)? CalculateBounds(ConnectedComponent component)
         {
-            if (component.Voxels.Count == 0)
-                return null;
-            
+            if (component.Voxels.Count == 0) return null;
+
             var min = new Vector3(float.MaxValue);
             var max = new Vector3(float.MinValue);
-            
+
             foreach (var voxel in component.Voxels)
             {
                 min = Vector3.Min(min, voxel);
                 max = Vector3.Max(max, voxel);
             }
-            
-            Logger.Log($"[AutoPlace] Component bounds: Min({min.X:F0},{min.Y:F0},{min.Z:F0}) Max({max.X:F0},{max.Y:F0},{max.Z:F0})");
-            
             return (min, max);
         }
 
         /// <summary>
-        /// Verifies that there is a connected path between two points within the material.
+        /// Verifies that there is a connected path between two points within the material set.
         /// </summary>
-        public bool HasPath(Vector3 start, Vector3 end)
+        private bool HasPath(Vector3 start, Vector3 end)
         {
             var startVoxel = new Vector3Int((int)start.X, (int)start.Y, (int)start.Z);
             var endVoxel = new Vector3Int((int)end.X, (int)end.Y, (int)end.Z);
-            
-            // Simple A* pathfinding
+
             var openSet = new SortedSet<PathNode>(new PathNodeComparer());
             var closedSet = new HashSet<Vector3Int>();
-            var startNode = new PathNode 
-            { 
-                Position = startVoxel, 
-                G = 0, 
-                H = Vector3Int.Distance(startVoxel, endVoxel),
-                Parent = null
-            };
+            var startNode = new PathNode { Position = startVoxel, G = 0, H = Vector3Int.Distance(startVoxel, endVoxel), Parent = null };
             openSet.Add(startNode);
-            
+
             while (openSet.Count > 0)
             {
                 var current = openSet.Min;
                 openSet.Remove(current);
-                
-                if (current.Position.Equals(endVoxel))
-                    return true; // Path found
-                
+
+                if (current.Position.Equals(endVoxel)) return true;
+
                 closedSet.Add(current.Position);
-                
-                // Check 6 neighbors
+
                 int[] dx = { 1, -1, 0, 0, 0, 0 };
                 int[] dy = { 0, 0, 1, -1, 0, 0 };
                 int[] dz = { 0, 0, 0, 0, 1, -1 };
-                
+
                 for (int i = 0; i < 6; i++)
                 {
-                    var neighbor = new Vector3Int(
-                        current.Position.X + dx[i],
-                        current.Position.Y + dy[i],
-                        current.Position.Z + dz[i]
-                    );
-                    
-                    // Check bounds and material
-                    if (neighbor.X < 0 || neighbor.X >= _width ||
-                        neighbor.Y < 0 || neighbor.Y >= _height ||
-                        neighbor.Z < 0 || neighbor.Z >= _depth ||
-                        closedSet.Contains(neighbor))
+                    var neighbor = new Vector3Int(current.Position.X + dx[i], current.Position.Y + dy[i], current.Position.Z + dz[i]);
+
+                    if (neighbor.X < 0 || neighbor.X >= _width || neighbor.Y < 0 || neighbor.Y >= _height || neighbor.Z < 0 || neighbor.Z >= _depth || closedSet.Contains(neighbor))
                         continue;
                     
-                    if (_dataset.LabelData[neighbor.X, neighbor.Y, neighbor.Z] != _materialId)
+                    if (!_materialIds.Contains(_dataset.LabelData[neighbor.X, neighbor.Y, neighbor.Z]))
                         continue;
-                    
+
                     float g = current.G + 1;
                     float h = Vector3Int.Distance(neighbor, endVoxel);
                     
@@ -219,8 +296,46 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
                     }
                 }
             }
-            
-            return false; // No path found
+            return false;
+        }
+
+        private bool IsPositionInMaterial(Vector3 position)
+        {
+            int x = Math.Clamp((int)position.X, 0, _width - 1);
+            int y = Math.Clamp((int)position.Y, 0, _height - 1);
+            int z = Math.Clamp((int)position.Z, 0, _depth - 1);
+            return _materialIds.Contains(_dataset.LabelData[x, y, z]);
+        }
+
+        private (Vector3 tx, Vector3 rx) FindValidTransducerPositions(Vector3 min, Vector3 max, int axis)
+        {
+            Vector3 txPos = Vector3.Zero, rxPos = Vector3.Zero;
+
+            switch (axis)
+            {
+                case 0: // X-axis
+                    {
+                        float centerY = (min.Y + max.Y) / 2.0f; float centerZ = (min.Z + max.Z) / 2.0f;
+                        for (int x = (int)min.X; x <= (int)max.X; x++) { if (IsPositionInMaterial(new Vector3(x, centerY, centerZ))) { txPos = new Vector3(x, centerY, centerZ); break; } }
+                        for (int x = (int)max.X; x >= (int)min.X; x--) { if (IsPositionInMaterial(new Vector3(x, centerY, centerZ))) { rxPos = new Vector3(x, centerY, centerZ); break; } }
+                    }
+                    break;
+                case 1: // Y-axis
+                    {
+                        float centerX = (min.X + max.X) / 2.0f; float centerZ = (min.Z + max.Z) / 2.0f;
+                        for (int y = (int)min.Y; y <= (int)max.Y; y++) { if (IsPositionInMaterial(new Vector3(centerX, y, centerZ))) { txPos = new Vector3(centerX, y, centerZ); break; } }
+                        for (int y = (int)max.Y; y >= (int)min.Y; y--) { if (IsPositionInMaterial(new Vector3(centerX, y, centerZ))) { rxPos = new Vector3(centerX, y, centerZ); break; } }
+                    }
+                    break;
+                case 2: // Z-axis
+                    {
+                        float centerX = (min.X + max.X) / 2.0f; float centerY = (min.Y + max.Y) / 2.0f;
+                        for (int z = (int)min.Z; z <= (int)max.Z; z++) { if (IsPositionInMaterial(new Vector3(centerX, centerY, z))) { txPos = new Vector3(centerX, centerY, z); break; } }
+                        for (int z = (int)max.Z; z >= (int)min.Z; z--) { if (IsPositionInMaterial(new Vector3(centerX, centerY, z))) { rxPos = new Vector3(centerX, centerY, z); break; } }
+                    }
+                    break;
+            }
+            return (txPos, rxPos);
         }
 
         private class ConnectedComponent
@@ -231,20 +346,8 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
         private struct Vector3Int : IEquatable<Vector3Int>
         {
             public int X, Y, Z;
-            
-            public Vector3Int(int x, int y, int z)
-            {
-                X = x; Y = y; Z = z;
-            }
-            
-            public static float Distance(Vector3Int a, Vector3Int b)
-            {
-                int dx = a.X - b.X;
-                int dy = a.Y - b.Y;
-                int dz = a.Z - b.Z;
-                return MathF.Sqrt(dx * dx + dy * dy + dz * dz);
-            }
-            
+            public Vector3Int(int x, int y, int z) { X = x; Y = y; Z = z; }
+            public static float Distance(Vector3Int a, Vector3Int b) => MathF.Sqrt((a.X - b.X) * (a.X - b.X) + (a.Y - b.Y) * (a.Y - b.Y) + (a.Z - b.Z) * (a.Z - b.Z));
             public bool Equals(Vector3Int other) => X == other.X && Y == other.Y && Z == other.Z;
             public override bool Equals(object obj) => obj is Vector3Int other && Equals(other);
             public override int GetHashCode() => HashCode.Combine(X, Y, Z);
@@ -253,9 +356,9 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
         private class PathNode
         {
             public Vector3Int Position { get; set; }
-            public float G { get; set; } // Cost from start
-            public float H { get; set; } // Heuristic to end
-            public float F => G + H; // Total score
+            public float G { get; set; }
+            public float H { get; set; }
+            public float F => G + H;
             public PathNode Parent { get; set; }
         }
 
@@ -265,11 +368,7 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
             {
                 if (x == null || y == null) return 0;
                 int result = x.F.CompareTo(y.F);
-                if (result == 0)
-                {
-                    // Use position hash as tiebreaker for stable sorting
-                    result = x.Position.GetHashCode().CompareTo(y.Position.GetHashCode());
-                }
+                if (result == 0) result = x.Position.GetHashCode().CompareTo(y.Position.GetHashCode());
                 return result;
             }
         }

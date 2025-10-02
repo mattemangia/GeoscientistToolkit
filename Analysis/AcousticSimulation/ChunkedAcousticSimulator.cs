@@ -1,6 +1,7 @@
 // GeoscientistToolkit/Analysis/AcousticSimulation/ChunkedAcousticSimulator.cs
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
 using System.Threading;
@@ -51,6 +52,8 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
             public float[,,] Vx, Vy, Vz;
             public float[,,] Sxx, Syy, Szz, Sxy, Sxz, Syz;
             public float[,,] Damage;
+            public bool IsInMemory = true;
+            public string FilePath;
         }
 
         private readonly List<WaveFieldChunk> _chunks = new();
@@ -148,8 +151,16 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
 
             CalculateTimeStep(density);
             ApplyInitialSource(labels, density);
+            
+            if (_params.EnableOffloading)
+            {
+                // Initially, offload all chunks except the first two needed for the first step.
+                for (int i = 2; i < _chunks.Count; i++)
+                {
+                    await OffloadChunkAsync(_chunks[i]);
+                }
+            }
 
-            // --- FIX: Run for the exact number of steps specified by the user ---
             int maxSteps = Math.Max(1, _params.TimeSteps);
             int step = 0;
             bool pHit = false, sHit = false;
@@ -159,7 +170,17 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
             {
                 for (int i = 0; i < _chunks.Count; i++)
                 {
+                    if (_params.EnableOffloading)
+                    {
+                        // Load the next chunk if needed for the next boundary exchange
+                        if (i + 1 < _chunks.Count) await LoadChunkAsync(_chunks[i + 1]);
+                        // Offload the chunk that is now "behind" the 3-chunk processing window
+                        if (i - 2 >= 0) await OffloadChunkAsync(_chunks[i - 2]);
+                    }
+
                     var c = _chunks[i];
+                    if (!c.IsInMemory) await LoadChunkAsync(c); // Should already be in memory, but as a safeguard
+
                     if (_useGPU)
                         await ProcessChunkGPUAsync(i, c, labels, density, token);
                     else
@@ -189,6 +210,15 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
 
                 Progress = (float)step / maxSteps;
                 ProgressUpdated?.Invoke(this, new SimulationProgressEventArgs { Progress = Progress, Step = step, Message = $"Step {step}" });
+            }
+
+            if (_params.EnableOffloading)
+            {
+                // Reload all chunks to reconstruct the final fields
+                foreach(var chunk in _chunks)
+                {
+                    await LoadChunkAsync(chunk);
+                }
             }
 
             float distance = CalculateTxRxDistance();
@@ -403,6 +433,12 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
             var paramsSelectedMaterialId = _params.SelectedMaterialID;
             if (kernel == _kernelStress)
             {
+                var paramsConfiningPressureMPa = _params.ConfiningPressureMPa;
+                var paramsCohesionMPa = _params.CohesionMPa;
+                var paramsFailureAngleDeg = _params.FailureAngleDeg;
+                var paramsUsePlasticModel = _params.UsePlasticModel;
+                var paramsUseBrittleModel = _params.UseBrittleModel;
+
                 _cl.SetKernelArg(kernel, a++, (nuint)sizeof(nint), in bufMatArg);
                 _cl.SetKernelArg(kernel, a++, (nuint)sizeof(nint), in bufDenArg);
                 _cl.SetKernelArg(kernel, a++, (nuint)sizeof(nint), in bufVel0Arg);
@@ -415,7 +451,6 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
                 _cl.SetKernelArg(kernel, a++, (nuint)sizeof(nint), in bufStr4Arg);
                 _cl.SetKernelArg(kernel, a++, (nuint)sizeof(nint), in bufStr5Arg);
                 _cl.SetKernelArg(kernel, a++, (nuint)sizeof(nint), in bufDmgArg);
-                // --- MODIFICATION: Pass new buffers instead of uniform values ---
                 _cl.SetKernelArg(kernel, a++, (nuint)sizeof(nint), in bufYmArg);
                 _cl.SetKernelArg(kernel, a++, (nuint)sizeof(nint), in bufPrArg);
                 _cl.SetKernelArg(kernel, a++, (nuint)sizeof(float), in _dt);
@@ -424,9 +459,15 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
                 _cl.SetKernelArg(kernel, a++, (nuint)sizeof(int), in h);
                 _cl.SetKernelArg(kernel, a++, (nuint)sizeof(int), in d);
                 _cl.SetKernelArg(kernel, a++, (nuint)sizeof(byte), in paramsSelectedMaterialId);
-                _cl.SetKernelArg(kernel, a++, (nuint)sizeof(float), in _tensileLimitPa);
-                _cl.SetKernelArg(kernel, a++, (nuint)sizeof(float), in _shearLimitPa);
                 _cl.SetKernelArg(kernel, a++, (nuint)sizeof(float), in _damageRatePerSec);
+                _cl.SetKernelArg(kernel, a++, (nuint)sizeof(float), in paramsConfiningPressureMPa);
+                _cl.SetKernelArg(kernel, a++, (nuint)sizeof(float), in paramsCohesionMPa);
+                _cl.SetKernelArg(kernel, a++, (nuint)sizeof(float), in paramsFailureAngleDeg);
+
+                int usePlastic = paramsUsePlasticModel ? 1 : 0;
+                int useBrittle = paramsUseBrittleModel ? 1 : 0;
+                _cl.SetKernelArg(kernel, a++, (nuint)sizeof(int), in usePlastic);
+                _cl.SetKernelArg(kernel, a++, (nuint)sizeof(int), in useBrittle);
             }
             else // _kernelVelocity
             {
@@ -612,7 +653,91 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
         #endregion
 
         #region Utilities
+        private Task OffloadChunkAsync(WaveFieldChunk chunk)
+        {
+            if (!chunk.IsInMemory || string.IsNullOrEmpty(_params.OffloadDirectory))
+            {
+                return Task.CompletedTask;
+            }
 
+            return Task.Run(() =>
+            {
+                if (string.IsNullOrEmpty(chunk.FilePath))
+                {
+                    chunk.FilePath = Path.Combine(_params.OffloadDirectory, $"chunk_{chunk.StartZ}_{Guid.NewGuid()}.tmp");
+                }
+
+                try
+                {
+                    using (var writer = new BinaryWriter(File.Create(chunk.FilePath)))
+                    {
+                        WriteField(writer, chunk.Vx); WriteField(writer, chunk.Vy); WriteField(writer, chunk.Vz);
+                        WriteField(writer, chunk.Sxx); WriteField(writer, chunk.Syy); WriteField(writer, chunk.Szz);
+                        WriteField(writer, chunk.Sxy); WriteField(writer, chunk.Sxz); WriteField(writer, chunk.Syz);
+                        WriteField(writer, chunk.Damage);
+                    }
+
+                    chunk.Vx = null; chunk.Vy = null; chunk.Vz = null;
+                    chunk.Sxx = null; chunk.Syy = null; chunk.Szz = null;
+                    chunk.Sxy = null; chunk.Sxz = null; chunk.Syz = null;
+                    chunk.Damage = null;
+                    chunk.IsInMemory = false;
+                }
+                catch (Exception ex)
+                {
+                    Logger.LogError($"[ChunkedSimulator] Failed to offload chunk {chunk.StartZ}: {ex.Message}");
+                    chunk.FilePath = null;
+                }
+            });
+        }
+
+        private Task LoadChunkAsync(WaveFieldChunk chunk)
+        {
+            if (chunk.IsInMemory || string.IsNullOrEmpty(chunk.FilePath) || !File.Exists(chunk.FilePath))
+            {
+                return Task.CompletedTask;
+            }
+
+            return Task.Run(() =>
+            {
+                try
+                {
+                    int d = chunk.EndZ - chunk.StartZ;
+                    chunk.Vx = new float[_params.Width, _params.Height, d]; chunk.Vy = new float[_params.Width, _params.Height, d]; chunk.Vz = new float[_params.Width, _params.Height, d];
+                    chunk.Sxx = new float[_params.Width, _params.Height, d]; chunk.Syy = new float[_params.Width, _params.Height, d]; chunk.Szz = new float[_params.Width, _params.Height, d];
+                    chunk.Sxy = new float[_params.Width, _params.Height, d]; chunk.Sxz = new float[_params.Width, _params.Height, d]; chunk.Syz = new float[_params.Width, _params.Height, d];
+                    chunk.Damage = new float[_params.Width, _params.Height, d];
+
+                    using (var reader = new BinaryReader(File.OpenRead(chunk.FilePath)))
+                    {
+                        ReadField(reader, chunk.Vx); ReadField(reader, chunk.Vy); ReadField(reader, chunk.Vz);
+                        ReadField(reader, chunk.Sxx); ReadField(reader, chunk.Syy); ReadField(reader, chunk.Szz);
+                        ReadField(reader, chunk.Sxy); ReadField(reader, chunk.Sxz); ReadField(reader, chunk.Syz);
+                        ReadField(reader, chunk.Damage);
+                    }
+                    chunk.IsInMemory = true;
+                    File.Delete(chunk.FilePath);
+                    chunk.FilePath = null;
+                }
+                catch (Exception ex)
+                {
+                    Logger.LogError($"[ChunkedSimulator] Failed to load chunk {chunk.StartZ}: {ex.Message}");
+                }
+            });
+        }
+
+        private void WriteField(BinaryWriter writer, float[,,] field)
+        {
+            var buffer = new byte[field.Length * sizeof(float)];
+            Buffer.BlockCopy(field, 0, buffer, 0, buffer.Length);
+            writer.Write(buffer);
+        }
+
+        private void ReadField(BinaryReader reader, float[,,] field)
+        {
+            var buffer = reader.ReadBytes(field.Length * sizeof(float));
+            Buffer.BlockCopy(buffer, 0, field, 0, buffer.Length);
+        }
         private void CalculateTimeStep(float[,,] density)
         {
             float rhoMin = float.MaxValue;
@@ -767,6 +892,7 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
             for (int i = 0; i < _chunks.Count - 1; i++)
             {
                 var a = _chunks[i]; var b = _chunks[i + 1];
+                if (!a.IsInMemory || !b.IsInMemory) continue; // Skip if chunks aren't ready
                 int za = a.EndZ - a.StartZ - 2; int zb = 1;
                 for (int y = 0; y < _params.Height; y++)
                 for (int x = 0; x < _params.Width; x++)
@@ -784,7 +910,7 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
             int rz = Math.Clamp((int)(_params.RxPosition.Z * _params.Depth), 0, _params.Depth - 1);
 
             var c = _chunks.FirstOrDefault(k => rz >= k.StartZ && rz < k.EndZ); 
-            if (c == null) return false;
+            if (c == null || !c.IsInMemory) return false;
 
             int lz = rz - c.StartZ;
             float comp = _params.Axis switch 
@@ -799,7 +925,7 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
         private bool CheckSWaveArrival()
         {
             int rx = (int)(_params.RxPosition.X * _params.Width); int ry = (int)(_params.RxPosition.Y * _params.Height); int rz = (int)(_params.RxPosition.Z * _params.Depth);
-            var c = _chunks.FirstOrDefault(k => rz >= k.StartZ && rz < k.EndZ); if (c == null) return false;
+            var c = _chunks.FirstOrDefault(k => rz >= k.StartZ && rz < k.EndZ); if (c == null || !c.IsInMemory) return false;
             int lz = rz - c.StartZ;
             float mag = _params.Axis switch
             {
@@ -824,6 +950,7 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
             var vx = new float[w, h, d]; var vy = new float[w, h, d]; var vz = new float[w, h, d];
             foreach (var c in _chunks)
             {
+                if (!c.IsInMemory) LoadChunkAsync(c).Wait();
                 int cd = c.EndZ - c.StartZ;
                 for (int lz = 0; lz < cd; lz += ds)
                 {
@@ -844,13 +971,14 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
             return snap;
         }
         
-        private async Task<float[,,]> ReconstructFieldAsync(int comp)
+        public async Task<float[,,]> ReconstructFieldAsync(int comp)
         {
             var field = new float[_params.Width, _params.Height, _params.Depth];
             await Task.Run(() =>
             {
                 foreach (var c in _chunks)
                 {
+                    if (!c.IsInMemory) return; // Should have been reloaded by RunAsync
                     int d = c.EndZ - c.StartZ;
                     for (int z = 0; z < d; z++)
                     for (int y = 0; y < _params.Height; y++)
@@ -869,6 +997,7 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
             var damageField = new float[_params.Width, _params.Height, _params.Depth];
             foreach (var chunk in _chunks)
             {
+                if (!chunk.IsInMemory) continue;
                 int d = chunk.EndZ - chunk.StartZ;
                 for (int z = 0; z < d; z++)
                 for (int y = 0; y < _params.Height; y++)
@@ -885,6 +1014,7 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
             var out3d = new float[_params.Width, _params.Height, _params.Depth];
             foreach (var c in _chunks)
             {
+                if (!c.IsInMemory) LoadChunkAsync(c).Wait();
                 int d = c.EndZ - c.StartZ;
                 for (int z = 0; z < d; z++)
                 for (int y = 0; y < _params.Height; y++)
@@ -904,6 +1034,19 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
         public void Dispose()
         {
             if (_useGPU) CleanupOpenCL();
+            
+            // Clean up any remaining offloaded files
+            foreach (var chunk in _chunks.Where(c => !string.IsNullOrEmpty(c.FilePath)))
+            {
+                try
+                {
+                    if (File.Exists(chunk.FilePath)) File.Delete(chunk.FilePath);
+                }
+                catch (Exception ex)
+                {
+                    Logger.LogWarning($"[ChunkedSimulator] Could not clean up offload file {chunk.FilePath}: {ex.Message}");
+                }
+            }
             _chunks.Clear();
         }
 
@@ -934,6 +1077,8 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
 {
     // --- MODIFICATION: Kernel updated for multi-material properties ---
     return @"
+    #define M_PI_F 3.14159265358979323846f
+
     __kernel void updateStress(
         __global const uchar* material, 
         __global const float* density,
@@ -946,8 +1091,12 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
         const float dt, const float dx,
         const int width, const int height, const int depth, 
         const uchar selectedMaterial,
-        const float tensileLimitPa, const float shearLimitPa, 
-        const float damageRatePerSec)
+        const float damageRatePerSec,
+        const float confiningPressureMPa,
+        const float cohesionMPa,
+        const float failureAngleDeg,
+        const int usePlasticModel,
+        const int useBrittleModel)
     {
         int idx = get_global_id(0); 
         if (idx >= width * height * depth) return;
@@ -961,18 +1110,14 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
         if (mat == 0) return;
         if (x <= 0 || x >= width-1 || y <= 0 || y >= height-1 || z <= 0 || z >= depth-1) return;
         
-        // Calculate material properties on-the-fly
-        float E = youngsModulus[idx] * 1e6f; // Convert MPa to Pa
+        float E = youngsModulus[idx] * 1e6f;
         float nu = poissonRatio[idx];
         float mu = E / (2.0f * (1.0f + nu));
         float lambda = E * nu / ((1.0f + nu) * (1.0f - 2.0f * nu));
 
-        int xp1 = idx + 1;
-        int xm1 = idx - 1;
-        int yp1 = idx + width;
-        int ym1 = idx - width;
-        int zp1 = idx + width * height;
-        int zm1 = idx - width * height;
+        int xp1 = idx + 1; int xm1 = idx - 1;
+        int yp1 = idx + width; int ym1 = idx - width;
+        int zp1 = idx + width * height; int zm1 = idx - width * height;
         
         if (zp1 >= width * height * depth || zm1 < 0) return;
         
@@ -987,19 +1132,47 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
         float dvy_dz = (vy[zp1] - vy[zm1]) / (2.0f * dx);
         
         float volumetric_strain = dvx_dx + dvy_dy + dvz_dz;
+        float damage_factor = (mat == selectedMaterial) ? (1.0f - damage[idx] * 0.5f) : 1.0f;
         
-        float damage_factor = 1.0f;
-        if (mat == selectedMaterial) {
-            damage_factor = 1.0f - damage[idx] * 0.5f;
+        float sxx_new = sxx[idx] + dt * damage_factor * (lambda * volumetric_strain + 2.0f * mu * dvx_dx);
+        float syy_new = syy[idx] + dt * damage_factor * (lambda * volumetric_strain + 2.0f * mu * dvy_dy);
+        float szz_new = szz[idx] + dt * damage_factor * (lambda * volumetric_strain + 2.0f * mu * dvz_dz);
+        float sxy_new = sxy[idx] + dt * damage_factor * mu * (dvy_dx + dvx_dy);
+        float sxz_new = sxz[idx] + dt * damage_factor * mu * (dvz_dx + dvx_dz);
+        float syz_new = syz[idx] + dt * damage_factor * mu * (dvz_dy + dvy_dz);
+
+        if (mat == selectedMaterial && usePlasticModel != 0) {
+            float mean = (sxx_new + syy_new + szz_new) / 3.0f;
+            float dev_xx = sxx_new - mean;
+            float dev_yy = syy_new - mean;
+            float dev_zz = szz_new - mean;
+
+            float J2 = 0.5f * (dev_xx*dev_xx + dev_yy*dev_yy + dev_zz*dev_zz) + sxy_new*sxy_new + sxz_new*sxz_new + syz_new*syz_new;
+            float tau = sqrt(J2);
+
+            float sinPhi = sin(failureAngleDeg * M_PI_F / 180.0f);
+            float cosPhi = cos(failureAngleDeg * M_PI_F / 180.0f);
+            float cohesionPa = cohesionMPa * 1e6f;
+            float p = -mean + confiningPressureMPa * 1e6f;
+
+            float yield = tau + p * sinPhi - cohesionPa * cosPhi;
+
+            if (yield > 0 && tau > 1e-10f) {
+                float scale = (tau - (cohesionPa * cosPhi - p * sinPhi)) / tau;
+                scale = fmin(scale, 0.95f);
+                
+                sxx_new = (dev_xx * (1 - scale)) + mean;
+                syy_new = (dev_yy * (1 - scale)) + mean;
+                szz_new = (dev_zz * (1 - scale)) + mean;
+                sxy_new *= (1 - scale);
+                sxz_new *= (1 - scale);
+                syz_new *= (1 - scale);
+            }
         }
-        
-        sxx[idx] += dt * damage_factor * (lambda * volumetric_strain + 2.0f * mu * dvx_dx);
-        syy[idx] += dt * damage_factor * (lambda * volumetric_strain + 2.0f * mu * dvy_dy);
-        szz[idx] += dt * damage_factor * (lambda * volumetric_strain + 2.0f * mu * dvz_dz);
-        sxy[idx] += dt * damage_factor * mu * (dvy_dx + dvx_dy);
-        sxz[idx] += dt * damage_factor * mu * (dvz_dx + dvx_dz);
-        syz[idx] += dt * damage_factor * mu * (dvz_dy + dvy_dz);
-        
+
+        sxx[idx] = sxx_new; syy[idx] = syy_new; szz[idx] = szz_new;
+        sxy[idx] = sxy_new; sxz[idx] = sxz_new; syz[idx] = syz_new;
+
         float stress_limit = 1e9f;
         sxx[idx] = clamp(sxx[idx], -stress_limit, stress_limit);
         syy[idx] = clamp(syy[idx], -stress_limit, stress_limit);
@@ -1008,7 +1181,10 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
         sxz[idx] = clamp(sxz[idx], -stress_limit, stress_limit);
         syz[idx] = clamp(syz[idx], -stress_limit, stress_limit);
         
-        if (mat == selectedMaterial) {
+        if (mat == selectedMaterial && useBrittleModel != 0) {
+            float tensileLimitPa = 0.05f * E;
+            float shearLimitPa = 0.03f * E;
+
             float tensile_max = fmax(sxx[idx], fmax(syy[idx], szz[idx]));
             float shear_magnitude = sqrt(sxy[idx]*sxy[idx] + sxz[idx]*sxz[idx] + syz[idx]*syz[idx]);
             
@@ -1044,12 +1220,9 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
         if (material[idx] == 0) return;
         if (x <= 0 || x >= width-1 || y <= 0 || y >= height-1 || z <= 0 || z >= depth-1) return;
         
-        int xp1 = idx + 1;
-        int xm1 = idx - 1;
-        int yp1 = idx + width;
-        int ym1 = idx - width;
-        int zp1 = idx + width * height;
-        int zm1 = idx - width * height;
+        int xp1 = idx + 1; int xm1 = idx - 1;
+        int yp1 = idx + width; int ym1 = idx - width;
+        int zp1 = idx + width * height; int zm1 = idx - width * height;
         
         if (zp1 >= width * height * depth || zm1 < 0) return;
         
