@@ -108,7 +108,6 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
         private readonly HashSet<byte> _selectedMaterialIDs = new HashSet<byte>();
         private int _selectedAxisIndex = 0;
         private float _confiningPressure = 1.0f;
-        private float _tensileStrength = 10.0f;
         private float _failureAngle = 30.0f;
         private float _cohesion = 5.0f;
         private float _sourceEnergy = 1.0f;
@@ -132,6 +131,9 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
         private DateTime _lastTomographyUpdate = DateTime.MinValue;
         private bool _tomographyWindowWasOpen = false;
         private ImGuiFileDialog _offloadDirectoryDialog;
+        private bool _useRickerWavelet = true;
+        private int _estimatedTimeSteps = 0;
+        private bool _timeStepsDirty = true;
 
         // --- IMPROVEMENT: Detailed simulation state tracking ---
         private enum SimulationState { Idle, Preparing, Simulating, Completed, Failed, Cancelled }
@@ -160,12 +162,17 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
         {
             _txPosition = AcousticIntegration.TxPosition;
             _rxPosition = AcousticIntegration.RxPosition;
+            _timeStepsDirty = true;
         }
 
         public void DrawPanel(CtImageStackDataset dataset)
 {
     if (dataset == null) return;
     
+    if (_currentDataset != dataset)
+    {
+        _timeStepsDirty = true;
+    }
     _currentDataset = dataset;
     AcousticIntegration.StartPlacement(dataset, null, _txPosition, _rxPosition); // Ensure it's active for drawing
 
@@ -265,6 +272,7 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
     {
         ApplyAxisPreset(_selectedAxisIndex);
         AcousticIntegration.StartPlacement(_currentDataset, null, _txPosition, _rxPosition);
+        _timeStepsDirty = true;
     }
 
     ImGui.Checkbox("Full-Face Transducers", ref _useFullFaceTransducers);
@@ -433,7 +441,6 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
     {
         ImGui.Indent();
         ImGui.DragFloat("Confining Pressure (MPa)", ref _confiningPressure, 0.1f, 0.0f, 100.0f);
-        ImGui.DragFloat("Tensile Strength (MPa)", ref _tensileStrength, 0.5f, 0.1f, 100.0f);
         ImGui.DragFloat("Failure Angle (°)", ref _failureAngle, 1.0f, 0.0f, 90.0f);
         ImGui.DragFloat("Cohesion (MPa)", ref _cohesion, 0.5f, 0.0f, 50.0f);
         if (ImGui.IsItemHovered())
@@ -445,10 +452,25 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
     if (ImGui.CollapsingHeader("Source Parameters"))
     {
         ImGui.Indent();
+        ImGui.Checkbox("Use Ricker Wavelet", ref _useRickerWavelet);
         ImGui.DragFloat("Source Energy (J)", ref _sourceEnergy, 0.1f, 0.01f, 10.0f);
         ImGui.DragFloat("Frequency (kHz)", ref _sourceFrequency, 10.0f, 1.0f, 5000.0f);
         ImGui.DragInt("Amplitude", ref _sourceAmplitude, 1, 1, 1000);
-        ImGui.DragInt("Time Steps", ref _timeSteps, 10, 100, 10000);
+        
+        if (_timeStepsDirty && dataset != null)
+        {
+            _estimatedTimeSteps = CalculateEstimatedTimeSteps(dataset);
+            _timeSteps = _estimatedTimeSteps;
+            _timeStepsDirty = false;
+        }
+        ImGui.DragInt("Time Steps", ref _timeSteps, 10, 100, 50000);
+        ImGui.SameLine();
+        if (ImGui.Button("Auto"))
+        {
+            _timeSteps = CalculateEstimatedTimeSteps(dataset);
+        }
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip($"Automatically estimate steps based on distance and material properties.\nEstimated: {_estimatedTimeSteps}");
 
         if (_lastResults != null)
         {
@@ -521,9 +543,9 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
             if(ImGui.IsItemHovered()) 
                 ImGui.SetTooltip("Automatically place TX/RX on opposite sides of the selected material(s) largest connected component.");
 
-            float dx = (_rxPosition.X - _txPosition.X) * dataset.Width * dataset.PixelSize / 1000f;
-            float dy = (_rxPosition.Y - _txPosition.Y) * dataset.Height * dataset.PixelSize / 1000f;
-            float dz = (_rxPosition.Z - _txPosition.Z) * dataset.Depth * dataset.SliceThickness / 1000f;
+            float dx = (_rxPosition.X - _txPosition.X) * dataset.Width * (float)dataset.PixelSize / 1000f;
+            float dy = (_rxPosition.Y - _txPosition.Y) * dataset.Height * (float)dataset.PixelSize / 1000f;
+            float dz = (_rxPosition.Z - _txPosition.Z) * dataset.Depth * (float)dataset.SliceThickness / 1000f;
             float distance = MathF.Sqrt(dx * dx + dy * dy + dz * dz);
             ImGui.Text($"TX-RX Distance: {distance:F2} mm");
         }
@@ -674,9 +696,10 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
 }
 private void ExportTomographyImage()
 {
-    if (_lastResults == null)
+    // Allow exporting if results are available OR a simulation is currently running
+    if (_lastResults == null && !_isSimulating)
     {
-        Logger.LogWarning("[Tomography] Cannot export, no simulation results available.");
+        Logger.LogWarning("[Tomography] Cannot export, no simulation data available.");
         return;
     }
     
@@ -684,36 +707,63 @@ private void ExportTomographyImage()
     _tomographyExportDialog.Open(filename);
 }
 
-private void SaveTomographyImage(string path)
+private async Task SaveTomographyImageAsync(string path)
 {
-    if (_lastResults == null) return;
+    SimulationResults resultsToUse = null;
 
-    // 1. Get dimensions
-    int width = _tomographySliceAxis switch { 0 => _parameters.Height, 1 => _parameters.Width, _ => _parameters.Width };
-    int height = _tomographySliceAxis switch { 0 => _parameters.Depth, 1 => _parameters.Depth, _ => _parameters.Height };
-    
-    // 2. Regenerate the pixel data
-    var rgbaData = _tomographyGenerator.Generate2DTomography(_lastResults, _tomographySliceAxis, _tomographySliceIndex);
-    if (rgbaData == null)
+    // Part 1: Get data (can be async). This happens on the UI thread.
+    if (_isSimulating && _simulator != null)
     {
-        Logger.LogError("[Tomography] Failed to generate pixel data for export.");
+        Logger.Log("[Tomography] Exporting live snapshot from ongoing simulation...");
+        resultsToUse = new SimulationResults
+        {
+            WaveFieldVx = await _simulator.ReconstructFieldAsync(0),
+            WaveFieldVy = await _simulator.ReconstructFieldAsync(1),
+            WaveFieldVz = await _simulator.ReconstructFieldAsync(2),
+            PWaveVelocity = _lastResults?.PWaveVelocity ?? 6000.0, // Use last good values for color bar consistency
+            SWaveVelocity = _lastResults?.SWaveVelocity ?? 3000.0,
+            VpVsRatio = _lastResults?.VpVsRatio ?? 2.0
+        };
+    }
+    else if (_lastResults != null)
+    {
+        Logger.Log("[Tomography] Exporting final simulation results...");
+        resultsToUse = _lastResults;
+    }
+
+    if (resultsToUse == null)
+    {
+        Logger.LogError("[Tomography] No data available to export.");
         return;
     }
     
-    // 3. Save to PNG using StbImageWriteSharp
-    try
+    // Part 2: Process and save data (CPU and I/O bound). Offload to a background thread to keep UI responsive.
+    await Task.Run(() =>
     {
-        using (var stream = File.Create(path))
+        int width = _tomographySliceAxis switch { 0 => _parameters.Height, 1 => _parameters.Width, _ => _parameters.Width };
+        int height = _tomographySliceAxis switch { 0 => _parameters.Depth, 1 => _parameters.Depth, _ => _parameters.Height };
+        
+        var rgbaData = _tomographyGenerator.Generate2DTomography(resultsToUse, _tomographySliceAxis, _tomographySliceIndex);
+        if (rgbaData == null)
         {
-            var writer = new ImageWriter();
-            writer.WritePng(rgbaData, width, height, ColorComponents.RedGreenBlueAlpha, stream);
+            Logger.LogError("[Tomography] Failed to generate pixel data for export.");
+            return;
         }
-        Logger.Log($"[Tomography] Successfully exported tomography image to {path}");
-    }
-    catch (Exception ex)
-    {
-        Logger.LogError($"[Tomography] Failed to export tomography image: {ex.Message}");
-    }
+        
+        try
+        {
+            using (var stream = File.Create(path))
+            {
+                var writer = new ImageWriter();
+                writer.WritePng(rgbaData, width, height, ColorComponents.RedGreenBlueAlpha, stream);
+            }
+            Logger.Log($"[Tomography] Successfully exported tomography image to {path}");
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError($"[Tomography] Failed to export tomography image: {ex.Message}");
+        }
+    });
 }
 
 private void ExportAllTomographySlices()
@@ -881,6 +931,52 @@ private void ExportAllTomographySlices()
             return (float)Math.Sqrt(dx * dx + dy * dy + dz * dz) * _parameters.PixelSize;
         }
 
+        private int CalculateEstimatedTimeSteps(CtImageStackDataset dataset)
+        {
+            if (dataset == null || !_selectedMaterialIDs.Any()) return 1000;
+        
+            try
+            {
+                // 1. Get material properties
+                var primaryMaterial = dataset.Materials.FirstOrDefault(m => _selectedMaterialIDs.Contains(m.ID));
+                float density = (float)(primaryMaterial?.Density ?? 2.7); // g/cm³
+                if (density <= 0) density = 2.7f;
+                density *= 1000; // to kg/m³
+        
+                float E = _youngsModulus * 1e6f; // Pa
+                float nu = _poissonRatio;
+        
+                // 2. Estimate Vp
+                float mu = E / (2.0f * (1.0f + nu));
+                float lambda = E * nu / ((1 + nu) * (1 - 2 * nu));
+                float vp = MathF.Sqrt((lambda + 2 * mu) / density);
+                if (float.IsNaN(vp) || vp <= 100) vp = 5000f; // Fallback
+        
+                // 3. Calculate distance
+                float pixelSizeM = (float)dataset.PixelSize / 1000f;
+                float sliceThicknessM = (float)dataset.SliceThickness / 1000f;
+                float dx = (_rxPosition.X - _txPosition.X) * dataset.Width * pixelSizeM;
+                float dy = (_rxPosition.Y - _txPosition.Y) * dataset.Height * pixelSizeM;
+                float dz = (_rxPosition.Z - _txPosition.Z) * dataset.Depth * sliceThicknessM;
+                float distance = MathF.Sqrt(dx * dx + dy * dy + dz * dz);
+        
+                // 4. Estimate time step (dt)
+                float dt_est = pixelSizeM / (1.732f * vp) * 0.5f; // Courant condition estimate
+        
+                // 5. Calculate steps
+                if (dt_est < 1e-12f) return 1000; // Avoid division by zero
+                float travelTime = distance / vp;
+                int steps = (int)(travelTime / dt_est);
+        
+                // Add a buffer and clamp to a reasonable range
+                return Math.Clamp((int)(steps * 1.5), 500, 50000);
+            }
+            catch
+            {
+                return 1000; // Fallback on any error
+            }
+        }
+
         private void DrawTomographyWindow()
 {
     ImGui.SetNextWindowSize(new Vector2(500, 600), ImGuiCond.FirstUseEver);
@@ -1020,7 +1116,8 @@ private void ExportAllTomographySlices()
 
     if (_tomographyExportDialog.Submit())
     {
-        SaveTomographyImage(_tomographyExportDialog.SelectedPath);
+        // Fire-and-forget the async save method to avoid blocking the UI
+        _ = SaveTomographyImageAsync(_tomographyExportDialog.SelectedPath);
     }
     
     // Auto-update during simulation
@@ -1133,12 +1230,13 @@ private void ExportAllTomographySlices()
             SelectedMaterialID = _selectedMaterialIDs.FirstOrDefault(), // For legacy/damage model
             // SelectedMaterialIDs = _selectedMaterialIDs, // This requires changing SimulationParameters.cs; simulator uses per-voxel properties instead
             Axis = _selectedAxisIndex, UseFullFaceTransducers = _useFullFaceTransducers,
-            ConfiningPressureMPa = _confiningPressure, TensileStrengthMPa = _tensileStrength, 
+            ConfiningPressureMPa = _confiningPressure, 
             FailureAngleDeg = _failureAngle, CohesionMPa = _cohesion,
             SourceEnergyJ = _sourceEnergy, SourceFrequencyKHz = _sourceFrequency, 
             SourceAmplitude = _sourceAmplitude, TimeSteps = _timeSteps,
             YoungsModulusMPa = _youngsModulus, PoissonRatio = _poissonRatio,
             UseElasticModel = _useElastic, UsePlasticModel = _usePlastic, UseBrittleModel = _useBrittle, UseGPU = _useGPU,
+            UseRickerWavelet = _useRickerWavelet,
             TxPosition = _txPosition, RxPosition = _rxPosition, EnableRealTimeVisualization = _enableRealTimeVisualization,
             SaveTimeSeries = _saveTimeSeries, SnapshotInterval = _snapshotInterval,
             UseChunkedProcessing = _useChunkedProcessing, ChunkSizeMB = _chunkSizeMB, 
@@ -1374,13 +1472,11 @@ private async Task<(float[,,] youngsModulus, float[,,] poissonRatio)> ExtractMat
             if (_isSimulating && _simulator != null)
             {
                 // Reconstruct the fields from the simulator's current state.
-                // This creates a temporary object for visualization purposes.
                 resultsToUse = new SimulationResults
                 {
                     WaveFieldVx = await _simulator.ReconstructFieldAsync(0),
                     WaveFieldVy = await _simulator.ReconstructFieldAsync(1),
                     WaveFieldVz = await _simulator.ReconstructFieldAsync(2),
-                    // Use P/S velocities from the last run for a stable color bar range, with fallbacks.
                     PWaveVelocity = _lastResults?.PWaveVelocity ?? 6000.0,
                     SWaveVelocity = _lastResults?.SWaveVelocity ?? 3000.0,
                     VpVsRatio = _lastResults?.VpVsRatio ?? 2.0
@@ -1389,19 +1485,30 @@ private async Task<(float[,,] youngsModulus, float[,,] poissonRatio)> ExtractMat
 
             if (resultsToUse == null) return;
 
-            await Task.Run(() =>
+            // --- FIX START: Perform CPU-bound work in the background ---
+            (byte[] tomography, int width, int height) tomogData = await Task.Run(() =>
             {
-                var tomography = _tomographyGenerator.Generate2DTomography(resultsToUse, _tomographySliceAxis, _tomographySliceIndex);
-                if (tomography != null)
-                {
-                    _tomographyTexture?.Dispose();
-                    
-                    int width = _tomographySliceAxis switch { 0 => _parameters.Height, 1 => _parameters.Width, _ => _parameters.Width };
-                    int height = _tomographySliceAxis switch { 0 => _parameters.Depth, 1 => _parameters.Depth, _ => _parameters.Height };
-                    
-                    _tomographyTexture = TextureManager.CreateFromPixelData(tomography, (uint)width, (uint)height);
-                }
+                var pixelData = _tomographyGenerator.Generate2DTomography(resultsToUse, _tomographySliceAxis, _tomographySliceIndex);
+                if (pixelData == null) return (null, 0, 0);
+
+                int w = _tomographySliceAxis switch { 0 => _parameters.Height, 1 => _parameters.Width, _ => _parameters.Width };
+                int h = _tomographySliceAxis switch { 0 => _parameters.Depth, 1 => _parameters.Depth, _ => _parameters.Height };
+        
+                return (pixelData, w, h);
             });
+            // --- FIX END: Background work is complete ---
+
+
+            // --- FIX START: Update UI resources safely on the main thread ---
+            if (tomogData.tomography != null)
+            {
+                // Now that we are back on the UI thread, dispose the old texture
+                _tomographyTexture?.Dispose();
+        
+                // And create the new one
+                _tomographyTexture = TextureManager.CreateFromPixelData(tomogData.tomography, (uint)tomogData.width, (uint)tomogData.height);
+            }
+            // --- FIX END: UI update is complete ---
         }
 
         private void OnWaveFieldUpdated(object sender, WaveFieldUpdateEventArgs e)

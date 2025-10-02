@@ -45,6 +45,8 @@ namespace GeoscientistToolkit.Data.AcousticVolume
         public string SourceDatasetPath { get; set; }
         public string SourceMaterialName { get; set; }
         
+        public DensityVolume DensityData { get; set; } // ADD THIS LINE
+        
         // Time-series data for animation
         public List<WaveFieldSnapshot> TimeSeriesSnapshots { get; set; }
         

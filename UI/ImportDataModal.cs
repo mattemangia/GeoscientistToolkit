@@ -404,7 +404,8 @@ namespace GeoscientistToolkit.UI
                     DrawCheckmark(info.HasPWaveField, "P-Wave Field");
                     DrawCheckmark(info.HasSWaveField, "S-Wave Field");
                     DrawCheckmark(info.HasCombinedField, "Combined Wave Field");
-                    
+                    DrawCheckmark(info.HasDamageField, "Damage Field");
+
                     if (info.HasTimeSeries)
                     {
                         DrawCheckmark(true, $"Time Series ({info.TimeSeriesFrameCount} frames)");
@@ -432,6 +433,7 @@ namespace GeoscientistToolkit.UI
                     ImGui.Text("Expected structure:");
                     ImGui.BulletText("metadata.json (required)");
                     ImGui.BulletText("PWaveField.bin, SWaveField.bin, or CombinedField.bin");
+                    ImGui.BulletText("DamageField.bin (optional)");
                     ImGui.BulletText("TimeSeries/ folder with snapshot_*.bin files (optional)");
                 }
             }

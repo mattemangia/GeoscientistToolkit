@@ -38,6 +38,10 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
         private readonly float _tensileLimitPa;
         private readonly float _shearLimitPa;
         private readonly float _damageRatePerSec = 0.2f;
+        
+        // Ricker wavelet parameters
+        private float _rickerT0;
+        private readonly bool _isRickerActive;
 
         public float TimeStep => _dt;
         public float Progress { get; private set; }
@@ -88,6 +92,13 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
             float nu = _params.PoissonRatio;
             _mu = E / (2f * (1f + nu));
             _lambda = E * nu / ((1f + nu) * (1f - 2f * nu));
+            
+            if (_params.UseRickerWavelet)
+            {
+                _isRickerActive = true;
+                float freq = Math.Max(1.0f, _params.SourceFrequencyKHz * 1000f);
+                _rickerT0 = 1.2f / freq;
+            }
 
             _tensileLimitPa = 0.05f * E;
             _shearLimitPa = 0.03f * E;
@@ -150,7 +161,6 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
             var results = new SimulationResults { TimeSeriesSnapshots = _params.SaveTimeSeries ? new List<WaveFieldSnapshot>() : null };
 
             CalculateTimeStep(density);
-            ApplyInitialSource(labels, density);
             
             if (_params.EnableOffloading)
             {
@@ -168,6 +178,11 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
 
             while (step < maxSteps && !token.IsCancellationRequested)
             {
+                step++;
+                CurrentStep = step;
+                
+                float sourceValue = GetCurrentSourceValue(step);
+
                 for (int i = 0; i < _chunks.Count; i++)
                 {
                     if (_params.EnableOffloading)
@@ -182,17 +197,17 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
                     if (!c.IsInMemory) await LoadChunkAsync(c); // Should already be in memory, but as a safeguard
 
                     if (_useGPU)
-                        await ProcessChunkGPUAsync(i, c, labels, density, token);
+                        await ProcessChunkGPUAsync(i, c, labels, density, sourceValue, token);
                     else
                     {
+                        if (sourceValue != 0)
+                            ApplySourceToChunkCPU(c, sourceValue);
                         UpdateChunkStressCPU(c, labels, density);
                         UpdateChunkVelocityCPU(c, labels, density);
                     }
                 }
 
                 ExchangeBoundaries();
-                step++;
-                CurrentStep = step;
 
                 if (_params.SaveTimeSeries && step % _params.SnapshotInterval == 0)
                     results.TimeSeriesSnapshots?.Add(CreateSnapshot(step));
@@ -301,7 +316,7 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
             if (err2 != (int)CLEnum.Success) throw new InvalidOperationException($"CreateKernel(updateVelocity) failed: {err2}");
         }
 
-        private async Task ProcessChunkGPUAsync(int ci, WaveFieldChunk c, byte[,,] labels, float[,,] density, CancellationToken token)
+        private async Task ProcessChunkGPUAsync(int ci, WaveFieldChunk c, byte[,,] labels, float[,,] density, float sourceValue, CancellationToken token)
         {
             await Task.Run(() =>
             {
@@ -373,11 +388,11 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
                         // --- MODIFICATION: Update memory usage calculation ---
                         _lastDeviceBytes = (long)size * (sizeof(byte) + sizeof(float) * 13);
                         
-                        SetKernelArgs(_kernelStress, w, h, d);
+                        SetKernelArgs(_kernelStress, w, h, d, c.StartZ, sourceValue);
                         nuint gws = (nuint)size;
                         _cl.EnqueueNdrangeKernel(_queue, _kernelStress, 1, null, &gws, null, 0, null, null);
                         
-                        SetKernelArgs(_kernelVelocity, w, h, d);
+                        SetKernelArgs(_kernelVelocity, w, h, d, c.StartZ, sourceValue);
                         _cl.EnqueueNdrangeKernel(_queue, _kernelVelocity, 1, null, &gws, null, 0, null, null);
                         _cl.Finish(_queue);
 
@@ -409,7 +424,7 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
             });
         }
         
-        private unsafe void SetKernelArgs(nint kernel, int w, int h, int d)
+        private unsafe void SetKernelArgs(nint kernel, int w, int h, int d, int chunkStartZ, float sourceValue)
         {
             uint a = 0;
             nint bufMatArg = _bufMat;
@@ -424,10 +439,8 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
             nint bufStr4Arg = _bufStr[4];
             nint bufStr5Arg = _bufStr[5];
             nint bufDmgArg = _bufDmg;
-            // --- MODIFICATION: Create handles for new buffer arguments ---
             nint bufYmArg = _bufYoungsModulus;
             nint bufPrArg = _bufPoissonRatio;
-
 
             var paramsPixelSize = _params.PixelSize;
             var paramsSelectedMaterialId = _params.SelectedMaterialID;
@@ -438,6 +451,21 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
                 var paramsFailureAngleDeg = _params.FailureAngleDeg;
                 var paramsUsePlasticModel = _params.UsePlasticModel;
                 var paramsUseBrittleModel = _params.UseBrittleModel;
+
+                // Source parameters
+                int tx = (int)(_params.TxPosition.X * _params.Width);
+                int ty = (int)(_params.TxPosition.Y * _params.Height);
+                int tz = (int)(_params.TxPosition.Z * _params.Depth);
+                int applySource = 0;
+                if (sourceValue != 0)
+                {
+                    if (_params.UseFullFaceTransducers) applySource = 1;
+                    else if (tz >= chunkStartZ && tz < chunkStartZ + d) applySource = 1;
+                }
+
+                int localTz = tz - chunkStartZ;
+                int isFullFace = _params.UseFullFaceTransducers ? 1 : 0;
+                int sourceAxis = _params.Axis;
 
                 _cl.SetKernelArg(kernel, a++, (nuint)sizeof(nint), in bufMatArg);
                 _cl.SetKernelArg(kernel, a++, (nuint)sizeof(nint), in bufDenArg);
@@ -463,11 +491,19 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
                 _cl.SetKernelArg(kernel, a++, (nuint)sizeof(float), in paramsConfiningPressureMPa);
                 _cl.SetKernelArg(kernel, a++, (nuint)sizeof(float), in paramsCohesionMPa);
                 _cl.SetKernelArg(kernel, a++, (nuint)sizeof(float), in paramsFailureAngleDeg);
-
                 int usePlastic = paramsUsePlasticModel ? 1 : 0;
-                int useBrittle = paramsUseBrittleModel ? 1 : 0;
                 _cl.SetKernelArg(kernel, a++, (nuint)sizeof(int), in usePlastic);
+                int useBrittle = paramsUseBrittleModel ? 1 : 0;
                 _cl.SetKernelArg(kernel, a++, (nuint)sizeof(int), in useBrittle);
+                
+                // New source args
+                _cl.SetKernelArg(kernel, a++, (nuint)sizeof(float), in sourceValue);
+                _cl.SetKernelArg(kernel, a++, (nuint)sizeof(int), in applySource);
+                _cl.SetKernelArg(kernel, a++, (nuint)sizeof(int), in tx);
+                _cl.SetKernelArg(kernel, a++, (nuint)sizeof(int), in ty);
+                _cl.SetKernelArg(kernel, a++, (nuint)sizeof(int), in localTz);
+                _cl.SetKernelArg(kernel, a++, (nuint)sizeof(int), in isFullFace);
+                _cl.SetKernelArg(kernel, a++, (nuint)sizeof(int), in sourceAxis);
             }
             else // _kernelVelocity
             {
@@ -748,161 +784,130 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
             float vsMax = MathF.Sqrt(_mu / MathF.Max(100f, rhoMin));
             _dt = Math.Min(_params.TimeStepSeconds, _params.PixelSize / (1.7320508f * MathF.Max(1e-3f, vsMax)));
         }
+        
+        private float GetCurrentSourceValue(int step)
+        {
+            float baseAmp = _params.SourceAmplitude * MathF.Sqrt(MathF.Max(1e-6f, _params.SourceEnergyJ));
+            baseAmp *= 1e4f; // Scaling factor to make it impactful
 
-        private void ApplyInitialSource(byte[,,] labels, float[,,] density)
-{
-    if (_params.UseFullFaceTransducers)
-    {
-        // Apply source to entire face of the selected material
-        switch (_params.Axis)
-        {
-            case 0: // X-axis: apply to YZ face at x=0
-                for (int z = 0; z < _params.Depth; z++)
-                {
-                    var chunk = _chunks.FirstOrDefault(c => z >= c.StartZ && z < c.EndZ);
-                    if (chunk == null) continue;
-                    int localZ = z - chunk.StartZ;
-                    
-                    for (int y = 0; y < _params.Height; y++)
-                    {
-                        // Apply source at the first X position where material is found
-                        for (int x = 0; x < Math.Min(5, _params.Width); x++)
-                        {
-                            if (labels[x, y, z] == _params.SelectedMaterialID)
-                            {
-                                float amp = MathF.Max(1e-4f, _params.SourceAmplitude);
-                                chunk.Vx[x, y, localZ] += amp;
-                                chunk.Sxx[x, y, localZ] += amp * 1e6f; // Add stress pulse
-                                break; // Only apply to first material voxel in X direction
-                            }
-                        }
-                    }
-                }
-                break;
-                
-            case 1: // Y-axis: apply to XZ face at y=0
-                for (int z = 0; z < _params.Depth; z++)
-                {
-                    var chunk = _chunks.FirstOrDefault(c => z >= c.StartZ && z < c.EndZ);
-                    if (chunk == null) continue;
-                    int localZ = z - chunk.StartZ;
-                    
-                    for (int x = 0; x < _params.Width; x++)
-                    {
-                        // Apply source at the first Y position where material is found
-                        for (int y = 0; y < Math.Min(5, _params.Height); y++)
-                        {
-                            if (labels[x, y, z] == _params.SelectedMaterialID)
-                            {
-                                float amp = MathF.Max(1e-4f, _params.SourceAmplitude);
-                                chunk.Vy[x, y, localZ] += amp;
-                                chunk.Syy[x, y, localZ] += amp * 1e6f; // Add stress pulse
-                                break; // Only apply to first material voxel in Y direction
-                            }
-                        }
-                    }
-                }
-                break;
-                
-            case 2: // Z-axis: apply to XY face at z=0
-                // Find the first chunk
-                var firstChunk = _chunks[0];
-                for (int x = 0; x < _params.Width; x++)
-                {
-                    for (int y = 0; y < _params.Height; y++)
-                    {
-                        // Apply source at the first Z position where material is found
-                        for (int z = 0; z < Math.Min(5, firstChunk.EndZ - firstChunk.StartZ); z++)
-                        {
-                            int globalZ = firstChunk.StartZ + z;
-                            if (labels[x, y, globalZ] == _params.SelectedMaterialID)
-                            {
-                                float amp = MathF.Max(1e-4f, _params.SourceAmplitude);
-                                firstChunk.Vz[x, y, z] += amp;
-                                firstChunk.Szz[x, y, z] += amp * 1e6f; // Add stress pulse
-                                break; // Only apply to first material voxel in Z direction
-                            }
-                        }
-                    }
-                }
-                break;
-        }
-    }
-    else
-    {
-        // Point source implementation
-        int tx = (int)(_params.TxPosition.X * _params.Width);
-        int ty = (int)(_params.TxPosition.Y * _params.Height);
-        int tz = (int)(_params.TxPosition.Z * _params.Depth);
-        
-        // Apply spherical source with proper amplitude
-        int radius = 3; // Slightly larger radius for better wave initiation
-        float amp = MathF.Max(1e-4f, _params.SourceAmplitude);
-        
-        for (int dz = -radius; dz <= radius; dz++)
-        {
-            int gz = tz + dz;
-            if (gz < 0 || gz >= _params.Depth) continue;
-            
-            var chunk = _chunks.FirstOrDefault(c => gz >= c.StartZ && gz < c.EndZ);
-            if (chunk == null) continue;
-            int localZ = gz - chunk.StartZ;
-            
-            for (int dy = -radius; dy <= radius; dy++)
+            if (!_isRickerActive)
             {
-                int gy = ty + dy;
-                if (gy < 0 || gy >= _params.Height) continue;
-                
-                for (int dx = -radius; dx <= radius; dx++)
+                // Simple impulse source at the first step
+                return (step == 1) ? baseAmp : 0f;
+            }
+            else
+            {
+                // Ricker wavelet source
+                float t = step * _dt;
+                if (t > 2 * _rickerT0) return 0f;
+
+                float freq = Math.Max(1.0f, _params.SourceFrequencyKHz * 1000f);
+                float x = MathF.PI * freq * (t - _rickerT0);
+                float xx = x * x;
+                return baseAmp * (1.0f - 2.0f * xx) * MathF.Exp(-xx);
+            }
+        }
+        
+        private void ApplySourceToChunkCPU(WaveFieldChunk chunk, float sourceValue)
+        {
+            int tx = (int)(_params.TxPosition.X * _params.Width);
+            int ty = (int)(_params.TxPosition.Y * _params.Height);
+            int tz = (int)(_params.TxPosition.Z * _params.Depth);
+
+            if (_params.UseFullFaceTransducers)
+            {
+                switch (_params.Axis)
                 {
-                    int gx = tx + dx;
-                    if (gx < 0 || gx >= _params.Width) continue;
-                    
-                    float dist = MathF.Sqrt(dx * dx + dy * dy + dz * dz);
-                    if (dist > radius) continue;
-                    
-                    // Apply Gaussian-like pulse
-                    float falloff = MathF.Exp(-(dist * dist) / (radius * radius * 0.5f));
-                    float localAmp = amp * falloff;
-                    
-                    // Apply velocity and stress perturbation
-                    switch (_params.Axis)
+                    case 0: // X-axis, apply to YZ face at x=0
+                        if (tx > 2) return;
+                        for (int z = chunk.StartZ; z < chunk.EndZ; z++)
+                        for (int y = 0; y < _params.Height; y++)
+                            chunk.Sxx[0, y, z - chunk.StartZ] += sourceValue;
+                        break;
+                    case 1: // Y-axis, apply to XZ face at y=0
+                        if (ty > 2) return;
+                        for (int z = chunk.StartZ; z < chunk.EndZ; z++)
+                        for (int x = 0; x < _params.Width; x++)
+                            chunk.Syy[x, 0, z - chunk.StartZ] += sourceValue;
+                        break;
+                    case 2: // Z-axis, apply to XY face at z=0
+                        if (chunk.StartZ > 0 || tz > 2) return;
+                        for (int y = 0; y < _params.Height; y++)
+                        for (int x = 0; x < _params.Width; x++)
+                            chunk.Szz[x, y, 0] += sourceValue;
+                        break;
+                }
+            }
+            else // Point source
+            {
+                if (tz < chunk.StartZ || tz >= chunk.EndZ) return;
+                int localTz = tz - chunk.StartZ;
+                int radius = 3;
+
+                for (int dz = -radius; dz <= radius; dz++)
+                {
+                    int lz = localTz + dz;
+                    if (lz < 0 || lz >= (chunk.EndZ - chunk.StartZ)) continue;
+                    for (int dy = -radius; dy <= radius; dy++)
                     {
-                        case 0:
-                            chunk.Vx[gx, gy, localZ] += localAmp;
-                            chunk.Sxx[gx, gy, localZ] += localAmp * 1e6f;
-                            break;
-                        case 1:
-                            chunk.Vy[gx, gy, localZ] += localAmp;
-                            chunk.Syy[gx, gy, localZ] += localAmp * 1e6f;
-                            break;
-                        case 2:
-                            chunk.Vz[gx, gy, localZ] += localAmp;
-                            chunk.Szz[gx, gy, localZ] += localAmp * 1e6f;
-                            break;
+                        int y = ty + dy;
+                        if (y < 0 || y >= _params.Height) continue;
+                        for (int dx = -radius; dx <= radius; dx++)
+                        {
+                            int x = tx + dx;
+                            if (x < 0 || x >= _params.Width) continue;
+                            
+                            float distSq = dx * dx + dy * dy + dz * dz;
+                            if (distSq > radius * radius) continue;
+                            
+                            float falloff = MathF.Exp(-distSq / (radius * radius * 0.5f));
+                            float localSource = sourceValue * falloff;
+                            
+                            chunk.Sxx[x, y, lz] += localSource;
+                            chunk.Syy[x, y, lz] += localSource;
+                            chunk.Szz[x, y, lz] += localSource;
+                        }
                     }
                 }
             }
         }
-    }
-}
 
         private void ExchangeBoundaries()
         {
             for (int i = 0; i < _chunks.Count - 1; i++)
             {
-                var a = _chunks[i]; var b = _chunks[i + 1];
-                if (!a.IsInMemory || !b.IsInMemory) continue; // Skip if chunks aren't ready
-                int za = a.EndZ - a.StartZ - 2; int zb = 1;
+                var topChunk = _chunks[i];
+                var bottomChunk = _chunks[i + 1];
+
+                if (!topChunk.IsInMemory || !bottomChunk.IsInMemory) continue;
+
+                int topChunkDepth = topChunk.EndZ - topChunk.StartZ;
+
+                // Define the slice indices for clarity
+                int lastInteriorSlice_top = topChunkDepth - 2;
+                int bottomGhostSlice_top = topChunkDepth - 1;
+                int topGhostSlice_bottom = 0;
+                int firstInteriorSlice_bottom = 1;
+
                 for (int y = 0; y < _params.Height; y++)
-                for (int x = 0; x < _params.Width; x++)
                 {
-                    b.Vx[x, y, zb - 1] = a.Vx[x, y, za + 1]; b.Vy[x, y, zb - 1] = a.Vy[x, y, za + 1]; b.Vz[x, y, zb - 1] = a.Vz[x, y, za + 1];
-                    a.Vx[x, y, za] = b.Vx[x, y, zb]; a.Vy[x, y, za] = b.Vy[x, y, zb]; a.Vz[x, y, za] = b.Vz[x, y, zb];
+                    for (int x = 0; x < _params.Width; x++)
+                    {
+                        // Update the ghost slice at the bottom of the top chunk
+                        // with data from the first interior slice of the bottom chunk.
+                        topChunk.Vx[x, y, bottomGhostSlice_top] = bottomChunk.Vx[x, y, firstInteriorSlice_bottom];
+                        topChunk.Vy[x, y, bottomGhostSlice_top] = bottomChunk.Vy[x, y, firstInteriorSlice_bottom];
+                        topChunk.Vz[x, y, bottomGhostSlice_top] = bottomChunk.Vz[x, y, firstInteriorSlice_bottom];
+
+                        // Update the ghost slice at the top of the bottom chunk
+                        // with data from the last interior slice of the top chunk.
+                        bottomChunk.Vx[x, y, topGhostSlice_bottom] = topChunk.Vx[x, y, lastInteriorSlice_top];
+                        bottomChunk.Vy[x, y, topGhostSlice_bottom] = topChunk.Vy[x, y, lastInteriorSlice_top];
+                        bottomChunk.Vz[x, y, topGhostSlice_bottom] = topChunk.Vz[x, y, lastInteriorSlice_top];
+                    }
                 }
             }
         }
-
         private bool CheckPWaveArrival()
         {
             int rx = Math.Clamp((int)(_params.RxPosition.X * _params.Width), 0, _params.Width - 1);
@@ -1096,7 +1101,13 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
         const float cohesionMPa,
         const float failureAngleDeg,
         const int usePlasticModel,
-        const int useBrittleModel)
+        const int useBrittleModel,
+        const float sourceValue,
+        const int applySource,
+        const int srcX, const int srcY, const int srcZ_local,
+        const int isFullFace,
+        const int sourceAxis
+    )
     {
         int idx = get_global_id(0); 
         if (idx >= width * height * depth) return;
@@ -1105,6 +1116,23 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
         int rem = idx % (width * height);
         int y = rem / width;
         int x = rem % width;
+        
+        if (applySource != 0) {
+            if (isFullFace != 0) {
+                if (sourceAxis == 0 && x < 2) sxx[idx] += sourceValue;
+                if (sourceAxis == 1 && y < 2) syy[idx] += sourceValue;
+                if (sourceAxis == 2 && z < 2) szz[idx] += sourceValue;
+            } else {
+                float dist_sq = (float)((x-srcX)*(x-srcX) + (y-srcY)*(y-srcY) + (z-srcZ_local)*(z-srcZ_local));
+                if (dist_sq < 9.1f) {
+                    float falloff = exp(-dist_sq / 4.5f);
+                    float localSource = sourceValue * falloff;
+                    sxx[idx] += localSource;
+                    syy[idx] += localSource;
+                    szz[idx] += localSource;
+                }
+            }
+        }
         
         uchar mat = material[idx];
         if (mat == 0) return;

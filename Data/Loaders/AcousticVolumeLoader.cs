@@ -32,6 +32,7 @@ namespace GeoscientistToolkit.Data.Loaders
             public bool HasPWaveField { get; set; }
             public bool HasSWaveField { get; set; }
             public bool HasCombinedField { get; set; }
+            public bool HasDamageField { get; set; } // ADDED
             public bool HasTimeSeries { get; set; }
             public int TimeSeriesFrameCount { get; set; }
             public long TotalSize { get; set; }
@@ -88,10 +89,12 @@ namespace GeoscientistToolkit.Data.Loaders
                 string pWavePath = Path.Combine(DirectoryPath, "PWaveField.bin");
                 string sWavePath = Path.Combine(DirectoryPath, "SWaveField.bin");
                 string combinedPath = Path.Combine(DirectoryPath, "CombinedField.bin");
+                string damagePath = Path.Combine(DirectoryPath, "DamageField.bin"); // ADDED
 
                 _volumeInfo.HasPWaveField = File.Exists(pWavePath);
                 _volumeInfo.HasSWaveField = File.Exists(sWavePath);
                 _volumeInfo.HasCombinedField = File.Exists(combinedPath);
+                _volumeInfo.HasDamageField = File.Exists(damagePath); // ADDED
 
                 // Check for time series
                 string timeSeriesDir = Path.Combine(DirectoryPath, "TimeSeries");
@@ -160,9 +163,8 @@ namespace GeoscientistToolkit.Data.Loaders
                 }
 
                 float progressBase = 0.2f;
-                float progressPerVolume = 0.2f;
+                float progressPerVolume = 0.18f; // Adjusted to make space for DamageField
                 int volumeCount = 0;
-                int totalVolumes = 3; // P, S, Combined
 
                 // Load P-Wave field
                 string pWavePath = Path.Combine(DirectoryPath, "PWaveField.bin");
@@ -191,14 +193,7 @@ namespace GeoscientistToolkit.Data.Loaders
                     volumeCount++;
                 }
 
-                // Load time series if available
-                progressBase = 0.8f;
-                string timeSeriesDir = Path.Combine(DirectoryPath, "TimeSeries");
-                if (Directory.Exists(timeSeriesDir))
-                {
-                    progress?.Report((progressBase, "Loading time series snapshots..."));
-                    LoadTimeSeries(dataset, timeSeriesDir, progress, progressBase, 0.15f);
-                }
+                // MODIFIED: Load Damage Field
                 string damagePath = Path.Combine(DirectoryPath, "DamageField.bin");
                 if (File.Exists(damagePath))
                 {
@@ -206,6 +201,16 @@ namespace GeoscientistToolkit.Data.Loaders
                     dataset.DamageField = LoadVolume(damagePath, progress, progressBase + volumeCount * progressPerVolume, progressPerVolume);
                     volumeCount++;
                 }
+                
+                // Load time series if available
+                progressBase = 0.85f;
+                string timeSeriesDir = Path.Combine(DirectoryPath, "TimeSeries");
+                if (Directory.Exists(timeSeriesDir))
+                {
+                    progress?.Report((progressBase, "Loading time series snapshots..."));
+                    LoadTimeSeries(dataset, timeSeriesDir, progress, progressBase, 0.15f);
+                }
+
                 progress?.Report((1.0f, "Acoustic volume dataset loaded successfully"));
                 
                 Logger.Log($"[AcousticVolumeLoader] Loaded acoustic volume: {datasetName}");

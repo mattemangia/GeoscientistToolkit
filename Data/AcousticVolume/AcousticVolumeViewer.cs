@@ -3,6 +3,7 @@ using System;
 using System.Linq;
 using System.Numerics;
 using GeoscientistToolkit.Data.VolumeData;
+using GeoscientistToolkit.UI.AcousticVolume;
 using GeoscientistToolkit.UI.Interfaces;
 using GeoscientistToolkit.Util;
 using ImGuiNET;
@@ -11,8 +12,8 @@ using Veldrid;
 namespace GeoscientistToolkit.Data.AcousticVolume
 {
     /// <summary>
-    /// Viewer for acoustic simulation results with wave field visualization
-    /// and time-series animation capabilities
+    /// Viewer for acoustic simulation results with wave field visualization,
+    /// time-series animation, and interactive analysis capabilities.
     /// </summary>
     public class AcousticVolumeViewer : IDatasetViewer, IDisposable
     {
@@ -24,6 +25,7 @@ namespace GeoscientistToolkit.Data.AcousticVolume
             PWaveField,
             SWaveField,
             CombinedField,
+            DamageField,
             TimeSeries
         }
         private VisualizationMode _currentMode = VisualizationMode.CombinedField;
@@ -41,7 +43,7 @@ namespace GeoscientistToolkit.Data.AcousticVolume
         private bool _needsUpdateXZ = true;
         private bool _needsUpdateYZ = true;
 
-// Zoom and pan for each view
+        // Zoom and pan for each view
         private float _zoomXY = 1.0f;
         private float _zoomXZ = 1.0f;
         private float _zoomYZ = 1.0f;
@@ -70,17 +72,22 @@ namespace GeoscientistToolkit.Data.AcousticVolume
         
         // Color maps
         private readonly string[] _colorMapNames = { "Grayscale", "Jet", "Viridis", "Hot", "Cool", "Seismic" };
+
+        // Line drawing state for FFT
+        private Vector2 _lineStartPos;
+        private bool _isDrawingLine = false;
         
         public AcousticVolumeViewer(AcousticVolumeDataset dataset)
         {
             _dataset = dataset ?? throw new ArgumentNullException(nameof(dataset));
             _dataset.Load();
             
-            if (_dataset.CombinedWaveField != null)
+            var initialVolume = _dataset.CombinedWaveField ?? _dataset.PWaveField;
+            if (initialVolume != null)
             {
-                _sliceX = _dataset.CombinedWaveField.Width / 2;
-                _sliceY = _dataset.CombinedWaveField.Height / 2;
-                _sliceZ = _dataset.CombinedWaveField.Depth / 2;
+                _sliceX = initialVolume.Width / 2;
+                _sliceY = initialVolume.Height / 2;
+                _sliceZ = initialVolume.Depth / 2;
             }
             
             Logger.Log($"[AcousticVolumeViewer] Initialized viewer for: {_dataset.Name}");
@@ -92,12 +99,20 @@ namespace GeoscientistToolkit.Data.AcousticVolume
             ImGui.Text("Mode:");
             ImGui.SameLine();
             ImGui.SetNextItemWidth(150);
-            string[] modes = { "P-Wave", "S-Wave", "Combined", "Time Series" };
+            string[] modes = { "P-Wave", "S-Wave", "Combined", "Damage", "Time Series" };
             int modeIndex = (int)_currentMode;
             if (ImGui.Combo("##Mode", ref modeIndex, modes, modes.Length))
             {
-                _currentMode = (VisualizationMode)modeIndex;
-                _needsUpdateXY = _needsUpdateXZ = _needsUpdateYZ = true;
+                var newMode = (VisualizationMode)modeIndex;
+                if (newMode == VisualizationMode.DamageField && _dataset.DamageField == null)
+                {
+                    Logger.LogWarning("[AcousticVolumeViewer] Damage field not available. Staying in previous mode.");
+                }
+                else
+                {
+                    _currentMode = newMode;
+                    _needsUpdateXY = _needsUpdateXZ = _needsUpdateYZ = true;
+                }
             }
             
             ImGui.SameLine();
@@ -176,15 +191,9 @@ namespace GeoscientistToolkit.Data.AcousticVolume
             
             switch (_layout)
             {
-                case Layout.Horizontal:
-                    DrawHorizontalLayout(availableSize);
-                    break;
-                case Layout.Vertical:
-                    DrawVerticalLayout(availableSize);
-                    break;
-                case Layout.Grid2x2:
-                    DrawGrid2x2Layout(availableSize);
-                    break;
+                case Layout.Horizontal: DrawHorizontalLayout(availableSize); break;
+                case Layout.Vertical: DrawVerticalLayout(availableSize); break;
+                case Layout.Grid2x2: DrawGrid2x2Layout(availableSize); break;
             }
             
             // Draw legend if enabled
@@ -199,13 +208,7 @@ namespace GeoscientistToolkit.Data.AcousticVolume
             if ((DateTime.Now - _lastFrameTime).TotalSeconds >= _frameInterval / _animationSpeed)
             {
                 _lastFrameTime = DateTime.Now;
-                _currentFrameIndex++;
-                
-                if (_currentFrameIndex >= _dataset.TimeSeriesSnapshots.Count)
-                {
-                    _currentFrameIndex = 0;
-                }
-                
+                _currentFrameIndex = (_currentFrameIndex + 1) % _dataset.TimeSeriesSnapshots.Count;
                 _needsUpdateXY = _needsUpdateXZ = _needsUpdateYZ = true;
             }
         }
@@ -213,23 +216,19 @@ namespace GeoscientistToolkit.Data.AcousticVolume
         private void DrawHorizontalLayout(Vector2 availableSize)
         {
             float viewWidth = (availableSize.X - 4) / 3;
-            float viewHeight = availableSize.Y;
-            
-            DrawView(0, new Vector2(viewWidth, viewHeight), "XY (Axial)");
+            DrawView(0, new Vector2(viewWidth, availableSize.Y), "XY (Axial)");
             ImGui.SameLine(0, 2);
-            DrawView(1, new Vector2(viewWidth, viewHeight), "XZ (Coronal)");
+            DrawView(1, new Vector2(viewWidth, availableSize.Y), "XZ (Coronal)");
             ImGui.SameLine(0, 2);
-            DrawView(2, new Vector2(viewWidth, viewHeight), "YZ (Sagittal)");
+            DrawView(2, new Vector2(viewWidth, availableSize.Y), "YZ (Sagittal)");
         }
         
         private void DrawVerticalLayout(Vector2 availableSize)
         {
-            float viewWidth = availableSize.X;
             float viewHeight = (availableSize.Y - 4) / 3;
-            
-            DrawView(0, new Vector2(viewWidth, viewHeight), "XY (Axial)");
-            DrawView(1, new Vector2(viewWidth, viewHeight), "XZ (Coronal)");
-            DrawView(2, new Vector2(viewWidth, viewHeight), "YZ (Sagittal)");
+            DrawView(0, new Vector2(availableSize.X, viewHeight), "XY (Axial)");
+            DrawView(1, new Vector2(availableSize.X, viewHeight), "XZ (Coronal)");
+            DrawView(2, new Vector2(availableSize.X, viewHeight), "YZ (Sagittal)");
         }
         
         private void DrawGrid2x2Layout(Vector2 availableSize)
@@ -244,7 +243,6 @@ namespace GeoscientistToolkit.Data.AcousticVolume
             DrawView(2, new Vector2(viewWidth, viewHeight), "YZ (Sagittal)");
             ImGui.SameLine(0, 2);
             
-            // Info panel in the fourth quadrant
             ImGui.BeginChild("InfoPanel", new Vector2(viewWidth, viewHeight), ImGuiChildFlags.Border);
             DrawInfoPanel();
             ImGui.EndChild();
@@ -253,204 +251,186 @@ namespace GeoscientistToolkit.Data.AcousticVolume
         private void DrawView(int viewIndex, Vector2 size, string title)
         {
             ImGui.BeginChild($"View{viewIndex}", size, ImGuiChildFlags.Border);
-    
             ImGui.Text(title);
             ImGui.SameLine();
     
-            // Slice control
             ChunkedVolume currentVolume = GetCurrentVolume();
             if (currentVolume != null)
             {
                 int slice = viewIndex switch { 0 => _sliceZ, 1 => _sliceY, 2 => _sliceX, _ => 0 };
-                int maxSlice = viewIndex switch 
-                { 
-                    0 => currentVolume.Depth - 1, 
-                    1 => currentVolume.Height - 1, 
-                    2 => currentVolume.Width - 1, 
-                    _ => 0 
-                };
-        
+                int maxSlice = viewIndex switch { 0 => currentVolume.Depth - 1, 1 => currentVolume.Height - 1, 2 => currentVolume.Width - 1, _ => 0 };
                 ImGui.SetNextItemWidth(150);
                 if (ImGui.SliderInt($"##Slice{viewIndex}", ref slice, 0, maxSlice))
                 {
-                    switch (viewIndex)
-                    {
-                        case 0: 
-                            _sliceZ = slice; 
-                            _needsUpdateXY = true; 
-                            break;
-                        case 1: 
-                            _sliceY = slice; 
-                            _needsUpdateXZ = true; 
-                            break;
-                        case 2: 
-                            _sliceX = slice; 
-                            _needsUpdateYZ = true; 
-                            break;
-                    }
+                    switch (viewIndex) { case 0: _sliceZ = slice; _needsUpdateXY = true; break; case 1: _sliceY = slice; _needsUpdateXZ = true; break; case 2: _sliceX = slice; _needsUpdateYZ = true; break; }
                 }
-        
                 ImGui.SameLine();
                 ImGui.Text($"{slice + 1}/{maxSlice + 1}");
             }
     
             ImGui.Separator();
-    
-            // Draw the actual slice
             DrawSliceView(viewIndex);
-    
             ImGui.EndChild();
         }
 
-private void DrawSliceView(int viewIndex)
-{
-    var io = ImGui.GetIO();
-    var canvasPos = ImGui.GetCursorScreenPos();
-    var canvasSize = ImGui.GetContentRegionAvail();
-    var dl = ImGui.GetWindowDrawList();
-    
-    ImGui.InvisibleButton($"canvas{viewIndex}", canvasSize);
-    bool isHovered = ImGui.IsItemHovered();
-    
-    // Handle zoom and pan - use if-else instead of switch expression with ref
-    float zoom;
-    Vector2 pan;
-    
-    if (viewIndex == 0)
-    {
-        zoom = _zoomXY;
-        pan = _panXY;
-    }
-    else if (viewIndex == 1)
-    {
-        zoom = _zoomXZ;
-        pan = _panXZ;
-    }
-    else
-    {
-        zoom = _zoomYZ;
-        pan = _panYZ;
-    }
-    
-    if (isHovered && io.MouseWheel != 0)
-    {
-        float zoomDelta = io.MouseWheel * 0.1f;
-        float newZoom = Math.Clamp(zoom + zoomDelta * zoom, 0.1f, 10.0f);
-        
-        if (newZoom != zoom)
+        private void DrawSliceView(int viewIndex)
         {
-            Vector2 mouseCanvasPos = io.MousePos - canvasPos - canvasSize * 0.5f;
-            pan -= mouseCanvasPos * (newZoom / zoom - 1.0f);
-            zoom = newZoom;
+            var io = ImGui.GetIO();
+            var canvasPos = ImGui.GetCursorScreenPos();
+            var canvasSize = ImGui.GetContentRegionAvail();
+            var dl = ImGui.GetWindowDrawList();
             
-            // Update the appropriate field
-            if (viewIndex == 0)
+            ImGui.InvisibleButton($"canvas{viewIndex}", canvasSize);
+            bool isHovered = ImGui.IsItemHovered();
+            
+            // Handle zoom and pan
+            float zoom = viewIndex switch { 0 => _zoomXY, 1 => _zoomXZ, _ => _zoomYZ };
+            Vector2 pan = viewIndex switch { 0 => _panXY, 1 => _panXZ, _ => _panYZ };
+
+            if (isHovered && io.MouseWheel != 0)
             {
-                _zoomXY = zoom;
-                _panXY = pan;
+                float zoomDelta = io.MouseWheel * 0.1f;
+                float newZoom = Math.Clamp(zoom + zoomDelta * zoom, 0.1f, 10.0f);
+                Vector2 mouseCanvasPos = io.MousePos - canvasPos - canvasSize * 0.5f;
+                pan -= mouseCanvasPos * (newZoom / zoom - 1.0f);
+                zoom = newZoom;
             }
-            else if (viewIndex == 1)
+            if (isHovered && ImGui.IsMouseDragging(ImGuiMouseButton.Middle)) pan += io.MouseDelta;
+            
+            switch(viewIndex) { case 0: _zoomXY = zoom; _panXY = pan; break; case 1: _zoomXZ = zoom; _panXZ = pan; break; case 2: _zoomYZ = zoom; _panYZ = pan; break; }
+
+            // --- INTERACTION LOGIC ---
+            if (isHovered)
             {
-                _zoomXZ = zoom;
-                _panXZ = pan;
+                // Point Probing (on right-click or holding Ctrl)
+                if (ImGui.IsMouseClicked(ImGuiMouseButton.Right) || (ImGui.IsMouseDown(ImGuiMouseButton.Left) && io.KeyCtrl))
+                {
+                    HandlePointProbing(io, canvasPos, canvasSize, zoom, pan, viewIndex);
+                }
+
+                // Line Drawing for FFT
+                if (AcousticInteractionManager.InteractionMode == ViewerInteractionMode.DrawingLine)
+                {
+                    HandleLineDrawing(io, canvasPos, canvasSize, zoom, pan, viewIndex);
+                }
             }
-            else
+            
+            // Update texture if needed
+            bool needsUpdate = viewIndex switch { 0 => _needsUpdateXY, 1 => _needsUpdateXZ, _ => _needsUpdateYZ };
+            TextureManager texture = viewIndex switch { 0 => _textureXY, 1 => _textureXZ, _ => _textureYZ };
+            if (needsUpdate || texture == null || !texture.IsValid)
             {
-                _zoomYZ = zoom;
-                _panYZ = pan;
+                UpdateTexture(viewIndex, ref texture);
+                switch(viewIndex) { case 0: _textureXY = texture; _needsUpdateXY = false; break; case 1: _textureXZ = texture; _needsUpdateXZ = false; break; case 2: _textureYZ = texture; _needsUpdateYZ = false; break; }
             }
-        }
-    }
-    
-    if (isHovered && ImGui.IsMouseDragging(ImGuiMouseButton.Middle))
-    {
-        pan += io.MouseDelta;
-        
-        // Update the appropriate field
-        if (viewIndex == 0)
+            
+            dl.AddRectFilled(canvasPos, canvasPos + canvasSize, 0xFF202020);
+            
+            if (texture != null && texture.IsValid && GetCurrentVolume() != null)
+            {
+                var (width, height) = GetImageDimensionsForView(viewIndex, GetCurrentVolume());
+                var (imagePos, imageSize) = GetImageDisplayMetrics(canvasPos, canvasSize, zoom, pan, width, height); // CORRECTED CALL
+                
+                dl.PushClipRect(canvasPos, canvasPos + canvasSize, true);
+                dl.AddImage(texture.GetImGuiTextureId(), imagePos, imagePos + imageSize);
+                if (_showGrid) DrawGrid(dl, imagePos, imageSize, 10);
+                dl.PopClipRect();
+
+                // Draw line in progress on top of the image
+                if (_isDrawingLine && AcousticInteractionManager.LineViewIndex == viewIndex)
+                {
+                    dl.AddLine(_lineStartPos, io.MousePos, ImGui.GetColorU32(new Vector4(1, 1, 0, 0.8f)), 2.0f);
+                }
+            }
+        }      
+
+        /// <summary>
+        /// Handles user interaction for probing data at a specific point in a slice.
+        /// </summary>
+        private void HandlePointProbing(ImGuiIOPtr io, Vector2 canvasPos, Vector2 canvasSize, float zoom, Vector2 pan, int viewIndex)
         {
-            _panXY = pan;
-        }
-        else if (viewIndex == 1)
-        {
-            _panXZ = pan;
-        }
-        else
-        {
-            _panYZ = pan;
-        }
-    }
-    
-    // Update texture if needed
-    bool needsUpdate;
-    TextureManager texture;
-    
-    if (viewIndex == 0)
-    {
-        needsUpdate = _needsUpdateXY;
-        texture = _textureXY;
-    }
-    else if (viewIndex == 1)
-    {
-        needsUpdate = _needsUpdateXZ;
-        texture = _textureXZ;
-    }
-    else
-    {
-        needsUpdate = _needsUpdateYZ;
-        texture = _textureYZ;
-    }
-    
-    if (needsUpdate || texture == null || !texture.IsValid)
-    {
-        UpdateTexture(viewIndex, ref texture);
-        
-        // Update the appropriate field
-        if (viewIndex == 0)
-        {
-            _textureXY = texture;
-            _needsUpdateXY = false;
-        }
-        else if (viewIndex == 1)
-        {
-            _textureXZ = texture;
-            _needsUpdateXZ = false;
-        }
-        else
-        {
-            _textureYZ = texture;
-            _needsUpdateYZ = false;
-        }
-    }
-    
-    // Draw background
-    dl.AddRectFilled(canvasPos, canvasPos + canvasSize, 0xFF202020);
-    
-    // Draw texture
-    if (texture != null && texture.IsValid)
-    {
-        ChunkedVolume volume = GetCurrentVolume();
-        if (volume != null)
-        {
+            var volume = GetCurrentVolume();
+            if (volume == null) return;
+            
             var (width, height) = GetImageDimensionsForView(viewIndex, volume);
-            var (imagePos, imageSize) = GetImageDisplayMetrics(canvasPos, canvasSize, zoom, pan, width, height);
-            
-            dl.PushClipRect(canvasPos, canvasPos + canvasSize, true);
-            
-            // Draw the wave field image
-            dl.AddImage(texture.GetImGuiTextureId(), imagePos, imagePos + imageSize, 
-                Vector2.Zero, Vector2.One, 0xFFFFFFFF);
-            
-            // Draw grid if enabled
-            if (_showGrid)
+            var (imagePos, imageSize) = GetImageDisplayMetrics(canvasPos, canvasSize, zoom, pan, width, height); // CORRECTED CALL
+            Vector2 mouseImgCoord = (io.MousePos - imagePos) / imageSize;
+
+            if (mouseImgCoord.X >= 0 && mouseImgCoord.X <= 1 && mouseImgCoord.Y >= 0 && mouseImgCoord.Y <= 1)
             {
-                DrawGrid(dl, imagePos, imageSize, 10);
+                int x = (int)(mouseImgCoord.X * width);
+                int y = (int)(mouseImgCoord.Y * height);
+
+                // Convert 2D view coordinates to 3D volume coordinates
+                var (volX, volY, volZ) = viewIndex switch
+                {
+                    0 => (x, y, _sliceZ),
+                    1 => (x, _sliceY, y),
+                    _ => (_sliceX, x, y)
+                };
+                
+                // Clamp coordinates to be safe
+                var baseVolume = _dataset.CombinedWaveField ?? _dataset.PWaveField;
+                if (baseVolume == null) return;
+
+                volX = Math.Clamp(volX, 0, baseVolume.Width - 1);
+                volY = Math.Clamp(volY, 0, baseVolume.Height - 1);
+                volZ = Math.Clamp(volZ, 0, baseVolume.Depth - 1);
+
+                string tooltip = $"Voxel: ({volX}, {volY}, {volZ})\n";
+                
+                // Query calibrated density data if available
+                if (_dataset.DensityData != null)
+                {
+                    tooltip += $"Density: {_dataset.DensityData.GetDensity(volX, volY, volZ):F0} kg/m³\n" +
+                               $"Vp: {_dataset.DensityData.GetPWaveVelocity(volX, volY, volZ):F0} m/s\n" +
+                               $"Vs: {_dataset.DensityData.GetSWaveVelocity(volX, volY, volZ):F0} m/s";
+                }
+                else { tooltip += "Density data not calibrated."; }
+
+                // Query damage field if available
+                if (_dataset.DamageField != null)
+                {
+                    tooltip += $"\nDamage: {_dataset.DamageField[volX, volY, volZ] / 255.0f:P1}";
+                }
+
+                ImGui.SetTooltip(tooltip);
             }
-            
-            dl.PopClipRect();
         }
-    }
-}      
+
+        /// <summary>
+        /// Handles the UI logic for drawing a line for FFT analysis.
+        /// </summary>
+        private void HandleLineDrawing(ImGuiIOPtr io, Vector2 canvasPos, Vector2 canvasSize, float zoom, Vector2 pan, int viewIndex)
+        {
+            ImGui.SetTooltip("Click and drag to define a line for FFT analysis.\nPress ESC or 'Cancel' in Analysis tool to exit.");
+            
+            var (width, height) = GetImageDimensionsForView(viewIndex, GetCurrentVolume());
+            var (imagePos, imageSize) = GetImageDisplayMetrics(canvasPos, canvasSize, zoom, pan, width, height); // CORRECTED CALL
+
+            if (ImGui.IsMouseClicked(ImGuiMouseButton.Left))
+            {
+                _isDrawingLine = true;
+                _lineStartPos = io.MousePos;
+                AcousticInteractionManager.IsLineDefinitionActive = true;
+                AcousticInteractionManager.LineViewIndex = viewIndex;
+            }
+
+            if (_isDrawingLine && ImGui.IsMouseReleased(ImGuiMouseButton.Left))
+            {
+                _isDrawingLine = false;
+                
+                // Convert screen-space start/end points to pixel coordinates within the slice image
+                Vector2 startPixel = ((_lineStartPos - imagePos) / imageSize) * new Vector2(width, height);
+                Vector2 endPixel = ((io.MousePos - imagePos) / imageSize) * new Vector2(width, height);
+                
+                int sliceIndex = viewIndex switch { 0 => _sliceZ, 1 => _sliceY, 2 => _sliceX, _ => 0 };
+
+                // Finalize the line and notify the analysis tool
+                AcousticInteractionManager.FinalizeLine(sliceIndex, viewIndex, startPixel, endPixel);
+            }
+        }
+        
         private void UpdateTexture(int viewIndex, ref TextureManager texture)
         {
             ChunkedVolume volume = GetCurrentVolume();
@@ -461,10 +441,8 @@ private void DrawSliceView(int viewIndex)
                 var (width, height) = GetImageDimensionsForView(viewIndex, volume);
                 byte[] sliceData = ExtractSliceData(viewIndex, volume, width, height);
                 
-                // Apply color map
                 byte[] rgbaData = ApplyColorMap(sliceData, width, height);
                 
-                // Create or update texture
                 texture?.Dispose();
                 texture = TextureManager.CreateFromPixelData(rgbaData, (uint)width, (uint)height);
             }
@@ -480,26 +458,12 @@ private void DrawSliceView(int viewIndex)
             
             switch (viewIndex)
             {
-                case 0: // XY slice
-                    volume.ReadSliceZ(_sliceZ, data);
-                    break;
-                    
-                case 1: // XZ slice
-                    for (int z = 0; z < height; z++)
-                        for (int x = 0; x < width; x++)
-                            data[z * width + x] = volume[x, _sliceY, z];
-                    break;
-                    
-                case 2: // YZ slice
-                    for (int z = 0; z < height; z++)
-                        for (int y = 0; y < width; y++)
-                            data[z * width + y] = volume[_sliceX, y, z];
-                    break;
+                case 0: volume.ReadSliceZ(_sliceZ, data); break;
+                case 1: for (int z = 0; z < height; z++) for (int x = 0; x < width; x++) data[z * width + x] = volume[x, _sliceY, z]; break;
+                case 2: for (int z = 0; z < height; z++) for (int y = 0; y < width; y++) data[z * width + y] = volume[_sliceX, y, z]; break;
             }
             
-            // Apply contrast
             ApplyContrast(data);
-            
             return data;
         }
         
@@ -507,39 +471,41 @@ private void DrawSliceView(int viewIndex)
         {
             float min = _contrastMin * 255;
             float max = _contrastMax * 255;
-            float range = max - min;
-            if (range < 1e-5f) range = 1e-5f;
+            float range = Math.Max(1e-5f, max - min);
             
             for (int i = 0; i < data.Length; i++)
             {
-                float value = (data[i] - min) / range * 255;
-                data[i] = (byte)Math.Clamp(value, 0, 255);
+                data[i] = (byte)Math.Clamp((data[i] - min) / range * 255, 0, 255);
             }
         }
         
         private byte[] ApplyColorMap(byte[] data, int width, int height)
         {
             byte[] rgba = new byte[width * height * 4];
-            
             for (int i = 0; i < width * height; i++)
             {
                 Vector4 color = GetColorFromMap(data[i] / 255f);
-                rgba[i * 4] = (byte)(color.X * 255);
+                rgba[i * 4 + 0] = (byte)(color.X * 255);
                 rgba[i * 4 + 1] = (byte)(color.Y * 255);
                 rgba[i * 4 + 2] = (byte)(color.Z * 255);
                 rgba[i * 4 + 3] = 255;
             }
-            
             return rgba;
         }
         
         private Vector4 GetColorFromMap(float value)
         {
             value = Math.Clamp(value, 0, 1);
+
+            // Use a specific color map for damage to make it stand out
+            if (_currentMode == VisualizationMode.DamageField)
+            {
+                return GetHotColor(value);
+            }
             
             return _colorMapIndex switch
             {
-                0 => new Vector4(value, value, value, 1), // Grayscale
+                0 => new Vector4(value, value, value, 1),
                 1 => GetJetColor(value),
                 2 => GetViridisColor(value),
                 3 => GetHotColor(value),
@@ -549,78 +515,41 @@ private void DrawSliceView(int viewIndex)
             };
         }
         
-        private Vector4 GetJetColor(float value)
+        #region Color Map Functions
+        private Vector4 GetJetColor(float v)
         {
-            float r, g, b;
-            
-            if (value < 0.25f)
-            {
-                r = 0;
-                g = 4 * value;
-                b = 1;
-            }
-            else if (value < 0.5f)
-            {
-                r = 0;
-                g = 1;
-                b = 1 - 4 * (value - 0.25f);
-            }
-            else if (value < 0.75f)
-            {
-                r = 4 * (value - 0.5f);
-                g = 1;
-                b = 0;
-            }
-            else
-            {
-                r = 1;
-                g = 1 - 4 * (value - 0.75f);
-                b = 0;
-            }
-            
+            if (v < 0.25f) return new Vector4(0, 4 * v, 1, 1);
+            if (v < 0.5f) return new Vector4(0, 1, 1 - 4 * (v - 0.25f), 1);
+            if (v < 0.75f) return new Vector4(4 * (v - 0.5f), 1, 0, 1);
+            return new Vector4(1, 1 - 4 * (v - 0.75f), 0, 1);
+        }
+        
+        private Vector4 GetViridisColor(float v)
+        {
+            float r = 0.267f + v * (0.003f + v * (0.5f + v * 0.23f));
+            float g = 0.0049f + v * (1.1f - v * 0.5f);
+            float b = 0.329f + v * (0.45f - v * 0.82f);
             return new Vector4(r, g, b, 1);
         }
         
-        private Vector4 GetViridisColor(float value)
+        private Vector4 GetHotColor(float v)
         {
-            // Simplified Viridis approximation
-            float r = 0.267f + value * (0.003f + value * (0.5f + value * 0.23f));
-            float g = 0.0049f + value * (1.1f - value * 0.5f);
-            float b = 0.329f + value * (0.45f - value * 0.82f);
+            float r = Math.Min(1.0f, v * 2.5f);
+            float g = Math.Max(0, Math.Min(1.0f, v * 2.5f - 1.0f));
+            float b = Math.Max(0, v * 2.5f - 2.0f);
             return new Vector4(r, g, b, 1);
         }
         
-        private Vector4 GetHotColor(float value)
-        {
-            float r = Math.Min(1.0f, value * 2.5f);
-            float g = Math.Max(0, Math.Min(1.0f, value * 2.5f - 0.5f));
-            float b = Math.Max(0, value * 2.5f - 1.5f);
-            return new Vector4(r, g, b, 1);
-        }
+        private Vector4 GetCoolColor(float v) => new Vector4(v, 1 - v, 1, 1);
         
-        private Vector4 GetCoolColor(float value)
+        private Vector4 GetSeismicColor(float v)
         {
-            float r = value;
-            float g = 1 - value;
-            float b = 1;
-            return new Vector4(r, g, b, 1);
+            if (v < 0.5f) return new Vector4(v * 2, v * 2, 1, 1);
+            float t = (v - 0.5f) * 2;
+            return new Vector4(1, 1 - t, 1 - t, 1);
         }
-        
-        private Vector4 GetSeismicColor(float value)
-        {
-            // Blue to white to red
-            if (value < 0.5f)
-            {
-                float t = value * 2;
-                return new Vector4(t, t, 1, 1);
-            }
-            else
-            {
-                float t = (value - 0.5f) * 2;
-                return new Vector4(1, 1 - t, 1 - t, 1);
-            }
-        }
-        
+        #endregion
+
         private void DrawInfoPanel()
         {
             ImGui.Text("Acoustic Simulation Results");
@@ -630,90 +559,54 @@ private void DrawSliceView(int viewIndex)
             {
                 ImGui.Text($"P-Wave Velocity: {_dataset.PWaveVelocity:F2} m/s");
                 ImGui.Text($"S-Wave Velocity: {_dataset.SWaveVelocity:F2} m/s");
-                ImGui.Text($"Vp/Vs Ratio: {_dataset.VpVsRatio:F3}");
                 ImGui.Spacing();
-                
-                ImGui.Text("Material Properties:");
+                ImGui.Text("Material Properties (Simulation Input):");
                 ImGui.Indent();
                 ImGui.Text($"Young's Modulus: {_dataset.YoungsModulusMPa:F0} MPa");
                 ImGui.Text($"Poisson's Ratio: {_dataset.PoissonRatio:F3}");
-                ImGui.Text($"Confining Pressure: {_dataset.ConfiningPressureMPa:F1} MPa");
                 ImGui.Unindent();
-                ImGui.Spacing();
-                
-                ImGui.Text("Source Parameters:");
-                ImGui.Indent();
-                ImGui.Text($"Frequency: {_dataset.SourceFrequencyKHz:F0} kHz");
-                ImGui.Text($"Energy: {_dataset.SourceEnergyJ:F2} J");
-                ImGui.Unindent();
-                ImGui.Spacing();
-                
-                ImGui.Text($"Time Steps: {_dataset.TimeSteps}");
-                ImGui.Text($"Computation Time: {_dataset.ComputationTime.TotalSeconds:F1} s");
-                
-                if (_dataset.TimeSeriesSnapshots?.Count > 0)
-                {
-                    ImGui.Spacing();
-                    ImGui.Text($"Time Series Frames: {_dataset.TimeSeriesSnapshots.Count}");
-                    
-                    if (_currentMode == VisualizationMode.TimeSeries)
-                    {
-                        var currentSnapshot = _dataset.TimeSeriesSnapshots[_currentFrameIndex];
-                        ImGui.Text($"Current Time: {currentSnapshot.SimulationTime:F6} s");
-                    }
-                }
             }
             
             ImGui.Spacing();
             ImGui.Separator();
             
-            // Contrast controls
             ImGui.Text("Display Settings:");
             ImGui.SetNextItemWidth(-1);
-            ImGui.DragFloatRange2("Contrast", ref _contrastMin, ref _contrastMax, 0.01f, 0.0f, 1.0f);
+            if(ImGui.DragFloatRange2("Contrast", ref _contrastMin, ref _contrastMax, 0.01f, 0.0f, 1.0f))
+            {
+                _needsUpdateXY = _needsUpdateXZ = _needsUpdateYZ = true;
+            }
             
             ImGui.Spacing();
-            
-            // Layout selector
             ImGui.Text("Layout:");
-            if (ImGui.RadioButton("Horizontal", _layout == Layout.Horizontal)) _layout = Layout.Horizontal;
-            if (ImGui.RadioButton("Vertical", _layout == Layout.Vertical)) _layout = Layout.Vertical;
+            if (ImGui.RadioButton("Horizontal", _layout == Layout.Horizontal)) _layout = Layout.Horizontal; ImGui.SameLine();
+            if (ImGui.RadioButton("Vertical", _layout == Layout.Vertical)) _layout = Layout.Vertical; ImGui.SameLine();
             if (ImGui.RadioButton("2x2 Grid", _layout == Layout.Grid2x2)) _layout = Layout.Grid2x2;
         }
         
         private void DrawLegend()
         {
-            ImGui.SetNextWindowPos(new Vector2(ImGui.GetWindowPos().X + ImGui.GetWindowWidth() - 160, 
-                ImGui.GetWindowPos().Y + 50), ImGuiCond.FirstUseEver);
-            ImGui.SetNextWindowSize(new Vector2(150, 200), ImGuiCond.FirstUseEver);
+            ImGui.SetNextWindowPos(new Vector2(ImGui.GetWindowPos().X + ImGui.GetWindowWidth() - 160, ImGui.GetWindowPos().Y + 50), ImGuiCond.FirstUseEver);
+            ImGui.SetNextWindowSize(new Vector2(150, 180), ImGuiCond.FirstUseEver);
             
             if (ImGui.Begin("Legend", ref _showLegend, ImGuiWindowFlags.AlwaysAutoResize))
             {
-                ImGui.Text($"Color Map: {_colorMapNames[_colorMapIndex]}");
+                string colorMapName = (_currentMode == VisualizationMode.DamageField) ? "Hot" : _colorMapNames[_colorMapIndex];
+                ImGui.Text($"Color Map: {colorMapName}");
                 ImGui.Separator();
                 
-                // Draw color bar
                 var drawList = ImGui.GetWindowDrawList();
                 var pos = ImGui.GetCursorScreenPos();
-                float width = 30;
-                float height = 100;
+                float width = 30, height = 100;
                 
                 for (int i = 0; i < height; i++)
                 {
-                    float value = 1.0f - (float)i / height;
-                    Vector4 color = GetColorFromMap(value);
-                    uint col = ImGui.GetColorU32(color);
-                    drawList.AddRectFilled(
-                        new Vector2(pos.X, pos.Y + i),
-                        new Vector2(pos.X + width, pos.Y + i + 1),
-                        col);
+                    Vector4 color = GetColorFromMap(1.0f - (float)i / height);
+                    drawList.AddRectFilled(new Vector2(pos.X, pos.Y + i), new Vector2(pos.X + width, pos.Y + i + 1), ImGui.GetColorU32(color));
                 }
                 
-                // Draw labels
-                ImGui.SetCursorScreenPos(new Vector2(pos.X + width + 5, pos.Y - 5));
-                ImGui.Text("High");
-                ImGui.SetCursorScreenPos(new Vector2(pos.X + width + 5, pos.Y + height - 5));
-                ImGui.Text("Low");
+                ImGui.SetCursorScreenPos(new Vector2(pos.X + width + 5, pos.Y - 5)); ImGui.Text("High");
+                ImGui.SetCursorScreenPos(new Vector2(pos.X + width + 5, pos.Y + height - 15)); ImGui.Text("Low");
             }
             ImGui.End();
         }
@@ -721,12 +614,10 @@ private void DrawSliceView(int viewIndex)
         private void DrawGrid(ImDrawListPtr dl, Vector2 pos, Vector2 size, int divisions)
         {
             uint color = 0x40FFFFFF;
-            
             for (int i = 1; i < divisions; i++)
             {
                 float x = pos.X + (size.X / divisions) * i;
                 float y = pos.Y + (size.Y / divisions) * i;
-                
                 dl.AddLine(new Vector2(x, pos.Y), new Vector2(x, pos.Y + size.Y), color, 0.5f);
                 dl.AddLine(new Vector2(pos.X, y), new Vector2(pos.X + size.X, y), color, 0.5f);
             }
@@ -734,38 +625,23 @@ private void DrawSliceView(int viewIndex)
         
         private ChunkedVolume GetCurrentVolume()
         {
-            if (_currentMode == VisualizationMode.TimeSeries && 
-                _dataset.TimeSeriesSnapshots?.Count > 0 &&
-                _currentFrameIndex < _dataset.TimeSeriesSnapshots.Count)
+            if (_currentMode == VisualizationMode.TimeSeries && _dataset.TimeSeriesSnapshots?.Count > 0)
             {
-                // For time series, we need to create a temporary volume from the snapshot
-                // This is simplified - in production you might cache these
+                // Note: Time-series visualization is simplified and may not be performant for large datasets.
                 var snapshot = _dataset.TimeSeriesSnapshots[_currentFrameIndex];
-                var field = snapshot.GetVelocityField(0); // Get X component for now
+                var field = snapshot.GetVelocityField(0); // Show X component for now
+                if (field == null) return null;
                 
-                if (field != null)
+                var volume = new ChunkedVolume(snapshot.Width, snapshot.Height, snapshot.Depth);
+                for (int z = 0; z < snapshot.Depth; z++)
                 {
-                    var volume = new ChunkedVolume(snapshot.Width, snapshot.Height, snapshot.Depth);
-                    
-                    // Convert float field to byte volume
-                    for (int z = 0; z < snapshot.Depth; z++)
-                    {
-                        byte[] slice = new byte[snapshot.Width * snapshot.Height];
-                        int idx = 0;
-                        
-                        for (int y = 0; y < snapshot.Height; y++)
-                            for (int x = 0; x < snapshot.Width; x++)
-                            {
-                                float value = field[x, y, z];
-                                // Normalize to byte range
-                                slice[idx++] = (byte)(Math.Clamp((value + 1) * 127.5f, 0, 255));
-                            }
-                        
-                        volume.WriteSliceZ(z, slice);
-                    }
-                    
-                    return volume;
+                    byte[] slice = new byte[snapshot.Width * snapshot.Height];
+                    for (int y = 0; y < snapshot.Height; y++)
+                        for (int x = 0; x < snapshot.Width; x++)
+                            slice[y * snapshot.Width + x] = (byte)(Math.Clamp((field[x, y, z] + 1) * 127.5f, 0, 255));
+                    volume.WriteSliceZ(z, slice);
                 }
+                return volume;
             }
             
             return _currentMode switch
@@ -773,6 +649,7 @@ private void DrawSliceView(int viewIndex)
                 VisualizationMode.PWaveField => _dataset.PWaveField,
                 VisualizationMode.SWaveField => _dataset.SWaveField,
                 VisualizationMode.CombinedField => _dataset.CombinedWaveField,
+                VisualizationMode.DamageField => _dataset.DamageField,
                 _ => _dataset.CombinedWaveField
             };
         }
@@ -780,44 +657,30 @@ private void DrawSliceView(int viewIndex)
         private (int width, int height) GetImageDimensionsForView(int viewIndex, ChunkedVolume volume)
         {
             if (volume == null) return (1, 1);
-            
-            return viewIndex switch
-            {
-                0 => (volume.Width, volume.Height),
-                1 => (volume.Width, volume.Depth),
-                2 => (volume.Height, volume.Depth),
-                _ => (volume.Width, volume.Height)
-            };
+            return viewIndex switch { 0 => (volume.Width, volume.Height), 1 => (volume.Width, volume.Depth), _ => (volume.Height, volume.Depth) };
         }
         
-        private (Vector2 pos, Vector2 size) GetImageDisplayMetrics(Vector2 canvasPos, Vector2 canvasSize, 
-            float zoom, Vector2 pan, int imageWidth, int imageHeight)
+        private (Vector2 pos, Vector2 size) GetImageDisplayMetrics(Vector2 canvasPos, Vector2 canvasSize, float zoom, Vector2 pan, int imageWidth, int imageHeight)
         {
             float imageAspect = (float)imageWidth / imageHeight;
             float canvasAspect = canvasSize.X / canvasSize.Y;
             
-            Vector2 imageDisplaySize;
-            if (imageAspect > canvasAspect)
-                imageDisplaySize = new Vector2(canvasSize.X, canvasSize.X / imageAspect);
-            else
-                imageDisplaySize = new Vector2(canvasSize.Y * imageAspect, canvasSize.Y);
+            Vector2 imageDisplaySize = (imageAspect > canvasAspect) ? new Vector2(canvasSize.X, canvasSize.X / imageAspect) : new Vector2(canvasSize.Y * imageAspect, canvasSize.Y);
             
             imageDisplaySize *= zoom;
             Vector2 imageDisplayPos = canvasPos + (canvasSize - imageDisplaySize) * 0.5f + pan;
-            
             return (imageDisplayPos, imageDisplaySize);
         }
         
         private void ResetViews()
         {
-            ChunkedVolume volume = GetCurrentVolume();
+            var volume = GetCurrentVolume() ?? _dataset.CombinedWaveField;
             if (volume != null)
             {
                 _sliceX = volume.Width / 2;
                 _sliceY = volume.Height / 2;
                 _sliceZ = volume.Depth / 2;
             }
-            
             _zoomXY = _zoomXZ = _zoomYZ = 1.0f;
             _panXY = _panXZ = _panYZ = Vector2.Zero;
             _needsUpdateXY = _needsUpdateXZ = _needsUpdateYZ = true;

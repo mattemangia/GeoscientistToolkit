@@ -165,7 +165,6 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
                 SourceEnergyJ = _parameters.SourceEnergyJ,
                 SourceDatasetPath = _sourceDataset.FilePath,
                 SourceMaterialName = GetMaterialName(),
-                TensileStrengthMPa = _parameters.TensileStrengthMPa,
                 CohesionMPa = _parameters.CohesionMPa,
                 FailureAngleDeg = _parameters.FailureAngleDeg,
                 MaxDamage = 1.0f,

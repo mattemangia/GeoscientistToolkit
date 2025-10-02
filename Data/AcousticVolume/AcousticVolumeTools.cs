@@ -1,11 +1,12 @@
 // GeoscientistToolkit/UI/AcousticVolume/AcousticVolumeTools.cs
 using GeoscientistToolkit.Data;
-using GeoscientistToolkit.Data.AcousticVolume;
+using GeoscientistToolkit.UI.AcousticVolume;
 using GeoscientistToolkit.UI.Interfaces;
 using GeoscientistToolkit.UI.Utils;
 using GeoscientistToolkit.Util;
 using ImGuiNET;
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Numerics;
@@ -13,564 +14,350 @@ using System.Numerics;
 namespace GeoscientistToolkit.Data.AcousticVolume
 {
     /// <summary>
-    /// Tools for acoustic volume datasets
+    /// Categorized tool panel for Acoustic Volume datasets.
+    /// Uses a compact dropdown + tabs navigation to maximize usable space,
+    /// managing all related sub-tools.
     /// </summary>
     public class AcousticVolumeTools : IDatasetTools
     {
-        private readonly ImGuiExportFileDialog _exportDialog;
-        private readonly ImGuiExportFileDialog _animationExportDialog;
-        private readonly ImGuiExportFileDialog _snapshotExportDialog;
-        
-        // Export options
-        private bool _showExportOptions = false;
-        private int _exportFormat = 0; // 0=Binary, 1=VTK, 2=CSV
-        private bool _exportPWave = true;
-        private bool _exportSWave = true;
-        private bool _exportCombined = true;
-        private bool _exportTimeSeries = false;
-        
-        // Animation export options
-        private int _animationFormat = 0; // 0=Image sequence, 1=GIF, 2=MP4
-        private int _animationFPS = 30;
-        private int _animationQuality = 80;
-        private bool _includeColorBar = true;
-        
-        // Analysis options
-        private bool _showAnalysisOptions = false;
-        private int _analysisType = 0; // 0=FFT, 1=Histogram, 2=Statistics
-        private bool _analyzeFullVolume = false;
-        private int _sliceIndex = 0;
-        
-        // Comparison options
-        private bool _showComparisonOptions = false;
-        private string _comparisonDatasetName = "";
-        
+        // Tool categories
+        private enum ToolCategory
+        {
+            Animation,
+            Analysis,
+            Export
+        }
+
+        private class ToolEntry
+        {
+            public string Name { get; set; }
+            public string Description { get; set; }
+            public IDatasetTools Tool { get; set; }
+            public ToolCategory Category { get; set; }
+        }
+
+        private ToolCategory _selectedCategory = ToolCategory.Analysis; // Default to analysis
+        private int _selectedToolIndex = 0;
+
+        // All tools organized by category
+        private readonly Dictionary<ToolCategory, List<ToolEntry>> _toolsByCategory;
+        private readonly Dictionary<ToolCategory, string> _categoryNames;
+        private readonly Dictionary<ToolCategory, string> _categoryDescriptions;
+
         public AcousticVolumeTools()
         {
-            _exportDialog = new ImGuiExportFileDialog("AcousticExport", "Export Acoustic Data");
-            _exportDialog.SetExtensions(
-                (".bin", "Binary Format"),
-                (".vtk", "VTK Format"),
-                (".csv", "CSV Format")
-            );
-            
-            _animationExportDialog = new ImGuiExportFileDialog("AnimationExport", "Export Animation");
-            _animationExportDialog.SetExtensions(
-                (".png", "PNG Sequence"),
-                (".gif", "Animated GIF"),
-                (".mp4", "MP4 Video")
-            );
-            
-            _snapshotExportDialog = new ImGuiExportFileDialog("SnapshotExport", "Export Snapshot");
-            _snapshotExportDialog.SetExtensions(
-                (".png", "PNG Image"),
-                (".jpg", "JPEG Image"),
-                (".bmp", "Bitmap Image")
-            );
+            // Category metadata
+            _categoryNames = new Dictionary<ToolCategory, string>
+            {
+                { ToolCategory.Animation, "Animation" },
+                { ToolCategory.Analysis, "Analysis" },
+                { ToolCategory.Export, "Export" }
+            };
+
+            _categoryDescriptions = new Dictionary<ToolCategory, string>
+            {
+                { ToolCategory.Animation, "Control and export time-series animations" },
+                { ToolCategory.Analysis, "Quantitative analysis and visualization of wave field data" },
+                { ToolCategory.Export, "Export raw wave fields, calculated properties, and metadata" }
+            };
+
+            // Initialize tools and add them to their respective categories
+            _toolsByCategory = new Dictionary<ToolCategory, List<ToolEntry>>
+            {
+                {
+                    ToolCategory.Animation,
+                    new List<ToolEntry>
+                    {
+                        new ToolEntry
+                        {
+                            Name = "Animation Controls",
+                            Description = "Playback and export settings for time-series data",
+                            Tool = new AcousticAnimationTool(),
+                            Category = ToolCategory.Animation
+                        }
+                    }
+                },
+                {
+                    ToolCategory.Analysis,
+                    new List<ToolEntry>
+                    {
+                        new ToolEntry
+                        {
+                            Name = "Data Analysis",
+                            Description = "Calculate statistics, histograms, and frequency spectrums",
+                            Tool = new AcousticAnalysisTool(),
+                            Category = ToolCategory.Analysis
+                        },
+                         new ToolEntry
+                        {
+                            Name = "Waveform Viewer",
+                            Description = "Extract and view 1D waveforms between two points in time",
+                            Tool = new WaveformViewerAdapter(),
+                            Category = ToolCategory.Analysis
+                        }
+                    }
+                },
+                {
+                    ToolCategory.Export,
+                    new List<ToolEntry>
+                    {
+                        new ToolEntry
+                        {
+                            Name = "Wave Field Export",
+                            Description = "Export raw wave field volumes and metadata",
+                            Tool = new AcousticExportTool(),
+                            Category = ToolCategory.Export
+                        },
+                        new ToolEntry
+                        {
+                            Name = "Properties Export",
+                            Description = "Export calculated physical properties and damage data",
+                            Tool = new AcousticExportResultsTool(),
+                            Category = ToolCategory.Export
+                        }
+                    }
+                }
+            };
         }
-        
+
         public void Draw(Dataset dataset)
         {
-            if (dataset is not AcousticVolumeDataset acousticDataset)
+            if (dataset is not AcousticVolumeDataset)
+            {
+                ImGui.TextDisabled("These tools are available for Acoustic Volume datasets.");
                 return;
-            
-            // Animation controls
-            if (ImGui.CollapsingHeader("Animation", ImGuiTreeNodeFlags.DefaultOpen))
-            {
-                DrawAnimationControls(acousticDataset);
             }
-            
-            // Export options
-            if (ImGui.CollapsingHeader("Export"))
-            {
-                DrawExportOptions(acousticDataset);
-            }
-            
-            // Analysis tools
-            if (ImGui.CollapsingHeader("Analysis"))
-            {
-                DrawAnalysisTools(acousticDataset);
-            }
-            
-            // Comparison tools
-            if (ImGui.CollapsingHeader("Comparison"))
-            {
-                DrawComparisonTools(acousticDataset);
-            }
-            
-            // Processing tools
-            if (ImGui.CollapsingHeader("Processing"))
-            {
-                DrawProcessingTools(acousticDataset);
-            }
-            
-            // Handle export dialogs
-            HandleExportDialogs(acousticDataset);
+
+            DrawCompactUI(dataset);
         }
-        
-        private void DrawAnimationControls(AcousticVolumeDataset dataset)
+
+        private void DrawCompactUI(Dataset dataset)
         {
-            if (dataset.TimeSeriesSnapshots == null || dataset.TimeSeriesSnapshots.Count == 0)
-            {
-                ImGui.TextDisabled("No time series data available");
-                return;
-            }
-            
-            ImGui.Text($"Time Series: {dataset.TimeSeriesSnapshots.Count} frames");
-            
-            var firstSnapshot = dataset.TimeSeriesSnapshots.First();
-            var lastSnapshot = dataset.TimeSeriesSnapshots.Last();
-            float duration = lastSnapshot.SimulationTime - firstSnapshot.SimulationTime;
-            
-            ImGui.Text($"Duration: {duration * 1000:F3} ms");
-            ImGui.Text($"Time Range: {firstSnapshot.SimulationTime:F6} - {lastSnapshot.SimulationTime:F6} s");
-            
-            ImGui.Spacing();
-            
-            if (ImGui.Button("Export Animation..."))
-            {
-                _animationExportDialog.Open($"{dataset.Name}_animation");
-            }
-            
+            // Compact category selector as dropdown
+            ImGui.PushStyleVar(ImGuiStyleVar.FramePadding, new Vector2(8, 4));
+            ImGui.Text("Category:");
             ImGui.SameLine();
-            
-            if (ImGui.Button("Export Current Frame..."))
+
+            string currentCategoryName = _categoryNames[_selectedCategory];
+            var categoryTools = _toolsByCategory[_selectedCategory];
+            string preview = $"{currentCategoryName} ({categoryTools.Count})";
+
+            ImGui.SetNextItemWidth(ImGui.GetContentRegionAvail().X);
+            if (ImGui.BeginCombo("##CategorySelector", preview))
             {
-                _snapshotExportDialog.Open($"{dataset.Name}_frame");
-            }
-            
-            ImGui.Spacing();
-            ImGui.Separator();
-            ImGui.Text("Animation Export Settings:");
-            
-            ImGui.SetNextItemWidth(150);
-            string[] formats = { "Image Sequence", "Animated GIF", "MP4 Video" };
-            ImGui.Combo("Format", ref _animationFormat, formats, formats.Length);
-            
-            ImGui.SetNextItemWidth(100);
-            ImGui.InputInt("FPS", ref _animationFPS);
-            _animationFPS = Math.Clamp(_animationFPS, 1, 120);
-            
-            ImGui.SetNextItemWidth(100);
-            ImGui.SliderInt("Quality", ref _animationQuality, 1, 100);
-            
-            ImGui.Checkbox("Include Color Bar", ref _includeColorBar);
-        }
-        
-        private void DrawExportOptions(AcousticVolumeDataset dataset)
-        {
-            if (ImGui.Button("Export Wave Fields..."))
-            {
-                _showExportOptions = !_showExportOptions;
-            }
-            
-            if (_showExportOptions)
-            {
-                ImGui.Indent();
-                
-                ImGui.Text("Export Format:");
-                ImGui.RadioButton("Binary", ref _exportFormat, 0);
-                ImGui.SameLine();
-                ImGui.RadioButton("VTK", ref _exportFormat, 1);
-                ImGui.SameLine();
-                ImGui.RadioButton("CSV", ref _exportFormat, 2);
-                
-                ImGui.Spacing();
-                ImGui.Text("Fields to Export:");
-                
-                if (dataset.PWaveField != null)
-                    ImGui.Checkbox("P-Wave Field", ref _exportPWave);
-                
-                if (dataset.SWaveField != null)
-                    ImGui.Checkbox("S-Wave Field", ref _exportSWave);
-                
-                if (dataset.CombinedWaveField != null)
-                    ImGui.Checkbox("Combined Field", ref _exportCombined);
-                
-                if (dataset.TimeSeriesSnapshots?.Count > 0)
-                    ImGui.Checkbox("Time Series", ref _exportTimeSeries);
-                
-                ImGui.Spacing();
-                
-                if (ImGui.Button("Export"))
+                foreach (var category in Enum.GetValues<ToolCategory>())
                 {
-                    string extension = _exportFormat switch
+                    var tools = _toolsByCategory[category];
+                    bool isSelected = _selectedCategory == category;
+                    string label = $"{_categoryNames[category]} ({tools.Count} tools)";
+
+                    if (ImGui.Selectable(label, isSelected))
                     {
-                        0 => ".bin",
-                        1 => ".vtk",
-                        2 => ".csv",
-                        _ => ".bin"
-                    };
-                    _exportDialog.Open($"{dataset.Name}_export");
+                        _selectedCategory = category;
+                        _selectedToolIndex = 0;
+                    }
+
+                    if (ImGui.IsItemHovered())
+                    {
+                        ImGui.SetTooltip(_categoryDescriptions[category]);
+                    }
                 }
-                
-                ImGui.SameLine();
-                
-                if (ImGui.Button("Cancel"))
-                {
-                    _showExportOptions = false;
-                }
-                
-                ImGui.Unindent();
+                ImGui.EndCombo();
             }
-            
-            ImGui.Spacing();
-            
-            if (ImGui.Button("Save Current State"))
-            {
-                SaveCurrentState(dataset);
-            }
-            
-            ImGui.SameLine();
-            
-            if (ImGui.Button("Export Metadata as JSON"))
-            {
-                ExportMetadataAsJson(dataset);
-            }
-        }
-        
-        private void DrawAnalysisTools(AcousticVolumeDataset dataset)
-        {
-            ImGui.Text("Analysis Type:");
-            ImGui.RadioButton("Frequency Spectrum", ref _analysisType, 0);
-            ImGui.RadioButton("Histogram", ref _analysisType, 1);
-            ImGui.RadioButton("Statistics", ref _analysisType, 2);
-            
-            ImGui.Spacing();
-            
-            ImGui.Checkbox("Analyze Full Volume", ref _analyzeFullVolume);
-            
-            if (!_analyzeFullVolume)
-            {
-                ImGui.SetNextItemWidth(150);
-                
-                int maxSlice = 0;
-                if (dataset.CombinedWaveField != null)
-                    maxSlice = dataset.CombinedWaveField.Depth - 1;
-                
-                ImGui.SliderInt("Slice Index", ref _sliceIndex, 0, maxSlice);
-            }
-            
-            ImGui.Spacing();
-            
-            if (ImGui.Button("Run Analysis"))
-            {
-                RunAnalysis(dataset);
-            }
-            
-            ImGui.Spacing();
+            ImGui.PopStyleVar();
+
+            ImGui.TextColored(new Vector4(0.7f, 0.7f, 0.7f, 1), _categoryDescriptions[_selectedCategory]);
             ImGui.Separator();
-            
-            // Quick statistics
-            if (dataset.CombinedWaveField != null)
-            {
-                ImGui.Text("Quick Statistics:");
-                ImGui.Indent();
-                
-                // These would be calculated from the actual data
-                ImGui.Text($"Volume: {dataset.CombinedWaveField.Width} × {dataset.CombinedWaveField.Height} × {dataset.CombinedWaveField.Depth}");
-                
-                long totalVoxels = (long)dataset.CombinedWaveField.Width * 
-                                  dataset.CombinedWaveField.Height * 
-                                  dataset.CombinedWaveField.Depth;
-                ImGui.Text($"Total Voxels: {totalVoxels:N0}");
-                
-                // Nyquist frequency
-                if (dataset.SourceFrequencyKHz > 0)
-                {
-                    double nyquist = dataset.SourceFrequencyKHz * 500; // Half of sampling rate
-                    ImGui.Text($"Nyquist Frequency: {nyquist:F0} Hz");
-                }
-                
-                ImGui.Unindent();
-            }
-        }
-        
-        private void DrawComparisonTools(AcousticVolumeDataset dataset)
-        {
-            ImGui.Text("Compare with another acoustic dataset:");
-            
-            ImGui.SetNextItemWidth(200);
-            ImGui.InputText("Dataset Name", ref _comparisonDatasetName, 256);
-            
-            ImGui.SameLine();
-            if (ImGui.Button("Browse..."))
-            {
-                // Open dataset browser
-                Logger.Log("Dataset browser not yet implemented");
-            }
-            
             ImGui.Spacing();
-            
-            if (!string.IsNullOrEmpty(_comparisonDatasetName))
+
+            // Render tools in the selected category as tabs
+            if (categoryTools.Count > 0)
             {
-                if (ImGui.Button("Compare Velocities"))
+                if (ImGui.BeginTabBar($"Tools_{_selectedCategory}", ImGuiTabBarFlags.None))
                 {
-                    Logger.Log($"Comparing velocities with {_comparisonDatasetName}");
-                }
-                
-                ImGui.SameLine();
-                
-                if (ImGui.Button("Compare Spectra"))
-                {
-                    Logger.Log($"Comparing spectra with {_comparisonDatasetName}");
-                }
-                
-                ImGui.SameLine();
-                
-                if (ImGui.Button("Difference Map"))
-                {
-                    Logger.Log($"Creating difference map with {_comparisonDatasetName}");
+                    for (int i = 0; i < categoryTools.Count; i++)
+                    {
+                        var entry = categoryTools[i];
+                        if (ImGui.BeginTabItem(entry.Name))
+                        {
+                            _selectedToolIndex = i;
+                            ImGui.TextColored(new Vector4(0.6f, 0.6f, 0.6f, 1), entry.Description);
+                            ImGui.Separator();
+                            ImGui.Spacing();
+
+                            ImGui.BeginChild($"ToolContent_{entry.Name}", new Vector2(0, 0), ImGuiChildFlags.None,
+                                ImGuiWindowFlags.HorizontalScrollbar);
+                            {
+                                entry.Tool.Draw(dataset);
+                            }
+                            ImGui.EndChild();
+
+                            ImGui.EndTabItem();
+                        }
+                    }
+                    ImGui.EndTabBar();
                 }
             }
             else
             {
-                ImGui.TextDisabled("Select a dataset to compare");
+                ImGui.TextDisabled("No tools available in this category.");
             }
         }
         
-        private void DrawProcessingTools(AcousticVolumeDataset dataset)
+        /// <summary>
+        /// Adapter to use the WaveformViewer, which creates its own window,
+        /// within the composite tool structure.
+        /// </summary>
+        private sealed class WaveformViewerAdapter : IDatasetTools
         {
-            ImGui.Text("Processing Operations:");
-            
-            if (ImGui.Button("Apply Gaussian Filter"))
+            private WaveformViewer _viewer;
+            private AcousticVolumeDataset _lastDataset;
+            private bool _isWindowOpen = false;
+
+            public void Draw(Dataset dataset)
             {
-                Logger.Log("Applying Gaussian filter to acoustic data");
-                // Implementation would go here
-            }
-            
-            if (ImGui.Button("Apply Median Filter"))
-            {
-                Logger.Log("Applying median filter to acoustic data");
-                // Implementation would go here
-            }
-            
-            if (ImGui.Button("Normalize Amplitudes"))
-            {
-                Logger.Log("Normalizing wave field amplitudes");
-                // Implementation would go here
-            }
-            
-            ImGui.Spacing();
-            ImGui.Separator();
-            ImGui.Text("Advanced Processing:");
-            
-            if (ImGui.Button("Extract Envelope"))
-            {
-                Logger.Log("Extracting signal envelope");
-                // Implementation would go here
-            }
-            
-            if (ImGui.Button("Calculate Phase"))
-            {
-                Logger.Log("Calculating phase information");
-                // Implementation would go here
-            }
-            
-            if (ImGui.Button("Time-Frequency Analysis"))
-            {
-                Logger.Log("Performing time-frequency analysis");
-                // Implementation would go here
-            }
-            
-            ImGui.Spacing();
-            
-            if (dataset.TimeSeriesSnapshots?.Count > 0)
-            {
-                ImGui.Separator();
-                ImGui.Text("Time Series Processing:");
-                
-                if (ImGui.Button("Temporal Smoothing"))
+                if (dataset is not AcousticVolumeDataset avd) 
                 {
-                    Logger.Log("Applying temporal smoothing");
+                    ImGui.TextDisabled("Requires an Acoustic Volume Dataset.");
+                    return;
+                }
+
+                // Re-create viewer if dataset changes to ensure it has the correct data reference
+                if (!ReferenceEquals(_lastDataset, avd))
+                {
+                    _viewer?.Dispose();
+                    _viewer = new WaveformViewer(avd);
+                    _lastDataset = avd;
+                    _isWindowOpen = false; // Close window for old dataset
                 }
                 
-                if (ImGui.Button("Extract Key Frames"))
+                if (ImGui.Checkbox("Show Waveform Viewer Window", ref _isWindowOpen))
                 {
-                    Logger.Log("Extracting key frames from time series");
-                }
-                
-                if (ImGui.Button("Compute Velocity Field"))
-                {
-                    Logger.Log("Computing velocity field from time series");
-                }
-            }
-        }
-        
-        private void HandleExportDialogs(AcousticVolumeDataset dataset)
-        {
-            if (_exportDialog.Submit())
-            {
-                ExportWaveFields(dataset, _exportDialog.SelectedPath);
-            }
-            
-            if (_animationExportDialog.Submit())
-            {
-                ExportAnimation(dataset, _animationExportDialog.SelectedPath);
-            }
-            
-            if (_snapshotExportDialog.Submit())
-            {
-                ExportSnapshot(dataset, _snapshotExportDialog.SelectedPath);
-            }
-        }
-        
-        private void SaveCurrentState(AcousticVolumeDataset dataset)
-        {
-            try
-            {
-                dataset.SaveWaveFields();
-                Logger.Log($"Saved acoustic volume state for {dataset.Name}");
-            }
-            catch (Exception ex)
-            {
-                Logger.LogError($"Failed to save state: {ex.Message}");
-            }
-        }
-        
-        private void ExportMetadataAsJson(AcousticVolumeDataset dataset)
-        {
-            try
-            {
-                var metadata = new
-                {
-                    Name = dataset.Name,
-                    PWaveVelocity = dataset.PWaveVelocity,
-                    SWaveVelocity = dataset.SWaveVelocity,
-                    VpVsRatio = dataset.VpVsRatio,
-                    TimeSteps = dataset.TimeSteps,
-                    ComputationTime = dataset.ComputationTime.TotalSeconds,
-                    MaterialProperties = new
+                    if (_viewer == null)
                     {
-                        YoungsModulus = dataset.YoungsModulusMPa,
-                        PoissonRatio = dataset.PoissonRatio,
-                        ConfiningPressure = dataset.ConfiningPressureMPa
-                    },
-                    Source = new
-                    {
-                        Frequency = dataset.SourceFrequencyKHz,
-                        Energy = dataset.SourceEnergyJ,
-                        Dataset = dataset.SourceDatasetPath,
-                        Material = dataset.SourceMaterialName
-                    },
-                    VolumeInfo = new
-                    {
-                        HasPWave = dataset.PWaveField != null,
-                        HasSWave = dataset.SWaveField != null,
-                        HasCombined = dataset.CombinedWaveField != null,
-                        TimeSeriesFrames = dataset.TimeSeriesSnapshots?.Count ?? 0
+                         _viewer = new WaveformViewer(avd);
+                         _lastDataset = avd;
                     }
-                };
-                
-                string json = System.Text.Json.JsonSerializer.Serialize(metadata, 
-                    new System.Text.Json.JsonSerializerOptions { WriteIndented = true });
-                
-                string path = Path.Combine(
-                    Path.GetDirectoryName(dataset.FilePath) ?? "",
-                    $"{dataset.Name}_metadata.json"
-                );
-                
-                File.WriteAllText(path, json);
-                Logger.Log($"Exported metadata to {path}");
-            }
-            catch (Exception ex)
-            {
-                Logger.LogError($"Failed to export metadata: {ex.Message}");
-            }
-        }
-        
-        private void ExportWaveFields(AcousticVolumeDataset dataset, string basePath)
-        {
-            try
-            {
-                string dir = Path.GetDirectoryName(basePath) ?? "";
-                string name = Path.GetFileNameWithoutExtension(basePath);
-                string ext = Path.GetExtension(basePath);
-                
-                if (_exportPWave && dataset.PWaveField != null)
-                {
-                    string path = Path.Combine(dir, $"{name}_pwave{ext}");
-                    ExportVolume(dataset.PWaveField, path, _exportFormat);
                 }
                 
-                if (_exportSWave && dataset.SWaveField != null)
-                {
-                    string path = Path.Combine(dir, $"{name}_swave{ext}");
-                    ExportVolume(dataset.SWaveField, path, _exportFormat);
-                }
+                ImGui.TextWrapped("This tool opens in a separate window, allowing you to view waveforms while interacting with other tools.");
                 
-                if (_exportCombined && dataset.CombinedWaveField != null)
+                // If the window is open, call its Draw method.
+                // The WaveformViewer's Draw method contains its own ImGui.Begin/End calls.
+                if (_isWindowOpen)
                 {
-                    string path = Path.Combine(dir, $"{name}_combined{ext}");
-                    ExportVolume(dataset.CombinedWaveField, path, _exportFormat);
+                    _viewer.Draw();
                 }
-                
-                if (_exportTimeSeries && dataset.TimeSeriesSnapshots?.Count > 0)
-                {
-                    string tsDir = Path.Combine(dir, $"{name}_timeseries");
-                    Directory.CreateDirectory(tsDir);
-                    ExportTimeSeries(dataset, tsDir);
-                }
-                
-                Logger.Log($"Exported wave fields to {dir}");
             }
-            catch (Exception ex)
-            {
-                Logger.LogError($"Failed to export wave fields: {ex.Message}");
-            }
-        }
-        
-        private void ExportVolume(Data.VolumeData.ChunkedVolume volume, string path, int format)
-        {
-            switch (format)
-            {
-                case 0: // Binary
-                    volume.SaveAsBin(path);
-                    break;
-                case 1: // VTK
-                    Logger.Log("VTK export not yet implemented");
-                    break;
-                case 2: // CSV
-                    Logger.Log("CSV export not yet implemented");
-                    break;
-            }
-        }
-        
-        private void ExportTimeSeries(AcousticVolumeDataset dataset, string directory)
-        {
-            for (int i = 0; i < dataset.TimeSeriesSnapshots.Count; i++)
-            {
-                string path = Path.Combine(directory, $"frame_{i:D6}.bin");
-                dataset.TimeSeriesSnapshots[i].SaveToFile(path);
-            }
-        }
-        
-        private void ExportAnimation(AcousticVolumeDataset dataset, string path)
-        {
-            Logger.Log($"Exporting animation to {path}");
-            // Implementation would generate image sequence or video
-        }
-        
-        private void ExportSnapshot(AcousticVolumeDataset dataset, string path)
-        {
-            Logger.Log($"Exporting snapshot to {path}");
-            // Implementation would export current view as image
-        }
-        
-        private void RunAnalysis(AcousticVolumeDataset dataset)
-        {
-            string analysisName = _analysisType switch
-            {
-                0 => "Frequency Spectrum",
-                1 => "Histogram",
-                2 => "Statistics",
-                _ => "Unknown"
-            };
-            
-            string scope = _analyzeFullVolume ? "full volume" : $"slice {_sliceIndex}";
-            Logger.Log($"Running {analysisName} analysis on {scope}");
-            
-            // Implementation would perform the actual analysis
         }
     }
+    
+    #region Refactored Child Tool Classes
+    
+    /// <summary>
+    /// Handles Animation controls, extracted from the old monolithic AcousticVolumeTools.
+    /// </summary>
+    internal class AcousticAnimationTool : IDatasetTools
+    {
+        private readonly ImGuiExportFileDialog _animationExportDialog;
+        private readonly ImGuiExportFileDialog _snapshotExportDialog;
+        private int _animationFormat = 0; // 0=PNG, 1=GIF, 2=MP4
+        private int _animationFPS = 30;
+        private int _animationQuality = 80;
+        private bool _includeColorBar = true;
+
+        public AcousticAnimationTool()
+        {
+            _animationExportDialog = new ImGuiExportFileDialog("AnimationExport", "Export Animation");
+            _animationExportDialog.SetExtensions((".png", "PNG Sequence"),(".gif", "Animated GIF"),(".mp4", "MP4 Video"));
+            _snapshotExportDialog = new ImGuiExportFileDialog("SnapshotExport", "Export Snapshot");
+            _snapshotExportDialog.SetExtensions((".png", "PNG Image"),(".jpg", "JPEG Image"),(".bmp", "Bitmap Image"));
+        }
+        
+        public void Draw(Dataset dataset)
+        {
+            if (dataset is not AcousticVolumeDataset ad) return;
+
+            if (ad.TimeSeriesSnapshots == null || ad.TimeSeriesSnapshots.Count == 0)
+            {
+                ImGui.TextDisabled("No time series data available for animation.");
+                return;
+            }
+
+            ImGui.Text($"Time Series: {ad.TimeSeriesSnapshots.Count} frames");
+            float duration = ad.TimeSeriesSnapshots.Last().SimulationTime - ad.TimeSeriesSnapshots.First().SimulationTime;
+            ImGui.Text($"Duration: {duration * 1000:F3} ms");
+
+            if (ImGui.Button("Export Animation...")) _animationExportDialog.Open($"{ad.Name}_animation");
+            ImGui.SameLine();
+            if (ImGui.Button("Export Current Frame...")) _snapshotExportDialog.Open($"{ad.Name}_frame");
+
+            ImGui.Separator();
+            ImGui.Text("Animation Export Settings:");
+            ImGui.Combo("Format", ref _animationFormat, "Image Sequence\0Animated GIF\0MP4 Video\0");
+            ImGui.InputInt("FPS", ref _animationFPS);
+            _animationFPS = Math.Clamp(_animationFPS, 1, 120);
+            ImGui.SliderInt("Quality", ref _animationQuality, 1, 100);
+            ImGui.Checkbox("Include Color Bar", ref _includeColorBar);
+
+            // Handle dialog submissions
+            if (_animationExportDialog.Submit()) Logger.Log($"[AnimationTool] Exporting animation to {_animationExportDialog.SelectedPath}. (Implementation pending)");
+            if (_snapshotExportDialog.Submit()) Logger.Log($"[AnimationTool] Exporting frame to {_snapshotExportDialog.SelectedPath}. (Implementation pending)");
+        }
+    }
+
+    /// <summary>
+    /// Handles raw data export, extracted from the old monolithic AcousticVolumeTools.
+    /// </summary>
+    internal class AcousticExportTool : IDatasetTools
+    {
+        private readonly ImGuiExportFileDialog _exportDialog;
+        private int _exportFormat = 0;
+        private bool _exportPWave = true;
+        private bool _exportSWave = true;
+        private bool _exportCombined = true;
+        private bool _exportDamage = true;
+
+        public AcousticExportTool()
+        {
+            _exportDialog = new ImGuiExportFileDialog("AcousticWaveFieldExport", "Export Wave Field Data");
+            _exportDialog.SetExtensions((".bin", "Binary Format"), (".vtk", "VTK Format (Not Implemented)"), (".csv", "CSV Format (Not Implemented)"));
+        }
+
+        public void Draw(Dataset dataset)
+        {
+            if (dataset is not AcousticVolumeDataset ad) return;
+
+            ImGui.Text("Export Format:");
+            ImGui.RadioButton("Binary", ref _exportFormat, 0); ImGui.SameLine();
+            ImGui.BeginDisabled();
+            ImGui.RadioButton("VTK", ref _exportFormat, 1); ImGui.SameLine();
+            ImGui.RadioButton("CSV", ref _exportFormat, 2);
+            ImGui.EndDisabled();
+
+            ImGui.Spacing();
+            ImGui.Text("Fields to Export:");
+            if (ad.PWaveField != null) ImGui.Checkbox("P-Wave Field", ref _exportPWave);
+            if (ad.SWaveField != null) ImGui.Checkbox("S-Wave Field", ref _exportSWave);
+            if (ad.CombinedWaveField != null) ImGui.Checkbox("Combined Field", ref _exportCombined);
+            if (ad.DamageField != null) ImGui.Checkbox("Damage Field", ref _exportDamage);
+            
+            ImGui.Spacing();
+            if (ImGui.Button("Export Wave Fields...", new Vector2(-1, 0))) _exportDialog.Open($"{ad.Name}_export");
+            
+            ImGui.Separator();
+            
+            if (ImGui.Button("Export Metadata as JSON", new Vector2(-1, 0)))
+            {
+                Logger.Log("[ExportTool] Exporting metadata as JSON. (Implementation pending)");
+            }
+
+            if (_exportDialog.Submit())
+            {
+                Logger.Log($"[ExportTool] Exporting selected wave fields to base path: {_exportDialog.SelectedPath}. (Implementation pending)");
+            }
+        }
+    }
+    
+    #endregion
 }

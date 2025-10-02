@@ -1,6 +1,7 @@
 ﻿// GeoscientistToolkit/Data/DatasetDTO.cs
+using System; // Added for DateTime
 using System.Collections.Generic;
-using System.Numerics; // Added for Vector4
+using System.Numerics;
 
 namespace GeoscientistToolkit.Data
 {
@@ -11,8 +12,8 @@ namespace GeoscientistToolkit.Data
         public string Name { get; set; }
         public string FilePath { get; set; }
         public DatasetMetadataDTO Metadata { get; set; } = new DatasetMetadataDTO();
-        
     }
+
     public class ProjectMetadataDTO
     {
         public string Organisation { get; set; }
@@ -27,6 +28,7 @@ namespace GeoscientistToolkit.Data
         public string License { get; set; }
         public Dictionary<string, string> CustomFields { get; set; } = new Dictionary<string, string>();
     }
+    
     public class DatasetMetadataDTO
     {
         public string SampleName { get; set; }
@@ -43,6 +45,7 @@ namespace GeoscientistToolkit.Data
         public string Notes { get; set; }
         public Dictionary<string, string> CustomFields { get; set; } = new Dictionary<string, string>();
     }
+    
     public class TableDatasetDTO : DatasetDTO
     {
         public string SourceFormat { get; set; }
@@ -54,7 +57,7 @@ namespace GeoscientistToolkit.Data
         public List<string> ColumnNames { get; set; }
         public List<string> ColumnTypes { get; set; }
     }
-    // --- NEW --- DTO for Material
+    
     public class MaterialDTO
     {
         public byte ID { get; set; }
@@ -65,16 +68,11 @@ namespace GeoscientistToolkit.Data
         public bool IsExterior { get; set; }
         public double Density { get; set; }
         public bool IsVisible { get; set; }
-        
         public string PhysicalMaterialName { get; set; }
     }
 
-    // DTO for ImageDataset
     public class ImageDatasetDTO:DatasetDTO
     {
-        public string TypeName { get; set; }
-        public string Name { get; set; }
-        public string FilePath { get; set; }
         public float PixelSize { get; set; }
         public string Unit { get; set; }
         public long Tags { get; set; } 
@@ -82,23 +80,21 @@ namespace GeoscientistToolkit.Data
         public string SegmentationPath { get; set; }
     }
 
-    // --- MODIFIED --- DTO for CtImageStackDataset
     public class CtImageStackDatasetDTO : DatasetDTO
     {
         public float PixelSize { get; set; }
         public float SliceThickness { get; set; }
         public string Unit { get; set; }
         public int BinningSize { get; set; }
-
-        // List of materials associated with this dataset
         public List<MaterialDTO> Materials { get; set; } = new List<MaterialDTO>();
     }
 
-    // DTO for DatasetGroup
     public class DatasetGroupDTO : DatasetDTO
     {
         public List<DatasetDTO> Datasets { get; set; } = new List<DatasetDTO>();
     }
+    
+    // --- MODIFIED ---
     public class AcousticVolumeDatasetDTO : DatasetDTO
     {
         public double PWaveVelocity { get; set; }
@@ -114,24 +110,22 @@ namespace GeoscientistToolkit.Data
         public string SourceDatasetPath { get; set; }
         public string SourceMaterialName { get; set; }
         public bool HasTimeSeries { get; set; }
-        public int TimeSeriesCount { get; set; }
+        public bool HasDamageField { get; set; } // ADDED
+        public bool HasCalibration { get; set; } // ADDED
     }
-    // Main project file structure
+    
     public class ProjectFileDTO
     {
         public string ProjectName { get; set; }
         public List<DatasetDTO> Datasets { get; set; } = new List<DatasetDTO>();
         public ProjectMetadataDTO ProjectMetadata { get; set; } = new ProjectMetadataDTO();
     }
+
     public class StreamingCtVolumeDatasetDTO : DatasetDTO
     {
-        /// <summary>
-        /// The file path to the corresponding CtImageStackDataset's folder, used to link the editable partner.
-        /// </summary>
         public string PartnerFilePath { get; set; }
     }
 
-    // --- NEW DTOs for PNM ---
     public class PoreDTO
     {
         public int ID { get; set; }

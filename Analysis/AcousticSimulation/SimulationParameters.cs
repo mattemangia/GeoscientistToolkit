@@ -16,7 +16,6 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
         public int Axis { get; set; }
         public bool UseFullFaceTransducers { get; set; }
         public float ConfiningPressureMPa { get; set; }
-        public float TensileStrengthMPa { get; set; }
         public float FailureAngleDeg { get; set; }
         public float CohesionMPa { get; set; }
         public float SourceEnergyJ { get; set; }
@@ -29,6 +28,7 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
         public bool UsePlasticModel { get; set; }
         public bool UseBrittleModel { get; set; }
         public bool UseGPU { get; set; }
+        public bool UseRickerWavelet { get; set; }
         public Vector3 TxPosition { get; set; }
         public Vector3 RxPosition { get; set; }
         public bool EnableRealTimeVisualization { get; set; }
