@@ -11,6 +11,7 @@ using GeoscientistToolkit.Data.Table;
 using GeoscientistToolkit.Data.GIS;
 using GeoscientistToolkit.Data.AcousticVolume;
 using GeoscientistToolkit.Data.Pnm; // Added for PNM
+using GeoscientistToolkit.UI.AcousticVolume;
 
 namespace GeoscientistToolkit.UI
 {
@@ -20,6 +21,7 @@ namespace GeoscientistToolkit.UI
         private Action<Dataset> _onDatasetSelected;
         private Action _onImportClicked;
         private readonly MetadataEditor _metadataEditor = new();
+        private readonly AcousticToCtConverterDialog _acousticToCtConverterDialog = new();
         // Multi-selection state
         private HashSet<Dataset> _selectedDatasets = new HashSet<Dataset>();
         private Dataset _lastSelectedDataset = null;
@@ -114,6 +116,7 @@ namespace GeoscientistToolkit.UI
                     }
                 }
             }
+            _acousticToCtConverterDialog.Draw();
             _metadataEditor.Submit();
             ImGui.Separator();
             ImGui.TextDisabled($"{datasets.Count} dataset(s) loaded");
@@ -380,6 +383,15 @@ namespace GeoscientistToolkit.UI
                 }
             }
             
+            if (dataset is AcousticVolumeDataset acousticDataset)
+            {
+                ImGui.Separator();
+                if (ImGui.MenuItem("Convert Velocity Field To Greyscale Dataset"))
+                {
+                    _acousticToCtConverterDialog.Open(acousticDataset);
+                }
+            }
+
             // Multi-selection grouping
             if (_selectedDatasets.Count > 1 && _selectedDatasets.Contains(dataset))
             {

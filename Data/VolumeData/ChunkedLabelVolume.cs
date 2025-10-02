@@ -31,6 +31,7 @@ namespace GeoscientistToolkit.Data.VolumeData
         private MemoryMappedViewAccessor _viewAccessor;
         private readonly bool _useMemoryMapping;
         private readonly string _filePath;
+        public string FilePath => _filePath; // Added public getter
 
         // Header size constant
         private const int HEADER_SIZE = 16; // 4 integers (ChunkDim, ChunkCountX, ChunkCountY, ChunkCountZ)
