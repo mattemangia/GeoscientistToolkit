@@ -100,8 +100,9 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
                 _rickerT0 = 1.2f / freq;
             }
 
-            _tensileLimitPa = 0.05f * E;
-            _shearLimitPa = 0.03f * E;
+            // These are now calculated on-the-fly from Mohr-Coulomb parameters
+            _tensileLimitPa = 0; // 0.05f * E;
+            _shearLimitPa = 0; // 0.03f * E;
 
             long targetBytes = (_params.ChunkSizeMB > 0 ? _params.ChunkSizeMB : 256) * 1024L * 1024L;
             long bytesPerZ = (long)_params.Width * _params.Height * sizeof(float) * 10;
@@ -540,94 +541,120 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
         for (int y = 1; y < _params.Height - 1; y++)
         for (int x = 1; x < _params.Width - 1; x++)
         {
-            // Allow wave propagation through ALL materials, not just selected
             byte materialId = labels[x, y, gz];
-            if (materialId == 0) continue; // Skip air/background
-            
-            // Get material-specific properties
+            if (materialId == 0) continue;
+
             float localE, localNu, localLambda, localMu;
             if (_usePerVoxelProperties && _perVoxelYoungsModulus != null && _perVoxelPoissonRatio != null)
             {
-                localE = _perVoxelYoungsModulus[x, y, gz] * 1e6f; // Convert MPa to Pa
+                localE = _perVoxelYoungsModulus[x, y, gz] * 1e6f;
                 localNu = _perVoxelPoissonRatio[x, y, gz];
             }
             else
             {
-                // Use global parameters for all materials (allows wave to propagate)
                 localE = _params.YoungsModulusMPa * 1e6f;
                 localNu = _params.PoissonRatio;
             }
             
-            // Calculate Lamé constants
             localMu = localE / (2f * (1f + localNu));
             localLambda = localE * localNu / ((1f + localNu) * (1f - 2f * localNu));
             
-            // Calculate velocity gradients with boundary checks
-            float dvx_dx = (c.Vx[Math.Min(x + 1, _params.Width - 1), y, lz] - 
-                           c.Vx[Math.Max(x - 1, 0), y, lz]) / (2 * _params.PixelSize);
-            float dvy_dy = (c.Vy[x, Math.Min(y + 1, _params.Height - 1), lz] - 
-                           c.Vy[x, Math.Max(y - 1, 0), lz]) / (2 * _params.PixelSize);
-            float dvz_dz = 0;
-            if (lz > 0 && lz < d - 1)
-            {
-                dvz_dz = (c.Vz[x, y, lz + 1] - c.Vz[x, y, lz - 1]) / (2 * _params.PixelSize);
-            }
-            
-            float dvy_dx = (c.Vy[Math.Min(x + 1, _params.Width - 1), y, lz] - 
-                           c.Vy[Math.Max(x - 1, 0), y, lz]) / (2 * _params.PixelSize);
-            float dvx_dy = (c.Vx[x, Math.Min(y + 1, _params.Height - 1), lz] - 
-                           c.Vx[x, Math.Max(y - 1, 0), lz]) / (2 * _params.PixelSize);
-            float dvz_dx = (c.Vz[Math.Min(x + 1, _params.Width - 1), y, lz] - 
-                           c.Vz[Math.Max(x - 1, 0), y, lz]) / (2 * _params.PixelSize);
-            float dvx_dz = 0, dvz_dy = 0, dvy_dz = 0;
-            if (lz > 0 && lz < d - 1)
-            {
-                dvx_dz = (c.Vx[x, y, lz + 1] - c.Vx[x, y, lz - 1]) / (2 * _params.PixelSize);
-                dvz_dy = (c.Vz[x, Math.Min(y + 1, _params.Height - 1), lz] - 
-                         c.Vz[x, Math.Max(y - 1, 0), lz]) / (2 * _params.PixelSize);
-                dvy_dz = (c.Vy[x, y, lz + 1] - c.Vy[x, y, lz - 1]) / (2 * _params.PixelSize);
-            }
+            float dvx_dx = (c.Vx[x + 1, y, lz] - c.Vx[x - 1, y, lz]) / (2 * _params.PixelSize);
+            float dvy_dy = (c.Vy[x, y + 1, lz] - c.Vy[x, y - 1, lz]) / (2 * _params.PixelSize);
+            float dvz_dz = (c.Vz[x, y, lz + 1] - c.Vz[x, y, lz - 1]) / (2 * _params.PixelSize);
+            float dvy_dx = (c.Vy[x + 1, y, lz] - c.Vy[x - 1, y, lz]) / (2 * _params.PixelSize);
+            float dvx_dy = (c.Vx[x, y + 1, lz] - c.Vx[x, y - 1, lz]) / (2 * _params.PixelSize);
+            float dvz_dx = (c.Vz[x + 1, y, lz] - c.Vz[x - 1, y, lz]) / (2 * _params.PixelSize);
+            float dvx_dz = (c.Vx[x, y, lz + 1] - c.Vx[x, y, lz - 1]) / (2 * _params.PixelSize);
+            float dvz_dy = (c.Vz[x, y + 1, lz] - c.Vz[x, y - 1, lz]) / (2 * _params.PixelSize);
+            float dvy_dz = (c.Vy[x, y, lz + 1] - c.Vy[x, y, lz - 1]) / (2 * _params.PixelSize);
             
             float volumetric = dvx_dx + dvy_dy + dvz_dz;
-            
-            // Apply damage only to selected material
-            float damp = 1f;
-            if (materialId == _params.SelectedMaterialID)
+            float damp = (materialId == _params.SelectedMaterialID) ? (1f - c.Damage[x, y, lz] * 0.5f) : 1f;
+
+            float sxx_new = c.Sxx[x, y, lz] + _dt * damp * (localLambda * volumetric + 2f * localMu * dvx_dx);
+            float syy_new = c.Syy[x, y, lz] + _dt * damp * (localLambda * volumetric + 2f * localMu * dvy_dy);
+            float szz_new = c.Szz[x, y, lz] + _dt * damp * (localLambda * volumetric + 2f * localMu * dvz_dz);
+            float sxy_new = c.Sxy[x, y, lz] + _dt * damp * localMu * (dvy_dx + dvx_dy);
+            float sxz_new = c.Sxz[x, y, lz] + _dt * damp * localMu * (dvz_dx + dvx_dz);
+            float syz_new = c.Syz[x, y, lz] + _dt * damp * localMu * (dvz_dy + dvy_dz);
+
+            if (materialId == _params.SelectedMaterialID && _params.UsePlasticModel)
             {
-                damp = 1f - c.Damage[x, y, lz] * 0.5f; // Reduced damage effect
+                float mean = (sxx_new + syy_new + szz_new) / 3.0f;
+                float dev_xx = sxx_new - mean;
+                float dev_yy = syy_new - mean;
+                float dev_zz = szz_new - mean;
+                float J2 = 0.5f * (dev_xx*dev_xx + dev_yy*dev_yy + dev_zz*dev_zz) + sxy_new*sxy_new + sxz_new*sxz_new + syz_new*syz_new;
+                float tau = MathF.Sqrt(J2);
+                float failureAngleRad = _params.FailureAngleDeg * MathF.PI / 180.0f;
+                float sinPhi = MathF.Sin(failureAngleRad);
+                float cosPhi = MathF.Cos(failureAngleRad);
+                float cohesionPa = _params.CohesionMPa * 1e6f;
+                float p = -mean + _params.ConfiningPressureMPa * 1e6f;
+                float yield = tau + p * sinPhi - cohesionPa * cosPhi;
+
+                if (yield > 0 && tau > 1e-10f)
+                {
+                    float scale = (tau - (cohesionPa * cosPhi - p * sinPhi)) / tau;
+                    scale = Math.Min(scale, 0.95f);
+                    sxx_new = (dev_xx * (1 - scale)) + mean;
+                    syy_new = (dev_yy * (1 - scale)) + mean;
+                    szz_new = (dev_zz * (1 - scale)) + mean;
+                    sxy_new *= (1 - scale);
+                    sxz_new *= (1 - scale);
+                    syz_new *= (1 - scale);
+                }
             }
             
-            // Update stress components
-            c.Sxx[x, y, lz] += _dt * damp * (localLambda * volumetric + 2f * localMu * dvx_dx);
-            c.Syy[x, y, lz] += _dt * damp * (localLambda * volumetric + 2f * localMu * dvy_dy);
-            c.Szz[x, y, lz] += _dt * damp * (localLambda * volumetric + 2f * localMu * dvz_dz);
-            c.Sxy[x, y, lz] += _dt * damp * localMu * (dvy_dx + dvx_dy);
-            c.Sxz[x, y, lz] += _dt * damp * localMu * (dvz_dx + dvx_dz);
-            c.Syz[x, y, lz] += _dt * damp * localMu * (dvz_dy + dvy_dz);
-            
-            // Apply damage model only for selected material
+            c.Sxx[x, y, lz] = sxx_new;
+            c.Syy[x, y, lz] = syy_new;
+            c.Szz[x, y, lz] = szz_new;
+            c.Sxy[x, y, lz] = sxy_new;
+            c.Sxz[x, y, lz] = sxz_new;
+            c.Syz[x, y, lz] = syz_new;
+
             if (materialId == _params.SelectedMaterialID && _params.UseBrittleModel)
             {
-                float localTensileLimit = 0.05f * localE;
-                float localShearLimit = 0.03f * localE;
+                // Source: Based on typical rock mechanics principles, e.g., in "Engineering Rock Mechanics" by Hudson & Harrison.
+                // Uniaxial Compressive Strength (UCS) is derived from Mohr-Coulomb parameters.
+                // Tensile strength is estimated as a fraction (typically 1/10) of UCS.
+                float cohesionPa = _params.CohesionMPa * 1e6f;
+                float failureAngleRad = _params.FailureAngleDeg * MathF.PI / 180.0f;
+                float sinPhi = MathF.Sin(failureAngleRad);
+                float cosPhi = MathF.Cos(failureAngleRad);
+                float ucsPa = (2.0f * cohesionPa * cosPhi) / (1.0f - sinPhi);
+                float tensileLimitPa = ucsPa / 10.0f;
+
+                float meanStress = (sxx_new + syy_new + szz_new) / 3.0f;
+                float p = -meanStress + _params.ConfiningPressureMPa * 1e6f;
+                float dev_xx = sxx_new - meanStress;
+                float dev_yy = syy_new - meanStress;
+                float dev_zz = szz_new - meanStress;
+                float J2 = 0.5f * (dev_xx*dev_xx + dev_yy*dev_yy + dev_zz*dev_zz) + sxy_new*sxy_new + sxz_new*sxz_new + syz_new*syz_new;
+                float tau = MathF.Sqrt(J2);
+                float yieldShear = tau + p * sinPhi - cohesionPa * cosPhi;
                 
-                float tensileMax = MathF.Max(c.Sxx[x, y, lz], MathF.Max(c.Syy[x, y, lz], c.Szz[x, y, lz]));
-                float shearMag = MathF.Sqrt(c.Sxy[x, y, lz] * c.Sxy[x, y, lz] + 
-                                            c.Sxz[x, y, lz] * c.Sxz[x, y, lz] + 
-                                            c.Syz[x, y, lz] * c.Syz[x, y, lz]);
+                float maxTensile = MathF.Max(sxx_new, MathF.Max(syy_new, szz_new));
                 
                 float dInc = 0f;
-                if (tensileMax > localTensileLimit) 
-                    dInc += _damageRatePerSec * _dt * (tensileMax / localTensileLimit - 1f) * 0.1f; // Reduced damage rate
-                if (shearMag > localShearLimit) 
-                    dInc += _damageRatePerSec * _dt * (shearMag / localShearLimit - 1f) * 0.1f;
+                if (yieldShear > 0 && cohesionPa > 0)
+                {
+                    dInc += _damageRatePerSec * _dt * (yieldShear / (cohesionPa * cosPhi));
+                }
+                if (maxTensile > tensileLimitPa && tensileLimitPa > 0)
+                {
+                    dInc += _damageRatePerSec * _dt * (maxTensile / tensileLimitPa - 1.0f);
+                }
                 
-                c.Damage[x, y, lz] = Math.Min(0.9f, Math.Max(0f, c.Damage[x, y, lz] + dInc)); // Cap at 0.9
+                if (dInc > 0)
+                {
+                    c.Damage[x, y, lz] = Math.Min(0.9f, c.Damage[x, y, lz] + dInc);
+                }
             }
         }
     });
 }
-
         private void UpdateChunkVelocityCPU(WaveFieldChunk c, byte[,,] labels, float[,,] density)
 {
     int d = c.EndZ - c.StartZ;
@@ -1080,7 +1107,7 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
 
         private string GetKernelSource()
 {
-    // --- MODIFICATION: Kernel updated for multi-material properties ---
+    // --- MODIFICATION: Kernel updated for multi-material properties and realistic damage ---
     return @"
     #define M_PI_F 3.14159265358979323846f
 
@@ -1210,20 +1237,38 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
         syz[idx] = clamp(syz[idx], -stress_limit, stress_limit);
         
         if (mat == selectedMaterial && useBrittleModel != 0) {
-            float tensileLimitPa = 0.05f * E;
-            float shearLimitPa = 0.03f * E;
+            // Source: Based on typical rock mechanics principles, e.g., in ""Engineering Rock Mechanics"" by Hudson & Harrison.
+            // Uniaxial Compressive Strength (UCS) is derived from Mohr-Coulomb parameters.
+            // Tensile strength is estimated as a fraction (typically 1/10) of UCS.
+            float cohesionPa_d = cohesionMPa * 1e6f;
+            float failureAngleRad_d = failureAngleDeg * M_PI_F / 180.0f;
+            float sinPhi_d = sin(failureAngleRad_d);
+            float cosPhi_d = cos(failureAngleRad_d);
+            float ucsPa_d = (2.0f * cohesionPa_d * cosPhi_d) / (1.0f - sinPhi_d);
+            float tensileLimitPa_d = ucsPa_d / 10.0f;
+
+            float mean_final = (sxx[idx] + syy[idx] + szz[idx]) / 3.0f;
+            float p_final = -mean_final + confiningPressureMPa * 1e6f;
+            float dev_xx_final = sxx[idx] - mean_final;
+            float dev_yy_final = syy[idx] - mean_final;
+            float dev_zz_final = szz[idx] - mean_final;
+            float J2_final = 0.5f * (dev_xx_final*dev_xx_final + dev_yy_final*dev_yy_final + dev_zz_final*dev_zz_final) + sxy[idx]*sxy[idx] + sxz[idx]*sxz[idx] + syz[idx]*syz[idx];
+            float tau_final = sqrt(J2_final);
+            float yieldShear_final = tau_final + p_final * sinPhi_d - cohesionPa_d * cosPhi_d;
 
             float tensile_max = fmax(sxx[idx], fmax(syy[idx], szz[idx]));
-            float shear_magnitude = sqrt(sxy[idx]*sxy[idx] + sxz[idx]*sxz[idx] + syz[idx]*syz[idx]);
             
             float damage_increment = 0.0f;
-            if (tensile_max > tensileLimitPa) {
-                damage_increment += damageRatePerSec * dt * (tensile_max / tensileLimitPa - 1.0f) * 0.1f;
+            if (yieldShear_final > 0 && cohesionPa_d > 0) {
+                damage_increment += damageRatePerSec * dt * (yieldShear_final / (cohesionPa_d * cosPhi_d));
             }
-            if (shear_magnitude > shearLimitPa) {
-                damage_increment += damageRatePerSec * dt * (shear_magnitude / shearLimitPa - 1.0f) * 0.1f;
+            if (tensile_max > tensileLimitPa_d && tensileLimitPa_d > 0) {
+                damage_increment += damageRatePerSec * dt * (tensile_max / tensileLimitPa_d - 1.0f);
             }
-            damage[idx] = clamp(damage[idx] + damage_increment, 0.0f, 0.9f);
+
+            if(damage_increment > 0) {
+                damage[idx] = clamp(damage[idx] + damage_increment, 0.0f, 0.9f);
+            }
         }
     }
     
