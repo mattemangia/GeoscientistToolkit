@@ -542,7 +542,7 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
         for (int x = 1; x < _params.Width - 1; x++)
         {
             byte materialId = labels[x, y, gz];
-            if (materialId != _params.SelectedMaterialID || density[x, y, gz] <= 0f) continue;
+            if (materialId != _params.SelectedMaterialID || density[x,y,gz] <= 0f) continue;
 
             float localE, localNu, localLambda, localMu;
             if (_usePerVoxelProperties && _perVoxelYoungsModulus != null && _perVoxelPoissonRatio != null)
@@ -570,7 +570,7 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
             float dvy_dz = (c.Vy[x, y, lz + 1] - c.Vy[x, y, lz - 1]) / (2 * _params.PixelSize);
             
             float volumetric = dvx_dx + dvy_dy + dvz_dz;
-            float damp = (materialId == _params.SelectedMaterialID) ? (1f - c.Damage[x, y, lz] * 0.5f) : 1f;
+            float damp = (1f - c.Damage[x, y, lz] * 0.5f);
 
             float sxx_new = c.Sxx[x, y, lz] + _dt * damp * (localLambda * volumetric + 2f * localMu * dvx_dx);
             float syy_new = c.Syy[x, y, lz] + _dt * damp * (localLambda * volumetric + 2f * localMu * dvy_dy);
@@ -579,7 +579,7 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
             float sxz_new = c.Sxz[x, y, lz] + _dt * damp * localMu * (dvz_dx + dvx_dz);
             float syz_new = c.Syz[x, y, lz] + _dt * damp * localMu * (dvz_dy + dvy_dz);
 
-            if (materialId == _params.SelectedMaterialID && _params.UsePlasticModel)
+            if (_params.UsePlasticModel)
             {
                 float mean = (sxx_new + syy_new + szz_new) / 3.0f;
                 float dev_xx = sxx_new - mean;
@@ -614,11 +614,11 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
             c.Sxz[x, y, lz] = sxz_new;
             c.Syz[x, y, lz] = syz_new;
 
-            if (materialId == _params.SelectedMaterialID && _params.UseBrittleModel)
+            if (_params.UseBrittleModel)
             {
                 // Source: Based on typical rock mechanics principles, e.g., in "Engineering Rock Mechanics" by Hudson & Harrison.
                 // Uniaxial Compressive Strength (UCS) is derived from Mohr-Coulomb parameters.
-                // Tensile strength is estimated as a fraction (typically 1/10) of UCS.
+                // Tensile strength is estimated as a fraction (typically 1/10) of UCS, a common empirical relationship for rocks.
                 float cohesionPa = _params.CohesionMPa * 1e6f;
                 float failureAngleRad = _params.FailureAngleDeg * MathF.PI / 180.0f;
                 float sinPhi = MathF.Sin(failureAngleRad);
@@ -665,7 +665,7 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
         for (int x = 1; x < _params.Width - 1; x++)
         {
             byte materialId = labels[x, y, gz];
-            if (materialId != _params.SelectedMaterialID || density[x, y, gz] <= 0f) continue;
+            if (materialId != _params.SelectedMaterialID || density[x,y,gz] <= 0f) continue;
             
             float rho = MathF.Max(100f, density[x, y, gz]);
             
@@ -1138,14 +1138,14 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
         int idx = get_global_id(0); 
         if (idx >= width * height * depth) return;
         
+        uchar mat = material[idx];
+        if (mat != selectedMaterial || density[idx] <= 0.0f) return;
+        
         int z = idx / (width * height);
         int rem = idx % (width * height);
         int y = rem / width;
         int x = rem % width;
         
-        uchar mat = material[idx];
-        if (mat != selectedMaterial || density[idx] <= 0.0f) return;
-
         if (applySource != 0) {
             if (isFullFace != 0) {
                 if (sourceAxis == 0 && x < 2) sxx[idx] += sourceValue;
@@ -1187,7 +1187,7 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
         float dvy_dz = (vy[zp1] - vy[zm1]) / (2.0f * dx);
         
         float volumetric_strain = dvx_dx + dvy_dy + dvz_dz;
-        float damage_factor = (mat == selectedMaterial) ? (1.0f - damage[idx] * 0.5f) : 1.0f;
+        float damage_factor = (1.0f - damage[idx] * 0.5f);
         
         float sxx_new = sxx[idx] + dt * damage_factor * (lambda * volumetric_strain + 2.0f * mu * dvx_dx);
         float syy_new = syy[idx] + dt * damage_factor * (lambda * volumetric_strain + 2.0f * mu * dvy_dy);
@@ -1196,7 +1196,7 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
         float sxz_new = sxz[idx] + dt * damage_factor * mu * (dvz_dx + dvx_dz);
         float syz_new = syz[idx] + dt * damage_factor * mu * (dvz_dy + dvy_dz);
 
-        if (mat == selectedMaterial && usePlasticModel != 0) {
+        if (usePlasticModel != 0) {
             float mean = (sxx_new + syy_new + szz_new) / 3.0f;
             float dev_xx = sxx_new - mean;
             float dev_yy = syy_new - mean;
@@ -1236,10 +1236,10 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
         sxz[idx] = clamp(sxz[idx], -stress_limit, stress_limit);
         syz[idx] = clamp(syz[idx], -stress_limit, stress_limit);
         
-        if (mat == selectedMaterial && useBrittleModel != 0) {
+        if (useBrittleModel != 0) {
             // Source: Based on typical rock mechanics principles, e.g., in ""Engineering Rock Mechanics"" by Hudson & Harrison.
             // Uniaxial Compressive Strength (UCS) is derived from Mohr-Coulomb parameters.
-            // Tensile strength is estimated as a fraction (typically 1/10) of UCS.
+            // Tensile strength is estimated as a fraction (typically 1/10) of UCS, a common empirical relationship for rocks.
             float cohesionPa_d = cohesionMPa * 1e6f;
             float failureAngleRad_d = failureAngleDeg * M_PI_F / 180.0f;
             float sinPhi_d = sin(failureAngleRad_d);
