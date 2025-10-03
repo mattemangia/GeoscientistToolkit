@@ -29,6 +29,16 @@ namespace GeoscientistToolkit.UI.AcousticVolume
         // Store line definition to regenerate if needed
         private List<Tuple<int, int, int>> _linePoints;
         private int _selectedComponent = 0; // 0=Magnitude, 1=X, 2=Y, 3=Z
+        
+        // --- NEW: For interactive waveform/timeseries plots ---
+        private int _selectedTimeIndex = -1;
+        private float[] _waveformAtTime;
+        private string _waveformTitle = "Waveform at Time T";
+        
+        private int _selectedDistanceIndex = -1;
+        private float[] _timeSeriesAtDistance;
+        private string _timeSeriesTitle = "Time Series at Point X";
+
 
         public WaveformViewer(AcousticVolumeDataset dataset)
         {
@@ -100,12 +110,17 @@ namespace GeoscientistToolkit.UI.AcousticVolume
                      _ = ExtractProfileDataAsync(useExistingLine: true);
                 }
             }
+            
+            ImGui.TextWrapped("Left-click on the profile below to view the waveform at a specific time. Right-click to view the time series at a specific point.");
         }
 
         private void DrawProfileDisplay()
         {
             ImGui.Text("Time-Distance Profile (B-Scan)");
+            
+            var canvasPos = ImGui.GetCursorScreenPos();
             var canvasSize = ImGui.GetContentRegionAvail();
+            canvasSize.Y = ImGui.GetTextLineHeight() * 15; // Set a fixed height for the B-scan
             if (canvasSize.X < 50) canvasSize.X = 50;
             if (canvasSize.Y < 50) canvasSize.Y = 50;
 
@@ -116,17 +131,82 @@ namespace GeoscientistToolkit.UI.AcousticVolume
             else if (_profileTexture != null && _profileTexture.IsValid)
             {
                 ImGui.Image(_profileTexture.GetImGuiTextureId(), canvasSize);
+                HandleProfileInteraction(canvasPos, canvasSize);
             }
             else
             {
+                ImGui.Dummy(canvasSize); // Reserve space
                 ImGui.TextDisabled(_statusMessage);
             }
+            
+            ImGui.Separator();
+
+            if (_waveformAtTime != null)
+            {
+                ImGui.PlotLines(_waveformTitle, ref _waveformAtTime[0], _waveformAtTime.Length, 0,
+                    "Distance ->", -_maxAbsAmplitude, _maxAbsAmplitude, new Vector2(0, 100));
+            }
+            
+            if (_timeSeriesAtDistance != null)
+            {
+                ImGui.PlotLines(_timeSeriesTitle, ref _timeSeriesAtDistance[0], _timeSeriesAtDistance.Length, 0,
+                    "Time ->", -_maxAbsAmplitude, _maxAbsAmplitude, new Vector2(0, 100));
+            }
         }
+        
+        private void HandleProfileInteraction(Vector2 canvasPos, Vector2 canvasSize)
+        {
+            ImGui.SetCursorScreenPos(canvasPos);
+            ImGui.InvisibleButton("##profile_interaction", canvasSize);
+            var drawList = ImGui.GetWindowDrawList();
+
+            if (ImGui.IsItemHovered())
+            {
+                var io = ImGui.GetIO();
+                Vector2 mousePos = io.MousePos - canvasPos;
+                
+                // Left-click to select a time (horizontal line)
+                if (ImGui.IsMouseClicked(ImGuiMouseButton.Left))
+                {
+                    _selectedTimeIndex = (int)Math.Clamp((mousePos.Y / canvasSize.Y) * _profileData.GetLength(0), 0, _profileData.GetLength(0) - 1);
+                    ExtractWaveformAtTime();
+                }
+
+                // Right-click to select a distance point (vertical line)
+                if (ImGui.IsMouseClicked(ImGuiMouseButton.Right))
+                {
+                    _selectedDistanceIndex = (int)Math.Clamp((mousePos.X / canvasSize.X) * _profileData.GetLength(1), 0, _profileData.GetLength(1) - 1);
+                    ExtractTimeSeriesAtDistance();
+                }
+            }
+
+            // Draw horizontal line for selected time
+            if (_selectedTimeIndex != -1)
+            {
+                float y = canvasPos.Y + (float)_selectedTimeIndex / _profileData.GetLength(0) * canvasSize.Y;
+                drawList.AddLine(new Vector2(canvasPos.X, y), new Vector2(canvasPos.X + canvasSize.X, y), 0xFF00FFFF, 1.0f); // Cyan
+            }
+            
+            // Draw vertical line for selected distance
+            if (_selectedDistanceIndex != -1)
+            {
+                float x = canvasPos.X + (float)_selectedDistanceIndex / _profileData.GetLength(1) * canvasSize.X;
+                drawList.AddLine(new Vector2(x, canvasPos.Y), new Vector2(x, canvasPos.Y + canvasSize.Y), 0xFF00FF00, 1.0f); // Green
+            }
+        }
+
 
         private async Task ExtractProfileDataAsync(bool useExistingLine = false)
         {
             if (_isCalculating) return;
             _isCalculating = true;
+            
+            // Clear old plots
+            _waveformAtTime = null;
+            _timeSeriesAtDistance = null;
+            _selectedTimeIndex = -1;
+            _selectedDistanceIndex = -1;
+            
             _progressDialog.Open("Extracting waveform profile...");
             
             try
@@ -212,6 +292,42 @@ namespace GeoscientistToolkit.UI.AcousticVolume
                 _progressDialog.Close();
             }
         }
+        
+        private void ExtractWaveformAtTime()
+        {
+            if (_profileData == null || _selectedTimeIndex < 0 || _selectedTimeIndex >= _profileData.GetLength(0))
+            {
+                _waveformAtTime = null;
+                return;
+            }
+
+            int distancePoints = _profileData.GetLength(1);
+            _waveformAtTime = new float[distancePoints];
+            for (int i = 0; i < distancePoints; i++)
+            {
+                _waveformAtTime[i] = _profileData[_selectedTimeIndex, i];
+            }
+            float time = _dataset.TimeSeriesSnapshots[_selectedTimeIndex].SimulationTime;
+            _waveformTitle = $"Waveform at T = {time * 1000:F4} ms";
+        }
+
+        private void ExtractTimeSeriesAtDistance()
+        {
+            if (_profileData == null || _selectedDistanceIndex < 0 || _selectedDistanceIndex >= _profileData.GetLength(1))
+            {
+                _timeSeriesAtDistance = null;
+                return;
+            }
+
+            int timePoints = _profileData.GetLength(0);
+            _timeSeriesAtDistance = new float[timePoints];
+            for (int i = 0; i < timePoints; i++)
+            {
+                _timeSeriesAtDistance[i] = _profileData[i, _selectedDistanceIndex];
+            }
+            _timeSeriesTitle = $"Time Series at Distance Point {_selectedDistanceIndex}";
+        }
+
 
         private List<Tuple<int, int, int>> GetLinePoints()
         {
@@ -248,7 +364,7 @@ namespace GeoscientistToolkit.UI.AcousticVolume
                             points.Add(new Tuple<int, int, int>(x_vol, y_vol, z_vol));
                         break;
                     case 2: // YZ View
-                        x_vol = slice_coord; y_vol = y1_2d; z_vol = y1_2d;
+                        x_vol = slice_coord; y_vol = x1_2d; z_vol = y1_2d; // Corrected from y1_2d to x1_2d for y_vol
                         if (x_vol >= 0 && x_vol < volume.Width && y_vol >= 0 && y_vol < volume.Height && z_vol >= 0 && z_vol < volume.Depth)
                             points.Add(new Tuple<int, int, int>(x_vol, y_vol, z_vol));
                         break;
@@ -289,12 +405,12 @@ namespace GeoscientistToolkit.UI.AcousticVolume
                     if (isSigned)
                     {
                         // Normalize [-maxAbs, maxAbs] to [0, 1], with 0 mapping to 0.5
-                        normalizedValue = (_maxAbsAmplitude > 0) ? (value / _maxAbsAmplitude) * 0.5f + 0.5f : 0.5f;
+                        normalizedValue = (_maxAbsAmplitude > 1e-9f) ? (value / _maxAbsAmplitude) * 0.5f + 0.5f : 0.5f;
                     }
                     else
                     {
                         // Normalize [0, maxAbs] to [0, 1]
-                        normalizedValue = (_maxAbsAmplitude > 0) ? value / _maxAbsAmplitude : 0;
+                        normalizedValue = (_maxAbsAmplitude > 1e-9f) ? value / _maxAbsAmplitude : 0;
                     }
 
                     var color = GetSeismicColor(normalizedValue); // Use seismic for good contrast
@@ -314,15 +430,19 @@ namespace GeoscientistToolkit.UI.AcousticVolume
         private Vector4 GetSeismicColor(float v)
         {
             v = Math.Clamp(v, 0.0f, 1.0f);
+            // Diverging: Blue -> White -> Red
+            // v = 0.0 -> Blue (0,0,1)
+            // v = 0.5 -> White (1,1,1)
+            // v = 1.0 -> Red (1,0,0)
             if (v < 0.5f)
             {
-                float t = v * 2.0f;
-                return new Vector4(t, t, 1.0f, 1.0f);
+                float t = v * 2.0f; // remaps [0, 0.5] to [0, 1]
+                return new Vector4(t, t, 1.0f, 1.0f); // Interpolate from Blue to White
             }
             else
             {
-                float t = (v - 0.5f) * 2.0f;
-                return new Vector4(1.0f, 1.0f - t, 1.0f - t, 1.0f);
+                float t = (v - 0.5f) * 2.0f; // remaps [0.5, 1] to [0, 1]
+                return new Vector4(1.0f, 1.0f - t, 1.0f - t, 1.0f); // Interpolate from White to Red
             }
         }
 

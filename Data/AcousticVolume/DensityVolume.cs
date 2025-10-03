@@ -20,6 +20,10 @@ namespace GeoscientistToolkit.Data.AcousticVolume
         public int Height { get; }
         public int Depth { get; }
 
+        /// <summary>
+        /// Creates a new, empty DensityVolume and initializes it with default properties.
+        /// Used by the DensityCalibrationTool.
+        /// </summary>
         public DensityVolume(int width, int height, int depth)
         {
             Width = width;
@@ -35,54 +39,93 @@ namespace GeoscientistToolkit.Data.AcousticVolume
             _pWaveVelocity = new float[totalVoxels];
             _sWaveVelocity = new float[totalVoxels];
             
-            // Initialize with limestone properties
+            // Initialize with default properties (e.g., limestone)
             Parallel.For(0, totalVoxels, i =>
             {
                 _density[i] = 2700f;
-                _youngsModulus[i] = 35e9f; // 35 GPa
+                _youngsModulus[i] = 35e9f; // 35 GPa in Pascals
                 _poissonRatio[i] = 0.26f;
-                CalculateElasticProperties(i);
+                RecalculateDerivedProperties(i);
             });
+        }
+
+        /// <summary>
+        /// Creates a DensityVolume from existing raw property arrays.
+        /// Used when loading an AcousticVolumeDataset.
+        /// </summary>
+        public DensityVolume(float[,,] density, float[,,] youngsModulus, float[,,] poissonRatio)
+        {
+            Width = density.GetLength(0);
+            Height = density.GetLength(1);
+            Depth = density.GetLength(2);
+
+            int totalVoxels = Width * Height * Depth;
+            _density = new float[totalVoxels];
+            _youngsModulus = new float[totalVoxels]; // Expects Pa
+            _poissonRatio = new float[totalVoxels];
+
+            // Copy data from 3D arrays to flat 1D arrays for performance
+            Buffer.BlockCopy(density, 0, _density, 0, totalVoxels * sizeof(float));
+            Buffer.BlockCopy(youngsModulus, 0, _youngsModulus, 0, totalVoxels * sizeof(float));
+            Buffer.BlockCopy(poissonRatio, 0, _poissonRatio, 0, totalVoxels * sizeof(float));
+            
+            // Allocate and recalculate derived properties from the loaded authoritative values
+            _bulkModulus = new float[totalVoxels];
+            _shearModulus = new float[totalVoxels];
+            _pWaveVelocity = new float[totalVoxels];
+            _sWaveVelocity = new float[totalVoxels];
+            
+            Parallel.For(0, totalVoxels, RecalculateDerivedProperties);
         }
 
         public void SetDensity(int x, int y, int z, float density)
         {
             int index = GetIndex(x, y, z);
             _density[index] = density;
-            CalculateElasticProperties(index);
+            // Note: This simple setter doesn't automatically derive E and nu.
+            // Full property recalculation is more complex.
         }
 
         public void SetMaterialProperties(int x, int y, int z, RockMaterial material)
         {
             int index = GetIndex(x, y, z);
             _density[index] = material.Density;
-            _youngsModulus[index] = material.YoungsModulus * 1e9f;
+            _youngsModulus[index] = material.YoungsModulus * 1e9f; // Convert GPa to Pa
             _poissonRatio[index] = material.PoissonRatio;
-            _pWaveVelocity[index] = material.Vp;
-            _sWaveVelocity[index] = material.Vs;
             
-            // Calculate derived properties
-            _bulkModulus[index] = _youngsModulus[index] / (3 * (1 - 2 * _poissonRatio[index]));
-            _shearModulus[index] = _youngsModulus[index] / (2 * (1 + _poissonRatio[index]));
+            RecalculateDerivedProperties(index);
+        }
+        
+        /// <summary>
+        /// Recalculates derived properties (velocities, moduli) for a given voxel index
+        /// based on the authoritative values of Density, Young's Modulus, and Poisson's Ratio.
+        /// </summary>
+        private void RecalculateDerivedProperties(int index)
+        {
+            float E = _youngsModulus[index]; // in Pa
+            float nu = _poissonRatio[index];
+            float rho = _density[index]; // in kg/m³
+
+            if (rho > 0 && E > 0 && nu < 0.5f && nu > -1.0f)
+            {
+                _shearModulus[index] = E / (2f * (1f + nu));
+                _bulkModulus[index] = E / (3f * (1f - 2f * nu));
+                
+                // P-wave modulus (M) = K + 4/3 * G
+                float p_modulus = _bulkModulus[index] + (4f / 3f) * _shearModulus[index];
+
+                _pWaveVelocity[index] = MathF.Sqrt(p_modulus / rho);
+                _sWaveVelocity[index] = MathF.Sqrt(_shearModulus[index] / rho);
+            }
+            else // Set to zero if inputs are invalid
+            {
+                _shearModulus[index] = 0;
+                _bulkModulus[index] = 0;
+                _pWaveVelocity[index] = 0;
+                _sWaveVelocity[index] = 0;
+            }
         }
 
-        public void CalculateElasticProperties(int index)
-        {
-            // Use empirical relationships
-            float density = _density[index];
-            
-            // Gardner's relation for velocity estimation
-            _pWaveVelocity[index] = 1080 * MathF.Pow(density / 1000, 0.25f);
-            _sWaveVelocity[index] = _pWaveVelocity[index] * MathF.Sqrt((1 - 2 * _poissonRatio[index]) / (2 * (1 - _poissonRatio[index])));
-            
-            // Calculate elastic moduli
-            float mu = _sWaveVelocity[index] * _sWaveVelocity[index] * density;
-            float k = _pWaveVelocity[index] * _pWaveVelocity[index] * density - 4f/3f * mu;
-            
-            _shearModulus[index] = mu;
-            _bulkModulus[index] = k;
-            _youngsModulus[index] = 9 * k * mu / (3 * k + mu);
-        }
 
         public float GetDensity(int x, int y, int z) => _density[GetIndex(x, y, z)];
         public float GetYoungsModulus(int x, int y, int z) => _youngsModulus[GetIndex(x, y, z)];
@@ -123,7 +166,7 @@ namespace GeoscientistToolkit.Data.AcousticVolume
 
         public void Dispose()
         {
-            // Arrays will be garbage collected
+            // Nothing to dispose, arrays are managed.
         }
     }
 }

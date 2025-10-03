@@ -28,8 +28,10 @@ namespace GeoscientistToolkit.UI.AcousticVolume
         private float[] _histogramData;
         private string _histogramTitle = "Histogram";
         private float[] _fftData;
+        private float[] _fftDataDb; // For logarithmic scale
         private string _fftTitle = "FFT Spectrum";
         private bool _isCalculating = false;
+        private bool _useLogarithmicScale = true; // Default to log scale as it's more revealing
 
         // Data for FFT
         private List<byte> _lineData;
@@ -178,11 +180,18 @@ namespace GeoscientistToolkit.UI.AcousticVolume
             ImGui.Separator();
             ImGui.Text("Frequency Spectrum:");
 
+            ImGui.Checkbox("Logarithmic Scale (dB)", ref _useLogarithmicScale);
+
             if (_isCalculating)
             {
                 ImGui.Text("Calculating...");
             }
-            else if (_fftData != null && _fftData.Length > 0)
+            else if (_useLogarithmicScale && _fftDataDb != null && _fftDataDb.Length > 0)
+            {
+                ImGui.PlotLines(_fftTitle + " (dB)", ref _fftDataDb[0], _fftDataDb.Length, 0, 
+                    "Frequency ->", _fftDataDb.Min(), _fftDataDb.Max(), new Vector2(0, 150));
+            }
+            else if (!_useLogarithmicScale && _fftData != null && _fftData.Length > 0)
             {
                  ImGui.PlotLines(_fftTitle, ref _fftData[0], _fftData.Length, 0,
                     "Frequency ->", 0, _fftData.Max(), new Vector2(0, 150));
@@ -231,6 +240,7 @@ namespace GeoscientistToolkit.UI.AcousticVolume
         {
              _lineData = null;
              _fftData = null;
+             _fftDataDb = null;
              _histogramData = null;
              _statsResult = "No analysis run yet.";
         }
@@ -429,6 +439,15 @@ namespace GeoscientistToolkit.UI.AcousticVolume
             {
                 // The result is the magnitude of the complex number
                 _fftData[i] = (float)spectrum[i].Magnitude;
+            }
+
+            // Also compute a dB scale version for better visualization
+            _fftDataDb = new float[halfN];
+            float epsilon = 1e-12f; // To avoid log(0)
+            for (int i = 0; i < halfN; i++)
+            {
+                // Convert magnitude to dB
+                _fftDataDb[i] = 20.0f * (float)Math.Log10(Math.Max(_fftData[i], epsilon));
             }
 
             _fftTitle = $"FFT Spectrum ({n} points)";

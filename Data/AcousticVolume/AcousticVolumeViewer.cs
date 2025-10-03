@@ -185,18 +185,31 @@ namespace GeoscientistToolkit.Data.AcousticVolume
             {
                 UpdateAnimation();
             }
-            
-            // Draw main content based on layout
+
+            // --- REFACTORED LAYOUT ---
+            // This creates a persistent control panel on the right and a flexible view panel on the left.
+            float controlPanelWidth = 300; 
             var availableSize = ImGui.GetContentRegionAvail();
             
+            // Main view panel (left)
+            ImGui.BeginChild("SliceViews", new Vector2(availableSize.X - controlPanelWidth - ImGui.GetStyle().ItemSpacing.X, availableSize.Y), ImGuiChildFlags.None);
+            var viewPanelSize = ImGui.GetContentRegionAvail();
             switch (_layout)
             {
-                case Layout.Horizontal: DrawHorizontalLayout(availableSize); break;
-                case Layout.Vertical: DrawVerticalLayout(availableSize); break;
-                case Layout.Grid2x2: DrawGrid2x2Layout(availableSize); break;
+                case Layout.Horizontal: DrawHorizontalLayout(viewPanelSize); break;
+                case Layout.Vertical: DrawVerticalLayout(viewPanelSize); break;
+                case Layout.Grid2x2: DrawGrid2x2Layout(viewPanelSize); break;
             }
+            ImGui.EndChild();
+
+            ImGui.SameLine();
+
+            // Control panel (right)
+            ImGui.BeginChild("InfoAndControlPanel", new Vector2(controlPanelWidth, availableSize.Y), ImGuiChildFlags.Border);
+            DrawInfoPanel();
+            ImGui.EndChild();
             
-            // Draw legend if enabled
+            // Draw legend if enabled (it's a separate window)
             if (_showLegend)
             {
                 DrawLegend();
@@ -215,17 +228,17 @@ namespace GeoscientistToolkit.Data.AcousticVolume
         
         private void DrawHorizontalLayout(Vector2 availableSize)
         {
-            float viewWidth = (availableSize.X - 4) / 3;
+            float viewWidth = (availableSize.X - (ImGui.GetStyle().ItemSpacing.X * 2)) / 3;
             DrawView(0, new Vector2(viewWidth, availableSize.Y), "XY (Axial)");
-            ImGui.SameLine(0, 2);
+            ImGui.SameLine();
             DrawView(1, new Vector2(viewWidth, availableSize.Y), "XZ (Coronal)");
-            ImGui.SameLine(0, 2);
+            ImGui.SameLine();
             DrawView(2, new Vector2(viewWidth, availableSize.Y), "YZ (Sagittal)");
         }
         
         private void DrawVerticalLayout(Vector2 availableSize)
         {
-            float viewHeight = (availableSize.Y - 4) / 3;
+            float viewHeight = (availableSize.Y - (ImGui.GetStyle().ItemSpacing.Y * 2)) / 3;
             DrawView(0, new Vector2(availableSize.X, viewHeight), "XY (Axial)");
             DrawView(1, new Vector2(availableSize.X, viewHeight), "XZ (Coronal)");
             DrawView(2, new Vector2(availableSize.X, viewHeight), "YZ (Sagittal)");
@@ -233,18 +246,22 @@ namespace GeoscientistToolkit.Data.AcousticVolume
         
         private void DrawGrid2x2Layout(Vector2 availableSize)
         {
-            float viewWidth = (availableSize.X - 2) / 2;
-            float viewHeight = (availableSize.Y - 2) / 2;
+            float viewWidth = (availableSize.X - ImGui.GetStyle().ItemSpacing.X) / 2;
+            float viewHeight = (availableSize.Y - ImGui.GetStyle().ItemSpacing.Y) / 2;
             
             DrawView(0, new Vector2(viewWidth, viewHeight), "XY (Axial)");
-            ImGui.SameLine(0, 2);
+            ImGui.SameLine();
             DrawView(1, new Vector2(viewWidth, viewHeight), "XZ (Coronal)");
             
             DrawView(2, new Vector2(viewWidth, viewHeight), "YZ (Sagittal)");
-            ImGui.SameLine(0, 2);
+            ImGui.SameLine();
             
-            ImGui.BeginChild("InfoPanel", new Vector2(viewWidth, viewHeight), ImGuiChildFlags.Border);
-            DrawInfoPanel();
+            // Placeholder for the 4th view
+            ImGui.BeginChild("PlaceholderView", new Vector2(viewWidth, viewHeight), ImGuiChildFlags.Border);
+            var text = "3D View (Placeholder)";
+            var textSize = ImGui.CalcTextSize(text);
+            ImGui.SetCursorPos(ImGui.GetCursorPos() + (new Vector2(viewWidth, viewHeight) - textSize) * 0.5f);
+            ImGui.TextDisabled(text);
             ImGui.EndChild();
         }
         

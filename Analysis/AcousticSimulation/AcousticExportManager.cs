@@ -31,7 +31,10 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
         private CalibrationData _calibrationData;
         private float[,,] _damageField; // Store damage field from simulation
         private bool _isWaveformViewerOpen = false;
-        
+        private float[,,] _densityVolume; // ADDED
+        private float[,,] _youngsModulusVolume; // ADDED
+        private float[,,] _poissonRatioVolume; // ADDED
+       
         public AcousticExportManager()
         {
             _exportDialog = new ImGuiExportFileDialog("AcousticExport", "Export Acoustic Volume");
@@ -100,7 +103,12 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
                 _waveformViewer = null;
             }
         }
-        
+        public void SetMaterialPropertyVolumes(float[,,] density, float[,,] youngsModulus, float[,,] poissonRatio)
+        {
+            _densityVolume = density;
+            _youngsModulusVolume = youngsModulus;
+            _poissonRatioVolume = poissonRatio;
+        }
         private void HandleDialogs()
         {
             _progressDialog.Submit();
@@ -135,115 +143,141 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
         }
         
         private void ExportAcousticVolume(string basePath, CancellationToken cancellationToken)
-        {
-            // Create directory structure
-            string volumeDir = Path.ChangeExtension(basePath, null);
-            Directory.CreateDirectory(volumeDir);
-            
-            string timeSeriesDir = Path.Combine(volumeDir, "TimeSeries");
-            if (_results.TimeSeriesSnapshots?.Count > 0)
-            {
-                Directory.CreateDirectory(timeSeriesDir);
-            }
-            
-            UpdateProgress(0.1f, "Creating acoustic volume dataset...");
-            
-            // Create dataset
-            var acousticDataset = new AcousticVolumeDataset(
-                Path.GetFileName(volumeDir),
-                volumeDir)
-            {
-                PWaveVelocity = _results.PWaveVelocity,
-                SWaveVelocity = _results.SWaveVelocity,
-                VpVsRatio = _results.VpVsRatio,
-                TimeSteps = _results.TotalTimeSteps,
-                ComputationTime = _results.ComputationTime,
-                YoungsModulusMPa = _parameters.YoungsModulusMPa,
-                PoissonRatio = _parameters.PoissonRatio,
-                ConfiningPressureMPa = _parameters.ConfiningPressureMPa,
-                SourceFrequencyKHz = _parameters.SourceFrequencyKHz,
-                SourceEnergyJ = _parameters.SourceEnergyJ,
-                SourceDatasetPath = _sourceDataset.FilePath,
-                SourceMaterialName = GetMaterialName(),
-                CohesionMPa = _parameters.CohesionMPa,
-                FailureAngleDeg = _parameters.FailureAngleDeg,
-                MaxDamage = 1.0f,
-                Calibration = _calibrationData
-            };
-            
-            float progressBase = 0.2f;
-            float progressPerField = 0.15f;
-            
-            // Export P-Wave field
-            if (_results.WaveFieldVx != null)
-            {
-                UpdateProgress(progressBase, "Exporting P-Wave field...");
-                cancellationToken.ThrowIfCancellationRequested();
-                
-                string pWavePath = Path.Combine(volumeDir, "PWaveField.bin");
-                ExportWaveField(_results.WaveFieldVx, pWavePath);
-                progressBase += progressPerField;
-            }
-            
-            // Export S-Wave field
-            if (_results.WaveFieldVy != null)
-            {
-                UpdateProgress(progressBase, "Exporting S-Wave field...");
-                cancellationToken.ThrowIfCancellationRequested();
-                
-                string sWavePath = Path.Combine(volumeDir, "SWaveField.bin");
-                ExportWaveField(_results.WaveFieldVy, sWavePath);
-                progressBase += progressPerField;
-            }
-            
-            // Export Combined field
-            if (_results.WaveFieldVz != null)
-            {
-                UpdateProgress(progressBase, "Creating combined field...");
-                cancellationToken.ThrowIfCancellationRequested();
-                
-                var combined = CreateCombinedField();
-                string combinedPath = Path.Combine(volumeDir, "CombinedField.bin");
-                ExportWaveField(combined, combinedPath);
-                progressBase += progressPerField;
-            }
-            
-            // Export Damage field
-            if (_damageField != null)
-            {
-                UpdateProgress(progressBase, "Exporting damage field...");
-                cancellationToken.ThrowIfCancellationRequested();
-                
-                string damagePath = Path.Combine(volumeDir, "DamageField.bin");
-                ExportWaveField(_damageField, damagePath);
-                progressBase += progressPerField;
-            }
-            
-            // Export time series
-            if (_results.TimeSeriesSnapshots?.Count > 0)
-            {
-                UpdateProgress(0.8f, "Exporting time series snapshots...");
-                ExportTimeSeries(timeSeriesDir, cancellationToken);
-            }
-            
-            // Save metadata
-            UpdateProgress(0.95f, "Saving metadata...");
-            SaveMetadata(acousticDataset, volumeDir);
-            
-            // Save calibration if available
-            if (_calibrationData != null && _calibrationData.Points.Count > 0)
-            {
-                UpdateProgress(0.97f, "Saving calibration data...");
-                SaveCalibration(_calibrationData, volumeDir);
-            }
-            
-            // Add to project
-            UpdateProgress(0.99f, "Adding to project...");
-            acousticDataset.Load();
-            ProjectManager.Instance.AddDataset(acousticDataset);
-            
-            UpdateProgress(1.0f, "Export complete!");
-        }
+{
+    // Create directory structure
+    string volumeDir = Path.ChangeExtension(basePath, null);
+    Directory.CreateDirectory(volumeDir);
+    
+    string timeSeriesDir = Path.Combine(volumeDir, "TimeSeries");
+    if (_results.TimeSeriesSnapshots?.Count > 0)
+    {
+        Directory.CreateDirectory(timeSeriesDir);
+    }
+    
+    UpdateProgress(0.05f, "Creating acoustic volume dataset...");
+    
+    // Create dataset metadata object
+    var acousticDataset = new AcousticVolumeDataset(
+        Path.GetFileName(volumeDir),
+        volumeDir)
+    {
+        PWaveVelocity = _results.PWaveVelocity,
+        SWaveVelocity = _results.SWaveVelocity,
+        VpVsRatio = _results.VpVsRatio,
+        TimeSteps = _results.TotalTimeSteps,
+        ComputationTime = _results.ComputationTime,
+        YoungsModulusMPa = _parameters.YoungsModulusMPa,
+        PoissonRatio = _parameters.PoissonRatio,
+        ConfiningPressureMPa = _parameters.ConfiningPressureMPa,
+        SourceFrequencyKHz = _parameters.SourceFrequencyKHz,
+        SourceEnergyJ = _parameters.SourceEnergyJ,
+        SourceDatasetPath = _sourceDataset.FilePath,
+        SourceMaterialName = GetMaterialName(),
+        CohesionMPa = _parameters.CohesionMPa,
+        FailureAngleDeg = _parameters.FailureAngleDeg,
+        MaxDamage = 1.0f,
+        Calibration = _calibrationData
+    };
+    
+    float progressBase = 0.1f;
+    float progressPerField = 0.1f; // Adjusted progress step for more fields
+    
+    // Export P-Wave field
+    if (_results.WaveFieldVx != null)
+    {
+        UpdateProgress(progressBase, "Exporting P-Wave field...");
+        cancellationToken.ThrowIfCancellationRequested();
+        
+        string pWavePath = Path.Combine(volumeDir, "PWaveField.bin");
+        ExportWaveField(_results.WaveFieldVx, pWavePath);
+        progressBase += progressPerField;
+    }
+    
+    // Export S-Wave field
+    if (_results.WaveFieldVy != null)
+    {
+        UpdateProgress(progressBase, "Exporting S-Wave field...");
+        cancellationToken.ThrowIfCancellationRequested();
+        
+        string sWavePath = Path.Combine(volumeDir, "SWaveField.bin");
+        ExportWaveField(_results.WaveFieldVy, sWavePath);
+        progressBase += progressPerField;
+    }
+    
+    // Export Combined field
+    if (_results.WaveFieldVz != null)
+    {
+        UpdateProgress(progressBase, "Creating combined field...");
+        cancellationToken.ThrowIfCancellationRequested();
+        
+        var combined = CreateCombinedField();
+        string combinedPath = Path.Combine(volumeDir, "CombinedField.bin");
+        ExportWaveField(combined, combinedPath);
+        progressBase += progressPerField;
+    }
+    
+    // Export Damage field
+    if (_damageField != null)
+    {
+        UpdateProgress(progressBase, "Exporting damage field...");
+        cancellationToken.ThrowIfCancellationRequested();
+        
+        string damagePath = Path.Combine(volumeDir, "DamageField.bin");
+        ExportWaveField(_damageField, damagePath);
+        progressBase += progressPerField;
+    }
+    
+    // Export Material Property fields
+    if (_densityVolume != null)
+    {
+        UpdateProgress(progressBase, "Exporting Density Volume...");
+        cancellationToken.ThrowIfCancellationRequested();
+        string path = Path.Combine(volumeDir, "Density.bin");
+        ExportRawFloatField(_densityVolume, path);
+        progressBase += progressPerField;
+    }
+    if (_youngsModulusVolume != null)
+    {
+        UpdateProgress(progressBase, "Exporting Young's Modulus Volume...");
+        cancellationToken.ThrowIfCancellationRequested();
+        string path = Path.Combine(volumeDir, "YoungsModulus.bin");
+        ExportRawFloatField(_youngsModulusVolume, path);
+        progressBase += progressPerField;
+    }
+    if (_poissonRatioVolume != null)
+    {
+        UpdateProgress(progressBase, "Exporting Poisson's Ratio Volume...");
+        cancellationToken.ThrowIfCancellationRequested();
+        string path = Path.Combine(volumeDir, "PoissonRatio.bin");
+        ExportRawFloatField(_poissonRatioVolume, path);
+        progressBase += progressPerField;
+    }
+
+    // Export time series
+    if (_results.TimeSeriesSnapshots?.Count > 0)
+    {
+        UpdateProgress(0.8f, "Exporting time series snapshots..."); // Adjusted progress start
+        ExportTimeSeries(timeSeriesDir, cancellationToken);
+    }
+    
+    // Save metadata
+    UpdateProgress(0.95f, "Saving metadata...");
+    SaveMetadata(acousticDataset, volumeDir);
+    
+    // Save calibration if available
+    if (_calibrationData != null && _calibrationData.Points.Count > 0)
+    {
+        UpdateProgress(0.97f, "Saving calibration data...");
+        SaveCalibration(_calibrationData, volumeDir);
+    }
+    
+    // Add to project
+    UpdateProgress(0.99f, "Adding to project...");
+    acousticDataset.Load(); // The Load method will now pick up the property files we just saved
+    ProjectManager.Instance.AddDataset(acousticDataset);
+    
+    UpdateProgress(1.0f, "Export complete!");
+}
         
         private void ExportWaveField(float[,,] field, string path)
         {
@@ -411,7 +445,25 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
             
             return volume;
         }
-        
+        private void ExportRawFloatField(float[,,] field, string path)
+        {
+            if (field == null) return;
+            int width = field.GetLength(0);
+            int height = field.GetLength(1);
+            int depth = field.GetLength(2);
+
+            using (var writer = new BinaryWriter(File.Create(path)))
+            {
+                writer.Write(width);
+                writer.Write(height);
+                writer.Write(depth);
+
+                // Buffer the entire array for a single fast write
+                var buffer = new byte[field.Length * sizeof(float)];
+                Buffer.BlockCopy(field, 0, buffer, 0, buffer.Length);
+                writer.Write(buffer);
+            }
+        }
         private string GetMaterialName()
         {
             if (_sourceDataset?.Materials == null) return "Unknown";

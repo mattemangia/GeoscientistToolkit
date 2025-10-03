@@ -1317,12 +1317,15 @@ private void ExportAllTomographySlices()
         if (_lastResults != null)
         {
             _currentState = SimulationState.Completed;
-            
-            // Get damage field from simulator
+    
             var damageField = _simulator.GetDamageField();
+    
+            // --- MODIFIED SECTION START ---
             _exportManager.SetDamageField(damageField);
+            _exportManager.SetMaterialPropertyVolumes(densityVolume, youngsModulusVolume, poissonRatioVolume);
             _lastResults.DamageField = damageField;
-            
+            // --- MODIFIED SECTION END ---
+    
             Logger.Log($"[AcousticSimulation] Simulation completed: Vp={_lastResults.PWaveVelocity:F2} m/s, Vs={_lastResults.SWaveVelocity:F2} m/s");
             
             // Add to calibration if single material selected

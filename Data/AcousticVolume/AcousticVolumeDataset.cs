@@ -44,8 +44,8 @@ namespace GeoscientistToolkit.Data.AcousticVolume
         // Reference to source dataset
         public string SourceDatasetPath { get; set; }
         public string SourceMaterialName { get; set; }
-        
-        public DensityVolume DensityData { get; set; } // ADD THIS LINE
+       
+        public DensityVolume DensityData { get; set; }
         
         // Time-series data for animation
         public List<WaveFieldSnapshot> TimeSeriesSnapshots { get; set; }
@@ -78,6 +78,9 @@ namespace GeoscientistToolkit.Data.AcousticVolume
             {
                 size += snapshot.GetSizeInBytes();
             }
+            
+            if (DensityData != null)
+                size += (long)DensityData.Width * DensityData.Height * DensityData.Depth * sizeof(float) * 3;
             
             return size;
         }
@@ -132,7 +135,7 @@ namespace GeoscientistToolkit.Data.AcousticVolume
                 {
                     LoadCalibration(calibrationPath);
                 }
-                
+                LoadMaterialProperties();
                 // Load time series if available
                 LoadTimeSeries();
                 
@@ -151,12 +154,14 @@ namespace GeoscientistToolkit.Data.AcousticVolume
             SWaveField?.Dispose();
             CombinedWaveField?.Dispose();
             DamageField?.Dispose();
+            DensityData?.Dispose(); // ADDED
             TimeSeriesSnapshots?.Clear();
             
             PWaveField = null;
             SWaveField = null;
             CombinedWaveField = null;
             DamageField = null;
+            DensityData = null; // ADDED
             
             Logger.Log($"[AcousticVolumeDataset] Unloaded: {Name}");
         }
@@ -205,7 +210,47 @@ namespace GeoscientistToolkit.Data.AcousticVolume
                 Logger.LogError($"[AcousticVolumeDataset] Failed to save: {ex.Message}");
             }
         }
-        
+        private void LoadMaterialProperties()
+        {
+            string densityPath = Path.Combine(FilePath, "Density.bin");
+            string youngsPath = Path.Combine(FilePath, "YoungsModulus.bin");
+            string poissonPath = Path.Combine(FilePath, "PoissonRatio.bin");
+
+            if (File.Exists(densityPath) && File.Exists(youngsPath) && File.Exists(poissonPath))
+            {
+                try
+                {
+                    var density = LoadRawFloatField(densityPath);
+                    var youngs = LoadRawFloatField(youngsPath);
+                    var poisson = LoadRawFloatField(poissonPath);
+
+                    if (density != null && youngs != null && poisson != null)
+                    {
+                        DensityData = new DensityVolume(density, youngs, poisson);
+                        Logger.Log("[AcousticVolumeDataset] Loaded calibrated material properties.");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Logger.LogError($"[AcousticVolumeDataset] Failed to load material properties: {ex.Message}");
+                }
+            }
+        }
+
+        private float[,,] LoadRawFloatField(string path)
+        {
+            using (var reader = new BinaryReader(File.OpenRead(path)))
+            {
+                int width = reader.ReadInt32();
+                int height = reader.ReadInt32();
+                int depth = reader.ReadInt32();
+
+                var field = new float[width, height, depth];
+                var buffer = reader.ReadBytes(field.Length * sizeof(float));
+                Buffer.BlockCopy(buffer, 0, field, 0, buffer.Length);
+                return field;
+            }
+        }
         private void LoadMetadata(string path)
         {
             try
