@@ -542,7 +542,7 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
         for (int x = 1; x < _params.Width - 1; x++)
         {
             byte materialId = labels[x, y, gz];
-            if (materialId == 0) continue;
+            if (materialId != _params.SelectedMaterialID || density[x, y, gz] <= 0f) continue;
 
             float localE, localNu, localLambda, localMu;
             if (_usePerVoxelProperties && _perVoxelYoungsModulus != null && _perVoxelPoissonRatio != null)
@@ -664,9 +664,8 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
         for (int y = 1; y < _params.Height - 1; y++)
         for (int x = 1; x < _params.Width - 1; x++)
         {
-            // Allow wave propagation through ALL materials
             byte materialId = labels[x, y, gz];
-            if (materialId == 0) continue; // Skip air/background
+            if (materialId != _params.SelectedMaterialID || density[x, y, gz] <= 0f) continue;
             
             float rho = MathF.Max(100f, density[x, y, gz]);
             
@@ -1144,6 +1143,9 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
         int y = rem / width;
         int x = rem % width;
         
+        uchar mat = material[idx];
+        if (mat != selectedMaterial || density[idx] <= 0.0f) return;
+
         if (applySource != 0) {
             if (isFullFace != 0) {
                 if (sourceAxis == 0 && x < 2) sxx[idx] += sourceValue;
@@ -1161,8 +1163,6 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
             }
         }
         
-        uchar mat = material[idx];
-        if (mat == 0) return;
         if (x <= 0 || x >= width-1 || y <= 0 || y >= height-1 || z <= 0 || z >= depth-1) return;
         
         float E = youngsModulus[idx] * 1e6f;
@@ -1285,12 +1285,13 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
         int idx = get_global_id(0);
         if (idx >= width * height * depth) return;
         
+        if (material[idx] != selectedMaterial || density[idx] <= 0.0f) return;
+
         int z = idx / (width * height);
         int rem = idx % (width * height);
         int y = rem / width;
         int x = rem % width;
         
-        if (material[idx] == 0) return;
         if (x <= 0 || x >= width-1 || y <= 0 || y >= height-1 || z <= 0 || z >= depth-1) return;
         
         int xp1 = idx + 1; int xm1 = idx - 1;
