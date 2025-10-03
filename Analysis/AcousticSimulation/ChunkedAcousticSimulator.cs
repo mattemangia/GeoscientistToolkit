@@ -1,4 +1,6 @@
 // GeoscientistToolkit/Analysis/AcousticSimulation/ChunkedAcousticSimulator.cs
+// FIXED VERSION - Complete implementation with corrected boundary handling
+
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -13,33 +15,17 @@ using Silk.NET.OpenCL;
 
 namespace GeoscientistToolkit.Analysis.AcousticSimulation
 {
-    /// <summary>
-    /// High-performance, chunk-based acoustic simulator with optional GPU acceleration.
-    /// This design is memory-efficient for very large datasets.
-    /// </summary>
     public class ChunkedAcousticSimulator : IDisposable
     {
         private readonly SimulationParameters _params;
         private long _lastDeviceBytes;
 
-        // Public property for UI to read current memory usage
-        public long CurrentMemoryUsageMB
-        {
-            get
-            {
-                long managedBytes = GC.GetTotalMemory(false);
-                long deviceBytes = Interlocked.Read(ref _lastDeviceBytes);
-                return (managedBytes + deviceBytes) / (1024 * 1024);
-            }
-        }
+        public long CurrentMemoryUsageMB => (GC.GetTotalMemory(false) + Interlocked.Read(ref _lastDeviceBytes)) / (1024 * 1024);
 
         private readonly float _lambda, _mu;
         private float _dt;
-        private readonly float _tensileLimitPa;
-        private readonly float _shearLimitPa;
         private readonly float _damageRatePerSec = 0.2f;
         
-        // Ricker wavelet parameters
         private float _rickerT0;
         private readonly bool _isRickerActive;
 
@@ -56,6 +42,7 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
             public float[,,] Vx, Vy, Vz;
             public float[,,] Sxx, Syy, Szz, Sxy, Sxz, Syz;
             public float[,,] Damage;
+            public float[,,] MaxAbsVx, MaxAbsVy, MaxAbsVz;
             public bool IsInMemory = true;
             public string FilePath;
         }
@@ -65,23 +52,16 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
 
         private readonly bool _useGPU;
         private readonly CL _cl = CL.GetApi();
-        private nint _platform;
-        private nint _device;
-        private nint _context;
-        private nint _queue;
-        private nint _program;
-        private nint _kernelStress;
-        private nint _kernelVelocity;
-
-        private nint _bufMat;
-        private nint _bufDen;
+        private nint _platform, _device, _context, _queue, _program, _kernelStress, _kernelVelocity;
+        private nint _bufMat, _bufDen, _bufMatLookup; // NEW: Material lookup buffer
         private readonly nint[] _bufVel = new nint[3];
+        private readonly nint[] _bufMaxVel = new nint[3];
         private readonly nint[] _bufStr = new nint[6];
-        private nint _bufDmg;
-        // --- MODIFICATION: Buffers for per-voxel material properties ---
-        private nint _bufYoungsModulus;
-        private nint _bufPoissonRatio;
+        private nint _bufDmg, _bufYoungsModulus, _bufPoissonRatio;
 
+        private float[,,] _perVoxelYoungsModulus;
+        private float[,,] _perVoxelPoissonRatio;
+        private bool _usePerVoxelProperties = false;
 
         public ChunkedAcousticSimulator(SimulationParameters parameters)
         {
@@ -100,12 +80,8 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
                 _rickerT0 = 1.2f / freq;
             }
 
-            // These are now calculated on-the-fly from Mohr-Coulomb parameters
-            _tensileLimitPa = 0; // 0.05f * E;
-            _shearLimitPa = 0; // 0.03f * E;
-
             long targetBytes = (_params.ChunkSizeMB > 0 ? _params.ChunkSizeMB : 256) * 1024L * 1024L;
-            long bytesPerZ = (long)_params.Width * _params.Height * sizeof(float) * 10;
+            long bytesPerZ = (long)_params.Width * _params.Height * sizeof(float) * 13;
             _chunkDepth = (int)Math.Clamp(targetBytes / Math.Max(1, bytesPerZ), 8, _params.Depth);
 
             InitChunks();
@@ -126,17 +102,13 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
             }
         }
 
-        private float[,,] _perVoxelYoungsModulus;
-        private float[,,] _perVoxelPoissonRatio;
-        private bool _usePerVoxelProperties = false;
-
-
         public void SetPerVoxelMaterialProperties(float[,,] youngsModulus, float[,,] poissonRatio)
         {
             _perVoxelYoungsModulus = youngsModulus;
             _perVoxelPoissonRatio = poissonRatio;
             _usePerVoxelProperties = true;
         }
+
         private void InitChunks()
         {
             for (int z0 = 0; z0 < _params.Depth; z0 += _chunkDepth)
@@ -147,13 +119,22 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
                 _chunks.Add(new WaveFieldChunk
                 {
                     StartZ = z0, EndZ = z1,
-                    Vx = new float[_params.Width, _params.Height, d], Vy = new float[_params.Width, _params.Height, d], Vz = new float[_params.Width, _params.Height, d],
-                    Sxx = new float[_params.Width, _params.Height, d], Syy = new float[_params.Width, _params.Height, d], Szz = new float[_params.Width, _params.Height, d],
-                    Sxy = new float[_params.Width, _params.Height, d], Sxz = new float[_params.Width, _params.Height, d], Syz = new float[_params.Width, _params.Height, d],
-                    Damage = new float[_params.Width, _params.Height, d]
+                    Vx = new float[_params.Width, _params.Height, d],
+                    Vy = new float[_params.Width, _params.Height, d],
+                    Vz = new float[_params.Width, _params.Height, d],
+                    Sxx = new float[_params.Width, _params.Height, d],
+                    Syy = new float[_params.Width, _params.Height, d],
+                    Szz = new float[_params.Width, _params.Height, d],
+                    Sxy = new float[_params.Width, _params.Height, d],
+                    Sxz = new float[_params.Width, _params.Height, d],
+                    Syz = new float[_params.Width, _params.Height, d],
+                    Damage = new float[_params.Width, _params.Height, d],
+                    MaxAbsVx = new float[_params.Width, _params.Height, d],
+                    MaxAbsVy = new float[_params.Width, _params.Height, d],
+                    MaxAbsVz = new float[_params.Width, _params.Height, d]
                 });
             }
-            Logger.Log($"[ChunkedSimulator] Initialized with {_chunks.Count} chunks of depth {_chunkDepth}");
+            Logger.Log($"[ChunkedSimulator] Initialized {_chunks.Count} chunks of depth ~{_chunkDepth}");
         }
 
         public async Task<SimulationResults> RunAsync(byte[,,] labels, float[,,] density, CancellationToken token)
@@ -163,13 +144,10 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
 
             CalculateTimeStep(density);
             
-            if (_params.EnableOffloading)
+            // FIX: Ensure all chunks start in memory
+            foreach (var chunk in _chunks)
             {
-                // Initially, offload all chunks except the first two needed for the first step.
-                for (int i = 2; i < _chunks.Count; i++)
-                {
-                    await OffloadChunkAsync(_chunks[i]);
-                }
+                chunk.IsInMemory = true;
             }
 
             int maxSteps = Math.Max(1, _params.TimeSteps);
@@ -184,45 +162,9 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
                 
                 float sourceValue = GetCurrentSourceValue(step);
 
-                // --- STRESS UPDATE PASS ---
-                for (int i = 0; i < _chunks.Count; i++)
-                {
-                    if (_params.EnableOffloading)
-                    {
-                        if (i + 1 < _chunks.Count) await LoadChunkAsync(_chunks[i + 1]);
-                        if (i - 2 >= 0) await OffloadChunkAsync(_chunks[i - 2]);
-                    }
-                    var c = _chunks[i];
-                    if (!c.IsInMemory) await LoadChunkAsync(c);
-
-                    if (_useGPU)
-                        await ProcessChunkGPU_StressOnly(c, labels, density, sourceValue, token);
-                    else
-                    {
-                        if (sourceValue != 0)
-                            ApplySourceToChunkCPU(c, sourceValue);
-                        UpdateChunkStressCPU(c, labels, density);
-                    }
-                }
-                ExchangeStressBoundaries();
-
-                // --- VELOCITY UPDATE PASS ---
-                for (int i = 0; i < _chunks.Count; i++)
-                {
-                    if (_params.EnableOffloading)
-                    {
-                        if (i + 1 < _chunks.Count) await LoadChunkAsync(_chunks[i + 1]);
-                        if (i - 2 >= 0) await OffloadChunkAsync(_chunks[i - 2]);
-                    }
-                    var c = _chunks[i];
-                    if (!c.IsInMemory) await LoadChunkAsync(c);
-
-                    if (_useGPU)
-                        await ProcessChunkGPU_VelocityOnly(c, labels, density, token);
-                    else
-                        UpdateChunkVelocityCPU(c, labels, density);
-                }
-                ExchangeVelocityBoundaries();
+                // FIX: Process with proper boundary exchange
+                await ProcessStressUpdatePass(labels, density, sourceValue, token);
+                await ProcessVelocityUpdatePass(labels, density, token);
 
                 if (_params.SaveTimeSeries && step % _params.SnapshotInterval == 0)
                     results.TimeSeriesSnapshots?.Add(CreateSnapshot(step));
@@ -231,7 +173,10 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
                 {
                     WaveFieldUpdated?.Invoke(this, new WaveFieldUpdateEventArgs
                     {
-                        WaveField = GetCombinedMagnitude(), TimeStep = step, SimTime = step * _dt, Dataset = labels
+                        WaveField = GetCombinedMagnitude(),
+                        TimeStep = step,
+                        SimTime = step * _dt,
+                        Dataset = labels
                     });
                 }
 
@@ -239,17 +184,12 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
                 if (pHit && !sHit && CheckSWaveArrival()) { sHit = true; sStep = step; }
 
                 Progress = (float)step / maxSteps;
-                ProgressUpdated?.Invoke(this, new SimulationProgressEventArgs { Progress = Progress, Step = step, Message = $"Step {step}" });
+                ProgressUpdated?.Invoke(this, new SimulationProgressEventArgs { Progress = Progress, Step = step, Message = $"Step {step}/{maxSteps}" });
             }
 
-            if (_params.EnableOffloading)
-            {
-                // Reload all chunks to reconstruct the final fields
-                foreach(var chunk in _chunks)
-                {
-                    await LoadChunkAsync(chunk);
-                }
-            }
+            // Ensure all data in memory for reconstruction
+            foreach (var chunk in _chunks.Where(c => !c.IsInMemory))
+                await LoadChunkAsync(chunk);
 
             float distance = CalculateTxRxDistance();
             results.PWaveVelocity = pStep > 0 ? distance / (pStep * _dt) : 0;
@@ -260,16 +200,207 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
             results.TotalTimeSteps = step;
             results.ComputationTime = DateTime.Now - started;
 
-            results.WaveFieldVx = await ReconstructFieldAsync(0);
-            results.WaveFieldVy = await ReconstructFieldAsync(1);
-            results.WaveFieldVz = await ReconstructFieldAsync(2);
+            results.WaveFieldVx = await ReconstructMaxFieldAsync(0);
+            results.WaveFieldVy = await ReconstructMaxFieldAsync(1);
+            results.WaveFieldVz = await ReconstructMaxFieldAsync(2);
             results.DamageField = GetDamageField();
 
             return results;
         }
 
-        #region OpenCL and GPU Processing
+        // FIX: Stress update with correct boundary exchange
+        private async Task ProcessStressUpdatePass(byte[,,] labels, float[,,] density, float sourceValue, CancellationToken token)
+        {
+            // CRITICAL: For correct FD, we need all ghost cells updated with data from previous timestep
+            // This requires all chunks in memory. If offloading is enabled, load everything first.
+            if (_params.EnableOffloading)
+            {
+                foreach (var chunk in _chunks.Where(c => !c.IsInMemory))
+                    await LoadChunkAsync(chunk);
+            }
 
+            // Exchange ALL boundaries BEFORE processing any chunk
+            // This ensures every stencil operation reads consistent data
+            for (int i = 0; i < _chunks.Count - 1; i++)
+            {
+                ExchangeStressBetweenChunks(_chunks[i], _chunks[i + 1]);
+            }
+
+            // Apply global boundary conditions at volume edges
+            ApplyGlobalBoundaryConditions();
+
+            // Now process all chunks - they all have valid ghost cells
+            for (int i = 0; i < _chunks.Count; i++)
+            {
+                var chunk = _chunks[i];
+
+                if (_useGPU)
+                    await ProcessChunkGPU_StressOnly(chunk, labels, density, sourceValue, token);
+                else
+                {
+                    if (sourceValue != 0)
+                        ApplySourceToChunkCPU(chunk, sourceValue);
+                    UpdateChunkStressCPU(chunk, labels, density);
+                }
+            }
+
+            // Optionally offload chunks after the entire pass completes
+            // Note: They'll be reloaded at the start of next pass
+            if (_params.EnableOffloading)
+            {
+                for (int i = 0; i < _chunks.Count - 1; i++)
+                    await OffloadChunkAsync(_chunks[i]);
+            }
+        }
+
+        // FIX: Velocity update with correct boundary exchange
+        private async Task ProcessVelocityUpdatePass(byte[,,] labels, float[,,] density, CancellationToken token)
+        {
+            // Load all chunks if offloading is enabled
+            if (_params.EnableOffloading)
+            {
+                foreach (var chunk in _chunks.Where(c => !c.IsInMemory))
+                    await LoadChunkAsync(chunk);
+            }
+
+            // Exchange ALL boundaries BEFORE processing
+            for (int i = 0; i < _chunks.Count - 1; i++)
+            {
+                ExchangeVelocityBetweenChunks(_chunks[i], _chunks[i + 1]);
+            }
+
+            // Apply global boundary conditions
+            ApplyGlobalBoundaryConditions();
+
+            // Process all chunks
+            for (int i = 0; i < _chunks.Count; i++)
+            {
+                var chunk = _chunks[i];
+
+                if (_useGPU)
+                    await ProcessChunkGPU_VelocityOnly(chunk, labels, density, token);
+                else
+                    UpdateChunkVelocityCPU(chunk, labels, density);
+            }
+
+            // Optionally offload after pass
+            if (_params.EnableOffloading)
+            {
+                for (int i = 0; i < _chunks.Count - 1; i++)
+                    await OffloadChunkAsync(_chunks[i]);
+            }
+        }
+
+        // Apply absorbing boundary conditions at global volume boundaries
+        private void ApplyGlobalBoundaryConditions()
+        {
+            if (_chunks.Count == 0) return;
+
+            // First chunk: top boundary (z=0) - use simple absorbing condition
+            var firstChunk = _chunks[0];
+            int d0 = firstChunk.EndZ - firstChunk.StartZ;
+            for (int y = 0; y < _params.Height; y++)
+            {
+                for (int x = 0; x < _params.Width; x++)
+                {
+                    // Copy first interior layer to ghost layer (free boundary approximation)
+                    firstChunk.Vx[x, y, 0] = firstChunk.Vx[x, y, 1];
+                    firstChunk.Vy[x, y, 0] = firstChunk.Vy[x, y, 1];
+                    firstChunk.Vz[x, y, 0] = firstChunk.Vz[x, y, 1];
+                    firstChunk.Sxx[x, y, 0] = firstChunk.Sxx[x, y, 1];
+                    firstChunk.Syy[x, y, 0] = firstChunk.Syy[x, y, 1];
+                    firstChunk.Szz[x, y, 0] = firstChunk.Szz[x, y, 1];
+                    firstChunk.Sxy[x, y, 0] = firstChunk.Sxy[x, y, 1];
+                    firstChunk.Sxz[x, y, 0] = firstChunk.Sxz[x, y, 1];
+                    firstChunk.Syz[x, y, 0] = firstChunk.Syz[x, y, 1];
+                }
+            }
+
+            // Last chunk: bottom boundary (z=depth-1)
+            var lastChunk = _chunks[_chunks.Count - 1];
+            int d_last = lastChunk.EndZ - lastChunk.StartZ;
+            for (int y = 0; y < _params.Height; y++)
+            {
+                for (int x = 0; x < _params.Width; x++)
+                {
+                    lastChunk.Vx[x, y, d_last - 1] = lastChunk.Vx[x, y, d_last - 2];
+                    lastChunk.Vy[x, y, d_last - 1] = lastChunk.Vy[x, y, d_last - 2];
+                    lastChunk.Vz[x, y, d_last - 1] = lastChunk.Vz[x, y, d_last - 2];
+                    lastChunk.Sxx[x, y, d_last - 1] = lastChunk.Sxx[x, y, d_last - 2];
+                    lastChunk.Syy[x, y, d_last - 1] = lastChunk.Syy[x, y, d_last - 2];
+                    lastChunk.Szz[x, y, d_last - 1] = lastChunk.Szz[x, y, d_last - 2];
+                    lastChunk.Sxy[x, y, d_last - 1] = lastChunk.Sxy[x, y, d_last - 2];
+                    lastChunk.Sxz[x, y, d_last - 1] = lastChunk.Sxz[x, y, d_last - 2];
+                    lastChunk.Syz[x, y, d_last - 1] = lastChunk.Syz[x, y, d_last - 2];
+                }
+            }
+        }
+
+        // FIX: Ensure 3-chunk window is in memory
+        private async Task EnsureChunksInMemory(int chunkIndex)
+        {
+            if (!_chunks[chunkIndex].IsInMemory)
+                await LoadChunkAsync(_chunks[chunkIndex]);
+
+            if (chunkIndex > 0 && !_chunks[chunkIndex - 1].IsInMemory)
+                await LoadChunkAsync(_chunks[chunkIndex - 1]);
+
+            if (chunkIndex < _chunks.Count - 1 && !_chunks[chunkIndex + 1].IsInMemory)
+                await LoadChunkAsync(_chunks[chunkIndex + 1]);
+        }
+
+        // FIX: Correct boundary exchange between adjacent chunks
+        private void ExchangeStressBetweenChunks(WaveFieldChunk topChunk, WaveFieldChunk bottomChunk)
+        {
+            if (!topChunk.IsInMemory || !bottomChunk.IsInMemory) return;
+
+            int topDepth = topChunk.EndZ - topChunk.StartZ;
+
+            for (int y = 0; y < _params.Height; y++)
+            {
+                for (int x = 0; x < _params.Width; x++)
+                {
+                    // Top chunk's last layer gets bottom chunk's second layer
+                    topChunk.Sxx[x, y, topDepth - 1] = bottomChunk.Sxx[x, y, 1];
+                    topChunk.Syy[x, y, topDepth - 1] = bottomChunk.Syy[x, y, 1];
+                    topChunk.Szz[x, y, topDepth - 1] = bottomChunk.Szz[x, y, 1];
+                    topChunk.Sxy[x, y, topDepth - 1] = bottomChunk.Sxy[x, y, 1];
+                    topChunk.Sxz[x, y, topDepth - 1] = bottomChunk.Sxz[x, y, 1];
+                    topChunk.Syz[x, y, topDepth - 1] = bottomChunk.Syz[x, y, 1];
+
+                    // Bottom chunk's first layer gets top chunk's second-to-last layer
+                    bottomChunk.Sxx[x, y, 0] = topChunk.Sxx[x, y, topDepth - 2];
+                    bottomChunk.Syy[x, y, 0] = topChunk.Syy[x, y, topDepth - 2];
+                    bottomChunk.Szz[x, y, 0] = topChunk.Szz[x, y, topDepth - 2];
+                    bottomChunk.Sxy[x, y, 0] = topChunk.Sxy[x, y, topDepth - 2];
+                    bottomChunk.Sxz[x, y, 0] = topChunk.Sxz[x, y, topDepth - 2];
+                    bottomChunk.Syz[x, y, 0] = topChunk.Syz[x, y, topDepth - 2];
+                }
+            }
+        }
+
+        private void ExchangeVelocityBetweenChunks(WaveFieldChunk topChunk, WaveFieldChunk bottomChunk)
+        {
+            if (!topChunk.IsInMemory || !bottomChunk.IsInMemory) return;
+
+            int topDepth = topChunk.EndZ - topChunk.StartZ;
+
+            for (int y = 0; y < _params.Height; y++)
+            {
+                for (int x = 0; x < _params.Width; x++)
+                {
+                    topChunk.Vx[x, y, topDepth - 1] = bottomChunk.Vx[x, y, 1];
+                    topChunk.Vy[x, y, topDepth - 1] = bottomChunk.Vy[x, y, 1];
+                    topChunk.Vz[x, y, topDepth - 1] = bottomChunk.Vz[x, y, 1];
+
+                    bottomChunk.Vx[x, y, 0] = topChunk.Vx[x, y, topDepth - 2];
+                    bottomChunk.Vy[x, y, 0] = topChunk.Vy[x, y, topDepth - 2];
+                    bottomChunk.Vz[x, y, 0] = topChunk.Vz[x, y, topDepth - 2];
+                }
+            }
+        }
+
+        #region OpenCL and GPU Processing
         private unsafe void InitOpenCL()
         {
             uint nplat = 0;
@@ -292,7 +423,7 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
             fixed (nint* pDevs = devs) _cl.GetDeviceIDs(_platform, chosen, ndev, pDevs, null);
             _device = devs[0];
             
-            int err; // Declare err here to be in scope for the whole method
+            int err;
             nint[] one = { _device };
             fixed (nint* p = one)
                 _context = _cl.CreateContext(null, 1u, p, null, null, out err);
@@ -341,10 +472,10 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
 
                 var mat = new byte[size]; var den = new float[size]; var vx = new float[size]; var vy = new float[size]; var vz = new float[size];
                 var sxx = new float[size]; var syy = new float[size]; var szz = new float[size]; var sxy = new float[size]; var sxz = new float[size]; var syz = new float[size];
-                var dmg = new float[size];
-                var ym = new float[size]; 
-                var pr = new float[size];
-
+                var dmg = new float[size]; var ym = new float[size]; var pr = new float[size];
+                
+                // NEW: Get material lookup table
+                var matLookup = _params.CreateMaterialLookupTable();
 
                 int k = 0;
                 for (int lz = 0; lz < d; lz++)
@@ -368,7 +499,6 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
                             ym[k] = _params.YoungsModulusMPa;
                             pr[k] = _params.PoissonRatio;
                         }
-
                     }
                 }
                 
@@ -376,11 +506,12 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
                 {
                     fixed (byte* pMat = mat) fixed (float* pDen = den) fixed (float* pVx = vx) fixed (float* pVy = vy) fixed (float* pVz = vz)
                     fixed (float* pSxx = sxx) fixed (float* pSyy = syy) fixed (float* pSzz = szz) fixed (float* pSxy = sxy) fixed (float* pSxz = sxz) fixed (float* pSyz = syz)
-                    fixed (float* pDmg = dmg)
-                    fixed (float* pYm = ym) fixed (float* pPr = pr)
+                    fixed (float* pDmg = dmg) fixed (float* pYm = ym) fixed (float* pPr = pr)
+                    fixed (byte* pMatLookup = matLookup) // NEW: Pin material lookup
                     {
                         _bufMat = _cl.CreateBuffer(_context, MemFlags.ReadOnly | MemFlags.CopyHostPtr, (nuint)(size * sizeof(byte)), pMat, out int err);
                         _bufDen = _cl.CreateBuffer(_context, MemFlags.ReadOnly | MemFlags.CopyHostPtr, (nuint)(size * sizeof(float)), pDen, out err);
+                        _bufMatLookup = _cl.CreateBuffer(_context, MemFlags.ReadOnly | MemFlags.CopyHostPtr, 256, pMatLookup, out err); // NEW
                         _bufVel[0] = _cl.CreateBuffer(_context, MemFlags.ReadOnly | MemFlags.CopyHostPtr, (nuint)(size * sizeof(float)), pVx, out err);
                         _bufVel[1] = _cl.CreateBuffer(_context, MemFlags.ReadOnly | MemFlags.CopyHostPtr, (nuint)(size * sizeof(float)), pVy, out err);
                         _bufVel[2] = _cl.CreateBuffer(_context, MemFlags.ReadOnly | MemFlags.CopyHostPtr, (nuint)(size * sizeof(float)), pVz, out err);
@@ -394,8 +525,7 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
                         _bufYoungsModulus = _cl.CreateBuffer(_context, MemFlags.ReadOnly | MemFlags.CopyHostPtr, (nuint)(size * sizeof(float)), pYm, out err);
                         _bufPoissonRatio = _cl.CreateBuffer(_context, MemFlags.ReadOnly | MemFlags.CopyHostPtr, (nuint)(size * sizeof(float)), pPr, out err);
 
-                        
-                        _lastDeviceBytes = (long)size * (sizeof(byte) + sizeof(float) * 13);
+                        _lastDeviceBytes = (long)size * (sizeof(byte) + sizeof(float) * 13) + 256;
                         
                         SetKernelArgs(_kernelStress, w, h, d, c.StartZ, sourceValue);
                         nuint gws = (nuint)size;
@@ -437,6 +567,10 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
 
                 var mat = new byte[size]; var den = new float[size]; var vx = new float[size]; var vy = new float[size]; var vz = new float[size];
                 var sxx = new float[size]; var syy = new float[size]; var szz = new float[size]; var sxy = new float[size]; var sxz = new float[size]; var syz = new float[size];
+                var max_vx = new float[size]; var max_vy = new float[size]; var max_vz = new float[size];
+                
+                // NEW: Get material lookup table
+                var matLookup = _params.CreateMaterialLookupTable();
 
                 int k = 0;
                 for (int lz = 0; lz < d; lz++)
@@ -449,6 +583,9 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
                         vx[k] = c.Vx[x, y, lz]; vy[k] = c.Vy[x, y, lz]; vz[k] = c.Vz[x, y, lz];
                         sxx[k] = c.Sxx[x, y, lz]; syy[k] = c.Syy[x, y, lz]; szz[k] = c.Szz[x, y, lz];
                         sxy[k] = c.Sxy[x, y, lz]; sxz[k] = c.Sxz[x, y, lz]; syz[k] = c.Syz[x, y, lz];
+                        max_vx[k] = c.MaxAbsVx[x, y, lz];
+                        max_vy[k] = c.MaxAbsVy[x, y, lz];
+                        max_vz[k] = c.MaxAbsVz[x, y, lz];
                     }
                 }
 
@@ -456,9 +593,12 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
                 {
                     fixed (byte* pMat = mat) fixed (float* pDen = den) fixed (float* pVx = vx) fixed (float* pVy = vy) fixed (float* pVz = vz)
                     fixed (float* pSxx = sxx) fixed (float* pSyy = syy) fixed (float* pSzz = szz) fixed (float* pSxy = sxy) fixed (float* pSxz = sxz) fixed (float* pSyz = syz)
+                    fixed (float* pMaxVx = max_vx) fixed (float* pMaxVy = max_vy) fixed (float* pMaxVz = max_vz)
+                    fixed (byte* pMatLookup = matLookup) // NEW: Pin material lookup
                     {
                         _bufMat = _cl.CreateBuffer(_context, MemFlags.ReadOnly | MemFlags.CopyHostPtr, (nuint)(size * sizeof(byte)), pMat, out int err);
                         _bufDen = _cl.CreateBuffer(_context, MemFlags.ReadOnly | MemFlags.CopyHostPtr, (nuint)(size * sizeof(float)), pDen, out err);
+                        _bufMatLookup = _cl.CreateBuffer(_context, MemFlags.ReadOnly | MemFlags.CopyHostPtr, 256, pMatLookup, out err); // NEW
                         _bufVel[0] = _cl.CreateBuffer(_context, MemFlags.ReadWrite | MemFlags.CopyHostPtr, (nuint)(size * sizeof(float)), pVx, out err);
                         _bufVel[1] = _cl.CreateBuffer(_context, MemFlags.ReadWrite | MemFlags.CopyHostPtr, (nuint)(size * sizeof(float)), pVy, out err);
                         _bufVel[2] = _cl.CreateBuffer(_context, MemFlags.ReadWrite | MemFlags.CopyHostPtr, (nuint)(size * sizeof(float)), pVz, out err);
@@ -468,8 +608,11 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
                         _bufStr[3] = _cl.CreateBuffer(_context, MemFlags.ReadOnly | MemFlags.CopyHostPtr, (nuint)(size * sizeof(float)), pSxy, out err);
                         _bufStr[4] = _cl.CreateBuffer(_context, MemFlags.ReadOnly | MemFlags.CopyHostPtr, (nuint)(size * sizeof(float)), pSxz, out err);
                         _bufStr[5] = _cl.CreateBuffer(_context, MemFlags.ReadOnly | MemFlags.CopyHostPtr, (nuint)(size * sizeof(float)), pSyz, out err);
-                        
-                        _lastDeviceBytes = (long)size * (sizeof(byte) + sizeof(float) * 12);
+                        _bufMaxVel[0] = _cl.CreateBuffer(_context, MemFlags.ReadWrite | MemFlags.CopyHostPtr, (nuint)(size * sizeof(float)), pMaxVx, out err);
+                        _bufMaxVel[1] = _cl.CreateBuffer(_context, MemFlags.ReadWrite | MemFlags.CopyHostPtr, (nuint)(size * sizeof(float)), pMaxVy, out err);
+                        _bufMaxVel[2] = _cl.CreateBuffer(_context, MemFlags.ReadWrite | MemFlags.CopyHostPtr, (nuint)(size * sizeof(float)), pMaxVz, out err);
+
+                        _lastDeviceBytes = (long)size * (sizeof(byte) + sizeof(float) * 15) + 256;
                         
                         SetKernelArgs(_kernelVelocity, w, h, d, c.StartZ, 0);
                         nuint gws = (nuint)size;
@@ -480,6 +623,9 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
                         _cl.EnqueueReadBuffer(_queue, _bufVel[0], true, 0, (nuint)(size * sizeof(float)), pVx, 0, null, null);
                         _cl.EnqueueReadBuffer(_queue, _bufVel[1], true, 0, (nuint)(size * sizeof(float)), pVy, 0, null, null);
                         _cl.EnqueueReadBuffer(_queue, _bufVel[2], true, 0, (nuint)(size * sizeof(float)), pVz, 0, null, null);
+                        _cl.EnqueueReadBuffer(_queue, _bufMaxVel[0], true, 0, (nuint)(size * sizeof(float)), pMaxVx, 0, null, null);
+                        _cl.EnqueueReadBuffer(_queue, _bufMaxVel[1], true, 0, (nuint)(size * sizeof(float)), pMaxVy, 0, null, null);
+                        _cl.EnqueueReadBuffer(_queue, _bufMaxVel[2], true, 0, (nuint)(size * sizeof(float)), pMaxVz, 0, null, null);
                     }
                 }
 
@@ -489,6 +635,9 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
                 for (int x = 0; x < w; x++, k++)
                 {
                     c.Vx[x, y, lz] = vx[k]; c.Vy[x, y, lz] = vy[k]; c.Vz[x, y, lz] = vz[k];
+                    c.MaxAbsVx[x, y, lz] = max_vx[k];
+                    c.MaxAbsVy[x, y, lz] = max_vy[k];
+                    c.MaxAbsVz[x, y, lz] = max_vz[k];
                 }
 
                 ReleaseChunkBuffers();
@@ -500,6 +649,7 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
             uint a = 0;
             nint bufMatArg = _bufMat;
             nint bufDenArg = _bufDen;
+            nint bufMatLookupArg = _bufMatLookup; // NEW
             nint bufVel0Arg = _bufVel[0];
             nint bufVel1Arg = _bufVel[1];
             nint bufVel2Arg = _bufVel[2];
@@ -512,9 +662,13 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
             nint bufDmgArg = _bufDmg;
             nint bufYmArg = _bufYoungsModulus;
             nint bufPrArg = _bufPoissonRatio;
+            nint bufMaxVel0Arg = _bufMaxVel[0];
+            nint bufMaxVel1Arg = _bufMaxVel[1];
+            nint bufMaxVel2Arg = _bufMaxVel[2];
 
             var paramsPixelSize = _params.PixelSize;
             var paramsSelectedMaterialId = _params.SelectedMaterialID;
+            
             if (kernel == _kernelStress)
             {
                 var paramsConfiningPressureMPa = _params.ConfiningPressureMPa;
@@ -527,11 +681,35 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
                 int tx = (int)(_params.TxPosition.X * _params.Width);
                 int ty = (int)(_params.TxPosition.Y * _params.Height);
                 int tz = (int)(_params.TxPosition.Z * _params.Depth);
+                
+                // FIX: Only apply full-face source in the chunk that contains the source position
                 int applySource = 0;
                 if (sourceValue != 0)
                 {
-                    if (_params.UseFullFaceTransducers) applySource = 1;
-                    else if (tz >= chunkStartZ && tz < chunkStartZ + d) applySource = 1;
+                    if (_params.UseFullFaceTransducers)
+                    {
+                        // Check if this chunk contains the source face
+                        bool chunkContainsSource = false;
+                        switch (_params.Axis)
+                        {
+                            case 0: // X-axis source at x=0
+                                chunkContainsSource = (tx <= 2);
+                                break;
+                            case 1: // Y-axis source at y=0
+                                chunkContainsSource = (ty <= 2);
+                                break;
+                            case 2: // Z-axis source at z=0
+                                chunkContainsSource = (chunkStartZ == 0 && tz <= 2);
+                                break;
+                        }
+                        applySource = chunkContainsSource ? 1 : 0;
+                    }
+                    else
+                    {
+                        // Point source - check if in this chunk
+                        if (tz >= chunkStartZ && tz < chunkStartZ + d)
+                            applySource = 1;
+                    }
                 }
 
                 int localTz = tz - chunkStartZ;
@@ -540,6 +718,7 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
 
                 _cl.SetKernelArg(kernel, a++, (nuint)sizeof(nint), in bufMatArg);
                 _cl.SetKernelArg(kernel, a++, (nuint)sizeof(nint), in bufDenArg);
+                _cl.SetKernelArg(kernel, a++, (nuint)sizeof(nint), in bufMatLookupArg); // NEW
                 _cl.SetKernelArg(kernel, a++, (nuint)sizeof(nint), in bufVel0Arg);
                 _cl.SetKernelArg(kernel, a++, (nuint)sizeof(nint), in bufVel1Arg);
                 _cl.SetKernelArg(kernel, a++, (nuint)sizeof(nint), in bufVel2Arg);
@@ -567,7 +746,7 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
                 int useBrittle = paramsUseBrittleModel ? 1 : 0;
                 _cl.SetKernelArg(kernel, a++, (nuint)sizeof(int), in useBrittle);
                 
-                // New source args
+                // Source application args
                 _cl.SetKernelArg(kernel, a++, (nuint)sizeof(float), in sourceValue);
                 _cl.SetKernelArg(kernel, a++, (nuint)sizeof(int), in applySource);
                 _cl.SetKernelArg(kernel, a++, (nuint)sizeof(int), in tx);
@@ -580,6 +759,7 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
             {
                 _cl.SetKernelArg(kernel, a++, (nuint)sizeof(nint), in bufMatArg);
                 _cl.SetKernelArg(kernel, a++, (nuint)sizeof(nint), in bufDenArg);
+                _cl.SetKernelArg(kernel, a++, (nuint)sizeof(nint), in bufMatLookupArg); // NEW
                 _cl.SetKernelArg(kernel, a++, (nuint)sizeof(nint), in bufVel0Arg);
                 _cl.SetKernelArg(kernel, a++, (nuint)sizeof(nint), in bufVel1Arg);
                 _cl.SetKernelArg(kernel, a++, (nuint)sizeof(nint), in bufVel2Arg);
@@ -589,6 +769,9 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
                 _cl.SetKernelArg(kernel, a++, (nuint)sizeof(nint), in bufStr3Arg);
                 _cl.SetKernelArg(kernel, a++, (nuint)sizeof(nint), in bufStr4Arg);
                 _cl.SetKernelArg(kernel, a++, (nuint)sizeof(nint), in bufStr5Arg);
+                _cl.SetKernelArg(kernel, a++, (nuint)sizeof(nint), in bufMaxVel0Arg);
+                _cl.SetKernelArg(kernel, a++, (nuint)sizeof(nint), in bufMaxVel1Arg);
+                _cl.SetKernelArg(kernel, a++, (nuint)sizeof(nint), in bufMaxVel2Arg);
                 _cl.SetKernelArg(kernel, a++, (nuint)sizeof(float), in _dt);
                 _cl.SetKernelArg(kernel, a++, (nuint)sizeof(float), in paramsPixelSize);
                 _cl.SetKernelArg(kernel, a++, (nuint)sizeof(int), in w);
@@ -601,356 +784,193 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
         #endregion
 
         #region CPU Processing
-
         private void UpdateChunkStressCPU(WaveFieldChunk c, byte[,,] labels, float[,,] density)
-{
-    int d = c.EndZ - c.StartZ;
-    Parallel.For(1, d - 1, lz =>
-    {
-        int gz = c.StartZ + lz;
-        for (int y = 1; y < _params.Height - 1; y++)
-        for (int x = 1; x < _params.Width - 1; x++)
         {
-            byte materialId = labels[x, y, gz];
-            if (materialId != _params.SelectedMaterialID || density[x,y,gz] <= 0f) continue;
-
-            float localE, localNu, localLambda, localMu;
-            if (_usePerVoxelProperties && _perVoxelYoungsModulus != null && _perVoxelPoissonRatio != null)
+            int d = c.EndZ - c.StartZ;
+            Parallel.For(1, d - 1, lz =>
             {
-                localE = _perVoxelYoungsModulus[x, y, gz] * 1e6f;
-                localNu = _perVoxelPoissonRatio[x, y, gz];
-            }
-            else
-            {
-                localE = _params.YoungsModulusMPa * 1e6f;
-                localNu = _params.PoissonRatio;
-            }
-            
-            localMu = localE / (2f * (1f + localNu));
-            localLambda = localE * localNu / ((1f + localNu) * (1f - 2f * localNu));
-            
-            float dvx_dx = (c.Vx[x + 1, y, lz] - c.Vx[x - 1, y, lz]) / (2 * _params.PixelSize);
-            float dvy_dy = (c.Vy[x, y + 1, lz] - c.Vy[x, y - 1, lz]) / (2 * _params.PixelSize);
-            float dvz_dz = (c.Vz[x, y, lz + 1] - c.Vz[x, y, lz - 1]) / (2 * _params.PixelSize);
-            float dvy_dx = (c.Vy[x + 1, y, lz] - c.Vy[x - 1, y, lz]) / (2 * _params.PixelSize);
-            float dvx_dy = (c.Vx[x, y + 1, lz] - c.Vx[x, y - 1, lz]) / (2 * _params.PixelSize);
-            float dvz_dx = (c.Vz[x + 1, y, lz] - c.Vz[x - 1, y, lz]) / (2 * _params.PixelSize);
-            float dvx_dz = (c.Vx[x, y, lz + 1] - c.Vx[x, y, lz - 1]) / (2 * _params.PixelSize);
-            float dvz_dy = (c.Vz[x, y + 1, lz] - c.Vz[x, y - 1, lz]) / (2 * _params.PixelSize);
-            float dvy_dz = (c.Vy[x, y, lz + 1] - c.Vy[x, y, lz - 1]) / (2 * _params.PixelSize);
-            
-            float volumetric = dvx_dx + dvy_dy + dvz_dz;
-            float damp = (1f - c.Damage[x, y, lz] * 0.5f);
-
-            float sxx_new = c.Sxx[x, y, lz] + _dt * damp * (localLambda * volumetric + 2f * localMu * dvx_dx);
-            float syy_new = c.Syy[x, y, lz] + _dt * damp * (localLambda * volumetric + 2f * localMu * dvy_dy);
-            float szz_new = c.Szz[x, y, lz] + _dt * damp * (localLambda * volumetric + 2f * localMu * dvz_dz);
-            float sxy_new = c.Sxy[x, y, lz] + _dt * damp * localMu * (dvy_dx + dvx_dy);
-            float sxz_new = c.Sxz[x, y, lz] + _dt * damp * localMu * (dvz_dx + dvx_dz);
-            float syz_new = c.Syz[x, y, lz] + _dt * damp * localMu * (dvz_dy + dvy_dz);
-
-            if (_params.UsePlasticModel)
-            {
-                float mean = (sxx_new + syy_new + szz_new) / 3.0f;
-                float dev_xx = sxx_new - mean;
-                float dev_yy = syy_new - mean;
-                float dev_zz = szz_new - mean;
-                float J2 = 0.5f * (dev_xx*dev_xx + dev_yy*dev_yy + dev_zz*dev_zz) + sxy_new*sxy_new + sxz_new*sxz_new + syz_new*syz_new;
-                float tau = MathF.Sqrt(J2);
-                float failureAngleRad = _params.FailureAngleDeg * MathF.PI / 180.0f;
-                float sinPhi = MathF.Sin(failureAngleRad);
-                float cosPhi = MathF.Cos(failureAngleRad);
-                float cohesionPa = _params.CohesionMPa * 1e6f;
-                float p = -mean + _params.ConfiningPressureMPa * 1e6f;
-                float yield = tau + p * sinPhi - cohesionPa * cosPhi;
-
-                if (yield > 0 && tau > 1e-10f)
+                int gz = c.StartZ + lz;
+                for (int y = 1; y < _params.Height - 1; y++)
+                for (int x = 1; x < _params.Width - 1; x++)
                 {
-                    float scale = (tau - (cohesionPa * cosPhi - p * sinPhi)) / tau;
-                    scale = Math.Min(scale, 0.95f);
-                    sxx_new = (dev_xx * (1 - scale)) + mean;
-                    syy_new = (dev_yy * (1 - scale)) + mean;
-                    szz_new = (dev_zz * (1 - scale)) + mean;
-                    sxy_new *= (1 - scale);
-                    sxz_new *= (1 - scale);
-                    syz_new *= (1 - scale);
-                }
-            }
-            
-            c.Sxx[x, y, lz] = sxx_new;
-            c.Syy[x, y, lz] = syy_new;
-            c.Szz[x, y, lz] = szz_new;
-            c.Sxy[x, y, lz] = sxy_new;
-            c.Sxz[x, y, lz] = sxz_new;
-            c.Syz[x, y, lz] = syz_new;
+                    byte materialId = labels[x, y, gz];
+                    
+                    // MULTI-MATERIAL: Check if this material is selected
+                    if (!_params.IsMaterialSelected(materialId) || density[x,y,gz] <= 0f) 
+                        continue;
 
-            if (_params.UseBrittleModel)
-            {
-                // Source: Based on typical rock mechanics principles, e.g., in "Engineering Rock Mechanics" by Hudson & Harrison.
-                // Uniaxial Compressive Strength (UCS) is derived from Mohr-Coulomb parameters.
-                // Tensile strength is estimated as a fraction (typically 1/10) of UCS, a common empirical relationship for rocks.
-                float cohesionPa = _params.CohesionMPa * 1e6f;
-                float failureAngleRad = _params.FailureAngleDeg * MathF.PI / 180.0f;
-                float sinPhi = MathF.Sin(failureAngleRad);
-                float cosPhi = MathF.Cos(failureAngleRad);
-                float ucsPa = (2.0f * cohesionPa * cosPhi) / (1.0f - sinPhi);
-                float tensileLimitPa = ucsPa / 10.0f;
+                    float localE, localNu, localLambda, localMu;
+                    if (_usePerVoxelProperties && _perVoxelYoungsModulus != null && _perVoxelPoissonRatio != null)
+                    {
+                        localE = _perVoxelYoungsModulus[x, y, gz] * 1e6f;
+                        localNu = _perVoxelPoissonRatio[x, y, gz];
+                        
+                        // Skip if material properties are invalid
+                        if (localE <= 0f || localNu <= -1.0f || localNu >= 0.5f) continue;
+                    }
+                    else
+                    {
+                        localE = _params.YoungsModulusMPa * 1e6f;
+                        localNu = _params.PoissonRatio;
+                    }
+                    
+                    localMu = localE / (2f * (1f + localNu));
+                    localLambda = localE * localNu / ((1f + localNu) * (1f - 2f * localNu));
+                    
+                    float dvx_dx = (c.Vx[x + 1, y, lz] - c.Vx[x - 1, y, lz]) / (2 * _params.PixelSize);
+                    float dvy_dy = (c.Vy[x, y + 1, lz] - c.Vy[x, y - 1, lz]) / (2 * _params.PixelSize);
+                    float dvz_dz = (c.Vz[x, y, lz + 1] - c.Vz[x, y, lz - 1]) / (2 * _params.PixelSize);
+                    float dvy_dx = (c.Vy[x + 1, y, lz] - c.Vy[x - 1, y, lz]) / (2 * _params.PixelSize);
+                    float dvx_dy = (c.Vx[x, y + 1, lz] - c.Vx[x, y - 1, lz]) / (2 * _params.PixelSize);
+                    float dvz_dx = (c.Vz[x + 1, y, lz] - c.Vz[x - 1, y, lz]) / (2 * _params.PixelSize);
+                    float dvx_dz = (c.Vx[x, y, lz + 1] - c.Vx[x, y, lz - 1]) / (2 * _params.PixelSize);
+                    float dvz_dy = (c.Vz[x, y + 1, lz] - c.Vz[x, y - 1, lz]) / (2 * _params.PixelSize);
+                    float dvy_dz = (c.Vy[x, y, lz + 1] - c.Vy[x, y, lz - 1]) / (2 * _params.PixelSize);
+                    
+                    float volumetric = dvx_dx + dvy_dy + dvz_dz;
+                    float damp = (1f - c.Damage[x, y, lz] * 0.5f);
 
-                float meanStress = (sxx_new + syy_new + szz_new) / 3.0f;
-                float p = -meanStress + _params.ConfiningPressureMPa * 1e6f;
-                float dev_xx = sxx_new - meanStress;
-                float dev_yy = syy_new - meanStress;
-                float dev_zz = szz_new - meanStress;
-                float J2 = 0.5f * (dev_xx*dev_xx + dev_yy*dev_yy + dev_zz*dev_zz) + sxy_new*sxy_new + sxz_new*sxz_new + syz_new*syz_new;
-                float tau = MathF.Sqrt(J2);
-                float yieldShear = tau + p * sinPhi - cohesionPa * cosPhi;
-                
-                float maxTensile = MathF.Max(sxx_new, MathF.Max(syy_new, szz_new));
-                
-                float dInc = 0f;
-                if (yieldShear > 0 && cohesionPa > 0)
-                {
-                    dInc += _damageRatePerSec * _dt * (yieldShear / (cohesionPa * cosPhi));
+                    float sxx_new = c.Sxx[x, y, lz] + _dt * damp * (localLambda * volumetric + 2f * localMu * dvx_dx);
+                    float syy_new = c.Syy[x, y, lz] + _dt * damp * (localLambda * volumetric + 2f * localMu * dvy_dy);
+                    float szz_new = c.Szz[x, y, lz] + _dt * damp * (localLambda * volumetric + 2f * localMu * dvz_dz);
+                    float sxy_new = c.Sxy[x, y, lz] + _dt * damp * localMu * (dvy_dx + dvx_dy);
+                    float sxz_new = c.Sxz[x, y, lz] + _dt * damp * localMu * (dvz_dx + dvx_dz);
+                    float syz_new = c.Syz[x, y, lz] + _dt * damp * localMu * (dvz_dy + dvy_dz);
+
+                    if (_params.UsePlasticModel)
+                    {
+                        float mean = (sxx_new + syy_new + szz_new) / 3.0f;
+                        float dev_xx = sxx_new - mean;
+                        float dev_yy = syy_new - mean;
+                        float dev_zz = szz_new - mean;
+                        float J2 = 0.5f * (dev_xx*dev_xx + dev_yy*dev_yy + dev_zz*dev_zz) + sxy_new*sxy_new + sxz_new*sxz_new + syz_new*syz_new;
+                        float tau = MathF.Sqrt(J2);
+                        float failureAngleRad = _params.FailureAngleDeg * MathF.PI / 180.0f;
+                        float sinPhi = MathF.Sin(failureAngleRad);
+                        float cosPhi = MathF.Cos(failureAngleRad);
+                        float cohesionPa = _params.CohesionMPa * 1e6f;
+                        float p = -mean + _params.ConfiningPressureMPa * 1e6f;
+                        float yield = tau + p * sinPhi - cohesionPa * cosPhi;
+
+                        if (yield > 0 && tau > 1e-10f)
+                        {
+                            float scale = (tau - (cohesionPa * cosPhi - p * sinPhi)) / tau;
+                            scale = Math.Min(scale, 0.95f);
+                            sxx_new = (dev_xx * (1 - scale)) + mean;
+                            syy_new = (dev_yy * (1 - scale)) + mean;
+                            szz_new = (dev_zz * (1 - scale)) + mean;
+                            sxy_new *= (1 - scale);
+                            sxz_new *= (1 - scale);
+                            syz_new *= (1 - scale);
+                        }
+                    }
+                    
+                    c.Sxx[x, y, lz] = sxx_new;
+                    c.Syy[x, y, lz] = syy_new;
+                    c.Szz[x, y, lz] = szz_new;
+                    c.Sxy[x, y, lz] = sxy_new;
+                    c.Sxz[x, y, lz] = sxz_new;
+                    c.Syz[x, y, lz] = syz_new;
+
+                    if (_params.UseBrittleModel)
+                    {
+                        float cohesionPa = _params.CohesionMPa * 1e6f;
+                        float failureAngleRad = _params.FailureAngleDeg * MathF.PI / 180.0f;
+                        float sinPhi = MathF.Sin(failureAngleRad);
+                        float cosPhi = MathF.Cos(failureAngleRad);
+                        float ucsPa = (2.0f * cohesionPa * cosPhi) / (1.0f - sinPhi);
+                        float tensileLimitPa = ucsPa / 10.0f;
+
+                        float meanStress = (sxx_new + syy_new + szz_new) / 3.0f;
+                        float p = -meanStress + _params.ConfiningPressureMPa * 1e6f;
+                        float dev_xx = sxx_new - meanStress;
+                        float dev_yy = syy_new - meanStress;
+                        float dev_zz = szz_new - meanStress;
+                        float J2 = 0.5f * (dev_xx*dev_xx + dev_yy*dev_yy + dev_zz*dev_zz) + sxy_new*sxy_new + sxz_new*sxz_new + syz_new*syz_new;
+                        float tau = MathF.Sqrt(J2);
+                        float yieldShear = tau + p * sinPhi - cohesionPa * cosPhi;
+                        
+                        float maxTensile = MathF.Max(sxx_new, MathF.Max(syy_new, szz_new));
+                        
+                        float dInc = 0f;
+                        if (yieldShear > 0 && cohesionPa > 0)
+                        {
+                            dInc += _damageRatePerSec * _dt * (yieldShear / (cohesionPa * cosPhi));
+                        }
+                        if (maxTensile > tensileLimitPa && tensileLimitPa > 0)
+                        {
+                            dInc += _damageRatePerSec * _dt * (maxTensile / tensileLimitPa - 1.0f);
+                        }
+                        
+                        if (dInc > 0)
+                        {
+                            c.Damage[x, y, lz] = Math.Min(0.9f, c.Damage[x, y, lz] + dInc);
+                        }
+                    }
                 }
-                if (maxTensile > tensileLimitPa && tensileLimitPa > 0)
-                {
-                    dInc += _damageRatePerSec * _dt * (maxTensile / tensileLimitPa - 1.0f);
-                }
-                
-                if (dInc > 0)
-                {
-                    c.Damage[x, y, lz] = Math.Min(0.9f, c.Damage[x, y, lz] + dInc);
-                }
-            }
+            });
         }
-    });
-}
+
         private void UpdateChunkVelocityCPU(WaveFieldChunk c, byte[,,] labels, float[,,] density)
-{
-    int d = c.EndZ - c.StartZ;
-    Parallel.For(1, d - 1, lz =>
-    {
-        int gz = c.StartZ + lz;
-        for (int y = 1; y < _params.Height - 1; y++)
-        for (int x = 1; x < _params.Width - 1; x++)
         {
-            byte materialId = labels[x, y, gz];
-            if (materialId != _params.SelectedMaterialID || density[x,y,gz] <= 0f) continue;
-            
-            float rho = MathF.Max(100f, density[x, y, gz]);
-            
-            // Calculate stress gradients with boundary checks
-            float dsxx_dx = (c.Sxx[Math.Min(x + 1, _params.Width - 1), y, lz] - 
-                            c.Sxx[Math.Max(x - 1, 0), y, lz]) / (2 * _params.PixelSize);
-            float dsyy_dy = (c.Syy[x, Math.Min(y + 1, _params.Height - 1), lz] - 
-                            c.Syy[x, Math.Max(y - 1, 0), lz]) / (2 * _params.PixelSize);
-            float dszz_dz = 0;
-            if (lz > 0 && lz < d - 1)
+            int d = c.EndZ - c.StartZ;
+            Parallel.For(1, d - 1, lz =>
             {
-                dszz_dz = (c.Szz[x, y, lz + 1] - c.Szz[x, y, lz - 1]) / (2 * _params.PixelSize);
-            }
-            
-            float dsxy_dy = (c.Sxy[x, Math.Min(y + 1, _params.Height - 1), lz] - 
-                            c.Sxy[x, Math.Max(y - 1, 0), lz]) / (2 * _params.PixelSize);
-            float dsxy_dx = (c.Sxy[Math.Min(x + 1, _params.Width - 1), y, lz] - 
-                            c.Sxy[Math.Max(x - 1, 0), y, lz]) / (2 * _params.PixelSize);
-            float dsxz_dz = 0, dsxz_dx = 0, dsyz_dz = 0, dsyz_dy = 0;
-            if (lz > 0 && lz < d - 1)
-            {
-                dsxz_dz = (c.Sxz[x, y, lz + 1] - c.Sxz[x, y, lz - 1]) / (2 * _params.PixelSize);
-                dsyz_dz = (c.Syz[x, y, lz + 1] - c.Syz[x, y, lz - 1]) / (2 * _params.PixelSize);
-            }
-            dsxz_dx = (c.Sxz[Math.Min(x + 1, _params.Width - 1), y, lz] - 
-                      c.Sxz[Math.Max(x - 1, 0), y, lz]) / (2 * _params.PixelSize);
-            dsyz_dy = (c.Syz[x, Math.Min(y + 1, _params.Height - 1), lz] - 
-                      c.Syz[x, Math.Max(y - 1, 0), lz]) / (2 * _params.PixelSize);
-            
-            // Reduced damping for better propagation
-            const float damping = 0.999f; // Very light damping
-            
-            // Update velocities
-            c.Vx[x, y, lz] = c.Vx[x, y, lz] * damping + _dt * (dsxx_dx + dsxy_dy + dsxz_dz) / rho;
-            c.Vy[x, y, lz] = c.Vy[x, y, lz] * damping + _dt * (dsxy_dx + dsyy_dy + dsyz_dz) / rho;
-            c.Vz[x, y, lz] = c.Vz[x, y, lz] * damping + _dt * (dsxz_dx + dsyz_dy + dszz_dz) / rho;
-            
-            // Apply velocity limits to prevent instability
-            const float maxVel = 10000f; // 10 km/s
-            c.Vx[x, y, lz] = Math.Clamp(c.Vx[x, y, lz], -maxVel, maxVel);
-            c.Vy[x, y, lz] = Math.Clamp(c.Vy[x, y, lz], -maxVel, maxVel);
-            c.Vz[x, y, lz] = Math.Clamp(c.Vz[x, y, lz], -maxVel, maxVel);
-        }
-    });
-}
-
-        #endregion
-
-        #region Utilities
-        private Task OffloadChunkAsync(WaveFieldChunk chunk)
-        {
-            if (!chunk.IsInMemory || string.IsNullOrEmpty(_params.OffloadDirectory))
-            {
-                return Task.CompletedTask;
-            }
-
-            return Task.Run(() =>
-            {
-                if (string.IsNullOrEmpty(chunk.FilePath))
+                int gz = c.StartZ + lz;
+                for (int y = 1; y < _params.Height - 1; y++)
+                for (int x = 1; x < _params.Width - 1; x++)
                 {
-                    chunk.FilePath = Path.Combine(_params.OffloadDirectory, $"chunk_{chunk.StartZ}_{Guid.NewGuid()}.tmp");
-                }
-
-                try
-                {
-                    using (var writer = new BinaryWriter(File.Create(chunk.FilePath)))
+                    byte materialId = labels[x, y, gz];
+                    
+                    // MULTI-MATERIAL: Check if this material is selected
+                    if (!_params.IsMaterialSelected(materialId) || density[x,y,gz] <= 0f)
+                        continue;
+                    
+                    float rho = MathF.Max(100f, density[x, y, gz]);
+                    
+                    float dsxx_dx = (c.Sxx[Math.Min(x + 1, _params.Width - 1), y, lz] - 
+                                    c.Sxx[Math.Max(x - 1, 0), y, lz]) / (2 * _params.PixelSize);
+                    float dsyy_dy = (c.Syy[x, Math.Min(y + 1, _params.Height - 1), lz] - 
+                                    c.Syy[x, Math.Max(y - 1, 0), lz]) / (2 * _params.PixelSize);
+                    float dszz_dz = 0;
+                    if (lz > 0 && lz < d - 1)
                     {
-                        WriteField(writer, chunk.Vx); WriteField(writer, chunk.Vy); WriteField(writer, chunk.Vz);
-                        WriteField(writer, chunk.Sxx); WriteField(writer, chunk.Syy); WriteField(writer, chunk.Szz);
-                        WriteField(writer, chunk.Sxy); WriteField(writer, chunk.Sxz); WriteField(writer, chunk.Syz);
-                        WriteField(writer, chunk.Damage);
+                        dszz_dz = (c.Szz[x, y, lz + 1] - c.Szz[x, y, lz - 1]) / (2 * _params.PixelSize);
                     }
+                    
+                    float dsxy_dy = (c.Sxy[x, Math.Min(y + 1, _params.Height - 1), lz] - 
+                                    c.Sxy[x, Math.Max(y - 1, 0), lz]) / (2 * _params.PixelSize);
+                    float dsxy_dx = (c.Sxy[Math.Min(x + 1, _params.Width - 1), y, lz] - 
+                                    c.Sxy[Math.Max(x - 1, 0), y, lz]) / (2 * _params.PixelSize);
+                    float dsxz_dz = 0, dsxz_dx = 0, dsyz_dz = 0, dsyz_dy = 0;
+                    if (lz > 0 && lz < d - 1)
+                    {
+                        dsxz_dz = (c.Sxz[x, y, lz + 1] - c.Sxz[x, y, lz - 1]) / (2 * _params.PixelSize);
+                        dsyz_dz = (c.Syz[x, y, lz + 1] - c.Syz[x, y, lz - 1]) / (2 * _params.PixelSize);
+                    }
+                    dsxz_dx = (c.Sxz[Math.Min(x + 1, _params.Width - 1), y, lz] - 
+                              c.Sxz[Math.Max(x - 1, 0), y, lz]) / (2 * _params.PixelSize);
+                    dsyz_dy = (c.Syz[x, Math.Min(y + 1, _params.Height - 1), lz] - 
+                              c.Syz[x, Math.Max(y - 1, 0), lz]) / (2 * _params.PixelSize);
+                    
+                    const float damping = 0.999f;
+                    
+                    c.Vx[x, y, lz] = c.Vx[x, y, lz] * damping + _dt * (dsxx_dx + dsxy_dy + dsxz_dz) / rho;
+                    c.Vy[x, y, lz] = c.Vy[x, y, lz] * damping + _dt * (dsxy_dx + dsyy_dy + dsyz_dz) / rho;
+                    c.Vz[x, y, lz] = c.Vz[x, y, lz] * damping + _dt * (dsxz_dx + dsyz_dy + dszz_dz) / rho;
+                    
+                    const float maxVel = 10000f;
+                    c.Vx[x, y, lz] = Math.Clamp(c.Vx[x, y, lz], -maxVel, maxVel);
+                    c.Vy[x, y, lz] = Math.Clamp(c.Vy[x, y, lz], -maxVel, maxVel);
+                    c.Vz[x, y, lz] = Math.Clamp(c.Vz[x, y, lz], -maxVel, maxVel);
 
-                    chunk.Vx = null; chunk.Vy = null; chunk.Vz = null;
-                    chunk.Sxx = null; chunk.Syy = null; chunk.Szz = null;
-                    chunk.Sxy = null; chunk.Sxz = null; chunk.Syz = null;
-                    chunk.Damage = null;
-                    chunk.IsInMemory = false;
-                }
-                catch (Exception ex)
-                {
-                    Logger.LogError($"[ChunkedSimulator] Failed to offload chunk {chunk.StartZ}: {ex.Message}");
-                    chunk.FilePath = null;
+                    c.MaxAbsVx[x, y, lz] = MathF.Max(c.MaxAbsVx[x, y, lz], MathF.Abs(c.Vx[x, y, lz]));
+                    c.MaxAbsVy[x, y, lz] = MathF.Max(c.MaxAbsVy[x, y, lz], MathF.Abs(c.Vy[x, y, lz]));
+                    c.MaxAbsVz[x, y, lz] = MathF.Max(c.MaxAbsVz[x, y, lz], MathF.Abs(c.Vz[x, y, lz]));
                 }
             });
         }
 
-        private Task LoadChunkAsync(WaveFieldChunk chunk)
-        {
-            if (chunk.IsInMemory || string.IsNullOrEmpty(chunk.FilePath) || !File.Exists(chunk.FilePath))
-            {
-                return Task.CompletedTask;
-            }
-
-            return Task.Run(() =>
-            {
-                try
-                {
-                    int d = chunk.EndZ - chunk.StartZ;
-                    chunk.Vx = new float[_params.Width, _params.Height, d]; chunk.Vy = new float[_params.Width, _params.Height, d]; chunk.Vz = new float[_params.Width, _params.Height, d];
-                    chunk.Sxx = new float[_params.Width, _params.Height, d]; chunk.Syy = new float[_params.Width, _params.Height, d]; chunk.Szz = new float[_params.Width, _params.Height, d];
-                    chunk.Sxy = new float[_params.Width, _params.Height, d]; chunk.Sxz = new float[_params.Width, _params.Height, d]; chunk.Syz = new float[_params.Width, _params.Height, d];
-                    chunk.Damage = new float[_params.Width, _params.Height, d];
-
-                    using (var reader = new BinaryReader(File.OpenRead(chunk.FilePath)))
-                    {
-                        ReadField(reader, chunk.Vx); ReadField(reader, chunk.Vy); ReadField(reader, chunk.Vz);
-                        ReadField(reader, chunk.Sxx); ReadField(reader, chunk.Syy); ReadField(reader, chunk.Szz);
-                        ReadField(reader, chunk.Sxy); ReadField(reader, chunk.Sxz); ReadField(reader, chunk.Syz);
-                        ReadField(reader, chunk.Damage);
-                    }
-                    chunk.IsInMemory = true;
-                    File.Delete(chunk.FilePath);
-                    chunk.FilePath = null;
-                }
-                catch (Exception ex)
-                {
-                    Logger.LogError($"[ChunkedSimulator] Failed to load chunk {chunk.StartZ}: {ex.Message}");
-                }
-            });
-        }
-
-        private void WriteField(BinaryWriter writer, float[,,] field)
-        {
-            var buffer = new byte[field.Length * sizeof(float)];
-            Buffer.BlockCopy(field, 0, buffer, 0, buffer.Length);
-            writer.Write(buffer);
-        }
-
-        private void ReadField(BinaryReader reader, float[,,] field)
-        {
-            var buffer = reader.ReadBytes(field.Length * sizeof(float));
-            Buffer.BlockCopy(buffer, 0, field, 0, buffer.Length);
-        }
-        private void CalculateTimeStep(float[,,] density)
-        {
-            float vpMax = 0f;
-
-            if (_usePerVoxelProperties && _perVoxelYoungsModulus != null && _perVoxelPoissonRatio != null)
-            {
-                // Calculate local max velocity for heterogeneous media
-                for (int z = 0; z < _params.Depth; z++)
-                for (int y = 0; y < _params.Height; y++)
-                for (int x = 0; x < _params.Width; x++)
-                {
-                    if (density[x, y, z] <= 0) continue;
-
-                    float rho = MathF.Max(100f, density[x, y, z]);
-                    float E = _perVoxelYoungsModulus[x, y, z] * 1e6f; // MPa to Pa
-                    float nu = _perVoxelPoissonRatio[x, y, z];
-
-                    if (E <= 0 || rho <= 0 || nu >= 0.5f || nu <= -1.0f) continue;
-
-                    float lambda = E * nu / ((1f + nu) * (1f - 2f * nu));
-                    float mu = E / (2f * (1f + nu));
-                    float vp = MathF.Sqrt((lambda + 2f * mu) / rho);
-                    if (vp > vpMax)
-                    {
-                        vpMax = vp;
-                    }
-                }
-            }
-            else
-            {
-                // Fallback to global properties
-                float rhoMin = float.MaxValue;
-                for (int z = 0; z < _params.Depth; z++)
-                for (int y = 0; y < _params.Height; y++)
-                for (int x = 0; x < _params.Width; x++)
-                {
-                     if (density[x,y,z] > 0)
-                        rhoMin = MathF.Min(rhoMin, MathF.Max(100f, density[x, y, z]));
-                }
-                
-                if(rhoMin == float.MaxValue) rhoMin = 2700; // fallback rock density
-                
-                vpMax = MathF.Sqrt((_lambda + 2f * _mu) / rhoMin);
-            }
-
-            if (vpMax < 1e-3f) {
-                _dt = _params.TimeStepSeconds; // Fallback to a user-defined (likely unstable) value
-                Logger.LogWarning($"[CFL] Could not determine a valid Vp_max. Falling back to default dt={_dt * 1e6f:F4} µs.");
-                return;
-            }
-
-            // CFL condition from Courant, Friedrichs, Lewy (1928) for 3D finite differences.
-            // dt <= dx / (sqrt(3) * Vp_max)
-            // A safety factor (e.g., 0.5) is added for stability with complex models.
-            _dt = 0.5f * (_params.PixelSize / (MathF.Sqrt(3) * vpMax));
-            Logger.Log($"[CFL] Calculated stable timestep: dt={_dt*1e6f:F4} µs based on Vp_max={vpMax:F0} m/s");
-        }
-        
-        private float GetCurrentSourceValue(int step)
-        {
-            float baseAmp = _params.SourceAmplitude * MathF.Sqrt(MathF.Max(1e-6f, _params.SourceEnergyJ));
-            baseAmp *= 1e4f; // Scaling factor to make it impactful
-
-            if (!_isRickerActive)
-            {
-                // Simple impulse source at the first step
-                return (step == 1) ? baseAmp : 0f;
-            }
-            else
-            {
-                // Ricker wavelet source
-                float t = step * _dt;
-                if (t > 2 * _rickerT0) return 0f;
-
-                float freq = Math.Max(1.0f, _params.SourceFrequencyKHz * 1000f);
-                float x = MathF.PI * freq * (t - _rickerT0);
-                float xx = x * x;
-                return baseAmp * (1.0f - 2.0f * xx) * MathF.Exp(-xx);
-            }
-        }
-        
         private void ApplySourceToChunkCPU(WaveFieldChunk chunk, float sourceValue)
         {
             int tx = (int)(_params.TxPosition.X * _params.Width);
@@ -1014,70 +1034,75 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
                 }
             }
         }
+        #endregion
 
-        private void ExchangeVelocityBoundaries()
+        private float GetCurrentSourceValue(int step)
         {
-            for (int i = 0; i < _chunks.Count - 1; i++)
+            float baseAmp = _params.SourceAmplitude * MathF.Sqrt(MathF.Max(1e-6f, _params.SourceEnergyJ));
+            baseAmp *= 1e4f;
+
+            if (!_isRickerActive)
+                return (step == 1) ? baseAmp : 0f;
+
+            float t = step * _dt;
+            if (t > 2 * _rickerT0) return 0f;
+
+            float freq = Math.Max(1.0f, _params.SourceFrequencyKHz * 1000f);
+            float x = MathF.PI * freq * (t - _rickerT0);
+            float xx = x * x;
+            return baseAmp * (1.0f - 2.0f * xx) * MathF.Exp(-xx);
+        }
+        private void CalculateTimeStep(float[,,] density)
+        {
+            float vpMax = 0f;
+
+            if (_usePerVoxelProperties && _perVoxelYoungsModulus != null && _perVoxelPoissonRatio != null)
             {
-                var topChunk = _chunks[i];
-                var bottomChunk = _chunks[i + 1];
-
-                if (!topChunk.IsInMemory || !bottomChunk.IsInMemory) continue;
-
-                int topChunkDepth = topChunk.EndZ - topChunk.StartZ;
-                int lastInteriorSlice_top = topChunkDepth - 2;
-                int bottomGhostSlice_top = topChunkDepth - 1;
-                int topGhostSlice_bottom = 0;
-                int firstInteriorSlice_bottom = 1;
-
+                for (int z = 0; z < _params.Depth; z++)
                 for (int y = 0; y < _params.Height; y++)
                 for (int x = 0; x < _params.Width; x++)
                 {
-                    topChunk.Vx[x, y, bottomGhostSlice_top] = bottomChunk.Vx[x, y, firstInteriorSlice_bottom];
-                    topChunk.Vy[x, y, bottomGhostSlice_top] = bottomChunk.Vy[x, y, firstInteriorSlice_bottom];
-                    topChunk.Vz[x, y, bottomGhostSlice_top] = bottomChunk.Vz[x, y, firstInteriorSlice_bottom];
+                    if (density[x, y, z] <= 0) continue;
 
-                    bottomChunk.Vx[x, y, topGhostSlice_bottom] = topChunk.Vx[x, y, lastInteriorSlice_top];
-                    bottomChunk.Vy[x, y, topGhostSlice_bottom] = topChunk.Vy[x, y, lastInteriorSlice_top];
-                    bottomChunk.Vz[x, y, topGhostSlice_bottom] = topChunk.Vz[x, y, lastInteriorSlice_top];
+                    float rho = MathF.Max(100f, density[x, y, z]);
+                    float E = _perVoxelYoungsModulus[x, y, z] * 1e6f;
+                    float nu = _perVoxelPoissonRatio[x, y, z];
+
+                    if (E <= 0 || rho <= 0 || nu >= 0.5f || nu <= -1.0f) continue;
+
+                    float lambda = E * nu / ((1f + nu) * (1f - 2f * nu));
+                    float mu = E / (2f * (1f + nu));
+                    float vp = MathF.Sqrt((lambda + 2f * mu) / rho);
+                    if (vp > vpMax) vpMax = vp;
                 }
             }
-        }
-
-        private void ExchangeStressBoundaries()
-        {
-            for (int i = 0; i < _chunks.Count - 1; i++)
+            else
             {
-                var topChunk = _chunks[i];
-                var bottomChunk = _chunks[i + 1];
-
-                if (!topChunk.IsInMemory || !bottomChunk.IsInMemory) continue;
-
-                int topChunkDepth = topChunk.EndZ - topChunk.StartZ;
-                int lastInteriorSlice_top = topChunkDepth - 2;
-                int bottomGhostSlice_top = topChunkDepth - 1;
-                int topGhostSlice_bottom = 0;
-                int firstInteriorSlice_bottom = 1;
-
+                float rhoMin = float.MaxValue;
+                for (int z = 0; z < _params.Depth; z++)
                 for (int y = 0; y < _params.Height; y++)
                 for (int x = 0; x < _params.Width; x++)
                 {
-                    topChunk.Sxx[x, y, bottomGhostSlice_top] = bottomChunk.Sxx[x, y, firstInteriorSlice_bottom];
-                    topChunk.Syy[x, y, bottomGhostSlice_top] = bottomChunk.Syy[x, y, firstInteriorSlice_bottom];
-                    topChunk.Szz[x, y, bottomGhostSlice_top] = bottomChunk.Szz[x, y, firstInteriorSlice_bottom];
-                    topChunk.Sxy[x, y, bottomGhostSlice_top] = bottomChunk.Sxy[x, y, firstInteriorSlice_bottom];
-                    topChunk.Sxz[x, y, bottomGhostSlice_top] = bottomChunk.Sxz[x, y, firstInteriorSlice_bottom];
-                    topChunk.Syz[x, y, bottomGhostSlice_top] = bottomChunk.Syz[x, y, firstInteriorSlice_bottom];
-
-                    bottomChunk.Sxx[x, y, topGhostSlice_bottom] = topChunk.Sxx[x, y, lastInteriorSlice_top];
-                    bottomChunk.Syy[x, y, topGhostSlice_bottom] = topChunk.Syy[x, y, lastInteriorSlice_top];
-                    bottomChunk.Szz[x, y, topGhostSlice_bottom] = topChunk.Szz[x, y, lastInteriorSlice_top];
-                    bottomChunk.Sxy[x, y, topGhostSlice_bottom] = topChunk.Sxy[x, y, lastInteriorSlice_top];
-                    bottomChunk.Sxz[x, y, topGhostSlice_bottom] = topChunk.Sxz[x, y, lastInteriorSlice_top];
-                    bottomChunk.Syz[x, y, topGhostSlice_bottom] = topChunk.Syz[x, y, lastInteriorSlice_top];
+                     if (density[x,y,z] > 0)
+                        rhoMin = MathF.Min(rhoMin, MathF.Max(100f, density[x, y, z]));
                 }
+                
+                if(rhoMin == float.MaxValue) rhoMin = 2700;
+                
+                vpMax = MathF.Sqrt((_lambda + 2f * _mu) / rhoMin);
             }
+
+            if (vpMax < 1e-3f)
+            {
+                _dt = _params.TimeStepSeconds;
+                Logger.LogWarning($"[CFL] Could not determine valid Vp_max. Using default dt={_dt * 1e6f:F4} µs.");
+                return;
+            }
+
+            _dt = 0.5f * (_params.PixelSize / (MathF.Sqrt(3) * vpMax));
+            Logger.Log($"[CFL] Calculated stable timestep: dt={_dt*1e6f:F4} µs based on Vp_max={vpMax:F0} m/s");
         }
+
         private bool CheckPWaveArrival()
         {
             int rx = Math.Clamp((int)(_params.RxPosition.X * _params.Width), 0, _params.Width - 1);
@@ -1099,8 +1124,13 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
 
         private bool CheckSWaveArrival()
         {
-            int rx = (int)(_params.RxPosition.X * _params.Width); int ry = (int)(_params.RxPosition.Y * _params.Height); int rz = (int)(_params.RxPosition.Z * _params.Depth);
-            var c = _chunks.FirstOrDefault(k => rz >= k.StartZ && rz < k.EndZ); if (c == null || !c.IsInMemory) return false;
+            int rx = (int)(_params.RxPosition.X * _params.Width);
+            int ry = (int)(_params.RxPosition.Y * _params.Height);
+            int rz = (int)(_params.RxPosition.Z * _params.Depth);
+            
+            var c = _chunks.FirstOrDefault(k => rz >= k.StartZ && rz < k.EndZ);
+            if (c == null || !c.IsInMemory) return false;
+            
             int lz = rz - c.StartZ;
             float mag = _params.Axis switch
             {
@@ -1113,35 +1143,64 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
         
         private float CalculateTxRxDistance()
         {
-            int tx = (int)(_params.TxPosition.X * _params.Width); int ty = (int)(_params.TxPosition.Y * _params.Height); int tz = (int)(_params.TxPosition.Z * _params.Depth);
-            int rx = (int)(_params.RxPosition.X * _params.Width); int ry = (int)(_params.RxPosition.Y * _params.Height); int rz = (int)(_params.RxPosition.Z * _params.Depth);
+            int tx = (int)(_params.TxPosition.X * _params.Width);
+            int ty = (int)(_params.TxPosition.Y * _params.Height);
+            int tz = (int)(_params.TxPosition.Z * _params.Depth);
+            int rx = (int)(_params.RxPosition.X * _params.Width);
+            int ry = (int)(_params.RxPosition.Y * _params.Height);
+            int rz = (int)(_params.RxPosition.Z * _params.Depth);
+            
             return MathF.Sqrt((tx - rx) * (tx - rx) + (ty - ry) * (ty - ry) + (tz - rz) * (tz - rz)) * _params.PixelSize;
         }
 
         private WaveFieldSnapshot CreateSnapshot(int step)
         {
             int ds = Math.Max(1, Math.Max(_params.Width, Math.Max(_params.Height, _params.Depth)) / 128);
-            int w = Math.Max(1, _params.Width / ds); int h = Math.Max(1, _params.Height / ds); int d = Math.Max(1, _params.Depth / ds);
-            var vx = new float[w, h, d]; var vy = new float[w, h, d]; var vz = new float[w, h, d];
+            int w = Math.Max(1, _params.Width / ds);
+            int h = Math.Max(1, _params.Height / ds);
+            int d = Math.Max(1, _params.Depth / ds);
+            
+            var vx = new float[w, h, d];
+            var vy = new float[w, h, d];
+            var vz = new float[w, h, d];
+            
             foreach (var c in _chunks)
             {
                 if (!c.IsInMemory) LoadChunkAsync(c).Wait();
                 int cd = c.EndZ - c.StartZ;
+                
                 for (int lz = 0; lz < cd; lz += ds)
                 {
-                    int gz = c.StartZ + lz; int dz = gz / ds; if (dz >= d) continue;
+                    int gz = c.StartZ + lz;
+                    int dz = gz / ds;
+                    if (dz >= d) continue;
+                    
                     for (int y = 0; y < _params.Height; y += ds)
                     {
-                        int dy = y / ds; if (dy >= h) continue;
+                        int dy = y / ds;
+                        if (dy >= h) continue;
+                        
                         for (int x = 0; x < _params.Width; x += ds)
                         {
-                            int dx = x / ds; if (dx >= w) continue;
-                            vx[dx, dy, dz] = c.Vx[x, y, lz]; vy[dx, dy, dz] = c.Vy[x, y, lz]; vz[dx, dy, dz] = c.Vz[x, y, lz];
+                            int dx = x / ds;
+                            if (dx >= w) continue;
+                            
+                            vx[dx, dy, dz] = c.Vx[x, y, lz];
+                            vy[dx, dy, dz] = c.Vy[x, y, lz];
+                            vz[dx, dy, dz] = c.Vz[x, y, lz];
                         }
                     }
                 }
             }
-            var snap = new WaveFieldSnapshot { TimeStep = step, SimulationTime = step * _dt, Width = w, Height = h, Depth = d };
+            
+            var snap = new WaveFieldSnapshot
+            {
+                TimeStep = step,
+                SimulationTime = step * _dt,
+                Width = w,
+                Height = h,
+                Depth = d
+            };
             snap.SetVelocityFields(vx, vy, vz);
             return snap;
         }
@@ -1153,13 +1212,36 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
             {
                 foreach (var c in _chunks)
                 {
-                    if (!c.IsInMemory) return; // Should have been reloaded by RunAsync
+                    if (!c.IsInMemory) return;
                     int d = c.EndZ - c.StartZ;
+                    
                     for (int z = 0; z < d; z++)
                     for (int y = 0; y < _params.Height; y++)
                     for (int x = 0; x < _params.Width; x++)
                     {
                         float v = comp switch { 0 => c.Vx[x, y, z], 1 => c.Vy[x, y, z], _ => c.Vz[x, y, z] };
+                        field[x, y, c.StartZ + z] = v;
+                    }
+                }
+            });
+            return field;
+        }
+        
+        public async Task<float[,,]> ReconstructMaxFieldAsync(int comp)
+        {
+            var field = new float[_params.Width, _params.Height, _params.Depth];
+            await Task.Run(() =>
+            {
+                foreach (var c in _chunks)
+                {
+                    if (!c.IsInMemory) return;
+                    int d = c.EndZ - c.StartZ;
+                    
+                    for (int z = 0; z < d; z++)
+                    for (int y = 0; y < _params.Height; y++)
+                    for (int x = 0; x < _params.Width; x++)
+                    {
+                        float v = comp switch { 0 => c.MaxAbsVx[x, y, z], 1 => c.MaxAbsVy[x, y, z], _ => c.MaxAbsVz[x, y, z] };
                         field[x, y, c.StartZ + z] = v;
                     }
                 }
@@ -1174,6 +1256,7 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
             {
                 if (!chunk.IsInMemory) continue;
                 int d = chunk.EndZ - chunk.StartZ;
+                
                 for (int z = 0; z < d; z++)
                 for (int y = 0; y < _params.Height; y++)
                 for (int x = 0; x < _params.Width; x++)
@@ -1191,36 +1274,137 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
             {
                 if (!c.IsInMemory) LoadChunkAsync(c).Wait();
                 int d = c.EndZ - c.StartZ;
+                
                 for (int z = 0; z < d; z++)
                 for (int y = 0; y < _params.Height; y++)
                 for (int x = 0; x < _params.Width; x++)
                 {
-                    float vx = c.Vx[x, y, z], vy = c.Vy[x, y, z], vz = c.Vz[x, y, z];
+                    float vx = c.Vx[x, y, z];
+                    float vy = c.Vy[x, y, z];
+                    float vz = c.Vz[x, y, z];
                     out3d[x, y, c.StartZ + z] = MathF.Sqrt(vx * vx + vy * vy + vz * vz);
                 }
             }
             return out3d;
         }
 
-        #endregion
+        private Task OffloadChunkAsync(WaveFieldChunk chunk)
+        {
+            if (!chunk.IsInMemory || string.IsNullOrEmpty(_params.OffloadDirectory))
+                return Task.CompletedTask;
 
-        #region Disposal
+            return Task.Run(() =>
+            {
+                if (string.IsNullOrEmpty(chunk.FilePath))
+                    chunk.FilePath = Path.Combine(_params.OffloadDirectory, $"chunk_{chunk.StartZ}_{Guid.NewGuid()}.tmp");
+
+                try
+                {
+                    using (var writer = new BinaryWriter(File.Create(chunk.FilePath)))
+                    {
+                        WriteField(writer, chunk.Vx);
+                        WriteField(writer, chunk.Vy);
+                        WriteField(writer, chunk.Vz);
+                        WriteField(writer, chunk.Sxx);
+                        WriteField(writer, chunk.Syy);
+                        WriteField(writer, chunk.Szz);
+                        WriteField(writer, chunk.Sxy);
+                        WriteField(writer, chunk.Sxz);
+                        WriteField(writer, chunk.Syz);
+                        WriteField(writer, chunk.Damage);
+                        WriteField(writer, chunk.MaxAbsVx);
+                        WriteField(writer, chunk.MaxAbsVy);
+                        WriteField(writer, chunk.MaxAbsVz);
+                    }
+
+                    chunk.Vx = null; chunk.Vy = null; chunk.Vz = null;
+                    chunk.Sxx = null; chunk.Syy = null; chunk.Szz = null;
+                    chunk.Sxy = null; chunk.Sxz = null; chunk.Syz = null;
+                    chunk.Damage = null;
+                    chunk.MaxAbsVx = null; chunk.MaxAbsVy = null; chunk.MaxAbsVz = null;
+                    chunk.IsInMemory = false;
+                }
+                catch (Exception ex)
+                {
+                    Logger.LogError($"[ChunkedSimulator] Failed to offload chunk {chunk.StartZ}: {ex.Message}");
+                    chunk.FilePath = null;
+                }
+            });
+        }
+
+        private Task LoadChunkAsync(WaveFieldChunk chunk)
+        {
+            if (chunk.IsInMemory || string.IsNullOrEmpty(chunk.FilePath) || !File.Exists(chunk.FilePath))
+                return Task.CompletedTask;
+
+            return Task.Run(() =>
+            {
+                try
+                {
+                    int d = chunk.EndZ - chunk.StartZ;
+                    chunk.Vx = new float[_params.Width, _params.Height, d];
+                    chunk.Vy = new float[_params.Width, _params.Height, d];
+                    chunk.Vz = new float[_params.Width, _params.Height, d];
+                    chunk.Sxx = new float[_params.Width, _params.Height, d];
+                    chunk.Syy = new float[_params.Width, _params.Height, d];
+                    chunk.Szz = new float[_params.Width, _params.Height, d];
+                    chunk.Sxy = new float[_params.Width, _params.Height, d];
+                    chunk.Sxz = new float[_params.Width, _params.Height, d];
+                    chunk.Syz = new float[_params.Width, _params.Height, d];
+                    chunk.Damage = new float[_params.Width, _params.Height, d];
+                    chunk.MaxAbsVx = new float[_params.Width, _params.Height, d];
+                    chunk.MaxAbsVy = new float[_params.Width, _params.Height, d];
+                    chunk.MaxAbsVz = new float[_params.Width, _params.Height, d];
+
+                    using (var reader = new BinaryReader(File.OpenRead(chunk.FilePath)))
+                    {
+                        ReadField(reader, chunk.Vx);
+                        ReadField(reader, chunk.Vy);
+                        ReadField(reader, chunk.Vz);
+                        ReadField(reader, chunk.Sxx);
+                        ReadField(reader, chunk.Syy);
+                        ReadField(reader, chunk.Szz);
+                        ReadField(reader, chunk.Sxy);
+                        ReadField(reader, chunk.Sxz);
+                        ReadField(reader, chunk.Syz);
+                        ReadField(reader, chunk.Damage);
+                        ReadField(reader, chunk.MaxAbsVx);
+                        ReadField(reader, chunk.MaxAbsVy);
+                        ReadField(reader, chunk.MaxAbsVz);
+                    }
+                    
+                    chunk.IsInMemory = true;
+                    File.Delete(chunk.FilePath);
+                    chunk.FilePath = null;
+                }
+                catch (Exception ex)
+                {
+                    Logger.LogError($"[ChunkedSimulator] Failed to load chunk {chunk.StartZ}: {ex.Message}");
+                }
+            });
+        }
+
+        private void WriteField(BinaryWriter writer, float[,,] field)
+        {
+            var buffer = new byte[field.Length * sizeof(float)];
+            Buffer.BlockCopy(field, 0, buffer, 0, buffer.Length);
+            writer.Write(buffer);
+        }
+
+        private void ReadField(BinaryReader reader, float[,,] field)
+        {
+            var buffer = reader.ReadBytes(field.Length * sizeof(float));
+            Buffer.BlockCopy(buffer, 0, field, 0, buffer.Length);
+        }
 
         public void Dispose()
         {
             if (_useGPU) CleanupOpenCL();
             
-            // Clean up any remaining offloaded files
             foreach (var chunk in _chunks.Where(c => !string.IsNullOrEmpty(c.FilePath)))
             {
-                try
-                {
-                    if (File.Exists(chunk.FilePath)) File.Delete(chunk.FilePath);
-                }
-                catch (Exception ex)
-                {
-                    Logger.LogWarning($"[ChunkedSimulator] Could not clean up offload file {chunk.FilePath}: {ex.Message}");
-                }
+                try { if (File.Exists(chunk.FilePath)) File.Delete(chunk.FilePath); }
+                catch (Exception ex) { Logger.LogWarning($"[ChunkedSimulator] Cleanup failed: {ex.Message}"); }
             }
             _chunks.Clear();
         }
@@ -1240,18 +1424,17 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
             if (_bufMat != 0) { _cl.ReleaseMemObject(_bufMat); _bufMat = 0; }
             if (_bufDen != 0) { _cl.ReleaseMemObject(_bufDen); _bufDen = 0; }
             if (_bufDmg != 0) { _cl.ReleaseMemObject(_bufDmg); _bufDmg = 0; }
-            // --- MODIFICATION: Release new buffers ---
             if (_bufYoungsModulus != 0) { _cl.ReleaseMemObject(_bufYoungsModulus); _bufYoungsModulus = 0; }
             if (_bufPoissonRatio != 0) { _cl.ReleaseMemObject(_bufPoissonRatio); _bufPoissonRatio = 0; }
             for (int i = 0; i < 3; i++) if (_bufVel[i] != 0) { _cl.ReleaseMemObject(_bufVel[i]); _bufVel[i] = 0; }
+            for (int i = 0; i < 3; i++) if (_bufMaxVel[i] != 0) { _cl.ReleaseMemObject(_bufMaxVel[i]); _bufMaxVel[i] = 0; }
             for (int i = 0; i < 6; i++) if (_bufStr[i] != 0) { _cl.ReleaseMemObject(_bufStr[i]); _bufStr[i] = 0; }
             _lastDeviceBytes = 0;
         }
 
         private string GetKernelSource()
-{
-    // --- MODIFICATION: Kernel updated for multi-material properties and realistic damage ---
-    return @"
+        {
+            return @"
     #define M_PI_F 3.14159265358979323846f
 
     __kernel void updateStress(
@@ -1283,6 +1466,9 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
         if (idx >= width * height * depth) return;
         
         uchar mat = material[idx];
+        
+        // CRITICAL: Only process voxels of selected material(s)
+        // Waves only propagate through chosen materials
         if (mat != selectedMaterial || density[idx] <= 0.0f) return;
         
         int z = idx / (width * height);
@@ -1311,6 +1497,10 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
         
         float E = youngsModulus[idx] * 1e6f;
         float nu = poissonRatio[idx];
+        
+        // Skip if material properties are invalid
+        if (E <= 0.0f || nu <= -1.0f || nu >= 0.5f) return;
+        
         float mu = E / (2.0f * (1.0f + nu));
         float lambda = E * nu / ((1.0f + nu) * (1.0f - 2.0f * nu));
 
@@ -1381,9 +1571,6 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
         syz[idx] = clamp(syz[idx], -stress_limit, stress_limit);
         
         if (useBrittleModel != 0) {
-            // Source: Based on typical rock mechanics principles, e.g., in ""Engineering Rock Mechanics"" by Hudson & Harrison.
-            // Uniaxial Compressive Strength (UCS) is derived from Mohr-Coulomb parameters.
-            // Tensile strength is estimated as a fraction (typically 1/10) of UCS, a common empirical relationship for rocks.
             float cohesionPa_d = cohesionMPa * 1e6f;
             float failureAngleRad_d = failureAngleDeg * M_PI_F / 180.0f;
             float sinPhi_d = sin(failureAngleRad_d);
@@ -1422,6 +1609,7 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
         __global float* vx, __global float* vy, __global float* vz,
         __global const float* sxx, __global const float* syy, __global const float* szz,
         __global const float* sxy, __global const float* sxz, __global const float* syz,
+        __global float* max_vx, __global float* max_vy, __global float* max_vz,
         const float dt, const float dx, 
         const int width, const int height, const int depth, 
         const uchar selectedMaterial)
@@ -1429,7 +1617,10 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
         int idx = get_global_id(0);
         if (idx >= width * height * depth) return;
         
-        if (material[idx] != selectedMaterial || density[idx] <= 0.0f) return;
+        uchar mat = material[idx];
+        
+        // CRITICAL: Only process voxels of selected material(s)
+        if (mat != selectedMaterial || density[idx] <= 0.0f) return;
 
         int z = idx / (width * height);
         int rem = idx % (width * height);
@@ -1466,9 +1657,11 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
         vx[idx] = clamp(vx[idx], -max_velocity, max_velocity);
         vy[idx] = clamp(vy[idx], -max_velocity, max_velocity);
         vz[idx] = clamp(vz[idx], -max_velocity, max_velocity);
+
+        max_vx[idx] = fmax(max_vx[idx], fabs(vx[idx]));
+        max_vy[idx] = fmax(max_vy[idx], fabs(vy[idx]));
+        max_vz[idx] = fmax(max_vz[idx], fabs(vz[idx]));
     }";
-}
-        
-        #endregion
+        }
     }
 }

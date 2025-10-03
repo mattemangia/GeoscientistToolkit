@@ -1,18 +1,22 @@
 // GeoscientistToolkit/Analysis/AcousticSimulation/SimulationParameters.cs
+using System.Collections.Generic;
 using System.Numerics;
 
 namespace GeoscientistToolkit.Analysis.AcousticSimulation
 {
-    /// <summary>
-    /// A comprehensive data structure to hold all parameters for an acoustic simulation run.
-    /// </summary>
     public class SimulationParameters
     {
         public int Width { get; set; }
         public int Height { get; set; }
         public int Depth { get; set; }
         public float PixelSize { get; set; }
+        
+        // Legacy single material support (kept for backwards compatibility)
         public byte SelectedMaterialID { get; set; }
+        
+        // NEW: Multi-material support
+        public HashSet<byte> SelectedMaterialIDs { get; set; } = new HashSet<byte>();
+        
         public int Axis { get; set; }
         public bool UseFullFaceTransducers { get; set; }
         public float ConfiningPressureMPa { get; set; }
@@ -39,5 +43,34 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
         public bool EnableOffloading { get; set; }
         public string OffloadDirectory { get; set; }
         public float TimeStepSeconds { get; set; } = 1e-6f;
+        
+        // Helper method to check if a material is selected
+        public bool IsMaterialSelected(byte materialId)
+        {
+            // If multi-material set is populated, use it
+            if (SelectedMaterialIDs.Count > 0)
+                return SelectedMaterialIDs.Contains(materialId);
+            
+            // Otherwise fall back to legacy single material
+            return materialId == SelectedMaterialID;
+        }
+        
+        // Helper to create GPU lookup table (256 bytes, one per possible material ID)
+        public byte[] CreateMaterialLookupTable()
+        {
+            var lookup = new byte[256];
+            
+            if (SelectedMaterialIDs.Count > 0)
+            {
+                foreach (var id in SelectedMaterialIDs)
+                    lookup[id] = 1;
+            }
+            else
+            {
+                lookup[SelectedMaterialID] = 1;
+            }
+            
+            return lookup;
+        }
     }
 }

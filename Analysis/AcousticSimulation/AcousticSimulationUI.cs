@@ -231,7 +231,17 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
         _selectedMaterialIDs.Add(materials.First().ID);
     }
     
+    // Store the state before the ImGui call modifies it
+    bool wasMultiMaterialEnabled = _enableMultiMaterialSelection;
     ImGui.Checkbox("Enable Multi-Material Selection", ref _enableMultiMaterialSelection);
+
+    // If the user just disabled multi-material selection, ensure the selection set is valid for single-select mode (only one item)
+    if (wasMultiMaterialEnabled && !_enableMultiMaterialSelection && _selectedMaterialIDs.Count > 1)
+    {
+        byte firstSelected = _selectedMaterialIDs.First();
+        _selectedMaterialIDs.Clear();
+        _selectedMaterialIDs.Add(firstSelected);
+    }
 
     ImGui.BeginChild("MaterialList", new Vector2(-1, materials.Length * 25f + 10), ImGuiChildFlags.Border);
     foreach (var material in materials)
@@ -1223,52 +1233,83 @@ private void ExportAllTomographySlices()
         }
         CtImageStackTools.Update3DPreviewFromExternal(dataset, null, Vector4.Zero);
 
+        // Initialize simulation parameters with multi-material support
         _parameters = new SimulationParameters
         {
-            Width = dataset.Width, Height = dataset.Height, Depth = dataset.Depth,
+            Width = dataset.Width,
+            Height = dataset.Height,
+            Depth = dataset.Depth,
             PixelSize = (float)dataset.PixelSize / 1000.0f,
-            SelectedMaterialID = _selectedMaterialIDs.FirstOrDefault(), // For legacy/damage model
-            // SelectedMaterialIDs = _selectedMaterialIDs, // This requires changing SimulationParameters.cs; simulator uses per-voxel properties instead
-            Axis = _selectedAxisIndex, UseFullFaceTransducers = _useFullFaceTransducers,
-            ConfiningPressureMPa = _confiningPressure, 
-            FailureAngleDeg = _failureAngle, CohesionMPa = _cohesion,
-            SourceEnergyJ = _sourceEnergy, SourceFrequencyKHz = _sourceFrequency, 
-            SourceAmplitude = _sourceAmplitude, TimeSteps = _timeSteps,
-            YoungsModulusMPa = _youngsModulus, PoissonRatio = _poissonRatio,
-            UseElasticModel = _useElastic, UsePlasticModel = _usePlastic, UseBrittleModel = _useBrittle, UseGPU = _useGPU,
+            
+            // MULTI-MATERIAL SUPPORT: Use HashSet for multiple materials
+            SelectedMaterialIDs = new HashSet<byte>(_selectedMaterialIDs),
+            
+            // Legacy single material (for backwards compatibility - set first material)
+            SelectedMaterialID = _selectedMaterialIDs.FirstOrDefault(),
+            
+            Axis = _selectedAxisIndex,
+            UseFullFaceTransducers = _useFullFaceTransducers,
+            ConfiningPressureMPa = _confiningPressure,
+            FailureAngleDeg = _failureAngle,
+            CohesionMPa = _cohesion,
+            SourceEnergyJ = _sourceEnergy,
+            SourceFrequencyKHz = _sourceFrequency,
+            SourceAmplitude = _sourceAmplitude,
+            TimeSteps = _timeSteps,
+            YoungsModulusMPa = _youngsModulus,
+            PoissonRatio = _poissonRatio,
+            UseElasticModel = _useElastic,
+            UsePlasticModel = _usePlastic,
+            UseBrittleModel = _useBrittle,
+            UseGPU = _useGPU,
             UseRickerWavelet = _useRickerWavelet,
-            TxPosition = _txPosition, RxPosition = _rxPosition, EnableRealTimeVisualization = _enableRealTimeVisualization,
-            SaveTimeSeries = _saveTimeSeries, SnapshotInterval = _snapshotInterval,
-            UseChunkedProcessing = _useChunkedProcessing, ChunkSizeMB = _chunkSizeMB, 
-            EnableOffloading = _enableOffloading, OffloadDirectory = _offloadDirectory
+            TxPosition = _txPosition,
+            RxPosition = _rxPosition,
+            EnableRealTimeVisualization = _enableRealTimeVisualization,
+            SaveTimeSeries = _saveTimeSeries,
+            SnapshotInterval = _snapshotInterval,
+            UseChunkedProcessing = _useChunkedProcessing,
+            ChunkSizeMB = _chunkSizeMB,
+            EnableOffloading = _enableOffloading,
+            OffloadDirectory = _offloadDirectory
         };
 
+        // Extract volume labels
         _preparationStatus = "Extracting volume labels...";
         _preparationProgress = 0.1f;
         var volumeLabels = await ExtractVolumeLabelsAsync(dataset);
         
+        // Extract density volume with heterogeneous grayscale-based density
         _preparationStatus = "Extracting density volume...";
         _preparationProgress = 0.4f;
         var densityVolume = await ExtractDensityVolumeAsync(dataset, dataset.VolumeData);
         
+        // Extract per-voxel material properties for heterogeneous simulations
         _preparationStatus = "Extracting material properties...";
         _preparationProgress = 0.7f;
         var (youngsModulusVolume, poissonRatioVolume) = await ExtractMaterialPropertiesVolumeAsync(dataset);
 
+        // Initialize the simulator
         _preparationStatus = "Initializing simulator...";
         _preparationProgress = 0.9f;
         _simulator = new ChunkedAcousticSimulator(_parameters);
         
+        // Register event handlers
         _simulator.ProgressUpdated += OnSimulationProgress;
-        if (_enableRealTimeVisualization) { _simulator.WaveFieldUpdated += OnWaveFieldUpdated; }
+        if (_enableRealTimeVisualization)
+        {
+            _simulator.WaveFieldUpdated += OnWaveFieldUpdated;
+        }
         
+        // Set per-voxel material properties (enables multi-material with different properties)
         _simulator.SetPerVoxelMaterialProperties(youngsModulusVolume, poissonRatioVolume);
         
         _preparationStatus = "Pre-computation completed.";
         _preparationProgress = 1.0f;
         _preparationComplete = true;
-        await Task.Delay(1000, _cancellationTokenSource.Token); 
+        await Task.Delay(1000, _cancellationTokenSource.Token);
 
+        // Run the simulation
         _currentState = SimulationState.Simulating;
         
         _lastResults = await _simulator.RunAsync(volumeLabels, densityVolume, _cancellationTokenSource.Token);
@@ -1276,45 +1317,67 @@ private void ExportAllTomographySlices()
         if (_lastResults != null)
         {
             _currentState = SimulationState.Completed;
+            
+            // Get damage field from simulator
             var damageField = _simulator.GetDamageField();
             _exportManager.SetDamageField(damageField);
             _lastResults.DamageField = damageField;
+            
             Logger.Log($"[AcousticSimulation] Simulation completed: Vp={_lastResults.PWaveVelocity:F2} m/s, Vs={_lastResults.SWaveVelocity:F2} m/s");
             
+            // Add to calibration if single material selected
             if (_selectedMaterialIDs.Count == 1)
             {
                 var material = dataset.Materials.First(m => m.ID == _selectedMaterialIDs.First());
-                _calibrationManager.AddSimulationResult(material.Name, material.ID, (float)material.Density, _confiningPressure, _youngsModulus, _poissonRatio, _lastResults.PWaveVelocity, _lastResults.SWaveVelocity);
+                _calibrationManager.AddSimulationResult(
+                    material.Name,
+                    material.ID,
+                    (float)material.Density,
+                    _confiningPressure,
+                    _youngsModulus,
+                    _poissonRatio,
+                    _lastResults.PWaveVelocity,
+                    _lastResults.SWaveVelocity
+                );
+            }
+            else if (_selectedMaterialIDs.Count > 1)
+            {
+                Logger.Log($"[AcousticSimulation] Multi-material simulation completed with {_selectedMaterialIDs.Count} materials. Calibration not added (single material only).");
             }
             
+            // Generate initial tomography view
             await GenerateTomographyAsync();
         }
     }
-    catch (OperationCanceledException) 
-    { 
+    catch (OperationCanceledException)
+    {
         Logger.Log("[AcousticSimulation] Simulation was cancelled.");
         _currentState = SimulationState.Cancelled;
     }
-    catch (Exception ex) 
-    { 
+    catch (Exception ex)
+    {
         Logger.LogError($"[AcousticSimulation] Simulation failed: {ex.Message}");
+        Logger.LogError($"Stack trace: {ex.StackTrace}");
         _currentState = SimulationState.Failed;
     }
-    finally 
-    { 
-        _isSimulating = false; 
+    finally
+    {
+        _isSimulating = false;
         if (_currentState == SimulationState.Simulating || _currentState == SimulationState.Preparing)
         {
-            _currentState = SimulationState.Idle; // Reset state if it ends unexpectedly
+            _currentState = SimulationState.Idle;
         }
-        _simulator?.Dispose(); 
+        _simulator?.Dispose();
         _simulator = null;
+        
+        // Clear 3D preview overlay
         if (dataset != null)
         {
             CtImageStackTools.Update3DPreviewFromExternal(dataset, null, Vector4.Zero);
         }
     }
 }
+
 private async Task<(float[,,] youngsModulus, float[,,] poissonRatio)> ExtractMaterialPropertiesVolumeAsync(CtImageStackDataset dataset)
 {
     return await Task.Run(() =>
@@ -1322,44 +1385,50 @@ private async Task<(float[,,] youngsModulus, float[,,] poissonRatio)> ExtractMat
         var youngsModulus = new float[dataset.Width, dataset.Height, dataset.Depth];
         var poissonRatio = new float[dataset.Width, dataset.Height, dataset.Depth];
         
-        // Create a fast lookup dictionary for material properties
+        // Create fast lookup dictionary for material properties
         var materialProps = new Dictionary<byte, (float E, float Nu)>();
+        
         foreach (var material in dataset.Materials)
         {
             if (material.ID == 0) continue;
 
-            float E = _youngsModulus;
-            float Nu = _poissonRatio;
+            float E = _youngsModulus;  // Default from UI
+            float Nu = _poissonRatio;  // Default from UI
 
+            // If material has a physical material assigned, use its properties
             if (!string.IsNullOrEmpty(material.PhysicalMaterialName))
             {
                 var physMat = MaterialLibrary.Instance.Find(material.PhysicalMaterialName);
                 if (physMat != null)
                 {
-                    E = (float)(physMat.YoungModulus_GPa ?? _youngsModulus) * 1000f; // GPa to MPa
+                    // Convert from GPa to MPa
+                    E = (float)(physMat.YoungModulus_GPa ?? _youngsModulus) * 1000f;
                     Nu = (float)(physMat.PoissonRatio ?? _poissonRatio);
                 }
             }
+            
             materialProps[material.ID] = (E, Nu);
         }
         
-        // Process the volume
-        Parallel.For(0, dataset.Depth, z => 
+        // Fill the volume with material properties
+        Parallel.For(0, dataset.Depth, z =>
         {
             for (int y = 0; y < dataset.Height; y++)
             {
-                for(int x = 0; x < dataset.Width; x++)
+                for (int x = 0; x < dataset.Width; x++)
                 {
                     byte label = dataset.LabelData[x, y, z];
                     
-                    // If the material is selected, use its properties. Otherwise, use default simulation properties.
+                    // If the material is in our selected set, use its properties
                     if (_selectedMaterialIDs.Contains(label) && materialProps.TryGetValue(label, out var props))
                     {
                         youngsModulus[x, y, z] = props.E;
                         poissonRatio[x, y, z] = props.Nu;
                     }
-                    else // For background or non-selected materials
+                    else
                     {
+                        // For non-selected materials (barriers), use default properties
+                        // These won't be processed anyway due to material filtering
                         youngsModulus[x, y, z] = _youngsModulus;
                         poissonRatio[x, y, z] = _poissonRatio;
                     }
@@ -1367,6 +1436,7 @@ private async Task<(float[,,] youngsModulus, float[,,] poissonRatio)> ExtractMat
             }
         });
 
+        Logger.Log($"[AcousticSimulation] Generated heterogeneous material property volumes for {materialProps.Count} materials.");
         return (youngsModulus, poissonRatio);
     });
 }

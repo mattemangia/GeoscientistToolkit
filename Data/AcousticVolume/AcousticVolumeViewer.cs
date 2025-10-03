@@ -403,7 +403,7 @@ namespace GeoscientistToolkit.Data.AcousticVolume
         /// </summary>
         private void HandleLineDrawing(ImGuiIOPtr io, Vector2 canvasPos, Vector2 canvasSize, float zoom, Vector2 pan, int viewIndex)
         {
-            ImGui.SetTooltip("Click and drag to define a line for FFT analysis.\nPress ESC or 'Cancel' in Analysis tool to exit.");
+            ImGui.SetTooltip("Click and drag to define a line for analysis.\nPress ESC or 'Cancel' in Analysis tool to exit.");
             
             var (width, height) = GetImageDimensionsForView(viewIndex, GetCurrentVolume());
             var (imagePos, imageSize) = GetImageDisplayMetrics(canvasPos, canvasSize, zoom, pan, width, height); // CORRECTED CALL
@@ -518,35 +518,70 @@ namespace GeoscientistToolkit.Data.AcousticVolume
         #region Color Map Functions
         private Vector4 GetJetColor(float v)
         {
-            if (v < 0.25f) return new Vector4(0, 4 * v, 1, 1);
-            if (v < 0.5f) return new Vector4(0, 1, 1 - 4 * (v - 0.25f), 1);
-            if (v < 0.75f) return new Vector4(4 * (v - 0.5f), 1, 0, 1);
-            return new Vector4(1, 1 - 4 * (v - 0.75f), 0, 1);
+            v = Math.Clamp(v, 0.0f, 1.0f);
+            Vector4 c = new Vector4(1.0f, 1.0f, 1.0f, 1.0f); // Default white
+        
+            if (v < 0.125f) {
+                c.X = 0.0f;
+                c.Y = 0.0f;
+                c.Z = 0.5f + 4.0f * v; // 0.5 -> 1 (dark blue to blue)
+            } else if (v < 0.375f) {
+                c.X = 0.0f;
+                c.Y = 4.0f * (v - 0.125f); // 0 -> 1 (blue to cyan)
+                c.Z = 1.0f;
+            } else if (v < 0.625f) {
+                c.X = 4.0f * (v - 0.375f); // 0 -> 1 (cyan to green to yellow)
+                c.Y = 1.0f;
+                c.Z = 1.0f - 4.0f * (v - 0.375f);
+            } else if (v < 0.875f) {
+                c.X = 1.0f;
+                c.Y = 1.0f - 4.0f * (v - 0.625f); // 1 -> 0 (yellow to red)
+                c.Z = 0.0f;
+            } else {
+                c.X = 1.0f - 4.0f * (v - 0.875f); // 1 -> 0.5 (red to dark red)
+                c.Y = 0.0f;
+                c.Z = 0.0f;
+            }
+            return new Vector4(c.X, c.Y, c.Z, 1.0f);
         }
         
-        private Vector4 GetViridisColor(float v)
+        private Vector4 GetViridisColor(float t)
         {
-            float r = 0.267f + v * (0.003f + v * (0.5f + v * 0.23f));
-            float g = 0.0049f + v * (1.1f - v * 0.5f);
-            float b = 0.329f + v * (0.45f - v * 0.82f);
-            return new Vector4(r, g, b, 1);
+            // Polynomial coefficients for Viridis
+            float r = 0.26700f + t * (2.05282f - t * (29.25595f - t * (127.35689f - t * (214.53428f - t * 128.38883f))));
+            float g = 0.00497f + t * (1.10748f + t * (4.29528f  - t * (4.93638f  + t * ( -7.42203f + t * 4.02493f))));
+            float b = 0.32942f + t * (0.45984f - t * (5.58064f  + t * (27.20658f - t * (50.11327f + t * 28.18927f))));
+            return new Vector4(Math.Clamp(r, 0.0f, 1.0f), Math.Clamp(g, 0.0f, 1.0f), Math.Clamp(b, 0.0f, 1.0f), 1.0f);
         }
         
         private Vector4 GetHotColor(float v)
         {
-            float r = Math.Min(1.0f, v * 2.5f);
-            float g = Math.Max(0, Math.Min(1.0f, v * 2.5f - 1.0f));
-            float b = Math.Max(0, v * 2.5f - 2.0f);
-            return new Vector4(r, g, b, 1);
+            v = Math.Clamp(v, 0.0f, 1.0f);
+            float r = Math.Clamp(v / 0.4f, 0.0f, 1.0f);
+            float g = Math.Clamp((v - 0.4f) / 0.4f, 0.0f, 1.0f);
+            float b = Math.Clamp((v - 0.8f) / 0.2f, 0.0f, 1.0f);
+            return new Vector4(r, g, b, 1.0f);
         }
         
         private Vector4 GetCoolColor(float v) => new Vector4(v, 1 - v, 1, 1);
         
         private Vector4 GetSeismicColor(float v)
         {
-            if (v < 0.5f) return new Vector4(v * 2, v * 2, 1, 1);
-            float t = (v - 0.5f) * 2;
-            return new Vector4(1, 1 - t, 1 - t, 1);
+            v = Math.Clamp(v, 0.0f, 1.0f);
+            // Diverging: Blue -> White -> Red
+            // v = 0.0 -> Blue (0,0,1)
+            // v = 0.5 -> White (1,1,1)
+            // v = 1.0 -> Red (1,0,0)
+            if (v < 0.5f)
+            {
+                float t = v * 2.0f; // remaps [0, 0.5] to [0, 1]
+                return new Vector4(t, t, 1.0f, 1.0f); // Interpolate from Blue to White
+            }
+            else
+            {
+                float t = (v - 0.5f) * 2.0f; // remaps [0.5, 1] to [0, 1]
+                return new Vector4(1.0f, 1.0f - t, 1.0f - t, 1.0f); // Interpolate from White to Red
+            }
         }
         #endregion
 

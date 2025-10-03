@@ -10,6 +10,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Numerics;
+using System.Threading.Tasks;
 
 namespace GeoscientistToolkit.Data.AcousticVolume
 {
@@ -86,6 +87,13 @@ namespace GeoscientistToolkit.Data.AcousticVolume
                             Name = "Data Analysis",
                             Description = "Calculate statistics, histograms, and frequency spectrums",
                             Tool = new AcousticAnalysisTool(),
+                            Category = ToolCategory.Analysis
+                        },
+                        new ToolEntry
+                        {
+                            Name = "Velocity Profile",
+                            Description = "Analyze Vp and Vs along a user-defined line from calibrated density data",
+                            Tool = new VelocityProfileTool(),
                             Category = ToolCategory.Analysis
                         },
                          new ToolEntry
@@ -359,5 +367,173 @@ namespace GeoscientistToolkit.Data.AcousticVolume
         }
     }
     
+    /// <summary>
+    /// A new tool to analyze Vp/Vs along a user-defined profile.
+    /// </summary>
+    internal class VelocityProfileTool : IDatasetTools
+    {
+        private List<float> _vpData;
+        private List<float> _vsData;
+        private string _statsResult = "No profile selected.";
+        private bool _isCalculating = false;
+
+        public void Draw(Dataset dataset)
+        {
+            if (dataset is not AcousticVolumeDataset ad)
+            {
+                ImGui.TextDisabled("This tool requires an Acoustic Volume Dataset.");
+                return;
+            }
+
+            if (ad.DensityData == null)
+            {
+                ImGui.TextColored(new Vector4(1, 1, 0, 1), "Warning: Density data has not been calibrated.");
+                ImGui.TextWrapped("Please run the Density Calibration tool before using the profile tool.");
+                return;
+            }
+            
+            // Check for new line data from the viewer on every frame
+            if (AcousticInteractionManager.HasNewLine)
+            {
+                AcousticInteractionManager.HasNewLine = false;
+                if (!_isCalculating)
+                {
+                    _isCalculating = true;
+                    // Run calculation in a background thread to keep UI responsive
+                    Task.Run(() => CalculateProfile(ad));
+                }
+            }
+            
+            ImGui.Text("Analyze Vp and Vs along a user-defined line.");
+            ImGui.Separator();
+
+            if (AcousticInteractionManager.InteractionMode == ViewerInteractionMode.DrawingLine)
+            {
+                ImGui.TextColored(new Vector4(1, 1, 0, 1), "Drawing mode active in viewer window...");
+                if (ImGui.Button("Cancel Drawing"))
+                {
+                    AcousticInteractionManager.CancelLineDrawing();
+                }
+            }
+            else
+            {
+                if (ImGui.Button("Select Profile in Viewer..."))
+                {
+                    AcousticInteractionManager.StartLineDrawing();
+                }
+            }
+
+            ImGui.Spacing();
+            ImGui.Separator();
+            ImGui.Text("Results:");
+
+            if (_isCalculating)
+            {
+                ImGui.Text("Calculating...");
+            }
+            else
+            {
+                ImGui.TextWrapped(_statsResult);
+                if (_vpData != null && _vpData.Count > 0)
+                {
+                    var vpArray = _vpData.ToArray();
+                    ImGui.PlotLines("P-Wave Velocity (Vp)", ref vpArray[0], vpArray.Length, 0, "Distance ->", _vsData.Min(), _vpData.Max(), new Vector2(0, 120));
+                }
+
+                if (_vsData != null && _vsData.Count > 0)
+                {
+                    var vsArray = _vsData.ToArray();
+                    ImGui.PlotLines("S-Wave Velocity (Vs)", ref vsArray[0], vsArray.Length, 0, "Distance ->", _vsData.Min(), _vpData.Max(), new Vector2(0, 120));
+                }
+            }
+        }
+        
+        /// <summary>
+        /// Extracts velocity data along a line defined in the viewer.
+        /// </summary>
+        private void CalculateProfile(AcousticVolumeDataset dataset)
+        {
+            var densityVolume = dataset.DensityData;
+            if (densityVolume == null)
+            {
+                _statsResult = "Density data is not available for calculation.";
+                _isCalculating = false;
+                return;
+            }
+
+            // Get coordinates from the interaction manager
+            int x1 = (int)AcousticInteractionManager.LineStartPoint.X;
+            int y1 = (int)AcousticInteractionManager.LineStartPoint.Y;
+            int x2 = (int)AcousticInteractionManager.LineEndPoint.X;
+            int y2 = (int)AcousticInteractionManager.LineEndPoint.Y;
+            int slice_coord = AcousticInteractionManager.LineSliceIndex;
+            int viewIndex = AcousticInteractionManager.LineViewIndex;
+
+            _vpData = new List<float>();
+            _vsData = new List<float>();
+
+            // Bresenham's line algorithm to iterate over pixels
+            int dx = Math.Abs(x2 - x1), sx = x1 < x2 ? 1 : -1;
+            int dy = -Math.Abs(y2 - y1), sy = y1 < y2 ? 1 : -1;
+            int err = dx + dy, e2;
+
+            while (true)
+            {
+                // Convert 2D view coordinates to 3D volume coordinates
+                int volX, volY, volZ;
+                bool inBounds = false;
+                switch (viewIndex)
+                {
+                    case 0: // XY View
+                        volX = x1; volY = y1; volZ = slice_coord;
+                        if (volX >= 0 && volX < densityVolume.Width && volY >= 0 && volY < densityVolume.Height && volZ >= 0 && volZ < densityVolume.Depth)
+                            inBounds = true;
+                        break;
+                    case 1: // XZ View
+                        volX = x1; volY = slice_coord; volZ = y1;
+                        if (volX >= 0 && volX < densityVolume.Width && volY >= 0 && volY < densityVolume.Height && volZ >= 0 && volZ < densityVolume.Depth)
+                             inBounds = true;
+                        break;
+                    case 2: // YZ View
+                        volX = slice_coord; volY = x1; volZ = y1;
+                         if (volX >= 0 && volX < densityVolume.Width && volY >= 0 && volY < densityVolume.Height && volZ >= 0 && volZ < densityVolume.Depth)
+                            inBounds = true;
+                        break;
+                    default:
+                        volX = volY = volZ = 0;
+                        break;
+                }
+
+                if (inBounds)
+                {
+                    _vpData.Add(densityVolume.GetPWaveVelocity(volX, volY, volZ));
+                    _vsData.Add(densityVolume.GetSWaveVelocity(volX, volY, volZ));
+                }
+
+                if (x1 == x2 && y1 == y2) break;
+                e2 = 2 * err;
+                if (e2 >= dy) { err += dy; x1 += sx; }
+                if (e2 <= dx) { err += dx; y1 += sy; }
+            }
+
+            if (_vpData.Count > 0)
+            {
+                float avgVp = _vpData.Average();
+                float avgVs = _vsData.Average();
+                float avgVpVs = avgVs > 0 ? avgVp / avgVs : 0;
+                _statsResult = $"Points Sampled: {_vpData.Count}\n" +
+                               $"Average Vp: {avgVp:F2} m/s\n" +
+                               $"Average Vs: {avgVs:F2} m/s\n" +
+                               $"Average Vp/Vs Ratio: {avgVpVs:F3}";
+            }
+            else
+            {
+                _statsResult = "No data points found along the selected line.";
+            }
+
+            Logger.Log($"[VelocityProfileTool] Extracted {_vpData.Count} data points for velocity profile.");
+            _isCalculating = false;
+        }
+    }
     #endregion
 }
