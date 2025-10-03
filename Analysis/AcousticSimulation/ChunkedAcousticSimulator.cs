@@ -184,31 +184,45 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
                 
                 float sourceValue = GetCurrentSourceValue(step);
 
+                // --- STRESS UPDATE PASS ---
                 for (int i = 0; i < _chunks.Count; i++)
                 {
                     if (_params.EnableOffloading)
                     {
-                        // Load the next chunk if needed for the next boundary exchange
                         if (i + 1 < _chunks.Count) await LoadChunkAsync(_chunks[i + 1]);
-                        // Offload the chunk that is now "behind" the 3-chunk processing window
                         if (i - 2 >= 0) await OffloadChunkAsync(_chunks[i - 2]);
                     }
-
                     var c = _chunks[i];
-                    if (!c.IsInMemory) await LoadChunkAsync(c); // Should already be in memory, but as a safeguard
+                    if (!c.IsInMemory) await LoadChunkAsync(c);
 
                     if (_useGPU)
-                        await ProcessChunkGPUAsync(i, c, labels, density, sourceValue, token);
+                        await ProcessChunkGPU_StressOnly(c, labels, density, sourceValue, token);
                     else
                     {
                         if (sourceValue != 0)
                             ApplySourceToChunkCPU(c, sourceValue);
                         UpdateChunkStressCPU(c, labels, density);
-                        UpdateChunkVelocityCPU(c, labels, density);
                     }
                 }
+                ExchangeStressBoundaries();
 
-                ExchangeBoundaries();
+                // --- VELOCITY UPDATE PASS ---
+                for (int i = 0; i < _chunks.Count; i++)
+                {
+                    if (_params.EnableOffloading)
+                    {
+                        if (i + 1 < _chunks.Count) await LoadChunkAsync(_chunks[i + 1]);
+                        if (i - 2 >= 0) await OffloadChunkAsync(_chunks[i - 2]);
+                    }
+                    var c = _chunks[i];
+                    if (!c.IsInMemory) await LoadChunkAsync(c);
+
+                    if (_useGPU)
+                        await ProcessChunkGPU_VelocityOnly(c, labels, density, token);
+                    else
+                        UpdateChunkVelocityCPU(c, labels, density);
+                }
+                ExchangeVelocityBoundaries();
 
                 if (_params.SaveTimeSeries && step % _params.SnapshotInterval == 0)
                     results.TimeSeriesSnapshots?.Add(CreateSnapshot(step));
@@ -317,7 +331,7 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
             if (err2 != (int)CLEnum.Success) throw new InvalidOperationException($"CreateKernel(updateVelocity) failed: {err2}");
         }
 
-        private async Task ProcessChunkGPUAsync(int ci, WaveFieldChunk c, byte[,,] labels, float[,,] density, float sourceValue, CancellationToken token)
+        private async Task ProcessChunkGPU_StressOnly(WaveFieldChunk c, byte[,,] labels, float[,,] density, float sourceValue, CancellationToken token)
         {
             await Task.Run(() =>
             {
@@ -328,7 +342,6 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
                 var mat = new byte[size]; var den = new float[size]; var vx = new float[size]; var vy = new float[size]; var vz = new float[size];
                 var sxx = new float[size]; var syy = new float[size]; var szz = new float[size]; var sxy = new float[size]; var sxz = new float[size]; var syz = new float[size];
                 var dmg = new float[size];
-                // --- MODIFICATION: Create host-side arrays for material properties ---
                 var ym = new float[size]; 
                 var pr = new float[size];
 
@@ -345,7 +358,6 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
                         sxx[k] = c.Sxx[x, y, lz]; syy[k] = c.Syy[x, y, lz]; szz[k] = c.Szz[x, y, lz];
                         sxy[k] = c.Sxy[x, y, lz]; sxz[k] = c.Sxz[x, y, lz]; syz[k] = c.Syz[x, y, lz];
                         dmg[k] = c.Damage[x, y, lz];
-                        // --- MODIFICATION: Populate material property arrays ---
                         if (_usePerVoxelProperties)
                         {
                             ym[k] = _perVoxelYoungsModulus[x, y, gz];
@@ -353,7 +365,6 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
                         }
                         else
                         {
-                            // Fallback to global properties if per-voxel not set
                             ym[k] = _params.YoungsModulusMPa;
                             pr[k] = _params.PoissonRatio;
                         }
@@ -366,14 +377,13 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
                     fixed (byte* pMat = mat) fixed (float* pDen = den) fixed (float* pVx = vx) fixed (float* pVy = vy) fixed (float* pVz = vz)
                     fixed (float* pSxx = sxx) fixed (float* pSyy = syy) fixed (float* pSzz = szz) fixed (float* pSxy = sxy) fixed (float* pSxz = sxz) fixed (float* pSyz = syz)
                     fixed (float* pDmg = dmg)
-                    // --- MODIFICATION: Pin memory for new arrays ---
                     fixed (float* pYm = ym) fixed (float* pPr = pr)
                     {
                         _bufMat = _cl.CreateBuffer(_context, MemFlags.ReadOnly | MemFlags.CopyHostPtr, (nuint)(size * sizeof(byte)), pMat, out int err);
                         _bufDen = _cl.CreateBuffer(_context, MemFlags.ReadOnly | MemFlags.CopyHostPtr, (nuint)(size * sizeof(float)), pDen, out err);
-                        _bufVel[0] = _cl.CreateBuffer(_context, MemFlags.ReadWrite | MemFlags.CopyHostPtr, (nuint)(size * sizeof(float)), pVx, out err);
-                        _bufVel[1] = _cl.CreateBuffer(_context, MemFlags.ReadWrite | MemFlags.CopyHostPtr, (nuint)(size * sizeof(float)), pVy, out err);
-                        _bufVel[2] = _cl.CreateBuffer(_context, MemFlags.ReadWrite | MemFlags.CopyHostPtr, (nuint)(size * sizeof(float)), pVz, out err);
+                        _bufVel[0] = _cl.CreateBuffer(_context, MemFlags.ReadOnly | MemFlags.CopyHostPtr, (nuint)(size * sizeof(float)), pVx, out err);
+                        _bufVel[1] = _cl.CreateBuffer(_context, MemFlags.ReadOnly | MemFlags.CopyHostPtr, (nuint)(size * sizeof(float)), pVy, out err);
+                        _bufVel[2] = _cl.CreateBuffer(_context, MemFlags.ReadOnly | MemFlags.CopyHostPtr, (nuint)(size * sizeof(float)), pVz, out err);
                         _bufStr[0] = _cl.CreateBuffer(_context, MemFlags.ReadWrite | MemFlags.CopyHostPtr, (nuint)(size * sizeof(float)), pSxx, out err);
                         _bufStr[1] = _cl.CreateBuffer(_context, MemFlags.ReadWrite | MemFlags.CopyHostPtr, (nuint)(size * sizeof(float)), pSyy, out err);
                         _bufStr[2] = _cl.CreateBuffer(_context, MemFlags.ReadWrite | MemFlags.CopyHostPtr, (nuint)(size * sizeof(float)), pSzz, out err);
@@ -381,25 +391,18 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
                         _bufStr[4] = _cl.CreateBuffer(_context, MemFlags.ReadWrite | MemFlags.CopyHostPtr, (nuint)(size * sizeof(float)), pSxz, out err);
                         _bufStr[5] = _cl.CreateBuffer(_context, MemFlags.ReadWrite | MemFlags.CopyHostPtr, (nuint)(size * sizeof(float)), pSyz, out err);
                         _bufDmg = _cl.CreateBuffer(_context, MemFlags.ReadWrite | MemFlags.CopyHostPtr, (nuint)(size * sizeof(float)), pDmg, out err);
-                        // --- MODIFICATION: Create new GPU buffers ---
                         _bufYoungsModulus = _cl.CreateBuffer(_context, MemFlags.ReadOnly | MemFlags.CopyHostPtr, (nuint)(size * sizeof(float)), pYm, out err);
                         _bufPoissonRatio = _cl.CreateBuffer(_context, MemFlags.ReadOnly | MemFlags.CopyHostPtr, (nuint)(size * sizeof(float)), pPr, out err);
 
                         
-                        // --- MODIFICATION: Update memory usage calculation ---
                         _lastDeviceBytes = (long)size * (sizeof(byte) + sizeof(float) * 13);
                         
                         SetKernelArgs(_kernelStress, w, h, d, c.StartZ, sourceValue);
                         nuint gws = (nuint)size;
                         _cl.EnqueueNdrangeKernel(_queue, _kernelStress, 1, null, &gws, null, 0, null, null);
                         
-                        SetKernelArgs(_kernelVelocity, w, h, d, c.StartZ, sourceValue);
-                        _cl.EnqueueNdrangeKernel(_queue, _kernelVelocity, 1, null, &gws, null, 0, null, null);
                         _cl.Finish(_queue);
 
-                        _cl.EnqueueReadBuffer(_queue, _bufVel[0], true, 0, (nuint)(size * sizeof(float)), pVx, 0, null, null);
-                        _cl.EnqueueReadBuffer(_queue, _bufVel[1], true, 0, (nuint)(size * sizeof(float)), pVy, 0, null, null);
-                        _cl.EnqueueReadBuffer(_queue, _bufVel[2], true, 0, (nuint)(size * sizeof(float)), pVz, 0, null, null);
                         _cl.EnqueueReadBuffer(_queue, _bufStr[0], true, 0, (nuint)(size * sizeof(float)), pSxx, 0, null, null);
                         _cl.EnqueueReadBuffer(_queue, _bufStr[1], true, 0, (nuint)(size * sizeof(float)), pSyy, 0, null, null);
                         _cl.EnqueueReadBuffer(_queue, _bufStr[2], true, 0, (nuint)(size * sizeof(float)), pSzz, 0, null, null);
@@ -415,10 +418,77 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
                 for (int y = 0; y < h; y++)
                 for (int x = 0; x < w; x++, k++)
                 {
-                    c.Vx[x, y, lz] = vx[k]; c.Vy[x, y, lz] = vy[k]; c.Vz[x, y, lz] = vz[k];
                     c.Sxx[x, y, lz] = sxx[k]; c.Syy[x, y, lz] = syy[k]; c.Szz[x, y, lz] = szz[k];
                     c.Sxy[x, y, lz] = sxy[k]; c.Sxz[x, y, lz] = sxz[k]; c.Syz[x, y, lz] = syz[k];
                     c.Damage[x, y, lz] = dmg[k];
+                }
+
+                ReleaseChunkBuffers();
+            });
+        }
+        
+        private async Task ProcessChunkGPU_VelocityOnly(WaveFieldChunk c, byte[,,] labels, float[,,] density, CancellationToken token)
+        {
+            await Task.Run(() =>
+            {
+                token.ThrowIfCancellationRequested();
+                int w = _params.Width, h = _params.Height, d = c.EndZ - c.StartZ;
+                int size = w * h * d;
+
+                var mat = new byte[size]; var den = new float[size]; var vx = new float[size]; var vy = new float[size]; var vz = new float[size];
+                var sxx = new float[size]; var syy = new float[size]; var szz = new float[size]; var sxy = new float[size]; var sxz = new float[size]; var syz = new float[size];
+
+                int k = 0;
+                for (int lz = 0; lz < d; lz++)
+                {
+                    int gz = c.StartZ + lz;
+                    for (int y = 0; y < h; y++)
+                    for (int x = 0; x < w; x++, k++)
+                    {
+                        mat[k] = labels[x, y, gz]; den[k] = MathF.Max(100f, density[x, y, gz]);
+                        vx[k] = c.Vx[x, y, lz]; vy[k] = c.Vy[x, y, lz]; vz[k] = c.Vz[x, y, lz];
+                        sxx[k] = c.Sxx[x, y, lz]; syy[k] = c.Syy[x, y, lz]; szz[k] = c.Szz[x, y, lz];
+                        sxy[k] = c.Sxy[x, y, lz]; sxz[k] = c.Sxz[x, y, lz]; syz[k] = c.Syz[x, y, lz];
+                    }
+                }
+
+                unsafe
+                {
+                    fixed (byte* pMat = mat) fixed (float* pDen = den) fixed (float* pVx = vx) fixed (float* pVy = vy) fixed (float* pVz = vz)
+                    fixed (float* pSxx = sxx) fixed (float* pSyy = syy) fixed (float* pSzz = szz) fixed (float* pSxy = sxy) fixed (float* pSxz = sxz) fixed (float* pSyz = syz)
+                    {
+                        _bufMat = _cl.CreateBuffer(_context, MemFlags.ReadOnly | MemFlags.CopyHostPtr, (nuint)(size * sizeof(byte)), pMat, out int err);
+                        _bufDen = _cl.CreateBuffer(_context, MemFlags.ReadOnly | MemFlags.CopyHostPtr, (nuint)(size * sizeof(float)), pDen, out err);
+                        _bufVel[0] = _cl.CreateBuffer(_context, MemFlags.ReadWrite | MemFlags.CopyHostPtr, (nuint)(size * sizeof(float)), pVx, out err);
+                        _bufVel[1] = _cl.CreateBuffer(_context, MemFlags.ReadWrite | MemFlags.CopyHostPtr, (nuint)(size * sizeof(float)), pVy, out err);
+                        _bufVel[2] = _cl.CreateBuffer(_context, MemFlags.ReadWrite | MemFlags.CopyHostPtr, (nuint)(size * sizeof(float)), pVz, out err);
+                        _bufStr[0] = _cl.CreateBuffer(_context, MemFlags.ReadOnly | MemFlags.CopyHostPtr, (nuint)(size * sizeof(float)), pSxx, out err);
+                        _bufStr[1] = _cl.CreateBuffer(_context, MemFlags.ReadOnly | MemFlags.CopyHostPtr, (nuint)(size * sizeof(float)), pSyy, out err);
+                        _bufStr[2] = _cl.CreateBuffer(_context, MemFlags.ReadOnly | MemFlags.CopyHostPtr, (nuint)(size * sizeof(float)), pSzz, out err);
+                        _bufStr[3] = _cl.CreateBuffer(_context, MemFlags.ReadOnly | MemFlags.CopyHostPtr, (nuint)(size * sizeof(float)), pSxy, out err);
+                        _bufStr[4] = _cl.CreateBuffer(_context, MemFlags.ReadOnly | MemFlags.CopyHostPtr, (nuint)(size * sizeof(float)), pSxz, out err);
+                        _bufStr[5] = _cl.CreateBuffer(_context, MemFlags.ReadOnly | MemFlags.CopyHostPtr, (nuint)(size * sizeof(float)), pSyz, out err);
+                        
+                        _lastDeviceBytes = (long)size * (sizeof(byte) + sizeof(float) * 12);
+                        
+                        SetKernelArgs(_kernelVelocity, w, h, d, c.StartZ, 0);
+                        nuint gws = (nuint)size;
+                        _cl.EnqueueNdrangeKernel(_queue, _kernelVelocity, 1, null, &gws, null, 0, null, null);
+                        
+                        _cl.Finish(_queue);
+
+                        _cl.EnqueueReadBuffer(_queue, _bufVel[0], true, 0, (nuint)(size * sizeof(float)), pVx, 0, null, null);
+                        _cl.EnqueueReadBuffer(_queue, _bufVel[1], true, 0, (nuint)(size * sizeof(float)), pVy, 0, null, null);
+                        _cl.EnqueueReadBuffer(_queue, _bufVel[2], true, 0, (nuint)(size * sizeof(float)), pVz, 0, null, null);
+                    }
+                }
+
+                k = 0;
+                for (int lz = 0; lz < d; lz++)
+                for (int y = 0; y < h; y++)
+                for (int x = 0; x < w; x++, k++)
+                {
+                    c.Vx[x, y, lz] = vx[k]; c.Vy[x, y, lz] = vy[k]; c.Vz[x, y, lz] = vz[k];
                 }
 
                 ReleaseChunkBuffers();
@@ -802,13 +872,60 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
         }
         private void CalculateTimeStep(float[,,] density)
         {
-            float rhoMin = float.MaxValue;
-            for (int z = 0; z < _params.Depth; z++)
+            float vpMax = 0f;
+
+            if (_usePerVoxelProperties && _perVoxelYoungsModulus != null && _perVoxelPoissonRatio != null)
+            {
+                // Calculate local max velocity for heterogeneous media
+                for (int z = 0; z < _params.Depth; z++)
                 for (int y = 0; y < _params.Height; y++)
-                    for (int x = 0; x < _params.Width; x++)
+                for (int x = 0; x < _params.Width; x++)
+                {
+                    if (density[x, y, z] <= 0) continue;
+
+                    float rho = MathF.Max(100f, density[x, y, z]);
+                    float E = _perVoxelYoungsModulus[x, y, z] * 1e6f; // MPa to Pa
+                    float nu = _perVoxelPoissonRatio[x, y, z];
+
+                    if (E <= 0 || rho <= 0 || nu >= 0.5f || nu <= -1.0f) continue;
+
+                    float lambda = E * nu / ((1f + nu) * (1f - 2f * nu));
+                    float mu = E / (2f * (1f + nu));
+                    float vp = MathF.Sqrt((lambda + 2f * mu) / rho);
+                    if (vp > vpMax)
+                    {
+                        vpMax = vp;
+                    }
+                }
+            }
+            else
+            {
+                // Fallback to global properties
+                float rhoMin = float.MaxValue;
+                for (int z = 0; z < _params.Depth; z++)
+                for (int y = 0; y < _params.Height; y++)
+                for (int x = 0; x < _params.Width; x++)
+                {
+                     if (density[x,y,z] > 0)
                         rhoMin = MathF.Min(rhoMin, MathF.Max(100f, density[x, y, z]));
-            float vsMax = MathF.Sqrt(_mu / MathF.Max(100f, rhoMin));
-            _dt = Math.Min(_params.TimeStepSeconds, _params.PixelSize / (1.7320508f * MathF.Max(1e-3f, vsMax)));
+                }
+                
+                if(rhoMin == float.MaxValue) rhoMin = 2700; // fallback rock density
+                
+                vpMax = MathF.Sqrt((_lambda + 2f * _mu) / rhoMin);
+            }
+
+            if (vpMax < 1e-3f) {
+                _dt = _params.TimeStepSeconds; // Fallback to a user-defined (likely unstable) value
+                Logger.LogWarning($"[CFL] Could not determine a valid Vp_max. Falling back to default dt={_dt * 1e6f:F4} µs.");
+                return;
+            }
+
+            // CFL condition from Courant, Friedrichs, Lewy (1928) for 3D finite differences.
+            // dt <= dx / (sqrt(3) * Vp_max)
+            // A safety factor (e.g., 0.5) is added for stability with complex models.
+            _dt = 0.5f * (_params.PixelSize / (MathF.Sqrt(3) * vpMax));
+            Logger.Log($"[CFL] Calculated stable timestep: dt={_dt*1e6f:F4} µs based on Vp_max={vpMax:F0} m/s");
         }
         
         private float GetCurrentSourceValue(int step)
@@ -898,7 +1015,7 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
             }
         }
 
-        private void ExchangeBoundaries()
+        private void ExchangeVelocityBoundaries()
         {
             for (int i = 0; i < _chunks.Count - 1; i++)
             {
@@ -908,29 +1025,56 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
                 if (!topChunk.IsInMemory || !bottomChunk.IsInMemory) continue;
 
                 int topChunkDepth = topChunk.EndZ - topChunk.StartZ;
-
-                // Define the slice indices for clarity
                 int lastInteriorSlice_top = topChunkDepth - 2;
                 int bottomGhostSlice_top = topChunkDepth - 1;
                 int topGhostSlice_bottom = 0;
                 int firstInteriorSlice_bottom = 1;
 
                 for (int y = 0; y < _params.Height; y++)
+                for (int x = 0; x < _params.Width; x++)
                 {
-                    for (int x = 0; x < _params.Width; x++)
-                    {
-                        // Update the ghost slice at the bottom of the top chunk
-                        // with data from the first interior slice of the bottom chunk.
-                        topChunk.Vx[x, y, bottomGhostSlice_top] = bottomChunk.Vx[x, y, firstInteriorSlice_bottom];
-                        topChunk.Vy[x, y, bottomGhostSlice_top] = bottomChunk.Vy[x, y, firstInteriorSlice_bottom];
-                        topChunk.Vz[x, y, bottomGhostSlice_top] = bottomChunk.Vz[x, y, firstInteriorSlice_bottom];
+                    topChunk.Vx[x, y, bottomGhostSlice_top] = bottomChunk.Vx[x, y, firstInteriorSlice_bottom];
+                    topChunk.Vy[x, y, bottomGhostSlice_top] = bottomChunk.Vy[x, y, firstInteriorSlice_bottom];
+                    topChunk.Vz[x, y, bottomGhostSlice_top] = bottomChunk.Vz[x, y, firstInteriorSlice_bottom];
 
-                        // Update the ghost slice at the top of the bottom chunk
-                        // with data from the last interior slice of the top chunk.
-                        bottomChunk.Vx[x, y, topGhostSlice_bottom] = topChunk.Vx[x, y, lastInteriorSlice_top];
-                        bottomChunk.Vy[x, y, topGhostSlice_bottom] = topChunk.Vy[x, y, lastInteriorSlice_top];
-                        bottomChunk.Vz[x, y, topGhostSlice_bottom] = topChunk.Vz[x, y, lastInteriorSlice_top];
-                    }
+                    bottomChunk.Vx[x, y, topGhostSlice_bottom] = topChunk.Vx[x, y, lastInteriorSlice_top];
+                    bottomChunk.Vy[x, y, topGhostSlice_bottom] = topChunk.Vy[x, y, lastInteriorSlice_top];
+                    bottomChunk.Vz[x, y, topGhostSlice_bottom] = topChunk.Vz[x, y, lastInteriorSlice_top];
+                }
+            }
+        }
+
+        private void ExchangeStressBoundaries()
+        {
+            for (int i = 0; i < _chunks.Count - 1; i++)
+            {
+                var topChunk = _chunks[i];
+                var bottomChunk = _chunks[i + 1];
+
+                if (!topChunk.IsInMemory || !bottomChunk.IsInMemory) continue;
+
+                int topChunkDepth = topChunk.EndZ - topChunk.StartZ;
+                int lastInteriorSlice_top = topChunkDepth - 2;
+                int bottomGhostSlice_top = topChunkDepth - 1;
+                int topGhostSlice_bottom = 0;
+                int firstInteriorSlice_bottom = 1;
+
+                for (int y = 0; y < _params.Height; y++)
+                for (int x = 0; x < _params.Width; x++)
+                {
+                    topChunk.Sxx[x, y, bottomGhostSlice_top] = bottomChunk.Sxx[x, y, firstInteriorSlice_bottom];
+                    topChunk.Syy[x, y, bottomGhostSlice_top] = bottomChunk.Syy[x, y, firstInteriorSlice_bottom];
+                    topChunk.Szz[x, y, bottomGhostSlice_top] = bottomChunk.Szz[x, y, firstInteriorSlice_bottom];
+                    topChunk.Sxy[x, y, bottomGhostSlice_top] = bottomChunk.Sxy[x, y, firstInteriorSlice_bottom];
+                    topChunk.Sxz[x, y, bottomGhostSlice_top] = bottomChunk.Sxz[x, y, firstInteriorSlice_bottom];
+                    topChunk.Syz[x, y, bottomGhostSlice_top] = bottomChunk.Syz[x, y, firstInteriorSlice_bottom];
+
+                    bottomChunk.Sxx[x, y, topGhostSlice_bottom] = topChunk.Sxx[x, y, lastInteriorSlice_top];
+                    bottomChunk.Syy[x, y, topGhostSlice_bottom] = topChunk.Syy[x, y, lastInteriorSlice_top];
+                    bottomChunk.Szz[x, y, topGhostSlice_bottom] = topChunk.Szz[x, y, lastInteriorSlice_top];
+                    bottomChunk.Sxy[x, y, topGhostSlice_bottom] = topChunk.Sxy[x, y, lastInteriorSlice_top];
+                    bottomChunk.Sxz[x, y, topGhostSlice_bottom] = topChunk.Sxz[x, y, lastInteriorSlice_top];
+                    bottomChunk.Syz[x, y, topGhostSlice_bottom] = topChunk.Syz[x, y, lastInteriorSlice_top];
                 }
             }
         }
