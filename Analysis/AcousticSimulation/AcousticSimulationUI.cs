@@ -141,6 +141,7 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
         private float _preparationProgress;
         private string _preparationStatus = "";
         private bool _preparationComplete;
+        private CancellationTokenSource _tomographyUpdateCts;
 
 
         public AcousticSimulationUI()
@@ -342,7 +343,7 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
         if (!prevTomographyOpen && _isTomographyWindowOpen && (_lastResults != null || _isSimulating))
         {
             // Window was just opened, regenerate tomography from final or live data
-            _ = GenerateTomographyAsync();
+            RequestTomographyUpdate();
         }
 
         ImGui.Separator();
@@ -1040,7 +1041,20 @@ private void ExportAllTomographySlices()
     }
 }
 
-        private void DrawTomographyWindow()
+        /// <summary>
+/// Manages cancellation and dispatching of tomography generation tasks.
+/// </summary>
+private void RequestTomographyUpdate()
+{
+    // Cancel any previously running update to prevent race conditions.
+    _tomographyUpdateCts?.Cancel();
+    _tomographyUpdateCts = new CancellationTokenSource();
+    
+    // Fire and forget the new update task.
+    _ = GenerateTomographyAsync(_tomographyUpdateCts.Token);
+}
+
+private void DrawTomographyWindow()
 {
     ImGui.SetNextWindowSize(new Vector2(500, 600), ImGuiCond.FirstUseEver);
     if (ImGui.Begin("Velocity Tomography", ref _isTomographyWindowOpen))
@@ -1055,7 +1069,7 @@ private void ExportAllTomographySlices()
         // Update button - regenerate tomography with current results
         if (ImGui.Button("Update Tomography", new Vector2(-1, 0)))
         {
-            _ = GenerateTomographyAsync();
+            RequestTomographyUpdate();
             Logger.Log("[Tomography] Manually updating tomography view");
         }
         
@@ -1079,7 +1093,7 @@ private void ExportAllTomographySlices()
         // --- Regenerate texture if controls change ---
         if (_tomographySliceIndex != _lastTomographySliceIndex || _tomographySliceAxis != _lastTomographySliceAxis)
         {
-            _ = GenerateTomographyAsync();
+            RequestTomographyUpdate();
             _lastTomographySliceIndex = _tomographySliceIndex;
             _lastTomographySliceAxis = _tomographySliceAxis;
         }
@@ -1158,7 +1172,7 @@ private void ExportAllTomographySlices()
             ImGui.Text("Generating tomography...");
             if (ImGui.Button("Retry Generation"))
             {
-                _ = GenerateTomographyAsync();
+                RequestTomographyUpdate();
             }
         }
         
@@ -1188,7 +1202,7 @@ private void ExportAllTomographySlices()
     {
         if ((DateTime.Now - _lastTomographyUpdate).TotalSeconds > 1.0) // Update every second
         {
-            _ = GenerateTomographyAsync();
+            RequestTomographyUpdate();
             _lastTomographyUpdate = DateTime.Now;
         }
     }
@@ -1402,7 +1416,7 @@ private void ExportAllTomographySlices()
             }
             
             // Generate initial tomography view
-            await GenerateTomographyAsync();
+            RequestTomographyUpdate();
         }
     }
     catch (OperationCanceledException)
@@ -1590,52 +1604,59 @@ private async Task<(float[,,] youngsModulus, float[,,] poissonRatio)> ExtractMat
     });
 }
 
-        private async Task GenerateTomographyAsync()
+        private async Task GenerateTomographyAsync(CancellationToken token)
+{
+    SimulationResults resultsToUse = _lastResults;
+
+    // If a simulation is running, get a live snapshot of the wave fields.
+    if (_isSimulating && _simulator != null)
+    {
+        // Reconstruct the fields from the simulator's current state.
+        resultsToUse = new SimulationResults
         {
-            SimulationResults resultsToUse = _lastResults;
+            WaveFieldVx = await _simulator.ReconstructFieldAsync(0),
+            WaveFieldVy = await _simulator.ReconstructFieldAsync(1),
+            WaveFieldVz = await _simulator.ReconstructFieldAsync(2),
+            PWaveVelocity = _lastResults?.PWaveVelocity ?? 6000.0,
+            SWaveVelocity = _lastResults?.SWaveVelocity ?? 3000.0,
+            VpVsRatio = _lastResults?.VpVsRatio ?? 2.0
+        };
+    }
 
-            // If a simulation is running, get a live snapshot of the wave fields.
-            if (_isSimulating && _simulator != null)
-            {
-                // Reconstruct the fields from the simulator's current state.
-                resultsToUse = new SimulationResults
-                {
-                    WaveFieldVx = await _simulator.ReconstructFieldAsync(0),
-                    WaveFieldVy = await _simulator.ReconstructFieldAsync(1),
-                    WaveFieldVz = await _simulator.ReconstructFieldAsync(2),
-                    PWaveVelocity = _lastResults?.PWaveVelocity ?? 6000.0,
-                    SWaveVelocity = _lastResults?.SWaveVelocity ?? 3000.0,
-                    VpVsRatio = _lastResults?.VpVsRatio ?? 2.0
-                };
-            }
+    if (token.IsCancellationRequested) return;
+    if (resultsToUse == null) return;
 
-            if (resultsToUse == null) return;
+    // --- FIX START: Perform CPU-bound work in the background ---
+    (byte[] tomography, int width, int height) tomogData = await Task.Run(() =>
+    {
+        token.ThrowIfCancellationRequested(); // Check before starting work
+        var pixelData = _tomographyGenerator.Generate2DTomography(resultsToUse, _tomographySliceAxis, _tomographySliceIndex);
+        if (pixelData == null) return (null, 0, 0);
 
-            // --- FIX START: Perform CPU-bound work in the background ---
-            (byte[] tomography, int width, int height) tomogData = await Task.Run(() =>
-            {
-                var pixelData = _tomographyGenerator.Generate2DTomography(resultsToUse, _tomographySliceAxis, _tomographySliceIndex);
-                if (pixelData == null) return (null, 0, 0);
+        token.ThrowIfCancellationRequested(); // Check after work is done
 
-                int w = _tomographySliceAxis switch { 0 => _parameters.Height, 1 => _parameters.Width, _ => _parameters.Width };
-                int h = _tomographySliceAxis switch { 0 => _parameters.Depth, 1 => _parameters.Depth, _ => _parameters.Height };
-        
-                return (pixelData, w, h);
-            });
-            // --- FIX END: Background work is complete ---
+        int w = _tomographySliceAxis switch { 0 => _parameters.Height, 1 => _parameters.Width, _ => _parameters.Width };
+        int h = _tomographySliceAxis switch { 0 => _parameters.Depth, 1 => _parameters.Depth, _ => _parameters.Height };
+
+        return (pixelData, w, h);
+    }, token);
+    // --- FIX END: Background work is complete ---
 
 
-            // --- FIX START: Update UI resources safely on the main thread ---
-            if (tomogData.tomography != null)
-            {
-                // Now that we are back on the UI thread, dispose the old texture
-                _tomographyTexture?.Dispose();
-        
-                // And create the new one
-                _tomographyTexture = TextureManager.CreateFromPixelData(tomogData.tomography, (uint)tomogData.width, (uint)tomogData.height);
-            }
-            // --- FIX END: UI update is complete ---
-        }
+    // --- FIX START: Update UI resources safely on the main thread ---
+    // This critical check ensures that a cancelled (stale) task does not update the UI.
+    if (token.IsCancellationRequested) return;
+    
+    if (tomogData.tomography != null)
+    {
+        // Now that we are back on the UI thread, dispose the old texture
+        _tomographyTexture?.Dispose();
+
+        // And create the new one
+        _tomographyTexture = TextureManager.CreateFromPixelData(tomogData.tomography, (uint)tomogData.width, (uint)tomogData.height);
+    }
+    // --- FIX END: UI update is complete ---
+}
 
         private void OnWaveFieldUpdated(object sender, WaveFieldUpdateEventArgs e)
         {
@@ -1679,6 +1700,8 @@ private async Task<(float[,,] youngsModulus, float[,,] poissonRatio)> ExtractMat
 
             _cancellationTokenSource?.Cancel();
             _cancellationTokenSource?.Dispose();
+            _tomographyUpdateCts?.Cancel();
+            _tomographyUpdateCts?.Dispose();
             _simulator?.Dispose();
             _exportManager?.Dispose();
             _tomographyTexture?.Dispose();

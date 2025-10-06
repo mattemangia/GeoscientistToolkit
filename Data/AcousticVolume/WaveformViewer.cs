@@ -739,15 +739,26 @@ private void DrawFrequencyAnalysisWindow()
             int x = point.Item1;
             int y = point.Item2;
             int z = point.Item3;
-            
+
+            // --- FIX START: Add boundary check ---
+            int fieldWidth = vx.GetLength(0);
+            int fieldHeight = vx.GetLength(1);
+            int fieldDepth = vx.GetLength(2);
+
+            if (x < 0 || x >= fieldWidth || y < 0 || y >= fieldHeight || z < 0 || z >= fieldDepth)
+            {
+                return 0.0f; // Return a safe default value if the point is out of bounds for this snapshot
+            }
+            // --- FIX END ---
+    
             return _selectedComponent switch
             {
                 1 => vx[x, y, z],
                 2 => vy[x, y, z],
                 3 => vz[x, y, z],
                 _ => (float)Math.Sqrt(vx[x, y, z] * vx[x, y, z] + 
-                                     vy[x, y, z] * vy[x, y, z] + 
-                                     vz[x, y, z] * vz[x, y, z])
+                                      vy[x, y, z] * vy[x, y, z] + 
+                                      vz[x, y, z] * vz[x, y, z])
             };
         }
 

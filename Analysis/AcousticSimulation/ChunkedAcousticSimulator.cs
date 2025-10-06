@@ -768,105 +768,117 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
         }
 
         private void UpdateChunkVelocityCPU(WaveFieldChunk c, byte[,,] labels, float[,,] density)
+{
+    int d = c.EndZ - c.StartZ;
+    float inv_dx = 1.0f / _params.PixelSize;
+    
+    // --- FIX START: Adjust loop bounds to respect the stencil's 2-voxel boundary requirement ---
+    // The original loops started from 1 and ended at dimension-2, which was insufficient
+    // for stencils accessing elements like `x-2`. The loops must now start at 2
+    // and end at dimension-3 to provide a safe 2-voxel margin on all sides.
+    Parallel.For(2, d - 2, lz =>
+    // --- FIX END ---
+    {
+        int gz = c.StartZ + lz;
+        // --- FIX START: Adjust loop bounds ---
+        for (int y = 2; y < _params.Height - 2; y++)
+        for (int x = 2; x < _params.Width - 2; x++)
+        // --- FIX END ---
         {
-            int d = c.EndZ - c.StartZ;
-            float inv_dx = 1.0f / _params.PixelSize;
+            byte materialId = labels[x, y, gz];
             
-            Parallel.For(1, d - 1, lz =>
-            {
-                int gz = c.StartZ + lz;
-                for (int y = 1; y < _params.Height - 1; y++)
-                for (int x = 1; x < _params.Width - 1; x++)
-                {
-                    byte materialId = labels[x, y, gz];
-                    
-                    if (!_params.IsMaterialSelected(materialId) || density[x,y,gz] <= 0f)
-                        continue;
-                    
-                    float rho_inv = 1.0f / MathF.Max(100f, density[x, y, gz]);
-                    
-                    // --- STABILIZED STENCIL IMPLEMENTATION ---
-                    float dsxx_dx = (c.Sxx[x + 1, y, lz] - c.Sxx[x, y, lz]) * inv_dx;
-                    float dsyy_dy = (c.Syy[x, y + 1, lz] - c.Syy[x, y, lz]) * inv_dx;
-                    float dszz_dz = (c.Szz[x, y, lz + 1] - c.Szz[x, y, lz]) * inv_dx;
+            if (!_params.IsMaterialSelected(materialId) || density[x,y,gz] <= 0f)
+                continue;
+            
+            float rho_inv = 1.0f / MathF.Max(100f, density[x, y, gz]);
+            
+            // --- STABILIZED STENCIL IMPLEMENTATION ---
+            float dsxx_dx = (c.Sxx[x + 1, y, lz] - c.Sxx[x, y, lz]) * inv_dx;
+            float dsyy_dy = (c.Syy[x, y + 1, lz] - c.Syy[x, y, lz]) * inv_dx;
+            float dszz_dz = (c.Szz[x, y, lz + 1] - c.Szz[x, y, lz]) * inv_dx;
 
-                    // Averaged/Rotated stencil for shear terms to couple the grid
-                    float dsxy_dx = 0.25f * (c.Sxy[x,y,lz] + c.Sxy[x,y-1,lz] + c.Sxy[x+1,y,lz] + c.Sxy[x+1,y-1,lz] -
-                                             (c.Sxy[x-1,y,lz] + c.Sxy[x-1,y-1,lz] + c.Sxy[x-2,y,lz] + c.Sxy[x-2,y-1,lz])) * inv_dx;
+            // Averaged/Rotated stencil for shear terms to couple the grid
+            float dsxy_dx = 0.25f * (c.Sxy[x,y,lz] + c.Sxy[x,y-1,lz] + c.Sxy[x+1,y,lz] + c.Sxy[x+1,y-1,lz] -
+                                     (c.Sxy[x-1,y,lz] + c.Sxy[x-1,y-1,lz] + c.Sxy[x-2,y,lz] + c.Sxy[x-2,y-1,lz])) * inv_dx;
 
-                    float dsxy_dy = (c.Sxy[x, y, lz] - c.Sxy[x, y - 1, lz]) * inv_dx;
-                    float dsxz_dx = (c.Sxz[x, y, lz] - c.Sxz[x - 1, y, lz]) * inv_dx;
-                    float dsxz_dz = (c.Sxz[x, y, lz] - c.Sxz[x, y, lz - 1]) * inv_dx;
-                    float dsyz_dy = (c.Syz[x, y, lz] - c.Syz[x, y-1, lz]) * inv_dx;
-                    float dsyz_dz = (c.Syz[x, y, lz] - c.Syz[x, y, lz-1]) * inv_dx;
+            float dsxy_dy = (c.Sxy[x, y, lz] - c.Sxy[x, y - 1, lz]) * inv_dx;
+            float dsxz_dx = (c.Sxz[x, y, lz] - c.Sxz[x - 1, y, lz]) * inv_dx;
+            float dsxz_dz = (c.Sxz[x, y, lz] - c.Sxz[x, y, lz - 1]) * inv_dx;
+            float dsyz_dy = (c.Syz[x, y, lz] - c.Syz[x, y-1, lz]) * inv_dx;
+            float dsyz_dz = (c.Syz[x, y, lz] - c.Syz[x, y, lz-1]) * inv_dx;
 
-                    const float damping = 0.999f;
-                    
-                    c.Vx[x, y, lz] = c.Vx[x, y, lz] * damping + _dt * (dsxx_dx + dsxy_dy + dsxz_dz) * rho_inv;
-                    c.Vy[x, y, lz] = c.Vy[x, y, lz] * damping + _dt * (dsxy_dx + dsyy_dy + dsyz_dz) * rho_inv;
-                    c.Vz[x, y, lz] = c.Vz[x, y, lz] * damping + _dt * (dsxz_dx + dsyz_dy + dszz_dz) * rho_inv;
-                    
-                    const float maxVel = 10000f;
-                    c.Vx[x, y, lz] = Math.Clamp(c.Vx[x, y, lz], -maxVel, maxVel);
-                    c.Vy[x, y, lz] = Math.Clamp(c.Vy[x, y, lz], -maxVel, maxVel);
-                    c.Vz[x, y, lz] = Math.Clamp(c.Vz[x, y, lz], -maxVel, maxVel);
+            const float damping = 0.999f;
+            
+            c.Vx[x, y, lz] = c.Vx[x, y, lz] * damping + _dt * (dsxx_dx + dsxy_dy + dsxz_dz) * rho_inv;
+            c.Vy[x, y, lz] = c.Vy[x, y, lz] * damping + _dt * (dsxy_dx + dsyy_dy + dsyz_dz) * rho_inv;
+            c.Vz[x, y, lz] = c.Vz[x, y, lz] * damping + _dt * (dsxz_dx + dsyz_dy + dszz_dz) * rho_inv;
+            
+            const float maxVel = 10000f;
+            c.Vx[x, y, lz] = Math.Clamp(c.Vx[x, y, lz], -maxVel, maxVel);
+            c.Vy[x, y, lz] = Math.Clamp(c.Vy[x, y, lz], -maxVel, maxVel);
+            c.Vz[x, y, lz] = Math.Clamp(c.Vz[x, y, lz], -maxVel, maxVel);
 
-                    c.MaxAbsVx[x, y, lz] = MathF.Max(c.MaxAbsVx[x, y, lz], MathF.Abs(c.Vx[x, y, lz]));
-                    c.MaxAbsVy[x, y, lz] = MathF.Max(c.MaxAbsVy[x, y, lz], MathF.Abs(c.Vy[x, y, lz]));
-                    c.MaxAbsVz[x, y, lz] = MathF.Max(c.MaxAbsVz[x, y, lz], MathF.Abs(c.Vz[x, y, lz]));
-                }
-            });
+            c.MaxAbsVx[x, y, lz] = MathF.Max(c.MaxAbsVx[x, y, lz], MathF.Abs(c.Vx[x, y, lz]));
+            c.MaxAbsVy[x, y, lz] = MathF.Max(c.MaxAbsVy[x, y, lz], MathF.Abs(c.Vy[x, y, lz]));
+            c.MaxAbsVz[x, y, lz] = MathF.Max(c.MaxAbsVz[x, y, lz], MathF.Abs(c.Vz[x, y, lz]));
         }
+    });
+}
         
         private void ApplySourceToChunkCPU(WaveFieldChunk chunk, float sourceValue, byte[,,] labels)
+{
+    int tx = (int)(_params.TxPosition.X * _params.Width);
+    int ty = (int)(_params.TxPosition.Y * _params.Height);
+    int tz = (int)(_params.TxPosition.Z * _params.Depth);
+
+    if (_params.UseFullFaceTransducers)
+    {
+        // --- FIX START ---
+        // The original indices (1 and dimension-2) were outside the computational
+        // domain of the velocity update loop, which starts at 2.
+        // These indices are moved inward by one voxel to ensure the source is "seen".
+        int src_x = (tx < _params.Width / 2) ? 2 : _params.Width - 3;
+        int src_y = (ty < _params.Height / 2) ? 2 : _params.Height - 3;
+        int src_z_global = (tz < _params.Depth / 2) ? 2 : _params.Depth - 3;
+        // --- FIX END ---
+
+        switch (_params.Axis)
         {
-            int tx = (int)(_params.TxPosition.X * _params.Width);
-            int ty = (int)(_params.TxPosition.Y * _params.Height);
-            int tz = (int)(_params.TxPosition.Z * _params.Depth);
-
-            if (_params.UseFullFaceTransducers)
-            {
-                int src_x = (tx < _params.Width / 2) ? 1 : _params.Width - 2;
-                int src_y = (ty < _params.Height / 2) ? 1 : _params.Height - 2;
-                int src_z_global = (tz < _params.Depth / 2) ? 1 : _params.Depth - 2;
-
-                switch (_params.Axis)
+            case 0: 
+                for (int z = chunk.StartZ; z < chunk.EndZ; z++)
+                for (int y = 0; y < _params.Height; y++)
+                    if (_params.IsMaterialSelected(labels[src_x, y, z]))
+                        chunk.Sxx[src_x, y, z - chunk.StartZ] += sourceValue;
+                break;
+            case 1: 
+                for (int z = chunk.StartZ; z < chunk.EndZ; z++)
+                for (int x = 0; x < _params.Width; x++)
+                     if (_params.IsMaterialSelected(labels[x, src_y, z]))
+                        chunk.Syy[x, src_y, z - chunk.StartZ] += sourceValue;
+                break;
+            case 2:
+                if (src_z_global >= chunk.StartZ && src_z_global < chunk.EndZ)
                 {
-                    case 0: 
-                        for (int z = chunk.StartZ; z < chunk.EndZ; z++)
-                        for (int y = 0; y < _params.Height; y++)
-                            if (_params.IsMaterialSelected(labels[src_x, y, z]))
-                                chunk.Sxx[src_x, y, z - chunk.StartZ] += sourceValue;
-                        break;
-                    case 1: 
-                        for (int z = chunk.StartZ; z < chunk.EndZ; z++)
-                        for (int x = 0; x < _params.Width; x++)
-                             if (_params.IsMaterialSelected(labels[x, src_y, z]))
-                                chunk.Syy[x, src_y, z - chunk.StartZ] += sourceValue;
-                        break;
-                    case 2:
-                        if (src_z_global >= chunk.StartZ && src_z_global < chunk.EndZ)
-                        {
-                            int local_z = src_z_global - chunk.StartZ;
-                            for (int y = 0; y < _params.Height; y++)
-                            for (int x = 0; x < _params.Width; x++)
-                                if (_params.IsMaterialSelected(labels[x, y, src_z_global]))
-                                    chunk.Szz[x, y, local_z] += sourceValue;
-                        }
-                        break;
+                    int local_z = src_z_global - chunk.StartZ;
+                    for (int y = 0; y < _params.Height; y++)
+                    for (int x = 0; x < _params.Width; x++)
+                        if (_params.IsMaterialSelected(labels[x, y, src_z_global]))
+                            chunk.Szz[x, y, local_z] += sourceValue;
                 }
-            }
-            else // Point source
-            {
-                if (tz < chunk.StartZ || tz >= chunk.EndZ) return;
-                if (!_params.IsMaterialSelected(labels[tx,ty,tz])) return;
-                
-                int localTz = tz - chunk.StartZ;
-                chunk.Sxx[tx, ty, localTz] += sourceValue;
-                chunk.Syy[tx, ty, localTz] += sourceValue;
-                chunk.Szz[tx, ty, localTz] += sourceValue;
-            }
+                break;
         }
+    }
+    else // Point source
+    {
+        if (tz < chunk.StartZ || tz >= chunk.EndZ) return;
+        if (!_params.IsMaterialSelected(labels[tx,ty,tz])) return;
+        
+        int localTz = tz - chunk.StartZ;
+        chunk.Sxx[tx, ty, localTz] += sourceValue;
+        chunk.Syy[tx, ty, localTz] += sourceValue;
+        chunk.Szz[tx, ty, localTz] += sourceValue;
+    }
+}
         #endregion
 
         private float GetCurrentSourceValue(int step)
