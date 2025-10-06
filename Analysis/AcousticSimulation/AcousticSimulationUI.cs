@@ -1099,9 +1099,14 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
                 
                 var materialProps = new Dictionary<byte, (float E, float Nu)>();
                 
+                // --- FIX: Calculate average properties for the background medium ---
+                float avgE = 0;
+                float avgNu = 0;
+                int selectedCount = 0;
+
                 foreach (var material in dataset.Materials)
                 {
-                    if (material.ID == 0) continue;
+                    if (!_selectedMaterialIDs.Contains(material.ID)) continue;
 
                     float E = _youngsModulus;
                     float Nu = _poissonRatio;
@@ -1111,14 +1116,27 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
                         var physMat = MaterialLibrary.Instance.Find(material.PhysicalMaterialName);
                         if (physMat != null)
                         {
-                            E = (float)(physMat.YoungModulus_GPa ?? _youngsModulus) * 1000f;
+                            E = (float)(physMat.YoungModulus_GPa ?? _youngsModulus / 1000.0) * 1000f;
                             Nu = (float)(physMat.PoissonRatio ?? _poissonRatio);
                         }
                     }
-                    
                     materialProps[material.ID] = (E, Nu);
+                    avgE += E;
+                    avgNu += Nu;
+                    selectedCount++;
                 }
                 
+                if (selectedCount > 0)
+                {
+                    avgE /= selectedCount;
+                    avgNu /= selectedCount;
+                }
+                else // Fallback if no materials are selected for some reason
+                {
+                    avgE = _youngsModulus;
+                    avgNu = _poissonRatio;
+                }
+
                 Parallel.For(0, dataset.Depth, z =>
                 {
                     for (int y = 0; y < dataset.Height; y++)
@@ -1134,17 +1152,19 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
                             }
                             else
                             {
-                                youngsModulus[x, y, z] = _youngsModulus;
-                                poissonRatio[x, y, z] = _poissonRatio;
+                                // --- FIX: Assign stable average properties to the background ---
+                                youngsModulus[x, y, z] = avgE;
+                                poissonRatio[x, y, z] = avgNu;
                             }
                         }
                     }
                 });
 
-                Logger.Log($"[AcousticSimulation] Generated heterogeneous material property volumes for {materialProps.Count} materials.");
+                Logger.Log($"[AcousticSimulation] Generated heterogeneous material property volumes. Background E={avgE:F0} MPa, Nu={avgNu:F3}");
                 return (youngsModulus, poissonRatio);
             });
         }
+
         private async Task<byte[,,]> ExtractVolumeLabelsAsync(CtImageStackDataset dataset)
         {
             return await Task.Run(() =>
@@ -1159,8 +1179,15 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
         {
             return await Task.Run(() =>
             {
-                var materialStats = new Dictionary<byte, (long grayscaleSum, long voxelCount)>();
+                // --- FIX: Calculate average density of selected materials for the background ---
+                var selectedMaterials = dataset.Materials.Where(m => _selectedMaterialIDs.Contains(m.ID)).ToList();
+                float avgDensityKgM3 = 2700f; // Default to a common rock density
+                if (selectedMaterials.Any())
+                {
+                    avgDensityKgM3 = (float)selectedMaterials.Average(m => m.Density > 0 ? m.Density : 2.7) * 1000.0f;
+                }
 
+                var materialStats = new Dictionary<byte, (long grayscaleSum, long voxelCount)>();
                 for (int z = 0; z < dataset.Depth; z++)
                 {
                     var labelSlice = new byte[dataset.Width * dataset.Height];
@@ -1171,7 +1198,7 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
                     for (int i = 0; i < labelSlice.Length; i++)
                     {
                         byte label = labelSlice[i];
-                        if (label == 0) continue; 
+                        if (!_selectedMaterialIDs.Contains(label)) continue; 
 
                         if (!materialStats.ContainsKey(label))
                         {
@@ -1211,28 +1238,29 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
                         int y = i / dataset.Width;
                         byte label = labelSlice[i];
 
-                        if (label == 0 || !materialDensityMap.ContainsKey(label))
+                        if (!_selectedMaterialIDs.Contains(label) || !materialDensityMap.ContainsKey(label))
                         {
-                            density[x, y, z] = 1.225f; // Density of air
+                            // --- FIX: Assign stable average density to background ---
+                            density[x, y, z] = avgDensityKgM3;
                             continue;
                         }
 
-                        float avgDensity = materialDensityMap[label];
+                        float avgMaterialDensity = materialDensityMap[label];
                         
                         if (avgGrayscaleMap.TryGetValue(label, out float avgGray) && avgGray > 1.0f)
                         {
-                            density[x, y, z] = avgDensity * (graySlice[i] / avgGray);
+                            density[x, y, z] = avgMaterialDensity * (graySlice[i] / avgGray);
                         }
                         else
                         {
-                            density[x, y, z] = avgDensity;
+                            density[x, y, z] = avgMaterialDensity;
                         }
                         
                         density[x, y, z] = Math.Max(100f, density[x, y, z]); // Minimum density
                     }
                 }
                 
-                Logger.Log("[AcousticSimulation] Generated heterogeneous density map based on grayscale values.");
+                Logger.Log($"[AcousticSimulation] Generated heterogeneous density map. Background ρ={avgDensityKgM3 / 1000.0f:F3} g/cm³");
                 return density;
             });
         }

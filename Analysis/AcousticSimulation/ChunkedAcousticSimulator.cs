@@ -845,9 +845,33 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
 
                     const float damping = 0.999f;
                     
-                    c.Vx[x, y, lz] = c.Vx[x, y, lz] * damping + _dt * (dsxx_dx + dsxy_dy + dsxz_dz) * rho_inv;
-                    c.Vy[x, y, lz] = c.Vy[x, y, lz] * damping + _dt * (dsyx_dx + dsyy_dy + dsyz_dz) * rho_inv;
-                    c.Vz[x, y, lz] = c.Vz[x, y, lz] * damping + _dt * (dszx_dx + dszy_dy + dszz_dz) * rho_inv;
+                    // --- FIX 2: Increased artificial viscosity and more aggressive coefficient
+                    const float artificialViscosityCoeff = 0.1f;
+
+                    float laplacian_vx = (c.Vx[x + 1, y, lz] + c.Vx[x - 1, y, lz] +
+                                          c.Vx[x, y + 1, lz] + c.Vx[x, y - 1, lz] +
+                                          c.Vx[x, y, lz + 1] + c.Vx[x, y, lz - 1] -
+                                          6.0f * c.Vx[x, y, lz]);
+
+                    float laplacian_vy = (c.Vy[x + 1, y, lz] + c.Vy[x - 1, y, lz] +
+                                          c.Vy[x, y + 1, lz] + c.Vy[x, y - 1, lz] +
+                                          c.Vy[x, y, lz + 1] + c.Vy[x, y, lz - 1] -
+                                          6.0f * c.Vy[x, y, lz]);
+
+                    float laplacian_vz = (c.Vz[x + 1, y, lz] + c.Vz[x - 1, y, lz] +
+                                          c.Vz[x, y + 1, lz] + c.Vz[x, y - 1, lz] +
+                                          c.Vz[x, y, lz + 1] + c.Vz[x, y, lz - 1] -
+                                          6.0f * c.Vz[x, y, lz]);
+
+                    // Original velocity update based on stress divergence
+                    float dvx_dt = (dsxx_dx + dsxy_dy + dsxz_dz) * rho_inv;
+                    float dvy_dt = (dsyx_dx + dsyy_dy + dsyz_dz) * rho_inv;
+                    float dvz_dt = (dszx_dx + dszy_dy + dszz_dz) * rho_inv;
+                    
+                    // Update velocity with physical term and damping/viscosity.
+                    c.Vx[x, y, lz] = c.Vx[x, y, lz] * damping + _dt * dvx_dt + (artificialViscosityCoeff / 6.0f) * laplacian_vx;
+                    c.Vy[x, y, lz] = c.Vy[x, y, lz] * damping + _dt * dvy_dt + (artificialViscosityCoeff / 6.0f) * laplacian_vy;
+                    c.Vz[x, y, lz] = c.Vz[x, y, lz] * damping + _dt * dvz_dt + (artificialViscosityCoeff / 6.0f) * laplacian_vz;
                     
                     const float maxVel = 10000f;
                     c.Vx[x, y, lz] = Math.Clamp(c.Vx[x, y, lz], -maxVel, maxVel);
@@ -904,12 +928,42 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
             else // Point source
             {
                 if (tz < chunk.StartZ || tz >= chunk.EndZ) return;
-                if (!_params.IsMaterialSelected(labels[tx,ty,tz])) return;
-                
-                int localTz = tz - chunk.StartZ;
-                chunk.Sxx[tx, ty, localTz] += sourceValue;
-                chunk.Syy[tx, ty, localTz] += sourceValue;
-                chunk.Szz[tx, ty, localTz] += sourceValue;
+
+                // --- FIX 2: Spatially smoothed source injection ---
+                // Distribute the source over a 3x3x3 volume to avoid a singularity.
+                // Weights are approximated from a Gaussian kernel.
+                float[] weights = { 0.073f, 0.12f, 0.073f }; // Center weight is implicitly 1.0
+
+                for (int dz = -1; dz <= 1; dz++) {
+                    for (int dy = -1; dy <= 1; dy++) {
+                        for (int dx = -1; dx <= 1; dx++) {
+                            int curX = tx + dx;
+                            int curY = ty + dy;
+                            int curZ = tz + dz;
+                            int localZ = curZ - chunk.StartZ;
+
+                            // Check bounds
+                            if (curX < 1 || curX >= _params.Width - 1 ||
+                                curY < 1 || curY >= _params.Height - 1 ||
+                                localZ < 1 || localZ >= (chunk.EndZ - chunk.StartZ) - 1)
+                            {
+                                continue;
+                            }
+                            
+                            if (!_params.IsMaterialSelected(labels[curX, curY, curZ])) continue;
+
+                            float weight = 1.0f;
+                            if (dx != 0) weight *= weights[dx + 1];
+                            if (dy != 0) weight *= weights[dy + 1];
+                            if (dz != 0) weight *= weights[dz + 1];
+
+                            float weightedSource = sourceValue * weight;
+                            chunk.Sxx[curX, curY, localZ] += weightedSource;
+                            chunk.Syy[curX, curY, localZ] += weightedSource;
+                            chunk.Szz[curX, curY, localZ] += weightedSource;
+                        }
+                    }
+                }
             }
         }
         #endregion
@@ -971,7 +1025,8 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
                 return;
             }
             
-            _dt = 0.5f * (_params.PixelSize / (MathF.Sqrt(3) * vpMax));
+            // --- FIX 2: Use an even more conservative safety factor (0.25) for maximum stability ---
+            _dt = 0.25f * (_params.PixelSize / (MathF.Sqrt(3) * vpMax));
             Logger.Log($"[CFL] Calculated stable timestep: dt={_dt*1e6f:F4} µs based on Vp_max={vpMax:F0} m/s");
         }
 
@@ -1280,40 +1335,27 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
             // The entire OpenCL kernel has been reviewed and corrected. The 'updateVelocity' kernel,
             // which was the source of the numerical instability, now uses a physically correct and
             // stable discretization scheme for the elastic wave equation on a co-located grid.
+            // --- FIX: Added Laplacian-based artificial viscosity to kill grid-scale noise.
+            // --- FIX 2: Increased viscosity coefficient and implemented smoothed source.
             return @"
             #define M_PI_F 3.14159265358979323846f
 
             // --- STABILIZED STENCIL HELPERS ---
-            // These functions compute spatial derivatives for shear stress terms using a rotated stencil.
-            // This is critical for preventing grid decoupling (checkerboarding) which causes wave dissipation.
-            // They average values across adjacent cells before taking the difference, coupling the grid.
-
-            // Calculates d(F)/dy for the Vx update
             float d_dy_for_vx(__global const float* F, int idx, int width, float inv_d) {
                 return 0.25f * ((F[idx] + F[idx + 1]) - (F[idx - width] + F[idx + 1 - width])) * inv_d;
             }
-
-            // Calculates d(F)/dz for the Vx update
             float d_dz_for_vx(__global const float* F, int idx, int wh, float inv_d) {
                 return 0.25f * ((F[idx] + F[idx + 1]) - (F[idx - wh] + F[idx + 1 - wh])) * inv_d;
             }
-            
-            // Calculates d(F)/dx for the Vy update
             float d_dx_for_vy(__global const float* F, int idx, int width, float inv_d) {
                 return 0.25f * ((F[idx] + F[idx + width]) - (F[idx - 1] + F[idx - 1 + width])) * inv_d;
             }
-
-            // Calculates d(F)/dz for the Vy update
             float d_dz_for_vy(__global const float* F, int idx, int width, int wh, float inv_d) {
                  return 0.25f * ((F[idx] + F[idx + width]) - (F[idx - wh] + F[idx + width - wh])) * inv_d;
             }
-
-            // Calculates d(F)/dx for the Vz update
             float d_dx_for_vz(__global const float* F, int idx, int wh, float inv_d) {
                 return 0.25f * ((F[idx] + F[idx + wh]) - (F[idx - 1] + F[idx - 1 + wh])) * inv_d;
             }
-
-            // Calculates d(F)/dy for the Vz update
             float d_dy_for_vz(__global const float* F, int idx, int width, int wh, float inv_d) {
                 return 0.25f * ((F[idx] + F[idx + wh]) - (F[idx - width] + F[idx - width + wh])) * inv_d;
             }
@@ -1339,16 +1381,26 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
                 
                 if (sourceValue != 0.0f && material_lookup[mat] != 0) {
                     if (isFullFace != 0) {
-                        int src_x = (srcX < width / 2) ? 2 : width - 3;
-                        int src_y = (srcY < height / 2) ? 2 : height - 3;
-                        int src_z = (srcZ_local < depth / 2) ? 2 : depth - 3;
+                        int src_x_face = (srcX < width / 2) ? 2 : width - 3;
+                        int src_y_face = (srcY < height / 2) ? 2 : height - 3;
+                        int src_z_face = (srcZ_local < depth / 2) ? 2 : depth - 3;
 
-                        if (sourceAxis == 0 && x == src_x) sxx[idx] += sourceValue;
-                        if (sourceAxis == 1 && y == src_y) syy[idx] += sourceValue;
-                        if (sourceAxis == 2 && z == src_z) szz[idx] += sourceValue;
+                        if (sourceAxis == 0 && x == src_x_face) sxx[idx] += sourceValue;
+                        if (sourceAxis == 1 && y == src_y_face) syy[idx] += sourceValue;
+                        if (sourceAxis == 2 && z == src_z_face) szz[idx] += sourceValue;
                     } else {
-                        if(x == srcX && y == srcY && z == srcZ_local) {
-                           sxx[idx] += sourceValue; syy[idx] += sourceValue; szz[idx] += sourceValue;
+                        // --- FIX 2: Smoothed source injection on GPU ---
+                        float dx_dist = (float)(x - srcX);
+                        float dy_dist = (float)(y - srcY);
+                        float dz_dist = (float)(z - srcZ_local);
+
+                        if (fabs(dx_dist) <= 1.5f && fabs(dy_dist) <= 1.5f && fabs(dz_dist) <= 1.5f) {
+                            // Simple Gaussian-like spatial falloff
+                            float weight = exp(-0.5f * (dx_dist*dx_dist + dy_dist*dy_dist + dz_dist*dz_dist));
+                            float weightedSource = sourceValue * weight;
+                            sxx[idx] += weightedSource;
+                            syy[idx] += weightedSource;
+                            szz[idx] += weightedSource;
                         }
                     }
                 }
@@ -1361,7 +1413,7 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
                 
                 float mu = E / (2.0f * (1.0f + nu)); float lambda = E * nu / ((1.0f + nu) * (1.0f - 2.0f * nu));
 
-                int xp1=idx+1, xm1=idx-1; int yp1=idx+width, ym1=idx-width; int zp1=idx+wh, zm1=idx-wh;
+                int xm1=idx-1; int ym1=idx-width; int zm1=idx-wh;
                 
                 float dvx_dx = (vx[idx] - vx[xm1]) / dx;
                 float dvy_dy = (vy[idx] - vy[ym1]) / dx;
@@ -1406,33 +1458,42 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
                 float rho_inv = 1.0f / fmax(100.0f, density[idx]);
                 float inv_dx = 1.0f / dx;
                 
-                // --- PHYSICALLY CORRECT VELOCITY UPDATE ---
-                // For Vx: rho*dvx/dt = dsxx/dx + dsxy/dy + dsxz/dz
                 float dsxx_dx_vx = (sxx[idx] - sxx[idx - 1]) * inv_dx;
                 float dsxy_dy_vx = d_dy_for_vx(sxy, idx, width, inv_dx);
                 float dsxz_dz_vx = d_dz_for_vx(sxz, idx, wh, inv_dx);
                 
-                // For Vy: rho*dvy/dt = dsyx/dx + dsyy/dy + dsyz/dz (where syx=sxy)
                 float dsyx_dx_vy = d_dx_for_vy(sxy, idx, width, inv_dx);
                 float dsyy_dy_vy = (syy[idx] - syy[idx - width]) * inv_dx;
                 float dsyz_dz_vy = d_dz_for_vy(syz, idx, width, wh, inv_dx);
 
-                // For Vz: rho*dvz/dt = dszx/dx + dszy/dy + dszz/dz (where szx=sxz, szy=syz)
                 float dszx_dx_vz = d_dx_for_vz(sxz, idx, wh, inv_dx);
                 float dszy_dy_vz = d_dy_for_vz(syz, idx, width, wh, inv_dx);
                 float dszz_dz_vz = (szz[idx] - szz[idx - wh]) * inv_dx;
                 
                 const float damping = 0.999f;
                 
-                vx[idx] = vx[idx] * damping + dt * (dsxx_dx_vx + dsxy_dy_vx + dsxz_dz_vx) * rho_inv;
-                vy[idx] = vy[idx] * damping + dt * (dsyx_dx_vy + dsyy_dy_vy + dsyz_dz_vy) * rho_inv;
-                vz[idx] = vz[idx] * damping + dt * (dszx_dx_vz + dszy_dy_vz + dszz_dz_vz) * rho_inv;
+                // --- FIX 2: Increased artificial viscosity coefficient
+                const float artificialViscosityCoeff = 0.1f;
+                int xp1 = idx + 1; int xm1 = idx - 1;
+                int yp1 = idx + width; int ym1 = idx - width;
+                int zp1 = idx + wh; int zm1 = idx - wh;
                 
+                float laplacian_vx = vx[xp1] + vx[xm1] + vx[yp1] + vx[ym1] + vx[zp1] + vx[zm1] - 6.0f * vx[idx];
+                float laplacian_vy = vy[xp1] + vy[xm1] + vy[yp1] + vy[ym1] + vy[zp1] + vy[zm1] - 6.0f * vy[idx];
+                float laplacian_vz = vz[xp1] + vz[xm1] + vz[yp1] + vz[ym1] + vz[zp1] + vz[zm1] - 6.0f * vz[idx];
+                
+                float dvx_update = dt * (dsxx_dx_vx + dsxy_dy_vx + dsxz_dz_vx) * rho_inv;
+                float dvy_update = dt * (dsyx_dx_vy + dsyy_dy_vy + dsyz_dz_vy) * rho_inv;
+                float dvz_update = dt * (dszx_dx_vz + dszy_dy_vz + dszz_dz_vz) * rho_inv;
+                
+                vx[idx] = vx[idx] * damping + dvx_update + (artificialViscosityCoeff / 6.0f) * laplacian_vx;
+                vy[idx] = vy[idx] * damping + dvy_update + (artificialViscosityCoeff / 6.0f) * laplacian_vy;
+                vz[idx] = vz[idx] * damping + dvz_update + (artificialViscosityCoeff / 6.0f) * laplacian_vz;
+
                 max_vx[idx] = fmax(max_vx[idx], fabs(vx[idx]));
                 max_vy[idx] = fmax(max_vy[idx], fabs(vy[idx]));
                 max_vz[idx] = fmax(max_vz[idx], fabs(vz[idx]));
             }";
-            // --- FIX END ---
         }
     }
 }
