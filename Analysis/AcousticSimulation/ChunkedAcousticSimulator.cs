@@ -767,118 +767,151 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
             });
         }
 
-        private void UpdateChunkVelocityCPU(WaveFieldChunk c, byte[,,] labels, float[,,] density)
-{
-    int d = c.EndZ - c.StartZ;
-    float inv_dx = 1.0f / _params.PixelSize;
-    
-    // --- FIX START: Adjust loop bounds to respect the stencil's 2-voxel boundary requirement ---
-    // The original loops started from 1 and ended at dimension-2, which was insufficient
-    // for stencils accessing elements like `x-2`. The loops must now start at 2
-    // and end at dimension-3 to provide a safe 2-voxel margin on all sides.
-    Parallel.For(2, d - 2, lz =>
-    // --- FIX END ---
-    {
-        int gz = c.StartZ + lz;
-        // --- FIX START: Adjust loop bounds ---
-        for (int y = 2; y < _params.Height - 2; y++)
-        for (int x = 2; x < _params.Width - 2; x++)
-        // --- FIX END ---
+        #region CPU Stencil Helpers
+        // The following C# methods are direct translations of the stabilized, rotated stencil
+        // operations found in the corrected OpenCL kernel. This ensures the CPU and GPU
+        // implementations are now physically consistent.
+
+        private static float d_dy_for_vx(float[,,] F, int x, int y, int lz, float inv_d)
         {
-            byte materialId = labels[x, y, gz];
-            
-            if (!_params.IsMaterialSelected(materialId) || density[x,y,gz] <= 0f)
-                continue;
-            
-            float rho_inv = 1.0f / MathF.Max(100f, density[x, y, gz]);
-            
-            // --- STABILIZED STENCIL IMPLEMENTATION ---
-            float dsxx_dx = (c.Sxx[x + 1, y, lz] - c.Sxx[x, y, lz]) * inv_dx;
-            float dsyy_dy = (c.Syy[x, y + 1, lz] - c.Syy[x, y, lz]) * inv_dx;
-            float dszz_dz = (c.Szz[x, y, lz + 1] - c.Szz[x, y, lz]) * inv_dx;
-
-            // Averaged/Rotated stencil for shear terms to couple the grid
-            float dsxy_dx = 0.25f * (c.Sxy[x,y,lz] + c.Sxy[x,y-1,lz] + c.Sxy[x+1,y,lz] + c.Sxy[x+1,y-1,lz] -
-                                     (c.Sxy[x-1,y,lz] + c.Sxy[x-1,y-1,lz] + c.Sxy[x-2,y,lz] + c.Sxy[x-2,y-1,lz])) * inv_dx;
-
-            float dsxy_dy = (c.Sxy[x, y, lz] - c.Sxy[x, y - 1, lz]) * inv_dx;
-            float dsxz_dx = (c.Sxz[x, y, lz] - c.Sxz[x - 1, y, lz]) * inv_dx;
-            float dsxz_dz = (c.Sxz[x, y, lz] - c.Sxz[x, y, lz - 1]) * inv_dx;
-            float dsyz_dy = (c.Syz[x, y, lz] - c.Syz[x, y-1, lz]) * inv_dx;
-            float dsyz_dz = (c.Syz[x, y, lz] - c.Syz[x, y, lz-1]) * inv_dx;
-
-            const float damping = 0.999f;
-            
-            c.Vx[x, y, lz] = c.Vx[x, y, lz] * damping + _dt * (dsxx_dx + dsxy_dy + dsxz_dz) * rho_inv;
-            c.Vy[x, y, lz] = c.Vy[x, y, lz] * damping + _dt * (dsxy_dx + dsyy_dy + dsyz_dz) * rho_inv;
-            c.Vz[x, y, lz] = c.Vz[x, y, lz] * damping + _dt * (dsxz_dx + dsyz_dy + dszz_dz) * rho_inv;
-            
-            const float maxVel = 10000f;
-            c.Vx[x, y, lz] = Math.Clamp(c.Vx[x, y, lz], -maxVel, maxVel);
-            c.Vy[x, y, lz] = Math.Clamp(c.Vy[x, y, lz], -maxVel, maxVel);
-            c.Vz[x, y, lz] = Math.Clamp(c.Vz[x, y, lz], -maxVel, maxVel);
-
-            c.MaxAbsVx[x, y, lz] = MathF.Max(c.MaxAbsVx[x, y, lz], MathF.Abs(c.Vx[x, y, lz]));
-            c.MaxAbsVy[x, y, lz] = MathF.Max(c.MaxAbsVy[x, y, lz], MathF.Abs(c.Vy[x, y, lz]));
-            c.MaxAbsVz[x, y, lz] = MathF.Max(c.MaxAbsVz[x, y, lz], MathF.Abs(c.Vz[x, y, lz]));
+            return 0.25f * ((F[x, y, lz] + F[x + 1, y, lz]) - (F[x, y - 1, lz] + F[x + 1, y - 1, lz])) * inv_d;
         }
-    });
-}
+
+        private static float d_dz_for_vx(float[,,] F, int x, int y, int lz, float inv_d)
+        {
+            return 0.25f * ((F[x, y, lz] + F[x + 1, y, lz]) - (F[x, y, lz - 1] + F[x + 1, y, lz - 1])) * inv_d;
+        }
+
+        private static float d_dx_for_vy(float[,,] F, int x, int y, int lz, float inv_d)
+        {
+            return 0.25f * ((F[x, y, lz] + F[x, y + 1, lz]) - (F[x - 1, y, lz] + F[x - 1, y + 1, lz])) * inv_d;
+        }
+
+        private static float d_dz_for_vy(float[,,] F, int x, int y, int lz, float inv_d)
+        {
+            return 0.25f * ((F[x, y, lz] + F[x, y + 1, lz]) - (F[x, y, lz - 1] + F[x, y + 1, lz - 1])) * inv_d;
+        }
+
+        private static float d_dx_for_vz(float[,,] F, int x, int y, int lz, float inv_d)
+        {
+            return 0.25f * ((F[x, y, lz] + F[x, y, lz + 1]) - (F[x - 1, y, lz] + F[x - 1, y, lz + 1])) * inv_d;
+        }
+
+        private static float d_dy_for_vz(float[,,] F, int x, int y, int lz, float inv_d)
+        {
+            return 0.25f * ((F[x, y, lz] + F[x, y, lz + 1]) - (F[x, y - 1, lz] + F[x, y - 1, lz + 1])) * inv_d;
+        }
+        #endregion
+
+        private void UpdateChunkVelocityCPU(WaveFieldChunk c, byte[,,] labels, float[,,] density)
+        {
+            int d = c.EndZ - c.StartZ;
+            float inv_dx = 1.0f / _params.PixelSize;
+
+            // Loop bounds start at 2 and end at Dim-3 to provide a 2-voxel-wide boundary
+            // for the stencil calculations, preventing out-of-bounds errors.
+            Parallel.For(2, d - 2, lz =>
+            {
+                int gz = c.StartZ + lz;
+                for (int y = 2; y < _params.Height - 2; y++)
+                for (int x = 2; x < _params.Width - 2; x++)
+                {
+                    byte materialId = labels[x, y, gz];
+                    
+                    if (!_params.IsMaterialSelected(materialId) || density[x,y,gz] <= 0f)
+                        continue;
+                    
+                    float rho_inv = 1.0f / MathF.Max(100f, density[x, y, gz]);
+                    
+                    // --- PHYSICALLY CORRECT STABILIZED SCHEME ---
+                    // This section now correctly implements the equations of motion for a co-located grid
+                    // using a combination of simple backward differences for normal stresses and
+                    // stabilized rotated stencils for shear stresses to prevent numerical instability.
+
+                    // For Vx update: rho * dvx/dt = dsxx/dx + dsxy/dy + dsxz/dz
+                    float dsxx_dx = (c.Sxx[x, y, lz] - c.Sxx[x - 1, y, lz]) * inv_dx;
+                    float dsxy_dy = d_dy_for_vx(c.Sxy, x, y, lz, inv_dx);
+                    float dsxz_dz = d_dz_for_vx(c.Sxz, x, y, lz, inv_dx);
+
+                    // For Vy update: rho * dvy/dt = dsyx/dx + dsyy/dy + dsyz/dz (sxy = syx)
+                    float dsyx_dx = d_dx_for_vy(c.Sxy, x, y, lz, inv_dx);
+                    float dsyy_dy = (c.Syy[x, y, lz] - c.Syy[x, y - 1, lz]) * inv_dx;
+                    float dsyz_dz = d_dz_for_vy(c.Syz, x, y, lz, inv_dx);
+                    
+                    // For Vz update: rho * dvz/dt = dszx/dx + dszy/dy + dszz/dz (sxz = szx, syz = szy)
+                    float dszx_dx = d_dx_for_vz(c.Sxz, x, y, lz, inv_dx);
+                    float dszy_dy = d_dy_for_vz(c.Syz, x, y, lz, inv_dx);
+                    float dszz_dz = (c.Szz[x, y, lz] - c.Szz[x, y, lz - 1]) * inv_dx;
+
+                    const float damping = 0.999f;
+                    
+                    c.Vx[x, y, lz] = c.Vx[x, y, lz] * damping + _dt * (dsxx_dx + dsxy_dy + dsxz_dz) * rho_inv;
+                    c.Vy[x, y, lz] = c.Vy[x, y, lz] * damping + _dt * (dsyx_dx + dsyy_dy + dsyz_dz) * rho_inv;
+                    c.Vz[x, y, lz] = c.Vz[x, y, lz] * damping + _dt * (dszx_dx + dszy_dy + dszz_dz) * rho_inv;
+                    
+                    const float maxVel = 10000f;
+                    c.Vx[x, y, lz] = Math.Clamp(c.Vx[x, y, lz], -maxVel, maxVel);
+                    c.Vy[x, y, lz] = Math.Clamp(c.Vy[x, y, lz], -maxVel, maxVel);
+                    c.Vz[x, y, lz] = Math.Clamp(c.Vz[x, y, lz], -maxVel, maxVel);
+
+                    c.MaxAbsVx[x, y, lz] = MathF.Max(c.MaxAbsVx[x, y, lz], MathF.Abs(c.Vx[x, y, lz]));
+                    c.MaxAbsVy[x, y, lz] = MathF.Max(c.MaxAbsVy[x, y, lz], MathF.Abs(c.Vy[x, y, lz]));
+                    c.MaxAbsVz[x, y, lz] = MathF.Max(c.MaxAbsVz[x, y, lz], MathF.Abs(c.Vz[x, y, lz]));
+                }
+            });
+        }
         
         private void ApplySourceToChunkCPU(WaveFieldChunk chunk, float sourceValue, byte[,,] labels)
-{
-    int tx = (int)(_params.TxPosition.X * _params.Width);
-    int ty = (int)(_params.TxPosition.Y * _params.Height);
-    int tz = (int)(_params.TxPosition.Z * _params.Depth);
-
-    if (_params.UseFullFaceTransducers)
-    {
-        // --- FIX START ---
-        // The original indices (1 and dimension-2) were outside the computational
-        // domain of the velocity update loop, which starts at 2.
-        // These indices are moved inward by one voxel to ensure the source is "seen".
-        int src_x = (tx < _params.Width / 2) ? 2 : _params.Width - 3;
-        int src_y = (ty < _params.Height / 2) ? 2 : _params.Height - 3;
-        int src_z_global = (tz < _params.Depth / 2) ? 2 : _params.Depth - 3;
-        // --- FIX END ---
-
-        switch (_params.Axis)
         {
-            case 0: 
-                for (int z = chunk.StartZ; z < chunk.EndZ; z++)
-                for (int y = 0; y < _params.Height; y++)
-                    if (_params.IsMaterialSelected(labels[src_x, y, z]))
-                        chunk.Sxx[src_x, y, z - chunk.StartZ] += sourceValue;
-                break;
-            case 1: 
-                for (int z = chunk.StartZ; z < chunk.EndZ; z++)
-                for (int x = 0; x < _params.Width; x++)
-                     if (_params.IsMaterialSelected(labels[x, src_y, z]))
-                        chunk.Syy[x, src_y, z - chunk.StartZ] += sourceValue;
-                break;
-            case 2:
-                if (src_z_global >= chunk.StartZ && src_z_global < chunk.EndZ)
+            int tx = (int)(_params.TxPosition.X * _params.Width);
+            int ty = (int)(_params.TxPosition.Y * _params.Height);
+            int tz = (int)(_params.TxPosition.Z * _params.Depth);
+
+            if (_params.UseFullFaceTransducers)
+            {
+                // Source is placed at index 2 (or width-3) to be safely within the
+                // computational domain of the velocity update loop, which starts at 2.
+                int src_x = (tx < _params.Width / 2) ? 2 : _params.Width - 3;
+                int src_y = (ty < _params.Height / 2) ? 2 : _params.Height - 3;
+                int src_z_global = (tz < _params.Depth / 2) ? 2 : _params.Depth - 3;
+
+                switch (_params.Axis)
                 {
-                    int local_z = src_z_global - chunk.StartZ;
-                    for (int y = 0; y < _params.Height; y++)
-                    for (int x = 0; x < _params.Width; x++)
-                        if (_params.IsMaterialSelected(labels[x, y, src_z_global]))
-                            chunk.Szz[x, y, local_z] += sourceValue;
+                    case 0: 
+                        for (int z = chunk.StartZ; z < chunk.EndZ; z++)
+                        for (int y = 0; y < _params.Height; y++)
+                            if (_params.IsMaterialSelected(labels[src_x, y, z]))
+                                chunk.Sxx[src_x, y, z - chunk.StartZ] += sourceValue;
+                        break;
+                    case 1: 
+                        for (int z = chunk.StartZ; z < chunk.EndZ; z++)
+                        for (int x = 0; x < _params.Width; x++)
+                             if (_params.IsMaterialSelected(labels[x, src_y, z]))
+                                chunk.Syy[x, src_y, z - chunk.StartZ] += sourceValue;
+                        break;
+                    case 2:
+                        if (src_z_global >= chunk.StartZ && src_z_global < chunk.EndZ)
+                        {
+                            int local_z = src_z_global - chunk.StartZ;
+                            for (int y = 0; y < _params.Height; y++)
+                            for (int x = 0; x < _params.Width; x++)
+                                if (_params.IsMaterialSelected(labels[x, y, src_z_global]))
+                                    chunk.Szz[x, y, local_z] += sourceValue;
+                        }
+                        break;
                 }
-                break;
+            }
+            else // Point source
+            {
+                if (tz < chunk.StartZ || tz >= chunk.EndZ) return;
+                if (!_params.IsMaterialSelected(labels[tx,ty,tz])) return;
+                
+                int localTz = tz - chunk.StartZ;
+                chunk.Sxx[tx, ty, localTz] += sourceValue;
+                chunk.Syy[tx, ty, localTz] += sourceValue;
+                chunk.Szz[tx, ty, localTz] += sourceValue;
+            }
         }
-    }
-    else // Point source
-    {
-        if (tz < chunk.StartZ || tz >= chunk.EndZ) return;
-        if (!_params.IsMaterialSelected(labels[tx,ty,tz])) return;
-        
-        int localTz = tz - chunk.StartZ;
-        chunk.Sxx[tx, ty, localTz] += sourceValue;
-        chunk.Syy[tx, ty, localTz] += sourceValue;
-        chunk.Szz[tx, ty, localTz] += sourceValue;
-    }
-}
         #endregion
 
         private float GetCurrentSourceValue(int step)
@@ -1243,54 +1276,46 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
 
         private string GetKernelSource()
         {
-            // The OpenCL Kernel source code is identical to the previous corrected version
-            // and contains the stabilized stencils and logic.
+            // --- FIX START ---
+            // The entire OpenCL kernel has been reviewed and corrected. The 'updateVelocity' kernel,
+            // which was the source of the numerical instability, now uses a physically correct and
+            // stable discretization scheme for the elastic wave equation on a co-located grid.
             return @"
             #define M_PI_F 3.14159265358979323846f
 
-            // Rotated stencil derivative helper for d(F)/dy used in d(vx)/dt
-            float d_dy_for_vx(int idx, int width, __global const float* F, float inv_dy) {
-                int ym1 = idx - width;
-                int xp1 = idx + 1;
-                int xp1ym1 = xp1 - width;
-                return 0.25f * ( (F[idx] + F[xp1]) - (F[ym1] + F[xp1ym1]) ) * inv_dy;
+            // --- STABILIZED STENCIL HELPERS ---
+            // These functions compute spatial derivatives for shear stress terms using a rotated stencil.
+            // This is critical for preventing grid decoupling (checkerboarding) which causes wave dissipation.
+            // They average values across adjacent cells before taking the difference, coupling the grid.
+
+            // Calculates d(F)/dy for the Vx update
+            float d_dy_for_vx(__global const float* F, int idx, int width, float inv_d) {
+                return 0.25f * ((F[idx] + F[idx + 1]) - (F[idx - width] + F[idx + 1 - width])) * inv_d;
             }
 
-            // Rotated stencil derivative helper for d(F)/dz used in d(vx)/dt
-            float d_dz_for_vx(int idx, int wh, __global const float* F, float inv_dz) {
-                int zm1 = idx - wh;
-                int xp1 = idx + 1;
-                int xp1zm1 = xp1 - wh;
-                return 0.25f * ( (F[idx] + F[xp1]) - (F[zm1] + F[xp1zm1]) ) * inv_dz;
+            // Calculates d(F)/dz for the Vx update
+            float d_dz_for_vx(__global const float* F, int idx, int wh, float inv_d) {
+                return 0.25f * ((F[idx] + F[idx + 1]) - (F[idx - wh] + F[idx + 1 - wh])) * inv_d;
             }
             
-            // Similar helpers for d(vy)/dt and d(vz)/dt...
-            float d_dx_for_vy(int idx, int width, __global const float* F, float inv_dx) {
-                int xm1 = idx - 1;
-                int yp1 = idx + width;
-                int yp1xm1 = yp1 - 1;
-                return 0.25f * ( (F[idx] + F[yp1]) - (F[xm1] + F[yp1xm1]) ) * inv_dx;
+            // Calculates d(F)/dx for the Vy update
+            float d_dx_for_vy(__global const float* F, int idx, int width, float inv_d) {
+                return 0.25f * ((F[idx] + F[idx + width]) - (F[idx - 1] + F[idx - 1 + width])) * inv_d;
             }
 
-            float d_dz_for_vy(int idx, int wh, __global const float* F, float inv_dz) {
-                int zm1 = idx - wh;
-                int yp1 = idx + wh;
-                int yp1zm1 = yp1 - wh;
-                return 0.25f * ( (F[idx] + F[yp1]) - (F[zm1] + F[yp1zm1]) ) * inv_dz;
+            // Calculates d(F)/dz for the Vy update
+            float d_dz_for_vy(__global const float* F, int idx, int width, int wh, float inv_d) {
+                 return 0.25f * ((F[idx] + F[idx + width]) - (F[idx - wh] + F[idx + width - wh])) * inv_d;
             }
 
-            float d_dx_for_vz(int idx, int wh, __global const float* F, float inv_dx) {
-                int xm1 = idx - 1;
-                int zp1 = idx + wh;
-                int zp1xm1 = zp1 - 1;
-                return 0.25f * ( (F[idx] + F[zp1]) - (F[xm1] + F[zp1xm1]) ) * inv_dx;
+            // Calculates d(F)/dx for the Vz update
+            float d_dx_for_vz(__global const float* F, int idx, int wh, float inv_d) {
+                return 0.25f * ((F[idx] + F[idx + wh]) - (F[idx - 1] + F[idx - 1 + wh])) * inv_d;
             }
 
-            float d_dy_for_vz(int idx, int width, int wh, __global const float* F, float inv_dy) {
-                int ym1 = idx - width;
-                int zp1 = idx + wh;
-                int zp1ym1 = zp1 - width;
-                return 0.25f * ( (F[idx] + F[zp1]) - (F[ym1] + F[zp1ym1]) ) * inv_dy;
+            // Calculates d(F)/dy for the Vz update
+            float d_dy_for_vz(__global const float* F, int idx, int width, int wh, float inv_d) {
+                return 0.25f * ((F[idx] + F[idx + wh]) - (F[idx - width] + F[idx - width + wh])) * inv_d;
             }
 
             __kernel void updateStress(
@@ -1314,9 +1339,9 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
                 
                 if (sourceValue != 0.0f && material_lookup[mat] != 0) {
                     if (isFullFace != 0) {
-                        int src_x = (srcX < width / 2) ? 1 : width - 2;
-                        int src_y = (srcY < height / 2) ? 1 : height - 2;
-                        int src_z = (srcZ_local < depth / 2) ? 1 : depth - 2;
+                        int src_x = (srcX < width / 2) ? 2 : width - 3;
+                        int src_y = (srcY < height / 2) ? 2 : height - 3;
+                        int src_z = (srcZ_local < depth / 2) ? 2 : depth - 3;
 
                         if (sourceAxis == 0 && x == src_x) sxx[idx] += sourceValue;
                         if (sourceAxis == 1 && y == src_y) syy[idx] += sourceValue;
@@ -1338,16 +1363,15 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
 
                 int xp1=idx+1, xm1=idx-1; int yp1=idx+width, ym1=idx-width; int zp1=idx+wh, zm1=idx-wh;
                 
-                float dvx_dx = (vx[xp1] - vx[idx]) / dx;
-                float dvy_dy = (vy[yp1] - vy[idx]) / dx;
-                float dvz_dz = (vz[zp1] - vz[idx]) / dx;
-
-                float dvx_dy = (vx[yp1] - vx[idx]) / dx;
-                float dvy_dx = (vy[xp1] - vy[idx]) / dx;
-                float dvx_dz = (vx[zp1] - vx[idx]) / dx;
-                float dvz_dx = (vz[xp1] - vz[idx]) / dx;
-                float dvy_dz = (vy[zp1] - vy[idx]) / dx;
-                float dvz_dy = (vz[yp1] - vz[idx]) / dx;
+                float dvx_dx = (vx[idx] - vx[xm1]) / dx;
+                float dvy_dy = (vy[idx] - vy[ym1]) / dx;
+                float dvz_dz = (vz[idx] - vz[zm1]) / dx;
+                float dvx_dy = (vx[idx] - vx[ym1]) / dx;
+                float dvy_dx = (vy[idx] - vy[xm1]) / dx;
+                float dvx_dz = (vx[idx] - vx[zm1]) / dx;
+                float dvz_dx = (vz[idx] - vz[xm1]) / dx;
+                float dvy_dz = (vy[idx] - vy[zm1]) / dx;
+                float dvz_dy = (vz[idx] - vz[ym1]) / dx;
                 
                 float volumetric_strain = dvx_dx + dvy_dy + dvz_dz;
                 float damage_factor = (1.0f - damage[idx] * 0.5f);
@@ -1382,31 +1406,33 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
                 float rho_inv = 1.0f / fmax(100.0f, density[idx]);
                 float inv_dx = 1.0f / dx;
                 
-                int xm1 = idx - 1;
+                // --- PHYSICALLY CORRECT VELOCITY UPDATE ---
+                // For Vx: rho*dvx/dt = dsxx/dx + dsxy/dy + dsxz/dz
+                float dsxx_dx_vx = (sxx[idx] - sxx[idx - 1]) * inv_dx;
+                float dsxy_dy_vx = d_dy_for_vx(sxy, idx, width, inv_dx);
+                float dsxz_dz_vx = d_dz_for_vx(sxz, idx, wh, inv_dx);
                 
-                float dsxx_dx = (sxx[idx] - sxx[xm1]) * inv_dx;
-                float dsyy_dy = d_dy_for_vx(idx, width, syy, inv_dx); // Using stabilized stencils
-                float dszz_dz = d_dz_for_vx(idx, wh, szz, inv_dx);
+                // For Vy: rho*dvy/dt = dsyx/dx + dsyy/dy + dsyz/dz (where syx=sxy)
+                float dsyx_dx_vy = d_dx_for_vy(sxy, idx, width, inv_dx);
+                float dsyy_dy_vy = (syy[idx] - syy[idx - width]) * inv_dx;
+                float dsyz_dz_vy = d_dz_for_vy(syz, idx, width, wh, inv_dx);
 
-                float dsxy_dy = (sxy[idx] - sxy[idx - width]) * inv_dx;
-                float dsxz_dz = (sxz[idx] - sxz[idx - wh]) * inv_dx;
-                
-                float dsyz_dz_vy = (syz[idx] - syz[idx - wh]) * inv_dx;
-                float dsyx_dx_vy = d_dx_for_vy(idx, width, sxy, inv_dx);
-
-                float dszy_dy_vz = d_dy_for_vz(idx, width, wh, syz, inv_dx);
-                float dszx_dx_vz = d_dx_for_vz(idx, wh, sxz, inv_dx);
+                // For Vz: rho*dvz/dt = dszx/dx + dszy/dy + dszz/dz (where szx=sxz, szy=syz)
+                float dszx_dx_vz = d_dx_for_vz(sxz, idx, wh, inv_dx);
+                float dszy_dy_vz = d_dy_for_vz(syz, idx, width, wh, inv_dx);
+                float dszz_dz_vz = (szz[idx] - szz[idx - wh]) * inv_dx;
                 
                 const float damping = 0.999f;
                 
-                vx[idx] = vx[idx] * damping + dt * (dsxx_dx + dsxy_dy + dsxz_dz) * rho_inv;
-                vy[idx] = vy[idx] * damping + dt * (dsyx_dx_vy + dsyy_dy + dsyz_dz_vy) * rho_inv;
-                vz[idx] = vz[idx] * damping + dt * (dszx_dx_vz + dszy_dy_vz + dszz_dz) * rho_inv;
+                vx[idx] = vx[idx] * damping + dt * (dsxx_dx_vx + dsxy_dy_vx + dsxz_dz_vx) * rho_inv;
+                vy[idx] = vy[idx] * damping + dt * (dsyx_dx_vy + dsyy_dy_vy + dsyz_dz_vy) * rho_inv;
+                vz[idx] = vz[idx] * damping + dt * (dszx_dx_vz + dszy_dy_vz + dszz_dz_vz) * rho_inv;
                 
                 max_vx[idx] = fmax(max_vx[idx], fabs(vx[idx]));
                 max_vy[idx] = fmax(max_vy[idx], fabs(vy[idx]));
                 max_vz[idx] = fmax(max_vz[idx], fabs(vz[idx]));
             }";
+            // --- FIX END ---
         }
     }
 }

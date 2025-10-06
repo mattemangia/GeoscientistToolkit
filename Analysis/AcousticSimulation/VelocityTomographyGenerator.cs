@@ -90,7 +90,7 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
             return tomography;
         }
 
-        private Vector4 GetJetColor(float value)
+        public Vector4 GetJetColor(float value)
         {
             float r, g, b;
             if (value < 0.25f) { r = 0; g = 4 * value; b = 1; }
