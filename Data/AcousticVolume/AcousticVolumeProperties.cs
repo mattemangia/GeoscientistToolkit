@@ -87,28 +87,26 @@ namespace GeoscientistToolkit.Data.AcousticVolume
                 // Calculate wavelengths
                 if (acousticDataset.PWaveVelocity > 0 && acousticDataset.SourceFrequencyKHz > 0)
                 {
-                    double pWavelength = acousticDataset.PWaveVelocity / (acousticDataset.SourceFrequencyKHz * 1000);
+                    double pWavelength = acousticDataset.PWaveVelocity / (acousticDataset.SourceFrequencyKHz * 1000); // in meters
                     ImGui.Text($"P-Wave: {pWavelength * 1000:F2} mm");
                     
                     // Resolution info
-                    if (acousticDataset.PWaveField != null)
+                    if (acousticDataset.PWaveField != null && acousticDataset.VoxelSize > 0)
                     {
-                        double voxelSize = 1.0; // Assume 1mm voxel size, should come from metadata
-                        double resolution = pWavelength * 1000 / voxelSize;
+                        double resolution = pWavelength / acousticDataset.VoxelSize; // meters / meters
                         ImGui.TextDisabled($"  ({resolution:F1} voxels per wavelength)");
                     }
                 }
                 
                 if (acousticDataset.SWaveVelocity > 0 && acousticDataset.SourceFrequencyKHz > 0)
                 {
-                    double sWavelength = acousticDataset.SWaveVelocity / (acousticDataset.SourceFrequencyKHz * 1000);
+                    double sWavelength = acousticDataset.SWaveVelocity / (acousticDataset.SourceFrequencyKHz * 1000); // in meters
                     ImGui.Text($"S-Wave: {sWavelength * 1000:F2} mm");
                     
                     // Resolution info
-                    if (acousticDataset.SWaveField != null)
+                    if (acousticDataset.SWaveField != null && acousticDataset.VoxelSize > 0)
                     {
-                        double voxelSize = 1.0; // Assume 1mm voxel size
-                        double resolution = sWavelength * 1000 / voxelSize;
+                        double resolution = sWavelength / acousticDataset.VoxelSize; // meters / meters
                         ImGui.TextDisabled($"  ({resolution:F1} voxels per wavelength)");
                     }
                 }
@@ -162,19 +160,19 @@ namespace GeoscientistToolkit.Data.AcousticVolume
                 if (acousticDataset.PWaveField != null)
                 {
                     hasData = true;
-                    DrawVolumeInfo("P-Wave Field", acousticDataset.PWaveField);
+                    DrawVolumeInfo("P-Wave Field", acousticDataset.PWaveField, acousticDataset);
                 }
                 
                 if (acousticDataset.SWaveField != null)
                 {
                     hasData = true;
-                    DrawVolumeInfo("S-Wave Field", acousticDataset.SWaveField);
+                    DrawVolumeInfo("S-Wave Field", acousticDataset.SWaveField, acousticDataset);
                 }
                 
                 if (acousticDataset.CombinedWaveField != null)
                 {
                     hasData = true;
-                    DrawVolumeInfo("Combined Field", acousticDataset.CombinedWaveField);
+                    DrawVolumeInfo("Combined Field", acousticDataset.CombinedWaveField, acousticDataset);
                 }
                 
                 if (!hasData)
@@ -278,7 +276,7 @@ namespace GeoscientistToolkit.Data.AcousticVolume
             }
         }
         
-        private void DrawVolumeInfo(string name, Data.VolumeData.ChunkedVolume volume)
+        private void DrawVolumeInfo(string name, Data.VolumeData.ChunkedVolume volume, AcousticVolumeDataset acousticDataset)
         {
             ImGui.Text($"{name}:");
             ImGui.Indent();
@@ -287,9 +285,18 @@ namespace GeoscientistToolkit.Data.AcousticVolume
             long voxelCount = (long)volume.Width * volume.Height * volume.Depth;
             ImGui.Text($"Voxels: {voxelCount:N0}");
             
-            // Estimate physical size if we have metadata
-            // This should come from dataset metadata
-            ImGui.TextDisabled("Physical size information not available");
+            // Calculate and display physical size if voxel size is known
+            if (acousticDataset.VoxelSize > 0)
+            {
+                double sizeX = volume.Width * acousticDataset.VoxelSize * 1000;  // in mm
+                double sizeY = volume.Height * acousticDataset.VoxelSize * 1000; // in mm
+                double sizeZ = volume.Depth * acousticDataset.VoxelSize * 1000;  // in mm
+                ImGui.Text($"Physical Size: {sizeX:F1} × {sizeY:F1} × {sizeZ:F1} mm");
+            }
+            else
+            {
+                ImGui.TextDisabled("Physical size information not available");
+            }
             
             ImGui.Unindent();
             ImGui.Spacing();

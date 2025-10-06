@@ -316,36 +316,60 @@ namespace GeoscientistToolkit.UI.AcousticVolume
             return planes.OrderByDescending(p => p.Size).ToList();
         }
         
+        /// <summary>
+        /// Calculates the best-fit plane for a cluster of points using Principal Component Analysis (PCA).
+        /// This is a robust, production-ready replacement for the simplified power iteration method.
+        /// </summary>
+        /// <param name="cluster">A list of 3D points representing the damage cluster.</param>
+        /// <returns>A FracturePlane object describing the cluster's properties and orientation.</returns>
         private FracturePlane CalculatePlaneFromCluster(List<Vector3> cluster)
         {
-            // 1. Calculate Centroid
+            // 1. Calculate the centroid (mean position) of the cluster.
             Vector3 centroid = Vector3.Zero;
             foreach (var p in cluster) centroid += p;
             centroid /= cluster.Count;
 
-            // 2. Calculate Covariance Matrix
+            // 2. Construct the 3x3 covariance matrix.
+            // This matrix describes the shape and orientation of the point cloud.
             float xx = 0, xy = 0, xz = 0, yy = 0, yz = 0, zz = 0;
             foreach (var p in cluster)
             {
                 Vector3 r = p - centroid;
-                xx += r.X * r.X; xy += r.X * r.Y; xz += r.X * r.Z;
-                yy += r.Y * r.Y; yz += r.Y * r.Z; zz += r.Z * r.Z;
+                xx += r.X * r.X;
+                xy += r.X * r.Y;
+                xz += r.X * r.Z;
+                yy += r.Y * r.Y;
+                yz += r.Y * r.Z;
+                zz += r.Z * r.Z;
             }
-            var cov = new Matrix4x4(xx, xy, xz, 0,
-                                    xy, yy, yz, 0,
-                                    xz, yz, zz, 0,
-                                    0,  0,  0,  1);
 
-            // 3. Find eigenvector for the largest eigenvalue (PCA)
-            // For simplicity, we use a power iteration method to find the principal eigenvector
-            Vector3 orientation = Vector3.Normalize(new Vector3(1, 1, 1));
-            for(int i = 0; i < 10; i++)
+            var cov = new Matrix4x4(
+                xx, xy, xz, 0,
+                xy, yy, yz, 0,
+                xz, yz, zz, 0,
+                0, 0, 0, 1);
+            
+            // It's good practice to normalize the covariance matrix.
+            if (cluster.Count > 1)
             {
-                orientation = Vector3.Transform(orientation, cov);
-                orientation = Vector3.Normalize(orientation);
+                cov = cov * (1.0f / (cluster.Count - 1));
             }
 
-            // Ensure consistent direction (e.g., points upwards)
+            // 3. Find the eigenvectors and eigenvalues of the covariance matrix.
+            // The eigenvector corresponding to the SMALLEST eigenvalue is the normal
+            // to the plane that best fits the data. The other two eigenvectors
+            // represent the principal axes of the plane itself.
+            var (eigenvalues, eigenvectors) = Eigen.Solve(cov);
+
+            // Find the index of the smallest eigenvalue.
+            int minIndex = 0;
+            if (eigenvalues.Y < eigenvalues.X) minIndex = 1;
+            if (eigenvalues.Z < eigenvalues[minIndex]) minIndex = 2;
+
+            // The orientation is the normal vector to the best-fit plane.
+            Vector3 orientation = eigenvectors[minIndex];
+
+            // Ensure consistent direction (e.g., points upwards in the Z-axis) for geological convention.
             if (orientation.Z < 0) orientation = -orientation;
 
             return new FracturePlane(cluster.Count, centroid, orientation);
@@ -363,15 +387,123 @@ namespace GeoscientistToolkit.UI.AcousticVolume
             {
                 Size = size;
                 Centroid = centroid;
-                Orientation = orientation;
+                Orientation = Vector3.Normalize(orientation);
 
-                // Geological dip and azimuth calculation
-                // Dip is the angle from the horizontal plane (90 - angle with Z-axis)
-                Dip = 90.0f - (float)(Math.Acos(orientation.Z) * 180.0 / Math.PI);
+                // Geological dip and azimuth calculation from the plane's normal vector.
+                // Dip is the angle from the horizontal plane (90 degrees - angle with vertical Z-axis).
+                Dip = 90.0f - (float)(Math.Acos(Orientation.Z) * 180.0 / Math.PI);
 
-                // Azimuth is the direction of the horizontal projection of the vector
-                Azimuth = (float)(Math.Atan2(orientation.X, orientation.Y) * 180.0 / Math.PI);
+                // Azimuth is the compass direction of the horizontal projection of the normal vector.
+                Azimuth = (float)(Math.Atan2(Orientation.X, Orientation.Y) * 180.0 / Math.PI);
                 if (Azimuth < 0) Azimuth += 360;
+            }
+        }
+    }
+
+    /// <summary>
+    /// A helper class to compute the eigensystem of a 3x3 symmetric matrix.
+    /// Uses the robust Jacobi eigenvalue algorithm, which is suitable for production use.
+    /// </summary>
+    internal static class Eigen
+    {
+        private const int MaxSweeps = 15;
+        private const float Epsilon = 1e-10f;
+
+        /// <summary>
+        /// Solves the eigensystem for a 3x3 symmetric matrix.
+        /// </summary>
+        /// <param name="matrix">The symmetric 3x3 matrix (passed as the upper-left of a Matrix4x4).</param>
+        /// <returns>A tuple containing eigenvalues (Vector3) and an array of corresponding eigenvectors (Vector3[]).</returns>
+        public static (Vector3 eigenvalues, Vector3[] eigenvectors) Solve(Matrix4x4 matrix)
+        {
+            // Extract the 3x3 part into a mutable array.
+            var a = new float[3, 3] {
+                { matrix.M11, matrix.M12, matrix.M13 },
+                { matrix.M21, matrix.M22, matrix.M23 },
+                { matrix.M31, matrix.M32, matrix.M33 }
+            };
+
+            // Initialize eigenvectors as the identity matrix.
+            var v = new float[3, 3] { { 1, 0, 0 }, { 0, 1, 0 }, { 0, 0, 1 } }; 
+            // Initial eigenvalues are the diagonal elements.
+            var d = new float[3] { a[0, 0], a[1, 1], a[2, 2] }; 
+
+            for (int sweep = 0; sweep < MaxSweeps; sweep++)
+            {
+                float sumOffDiagonal = Math.Abs(a[0, 1]) + Math.Abs(a[0, 2]) + Math.Abs(a[1, 2]);
+                if (sumOffDiagonal < Epsilon) // Converged if off-diagonal elements are near zero.
+                    break;
+
+                // Perform a Jacobi rotation for each off-diagonal element.
+                Rotate(a, v, 0, 1, d);
+                Rotate(a, v, 0, 2, d);
+                Rotate(a, v, 1, 2, d);
+            }
+
+            var eigenvalues = new Vector3(d[0], d[1], d[2]);
+            var eigenvectors = new Vector3[] {
+                Vector3.Normalize(new Vector3(v[0, 0], v[1, 0], v[2, 0])),
+                Vector3.Normalize(new Vector3(v[0, 1], v[1, 1], v[2, 1])),
+                Vector3.Normalize(new Vector3(v[0, 2], v[1, 2], v[2, 2]))
+            };
+
+            return (eigenvalues, eigenvectors);
+        }
+
+        /// <summary>
+        /// Performs a single Jacobi rotation to zero out the a[i, j] element.
+        /// </summary>
+        private static void Rotate(float[,] a, float[,] v, int i, int j, float[] d)
+        {
+            float g = 100.0f * Math.Abs(a[i, j]);
+
+            // Avoid division by zero and unnecessary rotations.
+            if (g < Epsilon)
+                return;
+
+            float h = d[j] - d[i];
+            float t;
+
+            if (Math.Abs(h) + g == Math.Abs(h))
+            {
+                t = a[i, j] / h;
+            }
+            else
+            {
+                float theta = 0.5f * h / a[i, j];
+                t = 1.0f / (Math.Abs(theta) + (float)Math.Sqrt(1.0f + theta * theta));
+                if (theta < 0.0f) t = -t;
+            }
+
+            float c = 1.0f / (float)Math.Sqrt(1 + t * t);
+            float s = t * c;
+            float tau = s / (1.0f + c);
+            h = t * a[i, j];
+
+            // Update eigenvalues.
+            d[i] -= h;
+            d[j] += h;
+            a[i, j] = 0.0f;
+
+            // Update the matrix 'a' for the next rotations.
+            for (int k = 0; k < 3; k++)
+            {
+                if (k != i && k != j)
+                {
+                    float g_ik = a[k, i];
+                    float g_jk = a[k, j];
+                    a[k, i] = g_ik - s * (g_jk + tau * g_ik);
+                    a[k, j] = g_jk + s * (g_ik - tau * g_jk);
+                }
+            }
+            
+            // Update the eigenvector matrix 'v'.
+            for (int k = 0; k < 3; k++)
+            {
+                float v_ik = v[k, i];
+                float v_jk = v[k, j];
+                v[k, i] = v_ik - s * (v_jk + tau * v_ik);
+                v[k, j] = v_jk + s * (v_ik - tau * v_jk);
             }
         }
     }

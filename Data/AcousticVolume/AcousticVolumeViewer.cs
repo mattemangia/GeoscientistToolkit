@@ -17,7 +17,7 @@ namespace GeoscientistToolkit.Data.AcousticVolume
     /// <summary>
     /// Viewer for acoustic simulation results with wave field visualization,
     /// time-series animation, and interactive analysis capabilities.
-    /// Now with lazy loading to prevent UI freezing.
+    /// Now with high-performance, direct snapshot rendering.
     /// </summary>
     public class AcousticVolumeViewer : IDatasetViewer, IDisposable
     {
@@ -67,6 +67,7 @@ namespace GeoscientistToolkit.Data.AcousticVolume
         private float _animationSpeed = 1.0f;
         private DateTime _lastFrameTime = DateTime.MinValue;
         private float _frameInterval = 0.033f; // 30 FPS
+        private int _timeSeriesComponent = 0; // 0=Magnitude, 1=Vx, 2=Vy, 3=Vz
         
         // Display settings
         private float _contrastMin = 0.0f;
@@ -294,27 +295,38 @@ namespace GeoscientistToolkit.Data.AcousticVolume
             ImGui.SameLine();
             
             // Time series controls
-            if (_currentMode == VisualizationMode.TimeSeries && _dataset.TimeSeriesSnapshots?.Count > 0)
+            if (_currentMode == VisualizationMode.TimeSeries)
             {
-                if (ImGui.Button(_isPlaying ? "⏸" : "▶"))
+                if (_dataset.TimeSeriesSnapshots?.Count > 0)
                 {
-                    _isPlaying = !_isPlaying;
-                    _lastFrameTime = DateTime.Now;
+                    if (ImGui.Button(_isPlaying ? "⏸" : "▶"))
+                    {
+                        _isPlaying = !_isPlaying;
+                        _lastFrameTime = DateTime.Now;
+                    }
+                    
+                    ImGui.SameLine();
+                    ImGui.SetNextItemWidth(150);
+                    if (ImGui.SliderInt("Frame", ref _currentFrameIndex, 0, _dataset.TimeSeriesSnapshots.Count - 1))
+                    {
+                        _needsUpdateXY = _needsUpdateXZ = _needsUpdateYZ = true;
+                    }
+                    
+                    ImGui.SameLine();
+                    ImGui.Text($"{_currentFrameIndex + 1}/{_dataset.TimeSeriesSnapshots.Count}");
+                    
+                    ImGui.SameLine();
+                    ImGui.SetNextItemWidth(120);
+                    string[] components = { "Magnitude", "Vx", "Vy", "Vz" };
+                    if (ImGui.Combo("Component", ref _timeSeriesComponent, components, components.Length))
+                    {
+                        _needsUpdateXY = _needsUpdateXZ = _needsUpdateYZ = true;
+                    }
                 }
-                
-                ImGui.SameLine();
-                ImGui.SetNextItemWidth(200);
-                if (ImGui.SliderInt("Frame", ref _currentFrameIndex, 0, _dataset.TimeSeriesSnapshots.Count - 1))
+                else
                 {
-                    _needsUpdateXY = _needsUpdateXZ = _needsUpdateYZ = true;
+                    ImGui.TextDisabled("No time series data loaded.");
                 }
-                
-                ImGui.SameLine();
-                ImGui.Text($"{_currentFrameIndex + 1}/{_dataset.TimeSeriesSnapshots.Count}");
-                
-                ImGui.SameLine();
-                ImGui.SetNextItemWidth(100);
-                ImGui.DragFloat("Speed", ref _animationSpeed, 0.01f, 0.1f, 10.0f);
             }
             
             ImGui.SameLine();
@@ -361,7 +373,7 @@ namespace GeoscientistToolkit.Data.AcousticVolume
             }
         
             // Handle loading/progress dialog
-            _loadingProgress.Submit();
+            if (_isLoading) _loadingProgress.Submit();
             
             if (!_isInitialized)
             {
@@ -381,7 +393,7 @@ namespace GeoscientistToolkit.Data.AcousticVolume
             }
             
             // Update animation
-            if (_isPlaying && _dataset.TimeSeriesSnapshots?.Count > 0)
+            if (_isPlaying && _currentMode == VisualizationMode.TimeSeries && _dataset.TimeSeriesSnapshots?.Count > 0)
             {
                 UpdateAnimation();
             }
@@ -465,11 +477,11 @@ namespace GeoscientistToolkit.Data.AcousticVolume
             ImGui.Text(title);
             ImGui.SameLine();
     
-            ChunkedVolume currentVolume = GetCurrentVolume();
-            if (currentVolume != null)
+            var (hasVolume, width, height, depth) = GetCurrentVolumeDimensions();
+            if (hasVolume)
             {
                 int slice = viewIndex switch { 0 => _sliceZ, 1 => _sliceY, 2 => _sliceX, _ => 0 };
-                int maxSlice = viewIndex switch { 0 => currentVolume.Depth - 1, 1 => currentVolume.Height - 1, 2 => currentVolume.Width - 1, _ => 0 };
+                int maxSlice = viewIndex switch { 0 => depth - 1, 1 => height - 1, 2 => width - 1, _ => 0 };
                 ImGui.SetNextItemWidth(150);
                 if (ImGui.SliderInt($"##Slice{viewIndex}", ref slice, 0, maxSlice))
                 {
@@ -556,9 +568,9 @@ namespace GeoscientistToolkit.Data.AcousticVolume
             // Re-fetch texture for drawing as the async task may have updated it
             texture = viewIndex switch { 0 => _textureXY, 1 => _textureXZ, _ => _textureYZ };
             
-            if (texture != null && texture.IsValid && GetCurrentVolume() != null)
+            if (texture != null && texture.IsValid)
             {
-                var (width, height) = GetImageDimensionsForView(viewIndex, GetCurrentVolume());
+                var (width, height) = GetImageDimensionsForView(viewIndex);
                 var (imagePos, imageSize) = GetImageDisplayMetrics(canvasPos, canvasSize, zoom, pan, width, height);
                 
                 dl.PushClipRect(canvasPos, canvasPos + canvasSize, true);
@@ -579,10 +591,10 @@ namespace GeoscientistToolkit.Data.AcousticVolume
         /// </summary>
         private void HandlePointProbing(ImGuiIOPtr io, Vector2 canvasPos, Vector2 canvasSize, float zoom, Vector2 pan, int viewIndex)
         {
-            var volume = GetCurrentVolume();
-            if (volume == null) return;
+            var (hasVolume, volWidth, volHeight, volDepth) = GetCurrentVolumeDimensions();
+            if (!hasVolume) return;
             
-            var (width, height) = GetImageDimensionsForView(viewIndex, volume);
+            var (width, height) = GetImageDimensionsForView(viewIndex);
             var (imagePos, imageSize) = GetImageDisplayMetrics(canvasPos, canvasSize, zoom, pan, width, height);
             Vector2 mouseImgCoord = (io.MousePos - imagePos) / imageSize;
 
@@ -606,17 +618,12 @@ namespace GeoscientistToolkit.Data.AcousticVolume
                     _ = LoadDensityDataAsync();
                 }
                 
-                // Clamp coordinates to be safe
-                var baseVolume = _dataset.CombinedWaveField ?? _dataset.PWaveField;
-                if (baseVolume == null) return;
-
-                volX = Math.Clamp(volX, 0, baseVolume.Width - 1);
-                volY = Math.Clamp(volY, 0, baseVolume.Height - 1);
-                volZ = Math.Clamp(volZ, 0, baseVolume.Depth - 1);
+                volX = Math.Clamp(volX, 0, volWidth - 1);
+                volY = Math.Clamp(volY, 0, volHeight - 1);
+                volZ = Math.Clamp(volZ, 0, volDepth - 1);
 
                 string tooltip = $"Voxel: ({volX}, {volY}, {volZ})\n";
                 
-                // Query calibrated density data if available
                 if (_dataset.DensityData != null)
                 {
                     tooltip += $"Density: {_dataset.DensityData.GetDensity(volX, volY, volZ):F0} kg/m³\n" +
@@ -625,7 +632,6 @@ namespace GeoscientistToolkit.Data.AcousticVolume
                 }
                 else { tooltip += "Density data not calibrated."; }
 
-                // Query damage field if available
                 if (_dataset.DamageField != null)
                 {
                     tooltip += $"\nDamage: {_dataset.DamageField[volX, volY, volZ] / 255.0f:P1}";
@@ -694,8 +700,7 @@ namespace GeoscientistToolkit.Data.AcousticVolume
         {
             ImGui.SetTooltip("Click and drag to define a line for analysis.\nPress ESC or 'Cancel' in Analysis tool to exit.");
             
-            var (width, height) = GetImageDimensionsForView(viewIndex, GetCurrentVolume());
-            var (imagePos, imageSize) = GetImageDisplayMetrics(canvasPos, canvasSize, zoom, pan, width, height);
+            var (width, height) = GetImageDimensionsForView(viewIndex);
 
             if (ImGui.IsMouseClicked(ImGuiMouseButton.Left))
             {
@@ -709,13 +714,12 @@ namespace GeoscientistToolkit.Data.AcousticVolume
             {
                 _isDrawingLine = false;
                 
-                // Convert screen-space start/end points to pixel coordinates within the slice image
+                var (imagePos, imageSize) = GetImageDisplayMetrics(canvasPos, canvasSize, zoom, pan, width, height);
                 Vector2 startPixel = ((_lineStartPos - imagePos) / imageSize) * new Vector2(width, height);
                 Vector2 endPixel = ((io.MousePos - imagePos) / imageSize) * new Vector2(width, height);
                 
                 int sliceIndex = viewIndex switch { 0 => _sliceZ, 1 => _sliceY, 2 => _sliceX, _ => 0 };
 
-                // Finalize the line and notify the analysis tool
                 AcousticInteractionManager.FinalizeLine(sliceIndex, viewIndex, startPixel, endPixel);
             }
         }
@@ -726,13 +730,11 @@ namespace GeoscientistToolkit.Data.AcousticVolume
         private void HandlePointSelection(ImDrawListPtr dl, ImGuiIOPtr io, Vector2 canvasPos, Vector2 canvasSize, float zoom, Vector2 pan, int viewIndex)
         {
             ImGui.SetTooltip("Click to select a point for analysis.");
-
-            // Draw a visual cue for the cursor
             dl.AddCircle(io.MousePos, 5, ImGui.GetColorU32(new Vector4(1, 0, 1, 0.8f)), 12, 2.0f);
 
             if (ImGui.IsMouseClicked(ImGuiMouseButton.Left))
             {
-                var (width, height) = GetImageDimensionsForView(viewIndex, GetCurrentVolume());
+                var (width, height) = GetImageDimensionsForView(viewIndex);
                 var (imagePos, imageSize) = GetImageDisplayMetrics(canvasPos, canvasSize, zoom, pan, width, height);
                 Vector2 mouseImgCoord = (io.MousePos - imagePos) / imageSize;
 
@@ -741,7 +743,6 @@ namespace GeoscientistToolkit.Data.AcousticVolume
                     int x = (int)(mouseImgCoord.X * width);
                     int y = (int)(mouseImgCoord.Y * height);
 
-                    // Convert 2D view coordinates to 3D volume coordinates
                     var (volX, volY, volZ) = viewIndex switch
                     {
                         0 => (x, y, _sliceZ),
@@ -749,13 +750,13 @@ namespace GeoscientistToolkit.Data.AcousticVolume
                         _ => (_sliceX, x, y)
                     };
                     
-                    var baseVolume = GetCurrentVolume();
-                    if (baseVolume != null)
+                    var (hasVolume, w, h, d) = GetCurrentVolumeDimensions();
+                    if (hasVolume)
                     {
                          Vector3 finalPoint = new Vector3(
-                            Math.Clamp(volX, 0, baseVolume.Width - 1),
-                            Math.Clamp(volY, 0, baseVolume.Height - 1),
-                            Math.Clamp(volZ, 0, baseVolume.Depth - 1)
+                            Math.Clamp(volX, 0, w - 1),
+                            Math.Clamp(volY, 0, h - 1),
+                            Math.Clamp(volZ, 0, d - 1)
                         );
                         AcousticInteractionManager.FinalizePoint(finalPoint);
                     }
@@ -768,19 +769,24 @@ namespace GeoscientistToolkit.Data.AcousticVolume
         /// </summary>
         private async Task UpdateTextureAsync(int viewIndex)
         {
-            ChunkedVolume volume = GetCurrentVolume();
-            if (volume == null) return;
-
             try
             {
-                var (width, height) = GetImageDimensionsForView(viewIndex, volume);
+                var (width, height) = GetImageDimensionsForView(viewIndex);
                 string cacheKey = $"{_currentMode}_{viewIndex}_{GetSliceIndexForView(viewIndex)}_{_contrastMin:F3}_{_contrastMax:F3}";
+                if (_currentMode == VisualizationMode.TimeSeries)
+                {
+                    cacheKey += $"_frame{_currentFrameIndex}_comp{_timeSeriesComponent}";
+                }
+                
+                byte[] sliceData = _sliceCache.GetOrLoad(cacheKey, () =>
+                {
+                    return _currentMode == VisualizationMode.TimeSeries
+                        ? ExtractSliceDataFromSnapshot(viewIndex)
+                        : ExtractSliceDataFromVolume(viewIndex, width, height);
+                });
 
-                // CPU-bound work: extract slice data and apply color map. Can run on a background thread.
-                byte[] sliceData = _sliceCache.GetOrLoad(cacheKey, () => ExtractSliceData(viewIndex, volume, width, height));
                 byte[] rgbaData = await Task.Run(() => ApplyColorMap(sliceData, width, height));
 
-                // GPU/main-thread work: queue an action to create/swap textures safely.
                 _mainThreadActions.Enqueue(() =>
                 {
                     try
@@ -794,7 +800,6 @@ namespace GeoscientistToolkit.Data.AcousticVolume
                             case 1: oldTexture = _textureXZ; _textureXZ = newTexture; break;
                             case 2: oldTexture = _textureYZ; _textureYZ = newTexture; break;
                         }
-                        // Dispose the old texture on the main thread after the new one is in place.
                         oldTexture?.Dispose();
                     }
                     catch (Exception ex)
@@ -811,8 +816,11 @@ namespace GeoscientistToolkit.Data.AcousticVolume
         
         private int GetSliceIndexForView(int viewIndex) => viewIndex switch { 0 => _sliceZ, 1 => _sliceY, 2 => _sliceX, _ => 0 };
         
-        private byte[] ExtractSliceData(int viewIndex, ChunkedVolume volume, int width, int height)
+        private byte[] ExtractSliceDataFromVolume(int viewIndex, int width, int height)
         {
+            var volume = GetCurrentVolume();
+            if (volume == null) return null;
+
             byte[] data = new byte[width * height];
             
             switch (viewIndex)
@@ -824,6 +832,78 @@ namespace GeoscientistToolkit.Data.AcousticVolume
             
             ApplyContrast(data);
             return data;
+        }
+
+        private byte[] ExtractSliceDataFromSnapshot(int viewIndex)
+        {
+            if (_dataset.TimeSeriesSnapshots == null || _dataset.TimeSeriesSnapshots.Count <= _currentFrameIndex)
+                return null;
+            
+            var snapshot = _dataset.TimeSeriesSnapshots[_currentFrameIndex];
+            var (width, height) = GetImageDimensionsForView(viewIndex);
+            byte[] slice = new byte[width * height];
+
+            // Magnitude component requires expensive calculation
+            if (_timeSeriesComponent == 0) // Magnitude
+            {
+                var vxf = snapshot.GetVelocityField(0);
+                var vyf = snapshot.GetVelocityField(1);
+                var vzf = snapshot.GetVelocityField(2);
+                if (vxf == null || vyf == null || vzf == null) return null;
+
+                var magnitudeSlice = new float[width * height];
+                float maxMag = 0;
+
+                // Calculate magnitude for the slice and find max
+                for (int j = 0; j < height; j++)
+                {
+                    for (int i = 0; i < width; i++)
+                    {
+                        var (x, y, z) = Get3DCoords(viewIndex, i, j);
+                        float mag = MathF.Sqrt(vxf[x, y, z] * vxf[x, y, z] + vyf[x, y, z] * vyf[x, y, z] + vzf[x, y, z] * vzf[x, y, z]);
+                        magnitudeSlice[j * width + i] = mag;
+                        if (mag > maxMag) maxMag = mag;
+                    }
+                }
+                
+                // Normalize and convert to byte slice
+                if (maxMag > 0)
+                {
+                    for (int i = 0; i < magnitudeSlice.Length; i++)
+                    {
+                        slice[i] = (byte)(Math.Clamp(magnitudeSlice[i] / maxMag, 0, 1) * 255);
+                    }
+                }
+                return slice;
+            }
+            else // Optimized path for single components (Vx, Vy, Vz)
+            {
+                var compressedData = snapshot.GetCompressedVelocityField(_timeSeriesComponent - 1);
+                if (compressedData == null) return null;
+                
+                int volW = snapshot.Width, volH = snapshot.Height, volD = snapshot.Depth;
+                
+                for (int j = 0; j < height; j++)
+                {
+                    for (int i = 0; i < width; i++)
+                    {
+                        var (x, y, z) = Get3DCoords(viewIndex, i, j);
+                        int sourceIndex = z * volW * volH + y * volW + x;
+                        slice[j * width + i] = compressedData[sourceIndex];
+                    }
+                }
+                return slice;
+            }
+        }
+
+        private (int x, int y, int z) Get3DCoords(int viewIndex, int i, int j)
+        {
+            return viewIndex switch
+            {
+                0 => (i, j, _sliceZ),       // XY view
+                1 => (i, _sliceY, j),       // XZ view
+                _ => (_sliceX, i, j),       // YZ view
+            };
         }
         
         private void ApplyContrast(byte[] data)
@@ -840,6 +920,8 @@ namespace GeoscientistToolkit.Data.AcousticVolume
         
         private byte[] ApplyColorMap(byte[] data, int width, int height)
         {
+            if (data == null) return new byte[width * height * 4];
+            
             byte[] rgba = new byte[width * height * 4];
             for (int i = 0; i < width * height; i++)
             {
@@ -856,11 +938,8 @@ namespace GeoscientistToolkit.Data.AcousticVolume
         {
             value = Math.Clamp(value, 0, 1);
 
-            // Use a specific color map for damage to make it stand out
-            if (_currentMode == VisualizationMode.DamageField)
-            {
-                return GetHotColor(value);
-            }
+            if (_currentMode == VisualizationMode.DamageField) return GetHotColor(value);
+            if (_currentMode == VisualizationMode.TimeSeries) return GetSeismicColor(value);
             
             return _colorMapIndex switch
             {
@@ -878,30 +957,11 @@ namespace GeoscientistToolkit.Data.AcousticVolume
         private Vector4 GetJetColor(float v)
         {
             v = Math.Clamp(v, 0.0f, 1.0f);
-            Vector4 c = new Vector4(1.0f, 1.0f, 1.0f, 1.0f);
-        
-            if (v < 0.125f) {
-                c.X = 0.0f;
-                c.Y = 0.0f;
-                c.Z = 0.5f + 4.0f * v;
-            } else if (v < 0.375f) {
-                c.X = 0.0f;
-                c.Y = 4.0f * (v - 0.125f);
-                c.Z = 1.0f;
-            } else if (v < 0.625f) {
-                c.X = 4.0f * (v - 0.375f);
-                c.Y = 1.0f;
-                c.Z = 1.0f - 4.0f * (v - 0.375f);
-            } else if (v < 0.875f) {
-                c.X = 1.0f;
-                c.Y = 1.0f - 4.0f * (v - 0.625f);
-                c.Z = 0.0f;
-            } else {
-                c.X = 1.0f - 4.0f * (v - 0.875f);
-                c.Y = 0.0f;
-                c.Z = 0.0f;
-            }
-            return new Vector4(c.X, c.Y, c.Z, 1.0f);
+            if (v < 0.125f) return new Vector4(0, 0, 0.5f + 4 * v, 1);
+            if (v < 0.375f) return new Vector4(0, 4 * (v - 0.125f), 1, 1);
+            if (v < 0.625f) return new Vector4(4 * (v - 0.375f), 1, 1 - 4 * (v - 0.375f), 1);
+            if (v < 0.875f) return new Vector4(1, 1 - 4 * (v - 0.625f), 0, 1);
+            return new Vector4(1 - 4 * (v - 0.875f), 0, 0, 1);
         }
         
         private Vector4 GetViridisColor(float t)
@@ -925,16 +985,17 @@ namespace GeoscientistToolkit.Data.AcousticVolume
         
         private Vector4 GetSeismicColor(float v)
         {
+            // Blue -> White -> Red (bipolar map for signed data)
             v = Math.Clamp(v, 0.0f, 1.0f);
             if (v < 0.5f)
             {
-                float t = v * 2.0f;
-                return new Vector4(t, t, 1.0f, 1.0f);
+                float t = v * 2.0f; // 0 -> 1
+                return new Vector4(t, t, 1.0f, 1.0f); // Blue to White
             }
             else
             {
-                float t = (v - 0.5f) * 2.0f;
-                return new Vector4(1.0f, 1.0f - t, 1.0f - t, 1.0f);
+                float t = (v - 0.5f) * 2.0f; // 0 -> 1
+                return new Vector4(1.0f, 1.0f - t, 1.0f - t, 1.0f); // White to Red
             }
         }
         #endregion
@@ -989,8 +1050,8 @@ namespace GeoscientistToolkit.Data.AcousticVolume
             ImGui.Text("Slice Histogram (XY View)");
             ImGui.Separator();
 
-            var volume = GetCurrentVolume();
-            if (volume == null)
+            var (hasVolume, width, height, depth) = GetCurrentVolumeDimensions();
+            if (!hasVolume)
             {
                 ImGui.TextDisabled("No data available.");
                 ImGui.EndChild();
@@ -1000,15 +1061,17 @@ namespace GeoscientistToolkit.Data.AcousticVolume
             // Check if histogram needs recalculation (slice index or mode changed)
             if (_lastHistogramSliceZ != _sliceZ || _lastHistogramMode != _currentMode || _histogramDataXY == null)
             {
-                var (width, height) = GetImageDimensionsForView(0, volume);
+                var (imgWidth, imgHeight) = GetImageDimensionsForView(0);
                 string cacheKey = $"{_currentMode}_0_{_sliceZ}_{_contrastMin:F3}_{_contrastMax:F3}";
-                byte[] sliceData = _sliceCache.GetOrLoad(cacheKey, () => ExtractSliceData(0, volume, width, height));
+                byte[] sliceData = _sliceCache.GetOrLoad(cacheKey, () => ExtractSliceDataFromVolume(0, imgWidth, imgHeight));
 
-                // Calculate histogram
                 var bins = new int[256];
-                for (int i = 0; i < sliceData.Length; i++)
+                if (sliceData != null)
                 {
-                    bins[sliceData[i]]++;
+                    for (int i = 0; i < sliceData.Length; i++)
+                    {
+                        bins[sliceData[i]]++;
+                    }
                 }
                 _histogramDataXY = bins.Select(b => (float)b).ToArray();
                 _lastHistogramSliceZ = _sliceZ;
@@ -1031,7 +1094,10 @@ namespace GeoscientistToolkit.Data.AcousticVolume
             
             if (ImGui.Begin("Legend", ref _showLegend, ImGuiWindowFlags.AlwaysAutoResize))
             {
-                string colorMapName = (_currentMode == VisualizationMode.DamageField) ? "Hot" : _colorMapNames[_colorMapIndex];
+                string colorMapName = _colorMapNames[_colorMapIndex];
+                if (_currentMode == VisualizationMode.DamageField) colorMapName = "Hot";
+                if (_currentMode == VisualizationMode.TimeSeries) colorMapName = "Seismic";
+
                 ImGui.Text($"Color Map: {colorMapName}");
                 ImGui.Separator();
                 
@@ -1045,8 +1111,17 @@ namespace GeoscientistToolkit.Data.AcousticVolume
                     drawList.AddRectFilled(new Vector2(pos.X, pos.Y + i), new Vector2(pos.X + width, pos.Y + i + 1), ImGui.GetColorU32(color));
                 }
                 
-                ImGui.SetCursorScreenPos(new Vector2(pos.X + width + 5, pos.Y - 5)); ImGui.Text("High");
-                ImGui.SetCursorScreenPos(new Vector2(pos.X + width + 5, pos.Y + height - 15)); ImGui.Text("Low");
+                string highLabel = "High";
+                string lowLabel = "Low";
+                if (_currentMode == VisualizationMode.TimeSeries)
+                {
+                    highLabel = "Positive";
+                    lowLabel = "Negative";
+                    ImGui.SetCursorScreenPos(new Vector2(pos.X + width + 5, pos.Y + height / 2 - 10)); ImGui.Text("Zero");
+                }
+                
+                ImGui.SetCursorScreenPos(new Vector2(pos.X + width + 5, pos.Y - 5)); ImGui.Text(highLabel);
+                ImGui.SetCursorScreenPos(new Vector2(pos.X + width + 5, pos.Y + height - 15)); ImGui.Text(lowLabel);
             }
             ImGui.End();
         }
@@ -1065,39 +1140,48 @@ namespace GeoscientistToolkit.Data.AcousticVolume
         
         private ChunkedVolume GetCurrentVolume()
         {
-            if (_currentMode == VisualizationMode.TimeSeries && _dataset.TimeSeriesSnapshots?.Count > 0)
-            {
-                // Note: Time-series visualization is simplified and may not be performant for large datasets.
-                var snapshot = _dataset.TimeSeriesSnapshots[_currentFrameIndex];
-                var field = snapshot.GetVelocityField(0); // Show X component for now
-                if (field == null) return null;
-                
-                var volume = new ChunkedVolume(snapshot.Width, snapshot.Height, snapshot.Depth);
-                for (int z = 0; z < snapshot.Depth; z++)
-                {
-                    byte[] slice = new byte[snapshot.Width * snapshot.Height];
-                    for (int y = 0; y < snapshot.Height; y++)
-                        for (int x = 0; x < snapshot.Width; x++)
-                            slice[y * snapshot.Width + x] = (byte)(Math.Clamp((field[x, y, z] + 1) * 127.5f, 0, 255));
-                    volume.WriteSliceZ(z, slice);
-                }
-                return volume;
-            }
-            
+            // This method is now only for static volume modes.
             return _currentMode switch
             {
                 VisualizationMode.PWaveField => _dataset.PWaveField,
                 VisualizationMode.SWaveField => _dataset.SWaveField,
                 VisualizationMode.CombinedField => _dataset.CombinedWaveField,
                 VisualizationMode.DamageField => _dataset.DamageField,
-                _ => _dataset.CombinedWaveField
+                _ => _dataset.CombinedWaveField // Default fallback
             };
         }
-        
-        private (int width, int height) GetImageDimensionsForView(int viewIndex, ChunkedVolume volume)
+
+        private (bool hasVolume, int width, int height, int depth) GetCurrentVolumeDimensions()
         {
-            if (volume == null) return (1, 1);
-            return viewIndex switch { 0 => (volume.Width, volume.Height), 1 => (volume.Width, volume.Depth), _ => (volume.Height, volume.Depth) };
+            if (_currentMode == VisualizationMode.TimeSeries)
+            {
+                if (_dataset.TimeSeriesSnapshots?.Count > 0)
+                {
+                    var snapshot = _dataset.TimeSeriesSnapshots[_currentFrameIndex];
+                    return (true, snapshot.Width, snapshot.Height, snapshot.Depth);
+                }
+                return (false, 0, 0, 0);
+            }
+            
+            var volume = GetCurrentVolume();
+            if (volume != null)
+            {
+                return (true, volume.Width, volume.Height, volume.Depth);
+            }
+            return (false, 0, 0, 0);
+        }
+        
+        private (int width, int height) GetImageDimensionsForView(int viewIndex)
+        {
+            var (hasVolume, volWidth, volHeight, volDepth) = GetCurrentVolumeDimensions();
+            if (!hasVolume) return (1, 1);
+            
+            return viewIndex switch
+            {
+                0 => (volWidth, volHeight), 
+                1 => (volWidth, volDepth), 
+                _ => (volHeight, volDepth)
+            };
         }
         
         private (Vector2 pos, Vector2 size) GetImageDisplayMetrics(Vector2 canvasPos, Vector2 canvasSize, float zoom, Vector2 pan, int imageWidth, int imageHeight)
@@ -1114,12 +1198,12 @@ namespace GeoscientistToolkit.Data.AcousticVolume
         
         private void ResetViews()
         {
-            var volume = GetCurrentVolume() ?? _dataset.CombinedWaveField;
-            if (volume != null)
+            var (hasVolume, width, height, depth) = GetCurrentVolumeDimensions();
+            if (hasVolume)
             {
-                _sliceX = volume.Width / 2;
-                _sliceY = volume.Height / 2;
-                _sliceZ = volume.Depth / 2;
+                _sliceX = width / 2;
+                _sliceY = height / 2;
+                _sliceZ = depth / 2;
             }
             _zoomXY = _zoomXZ = _zoomYZ = 1.0f;
             _panXY = _panXZ = _panYZ = Vector2.Zero;
@@ -1153,20 +1237,17 @@ namespace GeoscientistToolkit.Data.AcousticVolume
         {
             if (_cache.TryGetValue(key, out var data))
             {
-                // Move to front of LRU
                 _lru.Remove(key);
                 _lru.AddFirst(key);
                 return data;
             }
             
-            // Load new data
             data = loader();
+            if (data == null) return null;
             
-            // Add to cache
             _cache[key] = data;
             _lru.AddFirst(key);
             
-            // Evict if needed
             while (_lru.Count > MAX_CACHE_SIZE)
             {
                 var oldest = _lru.Last.Value;

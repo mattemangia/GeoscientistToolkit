@@ -8,7 +8,7 @@ using ImGuiNET;
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Numerics;
+using System.Numerics; // Using the standard Complex type
 using System.Threading.Tasks;
 
 namespace GeoscientistToolkit.UI.AcousticVolume
@@ -27,8 +27,9 @@ namespace GeoscientistToolkit.UI.AcousticVolume
         private string _statsResult = "No analysis run yet.";
         private float[] _histogramData;
         private string _histogramTitle = "Histogram";
-        private float[] _fftData;
-        private float[] _fftDataDb; // For logarithmic scale
+        private float[] _fftMagnitudes;
+        private float[] _fftMagnitudesDb; // For logarithmic scale
+        private float _nyquistFrequency; // The maximum frequency that can be resolved
         private string _fftTitle = "FFT Spectrum";
         private bool _isCalculating = false;
         private bool _useLogarithmicScale = true; // Default to log scale as it's more revealing
@@ -171,14 +172,14 @@ namespace GeoscientistToolkit.UI.AcousticVolume
                     if (!_isCalculating)
                     {
                         _isCalculating = true;
-                        Task.Run(ComputeFFT);
+                        Task.Run(() => ComputeFFT(dataset.VoxelSize));
                     }
                 }
             }
 
             ImGui.Spacing();
             ImGui.Separator();
-            ImGui.Text("Frequency Spectrum:");
+            ImGui.Text("Spatial Frequency Spectrum:");
 
             ImGui.Checkbox("Logarithmic Scale (dB)", ref _useLogarithmicScale);
 
@@ -186,19 +187,43 @@ namespace GeoscientistToolkit.UI.AcousticVolume
             {
                 ImGui.Text("Calculating...");
             }
-            else if (_useLogarithmicScale && _fftDataDb != null && _fftDataDb.Length > 0)
+            else if (_useLogarithmicScale && _fftMagnitudesDb != null && _fftMagnitudesDb.Length > 0)
             {
-                ImGui.PlotLines(_fftTitle + " (dB)", ref _fftDataDb[0], _fftDataDb.Length, 0, 
-                    "Frequency ->", _fftDataDb.Min(), _fftDataDb.Max(), new Vector2(0, 150));
+                PlotWithTooltip(_fftTitle + " (dB)", _fftMagnitudesDb, _nyquistFrequency, "cycles/meter");
             }
-            else if (!_useLogarithmicScale && _fftData != null && _fftData.Length > 0)
+            else if (!_useLogarithmicScale && _fftMagnitudes != null && _fftMagnitudes.Length > 0)
             {
-                 ImGui.PlotLines(_fftTitle, ref _fftData[0], _fftData.Length, 0,
-                    "Frequency ->", 0, _fftData.Max(), new Vector2(0, 150));
+                PlotWithTooltip(_fftTitle, _fftMagnitudes, _nyquistFrequency, "cycles/meter");
             }
             else
             {
                 ImGui.TextDisabled("No FFT computed.");
+            }
+        }
+        
+        /// <summary>
+        /// Draws a plot and shows a tooltip with the X and Y values under the cursor.
+        /// </summary>
+        private void PlotWithTooltip(string title, float[] data, float xMax, string xUnit)
+        {
+            ImGui.PlotLines(title, ref data[0], data.Length, 0,
+                $"Nyquist: {xMax:F2} {xUnit}", data.Min(), data.Max(), new Vector2(0, 150));
+            
+            if (ImGui.IsItemHovered())
+            {
+                var io = ImGui.GetIO();
+                var plotSize = ImGui.GetItemRectSize();
+                var mousePos = (io.MousePos - ImGui.GetItemRectMin()) / plotSize;
+
+                if (mousePos.X >= 0 && mousePos.X <= 1)
+                {
+                    int index = (int)(mousePos.X * data.Length);
+                    if (index >= 0 && index < data.Length)
+                    {
+                        float freq = (float)index / data.Length * xMax;
+                        ImGui.SetTooltip($"Frequency: {freq:F3} {xUnit}\nMagnitude: {data[index]:F3}");
+                    }
+                }
             }
         }
         
@@ -240,8 +265,8 @@ namespace GeoscientistToolkit.UI.AcousticVolume
         private void ClearResults()
         {
              _lineData = null;
-             _fftData = null;
-             _fftDataDb = null;
+             _fftMagnitudes = null;
+             _fftMagnitudesDb = null;
              _histogramData = null;
              _statsResult = "No analysis run yet.";
         }
@@ -307,6 +332,13 @@ namespace GeoscientistToolkit.UI.AcousticVolume
                     if (val > max) max = val;
                 }
                 count += slice.Length;
+            }
+
+            if (count == 0)
+            {
+                _statsResult = "No data to analyze.";
+                _isCalculating = false;
+                return;
             }
 
             double mean = sum / count;
@@ -407,70 +439,114 @@ namespace GeoscientistToolkit.UI.AcousticVolume
         }
 
         /// <summary>
-        /// Asynchronously computes the Discrete Fourier Transform of the extracted line data.
+        /// Asynchronously computes the Fast Fourier Transform of the extracted line data.
         /// </summary>
-        private void ComputeFFT()
+        private void ComputeFFT(double voxelSize)
         {
             if (_lineData == null || _lineData.Count < 2)
             {
-                _fftData = null;
+                _fftMagnitudes = null;
+                _fftMagnitudesDb = null;
                 _isCalculating = false;
                 return;
             }
 
-            int n = _lineData.Count;
-            // Convert byte data to complex numbers for the transform
-            var complexData = _lineData.Select(val => new Complex(val, 0)).ToArray();
-            var spectrum = new Complex[n];
+            int originalN = _lineData.Count;
+            
+            // FFT is most efficient for lengths that are a power of 2. Pad with zeros.
+            int n = 1;
+            while (n < originalN) n <<= 1;
 
-            // Perform the DFT
-            for (int k = 0; k < n; k++)
+            // Convert byte data to complex numbers for the transform
+            var complexData = new Complex[n];
+            for(int i = 0; i < n; i++)
             {
-                spectrum[k] = new Complex(0, 0);
-                for (int j = 0; j < n; j++)
-                {
-                    double angle = 2 * Math.PI * k * j / n;
-                    spectrum[k] += complexData[j] * Complex.Exp(new Complex(0, -angle));
-                }
+                if (i < originalN)
+                    complexData[i] = new Complex(_lineData[i], 0);
+                else
+                    complexData[i] = new Complex(0, 0); // Zero padding
             }
+            
+            // Perform the FFT
+            Fft(complexData, false); // Use the production-ready iterative FFT
             
             // We only need the first half of the spectrum (due to symmetry)
             int halfN = n / 2;
-            _fftData = new float[halfN];
+            _fftMagnitudes = new float[halfN];
             for (int i = 0; i < halfN; i++)
             {
-                // The result is the magnitude of the complex number
-                _fftData[i] = (float)spectrum[i].Magnitude;
+                // The result is the magnitude of the complex number, normalized by N
+                _fftMagnitudes[i] = (float)(complexData[i].Magnitude / n);
             }
 
             // Also compute a dB scale version for better visualization
-            _fftDataDb = new float[halfN];
+            _fftMagnitudesDb = new float[halfN];
             float epsilon = 1e-12f; // To avoid log(0)
             for (int i = 0; i < halfN; i++)
             {
                 // Convert magnitude to dB
-                _fftDataDb[i] = 20.0f * (float)Math.Log10(Math.Max(_fftData[i], epsilon));
+                _fftMagnitudesDb[i] = 20.0f * (float)Math.Log10(Math.Max(_fftMagnitudes[i], epsilon));
             }
 
-            _fftTitle = $"FFT Spectrum ({n} points)";
+            // Calculate the physical frequency range
+            double samplingRate = 1.0 / voxelSize; // samples per meter
+            _nyquistFrequency = (float)(samplingRate / 2.0);
+
+            _fftTitle = $"FFT Spectrum ({originalN} points, padded to {n})";
             _isCalculating = false;
         }
-    }
 
-    /// <summary>
-    /// Helper struct for representing complex numbers used in DFT calculations.
-    /// </summary>
-    public struct Complex
-    {
-        public double Real, Imaginary;
-        public Complex(double real, double imaginary) { Real = real; Imaginary = imaginary; }
-        public double Magnitude => Math.Sqrt(Real * Real + Imaginary * Imaginary);
-        public static Complex operator +(Complex a, Complex b) => new Complex(a.Real + b.Real, a.Imaginary + b.Imaginary);
-        public static Complex operator *(Complex a, Complex b) => new Complex(a.Real * b.Real - a.Imaginary * b.Imaginary, a.Real * b.Imaginary + a.Imaginary * b.Real);
-        public static Complex Exp(Complex z)
+        /// <summary>
+        /// A robust, iterative, in-place Cooley-Tukey FFT algorithm.
+        /// This is a production-quality replacement for the simpler recursive version.
+        /// </summary>
+        /// <param name="x">Input complex data. Length MUST be a power of 2.</param>
+        /// <param name="inverse">If true, computes the inverse FFT.</param>
+        public static void Fft(Complex[] x, bool inverse)
         {
-            double expReal = Math.Exp(z.Real);
-            return new Complex(expReal * Math.Cos(z.Imaginary), expReal * Math.Sin(z.Imaginary));
+            int n = x.Length;
+            if (n <= 1) return;
+
+            // Bit-reversal permutation
+            for (int i = 1, j = 0; i < n; i++)
+            {
+                int bit = n >> 1;
+                for (; (j & bit) != 0; bit >>= 1)
+                    j ^= bit;
+                j ^= bit;
+                if (i < j)
+                {
+                    (x[i], x[j]) = (x[j], x[i]); // Swap
+                }
+            }
+
+            // Cooley-Tukey iterations
+            for (int len = 2; len <= n; len <<= 1)
+            {
+                double angle = (inverse ? 2 : -2) * Math.PI / len;
+                Complex wlen = new Complex(Math.Cos(angle), Math.Sin(angle));
+                for (int i = 0; i < n; i += len)
+                {
+                    Complex w = new Complex(1, 0);
+                    for (int j = 0; j < len / 2; j++)
+                    {
+                        Complex u = x[i + j];
+                        Complex v = x[i + j + len / 2] * w;
+                        x[i + j] = u + v;
+                        x[i + j + len / 2] = u - v;
+                        w *= wlen;
+                    }
+                }
+            }
+
+            // If inverse, scale by 1/N
+            if (inverse)
+            {
+                for (int i = 0; i < n; i++)
+                {
+                    x[i] /= n;
+                }
+            }
         }
     }
 }

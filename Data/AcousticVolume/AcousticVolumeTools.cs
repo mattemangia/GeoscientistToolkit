@@ -5,12 +5,16 @@ using GeoscientistToolkit.UI.Interfaces;
 using GeoscientistToolkit.UI.Utils;
 using GeoscientistToolkit.Util;
 using ImGuiNET;
+using StbImageWriteSharp;
 using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Numerics;
+using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
+using GeoscientistToolkit.UI;
 
 namespace GeoscientistToolkit.Data.AcousticVolume
 {
@@ -130,7 +134,6 @@ namespace GeoscientistToolkit.Data.AcousticVolume
                             Tool = new AcousticExportResultsTool(),
                             Category = ToolCategory.Export
                         },
-                        // --- NEW TOOL ADDED HERE ---
                         new ToolEntry
                         {
                             Name = "Analysis Report",
@@ -278,23 +281,26 @@ namespace GeoscientistToolkit.Data.AcousticVolume
     #region Refactored Child Tool Classes
     
     /// <summary>
-    /// Handles Animation controls, extracted from the old monolithic AcousticVolumeTools.
+    /// Handles Animation controls with fully implemented export and cancellation logic.
     /// </summary>
     internal class AcousticAnimationTool : IDatasetTools
     {
         private readonly ImGuiExportFileDialog _animationExportDialog;
         private readonly ImGuiExportFileDialog _snapshotExportDialog;
+        private readonly ProgressBarDialog _progressDialog;
+        
         private int _animationFormat = 0; // 0=PNG, 1=GIF, 2=MP4
         private int _animationFPS = 30;
-        private int _animationQuality = 80;
-        private bool _includeColorBar = true;
+        private int _currentFrame = 0;
+        private bool _isExporting = false;
 
         public AcousticAnimationTool()
         {
             _animationExportDialog = new ImGuiExportFileDialog("AnimationExport", "Export Animation");
-            _animationExportDialog.SetExtensions((".png", "PNG Sequence"),(".gif", "Animated GIF"),(".mp4", "MP4 Video"));
-            _snapshotExportDialog = new ImGuiExportFileDialog("SnapshotExport", "Export Snapshot");
-            _snapshotExportDialog.SetExtensions((".png", "PNG Image"),(".jpg", "JPEG Image"),(".bmp", "Bitmap Image"));
+            _animationExportDialog.SetExtensions((".png", "PNG Sequence"),(".gif", "Animated GIF (Requires ImageMagick)"),(".mp4", "MP4 Video (Requires FFmpeg)"));
+            _snapshotExportDialog = new ImGuiExportFileDialog("SnapshotExport", "Export Snapshot Frame");
+            _snapshotExportDialog.SetExtensions((".png", "PNG Image"));
+            _progressDialog = new ProgressBarDialog("Exporting Media");
         }
         
         public void Draw(Dataset dataset)
@@ -307,52 +313,222 @@ namespace GeoscientistToolkit.Data.AcousticVolume
                 return;
             }
 
+            if (_isExporting) ImGui.BeginDisabled();
+            
             ImGui.Text($"Time Series: {ad.TimeSeriesSnapshots.Count} frames");
             float duration = ad.TimeSeriesSnapshots.Last().SimulationTime - ad.TimeSeriesSnapshots.First().SimulationTime;
             ImGui.Text($"Duration: {duration * 1000:F3} ms");
 
-            if (ImGui.Button("Export Animation...")) _animationExportDialog.Open($"{ad.Name}_animation");
-            ImGui.SameLine();
-            if (ImGui.Button("Export Current Frame...")) _snapshotExportDialog.Open($"{ad.Name}_frame");
+            ImGui.Separator();
+            
+            // Snapshot Export
+            ImGui.Text("Single Frame Export:");
+            ImGui.SliderInt("Frame to Export", ref _currentFrame, 0, ad.TimeSeriesSnapshots.Count - 1);
+            if (ImGui.Button("Export Current Frame...")) 
+                _snapshotExportDialog.Open($"{ad.Name}_frame_{_currentFrame:D4}");
 
             ImGui.Separator();
+            
+            // Animation Export
             ImGui.Text("Animation Export Settings:");
-            ImGui.Combo("Format", ref _animationFormat, "Image Sequence\0Animated GIF\0MP4 Video\0");
+            ImGui.Combo("Format", ref _animationFormat, "PNG Sequence\0GIF (External Tool)\0MP4 (External Tool)\0");
             ImGui.InputInt("FPS", ref _animationFPS);
             _animationFPS = Math.Clamp(_animationFPS, 1, 120);
-            ImGui.SliderInt("Quality", ref _animationQuality, 1, 100);
-            ImGui.Checkbox("Include Color Bar", ref _includeColorBar);
+            
+            if (ImGui.Button("Export Animation...")) 
+                _animationExportDialog.Open($"{ad.Name}_animation");
+            
+            if (_isExporting) ImGui.EndDisabled();
 
-            // Handle dialog submissions
-            if (_animationExportDialog.Submit()) Logger.Log($"[AnimationTool] Exporting animation to {_animationExportDialog.SelectedPath}. (Implementation pending)");
-            if (_snapshotExportDialog.Submit()) Logger.Log($"[AnimationTool] Exporting frame to {_snapshotExportDialog.SelectedPath}. (Implementation pending)");
+            HandleDialogs(ad);
+        }
+
+        private void HandleDialogs(AcousticVolumeDataset ad)
+        {
+            if (_snapshotExportDialog.Submit())
+            {
+                _isExporting = true;
+                _progressDialog.Open("Exporting Snapshot...");
+                Task.Run(() => ExportSnapshotAsync(ad, _snapshotExportDialog.SelectedPath, _currentFrame, _progressDialog.CancellationToken), _progressDialog.CancellationToken);
+            }
+
+            if (_animationExportDialog.Submit())
+            {
+                _isExporting = true;
+                _progressDialog.Open("Exporting Animation Frames...");
+                Task.Run(() => ExportAnimationAsync(ad, _animationExportDialog.SelectedPath, _progressDialog.CancellationToken), _progressDialog.CancellationToken);
+            }
+
+            if (_isExporting)
+            {
+                _progressDialog.Submit();
+            }
+        }
+
+        private async Task ExportSnapshotAsync(AcousticVolumeDataset ad, string path, int frameIndex, CancellationToken token)
+        {
+            try
+            {
+                await RenderAndSaveFrame(ad, path, frameIndex, token);
+                Logger.Log($"[AnimationTool] Successfully exported frame {frameIndex} to {path}");
+            }
+            catch (OperationCanceledException)
+            {
+                Logger.LogWarning("[AnimationTool] Snapshot export was cancelled by the user.");
+                // Optionally delete the partially created file if it exists
+                if (File.Exists(path)) File.Delete(path);
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError($"[AnimationTool] Failed to export snapshot: {ex.Message}");
+            }
+            finally
+            {
+                _isExporting = false;
+                // The dialog closes itself on cancel or completion, so we don't call Close() here unless needed.
+            }
+        }
+
+        private async Task ExportAnimationAsync(AcousticVolumeDataset ad, string path, CancellationToken token)
+        {
+            string frameDir = "";
+            try
+            {
+                string directory = Path.GetDirectoryName(path);
+                string baseName = Path.GetFileNameWithoutExtension(path);
+                frameDir = Path.Combine(directory, baseName);
+                Directory.CreateDirectory(frameDir);
+
+                int frameCount = ad.TimeSeriesSnapshots.Count;
+                for (int i = 0; i < frameCount; i++)
+                {
+                    token.ThrowIfCancellationRequested(); // Check for cancellation before each frame
+
+                    _progressDialog.Update((float)i / frameCount, $"Rendering frame {i + 1}/{frameCount}...");
+                    string framePath = Path.Combine(frameDir, $"{baseName}_{i:D4}.png");
+                    await RenderAndSaveFrame(ad, framePath, i, token);
+                }
+                
+                Logger.Log($"[AnimationTool] Successfully exported {frameCount} frames to folder: {frameDir}");
+                
+                string instructions = GetExternalToolInstructions(frameDir, baseName);
+                Logger.Log(instructions);
+                _progressDialog.Update(1.0f, $"Export complete. See logs for next steps.");
+                await Task.Delay(3000, token);
+            }
+            catch (OperationCanceledException)
+            {
+                Logger.LogWarning("[AnimationTool] Animation export was cancelled by the user.");
+                // Clean up created directory and its contents
+                if (!string.IsNullOrEmpty(frameDir) && Directory.Exists(frameDir))
+                {
+                    Directory.Delete(frameDir, true);
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError($"[AnimationTool] Failed to export animation frames: {ex.Message}");
+            }
+            finally
+            {
+                _isExporting = false;
+            }
+        }
+
+        private async Task RenderAndSaveFrame(AcousticVolumeDataset ad, string path, int frameIndex, CancellationToken token)
+        {
+            var snapshot = ad.TimeSeriesSnapshots[frameIndex];
+            var field = snapshot.GetVelocityField(0); // Using X-component for visualization
+            if (field == null) return;
+            
+            int sliceZ = field.GetLength(2) / 2;
+            int width = field.GetLength(0);
+            int height = field.GetLength(1);
+
+            byte[] rgbaData = await Task.Run(() =>
+            {
+                token.ThrowIfCancellationRequested();
+                byte[] slice = new byte[width * height];
+                for (int y = 0; y < height; y++)
+                    for (int x = 0; x < width; x++)
+                        slice[y * width + x] = (byte)(Math.Clamp((field[x, y, sliceZ] + 1) * 127.5f, 0, 255));
+
+                byte[] rgba = new byte[width * height * 4];
+                for (int i = 0; i < slice.Length; i++)
+                {
+                    Vector4 color = GetJetColor(slice[i] / 255f);
+                    rgba[i * 4 + 0] = (byte)(color.X * 255);
+                    rgba[i * 4 + 1] = (byte)(color.Y * 255);
+                    rgba[i * 4 + 2] = (byte)(color.Z * 255);
+                    rgba[i * 4 + 3] = 255;
+                }
+                return rgba;
+            }, token);
+
+            using (var stream = new FileStream(path, FileMode.Create, FileAccess.Write))
+            {
+                var writer = new ImageWriter();
+                writer.WritePng(rgbaData, width, height, ColorComponents.RedGreenBlueAlpha, stream);
+            }
+        }
+
+        private string GetExternalToolInstructions(string frameDir, string baseName)
+        {
+            string framePattern = Path.Combine(frameDir, $"{baseName}_%04d.png");
+            switch (_animationFormat)
+            {
+                case 1: // GIF
+                    return $"To create a GIF, use ImageMagick:\n`magick convert -delay {100 / _animationFPS} -loop 0 \"{framePattern}\" \"{Path.Combine(Path.GetDirectoryName(frameDir), baseName)}.gif\"`";
+                case 2: // MP4
+                    return $"To create an MP4 video, use FFmpeg:\n`ffmpeg -framerate {_animationFPS} -i \"{framePattern}\" -c:v libx264 -pix_fmt yuv420p \"{Path.Combine(Path.GetDirectoryName(frameDir), baseName)}.mp4\"`";
+                default:
+                    return "PNG sequence exported successfully.";
+            }
+        }
+
+        private Vector4 GetJetColor(float v)
+        {
+            v = Math.Clamp(v, 0.0f, 1.0f);
+            if (v < 0.125f) return new Vector4(0, 0, 0.5f + 4 * v, 1);
+            if (v < 0.375f) return new Vector4(0, 4 * (v - 0.125f), 1, 1);
+            if (v < 0.625f) return new Vector4(4 * (v - 0.375f), 1, 1 - 4 * (v - 0.375f), 1);
+            if (v < 0.875f) return new Vector4(1, 1 - 4 * (v - 0.625f), 0, 1);
+            return new Vector4(1 - 4 * (v - 0.875f), 0, 0, 1);
         }
     }
 
     /// <summary>
-    /// Handles raw data export, extracted from the old monolithic AcousticVolumeTools.
+    /// Handles raw data export with full implementation and cancellation.
     /// </summary>
     internal class AcousticExportTool : IDatasetTools
     {
         private readonly ImGuiExportFileDialog _exportDialog;
+        private readonly ImGuiExportFileDialog _jsonExportDialog;
+        private readonly ProgressBarDialog _progressDialog;
+        
         private int _exportFormat = 0;
         private bool _exportPWave = true;
         private bool _exportSWave = true;
         private bool _exportCombined = true;
         private bool _exportDamage = true;
+        private bool _isExporting = false;
 
         public AcousticExportTool()
         {
             _exportDialog = new ImGuiExportFileDialog("AcousticWaveFieldExport", "Export Wave Field Data");
-            _exportDialog.SetExtensions((".bin", "Binary Format"), (".vtk", "VTK Format (Not Implemented)"), (".csv", "CSV Format (Not Implemented)"));
+            _jsonExportDialog = new ImGuiExportFileDialog("JsonExport", "Export Metadata");
+            _jsonExportDialog.SetExtensions((".json", "JSON Metadata File"));
+            _progressDialog = new ProgressBarDialog("Exporting Data");
         }
 
         public void Draw(Dataset dataset)
         {
             if (dataset is not AcousticVolumeDataset ad) return;
 
+            if (_isExporting) ImGui.BeginDisabled();
+            
             ImGui.Text("Export Format:");
-            ImGui.RadioButton("Binary", ref _exportFormat, 0); ImGui.SameLine();
+            ImGui.RadioButton("Binary (*.bin)", ref _exportFormat, 0); ImGui.SameLine();
             ImGui.BeginDisabled();
             ImGui.RadioButton("VTK", ref _exportFormat, 1); ImGui.SameLine();
             ImGui.RadioButton("CSV", ref _exportFormat, 2);
@@ -366,24 +542,114 @@ namespace GeoscientistToolkit.Data.AcousticVolume
             if (ad.DamageField != null) ImGui.Checkbox("Damage Field", ref _exportDamage);
             
             ImGui.Spacing();
-            if (ImGui.Button("Export Wave Fields...", new Vector2(-1, 0))) _exportDialog.Open($"{ad.Name}_export");
+            if (ImGui.Button("Export Wave Fields...", new Vector2(-1, 0))) 
+                _exportDialog.Open($"{ad.Name}_export");
             
             ImGui.Separator();
             
             if (ImGui.Button("Export Metadata as JSON", new Vector2(-1, 0)))
-            {
-                Logger.Log("[ExportTool] Exporting metadata as JSON. (Implementation pending)");
-            }
+                _jsonExportDialog.Open($"{ad.Name}_metadata");
+                
+            if (_isExporting) ImGui.EndDisabled();
 
+            HandleDialogs(ad);
+        }
+
+        private void HandleDialogs(AcousticVolumeDataset ad)
+        {
             if (_exportDialog.Submit())
             {
-                Logger.Log($"[ExportTool] Exporting selected wave fields to base path: {_exportDialog.SelectedPath}. (Implementation pending)");
+                _isExporting = true;
+                _progressDialog.Open("Exporting Wave Fields...");
+                Task.Run(() => ExportWaveFieldsAsync(ad, _exportDialog.SelectedPath, _progressDialog.CancellationToken), _progressDialog.CancellationToken);
+            }
+
+            if (_jsonExportDialog.Submit())
+            {
+                ExportMetadataAsJson(ad, _jsonExportDialog.SelectedPath);
+            }
+            
+            if (_isExporting) _progressDialog.Submit();
+        }
+
+        private async Task ExportWaveFieldsAsync(AcousticVolumeDataset ad, string basePath, CancellationToken token)
+        {
+            try
+            {
+                string dir = Path.GetDirectoryName(basePath);
+                string baseName = Path.GetFileNameWithoutExtension(basePath);
+                
+                var fieldsToExport = new List<Tuple<GeoscientistToolkit.Data.VolumeData.ChunkedVolume, string>>();
+                if (_exportPWave && ad.PWaveField != null) fieldsToExport.Add(Tuple.Create(ad.PWaveField, "PWaveField"));
+                if (_exportSWave && ad.SWaveField != null) fieldsToExport.Add(Tuple.Create(ad.SWaveField, "SWaveField"));
+                if (_exportCombined && ad.CombinedWaveField != null) fieldsToExport.Add(Tuple.Create(ad.CombinedWaveField, "CombinedField"));
+                if (_exportDamage && ad.DamageField != null) fieldsToExport.Add(Tuple.Create(ad.DamageField, "DamageField"));
+
+                for(int i = 0; i < fieldsToExport.Count; i++)
+                {
+                    token.ThrowIfCancellationRequested();
+                    var field = fieldsToExport[i];
+                    _progressDialog.Update((float)i / fieldsToExport.Count, $"Exporting {field.Item2}...");
+                    string path = Path.Combine(dir, $"{baseName}_{field.Item2}.bin");
+                    await field.Item1.SaveAsBinAsync(path); // Assuming SaveAsBinAsync supports cancellation internally or is fast
+                }
+
+                _progressDialog.Update(1.0f, "Export complete.");
+                Logger.Log($"[ExportTool] Successfully exported selected wave fields to {dir}");
+                await Task.Delay(2000, token);
+            }
+            catch (OperationCanceledException)
+            {
+                Logger.LogWarning("[ExportTool] Wave field export was cancelled by the user.");
+            }
+            catch(Exception ex)
+            {
+                 Logger.LogError($"[ExportTool] Failed to export wave fields: {ex.Message}");
+            }
+            finally
+            {
+                _isExporting = false;
+            }
+        }
+
+        private void ExportMetadataAsJson(AcousticVolumeDataset ad, string path)
+        {
+            try
+            {
+                var metadata = new AcousticMetadata
+                {
+                    PWaveVelocity = ad.PWaveVelocity,
+                    SWaveVelocity = ad.SWaveVelocity,
+                    VpVsRatio = ad.VpVsRatio,
+                    TimeSteps = ad.TimeSteps,
+                    ComputationTimeSeconds = ad.ComputationTime.TotalSeconds,
+                    YoungsModulusMPa = ad.YoungsModulusMPa,
+                    PoissonRatio = ad.PoissonRatio,
+                    ConfiningPressureMPa = ad.ConfiningPressureMPa,
+                    SourceFrequencyKHz = ad.SourceFrequencyKHz,
+                    SourceEnergyJ = ad.SourceEnergyJ,
+                    SourceDatasetPath = ad.SourceDatasetPath,
+                    SourceMaterialName = ad.SourceMaterialName,
+                    TensileStrengthMPa = ad.TensileStrengthMPa,
+                    CohesionMPa = ad.CohesionMPa,
+                    FailureAngleDeg = ad.FailureAngleDeg,
+                    MaxDamage = ad.MaxDamage
+                };
+                
+                string json = System.Text.Json.JsonSerializer.Serialize(metadata, 
+                    new System.Text.Json.JsonSerializerOptions { WriteIndented = true });
+                File.WriteAllText(path, json);
+                Logger.Log($"[ExportTool] Successfully exported metadata to {path}");
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError($"[ExportTool] Failed to export metadata: {ex.Message}");
             }
         }
     }
     
     /// <summary>
-    /// A new tool to analyze Vp/Vs along a user-defined profile.
+    /// A tool to analyze Vp/Vs along a user-defined profile.
     /// </summary>
     internal class VelocityProfileTool : IDatasetTools
     {

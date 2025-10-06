@@ -635,15 +635,32 @@ namespace GeoscientistToolkit.Data.AcousticVolume
             return compressed;
         }
         
-        public float[,,] GetVelocityField(int component)
+        /// <summary>
+        /// Gets the raw compressed byte array for a specific velocity component.
+        /// This is a high-performance accessor for rendering.
+        /// </summary>
+        /// <param name="component">The velocity component index (0=Vx, 1=Vy, 2=Vz).</param>
+        /// <returns>The compressed byte array, or null if the component is invalid.</returns>
+        public byte[] GetCompressedVelocityField(int component)
         {
-            byte[] compressed = component switch
+            return component switch
             {
                 0 => _compressedVx,
                 1 => _compressedVy,
                 2 => _compressedVz,
                 _ => null
             };
+        }
+        
+        /// <summary>
+        /// Gets the decompressed 3D float array for a specific velocity component.
+        /// This is computationally more expensive and should be used for analysis, not rendering.
+        /// </summary>
+        /// <param name="component">The velocity component index (0=Vx, 1=Vy, 2=Vz).</param>
+        /// <returns>The decompressed 3D float array, or null if the component is invalid.</returns>
+        public float[,,] GetVelocityField(int component)
+        {
+            byte[] compressed = GetCompressedVelocityField(component);
             
             if (compressed == null)
                 return null;
