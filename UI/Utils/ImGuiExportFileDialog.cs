@@ -10,7 +10,6 @@ using System.Linq;
 
 namespace GeoscientistToolkit.UI.Utils
 {
-    // ADDED ENUM
     public enum FileDialogType
     {
         OpenFile,
@@ -36,9 +35,21 @@ namespace GeoscientistToolkit.UI.Utils
         private List<VolumeInfo> _availableVolumes = new List<VolumeInfo>();
         private float _drivePanelWidth = 180f;
         
+        // Create folder popup
         private bool _showCreateFolderPopup = false;
         private string _newFolderName = "";
         private string _createFolderError = "";
+        
+        // Context menu and operations
+        private string _contextMenuTarget = "";
+        private bool _isContextMenuTargetDirectory = false;
+        private bool _showRenamePopup = false;
+        private string _renameNewName = "";
+        private string _renameError = "";
+        private bool _showDeleteConfirmation = false;
+        private string _deleteTargetPath = "";
+        private bool _deleteTargetIsDirectory = false;
+        
         private class VolumeInfo
         {
             public string Path { get; set; }
@@ -241,9 +252,12 @@ namespace GeoscientistToolkit.UI.Utils
                 CurrentDirectory = startingPath;
             else
                 CurrentDirectory = Directory.GetCurrentDirectory();
+            
             _showCreateFolderPopup = false;
             _newFolderName = "";
             _createFolderError = "";
+            _showRenamePopup = false;
+            _showDeleteConfirmation = false;
             RefreshDrives();
         }
 
@@ -252,7 +266,8 @@ namespace GeoscientistToolkit.UI.Utils
             bool selectionMade = false;
             if (IsOpen)
             {
-                ImGui.SetNextWindowSize(new Vector2(900, 550), ImGuiCond.FirstUseEver);
+                // Increased window size to prevent scrollbars
+                ImGui.SetNextWindowSize(new Vector2(950, 650), ImGuiCond.FirstUseEver);
                 var center = ImGui.GetMainViewport().GetCenter();
                 ImGui.SetNextWindowPos(center, ImGuiCond.FirstUseEver, new Vector2(0.5f, 0.5f));
 
@@ -261,8 +276,16 @@ namespace GeoscientistToolkit.UI.Utils
                 {
                     DrawPathNavigation();
 
-                    float bottomBarHeight = ImGui.GetFrameHeightWithSpacing() * 2.5f + ImGui.GetStyle().ItemSpacing.Y * 3;
-                    float contentHeight = ImGui.GetContentRegionAvail().Y - bottomBarHeight;
+                    // More accurate calculation for bottom controls height
+                    // Path nav: 1 row + separator
+                    // Bottom controls: separator + 3 input rows + warning/empty line + button row
+                    float pathNavHeight = ImGui.GetFrameHeightWithSpacing() + ImGui.GetStyle().ItemSpacing.Y * 2;
+                    float bottomControlsHeight = ImGui.GetFrameHeightWithSpacing() * 5 + ImGui.GetStyle().ItemSpacing.Y * 6;
+                    float totalReservedHeight = bottomControlsHeight + ImGui.GetStyle().WindowPadding.Y * 2;
+                    
+                    // Calculate available height for the file browser
+                    float availableHeight = ImGui.GetContentRegionAvail().Y;
+                    float contentHeight = Math.Max(200, availableHeight - totalReservedHeight);
 
                     // Draw drive panel and file list side by side
                     if (ImGui.BeginTable("##ExportFileDialogLayout", 2, ImGuiTableFlags.BordersInnerV | ImGuiTableFlags.Resizable))
@@ -280,13 +303,22 @@ namespace GeoscientistToolkit.UI.Utils
                         ImGui.EndTable();
                     }
 
+                    // Add small spacing before bottom controls
+                    ImGui.Dummy(new Vector2(0, ImGui.GetStyle().ItemSpacing.Y));
                     DrawBottomControls(ref selectionMade);
+                    
                     ImGui.End();
                 }
+                
+                // Draw popups (these can be outside since they're modal)
                 if (_showCreateFolderPopup)
-                {
                     DrawCreateFolderPopup();
-                }
+                    
+                if (_showRenamePopup)
+                    DrawRenamePopup();
+                    
+                if (_showDeleteConfirmation)
+                    DrawDeleteConfirmation();
             }
             return selectionMade;
         }
@@ -386,6 +418,273 @@ namespace GeoscientistToolkit.UI.Utils
 
             ImGui.Separator();
         }
+        
+        private void DrawFileList(Vector2 size)
+        {
+            if (ImGui.BeginChild("##FileList", size, ImGuiChildFlags.Border))
+            {
+                try
+                {
+                    // Draw directories
+                    foreach (var dir in Directory.GetDirectories(CurrentDirectory))
+                    {
+                        var dirName = Path.GetFileName(dir);
+                        ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(1.0f, 1.0f, 0.5f, 1.0f));
+                        
+                        string selectableId = $"[D] {dirName}###{dir}";
+                        if (ImGui.Selectable(selectableId, false, ImGuiSelectableFlags.AllowDoubleClick))
+                        {
+                            if (ImGui.IsMouseDoubleClicked(0))
+                            {
+                                CurrentDirectory = dir;
+                                _selectedFileNameInList = "";
+                            }
+                        }
+                        
+                        // Handle right-click context menu - using more reliable detection
+                        if (ImGui.BeginPopupContextItem($"##ctx_{dir}"))
+                        {
+                            _contextMenuTarget = dir;
+                            _isContextMenuTargetDirectory = true;
+                            DrawContextMenuItems();
+                            ImGui.EndPopup();
+                        }
+                        
+                        ImGui.PopStyleColor();
+                    }
+
+                    // Draw files
+                    foreach (var file in Directory.GetFiles(CurrentDirectory))
+                    {
+                        var fileName = Path.GetFileName(file);
+                        bool isSelected = _selectedFileNameInList == fileName;
+                        
+                        string selectableId = $"[F] {fileName}###{file}";
+                        if (ImGui.Selectable(selectableId, isSelected))
+                        {
+                            _selectedFileNameInList = fileName;
+                            _fileName = Path.GetFileNameWithoutExtension(fileName);
+                        }
+                        
+                        // Handle right-click context menu - using more reliable detection
+                        if (ImGui.BeginPopupContextItem($"##ctx_{file}"))
+                        {
+                            _contextMenuTarget = file;
+                            _isContextMenuTargetDirectory = false;
+                            DrawContextMenuItems();
+                            ImGui.EndPopup();
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    ImGui.TextColored(new Vector4(1, 0, 0, 1), $"Error: {ex.Message}");
+                }
+                ImGui.EndChild();
+            }
+        }
+
+        private void DrawContextMenuItems()
+        {
+            string targetName = Path.GetFileName(_contextMenuTarget);
+            ImGui.Text(_isContextMenuTargetDirectory ? $"Folder: {targetName}" : $"File: {targetName}");
+            ImGui.Separator();
+            
+            if (ImGui.MenuItem("Select"))
+            {
+                if (!_isContextMenuTargetDirectory)
+                {
+                    _selectedFileNameInList = targetName;
+                    _fileName = Path.GetFileNameWithoutExtension(targetName);
+                }
+            }
+            
+            if (ImGui.MenuItem("Rename"))
+            {
+                _renameNewName = targetName;
+                _renameError = "";
+                _showRenamePopup = true;
+            }
+            
+            ImGui.Separator();
+            
+            if (ImGui.MenuItem("Delete"))
+            {
+                _deleteTargetPath = _contextMenuTarget;
+                _deleteTargetIsDirectory = _isContextMenuTargetDirectory;
+                _showDeleteConfirmation = true;
+            }
+        }
+        
+        private void DrawRenamePopup()
+        {
+            ImGui.OpenPopup("Rename Item");
+            
+            var center = ImGui.GetMainViewport().GetCenter();
+            ImGui.SetNextWindowPos(center, ImGuiCond.Appearing, new Vector2(0.5f, 0.5f));
+            
+            if (ImGui.BeginPopupModal("Rename Item", ref _showRenamePopup, 
+                ImGuiWindowFlags.AlwaysAutoResize | ImGuiWindowFlags.NoMove))
+            {
+                ImGui.Text($"Rename {(_isContextMenuTargetDirectory ? "folder" : "file")}:");
+                ImGui.Text(Path.GetFileName(_contextMenuTarget));
+                ImGui.Separator();
+                
+                ImGui.Text("New name:");
+                ImGui.SetNextItemWidth(300);
+                if (ImGui.InputText("##RenameInput", ref _renameNewName, 256))
+                {
+                    _renameError = "";
+                }
+                
+                if (!string.IsNullOrEmpty(_renameError))
+                {
+                    ImGui.TextColored(new Vector4(1, 0, 0, 1), _renameError);
+                }
+                
+                ImGui.Separator();
+                
+                if (ImGui.Button("Rename", new Vector2(100, 0)))
+                {
+                    if (PerformRename())
+                        _showRenamePopup = false;
+                }
+                
+                ImGui.SameLine();
+                
+                if (ImGui.Button("Cancel", new Vector2(100, 0)))
+                {
+                    _showRenamePopup = false;
+                    _renameError = "";
+                }
+                
+                ImGui.EndPopup();
+            }
+        }
+        
+        private bool PerformRename()
+        {
+            if (string.IsNullOrWhiteSpace(_renameNewName))
+            {
+                _renameError = "Name cannot be empty";
+                return false;
+            }
+            
+            char[] invalidChars = Path.GetInvalidFileNameChars();
+            if (_renameNewName.Any(c => invalidChars.Contains(c)))
+            {
+                _renameError = "Name contains invalid characters";
+                return false;
+            }
+            
+            string newPath = Path.Combine(Path.GetDirectoryName(_contextMenuTarget), _renameNewName);
+            
+            if (File.Exists(newPath) || Directory.Exists(newPath))
+            {
+                _renameError = "An item with this name already exists";
+                return false;
+            }
+            
+            try
+            {
+                if (_isContextMenuTargetDirectory)
+                {
+                    Directory.Move(_contextMenuTarget, newPath);
+                    Logger.Log($"[ImGuiExportFileDialog] Renamed folder: {_contextMenuTarget} -> {newPath}");
+                }
+                else
+                {
+                    File.Move(_contextMenuTarget, newPath);
+                    Logger.Log($"[ImGuiExportFileDialog] Renamed file: {_contextMenuTarget} -> {newPath}");
+                    
+                    // Update selection if renamed file was selected
+                    if (_selectedFileNameInList == Path.GetFileName(_contextMenuTarget))
+                    {
+                        _selectedFileNameInList = _renameNewName;
+                        _fileName = Path.GetFileNameWithoutExtension(_renameNewName);
+                    }
+                }
+                return true;
+            }
+            catch (Exception ex)
+            {
+                _renameError = $"Error: {ex.Message}";
+                Logger.LogError($"[ImGuiExportFileDialog] Failed to rename: {ex.Message}");
+                return false;
+            }
+        }
+        
+        private void DrawDeleteConfirmation()
+        {
+            ImGui.OpenPopup("Delete Confirmation");
+            
+            var center = ImGui.GetMainViewport().GetCenter();
+            ImGui.SetNextWindowPos(center, ImGuiCond.Appearing, new Vector2(0.5f, 0.5f));
+            
+            if (ImGui.BeginPopupModal("Delete Confirmation", ref _showDeleteConfirmation,
+                ImGuiWindowFlags.AlwaysAutoResize | ImGuiWindowFlags.NoMove))
+            {
+                string itemName = Path.GetFileName(_deleteTargetPath);
+                string itemType = _deleteTargetIsDirectory ? "folder" : "file";
+                
+                ImGui.Text($"Are you sure you want to delete this {itemType}?");
+                ImGui.Separator();
+                
+                ImGui.TextColored(new Vector4(1.0f, 0.8f, 0.0f, 1.0f), itemName);
+                
+                if (_deleteTargetIsDirectory)
+                {
+                    ImGui.TextColored(new Vector4(1.0f, 0.5f, 0.0f, 1.0f), 
+                        "Warning: This will delete the folder and all its contents!");
+                }
+                
+                ImGui.Separator();
+                
+                if (ImGui.Button("Delete", new Vector2(100, 0)))
+                {
+                    PerformDelete();
+                    _showDeleteConfirmation = false;
+                }
+                
+                ImGui.SameLine();
+                
+                if (ImGui.Button("Cancel", new Vector2(100, 0)))
+                {
+                    _showDeleteConfirmation = false;
+                }
+                
+                ImGui.EndPopup();
+            }
+        }
+        
+        private void PerformDelete()
+        {
+            try
+            {
+                if (_deleteTargetIsDirectory)
+                {
+                    Directory.Delete(_deleteTargetPath, true); // true = recursive delete
+                    Logger.Log($"[ImGuiExportFileDialog] Deleted folder: {_deleteTargetPath}");
+                }
+                else
+                {
+                    File.Delete(_deleteTargetPath);
+                    Logger.Log($"[ImGuiExportFileDialog] Deleted file: {_deleteTargetPath}");
+                    
+                    // Clear selection if deleted file was selected
+                    if (_selectedFileNameInList == Path.GetFileName(_deleteTargetPath))
+                    {
+                        _selectedFileNameInList = "";
+                        _fileName = "";
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError($"[ImGuiExportFileDialog] Failed to delete: {ex.Message}");
+            }
+        }
+        
         private void DrawCreateFolderPopup()
         {
             ImGui.OpenPopup("Create New Folder");
@@ -468,59 +767,27 @@ namespace GeoscientistToolkit.UI.Utils
                 return false;
             }
         }
-        private void DrawFileList(Vector2 size)
-        {
-            if (ImGui.BeginChild("##FileList", size, ImGuiChildFlags.Border))
-            {
-                try
-                {
-                    foreach (var dir in Directory.GetDirectories(CurrentDirectory))
-                    {
-                        var dirName = Path.GetFileName(dir);
-                        ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(1.0f, 1.0f, 0.5f, 1.0f));
-                        if (ImGui.Selectable($"[D] {dirName}", false, ImGuiSelectableFlags.AllowDoubleClick))
-                        {
-                            if (ImGui.IsMouseDoubleClicked(0))
-                            {
-                                CurrentDirectory = dir;
-                                _selectedFileNameInList = "";
-                            }
-                        }
-                        ImGui.PopStyleColor();
-                    }
-
-                    foreach (var file in Directory.GetFiles(CurrentDirectory))
-                    {
-                        var fileName = Path.GetFileName(file);
-                        bool isSelected = _selectedFileNameInList == fileName;
-
-                        if (ImGui.Selectable($"[F] {fileName}", isSelected))
-                        {
-                            _selectedFileNameInList = fileName;
-                            _fileName = Path.GetFileNameWithoutExtension(fileName);
-                        }
-                    }
-                }
-                catch (Exception ex)
-                {
-                    ImGui.TextColored(new Vector4(1, 0, 0, 1), $"Error: {ex.Message}");
-                }
-                ImGui.EndChild();
-            }
-        }
 
         private void DrawBottomControls(ref bool selectionMade)
         {
             ImGui.Separator();
 
+            // Create a child region to ensure consistent layout
+            float controlsHeight = ImGui.GetFrameHeightWithSpacing() * 4.5f;
+            
+            // File name input row
+            ImGui.AlignTextToFramePadding();
             ImGui.Text("File name:");
             ImGui.SameLine();
-            ImGui.SetNextItemWidth(ImGui.GetContentRegionAvail().X - 120);
+            float labelWidth = ImGui.CalcTextSize("Save as type:").X + ImGui.GetStyle().ItemSpacing.X * 2;
+            ImGui.SetNextItemWidth(ImGui.GetContentRegionAvail().X - labelWidth);
             ImGui.InputText("##FileNameInput", ref _fileName, 260);
 
+            // Extension combo row
+            ImGui.AlignTextToFramePadding();
             ImGui.Text("Save as type:");
             ImGui.SameLine();
-            ImGui.SetNextItemWidth(ImGui.GetContentRegionAvail().X - 120);
+            ImGui.SetNextItemWidth(ImGui.GetContentRegionAvail().X);
             if (_extensionOptions.Count > 0)
             {
                 if (ImGui.BeginCombo("##ExtensionCombo", _extensionOptions[_selectedExtensionIndex].ToString()))
@@ -537,24 +804,33 @@ namespace GeoscientistToolkit.UI.Utils
                 }
             }
 
-            ImGui.Spacing();
-            float buttonPosX = ImGui.GetContentRegionAvail().X - 170;
-            ImGui.SetCursorPosX(buttonPosX);
-
-            if (ImGui.Button("Export", new Vector2(80, 0)))
-            {
-                selectionMade = HandleExport();
-            }
-            ImGui.SameLine();
-            if (ImGui.Button("Cancel", new Vector2(80, 0)))
-            {
-                IsOpen = false;
-            }
-
+            // Warning for file overwrite or empty line for consistent spacing
             string potentialPath = Path.Combine(CurrentDirectory, _fileName + SelectedExtension);
             if (File.Exists(potentialPath))
             {
                 ImGui.TextColored(new Vector4(1.0f, 0.8f, 0.0f, 1.0f), "Warning: File will be overwritten!");
+            }
+            else
+            {
+                ImGui.Dummy(new Vector2(0, ImGui.GetTextLineHeight())); // Maintain consistent spacing
+            }
+
+            // Buttons row - properly aligned to the right
+            float buttonWidth = 85f;
+            float buttonsWidth = buttonWidth * 2 + ImGui.GetStyle().ItemSpacing.X;
+            float availWidth = ImGui.GetContentRegionAvail().X;
+            
+            ImGui.Dummy(new Vector2(availWidth - buttonsWidth, 0));
+            ImGui.SameLine();
+
+            if (ImGui.Button("Export", new Vector2(buttonWidth, 0)))
+            {
+                selectionMade = HandleExport();
+            }
+            ImGui.SameLine();
+            if (ImGui.Button("Cancel", new Vector2(buttonWidth, 0)))
+            {
+                IsOpen = false;
             }
         }
 

@@ -109,7 +109,6 @@ namespace GeoscientistToolkit.UI.AcousticVolume
             ImGui.Checkbox("Render and Embed Images", ref _renderImages);
             if ((ReportFormat)_format == ReportFormat.PlainText) ImGui.EndDisabled();
 
-
             ImGui.Spacing();
             ImGui.Separator();
 
@@ -196,7 +195,6 @@ namespace GeoscientistToolkit.UI.AcousticVolume
             return "Ready to generate.";
         }
 
-
         private void HandleDialogs(AcousticVolumeDataset dataset)
         {
             if (_exportDialog.Submit())
@@ -235,7 +233,8 @@ namespace GeoscientistToolkit.UI.AcousticVolume
                 if (useImages)
                 {
                     Directory.CreateDirectory(imageDir);
-                    renderer = new ReportImageRenderer(ad, imageDir);
+                    var config = ReportImageRenderer.RenderConfig.Default;
+                    renderer = new ReportImageRenderer(ad, imageDir, config);
                 }
 
                 // --- HEADER ---
@@ -253,7 +252,9 @@ namespace GeoscientistToolkit.UI.AcousticVolume
                     {
                         var sliceDef = new ReportImageRenderer.SliceDefinition
                         {
-                            FieldName = "Combined", SliceAxis = 'Z', SliceIndex = ad.CombinedWaveField.Depth / 2,
+                            FieldName = "Combined", 
+                            SliceAxis = 'Z', 
+                            SliceIndex = ad.CombinedWaveField != null ? ad.CombinedWaveField.Depth / 2 : 0,
                             Title = "Central Slice of Combined Wave Field"
                         };
                         string imagePath = await renderer.RenderSliceViewAsync(sliceDef, _progressDialog.CancellationToken);
@@ -282,7 +283,9 @@ namespace GeoscientistToolkit.UI.AcousticVolume
                     {
                         var sliceDef = new ReportImageRenderer.SliceDefinition
                         {
-                            FieldName = "Damage", SliceAxis = 'Z', SliceIndex = ad.DamageField.Depth / 2,
+                            FieldName = "Damage", 
+                            SliceAxis = 'Z', 
+                            SliceIndex = ad.DamageField.Depth / 2,
                             Title = "Central Slice of Damage Field"
                         };
                         string imagePath = await renderer.RenderSliceViewAsync(sliceDef, _progressDialog.CancellationToken);
@@ -352,12 +355,33 @@ namespace GeoscientistToolkit.UI.AcousticVolume
         /// </summary>
         private class ReportImageRenderer
         {
+            public struct RenderConfig
+            {
+                public int ImageWidth { get; set; }
+                public int PlotHeight { get; set; }
+                public int PaddingTop { get; set; }
+                public int PaddingBottom { get; set; }
+                public int PaddingLeft { get; set; }
+                public int PaddingRight { get; set; }
+                public int LineThickness { get; set; }
+                public int FontScale { get; set; }
+                
+                public static RenderConfig Default => new RenderConfig
+                {
+                    ImageWidth = 800,
+                    PlotHeight = 400,
+                    PaddingTop = 40,
+                    PaddingBottom = 50,
+                    PaddingLeft = 70,
+                    PaddingRight = 30,
+                    LineThickness = 2,
+                    FontScale = 1
+                };
+            }
+
             private readonly AcousticVolumeDataset _dataset;
             private readonly string _outputDirectory;
-            
-            // Image Dimensions
-            private const int IMAGE_WIDTH = 800;
-            private const int PLOT_HEIGHT = 400;
+            private readonly RenderConfig _config;
 
             // Plot Styling
             private static readonly Color PlotBgColor = new Color(20, 20, 25, 255);
@@ -366,23 +390,20 @@ namespace GeoscientistToolkit.UI.AcousticVolume
             private static readonly Color VpPlotColor = new Color(60, 180, 255, 255);
             private static readonly Color VsPlotColor = new Color(255, 180, 60, 255);
             private static readonly Color WaveformPlotColor = new Color(100, 255, 100, 255);
-            private const int PADDING_TOP = 40;
-            private const int PADDING_BOTTOM = 50;
-            private const int PADDING_LEFT = 70;
-            private const int PADDING_RIGHT = 30;
 
             public struct SliceDefinition
             {
-                public string FieldName; // PWave, SWave, Combined, Damage
-                public char SliceAxis; // X, Y, Z
+                public string FieldName;
+                public char SliceAxis;
                 public int SliceIndex;
                 public string Title;
             }
 
-            public ReportImageRenderer(AcousticVolumeDataset dataset, string outputDirectory)
+            public ReportImageRenderer(AcousticVolumeDataset dataset, string outputDirectory, RenderConfig config)
             {
                 _dataset = dataset;
                 _outputDirectory = outputDirectory;
+                _config = config;
             }
 
             public async Task<string> RenderSliceViewAsync(SliceDefinition def, CancellationToken token)
@@ -390,75 +411,98 @@ namespace GeoscientistToolkit.UI.AcousticVolume
                 return await Task.Run(() =>
                 {
                     token.ThrowIfCancellationRequested();
-                    ChunkedVolume volume = def.FieldName switch
+                    
+                    ChunkedVolume volume = null;
+                    try
                     {
-                        "PWave" => _dataset.PWaveField,
-                        "SWave" => _dataset.SWaveField,
-                        "Combined" => _dataset.CombinedWaveField,
-                        "Damage" => _dataset.DamageField,
-                        _ => _dataset.CombinedWaveField
-                    };
+                        volume = def.FieldName switch
+                        {
+                            "PWave" => _dataset.PWaveField,
+                            "SWave" => _dataset.SWaveField,
+                            "Combined" => _dataset.CombinedWaveField,
+                            "Damage" => _dataset.DamageField,
+                            _ => _dataset.CombinedWaveField
+                        };
 
-                    if (volume == null) throw new InvalidOperationException($"{def.FieldName} field is not available.");
+                        if (volume == null) 
+                        {
+                            Logger.LogWarning($"[ReportImageRenderer] {def.FieldName} field is not available.");
+                            return CreateErrorImage("Field not available");
+                        }
 
-                    var (width, height) = GetSliceDimensions(volume, def.SliceAxis);
-                    var sliceData = ExtractSlice(volume, def.SliceAxis, def.SliceIndex, width, height);
+                        var (width, height) = GetSliceDimensions(volume, def.SliceAxis);
+                        var sliceData = ExtractSlice(volume, def.SliceAxis, def.SliceIndex, width, height);
 
-                    byte[] rgbaData = new byte[width * height * 4];
-                    for (int i = 0; i < sliceData.Length; i++)
-                    {
-                        float val = sliceData[i] / 255f;
-                        Vector4 colorVec = (def.FieldName == "Damage") ? GetHotColor(val) : GetJetColor(val);
-                        rgbaData[i * 4 + 0] = (byte)(colorVec.X * 255);
-                        rgbaData[i * 4 + 1] = (byte)(colorVec.Y * 255);
-                        rgbaData[i * 4 + 2] = (byte)(colorVec.Z * 255);
-                        rgbaData[i * 4 + 3] = 255;
+                        byte[] rgbaData = new byte[width * height * 4];
+                        for (int i = 0; i < sliceData.Length; i++)
+                        {
+                            float val = sliceData[i] / 255f;
+                            Vector4 colorVec = (def.FieldName == "Damage") ? GetHotColor(val) : GetJetColor(val);
+                            rgbaData[i * 4 + 0] = (byte)(colorVec.X * 255);
+                            rgbaData[i * 4 + 1] = (byte)(colorVec.Y * 255);
+                            rgbaData[i * 4 + 2] = (byte)(colorVec.Z * 255);
+                            rgbaData[i * 4 + 3] = 255;
+                        }
+
+                        string path = Path.Combine(_outputDirectory, $"slice_{def.FieldName}_{def.SliceAxis}{def.SliceIndex}.png");
+                        SavePng(path, width, height, rgbaData);
+                        return path;
                     }
-
-                    string path = Path.Combine(_outputDirectory, $"slice_{def.FieldName}_{def.SliceAxis}{def.SliceIndex}.png");
-                    SavePng(path, width, height, rgbaData);
-                    return path;
+                    catch (Exception ex)
+                    {
+                        Logger.LogError($"[ReportImageRenderer] Failed to render slice: {ex.Message}");
+                        return CreateErrorImage($"Error: {ex.Message}");
+                    }
                 }, token);
             }
 
             public async Task<string> RenderVelocityProfileAsync(List<float> vp, List<float> vs, CancellationToken token)
             {
-                 return await Task.Run(() =>
+                return await Task.Run(() =>
                 {
                     token.ThrowIfCancellationRequested();
                     
-                    var rgbaBuffer = new byte[IMAGE_WIDTH * PLOT_HEIGHT * 4];
-                    DrawFilledRect(rgbaBuffer, IMAGE_WIDTH, 0, 0, IMAGE_WIDTH, PLOT_HEIGHT, PlotBgColor);
+                    var rgbaBuffer = new byte[_config.ImageWidth * _config.PlotHeight * 4];
+                    DrawFilledRect(rgbaBuffer, _config.ImageWidth, 0, 0, _config.ImageWidth, _config.PlotHeight, PlotBgColor);
 
                     if (vp == null || vp.Count == 0 || vs == null || vs.Count == 0)
                     {
-                        DrawText(rgbaBuffer, IMAGE_WIDTH, IMAGE_WIDTH / 2 - 100, PLOT_HEIGHT / 2, "No data to display", PlotTextColor, 2);
+                        DrawText(rgbaBuffer, _config.ImageWidth, _config.ImageWidth / 2 - 100, _config.PlotHeight / 2, 
+                            "NO DATA TO DISPLAY", PlotTextColor, 2);
                         string errorPath = Path.Combine(_outputDirectory, "velocity_profile_error.png");
-                        SavePng(errorPath, IMAGE_WIDTH, PLOT_HEIGHT, rgbaBuffer);
+                        SavePng(errorPath, _config.ImageWidth, _config.PlotHeight, rgbaBuffer);
                         return errorPath;
                     }
                     
-                    float yMin = vs.Min();
-                    float yMax = vp.Max();
+                    float yMin = Math.Min(vs.Min(), 0);
+                    float yMax = Math.Max(vp.Max(), vs.Max());
                     if (yMax <= yMin) yMax = yMin + 1;
 
                     // Draw grid and axes
-                    DrawPlotAxesAndGrid(rgbaBuffer, IMAGE_WIDTH, PLOT_HEIGHT, vp.Count, yMin, yMax, "Distance (points)", "Velocity (m/s)", "Velocity Profile");
+                    DrawPlotAxesAndGrid(rgbaBuffer, _config.ImageWidth, _config.PlotHeight, vp.Count, 
+                        yMin, yMax, "Distance (points)", "Velocity (m/s)", "Velocity Profile");
 
-                    // Draw lines
-                    DrawLinePlot(rgbaBuffer, IMAGE_WIDTH, PLOT_HEIGHT, vp, yMin, yMax, VpPlotColor);
-                    DrawLinePlot(rgbaBuffer, IMAGE_WIDTH, PLOT_HEIGHT, vs, yMin, yMax, VsPlotColor);
+                    // Draw lines with configured thickness
+                    DrawLinePlot(rgbaBuffer, _config.ImageWidth, _config.PlotHeight, vp, yMin, yMax, VpPlotColor);
+                    DrawLinePlot(rgbaBuffer, _config.ImageWidth, _config.PlotHeight, vs, yMin, yMax, VsPlotColor);
                     
                     // Draw legend
-                    DrawFilledRect(rgbaBuffer, IMAGE_WIDTH, PADDING_LEFT + 20, PADDING_TOP + 10, 100, 45, new Color(40,40,45,200));
-                    DrawLine(rgbaBuffer, IMAGE_WIDTH, PADDING_LEFT + 30, PADDING_TOP + 25, PADDING_LEFT + 45, PADDING_TOP + 25, VpPlotColor);
-                    DrawText(rgbaBuffer, IMAGE_WIDTH, PADDING_LEFT + 50, PADDING_TOP + 20, "Vp", PlotTextColor, 1);
-                    DrawLine(rgbaBuffer, IMAGE_WIDTH, PADDING_LEFT + 30, PADDING_TOP + 45, PADDING_LEFT + 45, PADDING_TOP + 45, VsPlotColor);
-                    DrawText(rgbaBuffer, IMAGE_WIDTH, PADDING_LEFT + 50, PADDING_TOP + 40, "Vs", PlotTextColor, 1);
-
+                    DrawFilledRect(rgbaBuffer, _config.ImageWidth, 
+                        _config.PaddingLeft + 20, _config.PaddingTop + 10, 100, 50, 
+                        new Color(40, 40, 45, 200));
+                    DrawLine(rgbaBuffer, _config.ImageWidth, 
+                        _config.PaddingLeft + 30, _config.PaddingTop + 25, 
+                        _config.PaddingLeft + 50, _config.PaddingTop + 25, VpPlotColor, 2);
+                    DrawText(rgbaBuffer, _config.ImageWidth, 
+                        _config.PaddingLeft + 55, _config.PaddingTop + 20, "VP", PlotTextColor, 1);
+                    DrawLine(rgbaBuffer, _config.ImageWidth, 
+                        _config.PaddingLeft + 30, _config.PaddingTop + 40, 
+                        _config.PaddingLeft + 50, _config.PaddingTop + 40, VsPlotColor, 2);
+                    DrawText(rgbaBuffer, _config.ImageWidth, 
+                        _config.PaddingLeft + 55, _config.PaddingTop + 35, "VS", PlotTextColor, 1);
 
                     string path = Path.Combine(_outputDirectory, "velocity_profile.png");
-                    SavePng(path, IMAGE_WIDTH, PLOT_HEIGHT, rgbaBuffer);
+                    SavePng(path, _config.ImageWidth, _config.PlotHeight, rgbaBuffer);
                     return path;
                 }, token);
             }
@@ -468,55 +512,92 @@ namespace GeoscientistToolkit.UI.AcousticVolume
                 return await Task.Run(() =>
                 {
                     token.ThrowIfCancellationRequested();
-                    var rgbaBuffer = new byte[IMAGE_WIDTH * PLOT_HEIGHT * 4];
-                    DrawFilledRect(rgbaBuffer, IMAGE_WIDTH, 0, 0, IMAGE_WIDTH, PLOT_HEIGHT, PlotBgColor);
+                    var rgbaBuffer = new byte[_config.ImageWidth * _config.PlotHeight * 4];
+                    DrawFilledRect(rgbaBuffer, _config.ImageWidth, 0, 0, _config.ImageWidth, _config.PlotHeight, PlotBgColor);
 
                     if (waveform == null || waveform.Length == 0)
                     {
-                        DrawText(rgbaBuffer, IMAGE_WIDTH, IMAGE_WIDTH / 2 - 100, PLOT_HEIGHT / 2, "No data to display", PlotTextColor, 2);
+                        DrawText(rgbaBuffer, _config.ImageWidth, _config.ImageWidth / 2 - 100, _config.PlotHeight / 2, 
+                            "NO DATA TO DISPLAY", PlotTextColor, 2);
                         string errorPath = Path.Combine(_outputDirectory, "waveform_error.png");
-                        SavePng(errorPath, IMAGE_WIDTH, PLOT_HEIGHT, rgbaBuffer);
+                        SavePng(errorPath, _config.ImageWidth, _config.PlotHeight, rgbaBuffer);
                         return errorPath;
                     }
 
                     float yMin = waveform.Min();
                     float yMax = waveform.Max();
-                    if (yMax <= yMin) yMax = yMin + 1e-9f;
+                    if (Math.Abs(yMax - yMin) < 1e-9f) 
+                    {
+                        yMax = yMin + 1e-9f;
+                    }
 
                     // Draw grid and axes
-                    DrawPlotAxesAndGrid(rgbaBuffer, IMAGE_WIDTH, PLOT_HEIGHT, waveform.Length, yMin, yMax, $"Time (0-{duration*1000:F2} ms)", "Amplitude", "Waveform");
+                    DrawPlotAxesAndGrid(rgbaBuffer, _config.ImageWidth, _config.PlotHeight, waveform.Length, 
+                        yMin, yMax, $"Time (0-{duration*1000:F2} ms)", "Amplitude", "Waveform");
 
                     // Draw line
-                    DrawLinePlot(rgbaBuffer, IMAGE_WIDTH, PLOT_HEIGHT, waveform.ToList(), yMin, yMax, WaveformPlotColor);
+                    DrawLinePlot(rgbaBuffer, _config.ImageWidth, _config.PlotHeight, waveform.ToList(), 
+                        yMin, yMax, WaveformPlotColor);
 
                     string path = Path.Combine(_outputDirectory, "waveform.png");
-                    SavePng(path, IMAGE_WIDTH, PLOT_HEIGHT, rgbaBuffer);
+                    SavePng(path, _config.ImageWidth, _config.PlotHeight, rgbaBuffer);
                     return path;
                 }, token);
             }
 
             #region Graphics Primitives
-            private struct Color {
+            private struct Color 
+            {
                 public byte R, G, B, A;
                 public Color(byte r, byte g, byte b, byte a) { R = r; G = g; B = b; A = a; }
             }
 
             private void SetPixel(byte[] rgbaBuffer, int imgWidth, int x, int y, Color color)
             {
-                if (x < 0 || x >= imgWidth || y < 0 || y >= PLOT_HEIGHT) return;
+                if (x < 0 || x >= imgWidth || y < 0 || y >= _config.PlotHeight) return;
                 int index = (y * imgWidth + x) * 4;
+                if (index < 0 || index >= rgbaBuffer.Length - 3) return;
                 rgbaBuffer[index] = color.R;
                 rgbaBuffer[index + 1] = color.G;
                 rgbaBuffer[index + 2] = color.B;
                 rgbaBuffer[index + 3] = color.A;
             }
 
-            private void DrawLine(byte[] rgbaBuffer, int imgWidth, int x0, int y0, int x1, int y1, Color color)
+            private void DrawLine(byte[] rgbaBuffer, int imgWidth, int x0, int y0, int x1, int y1, Color color, int thickness = 1)
+            {
+                if (thickness == 1)
+                {
+                    DrawBresenhamLine(rgbaBuffer, imgWidth, x0, y0, x1, y1, color);
+                }
+                else
+                {
+                    // Draw multiple lines for thickness
+                    for (int t = 0; t < thickness; t++)
+                    {
+                        int offset = t - thickness / 2;
+                        // Determine if line is more horizontal or vertical
+                        if (Math.Abs(x1 - x0) > Math.Abs(y1 - y0))
+                        {
+                            // More horizontal - offset vertically
+                            DrawBresenhamLine(rgbaBuffer, imgWidth, x0, y0 + offset, x1, y1 + offset, color);
+                        }
+                        else
+                        {
+                            // More vertical - offset horizontally
+                            DrawBresenhamLine(rgbaBuffer, imgWidth, x0 + offset, y0, x1 + offset, y1, color);
+                        }
+                    }
+                }
+            }
+
+            private void DrawBresenhamLine(byte[] rgbaBuffer, int imgWidth, int x0, int y0, int x1, int y1, Color color)
             {
                 int dx = Math.Abs(x1 - x0), sx = x0 < x1 ? 1 : -1;
                 int dy = -Math.Abs(y1 - y0), sy = y0 < y1 ? 1 : -1;
                 int err = dx + dy, e2;
-                for (;;) {
+                
+                while (true) 
+                {
                     SetPixel(rgbaBuffer, imgWidth, x0, y0, color);
                     if (x0 == x1 && y0 == y1) break;
                     e2 = 2 * err;
@@ -527,9 +608,13 @@ namespace GeoscientistToolkit.UI.AcousticVolume
 
             private void DrawFilledRect(byte[] rgbaBuffer, int imgWidth, int x, int y, int w, int h, Color color)
             {
-                for (int j = y; j < y + h; j++)
-                    for (int i = x; i < x + w; i++)
+                for (int j = y; j < y + h && j < _config.PlotHeight; j++)
+                {
+                    for (int i = x; i < x + w && i < imgWidth; i++)
+                    {
                         SetPixel(rgbaBuffer, imgWidth, i, j, color);
+                    }
+                }
             }
 
             private void DrawText(byte[] rgbaBuffer, int imgWidth, int x, int y, string text, Color color, int scale = 1)
@@ -537,7 +622,8 @@ namespace GeoscientistToolkit.UI.AcousticVolume
                 int currentX = x;
                 foreach (char c in text)
                 {
-                    if (SimpleFont.FontMap.TryGetValue(char.ToUpper(c), out var pattern))
+                    char upperC = char.ToUpper(c);
+                    if (SimpleFont.FontMap.TryGetValue(upperC, out var pattern))
                     {
                         for (int py = 0; py < SimpleFont.CharHeight; py++)
                         {
@@ -545,64 +631,130 @@ namespace GeoscientistToolkit.UI.AcousticVolume
                             {
                                 if (pattern[py, px])
                                 {
-                                    if (scale == 1) SetPixel(rgbaBuffer, imgWidth, currentX + px, y + py, color);
-                                    else DrawFilledRect(rgbaBuffer, imgWidth, currentX + px * scale, y + py * scale, scale, scale, color);
+                                    if (scale == 1) 
+                                    {
+                                        SetPixel(rgbaBuffer, imgWidth, currentX + px, y + py, color);
+                                    }
+                                    else 
+                                    {
+                                        DrawFilledRect(rgbaBuffer, imgWidth, currentX + px * scale, y + py * scale, scale, scale, color);
+                                    }
                                 }
                             }
                         }
                         currentX += (SimpleFont.CharWidth + SimpleFont.CharSpacing) * scale;
                     }
+                    else if (c == ' ')
+                    {
+                        currentX += (SimpleFont.CharWidth + SimpleFont.CharSpacing) * scale;
+                    }
                 }
             }
 
-            private void DrawPlotAxesAndGrid(byte[] rgbaBuffer, int imgWidth, int imgHeight, int xDataCount, float yMin, float yMax, string xLabel, string yLabel, string title)
+            private void DrawTextVertical(byte[] rgbaBuffer, int imgWidth, int x, int y, string text, Color color, int scale = 1)
             {
-                int plotWidth = imgWidth - PADDING_LEFT - PADDING_RIGHT;
-                int plotHeight = imgHeight - PADDING_TOP - PADDING_BOTTOM;
+                int currentY = y;
+                foreach (char c in text)
+                {
+                    char upperC = char.ToUpper(c);
+                    if (SimpleFont.FontMap.TryGetValue(upperC, out var pattern))
+                    {
+                        for (int py = 0; py < SimpleFont.CharHeight; py++)
+                        {
+                            for (int px = 0; px < SimpleFont.CharWidth; px++)
+                            {
+                                if (pattern[py, px])
+                                {
+                                    if (scale == 1) 
+                                    {
+                                        SetPixel(rgbaBuffer, imgWidth, x + px, currentY + py, color);
+                                    }
+                                    else 
+                                    {
+                                        DrawFilledRect(rgbaBuffer, imgWidth, x + px * scale, currentY + py * scale, scale, scale, color);
+                                    }
+                                }
+                            }
+                        }
+                        currentY += (SimpleFont.CharHeight + SimpleFont.CharSpacing) * scale;
+                    }
+                    else if (c == ' ')
+                    {
+                        currentY += (SimpleFont.CharHeight + SimpleFont.CharSpacing) * scale;
+                    }
+                }
+            }
+
+            private void DrawPlotAxesAndGrid(byte[] rgbaBuffer, int imgWidth, int imgHeight, int xDataCount, 
+                float yMin, float yMax, string xLabel, string yLabel, string title)
+            {
+                int plotWidth = imgWidth - _config.PaddingLeft - _config.PaddingRight;
+                int plotHeight = imgHeight - _config.PaddingTop - _config.PaddingBottom;
 
                 // Title
-                DrawText(rgbaBuffer, imgWidth, imgWidth/2 - (title.Length * 6 * 2)/2, 10, title, PlotTextColor, 2);
+                int titleX = imgWidth / 2 - (title.Length * 6 * 2) / 2;
+                DrawText(rgbaBuffer, imgWidth, titleX, 10, title, PlotTextColor, 2);
 
                 // Y Axis
-                DrawLine(rgbaBuffer, imgWidth, PADDING_LEFT, PADDING_TOP, PADDING_LEFT, PADDING_TOP + plotHeight, PlotGridColor);
-                DrawText(rgbaBuffer, imgWidth, 10, imgHeight/2 + 30, yLabel.ToCharArray().Reverse().Aggregate("", (s,c) => s+c), PlotTextColor, 1); // Vertical text
+                DrawLine(rgbaBuffer, imgWidth, _config.PaddingLeft, _config.PaddingTop, 
+                    _config.PaddingLeft, _config.PaddingTop + plotHeight, PlotGridColor);
+                DrawTextVertical(rgbaBuffer, imgWidth, 10, imgHeight / 2 - (yLabel.Length * 7) / 2, yLabel, PlotTextColor, 1);
+                
                 for (int i = 0; i <= 5; i++)
                 {
                     float val = yMin + (yMax - yMin) * (i / 5.0f);
-                    int y = PADDING_TOP + plotHeight - (int)(i / 5.0f * plotHeight);
-                    DrawLine(rgbaBuffer, imgWidth, PADDING_LEFT - 5, y, PADDING_LEFT, y, PlotGridColor);
-                    DrawLine(rgbaBuffer, imgWidth, PADDING_LEFT, y, PADDING_LEFT + plotWidth, y, PlotGridColor);
-                    DrawText(rgbaBuffer, imgWidth, PADDING_LEFT - 60, y - 4, $"{val:G3}", PlotTextColor, 1);
+                    int y = _config.PaddingTop + plotHeight - (int)(i / 5.0f * plotHeight);
+                    DrawLine(rgbaBuffer, imgWidth, _config.PaddingLeft - 5, y, _config.PaddingLeft, y, PlotGridColor);
+                    DrawLine(rgbaBuffer, imgWidth, _config.PaddingLeft, y, _config.PaddingLeft + plotWidth, y, 
+                        new Color(50, 50, 50, 255));
+                    
+                    string label = $"{val:G3}";
+                    DrawText(rgbaBuffer, imgWidth, _config.PaddingLeft - 60, y - 4, label, PlotTextColor, 1);
                 }
 
                 // X Axis
-                DrawLine(rgbaBuffer, imgWidth, PADDING_LEFT, PADDING_TOP + plotHeight, PADDING_LEFT + plotWidth, PADDING_TOP + plotHeight, PlotGridColor);
-                DrawText(rgbaBuffer, imgWidth, imgWidth/2 - (xLabel.Length * 6)/2, imgHeight - 20, xLabel, PlotTextColor, 1);
+                DrawLine(rgbaBuffer, imgWidth, _config.PaddingLeft, _config.PaddingTop + plotHeight, 
+                    _config.PaddingLeft + plotWidth, _config.PaddingTop + plotHeight, PlotGridColor);
+                int xLabelX = imgWidth / 2 - (xLabel.Length * 6) / 2;
+                DrawText(rgbaBuffer, imgWidth, xLabelX, imgHeight - 20, xLabel, PlotTextColor, 1);
+                
                 for (int i = 0; i <= 5; i++)
                 {
-                    int x = PADDING_LEFT + (int)(i / 5.0f * plotWidth);
+                    int x = _config.PaddingLeft + (int)(i / 5.0f * plotWidth);
                     float val = xDataCount * (i / 5.0f);
-                    DrawLine(rgbaBuffer, imgWidth, x, PADDING_TOP + plotHeight, x, PADDING_TOP + plotHeight + 5, PlotGridColor);
-                    DrawText(rgbaBuffer, imgWidth, x-10, PADDING_TOP + plotHeight + 10, $"{val:F0}", PlotTextColor, 1);
+                    DrawLine(rgbaBuffer, imgWidth, x, _config.PaddingTop + plotHeight, x, 
+                        _config.PaddingTop + plotHeight + 5, PlotGridColor);
+                    DrawLine(rgbaBuffer, imgWidth, x, _config.PaddingTop, x, _config.PaddingTop + plotHeight, 
+                        new Color(50, 50, 50, 255));
+                    
+                    string label = $"{val:F0}";
+                    DrawText(rgbaBuffer, imgWidth, x - 10, _config.PaddingTop + plotHeight + 10, label, PlotTextColor, 1);
                 }
             }
 
-            private void DrawLinePlot(byte[] rgbaBuffer, int imgWidth, int imgHeight, List<float> data, float yMin, float yMax, Color color)
+            private void DrawLinePlot(byte[] rgbaBuffer, int imgWidth, int imgHeight, List<float> data, 
+                float yMin, float yMax, Color color)
             {
-                int plotWidth = imgWidth - PADDING_LEFT - PADDING_RIGHT;
-                int plotHeight = imgHeight - PADDING_TOP - PADDING_BOTTOM;
+                if (data == null || data.Count < 2) return;
+                
+                int plotWidth = imgWidth - _config.PaddingLeft - _config.PaddingRight;
+                int plotHeight = imgHeight - _config.PaddingTop - _config.PaddingBottom;
                 float yRange = yMax - yMin;
+                if (Math.Abs(yRange) < 1e-9f) yRange = 1e-9f;
 
                 int lastX = -1, lastY = -1;
                 for (int i = 0; i < data.Count; i++)
                 {
-                    float x_norm = (float)i / (data.Count - 1);
+                    float x_norm = (float)i / Math.Max(1, data.Count - 1);
                     float y_norm = (data[i] - yMin) / yRange;
-                    int x = PADDING_LEFT + (int)(x_norm * plotWidth);
-                    int y = PADDING_TOP + plotHeight - (int)(y_norm * plotHeight);
+                    y_norm = Math.Max(0, Math.Min(1, y_norm)); // Clamp
+                    
+                    int x = _config.PaddingLeft + (int)(x_norm * plotWidth);
+                    int y = _config.PaddingTop + plotHeight - (int)(y_norm * plotHeight);
+                    
                     if (lastX != -1)
                     {
-                        DrawLine(rgbaBuffer, imgWidth, lastX, lastY, x, y, color);
+                        DrawLine(rgbaBuffer, imgWidth, lastX, lastY, x, y, color, _config.LineThickness);
                     }
                     lastX = x;
                     lastY = y;
@@ -611,28 +763,89 @@ namespace GeoscientistToolkit.UI.AcousticVolume
             #endregion
 
             #region Data and I/O Helpers
-            private (int width, int height) GetSliceDimensions(ChunkedVolume vol, char axis) => axis switch {
-                'X' => (vol.Height, vol.Depth), 'Y' => (vol.Width, vol.Depth), _ => (vol.Width, vol.Height)
-            };
+            private (int width, int height) GetSliceDimensions(ChunkedVolume vol, char axis) 
+            {
+                return axis switch 
+                {
+                    'X' => (vol.Height, vol.Depth), 
+                    'Y' => (vol.Width, vol.Depth), 
+                    _ => (vol.Width, vol.Height)
+                };
+            }
 
-            private byte[] ExtractSlice(ChunkedVolume vol, char axis, int index, int w, int h) {
+            private byte[] ExtractSlice(ChunkedVolume vol, char axis, int index, int w, int h) 
+            {
                 var data = new byte[w * h];
-                if (axis == 'Z') vol.ReadSliceZ(index, data);
-                else if (axis == 'Y') for (int z=0; z<h; z++) for(int x=0; x<w; x++) data[z*w+x] = vol[x, index, z];
-                else if (axis == 'X') for (int z=0; z<h; z++) for(int y=0; y<w; y++) data[z*w+y] = vol[index, y, z];
+                try 
+                {
+                    if (axis == 'Z') 
+                    {
+                        vol.ReadSliceZ(index, data);
+                    }
+                    else if (axis == 'Y') 
+                    {
+                        for (int z = 0; z < h; z++)
+                        {
+                            for(int x = 0; x < w; x++)
+                            {
+                                data[z * w + x] = vol[x, index, z];
+                            }
+                        }
+                    }
+                    else if (axis == 'X') 
+                    {
+                        for (int z = 0; z < h; z++)
+                        {
+                            for(int y = 0; y < w; y++)
+                            {
+                                data[z * w + y] = vol[index, y, z];
+                            }
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Logger.LogError($"[ReportImageRenderer] Failed to extract slice: {ex.Message}");
+                    // Return gray pattern on error
+                    for (int i = 0; i < data.Length; i++)
+                    {
+                        data[i] = 128;
+                    }
+                }
                 return data;
             }
 
-            private void SavePng(string path, int w, int h, byte[] rgbaData) {
-                using (var stream = new FileStream(path, FileMode.Create, FileAccess.Write)) {
-                    var writer = new StbImageWriteSharp.ImageWriter();
-                    writer.WritePng(rgbaData, w, h, ColorComponents.RedGreenBlueAlpha, stream);
+            private void SavePng(string path, int w, int h, byte[] rgbaData) 
+            {
+                try
+                {
+                    using (var stream = new FileStream(path, FileMode.Create, FileAccess.Write)) 
+                    {
+                        var writer = new ImageWriter();
+                        writer.WritePng(rgbaData, w, h, ColorComponents.RedGreenBlueAlpha, stream);
+                    }
                 }
+                catch (Exception ex)
+                {
+                    Logger.LogError($"[ReportImageRenderer] Failed to save PNG: {ex.Message}");
+                }
+            }
+
+            private string CreateErrorImage(string message)
+            {
+                int w = 400, h = 100;
+                byte[] rgbaData = new byte[w * h * 4];
+                DrawFilledRect(rgbaData, w, 0, 0, w, h, new Color(50, 50, 50, 255));
+                DrawText(rgbaData, w, 10, h/2 - 5, message, new Color(255, 100, 100, 255), 1);
+                string path = Path.Combine(_outputDirectory, $"error_{DateTime.Now.Ticks}.png");
+                SavePng(path, w, h, rgbaData);
+                return path;
             }
             #endregion
             
             #region Colormaps
-            private Vector4 GetJetColor(float v) {
+            private Vector4 GetJetColor(float v) 
+            {
                 v = Math.Clamp(v, 0.0f, 1.0f);
                 if (v < 0.125f) return new Vector4(0, 0, 0.5f + 4 * v, 1);
                 else if (v < 0.375f) return new Vector4(0, 4 * (v - 0.125f), 1, 1);
@@ -640,7 +853,9 @@ namespace GeoscientistToolkit.UI.AcousticVolume
                 else if (v < 0.875f) return new Vector4(1, 1 - 4 * (v - 0.625f), 0, 1);
                 else return new Vector4(1 - 4 * (v - 0.875f), 0, 0, 1);
             }
-            private Vector4 GetHotColor(float v) {
+            
+            private Vector4 GetHotColor(float v) 
+            {
                 v = Math.Clamp(v, 0.0f, 1.0f);
                 float r = Math.Clamp(v / 0.4f, 0, 1);
                 float g = Math.Clamp((v - 0.4f) / 0.4f, 0, 1);
@@ -649,10 +864,13 @@ namespace GeoscientistToolkit.UI.AcousticVolume
             }
             #endregion
 
-            #region Minimal Font
-            private static class SimpleFont {
+            #region Enhanced Font System
+            private static class SimpleFont 
+            {
                 public const int CharWidth = 5, CharHeight = 7, CharSpacing = 1;
-                public static readonly Dictionary<char, bool[,]> FontMap = new Dictionary<char, bool[,]> {
+                public static readonly Dictionary<char, bool[,]> FontMap = new Dictionary<char, bool[,]> 
+                {
+                    // Uppercase letters
                     {'A',new bool[7,5]{{false,true,true,true,false},{true,false,false,false,true},{true,true,true,true,true},{true,false,false,false,true},{true,false,false,false,true},{false,false,false,false,false},{false,false,false,false,false}}},
                     {'B',new bool[7,5]{{true,true,true,true,false},{true,false,false,false,true},{true,true,true,true,false},{true,false,false,false,true},{true,true,true,true,false},{false,false,false,false,false},{false,false,false,false,false}}},
                     {'C',new bool[7,5]{{false,true,true,true,false},{true,false,false,false,true},{true,false,false,false,false},{true,false,false,false,true},{false,true,true,true,false},{false,false,false,false,false},{false,false,false,false,false}}},
@@ -662,7 +880,7 @@ namespace GeoscientistToolkit.UI.AcousticVolume
                     {'G',new bool[7,5]{{false,true,true,true,false},{true,false,false,false,false},{true,false,true,true,true},{true,false,false,false,true},{false,true,true,true,false},{false,false,false,false,false},{false,false,false,false,false}}},
                     {'H',new bool[7,5]{{true,false,false,false,true},{true,false,false,false,true},{true,true,true,true,true},{true,false,false,false,true},{true,false,false,false,true},{false,false,false,false,false},{false,false,false,false,false}}},
                     {'I',new bool[7,5]{{false,true,true,true,false},{false,false,true,false,false},{false,false,true,false,false},{false,false,true,false,false},{false,true,true,true,false},{false,false,false,false,false},{false,false,false,false,false}}},
-                    {'J',new bool[7,5]{{false,false,false,true,true},{false,false,false,false,true},{true,false,false,false,true},{false,true,true,true,false},{false,false,false,false,false},{false,false,false,false,false},{false,false,false,false,false}}},
+                    {'J',new bool[7,5]{{false,false,false,true,true},{false,false,false,false,true},{false,false,false,false,true},{true,false,false,false,true},{false,true,true,true,false},{false,false,false,false,false},{false,false,false,false,false}}},
                     {'K',new bool[7,5]{{true,false,false,true,false},{true,false,true,false,false},{true,true,false,false,false},{true,false,true,false,false},{true,false,false,true,false},{false,false,false,false,false},{false,false,false,false,false}}},
                     {'L',new bool[7,5]{{true,false,false,false,false},{true,false,false,false,false},{true,false,false,false,false},{true,false,false,false,false},{true,true,true,true,true},{false,false,false,false,false},{false,false,false,false,false}}},
                     {'M',new bool[7,5]{{true,false,false,false,true},{true,true,false,true,true},{true,false,true,false,true},{true,false,false,false,true},{true,false,false,false,true},{false,false,false,false,false},{false,false,false,false,false}}},
@@ -679,6 +897,8 @@ namespace GeoscientistToolkit.UI.AcousticVolume
                     {'X',new bool[7,5]{{true,false,false,false,true},{false,true,false,true,false},{false,false,true,false,false},{false,true,false,true,false},{true,false,false,false,true},{false,false,false,false,false},{false,false,false,false,false}}},
                     {'Y',new bool[7,5]{{true,false,false,false,true},{false,true,false,true,false},{false,false,true,false,false},{false,false,true,false,false},{false,false,true,false,false},{false,false,false,false,false},{false,false,false,false,false}}},
                     {'Z',new bool[7,5]{{true,true,true,true,true},{false,false,false,true,false},{false,false,true,false,false},{false,true,false,false,false},{true,true,true,true,true},{false,false,false,false,false},{false,false,false,false,false}}},
+                    
+                    // Numbers
                     {'0',new bool[7,5]{{false,true,true,true,false},{true,false,false,true,true},{true,false,true,false,true},{true,true,false,false,true},{false,true,true,true,false},{false,false,false,false,false},{false,false,false,false,false}}},
                     {'1',new bool[7,5]{{false,false,true,false,false},{false,true,true,false,false},{false,false,true,false,false},{false,false,true,false,false},{false,true,true,true,false},{false,false,false,false,false},{false,false,false,false,false}}},
                     {'2',new bool[7,5]{{false,true,true,true,false},{true,false,false,false,true},{false,false,false,true,false},{false,false,true,false,false},{true,true,true,true,true},{false,false,false,false,false},{false,false,false,false,false}}},
@@ -689,14 +909,39 @@ namespace GeoscientistToolkit.UI.AcousticVolume
                     {'7',new bool[7,5]{{true,true,true,true,true},{false,false,false,true,false},{false,false,true,false,false},{false,true,false,false,false},{false,true,false,false,false},{false,false,false,false,false},{false,false,false,false,false}}},
                     {'8',new bool[7,5]{{false,true,true,true,false},{true,false,false,false,true},{false,true,true,true,false},{true,false,false,false,true},{false,true,true,true,false},{false,false,false,false,false},{false,false,false,false,false}}},
                     {'9',new bool[7,5]{{false,true,true,true,false},{true,false,false,false,true},{false,true,true,true,true},{false,false,false,false,true},{false,true,true,true,false},{false,false,false,false,false},{false,false,false,false,false}}},
+                    
+                    // Special characters
                     {'.',new bool[7,5]{{false,false,false,false,false},{false,false,false,false,false},{false,false,false,false,false},{false,false,false,false,false},{false,true,true,false,false},{false,true,true,false,false},{false,false,false,false,false}}},
                     {':',new bool[7,5]{{false,false,false,false,false},{false,true,true,false,false},{false,true,true,false,false},{false,false,false,false,false},{false,true,true,false,false},{false,true,true,false,false},{false,false,false,false,false}}},
+                    {',',new bool[7,5]{{false,false,false,false,false},{false,false,false,false,false},{false,false,false,false,false},{false,false,false,false,false},{false,false,true,false,false},{false,false,true,false,false},{false,true,false,false,false}}},
+                    {';',new bool[7,5]{{false,false,false,false,false},{false,false,true,false,false},{false,false,true,false,false},{false,false,false,false,false},{false,false,true,false,false},{false,false,true,false,false},{false,true,false,false,false}}},
+                    {'!',new bool[7,5]{{false,false,true,false,false},{false,false,true,false,false},{false,false,true,false,false},{false,false,true,false,false},{false,false,false,false,false},{false,false,true,false,false},{false,false,false,false,false}}},
+                    {'?',new bool[7,5]{{false,true,true,true,false},{true,false,false,false,true},{false,false,false,true,false},{false,false,true,false,false},{false,false,false,false,false},{false,false,true,false,false},{false,false,false,false,false}}},
                     {'-',new bool[7,5]{{false,false,false,false,false},{false,false,false,false,false},{true,true,true,true,true},{false,false,false,false,false},{false,false,false,false,false},{false,false,false,false,false},{false,false,false,false,false}}},
-                    {' ',new bool[7,5]{{false,false,false,false,false},{false,false,false,false,false},{false,false,false,false,false},{false,false,false,false,false},{false,false,false,false,false},{false,false,false,false,false},{false,false,false,false,false}}},
+                    {'+',new bool[7,5]{{false,false,false,false,false},{false,false,true,false,false},{false,false,true,false,false},{true,true,true,true,true},{false,false,true,false,false},{false,false,true,false,false},{false,false,false,false,false}}},
+                    {'=',new bool[7,5]{{false,false,false,false,false},{false,false,false,false,false},{true,true,true,true,true},{false,false,false,false,false},{true,true,true,true,true},{false,false,false,false,false},{false,false,false,false,false}}},
+                    {'*',new bool[7,5]{{false,false,false,false,false},{false,true,false,true,false},{false,false,true,false,false},{true,true,true,true,true},{false,false,true,false,false},{false,true,false,true,false},{false,false,false,false,false}}},
+                    {'/',new bool[7,5]{{false,false,false,false,true},{false,false,false,true,false},{false,false,true,false,false},{false,true,false,false,false},{true,false,false,false,false},{false,false,false,false,false},{false,false,false,false,false}}},
                     {'(',new bool[7,5]{{false,false,true,true,false},{false,true,false,false,false},{false,true,false,false,false},{false,true,false,false,false},{false,false,true,true,false},{false,false,false,false,false},{false,false,false,false,false}}},
                     {')',new bool[7,5]{{false,true,true,false,false},{false,false,false,true,false},{false,false,false,true,false},{false,false,false,true,false},{false,true,true,false,false},{false,false,false,false,false},{false,false,false,false,false}}},
-                    {'/',new bool[7,5]{{false,false,false,false,true},{false,false,false,true,false},{false,false,true,false,false},{false,true,false,false,false},{true,false,false,false,false},{false,false,false,false,false},{false,false,false,false,false}}}
+                    {'[',new bool[7,5]{{false,true,true,true,false},{false,true,false,false,false},{false,true,false,false,false},{false,true,false,false,false},{false,true,true,true,false},{false,false,false,false,false},{false,false,false,false,false}}},
+                    {']',new bool[7,5]{{false,true,true,true,false},{false,false,false,true,false},{false,false,false,true,false},{false,false,false,true,false},{false,true,true,true,false},{false,false,false,false,false},{false,false,false,false,false}}},
+                    {'_',new bool[7,5]{{false,false,false,false,false},{false,false,false,false,false},{false,false,false,false,false},{false,false,false,false,false},{false,false,false,false,false},{true,true,true,true,true},{false,false,false,false,false}}},
+                    {' ',new bool[7,5]{{false,false,false,false,false},{false,false,false,false,false},{false,false,false,false,false},{false,false,false,false,false},{false,false,false,false,false},{false,false,false,false,false},{false,false,false,false,false}}}
                 };
+
+                static SimpleFont()
+                {
+                    // Add lowercase letters (mapped to uppercase for simplicity)
+                    for (char c = 'a'; c <= 'z'; c++)
+                    {
+                        char upperC = char.ToUpper(c);
+                        if (FontMap.ContainsKey(upperC))
+                        {
+                            FontMap[c] = FontMap[upperC];
+                        }
+                    }
+                }
             }
             #endregion
         }
@@ -771,7 +1016,7 @@ namespace GeoscientistToolkit.UI.AcousticVolume
         {
              var planes = await Task.Run(() =>
              {
-                 var analyzer = new DamageAnalysisTool(); // Use an instance to access logic
+                 var analyzer = new DamageAnalysisTool();
                  return analyzer.AnalyzeFractureOrientations_Internal(ad.DamageField, threshold, minClusterSize, null);
              });
 
@@ -859,7 +1104,6 @@ namespace GeoscientistToolkit.UI.AcousticVolume
             return (sb.ToString(), waveform);
         }
 
-
         private static string GetStatsTableRow(string name, ChunkedVolume volume)
         {
             var (min, max, mean, stdDev, _) = CalculateVolumeStats(volume);
@@ -873,7 +1117,7 @@ namespace GeoscientistToolkit.UI.AcousticVolume
             double sumOfSquares = 0;
             byte min = 255;
             byte max = 0;
-            long damagedCount = 0; // Voxels with damage > 128
+            long damagedCount = 0;
 
             for (int z = 0; z < volume.Depth; z++)
             {
