@@ -22,6 +22,11 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
         private int _lastSliceAxis = -1;
         private int _lastSliceIndex = -1;
 
+        // --- NEW: Data fields for the dynamic legend ---
+        private float _currentSliceMinVel;
+        private float _currentSliceMaxVel;
+
+
         // Data and Processing State
         private SimulationResults _currentDataSource;
         private Vector3 _dimensions;
@@ -33,7 +38,8 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
 
         // Graphics Resources
         private TextureManager _tomographyTexture;
-        private (byte[] pixelData, int w, int h)? _pendingTextureUpdate;
+        // --- MODIFIED: Change tuple to include min/max velocity ---
+        private (byte[] pixelData, int w, int h, float minVel, float maxVel)? _pendingTextureUpdate;
 
         public void Show() => _isOpen = true;
 
@@ -68,11 +74,17 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
         public void Draw()
         {
             // Safely create/update texture from the main UI thread if new data is ready.
+            // --- MODIFIED: Handle the new tuple ---
             if (_pendingTextureUpdate.HasValue)
             {
-                var (pixelData, w, h) = _pendingTextureUpdate.Value;
+                var (pixelData, w, h, minVel, maxVel) = _pendingTextureUpdate.Value;
                 _tomographyTexture?.Dispose();
                 _tomographyTexture = TextureManager.CreateFromPixelData(pixelData, (uint)w, (uint)h);
+                
+                // --- NEW: Update the state for the legend ---
+                _currentSliceMinVel = minVel;
+                _currentSliceMaxVel = maxVel;
+
                 _pendingTextureUpdate = null; // Consume the update
             }
 
@@ -182,7 +194,13 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
             float barWidth = Math.Max(200, region.X * 0.75f);
             float barHeight = 20;
             pos.X += (region.X - barWidth) / 2; // Center the bar
-
+        
+            // --- NEW: Add a title for the legend ---
+            string title = "Velocity Magnitude (m/s)";
+            var titleSize = ImGui.CalcTextSize(title);
+            ImGui.SetCursorScreenPos(pos - new Vector2((titleSize.X - barWidth) / 2, titleSize.Y + 2));
+            ImGui.Text(title);
+        
             // Draw the gradient bar
             for (int i = 0; i < barWidth; i++)
             {
@@ -191,14 +209,21 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
                 uint col32 = ImGui.GetColorU32(color);
                 drawList.AddRectFilled(new Vector2(pos.X + i, pos.Y), new Vector2(pos.X + i + 1, pos.Y + barHeight), col32);
             }
-
+        
             // Draw labels
-            string minLabel = $"{_currentDataSource?.SWaveVelocity ?? 3000:F0} m/s (Shear)";
-            string maxLabel = $"{_currentDataSource?.PWaveVelocity ?? 6000:F0} m/s (Pressure)";
+            string minLabel = $"{_currentSliceMinVel:F2}";
+            string maxLabel = $"{_currentSliceMaxVel:F2}";
+
             ImGui.SetCursorScreenPos(pos + new Vector2(0, barHeight + 5));
-            ImGui.Text(minLabel);
-            ImGui.SameLine(pos.X + barWidth - ImGui.CalcTextSize(maxLabel).X);
-            ImGui.Text(maxLabel);
+            float barStartX = ImGui.GetCursorPosX(); // Get local X at the start of the bar
+            
+            ImGui.Text(minLabel); // Draw min label at the start
+
+            float maxLabelWidth = ImGui.CalcTextSize(maxLabel).X;
+            
+            // --- FIX: Use local coordinates for SameLine to correctly right-align the max label ---
+            ImGui.SameLine(barStartX + barWidth - maxLabelWidth); 
+            ImGui.Text(maxLabel); // Draw max label
         }
 
 
@@ -233,16 +258,21 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
         {
             try
             {
-                (byte[] pixelData, int w, int h)? result = await Task.Run(() =>
+                // --- MODIFIED: Update the tuple type here ---
+                (byte[] pixelData, int w, int h, float minVel, float maxVel)? result = await Task.Run(() =>
                 {
                     token.ThrowIfCancellationRequested();
-                    var data = _generator.Generate2DTomography(_currentDataSource, _sliceAxis, _sliceIndex);
-                    if (data == null) return null;
+                    var generationResult = _generator.Generate2DTomography(_currentDataSource, _sliceAxis, _sliceIndex);
+                    if (!generationResult.HasValue) return null;
+
+                    // Unpack the result from the generator
+                    var (pixelData, minVelocity, maxVelocity) = generationResult.Value;
 
                     int w = _sliceAxis switch { 0 => (int)_dimensions.Y, 1 => (int)_dimensions.X, _ => (int)_dimensions.X };
                     int h = _sliceAxis switch { 0 => (int)_dimensions.Z, 1 => (int)_dimensions.Z, _ => (int)_dimensions.Y };
                     
-                    return ((byte[] pixelData, int w, int h)?)(data, w, h);
+                    // --- MODIFIED: Return the full tuple ---
+                    return ((byte[] pixelData, int w, int h, float minVel, float maxVel)?)(pixelData, w, h, minVelocity, maxVelocity);
                 }, token);
 
                 // If the task was cancelled while running, this line will not be reached.
@@ -273,4 +303,3 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
         }
     }
 }
-

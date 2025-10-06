@@ -9,7 +9,7 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
     /// </summary>
     public class VelocityTomographyGenerator : IDisposable
     {
-        public byte[] Generate2DTomography(SimulationResults results, int axis, int sliceIndex)
+        public (byte[] pixelData, float minVelocity, float maxVelocity)? Generate2DTomography(SimulationResults results, int axis, int sliceIndex)
         {
             if (results == null || results.WaveFieldVx == null) return null;
             
@@ -87,7 +87,7 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
                 tomography[idx++] = 255;
             }
             
-            return tomography;
+            return (tomography, minVel, maxVel);
         }
 
         public Vector4 GetJetColor(float value)
