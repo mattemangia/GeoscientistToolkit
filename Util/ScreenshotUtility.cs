@@ -1,5 +1,6 @@
 // GeoscientistToolkit/Util/ScreenshotUtility.cs
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Numerics;
 using System.Runtime.InteropServices;
@@ -20,6 +21,18 @@ namespace GeoscientistToolkit.Util
             JPEG,
             BMP,
             TGA
+        }
+
+        private static readonly Dictionary<IntPtr, Texture> _windowTextures = new Dictionary<IntPtr, Texture>();
+        private static readonly List<DeferredScreenshot> _deferredCaptures = new List<DeferredScreenshot>();
+
+        private class DeferredScreenshot
+        {
+            public string FilePath { get; set; }
+            public Texture Texture { get; set; }
+            public ImageFormat Format { get; set; }
+            public int JpegQuality { get; set; }
+            public Action<bool> Callback { get; set; }
         }
 
         /// <summary>
@@ -84,36 +97,59 @@ namespace GeoscientistToolkit.Util
         }
 
         /// <summary>
-        /// Captures the current ImGui drawlist content (experimental - requires framebuffer access)
+        /// Captures an ImGui window by its name
         /// </summary>
         public static bool CaptureImGuiWindow(string windowName, string filePath, ImageFormat format = ImageFormat.PNG)
         {
-            // This would require accessing the underlying framebuffer that ImGui is rendering to
-            // For now, we'll provide a helper that captures the main framebuffer region
-            
-            if (!ImGui.Begin(windowName))
+            try
             {
-                ImGui.End();
-                Logger.LogError($"[Screenshot] Window '{windowName}' not found");
+                // Get window rect from ImGui internal state
+                Vector2 windowPos, windowSize;
+                if (!GetImGuiWindowRect(windowName, out windowPos, out windowSize))
+                {
+                    Logger.LogError($"[Screenshot] Could not get window rect for '{windowName}'");
+                    return false;
+                }
+
+                // Capture the framebuffer region corresponding to the window's rectangle
+                return CaptureFramebufferRegion(
+                    (int)windowPos.X, (int)windowPos.Y,
+                    (int)windowSize.X, (int)windowSize.Y,
+                    filePath, format);
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError($"[Screenshot] Failed to capture ImGui window: {ex.Message}");
                 return false;
             }
-
-            var windowPos = ImGui.GetWindowPos();
-            var windowSize = ImGui.GetWindowSize();
-            ImGui.End();
-
-            // Capture main framebuffer region
-            return CaptureFramebufferRegion(
-                (int)windowPos.X, (int)windowPos.Y,
-                (int)windowSize.X, (int)windowSize.Y,
-                filePath, format);
         }
 
         /// <summary>
-        /// Captures a region of the main framebuffer
+        /// Gets the position and size of an ImGui window
         /// </summary>
-        public static bool CaptureFramebufferRegion(int x, int y, int width, int height, 
-                                                   string filePath, ImageFormat format = ImageFormat.PNG)
+        public static bool GetImGuiWindowRect(string windowName, out Vector2 pos, out Vector2 size)
+        {
+            pos = Vector2.Zero;
+            size = Vector2.Zero;
+
+            // Use Begin/End to access window properties. This is a common ImGui pattern.
+            // It might bring the window to focus, but it's the most reliable way to get its state.
+            if (!ImGui.Begin(windowName))
+            {
+                ImGui.End(); // Ensure End is called even if Begin returns false
+                return false;
+            }
+
+            pos = ImGui.GetWindowPos();
+            size = ImGui.GetWindowSize();
+            ImGui.End();
+            return true;
+        }
+
+        /// <summary>
+        /// Captures the entire framebuffer
+        /// </summary>
+        public static bool CaptureFullFramebuffer(string filePath, ImageFormat format = ImageFormat.PNG)
         {
             try
             {
@@ -123,9 +159,70 @@ namespace GeoscientistToolkit.Util
                 // Get the backbuffer texture
                 var backbuffer = swapchain.Framebuffer.ColorTargets[0].Target;
                 
-                // For now, capture the entire framebuffer
-                // (Region capture would require additional render-to-texture setup)
                 return CaptureTexture(backbuffer, filePath, format);
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError($"[Screenshot] Failed to capture framebuffer: {ex.Message}");
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// Captures a region of the main framebuffer
+        /// </summary>
+        public static bool CaptureFramebufferRegion(int x, int y, int width, int height, 
+                                                   string filePath, ImageFormat format = ImageFormat.PNG)
+        {
+            // Clamp dimensions to be within the framebuffer
+            var gd = VeldridManager.GraphicsDevice;
+            var swapchain = gd.MainSwapchain;
+            var backbuffer = swapchain.Framebuffer.ColorTargets[0].Target;
+
+            if (x < 0) { width += x; x = 0; }
+            if (y < 0) { height += y; y = 0; }
+            if (x + width > backbuffer.Width) { width = (int)backbuffer.Width - x; }
+            if (y + height > backbuffer.Height) { height = (int)backbuffer.Height - y; }
+
+            if (width <= 0 || height <= 0)
+            {
+                Logger.LogError("[Screenshot] Invalid capture region dimensions.");
+                return false;
+            }
+
+            try
+            {
+                var factory = gd.ResourceFactory;
+                
+                // 1. Create a destination texture for the cropped image
+                var cropDesc = TextureDescription.Texture2D(
+                    (uint)width, (uint)height, 1, 1,
+                    backbuffer.Format, TextureUsage.Sampled);
+
+                using (var croppedTexture = factory.CreateTexture(cropDesc))
+                using (var cl = factory.CreateCommandList())
+                {
+                    // 2. Begin a command list to copy the texture region
+                    cl.Begin();
+                    
+                    // 3. Copy the specified region from the backbuffer to our new texture
+                    cl.CopyTexture(
+                        source: backbuffer,
+                        srcX: (uint)x, srcY: (uint)y, srcZ: 0,
+                        srcMipLevel: 0, srcBaseArrayLayer: 0,
+                        destination: croppedTexture,
+                        dstX: 0, dstY: 0, dstZ: 0,
+                        dstMipLevel: 0, dstBaseArrayLayer: 0,
+                        width: (uint)width, height: (uint)height, depth: 1,
+                        layerCount: 1);
+                    
+                    cl.End();
+                    gd.SubmitCommands(cl);
+                    gd.WaitForIdle(); // Ensure the copy operation is complete
+
+                    // 4. Use the existing CaptureTexture utility on the new, smaller texture
+                    return CaptureTexture(croppedTexture, filePath, format);
+                }
             }
             catch (Exception ex)
             {
@@ -135,24 +232,38 @@ namespace GeoscientistToolkit.Util
         }
 
         /// <summary>
-        /// Shows a file save dialog and captures a screenshot
+        /// Defers a screenshot capture until after the current frame is rendered
         /// </summary>
-        public static void ShowScreenshotDialog(Texture texture, string defaultName = "screenshot")
+        public static void DeferScreenshotCapture(Texture texture, string filePath, 
+                                                  ImageFormat format = ImageFormat.PNG, 
+                                                  int jpegQuality = 90,
+                                                  Action<bool> callback = null)
         {
-            var dialog = new GeoscientistToolkit.UI.Utils.ImGuiExportFileDialog(
-                "ScreenshotDialog", "Save Screenshot");
-            
-            dialog.SetExtensions(
-                (".png", "PNG Image"),
-                (".jpg", "JPEG Image"),
-                (".bmp", "Bitmap Image"),
-                (".tga", "TGA Image")
-            );
-            
-            dialog.Open(defaultName);
-            
-            // This would typically be handled in the UI update loop
-            // Store the dialog reference for processing in the next frame
+            _deferredCaptures.Add(new DeferredScreenshot
+            {
+                FilePath = filePath,
+                Texture = texture,
+                Format = format,
+                JpegQuality = jpegQuality,
+                Callback = callback
+            });
+        }
+
+        /// <summary>
+        /// Processes any deferred screenshot captures
+        /// </summary>
+        public static void ProcessDeferredCaptures()
+        {
+            if (_deferredCaptures.Count == 0) return;
+
+            var captures = new List<DeferredScreenshot>(_deferredCaptures);
+            _deferredCaptures.Clear();
+
+            foreach (var capture in captures)
+            {
+                bool success = CaptureTexture(capture.Texture, capture.FilePath, capture.Format, capture.JpegQuality);
+                capture.Callback?.Invoke(success);
+            }
         }
 
         #region Helper Methods

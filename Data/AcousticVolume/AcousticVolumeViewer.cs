@@ -1,8 +1,11 @@
 // GeoscientistToolkit/Data/AcousticVolume/AcousticVolumeViewer.cs
 using System;
+using System.Collections.Concurrent;
 using System.Linq;
 using System.Numerics;
+using System.Threading.Tasks;
 using GeoscientistToolkit.Data.VolumeData;
+using GeoscientistToolkit.UI;
 using GeoscientistToolkit.UI.AcousticVolume;
 using GeoscientistToolkit.UI.Interfaces;
 using GeoscientistToolkit.Util;
@@ -14,10 +17,12 @@ namespace GeoscientistToolkit.Data.AcousticVolume
     /// <summary>
     /// Viewer for acoustic simulation results with wave field visualization,
     /// time-series animation, and interactive analysis capabilities.
+    /// Now with lazy loading to prevent UI freezing.
     /// </summary>
     public class AcousticVolumeViewer : IDatasetViewer, IDisposable
     {
         private readonly AcousticVolumeDataset _dataset;
+        private readonly ProgressBarDialog _loadingProgress;
         
         // Visualization mode
         private enum VisualizationMode
@@ -29,6 +34,11 @@ namespace GeoscientistToolkit.Data.AcousticVolume
             TimeSeries
         }
         private VisualizationMode _currentMode = VisualizationMode.CombinedField;
+        
+        // Loading state
+        private bool _isInitialized = false;
+        private bool _isLoading = false;
+        private string _loadingError = null;
         
         // Slice positions
         private int _sliceX;
@@ -77,24 +87,187 @@ namespace GeoscientistToolkit.Data.AcousticVolume
         private Vector2 _lineStartPos;
         private bool _isDrawingLine = false;
         
+        // Cache for currently displayed slices to avoid reloading
+        private readonly SliceCache _sliceCache;
+
+        // Histogram cache for the 4th panel
+        private float[] _histogramDataXY;
+        private int _lastHistogramSliceZ = -1;
+        private VisualizationMode _lastHistogramMode;
+        
+        // Thread-safe queue for main thread graphics operations
+        private readonly ConcurrentQueue<Action> _mainThreadActions = new();
+        
         public AcousticVolumeViewer(AcousticVolumeDataset dataset)
         {
             _dataset = dataset ?? throw new ArgumentNullException(nameof(dataset));
-            _dataset.Load();
+            _loadingProgress = new ProgressBarDialog("Loading Acoustic Volume");
+            _sliceCache = new SliceCache();
             
-            var initialVolume = _dataset.CombinedWaveField ?? _dataset.PWaveField;
-            if (initialVolume != null)
+            // Don't load synchronously - just set initial state
+            _sliceX = 0;
+            _sliceY = 0;
+            _sliceZ = 0;
+
+            // Automatically start initialization when viewer is created
+            _ = InitializeAsync();
+            
+            Logger.Log($"[AcousticVolumeViewer] Created viewer for: {_dataset.Name}");
+        }
+        
+        /// <summary>
+        /// Asynchronously initializes the viewer by loading metadata and preparing volumes.
+        /// </summary>
+        private async Task InitializeAsync()
+        {
+            if (_isInitialized || _isLoading) return;
+            
+            _isLoading = true;
+            _loadingProgress.Open("Loading acoustic volume metadata...");
+            
+            try
             {
-                _sliceX = initialVolume.Width / 2;
-                _sliceY = initialVolume.Height / 2;
-                _sliceZ = initialVolume.Depth / 2;
+                await Task.Run(async () =>
+                {
+                    _loadingProgress.Update(0.1f, "Loading metadata...");
+                    
+                    // Load only metadata initially, not the full volumes
+                    if (!System.IO.Directory.Exists(_dataset.FilePath))
+                    {
+                        throw new System.IO.DirectoryNotFoundException($"Dataset directory not found: {_dataset.FilePath}");
+                    }
+                    
+                    // Load metadata files
+                    string metadataPath = System.IO.Path.Combine(_dataset.FilePath, "metadata.json");
+                    if (System.IO.File.Exists(metadataPath))
+                    {
+                        _loadingProgress.Update(0.2f, "Reading metadata...");
+                        string json = System.IO.File.ReadAllText(metadataPath);
+                        var metadata = System.Text.Json.JsonSerializer.Deserialize<AcousticMetadata>(json);
+                        ApplyMetadata(metadata);
+                    }
+                    
+                    // Convert existing volumes to lazy-loading if needed
+                    _loadingProgress.Update(0.3f, "Preparing wave field volumes...");
+                    await ConvertToLazyVolumesAsync();
+                    
+                    // Get dimensions from the first available volume
+                    var initialVolume = GetCurrentVolume();
+                    if (initialVolume != null)
+                    {
+                        _sliceX = initialVolume.Width / 2;
+                        _sliceY = initialVolume.Height / 2;
+                        _sliceZ = initialVolume.Depth / 2;
+                    }
+                    
+                    _loadingProgress.Update(1.0f, "Ready!");
+                });
+                
+                _isInitialized = true;
+                _needsUpdateXY = _needsUpdateXZ = _needsUpdateYZ = true;
+                Logger.Log($"[AcousticVolumeViewer] Initialized successfully");
+            }
+            catch (Exception ex)
+            {
+                _loadingError = ex.Message;
+                Logger.LogError($"[AcousticVolumeViewer] Initialization failed: {ex.Message}");
+            }
+            finally
+            {
+                _isLoading = false;
+                _loadingProgress.Close();
+            }
+        }
+        
+        private void ApplyMetadata(AcousticMetadata metadata)
+        {
+            _dataset.PWaveVelocity = metadata.PWaveVelocity;
+            _dataset.SWaveVelocity = metadata.SWaveVelocity;
+            _dataset.VpVsRatio = metadata.VpVsRatio;
+            _dataset.TimeSteps = metadata.TimeSteps;
+            _dataset.ComputationTime = TimeSpan.FromSeconds(metadata.ComputationTimeSeconds);
+            _dataset.YoungsModulusMPa = metadata.YoungsModulusMPa;
+            _dataset.PoissonRatio = metadata.PoissonRatio;
+            _dataset.ConfiningPressureMPa = metadata.ConfiningPressureMPa;
+            _dataset.SourceFrequencyKHz = metadata.SourceFrequencyKHz;
+            _dataset.SourceEnergyJ = metadata.SourceEnergyJ;
+            _dataset.SourceDatasetPath = metadata.SourceDatasetPath;
+            _dataset.SourceMaterialName = metadata.SourceMaterialName;
+        }
+        
+        /// <summary>
+        /// Converts file-based volumes to lazy-loading volumes if not already loaded.
+        /// </summary>
+        private async Task ConvertToLazyVolumesAsync()
+        {
+            // Check for P-Wave field
+            if (_dataset.PWaveField == null)
+            {
+                string pWavePath = System.IO.Path.Combine(_dataset.FilePath, "PWaveField.bin");
+                if (System.IO.File.Exists(pWavePath))
+                {
+                    _dataset.PWaveField = await LoadLazyVolumeAsync(pWavePath, "P-Wave field");
+                }
             }
             
-            Logger.Log($"[AcousticVolumeViewer] Initialized viewer for: {_dataset.Name}");
+            // Check for S-Wave field
+            if (_dataset.SWaveField == null)
+            {
+                string sWavePath = System.IO.Path.Combine(_dataset.FilePath, "SWaveField.bin");
+                if (System.IO.File.Exists(sWavePath))
+                {
+                    _dataset.SWaveField = await LoadLazyVolumeAsync(sWavePath, "S-Wave field");
+                }
+            }
+            
+            // Check for Combined field
+            if (_dataset.CombinedWaveField == null)
+            {
+                string combinedPath = System.IO.Path.Combine(_dataset.FilePath, "CombinedField.bin");
+                if (System.IO.File.Exists(combinedPath))
+                {
+                    _dataset.CombinedWaveField = await LoadLazyVolumeAsync(combinedPath, "Combined field");
+                }
+            }
+            
+            // Check for Damage field
+            if (_dataset.DamageField == null)
+            {
+                string damagePath = System.IO.Path.Combine(_dataset.FilePath, "DamageField.bin");
+                if (System.IO.File.Exists(damagePath))
+                {
+                    _dataset.DamageField = await LoadLazyVolumeAsync(damagePath, "Damage field");
+                }
+            }
+        }
+        
+        private async Task<ChunkedVolume> LoadLazyVolumeAsync(string path, string fieldName)
+        {
+            _loadingProgress.Update(0.5f, $"Loading {fieldName}...");
+            
+            // Create a lazy-loading wrapper
+            var lazyVolume = await LazyChunkedVolume.CreateAsync(path);
+            
+            // For compatibility with existing code, we need to return a ChunkedVolume
+            // We'll create a wrapper that uses lazy loading internally
+            return new LazyChunkedVolumeAdapter(lazyVolume);
         }
         
         public void DrawToolbarControls()
         {
+            // Check initialization status
+            if (!_isInitialized)
+            {
+                ImGui.TextDisabled(_isLoading ? "Loading..." : "Initializing viewer...");
+                return;
+            }
+            
+            if (!string.IsNullOrEmpty(_loadingError))
+            {
+                ImGui.TextColored(new Vector4(1, 0, 0, 1), $"Error: {_loadingError}");
+                return;
+            }
+            
             // Mode selection
             ImGui.Text("Mode:");
             ImGui.SameLine();
@@ -112,6 +285,7 @@ namespace GeoscientistToolkit.Data.AcousticVolume
                 {
                     _currentMode = newMode;
                     _needsUpdateXY = _needsUpdateXZ = _needsUpdateYZ = true;
+                    _sliceCache.Clear(); // Clear cache when changing modes
                 }
             }
             
@@ -180,14 +354,39 @@ namespace GeoscientistToolkit.Data.AcousticVolume
         
         public void DrawContent(ref float zoom, ref Vector2 pan)
         {
+            // Process any pending graphics operations that were queued from background threads
+            while (_mainThreadActions.TryDequeue(out var action))
+            {
+                action?.Invoke();
+            }
+        
+            // Handle loading/progress dialog
+            _loadingProgress.Submit();
+            
+            if (!_isInitialized)
+            {
+                if (_isLoading)
+                {
+                    ImGui.TextDisabled("Loading acoustic volume data...");
+                }
+                else if (!string.IsNullOrEmpty(_loadingError))
+                {
+                    ImGui.TextColored(new Vector4(1, 0, 0, 1), $"Error: {_loadingError}");
+                }
+                else
+                {
+                    ImGui.TextDisabled("Initializing...");
+                }
+                return;
+            }
+            
             // Update animation
             if (_isPlaying && _dataset.TimeSeriesSnapshots?.Count > 0)
             {
                 UpdateAnimation();
             }
 
-            // --- REFACTORED LAYOUT ---
-            // This creates a persistent control panel on the right and a flexible view panel on the left.
+            // Main layout
             float controlPanelWidth = 300; 
             var availableSize = ImGui.GetContentRegionAvail();
             
@@ -256,13 +455,8 @@ namespace GeoscientistToolkit.Data.AcousticVolume
             DrawView(2, new Vector2(viewWidth, viewHeight), "YZ (Sagittal)");
             ImGui.SameLine();
             
-            // Placeholder for the 4th view
-            ImGui.BeginChild("PlaceholderView", new Vector2(viewWidth, viewHeight), ImGuiChildFlags.Border);
-            var text = "3D View (Placeholder)";
-            var textSize = ImGui.CalcTextSize(text);
-            ImGui.SetCursorPos(ImGui.GetCursorPos() + (new Vector2(viewWidth, viewHeight) - textSize) * 0.5f);
-            ImGui.TextDisabled(text);
-            ImGui.EndChild();
+            // 4th view is now a histogram
+            DrawHistogramPanel(new Vector2(viewWidth, viewHeight));
         }
         
         private void DrawView(int viewIndex, Vector2 size, string title)
@@ -279,7 +473,12 @@ namespace GeoscientistToolkit.Data.AcousticVolume
                 ImGui.SetNextItemWidth(150);
                 if (ImGui.SliderInt($"##Slice{viewIndex}", ref slice, 0, maxSlice))
                 {
-                    switch (viewIndex) { case 0: _sliceZ = slice; _needsUpdateXY = true; break; case 1: _sliceY = slice; _needsUpdateXZ = true; break; case 2: _sliceX = slice; _needsUpdateYZ = true; break; }
+                    switch (viewIndex) 
+                    { 
+                        case 0: _sliceZ = slice; _needsUpdateXY = true; break; 
+                        case 1: _sliceY = slice; _needsUpdateXZ = true; break; 
+                        case 2: _sliceX = slice; _needsUpdateYZ = true; break; 
+                    }
                 }
                 ImGui.SameLine();
                 ImGui.Text($"{slice + 1}/{maxSlice + 1}");
@@ -316,7 +515,7 @@ namespace GeoscientistToolkit.Data.AcousticVolume
             
             switch(viewIndex) { case 0: _zoomXY = zoom; _panXY = pan; break; case 1: _zoomXZ = zoom; _panXZ = pan; break; case 2: _zoomYZ = zoom; _panYZ = pan; break; }
 
-            // --- INTERACTION LOGIC ---
+            // Interaction logic
             if (isHovered)
             {
                 // Point Probing (on right-click or holding Ctrl)
@@ -325,10 +524,16 @@ namespace GeoscientistToolkit.Data.AcousticVolume
                     HandlePointProbing(io, canvasPos, canvasSize, zoom, pan, viewIndex);
                 }
 
-                // Line Drawing for FFT
+                // Line Drawing
                 if (AcousticInteractionManager.InteractionMode == ViewerInteractionMode.DrawingLine)
                 {
                     HandleLineDrawing(io, canvasPos, canvasSize, zoom, pan, viewIndex);
+                }
+                
+                // Point Selection
+                if (AcousticInteractionManager.InteractionMode == ViewerInteractionMode.SelectingPoint)
+                {
+                    HandlePointSelection(dl, io, canvasPos, canvasSize, zoom, pan, viewIndex);
                 }
             }
             
@@ -337,16 +542,24 @@ namespace GeoscientistToolkit.Data.AcousticVolume
             TextureManager texture = viewIndex switch { 0 => _textureXY, 1 => _textureXZ, _ => _textureYZ };
             if (needsUpdate || texture == null || !texture.IsValid)
             {
-                UpdateTexture(viewIndex, ref texture);
-                switch(viewIndex) { case 0: _textureXY = texture; _needsUpdateXY = false; break; case 1: _textureXZ = texture; _needsUpdateXZ = false; break; case 2: _textureYZ = texture; _needsUpdateYZ = false; break; }
+                _ = UpdateTextureAsync(viewIndex);
+                switch(viewIndex) 
+                { 
+                    case 0: _needsUpdateXY = false; break; 
+                    case 1: _needsUpdateXZ = false; break; 
+                    case 2: _needsUpdateYZ = false; break; 
+                }
             }
             
             dl.AddRectFilled(canvasPos, canvasPos + canvasSize, 0xFF202020);
             
+            // Re-fetch texture for drawing as the async task may have updated it
+            texture = viewIndex switch { 0 => _textureXY, 1 => _textureXZ, _ => _textureYZ };
+            
             if (texture != null && texture.IsValid && GetCurrentVolume() != null)
             {
                 var (width, height) = GetImageDimensionsForView(viewIndex, GetCurrentVolume());
-                var (imagePos, imageSize) = GetImageDisplayMetrics(canvasPos, canvasSize, zoom, pan, width, height); // CORRECTED CALL
+                var (imagePos, imageSize) = GetImageDisplayMetrics(canvasPos, canvasSize, zoom, pan, width, height);
                 
                 dl.PushClipRect(canvasPos, canvasPos + canvasSize, true);
                 dl.AddImage(texture.GetImGuiTextureId(), imagePos, imagePos + imageSize);
@@ -370,7 +583,7 @@ namespace GeoscientistToolkit.Data.AcousticVolume
             if (volume == null) return;
             
             var (width, height) = GetImageDimensionsForView(viewIndex, volume);
-            var (imagePos, imageSize) = GetImageDisplayMetrics(canvasPos, canvasSize, zoom, pan, width, height); // CORRECTED CALL
+            var (imagePos, imageSize) = GetImageDisplayMetrics(canvasPos, canvasSize, zoom, pan, width, height);
             Vector2 mouseImgCoord = (io.MousePos - imagePos) / imageSize;
 
             if (mouseImgCoord.X >= 0 && mouseImgCoord.X <= 1 && mouseImgCoord.Y >= 0 && mouseImgCoord.Y <= 1)
@@ -385,6 +598,13 @@ namespace GeoscientistToolkit.Data.AcousticVolume
                     1 => (x, _sliceY, y),
                     _ => (_sliceX, x, y)
                 };
+                
+                // Ensure density data is available
+                if (_dataset.DensityData == null)
+                {
+                    // Load density data if not loaded
+                    _ = LoadDensityDataAsync();
+                }
                 
                 // Clamp coordinates to be safe
                 var baseVolume = _dataset.CombinedWaveField ?? _dataset.PWaveField;
@@ -416,14 +636,66 @@ namespace GeoscientistToolkit.Data.AcousticVolume
         }
 
         /// <summary>
-        /// Handles the UI logic for drawing a line for FFT analysis.
+        /// Asynchronously loads density data if needed.
+        /// </summary>
+        private async Task LoadDensityDataAsync()
+        {
+            if (_dataset.DensityData != null) return;
+            
+            await Task.Run(() =>
+            {
+                string densityPath = System.IO.Path.Combine(_dataset.FilePath, "Density.bin");
+                string youngsPath = System.IO.Path.Combine(_dataset.FilePath, "YoungsModulus.bin");
+                string poissonPath = System.IO.Path.Combine(_dataset.FilePath, "PoissonRatio.bin");
+
+                if (System.IO.File.Exists(densityPath) && 
+                    System.IO.File.Exists(youngsPath) && 
+                    System.IO.File.Exists(poissonPath))
+                {
+                    try
+                    {
+                        var density = LoadRawFloatField(densityPath);
+                        var youngs = LoadRawFloatField(youngsPath);
+                        var poisson = LoadRawFloatField(poissonPath);
+
+                        if (density != null && youngs != null && poisson != null)
+                        {
+                            _dataset.DensityData = new DensityVolume(density, youngs, poisson);
+                            Logger.Log("[AcousticVolumeViewer] Loaded calibrated material properties.");
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        Logger.LogError($"[AcousticVolumeViewer] Failed to load material properties: {ex.Message}");
+                    }
+                }
+            });
+        }
+
+        private float[,,] LoadRawFloatField(string path)
+        {
+            using (var reader = new System.IO.BinaryReader(System.IO.File.OpenRead(path)))
+            {
+                int width = reader.ReadInt32();
+                int height = reader.ReadInt32();
+                int depth = reader.ReadInt32();
+
+                var field = new float[width, height, depth];
+                var buffer = reader.ReadBytes(field.Length * sizeof(float));
+                Buffer.BlockCopy(buffer, 0, field, 0, buffer.Length);
+                return field;
+            }
+        }
+
+        /// <summary>
+        /// Handles the UI logic for drawing a line for analysis.
         /// </summary>
         private void HandleLineDrawing(ImGuiIOPtr io, Vector2 canvasPos, Vector2 canvasSize, float zoom, Vector2 pan, int viewIndex)
         {
             ImGui.SetTooltip("Click and drag to define a line for analysis.\nPress ESC or 'Cancel' in Analysis tool to exit.");
             
             var (width, height) = GetImageDimensionsForView(viewIndex, GetCurrentVolume());
-            var (imagePos, imageSize) = GetImageDisplayMetrics(canvasPos, canvasSize, zoom, pan, width, height); // CORRECTED CALL
+            var (imagePos, imageSize) = GetImageDisplayMetrics(canvasPos, canvasSize, zoom, pan, width, height);
 
             if (ImGui.IsMouseClicked(ImGuiMouseButton.Left))
             {
@@ -448,26 +720,96 @@ namespace GeoscientistToolkit.Data.AcousticVolume
             }
         }
         
-        private void UpdateTexture(int viewIndex, ref TextureManager texture)
+        /// <summary>
+        /// Handles the UI logic for selecting a single point for analysis.
+        /// </summary>
+        private void HandlePointSelection(ImDrawListPtr dl, ImGuiIOPtr io, Vector2 canvasPos, Vector2 canvasSize, float zoom, Vector2 pan, int viewIndex)
+        {
+            ImGui.SetTooltip("Click to select a point for analysis.");
+
+            // Draw a visual cue for the cursor
+            dl.AddCircle(io.MousePos, 5, ImGui.GetColorU32(new Vector4(1, 0, 1, 0.8f)), 12, 2.0f);
+
+            if (ImGui.IsMouseClicked(ImGuiMouseButton.Left))
+            {
+                var (width, height) = GetImageDimensionsForView(viewIndex, GetCurrentVolume());
+                var (imagePos, imageSize) = GetImageDisplayMetrics(canvasPos, canvasSize, zoom, pan, width, height);
+                Vector2 mouseImgCoord = (io.MousePos - imagePos) / imageSize;
+
+                if (mouseImgCoord.X >= 0 && mouseImgCoord.X <= 1 && mouseImgCoord.Y >= 0 && mouseImgCoord.Y <= 1)
+                {
+                    int x = (int)(mouseImgCoord.X * width);
+                    int y = (int)(mouseImgCoord.Y * height);
+
+                    // Convert 2D view coordinates to 3D volume coordinates
+                    var (volX, volY, volZ) = viewIndex switch
+                    {
+                        0 => (x, y, _sliceZ),
+                        1 => (x, _sliceY, y),
+                        _ => (_sliceX, x, y)
+                    };
+                    
+                    var baseVolume = GetCurrentVolume();
+                    if (baseVolume != null)
+                    {
+                         Vector3 finalPoint = new Vector3(
+                            Math.Clamp(volX, 0, baseVolume.Width - 1),
+                            Math.Clamp(volY, 0, baseVolume.Height - 1),
+                            Math.Clamp(volZ, 0, baseVolume.Depth - 1)
+                        );
+                        AcousticInteractionManager.FinalizePoint(finalPoint);
+                    }
+                }
+            }
+        }
+        
+        /// <summary>
+        /// Asynchronously prepares slice texture data and queues the final GPU operations for the main thread.
+        /// </summary>
+        private async Task UpdateTextureAsync(int viewIndex)
         {
             ChunkedVolume volume = GetCurrentVolume();
             if (volume == null) return;
-            
+
             try
             {
                 var (width, height) = GetImageDimensionsForView(viewIndex, volume);
-                byte[] sliceData = ExtractSliceData(viewIndex, volume, width, height);
-                
-                byte[] rgbaData = ApplyColorMap(sliceData, width, height);
-                
-                texture?.Dispose();
-                texture = TextureManager.CreateFromPixelData(rgbaData, (uint)width, (uint)height);
+                string cacheKey = $"{_currentMode}_{viewIndex}_{GetSliceIndexForView(viewIndex)}_{_contrastMin:F3}_{_contrastMax:F3}";
+
+                // CPU-bound work: extract slice data and apply color map. Can run on a background thread.
+                byte[] sliceData = _sliceCache.GetOrLoad(cacheKey, () => ExtractSliceData(viewIndex, volume, width, height));
+                byte[] rgbaData = await Task.Run(() => ApplyColorMap(sliceData, width, height));
+
+                // GPU/main-thread work: queue an action to create/swap textures safely.
+                _mainThreadActions.Enqueue(() =>
+                {
+                    try
+                    {
+                        var newTexture = TextureManager.CreateFromPixelData(rgbaData, (uint)width, (uint)height);
+                        
+                        TextureManager oldTexture = null;
+                        switch (viewIndex)
+                        {
+                            case 0: oldTexture = _textureXY; _textureXY = newTexture; break;
+                            case 1: oldTexture = _textureXZ; _textureXZ = newTexture; break;
+                            case 2: oldTexture = _textureYZ; _textureYZ = newTexture; break;
+                        }
+                        // Dispose the old texture on the main thread after the new one is in place.
+                        oldTexture?.Dispose();
+                    }
+                    catch (Exception ex)
+                    {
+                        Logger.LogError($"[AcousticVolumeViewer] Failed to create/swap texture on main thread: {ex.Message}");
+                    }
+                });
             }
             catch (Exception ex)
             {
-                Logger.LogError($"[AcousticVolumeViewer] Error updating texture: {ex.Message}");
+                Logger.LogError($"[AcousticVolumeViewer] Error preparing texture update: {ex.Message}");
             }
         }
+        
+        private int GetSliceIndexForView(int viewIndex) => viewIndex switch { 0 => _sliceZ, 1 => _sliceY, 2 => _sliceX, _ => 0 };
         
         private byte[] ExtractSliceData(int viewIndex, ChunkedVolume volume, int width, int height)
         {
@@ -536,26 +878,26 @@ namespace GeoscientistToolkit.Data.AcousticVolume
         private Vector4 GetJetColor(float v)
         {
             v = Math.Clamp(v, 0.0f, 1.0f);
-            Vector4 c = new Vector4(1.0f, 1.0f, 1.0f, 1.0f); // Default white
+            Vector4 c = new Vector4(1.0f, 1.0f, 1.0f, 1.0f);
         
             if (v < 0.125f) {
                 c.X = 0.0f;
                 c.Y = 0.0f;
-                c.Z = 0.5f + 4.0f * v; // 0.5 -> 1 (dark blue to blue)
+                c.Z = 0.5f + 4.0f * v;
             } else if (v < 0.375f) {
                 c.X = 0.0f;
-                c.Y = 4.0f * (v - 0.125f); // 0 -> 1 (blue to cyan)
+                c.Y = 4.0f * (v - 0.125f);
                 c.Z = 1.0f;
             } else if (v < 0.625f) {
-                c.X = 4.0f * (v - 0.375f); // 0 -> 1 (cyan to green to yellow)
+                c.X = 4.0f * (v - 0.375f);
                 c.Y = 1.0f;
                 c.Z = 1.0f - 4.0f * (v - 0.375f);
             } else if (v < 0.875f) {
                 c.X = 1.0f;
-                c.Y = 1.0f - 4.0f * (v - 0.625f); // 1 -> 0 (yellow to red)
+                c.Y = 1.0f - 4.0f * (v - 0.625f);
                 c.Z = 0.0f;
             } else {
-                c.X = 1.0f - 4.0f * (v - 0.875f); // 1 -> 0.5 (red to dark red)
+                c.X = 1.0f - 4.0f * (v - 0.875f);
                 c.Y = 0.0f;
                 c.Z = 0.0f;
             }
@@ -564,7 +906,6 @@ namespace GeoscientistToolkit.Data.AcousticVolume
         
         private Vector4 GetViridisColor(float t)
         {
-            // Polynomial coefficients for Viridis
             float r = 0.26700f + t * (2.05282f - t * (29.25595f - t * (127.35689f - t * (214.53428f - t * 128.38883f))));
             float g = 0.00497f + t * (1.10748f + t * (4.29528f  - t * (4.93638f  + t * ( -7.42203f + t * 4.02493f))));
             float b = 0.32942f + t * (0.45984f - t * (5.58064f  + t * (27.20658f - t * (50.11327f + t * 28.18927f))));
@@ -585,19 +926,15 @@ namespace GeoscientistToolkit.Data.AcousticVolume
         private Vector4 GetSeismicColor(float v)
         {
             v = Math.Clamp(v, 0.0f, 1.0f);
-            // Diverging: Blue -> White -> Red
-            // v = 0.0 -> Blue (0,0,1)
-            // v = 0.5 -> White (1,1,1)
-            // v = 1.0 -> Red (1,0,0)
             if (v < 0.5f)
             {
-                float t = v * 2.0f; // remaps [0, 0.5] to [0, 1]
-                return new Vector4(t, t, 1.0f, 1.0f); // Interpolate from Blue to White
+                float t = v * 2.0f;
+                return new Vector4(t, t, 1.0f, 1.0f);
             }
             else
             {
-                float t = (v - 0.5f) * 2.0f; // remaps [0.5, 1] to [0, 1]
-                return new Vector4(1.0f, 1.0f - t, 1.0f - t, 1.0f); // Interpolate from White to Red
+                float t = (v - 0.5f) * 2.0f;
+                return new Vector4(1.0f, 1.0f - t, 1.0f - t, 1.0f);
             }
         }
         #endregion
@@ -607,7 +944,7 @@ namespace GeoscientistToolkit.Data.AcousticVolume
             ImGui.Text("Acoustic Simulation Results");
             ImGui.Separator();
             
-            if (_showInfo)
+            if (_showInfo && _dataset != null)
             {
                 ImGui.Text($"P-Wave Velocity: {_dataset.PWaveVelocity:F2} m/s");
                 ImGui.Text($"S-Wave Velocity: {_dataset.SWaveVelocity:F2} m/s");
@@ -634,6 +971,57 @@ namespace GeoscientistToolkit.Data.AcousticVolume
             if (ImGui.RadioButton("Horizontal", _layout == Layout.Horizontal)) _layout = Layout.Horizontal; ImGui.SameLine();
             if (ImGui.RadioButton("Vertical", _layout == Layout.Vertical)) _layout = Layout.Vertical; ImGui.SameLine();
             if (ImGui.RadioButton("2x2 Grid", _layout == Layout.Grid2x2)) _layout = Layout.Grid2x2;
+            
+            ImGui.Spacing();
+            ImGui.Separator();
+            ImGui.Text("Cache Status:");
+            ImGui.Text($"Cached Slices: {_sliceCache.Count}/{SliceCache.MAX_CACHE_SIZE}");
+            if (ImGui.Button("Clear Cache"))
+            {
+                _sliceCache.Clear();
+                Logger.Log("[AcousticVolumeViewer] Slice cache cleared");
+            }
+        }
+
+        private void DrawHistogramPanel(Vector2 size)
+        {
+            ImGui.BeginChild("HistogramView", size, ImGuiChildFlags.Border);
+            ImGui.Text("Slice Histogram (XY View)");
+            ImGui.Separator();
+
+            var volume = GetCurrentVolume();
+            if (volume == null)
+            {
+                ImGui.TextDisabled("No data available.");
+                ImGui.EndChild();
+                return;
+            }
+
+            // Check if histogram needs recalculation (slice index or mode changed)
+            if (_lastHistogramSliceZ != _sliceZ || _lastHistogramMode != _currentMode || _histogramDataXY == null)
+            {
+                var (width, height) = GetImageDimensionsForView(0, volume);
+                string cacheKey = $"{_currentMode}_0_{_sliceZ}_{_contrastMin:F3}_{_contrastMax:F3}";
+                byte[] sliceData = _sliceCache.GetOrLoad(cacheKey, () => ExtractSliceData(0, volume, width, height));
+
+                // Calculate histogram
+                var bins = new int[256];
+                for (int i = 0; i < sliceData.Length; i++)
+                {
+                    bins[sliceData[i]]++;
+                }
+                _histogramDataXY = bins.Select(b => (float)b).ToArray();
+                _lastHistogramSliceZ = _sliceZ;
+                _lastHistogramMode = _currentMode;
+            }
+
+            if (_histogramDataXY != null && _histogramDataXY.Length > 0)
+            {
+                ImGui.PlotHistogram("##slice_histo", ref _histogramDataXY[0], _histogramDataXY.Length, 0,
+                    null, 0, _histogramDataXY.Max(), new Vector2(ImGui.GetContentRegionAvail().X, ImGui.GetContentRegionAvail().Y));
+            }
+
+            ImGui.EndChild();
         }
         
         private void DrawLegend()
@@ -745,6 +1133,94 @@ namespace GeoscientistToolkit.Data.AcousticVolume
             _textureXY?.Dispose();
             _textureXZ?.Dispose();
             _textureYZ?.Dispose();
+            _sliceCache?.Clear();
+            _loadingProgress?.Close();
+        }
+    }
+    
+    /// <summary>
+    /// Cache for slice data to avoid re-extracting from volumes.
+    /// </summary>
+    internal class SliceCache
+    {
+        public const int MAX_CACHE_SIZE = 64; // Cache up to 64 slices
+        private readonly Dictionary<string, byte[]> _cache = new Dictionary<string, byte[]>();
+        private readonly LinkedList<string> _lru = new LinkedList<string>();
+        
+        public int Count => _cache.Count;
+        
+        public byte[] GetOrLoad(string key, Func<byte[]> loader)
+        {
+            if (_cache.TryGetValue(key, out var data))
+            {
+                // Move to front of LRU
+                _lru.Remove(key);
+                _lru.AddFirst(key);
+                return data;
+            }
+            
+            // Load new data
+            data = loader();
+            
+            // Add to cache
+            _cache[key] = data;
+            _lru.AddFirst(key);
+            
+            // Evict if needed
+            while (_lru.Count > MAX_CACHE_SIZE)
+            {
+                var oldest = _lru.Last.Value;
+                _lru.RemoveLast();
+                _cache.Remove(oldest);
+            }
+            
+            return data;
+        }
+        
+        public void Clear()
+        {
+            _cache.Clear();
+            _lru.Clear();
+        }
+    }
+    
+    /// <summary>
+    /// Adapter to make LazyChunkedVolume compatible with ChunkedVolume interface.
+    /// </summary>
+    internal class LazyChunkedVolumeAdapter : ChunkedVolume
+    {
+        private readonly LazyChunkedVolume _lazyVolume;
+        
+        public LazyChunkedVolumeAdapter(LazyChunkedVolume lazyVolume) 
+            : base(lazyVolume.Width, lazyVolume.Height, lazyVolume.Depth)
+        {
+            _lazyVolume = lazyVolume;
+            this.PixelSize = lazyVolume.PixelSize;
+        }
+        
+        public new byte this[int x, int y, int z]
+        {
+            get => _lazyVolume[x, y, z];
+            set => throw new NotSupportedException("Lazy volumes are read-only");
+        }
+        
+        public new void ReadSliceZ(int z, byte[] buffer)
+        {
+            _lazyVolume.ReadSliceZ(z, buffer);
+        }
+        
+        public new void WriteSliceZ(int z, byte[] data)
+        {
+            throw new NotSupportedException("Lazy volumes are read-only");
+        }
+        
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing)
+            {
+                _lazyVolume?.Dispose();
+            }
+            base.Dispose(disposing);
         }
     }
 }

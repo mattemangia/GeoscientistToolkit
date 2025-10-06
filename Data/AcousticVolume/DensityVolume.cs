@@ -2,6 +2,7 @@
 using GeoscientistToolkit.Data.VolumeData;
 using GeoscientistToolkit.Util;
 using System;
+using System.Linq;
 using System.Threading.Tasks;
 
 namespace GeoscientistToolkit.Data.AcousticVolume
@@ -149,6 +150,12 @@ namespace GeoscientistToolkit.Data.AcousticVolume
             for (int i = 0; i < _poissonRatio.Length; i++)
                 sum += _poissonRatio[i];
             return (float)(sum / _poissonRatio.Length);
+        }
+
+        public float GetMeanDensity()
+        {
+            if (_density == null || _density.Length == 0) return 0;
+            return _density.Average();
         }
 
         private int GetIndex(int x, int y, int z) => z * Width * Height + y * Width + x;

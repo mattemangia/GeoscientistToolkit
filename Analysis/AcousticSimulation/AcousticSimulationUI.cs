@@ -653,11 +653,15 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
             _exportManager.SetCalibrationData(_calibrationManager.CalibrationData);
             if (_lastResults.DamageField != null)
             {
-                _exportManager.SetDamageField(_lastResults.DamageField);
+                // This was the original location of the SetDamageField call. 
+                // It is moved to RunSimulationAsync to avoid being overwritten.
                 ImGui.Text($"Damage Field: Available ({_lastResults.DamageField.Length} voxels)");
             }
     
-            _exportManager.DrawExportControls(_lastResults, _parameters, dataset);
+            // --- FIX START ---
+            // Pass the damage field from the results directly to the export controls.
+            _exportManager.DrawExportControls(_lastResults, _parameters, dataset, _lastResults.DamageField);
+            // --- FIX END ---
             ImGui.Spacing();
 
             bool canAddToCalibration = _selectedMaterialIDs.Count == 1;
@@ -906,7 +910,7 @@ private void ExportAllTomographySlices()
         
             if (!placementResult.HasValue)
             {
-                Logger.LogError("[AutoPlace] Failed to automatically place transducers. The selected material(s) might be too small, fragmented, or not present along the chosen axis.");
+                Logger.LogError($"[AutoPlace] Failed to automatically place transducers. The selected material(s) might be too small, fragmented, or not present along the chosen axis.");
                 return;
             }
         
@@ -942,50 +946,99 @@ private void ExportAllTomographySlices()
         }
 
         private int CalculateEstimatedTimeSteps(CtImageStackDataset dataset)
+{
+    if (dataset == null || !_selectedMaterialIDs.Any()) return 1000;
+
+    try
+    {
+        // --- STEP 1: Find average and maximum P-wave velocities among selected materials ---
+        float vp_avg = 5000f; // Fallback average velocity
+        float vp_max = 5000f; // Fallback maximum velocity
+        bool firstMaterial = true;
+
+        var calculatedVps = new List<float>();
+
+        foreach (byte materialId in _selectedMaterialIDs)
         {
-            if (dataset == null || !_selectedMaterialIDs.Any()) return 1000;
-        
-            try
+            var material = dataset.Materials.FirstOrDefault(m => m.ID == materialId);
+            if (material == null) continue;
+
+            float density_g_cm3 = (float)(material.Density);
+            if (density_g_cm3 <= 0) density_g_cm3 = 2.7f; // fallback density
+            float density_kg_m3 = density_g_cm3 * 1000f;
+
+            // Start with UI overrides, then check material library
+            float e_MPa = _youngsModulus;
+            float nu = _poissonRatio;
+            
+            if (!string.IsNullOrEmpty(material.PhysicalMaterialName))
             {
-                // 1. Get material properties
-                var primaryMaterial = dataset.Materials.FirstOrDefault(m => _selectedMaterialIDs.Contains(m.ID));
-                float density = (float)(primaryMaterial?.Density ?? 2.7); // g/cm³
-                if (density <= 0) density = 2.7f;
-                density *= 1000; // to kg/m³
-        
-                float E = _youngsModulus * 1e6f; // Pa
-                float nu = _poissonRatio;
-        
-                // 2. Estimate Vp
-                float mu = E / (2.0f * (1.0f + nu));
-                float lambda = E * nu / ((1 + nu) * (1 - 2 * nu));
-                float vp = MathF.Sqrt((lambda + 2 * mu) / density);
-                if (float.IsNaN(vp) || vp <= 100) vp = 5000f; // Fallback
-        
-                // 3. Calculate distance
-                float pixelSizeM = (float)dataset.PixelSize / 1000f;
-                float sliceThicknessM = (float)dataset.SliceThickness / 1000f;
-                float dx = (_rxPosition.X - _txPosition.X) * dataset.Width * pixelSizeM;
-                float dy = (_rxPosition.Y - _txPosition.Y) * dataset.Height * pixelSizeM;
-                float dz = (_rxPosition.Z - _txPosition.Z) * dataset.Depth * sliceThicknessM;
-                float distance = MathF.Sqrt(dx * dx + dy * dy + dz * dz);
-        
-                // 4. Estimate time step (dt)
-                float dt_est = pixelSizeM / (1.732f * vp) * 0.5f; // Courant condition estimate
-        
-                // 5. Calculate steps
-                if (dt_est < 1e-12f) return 1000; // Avoid division by zero
-                float travelTime = distance / vp;
-                int steps = (int)(travelTime / dt_est);
-        
-                // Add a buffer and clamp to a reasonable range
-                return Math.Clamp((int)(steps * 1.5), 500, 50000);
+                var physMat = MaterialLibrary.Instance.Find(material.PhysicalMaterialName);
+                if (physMat != null)
+                {
+                    // Use library values if available, converting GPa to MPa for Young's Modulus
+                    e_MPa = (float)(physMat.YoungModulus_GPa ?? (_youngsModulus / 1000.0)) * 1000f;
+                    nu = (float)(physMat.PoissonRatio ?? _poissonRatio);
+                }
             }
-            catch
+
+            float e_Pa = e_MPa * 1e6f;
+            
+            // Check for invalid material properties to avoid NaN
+            if (e_Pa <= 0 || nu <= -1.0f || nu >= 0.5f) continue;
+
+            float mu = e_Pa / (2.0f * (1.0f + nu));
+            float lambda = e_Pa * nu / ((1.0f + nu) * (1.0f - 2.0f * nu));
+            float current_vp = MathF.Sqrt((lambda + 2.0f * mu) / density_kg_m3);
+            
+            if (float.IsNaN(current_vp) || current_vp <= 100) continue;
+
+            calculatedVps.Add(current_vp);
+
+            if (firstMaterial)
             {
-                return 1000; // Fallback on any error
+                vp_avg = current_vp; // Use the first selected material for average travel time
+                firstMaterial = false;
             }
         }
+
+        if (calculatedVps.Any())
+        {
+            vp_max = calculatedVps.Max();
+        }
+
+
+        // --- STEP 2: Calculate physical distance between transducers ---
+        float pixelSizeM = (float)dataset.PixelSize / 1000f;
+        float sliceThicknessM = (float)dataset.SliceThickness / 1000f;
+        float dx = (_rxPosition.X - _txPosition.X) * dataset.Width * pixelSizeM;
+        float dy = (_rxPosition.Y - _txPosition.Y) * dataset.Height * pixelSizeM;
+        float dz = (_rxPosition.Z - _txPosition.Z) * dataset.Depth * sliceThicknessM;
+        float distance = MathF.Sqrt(dx * dx + dy * dy + dz * dz);
+        if (distance < pixelSizeM) distance = pixelSizeM; // Avoid zero distance
+
+        // --- STEP 3: Estimate the simulation time step (dt) using the worst-case velocity ---
+        // CFL condition: dt <= h / (sqrt(3) * Vp_max), with a safety factor of 0.5
+        float dt_est = 0.5f * (pixelSizeM / (1.732f * vp_max));
+
+        // --- STEP 4: Calculate P-wave travel time and corresponding steps ---
+        if (dt_est < 1e-12f) return 2000; // Avoid division by zero, return a safe default
+        float travelTime = distance / vp_avg;
+        int p_wave_steps = (int)(travelTime / dt_est);
+
+        // --- STEP 5: Add a generous buffer to allow S-wave to arrive and see reflections ---
+        // We assume Vp/Vs is ~1.8, and add an extra 25% margin.
+        // Total multiplier = 1.8 (for S-wave) * 1.25 (margin) = 2.25
+        int total_steps = (int)(p_wave_steps * 2.25);
+        
+        // Clamp to a reasonable range to prevent extreme values
+        return Math.Clamp(total_steps, 500, 50000);
+    }
+    catch
+    {
+        return 2000; // Fallback on any error
+    }
+}
 
         private void DrawTomographyWindow()
 {

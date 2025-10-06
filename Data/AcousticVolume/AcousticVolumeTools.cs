@@ -91,6 +91,13 @@ namespace GeoscientistToolkit.Data.AcousticVolume
                         },
                         new ToolEntry
                         {
+                            Name = "Damage Analysis",
+                            Description = "Tools for analyzing fracture and damage patterns",
+                            Tool = new DamageAnalysisTool(),
+                            Category = ToolCategory.Analysis
+                        },
+                        new ToolEntry
+                        {
                             Name = "Velocity Profile",
                             Description = "Analyze Vp and Vs along a user-defined line from calibrated density data",
                             Tool = new VelocityProfileTool(),
@@ -121,6 +128,14 @@ namespace GeoscientistToolkit.Data.AcousticVolume
                             Name = "Properties Export",
                             Description = "Export calculated physical properties and damage data",
                             Tool = new AcousticExportResultsTool(),
+                            Category = ToolCategory.Export
+                        },
+                        // --- NEW TOOL ADDED HERE ---
+                        new ToolEntry
+                        {
+                            Name = "Analysis Report",
+                            Description = "Generate a full textual and graphical report of the dataset analysis.",
+                            Tool = new AcousticReportGeneratorTool(),
                             Category = ToolCategory.Export
                         }
                     }
@@ -460,8 +475,32 @@ namespace GeoscientistToolkit.Data.AcousticVolume
                 _isCalculating = false;
                 return;
             }
+            var (vpData, vsData) = CalculateProfile_Internal(densityVolume);
+            _vpData = vpData;
+            _vsData = vsData;
 
-            // Get coordinates from the interaction manager
+            if (_vpData.Count > 0)
+            {
+                float avgVp = _vpData.Average();
+                float avgVs = _vsData.Average();
+                float avgVpVs = avgVs > 0 ? avgVp / avgVs : 0;
+                _statsResult = $"Points Sampled: {_vpData.Count}\n" +
+                               $"Average Vp: {avgVp:F2} m/s\n" +
+                               $"Average Vs: {avgVs:F2} m/s\n" +
+                               $"Average Vp/Vs Ratio: {avgVpVs:F3}";
+            }
+            else
+            {
+                _statsResult = "No data points found along the selected line.";
+            }
+
+            Logger.Log($"[VelocityProfileTool] Extracted {_vpData.Count} data points for velocity profile.");
+            _isCalculating = false;
+        }
+
+        public (List<float> vpData, List<float> vsData) CalculateProfile_Internal(DensityVolume densityVolume)
+        {
+             // Get coordinates from the interaction manager
             int x1 = (int)AcousticInteractionManager.LineStartPoint.X;
             int y1 = (int)AcousticInteractionManager.LineStartPoint.Y;
             int x2 = (int)AcousticInteractionManager.LineEndPoint.X;
@@ -469,8 +508,8 @@ namespace GeoscientistToolkit.Data.AcousticVolume
             int slice_coord = AcousticInteractionManager.LineSliceIndex;
             int viewIndex = AcousticInteractionManager.LineViewIndex;
 
-            _vpData = new List<float>();
-            _vsData = new List<float>();
+            var vpData = new List<float>();
+            var vsData = new List<float>();
 
             // Bresenham's line algorithm to iterate over pixels
             int dx = Math.Abs(x2 - x1), sx = x1 < x2 ? 1 : -1;
@@ -506,8 +545,8 @@ namespace GeoscientistToolkit.Data.AcousticVolume
 
                 if (inBounds)
                 {
-                    _vpData.Add(densityVolume.GetPWaveVelocity(volX, volY, volZ));
-                    _vsData.Add(densityVolume.GetSWaveVelocity(volX, volY, volZ));
+                    vpData.Add(densityVolume.GetPWaveVelocity(volX, volY, volZ));
+                    vsData.Add(densityVolume.GetSWaveVelocity(volX, volY, volZ));
                 }
 
                 if (x1 == x2 && y1 == y2) break;
@@ -515,24 +554,7 @@ namespace GeoscientistToolkit.Data.AcousticVolume
                 if (e2 >= dy) { err += dy; x1 += sx; }
                 if (e2 <= dx) { err += dx; y1 += sy; }
             }
-
-            if (_vpData.Count > 0)
-            {
-                float avgVp = _vpData.Average();
-                float avgVs = _vsData.Average();
-                float avgVpVs = avgVs > 0 ? avgVp / avgVs : 0;
-                _statsResult = $"Points Sampled: {_vpData.Count}\n" +
-                               $"Average Vp: {avgVp:F2} m/s\n" +
-                               $"Average Vs: {avgVs:F2} m/s\n" +
-                               $"Average Vp/Vs Ratio: {avgVpVs:F3}";
-            }
-            else
-            {
-                _statsResult = "No data points found along the selected line.";
-            }
-
-            Logger.Log($"[VelocityProfileTool] Extracted {_vpData.Count} data points for velocity profile.");
-            _isCalculating = false;
+            return (vpData, vsData);
         }
     }
     #endregion

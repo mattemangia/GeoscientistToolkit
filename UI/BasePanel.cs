@@ -133,6 +133,7 @@ namespace GeoscientistToolkit.UI
                 // and this will update the caller's flag for the next frame.
                 pOpen = _isOpen;
             }
+            
         }
 
         /// <summary>

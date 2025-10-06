@@ -28,6 +28,7 @@ namespace GeoscientistToolkit.UI
         private readonly SettingsWindow _settingsWindow = new();
         private readonly Volume3DDebugWindow _volume3DDebugWindow = new();
         private readonly MaterialLibraryWindow _materialLibraryWindow = new();
+        private readonly ImGuiWindowScreenshotTool _screenshotTool; // This tool is now self-sufficient
 
         // File Dialogs - FIXED: Changed SaveFile dialog to correct type
         private readonly ImGuiFileDialog _loadProjectDialog = new("LoadProjectDlg", FileDialogType.OpenFile, "Load Project");
@@ -60,6 +61,9 @@ namespace GeoscientistToolkit.UI
         {
             // Subscribe to dataset removal events
             ProjectManager.Instance.DatasetRemoved += OnDatasetRemoved;
+            
+            // Initialize the screenshot tool. It will set its own static instance for global access.
+            _screenshotTool = new ImGuiWindowScreenshotTool();
         }
 
         // ──────────────────────────────────────────────────────────────────────
@@ -191,6 +195,8 @@ namespace GeoscientistToolkit.UI
             _metadataTableViewer.Submit();
             _materialLibraryWindow.Submit();
 
+            // The screenshot tool must be updated AFTER all other UI has been submitted.
+            _screenshotTool.PostUpdate();
             
             ImGui.End();
         }
@@ -362,12 +368,10 @@ namespace GeoscientistToolkit.UI
                 ImGui.Separator();
                 if (ImGui.MenuItem("Settings...", "Ctrl+,")) _settingsWindow.Open();
                 ImGui.Separator();
-                ImGui.Separator();
                 if (ImGui.MenuItem("Material Library..."))
                 {
                     _materialLibraryWindow.Open();
                 }
-                ImGui.MenuItem("Tools Panel", string.Empty, ref _showTools);
                 ImGui.EndMenu();
             }
 
@@ -376,6 +380,7 @@ namespace GeoscientistToolkit.UI
                 ImGui.MenuItem("Datasets Panel", string.Empty, ref _showDatasets);
                 ImGui.MenuItem("Properties Panel", string.Empty, ref _showProperties);
                 ImGui.MenuItem("Log Panel", string.Empty, ref _showLog);
+                ImGui.MenuItem("Tools Panel", string.Empty, ref _showTools);
                 ImGui.Separator();
 
                 // Full Screen toggle (disabled on macOS)
@@ -387,6 +392,19 @@ namespace GeoscientistToolkit.UI
                 }
 
                 if (ImGui.MenuItem("Reset Layout")) _layoutBuilt = false;
+                ImGui.EndMenu();
+            }
+            
+            if (ImGui.BeginMenu("Tools"))
+            {
+                if (ImGui.MenuItem("Screenshot Fullscreen"))
+                {
+                    _screenshotTool.TakeFullScreenshot();
+                }
+                if (ImGui.MenuItem("Screenshot Window..."))
+                {
+                    _screenshotTool.StartSelection();
+                }
                 ImGui.EndMenu();
             }
             

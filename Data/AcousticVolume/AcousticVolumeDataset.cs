@@ -52,6 +52,8 @@ namespace GeoscientistToolkit.Data.AcousticVolume
         
         // Calibration data
         public CalibrationData Calibration { get; set; }
+
+        public double VoxelSize { get; set; } = 0.001; // Default to 1mm
         
         public AcousticVolumeDataset(string name, string filePath) : base(name, filePath)
         {
@@ -101,6 +103,7 @@ namespace GeoscientistToolkit.Data.AcousticVolume
                 if (File.Exists(pWavePath))
                 {
                     PWaveField = ChunkedVolume.LoadFromBinAsync(pWavePath, false).Result;
+                    if (PWaveField != null) VoxelSize = PWaveField.PixelSize;
                 }
                 
                 string sWavePath = Path.Combine(FilePath, "SWaveField.bin");
@@ -113,6 +116,7 @@ namespace GeoscientistToolkit.Data.AcousticVolume
                 if (File.Exists(combinedPath))
                 {
                     CombinedWaveField = ChunkedVolume.LoadFromBinAsync(combinedPath, false).Result;
+                    if (CombinedWaveField != null && VoxelSize <= 0) VoxelSize = CombinedWaveField.PixelSize;
                 }
                 
                 // Load damage field

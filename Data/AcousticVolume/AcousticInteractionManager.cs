@@ -15,7 +15,11 @@ namespace GeoscientistToolkit.UI.AcousticVolume
         /// <summary>
         /// The user is actively drawing a line for analysis.
         /// </summary>
-        DrawingLine
+        DrawingLine,
+        /// <summary>
+        /// The user is selecting a single point for analysis.
+        /// </summary>
+        SelectingPoint
     }
 
     /// <summary>
@@ -33,6 +37,12 @@ namespace GeoscientistToolkit.UI.AcousticVolume
         public static Vector2 LineStartPoint { get; set; }
         public static Vector2 LineEndPoint { get; set; }
         public static bool HasNewLine { get; set; } = false;
+        
+        // --- NEW: Properties for a single point ---
+        public static bool IsPointDefinitionActive { get; set; } = false;
+        public static Vector3 SelectedPoint { get; set; } // Using Vector3 for 3D volume coordinates
+        public static bool HasNewPoint { get; set; } = false;
+
 
         /// <summary>
         /// Initiates the line drawing mode in the viewer.
@@ -41,6 +51,7 @@ namespace GeoscientistToolkit.UI.AcousticVolume
         {
             InteractionMode = ViewerInteractionMode.DrawingLine;
             HasNewLine = false;
+            IsPointDefinitionActive = false; // Ensure other modes are off
         }
 
         /// <summary>
@@ -64,6 +75,36 @@ namespace GeoscientistToolkit.UI.AcousticVolume
             InteractionMode = ViewerInteractionMode.None;
             IsLineDefinitionActive = false;
             HasNewLine = true;
+        }
+
+        /// <summary>
+        /// Initiates the point selection mode in the viewer.
+        /// </summary>
+        public static void StartPointSelection()
+        {
+            InteractionMode = ViewerInteractionMode.SelectingPoint;
+            HasNewPoint = false;
+            IsLineDefinitionActive = false; // Ensure other modes are off
+        }
+
+        /// <summary>
+        /// Cancels the point selection mode.
+        /// </summary>
+        public static void CancelPointSelection()
+        {
+            InteractionMode = ViewerInteractionMode.None;
+            IsPointDefinitionActive = false;
+        }
+
+        /// <summary>
+        /// Finalizes the point coordinates and notifies that a new point is available.
+        /// </summary>
+        public static void FinalizePoint(Vector3 pointInVolume)
+        {
+            SelectedPoint = pointInVolume;
+            InteractionMode = ViewerInteractionMode.None;
+            IsPointDefinitionActive = false;
+            HasNewPoint = true;
         }
     }
 }

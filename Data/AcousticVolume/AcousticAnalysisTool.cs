@@ -233,6 +233,7 @@ namespace GeoscientistToolkit.UI.AcousticVolume
             if (dataset.PWaveField != null) { if(ImGui.RadioButton("P-Wave", ref _selectedVolume, 0)) ClearResults(); ImGui.SameLine(); }
             if (dataset.SWaveField != null) { if(ImGui.RadioButton("S-Wave", ref _selectedVolume, 1)) ClearResults(); ImGui.SameLine(); }
             if (dataset.CombinedWaveField != null) { if(ImGui.RadioButton("Combined", ref _selectedVolume, 2)) ClearResults(); }
+            if (dataset.DamageField != null) { ImGui.SameLine(); if(ImGui.RadioButton("Damage", ref _selectedVolume, 3)) ClearResults(); }
             ImGui.NewLine();
         }
 
@@ -255,6 +256,7 @@ namespace GeoscientistToolkit.UI.AcousticVolume
                 0 => dataset.PWaveField,
                 1 => dataset.SWaveField,
                 2 => dataset.CombinedWaveField,
+                3 => dataset.DamageField,
                 _ => dataset.CombinedWaveField // Default fallback
             };
         }
