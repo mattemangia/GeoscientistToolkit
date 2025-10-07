@@ -571,7 +571,8 @@ namespace GeoscientistToolkit.Data.AcousticVolume
             if (texture != null && texture.IsValid)
             {
                 var (width, height) = GetImageDimensionsForView(viewIndex);
-                var (imagePos, imageSize) = GetImageDisplayMetrics(canvasPos, canvasSize, zoom, pan, width, height);
+                var (imagePos, imageSize) = GetImageDisplayMetrics(
+                    canvasPos, canvasSize, zoom, pan, width, height, viewIndex);
                 
                 dl.PushClipRect(canvasPos, canvasPos + canvasSize, true);
                 dl.AddImage(texture.GetImGuiTextureId(), imagePos, imagePos + imageSize);
@@ -595,7 +596,7 @@ namespace GeoscientistToolkit.Data.AcousticVolume
             if (!hasVolume) return;
             
             var (width, height) = GetImageDimensionsForView(viewIndex);
-            var (imagePos, imageSize) = GetImageDisplayMetrics(canvasPos, canvasSize, zoom, pan, width, height);
+            var (imagePos, imageSize) = GetImageDisplayMetrics(canvasPos, canvasSize, zoom, pan, width, height, viewIndex);
             Vector2 mouseImgCoord = (io.MousePos - imagePos) / imageSize;
 
             if (mouseImgCoord.X >= 0 && mouseImgCoord.X <= 1 && mouseImgCoord.Y >= 0 && mouseImgCoord.Y <= 1)
@@ -714,7 +715,7 @@ namespace GeoscientistToolkit.Data.AcousticVolume
             {
                 _isDrawingLine = false;
                 
-                var (imagePos, imageSize) = GetImageDisplayMetrics(canvasPos, canvasSize, zoom, pan, width, height);
+                var (imagePos, imageSize) = GetImageDisplayMetrics(canvasPos, canvasSize, zoom, pan, width, height, viewIndex);
                 Vector2 startPixel = ((_lineStartPos - imagePos) / imageSize) * new Vector2(width, height);
                 Vector2 endPixel = ((io.MousePos - imagePos) / imageSize) * new Vector2(width, height);
                 
@@ -735,7 +736,7 @@ namespace GeoscientistToolkit.Data.AcousticVolume
             if (ImGui.IsMouseClicked(ImGuiMouseButton.Left))
             {
                 var (width, height) = GetImageDimensionsForView(viewIndex);
-                var (imagePos, imageSize) = GetImageDisplayMetrics(canvasPos, canvasSize, zoom, pan, width, height);
+                var (imagePos, imageSize) = GetImageDisplayMetrics(canvasPos, canvasSize, zoom, pan, width, height, viewIndex);
                 Vector2 mouseImgCoord = (io.MousePos - imagePos) / imageSize;
 
                 if (mouseImgCoord.X >= 0 && mouseImgCoord.X <= 1 && mouseImgCoord.Y >= 0 && mouseImgCoord.Y <= 1)
@@ -753,7 +754,7 @@ namespace GeoscientistToolkit.Data.AcousticVolume
                     var (hasVolume, w, h, d) = GetCurrentVolumeDimensions();
                     if (hasVolume)
                     {
-                         Vector3 finalPoint = new Vector3(
+                        Vector3 finalPoint = new Vector3(
                             Math.Clamp(volX, 0, w - 1),
                             Math.Clamp(volY, 0, h - 1),
                             Math.Clamp(volZ, 0, d - 1)
@@ -1184,13 +1185,43 @@ namespace GeoscientistToolkit.Data.AcousticVolume
             };
         }
         
-        private (Vector2 pos, Vector2 size) GetImageDisplayMetrics(Vector2 canvasPos, Vector2 canvasSize, float zoom, Vector2 pan, int imageWidth, int imageHeight)
+        private (Vector2 pos, Vector2 size) GetImageDisplayMetrics(Vector2 canvasPos, Vector2 canvasSize, float zoom, Vector2 pan, int imageWidth, int imageHeight, int viewIndex)
         {
-            float imageAspect = (float)imageWidth / imageHeight;
+            // This method assumes the dataset has properties to correct for anisotropic voxels.
+            // The AcousticVolumeDataset uses a single isotropic 'VoxelSize'.
+            float pixelWidth, pixelHeight;
+
+            switch (viewIndex)
+            {
+                case 0: // XY View
+                    pixelWidth = (float)_dataset.VoxelSize; 
+                    pixelHeight = (float)_dataset.VoxelSize;
+                    break;
+                case 1: // XZ View
+                case 2: // YZ View
+                    pixelWidth = (float)_dataset.VoxelSize;
+                    // For an isotropic volume, the "slice thickness" is the same as the pixel size.
+                    pixelHeight = (float)_dataset.VoxelSize;
+                    break;
+                default:
+                    pixelWidth = 1.0f;
+                    pixelHeight = 1.0f;
+                    break;
+            }
+    
+            // Handle case where properties might be zero or invalid
+            if (pixelHeight <= 0) pixelHeight = pixelWidth;
+            if (pixelWidth <= 0) pixelWidth = 1.0f;
+
+            // Calculate the physical aspect ratio of the slice
+            float imageAspect = (imageWidth * pixelWidth) / (imageHeight * pixelHeight);
             float canvasAspect = canvasSize.X / canvasSize.Y;
-            
-            Vector2 imageDisplaySize = (imageAspect > canvasAspect) ? new Vector2(canvasSize.X, canvasSize.X / imageAspect) : new Vector2(canvasSize.Y * imageAspect, canvasSize.Y);
-            
+    
+            // Fit the image within the canvas while preserving its aspect ratio
+            Vector2 imageDisplaySize = (imageAspect > canvasAspect) 
+                ? new Vector2(canvasSize.X, canvasSize.X / imageAspect)  // Letterboxed
+                : new Vector2(canvasSize.Y * imageAspect, canvasSize.Y); // Pillarboxed
+    
             imageDisplaySize *= zoom;
             Vector2 imageDisplayPos = canvasPos + (canvasSize - imageDisplaySize) * 0.5f + pan;
             return (imageDisplayPos, imageDisplaySize);

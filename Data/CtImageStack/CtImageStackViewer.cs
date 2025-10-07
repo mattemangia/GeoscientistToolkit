@@ -247,9 +247,35 @@ namespace GeoscientistToolkit.Data.CtImageStack
             ImGui.EndChild();
         }
 
-        private (Vector2 pos, Vector2 size) GetImageDisplayMetrics(Vector2 canvasPos, Vector2 canvasSize, float zoom, Vector2 pan, int imageWidth, int imageHeight)
+        private (Vector2 pos, Vector2 size) GetImageDisplayMetrics(Vector2 canvasPos, Vector2 canvasSize, float zoom, Vector2 pan, int imageWidth, int imageHeight, int viewIndex)
         {
-            float imageAspect = (float)imageWidth / imageHeight;
+            float pixelWidth, pixelHeight;
+
+            switch (viewIndex)
+            {
+                case 0: // XY View
+                    pixelWidth = _dataset.PixelSize;
+                    pixelHeight = _dataset.PixelSize;
+                    break;
+                case 1: // XZ View
+                    pixelWidth = _dataset.PixelSize;
+                    pixelHeight = _dataset.SliceThickness;
+                    break;
+                case 2: // YZ View
+                    pixelWidth = _dataset.PixelSize;
+                    pixelHeight = _dataset.SliceThickness;
+                    break;
+                default:
+                    pixelWidth = 1.0f;
+                    pixelHeight = 1.0f;
+                    break;
+            }
+
+            // Handle cases where slice thickness might be zero or invalid
+            if (pixelHeight <= 0) pixelHeight = pixelWidth;
+            if (pixelWidth <= 0) pixelWidth = 1.0f;
+
+            float imageAspect = (imageWidth * pixelWidth) / (imageHeight * pixelHeight);
             float canvasAspect = canvasSize.X / canvasSize.Y;
 
             Vector2 imageDisplaySize;
@@ -286,7 +312,7 @@ namespace GeoscientistToolkit.Data.CtImageStack
     bool isHovered = ImGui.IsItemHovered();
 
     var (width, height) = GetImageDimensionsForView(viewIndex);
-    var (imagePos, imageSize) = GetImageDisplayMetrics(canvasPos, canvasSize, zoom, pan, width, height);
+    var (imagePos, imageSize) = GetImageDisplayMetrics(canvasPos, canvasSize, zoom, pan, width, height, viewIndex);
 
     // -------- Overlay-first input (RockCore, Transform) --------
     bool inputHandled = false;
@@ -420,7 +446,7 @@ namespace GeoscientistToolkit.Data.CtImageStack
         private void UpdateCrosshairFromMouse(int viewIndex, Vector2 canvasPos, Vector2 canvasSize, float zoom, Vector2 pan)
         {
             var (width, height) = GetImageDimensionsForView(viewIndex);
-            var (imagePos, imageSize) = GetImageDisplayMetrics(canvasPos, canvasSize, zoom, pan, width, height);
+            var (imagePos, imageSize) = GetImageDisplayMetrics(canvasPos, canvasSize, zoom, pan, width, height, viewIndex);
             var mousePosInImage = GetMousePosInImage(ImGui.GetMousePos(), imagePos, imageSize, width, height);
 
             switch (viewIndex)
@@ -574,11 +600,11 @@ namespace GeoscientistToolkit.Data.CtImageStack
             {
                 0 => _dataset.PixelSize,
                 1 => _dataset.PixelSize,
-                2 => _dataset.SliceThickness,
+                2 => _dataset.PixelSize, // The width of the YZ view corresponds to the dataset's Height, which uses PixelSize
                 _ => _dataset.PixelSize
             };
 
-            var (imagePos, imageSize) = GetImageDisplayMetrics(canvasPos, canvasSize, zoom, Vector2.Zero, imageWidth, imageHeight);
+            var (imagePos, imageSize) = GetImageDisplayMetrics(canvasPos, canvasSize, zoom, Vector2.Zero, imageWidth, imageHeight, viewIndex);
             float scaleFactor = imageSize.X / imageWidth;
             float[] possibleLengths = { 1, 2, 5, 10, 20, 50, 100, 200, 500, 1000, 2000, 5000 };
             string unit = _dataset.Unit ?? "µm";
