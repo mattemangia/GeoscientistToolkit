@@ -142,8 +142,11 @@ namespace GeoscientistToolkit.Analysis.ParticleSeparator
             _context = _cl.CreateContext(null, 1, &selectedDevice, null, null, &err);
             CheckErr(err, "CreateContext");
             
-            _commandQueue = _cl.CreateCommandQueueWithProperties(_context, selectedDevice, (QueueProperties*)null, &err);
-            CheckErr(err, "CreateCommandQueueWithProperties");
+            _commandQueue = _cl.CreateCommandQueue(
+                _context,
+                selectedDevice,
+                CommandQueueProperties.ProfilingEnable,   // ← correct name
+                &err);
 
             // 4. Create and Build Program
             nuint sourceLength = (nuint)GpuLabelingKernelSource.Length;
