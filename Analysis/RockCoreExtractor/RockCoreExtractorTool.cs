@@ -6,6 +6,8 @@ using System.Threading;
 using System.Threading.Tasks;
 using GeoscientistToolkit.Data.CtImageStack;
 using ImGuiNET;
+using GeoscientistToolkit.Business;
+using System.Linq;
 
 namespace GeoscientistToolkit.Analysis.RockCoreExtractor
 {
@@ -393,58 +395,37 @@ namespace GeoscientistToolkit.Analysis.RockCoreExtractor
             {
                 ct.ThrowIfCancellationRequested();
 
-                // Choose circle plane depending on view
-                if (_selectedView == CircularView.XY_Circular_Z_Lateral)
-                {
-                    for (int y = yr.min; y <= yr.max; y++)
-                    {
-                        float dy = y - cy;
-                        for (int x = xr.min; x <= xr.max; x++)
-                        {
-                            float dx = x - cx;
-                            if ((dx * dx + dy * dy) <= r2)
-                            {
-                                int idx = z * W * H + y * W + x;
-                                indices.Add(idx);
-                            }
-                        }
-                    }
-                }
-                else if (_selectedView == CircularView.XZ_Circular_Y_Lateral)
+                for (int y = yr.min; y <= yr.max; y++)
                 {
                     for (int x = xr.min; x <= xr.max; x++)
                     {
-                        float dx = x - cx;
-                        for (int zz = z; zz <= z; zz++) // single z, loop kept symmetrical
+                        float dx = 0, dy = 0, dz = 0;
+                        bool inCircle = false;
+                        
+                        // Check if the point is within the cylinder
+                        switch(_selectedView)
                         {
-                            float dz = zz - cz;
-                            if ((dx * dx + dz * dz) <= r2)
-                            {
-                                for (int y = yr.min; y <= yr.max; y++)
-                                {
-                                    int idx = zz * W * H + y * W + x;
-                                    indices.Add(idx);
-                                }
-                            }
+                            case CircularView.XY_Circular_Z_Lateral:
+                                dx = x - cx;
+                                dy = y - cy;
+                                inCircle = (dx * dx + dy * dy) <= r2;
+                                break;
+                            case CircularView.XZ_Circular_Y_Lateral:
+                                dx = x - cx;
+                                dz = z - cz;
+                                inCircle = (dx * dx + dz * dz) <= r2;
+                                break;
+                            case CircularView.YZ_Circular_X_Lateral:
+                                dy = y - cy;
+                                dz = z - cz;
+                                inCircle = (dy * dy + dz * dz) <= r2;
+                                break;
                         }
-                    }
-                }
-                else // YZ circle
-                {
-                    for (int y = yr.min; y <= yr.max; y++)
-                    {
-                        float dy = y - cy;
-                        for (int zz = z; zz <= z; zz++)
+                        
+                        if (inCircle)
                         {
-                            float dz = zz - cz;
-                            if ((dy * dy + dz * dz) <= r2)
-                            {
-                                for (int x = xr.min; x <= xr.max; x++)
-                                {
-                                    int idx = zz * W * H + y * W + x;
-                                    indices.Add(idx);
-                                }
-                            }
+                            int idx = z * W * H + y * W + x;
+                            indices.Add(idx);
                         }
                     }
                 }
@@ -473,9 +454,9 @@ namespace GeoscientistToolkit.Analysis.RockCoreExtractor
         private void StartExtraction()
         {
             if (_isProcessing) return;
-            if (_currentDataset == null)
+            if (_currentDataset?.LabelData == null)
             {
-                _statusMessage = "No dataset.";
+                _statusMessage = "No dataset or label data available.";
                 return;
             }
 
@@ -483,16 +464,77 @@ namespace GeoscientistToolkit.Analysis.RockCoreExtractor
             _progress = 0f;
             _statusMessage = "Extracting core...";
             _cancelToken = new CancellationTokenSource();
+            var token = _cancelToken.Token;
 
-            // Offload to a background task (CPU), but the tool remains responsive.
             Task.Run(() =>
             {
                 try
                 {
-                    var progress = new Progress<float>(p => _progress = p);
-                    var result = ComputeExtractionIndices(progress, _cancelToken.Token);
+                    // Step 1: Compute indices of voxels INSIDE the core
+                    _statusMessage = "Calculating core voxels...";
+                    var progressReporter = new Progress<float>(p => _progress = p * 0.25f); // 25% of progress bar for this step
+                    var result = ComputeExtractionIndices(progressReporter, token);
+                    token.ThrowIfCancellationRequested();
+
+                    // Step 2: Set all voxels OUTSIDE the core to Exterior (ID 0)
+                    _statusMessage = "Applying exterior mask...";
+                    var labelVolume = _currentDataset.LabelData;
+                    int W = _currentDataset.Width;
+                    int H = _currentDataset.Height;
+                    int D = _currentDataset.Depth;
+
+                    // Use a HashSet for O(1) lookups, which is much faster than list.Contains()
+                    var coreIndices = new HashSet<int>(result.SelectedVoxelIndices);
+                    bool dataWasModified = false;
+
+                    for (int z = 0; z < D; z++)
+                    {
+                        token.ThrowIfCancellationRequested();
+                        _progress = 0.25f + (0.7f * (z / (float)D)); // 70% of progress bar for this loop
+
+                        var sliceBuffer = new byte[W * H];
+                        labelVolume.ReadSliceZ(z, sliceBuffer);
+                        bool sliceModified = false;
+
+                        // Use Parallel.For for faster processing of each slice
+                        Parallel.For(0, W * H, i =>
+                        {
+                            int x = i % W;
+                            int y = i / W;
+                            int linearIndex = z * W * H + y * W + x;
+
+                            // If the voxel is NOT in the core and is NOT already exterior, change it
+                            if (!coreIndices.Contains(linearIndex) && sliceBuffer[i] != 0)
+                            {
+                                sliceBuffer[i] = 0; // Set to Exterior material
+                                sliceModified = true;
+                            }
+                        });
+
+                        if (sliceModified)
+                        {
+                            labelVolume.WriteSliceZ(z, sliceBuffer);
+                            dataWasModified = true;
+                        }
+                    }
+
+                    // Step 3: Finalize, save, and notify the application
+                    if (dataWasModified)
+                    {
+                        _statusMessage = "Saving changes...";
+                        _progress = 0.95f;
+                        _currentDataset.SaveLabelData();
+                        ProjectManager.Instance.NotifyDatasetDataChanged(_currentDataset);
+                        ProjectManager.Instance.HasUnsavedChanges = true;
+                        _statusMessage = "Extraction complete. Voxels outside the core have been set to Exterior.";
+                    }
+                    else
+                    {
+                        _statusMessage = "Extraction complete. No changes were necessary.";
+                    }
+
+                    // Also invoke the event for other potential listeners (like analysis tools)
                     OnExtracted?.Invoke(result);
-                    _statusMessage = $"Done. Selected {result.SelectedVoxelIndices.Length:N0} voxels.";
                 }
                 catch (OperationCanceledException)
                 {
@@ -509,7 +551,7 @@ namespace GeoscientistToolkit.Analysis.RockCoreExtractor
                     _cancelToken = null;
                     _progress = 0f;
                 }
-            });
+            }, token);
         }
     }
 }

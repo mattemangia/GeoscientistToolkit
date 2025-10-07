@@ -166,7 +166,7 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
             _rxPosition = AcousticIntegration.RxPosition;
             _timeStepsDirty = true;
         }
-
+        private float _artificialDampingFactor = 0.2f;
         public void DrawPanel(CtImageStackDataset dataset)
         {
             if (dataset == null) return;
@@ -582,6 +582,14 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
                 if (ImGui.IsItemHovered()) ImGui.SetTooltip("Use OpenCL for GPU acceleration (if available)");
                 ImGui.Checkbox("Auto-Calibrate", ref _autoCalibrate);
                 if (ImGui.IsItemHovered()) ImGui.SetTooltip("Automatically calibrate parameters based on previous simulations");
+
+                // --- ADD THIS SLIDER ---
+                ImGui.Separator();
+                ImGui.DragFloat("Artificial Damping Factor", ref _artificialDampingFactor, 0.01f, 0.0f, 1.0f);
+                if (ImGui.IsItemHovered())
+                    ImGui.SetTooltip("Controls the strength of the numerical damping used to suppress high-frequency noise and prevent instability.\nIncrease this value if you see strange energy build-up.\nDefault: 0.2");
+                // --- END OF ADDED SLIDER ---
+
                 ImGui.Unindent();
             }
 
@@ -719,20 +727,48 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
         
         private async Task UpdateLiveTomographyAsync()
         {
-            if (_simulator == null) return;
+            if (_simulator == null || _currentDataset == null) return;
 
+            // --- FIX: Correctly calculate and pass theoretical velocities ---
+            float expectedVp = 6000.0f; // Default fallback
+            float expectedVs = 3000.0f; // Default fallback
+
+            // Calculate expected velocities based on current UI parameters
+            var primaryMaterial = _currentDataset.Materials.FirstOrDefault(m => _selectedMaterialIDs.Contains(m.ID));
+            if (primaryMaterial != null)
+            {
+                float density_g_cm3 = (float)(primaryMaterial.Density);
+                if (density_g_cm3 <= 0) density_g_cm3 = 2.7f;
+                float density_kg_m3 = density_g_cm3 * 1000f;
+                
+                float e_Pa = _youngsModulus * 1e6f;
+                float nu = _poissonRatio;
+
+                if (e_Pa > 0 && nu > -1.0f && nu < 0.5f)
+                {
+                    float mu = e_Pa / (2.0f * (1.0f + nu));
+                    float lambda = e_Pa * nu / ((1.0f + nu) * (1.0f - 2.0f * nu));
+                    expectedVp = MathF.Sqrt((lambda + 2.0f * mu) / density_kg_m3);
+                    expectedVs = MathF.Sqrt(mu / density_kg_m3);
+                }
+            }
+            
             var liveResults = new SimulationResults
             {
                 WaveFieldVx = await _simulator.ReconstructFieldAsync(0),
                 WaveFieldVy = await _simulator.ReconstructFieldAsync(1),
                 WaveFieldVz = await _simulator.ReconstructFieldAsync(2),
-                PWaveVelocity = _lastResults?.PWaveVelocity ?? 6000.0,
-                SWaveVelocity = _lastResults?.SWaveVelocity ?? 3000.0,
-                VpVsRatio = _lastResults?.VpVsRatio ?? 2.0
+                PWaveVelocity = expectedVp,
+                SWaveVelocity = expectedVs,
+                VpVsRatio = expectedVs > 0 ? expectedVp / expectedVs : 0
             };
 
             var dimensions = new Vector3(_parameters.Width, _parameters.Height, _parameters.Depth);
-            _tomographyViewer.UpdateLiveData(liveResults, dimensions);
+            
+            // Extract a fresh copy of labels for filtering
+            var volumeLabels = await ExtractVolumeLabelsAsync(_currentDataset);
+            
+            _tomographyViewer.UpdateLiveData(liveResults, dimensions, volumeLabels, _selectedMaterialIDs);
         }
 
         private void ApplyAxisPreset(int axis)
@@ -917,8 +953,9 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
 
 
                 // --- STEP 2: Calculate physical distance between transducers ---
-                float pixelSizeM = (float)dataset.PixelSize / 1000f;
-                float sliceThicknessM = (float)dataset.SliceThickness / 1000f;
+                // CORRECTED: Convert pixel size and thickness from µm to meters for calculation.
+                float pixelSizeM = (float)dataset.PixelSize / 1_000_000f; 
+                float sliceThicknessM = (float)dataset.SliceThickness / 1_000_000f;
                 float dx = (_rxPosition.X - _txPosition.X) * dataset.Width * pixelSizeM;
                 float dy = (_rxPosition.Y - _txPosition.Y) * dataset.Height * pixelSizeM;
                 float dz = (_rxPosition.Z - _txPosition.Z) * dataset.Depth * sliceThicknessM;
@@ -949,148 +986,152 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
         }
 
         private async Task RunSimulationAsync(CtImageStackDataset dataset)
+{
+    if (_isSimulating) return;
+    _isSimulating = true;
+    _cancellationTokenSource = new CancellationTokenSource();
+
+    _currentState = SimulationState.Preparing;
+    _preparationComplete = false;
+    _preparationProgress = 0.0f;
+    _preparationStatus = "Starting pre-computation...";
+
+    try
+    {
+        _lastResults = null;
+        
+        CtImageStackTools.Update3DPreviewFromExternal(dataset, null, Vector4.Zero);
+
+        _parameters = new SimulationParameters
         {
-            if (_isSimulating) return;
-            _isSimulating = true;
-            _cancellationTokenSource = new CancellationTokenSource();
+            Width = dataset.Width,
+            Height = dataset.Height,
+            Depth = dataset.Depth,
+            // CORRECTED: Convert pixel size from micrometers (µm) to meters (m) for the physics engine.
+            PixelSize = (float)dataset.PixelSize / 1_000_000.0f,
+            SelectedMaterialIDs = new HashSet<byte>(_selectedMaterialIDs),
+            SelectedMaterialID = _selectedMaterialIDs.FirstOrDefault(),
+            Axis = _selectedAxisIndex,
+            UseFullFaceTransducers = _useFullFaceTransducers,
+            ConfiningPressureMPa = _confiningPressure,
+            FailureAngleDeg = _failureAngle,
+            CohesionMPa = _cohesion,
+            SourceEnergyJ = _sourceEnergy,
+            SourceFrequencyKHz = _sourceFrequency,
+            SourceAmplitude = _sourceAmplitude,
+            TimeSteps = _timeSteps,
+            YoungsModulusMPa = _youngsModulus,
+            PoissonRatio = _poissonRatio,
+            UseElasticModel = _useElastic,
+            UsePlasticModel = _usePlastic,
+            UseBrittleModel = _useBrittle,
+            UseGPU = _useGPU,
+            UseRickerWavelet = _useRickerWavelet,
+            TxPosition = _txPosition,
+            RxPosition = _rxPosition,
+            EnableRealTimeVisualization = _enableRealTimeVisualization,
+            SaveTimeSeries = _saveTimeSeries,
+            SnapshotInterval = _snapshotInterval,
+            UseChunkedProcessing = _useChunkedProcessing,
+            ChunkSizeMB = _chunkSizeMB,
+            EnableOffloading = _enableOffloading,
+            OffloadDirectory = _offloadDirectory,
+            ArtificialDampingFactor = _artificialDampingFactor
+        };
 
-            _currentState = SimulationState.Preparing;
-            _preparationComplete = false;
-            _preparationProgress = 0.0f;
-            _preparationStatus = "Starting pre-computation...";
+        _preparationStatus = "Extracting volume labels...";
+        _preparationProgress = 0.1f;
+        var volumeLabels = await ExtractVolumeLabelsAsync(dataset);
+        
+        _preparationStatus = "Extracting density volume...";
+        _preparationProgress = 0.4f;
+        var densityVolume = await ExtractDensityVolumeAsync(dataset, dataset.VolumeData);
+        
+        _preparationStatus = "Extracting material properties...";
+        _preparationProgress = 0.7f;
+        var (youngsModulusVolume, poissonRatioVolume) = await ExtractMaterialPropertiesVolumeAsync(dataset);
 
-            try
-            {
-                _lastResults = null;
-                
-                CtImageStackTools.Update3DPreviewFromExternal(dataset, null, Vector4.Zero);
-
-                _parameters = new SimulationParameters
-                {
-                    Width = dataset.Width,
-                    Height = dataset.Height,
-                    Depth = dataset.Depth,
-                    PixelSize = (float)dataset.PixelSize / 1000.0f,
-                    SelectedMaterialIDs = new HashSet<byte>(_selectedMaterialIDs),
-                    SelectedMaterialID = _selectedMaterialIDs.FirstOrDefault(),
-                    Axis = _selectedAxisIndex,
-                    UseFullFaceTransducers = _useFullFaceTransducers,
-                    ConfiningPressureMPa = _confiningPressure,
-                    FailureAngleDeg = _failureAngle,
-                    CohesionMPa = _cohesion,
-                    SourceEnergyJ = _sourceEnergy,
-                    SourceFrequencyKHz = _sourceFrequency,
-                    SourceAmplitude = _sourceAmplitude,
-                    TimeSteps = _timeSteps,
-                    YoungsModulusMPa = _youngsModulus,
-                    PoissonRatio = _poissonRatio,
-                    UseElasticModel = _useElastic,
-                    UsePlasticModel = _usePlastic,
-                    UseBrittleModel = _useBrittle,
-                    UseGPU = _useGPU,
-                    UseRickerWavelet = _useRickerWavelet,
-                    TxPosition = _txPosition,
-                    RxPosition = _rxPosition,
-                    EnableRealTimeVisualization = _enableRealTimeVisualization,
-                    SaveTimeSeries = _saveTimeSeries,
-                    SnapshotInterval = _snapshotInterval,
-                    UseChunkedProcessing = _useChunkedProcessing,
-                    ChunkSizeMB = _chunkSizeMB,
-                    EnableOffloading = _enableOffloading,
-                    OffloadDirectory = _offloadDirectory
-                };
-
-                _preparationStatus = "Extracting volume labels...";
-                _preparationProgress = 0.1f;
-                var volumeLabels = await ExtractVolumeLabelsAsync(dataset);
-                
-                _preparationStatus = "Extracting density volume...";
-                _preparationProgress = 0.4f;
-                var densityVolume = await ExtractDensityVolumeAsync(dataset, dataset.VolumeData);
-                
-                _preparationStatus = "Extracting material properties...";
-                _preparationProgress = 0.7f;
-                var (youngsModulusVolume, poissonRatioVolume) = await ExtractMaterialPropertiesVolumeAsync(dataset);
-
-                _preparationStatus = "Initializing simulator...";
-                _preparationProgress = 0.9f;
-                _simulator = new ChunkedAcousticSimulator(_parameters);
-                
-                _simulator.ProgressUpdated += OnSimulationProgress;
-                if (_enableRealTimeVisualization)
-                {
-                    _simulator.WaveFieldUpdated += OnWaveFieldUpdated;
-                }
-                
-                _simulator.SetPerVoxelMaterialProperties(youngsModulusVolume, poissonRatioVolume);
-                
-                _preparationStatus = "Pre-computation completed.";
-                _preparationProgress = 1.0f;
-                _preparationComplete = true;
-                await Task.Delay(1000, _cancellationTokenSource.Token);
-
-                _currentState = SimulationState.Simulating;
-                
-                _lastResults = await _simulator.RunAsync(volumeLabels, densityVolume, _cancellationTokenSource.Token);
-                
-                if (_lastResults != null)
-                {
-                    _currentState = SimulationState.Completed;
-            
-                    var damageField = _simulator.GetDamageField();
-            
-                    _exportManager.SetDamageField(damageField);
-                    _exportManager.SetMaterialPropertyVolumes(densityVolume, youngsModulusVolume, poissonRatioVolume);
-                    _lastResults.DamageField = damageField;
-            
-                    Logger.Log($"[AcousticSimulation] Simulation completed: Vp={_lastResults.PWaveVelocity:F2} m/s, Vs={_lastResults.SWaveVelocity:F2} m/s");
-                    
-                    if (_selectedMaterialIDs.Count == 1)
-                    {
-                        var material = dataset.Materials.First(m => m.ID == _selectedMaterialIDs.First());
-                        _calibrationManager.AddSimulationResult(
-                            material.Name, material.ID, (float)material.Density, _confiningPressure,
-                            _youngsModulus, _poissonRatio, _lastResults.PWaveVelocity, _lastResults.SWaveVelocity
-                        );
-                    }
-                    else if (_selectedMaterialIDs.Count > 1)
-                    {
-                        Logger.Log($"[AcousticSimulation] Multi-material simulation completed with {_selectedMaterialIDs.Count} materials. Calibration not added (single material only).");
-                    }
-                    
-                    // --- Set final data on the tomography viewer ---
-                    _tomographyViewer.SetFinalData(_lastResults, new Vector3(_parameters.Width, _parameters.Height, _parameters.Depth));
-                }
-            }
-            catch (OperationCanceledException)
-            {
-                Logger.Log("[AcousticSimulation] Simulation was cancelled.");
-                _currentState = SimulationState.Cancelled;
-            }
-            catch (Exception ex)
-            {
-                Logger.LogError($"[AcousticSimulation] Simulation failed: {ex.Message}");
-                Logger.LogError($"Stack trace: {ex.StackTrace}");
-                _currentState = SimulationState.Failed;
-            }
-            finally
-            {
-                _isSimulating = false;
-                if (_currentState == SimulationState.Simulating || _currentState == SimulationState.Preparing)
-                {
-                    _currentState = SimulationState.Idle;
-                }
-                _simulator?.Dispose();
-                _simulator = null;
-                
-                if (dataset != null)
-                {
-                    CtImageStackTools.Update3DPreviewFromExternal(dataset, null, Vector4.Zero);
-                }
-            }
+        _preparationStatus = "Initializing simulator...";
+        _preparationProgress = 0.9f;
+        _simulator = new ChunkedAcousticSimulator(_parameters);
+        
+        _simulator.ProgressUpdated += OnSimulationProgress;
+        if (_enableRealTimeVisualization)
+        {
+            _simulator.WaveFieldUpdated += OnWaveFieldUpdated;
         }
+        
+        _simulator.SetPerVoxelMaterialProperties(youngsModulusVolume, poissonRatioVolume);
+        
+        _preparationStatus = "Pre-computation completed.";
+        _preparationProgress = 1.0f;
+        _preparationComplete = true;
+        await Task.Delay(1000, _cancellationTokenSource.Token);
 
-        private async Task<(float[,,] youngsModulus, float[,,] poissonRatio)> ExtractMaterialPropertiesVolumeAsync(CtImageStackDataset dataset)
+        _currentState = SimulationState.Simulating;
+        
+        _lastResults = await _simulator.RunAsync(volumeLabels, densityVolume, _cancellationTokenSource.Token);
+        
+        if (_lastResults != null)
+        {
+            _currentState = SimulationState.Completed;
+    
+            var damageField = _simulator.GetDamageField();
+    
+            _exportManager.SetDamageField(damageField);
+            _exportManager.SetMaterialPropertyVolumes(densityVolume, youngsModulusVolume, poissonRatioVolume);
+            _lastResults.DamageField = damageField;
+    
+            Logger.Log($"[AcousticSimulation] Simulation completed: Vp={_lastResults.PWaveVelocity:F2} m/s, Vs={_lastResults.SWaveVelocity:F2} m/s");
+            
+            if (_selectedMaterialIDs.Count == 1)
+            {
+                var material = dataset.Materials.First(m => m.ID == _selectedMaterialIDs.First());
+                _calibrationManager.AddSimulationResult(
+                    material.Name, material.ID, (float)material.Density, _confiningPressure,
+                    _youngsModulus, _poissonRatio, _lastResults.PWaveVelocity, _lastResults.SWaveVelocity
+                );
+            }
+            else if (_selectedMaterialIDs.Count > 1)
+            {
+                Logger.Log($"[AcousticSimulation] Multi-material simulation completed with {_selectedMaterialIDs.Count} materials. Calibration not added (single material only).");
+            }
+            
+            // --- FINAL CORRECTED CALL ---
+            // This now correctly passes all data required for filtering and display to the tomography viewer upon simulation completion.
+            var finalDimensions = new Vector3(_parameters.Width, _parameters.Height, _parameters.Depth);
+            _tomographyViewer.SetFinalData(_lastResults, finalDimensions, volumeLabels, new HashSet<byte>(_selectedMaterialIDs));
+        }
+    }
+    catch (OperationCanceledException)
+    {
+        Logger.Log("[AcousticSimulation] Simulation was cancelled.");
+        _currentState = SimulationState.Cancelled;
+    }
+    catch (Exception ex)
+    {
+        Logger.LogError($"[AcousticSimulation] Simulation failed: {ex.Message}");
+        Logger.LogError($"Stack trace: {ex.StackTrace}");
+        _currentState = SimulationState.Failed;
+    }
+    finally
+    {
+        _isSimulating = false;
+        if (_currentState == SimulationState.Simulating || _currentState == SimulationState.Preparing)
+        {
+            _currentState = SimulationState.Idle;
+        }
+        _simulator?.Dispose();
+        _simulator = null;
+        
+        if (dataset != null)
+        {
+            CtImageStackTools.Update3DPreviewFromExternal(dataset, null, Vector4.Zero);
+        }
+    }
+}
+
+       private async Task<(float[,,] youngsModulus, float[,,] poissonRatio)> ExtractMaterialPropertiesVolumeAsync(CtImageStackDataset dataset)
         {
             return await Task.Run(() =>
             {
@@ -1099,18 +1140,14 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
                 
                 var materialProps = new Dictionary<byte, (float E, float Nu)>();
                 
-                // --- FIX: Calculate average properties for the background medium ---
-                float avgE = 0;
-                float avgNu = 0;
-                int selectedCount = 0;
-
+                // Pre-calculate properties for all materials defined in the dataset
                 foreach (var material in dataset.Materials)
                 {
-                    if (!_selectedMaterialIDs.Contains(material.ID)) continue;
-
+                    // Default to user-override values from the UI
                     float E = _youngsModulus;
                     float Nu = _poissonRatio;
 
+                    // If material has a physical library entry, use it
                     if (!string.IsNullOrEmpty(material.PhysicalMaterialName))
                     {
                         var physMat = MaterialLibrary.Instance.Find(material.PhysicalMaterialName);
@@ -1121,21 +1158,11 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
                         }
                     }
                     materialProps[material.ID] = (E, Nu);
-                    avgE += E;
-                    avgNu += Nu;
-                    selectedCount++;
                 }
-                
-                if (selectedCount > 0)
-                {
-                    avgE /= selectedCount;
-                    avgNu /= selectedCount;
-                }
-                else // Fallback if no materials are selected for some reason
-                {
-                    avgE = _youngsModulus;
-                    avgNu = _poissonRatio;
-                }
+
+                // Define physically realistic properties for the background medium (air/water/pores)
+                const float backgroundE = 1.0f; // Very low stiffness (1 MPa)
+                const float backgroundNu = 0.3f; // Poisson's ratio for fluid-like medium
 
                 Parallel.For(0, dataset.Depth, z =>
                 {
@@ -1145,25 +1172,27 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
                         {
                             byte label = dataset.LabelData[x, y, z];
                             
-                            if (_selectedMaterialIDs.Contains(label) && materialProps.TryGetValue(label, out var props))
+                            // If the label corresponds to a defined material, use its properties
+                            if (materialProps.TryGetValue(label, out var props))
                             {
                                 youngsModulus[x, y, z] = props.E;
                                 poissonRatio[x, y, z] = props.Nu;
                             }
                             else
                             {
-                                // --- FIX: Assign stable average properties to the background ---
-                                youngsModulus[x, y, z] = avgE;
-                                poissonRatio[x, y, z] = avgNu;
+                                // Otherwise, treat it as the background medium with near-zero stiffness
+                                youngsModulus[x, y, z] = backgroundE;
+                                poissonRatio[x, y, z] = backgroundNu;
                             }
                         }
                     }
                 });
 
-                Logger.Log($"[AcousticSimulation] Generated heterogeneous material property volumes. Background E={avgE:F0} MPa, Nu={avgNu:F3}");
+                Logger.Log($"[AcousticSimulation] Generated realistic heterogeneous material property volumes.");
                 return (youngsModulus, poissonRatio);
             });
         }
+
 
         private async Task<byte[,,]> ExtractVolumeLabelsAsync(CtImageStackDataset dataset)
         {
@@ -1175,95 +1204,92 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
             });
         }
 
-        private async Task<float[,,]> ExtractDensityVolumeAsync(CtImageStackDataset dataset, IGrayscaleVolumeData grayscaleVolume)
+       private async Task<float[,,]> ExtractDensityVolumeAsync(CtImageStackDataset dataset, IGrayscaleVolumeData grayscaleVolume)
+{
+    return await Task.Run(() =>
+    {
+        Logger.Log("[AcousticSimulation] Generating heterogeneous density volume from grayscale data...");
+
+        // --- Step 1: Pre-calculate the average grayscale value for each material ID ---
+        var grayscaleStats = new System.Collections.Concurrent.ConcurrentDictionary<byte, (double sum, long count)>();
+        
+        // FIX: Explicitly cast dataset.Depth to int to resolve ambiguous invocation
+        Parallel.For(0, (int)dataset.Depth, z =>
         {
-            return await Task.Run(() =>
+            // FIX: Read grayscale data into a byte[] array, as indicated by the compiler error.
+            var graySlice = new byte[dataset.Width * dataset.Height];
+            var labelSlice = new byte[dataset.Width * dataset.Height];
+            grayscaleVolume.ReadSliceZ(z, graySlice);
+            dataset.LabelData.ReadSliceZ(z, labelSlice);
+
+            for (int i = 0; i < labelSlice.Length; i++)
             {
-                // --- FIX: Calculate average density of selected materials for the background ---
-                var selectedMaterials = dataset.Materials.Where(m => _selectedMaterialIDs.Contains(m.ID)).ToList();
-                float avgDensityKgM3 = 2700f; // Default to a common rock density
-                if (selectedMaterials.Any())
+                byte label = labelSlice[i];
+                if (label == 0) continue; // Skip background
+
+                grayscaleStats.AddOrUpdate(label, 
+                    (graySlice[i], 1), 
+                    (key, existing) => (existing.sum + graySlice[i], existing.count + 1));
+            }
+        });
+
+        var avgGrayscaleMap = grayscaleStats.ToDictionary(
+            kvp => kvp.Key,
+            kvp => (kvp.Value.count > 0) ? (kvp.Value.sum / kvp.Value.count) : 0.0
+        );
+
+        // --- Step 2: Create the heterogeneous density field ---
+        var density = new float[dataset.Width, dataset.Height, dataset.Depth];
+        
+        var materialDensityMap = dataset.Materials
+            .ToDictionary(m => m.ID, m => (m.Density > 0 ? (float)m.Density : 1.0f) * 1000.0f); // g/cm³ to kg/m³
+
+        const float backgroundDensity = 1.225f; // kg/m³ for air/unlabeled voxels
+
+        // FIX: Explicitly cast dataset.Depth to int to resolve ambiguous invocation
+        Parallel.For(0, (int)dataset.Depth, z =>
+        {
+            // FIX: Read grayscale data into a byte[] array.
+            var graySlice = new byte[dataset.Width * dataset.Height];
+            var labelSlice = new byte[dataset.Width * dataset.Height];
+            grayscaleVolume.ReadSliceZ(z, graySlice);
+            dataset.LabelData.ReadSliceZ(z, labelSlice);
+
+            for (int i = 0; i < labelSlice.Length; i++)
+            {
+                int x = i % dataset.Width;
+                int y = i / dataset.Width;
+                byte label = labelSlice[i];
+
+                if (materialDensityMap.TryGetValue(label, out float meanMaterialDensity) && 
+                    avgGrayscaleMap.TryGetValue(label, out double avgGrayscale) && 
+                    avgGrayscale > 1e-6)
                 {
-                    avgDensityKgM3 = (float)selectedMaterials.Average(m => m.Density > 0 ? m.Density : 2.7) * 1000.0f;
+                    // Scale the material's mean density by the voxel's relative grayscale intensity.
+                    // This makes brighter parts of a material denser than darker parts.
+                    float grayscaleValue = graySlice[i];
+                    density[x, y, z] = meanMaterialDensity * (float)(grayscaleValue / avgGrayscale);
                 }
-
-                var materialStats = new Dictionary<byte, (long grayscaleSum, long voxelCount)>();
-                for (int z = 0; z < dataset.Depth; z++)
+                else if (materialDensityMap.ContainsKey(label))
                 {
-                    var labelSlice = new byte[dataset.Width * dataset.Height];
-                    var graySlice = new byte[dataset.Width * dataset.Height];
-                    dataset.LabelData.ReadSliceZ(z, labelSlice);
-                    grayscaleVolume.ReadSliceZ(z, graySlice);
-
-                    for (int i = 0; i < labelSlice.Length; i++)
-                    {
-                        byte label = labelSlice[i];
-                        if (!_selectedMaterialIDs.Contains(label)) continue; 
-
-                        if (!materialStats.ContainsKey(label))
-                        {
-                            materialStats[label] = (0, 0);
-                        }
-                        var stats = materialStats[label];
-                        stats.grayscaleSum += graySlice[i];
-                        stats.voxelCount++;
-                        materialStats[label] = stats;
-                    }
+                    // Fallback for materials with no grayscale variation (or pure black)
+                    density[x, y, z] = materialDensityMap[label];
                 }
-
-                var avgGrayscaleMap = new Dictionary<byte, float>();
-                foreach (var item in materialStats)
+                else
                 {
-                    if (item.Value.voxelCount > 0)
-                    {
-                        avgGrayscaleMap[item.Key] = (float)item.Value.grayscaleSum / item.Value.voxelCount;
-                    }
-                }
-
-                var density = new float[dataset.Width, dataset.Height, dataset.Depth];
-                
-                var materialDensityMap = dataset.Materials
-                    .ToDictionary(m => m.ID, m => (float)m.Density * 1000.0f);
-
-                for (int z = 0; z < dataset.Depth; z++)
-                {
-                    var labelSlice = new byte[dataset.Width * dataset.Height];
-                    var graySlice = new byte[dataset.Width * dataset.Height];
-                    dataset.LabelData.ReadSliceZ(z, labelSlice);
-                    grayscaleVolume.ReadSliceZ(z, graySlice);
-
-                    for (int i = 0; i < labelSlice.Length; i++)
-                    {
-                        int x = i % dataset.Width;
-                        int y = i / dataset.Width;
-                        byte label = labelSlice[i];
-
-                        if (!_selectedMaterialIDs.Contains(label) || !materialDensityMap.ContainsKey(label))
-                        {
-                            // --- FIX: Assign stable average density to background ---
-                            density[x, y, z] = avgDensityKgM3;
-                            continue;
-                        }
-
-                        float avgMaterialDensity = materialDensityMap[label];
-                        
-                        if (avgGrayscaleMap.TryGetValue(label, out float avgGray) && avgGray > 1.0f)
-                        {
-                            density[x, y, z] = avgMaterialDensity * (graySlice[i] / avgGray);
-                        }
-                        else
-                        {
-                            density[x, y, z] = avgMaterialDensity;
-                        }
-                        
-                        density[x, y, z] = Math.Max(100f, density[x, y, z]); // Minimum density
-                    }
+                    // Assign background density to unlabeled voxels
+                    density[x, y, z] = backgroundDensity;
                 }
                 
-                Logger.Log($"[AcousticSimulation] Generated heterogeneous density map. Background ρ={avgDensityKgM3 / 1000.0f:F3} g/cm³");
-                return density;
-            });
-        }
+                // Ensure a minimum physical density to prevent simulation errors
+                density[x, y, z] = Math.Max(1.0f, density[x, y, z]);
+            }
+        });
+        
+        Logger.Log($"[AcousticSimulation] Generated robust heterogeneous density map.");
+        return density;
+    });
+}
         
         private void OnWaveFieldUpdated(object sender, WaveFieldUpdateEventArgs e)
         {

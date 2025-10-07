@@ -26,6 +26,8 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
         public float SourceFrequencyKHz { get; set; }
         public int SourceAmplitude { get; set; }
         public int TimeSteps { get; set; }
+        
+        public float ArtificialDampingFactor { get; set; } = 0.2f;
         public float YoungsModulusMPa { get; set; }
         public float PoissonRatio { get; set; }
         public bool UseElasticModel { get; set; }

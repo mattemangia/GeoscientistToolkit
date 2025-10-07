@@ -58,7 +58,8 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
         private readonly nint[] _bufMaxVel = new nint[3];
         private readonly nint[] _bufStr = new nint[6];
         private nint _bufDmg, _bufYoungsModulus, _bufPoissonRatio;
-
+        private float _dynamicViscosityCoeff;
+        private float _artificialDampingFactor = 0.2f;
         private float[,,] _perVoxelYoungsModulus;
         private float[,,] _perVoxelPoissonRatio;
         private bool _usePerVoxelProperties = false;
@@ -144,9 +145,28 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
 
             CalculateTimeStep(labels, density);
             
-            foreach (var chunk in _chunks)
+            // Log density range to confirm it's being received
+            float minDensity = float.MaxValue, maxDensity = float.MinValue;
+            for(int i = 0; i < density.GetLength(0); i++)
+            for(int j = 0; j < density.GetLength(1); j++)
+            for (int k = 0; k < density.GetLength(2); k++)
             {
-                chunk.IsInMemory = true;
+                if (_params.IsMaterialSelected(labels[i, j, k]))
+                {
+                    minDensity = Math.Min(minDensity, density[i, j, k]);
+                    maxDensity = Math.Max(maxDensity, density[i, j, k]);
+                }
+            }
+            Logger.Log($"[Simulator] Running with density range (kg/m³): {minDensity:F2} to {maxDensity:F2}");
+
+            // MODIFICATION: If offloading is enabled, immediately offload all chunks to disk.
+            if (_params.EnableOffloading)
+            {
+                Logger.Log("[ChunkedSimulator] Offloading all chunks to disk before starting simulation.");
+                foreach (var chunk in _chunks)
+                {
+                    await OffloadChunkAsync(chunk);
+                }
             }
 
             int maxSteps = Math.Max(1, _params.TimeSteps);
@@ -207,26 +227,62 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
         
         private async Task ProcessStressUpdatePass(byte[,,] labels, float[,,] density, float sourceValue, CancellationToken token)
         {
+            // MODIFICATION: Replaced "load-all" logic with a proper sliding window for memory management.
             if (_params.EnableOffloading)
             {
-                foreach (var chunk in _chunks.Where(c => !c.IsInMemory))
-                    await LoadChunkAsync(chunk);
+                // Offload all chunks that are currently in memory to ensure a clean state for the pass.
+                foreach (var chunk in _chunks.Where(c => c.IsInMemory))
+                {
+                    await OffloadChunkAsync(chunk);
+                }
+        
+                // Load pairs of chunks, exchange their boundaries, and then offload the first chunk of the pair.
+                for (int i = 0; i < _chunks.Count - 1; i++)
+                {
+                    await LoadChunkAsync(_chunks[i]);
+                    await LoadChunkAsync(_chunks[i + 1]);
+        
+                    ExchangeBoundary(_chunks[i].Vx, _chunks[i + 1].Vx);
+                    ExchangeBoundary(_chunks[i].Vy, _chunks[i + 1].Vy);
+                    ExchangeBoundary(_chunks[i].Vz, _chunks[i + 1].Vz);
+        
+                    await OffloadChunkAsync(_chunks[i]);
+                }
+                // Offload the last chunk which is still in memory.
+                if (_chunks.Count > 0)
+                {
+                    await OffloadChunkAsync(_chunks.Last());
+                }
             }
-
-            // Exchange Z-boundaries between chunks before processing
-            for (int i = 0; i < _chunks.Count - 1; i++)
+            else
             {
-                ExchangeBoundary(_chunks[i].Vx, _chunks[i + 1].Vx);
-                ExchangeBoundary(_chunks[i].Vy, _chunks[i + 1].Vy);
-                ExchangeBoundary(_chunks[i].Vz, _chunks[i + 1].Vz);
+                // Original logic for non-offloading mode.
+                for (int i = 0; i < _chunks.Count - 1; i++)
+                {
+                    ExchangeBoundary(_chunks[i].Vx, _chunks[i + 1].Vx);
+                    ExchangeBoundary(_chunks[i].Vy, _chunks[i + 1].Vy);
+                    ExchangeBoundary(_chunks[i].Vz, _chunks[i + 1].Vz);
+                }
             }
             
-            // Apply boundary conditions to the entire volume (X, Y, Z faces)
+            // Apply boundary conditions. If offloading, this requires loading the first and last chunks.
+            if (_params.EnableOffloading && _chunks.Count > 0)
+            {
+                await LoadChunkAsync(_chunks.First());
+                if (_chunks.Count > 1) await LoadChunkAsync(_chunks.Last());
+            }
             ApplyGlobalBoundaryConditions(isStressUpdate: true);
+            if (_params.EnableOffloading && _chunks.Count > 0)
+            {
+                await OffloadChunkAsync(_chunks.First());
+                if (_chunks.Count > 1) await OffloadChunkAsync(_chunks.Last());
+            }
 
-            // Process all chunks
+            // Process all chunks one by one, loading and offloading as needed.
             for (int i = 0; i < _chunks.Count; i++)
             {
+                if (_params.EnableOffloading) await LoadChunkAsync(_chunks[i]);
+        
                 var chunk = _chunks[i];
                 if (_useGPU)
                     await ProcessChunkGPU_StressOnly(chunk, labels, density, sourceValue, token);
@@ -236,39 +292,82 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
                         ApplySourceToChunkCPU(chunk, sourceValue, labels);
                     UpdateChunkStressCPU(chunk, labels, density);
                 }
+        
+                if (_params.EnableOffloading) await OffloadChunkAsync(chunk);
             }
         }
         
         private async Task ProcessVelocityUpdatePass(byte[,,] labels, float[,,] density, CancellationToken token)
         {
+            // MODIFICATION: Replaced "load-all" logic with a proper sliding window for memory management.
             if (_params.EnableOffloading)
             {
-                foreach (var chunk in _chunks.Where(c => !c.IsInMemory))
-                    await LoadChunkAsync(chunk);
+                // Offload all chunks that are currently in memory to ensure a clean state for the pass.
+                foreach (var chunk in _chunks.Where(c => c.IsInMemory))
+                {
+                    await OffloadChunkAsync(chunk);
+                }
+        
+                // Load pairs of chunks, exchange their boundaries, and then offload the first chunk of the pair.
+                for (int i = 0; i < _chunks.Count - 1; i++)
+                {
+                    await LoadChunkAsync(_chunks[i]);
+                    await LoadChunkAsync(_chunks[i + 1]);
+        
+                    ExchangeBoundary(_chunks[i].Sxx, _chunks[i + 1].Sxx);
+                    ExchangeBoundary(_chunks[i].Syy, _chunks[i + 1].Syy);
+                    ExchangeBoundary(_chunks[i].Szz, _chunks[i + 1].Szz);
+                    ExchangeBoundary(_chunks[i].Sxy, _chunks[i + 1].Sxy);
+                    ExchangeBoundary(_chunks[i].Sxz, _chunks[i + 1].Sxz);
+                    ExchangeBoundary(_chunks[i].Syz, _chunks[i + 1].Syz);
+        
+                    await OffloadChunkAsync(_chunks[i]);
+                }
+                // Offload the last chunk which is still in memory.
+                if (_chunks.Count > 0)
+                {
+                    await OffloadChunkAsync(_chunks.Last());
+                }
             }
-
-            // Exchange Z-boundaries between chunks before processing
-            for (int i = 0; i < _chunks.Count - 1; i++)
+            else
             {
-                ExchangeBoundary(_chunks[i].Sxx, _chunks[i + 1].Sxx);
-                ExchangeBoundary(_chunks[i].Syy, _chunks[i + 1].Syy);
-                ExchangeBoundary(_chunks[i].Szz, _chunks[i + 1].Szz);
-                ExchangeBoundary(_chunks[i].Sxy, _chunks[i + 1].Sxy);
-                ExchangeBoundary(_chunks[i].Sxz, _chunks[i + 1].Sxz);
-                ExchangeBoundary(_chunks[i].Syz, _chunks[i + 1].Syz);
+                // Original logic for non-offloading mode.
+                for (int i = 0; i < _chunks.Count - 1; i++)
+                {
+                    ExchangeBoundary(_chunks[i].Sxx, _chunks[i + 1].Sxx);
+                    ExchangeBoundary(_chunks[i].Syy, _chunks[i + 1].Syy);
+                    ExchangeBoundary(_chunks[i].Szz, _chunks[i + 1].Szz);
+                    ExchangeBoundary(_chunks[i].Sxy, _chunks[i + 1].Sxy);
+                    ExchangeBoundary(_chunks[i].Sxz, _chunks[i + 1].Sxz);
+                    ExchangeBoundary(_chunks[i].Syz, _chunks[i + 1].Syz);
+                }
             }
 
-            // Apply boundary conditions to the entire volume (X, Y, Z faces)
+            // Apply boundary conditions. If offloading, this requires loading the first and last chunks.
+            if (_params.EnableOffloading && _chunks.Count > 0)
+            {
+                await LoadChunkAsync(_chunks.First());
+                if (_chunks.Count > 1) await LoadChunkAsync(_chunks.Last());
+            }
             ApplyGlobalBoundaryConditions(isStressUpdate: false);
+            if (_params.EnableOffloading && _chunks.Count > 0)
+            {
+                await OffloadChunkAsync(_chunks.First());
+                if (_chunks.Count > 1) await OffloadChunkAsync(_chunks.Last());
+            }
             
-            // Process all chunks
+            // Process all chunks one by one, loading and offloading as needed.
             for (int i = 0; i < _chunks.Count; i++)
             {
+                if (_params.EnableOffloading) await LoadChunkAsync(_chunks[i]);
+        
                 var chunk = _chunks[i];
                 if (_useGPU)
                     await ProcessChunkGPU_VelocityOnly(chunk, labels, density, token);
                 else
                     UpdateChunkVelocityCPU(chunk, labels, density);
+        
+                if (_params.EnableOffloading) await OffloadChunkAsync(chunk);
             }
         }
 
@@ -276,6 +375,9 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
         {
             foreach (var chunk in _chunks)
             {
+                // ADDED: Ensure chunk is in memory before applying BCs that access its data.
+                if (!chunk.IsInMemory) continue;
+
                 int d = chunk.EndZ - chunk.StartZ;
                 // X boundaries
                 for (int z = 0; z < d; z++)
@@ -315,6 +417,10 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
             {
                 var firstChunk = _chunks.First();
                 var lastChunk = _chunks.Last();
+
+                // ADDED: Ensure first and last chunks are in memory for Z-boundary conditions.
+                if (!firstChunk.IsInMemory || !lastChunk.IsInMemory) return;
+
                 int d_last = lastChunk.EndZ - lastChunk.StartZ;
 
                 for (int y = 0; y < _params.Height; y++)
@@ -599,101 +705,105 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
         }
         
         private unsafe void SetKernelArgs(nint kernel, int w, int h, int d, int chunkStartZ, float sourceValue)
-        {
-            uint a = 0;
-            nint bufMatArg = _bufMat;
-            nint bufDenArg = _bufDen;
-            nint bufMatLookupArg = _bufMatLookup;
-            nint bufVel0Arg = _bufVel[0];
-            nint bufVel1Arg = _bufVel[1];
-            nint bufVel2Arg = _bufVel[2];
-            nint bufStr0Arg = _bufStr[0];
-            nint bufStr1Arg = _bufStr[1];
-            nint bufStr2Arg = _bufStr[2];
-            nint bufStr3Arg = _bufStr[3];
-            nint bufStr4Arg = _bufStr[4];
-            nint bufStr5Arg = _bufStr[5];
-            nint bufDmgArg = _bufDmg;
-            nint bufYmArg = _bufYoungsModulus;
-            nint bufPrArg = _bufPoissonRatio;
-            nint bufMaxVel0Arg = _bufMaxVel[0];
-            nint bufMaxVel1Arg = _bufMaxVel[1];
-            nint bufMaxVel2Arg = _bufMaxVel[2];
+{
+    uint a = 0;
+    nint bufMatArg = _bufMat;
+    nint bufDenArg = _bufDen;
+    nint bufMatLookupArg = _bufMatLookup;
+    nint bufVel0Arg = _bufVel[0];
+    nint bufVel1Arg = _bufVel[1];
+    nint bufVel2Arg = _bufVel[2];
+    nint bufStr0Arg = _bufStr[0];
+    nint bufStr1Arg = _bufStr[1];
+    nint bufStr2Arg = _bufStr[2];
+    nint bufStr3Arg = _bufStr[3];
+    nint bufStr4Arg = _bufStr[4];
+    nint bufStr5Arg = _bufStr[5];
+    nint bufDmgArg = _bufDmg;
+    nint bufYmArg = _bufYoungsModulus;
+    nint bufPrArg = _bufPoissonRatio;
+    nint bufMaxVel0Arg = _bufMaxVel[0];
+    nint bufMaxVel1Arg = _bufMaxVel[1];
+    nint bufMaxVel2Arg = _bufMaxVel[2];
 
-            var paramsPixelSize = _params.PixelSize;
-            
-            if (kernel == _kernelStress)
-            {
-                var paramsConfiningPressureMPa = _params.ConfiningPressureMPa;
-                var paramsCohesionMPa = _params.CohesionMPa;
-                var paramsFailureAngleDeg = _params.FailureAngleDeg;
+    var paramsPixelSize = _params.PixelSize;
+    
+    if (kernel == _kernelStress)
+    {
+        var paramsConfiningPressureMPa = _params.ConfiningPressureMPa;
+        var paramsCohesionMPa = _params.CohesionMPa;
+        var paramsFailureAngleDeg = _params.FailureAngleDeg;
 
-                int tx = (int)(_params.TxPosition.X * _params.Width);
-                int ty = (int)(_params.TxPosition.Y * _params.Height);
-                int tz = (int)(_params.TxPosition.Z * _params.Depth);
-                int localTz = tz - chunkStartZ;
-                int isFullFace = _params.UseFullFaceTransducers ? 1 : 0;
-                int sourceAxis = _params.Axis;
-                int usePlastic = _params.UsePlasticModel ? 1 : 0;
-                int useBrittle = _params.UseBrittleModel ? 1 : 0;
-                
-                _cl.SetKernelArg(kernel, a++, (nuint)sizeof(nint), in bufMatArg);
-                _cl.SetKernelArg(kernel, a++, (nuint)sizeof(nint), in bufDenArg);
-                _cl.SetKernelArg(kernel, a++, (nuint)sizeof(nint), in bufMatLookupArg);
-                _cl.SetKernelArg(kernel, a++, (nuint)sizeof(nint), in bufVel0Arg);
-                _cl.SetKernelArg(kernel, a++, (nuint)sizeof(nint), in bufVel1Arg);
-                _cl.SetKernelArg(kernel, a++, (nuint)sizeof(nint), in bufVel2Arg);
-                _cl.SetKernelArg(kernel, a++, (nuint)sizeof(nint), in bufStr0Arg);
-                _cl.SetKernelArg(kernel, a++, (nuint)sizeof(nint), in bufStr1Arg);
-                _cl.SetKernelArg(kernel, a++, (nuint)sizeof(nint), in bufStr2Arg);
-                _cl.SetKernelArg(kernel, a++, (nuint)sizeof(nint), in bufStr3Arg);
-                _cl.SetKernelArg(kernel, a++, (nuint)sizeof(nint), in bufStr4Arg);
-                _cl.SetKernelArg(kernel, a++, (nuint)sizeof(nint), in bufStr5Arg);
-                _cl.SetKernelArg(kernel, a++, (nuint)sizeof(nint), in bufDmgArg);
-                _cl.SetKernelArg(kernel, a++, (nuint)sizeof(nint), in bufYmArg);
-                _cl.SetKernelArg(kernel, a++, (nuint)sizeof(nint), in bufPrArg);
-                _cl.SetKernelArg(kernel, a++, (nuint)sizeof(float), in _dt);
-                _cl.SetKernelArg(kernel, a++, (nuint)sizeof(float), in paramsPixelSize);
-                _cl.SetKernelArg(kernel, a++, (nuint)sizeof(int), in w);
-                _cl.SetKernelArg(kernel, a++, (nuint)sizeof(int), in h);
-                _cl.SetKernelArg(kernel, a++, (nuint)sizeof(int), in d);
-                _cl.SetKernelArg(kernel, a++, (nuint)sizeof(float), in _damageRatePerSec);
-                _cl.SetKernelArg(kernel, a++, (nuint)sizeof(float), in paramsConfiningPressureMPa);
-                _cl.SetKernelArg(kernel, a++, (nuint)sizeof(float), in paramsCohesionMPa);
-                _cl.SetKernelArg(kernel, a++, (nuint)sizeof(float), in paramsFailureAngleDeg);
-                _cl.SetKernelArg(kernel, a++, (nuint)sizeof(int), in usePlastic);
-                _cl.SetKernelArg(kernel, a++, (nuint)sizeof(int), in useBrittle);
-                _cl.SetKernelArg(kernel, a++, (nuint)sizeof(float), in sourceValue);
-                _cl.SetKernelArg(kernel, a++, (nuint)sizeof(int), in tx);
-                _cl.SetKernelArg(kernel, a++, (nuint)sizeof(int), in ty);
-                _cl.SetKernelArg(kernel, a++, (nuint)sizeof(int), in localTz);
-                _cl.SetKernelArg(kernel, a++, (nuint)sizeof(int), in isFullFace);
-                _cl.SetKernelArg(kernel, a++, (nuint)sizeof(int), in sourceAxis);
-            }
-            else // _kernelVelocity
-            {
-                _cl.SetKernelArg(kernel, a++, (nuint)sizeof(nint), in bufMatArg);
-                _cl.SetKernelArg(kernel, a++, (nuint)sizeof(nint), in bufDenArg);
-                _cl.SetKernelArg(kernel, a++, (nuint)sizeof(nint), in bufMatLookupArg);
-                _cl.SetKernelArg(kernel, a++, (nuint)sizeof(nint), in bufVel0Arg);
-                _cl.SetKernelArg(kernel, a++, (nuint)sizeof(nint), in bufVel1Arg);
-                _cl.SetKernelArg(kernel, a++, (nuint)sizeof(nint), in bufVel2Arg);
-                _cl.SetKernelArg(kernel, a++, (nuint)sizeof(nint), in bufStr0Arg);
-                _cl.SetKernelArg(kernel, a++, (nuint)sizeof(nint), in bufStr1Arg);
-                _cl.SetKernelArg(kernel, a++, (nuint)sizeof(nint), in bufStr2Arg);
-                _cl.SetKernelArg(kernel, a++, (nuint)sizeof(nint), in bufStr3Arg);
-                _cl.SetKernelArg(kernel, a++, (nuint)sizeof(nint), in bufStr4Arg);
-                _cl.SetKernelArg(kernel, a++, (nuint)sizeof(nint), in bufStr5Arg);
-                _cl.SetKernelArg(kernel, a++, (nuint)sizeof(nint), in bufMaxVel0Arg);
-                _cl.SetKernelArg(kernel, a++, (nuint)sizeof(nint), in bufMaxVel1Arg);
-                _cl.SetKernelArg(kernel, a++, (nuint)sizeof(nint), in bufMaxVel2Arg);
-                _cl.SetKernelArg(kernel, a++, (nuint)sizeof(float), in _dt);
-                _cl.SetKernelArg(kernel, a++, (nuint)sizeof(float), in paramsPixelSize);
-                _cl.SetKernelArg(kernel, a++, (nuint)sizeof(int), in w);
-                _cl.SetKernelArg(kernel, a++, (nuint)sizeof(int), in h);
-                _cl.SetKernelArg(kernel, a++, (nuint)sizeof(int), in d);
-            }
-        }
+        int tx = (int)(_params.TxPosition.X * _params.Width);
+        int ty = (int)(_params.TxPosition.Y * _params.Height);
+        int tz = (int)(_params.TxPosition.Z * _params.Depth); // Use GLOBAL tz
+        // localTz is no longer needed here
+        int isFullFace = _params.UseFullFaceTransducers ? 1 : 0;
+        int sourceAxis = _params.Axis;
+        int usePlastic = _params.UsePlasticModel ? 1 : 0;
+        int useBrittle = _params.UseBrittleModel ? 1 : 0;
+        
+        _cl.SetKernelArg(kernel, a++, (nuint)sizeof(nint), in bufMatArg);
+        _cl.SetKernelArg(kernel, a++, (nuint)sizeof(nint), in bufDenArg);
+        _cl.SetKernelArg(kernel, a++, (nuint)sizeof(nint), in bufMatLookupArg);
+        _cl.SetKernelArg(kernel, a++, (nuint)sizeof(nint), in bufVel0Arg);
+        _cl.SetKernelArg(kernel, a++, (nuint)sizeof(nint), in bufVel1Arg);
+        _cl.SetKernelArg(kernel, a++, (nuint)sizeof(nint), in bufVel2Arg);
+        _cl.SetKernelArg(kernel, a++, (nuint)sizeof(nint), in bufStr0Arg);
+        _cl.SetKernelArg(kernel, a++, (nuint)sizeof(nint), in bufStr1Arg);
+        _cl.SetKernelArg(kernel, a++, (nuint)sizeof(nint), in bufStr2Arg);
+        _cl.SetKernelArg(kernel, a++, (nuint)sizeof(nint), in bufStr3Arg);
+        _cl.SetKernelArg(kernel, a++, (nuint)sizeof(nint), in bufStr4Arg);
+        _cl.SetKernelArg(kernel, a++, (nuint)sizeof(nint), in bufStr5Arg);
+        _cl.SetKernelArg(kernel, a++, (nuint)sizeof(nint), in bufDmgArg);
+        _cl.SetKernelArg(kernel, a++, (nuint)sizeof(nint), in bufYmArg);
+        _cl.SetKernelArg(kernel, a++, (nuint)sizeof(nint), in bufPrArg);
+        _cl.SetKernelArg(kernel, a++, (nuint)sizeof(float), in _dt);
+        _cl.SetKernelArg(kernel, a++, (nuint)sizeof(float), in paramsPixelSize);
+        _cl.SetKernelArg(kernel, a++, (nuint)sizeof(int), in w);
+        _cl.SetKernelArg(kernel, a++, (nuint)sizeof(int), in h);
+        _cl.SetKernelArg(kernel, a++, (nuint)sizeof(int), in d);
+        _cl.SetKernelArg(kernel, a++, (nuint)sizeof(int), in chunkStartZ); // Pass chunk's Z offset
+        _cl.SetKernelArg(kernel, a++, (nuint)sizeof(float), in _damageRatePerSec);
+        _cl.SetKernelArg(kernel, a++, (nuint)sizeof(float), in paramsConfiningPressureMPa);
+        _cl.SetKernelArg(kernel, a++, (nuint)sizeof(float), in paramsCohesionMPa);
+        _cl.SetKernelArg(kernel, a++, (nuint)sizeof(float), in paramsFailureAngleDeg);
+        _cl.SetKernelArg(kernel, a++, (nuint)sizeof(int), in usePlastic);
+        _cl.SetKernelArg(kernel, a++, (nuint)sizeof(int), in useBrittle);
+        _cl.SetKernelArg(kernel, a++, (nuint)sizeof(float), in sourceValue);
+        _cl.SetKernelArg(kernel, a++, (nuint)sizeof(int), in tx);
+        _cl.SetKernelArg(kernel, a++, (nuint)sizeof(int), in ty);
+        _cl.SetKernelArg(kernel, a++, (nuint)sizeof(int), in tz); // Pass GLOBAL tz
+        _cl.SetKernelArg(kernel, a++, (nuint)sizeof(int), in isFullFace);
+        _cl.SetKernelArg(kernel, a++, (nuint)sizeof(int), in sourceAxis);
+    }
+    else // _kernelVelocity
+    {
+        var artificialDampingFactor = _params.ArtificialDampingFactor;
+
+        _cl.SetKernelArg(kernel, a++, (nuint)sizeof(nint), in bufMatArg);
+        _cl.SetKernelArg(kernel, a++, (nuint)sizeof(nint), in bufDenArg);
+        _cl.SetKernelArg(kernel, a++, (nuint)sizeof(nint), in bufMatLookupArg);
+        _cl.SetKernelArg(kernel, a++, (nuint)sizeof(nint), in bufVel0Arg);
+        _cl.SetKernelArg(kernel, a++, (nuint)sizeof(nint), in bufVel1Arg);
+        _cl.SetKernelArg(kernel, a++, (nuint)sizeof(nint), in bufVel2Arg);
+        _cl.SetKernelArg(kernel, a++, (nuint)sizeof(nint), in bufStr0Arg);
+        _cl.SetKernelArg(kernel, a++, (nuint)sizeof(nint), in bufStr1Arg);
+        _cl.SetKernelArg(kernel, a++, (nuint)sizeof(nint), in bufStr2Arg);
+        _cl.SetKernelArg(kernel, a++, (nuint)sizeof(nint), in bufStr3Arg);
+        _cl.SetKernelArg(kernel, a++, (nuint)sizeof(nint), in bufStr4Arg);
+        _cl.SetKernelArg(kernel, a++, (nuint)sizeof(nint), in bufStr5Arg);
+        _cl.SetKernelArg(kernel, a++, (nuint)sizeof(nint), in bufMaxVel0Arg);
+        _cl.SetKernelArg(kernel, a++, (nuint)sizeof(nint), in bufMaxVel1Arg);
+        _cl.SetKernelArg(kernel, a++, (nuint)sizeof(nint), in bufMaxVel2Arg);
+        _cl.SetKernelArg(kernel, a++, (nuint)sizeof(float), in _dt);
+        _cl.SetKernelArg(kernel, a++, (nuint)sizeof(float), in paramsPixelSize);
+        _cl.SetKernelArg(kernel, a++, (nuint)sizeof(int), in w);
+        _cl.SetKernelArg(kernel, a++, (nuint)sizeof(int), in h);
+        _cl.SetKernelArg(kernel, a++, (nuint)sizeof(int), in d);
+        _cl.SetKernelArg(kernel, a++, (nuint)sizeof(float), in artificialDampingFactor);
+    }
+}
         
         #endregion
 
@@ -742,7 +852,7 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
                     float dvz_dy = (c.Vz[x,y,lz] - c.Vz[x,y-1,lz]) * inv_dx;
 
                     float volumetric = dvx_dx + dvy_dy + dvz_dz;
-                    float damp = (1f - c.Damage[x, y, lz] * 0.5f);
+                    float damp = (1f - c.Damage[x, y, lz] * 0.9f); // Damage reduces stiffness
 
                     float sxx_new = c.Sxx[x, y, lz] + _dt * damp * (localLambda * volumetric + 2f * localMu * dvx_dx);
                     float syy_new = c.Syy[x, y, lz] + _dt * damp * (localLambda * volumetric + 2f * localMu * dvy_dy);
@@ -751,18 +861,50 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
                     float sxz_new = c.Sxz[x, y, lz] + _dt * damp * localMu * (dvx_dz + dvz_dx);
                     float syz_new = c.Syz[x, y, lz] + _dt * damp * localMu * (dvy_dz + dvz_dy);
 
-                    if (_params.UsePlasticModel)
+                    if (_params.UsePlasticModel || _params.UseBrittleModel)
                     {
-                        // (Plasticity model remains the same)
+                        // Apply Mohr-Coulomb Failure Criterion
+                        float cohesion = _params.CohesionMPa * 1e6f; // Pa
+                        float frictionAngle = _params.FailureAngleDeg * (MathF.PI / 180.0f); // rad
+                        float sin_phi = MathF.Sin(frictionAngle);
+                        float cos_phi = MathF.Cos(frictionAngle);
+
+                        float s_mean = (sxx_new + syy_new + szz_new) / 3.0f - (_params.ConfiningPressureMPa * 1e6f);
+                        float dev_sxx = sxx_new - s_mean;
+                        float dev_syy = syy_new - s_mean;
+                        float dev_szz = szz_new - s_mean;
+                        
+                        float j2 = 0.5f * (dev_sxx * dev_sxx + dev_syy * dev_syy + dev_szz * dev_szz) + sxy_new * sxy_new + sxz_new * sxz_new + syz_new * syz_new;
+                        float sqrt_j2 = MathF.Sqrt(j2);
+                        
+                        float yield_val = sqrt_j2 + sin_phi / MathF.Sqrt(3.0f) * s_mean - cohesion * cos_phi / MathF.Sqrt(3.0f);
+
+                        if (yield_val > 0)
+                        {
+                            if (_params.UseBrittleModel)
+                            {
+                                c.Damage[x, y, lz] += _dt * _damageRatePerSec * (yield_val / (cohesion + 1e-6f));
+                                c.Damage[x, y, lz] = Math.Clamp(c.Damage[x, y, lz], 0f, 1f);
+                            }
+
+                            if (_params.UsePlasticModel)
+                            {
+                                float return_factor = (cohesion * cos_phi / MathF.Sqrt(3.0f) - sin_phi / MathF.Sqrt(3.0f) * s_mean) / (sqrt_j2 + 1e-9f);
+                                if (return_factor < 1.0f)
+                                {
+                                    sxx_new = (dev_sxx * return_factor) + s_mean;
+                                    syy_new = (dev_syy * return_factor) + s_mean;
+                                    szz_new = (dev_szz * return_factor) + s_mean;
+                                    sxy_new *= return_factor;
+                                    sxz_new *= return_factor;
+                                    syz_new *= return_factor;
+                                }
+                            }
+                        }
                     }
                     
                     c.Sxx[x, y, lz] = sxx_new; c.Syy[x, y, lz] = syy_new; c.Szz[x, y, lz] = szz_new;
                     c.Sxy[x, y, lz] = sxy_new; c.Sxz[x, y, lz] = sxz_new; c.Syz[x, y, lz] = syz_new;
-
-                    if (_params.UseBrittleModel)
-                    {
-                        // (Brittle damage model remains the same)
-                    }
                 }
             });
         }
@@ -804,86 +946,83 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
         #endregion
 
         private void UpdateChunkVelocityCPU(WaveFieldChunk c, byte[,,] labels, float[,,] density)
+{
+    int d = c.EndZ - c.StartZ;
+    float inv_dx = 1.0f / _params.PixelSize;
+
+    // Loop bounds start at 2 and end at Dim-3 to provide a 2-voxel-wide boundary
+    // for the stencil calculations, preventing out-of-bounds errors.
+    Parallel.For(2, d - 2, lz =>
+    {
+        int gz = c.StartZ + lz;
+        for (int y = 2; y < _params.Height - 2; y++)
+        for (int x = 2; x < _params.Width - 2; x++)
         {
-            int d = c.EndZ - c.StartZ;
-            float inv_dx = 1.0f / _params.PixelSize;
+            byte materialId = labels[x, y, gz];
+            
+            if (!_params.IsMaterialSelected(materialId) || density[x,y,gz] <= 0f)
+                continue;
+            
+            float rho_inv = 1.0f / MathF.Max(100f, density[x, y, gz]);
+            
+            // --- PHYSICALLY CORRECT STABILIZED SCHEME ---
+            // This section now correctly implements the equations of motion for a co-located grid
+            // using a combination of simple backward differences for normal stresses and
+            // stabilized rotated stencils for shear stresses to prevent numerical instability.
 
-            // Loop bounds start at 2 and end at Dim-3 to provide a 2-voxel-wide boundary
-            // for the stencil calculations, preventing out-of-bounds errors.
-            Parallel.For(2, d - 2, lz =>
-            {
-                int gz = c.StartZ + lz;
-                for (int y = 2; y < _params.Height - 2; y++)
-                for (int x = 2; x < _params.Width - 2; x++)
-                {
-                    byte materialId = labels[x, y, gz];
-                    
-                    if (!_params.IsMaterialSelected(materialId) || density[x,y,gz] <= 0f)
-                        continue;
-                    
-                    float rho_inv = 1.0f / MathF.Max(100f, density[x, y, gz]);
-                    
-                    // --- PHYSICALLY CORRECT STABILIZED SCHEME ---
-                    // This section now correctly implements the equations of motion for a co-located grid
-                    // using a combination of simple backward differences for normal stresses and
-                    // stabilized rotated stencils for shear stresses to prevent numerical instability.
+            // For Vx update: rho * dvx/dt = dsxx/dx + dsxy/dy + dsxz/dz
+            float dsxx_dx = (c.Sxx[x, y, lz] - c.Sxx[x - 1, y, lz]) * inv_dx;
+            float dsxy_dy = d_dy_for_vx(c.Sxy, x, y, lz, inv_dx);
+            float dsxz_dz = d_dz_for_vx(c.Sxz, x, y, lz, inv_dx);
 
-                    // For Vx update: rho * dvx/dt = dsxx/dx + dsxy/dy + dsxz/dz
-                    float dsxx_dx = (c.Sxx[x, y, lz] - c.Sxx[x - 1, y, lz]) * inv_dx;
-                    float dsxy_dy = d_dy_for_vx(c.Sxy, x, y, lz, inv_dx);
-                    float dsxz_dz = d_dz_for_vx(c.Sxz, x, y, lz, inv_dx);
+            // For Vy update: rho * dvy/dt = dsyx/dx + dsyy/dy + dsyz/dz (sxy = syx)
+            float dsyx_dx = d_dx_for_vy(c.Sxy, x, y, lz, inv_dx);
+            float dsyy_dy = (c.Syy[x, y, lz] - c.Syy[x, y - 1, lz]) * inv_dx;
+            float dsyz_dz = d_dz_for_vy(c.Syz, x, y, lz, inv_dx);
+            
+            // For Vz update: rho * dvz/dt = dszx/dx + dszy/dy + dszz/dz (sxz = szx, syz = szy)
+            float dszx_dx = d_dx_for_vz(c.Sxz, x, y, lz, inv_dx);
+            float dszy_dy = d_dy_for_vz(c.Syz, x, y, lz, inv_dx);
+            float dszz_dz = (c.Szz[x, y, lz] - c.Szz[x, y, lz - 1]) * inv_dx;
 
-                    // For Vy update: rho * dvy/dt = dsyx/dx + dsyy/dy + dsyz/dz (sxy = syx)
-                    float dsyx_dx = d_dx_for_vy(c.Sxy, x, y, lz, inv_dx);
-                    float dsyy_dy = (c.Syy[x, y, lz] - c.Syy[x, y - 1, lz]) * inv_dx;
-                    float dsyz_dz = d_dz_for_vy(c.Syz, x, y, lz, inv_dx);
-                    
-                    // For Vz update: rho * dvz/dt = dszx/dx + dszy/dy + dszz/dz (sxz = szx, syz = szy)
-                    float dszx_dx = d_dx_for_vz(c.Sxz, x, y, lz, inv_dx);
-                    float dszy_dy = d_dy_for_vz(c.Syz, x, y, lz, inv_dx);
-                    float dszz_dz = (c.Szz[x, y, lz] - c.Szz[x, y, lz - 1]) * inv_dx;
+            const float damping = 0.999f;
 
-                    const float damping = 0.999f;
-                    
-                    // --- FIX 2: Increased artificial viscosity and more aggressive coefficient
-                    const float artificialViscosityCoeff = 0.1f;
+            float laplacian_vx = (c.Vx[x + 1, y, lz] + c.Vx[x - 1, y, lz] +
+                                  c.Vx[x, y + 1, lz] + c.Vx[x, y - 1, lz] +
+                                  c.Vx[x, y, lz + 1] + c.Vx[x, y, lz - 1] -
+                                  6.0f * c.Vx[x, y, lz]);
 
-                    float laplacian_vx = (c.Vx[x + 1, y, lz] + c.Vx[x - 1, y, lz] +
-                                          c.Vx[x, y + 1, lz] + c.Vx[x, y - 1, lz] +
-                                          c.Vx[x, y, lz + 1] + c.Vx[x, y, lz - 1] -
-                                          6.0f * c.Vx[x, y, lz]);
+            float laplacian_vy = (c.Vy[x + 1, y, lz] + c.Vy[x - 1, y, lz] +
+                                  c.Vy[x, y + 1, lz] + c.Vy[x, y - 1, lz] +
+                                  c.Vy[x, y, lz + 1] + c.Vy[x, y, lz - 1] -
+                                  6.0f * c.Vy[x, y, lz]);
 
-                    float laplacian_vy = (c.Vy[x + 1, y, lz] + c.Vy[x - 1, y, lz] +
-                                          c.Vy[x, y + 1, lz] + c.Vy[x, y - 1, lz] +
-                                          c.Vy[x, y, lz + 1] + c.Vy[x, y, lz - 1] -
-                                          6.0f * c.Vy[x, y, lz]);
+            float laplacian_vz = (c.Vz[x + 1, y, lz] + c.Vz[x - 1, y, lz] +
+                                  c.Vz[x, y + 1, lz] + c.Vz[x, y - 1, lz] +
+                                  c.Vz[x, y, lz + 1] + c.Vz[x, y, lz - 1] -
+                                  6.0f * c.Vz[x, y, lz]);
 
-                    float laplacian_vz = (c.Vz[x + 1, y, lz] + c.Vz[x - 1, y, lz] +
-                                          c.Vz[x, y + 1, lz] + c.Vz[x, y - 1, lz] +
-                                          c.Vz[x, y, lz + 1] + c.Vz[x, y, lz - 1] -
-                                          6.0f * c.Vz[x, y, lz]);
+            // Original velocity update based on stress divergence
+            float dvx_dt = (dsxx_dx + dsxy_dy + dsxz_dz) * rho_inv;
+            float dvy_dt = (dsyx_dx + dsyy_dy + dsyz_dz) * rho_inv;
+            float dvz_dt = (dszx_dx + dszy_dy + dszz_dz) * rho_inv;
+            
+            // Update velocity with physical term and damping/viscosity.
+            c.Vx[x, y, lz] = c.Vx[x, y, lz] * damping + _dt * dvx_dt + (_params.ArtificialDampingFactor / 6.0f) * laplacian_vx;
+            c.Vy[x, y, lz] = c.Vy[x, y, lz] * damping + _dt * dvy_dt + (_params.ArtificialDampingFactor / 6.0f) * laplacian_vy;
+            c.Vz[x, y, lz] = c.Vz[x, y, lz] * damping + _dt * dvz_dt + (_params.ArtificialDampingFactor / 6.0f) * laplacian_vz;
+            
+            const float maxVel = 10000f;
+            c.Vx[x, y, lz] = Math.Clamp(c.Vx[x, y, lz], -maxVel, maxVel);
+            c.Vy[x, y, lz] = Math.Clamp(c.Vy[x, y, lz], -maxVel, maxVel);
+            c.Vz[x, y, lz] = Math.Clamp(c.Vz[x, y, lz], -maxVel, maxVel);
 
-                    // Original velocity update based on stress divergence
-                    float dvx_dt = (dsxx_dx + dsxy_dy + dsxz_dz) * rho_inv;
-                    float dvy_dt = (dsyx_dx + dsyy_dy + dsyz_dz) * rho_inv;
-                    float dvz_dt = (dszx_dx + dszy_dy + dszz_dz) * rho_inv;
-                    
-                    // Update velocity with physical term and damping/viscosity.
-                    c.Vx[x, y, lz] = c.Vx[x, y, lz] * damping + _dt * dvx_dt + (artificialViscosityCoeff / 6.0f) * laplacian_vx;
-                    c.Vy[x, y, lz] = c.Vy[x, y, lz] * damping + _dt * dvy_dt + (artificialViscosityCoeff / 6.0f) * laplacian_vy;
-                    c.Vz[x, y, lz] = c.Vz[x, y, lz] * damping + _dt * dvz_dt + (artificialViscosityCoeff / 6.0f) * laplacian_vz;
-                    
-                    const float maxVel = 10000f;
-                    c.Vx[x, y, lz] = Math.Clamp(c.Vx[x, y, lz], -maxVel, maxVel);
-                    c.Vy[x, y, lz] = Math.Clamp(c.Vy[x, y, lz], -maxVel, maxVel);
-                    c.Vz[x, y, lz] = Math.Clamp(c.Vz[x, y, lz], -maxVel, maxVel);
-
-                    c.MaxAbsVx[x, y, lz] = MathF.Max(c.MaxAbsVx[x, y, lz], MathF.Abs(c.Vx[x, y, lz]));
-                    c.MaxAbsVy[x, y, lz] = MathF.Max(c.MaxAbsVy[x, y, lz], MathF.Abs(c.Vy[x, y, lz]));
-                    c.MaxAbsVz[x, y, lz] = MathF.Max(c.MaxAbsVz[x, y, lz], MathF.Abs(c.Vz[x, y, lz]));
-                }
-            });
+            c.MaxAbsVx[x, y, lz] = MathF.Max(c.MaxAbsVx[x, y, lz], MathF.Abs(c.Vx[x, y, lz]));
+            c.MaxAbsVy[x, y, lz] = MathF.Max(c.MaxAbsVy[x, y, lz], MathF.Abs(c.Vy[x, y, lz]));
+            c.MaxAbsVz[x, y, lz] = MathF.Max(c.MaxAbsVz[x, y, lz], MathF.Abs(c.Vz[x, y, lz]));
         }
+    });
+}
         
         private void ApplySourceToChunkCPU(WaveFieldChunk chunk, float sourceValue, byte[,,] labels)
         {
@@ -929,9 +1068,7 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
             {
                 if (tz < chunk.StartZ || tz >= chunk.EndZ) return;
 
-                // --- FIX 2: Spatially smoothed source injection ---
-                // Distribute the source over a 3x3x3 volume to avoid a singularity.
-                // Weights are approximated from a Gaussian kernel.
+                // Spatially smoothed source injection
                 float[] weights = { 0.073f, 0.12f, 0.073f }; // Center weight is implicitly 1.0
 
                 for (int dz = -1; dz <= 1; dz++) {
@@ -1001,8 +1138,8 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
 
                 if (_usePerVoxelProperties && _perVoxelYoungsModulus != null && _perVoxelPoissonRatio != null)
                 {
-                     E = _perVoxelYoungsModulus[x, y, z] * 1e6f;
-                     nu = _perVoxelPoissonRatio[x, y, z];
+                    E = _perVoxelYoungsModulus[x, y, z] * 1e6f;
+                    nu = _perVoxelPoissonRatio[x, y, z];
                 }
                 else
                 {
@@ -1024,12 +1161,10 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
                 Logger.LogWarning($"[CFL] Could not determine valid Vp_max from selected materials. Using default dt={_dt * 1e6f:F4} µs.");
                 return;
             }
-            
-            // --- FIX 2: Use an even more conservative safety factor (0.25) for maximum stability ---
+    
             _dt = 0.25f * (_params.PixelSize / (MathF.Sqrt(3) * vpMax));
             Logger.Log($"[CFL] Calculated stable timestep: dt={_dt*1e6f:F4} µs based on Vp_max={vpMax:F0} m/s");
         }
-
         private bool CheckPWaveArrival()
         {
             int rx = Math.Clamp((int)(_params.RxPosition.X * _params.Width), 1, _params.Width - 2);
@@ -1128,44 +1263,80 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
             return snap;
         }
         
-        public async Task<float[,,]> ReconstructFieldAsync(int comp)
+        /// <summary>
+        /// Reconstructs a full 3-D field from the chunks (instantaneous values).
+        /// axis: 0 = Vx, 1 = Vy, 2 = Vz
+        /// </summary>
+        public async Task<float[,,]> ReconstructFieldAsync(int axis)
         {
             var field = new float[_params.Width, _params.Height, _params.Depth];
+
             await Task.Run(() =>
             {
                 foreach (var c in _chunks)
                 {
-                    if (!c.IsInMemory) return;
+                    if (!c.IsInMemory)
+                        LoadChunkAsync(c).Wait();
+
                     int d = c.EndZ - c.StartZ;
-                    
+
+                    // X-fastest, then Y, then Z – exactly what the tomography viewer expects
                     for (int z = 0; z < d; z++)
-                    for (int y = 0; y < _params.Height; y++)
-                    for (int x = 0; x < _params.Width; x++)
                     {
-                        float v = comp switch { 0 => c.Vx[x, y, z], 1 => c.Vy[x, y, z], _ => c.Vz[x, y, z] };
-                        field[x, y, c.StartZ + z] = v;
+                        int globalZ = c.StartZ + z;
+                        for (int y = 0; y < _params.Height; y++)
+                        {
+                            for (int x = 0; x < _params.Width; x++)
+                            {
+                                float v = axis switch
+                                {
+                                    0 => c.Vx[x, y, z],
+                                    1 => c.Vy[x, y, z],
+                                    _ => c.Vz[x, y, z]
+                                };
+                                field[x, y, globalZ] = v;
+                            }
+                        }
                     }
                 }
             });
             return field;
         }
         
-        public async Task<float[,,]> ReconstructMaxFieldAsync(int comp)
+        /// <summary>
+        /// Reconstructs a full 3-D field from the chunks (maximum absolute values).
+        /// axis: 0 = Vx, 1 = Vy, 2 = Vz
+        /// </summary>
+        public async Task<float[,,]> ReconstructMaxFieldAsync(int axis)
         {
             var field = new float[_params.Width, _params.Height, _params.Depth];
+
             await Task.Run(() =>
             {
                 foreach (var c in _chunks)
                 {
-                    if (!c.IsInMemory) LoadChunkAsync(c).Wait();
+                    if (!c.IsInMemory)
+                        LoadChunkAsync(c).Wait();
+
                     int d = c.EndZ - c.StartZ;
-                    
+
+                    // X-fastest, then Y, then Z – exactly what the tomography viewer expects
                     for (int z = 0; z < d; z++)
-                    for (int y = 0; y < _params.Height; y++)
-                    for (int x = 0; x < _params.Width; x++)
                     {
-                        float v = comp switch { 0 => c.MaxAbsVx[x, y, z], 1 => c.MaxAbsVy[x, y, z], _ => c.MaxAbsVz[x, y, z] };
-                        field[x, y, c.StartZ + z] = v;
+                        int globalZ = c.StartZ + z;
+                        for (int y = 0; y < _params.Height; y++)
+                        {
+                            for (int x = 0; x < _params.Width; x++)
+                            {
+                                float v = axis switch
+                                {
+                                    0 => c.MaxAbsVx[x, y, z],
+                                    1 => c.MaxAbsVy[x, y, z],
+                                    _ => c.MaxAbsVz[x, y, z]
+                                };
+                                field[x, y, globalZ] = v;
+                            }
+                        }
                     }
                 }
             });
@@ -1330,170 +1501,222 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
         }
 
         private string GetKernelSource()
+{
+    return @"
+    #define M_PI_F 3.14159265358979323846f
+
+    // --- STABILIZED STENCIL HELPERS ---
+    float d_dy_for_vx(__global const float* F, int idx, int width, float inv_d) {
+        return 0.25f * ((F[idx] + F[idx + 1]) - (F[idx - width] + F[idx + 1 - width])) * inv_d;
+    }
+    float d_dz_for_vx(__global const float* F, int idx, int wh, float inv_d) {
+        return 0.25f * ((F[idx] + F[idx + 1]) - (F[idx - wh] + F[idx + 1 - wh])) * inv_d;
+    }
+    float d_dx_for_vy(__global const float* F, int idx, int width, float inv_d) {
+        return 0.25f * ((F[idx] + F[idx + width]) - (F[idx - 1] + F[idx - 1 + width])) * inv_d;
+    }
+    float d_dz_for_vy(__global const float* F, int idx, int width, int wh, float inv_d) {
+         return 0.25f * ((F[idx] + F[idx + width]) - (F[idx - wh] + F[idx + width - wh])) * inv_d;
+    }
+    float d_dx_for_vz(__global const float* F, int idx, int wh, float inv_d) {
+        return 0.25f * ((F[idx] + F[idx + wh]) - (F[idx - 1] + F[idx - 1 + wh])) * inv_d;
+    }
+    float d_dy_for_vz(__global const float* F, int idx, int width, int wh, float inv_d) {
+        return 0.25f * ((F[idx] + F[idx + wh]) - (F[idx - width] + F[idx - width + wh])) * inv_d;
+    }
+
+    __kernel void updateStress(
+        __global const uchar* material, __global const float* density, __global const uchar* material_lookup,
+        __global const float* vx, __global const float* vy, __global const float* vz,
+        __global float* sxx, __global float* syy, __global float* szz,
+        __global float* sxy, __global float* sxz, __global float* syz,
+        __global float* damage, __global const float* youngsModulus, __global const float* poissonRatio,
+        const float dt, const float dx, const int width, const int height, const int depth,
+        const int chunkStartZ,
+        const float damageRatePerSec, const float confiningPressureMPa, const float cohesionMPa, const float failureAngleDeg,
+        const int usePlasticModel, const int useBrittleModel, const float sourceValue,
+        const int srcX, const int srcY, const int srcZ_global,
+        const int isFullFace, const int sourceAxis
+    )
+    {
+        int idx = get_global_id(0); 
+        int wh = width * height;
+        if (idx >= width * height * depth) return;
+        
+        // Voxel's local coordinates within the chunk
+        int z_local = idx / wh;
+        int rem = idx % wh;
+        int y = rem / width;
+        int x = rem % width;
+        
+        // Voxel's global Z coordinate
+        int z_global = z_local + chunkStartZ;
+        
+        uchar mat = material[idx];
+
+        // Boundary check for all stencil calculations
+        if (x <= 0 || x >= width-1 || y <= 0 || y >= height-1 || z_local <= 0 || z_local >= depth-1) return;
+        
+        if (sourceValue != 0.0f && material_lookup[mat] != 0) {
+            if (isFullFace != 0) {
+                // Full-face source still uses local coordinates for simplicity within the face plane
+                int src_x_face = (srcX < width / 2) ? 2 : width - 3;
+                int src_y_face = (srcY < height / 2) ? 2 : height - 3;
+                int src_z_face_global = (srcZ_global < (chunkStartZ + depth) / 2) ? 2 : (chunkStartZ + depth) - 3;
+
+                if (sourceAxis == 0 && x == src_x_face) sxx[idx] += sourceValue;
+                if (sourceAxis == 1 && y == src_y_face) syy[idx] += sourceValue;
+                if (sourceAxis == 2 && z_global == src_z_face_global) szz[idx] += sourceValue;
+            } else {
+                // Point source now correctly compares global coordinates
+                float dx_dist = (float)(x - srcX);
+                float dy_dist = (float)(y - srcY);
+                float dz_dist = (float)(z_global - srcZ_global);
+
+                if (fabs(dx_dist) <= 1.5f && fabs(dy_dist) <= 1.5f && fabs(dz_dist) <= 1.5f) {
+                    float weight = exp(-0.5f * (dx_dist*dx_dist + dy_dist*dy_dist + dz_dist*dz_dist));
+                    float weightedSource = sourceValue * weight;
+                    sxx[idx] += weightedSource;
+                    syy[idx] += weightedSource;
+                    szz[idx] += weightedSource;
+                }
+            }
+        }
+        
+        if (material_lookup[mat] == 0 || density[idx] <= 0.0f) return;
+        
+        float E = youngsModulus[idx] * 1e6f; float nu = poissonRatio[idx];
+        if (E <= 0.0f || nu <= -1.0f || nu >= 0.5f) return;
+        
+        float mu = E / (2.0f * (1.0f + nu)); float lambda = E * nu / ((1.0f + nu) * (1.0f - 2.0f * nu));
+
+        int xm1=idx-1; int ym1=idx-width; int zm1=idx-wh;
+        
+        float dvx_dx = (vx[idx] - vx[xm1]) / dx;
+        float dvy_dy = (vy[idx] - vy[ym1]) / dx;
+        float dvz_dz = (vz[idx] - vz[zm1]) / dx;
+        float dvx_dy = (vx[idx] - vx[ym1]) / dx;
+        float dvy_dx = (vy[idx] - vy[xm1]) / dx;
+        float dvx_dz = (vx[idx] - vx[zm1]) / dx;
+        float dvz_dx = (vz[idx] - vz[xm1]) / dx;
+        float dvy_dz = (vy[idx] - vy[zm1]) / dx;
+        float dvz_dy = (vz[idx] - vz[ym1]) / dx;
+        
+        float volumetric_strain = dvx_dx + dvy_dy + dvz_dz;
+        float damage_factor = (1.0f - damage[idx] * 0.9f);
+        
+        float sxx_new = sxx[idx] + dt * damage_factor * (lambda * volumetric_strain + 2.0f * mu * dvx_dx);
+        float syy_new = syy[idx] + dt * damage_factor * (lambda * volumetric_strain + 2.0f * mu * dvy_dy);
+        float szz_new = szz[idx] + dt * damage_factor * (lambda * volumetric_strain + 2.0f * mu * dvz_dz);
+        float sxy_new = sxy[idx] + dt * damage_factor * mu * (dvx_dy + dvy_dx);
+        float sxz_new = sxz[idx] + dt * damage_factor * mu * (dvx_dz + dvz_dx);
+        float syz_new = syz[idx] + dt * damage_factor * mu * (dvy_dz + dvz_dy);
+
+        if (usePlasticModel != 0 || useBrittleModel != 0)
         {
-            // --- FIX START ---
-            // The entire OpenCL kernel has been reviewed and corrected. The 'updateVelocity' kernel,
-            // which was the source of the numerical instability, now uses a physically correct and
-            // stable discretization scheme for the elastic wave equation on a co-located grid.
-            // --- FIX: Added Laplacian-based artificial viscosity to kill grid-scale noise.
-            // --- FIX 2: Increased viscosity coefficient and implemented smoothed source.
-            return @"
-            #define M_PI_F 3.14159265358979323846f
+            float cohesion = cohesionMPa * 1e6f;
+            float frictionAngle = failureAngleDeg * (M_PI_F / 180.0f);
+            float sin_phi = sin(frictionAngle);
+            float cos_phi = cos(frictionAngle);
 
-            // --- STABILIZED STENCIL HELPERS ---
-            float d_dy_for_vx(__global const float* F, int idx, int width, float inv_d) {
-                return 0.25f * ((F[idx] + F[idx + 1]) - (F[idx - width] + F[idx + 1 - width])) * inv_d;
-            }
-            float d_dz_for_vx(__global const float* F, int idx, int wh, float inv_d) {
-                return 0.25f * ((F[idx] + F[idx + 1]) - (F[idx - wh] + F[idx + 1 - wh])) * inv_d;
-            }
-            float d_dx_for_vy(__global const float* F, int idx, int width, float inv_d) {
-                return 0.25f * ((F[idx] + F[idx + width]) - (F[idx - 1] + F[idx - 1 + width])) * inv_d;
-            }
-            float d_dz_for_vy(__global const float* F, int idx, int width, int wh, float inv_d) {
-                 return 0.25f * ((F[idx] + F[idx + width]) - (F[idx - wh] + F[idx + width - wh])) * inv_d;
-            }
-            float d_dx_for_vz(__global const float* F, int idx, int wh, float inv_d) {
-                return 0.25f * ((F[idx] + F[idx + wh]) - (F[idx - 1] + F[idx - 1 + wh])) * inv_d;
-            }
-            float d_dy_for_vz(__global const float* F, int idx, int width, int wh, float inv_d) {
-                return 0.25f * ((F[idx] + F[idx + wh]) - (F[idx - width] + F[idx - width + wh])) * inv_d;
-            }
+            float s_mean = (sxx_new + syy_new + szz_new) / 3.0f - (confiningPressureMPa * 1e6f);
+            float dev_sxx = sxx_new - s_mean;
+            float dev_syy = syy_new - s_mean;
+            float dev_szz = szz_new - s_mean;
+            
+            float j2 = 0.5f * (dev_sxx * dev_sxx + dev_syy * dev_syy + dev_szz * dev_szz) + sxy_new * sxy_new + sxz_new * sxz_new + syz_new * syz_new;
+            float sqrt_j2 = sqrt(j2);
+            
+            float yield_val = sqrt_j2 + sin_phi / sqrt(3.0f) * s_mean - cohesion * cos_phi / sqrt(3.0f);
 
-            __kernel void updateStress(
-                __global const uchar* material, __global const float* density, __global const uchar* material_lookup,
-                __global const float* vx, __global const float* vy, __global const float* vz,
-                __global float* sxx, __global float* syy, __global float* szz,
-                __global float* sxy, __global float* sxz, __global float* syz,
-                __global float* damage, __global const float* youngsModulus, __global const float* poissonRatio,
-                const float dt, const float dx, const int width, const int height, const int depth,
-                const float damageRatePerSec, const float confiningPressureMPa, const float cohesionMPa, const float failureAngleDeg,
-                const int usePlasticModel, const int useBrittleModel, const float sourceValue,
-                const int srcX, const int srcY, const int srcZ_local, const int isFullFace, const int sourceAxis
-            )
+            if (yield_val > 0)
             {
-                int idx = get_global_id(0); 
-                int wh = width * height;
-                if (idx >= width * height * depth) return;
-                
-                int z = idx / wh; int rem = idx % wh; int y = rem / width; int x = rem % width;
-                uchar mat = material[idx];
-                
-                if (sourceValue != 0.0f && material_lookup[mat] != 0) {
-                    if (isFullFace != 0) {
-                        int src_x_face = (srcX < width / 2) ? 2 : width - 3;
-                        int src_y_face = (srcY < height / 2) ? 2 : height - 3;
-                        int src_z_face = (srcZ_local < depth / 2) ? 2 : depth - 3;
-
-                        if (sourceAxis == 0 && x == src_x_face) sxx[idx] += sourceValue;
-                        if (sourceAxis == 1 && y == src_y_face) syy[idx] += sourceValue;
-                        if (sourceAxis == 2 && z == src_z_face) szz[idx] += sourceValue;
-                    } else {
-                        // --- FIX 2: Smoothed source injection on GPU ---
-                        float dx_dist = (float)(x - srcX);
-                        float dy_dist = (float)(y - srcY);
-                        float dz_dist = (float)(z - srcZ_local);
-
-                        if (fabs(dx_dist) <= 1.5f && fabs(dy_dist) <= 1.5f && fabs(dz_dist) <= 1.5f) {
-                            // Simple Gaussian-like spatial falloff
-                            float weight = exp(-0.5f * (dx_dist*dx_dist + dy_dist*dy_dist + dz_dist*dz_dist));
-                            float weightedSource = sourceValue * weight;
-                            sxx[idx] += weightedSource;
-                            syy[idx] += weightedSource;
-                            szz[idx] += weightedSource;
-                        }
+                if (useBrittleModel != 0)
+                {
+                    damage[idx] += dt * damageRatePerSec * (yield_val / (cohesion + 1e-6f));
+                    damage[idx] = clamp(damage[idx], 0.0f, 1.0f);
+                }
+                if (usePlasticModel != 0)
+                {
+                    float return_factor = (cohesion * cos_phi / sqrt(3.0f) - sin_phi / sqrt(3.0f) * s_mean) / (sqrt_j2 + 1e-9f);
+                    if (return_factor < 1.0f)
+                    {
+                        sxx_new = (dev_sxx * return_factor) + s_mean;
+                        syy_new = (dev_syy * return_factor) + s_mean;
+                        szz_new = (dev_szz * return_factor) + s_mean;
+                        sxy_new *= return_factor;
+                        sxz_new *= return_factor;
+                        syz_new *= return_factor;
                     }
                 }
-                
-                if (material_lookup[mat] == 0 || density[idx] <= 0.0f) return;
-                if (x <= 0 || x >= width-1 || y <= 0 || y >= height-1 || z <= 0 || z >= depth-1) return;
-                
-                float E = youngsModulus[idx] * 1e6f; float nu = poissonRatio[idx];
-                if (E <= 0.0f || nu <= -1.0f || nu >= 0.5f) return;
-                
-                float mu = E / (2.0f * (1.0f + nu)); float lambda = E * nu / ((1.0f + nu) * (1.0f - 2.0f * nu));
-
-                int xm1=idx-1; int ym1=idx-width; int zm1=idx-wh;
-                
-                float dvx_dx = (vx[idx] - vx[xm1]) / dx;
-                float dvy_dy = (vy[idx] - vy[ym1]) / dx;
-                float dvz_dz = (vz[idx] - vz[zm1]) / dx;
-                float dvx_dy = (vx[idx] - vx[ym1]) / dx;
-                float dvy_dx = (vy[idx] - vy[xm1]) / dx;
-                float dvx_dz = (vx[idx] - vx[zm1]) / dx;
-                float dvz_dx = (vz[idx] - vz[xm1]) / dx;
-                float dvy_dz = (vy[idx] - vy[zm1]) / dx;
-                float dvz_dy = (vz[idx] - vz[ym1]) / dx;
-                
-                float volumetric_strain = dvx_dx + dvy_dy + dvz_dz;
-                float damage_factor = (1.0f - damage[idx] * 0.5f);
-                
-                sxx[idx] += dt * damage_factor * (lambda * volumetric_strain + 2.0f * mu * dvx_dx);
-                syy[idx] += dt * damage_factor * (lambda * volumetric_strain + 2.0f * mu * dvy_dy);
-                szz[idx] += dt * damage_factor * (lambda * volumetric_strain + 2.0f * mu * dvz_dz);
-                sxy[idx] += dt * damage_factor * mu * (dvx_dy + dvy_dx);
-                sxz[idx] += dt * damage_factor * mu * (dvx_dz + dvz_dx);
-                syz[idx] += dt * damage_factor * mu * (dvy_dz + dvz_dy);
             }
-    
-            __kernel void updateVelocity(
-                __global const uchar* material, __global const float* density, __global const uchar* material_lookup,
-                __global float* vx, __global float* vy, __global float* vz,
-                __global const float* sxx, __global const float* syy, __global const float* szz,
-                __global const float* sxy, __global const float* sxz, __global const float* syz,
-                __global float* max_vx, __global float* max_vy, __global float* max_vz,
-                const float dt, const float dx, const int width, const int height, const int depth
-            )
-            {
-                int idx = get_global_id(0);
-                int wh = width * height;
-                if (idx >= wh * depth) return;
-                
-                uchar mat = material[idx];
-                if (material_lookup[mat] == 0 || density[idx] <= 0.0f) return;
-
-                int z = idx / wh; int rem = idx % wh; int y = rem / width; int x = rem % width;
-                if (x <= 1 || x >= width-2 || y <= 1 || y >= height-2 || z <= 1 || z >= depth-2) return;
-                
-                float rho_inv = 1.0f / fmax(100.0f, density[idx]);
-                float inv_dx = 1.0f / dx;
-                
-                float dsxx_dx_vx = (sxx[idx] - sxx[idx - 1]) * inv_dx;
-                float dsxy_dy_vx = d_dy_for_vx(sxy, idx, width, inv_dx);
-                float dsxz_dz_vx = d_dz_for_vx(sxz, idx, wh, inv_dx);
-                
-                float dsyx_dx_vy = d_dx_for_vy(sxy, idx, width, inv_dx);
-                float dsyy_dy_vy = (syy[idx] - syy[idx - width]) * inv_dx;
-                float dsyz_dz_vy = d_dz_for_vy(syz, idx, width, wh, inv_dx);
-
-                float dszx_dx_vz = d_dx_for_vz(sxz, idx, wh, inv_dx);
-                float dszy_dy_vz = d_dy_for_vz(syz, idx, width, wh, inv_dx);
-                float dszz_dz_vz = (szz[idx] - szz[idx - wh]) * inv_dx;
-                
-                const float damping = 0.999f;
-                
-                // --- FIX 2: Increased artificial viscosity coefficient
-                const float artificialViscosityCoeff = 0.1f;
-                int xp1 = idx + 1; int xm1 = idx - 1;
-                int yp1 = idx + width; int ym1 = idx - width;
-                int zp1 = idx + wh; int zm1 = idx - wh;
-                
-                float laplacian_vx = vx[xp1] + vx[xm1] + vx[yp1] + vx[ym1] + vx[zp1] + vx[zm1] - 6.0f * vx[idx];
-                float laplacian_vy = vy[xp1] + vy[xm1] + vy[yp1] + vy[ym1] + vy[zp1] + vy[zm1] - 6.0f * vy[idx];
-                float laplacian_vz = vz[xp1] + vz[xm1] + vz[yp1] + vz[ym1] + vz[zp1] + vz[zm1] - 6.0f * vz[idx];
-                
-                float dvx_update = dt * (dsxx_dx_vx + dsxy_dy_vx + dsxz_dz_vx) * rho_inv;
-                float dvy_update = dt * (dsyx_dx_vy + dsyy_dy_vy + dsyz_dz_vy) * rho_inv;
-                float dvz_update = dt * (dszx_dx_vz + dszy_dy_vz + dszz_dz_vz) * rho_inv;
-                
-                vx[idx] = vx[idx] * damping + dvx_update + (artificialViscosityCoeff / 6.0f) * laplacian_vx;
-                vy[idx] = vy[idx] * damping + dvy_update + (artificialViscosityCoeff / 6.0f) * laplacian_vy;
-                vz[idx] = vz[idx] * damping + dvz_update + (artificialViscosityCoeff / 6.0f) * laplacian_vz;
-
-                max_vx[idx] = fmax(max_vx[idx], fabs(vx[idx]));
-                max_vy[idx] = fmax(max_vy[idx], fabs(vy[idx]));
-                max_vz[idx] = fmax(max_vz[idx], fabs(vz[idx]));
-            }";
         }
+
+        sxx[idx] = sxx_new;
+        syy[idx] = syy_new;
+        szz[idx] = szz_new;
+        sxy[idx] = sxy_new;
+        sxz[idx] = sxz_new;
+        syz[idx] = syz_new;
+    }
+
+    __kernel void updateVelocity(
+        __global const uchar* material, __global const float* density, __global const uchar* material_lookup,
+        __global float* vx, __global float* vy, __global float* vz,
+        __global const float* sxx, __global const float* syy, __global const float* szz,
+        __global const float* sxy, __global const float* sxz, __global const float* syz,
+        __global float* max_vx, __global float* max_vy, __global float* max_vz,
+        const float dt, const float dx, const int width, const int height, const int depth,
+        const float artificialDampingFactor
+    )
+    {
+        int idx = get_global_id(0);
+        int wh = width * height;
+        if (idx >= wh * depth) return;
+        
+        uchar mat = material[idx];
+        if (material_lookup[mat] == 0 || density[idx] <= 0.0f) return;
+
+        int z = idx / wh; int rem = idx % wh; int y = rem / width; int x = rem % width;
+        if (x <= 1 || x >= width-2 || y <= 1 || y >= height-2 || z <= 1 || z >= depth-2) return;
+        
+        float rho_inv = 1.0f / fmax(100.0f, density[idx]);
+        float inv_dx = 1.0f / dx;
+        
+        float dsxx_dx_vx = (sxx[idx] - sxx[idx - 1]) * inv_dx;
+        float dsxy_dy_vx = d_dy_for_vx(sxy, idx, width, inv_dx);
+        float dsxz_dz_vx = d_dz_for_vx(sxz, idx, wh, inv_dx);
+        
+        float dsyx_dx_vy = d_dx_for_vy(sxy, idx, width, inv_dx);
+        float dsyy_dy_vy = (syy[idx] - syy[idx - width]) * inv_dx;
+        float dsyz_dz_vy = d_dz_for_vy(syz, idx, width, wh, inv_dx);
+
+        float dszx_dx_vz = d_dx_for_vz(sxz, idx, wh, inv_dx);
+        float dszy_dy_vz = d_dy_for_vz(syz, idx, width, wh, inv_dx);
+        float dszz_dz_vz = (szz[idx] - szz[idx - wh]) * inv_dx;
+        
+        const float damping = 0.999f;
+        
+        int xp1 = idx + 1; int xm1 = idx - 1;
+        int yp1 = idx + width; int ym1 = idx - width;
+        int zp1 = idx + wh; int zm1 = idx - wh;
+        
+        float laplacian_vx = vx[xp1] + vx[xm1] + vx[yp1] + vx[ym1] + vx[zp1] + vx[zm1] - 6.0f * vx[idx];
+        float laplacian_vy = vy[xp1] + vy[xm1] + vy[yp1] + vy[ym1] + vy[zp1] + vy[zm1] - 6.0f * vy[idx];
+        float laplacian_vz = vz[xp1] + vz[xm1] + vz[yp1] + vz[ym1] + vz[zp1] + vz[zm1] - 6.0f * vz[idx];
+        
+        float dvx_update = dt * (dsxx_dx_vx + dsxy_dy_vx + dsxz_dz_vx) * rho_inv;
+        float dvy_update = dt * (dsyx_dx_vy + dsyy_dy_vy + dsyz_dz_vy) * rho_inv;
+        float dvz_update = dt * (dszx_dx_vz + dszy_dy_vz + dszz_dz_vz) * rho_inv;
+        
+        vx[idx] = vx[idx] * damping + dvx_update + (artificialDampingFactor / 6.0f) * laplacian_vx;
+        vy[idx] = vy[idx] * damping + dvy_update + (artificialDampingFactor / 6.0f) * laplacian_vy;
+        vz[idx] = vz[idx] * damping + dvz_update + (artificialDampingFactor / 6.0f) * laplacian_vz;
+
+        max_vx[idx] = fmax(max_vx[idx], fabs(vx[idx]));
+        max_vy[idx] = fmax(max_vy[idx], fabs(vy[idx]));
+        max_vz[idx] = fmax(max_vz[idx], fabs(vz[idx]));
+    }";
+}
     }
 }
