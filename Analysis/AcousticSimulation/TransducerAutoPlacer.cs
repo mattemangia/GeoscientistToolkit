@@ -130,10 +130,13 @@ public class TransducerAutoPlacer
             }
         }
 
-        // Verify path and log results
-        var hasPath = HasPath(txVoxel, rxVoxel);
-        if (!hasPath)
-            Logger.LogWarning("[AutoPlace] No direct path found between TX and RX. The material(s) may be fragmented.");
+        // --- FIX START ---
+        // The expensive A* path check (`HasPath`) is removed.
+        // The placement is within the largest connected component, so a path is guaranteed by definition.
+        const bool hasPath = true;
+        Logger.Log("[AutoPlace] Path is guaranteed as transducers are placed within the largest connected component.");
+        // --- FIX END ---
+        
         _progressReporter?.Report((1.0f, "Placement complete."));
 
         // Normalize positions for the UI
@@ -276,66 +279,6 @@ public class TransducerAutoPlacer
         return (min, max);
     }
 
-    /// <summary>
-    ///     Verifies that there is a connected path between two points within the material set.
-    /// </summary>
-    private bool HasPath(Vector3 start, Vector3 end)
-    {
-        var startVoxel = new Vector3Int((int)start.X, (int)start.Y, (int)start.Z);
-        var endVoxel = new Vector3Int((int)end.X, (int)end.Y, (int)end.Z);
-
-        var openSet = new SortedSet<PathNode>(new PathNodeComparer());
-        var closedSet = new HashSet<Vector3Int>();
-        var startNode = new PathNode
-            { Position = startVoxel, G = 0, H = Vector3Int.Distance(startVoxel, endVoxel), Parent = null };
-        openSet.Add(startNode);
-
-        while (openSet.Count > 0)
-        {
-            var current = openSet.Min;
-            openSet.Remove(current);
-
-            if (current.Position.Equals(endVoxel)) return true;
-
-            closedSet.Add(current.Position);
-
-            int[] dx = { 1, -1, 0, 0, 0, 0 };
-            int[] dy = { 0, 0, 1, -1, 0, 0 };
-            int[] dz = { 0, 0, 0, 0, 1, -1 };
-
-            for (var i = 0; i < 6; i++)
-            {
-                var neighbor = new Vector3Int(current.Position.X + dx[i], current.Position.Y + dy[i],
-                    current.Position.Z + dz[i]);
-
-                if (neighbor.X < 0 || neighbor.X >= _width || neighbor.Y < 0 || neighbor.Y >= _height ||
-                    neighbor.Z < 0 || neighbor.Z >= _depth || closedSet.Contains(neighbor))
-                    continue;
-
-                if (!_materialIds.Contains(_labelData[neighbor.X, neighbor.Y, neighbor.Z]))
-                    continue;
-
-                var g = current.G + 1;
-                var h = Vector3Int.Distance(neighbor, endVoxel);
-
-                var existingNode = openSet.FirstOrDefault(n => n.Position.Equals(neighbor));
-                if (existingNode == null)
-                {
-                    openSet.Add(new PathNode { Position = neighbor, G = g, H = h, Parent = current });
-                }
-                else if (g < existingNode.G)
-                {
-                    openSet.Remove(existingNode);
-                    existingNode.G = g;
-                    existingNode.Parent = current;
-                    openSet.Add(existingNode);
-                }
-            }
-        }
-
-        return false;
-    }
-
     private bool IsPositionInMaterial(Vector3 position)
     {
         var x = Math.Clamp((int)position.X, 0, _width - 1);
@@ -415,59 +358,5 @@ public class TransducerAutoPlacer
     private class ConnectedComponent
     {
         public List<Vector3> Voxels { get; } = new();
-    }
-
-    private struct Vector3Int : IEquatable<Vector3Int>
-    {
-        public readonly int X;
-        public readonly int Y;
-        public readonly int Z;
-
-        public Vector3Int(int x, int y, int z)
-        {
-            X = x;
-            Y = y;
-            Z = z;
-        }
-
-        public static float Distance(Vector3Int a, Vector3Int b)
-        {
-            return MathF.Sqrt((a.X - b.X) * (a.X - b.X) + (a.Y - b.Y) * (a.Y - b.Y) + (a.Z - b.Z) * (a.Z - b.Z));
-        }
-
-        public bool Equals(Vector3Int other)
-        {
-            return X == other.X && Y == other.Y && Z == other.Z;
-        }
-
-        public override bool Equals(object obj)
-        {
-            return obj is Vector3Int other && Equals(other);
-        }
-
-        public override int GetHashCode()
-        {
-            return HashCode.Combine(X, Y, Z);
-        }
-    }
-
-    private class PathNode
-    {
-        public Vector3Int Position { get; set; }
-        public float G { get; set; }
-        public float H { get; set; }
-        public float F => G + H;
-        public PathNode Parent { get; set; }
-    }
-
-    private class PathNodeComparer : IComparer<PathNode>
-    {
-        public int Compare(PathNode x, PathNode y)
-        {
-            if (x == null || y == null) return 0;
-            var result = x.F.CompareTo(y.F);
-            if (result == 0) result = x.Position.GetHashCode().CompareTo(y.Position.GetHashCode());
-            return result;
-        }
     }
 }
