@@ -12,6 +12,7 @@ using GeoscientistToolkit.Data;
 using GeoscientistToolkit.Data.AcousticVolume;
 using GeoscientistToolkit.Data.CtImageStack;
 using GeoscientistToolkit.Data.VolumeData;
+using GeoscientistToolkit.UI;
 using GeoscientistToolkit.UI.Utils;
 using GeoscientistToolkit.Util;
 using ImGuiNET;
@@ -147,6 +148,8 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
         private float _preparationProgress;
         private string _preparationStatus = "";
         private bool _preparationComplete;
+        private readonly ProgressBarDialog _extentCalculationDialog;
+        private bool _isCalculatingExtent = false;
 
 
         public AcousticSimulationUI()
@@ -156,6 +159,7 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
             _exportManager = new AcousticExportManager();
             _tomographyViewer = new RealTimeTomographyViewer(); // Initialize the new viewer
             _offloadDirectory = Path.Combine(Path.GetTempPath(), "AcousticSimulation");
+            _extentCalculationDialog = new ProgressBarDialog("Calculating Bounding Box");
             Directory.CreateDirectory(_offloadDirectory);
             AcousticIntegration.OnPositionsChanged += OnTransducerMoved;
             
@@ -174,6 +178,8 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
         {
             if (dataset == null) return;
             
+            _extentCalculationDialog.Submit();
+
             if (_currentDataset != dataset)
             {
                 _timeStepsDirty = true;
@@ -260,6 +266,8 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
                             _selectedMaterialIDs.Add(material.ID);
                         else
                             _selectedMaterialIDs.Remove(material.ID);
+                        
+                        _simulationExtent = null; // Invalidate extent
                     }
                 }
                 else
@@ -269,6 +277,7 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
                     {
                         _selectedMaterialIDs.Clear();
                         _selectedMaterialIDs.Add(material.ID);
+                        _simulationExtent = null; // Invalidate extent
                     }
                 }
             }
@@ -658,10 +667,13 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
             ImGui.Separator();
 
             // Auto-cropping feature
-            if (ImGui.Checkbox("Auto-Crop to Selection", ref _autoCropToSelection))
-            {
-                _simulationExtent = null; // Force recalculation
+            if (ImGui.Checkbox("Auto-Crop to Selection", ref _autoCropToSelection)) {
+                if (_autoCropToSelection)
+                {
+                    _simulationExtent = null; // Force recalculation when turning on
+                }
             }
+
             if (ImGui.IsItemHovered())
             {
                 ImGui.SetTooltip("Automatically calculate the bounding box of the selected material(s) and run the simulation only within that extent.");
@@ -669,11 +681,15 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
 
             if (_autoCropToSelection)
             {
-                if (_simulationExtent == null && _selectedMaterialIDs.Any())
+                if (_simulationExtent == null && _selectedMaterialIDs.Any() && !_isCalculatingExtent)
                 {
-                    _simulationExtent = CalculateSimulationExtent(dataset);
+                    _isCalculatingExtent = true;
+                    _extentCalculationDialog.Open("Calculating material bounding box...");
+                    _ = CalculateSimulationExtentAsync(dataset); // Fire and forget
                 }
-                ImGui.Text(_simulationExtent.HasValue ? $"Simulation Extent: {_simulationExtent.Value.Width}x{_simulationExtent.Value.Height}x{_simulationExtent.Value.Depth}" : "Calculating extent...");
+                
+                ImGui.Text(_isCalculatingExtent ? "Calculating extent..." : 
+                    _simulationExtent.HasValue ? $"Simulation Extent: {_simulationExtent.Value.Width}x{_simulationExtent.Value.Height}x{_simulationExtent.Value.Depth}" : "Calculating extent...");
             }
 
             // Simulation Results
@@ -1256,46 +1272,63 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
             });
         }
 
-        private BoundingBox? CalculateSimulationExtent(CtImageStackDataset dataset)
+        private async Task CalculateSimulationExtentAsync(CtImageStackDataset dataset)
         {
-            int minX = _currentDataset.Width, minY = _currentDataset.Height, minZ = _currentDataset.Depth;
-            int maxX = -1, maxY = -1, maxZ = -1;
-            bool found = false;
-
-            for (int z = 0; z < _currentDataset.Depth; z++)
+            try
             {
-                for (int y = 0; y < _currentDataset.Height; y++)
+                var result = await Task.Run(() =>
                 {
-                    for (int x = 0; x < _currentDataset.Width; x++)
+                    int minX = dataset.Width, minY = dataset.Height, minZ = dataset.Depth;
+                    int maxX = -1, maxY = -1, maxZ = -1;
+                    bool found = false;
+
+                    for (int z = 0; z < dataset.Depth; z++)
                     {
-                        if (_selectedMaterialIDs.Contains(dataset.LabelData[x, y, z]))
+                        if (_extentCalculationDialog.IsCancellationRequested)
+                            return (BoundingBox?)null;
+
+                        float progress = (float)z / dataset.Depth;
+                        _extentCalculationDialog.Update(progress, $"Scanning slice {z + 1}/{dataset.Depth}...");
+
+                        for (int y = 0; y < dataset.Height; y++)
+                        for (int x = 0; x < dataset.Width; x++)
                         {
-                            found = true;
-                            minX = Math.Min(minX, x);
-                            minY = Math.Min(minY, y);
-                            minZ = Math.Min(minZ, z);
-                            maxX = Math.Max(maxX, x);
-                            maxY = Math.Max(maxY, y);
-                            maxZ = Math.Max(maxZ, z);
+                            if (_selectedMaterialIDs.Contains(dataset.LabelData[x, y, z]))
+                            {
+                                found = true;
+                                minX = Math.Min(minX, x);
+                                minY = Math.Min(minY, y);
+                                minZ = Math.Min(minZ, z);
+                                maxX = Math.Max(maxX, x);
+                                maxY = Math.Max(maxY, y);
+                                maxZ = Math.Max(maxZ, z);
+                            }
                         }
                     }
-                }
+
+                    if (!found) return (BoundingBox?)null;
+
+                    const int buffer = 5;
+                    minX = Math.Max(0, minX - buffer);
+                    minY = Math.Max(0, minY - buffer);
+                    minZ = Math.Max(0, minZ - buffer);
+                    maxX = Math.Min(dataset.Width - 1, maxX + buffer);
+                    maxY = Math.Min(dataset.Height - 1, maxY + buffer);
+                    maxZ = Math.Min(dataset.Depth - 1, maxZ + buffer);
+
+                    return new BoundingBox(minX, minY, minZ, maxX - minX + 1, maxY - minY + 1, maxZ - minZ + 1);
+                }, _extentCalculationDialog.CancellationToken);
+
+                _simulationExtent = result;
             }
-            
-            if (!found) return null;
-            
-            // Add a buffer around the extent
-            const int buffer = 5;
-            minX = Math.Max(0, minX - buffer);
-            minY = Math.Max(0, minY - buffer);
-            minZ = Math.Max(0, minZ - buffer);
-            maxX = Math.Min(_currentDataset.Width - 1, maxX + buffer);
-            maxY = Math.Min(_currentDataset.Height - 1, maxY + buffer);
-            maxZ = Math.Min(_currentDataset.Depth - 1, maxZ + buffer);
-
-            return new BoundingBox(minX, minY, minZ, maxX - minX + 1, maxY - minY + 1, maxZ - minZ + 1);
+            catch (OperationCanceledException) { Logger.Log("[AcousticSimulationUI] Bounding box calculation was cancelled."); _simulationExtent = null; }
+            catch (Exception ex) { Logger.LogError($"[AcousticSimulationUI] Error calculating simulation extent: {ex.Message}"); _simulationExtent = null; }
+            finally
+            {
+                _isCalculatingExtent = false;
+                if (_extentCalculationDialog.IsActive) _extentCalculationDialog.Close();
+            }
         }
-
         private async Task<byte[,,]> ExtractVolumeLabelsAsync(CtImageStackDataset dataset)
         {
             var fullExtent = new BoundingBox(0, 0, 0, dataset.Width, dataset.Height, dataset.Depth);
