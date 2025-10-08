@@ -185,17 +185,6 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
                 if (_params.SaveTimeSeries && step % _params.SnapshotInterval == 0)
                     results.TimeSeriesSnapshots?.Add(CreateSnapshot(step));
 
-                if (_params.EnableRealTimeVisualization && step % 10 == 0)
-                {
-                    WaveFieldUpdated?.Invoke(this, new WaveFieldUpdateEventArgs
-                    {
-                        WaveField = GetCombinedMagnitude(),
-                        TimeStep = step,
-                        SimTime = step * _dt,
-                        Dataset = labels
-                    });
-                }
-
                 if (!pHit && CheckPWaveArrival()) { pHit = true; pStep = step; }
                 if (pHit && !sHit && CheckSWaveArrival()) { sHit = true; sStep = step; }
 
@@ -318,6 +307,9 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
                         await ProcessChunkGPU_VelocityOnly(chunk, labels, density, token);
                     else
                         UpdateChunkVelocityCPU(chunk, labels, density);
+                    
+                    // After processing, this chunk is up-to-date for this timestep
+                    FireWaveFieldUpdate(chunk);
                 }
                 return;
             }
@@ -331,6 +323,7 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
                     await LoadChunkAsync(chunk);
                     ApplyGlobalBoundaryConditions(isStressUpdate: false);
                     if (_useGPU) await ProcessChunkGPU_VelocityOnly(chunk, labels, density, token); else UpdateChunkVelocityCPU(chunk, labels, density);
+                    FireWaveFieldUpdate(chunk);
                     await OffloadChunkAsync(chunk);
                 }
                 return;
@@ -354,6 +347,8 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
         
                 ApplyGlobalBoundaryConditions(isStressUpdate: false);
                 if (_useGPU) await ProcessChunkGPU_VelocityOnly(currentChunk, labels, density, token); else UpdateChunkVelocityCPU(currentChunk, labels, density);
+                
+                FireWaveFieldUpdate(currentChunk);
         
                 if (i > 0)
                 {
@@ -362,6 +357,21 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
             }
             await OffloadChunkAsync(_chunks[_chunks.Count - 2]);
             await OffloadChunkAsync(_chunks.Last());
+        }
+
+        private void FireWaveFieldUpdate(WaveFieldChunk chunk)
+        {
+            if (CurrentStep % 5 == 0) // Throttle updates to avoid overwhelming the UI thread
+            {
+                WaveFieldUpdated?.Invoke(this, new WaveFieldUpdateEventArgs
+                {
+                    ChunkVelocityFields = (chunk.Vx, chunk.Vy, chunk.Vz),
+                    ChunkStartZ = chunk.StartZ,
+                    ChunkDepth = chunk.EndZ - chunk.StartZ,
+                    TimeStep = CurrentStep,
+                    SimTime = CurrentStep * _dt
+                });
+            }
         }
 
         private void ApplyGlobalBoundaryConditions(bool isStressUpdate)
@@ -728,11 +738,13 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
         int tx = (int)(_params.TxPosition.X * _params.Width);
         int ty = (int)(_params.TxPosition.Y * _params.Height);
         int tz = (int)(_params.TxPosition.Z * _params.Depth); // Use GLOBAL tz
-        // localTz is no longer needed here
         int isFullFace = _params.UseFullFaceTransducers ? 1 : 0;
         int sourceAxis = _params.Axis;
         int usePlastic = _params.UsePlasticModel ? 1 : 0;
         int useBrittle = _params.UseBrittleModel ? 1 : 0;
+        
+        // --- FIX: Pass total simulation depth to the kernel ---
+        int totalSimDepth = _params.Depth;
         
         _cl.SetKernelArg(kernel, a++, (nuint)sizeof(nint), in bufMatArg);
         _cl.SetKernelArg(kernel, a++, (nuint)sizeof(nint), in bufDenArg);
@@ -767,6 +779,9 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
         _cl.SetKernelArg(kernel, a++, (nuint)sizeof(int), in tz); // Pass GLOBAL tz
         _cl.SetKernelArg(kernel, a++, (nuint)sizeof(int), in isFullFace);
         _cl.SetKernelArg(kernel, a++, (nuint)sizeof(int), in sourceAxis);
+        
+        // --- FIX: Add the new argument to the call ---
+        _cl.SetKernelArg(kernel, a++, (nuint)sizeof(int), in totalSimDepth);
     }
     else // _kernelVelocity
     {
@@ -1000,80 +1015,83 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
 }
         
         private void ApplySourceToChunkCPU(WaveFieldChunk chunk, float sourceValue, byte[,,] labels)
+{
+    int tx = (int)(_params.TxPosition.X * _params.Width);
+    int ty = (int)(_params.TxPosition.Y * _params.Height);
+    int tz = (int)(_params.TxPosition.Z * _params.Depth);
+
+    if (_params.UseFullFaceTransducers)
+    {
+        // Determine which face to apply the source to based on the transducer's position.
+        int src_x = (tx < _params.Width / 2) ? 2 : _params.Width - 3;
+        int src_y = (ty < _params.Height / 2) ? 2 : _params.Height - 3;
+        int src_z_global = (tz < _params.Depth / 2) ? 2 : _params.Depth - 3;
+
+        switch (_params.Axis)
         {
-            int tx = (int)(_params.TxPosition.X * _params.Width);
-            int ty = (int)(_params.TxPosition.Y * _params.Height);
-            int tz = (int)(_params.TxPosition.Z * _params.Depth);
-
-            if (_params.UseFullFaceTransducers)
-            {
-                int src_x = (tx < _params.Width / 2) ? 2 : _params.Width - 3;
-                int src_y = (ty < _params.Height / 2) ? 2 : _params.Height - 3;
-                int src_z_global = (tz < _params.Depth / 2) ? 2 : _params.Depth - 3;
-
-                switch (_params.Axis)
+            case 0: // X-Axis
+                // --- FIX: Apply source to the entire geometric face, regardless of material at that exact voxel. ---
+                // The wave will only propagate through the material in the next step anyway.
+                for (int z = chunk.StartZ; z < chunk.EndZ; z++)
+                for (int y = 0; y < _params.Height; y++)
+                    chunk.Sxx[src_x, y, z - chunk.StartZ] += sourceValue;
+                break;
+            case 1: // Y-Axis
+                // --- FIX: Apply source to the entire geometric face. ---
+                for (int z = chunk.StartZ; z < chunk.EndZ; z++)
+                for (int x = 0; x < _params.Width; x++)
+                    chunk.Syy[x, src_y, z - chunk.StartZ] += sourceValue;
+                break;
+            case 2: // Z-Axis
+                // --- FIX: Apply source to the entire geometric face. ---
+                // Check if the target source plane is within the current chunk.
+                if (src_z_global >= chunk.StartZ && src_z_global < chunk.EndZ)
                 {
-                    case 0: 
-                        for (int z = chunk.StartZ; z < chunk.EndZ; z++)
-                        for (int y = 0; y < _params.Height; y++)
-                            if (_params.IsMaterialSelected(labels[src_x, y, z]))
-                                chunk.Sxx[src_x, y, z - chunk.StartZ] += sourceValue;
-                        break;
-                    case 1: 
-                        for (int z = chunk.StartZ; z < chunk.EndZ; z++)
-                        for (int x = 0; x < _params.Width; x++)
-                             if (_params.IsMaterialSelected(labels[x, src_y, z]))
-                                chunk.Syy[x, src_y, z - chunk.StartZ] += sourceValue;
-                        break;
-                    case 2:
-                        if (src_z_global >= chunk.StartZ && src_z_global < chunk.EndZ)
-                        {
-                            int local_z = src_z_global - chunk.StartZ;
-                            for (int y = 0; y < _params.Height; y++)
-                            for (int x = 0; x < _params.Width; x++)
-                                if (_params.IsMaterialSelected(labels[x, y, src_z_global]))
-                                    chunk.Szz[x, y, local_z] += sourceValue;
-                        }
-                        break;
+                    int local_z = src_z_global - chunk.StartZ;
+                    for (int y = 0; y < _params.Height; y++)
+                    for (int x = 0; x < _params.Width; x++)
+                        chunk.Szz[x, y, local_z] += sourceValue;
                 }
-            }
-            else // Point source
-            {
-                if (tz < chunk.StartZ || tz >= chunk.EndZ) return;
+                break;
+        }
+    }
+    else // Point source logic remains the same, as it correctly checks the material.
+    {
+        if (tz < chunk.StartZ || tz >= chunk.EndZ) return;
 
-                float[] weights = { 0.073f, 0.12f, 0.073f }; 
+        float[] weights = { 0.073f, 0.12f, 0.073f }; 
 
-                for (int dz = -1; dz <= 1; dz++) {
-                    for (int dy = -1; dy <= 1; dy++) {
-                        for (int dx = -1; dx <= 1; dx++) {
-                            int curX = tx + dx;
-                            int curY = ty + dy;
-                            int curZ = tz + dz;
-                            int localZ = curZ - chunk.StartZ;
+        for (int dz = -1; dz <= 1; dz++) {
+            for (int dy = -1; dy <= 1; dy++) {
+                for (int dx = -1; dx <= 1; dx++) {
+                    int curX = tx + dx;
+                    int curY = ty + dy;
+                    int curZ = tz + dz;
+                    int localZ = curZ - chunk.StartZ;
 
-                            if (curX < 1 || curX >= _params.Width - 1 ||
-                                curY < 1 || curY >= _params.Height - 1 ||
-                                localZ < 1 || localZ >= (chunk.EndZ - chunk.StartZ) - 1)
-                            {
-                                continue;
-                            }
-                            
-                            if (!_params.IsMaterialSelected(labels[curX, curY, curZ])) continue;
-
-                            float weight = 1.0f;
-                            if (dx != 0) weight *= weights[dx + 1];
-                            if (dy != 0) weight *= weights[dy + 1];
-                            if (dz != 0) weight *= weights[dz + 1];
-
-                            float weightedSource = sourceValue * weight;
-                            chunk.Sxx[curX, curY, localZ] += weightedSource;
-                            chunk.Syy[curX, curY, localZ] += weightedSource;
-                            chunk.Szz[curX, curY, localZ] += weightedSource;
-                        }
+                    if (curX < 1 || curX >= _params.Width - 1 ||
+                        curY < 1 || curY >= _params.Height - 1 ||
+                        localZ < 1 || localZ >= (chunk.EndZ - chunk.StartZ) - 1)
+                    {
+                        continue;
                     }
+                    
+                    if (!_params.IsMaterialSelected(labels[curX, curY, curZ])) continue;
+
+                    float weight = 1.0f;
+                    if (dx != 0) weight *= weights[dx + 1];
+                    if (dy != 0) weight *= weights[dy + 1];
+                    if (dz != 0) weight *= weights[dz + 1];
+
+                    float weightedSource = sourceValue * weight;
+                    chunk.Sxx[curX, curY, localZ] += weightedSource;
+                    chunk.Syy[curX, curY, localZ] += weightedSource;
+                    chunk.Szz[curX, curY, localZ] += weightedSource;
                 }
             }
         }
+    }
+}
         #endregion
 
         private float GetCurrentSourceValue(int step)
@@ -1322,27 +1340,6 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
             return damageField;
         }
 
-        private float[,,] GetCombinedMagnitude()
-        {
-            var out3d = new float[_params.Width, _params.Height, _params.Depth];
-            foreach (var c in _chunks)
-            {
-                if (!c.IsInMemory) LoadChunkAsync(c).Wait();
-                int d = c.EndZ - c.StartZ;
-                
-                for (int z = 0; z < d; z++)
-                for (int y = 0; y < _params.Height; y++)
-                for (int x = 0; x < _params.Width; x++)
-                {
-                    float vx = c.Vx[x, y, z];
-                    float vy = c.Vy[x, y, z];
-                    float vz = c.Vz[x, y, z];
-                    out3d[x, y, c.StartZ + z] = MathF.Sqrt(vx * vx + vy * vy + vz * vz);
-                }
-            }
-            return out3d;
-        }
-
         private Task OffloadChunkAsync(WaveFieldChunk chunk)
         {
             if (!chunk.IsInMemory || string.IsNullOrEmpty(_params.OffloadDirectory))
@@ -1366,6 +1363,7 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
                     chunk.Vx = null; chunk.Vy = null; chunk.Vz = null; chunk.Sxx = null; chunk.Syy = null; chunk.Szz = null;
                     chunk.Sxy = null; chunk.Sxz = null; chunk.Syz = null; chunk.Damage = null;
                     chunk.MaxAbsVx = null; chunk.MaxAbsVy = null; chunk.MaxAbsVz = null;
+                    GC.Collect(); // Force GC to reclaim the large arrays immediately
                     chunk.IsInMemory = false;
                 }
                 catch (Exception ex)
@@ -1466,7 +1464,7 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
             _lastDeviceBytes = 0;
         }
 
-        private string GetKernelSource()
+       private string GetKernelSource()
 {
     return @"
     #define M_PI_F 3.14159265358979323846f
@@ -1502,7 +1500,8 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
         const float damageRatePerSec, const float confiningPressureMPa, const float cohesionMPa, const float failureAngleDeg,
         const int usePlasticModel, const int useBrittleModel, const float sourceValue,
         const int srcX, const int srcY, const int srcZ_global,
-        const int isFullFace, const int sourceAxis
+        const int isFullFace, const int sourceAxis,
+        const int totalSimDepth
     )
     {
         int idx = get_global_id(0); 
@@ -1524,7 +1523,7 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
             if (isFullFace != 0) {
                 int src_x_face = (srcX < width / 2) ? 2 : width - 3;
                 int src_y_face = (srcY < height / 2) ? 2 : height - 3;
-                int src_z_face_global = (srcZ_global < (chunkStartZ + depth) / 2) ? 2 : (chunkStartZ + depth) - 3;
+                int src_z_face_global = (srcZ_global < totalSimDepth / 2) ? 2 : totalSimDepth - 3;
 
                 if (sourceAxis == 0 && x == src_x_face) sxx[idx] += sourceValue;
                 if (sourceAxis == 1 && y == src_y_face) syy[idx] += sourceValue;

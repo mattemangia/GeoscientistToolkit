@@ -97,7 +97,8 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
         private bool _enableRealTimeVisualization = false;
         private float _visualizationUpdateInterval = 0.1f;
         private DateTime _lastVisualizationUpdate = DateTime.MinValue;
-        private byte[] _currentWaveFieldMask;
+        private byte[] _realTimeVisualizationMask; // A full-sized buffer for progressive updates
+        private SimulationResults _liveResultsForTomography; // A full-sized buffer for tomography
         
         // Memory management
         private bool _useChunkedProcessing = true;
@@ -149,6 +150,7 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
         private string _preparationStatus = "";
         private bool _preparationComplete;
         private readonly ProgressBarDialog _extentCalculationDialog;
+        private readonly ProgressBarDialog _autoPlaceDialog; // ADDED: Progress dialog for auto-placement
         private bool _isCalculatingExtent = false;
 
 
@@ -160,6 +162,7 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
             _tomographyViewer = new RealTimeTomographyViewer(); // Initialize the new viewer
             _offloadDirectory = Path.Combine(Path.GetTempPath(), "AcousticSimulation");
             _extentCalculationDialog = new ProgressBarDialog("Calculating Bounding Box");
+            _autoPlaceDialog = new ProgressBarDialog("Auto-placing Transducers"); // ADDED
             Directory.CreateDirectory(_offloadDirectory);
             AcousticIntegration.OnPositionsChanged += OnTransducerMoved;
             
@@ -179,6 +182,7 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
             if (dataset == null) return;
             
             _extentCalculationDialog.Submit();
+            _autoPlaceDialog.Submit(); // ADDED
 
             if (_currentDataset != dataset)
             {
@@ -589,7 +593,8 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
                     
                     if (ImGui.Button("Auto-place Transducers"))
                     {
-                        AutoPlaceTransducers(dataset);
+                        // MODIFIED: Changed from sync call to async task
+                        _ = AutoPlaceTransducersAsync(dataset);
                     }
                     if(ImGui.IsItemHovered()) 
                         ImGui.SetTooltip("Automatically place TX/RX on opposite sides of the selected material(s) largest connected component.");
@@ -659,7 +664,7 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
                 // --- Live update hook for the tomography viewer ---
                 if (_showTomographyWindow && _autoUpdateTomography && (DateTime.Now - _lastTomographyUpdate).TotalSeconds > 1.0)
                 {
-                    _ = UpdateLiveTomographyAsync();
+                    UpdateLiveTomography();
                     _lastTomographyUpdate = DateTime.Now;
                 }
             }
@@ -686,7 +691,6 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
                     }
                 }
             }
-            ImGui.EndChild();
             ImGui.Separator();
 
             // Auto-cropping feature
@@ -775,15 +779,13 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
             }
         }
         
-        private async Task UpdateLiveTomographyAsync()
+        private void UpdateLiveTomography()
         {
-            if (_simulator == null || _currentDataset == null) return;
-
-            // --- FIX: Correctly calculate and pass theoretical velocities ---
-            float expectedVp = 6000.0f; // Default fallback
-            float expectedVs = 3000.0f; // Default fallback
-
-            // Calculate expected velocities based on current UI parameters
+            if (_simulator == null || _currentDataset == null || _liveResultsForTomography == null) return;
+        
+            float expectedVp = 6000.0f; 
+            float expectedVs = 3000.0f;
+        
             var primaryMaterial = _currentDataset.Materials.FirstOrDefault(m => _selectedMaterialIDs.Contains(m.ID));
             if (primaryMaterial != null)
             {
@@ -793,7 +795,7 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
                 
                 float e_Pa = _youngsModulus * 1e6f;
                 float nu = _poissonRatio;
-
+        
                 if (e_Pa > 0 && nu > -1.0f && nu < 0.5f)
                 {
                     float mu = e_Pa / (2.0f * (1.0f + nu));
@@ -803,23 +805,24 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
                 }
             }
             
-            var liveResults = new SimulationResults
-            {
-                WaveFieldVx = await _simulator.ReconstructFieldAsync(0),
-                WaveFieldVy = await _simulator.ReconstructFieldAsync(1),
-                WaveFieldVz = await _simulator.ReconstructFieldAsync(2),
-                PWaveVelocity = expectedVp,
-                SWaveVelocity = expectedVs,
-                VpVsRatio = expectedVs > 0 ? expectedVp / expectedVs : 0
-            };
-
-            var dimensions = new Vector3(_parameters.Width, _parameters.Height, _parameters.Depth);
+            _liveResultsForTomography.PWaveVelocity = expectedVp;
+            _liveResultsForTomography.SWaveVelocity = expectedVs;
+            _liveResultsForTomography.VpVsRatio = expectedVs > 0 ? expectedVp / expectedVs : 0;
+        
+            // --- FIX ---
+            // The dimensions vector MUST match the dimensions of the data being passed.
+            // _liveResultsForTomography holds full-size data, so we must pass its full dimensions.
+            var dimensions = new Vector3(
+                _liveResultsForTomography.WaveFieldVx.GetLength(0), 
+                _liveResultsForTomography.WaveFieldVx.GetLength(1), 
+                _liveResultsForTomography.WaveFieldVx.GetLength(2)
+            );
             
-            // Extract a fresh copy of labels for filtering
-            var volumeLabels = await ExtractVolumeLabelsAsync(_currentDataset);
+            var volumeLabels = (byte[,,])_liveResultsForTomography.Context;
             
-            _tomographyViewer.UpdateLiveData(liveResults, dimensions, volumeLabels, _selectedMaterialIDs);
+            _tomographyViewer.UpdateLiveData(_liveResultsForTomography, dimensions, volumeLabels, _selectedMaterialIDs);
         }
+
 
         private void ApplyAxisPreset(int axis)
         {
@@ -886,61 +889,81 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
             ImGui.Unindent();
         }
         
-        private async void AutoPlaceTransducers(CtImageStackDataset dataset)
-{
-    if (!_selectedMaterialIDs.Any())
-    {
-        Logger.LogWarning("[AutoPlace] No materials selected for auto-placement.");
-        return;
-    }
+        private async Task AutoPlaceTransducersAsync(CtImageStackDataset dataset)
+        {
+            if (!_selectedMaterialIDs.Any())
+            {
+                Logger.LogWarning("[AutoPlace] No materials selected for auto-placement.");
+                return;
+            }
 
-    byte[,,] labelsToSearch;
-    BoundingBox extent;
+            _autoPlaceDialog.Open("Preparing for auto-placement...");
 
-    // Prepare the correct extent and label data based on whether auto-cropping is enabled.
-    if (_autoCropToSelection && _simulationExtent.HasValue)
-    {
-        extent = _simulationExtent.Value;
-        labelsToSearch = await GetCroppedLabelsAsync(dataset, extent);
-    }
-    else // Handle the case where we are searching the entire volume
-    {
-        extent = new BoundingBox(0, 0, 0, dataset.Width, dataset.Height, dataset.Depth);
-        // Use the same helper function to extract labels for the full extent
-        labelsToSearch = await GetCroppedLabelsAsync(dataset, extent);
-    }
-    
-    Logger.Log($"[AutoPlace] Finding optimal transducer positions for material IDs [{string.Join(", ", _selectedMaterialIDs)}]...");
+            (Vector3 tx, Vector3 rx)? placementResult = null;
 
-    // 2. Create the placer with the prepared data.
-    var autoPlacer = new TransducerAutoPlacer(dataset, _selectedMaterialIDs, extent, labelsToSearch);
+            try
+            {
+                byte[,,] labelsToSearch;
+                BoundingBox extent;
+                
+                if (_autoCropToSelection && _simulationExtent.HasValue)
+                {
+                    extent = _simulationExtent.Value;
+                    labelsToSearch = await GetCroppedLabelsAsync(dataset, extent);
+                }
+                else
+                {
+                    extent = new BoundingBox(0, 0, 0, dataset.Width, dataset.Height, dataset.Depth);
+                    labelsToSearch = await GetCroppedLabelsAsync(dataset, extent);
+                }
+                
+                var progress = new Progress<(float, string)>(value => _autoPlaceDialog.Update(value.Item1, value.Item2));
 
-    // 3. Call the public method, which encapsulates all logic.
-    var placementResult = await Task.Run(() => autoPlacer.PlaceTransducersForAxis(_selectedAxisIndex));
+                placementResult = await Task.Run(() =>
+                {
+                    var autoPlacer = new TransducerAutoPlacer(dataset, _selectedMaterialIDs, extent, labelsToSearch, progress);
+                    return autoPlacer.PlaceTransducersForAxis(_selectedAxisIndex, _autoPlaceDialog.CancellationToken);
+                }, _autoPlaceDialog.CancellationToken);
 
-    if (!placementResult.HasValue)
-    {
-        Logger.LogError($"[AutoPlace] Failed to automatically place transducers. The selected material(s) might be too small, fragmented, or not present along the chosen axis.");
-        return;
-    }
-
-    // 4. Update UI state with the results.
-    // The result is normalized to the extent that was searched. We must convert these
-    // local normalized coordinates back to global normalized coordinates for the UI.
-    var crop = extent; 
-    _txPosition = new Vector3(
-        (placementResult.Value.tx.X * crop.Width + crop.Min.X) / dataset.Width,
-        (placementResult.Value.tx.Y * crop.Height + crop.Min.Y) / dataset.Height,
-        (placementResult.Value.tx.Z * crop.Depth + crop.Min.Z) / dataset.Depth);
-    _rxPosition = new Vector3(
-        (placementResult.Value.rx.X * crop.Width + crop.Min.X) / dataset.Width,
-        (placementResult.Value.rx.Y * crop.Height + crop.Min.Y) / dataset.Height,
-        (placementResult.Value.rx.Z * crop.Depth + crop.Min.Z) / dataset.Depth);
-
-    // Update the integration helper for visual feedback in the viewers.
-    AcousticIntegration.UpdateMarkerPositionsForDrawing(dataset, _txPosition, _rxPosition);
-    OnTransducerMoved();
-}
+                if (placementResult.HasValue)
+                {
+                    var crop = extent; 
+                    _txPosition = new Vector3(
+                        (placementResult.Value.tx.X * crop.Width + crop.Min.X) / dataset.Width,
+                        (placementResult.Value.tx.Y * crop.Height + crop.Min.Y) / dataset.Height,
+                        (placementResult.Value.tx.Z * crop.Depth + crop.Min.Z) / dataset.Depth);
+                    _rxPosition = new Vector3(
+                        (placementResult.Value.rx.X * crop.Width + crop.Min.X) / dataset.Width,
+                        (placementResult.Value.rx.Y * crop.Height + crop.Min.Y) / dataset.Height,
+                        (placementResult.Value.rx.Z * crop.Depth + crop.Min.Z) / dataset.Depth);
+                    
+                    AcousticIntegration.UpdateMarkerPositionsForDrawing(dataset, _txPosition, _rxPosition);
+                    OnTransducerMoved();
+                }
+                else
+                {
+                    if (!_autoPlaceDialog.IsCancellationRequested)
+                    {
+                        Logger.LogError("[AutoPlace] Failed to automatically place transducers. The selected material(s) might be too small, fragmented, or not present along the chosen axis.");
+                    }
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                Logger.Log("[AutoPlace] Auto-placement was cancelled by the user.");
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError($"[AutoPlace] An error occurred during auto-placement: {ex.Message}");
+            }
+            finally
+            {
+                if (_autoPlaceDialog.IsActive)
+                {
+                    _autoPlaceDialog.Close();
+                }
+            }
+        }
         
         private float CalculatePixelSizeFromVelocities()
         {
@@ -1075,19 +1098,39 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
     {
         _lastResults = null;
         
-        // --- NEW: Handle Auto-Cropping ---
         BoundingBox extent = _autoCropToSelection && _simulationExtent.HasValue
             ? _simulationExtent.Value
             : new BoundingBox(0, 0, 0, dataset.Width, dataset.Height, dataset.Depth);
 
         CtImageStackTools.Update3DPreviewFromExternal(dataset, null, Vector4.Zero);
 
+        // --- FIX START: Clamp transducer positions to the simulation extent ---
+        // Calculate the local normalized positions first
+        var txPosLocalNormalized = new Vector3(
+            (_txPosition.X * dataset.Width - extent.Min.X) / extent.Width,
+            (_txPosition.Y * dataset.Height - extent.Min.Y) / extent.Height,
+            (_txPosition.Z * dataset.Depth - extent.Min.Z) / extent.Depth);
+
+        var rxPosLocalNormalized = new Vector3(
+            (_rxPosition.X * dataset.Width - extent.Min.X) / extent.Width,
+            (_rxPosition.Y * dataset.Height - extent.Min.Y) / extent.Height,
+            (_rxPosition.Z * dataset.Depth - extent.Min.Z) / extent.Depth);
+
+        // Clamp the local positions to the valid [0, 1] range.
+        txPosLocalNormalized.X = Math.Clamp(txPosLocalNormalized.X, 0.0f, 1.0f);
+        txPosLocalNormalized.Y = Math.Clamp(txPosLocalNormalized.Y, 0.0f, 1.0f);
+        txPosLocalNormalized.Z = Math.Clamp(txPosLocalNormalized.Z, 0.0f, 1.0f);
+        
+        rxPosLocalNormalized.X = Math.Clamp(rxPosLocalNormalized.X, 0.0f, 1.0f);
+        rxPosLocalNormalized.Y = Math.Clamp(rxPosLocalNormalized.Y, 0.0f, 1.0f);
+        rxPosLocalNormalized.Z = Math.Clamp(rxPosLocalNormalized.Z, 0.0f, 1.0f);
+        // --- FIX END ---
+
         _parameters = new SimulationParameters
         {
             Width = extent.Width,
             Height = extent.Height,
             Depth = extent.Depth,
-            // CORRECTED: Convert pixel size from micrometers (µm) to meters (m) for the physics engine.
             PixelSize = (float)dataset.PixelSize / 1_000_000.0f,
             SimulationExtent = extent,
             SelectedMaterialIDs = new HashSet<byte>(_selectedMaterialIDs),
@@ -1108,15 +1151,9 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
             UseBrittleModel = _useBrittle,
             UseGPU = _useGPU,
             UseRickerWavelet = _useRickerWavelet,
-            // --- NEW: Normalize transducer positions to the cropped extent ---
-            TxPosition = new Vector3(
-                (_txPosition.X * dataset.Width - extent.Min.X) / extent.Width,
-                (_txPosition.Y * dataset.Height - extent.Min.Y) / extent.Height,
-                (_txPosition.Z * dataset.Depth - extent.Min.Z) / extent.Depth),
-            RxPosition = new Vector3(
-                (_rxPosition.X * dataset.Width - extent.Min.X) / extent.Width,
-                (_rxPosition.Y * dataset.Height - extent.Min.Y) / extent.Height,
-                (_rxPosition.Z * dataset.Depth - extent.Min.Z) / extent.Depth),
+            // Use the clamped, local normalized positions
+            TxPosition = txPosLocalNormalized,
+            RxPosition = rxPosLocalNormalized,
             EnableRealTimeVisualization = _enableRealTimeVisualization,
             SaveTimeSeries = _saveTimeSeries,
             SnapshotInterval = _snapshotInterval,
@@ -1144,9 +1181,19 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
         _simulator = new ChunkedAcousticSimulator(_parameters);
         
         _simulator.ProgressUpdated += OnSimulationProgress;
-        if (_enableRealTimeVisualization)
+        if (_enableRealTimeVisualization || _autoUpdateTomography)
         {
-            _simulator.WaveFieldUpdated += OnWaveFieldUpdated;
+            // CRASH FIX: Allocate visualization buffers based on the FULL dataset dimensions, not the cropped simulation dimensions.
+            _realTimeVisualizationMask = new byte[(long)dataset.Width * dataset.Height * dataset.Depth];
+            _liveResultsForTomography = new SimulationResults
+            {
+                WaveFieldVx = new float[dataset.Width, dataset.Height, dataset.Depth],
+                WaveFieldVy = new float[dataset.Width, dataset.Height, dataset.Depth],
+                WaveFieldVz = new float[dataset.Width, dataset.Height, dataset.Depth],
+                Context = await GetCroppedLabelsAsync(dataset, new BoundingBox(0,0,0, dataset.Width, dataset.Height, dataset.Depth))
+            };
+            
+            _simulator.WaveFieldUpdated += OnSimulationChunkUpdated;
         }
         
         _simulator.SetPerVoxelMaterialProperties(youngsModulusVolume, poissonRatioVolume);
@@ -1449,28 +1496,111 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
     });
 }
         
-        private void OnWaveFieldUpdated(object sender, WaveFieldUpdateEventArgs e)
+        private void OnSimulationChunkUpdated(object sender, WaveFieldUpdateEventArgs e)
         {
-            if ((DateTime.Now - _lastVisualizationUpdate).TotalSeconds >= _visualizationUpdateInterval)
+            if (_isSimulating)
             {
-                _lastVisualizationUpdate = DateTime.Now;
-                _currentWaveFieldMask = CreateWaveFieldMask(e.WaveField);
-                CtImageStackTools.Update3DPreviewFromExternal(_currentDataset, _currentWaveFieldMask, new Vector4(1.0f, 0.5f, 0.0f, 0.5f));
+                // Update data for live tomography
+                if (_showTomographyWindow && _autoUpdateTomography && _liveResultsForTomography != null)
+                {
+                    UpdateTomographyData(e);
+                }
+            
+                // Update data for 3D visualization preview
+                if (_enableRealTimeVisualization && (DateTime.Now - _lastVisualizationUpdate).TotalSeconds >= _visualizationUpdateInterval)
+                {
+                    _lastVisualizationUpdate = DateTime.Now;
+                    Update3DVisualizationMask(e);
+                    CtImageStackTools.Update3DPreviewFromExternal(_currentDataset, _realTimeVisualizationMask, new Vector4(1.0f, 0.5f, 0.0f, 0.5f));
+                }
+            }
+        }
+        
+        private void UpdateTomographyData(WaveFieldUpdateEventArgs e)
+        {
+            var (vx, vy, vz) = e.ChunkVelocityFields;
+            var simExtent = _parameters.SimulationExtent.Value;
+
+            for (int z_chunk = 0; z_chunk < e.ChunkDepth; z_chunk++)
+            {
+                int z_global = simExtent.Min.Z + e.ChunkStartZ + z_chunk;
+                if (z_global >= _liveResultsForTomography.WaveFieldVx.GetLength(2)) continue;
+
+                for (int y_chunk = 0; y_chunk < vy.GetLength(1); y_chunk++)
+                {
+                    int y_global = simExtent.Min.Y + y_chunk;
+                    if (y_global >= _liveResultsForTomography.WaveFieldVx.GetLength(1)) continue;
+
+                    for (int x_chunk = 0; x_chunk < vx.GetLength(0); x_chunk++)
+                    {
+                        int x_global = simExtent.Min.X + x_chunk;
+                        if (x_global >= _liveResultsForTomography.WaveFieldVx.GetLength(0)) continue;
+
+                        _liveResultsForTomography.WaveFieldVx[x_global, y_global, z_global] = vx[x_chunk, y_chunk, z_chunk];
+                        _liveResultsForTomography.WaveFieldVy[x_global, y_global, z_global] = vy[x_chunk, y_chunk, z_chunk];
+                        _liveResultsForTomography.WaveFieldVz[x_global, y_global, z_global] = vz[x_chunk, y_chunk, z_chunk];
+                    }
+                }
+            }
+        }
+        
+        private void Update3DVisualizationMask(WaveFieldUpdateEventArgs e)
+        {
+            var (vx, vy, vz) = e.ChunkVelocityFields;
+            var (chunkMask, _) = CreateWaveFieldMaskForChunk(vx, vy, vz);
+            
+            var simExtent = _parameters.SimulationExtent.Value;
+            int chunkWidth = vx.GetLength(0);
+            int chunkHeight = vx.GetLength(1);
+
+            long fullWidth = _currentDataset.Width;
+            long full_wh = fullWidth * _currentDataset.Height;
+
+            for (int z_chunk = 0; z_chunk < e.ChunkDepth; z_chunk++)
+            {
+                long z_global = simExtent.Min.Z + e.ChunkStartZ + z_chunk;
+                long dest_z_offset = z_global * full_wh;
+
+                for (int y_chunk = 0; y_chunk < chunkHeight; y_chunk++)
+                {
+                    long y_global = simExtent.Min.Y + y_chunk;
+                    long dest_yx_offset = dest_z_offset + (y_global * fullWidth) + simExtent.Min.X;
+                    long src_yx_offset = (long)z_chunk * chunkWidth * chunkHeight + (long)y_chunk * chunkWidth;
+
+                    Buffer.BlockCopy(chunkMask, (int)src_yx_offset, _realTimeVisualizationMask, (int)dest_yx_offset, chunkWidth);
+                }
             }
         }
 
-        private byte[] CreateWaveFieldMask(float[,,] waveField)
+
+        private (byte[], float) CreateWaveFieldMaskForChunk(float[,,] vx, float[,,] vy, float[,,] vz)
         {
-            int width = waveField.GetLength(0); int height = waveField.GetLength(1); int depth = waveField.GetLength(2);
+            int width = vx.GetLength(0); int height = vx.GetLength(1); int depth = vx.GetLength(2);
             byte[] mask = new byte[width * height * depth];
             float maxAmplitude = 0;
-            for (int z = 0; z < depth; z++) for (int y = 0; y < height; y++) for (int x = 0; x < width; x++) maxAmplitude = Math.Max(maxAmplitude, Math.Abs(waveField[x, y, z]));
-            if (maxAmplitude > 0)
+            
+            for (int z = 0; z < depth; z++) 
+            for (int y = 0; y < height; y++) 
+            for (int x = 0; x < width; x++)
+            {
+                float magSq = vx[x, y, z] * vx[x, y, z] + vy[x, y, z] * vy[x, y, z] + vz[x, y, z] * vz[x, y, z];
+                maxAmplitude = Math.Max(maxAmplitude, magSq);
+            }
+            maxAmplitude = MathF.Sqrt(maxAmplitude);
+
+            if (maxAmplitude > 1e-9f)
             {
                 int idx = 0;
-                for (int z = 0; z < depth; z++) for (int y = 0; y < height; y++) for (int x = 0; x < width; x++) { float normalized = Math.Abs(waveField[x, y, z]) / maxAmplitude; mask[idx++] = (byte)(normalized * 255); }
+                for (int z = 0; z < depth; z++) 
+                for (int y = 0; y < height; y++) 
+                for (int x = 0; x < width; x++)
+                {
+                    float mag = MathF.Sqrt(vx[x, y, z] * vx[x, y, z] + vy[x, y, z] * vy[x, y, z] + vz[x, y, z] * vz[x, y, z]);
+                    float normalized = mag / maxAmplitude;
+                    mask[idx++] = (byte)(Math.Clamp(normalized, 0f, 1f) * 255);
+                }
             }
-            return mask;
+            return (mask, maxAmplitude);
         }
 
         private void CancelSimulation()
@@ -1484,7 +1614,7 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
         public void Dispose()
         {
             AcousticIntegration.OnPositionsChanged -= OnTransducerMoved;
-            if (AcousticIntegration.IsActiveFor(_currentDataset))
+            if (_currentDataset != null && AcousticIntegration.IsActiveFor(_currentDataset))
             {
                 AcousticIntegration.StopPlacement();
             }

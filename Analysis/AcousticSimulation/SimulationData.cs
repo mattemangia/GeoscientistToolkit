@@ -28,6 +28,11 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
         public float[,,] WaveFieldVy { get; set; }
         public float[,,] WaveFieldVz { get; set; }
         public List<WaveFieldSnapshot> TimeSeriesSnapshots { get; set; }
+        
+        /// <summary>
+        /// A general-purpose property to hold contextual data, like the labels for tomography.
+        /// </summary>
+        public object Context { get; set; }
     }
 
     /// <summary>
@@ -41,14 +46,27 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
     }
 
     /// <summary>
-    /// Provides real-time wave field data for visualization updates.
+    /// Provides real-time data for a single processed chunk for visualization updates.
     /// </summary>
     public class WaveFieldUpdateEventArgs : EventArgs
     {
-        public float[,,] WaveField { get; set; }
+        /// <summary>
+        /// The velocity fields (Vx, Vy, Vz) for the updated chunk.
+        /// </summary>
+        public (float[,,] Vx, float[,,] Vy, float[,,] Vz) ChunkVelocityFields { get; set; }
+        
+        /// <summary>
+        /// The global starting Z-index of this chunk.
+        /// </summary>
+        public int ChunkStartZ { get; set; }
+        
+        /// <summary>
+        /// The depth (number of slices) of this chunk.
+        /// </summary>
+        public int ChunkDepth { get; set; }
+
         public int TimeStep { get; set; }
         public float SimTime { get; set; }
-        public object Dataset { get; set; }
     }
 
     /// <summary>

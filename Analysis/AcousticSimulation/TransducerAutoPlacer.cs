@@ -3,6 +3,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Numerics;
+using System.Threading;
 using System.Threading.Tasks;
 using GeoscientistToolkit.Data.CtImageStack;
 using GeoscientistToolkit.Util;
@@ -20,12 +21,14 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
         private readonly int _width, _height, _depth;
         private readonly BoundingBox _extent;
         private readonly CtImageStackDataset _originalDataset;
+        private readonly IProgress<(float progress, string message)> _progressReporter;
+
         /// <summary>
         /// Initializes a new instance of the TransducerAutoPlacer.
         /// </summary>
         /// <param name="dataset">The original dataset, used for pixel size metadata.</param>
         /// <param name="materialIds">A set of material IDs that are considered valid for placement and wave propagation.</param>
-        public TransducerAutoPlacer(CtImageStackDataset originalDataset, ISet<byte> materialIds, BoundingBox extent, byte[,,] labelDataToSearch)
+        public TransducerAutoPlacer(CtImageStackDataset originalDataset, ISet<byte> materialIds, BoundingBox extent, byte[,,] labelDataToSearch, IProgress<(float progress, string message)> progressReporter = null)
         {
             if (materialIds == null || !materialIds.Any())
             {
@@ -39,6 +42,7 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
             _originalDataset = originalDataset;
             _materialIds = materialIds;
             _labelData = labelDataToSearch;
+            _progressReporter = progressReporter;
         
             // Set dimensions to the size of the data we are actually searching
             _width = labelDataToSearch.GetLength(0);
@@ -50,10 +54,12 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
         /// Executes the full auto-placement process for a given propagation axis.
         /// </summary>
         /// <param name="axis">The propagation axis (0=X, 1=Y, 2=Z).</param>
+        /// <param name="cancellationToken">Token to monitor for cancellation requests.</param>
         /// <returns>A tuple with normalized TX and RX positions, or null if placement fails.</returns>
-        public (Vector3 tx, Vector3 rx)? PlaceTransducersForAxis(int axis)
+        public (Vector3 tx, Vector3 rx)? PlaceTransducersForAxis(int axis, CancellationToken cancellationToken)
         {
-            var bounds = FindLargestIslandAndBounds();
+            var bounds = FindLargestIslandAndBounds(cancellationToken);
+            cancellationToken.ThrowIfCancellationRequested();
 
             if (!bounds.HasValue)
             {
@@ -63,6 +69,8 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
 
             var (min, max) = bounds.Value;
             Logger.Log($"[AutoPlace] Largest connected component bounds: Min({min}), Max({max})");
+            _progressReporter?.Report((0.8f, "Calculating transducer positions..."));
+
 
             const int buffer = 3; // Place transducers 3 voxels inside the material bounds
             Vector3 txVoxel, rxVoxel;
@@ -108,6 +116,7 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
             if (!txValid || !rxValid)
             {
                 Logger.LogWarning($"[AutoPlace] Initial positions not in material. Searching for valid positions...");
+                _progressReporter?.Report((0.9f, "Refining positions..."));
                 (txVoxel, rxVoxel) = FindValidTransducerPositions(min, max, axis);
                 if (!IsPositionInMaterial(txVoxel) || !IsPositionInMaterial(rxVoxel))
                 {
@@ -122,6 +131,7 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
             {
                 Logger.LogWarning($"[AutoPlace] No direct path found between TX and RX. The material(s) may be fragmented.");
             }
+             _progressReporter?.Report((1.0f, "Placement complete."));
 
             // Normalize positions for the UI
             Vector3 txNormalized = new Vector3(
@@ -158,11 +168,15 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
         /// and returns its bounding box.
         /// </summary>
         /// <returns>A tuple containing the min and max voxel coordinates of the largest island, or null if not found.</returns>
-        private (Vector3 min, Vector3 max)? FindLargestIslandAndBounds()
+        private (Vector3 min, Vector3 max)? FindLargestIslandAndBounds(CancellationToken cancellationToken)
         {
             Logger.Log($"[AutoPlace] Starting search for largest island of material IDs [{string.Join(", ", _materialIds)}]");
+            _progressReporter?.Report((0.0f, "Searching for material islands..."));
 
-            var components = FindAllConnectedComponents();
+
+            var components = FindAllConnectedComponents(cancellationToken);
+            cancellationToken.ThrowIfCancellationRequested();
+
 
             if (components.Count == 0)
             {
@@ -170,19 +184,27 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
                 return null;
             }
 
+            _progressReporter?.Report((0.7f, $"Found {components.Count} islands. Analyzing largest..."));
             var largestComponent = components.OrderByDescending(c => c.Voxels.Count).First();
             Logger.Log($"[AutoPlace] Found {components.Count} islands. Largest has {largestComponent.Voxels.Count} voxels.");
 
             return CalculateBounds(largestComponent);
         }
 
-        private List<ConnectedComponent> FindAllConnectedComponents()
+        private List<ConnectedComponent> FindAllConnectedComponents(CancellationToken cancellationToken)
         {
             var components = new List<ConnectedComponent>();
             var visited = new bool[_width, _height, _depth];
 
             for (int z = 0; z < _depth; z++)
             {
+                cancellationToken.ThrowIfCancellationRequested();
+                if (z % 5 == 0) // Update progress periodically
+                {
+                    float progress = 0.7f * z / _depth; // Scale progress to 70% of the total time
+                    _progressReporter?.Report((progress, $"Scanning slice {z + 1}/{_depth}..."));
+                }
+                
                 for (int y = 0; y < _height; y++)
                 {
                     for (int x = 0; x < _width; x++)
@@ -190,7 +212,7 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
                         if (_materialIds.Contains(_labelData[x, y, z]) && !visited[x, y, z])
                         {
                             var component = FloodFill3D(x, y, z, visited);
-                            if (component.Voxels.Count > 0)
+                            if (component.Voxels.Count > 100) // Ignore very small components
                             {
                                 components.Add(component);
                             }
