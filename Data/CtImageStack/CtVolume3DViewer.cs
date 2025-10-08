@@ -569,30 +569,43 @@ void main()
         }
 
         vec4 sampledColor = vec4(0.0);
+
+        // 1. Base Grayscale Rendering
+        if (ThresholdParams.w > 0.5) // Show Grayscale
+        {
+            float intensity = textureLod(sampler3D(VolumeTexture, VolumeSampler), currentPos, 0.0).r;
+            if (intensity >= ThresholdParams.x && intensity <= ThresholdParams.y)
+            {
+                float normIntensity = (intensity - ThresholdParams.x) / (ThresholdParams.y - ThresholdParams.x + 0.001);
+                sampledColor = (RenderParams.x > 0.5) ? ApplyColorMap(normIntensity) : vec4(vec3(normIntensity), normIntensity);
+                sampledColor.a = pow(sampledColor.a, 2.0);
+            }
+        }
+
+        // 2. Material Overlay
+        int materialId = int(textureLod(sampler3D(LabelTexture, VolumeSampler), currentPos, 0.0).r * 255.0 + 0.5);
+        if (materialId > 0)
+        {
+            vec2 materialParams = texelFetch(sampler1D(MaterialParamsTexture, VolumeSampler), materialId, 0).xy;
+            bool isVisible = materialParams.x > 0.5;
+            if (isVisible)
+            {
+                vec4 materialColor = texelFetch(sampler1D(MaterialColorsTexture, VolumeSampler), materialId, 0);
+                float opacity = materialParams.y;
+                
+                // Blend over grayscale
+                sampledColor.rgb = mix(sampledColor.rgb, materialColor.rgb, opacity);
+                sampledColor.a = max(sampledColor.a, opacity);
+            }
+        }
+
+        // 3. Preview Overlay (highest priority)
         if (PreviewParams.x > 0.5 && textureLod(sampler3D(PreviewTexture, VolumeSampler), currentPos, 0.0).r > 0.5)
         {
-            sampledColor = vec4(PreviewParams.yzw, PreviewAlpha.x * 5.0);
-        }
-        else
-        {
-            int materialId = int(textureLod(sampler3D(LabelTexture, VolumeSampler), currentPos, 0.0).r * 255.0 + 0.5);
-            vec2 materialParams = texelFetch(sampler1D(MaterialParamsTexture, VolumeSampler), materialId, 0).xy;
-
-            if (materialId > 0 && materialParams.x > 0.5)
-            {
-                sampledColor = texelFetch(sampler1D(MaterialColorsTexture, VolumeSampler), materialId, 0);
-                sampledColor.a = materialParams.y * 5.0;
-            }
-            else if (ThresholdParams.w > 0.5)
-            {
-                float intensity = textureLod(sampler3D(VolumeTexture, VolumeSampler), currentPos, 0.0).r;
-                if (intensity >= ThresholdParams.x && intensity <= ThresholdParams.y)
-                {
-                    float normIntensity = (intensity - ThresholdParams.x) / (ThresholdParams.y - ThresholdParams.x + 0.001);
-                    sampledColor = (RenderParams.x > 0.5) ? ApplyColorMap(normIntensity) : vec4(vec3(normIntensity), normIntensity);
-                    sampledColor.a = pow(sampledColor.a, 2.0);
-                }
-            }
+            vec4 previewRgba = vec4(PreviewParams.yzw, PreviewAlpha.x);
+            // Blend over material/grayscale
+            sampledColor.rgb = mix(sampledColor.rgb, previewRgba.rgb, previewRgba.a);
+            sampledColor.a = max(sampledColor.a, previewRgba.a);
         }
         
         if (sampledColor.a > 0.0)

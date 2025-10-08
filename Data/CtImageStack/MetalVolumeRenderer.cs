@@ -260,72 +260,60 @@ fragment float4 fragment_main(VertexOut in [[stage_in]],
         
         float4 sampleColor = float4(0.0);
         
-        // Enhanced acoustic wave visualization (highest priority)
+        // Acoustic wave visualization (has highest priority and is NOT blended)
         if (constants.PreviewParams.x > 0.5) {
             float previewValue = previewTex.sample(volumeSampler, pos).r;
             if (previewValue > 0.001) {
                 hasAcousticWave = true;
                 maxWaveIntensity = max(maxWaveIntensity, previewValue);
                 
-                // Enhanced wave visualization with better color gradient
-                float intensity = pow(previewValue, 0.5); // Non-linear scaling for better visibility
-                
-                // Create a color gradient from blue (low) to red (high) intensity
+                float intensity = pow(previewValue, 0.5);
                 float3 waveColor;
                 if (intensity < 0.5) {
-                    // Blue to green
                     waveColor = mix(float3(0.0, 0.0, 1.0), float3(0.0, 1.0, 0.0), intensity * 2.0);
                 } else {
-                    // Green to red
                     waveColor = mix(float3(0.0, 1.0, 0.0), float3(1.0, 0.0, 0.0), (intensity - 0.5) * 2.0);
                 }
-                
-                // Apply the preview color tint
                 waveColor = mix(waveColor, float3(constants.PreviewParams.yzw), 0.5);
-                
-                // Calculate opacity based on intensity
                 float waveOpacity = constants.PreviewAlpha.x * intensity * 2.0;
                 sampleColor = float4(waveColor, waveOpacity);
             }
         }
         
-        // Material rendering (if no acoustic wave at this position)
-        if (sampleColor.a == 0.0) {
-            float labelValue = labelTex.sample(volumeSampler, pos).r;
-            int materialId = int(labelValue * 255.0 + 0.5);
-            
-            if (materialId > 0) {
-                // Sample material parameters and colors
-                float2 params = materialParams.read(uint2(materialId, 0), 0).xy;
-                bool isVisible = params.x > 0.5;
-                float opacity = params.y;
-                
-                if (isVisible) {
-                    float4 matColor = materialColors.read(uint2(materialId, 0), 0);
-                    
-                    // Reduce material opacity when acoustic waves are present
-                    if (hasAcousticWave) {
-                        opacity *= 0.3; // Make materials more transparent during wave visualization
-                    }
-                    
-                    sampleColor = float4(matColor.rgb, matColor.a * opacity * 0.5);
-                }
-            } else if (constants.ThresholdParams.w > 0.5 && !hasAcousticWave) {
-                // Grayscale volume (only if no acoustic waves)
+        // If no acoustic wave was rendered for this sample, do standard rendering
+        if (sampleColor.a < 0.001) {
+
+            // 1. Start with grayscale color if enabled
+            if (constants.ThresholdParams.w > 0.5) { // ShowGrayscale
                 float density = volumeTex.sample(volumeSampler, pos).r;
-                
                 if (density > constants.ThresholdParams.x && density < constants.ThresholdParams.y) {
                     float normalizedDensity = (density - constants.ThresholdParams.x) / 
                                             (constants.ThresholdParams.y - constants.ThresholdParams.x + 0.001);
-                    
-                    // Apply color map if requested
                     float3 volColor = float3(normalizedDensity);
                     if (constants.RenderParams.x > 0.5) {
-                        // Simple color mapping for acoustic context
                         volColor = mix(float3(0.1, 0.1, 0.3), float3(0.3, 0.3, 0.7), normalizedDensity);
                     }
-                    
                     sampleColor = float4(volColor, normalizedDensity * 0.3);
+                }
+            }
+
+            // 2. Overlay visible materials
+            float labelValue = labelTex.sample(volumeSampler, pos).r;
+            int materialId = int(labelValue * 255.0 + 0.5);
+            if (materialId > 0) {
+                float2 params = materialParams.read(uint2(materialId, 0), 0).xy;
+                bool isVisible = params.x > 0.5;
+                if (isVisible) {
+                    float opacity = params.y;
+                    // Dim materials if acoustic sim is running anywhere
+                    if (hasAcousticWave) {
+                        opacity *= 0.3;
+                    }
+                    float4 matColor = materialColors.read(uint2(materialId, 0), 0);
+                    
+                    // Blend over the existing sampleColor (which is either grayscale or transparent)
+                    sampleColor.rgb = mix(sampleColor.rgb, matColor.rgb, opacity);
+                    sampleColor.a = max(sampleColor.a, matColor.a * opacity * 0.5f);
                 }
             }
         }
