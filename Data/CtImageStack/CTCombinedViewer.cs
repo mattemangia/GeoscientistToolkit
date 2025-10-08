@@ -849,7 +849,11 @@ public class CtCombinedViewer : IDatasetViewer, IDisposable
 
             // Draw Acoustic Transducer markers
             if (AcousticIntegration.IsActiveFor(_dataset))
+            {
                 DrawTransducerMarkers(dl, viewIndex, imagePos, imageSize, width, height);
+                if (AcousticIntegration.ShouldDrawExtent)
+                    DrawSimulationExtent(dl, viewIndex, imagePos, imageSize, width, height);
+            }
 
             // Draw Rock Core Extractor overlay if active
             RockCoreIntegration.DrawOverlay(_dataset, dl, viewIndex, imagePos, imageSize, width, height,
@@ -867,6 +871,54 @@ public class CtCombinedViewer : IDatasetViewer, IDisposable
         }
 
         dl.PopClipRect();
+    }
+
+    private void DrawSimulationExtent(ImDrawListPtr dl, int viewIndex, Vector2 imagePos, Vector2 imageSize,
+        int imageWidth, int imageHeight)
+    {
+        var extentNullable = AcousticIntegration.GetActiveExtent();
+        if (!extentNullable.HasValue) return;
+
+        var extent = extentNullable.Value;
+        var color = 0xA0FF00FF; // Semi-transparent magenta
+
+        Vector2 rectMin = Vector2.Zero, rectMax = Vector2.Zero;
+
+        switch (viewIndex)
+        {
+            case 0: // XY view, slice at _sliceZ. Shows X and Y axes.
+                if (_sliceZ >= extent.Min.Z && _sliceZ <= extent.Max.Z)
+                {
+                    rectMin = new Vector2(imagePos.X + (float)extent.Min.X / imageWidth * imageSize.X,
+                        imagePos.Y + (float)extent.Min.Y / imageHeight * imageSize.Y);
+                    rectMax = new Vector2(imagePos.X + (float)(extent.Max.X + 1) / imageWidth * imageSize.X,
+                        imagePos.Y + (float)(extent.Max.Y + 1) / imageHeight * imageSize.Y);
+                }
+
+                break;
+            case 1: // XZ view, slice at _sliceY. Shows X and Z axes.
+                if (_sliceY >= extent.Min.Y && _sliceY <= extent.Max.Y)
+                {
+                    rectMin = new Vector2(imagePos.X + (float)extent.Min.X / imageWidth * imageSize.X,
+                        imagePos.Y + (float)extent.Min.Z / imageHeight * imageSize.Y);
+                    rectMax = new Vector2(imagePos.X + (float)(extent.Max.X + 1) / imageWidth * imageSize.X,
+                        imagePos.Y + (float)(extent.Max.Z + 1) / imageHeight * imageSize.Y);
+                }
+
+                break;
+            case 2: // YZ view, slice at _sliceX. Shows Y and Z axes.
+                if (_sliceX >= extent.Min.X && _sliceX <= extent.Max.X)
+                {
+                    rectMin = new Vector2(imagePos.X + (float)extent.Min.Y / imageWidth * imageSize.X,
+                        imagePos.Y + (float)extent.Min.Z / imageHeight * imageSize.Y);
+                    rectMax = new Vector2(imagePos.X + (float)(extent.Max.Y + 1) / imageWidth * imageSize.X,
+                        imagePos.Y + (float)(extent.Max.Z + 1) / imageHeight * imageSize.Y);
+                }
+
+                break;
+        }
+
+        if (rectMin != rectMax) dl.AddRect(rectMin, rectMax, color, 0, ImDrawFlags.None, 2.0f);
     }
 
     private void DrawTransducerMarkers(ImDrawListPtr dl, int viewIndex, Vector2 imagePos, Vector2 imageSize,

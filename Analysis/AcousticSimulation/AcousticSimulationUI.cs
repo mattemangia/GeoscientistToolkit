@@ -20,10 +20,27 @@ internal static class AcousticIntegration
 {
     private static Dataset _targetDataset;
     private static string _placingWhich; // "TX" or "RX"
+    private static BoundingBox? _activeExtent;
+    public static bool ShouldDrawExtent { get; private set; }
+
     public static bool IsPlacing { get; private set; }
     public static Vector3 TxPosition { get; private set; }
     public static Vector3 RxPosition { get; private set; }
     public static event Action OnPositionsChanged;
+
+    /// <summary>
+    ///     Configures the global state for placement and visualization overlays.
+    /// </summary>
+    public static void Configure(BoundingBox? extent, bool drawExtent)
+    {
+        _activeExtent = extent;
+        ShouldDrawExtent = drawExtent;
+    }
+
+    public static BoundingBox? GetActiveExtent()
+    {
+        return _activeExtent;
+    }
 
     /// <summary>
     ///     Updates the current positions for drawing markers without changing the placement state.
@@ -71,10 +88,34 @@ internal static class AcousticIntegration
     {
         if (!IsPlacing) return;
 
+        var finalPos = newNormalizedPos;
+
+        // If there's an active extent, clamp the new position to it.
+        if (_activeExtent.HasValue && _targetDataset is CtImageStackDataset ctDataset)
+        {
+            var extent = _activeExtent.Value;
+
+            var posVoxel = new Vector3(
+                newNormalizedPos.X * ctDataset.Width,
+                newNormalizedPos.Y * ctDataset.Height,
+                newNormalizedPos.Z * ctDataset.Depth
+            );
+
+            posVoxel.X = Math.Clamp(posVoxel.X, extent.Min.X, extent.Max.X);
+            posVoxel.Y = Math.Clamp(posVoxel.Y, extent.Min.Y, extent.Max.Y);
+            posVoxel.Z = Math.Clamp(posVoxel.Z, extent.Min.Z, extent.Max.Z);
+
+            finalPos = new Vector3(
+                posVoxel.X / ctDataset.Width,
+                posVoxel.Y / ctDataset.Height,
+                posVoxel.Z / ctDataset.Depth
+            );
+        }
+
         if (_placingWhich == "TX")
-            TxPosition = newNormalizedPos;
+            TxPosition = finalPos;
         else if (_placingWhich == "RX") // Explicitly check for RX
-            RxPosition = newNormalizedPos;
+            RxPosition = finalPos;
 
         OnPositionsChanged?.Invoke();
     }
@@ -177,6 +218,8 @@ public class AcousticSimulationUI : IDisposable
         if (_currentDataset != null && AcousticIntegration.IsActiveFor(_currentDataset))
             AcousticIntegration.StopPlacement();
 
+        AcousticIntegration.Configure(null, false);
+
         _cancellationTokenSource?.Cancel();
         _cancellationTokenSource?.Dispose();
         _simulator?.Dispose();
@@ -196,7 +239,6 @@ public class AcousticSimulationUI : IDisposable
     {
         _txPosition = AcousticIntegration.TxPosition;
         _rxPosition = AcousticIntegration.RxPosition;
-        if (_autoCropToSelection) _simulationExtent = null; // Invalidate extent
         _timeStepsDirty = true;
     }
 
@@ -213,6 +255,8 @@ public class AcousticSimulationUI : IDisposable
         // --- FIX: Use the corrected method to update marker positions for drawing ---
         // This ensures the current TX/RX positions are known to viewers without changing placement state.
         AcousticIntegration.UpdateMarkerPositionsForDrawing(dataset, _txPosition, _rxPosition);
+        AcousticIntegration.Configure(_simulationExtent, _autoCropToSelection && _simulationExtent.HasValue);
+
 
         // --- Call the new viewer's draw method ---
         _tomographyViewer.Draw();
@@ -749,7 +793,11 @@ public class AcousticSimulationUI : IDisposable
 
         // Auto-cropping feature
         if (ImGui.Checkbox("Auto-Crop to Selection",
-                ref _autoCropToSelection)) _simulationExtent = null; // Force recalculation when turning on/off
+                ref _autoCropToSelection))
+        {
+            _simulationExtent = null; // Force recalculation when turning on/off
+            AcousticIntegration.Configure(null, false);
+        }
 
         if (ImGui.IsItemHovered())
             ImGui.SetTooltip(
@@ -1416,6 +1464,7 @@ public class AcousticSimulationUI : IDisposable
             }, _extentCalculationDialog.CancellationToken);
 
             _simulationExtent = result;
+            AcousticIntegration.Configure(_simulationExtent, _autoCropToSelection && _simulationExtent.HasValue);
         }
         catch (OperationCanceledException)
         {
