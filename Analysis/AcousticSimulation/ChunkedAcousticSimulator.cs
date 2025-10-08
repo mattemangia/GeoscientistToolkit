@@ -145,7 +145,6 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
 
             CalculateTimeStep(labels, density);
             
-            // Log density range to confirm it's being received
             float minDensity = float.MaxValue, maxDensity = float.MinValue;
             for(int i = 0; i < density.GetLength(0); i++)
             for(int j = 0; j < density.GetLength(1); j++)
@@ -159,10 +158,9 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
             }
             Logger.Log($"[Simulator] Running with density range (kg/m³): {minDensity:F2} to {maxDensity:F2}");
 
-            // MODIFICATION: If offloading is enabled, immediately offload all chunks to disk.
             if (_params.EnableOffloading)
             {
-                Logger.Log("[ChunkedSimulator] Offloading all chunks to disk before starting simulation.");
+                Logger.Log($"[ChunkedSimulator] Offloading all chunks to disk before starting simulation. Offload dir: {_params.OffloadDirectory}");
                 foreach (var chunk in _chunks)
                 {
                     await OffloadChunkAsync(chunk);
@@ -227,111 +225,81 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
         
         private async Task ProcessStressUpdatePass(byte[,,] labels, float[,,] density, float sourceValue, CancellationToken token)
         {
-            // MODIFICATION: Replaced "load-all" logic with a proper sliding window for memory management.
-            if (_params.EnableOffloading)
+            // Case 1: In-Memory Processing. Fast, but requires high RAM.
+            // Exchange all boundaries first, then apply global BCs, then process all chunks.
+            if (!_params.EnableOffloading)
             {
-                // Offload all chunks that are currently in memory to ensure a clean state for the pass.
-                foreach (var chunk in _chunks.Where(c => c.IsInMemory))
+                for (int i = 0; i < _chunks.Count - 1; i++)
                 {
+                    ExchangeBoundary(_chunks[i].Vx, _chunks[i + 1].Vx);
+                    ExchangeBoundary(_chunks[i].Vy, _chunks[i + 1].Vy);
+                    ExchangeBoundary(_chunks[i].Vz, _chunks[i + 1].Vz);
+                }
+        
+                ApplyGlobalBoundaryConditions(isStressUpdate: true);
+        
+                foreach (var chunk in _chunks)
+                {
+                    if (_useGPU)
+                        await ProcessChunkGPU_StressOnly(chunk, labels, density, sourceValue, token);
+                    else
+                    {
+                        if (sourceValue != 0) ApplySourceToChunkCPU(chunk, sourceValue, labels);
+                        UpdateChunkStressCPU(chunk, labels, density);
+                    }
+                }
+                return;
+            }
+        
+            // Case 2: Efficient Offloading with a Sliding Window.
+            // This minimizes disk I/O by keeping only two adjacent chunks in memory at a time.
+            if (_chunks.Count <= 1)
+            {
+                if (_chunks.Any())
+                {
+                    var chunk = _chunks.First();
+                    await LoadChunkAsync(chunk);
+                    ApplyGlobalBoundaryConditions(isStressUpdate: true);
+                     if (_useGPU) await ProcessChunkGPU_StressOnly(chunk, labels, density, sourceValue, token); else { if (sourceValue != 0) ApplySourceToChunkCPU(chunk, sourceValue, labels); UpdateChunkStressCPU(chunk, labels, density); }
                     await OffloadChunkAsync(chunk);
                 }
-        
-                // Load pairs of chunks, exchange their boundaries, and then offload the first chunk of the pair.
-                for (int i = 0; i < _chunks.Count - 1; i++)
-                {
-                    await LoadChunkAsync(_chunks[i]);
-                    await LoadChunkAsync(_chunks[i + 1]);
-        
-                    ExchangeBoundary(_chunks[i].Vx, _chunks[i + 1].Vx);
-                    ExchangeBoundary(_chunks[i].Vy, _chunks[i + 1].Vy);
-                    ExchangeBoundary(_chunks[i].Vz, _chunks[i + 1].Vz);
-        
-                    await OffloadChunkAsync(_chunks[i]);
-                }
-                // Offload the last chunk which is still in memory.
-                if (_chunks.Count > 0)
-                {
-                    await OffloadChunkAsync(_chunks.Last());
-                }
-            }
-            else
-            {
-                // Original logic for non-offloading mode.
-                for (int i = 0; i < _chunks.Count - 1; i++)
-                {
-                    ExchangeBoundary(_chunks[i].Vx, _chunks[i + 1].Vx);
-                    ExchangeBoundary(_chunks[i].Vy, _chunks[i + 1].Vy);
-                    ExchangeBoundary(_chunks[i].Vz, _chunks[i + 1].Vz);
-                }
+                return;
             }
             
-            // Apply boundary conditions. If offloading, this requires loading the first and last chunks.
-            if (_params.EnableOffloading && _chunks.Count > 0)
-            {
-                await LoadChunkAsync(_chunks.First());
-                if (_chunks.Count > 1) await LoadChunkAsync(_chunks.Last());
-            }
-            ApplyGlobalBoundaryConditions(isStressUpdate: true);
-            if (_params.EnableOffloading && _chunks.Count > 0)
-            {
-                await OffloadChunkAsync(_chunks.First());
-                if (_chunks.Count > 1) await OffloadChunkAsync(_chunks.Last());
-            }
-
-            // Process all chunks one by one, loading and offloading as needed.
             for (int i = 0; i < _chunks.Count; i++)
             {
-                if (_params.EnableOffloading) await LoadChunkAsync(_chunks[i]);
+                var currentChunk = _chunks[i];
+                await LoadChunkAsync(currentChunk);
         
-                var chunk = _chunks[i];
-                if (_useGPU)
-                    await ProcessChunkGPU_StressOnly(chunk, labels, density, sourceValue, token);
-                else
+                // Load the next chunk to exchange boundaries
+                if (i + 1 < _chunks.Count)
                 {
-                    if (sourceValue != 0)
-                        ApplySourceToChunkCPU(chunk, sourceValue, labels);
-                    UpdateChunkStressCPU(chunk, labels, density);
+                    await LoadChunkAsync(_chunks[i + 1]);
+                    ExchangeBoundary(currentChunk.Vx, _chunks[i + 1].Vx);
+                    ExchangeBoundary(currentChunk.Vy, _chunks[i + 1].Vy);
+                    ExchangeBoundary(currentChunk.Vz, _chunks[i + 1].Vz);
                 }
         
-                if (_params.EnableOffloading) await OffloadChunkAsync(chunk);
+                // Process the current chunk. Its boundaries are now up-to-date.
+                ApplyGlobalBoundaryConditions(isStressUpdate: true);
+                if (_useGPU) await ProcessChunkGPU_StressOnly(currentChunk, labels, density, sourceValue, token); else { if (sourceValue != 0) ApplySourceToChunkCPU(currentChunk, sourceValue, labels); UpdateChunkStressCPU(currentChunk, labels, density); }
+        
+                // Offload the previous chunk, which is no longer needed.
+                if (i > 0)
+                {
+                    await OffloadChunkAsync(_chunks[i - 1]);
+                }
             }
+            // Offload the final two chunks
+            await OffloadChunkAsync(_chunks[_chunks.Count - 2]);
+            await OffloadChunkAsync(_chunks.Last());
         }
         
         private async Task ProcessVelocityUpdatePass(byte[,,] labels, float[,,] density, CancellationToken token)
         {
-            // MODIFICATION: Replaced "load-all" logic with a proper sliding window for memory management.
-            if (_params.EnableOffloading)
+            // Case 1: In-Memory Processing.
+            if (!_params.EnableOffloading)
             {
-                // Offload all chunks that are currently in memory to ensure a clean state for the pass.
-                foreach (var chunk in _chunks.Where(c => c.IsInMemory))
-                {
-                    await OffloadChunkAsync(chunk);
-                }
-        
-                // Load pairs of chunks, exchange their boundaries, and then offload the first chunk of the pair.
-                for (int i = 0; i < _chunks.Count - 1; i++)
-                {
-                    await LoadChunkAsync(_chunks[i]);
-                    await LoadChunkAsync(_chunks[i + 1]);
-        
-                    ExchangeBoundary(_chunks[i].Sxx, _chunks[i + 1].Sxx);
-                    ExchangeBoundary(_chunks[i].Syy, _chunks[i + 1].Syy);
-                    ExchangeBoundary(_chunks[i].Szz, _chunks[i + 1].Szz);
-                    ExchangeBoundary(_chunks[i].Sxy, _chunks[i + 1].Sxy);
-                    ExchangeBoundary(_chunks[i].Sxz, _chunks[i + 1].Sxz);
-                    ExchangeBoundary(_chunks[i].Syz, _chunks[i + 1].Syz);
-        
-                    await OffloadChunkAsync(_chunks[i]);
-                }
-                // Offload the last chunk which is still in memory.
-                if (_chunks.Count > 0)
-                {
-                    await OffloadChunkAsync(_chunks.Last());
-                }
-            }
-            else
-            {
-                // Original logic for non-offloading mode.
                 for (int i = 0; i < _chunks.Count - 1; i++)
                 {
                     ExchangeBoundary(_chunks[i].Sxx, _chunks[i + 1].Sxx);
@@ -341,41 +309,65 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
                     ExchangeBoundary(_chunks[i].Sxz, _chunks[i + 1].Sxz);
                     ExchangeBoundary(_chunks[i].Syz, _chunks[i + 1].Syz);
                 }
-            }
-
-            // Apply boundary conditions. If offloading, this requires loading the first and last chunks.
-            if (_params.EnableOffloading && _chunks.Count > 0)
-            {
-                await LoadChunkAsync(_chunks.First());
-                if (_chunks.Count > 1) await LoadChunkAsync(_chunks.Last());
-            }
-            ApplyGlobalBoundaryConditions(isStressUpdate: false);
-            if (_params.EnableOffloading && _chunks.Count > 0)
-            {
-                await OffloadChunkAsync(_chunks.First());
-                if (_chunks.Count > 1) await OffloadChunkAsync(_chunks.Last());
+        
+                ApplyGlobalBoundaryConditions(isStressUpdate: false);
+        
+                foreach (var chunk in _chunks)
+                {
+                    if (_useGPU)
+                        await ProcessChunkGPU_VelocityOnly(chunk, labels, density, token);
+                    else
+                        UpdateChunkVelocityCPU(chunk, labels, density);
+                }
+                return;
             }
             
-            // Process all chunks one by one, loading and offloading as needed.
+            // Case 2: Efficient Offloading with a Sliding Window.
+            if (_chunks.Count <= 1)
+            {
+                if (_chunks.Any())
+                {
+                    var chunk = _chunks.First();
+                    await LoadChunkAsync(chunk);
+                    ApplyGlobalBoundaryConditions(isStressUpdate: false);
+                    if (_useGPU) await ProcessChunkGPU_VelocityOnly(chunk, labels, density, token); else UpdateChunkVelocityCPU(chunk, labels, density);
+                    await OffloadChunkAsync(chunk);
+                }
+                return;
+            }
+            
             for (int i = 0; i < _chunks.Count; i++)
             {
-                if (_params.EnableOffloading) await LoadChunkAsync(_chunks[i]);
+                var currentChunk = _chunks[i];
+                await LoadChunkAsync(currentChunk);
         
-                var chunk = _chunks[i];
-                if (_useGPU)
-                    await ProcessChunkGPU_VelocityOnly(chunk, labels, density, token);
-                else
-                    UpdateChunkVelocityCPU(chunk, labels, density);
+                if (i + 1 < _chunks.Count)
+                {
+                    await LoadChunkAsync(_chunks[i + 1]);
+                    ExchangeBoundary(currentChunk.Sxx, _chunks[i + 1].Sxx);
+                    ExchangeBoundary(currentChunk.Syy, _chunks[i + 1].Syy);
+                    ExchangeBoundary(currentChunk.Szz, _chunks[i + 1].Szz);
+                    ExchangeBoundary(currentChunk.Sxy, _chunks[i + 1].Sxy);
+                    ExchangeBoundary(currentChunk.Sxz, _chunks[i + 1].Sxz);
+                    ExchangeBoundary(currentChunk.Syz, _chunks[i + 1].Syz);
+                }
         
-                if (_params.EnableOffloading) await OffloadChunkAsync(chunk);
+                ApplyGlobalBoundaryConditions(isStressUpdate: false);
+                if (_useGPU) await ProcessChunkGPU_VelocityOnly(currentChunk, labels, density, token); else UpdateChunkVelocityCPU(currentChunk, labels, density);
+        
+                if (i > 0)
+                {
+                    await OffloadChunkAsync(_chunks[i - 1]);
+                }
             }
+            await OffloadChunkAsync(_chunks[_chunks.Count - 2]);
+            await OffloadChunkAsync(_chunks.Last());
         }
 
         private void ApplyGlobalBoundaryConditions(bool isStressUpdate)
         {
             foreach (var chunk in _chunks)
             {
-                // ADDED: Ensure chunk is in memory before applying BCs that access its data.
                 if (!chunk.IsInMemory) continue;
 
                 int d = chunk.EndZ - chunk.StartZ;
@@ -418,7 +410,6 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
                 var firstChunk = _chunks.First();
                 var lastChunk = _chunks.Last();
 
-                // ADDED: Ensure first and last chunks are in memory for Z-boundary conditions.
                 if (!firstChunk.IsInMemory || !lastChunk.IsInMemory) return;
 
                 int d_last = lastChunk.EndZ - lastChunk.StartZ;
@@ -910,10 +901,6 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
         }
 
         #region CPU Stencil Helpers
-        // The following C# methods are direct translations of the stabilized, rotated stencil
-        // operations found in the corrected OpenCL kernel. This ensures the CPU and GPU
-        // implementations are now physically consistent.
-
         private static float d_dy_for_vx(float[,,] F, int x, int y, int lz, float inv_d)
         {
             return 0.25f * ((F[x, y, lz] + F[x + 1, y, lz]) - (F[x, y - 1, lz] + F[x + 1, y - 1, lz])) * inv_d;
@@ -950,8 +937,6 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
     int d = c.EndZ - c.StartZ;
     float inv_dx = 1.0f / _params.PixelSize;
 
-    // Loop bounds start at 2 and end at Dim-3 to provide a 2-voxel-wide boundary
-    // for the stencil calculations, preventing out-of-bounds errors.
     Parallel.For(2, d - 2, lz =>
     {
         int gz = c.StartZ + lz;
@@ -965,22 +950,14 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
             
             float rho_inv = 1.0f / MathF.Max(100f, density[x, y, gz]);
             
-            // --- PHYSICALLY CORRECT STABILIZED SCHEME ---
-            // This section now correctly implements the equations of motion for a co-located grid
-            // using a combination of simple backward differences for normal stresses and
-            // stabilized rotated stencils for shear stresses to prevent numerical instability.
-
-            // For Vx update: rho * dvx/dt = dsxx/dx + dsxy/dy + dsxz/dz
             float dsxx_dx = (c.Sxx[x, y, lz] - c.Sxx[x - 1, y, lz]) * inv_dx;
             float dsxy_dy = d_dy_for_vx(c.Sxy, x, y, lz, inv_dx);
             float dsxz_dz = d_dz_for_vx(c.Sxz, x, y, lz, inv_dx);
 
-            // For Vy update: rho * dvy/dt = dsyx/dx + dsyy/dy + dsyz/dz (sxy = syx)
             float dsyx_dx = d_dx_for_vy(c.Sxy, x, y, lz, inv_dx);
             float dsyy_dy = (c.Syy[x, y, lz] - c.Syy[x, y - 1, lz]) * inv_dx;
             float dsyz_dz = d_dz_for_vy(c.Syz, x, y, lz, inv_dx);
             
-            // For Vz update: rho * dvz/dt = dszx/dx + dszy/dy + dszz/dz (sxz = szx, syz = szy)
             float dszx_dx = d_dx_for_vz(c.Sxz, x, y, lz, inv_dx);
             float dszy_dy = d_dy_for_vz(c.Syz, x, y, lz, inv_dx);
             float dszz_dz = (c.Szz[x, y, lz] - c.Szz[x, y, lz - 1]) * inv_dx;
@@ -1002,12 +979,10 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
                                   c.Vz[x, y, lz + 1] + c.Vz[x, y, lz - 1] -
                                   6.0f * c.Vz[x, y, lz]);
 
-            // Original velocity update based on stress divergence
             float dvx_dt = (dsxx_dx + dsxy_dy + dsxz_dz) * rho_inv;
             float dvy_dt = (dsyx_dx + dsyy_dy + dsyz_dz) * rho_inv;
             float dvz_dt = (dszx_dx + dszy_dy + dszz_dz) * rho_inv;
             
-            // Update velocity with physical term and damping/viscosity.
             c.Vx[x, y, lz] = c.Vx[x, y, lz] * damping + _dt * dvx_dt + (_params.ArtificialDampingFactor / 6.0f) * laplacian_vx;
             c.Vy[x, y, lz] = c.Vy[x, y, lz] * damping + _dt * dvy_dt + (_params.ArtificialDampingFactor / 6.0f) * laplacian_vy;
             c.Vz[x, y, lz] = c.Vz[x, y, lz] * damping + _dt * dvz_dt + (_params.ArtificialDampingFactor / 6.0f) * laplacian_vz;
@@ -1032,8 +1007,6 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
 
             if (_params.UseFullFaceTransducers)
             {
-                // Source is placed at index 2 (or width-3) to be safely within the
-                // computational domain of the velocity update loop, which starts at 2.
                 int src_x = (tx < _params.Width / 2) ? 2 : _params.Width - 3;
                 int src_y = (ty < _params.Height / 2) ? 2 : _params.Height - 3;
                 int src_z_global = (tz < _params.Depth / 2) ? 2 : _params.Depth - 3;
@@ -1068,8 +1041,7 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
             {
                 if (tz < chunk.StartZ || tz >= chunk.EndZ) return;
 
-                // Spatially smoothed source injection
-                float[] weights = { 0.073f, 0.12f, 0.073f }; // Center weight is implicitly 1.0
+                float[] weights = { 0.073f, 0.12f, 0.073f }; 
 
                 for (int dz = -1; dz <= 1; dz++) {
                     for (int dy = -1; dy <= 1; dy++) {
@@ -1079,7 +1051,6 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
                             int curZ = tz + dz;
                             int localZ = curZ - chunk.StartZ;
 
-                            // Check bounds
                             if (curX < 1 || curX >= _params.Width - 1 ||
                                 curY < 1 || curY >= _params.Height - 1 ||
                                 localZ < 1 || localZ >= (chunk.EndZ - chunk.StartZ) - 1)
@@ -1263,10 +1234,6 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
             return snap;
         }
         
-        /// <summary>
-        /// Reconstructs a full 3-D field from the chunks (instantaneous values).
-        /// axis: 0 = Vx, 1 = Vy, 2 = Vz
-        /// </summary>
         public async Task<float[,,]> ReconstructFieldAsync(int axis)
         {
             var field = new float[_params.Width, _params.Height, _params.Depth];
@@ -1280,7 +1247,6 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
 
                     int d = c.EndZ - c.StartZ;
 
-                    // X-fastest, then Y, then Z – exactly what the tomography viewer expects
                     for (int z = 0; z < d; z++)
                     {
                         int globalZ = c.StartZ + z;
@@ -1303,10 +1269,6 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
             return field;
         }
         
-        /// <summary>
-        /// Reconstructs a full 3-D field from the chunks (maximum absolute values).
-        /// axis: 0 = Vx, 1 = Vy, 2 = Vz
-        /// </summary>
         public async Task<float[,,]> ReconstructMaxFieldAsync(int axis)
         {
             var field = new float[_params.Width, _params.Height, _params.Depth];
@@ -1320,7 +1282,6 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
 
                     int d = c.EndZ - c.StartZ;
 
-                    // X-fastest, then Y, then Z – exactly what the tomography viewer expects
                     for (int z = 0; z < d; z++)
                     {
                         int globalZ = c.StartZ + z;
@@ -1390,11 +1351,11 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
             return Task.Run(() =>
             {
                 if (string.IsNullOrEmpty(chunk.FilePath))
-                    chunk.FilePath = Path.Combine(_params.OffloadDirectory, $"chunk_{chunk.StartZ}_{Guid.NewGuid()}.tmp");
+                    chunk.FilePath = Path.Combine(_params.OffloadDirectory, $"chunk_{chunk.StartZ}.tmp");
 
                 try
                 {
-                    using (var writer = new BinaryWriter(File.Create(chunk.FilePath)))
+                    using (var writer = new BinaryWriter(new FileStream(chunk.FilePath, FileMode.Create, FileAccess.Write, FileShare.None, 65536)))
                     {
                         WriteField(writer, chunk.Vx); WriteField(writer, chunk.Vy); WriteField(writer, chunk.Vz);
                         WriteField(writer, chunk.Sxx); WriteField(writer, chunk.Syy); WriteField(writer, chunk.Szz);
@@ -1417,8 +1378,15 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
 
         private Task LoadChunkAsync(WaveFieldChunk chunk)
         {
-            if (chunk.IsInMemory || string.IsNullOrEmpty(chunk.FilePath) || !File.Exists(chunk.FilePath))
+            if (chunk.IsInMemory)
                 return Task.CompletedTask;
+
+            if (string.IsNullOrEmpty(chunk.FilePath) || !File.Exists(chunk.FilePath))
+            {
+                if (!string.IsNullOrEmpty(chunk.FilePath))
+                   Logger.LogError($"[ChunkedSimulator] Load failed: Offload file not found at {chunk.FilePath}");
+                return Task.CompletedTask;
+            }
 
             return Task.Run(() =>
             {
@@ -1441,8 +1409,6 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
                     }
                     
                     chunk.IsInMemory = true;
-                    File.Delete(chunk.FilePath);
-                    chunk.FilePath = null;
                 }
                 catch (Exception ex)
                 {
@@ -1543,23 +1509,19 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
         int wh = width * height;
         if (idx >= width * height * depth) return;
         
-        // Voxel's local coordinates within the chunk
         int z_local = idx / wh;
         int rem = idx % wh;
         int y = rem / width;
         int x = rem % width;
         
-        // Voxel's global Z coordinate
         int z_global = z_local + chunkStartZ;
         
         uchar mat = material[idx];
 
-        // Boundary check for all stencil calculations
         if (x <= 0 || x >= width-1 || y <= 0 || y >= height-1 || z_local <= 0 || z_local >= depth-1) return;
         
         if (sourceValue != 0.0f && material_lookup[mat] != 0) {
             if (isFullFace != 0) {
-                // Full-face source still uses local coordinates for simplicity within the face plane
                 int src_x_face = (srcX < width / 2) ? 2 : width - 3;
                 int src_y_face = (srcY < height / 2) ? 2 : height - 3;
                 int src_z_face_global = (srcZ_global < (chunkStartZ + depth) / 2) ? 2 : (chunkStartZ + depth) - 3;
@@ -1568,7 +1530,6 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
                 if (sourceAxis == 1 && y == src_y_face) syy[idx] += sourceValue;
                 if (sourceAxis == 2 && z_global == src_z_face_global) szz[idx] += sourceValue;
             } else {
-                // Point source now correctly compares global coordinates
                 float dx_dist = (float)(x - srcX);
                 float dy_dist = (float)(y - srcY);
                 float dz_dist = (float)(z_global - srcZ_global);

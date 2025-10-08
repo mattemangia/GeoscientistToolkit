@@ -140,6 +140,8 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
         private bool _timeStepsDirty = true;
 
         // --- IMPROVEMENT: Detailed simulation state tracking ---
+        private bool _autoCropToSelection = true;
+        private BoundingBox? _simulationExtent = null;
         private enum SimulationState { Idle, Preparing, Simulating, Completed, Failed, Cancelled }
         private SimulationState _currentState = SimulationState.Idle;
         private float _preparationProgress;
@@ -164,6 +166,7 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
         {
             _txPosition = AcousticIntegration.TxPosition;
             _rxPosition = AcousticIntegration.RxPosition;
+            if (_autoCropToSelection) _simulationExtent = null; // Invalidate extent
             _timeStepsDirty = true;
         }
         private float _artificialDampingFactor = 0.2f;
@@ -651,6 +654,27 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
                     }
                 }
             }
+            ImGui.EndChild();
+            ImGui.Separator();
+
+            // Auto-cropping feature
+            if (ImGui.Checkbox("Auto-Crop to Selection", ref _autoCropToSelection))
+            {
+                _simulationExtent = null; // Force recalculation
+            }
+            if (ImGui.IsItemHovered())
+            {
+                ImGui.SetTooltip("Automatically calculate the bounding box of the selected material(s) and run the simulation only within that extent.");
+            }
+
+            if (_autoCropToSelection)
+            {
+                if (_simulationExtent == null && _selectedMaterialIDs.Any())
+                {
+                    _simulationExtent = CalculateSimulationExtent(dataset);
+                }
+                ImGui.Text(_simulationExtent.HasValue ? $"Simulation Extent: {_simulationExtent.Value.Width}x{_simulationExtent.Value.Height}x{_simulationExtent.Value.Depth}" : "Calculating extent...");
+            }
 
             // Simulation Results
             if (_lastResults != null)
@@ -837,35 +861,60 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
         }
         
         private async void AutoPlaceTransducers(CtImageStackDataset dataset)
-        {
-            if (!_selectedMaterialIDs.Any())
-            {
-                Logger.LogWarning("[AutoPlace] No materials selected for auto-placement.");
-                return;
-            }
-        
-            Logger.Log($"[AutoPlace] Finding optimal transducer positions for material IDs [{string.Join(", ", _selectedMaterialIDs)}]...");
-        
-            // 1. Create the placer with the set of selected materials.
-            var autoPlacer = new TransducerAutoPlacer(dataset, _selectedMaterialIDs);
-        
-            // 2. Call the new public method, which encapsulates all logic.
-            var placementResult = await Task.Run(() => autoPlacer.PlaceTransducersForAxis(_selectedAxisIndex));
-        
-            if (!placementResult.HasValue)
-            {
-                Logger.LogError($"[AutoPlace] Failed to automatically place transducers. The selected material(s) might be too small, fragmented, or not present along the chosen axis.");
-                return;
-            }
-        
-            // 3. Update UI state with the results.
-            _txPosition = placementResult.Value.tx;
-            _rxPosition = placementResult.Value.rx;
-        
-            // Update the integration helper for visual feedback in the viewers.
-            AcousticIntegration.UpdateMarkerPositionsForDrawing(dataset, _txPosition, _rxPosition);
-            OnTransducerMoved();
-        }
+{
+    if (!_selectedMaterialIDs.Any())
+    {
+        Logger.LogWarning("[AutoPlace] No materials selected for auto-placement.");
+        return;
+    }
+
+    byte[,,] labelsToSearch;
+    BoundingBox extent;
+
+    // Prepare the correct extent and label data based on whether auto-cropping is enabled.
+    if (_autoCropToSelection && _simulationExtent.HasValue)
+    {
+        extent = _simulationExtent.Value;
+        labelsToSearch = await GetCroppedLabelsAsync(dataset, extent);
+    }
+    else // Handle the case where we are searching the entire volume
+    {
+        extent = new BoundingBox(0, 0, 0, dataset.Width, dataset.Height, dataset.Depth);
+        // Use the same helper function to extract labels for the full extent
+        labelsToSearch = await GetCroppedLabelsAsync(dataset, extent);
+    }
+    
+    Logger.Log($"[AutoPlace] Finding optimal transducer positions for material IDs [{string.Join(", ", _selectedMaterialIDs)}]...");
+
+    // 2. Create the placer with the prepared data.
+    var autoPlacer = new TransducerAutoPlacer(dataset, _selectedMaterialIDs, extent, labelsToSearch);
+
+    // 3. Call the public method, which encapsulates all logic.
+    var placementResult = await Task.Run(() => autoPlacer.PlaceTransducersForAxis(_selectedAxisIndex));
+
+    if (!placementResult.HasValue)
+    {
+        Logger.LogError($"[AutoPlace] Failed to automatically place transducers. The selected material(s) might be too small, fragmented, or not present along the chosen axis.");
+        return;
+    }
+
+    // 4. Update UI state with the results.
+    // The result is normalized to the extent that was searched. We must convert these
+    // local normalized coordinates back to global normalized coordinates for the UI.
+    var crop = extent; 
+    _txPosition = new Vector3(
+        (placementResult.Value.tx.X * crop.Width + crop.Min.X) / dataset.Width,
+        (placementResult.Value.tx.Y * crop.Height + crop.Min.Y) / dataset.Height,
+        (placementResult.Value.tx.Z * crop.Depth + crop.Min.Z) / dataset.Depth);
+    _rxPosition = new Vector3(
+        (placementResult.Value.rx.X * crop.Width + crop.Min.X) / dataset.Width,
+        (placementResult.Value.rx.Y * crop.Height + crop.Min.Y) / dataset.Height,
+        (placementResult.Value.rx.Z * crop.Depth + crop.Min.Z) / dataset.Depth);
+
+    // Update the integration helper for visual feedback in the viewers.
+    AcousticIntegration.UpdateMarkerPositionsForDrawing(dataset, _txPosition, _rxPosition);
+    OnTransducerMoved();
+}
         
         private float CalculatePixelSizeFromVelocities()
         {
@@ -1000,15 +1049,21 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
     {
         _lastResults = null;
         
+        // --- NEW: Handle Auto-Cropping ---
+        BoundingBox extent = _autoCropToSelection && _simulationExtent.HasValue
+            ? _simulationExtent.Value
+            : new BoundingBox(0, 0, 0, dataset.Width, dataset.Height, dataset.Depth);
+
         CtImageStackTools.Update3DPreviewFromExternal(dataset, null, Vector4.Zero);
 
         _parameters = new SimulationParameters
         {
-            Width = dataset.Width,
-            Height = dataset.Height,
-            Depth = dataset.Depth,
+            Width = extent.Width,
+            Height = extent.Height,
+            Depth = extent.Depth,
             // CORRECTED: Convert pixel size from micrometers (µm) to meters (m) for the physics engine.
             PixelSize = (float)dataset.PixelSize / 1_000_000.0f,
+            SimulationExtent = extent,
             SelectedMaterialIDs = new HashSet<byte>(_selectedMaterialIDs),
             SelectedMaterialID = _selectedMaterialIDs.FirstOrDefault(),
             Axis = _selectedAxisIndex,
@@ -1027,8 +1082,15 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
             UseBrittleModel = _useBrittle,
             UseGPU = _useGPU,
             UseRickerWavelet = _useRickerWavelet,
-            TxPosition = _txPosition,
-            RxPosition = _rxPosition,
+            // --- NEW: Normalize transducer positions to the cropped extent ---
+            TxPosition = new Vector3(
+                (_txPosition.X * dataset.Width - extent.Min.X) / extent.Width,
+                (_txPosition.Y * dataset.Height - extent.Min.Y) / extent.Height,
+                (_txPosition.Z * dataset.Depth - extent.Min.Z) / extent.Depth),
+            RxPosition = new Vector3(
+                (_rxPosition.X * dataset.Width - extent.Min.X) / extent.Width,
+                (_rxPosition.Y * dataset.Height - extent.Min.Y) / extent.Height,
+                (_rxPosition.Z * dataset.Depth - extent.Min.Z) / extent.Depth),
             EnableRealTimeVisualization = _enableRealTimeVisualization,
             SaveTimeSeries = _saveTimeSeries,
             SnapshotInterval = _snapshotInterval,
@@ -1041,15 +1103,15 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
 
         _preparationStatus = "Extracting volume labels...";
         _preparationProgress = 0.1f;
-        var volumeLabels = await ExtractVolumeLabelsAsync(dataset);
+        var volumeLabels = await GetCroppedLabelsAsync(dataset, extent);
         
         _preparationStatus = "Extracting density volume...";
         _preparationProgress = 0.4f;
-        var densityVolume = await ExtractDensityVolumeAsync(dataset, dataset.VolumeData);
+        var densityVolume = await ExtractDensityVolumeAsync(dataset, dataset.VolumeData, extent);
         
         _preparationStatus = "Extracting material properties...";
         _preparationProgress = 0.7f;
-        var (youngsModulusVolume, poissonRatioVolume) = await ExtractMaterialPropertiesVolumeAsync(dataset);
+        var (youngsModulusVolume, poissonRatioVolume) = await ExtractMaterialPropertiesVolumeAsync(dataset, extent);
 
         _preparationStatus = "Initializing simulator...";
         _preparationProgress = 0.9f;
@@ -1131,12 +1193,12 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
     }
 }
 
-       private async Task<(float[,,] youngsModulus, float[,,] poissonRatio)> ExtractMaterialPropertiesVolumeAsync(CtImageStackDataset dataset)
+       private async Task<(float[,,] youngsModulus, float[,,] poissonRatio)> ExtractMaterialPropertiesVolumeAsync(CtImageStackDataset dataset, BoundingBox extent)
         {
             return await Task.Run(() =>
             {
-                var youngsModulus = new float[dataset.Width, dataset.Height, dataset.Depth];
-                var poissonRatio = new float[dataset.Width, dataset.Height, dataset.Depth];
+                var youngsModulus = new float[extent.Width, extent.Height, extent.Depth];
+                var poissonRatio = new float[extent.Width, extent.Height, extent.Depth];
                 
                 var materialProps = new Dictionary<byte, (float E, float Nu)>();
                 
@@ -1164,25 +1226,26 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
                 const float backgroundE = 1.0f; // Very low stiffness (1 MPa)
                 const float backgroundNu = 0.3f; // Poisson's ratio for fluid-like medium
 
-                Parallel.For(0, dataset.Depth, z =>
+                Parallel.For(0, extent.Depth, z_local =>
                 {
-                    for (int y = 0; y < dataset.Height; y++)
+                    int z_global = extent.Min.Z + z_local;
+                    for (int y_local = 0; y_local < extent.Height; y_local++)
                     {
-                        for (int x = 0; x < dataset.Width; x++)
+                        int y_global = extent.Min.Y + y_local;
+                        for (int x_local = 0; x_local < extent.Width; x_local++)
                         {
-                            byte label = dataset.LabelData[x, y, z];
+                            int x_global = extent.Min.X + x_local;
+                            byte label = dataset.LabelData[x_global, y_global, z_global];
                             
-                            // If the label corresponds to a defined material, use its properties
                             if (materialProps.TryGetValue(label, out var props))
                             {
-                                youngsModulus[x, y, z] = props.E;
-                                poissonRatio[x, y, z] = props.Nu;
+                                youngsModulus[x_local, y_local, z_local] = props.E;
+                                poissonRatio[x_local, y_local, z_local] = props.Nu;
                             }
                             else
                             {
-                                // Otherwise, treat it as the background medium with near-zero stiffness
-                                youngsModulus[x, y, z] = backgroundE;
-                                poissonRatio[x, y, z] = backgroundNu;
+                                youngsModulus[x_local, y_local, z_local] = backgroundE;
+                                poissonRatio[x_local, y_local, z_local] = backgroundNu;
                             }
                         }
                     }
@@ -1193,18 +1256,53 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
             });
         }
 
+        private BoundingBox? CalculateSimulationExtent(CtImageStackDataset dataset)
+        {
+            int minX = _currentDataset.Width, minY = _currentDataset.Height, minZ = _currentDataset.Depth;
+            int maxX = -1, maxY = -1, maxZ = -1;
+            bool found = false;
+
+            for (int z = 0; z < _currentDataset.Depth; z++)
+            {
+                for (int y = 0; y < _currentDataset.Height; y++)
+                {
+                    for (int x = 0; x < _currentDataset.Width; x++)
+                    {
+                        if (_selectedMaterialIDs.Contains(dataset.LabelData[x, y, z]))
+                        {
+                            found = true;
+                            minX = Math.Min(minX, x);
+                            minY = Math.Min(minY, y);
+                            minZ = Math.Min(minZ, z);
+                            maxX = Math.Max(maxX, x);
+                            maxY = Math.Max(maxY, y);
+                            maxZ = Math.Max(maxZ, z);
+                        }
+                    }
+                }
+            }
+            
+            if (!found) return null;
+            
+            // Add a buffer around the extent
+            const int buffer = 5;
+            minX = Math.Max(0, minX - buffer);
+            minY = Math.Max(0, minY - buffer);
+            minZ = Math.Max(0, minZ - buffer);
+            maxX = Math.Min(_currentDataset.Width - 1, maxX + buffer);
+            maxY = Math.Min(_currentDataset.Height - 1, maxY + buffer);
+            maxZ = Math.Min(_currentDataset.Depth - 1, maxZ + buffer);
+
+            return new BoundingBox(minX, minY, minZ, maxX - minX + 1, maxY - minY + 1, maxZ - minZ + 1);
+        }
 
         private async Task<byte[,,]> ExtractVolumeLabelsAsync(CtImageStackDataset dataset)
         {
-            return await Task.Run(() =>
-            {
-                var labels = new byte[dataset.Width, dataset.Height, dataset.Depth];
-                Parallel.For(0, dataset.Depth, z => { for (int y = 0; y < dataset.Height; y++) for (int x = 0; x < dataset.Width; x++) labels[x, y, z] = dataset.LabelData[x, y, z]; });
-                return labels;
-            });
+            var fullExtent = new BoundingBox(0, 0, 0, dataset.Width, dataset.Height, dataset.Depth);
+            return await GetCroppedLabelsAsync(dataset, fullExtent);
         }
 
-       private async Task<float[,,]> ExtractDensityVolumeAsync(CtImageStackDataset dataset, IGrayscaleVolumeData grayscaleVolume)
+       private async Task<float[,,]> ExtractDensityVolumeAsync(CtImageStackDataset dataset, IGrayscaleVolumeData grayscaleVolume, BoundingBox extent)
 {
     return await Task.Run(() =>
     {
@@ -1214,14 +1312,14 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
         var grayscaleStats = new System.Collections.Concurrent.ConcurrentDictionary<byte, (double sum, long count)>();
         
         // FIX: Explicitly cast dataset.Depth to int to resolve ambiguous invocation
-        Parallel.For(0, (int)dataset.Depth, z =>
+        Parallel.For(extent.Min.Z, extent.Max.Z + 1, z =>
         {
             // FIX: Read grayscale data into a byte[] array, as indicated by the compiler error.
             var graySlice = new byte[dataset.Width * dataset.Height];
             var labelSlice = new byte[dataset.Width * dataset.Height];
             grayscaleVolume.ReadSliceZ(z, graySlice);
             dataset.LabelData.ReadSliceZ(z, labelSlice);
-
+            
             for (int i = 0; i < labelSlice.Length; i++)
             {
                 byte label = labelSlice[i];
@@ -1239,27 +1337,30 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
         );
 
         // --- Step 2: Create the heterogeneous density field ---
-        var density = new float[dataset.Width, dataset.Height, dataset.Depth];
+        var density = new float[extent.Width, extent.Height, extent.Depth];
         
         var materialDensityMap = dataset.Materials
             .ToDictionary(m => m.ID, m => (m.Density > 0 ? (float)m.Density : 1.0f) * 1000.0f); // g/cm³ to kg/m³
 
         const float backgroundDensity = 1.225f; // kg/m³ for air/unlabeled voxels
 
-        // FIX: Explicitly cast dataset.Depth to int to resolve ambiguous invocation
-        Parallel.For(0, (int)dataset.Depth, z =>
+        Parallel.For(0, extent.Depth, z_local =>
         {
-            // FIX: Read grayscale data into a byte[] array.
+            int z_global = extent.Min.Z + z_local;
             var graySlice = new byte[dataset.Width * dataset.Height];
             var labelSlice = new byte[dataset.Width * dataset.Height];
-            grayscaleVolume.ReadSliceZ(z, graySlice);
-            dataset.LabelData.ReadSliceZ(z, labelSlice);
-
-            for (int i = 0; i < labelSlice.Length; i++)
+            grayscaleVolume.ReadSliceZ(z_global, graySlice);
+            dataset.LabelData.ReadSliceZ(z_global, labelSlice);
+            
+            for (int y_local = 0; y_local < extent.Height; y_local++)
             {
-                int x = i % dataset.Width;
-                int y = i / dataset.Width;
-                byte label = labelSlice[i];
+                int y_global = extent.Min.Y + y_local;
+                for (int x_local = 0; x_local < extent.Width; x_local++)
+                {
+                    int x_global = extent.Min.X + x_local;
+                    
+                    int slice_idx = y_global * dataset.Width + x_global;
+                    byte label = labelSlice[slice_idx];
 
                 if (materialDensityMap.TryGetValue(label, out float meanMaterialDensity) && 
                     avgGrayscaleMap.TryGetValue(label, out double avgGrayscale) && 
@@ -1267,27 +1368,41 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
                 {
                     // Scale the material's mean density by the voxel's relative grayscale intensity.
                     // This makes brighter parts of a material denser than darker parts.
-                    float grayscaleValue = graySlice[i];
-                    density[x, y, z] = meanMaterialDensity * (float)(grayscaleValue / avgGrayscale);
+                    float grayscaleValue = graySlice[slice_idx];
+                    density[x_local, y_local, z_local] = meanMaterialDensity * (float)(grayscaleValue / avgGrayscale);
                 }
                 else if (materialDensityMap.ContainsKey(label))
                 {
                     // Fallback for materials with no grayscale variation (or pure black)
-                    density[x, y, z] = materialDensityMap[label];
+                    density[x_local, y_local, z_local] = materialDensityMap[label];
                 }
                 else
                 {
                     // Assign background density to unlabeled voxels
-                    density[x, y, z] = backgroundDensity;
+                    density[x_local, y_local, z_local] = backgroundDensity;
                 }
                 
-                // Ensure a minimum physical density to prevent simulation errors
-                density[x, y, z] = Math.Max(1.0f, density[x, y, z]);
+                density[x_local, y_local, z_local] = Math.Max(1.0f, density[x_local, y_local, z_local]);
+                }
             }
         });
         
         Logger.Log($"[AcousticSimulation] Generated robust heterogeneous density map.");
         return density;
+    });
+}
+        private async Task<byte[,,]> GetCroppedLabelsAsync(CtImageStackDataset dataset, BoundingBox extent)
+{
+    return await Task.Run(() =>
+    {
+        var labels = new byte[extent.Width, extent.Height, extent.Depth];
+        Parallel.For(0, extent.Depth, z =>
+        {
+            for (int y = 0; y < extent.Height; y++)
+            for (int x = 0; x < extent.Width; x++)
+                labels[x, y, z] = dataset.LabelData[extent.Min.X + x, extent.Min.Y + y, extent.Min.Z + z];
+        });
+        return labels;
     });
 }
         

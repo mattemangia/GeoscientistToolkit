@@ -1,14 +1,38 @@
 // GeoscientistToolkit/Analysis/AcousticSimulation/SimulationParameters.cs
 using System.Collections.Generic;
 using System.Numerics;
+using GeoscientistToolkit.Business;
 
 namespace GeoscientistToolkit.Analysis.AcousticSimulation
 {
+    public struct BoundingBox
+    {
+        public (int X, int Y, int Z) Min;
+        public int Width { get; }
+        public int Height { get; }
+        public int Depth { get; }
+        public (int X, int Y, int Z) Max => (Min.X + Width - 1, Min.Y + Height - 1, Min.Z + Depth - 1);
+
+        public BoundingBox(int minX, int minY, int minZ, int width, int height, int depth)
+        {
+            Min = (minX, minY, minZ);
+            Width = width;
+            Height = height;
+            Depth = depth;
+        }
+
+        public override string ToString()
+        {
+            return $"Min({Min.X},{Min.Y},{Min.Z}), Size({Width},{Height},{Depth})";
+        }
+    }
+
     public class SimulationParameters
     {
         public int Width { get; set; }
         public int Height { get; set; }
         public int Depth { get; set; }
+        public BoundingBox? SimulationExtent { get; set; } = null;
         public float PixelSize { get; set; }
         
         // Legacy single material support (kept for backwards compatibility)
@@ -46,6 +70,11 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
         public string OffloadDirectory { get; set; }
         public float TimeStepSeconds { get; set; } = 1e-6f;
         
+        public SimulationParameters()
+        {
+            // Default constructor
+        }
+
         // Helper method to check if a material is selected
         public bool IsMaterialSelected(byte materialId)
         {

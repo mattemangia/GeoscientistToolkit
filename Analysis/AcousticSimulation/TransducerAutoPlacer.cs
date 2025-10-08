@@ -15,26 +15,35 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
     /// </summary>
     public class TransducerAutoPlacer
     {
-        private readonly CtImageStackDataset _dataset;
+        private readonly byte[,,] _labelData;
         private readonly ISet<byte> _materialIds;
         private readonly int _width, _height, _depth;
-
+        private readonly BoundingBox _extent;
+        private readonly CtImageStackDataset _originalDataset;
         /// <summary>
         /// Initializes a new instance of the TransducerAutoPlacer.
         /// </summary>
-        /// <param name="dataset">The dataset to analyze.</param>
+        /// <param name="dataset">The original dataset, used for pixel size metadata.</param>
         /// <param name="materialIds">A set of material IDs that are considered valid for placement and wave propagation.</param>
-        public TransducerAutoPlacer(CtImageStackDataset dataset, ISet<byte> materialIds)
+        public TransducerAutoPlacer(CtImageStackDataset originalDataset, ISet<byte> materialIds, BoundingBox extent, byte[,,] labelDataToSearch)
         {
             if (materialIds == null || !materialIds.Any())
             {
                 throw new ArgumentException("At least one material ID must be provided.", nameof(materialIds));
             }
-            _dataset = dataset;
+            if (labelDataToSearch == null)
+            {
+                throw new ArgumentNullException(nameof(labelDataToSearch), "Label data for searching cannot be null.");
+            }
+
+            _originalDataset = originalDataset;
             _materialIds = materialIds;
-            _width = dataset.Width;
-            _height = dataset.Height;
-            _depth = dataset.Depth;
+            _labelData = labelDataToSearch;
+        
+            // Set dimensions to the size of the data we are actually searching
+            _width = labelDataToSearch.GetLength(0);
+            _height = labelDataToSearch.GetLength(1);
+            _depth = labelDataToSearch.GetLength(2);
         }
 
         /// <summary>
@@ -132,9 +141,9 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
 
         private void LogPlacementResults(Vector3 txVoxel, Vector3 rxVoxel, Vector3 txNorm, Vector3 rxNorm, bool hasPath)
         {
-            float dx = (rxVoxel.X - txVoxel.X) * _dataset.PixelSize / 1000f;
-            float dy = (rxVoxel.Y - txVoxel.Y) * _dataset.PixelSize / 1000f;
-            float dz = (rxVoxel.Z - txVoxel.Z) * _dataset.SliceThickness / 1000f;
+            float dx = (rxVoxel.X - txVoxel.X) * _originalDataset.PixelSize / 1000f;
+            float dy = (rxVoxel.Y - txVoxel.Y) * _originalDataset.PixelSize / 1000f;
+            float dz = (rxVoxel.Z - txVoxel.Z) * _originalDataset.SliceThickness / 1000f;
             float distance = MathF.Sqrt(dx * dx + dy * dy + dz * dz);
 
             Logger.Log($"[AutoPlace] Successfully placed transducers:");
@@ -178,7 +187,7 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
                 {
                     for (int x = 0; x < _width; x++)
                     {
-                        if (_materialIds.Contains(_dataset.LabelData[x, y, z]) && !visited[x, y, z])
+                        if (_materialIds.Contains(_labelData[x, y, z]) && !visited[x, y, z])
                         {
                             var component = FloodFill3D(x, y, z, visited);
                             if (component.Voxels.Count > 0)
@@ -217,7 +226,7 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
 
                     if (nx >= 0 && nx < _width && ny >= 0 && ny < _height && nz >= 0 && nz < _depth && !visited[nx, ny, nz])
                     {
-                        if (_materialIds.Contains(_dataset.LabelData[nx, ny, nz]))
+                        if (_materialIds.Contains(_labelData[nx, ny, nz]))
                         {
                             visited[nx, ny, nz] = true;
                             queue.Enqueue((nx, ny, nz));
@@ -276,7 +285,7 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
                     if (neighbor.X < 0 || neighbor.X >= _width || neighbor.Y < 0 || neighbor.Y >= _height || neighbor.Z < 0 || neighbor.Z >= _depth || closedSet.Contains(neighbor))
                         continue;
                     
-                    if (!_materialIds.Contains(_dataset.LabelData[neighbor.X, neighbor.Y, neighbor.Z]))
+                    if (!_materialIds.Contains(_labelData[neighbor.X, neighbor.Y, neighbor.Z]))
                         continue;
 
                     float g = current.G + 1;
@@ -304,7 +313,7 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
             int x = Math.Clamp((int)position.X, 0, _width - 1);
             int y = Math.Clamp((int)position.Y, 0, _height - 1);
             int z = Math.Clamp((int)position.Z, 0, _depth - 1);
-            return _materialIds.Contains(_dataset.LabelData[x, y, z]);
+            return _materialIds.Contains(_labelData[x, y, z]);
         }
 
         private (Vector3 tx, Vector3 rx) FindValidTransducerPositions(Vector3 min, Vector3 max, int axis)
