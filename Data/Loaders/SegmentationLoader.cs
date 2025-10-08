@@ -1,163 +1,164 @@
 // GeoscientistToolkit/Data/Loaders/SegmentationLoader.cs
-using System;
-using System.IO;
-using System.Threading.Tasks;
-using GeoscientistToolkit.Data;         // <-- Dataset base type (namespace per Dataset.cs)
-using GeoscientistToolkit.Data.Image;   // ImageDataset
-using GeoscientistToolkit.Util;         // Logger
 
-namespace GeoscientistToolkit.Data.Loaders
+using GeoscientistToolkit.Data.Image;
+using GeoscientistToolkit.Util;
+// <-- Dataset base type (namespace per Dataset.cs)
+// ImageDataset
+
+// Logger
+
+namespace GeoscientistToolkit.Data.Loaders;
+
+/// <summary>
+///     Loader for standalone segmentation/label images without background.
+///     Accepts a single label image (e.g., PNG/TIF) and optional *.materials.json sidecar.
+/// </summary>
+public class SegmentationLoader : IDataLoader
 {
-    /// <summary>
-    /// Loader for standalone segmentation/label images without background.
-    /// Accepts a single label image (e.g., PNG/TIF) and optional *.materials.json sidecar.
-    /// </summary>
-    public class SegmentationLoader : IDataLoader
+    // === Helpers ===
+
+    private static readonly string[] _allowedExtensions =
     {
-        /// <summary>Full path to the segmentation (label) image.</summary>
-        public string SegmentationPath { get; set; }
+        ".png", ".tif", ".tiff", ".jpg", ".jpeg", ".bmp"
+    };
 
-        /// <summary>Optional dataset name. If null/empty, derived from file name.</summary>
-        public string DatasetName { get; set; }
+    /// <summary>Full path to the segmentation (label) image.</summary>
+    public string SegmentationPath { get; set; }
 
-        // === IDataLoader ===
-        public string Name => "Segmentation Loader";
+    /// <summary>Optional dataset name. If null/empty, derived from file name.</summary>
+    public string DatasetName { get; set; }
 
-        public string Description =>
-            "Imports a single labeled segmentation image and (if present) a companion .materials.json file.";
+    // === IDataLoader ===
+    public string Name => "Segmentation Loader";
 
-        public string ValidationMessage => ValidateInternal();
+    public string Description =>
+        "Imports a single labeled segmentation image and (if present) a companion .materials.json file.";
 
-        public bool CanImport => ValidateInternal() == null;
+    public string ValidationMessage => ValidateInternal();
 
-        public Task<Dataset> LoadAsync(IProgress<(float progress, string message)> progressReporter)
+    public bool CanImport => ValidateInternal() == null;
+
+    public Task<Dataset> LoadAsync(IProgress<(float progress, string message)> progressReporter)
+    {
+        // IMPORTANT: force Task<T> to be Task<Dataset> (not Task<ImageDataset>)
+        return Task.Run(() =>
         {
-            // IMPORTANT: force Task<T> to be Task<Dataset> (not Task<ImageDataset>)
-            return Task.Run<Dataset>(() =>
-            {
-                try
-                {
-                    progressReporter?.Report((0.05f, "Validating selection..."));
-                    var validation = ValidateInternal();
-                    if (validation != null)
-                        throw new InvalidOperationException(validation);
-
-                    progressReporter?.Report((0.10f, "Loading segmentation file..."));
-
-                    // Determine dataset name
-                    string name = !string.IsNullOrEmpty(DatasetName)
-                        ? DatasetName
-                        : Path.GetFileNameWithoutExtension(SegmentationPath);
-
-                    progressReporter?.Report((0.35f, "Creating segmentation dataset..."));
-
-                    // Create the segmentation dataset (returns ImageDataset)
-                    ImageDataset dataset = ImageDataset.CreateSegmentationDataset(name, SegmentationPath);
-
-                    progressReporter?.Report((0.70f, "Checking materials file..."));
-
-                    // Check for materials file (optional)
-                    string materialsPath = Path.ChangeExtension(SegmentationPath, ".materials.json");
-                    if (File.Exists(materialsPath))
-                    {
-                        Logger.Log($"[SegmentationLoader] Found materials file: {materialsPath}");
-                    }
-
-                    progressReporter?.Report((1.0f, "Segmentation loaded successfully."));
-                    Logger.Log($"[SegmentationLoader] Successfully loaded segmentation: {name}");
-
-                    // Upcast to Dataset so Task.Run produces Task<Dataset>
-                    return (Dataset)dataset;
-                }
-                catch (Exception ex)
-                {
-                    Logger.LogError($"[SegmentationLoader] Failed to load segmentation: {ex.Message}");
-                    throw;
-                }
-            });
-        }
-
-        public void Reset()
-        {
-            SegmentationPath = null;
-            DatasetName = null;
-        }
-
-        // === Helpers ===
-
-        private static readonly string[] _allowedExtensions =
-        {
-            ".png", ".tif", ".tiff", ".jpg", ".jpeg", ".bmp"
-        };
-
-        /// <summary>
-        /// Returns null if valid; otherwise an error message describing why import cannot proceed.
-        /// </summary>
-        private string ValidateInternal()
-        {
-            if (string.IsNullOrWhiteSpace(SegmentationPath))
-                return "No segmentation file selected.";
-
-            if (!File.Exists(SegmentationPath))
-                return $"File not found: {SegmentationPath}";
-
-            string ext = Path.GetExtension(SegmentationPath).ToLowerInvariant();
-            bool okExt = false;
-            foreach (var e in _allowedExtensions)
-            {
-                if (ext == e) { okExt = true; break; }
-            }
-            if (!okExt)
-                return $"Unsupported file extension '{ext}'. Supported: {string.Join(", ", _allowedExtensions)}";
-
             try
             {
-                var info = ImageLoader.LoadImageInfo(SegmentationPath);
-                if (info == null || info.Width <= 0 || info.Height <= 0)
-                    return "Unable to read image size; the file may be corrupted or unsupported.";
+                progressReporter?.Report((0.05f, "Validating selection..."));
+                var validation = ValidateInternal();
+                if (validation != null)
+                    throw new InvalidOperationException(validation);
+
+                progressReporter?.Report((0.10f, "Loading segmentation file..."));
+
+                // Determine dataset name
+                var name = !string.IsNullOrEmpty(DatasetName)
+                    ? DatasetName
+                    : Path.GetFileNameWithoutExtension(SegmentationPath);
+
+                progressReporter?.Report((0.35f, "Creating segmentation dataset..."));
+
+                // Create the segmentation dataset (returns ImageDataset)
+                var dataset = ImageDataset.CreateSegmentationDataset(name, SegmentationPath);
+
+                progressReporter?.Report((0.70f, "Checking materials file..."));
+
+                // Check for materials file (optional)
+                var materialsPath = Path.ChangeExtension(SegmentationPath, ".materials.json");
+                if (File.Exists(materialsPath))
+                    Logger.Log($"[SegmentationLoader] Found materials file: {materialsPath}");
+
+                progressReporter?.Report((1.0f, "Segmentation loaded successfully."));
+                Logger.Log($"[SegmentationLoader] Successfully loaded segmentation: {name}");
+
+                // Upcast to Dataset so Task.Run produces Task<Dataset>
+                return (Dataset)dataset;
             }
             catch (Exception ex)
             {
-                return $"Failed to read image info: {ex.Message}";
+                Logger.LogError($"[SegmentationLoader] Failed to load segmentation: {ex.Message}");
+                throw;
             }
+        });
+    }
 
-            return null; // Valid
-        }
+    public void Reset()
+    {
+        SegmentationPath = null;
+        DatasetName = null;
+    }
 
-        // Optional: lightweight info snapshot usable by UIs
-        public class SegmentationInfo
-        {
-            public string FileName { get; set; }
-            public long FileSize { get; set; }
-            public int Width { get; set; }
-            public int Height { get; set; }
-            public bool HasMaterialsFile { get; set; }
-        }
+    /// <summary>
+    ///     Returns null if valid; otherwise an error message describing why import cannot proceed.
+    /// </summary>
+    private string ValidateInternal()
+    {
+        if (string.IsNullOrWhiteSpace(SegmentationPath))
+            return "No segmentation file selected.";
 
-        public SegmentationInfo GetSegmentationInfo()
-        {
-            if (!CanImport) return null;
+        if (!File.Exists(SegmentationPath))
+            return $"File not found: {SegmentationPath}";
 
-            try
+        var ext = Path.GetExtension(SegmentationPath).ToLowerInvariant();
+        var okExt = false;
+        foreach (var e in _allowedExtensions)
+            if (ext == e)
             {
-                var fileInfo = new FileInfo(SegmentationPath);
-                var imageInfo = ImageLoader.LoadImageInfo(SegmentationPath);
-                string materialsPath = Path.ChangeExtension(SegmentationPath, ".materials.json");
+                okExt = true;
+                break;
+            }
 
-                return new SegmentationInfo
-                {
-                    FileName = fileInfo.Name,
-                    FileSize = fileInfo.Length,
-                    Width = imageInfo?.Width ?? 0,
-                    Height = imageInfo?.Height ?? 0,
-                    HasMaterialsFile = File.Exists(materialsPath)
-                };
-            }
-            catch (Exception ex)
-            {
-                Logger.LogError($"[SegmentationLoader] Error getting segmentation info: {ex.Message}");
-                return null;
-            }
+        if (!okExt)
+            return $"Unsupported file extension '{ext}'. Supported: {string.Join(", ", _allowedExtensions)}";
+
+        try
+        {
+            var info = ImageLoader.LoadImageInfo(SegmentationPath);
+            if (info == null || info.Width <= 0 || info.Height <= 0)
+                return "Unable to read image size; the file may be corrupted or unsupported.";
         }
+        catch (Exception ex)
+        {
+            return $"Failed to read image info: {ex.Message}";
+        }
+
+        return null; // Valid
+    }
+
+    public SegmentationInfo GetSegmentationInfo()
+    {
+        if (!CanImport) return null;
+
+        try
+        {
+            var fileInfo = new FileInfo(SegmentationPath);
+            var imageInfo = ImageLoader.LoadImageInfo(SegmentationPath);
+            var materialsPath = Path.ChangeExtension(SegmentationPath, ".materials.json");
+
+            return new SegmentationInfo
+            {
+                FileName = fileInfo.Name,
+                FileSize = fileInfo.Length,
+                Width = imageInfo?.Width ?? 0,
+                Height = imageInfo?.Height ?? 0,
+                HasMaterialsFile = File.Exists(materialsPath)
+            };
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError($"[SegmentationLoader] Error getting segmentation info: {ex.Message}");
+            return null;
+        }
+    }
+
+    // Optional: lightweight info snapshot usable by UIs
+    public class SegmentationInfo
+    {
+        public string FileName { get; set; }
+        public long FileSize { get; set; }
+        public int Width { get; set; }
+        public int Height { get; set; }
+        public bool HasMaterialsFile { get; set; }
     }
 }

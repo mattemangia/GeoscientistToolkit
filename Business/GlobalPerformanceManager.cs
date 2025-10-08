@@ -1,46 +1,45 @@
 ﻿// GeoscientistToolkit/Business/GlobalPerformanceManager.cs
+
 using GeoscientistToolkit.Settings;
 using GeoscientistToolkit.Util;
-using System.Linq;
-using Veldrid;
 
-namespace GeoscientistToolkit.Business
+namespace GeoscientistToolkit.Business;
+
+public sealed class GlobalPerformanceManager
 {
-    public sealed class GlobalPerformanceManager
+    private GlobalPerformanceManager()
     {
-        private static readonly GlobalPerformanceManager _instance = new();
-        public static GlobalPerformanceManager Instance => _instance;
+    }
 
-        public string VisualizationAdapterName { get; private set; }
-        public string ComputeAdapterName { get; private set; }
+    public static GlobalPerformanceManager Instance { get; } = new();
 
-        public TextureCacheManager TextureCache { get; private set; }
-        public UndoManager UndoManager { get; private set; }
+    public string VisualizationAdapterName { get; private set; }
+    public string ComputeAdapterName { get; private set; }
 
-        private GlobalPerformanceManager() {}
+    public TextureCacheManager TextureCache { get; private set; }
+    public UndoManager UndoManager { get; private set; }
 
-        public void Initialize(AppSettings settings)
-        {
-            VisualizationAdapterName = settings.Hardware.VisualizationGPU;
-            ComputeAdapterName = settings.Hardware.ComputeGPU;
-            
-            TextureCache = new TextureCacheManager(settings.Performance.TextureCacheSize * 1024L * 1024L);
-            UndoManager = new UndoManager(settings.Performance.UndoHistorySize);
-            
-            SettingsManager.Instance.SettingsChanged += OnSettingsChanged;
-        }
+    public void Initialize(AppSettings settings)
+    {
+        VisualizationAdapterName = settings.Hardware.VisualizationGPU;
+        ComputeAdapterName = settings.Hardware.ComputeGPU;
 
-        private void OnSettingsChanged(AppSettings newSettings)
-        {
-            TextureCache.UpdateCacheSize(newSettings.Performance.TextureCacheSize * 1024L * 1024L);
-            UndoManager.UpdateHistoryLimit(newSettings.Performance.UndoHistorySize);
-            ComputeAdapterName = newSettings.Hardware.ComputeGPU;
-            Logger.Log("Global performance managers updated with new settings.");
-        }
+        TextureCache = new TextureCacheManager(settings.Performance.TextureCacheSize * 1024L * 1024L);
+        UndoManager = new UndoManager(settings.Performance.UndoHistorySize);
 
-        public void Shutdown()
-        {
-            TextureCache?.Dispose();
-        }
+        SettingsManager.Instance.SettingsChanged += OnSettingsChanged;
+    }
+
+    private void OnSettingsChanged(AppSettings newSettings)
+    {
+        TextureCache.UpdateCacheSize(newSettings.Performance.TextureCacheSize * 1024L * 1024L);
+        UndoManager.UpdateHistoryLimit(newSettings.Performance.UndoHistorySize);
+        ComputeAdapterName = newSettings.Hardware.ComputeGPU;
+        Logger.Log("Global performance managers updated with new settings.");
+    }
+
+    public void Shutdown()
+    {
+        TextureCache?.Dispose();
     }
 }

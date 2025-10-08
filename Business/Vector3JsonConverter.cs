@@ -19,7 +19,7 @@ public class Vector3JsonConverter : JsonConverter<Vector3>
 
             if (reader.TokenType == JsonTokenType.PropertyName)
             {
-                string propertyName = reader.GetString();
+                var propertyName = reader.GetString();
                 reader.Read();
                 switch (propertyName)
                 {
@@ -29,6 +29,7 @@ public class Vector3JsonConverter : JsonConverter<Vector3>
                 }
             }
         }
+
         throw new JsonException();
     }
 

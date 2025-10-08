@@ -16,57 +16,57 @@
       from the main project's compilation. This resolves the duplicate attribute errors.
     -->
     <ItemGroup>
-        <Compile Remove="AddInExtractor\**" />
-        <EmbeddedResource Remove="AddInExtractor\**" />
-        <None Remove="AddInExtractor\**" />
+        <Compile Remove="AddInExtractor\**"/>
+        <EmbeddedResource Remove="AddInExtractor\**"/>
+        <None Remove="AddInExtractor\**"/>
     </ItemGroup>
 
     <!-- FIX 2: All PackageReference items are correctly placed within a single ItemGroup -->
     <ItemGroup>
-        <PackageReference Include="ClosedXML" Version="0.105.0" />
-        <PackageReference Include="GDAL" Version="3.11.3" />
-        <PackageReference Include="ImGui.NET" Version="1.90.8.1" />
-        <PackageReference Include="ImGui.NET.Branches.Docking" Version="1.88.0" />
-        <PackageReference Include="NetTopologySuite" Version="2.6.0" />
-        <PackageReference Include="NetTopologySuite.Features" Version="2.2.0" />
-        <PackageReference Include="NetTopologySuite.IO.Esri.Shapefile" Version="1.2.0" />
-        <PackageReference Include="NetTopologySuite.IO.GeoJSON" Version="4.0.0" />
-        <PackageReference Include="NetTopologySuite.IO.ShapeFile" Version="2.1.0" />
-        <PackageReference Include="ProjNET" Version="2.0.0" />
-        <PackageReference Include="sdl2" Version="2.0.5" />
-        <PackageReference Include="Silk.NET.OpenCL" Version="2.21.0" />
-        <PackageReference Include="StbImageSharp" Version="2.30.15" />
-        <PackageReference Include="StbImageWriteSharp" Version="1.16.7" />
-        <PackageReference Include="System.Drawing.Primitives" Version="4.3.0" />
-        <PackageReference Include="System.Management" Version="8.0.0" />
-        <PackageReference Include="TinyDialogsNet" Version="1.0.2" />
-        <PackageReference Include="Veldrid" Version="4.9.0" />
-        <PackageReference Include="Veldrid.ImGui" Version="5.72.0" />
-        <PackageReference Include="Veldrid.MetalBindings" Version="4.9.0" />
-        <PackageReference Include="Veldrid.SDL2" Version="4.9.0" />
-        <PackageReference Include="Veldrid.SPIRV" Version="1.0.15" />
-        <PackageReference Include="Veldrid.StartupUtilities" Version="4.9.0" />
-        <PackageReference Include="BitMiracle.LibTiff.NET" Version="2.4.649" />
-        <PackageReference Include="SkiaSharp" Version="2.88.8" />
-        <PackageReference Include="SkiaSharp.NativeAssets.Win32" Version="2.88.8" />
-        <PackageReference Include="SkiaSharp.NativeAssets.macOS" Version="2.88.8" />
-        <PackageReference Include="SkiaSharp.NativeAssets.Linux" Version="2.88.8" />
-        <PackageReference Include="SkiaSharp.HarfBuzz" Version="2.88.8" />
+        <PackageReference Include="ClosedXML" Version="0.105.0"/>
+        <PackageReference Include="GDAL" Version="3.11.3"/>
+        <PackageReference Include="ImGui.NET" Version="1.90.8.1"/>
+        <PackageReference Include="ImGui.NET.Branches.Docking" Version="1.88.0"/>
+        <PackageReference Include="NetTopologySuite" Version="2.6.0"/>
+        <PackageReference Include="NetTopologySuite.Features" Version="2.2.0"/>
+        <PackageReference Include="NetTopologySuite.IO.Esri.Shapefile" Version="1.2.0"/>
+        <PackageReference Include="NetTopologySuite.IO.GeoJSON" Version="4.0.0"/>
+        <PackageReference Include="NetTopologySuite.IO.ShapeFile" Version="2.1.0"/>
+        <PackageReference Include="ProjNET" Version="2.0.0"/>
+        <PackageReference Include="sdl2" Version="2.0.5"/>
+        <PackageReference Include="Silk.NET.OpenCL" Version="2.21.0"/>
+        <PackageReference Include="StbImageSharp" Version="2.30.15"/>
+        <PackageReference Include="StbImageWriteSharp" Version="1.16.7"/>
+        <PackageReference Include="System.Drawing.Primitives" Version="4.3.0"/>
+        <PackageReference Include="System.Management" Version="8.0.0"/>
+        <PackageReference Include="TinyDialogsNet" Version="1.0.2"/>
+        <PackageReference Include="Veldrid" Version="4.9.0"/>
+        <PackageReference Include="Veldrid.ImGui" Version="5.72.0"/>
+        <PackageReference Include="Veldrid.MetalBindings" Version="4.9.0"/>
+        <PackageReference Include="Veldrid.SDL2" Version="4.9.0"/>
+        <PackageReference Include="Veldrid.SPIRV" Version="1.0.15"/>
+        <PackageReference Include="Veldrid.StartupUtilities" Version="4.9.0"/>
+        <PackageReference Include="BitMiracle.LibTiff.NET" Version="2.4.649"/>
+        <PackageReference Include="SkiaSharp" Version="2.88.8"/>
+        <PackageReference Include="SkiaSharp.NativeAssets.Win32" Version="2.88.8"/>
+        <PackageReference Include="SkiaSharp.NativeAssets.macOS" Version="2.88.8"/>
+        <PackageReference Include="SkiaSharp.NativeAssets.Linux" Version="2.88.8"/>
+        <PackageReference Include="SkiaSharp.HarfBuzz" Version="2.88.8"/>
     </ItemGroup>
 
     <!-- The ProjectReference to the extractor tool, correctly in its own ItemGroup -->
     <ItemGroup>
-        <ProjectReference Include="AddInExtractor\AddInExtractor.csproj" ReferenceOutputAssembly="false" OutputItemType="AddInExtractorPath" />
+        <ProjectReference Include="AddInExtractor\AddInExtractor.csproj" ReferenceOutputAssembly="false" OutputItemType="AddInExtractorPath"/>
     </ItemGroup>
 
     <!-- In Release mode, we must EXCLUDE the add-in source from the main compile. -->
     <ItemGroup Condition="'$(Configuration)' == 'Release'">
-        <Compile Remove="AddIns\Development\**\*.cs" />
+        <Compile Remove="AddIns\Development\**\*.cs"/>
     </ItemGroup>
 
     <!-- First, ensure the AddInExtractor is built -->
     <Target Name="BuildAddInExtractor" BeforeTargets="ExtractAddIns" Condition="'$(Configuration)' == 'Release'">
-        <MSBuild Projects="AddInExtractor\AddInExtractor.csproj" Properties="Configuration=$(Configuration)" Targets="Build" />
+        <MSBuild Projects="AddInExtractor\AddInExtractor.csproj" Properties="Configuration=$(Configuration)" Targets="Build"/>
     </Target>
 
     <!-- Target to extract add-ins after build in Release mode -->
@@ -82,22 +82,22 @@
         </PropertyGroup>
 
         <ItemGroup>
-            <AddInSourceFiles Include="$(MSBuildProjectDirectory)\AddIns\Development\*.cs" />
+            <AddInSourceFiles Include="$(MSBuildProjectDirectory)\AddIns\Development\*.cs"/>
         </ItemGroup>
 
-        <Message Text="Checking for add-ins to extract..." Importance="high" />
-        <Message Text="Core assembly: $(OutputPath)GeoscientistToolkit.dll" Importance="high" />
-        <Message Text="Extractor command: $(ExtractorCommand)" Importance="normal" Condition="'@(AddInSourceFiles)' != ''" />
+        <Message Text="Checking for add-ins to extract..." Importance="high"/>
+        <Message Text="Core assembly: $(OutputPath)GeoscientistToolkit.dll" Importance="high"/>
+        <Message Text="Extractor command: $(ExtractorCommand)" Importance="normal" Condition="'@(AddInSourceFiles)' != ''"/>
 
-        <Exec Condition="'@(AddInSourceFiles)' != ''" Command="$(ExtractorCommand)" WorkingDirectory="$(MSBuildProjectDirectory)" />
+        <Exec Condition="'@(AddInSourceFiles)' != ''" Command="$(ExtractorCommand)" WorkingDirectory="$(MSBuildProjectDirectory)"/>
 
-        <Message Condition="'@(AddInSourceFiles)' != ''" Text="Add-in extraction complete!" Importance="high" />
-        <Message Condition="'@(AddInSourceFiles)' == ''" Text="No add-ins found in AddIns\Development directory." Importance="high" />
+        <Message Condition="'@(AddInSourceFiles)' != ''" Text="Add-in extraction complete!" Importance="high"/>
+        <Message Condition="'@(AddInSourceFiles)' == ''" Text="No add-ins found in AddIns\Development directory." Importance="high"/>
     </Target>
 
     <!-- Optional: Create the add-in development directory structure on first build -->
     <Target Name="EnsureAddInDirectory" BeforeTargets="BeforeBuild">
-        <MakeDir Directories="$(MSBuildProjectDirectory)\AddIns\Development" Condition="!Exists('$(MSBuildProjectDirectory)\AddIns\Development')" />
+        <MakeDir Directories="$(MSBuildProjectDirectory)\AddIns\Development" Condition="!Exists('$(MSBuildProjectDirectory)\AddIns\Development')"/>
     </Target>
 
 </Project>

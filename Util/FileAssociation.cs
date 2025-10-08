@@ -1,30 +1,31 @@
 ﻿// GeoscientistToolkit/Util/FileAssociation.cs
+
 #if WINDOWS
 using Microsoft.Win32;
 using System;
 using System.Diagnostics;
 #endif
 
-namespace GeoscientistToolkit.Util
-{
-    /// <summary>
-    /// Manages .gtp file association on Windows.
-    /// </summary>
-    public static class FileAssociation
-    {
-        private const string Extension = ".gtp";
-        private const string ProgId = "GeoscientistToolkit.Project";
-        private const string FileDescription = "GeoscientistToolkit Project File";
+namespace GeoscientistToolkit.Util;
 
-        public static bool IsAssociationSupported => 
+/// <summary>
+///     Manages .gtp file association on Windows.
+/// </summary>
+public static class FileAssociation
+{
+    private const string Extension = ".gtp";
+    private const string ProgId = "GeoscientistToolkit.Project";
+    private const string FileDescription = "GeoscientistToolkit Project File";
+
+    public static bool IsAssociationSupported =>
 #if WINDOWS
             true;
 #else
-            false;
+        false;
 #endif
 
-        public static bool IsAssociated()
-        {
+    public static bool IsAssociated()
+    {
 #if WINDOWS
             try
             {
@@ -36,12 +37,12 @@ namespace GeoscientistToolkit.Util
                 return false;
             }
 #else
-            return false;
+        return false;
 #endif
-        }
+    }
 
-        public static void Register()
-        {
+    public static void Register()
+    {
 #if WINDOWS
             try
             {
@@ -67,10 +68,10 @@ namespace GeoscientistToolkit.Util
                 throw;
             }
 #endif
-        }
+    }
 
-        public static void Unregister()
-        {
+    public static void Unregister()
+    {
 #if WINDOWS
             try
             {
@@ -84,6 +85,5 @@ namespace GeoscientistToolkit.Util
                 throw;
             }
 #endif
-        }
     }
 }

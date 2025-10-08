@@ -1,67 +1,66 @@
 // GeoscientistToolkit/UI/Utils/ConfirmationDialog.cs
+
 using System.Numerics;
 using ImGuiNET;
 
-namespace GeoscientistToolkit.UI
+namespace GeoscientistToolkit.UI;
+
+/// <summary>
+///     A reusable modal dialog for confirming actions.
+/// </summary>
+public class ConfirmationDialog
 {
-    /// <summary>
-    /// A reusable modal dialog for confirming actions.
-    /// </summary>
-    public class ConfirmationDialog
+    private readonly string _message;
+    private readonly string _title;
+    private bool _isOpen;
+
+    public ConfirmationDialog(string title, string message)
     {
-        private readonly string _title;
-        private readonly string _message;
-        private bool _isOpen;
+        _title = title;
+        _message = message;
+    }
 
-        public ConfirmationDialog(string title, string message)
+    /// <summary>
+    ///     Opens the confirmation dialog on the next frame.
+    /// </summary>
+    public void Open()
+    {
+        _isOpen = true;
+    }
+
+    /// <summary>
+    ///     Draws the dialog and returns true if the user confirmed the action.
+    /// </summary>
+    /// <returns>True if 'Yes' was clicked, otherwise false.</returns>
+    public bool Submit()
+    {
+        var confirmed = false;
+
+        if (_isOpen)
         {
-            _title = title;
-            _message = message;
+            ImGui.OpenPopup(_title);
+            _isOpen = false; // Reset for next call
         }
 
-        /// <summary>
-        /// Opens the confirmation dialog on the next frame.
-        /// </summary>
-        public void Open()
-        {
-            _isOpen = true;
-        }
+        var center = ImGui.GetMainViewport().GetCenter();
+        ImGui.SetNextWindowPos(center, ImGuiCond.Appearing, new Vector2(0.5f, 0.5f));
 
-        /// <summary>
-        /// Draws the dialog and returns true if the user confirmed the action.
-        /// </summary>
-        /// <returns>True if 'Yes' was clicked, otherwise false.</returns>
-        public bool Submit()
+        if (ImGui.BeginPopupModal(_title, ref _isOpen, ImGuiWindowFlags.AlwaysAutoResize))
         {
-            bool confirmed = false;
+            ImGui.TextWrapped(_message);
+            ImGui.Separator();
 
-            if (_isOpen)
+            if (ImGui.Button("Yes", new Vector2(120, 0)))
             {
-                ImGui.OpenPopup(_title);
-                _isOpen = false; // Reset for next call
+                confirmed = true;
+                ImGui.CloseCurrentPopup();
             }
 
-            var center = ImGui.GetMainViewport().GetCenter();
-            ImGui.SetNextWindowPos(center, ImGuiCond.Appearing, new Vector2(0.5f, 0.5f));
-
-            if (ImGui.BeginPopupModal(_title, ref _isOpen, ImGuiWindowFlags.AlwaysAutoResize))
-            {
-                ImGui.TextWrapped(_message);
-                ImGui.Separator();
-
-                if (ImGui.Button("Yes", new Vector2(120, 0)))
-                {
-                    confirmed = true;
-                    ImGui.CloseCurrentPopup();
-                }
-                ImGui.SameLine();
-                if (ImGui.Button("No", new Vector2(120, 0)))
-                {
-                    ImGui.CloseCurrentPopup();
-                }
-                ImGui.EndPopup();
-            }
-            return confirmed;
+            ImGui.SameLine();
+            if (ImGui.Button("No", new Vector2(120, 0))) ImGui.CloseCurrentPopup();
+            ImGui.EndPopup();
         }
+
+        return confirmed;
     }
 }

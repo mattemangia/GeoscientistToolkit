@@ -1,40 +1,36 @@
 // GeoscientistToolkit/UI/Tools/ParticleSeparatorTool.cs
+
 using GeoscientistToolkit.Analysis.ParticleSeparator;
 using GeoscientistToolkit.Data;
 using GeoscientistToolkit.Data.CtImageStack;
 using GeoscientistToolkit.UI.Interfaces;
-using System;
 
-namespace GeoscientistToolkit.UI.Tools
+namespace GeoscientistToolkit.UI.Tools;
+
+/// <summary>
+///     UI bridge for the Particle Separator tool.
+///     This class connects the core analysis UI to the main application's tool panel.
+/// </summary>
+public class ParticleSeparatorTool : IDatasetTools, IDisposable
 {
-    /// <summary>
-    /// UI bridge for the Particle Separator tool.
-    /// This class connects the core analysis UI to the main application's tool panel.
-    /// </summary>
-    public class ParticleSeparatorTool : IDatasetTools, IDisposable
+    private readonly ParticleSeparatorUI _separatorUI;
+
+    public ParticleSeparatorTool()
     {
-        private readonly ParticleSeparatorUI _separatorUI;
+        _separatorUI = new ParticleSeparatorUI();
+    }
 
-        public ParticleSeparatorTool()
-        {
-            _separatorUI = new ParticleSeparatorUI();
-        }
+    /// <summary>
+    ///     Draws the UI panel for the Particle Separator.
+    /// </summary>
+    /// <param name="dataset">The target CtImageStackDataset.</param>
+    public void Draw(Dataset dataset)
+    {
+        if (dataset is CtImageStackDataset ctDataset) _separatorUI.DrawPanel(ctDataset);
+    }
 
-        /// <summary>
-        /// Draws the UI panel for the Particle Separator.
-        /// </summary>
-        /// <param name="dataset">The target CtImageStackDataset.</param>
-        public void Draw(Dataset dataset)
-        {
-            if (dataset is CtImageStackDataset ctDataset)
-            {
-                _separatorUI.DrawPanel(ctDataset);
-            }
-        }
-
-        public void Dispose()
-        {
-            _separatorUI?.Dispose();
-        }
+    public void Dispose()
+    {
+        _separatorUI?.Dispose();
     }
 }

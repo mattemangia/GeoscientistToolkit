@@ -1,405 +1,416 @@
 ﻿// GeoscientistToolkit/Data/CtImageStack/CtImageStackDataset.cs
-using GeoscientistToolkit.Data.VolumeData;
-using GeoscientistToolkit.UI.Interfaces;
-using GeoscientistToolkit.Util;
-using System.Collections.Generic;
-using System.IO;
-using System.Linq;
+
 using System.Numerics;
-using System.Text.Json; // Added for material serialization
-using System;
+using System.Text.Json;
+using GeoscientistToolkit.Data.VolumeData;
+using GeoscientistToolkit.Util;
+// Added for material serialization
 
-namespace GeoscientistToolkit.Data.CtImageStack
+namespace GeoscientistToolkit.Data.CtImageStack;
+
+public class CtImageStackDataset : Dataset, ISerializableDataset
 {
-    public class CtImageStackDataset : Dataset, ISerializableDataset
+    // Volume data
+
+    public CtImageStackDataset(string name, string folderPath) : base(name, folderPath)
     {
-        // Dimensions
-        public int Width { get; set; }
-        public int Height { get; set; }
-        public int Depth { get; set; } // Number of slices
+        Type = DatasetType.CtImageStack;
+        // Add a default "Exterior" material that will be replaced if a local materials file is found
+        Materials.Add(new Material(0, "Exterior", new Vector4(0, 0, 0, 0)));
+    }
 
-        // Pixel/Voxel information
-        public float PixelSize { get; set; } // In-plane pixel size
-        public float SliceThickness { get; set; } // Distance between slices
-        public string Unit { get; set; } = "µm";
-        public int BitDepth { get; set; } = 16;
+    // Dimensions
+    public int Width { get; set; }
+    public int Height { get; set; }
+    public int Depth { get; set; } // Number of slices
 
-        // CT-specific properties
-        public int BinningSize { get; set; } = 1;
-        public float MinValue { get; set; }
-        public float MaxValue { get; set; }
+    // Pixel/Voxel information
+    public float PixelSize { get; set; } // In-plane pixel size
+    public float SliceThickness { get; set; } // Distance between slices
+    public string Unit { get; set; } = "µm";
+    public int BitDepth { get; set; } = 16;
 
-        // File paths for the image stack
-        public List<string> ImagePaths { get; set; } = new List<string>();
+    // CT-specific properties
+    public int BinningSize { get; set; } = 1;
+    public float MinValue { get; set; }
+    public float MaxValue { get; set; }
 
-        // Volume data
-        private ChunkedVolume _volumeData;
-        public ChunkedVolume VolumeData => _volumeData;
+    // File paths for the image stack
+    public List<string> ImagePaths { get; set; } = new();
+    public ChunkedVolume VolumeData { get; private set; }
 
-        // --- NEW PROPERTIES FOR MATERIALS AND LABELS ---
-        public ChunkedLabelVolume LabelData { get; set; }
-        public List<Material> Materials { get; set; } = new List<Material>();
+    // --- NEW PROPERTIES FOR MATERIALS AND LABELS ---
+    public ChunkedLabelVolume LabelData { get; set; }
+    public List<Material> Materials { get; set; } = new();
 
-        public CtImageStackDataset(string name, string folderPath) : base(name, folderPath)
+    public object ToSerializableObject()
+    {
+        var dto = new CtImageStackDatasetDTO
         {
-            Type = DatasetType.CtImageStack;
-            // Add a default "Exterior" material that will be replaced if a local materials file is found
-            Materials.Add(new Material(0, "Exterior", new Vector4(0, 0, 0, 0)));
+            TypeName = nameof(CtImageStackDataset),
+            Name = Name,
+            FilePath = FilePath,
+            PixelSize = PixelSize,
+            SliceThickness = SliceThickness,
+            Unit = Unit,
+            BinningSize = BinningSize
+        };
+
+        if (Materials != null)
+            foreach (var material in Materials)
+                dto.Materials.Add(new MaterialDTO
+                {
+                    ID = material.ID,
+                    Name = material.Name,
+                    Color = material.Color,
+                    MinValue = material.MinValue,
+                    MaxValue = material.MaxValue,
+                    IsVisible = material.IsVisible,
+                    IsExterior = material.IsExterior,
+                    Density = material.Density,
+                    PhysicalMaterialName = material.PhysicalMaterialName // NEW
+                });
+
+        return dto;
+    }
+
+    public override long GetSizeInBytes()
+    {
+        long totalSize = 0;
+        var volumePath = GetVolumePath();
+        if (File.Exists(volumePath)) totalSize += new FileInfo(volumePath).Length;
+
+        var labelPath = GetLabelPath();
+        if (File.Exists(labelPath)) totalSize += new FileInfo(labelPath).Length;
+
+        // If binary files don't exist, calculate from images
+        if (totalSize == 0 && Directory.Exists(FilePath))
+        {
+            var imageFiles = Directory.GetFiles(FilePath)
+                .Where(f => IsImageFile(f))
+                .ToList();
+
+            foreach (var file in imageFiles) totalSize += new FileInfo(file).Length;
         }
 
-        public override long GetSizeInBytes()
+        return totalSize;
+    }
+
+    public override void Load()
+    {
+        // Load Grayscale Data
+        if (VolumeData == null)
         {
-            long totalSize = 0;
-            string volumePath = GetVolumePath();
+            var volumePath = GetVolumePath();
             if (File.Exists(volumePath))
             {
-                totalSize += new FileInfo(volumePath).Length;
+                var loadTask = ChunkedVolume.LoadFromBinAsync(volumePath, false);
+                VolumeData = loadTask.GetAwaiter().GetResult();
+                if (VolumeData != null)
+                {
+                    Width = VolumeData.Width;
+                    Height = VolumeData.Height;
+                    Depth = VolumeData.Depth;
+                }
             }
+        }
 
-            string labelPath = GetLabelPath();
+        // --- MODIFIED: Load materials from local file first ---
+        LoadMaterials();
+
+        // Load Label Data (non-destructively)
+        if (LabelData == null)
+        {
+            var labelPath = GetLabelPath();
             if (File.Exists(labelPath))
             {
-                totalSize += new FileInfo(labelPath).Length;
-            }
-
-            // If binary files don't exist, calculate from images
-            if (totalSize == 0 && Directory.Exists(FilePath))
-            {
-                var imageFiles = Directory.GetFiles(FilePath)
-                    .Where(f => IsImageFile(f))
-                    .ToList();
-
-                foreach (var file in imageFiles)
+                try
                 {
-                    totalSize += new FileInfo(file).Length;
+                    var loadedLabels = ChunkedLabelVolume.LoadFromBin(labelPath, false);
+                    if (VolumeData != null &&
+                        (loadedLabels.Width != VolumeData.Width ||
+                         loadedLabels.Height != VolumeData.Height ||
+                         loadedLabels.Depth != VolumeData.Depth))
+                        // Log a warning about the mismatch but still load the data.
+                        Logger.LogWarning(
+                            $"[CtImageStackDataset] Mismatched dimensions for '{Name}'. Label data may not align with volume data. " +
+                            $"Labels: {loadedLabels.Width}x{loadedLabels.Height}x{loadedLabels.Depth}, " +
+                            $"Volume: {VolumeData.Width}x{VolumeData.Height}x{VolumeData.Depth}");
+                    LabelData = loadedLabels;
+                    Logger.Log($"[CtImageStackDataset] Loaded label data for '{Name}' from {labelPath}");
+                }
+                catch (Exception ex)
+                {
+                    Logger.LogError(
+                        $"[CtImageStackDataset] Failed to load label file '{labelPath}': {ex.Message}. A new empty label volume will be used.");
+                    if (VolumeData != null)
+                        LabelData = new ChunkedLabelVolume(Width, Height, Depth, VolumeData.ChunkDim, false, labelPath);
                 }
             }
-
-            return totalSize;
-        }
-
-        public override void Load()
-{
-    // Load Grayscale Data
-    if (_volumeData == null)
-    {
-        var volumePath = GetVolumePath();
-        if (File.Exists(volumePath))
-        {
-            var loadTask = ChunkedVolume.LoadFromBinAsync(volumePath, false);
-            _volumeData = loadTask.GetAwaiter().GetResult();
-            if (_volumeData != null)
+            else if (VolumeData != null)
             {
-                Width = _volumeData.Width;
-                Height = _volumeData.Height;
-                Depth = _volumeData.Depth;
+                // If the label file doesn't exist, create an in-memory representation
+                // but DO NOT save it automatically. It will be saved when the user performs
+                // a segmentation action or saves the project.
+                Logger.Log(
+                    $"[CtImageStackDataset] No label file found for {Name}. A new in-memory label volume will be used.");
+                LabelData = new ChunkedLabelVolume(Width, Height, Depth, VolumeData.ChunkDim, false, labelPath);
             }
         }
     }
 
-    // --- MODIFIED: Load materials from local file first ---
-    LoadMaterials();
-
-    // Load Label Data (non-destructively)
-    if (LabelData == null)
+    public override void Unload()
     {
-        var labelPath = GetLabelPath();
-        if (File.Exists(labelPath))
-        {
-            try
-            {
-                var loadedLabels = ChunkedLabelVolume.LoadFromBin(labelPath, false);
-                if (_volumeData != null &&
-                    (loadedLabels.Width != _volumeData.Width ||
-                     loadedLabels.Height != _volumeData.Height ||
-                     loadedLabels.Depth != _volumeData.Depth))
-                {
-                    // Log a warning about the mismatch but still load the data.
-                    Logger.LogWarning($"[CtImageStackDataset] Mismatched dimensions for '{Name}'. Label data may not align with volume data. " +
-                                     $"Labels: {loadedLabels.Width}x{loadedLabels.Height}x{loadedLabels.Depth}, " +
-                                     $"Volume: {_volumeData.Width}x{_volumeData.Height}x{_volumeData.Depth}");
-                }
-                LabelData = loadedLabels;
-                Logger.Log($"[CtImageStackDataset] Loaded label data for '{Name}' from {labelPath}");
-            }
-            catch (Exception ex)
-            {
-                Logger.LogError($"[CtImageStackDataset] Failed to load label file '{labelPath}': {ex.Message}. A new empty label volume will be used.");
-                if (_volumeData != null)
-                {
-                    LabelData = new ChunkedLabelVolume(Width, Height, Depth, _volumeData.ChunkDim, false, labelPath);
-                }
-            }
-        }
-        else if (_volumeData != null)
-        {
-            // If the label file doesn't exist, create an in-memory representation
-            // but DO NOT save it automatically. It will be saved when the user performs
-            // a segmentation action or saves the project.
-            Logger.Log($"[CtImageStackDataset] No label file found for {Name}. A new in-memory label volume will be used.");
-            LabelData = new ChunkedLabelVolume(Width, Height, Depth, _volumeData.ChunkDim, false, labelPath);
-        }
-    }
-}
-
-        public override void Unload()
-        {
-            _volumeData?.Dispose();
-            _volumeData = null;
-            LabelData?.Dispose();
-            LabelData = null;
-        }
-
-        public object ToSerializableObject()
-        {
-            var dto = new CtImageStackDatasetDTO
-            {
-                TypeName = nameof(CtImageStackDataset),
-                Name = this.Name,
-                FilePath = this.FilePath,
-                PixelSize = this.PixelSize,
-                SliceThickness = this.SliceThickness,
-                Unit = this.Unit,
-                BinningSize = this.BinningSize,
-            };
-
-            if (this.Materials != null)
-            {
-                foreach (var material in this.Materials)
-                {
-                    dto.Materials.Add(new MaterialDTO
-                    {
-                        ID = material.ID,
-                        Name = material.Name,
-                        Color = material.Color,
-                        MinValue = material.MinValue,
-                        MaxValue = material.MaxValue,
-                        IsVisible = material.IsVisible,
-                        IsExterior = material.IsExterior,
-                        Density = material.Density,
-                        PhysicalMaterialName = material.PhysicalMaterialName  // NEW
-                    });
-                }
-            }
-            return dto;
-        }
-
-        // --- NEW METHOD: Save label data ---
-        public void SaveLabelData()
-        {
-            if (LabelData != null)
-            {
-                string labelPath = GetLabelPath();
-                if (!string.IsNullOrEmpty(labelPath))
-                {
-                    Logger.Log($"[CtImageStackDataset] Saving label data for '{Name}' to {labelPath}");
-                    LabelData.SaveAsBin(labelPath);
-                }
-            }
-        }
-
-        // --- NEW METHOD: Save materials to a local JSON file ---
-        public void SaveMaterials()
-        {
-            if (Materials == null || Materials.Count == 0) return;
-
-            try
-            {
-                string materialsPath = GetMaterialsPath();
-                var options = new JsonSerializerOptions { WriteIndented = true };
-                var dtos = Materials.Select(m => new MaterialDTO
-                {
-                    ID = m.ID,
-                    Name = m.Name,
-                    Color = m.Color,
-                    MinValue = m.MinValue,
-                    MaxValue = m.MaxValue,
-                    IsVisible = m.IsVisible,
-                    IsExterior = m.IsExterior,
-                    Density = m.Density,
-                    PhysicalMaterialName = m.PhysicalMaterialName  // NEW
-                }).ToList();
-
-                string jsonString = JsonSerializer.Serialize(dtos, options);
-                File.WriteAllText(materialsPath, jsonString);
-                Logger.Log($"[CtImageStackDataset] Saved {Materials.Count} materials to {materialsPath}");
-            }
-            catch (Exception ex)
-            {
-                Logger.LogError($"[CtImageStackDataset] Failed to save materials: {ex.Message}");
-            }
-        }
-
-        // --- NEW METHOD: Load materials from a local JSON file ---
-        private void LoadMaterials()
-{
-    // If the Materials list contains more than just the default 'Exterior' material,
-    // it means it has likely been populated by the project loader. In that case,
-    // we should not overwrite the correctly deserialized data from the project file.
-    if (Materials.Any(m => m.ID != 0))
-    {
-        Logger.Log($"[CtImageStackDataset] Materials for '{Name}' appear to be pre-loaded (e.g., from a project file). Checking for black materials...");
-        
-        // FIX: Check for black materials and assign random colors
-        FixBlackMaterials();
-        return;
+        VolumeData?.Dispose();
+        VolumeData = null;
+        LabelData?.Dispose();
+        LabelData = null;
     }
 
-    string materialsPath = GetMaterialsPath();
-    if (File.Exists(materialsPath))
+    // --- NEW METHOD: Save label data ---
+    public void SaveLabelData()
     {
+        if (LabelData != null)
+        {
+            var labelPath = GetLabelPath();
+            if (!string.IsNullOrEmpty(labelPath))
+            {
+                Logger.Log($"[CtImageStackDataset] Saving label data for '{Name}' to {labelPath}");
+                LabelData.SaveAsBin(labelPath);
+            }
+        }
+    }
+
+    // --- NEW METHOD: Save materials to a local JSON file ---
+    public void SaveMaterials()
+    {
+        if (Materials == null || Materials.Count == 0) return;
+
         try
         {
-            string jsonString = File.ReadAllText(materialsPath);
-            var options = new JsonSerializerOptions();
-            var dtos = JsonSerializer.Deserialize<List<MaterialDTO>>(jsonString, options);
-
-            if (dtos != null && dtos.Any())
+            var materialsPath = GetMaterialsPath();
+            var options = new JsonSerializerOptions { WriteIndented = true };
+            var dtos = Materials.Select(m => new MaterialDTO
             {
-                Materials.Clear();
-                foreach (var dto in dtos)
-                {
-                    var material = new Material(dto.ID, dto.Name, dto.Color)
-                    {
-                        MinValue = dto.MinValue,
-                        MaxValue = dto.MaxValue,
-                        IsVisible = dto.IsVisible,
-                        IsExterior = dto.IsExterior,
-                        Density = dto.Density,
-                        PhysicalMaterialName = dto.PhysicalMaterialName  // NEW
-                    };
-                    Materials.Add(material);
-                }
-                Logger.Log($"[CtImageStackDataset] Loaded {Materials.Count} materials from {materialsPath}");
-                
-                // Check for black materials after loading
-                FixBlackMaterials();
-            }
+                ID = m.ID,
+                Name = m.Name,
+                Color = m.Color,
+                MinValue = m.MinValue,
+                MaxValue = m.MaxValue,
+                IsVisible = m.IsVisible,
+                IsExterior = m.IsExterior,
+                Density = m.Density,
+                PhysicalMaterialName = m.PhysicalMaterialName // NEW
+            }).ToList();
+
+            var jsonString = JsonSerializer.Serialize(dtos, options);
+            File.WriteAllText(materialsPath, jsonString);
+            Logger.Log($"[CtImageStackDataset] Saved {Materials.Count} materials to {materialsPath}");
         }
         catch (Exception ex)
         {
-            Logger.LogError($"[CtImageStackDataset] Failed to load materials: {ex.Message}");
-            // Add default if loading fails
-            if (!Materials.Any(m => m.ID == 0))
-            {
-                Materials.Clear();
-                Materials.Add(new Material(0, "Exterior", new Vector4(0, 0, 0, 0)));
-            }
+            Logger.LogError($"[CtImageStackDataset] Failed to save materials: {ex.Message}");
         }
     }
-    else
+
+    // --- NEW METHOD: Load materials from a local JSON file ---
+    private void LoadMaterials()
     {
-        // No materials file - ensure default exists
-        if (!Materials.Any())
+        // If the Materials list contains more than just the default 'Exterior' material,
+        // it means it has likely been populated by the project loader. In that case,
+        // we should not overwrite the correctly deserialized data from the project file.
+        if (Materials.Any(m => m.ID != 0))
         {
-            Materials.Add(new Material(0, "Exterior", new Vector4(0, 0, 0, 0)));
+            Logger.Log(
+                $"[CtImageStackDataset] Materials for '{Name}' appear to be pre-loaded (e.g., from a project file). Checking for black materials...");
+
+            // FIX: Check for black materials and assign random colors
+            FixBlackMaterials();
+            return;
+        }
+
+        var materialsPath = GetMaterialsPath();
+        if (File.Exists(materialsPath))
+        {
+            try
+            {
+                var jsonString = File.ReadAllText(materialsPath);
+                var options = new JsonSerializerOptions();
+                var dtos = JsonSerializer.Deserialize<List<MaterialDTO>>(jsonString, options);
+
+                if (dtos != null && dtos.Any())
+                {
+                    Materials.Clear();
+                    foreach (var dto in dtos)
+                    {
+                        var material = new Material(dto.ID, dto.Name, dto.Color)
+                        {
+                            MinValue = dto.MinValue,
+                            MaxValue = dto.MaxValue,
+                            IsVisible = dto.IsVisible,
+                            IsExterior = dto.IsExterior,
+                            Density = dto.Density,
+                            PhysicalMaterialName = dto.PhysicalMaterialName // NEW
+                        };
+                        Materials.Add(material);
+                    }
+
+                    Logger.Log($"[CtImageStackDataset] Loaded {Materials.Count} materials from {materialsPath}");
+
+                    // Check for black materials after loading
+                    FixBlackMaterials();
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError($"[CtImageStackDataset] Failed to load materials: {ex.Message}");
+                // Add default if loading fails
+                if (!Materials.Any(m => m.ID == 0))
+                {
+                    Materials.Clear();
+                    Materials.Add(new Material(0, "Exterior", new Vector4(0, 0, 0, 0)));
+                }
+            }
+        }
+        else
+        {
+            // No materials file - ensure default exists
+            if (!Materials.Any()) Materials.Add(new Material(0, "Exterior", new Vector4(0, 0, 0, 0)));
         }
     }
-}
-        private void FixBlackMaterials()
-        {
-            var random = new Random();
-            bool anyFixed = false;
-    
-            foreach (var material in Materials)
-            {
-                // Skip exterior material (ID 0)
-                if (material.ID == 0)
-                {
-                    // Ensure exterior is transparent
-                    material.Color = new Vector4(0, 0, 0, 0);
-                    material.IsExterior = true;
-                    continue;
-                }
-        
-                // Check if material is black or nearly black (all RGB components < 0.1)
-                if (material.Color.X < 0.1f && material.Color.Y < 0.1f && material.Color.Z < 0.1f)
-                {
-                    // Generate a random, visually distinct color
-                    float hue = random.Next(0, 360) / 360f;
-                    var newColor = HsvToRgb(hue, 0.7f, 0.8f);
-                    material.Color = new Vector4(newColor.X, newColor.Y, newColor.Z, 1.0f);
-                    anyFixed = true;
-            
-                    Logger.Log($"[CtImageStackDataset] Assigned random color to material {material.ID} ({material.Name}): RGB({material.Color.X:F2}, {material.Color.Y:F2}, {material.Color.Z:F2})");
-                }
-            }
-    
-            if (anyFixed)
-            {
-                Logger.Log($"[CtImageStackDataset] Fixed black materials with random colors");
-                SaveMaterials(); // Save the fixed colors
-            }
-        }
-        private static Vector4 HsvToRgb(float h, float s, float v)
-        {
-            float c = v * s;
-            float x = c * (1 - Math.Abs((h * 6) % 2 - 1));
-            float m = v - c;
-    
-            float r, g, b;
-            if (h < 1f/6)      { r = c; g = x; b = 0; }
-            else if (h < 2f/6) { r = x; g = c; b = 0; }
-            else if (h < 3f/6) { r = 0; g = c; b = x; }
-            else if (h < 4f/6) { r = 0; g = x; b = c; }
-            else if (h < 5f/6) { r = x; g = 0; b = c; }
-            else               { r = c; g = 0; b = x; }
-    
-            return new Vector4(r + m, g + m, b + m, 1.0f);
-        }
 
-        // --- NEW HELPER: Get path for the local materials file ---
-        private string GetMaterialsPath()
+    private void FixBlackMaterials()
+    {
+        var random = new Random();
+        var anyFixed = false;
+
+        foreach (var material in Materials)
         {
-            if (File.Exists(FilePath))
+            // Skip exterior material (ID 0)
+            if (material.ID == 0)
             {
-                string directory = Path.GetDirectoryName(FilePath);
-                string nameWithoutExt = Path.GetFileNameWithoutExtension(FilePath);
-                return Path.Combine(directory, $"{nameWithoutExt}.Materials.json");
+                // Ensure exterior is transparent
+                material.Color = new Vector4(0, 0, 0, 0);
+                material.IsExterior = true;
+                continue;
             }
-            else
+
+            // Check if material is black or nearly black (all RGB components < 0.1)
+            if (material.Color.X < 0.1f && material.Color.Y < 0.1f && material.Color.Z < 0.1f)
             {
-                string folderName = Path.GetFileName(FilePath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
-                return Path.Combine(FilePath, $"{folderName}.Materials.json");
+                // Generate a random, visually distinct color
+                var hue = random.Next(0, 360) / 360f;
+                var newColor = HsvToRgb(hue, 0.7f, 0.8f);
+                material.Color = new Vector4(newColor.X, newColor.Y, newColor.Z, 1.0f);
+                anyFixed = true;
+
+                Logger.Log(
+                    $"[CtImageStackDataset] Assigned random color to material {material.ID} ({material.Name}): RGB({material.Color.X:F2}, {material.Color.Y:F2}, {material.Color.Z:F2})");
             }
         }
 
-        private string GetVolumePath()
+        if (anyFixed)
         {
-            if (File.Exists(FilePath))
-            {
-                string directory = Path.GetDirectoryName(FilePath);
-                string nameWithoutExt = Path.GetFileNameWithoutExtension(FilePath);
-                return Path.Combine(directory, $"{nameWithoutExt}.Volume.bin");
-            }
-            else
-            {
-                string folderName = Path.GetFileName(FilePath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
-                return Path.Combine(FilePath, $"{folderName}.Volume.bin");
-            }
+            Logger.Log("[CtImageStackDataset] Fixed black materials with random colors");
+            SaveMaterials(); // Save the fixed colors
+        }
+    }
+
+    private static Vector4 HsvToRgb(float h, float s, float v)
+    {
+        var c = v * s;
+        var x = c * (1 - Math.Abs(h * 6 % 2 - 1));
+        var m = v - c;
+
+        float r, g, b;
+        if (h < 1f / 6)
+        {
+            r = c;
+            g = x;
+            b = 0;
+        }
+        else if (h < 2f / 6)
+        {
+            r = x;
+            g = c;
+            b = 0;
+        }
+        else if (h < 3f / 6)
+        {
+            r = 0;
+            g = c;
+            b = x;
+        }
+        else if (h < 4f / 6)
+        {
+            r = 0;
+            g = x;
+            b = c;
+        }
+        else if (h < 5f / 6)
+        {
+            r = x;
+            g = 0;
+            b = c;
+        }
+        else
+        {
+            r = c;
+            g = 0;
+            b = x;
         }
 
-        private string GetLabelPath()
+        return new Vector4(r + m, g + m, b + m, 1.0f);
+    }
+
+    // --- NEW HELPER: Get path for the local materials file ---
+    private string GetMaterialsPath()
+    {
+        if (File.Exists(FilePath))
         {
-            if (File.Exists(FilePath))
-            {
-                string directory = Path.GetDirectoryName(FilePath);
-                string nameWithoutExt = Path.GetFileNameWithoutExtension(FilePath);
-                return Path.Combine(directory, $"{nameWithoutExt}.Labels.bin");
-            }
-            else
-            {
-                string folderName = Path.GetFileName(FilePath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
-                return Path.Combine(FilePath, $"{folderName}.Labels.bin");
-            }
+            var directory = Path.GetDirectoryName(FilePath);
+            var nameWithoutExt = Path.GetFileNameWithoutExtension(FilePath);
+            return Path.Combine(directory, $"{nameWithoutExt}.Materials.json");
         }
 
-        private bool IsImageFile(string path)
+        var folderName =
+            Path.GetFileName(FilePath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+        return Path.Combine(FilePath, $"{folderName}.Materials.json");
+    }
+
+    private string GetVolumePath()
+    {
+        if (File.Exists(FilePath))
         {
-            string ext = Path.GetExtension(path).ToLower();
-            return ext == ".png" || ext == ".jpg" || ext == ".jpeg" ||
-                   ext == ".bmp" || ext == ".tif" || ext == ".tiff" ||
-                   ext == ".tga" || ext == ".gif";
+            var directory = Path.GetDirectoryName(FilePath);
+            var nameWithoutExt = Path.GetFileNameWithoutExtension(FilePath);
+            return Path.Combine(directory, $"{nameWithoutExt}.Volume.bin");
         }
+
+        var folderName =
+            Path.GetFileName(FilePath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+        return Path.Combine(FilePath, $"{folderName}.Volume.bin");
+    }
+
+    private string GetLabelPath()
+    {
+        if (File.Exists(FilePath))
+        {
+            var directory = Path.GetDirectoryName(FilePath);
+            var nameWithoutExt = Path.GetFileNameWithoutExtension(FilePath);
+            return Path.Combine(directory, $"{nameWithoutExt}.Labels.bin");
+        }
+
+        var folderName =
+            Path.GetFileName(FilePath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+        return Path.Combine(FilePath, $"{folderName}.Labels.bin");
+    }
+
+    private bool IsImageFile(string path)
+    {
+        var ext = Path.GetExtension(path).ToLower();
+        return ext == ".png" || ext == ".jpg" || ext == ".jpeg" ||
+               ext == ".bmp" || ext == ".tif" || ext == ".tiff" ||
+               ext == ".tga" || ext == ".gif";
     }
 }
