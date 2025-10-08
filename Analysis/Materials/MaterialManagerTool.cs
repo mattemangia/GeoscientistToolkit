@@ -15,12 +15,16 @@ namespace GeoscientistToolkit.Analysis.MaterialManager
     /// Material Manager tool for creating, editing, and managing materials in CT datasets.
     /// Integrated into the segmentation workflow.
     /// </summary>
-    public class MaterialManagerTool : IDatasetTools
+    public class MaterialManagerTool : IDatasetTools, IDisposable
     {
         private string _newMaterialName = "New Material";
         private int _selectedMaterialId = -1;
         private string _renameBuf = string.Empty;
         private bool _pendingSave = false;
+
+        // --- Caching for voxel count statistics ---
+        private readonly Dictionary<byte, int> _voxelCountCache = new();
+        private WeakReference<CtImageStackDataset> _currentDatasetRef;
         
         // Color presets for quick material creation
         private readonly Vector4[] _colorPresets = new[]
@@ -34,6 +38,21 @@ namespace GeoscientistToolkit.Analysis.MaterialManager
             new Vector4(1.0f, 0.6f, 0.2f, 1.0f), // Orange
             new Vector4(0.6f, 0.2f, 1.0f, 1.0f), // Purple
         };
+
+        public MaterialManagerTool()
+        {
+            Business.ProjectManager.Instance.DatasetDataChanged += OnDatasetDataChanged;
+        }
+        
+        private void OnDatasetDataChanged(Dataset dataset)
+        {
+            // If the changed dataset is the one we're caching for, clear the cache.
+            if (_currentDatasetRef != null && _currentDatasetRef.TryGetTarget(out var cachedDs) && ReferenceEquals(cachedDs, dataset))
+            {
+                _voxelCountCache.Clear();
+                Logger.Log("[MaterialManager] Voxel count cache cleared due to dataset change notification.");
+            }
+        }
 
         public void Draw(Dataset dataset)
         {
@@ -197,7 +216,7 @@ namespace GeoscientistToolkit.Analysis.MaterialManager
                 // Statistics
                 ImGui.Separator();
                 ImGui.Text("Statistics:");
-                int voxelCount = CountMaterialVoxels(ct, selectedMat.ID);
+                int voxelCount = GetVoxelCount(ct, selectedMat.ID);
                 ImGui.Text($"  Voxels: {voxelCount:N0}");
                 if (ct.PixelSize > 0 && ct.SliceThickness > 0)
                 {
@@ -366,10 +385,23 @@ namespace GeoscientistToolkit.Analysis.MaterialManager
             Logger.Log($"[MaterialManager] Saved {ct.Materials.Count} materials");
         }
 
-        private int CountMaterialVoxels(CtImageStackDataset ct, byte materialId)
+        private int GetVoxelCount(CtImageStackDataset ct, byte materialId)
         {
+            // Check if dataset has changed since last time, invalidate cache if so.
+            if (_currentDatasetRef == null || !_currentDatasetRef.TryGetTarget(out var cachedDs) || !ReferenceEquals(cachedDs, ct))
+            {
+                _voxelCountCache.Clear();
+                _currentDatasetRef = new WeakReference<CtImageStackDataset>(ct);
+            }
+
+            if (_voxelCountCache.TryGetValue(materialId, out int cachedCount))
+            {
+                return cachedCount;
+            }
+
+            // If not in cache, calculate, store, and return.
             if (ct.LabelData == null) return 0;
-            
+
             int count = 0;
             var slice = new byte[ct.Width * ct.Height];
             
@@ -381,7 +413,8 @@ namespace GeoscientistToolkit.Analysis.MaterialManager
                     if (slice[i] == materialId) count++;
                 }
             }
-            
+
+            _voxelCountCache[materialId] = count;
             return count;
         }
 
@@ -429,6 +462,11 @@ namespace GeoscientistToolkit.Analysis.MaterialManager
             }
 
             return new Vector4(r, g, b, 1.0f);
+        }
+
+        public void Dispose()
+        {
+            Business.ProjectManager.Instance.DatasetDataChanged -= OnDatasetDataChanged;
         }
     }
 }

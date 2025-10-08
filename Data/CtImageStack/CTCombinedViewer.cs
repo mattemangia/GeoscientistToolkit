@@ -167,11 +167,21 @@ namespace GeoscientistToolkit.Data.CtImageStack
                 _needsUpdateXY = _needsUpdateXZ = _needsUpdateYZ = true;
             };
             
-            // Subscribe to the 3D preview update event
+            // Subscribe to the 3D preview update event and the generic preview update
             CtImageStackTools.Preview3DChanged += OnPreview3DChanged;
+            CtImageStackTools.PreviewChanged += OnGenericPreviewChanged;
             AcousticIntegration.OnPositionsChanged += OnAcousticPositionsChanged;
             
             _ = InitializeAsync();
+        }
+
+        private void OnGenericPreviewChanged(Dataset dataset)
+        {
+            // This is a generic signal that a preview state (like 2D thresholding) has changed
+            if (dataset == _dataset)
+            {
+                _needsUpdateXY = _needsUpdateXZ = _needsUpdateYZ = true;
+            }
         }
         
         private void OnAcousticPositionsChanged()
@@ -850,8 +860,7 @@ namespace GeoscientistToolkit.Data.CtImageStack
             try
             {
                 var (width, height) = GetImageDimensionsForView(viewIndex);
-                byte[] imageData = ExtractSliceData(viewIndex, width, height);
-                ApplyWindowLevel(imageData);
+                byte[] rawGrayscaleData = ExtractSliceData(viewIndex, width, height);
 
                 byte[] labelData = null;
                 if (_dataset.LabelData != null)
@@ -861,21 +870,35 @@ namespace GeoscientistToolkit.Data.CtImageStack
 
                 int currentSlice = viewIndex switch { 0 => _sliceZ, 1 => _sliceY, 2 => _sliceX, _ => -1 };
 
-                // Get preview data from external tools (like island removal)
+                // Get 3D preview data from external tools (like island removal)
                 var (isExternalPreviewActive, full3DPreviewMask, previewColor) = CtImageStackTools.GetPreviewData(_dataset);
-                byte[] externalPreviewMask = ExtractPreviewSlice(full3DPreviewMask, viewIndex, width, height);
+                byte[] externalPreviewMask = isExternalPreviewActive ? ExtractPreviewSlice(full3DPreviewMask, viewIndex, width, height) : null;
+
+                // Get real-time 2D threshold preview state
+                var (is2DThresholdPreview, minThreshold, maxThreshold, thresholdColor) = CtImageStackTools.Get2DThresholdPreviewState();
 
                 byte[] segmentationPreviewMask = _interactiveSegmentation?.GetPreviewMask(currentSlice, viewIndex);
                 byte[] committedSelectionMask = _interactiveSegmentation?.GetCommittedSelectionMask(currentSlice, viewIndex);
 
                 byte[] rgbaData = new byte[width * height * 4];
                 var targetMaterial = _dataset.Materials.FirstOrDefault(m => m.ID == _interactiveSegmentation.TargetMaterialId);
+                
+                // Pre-calculate window/level parameters
+                float minWL = _windowLevel - _windowWidth / 2;
+                float rangeWL = _windowWidth;
+                if (rangeWL < 1e-5f) rangeWL = 1e-5f;
 
                 for (int i = 0; i < width * height; i++)
                 {
-                    byte value = imageData[i];
-                    Vector4 finalColor = new Vector4(value / 255f, value / 255f, value / 255f, 1.0f);
+                    byte rawValue = rawGrayscaleData[i];
+                    
+                    // Apply window/level on the fly
+                    float wlValue = (rawValue - minWL) / rangeWL * 255f;
+                    byte displayValue = (byte)Math.Clamp(wlValue, 0, 255);
+                    
+                    Vector4 finalColor = new Vector4(displayValue / 255f, displayValue / 255f, displayValue / 255f, 1.0f);
 
+                    // 1. Materials
                     if (labelData != null && labelData[i] > 0)
                     {
                         var material = _dataset.Materials.FirstOrDefault(m => m.ID == labelData[i]);
@@ -887,25 +910,32 @@ namespace GeoscientistToolkit.Data.CtImageStack
                         }
                     }
 
+                    // 2. Committed Interactive Selection (e.g. magic wand result before applying)
                     if (committedSelectionMask != null && committedSelectionMask[i] > 0)
                     {
                         var selColor = targetMaterial?.Color ?? new Vector4(0.8f, 0.8f, 0.0f, 1.0f);
-                        float opacity = 0.4f;
-                        finalColor = Vector4.Lerp(finalColor, new Vector4(selColor.X, selColor.Y, selColor.Z, 1.0f), opacity);
+                        finalColor = Vector4.Lerp(finalColor, new Vector4(selColor.X, selColor.Y, selColor.Z, 1.0f), 0.4f);
+                    }
+                    
+                    // 3. NEW: Real-time 2D Thresholding Preview
+                    if (is2DThresholdPreview && rawValue >= minThreshold && rawValue <= maxThreshold)
+                    {
+                        Vector4 tColorVec = new Vector4(thresholdColor.X, thresholdColor.Y, thresholdColor.Z, 1.0f);
+                        finalColor = Vector4.Lerp(finalColor, tColorVec, 0.5f);
                     }
 
+                    // 4. External 3D Preview (e.g. island removal)
                     if (isExternalPreviewActive && externalPreviewMask != null && externalPreviewMask[i] > 0)
                     {
-                        float opacity = 0.5f;
                         Vector4 previewRgba = new Vector4(previewColor.X, previewColor.Y, previewColor.Z, 1.0f);
-                        finalColor = Vector4.Lerp(finalColor, previewRgba, opacity);
+                        finalColor = Vector4.Lerp(finalColor, previewRgba, 0.5f);
                     }
 
+                    // 5. Live Interactive Tool Preview (e.g. brush stroke)
                     if (segmentationPreviewMask != null && segmentationPreviewMask[i] > 0)
                     {
                         var segColor = targetMaterial?.Color ?? new Vector4(1, 0, 0, 1);
-                        float opacity = 0.6f;
-                        finalColor = Vector4.Lerp(finalColor, new Vector4(segColor.X, segColor.Y, segColor.Z, 1.0f), opacity);
+                        finalColor = Vector4.Lerp(finalColor, new Vector4(segColor.X, segColor.Y, segColor.Z, 1.0f), 0.6f);
                     }
                     
                     rgbaData[i * 4] = (byte)(finalColor.X * 255);
@@ -1209,6 +1239,7 @@ namespace GeoscientistToolkit.Data.CtImageStack
         {
             ProjectManager.Instance.DatasetDataChanged -= OnDatasetDataChanged;
             CtImageStackTools.Preview3DChanged -= OnPreview3DChanged;
+            CtImageStackTools.PreviewChanged -= OnGenericPreviewChanged;
             AcousticIntegration.OnPositionsChanged -= OnAcousticPositionsChanged;
 
             CtSegmentationIntegration.Cleanup(_dataset);

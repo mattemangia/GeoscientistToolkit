@@ -90,7 +90,7 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
             if (_isWaveformViewerOpen)
             {
                 ImGui.SetNextWindowSize(new System.Numerics.Vector2(600, 400), ImGuiCond.FirstUseEver);
-                if (ImGui.Begin("Waveform Viewer", ref _isWaveformViewerOpen))
+                if (ImGui.Begin("Waveform Viewer", ref _isWaveformViewerOpen, ImGuiWindowFlags.NoDocking))
                 {
                     _waveformViewer?.Draw();
                 }
