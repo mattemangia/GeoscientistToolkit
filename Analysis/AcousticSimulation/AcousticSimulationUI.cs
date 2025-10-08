@@ -205,13 +205,6 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
 
             if (_autoCropToSelection)
             {
-                if (_simulationExtent == null && _selectedMaterialIDs.Any() && !_isCalculatingExtent)
-                {
-                    _isCalculatingExtent = true;
-                    _extentCalculationDialog.Open("Calculating material bounding box...");
-                    _ = CalculateSimulationExtentAsync(dataset);
-                }
-
                 string extentText = "Simulation Extent: ";
                 if (_isCalculatingExtent)
                 {
@@ -222,7 +215,14 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
                     var extent = _simulationExtent.Value;
                     extentText += $"{extent.Width} × {extent.Height} × {extent.Depth}";
                 }
-                else { extentText += "Not yet calculated."; }
+                else if (_selectedMaterialIDs.Any())
+                {
+                    extentText += "Not yet calculated. Select material(s) and calculate.";
+                }
+                else
+                {
+                    extentText += "N/A (no material selected).";
+                }
                 ImGui.Text(extentText);
             }
 
@@ -250,9 +250,6 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
 
             ImGui.Separator();
 
-            // Calibration Manager Controls
-            _calibrationManager.DrawCalibrationControls(ref _youngsModulus, ref _poissonRatio);
-            ImGui.Separator();
 
             // Material Selection
             ImGui.Text("Target Material(s):");
@@ -262,14 +259,9 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
                 ImGui.TextColored(new Vector4(1, 1, 0, 1), "No materials defined in dataset.");
                 return;
             }
-
-            // Ensure at least one material is selected by default
-            if (!_selectedMaterialIDs.Any() && materials.Any())
-            {
-                _selectedMaterialIDs.Add(materials.First().ID);
-            }
             
             // Store the state before the ImGui call modifies it
+            var prevSelection = new HashSet<byte>(_selectedMaterialIDs);
             bool wasMultiMaterialEnabled = _enableMultiMaterialSelection;
             ImGui.Checkbox("Enable Multi-Material Selection", ref _enableMultiMaterialSelection);
 
@@ -279,6 +271,7 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
                 byte firstSelected = _selectedMaterialIDs.First();
                 _selectedMaterialIDs.Clear();
                 _selectedMaterialIDs.Add(firstSelected);
+                _simulationExtent = null; // Invalidate extent
             }
 
             ImGui.BeginChild("MaterialList", new Vector2(-1, materials.Length * 25f + 10), ImGuiChildFlags.Border);
@@ -302,13 +295,64 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
                     bool isSelected = _selectedMaterialIDs.Contains(material.ID);
                     if (ImGui.RadioButton(material.Name, isSelected))
                     {
-                        _selectedMaterialIDs.Clear();
-                        _selectedMaterialIDs.Add(material.ID);
-                        _simulationExtent = null; // Invalidate extent
+                        if (!_selectedMaterialIDs.Contains(material.ID))
+                        {
+                            _selectedMaterialIDs.Clear();
+                            _selectedMaterialIDs.Add(material.ID);
+                            _simulationExtent = null; // Invalidate extent
+                        }
                     }
                 }
             }
             ImGui.EndChild();
+
+            bool selectionChanged = !prevSelection.SetEquals(_selectedMaterialIDs);
+            if (!_enableMultiMaterialSelection && selectionChanged && _selectedMaterialIDs.Any())
+            {
+                if (_autoCropToSelection && !_isCalculatingExtent)
+                {
+                    _isCalculatingExtent = true;
+                    _extentCalculationDialog.Open("Calculating material bounding box...");
+                    _ = CalculateSimulationExtentAsync(dataset);
+                }
+            }
+
+            if (_enableMultiMaterialSelection)
+            {
+                ImGui.Spacing();
+                bool canCalculate = _autoCropToSelection && _selectedMaterialIDs.Any();
+                if (!canCalculate) ImGui.BeginDisabled();
+            
+                if (ImGui.Button("Calculate/Refresh Simulation Extent", new Vector2(-1, 0)))
+                {
+                    if (!_isCalculatingExtent)
+                    {
+                        _simulationExtent = null;
+                        _isCalculatingExtent = true;
+                        _extentCalculationDialog.Open("Calculating material bounding box...");
+                        _ = CalculateSimulationExtentAsync(dataset);
+                    }
+                }
+            
+                if (!canCalculate) ImGui.EndDisabled();
+                if (ImGui.IsItemHovered())
+                {
+                    if (!_selectedMaterialIDs.Any()) ImGui.SetTooltip("Select at least one material to enable extent calculation.");
+                    else if (!_autoCropToSelection) ImGui.SetTooltip("Enable 'Auto-Crop to Selection' to use this feature.");
+                    else ImGui.SetTooltip("Calculates the bounding box for the currently selected materials.");
+                }
+            }
+            ImGui.Separator();
+
+            // --- NEW: Disable controls if extent needs calculation ---
+            bool controlsDisabled = (_autoCropToSelection && _selectedMaterialIDs.Any() && !_simulationExtent.HasValue) || _isCalculatingExtent;
+            if (controlsDisabled)
+            {
+                ImGui.BeginDisabled();
+            }
+
+            // Calibration Manager Controls
+            _calibrationManager.DrawCalibrationControls(ref _youngsModulus, ref _poissonRatio);
             ImGui.Separator();
 
             // Wave Propagation Axis
@@ -632,6 +676,11 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
 
                 ImGui.Unindent();
             }
+            
+            if (controlsDisabled)
+            {
+                ImGui.EndDisabled();
+            }
 
             ImGui.Separator();
 
@@ -670,7 +719,7 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
             }
             else // Idle, Completed, Failed, Cancelled states
             {
-                bool canSimulate = _selectedMaterialIDs.Any();
+                bool canSimulate = _selectedMaterialIDs.Any() && !controlsDisabled;
                 if (!canSimulate)
                 {
                     ImGui.BeginDisabled();
@@ -687,7 +736,14 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
                     ImGui.EndDisabled();
                     if(ImGui.IsItemHovered())
                     {
-                        ImGui.SetTooltip("You must select at least one material to run a simulation.");
+                        if (!_selectedMaterialIDs.Any())
+                        {
+                            ImGui.SetTooltip("You must select at least one material to run a simulation.");
+                        }
+                        else if (controlsDisabled)
+                        {
+                            ImGui.SetTooltip("The simulation extent has not been calculated. Select material(s) and calculate the extent before running.");
+                        }
                     }
                 }
             }
@@ -695,10 +751,7 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
 
             // Auto-cropping feature
             if (ImGui.Checkbox("Auto-Crop to Selection", ref _autoCropToSelection)) {
-                if (_autoCropToSelection)
-                {
-                    _simulationExtent = null; // Force recalculation when turning on
-                }
+                _simulationExtent = null; // Force recalculation when turning on/off
             }
 
             if (ImGui.IsItemHovered())
@@ -1575,7 +1628,7 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
 
         private (byte[], float) CreateWaveFieldMaskForChunk(float[,,] vx, float[,,] vy, float[,,] vz)
         {
-            int width = vx.GetLength(0); int height = vx.GetLength(1); int depth = vx.GetLength(2);
+            int width = vx.GetLength(0); int height = vx.GetLength(1); int depth = vz.GetLength(2);
             byte[] mask = new byte[width * height * depth];
             float maxAmplitude = 0;
             
