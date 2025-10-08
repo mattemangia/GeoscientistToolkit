@@ -12,6 +12,7 @@ using GeoscientistToolkit.UI.GIS;
 using GeoscientistToolkit.UI.Interfaces;
 using GeoscientistToolkit.UI.Tools;
 using ImGuiNET;
+
 // Added for PNM
 // Added for CompositeTool
 

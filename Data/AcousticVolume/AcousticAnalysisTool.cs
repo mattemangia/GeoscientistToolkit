@@ -7,6 +7,7 @@ using GeoscientistToolkit.Data.VolumeData;
 using GeoscientistToolkit.UI.Interfaces;
 using GeoscientistToolkit.Util;
 using ImGuiNET;
+
 // Using the standard Complex type
 
 namespace GeoscientistToolkit.UI.AcousticVolume;

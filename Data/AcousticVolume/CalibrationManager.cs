@@ -82,8 +82,7 @@ public class CalibrationManagerUI
                 // Open: restrict to JSON
                 _importDialog.Open(
                     _lastImportDir,
-                    ImportExtensions,
-                    null);
+                    ImportExtensions);
 
             ImGui.SameLine();
             if (HasCalibration)

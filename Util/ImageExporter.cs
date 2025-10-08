@@ -2,6 +2,7 @@
 
 using System.Runtime.InteropServices;
 using Veldrid;
+
 // Required for Marshal.Copy
 
 namespace GeoscientistToolkit.Util;

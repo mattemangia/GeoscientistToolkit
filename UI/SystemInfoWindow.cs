@@ -7,6 +7,7 @@ using System.Runtime.InteropServices;
 using System.Text;
 using ImGuiNET;
 using Veldrid;
+
 // Ensure you have added the System.Management NuGet package to your project.
 
 namespace GeoscientistToolkit.UI;

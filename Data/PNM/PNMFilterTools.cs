@@ -53,7 +53,7 @@ public sealed class PNMFilterTools : IDatasetTools
         if (_exportPoresCsvDialog.Submit())
             try
             {
-                pnm.ExportPoresCsv(_exportPoresCsvDialog.SelectedPath, true, true);
+                pnm.ExportPoresCsv(_exportPoresCsvDialog.SelectedPath);
                 Logger.Log($"[PNMFilterTools] Exported pores CSV to '{_exportPoresCsvDialog.SelectedPath}'");
             }
             catch (Exception ex)
@@ -64,7 +64,7 @@ public sealed class PNMFilterTools : IDatasetTools
         if (_exportThroatsCsvDialog.Submit())
             try
             {
-                pnm.ExportThroatsCsv(_exportThroatsCsvDialog.SelectedPath, true, true);
+                pnm.ExportThroatsCsv(_exportThroatsCsvDialog.SelectedPath);
                 Logger.Log($"[PNMFilterTools] Exported throats CSV to '{_exportThroatsCsvDialog.SelectedPath}'");
             }
             catch (Exception ex)

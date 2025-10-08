@@ -3,6 +3,7 @@
 using System.Numerics;
 using GeoscientistToolkit.Settings;
 using GeoscientistToolkit.Util;
+
 // Added for Linq
 
 namespace GeoscientistToolkit.Data.Image;

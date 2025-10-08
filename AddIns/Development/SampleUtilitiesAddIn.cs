@@ -5,6 +5,7 @@ using System.Text;
 using GeoscientistToolkit.AddIns;
 using GeoscientistToolkit.Data;
 using GeoscientistToolkit.Util;
+
 // Using StringBuilder for cleaner string construction
 
 namespace GeoscientistToolkit.CustomAddIns;

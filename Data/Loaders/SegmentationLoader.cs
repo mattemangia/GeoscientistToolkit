@@ -2,6 +2,7 @@
 
 using GeoscientistToolkit.Data.Image;
 using GeoscientistToolkit.Util;
+
 // <-- Dataset base type (namespace per Dataset.cs)
 // ImageDataset
 

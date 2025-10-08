@@ -4,6 +4,7 @@ using System.Numerics;
 using System.Text.Json;
 using GeoscientistToolkit.Data.VolumeData;
 using GeoscientistToolkit.Util;
+
 // Added for material serialization
 
 namespace GeoscientistToolkit.Data.CtImageStack;

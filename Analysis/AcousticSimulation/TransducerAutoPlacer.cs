@@ -136,7 +136,7 @@ public class TransducerAutoPlacer
         const bool hasPath = true;
         Logger.Log("[AutoPlace] Path is guaranteed as transducers are placed within the largest connected component.");
         // --- FIX END ---
-        
+
         _progressReporter?.Report((1.0f, "Placement complete."));
 
         // Normalize positions for the UI
