@@ -199,6 +199,29 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
             long volumeMemory = (long)dataset.Width * dataset.Height * dataset.Depth * 3 * sizeof(float) * 2;
             ImGui.Text($"Estimated Memory: {volumeMemory / (1024 * 1024)} MB");
 
+            if (_autoCropToSelection)
+            {
+                if (_simulationExtent == null && _selectedMaterialIDs.Any() && !_isCalculatingExtent)
+                {
+                    _isCalculatingExtent = true;
+                    _extentCalculationDialog.Open("Calculating material bounding box...");
+                    _ = CalculateSimulationExtentAsync(dataset);
+                }
+
+                string extentText = "Simulation Extent: ";
+                if (_isCalculatingExtent)
+                {
+                    extentText += "Calculating...";
+                }
+                else if (_simulationExtent.HasValue)
+                {
+                    var extent = _simulationExtent.Value;
+                    extentText += $"{extent.Width} × {extent.Height} × {extent.Depth}";
+                }
+                else { extentText += "Not yet calculated."; }
+                ImGui.Text(extentText);
+            }
+
             if (volumeMemory > 4L * 1024 * 1024 * 1024)
             {
                 ImGui.TextColored(new Vector4(1, 1, 0, 1), "⚠ Large dataset - chunked processing recommended");
@@ -677,19 +700,6 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation
             if (ImGui.IsItemHovered())
             {
                 ImGui.SetTooltip("Automatically calculate the bounding box of the selected material(s) and run the simulation only within that extent.");
-            }
-
-            if (_autoCropToSelection)
-            {
-                if (_simulationExtent == null && _selectedMaterialIDs.Any() && !_isCalculatingExtent)
-                {
-                    _isCalculatingExtent = true;
-                    _extentCalculationDialog.Open("Calculating material bounding box...");
-                    _ = CalculateSimulationExtentAsync(dataset); // Fire and forget
-                }
-                
-                ImGui.Text(_isCalculatingExtent ? "Calculating extent..." : 
-                    _simulationExtent.HasValue ? $"Simulation Extent: {_simulationExtent.Value.Width}x{_simulationExtent.Value.Height}x{_simulationExtent.Value.Depth}" : "Calculating extent...");
             }
 
             // Simulation Results
