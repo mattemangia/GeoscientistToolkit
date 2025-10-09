@@ -22,16 +22,23 @@ public class AcousticExportManager : IDisposable
     private readonly ImGuiExportFileDialog _exportDialog;
     private readonly ProgressBarDialog _progressDialog;
     private CalibrationData _calibrationData;
-    private float[,,] _damageField; // Store damage field from simulation
-    private float[,,] _densityVolume; // ADDED
+    private float _combinedFieldMaxVelocity;
+    private float[,,] _damageField;
+    private float _damageFieldMaxValue; // NEW: Store max value for denormalization
+    private float[,,] _densityVolume;
     private bool _isWaveformViewerOpen;
     private SimulationParameters _parameters;
     private float _pixelSize;
-    private float[,,] _poissonRatioVolume; // ADDED
+    private float[,,] _poissonRatioVolume;
+
+    // NEW: Store max velocity values for denormalization
+    private float _pWaveFieldMaxVelocity;
+
     private SimulationResults _results;
     private CtImageStackDataset _sourceDataset;
+    private float _sWaveFieldMaxVelocity;
     private WaveformViewer _waveformViewer;
-    private float[,,] _youngsModulusVolume; // ADDED
+    private float[,,] _youngsModulusVolume;
 
     public AcousticExportManager()
     {
@@ -55,6 +62,13 @@ public class AcousticExportManager : IDisposable
         _calibrationData = calibrationData;
     }
 
+    public void SetMaterialPropertyVolumes(float[,,] density, float[,,] youngsModulus, float[,,] poissonRatio)
+    {
+        _densityVolume = density;
+        _youngsModulusVolume = youngsModulus;
+        _poissonRatioVolume = poissonRatio;
+    }
+
     /// <summary>
     ///     Shows export UI controls.
     /// </summary>
@@ -69,6 +83,7 @@ public class AcousticExportManager : IDisposable
         _damageField = damageField;
         _calibrationData = calibrationData;
         _pixelSize = sourceDataset.PixelSize;
+
         if (ImGui.Button("Export Acoustic Volume", new Vector2(-1, 0)))
         {
             var defaultName = $"{sourceDataset.Name}_AcousticVolume_{DateTime.Now:yyyyMMdd_HHmmss}";
@@ -79,7 +94,6 @@ public class AcousticExportManager : IDisposable
         {
             if (_waveformViewer == null)
             {
-                // Create temporary dataset for waveform viewer
                 var tempDataset = CreateTemporaryDataset();
                 _waveformViewer = new WaveformViewer(tempDataset);
             }
@@ -87,10 +101,8 @@ public class AcousticExportManager : IDisposable
             _isWaveformViewerOpen = true;
         }
 
-        // Handle dialogs
         HandleDialogs();
 
-        // Draw waveform viewer if open
         if (_isWaveformViewerOpen)
         {
             ImGui.SetNextWindowSize(new Vector2(600, 400), ImGuiCond.FirstUseEver);
@@ -106,18 +118,11 @@ public class AcousticExportManager : IDisposable
         }
     }
 
-    public void SetMaterialPropertyVolumes(float[,,] density, float[,,] youngsModulus, float[,,] poissonRatio)
-    {
-        _densityVolume = density;
-        _youngsModulusVolume = youngsModulus;
-        _poissonRatioVolume = poissonRatio;
-    }
-
     private void HandleDialogs()
     {
         _progressDialog.Submit();
-
-        if (_exportDialog.Submit()) _ = ExportAcousticVolumeAsync(_exportDialog.SelectedPath);
+        if (_exportDialog.Submit())
+            _ = ExportAcousticVolumeAsync(_exportDialog.SelectedPath);
     }
 
     private async Task ExportAcousticVolumeAsync(string basePath)
@@ -149,7 +154,8 @@ public class AcousticExportManager : IDisposable
         Directory.CreateDirectory(volumeDir);
 
         var timeSeriesDir = Path.Combine(volumeDir, "TimeSeries");
-        if (_results.TimeSeriesSnapshots?.Count > 0) Directory.CreateDirectory(timeSeriesDir);
+        if (_results.TimeSeriesSnapshots?.Count > 0)
+            Directory.CreateDirectory(timeSeriesDir);
 
         UpdateProgress(0.05f, "Creating acoustic volume dataset...");
 
@@ -178,43 +184,45 @@ public class AcousticExportManager : IDisposable
         var progressBase = 0.1f;
         var progressPerField = 0.12f;
 
-        // FIX: Export with correct filenames that loader expects
-        // Export P-Wave field (maximum P-wave magnitude)
+        // Export P-Wave field
         if (_results.WaveFieldVx != null)
         {
-            UpdateProgress(progressBase, "Exporting P-Wave field (max longitudinal)...");
+            UpdateProgress(progressBase, "Exporting P-Wave field...");
             cancellationToken.ThrowIfCancellationRequested();
 
             var pWavePath = Path.Combine(volumeDir, "PWaveField.bin");
-            ExportWaveField(_results.WaveFieldVx, pWavePath, false); // unsigned
+            ExportWaveField(_results.WaveFieldVx, pWavePath, false, out _pWaveFieldMaxVelocity);
+            acousticDataset.PWaveFieldMaxVelocity = _pWaveFieldMaxVelocity;
 
-            Logger.Log("[Export] ✓ Exported PWaveField.bin (maximum P-wave/longitudinal velocity)");
+            Logger.Log($"[Export] ✓ PWaveField.bin (max: {_pWaveFieldMaxVelocity:F2} m/s)");
             progressBase += progressPerField;
         }
 
-        // Export S-Wave field (maximum S-wave magnitude)
+        // Export S-Wave field
         if (_results.WaveFieldVy != null)
         {
-            UpdateProgress(progressBase, "Exporting S-Wave field (max transverse)...");
+            UpdateProgress(progressBase, "Exporting S-Wave field...");
             cancellationToken.ThrowIfCancellationRequested();
 
             var sWavePath = Path.Combine(volumeDir, "SWaveField.bin");
-            ExportWaveField(_results.WaveFieldVy, sWavePath, false); // unsigned
+            ExportWaveField(_results.WaveFieldVy, sWavePath, false, out _sWaveFieldMaxVelocity);
+            acousticDataset.SWaveFieldMaxVelocity = _sWaveFieldMaxVelocity;
 
-            Logger.Log("[Export] ✓ Exported SWaveField.bin (maximum S-wave/transverse velocity)");
+            Logger.Log($"[Export] ✓ SWaveField.bin (max: {_sWaveFieldMaxVelocity:F2} m/s)");
             progressBase += progressPerField;
         }
 
-        // Export Combined field (maximum total magnitude)
+        // Export Combined field
         if (_results.WaveFieldVz != null)
         {
-            UpdateProgress(progressBase, "Exporting Combined field (max total magnitude)...");
+            UpdateProgress(progressBase, "Exporting Combined field...");
             cancellationToken.ThrowIfCancellationRequested();
 
             var combinedPath = Path.Combine(volumeDir, "CombinedField.bin");
-            ExportWaveField(_results.WaveFieldVz, combinedPath, false); // unsigned
+            ExportWaveField(_results.WaveFieldVz, combinedPath, false, out _combinedFieldMaxVelocity);
+            acousticDataset.CombinedFieldMaxVelocity = _combinedFieldMaxVelocity;
 
-            Logger.Log("[Export] ✓ Exported CombinedField.bin (maximum combined magnitude)");
+            Logger.Log($"[Export] ✓ CombinedField.bin (max: {_combinedFieldMaxVelocity:F2} m/s)");
             progressBase += progressPerField;
         }
 
@@ -225,12 +233,14 @@ public class AcousticExportManager : IDisposable
             cancellationToken.ThrowIfCancellationRequested();
 
             var damagePath = Path.Combine(volumeDir, "DamageField.bin");
-            ExportWaveField(_damageField, damagePath, false);
-            Logger.Log("[Export] ✓ Exported DamageField.bin");
+            ExportWaveField(_damageField, damagePath, false, out _damageFieldMaxValue);
+            acousticDataset.DamageFieldMaxValue = _damageFieldMaxValue;
+
+            Logger.Log($"[Export] ✓ DamageField.bin (max: {_damageFieldMaxValue:F3})");
             progressBase += progressPerField;
         }
 
-        // Material properties (unchanged)
+        // Material properties
         if (_densityVolume != null)
         {
             UpdateProgress(progressBase, "Exporting Density Volume...");
@@ -258,7 +268,7 @@ public class AcousticExportManager : IDisposable
             progressBase += progressPerField;
         }
 
-        // Time series (unchanged)
+        // Time series
         if (_results.TimeSeriesSnapshots?.Count > 0)
         {
             UpdateProgress(0.8f, "Exporting time series snapshots...");
@@ -282,46 +292,120 @@ public class AcousticExportManager : IDisposable
 
         Logger.Log("[Export] ═══════════════════════════════════════");
         Logger.Log("[Export] ✓ Acoustic volume exported successfully");
-        Logger.Log("[Export] PWaveField.bin    = Maximum P-wave (longitudinal) velocity");
-        Logger.Log("[Export] SWaveField.bin    = Maximum S-wave (transverse) velocity");
-        Logger.Log("[Export] CombinedField.bin = Maximum combined magnitude");
-        Logger.Log("[Export] These fields allow post-simulation Vp/Vs analysis in viewer");
+        Logger.Log($"[Export] P-Wave max: {_pWaveFieldMaxVelocity:F2} m/s");
+        Logger.Log($"[Export] S-Wave max: {_sWaveFieldMaxVelocity:F2} m/s");
+        Logger.Log($"[Export] Combined max: {_combinedFieldMaxVelocity:F2} m/s");
+        Logger.Log("[Export] Velocity profile tool can now extract simulated velocities");
         Logger.Log("[Export] ═══════════════════════════════════════");
     }
 
-    private void ExportWaveField(float[,,] field, string path, bool isSigned)
+    /// <summary>
+    ///     Exports a wave field and returns the max value used for normalization.
+    /// </summary>
+    private void ExportWaveField(float[,,] field, string path, bool isSigned, out float maxValue)
     {
-        if (field == null) return;
-
-        // Create a ChunkedVolume from the float data. This normalizes it correctly.
-        using (var volume = CreateVolumeFromField(field, isSigned))
+        if (field == null)
         {
-            // Use the built-in save method which writes a correct header.
+            maxValue = 0;
+            return;
+        }
+
+        // Create volume and get the max value used for normalization
+        using (var volume = CreateVolumeFromField(field, isSigned, out maxValue))
+        {
             volume?.SaveAsBin(path);
         }
     }
 
-    private float[,,] CreateCombinedField()
+    /// <summary>
+    ///     Creates a ChunkedVolume from a float field, normalizing to byte range.
+    ///     Returns the max value used for normalization (for later denormalization).
+    /// </summary>
+    private ChunkedVolume CreateVolumeFromField(float[,,] field, bool isSigned, out float maxValue)
     {
-        if (_results.WaveFieldVx == null) return null;
+        if (field == null)
+        {
+            maxValue = 0;
+            return null;
+        }
 
-        var width = _results.WaveFieldVx.GetLength(0);
-        var height = _results.WaveFieldVx.GetLength(1);
-        var depth = _results.WaveFieldVx.GetLength(2);
+        var width = field.GetLength(0);
+        var height = field.GetLength(1);
+        var depth = field.GetLength(2);
 
-        var combined = new float[width, height, depth];
+        var volume = new ChunkedVolume(width, height, depth);
+        volume.PixelSize = _pixelSize;
 
+        // Find max for normalization using percentile to avoid source saturation
+        var allValues = new List<float>();
         for (var z = 0; z < depth; z++)
         for (var y = 0; y < height; y++)
         for (var x = 0; x < width; x++)
+            allValues.Add(Math.Abs(field[x, y, z]));
+
+        allValues.Sort();
+
+        // Use 99.5th percentile as max to exclude extreme outliers (source voxels)
+        var percentileIndex = (int)(allValues.Count * 0.995);
+        maxValue = allValues[Math.Min(percentileIndex, allValues.Count - 1)];
+
+        // Ensure we have a valid range
+        if (maxValue < 1e-10f) maxValue = 1e-10f;
+
+        Logger.Log($"[Export] Normalization: 0 to {maxValue:E3} (99.5th percentile)");
+        Logger.Log($"[Export] Actual max: {allValues[allValues.Count - 1]:E3}");
+
+        // Apply logarithmic compression for better visualization
+        var useLogCompression = true;
+
+        if (useLogCompression)
         {
-            var vx = _results.WaveFieldVx?[x, y, z] ?? 0;
-            var vy = _results.WaveFieldVy?[x, y, z] ?? 0;
-            var vz = _results.WaveFieldVz?[x, y, z] ?? 0;
-            combined[x, y, z] = (float)Math.Sqrt(vx * vx + vy * vy + vz * vz);
+            Logger.Log("[Export] Applying logarithmic compression");
+            for (var z = 0; z < depth; z++)
+            {
+                var slice = new byte[width * height];
+                var idx = 0;
+                for (var y = 0; y < height; y++)
+                for (var x = 0; x < width; x++)
+                {
+                    var value = Math.Abs(field[x, y, z]);
+
+                    // Logarithmic compression: log10(1 + value/maxValue)
+                    var normalized = (float)Math.Log10(1 + value / maxValue) / (float)Math.Log10(2);
+                    normalized = Math.Clamp(normalized, 0f, 1f);
+
+                    slice[idx++] = (byte)(normalized * 255);
+                }
+
+                volume.WriteSliceZ(z, slice);
+            }
+        }
+        else
+        {
+            // Linear normalization
+            for (var z = 0; z < depth; z++)
+            {
+                var slice = new byte[width * height];
+                var idx = 0;
+                for (var y = 0; y < height; y++)
+                for (var x = 0; x < width; x++)
+                {
+                    var value = field[x, y, z];
+                    float normalized;
+
+                    if (isSigned)
+                        normalized = (value + maxValue) / (2 * maxValue);
+                    else
+                        normalized = value / maxValue;
+
+                    slice[idx++] = (byte)(Math.Clamp(normalized, 0f, 1f) * 255);
+                }
+
+                volume.WriteSliceZ(z, slice);
+            }
         }
 
-        return combined;
+        return volume;
     }
 
     private void ExportTimeSeries(string timeSeriesDir, CancellationToken cancellationToken)
@@ -341,7 +425,6 @@ public class AcousticExportManager : IDisposable
             var simSnapshot = _results.TimeSeriesSnapshots[i];
             var path = Path.Combine(timeSeriesDir, $"snapshot_{i:D6}.bin");
 
-            // Convert simulation snapshot to data layer format
             var dataSnapshot = new Data.AcousticVolume.WaveFieldSnapshot
             {
                 TimeStep = simSnapshot.TimeStep,
@@ -351,12 +434,8 @@ public class AcousticExportManager : IDisposable
                 Depth = _results.WaveFieldVx.GetLength(2)
             };
 
-            // For huge datasets, we only have max velocity (combined), so we need to split it
-            // For normal datasets, we have the full Vx, Vy, Vz fields
             if (simSnapshot.VelocityField != null)
             {
-                // Use the combined velocity field as Vx, leave Vy and Vz as zero
-                // This is acceptable for visualization purposes
                 var vx = simSnapshot.VelocityField;
                 var vy = new float[dataSnapshot.Width, dataSnapshot.Height, dataSnapshot.Depth];
                 var vz = new float[dataSnapshot.Width, dataSnapshot.Height, dataSnapshot.Depth];
@@ -364,14 +443,12 @@ public class AcousticExportManager : IDisposable
             }
             else if (simSnapshot.MaxVelocityField != null)
             {
-                // Same approach for max velocity field
                 var vx = simSnapshot.MaxVelocityField;
                 var vy = new float[dataSnapshot.Width, dataSnapshot.Height, dataSnapshot.Depth];
                 var vz = new float[dataSnapshot.Width, dataSnapshot.Height, dataSnapshot.Depth];
                 dataSnapshot.SetVelocityFields(vx, vy, vz);
             }
 
-            // Save in the data layer format
             dataSnapshot.SaveToFile(path);
         }
     }
@@ -395,7 +472,12 @@ public class AcousticExportManager : IDisposable
             TensileStrengthMPa = dataset.TensileStrengthMPa,
             CohesionMPa = dataset.CohesionMPa,
             FailureAngleDeg = dataset.FailureAngleDeg,
-            MaxDamage = dataset.MaxDamage
+            MaxDamage = dataset.MaxDamage,
+            // NEW: Store scaling factors for denormalization
+            PWaveFieldMaxVelocity = dataset.PWaveFieldMaxVelocity,
+            SWaveFieldMaxVelocity = dataset.SWaveFieldMaxVelocity,
+            CombinedFieldMaxVelocity = dataset.CombinedFieldMaxVelocity,
+            DamageFieldMaxValue = dataset.DamageFieldMaxValue
         };
 
         var json = JsonSerializer.Serialize(metadata,
@@ -426,20 +508,22 @@ public class AcousticExportManager : IDisposable
             ConfiningPressureMPa = _parameters.ConfiningPressureMPa,
             SourceFrequencyKHz = _parameters.SourceFrequencyKHz,
             SourceEnergyJ = _parameters.SourceEnergyJ,
-            TimeSeriesSnapshots = ConvertTimeSeriesForViewer(_results.TimeSeriesSnapshots)
+            TimeSeriesSnapshots = ConvertTimeSeriesForViewer(_results.TimeSeriesSnapshots),
+            Calibration = _calibrationData,
+            PWaveFieldMaxVelocity = _pWaveFieldMaxVelocity,
+            SWaveFieldMaxVelocity = _sWaveFieldMaxVelocity,
+            CombinedFieldMaxVelocity = _combinedFieldMaxVelocity,
+            DamageFieldMaxValue = _damageFieldMaxValue
         };
 
-        // FIX: Map correctly to dataset fields
         if (_results.WaveFieldVx != null)
-            dataset.PWaveField = CreateVolumeFromField(_results.WaveFieldVx, false); // Max P-wave
+            dataset.PWaveField = CreateVolumeFromField(_results.WaveFieldVx, false, out _);
         if (_results.WaveFieldVy != null)
-            dataset.SWaveField = CreateVolumeFromField(_results.WaveFieldVy, false); // Max S-wave
+            dataset.SWaveField = CreateVolumeFromField(_results.WaveFieldVy, false, out _);
         if (_results.WaveFieldVz != null)
-            dataset.CombinedWaveField = CreateVolumeFromField(_results.WaveFieldVz, false); // Max combined
+            dataset.CombinedWaveField = CreateVolumeFromField(_results.WaveFieldVz, false, out _);
         if (_damageField != null)
-            dataset.DamageField = CreateVolumeFromField(_damageField, false);
-
-        dataset.Calibration = _calibrationData;
+            dataset.DamageField = CreateVolumeFromField(_damageField, false, out _);
 
         return dataset;
     }
@@ -463,7 +547,6 @@ public class AcousticExportManager : IDisposable
                 Depth = _results.WaveFieldVx.GetLength(2)
             };
 
-            // Convert velocity fields
             if (simSnapshot.VelocityField != null)
             {
                 var vx = simSnapshot.VelocityField;
@@ -485,89 +568,6 @@ public class AcousticExportManager : IDisposable
         return dataSnapshots;
     }
 
-    private ChunkedVolume CreateVolumeFromField(float[,,] field, bool isSigned)
-{
-    if (field == null) return null;
-
-    var width = field.GetLength(0);
-    var height = field.GetLength(1);
-    var depth = field.GetLength(2);
-
-    var volume = new ChunkedVolume(width, height, depth);
-    volume.PixelSize = _pixelSize;
-
-    // FIX: Use percentile-based normalization instead of global max
-    // This prevents source saturation from dominating the visualization
-    var allValues = new List<float>();
-    for (var z = 0; z < depth; z++)
-        for (var y = 0; y < height; y++)
-            for (var x = 0; x < width; x++)
-                allValues.Add(Math.Abs(field[x, y, z]));
-
-    allValues.Sort();
-    
-    // Use 99.5th percentile as max to exclude extreme outliers (source voxels)
-    var percentileIndex = (int)(allValues.Count * 0.995);
-    var maxValue = allValues[Math.Min(percentileIndex, allValues.Count - 1)];
-    
-    // Ensure we have a valid range
-    if (maxValue < 1e-10f) maxValue = 1e-10f;
-
-    Logger.Log($"[Export] Normalization range: 0 to {maxValue:E3} (99.5th percentile)");
-    Logger.Log($"[Export] Actual max value: {allValues[allValues.Count - 1]:E3}");
-
-    // Optional: Apply logarithmic compression for better dynamic range
-    var useLogCompression = true; // Make this a parameter if needed
-    
-    if (useLogCompression)
-    {
-        Logger.Log("[Export] Applying logarithmic compression for better visualization");
-        for (var z = 0; z < depth; z++)
-        {
-            var slice = new byte[width * height];
-            var idx = 0;
-            for (var y = 0; y < height; y++)
-                for (var x = 0; x < width; x++)
-                {
-                    var value = Math.Abs(field[x, y, z]);
-                    
-                    // Logarithmic compression: log10(1 + value/maxValue)
-                    // This compresses the high values while preserving low-amplitude signals
-                    var normalized = (float)Math.Log10(1 + value / maxValue) / (float)Math.Log10(2);
-                    normalized = Math.Clamp(normalized, 0f, 1f);
-                    
-                    slice[idx++] = (byte)(normalized * 255);
-                }
-            volume.WriteSliceZ(z, slice);
-        }
-    }
-    else
-    {
-        // Linear normalization with percentile-based max
-        for (var z = 0; z < depth; z++)
-        {
-            var slice = new byte[width * height];
-            var idx = 0;
-            for (var y = 0; y < height; y++)
-                for (var x = 0; x < width; x++)
-                {
-                    var value = field[x, y, z];
-                    float normalized;
-
-                    if (isSigned)
-                        normalized = (value + maxValue) / (2 * maxValue);
-                    else
-                        normalized = value / maxValue;
-                        
-                    slice[idx++] = (byte)(Math.Clamp(normalized, 0f, 1f) * 255);
-                }
-            volume.WriteSliceZ(z, slice);
-        }
-    }
-
-    return volume;
-}
-
     private void ExportRawFloatField(float[,,] field, string path)
     {
         if (field == null) return;
@@ -581,7 +581,6 @@ public class AcousticExportManager : IDisposable
             writer.Write(height);
             writer.Write(depth);
 
-            // Buffer the entire array for a single fast write
             var buffer = new byte[field.Length * sizeof(float)];
             Buffer.BlockCopy(field, 0, buffer, 0, buffer.Length);
             writer.Write(buffer);

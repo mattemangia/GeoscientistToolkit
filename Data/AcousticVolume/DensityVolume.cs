@@ -171,6 +171,77 @@ public class DensityVolume : IDisposable
         return (float)(sum / _youngsModulus.Length);
     }
 
+    /// <summary>
+    ///     Extracts the density array for export.
+    /// </summary>
+    public float[,,] ExtractDensityArray()
+    {
+        var result = new float[Width, Height, Depth];
+        for (var z = 0; z < Depth; z++)
+        for (var y = 0; y < Height; y++)
+        for (var x = 0; x < Width; x++)
+            result[x, y, z] = _density[GetIndex(x, y, z)];
+        return result;
+    }
+
+    /// <summary>
+    ///     Extracts the Young's modulus array for export (in Pascals).
+    /// </summary>
+    public float[,,] ExtractYoungsModulusArray()
+    {
+        var result = new float[Width, Height, Depth];
+        for (var z = 0; z < Depth; z++)
+        for (var y = 0; y < Height; y++)
+        for (var x = 0; x < Width; x++)
+            result[x, y, z] = _youngsModulus[GetIndex(x, y, z)];
+        return result;
+    }
+
+    /// <summary>
+    ///     Extracts the Poisson's ratio array for export.
+    /// </summary>
+    public float[,,] ExtractPoissonRatioArray()
+    {
+        var result = new float[Width, Height, Depth];
+        for (var z = 0; z < Depth; z++)
+        for (var y = 0; y < Height; y++)
+        for (var x = 0; x < Width; x++)
+            result[x, y, z] = _poissonRatio[GetIndex(x, y, z)];
+        return result;
+    }
+
+    /// <summary>
+    ///     Sets material properties for a voxel based on density using empirical relationships.
+    ///     This provides spatially varying properties even when only density is known.
+    /// </summary>
+    public void SetPropertiesFromDensity(int x, int y, int z, float density)
+    {
+        var index = GetIndex(x, y, z);
+        _density[index] = density;
+
+        // Empirical relationships for sedimentary rocks
+        var densityGcm3 = density / 1000f; // Convert kg/m³ to g/cm³
+
+        // Gardner's relation: Vp = 1.85 * ρ^0.265 (gives Vp in km/s)
+        var vpKms = 1.85f * MathF.Pow(densityGcm3, 0.265f);
+        var vp = vpKms * 1000f; // Convert to m/s
+
+        // Estimate Poisson's ratio based on density
+        // Lower density (clay) -> higher nu (~0.35)
+        // Higher density (limestone) -> lower nu (~0.25)
+        var nu = 0.35f - (densityGcm3 - 2.0f) * 0.05f;
+        nu = Math.Clamp(nu, 0.15f, 0.40f);
+
+        // Calculate Young's modulus from Vp and Poisson's ratio
+        // E = ρ * Vp² * (1+ν)(1-2ν) / (1-ν)
+        var E = density * vp * vp * (1 + nu) * (1 - 2 * nu) / (1 - nu);
+
+        _youngsModulus[index] = E;
+        _poissonRatio[index] = nu;
+
+        RecalculateDerivedProperties(index);
+    }
+
     public float GetMeanPoissonRatio()
     {
         double sum = 0;

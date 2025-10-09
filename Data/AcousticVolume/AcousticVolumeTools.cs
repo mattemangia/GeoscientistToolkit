@@ -232,7 +232,6 @@ public class AcousticVolumeTools : IDatasetTools
     /// </summary>
     private sealed class WaveformViewerAdapter : IDatasetTools
     {
-        private bool _isWindowOpen;
         private AcousticVolumeDataset _lastDataset;
         private WaveformViewer _viewer;
 
@@ -250,22 +249,35 @@ public class AcousticVolumeTools : IDatasetTools
                 _viewer?.Dispose();
                 _viewer = new WaveformViewer(avd);
                 _lastDataset = avd;
-                _isWindowOpen = false; // Close window for old dataset
             }
 
-            if (ImGui.Checkbox("Show Waveform Viewer Window", ref _isWindowOpen))
+            // Synchronize checkbox state with actual window state
+            var isWindowOpen = _viewer?.IsWindowOpen ?? false;
+
+            if (ImGui.Checkbox("Show Waveform Viewer Window", ref isWindowOpen))
+            {
                 if (_viewer == null)
                 {
                     _viewer = new WaveformViewer(avd);
                     _lastDataset = avd;
                 }
 
+                _viewer.IsWindowOpen = isWindowOpen;
+            }
+
             ImGui.TextWrapped(
                 "This tool opens in a separate window, allowing you to view waveforms while interacting with other tools.");
 
-            // If the window is open, call its Draw method.
-            // The WaveformViewer's Draw method contains its own ImGui.Begin/End calls.
-            if (_isWindowOpen) _viewer.Draw();
+            // Draw the viewer if the window should be open
+            if (_viewer != null && _viewer.IsWindowOpen)
+            {
+                _viewer.Draw();
+                // Update our local state in case the window was closed via the X button
+                if (!_viewer.IsWindowOpen)
+                {
+                    // Window was closed, no need to dispose as it might be reopened
+                }
+            }
         }
     }
 }
@@ -729,15 +741,17 @@ internal class VelocityProfileTool : IDatasetTools
     /// </summary>
     private void CalculateProfile(AcousticVolumeDataset dataset)
     {
-        var densityVolume = dataset.DensityData;
-        if (densityVolume == null)
+        var pWaveField = dataset.PWaveField;
+        var sWaveField = dataset.SWaveField;
+
+        if (pWaveField == null || sWaveField == null)
         {
-            _statsResult = "Density data is not available for calculation.";
+            _statsResult = "Wave field data is not available.";
             _isCalculating = false;
             return;
         }
 
-        var (vpData, vsData) = CalculateProfile_Internal(densityVolume);
+        var (vpData, vsData) = CalculateProfile_Internal(dataset);
         _vpData = vpData;
         _vsData = vsData;
 
@@ -746,10 +760,27 @@ internal class VelocityProfileTool : IDatasetTools
             var avgVp = _vpData.Average();
             var avgVs = _vsData.Average();
             var avgVpVs = avgVs > 0 ? avgVp / avgVs : 0;
-            _statsResult = $"Points Sampled: {_vpData.Count}\n" +
+
+            _statsResult = $"SIMULATED Wave Velocities:\n" +
+                           $"Points Sampled: {_vpData.Count}\n" +
                            $"Average Vp: {avgVp:F2} m/s\n" +
                            $"Average Vs: {avgVs:F2} m/s\n" +
-                           $"Average Vp/Vs Ratio: {avgVpVs:F3}";
+                           $"Average Vp/Vs Ratio: {avgVpVs:F3}\n\n";
+
+            // Also show theoretical values for comparison
+            if (dataset.DensityData != null)
+            {
+                var (vpTheory, vsTheory) = GetTheoreticalVelocities(dataset.DensityData);
+                var avgVpTheory = vpTheory.Average();
+                var avgVsTheory = vsTheory.Average();
+                var avgVpVsTheory = avgVsTheory > 0 ? avgVpTheory / avgVsTheory : 0;
+
+                _statsResult += $"THEORETICAL (Input) Velocities:\n" +
+                                $"Average Vp: {avgVpTheory:F2} m/s\n" +
+                                $"Average Vs: {avgVsTheory:F2} m/s\n" +
+                                $"Average Vp/Vs Ratio: {avgVpVsTheory:F3}\n\n" +
+                                $"Difference: {(avgVpVs - avgVpVsTheory) / avgVpVsTheory * 100:F1}%";
+            }
         }
         else
         {
@@ -758,6 +789,97 @@ internal class VelocityProfileTool : IDatasetTools
 
         Logger.Log($"[VelocityProfileTool] Extracted {_vpData.Count} data points for velocity profile.");
         _isCalculating = false;
+    }
+
+    /// <summary>
+    ///     Extracts theoretical velocities from the calibrated density volume along the user-defined line.
+    /// </summary>
+    private (List<float> vpTheory, List<float> vsTheory) GetTheoreticalVelocities(DensityVolume densityVolume)
+    {
+        var x1 = (int)AcousticInteractionManager.LineStartPoint.X;
+        var y1 = (int)AcousticInteractionManager.LineStartPoint.Y;
+        var x2 = (int)AcousticInteractionManager.LineEndPoint.X;
+        var y2 = (int)AcousticInteractionManager.LineEndPoint.Y;
+        var slice_coord = AcousticInteractionManager.LineSliceIndex;
+        var viewIndex = AcousticInteractionManager.LineViewIndex;
+
+        var vpData = new List<float>();
+        var vsData = new List<float>();
+
+        // Bresenham's line algorithm
+        int dx = Math.Abs(x2 - x1), sx = x1 < x2 ? 1 : -1;
+        int dy = -Math.Abs(y2 - y1), sy = y1 < y2 ? 1 : -1;
+        int err = dx + dy, e2;
+
+        while (true)
+        {
+            int volX, volY, volZ;
+            var inBounds = false;
+
+            switch (viewIndex)
+            {
+                case 0: // XY View
+                    volX = x1;
+                    volY = y1;
+                    volZ = slice_coord;
+                    if (volX >= 0 && volX < densityVolume.Width &&
+                        volY >= 0 && volY < densityVolume.Height &&
+                        volZ >= 0 && volZ < densityVolume.Depth)
+                        inBounds = true;
+                    break;
+
+                case 1: // XZ View
+                    volX = x1;
+                    volY = slice_coord;
+                    volZ = y1;
+                    if (volX >= 0 && volX < densityVolume.Width &&
+                        volY >= 0 && volY < densityVolume.Height &&
+                        volZ >= 0 && volZ < densityVolume.Depth)
+                        inBounds = true;
+                    break;
+
+                case 2: // YZ View
+                    volX = slice_coord;
+                    volY = x1;
+                    volZ = y1;
+                    if (volX >= 0 && volX < densityVolume.Width &&
+                        volY >= 0 && volY < densityVolume.Height &&
+                        volZ >= 0 && volZ < densityVolume.Depth)
+                        inBounds = true;
+                    break;
+
+                default:
+                    volX = volY = volZ = 0;
+                    break;
+            }
+
+            if (inBounds)
+            {
+                // Read theoretical velocities from calibrated material properties
+                var vp = densityVolume.GetPWaveVelocity(volX, volY, volZ);
+                var vs = densityVolume.GetSWaveVelocity(volX, volY, volZ);
+
+                vpData.Add(vp);
+                vsData.Add(vs);
+            }
+
+            if (x1 == x2 && y1 == y2) break;
+
+            e2 = 2 * err;
+            if (e2 >= dy)
+            {
+                err += dy;
+                x1 += sx;
+            }
+
+            if (e2 <= dx)
+            {
+                err += dx;
+                y1 += sy;
+            }
+        }
+
+        return (vpData, vsData);
     }
 
     public (List<float> vpData, List<float> vsData) CalculateProfile_Internal(DensityVolume densityVolume)
@@ -818,6 +940,101 @@ internal class VelocityProfileTool : IDatasetTools
             {
                 vpData.Add(densityVolume.GetPWaveVelocity(volX, volY, volZ));
                 vsData.Add(densityVolume.GetSWaveVelocity(volX, volY, volZ));
+            }
+
+            if (x1 == x2 && y1 == y2) break;
+            e2 = 2 * err;
+            if (e2 >= dy)
+            {
+                err += dy;
+                x1 += sx;
+            }
+
+            if (e2 <= dx)
+            {
+                err += dx;
+                y1 += sy;
+            }
+        }
+
+        return (vpData, vsData);
+    }
+
+    public (List<float> vpData, List<float> vsData) CalculateProfile_Internal(AcousticVolumeDataset dataset)
+    {
+        // Get SIMULATED wave fields
+        var pWaveField = dataset.PWaveField;
+        var sWaveField = dataset.SWaveField;
+
+        // Get scaling factors to convert bytes back to m/s
+        var vpScale = dataset.PWaveFieldMaxVelocity;
+        var vsScale = dataset.SWaveFieldMaxVelocity;
+
+        if (vpScale <= 0) vpScale = 1.0f; // Fallback for old datasets
+        if (vsScale <= 0) vsScale = 1.0f;
+
+        var x1 = (int)AcousticInteractionManager.LineStartPoint.X;
+        var y1 = (int)AcousticInteractionManager.LineStartPoint.Y;
+        var x2 = (int)AcousticInteractionManager.LineEndPoint.X;
+        var y2 = (int)AcousticInteractionManager.LineEndPoint.Y;
+        var slice_coord = AcousticInteractionManager.LineSliceIndex;
+        var viewIndex = AcousticInteractionManager.LineViewIndex;
+
+        var vpData = new List<float>();
+        var vsData = new List<float>();
+
+        // Bresenham's line algorithm
+        int dx = Math.Abs(x2 - x1), sx = x1 < x2 ? 1 : -1;
+        int dy = -Math.Abs(y2 - y1), sy = y1 < y2 ? 1 : -1;
+        int err = dx + dy, e2;
+
+        while (true)
+        {
+            int volX, volY, volZ;
+            var inBounds = false;
+            switch (viewIndex)
+            {
+                case 0: // XY View
+                    volX = x1;
+                    volY = y1;
+                    volZ = slice_coord;
+                    if (volX >= 0 && volX < pWaveField.Width && volY >= 0 && volY < pWaveField.Height &&
+                        volZ >= 0 && volZ < pWaveField.Depth)
+                        inBounds = true;
+                    break;
+                case 1: // XZ View
+                    volX = x1;
+                    volY = slice_coord;
+                    volZ = y1;
+                    if (volX >= 0 && volX < pWaveField.Width && volY >= 0 && volY < pWaveField.Height &&
+                        volZ >= 0 && volZ < pWaveField.Depth)
+                        inBounds = true;
+                    break;
+                case 2: // YZ View
+                    volX = slice_coord;
+                    volY = x1;
+                    volZ = y1;
+                    if (volX >= 0 && volX < pWaveField.Width && volY >= 0 && volY < pWaveField.Height &&
+                        volZ >= 0 && volZ < pWaveField.Depth)
+                        inBounds = true;
+                    break;
+                default:
+                    volX = volY = volZ = 0;
+                    break;
+            }
+
+            if (inBounds)
+            {
+                // ✅ Read from SIMULATED wave fields and denormalize
+                var vpByte = pWaveField[volX, volY, volZ];
+                var vsByte = sWaveField[volX, volY, volZ];
+
+                // Convert byte (0-255) back to physical velocity (m/s)
+                var vp = vpByte / 255f * vpScale;
+                var vs = vsByte / 255f * vsScale;
+
+                vpData.Add(vp);
+                vsData.Add(vs);
             }
 
             if (x1 == x2 && y1 == y2) break;

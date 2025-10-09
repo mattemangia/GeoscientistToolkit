@@ -194,6 +194,9 @@ public class DensityCalibrationTool
 
     private void ApplyMeanDensity()
     {
+        Logger.Log(
+            $"[DensityCalibrationTool] Applying mean density calibration: {_meanDensity} kg/m³ ± {_densityVariation * 100}%");
+
         Parallel.For(0, _ctDataset.Depth, z =>
         {
             var graySlice = new byte[_ctDataset.Width * _ctDataset.Height];
@@ -202,13 +205,33 @@ public class DensityCalibrationTool
             for (var i = 0; i < graySlice.Length; i++)
             {
                 var normalized = graySlice[i] / 255f;
+                // Vary density based on grayscale: darker = lower density, brighter = higher density
                 var density = _meanDensity * (1 + _densityVariation * (normalized - 0.5f) * 2);
 
                 var x = i % _ctDataset.Width;
                 var y = i / _ctDataset.Width;
-                _densityVolume.SetDensity(x, y, z, density);
+
+                // Use empirical relationships to derive E and nu from density
+                // This will give spatially varying Vp/Vs ratios based on density
+                _densityVolume.SetPropertiesFromDensity(x, y, z, density);
             }
         });
+
+        // Log the resulting property ranges
+        var minDensity = float.MaxValue;
+        var maxDensity = float.MinValue;
+        for (var z = 0; z < _ctDataset.Depth; z++)
+        for (var y = 0; y < _ctDataset.Height; y++)
+        for (var x = 0; x < _ctDataset.Width; x++)
+        {
+            var d = _densityVolume.GetDensity(x, y, z);
+            if (d < minDensity) minDensity = d;
+            if (d > maxDensity) maxDensity = d;
+        }
+
+        Logger.Log($"[DensityCalibrationTool] Density range: {minDensity:F0} - {maxDensity:F0} kg/m³");
+        Logger.Log($"[DensityCalibrationTool] Mean E: {_densityVolume.GetMeanYoungsModulus() / 1e9:F1} GPa");
+        Logger.Log($"[DensityCalibrationTool] Mean ν: {_densityVolume.GetMeanPoissonRatio():F3}");
     }
 
     private void ApplyManualSelection()

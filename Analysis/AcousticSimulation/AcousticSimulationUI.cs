@@ -1499,7 +1499,7 @@ public class AcousticSimulationUI : IDisposable
                         _youngsModulus, _poissonRatio, _lastResults.PWaveVelocity, _lastResults.SWaveVelocity
                     );
                 }
-                
+
                 // FIX: Set final tomography data with correct dimensions
                 var finalDimensions = new Vector3(_parameters.Width, _parameters.Height, _parameters.Depth);
 
@@ -1786,7 +1786,7 @@ public class AcousticSimulationUI : IDisposable
             if (_showTomographyWindow && _autoUpdateTomography && _liveResultsForTomography != null)
             {
                 UpdateTomographyData(e);
-            
+
                 // FIX: Tell viewer to regenerate slice periodically
                 if ((DateTime.Now - _lastTomographyUpdate).TotalSeconds > 1.0)
                 {

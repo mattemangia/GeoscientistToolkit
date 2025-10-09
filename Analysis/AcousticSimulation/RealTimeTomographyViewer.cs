@@ -19,10 +19,12 @@ public class RealTimeTomographyViewer : IDisposable
     private bool _isLive;
     private bool _isOpen;
     private byte[,,] _labels;
+
     private DateTime _lastLiveUpdateTime = DateTime.MinValue;
-    private int _liveUpdateCounter = 0;
+
     // FIX: Track when data actually changes
     private int _lastUpdateHash;
+    private int _liveUpdateCounter;
 
     private (byte[] pixelData, int w, int h, float minVel, float maxVel)? _pendingTextureUpdate;
     private ISet<byte> _selectedMaterialIDs;
@@ -64,7 +66,7 @@ public class RealTimeTomographyViewer : IDisposable
     {
         // FIX: Update data even if window is closed (it might be reopened)
         // But don't trigger regeneration if not visible
-    
+
         // Throttle updates to prevent overwhelming the GPU
         var timeSinceLastUpdate = (DateTime.Now - _lastLiveUpdateTime).TotalSeconds;
         if (timeSinceLastUpdate < 0.5) // Update at most every 0.5 seconds
@@ -81,11 +83,8 @@ public class RealTimeTomographyViewer : IDisposable
         _statusMessage = $"Live Simulation (frame {_liveUpdateCounter})";
 
         // Only request update if window is actually open
-        if (_isOpen)
-        {
-            RequestUpdate();
-            //Logger.Log($"[TomographyViewer] Live update #{_liveUpdateCounter}");
-        }
+        if (_isOpen) RequestUpdate();
+        //Logger.Log($"[TomographyViewer] Live update #{_liveUpdateCounter}");
     }
 
     public void Draw()
@@ -129,74 +128,72 @@ public class RealTimeTomographyViewer : IDisposable
     }
 
     private void DrawControls()
-{
-    ImGui.Text("Data Source:");
-    ImGui.SameLine();
-    var statusColor = _isLive ? new Vector4(0.1f, 1.0f, 0.1f, 1.0f) : new Vector4(0.5f, 0.8f, 1.0f, 1.0f);
-    ImGui.TextColored(statusColor, _statusMessage);
-    
-    if (_isLive)
     {
+        ImGui.Text("Data Source:");
         ImGui.SameLine();
-        // Show a pulsing indicator for live updates
-        var pulseColor = (DateTime.Now.Millisecond / 500) % 2 == 0 
-            ? new Vector4(0, 1, 0, 1) 
-            : new Vector4(0, 0.5f, 0, 1);
-        ImGui.TextColored(pulseColor, "●");
-        if (ImGui.IsItemHovered())
-            ImGui.SetTooltip("Live data - updates every 0.5 seconds");
-    }
+        var statusColor = _isLive ? new Vector4(0.1f, 1.0f, 0.1f, 1.0f) : new Vector4(0.5f, 0.8f, 1.0f, 1.0f);
+        ImGui.TextColored(statusColor, _statusMessage);
 
-    ImGui.Text($"Vp={_currentDataSource.PWaveVelocity:F0} m/s | Vs={_currentDataSource.SWaveVelocity:F0} m/s | Vp/Vs={_currentDataSource.VpVsRatio:F3}");
-    
-    ImGui.Spacing();
-    ImGui.Separator();
-    ImGui.Text("Current Slice Color Scale:");
-    ImGui.Indent();
-    ImGui.Text($"Min: {FormatVelocity(_currentSliceMinVel)} m/s");
-    ImGui.Text($"Max: {FormatVelocity(_currentSliceMaxVel)} m/s");
-    ImGui.Unindent();
-    ImGui.Separator();
-    ImGui.Spacing();
-
-    ImGui.Text("Tomography Slice:");
-    var controlsChanged = false;
-    
-    controlsChanged |= ImGui.RadioButton("X Axis (YZ)", ref _sliceAxis, 0);
-    ImGui.SameLine();
-    controlsChanged |= ImGui.RadioButton("Y Axis (XZ)", ref _sliceAxis, 1);
-    ImGui.SameLine();
-    controlsChanged |= ImGui.RadioButton("Z Axis (XY)", ref _sliceAxis, 2);
-
-    var maxSlice = _dimensions.X > 0
-        ? _sliceAxis switch
+        if (_isLive)
         {
-            0 => (int)_dimensions.X - 1,
-            1 => (int)_dimensions.Y - 1,
-            _ => (int)_dimensions.Z - 1
+            ImGui.SameLine();
+            // Show a pulsing indicator for live updates
+            var pulseColor = DateTime.Now.Millisecond / 500 % 2 == 0
+                ? new Vector4(0, 1, 0, 1)
+                : new Vector4(0, 0.5f, 0, 1);
+            ImGui.TextColored(pulseColor, "●");
+            if (ImGui.IsItemHovered())
+                ImGui.SetTooltip("Live data - updates every 0.5 seconds");
         }
-        : 0;
-    _sliceIndex = Math.Clamp(_sliceIndex, 0, maxSlice);
-    
-    ImGui.PushItemWidth(-1);
-    controlsChanged |= ImGui.SliderInt("##SliceIndex", ref _sliceIndex, 0, maxSlice);
-    ImGui.PopItemWidth();
-    ImGui.Text($"Slice: {_sliceIndex + 1} / {maxSlice + 1}");
 
-    ImGui.Spacing();
-    ImGui.Separator();
-    
-    if (ImGui.Checkbox("Show Only Selected Material", ref _showOnlySelectedMaterial)) 
-        controlsChanged = true;
-    
-    if (ImGui.IsItemHovered())
-        ImGui.SetTooltip("Hides non-selected materials.\nColor scale adjusts to visible data only.");
+        ImGui.Text(
+            $"Vp={_currentDataSource.PWaveVelocity:F0} m/s | Vs={_currentDataSource.SWaveVelocity:F0} m/s | Vp/Vs={_currentDataSource.VpVsRatio:F3}");
 
-    if (controlsChanged) 
-    {
-        RequestUpdate();
+        ImGui.Spacing();
+        ImGui.Separator();
+        ImGui.Text("Current Slice Color Scale:");
+        ImGui.Indent();
+        ImGui.Text($"Min: {FormatVelocity(_currentSliceMinVel)} m/s");
+        ImGui.Text($"Max: {FormatVelocity(_currentSliceMaxVel)} m/s");
+        ImGui.Unindent();
+        ImGui.Separator();
+        ImGui.Spacing();
+
+        ImGui.Text("Tomography Slice:");
+        var controlsChanged = false;
+
+        controlsChanged |= ImGui.RadioButton("X Axis (YZ)", ref _sliceAxis, 0);
+        ImGui.SameLine();
+        controlsChanged |= ImGui.RadioButton("Y Axis (XZ)", ref _sliceAxis, 1);
+        ImGui.SameLine();
+        controlsChanged |= ImGui.RadioButton("Z Axis (XY)", ref _sliceAxis, 2);
+
+        var maxSlice = _dimensions.X > 0
+            ? _sliceAxis switch
+            {
+                0 => (int)_dimensions.X - 1,
+                1 => (int)_dimensions.Y - 1,
+                _ => (int)_dimensions.Z - 1
+            }
+            : 0;
+        _sliceIndex = Math.Clamp(_sliceIndex, 0, maxSlice);
+
+        ImGui.PushItemWidth(-1);
+        controlsChanged |= ImGui.SliderInt("##SliceIndex", ref _sliceIndex, 0, maxSlice);
+        ImGui.PopItemWidth();
+        ImGui.Text($"Slice: {_sliceIndex + 1} / {maxSlice + 1}");
+
+        ImGui.Spacing();
+        ImGui.Separator();
+
+        if (ImGui.Checkbox("Show Only Selected Material", ref _showOnlySelectedMaterial))
+            controlsChanged = true;
+
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip("Hides non-selected materials.\nColor scale adjusts to visible data only.");
+
+        if (controlsChanged) RequestUpdate();
     }
-}
 
     private void DrawTomographyView()
     {

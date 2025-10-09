@@ -494,67 +494,67 @@ public class ChunkedAcousticSimulator : IDisposable
     }
 
     private void ApplyPointSource(WaveFieldChunk chunk, int x, int y, int z)
-{
-    if (z < chunk.StartZ || z >= chunk.StartZ + chunk.Depth)
-        return;
-
-    var localZ = z - chunk.StartZ;
-
-    // Calculate amplitude from source energy
-    var density = DensityVolume?[x, y, z] ?? 2700f;
-    var voxelVolume = MathF.Pow(_params.PixelSize, 3);
-    var energyPerVoxel = _params.SourceEnergyJ / (voxelVolume * 1e9f);
-    var amplitude = MathF.Sqrt(2f * energyPerVoxel / density);
-    amplitude *= _params.SourceAmplitude / 100f;
-
-    if (_params.UseRickerWavelet)
     {
-        var freq = _params.SourceFrequencyKHz * 1000f;
-        var t = 1.0f / freq;
-        amplitude *= RickerWavelet(0, freq, t);
-    }
+        if (z < chunk.StartZ || z >= chunk.StartZ + chunk.Depth)
+            return;
 
-    // FIX: Generate realistic wave with both P and S components
-    // Real transducers create both longitudinal and transverse motion
-    
-    // Calculate expected Vp/Vs ratio for the material
-    var E = _params.YoungsModulusMPa * 1e6f;
-    var nu = _params.PoissonRatio;
-    var mu = E / (2f * (1f + nu));
-    var lambda = E * nu / ((1f + nu) * (1f - 2f * nu));
-    var vp = MathF.Sqrt((lambda + 2f * mu) / density);
-    var vs = MathF.Sqrt(mu / density);
-    var vpVsRatio = vs > 0 ? vp / vs : 1.732f; // Default sqrt(3) for typical rocks
-    
-    // Amplitude partition: P-wave gets ~70%, S-wave gets ~30% of energy
-    // This is typical for a finite-size transducer
-    var pWaveAmplitude = amplitude * 0.85f;
-    var sWaveAmplitude = amplitude * 0.35f; // S-waves have smaller amplitude
-    
-    // Apply based on propagation axis
-    switch (_params.Axis)
-    {
-        case 0: // X-Axis propagation
-            chunk.Vx[x, y, localZ] = pWaveAmplitude;           // P-wave (longitudinal)
-            chunk.Vy[x, y, localZ] = sWaveAmplitude * 0.7f;    // S-wave (transverse)
-            chunk.Vz[x, y, localZ] = sWaveAmplitude * 0.7f;    // S-wave (transverse)
-            break;
-        case 1: // Y-Axis propagation
-            chunk.Vy[x, y, localZ] = pWaveAmplitude;           // P-wave
-            chunk.Vx[x, y, localZ] = sWaveAmplitude * 0.7f;    // S-wave
-            chunk.Vz[x, y, localZ] = sWaveAmplitude * 0.7f;    // S-wave
-            break;
-        case 2: // Z-Axis propagation
-            chunk.Vz[x, y, localZ] = pWaveAmplitude;           // P-wave
-            chunk.Vx[x, y, localZ] = sWaveAmplitude * 0.7f;    // S-wave
-            chunk.Vy[x, y, localZ] = sWaveAmplitude * 0.7f;    // S-wave
-            break;
+        var localZ = z - chunk.StartZ;
+
+        // Calculate amplitude from source energy
+        var density = DensityVolume?[x, y, z] ?? 2700f;
+        var voxelVolume = MathF.Pow(_params.PixelSize, 3);
+        var energyPerVoxel = _params.SourceEnergyJ / (voxelVolume * 1e9f);
+        var amplitude = MathF.Sqrt(2f * energyPerVoxel / density);
+        amplitude *= _params.SourceAmplitude / 100f;
+
+        if (_params.UseRickerWavelet)
+        {
+            var freq = _params.SourceFrequencyKHz * 1000f;
+            var t = 1.0f / freq;
+            amplitude *= RickerWavelet(0, freq, t);
+        }
+
+        // FIX: Generate realistic wave with both P and S components
+        // Real transducers create both longitudinal and transverse motion
+
+        // Calculate expected Vp/Vs ratio for the material
+        var E = _params.YoungsModulusMPa * 1e6f;
+        var nu = _params.PoissonRatio;
+        var mu = E / (2f * (1f + nu));
+        var lambda = E * nu / ((1f + nu) * (1f - 2f * nu));
+        var vp = MathF.Sqrt((lambda + 2f * mu) / density);
+        var vs = MathF.Sqrt(mu / density);
+        var vpVsRatio = vs > 0 ? vp / vs : 1.732f; // Default sqrt(3) for typical rocks
+
+        // Amplitude partition: P-wave gets ~70%, S-wave gets ~30% of energy
+        // This is typical for a finite-size transducer
+        var pWaveAmplitude = amplitude * 0.85f;
+        var sWaveAmplitude = amplitude * 0.35f; // S-waves have smaller amplitude
+
+        // Apply based on propagation axis
+        switch (_params.Axis)
+        {
+            case 0: // X-Axis propagation
+                chunk.Vx[x, y, localZ] = pWaveAmplitude; // P-wave (longitudinal)
+                chunk.Vy[x, y, localZ] = sWaveAmplitude * 0.7f; // S-wave (transverse)
+                chunk.Vz[x, y, localZ] = sWaveAmplitude * 0.7f; // S-wave (transverse)
+                break;
+            case 1: // Y-Axis propagation
+                chunk.Vy[x, y, localZ] = pWaveAmplitude; // P-wave
+                chunk.Vx[x, y, localZ] = sWaveAmplitude * 0.7f; // S-wave
+                chunk.Vz[x, y, localZ] = sWaveAmplitude * 0.7f; // S-wave
+                break;
+            case 2: // Z-Axis propagation
+                chunk.Vz[x, y, localZ] = pWaveAmplitude; // P-wave
+                chunk.Vx[x, y, localZ] = sWaveAmplitude * 0.7f; // S-wave
+                chunk.Vy[x, y, localZ] = sWaveAmplitude * 0.7f; // S-wave
+                break;
+        }
+
+        Logger.Log($"[Source] Applied multi-mode source at ({x},{y},{z})");
+        Logger.Log($"[Source] P-wave amplitude: {pWaveAmplitude:E3}, S-wave amplitude: {sWaveAmplitude:E3}");
+        Logger.Log($"[Source] Expected Vp/Vs ratio: {vpVsRatio:F3}");
     }
-    
-    Logger.Log($"[Source] Applied multi-mode source at ({x},{y},{z})");
-    Logger.Log($"[Source] P-wave amplitude: {pWaveAmplitude:E3}, S-wave amplitude: {sWaveAmplitude:E3}");
-    Logger.Log($"[Source] Expected Vp/Vs ratio: {vpVsRatio:F3}");
-}
 
     private void ApplyFullFaceSource(WaveFieldChunk chunk, int txX, int txY, int txZ)
     {
@@ -568,61 +568,64 @@ public class ChunkedAcousticSimulator : IDisposable
         };
 
         var density = 2700f;
-    var voxelVolume = MathF.Pow(_params.PixelSize, 3);
-    var totalVolume = faceArea * voxelVolume;
-    var energyPerVoxel = _params.SourceEnergyJ / faceArea;
-    var amplitude = MathF.Sqrt(2f * energyPerVoxel / (density * voxelVolume));
-    amplitude *= _params.SourceAmplitude / 100f;
+        var voxelVolume = MathF.Pow(_params.PixelSize, 3);
+        var totalVolume = faceArea * voxelVolume;
+        var energyPerVoxel = _params.SourceEnergyJ / faceArea;
+        var amplitude = MathF.Sqrt(2f * energyPerVoxel / (density * voxelVolume));
+        amplitude *= _params.SourceAmplitude / 100f;
 
-    if (_params.UseRickerWavelet)
-    {
-        var freq = _params.SourceFrequencyKHz * 1000f;
-        var t = 1.0f / freq;
-        amplitude *= RickerWavelet(0, freq, t);
-    }
+        if (_params.UseRickerWavelet)
+        {
+            var freq = _params.SourceFrequencyKHz * 1000f;
+            var t = 1.0f / freq;
+            amplitude *= RickerWavelet(0, freq, t);
+        }
 
-    // FIX: Add transverse components for S-wave generation
-    var pWaveAmplitude = amplitude * 0.85f;
-    var sWaveAmplitude = amplitude * 0.35f;
+        // FIX: Add transverse components for S-wave generation
+        var pWaveAmplitude = amplitude * 0.85f;
+        var sWaveAmplitude = amplitude * 0.35f;
 
-    // Apply to entire face with mixed modes
-    switch (_params.Axis)
-    {
-        case 0: // YZ face at X
-            for (var y = 0; y < _params.Height; y++)
-            for (var z = 0; z < chunk.Depth; z++)
-                if (txX >= 0 && txX < _params.Width)
-                {
-                    chunk.Vx[txX, y, z] = pWaveAmplitude;
-                    chunk.Vy[txX, y, z] = sWaveAmplitude * 0.7f;
-                    chunk.Vz[txX, y, z] = sWaveAmplitude * 0.7f;
-                }
-            break;
-        case 1: // XZ face at Y
-            for (var x = 0; x < _params.Width; x++)
-            for (var z = 0; z < chunk.Depth; z++)
-                if (txY >= 0 && txY < _params.Height)
-                {
-                    chunk.Vy[x, txY, z] = pWaveAmplitude;
-                    chunk.Vx[x, txY, z] = sWaveAmplitude * 0.7f;
-                    chunk.Vz[x, txY, z] = sWaveAmplitude * 0.7f;
-                }
-            break;
-        case 2: // XY face at Z
-            if (txZ >= chunk.StartZ && txZ < chunk.StartZ + chunk.Depth)
-            {
-                var localZ = txZ - chunk.StartZ;
-                for (var x = 0; x < _params.Width; x++)
+        // Apply to entire face with mixed modes
+        switch (_params.Axis)
+        {
+            case 0: // YZ face at X
                 for (var y = 0; y < _params.Height; y++)
+                for (var z = 0; z < chunk.Depth; z++)
+                    if (txX >= 0 && txX < _params.Width)
+                    {
+                        chunk.Vx[txX, y, z] = pWaveAmplitude;
+                        chunk.Vy[txX, y, z] = sWaveAmplitude * 0.7f;
+                        chunk.Vz[txX, y, z] = sWaveAmplitude * 0.7f;
+                    }
+
+                break;
+            case 1: // XZ face at Y
+                for (var x = 0; x < _params.Width; x++)
+                for (var z = 0; z < chunk.Depth; z++)
+                    if (txY >= 0 && txY < _params.Height)
+                    {
+                        chunk.Vy[x, txY, z] = pWaveAmplitude;
+                        chunk.Vx[x, txY, z] = sWaveAmplitude * 0.7f;
+                        chunk.Vz[x, txY, z] = sWaveAmplitude * 0.7f;
+                    }
+
+                break;
+            case 2: // XY face at Z
+                if (txZ >= chunk.StartZ && txZ < chunk.StartZ + chunk.Depth)
                 {
-                    chunk.Vz[x, y, localZ] = pWaveAmplitude;
-                    chunk.Vx[x, y, localZ] = sWaveAmplitude * 0.7f;
-                    chunk.Vy[x, y, localZ] = sWaveAmplitude * 0.7f;
+                    var localZ = txZ - chunk.StartZ;
+                    for (var x = 0; x < _params.Width; x++)
+                    for (var y = 0; y < _params.Height; y++)
+                    {
+                        chunk.Vz[x, y, localZ] = pWaveAmplitude;
+                        chunk.Vx[x, y, localZ] = sWaveAmplitude * 0.7f;
+                        chunk.Vy[x, y, localZ] = sWaveAmplitude * 0.7f;
+                    }
                 }
-            }
-            break;
+
+                break;
+        }
     }
-}
 
     private float RickerWavelet(float t, float freq, float tpeak)
     {
@@ -1148,7 +1151,7 @@ public class ChunkedAcousticSimulator : IDisposable
                     if (x < 0 || x >= simWidth) continue;
 
                     // FIX: Skip source region to prevent saturation
-                    if (IsNearSource(x, y, localZ, excludeRadius: 8)) continue;
+                    if (IsNearSource(x, y, localZ, 8)) continue;
 
                     var vx = chunk.Vx[x, y, z];
                     var vy = chunk.Vy[x, y, z];
@@ -1305,19 +1308,21 @@ public class ChunkedAcousticSimulator : IDisposable
             }
         }
     }
+
     private bool IsNearSource(int x, int y, int z, int excludeRadius = 5)
     {
         var txX = (int)(_params.TxPosition.X * _params.Width);
         var txY = (int)(_params.TxPosition.Y * _params.Height);
         var txZ = (int)(_params.TxPosition.Z * _params.Depth);
-    
+
         var dx = x - txX;
         var dy = y - txY;
         var dz = z - txZ;
         var distSq = dx * dx + dy * dy + dz * dz;
-    
+
         return distSq <= excludeRadius * excludeRadius;
     }
+
     private void SaveSnapshot(int timeStep)
     {
         // For huge datasets, only save current max velocities (not full field)

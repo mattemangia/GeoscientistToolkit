@@ -43,7 +43,15 @@ public class AcousticVolumeDataset : Dataset, ISerializableDataset
     public float TensileStrengthMPa { get; set; }
     public float CohesionMPa { get; set; }
     public float FailureAngleDeg { get; set; }
+
     public float MaxDamage { get; set; }
+
+    //Velocities
+    public float PWaveFieldMaxVelocity { get; set; } // m/s
+    public float SWaveFieldMaxVelocity { get; set; } // m/s
+    public float CombinedFieldMaxVelocity { get; set; } // m/s
+
+    public float DamageFieldMaxValue { get; set; }
 
     // Reference to source dataset
     public string SourceDatasetPath { get; set; }
@@ -80,7 +88,11 @@ public class AcousticVolumeDataset : Dataset, ISerializableDataset
             SourceMaterialName = SourceMaterialName,
             HasTimeSeries = TimeSeriesSnapshots.Count > 0,
             HasDamageField = DamageField != null,
-            HasCalibration = Calibration != null && Calibration.Points.Count > 0
+            HasCalibration = Calibration != null && Calibration.Points.Count > 0,
+            PWaveFieldMaxVelocity = PWaveFieldMaxVelocity,
+            SWaveFieldMaxVelocity = SWaveFieldMaxVelocity,
+            CombinedFieldMaxVelocity = CombinedFieldMaxVelocity,
+            DamageFieldMaxValue = DamageFieldMaxValue
         };
     }
 
@@ -282,6 +294,10 @@ public class AcousticVolumeDataset : Dataset, ISerializableDataset
             CohesionMPa = metadata.CohesionMPa;
             FailureAngleDeg = metadata.FailureAngleDeg;
             MaxDamage = metadata.MaxDamage;
+            PWaveFieldMaxVelocity = metadata.PWaveFieldMaxVelocity;
+            SWaveFieldMaxVelocity = metadata.SWaveFieldMaxVelocity;
+            CombinedFieldMaxVelocity = metadata.CombinedFieldMaxVelocity;
+            DamageFieldMaxValue = metadata.DamageFieldMaxValue;
         }
         catch (Exception ex)
         {
@@ -516,6 +532,10 @@ public class AcousticMetadata
     public float CohesionMPa { get; set; }
     public float FailureAngleDeg { get; set; }
     public float MaxDamage { get; set; }
+    public float PWaveFieldMaxVelocity { get; set; } // m/s
+    public float SWaveFieldMaxVelocity { get; set; } // m/s
+    public float CombinedFieldMaxVelocity { get; set; } // m/s
+    public float DamageFieldMaxValue { get; set; }
 }
 
 /// <summary>
@@ -538,6 +558,11 @@ public class AcousticVolumeDatasetDTO : DatasetDTO
     public bool HasTimeSeries { get; set; }
     public bool HasDamageField { get; set; }
     public bool HasCalibration { get; set; }
+
+    public float PWaveFieldMaxVelocity { get; set; } // m/s
+    public float SWaveFieldMaxVelocity { get; set; } // m/s
+    public float CombinedFieldMaxVelocity { get; set; } // m/s
+    public float DamageFieldMaxValue { get; set; }
 }
 
 public class WaveFieldSnapshot

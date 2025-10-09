@@ -24,6 +24,7 @@ public class WaveformViewer : IDisposable
     private readonly ImGuiExportFileDialog _exportWavDialog;
     private readonly ProgressBarDialog _progressDialog;
     private float _amplitudeScale = 1.0f;
+
     private bool _autoNormalize = true;
 
     // Display settings
@@ -82,6 +83,12 @@ public class WaveformViewer : IDisposable
         _exportImageDialog.SetExtensions((".png", "PNG Image"));
 
         UpdateStatusMessage();
+    }
+
+    public bool IsWindowOpen
+    {
+        get => _isWindowOpen;
+        set => _isWindowOpen = value;
     }
 
     public void Dispose()
@@ -667,9 +674,9 @@ public class WaveformViewer : IDisposable
     {
         var numTimeSteps = _dataset.TimeSeriesSnapshots.Count;
         var numLinePoints = _linePoints.Count;
-    
+
         Logger.Log($"[WaveformViewer] Extracting profile: {numTimeSteps} timesteps × {numLinePoints} points");
-    
+
         _profileData = new float[numTimeSteps, numLinePoints];
         _maxAbsAmplitude = 0;
 
@@ -700,7 +707,7 @@ public class WaveformViewer : IDisposable
                     _maxAbsAmplitude = Math.Abs(value);
             }
         }
-    
+
         Logger.Log($"[WaveformViewer] Profile extraction complete. Max amplitude: {_maxAbsAmplitude:E3}");
     }
 
@@ -778,75 +785,83 @@ public class WaveformViewer : IDisposable
     }
 
     private List<Tuple<int, int, int>> GetLinePoints()
-{
-    var volume = _dataset.PWaveField ?? _dataset.CombinedWaveField;
-    if (volume == null) return null;
-
-    var x1_2d = (int)AcousticInteractionManager.LineStartPoint.X;
-    var y1_2d = (int)AcousticInteractionManager.LineStartPoint.Y;
-    var x2_2d = (int)AcousticInteractionManager.LineEndPoint.X;
-    var y2_2d = (int)AcousticInteractionManager.LineEndPoint.Y;
-    var slice_coord = AcousticInteractionManager.LineSliceIndex;
-    var viewIndex = AcousticInteractionManager.LineViewIndex;
-
-    var points = new List<Tuple<int, int, int>>();
-
-    // FIX: Clamp coordinates to valid range BEFORE Bresenham
-    x1_2d = Math.Clamp(x1_2d, 0, volume.Width - 1);
-    y1_2d = Math.Clamp(y1_2d, 0, volume.Height - 1);
-    x2_2d = Math.Clamp(x2_2d, 0, volume.Width - 1);
-    y2_2d = Math.Clamp(y2_2d, 0, volume.Height - 1);
-    
-    Logger.Log($"[WaveformViewer] Line from ({x1_2d},{y1_2d}) to ({x2_2d},{y2_2d}) on view {viewIndex}, slice {slice_coord}");
-    Logger.Log($"[WaveformViewer] Volume dimensions: {volume.Width}x{volume.Height}x{volume.Depth}");
-
-    // Bresenham's line algorithm
-    int dx = Math.Abs(x2_2d - x1_2d), sx = x1_2d < x2_2d ? 1 : -1;
-    int dy = -Math.Abs(y2_2d - y1_2d), sy = y1_2d < y2_2d ? 1 : -1;
-    int err = dx + dy, e2;
-
-    while (true)
     {
-        int x_vol, y_vol, z_vol;
-        switch (viewIndex)
+        var volume = _dataset.PWaveField ?? _dataset.CombinedWaveField;
+        if (volume == null) return null;
+
+        var x1_2d = (int)AcousticInteractionManager.LineStartPoint.X;
+        var y1_2d = (int)AcousticInteractionManager.LineStartPoint.Y;
+        var x2_2d = (int)AcousticInteractionManager.LineEndPoint.X;
+        var y2_2d = (int)AcousticInteractionManager.LineEndPoint.Y;
+        var slice_coord = AcousticInteractionManager.LineSliceIndex;
+        var viewIndex = AcousticInteractionManager.LineViewIndex;
+
+        var points = new List<Tuple<int, int, int>>();
+
+        // FIX: Clamp coordinates to valid range BEFORE Bresenham
+        x1_2d = Math.Clamp(x1_2d, 0, volume.Width - 1);
+        y1_2d = Math.Clamp(y1_2d, 0, volume.Height - 1);
+        x2_2d = Math.Clamp(x2_2d, 0, volume.Width - 1);
+        y2_2d = Math.Clamp(y2_2d, 0, volume.Height - 1);
+
+        Logger.Log(
+            $"[WaveformViewer] Line from ({x1_2d},{y1_2d}) to ({x2_2d},{y2_2d}) on view {viewIndex}, slice {slice_coord}");
+        Logger.Log($"[WaveformViewer] Volume dimensions: {volume.Width}x{volume.Height}x{volume.Depth}");
+
+        // Bresenham's line algorithm
+        int dx = Math.Abs(x2_2d - x1_2d), sx = x1_2d < x2_2d ? 1 : -1;
+        int dy = -Math.Abs(y2_2d - y1_2d), sy = y1_2d < y2_2d ? 1 : -1;
+        int err = dx + dy, e2;
+
+        while (true)
         {
-            case 0: // XY View
-                x_vol = x1_2d;
-                y_vol = y1_2d;
-                z_vol = slice_coord;
-                break;
-            case 1: // XZ View
-                x_vol = x1_2d;
-                y_vol = slice_coord;
-                z_vol = y1_2d;
-                break;
-            case 2: // YZ View
-                x_vol = slice_coord;
-                y_vol = x1_2d;
-                z_vol = y1_2d;
-                break;
-            default:
-                Logger.LogError($"[WaveformViewer] Invalid view index: {viewIndex}");
-                return points;
+            int x_vol, y_vol, z_vol;
+            switch (viewIndex)
+            {
+                case 0: // XY View
+                    x_vol = x1_2d;
+                    y_vol = y1_2d;
+                    z_vol = slice_coord;
+                    break;
+                case 1: // XZ View
+                    x_vol = x1_2d;
+                    y_vol = slice_coord;
+                    z_vol = y1_2d;
+                    break;
+                case 2: // YZ View
+                    x_vol = slice_coord;
+                    y_vol = x1_2d;
+                    z_vol = y1_2d;
+                    break;
+                default:
+                    Logger.LogError($"[WaveformViewer] Invalid view index: {viewIndex}");
+                    return points;
+            }
+
+            // Validate and add point
+            if (x_vol >= 0 && x_vol < volume.Width &&
+                y_vol >= 0 && y_vol < volume.Height &&
+                z_vol >= 0 && z_vol < volume.Depth)
+                points.Add(new Tuple<int, int, int>(x_vol, y_vol, z_vol));
+
+            if (x1_2d == x2_2d && y1_2d == y2_2d) break;
+            e2 = 2 * err;
+            if (e2 >= dy)
+            {
+                err += dy;
+                x1_2d += sx;
+            }
+
+            if (e2 <= dx)
+            {
+                err += dx;
+                y1_2d += sy;
+            }
         }
 
-        // Validate and add point
-        if (x_vol >= 0 && x_vol < volume.Width &&
-            y_vol >= 0 && y_vol < volume.Height &&
-            z_vol >= 0 && z_vol < volume.Depth)
-        {
-            points.Add(new Tuple<int, int, int>(x_vol, y_vol, z_vol));
-        }
-
-        if (x1_2d == x2_2d && y1_2d == y2_2d) break;
-        e2 = 2 * err;
-        if (e2 >= dy) { err += dy; x1_2d += sx; }
-        if (e2 <= dx) { err += dx; y1_2d += sy; }
+        Logger.Log($"[WaveformViewer] Extracted {points.Count} points along line");
+        return points;
     }
-
-    Logger.Log($"[WaveformViewer] Extracted {points.Count} points along line");
-    return points;
-}
 
     private void ExtractWaveformAtTime()
     {
