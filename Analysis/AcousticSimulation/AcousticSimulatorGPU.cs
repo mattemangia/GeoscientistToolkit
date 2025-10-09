@@ -11,18 +11,18 @@ public unsafe class AcousticSimulatorGPU : IAcousticKernel
 {
     private readonly CL _cl;
     private readonly SimulationParameters _params;
-    
-    private nint _bufVx, _bufVy, _bufVz;
+    private nint _bufE, _bufNu, _bufRho;
     private nint _bufSxx, _bufSyy, _bufSzz;
     private nint _bufSxy, _bufSxz, _bufSyz;
-    private nint _bufE, _bufNu, _bufRho;
-    
+
+    private nint _bufVx, _bufVy, _bufVz;
+
     private nint _commandQueue;
     private nint _context;
-    
-    private int _currentBufferWidth, _currentBufferHeight, _currentBufferDepth;
     private nuint _currentBufferSize;
-    
+
+    private int _currentBufferWidth, _currentBufferHeight, _currentBufferDepth;
+
     private bool _initialized;
     private nint _kernelUpdateStress;
     private nint _kernelUpdateVelocity;
@@ -59,7 +59,7 @@ public unsafe class AcousticSimulatorGPU : IAcousticKernel
         var chunkWidth = vx.GetLength(0);
         var chunkHeight = vx.GetLength(1);
         var chunkDepth = vx.GetLength(2);
-        
+
         EnsureBuffersAllocated(chunkWidth, chunkHeight, chunkDepth);
 
         // Upload material properties (must be done for every chunk)
@@ -80,19 +80,21 @@ public unsafe class AcousticSimulatorGPU : IAcousticKernel
 
         // Execute stress update kernel
         SetKernelArgs(_kernelUpdateStress, dt, dx, chunkWidth, chunkHeight, chunkDepth);
-        
+
         var globalWorkSize = stackalloc nuint[3];
         globalWorkSize[0] = (nuint)chunkWidth;
         globalWorkSize[1] = (nuint)chunkHeight;
         globalWorkSize[2] = (nuint)chunkDepth;
 
-        var error = _cl.EnqueueNdrangeKernel(_commandQueue, _kernelUpdateStress, 3, null, globalWorkSize, null, 0, null, null);
+        var error = _cl.EnqueueNdrangeKernel(_commandQueue, _kernelUpdateStress, 3, null, globalWorkSize, null, 0, null,
+            null);
         CheckError(error, "EnqueueNDRangeKernel (stress)");
 
         // Execute velocity update kernel
         SetKernelArgsVelocity(_kernelUpdateVelocity, dt, dx, dampingFactor, chunkWidth, chunkHeight, chunkDepth);
-        
-        error = _cl.EnqueueNdrangeKernel(_commandQueue, _kernelUpdateVelocity, 3, null, globalWorkSize, null, 0, null, null);
+
+        error = _cl.EnqueueNdrangeKernel(_commandQueue, _kernelUpdateVelocity, 3, null, globalWorkSize, null, 0, null,
+            null);
         CheckError(error, "EnqueueNDRangeKernel (velocity)");
 
         // Download results (blocking reads ensure completion)
@@ -111,7 +113,7 @@ public unsafe class AcousticSimulatorGPU : IAcousticKernel
     {
         if (_commandQueue != 0)
             _cl.Finish(_commandQueue);
-            
+
         ReleaseBuffers();
 
         if (_kernelUpdateStress != 0) _cl.ReleaseKernel(_kernelUpdateStress);
@@ -124,19 +126,17 @@ public unsafe class AcousticSimulatorGPU : IAcousticKernel
     private void EnsureBuffersAllocated(int width, int height, int depth)
     {
         var bufferSize = (nuint)(width * height * depth * sizeof(float));
-        
-        if (_currentBufferSize == bufferSize && 
-            _currentBufferWidth == width && 
-            _currentBufferHeight == height && 
+
+        if (_currentBufferSize == bufferSize &&
+            _currentBufferWidth == width &&
+            _currentBufferHeight == height &&
             _currentBufferDepth == depth)
-        {
             return;
-        }
-        
+
         ReleaseBuffers();
-        
+
         int error;
-        
+
         _bufVx = _cl.CreateBuffer(_context, MemFlags.ReadWrite, bufferSize, null, &error);
         CheckError(error, "CreateBuffer Vx");
         _bufVy = _cl.CreateBuffer(_context, MemFlags.ReadWrite, bufferSize, null, &error);
@@ -161,7 +161,7 @@ public unsafe class AcousticSimulatorGPU : IAcousticKernel
         CheckError(error, "CreateBuffer Nu");
         _bufRho = _cl.CreateBuffer(_context, MemFlags.ReadOnly, bufferSize, null, &error);
         CheckError(error, "CreateBuffer Rho");
-        
+
         _currentBufferWidth = width;
         _currentBufferHeight = height;
         _currentBufferDepth = depth;
@@ -169,22 +169,81 @@ public unsafe class AcousticSimulatorGPU : IAcousticKernel
 
         Logger.Log($"[GPU] Allocated {bufferSize * 12 / (1024 * 1024)} MB for chunk {width}x{height}x{depth}");
     }
-    
+
     private void ReleaseBuffers()
     {
-        if (_bufVx != 0) { _cl.ReleaseMemObject(_bufVx); _bufVx = 0; }
-        if (_bufVy != 0) { _cl.ReleaseMemObject(_bufVy); _bufVy = 0; }
-        if (_bufVz != 0) { _cl.ReleaseMemObject(_bufVz); _bufVz = 0; }
-        if (_bufSxx != 0) { _cl.ReleaseMemObject(_bufSxx); _bufSxx = 0; }
-        if (_bufSyy != 0) { _cl.ReleaseMemObject(_bufSyy); _bufSyy = 0; }
-        if (_bufSzz != 0) { _cl.ReleaseMemObject(_bufSzz); _bufSzz = 0; }
-        if (_bufSxy != 0) { _cl.ReleaseMemObject(_bufSxy); _bufSxy = 0; }
-        if (_bufSxz != 0) { _cl.ReleaseMemObject(_bufSxz); _bufSxz = 0; }
-        if (_bufSyz != 0) { _cl.ReleaseMemObject(_bufSyz); _bufSyz = 0; }
-        if (_bufE != 0) { _cl.ReleaseMemObject(_bufE); _bufE = 0; }
-        if (_bufNu != 0) { _cl.ReleaseMemObject(_bufNu); _bufNu = 0; }
-        if (_bufRho != 0) { _cl.ReleaseMemObject(_bufRho); _bufRho = 0; }
-        
+        if (_bufVx != 0)
+        {
+            _cl.ReleaseMemObject(_bufVx);
+            _bufVx = 0;
+        }
+
+        if (_bufVy != 0)
+        {
+            _cl.ReleaseMemObject(_bufVy);
+            _bufVy = 0;
+        }
+
+        if (_bufVz != 0)
+        {
+            _cl.ReleaseMemObject(_bufVz);
+            _bufVz = 0;
+        }
+
+        if (_bufSxx != 0)
+        {
+            _cl.ReleaseMemObject(_bufSxx);
+            _bufSxx = 0;
+        }
+
+        if (_bufSyy != 0)
+        {
+            _cl.ReleaseMemObject(_bufSyy);
+            _bufSyy = 0;
+        }
+
+        if (_bufSzz != 0)
+        {
+            _cl.ReleaseMemObject(_bufSzz);
+            _bufSzz = 0;
+        }
+
+        if (_bufSxy != 0)
+        {
+            _cl.ReleaseMemObject(_bufSxy);
+            _bufSxy = 0;
+        }
+
+        if (_bufSxz != 0)
+        {
+            _cl.ReleaseMemObject(_bufSxz);
+            _bufSxz = 0;
+        }
+
+        if (_bufSyz != 0)
+        {
+            _cl.ReleaseMemObject(_bufSyz);
+            _bufSyz = 0;
+        }
+
+        if (_bufE != 0)
+        {
+            _cl.ReleaseMemObject(_bufE);
+            _bufE = 0;
+        }
+
+        if (_bufNu != 0)
+        {
+            _cl.ReleaseMemObject(_bufNu);
+            _bufNu = 0;
+        }
+
+        if (_bufRho != 0)
+        {
+            _cl.ReleaseMemObject(_bufRho);
+            _bufRho = 0;
+        }
+
         _currentBufferSize = 0;
     }
 
@@ -248,6 +307,7 @@ public unsafe class AcousticSimulatorGPU : IAcousticKernel
             {
                 _cl.GetProgramBuildInfo(_program, 0, (uint)ProgramBuildInfo.BuildLog, logSize, logPtr, null);
             }
+
             var logString = Encoding.UTF8.GetString(log);
             throw new Exception($"OpenCL build failed: {logString}");
         }

@@ -145,7 +145,6 @@ public class AcousticExportManager : IDisposable
 
     private void ExportAcousticVolume(string basePath, CancellationToken cancellationToken)
     {
-        // Create directory structure
         var volumeDir = Path.ChangeExtension(basePath, null);
         Directory.CreateDirectory(volumeDir);
 
@@ -154,7 +153,6 @@ public class AcousticExportManager : IDisposable
 
         UpdateProgress(0.05f, "Creating acoustic volume dataset...");
 
-        // Create dataset metadata object
         var acousticDataset = new AcousticVolumeDataset(
             Path.GetFileName(volumeDir),
             volumeDir)
@@ -178,43 +176,49 @@ public class AcousticExportManager : IDisposable
         };
 
         var progressBase = 0.1f;
-        var progressPerField = 0.1f; // Adjusted progress step for more fields
+        var progressPerField = 0.12f;
 
-        // Export P-Wave field
+        // FIX: Export with correct filenames that loader expects
+        // Export P-Wave field (maximum P-wave magnitude)
         if (_results.WaveFieldVx != null)
         {
-            UpdateProgress(progressBase, "Exporting P-Wave field...");
+            UpdateProgress(progressBase, "Exporting P-Wave field (max longitudinal)...");
             cancellationToken.ThrowIfCancellationRequested();
 
             var pWavePath = Path.Combine(volumeDir, "PWaveField.bin");
-            ExportWaveField(_results.WaveFieldVx, pWavePath, true);
+            ExportWaveField(_results.WaveFieldVx, pWavePath, false); // unsigned
+
+            Logger.Log("[Export] ✓ Exported PWaveField.bin (maximum P-wave/longitudinal velocity)");
             progressBase += progressPerField;
         }
 
-        // Export S-Wave field
+        // Export S-Wave field (maximum S-wave magnitude)
         if (_results.WaveFieldVy != null)
         {
-            UpdateProgress(progressBase, "Exporting S-Wave field...");
+            UpdateProgress(progressBase, "Exporting S-Wave field (max transverse)...");
             cancellationToken.ThrowIfCancellationRequested();
 
             var sWavePath = Path.Combine(volumeDir, "SWaveField.bin");
-            ExportWaveField(_results.WaveFieldVy, sWavePath, true);
+            ExportWaveField(_results.WaveFieldVy, sWavePath, false); // unsigned
+
+            Logger.Log("[Export] ✓ Exported SWaveField.bin (maximum S-wave/transverse velocity)");
             progressBase += progressPerField;
         }
 
-        // Export Combined field
+        // Export Combined field (maximum total magnitude)
         if (_results.WaveFieldVz != null)
         {
-            UpdateProgress(progressBase, "Creating combined field...");
+            UpdateProgress(progressBase, "Exporting Combined field (max total magnitude)...");
             cancellationToken.ThrowIfCancellationRequested();
 
-            var combined = CreateCombinedField();
             var combinedPath = Path.Combine(volumeDir, "CombinedField.bin");
-            ExportWaveField(combined, combinedPath, false);
+            ExportWaveField(_results.WaveFieldVz, combinedPath, false); // unsigned
+
+            Logger.Log("[Export] ✓ Exported CombinedField.bin (maximum combined magnitude)");
             progressBase += progressPerField;
         }
 
-        // Export Damage field
+        // Damage field
         if (_damageField != null)
         {
             UpdateProgress(progressBase, "Exporting damage field...");
@@ -222,10 +226,11 @@ public class AcousticExportManager : IDisposable
 
             var damagePath = Path.Combine(volumeDir, "DamageField.bin");
             ExportWaveField(_damageField, damagePath, false);
+            Logger.Log("[Export] ✓ Exported DamageField.bin");
             progressBase += progressPerField;
         }
 
-        // Export Material Property fields
+        // Material properties (unchanged)
         if (_densityVolume != null)
         {
             UpdateProgress(progressBase, "Exporting Density Volume...");
@@ -253,30 +258,35 @@ public class AcousticExportManager : IDisposable
             progressBase += progressPerField;
         }
 
-        // Export time series
+        // Time series (unchanged)
         if (_results.TimeSeriesSnapshots?.Count > 0)
         {
-            UpdateProgress(0.8f, "Exporting time series snapshots..."); // Adjusted progress start
+            UpdateProgress(0.8f, "Exporting time series snapshots...");
             ExportTimeSeries(timeSeriesDir, cancellationToken);
         }
 
-        // Save metadata
         UpdateProgress(0.95f, "Saving metadata...");
         SaveMetadata(acousticDataset, volumeDir);
 
-        // Save calibration if available
         if (_calibrationData != null && _calibrationData.Points.Count > 0)
         {
             UpdateProgress(0.97f, "Saving calibration data...");
             SaveCalibration(_calibrationData, volumeDir);
         }
 
-        // Add to project
         UpdateProgress(0.99f, "Adding to project...");
-        acousticDataset.Load(); // The Load method will now pick up the property files we just saved
+        acousticDataset.Load();
         ProjectManager.Instance.AddDataset(acousticDataset);
 
         UpdateProgress(1.0f, "Export complete!");
+
+        Logger.Log("[Export] ═══════════════════════════════════════");
+        Logger.Log("[Export] ✓ Acoustic volume exported successfully");
+        Logger.Log("[Export] PWaveField.bin    = Maximum P-wave (longitudinal) velocity");
+        Logger.Log("[Export] SWaveField.bin    = Maximum S-wave (transverse) velocity");
+        Logger.Log("[Export] CombinedField.bin = Maximum combined magnitude");
+        Logger.Log("[Export] These fields allow post-simulation Vp/Vs analysis in viewer");
+        Logger.Log("[Export] ═══════════════════════════════════════");
     }
 
     private void ExportWaveField(float[,,] field, string path, bool isSigned)
@@ -404,7 +414,6 @@ public class AcousticExportManager : IDisposable
 
     private AcousticVolumeDataset CreateTemporaryDataset()
     {
-        // Create a temporary dataset for the waveform viewer
         var dataset = new AcousticVolumeDataset("Temp", Path.GetTempPath())
         {
             PWaveVelocity = _results.PWaveVelocity,
@@ -420,12 +429,15 @@ public class AcousticExportManager : IDisposable
             TimeSeriesSnapshots = ConvertTimeSeriesForViewer(_results.TimeSeriesSnapshots)
         };
 
-        // Create volumes from results
-        if (_results.WaveFieldVx != null) dataset.PWaveField = CreateVolumeFromField(_results.WaveFieldVx, true);
-        if (_results.WaveFieldVy != null) dataset.SWaveField = CreateVolumeFromField(_results.WaveFieldVy, true);
+        // FIX: Map correctly to dataset fields
+        if (_results.WaveFieldVx != null)
+            dataset.PWaveField = CreateVolumeFromField(_results.WaveFieldVx, false); // Max P-wave
+        if (_results.WaveFieldVy != null)
+            dataset.SWaveField = CreateVolumeFromField(_results.WaveFieldVy, false); // Max S-wave
         if (_results.WaveFieldVz != null)
-            dataset.CombinedWaveField = CreateVolumeFromField(CreateCombinedField(), false);
-        if (_damageField != null) dataset.DamageField = CreateVolumeFromField(_damageField, false);
+            dataset.CombinedWaveField = CreateVolumeFromField(_results.WaveFieldVz, false); // Max combined
+        if (_damageField != null)
+            dataset.DamageField = CreateVolumeFromField(_damageField, false);
 
         dataset.Calibration = _calibrationData;
 
