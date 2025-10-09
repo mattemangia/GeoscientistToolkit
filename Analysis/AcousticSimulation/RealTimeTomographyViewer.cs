@@ -18,14 +18,14 @@ public class RealTimeTomographyViewer : IDisposable
     private SimulationResults _currentDataSource;
     private float _currentSliceMaxVel;
 
-    // Data fields for the dynamic legend
+// Data fields for the dynamic legend
     private float _currentSliceMinVel;
     private Vector3 _dimensions;
     private Task _generationTask;
 
     private bool _isLive;
 
-    // UI State
+// UI State
     private bool _isOpen;
     private byte[,,] _labels; // Material labels for filtering
     private (byte[] pixelData, int w, int h, float minVel, float maxVel)? _pendingTextureUpdate;
@@ -35,7 +35,7 @@ public class RealTimeTomographyViewer : IDisposable
     private int _sliceIndex;
     private string _statusMessage = "No data available.";
 
-    // Graphics Resources
+// Graphics Resources
     private TextureManager _tomographyTexture;
     private CancellationTokenSource _updateCts;
 
@@ -161,30 +161,49 @@ public class RealTimeTomographyViewer : IDisposable
 
     private void DrawTomographyView()
     {
-        if (_generationTask != null && !_generationTask.IsCompleted) ImGui.Text("Generating slice...");
+        var w = _sliceAxis switch { 0 => (int)_dimensions.Y, 1 => (int)_dimensions.X, _ => (int)_dimensions.X };
+        var h = _sliceAxis switch { 0 => (int)_dimensions.Z, 1 => (int)_dimensions.Z, _ => (int)_dimensions.Y };
+
+        var availableSize = ImGui.GetContentRegionAvail();
+        availableSize.Y -= 80; // Reserve space for color bar and labels
+
+        // Keep a consistent height for the image area to prevent layout shifts
+        var imageContainerSize = new Vector2(availableSize.X, Math.Max(50, availableSize.Y));
+        var imageContainerTopLeft = ImGui.GetCursorScreenPos();
+
+        // Draw a dummy item to reserve the space
+        ImGui.Dummy(imageContainerSize);
+
+        if (_generationTask != null && !_generationTask.IsCompleted)
+        {
+            var loadingText = "Generating slice...";
+            var textSize = ImGui.CalcTextSize(loadingText);
+            var textPos = imageContainerTopLeft + (imageContainerSize - textSize) * 0.5f;
+            ImGui.GetWindowDrawList().AddText(textPos, ImGui.GetColorU32(ImGuiCol.Text), loadingText);
+        }
 
         if (_tomographyTexture != null && _tomographyTexture.IsValid)
         {
-            var w = _sliceAxis switch { 0 => (int)_dimensions.Y, 1 => (int)_dimensions.X, _ => (int)_dimensions.X };
-            var h = _sliceAxis switch { 0 => (int)_dimensions.Z, 1 => (int)_dimensions.Z, _ => (int)_dimensions.Y };
             ImGui.Text(
                 $"Displaying slice {_sliceIndex} on Axis {(_sliceAxis == 0 ? "X" : _sliceAxis == 1 ? "Y" : "Z")}. Image size: {w}x{h}");
 
-            var availableSize = ImGui.GetContentRegionAvail();
-            availableSize.Y -= 80;
-
-            if (availableSize.X > 50 && availableSize.Y > 50)
+            if (imageContainerSize.X > 50 && imageContainerSize.Y > 50)
             {
                 var aspectRatio = w > 0 && h > 0 ? (float)w / h : 1.0f;
                 Vector2 imageSize;
-                if (availableSize.X / availableSize.Y > aspectRatio)
-                    imageSize = new Vector2(availableSize.Y * aspectRatio, availableSize.Y);
+                if (imageContainerSize.X / imageContainerSize.Y > aspectRatio)
+                    imageSize = new Vector2(imageContainerSize.Y * aspectRatio, imageContainerSize.Y);
                 else
-                    imageSize = new Vector2(availableSize.X, availableSize.X / aspectRatio);
+                    imageSize = new Vector2(imageContainerSize.X, imageContainerSize.X / aspectRatio);
 
-                ImGui.Image(_tomographyTexture.GetImGuiTextureId(), imageSize);
+                // Center the image within the reserved container space
+                var imageTopLeft = imageContainerTopLeft + (imageContainerSize - imageSize) * 0.5f;
+                ImGui.GetWindowDrawList().AddImage(_tomographyTexture.GetImGuiTextureId(), imageTopLeft,
+                    imageTopLeft + imageSize);
             }
 
+            // Set cursor for the color bar to be drawn after the reserved space
+            ImGui.SetCursorScreenPos(imageContainerTopLeft + new Vector2(0, imageContainerSize.Y));
             DrawColorBar();
         }
         else if (_generationTask == null || _generationTask.IsCompleted)
@@ -217,8 +236,8 @@ public class RealTimeTomographyViewer : IDisposable
             drawList.AddRectFilled(new Vector2(pos.X + i, pos.Y), new Vector2(pos.X + i + 1, pos.Y + barHeight), col32);
         }
 
-        var minLabel = $"{_currentSliceMinVel:F0}";
-        var maxLabel = $"{_currentSliceMaxVel:F0}";
+        var minLabel = $"{_currentSliceMinVel:0.000E+00}";
+        var maxLabel = $"{_currentSliceMaxVel:0.000E+00}";
         var maxLabelSize = ImGui.CalcTextSize(maxLabel);
 
         ImGui.SetCursorScreenPos(pos + new Vector2(0, barHeight + 2));

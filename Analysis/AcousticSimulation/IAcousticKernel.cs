@@ -11,7 +11,7 @@ public interface IAcousticKernel : IDisposable
     ///     Initializes the kernel with volume dimensions.
     /// </summary>
     void Initialize(int width, int height, int depth);
-    
+
     /// <summary>
     ///     Updates the wave field for one time step using elastic wave equations.
     /// </summary>

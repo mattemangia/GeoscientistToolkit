@@ -1,6 +1,5 @@
 // GeoscientistToolkit/Analysis/AcousticSimulation/AcousticSimulatorGPU.cs
 
-using System.Runtime.InteropServices;
 using System.Text;
 using GeoscientistToolkit.Util;
 using Silk.NET.OpenCL;
@@ -12,23 +11,23 @@ namespace GeoscientistToolkit.Analysis.AcousticSimulation;
 /// </summary>
 public unsafe class AcousticSimulatorGPU : IAcousticKernel
 {
-    private readonly SimulationParameters _params;
     private readonly CL _cl;
-    
-    private nint _context;
-    private nint _commandQueue;
-    private nint _program;
-    private nint _kernelUpdateStress;
-    private nint _kernelUpdateVelocity;
-    
-    // Device buffers
-    private nint _bufVx, _bufVy, _bufVz;
+    private readonly SimulationParameters _params;
+    private nint _bufE, _bufNu, _bufRho;
     private nint _bufSxx, _bufSyy, _bufSzz;
     private nint _bufSxy, _bufSxz, _bufSyz;
-    private nint _bufE, _bufNu, _bufRho;
-    
-    private int _width, _height, _depth;
+
+    // Device buffers
+    private nint _bufVx, _bufVy, _bufVz;
+    private nint _commandQueue;
+
+    private nint _context;
     private bool _initialized;
+    private nint _kernelUpdateStress;
+    private nint _kernelUpdateVelocity;
+    private nint _program;
+
+    private int _width, _height, _depth;
 
     public AcousticSimulatorGPU(SimulationParameters parameters)
     {
@@ -37,91 +36,224 @@ public unsafe class AcousticSimulatorGPU : IAcousticKernel
         InitializeOpenCL();
     }
 
+    public void Initialize(int width, int height, int depth)
+    {
+        _width = width;
+        _height = height;
+        _depth = depth;
+
+        var bufferSize = (nuint)(width * height * depth * sizeof(float));
+        int error;
+
+        // Create device buffers
+        _bufVx = _cl.CreateBuffer(_context, MemFlags.ReadWrite, bufferSize, null, &error);
+        CheckError(error, "CreateBuffer Vx");
+
+        _bufVy = _cl.CreateBuffer(_context, MemFlags.ReadWrite, bufferSize, null, &error);
+        CheckError(error, "CreateBuffer Vy");
+
+        _bufVz = _cl.CreateBuffer(_context, MemFlags.ReadWrite, bufferSize, null, &error);
+        CheckError(error, "CreateBuffer Vz");
+
+        _bufSxx = _cl.CreateBuffer(_context, MemFlags.ReadWrite, bufferSize, null, &error);
+        CheckError(error, "CreateBuffer Sxx");
+
+        _bufSyy = _cl.CreateBuffer(_context, MemFlags.ReadWrite, bufferSize, null, &error);
+        CheckError(error, "CreateBuffer Syy");
+
+        _bufSzz = _cl.CreateBuffer(_context, MemFlags.ReadWrite, bufferSize, null, &error);
+        CheckError(error, "CreateBuffer Szz");
+
+        _bufSxy = _cl.CreateBuffer(_context, MemFlags.ReadWrite, bufferSize, null, &error);
+        CheckError(error, "CreateBuffer Sxy");
+
+        _bufSxz = _cl.CreateBuffer(_context, MemFlags.ReadWrite, bufferSize, null, &error);
+        CheckError(error, "CreateBuffer Sxz");
+
+        _bufSyz = _cl.CreateBuffer(_context, MemFlags.ReadWrite, bufferSize, null, &error);
+        CheckError(error, "CreateBuffer Syz");
+
+        _bufE = _cl.CreateBuffer(_context, MemFlags.ReadOnly, bufferSize, null, &error);
+        CheckError(error, "CreateBuffer E");
+
+        _bufNu = _cl.CreateBuffer(_context, MemFlags.ReadOnly, bufferSize, null, &error);
+        CheckError(error, "CreateBuffer Nu");
+
+        _bufRho = _cl.CreateBuffer(_context, MemFlags.ReadOnly, bufferSize, null, &error);
+        CheckError(error, "CreateBuffer Rho");
+
+        _initialized = true;
+        Logger.Log($"[GPU] Allocated {bufferSize * 12 / (1024 * 1024)} MB of device memory");
+    }
+
+    public void UpdateWaveField(
+        float[,,] vx, float[,,] vy, float[,,] vz,
+        float[,,] sxx, float[,,] syy, float[,,] szz,
+        float[,,] sxy, float[,,] sxz, float[,,] syz,
+        float[,,] E, float[,,] nu, float[,,] rho,
+        float dt, float dx, float dampingFactor)
+    {
+        if (!_initialized)
+            throw new InvalidOperationException("GPU kernel not initialized");
+
+        int error;
+
+        // Upload data to device
+        UploadBuffer(_bufVx, vx);
+        UploadBuffer(_bufVy, vy);
+        UploadBuffer(_bufVz, vz);
+        UploadBuffer(_bufSxx, sxx);
+        UploadBuffer(_bufSyy, syy);
+        UploadBuffer(_bufSzz, szz);
+        UploadBuffer(_bufSxy, sxy);
+        UploadBuffer(_bufSxz, sxz);
+        UploadBuffer(_bufSyz, syz);
+        UploadBuffer(_bufE, E);
+        UploadBuffer(_bufNu, nu);
+        UploadBuffer(_bufRho, rho);
+
+        // Set kernel arguments for stress update
+        SetKernelArgs(_kernelUpdateStress, dt, dx);
+
+        // Execute stress kernel
+        var globalWorkSize = stackalloc nuint[3];
+        globalWorkSize[0] = (nuint)_width;
+        globalWorkSize[1] = (nuint)_height;
+        globalWorkSize[2] = (nuint)_depth;
+
+        error = _cl.EnqueueNdrangeKernel(_commandQueue, _kernelUpdateStress, 3, null, globalWorkSize, null, 0, null,
+            null);
+        CheckError(error, "EnqueueNDRangeKernel (stress)");
+
+        // Set kernel arguments for velocity update
+        SetKernelArgsVelocity(_kernelUpdateVelocity, dt, dx, dampingFactor);
+
+        // Execute velocity kernel
+        error = _cl.EnqueueNdrangeKernel(_commandQueue, _kernelUpdateVelocity, 3, null, globalWorkSize, null, 0, null,
+            null);
+        CheckError(error, "EnqueueNDRangeKernel (velocity)");
+
+        // Download results
+        DownloadBuffer(_bufVx, vx);
+        DownloadBuffer(_bufVy, vy);
+        DownloadBuffer(_bufVz, vz);
+        DownloadBuffer(_bufSxx, sxx);
+        DownloadBuffer(_bufSyy, syy);
+        DownloadBuffer(_bufSzz, szz);
+        DownloadBuffer(_bufSxy, sxy);
+        DownloadBuffer(_bufSxz, sxz);
+        DownloadBuffer(_bufSyz, syz);
+
+        _cl.Finish(_commandQueue);
+    }
+
+    public void Dispose()
+    {
+        if (_bufVx != 0) _cl.ReleaseMemObject(_bufVx);
+        if (_bufVy != 0) _cl.ReleaseMemObject(_bufVy);
+        if (_bufVz != 0) _cl.ReleaseMemObject(_bufVz);
+        if (_bufSxx != 0) _cl.ReleaseMemObject(_bufSxx);
+        if (_bufSyy != 0) _cl.ReleaseMemObject(_bufSyy);
+        if (_bufSzz != 0) _cl.ReleaseMemObject(_bufSzz);
+        if (_bufSxy != 0) _cl.ReleaseMemObject(_bufSxy);
+        if (_bufSxz != 0) _cl.ReleaseMemObject(_bufSxz);
+        if (_bufSyz != 0) _cl.ReleaseMemObject(_bufSyz);
+        if (_bufE != 0) _cl.ReleaseMemObject(_bufE);
+        if (_bufNu != 0) _cl.ReleaseMemObject(_bufNu);
+        if (_bufRho != 0) _cl.ReleaseMemObject(_bufRho);
+
+        if (_kernelUpdateStress != 0) _cl.ReleaseKernel(_kernelUpdateStress);
+        if (_kernelUpdateVelocity != 0) _cl.ReleaseKernel(_kernelUpdateVelocity);
+        if (_program != 0) _cl.ReleaseProgram(_program);
+        if (_commandQueue != 0) _cl.ReleaseCommandQueue(_commandQueue);
+        if (_context != 0) _cl.ReleaseContext(_context);
+    }
+
     private void InitializeOpenCL()
     {
         int error;
-        
+
         // Get platform
         uint numPlatforms;
-        _cl.GetPlatformIDs(0, (nint*)null, &numPlatforms);
-        
+        _cl.GetPlatformIDs(0, null, &numPlatforms);
+
         if (numPlatforms == 0)
             throw new Exception("No OpenCL platforms found");
-        
+
         var platforms = stackalloc nint[(int)numPlatforms];
-        _cl.GetPlatformIDs(numPlatforms, platforms, (uint*)null);
-        
+        _cl.GetPlatformIDs(numPlatforms, platforms, null);
+
         // Get device
         uint numDevices;
-        _cl.GetDeviceIDs(platforms[0], DeviceType.Gpu, 0, (nint*)null, &numDevices);
-        
+        _cl.GetDeviceIDs(platforms[0], DeviceType.Gpu, 0, null, &numDevices);
+
         if (numDevices == 0)
-            _cl.GetDeviceIDs(platforms[0], DeviceType.All, 0, (nint*)null, &numDevices);
-        
+            _cl.GetDeviceIDs(platforms[0], DeviceType.All, 0, null, &numDevices);
+
         if (numDevices == 0)
             throw new Exception("No OpenCL devices found");
-        
+
         var devices = stackalloc nint[(int)numDevices];
-        _cl.GetDeviceIDs(platforms[0], DeviceType.Gpu, numDevices, devices, (uint*)null);
-        
+        _cl.GetDeviceIDs(platforms[0], DeviceType.Gpu, numDevices, devices, null);
+
         if (devices[0] == 0)
-            _cl.GetDeviceIDs(platforms[0], DeviceType.All, numDevices, devices, (uint*)null);
-        
+            _cl.GetDeviceIDs(platforms[0], DeviceType.All, numDevices, devices, null);
+
         // Create context
-        _context = _cl.CreateContext((nint*)null, 1, devices, null, null, &error);
+        _context = _cl.CreateContext(null, 1, devices, null, null, &error);
         CheckError(error, "CreateContext");
-        
+
         // Create command queue with explicit cast
         _commandQueue = _cl.CreateCommandQueue(_context, devices[0], (CommandQueueProperties)0, &error);
         CheckError(error, "CreateCommandQueue");
-        
+
         // Build program
         BuildProgram();
-        
+
         Logger.Log("[GPU] OpenCL initialized successfully");
     }
 
     private void BuildProgram()
     {
-        string kernelSource = GetKernelSource();
-        byte[] sourceBytes = Encoding.UTF8.GetBytes(kernelSource);
-        
+        var kernelSource = GetKernelSource();
+        var sourceBytes = Encoding.UTF8.GetBytes(kernelSource);
+
         int error;
         fixed (byte* sourcePtr = sourceBytes)
         {
             var lengths = stackalloc nuint[1];
             lengths[0] = (nuint)sourceBytes.Length;
-            
-            byte** sourcePtrs = stackalloc byte*[1];
+
+            var sourcePtrs = stackalloc byte*[1];
             sourcePtrs[0] = sourcePtr;
-            
+
             _program = _cl.CreateProgramWithSource(_context, 1, sourcePtrs, lengths, &error);
             CheckError(error, "CreateProgramWithSource");
         }
-        
+
         // Build with null options
-        error = _cl.BuildProgram(_program, 0, (nint*)null, (byte*)null, null, null);
-        
+        error = _cl.BuildProgram(_program, 0, null, (byte*)null, null, null);
+
         if (error != 0)
         {
             // Get build log
             nuint logSize;
-            _cl.GetProgramBuildInfo(_program, (nint)0, (uint)ProgramBuildInfo.BuildLog, 0, null, &logSize);
-            
+            _cl.GetProgramBuildInfo(_program, 0, (uint)ProgramBuildInfo.BuildLog, 0, null, &logSize);
+
             var log = new byte[logSize];
             fixed (byte* logPtr = log)
             {
-                _cl.GetProgramBuildInfo(_program, (nint)0, (uint)ProgramBuildInfo.BuildLog, logSize, logPtr, (nuint*)null);
+                _cl.GetProgramBuildInfo(_program, 0, (uint)ProgramBuildInfo.BuildLog, logSize, logPtr, null);
             }
-            
-            string logString = Encoding.UTF8.GetString(log);
+
+            var logString = Encoding.UTF8.GetString(log);
             throw new Exception($"OpenCL build failed: {logString}");
         }
-        
+
         // Create kernels
         _kernelUpdateStress = _cl.CreateKernel(_program, "update_stress", &error);
         CheckError(error, "CreateKernel (stress)");
-        
+
         _kernelUpdateVelocity = _cl.CreateKernel(_program, "update_velocity", &error);
         CheckError(error, "CreateKernel (velocity)");
     }
@@ -238,118 +370,9 @@ __kernel void update_velocity(
 ";
     }
 
-    public void Initialize(int width, int height, int depth)
-    {
-        _width = width;
-        _height = height;
-        _depth = depth;
-        
-        nuint bufferSize = (nuint)(width * height * depth * sizeof(float));
-        int error;
-        
-        // Create device buffers
-        _bufVx = _cl.CreateBuffer(_context, MemFlags.ReadWrite, bufferSize, null, &error);
-        CheckError(error, "CreateBuffer Vx");
-        
-        _bufVy = _cl.CreateBuffer(_context, MemFlags.ReadWrite, bufferSize, null, &error);
-        CheckError(error, "CreateBuffer Vy");
-        
-        _bufVz = _cl.CreateBuffer(_context, MemFlags.ReadWrite, bufferSize, null, &error);
-        CheckError(error, "CreateBuffer Vz");
-        
-        _bufSxx = _cl.CreateBuffer(_context, MemFlags.ReadWrite, bufferSize, null, &error);
-        CheckError(error, "CreateBuffer Sxx");
-        
-        _bufSyy = _cl.CreateBuffer(_context, MemFlags.ReadWrite, bufferSize, null, &error);
-        CheckError(error, "CreateBuffer Syy");
-        
-        _bufSzz = _cl.CreateBuffer(_context, MemFlags.ReadWrite, bufferSize, null, &error);
-        CheckError(error, "CreateBuffer Szz");
-        
-        _bufSxy = _cl.CreateBuffer(_context, MemFlags.ReadWrite, bufferSize, null, &error);
-        CheckError(error, "CreateBuffer Sxy");
-        
-        _bufSxz = _cl.CreateBuffer(_context, MemFlags.ReadWrite, bufferSize, null, &error);
-        CheckError(error, "CreateBuffer Sxz");
-        
-        _bufSyz = _cl.CreateBuffer(_context, MemFlags.ReadWrite, bufferSize, null, &error);
-        CheckError(error, "CreateBuffer Syz");
-        
-        _bufE = _cl.CreateBuffer(_context, MemFlags.ReadOnly, bufferSize, null, &error);
-        CheckError(error, "CreateBuffer E");
-        
-        _bufNu = _cl.CreateBuffer(_context, MemFlags.ReadOnly, bufferSize, null, &error);
-        CheckError(error, "CreateBuffer Nu");
-        
-        _bufRho = _cl.CreateBuffer(_context, MemFlags.ReadOnly, bufferSize, null, &error);
-        CheckError(error, "CreateBuffer Rho");
-        
-        _initialized = true;
-        Logger.Log($"[GPU] Allocated {bufferSize * 12 / (1024 * 1024)} MB of device memory");
-    }
-
-    public void UpdateWaveField(
-        float[,,] vx, float[,,] vy, float[,,] vz,
-        float[,,] sxx, float[,,] syy, float[,,] szz,
-        float[,,] sxy, float[,,] sxz, float[,,] syz,
-        float[,,] E, float[,,] nu, float[,,] rho,
-        float dt, float dx, float dampingFactor)
-    {
-        if (!_initialized)
-            throw new InvalidOperationException("GPU kernel not initialized");
-        
-        int error;
-        
-        // Upload data to device
-        UploadBuffer(_bufVx, vx);
-        UploadBuffer(_bufVy, vy);
-        UploadBuffer(_bufVz, vz);
-        UploadBuffer(_bufSxx, sxx);
-        UploadBuffer(_bufSyy, syy);
-        UploadBuffer(_bufSzz, szz);
-        UploadBuffer(_bufSxy, sxy);
-        UploadBuffer(_bufSxz, sxz);
-        UploadBuffer(_bufSyz, syz);
-        UploadBuffer(_bufE, E);
-        UploadBuffer(_bufNu, nu);
-        UploadBuffer(_bufRho, rho);
-        
-        // Set kernel arguments for stress update
-        SetKernelArgs(_kernelUpdateStress, dt, dx);
-        
-        // Execute stress kernel
-        nuint* globalWorkSize = stackalloc nuint[3];
-        globalWorkSize[0] = (nuint)_width;
-        globalWorkSize[1] = (nuint)_height;
-        globalWorkSize[2] = (nuint)_depth;
-        
-        error = _cl.EnqueueNdrangeKernel(_commandQueue, _kernelUpdateStress, 3, null, globalWorkSize, null, 0, null, null);
-        CheckError(error, "EnqueueNDRangeKernel (stress)");
-        
-        // Set kernel arguments for velocity update
-        SetKernelArgsVelocity(_kernelUpdateVelocity, dt, dx, dampingFactor);
-        
-        // Execute velocity kernel
-        error = _cl.EnqueueNdrangeKernel(_commandQueue, _kernelUpdateVelocity, 3, null, globalWorkSize, null, 0, null, null);
-        CheckError(error, "EnqueueNDRangeKernel (velocity)");
-        
-        // Download results
-        DownloadBuffer(_bufVx, vx);
-        DownloadBuffer(_bufVy, vy);
-        DownloadBuffer(_bufVz, vz);
-        DownloadBuffer(_bufSxx, sxx);
-        DownloadBuffer(_bufSyy, syy);
-        DownloadBuffer(_bufSzz, szz);
-        DownloadBuffer(_bufSxy, sxy);
-        DownloadBuffer(_bufSxz, sxz);
-        DownloadBuffer(_bufSyz, syz);
-        
-        _cl.Finish(_commandQueue);
-    }
-
     private void SetKernelArgs(nint kernel, float dt, float dx)
     {
-        int arg = 0;
+        var arg = 0;
         SetKernelArg(kernel, arg++, _bufVx);
         SetKernelArg(kernel, arg++, _bufVy);
         SetKernelArg(kernel, arg++, _bufVz);
@@ -371,7 +394,7 @@ __kernel void update_velocity(
 
     private void SetKernelArgsVelocity(nint kernel, float dt, float dx, float damping)
     {
-        int arg = 0;
+        var arg = 0;
         SetKernelArg(kernel, arg++, _bufVx);
         SetKernelArg(kernel, arg++, _bufVy);
         SetKernelArg(kernel, arg++, _bufVz);
@@ -394,7 +417,7 @@ __kernel void update_velocity(
 
     private void SetKernelArg<T>(nint kernel, int index, T value) where T : unmanaged
     {
-        int error = _cl.SetKernelArg(kernel, (uint)index, (nuint)sizeof(T), &value);
+        var error = _cl.SetKernelArg(kernel, (uint)index, (nuint)sizeof(T), &value);
         CheckError(error, $"SetKernelArg {index}");
     }
 
@@ -402,8 +425,8 @@ __kernel void update_velocity(
     {
         fixed (float* ptr = data)
         {
-            nuint size = (nuint)(data.Length * sizeof(float));
-            int error = _cl.EnqueueWriteBuffer(_commandQueue, buffer, true, 0, size, ptr, 0, null, null);
+            var size = (nuint)(data.Length * sizeof(float));
+            var error = _cl.EnqueueWriteBuffer(_commandQueue, buffer, true, 0, size, ptr, 0, null, null);
             CheckError(error, "EnqueueWriteBuffer");
         }
     }
@@ -412,8 +435,8 @@ __kernel void update_velocity(
     {
         fixed (float* ptr = data)
         {
-            nuint size = (nuint)(data.Length * sizeof(float));
-            int error = _cl.EnqueueReadBuffer(_commandQueue, buffer, true, 0, size, ptr, 0, null, null);
+            var size = (nuint)(data.Length * sizeof(float));
+            var error = _cl.EnqueueReadBuffer(_commandQueue, buffer, true, 0, size, ptr, 0, null, null);
             CheckError(error, "EnqueueReadBuffer");
         }
     }
@@ -422,27 +445,5 @@ __kernel void update_velocity(
     {
         if (error != 0)
             throw new Exception($"OpenCL error in {operation}: {error}");
-    }
-
-    public void Dispose()
-    {
-        if (_bufVx != 0) _cl.ReleaseMemObject(_bufVx);
-        if (_bufVy != 0) _cl.ReleaseMemObject(_bufVy);
-        if (_bufVz != 0) _cl.ReleaseMemObject(_bufVz);
-        if (_bufSxx != 0) _cl.ReleaseMemObject(_bufSxx);
-        if (_bufSyy != 0) _cl.ReleaseMemObject(_bufSyy);
-        if (_bufSzz != 0) _cl.ReleaseMemObject(_bufSzz);
-        if (_bufSxy != 0) _cl.ReleaseMemObject(_bufSxy);
-        if (_bufSxz != 0) _cl.ReleaseMemObject(_bufSxz);
-        if (_bufSyz != 0) _cl.ReleaseMemObject(_bufSyz);
-        if (_bufE != 0) _cl.ReleaseMemObject(_bufE);
-        if (_bufNu != 0) _cl.ReleaseMemObject(_bufNu);
-        if (_bufRho != 0) _cl.ReleaseMemObject(_bufRho);
-        
-        if (_kernelUpdateStress != 0) _cl.ReleaseKernel(_kernelUpdateStress);
-        if (_kernelUpdateVelocity != 0) _cl.ReleaseKernel(_kernelUpdateVelocity);
-        if (_program != 0) _cl.ReleaseProgram(_program);
-        if (_commandQueue != 0) _cl.ReleaseCommandQueue(_commandQueue);
-        if (_context != 0) _cl.ReleaseContext(_context);
     }
 }
