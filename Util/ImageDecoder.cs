@@ -128,7 +128,7 @@ public static class ImageDecoder
 /// <summary>
 ///     Coordinate conversion utilities
 /// </summary>
-public static class CoordinateConverter
+public static partial class CoordinateConverter
 {
     public static DMS ToDMS(double decimalDegrees)
     {

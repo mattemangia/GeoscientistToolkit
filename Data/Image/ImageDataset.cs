@@ -28,7 +28,7 @@ public class ImageDataset : Dataset, IDisposable, ISerializableDataset
     public ImageTag Tags { get; set; } = ImageTag.None;
     public Dictionary<string, object> ImageMetadata { get; set; } = new();
 
-    public byte[] ImageData { get; private set; }
+    public byte[] ImageData { get; set; }
 
     // FIX: Added a shared property to control segmentation visibility across UI panels
     public bool ShowSegmentationOverlay { get; set; } = true;

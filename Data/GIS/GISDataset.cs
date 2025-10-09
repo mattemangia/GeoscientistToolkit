@@ -1,11 +1,11 @@
-// GeoscientistToolkit/Data/GIS/GISDataset.cs
+// GeoscientistToolkit/Data/GIS/GISDataset.cs (Updated)
 
 using System.IO.Compression;
 using System.Numerics;
+using System.Text;
 using System.Text.Json;
 using System.Xml.Linq;
 using GeoscientistToolkit.Util;
-using NetTopologySuite.Features;
 using NetTopologySuite.Geometries;
 using NetTopologySuite.IO;
 using ProjNet.CoordinateSystems;
@@ -47,6 +47,10 @@ public class GISDataset : Dataset, ISerializableDataset
     // Edit state
     public bool IsEditable { get; set; } = true;
 
+    // Tag System
+    public GISTag Tags { get; set; } = GISTag.None;
+    public Dictionary<string, object> GISMetadata { get; set; } = new();
+
     public object ToSerializableObject()
     {
         return new GISDatasetDTO
@@ -66,17 +70,61 @@ public class GISDataset : Dataset, ISerializableDataset
             BasemapType = BasemapType.ToString(),
             BasemapPath = BasemapPath,
             Center = Center,
-            DefaultZoom = DefaultZoom
+            DefaultZoom = DefaultZoom,
+            Tags = (long)Tags,
+            GISMetadata = new Dictionary<string, string>(
+                GISMetadata.Select(kvp => new KeyValuePair<string, string>(
+                    kvp.Key, kvp.Value?.ToString() ?? "")))
         };
+    }
+
+    // Tag Management Methods
+    public void AddTag(GISTag tag)
+    {
+        Tags |= tag;
+        Logger.Log($"Added tag '{tag.GetDisplayName()}' to {Name}");
+    }
+
+    public void RemoveTag(GISTag tag)
+    {
+        Tags &= ~tag;
+        Logger.Log($"Removed tag '{tag.GetDisplayName()}' from {Name}");
+    }
+
+    public bool HasTag(GISTag tag)
+    {
+        return Tags.HasFlag(tag);
+    }
+
+    public void ClearTags()
+    {
+        Tags = GISTag.None;
+    }
+
+    public void SetGeoreference(string epsg, string projectionName)
+    {
+        Projection.EPSG = epsg;
+        Projection.Name = projectionName;
+        AddTag(GISTag.Georeferenced);
+
+        if (!string.IsNullOrEmpty(epsg) && epsg != "EPSG:4326")
+            AddTag(GISTag.Projected);
+    }
+
+    public string[] GetAvailableOperations()
+    {
+        return Tags.GetAvailableOperations();
     }
 
     public override long GetSizeInBytes()
     {
-        if (!string.IsNullOrEmpty(FilePath) && File.Exists(FilePath)) return new FileInfo(FilePath).Length;
+        if (!string.IsNullOrEmpty(FilePath) && File.Exists(FilePath))
+            return new FileInfo(FilePath).Length;
 
         // Estimate size for in-memory data
         long size = 0;
-        foreach (var layer in Layers) size += layer.Features.Count * 100; // Rough estimate per feature
+        foreach (var layer in Layers)
+            size += layer.Features.Count * 100; // Rough estimate per feature
         return size;
     }
 
@@ -85,6 +133,7 @@ public class GISDataset : Dataset, ISerializableDataset
         if (string.IsNullOrEmpty(FilePath))
         {
             // New empty dataset
+            AddTag(GISTag.Editable);
             Logger.Log($"Created new GIS dataset: {Name}");
             return;
         }
@@ -99,31 +148,64 @@ public class GISDataset : Dataset, ISerializableDataset
         try
         {
             var extension = Path.GetExtension(FilePath).ToLower();
+
+            // Auto-detect and assign format tags
             switch (extension)
             {
                 case ".shp":
                     LoadShapefile();
+                    AddTag(GISTag.Shapefile);
+                    AddTag(GISTag.VectorData);
                     break;
                 case ".geojson":
                 case ".json":
                     LoadGeoJSON();
+                    AddTag(GISTag.GeoJSON);
+                    AddTag(GISTag.VectorData);
                     break;
                 case ".kmz":
                     LoadKMZ();
+                    AddTag(GISTag.KMZ);
+                    AddTag(GISTag.VectorData);
                     break;
                 case ".kml":
                     LoadKML();
+                    AddTag(GISTag.KML);
+                    AddTag(GISTag.VectorData);
                     break;
                 case ".tif":
                 case ".tiff":
                     LoadGeoTIFF();
+                    AddTag(GISTag.GeoTIFF);
+                    AddTag(GISTag.RasterData);
                     break;
                 default:
                     throw new NotSupportedException($"File format '{extension}' is not supported for GIS datasets.");
             }
 
+            // Auto-detect recommended tags based on filename and content
+            var recommendedTags = GISTagExtensions.GetRecommendedTags(
+                FilePath,
+                Layers.FirstOrDefault()?.Type ?? LayerType.Vector);
+
+            foreach (var tag in recommendedTags)
+                if (!HasTag(tag))
+                    AddTag(tag);
+
+            // Check for attributes
+            if (Layers.Any(l => l.Features.Any(f => f.Properties.Count > 0)))
+                AddTag(GISTag.Attributed);
+
+            // Check for multi-layer
+            if (Layers.Count > 1)
+                AddTag(GISTag.MultiLayer);
+
+            // Mark as imported
+            AddTag(GISTag.Imported);
+
             UpdateBounds();
-            Logger.Log($"Loaded GIS dataset: {Name} with {Layers.Count} layers");
+            Logger.Log(
+                $"Loaded GIS dataset: {Name} with {Layers.Count} layers and tags: {string.Join(", ", Tags.GetFlags().Select(t => t.GetDisplayName()))}");
         }
         catch (Exception ex)
         {
@@ -132,6 +214,7 @@ public class GISDataset : Dataset, ISerializableDataset
         }
     }
 
+    // --- Load methods are unchanged ---
     private void LoadShapefile()
     {
         Logger.Log($"Loading shapefile: {FilePath}");
@@ -161,6 +244,10 @@ public class GISDataset : Dataset, ISerializableDataset
                     var cs = csFactory.CreateFromWkt(wkt);
                     Projection.Name = cs.Name;
                     Projection.EPSG = cs.AuthorityCode > 0 ? $"EPSG:{cs.AuthorityCode}" : "Custom";
+                    AddTag(GISTag.Georeferenced);
+
+                    if (Projection.EPSG != "EPSG:4326")
+                        AddTag(GISTag.Projected);
                 }
                 catch
                 {
@@ -279,7 +366,8 @@ public class GISDataset : Dataset, ISerializableDataset
 
                     case "Polygon":
                         // Take first ring (exterior)
-                        if (coordsElement.GetArrayLength() > 0) coordinates = ParseCoordinateList(coordsElement[0]);
+                        if (coordsElement.GetArrayLength() > 0)
+                            coordinates = ParseCoordinateList(coordsElement[0]);
                         break;
 
                     case "MultiPoint":
@@ -453,7 +541,8 @@ public class GISDataset : Dataset, ISerializableDataset
             {
                 feature.Type = FeatureType.Line;
                 var coordsText = lineString.Element(kml + "coordinates")?.Value;
-                if (!string.IsNullOrEmpty(coordsText)) feature.Coordinates = ParseKMLCoordinates(coordsText);
+                if (!string.IsNullOrEmpty(coordsText))
+                    feature.Coordinates = ParseKMLCoordinates(coordsText);
             }
 
             var polygon = placemark.Element(kml + "Polygon");
@@ -467,7 +556,8 @@ public class GISDataset : Dataset, ISerializableDataset
                     if (linearRing != null)
                     {
                         var coordsText = linearRing.Element(kml + "coordinates")?.Value;
-                        if (!string.IsNullOrEmpty(coordsText)) feature.Coordinates = ParseKMLCoordinates(coordsText);
+                        if (!string.IsNullOrEmpty(coordsText))
+                            feature.Coordinates = ParseKMLCoordinates(coordsText);
                     }
                 }
             }
@@ -515,7 +605,53 @@ public class GISDataset : Dataset, ISerializableDataset
         Layers.Add(layer);
     }
 
-    private GISFeature ConvertNTSGeometry(Geometry geometry, Dictionary<string, object> attributes)
+    public Geometry ConvertToNTSGeometry(GISFeature feature)
+    {
+        try
+        {
+            switch (feature.Type)
+            {
+                case FeatureType.Point:
+                    if (feature.Coordinates.Count > 0)
+                    {
+                        var coord = feature.Coordinates[0];
+                        return _geometryFactory.CreatePoint(new Coordinate(coord.X, coord.Y));
+                    }
+
+                    break;
+                case FeatureType.Line:
+                    if (feature.Coordinates.Count >= 2)
+                    {
+                        var coords = feature.Coordinates.Select(c => new Coordinate(c.X, c.Y)).ToArray();
+                        return _geometryFactory.CreateLineString(coords);
+                    }
+
+                    break;
+                case FeatureType.Polygon:
+                    if (feature.Coordinates.Count >= 3)
+                    {
+                        var coords = feature.Coordinates.Select(c => new Coordinate(c.X, c.Y)).ToList();
+                        // Ensure the polygon is a closed ring for NTS
+                        if (!coords[0].Equals2D(coords[^1])) coords.Add(new Coordinate(coords[0].X, coords[0].Y));
+                        if (coords.Count >= 4)
+                        {
+                            var ring = _geometryFactory.CreateLinearRing(coords.ToArray());
+                            return _geometryFactory.CreatePolygon(ring);
+                        }
+                    }
+
+                    break;
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning($"Failed to convert feature to NTS geometry: {ex.Message}");
+        }
+
+        return null;
+    }
+
+    public static GISFeature ConvertNTSGeometry(Geometry geometry, Dictionary<string, object> attributes)
     {
         if (geometry == null) return null;
 
@@ -681,57 +817,7 @@ public class GISDataset : Dataset, ISerializableDataset
         Center = (Bounds.Min + Bounds.Max) * 0.5f;
     }
 
-    public void SaveAsShapefile(string path)
-    {
-        Logger.Log($"Exporting to shapefile: {path}");
-
-        try
-        {
-            // Combine all vector layers
-            var allFeatures = new List<IFeature>();
-            var attributeTable = new AttributesTable();
-
-            foreach (var layer in Layers.Where(l => l.Type == LayerType.Vector))
-            foreach (var feature in layer.Features)
-            {
-                var ntsGeometry = ConvertToNTSGeometry(feature);
-                if (ntsGeometry != null)
-                {
-                    var ntsFeature = new Feature(ntsGeometry, new AttributesTable(feature.Properties));
-                    allFeatures.Add(ntsFeature);
-                }
-            }
-
-            if (allFeatures.Count == 0)
-            {
-                Logger.LogWarning("No features to export");
-                return;
-            }
-
-            // Write shapefile
-            var writer = new ShapefileDataWriter(path, _geometryFactory)
-            {
-                Header = ShapefileDataWriter.GetHeader(allFeatures[0], allFeatures.Count)
-            };
-
-            writer.Write(allFeatures);
-
-            // Write projection file if we have projection info
-            if (!string.IsNullOrEmpty(Projection.EPSG) && Projection.EPSG != "EPSG:4326")
-            {
-                var prjPath = Path.ChangeExtension(path, ".prj");
-                // In production, you'd write the actual WKT projection string here
-                File.WriteAllText(prjPath, GetProjectionWKT());
-            }
-
-            Logger.Log($"Exported {allFeatures.Count} features to shapefile");
-        }
-        catch (Exception ex)
-        {
-            Logger.LogError($"Failed to export shapefile: {ex.Message}");
-            throw;
-        }
-    }
+    // --- EXPORT METHODS REMOVED, a synchronous GeoJSON export is kept for now ---
 
     public void SaveAsGeoJSON(string path)
     {
@@ -776,6 +862,63 @@ public class GISDataset : Dataset, ISerializableDataset
         }
     }
 
+    public void SaveLayerAsCsv(GISLayer layer, string path)
+    {
+        if (layer.Type != LayerType.Vector)
+        {
+            Logger.LogError("Can only export attributes from vector layers.");
+            return;
+        }
+
+        Logger.Log($"Exporting attributes for layer '{layer.Name}' to CSV: {path}");
+
+        try
+        {
+            // First pass: find all unique attribute keys (headers)
+            var headers = new HashSet<string>();
+            foreach (var feature in layer.Features)
+            foreach (var key in feature.Properties.Keys)
+                headers.Add(key);
+
+            var orderedHeaders = headers.OrderBy(h => h).ToList();
+
+            var csv = new StringBuilder();
+
+            // Write header row
+            csv.AppendLine(string.Join(",", orderedHeaders.Select(h => $"\"{h.Replace("\"", "\"\"")}\"")));
+
+            // Write data rows
+            foreach (var feature in layer.Features)
+            {
+                var row = new List<string>();
+                foreach (var header in orderedHeaders)
+                    if (feature.Properties.TryGetValue(header, out var value) && value != null)
+                    {
+                        var cellValue = value.ToString().Replace("\"", "\"\"");
+                        // Enclose if it contains a comma or quote
+                        if (cellValue.Contains(',') || cellValue.Contains('"'))
+                            row.Add($"\"{cellValue}\"");
+                        else
+                            row.Add(cellValue);
+                    }
+                    else
+                    {
+                        row.Add(""); // Empty cell for missing attribute
+                    }
+
+                csv.AppendLine(string.Join(",", row));
+            }
+
+            File.WriteAllText(path, csv.ToString());
+            Logger.Log($"Successfully exported {layer.Features.Count} records to {path}");
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError($"Failed to export layer attributes to CSV: {ex.Message}");
+            throw;
+        }
+    }
+
     private Dictionary<string, object> CreateGeoJsonGeometry(GISFeature feature)
     {
         var geometry = new Dictionary<string, object>();
@@ -811,62 +954,9 @@ public class GISDataset : Dataset, ISerializableDataset
 
         return geometry;
     }
-
-    private Geometry ConvertToNTSGeometry(GISFeature feature)
-    {
-        try
-        {
-            switch (feature.Type)
-            {
-                case FeatureType.Point:
-                    if (feature.Coordinates.Count > 0)
-                    {
-                        var coord = feature.Coordinates[0];
-                        return _geometryFactory.CreatePoint(new Coordinate(coord.X, coord.Y));
-                    }
-
-                    break;
-
-                case FeatureType.Line:
-                    if (feature.Coordinates.Count >= 2)
-                    {
-                        var coords = feature.Coordinates.Select(c => new Coordinate(c.X, c.Y)).ToArray();
-                        return _geometryFactory.CreateLineString(coords);
-                    }
-
-                    break;
-
-                case FeatureType.Polygon:
-                    if (feature.Coordinates.Count >= 3)
-                    {
-                        var coords = feature.Coordinates.Select(c => new Coordinate(c.X, c.Y)).ToList();
-                        // Ensure closed ring
-                        if (!coords[0].Equals2D(coords[coords.Count - 1])) coords.Add(coords[0]);
-                        if (coords.Count >= 4) // Minimum for a valid polygon
-                        {
-                            var ring = _geometryFactory.CreateLinearRing(coords.ToArray());
-                            return _geometryFactory.CreatePolygon(ring);
-                        }
-                    }
-
-                    break;
-            }
-        }
-        catch (Exception ex)
-        {
-            Logger.LogWarning($"Failed to convert feature to NTS geometry: {ex.Message}");
-        }
-
-        return null;
-    }
-
-    private string GetProjectionWKT()
-    {
-        // Return WGS84 WKT as default
-        return
-            @"GEOGCS[""WGS 84"",DATUM[""WGS_1984"",SPHEROID[""WGS 84"",6378137,298.257223563,AUTHORITY[""EPSG"",""7030""]],AUTHORITY[""EPSG"",""6326""]],PRIMEM[""Greenwich"",0,AUTHORITY[""EPSG"",""8901""]],UNIT[""degree"",0.0174532925199433,AUTHORITY[""EPSG"",""9122""]],AUTHORITY[""EPSG"",""4326""]]";
-    }
 }
+
+// --- Other classes in GISDataset.cs are unchanged ---
 
 public class GISLayer
 {
@@ -947,6 +1037,8 @@ public class GISDatasetDTO : DatasetDTO
     public string BasemapPath { get; set; }
     public Vector2 Center { get; set; }
     public float DefaultZoom { get; set; }
+    public long Tags { get; set; }
+    public Dictionary<string, string> GISMetadata { get; set; } = new();
 }
 
 public class GISLayerDTO
