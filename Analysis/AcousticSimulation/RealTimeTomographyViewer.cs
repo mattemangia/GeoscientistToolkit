@@ -130,23 +130,27 @@ public class RealTimeTomographyViewer : IDisposable
         ImGui.TextColored(statusColor, _statusMessage);
 
         ImGui.Text(
-            $"Data: Vp= {_currentDataSource.PWaveVelocity:F0} m/s | Vs= {_currentDataSource.SWaveVelocity:F0} m/s | Vp/Vs= {_currentDataSource.VpVsRatio:F3}");
+            $"Vp={_currentDataSource.PWaveVelocity:F0} m/s | Vs={_currentDataSource.SWaveVelocity:F0} m/s | Vp/Vs={_currentDataSource.VpVsRatio:F3}");
 
-        // FIX: Show current color scale range prominently
+        // FIX: Better spacing and formatting for color scale display
+        ImGui.Spacing();
         ImGui.Separator();
-        ImGui.Text("Current Color Scale:");
-        ImGui.SameLine();
-        ImGui.TextColored(new Vector4(1.0f, 1.0f, 0.0f, 1.0f),
-            $"{_currentSliceMinVel:E3} to {_currentSliceMaxVel:E3} m/s");
+        ImGui.Text("Current Slice Color Scale:");
+        ImGui.Indent();
+        ImGui.Text($"Min: {FormatVelocity(_currentSliceMinVel)} m/s");
+        ImGui.Text($"Max: {FormatVelocity(_currentSliceMaxVel)} m/s");
+        ImGui.Unindent();
         ImGui.Separator();
+        ImGui.Spacing();
 
-        ImGui.Text("Tomography Slice");
+        ImGui.Text("Tomography Slice:");
         var controlsChanged = false;
-        controlsChanged |= ImGui.RadioButton("X Axis (YZ Plane)", ref _sliceAxis, 0);
+
+        controlsChanged |= ImGui.RadioButton("X Axis (YZ)", ref _sliceAxis, 0);
         ImGui.SameLine();
-        controlsChanged |= ImGui.RadioButton("Y Axis (XZ Plane)", ref _sliceAxis, 1);
+        controlsChanged |= ImGui.RadioButton("Y Axis (XZ)", ref _sliceAxis, 1);
         ImGui.SameLine();
-        controlsChanged |= ImGui.RadioButton("Z Axis (XY Plane)", ref _sliceAxis, 2);
+        controlsChanged |= ImGui.RadioButton("Z Axis (XY)", ref _sliceAxis, 2);
 
         var maxSlice = _dimensions.X > 0
             ? _sliceAxis switch
@@ -157,18 +161,24 @@ public class RealTimeTomographyViewer : IDisposable
             }
             : 0;
         _sliceIndex = Math.Clamp(_sliceIndex, 0, maxSlice);
-        controlsChanged |= ImGui.SliderInt("Slice Index", ref _sliceIndex, 0, maxSlice);
 
+        ImGui.PushItemWidth(-1);
+        controlsChanged |= ImGui.SliderInt("##SliceIndex", ref _sliceIndex, 0, maxSlice);
+        ImGui.PopItemWidth();
+        ImGui.Text($"Slice: {_sliceIndex + 1} / {maxSlice + 1}");
+
+        ImGui.Spacing();
         ImGui.Separator();
+
         if (ImGui.Checkbox("Show Only Selected Material", ref _showOnlySelectedMaterial))
             controlsChanged = true;
+
         if (ImGui.IsItemHovered())
-            ImGui.SetTooltip(
-                "Hides all voxels not part of the selected materials.\nColor scale adjusts to visible materials only.");
+            ImGui.SetTooltip("Hides non-selected materials.\nColor scale adjusts to visible data only.");
 
         if (controlsChanged)
         {
-            _lastUpdateHash = 0; // Force update
+            _lastUpdateHash = 0;
             RequestUpdate();
         }
     }
@@ -179,7 +189,9 @@ public class RealTimeTomographyViewer : IDisposable
         var h = _sliceAxis switch { 0 => (int)_dimensions.Z, 1 => (int)_dimensions.Z, _ => (int)_dimensions.Y };
 
         var availableSize = ImGui.GetContentRegionAvail();
-        availableSize.Y -= 100;
+
+        // FIX: Reserve more space for color bar and labels to prevent overlap
+        availableSize.Y -= 120; // Increased from 100
 
         var imageContainerSize = new Vector2(availableSize.X, Math.Max(50, availableSize.Y));
         var imageContainerTopLeft = ImGui.GetCursorScreenPos();
@@ -210,12 +222,17 @@ public class RealTimeTomographyViewer : IDisposable
                     imageTopLeft + imageSize);
             }
 
-            ImGui.Text(
-                $"Displaying slice {_sliceIndex} on Axis {(_sliceAxis == 0 ? "X" : _sliceAxis == 1 ? "Y" : "Z")}. Image size: {w}x{h}");
-            ImGui.Separator();
+            // FIX: Position cursor AFTER image container, before color bar
+            ImGui.SetCursorScreenPos(imageContainerTopLeft + new Vector2(0, imageContainerSize.Y + 5));
 
-            ImGui.SetCursorScreenPos(imageContainerTopLeft + new Vector2(0, imageContainerSize.Y));
+            // Color bar goes here
             DrawColorBar();
+
+            // Info text goes AFTER color bar
+            ImGui.Spacing();
+            ImGui.Text(
+                $"Slice {_sliceIndex + 1}/{(_sliceAxis == 0 ? (int)_dimensions.X : _sliceAxis == 1 ? (int)_dimensions.Y : (int)_dimensions.Z)} on {(_sliceAxis == 0 ? "X" : _sliceAxis == 1 ? "Y" : "Z")} axis");
+            ImGui.Text($"Image: {w}×{h} pixels");
         }
         else if (_generationTask == null || _generationTask.IsCompleted)
         {
@@ -227,7 +244,8 @@ public class RealTimeTomographyViewer : IDisposable
 
             var buttonText = "Generate Slice";
             var buttonSize = ImGui.CalcTextSize(buttonText) + ImGui.GetStyle().FramePadding * 2;
-            var buttonPos = new Vector2(imageContainerTopLeft.X + (imageContainerSize.X - buttonSize.X) * 0.5f,
+            var buttonPos = new Vector2(
+                imageContainerTopLeft.X + (imageContainerSize.X - buttonSize.X) * 0.5f,
                 textPos.Y + textSize.Y + 10);
             ImGui.SetCursorScreenPos(buttonPos);
             if (ImGui.Button(buttonText)) RequestUpdate();
@@ -236,40 +254,70 @@ public class RealTimeTomographyViewer : IDisposable
 
     private void DrawColorBar()
     {
-        ImGui.Dummy(new Vector2(0, 10));
         var drawList = ImGui.GetWindowDrawList();
-        var pos = ImGui.GetCursorScreenPos();
+        var startPos = ImGui.GetCursorScreenPos();
         var region = ImGui.GetContentRegionAvail();
+
         var barWidth = Math.Max(200, region.X * 0.75f);
         float barHeight = 20;
-        pos.X += (region.X - barWidth) / 2;
+        var pos = new Vector2(startPos.X + (region.X - barWidth) / 2, startPos.Y + 30);
 
+        // Title above color bar
         var title = "Velocity Magnitude (m/s)";
         var titleSize = ImGui.CalcTextSize(title);
-        ImGui.SetCursorScreenPos(new Vector2(pos.X + (barWidth - titleSize.X) / 2, pos.Y - titleSize.Y - 4));
-        ImGui.Text(title);
-        ImGui.SetCursorScreenPos(pos);
+        var titlePos = new Vector2(pos.X + (barWidth - titleSize.X) / 2, pos.Y - titleSize.Y - 5);
 
+        ImGui.SetCursorScreenPos(titlePos);
+        ImGui.Text(title);
+
+        // Draw color bar
         for (var i = 0; i < barWidth; i++)
         {
             var value = i / (barWidth - 1);
             var color = _generator.GetJetColor(value);
             var col32 = ImGui.GetColorU32(color);
-            drawList.AddRectFilled(new Vector2(pos.X + i, pos.Y), new Vector2(pos.X + i + 1, pos.Y + barHeight), col32);
+            drawList.AddRectFilled(
+                new Vector2(pos.X + i, pos.Y),
+                new Vector2(pos.X + i + 1, pos.Y + barHeight),
+                col32);
         }
 
-        // FIX: Use scientific notation for better readability
-        var minLabel = $"{_currentSliceMinVel:0.00E+00}";
-        var maxLabel = $"{_currentSliceMaxVel:0.00E+00}";
+        // FIX: Format labels with proper scientific notation
+        var minLabel = FormatVelocity(_currentSliceMinVel);
+        var maxLabel = FormatVelocity(_currentSliceMaxVel);
+
+        var minLabelSize = ImGui.CalcTextSize(minLabel);
         var maxLabelSize = ImGui.CalcTextSize(maxLabel);
 
-        var labelYPos = pos.Y + barHeight + 2;
-        ImGui.SetCursorScreenPos(new Vector2(pos.X, labelYPos));
+        var labelYPos = pos.Y + barHeight + 5;
+
+        // Min label (left side)
+        ImGui.SetCursorScreenPos(new Vector2(pos.X - minLabelSize.X / 2, labelYPos));
         ImGui.Text(minLabel);
 
-        ImGui.SameLine(pos.X + barWidth - maxLabelSize.X);
+        // Max label (right side) - FIX: Properly positioned
+        ImGui.SetCursorScreenPos(new Vector2(pos.X + barWidth - maxLabelSize.X / 2, labelYPos));
         ImGui.Text(maxLabel);
-        ImGui.Dummy(new Vector2(0, barHeight + maxLabelSize.Y + 5));
+
+        // FIX: Move cursor past the color bar area to prevent overlap
+        ImGui.SetCursorScreenPos(new Vector2(startPos.X, labelYPos + maxLabelSize.Y + 10));
+        ImGui.Dummy(new Vector2(region.X, 1));
+    }
+
+    private string FormatVelocity(float velocity)
+    {
+        if (velocity == 0) return "0";
+
+        // Use adaptive formatting based on magnitude
+        if (velocity >= 1000.0f)
+            return $"{velocity / 1000.0f:F2}k";
+        if (velocity >= 1.0f)
+            return $"{velocity:F2}";
+        if (velocity >= 0.001f)
+            return $"{velocity * 1000.0f:F2}m";
+        if (velocity >= 0.000001f)
+            return $"{velocity * 1000000.0f:F2}µ";
+        return $"{velocity:E2}";
     }
 
     private void RequestUpdate()

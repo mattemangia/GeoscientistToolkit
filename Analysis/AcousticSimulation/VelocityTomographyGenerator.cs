@@ -60,7 +60,7 @@ public class VelocityTomographyGenerator : IDisposable
         var tomography = new byte[width * height * 4]; // RGBA
         var velocities = new float[width * height];
 
-        // Step 1: Calculate and store the velocity for every single pixel in the slice.
+        // Step 1: Calculate velocity magnitude for each pixel
         var flat_idx = 0;
         for (var y_slice = 0; y_slice < height; y_slice++)
         for (var x_slice = 0; x_slice < width; x_slice++)
@@ -88,9 +88,7 @@ public class VelocityTomographyGenerator : IDisposable
             velocities[flat_idx++] = (float)Math.Sqrt(vx * vx + vy * vy + vz * vz);
         }
 
-        // --- DYNAMIC COLOR SCALE FIX ---
-        // Step 2: Determine the min/max velocity for the color scale. This range is calculated
-        // based on the user's filtering choice.
+        // Step 2: Calculate min/max based on filtering AND visible material
         var minVelForScale = float.MaxValue;
         var maxVelForScale = float.MinValue;
         var foundAnyRelevantVoxels = false;
@@ -110,44 +108,71 @@ public class VelocityTomographyGenerator : IDisposable
                     case 2: currentLabel = labels[x_slice, y_slice, sliceIndex]; break;
                 }
 
-                if (selectedMaterialIDs.Contains(currentLabel)) shouldIncludeInScale = true;
+                if (selectedMaterialIDs.Contains(currentLabel))
+                    shouldIncludeInScale = true;
             }
 
             if (shouldIncludeInScale)
             {
                 var v = velocities[flat_idx];
-                if (v < minVelForScale) minVelForScale = v;
-                if (v > maxVelForScale) maxVelForScale = v;
-                foundAnyRelevantVoxels = true;
+
+                // FIX: Only include non-zero values in the scale calculation
+                // This prevents low velocities from being washed out by zeros
+                if (v > 1e-10f)
+                {
+                    if (v < minVelForScale) minVelForScale = v;
+                    if (v > maxVelForScale) maxVelForScale = v;
+                    foundAnyRelevantVoxels = true;
+                }
             }
 
             flat_idx++;
         }
 
-        // Handle case where a slice contains no selected materials
-        if (!foundAnyRelevantVoxels)
+        // Handle edge cases
+        if (!foundAnyRelevantVoxels || maxVelForScale < 1e-10f)
         {
             minVelForScale = 0;
-            maxVelForScale = 0;
+            maxVelForScale = 1e-10f; // Minimum non-zero value
+        }
+
+        // FIX: Use logarithmic scale for better visualization of wide dynamic ranges
+        var useLogScale = maxVelForScale / (minVelForScale + 1e-15f) > 100.0f;
+
+        if (useLogScale)
+        {
+            minVelForScale = MathF.Log10(minVelForScale + 1e-15f);
+            maxVelForScale = MathF.Log10(maxVelForScale + 1e-15f);
         }
 
         var range = maxVelForScale - minVelForScale;
-        if (range < 1e-6f) range = 1e-6f; // Prevent division by zero
+        if (range < 1e-10f) range = 1e-10f;
 
-        // Step 3: Generate the image, normalizing colors using the calculated dynamic range.
+        // Step 3: Generate the image with normalized colors
         var pixel_idx = 0;
         for (var y_slice = 0; y_slice < height; y_slice++)
         for (var x_slice = 0; x_slice < width; x_slice++)
         {
             var current_flat_idx = y_slice * width + x_slice;
-            var normalized = (velocities[current_flat_idx] - minVelForScale) / range;
+            var velocity = velocities[current_flat_idx];
+
+            // Apply log scale if needed
+            var velForColor = velocity;
+            if (useLogScale && velocity > 1e-15f)
+                velForColor = MathF.Log10(velocity);
+            else if (useLogScale)
+                velForColor = minVelForScale;
+
+            var normalized = (velForColor - minVelForScale) / range;
+            normalized = Math.Clamp(normalized, 0.0f, 1.0f);
+
             var color = GetJetColor(normalized);
 
             tomography[pixel_idx++] = (byte)(color.X * 255);
             tomography[pixel_idx++] = (byte)(color.Y * 255);
             tomography[pixel_idx++] = (byte)(color.Z * 255);
 
-            // Apply transparency based on filtering choice
+            // Apply transparency for filtered materials
             byte currentLabel = 0;
             switch (axis)
             {
@@ -160,8 +185,11 @@ public class VelocityTomographyGenerator : IDisposable
                 showOnlySelected && !selectedMaterialIDs.Contains(currentLabel) ? (byte)0 : (byte)255;
         }
 
-        // Step 4: Return the dynamically calculated min/max for the legend.
-        return (tomography, minVelForScale, maxVelForScale);
+        // Step 4: Return actual min/max (not log-scaled) for display
+        var displayMin = useLogScale ? MathF.Pow(10, minVelForScale) : minVelForScale;
+        var displayMax = useLogScale ? MathF.Pow(10, maxVelForScale) : maxVelForScale;
+
+        return (tomography, displayMin, displayMax);
     }
 
     public Vector4 GetJetColor(float value)

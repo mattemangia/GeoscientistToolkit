@@ -399,21 +399,23 @@ public class ChunkedAcousticSimulator : IDisposable
 
     private void InitializeFields()
     {
-        // FIX: Allocate three separate max tracking arrays
+        // Allocate tracking arrays - sized to SIMULATION dimensions
         _maxPWaveMagnitude = new float[_params.Width, _params.Height, _params.Depth];
         _maxSWaveMagnitude = new float[_params.Width, _params.Height, _params.Depth];
         _maxVelocityMagnitude = new float[_params.Width, _params.Height, _params.Depth];
 
         Logger.Log(
-            $"[Simulator] Allocated P-wave max tracking: {_params.Width * _params.Height * _params.Depth * sizeof(float) / (1024 * 1024)} MB");
+            $"[Simulator] Allocated tracking arrays for simulation extent: {_params.Width}x{_params.Height}x{_params.Depth}");
         Logger.Log(
-            $"[Simulator] Allocated S-wave max tracking: {_params.Width * _params.Height * _params.Depth * sizeof(float) / (1024 * 1024)} MB");
+            $"[Simulator] P-wave tracking: {_params.Width * _params.Height * _params.Depth * sizeof(float) / (1024 * 1024)} MB");
         Logger.Log(
-            $"[Simulator] Allocated combined max tracking: {_params.Width * _params.Height * _params.Depth * sizeof(float) / (1024 * 1024)} MB");
+            $"[Simulator] S-wave tracking: {_params.Width * _params.Height * _params.Depth * sizeof(float) / (1024 * 1024)} MB");
+        Logger.Log(
+            $"[Simulator] Combined tracking: {_params.Width * _params.Height * _params.Depth * sizeof(float) / (1024 * 1024)} MB");
         Logger.Log(
             $"[Simulator] Total tracking overhead: {_params.Width * _params.Height * _params.Depth * sizeof(float) * 3 / (1024 * 1024)} MB");
 
-        // Calculate and cache propagation direction
+        // Calculate propagation direction
         var txX = (int)(_params.TxPosition.X * _params.Width);
         var txY = (int)(_params.TxPosition.Y * _params.Height);
         var txZ = (int)(_params.TxPosition.Z * _params.Depth);
@@ -434,25 +436,26 @@ public class ChunkedAcousticSimulator : IDisposable
         }
         else
         {
-            _propagationDirection = new Vector3(1, 0, 0); // Default to X-axis
+            _propagationDirection = new Vector3(1, 0, 0);
             Logger.LogWarning("[Simulator] TX and RX too close, using default propagation direction");
         }
 
         if (_params.UseBrittleModel)
         {
             _damageField = new float[_params.Width, _params.Height, _params.Depth];
-            Logger.Log("[Simulator] Damage field initialized");
+            Logger.Log($"[Simulator] Damage field initialized: {_params.Width}x{_params.Height}x{_params.Depth}");
         }
 
         if (_params.SaveTimeSeries)
         {
             _timeSeriesSnapshots = new List<WaveFieldSnapshot>();
-            Logger.Log($"[Simulator] Time series snapshots enabled (interval: {_params.SnapshotInterval})");
+            Logger.Log($"[Simulator] Time series enabled (interval: {_params.SnapshotInterval})");
         }
 
         LoadChunk(_chunks[0]);
         Logger.Log("[Simulator] First chunk loaded and ready");
     }
+
 
     private void ApplyInitialSource()
     {
@@ -742,41 +745,59 @@ public class ChunkedAcousticSimulator : IDisposable
         var nu = new float[chunkWidth, chunkHeight, chunkDepth];
         var rho = new float[chunkWidth, chunkHeight, chunkDepth];
 
-        var offsetX = _params.SimulationExtent?.Min.X ?? 0;
-        var offsetY = _params.SimulationExtent?.Min.Y ?? 0;
-        var offsetZ = _params.SimulationExtent?.Min.Z ?? 0;
-
-        var fullWidth = YoungsModulusVolume?.GetLength(0) ?? _params.Width;
-        var fullHeight = YoungsModulusVolume?.GetLength(1) ?? _params.Height;
-        var fullDepth = YoungsModulusVolume?.GetLength(2) ?? _params.Depth;
+        // Get the dimensions of the persistent property arrays
+        var propWidth = _persistentYoungsModulus?.GetLength(0) ?? _params.Width;
+        var propHeight = _persistentYoungsModulus?.GetLength(1) ?? _params.Height;
+        var propDepth = _persistentYoungsModulus?.GetLength(2) ?? _params.Depth;
 
         Parallel.For(0, chunkDepth, z =>
         {
+            var localZ = chunk.StartZ + z;
+
             for (var y = 0; y < chunkHeight; y++)
             for (var x = 0; x < chunkWidth; x++)
             {
-                var globalX = offsetX + x;
-                var globalY = offsetY + y;
-                var globalZ = offsetZ + chunk.StartZ + z;
-
-                if (globalX >= fullWidth || globalY >= fullHeight || globalZ >= fullDepth)
+                // BOUNDS CHECK: Ensure we're within the persistent property arrays
+                if (x >= propWidth || y >= propHeight || localZ >= propDepth)
                 {
+                    // Out of bounds - use defaults
                     E[x, y, z] = _params.YoungsModulusMPa * 1e6f;
                     nu[x, y, z] = _params.PoissonRatio;
                     rho[x, y, z] = 2700f;
                     continue;
                 }
 
-                // FIX: Use persistent properties if damage is enabled
+                // Use persistent properties if damage is enabled
                 if (usePersistent && _params.UseBrittleModel && _persistentYoungsModulus != null)
                 {
-                    E[x, y, z] = _persistentYoungsModulus[globalX, globalY, globalZ] * 1e6f;
-                    nu[x, y, z] = _persistentPoissonRatio[globalX, globalY, globalZ];
+                    E[x, y, z] = _persistentYoungsModulus[x, y, localZ] * 1e6f;
+                    nu[x, y, z] = _persistentPoissonRatio[x, y, localZ];
                 }
                 else if (YoungsModulusVolume != null && PoissonRatioVolume != null)
                 {
-                    E[x, y, z] = YoungsModulusVolume[globalX, globalY, globalZ] * 1e6f;
-                    nu[x, y, z] = PoissonRatioVolume[globalX, globalY, globalZ];
+                    // Access from full volume with offset
+                    var offsetX = _params.SimulationExtent?.Min.X ?? 0;
+                    var offsetY = _params.SimulationExtent?.Min.Y ?? 0;
+                    var offsetZ = _params.SimulationExtent?.Min.Z ?? 0;
+
+                    var globalX = offsetX + x;
+                    var globalY = offsetY + y;
+                    var globalZ = offsetZ + localZ;
+
+                    var fullWidth = YoungsModulusVolume.GetLength(0);
+                    var fullHeight = YoungsModulusVolume.GetLength(1);
+                    var fullDepth = YoungsModulusVolume.GetLength(2);
+
+                    if (globalX < fullWidth && globalY < fullHeight && globalZ < fullDepth)
+                    {
+                        E[x, y, z] = YoungsModulusVolume[globalX, globalY, globalZ] * 1e6f;
+                        nu[x, y, z] = PoissonRatioVolume[globalX, globalY, globalZ];
+                    }
+                    else
+                    {
+                        E[x, y, z] = _params.YoungsModulusMPa * 1e6f;
+                        nu[x, y, z] = _params.PoissonRatio;
+                    }
                 }
                 else
                 {
@@ -784,7 +805,30 @@ public class ChunkedAcousticSimulator : IDisposable
                     nu[x, y, z] = _params.PoissonRatio;
                 }
 
-                rho[x, y, z] = DensityVolume?[globalX, globalY, globalZ] ?? 2700f;
+                // Get density
+                if (DensityVolume != null)
+                {
+                    var offsetX = _params.SimulationExtent?.Min.X ?? 0;
+                    var offsetY = _params.SimulationExtent?.Min.Y ?? 0;
+                    var offsetZ = _params.SimulationExtent?.Min.Z ?? 0;
+
+                    var globalX = offsetX + x;
+                    var globalY = offsetY + y;
+                    var globalZ = offsetZ + localZ;
+
+                    var fullWidth = DensityVolume.GetLength(0);
+                    var fullHeight = DensityVolume.GetLength(1);
+                    var fullDepth = DensityVolume.GetLength(2);
+
+                    if (globalX < fullWidth && globalY < fullHeight && globalZ < fullDepth)
+                        rho[x, y, z] = DensityVolume[globalX, globalY, globalZ];
+                    else
+                        rho[x, y, z] = 2700f;
+                }
+                else
+                {
+                    rho[x, y, z] = 2700f;
+                }
             }
         });
 
@@ -834,50 +878,58 @@ public class ChunkedAcousticSimulator : IDisposable
 
     private void ApplyDamageFixed(WaveFieldChunk chunk, float[,,] E, float[,,] nu)
     {
-        // FIX: Use a more realistic tensile strength (2-5 MPa for rocks)
-        var tensileStrength = 2e6f; // 2 MPa - more realistic for sedimentary rocks
+        var tensileStrength = 2e6f; // 2 MPa
 
-        var offsetX = _params.SimulationExtent?.Min.X ?? 0;
-        var offsetY = _params.SimulationExtent?.Min.Y ?? 0;
-        var offsetZ = _params.SimulationExtent?.Min.Z ?? 0;
+        // CRITICAL: When using simulation extent, all tracking arrays (_damageField, _persistentYoungsModulus)
+        // are sized to the SIMULATION dimensions, not the full dataset dimensions!
+        // So we must use LOCAL coordinates within the simulation extent.
+
+        var simWidth = _damageField?.GetLength(0) ?? _params.Width;
+        var simHeight = _damageField?.GetLength(1) ?? _params.Height;
+        var simDepth = _damageField?.GetLength(2) ?? _params.Depth;
 
         Parallel.For(0, chunk.Depth, z =>
         {
-            var globalZ = offsetZ + chunk.StartZ + z;
+            // LOCAL coordinates within the simulation extent
+            var localZ = chunk.StartZ + z;
+
+            // Bounds check
+            if (localZ < 0 || localZ >= simDepth)
+                return;
+
             for (var y = 0; y < _params.Height; y++)
             {
-                var globalY = offsetY + y;
+                if (y < 0 || y >= simHeight)
+                    continue;
+
                 for (var x = 0; x < _params.Width; x++)
                 {
-                    var globalX = offsetX + x;
+                    if (x < 0 || x >= simWidth)
+                        continue;
 
                     var sxx = chunk.Sxx[x, y, z];
                     var syy = chunk.Syy[x, y, z];
                     var szz = chunk.Szz[x, y, z];
 
-                    // Calculate maximum principal stress (most tensile)
                     var maxStress = Math.Max(sxx, Math.Max(syy, szz));
 
                     if (maxStress > tensileStrength && _damageField != null)
                     {
-                        // FIX: More aggressive damage accumulation (removed the 0.01 factor)
                         var damageIncrement = (maxStress - tensileStrength) / (tensileStrength * 10f);
-                        var newDamage = Math.Min(1f, _damageField[globalX, globalY, globalZ] + damageIncrement);
-                        _damageField[globalX, globalY, globalZ] = newDamage;
+                        var newDamage = Math.Min(1f, _damageField[x, y, localZ] + damageIncrement);
+                        _damageField[x, y, localZ] = newDamage;
 
-                        // FIX: Update persistent material properties
+                        // Update persistent material properties
                         if (_persistentYoungsModulus != null && _persistentPoissonRatio != null)
                         {
-                            var reduction = 1f - newDamage * 0.8f; // More aggressive stiffness reduction
-                            _persistentYoungsModulus[globalX, globalY, globalZ] *= reduction;
-
-                            // Also update the local chunk properties
-                            E[x, y, z] = _persistentYoungsModulus[globalX, globalY, globalZ] * 1e6f;
+                            var reduction = 1f - newDamage * 0.8f;
+                            _persistentYoungsModulus[x, y, localZ] *= reduction;
+                            E[x, y, z] = _persistentYoungsModulus[x, y, localZ] * 1e6f;
                         }
 
-                        // Log first damage occurrence
-                        if (_damageField[globalX, globalY, globalZ] > 0.1f && CurrentStep % 100 == 0)
-                            Logger.Log($"[Damage] Voxel ({globalX},{globalY},{globalZ}): " +
+                        // Log first damage occurrence (reduced frequency)
+                        if (newDamage > 0.1f && CurrentStep % 500 == 0)
+                            Logger.Log($"[Damage] Voxel ({x},{y},{localZ}): " +
                                        $"Damage={newDamage:F3}, Stress={maxStress / 1e6f:F2} MPa");
                     }
                 }
@@ -1038,41 +1090,49 @@ public class ChunkedAcousticSimulator : IDisposable
 
     private void UpdateMaxVelocity(WaveFieldChunk chunk)
     {
-        // FIX: Decompose into P-wave and S-wave components and track separately
-        var offsetX = _params.SimulationExtent?.Min.X ?? 0;
-        var offsetY = _params.SimulationExtent?.Min.Y ?? 0;
-        var offsetZ = _params.SimulationExtent?.Min.Z ?? 0;
+        // CRITICAL: When using simulation extent, tracking arrays are sized to SIMULATION dimensions
+        var simWidth = _maxVelocityMagnitude?.GetLength(0) ?? _params.Width;
+        var simHeight = _maxVelocityMagnitude?.GetLength(1) ?? _params.Height;
+        var simDepth = _maxVelocityMagnitude?.GetLength(2) ?? _params.Depth;
 
         Parallel.For(0, chunk.Depth, z =>
         {
-            var globalZ = offsetZ + chunk.StartZ + z;
+            // LOCAL coordinate within the simulation extent
+            var localZ = chunk.StartZ + z;
+
+            // Bounds check
+            if (localZ < 0 || localZ >= simDepth)
+                return;
+
             for (var y = 0; y < _params.Height; y++)
             {
-                var globalY = offsetY + y;
+                if (y < 0 || y >= simHeight)
+                    continue;
+
                 for (var x = 0; x < _params.Width; x++)
                 {
-                    var globalX = offsetX + x;
+                    if (x < 0 || x >= simWidth)
+                        continue;
 
                     var vx = chunk.Vx[x, y, z];
                     var vy = chunk.Vy[x, y, z];
                     var vz = chunk.Vz[x, y, z];
 
-                    // Combined magnitude (unchanged)
+                    // Combined magnitude
                     var magnitude = MathF.Sqrt(vx * vx + vy * vy + vz * vz);
-                    if (magnitude > _maxVelocityMagnitude[globalX, globalY, globalZ])
-                        _maxVelocityMagnitude[globalX, globalY, globalZ] = magnitude;
+                    if (magnitude > _maxVelocityMagnitude[x, y, localZ])
+                        _maxVelocityMagnitude[x, y, localZ] = magnitude;
 
-                    // FIX: Decompose into P-wave (longitudinal) and S-wave (transverse)
-                    // P-wave: component parallel to propagation direction
+                    // Decompose into P-wave (longitudinal) and S-wave (transverse)
                     var longitudinal = vx * _propagationDirection.X +
                                        vy * _propagationDirection.Y +
                                        vz * _propagationDirection.Z;
                     var pWaveMag = MathF.Abs(longitudinal);
 
-                    if (pWaveMag > _maxPWaveMagnitude[globalX, globalY, globalZ])
-                        _maxPWaveMagnitude[globalX, globalY, globalZ] = pWaveMag;
+                    if (pWaveMag > _maxPWaveMagnitude[x, y, localZ])
+                        _maxPWaveMagnitude[x, y, localZ] = pWaveMag;
 
-                    // S-wave: components perpendicular to propagation direction
+                    // S-wave: perpendicular components
                     var transverseX = vx - longitudinal * _propagationDirection.X;
                     var transverseY = vy - longitudinal * _propagationDirection.Y;
                     var transverseZ = vz - longitudinal * _propagationDirection.Z;
@@ -1080,8 +1140,8 @@ public class ChunkedAcousticSimulator : IDisposable
                                               transverseY * transverseY +
                                               transverseZ * transverseZ);
 
-                    if (sWaveMag > _maxSWaveMagnitude[globalX, globalY, globalZ])
-                        _maxSWaveMagnitude[globalX, globalY, globalZ] = sWaveMag;
+                    if (sWaveMag > _maxSWaveMagnitude[x, y, localZ])
+                        _maxSWaveMagnitude[x, y, localZ] = sWaveMag;
                 }
             }
         });

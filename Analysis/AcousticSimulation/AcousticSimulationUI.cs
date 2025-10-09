@@ -979,7 +979,6 @@ public class AcousticSimulationUI : IDisposable
         }
     }
 
-
     private void UpdateLiveTomography()
     {
         if (_simulator == null || _currentDataset == null || _liveResultsForTomography == null) return;
@@ -1010,9 +1009,7 @@ public class AcousticSimulationUI : IDisposable
         _liveResultsForTomography.SWaveVelocity = expectedVs;
         _liveResultsForTomography.VpVsRatio = expectedVs > 0 ? expectedVp / expectedVs : 0;
 
-        // --- FIX ---
-        // The dimensions vector MUST match the dimensions of the data being passed.
-        // _liveResultsForTomography holds full-size data, so we must pass its full dimensions.
+        // The dimensions vector must match the data being passed
         var dimensions = new Vector3(
             _liveResultsForTomography.WaveFieldVx.GetLength(0),
             _liveResultsForTomography.WaveFieldVx.GetLength(1),
@@ -1023,7 +1020,6 @@ public class AcousticSimulationUI : IDisposable
 
         _tomographyViewer.UpdateLiveData(_liveResultsForTomography, dimensions, volumeLabels, _selectedMaterialIDs);
     }
-
 
     private void ApplyAxisPreset(int axis)
     {
@@ -1807,16 +1803,16 @@ public class AcousticSimulationUI : IDisposable
         var (vx, vy, vz) = e.ChunkVelocityFields;
         var simExtent = _parameters.SimulationExtent.Value;
 
-        // CRITICAL: Use actual chunk dimensions, not parameters
         var chunkWidth = vx.GetLength(0);
         var chunkHeight = vx.GetLength(1);
         var chunkDepth = vx.GetLength(2);
 
+        // FIX: Copy INSTANTANEOUS values for live visualization
+        // (Not accumulated max - that's for final export only)
         for (var z_chunk = 0; z_chunk < chunkDepth; z_chunk++)
         {
             var z_global = simExtent.Min.Z + e.ChunkStartZ + z_chunk;
 
-            // Validate bounds
             if (z_global < 0 || z_global >= _liveResultsForTomography.WaveFieldVx.GetLength(2))
             {
                 Logger.LogError($"[Tomography] Z out of bounds: {z_global}");
@@ -1833,6 +1829,7 @@ public class AcousticSimulationUI : IDisposable
                     var x_global = simExtent.Min.X + x_chunk;
                     if (x_global >= _liveResultsForTomography.WaveFieldVx.GetLength(0)) continue;
 
+                    // FIX: Store instantaneous velocity components
                     _liveResultsForTomography.WaveFieldVx[x_global, y_global, z_global] = vx[x_chunk, y_chunk, z_chunk];
                     _liveResultsForTomography.WaveFieldVy[x_global, y_global, z_global] = vy[x_chunk, y_chunk, z_chunk];
                     _liveResultsForTomography.WaveFieldVz[x_global, y_global, z_global] = vz[x_chunk, y_chunk, z_chunk];

@@ -55,9 +55,6 @@
     </ItemGroup>
 
     <!-- The ProjectReference to the extractor tool, correctly in its own ItemGroup -->
-    <ItemGroup>
-        <ProjectReference Include="AddInExtractor\AddInExtractor.csproj" ReferenceOutputAssembly="false" OutputItemType="AddInExtractorPath"/>
-    </ItemGroup>
 
     <!-- In Release mode, we must EXCLUDE the add-in source from the main compile. -->
     <ItemGroup Condition="'$(Configuration)' == 'Release'">
