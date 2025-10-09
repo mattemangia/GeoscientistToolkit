@@ -19,7 +19,8 @@ public class RealTimeTomographyViewer : IDisposable
     private bool _isLive;
     private bool _isOpen;
     private byte[,,] _labels;
-
+    private DateTime _lastLiveUpdateTime = DateTime.MinValue;
+    private int _liveUpdateCounter = 0;
     // FIX: Track when data actually changes
     private int _lastUpdateHash;
 
@@ -54,32 +55,37 @@ public class RealTimeTomographyViewer : IDisposable
         _selectedMaterialIDs = selectedMaterialIDs;
         _isLive = false;
         _statusMessage = "Final Results";
+        _liveUpdateCounter = 0; // Reset counter
         RequestUpdate();
     }
 
     public void UpdateLiveData(SimulationResults liveResults, Vector3 dimensions, byte[,,] labels,
         ISet<byte> selectedMaterialIDs)
     {
-        if (!_isOpen) return;
+        // FIX: Update data even if window is closed (it might be reopened)
+        // But don't trigger regeneration if not visible
+    
+        // Throttle updates to prevent overwhelming the GPU
+        var timeSinceLastUpdate = (DateTime.Now - _lastLiveUpdateTime).TotalSeconds;
+        if (timeSinceLastUpdate < 0.5) // Update at most every 0.5 seconds
+            return;
 
-        // FIX: Check if data actually changed
-        var newHash = HashCode.Combine(
-            liveResults.WaveFieldVx?.GetHashCode() ?? 0,
-            dimensions.GetHashCode(),
-            _sliceAxis,
-            _sliceIndex
-        );
-
-        if (newHash == _lastUpdateHash) return; // No change, skip update
-        _lastUpdateHash = newHash;
+        _lastLiveUpdateTime = DateTime.Now;
+        _liveUpdateCounter++;
 
         _currentDataSource = liveResults;
         _dimensions = dimensions;
         _labels = labels;
         _selectedMaterialIDs = selectedMaterialIDs;
         _isLive = true;
-        _statusMessage = "Live Simulation Data";
-        RequestUpdate();
+        _statusMessage = $"Live Simulation (frame {_liveUpdateCounter})";
+
+        // Only request update if window is actually open
+        if (_isOpen)
+        {
+            RequestUpdate();
+            //Logger.Log($"[TomographyViewer] Live update #{_liveUpdateCounter}");
+        }
     }
 
     public void Draw()
@@ -99,7 +105,7 @@ public class RealTimeTomographyViewer : IDisposable
 
             _pendingTextureUpdate = null;
 
-            Logger.Log($"[TomographyViewer] Updated texture and color scale: min={minVel:E3}, max={maxVel:E3}");
+            //Logger.Log($"[TomographyViewer] Updated texture and color scale: min={minVel:E3}, max={maxVel:E3}");
         }
 
         if (!_isOpen) return;
@@ -123,65 +129,74 @@ public class RealTimeTomographyViewer : IDisposable
     }
 
     private void DrawControls()
+{
+    ImGui.Text("Data Source:");
+    ImGui.SameLine();
+    var statusColor = _isLive ? new Vector4(0.1f, 1.0f, 0.1f, 1.0f) : new Vector4(0.5f, 0.8f, 1.0f, 1.0f);
+    ImGui.TextColored(statusColor, _statusMessage);
+    
+    if (_isLive)
     {
-        ImGui.Text("Data Source:");
         ImGui.SameLine();
-        var statusColor = _isLive ? new Vector4(0.1f, 1.0f, 0.1f, 1.0f) : new Vector4(0.5f, 0.8f, 1.0f, 1.0f);
-        ImGui.TextColored(statusColor, _statusMessage);
-
-        ImGui.Text(
-            $"Vp={_currentDataSource.PWaveVelocity:F0} m/s | Vs={_currentDataSource.SWaveVelocity:F0} m/s | Vp/Vs={_currentDataSource.VpVsRatio:F3}");
-
-        // FIX: Better spacing and formatting for color scale display
-        ImGui.Spacing();
-        ImGui.Separator();
-        ImGui.Text("Current Slice Color Scale:");
-        ImGui.Indent();
-        ImGui.Text($"Min: {FormatVelocity(_currentSliceMinVel)} m/s");
-        ImGui.Text($"Max: {FormatVelocity(_currentSliceMaxVel)} m/s");
-        ImGui.Unindent();
-        ImGui.Separator();
-        ImGui.Spacing();
-
-        ImGui.Text("Tomography Slice:");
-        var controlsChanged = false;
-
-        controlsChanged |= ImGui.RadioButton("X Axis (YZ)", ref _sliceAxis, 0);
-        ImGui.SameLine();
-        controlsChanged |= ImGui.RadioButton("Y Axis (XZ)", ref _sliceAxis, 1);
-        ImGui.SameLine();
-        controlsChanged |= ImGui.RadioButton("Z Axis (XY)", ref _sliceAxis, 2);
-
-        var maxSlice = _dimensions.X > 0
-            ? _sliceAxis switch
-            {
-                0 => (int)_dimensions.X - 1,
-                1 => (int)_dimensions.Y - 1,
-                _ => (int)_dimensions.Z - 1
-            }
-            : 0;
-        _sliceIndex = Math.Clamp(_sliceIndex, 0, maxSlice);
-
-        ImGui.PushItemWidth(-1);
-        controlsChanged |= ImGui.SliderInt("##SliceIndex", ref _sliceIndex, 0, maxSlice);
-        ImGui.PopItemWidth();
-        ImGui.Text($"Slice: {_sliceIndex + 1} / {maxSlice + 1}");
-
-        ImGui.Spacing();
-        ImGui.Separator();
-
-        if (ImGui.Checkbox("Show Only Selected Material", ref _showOnlySelectedMaterial))
-            controlsChanged = true;
-
+        // Show a pulsing indicator for live updates
+        var pulseColor = (DateTime.Now.Millisecond / 500) % 2 == 0 
+            ? new Vector4(0, 1, 0, 1) 
+            : new Vector4(0, 0.5f, 0, 1);
+        ImGui.TextColored(pulseColor, "●");
         if (ImGui.IsItemHovered())
-            ImGui.SetTooltip("Hides non-selected materials.\nColor scale adjusts to visible data only.");
-
-        if (controlsChanged)
-        {
-            _lastUpdateHash = 0;
-            RequestUpdate();
-        }
+            ImGui.SetTooltip("Live data - updates every 0.5 seconds");
     }
+
+    ImGui.Text($"Vp={_currentDataSource.PWaveVelocity:F0} m/s | Vs={_currentDataSource.SWaveVelocity:F0} m/s | Vp/Vs={_currentDataSource.VpVsRatio:F3}");
+    
+    ImGui.Spacing();
+    ImGui.Separator();
+    ImGui.Text("Current Slice Color Scale:");
+    ImGui.Indent();
+    ImGui.Text($"Min: {FormatVelocity(_currentSliceMinVel)} m/s");
+    ImGui.Text($"Max: {FormatVelocity(_currentSliceMaxVel)} m/s");
+    ImGui.Unindent();
+    ImGui.Separator();
+    ImGui.Spacing();
+
+    ImGui.Text("Tomography Slice:");
+    var controlsChanged = false;
+    
+    controlsChanged |= ImGui.RadioButton("X Axis (YZ)", ref _sliceAxis, 0);
+    ImGui.SameLine();
+    controlsChanged |= ImGui.RadioButton("Y Axis (XZ)", ref _sliceAxis, 1);
+    ImGui.SameLine();
+    controlsChanged |= ImGui.RadioButton("Z Axis (XY)", ref _sliceAxis, 2);
+
+    var maxSlice = _dimensions.X > 0
+        ? _sliceAxis switch
+        {
+            0 => (int)_dimensions.X - 1,
+            1 => (int)_dimensions.Y - 1,
+            _ => (int)_dimensions.Z - 1
+        }
+        : 0;
+    _sliceIndex = Math.Clamp(_sliceIndex, 0, maxSlice);
+    
+    ImGui.PushItemWidth(-1);
+    controlsChanged |= ImGui.SliderInt("##SliceIndex", ref _sliceIndex, 0, maxSlice);
+    ImGui.PopItemWidth();
+    ImGui.Text($"Slice: {_sliceIndex + 1} / {maxSlice + 1}");
+
+    ImGui.Spacing();
+    ImGui.Separator();
+    
+    if (ImGui.Checkbox("Show Only Selected Material", ref _showOnlySelectedMaterial)) 
+        controlsChanged = true;
+    
+    if (ImGui.IsItemHovered())
+        ImGui.SetTooltip("Hides non-selected materials.\nColor scale adjusts to visible data only.");
+
+    if (controlsChanged) 
+    {
+        RequestUpdate();
+    }
+}
 
     private void DrawTomographyView()
     {
@@ -354,7 +369,7 @@ public class RealTimeTomographyViewer : IDisposable
                 var w = _sliceAxis switch { 0 => (int)_dimensions.Y, 1 => (int)_dimensions.X, _ => (int)_dimensions.X };
                 var h = _sliceAxis switch { 0 => (int)_dimensions.Z, 1 => (int)_dimensions.Z, _ => (int)_dimensions.Y };
 
-                Logger.Log($"[TomographyViewer] Generated slice with min={minVelocity:E3}, max={maxVelocity:E3}");
+                //Logger.Log($"[TomographyViewer] Generated slice with min={minVelocity:E3}, max={maxVelocity:E3}");
 
                 return ((byte[] pixelData, int w, int h, float minVel, float maxVel)?)(pixelData, w, h, minVelocity,
                     maxVelocity);

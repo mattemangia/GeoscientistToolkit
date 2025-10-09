@@ -486,47 +486,87 @@ public class AcousticExportManager : IDisposable
     }
 
     private ChunkedVolume CreateVolumeFromField(float[,,] field, bool isSigned)
-    {
-        if (field == null) return null;
+{
+    if (field == null) return null;
 
-        var width = field.GetLength(0);
-        var height = field.GetLength(1);
-        var depth = field.GetLength(2);
+    var width = field.GetLength(0);
+    var height = field.GetLength(1);
+    var depth = field.GetLength(2);
 
-        var volume = new ChunkedVolume(width, height, depth);
-        volume.PixelSize = _pixelSize;
-        // Normalize and convert to byte
-        float maxValue = 0;
-        for (var z = 0; z < depth; z++)
+    var volume = new ChunkedVolume(width, height, depth);
+    volume.PixelSize = _pixelSize;
+
+    // FIX: Use percentile-based normalization instead of global max
+    // This prevents source saturation from dominating the visualization
+    var allValues = new List<float>();
+    for (var z = 0; z < depth; z++)
         for (var y = 0; y < height; y++)
-        for (var x = 0; x < width; x++)
-            maxValue = Math.Max(maxValue, Math.Abs(field[x, y, z]));
+            for (var x = 0; x < width; x++)
+                allValues.Add(Math.Abs(field[x, y, z]));
 
-        if (maxValue > 0)
-            for (var z = 0; z < depth; z++)
-            {
-                var slice = new byte[width * height];
-                var idx = 0;
-                for (var y = 0; y < height; y++)
+    allValues.Sort();
+    
+    // Use 99.5th percentile as max to exclude extreme outliers (source voxels)
+    var percentileIndex = (int)(allValues.Count * 0.995);
+    var maxValue = allValues[Math.Min(percentileIndex, allValues.Count - 1)];
+    
+    // Ensure we have a valid range
+    if (maxValue < 1e-10f) maxValue = 1e-10f;
+
+    Logger.Log($"[Export] Normalization range: 0 to {maxValue:E3} (99.5th percentile)");
+    Logger.Log($"[Export] Actual max value: {allValues[allValues.Count - 1]:E3}");
+
+    // Optional: Apply logarithmic compression for better dynamic range
+    var useLogCompression = true; // Make this a parameter if needed
+    
+    if (useLogCompression)
+    {
+        Logger.Log("[Export] Applying logarithmic compression for better visualization");
+        for (var z = 0; z < depth; z++)
+        {
+            var slice = new byte[width * height];
+            var idx = 0;
+            for (var y = 0; y < height; y++)
+                for (var x = 0; x < width; x++)
+                {
+                    var value = Math.Abs(field[x, y, z]);
+                    
+                    // Logarithmic compression: log10(1 + value/maxValue)
+                    // This compresses the high values while preserving low-amplitude signals
+                    var normalized = (float)Math.Log10(1 + value / maxValue) / (float)Math.Log10(2);
+                    normalized = Math.Clamp(normalized, 0f, 1f);
+                    
+                    slice[idx++] = (byte)(normalized * 255);
+                }
+            volume.WriteSliceZ(z, slice);
+        }
+    }
+    else
+    {
+        // Linear normalization with percentile-based max
+        for (var z = 0; z < depth; z++)
+        {
+            var slice = new byte[width * height];
+            var idx = 0;
+            for (var y = 0; y < height; y++)
                 for (var x = 0; x < width; x++)
                 {
                     var value = field[x, y, z];
                     float normalized;
 
                     if (isSigned)
-                        // Normalize for signed data (-max to +max) -> (0 to 1)
                         normalized = (value + maxValue) / (2 * maxValue);
                     else
-                        // Normalize for unsigned data (0 to max) -> (0 to 1)
                         normalized = value / maxValue;
+                        
                     slice[idx++] = (byte)(Math.Clamp(normalized, 0f, 1f) * 255);
                 }
-
-                volume.WriteSliceZ(z, slice);
-            }
-
-        return volume;
+            volume.WriteSliceZ(z, slice);
+        }
     }
+
+    return volume;
+}
 
     private void ExportRawFloatField(float[,,] field, string path)
     {
