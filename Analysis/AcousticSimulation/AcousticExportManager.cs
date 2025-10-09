@@ -31,7 +31,7 @@ public class AcousticExportManager : IDisposable
     private CtImageStackDataset _sourceDataset;
     private WaveformViewer _waveformViewer;
     private float[,,] _youngsModulusVolume; // ADDED
-
+    private float _pixelSize;
     public AcousticExportManager()
     {
         _exportDialog = new ImGuiExportFileDialog("AcousticExport", "Export Acoustic Volume");
@@ -67,7 +67,7 @@ public class AcousticExportManager : IDisposable
         _sourceDataset = sourceDataset;
         _damageField = damageField;
         _calibrationData = calibrationData;
-
+        _pixelSize = sourceDataset.PixelSize;
         if (ImGui.Button("Export Acoustic Volume", new Vector2(-1, 0)))
         {
             var defaultName = $"{sourceDataset.Name}_AcousticVolume_{DateTime.Now:yyyyMMdd_HHmmss}";
@@ -314,23 +314,56 @@ public class AcousticExportManager : IDisposable
     }
 
     private void ExportTimeSeries(string timeSeriesDir, CancellationToken cancellationToken)
+{
+    if (_results.TimeSeriesSnapshots == null) return;
+
+    for (var i = 0; i < _results.TimeSeriesSnapshots.Count; i++)
     {
-        if (_results.TimeSeriesSnapshots == null) return;
+        cancellationToken.ThrowIfCancellationRequested();
 
-        for (var i = 0; i < _results.TimeSeriesSnapshots.Count; i++)
+        if (i % 5 == 0)
         {
-            cancellationToken.ThrowIfCancellationRequested();
-
-            if (i % 5 == 0)
-            {
-                var progress = 0.8f + 0.15f * i / _results.TimeSeriesSnapshots.Count;
-                UpdateProgress(progress, $"Exporting snapshot {i + 1}/{_results.TimeSeriesSnapshots.Count}...");
-            }
-
-            var path = Path.Combine(timeSeriesDir, $"snapshot_{i:D6}.bin");
-            _results.TimeSeriesSnapshots[i].SaveToFile(path);
+            var progress = 0.8f + 0.15f * i / _results.TimeSeriesSnapshots.Count;
+            UpdateProgress(progress, $"Exporting snapshot {i + 1}/{_results.TimeSeriesSnapshots.Count}...");
         }
+
+        var simSnapshot = _results.TimeSeriesSnapshots[i];
+        var path = Path.Combine(timeSeriesDir, $"snapshot_{i:D6}.bin");
+        
+        // Convert simulation snapshot to data layer format
+        var dataSnapshot = new GeoscientistToolkit.Data.AcousticVolume.WaveFieldSnapshot
+        {
+            TimeStep = simSnapshot.TimeStep,
+            SimulationTime = simSnapshot.SimulationTime,
+            Width = _results.WaveFieldVx.GetLength(0),
+            Height = _results.WaveFieldVx.GetLength(1),
+            Depth = _results.WaveFieldVx.GetLength(2)
+        };
+        
+        // For huge datasets, we only have max velocity (combined), so we need to split it
+        // For normal datasets, we have the full Vx, Vy, Vz fields
+        if (simSnapshot.VelocityField != null)
+        {
+            // Use the combined velocity field as Vx, leave Vy and Vz as zero
+            // This is acceptable for visualization purposes
+            var vx = simSnapshot.VelocityField;
+            var vy = new float[dataSnapshot.Width, dataSnapshot.Height, dataSnapshot.Depth];
+            var vz = new float[dataSnapshot.Width, dataSnapshot.Height, dataSnapshot.Depth];
+            dataSnapshot.SetVelocityFields(vx, vy, vz);
+        }
+        else if (simSnapshot.MaxVelocityField != null)
+        {
+            // Same approach for max velocity field
+            var vx = simSnapshot.MaxVelocityField;
+            var vy = new float[dataSnapshot.Width, dataSnapshot.Height, dataSnapshot.Depth];
+            var vz = new float[dataSnapshot.Width, dataSnapshot.Height, dataSnapshot.Depth];
+            dataSnapshot.SetVelocityFields(vx, vy, vz);
+        }
+        
+        // Save in the data layer format
+        dataSnapshot.SaveToFile(path);
     }
+}
 
     private void SaveMetadata(AcousticVolumeDataset dataset, string volumeDir)
     {
@@ -369,34 +402,75 @@ public class AcousticExportManager : IDisposable
     }
 
     private AcousticVolumeDataset CreateTemporaryDataset()
+{
+    // Create a temporary dataset for the waveform viewer
+    var dataset = new AcousticVolumeDataset("Temp", Path.GetTempPath())
     {
-        // Create a temporary dataset for the waveform viewer
-        var dataset = new AcousticVolumeDataset("Temp", Path.GetTempPath())
+        PWaveVelocity = _results.PWaveVelocity,
+        SWaveVelocity = _results.SWaveVelocity,
+        VpVsRatio = _results.VpVsRatio,
+        TimeSteps = _results.TotalTimeSteps,
+        ComputationTime = _results.ComputationTime,
+        YoungsModulusMPa = _parameters.YoungsModulusMPa,
+        PoissonRatio = _parameters.PoissonRatio,
+        ConfiningPressureMPa = _parameters.ConfiningPressureMPa,
+        SourceFrequencyKHz = _parameters.SourceFrequencyKHz,
+        SourceEnergyJ = _parameters.SourceEnergyJ,
+        TimeSeriesSnapshots = ConvertTimeSeriesForViewer(_results.TimeSeriesSnapshots)
+    };
+
+    // Create volumes from results
+    if (_results.WaveFieldVx != null) dataset.PWaveField = CreateVolumeFromField(_results.WaveFieldVx, true);
+    if (_results.WaveFieldVy != null) dataset.SWaveField = CreateVolumeFromField(_results.WaveFieldVy, true);
+    if (_results.WaveFieldVz != null)
+        dataset.CombinedWaveField = CreateVolumeFromField(CreateCombinedField(), false);
+    if (_damageField != null) dataset.DamageField = CreateVolumeFromField(_damageField, false);
+
+    dataset.Calibration = _calibrationData;
+
+    return dataset;
+}
+
+private List<GeoscientistToolkit.Data.AcousticVolume.WaveFieldSnapshot> ConvertTimeSeriesForViewer(
+    List<GeoscientistToolkit.Analysis.AcousticSimulation.WaveFieldSnapshot> simSnapshots)
+{
+    if (simSnapshots == null || simSnapshots.Count == 0)
+        return new List<GeoscientistToolkit.Data.AcousticVolume.WaveFieldSnapshot>();
+    
+    var dataSnapshots = new List<GeoscientistToolkit.Data.AcousticVolume.WaveFieldSnapshot>();
+    
+    foreach (var simSnapshot in simSnapshots)
+    {
+        var dataSnapshot = new GeoscientistToolkit.Data.AcousticVolume.WaveFieldSnapshot
         {
-            PWaveVelocity = _results.PWaveVelocity,
-            SWaveVelocity = _results.SWaveVelocity,
-            VpVsRatio = _results.VpVsRatio,
-            TimeSteps = _results.TotalTimeSteps,
-            ComputationTime = _results.ComputationTime,
-            YoungsModulusMPa = _parameters.YoungsModulusMPa,
-            PoissonRatio = _parameters.PoissonRatio,
-            ConfiningPressureMPa = _parameters.ConfiningPressureMPa,
-            SourceFrequencyKHz = _parameters.SourceFrequencyKHz,
-            SourceEnergyJ = _parameters.SourceEnergyJ,
-            TimeSeriesSnapshots = _results.TimeSeriesSnapshots
+            TimeStep = simSnapshot.TimeStep,
+            SimulationTime = simSnapshot.SimulationTime,
+            Width = _results.WaveFieldVx.GetLength(0),
+            Height = _results.WaveFieldVx.GetLength(1),
+            Depth = _results.WaveFieldVx.GetLength(2)
         };
-
-        // Create volumes from results
-        if (_results.WaveFieldVx != null) dataset.PWaveField = CreateVolumeFromField(_results.WaveFieldVx, true);
-        if (_results.WaveFieldVy != null) dataset.SWaveField = CreateVolumeFromField(_results.WaveFieldVy, true);
-        if (_results.WaveFieldVz != null)
-            dataset.CombinedWaveField = CreateVolumeFromField(CreateCombinedField(), false);
-        if (_damageField != null) dataset.DamageField = CreateVolumeFromField(_damageField, false);
-
-        dataset.Calibration = _calibrationData;
-
-        return dataset;
+        
+        // Convert velocity fields
+        if (simSnapshot.VelocityField != null)
+        {
+            var vx = simSnapshot.VelocityField;
+            var vy = new float[dataSnapshot.Width, dataSnapshot.Height, dataSnapshot.Depth];
+            var vz = new float[dataSnapshot.Width, dataSnapshot.Height, dataSnapshot.Depth];
+            dataSnapshot.SetVelocityFields(vx, vy, vz);
+        }
+        else if (simSnapshot.MaxVelocityField != null)
+        {
+            var vx = simSnapshot.MaxVelocityField;
+            var vy = new float[dataSnapshot.Width, dataSnapshot.Height, dataSnapshot.Depth];
+            var vz = new float[dataSnapshot.Width, dataSnapshot.Height, dataSnapshot.Depth];
+            dataSnapshot.SetVelocityFields(vx, vy, vz);
+        }
+        
+        dataSnapshots.Add(dataSnapshot);
     }
+    
+    return dataSnapshots;
+}
 
     private ChunkedVolume CreateVolumeFromField(float[,,] field, bool isSigned)
     {
@@ -407,7 +481,7 @@ public class AcousticExportManager : IDisposable
         var depth = field.GetLength(2);
 
         var volume = new ChunkedVolume(width, height, depth);
-
+        volume.PixelSize = _pixelSize;
         // Normalize and convert to byte
         float maxValue = 0;
         for (var z = 0; z < depth; z++)

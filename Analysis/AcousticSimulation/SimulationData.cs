@@ -67,6 +67,79 @@ public class WaveFieldUpdateEventArgs : EventArgs
 }
 
 /// <summary>
+///     Container for a single wave field snapshot in time.
+/// </summary>
+public class WaveFieldSnapshot
+{
+    /// <summary>
+    ///     Time step index when snapshot was taken.
+    /// </summary>
+    public int TimeStep { get; set; }
+    
+    /// <summary>
+    ///     Physical simulation time in seconds.
+    /// </summary>
+    public float SimulationTime { get; set; }
+    
+    /// <summary>
+    ///     Full velocity magnitude field (for normal datasets).
+    /// </summary>
+    public float[,,] VelocityField { get; set; }
+    
+    /// <summary>
+    ///     Maximum velocity field (for huge datasets - memory efficient).
+    /// </summary>
+    public float[,,] MaxVelocityField { get; set; }
+    
+    /// <summary>
+    ///     Saves snapshot to a binary file.
+    /// </summary>
+    public void SaveToFile(string path)
+    {
+        using var writer = new BinaryWriter(File.Create(path));
+        
+        var field = VelocityField ?? MaxVelocityField;
+        if (field == null) return;
+        
+        writer.Write(field.GetLength(0));
+        writer.Write(field.GetLength(1));
+        writer.Write(field.GetLength(2));
+        writer.Write(TimeStep);
+        writer.Write(SimulationTime);
+        
+        var buffer = new byte[field.Length * sizeof(float)];
+        Buffer.BlockCopy(field, 0, buffer, 0, buffer.Length);
+        writer.Write(buffer);
+    }
+    
+    /// <summary>
+    ///     Loads snapshot from a binary file.
+    /// </summary>
+    public static WaveFieldSnapshot LoadFromFile(string path)
+    {
+        using var reader = new BinaryReader(File.OpenRead(path));
+        
+        int w = reader.ReadInt32();
+        int h = reader.ReadInt32();
+        int d = reader.ReadInt32();
+        int timeStep = reader.ReadInt32();
+        float simTime = reader.ReadSingle();
+        
+        var field = new float[w, h, d];
+        var buffer = new byte[field.Length * sizeof(float)];
+        reader.Read(buffer, 0, buffer.Length);
+        Buffer.BlockCopy(buffer, 0, field, 0, buffer.Length);
+        
+        return new WaveFieldSnapshot
+        {
+            TimeStep = timeStep,
+            SimulationTime = simTime,
+            VelocityField = field
+        };
+    }
+}
+
+/// <summary>
 ///     Manages a collection of simulation results to calibrate material properties.
 /// </summary>
 internal class CalibrationManager

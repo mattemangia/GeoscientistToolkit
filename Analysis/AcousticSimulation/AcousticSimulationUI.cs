@@ -225,14 +225,20 @@ public class AcousticSimulationUI : IDisposable
         _simulator?.Dispose();
         _exportManager?.Dispose();
         _tomographyViewer?.Dispose();
+    
+        // Clean up offload directory on exit
         if (Directory.Exists(_offloadDirectory))
+        {
             try
             {
                 Directory.Delete(_offloadDirectory, true);
+                Logger.Log("[UI] Cleaned up offload cache on exit");
             }
             catch
             {
+                // Ignore cleanup errors on exit
             }
+        }
     }
 
     private void OnTransducerMoved()
@@ -437,39 +443,79 @@ public class AcousticSimulationUI : IDisposable
 
         // Memory Management
         if (ImGui.CollapsingHeader("Memory Management"))
+{
+    ImGui.Indent();
+    ImGui.Checkbox("Use Chunked Processing", ref _useChunkedProcessing);
+    if (ImGui.IsItemHovered())
+        ImGui.SetTooltip("Process large volumes in chunks to avoid memory issues");
+
+    if (_useChunkedProcessing)
+    {
+        ImGui.DragInt("Chunk Size (MB)", ref _chunkSizeMB, 1, 64, 2048);
+        ImGui.Checkbox("Enable Disk Offloading", ref _enableOffloading);
+        if (_enableOffloading)
         {
-            ImGui.Indent();
-            ImGui.Checkbox("Use Chunked Processing", ref _useChunkedProcessing);
-            if (ImGui.IsItemHovered())
-                ImGui.SetTooltip("Process large volumes in chunks to avoid memory issues");
+            ImGui.Text($"Offload Dir: {_offloadDirectory}");
+            if (ImGui.Button("Change Directory...")) _offloadDirectoryDialog.Open(_offloadDirectory);
 
-            if (_useChunkedProcessing)
+            ImGui.SameLine();
+            
+            // ===== REPLACE THIS ENTIRE SECTION =====
+            
+            // Show cache statistics
+            if (_simulator != null)
             {
-                ImGui.DragInt("Chunk Size (MB)", ref _chunkSizeMB, 1, 64, 2048);
-                ImGui.Checkbox("Enable Disk Offloading", ref _enableOffloading);
-                if (_enableOffloading)
+                var (totalChunks, loadedChunks, offloadedChunks, cacheSizeBytes) = _simulator.GetCacheStats();
+                ImGui.Separator();
+                ImGui.Text($"Cache Status:");
+                ImGui.Indent();
+                ImGui.Text($"Total Chunks: {totalChunks}");
+                ImGui.Text($"In Memory: {loadedChunks}");
+                ImGui.Text($"Offloaded: {offloadedChunks}");
+                ImGui.Text($"Disk Cache: {cacheSizeBytes / (1024.0 * 1024.0):F2} MB");
+                ImGui.Unindent();
+            }
+            
+            // Clear cache button
+            bool canClearCache = _simulator != null && !_simulator.IsSimulating;
+            
+            if (!canClearCache)
+                ImGui.BeginDisabled();
+            
+            if (ImGui.Button("Clear Cache"))
+            {
+                if (_simulator != null)
                 {
-                    ImGui.Text($"Offload Dir: {_offloadDirectory}");
-                    if (ImGui.Button("Change Directory...")) _offloadDirectoryDialog.Open(_offloadDirectory);
-
-                    ImGui.SameLine();
-                    if (ImGui.Button("Clear Cache"))
-                        if (Directory.Exists(_offloadDirectory))
-                            try
-                            {
-                                Directory.Delete(_offloadDirectory, true);
-                                Directory.CreateDirectory(_offloadDirectory);
-                                Logger.Log("[Simulation] Cleared offload cache");
-                            }
-                            catch (Exception ex)
-                            {
-                                Logger.LogError($"Failed to clear cache: {ex.Message}");
-                            }
+                    bool success = _simulator.ClearOffloadCache();
+                    if (success)
+                        Logger.Log("[UI] Successfully cleared offload cache");
+                    else
+                        Logger.LogError("[UI] Failed to clear cache - simulation may be running");
                 }
             }
-
-            ImGui.Unindent();
+            
+            if (!canClearCache)
+            {
+                ImGui.EndDisabled();
+                if (ImGui.IsItemHovered())
+                {
+                    if (_simulator?.IsSimulating == true)
+                        ImGui.SetTooltip("Cannot clear cache while simulation is running");
+                    else
+                        ImGui.SetTooltip("Run a simulation first to generate cache");
+                }
+            }
+            else if (ImGui.IsItemHovered())
+            {
+                ImGui.SetTooltip("Clears disk cache and resets LRU state.\nFrees up disk space but next simulation will be slower.");
+            }
+            
+            // ===== END OF REPLACEMENT SECTION =====
         }
+    }
+
+    ImGui.Unindent();
+}
 
         // Visualization Options
         if (ImGui.CollapsingHeader("Visualization"))
