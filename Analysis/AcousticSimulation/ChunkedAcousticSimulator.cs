@@ -467,11 +467,18 @@ public class ChunkedAcousticSimulator : IDisposable
 
     private async Task ProcessTimeStepAsync(CancellationToken ct)
     {
+        // CRITICAL: Process chunks in SEQUENTIAL ORDER for physics correctness
         for (int chunkIdx = 0; chunkIdx < _chunks.Count; chunkIdx++)
         {
             ct.ThrowIfCancellationRequested();
             
             var chunk = _chunks[chunkIdx];
+            
+            // Verify chunk is at correct position (sanity check)
+            if (chunk.StartZ != chunkIdx * (chunk.Depth > 0 ? _chunks[0].Depth : 1) && _chunks.Count > 1)
+            {
+                Logger.LogError($"[CRITICAL] Chunk {chunkIdx} position mismatch! Expected Z={chunkIdx * _chunks[0].Depth}, got Z={chunk.StartZ}");
+            }
             
             // Load chunk if offloaded (using LRU cache)
             if (chunk.IsOffloaded)
@@ -517,19 +524,23 @@ public class ChunkedAcousticSimulator : IDisposable
             if (_currentStep < 100) // Source duration
                 ApplyContinuousSource(chunk, _currentStep);
             
-            // Notify for visualization (throttled for huge datasets)
-            bool shouldVisualize = _params.EnableRealTimeVisualization && 
-                                   (!_isHugeDataset || chunkIdx % Math.Max(1, _chunks.Count / 8) == 0);
-            
-            if (shouldVisualize)
+            // FIXED: Always visualize all chunks sequentially
+            // The UI will handle throttling updates by time
+            if (_params.EnableRealTimeVisualization)
             {
                 NotifyWaveFieldUpdate(chunk, _currentStep);
             }
             
             // Smart LRU-based offloading (only if memory constrained)
+            // But NEVER offload the chunks we're about to need next
             if (_params.EnableOffloading && _currentMemoryUsageBytes > _maxMemoryBudgetBytes)
             {
-                EvictLRUChunksIfNeeded();
+                // Don't evict chunks we'll need in next few iterations
+                int safeZone = Math.Min(5, _chunks.Count / 10);
+                if (chunkIdx > safeZone && chunkIdx < _chunks.Count - safeZone)
+                {
+                    EvictLRUChunksIfNeeded();
+                }
             }
         }
         
@@ -1015,6 +1026,19 @@ public class ChunkedAcousticSimulator : IDisposable
 
     private void NotifyWaveFieldUpdate(WaveFieldChunk chunk, int timeStep)
     {
+        // VALIDATION: Ensure chunk coordinates are correct
+        if (chunk.StartZ < 0 || chunk.StartZ >= _params.Depth)
+        {
+            Logger.LogError($"[CRITICAL] Chunk has invalid StartZ: {chunk.StartZ} (max: {_params.Depth})");
+            return;
+        }
+        
+        if (chunk.StartZ + chunk.Depth > _params.Depth)
+        {
+            Logger.LogError($"[CRITICAL] Chunk exceeds volume bounds: StartZ={chunk.StartZ}, Depth={chunk.Depth}, MaxDepth={_params.Depth}");
+            return;
+        }
+        
         WaveFieldUpdated?.Invoke(this, new WaveFieldUpdateEventArgs
         {
             ChunkVelocityFields = (chunk.Vx, chunk.Vy, chunk.Vz),
@@ -1092,8 +1116,8 @@ public class ChunkedAcousticSimulator : IDisposable
             Logger.Log("[Simulator] Using max velocity field for huge dataset (avoiding full load)");
             
             // Calculate velocities from arrival times
-            double pVelocity = CalculateVelocity(_pWaveArrivalTime);
-            double sVelocity = CalculateVelocity(_sWaveArrivalTime);
+            double pWaveVelocity = CalculateVelocity(_pWaveArrivalTime);
+            double sWaveVelocity = CalculateVelocity(_sWaveArrivalTime);
             
             // Use max velocity as final wave field
             var results = new SimulationResults
@@ -1101,9 +1125,9 @@ public class ChunkedAcousticSimulator : IDisposable
                 WaveFieldVx = _maxVelocityMagnitude, // Combined into single field
                 WaveFieldVy = new float[_params.Width, _params.Height, _params.Depth],
                 WaveFieldVz = new float[_params.Width, _params.Height, _params.Depth],
-                PWaveVelocity = pVelocity,
-                SWaveVelocity = sVelocity,
-                VpVsRatio = sVelocity > 0 ? pVelocity / sVelocity : 0,
+                PWaveVelocity = pWaveVelocity,
+                SWaveVelocity = sWaveVelocity,
+                VpVsRatio = sWaveVelocity > 0 ? pWaveVelocity / sWaveVelocity : 0,
                 PWaveTravelTime = _pWaveArrivalTime,
                 SWaveTravelTime = _sWaveArrivalTime,
                 TotalTimeSteps = _currentStep,
@@ -1113,7 +1137,7 @@ public class ChunkedAcousticSimulator : IDisposable
                 Context = _materialLabels
             };
             
-            Logger.Log($"[Simulator] Results: Vp={pVelocity:F2} m/s, Vs={sVelocity:F2} m/s, Vp/Vs={results.VpVsRatio:F3}");
+            Logger.Log($"[Simulator] Results: Vp={pWaveVelocity:F2} m/s, Vs={sWaveVelocity:F2} m/s, Vp/Vs={results.VpVsRatio:F3}");
             Logger.Log($"[Simulator] Max velocity range: {_maxVelocityMagnitude.Cast<float>().Min():E3} to {_maxVelocityMagnitude.Cast<float>().Max():E3} m/s");
             
             return results;
@@ -1167,17 +1191,17 @@ public class ChunkedAcousticSimulator : IDisposable
         }, ct);
         
         // Calculate velocities from arrival times
-        double pWaveVelocity = CalculateVelocity(_pWaveArrivalTime);
-        double sWaveVelocity = CalculateVelocity(_sWaveArrivalTime);
+        double pVelocity = CalculateVelocity(_pWaveArrivalTime);
+        double sVelocity = CalculateVelocity(_sWaveArrivalTime);
         
         var finalResults = new SimulationResults
         {
             WaveFieldVx = vx,
             WaveFieldVy = vy,
             WaveFieldVz = vz,
-            PWaveVelocity = pWaveVelocity,
-            SWaveVelocity = sWaveVelocity,
-            VpVsRatio = sWaveVelocity > 0 ? pWaveVelocity / sWaveVelocity : 0,
+            PWaveVelocity = pVelocity,
+            SWaveVelocity = sVelocity,
+            VpVsRatio = sVelocity > 0 ? pVelocity / sVelocity : 0,
             PWaveTravelTime = _pWaveArrivalTime,
             SWaveTravelTime = _sWaveArrivalTime,
             TotalTimeSteps = _currentStep,
@@ -1187,7 +1211,7 @@ public class ChunkedAcousticSimulator : IDisposable
             Context = _materialLabels
         };
         
-        Logger.Log($"[Simulator] Results: Vp={pWaveVelocity:F2} m/s, Vs={sWaveVelocity:F2} m/s, Vp/Vs={finalResults.VpVsRatio:F3}");
+        Logger.Log($"[Simulator] Results: Vp={pVelocity:F2} m/s, Vs={sVelocity:F2} m/s, Vp/Vs={finalResults.VpVsRatio:F3}");
         Logger.Log($"[Simulator] Active voxels in final field: {CountActiveVoxels(vx, vy, vz)}");
         
         return finalResults;

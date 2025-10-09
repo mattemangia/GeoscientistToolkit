@@ -1682,6 +1682,7 @@ public class AcousticSimulationUI : IDisposable
                     var x_global = simExtent.Min.X + x_chunk;
                     if (x_global >= _liveResultsForTomography.WaveFieldVx.GetLength(0)) continue;
 
+                    // CRITICAL: Ensure coordinate mapping is correct
                     _liveResultsForTomography.WaveFieldVx[x_global, y_global, z_global] = vx[x_chunk, y_chunk, z_chunk];
                     _liveResultsForTomography.WaveFieldVy[x_global, y_global, z_global] = vy[x_chunk, y_chunk, z_chunk];
                     _liveResultsForTomography.WaveFieldVz[x_global, y_global, z_global] = vz[x_chunk, y_chunk, z_chunk];
