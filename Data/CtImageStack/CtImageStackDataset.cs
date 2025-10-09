@@ -38,7 +38,7 @@ public class CtImageStackDataset : Dataset, ISerializableDataset
 
     // File paths for the image stack
     public List<string> ImagePaths { get; set; } = new();
-    public ChunkedVolume VolumeData { get; private set; }
+    public ChunkedVolume VolumeData { get; set; }
 
     // --- NEW PROPERTIES FOR MATERIALS AND LABELS ---
     public ChunkedLabelVolume LabelData { get; set; }
