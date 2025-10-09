@@ -69,7 +69,9 @@ public class ChunkedAcousticSimulator : IDisposable
     public float[,,] YoungsModulusVolume { get; private set; }
 
     public float[,,] PoissonRatioVolume { get; private set; }
-
+    private bool _enableRealTimeVisualization;
+    private DateTime _lastVisualizationUpdate = DateTime.MinValue;
+    private float _visualizationUpdateInterval = 0.1f;
     public float Progress => _params.TimeSteps > 0 ? (float)CurrentStep / _params.TimeSteps : 0f;
     public int CurrentStep { get; private set; }
 
@@ -187,28 +189,117 @@ public class ChunkedAcousticSimulator : IDisposable
     }
 
     private void CalculateAdaptiveTimeStep()
+{
+    // Estimate maximum P-wave velocity
+    var maxVp = 6000f;
+    if (_params.YoungsModulusMPa > 0 && _params.PoissonRatio > 0)
     {
-        // CFL condition: dt <= h / (sqrt(3) * Vp_max)
-        // Estimate maximum P-wave velocity from material properties
-        var maxVp = 6000f; // Conservative estimate
-
-        if (_params.YoungsModulusMPa > 0 && _params.PoissonRatio > 0)
-        {
-            var E = _params.YoungsModulusMPa * 1e6f;
-            var nu = _params.PoissonRatio;
-            var rho = 2700f; // Typical rock density kg/m³
-
-            var mu = E / (2f * (1f + nu));
-            var lambda = E * nu / ((1f + nu) * (1f - 2f * nu));
-            maxVp = MathF.Sqrt((lambda + 2f * mu) / rho);
-        }
-
-        var h = _params.PixelSize; // Already in meters
-        var dtMax = 0.5f * h / (1.732f * maxVp); // Safety factor 0.5
-
-        _params.TimeStepSeconds = dtMax;
-        Logger.Log($"[Simulator] Adaptive time step: {_params.TimeStepSeconds * 1e6f:F3} µs");
+        var E = _params.YoungsModulusMPa * 1e6f;
+        var nu = _params.PoissonRatio;
+        var rho = 2700f;
+        var mu = E / (2f * (1f + nu));
+        var lambda = E * nu / ((1f + nu) * (1f - 2f * nu));
+        maxVp = MathF.Sqrt((lambda + 2f * mu) / rho);
     }
+
+    var h = _params.PixelSize; // meters
+    var h_um = h * 1e6f; // microns for logging
+    
+    // ADAPTIVE CFL FACTOR based on pixel size
+    // Smaller pixels = more aggressive (need fewer steps)
+    // Larger pixels = more conservative (can afford more steps)
+    float cflFactor;
+    string regime;
+    
+    if (h < 5e-6f) // < 5 microns - MICRO-CT regime
+    {
+        cflFactor = 0.95f;
+        regime = "Ultra-fine (micro-CT)";
+    }
+    else if (h < 20e-6f) // < 20 microns
+    {
+        cflFactor = 0.90f;
+        regime = "Very fine";
+    }
+    else if (h < 50e-6f) // < 50 microns
+    {
+        cflFactor = 0.85f;
+        regime = "Fine";
+    }
+    else if (h < 200e-6f) // < 200 microns
+    {
+        cflFactor = 0.75f;
+        regime = "Standard";
+    }
+    else if (h < 1e-3f) // < 1 mm
+    {
+        cflFactor = 0.65f;
+        regime = "Coarse";
+    }
+    else if (h < 10e-3f) // < 10 mm
+    {
+        cflFactor = 0.50f;
+        regime = "Very coarse";
+    }
+    else // >= 10 mm - Medical CT regime
+    {
+        cflFactor = 0.35f;
+        regime = "Medical CT";
+    }
+    if (System.Runtime.InteropServices.RuntimeInformation.IsOSPlatform(
+            System.Runtime.InteropServices.OSPlatform.OSX))
+    {
+        var originalCfl = cflFactor;
+        cflFactor = Math.Min(cflFactor + 0.05f, 0.98f); // Boost by 0.05, max 0.98
+    
+        if (Math.Abs(cflFactor - originalCfl) > 0.001f)
+        {
+            Logger.Log($"[Simulator] Mac detected - CFL boosted from {originalCfl:F3} to {cflFactor:F3}");
+            Logger.Log($"[Simulator] This reduces time steps by ~{(1.0f - originalCfl/cflFactor) * 100f:F1}%");
+        }
+    }
+    var dtMax = cflFactor * h / (1.732f * maxVp);
+    _params.TimeStepSeconds = dtMax;
+    
+    // Calculate simulation metrics
+    var totalSimTime = _params.TimeSteps * dtMax;
+    var expectedTravelTime = CalculateExpectedWaveTravelTime();
+    var coverageRatio = totalSimTime / expectedTravelTime;
+    
+    Logger.Log($"[Simulator] ═══════════════════════════════════════");
+    Logger.Log($"[Simulator] ADAPTIVE TIME STEP CALCULATION");
+    Logger.Log($"[Simulator] ───────────────────────────────────────");
+    Logger.Log($"[Simulator] Pixel size: {h_um:F3} μm ({h * 1000f:F6} mm)");
+    Logger.Log($"[Simulator] Resolution regime: {regime}");
+    Logger.Log($"[Simulator] CFL safety factor: {cflFactor:F3}");
+    Logger.Log($"[Simulator] Max P-wave velocity: {maxVp:F0} m/s");
+    Logger.Log($"[Simulator] ───────────────────────────────────────");
+    Logger.Log($"[Simulator] Time step (dt): {dtMax * 1e9f:F3} ns");
+    Logger.Log($"[Simulator] Total steps: {_params.TimeSteps:N0}");
+    Logger.Log($"[Simulator] Total sim time: {totalSimTime * 1e6f:F3} μs");
+    Logger.Log($"[Simulator] ───────────────────────────────────────");
+    Logger.Log($"[Simulator] Expected P-wave arrival: {expectedTravelTime * 1e6f:F3} μs");
+    Logger.Log($"[Simulator] Coverage ratio: {coverageRatio:F2}x travel time");
+    
+    if (coverageRatio < 1.5f)
+    {
+        var recommendedSteps = (int)(expectedTravelTime * 2.5f / dtMax);
+        Logger.LogWarning($"[Simulator] ⚠️  LOW COVERAGE - waves may not reach receiver!");
+        Logger.LogWarning($"[Simulator] Recommended: {recommendedSteps:N0} steps");
+    }
+    else if (coverageRatio > 10f)
+    {
+        var optimalSteps = (int)(expectedTravelTime * 3.0f / dtMax);
+        Logger.LogWarning($"[Simulator] ℹ️  High coverage - could reduce to ~{optimalSteps:N0} steps");
+    }
+    else
+    {
+        Logger.Log($"[Simulator] ✓ Coverage appears adequate");
+    }
+    
+    Logger.Log($"[Simulator] ═══════════════════════════════════════");
+}
+
 
     private void InitializeKernel()
     {
@@ -471,74 +562,101 @@ public class ChunkedAcousticSimulator : IDisposable
     }
 
     private async Task ProcessTimeStepAsync(CancellationToken ct)
+{
+    // OPTIMIZATION: Reduce progress reporting overhead
+    var shouldReportProgress = CurrentStep % 50 == 0;
+    var shouldUpdateVisualization = _params.EnableRealTimeVisualization && 
+                                    (DateTime.Now - _lastVisualizationUpdate).TotalSeconds >= _visualizationUpdateInterval;
+    var shouldLogActivity = CurrentStep % 500 == 0; // Reduced from 100
+    var shouldTriggerGC = CurrentStep % 500 == 0; // Reduced from 100
+    
+    // Process chunks sequentially (required for physics correctness)
+    for (var chunkIdx = 0; chunkIdx < _chunks.Count; chunkIdx++)
     {
-        // CRITICAL: Process chunks in SEQUENTIAL ORDER for physics correctness
-        for (var chunkIdx = 0; chunkIdx < _chunks.Count; chunkIdx++)
+        ct.ThrowIfCancellationRequested();
+
+        var chunk = _chunks[chunkIdx];
+
+        // Load chunk if offloaded
+        if (chunk.IsOffloaded)
+            LoadChunkWithLRU(chunkIdx);
+        else
+            TrackChunkAccess(chunkIdx);
+
+        // Get material properties
+        var (E, nu, rho) = ExtractChunkMaterialProperties(chunk);
+
+        // ALWAYS run elastic model (core physics)
+        if (_params.UseElasticModel)
         {
-            ct.ThrowIfCancellationRequested();
-
-            var chunk = _chunks[chunkIdx];
-
-            // Verify chunk is at correct position (sanity check)
-            if (chunk.StartZ != chunkIdx * (chunk.Depth > 0 ? _chunks[0].Depth : 1) && _chunks.Count > 1)
-                Logger.LogError(
-                    $"[CRITICAL] Chunk {chunkIdx} position mismatch! Expected Z={chunkIdx * _chunks[0].Depth}, got Z={chunk.StartZ}");
-
-            // Load chunk if offloaded (using LRU cache)
-            if (chunk.IsOffloaded)
-                LoadChunkWithLRU(chunkIdx);
-            else
-                // Track access for LRU
-                TrackChunkAccess(chunkIdx);
-
-            // Get material properties for this chunk
-            var (E, nu, rho) = ExtractChunkMaterialProperties(chunk);
-
-            // Run physics kernel (only if elastic model enabled)
-            if (_params.UseElasticModel)
-                _kernel.UpdateWaveField(
-                    chunk.Vx, chunk.Vy, chunk.Vz,
-                    chunk.Sxx, chunk.Syy, chunk.Szz,
-                    chunk.Sxy, chunk.Sxz, chunk.Syz,
-                    E, nu, rho,
-                    _params.TimeStepSeconds,
-                    _params.PixelSize,
-                    _params.ArtificialDampingFactor);
-
-            // Apply physics models
-            if (_params.UsePlasticModel)
-                ApplyPlasticity(chunk, E, nu, rho);
-
-            if (_params.UseBrittleModel)
-                ApplyDamage(chunk, E, nu);
-
-            // Update max velocity tracking
-            UpdateMaxVelocity(chunk);
-
-            // Apply boundary conditions
-            ApplyBoundaryConditions(chunk);
-
-            // Apply source at current time
-            if (CurrentStep < 100) // Source duration
-                ApplyContinuousSource(chunk, CurrentStep);
-
-            // FIXED: Always visualize all chunks sequentially
-            // The UI will handle throttling updates by time
-            if (_params.EnableRealTimeVisualization) NotifyWaveFieldUpdate(chunk, CurrentStep);
-
-            // Smart LRU-based offloading (only if memory constrained)
-            // But NEVER offload the chunks we're about to need next
-            if (_params.EnableOffloading && _currentMemoryUsageBytes > _maxMemoryBudgetBytes)
-            {
-                // Don't evict chunks we'll need in next few iterations
-                var safeZone = Math.Min(5, _chunks.Count / 10);
-                if (chunkIdx > safeZone && chunkIdx < _chunks.Count - safeZone) EvictLRUChunksIfNeeded();
-            }
+            _kernel.UpdateWaveField(
+                chunk.Vx, chunk.Vy, chunk.Vz,
+                chunk.Sxx, chunk.Syy, chunk.Szz,
+                chunk.Sxy, chunk.Sxz, chunk.Syz,
+                E, nu, rho,
+                _params.TimeStepSeconds,
+                _params.PixelSize,
+                _params.ArtificialDampingFactor);
         }
 
-        // Log wave activity periodically
-        if (CurrentStep % 100 == 0) LogWaveActivity();
+        // OPTIMIZATION: Only apply expensive models if enabled
+        if (_params.UsePlasticModel)
+            ApplyPlasticity(chunk, E, nu, rho);
+
+        if (_params.UseBrittleModel)
+            ApplyDamage(chunk, E, nu);
+
+        // Always update max velocity (needed for export)
+        UpdateMaxVelocity(chunk);
+
+        // Apply boundary conditions (required)
+        ApplyBoundaryConditions(chunk);
+
+        // Apply continuous source (only during initial pulse)
+        if (CurrentStep < 100)
+            ApplyContinuousSource(chunk, CurrentStep);
+
+        // OPTIMIZATION: Only visualize when needed and at intervals
+        if (shouldUpdateVisualization)
+        {
+            NotifyWaveFieldUpdate(chunk, CurrentStep);
+            if (chunkIdx == _chunks.Count - 1) // Last chunk
+                _lastVisualizationUpdate = DateTime.Now;
+        }
+
+        // OPTIMIZATION: Smart LRU eviction - only check periodically
+        if (_params.EnableOffloading && chunkIdx % 5 == 0 && _currentMemoryUsageBytes > _maxMemoryBudgetBytes)
+        {
+            var safeZone = Math.Min(5, _chunks.Count / 10);
+            if (chunkIdx > safeZone && chunkIdx < _chunks.Count - safeZone)
+                EvictLRUChunksIfNeeded();
+        }
     }
+    if (CurrentStep % 100 == 0)
+    {
+        RunDiagnostics(CurrentStep);
+    }
+    // OPTIMIZATION: Reduced overhead operations
+    if (shouldReportProgress)
+        ReportProgress();
+
+    if (shouldTriggerGC)
+    {
+        GC.Collect(GC.MaxGeneration, GCCollectionMode.Optimized, false);
+        UpdateMemoryUsage();
+    }
+
+    // Save snapshot if requested
+    if (_params.SaveTimeSeries && CurrentStep % _params.SnapshotInterval == 0)
+        SaveSnapshot(CurrentStep);
+
+    // Detect wave arrivals (lightweight)
+    DetectWaveArrivals(CurrentStep);
+
+    // OPTIMIZATION: Only log wave activity occasionally
+    if (shouldLogActivity)
+        LogWaveActivity();
+}
 
     private void TrackChunkAccess(int chunkIdx)
     {
@@ -600,36 +718,247 @@ public class ChunkedAcousticSimulator : IDisposable
             }
         }
     }
-
-    private (float[,,] E, float[,,] nu, float[,,] rho) ExtractChunkMaterialProperties(WaveFieldChunk chunk)
+#region debug
+private void ValidateChunkContinuity()
+{
+    Logger.Log("[Chunk Validation] Checking chunk boundaries...");
+    
+    for (int i = 0; i < _chunks.Count - 1; i++)
     {
-        var E = new float[_params.Width, _params.Height, chunk.Depth];
-        var nu = new float[_params.Width, _params.Height, chunk.Depth];
-        var rho = new float[_params.Width, _params.Height, chunk.Depth];
-
-        Parallel.For(0, chunk.Depth, z =>
+        var chunk1 = _chunks[i];
+        var chunk2 = _chunks[i + 1];
+        
+        if (chunk1.IsOffloaded || chunk2.IsOffloaded) continue;
+        
+        // Check if chunks are adjacent
+        if (chunk2.StartZ != chunk1.StartZ + chunk1.Depth)
         {
-            var globalZ = chunk.StartZ + z;
-            for (var y = 0; y < _params.Height; y++)
-            for (var x = 0; x < _params.Width; x++)
-            {
-                if (YoungsModulusVolume != null && PoissonRatioVolume != null)
-                {
-                    E[x, y, z] = YoungsModulusVolume[x, y, globalZ] * 1e6f; // MPa to Pa
-                    nu[x, y, z] = PoissonRatioVolume[x, y, globalZ];
-                }
-                else
-                {
-                    E[x, y, z] = _params.YoungsModulusMPa * 1e6f;
-                    nu[x, y, z] = _params.PoissonRatio;
-                }
-
-                rho[x, y, z] = DensityVolume?[x, y, globalZ] ?? 2700f;
-            }
-        });
-
-        return (E, nu, rho);
+            Logger.LogError($"[Chunk Validation] Gap between chunks {i} and {i+1}!");
+            Logger.LogError($"  Chunk {i}: Z={chunk1.StartZ} to {chunk1.StartZ + chunk1.Depth - 1}");
+            Logger.LogError($"  Chunk {i+1}: Z={chunk2.StartZ} to {chunk2.StartZ + chunk2.Depth - 1}");
+        }
+        
+        // Check boundary values match (sample a few points)
+        var boundaryZ1 = chunk1.Depth - 1;
+        var boundaryZ2 = 0;
+        
+        float maxDiscrepancy = 0;
+        int samplePoints = 10;
+        
+        for (int sample = 0; sample < samplePoints; sample++)
+        {
+            var x = sample * _params.Width / samplePoints;
+            var y = sample * _params.Height / samplePoints;
+            
+            var vx1 = chunk1.Vx[x, y, boundaryZ1];
+            var vx2 = chunk2.Vx[x, y, boundaryZ2];
+            
+            // Note: Boundaries WON'T match exactly due to the way chunks are processed
+            // But they should be similar in magnitude
+            var diff = MathF.Abs(vx1 - vx2);
+            maxDiscrepancy = MathF.Max(maxDiscrepancy, diff);
+        }
+        
+        if (maxDiscrepancy > 1e-3f)
+        {
+            Logger.LogWarning($"[Chunk Validation] Large discrepancy at boundary {i}/{i+1}: {maxDiscrepancy:E3}");
+            Logger.LogWarning("  This can cause visual artifacts but may not affect physics if chunks overlap");
+        }
     }
+}
+private void CheckEnergyConservation(int timeStep)
+{
+    if (timeStep % 200 != 0) return;
+    
+    float totalKineticEnergy = 0;
+    float totalStrainEnergy = 0;
+    long voxelCount = 0;
+    
+    foreach (var chunk in _chunks)
+    {
+        if (chunk.IsOffloaded) continue;
+        
+        for (int z = 0; z < chunk.Depth; z++)
+        {
+            for (int y = 0; y < _params.Height; y++)
+            {
+                for (int x = 0; x < _params.Width; x++)
+                {
+                    // Kinetic energy: 0.5 * rho * v^2
+                    var vx = chunk.Vx[x, y, z];
+                    var vy = chunk.Vy[x, y, z];
+                    var vz = chunk.Vz[x, y, z];
+                    var vMag2 = vx * vx + vy * vy + vz * vz;
+                    
+                    var rho = DensityVolume?[x, y, chunk.StartZ + z] ?? 2700f;
+                    totalKineticEnergy += 0.5f * rho * vMag2;
+                    
+                    // Strain energy: 0.5 * sigma * epsilon (simplified)
+                    var sxx = chunk.Sxx[x, y, z];
+                    var syy = chunk.Syy[x, y, z];
+                    var szz = chunk.Szz[x, y, z];
+                    totalStrainEnergy += 0.5f * (sxx * sxx + syy * syy + szz * szz) / 1e9f; // Normalized
+                    
+                    voxelCount++;
+                }
+            }
+        }
+    }
+    
+    var totalEnergy = totalKineticEnergy + totalStrainEnergy;
+    var sourceEnergy = _params.SourceEnergyJ;
+    
+    Logger.Log($"[Energy Check] Step {timeStep}:");
+    Logger.Log($"  Kinetic Energy: {totalKineticEnergy:E3} J");
+    Logger.Log($"  Strain Energy: {totalStrainEnergy:E3} J");
+    Logger.Log($"  Total Energy: {totalEnergy:E3} J");
+    Logger.Log($"  Source Energy: {sourceEnergy:E3} J");
+    Logger.Log($"  Energy Ratio: {totalEnergy / sourceEnergy:F3}");
+    
+    if (totalEnergy > sourceEnergy * 10)
+    {
+        Logger.LogWarning("  ⚠ ENERGY GROWING - Possible numerical instability!");
+    }
+    else if (totalEnergy < sourceEnergy * 0.01f && timeStep > 100)
+    {
+        Logger.LogWarning("  ⚠ ENERGY TOO LOW - Wave may be over-damped");
+    }
+}
+
+public void RunDiagnostics(int timeStep)
+{
+    DiagnoseWaveFrontVelocity(timeStep);
+    
+    if (timeStep == 500)
+    {
+        ValidateChunkContinuity();
+    }
+    
+    CheckEnergyConservation(timeStep);
+}
+private void DiagnoseWaveFrontVelocity(int timeStep)
+{
+    if (timeStep % 100 != 0) return; // Check every 100 steps
+    
+    var rxX = (int)(_params.RxPosition.X * _params.Width);
+    var rxY = (int)(_params.RxPosition.Y * _params.Height);
+    var rxZ = (int)(_params.RxPosition.Z * _params.Depth);
+    
+    var txX = (int)(_params.TxPosition.X * _params.Width);
+    var txY = (int)(_params.TxPosition.Y * _params.Height);
+    var txZ = (int)(_params.TxPosition.Z * _params.Depth);
+    
+    // Find the wave front (max velocity point between TX and RX)
+    float maxVel = 0;
+    int frontX = txX, frontY = txY, frontZ = txZ;
+    
+    // Sample along the TX-RX line
+    for (float t = 0; t <= 1.0f; t += 0.05f)
+    {
+        var x = (int)(txX + (rxX - txX) * t);
+        var y = (int)(txY + (rxY - txY) * t);
+        var z = (int)(txZ + (rxZ - txZ) * t);
+        
+        // Find chunk containing this point
+        var chunk = _chunks.FirstOrDefault(c => z >= c.StartZ && z < c.StartZ + c.Depth);
+        if (chunk == null || chunk.IsOffloaded) continue;
+        
+        var localZ = z - chunk.StartZ;
+        if (localZ < 0 || localZ >= chunk.Depth) continue;
+        
+        var vx = chunk.Vx[x, y, localZ];
+        var vy = chunk.Vy[x, y, localZ];
+        var vz = chunk.Vz[x, y, localZ];
+        var vel = MathF.Sqrt(vx * vx + vy * vy + vz * vz);
+        
+        if (vel > maxVel)
+        {
+            maxVel = vel;
+            frontX = x;
+            frontY = y;
+            frontZ = z;
+        }
+    }
+    
+    if (maxVel > 1e-10f)
+    {
+        // Calculate distance traveled
+        var dx = (frontX - txX) * _params.PixelSize;
+        var dy = (frontY - txY) * _params.PixelSize;
+        var dz = (frontZ - txZ) * _params.PixelSize;
+        var distanceTraveled = MathF.Sqrt(dx * dx + dy * dy + dz * dz);
+        
+        // Calculate apparent velocity
+        var timeElapsed = timeStep * _params.TimeStepSeconds;
+        var apparentVelocity = distanceTraveled / timeElapsed;
+        
+        Logger.Log($"[Wave Diagnostic] Step {timeStep}:");
+        Logger.Log($"  Wave front at ({frontX},{frontY},{frontZ}), distance: {distanceTraveled * 1000:F2} mm");
+        Logger.Log($"  Max velocity at front: {maxVel:E3} m/s");
+        Logger.Log($"  Apparent wave velocity: {apparentVelocity:F0} m/s");
+        //Logger.Log($"  Expected Vp: {CalculateExpectedVp():F0} m/s");
+        //Logger.Log($"  Progress: {100 * apparentVelocity / CalculateExpectedVp():F1}% of theoretical");
+    }
+}
+#endregion
+    private (float[,,] E, float[,,] nu, float[,,] rho) ExtractChunkMaterialProperties(WaveFieldChunk chunk)
+{
+    // CRITICAL FIX: Use chunk's actual dimensions, not _params dimensions!
+    var chunkWidth = chunk.Vx.GetLength(0);
+    var chunkHeight = chunk.Vx.GetLength(1);
+    var chunkDepth = chunk.Vx.GetLength(2);
+    
+    var E = new float[chunkWidth, chunkHeight, chunkDepth];
+    var nu = new float[chunkWidth, chunkHeight, chunkDepth];
+    var rho = new float[chunkWidth, chunkHeight, chunkDepth];
+
+    // Get extent offsets (if using simulation extent)
+    var offsetX = _params.SimulationExtent?.Min.X ?? 0;
+    var offsetY = _params.SimulationExtent?.Min.Y ?? 0;
+    var offsetZ = _params.SimulationExtent?.Min.Z ?? 0;
+    
+    // Get full volume dimensions for bounds checking
+    var fullWidth = YoungsModulusVolume?.GetLength(0) ?? _params.Width;
+    var fullHeight = YoungsModulusVolume?.GetLength(1) ?? _params.Height;
+    var fullDepth = YoungsModulusVolume?.GetLength(2) ?? _params.Depth;
+
+    Parallel.For(0, chunkDepth, z =>
+    {
+        for (var y = 0; y < chunkHeight; y++)
+        for (var x = 0; x < chunkWidth; x++)
+        {
+            // Calculate global coordinates in the FULL volume
+            var globalX = offsetX + x;
+            var globalY = offsetY + y;
+            var globalZ = offsetZ + chunk.StartZ + z;
+            
+            // Bounds check against FULL volume
+            if (globalX >= fullWidth || globalY >= fullHeight || globalZ >= fullDepth)
+            {
+                // Out of bounds - use defaults
+                E[x, y, z] = _params.YoungsModulusMPa * 1e6f;
+                nu[x, y, z] = _params.PoissonRatio;
+                rho[x, y, z] = 2700f;
+                continue;
+            }
+            
+            if (YoungsModulusVolume != null && PoissonRatioVolume != null)
+            {
+                E[x, y, z] = YoungsModulusVolume[globalX, globalY, globalZ] * 1e6f; // MPa to Pa
+                nu[x, y, z] = PoissonRatioVolume[globalX, globalY, globalZ];
+            }
+            else
+            {
+                E[x, y, z] = _params.YoungsModulusMPa * 1e6f;
+                nu[x, y, z] = _params.PoissonRatio;
+            }
+
+            rho[x, y, z] = DensityVolume?[globalX, globalY, globalZ] ?? 2700f;
+        }
+    });
+
+    return (E, nu, rho);
+}
 
     private void ApplyPlasticity(WaveFieldChunk chunk, float[,,] E, float[,,] nu, float[,,] rho)
     {
@@ -1205,7 +1534,26 @@ public class ChunkedAcousticSimulator : IDisposable
 
         return finalResults;
     }
-
+    private float CalculateExpectedWaveTravelTime()
+    {
+        var dx = (_params.RxPosition.X - _params.TxPosition.X) * _params.Width * _params.PixelSize;
+        var dy = (_params.RxPosition.Y - _params.TxPosition.Y) * _params.Height * _params.PixelSize;
+        var dz = (_params.RxPosition.Z - _params.TxPosition.Z) * _params.Depth * _params.PixelSize;
+        var distance = MathF.Sqrt(dx * dx + dy * dy + dz * dz);
+    
+        var maxVp = 6000f;
+        if (_params.YoungsModulusMPa > 0 && _params.PoissonRatio > 0)
+        {
+            var E = _params.YoungsModulusMPa * 1e6f;
+            var nu = _params.PoissonRatio;
+            var rho = 2700f;
+            var mu = E / (2f * (1f + nu));
+            var lambda = E * nu / ((1f + nu) * (1f - 2f * nu));
+            maxVp = MathF.Sqrt((lambda + 2f * mu) / rho);
+        }
+    
+        return distance / maxVp;
+    }
     private int CountActiveVoxels(float[,,] vx, float[,,] vy, float[,,] vz)
     {
         var count = 0;

@@ -1,4 +1,5 @@
 // GeoscientistToolkit/Analysis/AcousticSimulation/AcousticSimulatorGPU.cs
+// FIXED VERSION - Correct memory layout mapping
 
 using System.Text;
 using GeoscientistToolkit.Util;
@@ -6,22 +7,22 @@ using Silk.NET.OpenCL;
 
 namespace GeoscientistToolkit.Analysis.AcousticSimulation;
 
-/// <summary>
-///     GPU-accelerated acoustic wave propagation using OpenCL via Silk.NET.
-/// </summary>
 public unsafe class AcousticSimulatorGPU : IAcousticKernel
 {
     private readonly CL _cl;
     private readonly SimulationParameters _params;
-    private nint _bufE, _bufNu, _bufRho;
+    
+    private nint _bufVx, _bufVy, _bufVz;
     private nint _bufSxx, _bufSyy, _bufSzz;
     private nint _bufSxy, _bufSxz, _bufSyz;
-
-    // Device buffers
-    private nint _bufVx, _bufVy, _bufVz;
+    private nint _bufE, _bufNu, _bufRho;
+    
     private nint _commandQueue;
-
     private nint _context;
+    
+    private int _currentBufferWidth, _currentBufferHeight, _currentBufferDepth;
+    private nuint _currentBufferSize;
+    
     private bool _initialized;
     private nint _kernelUpdateStress;
     private nint _kernelUpdateVelocity;
@@ -41,49 +42,8 @@ public unsafe class AcousticSimulatorGPU : IAcousticKernel
         _width = width;
         _height = height;
         _depth = depth;
-
-        var bufferSize = (nuint)(width * height * depth * sizeof(float));
-        int error;
-
-        // Create device buffers
-        _bufVx = _cl.CreateBuffer(_context, MemFlags.ReadWrite, bufferSize, null, &error);
-        CheckError(error, "CreateBuffer Vx");
-
-        _bufVy = _cl.CreateBuffer(_context, MemFlags.ReadWrite, bufferSize, null, &error);
-        CheckError(error, "CreateBuffer Vy");
-
-        _bufVz = _cl.CreateBuffer(_context, MemFlags.ReadWrite, bufferSize, null, &error);
-        CheckError(error, "CreateBuffer Vz");
-
-        _bufSxx = _cl.CreateBuffer(_context, MemFlags.ReadWrite, bufferSize, null, &error);
-        CheckError(error, "CreateBuffer Sxx");
-
-        _bufSyy = _cl.CreateBuffer(_context, MemFlags.ReadWrite, bufferSize, null, &error);
-        CheckError(error, "CreateBuffer Syy");
-
-        _bufSzz = _cl.CreateBuffer(_context, MemFlags.ReadWrite, bufferSize, null, &error);
-        CheckError(error, "CreateBuffer Szz");
-
-        _bufSxy = _cl.CreateBuffer(_context, MemFlags.ReadWrite, bufferSize, null, &error);
-        CheckError(error, "CreateBuffer Sxy");
-
-        _bufSxz = _cl.CreateBuffer(_context, MemFlags.ReadWrite, bufferSize, null, &error);
-        CheckError(error, "CreateBuffer Sxz");
-
-        _bufSyz = _cl.CreateBuffer(_context, MemFlags.ReadWrite, bufferSize, null, &error);
-        CheckError(error, "CreateBuffer Syz");
-
-        _bufE = _cl.CreateBuffer(_context, MemFlags.ReadOnly, bufferSize, null, &error);
-        CheckError(error, "CreateBuffer E");
-
-        _bufNu = _cl.CreateBuffer(_context, MemFlags.ReadOnly, bufferSize, null, &error);
-        CheckError(error, "CreateBuffer Nu");
-
-        _bufRho = _cl.CreateBuffer(_context, MemFlags.ReadOnly, bufferSize, null, &error);
-        CheckError(error, "CreateBuffer Rho");
-
         _initialized = true;
-        Logger.Log($"[GPU] Allocated {bufferSize * 12 / (1024 * 1024)} MB of device memory");
+        Logger.Log($"[GPU] Initialized for volume {width}x{height}x{depth}");
     }
 
     public void UpdateWaveField(
@@ -96,9 +56,18 @@ public unsafe class AcousticSimulatorGPU : IAcousticKernel
         if (!_initialized)
             throw new InvalidOperationException("GPU kernel not initialized");
 
-        int error;
+        var chunkWidth = vx.GetLength(0);
+        var chunkHeight = vx.GetLength(1);
+        var chunkDepth = vx.GetLength(2);
+        
+        EnsureBuffersAllocated(chunkWidth, chunkHeight, chunkDepth);
 
-        // Upload data to device
+        // Upload material properties (must be done for every chunk)
+        UploadBuffer(_bufE, E);
+        UploadBuffer(_bufNu, nu);
+        UploadBuffer(_bufRho, rho);
+
+        // Upload wave fields
         UploadBuffer(_bufVx, vx);
         UploadBuffer(_bufVy, vy);
         UploadBuffer(_bufVz, vz);
@@ -108,32 +77,25 @@ public unsafe class AcousticSimulatorGPU : IAcousticKernel
         UploadBuffer(_bufSxy, sxy);
         UploadBuffer(_bufSxz, sxz);
         UploadBuffer(_bufSyz, syz);
-        UploadBuffer(_bufE, E);
-        UploadBuffer(_bufNu, nu);
-        UploadBuffer(_bufRho, rho);
 
-        // Set kernel arguments for stress update
-        SetKernelArgs(_kernelUpdateStress, dt, dx);
-
-        // Execute stress kernel
+        // Execute stress update kernel
+        SetKernelArgs(_kernelUpdateStress, dt, dx, chunkWidth, chunkHeight, chunkDepth);
+        
         var globalWorkSize = stackalloc nuint[3];
-        globalWorkSize[0] = (nuint)_width;
-        globalWorkSize[1] = (nuint)_height;
-        globalWorkSize[2] = (nuint)_depth;
+        globalWorkSize[0] = (nuint)chunkWidth;
+        globalWorkSize[1] = (nuint)chunkHeight;
+        globalWorkSize[2] = (nuint)chunkDepth;
 
-        error = _cl.EnqueueNdrangeKernel(_commandQueue, _kernelUpdateStress, 3, null, globalWorkSize, null, 0, null,
-            null);
+        var error = _cl.EnqueueNdrangeKernel(_commandQueue, _kernelUpdateStress, 3, null, globalWorkSize, null, 0, null, null);
         CheckError(error, "EnqueueNDRangeKernel (stress)");
 
-        // Set kernel arguments for velocity update
-        SetKernelArgsVelocity(_kernelUpdateVelocity, dt, dx, dampingFactor);
-
-        // Execute velocity kernel
-        error = _cl.EnqueueNdrangeKernel(_commandQueue, _kernelUpdateVelocity, 3, null, globalWorkSize, null, 0, null,
-            null);
+        // Execute velocity update kernel
+        SetKernelArgsVelocity(_kernelUpdateVelocity, dt, dx, dampingFactor, chunkWidth, chunkHeight, chunkDepth);
+        
+        error = _cl.EnqueueNdrangeKernel(_commandQueue, _kernelUpdateVelocity, 3, null, globalWorkSize, null, 0, null, null);
         CheckError(error, "EnqueueNDRangeKernel (velocity)");
 
-        // Download results
+        // Download results (blocking reads ensure completion)
         DownloadBuffer(_bufVx, vx);
         DownloadBuffer(_bufVy, vy);
         DownloadBuffer(_bufVz, vz);
@@ -143,24 +105,14 @@ public unsafe class AcousticSimulatorGPU : IAcousticKernel
         DownloadBuffer(_bufSxy, sxy);
         DownloadBuffer(_bufSxz, sxz);
         DownloadBuffer(_bufSyz, syz);
-
-        _cl.Finish(_commandQueue);
     }
 
     public void Dispose()
     {
-        if (_bufVx != 0) _cl.ReleaseMemObject(_bufVx);
-        if (_bufVy != 0) _cl.ReleaseMemObject(_bufVy);
-        if (_bufVz != 0) _cl.ReleaseMemObject(_bufVz);
-        if (_bufSxx != 0) _cl.ReleaseMemObject(_bufSxx);
-        if (_bufSyy != 0) _cl.ReleaseMemObject(_bufSyy);
-        if (_bufSzz != 0) _cl.ReleaseMemObject(_bufSzz);
-        if (_bufSxy != 0) _cl.ReleaseMemObject(_bufSxy);
-        if (_bufSxz != 0) _cl.ReleaseMemObject(_bufSxz);
-        if (_bufSyz != 0) _cl.ReleaseMemObject(_bufSyz);
-        if (_bufE != 0) _cl.ReleaseMemObject(_bufE);
-        if (_bufNu != 0) _cl.ReleaseMemObject(_bufNu);
-        if (_bufRho != 0) _cl.ReleaseMemObject(_bufRho);
+        if (_commandQueue != 0)
+            _cl.Finish(_commandQueue);
+            
+        ReleaseBuffers();
 
         if (_kernelUpdateStress != 0) _cl.ReleaseKernel(_kernelUpdateStress);
         if (_kernelUpdateVelocity != 0) _cl.ReleaseKernel(_kernelUpdateVelocity);
@@ -169,47 +121,104 @@ public unsafe class AcousticSimulatorGPU : IAcousticKernel
         if (_context != 0) _cl.ReleaseContext(_context);
     }
 
+    private void EnsureBuffersAllocated(int width, int height, int depth)
+    {
+        var bufferSize = (nuint)(width * height * depth * sizeof(float));
+        
+        if (_currentBufferSize == bufferSize && 
+            _currentBufferWidth == width && 
+            _currentBufferHeight == height && 
+            _currentBufferDepth == depth)
+        {
+            return;
+        }
+        
+        ReleaseBuffers();
+        
+        int error;
+        
+        _bufVx = _cl.CreateBuffer(_context, MemFlags.ReadWrite, bufferSize, null, &error);
+        CheckError(error, "CreateBuffer Vx");
+        _bufVy = _cl.CreateBuffer(_context, MemFlags.ReadWrite, bufferSize, null, &error);
+        CheckError(error, "CreateBuffer Vy");
+        _bufVz = _cl.CreateBuffer(_context, MemFlags.ReadWrite, bufferSize, null, &error);
+        CheckError(error, "CreateBuffer Vz");
+        _bufSxx = _cl.CreateBuffer(_context, MemFlags.ReadWrite, bufferSize, null, &error);
+        CheckError(error, "CreateBuffer Sxx");
+        _bufSyy = _cl.CreateBuffer(_context, MemFlags.ReadWrite, bufferSize, null, &error);
+        CheckError(error, "CreateBuffer Syy");
+        _bufSzz = _cl.CreateBuffer(_context, MemFlags.ReadWrite, bufferSize, null, &error);
+        CheckError(error, "CreateBuffer Szz");
+        _bufSxy = _cl.CreateBuffer(_context, MemFlags.ReadWrite, bufferSize, null, &error);
+        CheckError(error, "CreateBuffer Sxy");
+        _bufSxz = _cl.CreateBuffer(_context, MemFlags.ReadWrite, bufferSize, null, &error);
+        CheckError(error, "CreateBuffer Sxz");
+        _bufSyz = _cl.CreateBuffer(_context, MemFlags.ReadWrite, bufferSize, null, &error);
+        CheckError(error, "CreateBuffer Syz");
+        _bufE = _cl.CreateBuffer(_context, MemFlags.ReadOnly, bufferSize, null, &error);
+        CheckError(error, "CreateBuffer E");
+        _bufNu = _cl.CreateBuffer(_context, MemFlags.ReadOnly, bufferSize, null, &error);
+        CheckError(error, "CreateBuffer Nu");
+        _bufRho = _cl.CreateBuffer(_context, MemFlags.ReadOnly, bufferSize, null, &error);
+        CheckError(error, "CreateBuffer Rho");
+        
+        _currentBufferWidth = width;
+        _currentBufferHeight = height;
+        _currentBufferDepth = depth;
+        _currentBufferSize = bufferSize;
+
+        Logger.Log($"[GPU] Allocated {bufferSize * 12 / (1024 * 1024)} MB for chunk {width}x{height}x{depth}");
+    }
+    
+    private void ReleaseBuffers()
+    {
+        if (_bufVx != 0) { _cl.ReleaseMemObject(_bufVx); _bufVx = 0; }
+        if (_bufVy != 0) { _cl.ReleaseMemObject(_bufVy); _bufVy = 0; }
+        if (_bufVz != 0) { _cl.ReleaseMemObject(_bufVz); _bufVz = 0; }
+        if (_bufSxx != 0) { _cl.ReleaseMemObject(_bufSxx); _bufSxx = 0; }
+        if (_bufSyy != 0) { _cl.ReleaseMemObject(_bufSyy); _bufSyy = 0; }
+        if (_bufSzz != 0) { _cl.ReleaseMemObject(_bufSzz); _bufSzz = 0; }
+        if (_bufSxy != 0) { _cl.ReleaseMemObject(_bufSxy); _bufSxy = 0; }
+        if (_bufSxz != 0) { _cl.ReleaseMemObject(_bufSxz); _bufSxz = 0; }
+        if (_bufSyz != 0) { _cl.ReleaseMemObject(_bufSyz); _bufSyz = 0; }
+        if (_bufE != 0) { _cl.ReleaseMemObject(_bufE); _bufE = 0; }
+        if (_bufNu != 0) { _cl.ReleaseMemObject(_bufNu); _bufNu = 0; }
+        if (_bufRho != 0) { _cl.ReleaseMemObject(_bufRho); _bufRho = 0; }
+        
+        _currentBufferSize = 0;
+    }
+
     private void InitializeOpenCL()
     {
         int error;
 
-        // Get platform
         uint numPlatforms;
         _cl.GetPlatformIDs(0, null, &numPlatforms);
-
         if (numPlatforms == 0)
             throw new Exception("No OpenCL platforms found");
 
         var platforms = stackalloc nint[(int)numPlatforms];
         _cl.GetPlatformIDs(numPlatforms, platforms, null);
 
-        // Get device
         uint numDevices;
         _cl.GetDeviceIDs(platforms[0], DeviceType.Gpu, 0, null, &numDevices);
-
         if (numDevices == 0)
             _cl.GetDeviceIDs(platforms[0], DeviceType.All, 0, null, &numDevices);
-
         if (numDevices == 0)
             throw new Exception("No OpenCL devices found");
 
         var devices = stackalloc nint[(int)numDevices];
         _cl.GetDeviceIDs(platforms[0], DeviceType.Gpu, numDevices, devices, null);
-
         if (devices[0] == 0)
             _cl.GetDeviceIDs(platforms[0], DeviceType.All, numDevices, devices, null);
 
-        // Create context
         _context = _cl.CreateContext(null, 1, devices, null, null, &error);
         CheckError(error, "CreateContext");
 
-        // Create command queue with explicit cast
         _commandQueue = _cl.CreateCommandQueue(_context, devices[0], (CommandQueueProperties)0, &error);
         CheckError(error, "CreateCommandQueue");
 
-        // Build program
         BuildProgram();
-
         Logger.Log("[GPU] OpenCL initialized successfully");
     }
 
@@ -223,43 +232,36 @@ public unsafe class AcousticSimulatorGPU : IAcousticKernel
         {
             var lengths = stackalloc nuint[1];
             lengths[0] = (nuint)sourceBytes.Length;
-
             var sourcePtrs = stackalloc byte*[1];
             sourcePtrs[0] = sourcePtr;
-
             _program = _cl.CreateProgramWithSource(_context, 1, sourcePtrs, lengths, &error);
             CheckError(error, "CreateProgramWithSource");
         }
 
-        // Build with null options
         error = _cl.BuildProgram(_program, 0, null, (byte*)null, null, null);
-
         if (error != 0)
         {
-            // Get build log
             nuint logSize;
             _cl.GetProgramBuildInfo(_program, 0, (uint)ProgramBuildInfo.BuildLog, 0, null, &logSize);
-
             var log = new byte[logSize];
             fixed (byte* logPtr = log)
             {
                 _cl.GetProgramBuildInfo(_program, 0, (uint)ProgramBuildInfo.BuildLog, logSize, logPtr, null);
             }
-
             var logString = Encoding.UTF8.GetString(log);
             throw new Exception($"OpenCL build failed: {logString}");
         }
 
-        // Create kernels
         _kernelUpdateStress = _cl.CreateKernel(_program, "update_stress", &error);
         CheckError(error, "CreateKernel (stress)");
-
         _kernelUpdateVelocity = _cl.CreateKernel(_program, "update_velocity", &error);
         CheckError(error, "CreateKernel (velocity)");
     }
 
     private string GetKernelSource()
     {
+        // FIXED: Corrected indexing to match C# array layout [x,y,z]
+        // C# stores as: x*(H*D) + y*D + z (x varies slowest)
         return @"
 __kernel void update_stress(
     __global float* vx, __global float* vy, __global float* vz,
@@ -275,43 +277,40 @@ __kernel void update_stress(
     if (x <= 0 || x >= width - 1 || y <= 0 || y >= height - 1 || z <= 0 || z >= depth - 1)
         return;
     
-    int idx = x + y * width + z * width * height;
+    // FIXED: Match C# array layout [x,y,z]
+    int idx = x * (height * depth) + y * depth + z;
     
-    // Get material properties
     float E_local = E[idx];
     float nu_local = clamp(nu[idx], 0.01f, 0.49f);
     
-    // Lamé parameters
     float mu = E_local / (2.0f * (1.0f + nu_local));
     float lambda = E_local * nu_local / ((1.0f + nu_local) * (1.0f - 2.0f * nu_local));
     
-    // Indices for neighbors
-    int idx_xp = (x + 1) + y * width + z * width * height;
-    int idx_xm = (x - 1) + y * width + z * width * height;
-    int idx_yp = x + (y + 1) * width + z * width * height;
-    int idx_ym = x + (y - 1) * width + z * width * height;
-    int idx_zp = x + y * width + (z + 1) * width * height;
-    int idx_zm = x + y * width + (z - 1) * width * height;
+    // Neighbor indices
+    int idx_xp = (x + 1) * (height * depth) + y * depth + z;
+    int idx_xm = (x - 1) * (height * depth) + y * depth + z;
+    int idx_yp = x * (height * depth) + (y + 1) * depth + z;
+    int idx_ym = x * (height * depth) + (y - 1) * depth + z;
+    int idx_zp = x * (height * depth) + y * depth + (z + 1);
+    int idx_zm = x * (height * depth) + y * depth + (z - 1);
     
-    // Velocity gradients
-    float dvx_dx = (vx[idx_xp] - vx[idx_xm]) / (2.0f * dx);
-    float dvy_dy = (vy[idx_yp] - vy[idx_ym]) / (2.0f * dx);
-    float dvz_dz = (vz[idx_zp] - vz[idx_zm]) / (2.0f * dx);
+    float inv_2dx = 1.0f / (2.0f * dx);
+    float dvx_dx = (vx[idx_xp] - vx[idx_xm]) * inv_2dx;
+    float dvy_dy = (vy[idx_yp] - vy[idx_ym]) * inv_2dx;
+    float dvz_dz = (vz[idx_zp] - vz[idx_zm]) * inv_2dx;
     
-    // Update normal stresses
-    sxx[idx] += dt * ((lambda + 2.0f * mu) * dvx_dx + lambda * (dvy_dy + dvz_dz));
-    syy[idx] += dt * ((lambda + 2.0f * mu) * dvy_dy + lambda * (dvx_dx + dvz_dz));
-    szz[idx] += dt * ((lambda + 2.0f * mu) * dvz_dz + lambda * (dvx_dx + dvy_dy));
+    float lambda_2mu = lambda + 2.0f * mu;
+    sxx[idx] += dt * (lambda_2mu * dvx_dx + lambda * (dvy_dy + dvz_dz));
+    syy[idx] += dt * (lambda_2mu * dvy_dy + lambda * (dvx_dx + dvz_dz));
+    szz[idx] += dt * (lambda_2mu * dvz_dz + lambda * (dvx_dx + dvy_dy));
     
-    // Shear strains
-    float dvx_dy = (vx[idx_yp] - vx[idx_ym]) / (2.0f * dx);
-    float dvy_dx = (vy[idx_xp] - vy[idx_xm]) / (2.0f * dx);
-    float dvx_dz = (vx[idx_zp] - vx[idx_zm]) / (2.0f * dx);
-    float dvz_dx = (vz[idx_xp] - vz[idx_xm]) / (2.0f * dx);
-    float dvy_dz = (vy[idx_zp] - vy[idx_zm]) / (2.0f * dx);
-    float dvz_dy = (vz[idx_yp] - vz[idx_ym]) / (2.0f * dx);
+    float dvx_dy = (vx[idx_yp] - vx[idx_ym]) * inv_2dx;
+    float dvy_dx = (vy[idx_xp] - vy[idx_xm]) * inv_2dx;
+    float dvx_dz = (vx[idx_zp] - vx[idx_zm]) * inv_2dx;
+    float dvz_dx = (vz[idx_xp] - vz[idx_xm]) * inv_2dx;
+    float dvy_dz = (vy[idx_zp] - vy[idx_zm]) * inv_2dx;
+    float dvz_dy = (vz[idx_yp] - vz[idx_ym]) * inv_2dx;
     
-    // Update shear stresses
     sxy[idx] += dt * mu * (dvx_dy + dvy_dx);
     sxz[idx] += dt * mu * (dvx_dz + dvz_dx);
     syz[idx] += dt * mu * (dvy_dz + dvz_dy);
@@ -331,37 +330,37 @@ __kernel void update_velocity(
     if (x <= 0 || x >= width - 1 || y <= 0 || y >= height - 1 || z <= 0 || z >= depth - 1)
         return;
     
-    int idx = x + y * width + z * width * height;
+    // FIXED: Match C# array layout [x,y,z]
+    int idx = x * (height * depth) + y * depth + z;
     
     float rho_local = max(rho[idx], 1.0f);
+    float inv_rho = 1.0f / rho_local;
     
-    // Indices for neighbors
-    int idx_xp = (x + 1) + y * width + z * width * height;
-    int idx_xm = (x - 1) + y * width + z * width * height;
-    int idx_yp = x + (y + 1) * width + z * width * height;
-    int idx_ym = x + (y - 1) * width + z * width * height;
-    int idx_zp = x + y * width + (z + 1) * width * height;
-    int idx_zm = x + y * width + (z - 1) * width * height;
+    // Neighbor indices
+    int idx_xp = (x + 1) * (height * depth) + y * depth + z;
+    int idx_xm = (x - 1) * (height * depth) + y * depth + z;
+    int idx_yp = x * (height * depth) + (y + 1) * depth + z;
+    int idx_ym = x * (height * depth) + (y - 1) * depth + z;
+    int idx_zp = x * (height * depth) + y * depth + (z + 1);
+    int idx_zm = x * (height * depth) + y * depth + (z - 1);
     
-    // Stress gradients
-    float dsxx_dx = (sxx[idx_xp] - sxx[idx_xm]) / (2.0f * dx);
-    float dsxy_dy = (sxy[idx_yp] - sxy[idx_ym]) / (2.0f * dx);
-    float dsxz_dz = (sxz[idx_zp] - sxz[idx_zm]) / (2.0f * dx);
+    float inv_2dx = 1.0f / (2.0f * dx);
+    float dsxx_dx = (sxx[idx_xp] - sxx[idx_xm]) * inv_2dx;
+    float dsxy_dy = (sxy[idx_yp] - sxy[idx_ym]) * inv_2dx;
+    float dsxz_dz = (sxz[idx_zp] - sxz[idx_zm]) * inv_2dx;
     
-    float dsxy_dx = (sxy[idx_xp] - sxy[idx_xm]) / (2.0f * dx);
-    float dsyy_dy = (syy[idx_yp] - syy[idx_ym]) / (2.0f * dx);
-    float dsyz_dz = (syz[idx_zp] - syz[idx_zm]) / (2.0f * dx);
+    float dsxy_dx = (sxy[idx_xp] - sxy[idx_xm]) * inv_2dx;
+    float dsyy_dy = (syy[idx_yp] - syy[idx_ym]) * inv_2dx;
+    float dsyz_dz = (syz[idx_zp] - syz[idx_zm]) * inv_2dx;
     
-    float dsxz_dx = (sxz[idx_xp] - sxz[idx_xm]) / (2.0f * dx);
-    float dsyz_dy = (syz[idx_yp] - syz[idx_ym]) / (2.0f * dx);
-    float dszz_dz = (szz[idx_zp] - szz[idx_zm]) / (2.0f * dx);
+    float dsxz_dx = (sxz[idx_xp] - sxz[idx_xm]) * inv_2dx;
+    float dsyz_dy = (syz[idx_yp] - syz[idx_ym]) * inv_2dx;
+    float dszz_dz = (szz[idx_zp] - szz[idx_zm]) * inv_2dx;
     
-    // Accelerations
-    float ax = (dsxx_dx + dsxy_dy + dsxz_dz) / rho_local;
-    float ay = (dsxy_dx + dsyy_dy + dsyz_dz) / rho_local;
-    float az = (dsxz_dx + dsyz_dy + dszz_dz) / rho_local;
+    float ax = (dsxx_dx + dsxy_dy + dsxz_dz) * inv_rho;
+    float ay = (dsxy_dx + dsyy_dy + dsyz_dz) * inv_rho;
+    float az = (dsxz_dx + dsyz_dy + dszz_dz) * inv_rho;
     
-    // Update velocities with damping
     float damping = 1.0f - dampingFactor * dt;
     vx[idx] = vx[idx] * damping + dt * ax;
     vy[idx] = vy[idx] * damping + dt * ay;
@@ -370,7 +369,7 @@ __kernel void update_velocity(
 ";
     }
 
-    private void SetKernelArgs(nint kernel, float dt, float dx)
+    private void SetKernelArgs(nint kernel, float dt, float dx, int width, int height, int depth)
     {
         var arg = 0;
         SetKernelArg(kernel, arg++, _bufVx);
@@ -387,12 +386,12 @@ __kernel void update_velocity(
         SetKernelArg(kernel, arg++, _bufRho);
         SetKernelArg(kernel, arg++, dt);
         SetKernelArg(kernel, arg++, dx);
-        SetKernelArg(kernel, arg++, _width);
-        SetKernelArg(kernel, arg++, _height);
-        SetKernelArg(kernel, arg++, _depth);
+        SetKernelArg(kernel, arg++, width);
+        SetKernelArg(kernel, arg++, height);
+        SetKernelArg(kernel, arg++, depth);
     }
 
-    private void SetKernelArgsVelocity(nint kernel, float dt, float dx, float damping)
+    private void SetKernelArgsVelocity(nint kernel, float dt, float dx, float damping, int width, int height, int depth)
     {
         var arg = 0;
         SetKernelArg(kernel, arg++, _bufVx);
@@ -410,9 +409,9 @@ __kernel void update_velocity(
         SetKernelArg(kernel, arg++, dt);
         SetKernelArg(kernel, arg++, dx);
         SetKernelArg(kernel, arg++, damping);
-        SetKernelArg(kernel, arg++, _width);
-        SetKernelArg(kernel, arg++, _height);
-        SetKernelArg(kernel, arg++, _depth);
+        SetKernelArg(kernel, arg++, width);
+        SetKernelArg(kernel, arg++, height);
+        SetKernelArg(kernel, arg++, depth);
     }
 
     private void SetKernelArg<T>(nint kernel, int index, T value) where T : unmanaged

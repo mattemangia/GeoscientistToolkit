@@ -128,7 +128,7 @@ private void DrawControls()
     ImGui.TextColored(statusColor, _statusMessage);
 
     ImGui.Text(
-        $"Theoretical data: Vp= {_currentDataSource.PWaveVelocity:F0} m/s | Vs= {_currentDataSource.SWaveVelocity:F0} m/s | Vp/Vs= {_currentDataSource.VpVsRatio:F3}");
+        $"Data: Vp= {_currentDataSource.PWaveVelocity:F0} m/s | Vs= {_currentDataSource.SWaveVelocity:F0} m/s | Vp/Vs= {_currentDataSource.VpVsRatio:F3}");
     ImGui.Separator();
 
     ImGui.Text("Tomography Slice");
@@ -197,13 +197,15 @@ private void DrawTomographyView()
             var imageTopLeft = imageContainerTopLeft + (imageContainerSize - imageSize) * 0.5f;
             ImGui.GetWindowDrawList().AddImage(_tomographyTexture.GetImGuiTextureId(), imageTopLeft, imageTopLeft + imageSize);
         }
+        // Display information label *after* the color bar
+        ImGui.Text(
+            $"Displaying slice {_sliceIndex} on Axis {(_sliceAxis == 0 ? "X" : _sliceAxis == 1 ? "Y" : "Z")}. Image size: {w}x{h}");
+        ImGui.Separator();
         // Set cursor for the color bar to be drawn after the reserved space
         ImGui.SetCursorScreenPos(imageContainerTopLeft + new Vector2(0, imageContainerSize.Y));
         DrawColorBar();
 
-        // Display information label *after* the color bar
-        ImGui.Text(
-            $"Displaying slice {_sliceIndex} on Axis {(_sliceAxis == 0 ? "X" : _sliceAxis == 1 ? "Y" : "Z")}. Image size: {w}x{h}");
+        
     }
     else if (_generationTask == null || _generationTask.IsCompleted)
     {
