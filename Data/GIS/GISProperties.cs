@@ -29,7 +29,9 @@ public class GISProperties : IDatasetPropertiesRenderer
         DrawTagsSection(gisDataset);
 
         ImGui.Separator();
+        DrawLayerOrdering(gisDataset);
 
+        ImGui.Separator();
         // Projection Info
         ImGui.Text($"Projection: {gisDataset.Projection.Name}");
         ImGui.Text($"EPSG: {gisDataset.Projection.EPSG}");
@@ -182,6 +184,105 @@ public class GISProperties : IDatasetPropertiesRenderer
                 ImGui.TextColored(new Vector4(0.7f, 0.7f, 0.7f, 1.0f),
                     "These operations are available based on the dataset's tags.");
             }
+        }
+    }
+
+    private void DrawLayerOrdering(GISDataset dataset)
+    {
+        if (ImGui.CollapsingHeader("Display Order", ImGuiTreeNodeFlags.DefaultOpen))
+        {
+            ImGui.TextWrapped("Layers are drawn bottom to top. Higher layers appear on top.");
+            ImGui.Spacing();
+
+            if (dataset.Layers.Count == 0)
+            {
+                ImGui.TextDisabled("No layers");
+                return;
+            }
+
+            if (ImGui.BeginChild("LayerOrderList", new Vector2(0, 200), ImGuiChildFlags.Border))
+            {
+                for (var i = 0; i < dataset.Layers.Count; i++)
+                {
+                    var layer = dataset.Layers[i];
+                    ImGui.PushID(i);
+
+                    // Visibility checkbox
+                    var visible = layer.IsVisible;
+                    if (ImGui.Checkbox("##vis", ref visible)) layer.IsVisible = visible;
+
+                    ImGui.SameLine();
+
+                    // Layer color indicator
+                    var colorSize = new Vector2(16, 16);
+                    var cursorPos = ImGui.GetCursorScreenPos();
+                    ImGui.GetWindowDrawList().AddRectFilled(
+                        cursorPos,
+                        cursorPos + colorSize,
+                        ImGui.ColorConvertFloat4ToU32(layer.Color)
+                    );
+                    ImGui.GetWindowDrawList().AddRect(
+                        cursorPos,
+                        cursorPos + colorSize,
+                        ImGui.ColorConvertFloat4ToU32(new Vector4(0.5f, 0.5f, 0.5f, 1.0f))
+                    );
+                    ImGui.Dummy(colorSize);
+
+                    ImGui.SameLine();
+
+                    // Layer name
+                    var textColor = layer.IsVisible
+                        ? new Vector4(1.0f, 1.0f, 1.0f, 1.0f)
+                        : new Vector4(0.5f, 0.5f, 0.5f, 1.0f);
+                    ImGui.PushStyleColor(ImGuiCol.Text, textColor);
+                    ImGui.Text($"{layer.Name} ({layer.Features.Count} features)");
+                    ImGui.PopStyleColor();
+
+                    // Right-aligned buttons
+                    ImGui.SameLine();
+                    var availWidth = ImGui.GetContentRegionAvail().X;
+                    ImGui.SetCursorPosX(ImGui.GetCursorPosX() + availWidth - 60);
+
+                    // Move up button
+                    if (i > 0)
+                    {
+                        if (ImGui.SmallButton("▲"))
+                        {
+                            var temp = dataset.Layers[i];
+                            dataset.Layers[i] = dataset.Layers[i - 1];
+                            dataset.Layers[i - 1] = temp;
+                        }
+
+                        if (ImGui.IsItemHovered()) ImGui.SetTooltip("Move layer up (drawn later/on top)");
+                    }
+                    else
+                    {
+                        ImGui.Dummy(new Vector2(25, 0));
+                    }
+
+                    ImGui.SameLine();
+
+                    // Move down button
+                    if (i < dataset.Layers.Count - 1)
+                    {
+                        if (ImGui.SmallButton("▼"))
+                        {
+                            var temp = dataset.Layers[i];
+                            dataset.Layers[i] = dataset.Layers[i + 1];
+                            dataset.Layers[i + 1] = temp;
+                        }
+
+                        if (ImGui.IsItemHovered()) ImGui.SetTooltip("Move layer down (drawn earlier/behind)");
+                    }
+
+                    ImGui.PopID();
+                }
+
+                ImGui.EndChild();
+            }
+
+            ImGui.Spacing();
+            ImGui.TextDisabled("Tip: Uncheck the visibility checkbox to hide a layer");
         }
     }
 

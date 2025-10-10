@@ -504,6 +504,8 @@ void main()
     out_ModelPos = in_Position; 
     gl_Position = ViewProj * vec4(in_Position, 1.0);
 }";
+
+        // FIXED: Corrected the colormap application logic
         var fragmentShaderGlsl = @"
 #version 450
 layout(location = 0) in vec3 in_ModelPos;
@@ -570,9 +572,12 @@ bool IsCutByPlanes(vec3 pos)
     return false;
 }
 
-vec4 ApplyColorMap(float intensity)
+// FIXED: Always apply colormap based on index
+vec4 ApplyColorMap(float intensity, int colorMapIndex)
 {
-    float mapOffset = RenderParams.x * 256.0;
+    // colorMapIndex: 0=Grayscale, 1=Hot, 2=Cool, 3=Rainbow
+    // Each colormap occupies 256 texels in the 1024-texel texture
+    float mapOffset = float(colorMapIndex) * 256.0;
     float samplePos = clamp((mapOffset + intensity * 255.0) / 1024.0, 0.0, 1.0);
     return textureLod(sampler1D(ColorMapTexture, VolumeSampler), samplePos, 0.0);
 }
@@ -599,6 +604,9 @@ void main()
     float opacityScalar = 40.0;
     float t = tNear;
 
+    // Get colormap index from RenderParams.x
+    int colorMapIndex = int(RenderParams.x);
+
     for (int i = 0; i < 768; i++)
     {
         if (i >= maxSteps || t > tFar || accumulatedColor.a > 0.95) break;
@@ -612,14 +620,16 @@ void main()
 
         vec4 sampledColor = vec4(0.0);
 
-        // 1. Base Grayscale Rendering
+        // 1. Base Grayscale Rendering with Colormap
         if (ThresholdParams.w > 0.5) // Show Grayscale
         {
             float intensity = textureLod(sampler3D(VolumeTexture, VolumeSampler), currentPos, 0.0).r;
             if (intensity >= ThresholdParams.x && intensity <= ThresholdParams.y)
             {
                 float normIntensity = (intensity - ThresholdParams.x) / (ThresholdParams.y - ThresholdParams.x + 0.001);
-                sampledColor = (RenderParams.x > 0.5) ? ApplyColorMap(normIntensity) : vec4(vec3(normIntensity), normIntensity);
+                
+                // FIXED: Always apply colormap, colormap index 0 is grayscale
+                sampledColor = ApplyColorMap(normIntensity, colorMapIndex);
                 sampledColor.a = pow(sampledColor.a, 2.0);
             }
         }
@@ -665,6 +675,7 @@ void main()
 layout(location = 0) in vec3 in_Position;
 layout(set = 0, binding = 0) uniform Constants { mat4 ViewProj; vec4 PlaneColor; };
 void main() { gl_Position = ViewProj * vec4(in_Position, 1.0); }";
+
         var planeFragmentShaderGlsl = @"
 #version 450
 layout(location = 0) out vec4 out_Color;

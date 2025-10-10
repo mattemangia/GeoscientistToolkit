@@ -168,7 +168,7 @@ public class MetalVolumeRenderer : IDisposable
 
     private void CreateShaders(ResourceFactory factory)
     {
-        // Enhanced Metal shader with improved acoustic wave visualization
+        // FIXED: Completely rewritten Metal shader with proper colormap support
         const string metalShaderSource = @"
 #include <metal_stdlib>
 using namespace metal;
@@ -213,7 +213,7 @@ vertex VertexOut vertex_main(VertexIn in [[stage_in]],
     return out;
 }
 
-// Enhanced fragment shader for acoustic simulation
+// FIXED: Added colormap texture and proper sampling
 fragment float4 fragment_main(VertexOut in [[stage_in]],
                              constant Constants& constants [[buffer(0)]],
                              texture3d<float> volumeTex [[texture(0)]],
@@ -221,6 +221,7 @@ fragment float4 fragment_main(VertexOut in [[stage_in]],
                              texture2d<float> materialParams [[texture(2)]],
                              texture2d<float> materialColors [[texture(3)]],
                              texture3d<float> previewTex [[texture(4)]],
+                             texture2d<float> colorMapTex [[texture(5)]],
                              sampler volumeSampler [[sampler(0)]]) {
     // Ray setup
     float3 rayOrigin = constants.CameraPosition.xyz;
@@ -241,11 +242,14 @@ fragment float4 fragment_main(VertexOut in [[stage_in]],
     
     tNear = max(tNear, 0.0);
     
-    // Volume rendering with enhanced acoustic wave visualization
+    // Volume rendering with colormap support
     float4 color = float4(0.0);
     float stepSize = 0.01 * constants.ThresholdParams.z;
-    int maxSteps = 768; // Increased for better quality
+    int maxSteps = 768;
     float opacityScale = 40.0;
+    
+    // Get colormap index from RenderParams.x
+    int colorMapIndex = int(constants.RenderParams.x);
     
     // Track if we're visualizing acoustic waves
     bool hasAcousticWave = false;
@@ -309,18 +313,22 @@ fragment float4 fragment_main(VertexOut in [[stage_in]],
         
         // If no acoustic wave was rendered for this sample, do standard rendering
         if (sampleColor.a < 0.001) {
-
-            // 1. Start with grayscale color if enabled
+            // 1. Start with grayscale/colormap color if enabled
             if (constants.ThresholdParams.w > 0.5) { // ShowGrayscale
                 float density = volumeTex.sample(volumeSampler, pos).r;
                 if (density > constants.ThresholdParams.x && density < constants.ThresholdParams.y) {
                     float normalizedDensity = (density - constants.ThresholdParams.x) / 
                                             (constants.ThresholdParams.y - constants.ThresholdParams.x + 0.001);
-                    float3 volColor = float3(normalizedDensity);
-                    if (constants.RenderParams.x > 0.5) {
-                        volColor = mix(float3(0.1, 0.1, 0.3), float3(0.3, 0.3, 0.7), normalizedDensity);
-                    }
-                    sampleColor = float4(volColor, normalizedDensity * 0.3);
+                    
+                    // FIXED: Sample from colormap texture based on index
+                    // ColorMap texture is 256x4 (256 colors, 4 maps)
+                    // colorMapIndex: 0=Grayscale, 1=Hot, 2=Cool, 3=Rainbow
+                    float2 texCoord;
+                    texCoord.x = normalizedDensity; // X coordinate is the intensity
+                    texCoord.y = (float(colorMapIndex) + 0.5) / 4.0; // Y coordinate selects the colormap
+                    float4 colorMapColor = colorMapTex.sample(volumeSampler, texCoord);
+                    
+                    sampleColor = float4(colorMapColor.rgb, normalizedDensity * 0.3);
                 }
             }
 
@@ -338,9 +346,9 @@ fragment float4 fragment_main(VertexOut in [[stage_in]],
                     }
                     float4 matColor = materialColors.read(uint2(materialId, 0), 0);
                     
-                    // Blend over the existing sampleColor (which is either grayscale or transparent)
+                    // Blend over the existing sampleColor (which is either colormap or transparent)
                     sampleColor.rgb = mix(sampleColor.rgb, matColor.rgb, opacity);
-                    sampleColor.a = max(sampleColor.a, matColor.a * opacity * 0.5f);
+                    sampleColor.a = max(sampleColor.a, matColor.a * opacity * 0.5);
                 }
             }
         }
@@ -535,7 +543,7 @@ fragment float4 plane_fragment_main(constant PlaneConstants& constants [[buffer(
 
     private void CreatePipeline(ResourceFactory factory)
     {
-        // Create resource layout with all textures including preview for acoustic waves
+        // FIXED: Added colormap texture to resource layout
         _resourceLayout = factory.CreateResourceLayout(new ResourceLayoutDescription(
             new ResourceLayoutElementDescription("Constants", ResourceKind.UniformBuffer,
                 ShaderStages.Vertex | ShaderStages.Fragment),
@@ -546,6 +554,8 @@ fragment float4 plane_fragment_main(constant PlaneConstants& constants [[buffer(
             new ResourceLayoutElementDescription("MaterialColorsTexture", ResourceKind.TextureReadOnly,
                 ShaderStages.Fragment),
             new ResourceLayoutElementDescription("PreviewTexture", ResourceKind.TextureReadOnly, ShaderStages.Fragment),
+            new ResourceLayoutElementDescription("ColorMapTexture", ResourceKind.TextureReadOnly,
+                ShaderStages.Fragment),
             new ResourceLayoutElementDescription("VolumeSampler", ResourceKind.Sampler, ShaderStages.Fragment)));
 
         // Create pipeline with proper blending for acoustic visualization
@@ -593,7 +603,7 @@ fragment float4 plane_fragment_main(constant PlaneConstants& constants [[buffer(
 
     private void CreateResourceSets(ResourceFactory factory)
     {
-        // Create main resource set with all resources including preview texture for acoustic waves
+        // FIXED: Create main resource set with colormap texture included
         _resourceSet = factory.CreateResourceSet(new ResourceSetDescription(
             _resourceLayout,
             _constantBuffer,
@@ -602,6 +612,7 @@ fragment float4 plane_fragment_main(constant PlaneConstants& constants [[buffer(
             _materialParamsTexture,
             _materialColorsTexture,
             _previewTexture,
+            _colorMapTexture,
             _volumeSampler));
 
         // Plane visualization resource set for transducers
@@ -644,7 +655,7 @@ fragment float4 plane_fragment_main(constant PlaneConstants& constants [[buffer(
     {
         _labelTexture = newLabelTexture;
 
-        // Recreate resource set with new label texture
+        // Recreate resource set with new label texture (and include colormap)
         _resourceSet?.Dispose();
         _resourceSet = VeldridManager.Factory.CreateResourceSet(new ResourceSetDescription(
             _resourceLayout,
@@ -654,6 +665,7 @@ fragment float4 plane_fragment_main(constant PlaneConstants& constants [[buffer(
             _materialParamsTexture,
             _materialColorsTexture,
             _previewTexture,
+            _colorMapTexture,
             _volumeSampler));
 
         Logger.Log("[MetalVolumeRenderer] Label texture updated");
@@ -663,7 +675,7 @@ fragment float4 plane_fragment_main(constant PlaneConstants& constants [[buffer(
     {
         _previewTexture = newPreviewTexture;
 
-        // Recreate resource set with new preview texture
+        // Recreate resource set with new preview texture (and include colormap)
         _resourceSet?.Dispose();
         _resourceSet = VeldridManager.Factory.CreateResourceSet(new ResourceSetDescription(
             _resourceLayout,
@@ -673,6 +685,7 @@ fragment float4 plane_fragment_main(constant PlaneConstants& constants [[buffer(
             _materialParamsTexture,
             _materialColorsTexture,
             _previewTexture,
+            _colorMapTexture,
             _volumeSampler));
 
         Logger.Log("[MetalVolumeRenderer] Preview texture updated for acoustic wave visualization");

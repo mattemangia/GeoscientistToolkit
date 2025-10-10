@@ -43,7 +43,8 @@ public static class DatasetUIFactory
 
             // GIS datasets
             GISDataset gisDataset => new GISViewer(gisDataset),
-
+            DatasetGroup group when group.Datasets.All(d => d is GISDataset) =>
+                new GISViewer(group.Datasets.Cast<GISDataset>().ToList()),
             // Acoustic Volume datasets
             AcousticVolumeDataset acousticDataset => new AcousticVolumeViewer(acousticDataset),
 

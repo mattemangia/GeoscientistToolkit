@@ -1,8 +1,10 @@
 ﻿// GeoscientistToolkit/Data/CtImageStack/CtCombinedViewer.cs
+// FIXED: Added colormap support to 2D slices
 
 using System.Numerics;
 using GeoscientistToolkit.Analysis.AcousticSimulation;
 using GeoscientistToolkit.Analysis.RockCoreExtractor;
+using GeoscientistToolkit.Analysis.TextureClassification;
 using GeoscientistToolkit.Analysis.Transform;
 using GeoscientistToolkit.Business;
 using GeoscientistToolkit.Data.CtImageStack.Segmentation;
@@ -15,13 +17,8 @@ using ImGuiNET;
 
 namespace GeoscientistToolkit.Data.CtImageStack;
 
-/// <summary>
-///     Combined viewer showing 3 orthogonal slices + 3D volume rendering
-///     Enhanced with cutting plane visualization and real-time segmentation preview.
-/// </summary>
 public class CtCombinedViewer : IDatasetViewer, IDisposable
 {
-    // View mode enum
     public enum ViewModeEnum
     {
         Combined,
@@ -33,16 +30,16 @@ public class CtCombinedViewer : IDatasetViewer, IDisposable
     }
 
     private static readonly ProgressBarDialog _progressDialog = new("Loading 3D Viewer");
+
+    // ADDED: Colormap data for 2D slices
+    private static Vector3[,] _colormapData;
     private readonly CtImageStackDataset _dataset;
     private readonly CtSegmentationIntegration _interactiveSegmentation;
     private readonly Dictionary<byte, float> _materialOpacity = new();
-
-    // Material visibility and opacity tracking
     private readonly Dictionary<byte, bool> _materialVisibility = new();
-
     private readonly CtRenderingPanel _renderingPanel;
-    private bool _isInitialized;
 
+    private bool _isInitialized;
     private bool _isPoppedOut;
     private bool _needsUpdateXY = true;
     private bool _needsUpdateXZ = true;
@@ -51,23 +48,15 @@ public class CtCombinedViewer : IDatasetViewer, IDisposable
     private Vector2 _panXZ = Vector2.Zero;
     private Vector2 _panYZ = Vector2.Zero;
     private bool _renderingPanelOpen = true;
-
-    // Slice positions - now public properties
     private int _sliceX;
     private int _sliceY;
     private int _sliceZ;
     private StreamingCtVolumeDataset _streamingDataset;
-
-    // Textures for each view
     private TextureManager _textureXY;
     private TextureManager _textureXZ;
     private TextureManager _textureYZ;
-
-    // Window/Level - public properties
     private float _windowLevel = 128;
     private float _windowWidth = 255;
-
-    // Zoom and pan for each view
     private float _zoomXY = 1.0f;
     private float _zoomXZ = 1.0f;
     private float _zoomYZ = 1.0f;
@@ -75,8 +64,10 @@ public class CtCombinedViewer : IDatasetViewer, IDisposable
     public CtCombinedViewer(CtImageStackDataset dataset)
     {
         _dataset = dataset ?? throw new ArgumentNullException(nameof(dataset));
-
         _dataset.Load();
+
+        // ADDED: Initialize colormap data
+        InitializeColormaps();
 
         CtSegmentationIntegration.Initialize(_dataset);
         _interactiveSegmentation = CtSegmentationIntegration.GetInstance(_dataset);
@@ -101,8 +92,6 @@ public class CtCombinedViewer : IDatasetViewer, IDisposable
 
         ProjectManager.Instance.DatasetDataChanged += OnDatasetDataChanged;
         CalibrationIntegration.PreviewChanged += _ => { _needsUpdateXY = _needsUpdateXZ = _needsUpdateYZ = true; };
-
-        // Subscribe to the 3D preview update event and the generic preview update
         CtImageStackTools.Preview3DChanged += OnPreview3DChanged;
         CtImageStackTools.PreviewChanged += OnGenericPreviewChanged;
         AcousticIntegration.OnPositionsChanged += OnAcousticPositionsChanged;
@@ -111,7 +100,6 @@ public class CtCombinedViewer : IDatasetViewer, IDisposable
     }
 
     public CtVolume3DViewer VolumeViewer { get; private set; }
-
     public ViewModeEnum ViewMode { get; set; } = ViewModeEnum.Combined;
 
     public int SliceX
@@ -167,13 +155,10 @@ public class CtCombinedViewer : IDatasetViewer, IDisposable
         }
     }
 
-    // View settings - public properties
     public bool ShowCrosshairs { get; set; } = true;
     public bool SyncViews { get; set; } = true;
     public bool ShowScaleBar { get; set; } = true;
     public bool ShowCuttingPlanes { get; set; } = true;
-
-    // Volume rendering settings
     public bool ShowVolumeData { get; set; } = true;
 
     public float VolumeStepSize
@@ -209,12 +194,13 @@ public class CtCombinedViewer : IDatasetViewer, IDisposable
         set
         {
             if (VolumeViewer != null) VolumeViewer.ColorMapIndex = value;
+            // ADDED: Trigger slice updates when colormap changes
+            _needsUpdateXY = _needsUpdateXZ = _needsUpdateYZ = true;
         }
     }
 
     public void DrawToolbarControls()
     {
-        // Toolbar is kept simple, main tools are in the ToolsPanel
         ImGui.Dummy(new Vector2(0, 0));
     }
 
@@ -269,8 +255,7 @@ public class CtCombinedViewer : IDatasetViewer, IDisposable
 
             if (ImGui.MenuItem("Reset Views")) ResetAllViews();
 
-            if (ViewMode != ViewModeEnum.VolumeOnly &&
-                ImGui.MenuItem("Center Slices"))
+            if (ViewMode != ViewModeEnum.VolumeOnly && ImGui.MenuItem("Center Slices"))
             {
                 _sliceX = _dataset.Width / 2;
                 _sliceY = _dataset.Height / 2;
@@ -306,8 +291,6 @@ public class CtCombinedViewer : IDatasetViewer, IDisposable
         AcousticIntegration.OnPositionsChanged -= OnAcousticPositionsChanged;
 
         CtSegmentationIntegration.Cleanup(_dataset);
-
-        // Add this line for Rock Core cleanup
         RockCoreIntegration.UnregisterTool(_dataset);
 
         _renderingPanel?.Dispose();
@@ -317,22 +300,114 @@ public class CtCombinedViewer : IDatasetViewer, IDisposable
         VolumeViewer?.Dispose();
     }
 
+    // ADDED: Initialize colormap lookup tables for 2D slices
+    private static void InitializeColormaps()
+    {
+        if (_colormapData != null) return;
+
+        const int size = 256;
+        const int numMaps = 4;
+        _colormapData = new Vector3[numMaps, size];
+
+        // Grayscale (map 0)
+        for (var i = 0; i < size; i++)
+        {
+            var v = i / (float)(size - 1);
+            _colormapData[0, i] = new Vector3(v, v, v);
+        }
+
+        // Hot (map 1)
+        for (var i = 0; i < size; i++)
+        {
+            var t = i / (float)(size - 1);
+            var r = Math.Min(1.0f, 3.0f * t);
+            var g = Math.Clamp(3.0f * t - 1.0f, 0.0f, 1.0f);
+            var b = Math.Clamp(3.0f * t - 2.0f, 0.0f, 1.0f);
+            _colormapData[1, i] = new Vector3(r, g, b);
+        }
+
+        // Cool (map 2)
+        for (var i = 0; i < size; i++)
+        {
+            var t = i / (float)(size - 1);
+            _colormapData[2, i] = new Vector3(t, 1 - t, 1);
+        }
+
+        // Rainbow (map 3)
+        for (var i = 0; i < size; i++)
+        {
+            var h = i / (float)(size - 1) * 0.7f;
+            _colormapData[3, i] = HsvToRgb(h, 1.0f, 1.0f);
+        }
+    }
+
+    // ADDED: Helper to apply colormap to intensity value
+    private Vector3 ApplyColorMap(float normalizedIntensity, int colorMapIndex)
+    {
+        var mapIdx = Math.Clamp(colorMapIndex, 0, 3);
+        var texelIdx = (int)(normalizedIntensity * 255);
+        texelIdx = Math.Clamp(texelIdx, 0, 255);
+        return _colormapData[mapIdx, texelIdx];
+    }
+
+    private static Vector3 HsvToRgb(float h, float s, float v)
+    {
+        float r, g, b;
+        var i = (int)(h * 6);
+        var f = h * 6 - i;
+        var p = v * (1 - s);
+        var q = v * (1 - f * s);
+        var t = v * (1 - (1 - f) * s);
+
+        switch (i % 6)
+        {
+            case 0:
+                r = v;
+                g = t;
+                b = p;
+                break;
+            case 1:
+                r = q;
+                g = v;
+                b = p;
+                break;
+            case 2:
+                r = p;
+                g = v;
+                b = t;
+                break;
+            case 3:
+                r = p;
+                g = q;
+                b = v;
+                break;
+            case 4:
+                r = t;
+                g = p;
+                b = v;
+                break;
+            default:
+                r = v;
+                g = p;
+                b = q;
+                break;
+        }
+
+        return new Vector3(r, g, b);
+    }
+
     private void OnGenericPreviewChanged(Dataset dataset)
     {
-        // This is a generic signal that a preview state (like 2D thresholding) has changed
         if (dataset == _dataset) _needsUpdateXY = _needsUpdateXZ = _needsUpdateYZ = true;
     }
 
     private void OnAcousticPositionsChanged()
     {
-        // When TX/RX positions change, force a redraw of all slices to show updated markers
         _needsUpdateXY = _needsUpdateXZ = _needsUpdateYZ = true;
     }
 
-
     private void OnPreview3DChanged(CtImageStackDataset dataset, byte[] previewMask, Vector4 color)
     {
-        // If the event is for our dataset, trigger a redraw of the 2D slices
         if (dataset == _dataset)
         {
             _needsUpdateXY = true;
@@ -425,7 +500,6 @@ public class CtCombinedViewer : IDatasetViewer, IDisposable
         {
             material.IsVisible = visible;
             _needsUpdateXY = _needsUpdateXZ = _needsUpdateYZ = true;
-
             VolumeViewer?.SetMaterialVisibility(id, visible);
         }
     }
@@ -440,7 +514,6 @@ public class CtCombinedViewer : IDatasetViewer, IDisposable
     public void SetMaterialOpacity(byte id, float opacity)
     {
         _materialOpacity[id] = opacity;
-        // Make sure to pass the opacity value to the VolumeViewer
         VolumeViewer?.SetMaterialOpacity(id, opacity);
     }
 
@@ -566,7 +639,6 @@ public class CtCombinedViewer : IDatasetViewer, IDisposable
     private void DrawSliceView(int viewIndex, string title, ref float zoom, ref Vector2 pan, ref bool needsUpdate,
         ref TextureManager texture)
     {
-        // Use the enhanced slice navigation controls
         var slice = viewIndex switch { 0 => _sliceZ, 1 => _sliceY, 2 => _sliceX, _ => 0 };
         var maxSlice = viewIndex switch
         {
@@ -594,20 +666,17 @@ public class CtCombinedViewer : IDatasetViewer, IDisposable
 
         switch (viewIndex)
         {
-            case 0: // XY View
+            case 0:
                 pixelWidth = _dataset.PixelSize;
                 pixelHeight = _dataset.PixelSize;
-
                 break;
-            case 1: // XZ View
+            case 1:
                 pixelWidth = _dataset.PixelSize;
                 pixelHeight = _dataset.SliceThickness;
-
                 break;
-            case 2: // YZ View
+            case 2:
                 pixelWidth = _dataset.PixelSize;
                 pixelHeight = _dataset.SliceThickness;
-
                 break;
             default:
                 pixelWidth = 1.0f;
@@ -615,7 +684,6 @@ public class CtCombinedViewer : IDatasetViewer, IDisposable
                 break;
         }
 
-        // Handle cases where slice thickness might be zero or invalid
         if (pixelHeight <= 0) pixelHeight = pixelWidth;
         if (pixelWidth <= 0) pixelWidth = 1.0f;
 
@@ -659,10 +727,8 @@ public class CtCombinedViewer : IDatasetViewer, IDisposable
         var (width, height) = GetImageDimensionsForView(viewIndex);
         var (imagePos, imageSize) = GetImageDisplayMetrics(canvasPos, canvasSize, zoom, pan, width, height, viewIndex);
 
-        // --- FIXED INPUT HANDLING LOGIC ---
         var inputHandled = false;
 
-        // --- ACOUSTIC PLACEMENT INPUT ---
         if (AcousticIntegration.IsPlacingFor(_dataset) && isHovered && (ImGui.IsMouseClicked(ImGuiMouseButton.Left) ||
                                                                         ImGui.IsMouseDragging(ImGuiMouseButton.Left)))
         {
@@ -670,19 +736,18 @@ public class CtCombinedViewer : IDatasetViewer, IDisposable
             var currentTx = AcousticIntegration.TxPosition;
             var currentRx = AcousticIntegration.RxPosition;
 
-            // Convert 2D click in this view to a 3D normalized position
             var newPos = new Vector3();
             switch (viewIndex)
             {
-                case 0: // XY View
+                case 0:
                     newPos = new Vector3(mousePosInImage.X / width, mousePosInImage.Y / height,
                         (float)_sliceZ / _dataset.Depth);
                     break;
-                case 1: // XZ View
+                case 1:
                     newPos = new Vector3(mousePosInImage.X / width, (float)_sliceY / _dataset.Height,
                         mousePosInImage.Y / height);
                     break;
-                case 2: // YZ View
+                case 2:
                     newPos = new Vector3((float)_sliceX / _dataset.Width, mousePosInImage.X / width,
                         mousePosInImage.Y / height);
                     break;
@@ -692,19 +757,16 @@ public class CtCombinedViewer : IDatasetViewer, IDisposable
             inputHandled = true;
         }
 
-
         if (isHovered && !inputHandled)
         {
             if (isHovered && ImGui.IsItemClicked(ImGuiMouseButton.Left)
                           && CalibrationIntegration.IsRegionSelectionEnabled(_dataset))
             {
-                // Map mouse to image coordinates
                 var io0 = ImGui.GetIO();
                 var mousePosInImage = GetMousePosInImage(io0.MousePos, imagePos, imageSize, width, height);
                 var vx = Math.Clamp((int)mousePosInImage.X, 0, width - 1);
                 var vy = Math.Clamp((int)mousePosInImage.Y, 0, height - 1);
 
-                // XY -> “Z”, XZ -> “Y”, YZ -> “X”
                 switch (viewIndex)
                 {
                     case 0: CalibrationIntegration.OnViewerClick(_dataset, "Z", _sliceZ, vx, vy); break;
@@ -712,28 +774,30 @@ public class CtCombinedViewer : IDatasetViewer, IDisposable
                     case 2: CalibrationIntegration.OnViewerClick(_dataset, "X", _sliceX, vx, vy); break;
                 }
 
-                // Force a redraw and swallow the default click (prevents slice change / crosshair updates)
                 _needsUpdateXY = _needsUpdateXZ = _needsUpdateYZ = true;
                 return;
             }
 
-            // Give input to the Rock Core tool first
             inputHandled = RockCoreIntegration.HandleMouseInput(_dataset, io.MousePos,
                 imagePos, imageSize, width, height, viewIndex,
                 ImGui.IsItemClicked(ImGuiMouseButton.Left),
                 ImGui.IsMouseDragging(ImGuiMouseButton.Left),
                 ImGui.IsMouseReleased(ImGuiMouseButton.Left));
 
-            // If not handled, give input to the Transform tool
             if (!inputHandled)
                 inputHandled = TransformIntegration.HandleMouseInput(_dataset, io.MousePos,
                     imagePos, imageSize, width, height, viewIndex,
                     ImGui.IsItemClicked(ImGuiMouseButton.Left),
                     ImGui.IsMouseDragging(ImGuiMouseButton.Left),
                     ImGui.IsMouseReleased(ImGuiMouseButton.Left));
+            if (!inputHandled)
+                inputHandled = TextureClassificationIntegration.HandleMouseInput(_dataset, io.MousePos,
+                    imagePos, imageSize, width, height, viewIndex,
+                    ImGui.IsItemClicked(ImGuiMouseButton.Left),
+                    ImGui.IsMouseDragging(ImGuiMouseButton.Left),
+                    ImGui.IsMouseReleased(ImGuiMouseButton.Left));
         }
 
-        // Handle interactive segmentation only if no other tool handled the input
         if (!inputHandled && _interactiveSegmentation != null && isHovered)
         {
             var mousePosInImage = GetMousePosInImage(io.MousePos, imagePos, imageSize, width, height);
@@ -779,7 +843,6 @@ public class CtCombinedViewer : IDatasetViewer, IDisposable
             ImGui.EndPopup();
         }
 
-        // Handle scroll wheel for zoom
         if (isHovered && io.MouseWheel != 0)
         {
             var zoomDelta = io.MouseWheel * 0.1f;
@@ -793,7 +856,6 @@ public class CtCombinedViewer : IDatasetViewer, IDisposable
             }
         }
 
-        // Handle middle mouse drag for panning
         if (isHovered && ImGui.IsMouseDragging(ImGuiMouseButton.Middle))
         {
             pan += io.MouseDelta;
@@ -805,7 +867,6 @@ public class CtCombinedViewer : IDatasetViewer, IDisposable
             }
         }
 
-        // Handle Ctrl+scroll for slice navigation
         if (isHovered && io.MouseWheel != 0 && io.KeyCtrl)
         {
             var wheel = (int)io.MouseWheel;
@@ -817,15 +878,12 @@ public class CtCombinedViewer : IDatasetViewer, IDisposable
             }
         }
 
-        // Update crosshair from mouse click (only if not handled by another tool)
         if (!inputHandled && isHovered && ImGui.IsMouseClicked(ImGuiMouseButton.Left) &&
             !(_interactiveSegmentation?.HasActiveSelection ?? false))
             UpdateCrosshairFromMouse(viewIndex, canvasPos, canvasSize, zoom, pan);
 
-        // Draw background
         dl.AddRectFilled(canvasPos, canvasPos + canvasSize, 0xFF202020);
 
-        // Update texture if needed
         if (needsUpdate || texture == null || !texture.IsValid)
         {
             UpdateTexture(viewIndex, ref texture);
@@ -836,18 +894,15 @@ public class CtCombinedViewer : IDatasetViewer, IDisposable
 
         if (texture != null && texture.IsValid)
         {
-            // 1. Draw the composited texture (base image + materials + overlays)
             dl.AddImage(texture.GetImGuiTextureId(), imagePos, imagePos + imageSize, Vector2.Zero, Vector2.One,
                 0xFFFFFFFF);
 
-            // 2. Draw UI elements on top
             if (ShowCrosshairs)
                 DrawCrosshairs(dl, viewIndex, canvasPos, canvasSize, imagePos, imageSize, width, height);
             if (ShowScaleBar) DrawScaleBar(dl, canvasPos, canvasSize, zoom, width, height, viewIndex);
             if (ShowCuttingPlanes && VolumeViewer != null)
                 DrawCuttingPlanes(dl, viewIndex, canvasPos, canvasSize, imagePos, imageSize, width, height);
 
-            // Draw Acoustic Transducer markers
             if (AcousticIntegration.IsActiveFor(_dataset))
             {
                 DrawTransducerMarkers(dl, viewIndex, imagePos, imageSize, width, height);
@@ -855,15 +910,14 @@ public class CtCombinedViewer : IDatasetViewer, IDisposable
                     DrawSimulationExtent(dl, viewIndex, imagePos, imageSize, width, height);
             }
 
-            // Draw Rock Core Extractor overlay if active
             RockCoreIntegration.DrawOverlay(_dataset, dl, viewIndex, imagePos, imageSize, width, height,
                 _sliceX, _sliceY, _sliceZ);
 
-            // Draw Transform tool overlay if active
             TransformIntegration.DrawOverlay(dl, _dataset, viewIndex, imagePos, imageSize, width, height);
+            TextureClassificationIntegration.DrawOverlay(_dataset, dl, viewIndex, imagePos, imageSize,
+                width, height, _sliceX, _sliceY, _sliceZ);
         }
 
-        // 3. Draw live tool cursor on the very top
         if (isHovered && _interactiveSegmentation?.ActiveTool is BrushTool brushTool)
         {
             var brushRadiusPixels = brushTool.BrushSize * (imageSize.X / width);
@@ -880,13 +934,13 @@ public class CtCombinedViewer : IDatasetViewer, IDisposable
         if (!extentNullable.HasValue) return;
 
         var extent = extentNullable.Value;
-        var color = 0xA0FF00FF; // Semi-transparent magenta
+        var color = 0xA0FF00FF;
 
         Vector2 rectMin = Vector2.Zero, rectMax = Vector2.Zero;
 
         switch (viewIndex)
         {
-            case 0: // XY view, slice at _sliceZ. Shows X and Y axes.
+            case 0:
                 if (_sliceZ >= extent.Min.Z && _sliceZ <= extent.Max.Z)
                 {
                     rectMin = new Vector2(imagePos.X + (float)extent.Min.X / imageWidth * imageSize.X,
@@ -896,7 +950,7 @@ public class CtCombinedViewer : IDatasetViewer, IDisposable
                 }
 
                 break;
-            case 1: // XZ view, slice at _sliceY. Shows X and Z axes.
+            case 1:
                 if (_sliceY >= extent.Min.Y && _sliceY <= extent.Max.Y)
                 {
                     rectMin = new Vector2(imagePos.X + (float)extent.Min.X / imageWidth * imageSize.X,
@@ -906,7 +960,7 @@ public class CtCombinedViewer : IDatasetViewer, IDisposable
                 }
 
                 break;
-            case 2: // YZ view, slice at _sliceX. Shows Y and Z axes.
+            case 2:
                 if (_sliceX >= extent.Min.X && _sliceX <= extent.Max.X)
                 {
                     rectMin = new Vector2(imagePos.X + (float)extent.Min.Y / imageWidth * imageSize.X,
@@ -927,9 +981,7 @@ public class CtCombinedViewer : IDatasetViewer, IDisposable
         var tx = AcousticIntegration.TxPosition;
         var rx = AcousticIntegration.RxPosition;
 
-        // Draw TX
         DrawSingleTransducer(dl, viewIndex, imagePos, imageSize, imageWidth, imageHeight, tx, "TX", 0xFF00FFFF);
-        // Draw RX
         DrawSingleTransducer(dl, viewIndex, imagePos, imageSize, imageWidth, imageHeight, rx, "RX", 0xFF00FF00);
     }
 
@@ -941,17 +993,17 @@ public class CtCombinedViewer : IDatasetViewer, IDisposable
 
         switch (viewIndex)
         {
-            case 0: // XY View
+            case 0:
                 xNorm = pos3D.X;
                 yNorm = pos3D.Y;
                 onSlice = Math.Abs(_sliceZ - pos3D.Z * _dataset.Depth) < 1.5f;
                 break;
-            case 1: // XZ View
+            case 1:
                 xNorm = pos3D.X;
                 yNorm = pos3D.Z;
                 onSlice = Math.Abs(_sliceY - pos3D.Y * _dataset.Height) < 1.5f;
                 break;
-            case 2: // YZ View
+            case 2:
                 xNorm = pos3D.Y;
                 yNorm = pos3D.Z;
                 onSlice = Math.Abs(_sliceX - pos3D.X * _dataset.Width) < 1.5f;
@@ -963,13 +1015,14 @@ public class CtCombinedViewer : IDatasetViewer, IDisposable
             var screenX = imagePos.X + xNorm * imageSize.X;
             var screenY = imagePos.Y + yNorm * imageSize.Y;
             var radius = onSlice ? 6.0f : 4.0f;
-            var finalColor = onSlice ? color : (color & 0x00FFFFFF) | 0x80000000; // Dim if not on slice
+            var finalColor = onSlice ? color : (color & 0x00FFFFFF) | 0x80000000;
 
             dl.AddCircleFilled(new Vector2(screenX, screenY), radius, finalColor);
             dl.AddText(new Vector2(screenX + 8, screenY - 8), finalColor, label);
         }
     }
 
+    // MODIFIED: Now applies colormap to grayscale data
     private void UpdateTexture(int viewIndex, ref TextureManager texture)
     {
         if (_dataset.VolumeData == null)
@@ -988,13 +1041,11 @@ public class CtCombinedViewer : IDatasetViewer, IDisposable
 
             var currentSlice = viewIndex switch { 0 => _sliceZ, 1 => _sliceY, 2 => _sliceX, _ => -1 };
 
-            // Get 3D preview data from external tools (like island removal)
             var (isExternalPreviewActive, full3DPreviewMask, previewColor) = CtImageStackTools.GetPreviewData(_dataset);
             var externalPreviewMask = isExternalPreviewActive
                 ? ExtractPreviewSlice(full3DPreviewMask, viewIndex, width, height)
                 : null;
 
-            // Get real-time 2D threshold preview state
             var (is2DThresholdPreview, minThreshold, maxThreshold, thresholdColor) =
                 CtImageStackTools.Get2DThresholdPreviewState();
 
@@ -1005,22 +1056,27 @@ public class CtCombinedViewer : IDatasetViewer, IDisposable
             var targetMaterial =
                 _dataset.Materials.FirstOrDefault(m => m.ID == _interactiveSegmentation.TargetMaterialId);
 
-            // Pre-calculate window/level parameters
             var minWL = _windowLevel - _windowWidth / 2;
             var rangeWL = _windowWidth;
             if (rangeWL < 1e-5f) rangeWL = 1e-5f;
+
+            // ADDED: Get the current colormap index from the 3D viewer (or default to 0)
+            var colorMapIndex = VolumeViewer?.ColorMapIndex ?? 0;
 
             for (var i = 0; i < width * height; i++)
             {
                 var rawValue = rawGrayscaleData[i];
 
-                // Apply window/level on the fly
+                // Apply window/level
                 var wlValue = (rawValue - minWL) / rangeWL * 255f;
                 var displayValue = (byte)Math.Clamp(wlValue, 0, 255);
 
-                var finalColor = new Vector4(displayValue / 255f, displayValue / 255f, displayValue / 255f, 1.0f);
+                // MODIFIED: Apply colormap to the normalized intensity
+                var normalizedIntensity = displayValue / 255f;
+                var colorMapRgb = ApplyColorMap(normalizedIntensity, colorMapIndex);
+                var finalColor = new Vector4(colorMapRgb.X, colorMapRgb.Y, colorMapRgb.Z, 1.0f);
 
-                // 1. Materials
+                // Materials overlay
                 if (labelData != null && labelData[i] > 0)
                 {
                     var material = _dataset.Materials.FirstOrDefault(m => m.ID == labelData[i]);
@@ -1032,28 +1088,28 @@ public class CtCombinedViewer : IDatasetViewer, IDisposable
                     }
                 }
 
-                // 2. Committed Interactive Selection (e.g. magic wand result before applying)
+                // Committed selection overlay
                 if (committedSelectionMask != null && committedSelectionMask[i] > 0)
                 {
                     var selColor = targetMaterial?.Color ?? new Vector4(0.8f, 0.8f, 0.0f, 1.0f);
                     finalColor = Vector4.Lerp(finalColor, new Vector4(selColor.X, selColor.Y, selColor.Z, 1.0f), 0.4f);
                 }
 
-                // 3. NEW: Real-time 2D Thresholding Preview
+                // 2D threshold preview
                 if (is2DThresholdPreview && rawValue >= minThreshold && rawValue <= maxThreshold)
                 {
                     var tColorVec = new Vector4(thresholdColor.X, thresholdColor.Y, thresholdColor.Z, 1.0f);
                     finalColor = Vector4.Lerp(finalColor, tColorVec, 0.5f);
                 }
 
-                // 4. External 3D Preview (e.g. island removal)
+                // External 3D preview
                 if (isExternalPreviewActive && externalPreviewMask != null && externalPreviewMask[i] > 0)
                 {
                     var previewRgba = new Vector4(previewColor.X, previewColor.Y, previewColor.Z, 1.0f);
                     finalColor = Vector4.Lerp(finalColor, previewRgba, 0.5f);
                 }
 
-                // 5. Live Interactive Tool Preview (e.g. brush stroke)
+                // Live segmentation preview
                 if (segmentationPreviewMask != null && segmentationPreviewMask[i] > 0)
                 {
                     var segColor = targetMaterial?.Color ?? new Vector4(1, 0, 0, 1);
@@ -1087,24 +1143,22 @@ public class CtCombinedViewer : IDatasetViewer, IDisposable
         {
             switch (viewIndex)
             {
-                case 0: // XY View
+                case 0:
                     var offset = _sliceZ * fullWidth * fullHeight;
                     if (offset + sliceMask.Length <= full3DMask.Length)
                         Buffer.BlockCopy(full3DMask, offset, sliceMask, 0, sliceMask.Length);
                     break;
-                case 1: // XZ View
+                case 1:
                     for (var z = 0; z < sliceHeight; z++)
                     for (var x = 0; x < sliceWidth; x++)
                         sliceMask[z * sliceWidth + x] =
                             full3DMask[z * fullWidth * fullHeight + _sliceY * fullWidth + x];
-
                     break;
-                case 2: // YZ View
+                case 2:
                     for (var z = 0; z < sliceHeight; z++)
                     for (var y = 0; y < sliceWidth; y++)
                         sliceMask[z * sliceWidth + y] =
                             full3DMask[z * fullWidth * fullHeight + y * fullWidth + _sliceX];
-
                     break;
             }
         }
@@ -1168,20 +1222,6 @@ public class CtCombinedViewer : IDatasetViewer, IDisposable
         }
 
         return data;
-    }
-
-    private void ApplyWindowLevel(byte[] data)
-    {
-        var min = _windowLevel - _windowWidth / 2;
-        var max = _windowLevel + _windowWidth / 2;
-        var range = max - min;
-        if (range < 1e-5) range = 1e-5f;
-
-        Parallel.For(0, data.Length, i =>
-        {
-            var value = (data[i] - min) / range * 255;
-            data[i] = (byte)Math.Clamp(value, 0, 255);
-        });
     }
 
     private (int width, int height) GetImageDimensionsForView(int viewIndex)
@@ -1290,7 +1330,7 @@ public class CtCombinedViewer : IDatasetViewer, IDisposable
             var normalizedZ = VolumeViewer.CutZPosition;
             uint color = 0x60FF6060;
 
-            if (viewIndex == 1) // XZ view
+            if (viewIndex == 1)
             {
                 var screenPos = imagePos.Y + (1.0f - normalizedZ) * imageSize.Y;
                 if (screenPos >= imagePos.Y && screenPos <= imagePos.Y + imageSize.Y)
@@ -1302,7 +1342,7 @@ public class CtCombinedViewer : IDatasetViewer, IDisposable
                         VolumeViewer.CutZForward ? new Vector2(0, -10) : new Vector2(0, 10), color);
                 }
             }
-            else // YZ view
+            else
             {
                 var screenPos = imagePos.X + normalizedZ * imageSize.X;
                 if (screenPos >= imagePos.X && screenPos <= imagePos.X + imageSize.X)
@@ -1362,8 +1402,7 @@ public class CtCombinedViewer : IDatasetViewer, IDisposable
         {
             0 => _dataset.PixelSize,
             1 => _dataset.PixelSize,
-            2 => _dataset
-                .PixelSize, // The width of the YZ view corresponds to the dataset's Height, which uses PixelSize
+            2 => _dataset.PixelSize,
             _ => _dataset.PixelSize
         };
 

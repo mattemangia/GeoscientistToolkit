@@ -14,11 +14,12 @@ public class GISViewer : IDatasetViewer
 {
     private readonly BasemapManager _basemapManager;
     private readonly CoordinateFormat _coordinateFormat = CoordinateFormat.DecimalDegrees;
-
     private readonly List<Vector2> _currentDrawing = new();
 
     // --- All existing fields are correct ---
     private readonly GISDataset _dataset;
+    private readonly List<GISDataset> _datasets = new();
+    private readonly GISDataset _primaryDataset;
 
     // --- FIX: Screenshot functionality fields corrected ---
     private readonly ImGuiExportFileDialog _screenshotDialog;
@@ -55,16 +56,50 @@ public class GISViewer : IDatasetViewer
 
     public GISViewer(GISDataset dataset)
     {
-        _dataset = dataset;
-        _activeLayer = _dataset.Layers.FirstOrDefault(l => l.IsEditable);
+        _datasets.Add(dataset);
+        _primaryDataset = dataset;
+        _activeLayer = dataset.Layers.FirstOrDefault(l => l.IsEditable);
         _basemapManager = BasemapManager.Instance;
         _basemapManager.Initialize(VeldridManager.GraphicsDevice);
 
         _screenshotDialog = new ImGuiExportFileDialog("GISScreenshot", "Save Screenshot");
         _screenshotDialog.SetExtensions((".bmp", "Bitmap Image"));
 
-        if (_dataset.BasemapType == BasemapType.GeoTIFF && !string.IsNullOrEmpty(_dataset.BasemapPath))
-            LoadGeoTiffBasemap(_dataset.BasemapPath);
+        if (dataset.BasemapType == BasemapType.GeoTIFF && !string.IsNullOrEmpty(dataset.BasemapPath))
+            LoadGeoTiffBasemap(dataset.BasemapPath);
+    }
+
+    public GISViewer(List<GISDataset> datasets)
+    {
+        if (datasets == null || datasets.Count == 0)
+            throw new ArgumentException("Must provide at least one dataset");
+
+        _datasets.AddRange(datasets);
+        _primaryDataset = datasets[0];
+
+        // Find first editable layer across all datasets
+        foreach (var ds in _datasets)
+        {
+            _activeLayer = ds.Layers.FirstOrDefault(l => l.IsEditable);
+            if (_activeLayer != null) break;
+        }
+
+        _basemapManager = BasemapManager.Instance;
+        _basemapManager.Initialize(VeldridManager.GraphicsDevice);
+
+        _screenshotDialog = new ImGuiExportFileDialog("GISScreenshot", "Save Screenshot");
+        _screenshotDialog.SetExtensions((".bmp", "Bitmap Image"));
+
+        // Load basemap from first dataset that has one
+        foreach (var ds in _datasets)
+            if (ds.BasemapType == BasemapType.GeoTIFF && !string.IsNullOrEmpty(ds.BasemapPath))
+            {
+                LoadGeoTiffBasemap(ds.BasemapPath);
+                break;
+            }
+
+        // Update bounds to encompass all datasets
+        UpdateCombinedBounds();
     }
 
     public void DrawToolbarControls()
@@ -99,12 +134,14 @@ public class GISViewer : IDatasetViewer
         ImGui.SameLine();
 
         // Layer selector...
-        if (_dataset.Layers.Count > 0)
+        var editableLayers = _datasets.SelectMany(ds => ds.Layers.Where(l => l.IsEditable)).ToList();
+
+        if (editableLayers.Count > 0)
         {
             ImGui.SetNextItemWidth(150);
             if (ImGui.BeginCombo("##Layer", _activeLayer?.Name ?? "Select Layer"))
             {
-                foreach (var layer in _dataset.Layers.Where(l => l.IsEditable))
+                foreach (var layer in editableLayers)
                     if (ImGui.Selectable(layer.Name, layer == _activeLayer))
                         _activeLayer = layer;
 
@@ -131,7 +168,7 @@ public class GISViewer : IDatasetViewer
         // Basemap and Screenshot buttons
         if (ImGui.Button("Basemap")) _showBasemapSettings = !_showBasemapSettings;
         ImGui.SameLine();
-        if (ImGui.Button("Screenshot")) _screenshotDialog.Open($"{_dataset.Name}_capture");
+        if (ImGui.Button("Screenshot")) _screenshotDialog.Open($"{_primaryDataset.Name}_capture");
     }
 
     public void DrawContent(ref float zoom, ref Vector2 pan)
@@ -169,7 +206,7 @@ public class GISViewer : IDatasetViewer
         _lastMousePos = io.MousePos;
 
         var center = canvas_pos + canvas_size * 0.5f;
-        _viewTransform = Matrix3x2.CreateTranslation(-_dataset.Center) * Matrix3x2.CreateScale(zoom) *
+        _viewTransform = Matrix3x2.CreateTranslation(-_primaryDataset.Center) * Matrix3x2.CreateScale(zoom) *
                          Matrix3x2.CreateTranslation(center + pan);
 
         drawList.PushClipRect(canvas_pos, canvas_pos + canvas_size, true);
@@ -178,8 +215,10 @@ public class GISViewer : IDatasetViewer
         if (_dataset.BasemapType != BasemapType.None || _basemapManager.CurrentProvider != null)
             DrawBasemap(drawList, canvas_pos, canvas_size, zoom, pan);
         if (_showGrid) DrawGrid(drawList, canvas_pos, canvas_size, zoom, pan);
-        foreach (var layer in _dataset.Layers.Where(l => l.IsVisible && l.Type == LayerType.Vector))
+        foreach (var dataset in _datasets)
+        foreach (var layer in dataset.Layers.Where(l => l.IsVisible && l.Type == LayerType.Vector))
             DrawLayer(drawList, layer, canvas_pos, canvas_size, zoom, pan);
+
         if (_currentDrawing.Count > 0) DrawCurrentDrawing(drawList, canvas_pos, canvas_size, zoom, pan);
         if (_showScaleBar) DrawScaleBar(drawList, canvas_pos, canvas_size, zoom, pan);
         if (_showNorthArrow) DrawNorthArrow(drawList, canvas_pos, canvas_size);
@@ -197,6 +236,30 @@ public class GISViewer : IDatasetViewer
         DrawStatusBar(canvas_pos + new Vector2(0, canvas_size.Y), new Vector2(canvas_size.X, statusBarHeight),
             is_hovered);
         if (_showBasemapSettings) DrawBasemapSettings();
+    }
+
+    private void UpdateCombinedBounds()
+    {
+        if (_datasets.Count == 0) return;
+
+        float minX = float.MaxValue, minY = float.MaxValue;
+        float maxX = float.MinValue, maxY = float.MinValue;
+
+        foreach (var dataset in _datasets)
+        {
+            if (dataset.Bounds.Min.X < minX) minX = dataset.Bounds.Min.X;
+            if (dataset.Bounds.Min.Y < minY) minY = dataset.Bounds.Min.Y;
+            if (dataset.Bounds.Max.X > maxX) maxX = dataset.Bounds.Max.X;
+            if (dataset.Bounds.Max.Y > maxY) maxY = dataset.Bounds.Max.Y;
+        }
+
+        _primaryDataset.Bounds = new BoundingBox
+        {
+            Min = new Vector2(minX, minY),
+            Max = new Vector2(maxX, maxY)
+        };
+
+        _primaryDataset.Center = (_primaryDataset.Bounds.Min + _primaryDataset.Bounds.Max) * 0.5f;
     }
 
     // --- FIX: Method signature and implementation corrected ---
@@ -737,7 +800,7 @@ public class GISViewer : IDatasetViewer
     private Vector2 WorldToScreen(Vector2 worldPos, Vector2 canvasPos, Vector2 canvasSize, float zoom, Vector2 pan)
     {
         var center = canvasPos + canvasSize * 0.5f + pan;
-        var offset = (worldPos - _dataset.Center) * zoom;
+        var offset = (worldPos - _primaryDataset.Center) * zoom;
         return center + new Vector2(offset.X, -offset.Y);
     }
 
@@ -745,7 +808,7 @@ public class GISViewer : IDatasetViewer
     {
         var center = canvasSize * 0.5f + pan;
         var offset = screenPos - center;
-        return _dataset.Center + new Vector2(offset.X / zoom, -offset.Y / zoom);
+        return _primaryDataset.Center + new Vector2(offset.X / zoom, -offset.Y / zoom);
     }
 
     private void HandleDrawClick(Vector2 worldPos)

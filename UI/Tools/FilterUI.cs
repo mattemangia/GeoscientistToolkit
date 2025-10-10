@@ -25,21 +25,28 @@ public enum FilterType
 }
 
 /// <summary>
-///     Provides the UI panel and filtering logic.
+///     Provides the UI panel and filtering logic with GPU acceleration and real-time preview.
 /// </summary>
 public class FilterUI : IDisposable
 {
+    private const int PREVIEW_UPDATE_DELAY_MS = 300;
     private readonly GpuProcessor _gpuProcessor;
     private float _cannyHighThreshold = 150f;
     private float _cannyLowThreshold = 50f;
+    private bool _isGeneratingPreview;
 
     private bool _isProcessing;
     private int _kernelSize = 3;
+    private DateTime _lastPreviewUpdate = DateTime.MinValue;
     private float _nlmPatchRadius = 3;
     private float _nlmSearchRadius = 7;
+    private byte[] _previewMask;
     private bool _process3D;
     private float _progress;
     private FilterType _selectedFilter = FilterType.Gaussian;
+
+    // Preview functionality
+    private bool _showPreview;
     private float _sigma = 1.0f;
     private float _sigmaColor = 20.0f;
     private string _statusMessage = "Ready";
@@ -68,6 +75,7 @@ public class FilterUI : IDisposable
 
     public void Dispose()
     {
+        ClearPreview();
         _gpuProcessor?.Dispose();
     }
 
@@ -81,7 +89,10 @@ public class FilterUI : IDisposable
         {
             foreach (FilterType type in Enum.GetValues(typeof(FilterType)))
                 if (ImGui.Selectable(GetFilterDisplayName(type), type == _selectedFilter))
+                {
                     _selectedFilter = type;
+                    ClearPreview();
+                }
 
             ImGui.EndCombo();
         }
@@ -103,52 +114,29 @@ public class FilterUI : IDisposable
         ImGui.Separator();
         ImGui.Text("Parameters");
 
-        switch (_selectedFilter)
-        {
-            case FilterType.Gaussian:
-            case FilterType.Mean:
-                DrawKernelSizeSelector();
-                if (_selectedFilter == FilterType.Gaussian)
-                {
-                    ImGui.SetNextItemWidth(-1);
-                    ImGui.SliderFloat("Sigma (Blur)", ref _sigma, 0.1f, 10.0f, "%.2f");
-                }
+        var paramsChanged = DrawFilterParameters();
 
-                break;
-            case FilterType.Median:
-                DrawKernelSizeSelector();
-                break;
-            case FilterType.Bilateral:
-                DrawKernelSizeSelector();
-                ImGui.SetNextItemWidth(-1);
-                ImGui.SliderFloat("Sigma (Space)", ref _sigma, 0.1f, 10.0f, "%.2f");
-                ImGui.SetNextItemWidth(-1);
-                ImGui.SliderFloat("Sigma (Color)", ref _sigmaColor, 1.0f, 255.0f, "%.1f");
-                break;
-            case FilterType.NonLocalMeans:
-                ImGui.SetNextItemWidth(-1);
-                ImGui.SliderFloat("Filter Strength (h)", ref _sigma, 0.1f, 30.0f, "%.1f");
-                ImGui.SetNextItemWidth(-1);
-                ImGui.SliderFloat("Search Radius", ref _nlmSearchRadius, 3, 15, "%.0f");
-                ImGui.SetNextItemWidth(-1);
-                ImGui.SliderFloat("Patch Radius", ref _nlmPatchRadius, 1, 7, "%.0f");
-                break;
-            case FilterType.EdgeSobel:
-                ImGui.Text("Uses Sobel operator (3x3 kernel)");
-                break;
-            case FilterType.EdgeCanny:
-                ImGui.SetNextItemWidth(-1);
-                ImGui.SliderFloat("Low Threshold", ref _cannyLowThreshold, 0f, 255f, "%.1f");
-                ImGui.SetNextItemWidth(-1);
-                ImGui.SliderFloat("High Threshold", ref _cannyHighThreshold, 0f, 255f, "%.1f");
-                break;
-            case FilterType.UnsharpMask:
-                DrawKernelSizeSelector();
-                ImGui.SetNextItemWidth(-1);
-                ImGui.SliderFloat("Blur Sigma", ref _sigma, 0.1f, 10.0f, "%.2f");
-                ImGui.SetNextItemWidth(-1);
-                ImGui.SliderFloat("Amount", ref _unsharpAmount, 0.1f, 3.0f, "%.2f");
-                break;
+        ImGui.Separator();
+
+        // Preview controls
+        if (ImGui.Checkbox("Show Preview", ref _showPreview))
+        {
+            if (_showPreview)
+                _ = UpdatePreviewAsync(dataset);
+            else
+                ClearPreview();
+        }
+
+        if (_showPreview)
+        {
+            ImGui.SameLine();
+            if (_isGeneratingPreview)
+                ImGui.TextColored(new Vector4(1, 1, 0, 1), "Generating...");
+            else
+                ImGui.TextColored(new Vector4(0, 1, 0, 1), "Preview Active");
+
+            if (paramsChanged && (DateTime.Now - _lastPreviewUpdate).TotalMilliseconds > PREVIEW_UPDATE_DELAY_MS)
+                _ = UpdatePreviewAsync(dataset);
         }
 
         ImGui.Separator();
@@ -156,6 +144,7 @@ public class FilterUI : IDisposable
         if (_isProcessing) ImGui.BeginDisabled();
         if (ImGui.Button("Apply Filter", new Vector2(-1, 0)))
         {
+            ClearPreview();
             _isProcessing = true;
             _progress = 0f;
             _statusMessage = "Starting...";
@@ -175,7 +164,68 @@ public class FilterUI : IDisposable
         }
     }
 
-    private void DrawKernelSizeSelector()
+    private bool DrawFilterParameters()
+    {
+        var changed = false;
+
+        switch (_selectedFilter)
+        {
+            case FilterType.Gaussian:
+            case FilterType.Mean:
+                changed |= DrawKernelSizeSelector();
+                if (_selectedFilter == FilterType.Gaussian)
+                {
+                    ImGui.SetNextItemWidth(-1);
+                    changed |= ImGui.SliderFloat("Sigma (Blur)", ref _sigma, 0.1f, 10.0f, "%.2f");
+                }
+
+                break;
+
+            case FilterType.Median:
+                changed |= DrawKernelSizeSelector();
+                break;
+
+            case FilterType.Bilateral:
+                changed |= DrawKernelSizeSelector();
+                ImGui.SetNextItemWidth(-1);
+                changed |= ImGui.SliderFloat("Sigma (Space)", ref _sigma, 0.1f, 10.0f, "%.2f");
+                ImGui.SetNextItemWidth(-1);
+                changed |= ImGui.SliderFloat("Sigma (Color)", ref _sigmaColor, 1.0f, 255.0f, "%.1f");
+                break;
+
+            case FilterType.NonLocalMeans:
+                ImGui.SetNextItemWidth(-1);
+                changed |= ImGui.SliderFloat("Filter Strength (h)", ref _sigma, 0.1f, 30.0f, "%.1f");
+                ImGui.SetNextItemWidth(-1);
+                changed |= ImGui.SliderFloat("Search Radius", ref _nlmSearchRadius, 3, 15, "%.0f");
+                ImGui.SetNextItemWidth(-1);
+                changed |= ImGui.SliderFloat("Patch Radius", ref _nlmPatchRadius, 1, 7, "%.0f");
+                break;
+
+            case FilterType.EdgeSobel:
+                ImGui.Text("Uses Sobel operator (3x3 kernel)");
+                break;
+
+            case FilterType.EdgeCanny:
+                ImGui.SetNextItemWidth(-1);
+                changed |= ImGui.SliderFloat("Low Threshold", ref _cannyLowThreshold, 0f, 255f, "%.1f");
+                ImGui.SetNextItemWidth(-1);
+                changed |= ImGui.SliderFloat("High Threshold", ref _cannyHighThreshold, 0f, 255f, "%.1f");
+                break;
+
+            case FilterType.UnsharpMask:
+                changed |= DrawKernelSizeSelector();
+                ImGui.SetNextItemWidth(-1);
+                changed |= ImGui.SliderFloat("Blur Sigma", ref _sigma, 0.1f, 10.0f, "%.2f");
+                ImGui.SetNextItemWidth(-1);
+                changed |= ImGui.SliderFloat("Amount", ref _unsharpAmount, 0.1f, 3.0f, "%.2f");
+                break;
+        }
+
+        return changed;
+    }
+
+    private bool DrawKernelSizeSelector()
     {
         int[] kernelSizes = { 3, 5, 7, 9, 11 };
         var kernelLabels = kernelSizes.Select(s => $"{s}x{s}" + (_process3D ? $"x{s}" : "")).ToArray();
@@ -184,7 +234,12 @@ public class FilterUI : IDisposable
 
         ImGui.SetNextItemWidth(-1);
         if (ImGui.Combo("Kernel Size", ref currentKernelIndex, kernelLabels, kernelLabels.Length))
+        {
             _kernelSize = kernelSizes[currentKernelIndex];
+            return true;
+        }
+
+        return false;
     }
 
     private string GetFilterDisplayName(FilterType filter)
@@ -201,6 +256,88 @@ public class FilterUI : IDisposable
             FilterType.Bilateral => "Bilateral Filter",
             _ => filter.ToString()
         };
+    }
+
+    private async Task UpdatePreviewAsync(CtImageStackDataset dataset)
+    {
+        if (_isGeneratingPreview || dataset.VolumeData == null) return;
+
+        _isGeneratingPreview = true;
+
+        try
+        {
+            await Task.Run(() =>
+            {
+                var width = dataset.Width;
+                var height = dataset.Height;
+                var depth = dataset.Depth;
+
+                // Generate preview for current slice + adjacent slices
+                var previewDepth = Math.Min(5, depth);
+                var startZ = Math.Max(0, depth / 2 - previewDepth / 2);
+
+                var previewData = new byte[width * height * previewDepth];
+                for (var z = 0; z < previewDepth; z++)
+                {
+                    var slice = new byte[width * height];
+                    dataset.VolumeData.ReadSliceZ(startZ + z, slice);
+                    Buffer.BlockCopy(slice, 0, previewData, z * width * height, slice.Length);
+                }
+
+                byte[] resultData;
+                if (_useGpu && _gpuProcessor != null && _gpuProcessor.IsInitialized)
+                {
+                    resultData = _gpuProcessor.RunFilter(previewData, width, height, previewDepth, _selectedFilter,
+                        _kernelSize, _sigma, _sigmaColor, _nlmSearchRadius, _nlmPatchRadius, _unsharpAmount,
+                        _cannyLowThreshold, _cannyHighThreshold, false, _ => { }, _ => { });
+
+                    if (resultData == null)
+                    {
+                        resultData = new byte[previewData.Length];
+                        ApplyFilterCPUToSubVolume(previewData, resultData, width, height, previewDepth);
+                    }
+                }
+                else
+                {
+                    resultData = new byte[previewData.Length];
+                    ApplyFilterCPUToSubVolume(previewData, resultData, width, height, previewDepth);
+                }
+
+                // Create full volume preview mask showing difference
+                _previewMask = new byte[width * height * depth];
+                var midSlice = previewDepth / 2;
+                Buffer.BlockCopy(resultData, midSlice * width * height, _previewMask,
+                    (startZ + midSlice) * width * height, width * height);
+            });
+
+            CtImageStackTools.Update3DPreviewFromExternal(dataset, _previewMask, new Vector4(0, 1, 1, 0.5f));
+            _lastPreviewUpdate = DateTime.Now;
+        }
+        finally
+        {
+            _isGeneratingPreview = false;
+        }
+    }
+
+    private void ClearPreview()
+    {
+        _previewMask = null;
+        _showPreview = false;
+    }
+
+    private void ApplyFilterCPUToSubVolume(byte[] source, byte[] result, int width, int height, int depth)
+    {
+        switch (_selectedFilter)
+        {
+            case FilterType.Gaussian: ApplyGaussianCPU(source, result, width, height, depth); break;
+            case FilterType.Median: ApplyMedianCPU(source, result, width, height, depth); break;
+            case FilterType.Mean: ApplyMeanCPU(source, result, width, height, depth); break;
+            case FilterType.Bilateral: ApplyBilateralCPU(source, result, width, height, depth); break;
+            case FilterType.NonLocalMeans: ApplyNonLocalMeansCPU(source, result, width, height, depth); break;
+            case FilterType.EdgeSobel: ApplySobelCPU(source, result, width, height, depth); break;
+            case FilterType.EdgeCanny: ApplyCannyCPU(source, result, width, height, depth); break;
+            case FilterType.UnsharpMask: ApplyUnsharpMaskCPU(source, result, width, height, depth); break;
+        }
     }
 
     private async Task ApplyFilter(CtImageStackDataset dataset)
@@ -639,12 +776,11 @@ public class FilterUI : IDisposable
 }
 
 /// <summary>
-///     Encapsulates all OpenCL related logic for GPU processing.
+///     Encapsulates all OpenCL related logic for GPU processing with complete filter implementations.
 /// </summary>
 internal unsafe class GpuProcessor : IDisposable
 {
     private readonly Dictionary<string, nint> _kernels = new();
-
     private readonly Dictionary<string, nint> _programs = new();
     private CL _cl;
     private nint _context;
@@ -736,10 +872,14 @@ internal unsafe class GpuProcessor : IDisposable
         _queue = _cl.CreateCommandQueue(_context, _device, (CommandQueueProperties)0, out err);
         CheckError(err, "CreateCommandQueue");
 
-        // Compile kernels
+        // Compile all kernels
         CompileKernel(GaussianKernelSource, "gaussian_2d");
         CompileKernel(MedianKernelSource, "median_2d");
+        CompileKernel(MeanKernelSource, "mean_2d");
+        CompileKernel(BilateralKernelSource, "bilateral_2d");
         CompileKernel(SobelKernelSource, "sobel_2d");
+        CompileKernel(CannyKernelSource, "canny_gradient");
+        CompileKernel(UnsharpKernelSource, "unsharp_2d");
         CompileKernel(NonLocalMeans2DKernelSource, "nlm_2d");
         CompileKernel(NonLocalMeans3DKernelSource, "nlm_3d");
     }
@@ -789,7 +929,7 @@ internal unsafe class GpuProcessor : IDisposable
         float unsharpAmount, float cannyLowThreshold, float cannyHighThreshold,
         bool is3D, Action<float> onProgress, Action<string> onStatus)
     {
-        if (!IsGpuAcceleratedFilter(filter) || (is3D && filter != FilterType.NonLocalMeans))
+        if (!IsGpuAcceleratedFilter(filter) || (is3D && !SupportsGpu3D(filter)))
         {
             if (!IsGpuAcceleratedFilter(filter))
                 onStatus($"Filter ({GetFilterName(filter)}) not GPU-accelerated. Using CPU.");
@@ -810,8 +950,23 @@ internal unsafe class GpuProcessor : IDisposable
             case FilterType.Median:
                 ProcessMedianGPU(sourceData, resultData, width, height, depth, kernelSize, onProgress, onStatus);
                 break;
+            case FilterType.Mean:
+                ProcessMeanGPU(sourceData, resultData, width, height, depth, kernelSize, onProgress, onStatus);
+                break;
+            case FilterType.Bilateral:
+                ProcessBilateralGPU(sourceData, resultData, width, height, depth, kernelSize, sigma, sigmaColor,
+                    onProgress, onStatus);
+                break;
             case FilterType.EdgeSobel:
                 ProcessSobelGPU(sourceData, resultData, width, height, depth, onProgress, onStatus);
+                break;
+            case FilterType.EdgeCanny:
+                ProcessCannyGPU(sourceData, resultData, width, height, depth, cannyLowThreshold, cannyHighThreshold,
+                    onProgress, onStatus);
+                break;
+            case FilterType.UnsharpMask:
+                ProcessUnsharpGPU(sourceData, resultData, width, height, depth, kernelSize, sigma, unsharpAmount,
+                    onProgress, onStatus);
                 break;
             case FilterType.NonLocalMeans:
                 if (is3D)
@@ -830,7 +985,14 @@ internal unsafe class GpuProcessor : IDisposable
 
     private static bool IsGpuAcceleratedFilter(FilterType filter)
     {
-        return filter is FilterType.Gaussian or FilterType.Median or FilterType.EdgeSobel or FilterType.NonLocalMeans;
+        return filter is FilterType.Gaussian or FilterType.Median or FilterType.Mean
+            or FilterType.Bilateral or FilterType.EdgeSobel or FilterType.EdgeCanny
+            or FilterType.UnsharpMask or FilterType.NonLocalMeans;
+    }
+
+    private static bool SupportsGpu3D(FilterType filter)
+    {
+        return filter is FilterType.NonLocalMeans;
     }
 
     private static string GetFilterName(FilterType filter)
@@ -881,6 +1043,39 @@ internal unsafe class GpuProcessor : IDisposable
             Array.Empty<nint>(), new[] { radius }, onProgress, onStatus);
     }
 
+    private void ProcessMeanGPU(byte[] sourceData, byte[] resultData, int width, int height, int depth,
+        int kernelSize, Action<float> onProgress, Action<string> onStatus)
+    {
+        onStatus("Running Mean Filter on GPU...");
+        var kernel = _kernels["mean_2d"];
+        var radius = kernelSize / 2;
+        ProcessSlicesGPU(sourceData, resultData, width, height, depth, kernel,
+            Array.Empty<nint>(), new[] { radius }, onProgress, onStatus);
+    }
+
+    private void ProcessBilateralGPU(byte[] sourceData, byte[] resultData, int width, int height, int depth,
+        int kernelSize, float sigma, float sigmaColor, Action<float> onProgress, Action<string> onStatus)
+    {
+        onStatus("Running Bilateral Filter on GPU...");
+        var kernel = _kernels["bilateral_2d"];
+        var err = 0;
+        var radius = kernelSize / 2;
+
+        // Pack parameters into a buffer
+        var parameters = new[] { sigma, sigmaColor };
+        fixed (float* pParams = parameters)
+        {
+            var clParams = _cl.CreateBuffer(_context, MemFlags.ReadOnly | MemFlags.CopyHostPtr,
+                (nuint)(sizeof(float) * parameters.Length), pParams, &err);
+            CheckError(err, "CreateBuffer (bilateral_params)");
+
+            ProcessSlicesGPU(sourceData, resultData, width, height, depth, kernel,
+                new[] { clParams }, new[] { radius }, onProgress, onStatus);
+
+            _cl.ReleaseMemObject(clParams);
+        }
+    }
+
     private void ProcessSobelGPU(byte[] sourceData, byte[] resultData, int width, int height, int depth,
         Action<float> onProgress, Action<string> onStatus)
     {
@@ -888,6 +1083,59 @@ internal unsafe class GpuProcessor : IDisposable
         var kernel = _kernels["sobel_2d"];
         ProcessSlicesGPU(sourceData, resultData, width, height, depth, kernel,
             Array.Empty<nint>(), Array.Empty<int>(), onProgress, onStatus);
+    }
+
+    private void ProcessCannyGPU(byte[] sourceData, byte[] resultData, int width, int height, int depth,
+        float lowThreshold, float highThreshold, Action<float> onProgress, Action<string> onStatus)
+    {
+        onStatus("Running Canny Edge Detection on GPU...");
+        var kernel = _kernels["canny_gradient"];
+        var err = 0;
+
+        var thresholds = new[] { lowThreshold / 255f, highThreshold / 255f };
+        fixed (float* pThresh = thresholds)
+        {
+            var clThresh = _cl.CreateBuffer(_context, MemFlags.ReadOnly | MemFlags.CopyHostPtr,
+                (nuint)(sizeof(float) * thresholds.Length), pThresh, &err);
+            CheckError(err, "CreateBuffer (canny_thresholds)");
+
+            ProcessSlicesGPU(sourceData, resultData, width, height, depth, kernel,
+                new[] { clThresh }, Array.Empty<int>(), onProgress, onStatus);
+
+            _cl.ReleaseMemObject(clThresh);
+        }
+    }
+
+    private void ProcessUnsharpGPU(byte[] sourceData, byte[] resultData, int width, int height, int depth,
+        int kernelSize, float sigma, float amount, Action<float> onProgress, Action<string> onStatus)
+    {
+        onStatus("Running Unsharp Mask on GPU...");
+        var kernel = _kernels["unsharp_2d"];
+        var err = 0;
+        var radius = kernelSize / 2;
+
+        var kernelWeights = CreateGaussianKernel(kernelSize, sigma);
+        fixed (float* pWeights = kernelWeights)
+        {
+            var clWeights = _cl.CreateBuffer(_context, MemFlags.ReadOnly | MemFlags.CopyHostPtr,
+                (nuint)(sizeof(float) * kernelWeights.Length), pWeights, &err);
+            CheckError(err, "CreateBuffer (unsharp_weights)");
+
+            var parameters = new[] { amount };
+            fixed (float* pParams = parameters)
+            {
+                var clParams = _cl.CreateBuffer(_context, MemFlags.ReadOnly | MemFlags.CopyHostPtr,
+                    (nuint)(sizeof(float) * parameters.Length), pParams, &err);
+                CheckError(err, "CreateBuffer (unsharp_params)");
+
+                ProcessSlicesGPU(sourceData, resultData, width, height, depth, kernel,
+                    new[] { clWeights, clParams }, new[] { radius }, onProgress, onStatus);
+
+                _cl.ReleaseMemObject(clParams);
+            }
+
+            _cl.ReleaseMemObject(clWeights);
+        }
     }
 
     private void ProcessNonLocalMeans2DGPU(byte[] sourceData, byte[] resultData, int width, int height, int depth,
@@ -1169,6 +1417,44 @@ internal unsafe class GpuProcessor : IDisposable
             float m=values[N/2]; write_imagef(dst,pos,(float4)(m,m,0.0f,1.0f));
         }";
 
+    private const string MeanKernelSource = @"
+        __constant sampler_t sampler = CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP_TO_EDGE | CLK_FILTER_NEAREST;
+        __kernel void mean_2d(__read_only image2d_t src,__write_only image2d_t dst,int kernel_radius){
+            int2 pos=(int2)(get_global_id(0),get_global_id(1));
+            float sum=0.0f; int count=0;
+            for(int j=-kernel_radius;j<=kernel_radius;++j){
+                for(int i=-kernel_radius;i<=kernel_radius;++i){
+                    sum+=read_imagef(src,sampler,pos+(int2)(i,j)).x;
+                    count++;
+                }
+            }
+            float mean=sum/(float)count;
+            write_imagef(dst,pos,(float4)(mean,mean,mean,1.0f));
+        }";
+
+    private const string BilateralKernelSource = @"
+        __constant sampler_t sampler = CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP_TO_EDGE | CLK_FILTER_NEAREST;
+        __kernel void bilateral_2d(__read_only image2d_t src,__write_only image2d_t dst,__constant float* params,int kernel_radius){
+            int2 pos=(int2)(get_global_id(0),get_global_id(1));
+            float sigma_space=params[0], sigma_color=params[1];
+            float center_val=read_imagef(src,sampler,pos).x;
+            float weighted_sum=0.0f, total_weight=0.0f;
+            for(int j=-kernel_radius;j<=kernel_radius;++j){
+                for(int i=-kernel_radius;i<=kernel_radius;++i){
+                    float neighbor_val=read_imagef(src,sampler,pos+(int2)(i,j)).x;
+                    float dist_sq=(float)(i*i+j*j);
+                    float color_dist=fabs(neighbor_val-center_val);
+                    float spatial_weight=exp(-dist_sq/(2.0f*sigma_space*sigma_space));
+                    float color_weight=exp(-color_dist*color_dist/(2.0f*sigma_color*sigma_color));
+                    float weight=spatial_weight*color_weight;
+                    weighted_sum+=neighbor_val*weight;
+                    total_weight+=weight;
+                }
+            }
+            float result=weighted_sum/total_weight;
+            write_imagef(dst,pos,(float4)(result,result,result,1.0f));
+        }";
+
     private const string SobelKernelSource = @"
         __constant sampler_t sampler = CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP_TO_EDGE | CLK_FILTER_NEAREST;
         __kernel void sobel_2d(__read_only image2d_t src,__write_only image2d_t dst){
@@ -1181,6 +1467,41 @@ internal unsafe class GpuProcessor : IDisposable
             gy+= 1*read_imagef(src,sampler,p+(int2)(-1, 1)).x; gy+= 2*read_imagef(src,sampler,p+(int2)( 0, 1)).x; gy+= 1*read_imagef(src,sampler,p+(int2)( 1, 1)).x;
             float mag=clamp(sqrt(gx*gx+gy*gy)/255.0f,0.0f,1.0f);
             write_imagef(dst,p,(float4)(mag,mag,mag,1.0f));
+        }";
+
+    private const string CannyKernelSource = @"
+        __constant sampler_t sampler = CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP_TO_EDGE | CLK_FILTER_NEAREST;
+        __kernel void canny_gradient(__read_only image2d_t src,__write_only image2d_t dst,__constant float* thresholds){
+            int2 p=(int2)(get_global_id(0),get_global_id(1));
+            float gx=0.0f,gy=0.0f;
+            gx+=-1*read_imagef(src,sampler,p+(int2)(-1,-1)).x; gx+= 1*read_imagef(src,sampler,p+(int2)( 1,-1)).x;
+            gx+=-2*read_imagef(src,sampler,p+(int2)(-1, 0)).x; gx+= 2*read_imagef(src,sampler,p+(int2)( 1, 0)).x;
+            gx+=-1*read_imagef(src,sampler,p+(int2)(-1, 1)).x; gx+= 1*read_imagef(src,sampler,p+(int2)( 1, 1)).x;
+            gy+=-1*read_imagef(src,sampler,p+(int2)(-1,-1)).x; gy+=-2*read_imagef(src,sampler,p+(int2)( 0,-1)).x; gy+=-1*read_imagef(src,sampler,p+(int2)( 1,-1)).x;
+            gy+= 1*read_imagef(src,sampler,p+(int2)(-1, 1)).x; gy+= 2*read_imagef(src,sampler,p+(int2)( 0, 1)).x; gy+= 1*read_imagef(src,sampler,p+(int2)( 1, 1)).x;
+            float mag=sqrt(gx*gx+gy*gy)/255.0f;
+            float low_thresh=thresholds[0], high_thresh=thresholds[1];
+            float result = mag > high_thresh ? 1.0f : (mag > low_thresh ? 0.5f : 0.0f);
+            write_imagef(dst,p,(float4)(result,result,result,1.0f));
+        }";
+
+    private const string UnsharpKernelSource = @"
+        __constant sampler_t sampler = CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP_TO_EDGE | CLK_FILTER_NEAREST;
+        __kernel void unsharp_2d(__read_only image2d_t src,__write_only image2d_t dst,__constant float* kernel_weights,__constant float* params,int kernel_radius){
+            int2 pos=(int2)(get_global_id(0),get_global_id(1));
+            float amount=params[0];
+            float original=read_imagef(src,sampler,pos).x;
+            float4 blurred=(float4)(0.0f);
+            int kernel_dim=kernel_radius*2+1;
+            for(int j=-kernel_radius;j<=kernel_radius;++j){
+                for(int i=-kernel_radius;i<=kernel_radius;++i){
+                    float w=kernel_weights[(j+kernel_radius)*kernel_dim+(i+kernel_radius)];
+                    blurred+=read_imagef(src,sampler,pos+(int2)(i,j))*w;
+                }
+            }
+            float sharpened=original+amount*(original-blurred.x);
+            sharpened=clamp(sharpened,0.0f,1.0f);
+            write_imagef(dst,pos,(float4)(sharpened,sharpened,sharpened,1.0f));
         }";
 
     private const string NonLocalMeans2DKernelSource = @"

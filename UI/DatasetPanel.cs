@@ -34,6 +34,9 @@ public class DatasetPanel : BasePanel
     {
     }
 
+    public event Action<GISDataset> OnCreateShapefileFromTable;
+    public event Action<GISDataset> OnCreateEmptyShapefile;
+
     public void Submit(ref bool pOpen, Action<Dataset> onDatasetSelected, Action onImportClicked)
     {
         _onDatasetSelected = onDatasetSelected;
@@ -334,6 +337,14 @@ public class DatasetPanel : BasePanel
             ImGui.Separator();
             if (ImGui.MenuItem("Convert Velocity Field To Greyscale Dataset"))
                 _acousticToCtConverterDialog.Open(acousticDataset);
+        }
+
+        if (dataset is GISDataset gisDataset)
+        {
+            ImGui.Separator();
+            if (ImGui.MenuItem("Create Shapefile from Table...")) OnCreateShapefileFromTable?.Invoke(gisDataset);
+
+            if (ImGui.MenuItem("Create Empty Shapefile...")) OnCreateEmptyShapefile?.Invoke(gisDataset);
         }
 
         // Multi-selection grouping

@@ -3,7 +3,9 @@
 using System.Numerics;
 using GeoscientistToolkit.Business;
 using GeoscientistToolkit.Data;
+using GeoscientistToolkit.Data.GIS;
 using GeoscientistToolkit.Settings;
+using GeoscientistToolkit.UI.GIS;
 using GeoscientistToolkit.UI.Utils;
 using GeoscientistToolkit.Util;
 using ImGuiNET;
@@ -35,7 +37,7 @@ public class MainWindow
 
     private readonly List<DatasetViewPanel> _viewers = new();
     private readonly List<ThumbnailViewerPanel> _thumbnailViewers = new();
-
+    private readonly ShapefileCreationDialog _shapefileCreationDialog = new();
     private bool _layoutBuilt;
     private bool _showDatasets = true;
     private bool _showProperties = true;
@@ -60,7 +62,9 @@ public class MainWindow
     {
         // Subscribe to dataset removal events
         ProjectManager.Instance.DatasetRemoved += OnDatasetRemoved;
-
+        // Subscribe to Create GIS Shapefile events
+        _datasets.OnCreateShapefileFromTable += gis => _shapefileCreationDialog.OpenFromTable(gis);
+        _datasets.OnCreateEmptyShapefile += gis => _shapefileCreationDialog.OpenEmpty(gis);
         // Initialize the screenshot tool. It will set its own static instance for global access.
         _screenshotTool = new ImGuiWindowScreenshotTool();
     }
@@ -184,7 +188,7 @@ public class MainWindow
 
         // The screenshot tool must be updated AFTER all other UI has been submitted.
         _screenshotTool.PostUpdate();
-
+        _shapefileCreationDialog.Submit();
         ImGui.End();
     }
 
@@ -328,6 +332,17 @@ public class MainWindow
 
             ImGui.Separator();
             if (ImGui.MenuItem("Import Data...")) _import.Open();
+            ImGui.Separator();
+            if (ImGui.MenuItem("New GIS Map..."))
+            {
+                var emptyGIS = new GISDataset("New Map", "")
+                {
+                    Tags = GISTag.Editable | GISTag.VectorData
+                };
+                ProjectManager.Instance.AddDataset(emptyGIS);
+                Logger.Log("Created new empty GIS map");
+            }
+
             ImGui.Separator();
             if (ImGui.MenuItem("Exit")) TryExit();
             ImGui.EndMenu();

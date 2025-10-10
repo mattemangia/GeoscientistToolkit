@@ -129,6 +129,13 @@ public class CtImageStackCompositeTool : IDatasetTools, IDisposable
                     },
                     new()
                     {
+                        Name = "Texture Classification",
+                        Description = "Machine learning based texture classification with GPU acceleration",
+                        Tool = new TextureClassificationTool(),
+                        Category = ToolCategory.Segmentation
+                    },
+                    new()
+                    {
                         Name = "Particle Separator",
                         Description = "Separate touching particles using watershed algorithms",
                         Tool = new ParticleSeparatorTool(),
