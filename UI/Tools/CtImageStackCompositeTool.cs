@@ -6,6 +6,7 @@ using GeoscientistToolkit.Analysis.ImageAdjustment;
 using GeoscientistToolkit.Analysis.MaterialManager;
 using GeoscientistToolkit.Analysis.Materials;
 using GeoscientistToolkit.Analysis.MaterialStatistics;
+using GeoscientistToolkit.Analysis.NMR;
 using GeoscientistToolkit.Analysis.Pnm;
 using GeoscientistToolkit.Analysis.RockCoreExtractor;
 using GeoscientistToolkit.Analysis.Transform;
@@ -179,6 +180,13 @@ public class CtImageStackCompositeTool : IDatasetTools, IDisposable
                         Name = "Acoustic Simulation",
                         Description = "Compute acoustic properties and elastic wave velocities",
                         Tool = new AcousticSimulationTool(),
+                        Category = ToolCategory.Analysis
+                    },
+                    new()
+                    {
+                        Name = "NMR Simulation",
+                        Description = "Simulate NMR T2 response for porosity and fluid analysis",
+                        Tool = new NMRAnalysisTool(),
                         Category = ToolCategory.Analysis
                     }
                 }

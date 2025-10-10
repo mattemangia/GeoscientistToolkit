@@ -10,6 +10,7 @@ using GeoscientistToolkit.Util;
 using NetTopologySuite.Geometries;
 using NetTopologySuite.IO;
 using ProjNet.CoordinateSystems;
+
 // Required for GISOperationsImpl
 // Required for BasemapManager
 

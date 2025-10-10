@@ -11,6 +11,7 @@ using GeoscientistToolkit.Data.GIS;
 using GeoscientistToolkit.Data.Table;
 using GeoscientistToolkit.Util;
 using ImGuiNET;
+
 // Required for encoding
 
 // Required for Marshal
