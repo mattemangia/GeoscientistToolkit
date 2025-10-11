@@ -9,6 +9,7 @@ using GeoscientistToolkit.Analysis.MaterialStatistics;
 using GeoscientistToolkit.Analysis.NMR;
 using GeoscientistToolkit.Analysis.Pnm;
 using GeoscientistToolkit.Analysis.RockCoreExtractor;
+using GeoscientistToolkit.Analysis.ThermalConductivity;
 using GeoscientistToolkit.Analysis.Transform;
 using GeoscientistToolkit.Data;
 using GeoscientistToolkit.Data.CtImageStack;
@@ -188,7 +189,14 @@ public class CtImageStackCompositeTool : IDatasetTools, IDisposable
                         Description = "Simulate NMR T2 response for porosity and fluid analysis",
                         Tool = new NMRAnalysisTool(),
                         Category = ToolCategory.Analysis
-                    }
+                    },
+                    new()
+                    {
+                        Name = "Thermal Conductivity",
+                        Description = "Simulate steady-state heat flow to find effective thermal conductivity.",
+                        Tool = new ThermalConductivityTool(),
+                        Category = ToolCategory.Analysis
+                    },
                 }
             },
             {

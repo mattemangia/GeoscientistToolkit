@@ -1,8 +1,10 @@
 ﻿// GeoscientistToolkit/Util/StlExporter.cs
 
+using System.Globalization;
 using System.Numerics;
 using System.Text;
 using GeoscientistToolkit.Data.CtImageStack;
+using GeoscientistToolkit.Data.Mesh3D;
 
 namespace GeoscientistToolkit.Util;
 
@@ -273,5 +275,65 @@ public static class StlExporter
         File.WriteAllText(filePath, sb.ToString());
 
         Logger.Log($"[StlExporter] STL file written to: {filePath}");
+    }
+    
+}
+public static class MeshExporter
+{
+    /// <summary>
+    /// Exports a Mesh3DDataset to an ASCII STL file.
+    /// </summary>
+    /// <param name="mesh">The mesh dataset to export.</param>
+    /// <param name="filePath">The path where the STL file will be saved.</param>
+    public static void ExportToStl(Mesh3DDataset mesh, string filePath)
+    {
+        if (mesh == null || mesh.VertexCount == 0 || mesh.FaceCount == 0)
+        {
+            Logger.LogWarning("[MeshExporter] Mesh is null or empty, cannot export to STL.");
+            return;
+        }
+
+        try
+        {
+            var sb = new StringBuilder();
+            // Use InvariantCulture for consistent number formatting
+            var culture = CultureInfo.InvariantCulture;
+
+            sb.AppendLine($"solid {Path.GetFileNameWithoutExtension(filePath)}");
+
+            foreach (var face in mesh.Faces)
+            {
+                if (face.Length < 3) continue; // Skip invalid faces
+
+                // Assuming triangular faces
+                var v1 = mesh.Vertices[face[0]];
+                var v2 = mesh.Vertices[face[1]];
+                var v3 = mesh.Vertices[face[2]];
+
+                // Calculate the normal of the triangle
+                var normal = Vector3.Normalize(Vector3.Cross(v2 - v1, v3 - v1));
+
+                sb.AppendLine(
+                    $"  facet normal {normal.X.ToString("E6", culture)} {normal.Y.ToString("E6", culture)} {normal.Z.ToString("E6", culture)}");
+                sb.AppendLine("    outer loop");
+                sb.AppendLine(
+                    $"      vertex {v1.X.ToString("E6", culture)} {v1.Y.ToString("E6", culture)} {v1.Z.ToString("E6", culture)}");
+                sb.AppendLine(
+                    $"      vertex {v2.X.ToString("E6", culture)} {v2.Y.ToString("E6", culture)} {v2.Z.ToString("E6", culture)}");
+                sb.AppendLine(
+                    $"      vertex {v3.X.ToString("E6", culture)} {v3.Y.ToString("E6", culture)} {v3.Z.ToString("E6", culture)}");
+                sb.AppendLine("    endloop");
+                sb.AppendLine("  endfacet");
+            }
+
+            sb.AppendLine($"endsolid {Path.GetFileNameWithoutExtension(filePath)}");
+
+            File.WriteAllText(filePath, sb.ToString());
+            Logger.Log($"[MeshExporter] Successfully exported mesh '{mesh.Name}' to {filePath}");
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError($"[MeshExporter] Failed to export STL file: {ex.Message}");
+        }
     }
 }
