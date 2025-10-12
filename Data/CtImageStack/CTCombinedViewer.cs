@@ -1,5 +1,5 @@
 ﻿// GeoscientistToolkit/Data/CtImageStack/CtCombinedViewer.cs
-// FIXED: Added colormap support to 2D slices
+// FIXED: Material color and opacity changes now update 2D slices immediately
 
 using System.Numerics;
 using GeoscientistToolkit.Analysis;
@@ -558,10 +558,18 @@ public class CtCombinedViewer : IDatasetViewer, IDisposable
         return 1.0f;
     }
 
+    // FIXED: Now triggers 2D slice updates
     public void SetMaterialOpacity(byte id, float opacity)
     {
         _materialOpacity[id] = opacity;
+        _needsUpdateXY = _needsUpdateXZ = _needsUpdateYZ = true;
         VolumeViewer?.SetMaterialOpacity(id, opacity);
+    }
+
+    // ADDED: Method to notify when material color changes
+    public void NotifyMaterialColorChanged()
+    {
+        _needsUpdateXY = _needsUpdateXZ = _needsUpdateYZ = true;
     }
 
     public void ResetAllViews()
@@ -1180,7 +1188,7 @@ public class CtCombinedViewer : IDatasetViewer, IDisposable
                     var material = _dataset.Materials.FirstOrDefault(m => m.ID == labelData[i]);
                     if (material != null && GetMaterialVisibility(material.ID))
                     {
-                        var opacity = GetMaterialOpacity(material.ID) * 0.4f; // Reduce opacity for better visibility
+                        var opacity = GetMaterialOpacity(material.ID) * 0.4f;
                         var matColor = new Vector4(material.Color.X, material.Color.Y, material.Color.Z, 1.0f);
                         baseColor = Vector4.Lerp(baseColor, matColor, opacity);
                     }

@@ -56,18 +56,18 @@ public class NMRResults
 }
 
 /// <summary>
-///     Configuration for NMR simulation.
+///     Configuration for NMR simulation with proper physics parameters.
 /// </summary>
 public class NMRSimulationConfig
 {
     public int NumberOfWalkers { get; set; } = 10000;
     public int NumberOfSteps { get; set; } = 1000;
     public double TimeStepMs { get; set; } = 0.01; // milliseconds
-    public double DiffusionCoefficient { get; set; } = 2.0e-9; // m^2/s for water at room temp
+    public double DiffusionCoefficient { get; set; } = 2.0e-9; // m²/s for water at room temp
     public double VoxelSize { get; set; } = 1e-6; // meters (1 micron)
     public byte PoreMaterialID { get; set; } = 1;
 
-    // Material relaxivities (1/s per meter of surface)
+    // Material relaxivities (μm/s) - only for MATRIX materials, NOT pore space!
     public Dictionary<byte, MaterialRelaxivityConfig> MaterialRelaxivities { get; set; } = new();
 
     // T2 spectrum computation
@@ -82,6 +82,13 @@ public class NMRSimulationConfig
     public double T1MaxMs { get; set; } = 10000;
     public double T1T2Ratio { get; set; } = 1.5; // Typical T1/T2 ratio for porous media
 
+    // CRITICAL: Pore geometry shape factor
+    // For T2-to-pore-size conversion: 1/T2 = ρ * (S/V)
+    // For spheres: S/V = 3/r  →  r = 3ρT2
+    // For cylinders: S/V = 2/r  →  r = 2ρT2
+    // For slits: S/V = 1/r  →  r = ρT2
+    public double PoreShapeFactor { get; set; } = 3.0; // Default: spherical pores
+
     // Random walk parameters
     public int RandomSeed { get; set; } = 42;
     public bool UseOpenCL { get; set; } = false;
@@ -90,6 +97,6 @@ public class NMRSimulationConfig
 public class MaterialRelaxivityConfig
 {
     public string MaterialName { get; set; }
-    public double SurfaceRelaxivity { get; set; } = 10.0; // micrometers/second
+    public double SurfaceRelaxivity { get; set; } = 10.0; // μm/s
     public Vector4 Color { get; set; }
 }

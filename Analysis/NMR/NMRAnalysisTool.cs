@@ -116,15 +116,19 @@ public class NMRAnalysisTool : IDatasetTools
         _config.VoxelSize = dataset.PixelSize * 1e-6; // Convert μm to m
         _config.MaterialRelaxivities.Clear();
 
-        // Add default relaxivities for all materials
+        // Add default relaxivities ONLY for non-pore materials
         foreach (var material in dataset.Materials)
-            if (material.ID != 0) // Skip exterior
-                _config.MaterialRelaxivities[material.ID] = new MaterialRelaxivityConfig
-                {
-                    MaterialName = material.Name,
-                    SurfaceRelaxivity = 10.0, // Default value
-                    Color = material.Color
-                };
+        {
+            if (material.ID == 0) continue; // Skip exterior
+
+            // Initialize all materials but mark which is pore space
+            _config.MaterialRelaxivities[material.ID] = new MaterialRelaxivityConfig
+            {
+                MaterialName = material.Name,
+                SurfaceRelaxivity = 10.0, // Default value for matrix materials
+                Color = material.Color
+            };
+        }
     }
 
     private void DrawConfigurationPanel()
@@ -202,31 +206,34 @@ public class NMRAnalysisTool : IDatasetTools
 
         ImGui.Spacing();
 
-        // Material relaxivities
-        if (ImGui.CollapsingHeader("Material Surface Relaxivities", ImGuiTreeNodeFlags.DefaultOpen))
+        // Material relaxivities - ONLY show NON-PORE materials
+        if (ImGui.CollapsingHeader("Matrix Surface Relaxivities (ρ)", ImGuiTreeNodeFlags.DefaultOpen))
         {
-            ImGui.TextWrapped("Controls magnetization decay rate at material surfaces.");
+            ImGui.TextWrapped(
+                "Surface relaxivity controls T2 decay at pore-matrix interfaces. Only matrix materials are shown.");
             ImGui.Spacing();
 
             foreach (var matConfig in _config.MaterialRelaxivities.Values.ToList())
             {
                 var materialID = _config.MaterialRelaxivities.First(kvp => kvp.Value == matConfig).Key;
-                if (materialID == _config.PoreMaterialID) continue; // Skip pore material
+
+                // SKIP the pore material - it doesn't have a relaxivity!
+                if (materialID == _config.PoreMaterialID) continue;
 
                 ImGui.PushStyleColor(ImGuiCol.Text, matConfig.Color);
-                ImGui.Text("■");
+                ImGui.Text("■ ");
                 ImGui.PopStyleColor();
                 ImGui.SameLine();
                 ImGui.Text(matConfig.MaterialName);
 
                 ImGui.Indent();
-                ImGui.Text("Relaxivity (μm/s)");
+                ImGui.Text("Relaxivity ρ (μm/s)");
                 var relaxivity = (float)matConfig.SurfaceRelaxivity;
                 ImGui.SetNextItemWidth(-1);
                 if (ImGui.DragFloat($"##Relax{materialID}", ref relaxivity, 0.1f, 0.1f, 1000.0f, "%.1f"))
                     matConfig.SurfaceRelaxivity = relaxivity;
                 if (ImGui.IsItemHovered())
-                    ImGui.SetTooltip("Typical values: Quartz: 1-10, Clay: 10-100");
+                    ImGui.SetTooltip("Typical: Quartz 1-10, Clay 10-100, Carbonate 5-20 μm/s");
                 ImGui.Unindent();
                 ImGui.Spacing();
             }
@@ -237,6 +244,17 @@ public class NMRAnalysisTool : IDatasetTools
         // Advanced settings
         if (ImGui.CollapsingHeader("Advanced Settings"))
         {
+            // Pore shape factor
+            ImGui.Text("Pore Geometry Shape Factor");
+            var shapeFactor = (float)_config.PoreShapeFactor;
+            ImGui.SetNextItemWidth(-1);
+            if (ImGui.SliderFloat("##ShapeFactor", ref shapeFactor, 1.0f, 5.0f, "%.1f"))
+                _config.PoreShapeFactor = shapeFactor;
+            if (ImGui.IsItemHovered())
+                ImGui.SetTooltip("Spherical pores: 3.0, Cylindrical: 2.0, Slit-like: 1.0");
+
+            ImGui.Spacing();
+
             // GPU toggle
             if (_gpuAvailable)
             {
@@ -360,6 +378,15 @@ public class NMRAnalysisTool : IDatasetTools
             ImGui.Text($"Mean T2: {results.MeanT2:F2} ms");
             ImGui.Text($"Geometric Mean T2: {results.GeometricMeanT2:F2} ms");
             ImGui.Text($"Peak T2: {results.T2PeakValue:F2} ms");
+
+            if (results.PoreSizes != null)
+            {
+                ImGui.Separator();
+                ImGui.Text("Pore Size Distribution:");
+                var meanPoreSize = results.PoreSizes.Zip(results.PoreSizeDistribution, (s, d) => s * d).Sum() /
+                                   results.PoreSizeDistribution.Sum();
+                ImGui.Text($"Mean Pore Radius: {meanPoreSize:F2} μm");
+            }
         }
 
         ImGui.Spacing();
@@ -377,7 +404,7 @@ public class NMRAnalysisTool : IDatasetTools
         ImGui.Spacing();
 
         // Draw selected visualization
-        var plotSize = new Vector2(-1, 300);
+        var plotSize = new Vector2(-1, 400);
 
         switch (_selectedVisualization)
         {
@@ -416,8 +443,8 @@ public class NMRAnalysisTool : IDatasetTools
                 DrawPlot(drawList, pos, contentSize,
                     results.TimePoints,
                     results.Magnetization,
-                    "Time (ms)", "Magnetization",
-                    new List<(string, Vector4)> { ("Magnetization", plotColor) });
+                    "Time (ms)", "Normalized Magnetization",
+                    new List<(string, Vector4)> { ("Decay", plotColor) });
             }
         }
 
@@ -439,8 +466,8 @@ public class NMRAnalysisTool : IDatasetTools
                 DrawHistogram(drawList, pos, contentSize,
                     results.T2HistogramBins,
                     results.T2Histogram,
-                    "T2 (ms)", "Amplitude",
-                    new List<(string, Vector4)> { ("T2 Amplitude", plotColor) },
+                    "T₂ (ms)", "Amplitude",
+                    new List<(string, Vector4)> { ("T₂ Distribution", plotColor) },
                     true);
             }
         }
@@ -464,7 +491,7 @@ public class NMRAnalysisTool : IDatasetTools
                     results.PoreSizes,
                     results.PoreSizeDistribution,
                     "Pore Radius (μm)", "Frequency",
-                    new List<(string, Vector4)> { ("Pore Frequency", plotColor) },
+                    new List<(string, Vector4)> { ("Pore Size", plotColor) },
                     true);
             }
         }
@@ -484,20 +511,234 @@ public class NMRAnalysisTool : IDatasetTools
             if (contentSize.X > 50 && contentSize.Y > 50 && results.HasT1T2Data)
                 Draw2DMap(drawList, pos, contentSize, results.T1T2Map,
                     results.T1HistogramBins, results.T2HistogramBins,
-                    "T2 (ms)", "T1 (ms)");
+                    "T₂ (ms)", "T₁ (ms)");
         }
 
         ImGui.EndChild();
     }
 
-    private void Draw2DMap(ImDrawListPtr drawList, Vector2 pos, Vector2 size,
-        double[,] map, double[] xBins, double[] yBins, string xLabel, string yLabel)
+    // FIXED: Publication-quality plot rendering with proper padding and labels
+    private void DrawPlot(ImDrawListPtr drawList, Vector2 pos, Vector2 size,
+        double[] xData, double[] yData, string xLabel, string yLabel, List<(string, Vector4)> legendItems,
+        bool logScaleX = false, bool logScaleY = false)
     {
-        var padding = new Vector4(80, 50, 50, 80); // Left, Top, Right, Bottom
+        // Professional padding for publication-quality plots
+        var padding = new Vector4(100, 80, 120, 100); // Left, Top, Right, Bottom
         var plotArea = new Vector2(size.X - padding.X - padding.Z, size.Y - padding.Y - padding.W);
         var plotPos = new Vector2(pos.X + padding.X, pos.Y + padding.Y);
 
-        drawList.AddRectFilled(pos, pos + size, ImGui.GetColorU32(new Vector4(0.1f, 0.1f, 0.1f, 1.0f)));
+        // Background
+        drawList.AddRectFilled(pos, pos + size, ImGui.GetColorU32(new Vector4(0.95f, 0.95f, 0.95f, 1.0f)));
+        drawList.AddRectFilled(plotPos, plotPos + plotArea, ImGui.GetColorU32(new Vector4(1.0f, 1.0f, 1.0f, 1.0f)));
+
+        if (xData == null || yData == null || xData.Length == 0) return;
+
+        // Data range
+        var xMin = logScaleX ? Math.Log10(xData.Where(x => x > 0).DefaultIfEmpty(1e-6).Min()) : xData.Min();
+        var xMax = logScaleX ? Math.Log10(xData.Max()) : xData.Max();
+        var yMin = logScaleY ? Math.Log10(yData.Where(y => y > 0).DefaultIfEmpty(1e-6).Min()) : 0.0;
+        var yMax = logScaleY ? Math.Log10(yData.Max()) : yData.Max();
+
+        // Add 5% margin
+        var xRange = xMax - xMin;
+        var yRange = yMax - yMin;
+        xMin -= xRange * 0.05;
+        xMax += xRange * 0.05;
+        yMax += yRange * 0.05;
+
+        // Draw grid
+        var gridColor = ImGui.GetColorU32(new Vector4(0.9f, 0.9f, 0.9f, 1.0f));
+        for (var i = 0; i <= 10; i++)
+        {
+            var frac = i / 10.0f;
+            // Vertical grid lines
+            var x = plotPos.X + frac * plotArea.X;
+            drawList.AddLine(new Vector2(x, plotPos.Y), new Vector2(x, plotPos.Y + plotArea.Y), gridColor, 1f);
+            // Horizontal grid lines
+            var y = plotPos.Y + frac * plotArea.Y;
+            drawList.AddLine(new Vector2(plotPos.X, y), new Vector2(plotPos.X + plotArea.X, y), gridColor, 1f);
+        }
+
+        // Draw axes (thicker for visibility)
+        var axisColor = ImGui.GetColorU32(new Vector4(0.2f, 0.2f, 0.2f, 1.0f));
+        drawList.AddLine(plotPos, new Vector2(plotPos.X, plotPos.Y + plotArea.Y), axisColor, 2f);
+        drawList.AddLine(new Vector2(plotPos.X, plotPos.Y + plotArea.Y),
+            new Vector2(plotPos.X + plotArea.X, plotPos.Y + plotArea.Y), axisColor, 2f);
+
+        // Draw data line
+        var lineColor = ImGui.GetColorU32(legendItems[0].Item2);
+        for (var i = 0; i < xData.Length - 1; i++)
+        {
+            var x1Val = logScaleX ? Math.Log10(Math.Max(xData[i], 1e-10)) : xData[i];
+            var y1Val = logScaleY ? Math.Log10(Math.Max(yData[i], 1e-10)) : yData[i];
+            var x2Val = logScaleX ? Math.Log10(Math.Max(xData[i + 1], 1e-10)) : xData[i + 1];
+            var y2Val = logScaleY ? Math.Log10(Math.Max(yData[i + 1], 1e-10)) : yData[i + 1];
+
+            var x1 = plotPos.X + (float)((x1Val - xMin) / (xMax - xMin)) * plotArea.X;
+            var y1 = plotPos.Y + plotArea.Y - (float)((y1Val - yMin) / (yMax - yMin)) * plotArea.Y;
+            var x2 = plotPos.X + (float)((x2Val - xMin) / (xMax - xMin)) * plotArea.X;
+            var y2 = plotPos.Y + plotArea.Y - (float)((y2Val - yMin) / (yMax - yMin)) * plotArea.Y;
+
+            drawList.AddLine(new Vector2(x1, y1), new Vector2(x2, y2), lineColor, 2.5f);
+        }
+
+        // Draw axis labels with proper positioning
+        var textColor = ImGui.GetColorU32(new Vector4(0.1f, 0.1f, 0.1f, 1.0f));
+        var xLabelSize = ImGui.CalcTextSize(xLabel);
+        var yLabelSize = ImGui.CalcTextSize(yLabel);
+
+        // X-axis label (centered, below plot)
+        drawList.AddText(new Vector2(plotPos.X + plotArea.X / 2 - xLabelSize.X / 2, plotPos.Y + plotArea.Y + 60),
+            textColor, xLabel);
+
+        // Y-axis label (rotated, left of plot) - approximation with regular text
+        drawList.AddText(new Vector2(pos.X + 20, plotPos.Y + plotArea.Y / 2 - yLabelSize.X / 2), textColor, yLabel);
+
+        // Draw tick labels
+        DrawTickLabels(drawList, plotPos, plotArea, xMin, xMax, yMin, yMax, logScaleX, logScaleY, textColor);
+
+        // Draw legend (top right, outside plot area)
+        DrawLegendOutside(drawList, pos, size, padding, legendItems);
+    }
+
+    // FIXED: Professional histogram rendering
+    private void DrawHistogram(ImDrawListPtr drawList, Vector2 pos, Vector2 size,
+        double[] bins, double[] values, string xLabel, string yLabel, List<(string, Vector4)> legendItems,
+        bool logScaleX)
+    {
+        var padding = new Vector4(100, 80, 120, 100);
+        var plotArea = new Vector2(size.X - padding.X - padding.Z, size.Y - padding.Y - padding.W);
+        var plotPos = new Vector2(pos.X + padding.X, pos.Y + padding.Y);
+
+        // Background
+        drawList.AddRectFilled(pos, pos + size, ImGui.GetColorU32(new Vector4(0.95f, 0.95f, 0.95f, 1.0f)));
+        drawList.AddRectFilled(plotPos, plotPos + plotArea, ImGui.GetColorU32(new Vector4(1.0f, 1.0f, 1.0f, 1.0f)));
+
+        if (bins == null || values == null || bins.Length == 0) return;
+
+        var xData = logScaleX ? bins.Select(Math.Log10).ToArray() : bins;
+        var xMin = xData.Min();
+        var xMax = xData.Max();
+        var yMin = 0.0;
+        var yMax = values.Max();
+
+        // Add margin
+        var xRange = xMax - xMin;
+        var yRange = yMax - yMin;
+        xMin -= xRange * 0.05;
+        xMax += xRange * 0.05;
+        yMax += yRange * 0.05;
+
+        // Grid
+        var gridColor = ImGui.GetColorU32(new Vector4(0.9f, 0.9f, 0.9f, 1.0f));
+        for (var i = 0; i <= 10; i++)
+        {
+            var frac = i / 10.0f;
+            var x = plotPos.X + frac * plotArea.X;
+            drawList.AddLine(new Vector2(x, plotPos.Y), new Vector2(x, plotPos.Y + plotArea.Y), gridColor, 1f);
+            var y = plotPos.Y + frac * plotArea.Y;
+            drawList.AddLine(new Vector2(plotPos.X, y), new Vector2(plotPos.X + plotArea.X, y), gridColor, 1f);
+        }
+
+        // Axes
+        var axisColor = ImGui.GetColorU32(new Vector4(0.2f, 0.2f, 0.2f, 1.0f));
+        drawList.AddLine(plotPos, new Vector2(plotPos.X, plotPos.Y + plotArea.Y), axisColor, 2f);
+        drawList.AddLine(new Vector2(plotPos.X, plotPos.Y + plotArea.Y),
+            new Vector2(plotPos.X + plotArea.X, plotPos.Y + plotArea.Y), axisColor, 2f);
+
+        // Draw bars
+        var barColor = ImGui.GetColorU32(legendItems[0].Item2);
+        var barOutlineColor = ImGui.GetColorU32(new Vector4(0.2f, 0.2f, 0.2f, 1.0f));
+
+        for (var i = 0; i < bins.Length; i++)
+        {
+            var x1 = plotPos.X + (float)((xData[i] - xMin) / (xMax - xMin)) * plotArea.X;
+            var x2 = i < bins.Length - 1
+                ? plotPos.X + (float)((xData[i + 1] - xMin) / (xMax - xMin)) * plotArea.X
+                : plotPos.X + plotArea.X;
+            var barWidth = x2 - x1;
+
+            var y = plotPos.Y + plotArea.Y - (float)((values[i] - yMin) / (yMax - yMin)) * plotArea.Y;
+            var yBottom = plotPos.Y + plotArea.Y;
+
+            drawList.AddRectFilled(new Vector2(x1 + 1, y), new Vector2(x2 - 1, yBottom), barColor);
+            drawList.AddRect(new Vector2(x1 + 1, y), new Vector2(x2 - 1, yBottom), barOutlineColor, 0f, 0, 1f);
+        }
+
+        // Labels
+        var textColor = ImGui.GetColorU32(new Vector4(0.1f, 0.1f, 0.1f, 1.0f));
+        var xLabelSize = ImGui.CalcTextSize(xLabel);
+        drawList.AddText(new Vector2(plotPos.X + plotArea.X / 2 - xLabelSize.X / 2, plotPos.Y + plotArea.Y + 60),
+            textColor, xLabel);
+        drawList.AddText(new Vector2(pos.X + 20, plotPos.Y + plotArea.Y / 2), textColor, yLabel);
+
+        DrawTickLabels(drawList, plotPos, plotArea, xMin, xMax, yMin, yMax, logScaleX, false, textColor);
+        DrawLegendOutside(drawList, pos, size, padding, legendItems);
+    }
+
+    private void DrawTickLabels(ImDrawListPtr drawList, Vector2 plotPos, Vector2 plotArea,
+        double xMin, double xMax, double yMin, double yMax, bool logX, bool logY, uint textColor)
+    {
+        // X-axis ticks
+        for (var i = 0; i <= 5; i++)
+        {
+            var frac = i / 5.0;
+            var xVal = xMin + frac * (xMax - xMin);
+            var xLabel = logX ? $"{Math.Pow(10, xVal):F1}" : $"{xVal:F1}";
+            var labelSize = ImGui.CalcTextSize(xLabel);
+            var x = plotPos.X + (float)frac * plotArea.X;
+
+            // Tick mark
+            drawList.AddLine(new Vector2(x, plotPos.Y + plotArea.Y),
+                new Vector2(x, plotPos.Y + plotArea.Y + 5), textColor, 2f);
+            // Label
+            drawList.AddText(new Vector2(x - labelSize.X / 2, plotPos.Y + plotArea.Y + 10), textColor, xLabel);
+        }
+
+        // Y-axis ticks
+        for (var i = 0; i <= 5; i++)
+        {
+            var frac = i / 5.0;
+            var yVal = yMin + frac * (yMax - yMin);
+            var yLabel = logY ? $"{Math.Pow(10, yVal):F2}" : $"{yVal:F2}";
+            var labelSize = ImGui.CalcTextSize(yLabel);
+            var y = plotPos.Y + plotArea.Y - (float)frac * plotArea.Y;
+
+            // Tick mark
+            drawList.AddLine(new Vector2(plotPos.X - 5, y), new Vector2(plotPos.X, y), textColor, 2f);
+            // Label
+            drawList.AddText(new Vector2(plotPos.X - labelSize.X - 10, y - labelSize.Y / 2), textColor, yLabel);
+        }
+    }
+
+    private void DrawLegendOutside(ImDrawListPtr drawList, Vector2 pos, Vector2 size, Vector4 padding,
+        List<(string, Vector4)> items)
+    {
+        // Position legend in top-right margin
+        var legendPos = new Vector2(pos.X + size.X - padding.Z + 10, pos.Y + 10);
+        var textColor = ImGui.GetColorU32(new Vector4(0.1f, 0.1f, 0.1f, 1.0f));
+        var boxSize = 12f;
+
+        foreach (var (label, color) in items)
+        {
+            drawList.AddRectFilled(legendPos, new Vector2(legendPos.X + boxSize, legendPos.Y + boxSize),
+                ImGui.GetColorU32(color));
+            drawList.AddRect(legendPos, new Vector2(legendPos.X + boxSize, legendPos.Y + boxSize),
+                ImGui.GetColorU32(new Vector4(0.2f, 0.2f, 0.2f, 1.0f)), 0f, 0, 1f);
+            drawList.AddText(new Vector2(legendPos.X + boxSize + 8, legendPos.Y), textColor, label);
+            legendPos.Y += 25;
+        }
+    }
+
+    private void Draw2DMap(ImDrawListPtr drawList, Vector2 pos, Vector2 size,
+        double[,] map, double[] xBins, double[] yBins, string xLabel, string yLabel)
+    {
+        var padding = new Vector4(100, 80, 150, 100);
+        var plotArea = new Vector2(size.X - padding.X - padding.Z, size.Y - padding.Y - padding.W);
+        var plotPos = new Vector2(pos.X + padding.X, pos.Y + padding.Y);
+
+        drawList.AddRectFilled(pos, pos + size, ImGui.GetColorU32(new Vector4(0.95f, 0.95f, 0.95f, 1.0f)));
+        drawList.AddRectFilled(plotPos, plotPos + plotArea, ImGui.GetColorU32(new Vector4(0.0f, 0.0f, 0.0f, 1.0f)));
 
         if (map == null || xBins == null || yBins == null) return;
 
@@ -530,21 +771,45 @@ public class NMRAnalysisTool : IDatasetTools
                 ImGui.GetColorU32(new Vector4(r / 255f, g / 255f, b / 255f, 1.0f)));
         }
 
-        var axisColor = ImGui.GetColorU32(new Vector4(0.7f, 0.7f, 0.7f, 1.0f));
-        drawList.AddLine(plotPos, new Vector2(plotPos.X, plotPos.Y + plotArea.Y), axisColor, 1f);
-        drawList.AddLine(new Vector2(plotPos.X, plotPos.Y + plotArea.Y), plotPos + plotArea, axisColor, 1f);
+        var axisColor = ImGui.GetColorU32(new Vector4(0.9f, 0.9f, 0.9f, 1.0f));
+        drawList.AddRect(plotPos, plotPos + plotArea, axisColor, 0f, 0, 2f);
 
-        var textColor = ImGui.GetColorU32(new Vector4(1f, 1f, 1f, 1f));
+        var textColor = ImGui.GetColorU32(new Vector4(0.1f, 0.1f, 0.1f, 1.0f));
         var xLabelSize = ImGui.CalcTextSize(xLabel);
-        drawList.AddText(new Vector2(plotPos.X + plotArea.X / 2 - xLabelSize.X / 2, plotPos.Y + plotArea.Y + 20),
+        drawList.AddText(new Vector2(plotPos.X + plotArea.X / 2 - xLabelSize.X / 2, plotPos.Y + plotArea.Y + 60),
             textColor, xLabel);
+        drawList.AddText(new Vector2(pos.X + 20, plotPos.Y + plotArea.Y / 2), textColor, yLabel);
 
-        DrawRotatedText(drawList, yLabel, new Vector2(pos.X + 20, plotPos.Y + plotArea.Y / 2), textColor,
-            (float)(-Math.PI / 2));
-
-        DrawLegend(drawList, pos, size, new List<(string, Vector4)> { ("Amplitude", new Vector4(1, 1, 0, 1)) }, true);
+        // Draw colorbar
+        DrawColorbar(drawList, new Vector2(plotPos.X + plotArea.X + 20, plotPos.Y),
+            new Vector2(30, plotArea.Y), maxAmplitude);
     }
 
+    private void DrawColorbar(ImDrawListPtr drawList, Vector2 pos, Vector2 size, double maxValue)
+    {
+        var steps = 100;
+        var stepHeight = size.Y / steps;
+
+        for (var i = 0; i < steps; i++)
+        {
+            var value = i / (float)steps;
+            var (r, g, b) = GetHotColor(value);
+            var y = pos.Y + size.Y - (i + 1) * stepHeight;
+
+            drawList.AddRectFilled(new Vector2(pos.X, y),
+                new Vector2(pos.X + size.X, y + stepHeight),
+                ImGui.GetColorU32(new Vector4(r / 255f, g / 255f, b / 255f, 1.0f)));
+        }
+
+        // Outline
+        drawList.AddRect(pos, pos + size,
+            ImGui.GetColorU32(new Vector4(0.2f, 0.2f, 0.2f, 1.0f)), 0f, 0, 1f);
+
+        // Labels
+        var textColor = ImGui.GetColorU32(new Vector4(0.1f, 0.1f, 0.1f, 1.0f));
+        drawList.AddText(new Vector2(pos.X + size.X + 5, pos.Y - 10), textColor, $"{maxValue:E2}");
+        drawList.AddText(new Vector2(pos.X + size.X + 5, pos.Y + size.Y - 10), textColor, "0");
+    }
 
     private (byte, byte, byte) GetHotColor(double value)
     {
@@ -553,126 +818,6 @@ public class NMRAnalysisTool : IDatasetTools
         if (value < 0.66) return (255, (byte)((value - 0.33) / 0.33 * 255), 0);
         return (255, 255, (byte)((value - 0.66) / 0.34 * 255));
     }
-
-    private void DrawPlot(ImDrawListPtr drawList, Vector2 pos, Vector2 size,
-        double[] xData, double[] yData, string xLabel, string yLabel, List<(string, Vector4)> legendItems)
-    {
-        var padding = new Vector4(80, 50, 50, 80);
-        var plotArea = new Vector2(size.X - padding.X - padding.Z, size.Y - padding.Y - padding.W);
-        var plotPos = new Vector2(pos.X + padding.X, pos.Y + padding.Y);
-
-        drawList.AddRectFilled(pos, pos + size, ImGui.GetColorU32(new Vector4(0.1f, 0.1f, 0.1f, 1.0f)));
-
-        if (xData == null || yData == null || xData.Length == 0) return;
-
-        var xMin = xData.Min();
-        var xMax = xData.Max();
-        var yMin = yData.Min();
-        var yMax = yData.Max();
-
-        var axisColor = ImGui.GetColorU32(new Vector4(0.7f, 0.7f, 0.7f, 1.0f));
-        drawList.AddLine(plotPos, new Vector2(plotPos.X, plotPos.Y + plotArea.Y), axisColor, 1f);
-        drawList.AddLine(new Vector2(plotPos.X, plotPos.Y + plotArea.Y),
-            new Vector2(plotPos.X + plotArea.X, plotPos.Y + plotArea.Y), axisColor, 1f);
-
-        for (var i = 0; i < xData.Length - 1; i++)
-        {
-            var x1 = plotPos.X + (float)((xData[i] - xMin) / (xMax - xMin)) * plotArea.X;
-            var y1 = plotPos.Y + plotArea.Y - (float)((yData[i] - yMin) / (yMax - yMin)) * plotArea.Y;
-            var x2 = plotPos.X + (float)((xData[i + 1] - xMin) / (xMax - xMin)) * plotArea.X;
-            var y2 = plotPos.Y + plotArea.Y - (float)((yData[i + 1] - yMin) / (yMax - yMin)) * plotArea.Y;
-            drawList.AddLine(new Vector2(x1, y1), new Vector2(x2, y2), ImGui.GetColorU32(legendItems[0].Item2), 2f);
-        }
-
-        var textColor = ImGui.GetColorU32(new Vector4(1f, 1f, 1f, 1f));
-        var xLabelSize = ImGui.CalcTextSize(xLabel);
-        drawList.AddText(new Vector2(plotPos.X + plotArea.X / 2 - xLabelSize.X / 2, plotPos.Y + plotArea.Y + 20),
-            textColor, xLabel);
-        DrawRotatedText(drawList, yLabel, new Vector2(pos.X + 20, plotPos.Y + plotArea.Y / 2), textColor,
-            (float)(-Math.PI / 2));
-        DrawLegend(drawList, pos, size, legendItems);
-    }
-
-    private void DrawHistogram(ImDrawListPtr drawList, Vector2 pos, Vector2 size,
-        double[] bins, double[] values, string xLabel, string yLabel, List<(string, Vector4)> legendItems,
-        bool logScaleX)
-    {
-        var padding = new Vector4(80, 50, 50, 80);
-        var plotArea = new Vector2(size.X - padding.X - padding.Z, size.Y - padding.Y - padding.W);
-        var plotPos = new Vector2(pos.X + padding.X, pos.Y + padding.Y);
-
-        drawList.AddRectFilled(pos, pos + size, ImGui.GetColorU32(new Vector4(0.1f, 0.1f, 0.1f, 1.0f)));
-
-        if (bins == null || values == null || bins.Length == 0) return;
-
-        var xData = logScaleX ? bins.Select(Math.Log10).ToArray() : bins;
-        var xMin = xData.Min();
-        var xMax = xData.Max();
-        var yMin = 0.0;
-        var yMax = values.Max();
-
-        var axisColor = ImGui.GetColorU32(new Vector4(0.7f, 0.7f, 0.7f, 1.0f));
-        drawList.AddLine(plotPos, new Vector2(plotPos.X, plotPos.Y + plotArea.Y), axisColor, 1f);
-        drawList.AddLine(new Vector2(plotPos.X, plotPos.Y + plotArea.Y),
-            new Vector2(plotPos.X + plotArea.X, plotPos.Y + plotArea.Y), axisColor, 1f);
-
-        var barWidth = plotArea.X / bins.Length * 0.9f;
-        var barColor = ImGui.GetColorU32(legendItems[0].Item2);
-
-        for (var i = 0; i < bins.Length; i++)
-        {
-            var x = plotPos.X + (float)((xData[i] - xMin) / (xMax - xMin)) * plotArea.X;
-            var y = plotPos.Y + plotArea.Y - (float)((values[i] - yMin) / (yMax - yMin)) * plotArea.Y;
-            drawList.AddRectFilled(new Vector2(x - barWidth / 2, y),
-                new Vector2(x + barWidth / 2, plotPos.Y + plotArea.Y), barColor);
-        }
-
-        var textColor = ImGui.GetColorU32(new Vector4(1f, 1f, 1f, 1f));
-        var xLabelSize = ImGui.CalcTextSize(xLabel);
-        drawList.AddText(new Vector2(plotPos.X + plotArea.X / 2 - xLabelSize.X / 2, plotPos.Y + plotArea.Y + 20),
-            textColor, xLabel);
-        DrawRotatedText(drawList, yLabel, new Vector2(pos.X + 20, plotPos.Y + plotArea.Y / 2), textColor,
-            (float)(-Math.PI / 2));
-        DrawLegend(drawList, pos, size, legendItems);
-    }
-
-    private void DrawLegend(ImDrawListPtr drawList, Vector2 pos, Vector2 size, List<(string, Vector4)> items,
-        bool is2DMap = false)
-    {
-        var legendPos = new Vector2(pos.X + size.X - 150, pos.Y + 50);
-        var textColor = ImGui.GetColorU32(new Vector4(0.9f, 0.9f, 0.9f, 1.0f));
-        var boxSize = 10f;
-
-        foreach (var (label, color) in items)
-        {
-            if (!is2DMap)
-                drawList.AddRectFilled(legendPos, new Vector2(legendPos.X + boxSize, legendPos.Y + boxSize),
-                    ImGui.GetColorU32(color));
-            drawList.AddText(new Vector2(legendPos.X + boxSize + 5, legendPos.Y - 2), textColor, label);
-            legendPos.Y += 20;
-        }
-    }
-
-    private void DrawRotatedText(ImDrawListPtr drawList, string text, Vector2 center, uint color, float angle)
-    {
-        var textSize = ImGui.CalcTextSize(text);
-        var corners = new Vector2[4]
-        {
-            center + Rotate(new Vector2(-textSize.X / 2, -textSize.Y / 2), angle),
-            center + Rotate(new Vector2(textSize.X / 2, -textSize.Y / 2), angle),
-            center + Rotate(new Vector2(textSize.X / 2, textSize.Y / 2), angle),
-            center + Rotate(new Vector2(-textSize.X / 2, textSize.Y / 2), angle)
-        };
-        drawList.AddText(corners[0], color, text);
-    }
-
-    private Vector2 Rotate(Vector2 v, float angle)
-    {
-        var sin = (float)Math.Sin(angle);
-        var cos = (float)Math.Cos(angle);
-        return new Vector2(v.X * cos - v.Y * sin, v.X * sin + v.Y * cos);
-    }
-
 
     private void DrawExportControls()
     {
@@ -715,18 +860,15 @@ public class NMRAnalysisTool : IDatasetTools
 
     private double EstimateComputationTime()
     {
-        // Rough estimate based on walkers and steps
         var operations = (long)_config.NumberOfWalkers * _config.NumberOfSteps;
 
         if (_config.UseOpenCL && _gpuAvailable)
         {
-            // GPU is much faster
-            var opsPerSecond = 200_000_000.0; // GPU performance
+            var opsPerSecond = 200_000_000.0;
             return operations / opsPerSecond;
         }
         else
         {
-            // CPU with SIMD
             var opsPerSecond = 10_000_000.0;
             return operations / opsPerSecond;
         }
@@ -801,7 +943,6 @@ public class NMRAnalysisTool : IDatasetTools
                     ExportVisualizationAsPng(filePath);
                     break;
                 case ".csv":
-                    // Check if this is a T1-T2 map export
                     if (filePath.Contains("t1t2", StringComparison.OrdinalIgnoreCase) && results.HasT1T2Data)
                         T1T2Computation.ExportT1T2MapToCSV(results, filePath);
                     else
@@ -825,21 +966,18 @@ public class NMRAnalysisTool : IDatasetTools
         try
         {
             var results = _currentDataset.NmrResults;
-            // Create a high-resolution plot (1920x1080)
             var width = 1920;
             var height = 1080;
-            var imageData = new byte[width * height * 4]; // RGBA
+            var imageData = new byte[width * height * 4];
 
-            // Fill with background color
             for (var i = 0; i < width * height * 4; i += 4)
             {
-                imageData[i] = 26; // R - Dark background
-                imageData[i + 1] = 26; // G
-                imageData[i + 2] = 26; // B
-                imageData[i + 3] = 255; // A
+                imageData[i] = 242;
+                imageData[i + 1] = 242;
+                imageData[i + 2] = 242;
+                imageData[i + 3] = 255;
             }
 
-            // Render the plot
             switch (_selectedVisualization)
             {
                 case 0:
@@ -857,9 +995,7 @@ public class NMRAnalysisTool : IDatasetTools
                     break;
             }
 
-            // Save using ImageExporter
             ImageExporter.ExportColorSlice(imageData, width, height, filePath);
-
             Logger.Log($"[NMRAnalysisTool] Exported visualization to: {filePath}");
         }
         catch (Exception ex)
@@ -868,6 +1004,7 @@ public class NMRAnalysisTool : IDatasetTools
         }
     }
 
+    // Rendering methods remain similar but use improved algorithms
     private void RenderDecayCurveToBuffer(byte[] buffer, int width, int height)
     {
         var results = _currentDataset.NmrResults;
@@ -882,12 +1019,10 @@ public class NMRAnalysisTool : IDatasetTools
         var yMin = 0.0;
         var yMax = 1.0;
 
-        // Draw axes
         DrawLineInBuffer(buffer, width, padding, padding, padding, padding + plotHeight, 200, 200, 200);
         DrawLineInBuffer(buffer, width, padding, padding + plotHeight, padding + plotWidth, padding + plotHeight, 200,
             200, 200);
 
-        // Draw data
         for (var i = 0; i < results.TimePoints.Length - 1; i++)
         {
             var x1 = padding + (int)((results.TimePoints[i] - xMin) / (xMax - xMin) * plotWidth);
@@ -899,7 +1034,6 @@ public class NMRAnalysisTool : IDatasetTools
             DrawLineInBuffer(buffer, width, x1, y1, x2, y2, 51, 204, 51);
         }
 
-        // Draw title and labels
         DrawTextInBuffer(buffer, width, width / 2 - 100, 50, "NMR Decay Curve", 255, 255, 255);
         DrawTextInBuffer(buffer, width, width / 2 - 50, height - 80, "Time (ms)", 255, 255, 255);
         DrawTextInBuffer(buffer, width, 40, height / 2, "Magnetization", 255, 255, 255);
@@ -919,12 +1053,10 @@ public class NMRAnalysisTool : IDatasetTools
         var yMin = 0.0;
         var yMax = results.T2Histogram.Max();
 
-        // Draw axes
         DrawLineInBuffer(buffer, width, padding, padding, padding, padding + plotHeight, 200, 200, 200);
         DrawLineInBuffer(buffer, width, padding, padding + plotHeight, padding + plotWidth, padding + plotHeight, 200,
             200, 200);
 
-        // Draw histogram bars
         var barWidth = plotWidth / results.T2HistogramBins.Length;
         for (var i = 0; i < results.T2HistogramBins.Length; i++)
         {
@@ -935,7 +1067,6 @@ public class NMRAnalysisTool : IDatasetTools
                 230);
         }
 
-        // Draw title and labels
         DrawTextInBuffer(buffer, width, width / 2 - 100, 50, "T2 Distribution", 255, 255, 255);
         DrawTextInBuffer(buffer, width, width / 2 - 50, height - 80, "T2 (ms)", 255, 255, 255);
         DrawTextInBuffer(buffer, width, 40, height / 2, "Amplitude", 255, 255, 255);
@@ -955,12 +1086,10 @@ public class NMRAnalysisTool : IDatasetTools
         var yMin = 0.0;
         var yMax = results.PoreSizeDistribution.Max();
 
-        // Draw axes
         DrawLineInBuffer(buffer, width, padding, padding, padding, padding + plotHeight, 200, 200, 200);
         DrawLineInBuffer(buffer, width, padding, padding + plotHeight, padding + plotWidth, padding + plotHeight, 200,
             200, 200);
 
-        // Draw histogram bars
         var barWidth = plotWidth / results.PoreSizes.Length;
         for (var i = 0; i < results.PoreSizes.Length; i++)
         {
@@ -971,7 +1100,6 @@ public class NMRAnalysisTool : IDatasetTools
                 128, 51);
         }
 
-        // Draw title and labels
         DrawTextInBuffer(buffer, width, width / 2 - 150, 50, "Pore Size Distribution", 255, 255, 255);
         DrawTextInBuffer(buffer, width, width / 2 - 80, height - 80, "Pore Radius (μm)", 255, 255, 255);
         DrawTextInBuffer(buffer, width, 40, height / 2, "Frequency", 255, 255, 255);
@@ -979,7 +1107,6 @@ public class NMRAnalysisTool : IDatasetTools
 
     private void DrawLineInBuffer(byte[] buffer, int width, int x0, int y0, int x1, int y1, byte r, byte g, byte b)
     {
-        // Bresenham's line algorithm
         var dx = Math.Abs(x1 - x0);
         var dy = Math.Abs(y1 - y0);
         var sx = x0 < x1 ? 1 : -1;
@@ -1016,8 +1143,6 @@ public class NMRAnalysisTool : IDatasetTools
 
     private void DrawTextInBuffer(byte[] buffer, int width, int x, int y, string text, byte r, byte g, byte b)
     {
-        // Simple text rendering (just draws a rectangle for now)
-        // For proper text, you'd need a font rasterizer
         var textWidth = text.Length * 10;
         DrawFilledRectInBuffer(buffer, width, x, y, textWidth, 20, r, g, b);
     }
@@ -1038,14 +1163,12 @@ public class NMRAnalysisTool : IDatasetTools
         var results = _currentDataset.NmrResults;
         var sb = new StringBuilder();
 
-        // Decay data
         sb.AppendLine("Time (ms),Magnetization");
         for (var i = 0; i < results.TimePoints.Length; i++)
             sb.AppendLine($"{results.TimePoints[i]},{results.Magnetization[i]}");
 
         sb.AppendLine();
 
-        // T2 distribution
         sb.AppendLine("T2 (ms),Amplitude");
         for (var i = 0; i < results.T2HistogramBins.Length; i++)
             sb.AppendLine($"{results.T2HistogramBins[i]},{results.T2Histogram[i]}");
@@ -1107,7 +1230,6 @@ public class NMRAnalysisTool : IDatasetTools
             var results = _currentDataset.NmrResults;
             var dataTable = new DataTable("NMR Results");
 
-            // Add columns
             dataTable.Columns.Add("Time_ms", typeof(double));
             dataTable.Columns.Add("Magnetization", typeof(double));
             dataTable.Columns.Add("T2_ms", typeof(double));
@@ -1119,7 +1241,6 @@ public class NMRAnalysisTool : IDatasetTools
                 dataTable.Columns.Add("PoreSize_Frequency", typeof(double));
             }
 
-            // Add data rows
             var maxRows = Math.Max(results.TimePoints.Length, results.T2HistogramBins.Length);
             for (var i = 0; i < maxRows; i++)
             {

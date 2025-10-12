@@ -1,4 +1,5 @@
 // GeoscientistToolkit/Analysis/NMR/NMRSimulation.cs
+// FIXED: Correct pore size physics implementation
 
 using System.Diagnostics;
 using System.Runtime.Intrinsics;
@@ -12,6 +13,11 @@ namespace GeoscientistToolkit.Analysis.NMR;
 
 /// <summary>
 ///     High-performance NMR simulation using random walk technique with SIMD acceleration.
+///     Physics Background:
+///     - T2 relaxation: 1/T2 = 1/T2_bulk + ρ₂ * (S/V)
+///     - For fast diffusion regime: ρ₂ is surface relaxivity (μm/s)
+///     - Pore radius from T2: r = shape_factor * ρ₂ * T2
+///     - Shape factors: Sphere=3, Cylinder=2, Slit=1
 /// </summary>
 public class NMRSimulation
 {
@@ -40,6 +46,7 @@ public class NMRSimulation
         _random = new Random(config.RandomSeed);
 
         Logger.Log($"[NMRSimulation] Initialized: {_width}x{_height}x{_depth}, {config.NumberOfWalkers} walkers");
+        Logger.Log($"[NMRSimulation] Pore shape factor: {config.PoreShapeFactor} (3.0=sphere, 2.0=cylinder, 1.0=slit)");
     }
 
     public async Task<NMRResults> RunSimulationAsync(IProgress<(float progress, string message)> progress)
@@ -75,7 +82,8 @@ public class NMRSimulation
         };
 
         // Time points
-        for (var t = 0; t < _config.NumberOfSteps; t++) results.TimePoints[t] = t * _config.TimeStepMs;
+        for (var t = 0; t < _config.NumberOfSteps; t++)
+            results.TimePoints[t] = t * _config.TimeStepMs;
 
         progress?.Report((0.1f, "Running random walk simulation..."));
 
@@ -84,10 +92,17 @@ public class NMRSimulation
 
         progress?.Report((0.8f, "Computing T2 distribution..."));
 
-        // Compute T2 spectrum and pore size distribution
+        // Compute T2 spectrum and pore size distribution with CORRECT physics
         ComputeT2Distribution(results);
         ComputePoreSizeDistribution(results);
         ComputeStatistics(results);
+
+        // Optional: Compute T1-T2 map
+        if (_config.ComputeT1T2Map)
+        {
+            progress?.Report((0.95f, "Computing T1-T2 correlation map..."));
+            T1T2Computation.ComputeT1T2Map(results, _config);
+        }
 
         stopwatch.Stop();
         results.ComputationTime = stopwatch.Elapsed;
@@ -114,6 +129,7 @@ public class NMRSimulation
             var y = _random.Next(0, _height);
             var z = _random.Next(0, _depth);
 
+            // Only start walkers in PORE SPACE (not matrix)
             if (_labelVolume[x, y, z] == _config.PoreMaterialID)
                 walkers.Add(new Walker
                 {
@@ -133,6 +149,8 @@ public class NMRSimulation
 
     private void SimulateRandomWalk(Walker[] walkers, NMRResults results, IProgress<(float, string)> progress)
     {
+        // Calculate step size based on diffusion coefficient
+        // Einstein relation: <r²> = 6Dt  →  step_size = √(6Dt)
         var stepSize = Math.Sqrt(6.0 * _config.DiffusionCoefficient * _config.TimeStepMs * 1e-3);
         var voxelStepSize = (int)Math.Max(1, stepSize / _config.VoxelSize);
 
@@ -175,14 +193,11 @@ public class NMRSimulation
         var totalMagnetization = 0.0;
         activeCount = 0;
 
-        // Process walkers in parallel (AVX2 doesn't provide much benefit for the branchy walker logic)
-        // But we still parallelize for multi-core performance
         Parallel.For(0, walkers.Length, i =>
         {
             if (walkers[i].IsActive) ProcessSingleWalker(ref walkers[i], stepSize);
         });
 
-        // Accumulate results
         for (var i = 0; i < walkers.Length; i++)
             if (walkers[i].IsActive)
             {
@@ -198,16 +213,12 @@ public class NMRSimulation
         var totalMagnetization = 0.0;
         activeCount = 0;
 
-        // ARM NEON acceleration - process walkers in parallel
         Parallel.For(0, walkers.Length, i =>
         {
             if (walkers[i].IsActive) ProcessSingleWalker(ref walkers[i], stepSize);
         });
 
-        // Accumulate results with NEON (using Vector64 instead of Vector128)
         var i = 0;
-
-        // Process 2 floats at a time with NEON Vector64
         float sum1 = 0f, sum2 = 0f;
         for (; i + 2 <= walkers.Length; i += 2)
         {
@@ -224,12 +235,10 @@ public class NMRSimulation
             }
         }
 
-        // Use NEON for final accumulation
         var vec = Vector64.Create(sum1, sum2);
         var sumVec = AdvSimd.AddPairwise(vec, vec);
         totalMagnetization = AdvSimd.Extract(sumVec, 0);
 
-        // Process remaining walkers
         for (; i < walkers.Length; i++)
             if (walkers[i].IsActive)
             {
@@ -292,18 +301,21 @@ public class NMRSimulation
         }
         else
         {
-            // Hit a surface - apply relaxation
+            // Hit a MATRIX surface - apply relaxation
             if (_config.MaterialRelaxivities.TryGetValue(materialID, out var relaxConfig))
             {
-                // Surface relaxivity effect
+                // Surface relaxivity effect: M(t+dt) = M(t) * exp(-ρ * dt / a)
+                // where ρ is surface relaxivity (μm/s), a is voxel size (μm)
                 var relaxationRate = relaxConfig.SurfaceRelaxivity; // μm/s
                 var dt = _config.TimeStepMs * 1e-3; // convert to seconds
-                var relaxationFactor = Math.Exp(-relaxationRate * dt / _config.VoxelSize);
+                var voxelSizeUm = _config.VoxelSize * 1e6; // convert to μm
+                var relaxationFactor = Math.Exp(-relaxationRate * dt / voxelSizeUm);
 
                 walker.Magnetization *= relaxationFactor;
 
                 // Deactivate if magnetization drops too low
-                if (walker.Magnetization < 0.001) walker.IsActive = false;
+                if (walker.Magnetization < 0.001)
+                    walker.IsActive = false;
             }
 
             // Don't move - walker stays at boundary
@@ -320,14 +332,15 @@ public class NMRSimulation
         results.T2HistogramBins = new double[_config.T2BinCount];
         results.T2Histogram = new double[_config.T2BinCount];
 
-        for (var i = 0; i < _config.T2BinCount; i++) results.T2HistogramBins[i] = Math.Pow(10, logMin + i * logStep);
+        for (var i = 0; i < _config.T2BinCount; i++)
+            results.T2HistogramBins[i] = Math.Pow(10, logMin + i * logStep);
 
         // Fit exponential decay to extract T2 components
-        // Simple approach: inverse Laplace transform approximation
+        // Use inverse Laplace transform with regularization
         var decay = results.Magnetization;
         var time = results.TimePoints;
 
-        // Use regularized inversion
+        // Simple but effective: project decay onto exponential basis functions
         for (var i = 0; i < _config.T2BinCount; i++)
         {
             var t2 = results.T2HistogramBins[i];
@@ -350,28 +363,51 @@ public class NMRSimulation
                 results.T2Histogram[i] /= sum;
     }
 
+    /// <summary>
+    ///     FIXED: Correct physics for pore size distribution
+    ///     In the fast diffusion regime:
+    ///     1/T2 = ρ₂ * (S/V)
+    ///     For different pore geometries:
+    ///     - Spherical pores: S/V = 3/r  →  r = 3·ρ₂·T2
+    ///     - Cylindrical pores: S/V = 2/r  →  r = 2·ρ₂·T2
+    ///     - Slit-like pores: S/V = 1/r  →  r = ρ₂·T2
+    ///     General formula: r = shape_factor · ρ₂ · T2
+    ///     Units check:
+    ///     [r] = [shape_factor] · [ρ₂] · [T2]
+    ///     μm = (dimensionless) · (μm/s) · (ms)
+    ///     μm = 1 · (μm/s) · (s · 10⁻³)
+    ///     μm = μm ✓
+    /// </summary>
     private void ComputePoreSizeDistribution(NMRResults results)
     {
-        // Convert T2 to pore size using surface relaxivity model
-        // r ≈ ρ * T2 (for spherical pores)
-        // where ρ is surface relaxivity
-
         if (results.T2HistogramBins == null) return;
 
-        var avgRelaxivity = _config.MaterialRelaxivities.Values
-            .Select(m => m.SurfaceRelaxivity)
+        // Get average surface relaxivity from MATRIX materials (not pore space!)
+        var avgRelaxivity = _config.MaterialRelaxivities
+            .Where(kvp => kvp.Key != _config.PoreMaterialID) // Exclude pore material
+            .Select(kvp => kvp.Value.SurfaceRelaxivity)
             .DefaultIfEmpty(10.0)
             .Average();
+
+        Logger.Log(
+            $"[NMRSimulation] Pore size calculation: ρ₂={avgRelaxivity:F1} μm/s, shape factor={_config.PoreShapeFactor:F1}");
 
         results.PoreSizes = new double[results.T2HistogramBins.Length];
         results.PoreSizeDistribution = new double[results.T2Histogram.Length];
 
         for (var i = 0; i < results.T2HistogramBins.Length; i++)
         {
-            // Convert T2 (ms) to pore radius (μm)
-            results.PoreSizes[i] = avgRelaxivity * results.T2HistogramBins[i] * 1e-3;
+            // CORRECT FORMULA: r = shape_factor * ρ₂ * T2
+            // T2 is in ms, ρ is in μm/s
+            // Convert T2 to seconds: T2_s = T2_ms * 1e-3
+            // r (μm) = shape_factor * ρ (μm/s) * T2 (s)
+            var t2Seconds = results.T2HistogramBins[i] * 1e-3; // ms → s
+            results.PoreSizes[i] = _config.PoreShapeFactor * avgRelaxivity * t2Seconds;
+
             results.PoreSizeDistribution[i] = results.T2Histogram[i];
         }
+
+        Logger.Log($"[NMRSimulation] Pore size range: {results.PoreSizes.Min():F3} - {results.PoreSizes.Max():F1} μm");
     }
 
     private void ComputeStatistics(NMRResults results)

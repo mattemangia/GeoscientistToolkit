@@ -15,6 +15,7 @@ namespace GeoscientistToolkit.Analysis.ThermalConductivity;
 /// <summary>
 ///     Solves thermal conductivity using Fourier's law and homogenization theory.
 ///     Supports AVX2, NEON, and OpenCL acceleration.
+///     AUTOMATICALLY EXCLUDES EXTERIOR MATERIAL (ID: 0) FROM SIMULATIONS.
 /// </summary>
 public class ThermalConductivitySolver
 {
@@ -38,6 +39,10 @@ __kernel void thermal_diffusion(
     
     int idx = (z*H + y)*W + x;
     uchar mat = labels[idx];
+    
+    // Skip exterior material (ID: 0)
+    if (mat == 0) return;
+    
     float k = conductivities[mat];
     
     // Get neighboring temperatures
@@ -117,6 +122,7 @@ __kernel void calculate_flux(
         Logger.Log($"[ThermalSolver] Starting thermal analysis for {dataset.Name}");
         Logger.Log($"[ThermalSolver] Boundary: Hot={options.TemperatureHot}°C, Cold={options.TemperatureCold}°C");
         Logger.Log($"[ThermalSolver] Direction: {options.HeatFlowDirection}");
+        Logger.Log("[ThermalSolver] EXCLUDING EXTERIOR MATERIAL (ID: 0) from simulation");
 
         var W = dataset.Width;
         var H = dataset.Height;
@@ -127,9 +133,15 @@ __kernel void calculate_flux(
         progress?.Report(0.05f);
         var temperature = InitializeTemperatureField(W, H, D, options);
 
-        // Get material conductivities
+        // Get material conductivities (excludes exterior ID: 0)
         progress?.Report(0.10f);
         var conductivities = GetMaterialConductivities(dataset, options);
+
+        // Log included materials
+        var includedMaterials = dataset.Materials.Where(m => m.ID != 0 && conductivities.ContainsKey(m.ID)).ToList();
+        Logger.Log($"[ThermalSolver] Simulating {includedMaterials.Count} materials:");
+        foreach (var mat in includedMaterials)
+            Logger.Log($"  - {mat.Name} (ID: {mat.ID}): k={conductivities[mat.ID]:F4} W/m·K");
 
         // Solve steady-state or transient
         progress?.Report(0.15f);
@@ -166,7 +178,8 @@ __kernel void calculate_flux(
         {
             TemperatureField = temperatureField,
             EffectiveConductivity = keff,
-            MaterialConductivities = conductivities.ToDictionary(kvp => kvp.Key, kvp => (double)kvp.Value),
+            MaterialConductivities = conductivities.Where(kvp => kvp.Key != 0)
+                .ToDictionary(kvp => kvp.Key, kvp => (double)kvp.Value),
             AnalyticalEstimates = analyticalEstimates.ToDictionary(kvp => kvp.Key, kvp => (double)kvp.Value),
             ComputationTime = sw.Elapsed
         };
@@ -206,7 +219,8 @@ __kernel void calculate_flux(
     {
         var conductivities = new Dictionary<byte, float>();
 
-        foreach (var material in dataset.Materials)
+        // Explicitly exclude exterior material (ID: 0)
+        foreach (var material in dataset.Materials.Where(m => m.ID != 0))
         {
             float k = 0;
 
@@ -228,11 +242,19 @@ __kernel void calculate_flux(
                 Logger.Log($"[ThermalSolver] Material {material.Name}: k={k} W/m·K (user override)");
             }
 
-            // Default for exterior (air)
-            if (material.ID == 0 && k == 0) k = 0.026f; // Air at 20°C
+            // Default for materials without assigned conductivity
+            if (k == 0)
+            {
+                k = 1.0f; // Default generic material
+                Logger.LogWarning(
+                    $"[ThermalSolver] Material {material.Name} has no conductivity, using default k={k} W/m·K");
+            }
 
             conductivities[material.ID] = k;
         }
+
+        // Add a very low conductivity for exterior (used for boundaries only, not in calculations)
+        conductivities[0] = 0.001f;
 
         return conductivities;
     }
@@ -301,7 +323,7 @@ __kernel void calculate_flux(
         var dT = (float)(options.TemperatureHot - options.TemperatureCold);
         var gradient = dT / (L * dx);
 
-        // Calculate average heat flux
+        // Calculate average heat flux (excluding exterior material)
         double totalFlux = 0;
         long count = 0;
 
@@ -309,33 +331,57 @@ __kernel void calculate_flux(
         for (var y = 0; y < H; y++)
         for (var x = 0; x < W - 1; x++)
         {
+            var mat1 = labels[x, y, z];
+
+            // Skip calculations involving exterior material (ID: 0)
+            if (mat1 == 0) continue;
+
             var T1 = temperature[x, y, z];
             float T2 = 0;
+            byte mat2 = 0;
 
             switch (options.HeatFlowDirection)
             {
                 case HeatFlowDirection.X:
-                    if (x < W - 1) T2 = temperature[x + 1, y, z];
-                    else continue;
+                    if (x < W - 1)
+                    {
+                        T2 = temperature[x + 1, y, z];
+                        mat2 = labels[x + 1, y, z];
+                    }
+                    else
+                    {
+                        continue;
+                    }
+
                     break;
                 case HeatFlowDirection.Y:
-                    if (y < H - 1) T2 = temperature[x, y + 1, z];
-                    else continue;
+                    if (y < H - 1)
+                    {
+                        T2 = temperature[x, y + 1, z];
+                        mat2 = labels[x, y + 1, z];
+                    }
+                    else
+                    {
+                        continue;
+                    }
+
                     break;
                 case HeatFlowDirection.Z:
-                    if (z < D - 1) T2 = temperature[x, y, z + 1];
-                    else continue;
+                    if (z < D - 1)
+                    {
+                        T2 = temperature[x, y, z + 1];
+                        mat2 = labels[x, y, z + 1];
+                    }
+                    else
+                    {
+                        continue;
+                    }
+
                     break;
             }
 
-            var mat1 = labels[x, y, z];
-            var mat2 = options.HeatFlowDirection switch
-            {
-                HeatFlowDirection.X => labels[x + 1, y, z],
-                HeatFlowDirection.Y => labels[x, y + 1, z],
-                HeatFlowDirection.Z => labels[x, y, z + 1],
-                _ => labels[x, y, z + 1]
-            };
+            // Skip if neighbor is exterior
+            if (mat2 == 0) continue;
 
             var k1 = conductivities[mat1];
             var k2 = conductivities[mat2];
@@ -344,6 +390,12 @@ __kernel void calculate_flux(
             var flux = -k_eff * (T2 - T1) / dx;
             totalFlux += flux;
             count++;
+        }
+
+        if (count == 0)
+        {
+            Logger.LogWarning("[ThermalSolver] No valid flux measurements (all voxels may be exterior). Returning 0.");
+            return 0.0f;
         }
 
         var avgFlux = totalFlux / count;
@@ -357,23 +409,38 @@ __kernel void calculate_flux(
     {
         var estimates = new Dictionary<string, float>();
 
-        // Calculate volume fractions
-        var totalVoxels = dataset.Width * dataset.Height * dataset.Depth;
+        // Calculate volume fractions (EXCLUDING EXTERIOR MATERIAL ID: 0)
         var materialVoxels = new Dictionary<byte, long>();
+        long totalNonExteriorVoxels = 0;
 
         for (var z = 0; z < dataset.Depth; z++)
         for (var y = 0; y < dataset.Height; y++)
         for (var x = 0; x < dataset.Width; x++)
         {
             var mat = dataset.LabelData[x, y, z];
+            if (mat == 0) continue; // Skip exterior
+
             if (!materialVoxels.ContainsKey(mat))
                 materialVoxels[mat] = 0;
             materialVoxels[mat]++;
+            totalNonExteriorVoxels++;
         }
 
-        // Assume first non-zero material is matrix, rest are inclusions
-        var matIds = conductivities.Keys.Where(k => k != 0).OrderBy(k => k).ToList();
-        if (matIds.Count < 2) return estimates;
+        if (totalNonExteriorVoxels == 0)
+        {
+            Logger.LogWarning("[ThermalSolver] No non-exterior voxels found. Cannot calculate analytical estimates.");
+            return estimates;
+        }
+
+        // Get non-exterior material IDs
+        var matIds = conductivities.Keys.Where(k => k != 0 && materialVoxels.ContainsKey(k)).OrderBy(k => k).ToList();
+
+        if (matIds.Count < 2)
+        {
+            Logger.Log(
+                $"[ThermalSolver] Only {matIds.Count} non-exterior material(s) found. Skipping analytical estimates (need at least 2).");
+            return estimates;
+        }
 
         var matrixId = matIds[0];
         var inclusionId = matIds[1];
@@ -382,9 +449,14 @@ __kernel void calculate_flux(
         var k_inclusion = conductivities[inclusionId];
         var Lambda = k_inclusion / k_matrix;
 
-        var matrixCount = materialVoxels.ContainsKey(matrixId) ? materialVoxels[matrixId] : 0;
-        var inclusionCount = materialVoxels.ContainsKey(inclusionId) ? materialVoxels[inclusionId] : 0;
+        var matrixCount = materialVoxels[matrixId];
+        var inclusionCount = materialVoxels[inclusionId];
         var epsilon = (float)inclusionCount / (matrixCount + inclusionCount);
+
+        Logger.Log("[ThermalSolver] Analytical model parameters:");
+        Logger.Log($"  Matrix: {dataset.Materials.First(m => m.ID == matrixId).Name} (k={k_matrix:F4})");
+        Logger.Log($"  Inclusion: {dataset.Materials.First(m => m.ID == inclusionId).Name} (k={k_inclusion:F4})");
+        Logger.Log($"  Volume fraction: ε={epsilon:F4}");
 
         // Ochoa-Tapia et al. (1994) - Series distribution
         var alpha = 1.0f;
@@ -426,7 +498,7 @@ __kernel void calculate_flux(
         var dx2 = dx * dx;
         var dy2 = dy * dy;
         var dz2 = dz * dz;
-        var max_k = conductivities.Values.Max();
+        var max_k = conductivities.Where(kvp => kvp.Key != 0).Max(kvp => kvp.Value);
         var dt = 0.1f * Math.Min(dx2, Math.Min(dy2, dz2)) / max_k;
 
         var iterations = options.MaxIterations;
@@ -503,12 +575,14 @@ __kernel void calculate_flux(
                 {
                     var idx = rowIdx + x;
 
-                    // Simplified computation for vectorization
-                    // Full heterogeneous computation done in scalar loop
                     for (var i = 0; i < 8; i++)
                     {
                         var cidx = idx + i;
                         var mat = labels[cidx % W, cidx / W % H, cidx / (W * H)];
+
+                        // Skip exterior material (ID: 0)
+                        if (mat == 0) continue;
+
                         var k = conductivities[mat];
 
                         var T_xp = tempIn[cidx + 1];
@@ -534,6 +608,10 @@ __kernel void calculate_flux(
                 {
                     var idx = rowIdx + x;
                     var mat = labels[x, y, z];
+
+                    // Skip exterior material (ID: 0)
+                    if (mat == 0) continue;
+
                     var k = conductivities[mat];
 
                     var T_c = tempIn[idx];
@@ -589,11 +667,14 @@ __kernel void calculate_flux(
                 {
                     var idx = rowIdx + x;
 
-                    // NEON processes 4 floats at a time
                     for (var i = 0; i < 4; i++)
                     {
                         var cidx = idx + i;
                         var mat = labels[cidx % W, cidx / W % H, cidx / (W * H)];
+
+                        // Skip exterior material (ID: 0)
+                        if (mat == 0) continue;
+
                         var k = conductivities[mat];
 
                         var T_c = tempIn[cidx];
@@ -612,20 +693,20 @@ __kernel void calculate_flux(
                         var mat_zp = labels[cidx % W, cidx / W % H, (cidx + W * H) / (W * H)];
                         var mat_zm = labels[cidx % W, cidx / W % H, (cidx - W * H) / (W * H)];
 
-                        var k_xp = conductivities[mat_xp];
-                        var k_xm = conductivities[mat_xm];
-                        var k_yp = conductivities[mat_yp];
-                        var k_ym = conductivities[mat_ym];
-                        var k_zp = conductivities[mat_zp];
-                        var k_zm = conductivities[mat_zm];
+                        var k_xp = conductivities.ContainsKey(mat_xp) ? conductivities[mat_xp] : 0.001f;
+                        var k_xm = conductivities.ContainsKey(mat_xm) ? conductivities[mat_xm] : 0.001f;
+                        var k_yp = conductivities.ContainsKey(mat_yp) ? conductivities[mat_yp] : 0.001f;
+                        var k_ym = conductivities.ContainsKey(mat_ym) ? conductivities[mat_ym] : 0.001f;
+                        var k_zp = conductivities.ContainsKey(mat_zp) ? conductivities[mat_zp] : 0.001f;
+                        var k_zm = conductivities.ContainsKey(mat_zm) ? conductivities[mat_zm] : 0.001f;
 
                         // Harmonic mean
-                        var k_x = 2 * k * k_xp / (k + k_xp + 1e-10f);
-                        var k_xm_avg = 2 * k * k_xm / (k + k_xm + 1e-10f);
-                        var k_y = 2 * k * k_yp / (k + k_yp + 1e-10f);
-                        var k_ym_avg = 2 * k * k_ym / (k + k_ym + 1e-10f);
-                        var k_z = 2 * k * k_zp / (k + k_zp + 1e-10f);
-                        var k_zm_avg = 2 * k * k_zm / (k + k_zm + 1e-10f);
+                        var k_x = HarmonicMean(k, k_xp);
+                        var k_xm_avg = HarmonicMean(k, k_xm);
+                        var k_y = HarmonicMean(k, k_yp);
+                        var k_ym_avg = HarmonicMean(k, k_ym);
+                        var k_z = HarmonicMean(k, k_zp);
+                        var k_zm_avg = HarmonicMean(k, k_zm);
 
                         var d2T_dx2 = (k_x * (T_xp - T_c) - k_xm_avg * (T_c - T_xm)) / dx2;
                         var d2T_dy2 = (k_y * (T_yp - T_c) - k_ym_avg * (T_c - T_ym)) / dy2;
@@ -643,6 +724,10 @@ __kernel void calculate_flux(
                 {
                     var idx = rowIdx + x;
                     var mat = labels[x, y, z];
+
+                    // Skip exterior material (ID: 0)
+                    if (mat == 0) continue;
+
                     var k = conductivities[mat];
 
                     var T_c = tempIn[idx];
@@ -653,19 +738,26 @@ __kernel void calculate_flux(
                     var T_zp = tempIn[idx + W * H];
                     var T_zm = tempIn[idx - W * H];
 
-                    var k_xp = conductivities[labels[x + 1, y, z]];
-                    var k_xm = conductivities[labels[x - 1, y, z]];
-                    var k_yp = conductivities[labels[x, y + 1, z]];
-                    var k_ym = conductivities[labels[x, y - 1, z]];
-                    var k_zp = conductivities[labels[x, y, z + 1]];
-                    var k_zm = conductivities[labels[x, y, z - 1]];
+                    var mat_xp = labels[x + 1, y, z];
+                    var mat_xm = labels[x - 1, y, z];
+                    var mat_yp = labels[x, y + 1, z];
+                    var mat_ym = labels[x, y - 1, z];
+                    var mat_zp = labels[x, y, z + 1];
+                    var mat_zm = labels[x, y, z - 1];
 
-                    var k_x = 2 * k * k_xp / (k + k_xp + 1e-10f);
-                    var k_xm_avg = 2 * k * k_xm / (k + k_xm + 1e-10f);
-                    var k_y = 2 * k * k_yp / (k + k_yp + 1e-10f);
-                    var k_ym_avg = 2 * k * k_ym / (k + k_ym + 1e-10f);
-                    var k_z = 2 * k * k_zp / (k + k_zp + 1e-10f);
-                    var k_zm_avg = 2 * k * k_zm / (k + k_zm + 1e-10f);
+                    var k_xp = conductivities.ContainsKey(mat_xp) ? conductivities[mat_xp] : 0.001f;
+                    var k_xm = conductivities.ContainsKey(mat_xm) ? conductivities[mat_xm] : 0.001f;
+                    var k_yp = conductivities.ContainsKey(mat_yp) ? conductivities[mat_yp] : 0.001f;
+                    var k_ym = conductivities.ContainsKey(mat_ym) ? conductivities[mat_ym] : 0.001f;
+                    var k_zp = conductivities.ContainsKey(mat_zp) ? conductivities[mat_zp] : 0.001f;
+                    var k_zm = conductivities.ContainsKey(mat_zm) ? conductivities[mat_zm] : 0.001f;
+
+                    var k_x = HarmonicMean(k, k_xp);
+                    var k_xm_avg = HarmonicMean(k, k_xm);
+                    var k_y = HarmonicMean(k, k_yp);
+                    var k_ym_avg = HarmonicMean(k, k_ym);
+                    var k_z = HarmonicMean(k, k_zp);
+                    var k_zm_avg = HarmonicMean(k, k_zm);
 
                     var d2T_dx2 = (k_x * (T_xp - T_c) - k_xm_avg * (T_c - T_xm)) / dx2;
                     var d2T_dy2 = (k_y * (T_yp - T_c) - k_ym_avg * (T_c - T_ym)) / dy2;
@@ -706,6 +798,10 @@ __kernel void calculate_flux(
             {
                 var idx = (z * H + y) * W + x;
                 var mat = labels[x, y, z];
+
+                // Skip exterior material (ID: 0)
+                if (mat == 0) continue;
+
                 var k_c = conductivities[mat];
 
                 var T_c = tempIn[idx];
@@ -724,17 +820,14 @@ __kernel void calculate_flux(
                 var mat_zp = labels[x, y, z + 1];
                 var mat_zm = labels[x, y, z - 1];
 
-                var k_xp = conductivities[mat_xp];
-                var k_xm = conductivities[mat_xm];
-                var k_yp = conductivities[mat_yp];
-                var k_ym = conductivities[mat_ym];
-                var k_zp = conductivities[mat_zp];
-                var k_zm = conductivities[mat_zm];
+                var k_xp = conductivities.ContainsKey(mat_xp) ? conductivities[mat_xp] : 0.001f;
+                var k_xm = conductivities.ContainsKey(mat_xm) ? conductivities[mat_xm] : 0.001f;
+                var k_yp = conductivities.ContainsKey(mat_yp) ? conductivities[mat_yp] : 0.001f;
+                var k_ym = conductivities.ContainsKey(mat_ym) ? conductivities[mat_ym] : 0.001f;
+                var k_zp = conductivities.ContainsKey(mat_zp) ? conductivities[mat_zp] : 0.001f;
+                var k_zm = conductivities.ContainsKey(mat_zm) ? conductivities[mat_zm] : 0.001f;
 
-                // Interface conductivities using harmonic mean (correct for flux across interface)
-                // For heat flux perpendicular to an interface, thermal resistances add in series
-                // Harmonic mean: k_eff = 2*k1*k2/(k1+k2) - equivalent to series resistances
-                // This is the standard and correct approach for finite difference thermal solvers
+                // Interface conductivities using harmonic mean
                 var k_interface_xp = HarmonicMean(k_c, k_xp);
                 var k_interface_xm = HarmonicMean(k_c, k_xm);
                 var k_interface_yp = HarmonicMean(k_c, k_yp);
@@ -742,13 +835,12 @@ __kernel void calculate_flux(
                 var k_interface_zp = HarmonicMean(k_c, k_zp);
                 var k_interface_zm = HarmonicMean(k_c, k_zm);
 
-                // Finite difference approximation of ∇·(k∇T)
-                // This correctly handles spatially varying conductivity
+                // Finite difference approximation
                 var d2T_dx2 = (k_interface_xp * (T_xp - T_c) - k_interface_xm * (T_c - T_xm)) / dx2;
                 var d2T_dy2 = (k_interface_yp * (T_yp - T_c) - k_interface_ym * (T_c - T_ym)) / dy2;
                 var d2T_dz2 = (k_interface_zp * (T_zp - T_c) - k_interface_zm * (T_c - T_zm)) / dz2;
 
-                // Explicit time integration (pseudo-transient to steady state)
+                // Explicit time integration
                 tempOut[idx] = T_c + dt * (d2T_dx2 + d2T_dy2 + d2T_dz2);
 
                 var change = Math.Abs(tempOut[idx] - T_c);
@@ -764,39 +856,18 @@ __kernel void calculate_flux(
         return maxChange;
     }
 
-    /// <summary>
-    ///     Harmonic mean for interface conductivity.
-    ///     Used when heat flows PERPENDICULAR to material interface (across boundaries).
-    ///     Formula: k_eff = 2*k1*k2/(k1+k2)
-    ///     Physical meaning: Thermal resistances in series (R = R1 + R2)
-    /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static float HarmonicMean(float k1, float k2)
     {
-        // Add small epsilon to avoid division by zero
         return 2.0f * k1 * k2 / (k1 + k2 + 1e-10f);
     }
 
-    /// <summary>
-    ///     Arithmetic mean for effective conductivity.
-    ///     Used when heat flows PARALLEL to material interface (along boundaries).
-    ///     Formula: k_eff = (k1 + k2) / 2
-    ///     Physical meaning: Conductances in parallel (G = G1 + G2)
-    ///     NOTE: Not typically used in standard finite difference schemes,
-    ///     but included for completeness and special applications.
-    /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static float ArithmeticMean(float k1, float k2)
     {
         return 0.5f * (k1 + k2);
     }
 
-    /// <summary>
-    ///     Geometric mean for effective conductivity.
-    ///     Formula: k_eff = sqrt(k1 * k2)
-    ///     Sometimes used in geosciences for isotropic random media.
-    ///     Provides a value between harmonic and arithmetic means.
-    /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static float GeometricMean(float k1, float k2)
     {
@@ -881,7 +952,7 @@ __kernel void calculate_flux(
                 var dx2 = dx * dx;
                 var dy2 = dy * dy;
                 var dz2 = dz * dz;
-                var max_k = conductivities.Values.Max();
+                var max_k = conductivities.Where(kvp => kvp.Key != 0).Max(kvp => kvp.Value);
                 var dt = 0.1f * Math.Min(dx2, Math.Min(dy2, dz2)) / max_k;
 
                 var iterations = options.MaxIterations;

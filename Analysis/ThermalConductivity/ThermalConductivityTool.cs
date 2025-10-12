@@ -157,163 +157,174 @@ public class ThermalConductivityTool : IDatasetTools, IDisposable
 
         ImGui.Spacing();
 
-        // Material properties with library integration
+        // Material properties with library integration - EXCLUDE EXTERIOR (ID: 0)
         if (ImGui.CollapsingHeader("Material Properties", ImGuiTreeNodeFlags.DefaultOpen))
         {
             ImGui.Indent();
 
-            if (ImGui.BeginTable("MaterialsTable", 6,
-                    ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.ScrollY |
-                    ImGuiTableFlags.SizingFixedFit,
-                    new Vector2(0, 200)))
+            // Filter out exterior material (ID: 0)
+            var visibleMaterials = _options.Dataset.Materials.Where(m => m.ID != 0).ToList();
+
+            if (visibleMaterials.Count == 0)
             {
-                ImGui.TableSetupColumn("", ImGuiTableColumnFlags.WidthFixed, 25);
-                ImGui.TableSetupColumn("Material", ImGuiTableColumnFlags.WidthFixed, 120);
-                ImGui.TableSetupColumn("k (W/m·K)", ImGuiTableColumnFlags.WidthFixed, 90);
-                ImGui.TableSetupColumn("Library", ImGuiTableColumnFlags.WidthFixed, 100);
-                ImGui.TableSetupColumn("Properties", ImGuiTableColumnFlags.WidthFixed, 80);
-                ImGui.TableSetupColumn("Actions", ImGuiTableColumnFlags.WidthStretch);
-                ImGui.TableHeadersRow();
-
-                foreach (var material in _options.Dataset.Materials)
+                ImGui.TextDisabled("No materials defined. Use segmentation tools to create materials.");
+            }
+            else
+            {
+                if (ImGui.BeginTable("MaterialsTable", 6,
+                        ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.ScrollY |
+                        ImGuiTableFlags.SizingFixedFit,
+                        new Vector2(0, 200)))
                 {
-                    ImGui.TableNextRow();
-                    ImGui.TableNextColumn();
+                    ImGui.TableSetupColumn("", ImGuiTableColumnFlags.WidthFixed, 25);
+                    ImGui.TableSetupColumn("Material", ImGuiTableColumnFlags.WidthFixed, 120);
+                    ImGui.TableSetupColumn("k (W/m·K)", ImGuiTableColumnFlags.WidthFixed, 90);
+                    ImGui.TableSetupColumn("Library", ImGuiTableColumnFlags.WidthFixed, 100);
+                    ImGui.TableSetupColumn("Properties", ImGuiTableColumnFlags.WidthFixed, 80);
+                    ImGui.TableSetupColumn("Actions", ImGuiTableColumnFlags.WidthStretch);
+                    ImGui.TableHeadersRow();
 
-                    // Color indicator
-                    var color = material.Color;
-                    ImGui.ColorButton($"##color_{material.ID}", color, ImGuiColorEditFlags.NoTooltip,
-                        new Vector2(16, 16));
-
-                    ImGui.TableNextColumn();
-                    ImGui.Text(material.Name);
-
-                    ImGui.TableNextColumn();
-                    if (!_options.MaterialConductivities.ContainsKey(material.ID))
-                        _options.MaterialConductivities[material.ID] = 1.0;
-                    var conductivity = (float)_options.MaterialConductivities[material.ID];
-                    ImGui.SetNextItemWidth(-1);
-                    if (ImGui.InputFloat($"##cond_{material.ID}", ref conductivity, 0.01f, 0.1f, "%.4f"))
-                        _options.MaterialConductivities[material.ID] = Math.Max(0.001, conductivity);
-
-                    // Validation indicator
-                    if (conductivity <= 0)
+                    foreach (var material in visibleMaterials)
                     {
-                        ImGui.TableNextColumn();
-                        ImGui.TextColored(new Vector4(1, 0, 0, 1), "!");
-                        if (ImGui.IsItemHovered()) ImGui.SetTooltip("Invalid conductivity value");
-                    }
-                    else
-                    {
+                        ImGui.TableNextRow();
                         ImGui.TableNextColumn();
 
-                        // Show library source
-                        PhysicalMaterial libMat = null;
+                        // Color indicator
+                        var color = material.Color;
+                        ImGui.ColorButton($"##color_{material.ID}", color, ImGuiColorEditFlags.NoTooltip,
+                            new Vector2(16, 16));
+
+                        ImGui.TableNextColumn();
+                        ImGui.Text(material.Name);
+
+                        ImGui.TableNextColumn();
+                        if (!_options.MaterialConductivities.ContainsKey(material.ID))
+                            _options.MaterialConductivities[material.ID] = 1.0;
+                        var conductivity = (float)_options.MaterialConductivities[material.ID];
+                        ImGui.SetNextItemWidth(-1);
+                        if (ImGui.InputFloat($"##cond_{material.ID}", ref conductivity, 0.01f, 0.1f, "%.4f"))
+                            _options.MaterialConductivities[material.ID] = Math.Max(0.001, conductivity);
+
+                        // Validation indicator
+                        if (conductivity <= 0)
+                        {
+                            ImGui.TableNextColumn();
+                            ImGui.TextColored(new Vector4(1, 0, 0, 1), "!");
+                            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Invalid conductivity value");
+                        }
+                        else
+                        {
+                            ImGui.TableNextColumn();
+
+                            // Show library source
+                            PhysicalMaterial libMat = null;
+                            if (!string.IsNullOrEmpty(material.PhysicalMaterialName))
+                                libMat = MaterialLibrary.Instance.Find(material.PhysicalMaterialName);
+
+                            if (libMat != null)
+                            {
+                                ImGui.TextColored(new Vector4(0.5f, 1, 0.5f, 1), "OK");
+                                if (ImGui.IsItemHovered())
+                                {
+                                    ImGui.BeginTooltip();
+                                    ImGui.Text($"Linked: {libMat.Name}");
+                                    if (libMat.ThermalConductivity_W_mK.HasValue)
+                                        ImGui.Text($"k = {libMat.ThermalConductivity_W_mK:F4} W/m·K");
+                                    ImGui.EndTooltip();
+                                }
+                            }
+                            else
+                            {
+                                ImGui.TextDisabled("Manual");
+                            }
+                        }
+
+                        ImGui.TableNextColumn();
+                        // Show available properties from library
                         if (!string.IsNullOrEmpty(material.PhysicalMaterialName))
-                            libMat = MaterialLibrary.Instance.Find(material.PhysicalMaterialName);
-
-                        if (libMat != null)
                         {
-                            ImGui.TextColored(new Vector4(0.5f, 1, 0.5f, 1), "OK");
-                            if (ImGui.IsItemHovered())
+                            var libMat = MaterialLibrary.Instance.Find(material.PhysicalMaterialName);
+                            if (libMat != null)
                             {
-                                ImGui.BeginTooltip();
-                                ImGui.Text($"Linked: {libMat.Name}");
-                                if (libMat.ThermalConductivity_W_mK.HasValue)
-                                    ImGui.Text($"k = {libMat.ThermalConductivity_W_mK:F4} W/m·K");
-                                ImGui.EndTooltip();
+                                var availableCount = 0;
+                                if (libMat.ThermalConductivity_W_mK.HasValue) availableCount++;
+                                if (libMat.SpecificHeatCapacity_J_kgK.HasValue) availableCount++;
+                                if (libMat.Density_kg_m3.HasValue) availableCount++;
+                                if (libMat.ThermalDiffusivity_m2_s.HasValue) availableCount++;
+
+                                ImGui.Text($"{availableCount}/4");
+                                if (ImGui.IsItemHovered())
+                                {
+                                    ImGui.BeginTooltip();
+                                    ImGui.Text("Available thermal properties:");
+                                    if (libMat.ThermalConductivity_W_mK.HasValue)
+                                        ImGui.Text($"  k = {libMat.ThermalConductivity_W_mK:F4} W/m·K");
+                                    if (libMat.SpecificHeatCapacity_J_kgK.HasValue)
+                                        ImGui.Text($"  cp = {libMat.SpecificHeatCapacity_J_kgK:F1} J/kg·K");
+                                    if (libMat.Density_kg_m3.HasValue)
+                                        ImGui.Text($"  rho = {libMat.Density_kg_m3:F1} kg/m³");
+                                    if (libMat.ThermalDiffusivity_m2_s.HasValue)
+                                        ImGui.Text($"  alpha = {libMat.ThermalDiffusivity_m2_s:E2} m²/s");
+                                    ImGui.EndTooltip();
+                                }
+                            }
+                            else
+                            {
+                                ImGui.TextDisabled("0/4");
                             }
                         }
                         else
                         {
-                            ImGui.TextDisabled("Manual");
+                            ImGui.TextDisabled("---");
                         }
-                    }
 
-                    ImGui.TableNextColumn();
-                    // Show available properties from library
-                    if (!string.IsNullOrEmpty(material.PhysicalMaterialName))
-                    {
-                        var libMat = MaterialLibrary.Instance.Find(material.PhysicalMaterialName);
-                        if (libMat != null)
+                        ImGui.TableNextColumn();
+                        if (ImGui.SmallButton($"Browse##browse_{material.ID}"))
                         {
-                            var availableCount = 0;
-                            if (libMat.ThermalConductivity_W_mK.HasValue) availableCount++;
-                            if (libMat.SpecificHeatCapacity_J_kgK.HasValue) availableCount++;
-                            if (libMat.Density_kg_m3.HasValue) availableCount++;
-                            if (libMat.ThermalDiffusivity_m2_s.HasValue) availableCount++;
+                            _targetMaterialIdForAssignment = material.ID;
+                            _showMaterialLibraryBrowser = true;
+                        }
 
-                            ImGui.Text($"{availableCount}/4");
-                            if (ImGui.IsItemHovered())
+                        if (ImGui.IsItemHovered()) ImGui.SetTooltip("Browse and assign from material library");
+
+                        // Clear library link button
+                        if (!string.IsNullOrEmpty(material.PhysicalMaterialName))
+                        {
+                            ImGui.SameLine();
+                            if (ImGui.SmallButton($"Clear##clear_{material.ID}"))
                             {
-                                ImGui.BeginTooltip();
-                                ImGui.Text("Available thermal properties:");
-                                if (libMat.ThermalConductivity_W_mK.HasValue)
-                                    ImGui.Text($"  k = {libMat.ThermalConductivity_W_mK:F4} W/m·K");
-                                if (libMat.SpecificHeatCapacity_J_kgK.HasValue)
-                                    ImGui.Text($"  cp = {libMat.SpecificHeatCapacity_J_kgK:F1} J/kg·K");
-                                if (libMat.Density_kg_m3.HasValue)
-                                    ImGui.Text($"  rho = {libMat.Density_kg_m3:F1} kg/m³");
-                                if (libMat.ThermalDiffusivity_m2_s.HasValue)
-                                    ImGui.Text($"  alpha = {libMat.ThermalDiffusivity_m2_s:E2} m²/s");
-                                ImGui.EndTooltip();
+                                material.PhysicalMaterialName = null;
+                                Logger.Log($"[ThermalTool] Cleared library link for {material.Name}");
                             }
-                        }
-                        else
-                        {
-                            ImGui.TextDisabled("0/4");
+
+                            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Clear library link");
                         }
                     }
-                    else
-                    {
-                        ImGui.TextDisabled("---");
-                    }
 
-                    ImGui.TableNextColumn();
-                    if (ImGui.SmallButton($"Browse##browse_{material.ID}"))
-                    {
-                        _targetMaterialIdForAssignment = material.ID;
-                        _showMaterialLibraryBrowser = true;
-                    }
-
-                    if (ImGui.IsItemHovered()) ImGui.SetTooltip("Browse and assign from material library");
-
-                    // Clear library link button
-                    if (!string.IsNullOrEmpty(material.PhysicalMaterialName))
-                    {
-                        ImGui.SameLine();
-                        if (ImGui.SmallButton($"Clear##clear_{material.ID}"))
-                        {
-                            material.PhysicalMaterialName = null;
-                            Logger.Log($"[ThermalTool] Cleared library link for {material.Name}");
-                        }
-
-                        if (ImGui.IsItemHovered()) ImGui.SetTooltip("Clear library link");
-                    }
+                    ImGui.EndTable();
                 }
 
-                ImGui.EndTable();
+                ImGui.Spacing();
+
+                // Quick material presets - EXCLUDE EXTERIOR
+                ImGui.Text("Quick Assignments:");
+                ImGui.PushStyleVar(ImGuiStyleVar.FramePadding, new Vector2(4, 2));
+
+                if (ImGui.Button("Air (0.026)", new Vector2((availWidth - 8) / 3, 0)))
+                    foreach (var mat in visibleMaterials)
+                        _options.MaterialConductivities[mat.ID] = 0.026;
+                ImGui.SameLine();
+                if (ImGui.Button("Water (0.6)", new Vector2((availWidth - 8) / 3, 0)))
+                    foreach (var mat in visibleMaterials)
+                        _options.MaterialConductivities[mat.ID] = 0.6;
+                ImGui.SameLine();
+                if (ImGui.Button("Rock (2.5)", new Vector2((availWidth - 8) / 3, 0)))
+                    foreach (var mat in visibleMaterials)
+                        _options.MaterialConductivities[mat.ID] = 2.5;
+
+                ImGui.PopStyleVar();
             }
 
-            ImGui.Spacing();
-
-            // Quick material presets
-            ImGui.Text("Quick Assignments:");
-            ImGui.PushStyleVar(ImGuiStyleVar.FramePadding, new Vector2(4, 2));
-
-            if (ImGui.Button("Air (0.026)", new Vector2((availWidth - 8) / 3, 0)))
-                foreach (var mat in _options.Dataset.Materials)
-                    _options.MaterialConductivities[mat.ID] = 0.026;
-            ImGui.SameLine();
-            if (ImGui.Button("Water (0.6)", new Vector2((availWidth - 8) / 3, 0)))
-                foreach (var mat in _options.Dataset.Materials)
-                    _options.MaterialConductivities[mat.ID] = 0.6;
-            ImGui.SameLine();
-            if (ImGui.Button("Rock (2.5)", new Vector2((availWidth - 8) / 3, 0)))
-                foreach (var mat in _options.Dataset.Materials)
-                    _options.MaterialConductivities[mat.ID] = 2.5;
-
-            ImGui.PopStyleVar();
             ImGui.Unindent();
         }
 
@@ -573,18 +584,19 @@ public class ThermalConductivityTool : IDatasetTools, IDisposable
             }
             else
             {
-                // Apply to all materials
+                // Apply to all materials (excluding exterior)
                 if (ImGui.Button("Apply to All Materials", new Vector2(-260, 0)))
                     if (_selectedLibraryMaterial?.ThermalConductivity_W_mK != null)
                     {
-                        foreach (var mat in _options.Dataset.Materials)
+                        foreach (var mat in _options.Dataset.Materials.Where(m => m.ID != 0))
                         {
                             _options.MaterialConductivities[mat.ID] =
                                 _selectedLibraryMaterial.ThermalConductivity_W_mK.Value;
                             mat.PhysicalMaterialName = _selectedLibraryMaterial.Name;
                         }
 
-                        Logger.Log($"[ThermalTool] Applied {_selectedLibraryMaterial.Name} to all materials");
+                        Logger.Log(
+                            $"[ThermalTool] Applied {_selectedLibraryMaterial.Name} to all materials (excluding exterior)");
                         _showMaterialLibraryBrowser = false;
                     }
             }
@@ -635,7 +647,8 @@ public class ThermalConductivityTool : IDatasetTools, IDisposable
         if (_options.TemperatureHot <= _options.TemperatureCold)
             messages.Add("Hot temperature must exceed cold temperature");
 
-        foreach (var kvp in _options.MaterialConductivities)
+        // Only check non-exterior materials
+        foreach (var kvp in _options.MaterialConductivities.Where(k => k.Key != 0))
             if (kvp.Value <= 0)
             {
                 var mat = _options.Dataset.Materials.FirstOrDefault(m => m.ID == kvp.Key);
@@ -647,6 +660,11 @@ public class ThermalConductivityTool : IDatasetTools, IDisposable
 
         if (_options.Dataset.Width < 3 || _options.Dataset.Height < 3 || _options.Dataset.Depth < 3)
             messages.Add("Dataset too small (min 3x3x3 voxels)");
+
+        // Check if there are any non-exterior materials
+        var hasNonExteriorMaterials = _options.Dataset.Materials.Any(m => m.ID != 0);
+        if (!hasNonExteriorMaterials)
+            messages.Add("No materials defined (use segmentation tools to create materials)");
 
         return messages.Count == 0;
     }
@@ -1218,7 +1236,8 @@ public class ThermalConductivityTool : IDatasetTools, IDisposable
 
                 writer.WriteLine("## Material Conductivities");
                 writer.WriteLine("Material ID,Material Name,Conductivity (W/mK)");
-                foreach (var material in _options.Dataset.Materials.OrderBy(m => m.ID))
+                // Exclude exterior material (ID: 0) from export
+                foreach (var material in _options.Dataset.Materials.Where(m => m.ID != 0).OrderBy(m => m.ID))
                 {
                     var conductivity = results.MaterialConductivities.ContainsKey(material.ID)
                         ? results.MaterialConductivities[material.ID]

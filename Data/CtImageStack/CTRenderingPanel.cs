@@ -1,4 +1,5 @@
 ﻿// GeoscientistToolkit/Data/CtImageStack/CtRenderingPanel.cs
+// FIXED: Material color changes now trigger 2D slice updates
 
 using System.Numerics;
 using GeoscientistToolkit.UI;
@@ -229,7 +230,9 @@ public class CtRenderingPanel : BasePanel
                         ImGuiColorEditFlags.NoInputs | ImGuiColorEditFlags.NoLabel))
                 {
                     material.Color = new Vector4(color3, color.W);
-                    _viewer.VolumeViewer?.SetMaterialVisibility(material.ID, isVisible); // Force update
+                    // FIXED: Trigger 2D slice updates when color changes
+                    _viewer.NotifyMaterialColorChanged();
+                    _viewer.VolumeViewer?.SetMaterialVisibility(material.ID, isVisible); // Force 3D update
                 }
 
                 ImGui.SameLine();
@@ -240,6 +243,7 @@ public class CtRenderingPanel : BasePanel
                     var opacity = _viewer.GetMaterialOpacity(material.ID);
                     ImGui.SetNextItemWidth(100);
                     if (ImGui.SliderFloat($"##opacity{material.ID}", ref opacity, 0.0f, 1.0f, "%.2f"))
+                        // FIXED: SetMaterialOpacity now triggers slice updates in CtCombinedViewer
                         _viewer.SetMaterialOpacity(material.ID, opacity);
                 }
 
