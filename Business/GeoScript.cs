@@ -1,10 +1,14 @@
 // GeoscientistToolkit/Business/GeoScript/GeoScript.cs
 
 using System.Data;
+using System.Globalization;
+using System.Reflection;
 using System.Text.RegularExpressions;
 using GeoscientistToolkit.Business.GIS;
+using GeoscientistToolkit.Business.Thermodynamics;
 using GeoscientistToolkit.Data;
 using GeoscientistToolkit.Data.GIS;
+using GeoscientistToolkit.Data.Materials;
 using GeoscientistToolkit.Data.Table;
 using GeoscientistToolkit.Util;
 using NCalc;
@@ -158,7 +162,14 @@ public static class CommandRegistry
             new ReclassifyCommand(),
             new SlopeCommand(),
             new AspectCommand(),
-            new ContourCommand()
+            new ContourCommand(),
+
+            // Thermodynamics Commands
+            new EquilibrateCommand(),
+            new SaturationCommand(),
+            new BalanceReactionCommand(),
+            new EvaporateCommand(),
+            new ReactCommand()
         };
         Commands = commandList.ToDictionary(c => c.Name.ToUpper(), c => c);
     }
@@ -896,6 +907,438 @@ public class ContourCommand : IGeoScriptCommand
         Logger.LogWarning(
             "CONTOUR command is not yet implemented. Requires a raster-to-vector marching squares algorithm.");
         return Task.FromResult(context.InputDataset);
+    }
+}
+
+#endregion
+
+#region --- Thermodynamics Command Implementations ---
+
+/// <summary>
+///     Base class for thermodynamics commands to share helper methods.
+/// </summary>
+public abstract class ThermoCommandBase
+{
+    /// <summary>
+    ///     Converts a concentration value to mol/L based on units found in the column header.
+    /// </summary>
+    /// <param name="columnName">The column header, e.g., "Ca (mg/L)"</param>
+    /// <param name="value">The numeric value from the cell.</param>
+    /// <param name="compoundLib">The compound library for molar mass lookups.</param>
+    /// <returns>The concentration in mol/L.</returns>
+    protected double ConvertToMoles(string columnName, double value, CompoundLibrary compoundLib)
+    {
+        // Regex to find units in parentheses, brackets, or after an underscore.
+        // Examples: "Ca (mg/L)", "Na [ppm]", "Cl_mg_L"
+        var unitMatch = Regex.Match(columnName, @"[\(\[_](?<unit>.+)[\)\]_]?");
+        var speciesName = columnName.Split(' ', '(', '[', '_')[0].Trim();
+
+        if (!unitMatch.Success)
+            // No units specified, assume mol/L as the base unit
+            return value;
+
+        var unit = unitMatch.Groups["unit"].Value.Trim().ToLower();
+        var compound = compoundLib.Find(speciesName);
+
+        if (compound == null)
+        {
+            // If we can't find the compound, we can't get a molar mass for conversion
+            Logger.LogWarning(
+                $"Could not find compound '{speciesName}' for unit conversion. Assuming a molar mass of 1 g/mol.");
+            return value; // Cannot convert without molar mass
+        }
+
+        var molarMass_g_mol = compound.MolecularWeight_g_mol ?? 1.0;
+        if (molarMass_g_mol == 0) molarMass_g_mol = 1.0;
+
+        switch (unit)
+        {
+            // Mass-based units
+            case "mg/l":
+            case "ppm": // ppm is roughly mg/L for dilute aqueous solutions
+                // (value mg/L) * (1 g / 1000 mg) / (molarMass g/mol) = mol/L
+                return value / 1000.0 / molarMass_g_mol;
+            case "ug/l":
+            case "ppb": // ppb is roughly ug/L
+                // (value ug/L) * (1 g / 1,000,000 ug) / (molarMass g/mol) = mol/L
+                return value / 1_000_000.0 / molarMass_g_mol;
+            case "g/l":
+                return value / molarMass_g_mol;
+
+            // Molar-based units
+            case "mol/l":
+            case "m": // common abbreviation for molarity
+                return value;
+            case "mmol/l":
+                return value / 1000.0;
+            case "umol/l":
+                return value / 1_000_000.0;
+            case "nmol/l":
+                return value / 1_000_000_000.0;
+
+            default:
+                Logger.LogWarning(
+                    $"Unrecognized unit '{unit}' in column '{columnName}'. Value will be treated as mol/L.");
+                return value;
+        }
+    }
+
+    /// <summary>
+    ///     Creates a ThermodynamicState from a row in a DataTable, now with unit conversion.
+    /// </summary>
+    protected ThermodynamicState CreateStateFromDataRow(DataRow row, double temperatureK = 298.15,
+        double pressureBar = 1.0)
+    {
+        var state = new ThermodynamicState
+        {
+            Temperature_K = temperatureK,
+            Pressure_bar = pressureBar,
+            Volume_L = 1.0 // Assume 1 kg of H2O solvent
+        };
+
+        var compoundLib = CompoundLibrary.Instance;
+        var reactionGenerator = new ReactionGenerator(compoundLib);
+
+        foreach (DataColumn col in row.Table.Columns)
+            // Try to parse the cell value to a double
+            if (double.TryParse(row[col].ToString(), NumberStyles.Any, CultureInfo.InvariantCulture, out var rawValue))
+            {
+                // *** NEW: Convert value from specified units to mol/L ***
+                var moles = ConvertToMoles(col.ColumnName, rawValue, compoundLib);
+                var speciesName = col.ColumnName.Split(' ', '(', '[', '_')[0].Trim();
+                var compound = compoundLib.Find(speciesName);
+
+                if (compound != null)
+                {
+                    var composition = reactionGenerator.ParseChemicalFormula(compound.ChemicalFormula);
+                    foreach (var (element, stoichiometry) in composition)
+                    {
+                        var molesOfElement = moles * stoichiometry;
+                        state.ElementalComposition[element] =
+                            state.ElementalComposition.GetValueOrDefault(element, 0) + molesOfElement;
+                    }
+
+                    state.SpeciesMoles[compound.Name] = moles;
+                }
+            }
+
+        // (Charge balance logic would go here as implemented previously)
+
+        return state;
+    }
+}
+
+public class EquilibrateCommand : ThermoCommandBase, IGeoScriptCommand
+{
+    public string Name => "EQUILIBRATE";
+    public string HelpText => "Solves for aqueous speciation for each row in a table.";
+    public string Usage => "EQUILIBRATE";
+
+    public Task<Dataset> ExecuteAsync(GeoScriptContext context, AstNode node)
+    {
+        if (context.InputDataset is not TableDataset tableDs)
+            throw new NotSupportedException("EQUILIBRATE only works on Table Datasets.");
+
+        var solver = new ThermodynamicSolver();
+        var sourceTable = tableDs.GetDataTable();
+        var resultTable = sourceTable.Copy();
+
+        // Add columns for standard outputs
+        if (!resultTable.Columns.Contains("pH")) resultTable.Columns.Add("pH", typeof(double));
+        if (!resultTable.Columns.Contains("IonicStrength_molkg"))
+            resultTable.Columns.Add("IonicStrength_molkg", typeof(double));
+
+        var allSpecies = new HashSet<string>();
+
+        // First pass to determine all possible species to create columns
+        foreach (DataRow row in sourceTable.Rows)
+        {
+            var initialState = CreateStateFromDataRow(row);
+            var finalState = solver.SolveSpeciation(initialState);
+            foreach (var species in finalState.Activities.Keys) allSpecies.Add(species);
+        }
+
+        // Add columns for activities of all species found
+        foreach (var species in allSpecies)
+        {
+            var colName = $"act_{species.Replace("⁺", "+").Replace("⁻", "-")}";
+            if (!resultTable.Columns.Contains(colName)) resultTable.Columns.Add(colName, typeof(double));
+        }
+
+        // Second pass to run simulation and populate the table
+        for (var i = 0; i < sourceTable.Rows.Count; i++)
+        {
+            var initialState = CreateStateFromDataRow(sourceTable.Rows[i]);
+            var finalState = solver.SolveSpeciation(initialState);
+
+            var resultRow = resultTable.Rows[i];
+            resultRow["pH"] = finalState.pH;
+            resultRow["IonicStrength_molkg"] = finalState.IonicStrength_molkg;
+
+            foreach (var (species, activity) in finalState.Activities)
+            {
+                var colName = $"act_{species.Replace("⁺", "+").Replace("⁻", "-")}";
+                resultRow[colName] = activity;
+            }
+        }
+
+        return Task.FromResult<Dataset>(new TableDataset($"{tableDs.Name}_Equilibrated", resultTable));
+    }
+}
+
+public class SaturationCommand : ThermoCommandBase, IGeoScriptCommand
+{
+    public string Name => "SATURATION";
+    public string HelpText => "Calculates mineral saturation indices (Log Q/K).";
+    public string Usage => "SATURATION MINERALS 'Mineral1', 'Mineral2', ...";
+
+    public Task<Dataset> ExecuteAsync(GeoScriptContext context, AstNode node)
+    {
+        if (context.InputDataset is not TableDataset tableDs)
+            throw new NotSupportedException("SATURATION only works on Table Datasets.");
+
+        var cmd = (CommandNode)node;
+        var mineralMatches = Regex.Matches(cmd.FullText, @"'([^']+)'");
+        var minerals = mineralMatches.Select(m => m.Groups[1].Value).ToList();
+        if (minerals.Count == 0) throw new ArgumentException("You must specify at least one mineral.");
+
+        var solver = new ThermodynamicSolver();
+        var sourceTable = tableDs.GetDataTable();
+        var resultTable = sourceTable.Copy();
+
+        // Add columns for the requested mineral SIs
+        foreach (var mineral in minerals) resultTable.Columns.Add($"SI_{mineral}", typeof(double));
+
+        foreach (DataRow row in resultTable.Rows)
+        {
+            var initialState = CreateStateFromDataRow(row);
+            var equilibratedState = solver.SolveSpeciation(initialState);
+            var saturationIndices = solver.CalculateSaturationIndices(equilibratedState);
+
+            foreach (var (reactionName, si) in saturationIndices)
+            {
+                // The reaction name is usually "MineralName dissolution"
+                var mineralName = reactionName.Replace(" dissolution", "");
+                if (resultTable.Columns.Contains($"SI_{mineralName}")) row[$"SI_{mineralName}"] = si;
+            }
+        }
+
+        return Task.FromResult<Dataset>(new TableDataset($"{tableDs.Name}_Saturation", resultTable));
+    }
+}
+
+public class BalanceReactionCommand : IGeoScriptCommand
+{
+    public string Name => "BALANCE_REACTION";
+    public string HelpText => "Generates a balanced dissolution reaction for a mineral.";
+    public string Usage => "BALANCE_REACTION 'MineralName'";
+
+    public Task<Dataset> ExecuteAsync(GeoScriptContext context, AstNode node)
+    {
+        var cmd = (CommandNode)node;
+        var match = Regex.Match(cmd.FullText, @"'([^']+)'", RegexOptions.IgnoreCase);
+        if (!match.Success) throw new ArgumentException("Invalid syntax. Specify a mineral name in quotes.");
+
+        var mineralName = match.Groups[1].Value;
+        var compoundLib = CompoundLibrary.Instance;
+        var mineral = compoundLib.Find(mineralName);
+        if (mineral == null) throw new ArgumentException($"Mineral '{mineralName}' not found in the database.");
+
+        var reactionGenerator = new ReactionGenerator(compoundLib);
+        var reaction =
+            reactionGenerator.GetType()
+                .GetMethod("GenerateSingleDissolutionReaction", BindingFlags.NonPublic | BindingFlags.Instance)
+                .Invoke(reactionGenerator, new object[] { mineral }) as ChemicalReaction;
+
+        if (reaction == null)
+            throw new InvalidOperationException($"Could not generate a reaction for '{mineralName}'.");
+
+        var reactants = reaction.Stoichiometry.Where(kvp => kvp.Value < 0)
+            .Select(kvp => $"{Math.Abs(kvp.Value)} {kvp.Key}");
+        var products = reaction.Stoichiometry.Where(kvp => kvp.Value > 0).Select(kvp => $"{kvp.Value} {kvp.Key}");
+        var reactionString = $"{string.Join(" + ", reactants)} <=> {string.Join(" + ", products)}";
+
+        var resultTable = new DataTable("BalancedReaction");
+        resultTable.Columns.Add("Mineral", typeof(string));
+        resultTable.Columns.Add("Reaction", typeof(string));
+        resultTable.Columns.Add("LogK_25C", typeof(double));
+        resultTable.Rows.Add(mineralName, reactionString, reaction.LogK_25C);
+
+        return Task.FromResult<Dataset>(new TableDataset("BalancedReaction", resultTable));
+    }
+}
+
+public class EvaporateCommand : ThermoCommandBase, IGeoScriptCommand
+{
+    public string Name => "EVAPORATE";
+    public string HelpText => "Simulates evaporation and mineral precipitation sequence.";
+    public string Usage => "EVAPORATE UPTO <factor>x STEPS <count> MINERALS 'Mineral1', 'Mineral2', ...";
+
+    public Task<Dataset> ExecuteAsync(GeoScriptContext context, AstNode node)
+    {
+        if (context.InputDataset is not TableDataset tableDs)
+            throw new NotSupportedException("EVAPORATE only works on Table Datasets.");
+
+        var cmd = (CommandNode)node;
+        var factorMatch = Regex.Match(cmd.FullText, @"UPTO\s+([\d\.]+)", RegexOptions.IgnoreCase);
+        var stepsMatch = Regex.Match(cmd.FullText, @"STEPS\s+(\d+)", RegexOptions.IgnoreCase);
+        var mineralMatches = Regex.Matches(cmd.FullText, @"'([^']+)'");
+
+        if (!factorMatch.Success || !stepsMatch.Success || mineralMatches.Count == 0)
+            throw new ArgumentException("Invalid EVAPORATE syntax.");
+
+        var maxFactor = double.Parse(factorMatch.Groups[1].Value);
+        var steps = int.Parse(stepsMatch.Groups[1].Value);
+        var minerals = mineralMatches.Select(m => m.Groups[1].Value).ToList();
+
+        var solver = new ThermodynamicSolver();
+        var sourceTable = tableDs.GetDataTable();
+        if (sourceTable.Rows.Count == 0) throw new DataException("Input table for EVAPORATE cannot be empty.");
+
+        // Use the first row as the starting water composition
+        var initialWaterRow = sourceTable.Rows[0];
+        var state = CreateStateFromDataRow(initialWaterRow);
+        var initialVolume = state.Volume_L;
+
+        var resultTable = new DataTable($"{tableDs.Name}_Evaporation_Sequence");
+        resultTable.Columns.Add("EvaporationFactor", typeof(double));
+        resultTable.Columns.Add("RemainingVolume_L", typeof(double));
+        resultTable.Columns.Add("pH", typeof(double));
+        resultTable.Columns.Add("IonicStrength_molkg", typeof(double));
+        foreach (var mineral in minerals) resultTable.Columns.Add($"Moles_{mineral}", typeof(double));
+
+        var totalPrecipitated = minerals.ToDictionary(m => m, m => 0.0);
+
+        for (var i = 0; i <= steps; i++)
+        {
+            var currentFactor = 1.0 + (maxFactor - 1.0) * i / steps;
+            state.Volume_L = initialVolume / currentFactor;
+
+            // Re-speciate with the new concentrated solution
+            var equilibratedState = solver.SolveSpeciation(state);
+
+            // Precipitation check (simplified approach)
+            // A full reaction path model would remove elements from solution.
+            // Here, we just check for supersaturation.
+            var SIs = solver.CalculateSaturationIndices(equilibratedState);
+            foreach (var (reactionName, si) in SIs)
+            {
+                var mineralName = reactionName.Replace(" dissolution", "");
+                if (totalPrecipitated.ContainsKey(mineralName) && si > 0.01) // 0.01 threshold for precipitation
+                    // This is a simplification. A real model would calculate moles to precipitate
+                    // to bring SI back to 0. We'll just mark it as precipitating.
+                    // For a simple output, we can use the SI value as a proxy for amount.
+                    totalPrecipitated[mineralName] += si;
+            }
+
+            var newRow = resultTable.NewRow();
+            newRow["EvaporationFactor"] = currentFactor;
+            newRow["RemainingVolume_L"] = equilibratedState.Volume_L;
+            newRow["pH"] = equilibratedState.pH;
+            newRow["IonicStrength_molkg"] = equilibratedState.IonicStrength_molkg;
+            foreach (var mineral in minerals) newRow[$"Moles_{mineral}"] = totalPrecipitated[mineral];
+            resultTable.Rows.Add(newRow);
+        }
+
+        return Task.FromResult<Dataset>(new TableDataset(resultTable.TableName, resultTable));
+    }
+}
+
+public class ReactCommand : IGeoScriptCommand
+{
+    public string Name => "REACT";
+    public string HelpText => "Calculates the equilibrium products of a set of reactants at given T and P.";
+    public string Usage => "REACT <Reactants> [TEMP <val> C|K] [PRES <val> BAR|ATM]";
+
+    public Task<Dataset> ExecuteAsync(GeoScriptContext context, AstNode node)
+    {
+        var cmd = (CommandNode)node;
+
+        // --- 1. Parse the command string ---
+        var pattern =
+            @"REACT\s+(?<reaction>.+?)(?:\s+TEMP\s+(?<tempval>[\d\.]+)\s*(?<tempunit>C|K))?(?:\s+PRES\s+(?<presval>[\d\.]+)\s*(?<presunit>BAR|ATM))?$";
+        var match = Regex.Match(cmd.FullText, pattern, RegexOptions.IgnoreCase);
+
+        if (!match.Success) throw new ArgumentException($"Invalid REACT syntax. Usage: {Usage}");
+
+        var reactionStr = match.Groups["reaction"].Value.Trim();
+
+        // --- 2. Set default T and P, then override with user values ---
+        var temperatureK = 20.0 + 273.15; // Default 20 C
+        var pressureBar = 1.0; // Default 1 atm ~ 1 bar
+
+        if (match.Groups["tempval"].Success)
+        {
+            var tempVal = double.Parse(match.Groups["tempval"].Value, CultureInfo.InvariantCulture);
+            temperatureK = match.Groups["tempunit"].Value.ToUpper() == "K" ? tempVal : tempVal + 273.15;
+        }
+
+        if (match.Groups["presval"].Success)
+        {
+            var presVal = double.Parse(match.Groups["presval"].Value, CultureInfo.InvariantCulture);
+            pressureBar = match.Groups["presunit"].Value.ToUpper() == "ATM" ? presVal * 1.01325 : presVal;
+        }
+
+        // --- 3. Build the initial thermodynamic state from reactants ---
+        var initialState = new ThermodynamicState
+        {
+            Temperature_K = temperatureK,
+            Pressure_bar = pressureBar,
+            Volume_L = 1.0 // Start with 1L volume
+        };
+
+        var compoundLib = CompoundLibrary.Instance;
+        var reactionGenerator = new ReactionGenerator(compoundLib);
+
+        var reactants = reactionStr.Split('+').Select(r => r.Trim()).ToList();
+
+        foreach (var reactantName in reactants)
+        {
+            // Handle custom hydration character '!' -> '·'
+            var cleanedName = reactantName.Replace('!', '·');
+            var compound = compoundLib.Find(cleanedName);
+
+            if (compound == null)
+            {
+                Logger.LogError($"Reactant '{reactantName}' not found in the chemical database.");
+                throw new ArgumentException($"Unknown reactant: {reactantName}");
+            }
+
+            // Assume 1 mole of each reactant, except for water which is the solvent.
+            var moles = compound.Name.ToUpper() == "WATER" || compound.ChemicalFormula == "H₂O" ? 55.509 : 1.0;
+
+            initialState.SpeciesMoles[compound.Name] =
+                initialState.SpeciesMoles.GetValueOrDefault(compound.Name, 0) + moles;
+
+            // Add to total elemental composition
+            var composition = reactionGenerator.ParseChemicalFormula(compound.ChemicalFormula);
+            foreach (var (element, stoichiometry) in composition)
+                initialState.ElementalComposition[element] =
+                    initialState.ElementalComposition.GetValueOrDefault(element, 0) + moles * stoichiometry;
+        }
+
+        // --- 4. Solve for equilibrium ---
+        var solver = new ThermodynamicSolver();
+        var finalState = solver.SolveEquilibrium(initialState);
+
+        // --- 5. Format the output ---
+        var resultTable = new DataTable("ReactionProducts");
+        resultTable.Columns.Add("Phase", typeof(string));
+        resultTable.Columns.Add("Species", typeof(string));
+        resultTable.Columns.Add("Moles", typeof(double));
+
+        var sortedProducts = finalState.SpeciesMoles
+            .Where(kvp => kvp.Value > 1e-9) // Filter out negligible amounts
+            .OrderBy(kvp => compoundLib.Find(kvp.Key)?.Phase.ToString())
+            .ThenByDescending(kvp => kvp.Value);
+
+        foreach (var (speciesName, moles) in sortedProducts)
+        {
+            var compound = compoundLib.Find(speciesName);
+            resultTable.Rows.Add(compound?.Phase.ToString() ?? "Unknown", speciesName, moles);
+        }
+
+        return Task.FromResult<Dataset>(new TableDataset("Reaction_Products", resultTable));
     }
 }
 

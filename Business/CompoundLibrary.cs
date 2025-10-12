@@ -55,6 +55,8 @@ public sealed class ChemicalCompound
     /// <summary>Standard Gibbs free energy of formation (kJ/mol)</summary>
     public double? GibbsFreeEnergyFormation_kJ_mol { get; set; }
 
+    public double? SetchenowCoefficient { get; set; }
+
     /// <summary>Standard enthalpy of formation (kJ/mol)</summary>
     public double? EnthalpyFormation_kJ_mol { get; set; }
 

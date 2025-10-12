@@ -11,6 +11,7 @@ using GeoscientistToolkit.UI.Utils;
 using GeoscientistToolkit.UI.Windows;
 using GeoscientistToolkit.Util;
 using ImGuiNET;
+
 // ADDED: To access the new editor window
 
 namespace GeoscientistToolkit.UI;
@@ -42,6 +43,7 @@ public class MainWindow
 
     // ADDED: Instance of the compound library editor window
     private readonly CompoundLibraryEditorWindow _compoundLibraryEditorWindow = new();
+    private readonly GeoScriptTerminalWindow _geoScriptTerminalWindow = new();
     private readonly ImGuiWindowScreenshotTool _screenshotTool;
 
     // File Dialogs
@@ -222,6 +224,7 @@ public class MainWindow
         _materialLibraryWindow.Submit();
         // ADDED: Draw the compound library editor window
         _compoundLibraryEditorWindow.Draw();
+        _geoScriptTerminalWindow.Draw();
 
         // Handle create mesh dialog
         HandleCreateMeshDialog();
@@ -428,6 +431,8 @@ public class MainWindow
 
         if (ImGui.BeginMenu("Tools"))
         {
+            if (ImGui.MenuItem("GeoScript Terminal")) _geoScriptTerminalWindow.Show();
+            ImGui.Separator();
             if (ImGui.MenuItem("Screenshot Fullscreen")) _screenshotTool.TakeFullScreenshot();
             if (ImGui.MenuItem("Screenshot Window...")) _screenshotTool.StartSelection();
             ImGui.EndMenu();

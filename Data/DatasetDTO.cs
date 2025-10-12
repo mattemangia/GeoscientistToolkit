@@ -2,6 +2,7 @@
 
 using System.Numerics;
 using GeoscientistToolkit.Data.Materials;
+
 // ADDED: For enums used in ChemicalCompoundDTO
 
 // Added for DateTime

@@ -50,7 +50,51 @@ public class GeoScriptEditor
     {
         if (_associatedDataset == null)
         {
-            ImGui.TextDisabled("No dataset selected to run a script on.");
+            var style = ImGui.GetStyle();
+            // Use a child window to create a contained, styled message area.
+            // CORRECTED LINE: Replaced 'false' with 'ImGuiChildFlags.None'
+            ImGui.BeginChild("##NoDatasetWarning", Vector2.Zero, ImGuiChildFlags.None,
+                ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoMove);
+
+            var windowSize = ImGui.GetWindowSize();
+            var drawList = ImGui.GetWindowDrawList();
+            var windowPos = ImGui.GetWindowPos();
+
+            // 1. Draw a red "title bar" rectangle at the top of the child window.
+            var titleBarHeight = ImGui.GetTextLineHeight() + style.FramePadding.Y * 2;
+            drawList.AddRectFilled(
+                windowPos,
+                new Vector2(windowPos.X + windowSize.X, windowPos.Y + titleBarHeight),
+                ImGui.GetColorU32(new Vector4(0.7f, 0.2f, 0.2f, 1.0f))
+            );
+
+            // Draw a border around the whole thing to make it look more like a panel
+            drawList.AddRect(
+                windowPos,
+                new Vector2(windowPos.X + windowSize.X, windowPos.Y + windowSize.Y),
+                ImGui.GetColorU32(new Vector4(0.7f, 0.2f, 0.2f, 1.0f)),
+                style.ChildRounding
+            );
+
+            // 2. Draw title text on the bar (centered)
+            var title = "⚠ No Dataset Selected";
+            var titleSize = ImGui.CalcTextSize(title);
+            ImGui.SetCursorPos(new Vector2(
+                (windowSize.X - titleSize.X) * 0.5f,
+                (titleBarHeight - titleSize.Y) * 0.5f
+            ));
+            ImGui.Text(title);
+
+            // 3. Draw the message body
+            ImGui.SetCursorPos(new Vector2(style.WindowPadding.X, titleBarHeight + style.WindowPadding.Y));
+            ImGui.BeginGroup();
+            ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(1.0f, 0.8f, 0.8f, 1.0f));
+            ImGui.TextWrapped(
+                "The GeoScript Terminal requires an active dataset to act upon. Please select a 'Context Dataset' from the dropdown list above to begin scripting.");
+            ImGui.PopStyleColor();
+            ImGui.EndGroup();
+
+            ImGui.EndChild();
             return;
         }
 
