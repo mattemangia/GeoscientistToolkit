@@ -43,12 +43,12 @@ public static class ScreenshotUtility
         var factory = gd.ResourceFactory;
         var swapchain = gd.MainSwapchain;
 
-        var width = (uint)swapchain.Framebuffer.Width;
-        var height = (uint)swapchain.Framebuffer.Height;
+        var width = swapchain.Framebuffer.Width;
+        var height = swapchain.Framebuffer.Height;
 
         // Recreate capture target if needed
-        if (_lastFrameCapture == null || 
-            _lastFrameCapture.Width != width || 
+        if (_lastFrameCapture == null ||
+            _lastFrameCapture.Width != width ||
             _lastFrameCapture.Height != height)
         {
             _captureFramebuffer?.Dispose();
@@ -130,7 +130,7 @@ public static class ScreenshotUtility
             Logger.LogError("[Screenshot] Invalid texture or file path");
             return false;
         }
-        
+
         try
         {
             var gd = VeldridManager.GraphicsDevice;
@@ -179,7 +179,7 @@ public static class ScreenshotUtility
             return false;
         }
     }
-    
+
     /// <summary>
     ///     Captures an ImGui window by its name
     /// </summary>
@@ -235,7 +235,7 @@ public static class ScreenshotUtility
     public static bool CaptureFullFramebuffer(string filePath, ImageFormat format = ImageFormat.PNG)
     {
         var gd = VeldridManager.GraphicsDevice;
-        
+
         // Check if we're on Metal backend
         if (gd.BackendType == GraphicsBackend.Metal)
         {
@@ -282,8 +282,18 @@ public static class ScreenshotUtility
         var backbuffer = gd.MainSwapchain.Framebuffer.ColorTargets[0].Target;
 
         // Clamp dimensions
-        if (x < 0) { width += x; x = 0; }
-        if (y < 0) { height += y; y = 0; }
+        if (x < 0)
+        {
+            width += x;
+            x = 0;
+        }
+
+        if (y < 0)
+        {
+            height += y;
+            y = 0;
+        }
+
         if (x + width > backbuffer.Width) width = (int)backbuffer.Width - x;
         if (y + height > backbuffer.Height) height = (int)backbuffer.Height - y;
 
@@ -357,11 +367,13 @@ public static class ScreenshotUtility
                         var dstOffset = row * rect.Width * 4;
                         Buffer.BlockCopy(fullData, srcOffset, imageData, dstOffset, rect.Width * 4);
                     }
+
                     finalWidth = rect.Width;
                     finalHeight = rect.Height;
                 }
 
-                var success = SaveImage(imageData, finalWidth, finalHeight, capture.FilePath, capture.Format, capture.JpegQuality);
+                var success = SaveImage(imageData, finalWidth, finalHeight, capture.FilePath, capture.Format,
+                    capture.JpegQuality);
                 capture.Callback?.Invoke(success);
             }
             catch (Exception ex)
@@ -418,10 +430,17 @@ public static class ScreenshotUtility
 
     private struct Rectangle
     {
-        public int X, Y, Width, Height;
+        public readonly int X;
+        public readonly int Y;
+        public readonly int Width;
+        public readonly int Height;
+
         public Rectangle(int x, int y, int width, int height)
         {
-            X = x; Y = y; Width = width; Height = height;
+            X = x;
+            Y = y;
+            Width = width;
+            Height = height;
         }
     }
 
@@ -430,7 +449,7 @@ public static class ScreenshotUtility
         public string FilePath { get; set; }
         public Texture Texture { get; set; }
         public ImageFormat Format { get; set; }
-        public int JpegQuality { get; set; } = 90;
+        public int JpegQuality { get; } = 90;
         public Action<bool> Callback { get; set; }
         public Rectangle CaptureRect { get; set; }
         public bool IsFullFrame { get; set; }
@@ -459,12 +478,13 @@ public static class ScreenshotUtility
         var result = new byte[width * height * 4];
         var srcPtr = (byte*)data.ToPointer();
 
-        if (rowPitch == width * 4 && (format == PixelFormat.R8_G8_B8_A8_UNorm || format == PixelFormat.R8_G8_B8_A8_UNorm_SRgb))
+        if (rowPitch == width * 4 &&
+            (format == PixelFormat.R8_G8_B8_A8_UNorm || format == PixelFormat.R8_G8_B8_A8_UNorm_SRgb))
         {
             Marshal.Copy(data, result, 0, result.Length);
             return result;
         }
-        
+
         for (var y = 0; y < height; y++)
         {
             var srcRowOffset = y * rowPitch;
@@ -488,6 +508,7 @@ public static class ScreenshotUtility
                         result[dstIdx + 2] = srcPtr[srcIdx + 0]; // B
                         result[dstIdx + 3] = srcPtr[srcIdx + 3]; // A
                     }
+
                     break;
 
                 case PixelFormat.R8_UNorm:
@@ -500,6 +521,7 @@ public static class ScreenshotUtility
                         result[dstIdx + 2] = gray;
                         result[dstIdx + 3] = 255;
                     }
+
                     break;
 
                 default:
@@ -512,9 +534,11 @@ public static class ScreenshotUtility
                         for (var i = 0; i < copySize; i++) result[dstIdx + i] = srcPtr[srcIdx + i];
                         if (copySize < 4) result[dstIdx + 3] = 255;
                     }
+
                     break;
             }
         }
+
         return result;
     }
 
@@ -524,7 +548,7 @@ public static class ScreenshotUtility
         try
         {
             var directory = Path.GetDirectoryName(filePath);
-            if (!string.IsNullOrEmpty(directory) && !Directory.Exists(directory)) 
+            if (!string.IsNullOrEmpty(directory) && !Directory.Exists(directory))
                 Directory.CreateDirectory(directory);
 
             using (var stream = new FileStream(filePath, FileMode.Create, FileAccess.Write))
@@ -534,7 +558,8 @@ public static class ScreenshotUtility
                 switch (format)
                 {
                     case ImageFormat.PNG: writer.WritePng(imageData, width, height, components, stream); break;
-                    case ImageFormat.JPEG: writer.WriteJpg(imageData, width, height, components, stream, jpegQuality); break;
+                    case ImageFormat.JPEG:
+                        writer.WriteJpg(imageData, width, height, components, stream, jpegQuality); break;
                     case ImageFormat.BMP: writer.WriteBmp(imageData, width, height, components, stream); break;
                     case ImageFormat.TGA: writer.WriteTga(imageData, width, height, components, stream); break;
                     default: throw new NotSupportedException($"Image format {format} not supported");

@@ -1,6 +1,8 @@
 ﻿// GeoscientistToolkit/Data/DatasetDTO.cs
 
 using System.Numerics;
+using GeoscientistToolkit.Data.Materials;
+// ADDED: For enums used in ChemicalCompoundDTO
 
 // Added for DateTime
 
@@ -123,7 +125,11 @@ public class ProjectFileDTO
 {
     public string ProjectName { get; set; }
     public List<DatasetDTO> Datasets { get; set; } = new();
+
     public ProjectMetadataDTO ProjectMetadata { get; set; } = new();
+
+    // ADDED: To store user-defined compounds in the project file.
+    public List<ChemicalCompoundDTO> CustomCompounds { get; set; } = new();
 }
 
 public class StreamingCtVolumeDatasetDTO : DatasetDTO
@@ -212,4 +218,46 @@ public class NMRResultsDTO
     public Dictionary<string, double> MaterialRelaxivities { get; set; }
     public double ComputationTimeSeconds { get; set; }
     public string ComputationMethod { get; set; }
+}
+
+// --- NEW DTO FOR CHEMICAL COMPOUNDS ---
+
+/// <summary>
+///     DTO for serializing a user-defined ChemicalCompound.
+/// </summary>
+public class ChemicalCompoundDTO
+{
+    public string Name { get; set; } = "Unnamed";
+    public string ChemicalFormula { get; set; } = "";
+    public CompoundPhase Phase { get; set; } = CompoundPhase.Solid;
+    public CrystalSystem? CrystalSystem { get; set; }
+    public double? GibbsFreeEnergyFormation_kJ_mol { get; set; }
+    public double? EnthalpyFormation_kJ_mol { get; set; }
+    public double? Entropy_J_molK { get; set; }
+    public double? HeatCapacity_J_molK { get; set; }
+    public double? MolarVolume_cm3_mol { get; set; }
+    public double? MolecularWeight_g_mol { get; set; }
+    public double? Density_g_cm3 { get; set; }
+    public double? LogKsp_25C { get; set; }
+    public double? Solubility_g_100mL_25C { get; set; }
+    public double? DissolutionEnthalpy_kJ_mol { get; set; }
+    public double? ActivationEnergy_Dissolution_kJ_mol { get; set; }
+    public double? ActivationEnergy_Precipitation_kJ_mol { get; set; }
+    public double? RateConstant_Dissolution_mol_m2_s { get; set; }
+    public double? RateConstant_Precipitation_mol_m2_s { get; set; }
+    public double? ReactionOrder_Dissolution { get; set; }
+    public double? SpecificSurfaceArea_m2_g { get; set; }
+    public double[]? HeatCapacityPolynomial_a_b_c_d { get; set; }
+    public double[]? TemperatureRange_K { get; set; }
+    public int? IonicCharge { get; set; }
+    public Dictionary<string, double>? ActivityCoefficientParams { get; set; }
+    public double? IonicConductivity_S_cm2_mol { get; set; }
+    public double? RefractiveIndex { get; set; }
+    public double? MohsHardness { get; set; }
+    public string Color { get; set; } = "";
+    public string Cleavage { get; set; } = "";
+    public List<string> Synonyms { get; set; } = new();
+    public string Notes { get; set; } = "";
+    public List<string> Sources { get; set; } = new();
+    public Dictionary<string, double> CustomParams { get; set; } = new();
 }

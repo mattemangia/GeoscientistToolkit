@@ -4,6 +4,7 @@ using System.Numerics;
 using GeoscientistToolkit.UI.Utils;
 using GeoscientistToolkit.Util;
 using ImGuiNET;
+using Veldrid;
 
 namespace GeoscientistToolkit.UI;
 
@@ -45,7 +46,7 @@ public class ImGuiWindowScreenshotTool
 
         // Check if we're on Metal backend
         var gd = VeldridManager.GraphicsDevice;
-        if (gd != null && gd.BackendType == Veldrid.GraphicsBackend.Metal)
+        if (gd != null && gd.BackendType == GraphicsBackend.Metal)
         {
             _showMetalWarningDialog = true;
             Logger.LogError("[Screenshot] Screenshot functionality not supported on Metal (macOS) backend");
@@ -79,33 +80,33 @@ public class ImGuiWindowScreenshotTool
         // Metal warning dialog
         ImGui.SetNextWindowPos(ImGui.GetMainViewport().GetCenter(), ImGuiCond.Appearing, new Vector2(0.5f, 0.5f));
         ImGui.SetNextWindowSize(new Vector2(600, 0), ImGuiCond.Appearing);
-        
+
         // Push red color for title bar
         ImGui.PushStyleColor(ImGuiCol.TitleBg, new Vector4(0.6f, 0.0f, 0.0f, 1.0f));
         ImGui.PushStyleColor(ImGuiCol.TitleBgActive, new Vector4(0.8f, 0.0f, 0.0f, 1.0f));
         ImGui.PushStyleColor(ImGuiCol.TitleBgCollapsed, new Vector4(0.5f, 0.0f, 0.0f, 1.0f));
 
         var metalWarningOpen = true;
-        if (ImGui.BeginPopupModal("Screenshot Not Supported###MetalWarning", ref metalWarningOpen, 
-            ImGuiWindowFlags.AlwaysAutoResize | ImGuiWindowFlags.NoMove))
+        if (ImGui.BeginPopupModal("Screenshot Not Supported###MetalWarning", ref metalWarningOpen,
+                ImGuiWindowFlags.AlwaysAutoResize | ImGuiWindowFlags.NoMove))
         {
             ImGui.PopStyleColor(3); // Pop title colors
 
             ImGui.Spacing();
-            
+
             // Red warning text
             ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(1.0f, 0.0f, 0.0f, 1.0f));
-            
+
             // Center the warning symbol and text
             var warningText = "⚠ Screenshot Functionality not supported on Metal (MTL - MacOS) backend.";
             var textWidth = ImGui.CalcTextSize(warningText).X;
             var windowWidth = ImGui.GetContentRegionAvail().X;
             var indent = (windowWidth - textWidth) * 0.5f;
             if (indent > 0) ImGui.SetCursorPosX(ImGui.GetCursorPosX() + indent);
-            
+
             ImGui.TextWrapped(warningText);
             ImGui.PopStyleColor(); // Pop red text color
-            
+
             ImGui.Spacing();
             ImGui.Separator();
             ImGui.Spacing();
@@ -114,13 +115,13 @@ public class ImGuiWindowScreenshotTool
             ImGui.TextWrapped(
                 "The Metal graphics API (used on macOS) does not allow capturing screenshots " +
                 "from the swapchain backbuffer due to how it manages render targets.");
-            
+
             ImGui.Spacing();
             ImGui.Text("Workarounds:");
             ImGui.BulletText("Use macOS's built-in screenshot tool (Cmd+Shift+4)");
             ImGui.BulletText("Run the application on Windows or Linux");
             ImGui.BulletText("Use external screen capture software");
-            
+
             ImGui.Spacing();
             ImGui.Separator();
             ImGui.Spacing();
@@ -130,18 +131,13 @@ public class ImGuiWindowScreenshotTool
             var buttonIndent = (windowWidth - buttonWidth) * 0.5f;
             if (buttonIndent > 0) ImGui.SetCursorPosX(ImGui.GetCursorPosX() + buttonIndent);
 
-            if (ImGui.Button("OK", new Vector2(buttonWidth, 35)))
-            {
-                ImGui.CloseCurrentPopup();
-            }
+            if (ImGui.Button("OK", new Vector2(buttonWidth, 35))) ImGui.CloseCurrentPopup();
 
             // Handle Enter/Escape to close
-            if (ImGui.IsKeyReleased(ImGuiKey.Enter) || 
+            if (ImGui.IsKeyReleased(ImGuiKey.Enter) ||
                 ImGui.IsKeyReleased(ImGuiKey.KeypadEnter) ||
                 ImGui.IsKeyReleased(ImGuiKey.Escape))
-            {
                 ImGui.CloseCurrentPopup();
-            }
 
             ImGui.Spacing();
             ImGui.EndPopup();
@@ -390,7 +386,7 @@ public class ImGuiWindowScreenshotTool
     {
         // Check if we're on Metal backend
         var gd = VeldridManager.GraphicsDevice;
-        if (gd != null && gd.BackendType == Veldrid.GraphicsBackend.Metal)
+        if (gd != null && gd.BackendType == GraphicsBackend.Metal)
         {
             _showMetalWarningDialog = true;
             Logger.LogError("[Screenshot] Screenshot functionality not supported on Metal (macOS) backend");

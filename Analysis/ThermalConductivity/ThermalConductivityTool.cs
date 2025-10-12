@@ -52,6 +52,9 @@ public class ThermalConductivityTool : IDatasetTools, IDisposable
     // Material library browser state
     private bool _showMaterialLibraryBrowser;
     private Task _simulationTask;
+    private uint[] _sliceCache;
+    private bool _sliceCacheDirty = true;
+    private (int axis, int slice, int cmap, float hot, float cold, int gw, int gh) _sliceCacheKey;
     private byte _targetMaterialIdForAssignment;
 
     public ThermalConductivityTool()
@@ -198,18 +201,18 @@ public class ThermalConductivityTool : IDatasetTools, IDisposable
                         | ImGuiTableFlags.RowBg
                         | ImGuiTableFlags.ScrollY
                         | ImGuiTableFlags.ScrollX
-                        | ImGuiTableFlags.SizingFixedFit    // honor fixed widths; allow scroll if too narrow
+                        | ImGuiTableFlags.SizingFixedFit // honor fixed widths; allow scroll if too narrow
                         | ImGuiTableFlags.Resizable,
                         new Vector2(0, 230)))
                 {
                     ImGui.TableSetupScrollFreeze(0, 1);
 
                     // Tighten up the early columns
-                    ImGui.TableSetupColumn("",            ImGuiTableColumnFlags.WidthFixed, 24);   // color
-                    ImGui.TableSetupColumn("Material",    ImGuiTableColumnFlags.WidthFixed, 100);  // smaller
-                    ImGui.TableSetupColumn("k (W/m·K)",   ImGuiTableColumnFlags.WidthFixed, 90);
-                    ImGui.TableSetupColumn("Library",     ImGuiTableColumnFlags.WidthFixed, 88);
-                    ImGui.TableSetupColumn("Properties",  ImGuiTableColumnFlags.WidthFixed, 80);
+                    ImGui.TableSetupColumn("", ImGuiTableColumnFlags.WidthFixed, 24); // color
+                    ImGui.TableSetupColumn("Material", ImGuiTableColumnFlags.WidthFixed, 100); // smaller
+                    ImGui.TableSetupColumn("k (W/m·K)", ImGuiTableColumnFlags.WidthFixed, 90);
+                    ImGui.TableSetupColumn("Library", ImGuiTableColumnFlags.WidthFixed, 88);
+                    ImGui.TableSetupColumn("Properties", ImGuiTableColumnFlags.WidthFixed, 80);
 
                     // Give Actions room; can't be hidden
                     ImGui.TableSetupColumn("Actions",
@@ -220,7 +223,6 @@ public class ThermalConductivityTool : IDatasetTools, IDisposable
                     // (Optional) enforce minimum runtime width in case user resized too small
                     ImGui.TableSetColumnIndex(5); // Actions col index
                     var w = ImGui.GetColumnWidth(5);
-                    
 
 
                     foreach (var material in visibleMaterials)
@@ -814,12 +816,12 @@ public class ThermalConductivityTool : IDatasetTools, IDisposable
             if (slice != null) ExportSliceToCsv(_sliceCsvExportDialog.SelectedPath, slice);
         }
     }
-    
+
     private void DrawSliceViewer()
     {
         // ---- UI controls (unchanged) ----
         var selectedDirection = (HeatFlowDirection)_selectedSliceDirectionInt;
-        int maxSlice = selectedDirection switch
+        var maxSlice = selectedDirection switch
         {
             HeatFlowDirection.X => _options.Dataset.Width - 1,
             HeatFlowDirection.Y => _options.Dataset.Height - 1,
@@ -865,7 +867,7 @@ public class ThermalConductivityTool : IDatasetTools, IDisposable
         // ---- Get slice data (thermal and label) ----
         var (slice, srcW, srcH) = GetSelectedSlice();
         if (slice == null) return;
-    
+
         var (labelSlice, _, _) = GetSelectedLabelSlice();
         if (labelSlice == null) return;
 
@@ -874,7 +876,7 @@ public class ThermalConductivityTool : IDatasetTools, IDisposable
         var dl = ImGui.GetWindowDrawList();
         var canvasPos = ImGui.GetCursorScreenPos();
 
-        float aspect = (float)srcW / Math.Max(1, srcH);
+        var aspect = (float)srcW / Math.Max(1, srcH);
         var canvasW = MathF.Min(avail.X - 100f, avail.Y * aspect);
         var canvasH = MathF.Min(avail.Y - 20f, (avail.X - 100f) / aspect);
         var canvasSize = new Vector2(canvasW, canvasH);
@@ -884,34 +886,34 @@ public class ThermalConductivityTool : IDatasetTools, IDisposable
 
         // ---- Downsample budget: keep <= 256x256 cells (<= 65k rects) ----
         const int MAX_CELLS = 256;
-        int gridW = Math.Min(srcW, MAX_CELLS);
-        int gridH = Math.Min(srcH, MAX_CELLS);
+        var gridW = Math.Min(srcW, MAX_CELLS);
+        var gridH = Math.Min(srcH, MAX_CELLS);
 
         // Map from grid to src
-        float sx = (float)srcW / gridW;
-        float sy = (float)srcH / gridH;
+        var sx = (float)srcW / gridW;
+        var sy = (float)srcH / gridH;
 
         // Precompute and cache the colorized grid so we don’t recompute per frame
         var cacheKey = (_selectedSliceDirectionInt, _selectedSliceIndex, _colorMapIndex,
-                        (float)_options.TemperatureHot, (float)_options.TemperatureCold, gridW, gridH);
+            (float)_options.TemperatureHot, (float)_options.TemperatureCold, gridW, gridH);
 
         if (_sliceCache == null || !_sliceCacheKey.Equals(cacheKey) || _sliceCacheDirty)
         {
             _sliceCache = _sliceCache ?? new uint[gridW * gridH];
             if (_sliceCache.Length != gridW * gridH) _sliceCache = new uint[gridW * gridH];
 
-            float tHot = (float)_options.TemperatureHot;
-            float tCold = (float)_options.TemperatureCold;
-            float invRange = 1.0f / MathF.Max(1e-6f, tHot - tCold);
+            var tHot = (float)_options.TemperatureHot;
+            var tCold = (float)_options.TemperatureCold;
+            var invRange = 1.0f / MathF.Max(1e-6f, tHot - tCold);
 
-            for (int gy = 0; gy < gridH; gy++)
+            for (var gy = 0; gy < gridH; gy++)
             {
-                int syi = Math.Min(srcH - 1, (int)(gy * sy));
-                for (int gx = 0; gx < gridW; gx++)
+                var syi = Math.Min(srcH - 1, (int)(gy * sy));
+                for (var gx = 0; gx < gridW; gx++)
                 {
-                    int sxi = Math.Min(srcW - 1, (int)(gx * sx));
-                
-                    byte materialId = labelSlice[sxi, syi];
+                    var sxi = Math.Min(srcW - 1, (int)(gx * sx));
+
+                    var materialId = labelSlice[sxi, syi];
                     uint colorU32;
 
                     if (materialId == 0)
@@ -920,11 +922,12 @@ public class ThermalConductivityTool : IDatasetTools, IDisposable
                     }
                     else
                     {
-                        float temp = slice[sxi, syi];
-                        float n = Math.Clamp((temp - tCold) * invRange, 0f, 1f);
+                        var temp = slice[sxi, syi];
+                        var n = Math.Clamp((temp - tCold) * invRange, 0f, 1f);
                         var col = ApplyColorMap(n, _colorMapIndex);
                         colorU32 = ImGui.GetColorU32(col);
                     }
+
                     _sliceCache[gy * gridW + gx] = colorU32;
                 }
             }
@@ -934,16 +937,16 @@ public class ThermalConductivityTool : IDatasetTools, IDisposable
         }
 
         // ---- Pixel-snapped drawing ----
-        for (int gy = 0; gy < gridH; gy++)
+        for (var gy = 0; gy < gridH; gy++)
         {
-            int y0 = (int)MathF.Floor(canvasPos.Y + (gy * canvasH) / gridH);
-            int y1 = (int)MathF.Floor(canvasPos.Y + ((gy + 1f) * canvasH) / gridH);
+            var y0 = (int)MathF.Floor(canvasPos.Y + gy * canvasH / gridH);
+            var y1 = (int)MathF.Floor(canvasPos.Y + (gy + 1f) * canvasH / gridH);
             if (y1 <= y0) y1 = y0 + 1;
 
-            for (int gx = 0; gx < gridW; gx++)
+            for (var gx = 0; gx < gridW; gx++)
             {
-                int x0 = (int)MathF.Floor(canvasPos.X + (gx * canvasW) / gridW);
-                int x1 = (int)MathF.Floor(canvasPos.X + ((gx + 1f) * canvasW) / gridW);
+                var x0 = (int)MathF.Floor(canvasPos.X + gx * canvasW / gridW);
+                var x1 = (int)MathF.Floor(canvasPos.X + (gx + 1f) * canvasW / gridW);
                 if (x1 <= x0) x1 = x0 + 1;
 
                 dl.AddRectFilled(new Vector2(x0, y0), new Vector2(x1, y1), _sliceCache[gy * gridW + gx]);
@@ -958,13 +961,13 @@ public class ThermalConductivityTool : IDatasetTools, IDisposable
         {
             var mouse = ImGui.GetMousePos();
             var rel = mouse - canvasPos;
-            int hx = (int)(rel.X / canvasW * srcW);
-            int hy = (int)(rel.Y / canvasH * srcH);
+            var hx = (int)(rel.X / canvasW * srcW);
+            var hy = (int)(rel.Y / canvasH * srcH);
             if (hx >= 0 && hx < srcW && hy >= 0 && hy < srcH)
             {
                 if (labelSlice[hx, hy] != 0)
                 {
-                    float t = slice[hx, hy];
+                    var t = slice[hx, hy];
                     ImGui.SetTooltip($"Pos: ({hx}, {hy})\nT: {t:F2} K ({t - 273.15f:F2} °C)");
                 }
                 else
@@ -982,13 +985,14 @@ public class ThermalConductivityTool : IDatasetTools, IDisposable
             if (key != _cachedIsocontoursKey)
             {
                 _cachedIsocontours.Clear();
-                for (int i = 1; i <= _numIsocontours; i++)
+                for (var i = 1; i <= _numIsocontours; i++)
                 {
                     var iso = _options.TemperatureCold + i * tempRange / (_numIsocontours + 1);
                     // MODIFIED: Pass labelSlice to the generator
                     var lines = IsosurfaceGenerator.GenerateIsocontours(slice, labelSlice, (float)iso);
                     _cachedIsocontours.AddRange(lines);
                 }
+
                 _cachedIsocontoursKey = key;
             }
 
@@ -1012,11 +1016,9 @@ public class ThermalConductivityTool : IDatasetTools, IDisposable
             _pngExportDialog.Open($"Slice_{(HeatFlowDirection)_selectedSliceDirectionInt}{_selectedSliceIndex}.png");
         ImGui.SameLine();
         if (ImGui.Button("Export Slice to CSV", new Vector2(180, 0)))
-            _sliceCsvExportDialog.Open($"SliceData_{(HeatFlowDirection)_selectedSliceDirectionInt}{_selectedSliceIndex}.csv");
+            _sliceCsvExportDialog.Open(
+                $"SliceData_{(HeatFlowDirection)_selectedSliceDirectionInt}{_selectedSliceIndex}.csv");
     }
-    private uint[] _sliceCache;
-    private (int axis, int slice, int cmap, float hot, float cold, int gw, int gh) _sliceCacheKey;
-    private bool _sliceCacheDirty = true;
 
     private void DrawColorScaleLegend(Vector2 pos, Vector2 size)
     {
@@ -1054,7 +1056,7 @@ public class ThermalConductivityTool : IDatasetTools, IDisposable
     {
         var results = _options.Dataset.ThermalResults;
         if (results?.TemperatureField == null) return;
-        
+
         // Ensure label data is available for isosurface generation
         if (_options.Dataset.LabelData == null)
         {
@@ -1415,7 +1417,7 @@ public class ThermalConductivityTool : IDatasetTools, IDisposable
         {
             var (labelSlice, _, _) = GetSelectedLabelSlice();
             if (labelSlice == null) return;
-            
+
             var imageData = new byte[width * height * 4];
 
             Parallel.For(0, height, y =>
@@ -1423,7 +1425,7 @@ public class ThermalConductivityTool : IDatasetTools, IDisposable
                 for (var x = 0; x < width; x++)
                 {
                     var idx = (y * width + x) * 4;
-                    if (labelSlice[x,y] == 0)
+                    if (labelSlice[x, y] == 0)
                     {
                         imageData[idx] = 32;
                         imageData[idx + 1] = 32;
@@ -1438,7 +1440,7 @@ public class ThermalConductivityTool : IDatasetTools, IDisposable
                         normalizedTemp = Math.Clamp(normalizedTemp, 0.0, 1.0);
 
                         var color = ApplyColorMap((float)normalizedTemp, _colorMapIndex);
-                        
+
                         imageData[idx + 0] = (byte)(color.X * 255);
                         imageData[idx + 1] = (byte)(color.Y * 255);
                         imageData[idx + 2] = (byte)(color.Z * 255);
@@ -1531,18 +1533,19 @@ public class ThermalConductivityTool : IDatasetTools, IDisposable
             for (var x = 0; x < sliceWidth; x++)
             {
                 var destIdx = ((y + padding) * compositeWidth + x + padding) * 4;
-                if(labelSlice[x,y] == 0)
+                if (labelSlice[x, y] == 0)
                 {
-                     buffer[destIdx + 0] = 32;
-                     buffer[destIdx + 1] = 32;
-                     buffer[destIdx + 2] = 32;
-                     buffer[destIdx + 3] = 255;
+                    buffer[destIdx + 0] = 32;
+                    buffer[destIdx + 1] = 32;
+                    buffer[destIdx + 2] = 32;
+                    buffer[destIdx + 3] = 255;
                 }
                 else
                 {
                     var temp = slice[x, y];
                     var norm = Math.Clamp(
-                        (temp - _options.TemperatureCold) / (_options.TemperatureHot - _options.TemperatureCold), 0.0, 1.0);
+                        (temp - _options.TemperatureCold) / (_options.TemperatureHot - _options.TemperatureCold), 0.0,
+                        1.0);
                     var color = ApplyColorMap((float)norm, _colorMapIndex);
 
                     buffer[destIdx + 0] = (byte)(color.X * 255);
@@ -1671,7 +1674,7 @@ public class ThermalConductivityTool : IDatasetTools, IDisposable
 
         return (null, 0, 0);
     }
-    
+
     private (byte[,] slice, int width, int height) GetSelectedLabelSlice()
     {
         var labels = _options.Dataset.LabelData;
@@ -1681,7 +1684,7 @@ public class ThermalConductivityTool : IDatasetTools, IDisposable
         var H = _options.Dataset.Height;
         var D = _options.Dataset.Depth;
         var selectedDirection = (HeatFlowDirection)_selectedSliceDirectionInt;
-        
+
         _selectedSliceIndex = Math.Clamp(_selectedSliceIndex, 0,
             selectedDirection == HeatFlowDirection.X ? W - 1 :
             selectedDirection == HeatFlowDirection.Y ? H - 1 : D - 1);

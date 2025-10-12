@@ -13,10 +13,10 @@ public class Mesh3DViewer : IDatasetViewer, IDisposable
 {
     private readonly D3D11MeshRenderer _d3dRenderer;
     private readonly Mesh3DDataset _dataset;
-    private readonly MetalMeshRenderer _metalRenderer;
-    private readonly VulkanMeshRenderer _vulkanRenderer;
-    private readonly TextureManager _textureManager;
     private readonly Mesh3DEditor _editor;
+    private readonly MetalMeshRenderer _metalRenderer;
+    private readonly TextureManager _textureManager;
+    private readonly VulkanMeshRenderer _vulkanRenderer;
 
     private float _cameraDistance = 2.0f;
     private float _cameraPitch = MathF.PI / 6f;
@@ -25,12 +25,12 @@ public class Mesh3DViewer : IDatasetViewer, IDisposable
     private bool _isDragging;
     private bool _isPanning;
     private Vector2 _lastMousePos;
+
+    // View presets
+    private CameraPreset _lastPreset = CameraPreset.Custom;
     private Matrix4x4 _projMatrix;
     private bool _showGrid = true;
     private Matrix4x4 _viewMatrix;
-    
-    // View presets
-    private CameraPreset _lastPreset = CameraPreset.Custom;
 
     public Mesh3DViewer(Mesh3DDataset dataset)
     {
@@ -94,10 +94,10 @@ public class Mesh3DViewer : IDatasetViewer, IDisposable
         }
 
         ImGui.SameLine();
-        
+
         // Grid toggle
         var grid = _showGrid;
-        if (ImGui.Checkbox("Grid", ref grid)) 
+        if (ImGui.Checkbox("Grid", ref grid))
             _showGrid = grid;
 
         ImGui.SameLine();
@@ -107,27 +107,27 @@ public class Mesh3DViewer : IDatasetViewer, IDisposable
         // View Presets
         ImGui.Text("View:");
         ImGui.SameLine();
-        
+
         if (ImGui.Button("Top"))
             ApplyViewPreset(CameraPreset.Top);
         ImGui.SameLine();
-        
+
         if (ImGui.Button("Bottom"))
             ApplyViewPreset(CameraPreset.Bottom);
         ImGui.SameLine();
-        
+
         if (ImGui.Button("Front"))
             ApplyViewPreset(CameraPreset.Front);
         ImGui.SameLine();
-        
+
         if (ImGui.Button("Back"))
             ApplyViewPreset(CameraPreset.Back);
         ImGui.SameLine();
-        
+
         if (ImGui.Button("Left"))
             ApplyViewPreset(CameraPreset.Left);
         ImGui.SameLine();
-        
+
         if (ImGui.Button("Right"))
             ApplyViewPreset(CameraPreset.Right);
 
@@ -163,10 +163,10 @@ public class Mesh3DViewer : IDatasetViewer, IDisposable
             ImGui.Image(textureId, availableSize, new Vector2(0, 1), new Vector2(1, 0));
 
             // Handle mouse interaction
-            if (isHovered || isActive || _isDragging || _isPanning) 
+            if (isHovered || isActive || _isDragging || _isPanning)
             {
                 HandleMouseInput();
-                
+
                 // Mark as custom view when user interacts
                 if ((_isDragging || _isPanning) && _lastPreset != CameraPreset.Custom)
                     _lastPreset = CameraPreset.Custom;
@@ -186,7 +186,7 @@ public class Mesh3DViewer : IDatasetViewer, IDisposable
                 }
 
                 ImGui.Separator();
-                
+
                 if (ImGui.BeginMenu("View Preset"))
                 {
                     if (ImGui.MenuItem("Top View")) ApplyViewPreset(CameraPreset.Top);
@@ -200,18 +200,15 @@ public class Mesh3DViewer : IDatasetViewer, IDisposable
 
                 ImGui.Separator();
 
-                if (ImGui.MenuItem("Toggle Grid", null, _showGrid)) 
+                if (ImGui.MenuItem("Toggle Grid", null, _showGrid))
                     _showGrid = !_showGrid;
-                
+
                 ImGui.EndPopup();
             }
         }
 
         // Draw editor panel if in edit mode
-        if (_editor.IsEditMode)
-        {
-            _editor.DrawEditorPanel();
-        }
+        if (_editor.IsEditMode) _editor.DrawEditorPanel();
     }
 
     public void Dispose()
@@ -240,7 +237,7 @@ public class Mesh3DViewer : IDatasetViewer, IDisposable
         offset.Y = MathF.Sin(_cameraPitch);
         offset.Z = MathF.Sin(_cameraYaw) * MathF.Cos(_cameraPitch);
         offset *= _cameraDistance;
-        
+
         var cameraPosition = _cameraTarget + offset;
         _viewMatrix = Matrix4x4.CreateLookAt(cameraPosition, _cameraTarget, Vector3.UnitY);
 
@@ -325,7 +322,7 @@ public class Mesh3DViewer : IDatasetViewer, IDisposable
     {
         _lastPreset = preset;
         _cameraTarget = Vector3.Zero;
-        
+
         // Get model bounds for appropriate distance
         var size = _dataset.BoundingBoxMax - _dataset.BoundingBoxMin;
         var maxDim = MathF.Max(size.X, MathF.Max(size.Y, size.Z));

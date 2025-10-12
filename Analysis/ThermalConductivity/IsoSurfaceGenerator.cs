@@ -2,7 +2,9 @@
 
 using System.Numerics;
 using GeoscientistToolkit.Data.Mesh3D;
-using GeoscientistToolkit.Data.VolumeData; // Added for ILabelVolumeData
+using GeoscientistToolkit.Data.VolumeData;
+
+// Added for ILabelVolumeData
 
 namespace GeoscientistToolkit.Analysis;
 
@@ -81,8 +83,8 @@ public static class IsosurfaceGenerator
                     // --- MODIFICATION START: Check for void voxels (Material ID 0) ---
                     // A cube is skipped if any of its 8 corners are in a void region.
                     // This prevents generating surfaces in or connected to excluded areas.
-                    bool containsVoid = false;
-                    for (int i = 0; i < 8; i++)
+                    var containsVoid = false;
+                    for (var i = 0; i < 8; i++)
                     {
                         var cornerPos = new Vector3(x, y, z) + _cubeCorners[i];
                         if (labelData[(int)cornerPos.X, (int)cornerPos.Y, (int)cornerPos.Z] == 0)
@@ -91,12 +93,10 @@ public static class IsosurfaceGenerator
                             break;
                         }
                     }
-                    if (containsVoid)
-                    {
-                        continue; // Skip this cube entirely
-                    }
+
+                    if (containsVoid) continue; // Skip this cube entirely
                     // --- MODIFICATION END ---
-                    
+
                     var cubeCase = 0;
                     for (var i = 0; i < 8; i++)
                     {
@@ -218,11 +218,9 @@ public static class IsosurfaceGenerator
                 labelSlice[x + 1, y] == 0 ||
                 labelSlice[x + 1, y + 1] == 0 ||
                 labelSlice[x, y + 1] == 0)
-            {
                 continue;
-            }
             // --- MODIFICATION END ---
-            
+
             var cellCorners = new Vector2[] { new(x, y), new(x + 1, y), new(x + 1, y + 1), new(x, y + 1) };
             var cellValues = new[]
             {

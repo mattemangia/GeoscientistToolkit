@@ -9,11 +9,13 @@ using GeoscientistToolkit.Data.AcousticVolume;
 using GeoscientistToolkit.Data.CtImageStack;
 using GeoscientistToolkit.Data.GIS;
 using GeoscientistToolkit.Data.Image;
+using GeoscientistToolkit.Data.Materials;
 using GeoscientistToolkit.Data.Mesh3D;
 using GeoscientistToolkit.Data.Pnm;
 using GeoscientistToolkit.Data.Table;
 using GeoscientistToolkit.Settings;
 using GeoscientistToolkit.Util;
+// ADDED: To access CompoundLibrary and ChemicalCompound
 using AcousticVolumeDatasetDTO = GeoscientistToolkit.Data.AcousticVolumeDatasetDTO;
 
 namespace GeoscientistToolkit.Business;
@@ -52,6 +54,9 @@ public class ProjectManager
     {
         for (var i = LoadedDatasets.Count - 1; i >= 0; i--) LoadedDatasets[i].Unload();
         LoadedDatasets.Clear();
+
+        // ADDED: Clear any user-defined compounds from the previous project.
+        CompoundLibrary.Instance.ClearUserCompounds();
 
         ProjectName = "Untitled Project";
         ProjectPath = null;
@@ -122,6 +127,7 @@ public class ProjectManager
                 ctDataset.SaveMaterials();
             }
 
+        // MODIFIED: The serializer will now also save custom compounds from CompoundLibrary.Instance
         ProjectSerializer.SaveProject(this, path);
         ProjectPath = path;
         ProjectName = Path.GetFileNameWithoutExtension(path);
@@ -204,6 +210,18 @@ public class ProjectManager
 
         if (projectDto.ProjectMetadata != null)
             ProjectMetadata = ConvertFromProjectMetadataDTO(projectDto.ProjectMetadata);
+
+        // ADDED: Restore custom compounds from the project file
+        if (projectDto.CustomCompounds != null && projectDto.CustomCompounds.Count > 0)
+        {
+            foreach (var compoundDto in projectDto.CustomCompounds)
+            {
+                var compound = ConvertFromChemicalCompoundDTO(compoundDto);
+                CompoundLibrary.Instance.AddOrUpdate(compound);
+            }
+
+            Logger.Log($"Restored {projectDto.CustomCompounds.Count} custom compounds from project.");
+        }
 
         var createdDatasets = new Dictionary<string, Dataset>();
         var streamingDtos = new List<StreamingCtVolumeDatasetDTO>();
@@ -548,6 +566,50 @@ public class ProjectManager
             meta.Size = new Vector3(dto.SizeX.Value, dto.SizeY.Value, dto.SizeZ.Value);
 
         return meta;
+    }
+
+    // ADDED: Helper to convert a ChemicalCompoundDTO to a ChemicalCompound model
+    private ChemicalCompound ConvertFromChemicalCompoundDTO(ChemicalCompoundDTO dto)
+    {
+        if (dto == null) return null;
+
+        return new ChemicalCompound
+        {
+            Name = dto.Name,
+            ChemicalFormula = dto.ChemicalFormula,
+            Phase = dto.Phase,
+            CrystalSystem = dto.CrystalSystem,
+            GibbsFreeEnergyFormation_kJ_mol = dto.GibbsFreeEnergyFormation_kJ_mol,
+            EnthalpyFormation_kJ_mol = dto.EnthalpyFormation_kJ_mol,
+            Entropy_J_molK = dto.Entropy_J_molK,
+            HeatCapacity_J_molK = dto.HeatCapacity_J_molK,
+            MolarVolume_cm3_mol = dto.MolarVolume_cm3_mol,
+            MolecularWeight_g_mol = dto.MolecularWeight_g_mol,
+            Density_g_cm3 = dto.Density_g_cm3,
+            LogKsp_25C = dto.LogKsp_25C,
+            Solubility_g_100mL_25C = dto.Solubility_g_100mL_25C,
+            DissolutionEnthalpy_kJ_mol = dto.DissolutionEnthalpy_kJ_mol,
+            ActivationEnergy_Dissolution_kJ_mol = dto.ActivationEnergy_Dissolution_kJ_mol,
+            ActivationEnergy_Precipitation_kJ_mol = dto.ActivationEnergy_Precipitation_kJ_mol,
+            RateConstant_Dissolution_mol_m2_s = dto.RateConstant_Dissolution_mol_m2_s,
+            RateConstant_Precipitation_mol_m2_s = dto.RateConstant_Precipitation_mol_m2_s,
+            ReactionOrder_Dissolution = dto.ReactionOrder_Dissolution,
+            SpecificSurfaceArea_m2_g = dto.SpecificSurfaceArea_m2_g,
+            HeatCapacityPolynomial_a_b_c_d = dto.HeatCapacityPolynomial_a_b_c_d,
+            TemperatureRange_K = dto.TemperatureRange_K,
+            IonicCharge = dto.IonicCharge,
+            ActivityCoefficientParams = dto.ActivityCoefficientParams,
+            IonicConductivity_S_cm2_mol = dto.IonicConductivity_S_cm2_mol,
+            RefractiveIndex = dto.RefractiveIndex,
+            MohsHardness = dto.MohsHardness,
+            Color = dto.Color,
+            Cleavage = dto.Cleavage,
+            Synonyms = dto.Synonyms,
+            Notes = dto.Notes,
+            Sources = dto.Sources,
+            CustomParams = dto.CustomParams,
+            IsUserCompound = true // Mark as a user-defined compound
+        };
     }
 
     private ProjectMetadata ConvertFromProjectMetadataDTO(ProjectMetadataDTO dto)

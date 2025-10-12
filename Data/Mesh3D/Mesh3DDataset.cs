@@ -63,6 +63,7 @@ public class Mesh3DDataset : Dataset, ISerializableDataset
             Center = Center
         };
     }
+
     /// <summary>
     ///     Create an empty mesh dataset that can be edited
     /// </summary>
@@ -94,6 +95,7 @@ public class Mesh3DDataset : Dataset, ISerializableDataset
         Logger.Log($"Created empty mesh: {name}");
         return dataset;
     }
+
     /// <summary>
     ///     Add a simple unit cube as the initial geometry
     /// </summary>
@@ -136,6 +138,7 @@ public class Mesh3DDataset : Dataset, ISerializableDataset
         GenerateNormals();
         CalculateBounds();
     }
+
     public static Mesh3DDataset CreateFromData(string name, string filePath, List<Vector3> vertices, List<int[]> faces,
         float voxelSize, string unit)
     {
@@ -267,6 +270,7 @@ public class Mesh3DDataset : Dataset, ISerializableDataset
             throw;
         }
     }
+
     /// <summary>
     ///     Save the current mesh to its file path
     /// </summary>
@@ -282,10 +286,7 @@ public class Mesh3DDataset : Dataset, ISerializableDataset
         {
             // Ensure directory exists
             var directory = Path.GetDirectoryName(FilePath);
-            if (!string.IsNullOrEmpty(directory) && !Directory.Exists(directory))
-            {
-                Directory.CreateDirectory(directory);
-            }
+            if (!string.IsNullOrEmpty(directory) && !Directory.Exists(directory)) Directory.CreateDirectory(directory);
 
             // Recalculate bounds before saving
             CalculateBounds();
@@ -326,6 +327,7 @@ public class Mesh3DDataset : Dataset, ISerializableDataset
 
         Center = (BoundingBoxMin + BoundingBoxMax) * 0.5f;
     }
+
     private void LoadOBJ()
     {
         Vertices.Clear();

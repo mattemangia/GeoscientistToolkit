@@ -8,8 +8,10 @@ using GeoscientistToolkit.Data.Mesh3D;
 using GeoscientistToolkit.Settings;
 using GeoscientistToolkit.UI.GIS;
 using GeoscientistToolkit.UI.Utils;
+using GeoscientistToolkit.UI.Windows;
 using GeoscientistToolkit.Util;
 using ImGuiNET;
+// ADDED: To access the new editor window
 
 namespace GeoscientistToolkit.UI;
 
@@ -35,7 +37,11 @@ public class MainWindow
     private readonly SystemInfoWindow _systemInfoWindow = new();
     private readonly SettingsWindow _settingsWindow = new();
     private readonly Volume3DDebugWindow _volume3DDebugWindow = new();
+
     private readonly MaterialLibraryWindow _materialLibraryWindow = new();
+
+    // ADDED: Instance of the compound library editor window
+    private readonly CompoundLibraryEditorWindow _compoundLibraryEditorWindow = new();
     private readonly ImGuiWindowScreenshotTool _screenshotTool;
 
     // File Dialogs
@@ -83,7 +89,7 @@ public class MainWindow
         _datasets.OnCreateEmptyShapefile += gis => _shapefileCreationDialog.OpenEmpty(gis);
         // Initialize the screenshot tool
         _screenshotTool = new ImGuiWindowScreenshotTool();
-        
+
         // Configure the create mesh dialog
         _createMeshDialog.SetExtensions(
             new ImGuiExportFileDialog.ExtensionOption(".obj", "Wavefront OBJ")
@@ -214,7 +220,9 @@ public class MainWindow
         _projectMetadataEditor.Submit();
         _metadataTableViewer.Submit();
         _materialLibraryWindow.Submit();
-        
+        // ADDED: Draw the compound library editor window
+        _compoundLibraryEditorWindow.Draw();
+
         // Handle create mesh dialog
         HandleCreateMeshDialog();
 
@@ -365,10 +373,10 @@ public class MainWindow
             ImGui.Separator();
             if (ImGui.MenuItem("Import Data...")) _import.Open();
             ImGui.Separator();
-            
+
             // NEW: Add empty mesh creation
             if (ImGui.MenuItem("New 3D Model...")) OnCreateEmptyMesh();
-            
+
             if (ImGui.MenuItem("New GIS Map..."))
             {
                 var emptyGIS = new GISDataset("New Map", "")
@@ -396,6 +404,8 @@ public class MainWindow
             if (ImGui.MenuItem("Settings...", "Ctrl+,")) _settingsWindow.Open();
             ImGui.Separator();
             if (ImGui.MenuItem("Material Library...")) _materialLibraryWindow.Open();
+            // ADDED: Menu item to open the Compound Library Editor
+            if (ImGui.MenuItem("Compound Library...")) _compoundLibraryEditorWindow.Show();
             ImGui.EndMenu();
         }
 
@@ -534,14 +544,13 @@ public class MainWindow
         {
             var timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
             var defaultName = $"NewModel_{timestamp}";
-            
+
             // Get user's documents folder as default location
             var documentsPath = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
             var defaultPath = Path.Combine(documentsPath, "3D Models");
-            
+
             // Create the directory if it doesn't exist
             if (!Directory.Exists(defaultPath))
-            {
                 try
                 {
                     Directory.CreateDirectory(defaultPath);
@@ -551,8 +560,7 @@ public class MainWindow
                     // If we can't create it, just use documents folder
                     defaultPath = documentsPath;
                 }
-            }
-            
+
             _createMeshDialog.Open(defaultName, defaultPath);
             Logger.Log("Opening create mesh dialog");
         }
@@ -565,22 +573,21 @@ public class MainWindow
     private void HandleCreateMeshDialog()
     {
         if (_createMeshDialog.Submit())
-        {
             try
             {
                 var filePath = _createMeshDialog.SelectedPath;
                 var name = Path.GetFileNameWithoutExtension(filePath);
-                
+
                 Logger.Log($"Creating empty mesh: {name} at {filePath}");
-                
+
                 var emptyMesh = Mesh3DDataset.CreateEmpty(name, filePath);
-                
+
                 if (emptyMesh == null)
                 {
                     Logger.LogError("Failed to create empty mesh - CreateEmpty returned null");
                     return;
                 }
-                
+
                 // Save the initial mesh to the selected location
                 try
                 {
@@ -591,10 +598,10 @@ public class MainWindow
                 {
                     Logger.LogError($"Failed to save initial mesh: {saveEx.Message}");
                 }
-                
+
                 ProjectManager.Instance.AddDataset(emptyMesh);
                 Logger.Log($"Created new empty 3D model: {name}");
-                
+
                 // Auto-select and open the new mesh
                 OnDatasetSelected(emptyMesh);
             }
@@ -603,7 +610,6 @@ public class MainWindow
                 Logger.LogError($"Failed to create empty mesh: {ex.Message}");
                 Logger.LogError($"Stack trace: {ex.StackTrace}");
             }
-        }
     }
 
     private void TryExit()

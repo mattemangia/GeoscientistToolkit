@@ -11,28 +11,34 @@ namespace GeoscientistToolkit.Data.Mesh3D;
 /// </summary>
 public class Mesh3DEditor
 {
+    public enum EditorMode
+    {
+        View,
+        Edit,
+        AddPrimitive
+    }
+
+    private const int MaxUndoSteps = 50;
     private readonly Mesh3DDataset _dataset;
-    private EditorMode _mode = EditorMode.View;
-    private PrimitiveType _selectedPrimitive = PrimitiveType.Cube;
-    
-    // Editing state
-    private Vector3 _newVertexPosition = Vector3.Zero;
-    private List<int> _selectedVertices = new();
-    private Vector3 _primitiveScale = Vector3.One;
-    private Vector3 _primitivePosition = Vector3.Zero;
-    
-    // Snapping settings
-    private bool _snapToGrid = false;
-    private float _gridSnapSize = 0.5f;
-    private bool _snapToVertex = false;
-    private float _vertexSnapDistance = 0.1f;
-    private bool _snapAngle = false;
-    private float _angleSnapDegrees = 45f;
-    
+    private readonly Stack<MeshState> _redoStack = new();
+    private readonly List<int> _selectedVertices = new();
+
     // Undo/Redo stacks
     private readonly Stack<MeshState> _undoStack = new();
-    private readonly Stack<MeshState> _redoStack = new();
-    private const int MaxUndoSteps = 50;
+    private float _angleSnapDegrees = 45f;
+    private float _gridSnapSize = 0.5f;
+
+    // Editing state
+    private Vector3 _newVertexPosition = Vector3.Zero;
+    private Vector3 _primitivePosition = Vector3.Zero;
+    private Vector3 _primitiveScale = Vector3.One;
+    private PrimitiveType _selectedPrimitive = PrimitiveType.Cube;
+    private bool _snapAngle;
+
+    // Snapping settings
+    private bool _snapToGrid;
+    private bool _snapToVertex;
+    private float _vertexSnapDistance = 0.1f;
 
     public Mesh3DEditor(Mesh3DDataset dataset)
     {
@@ -40,8 +46,9 @@ public class Mesh3DEditor
         SaveState(); // Initial state
     }
 
-    public EditorMode Mode => _mode;
-    public bool IsEditMode => _mode != EditorMode.View;
+    public EditorMode Mode { get; private set; } = EditorMode.View;
+
+    public bool IsEditMode => Mode != EditorMode.View;
 
     /// <summary>
     ///     Draw editor controls in the viewer toolbar
@@ -53,32 +60,26 @@ public class Mesh3DEditor
         ImGui.SameLine();
 
         // Mode buttons
-        if (ImGui.RadioButton("View", _mode == EditorMode.View))
-            _mode = EditorMode.View;
+        if (ImGui.RadioButton("View", Mode == EditorMode.View))
+            Mode = EditorMode.View;
         ImGui.SameLine();
-        
-        if (ImGui.RadioButton("Edit", _mode == EditorMode.Edit))
-            _mode = EditorMode.Edit;
+
+        if (ImGui.RadioButton("Edit", Mode == EditorMode.Edit))
+            Mode = EditorMode.Edit;
         ImGui.SameLine();
-        
-        if (ImGui.RadioButton("Add Primitive", _mode == EditorMode.AddPrimitive))
-            _mode = EditorMode.AddPrimitive;
+
+        if (ImGui.RadioButton("Add Primitive", Mode == EditorMode.AddPrimitive))
+            Mode = EditorMode.AddPrimitive;
 
         ImGui.SameLine();
         ImGui.Separator();
         ImGui.SameLine();
 
         // Undo/Redo
-        if (ImGui.Button("Undo") && _undoStack.Count > 1)
-        {
-            Undo();
-        }
+        if (ImGui.Button("Undo") && _undoStack.Count > 1) Undo();
         ImGui.SameLine();
-        
-        if (ImGui.Button("Redo") && _redoStack.Count > 0)
-        {
-            Redo();
-        }
+
+        if (ImGui.Button("Redo") && _redoStack.Count > 0) Redo();
 
         ImGui.SameLine();
         ImGui.Separator();
@@ -89,34 +90,31 @@ public class Mesh3DEditor
         {
             ImGui.Text("Snap:");
             ImGui.SameLine();
-            
+
             if (_snapToGrid)
             {
                 ImGui.TextColored(new Vector4(0.4f, 1.0f, 0.4f, 1.0f), $"Grid({_gridSnapSize:F2})");
                 ImGui.SameLine();
             }
-            
+
             if (_snapToVertex)
             {
                 ImGui.TextColored(new Vector4(0.4f, 0.8f, 1.0f, 1.0f), $"Vtx({_vertexSnapDistance:F2})");
                 ImGui.SameLine();
             }
-            
+
             if (_snapAngle)
             {
                 ImGui.TextColored(new Vector4(1.0f, 0.8f, 0.4f, 1.0f), $"Ang({_angleSnapDegrees:F0}°)");
                 ImGui.SameLine();
             }
-            
+
             ImGui.Separator();
             ImGui.SameLine();
         }
 
         // Save/Export
-        if (ImGui.Button("Save Model"))
-        {
-            SaveModel();
-        }
+        if (ImGui.Button("Save Model")) SaveModel();
     }
 
     /// <summary>
@@ -124,15 +122,15 @@ public class Mesh3DEditor
     /// </summary>
     public void DrawEditorPanel()
     {
-        if (_mode == EditorMode.View)
+        if (Mode == EditorMode.View)
             return;
 
         ImGui.SetNextWindowPos(new Vector2(ImGui.GetIO().DisplaySize.X - 320, 80), ImGuiCond.FirstUseEver);
         ImGui.SetNextWindowSize(new Vector2(300, 500), ImGuiCond.FirstUseEver);
-        
+
         if (ImGui.Begin("Mesh Editor", ImGuiWindowFlags.NoCollapse))
         {
-            ImGui.Text($"Mode: {_mode}");
+            ImGui.Text($"Mode: {Mode}");
             ImGui.Text($"Vertices: {_dataset.VertexCount}");
             ImGui.Text($"Faces: {_dataset.FaceCount}");
             ImGui.Separator();
@@ -141,7 +139,7 @@ public class Mesh3DEditor
             DrawSnappingSettings();
             ImGui.Separator();
 
-            switch (_mode)
+            switch (Mode)
             {
                 case EditorMode.Edit:
                     DrawEditModePanel();
@@ -151,6 +149,7 @@ public class Mesh3DEditor
                     break;
             }
         }
+
         ImGui.End();
     }
 
@@ -162,7 +161,7 @@ public class Mesh3DEditor
         if (ImGui.CollapsingHeader("Add Vertex", ImGuiTreeNodeFlags.DefaultOpen))
         {
             ImGui.DragFloat3("Position", ref _newVertexPosition, 0.1f);
-            
+
             // Apply snapping to display
             var snappedPos = ApplySnapping(_newVertexPosition);
             if (snappedPos != _newVertexPosition)
@@ -172,64 +171,40 @@ public class Mesh3DEditor
                 ImGui.SameLine();
                 ImGui.Text($"({snappedPos.X:F2}, {snappedPos.Y:F2}, {snappedPos.Z:F2})");
             }
-            
-            if (ImGui.Button("Add Vertex", new Vector2(-1, 0)))
-            {
-                AddVertex(ApplySnapping(_newVertexPosition));
-            }
+
+            if (ImGui.Button("Add Vertex", new Vector2(-1, 0))) AddVertex(ApplySnapping(_newVertexPosition));
         }
 
         if (ImGui.CollapsingHeader("Selection Info"))
         {
             ImGui.Text($"Selected: {_selectedVertices.Count} vertices");
-            
+
             if (_selectedVertices.Count > 0)
             {
-                if (ImGui.Button("Clear Selection", new Vector2(-1, 0)))
-                {
-                    _selectedVertices.Clear();
-                }
+                if (ImGui.Button("Clear Selection", new Vector2(-1, 0))) _selectedVertices.Clear();
 
                 ImGui.Spacing();
-                
+
                 if (_selectedVertices.Count >= 3)
-                {
                     if (ImGui.Button("Create Face from Selection", new Vector2(-1, 0)))
-                    {
                         CreateFaceFromSelection();
-                    }
-                }
-                
-                if (ImGui.Button("Delete Selected", new Vector2(-1, 0)))
-                {
-                    DeleteSelectedVertices();
-                }
-                
+
+                if (ImGui.Button("Delete Selected", new Vector2(-1, 0))) DeleteSelectedVertices();
+
                 ImGui.Spacing();
-                
+
                 if (_selectedVertices.Count > 0 && ImGui.Button("Snap Selected to Grid", new Vector2(-1, 0)))
-                {
                     SnapSelectedToGrid();
-                }
             }
         }
 
         if (ImGui.CollapsingHeader("Mesh Operations"))
         {
-            if (ImGui.Button("Recalculate Normals", new Vector2(-1, 0)))
-            {
-                RecalculateNormals();
-            }
-            
-            if (ImGui.Button("Center Model", new Vector2(-1, 0)))
-            {
-                CenterModel();
-            }
-            
-            if (ImGui.Button("Clear Mesh", new Vector2(-1, 0)))
-            {
-                ClearMesh();
-            }
+            if (ImGui.Button("Recalculate Normals", new Vector2(-1, 0))) RecalculateNormals();
+
+            if (ImGui.Button("Center Model", new Vector2(-1, 0))) CenterModel();
+
+            if (ImGui.Button("Clear Mesh", new Vector2(-1, 0))) ClearMesh();
         }
     }
 
@@ -241,7 +216,7 @@ public class Mesh3DEditor
         if (ImGui.CollapsingHeader("Primitive Type", ImGuiTreeNodeFlags.DefaultOpen))
         {
             var primitiveInt = (int)_selectedPrimitive;
-            
+
             if (ImGui.RadioButton("Cube", ref primitiveInt, (int)PrimitiveType.Cube))
                 _selectedPrimitive = PrimitiveType.Cube;
             if (ImGui.RadioButton("Sphere", ref primitiveInt, (int)PrimitiveType.Sphere))
@@ -257,7 +232,7 @@ public class Mesh3DEditor
         if (ImGui.CollapsingHeader("Parameters", ImGuiTreeNodeFlags.DefaultOpen))
         {
             ImGui.DragFloat3("Position", ref _primitivePosition, 0.1f);
-            
+
             // Show snapped position preview
             var snappedPos = ApplySnapping(_primitivePosition);
             if (snappedPos != _primitivePosition)
@@ -267,14 +242,12 @@ public class Mesh3DEditor
                 ImGui.SameLine();
                 ImGui.Text($"({snappedPos.X:F2}, {snappedPos.Y:F2}, {snappedPos.Z:F2})");
             }
-            
+
             ImGui.DragFloat3("Scale", ref _primitiveScale, 0.1f, 0.1f, 10.0f);
         }
 
         if (ImGui.Button("Add Primitive", new Vector2(-1, 0)))
-        {
             AddPrimitive(_selectedPrimitive, ApplySnapping(_primitivePosition), _primitiveScale);
-        }
     }
 
     private void DrawSnappingSettings()
@@ -282,7 +255,7 @@ public class Mesh3DEditor
         if (ImGui.CollapsingHeader("Snapping", ImGuiTreeNodeFlags.DefaultOpen))
         {
             ImGui.Indent();
-            
+
             // Grid snapping
             ImGui.Checkbox("Snap to Grid", ref _snapToGrid);
             if (_snapToGrid)
@@ -290,7 +263,7 @@ public class Mesh3DEditor
                 ImGui.Indent();
                 ImGui.SetNextItemWidth(-1);
                 ImGui.DragFloat("Grid Size", ref _gridSnapSize, 0.05f, 0.01f, 10.0f, "%.2f");
-                
+
                 // Quick preset buttons
                 ImGui.Text("Presets:");
                 ImGui.SameLine();
@@ -301,12 +274,12 @@ public class Mesh3DEditor
                 if (ImGui.SmallButton("0.5")) _gridSnapSize = 0.5f;
                 ImGui.SameLine();
                 if (ImGui.SmallButton("1.0")) _gridSnapSize = 1.0f;
-                
+
                 ImGui.Unindent();
             }
-            
+
             ImGui.Spacing();
-            
+
             // Vertex snapping
             ImGui.Checkbox("Snap to Vertex", ref _snapToVertex);
             if (_snapToVertex)
@@ -317,9 +290,9 @@ public class Mesh3DEditor
                 ImGui.TextDisabled("Snaps to nearest vertex within distance");
                 ImGui.Unindent();
             }
-            
+
             ImGui.Spacing();
-            
+
             // Angle snapping (for future rotation tools)
             ImGui.Checkbox("Snap Angles", ref _snapAngle);
             if (_snapAngle)
@@ -327,7 +300,7 @@ public class Mesh3DEditor
                 ImGui.Indent();
                 ImGui.SetNextItemWidth(-1);
                 ImGui.DragFloat("Angle Step", ref _angleSnapDegrees, 1f, 1f, 90f, "%.0f°");
-                
+
                 // Quick preset buttons
                 ImGui.Text("Presets:");
                 ImGui.SameLine();
@@ -336,10 +309,10 @@ public class Mesh3DEditor
                 if (ImGui.SmallButton("45°")) _angleSnapDegrees = 45f;
                 ImGui.SameLine();
                 if (ImGui.SmallButton("90°")) _angleSnapDegrees = 90f;
-                
+
                 ImGui.Unindent();
             }
-            
+
             ImGui.Unindent();
         }
     }
@@ -375,32 +348,25 @@ public class Mesh3DEditor
             return;
 
         SaveState();
-        
+
         // Sort in descending order to maintain correct indices while removing
         _selectedVertices.Sort((a, b) => b.CompareTo(a));
-        
+
         foreach (var idx in _selectedVertices)
-        {
             if (idx >= 0 && idx < _dataset.Vertices.Count)
-            {
                 _dataset.Vertices.RemoveAt(idx);
-            }
-        }
-        
+
         // Update faces to remove references to deleted vertices
         var validFaces = new List<int[]>();
         foreach (var face in _dataset.Faces)
         {
             var validFace = face.Where(v => !_selectedVertices.Contains(v)).ToArray();
-            if (validFace.Length >= 3)
-            {
-                validFaces.Add(validFace);
-            }
+            if (validFace.Length >= 3) validFaces.Add(validFace);
         }
-        
+
         _dataset.Faces.Clear();
         _dataset.Faces.AddRange(validFaces);
-        
+
         _dataset.VertexCount = _dataset.Vertices.Count;
         _dataset.FaceCount = _dataset.Faces.Count;
         _selectedVertices.Clear();
@@ -419,41 +385,29 @@ public class Mesh3DEditor
     private void RecalculateNormalsInternal()
     {
         _dataset.Normals.Clear();
-        
+
         // Initialize normals
-        for (var i = 0; i < _dataset.Vertices.Count; i++)
-        {
-            _dataset.Normals.Add(Vector3.Zero);
-        }
-        
+        for (var i = 0; i < _dataset.Vertices.Count; i++) _dataset.Normals.Add(Vector3.Zero);
+
         // Calculate face normals and accumulate
         foreach (var face in _dataset.Faces)
-        {
             if (face.Length >= 3)
             {
                 var v0 = _dataset.Vertices[face[0]];
                 var v1 = _dataset.Vertices[face[1]];
                 var v2 = _dataset.Vertices[face[2]];
-                
+
                 var edge1 = v1 - v0;
                 var edge2 = v2 - v0;
                 var normal = Vector3.Normalize(Vector3.Cross(edge1, edge2));
-                
-                foreach (var idx in face)
-                {
-                    _dataset.Normals[idx] += normal;
-                }
+
+                foreach (var idx in face) _dataset.Normals[idx] += normal;
             }
-        }
-        
+
         // Normalize
         for (var i = 0; i < _dataset.Normals.Count; i++)
-        {
             if (_dataset.Normals[i].LengthSquared() > 0)
-            {
                 _dataset.Normals[i] = Vector3.Normalize(_dataset.Normals[i]);
-            }
-        }
     }
 
     private void CenterModel()
@@ -462,23 +416,20 @@ public class Mesh3DEditor
             return;
 
         SaveState();
-        
+
         var min = new Vector3(float.MaxValue);
         var max = new Vector3(float.MinValue);
-        
+
         foreach (var v in _dataset.Vertices)
         {
             min = Vector3.Min(min, v);
             max = Vector3.Max(max, v);
         }
-        
+
         var center = (min + max) * 0.5f;
-        
-        for (var i = 0; i < _dataset.Vertices.Count; i++)
-        {
-            _dataset.Vertices[i] -= center;
-        }
-        
+
+        for (var i = 0; i < _dataset.Vertices.Count; i++) _dataset.Vertices[i] -= center;
+
         UpdateDataset();
         Logger.Log("Centered model");
     }
@@ -499,9 +450,9 @@ public class Mesh3DEditor
     private void AddPrimitive(PrimitiveType type, Vector3 position, Vector3 scale)
     {
         SaveState();
-        
+
         var baseVertexIndex = _dataset.Vertices.Count;
-        
+
         switch (type)
         {
             case PrimitiveType.Cube:
@@ -520,7 +471,7 @@ public class Mesh3DEditor
                 AddCone(position, scale);
                 break;
         }
-        
+
         _dataset.VertexCount = _dataset.Vertices.Count;
         _dataset.FaceCount = _dataset.Faces.Count;
         UpdateDataset();
@@ -530,7 +481,7 @@ public class Mesh3DEditor
     private void AddCube(Vector3 position, Vector3 scale)
     {
         var baseIdx = _dataset.Vertices.Count;
-        
+
         // Define 8 cube vertices
         var vertices = new[]
         {
@@ -539,12 +490,9 @@ public class Mesh3DEditor
             new Vector3(-1, -1, 1), new Vector3(1, -1, 1),
             new Vector3(1, 1, 1), new Vector3(-1, 1, 1)
         };
-        
-        foreach (var v in vertices)
-        {
-            _dataset.Vertices.Add(position + v * scale * 0.5f);
-        }
-        
+
+        foreach (var v in vertices) _dataset.Vertices.Add(position + v * scale * 0.5f);
+
         // Define 12 triangular faces (2 per cube face)
         var faces = new[]
         {
@@ -561,11 +509,9 @@ public class Mesh3DEditor
             // Bottom
             new[] { 4, 5, 1 }, new[] { 4, 1, 0 }
         };
-        
+
         foreach (var face in faces)
-        {
             _dataset.Faces.Add(new[] { baseIdx + face[0], baseIdx + face[1], baseIdx + face[2] });
-        }
     }
 
     private void AddSphere(Vector3 position, float radius)
@@ -573,37 +519,35 @@ public class Mesh3DEditor
         var baseIdx = _dataset.Vertices.Count;
         var segments = 16;
         var rings = 12;
-        
+
         // Generate vertices
         for (var ring = 0; ring <= rings; ring++)
         {
             var phi = MathF.PI * ring / rings;
             var y = MathF.Cos(phi);
             var ringRadius = MathF.Sin(phi);
-            
+
             for (var seg = 0; seg <= segments; seg++)
             {
                 var theta = 2.0f * MathF.PI * seg / segments;
                 var x = ringRadius * MathF.Cos(theta);
                 var z = ringRadius * MathF.Sin(theta);
-                
+
                 _dataset.Vertices.Add(position + new Vector3(x, y, z) * radius);
             }
         }
-        
+
         // Generate faces
         for (var ring = 0; ring < rings; ring++)
+        for (var seg = 0; seg < segments; seg++)
         {
-            for (var seg = 0; seg < segments; seg++)
-            {
-                var i0 = baseIdx + ring * (segments + 1) + seg;
-                var i1 = i0 + segments + 1;
-                var i2 = i0 + 1;
-                var i3 = i1 + 1;
-                
-                _dataset.Faces.Add(new[] { i0, i1, i2 });
-                _dataset.Faces.Add(new[] { i2, i1, i3 });
-            }
+            var i0 = baseIdx + ring * (segments + 1) + seg;
+            var i1 = i0 + segments + 1;
+            var i2 = i0 + 1;
+            var i3 = i1 + 1;
+
+            _dataset.Faces.Add(new[] { i0, i1, i2 });
+            _dataset.Faces.Add(new[] { i2, i1, i3 });
         }
     }
 
@@ -613,10 +557,10 @@ public class Mesh3DEditor
         var segments = 16;
         var radius = scale.X * 0.5f;
         var height = scale.Y;
-        
+
         // Bottom cap center
         _dataset.Vertices.Add(position + new Vector3(0, -height * 0.5f, 0));
-        
+
         // Bottom cap vertices
         for (var i = 0; i <= segments; i++)
         {
@@ -625,7 +569,7 @@ public class Mesh3DEditor
             var z = radius * MathF.Sin(angle);
             _dataset.Vertices.Add(position + new Vector3(x, -height * 0.5f, z));
         }
-        
+
         // Top cap vertices
         for (var i = 0; i <= segments; i++)
         {
@@ -634,16 +578,13 @@ public class Mesh3DEditor
             var z = radius * MathF.Sin(angle);
             _dataset.Vertices.Add(position + new Vector3(x, height * 0.5f, z));
         }
-        
+
         // Top cap center
         _dataset.Vertices.Add(position + new Vector3(0, height * 0.5f, 0));
-        
+
         // Bottom cap faces
-        for (var i = 0; i < segments; i++)
-        {
-            _dataset.Faces.Add(new[] { baseIdx, baseIdx + i + 1, baseIdx + i + 2 });
-        }
-        
+        for (var i = 0; i < segments; i++) _dataset.Faces.Add(new[] { baseIdx, baseIdx + i + 1, baseIdx + i + 2 });
+
         // Side faces
         for (var i = 0; i < segments; i++)
         {
@@ -651,17 +592,15 @@ public class Mesh3DEditor
             var b1 = baseIdx + i + 2;
             var t0 = baseIdx + segments + 2 + i;
             var t1 = baseIdx + segments + 2 + i + 1;
-            
+
             _dataset.Faces.Add(new[] { b0, t0, b1 });
             _dataset.Faces.Add(new[] { b1, t0, t1 });
         }
-        
+
         // Top cap faces
         var topCenter = baseIdx + 2 * (segments + 1) + 1;
         for (var i = 0; i < segments; i++)
-        {
             _dataset.Faces.Add(new[] { topCenter, baseIdx + segments + 3 + i, baseIdx + segments + 2 + i });
-        }
     }
 
     private void AddPlane(Vector3 position, Vector3 scale)
@@ -669,12 +608,12 @@ public class Mesh3DEditor
         var baseIdx = _dataset.Vertices.Count;
         var halfX = scale.X * 0.5f;
         var halfZ = scale.Z * 0.5f;
-        
+
         _dataset.Vertices.Add(position + new Vector3(-halfX, 0, -halfZ));
         _dataset.Vertices.Add(position + new Vector3(halfX, 0, -halfZ));
         _dataset.Vertices.Add(position + new Vector3(halfX, 0, halfZ));
         _dataset.Vertices.Add(position + new Vector3(-halfX, 0, halfZ));
-        
+
         _dataset.Faces.Add(new[] { baseIdx, baseIdx + 1, baseIdx + 2 });
         _dataset.Faces.Add(new[] { baseIdx, baseIdx + 2, baseIdx + 3 });
     }
@@ -685,13 +624,13 @@ public class Mesh3DEditor
         var segments = 16;
         var radius = scale.X * 0.5f;
         var height = scale.Y;
-        
+
         // Apex
         _dataset.Vertices.Add(position + new Vector3(0, height * 0.5f, 0));
-        
+
         // Base center
         _dataset.Vertices.Add(position + new Vector3(0, -height * 0.5f, 0));
-        
+
         // Base rim
         for (var i = 0; i <= segments; i++)
         {
@@ -700,18 +639,12 @@ public class Mesh3DEditor
             var z = radius * MathF.Sin(angle);
             _dataset.Vertices.Add(position + new Vector3(x, -height * 0.5f, z));
         }
-        
+
         // Side faces
-        for (var i = 0; i < segments; i++)
-        {
-            _dataset.Faces.Add(new[] { baseIdx, baseIdx + i + 2, baseIdx + i + 3 });
-        }
-        
+        for (var i = 0; i < segments; i++) _dataset.Faces.Add(new[] { baseIdx, baseIdx + i + 2, baseIdx + i + 3 });
+
         // Base faces
-        for (var i = 0; i < segments; i++)
-        {
-            _dataset.Faces.Add(new[] { baseIdx + 1, baseIdx + i + 3, baseIdx + i + 2 });
-        }
+        for (var i = 0; i < segments; i++) _dataset.Faces.Add(new[] { baseIdx + 1, baseIdx + i + 3, baseIdx + i + 2 });
     }
 
     private void SaveState()
@@ -722,20 +655,17 @@ public class Mesh3DEditor
             Faces = new List<int[]>(_dataset.Faces.Select(f => (int[])f.Clone())),
             Normals = new List<Vector3>(_dataset.Normals)
         };
-        
+
         _undoStack.Push(state);
         _redoStack.Clear();
-        
+
         // Limit undo stack size
         while (_undoStack.Count > MaxUndoSteps)
         {
             var states = _undoStack.ToList();
             states.RemoveAt(states.Count - 1);
             _undoStack.Clear();
-            foreach (var s in states.AsEnumerable().Reverse())
-            {
-                _undoStack.Push(s);
-            }
+            foreach (var s in states.AsEnumerable().Reverse()) _undoStack.Push(s);
         }
     }
 
@@ -743,10 +673,10 @@ public class Mesh3DEditor
     {
         if (_undoStack.Count <= 1)
             return;
-        
+
         var currentState = _undoStack.Pop();
         _redoStack.Push(currentState);
-        
+
         var previousState = _undoStack.Peek();
         RestoreState(previousState);
         Logger.Log("Undo");
@@ -756,7 +686,7 @@ public class Mesh3DEditor
     {
         if (_redoStack.Count == 0)
             return;
-        
+
         var state = _redoStack.Pop();
         _undoStack.Push(state);
         RestoreState(state);
@@ -767,16 +697,16 @@ public class Mesh3DEditor
     {
         _dataset.Vertices.Clear();
         _dataset.Vertices.AddRange(state.Vertices);
-        
+
         _dataset.Faces.Clear();
         _dataset.Faces.AddRange(state.Faces);
-        
+
         _dataset.Normals.Clear();
         _dataset.Normals.AddRange(state.Normals);
-        
+
         _dataset.VertexCount = _dataset.Vertices.Count;
         _dataset.FaceCount = _dataset.Faces.Count;
-        
+
         UpdateDataset();
     }
 
@@ -816,17 +746,11 @@ public class Mesh3DEditor
         if (_snapToVertex)
         {
             var nearestVertex = FindNearestVertex(position, out var distance);
-            if (distance <= _vertexSnapDistance)
-            {
-                return nearestVertex;
-            }
+            if (distance <= _vertexSnapDistance) return nearestVertex;
         }
 
         // Grid snapping
-        if (_snapToGrid)
-        {
-            snappedPos = SnapToGrid(position);
-        }
+        if (_snapToGrid) snappedPos = SnapToGrid(position);
 
         return snappedPos;
     }
@@ -857,7 +781,7 @@ public class Mesh3DEditor
         var nearest = _dataset.Vertices[0];
         var minDist = Vector3.Distance(position, nearest);
 
-        for (int i = 1; i < _dataset.Vertices.Count; i++)
+        for (var i = 1; i < _dataset.Vertices.Count; i++)
         {
             var dist = Vector3.Distance(position, _dataset.Vertices[i]);
             if (dist < minDist)
@@ -893,12 +817,8 @@ public class Mesh3DEditor
         SaveState();
 
         foreach (var idx in _selectedVertices)
-        {
             if (idx >= 0 && idx < _dataset.Vertices.Count)
-            {
                 _dataset.Vertices[idx] = SnapToGrid(_dataset.Vertices[idx]);
-            }
-        }
 
         UpdateDataset();
         Logger.Log($"Snapped {_selectedVertices.Count} vertices to grid");
@@ -909,13 +829,6 @@ public class Mesh3DEditor
         public List<Vector3> Vertices { get; set; }
         public List<int[]> Faces { get; set; }
         public List<Vector3> Normals { get; set; }
-    }
-
-    public enum EditorMode
-    {
-        View,
-        Edit,
-        AddPrimitive
     }
 
     private enum PrimitiveType
