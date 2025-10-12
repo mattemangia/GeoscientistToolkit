@@ -45,6 +45,8 @@ public class MainWindow
     private readonly ImGuiFileDialog _saveProjectDialog =
         new("SaveProjectDlg", FileDialogType.SaveFile, "Save Project As");
 
+    private readonly ImGuiExportFileDialog _createMeshDialog = new("CreateMeshDialog", "Create New 3D Model");
+
     private readonly List<DatasetViewPanel> _viewers = new();
     private readonly List<ThumbnailViewerPanel> _thumbnailViewers = new();
     private readonly ShapefileCreationDialog _shapefileCreationDialog = new();
@@ -81,6 +83,11 @@ public class MainWindow
         _datasets.OnCreateEmptyShapefile += gis => _shapefileCreationDialog.OpenEmpty(gis);
         // Initialize the screenshot tool
         _screenshotTool = new ImGuiWindowScreenshotTool();
+        
+        // Configure the create mesh dialog
+        _createMeshDialog.SetExtensions(
+            new ImGuiExportFileDialog.ExtensionOption(".obj", "Wavefront OBJ")
+        );
     }
 
     // ──────────────────────────────────────────────────────────────────────
@@ -207,6 +214,9 @@ public class MainWindow
         _projectMetadataEditor.Submit();
         _metadataTableViewer.Submit();
         _materialLibraryWindow.Submit();
+        
+        // Handle create mesh dialog
+        HandleCreateMeshDialog();
 
         // The screenshot tool must be updated AFTER all other UI has been submitted
         _screenshotTool.PostUpdate();
@@ -355,7 +365,10 @@ public class MainWindow
             ImGui.Separator();
             if (ImGui.MenuItem("Import Data...")) _import.Open();
             ImGui.Separator();
+            
+            // NEW: Add empty mesh creation
             if (ImGui.MenuItem("New 3D Model...")) OnCreateEmptyMesh();
+            
             if (ImGui.MenuItem("New GIS Map..."))
             {
                 var emptyGIS = new GISDataset("New Map", "")
@@ -497,19 +510,7 @@ public class MainWindow
         _thumbnailViewers.Clear();
         _selectedDataset = null;
     }
-    private void OnCreateEmptyMesh()
-    {
-        var timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
-        var name = $"New Model {timestamp}";
-        var tempPath = Path.Combine(Path.GetTempPath(), $"{name}.obj");
-    
-        var emptyMesh = Mesh3DDataset.CreateEmpty(name, tempPath);
-        ProjectManager.Instance.AddDataset(emptyMesh);
-        Logger.Log($"Created new empty 3D model: {name}");
-    
-        // Auto-select and open the new mesh
-        OnDatasetSelected(emptyMesh);
-    }
+
     private void OnSaveProject()
     {
         if (string.IsNullOrEmpty(ProjectManager.Instance.ProjectPath))
@@ -525,6 +526,84 @@ public class MainWindow
             ? "NewProject"
             : ProjectManager.Instance.ProjectName;
         _saveProjectDialog.Open(null, new[] { ".gtp" }, defaultName);
+    }
+
+    private void OnCreateEmptyMesh()
+    {
+        try
+        {
+            var timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
+            var defaultName = $"NewModel_{timestamp}";
+            
+            // Get user's documents folder as default location
+            var documentsPath = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
+            var defaultPath = Path.Combine(documentsPath, "3D Models");
+            
+            // Create the directory if it doesn't exist
+            if (!Directory.Exists(defaultPath))
+            {
+                try
+                {
+                    Directory.CreateDirectory(defaultPath);
+                }
+                catch
+                {
+                    // If we can't create it, just use documents folder
+                    defaultPath = documentsPath;
+                }
+            }
+            
+            _createMeshDialog.Open(defaultName, defaultPath);
+            Logger.Log("Opening create mesh dialog");
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError($"Failed to open create mesh dialog: {ex.Message}");
+        }
+    }
+
+    private void HandleCreateMeshDialog()
+    {
+        if (_createMeshDialog.Submit())
+        {
+            try
+            {
+                var filePath = _createMeshDialog.SelectedPath;
+                var name = Path.GetFileNameWithoutExtension(filePath);
+                
+                Logger.Log($"Creating empty mesh: {name} at {filePath}");
+                
+                var emptyMesh = Mesh3DDataset.CreateEmpty(name, filePath);
+                
+                if (emptyMesh == null)
+                {
+                    Logger.LogError("Failed to create empty mesh - CreateEmpty returned null");
+                    return;
+                }
+                
+                // Save the initial mesh to the selected location
+                try
+                {
+                    emptyMesh.Save();
+                    Logger.Log($"Saved initial mesh to {filePath}");
+                }
+                catch (Exception saveEx)
+                {
+                    Logger.LogError($"Failed to save initial mesh: {saveEx.Message}");
+                }
+                
+                ProjectManager.Instance.AddDataset(emptyMesh);
+                Logger.Log($"Created new empty 3D model: {name}");
+                
+                // Auto-select and open the new mesh
+                OnDatasetSelected(emptyMesh);
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError($"Failed to create empty mesh: {ex.Message}");
+                Logger.LogError($"Stack trace: {ex.StackTrace}");
+            }
+        }
     }
 
     private void TryExit()

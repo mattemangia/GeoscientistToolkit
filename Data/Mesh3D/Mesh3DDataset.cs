@@ -43,7 +43,7 @@ public class Mesh3DDataset : Dataset, ISerializableDataset
     // Mesh data
     public List<Vector3> Vertices { get; private set; }
     public List<Vector3> Normals { get; private set; }
-    public List<Vector2> TextureCoordinates { get; }
+    public List<Vector2> TextureCoordinates { get; set; }
     public List<int[]> Faces { get; private set; } // Each face is an array of vertex indices
     public bool IsLoaded { get; private set; }
 
@@ -66,24 +66,75 @@ public class Mesh3DDataset : Dataset, ISerializableDataset
     /// <summary>
     ///     Create an empty mesh dataset that can be edited
     /// </summary>
+    /// <summary>
+    ///     Create an empty mesh dataset that can be edited
+    /// </summary>
     public static Mesh3DDataset CreateEmpty(string name, string filePath)
     {
         var dataset = new Mesh3DDataset(name, filePath)
         {
-            Vertices = new List<Vector3>(),
-            Faces = new List<int[]>(),
-            Normals = new List<Vector3>(),
-            VertexCount = 0,
-            FaceCount = 0,
             FileFormat = "OBJ",
             IsLoaded = true,
             BoundingBoxMin = Vector3.Zero,
             BoundingBoxMax = Vector3.Zero,
-            Center = Vector3.Zero
+            Center = Vector3.Zero,
+            VertexCount = 0,
+            FaceCount = 0
         };
+
+        // Initialize empty collections
+        dataset.Vertices = new List<Vector3>();
+        dataset.Faces = new List<int[]>();
+        dataset.Normals = new List<Vector3>();
+        dataset.TextureCoordinates = new List<Vector2>();
+
+        // Create a simple initial cube so the viewer has something to display
+        dataset.AddInitialCube();
 
         Logger.Log($"Created empty mesh: {name}");
         return dataset;
+    }
+    /// <summary>
+    ///     Add a simple unit cube as the initial geometry
+    /// </summary>
+    private void AddInitialCube()
+    {
+        // Define 8 cube vertices (unit cube centered at origin)
+        var cubeVertices = new[]
+        {
+            new Vector3(-0.5f, -0.5f, -0.5f), new Vector3(0.5f, -0.5f, -0.5f),
+            new Vector3(0.5f, 0.5f, -0.5f), new Vector3(-0.5f, 0.5f, -0.5f),
+            new Vector3(-0.5f, -0.5f, 0.5f), new Vector3(0.5f, -0.5f, 0.5f),
+            new Vector3(0.5f, 0.5f, 0.5f), new Vector3(-0.5f, 0.5f, 0.5f)
+        };
+
+        Vertices.AddRange(cubeVertices);
+
+        // Define 12 triangular faces (2 per cube face)
+        var cubeFaces = new[]
+        {
+            // Front
+            new[] { 0, 1, 2 }, new[] { 0, 2, 3 },
+            // Back
+            new[] { 5, 4, 7 }, new[] { 5, 7, 6 },
+            // Left
+            new[] { 4, 0, 3 }, new[] { 4, 3, 7 },
+            // Right
+            new[] { 1, 5, 6 }, new[] { 1, 6, 2 },
+            // Top
+            new[] { 3, 2, 6 }, new[] { 3, 6, 7 },
+            // Bottom
+            new[] { 4, 5, 1 }, new[] { 4, 1, 0 }
+        };
+
+        Faces.AddRange(cubeFaces);
+
+        VertexCount = Vertices.Count;
+        FaceCount = Faces.Count;
+
+        // Generate normals
+        GenerateNormals();
+        CalculateBounds();
     }
     public static Mesh3DDataset CreateFromData(string name, string filePath, List<Vector3> vertices, List<int[]> faces,
         float voxelSize, string unit)
@@ -174,6 +225,14 @@ public class Mesh3DDataset : Dataset, ISerializableDataset
     public override void Load()
     {
         if (IsLoaded) return;
+
+        // If file doesn't exist and we already have vertices, we're a new empty mesh
+        if (!File.Exists(FilePath) && Vertices != null && Vertices.Count > 0)
+        {
+            Logger.Log($"Empty mesh already loaded in memory: {Name}");
+            IsLoaded = true;
+            return;
+        }
 
         if (!File.Exists(FilePath))
         {
@@ -484,8 +543,6 @@ public class Mesh3DDataset : Dataset, ISerializableDataset
             if (Normals[i].LengthSquared() > 0)
                 Normals[i] = Vector3.Normalize(Normals[i]);
     }
-
-    
 
     public override void Unload()
     {

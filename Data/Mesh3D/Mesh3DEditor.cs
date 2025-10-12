@@ -411,6 +411,13 @@ public class Mesh3DEditor
     private void RecalculateNormals()
     {
         SaveState();
+        RecalculateNormalsInternal();
+        _dataset.CalculateBounds();
+        Logger.Log("Recalculated normals");
+    }
+
+    private void RecalculateNormalsInternal()
+    {
         _dataset.Normals.Clear();
         
         // Initialize normals
@@ -447,9 +454,6 @@ public class Mesh3DEditor
                 _dataset.Normals[i] = Vector3.Normalize(_dataset.Normals[i]);
             }
         }
-        
-        UpdateDataset();
-        Logger.Log("Recalculated normals");
     }
 
     private void CenterModel()
@@ -778,8 +782,10 @@ public class Mesh3DEditor
 
     private void UpdateDataset()
     {
+        _dataset.VertexCount = _dataset.Vertices.Count;
+        _dataset.FaceCount = _dataset.Faces.Count;
         _dataset.CalculateBounds();
-        RecalculateNormals();
+        RecalculateNormalsInternal();
     }
 
     private void SaveModel()

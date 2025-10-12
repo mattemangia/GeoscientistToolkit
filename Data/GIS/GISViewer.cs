@@ -12,19 +12,18 @@ namespace GeoscientistToolkit.UI.GIS;
 
 public class GISViewer : IDatasetViewer
 {
-    private readonly BasemapManager _basemapManager;
+    private BasemapManager _basemapManager; // Lazy initialization
     private readonly CoordinateFormat _coordinateFormat = CoordinateFormat.DecimalDegrees;
     private readonly List<Vector2> _currentDrawing = new();
 
-    // --- All existing fields are correct ---
     private readonly GISDataset _dataset;
     private readonly List<GISDataset> _datasets = new();
     private readonly GISDataset _primaryDataset;
 
-    // --- FIX: Screenshot functionality fields corrected ---
     private readonly ImGuiExportFileDialog _screenshotDialog;
     private readonly Dictionary<string, TileData> _tileCache = new();
     private readonly Dictionary<string, TextureManager> _tileTextures = new();
+    
     private GISLayer _activeLayer;
     private string _apiKey = "";
     private Vector2 _currentPan = Vector2.Zero;
@@ -40,8 +39,8 @@ public class GISViewer : IDatasetViewer
     private Vector2 _lastMousePos;
     private bool _requestScreenshot;
     private string _screenshotPath;
-    private Vector2 _screenshotRectMax; // Using Vector2 instead of the non-existent ImRect
-    private Vector2 _screenshotRectMin; // Using Vector2 instead of the non-existent ImRect
+    private Vector2 _screenshotRectMax;
+    private Vector2 _screenshotRectMin;
     private GISFeature _selectedFeature;
     private int _selectedProviderIndex;
     private bool _showBasemapSettings;
@@ -50,23 +49,31 @@ public class GISViewer : IDatasetViewer
     private bool _showNorthArrow = true;
     private bool _showScaleBar = true;
     private string _statusMessage = "";
-
     private Matrix3x2 _viewTransform = Matrix3x2.Identity;
-    // --- END FIX ---
+
+    // GDAL Error Dialog
+    private bool _showGdalErrorDialog;
+    private string _gdalErrorMessage;
+    private bool _gdalErrorDialogOpened;
 
     public GISViewer(GISDataset dataset)
     {
         _datasets.Add(dataset);
+        _dataset = dataset;
         _primaryDataset = dataset;
         _activeLayer = dataset.Layers.FirstOrDefault(l => l.IsEditable);
-        _basemapManager = BasemapManager.Instance;
-        _basemapManager.Initialize(VeldridManager.GraphicsDevice);
 
         _screenshotDialog = new ImGuiExportFileDialog("GISScreenshot", "Save Screenshot");
         _screenshotDialog.SetExtensions((".bmp", "Bitmap Image"));
 
+        // Only initialize basemap if one is configured
         if (dataset.BasemapType == BasemapType.GeoTIFF && !string.IsNullOrEmpty(dataset.BasemapPath))
-            LoadGeoTiffBasemap(dataset.BasemapPath);
+        {
+            if (InitializeBasemapManager())
+            {
+                LoadGeoTiffBasemap(dataset.BasemapPath);
+            }
+        }
     }
 
     public GISViewer(List<GISDataset> datasets)
@@ -76,6 +83,7 @@ public class GISViewer : IDatasetViewer
 
         _datasets.AddRange(datasets);
         _primaryDataset = datasets[0];
+        _dataset = datasets[0];
 
         // Find first editable layer across all datasets
         foreach (var ds in _datasets)
@@ -84,27 +92,28 @@ public class GISViewer : IDatasetViewer
             if (_activeLayer != null) break;
         }
 
-        _basemapManager = BasemapManager.Instance;
-        _basemapManager.Initialize(VeldridManager.GraphicsDevice);
-
         _screenshotDialog = new ImGuiExportFileDialog("GISScreenshot", "Save Screenshot");
         _screenshotDialog.SetExtensions((".bmp", "Bitmap Image"));
 
         // Load basemap from first dataset that has one
         foreach (var ds in _datasets)
+        {
             if (ds.BasemapType == BasemapType.GeoTIFF && !string.IsNullOrEmpty(ds.BasemapPath))
             {
-                LoadGeoTiffBasemap(ds.BasemapPath);
+                if (InitializeBasemapManager())
+                {
+                    LoadGeoTiffBasemap(ds.BasemapPath);
+                }
                 break;
             }
+        }
 
-        // Update bounds to encompass all datasets
         UpdateCombinedBounds();
     }
 
     public void DrawToolbarControls()
     {
-        // Edit mode buttons...
+        // Edit mode buttons
         if (ImGui.Button("Select")) _editMode = EditMode.None;
         ImGui.SameLine();
         if (ImGui.Button("Point"))
@@ -133,7 +142,7 @@ public class GISViewer : IDatasetViewer
         ImGui.Separator();
         ImGui.SameLine();
 
-        // Layer selector...
+        // Layer selector
         var editableLayers = _datasets.SelectMany(ds => ds.Layers.Where(l => l.IsEditable)).ToList();
 
         if (editableLayers.Count > 0)
@@ -153,7 +162,7 @@ public class GISViewer : IDatasetViewer
         ImGui.Separator();
         ImGui.SameLine();
 
-        // View options...
+        // View options
         ImGui.Checkbox("Grid", ref _showGrid);
         ImGui.SameLine();
         ImGui.Checkbox("Coords", ref _showCoordinates);
@@ -166,7 +175,15 @@ public class GISViewer : IDatasetViewer
         ImGui.SameLine();
 
         // Basemap and Screenshot buttons
-        if (ImGui.Button("Basemap")) _showBasemapSettings = !_showBasemapSettings;
+        if (ImGui.Button("Basemap")) 
+        {
+            _showBasemapSettings = !_showBasemapSettings;
+            // Try to initialize when user wants to use basemap
+            if (_showBasemapSettings && _basemapManager == null)
+            {
+                InitializeBasemapManager();
+            }
+        }
         ImGui.SameLine();
         if (ImGui.Button("Screenshot")) _screenshotDialog.Open($"{_primaryDataset.Name}_capture");
     }
@@ -186,15 +203,14 @@ public class GISViewer : IDatasetViewer
         if (canvas_size.X < 50.0f) canvas_size.X = 50.0f;
         if (canvas_size.Y < 50.0f) canvas_size.Y = 50.0f;
 
-        // --- FIX: Handle screenshot dialog submission correctly ---
+        // Handle screenshot dialog
         if (_screenshotDialog.Submit())
         {
             _screenshotPath = _screenshotDialog.SelectedPath;
-            _screenshotRectMin = canvas_pos; // Store the Min vector
-            _screenshotRectMax = canvas_pos + canvas_size; // Store the Max vector
+            _screenshotRectMin = canvas_pos;
+            _screenshotRectMax = canvas_pos + canvas_size;
             _requestScreenshot = true;
         }
-        // --- END FIX ---
 
         ImGui.InvisibleButton("GISCanvas", canvas_size);
         var io = ImGui.GetIO();
@@ -211,10 +227,15 @@ public class GISViewer : IDatasetViewer
 
         drawList.PushClipRect(canvas_pos, canvas_pos + canvas_size, true);
 
-        // Drawing operations...
-        if (_dataset.BasemapType != BasemapType.None || _basemapManager.CurrentProvider != null)
+        // Only draw basemap if manager is available
+        if (_basemapManager != null && 
+            (_dataset.BasemapType != BasemapType.None || _basemapManager.CurrentProvider != null))
+        {
             DrawBasemap(drawList, canvas_pos, canvas_size, zoom, pan);
+        }
+        
         if (_showGrid) DrawGrid(drawList, canvas_pos, canvas_size, zoom, pan);
+        
         foreach (var dataset in _datasets)
         foreach (var layer in dataset.Layers.Where(l => l.IsVisible && l.Type == LayerType.Vector))
             DrawLayer(drawList, layer, canvas_pos, canvas_size, zoom, pan);
@@ -225,17 +246,128 @@ public class GISViewer : IDatasetViewer
 
         drawList.PopClipRect();
 
-        // --- FIX: Trigger screenshot capture after drawing is complete ---
+        // Take screenshot if requested
         if (_requestScreenshot)
         {
             TakeScreenshot(_screenshotPath, _screenshotRectMin, _screenshotRectMax);
             _requestScreenshot = false;
         }
-        // --- END FIX ---
 
         DrawStatusBar(canvas_pos + new Vector2(0, canvas_size.Y), new Vector2(canvas_size.X, statusBarHeight),
             is_hovered);
+        
         if (_showBasemapSettings) DrawBasemapSettings();
+        
+        // Draw GDAL error dialog
+        DrawGdalErrorDialog();
+    }
+
+    private bool InitializeBasemapManager()
+    {
+        if (_basemapManager != null)
+            return true;
+
+        try
+        {
+            _basemapManager = BasemapManager.Instance;
+            _basemapManager.Initialize(VeldridManager.GraphicsDevice);
+            return true;
+        }
+        catch (TypeInitializationException ex)
+        {
+            // GDAL native libraries not found
+            _gdalErrorMessage = "GDAL libraries are not installed or cannot be loaded.\n\n" +
+                               "Basemap features (GeoTIFF, tile servers) will not be available.\n\n" +
+                               "You can still use the GIS viewer for vector data.\n\n" +
+                               $"Technical details: {ex.InnerException?.Message ?? ex.Message}";
+            _showGdalErrorDialog = true;
+            Logger.LogWarning($"BasemapManager initialization failed: {ex.Message}");
+            return false;
+        }
+        catch (Exception ex)
+        {
+            _gdalErrorMessage = $"Failed to initialize basemap manager:\n\n{ex.Message}\n\n" +
+                               "Basemap features will not be available.";
+            _showGdalErrorDialog = true;
+            Logger.LogError($"Failed to initialize BasemapManager: {ex.Message}");
+            return false;
+        }
+    }
+
+    private void DrawGdalErrorDialog()
+    {
+        if (_showGdalErrorDialog && !_gdalErrorDialogOpened)
+        {
+            ImGui.OpenPopup("GDAL Error###GdalErrorDialog");
+            _gdalErrorDialogOpened = true;
+        }
+
+        // Custom red title bar style
+        ImGui.PushStyleColor(ImGuiCol.TitleBg, new Vector4(0.6f, 0.1f, 0.1f, 1.0f));
+        ImGui.PushStyleColor(ImGuiCol.TitleBgActive, new Vector4(0.8f, 0.2f, 0.2f, 1.0f));
+        
+        var center = ImGui.GetMainViewport().GetCenter();
+        ImGui.SetNextWindowPos(center, ImGuiCond.Appearing, new Vector2(0.5f, 0.5f));
+        ImGui.SetNextWindowSize(new Vector2(500, 0), ImGuiCond.Appearing);
+
+        if (ImGui.BeginPopupModal("GDAL Error###GdalErrorDialog", ref _showGdalErrorDialog, 
+            ImGuiWindowFlags.AlwaysAutoResize | ImGuiWindowFlags.NoResize))
+        {
+            // Warning icon and title
+            ImGui.PushFont(ImGui.GetIO().Fonts.Fonts[0]); // Default font
+            ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(1.0f, 0.6f, 0.0f, 1.0f));
+            ImGui.Text("⚠");
+            ImGui.PopStyleColor();
+            ImGui.PopFont();
+            
+            ImGui.SameLine();
+            ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(1.0f, 0.8f, 0.8f, 1.0f));
+            ImGui.Text("Basemap Libraries Missing");
+            ImGui.PopStyleColor();
+            
+            ImGui.Separator();
+            ImGui.Spacing();
+
+            // Error message
+            ImGui.PushTextWrapPos(ImGui.GetContentRegionAvail().X);
+            ImGui.TextWrapped(_gdalErrorMessage ?? "Unknown error");
+            ImGui.PopTextWrapPos();
+
+            ImGui.Spacing();
+            ImGui.Separator();
+            ImGui.Spacing();
+
+            // Center the OK button
+            var buttonWidth = 120f;
+            var cursorX = (ImGui.GetContentRegionAvail().X - buttonWidth) * 0.5f;
+            if (cursorX > 0) ImGui.SetCursorPosX(ImGui.GetCursorPosX() + cursorX);
+
+            if (ImGui.Button("OK", new Vector2(buttonWidth, 30)))
+            {
+                _showGdalErrorDialog = false;
+                _gdalErrorDialogOpened = false;
+                ImGui.CloseCurrentPopup();
+            }
+
+            // Allow Enter or Escape to close
+            if (ImGui.IsKeyPressed(ImGuiKey.Enter) || ImGui.IsKeyPressed(ImGuiKey.KeypadEnter) ||
+                ImGui.IsKeyPressed(ImGuiKey.Escape))
+            {
+                _showGdalErrorDialog = false;
+                _gdalErrorDialogOpened = false;
+                ImGui.CloseCurrentPopup();
+            }
+
+            ImGui.EndPopup();
+        }
+
+        ImGui.PopStyleColor(2); // Pop title bar colors
+        
+        // Reset flag when dialog is closed
+        if (!_showGdalErrorDialog && _gdalErrorDialogOpened)
+        {
+            _gdalErrorDialogOpened = false;
+        }
     }
 
     private void UpdateCombinedBounds()
@@ -262,7 +394,6 @@ public class GISViewer : IDatasetViewer
         _primaryDataset.Center = (_primaryDataset.Bounds.Min + _primaryDataset.Bounds.Max) * 0.5f;
     }
 
-    // --- FIX: Method signature and implementation corrected ---
     private void TakeScreenshot(string filePath, Vector2 rectMin, Vector2 rectMax)
     {
         var gd = VeldridManager.GraphicsDevice;
@@ -270,10 +401,8 @@ public class GISViewer : IDatasetViewer
 
         var cl = VeldridManager.Factory.CreateCommandList();
 
-        // FIX 1: Use SwapchainFramebuffer, which is the correct API
         var sourceTexture = gd.SwapchainFramebuffer.ColorTargets[0].Target;
 
-        // FIX 2: Correctly calculate the capture rectangle based on vectors
         var mainViewport = ImGui.GetMainViewport();
         var scaleX = gd.SwapchainFramebuffer.Width / mainViewport.Size.X;
         var scaleY = gd.SwapchainFramebuffer.Height / mainViewport.Size.Y;
@@ -289,9 +418,6 @@ public class GISViewer : IDatasetViewer
 
         cl.Dispose();
     }
-    // --- END FIX ---
-
-    #region Unchanged Methods
 
     private void HandleInput(ImGuiIOPtr io, ref float zoom, ref Vector2 pan, Vector2 canvas_pos, Vector2 canvas_size,
         bool is_hovered, bool is_active)
@@ -316,7 +442,9 @@ public class GISViewer : IDatasetViewer
             }
 
             if (ImGui.IsMouseDragging(ImGuiMouseButton.Middle) ||
-                (ImGui.IsMouseDragging(ImGuiMouseButton.Right) && _editMode != EditMode.Draw)) pan += io.MouseDelta;
+                (ImGui.IsMouseDragging(ImGuiMouseButton.Right) && _editMode != EditMode.Draw)) 
+                pan += io.MouseDelta;
+            
             if (_editMode == EditMode.Draw && is_active && ImGui.IsMouseClicked(ImGuiMouseButton.Left))
             {
                 var worldPos = ScreenToWorld(io.MousePos - canvas_pos, canvas_pos, canvas_size, zoom, pan);
@@ -331,6 +459,7 @@ public class GISViewer : IDatasetViewer
         drawList.AddRectFilled(pos, pos + size, ImGui.GetColorU32(new Vector4(0.1f, 0.1f, 0.1f, 1.0f)));
         drawList.AddLine(pos, pos + new Vector2(size.X, 0), ImGui.GetColorU32(new Vector4(0.3f, 0.3f, 0.3f, 1.0f)));
         ImGui.SetCursorScreenPos(pos + new Vector2(5, 2));
+        
         if (isHovered && _showCoordinates)
         {
             var coordText = FormatCoordinate(_currentWorldPos);
@@ -339,6 +468,7 @@ public class GISViewer : IDatasetViewer
             ImGui.Text($"Zoom: {_currentZoom:F2}x");
             ImGui.SameLine(300);
             ImGui.Text($"Tile Level: {_currentTileZoom}");
+            
             if (_dataset.Layers.Count > 0)
             {
                 var totalFeatures = _dataset.Layers.Sum(l => l.Features.Count);
@@ -369,6 +499,21 @@ public class GISViewer : IDatasetViewer
         ImGui.SetNextWindowSize(new Vector2(400, 300), ImGuiCond.FirstUseEver);
         if (ImGui.Begin("Basemap Settings", ref _showBasemapSettings))
         {
+            if (_basemapManager == null)
+            {
+                ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(1.0f, 0.6f, 0.0f, 1.0f));
+                ImGui.Text("⚠");
+                ImGui.PopStyleColor();
+                ImGui.SameLine();
+                ImGui.TextColored(new Vector4(1, 0.7f, 0.3f, 1), 
+                    "Basemap functionality is not available");
+                ImGui.Spacing();
+                ImGui.TextWrapped("GDAL libraries are required for basemap features. " +
+                                 "Vector data editing still works normally.");
+                ImGui.End();
+                return;
+            }
+
             ImGui.Text("Basemap Provider:");
             ImGui.SetNextItemWidth(250);
             var providers = BasemapManager.Providers;
@@ -395,7 +540,9 @@ public class GISViewer : IDatasetViewer
             }
 
             ImGui.Separator();
-            if (ImGui.Button("Load GeoTIFF...")) _statusMessage = "GeoTIFF loading dialog would open here";
+            if (ImGui.Button("Load GeoTIFF...")) 
+                _statusMessage = "GeoTIFF loading dialog would open here";
+            
             if (_geoTiffData != null)
             {
                 ImGui.Text($"GeoTIFF: {_geoTiffData.Width}x{_geoTiffData.Height}");
@@ -418,6 +565,9 @@ public class GISViewer : IDatasetViewer
 
     private void DrawBasemap(ImDrawListPtr drawList, Vector2 canvasPos, Vector2 canvasSize, float zoom, Vector2 pan)
     {
+        if (_basemapManager == null)
+            return;
+
         if (_dataset.BasemapType == BasemapType.GeoTIFF && _geoTiffTexture != null)
             DrawGeoTiffBasemap(drawList, canvasPos, canvasSize, zoom, pan);
         else if (_dataset.BasemapType == BasemapType.TileServer || _basemapManager.CurrentProvider != null)
@@ -428,6 +578,7 @@ public class GISViewer : IDatasetViewer
         Vector2 pan)
     {
         if (_geoTiffData == null || _geoTiffTexture == null || !_geoTiffTexture.IsValid) return;
+        
         var topLeft = new Vector2((float)_geoTiffData.OriginX, (float)_geoTiffData.OriginY);
         var bottomRight = new Vector2((float)(_geoTiffData.OriginX + _geoTiffData.PixelWidth * _geoTiffData.Width),
             (float)(_geoTiffData.OriginY + _geoTiffData.PixelHeight * _geoTiffData.Height));
@@ -441,6 +592,9 @@ public class GISViewer : IDatasetViewer
 
     private void DrawTileBasemap(ImDrawListPtr drawList, Vector2 canvasPos, Vector2 canvasSize, float zoom, Vector2 pan)
     {
+        if (_basemapManager == null)
+            return;
+
         var topLeft = ScreenToWorld(Vector2.Zero, canvasPos, canvasSize, zoom, pan);
         var bottomRight = ScreenToWorld(canvasSize, canvasPos, canvasSize, zoom, pan);
         var bounds = new BoundingBox
@@ -450,6 +604,7 @@ public class GISViewer : IDatasetViewer
         };
         var visibleTiles = _basemapManager.GetVisibleTiles(bounds, _currentTileZoom);
         Task.Run(() => LoadVisibleTiles(visibleTiles));
+        
         foreach (var tileCoord in visibleTiles)
         {
             var tileKey = $"{tileCoord.Z}_{tileCoord.X}_{tileCoord.Y}";
@@ -477,15 +632,20 @@ public class GISViewer : IDatasetViewer
 
     private async void LoadVisibleTiles(List<TileCoordinate> tiles)
     {
+        if (_basemapManager == null)
+            return;
+
         _isLoadingTiles = true;
         foreach (var tile in tiles)
         {
             var tileKey = $"{tile.Z}_{tile.X}_{tile.Y}";
             if (_tileTextures.ContainsKey(tileKey)) continue;
+            
             if (!_tileCache.TryGetValue(tileKey, out var tileData))
             {
                 tileData = await _basemapManager.GetTileAsync(tile.X, tile.Y, tile.Z);
-                if (tileData != null && tileData.ImageData != null) _tileCache[tileKey] = tileData;
+                if (tileData != null && tileData.ImageData != null) 
+                    _tileCache[tileKey] = tileData;
             }
 
             if (tileData != null && tileData.ImageData != null)
@@ -523,6 +683,12 @@ public class GISViewer : IDatasetViewer
 
     private void LoadGeoTiffBasemap(string path)
     {
+        if (_basemapManager == null)
+        {
+            Logger.LogWarning("Cannot load GeoTIFF: BasemapManager not available");
+            return;
+        }
+
         _geoTiffData = _basemapManager.LoadGeoTiff(path);
         if (_geoTiffData != null && _geoTiffData.Data != null)
             VeldridManager.ExecuteOnMainThread(() =>
@@ -558,36 +724,19 @@ public class GISViewer : IDatasetViewer
     {
         switch (_coordinateFormat)
         {
-            case CoordinateFormat.DecimalDegrees: return $"Lon: {coord.X:F6}°, Lat: {coord.Y:F6}°";
+            case CoordinateFormat.DecimalDegrees: 
+                return $"Lon: {coord.X:F6}°, Lat: {coord.Y:F6}°";
             case CoordinateFormat.DegreesMinutesSeconds:
-                var lonDMS = ConvertToDMS(coord.X, true);
-                var latDMS = ConvertToDMS(coord.Y, false);
+                var lonDMS = CoordinateConverter.FormatDMS(coord.X, true);
+                var latDMS = CoordinateConverter.FormatDMS(coord.Y, false);
                 return $"Lon: {lonDMS}, Lat: {latDMS}";
             case CoordinateFormat.DegreesMinutes:
-                var lonDM = ConvertToDM(coord.X, true);
-                var latDM = ConvertToDM(coord.Y, false);
+                var lonDM = CoordinateConverter.FormatDM(coord.X, true);
+                var latDM = CoordinateConverter.FormatDM(coord.Y, false);
                 return $"Lon: {lonDM}, Lat: {latDM}";
-            default: return $"X: {coord.X:F6}, Y: {coord.Y:F6}";
+            default: 
+                return $"X: {coord.X:F6}, Y: {coord.Y:F6}";
         }
-    }
-
-    private string ConvertToDMS(float decimalDegrees, bool isLongitude)
-    {
-        return CoordinateConverter.FormatDMS(decimalDegrees, isLongitude);
-    }
-
-    private string ConvertToDM(float decimalDegrees, bool isLongitude)
-    {
-        return CoordinateConverter.FormatDM(decimalDegrees, isLongitude);
-    }
-
-    private string GetCoordinateFormatName(CoordinateFormat format)
-    {
-        return format switch
-        {
-            CoordinateFormat.DecimalDegrees => "Decimal", CoordinateFormat.DegreesMinutesSeconds => "DMS",
-            CoordinateFormat.DegreesMinutes => "DM", _ => "Unknown"
-        };
     }
 
     private string FormatBytes(long bytes)
@@ -608,11 +757,11 @@ public class GISViewer : IDatasetViewer
     {
         var gridColor = ImGui.GetColorU32(new Vector4(0.2f, 0.2f, 0.2f, 0.5f));
         var majorGridColor = ImGui.GetColorU32(new Vector4(0.3f, 0.3f, 0.3f, 0.5f));
-        var baseSpacing = 1.0f;
         var power = (float)Math.Floor(Math.Log10(10.0f / zoom));
         var spacing = (float)Math.Pow(10, power) * zoom;
         if (spacing < 20) spacing *= 10;
         if (spacing > 200) spacing /= 10;
+        
         var center = canvasPos + canvasSize * 0.5f + pan;
         var startY = center.Y % spacing;
         var lineCount = 0;
@@ -647,6 +796,7 @@ public class GISViewer : IDatasetViewer
         if (feature.Coordinates.Count == 0) return;
         var screenCoords = feature.Coordinates.Select(c => WorldToScreen(c, canvasPos, canvasSize, zoom, pan)).ToList();
         if (feature.IsSelected) color = ImGui.GetColorU32(new Vector4(1, 1, 0, 1));
+        
         switch (feature.Type)
         {
             case FeatureType.Point:
@@ -654,17 +804,16 @@ public class GISViewer : IDatasetViewer
                 {
                     drawList.AddCircleFilled(coord, layer.PointSize, color);
                     if (feature.IsSelected)
-                        drawList.AddCircle(coord, layer.PointSize + 2, ImGui.GetColorU32(new Vector4(1, 1, 1, 1)), 0,
-                            2);
+                        drawList.AddCircle(coord, layer.PointSize + 2, ImGui.GetColorU32(new Vector4(1, 1, 1, 1)), 0, 2);
                 }
-
                 break;
+                
             case FeatureType.Line:
                 if (screenCoords.Count >= 2)
                     for (var i = 0; i < screenCoords.Count - 1; i++)
                         drawList.AddLine(screenCoords[i], screenCoords[i + 1], color, layer.LineWidth);
-
                 break;
+                
             case FeatureType.Polygon:
                 if (screenCoords.Count >= 3)
                 {
@@ -672,10 +821,8 @@ public class GISViewer : IDatasetViewer
                         layer.Color.W * 0.3f));
                     var coordArray = screenCoords.ToArray();
                     drawList.AddConvexPolyFilled(ref coordArray[0], screenCoords.Count, fillColor);
-                    drawList.AddPolyline(ref coordArray[0], screenCoords.Count, color, ImDrawFlags.Closed,
-                        layer.LineWidth);
+                    drawList.AddPolyline(ref coordArray[0], screenCoords.Count, color, ImDrawFlags.Closed, layer.LineWidth);
                 }
-
                 break;
         }
     }
@@ -686,11 +833,15 @@ public class GISViewer : IDatasetViewer
         if (_currentDrawing.Count == 0) return;
         var color = ImGui.GetColorU32(new Vector4(1, 0.5f, 0, 1));
         var screenCoords = _currentDrawing.Select(c => WorldToScreen(c, canvasPos, canvasSize, zoom, pan)).ToList();
-        foreach (var coord in screenCoords) drawList.AddCircleFilled(coord, 3, color);
+        
+        foreach (var coord in screenCoords) 
+            drawList.AddCircleFilled(coord, 3, color);
+        
         if (_drawingType != FeatureType.Point && screenCoords.Count >= 2)
         {
             for (var i = 0; i < screenCoords.Count - 1; i++)
                 drawList.AddLine(screenCoords[i], screenCoords[i + 1], color, 2);
+            
             if (_drawingType == FeatureType.Polygon && screenCoords.Count >= 3)
             {
                 var dashColor = ImGui.GetColorU32(new Vector4(1, 0.5f, 0, 0.5f));
@@ -708,10 +859,12 @@ public class GISViewer : IDatasetViewer
         var gapLength = 5.0f;
         float currentLength = 0;
         var drawing = true;
+        
         while (currentLength < length)
         {
             var segmentLength = drawing ? dashLength : gapLength;
             if (currentLength + segmentLength > length) segmentLength = length - currentLength;
+            
             if (drawing)
             {
                 var segStart = start + dir * currentLength;
@@ -731,10 +884,12 @@ public class GISViewer : IDatasetViewer
         var northColor = ImGui.GetColorU32(new Vector4(0.8f, 0.2f, 0.2f, 1.0f));
         var bodyColor = ImGui.GetColorU32(new Vector4(0.9f, 0.9f, 0.9f, 1.0f));
         var textColor = ImGui.GetColorU32(ImGuiCol.Text);
+        
         drawList.AddTriangleFilled(arrowPos, arrowPos + new Vector2(-arrowSize / 2, arrowSize),
             arrowPos + new Vector2(arrowSize / 2, arrowSize), northColor);
         drawList.AddRectFilled(arrowPos + new Vector2(-arrowSize / 4, arrowSize),
             arrowPos + new Vector2(arrowSize / 4, arrowSize * 2), bodyColor);
+        
         var textSize = ImGui.CalcTextSize("N");
         drawList.AddText(arrowPos - new Vector2(textSize.X * 0.5f, textSize.Y), textColor, "N");
     }
@@ -754,6 +909,7 @@ public class GISViewer : IDatasetViewer
         var scaleText = FormatDistance(niceDistance);
         var textColor = ImGui.GetColorU32(ImGuiCol.Text);
         var textSize = ImGui.CalcTextSize(scaleText);
+        
         drawList.AddText(barStartPos + new Vector2((barPixelWidth - textSize.X) / 2, -textSize.Y - 5), textColor,
             scaleText);
         drawList.AddLine(barStartPos, barStartPos + new Vector2(barPixelWidth, 0), textColor, 2f);
@@ -778,7 +934,6 @@ public class GISViewer : IDatasetViewer
     private string FormatDistance(double distanceKm)
     {
         if (distanceKm >= 1) return $"{distanceKm:G3} km";
-
         return $"{distanceKm * 1000:F0} m";
     }
 
@@ -823,19 +978,26 @@ public class GISViewer : IDatasetViewer
         {
             case FeatureType.Point:
                 var pointFeature = new GISFeature
-                    { Type = FeatureType.Point, Coordinates = new List<Vector2> { worldPos } };
+                {
+                    Type = FeatureType.Point, 
+                    Coordinates = new List<Vector2> { worldPos }
+                };
                 _dataset.AddFeature(_activeLayer, pointFeature);
                 _statusMessage = $"Added point at {FormatCoordinate(worldPos)}";
                 break;
+                
             case FeatureType.Line:
                 _currentDrawing.Add(worldPos);
                 _statusMessage = $"Line: {_currentDrawing.Count} points";
-                if (_currentDrawing.Count >= 2 && ImGui.IsKeyPressed(ImGuiKey.Enter)) FinishDrawing();
+                if (_currentDrawing.Count >= 2 && ImGui.IsKeyPressed(ImGuiKey.Enter)) 
+                    FinishDrawing();
                 break;
+                
             case FeatureType.Polygon:
                 _currentDrawing.Add(worldPos);
                 _statusMessage = $"Polygon: {_currentDrawing.Count} vertices";
-                if (_currentDrawing.Count >= 3 && ImGui.IsKeyPressed(ImGuiKey.Enter)) FinishDrawing();
+                if (_currentDrawing.Count >= 3 && ImGui.IsKeyPressed(ImGuiKey.Enter)) 
+                    FinishDrawing();
                 break;
         }
     }
@@ -843,7 +1005,12 @@ public class GISViewer : IDatasetViewer
     private void FinishDrawing()
     {
         if (_currentDrawing.Count == 0 || _activeLayer == null) return;
-        var feature = new GISFeature { Type = _drawingType, Coordinates = new List<Vector2>(_currentDrawing) };
+        
+        var feature = new GISFeature 
+        { 
+            Type = _drawingType, 
+            Coordinates = new List<Vector2>(_currentDrawing) 
+        };
         _dataset.AddFeature(_activeLayer, feature);
         _statusMessage = $"Created {_drawingType} with {_currentDrawing.Count} points";
         _currentDrawing.Clear();
@@ -869,6 +1036,4 @@ public class GISViewer : IDatasetViewer
         DegreesMinutesSeconds,
         DegreesMinutes
     }
-
-    #endregion
 }
