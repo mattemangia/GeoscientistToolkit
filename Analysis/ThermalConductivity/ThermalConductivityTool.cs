@@ -77,34 +77,33 @@ public class ThermalConductivityTool : IDatasetTools, IDisposable
 
         _options.Dataset = ctDataset;
 
-        // Check if simulation task has completed and update flag
+        // Check if the simulation task has finished (for any reason) and clean up the UI state.
+        // This is the primary mechanism for returning to an interactive state.
         if (_isSimulationRunning && _simulationTask != null && _simulationTask.IsCompleted)
         {
-            Logger.Log("[ThermalTool] Simulation task completed, resetting flag");
+            Logger.Log("[ThermalTool] Simulation task has completed, cleaning up UI state.");
             _isSimulationRunning = false;
-            _progressDialog.Close();
         }
 
+        // If the simulation is running, we display the progress dialog and handle cancellation.
         if (_isSimulationRunning)
         {
             _progressDialog.Submit();
 
-            // Allow cancellation button
-            if (_progressDialog.IsCancellationRequested)
+            // If the dialog is closed by the user (either via its Cancel button or by closing the window),
+            // we must signal the background task to stop. We check if cancellation has already been requested
+            // to avoid sending the signal multiple times.
+            if ((_progressDialog.IsCancellationRequested || !_progressDialog.IsActive) &&
+                _cancellationTokenSource?.IsCancellationRequested == false)
             {
-                Logger.Log("[ThermalTool] User requested cancellation");
-                _cancellationTokenSource?.Cancel();
+                Logger.Log("[ThermalTool] User initiated cancellation. Signaling background task.");
+                _cancellationTokenSource.Cancel();
             }
 
-            // Force enable controls if dialog was somehow closed without proper cleanup
-            if (!_progressDialog.IsActive && _isSimulationRunning)
-            {
-                Logger.LogWarning("[ThermalTool] Dialog closed but flag still set - forcing cleanup");
-                _isSimulationRunning = false;
-            }
-
+            // While the simulation is running, we don't draw the rest of the tool's UI.
             return;
         }
+
 
         if (ImGui.BeginTabBar("ThermalTabs"))
         {
@@ -1235,8 +1234,9 @@ public class ThermalConductivityTool : IDatasetTools, IDisposable
             }
             finally
             {
-                Logger.Log("[ThermalTool] Cleaning up simulation task");
-                _isSimulationRunning = false;
+                Logger.Log("[ThermalTool] Simulation task has finished.");
+                // The UI thread is responsible for detecting task completion and updating its own state.
+                // We ensure the dialog is closed from the background thread.
                 _progressDialog.Close();
             }
         });

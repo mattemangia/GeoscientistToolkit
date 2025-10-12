@@ -595,9 +595,10 @@ __kernel void calculate_flux(
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static float UpdateTemperatureAVX2(float[] tempIn, float[] tempOut, ILabelVolumeData labels,
-        Dictionary<byte, float> conductivities, int W, int H, int D, float dx, float dy, float dz, float dt,
-        CancellationToken token)
+    private static float UpdateTemperatureAVX2(
+        float[] tempIn, float[] tempOut, ILabelVolumeData labels,
+        Dictionary<byte, float> conductivities, int W, int H, int D,
+        float dx, float dy, float dz, float dt, CancellationToken token)
     {
         float maxChange = 0;
         var dx2 = dx * dx;
@@ -616,7 +617,7 @@ __kernel void calculate_flux(
                 var x = 1;
                 var rowIdx = (z * H + y) * W;
 
-                // Process 8 elements at a time with AVX2
+                // Process 8 elements at a time (internally still per-element for correctness)
                 for (; x <= W - 9; x += 8)
                 {
                     var idx = rowIdx + x;
@@ -624,106 +625,22 @@ __kernel void calculate_flux(
                     for (var i = 0; i < 8; i++)
                     {
                         var cidx = idx + i;
-                        var mat = labels[cidx % W, cidx / W % H, cidx / (W * H)];
 
-                        // Skip exterior material (ID: 0)
-                        if (mat == 0) continue;
+                        // map flat index -> (x,y,z)
+                        var cx = cidx % W;
+                        var cy = cidx / W % H;
+                        var cz = cidx / (W * H);
 
-                        var k = conductivities[mat];
+                        var mat = labels[cx, cy, cz];
 
-                        var T_xp = tempIn[cidx + 1];
-                        var T_xm = tempIn[cidx - 1];
-                        var T_yp = tempIn[cidx + W];
-                        var T_ym = tempIn[cidx - W];
-                        var T_zp = tempIn[cidx + W * H];
-                        var T_zm = tempIn[cidx - W * H];
+                        // === Pass-through for exterior voxels to avoid oscillations ===
+                        if (mat == 0)
+                        {
+                            tempOut[cidx] = tempIn[cidx];
+                            continue;
+                        }
 
-                        var lap = k * ((T_xp + T_xm - 2 * tempIn[cidx]) / dx2 +
-                                       (T_yp + T_ym - 2 * tempIn[cidx]) / dy2 +
-                                       (T_zp + T_zm - 2 * tempIn[cidx]) / dz2);
-
-                        tempOut[cidx] = tempIn[cidx] + dt * lap;
-
-                        var change = Math.Abs(tempOut[cidx] - tempIn[cidx]);
-                        if (change > localMax) localMax = change;
-                    }
-                }
-
-                // Handle remaining elements
-                for (; x < W - 1; x++)
-                {
-                    var idx = rowIdx + x;
-                    var mat = labels[x, y, z];
-
-                    // Skip exterior material (ID: 0)
-                    if (mat == 0) continue;
-
-                    var k = conductivities[mat];
-
-                    var T_c = tempIn[idx];
-                    var T_xp = tempIn[idx + 1];
-                    var T_xm = tempIn[idx - 1];
-                    var T_yp = tempIn[idx + W];
-                    var T_ym = tempIn[idx - W];
-                    var T_zp = tempIn[idx + W * H];
-                    var T_zm = tempIn[idx - W * H];
-
-                    var d2T = k * ((T_xp + T_xm - 2 * T_c) / dx2 +
-                                   (T_yp + T_ym - 2 * T_c) / dy2 +
-                                   (T_zp + T_zm - 2 * T_c) / dz2);
-
-                    tempOut[idx] = T_c + dt * d2T;
-
-                    var change = Math.Abs(tempOut[idx] - T_c);
-                    if (change > localMax) localMax = change;
-                }
-            }
-
-            lock (lockObj)
-            {
-                if (localMax > maxChange) maxChange = localMax;
-            }
-        });
-
-        return maxChange;
-    }
-
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static float UpdateTemperatureNEON(float[] tempIn, float[] tempOut, ILabelVolumeData labels,
-        Dictionary<byte, float> conductivities, int W, int H, int D, float dx, float dy, float dz, float dt,
-        CancellationToken token)
-    {
-        float maxChange = 0;
-        var dx2 = dx * dx;
-        var dy2 = dy * dy;
-        var dz2 = dz * dz;
-
-        var lockObj = new object();
-        var pOptions = new ParallelOptions { CancellationToken = token };
-
-        Parallel.For(1, D - 1, pOptions, z =>
-        {
-            float localMax = 0;
-
-            for (var y = 1; y < H - 1; y++)
-            {
-                var x = 1;
-                var rowIdx = (z * H + y) * W;
-
-                // Process 4 elements at a time with NEON (128-bit vectors)
-                for (; x <= W - 5; x += 4)
-                {
-                    var idx = rowIdx + x;
-
-                    for (var i = 0; i < 4; i++)
-                    {
-                        var cidx = idx + i;
-                        var mat = labels[cidx % W, cidx / W % H, cidx / (W * H)];
-
-                        // Skip exterior material (ID: 0)
-                        if (mat == 0) continue;
-
-                        var k = conductivities[mat];
+                        var k_c = conductivities[mat];
 
                         var T_c = tempIn[cidx];
                         var T_xp = tempIn[cidx + 1];
@@ -733,14 +650,15 @@ __kernel void calculate_flux(
                         var T_zp = tempIn[cidx + W * H];
                         var T_zm = tempIn[cidx - W * H];
 
-                        // Get neighboring conductivities
-                        var mat_xp = labels[(cidx + 1) % W, (cidx + 1) / W % H, (cidx + 1) / (W * H)];
-                        var mat_xm = labels[(cidx - 1) % W, (cidx - 1) / W % H, (cidx - 1) / (W * H)];
-                        var mat_yp = labels[cidx % W, (cidx + W) / W % H, (cidx + W) / (W * H)];
-                        var mat_ym = labels[cidx % W, (cidx - W) / W % H, (cidx - W) / (W * H)];
-                        var mat_zp = labels[cidx % W, cidx / W % H, (cidx + W * H) / (W * H)];
-                        var mat_zm = labels[cidx % W, cidx / W % H, (cidx - W * H) / (W * H)];
+                        // neighbor materials (safe within interior band)
+                        var mat_xp = labels[cx + 1, cy, cz];
+                        var mat_xm = labels[cx - 1, cy, cz];
+                        var mat_yp = labels[cx, cy + 1, cz];
+                        var mat_ym = labels[cx, cy - 1, cz];
+                        var mat_zp = labels[cx, cy, cz + 1];
+                        var mat_zm = labels[cx, cy, cz - 1];
 
+                        // conductivities (use tiny value if id not present)
                         var k_xp = conductivities.ContainsKey(mat_xp) ? conductivities[mat_xp] : 0.001f;
                         var k_xm = conductivities.ContainsKey(mat_xm) ? conductivities[mat_xm] : 0.001f;
                         var k_yp = conductivities.ContainsKey(mat_yp) ? conductivities[mat_yp] : 0.001f;
@@ -748,17 +666,17 @@ __kernel void calculate_flux(
                         var k_zp = conductivities.ContainsKey(mat_zp) ? conductivities[mat_zp] : 0.001f;
                         var k_zm = conductivities.ContainsKey(mat_zm) ? conductivities[mat_zm] : 0.001f;
 
-                        // Harmonic mean
-                        var k_x = HarmonicMean(k, k_xp);
-                        var k_xm_avg = HarmonicMean(k, k_xm);
-                        var k_y = HarmonicMean(k, k_yp);
-                        var k_ym_avg = HarmonicMean(k, k_ym);
-                        var k_z = HarmonicMean(k, k_zp);
-                        var k_zm_avg = HarmonicMean(k, k_zm);
+                        // harmonic-mean interface conductivities (same physics as scalar/NEON)
+                        var k_ixp = HarmonicMean(k_c, k_xp);
+                        var k_ixm = HarmonicMean(k_c, k_xm);
+                        var k_iyp = HarmonicMean(k_c, k_yp);
+                        var k_iym = HarmonicMean(k_c, k_ym);
+                        var k_izp = HarmonicMean(k_c, k_zp);
+                        var k_izm = HarmonicMean(k_c, k_zm);
 
-                        var d2T_dx2 = (k_x * (T_xp - T_c) - k_xm_avg * (T_c - T_xm)) / dx2;
-                        var d2T_dy2 = (k_y * (T_yp - T_c) - k_ym_avg * (T_c - T_ym)) / dy2;
-                        var d2T_dz2 = (k_z * (T_zp - T_c) - k_zm_avg * (T_c - T_zm)) / dz2;
+                        var d2T_dx2 = (k_ixp * (T_xp - T_c) - k_ixm * (T_c - T_xm)) / dx2;
+                        var d2T_dy2 = (k_iyp * (T_yp - T_c) - k_iym * (T_c - T_ym)) / dy2;
+                        var d2T_dz2 = (k_izp * (T_zp - T_c) - k_izm * (T_c - T_zm)) / dz2;
 
                         tempOut[cidx] = T_c + dt * (d2T_dx2 + d2T_dy2 + d2T_dz2);
 
@@ -767,24 +685,27 @@ __kernel void calculate_flux(
                     }
                 }
 
-                // Handle remaining elements
+                // Remainder elements
                 for (; x < W - 1; x++)
                 {
-                    var idx = rowIdx + x;
+                    var idx1 = rowIdx + x;
                     var mat = labels[x, y, z];
 
-                    // Skip exterior material (ID: 0)
-                    if (mat == 0) continue;
+                    if (mat == 0)
+                    {
+                        tempOut[idx1] = tempIn[idx1];
+                        continue;
+                    }
 
-                    var k = conductivities[mat];
+                    var k_c = conductivities[mat];
 
-                    var T_c = tempIn[idx];
-                    var T_xp = tempIn[idx + 1];
-                    var T_xm = tempIn[idx - 1];
-                    var T_yp = tempIn[idx + W];
-                    var T_ym = tempIn[idx - W];
-                    var T_zp = tempIn[idx + W * H];
-                    var T_zm = tempIn[idx - W * H];
+                    var T_c = tempIn[idx1];
+                    var T_xp = tempIn[idx1 + 1];
+                    var T_xm = tempIn[idx1 - 1];
+                    var T_yp = tempIn[idx1 + W];
+                    var T_ym = tempIn[idx1 - W];
+                    var T_zp = tempIn[idx1 + W * H];
+                    var T_zm = tempIn[idx1 - W * H];
 
                     var mat_xp = labels[x + 1, y, z];
                     var mat_xm = labels[x - 1, y, z];
@@ -800,20 +721,20 @@ __kernel void calculate_flux(
                     var k_zp = conductivities.ContainsKey(mat_zp) ? conductivities[mat_zp] : 0.001f;
                     var k_zm = conductivities.ContainsKey(mat_zm) ? conductivities[mat_zm] : 0.001f;
 
-                    var k_x = HarmonicMean(k, k_xp);
-                    var k_xm_avg = HarmonicMean(k, k_xm);
-                    var k_y = HarmonicMean(k, k_yp);
-                    var k_ym_avg = HarmonicMean(k, k_ym);
-                    var k_z = HarmonicMean(k, k_zp);
-                    var k_zm_avg = HarmonicMean(k, k_zm);
+                    var k_ixp = HarmonicMean(k_c, k_xp);
+                    var k_ixm = HarmonicMean(k_c, k_xm);
+                    var k_iyp = HarmonicMean(k_c, k_yp);
+                    var k_iym = HarmonicMean(k_c, k_ym);
+                    var k_izp = HarmonicMean(k_c, k_zp);
+                    var k_izm = HarmonicMean(k_c, k_zm);
 
-                    var d2T_dx2 = (k_x * (T_xp - T_c) - k_xm_avg * (T_c - T_xm)) / dx2;
-                    var d2T_dy2 = (k_y * (T_yp - T_c) - k_ym_avg * (T_c - T_ym)) / dy2;
-                    var d2T_dz2 = (k_z * (T_zp - T_c) - k_zm_avg * (T_c - T_zm)) / dz2;
+                    var d2T_dx2 = (k_ixp * (T_xp - T_c) - k_ixm * (T_c - T_xm)) / dx2;
+                    var d2T_dy2 = (k_iyp * (T_yp - T_c) - k_iym * (T_c - T_ym)) / dy2;
+                    var d2T_dz2 = (k_izp * (T_zp - T_c) - k_izm * (T_c - T_zm)) / dz2;
 
-                    tempOut[idx] = T_c + dt * (d2T_dx2 + d2T_dy2 + d2T_dz2);
+                    tempOut[idx1] = T_c + dt * (d2T_dx2 + d2T_dy2 + d2T_dz2);
 
-                    var change = Math.Abs(tempOut[idx] - T_c);
+                    var change = Math.Abs(tempOut[idx1] - T_c);
                     if (change > localMax) localMax = change;
                 }
             }
@@ -827,9 +748,161 @@ __kernel void calculate_flux(
         return maxChange;
     }
 
-    private static float UpdateTemperatureScalar(float[] tempIn, float[] tempOut, ILabelVolumeData labels,
-        Dictionary<byte, float> conductivities, int W, int H, int D, float dx, float dy, float dz, float dt,
-        CancellationToken token)
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static float UpdateTemperatureNEON(
+        float[] tempIn, float[] tempOut, ILabelVolumeData labels,
+        Dictionary<byte, float> conductivities, int W, int H, int D,
+        float dx, float dy, float dz, float dt, CancellationToken token)
+    {
+        float maxChange = 0;
+        var dx2 = dx * dx;
+        var dy2 = dy * dy;
+        var dz2 = dz * dz;
+
+        var lockObj = new object();
+        var pOptions = new ParallelOptions { CancellationToken = token };
+
+        Parallel.For(1, D - 1, pOptions, z =>
+        {
+            float localMax = 0;
+
+            for (var y = 1; y < H - 1; y++)
+            {
+                var x = 1;
+                var rowIdx = (z * H + y) * W;
+
+                // 4-wide block
+                for (; x <= W - 5; x += 4)
+                {
+                    var idx = rowIdx + x;
+
+                    for (var i = 0; i < 4; i++)
+                    {
+                        var cidx = idx + i;
+
+                        var cx = cidx % W;
+                        var cy = cidx / W % H;
+                        var cz = cidx / (W * H);
+
+                        var mat = labels[cx, cy, cz];
+
+                        if (mat == 0)
+                        {
+                            tempOut[cidx] = tempIn[cidx];
+                            continue;
+                        }
+
+                        var k_c = conductivities[mat];
+
+                        var T_c = tempIn[cidx];
+                        var T_xp = tempIn[cidx + 1];
+                        var T_xm = tempIn[cidx - 1];
+                        var T_yp = tempIn[cidx + W];
+                        var T_ym = tempIn[cidx - W];
+                        var T_zp = tempIn[cidx + W * H];
+                        var T_zm = tempIn[cidx - W * H];
+
+                        var mat_xp = labels[cx + 1, cy, cz];
+                        var mat_xm = labels[cx - 1, cy, cz];
+                        var mat_yp = labels[cx, cy + 1, cz];
+                        var mat_ym = labels[cx, cy - 1, cz];
+                        var mat_zp = labels[cx, cy, cz + 1];
+                        var mat_zm = labels[cx, cy, cz - 1];
+
+                        var k_xp = conductivities.ContainsKey(mat_xp) ? conductivities[mat_xp] : 0.001f;
+                        var k_xm = conductivities.ContainsKey(mat_xm) ? conductivities[mat_xm] : 0.001f;
+                        var k_yp = conductivities.ContainsKey(mat_yp) ? conductivities[mat_yp] : 0.001f;
+                        var k_ym = conductivities.ContainsKey(mat_ym) ? conductivities[mat_ym] : 0.001f;
+                        var k_zp = conductivities.ContainsKey(mat_zp) ? conductivities[mat_zp] : 0.001f;
+                        var k_zm = conductivities.ContainsKey(mat_zm) ? conductivities[mat_zm] : 0.001f;
+
+                        var k_ixp = HarmonicMean(k_c, k_xp);
+                        var k_ixm = HarmonicMean(k_c, k_xm);
+                        var k_iyp = HarmonicMean(k_c, k_yp);
+                        var k_iym = HarmonicMean(k_c, k_ym);
+                        var k_izp = HarmonicMean(k_c, k_zp);
+                        var k_izm = HarmonicMean(k_c, k_zm);
+
+                        var d2T_dx2 = (k_ixp * (T_xp - T_c) - k_ixm * (T_c - T_xm)) / dx2;
+                        var d2T_dy2 = (k_iyp * (T_yp - T_c) - k_iym * (T_c - T_ym)) / dy2;
+                        var d2T_dz2 = (k_izp * (T_zp - T_c) - k_izm * (T_c - T_zm)) / dz2;
+
+                        tempOut[cidx] = T_c + dt * (d2T_dx2 + d2T_dy2 + d2T_dz2);
+
+                        var change = Math.Abs(tempOut[cidx] - T_c);
+                        if (change > localMax) localMax = change;
+                    }
+                }
+
+                // Remainder
+                for (; x < W - 1; x++)
+                {
+                    var idx1 = rowIdx + x;
+                    var mat = labels[x, y, z];
+
+                    if (mat == 0)
+                    {
+                        tempOut[idx1] = tempIn[idx1];
+                        continue;
+                    }
+
+                    var k_c = conductivities[mat];
+
+                    var T_c = tempIn[idx1];
+                    var T_xp = tempIn[idx1 + 1];
+                    var T_xm = tempIn[idx1 - 1];
+                    var T_yp = tempIn[idx1 + W];
+                    var T_ym = tempIn[idx1 - W];
+                    var T_zp = tempIn[idx1 + W * H];
+                    var T_zm = tempIn[idx1 - W * H];
+
+                    var mat_xp = labels[x + 1, y, z];
+                    var mat_xm = labels[x - 1, y, z];
+                    var mat_yp = labels[x, y + 1, z];
+                    var mat_ym = labels[x, y - 1, z];
+                    var mat_zp = labels[x, y, z + 1];
+                    var mat_zm = labels[x, y, z - 1];
+
+                    var k_xp = conductivities.ContainsKey(mat_xp) ? conductivities[mat_xp] : 0.001f;
+                    var k_xm = conductivities.ContainsKey(mat_xm) ? conductivities[mat_xm] : 0.001f;
+                    var k_yp = conductivities.ContainsKey(mat_yp) ? conductivities[mat_yp] : 0.001f;
+                    var k_ym = conductivities.ContainsKey(mat_ym) ? conductivities[mat_ym] : 0.001f;
+                    var k_zp = conductivities.ContainsKey(mat_zp) ? conductivities[mat_zp] : 0.001f;
+                    var k_zm = conductivities.ContainsKey(mat_zm) ? conductivities[mat_zm] : 0.001f;
+
+                    var k_ixp = HarmonicMean(k_c, k_xp);
+                    var k_ixm = HarmonicMean(k_c, k_xm);
+                    var k_iyp = HarmonicMean(k_c, k_yp);
+                    var k_iym = HarmonicMean(k_c, k_ym);
+                    var k_izp = HarmonicMean(k_c, k_zp);
+                    var k_izm = HarmonicMean(k_c, k_zm);
+
+                    var d2T_dx2 = (k_ixp * (T_xp - T_c) - k_ixm * (T_c - T_xm)) / dx2;
+                    var d2T_dy2 = (k_iyp * (T_yp - T_c) - k_iym * (T_c - T_ym)) / dy2;
+                    var d2T_dz2 = (k_izp * (T_zp - T_c) - k_izm * (T_c - T_zm)) / dz2;
+
+                    tempOut[idx1] = T_c + dt * (d2T_dx2 + d2T_dy2 + d2T_dz2);
+
+                    var change = Math.Abs(tempOut[idx1] - T_c);
+                    if (change > localMax) localMax = change;
+                }
+            }
+
+            lock (lockObj)
+            {
+                if (localMax > maxChange) maxChange = localMax;
+            }
+        });
+
+        return maxChange;
+    }
+
+
+    private static float UpdateTemperatureScalar(
+        float[] tempIn, float[] tempOut, ILabelVolumeData labels,
+        Dictionary<byte, float> conductivities, int W, int H, int D,
+        float dx, float dy, float dz, float dt, CancellationToken token)
     {
         float maxChange = 0;
         var dx2 = dx * dx;
@@ -849,8 +922,12 @@ __kernel void calculate_flux(
                 var idx = (z * H + y) * W + x;
                 var mat = labels[x, y, z];
 
-                // Skip exterior material (ID: 0)
-                if (mat == 0) continue;
+                // === Pass-through for exterior voxels ===
+                if (mat == 0)
+                {
+                    tempOut[idx] = tempIn[idx];
+                    continue;
+                }
 
                 var k_c = conductivities[mat];
 
@@ -862,7 +939,6 @@ __kernel void calculate_flux(
                 var T_zp = tempIn[idx + W * H];
                 var T_zm = tempIn[idx - W * H];
 
-                // Get neighboring conductivities
                 var mat_xp = labels[x + 1, y, z];
                 var mat_xm = labels[x - 1, y, z];
                 var mat_yp = labels[x, y + 1, z];
@@ -877,20 +953,17 @@ __kernel void calculate_flux(
                 var k_zp = conductivities.ContainsKey(mat_zp) ? conductivities[mat_zp] : 0.001f;
                 var k_zm = conductivities.ContainsKey(mat_zm) ? conductivities[mat_zm] : 0.001f;
 
-                // Interface conductivities using harmonic mean
-                var k_interface_xp = HarmonicMean(k_c, k_xp);
-                var k_interface_xm = HarmonicMean(k_c, k_xm);
-                var k_interface_yp = HarmonicMean(k_c, k_yp);
-                var k_interface_ym = HarmonicMean(k_c, k_ym);
-                var k_interface_zp = HarmonicMean(k_c, k_zp);
-                var k_interface_zm = HarmonicMean(k_c, k_zm);
+                var k_ixp = HarmonicMean(k_c, k_xp);
+                var k_ixm = HarmonicMean(k_c, k_xm);
+                var k_iyp = HarmonicMean(k_c, k_yp);
+                var k_iym = HarmonicMean(k_c, k_ym);
+                var k_izp = HarmonicMean(k_c, k_zp);
+                var k_izm = HarmonicMean(k_c, k_zm);
 
-                // Finite difference approximation
-                var d2T_dx2 = (k_interface_xp * (T_xp - T_c) - k_interface_xm * (T_c - T_xm)) / dx2;
-                var d2T_dy2 = (k_interface_yp * (T_yp - T_c) - k_interface_ym * (T_c - T_ym)) / dy2;
-                var d2T_dz2 = (k_interface_zp * (T_zp - T_c) - k_interface_zm * (T_c - T_zm)) / dz2;
+                var d2T_dx2 = (k_ixp * (T_xp - T_c) - k_ixm * (T_c - T_xm)) / dx2;
+                var d2T_dy2 = (k_iyp * (T_yp - T_c) - k_iym * (T_c - T_ym)) / dy2;
+                var d2T_dz2 = (k_izp * (T_zp - T_c) - k_izm * (T_c - T_zm)) / dz2;
 
-                // Explicit time integration
                 tempOut[idx] = T_c + dt * (d2T_dx2 + d2T_dy2 + d2T_dz2);
 
                 var change = Math.Abs(tempOut[idx] - T_c);
@@ -905,6 +978,7 @@ __kernel void calculate_flux(
 
         return maxChange;
     }
+
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static float HarmonicMean(float k1, float k2)

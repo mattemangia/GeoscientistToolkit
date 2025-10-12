@@ -467,7 +467,7 @@ public class NMRAnalysisTool : IDatasetTools
                 DrawPlot(drawList, pos, contentSize,
                     results.TimePoints,
                     results.Magnetization,
-                    "Time (ms)", "Normalized Magnetization",
+                    "Time (ms)", "Norm. Magnet.",
                     new List<(string, Vector4)> { ("Decay", plotColor) });
             }
         }
