@@ -42,7 +42,7 @@ public class Mesh3DDataset : Dataset, ISerializableDataset
 
     // Mesh data
     public List<Vector3> Vertices { get; private set; }
-    public List<Vector3> Normals { get; }
+    public List<Vector3> Normals { get; private set; }
     public List<Vector2> TextureCoordinates { get; }
     public List<int[]> Faces { get; private set; } // Each face is an array of vertex indices
     public bool IsLoaded { get; private set; }
@@ -63,7 +63,28 @@ public class Mesh3DDataset : Dataset, ISerializableDataset
             Center = Center
         };
     }
+    /// <summary>
+    ///     Create an empty mesh dataset that can be edited
+    /// </summary>
+    public static Mesh3DDataset CreateEmpty(string name, string filePath)
+    {
+        var dataset = new Mesh3DDataset(name, filePath)
+        {
+            Vertices = new List<Vector3>(),
+            Faces = new List<int[]>(),
+            Normals = new List<Vector3>(),
+            VertexCount = 0,
+            FaceCount = 0,
+            FileFormat = "OBJ",
+            IsLoaded = true,
+            BoundingBoxMin = Vector3.Zero,
+            BoundingBoxMax = Vector3.Zero,
+            Center = Vector3.Zero
+        };
 
+        Logger.Log($"Created empty mesh: {name}");
+        return dataset;
+    }
     public static Mesh3DDataset CreateFromData(string name, string filePath, List<Vector3> vertices, List<int[]> faces,
         float voxelSize, string unit)
     {
@@ -187,7 +208,65 @@ public class Mesh3DDataset : Dataset, ISerializableDataset
             throw;
         }
     }
+    /// <summary>
+    ///     Save the current mesh to its file path
+    /// </summary>
+    public void Save()
+    {
+        if (string.IsNullOrEmpty(FilePath))
+        {
+            Logger.LogError("Cannot save mesh: no file path specified");
+            return;
+        }
 
+        try
+        {
+            // Ensure directory exists
+            var directory = Path.GetDirectoryName(FilePath);
+            if (!string.IsNullOrEmpty(directory) && !Directory.Exists(directory))
+            {
+                Directory.CreateDirectory(directory);
+            }
+
+            // Recalculate bounds before saving
+            CalculateBounds();
+
+            // Write OBJ file
+            WriteOBJ(FilePath);
+
+            Logger.Log($"Saved mesh to {FilePath}");
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError($"Failed to save mesh: {ex.Message}");
+            throw;
+        }
+    }
+
+    /// <summary>
+    ///     Make CalculateBounds public so editor can call it
+    /// </summary>
+    public void CalculateBounds()
+    {
+        if (Vertices.Count == 0)
+        {
+            BoundingBoxMin = Vector3.Zero;
+            BoundingBoxMax = Vector3.Zero;
+            Center = Vector3.Zero;
+            return;
+        }
+
+        BoundingBoxMin = new Vector3(float.MaxValue);
+        BoundingBoxMax = new Vector3(float.MinValue);
+
+        foreach (var vertex in Vertices)
+        {
+            BoundingBoxMin = Vector3.Min(BoundingBoxMin, vertex);
+            BoundingBoxMax = Vector3.Max(BoundingBoxMax, vertex);
+        }
+
+        Center = (BoundingBoxMin + BoundingBoxMax) * 0.5f;
+    }
     private void LoadOBJ()
     {
         Vertices.Clear();
@@ -406,27 +485,7 @@ public class Mesh3DDataset : Dataset, ISerializableDataset
                 Normals[i] = Vector3.Normalize(Normals[i]);
     }
 
-    private void CalculateBounds()
-    {
-        if (Vertices.Count == 0)
-        {
-            BoundingBoxMin = Vector3.Zero;
-            BoundingBoxMax = Vector3.Zero;
-            Center = Vector3.Zero;
-            return;
-        }
-
-        BoundingBoxMin = new Vector3(float.MaxValue);
-        BoundingBoxMax = new Vector3(float.MinValue);
-
-        foreach (var vertex in Vertices)
-        {
-            BoundingBoxMin = Vector3.Min(BoundingBoxMin, vertex);
-            BoundingBoxMax = Vector3.Max(BoundingBoxMax, vertex);
-        }
-
-        Center = (BoundingBoxMin + BoundingBoxMax) * 0.5f;
-    }
+    
 
     public override void Unload()
     {

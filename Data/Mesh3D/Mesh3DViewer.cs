@@ -7,41 +7,40 @@ using Veldrid;
 namespace GeoscientistToolkit.Data.Mesh3D;
 
 /// <summary>
-///     3D model viewer for Mesh3DDataset, with support for multiple models and interactive controls.
+///     3D model viewer for Mesh3DDataset, with editor and view presets support.
 /// </summary>
 public class Mesh3DViewer : IDatasetViewer, IDisposable
 {
     private readonly D3D11MeshRenderer _d3dRenderer;
     private readonly Mesh3DDataset _dataset;
     private readonly MetalMeshRenderer _metalRenderer;
-
-    // Manage off-screen rendered texture for ImGui
-    private readonly TextureManager _textureManager;
     private readonly VulkanMeshRenderer _vulkanRenderer;
+    private readonly TextureManager _textureManager;
+    private readonly Mesh3DEditor _editor;
+
     private float _cameraDistance = 2.0f;
     private float _cameraPitch = MathF.PI / 6f;
-
-    // Camera parameters
     private Vector3 _cameraTarget = Vector3.Zero;
     private float _cameraYaw = -MathF.PI / 4f;
     private bool _isDragging;
     private bool _isPanning;
     private Vector2 _lastMousePos;
     private Matrix4x4 _projMatrix;
-
-    // Grid toggle
     private bool _showGrid = true;
     private Matrix4x4 _viewMatrix;
+    
+    // View presets
+    private CameraPreset _lastPreset = CameraPreset.Custom;
 
-    /// <summary>
-    ///     Initialize Mesh3DViewer for the given dataset.
-    /// </summary>
     public Mesh3DViewer(Mesh3DDataset dataset)
     {
         _dataset = dataset ?? throw new ArgumentNullException(nameof(dataset));
-        _dataset.Load(); // Ensure data is loaded
+        _dataset.Load();
 
-        // Initialize platform-specific renderer based on backend
+        // Initialize editor
+        _editor = new Mesh3DEditor(_dataset);
+
+        // Initialize platform-specific renderer
         var backend = VeldridManager.GraphicsDevice.BackendType;
         Logger.Log($"Initializing Mesh3D renderer for backend: {backend}");
 
@@ -67,8 +66,6 @@ public class Mesh3DViewer : IDatasetViewer, IDisposable
 
             case GraphicsBackend.OpenGL:
             case GraphicsBackend.OpenGLES:
-                // For OpenGL, we can use the Vulkan renderer with GLSL shaders
-                // as Veldrid handles the translation appropriately
                 _vulkanRenderer = new VulkanMeshRenderer();
                 _vulkanRenderer.Initialize(_dataset);
                 _textureManager = TextureManager.CreateFromTexture(_vulkanRenderer.ColorTarget);
@@ -79,65 +76,103 @@ public class Mesh3DViewer : IDatasetViewer, IDisposable
                 throw new NotSupportedException($"Graphics backend {backend} is not supported for Mesh3D rendering");
         }
 
-        // Initialize camera target at dataset center and set up initial matrices
-        _cameraTarget = Vector3.Zero; // Using centered model (translated to origin in model transform)
+        _cameraTarget = Vector3.Zero;
         UpdateCameraMatrices();
     }
 
-    /// <summary>
-    ///     Draw toolbar controls (buttons, checkboxes) for this viewer.
-    /// </summary>
     public void DrawToolbarControls()
     {
+        // Camera reset
         if (ImGui.Button("Reset Camera"))
         {
-            // Reset camera parameters to default
             _cameraYaw = -MathF.PI / 4f;
             _cameraPitch = MathF.PI / 6f;
             _cameraDistance = 2.0f;
             _cameraTarget = Vector3.Zero;
+            _lastPreset = CameraPreset.Custom;
             UpdateCameraMatrices();
         }
 
         ImGui.SameLine();
+        
+        // Grid toggle
         var grid = _showGrid;
-        if (ImGui.Checkbox("Grid", ref grid)) _showGrid = grid;
+        if (ImGui.Checkbox("Grid", ref grid)) 
+            _showGrid = grid;
 
-        // Show backend info in toolbar
+        ImGui.SameLine();
+        ImGui.Separator();
+        ImGui.SameLine();
+
+        // View Presets
+        ImGui.Text("View:");
+        ImGui.SameLine();
+        
+        if (ImGui.Button("Top"))
+            ApplyViewPreset(CameraPreset.Top);
+        ImGui.SameLine();
+        
+        if (ImGui.Button("Bottom"))
+            ApplyViewPreset(CameraPreset.Bottom);
+        ImGui.SameLine();
+        
+        if (ImGui.Button("Front"))
+            ApplyViewPreset(CameraPreset.Front);
+        ImGui.SameLine();
+        
+        if (ImGui.Button("Back"))
+            ApplyViewPreset(CameraPreset.Back);
+        ImGui.SameLine();
+        
+        if (ImGui.Button("Left"))
+            ApplyViewPreset(CameraPreset.Left);
+        ImGui.SameLine();
+        
+        if (ImGui.Button("Right"))
+            ApplyViewPreset(CameraPreset.Right);
+
+        // Editor controls
+        _editor.DrawToolbarControls();
+
+        // Backend info
+        ImGui.SameLine();
+        ImGui.Separator();
         ImGui.SameLine();
         ImGui.TextDisabled($"[{VeldridManager.GraphicsDevice.BackendType}]");
     }
 
-    /// <summary>
-    ///     Draw the main content (3D view) of the viewer. Responds to zoom, pan interactions.
-    /// </summary>
     public void DrawContent(ref float zoom, ref Vector2 pan)
     {
-        // Render the scene to the off-screen texture
+        // Render the scene
         RenderScene();
 
-        // Display the rendered image in ImGui
+        // Display rendered image
         var textureId = _textureManager.GetImGuiTextureId();
         if (textureId != IntPtr.Zero)
         {
             var availableSize = ImGui.GetContentRegionAvail();
             var imagePos = ImGui.GetCursorScreenPos();
 
-            // Place an invisible button over the image to capture mouse input
-            // This prevents the window from being dragged when clicking on the 3D view
+            // Invisible button for mouse input
             ImGui.InvisibleButton("Mesh3DViewArea", availableSize);
             var isHovered = ImGui.IsItemHovered();
             var isActive = ImGui.IsItemActive();
 
-            // Draw the image at the same position as the invisible button
+            // Draw image
             ImGui.SetCursorScreenPos(imagePos);
-            // Flip UVs vertically (Veldrid's texture coordinate difference)
             ImGui.Image(textureId, availableSize, new Vector2(0, 1), new Vector2(1, 0));
 
-            // Handle mouse interaction if hovering the invisible button area
-            if (isHovered || isActive || _isDragging || _isPanning) HandleMouseInput();
+            // Handle mouse interaction
+            if (isHovered || isActive || _isDragging || _isPanning) 
+            {
+                HandleMouseInput();
+                
+                // Mark as custom view when user interacts
+                if ((_isDragging || _isPanning) && _lastPreset != CameraPreset.Custom)
+                    _lastPreset = CameraPreset.Custom;
+            }
 
-            // Right-click context menu for additional options
+            // Context menu
             if (ImGui.BeginPopupContextItem("Mesh3DViewerContextMenu"))
             {
                 if (ImGui.MenuItem("Reset Camera"))
@@ -146,18 +181,39 @@ public class Mesh3DViewer : IDatasetViewer, IDisposable
                     _cameraPitch = MathF.PI / 6f;
                     _cameraDistance = 2.0f;
                     _cameraTarget = Vector3.Zero;
+                    _lastPreset = CameraPreset.Custom;
                     UpdateCameraMatrices();
                 }
 
-                if (ImGui.MenuItem("Toggle Grid", null, _showGrid)) _showGrid = !_showGrid;
+                ImGui.Separator();
+                
+                if (ImGui.BeginMenu("View Preset"))
+                {
+                    if (ImGui.MenuItem("Top View")) ApplyViewPreset(CameraPreset.Top);
+                    if (ImGui.MenuItem("Bottom View")) ApplyViewPreset(CameraPreset.Bottom);
+                    if (ImGui.MenuItem("Front View")) ApplyViewPreset(CameraPreset.Front);
+                    if (ImGui.MenuItem("Back View")) ApplyViewPreset(CameraPreset.Back);
+                    if (ImGui.MenuItem("Left View")) ApplyViewPreset(CameraPreset.Left);
+                    if (ImGui.MenuItem("Right View")) ApplyViewPreset(CameraPreset.Right);
+                    ImGui.EndMenu();
+                }
+
+                ImGui.Separator();
+
+                if (ImGui.MenuItem("Toggle Grid", null, _showGrid)) 
+                    _showGrid = !_showGrid;
+                
                 ImGui.EndPopup();
             }
         }
+
+        // Draw editor panel if in edit mode
+        if (_editor.IsEditMode)
+        {
+            _editor.DrawEditorPanel();
+        }
     }
 
-    /// <summary>
-    ///     Dispose of GPU resources used by the viewer.
-    /// </summary>
     public void Dispose()
     {
         _textureManager?.Dispose();
@@ -166,37 +222,29 @@ public class Mesh3DViewer : IDatasetViewer, IDisposable
         _vulkanRenderer?.Dispose();
     }
 
-    /// <summary>
-    ///     Render the 3D scene (all models and grid) to the off-screen framebuffer.
-    /// </summary>
     private void RenderScene()
     {
         if (_d3dRenderer != null)
-            // Use Direct3D11 renderer
             _d3dRenderer.Render(_dataset, _viewMatrix, _projMatrix, _cameraTarget, _showGrid);
         else if (_metalRenderer != null)
-            // Use Metal renderer
             _metalRenderer.Render(_dataset, _viewMatrix, _projMatrix, _cameraTarget, _showGrid);
         else if (_vulkanRenderer != null)
-            // Use Vulkan renderer
             _vulkanRenderer.Render(_dataset, _viewMatrix, _projMatrix, _cameraTarget, _showGrid);
     }
 
-    /// <summary>
-    ///     Update _cameraPosition, _viewMatrix, and _projMatrix based on yaw, pitch, distance.
-    /// </summary>
     private void UpdateCameraMatrices()
     {
-        // Calculate camera position in world from spherical angles around target (Y-up coordinate system)
+        // Calculate camera position from spherical coordinates
         Vector3 offset;
         offset.X = MathF.Cos(_cameraYaw) * MathF.Cos(_cameraPitch);
         offset.Y = MathF.Sin(_cameraPitch);
         offset.Z = MathF.Sin(_cameraYaw) * MathF.Cos(_cameraPitch);
         offset *= _cameraDistance;
+        
         var cameraPosition = _cameraTarget + offset;
         _viewMatrix = Matrix4x4.CreateLookAt(cameraPosition, _cameraTarget, Vector3.UnitY);
 
-        // 45-degree field of view, aspect ratio based on current render target size
+        // Projection matrix
         var aspect = 1.0f;
         if (_d3dRenderer != null)
             aspect = _d3dRenderer.Width / (float)_d3dRenderer.Height;
@@ -208,9 +256,6 @@ public class Mesh3DViewer : IDatasetViewer, IDisposable
         _projMatrix = Matrix4x4.CreatePerspectiveFieldOfView(MathF.PI / 4f, aspect, 0.1f, 1000f);
     }
 
-    /// <summary>
-    ///     Handle mouse input for orbit rotation (left drag), panning (middle/right drag), and zoom (wheel).
-    /// </summary>
     private void HandleMouseInput()
     {
         var io = ImGui.GetIO();
@@ -222,7 +267,7 @@ public class Mesh3DViewer : IDatasetViewer, IDisposable
             UpdateCameraMatrices();
         }
 
-        // Check if we should start dragging
+        // Start dragging
         if (!_isDragging && !_isPanning)
         {
             if (ImGui.IsMouseClicked(ImGuiMouseButton.Left))
@@ -237,13 +282,12 @@ public class Mesh3DViewer : IDatasetViewer, IDisposable
             }
         }
 
-        // Handle ongoing drag operations
+        // Orbit rotation (left mouse)
         if (_isDragging)
         {
             if (ImGui.IsMouseDown(ImGuiMouseButton.Left))
             {
                 var delta = io.MousePos - _lastMousePos;
-                // Orbit rotation (adjust yaw and pitch)
                 _cameraYaw -= delta.X * 0.01f;
                 _cameraPitch = Math.Clamp(_cameraPitch - delta.Y * 0.01f, -MathF.PI / 2.01f, MathF.PI / 2.01f);
                 _lastMousePos = io.MousePos;
@@ -255,14 +299,13 @@ public class Mesh3DViewer : IDatasetViewer, IDisposable
             }
         }
 
+        // Pan (middle/right mouse)
         if (_isPanning)
         {
             if (ImGui.IsMouseDown(ImGuiMouseButton.Middle) || ImGui.IsMouseDown(ImGuiMouseButton.Right))
             {
                 var delta = io.MousePos - _lastMousePos;
-                // Pan: translate camera target in view plane
                 Matrix4x4.Invert(_viewMatrix, out var invView);
-                // Right vector (world) and Up vector (world) from inverse view
                 var right = Vector3.Normalize(new Vector3(invView.M11, invView.M12, invView.M13));
                 var up = Vector3.Normalize(new Vector3(invView.M21, invView.M22, invView.M23));
                 var panSpeed = _cameraDistance * 0.001f;
@@ -276,5 +319,64 @@ public class Mesh3DViewer : IDatasetViewer, IDisposable
                 _isPanning = false;
             }
         }
+    }
+
+    private void ApplyViewPreset(CameraPreset preset)
+    {
+        _lastPreset = preset;
+        _cameraTarget = Vector3.Zero;
+        
+        // Get model bounds for appropriate distance
+        var size = _dataset.BoundingBoxMax - _dataset.BoundingBoxMin;
+        var maxDim = MathF.Max(size.X, MathF.Max(size.Y, size.Z));
+        _cameraDistance = maxDim * 2.0f;
+        if (_cameraDistance < 2.0f) _cameraDistance = 2.0f;
+
+        switch (preset)
+        {
+            case CameraPreset.Top:
+                _cameraYaw = 0;
+                _cameraPitch = MathF.PI / 2f - 0.01f; // Slightly off vertical to avoid gimbal lock
+                break;
+
+            case CameraPreset.Bottom:
+                _cameraYaw = 0;
+                _cameraPitch = -MathF.PI / 2f + 0.01f;
+                break;
+
+            case CameraPreset.Front:
+                _cameraYaw = 0;
+                _cameraPitch = 0;
+                break;
+
+            case CameraPreset.Back:
+                _cameraYaw = MathF.PI;
+                _cameraPitch = 0;
+                break;
+
+            case CameraPreset.Left:
+                _cameraYaw = -MathF.PI / 2f;
+                _cameraPitch = 0;
+                break;
+
+            case CameraPreset.Right:
+                _cameraYaw = MathF.PI / 2f;
+                _cameraPitch = 0;
+                break;
+        }
+
+        UpdateCameraMatrices();
+        Logger.Log($"Applied {preset} view preset");
+    }
+
+    private enum CameraPreset
+    {
+        Custom,
+        Top,
+        Bottom,
+        Front,
+        Back,
+        Left,
+        Right
     }
 }

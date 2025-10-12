@@ -4,6 +4,7 @@ using System.Numerics;
 using GeoscientistToolkit.Business;
 using GeoscientistToolkit.Data;
 using GeoscientistToolkit.Data.GIS;
+using GeoscientistToolkit.Data.Mesh3D;
 using GeoscientistToolkit.Settings;
 using GeoscientistToolkit.UI.GIS;
 using GeoscientistToolkit.UI.Utils;
@@ -354,6 +355,7 @@ public class MainWindow
             ImGui.Separator();
             if (ImGui.MenuItem("Import Data...")) _import.Open();
             ImGui.Separator();
+            if (ImGui.MenuItem("New 3D Model...")) OnCreateEmptyMesh();
             if (ImGui.MenuItem("New GIS Map..."))
             {
                 var emptyGIS = new GISDataset("New Map", "")
@@ -495,7 +497,19 @@ public class MainWindow
         _thumbnailViewers.Clear();
         _selectedDataset = null;
     }
-
+    private void OnCreateEmptyMesh()
+    {
+        var timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
+        var name = $"New Model {timestamp}";
+        var tempPath = Path.Combine(Path.GetTempPath(), $"{name}.obj");
+    
+        var emptyMesh = Mesh3DDataset.CreateEmpty(name, tempPath);
+        ProjectManager.Instance.AddDataset(emptyMesh);
+        Logger.Log($"Created new empty 3D model: {name}");
+    
+        // Auto-select and open the new mesh
+        OnDatasetSelected(emptyMesh);
+    }
     private void OnSaveProject()
     {
         if (string.IsNullOrEmpty(ProjectManager.Instance.ProjectPath))
