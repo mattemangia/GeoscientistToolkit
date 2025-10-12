@@ -2,6 +2,8 @@
 
 using System.Numerics;
 using System.Text.Json;
+using GeoscientistToolkit.Analysis.NMR;
+using GeoscientistToolkit.Analysis.ThermalConductivity;
 using GeoscientistToolkit.Data.VolumeData;
 using GeoscientistToolkit.Util;
 
@@ -44,6 +46,10 @@ public class CtImageStackDataset : Dataset, ISerializableDataset
     public ChunkedLabelVolume LabelData { get; set; }
     public List<Material> Materials { get; set; } = new();
 
+    // --- NEW PROPERTIES FOR STORING ANALYSIS RESULTS ---
+    public NMRResults NmrResults { get; set; }
+    public ThermalResults ThermalResults { get; set; }
+
     public object ToSerializableObject()
     {
         var dto = new CtImageStackDatasetDTO
@@ -71,6 +77,70 @@ public class CtImageStackDataset : Dataset, ISerializableDataset
                     Density = material.Density,
                     PhysicalMaterialName = material.PhysicalMaterialName // NEW
                 });
+        // --- NEW: Serialize results ---
+        if (NmrResults != null)
+        {
+            dto.NmrResults = new NMRResultsDTO
+            {
+                TimePoints = NmrResults.TimePoints,
+                Magnetization = NmrResults.Magnetization,
+                T2Histogram = NmrResults.T2Histogram,
+                T2HistogramBins = NmrResults.T2HistogramBins,
+                T1Histogram = NmrResults.T1Histogram,
+                T1HistogramBins = NmrResults.T1HistogramBins,
+                HasT1T2Data = NmrResults.HasT1T2Data,
+                PoreSizes = NmrResults.PoreSizes,
+                PoreSizeDistribution = NmrResults.PoreSizeDistribution,
+                MeanT2 = NmrResults.MeanT2,
+                GeometricMeanT2 = NmrResults.GeometricMeanT2,
+                T2PeakValue = NmrResults.T2PeakValue,
+                NumberOfWalkers = NmrResults.NumberOfWalkers,
+                TotalSteps = NmrResults.TotalSteps,
+                TimeStep = NmrResults.TimeStep,
+                PoreMaterial = NmrResults.PoreMaterial,
+                MaterialRelaxivities = NmrResults.MaterialRelaxivities,
+                ComputationTimeSeconds = NmrResults.ComputationTime.TotalSeconds,
+                ComputationMethod = NmrResults.ComputationMethod
+            };
+
+            if (NmrResults.T1T2Map != null && NmrResults.HasT1T2Data)
+            {
+                var t1Count = NmrResults.T1T2Map.GetLength(0);
+                var t2Count = NmrResults.T1T2Map.GetLength(1);
+                dto.NmrResults.T1T2Map_T1Count = t1Count;
+                dto.NmrResults.T1T2Map_T2Count = t2Count;
+                dto.NmrResults.T1T2MapData = new double[t1Count * t2Count];
+                Buffer.BlockCopy(NmrResults.T1T2Map, 0, dto.NmrResults.T1T2MapData, 0,
+                    t1Count * t2Count * sizeof(double));
+            }
+        }
+
+        if (ThermalResults != null)
+        {
+            dto.ThermalResults = new ThermalResultsDTO
+            {
+                EffectiveConductivity = ThermalResults.EffectiveConductivity,
+                MaterialConductivities = ThermalResults.MaterialConductivities,
+                AnalyticalEstimates = ThermalResults.AnalyticalEstimates,
+                ComputationTimeSeconds = ThermalResults.ComputationTime.TotalSeconds,
+                IterationsPerformed = ThermalResults.IterationsPerformed,
+                FinalError = ThermalResults.FinalError
+            };
+
+            if (ThermalResults.TemperatureField != null)
+            {
+                var w = ThermalResults.TemperatureField.GetLength(0);
+                var h = ThermalResults.TemperatureField.GetLength(1);
+                var d = ThermalResults.TemperatureField.GetLength(2);
+                dto.ThermalResults.TempField_W = w;
+                dto.ThermalResults.TempField_H = h;
+                dto.ThermalResults.TempField_D = d;
+                dto.ThermalResults.TemperatureFieldData = new float[w * h * d];
+                Buffer.BlockCopy(ThermalResults.TemperatureField, 0, dto.ThermalResults.TemperatureFieldData, 0,
+                    w * h * d * sizeof(float));
+            }
+        }
+
 
         return dto;
     }

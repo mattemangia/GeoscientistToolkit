@@ -88,6 +88,10 @@ public class CtImageStackDatasetDTO : DatasetDTO
     public string Unit { get; set; }
     public int BinningSize { get; set; }
     public List<MaterialDTO> Materials { get; set; } = new();
+
+    // NEW: Properties for storing simulation results
+    public ThermalResultsDTO ThermalResults { get; set; }
+    public NMRResultsDTO NmrResults { get; set; }
 }
 
 public class DatasetGroupDTO : DatasetDTO
@@ -155,4 +159,57 @@ public class PNMDatasetDTO : DatasetDTO
     public float LatticeBoltzmannPermeability { get; set; }
     public List<PoreDTO> Pores { get; set; } = new();
     public List<ThroatDTO> Throats { get; set; } = new();
+}
+
+// --- NEW DTOS FOR SIMULATION RESULTS ---
+
+/// <summary>
+///     DTO for serializing ThermalResults.
+/// </summary>
+public class ThermalResultsDTO
+{
+    // For flattened 3D temperature field
+    public int TempField_W { get; set; }
+    public int TempField_H { get; set; }
+    public int TempField_D { get; set; }
+    public float[] TemperatureFieldData { get; set; }
+
+    public double EffectiveConductivity { get; set; }
+    public Dictionary<byte, double> MaterialConductivities { get; set; }
+    public Dictionary<string, double> AnalyticalEstimates { get; set; }
+    public double ComputationTimeSeconds { get; set; }
+    public int IterationsPerformed { get; set; }
+    public double FinalError { get; set; }
+}
+
+/// <summary>
+///     DTO for serializing NMRResults.
+/// </summary>
+public class NMRResultsDTO
+{
+    public double[] TimePoints { get; set; }
+    public double[] Magnetization { get; set; }
+    public double[] T2Histogram { get; set; }
+    public double[] T2HistogramBins { get; set; }
+    public double[] T1Histogram { get; set; }
+    public double[] T1HistogramBins { get; set; }
+
+    // For flattened 2D T1T2Map
+    public int T1T2Map_T1Count { get; set; }
+    public int T1T2Map_T2Count { get; set; }
+    public double[] T1T2MapData { get; set; }
+    public bool HasT1T2Data { get; set; }
+
+    public double[] PoreSizes { get; set; }
+    public double[] PoreSizeDistribution { get; set; }
+    public double MeanT2 { get; set; }
+    public double GeometricMeanT2 { get; set; }
+    public double T2PeakValue { get; set; }
+    public int NumberOfWalkers { get; set; }
+    public int TotalSteps { get; set; }
+    public double TimeStep { get; set; }
+    public string PoreMaterial { get; set; }
+    public Dictionary<string, double> MaterialRelaxivities { get; set; }
+    public double ComputationTimeSeconds { get; set; }
+    public string ComputationMethod { get; set; }
 }

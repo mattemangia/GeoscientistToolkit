@@ -16,30 +16,43 @@ namespace GeoscientistToolkit.Analysis.ThermalConductivity;
 
 public class ThermalConductivityTool : IDatasetTools, IDisposable
 {
-    private readonly ThermalOptions _options = new();
-    private CancellationTokenSource _cancellationTokenSource;
-    private bool _isSimulationRunning;
-    private Task _simulationTask;
-    private ThermalResults _results;
-    private readonly ProgressBarDialog _progressDialog = new("Thermal Simulation");
-
-    private int _selectedSliceIndex;
-    private int _selectedSliceDirectionInt;
-    private int _colorMapIndex; // 0: Hot, 1: Rainbow
-    private bool _showIsocontours = true;
-    private int _numIsocontours = 10;
-    private double _isosurfaceValue = 300.0;
-    private int _numIsosurfaces = 5; // Moved from local static to class field
-    
-    private readonly ImGuiExportFileDialog _csvExportDialog = new("ExportThermalCsv", "Export Results to CSV");
-    private readonly ImGuiExportFileDialog _sliceCsvExportDialog = new("ExportSliceCsv", "Export Slice to CSV");
-    private readonly ImGuiExportFileDialog _pngExportDialog = new("ExportThermalPng", "Export Slice Image");
-    private readonly ImGuiExportFileDialog _compositePngExportDialog = new("ExportCompositePng", "Export Composite Image");
-    private readonly ImGuiExportFileDialog _txtReportExportDialog = new("ExportTxtReport", "Export Text Report");
-    private readonly ImGuiExportFileDialog _rtfReportExportDialog = new("ExportRtfReport", "Export Rich Text Report");
-    private readonly ImGuiExportFileDialog _stlExportDialog = new("ExportStl", "Export Mesh to STL");
-    
     private static Vector3[,] _colormapData;
+
+    // CACHED isocontours to avoid regenerating every frame
+    private readonly List<(Vector2, Vector2)> _cachedIsocontours = new();
+
+    private readonly ImGuiExportFileDialog _compositePngExportDialog =
+        new("ExportCompositePng", "Export Composite Image");
+
+    private readonly ImGuiExportFileDialog _csvExportDialog = new("ExportThermalCsv", "Export Results to CSV");
+    private readonly ProgressBarDialog _isosurfaceProgressDialog = new("Generating Isosurface");
+    private readonly ThermalOptions _options = new();
+    private readonly ImGuiExportFileDialog _pngExportDialog = new("ExportThermalPng", "Export Slice Image");
+    private readonly ProgressBarDialog _progressDialog = new("Thermal Simulation");
+    private readonly ImGuiExportFileDialog _rtfReportExportDialog = new("ExportRtfReport", "Export Rich Text Report");
+    private readonly ImGuiExportFileDialog _sliceCsvExportDialog = new("ExportSliceCsv", "Export Slice to CSV");
+    private readonly ImGuiExportFileDialog _stlExportDialog = new("ExportStl", "Export Mesh to STL");
+    private readonly ImGuiExportFileDialog _txtReportExportDialog = new("ExportTxtReport", "Export Text Report");
+    private (int sliceDir, int sliceIdx, float isoValue, int numContours) _cachedIsocontoursKey = (-1, -1, -1, -1);
+    private CancellationTokenSource _cancellationTokenSource;
+    private int _colorMapIndex;
+
+    private double _isosurfaceValue = 300.0;
+    private bool _isSimulationRunning;
+    private string _materialSearchFilter = "";
+    private int _numIsocontours = 10;
+    private int _numIsosurfaces = 5;
+    private PhysicalMaterial _selectedLibraryMaterial;
+    private int _selectedSliceDirectionInt;
+
+    // Slice viewer state
+    private int _selectedSliceIndex;
+    private bool _showIsocontours = true;
+
+    // Material library browser state
+    private bool _showMaterialLibraryBrowser;
+    private Task _simulationTask;
+    private byte _targetMaterialIdForAssignment;
 
     public ThermalConductivityTool()
     {
@@ -50,7 +63,7 @@ public class ThermalConductivityTool : IDatasetTools, IDisposable
         _txtReportExportDialog.SetExtensions((".txt", "Text Document"));
         _rtfReportExportDialog.SetExtensions((".rtf", "Rich Text Format"));
         _stlExportDialog.SetExtensions((".stl", "Stereolithography"));
-        
+
         InitializeColormaps();
     }
 
@@ -69,62 +82,96 @@ public class ThermalConductivityTool : IDatasetTools, IDisposable
             _progressDialog.Submit();
             return;
         }
-        
+
         if (ImGui.BeginTabBar("ThermalTabs"))
         {
-            if (ImGui.BeginTabItem("Settings"))
+            if (ImGui.BeginTabItem("Setup"))
             {
                 DrawSettingsTab();
                 ImGui.EndTabItem();
             }
+
             if (ImGui.BeginTabItem("Results"))
             {
                 DrawResultsTab();
                 ImGui.EndTabItem();
             }
+
+            if (ImGui.BeginTabItem("Export"))
+            {
+                DrawExportTab();
+                ImGui.EndTabItem();
+            }
+
             ImGui.EndTabBar();
         }
+
+        // Material library browser modal
+        if (_showMaterialLibraryBrowser) DrawMaterialLibraryBrowser();
+    }
+
+    public void Dispose()
+    {
+        _cancellationTokenSource?.Cancel();
+        _cancellationTokenSource?.Dispose();
     }
 
     private void DrawSettingsTab()
     {
-        // Quick presets
-        if (ImGui.CollapsingHeader("Quick Presets", ImGuiTreeNodeFlags.DefaultOpen))
+        var availWidth = ImGui.GetContentRegionAvail().X;
+
+        // Quick presets in a more compact layout
+        if (ImGui.CollapsingHeader("Temperature Presets", ImGuiTreeNodeFlags.DefaultOpen))
         {
-            ImGui.Text("Apply common temperature configurations:");
-            
-            if (ImGui.Button("Room Temp → Boiling Water", new Vector2(-1, 0)))
+            ImGui.PushStyleVar(ImGuiStyleVar.FramePadding, new Vector2(4, 2));
+
+            if (ImGui.Button("Room -> Boiling", new Vector2((availWidth - 12) / 4, 0)))
             {
-                _options.TemperatureHot = 373.15; // 100°C
-                _options.TemperatureCold = 293.15; // 20°C
+                _options.TemperatureHot = 373.15;
+                _options.TemperatureCold = 293.15;
             }
-            if (ImGui.Button("Freezing → Room Temp", new Vector2(-1, 0)))
+
+            ImGui.SameLine();
+            if (ImGui.Button("Freezing -> Room", new Vector2((availWidth - 12) / 4, 0)))
             {
-                _options.TemperatureHot = 293.15; // 20°C
-                _options.TemperatureCold = 273.15; // 0°C
+                _options.TemperatureHot = 293.15;
+                _options.TemperatureCold = 273.15;
             }
-            if (ImGui.Button("Geothermal Gradient (50°C)", new Vector2(-1, 0)))
+
+            ImGui.SameLine();
+            if (ImGui.Button("Geothermal 50C", new Vector2((availWidth - 12) / 4, 0)))
             {
-                _options.TemperatureHot = 323.15; // 50°C
-                _options.TemperatureCold = 283.15; // 10°C
+                _options.TemperatureHot = 323.15;
+                _options.TemperatureCold = 283.15;
             }
-            if (ImGui.Button("High Temperature (500°C)", new Vector2(-1, 0)))
+
+            ImGui.SameLine();
+            if (ImGui.Button("High Temp 500C", new Vector2((availWidth - 12) / 4, 0)))
             {
-                _options.TemperatureHot = 773.15; // 500°C
-                _options.TemperatureCold = 293.15; // 20°C
+                _options.TemperatureHot = 773.15;
+                _options.TemperatureCold = 293.15;
             }
+
+            ImGui.PopStyleVar();
         }
-        
+
         ImGui.Spacing();
-        
-        // Material properties
+
+        // Material properties with library integration
         if (ImGui.CollapsingHeader("Material Properties", ImGuiTreeNodeFlags.DefaultOpen))
         {
-            if (ImGui.BeginTable("MaterialsTable", 4, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.ScrollY, new Vector2(0, 200)))
+            ImGui.Indent();
+
+            if (ImGui.BeginTable("MaterialsTable", 6,
+                    ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.ScrollY |
+                    ImGuiTableFlags.SizingFixedFit,
+                    new Vector2(0, 200)))
             {
+                ImGui.TableSetupColumn("", ImGuiTableColumnFlags.WidthFixed, 25);
                 ImGui.TableSetupColumn("Material", ImGuiTableColumnFlags.WidthFixed, 120);
-                ImGui.TableSetupColumn("Conductivity (W/m·K)", ImGuiTableColumnFlags.WidthFixed, 150);
+                ImGui.TableSetupColumn("k (W/m·K)", ImGuiTableColumnFlags.WidthFixed, 90);
                 ImGui.TableSetupColumn("Library", ImGuiTableColumnFlags.WidthFixed, 100);
+                ImGui.TableSetupColumn("Properties", ImGuiTableColumnFlags.WidthFixed, 80);
                 ImGui.TableSetupColumn("Actions", ImGuiTableColumnFlags.WidthStretch);
                 ImGui.TableHeadersRow();
 
@@ -132,307 +179,588 @@ public class ThermalConductivityTool : IDatasetTools, IDisposable
                 {
                     ImGui.TableNextRow();
                     ImGui.TableNextColumn();
-                    
-                    // Material name with color indicator
+
+                    // Color indicator
                     var color = material.Color;
-                    ImGui.ColorButton($"##color_{material.ID}", color, ImGuiColorEditFlags.NoTooltip, new Vector2(16, 16));
-                    ImGui.SameLine();
+                    ImGui.ColorButton($"##color_{material.ID}", color, ImGuiColorEditFlags.NoTooltip,
+                        new Vector2(16, 16));
+
+                    ImGui.TableNextColumn();
                     ImGui.Text(material.Name);
-                    
+
                     ImGui.TableNextColumn();
                     if (!_options.MaterialConductivities.ContainsKey(material.ID))
-                    {
                         _options.MaterialConductivities[material.ID] = 1.0;
-                    }
                     var conductivity = (float)_options.MaterialConductivities[material.ID];
                     ImGui.SetNextItemWidth(-1);
                     if (ImGui.InputFloat($"##cond_{material.ID}", ref conductivity, 0.01f, 0.1f, "%.4f"))
-                    {
                         _options.MaterialConductivities[material.ID] = Math.Max(0.001, conductivity);
-                    }
-                    
+
                     // Validation indicator
                     if (conductivity <= 0)
                     {
-                        ImGui.SameLine();
+                        ImGui.TableNextColumn();
                         ImGui.TextColored(new Vector4(1, 0, 0, 1), "!");
-                        if (ImGui.IsItemHovered())
-                        {
-                            ImGui.SetTooltip("Conductivity must be positive!");
-                        }
-                    }
-
-                    ImGui.TableNextColumn();
-                    PhysicalMaterial libMat = null;
-                    if (!string.IsNullOrEmpty(material.PhysicalMaterialName))
-                    {
-                        libMat = MaterialLibrary.Instance.Find(material.PhysicalMaterialName);
-                    }
-                    
-                    if (libMat?.ThermalConductivity_W_mK != null)
-                    {
-                        ImGui.Text($"{libMat.ThermalConductivity_W_mK:F3}");
+                        if (ImGui.IsItemHovered()) ImGui.SetTooltip("Invalid conductivity value");
                     }
                     else
                     {
-                        ImGui.TextDisabled("N/A");
+                        ImGui.TableNextColumn();
+
+                        // Show library source
+                        PhysicalMaterial libMat = null;
+                        if (!string.IsNullOrEmpty(material.PhysicalMaterialName))
+                            libMat = MaterialLibrary.Instance.Find(material.PhysicalMaterialName);
+
+                        if (libMat != null)
+                        {
+                            ImGui.TextColored(new Vector4(0.5f, 1, 0.5f, 1), "OK");
+                            if (ImGui.IsItemHovered())
+                            {
+                                ImGui.BeginTooltip();
+                                ImGui.Text($"Linked: {libMat.Name}");
+                                if (libMat.ThermalConductivity_W_mK.HasValue)
+                                    ImGui.Text($"k = {libMat.ThermalConductivity_W_mK:F4} W/m·K");
+                                ImGui.EndTooltip();
+                            }
+                        }
+                        else
+                        {
+                            ImGui.TextDisabled("Manual");
+                        }
                     }
-                    
+
                     ImGui.TableNextColumn();
-                    if (libMat?.ThermalConductivity_W_mK != null)
+                    // Show available properties from library
+                    if (!string.IsNullOrEmpty(material.PhysicalMaterialName))
                     {
-                        if (ImGui.SmallButton($"Use##use_{material.ID}"))
+                        var libMat = MaterialLibrary.Instance.Find(material.PhysicalMaterialName);
+                        if (libMat != null)
                         {
-                            _options.MaterialConductivities[material.ID] = libMat.ThermalConductivity_W_mK.Value;
+                            var availableCount = 0;
+                            if (libMat.ThermalConductivity_W_mK.HasValue) availableCount++;
+                            if (libMat.SpecificHeatCapacity_J_kgK.HasValue) availableCount++;
+                            if (libMat.Density_kg_m3.HasValue) availableCount++;
+                            if (libMat.ThermalDiffusivity_m2_s.HasValue) availableCount++;
+
+                            ImGui.Text($"{availableCount}/4");
+                            if (ImGui.IsItemHovered())
+                            {
+                                ImGui.BeginTooltip();
+                                ImGui.Text("Available thermal properties:");
+                                if (libMat.ThermalConductivity_W_mK.HasValue)
+                                    ImGui.Text($"  k = {libMat.ThermalConductivity_W_mK:F4} W/m·K");
+                                if (libMat.SpecificHeatCapacity_J_kgK.HasValue)
+                                    ImGui.Text($"  cp = {libMat.SpecificHeatCapacity_J_kgK:F1} J/kg·K");
+                                if (libMat.Density_kg_m3.HasValue)
+                                    ImGui.Text($"  rho = {libMat.Density_kg_m3:F1} kg/m³");
+                                if (libMat.ThermalDiffusivity_m2_s.HasValue)
+                                    ImGui.Text($"  alpha = {libMat.ThermalDiffusivity_m2_s:E2} m²/s");
+                                ImGui.EndTooltip();
+                            }
                         }
-                        if (ImGui.IsItemHovered())
+                        else
                         {
-                            ImGui.SetTooltip($"Set to {libMat.ThermalConductivity_W_mK:F3} W/m·K from '{libMat.Name}'");
+                            ImGui.TextDisabled("0/4");
                         }
+                    }
+                    else
+                    {
+                        ImGui.TextDisabled("---");
+                    }
+
+                    ImGui.TableNextColumn();
+                    if (ImGui.SmallButton($"Browse##browse_{material.ID}"))
+                    {
+                        _targetMaterialIdForAssignment = material.ID;
+                        _showMaterialLibraryBrowser = true;
+                    }
+
+                    if (ImGui.IsItemHovered()) ImGui.SetTooltip("Browse and assign from material library");
+
+                    // Clear library link button
+                    if (!string.IsNullOrEmpty(material.PhysicalMaterialName))
+                    {
+                        ImGui.SameLine();
+                        if (ImGui.SmallButton($"Clear##clear_{material.ID}"))
+                        {
+                            material.PhysicalMaterialName = null;
+                            Logger.Log($"[ThermalTool] Cleared library link for {material.Name}");
+                        }
+
+                        if (ImGui.IsItemHovered()) ImGui.SetTooltip("Clear library link");
                     }
                 }
+
                 ImGui.EndTable();
             }
-            
-            // Common material presets
+
             ImGui.Spacing();
-            ImGui.Text("Quick material assignments:");
-            ImGui.Indent();
-            if (ImGui.SmallButton("Set all to Air (0.026)"))
-            {
+
+            // Quick material presets
+            ImGui.Text("Quick Assignments:");
+            ImGui.PushStyleVar(ImGuiStyleVar.FramePadding, new Vector2(4, 2));
+
+            if (ImGui.Button("Air (0.026)", new Vector2((availWidth - 8) / 3, 0)))
                 foreach (var mat in _options.Dataset.Materials)
                     _options.MaterialConductivities[mat.ID] = 0.026;
-            }
             ImGui.SameLine();
-            if (ImGui.SmallButton("Set all to Water (0.6)"))
-            {
+            if (ImGui.Button("Water (0.6)", new Vector2((availWidth - 8) / 3, 0)))
                 foreach (var mat in _options.Dataset.Materials)
                     _options.MaterialConductivities[mat.ID] = 0.6;
-            }
             ImGui.SameLine();
-            if (ImGui.SmallButton("Set all to Rock (2.5)"))
-            {
+            if (ImGui.Button("Rock (2.5)", new Vector2((availWidth - 8) / 3, 0)))
                 foreach (var mat in _options.Dataset.Materials)
                     _options.MaterialConductivities[mat.ID] = 2.5;
-            }
+
+            ImGui.PopStyleVar();
             ImGui.Unindent();
         }
-        
+
         ImGui.Spacing();
-        
-        // Simulation parameters
+
+        // Simulation parameters in a cleaner layout
         if (ImGui.CollapsingHeader("Simulation Parameters", ImGuiTreeNodeFlags.DefaultOpen))
         {
-            ImGui.Text("Boundary Temperatures:");
             ImGui.Indent();
-            
+
+            // Boundary temperatures
+            ImGui.SeparatorText("Boundary Conditions");
+
             var tempHot = (float)_options.TemperatureHot;
-            if (ImGui.InputFloat("Hot Temperature (K)", ref tempHot, 1.0f, 10.0f, "%.2f"))
-            {
+            ImGui.SetNextItemWidth(150);
+            if (ImGui.DragFloat("Hot (K)", ref tempHot, 1.0f, 273.15f, 1000.0f, "%.2f"))
                 _options.TemperatureHot = Math.Max(tempHot, _options.TemperatureCold + 1);
-            }
-            var tempHotC = _options.TemperatureHot - 273.15;
             ImGui.SameLine();
-            ImGui.TextDisabled($"({tempHotC:F1} °C)");
-            
+            ImGui.TextDisabled($"({tempHot - 273.15:F1} C)");
+
             var tempCold = (float)_options.TemperatureCold;
-            if (ImGui.InputFloat("Cold Temperature (K)", ref tempCold, 1.0f, 10.0f, "%.2f"))
-            {
+            ImGui.SetNextItemWidth(150);
+            if (ImGui.DragFloat("Cold (K)", ref tempCold, 1.0f, 0.0f, 1000.0f, "%.2f"))
                 _options.TemperatureCold = Math.Min(tempCold, _options.TemperatureHot - 1);
-            }
-            var tempColdC = _options.TemperatureCold - 273.15;
             ImGui.SameLine();
-            ImGui.TextDisabled($"({tempColdC:F1} °C)");
-            
-            ImGui.Unindent();
-            
+            ImGui.TextDisabled($"({tempCold - 273.15:F1} C)");
+
+            var dT = _options.TemperatureHot - _options.TemperatureCold;
+            ImGui.Text($"Temperature gradient: {dT:F2} K");
+
             ImGui.Spacing();
-            ImGui.Text("Heat Flow Configuration:");
-            ImGui.Indent();
-            
-            int directionIndex = (int)_options.HeatFlowDirection;
-            if (ImGui.Combo("Heat Flow Direction", ref directionIndex, "X (Width)\0Y (Height)\0Z (Depth)\0"))
-            {
+            ImGui.SeparatorText("Heat Flow Configuration");
+
+            var directionIndex = (int)_options.HeatFlowDirection;
+            ImGui.SetNextItemWidth(150);
+            if (ImGui.Combo("Direction", ref directionIndex, "X-axis\0Y-axis\0Z-axis\0"))
                 _options.HeatFlowDirection = (HeatFlowDirection)directionIndex;
-            }
-            if (ImGui.IsItemHovered())
-            {
-                ImGui.SetTooltip("Direction of the applied temperature gradient");
-            }
-            
-            ImGui.Unindent();
-            
+            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Direction of applied temperature gradient");
+
             ImGui.Spacing();
-            ImGui.Text("Solver Configuration:");
-            ImGui.Indent();
-            
-            int backendIndex = (int)_options.SolverBackend;
-            if (ImGui.Combo("Solver Backend", ref backendIndex, "CPU Parallel\0CPU SIMD (AVX2)\0GPU (OpenCL)\0"))
-            {
+            ImGui.SeparatorText("Solver Settings");
+
+            var backendIndex = (int)_options.SolverBackend;
+            ImGui.SetNextItemWidth(150);
+            if (ImGui.Combo("Backend", ref backendIndex, "CPU Parallel\0CPU SIMD\0GPU OpenCL\0"))
                 _options.SolverBackend = (SolverBackend)backendIndex;
-            }
-            if (ImGui.IsItemHovered())
-            {
-                ImGui.SetTooltip("CPU Parallel: Best compatibility\nCPU SIMD: Fastest on modern CPUs\nGPU: Best for very large datasets");
-            }
-            
+
             var maxIter = _options.MaxIterations;
+            ImGui.SetNextItemWidth(150);
             if (ImGui.InputInt("Max Iterations", ref maxIter, 100, 1000))
-            {
-                _options.MaxIterations = Math.Max(100, Math.Min(100000, maxIter));
-            }
-            if (ImGui.IsItemHovered())
-            {
-                ImGui.SetTooltip("Maximum number of solver iterations (100-100000)");
-            }
+                _options.MaxIterations = Math.Clamp(maxIter, 100, 100000);
 
             var tolerance = (float)_options.ConvergenceTolerance;
+            ImGui.SetNextItemWidth(150);
             if (ImGui.InputFloat("Tolerance", ref tolerance, 0, 0, "%.1e"))
-            {
-                _options.ConvergenceTolerance = Math.Max(1e-9, Math.Min(1e-3, tolerance));
-            }
-            if (ImGui.IsItemHovered())
-            {
-                ImGui.SetTooltip("Convergence criterion - smaller values take longer but are more accurate");
-            }
-            
+                _options.ConvergenceTolerance = Math.Clamp(tolerance, 1e-9, 1e-3);
+
             ImGui.Unindent();
         }
-        
+
         ImGui.Spacing();
         ImGui.Separator();
         ImGui.Spacing();
-        
-        // Validation summary
-        bool canRun = ValidateSettings(out var validationMessages);
-        
+
+        // Validation and run button
+        var canRun = ValidateSettings(out var validationMessages);
+
         if (!canRun)
         {
-            ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(1, 0.5f, 0, 1));
+            ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(1, 0.8f, 0, 1));
             ImGui.TextWrapped("Cannot run simulation:");
-            foreach (var msg in validationMessages)
-            {
-                ImGui.BulletText(msg);
-            }
             ImGui.PopStyleColor();
+            ImGui.Indent();
+            foreach (var msg in validationMessages) ImGui.BulletText(msg);
+            ImGui.Unindent();
             ImGui.Spacing();
         }
-        
+
         // Run button
+        ImGui.PushStyleColor(ImGuiCol.Button, new Vector4(0.2f, 0.7f, 0.2f, 1.0f));
+        ImGui.PushStyleColor(ImGuiCol.ButtonHovered, new Vector4(0.3f, 0.8f, 0.3f, 1.0f));
         ImGui.BeginDisabled(!canRun);
-        if (ImGui.Button("Run Simulation", new Vector2(-1, 40)))
-        {
-            StartSimulation();
-        }
+        if (ImGui.Button("> Run Simulation", new Vector2(-1, 40))) StartSimulation();
         ImGui.EndDisabled();
-        
-        if (!canRun && ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled))
-        {
-            ImGui.SetTooltip("Fix validation errors before running");
-        }
+        ImGui.PopStyleColor(2);
     }
-    
+
+    private void DrawMaterialLibraryBrowser()
+    {
+        ImGui.SetNextWindowSize(new Vector2(800, 600), ImGuiCond.FirstUseEver);
+        var isOpen = true;
+        if (ImGui.Begin("Material Library Browser##ThermalBrowser", ref isOpen,
+                ImGuiWindowFlags.NoCollapse))
+        {
+            var targetMaterial = _options.Dataset.Materials.FirstOrDefault(m => m.ID == _targetMaterialIdForAssignment);
+            if (targetMaterial != null)
+                ImGui.TextColored(new Vector4(0.5f, 1, 0.5f, 1),
+                    $"Assigning to: {targetMaterial.Name}");
+            else
+                ImGui.Text("Select a material from the library:");
+
+            ImGui.Separator();
+
+            // Search filter
+            ImGui.SetNextItemWidth(-1);
+            ImGui.InputTextWithHint("##search", "Search materials (name, phase, properties)...",
+                ref _materialSearchFilter, 256);
+
+            ImGui.Spacing();
+
+            // Split into two columns
+            if (ImGui.BeginTable("LibraryBrowserTable", 2, ImGuiTableFlags.Resizable))
+            {
+                ImGui.TableSetupColumn("Materials", ImGuiTableColumnFlags.WidthFixed, 350);
+                ImGui.TableSetupColumn("Properties", ImGuiTableColumnFlags.WidthStretch);
+
+                ImGui.TableNextRow();
+                ImGui.TableNextColumn();
+
+                // Left: Material list
+                if (ImGui.BeginChild("MaterialList", new Vector2(0, -80), ImGuiChildFlags.Border))
+                {
+                    var materials = MaterialLibrary.Instance.Materials
+                        .Where(m => string.IsNullOrEmpty(_materialSearchFilter) ||
+                                    m.Name.Contains(_materialSearchFilter, StringComparison.OrdinalIgnoreCase) ||
+                                    m.Phase.ToString().Contains(_materialSearchFilter,
+                                        StringComparison.OrdinalIgnoreCase) ||
+                                    (m.Notes?.Contains(_materialSearchFilter, StringComparison.OrdinalIgnoreCase) ??
+                                     false))
+                        .OrderBy(m => m.Phase)
+                        .ThenBy(m => m.Name)
+                        .ToList();
+
+                    if (materials.Count == 0)
+                    {
+                        ImGui.TextDisabled("No materials found.");
+                    }
+                    else
+                    {
+                        var currentPhase = "";
+                        foreach (var mat in materials)
+                        {
+                            // Phase header
+                            if (mat.Phase.ToString() != currentPhase)
+                            {
+                                currentPhase = mat.Phase.ToString();
+                                ImGui.SeparatorText(currentPhase);
+                            }
+
+                            var isSelected = _selectedLibraryMaterial == mat;
+
+                            // Material entry
+                            if (ImGui.Selectable($"{mat.Name}##{mat.Name}", isSelected)) _selectedLibraryMaterial = mat;
+
+                            // Quick property preview on hover
+                            if (ImGui.IsItemHovered())
+                            {
+                                ImGui.BeginTooltip();
+                                if (mat.ThermalConductivity_W_mK.HasValue)
+                                    ImGui.Text($"k = {mat.ThermalConductivity_W_mK:F4} W/m·K");
+                                if (mat.Density_kg_m3.HasValue)
+                                    ImGui.Text($"rho = {mat.Density_kg_m3:F1} kg/m³");
+                                ImGui.EndTooltip();
+                            }
+                        }
+                    }
+                }
+
+                ImGui.EndChild();
+
+                ImGui.TableNextColumn();
+
+                // Right: Material properties
+                if (ImGui.BeginChild("MaterialProperties", new Vector2(0, -80), ImGuiChildFlags.Border))
+                {
+                    if (_selectedLibraryMaterial != null)
+                    {
+                        var mat = _selectedLibraryMaterial;
+
+                        ImGui.TextColored(new Vector4(0.5f, 1, 1, 1), mat.Name);
+                        ImGui.TextDisabled($"Phase: {mat.Phase}");
+                        ImGui.Spacing();
+
+                        ImGui.SeparatorText("Thermal Properties");
+
+                        if (mat.ThermalConductivity_W_mK.HasValue)
+                            ImGui.Text($"Thermal Conductivity: {mat.ThermalConductivity_W_mK:F4} W/m·K");
+                        else
+                            ImGui.TextDisabled("Thermal Conductivity: N/A");
+
+                        if (mat.SpecificHeatCapacity_J_kgK.HasValue)
+                            ImGui.Text($"Specific Heat: {mat.SpecificHeatCapacity_J_kgK:F1} J/kg·K");
+                        else
+                            ImGui.TextDisabled("Specific Heat: N/A");
+
+                        if (mat.ThermalDiffusivity_m2_s.HasValue)
+                            ImGui.Text($"Thermal Diffusivity: {mat.ThermalDiffusivity_m2_s:E2} m²/s");
+                        else
+                            ImGui.TextDisabled("Thermal Diffusivity: N/A");
+
+                        ImGui.Spacing();
+                        ImGui.SeparatorText("General Properties");
+
+                        if (mat.Density_kg_m3.HasValue)
+                            ImGui.Text($"Density: {mat.Density_kg_m3:F1} kg/m³");
+                        else
+                            ImGui.TextDisabled("Density: N/A");
+
+                        if (mat.MohsHardness.HasValue)
+                            ImGui.Text($"Mohs Hardness: {mat.MohsHardness:F1}");
+
+                        if (mat.YoungModulus_GPa.HasValue)
+                            ImGui.Text($"Young's Modulus: {mat.YoungModulus_GPa:F1} GPa");
+
+                        if (mat.PoissonRatio.HasValue)
+                            ImGui.Text($"Poisson Ratio: {mat.PoissonRatio:F3}");
+
+                        if (!string.IsNullOrEmpty(mat.Notes))
+                        {
+                            ImGui.Spacing();
+                            ImGui.SeparatorText("Notes");
+                            ImGui.TextWrapped(mat.Notes);
+                        }
+
+                        if (mat.Sources.Count > 0)
+                        {
+                            ImGui.Spacing();
+                            ImGui.SeparatorText("Sources");
+                            foreach (var source in mat.Sources) ImGui.BulletText(source);
+                        }
+                    }
+                    else
+                    {
+                        ImGui.TextDisabled("Select a material to view properties");
+                    }
+                }
+
+                ImGui.EndChild();
+
+                ImGui.EndTable();
+            }
+
+            ImGui.Spacing();
+            ImGui.Separator();
+
+            // Action buttons
+            ImGui.BeginDisabled(_selectedLibraryMaterial == null);
+
+            if (_targetMaterialIdForAssignment > 0)
+            {
+                // Assign to specific material
+                if (ImGui.Button($"Assign to {targetMaterial?.Name}", new Vector2(-260, 0)))
+                {
+                    AssignLibraryMaterial(_targetMaterialIdForAssignment, _selectedLibraryMaterial);
+                    _showMaterialLibraryBrowser = false;
+                }
+            }
+            else
+            {
+                // Apply to all materials
+                if (ImGui.Button("Apply to All Materials", new Vector2(-260, 0)))
+                    if (_selectedLibraryMaterial?.ThermalConductivity_W_mK != null)
+                    {
+                        foreach (var mat in _options.Dataset.Materials)
+                        {
+                            _options.MaterialConductivities[mat.ID] =
+                                _selectedLibraryMaterial.ThermalConductivity_W_mK.Value;
+                            mat.PhysicalMaterialName = _selectedLibraryMaterial.Name;
+                        }
+
+                        Logger.Log($"[ThermalTool] Applied {_selectedLibraryMaterial.Name} to all materials");
+                        _showMaterialLibraryBrowser = false;
+                    }
+            }
+
+            ImGui.EndDisabled();
+
+            ImGui.SameLine();
+            if (ImGui.Button("Close", new Vector2(120, 0))) _showMaterialLibraryBrowser = false;
+
+            ImGui.SameLine();
+            ImGui.BeginDisabled(_selectedLibraryMaterial == null ||
+                                !_selectedLibraryMaterial.ThermalConductivity_W_mK.HasValue);
+            ImGui.TextDisabled($"k = {_selectedLibraryMaterial?.ThermalConductivity_W_mK:F4} W/m·K");
+            ImGui.EndDisabled();
+        }
+
+        ImGui.End();
+
+        if (!isOpen) _showMaterialLibraryBrowser = false;
+    }
+
+    private void AssignLibraryMaterial(byte materialId, PhysicalMaterial libraryMaterial)
+    {
+        var material = _options.Dataset.Materials.FirstOrDefault(m => m.ID == materialId);
+        if (material == null || libraryMaterial == null) return;
+
+        // Assign thermal conductivity
+        if (libraryMaterial.ThermalConductivity_W_mK.HasValue)
+            _options.MaterialConductivities[materialId] = libraryMaterial.ThermalConductivity_W_mK.Value;
+
+        // Assign density
+        if (libraryMaterial.Density_kg_m3.HasValue)
+            material.Density = libraryMaterial.Density_kg_m3.Value / 1000.0; // kg/m³ to g/cm³
+
+        // Link to library
+        material.PhysicalMaterialName = libraryMaterial.Name;
+
+        Logger.Log($"[ThermalTool] Assigned '{libraryMaterial.Name}' to '{material.Name}'");
+        Logger.Log($"  k = {libraryMaterial.ThermalConductivity_W_mK:F4} W/m·K");
+        if (libraryMaterial.Density_kg_m3.HasValue)
+            Logger.Log($"  rho = {libraryMaterial.Density_kg_m3:F1} kg/m³");
+    }
+
     private bool ValidateSettings(out List<string> messages)
     {
         messages = new List<string>();
-        
-        // Check temperature gradient
+
         if (_options.TemperatureHot <= _options.TemperatureCold)
-        {
-            messages.Add("Hot temperature must be higher than cold temperature");
-        }
-        
-        // Check material conductivities
+            messages.Add("Hot temperature must exceed cold temperature");
+
         foreach (var kvp in _options.MaterialConductivities)
-        {
             if (kvp.Value <= 0)
             {
                 var mat = _options.Dataset.Materials.FirstOrDefault(m => m.ID == kvp.Key);
                 var name = mat?.Name ?? $"Material {kvp.Key}";
-                messages.Add($"{name} has invalid conductivity ({kvp.Value})");
+                messages.Add($"{name}: invalid conductivity");
             }
-        }
-        
-        // Check if dataset has label data
-        if (_options.Dataset.LabelData == null)
-        {
-            messages.Add("Dataset has no label/material data");
-        }
-        
-        // Check dataset dimensions
+
+        if (_options.Dataset.LabelData == null) messages.Add("Dataset has no material/label data");
+
         if (_options.Dataset.Width < 3 || _options.Dataset.Height < 3 || _options.Dataset.Depth < 3)
-        {
-            messages.Add("Dataset is too small (minimum 3x3x3 voxels)");
-        }
-        
+            messages.Add("Dataset too small (min 3x3x3 voxels)");
+
         return messages.Count == 0;
     }
 
     private void DrawResultsTab()
     {
-        if (_results == null)
+        var results = _options.Dataset.ThermalResults;
+        if (results == null)
         {
-            ImGui.TextDisabled("No results to display. Run a simulation from the Settings tab.");
+            ImGui.TextDisabled("No results available. Run a simulation from the Setup tab.");
             return;
         }
 
-        if (ImGui.CollapsingHeader("Summary & Reporting", ImGuiTreeNodeFlags.DefaultOpen))
+        // Summary
+        if (ImGui.CollapsingHeader("Summary", ImGuiTreeNodeFlags.DefaultOpen))
         {
-            ImGui.Text($"Effective Conductivity: {_results.EffectiveConductivity:F4} W/mK");
-            ImGui.Text($"Computation Time: {_results.ComputationTime.TotalSeconds:F2} s");
+            ImGui.Indent();
 
-            if (_results.AnalyticalEstimates.Count > 0)
+            ImGui.Text("Effective Conductivity:");
+            ImGui.SameLine();
+            ImGui.TextColored(new Vector4(0.5f, 1, 0.5f, 1), $"{results.EffectiveConductivity:F4} W/m·K");
+
+            ImGui.Text($"Computation Time: {results.ComputationTime.TotalSeconds:F2} seconds");
+            ImGui.Text($"Temperature Range: {_options.TemperatureCold:F1} K to {_options.TemperatureHot:F1} K");
+            ImGui.Text($"Heat Flow Direction: {_options.HeatFlowDirection}");
+
+            if (results.AnalyticalEstimates.Count > 0)
             {
-                ImGui.Text("Analytical Estimates:");
-                foreach (var (name, value) in _results.AnalyticalEstimates)
+                ImGui.Spacing();
+                ImGui.SeparatorText("Analytical Comparisons");
+
+                if (ImGui.BeginTable("AnalyticalTable", 3, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg))
                 {
-                    ImGui.Text($"  {name}: {value:F4} W/mK");
+                    ImGui.TableSetupColumn("Model");
+                    ImGui.TableSetupColumn("k (W/m·K)");
+                    ImGui.TableSetupColumn("Error %");
+                    ImGui.TableHeadersRow();
+
+                    foreach (var (name, value) in results.AnalyticalEstimates.OrderBy(x => x.Value))
+                    {
+                        ImGui.TableNextRow();
+                        ImGui.TableNextColumn();
+                        ImGui.Text(name);
+                        ImGui.TableNextColumn();
+                        ImGui.Text($"{value:F4}");
+                        ImGui.TableNextColumn();
+                        var error = Math.Abs(results.EffectiveConductivity - value) / results.EffectiveConductivity *
+                                    100.0;
+                        ImGui.Text($"{error:F2}%");
+                    }
+
+                    ImGui.EndTable();
                 }
             }
-            
-            ImGui.Separator();
-            ImGui.Text("Export Simulation Data:");
-            
-            if (ImGui.Button("Export Summary to CSV", new Vector2(200, 0)))
-            {
-                _csvExportDialog.Open($"ThermalSummary_{_options.Dataset.Name}.csv");
-            }
-            ImGui.SameLine();
-            if (ImGui.Button("Export Composite Image (PNG)", new Vector2(200, 0)))
-            {
-                 _compositePngExportDialog.Open($"ThermalComposite_{(HeatFlowDirection)_selectedSliceDirectionInt}{_selectedSliceIndex}.png");
-            }
-            
-            if (ImGui.Button("Export Text Report (.txt)", new Vector2(200, 0)))
-            {
-                _txtReportExportDialog.Open($"ThermalReport_{_options.Dataset.Name}.txt");
-            }
-            ImGui.SameLine();
-             if (ImGui.Button("Export Rich Report (.rtf)", new Vector2(200, 0)))
-            {
-                _rtfReportExportDialog.Open($"ThermalReport_{_options.Dataset.Name}.rtf");
-            }
 
-            if (_csvExportDialog.Submit()) { ExportSummaryToCsv(_csvExportDialog.SelectedPath); }
-            if (_compositePngExportDialog.Submit()) { ExportCompositeImage(_compositePngExportDialog.SelectedPath); }
-            if (_txtReportExportDialog.Submit()) { ExportTextReport(_txtReportExportDialog.SelectedPath, false); }
-            if (_rtfReportExportDialog.Submit()) { ExportTextReport(_rtfReportExportDialog.SelectedPath, true); }
+            ImGui.Unindent();
         }
-        
-        if (ImGui.CollapsingHeader("2D Temperature Field", ImGuiTreeNodeFlags.DefaultOpen))
+
+        if (ImGui.CollapsingHeader("2D Temperature Field Viewer", ImGuiTreeNodeFlags.DefaultOpen)) DrawSliceViewer();
+
+        if (ImGui.CollapsingHeader("3D Isosurface Generation")) DrawIsosurfaceGenerator();
+    }
+
+    private void DrawExportTab()
+    {
+        var results = _options.Dataset.ThermalResults;
+        if (results == null)
         {
-            DrawSliceViewer();
+            ImGui.TextDisabled("No results to export. Run a simulation first.");
+            return;
         }
-        
-        if (ImGui.CollapsingHeader("Isosurface Generation", ImGuiTreeNodeFlags.DefaultOpen))
+
+        ImGui.SeparatorText("Data Export");
+
+        if (ImGui.Button("Export Summary (CSV)", new Vector2(-1, 0)))
+            _csvExportDialog.Open($"ThermalSummary_{_options.Dataset.Name}.csv");
+
+        if (ImGui.Button("Export Text Report (TXT)", new Vector2(-1, 0)))
+            _txtReportExportDialog.Open($"ThermalReport_{_options.Dataset.Name}.txt");
+
+        if (ImGui.Button("Export Rich Report (RTF)", new Vector2(-1, 0)))
+            _rtfReportExportDialog.Open($"ThermalReport_{_options.Dataset.Name}.rtf");
+
+        ImGui.Spacing();
+        ImGui.SeparatorText("Image Export");
+
+        if (ImGui.Button("Export Current Slice (PNG)", new Vector2(-1, 0)))
+            _pngExportDialog.Open(
+                $"ThermalSlice_{(HeatFlowDirection)_selectedSliceDirectionInt}{_selectedSliceIndex}.png");
+
+        if (ImGui.Button("Export Composite Image (PNG)", new Vector2(-1, 0)))
+            _compositePngExportDialog.Open($"ThermalComposite_{_options.Dataset.Name}.png");
+
+        // Handle dialogs
+        if (_csvExportDialog.Submit()) ExportSummaryToCsv(_csvExportDialog.SelectedPath);
+        if (_txtReportExportDialog.Submit()) ExportTextReport(_txtReportExportDialog.SelectedPath, false);
+        if (_rtfReportExportDialog.Submit()) ExportTextReport(_rtfReportExportDialog.SelectedPath, true);
+        if (_pngExportDialog.Submit())
         {
-            DrawIsosurfaceGenerator();
+            var (slice, width, height) = GetSelectedSlice();
+            if (slice != null) ExportSliceToPng(_pngExportDialog.SelectedPath, slice, width, height);
+        }
+
+        if (_compositePngExportDialog.Submit()) ExportCompositeImage(_compositePngExportDialog.SelectedPath);
+        if (_sliceCsvExportDialog.Submit())
+        {
+            var (slice, _, _) = GetSelectedSlice();
+            if (slice != null) ExportSliceToCsv(_sliceCsvExportDialog.SelectedPath, slice);
         }
     }
 
     private void DrawSliceViewer()
     {
-        int maxSlice = 0;
+        var maxSlice = 0;
         var selectedDirection = (HeatFlowDirection)_selectedSliceDirectionInt;
         switch (selectedDirection)
         {
@@ -440,659 +768,424 @@ public class ThermalConductivityTool : IDatasetTools, IDisposable
             case HeatFlowDirection.Y: maxSlice = _options.Dataset.Height - 1; break;
             case HeatFlowDirection.Z: maxSlice = _options.Dataset.Depth - 1; break;
         }
+
         _selectedSliceIndex = Math.Clamp(_selectedSliceIndex, 0, maxSlice);
 
-        if (ImGui.Combo("View Axis", ref _selectedSliceDirectionInt, "X\0Y\0Z\0"))
+        ImGui.SetNextItemWidth(120);
+        if (ImGui.Combo("Axis", ref _selectedSliceDirectionInt, "X\0Y\0Z\0"))
         {
-            _selectedSliceIndex = 0; // Reset slice on axis change
+            _selectedSliceIndex = 0;
+            _cachedIsocontoursKey = (-1, -1, -1, -1); // Invalidate cache
         }
 
-        ImGui.SliderInt("Slice", ref _selectedSliceIndex, 0, maxSlice);
+        ImGui.SameLine();
+        ImGui.SetNextItemWidth(200);
+        if (ImGui.SliderInt("Slice", ref _selectedSliceIndex, 0, maxSlice))
+            _cachedIsocontoursKey = (-1, -1, -1, -1); // Invalidate cache
 
-        ImGui.Combo("Colormap", ref _colorMapIndex, "Hot\0Rainbow\0");
-        ImGui.Checkbox("Show Isocontours", ref _showIsocontours);
+        ImGui.SameLine();
+        ImGui.SetNextItemWidth(120);
+        if (ImGui.Combo("Colormap", ref _colorMapIndex, "Hot\0Rainbow\0"))
+            _cachedIsocontoursKey = (-1, -1, -1, -1); // Invalidate cache
+
+        if (ImGui.Checkbox("Show Isocontours", ref _showIsocontours))
+            _cachedIsocontoursKey = (-1, -1, -1, -1); // Invalidate cache
+
         if (_showIsocontours)
         {
-            ImGui.SliderInt("Contour Count", ref _numIsocontours, 2, 50);
+            ImGui.SameLine();
+            ImGui.SetNextItemWidth(150);
+            if (ImGui.SliderInt("Count", ref _numIsocontours, 2, 20))
+                _cachedIsocontoursKey = (-1, -1, -1, -1); // Invalidate cache
         }
 
         var (slice, width, height) = GetSelectedSlice();
         if (slice == null) return;
-        
-        // Render slice visualization
+
+        // Render slice
         var available = ImGui.GetContentRegionAvail();
         var dl = ImGui.GetWindowDrawList();
         var canvasPos = ImGui.GetCursorScreenPos();
-        
-        // Calculate canvas size maintaining aspect ratio
-        float aspectRatio = (float)width / height;
+
+        var aspectRatio = (float)width / height;
         var canvasSize = new Vector2(
-            Math.Min(available.X - 20, available.Y * aspectRatio),
-            Math.Min(available.Y - 120, available.X / aspectRatio)
+            Math.Min(available.X - 100, available.Y * aspectRatio),
+            Math.Min(available.Y - 20, (available.X - 100) / aspectRatio)
         );
 
-        dl.AddRectFilled(canvasPos, canvasPos + canvasSize, 0xFF202020); // Background
-        
-        // Render temperature field with improved quality
-        int pixelSkip = Math.Max(1, Math.Max(width, height) / 512); // Adaptive sampling for performance
-        
-        for (int y = 0; y < height; y += pixelSkip)
-        for (int x = 0; x < width; x += pixelSkip)
-        {
-            var temp = slice[x, y];
-            var normalizedTemp = (temp - _options.TemperatureCold) / (_options.TemperatureHot - _options.TemperatureCold);
-            normalizedTemp = Math.Clamp(normalizedTemp, 0.0, 1.0);
-            var color = ApplyColorMap((float)normalizedTemp, _colorMapIndex);
-            
-            var px = canvasPos.X + (float)x / width * canvasSize.X;
-            var py = canvasPos.Y + (float)y / height * canvasSize.Y;
-            var pw = canvasSize.X / width * pixelSkip;
-            var ph = canvasSize.Y / height * pixelSkip;
-            
-            dl.AddRectFilled(new Vector2(px, py), new Vector2(px + pw, py + ph), ImGui.GetColorU32(color));
-        }
+        dl.AddRectFilled(canvasPos, canvasPos + canvasSize, 0xFF202020);
 
-        // Draw isocontours
+        // Render with adaptive sampling
+        var pixelSkip = Math.Max(1, Math.Max(width, height) / 512);
+
+        Parallel.For(0, height / pixelSkip, y =>
+        {
+            for (var x = 0; x < width; x += pixelSkip)
+            {
+                var actualY = y * pixelSkip;
+                var temp = slice[x, actualY];
+                var normalizedTemp = (temp - _options.TemperatureCold) /
+                                     (_options.TemperatureHot - _options.TemperatureCold);
+                normalizedTemp = Math.Clamp(normalizedTemp, 0.0, 1.0);
+                var color = ApplyColorMap((float)normalizedTemp, _colorMapIndex);
+
+                var px = canvasPos.X + (float)x / width * canvasSize.X;
+                var py = canvasPos.Y + (float)actualY / height * canvasSize.Y;
+                var pw = canvasSize.X / width * pixelSkip;
+                var ph = canvasSize.Y / height * pixelSkip;
+
+                dl.AddRectFilled(new Vector2(px, py), new Vector2(px + pw, py + ph), ImGui.GetColorU32(color));
+            }
+        });
+
+        // Draw CACHED isocontours
         if (_showIsocontours)
         {
             var tempRange = _options.TemperatureHot - _options.TemperatureCold;
-            for (int i = 1; i <= _numIsocontours; i++)
+
+            // Check if we need to regenerate cache
+            var currentKey = (_selectedSliceDirectionInt, _selectedSliceIndex, (float)tempRange, _numIsocontours);
+            if (currentKey != _cachedIsocontoursKey)
             {
-                var isovalue = _options.TemperatureCold + (i * tempRange / (_numIsocontours + 1));
-                var lines = IsosurfaceGenerator.GenerateIsocontours(slice, (float)isovalue);
-                
-                // Use different colors for different contour levels
-                float t = (float)i / (_numIsocontours + 1);
-                var contourColor = new Vector4(1.0f, 1.0f, 1.0f, 0.8f);
-                
-                foreach(var (p1, p2) in lines)
+                // Regenerate all isocontours at once
+                _cachedIsocontours.Clear();
+                for (var i = 1; i <= _numIsocontours; i++)
                 {
-                     var sp1 = canvasPos + new Vector2(p1.X / width * canvasSize.X, p1.Y / height * canvasSize.Y);
-                     var sp2 = canvasPos + new Vector2(p2.X / width * canvasSize.X, p2.Y / height * canvasSize.Y);
-                     dl.AddLine(sp1, sp2, ImGui.GetColorU32(contourColor), 1.5f);
+                    var isovalue = _options.TemperatureCold + i * tempRange / (_numIsocontours + 1);
+                    var lines = IsosurfaceGenerator.GenerateIsocontours(slice, (float)isovalue);
+                    _cachedIsocontours.AddRange(lines);
                 }
+
+                _cachedIsocontoursKey = currentKey;
+            }
+
+            // Draw cached contours
+            var contourColorOuter = new Vector4(0.1f, 0.1f, 0.1f, 0.7f);
+            var contourColorInner = new Vector4(1.0f, 1.0f, 1.0f, 0.9f);
+
+            foreach (var (p1, p2) in _cachedIsocontours)
+            {
+                var sp1 = canvasPos + new Vector2(p1.X / width * canvasSize.X, p1.Y / height * canvasSize.Y);
+                var sp2 = canvasPos + new Vector2(p2.X / width * canvasSize.X, p2.Y / height * canvasSize.Y);
+                dl.AddLine(sp1, sp2, ImGui.GetColorU32(contourColorOuter), 2.5f);
+                dl.AddLine(sp1, sp2, ImGui.GetColorU32(contourColorInner), 1.0f);
             }
         }
-        
-        // Draw border
-        dl.AddRect(canvasPos, canvasPos + canvasSize, 0xFFFFFFFF, 0, 0, 2.0f);
-        
-        ImGui.Dummy(canvasSize); // Reserve space
-        
-        // Mouse interaction - show temperature value on hover
+
+        dl.AddRect(canvasPos, canvasPos + canvasSize, 0xFFFFFFFF, 0, 0, 1.0f);
+
+        ImGui.Dummy(canvasSize);
+
+        // Tooltip
         if (ImGui.IsItemHovered())
         {
             var mousePos = ImGui.GetMousePos();
             var relativePos = mousePos - canvasPos;
-            int hoverX = (int)(relativePos.X / canvasSize.X * width);
-            int hoverY = (int)(relativePos.Y / canvasSize.Y * height);
-            
+            var hoverX = (int)(relativePos.X / canvasSize.X * width);
+            var hoverY = (int)(relativePos.Y / canvasSize.Y * height);
+
             if (hoverX >= 0 && hoverX < width && hoverY >= 0 && hoverY < height)
             {
                 var temp = slice[hoverX, hoverY];
                 var tempC = temp - 273.15;
-                ImGui.SetTooltip($"Position: ({hoverX}, {hoverY})\nTemperature: {temp:F2} K ({tempC:F2} °C)");
+                ImGui.SetTooltip($"Pos: ({hoverX}, {hoverY})\nT: {temp:F2} K ({tempC:F2} C)");
             }
         }
-        
+
+        // Legend
+        ImGui.SameLine();
+        DrawColorScaleLegend(ImGui.GetCursorScreenPos(), new Vector2(30, canvasSize.Y));
+
+        // Export buttons
         ImGui.Spacing();
-        
-        // Draw color scale legend
-        DrawColorScaleLegend(canvasPos + new Vector2(canvasSize.X + 10, 0), new Vector2(30, canvasSize.Y));
-        
-        ImGui.Spacing();
-        
         if (ImGui.Button("Export Slice as PNG", new Vector2(180, 0)))
-        {
             _pngExportDialog.Open($"Slice_{(HeatFlowDirection)_selectedSliceDirectionInt}{_selectedSliceIndex}.png");
-        }
         ImGui.SameLine();
         if (ImGui.Button("Export Slice to CSV", new Vector2(180, 0)))
-        {
-            _sliceCsvExportDialog.Open($"SliceData_{(HeatFlowDirection)_selectedSliceDirectionInt}{_selectedSliceIndex}.csv");
-        }
-        
-        if (_pngExportDialog.Submit())
-        {
-            ExportSliceToPng(_pngExportDialog.SelectedPath, slice, width, height);
-        }
-        if (_sliceCsvExportDialog.Submit())
-        {
-            ExportSliceToCsv(_sliceCsvExportDialog.SelectedPath, slice);
-        }
+            _sliceCsvExportDialog.Open(
+                $"SliceData_{(HeatFlowDirection)_selectedSliceDirectionInt}{_selectedSliceIndex}.csv");
     }
-    
+
     private void DrawColorScaleLegend(Vector2 pos, Vector2 size)
     {
         var dl = ImGui.GetWindowDrawList();
-        
-        // Draw color gradient
-        int steps = 50;
-        for (int i = 0; i < steps; i++)
+
+        var steps = 50;
+        for (var i = 0; i < steps; i++)
         {
-            float t = (float)i / (steps - 1);
+            var t = (float)i / (steps - 1);
             var color = ApplyColorMap(t, _colorMapIndex);
-            
+
             var y1 = pos.Y + size.Y * (1.0f - t - 1.0f / steps);
             var y2 = pos.Y + size.Y * (1.0f - t);
-            
+
             dl.AddRectFilled(
                 new Vector2(pos.X, y1),
                 new Vector2(pos.X + size.X, y2),
                 ImGui.GetColorU32(color)
             );
         }
-        
-        // Draw border
+
         dl.AddRect(pos, pos + size, 0xFFFFFFFF);
-        
-        // Draw temperature labels
-        var font = ImGui.GetFont();
+
         var tempHot = _options.TemperatureHot;
         var tempCold = _options.TemperatureCold;
-        
-        // Hot temperature (top)
-        var labelHot = $"{tempHot:F0}K";
-        dl.AddText(new Vector2(pos.X + size.X + 5, pos.Y - 5), 0xFFFFFFFF, labelHot);
-        
-        // Cold temperature (bottom)
-        var labelCold = $"{tempCold:F0}K";
-        dl.AddText(new Vector2(pos.X + size.X + 5, pos.Y + size.Y - 10), 0xFFFFFFFF, labelCold);
-        
-        // Middle temperature
+
+        dl.AddText(new Vector2(pos.X + size.X + 5, pos.Y - 5), 0xFFFFFFFF, $"{tempHot:F0}K");
+        dl.AddText(new Vector2(pos.X + size.X + 5, pos.Y + size.Y - 10), 0xFFFFFFFF, $"{tempCold:F0}K");
+
         var tempMid = (tempHot + tempCold) / 2;
-        var labelMid = $"{tempMid:F0}K";
-        dl.AddText(new Vector2(pos.X + size.X + 5, pos.Y + size.Y / 2 - 5), 0xFFFFFFFF, labelMid);
+        dl.AddText(new Vector2(pos.X + size.X + 5, pos.Y + size.Y / 2 - 5), 0xFFFFFFFF, $"{tempMid:F0}K");
     }
 
     private void DrawIsosurfaceGenerator()
     {
-         if (_results?.TemperatureField == null) return;
+        var results = _options.Dataset.ThermalResults;
+        if (results?.TemperatureField == null) return;
 
-        ImGui.Text("Generate 3D mesh of isothermal surface:");
-        ImGui.Spacing();
-        
-        // Temperature range info
-        ImGui.Text($"Temperature range: {_options.TemperatureCold:F1} K to {_options.TemperatureHot:F1} K");
-        ImGui.Text($"                   {(_options.TemperatureCold - 273.15):F1} °C to {(_options.TemperatureHot - 273.15):F1} °C");
-        ImGui.Spacing();
-        
-        // Single isosurface generation
-        ImGui.InputDouble("Isosurface Temperature (K)", ref _isosurfaceValue);
-        ImGui.SameLine();
-        if (ImGui.SmallButton("Set to Mid"))
+        if (_isosurfaceProgressDialog.IsActive)
         {
-            _isosurfaceValue = (_options.TemperatureHot + _options.TemperatureCold) / 2.0;
+            _isosurfaceProgressDialog.Submit();
+            ImGui.BeginDisabled();
         }
-        
+
+        ImGui.Text($"Temperature range: {_options.TemperatureCold:F1} K to {_options.TemperatureHot:F1} K");
+        ImGui.Text(
+            $"                   {_options.TemperatureCold - 273.15:F1} C to {_options.TemperatureHot - 273.15:F1} C");
+        ImGui.Spacing();
+
+        ImGui.SetNextItemWidth(150);
+        ImGui.InputDouble("Temperature (K)", ref _isosurfaceValue);
+        ImGui.SameLine();
+        if (ImGui.SmallButton("Mid")) _isosurfaceValue = (_options.TemperatureHot + _options.TemperatureCold) / 2.0;
+
         var tempC = _isosurfaceValue - 273.15;
-        ImGui.Text($"= {tempC:F2} °C");
+        ImGui.Text($"= {tempC:F2} C");
 
         if (ImGui.Button("Generate Single Isosurface", new Vector2(-1, 0)))
-        {
-            GenerateIsosurface(_isosurfaceValue);
-        }
-        
-        ImGui.Spacing();
-        ImGui.Separator();
-        ImGui.Spacing();
-        
-        // Batch generation
-        ImGui.Text("Batch Generation:");
-        
-        ImGui.SliderInt("Number of surfaces", ref _numIsosurfaces, 2, 20);
-        
-        if (ImGui.Button("Generate Multiple Isosurfaces", new Vector2(-1, 0)))
-        {
-            GenerateMultipleIsosurfaces(_numIsosurfaces);
-        }
-        
+            _ = GenerateIsosurfaceAsync(_isosurfaceValue);
+
         ImGui.Spacing();
         ImGui.Separator();
         ImGui.Spacing();
 
-        // List generated meshes
-         if (_results.IsosurfaceMeshes.Count > 0)
+        ImGui.Text("Batch Generation:");
+        ImGui.SetNextItemWidth(150);
+        ImGui.SliderInt("Number", ref _numIsosurfaces, 2, 20);
+
+        if (ImGui.Button("Generate Multiple Isosurfaces", new Vector2(-1, 0)))
+            _ = GenerateMultipleIsosurfacesAsync(_numIsosurfaces);
+
+        if (results.IsosurfaceMeshes.Count > 0)
         {
-            ImGui.Text($"Generated Meshes ({_results.IsosurfaceMeshes.Count}):");
-            
-            if (ImGui.BeginTable("MeshTable", 4, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.SizingFixedFit))
+            ImGui.Spacing();
+            ImGui.Separator();
+            ImGui.Spacing();
+            ImGui.Text($"Generated Meshes ({results.IsosurfaceMeshes.Count}):");
+
+            if (ImGui.BeginTable("MeshTable", 4, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg))
             {
-                ImGui.TableSetupColumn("Name", ImGuiTableColumnFlags.WidthStretch);
-                ImGui.TableSetupColumn("Vertices", ImGuiTableColumnFlags.WidthFixed, 80);
-                ImGui.TableSetupColumn("Faces", ImGuiTableColumnFlags.WidthFixed, 80);
-                ImGui.TableSetupColumn("Actions", ImGuiTableColumnFlags.WidthFixed, 160);
+                ImGui.TableSetupColumn("Name");
+                ImGui.TableSetupColumn("Vertices");
+                ImGui.TableSetupColumn("Faces");
+                ImGui.TableSetupColumn("Actions");
                 ImGui.TableHeadersRow();
-                
-                for (int i = _results.IsosurfaceMeshes.Count - 1; i >= 0; i--)
+
+                for (var i = results.IsosurfaceMeshes.Count - 1; i >= 0; i--)
                 {
-                    var mesh = _results.IsosurfaceMeshes[i];
-                    
+                    var mesh = results.IsosurfaceMeshes[i];
+
                     ImGui.TableNextRow();
                     ImGui.TableNextColumn();
                     ImGui.Text(mesh.Name);
-                    
+
                     ImGui.TableNextColumn();
                     ImGui.Text(mesh.VertexCount.ToString());
-                    
+
                     ImGui.TableNextColumn();
                     ImGui.Text(mesh.FaceCount.ToString());
-                    
+
                     ImGui.TableNextColumn();
-                    if (ImGui.SmallButton($"Export STL##{i}"))
-                    {
-                        _stlExportDialog.Open($"{mesh.Name}.stl");
-                    }
-                    if (_stlExportDialog.Submit())
-                    {
-                        MeshExporter.ExportToStl(mesh, _stlExportDialog.SelectedPath);
-                    }
-                    
+                    if (ImGui.SmallButton($"STL##{i}")) _stlExportDialog.Open($"{mesh.Name}.stl");
+                    if (_stlExportDialog.Submit()) MeshExporter.ExportToStl(mesh, _stlExportDialog.SelectedPath);
+
                     ImGui.SameLine();
                     if (ImGui.SmallButton($"Remove##{i}"))
                     {
                         ProjectManager.Instance.RemoveDataset(mesh);
-                        _results.IsosurfaceMeshes.RemoveAt(i);
+                        results.IsosurfaceMeshes.RemoveAt(i);
                     }
                 }
-                
+
                 ImGui.EndTable();
             }
-            
+
             if (ImGui.Button("Clear All Meshes", new Vector2(-1, 0)))
             {
-                foreach (var mesh in _results.IsosurfaceMeshes)
-                {
-                    ProjectManager.Instance.RemoveDataset(mesh);
-                }
-                _results.IsosurfaceMeshes.Clear();
+                foreach (var mesh in results.IsosurfaceMeshes) ProjectManager.Instance.RemoveDataset(mesh);
+                results.IsosurfaceMeshes.Clear();
             }
         }
-        else
-        {
-            ImGui.TextDisabled("No isosurface meshes generated yet.");
-        }
+
+        if (_isosurfaceProgressDialog.IsActive) ImGui.EndDisabled();
     }
-    private void ExportSliceToCsv(string path, float[,] slice)
+
+    private async Task GenerateIsosurfaceAsync(double temperature)
     {
-        if (slice == null) return;
+        _isosurfaceProgressDialog.Open("Generating isosurface...");
         try
         {
-            var width = slice.GetLength(0);
-            var height = slice.GetLength(1);
-            var sb = new StringBuilder();
+            var results = _options.Dataset.ThermalResults;
+            Logger.Log($"[ThermalTool] Generating isosurface at {temperature:F2} K");
 
-            for (int y = 0; y < height; y++)
-            {
-                for (int x = 0; x < width; x++)
-                {
-                    sb.Append(slice[x, y].ToString("F4"));
-                    if (x < width - 1)
-                    {
-                        sb.Append(",");
-                    }
-                }
-                sb.AppendLine();
-            }
+            var progress =
+                new Progress<(float p, string msg)>(report => _isosurfaceProgressDialog.Update(report.p, report.msg)
+                );
 
-            File.WriteAllText(path, sb.ToString());
-            Logger.Log($"[ThermalTool] Successfully exported slice data to {path}");
-        }
-        catch (Exception ex)
-        {
-            Logger.LogError($"[ThermalTool] Failed to export slice CSV: {ex.Message}");
-        }
-    }
-    private void ExportCompositeImage(string filePath)
-    {
-        try
-        {
-            var (slice, sliceWidth, sliceHeight) = GetSelectedSlice();
-            if (slice == null) return;
-
-            // Define layout
-            int padding = 20;
-            int legendWidth = 60;
-            int infoWidth = 250;
-            int compositeWidth = sliceWidth + legendWidth + infoWidth + padding * 4;
-            int compositeHeight = Math.Max(sliceHeight, 400) + padding * 2;
-            
-            var buffer = new byte[compositeWidth * compositeHeight * 4];
-            // Fill with a dark gray background
-            Array.Fill(buffer, (byte)50);
-            for (int i = 3; i < buffer.Length; i += 4) buffer[i] = 255;
-
-            // 1. Draw Temperature Slice
-            for (int y = 0; y < sliceHeight; y++)
-            {
-                for (int x = 0; x < sliceWidth; x++)
-                {
-                    var temp = slice[x, y];
-                    var norm = Math.Clamp((temp - _options.TemperatureCold) / (_options.TemperatureHot - _options.TemperatureCold), 0.0, 1.0);
-                    var color = ApplyColorMap((float)norm, _colorMapIndex);
-                    
-                    int destIdx = ((y + padding) * compositeWidth + (x + padding)) * 4;
-                    buffer[destIdx + 0] = (byte)(color.X * 255);
-                    buffer[destIdx + 1] = (byte)(color.Y * 255);
-                    buffer[destIdx + 2] = (byte)(color.Z * 255);
-                    buffer[destIdx + 3] = 255;
-                }
-            }
-            
-            // 2. Draw Color Legend
-            int legendX = sliceWidth + padding * 2;
-            int legendY = padding;
-            int barWidth = 30;
-            for (int i = 0; i < sliceHeight; i++)
-            {
-                var color = ApplyColorMap((float)i / (sliceHeight - 1), _colorMapIndex);
-                for (int j = 0; j < barWidth; j++)
-                {
-                    int destIdx = ((sliceHeight - 1 - i + legendY) * compositeWidth + (j + legendX)) * 4;
-                    buffer[destIdx + 0] = (byte)(color.X * 255);
-                    buffer[destIdx + 1] = (byte)(color.Y * 255);
-                    buffer[destIdx + 2] = (byte)(color.Z * 255);
-                }
-            }
-            uint white = 0xFFFFFFFF;
-            SimpleFontRenderer.DrawText(buffer, compositeWidth, legendX + barWidth + 5, legendY, $"{_options.TemperatureHot:F0}K", white);
-            SimpleFontRenderer.DrawText(buffer, compositeWidth, legendX + barWidth + 5, legendY + sliceHeight - 10, $"{_options.TemperatureCold:F0}K", white);
-
-            // 3. Draw Scale Bar
-            float pixelSizeUm = _options.Dataset.PixelSize;
-            float scaleBarLengthMm = 0.1f; // 100 um
-            int scaleBarLengthPx = (int)(scaleBarLengthMm * 1000 / pixelSizeUm);
-            int scaleBarY = padding + sliceHeight + 10;
-            for (int i = 0; i < scaleBarLengthPx; i++)
-            {
-                for (int j = 0; j < 5; j++)
-                {
-                    int destIdx = ((scaleBarY + j) * compositeWidth + (padding + i)) * 4;
-                    buffer[destIdx + 0] = 255; buffer[destIdx + 1] = 255; buffer[destIdx + 2] = 255;
-                }
-            }
-            SimpleFontRenderer.DrawText(buffer, compositeWidth, padding, scaleBarY + 8, $"{scaleBarLengthMm * 1000} UM", white);
-            
-            // 4. Draw Text Info
-            int infoX = legendX + legendWidth + padding;
-            int infoY = padding;
-            int line = 0;
-            var text = new List<string>
-            {
-                $"KEFF: {_results.EffectiveConductivity:F4} W/MK",
-                $"AXIS: {(HeatFlowDirection)_selectedSliceDirectionInt}",
-                $"SLICE: {_selectedSliceIndex}",
-                $"T_HOT: {_options.TemperatureHot:F1}K",
-                $"T_COLD: {_options.TemperatureCold:F1}K",
-                $"DATASET: {_options.Dataset.Name}"
-            };
-            foreach(var str in text)
-            {
-                SimpleFontRenderer.DrawText(buffer, compositeWidth, infoX, infoY + line++ * 12, str, white);
-            }
-
-            ImageExporter.ExportColorSlice(buffer, compositeWidth, compositeHeight, filePath);
-            Logger.Log($"[ThermalTool] Successfully exported composite image to {filePath}");
-        }
-        catch (Exception ex)
-        {
-            Logger.LogError($"[ThermalTool] Failed to export composite image: {ex.Message}");
-        }
-    }
-    private string GetReportTextContent()
-    {
-        var sb = new StringBuilder();
-        
-        sb.AppendLine("========================================");
-        sb.AppendLine("   Thermal Conductivity Analysis Report   ");
-        sb.AppendLine("========================================");
-        sb.AppendLine();
-        sb.AppendLine($"Dataset: {_options.Dataset.Name}");
-        sb.AppendLine($"Generated on: {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
-        sb.AppendLine();
-
-        sb.AppendLine("--- Simulation Summary ---");
-        sb.AppendLine($"Effective Thermal Conductivity: {_results.EffectiveConductivity:F6} W/mK");
-        sb.AppendLine($"Total Computation Time: {_results.ComputationTime.TotalSeconds:F3} seconds");
-        sb.AppendLine();
-
-        sb.AppendLine("--- Simulation Parameters ---");
-        sb.AppendLine($"Hot Boundary Temperature: {_options.TemperatureHot:F2} K ({_options.TemperatureHot - 273.15:F1} C)");
-        sb.AppendLine($"Cold Boundary Temperature: {_options.TemperatureCold:F2} K ({_options.TemperatureCold - 273.15:F1} C)");
-        sb.AppendLine($"Heat Flow Direction: {_options.HeatFlowDirection}");
-        sb.AppendLine($"Solver Backend: {_options.SolverBackend}");
-        sb.AppendLine($"Max Iterations: {_options.MaxIterations}");
-        sb.AppendLine($"Convergence Tolerance: {_options.ConvergenceTolerance:E2}");
-        sb.AppendLine();
-
-        sb.AppendLine("--- Material Properties Used ---");
-        sb.AppendLine("ID | Name                 | Conductivity (W/mK)");
-        sb.AppendLine("---|----------------------|--------------------");
-        foreach (var material in _options.Dataset.Materials.OrderBy(m => m.ID))
-        {
-            var conductivity = _results.MaterialConductivities.GetValueOrDefault(material.ID, 0.0);
-            sb.AppendLine($"{material.ID,-3}| {material.Name,-20} | {conductivity,-18:F4}");
-        }
-        sb.AppendLine();
-
-        if (_results.AnalyticalEstimates.Count > 0)
-        {
-            sb.AppendLine("--- Analytical Model Comparison ---");
-            sb.AppendLine("Model Name               | Conductivity (W/mK) | Rel. Error (%)");
-            sb.AppendLine("-------------------------|---------------------|---------------");
-            foreach (var (name, value) in _results.AnalyticalEstimates.OrderBy(x => x.Value))
-            {
-                var relativeError = Math.Abs((_results.EffectiveConductivity - value) / _results.EffectiveConductivity * 100.0);
-                sb.AppendLine($"{name,-24} | {value,-19:F6} | {relativeError,12:F2}");
-            }
-            sb.AppendLine();
-        }
-
-        sb.AppendLine("--- Dataset Information ---");
-        sb.AppendLine($"Dimensions: {_options.Dataset.Width} x {_options.Dataset.Height} x {_options.Dataset.Depth} voxels");
-        sb.AppendLine($"Voxel Size: {_options.Dataset.PixelSize} um (in-plane), {_options.Dataset.SliceThickness} um (thickness)");
-        sb.AppendLine();
-
-        return sb.ToString();
-    }
-    private void ExportTextReport(string filePath, bool isRtf)
-    {
-        try
-        {
-            string content = GetReportTextContent();
-            if (isRtf)
-            {
-                var rtfContent = new StringBuilder();
-                rtfContent.AppendLine(@"{\rtf1\ansi\deff0");
-                rtfContent.AppendLine(@"{\fonttbl{\f0 Arial;}}");
-                rtfContent.AppendLine(@"\pard\sa200\sl276\slmult1\f0\fs24");
-
-                var lines = content.Split(new[] { Environment.NewLine }, StringSplitOptions.None);
-                foreach (var line in lines)
-                {
-                    string rtfLine = line.Replace(@"\", @"\\").Replace("{", @"\{").Replace("}", @"\}");
-                    if (line.StartsWith("===") || line.StartsWith("---"))
-                    {
-                        rtfContent.Append(@"\b ");
-                        rtfContent.Append(rtfLine);
-                        rtfContent.Append(@"\b0");
-                    }
-                    else
-                    {
-                        rtfContent.Append(rtfLine);
-                    }
-                    rtfContent.AppendLine(@"\par");
-                }
-                rtfContent.AppendLine("}");
-                content = rtfContent.ToString();
-            }
-
-            File.WriteAllText(filePath, content);
-            Logger.Log($"[ThermalTool] Successfully exported report to {filePath}");
-        }
-        catch (Exception ex)
-        {
-            Logger.LogError($"[ThermalTool] Failed to export report: {ex.Message}");
-        }
-    }
-    private void GenerateIsosurface(double temperature)
-    {
-        try
-        {
-            Logger.Log($"[ThermalTool] Generating isosurface at {temperature:F2} K ({(temperature - 273.15):F2} °C)");
-            
             var voxelSize = new Vector3(
                 _options.Dataset.PixelSize * 1e-6f,
-                _options.Dataset.PixelSize * 1e-6f, 
+                _options.Dataset.PixelSize * 1e-6f,
                 _options.Dataset.SliceThickness * 1e-6f
             );
-            
-            var mesh = IsosurfaceGenerator.GenerateIsosurface(
-                _results.TemperatureField, 
-                (float)temperature, 
-                voxelSize
+
+            var mesh = await IsosurfaceGenerator.GenerateIsosurfaceAsync(
+                results.TemperatureField,
+                (float)temperature,
+                voxelSize,
+                progress,
+                _isosurfaceProgressDialog.CancellationToken
             );
-            
+
             if (mesh.VertexCount > 0)
             {
                 ProjectManager.Instance.AddDataset(mesh);
-                _results.IsosurfaceMeshes.Add(mesh);
-                Logger.Log($"[ThermalTool] Generated mesh with {mesh.VertexCount} vertices and {mesh.FaceCount} faces");
+                results.IsosurfaceMeshes.Add(mesh);
+                Logger.Log($"[ThermalTool] Generated mesh: {mesh.VertexCount} vertices, {mesh.FaceCount} faces");
             }
             else
             {
-                Logger.LogWarning($"[ThermalTool] No surface found at temperature {temperature:F2} K");
+                Logger.LogWarning($"[ThermalTool] No surface found at {temperature:F2} K");
             }
+        }
+        catch (OperationCanceledException)
+        {
+            Logger.LogWarning("[ThermalTool] Isosurface generation canceled");
         }
         catch (Exception ex)
         {
-            Logger.LogError($"[ThermalTool] Failed to generate isosurface: {ex.Message}");
+            Logger.LogError($"[ThermalTool] Isosurface generation failed: {ex.Message}");
+        }
+        finally
+        {
+            _isosurfaceProgressDialog.Close();
         }
     }
-    
-    private void GenerateMultipleIsosurfaces(int count)
+
+    private async Task GenerateMultipleIsosurfacesAsync(int count)
     {
+        _isosurfaceProgressDialog.Open($"Batch generating {count} surfaces...");
         try
         {
-            Logger.Log($"[ThermalTool] Generating {count} isosurfaces");
-            
+            var results = _options.Dataset.ThermalResults;
             var tempRange = _options.TemperatureHot - _options.TemperatureCold;
             var voxelSize = new Vector3(
                 _options.Dataset.PixelSize * 1e-6f,
                 _options.Dataset.PixelSize * 1e-6f,
                 _options.Dataset.SliceThickness * 1e-6f
             );
-            
-            int generated = 0;
-            for (int i = 1; i <= count; i++)
+
+            var generated = 0;
+            for (var i = 1; i <= count; i++)
             {
-                var temperature = _options.TemperatureCold + (i * tempRange / (count + 1));
-                
-                try
+                _isosurfaceProgressDialog.CancellationToken.ThrowIfCancellationRequested();
+
+                var temperature = _options.TemperatureCold + i * tempRange / (count + 1);
+                var overallProgress = (float)(i - 1) / count;
+                _isosurfaceProgressDialog.Update(overallProgress, $"Surface {i}/{count} at {temperature:F2} K");
+
+                var subProgress = new Progress<(float p, string msg)>();
+                var mesh = await IsosurfaceGenerator.GenerateIsosurfaceAsync(
+                    results.TemperatureField,
+                    (float)temperature,
+                    voxelSize,
+                    subProgress,
+                    _isosurfaceProgressDialog.CancellationToken
+                );
+
+                if (mesh.VertexCount > 0)
                 {
-                    var mesh = IsosurfaceGenerator.GenerateIsosurface(
-                        _results.TemperatureField,
-                        (float)temperature,
-                        voxelSize
-                    );
-                    
-                    if (mesh.VertexCount > 0)
-                    {
-                        ProjectManager.Instance.AddDataset(mesh);
-                        _results.IsosurfaceMeshes.Add(mesh);
-                        generated++;
-                    }
-                }
-                catch (Exception ex)
-                {
-                    Logger.LogWarning($"[ThermalTool] Failed to generate isosurface at {temperature:F2} K: {ex.Message}");
+                    ProjectManager.Instance.AddDataset(mesh);
+                    results.IsosurfaceMeshes.Add(mesh);
+                    generated++;
                 }
             }
-            
-            Logger.Log($"[ThermalTool] Successfully generated {generated} out of {count} isosurfaces");
+
+            Logger.Log($"[ThermalTool] Generated {generated}/{count} isosurfaces");
+        }
+        catch (OperationCanceledException)
+        {
+            Logger.LogWarning("[ThermalTool] Batch generation canceled");
         }
         catch (Exception ex)
         {
             Logger.LogError($"[ThermalTool] Batch generation failed: {ex.Message}");
         }
+        finally
+        {
+            _isosurfaceProgressDialog.Close();
+        }
     }
 
     private void StartSimulation()
     {
-        // Validate before starting
         if (!ValidateSettings(out var validationMessages))
         {
-            Logger.LogError("[ThermalTool] Cannot start simulation - validation failed:");
-            foreach (var msg in validationMessages)
-            {
-                Logger.LogError($"  - {msg}");
-            }
+            Logger.LogError("[ThermalTool] Validation failed");
             return;
         }
-        
+
         _cancellationTokenSource?.Dispose();
         _cancellationTokenSource = new CancellationTokenSource();
-        
-        _progressDialog.Open("Initializing thermal simulation...");
+
+        _progressDialog.Open("Initializing simulation...");
         _isSimulationRunning = true;
 
-        var startTime = DateTime.Now;
-        Logger.Log($"[ThermalTool] Starting thermal simulation at {startTime:HH:mm:ss}");
-        Logger.Log($"[ThermalTool] Dataset: {_options.Dataset.Name} ({_options.Dataset.Width}x{_options.Dataset.Height}x{_options.Dataset.Depth})");
-        Logger.Log($"[ThermalTool] Temperature range: {_options.TemperatureCold:F2} K to {_options.TemperatureHot:F2} K");
-        Logger.Log($"[ThermalTool] Solver: {_options.SolverBackend}");
+        Logger.Log("[ThermalTool] Starting simulation");
 
         _simulationTask = Task.Run(() =>
         {
             try
             {
-                var progress = new Progress<float>((p) =>
+                var progress = new Progress<float>(p =>
                 {
-                    var percent = (int)(p * 100);
                     var stage = p switch
                     {
                         < 0.05f => "Initializing...",
-                        < 0.10f => "Loading material properties...",
+                        < 0.10f => "Loading properties...",
                         < 0.15f => "Setting up solver...",
-                        < 0.85f => $"Solving heat equation... {percent}%",
-                        < 0.90f => "Computing effective conductivity...",
-                        < 0.95f => "Calculating analytical estimates...",
-                        _ => "Finalizing results..."
+                        < 0.85f => $"Solving ({(int)(p * 100)}%)...",
+                        < 0.90f => "Computing k_eff...",
+                        < 0.95f => "Analytical estimates...",
+                        _ => "Finalizing..."
                     };
-                    
                     _progressDialog.Update(p, stage);
                 });
-                
-                _results = ThermalConductivitySolver.Solve(_options, progress, _cancellationTokenSource.Token);
-                
-                var endTime = DateTime.Now;
-                var elapsed = endTime - startTime;
-                
-                Logger.Log($"[ThermalTool] Simulation completed at {endTime:HH:mm:ss}");
-                Logger.Log($"[ThermalTool] Total time: {elapsed.TotalSeconds:F2} seconds");
-                Logger.Log($"[ThermalTool] Effective conductivity: {_results.EffectiveConductivity:F6} W/m·K");
-                
-                // Log analytical comparison
-                if (_results.AnalyticalEstimates.Count > 0)
-                {
-                    Logger.Log("[ThermalTool] Analytical model comparison:");
-                    foreach (var (model, keff) in _results.AnalyticalEstimates.OrderBy(x => x.Value))
-                    {
-                        var error = Math.Abs(_results.EffectiveConductivity - keff) / _results.EffectiveConductivity * 100.0;
-                        Logger.Log($"  {model}: {keff:F6} W/m·K (error: {error:F2}%)");
-                    }
-                }
+
+                var results = ThermalConductivitySolver.Solve(_options, progress, _cancellationTokenSource.Token);
+                _options.Dataset.ThermalResults = results;
+                ProjectManager.Instance.NotifyDatasetDataChanged(_options.Dataset);
+
+                Logger.Log($"[ThermalTool] Complete: k_eff = {results.EffectiveConductivity:F6} W/m·K");
             }
             catch (OperationCanceledException)
             {
-                Logger.Log("[ThermalTool] Simulation was canceled by user.");
-                _results = null;
+                Logger.Log("[ThermalTool] Canceled");
+                _options.Dataset.ThermalResults = null;
             }
             catch (Exception ex)
             {
-                Logger.LogError($"[ThermalTool] Simulation failed with error: {ex.Message}");
-                Logger.LogError($"Stack trace: {ex.StackTrace}");
-                _results = null;
+                Logger.LogError($"[ThermalTool] Failed: {ex.Message}");
+                _options.Dataset.ThermalResults = null;
             }
             finally
             {
@@ -1106,163 +1199,324 @@ public class ThermalConductivityTool : IDatasetTools, IDisposable
     {
         try
         {
+            var results = _options.Dataset.ThermalResults;
             using (var writer = new StreamWriter(path))
             {
-                // Header
                 writer.WriteLine("# Thermal Conductivity Analysis Results");
                 writer.WriteLine($"# Dataset: {_options.Dataset.Name}");
                 writer.WriteLine($"# Generated: {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
-                writer.WriteLine($"# Voxel Size: {_options.Dataset.PixelSize} µm");
                 writer.WriteLine("#");
                 writer.WriteLine();
-                
-                // Summary statistics
+
                 writer.WriteLine("## Summary Statistics");
                 writer.WriteLine("Parameter,Value,Unit");
-                writer.WriteLine($"Effective Thermal Conductivity,{_results.EffectiveConductivity:F6},W/mK");
-                writer.WriteLine($"Computation Time,{_results.ComputationTime.TotalSeconds:F3},seconds");
+                writer.WriteLine($"Effective Thermal Conductivity,{results.EffectiveConductivity:F6},W/mK");
+                writer.WriteLine($"Computation Time,{results.ComputationTime.TotalSeconds:F3},seconds");
                 writer.WriteLine($"Hot Boundary Temperature,{_options.TemperatureHot:F2},K");
                 writer.WriteLine($"Cold Boundary Temperature,{_options.TemperatureCold:F2},K");
-                writer.WriteLine($"Temperature Gradient,{(_options.TemperatureHot - _options.TemperatureCold):F2},K");
-                writer.WriteLine($"Heat Flow Direction,{_options.HeatFlowDirection},");
-                writer.WriteLine($"Max Iterations,{_options.MaxIterations},");
-                writer.WriteLine($"Convergence Tolerance,{_options.ConvergenceTolerance:E3},");
                 writer.WriteLine();
-                
-                // Material properties
+
                 writer.WriteLine("## Material Conductivities");
-                writer.WriteLine("Material ID,Material Name,Conductivity (W/mK),Volume Fraction");
-                
-                var totalVoxels = _options.Dataset.Width * _options.Dataset.Height * _options.Dataset.Depth;
-                var materialVoxelCounts = new Dictionary<byte, long>();
-                
-                // Count voxels per material
-                for (int z = 0; z < _options.Dataset.Depth; z++)
-                for (int y = 0; y < _options.Dataset.Height; y++)
-                for (int x = 0; x < _options.Dataset.Width; x++)
-                {
-                    byte mat = _options.Dataset.LabelData[x, y, z];
-                    if (!materialVoxelCounts.ContainsKey(mat))
-                        materialVoxelCounts[mat] = 0;
-                    materialVoxelCounts[mat]++;
-                }
-                
+                writer.WriteLine("Material ID,Material Name,Conductivity (W/mK)");
                 foreach (var material in _options.Dataset.Materials.OrderBy(m => m.ID))
                 {
-                    var conductivity = _results.MaterialConductivities.ContainsKey(material.ID) 
-                        ? _results.MaterialConductivities[material.ID] 
+                    var conductivity = results.MaterialConductivities.ContainsKey(material.ID)
+                        ? results.MaterialConductivities[material.ID]
                         : 0.0;
-                    
-                    var voxelCount = materialVoxelCounts.ContainsKey(material.ID) 
-                        ? materialVoxelCounts[material.ID] 
-                        : 0;
-                    
-                    var volumeFraction = (double)voxelCount / totalVoxels;
-                    
-                    writer.WriteLine($"{material.ID},{material.Name},{conductivity:F6},{volumeFraction:F6}");
+                    writer.WriteLine($"{material.ID},{material.Name},{conductivity:F6}");
                 }
+
                 writer.WriteLine();
-                
-                // Analytical estimates
-                if (_results.AnalyticalEstimates.Count > 0)
+
+                if (results.AnalyticalEstimates.Count > 0)
                 {
                     writer.WriteLine("## Analytical Model Estimates");
                     writer.WriteLine("Model,Conductivity (W/mK),Relative Error (%)");
-                    
-                    foreach (var (name, value) in _results.AnalyticalEstimates.OrderBy(x => x.Value))
+                    foreach (var (name, value) in results.AnalyticalEstimates.OrderBy(x => x.Value))
                     {
-                        var relativeError = (_results.EffectiveConductivity - value) / _results.EffectiveConductivity * 100.0;
+                        var relativeError = (results.EffectiveConductivity - value) / results.EffectiveConductivity *
+                                            100.0;
                         writer.WriteLine($"{name},{value:F6},{relativeError:F2}");
                     }
-                    writer.WriteLine();
                 }
-                
-                // Temperature field statistics
-                writer.WriteLine("## Temperature Field Statistics");
-                writer.WriteLine("Statistic,Value,Unit");
-                
-                double minTemp = double.MaxValue;
-                double maxTemp = double.MinValue;
-                double sumTemp = 0;
-                long count = 0;
-                
-                for (int z = 0; z < _options.Dataset.Depth; z++)
-                for (int y = 0; y < _options.Dataset.Height; y++)
-                for (int x = 0; x < _options.Dataset.Width; x++)
-                {
-                    var temp = _results.TemperatureField[x, y, z];
-                    minTemp = Math.Min(minTemp, temp);
-                    maxTemp = Math.Max(maxTemp, temp);
-                    sumTemp += temp;
-                    count++;
-                }
-                
-                var meanTemp = sumTemp / count;
-                
-                writer.WriteLine($"Minimum Temperature,{minTemp:F2},K");
-                writer.WriteLine($"Maximum Temperature,{maxTemp:F2},K");
-                writer.WriteLine($"Mean Temperature,{meanTemp:F2},K");
-                writer.WriteLine($"Total Voxels,{count},");
-                writer.WriteLine();
-                
-                // Dataset dimensions
-                writer.WriteLine("## Dataset Information");
-                writer.WriteLine("Parameter,Value");
-                writer.WriteLine($"Width,{_options.Dataset.Width}");
-                writer.WriteLine($"Height,{_options.Dataset.Height}");
-                writer.WriteLine($"Depth,{_options.Dataset.Depth}");
-                writer.WriteLine($"Pixel Size,{_options.Dataset.PixelSize} µm");
-                writer.WriteLine($"Slice Thickness,{_options.Dataset.SliceThickness} µm");
             }
-            
-            Logger.Log($"[ThermalTool] Successfully exported comprehensive results to {path}");
+
+            Logger.Log($"[ThermalTool] Exported results to {path}");
         }
         catch (Exception ex)
         {
             Logger.LogError($"[ThermalTool] Failed to export CSV: {ex.Message}");
         }
     }
-    
+
+    private void ExportSliceToCsv(string path, float[,] slice)
+    {
+        if (slice == null) return;
+        try
+        {
+            var width = slice.GetLength(0);
+            var height = slice.GetLength(1);
+            var sb = new StringBuilder();
+
+            for (var y = 0; y < height; y++)
+            {
+                for (var x = 0; x < width; x++)
+                {
+                    sb.Append(slice[x, y].ToString("F4"));
+                    if (x < width - 1) sb.Append(",");
+                }
+
+                sb.AppendLine();
+            }
+
+            File.WriteAllText(path, sb.ToString());
+            Logger.Log($"[ThermalTool] Exported slice data to {path}");
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError($"[ThermalTool] Failed to export slice CSV: {ex.Message}");
+        }
+    }
+
+    private void ExportSliceToPng(string filePath, float[,] slice, int width, int height)
+    {
+        try
+        {
+            var imageData = new byte[width * height * 4];
+
+            Parallel.For(0, height, y =>
+            {
+                for (var x = 0; x < width; x++)
+                {
+                    var temp = slice[x, y];
+                    var normalizedTemp = (temp - _options.TemperatureCold) /
+                                         (_options.TemperatureHot - _options.TemperatureCold);
+                    normalizedTemp = Math.Clamp(normalizedTemp, 0.0, 1.0);
+
+                    var color = ApplyColorMap((float)normalizedTemp, _colorMapIndex);
+
+                    var idx = (y * width + x) * 4;
+                    imageData[idx + 0] = (byte)(color.X * 255);
+                    imageData[idx + 1] = (byte)(color.Y * 255);
+                    imageData[idx + 2] = (byte)(color.Z * 255);
+                    imageData[idx + 3] = (byte)(color.W * 255);
+                }
+            });
+
+            if (_showIsocontours)
+            {
+                var tempRange = _options.TemperatureHot - _options.TemperatureCold;
+                for (var i = 1; i <= _numIsocontours; i++)
+                {
+                    var isovalue = _options.TemperatureCold + i * tempRange / (_numIsocontours + 1);
+                    var lines = IsosurfaceGenerator.GenerateIsocontours(slice, (float)isovalue);
+
+                    foreach (var (p1, p2) in lines)
+                        DrawLineOnImage(imageData, width, height,
+                            (int)p1.X, (int)p1.Y, (int)p2.X, (int)p2.Y,
+                            255, 255, 255, 255);
+                }
+            }
+
+            ImageExporter.ExportColorSlice(imageData, width, height, filePath);
+            Logger.Log($"[ThermalTool] Exported slice to {filePath}");
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError($"[ThermalTool] Failed to export PNG: {ex.Message}");
+        }
+    }
+
+    private void DrawLineOnImage(byte[] imageData, int width, int height,
+        int x0, int y0, int x1, int y1, byte r, byte g, byte b, byte a)
+    {
+        var dx = Math.Abs(x1 - x0);
+        var dy = Math.Abs(y1 - y0);
+        var sx = x0 < x1 ? 1 : -1;
+        var sy = y0 < y1 ? 1 : -1;
+        var err = dx - dy;
+
+        while (true)
+        {
+            if (x0 >= 0 && x0 < width && y0 >= 0 && y0 < height)
+            {
+                var idx = (y0 * width + x0) * 4;
+                imageData[idx + 0] = r;
+                imageData[idx + 1] = g;
+                imageData[idx + 2] = b;
+                imageData[idx + 3] = a;
+            }
+
+            if (x0 == x1 && y0 == y1) break;
+
+            var e2 = 2 * err;
+            if (e2 > -dy)
+            {
+                err -= dy;
+                x0 += sx;
+            }
+
+            if (e2 < dx)
+            {
+                err += dx;
+                y0 += sy;
+            }
+        }
+    }
+
+    private void ExportCompositeImage(string filePath)
+    {
+        try
+        {
+            var (slice, sliceWidth, sliceHeight) = GetSelectedSlice();
+            if (slice == null) return;
+
+            var padding = 20;
+            var legendWidth = 60;
+            var infoWidth = 250;
+            var compositeWidth = sliceWidth + legendWidth + infoWidth + padding * 4;
+            var compositeHeight = Math.Max(sliceHeight, 400) + padding * 2;
+
+            var buffer = new byte[compositeWidth * compositeHeight * 4];
+            Array.Fill(buffer, (byte)50);
+            for (var i = 3; i < buffer.Length; i += 4) buffer[i] = 255;
+
+            // Draw temperature slice
+            for (var y = 0; y < sliceHeight; y++)
+            for (var x = 0; x < sliceWidth; x++)
+            {
+                var temp = slice[x, y];
+                var norm = Math.Clamp(
+                    (temp - _options.TemperatureCold) / (_options.TemperatureHot - _options.TemperatureCold), 0.0, 1.0);
+                var color = ApplyColorMap((float)norm, _colorMapIndex);
+
+                var destIdx = ((y + padding) * compositeWidth + x + padding) * 4;
+                buffer[destIdx + 0] = (byte)(color.X * 255);
+                buffer[destIdx + 1] = (byte)(color.Y * 255);
+                buffer[destIdx + 2] = (byte)(color.Z * 255);
+                buffer[destIdx + 3] = 255;
+            }
+
+            // Draw color legend
+            var legendX = sliceWidth + padding * 2;
+            var legendY = padding;
+            var barWidth = 30;
+            for (var i = 0; i < sliceHeight; i++)
+            {
+                var color = ApplyColorMap((float)i / (sliceHeight - 1), _colorMapIndex);
+                for (var j = 0; j < barWidth; j++)
+                {
+                    var destIdx = ((sliceHeight - 1 - i + legendY) * compositeWidth + j + legendX) * 4;
+                    buffer[destIdx + 0] = (byte)(color.X * 255);
+                    buffer[destIdx + 1] = (byte)(color.Y * 255);
+                    buffer[destIdx + 2] = (byte)(color.Z * 255);
+                }
+            }
+
+            ImageExporter.ExportColorSlice(buffer, compositeWidth, compositeHeight, filePath);
+            Logger.Log($"[ThermalTool] Exported composite image to {filePath}");
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError($"[ThermalTool] Failed to export composite image: {ex.Message}");
+        }
+    }
+
+    private void ExportTextReport(string filePath, bool isRtf)
+    {
+        try
+        {
+            var sb = new StringBuilder();
+            var results = _options.Dataset.ThermalResults;
+
+            sb.AppendLine("========================================");
+            sb.AppendLine("   Thermal Conductivity Analysis Report");
+            sb.AppendLine("========================================");
+            sb.AppendLine();
+            sb.AppendLine($"Dataset: {_options.Dataset.Name}");
+            sb.AppendLine($"Generated: {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
+            sb.AppendLine();
+            sb.AppendLine("--- Simulation Summary ---");
+            sb.AppendLine($"Effective Thermal Conductivity: {results.EffectiveConductivity:F6} W/mK");
+            sb.AppendLine($"Computation Time: {results.ComputationTime.TotalSeconds:F3} seconds");
+            sb.AppendLine();
+            sb.AppendLine("--- Simulation Parameters ---");
+            sb.AppendLine($"Hot Temperature: {_options.TemperatureHot:F2} K");
+            sb.AppendLine($"Cold Temperature: {_options.TemperatureCold:F2} K");
+            sb.AppendLine($"Heat Flow Direction: {_options.HeatFlowDirection}");
+            sb.AppendLine($"Solver Backend: {_options.SolverBackend}");
+
+            var content = sb.ToString();
+
+            if (isRtf)
+            {
+                var rtf = new StringBuilder();
+                rtf.AppendLine(@"{\rtf1\ansi\deff0");
+                rtf.AppendLine(@"{\fonttbl{\f0 Arial;}}");
+                rtf.AppendLine(@"\pard\f0\fs24");
+                foreach (var line in content.Split(Environment.NewLine))
+                    rtf.AppendLine(line.Replace(@"\", @"\\") + @"\par");
+                rtf.AppendLine("}");
+                content = rtf.ToString();
+            }
+
+            File.WriteAllText(filePath, content);
+            Logger.Log($"[ThermalTool] Exported report to {filePath}");
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError($"[ThermalTool] Failed to export report: {ex.Message}");
+        }
+    }
+
     private (float[,] slice, int width, int height) GetSelectedSlice()
     {
-        if (_results?.TemperatureField == null) return (null, 0, 0);
+        var results = _options.Dataset.ThermalResults;
+        if (results?.TemperatureField == null) return (null, 0, 0);
 
         var W = _options.Dataset.Width;
         var H = _options.Dataset.Height;
         var D = _options.Dataset.Depth;
         var selectedDirection = (HeatFlowDirection)_selectedSliceDirectionInt;
-        
-        _selectedSliceIndex = Math.Clamp(_selectedSliceIndex, 0, 
+
+        _selectedSliceIndex = Math.Clamp(_selectedSliceIndex, 0,
             selectedDirection == HeatFlowDirection.X ? W - 1 :
             selectedDirection == HeatFlowDirection.Y ? H - 1 : D - 1);
-        
-        if (_results.TemperatureSlices.TryGetValue((selectedDirection.ToString()[0], _selectedSliceIndex), out var slice))
-        {
-            return (slice, slice.GetLength(0), slice.GetLength(1));
-        }
 
-        // Extract slice if not cached
+        if (results.TemperatureSlices.TryGetValue((selectedDirection.ToString()[0], _selectedSliceIndex),
+                out var slice)) return (slice, slice.GetLength(0), slice.GetLength(1));
+
         switch (selectedDirection)
         {
             case HeatFlowDirection.X:
                 var sliceX = new float[H, D];
-                Parallel.For(0, H, y => { for (int z = 0; z < D; z++) sliceX[y, z] = _results.TemperatureField[_selectedSliceIndex, y, z]; });
-                _results.TemperatureSlices[('X', _selectedSliceIndex)] = sliceX;
+                Parallel.For(0, H, y =>
+                {
+                    for (var z = 0; z < D; z++) sliceX[y, z] = results.TemperatureField[_selectedSliceIndex, y, z];
+                });
+                results.TemperatureSlices[('X', _selectedSliceIndex)] = sliceX;
                 return (sliceX, H, D);
             case HeatFlowDirection.Y:
                 var sliceY = new float[W, D];
-                Parallel.For(0, W, x => { for (int z = 0; z < D; z++) sliceY[x, z] = _results.TemperatureField[x, _selectedSliceIndex, z]; });
-                 _results.TemperatureSlices[('Y', _selectedSliceIndex)] = sliceY;
+                Parallel.For(0, W, x =>
+                {
+                    for (var z = 0; z < D; z++) sliceY[x, z] = results.TemperatureField[x, _selectedSliceIndex, z];
+                });
+                results.TemperatureSlices[('Y', _selectedSliceIndex)] = sliceY;
                 return (sliceY, W, D);
             case HeatFlowDirection.Z:
                 var sliceZ = new float[W, H];
-                Parallel.For(0, W, x => { for (int y = 0; y < H; y++) sliceZ[x, y] = _results.TemperatureField[x, y, _selectedSliceIndex]; });
-                _results.TemperatureSlices[('Z', _selectedSliceIndex)] = sliceZ;
+                Parallel.For(0, W, x =>
+                {
+                    for (var y = 0; y < H; y++) sliceZ[x, y] = results.TemperatureField[x, y, _selectedSliceIndex];
+                });
+                results.TemperatureSlices[('Z', _selectedSliceIndex)] = sliceZ;
                 return (sliceZ, W, H);
         }
+
         return (null, 0, 0);
     }
-    
+
     private static void InitializeColormaps()
     {
         if (_colormapData != null) return;
@@ -1278,14 +1532,15 @@ public class ThermalConductivityTool : IDatasetTools, IDisposable
             var b = Math.Clamp(3.0f * t - 2.0f, 0.0f, 1.0f);
             _colormapData[0, i] = new Vector3(r, g, b);
         }
+
         // Rainbow (map 1)
         for (var i = 0; i < size; i++)
         {
-            var h = i / (float)(size - 1) * 0.7f; 
+            var h = i / (float)(size - 1) * 0.7f;
             _colormapData[1, i] = HsvToRgb(h, 1.0f, 1.0f);
         }
     }
-    
+
     private Vector4 ApplyColorMap(float normalizedIntensity, int colorMapIndex)
     {
         var mapIdx = Math.Clamp(colorMapIndex, 0, 1);
@@ -1294,124 +1549,49 @@ public class ThermalConductivityTool : IDatasetTools, IDisposable
         var rgb = _colormapData[mapIdx, texelIdx];
         return new Vector4(rgb.X, rgb.Y, rgb.Z, 1.0f);
     }
-    
+
     private static Vector3 HsvToRgb(float h, float s, float v)
     {
         float r, g, b;
-        int i = (int)(h * 6);
-        float f = h * 6 - i;
-        float p = v * (1 - s);
-        float q = v * (1 - f * s);
-        float t = v * (1 - (1 - f) * s);
+        var i = (int)(h * 6);
+        var f = h * 6 - i;
+        var p = v * (1 - s);
+        var q = v * (1 - f * s);
+        var t = v * (1 - (1 - f) * s);
         switch (i % 6)
         {
-            case 0: r = v; g = t; b = p; break;
-            case 1: r = q; g = v; b = p; break;
-            case 2: r = p; g = v; b = t; break;
-            case 3: r = p; g = q; b = v; break;
-            case 4: r = t; g = p; b = v; break;
-            default: r = v; g = p; b = q; break;
+            case 0:
+                r = v;
+                g = t;
+                b = p;
+                break;
+            case 1:
+                r = q;
+                g = v;
+                b = p;
+                break;
+            case 2:
+                r = p;
+                g = v;
+                b = t;
+                break;
+            case 3:
+                r = p;
+                g = q;
+                b = v;
+                break;
+            case 4:
+                r = t;
+                g = p;
+                b = v;
+                break;
+            default:
+                r = v;
+                g = p;
+                b = q;
+                break;
         }
+
         return new Vector3(r, g, b);
-    }
-
-    private void ExportSliceToPng(string filePath, float[,] slice, int width, int height)
-    {
-        try
-        {
-            // Create RGBA image data
-            var imageData = new byte[width * height * 4];
-            
-            // Normalize and colormap the temperature data
-            Parallel.For(0, height, y =>
-            {
-                for (int x = 0; x < width; x++)
-                {
-                    var temp = slice[x, y];
-                    var normalizedTemp = (temp - _options.TemperatureCold) / (_options.TemperatureHot - _options.TemperatureCold);
-                    normalizedTemp = Math.Clamp(normalizedTemp, 0.0, 1.0);
-                    
-                    var color = ApplyColorMap((float)normalizedTemp, _colorMapIndex);
-                    
-                    int idx = (y * width + x) * 4;
-                    imageData[idx + 0] = (byte)(color.X * 255);     // R
-                    imageData[idx + 1] = (byte)(color.Y * 255);     // G
-                    imageData[idx + 2] = (byte)(color.Z * 255);     // B
-                    imageData[idx + 3] = (byte)(color.W * 255);     // A
-                }
-            });
-            
-            // Draw isocontours if enabled
-            if (_showIsocontours)
-            {
-                var tempRange = _options.TemperatureHot - _options.TemperatureCold;
-                for (int i = 1; i <= _numIsocontours; i++)
-                {
-                    var isovalue = _options.TemperatureCold + (i * tempRange / (_numIsocontours + 1));
-                    var lines = IsosurfaceGenerator.GenerateIsocontours(slice, (float)isovalue);
-                    
-                    // Draw lines in white
-                    foreach (var (p1, p2) in lines)
-                    {
-                        DrawLineOnImage(imageData, width, height, 
-                            (int)p1.X, (int)p1.Y, (int)p2.X, (int)p2.Y, 
-                            255, 255, 255, 255);
-                    }
-                }
-            }
-            
-            // Export using ImageExporter
-            ImageExporter.ExportColorSlice(imageData, width, height, filePath);
-            
-            Logger.Log($"[ThermalTool] Successfully exported slice to {filePath}");
-        }
-        catch (Exception ex)
-        {
-            Logger.LogError($"[ThermalTool] Failed to export PNG: {ex.Message}");
-        }
-    }
-    
-    private void DrawLineOnImage(byte[] imageData, int width, int height, 
-        int x0, int y0, int x1, int y1, byte r, byte g, byte b, byte a)
-    {
-        // Bresenham's line algorithm
-        int dx = Math.Abs(x1 - x0);
-        int dy = Math.Abs(y1 - y0);
-        int sx = x0 < x1 ? 1 : -1;
-        int sy = y0 < y1 ? 1 : -1;
-        int err = dx - dy;
-        
-        while (true)
-        {
-            // Plot pixel if within bounds
-            if (x0 >= 0 && x0 < width && y0 >= 0 && y0 < height)
-            {
-                int idx = (y0 * width + x0) * 4;
-                imageData[idx + 0] = r;
-                imageData[idx + 1] = g;
-                imageData[idx + 2] = b;
-                imageData[idx + 3] = a;
-            }
-            
-            if (x0 == x1 && y0 == y1) break;
-            
-            int e2 = 2 * err;
-            if (e2 > -dy)
-            {
-                err -= dy;
-                x0 += sx;
-            }
-            if (e2 < dx)
-            {
-                err += dx;
-                y0 += sy;
-            }
-        }
-    }
-
-    public void Dispose()
-    {
-        _cancellationTokenSource?.Cancel();
-        _cancellationTokenSource?.Dispose();
     }
 }

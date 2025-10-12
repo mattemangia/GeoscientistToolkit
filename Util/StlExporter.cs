@@ -276,12 +276,12 @@ public static class StlExporter
 
         Logger.Log($"[StlExporter] STL file written to: {filePath}");
     }
-    
 }
+
 public static class MeshExporter
 {
     /// <summary>
-    /// Exports a Mesh3DDataset to an ASCII STL file.
+    ///     Exports a Mesh3DDataset to an ASCII STL file.
     /// </summary>
     /// <param name="mesh">The mesh dataset to export.</param>
     /// <param name="filePath">The path where the STL file will be saved.</param>

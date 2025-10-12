@@ -2,6 +2,7 @@
 // FIXED: Added colormap support to 2D slices
 
 using System.Numerics;
+using GeoscientistToolkit.Analysis;
 using GeoscientistToolkit.Analysis.AcousticSimulation;
 using GeoscientistToolkit.Analysis.RockCoreExtractor;
 using GeoscientistToolkit.Analysis.TextureClassification;
@@ -19,6 +20,12 @@ namespace GeoscientistToolkit.Data.CtImageStack;
 
 public class CtCombinedViewer : IDatasetViewer, IDisposable
 {
+    public enum SliceDisplayMode
+    {
+        Grayscale,
+        ThermalField
+    }
+
     public enum ViewModeEnum
     {
         Combined,
@@ -38,7 +45,12 @@ public class CtCombinedViewer : IDatasetViewer, IDisposable
     private readonly Dictionary<byte, float> _materialOpacity = new();
     private readonly Dictionary<byte, bool> _materialVisibility = new();
     private readonly CtRenderingPanel _renderingPanel;
-
+    private List<(Vector2, Vector2)> _cachedIsocontoursXY = new();
+    private List<(Vector2, Vector2)> _cachedIsocontoursXZ = new();
+    private List<(Vector2, Vector2)> _cachedIsocontoursYZ = new();
+    private (int slice, int numContours) _cachedKeyXY = (-1, -1);
+    private (int slice, int numContours) _cachedKeyXZ = (-1, -1);
+    private (int slice, int numContours) _cachedKeyYZ = (-1, -1);
     private bool _isInitialized;
     private bool _isPoppedOut;
     private bool _needsUpdateXY = true;
@@ -98,6 +110,10 @@ public class CtCombinedViewer : IDatasetViewer, IDisposable
 
         _ = InitializeAsync();
     }
+
+    public SliceDisplayMode CurrentSliceDisplayMode { get; set; } = SliceDisplayMode.Grayscale;
+    public bool ShowThermalIsocontours { get; set; } = true;
+    public int NumThermalIsocontours { get; set; } = 10;
 
     public CtVolume3DViewer VolumeViewer { get; private set; }
     public ViewModeEnum ViewMode { get; set; } = ViewModeEnum.Combined;
@@ -211,8 +227,44 @@ public class CtCombinedViewer : IDatasetViewer, IDisposable
         if (!_isInitialized)
         {
             _progressDialog.Submit();
-            ImGui.Text("Loading 3D viewer…");
+            ImGui.Text("Loading 3D viewer...");
             return;
+        }
+
+        // Thermal visualization options
+        if (_dataset.ThermalResults != null)
+        {
+            if (ImGui.CollapsingHeader("Thermal Visualization", ImGuiTreeNodeFlags.DefaultOpen))
+            {
+                ImGui.Indent();
+                var mode = (int)CurrentSliceDisplayMode;
+                if (ImGui.Combo("Data Source", ref mode, "Grayscale\0Thermal Field\0"))
+                {
+                    CurrentSliceDisplayMode = (SliceDisplayMode)mode;
+                    _needsUpdateXY = _needsUpdateXZ = _needsUpdateYZ = true;
+                    _cachedKeyXY = _cachedKeyXZ = _cachedKeyYZ = (-1, -1);
+                }
+
+                if (CurrentSliceDisplayMode == SliceDisplayMode.ThermalField)
+                {
+                    var showThermalIsocontours = ShowThermalIsocontours;
+                    if (ImGui.Checkbox("Show Isocontours", ref showThermalIsocontours))
+                        _cachedKeyXY = _cachedKeyXZ = _cachedKeyYZ = (-1, -1);
+
+                    if (showThermalIsocontours)
+                    {
+                        var numThermalIsocontours = NumThermalIsocontours;
+                        if (ImGui.SliderInt("Contour Count", ref numThermalIsocontours, 2, 20))
+                            _cachedKeyXY = _cachedKeyXZ = _cachedKeyYZ = (-1, -1);
+                    }
+                }
+
+                ImGui.Unindent();
+            }
+        }
+        else
+        {
+            CurrentSliceDisplayMode = SliceDisplayMode.Grayscale;
         }
 
         switch (ViewMode)
@@ -225,15 +277,9 @@ public class CtCombinedViewer : IDatasetViewer, IDisposable
                 break;
             case ViewModeEnum.VolumeOnly:
                 if (VolumeViewer != null)
-                {
                     VolumeViewer.DrawContent(ref zoom, ref pan);
-                }
                 else
-                {
-                    ImGui.Text("No 3-D volume dataset available.");
-                    ImGui.TextWrapped("Import with the Optimized for 3D option to enable volume rendering.");
-                }
-
+                    ImGui.Text("No 3D volume dataset available.");
                 break;
             case ViewModeEnum.XYOnly:
                 DrawSliceView(0, "XY (Axial)", ref _zoomXY, ref _panXY, ref _needsUpdateXY, ref _textureXY);
@@ -261,6 +307,7 @@ public class CtCombinedViewer : IDatasetViewer, IDisposable
                 _sliceY = _dataset.Height / 2;
                 _sliceZ = _dataset.Depth / 2;
                 _needsUpdateXY = _needsUpdateXZ = _needsUpdateYZ = true;
+                _cachedKeyXY = _cachedKeyXZ = _cachedKeyYZ = (-1, -1);
             }
 
             ImGui.Separator();
@@ -1025,22 +1072,87 @@ public class CtCombinedViewer : IDatasetViewer, IDisposable
     // MODIFIED: Now applies colormap to grayscale data
     private void UpdateTexture(int viewIndex, ref TextureManager texture)
     {
-        if (_dataset.VolumeData == null)
+        if (_dataset.VolumeData == null && CurrentSliceDisplayMode == SliceDisplayMode.Grayscale)
         {
-            Logger.LogError("[CtCombinedViewer] No volume data available");
+            Logger.LogError("[CtCombinedViewer] No volume data for grayscale mode");
+            return;
+        }
+
+        if (_dataset.ThermalResults == null && CurrentSliceDisplayMode == SliceDisplayMode.ThermalField)
+        {
+            Logger.LogWarning("[CtCombinedViewer] No thermal results; switching to grayscale");
+            CurrentSliceDisplayMode = SliceDisplayMode.Grayscale;
             return;
         }
 
         try
         {
             var (width, height) = GetImageDimensionsForView(viewIndex);
-            var rawGrayscaleData = ExtractSliceData(viewIndex, width, height);
+            var rgbaData = new byte[width * height * 4];
+            var colorMapIndex = VolumeViewer?.ColorMapIndex ?? 1; // Default to Hot colormap
 
+            // Generate base image
+            if (CurrentSliceDisplayMode == SliceDisplayMode.ThermalField)
+            {
+                var thermalSlice = ExtractThermalSliceData2D(viewIndex, width, height);
+                if (thermalSlice == null)
+                {
+                    Logger.LogError("[CtCombinedViewer] Failed to extract thermal slice");
+                    return;
+                }
+
+                var options = _dataset.ThermalResults.Options;
+                var tempRange = options.TemperatureHot - options.TemperatureCold;
+                if (tempRange < 1e-5) tempRange = 1.0;
+
+                Parallel.For(0, height, y =>
+                {
+                    for (var x = 0; x < width; x++)
+                    {
+                        var i = y * width + x;
+                        var temp = thermalSlice[x, y];
+                        var normalizedTemp = (temp - options.TemperatureCold) / tempRange;
+                        var colorRgb = ApplyColorMap((float)Math.Clamp(normalizedTemp, 0.0, 1.0), colorMapIndex);
+
+                        rgbaData[i * 4] = (byte)(colorRgb.X * 255);
+                        rgbaData[i * 4 + 1] = (byte)(colorRgb.Y * 255);
+                        rgbaData[i * 4 + 2] = (byte)(colorRgb.Z * 255);
+                        rgbaData[i * 4 + 3] = 255;
+                    }
+                });
+
+                // Draw isocontours on thermal field
+                if (ShowThermalIsocontours) DrawThermalIsocontours(viewIndex, thermalSlice, rgbaData, width, height);
+            }
+            else // Grayscale Mode
+            {
+                var rawGrayscaleData = ExtractSliceData(viewIndex, width, height);
+                var minWL = _windowLevel - _windowWidth / 2;
+                var rangeWL = _windowWidth;
+                if (rangeWL < 1e-5f) rangeWL = 255f;
+
+                Parallel.For(0, height, y =>
+                {
+                    for (var x = 0; x < width; x++)
+                    {
+                        var i = y * width + x;
+                        var rawValue = rawGrayscaleData[i];
+                        var wlValue = (rawValue - minWL) / rangeWL;
+                        var colorRgb = ApplyColorMap((float)Math.Clamp(wlValue, 0.0, 1.0), colorMapIndex);
+
+                        rgbaData[i * 4] = (byte)(colorRgb.X * 255);
+                        rgbaData[i * 4 + 1] = (byte)(colorRgb.Y * 255);
+                        rgbaData[i * 4 + 2] = (byte)(colorRgb.Z * 255);
+                        rgbaData[i * 4 + 3] = 255;
+                    }
+                });
+            }
+
+            // Apply overlays (materials, segmentation, etc.)
             byte[] labelData = null;
             if (_dataset.LabelData != null) labelData = ExtractLabelSliceData(viewIndex, width, height);
 
             var currentSlice = viewIndex switch { 0 => _sliceZ, 1 => _sliceY, 2 => _sliceX, _ => -1 };
-
             var (isExternalPreviewActive, full3DPreviewMask, previewColor) = CtImageStackTools.GetPreviewData(_dataset);
             var externalPreviewMask = isExternalPreviewActive
                 ? ExtractPreviewSlice(full3DPreviewMask, viewIndex, width, height)
@@ -1048,33 +1160,19 @@ public class CtCombinedViewer : IDatasetViewer, IDisposable
 
             var (is2DThresholdPreview, minThreshold, maxThreshold, thresholdColor) =
                 CtImageStackTools.Get2DThresholdPreviewState();
+            var rawGrayscaleForThreshold = is2DThresholdPreview && CurrentSliceDisplayMode == SliceDisplayMode.Grayscale
+                ? ExtractSliceData(viewIndex, width, height)
+                : null;
 
             var segmentationPreviewMask = _interactiveSegmentation?.GetPreviewMask(currentSlice, viewIndex);
             var committedSelectionMask = _interactiveSegmentation?.GetCommittedSelectionMask(currentSlice, viewIndex);
-
-            var rgbaData = new byte[width * height * 4];
             var targetMaterial =
                 _dataset.Materials.FirstOrDefault(m => m.ID == _interactiveSegmentation.TargetMaterialId);
 
-            var minWL = _windowLevel - _windowWidth / 2;
-            var rangeWL = _windowWidth;
-            if (rangeWL < 1e-5f) rangeWL = 1e-5f;
-
-            // ADDED: Get the current colormap index from the 3D viewer (or default to 0)
-            var colorMapIndex = VolumeViewer?.ColorMapIndex ?? 0;
-
             for (var i = 0; i < width * height; i++)
             {
-                var rawValue = rawGrayscaleData[i];
-
-                // Apply window/level
-                var wlValue = (rawValue - minWL) / rangeWL * 255f;
-                var displayValue = (byte)Math.Clamp(wlValue, 0, 255);
-
-                // MODIFIED: Apply colormap to the normalized intensity
-                var normalizedIntensity = displayValue / 255f;
-                var colorMapRgb = ApplyColorMap(normalizedIntensity, colorMapIndex);
-                var finalColor = new Vector4(colorMapRgb.X, colorMapRgb.Y, colorMapRgb.Z, 1.0f);
+                var baseColor = new Vector4(rgbaData[i * 4] / 255f, rgbaData[i * 4 + 1] / 255f,
+                    rgbaData[i * 4 + 2] / 255f, 1.0f);
 
                 // Materials overlay
                 if (labelData != null && labelData[i] > 0)
@@ -1082,43 +1180,45 @@ public class CtCombinedViewer : IDatasetViewer, IDisposable
                     var material = _dataset.Materials.FirstOrDefault(m => m.ID == labelData[i]);
                     if (material != null && GetMaterialVisibility(material.ID))
                     {
-                        var opacity = GetMaterialOpacity(material.ID);
+                        var opacity = GetMaterialOpacity(material.ID) * 0.4f; // Reduce opacity for better visibility
                         var matColor = new Vector4(material.Color.X, material.Color.Y, material.Color.Z, 1.0f);
-                        finalColor = Vector4.Lerp(finalColor, matColor, opacity);
+                        baseColor = Vector4.Lerp(baseColor, matColor, opacity);
                     }
                 }
 
-                // Committed selection overlay
+                // Other overlays (segmentation, threshold, etc.)
                 if (committedSelectionMask != null && committedSelectionMask[i] > 0)
                 {
                     var selColor = targetMaterial?.Color ?? new Vector4(0.8f, 0.8f, 0.0f, 1.0f);
-                    finalColor = Vector4.Lerp(finalColor, new Vector4(selColor.X, selColor.Y, selColor.Z, 1.0f), 0.4f);
+                    baseColor = Vector4.Lerp(baseColor, new Vector4(selColor.X, selColor.Y, selColor.Z, 1.0f), 0.4f);
                 }
 
-                // 2D threshold preview
-                if (is2DThresholdPreview && rawValue >= minThreshold && rawValue <= maxThreshold)
+                if (is2DThresholdPreview && rawGrayscaleForThreshold != null &&
+                    CurrentSliceDisplayMode == SliceDisplayMode.Grayscale)
                 {
-                    var tColorVec = new Vector4(thresholdColor.X, thresholdColor.Y, thresholdColor.Z, 1.0f);
-                    finalColor = Vector4.Lerp(finalColor, tColorVec, 0.5f);
+                    var rawValue = rawGrayscaleForThreshold[i];
+                    if (rawValue >= minThreshold && rawValue <= maxThreshold)
+                    {
+                        var tColorVec = new Vector4(thresholdColor.X, thresholdColor.Y, thresholdColor.Z, 1.0f);
+                        baseColor = Vector4.Lerp(baseColor, tColorVec, 0.5f);
+                    }
                 }
 
-                // External 3D preview
                 if (isExternalPreviewActive && externalPreviewMask != null && externalPreviewMask[i] > 0)
                 {
                     var previewRgba = new Vector4(previewColor.X, previewColor.Y, previewColor.Z, 1.0f);
-                    finalColor = Vector4.Lerp(finalColor, previewRgba, 0.5f);
+                    baseColor = Vector4.Lerp(baseColor, previewRgba, 0.5f);
                 }
 
-                // Live segmentation preview
                 if (segmentationPreviewMask != null && segmentationPreviewMask[i] > 0)
                 {
                     var segColor = targetMaterial?.Color ?? new Vector4(1, 0, 0, 1);
-                    finalColor = Vector4.Lerp(finalColor, new Vector4(segColor.X, segColor.Y, segColor.Z, 1.0f), 0.6f);
+                    baseColor = Vector4.Lerp(baseColor, new Vector4(segColor.X, segColor.Y, segColor.Z, 1.0f), 0.6f);
                 }
 
-                rgbaData[i * 4] = (byte)(finalColor.X * 255);
-                rgbaData[i * 4 + 1] = (byte)(finalColor.Y * 255);
-                rgbaData[i * 4 + 2] = (byte)(finalColor.Z * 255);
+                rgbaData[i * 4] = (byte)(baseColor.X * 255);
+                rgbaData[i * 4 + 1] = (byte)(baseColor.Y * 255);
+                rgbaData[i * 4 + 2] = (byte)(baseColor.Z * 255);
                 rgbaData[i * 4 + 3] = 255;
             }
 
@@ -1128,6 +1228,107 @@ public class CtCombinedViewer : IDatasetViewer, IDisposable
         catch (Exception ex)
         {
             Logger.LogError($"[CtCombinedViewer] Error updating texture: {ex.Message}");
+        }
+    }
+
+    private void DrawThermalIsocontours(int viewIndex, float[,] thermalSlice, byte[] rgbaData, int width, int height)
+    {
+        // Get cached contours or generate new ones
+        var currentKey = (viewIndex == 0 ? _sliceZ : viewIndex == 1 ? _sliceY : _sliceX, NumThermalIsocontours);
+        List<(Vector2, Vector2)> cachedContours = null;
+        (int slice, int numContours) cachedKey = (-1, -1);
+
+        switch (viewIndex)
+        {
+            case 0:
+                cachedContours = _cachedIsocontoursXY;
+                cachedKey = _cachedKeyXY;
+                break;
+            case 1:
+                cachedContours = _cachedIsocontoursXZ;
+                cachedKey = _cachedKeyXZ;
+                break;
+            case 2:
+                cachedContours = _cachedIsocontoursYZ;
+                cachedKey = _cachedKeyYZ;
+                break;
+        }
+
+        if (currentKey != cachedKey || cachedContours.Count == 0)
+        {
+            // Regenerate contours
+            cachedContours.Clear();
+
+            var options = _dataset.ThermalResults.Options;
+            var tempRange = options.TemperatureHot - options.TemperatureCold;
+
+            for (var i = 1; i <= NumThermalIsocontours; i++)
+            {
+                var isovalue = options.TemperatureCold + i * tempRange / (NumThermalIsocontours + 1);
+                var lines = IsosurfaceGenerator.GenerateIsocontours(thermalSlice, (float)isovalue);
+                cachedContours.AddRange(lines);
+            }
+
+            // Update cache
+            switch (viewIndex)
+            {
+                case 0:
+                    _cachedIsocontoursXY = cachedContours;
+                    _cachedKeyXY = currentKey;
+                    break;
+                case 1:
+                    _cachedIsocontoursXZ = cachedContours;
+                    _cachedKeyXZ = currentKey;
+                    break;
+                case 2:
+                    _cachedIsocontoursYZ = cachedContours;
+                    _cachedKeyYZ = currentKey;
+                    break;
+            }
+        }
+
+        // Draw cached contours onto the image
+        foreach (var (p1, p2) in cachedContours)
+            DrawLineOnImage(rgbaData, width, height,
+                (int)p1.X, (int)p1.Y, (int)p2.X, (int)p2.Y,
+                255, 255, 255, 255); // White contours
+    }
+
+    private void DrawLineOnImage(byte[] imageData, int width, int height,
+        int x0, int y0, int x1, int y1, byte r, byte g, byte b, byte a)
+    {
+        // Bresenham's line algorithm
+        var dx = Math.Abs(x1 - x0);
+        var dy = Math.Abs(y1 - y0);
+        var sx = x0 < x1 ? 1 : -1;
+        var sy = y0 < y1 ? 1 : -1;
+        var err = dx - dy;
+
+        while (true)
+        {
+            if (x0 >= 0 && x0 < width && y0 >= 0 && y0 < height)
+            {
+                var idx = (y0 * width + x0) * 4;
+                imageData[idx + 0] = r;
+                imageData[idx + 1] = g;
+                imageData[idx + 2] = b;
+                imageData[idx + 3] = a;
+            }
+
+            if (x0 == x1 && y0 == y1) break;
+
+            var e2 = 2 * err;
+            if (e2 > -dy)
+            {
+                err -= dy;
+                x0 += sx;
+            }
+
+            if (e2 < dx)
+            {
+                err += dx;
+                y0 += sy;
+            }
         }
     }
 
@@ -1393,6 +1594,85 @@ public class CtCombinedViewer : IDatasetViewer, IDisposable
         var wing2 = tip - normalized * 8 - perpendicular * 4;
 
         dl.AddTriangleFilled(tip, wing1, wing2, color);
+    }
+
+    private float[,] ExtractThermalSliceData2D(int viewIndex, int width, int height)
+    {
+        var thermalField = _dataset.ThermalResults?.TemperatureField;
+        if (thermalField == null) return null;
+
+        var data = new float[width, height];
+
+        try
+        {
+            switch (viewIndex)
+            {
+                case 0: // XY slice
+                    if (_sliceZ >= thermalField.GetLength(2)) return null;
+                    Parallel.For(0, height, y =>
+                    {
+                        if (y < thermalField.GetLength(1))
+                            for (var x = 0; x < width && x < thermalField.GetLength(0); x++)
+                                data[x, y] = thermalField[x, y, _sliceZ];
+                    });
+                    break;
+                case 1: // XZ slice
+                    if (_sliceY >= thermalField.GetLength(1)) return null;
+                    Parallel.For(0, height, z =>
+                    {
+                        if (z < thermalField.GetLength(2))
+                            for (var x = 0; x < width && x < thermalField.GetLength(0); x++)
+                                data[x, z] = thermalField[x, _sliceY, z];
+                    });
+                    break;
+                case 2: // YZ slice
+                    if (_sliceX >= thermalField.GetLength(0)) return null;
+                    Parallel.For(0, height, z =>
+                    {
+                        if (z < thermalField.GetLength(2))
+                            for (var y = 0; y < width && y < thermalField.GetLength(1); y++)
+                                data[y, z] = thermalField[_sliceX, y, z];
+                    });
+                    break;
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError($"[CtCombinedViewer] Error extracting thermal slice: {ex.Message}");
+            return null;
+        }
+
+        return data;
+    }
+
+    private void DrawColorScaleLegend(ImDrawListPtr dl, Vector2 pos, Vector2 size)
+    {
+        var results = _dataset.ThermalResults;
+        if (results == null) return;
+
+        var colorMapIndex = VolumeViewer?.ColorMapIndex ?? 0;
+
+        // Draw color gradient
+        var steps = 50;
+        for (var i = 0; i < steps; i++)
+        {
+            var t = (float)i / (steps - 1);
+            var colorRgb = ApplyColorMap(t, colorMapIndex);
+            var color = new Vector4(colorRgb.X, colorRgb.Y, colorRgb.Z, 1.0f);
+
+            var y1 = pos.Y + size.Y * (1.0f - t - 1.0f / steps);
+            var y2 = pos.Y + size.Y * (1.0f - t);
+
+            dl.AddRectFilled(new Vector2(pos.X, y1), new Vector2(pos.X + size.X, y2), ImGui.GetColorU32(color));
+        }
+
+        dl.AddRect(pos, pos + size, 0xFFFFFFFF);
+
+        var tempHot = results.Options.TemperatureHot;
+        var tempCold = results.Options.TemperatureCold;
+
+        dl.AddText(new Vector2(pos.X + size.X + 5, pos.Y - 5), 0xFFFFFFFF, $"{tempHot:F0}K");
+        dl.AddText(new Vector2(pos.X + size.X + 5, pos.Y + size.Y - 10), 0xFFFFFFFF, $"{tempCold:F0}K");
     }
 
     private void DrawScaleBar(ImDrawListPtr dl, Vector2 canvasPos, Vector2 canvasSize, float zoom, int imageWidth,

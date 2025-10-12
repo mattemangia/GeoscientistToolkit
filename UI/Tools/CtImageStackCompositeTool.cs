@@ -196,7 +196,7 @@ public class CtImageStackCompositeTool : IDatasetTools, IDisposable
                         Description = "Simulate steady-state heat flow to find effective thermal conductivity.",
                         Tool = new ThermalConductivityTool(),
                         Category = ToolCategory.Analysis
-                    },
+                    }
                 }
             },
             {

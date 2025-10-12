@@ -2,6 +2,8 @@
 
 using System.IO.Compression;
 using System.Numerics;
+using GeoscientistToolkit.Analysis.NMR;
+using GeoscientistToolkit.Analysis.ThermalConductivity;
 using GeoscientistToolkit.Data;
 using GeoscientistToolkit.Data.AcousticVolume;
 using GeoscientistToolkit.Data.CtImageStack;
@@ -43,6 +45,7 @@ public class ProjectManager
     public void NotifyDatasetDataChanged(Dataset dataset)
     {
         DatasetDataChanged?.Invoke(dataset);
+        HasUnsavedChanges = true;
     }
 
     public void NewProject()
@@ -352,6 +355,78 @@ public class ProjectManager
 
                     Logger.Log($"Restored {ctDataset.Materials.Count} materials for dataset: {ctDto.Name}");
                 }
+
+                // --- NEW: Deserialize simulation results ---
+                if (ctDto.NmrResults != null)
+                {
+                    var nr = new NMRResults(ctDto.NmrResults.TotalSteps > 0 ? ctDto.NmrResults.TotalSteps : 0)
+                    {
+                        TimePoints = ctDto.NmrResults.TimePoints,
+                        Magnetization = ctDto.NmrResults.Magnetization,
+                        T2Histogram = ctDto.NmrResults.T2Histogram,
+                        T2HistogramBins = ctDto.NmrResults.T2HistogramBins,
+                        T1Histogram = ctDto.NmrResults.T1Histogram,
+                        T1HistogramBins = ctDto.NmrResults.T1HistogramBins,
+                        HasT1T2Data = ctDto.NmrResults.HasT1T2Data,
+                        PoreSizes = ctDto.NmrResults.PoreSizes,
+                        PoreSizeDistribution = ctDto.NmrResults.PoreSizeDistribution,
+                        MeanT2 = ctDto.NmrResults.MeanT2,
+                        GeometricMeanT2 = ctDto.NmrResults.GeometricMeanT2,
+                        T2PeakValue = ctDto.NmrResults.T2PeakValue,
+                        NumberOfWalkers = ctDto.NmrResults.NumberOfWalkers,
+                        TotalSteps = ctDto.NmrResults.TotalSteps,
+                        TimeStep = ctDto.NmrResults.TimeStep,
+                        PoreMaterial = ctDto.NmrResults.PoreMaterial,
+                        MaterialRelaxivities = ctDto.NmrResults.MaterialRelaxivities,
+                        ComputationTime = TimeSpan.FromSeconds(ctDto.NmrResults.ComputationTimeSeconds),
+                        ComputationMethod = ctDto.NmrResults.ComputationMethod
+                    };
+
+                    if (nr.HasT1T2Data && ctDto.NmrResults.T1T2MapData != null)
+                    {
+                        var t1Count = ctDto.NmrResults.T1T2Map_T1Count;
+                        var t2Count = ctDto.NmrResults.T1T2Map_T2Count;
+                        if (t1Count > 0 && t2Count > 0)
+                        {
+                            nr.T1T2Map = new double[t1Count, t2Count];
+                            Buffer.BlockCopy(ctDto.NmrResults.T1T2MapData, 0, nr.T1T2Map, 0,
+                                t1Count * t2Count * sizeof(double));
+                        }
+                    }
+
+                    ctDataset.NmrResults = nr;
+                    Logger.Log($"Restored NMR results for dataset: {ctDto.Name}");
+                }
+
+                if (ctDto.ThermalResults != null)
+                {
+                    var tr = new ThermalResults
+                    {
+                        EffectiveConductivity = ctDto.ThermalResults.EffectiveConductivity,
+                        MaterialConductivities = ctDto.ThermalResults.MaterialConductivities,
+                        AnalyticalEstimates = ctDto.ThermalResults.AnalyticalEstimates,
+                        ComputationTime = TimeSpan.FromSeconds(ctDto.ThermalResults.ComputationTimeSeconds),
+                        IterationsPerformed = ctDto.ThermalResults.IterationsPerformed,
+                        FinalError = ctDto.ThermalResults.FinalError
+                    };
+
+                    if (ctDto.ThermalResults.TemperatureFieldData != null)
+                    {
+                        var w = ctDto.ThermalResults.TempField_W;
+                        var h = ctDto.ThermalResults.TempField_H;
+                        var d = ctDto.ThermalResults.TempField_D;
+                        if (w > 0 && h > 0 && d > 0)
+                        {
+                            tr.TemperatureField = new float[w, h, d];
+                            Buffer.BlockCopy(ctDto.ThermalResults.TemperatureFieldData, 0, tr.TemperatureField, 0,
+                                w * h * d * sizeof(float));
+                        }
+                    }
+
+                    ctDataset.ThermalResults = tr;
+                    Logger.Log($"Restored Thermal results for dataset: {ctDto.Name}");
+                }
+
 
                 if (ctDataset.IsMissing)
                     Logger.LogWarning($"Source folder or file not found for dataset: {ctDto.Name} at {ctDto.FilePath}");
