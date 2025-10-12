@@ -306,7 +306,12 @@ fragment float4 main0(VertexOut in [[stage_in]],
 
         foreach (var kvp in _setsByView) kvp.Value?.Dispose();
 
-        if (Context != IntPtr.Zero) ImGui.DestroyContext(Context);
+        if (Context != IntPtr.Zero)
+        {
+            // CRITICAL FIX: Unregister the controller before destroying its context.
+            VeldridManager.UnregisterImGuiController(this);
+            ImGui.DestroyContext(Context);
+        }
     }
 
     // ------------------------------------------------------------------

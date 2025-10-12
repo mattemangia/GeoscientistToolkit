@@ -63,6 +63,15 @@ public static class VeldridManager
     }
 
     /// <summary>
+    ///     Unregisters an ImGuiController, typically called when it's being disposed.
+    ///     This is crucial for preventing memory errors with pop-out windows.
+    /// </summary>
+    public static void UnregisterImGuiController(ImGuiController controller)
+    {
+        if (controller?.Context != IntPtr.Zero) _controllersByContext.Remove(controller.Context);
+    }
+
+    /// <summary>
     ///     Enqueues an action to be executed on the main thread during the next frame.
     ///     This is useful for OpenGL operations that must happen on the rendering thread.
     /// </summary>

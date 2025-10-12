@@ -1,4 +1,4 @@
-﻿// GeoscientistToolkit/UI/PopOutWindow.cs (Fixed to share GraphicsDevice)
+﻿// GeoscientistToolkit/UI/PopOutWindow.cs (Enhanced with safer disposal)
 
 using GeoscientistToolkit.Util;
 using ImGuiNET;
@@ -20,6 +20,7 @@ public class PopOutWindow : IDisposable
     private readonly Sdl2Window _window;
     private Action _drawCallback;
     private bool _isDisposed;
+    private bool _isDisposing;
 
     public PopOutWindow(string title, int x, int y, int width, int height)
     {
@@ -68,15 +69,22 @@ public class PopOutWindow : IDisposable
         // Handle window resize
         _window.Resized += () =>
         {
-            if (_isDisposed) return;
+            if (_isDisposed || _isDisposing) return;
 
-            _swapchain.Resize((uint)_window.Width, (uint)_window.Height);
+            try
+            {
+                _swapchain.Resize((uint)_window.Width, (uint)_window.Height);
 
-            // Ensure we use the pop-out context for resize
-            var prevContext = ImGui.GetCurrentContext();
-            ImGui.SetCurrentContext(_imGuiController.Context);
-            _imGuiController.WindowResized(_window.Width, _window.Height);
-            ImGui.SetCurrentContext(prevContext);
+                // Ensure we use the pop-out context for resize
+                var prevContext = ImGui.GetCurrentContext();
+                ImGui.SetCurrentContext(_imGuiController.Context);
+                _imGuiController.WindowResized(_window.Width, _window.Height);
+                ImGui.SetCurrentContext(prevContext);
+            }
+            catch (Exception ex)
+            {
+                Logger.LogWarning($"Error during window resize: {ex.Message}");
+            }
         };
     }
 
@@ -85,24 +93,53 @@ public class PopOutWindow : IDisposable
 
     public void Dispose()
     {
-        if (_isDisposed) return;
-        _isDisposed = true;
+        if (_isDisposed || _isDisposing) return;
+        _isDisposing = true;
 
-        var graphicsDevice = VeldridManager.GraphicsDevice;
-        graphicsDevice?.WaitForIdle();
-
-        // Dispose in correct context
-        if (_imGuiController != null && _imGuiController.Context != IntPtr.Zero)
+        try
         {
-            var prevContext = ImGui.GetCurrentContext();
-            ImGui.SetCurrentContext(_imGuiController.Context);
-            _imGuiController.Dispose();
-            ImGui.SetCurrentContext(prevContext);
-        }
+            var graphicsDevice = VeldridManager.GraphicsDevice;
 
-        _commandList?.Dispose();
-        _swapchain?.Dispose();
-        _window?.Close();
+            // Wait for any pending GPU operations to complete
+            graphicsDevice?.WaitForIdle();
+
+            // Store the current context
+            var prevContext = ImGui.GetCurrentContext();
+
+            try
+            {
+                // Dispose the ImGuiController in its own context
+                if (_imGuiController != null && _imGuiController.Context != IntPtr.Zero)
+                {
+                    ImGui.SetCurrentContext(_imGuiController.Context);
+                    _imGuiController.Dispose();
+                }
+            }
+            finally
+            {
+                // Always restore the previous context, even if disposal threw an exception
+                // But only if the previous context wasn't the one we just destroyed
+                if (prevContext != IntPtr.Zero && prevContext != _imGuiController?.Context)
+                    ImGui.SetCurrentContext(prevContext);
+                else if (prevContext == _imGuiController?.Context && _mainContext != IntPtr.Zero)
+                    // If we were in the context we just destroyed, fall back to main context
+                    ImGui.SetCurrentContext(_mainContext);
+            }
+
+            // Dispose other resources
+            _commandList?.Dispose();
+            _swapchain?.Dispose();
+            _window?.Close();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning($"Error during PopOutWindow disposal: {ex.Message}");
+        }
+        finally
+        {
+            _isDisposed = true;
+            _isDisposing = false;
+        }
     }
 
     public void SetDrawCallback(Action callback)
@@ -112,17 +149,19 @@ public class PopOutWindow : IDisposable
 
     public void ProcessFrame()
     {
-        if (_isDisposed || !_window.Exists || _drawCallback == null) return;
+        if (_isDisposed || _isDisposing || !_window.Exists || _drawCallback == null)
+            return;
 
         var snapshot = _window.PumpEvents();
         if (!_window.Exists) return;
 
         // CRITICAL: Set the correct ImGui context for this window
         var previousContext = ImGui.GetCurrentContext();
-        ImGui.SetCurrentContext(_imGuiController.Context);
 
         try
         {
+            ImGui.SetCurrentContext(_imGuiController.Context);
+
             var graphicsDevice = VeldridManager.GraphicsDevice;
 
             _imGuiController.Update(1f / 60f, snapshot);
@@ -143,12 +182,20 @@ public class PopOutWindow : IDisposable
         catch (Exception ex)
         {
             // Log error but don't crash the application
-            Logger.Log($"Error in PopOutWindow.ProcessFrame: {ex.Message}");
+            Logger.LogWarning($"Error in PopOutWindow.ProcessFrame: {ex.Message}");
         }
         finally
         {
             // Always restore the previous context
-            if (previousContext != IntPtr.Zero) ImGui.SetCurrentContext(previousContext);
+            if (previousContext != IntPtr.Zero)
+                try
+                {
+                    ImGui.SetCurrentContext(previousContext);
+                }
+                catch (Exception ex)
+                {
+                    Logger.LogWarning($"Error restoring ImGui context: {ex.Message}");
+                }
         }
     }
 }
