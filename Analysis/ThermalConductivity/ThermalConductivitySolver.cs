@@ -539,13 +539,13 @@ __kernel void calculate_flux(
             // Use SIMD-optimized solver
             if (Avx2.IsSupported)
                 maxChange = UpdateTemperatureAVX2(tempCurrent, tempNext, labels, conductivities,
-                    W, H, D, dx, dy, dz, dt);
+                    W, H, D, dx, dy, dz, dt, token);
             else if (AdvSimd.IsSupported)
                 maxChange = UpdateTemperatureNEON(tempCurrent, tempNext, labels, conductivities,
-                    W, H, D, dx, dy, dz, dt);
+                    W, H, D, dx, dy, dz, dt, token);
             else
                 maxChange = UpdateTemperatureScalar(tempCurrent, tempNext, labels, conductivities,
-                    W, H, D, dx, dy, dz, dt);
+                    W, H, D, dx, dy, dz, dt, token);
 
             // Apply boundary conditions
             ApplyBoundaryConditions(tempNext, W, H, D, options);
@@ -596,7 +596,8 @@ __kernel void calculate_flux(
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static float UpdateTemperatureAVX2(float[] tempIn, float[] tempOut, ILabelVolumeData labels,
-        Dictionary<byte, float> conductivities, int W, int H, int D, float dx, float dy, float dz, float dt)
+        Dictionary<byte, float> conductivities, int W, int H, int D, float dx, float dy, float dz, float dt,
+        CancellationToken token)
     {
         float maxChange = 0;
         var dx2 = dx * dx;
@@ -604,8 +605,9 @@ __kernel void calculate_flux(
         var dz2 = dz * dz;
 
         var lockObj = new object();
+        var pOptions = new ParallelOptions { CancellationToken = token };
 
-        Parallel.For(1, D - 1, z =>
+        Parallel.For(1, D - 1, pOptions, z =>
         {
             float localMax = 0;
 
@@ -688,7 +690,8 @@ __kernel void calculate_flux(
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static float UpdateTemperatureNEON(float[] tempIn, float[] tempOut, ILabelVolumeData labels,
-        Dictionary<byte, float> conductivities, int W, int H, int D, float dx, float dy, float dz, float dt)
+        Dictionary<byte, float> conductivities, int W, int H, int D, float dx, float dy, float dz, float dt,
+        CancellationToken token)
     {
         float maxChange = 0;
         var dx2 = dx * dx;
@@ -696,8 +699,9 @@ __kernel void calculate_flux(
         var dz2 = dz * dz;
 
         var lockObj = new object();
+        var pOptions = new ParallelOptions { CancellationToken = token };
 
-        Parallel.For(1, D - 1, z =>
+        Parallel.For(1, D - 1, pOptions, z =>
         {
             float localMax = 0;
 
@@ -824,7 +828,8 @@ __kernel void calculate_flux(
     }
 
     private static float UpdateTemperatureScalar(float[] tempIn, float[] tempOut, ILabelVolumeData labels,
-        Dictionary<byte, float> conductivities, int W, int H, int D, float dx, float dy, float dz, float dt)
+        Dictionary<byte, float> conductivities, int W, int H, int D, float dx, float dy, float dz, float dt,
+        CancellationToken token)
     {
         float maxChange = 0;
         var dx2 = dx * dx;
@@ -832,8 +837,9 @@ __kernel void calculate_flux(
         var dz2 = dz * dz;
 
         var lockObj = new object();
+        var pOptions = new ParallelOptions { CancellationToken = token };
 
-        Parallel.For(1, D - 1, z =>
+        Parallel.For(1, D - 1, pOptions, z =>
         {
             float localMax = 0;
 
