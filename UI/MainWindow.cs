@@ -1,4 +1,4 @@
-// GeoscientistToolkit/UI/MainWindow.cs — Fixed save dialog type
+// GeoscientistToolkit/UI/MainWindow.cs
 
 using System.Numerics;
 using GeoscientistToolkit.Business;
@@ -15,6 +15,15 @@ namespace GeoscientistToolkit.UI;
 public class MainWindow
 {
     // ──────────────────────────────────────────────────────────────────────
+    // Events
+    // ──────────────────────────────────────────────────────────────────────
+    /// <summary>
+    ///     Event raised when the user confirms they want to exit the application.
+    ///     Application.cs subscribes to this to know when to stop the main loop.
+    /// </summary>
+    public event Action OnExitConfirmed;
+
+    // ──────────────────────────────────────────────────────────────────────
     // Fields & state
     // ──────────────────────────────────────────────────────────────────────
     private readonly DatasetPanel _datasets = new();
@@ -26,14 +35,14 @@ public class MainWindow
     private readonly SettingsWindow _settingsWindow = new();
     private readonly Volume3DDebugWindow _volume3DDebugWindow = new();
     private readonly MaterialLibraryWindow _materialLibraryWindow = new();
-    private readonly ImGuiWindowScreenshotTool _screenshotTool; // This tool is now self-sufficient
+    private readonly ImGuiWindowScreenshotTool _screenshotTool;
 
-    // File Dialogs - FIXED: Changed SaveFile dialog to correct type
+    // File Dialogs
     private readonly ImGuiFileDialog
         _loadProjectDialog = new("LoadProjectDlg", FileDialogType.OpenFile, "Load Project");
 
     private readonly ImGuiFileDialog _saveProjectDialog =
-        new("SaveProjectDlg", FileDialogType.SaveFile, "Save Project As"); // FIXED THIS LINE
+        new("SaveProjectDlg", FileDialogType.SaveFile, "Save Project As");
 
     private readonly List<DatasetViewPanel> _viewers = new();
     private readonly List<ThumbnailViewerPanel> _thumbnailViewers = new();
@@ -48,6 +57,10 @@ public class MainWindow
     private bool _showAboutPopup;
     private bool _showUnsavedChangesPopup;
     private Action _pendingAction;
+
+    // Window close handling
+    private bool _showWindowCloseDialog;
+    private bool _windowCloseDialogOpened;
 
     // Timers for auto-save and backup
     private float _autoSaveTimer;
@@ -65,7 +78,7 @@ public class MainWindow
         // Subscribe to Create GIS Shapefile events
         _datasets.OnCreateShapefileFromTable += gis => _shapefileCreationDialog.OpenFromTable(gis);
         _datasets.OnCreateEmptyShapefile += gis => _shapefileCreationDialog.OpenEmpty(gis);
-        // Initialize the screenshot tool. It will set its own static instance for global access.
+        // Initialize the screenshot tool
         _screenshotTool = new ImGuiWindowScreenshotTool();
     }
 
@@ -98,10 +111,18 @@ public class MainWindow
     // ──────────────────────────────────────────────────────────────────────
     // Per-frame entry
     // ──────────────────────────────────────────────────────────────────────
-    public void SubmitUI()
+    public void SubmitUI(bool windowCloseRequested = false)
     {
         VeldridManager.ProcessMainThreadActions();
         HandleTimers();
+
+        // Handle window close request from Application.cs (X button was clicked)
+        if (windowCloseRequested && !_windowCloseDialogOpened)
+        {
+            _showWindowCloseDialog = true;
+            _windowCloseDialogOpened = true;
+            Logger.Log("Window close requested - preparing to show ImGui dialog");
+        }
 
         var vp = ImGui.GetMainViewport();
         ImGui.SetNextWindowPos(vp.WorkPos);
@@ -186,7 +207,7 @@ public class MainWindow
         _metadataTableViewer.Submit();
         _materialLibraryWindow.Submit();
 
-        // The screenshot tool must be updated AFTER all other UI has been submitted.
+        // The screenshot tool must be updated AFTER all other UI has been submitted
         _screenshotTool.PostUpdate();
         _shapefileCreationDialog.Submit();
         ImGui.End();
@@ -259,17 +280,17 @@ public class MainWindow
     }
 
 #if !IMGUI_HAS_DOCK_BUILDER
-        private static class DockBuilderStub
+    private static class DockBuilderStub
+    {
+        private static bool _warned;
+        public static void WarnOnce()
         {
-            private static bool _warned;
-            public static void WarnOnce()
-            {
-                if (_warned) return;
-                _warned = true;
-                System.Diagnostics.Debug.WriteLine("[MainWindow] DockBuilder API not available. " +
-                                                  "Panels will float — upgrade to a docking build and define IMGUI_HAS_DOCK_BUILDER.");
-            }
+            if (_warned) return;
+            _warned = true;
+            System.Diagnostics.Debug.WriteLine("[MainWindow] DockBuilder API not available. " +
+                                              "Panels will float — upgrade to a docking build and define IMGUI_HAS_DOCK_BUILDER.");
         }
+    }
 #endif
 
     // ──────────────────────────────────────────────────────────────────────
@@ -398,9 +419,7 @@ public class MainWindow
             ImGui.Separator();
 
             if (ImGui.MenuItem("Export Metadata to CSV...")) _metadataTableViewer.Open();
-            // The export dialog will be handled within the viewer
             if (ImGui.MenuItem("Export Metadata to Excel...")) _metadataTableViewer.Open();
-            // The export dialog will be handled within the viewer
             ImGui.EndMenu();
         }
 
@@ -488,7 +507,6 @@ public class MainWindow
     private void OnSaveProjectAs()
     {
         _saveAsMode = true;
-        // IMPROVED: Open with default filename and .gtp extension
         var defaultName = string.IsNullOrEmpty(ProjectManager.Instance.ProjectName)
             ? "NewProject"
             : ProjectManager.Instance.ProjectName;
@@ -497,7 +515,17 @@ public class MainWindow
 
     private void TryExit()
     {
-        CheckForUnsavedChanges(() => Environment.Exit(0));
+        CheckForUnsavedChanges(ConfirmExit);
+    }
+
+    /// <summary>
+    ///     Called when exit has been confirmed (either from menu or window close dialog).
+    ///     Raises the OnExitConfirmed event which Application.cs listens to.
+    /// </summary>
+    private void ConfirmExit()
+    {
+        Logger.Log("Exit confirmed - invoking OnExitConfirmed event");
+        OnExitConfirmed?.Invoke();
     }
 
     private void CheckForUnsavedChanges(Action actionToPerform)
@@ -550,7 +578,7 @@ public class MainWindow
 
     private void SubmitPopups()
     {
-        // Welcome once per session - check settings
+        // Welcome once per session
         if (_showWelcome && SettingsManager.Instance.Settings.Appearance.ShowWelcomeOnStartup)
         {
             ImGui.OpenPopup("Welcome!");
@@ -574,15 +602,95 @@ public class MainWindow
             ImGui.EndPopup();
         }
 
-        // Unsaved changes popup
+        // ============================================================================
+        // Window close dialog (when user clicks X button with unsaved changes)
+        // ============================================================================
+        if (_showWindowCloseDialog)
+        {
+            ImGui.OpenPopup("Close Application?###WindowCloseDialog");
+            _showWindowCloseDialog = false;
+        }
+
+        ImGui.SetNextWindowPos(ImGui.GetMainViewport().GetCenter(), ImGuiCond.Appearing, new Vector2(0.5f, 0.5f));
+        if (ImGui.BeginPopupModal("Close Application?###WindowCloseDialog", ImGuiWindowFlags.AlwaysAutoResize))
+        {
+            ImGui.Text("Your project has unsaved changes.");
+            ImGui.Text("Do you want to save before closing?");
+            ImGui.Spacing();
+            ImGui.Separator();
+            ImGui.Spacing();
+
+            // Calculate button widths for consistent sizing
+            var buttonWidth = 150f;
+            var spacing = ImGui.GetStyle().ItemSpacing.X;
+            var totalWidth = buttonWidth * 3 + spacing * 2;
+            var cursorX = (ImGui.GetContentRegionAvail().X - totalWidth) * 0.5f;
+            if (cursorX > 0) ImGui.SetCursorPosX(ImGui.GetCursorPosX() + cursorX);
+
+            // Save & Close button
+            if (ImGui.Button("Save & Close", new Vector2(buttonWidth, 0)))
+            {
+                Logger.Log("User chose 'Save & Close' from window close dialog");
+                OnSaveProject();
+                _windowCloseDialogOpened = false;
+                ImGui.CloseCurrentPopup();
+                ConfirmExit();
+            }
+
+            ImGui.SameLine();
+
+            // Close Without Saving button
+            if (ImGui.Button("Don't Save", new Vector2(buttonWidth, 0)))
+            {
+                Logger.Log("User chose 'Don't Save' from window close dialog");
+                ProjectManager.Instance.HasUnsavedChanges = false;
+                _windowCloseDialogOpened = false;
+                ImGui.CloseCurrentPopup();
+                ConfirmExit();
+            }
+
+            ImGui.SameLine();
+
+            // Cancel button
+            if (ImGui.Button("Cancel", new Vector2(buttonWidth, 0)))
+            {
+                Logger.Log("User cancelled window close");
+                _windowCloseDialogOpened = false;
+                ImGui.CloseCurrentPopup();
+                // Don't call ConfirmExit() - user cancelled the close operation
+            }
+
+            // Keyboard shortcuts
+            if (ImGui.IsKeyReleased(ImGuiKey.Enter) || ImGui.IsKeyReleased(ImGuiKey.KeypadEnter))
+            {
+                Logger.Log("User pressed Enter in window close dialog - saving and closing");
+                OnSaveProject();
+                _windowCloseDialogOpened = false;
+                ImGui.CloseCurrentPopup();
+                ConfirmExit();
+            }
+
+            if (ImGui.IsKeyReleased(ImGuiKey.Escape))
+            {
+                Logger.Log("User pressed Escape in window close dialog - cancelling");
+                _windowCloseDialogOpened = false;
+                ImGui.CloseCurrentPopup();
+            }
+
+            ImGui.EndPopup();
+        }
+
+        // ============================================================================
+        // Regular unsaved changes popup (from File→Exit or other menu actions)
+        // ============================================================================
         if (_showUnsavedChangesPopup)
         {
-            ImGui.OpenPopup("Unsaved Changes");
+            ImGui.OpenPopup("Unsaved Changes###RegularUnsavedChanges");
             _showUnsavedChangesPopup = false;
         }
 
         ImGui.SetNextWindowPos(ImGui.GetMainViewport().GetCenter(), ImGuiCond.Appearing, new Vector2(0.5f, 0.5f));
-        if (ImGui.BeginPopupModal("Unsaved Changes", ImGuiWindowFlags.AlwaysAutoResize))
+        if (ImGui.BeginPopupModal("Unsaved Changes###RegularUnsavedChanges", ImGuiWindowFlags.AlwaysAutoResize))
         {
             ImGui.Text("Your project has unsaved changes. Do you want to save them?");
             ImGui.Spacing();
@@ -629,7 +737,9 @@ public class MainWindow
             ImGui.EndPopup();
         }
 
+        // ============================================================================
         // About popup
+        // ============================================================================
         if (_showAboutPopup) ImGui.OpenPopup("About GeoscientistToolkit");
 
         ImGui.SetNextWindowPos(ImGui.GetMainViewport().GetCenter(), ImGuiCond.Appearing, new Vector2(0.5f, 0.5f));

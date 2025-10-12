@@ -477,6 +477,37 @@ public class CtImageStackDataset : Dataset, ISerializableDataset
         return Path.Combine(FilePath, $"{folderName}.Labels.bin");
     }
 
+    /// <summary>
+    ///     Converts the pixel size to meters based on the unit
+    /// </summary>
+    public double GetPixelSizeInMeters()
+    {
+        var unit = Unit?.ToLower().Trim() ?? "µm";
+
+        // Handle various unit formats
+        if (unit == "µm" || unit == "um" || unit == "micron" || unit == "microns") return PixelSize * 1e-6; // µm to m
+
+        if (unit == "mm" || unit == "millimeter" || unit == "millimeters") return PixelSize * 1e-3; // mm to m
+
+        if (unit == "nm" || unit == "nanometer" || unit == "nanometers") return PixelSize * 1e-9; // nm to m
+
+        if (unit == "m" || unit == "meter" || unit == "meters") return PixelSize; // already in m
+
+        if (unit == "cm" || unit == "centimeter" || unit == "centimeters") return PixelSize * 1e-2; // cm to m
+
+        // Default to µm if unknown
+        Logger.LogWarning($"[CtImageStackDataset] Unknown unit '{Unit}', assuming micrometers");
+        return PixelSize * 1e-6;
+    }
+
+    /// <summary>
+    ///     Gets the pixel size in micrometers (standard unit for NMR)
+    /// </summary>
+    public double GetPixelSizeInMicrometers()
+    {
+        return GetPixelSizeInMeters() * 1e6;
+    }
+
     private bool IsImageFile(string path)
     {
         var ext = Path.GetExtension(path).ToLower();

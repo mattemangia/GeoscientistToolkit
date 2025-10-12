@@ -162,7 +162,29 @@ public sealed class MaterialLibrary
             },
             IsUserMaterial = false
         });
-
+// --- OIL -------------------------------------------------
+        _materials.Add(new PhysicalMaterial
+        {
+            Name = "Crude Oil (medium, 20°C)",
+            Phase = PhaseType.Liquid,
+            Viscosity_Pa_s = 1.0e-2, // Pa·s (~10 cP for medium crude)
+            Density_kg_m3 = 850, // kg/m³ (typical for ~35° API gravity)
+            ThermalConductivity_W_mK = 0.135, // W/mK
+            SpecificHeatCapacity_J_kgK = 2090, // J/kgK
+            PoissonRatio = 0.5, // incompressible fluid approximation
+            Vp_m_s = 1350, // speed of sound in liquid oil
+            AcousticImpedance_MRayl = 1.15, // ρ × Vp
+            ElectricalResistivity_Ohm_m = 1e12, // Very high, good insulator
+            Notes =
+                "Medium crude oil at ambient conditions. Properties vary significantly with API gravity, temperature, dissolved gas, and composition.",
+            Sources = new List<string>
+            {
+                "McCain, W.D., 1990. The Properties of Petroleum Fluids, 2nd ed., PennWell Books.",
+                "Standing, M.B., 1977. Volumetric and Phase Behavior of Oil Field Hydrocarbon Systems, SPE.",
+                "Mehrotra, A.K., 1990. Development of mixing rules for predicting the viscosity of bitumen and its fractions blended with toluene. Canadian Journal of Chemical Engineering, 68(5), pp.839-845."
+            },
+            IsUserMaterial = false
+        });
         // --- GASES -----------------------------------------------
         _materials.Add(new PhysicalMaterial
         {

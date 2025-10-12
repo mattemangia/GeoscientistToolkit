@@ -119,9 +119,13 @@ __kernel void calculate_flux(
         var sw = Stopwatch.StartNew();
         var dataset = options.Dataset;
 
-        Logger.Log($"[ThermalSolver] Starting thermal analysis for {dataset.Name}");
-        Logger.Log($"[ThermalSolver] Boundary: Hot={options.TemperatureHot}°C, Cold={options.TemperatureCold}°C");
+        Logger.Log("[ThermalSolver] ========== STARTING THERMAL ANALYSIS ==========");
+        Logger.Log($"[ThermalSolver] Dataset: {dataset.Name}");
+        Logger.Log($"[ThermalSolver] Dimensions: {dataset.Width}x{dataset.Height}x{dataset.Depth} voxels");
+        Logger.Log($"[ThermalSolver] Boundary: Hot={options.TemperatureHot:F2}°C, Cold={options.TemperatureCold:F2}°C");
         Logger.Log($"[ThermalSolver] Direction: {options.HeatFlowDirection}");
+        Logger.Log($"[ThermalSolver] Max Iterations: {options.MaxIterations}");
+        Logger.Log($"[ThermalSolver] Tolerance: {options.ConvergenceTolerance:E2}");
         Logger.Log("[ThermalSolver] EXCLUDING EXTERIOR MATERIAL (ID: 0) from simulation");
 
         var W = dataset.Width;
@@ -130,10 +134,13 @@ __kernel void calculate_flux(
         var voxelSize = dataset.PixelSize * 1e-6; // μm to m
 
         // Initialize temperature field
+        Logger.Log("[ThermalSolver] [1/6] Initializing temperature field...");
         progress?.Report(0.05f);
         var temperature = InitializeTemperatureField(W, H, D, options);
+        Logger.Log($"[ThermalSolver] Temperature field initialized: {temperature.Length:N0} voxels");
 
         // Get material conductivities (excludes exterior ID: 0)
+        Logger.Log("[ThermalSolver] [2/6] Loading material properties...");
         progress?.Report(0.10f);
         var conductivities = GetMaterialConductivities(dataset, options);
 
@@ -144,18 +151,21 @@ __kernel void calculate_flux(
             Logger.Log($"  - {mat.Name} (ID: {mat.ID}): k={conductivities[mat.ID]:F4} W/m·K");
 
         // Solve steady-state or transient
+        Logger.Log("[ThermalSolver] [3/6] Starting solver...");
         progress?.Report(0.15f);
         float[,,] temperatureField;
 
         if (options.SolverBackend == SolverBackend.OpenCL && TryInitializeOpenCL())
         {
-            Logger.Log("[ThermalSolver] Using GPU acceleration");
+            Logger.Log("[ThermalSolver] Using GPU acceleration (OpenCL)");
             temperatureField = SolveGPU(temperature, dataset.LabelData, conductivities,
                 W, H, D, voxelSize, options, progress, token);
         }
         else
         {
-            Logger.Log("[ThermalSolver] Using CPU solver");
+            var backend = Avx2.IsSupported ? "CPU (AVX2 SIMD)" :
+                AdvSimd.IsSupported ? "CPU (NEON SIMD)" : "CPU (Scalar)";
+            Logger.Log($"[ThermalSolver] Using {backend}");
             temperatureField = SolveCPU(temperature, dataset.LabelData, conductivities,
                 W, H, D, voxelSize, options, progress, token);
         }
@@ -163,16 +173,23 @@ __kernel void calculate_flux(
         token.ThrowIfCancellationRequested();
 
         // Calculate effective thermal conductivity
+        Logger.Log("[ThermalSolver] [4/6] Calculating effective conductivity...");
         progress?.Report(0.90f);
         var keff = CalculateEffectiveConductivity(temperatureField, dataset.LabelData,
             conductivities, W, H, D, voxelSize, options);
+        Logger.Log($"[ThermalSolver] k_eff = {keff:F6} W/m·K");
 
         // Calculate analytical estimates for comparison
+        Logger.Log("[ThermalSolver] [5/6] Computing analytical estimates...");
+        progress?.Report(0.95f);
         var analyticalEstimates = CalculateAnalyticalEstimates(dataset, conductivities, options);
 
+        Logger.Log("[ThermalSolver] [6/6] Finalizing...");
         sw.Stop();
-        Logger.Log($"[ThermalSolver] Complete in {sw.ElapsedMilliseconds}ms");
+        Logger.Log($"[ThermalSolver] ========== COMPLETE in {sw.ElapsedMilliseconds}ms ==========");
         Logger.Log($"[ThermalSolver] Effective conductivity: {keff:F6} W/m·K");
+
+        progress?.Report(1.0f);
 
         return new ThermalResults(options)
         {
@@ -501,11 +518,17 @@ __kernel void calculate_flux(
         var max_k = conductivities.Where(kvp => kvp.Key != 0).Max(kvp => kvp.Value);
         var dt = 0.1f * Math.Min(dx2, Math.Min(dy2, dz2)) / max_k;
 
+        Logger.Log($"[ThermalSolver] Time step dt = {dt:E3} s");
+        Logger.Log($"[ThermalSolver] Voxel spacing: dx={dx:E3}, dy={dy:E3}, dz={dz:E3} m");
+
         var iterations = options.MaxIterations;
         var tolerance = (float)options.ConvergenceTolerance;
 
         var tempCurrent = (float[])temperature.Clone();
         var tempNext = new float[temperature.Length];
+
+        var lastLogTime = Stopwatch.GetTimestamp();
+        var converged = false;
 
         for (var iter = 0; iter < iterations; iter++)
         {
@@ -532,21 +555,42 @@ __kernel void calculate_flux(
             tempCurrent = tempNext;
             tempNext = tmp;
 
-            if (iter % 100 == 0)
+            // Update progress more frequently (every 10 iterations)
+            if (iter % 10 == 0)
             {
-                progress?.Report(0.15f + 0.70f * iter / iterations);
-                Logger.Log($"[ThermalSolver] Iteration {iter}/{iterations}, max change: {maxChange:E3}");
+                var iterProgress = 0.15f + 0.70f * iter / iterations;
+                progress?.Report(iterProgress);
             }
 
-            // Check convergence
-            if (maxChange < tolerance)
+            // Log every 50 iterations or when convergence check happens
+            var currentTime = Stopwatch.GetTimestamp();
+            var elapsedMs = (currentTime - lastLogTime) * 1000.0 / Stopwatch.Frequency;
+
+            if (iter % 50 == 0 || elapsedMs > 2000) // Log every 50 iters or every 2 seconds
             {
-                Logger.Log($"[ThermalSolver] Converged after {iter} iterations");
-                break;
+                var iterProgress = (float)iter / iterations * 100.0f;
+                Logger.Log(
+                    $"[ThermalSolver] Iteration {iter}/{iterations} ({iterProgress:F1}%), max change: {maxChange:E3}, converged: {maxChange < tolerance}");
+                lastLogTime = currentTime;
             }
+
+            // Check convergence every 10 iterations
+            if (iter > 0 && iter % 10 == 0)
+                if (maxChange < tolerance)
+                {
+                    Logger.Log(
+                        $"[ThermalSolver] *** CONVERGED after {iter} iterations (max change: {maxChange:E3} < tolerance: {tolerance:E3}) ***");
+                    converged = true;
+                    break;
+                }
         }
 
+        if (!converged)
+            Logger.LogWarning(
+                $"[ThermalSolver] Did not converge within {iterations} iterations. Consider increasing MaxIterations or relaxing tolerance.");
+
         // Convert to 3D array format
+        Logger.Log("[ThermalSolver] Converting to 3D array...");
         return ConvertTo3DArray(tempCurrent, W, H, D);
     }
 
@@ -884,13 +928,20 @@ __kernel void calculate_flux(
 
         try
         {
+            Logger.Log("[ThermalSolver] Attempting to initialize OpenCL...");
             _cl = CL.GetApi();
 
             unsafe
             {
                 uint nPlatforms = 0;
                 _cl.GetPlatformIDs(0, null, &nPlatforms);
-                if (nPlatforms == 0) return false;
+                if (nPlatforms == 0)
+                {
+                    Logger.Log("[ThermalSolver] No OpenCL platforms found");
+                    return false;
+                }
+
+                Logger.Log($"[ThermalSolver] Found {nPlatforms} OpenCL platform(s)");
 
                 var platforms = stackalloc nint[(int)nPlatforms];
                 _cl.GetPlatformIDs(nPlatforms, platforms, null);
@@ -905,32 +956,55 @@ __kernel void calculate_flux(
                     var devices = stackalloc nint[(int)nDevices];
                     _cl.GetDeviceIDs(platforms[i], DeviceType.Gpu, nDevices, devices, null);
                     device = devices[0];
+                    Logger.Log($"[ThermalSolver] Using GPU device from platform {i}");
                     break;
                 }
 
-                if (device == 0) return false;
+                if (device == 0)
+                {
+                    Logger.Log("[ThermalSolver] No GPU devices found");
+                    return false;
+                }
 
                 int err;
                 _ctx = _cl.CreateContext(null, 1, &device, null, null, &err);
-                if (err != 0) return false;
+                if (err != 0)
+                {
+                    Logger.LogError($"[ThermalSolver] Failed to create OpenCL context: {err}");
+                    return false;
+                }
 
                 _queue = _cl.CreateCommandQueue(_ctx, device, CommandQueueProperties.None, &err);
-                if (err != 0) return false;
+                if (err != 0)
+                {
+                    Logger.LogError($"[ThermalSolver] Failed to create command queue: {err}");
+                    return false;
+                }
 
                 var sources = new[] { OpenCLKernels };
                 var srcLen = (nuint)OpenCLKernels.Length;
                 _prog = _cl.CreateProgramWithSource(_ctx, 1, sources, in srcLen, &err);
-                if (err != 0) return false;
+                if (err != 0)
+                {
+                    Logger.LogError($"[ThermalSolver] Failed to create program: {err}");
+                    return false;
+                }
 
                 err = _cl.BuildProgram(_prog, 0, null, string.Empty, null, null);
-                if (err != 0) return false;
+                if (err != 0)
+                {
+                    Logger.LogError($"[ThermalSolver] Failed to build program: {err}");
+                    return false;
+                }
 
                 _clReady = true;
+                Logger.Log("[ThermalSolver] OpenCL initialized successfully");
                 return true;
             }
         }
-        catch
+        catch (Exception ex)
         {
+            Logger.LogError($"[ThermalSolver] OpenCL initialization exception: {ex.Message}");
             return false;
         }
     }
@@ -941,6 +1015,7 @@ __kernel void calculate_flux(
     {
         try
         {
+            Logger.Log("[ThermalSolver] Starting GPU solver");
             unsafe
             {
                 var dx = (float)voxelSize;
@@ -955,6 +1030,8 @@ __kernel void calculate_flux(
                 var max_k = conductivities.Where(kvp => kvp.Key != 0).Max(kvp => kvp.Value);
                 var dt = 0.1f * Math.Min(dx2, Math.Min(dy2, dz2)) / max_k;
 
+                Logger.Log($"[ThermalSolver] GPU time step dt = {dt:E3} s");
+
                 var iterations = options.MaxIterations;
                 var tolerance = (float)options.ConvergenceTolerance;
 
@@ -963,6 +1040,7 @@ __kernel void calculate_flux(
                 foreach (var kvp in conductivities) conductivityArray[kvp.Key] = kvp.Value;
 
                 // Convert label data to flat array
+                Logger.Log("[ThermalSolver] Converting label data to flat array...");
                 var labelArray = new byte[W * H * D];
                 Parallel.For(0, D, z =>
                 {
@@ -979,6 +1057,7 @@ __kernel void calculate_flux(
 
                 int err;
 
+                Logger.Log("[ThermalSolver] Creating GPU buffers...");
                 // Create OpenCL buffers
                 fixed (float* pTempIn = tempCurrent)
                 fixed (float* pTempOut = tempNext)
@@ -1001,6 +1080,7 @@ __kernel void calculate_flux(
                         (nuint)(conductivityArray.Length * sizeof(float)), pConductivities, &err);
                     if (err != 0) throw new Exception($"Failed to create conductivities buffer: {err}");
 
+                    Logger.Log("[ThermalSolver] Creating kernel...");
                     // Create kernel
                     var kernel = _cl.CreateKernel(_prog, "thermal_diffusion", &err);
                     if (err != 0) throw new Exception($"Failed to create kernel: {err}");
@@ -1023,6 +1103,9 @@ __kernel void calculate_flux(
                     globalWorkSize[1] = (nuint)H;
                     globalWorkSize[2] = (nuint)D;
 
+                    Logger.Log("[ThermalSolver] Starting GPU iteration loop...");
+                    var converged = false;
+
                     for (var iter = 0; iter < iterations; iter++)
                     {
                         token.ThrowIfCancellationRequested();
@@ -1033,7 +1116,7 @@ __kernel void calculate_flux(
 
                         _cl.Finish(_queue);
 
-                        // Apply boundary conditions on host
+                        // Apply boundary conditions on host every 10 iterations
                         if (iter % 10 == 0)
                         {
                             err = _cl.EnqueueReadBuffer(_queue, bufTempOut, true, 0,
@@ -1045,6 +1128,10 @@ __kernel void calculate_flux(
                             err = _cl.EnqueueWriteBuffer(_queue, bufTempIn, true, 0,
                                 (nuint)(tempNext.Length * sizeof(float)), pTempOut, 0, null, null);
                             if (err != 0) throw new Exception($"Failed to write buffer: {err}");
+
+                            // Update progress
+                            var iterProgress = 0.15f + 0.70f * iter / iterations;
+                            progress?.Report(iterProgress);
                         }
 
                         // Swap buffers
@@ -1052,12 +1139,10 @@ __kernel void calculate_flux(
                         bufTempIn = bufTempOut;
                         bufTempOut = tmp;
 
-                        if (iter % 100 == 0)
+                        // Check convergence every 100 iterations
+                        if (iter % 100 == 0 || iter % 50 == 0)
                         {
-                            progress?.Report(0.15f + 0.70f * iter / iterations);
-
-                            // Check convergence periodically
-                            if (iter % 500 == 0 && iter > 0)
+                            if (iter % 100 == 0 && iter > 0)
                             {
                                 err = _cl.EnqueueReadBuffer(_queue, bufTempIn, true, 0,
                                     (nuint)(tempCurrent.Length * sizeof(float)), pTempIn, 0, null, null);
@@ -1074,19 +1159,30 @@ __kernel void calculate_flux(
                                     if (change > maxChange) maxChange = change;
                                 }
 
+                                var iterProgress = (float)iter / iterations * 100.0f;
                                 Logger.Log(
-                                    $"[ThermalSolver] GPU Iteration {iter}/{iterations}, max change: {maxChange:E3}");
+                                    $"[ThermalSolver] GPU Iteration {iter}/{iterations} ({iterProgress:F1}%), max change: {maxChange:E3}");
 
                                 if (maxChange < tolerance)
                                 {
-                                    Logger.Log($"[ThermalSolver] GPU converged after {iter} iterations");
+                                    Logger.Log($"[ThermalSolver] *** GPU CONVERGED after {iter} iterations ***");
+                                    converged = true;
                                     break;
                                 }
+                            }
+                            else if (iter % 50 == 0)
+                            {
+                                var iterProgress = (float)iter / iterations * 100.0f;
+                                Logger.Log($"[ThermalSolver] GPU Iteration {iter}/{iterations} ({iterProgress:F1}%)");
                             }
                         }
                     }
 
+                    if (!converged)
+                        Logger.LogWarning($"[ThermalSolver] GPU did not converge within {iterations} iterations");
+
                     // Read final result
+                    Logger.Log("[ThermalSolver] Reading final GPU result...");
                     err = _cl.EnqueueReadBuffer(_queue, bufTempIn, true, 0,
                         (nuint)(tempCurrent.Length * sizeof(float)), pTempIn, 0, null, null);
                     if (err != 0) throw new Exception($"Failed to read final result: {err}");
@@ -1099,6 +1195,7 @@ __kernel void calculate_flux(
                     _cl.ReleaseKernel(kernel);
                 }
 
+                Logger.Log("[ThermalSolver] GPU solver complete, converting to 3D array...");
                 return ConvertTo3DArray(tempCurrent, W, H, D);
             }
         }

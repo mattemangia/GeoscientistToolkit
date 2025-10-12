@@ -17,12 +17,16 @@ namespace GeoscientistToolkit;
 public class Application
 {
     private CommandList _commandList;
+    private bool _confirmedExit;
     private GraphicsDevice _graphicsDevice;
     private ImGuiController _imGuiController;
     private LoadingScreen _loadingScreen;
     private MainWindow _mainWindow;
     private Sdl2Window _window;
     private bool _windowMoved;
+
+    // Window close handling - we track whether window tried to close
+    private bool _windowWantedToClose;
 
     public void Run()
     {
@@ -267,11 +271,12 @@ public class Application
         VeldridManager.ImGuiController = _imGuiController;
         VeldridManager.RegisterImGuiController(_imGuiController);
 
-        // --- REMOVED AddInManager INITIALIZATION ---
-
         _loadingScreen.UpdateStatus("Initializing UI...", 0.6f);
         SettingsManager.Instance.SettingsChanged += OnSettingsChanged;
         _mainWindow = new MainWindow();
+
+        // Subscribe to exit confirmation from MainWindow
+        _mainWindow.OnExitConfirmed += () => _confirmedExit = true;
 
         var io = ImGui.GetIO();
         io.ConfigFlags |= ImGuiConfigFlags.ViewportsEnable | ImGuiConfigFlags.DockingEnable;
@@ -317,7 +322,9 @@ public class Application
         var stopwatch = Stopwatch.StartNew();
         float frameTime = 0;
 
-        while (_window.Exists)
+        var wasWindowExisting = true;
+
+        while (_window.Exists || _windowWantedToClose)
         {
             if (!hardwareSettings.EnableVSync && hardwareSettings.TargetFrameRate > 0)
             {
@@ -329,30 +336,67 @@ public class Application
             stopwatch.Restart();
             var deltaTime = frameTime / 1000f;
 
-            var snapshot = _window.PumpEvents();
-            if (!_window.Exists) break;
-
-            if (_windowMoved)
+            // Check if window wanted to close this frame
+            if (wasWindowExisting && !_window.Exists)
             {
-                _windowMoved = false;
-                HandleDpiChange();
+                // Window just tried to close
+                if (ProjectManager.Instance.HasUnsavedChanges)
+                {
+                    // We have unsaved changes - we need to ask the user
+                    // Set flag so MainWindow will show the dialog
+                    _windowWantedToClose = true;
+                    Logger.Log("Window close detected with unsaved changes - showing dialog");
+                }
+                else
+                {
+                    // No unsaved changes, exit normally
+                    break;
+                }
             }
 
-            _imGuiController.Update(deltaTime, snapshot);
-            _mainWindow.SubmitUI();
+            wasWindowExisting = _window.Exists;
 
-            _commandList.Begin();
-            _commandList.SetFramebuffer(_graphicsDevice.MainSwapchain.Framebuffer);
-            _commandList.ClearColorTarget(0, new RgbaFloat(clearColor.X, clearColor.Y, clearColor.Z, clearColor.W));
-            _imGuiController.Render(_graphicsDevice, _commandList);
-            _commandList.End();
+            // If we confirmed exit, stop the loop
+            if (_confirmedExit)
+            {
+                Logger.Log("Exit confirmed by user");
+                break;
+            }
 
-            _graphicsDevice.SubmitCommands(_commandList);
-            _graphicsDevice.SwapBuffers(_graphicsDevice.MainSwapchain);
+            // Only pump events and render if window still exists
+            if (_window.Exists)
+            {
+                var snapshot = _window.PumpEvents();
 
-            if ((io.ConfigFlags & ImGuiConfigFlags.ViewportsEnable) != 0) ImGui.UpdatePlatformWindows();
+                if (_windowMoved)
+                {
+                    _windowMoved = false;
+                    HandleDpiChange();
+                }
 
-            BasePanel.ProcessAllPopOutWindows();
+                _imGuiController.Update(deltaTime, snapshot);
+
+                // Pass the window close request to MainWindow so it can show the dialog
+                _mainWindow.SubmitUI(_windowWantedToClose);
+
+                _commandList.Begin();
+                _commandList.SetFramebuffer(_graphicsDevice.MainSwapchain.Framebuffer);
+                _commandList.ClearColorTarget(0, new RgbaFloat(clearColor.X, clearColor.Y, clearColor.Z, clearColor.W));
+                _imGuiController.Render(_graphicsDevice, _commandList);
+                _commandList.End();
+
+                _graphicsDevice.SubmitCommands(_commandList);
+                _graphicsDevice.SwapBuffers(_graphicsDevice.MainSwapchain);
+
+                if ((io.ConfigFlags & ImGuiConfigFlags.ViewportsEnable) != 0) ImGui.UpdatePlatformWindows();
+
+                BasePanel.ProcessAllPopOutWindows();
+            }
+            else if (_windowWantedToClose)
+            {
+                // Window was closed but we're showing dialog - just wait a bit
+                Thread.Sleep(16); // ~60fps
+            }
         }
 
         // Cleanup
@@ -362,7 +406,6 @@ public class Application
         if (SettingsManager.Instance.HasUnsavedChanges) SettingsManager.Instance.SaveSettings();
 
         GlobalPerformanceManager.Instance.Shutdown();
-        // --- REMOVED AddInManager SHUTDOWN ---
 
         _graphicsDevice.WaitForIdle();
         _imGuiController.Dispose();

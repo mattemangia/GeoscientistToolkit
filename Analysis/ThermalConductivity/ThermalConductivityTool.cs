@@ -77,9 +77,32 @@ public class ThermalConductivityTool : IDatasetTools, IDisposable
 
         _options.Dataset = ctDataset;
 
+        // Check if simulation task has completed and update flag
+        if (_isSimulationRunning && _simulationTask != null && _simulationTask.IsCompleted)
+        {
+            Logger.Log("[ThermalTool] Simulation task completed, resetting flag");
+            _isSimulationRunning = false;
+            _progressDialog.Close();
+        }
+
         if (_isSimulationRunning)
         {
             _progressDialog.Submit();
+
+            // Allow cancellation button
+            if (_progressDialog.IsCancellationRequested)
+            {
+                Logger.Log("[ThermalTool] User requested cancellation");
+                _cancellationTokenSource?.Cancel();
+            }
+
+            // Force enable controls if dialog was somehow closed without proper cleanup
+            if (!_progressDialog.IsActive && _isSimulationRunning)
+            {
+                Logger.LogWarning("[ThermalTool] Dialog closed but flag still set - forcing cleanup");
+                _isSimulationRunning = false;
+            }
+
             return;
         }
 
@@ -1168,9 +1191,9 @@ public class ThermalConductivityTool : IDatasetTools, IDisposable
         _progressDialog.Open("Initializing simulation...");
         _isSimulationRunning = true;
 
-        Logger.Log("[ThermalTool] Starting simulation");
+        Logger.Log("[ThermalTool] ========== STARTING SIMULATION ==========");
 
-        _simulationTask = Task.Run(() =>
+        _simulationTask = Task.Run(async () =>
         {
             try
             {
@@ -1189,24 +1212,30 @@ public class ThermalConductivityTool : IDatasetTools, IDisposable
                     _progressDialog.Update(p, stage);
                 });
 
-                var results = ThermalConductivitySolver.Solve(_options, progress, _cancellationTokenSource.Token);
+                var results = await Task.Run(() =>
+                        ThermalConductivitySolver.Solve(_options, progress, _cancellationTokenSource.Token),
+                    _cancellationTokenSource.Token);
+
                 _options.Dataset.ThermalResults = results;
                 ProjectManager.Instance.NotifyDatasetDataChanged(_options.Dataset);
 
-                Logger.Log($"[ThermalTool] Complete: k_eff = {results.EffectiveConductivity:F6} W/m·K");
+                Logger.Log(
+                    $"[ThermalTool] ========== COMPLETE: k_eff = {results.EffectiveConductivity:F6} W/m·K ==========");
             }
             catch (OperationCanceledException)
             {
-                Logger.Log("[ThermalTool] Canceled");
+                Logger.Log("[ThermalTool] ========== CANCELED BY USER ==========");
                 _options.Dataset.ThermalResults = null;
             }
             catch (Exception ex)
             {
-                Logger.LogError($"[ThermalTool] Failed: {ex.Message}");
+                Logger.LogError($"[ThermalTool] ========== FAILED: {ex.Message} ==========");
+                Logger.LogError($"[ThermalTool] Stack trace: {ex.StackTrace}");
                 _options.Dataset.ThermalResults = null;
             }
             finally
             {
+                Logger.Log("[ThermalTool] Cleaning up simulation task");
                 _isSimulationRunning = false;
                 _progressDialog.Close();
             }
