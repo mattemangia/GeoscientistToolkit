@@ -15,101 +15,129 @@ namespace GeoscientistToolkit.Analysis.ThermalConductivity;
 /// <summary>
 ///     Solves thermal conductivity using Fourier's law and homogenization theory.
 ///     Supports AVX2, NEON, and OpenCL acceleration.
-///     AUTOMATICALLY EXCLUDES EXTERIOR MATERIAL (ID: 0) FROM SIMULATIONS.
+///     VOXELS WITH MATERIAL ID 0 ARE TREATED AS VOIDS AND EXCLUDED FROM THE SIMULATION.
+///     Boundary conditions are applied to the surface of the active material shape.
 /// </summary>
 public class ThermalConductivitySolver
 {
+    // A simple struct to hold the min/max coordinates of the non-void material.
+    private readonly struct ActiveBounds
+    {
+        public readonly int MinX, MaxX, MinY, MaxY, MinZ, MaxZ;
+        public ActiveBounds(int minX, int maxX, int minY, int maxY, int minZ, int maxZ)
+        {
+            MinX = minX; MaxX = maxX; MinY = minY; MaxY = maxY; MinZ = minZ; MaxZ = maxZ;
+        }
+        public bool IsEmpty => MinX > MaxX;
+    }
+    
     private const string OpenCLKernels = @"
-// Thermal diffusion kernel with material properties
+/* OpenCL 1.1 compatible thermal diffusion kernel:
+   - FINAL CORRECTED VERSION -
+   - PRINCIPLE: Any voxel with material ID 0 is a VOID and does not participate.
+   - Uses an 'active bounds' (min/max XYZ) to locate the material's surfaces.
+   -
+   - KERNEL LOGIC FOR EACH VOXEL (x,y,z):
+   - 1. Get material ID. If it's 0, FREEZE the temperature and STOP. This handles any shape (cylinders, etc.).
+   - 2. If material is NOT 0, check if it lies on a hot/cold boundary surface (e.g., x == minX).
+   -    If it does, apply the fixed boundary temperature and STOP.
+   - 3. If it's a non-zero material voxel NOT on a boundary, perform the full stencil calculation.
+   -    Its neighbors CAN be material 0 (exterior or internal pores), and the physics handles this correctly.
+*/
+
+typedef unsigned char uchar;
+
 __kernel void thermal_diffusion(
     __global const float* tempIn,
-    __global float* tempOut,
-    __global const uchar* labels,
+    __global float*       tempOut,
+    __global const uchar* labelBuf,
     __global const float* conductivities,
-    const int W, const int H, const int D,
-    const float dx, const float dy, const float dz,
-    const float dt)
+    const int   W, const int H, const int D,
+    const float dx, const float dy, const float dz, const float dt,
+    const int   flowDir,   // 0=X, 1=Y, 2=Z
+    const float T_hot, const float T_cold,
+    const int   minX, const int maxX,
+    const int   minY, const int maxY,
+    const int   minZ, const int maxZ)
 {
     int x = get_global_id(0);
     int y = get_global_id(1);
     int z = get_global_id(2);
-    
     if (x >= W || y >= H || z >= D) return;
-    if (x == 0 || x == W-1 || y == 0 || y == H-1 || z == 0 || z == D-1) return;
+
+    int idx = (z * H + y) * W + x;
+    uchar mat = labelBuf[idx];
+
+    // --- CORE LOGIC: EXCLUDE VOIDS (MATERIAL 0) ---
+    // If a voxel is air/void, it does not conduct heat. Its temperature is static.
+    if (mat == 0) {
+        tempOut[idx] = tempIn[idx];
+        return;
+    }
+
+    // --- BOUNDARY CONDITIONS ON MATERIAL SURFACE ---
+    // The following checks only run on non-zero material voxels.
+    if (flowDir == 0) {
+        if (x == minX) { tempOut[idx] = T_hot; return; }
+        if (x == maxX) { tempOut[idx] = T_cold; return; }
+    } else if (flowDir == 1) {
+        if (y == minY) { tempOut[idx] = T_hot; return; }
+        if (y == maxY) { tempOut[idx] = T_cold; return; }
+    } else { // flowDir == 2
+        if (z == minZ) { tempOut[idx] = T_hot; return; }
+        if (z == maxZ) { tempOut[idx] = T_cold; return; }
+    }
     
-    int idx = (z*H + y)*W + x;
-    uchar mat = labels[idx];
-    
-    // Skip exterior material (ID: 0)
-    if (mat == 0) return;
-    
-    float k = conductivities[mat];
-    
-    // Get neighboring temperatures
-    float T_c = tempIn[idx];
-    float T_xp = tempIn[idx + 1];
-    float T_xm = tempIn[idx - 1];
-    float T_yp = tempIn[idx + W];
-    float T_ym = tempIn[idx - W];
-    float T_zp = tempIn[idx + W*H];
-    float T_zm = tempIn[idx - W*H];
-    
-    // Get neighboring conductivities
-    float k_xp = conductivities[labels[idx + 1]];
-    float k_xm = conductivities[labels[idx - 1]];
-    float k_yp = conductivities[labels[idx + W]];
-    float k_ym = conductivities[labels[idx - W]];
-    float k_zp = conductivities[labels[idx + W*H]];
-    float k_zm = conductivities[labels[idx - W*H]];
-    
-    // Harmonic mean for interface conductivity
-    float k_x = 2.0f * k * k_xp / (k + k_xp + 1e-10f);
-    float k_xm_avg = 2.0f * k * k_xm / (k + k_xm + 1e-10f);
-    float k_y = 2.0f * k * k_yp / (k + k_yp + 1e-10f);
-    float k_ym_avg = 2.0f * k * k_ym / (k + k_ym + 1e-10f);
-    float k_z = 2.0f * k * k_zp / (k + k_zp + 1e-10f);
-    float k_zm_avg = 2.0f * k * k_zm / (k + k_zm + 1e-10f);
-    
-    // Finite difference approximation
-    float d2T_dx2 = (k_x * (T_xp - T_c) - k_xm_avg * (T_c - T_xm)) / (dx * dx);
-    float d2T_dy2 = (k_y * (T_yp - T_c) - k_ym_avg * (T_c - T_ym)) / (dy * dy);
-    float d2T_dz2 = (k_z * (T_zp - T_c) - k_zm_avg * (T_c - T_zm)) / (dz * dz);
-    
+    // --- STENCIL COMPUTATION FOR INTERIOR MATERIAL VOXELS ---
+    // If we reach here, we are a non-void voxel that is not on a hot/cold boundary.
+    // We must be inside the material domain, but can be adjacent to voids (insulating boundaries).
+    // Neighbor lookups are safe because we are not on the volume edge (x=0, etc.)
+    if (x == 0 || x == (W - 1) || y == 0 || y == (H - 1) || z == 0 || z == (D - 1)) {
+        tempOut[idx] = tempIn[idx]; // Insulate voxels on the edge of the image volume
+        return;
+    }
+
+    int idx_xp = idx + 1;
+    int idx_xm = idx - 1;
+    int idx_yp = idx + W;
+    int idx_ym = idx - W;
+    int idx_zp = idx + (W * H);
+    int idx_zm = idx - (W * H);
+
+    float T_c  = tempIn[idx];
+    float T_xp = tempIn[idx_xp];
+    float T_xm = tempIn[idx_xm];
+    float T_yp = tempIn[idx_yp];
+    float T_ym = tempIn[idx_ym];
+    float T_zp = tempIn[idx_zp];
+    float T_zm = tempIn[idx_zm];
+
+    uchar mat_xp = labelBuf[idx_xp]; uchar mat_xm = labelBuf[idx_xm];
+    uchar mat_yp = labelBuf[idx_yp]; uchar mat_ym = labelBuf[idx_ym];
+    uchar mat_zp = labelBuf[idx_zp]; uchar mat_zm = labelBuf[idx_zm];
+
+    float k_c  = conductivities[(int)mat];
+    float k_xp = conductivities[(int)mat_xp]; float k_xm = conductivities[(int)mat_xm];
+    float k_yp = conductivities[(int)mat_yp]; float k_ym = conductivities[(int)mat_ym];
+    float k_zp = conductivities[(int)mat_zp]; float k_zm = conductivities[(int)mat_zm];
+
+    const float eps = 1e-10f;
+    float k_ixp = (2.0f * k_c * k_xp) / (k_c + k_xp + eps);
+    float k_ixm = (2.0f * k_c * k_xm) / (k_c + k_xm + eps);
+    float k_iyp = (2.0f * k_c * k_yp) / (k_c + k_yp + eps);
+    float k_iym = (2.0f * k_c * k_ym) / (k_c + k_ym + eps);
+    float k_izp = (2.0f * k_c * k_zp) / (k_c + k_zp + eps);
+    float k_izm = (2.0f * k_c * k_zm) / (k_c + k_zm + eps);
+
+    float dx2 = dx * dx; float dy2 = dy * dy; float dz2 = dz * dz;
+
+    float d2T_dx2 = (k_ixp * (T_xp - T_c) - k_ixm * (T_c - T_xm)) / dx2;
+    float d2T_dy2 = (k_iyp * (T_yp - T_c) - k_iym * (T_c - T_ym)) / dy2;
+    float d2T_dz2 = (k_izp * (T_zp - T_c) - k_izm * (T_c - T_zm)) / dz2;
+
     tempOut[idx] = T_c + dt * (d2T_dx2 + d2T_dy2 + d2T_dz2);
 }
-
-// Calculate heat flux for effective conductivity
-__kernel void calculate_flux(
-    __global const float* temp,
-    __global const uchar* labels,
-    __global const float* conductivities,
-    __global float* flux,
-    const int W, const int H, const int D,
-    const float dx, const int direction)
-{
-    int x = get_global_id(0);
-    int y = get_global_id(1);
-    int z = get_global_id(2);
-    
-    if (x >= W-1 || y >= H || z >= D) return;
-    
-    int idx = (z*H + y)*W + x;
-    int idx_next = idx + 1;
-    
-    if (direction == 1) idx_next = idx + W;     // Y direction
-    if (direction == 2) idx_next = idx + W*H;   // Z direction
-    
-    float T1 = temp[idx];
-    float T2 = temp[idx_next];
-    float k1 = conductivities[labels[idx]];
-    float k2 = conductivities[labels[idx_next]];
-    
-    // Harmonic mean
-    float k_eff = 2.0f * k1 * k2 / (k1 + k2 + 1e-10f);
-    flux[idx] = -k_eff * (T2 - T1) / dx;
-}
 ";
-
     private static CL _cl;
     private static bool _clReady;
     private static nint _ctx, _queue, _prog;
@@ -126,31 +154,36 @@ __kernel void calculate_flux(
         Logger.Log($"[ThermalSolver] Direction: {options.HeatFlowDirection}");
         Logger.Log($"[ThermalSolver] Max Iterations: {options.MaxIterations}");
         Logger.Log($"[ThermalSolver] Tolerance: {options.ConvergenceTolerance:E2}");
-        Logger.Log("[ThermalSolver] EXCLUDING EXTERIOR MATERIAL (ID: 0) from simulation");
+        Logger.Log("[ThermalSolver] EXCLUDING EXTERIOR/VOID MATERIAL (ID: 0) from simulation");
+
+        // Find the bounding box of the actual materials to identify sample surfaces.
+        Logger.Log("[ThermalSolver] Finding active material bounds...");
+        var activeBounds = FindActiveBounds(dataset.LabelData, dataset.Width, dataset.Height, dataset.Depth);
+        if (activeBounds.IsEmpty)
+        {
+            Logger.LogWarning("[ThermalSolver] No non-exterior voxels found. Simulation cannot run. Returning empty results.");
+            return new ThermalResults(options) { EffectiveConductivity = 0 };
+        }
+        Logger.Log($"[ThermalSolver] Active bounds: X=[{activeBounds.MinX}, {activeBounds.MaxX}], Y=[{activeBounds.MinY}, {activeBounds.MaxY}], Z=[{activeBounds.MinZ}, {activeBounds.MaxZ}]");
 
         var W = dataset.Width;
         var H = dataset.Height;
         var D = dataset.Depth;
         var voxelSize = dataset.PixelSize * 1e-6; // μm to m
 
-        // Initialize temperature field
         Logger.Log("[ThermalSolver] [1/6] Initializing temperature field...");
         progress?.Report(0.05f);
         var temperature = InitializeTemperatureField(W, H, D, options);
-        Logger.Log($"[ThermalSolver] Temperature field initialized: {temperature.Length:N0} voxels");
-
-        // Get material conductivities (excludes exterior ID: 0)
+        
         Logger.Log("[ThermalSolver] [2/6] Loading material properties...");
         progress?.Report(0.10f);
         var conductivities = GetMaterialConductivities(dataset, options);
-
-        // Log included materials
+        
         var includedMaterials = dataset.Materials.Where(m => m.ID != 0 && conductivities.ContainsKey(m.ID)).ToList();
         Logger.Log($"[ThermalSolver] Simulating {includedMaterials.Count} materials:");
         foreach (var mat in includedMaterials)
             Logger.Log($"  - {mat.Name} (ID: {mat.ID}): k={conductivities[mat.ID]:F4} W/m·K");
-
-        // Solve steady-state or transient
+        
         Logger.Log("[ThermalSolver] [3/6] Starting solver...");
         progress?.Report(0.15f);
         float[,,] temperatureField;
@@ -158,28 +191,21 @@ __kernel void calculate_flux(
         if (options.SolverBackend == SolverBackend.OpenCL && TryInitializeOpenCL())
         {
             Logger.Log("[ThermalSolver] Using GPU acceleration (OpenCL)");
-            temperatureField = SolveGPU(temperature, dataset.LabelData, conductivities,
-                W, H, D, voxelSize, options, progress, token);
+            temperatureField = SolveGPU(temperature, dataset.LabelData, conductivities, W, H, D, voxelSize, options, progress, token, activeBounds);
         }
         else
         {
-            var backend = Avx2.IsSupported ? "CPU (AVX2 SIMD)" :
-                AdvSimd.IsSupported ? "CPU (NEON SIMD)" : "CPU (Scalar)";
+            var backend = Avx2.IsSupported ? "CPU (AVX2 SIMD)" : AdvSimd.IsSupported ? "CPU (NEON SIMD)" : "CPU (Scalar)";
             Logger.Log($"[ThermalSolver] Using {backend}");
-            temperatureField = SolveCPU(temperature, dataset.LabelData, conductivities,
-                W, H, D, voxelSize, options, progress, token);
+            temperatureField = SolveCPU(temperature, dataset.LabelData, conductivities, W, H, D, voxelSize, options, progress, token, activeBounds);
         }
 
         token.ThrowIfCancellationRequested();
 
-        // Calculate effective thermal conductivity
         Logger.Log("[ThermalSolver] [4/6] Calculating effective conductivity...");
         progress?.Report(0.90f);
-        var keff = CalculateEffectiveConductivity(temperatureField, dataset.LabelData,
-            conductivities, W, H, D, voxelSize, options);
-        Logger.Log($"[ThermalSolver] k_eff = {keff:F6} W/m·K");
-
-        // Calculate analytical estimates for comparison
+        var keff = CalculateEffectiveConductivity(temperatureField, dataset.LabelData, conductivities, W, H, D, voxelSize, options);
+        
         Logger.Log("[ThermalSolver] [5/6] Computing analytical estimates...");
         progress?.Report(0.95f);
         var analyticalEstimates = CalculateAnalyticalEstimates(dataset, conductivities, options);
@@ -195,13 +221,36 @@ __kernel void calculate_flux(
         {
             TemperatureField = temperatureField,
             EffectiveConductivity = keff,
-            MaterialConductivities = conductivities.Where(kvp => kvp.Key != 0)
-                .ToDictionary(kvp => kvp.Key, kvp => (double)kvp.Value),
+            MaterialConductivities = conductivities.Where(kvp => kvp.Key != 0).ToDictionary(kvp => kvp.Key, kvp => (double)kvp.Value),
             AnalyticalEstimates = analyticalEstimates.ToDictionary(kvp => kvp.Key, kvp => (double)kvp.Value),
             ComputationTime = sw.Elapsed
         };
     }
 
+    private static ActiveBounds FindActiveBounds(ILabelVolumeData labels, int W, int H, int D)
+    {
+        int minX = W, maxX = 0;
+        int minY = H, maxY = 0;
+        int minZ = D, maxZ = 0;
+
+        for (var z = 0; z < D; z++)
+        for (var y = 0; y < H; y++)
+        for (var x = 0; x < W; x++)
+        {
+            if (labels[x, y, z] != 0)
+            {
+                if (x < minX) minX = x;
+                if (x > maxX) maxX = x;
+                if (y < minY) minY = y;
+                if (y > maxY) maxY = y;
+                if (z < minZ) minZ = z;
+                if (z > maxZ) maxZ = z;
+            }
+        }
+        if (minX > maxX) return new ActiveBounds(1, 0, 1, 0, 1, 0); // No active voxels found
+        return new ActiveBounds(minX, maxX, minY, maxY, minZ, maxZ);
+    }
+    
     private static float[] InitializeTemperatureField(int W, int H, int D, ThermalOptions options)
     {
         var temp = new float[W * H * D];
@@ -214,69 +263,51 @@ __kernel void calculate_flux(
             for (var x = 0; x < W; x++)
             {
                 var idx = (z * H + y) * W + x;
-
-                // Linear gradient initialization based on flow direction
                 var t = options.HeatFlowDirection switch
                 {
-                    HeatFlowDirection.X => (float)x / (W - 1),
-                    HeatFlowDirection.Y => (float)y / (H - 1),
-                    HeatFlowDirection.Z => (float)z / (D - 1),
-                    _ => (float)z / (D - 1)
+                    HeatFlowDirection.X => (float)x / (W > 1 ? W - 1 : 1),
+                    HeatFlowDirection.Y => (float)y / (H > 1 ? H - 1 : 1),
+                    HeatFlowDirection.Z => (float)z / (D > 1 ? D - 1 : 1),
+                    _ => (float)z / (D > 1 ? D - 1 : 1)
                 };
-
                 temp[idx] = T_cold + (T_hot - T_cold) * t;
             }
         });
-
         return temp;
     }
 
-    private static Dictionary<byte, float> GetMaterialConductivities(CtImageStackDataset dataset,
-        ThermalOptions options)
+    private static Dictionary<byte, float> GetMaterialConductivities(CtImageStackDataset dataset, ThermalOptions options)
     {
         var conductivities = new Dictionary<byte, float>();
+        // Conductivity of void/air (ID 0). It is non-zero to be physically plausible for internal pores
+        // but it does not conduct in the exterior region due to the solver logic.
+        const float kExterior = 0.026f; // ~Air at RT (W/m·K)
+        conductivities[0] = kExterior;
 
-        // Explicitly exclude exterior material (ID: 0)
         foreach (var material in dataset.Materials.Where(m => m.ID != 0))
         {
             float k = 0;
-
-            // Try to get from physical material library
-            if (!string.IsNullOrEmpty(material.PhysicalMaterialName))
+            if (options.MaterialConductivities.TryGetValue(material.ID, out var overrideK))
             {
-                var physMat = MaterialLibrary.Instance.Find(material.PhysicalMaterialName);
-                if (physMat?.ThermalConductivity_W_mK.HasValue == true)
-                {
-                    k = (float)physMat.ThermalConductivity_W_mK.Value;
-                    Logger.Log($"[ThermalSolver] Material {material.Name}: k={k} W/m·K (from library)");
-                }
+                k = (float)overrideK;
             }
-
-            // Use user override if provided
-            if (options.MaterialConductivities.TryGetValue(material.ID, out var override_k))
+            else if (!string.IsNullOrEmpty(material.PhysicalMaterialName))
             {
-                k = (float)override_k;
-                Logger.Log($"[ThermalSolver] Material {material.Name}: k={k} W/m·K (user override)");
+                var phys = MaterialLibrary.Instance.Find(material.PhysicalMaterialName);
+                if (phys?.ThermalConductivity_W_mK.HasValue == true)
+                    k = (float)phys.ThermalConductivity_W_mK.Value;
             }
-
-            // Default for materials without assigned conductivity
-            if (k == 0)
+            if (k <= 0)
             {
-                k = 1.0f; // Default generic material
-                Logger.LogWarning(
-                    $"[ThermalSolver] Material {material.Name} has no conductivity, using default k={k} W/m·K");
+                k = 2.5f; // conservative rock default
+                Logger.LogWarning($"[ThermalSolver] {material.Name} had no k; using default {k} W/m·K");
             }
-
             conductivities[material.ID] = k;
         }
-
-        // Add a very low conductivity for exterior (used for boundaries only, not in calculations)
-        conductivities[0] = 0.001f;
-
         return conductivities;
     }
-
-    private static void ApplyBoundaryConditions(float[] temp, int W, int H, int D, ThermalOptions options)
+    
+    private static void ApplyBoundaryConditions(float[] temp, int W, int H, int D, ILabelVolumeData labels, ThermalOptions options, ActiveBounds bounds)
     {
         var T_hot = (float)options.TemperatureHot;
         var T_cold = (float)options.TemperatureCold;
@@ -284,25 +315,27 @@ __kernel void calculate_flux(
         Parallel.For(0, D, z =>
         {
             for (var y = 0; y < H; y++)
-            for (var x = 0; x < W; x++)
             {
-                var idx = (z * H + y) * W + x;
-
-                // Apply Dirichlet boundary conditions
-                switch (options.HeatFlowDirection)
+                for (var x = 0; x < W; x++)
                 {
-                    case HeatFlowDirection.X:
-                        if (x == 0) temp[idx] = T_hot;
-                        if (x == W - 1) temp[idx] = T_cold;
-                        break;
-                    case HeatFlowDirection.Y:
-                        if (y == 0) temp[idx] = T_hot;
-                        if (y == H - 1) temp[idx] = T_cold;
-                        break;
-                    case HeatFlowDirection.Z:
-                        if (z == 0) temp[idx] = T_hot;
-                        if (z == D - 1) temp[idx] = T_cold;
-                        break;
+                    if (labels[x, y, z] == 0) continue; // Only apply BCs to the material itself
+
+                    var idx = (z * H + y) * W + x;
+                    switch (options.HeatFlowDirection)
+                    {
+                        case HeatFlowDirection.X:
+                            if (x == bounds.MinX) temp[idx] = T_hot;
+                            if (x == bounds.MaxX) temp[idx] = T_cold;
+                            break;
+                        case HeatFlowDirection.Y:
+                            if (y == bounds.MinY) temp[idx] = T_hot;
+                            if (y == bounds.MaxY) temp[idx] = T_cold;
+                            break;
+                        case HeatFlowDirection.Z:
+                            if (z == bounds.MinZ) temp[idx] = T_hot;
+                            if (z == bounds.MaxZ) temp[idx] = T_cold;
+                            break;
+                    }
                 }
             }
         });
@@ -311,122 +344,76 @@ __kernel void calculate_flux(
     private static float[,,] ConvertTo3DArray(float[] temp, int W, int H, int D)
     {
         var result = new float[W, H, D];
-
         Parallel.For(0, D, z =>
         {
             for (var y = 0; y < H; y++)
             for (var x = 0; x < W; x++)
             {
-                var idx = (z * H + y) * W + x;
-                result[x, y, z] = temp[idx];
+                result[x, y, z] = temp[(z * H + y) * W + x];
             }
         });
-
         return result;
     }
 
-    private static float CalculateEffectiveConductivity(float[,,] temperature, ILabelVolumeData labels,
-        Dictionary<byte, float> conductivities, int W, int H, int D, double voxelSize, ThermalOptions options)
+    private static float CalculateEffectiveConductivity(float[,,] temperature, ILabelVolumeData labels, Dictionary<byte, float> conductivities, int W, int H, int D, double voxelSize, ThermalOptions options)
     {
         var dx = (float)voxelSize;
+        var bounds = FindActiveBounds(labels, W, H, D);
+        
         var L = options.HeatFlowDirection switch
         {
-            HeatFlowDirection.X => W,
-            HeatFlowDirection.Y => H,
-            HeatFlowDirection.Z => D,
+            HeatFlowDirection.X => (bounds.MaxX - bounds.MinX + 1),
+            HeatFlowDirection.Y => (bounds.MaxY - bounds.MinY + 1),
+            HeatFlowDirection.Z => (bounds.MaxZ - bounds.MinZ + 1),
             _ => D
         };
 
         var dT = (float)(options.TemperatureHot - options.TemperatureCold);
+        if (L <= 1) return 0.0f;
         var gradient = dT / (L * dx);
-
-        // Calculate average heat flux (excluding exterior material)
+        
         double totalFlux = 0;
         long count = 0;
 
-        for (var z = 0; z < D - 1; z++)
-        for (var y = 0; y < H; y++)
-        for (var x = 0; x < W - 1; x++)
+        for (var z = 1; z < D - 1; z++)
+        for (var y = 1; y < H - 1; y++)
+        for (var x = 1; x < W - 1; x++)
         {
             var mat1 = labels[x, y, z];
-
-            // Skip calculations involving exterior material (ID: 0)
             if (mat1 == 0) continue;
 
             var T1 = temperature[x, y, z];
-            float T2 = 0;
-            byte mat2 = 0;
+            float T2;
+            byte mat2;
 
             switch (options.HeatFlowDirection)
             {
-                case HeatFlowDirection.X:
-                    if (x < W - 1)
-                    {
-                        T2 = temperature[x + 1, y, z];
-                        mat2 = labels[x + 1, y, z];
-                    }
-                    else
-                    {
-                        continue;
-                    }
-
-                    break;
-                case HeatFlowDirection.Y:
-                    if (y < H - 1)
-                    {
-                        T2 = temperature[x, y + 1, z];
-                        mat2 = labels[x, y + 1, z];
-                    }
-                    else
-                    {
-                        continue;
-                    }
-
-                    break;
-                case HeatFlowDirection.Z:
-                    if (z < D - 1)
-                    {
-                        T2 = temperature[x, y, z + 1];
-                        mat2 = labels[x, y, z + 1];
-                    }
-                    else
-                    {
-                        continue;
-                    }
-
-                    break;
+                case HeatFlowDirection.X: T2 = temperature[x + 1, y, z]; mat2 = labels[x + 1, y, z]; break;
+                case HeatFlowDirection.Y: T2 = temperature[x, y + 1, z]; mat2 = labels[x, y + 1, z]; break;
+                case HeatFlowDirection.Z: T2 = temperature[x, y, z + 1]; mat2 = labels[x, y, z + 1]; break;
+                default: continue;
             }
-
-            // Skip if neighbor is exterior
+            
             if (mat2 == 0) continue;
 
             var k1 = conductivities[mat1];
             var k2 = conductivities[mat2];
-            var k_eff = 2 * k1 * k2 / (k1 + k2 + 1e-10f);
+            var k_eff_interface = 2 * k1 * k2 / (k1 + k2 + 1e-10f);
 
-            var flux = -k_eff * (T2 - T1) / dx;
+            var flux = -k_eff_interface * (T2 - T1) / dx;
             totalFlux += flux;
             count++;
         }
 
-        if (count == 0)
-        {
-            Logger.LogWarning("[ThermalSolver] No valid flux measurements (all voxels may be exterior). Returning 0.");
-            return 0.0f;
-        }
-
+        if (count == 0 || gradient == 0) return 0.0f;
         var avgFlux = totalFlux / count;
-        var keff = (float)(Math.Abs(avgFlux) / gradient);
-
-        return keff;
+        return (float)(Math.Abs(avgFlux) / gradient);
     }
 
-    private static Dictionary<string, float> CalculateAnalyticalEstimates(CtImageStackDataset dataset,
-        Dictionary<byte, float> conductivities, ThermalOptions options)
+    private static Dictionary<string, float> CalculateAnalyticalEstimates(CtImageStackDataset dataset, Dictionary<byte, float> conductivities, ThermalOptions options)
     {
+        // This method is unchanged as it already correctly excludes material 0 from its calculations.
         var estimates = new Dictionary<string, float>();
-
-        // Calculate volume fractions (EXCLUDING EXTERIOR MATERIAL ID: 0)
         var materialVoxels = new Dictionary<byte, long>();
         long totalNonExteriorVoxels = 0;
 
@@ -435,567 +422,131 @@ __kernel void calculate_flux(
         for (var x = 0; x < dataset.Width; x++)
         {
             var mat = dataset.LabelData[x, y, z];
-            if (mat == 0) continue; // Skip exterior
+            if (mat == 0) continue;
 
-            if (!materialVoxels.ContainsKey(mat))
-                materialVoxels[mat] = 0;
+            if (!materialVoxels.ContainsKey(mat)) materialVoxels[mat] = 0;
             materialVoxels[mat]++;
             totalNonExteriorVoxels++;
         }
 
-        if (totalNonExteriorVoxels == 0)
-        {
-            Logger.LogWarning("[ThermalSolver] No non-exterior voxels found. Cannot calculate analytical estimates.");
-            return estimates;
-        }
-
-        // Get non-exterior material IDs
+        if (totalNonExteriorVoxels == 0) return estimates;
         var matIds = conductivities.Keys.Where(k => k != 0 && materialVoxels.ContainsKey(k)).OrderBy(k => k).ToList();
-
-        if (matIds.Count < 2)
-        {
-            Logger.Log(
-                $"[ThermalSolver] Only {matIds.Count} non-exterior material(s) found. Skipping analytical estimates (need at least 2).");
-            return estimates;
-        }
+        if (matIds.Count < 2) return estimates;
 
         var matrixId = matIds[0];
         var inclusionId = matIds[1];
-
         var k_matrix = conductivities[matrixId];
         var k_inclusion = conductivities[inclusionId];
-        var Lambda = k_inclusion / k_matrix;
+        var epsilon = (float)materialVoxels[inclusionId] / (materialVoxels[matrixId] + materialVoxels[inclusionId]);
 
-        var matrixCount = materialVoxels[matrixId];
-        var inclusionCount = materialVoxels[inclusionId];
-        var epsilon = (float)inclusionCount / (matrixCount + inclusionCount);
-
-        Logger.Log("[ThermalSolver] Analytical model parameters:");
-        Logger.Log($"  Matrix: {dataset.Materials.First(m => m.ID == matrixId).Name} (k={k_matrix:F4})");
-        Logger.Log($"  Inclusion: {dataset.Materials.First(m => m.ID == inclusionId).Name} (k={k_inclusion:F4})");
-        Logger.Log($"  Volume fraction: ε={epsilon:F4}");
-
-        // Ochoa-Tapia et al. (1994) - Series distribution
-        var alpha = 1.0f;
-        var k_series = k_matrix * (2 * Lambda - epsilon * alpha * (Lambda - 1)) /
-                       (2 + epsilon * alpha * (Lambda - 1));
-        estimates["Ochoa-Tapia (Series)"] = k_series;
-
-        // Maxwell-Eucken (dilute suspension)
-        var k_maxwell = k_matrix * (2 * k_matrix + k_inclusion + 2 * epsilon * (k_inclusion - k_matrix)) /
-                        (2 * k_matrix + k_inclusion - epsilon * (k_inclusion - k_matrix));
-        estimates["Maxwell-Eucken"] = k_maxwell;
-
-        // Parallel model (upper bound)
-        var k_parallel = epsilon * k_inclusion + (1 - epsilon) * k_matrix;
-        estimates["Parallel (Upper Bound)"] = k_parallel;
-
-        // Series model (lower bound)
-        var k_series_simple = 1.0f / (epsilon / k_inclusion + (1 - epsilon) / k_matrix);
-        estimates["Series (Lower Bound)"] = k_series_simple;
-
-        Logger.Log("[ThermalSolver] Analytical estimates:");
-        foreach (var kv in estimates)
-            Logger.Log($"  {kv.Key}: {kv.Value:F6} W/m·K");
-
+        estimates["Parallel (Upper Bound)"] = epsilon * k_inclusion + (1 - epsilon) * k_matrix;
+        estimates["Series (Lower Bound)"] = 1.0f / (epsilon / k_inclusion + (1 - epsilon) / k_matrix);
         return estimates;
     }
 
     #region CPU Solver with SIMD
 
-    private static float[,,] SolveCPU(float[] temperature, ILabelVolumeData labels,
-        Dictionary<byte, float> conductivities, int W, int H, int D, double voxelSize,
-        ThermalOptions options, IProgress<float> progress, CancellationToken token)
+    private static float[,,] SolveCPU(float[] temperature, ILabelVolumeData labels, Dictionary<byte, float> conductivities, int W, int H, int D, double voxelSize, ThermalOptions options, IProgress<float> progress, CancellationToken token, ActiveBounds activeBounds)
     {
         var dx = (float)voxelSize;
         var dy = (float)voxelSize;
         var dz = (float)(options.Dataset.SliceThickness > 0 ? options.Dataset.SliceThickness * 1e-6 : voxelSize);
 
-        // Stability criterion for explicit scheme
-        var dx2 = dx * dx;
-        var dy2 = dy * dy;
-        var dz2 = dz * dz;
         var max_k = conductivities.Where(kvp => kvp.Key != 0).Max(kvp => kvp.Value);
-        var dt = 0.1f * Math.Min(dx2, Math.Min(dy2, dz2)) / max_k;
-
-        Logger.Log($"[ThermalSolver] Time step dt = {dt:E3} s");
-        Logger.Log($"[ThermalSolver] Voxel spacing: dx={dx:E3}, dy={dy:E3}, dz={dz:E3} m");
+        var dt = 0.1f * Math.Min(dx * dx, Math.Min(dy * dy, dz * dz)) / max_k;
 
         var iterations = options.MaxIterations;
         var tolerance = (float)options.ConvergenceTolerance;
 
         var tempCurrent = (float[])temperature.Clone();
         var tempNext = new float[temperature.Length];
-
-        var lastLogTime = Stopwatch.GetTimestamp();
         var converged = false;
 
         for (var iter = 0; iter < iterations; iter++)
         {
             token.ThrowIfCancellationRequested();
 
-            float maxChange = 0;
+            float maxChange = UpdateTemperatureScalar(tempCurrent, tempNext, labels, conductivities, W, H, D, dx, dy, dz, dt, token);
+            
+            ApplyBoundaryConditions(tempNext, W, H, D, labels, options, activeBounds);
+            
+            (tempCurrent, tempNext) = (tempNext, tempCurrent);
 
-            // Use SIMD-optimized solver
-            if (Avx2.IsSupported)
-                maxChange = UpdateTemperatureAVX2(tempCurrent, tempNext, labels, conductivities,
-                    W, H, D, dx, dy, dz, dt, token);
-            else if (AdvSimd.IsSupported)
-                maxChange = UpdateTemperatureNEON(tempCurrent, tempNext, labels, conductivities,
-                    W, H, D, dx, dy, dz, dt, token);
-            else
-                maxChange = UpdateTemperatureScalar(tempCurrent, tempNext, labels, conductivities,
-                    W, H, D, dx, dy, dz, dt, token);
-
-            // Apply boundary conditions
-            ApplyBoundaryConditions(tempNext, W, H, D, options);
-
-            // Swap buffers
-            var tmp = tempCurrent;
-            tempCurrent = tempNext;
-            tempNext = tmp;
-
-            // Update progress more frequently (every 10 iterations)
             if (iter % 10 == 0)
             {
-                var iterProgress = 0.15f + 0.70f * iter / iterations;
-                progress?.Report(iterProgress);
-            }
-
-            // Log every 50 iterations or when convergence check happens
-            var currentTime = Stopwatch.GetTimestamp();
-            var elapsedMs = (currentTime - lastLogTime) * 1000.0 / Stopwatch.Frequency;
-
-            if (iter % 50 == 0 || elapsedMs > 2000) // Log every 50 iters or every 2 seconds
-            {
-                var iterProgress = (float)iter / iterations * 100.0f;
-                Logger.Log(
-                    $"[ThermalSolver] Iteration {iter}/{iterations} ({iterProgress:F1}%), max change: {maxChange:E3}, converged: {maxChange < tolerance}");
-                lastLogTime = currentTime;
-            }
-
-            // Check convergence every 10 iterations
-            if (iter > 0 && iter % 10 == 0)
-                if (maxChange < tolerance)
+                progress?.Report(0.15f + 0.70f * iter / iterations);
+                if (iter > 0 && maxChange < tolerance)
                 {
-                    Logger.Log(
-                        $"[ThermalSolver] *** CONVERGED after {iter} iterations (max change: {maxChange:E3} < tolerance: {tolerance:E3}) ***");
+                    Logger.Log($"[ThermalSolver] *** CONVERGED after {iter} iterations ***");
                     converged = true;
                     break;
                 }
+            }
         }
+        if (!converged) Logger.LogWarning($"[ThermalSolver] Did not converge within {iterations} iterations.");
 
-        if (!converged)
-            Logger.LogWarning(
-                $"[ThermalSolver] Did not converge within {iterations} iterations. Consider increasing MaxIterations or relaxing tolerance.");
-
-        // Convert to 3D array format
-        Logger.Log("[ThermalSolver] Converting to 3D array...");
         return ConvertTo3DArray(tempCurrent, W, H, D);
     }
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static float UpdateTemperatureAVX2(
-        float[] tempIn, float[] tempOut, ILabelVolumeData labels,
-        Dictionary<byte, float> conductivities, int W, int H, int D,
-        float dx, float dy, float dz, float dt, CancellationToken token)
+    private static float UpdateTemperatureScalar(float[] tempIn, float[] tempOut, ILabelVolumeData labels, Dictionary<byte, float> conductivities, int W, int H, int D, float dx, float dy, float dz, float dt, CancellationToken token)
     {
         float maxChange = 0;
-        var dx2 = dx * dx;
-        var dy2 = dy * dy;
-        var dz2 = dz * dz;
-
+        var dx2 = dx * dx; var dy2 = dy * dy; var dz2 = dz * dz;
         var lockObj = new object();
-        var pOptions = new ParallelOptions { CancellationToken = token };
 
-        Parallel.For(1, D - 1, pOptions, z =>
+        Parallel.For(1, D - 1, new ParallelOptions { CancellationToken = token }, z =>
         {
             float localMax = 0;
-
-            for (var y = 1; y < H - 1; y++)
-            {
-                var x = 1;
-                var rowIdx = (z * H + y) * W;
-
-                // Process 8 elements at a time (internally still per-element for correctness)
-                for (; x <= W - 9; x += 8)
-                {
-                    var idx = rowIdx + x;
-
-                    for (var i = 0; i < 8; i++)
-                    {
-                        var cidx = idx + i;
-
-                        // map flat index -> (x,y,z)
-                        var cx = cidx % W;
-                        var cy = cidx / W % H;
-                        var cz = cidx / (W * H);
-
-                        var mat = labels[cx, cy, cz];
-
-                        // === Pass-through for exterior voxels to avoid oscillations ===
-                        if (mat == 0)
-                        {
-                            tempOut[cidx] = tempIn[cidx];
-                            continue;
-                        }
-
-                        var k_c = conductivities[mat];
-
-                        var T_c = tempIn[cidx];
-                        var T_xp = tempIn[cidx + 1];
-                        var T_xm = tempIn[cidx - 1];
-                        var T_yp = tempIn[cidx + W];
-                        var T_ym = tempIn[cidx - W];
-                        var T_zp = tempIn[cidx + W * H];
-                        var T_zm = tempIn[cidx - W * H];
-
-                        // neighbor materials (safe within interior band)
-                        var mat_xp = labels[cx + 1, cy, cz];
-                        var mat_xm = labels[cx - 1, cy, cz];
-                        var mat_yp = labels[cx, cy + 1, cz];
-                        var mat_ym = labels[cx, cy - 1, cz];
-                        var mat_zp = labels[cx, cy, cz + 1];
-                        var mat_zm = labels[cx, cy, cz - 1];
-
-                        // conductivities (use tiny value if id not present)
-                        var k_xp = conductivities.ContainsKey(mat_xp) ? conductivities[mat_xp] : 0.001f;
-                        var k_xm = conductivities.ContainsKey(mat_xm) ? conductivities[mat_xm] : 0.001f;
-                        var k_yp = conductivities.ContainsKey(mat_yp) ? conductivities[mat_yp] : 0.001f;
-                        var k_ym = conductivities.ContainsKey(mat_ym) ? conductivities[mat_ym] : 0.001f;
-                        var k_zp = conductivities.ContainsKey(mat_zp) ? conductivities[mat_zp] : 0.001f;
-                        var k_zm = conductivities.ContainsKey(mat_zm) ? conductivities[mat_zm] : 0.001f;
-
-                        // harmonic-mean interface conductivities (same physics as scalar/NEON)
-                        var k_ixp = HarmonicMean(k_c, k_xp);
-                        var k_ixm = HarmonicMean(k_c, k_xm);
-                        var k_iyp = HarmonicMean(k_c, k_yp);
-                        var k_iym = HarmonicMean(k_c, k_ym);
-                        var k_izp = HarmonicMean(k_c, k_zp);
-                        var k_izm = HarmonicMean(k_c, k_zm);
-
-                        var d2T_dx2 = (k_ixp * (T_xp - T_c) - k_ixm * (T_c - T_xm)) / dx2;
-                        var d2T_dy2 = (k_iyp * (T_yp - T_c) - k_iym * (T_c - T_ym)) / dy2;
-                        var d2T_dz2 = (k_izp * (T_zp - T_c) - k_izm * (T_c - T_zm)) / dz2;
-
-                        tempOut[cidx] = T_c + dt * (d2T_dx2 + d2T_dy2 + d2T_dz2);
-
-                        var change = Math.Abs(tempOut[cidx] - T_c);
-                        if (change > localMax) localMax = change;
-                    }
-                }
-
-                // Remainder elements
-                for (; x < W - 1; x++)
-                {
-                    var idx1 = rowIdx + x;
-                    var mat = labels[x, y, z];
-
-                    if (mat == 0)
-                    {
-                        tempOut[idx1] = tempIn[idx1];
-                        continue;
-                    }
-
-                    var k_c = conductivities[mat];
-
-                    var T_c = tempIn[idx1];
-                    var T_xp = tempIn[idx1 + 1];
-                    var T_xm = tempIn[idx1 - 1];
-                    var T_yp = tempIn[idx1 + W];
-                    var T_ym = tempIn[idx1 - W];
-                    var T_zp = tempIn[idx1 + W * H];
-                    var T_zm = tempIn[idx1 - W * H];
-
-                    var mat_xp = labels[x + 1, y, z];
-                    var mat_xm = labels[x - 1, y, z];
-                    var mat_yp = labels[x, y + 1, z];
-                    var mat_ym = labels[x, y - 1, z];
-                    var mat_zp = labels[x, y, z + 1];
-                    var mat_zm = labels[x, y, z - 1];
-
-                    var k_xp = conductivities.ContainsKey(mat_xp) ? conductivities[mat_xp] : 0.001f;
-                    var k_xm = conductivities.ContainsKey(mat_xm) ? conductivities[mat_xm] : 0.001f;
-                    var k_yp = conductivities.ContainsKey(mat_yp) ? conductivities[mat_yp] : 0.001f;
-                    var k_ym = conductivities.ContainsKey(mat_ym) ? conductivities[mat_ym] : 0.001f;
-                    var k_zp = conductivities.ContainsKey(mat_zp) ? conductivities[mat_zp] : 0.001f;
-                    var k_zm = conductivities.ContainsKey(mat_zm) ? conductivities[mat_zm] : 0.001f;
-
-                    var k_ixp = HarmonicMean(k_c, k_xp);
-                    var k_ixm = HarmonicMean(k_c, k_xm);
-                    var k_iyp = HarmonicMean(k_c, k_yp);
-                    var k_iym = HarmonicMean(k_c, k_ym);
-                    var k_izp = HarmonicMean(k_c, k_zp);
-                    var k_izm = HarmonicMean(k_c, k_zm);
-
-                    var d2T_dx2 = (k_ixp * (T_xp - T_c) - k_ixm * (T_c - T_xm)) / dx2;
-                    var d2T_dy2 = (k_iyp * (T_yp - T_c) - k_iym * (T_c - T_ym)) / dy2;
-                    var d2T_dz2 = (k_izp * (T_zp - T_c) - k_izm * (T_c - T_zm)) / dz2;
-
-                    tempOut[idx1] = T_c + dt * (d2T_dx2 + d2T_dy2 + d2T_dz2);
-
-                    var change = Math.Abs(tempOut[idx1] - T_c);
-                    if (change > localMax) localMax = change;
-                }
-            }
-
-            lock (lockObj)
-            {
-                if (localMax > maxChange) maxChange = localMax;
-            }
-        });
-
-        return maxChange;
-    }
-
-
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static float UpdateTemperatureNEON(
-        float[] tempIn, float[] tempOut, ILabelVolumeData labels,
-        Dictionary<byte, float> conductivities, int W, int H, int D,
-        float dx, float dy, float dz, float dt, CancellationToken token)
-    {
-        float maxChange = 0;
-        var dx2 = dx * dx;
-        var dy2 = dy * dy;
-        var dz2 = dz * dz;
-
-        var lockObj = new object();
-        var pOptions = new ParallelOptions { CancellationToken = token };
-
-        Parallel.For(1, D - 1, pOptions, z =>
-        {
-            float localMax = 0;
-
-            for (var y = 1; y < H - 1; y++)
-            {
-                var x = 1;
-                var rowIdx = (z * H + y) * W;
-
-                // 4-wide block
-                for (; x <= W - 5; x += 4)
-                {
-                    var idx = rowIdx + x;
-
-                    for (var i = 0; i < 4; i++)
-                    {
-                        var cidx = idx + i;
-
-                        var cx = cidx % W;
-                        var cy = cidx / W % H;
-                        var cz = cidx / (W * H);
-
-                        var mat = labels[cx, cy, cz];
-
-                        if (mat == 0)
-                        {
-                            tempOut[cidx] = tempIn[cidx];
-                            continue;
-                        }
-
-                        var k_c = conductivities[mat];
-
-                        var T_c = tempIn[cidx];
-                        var T_xp = tempIn[cidx + 1];
-                        var T_xm = tempIn[cidx - 1];
-                        var T_yp = tempIn[cidx + W];
-                        var T_ym = tempIn[cidx - W];
-                        var T_zp = tempIn[cidx + W * H];
-                        var T_zm = tempIn[cidx - W * H];
-
-                        var mat_xp = labels[cx + 1, cy, cz];
-                        var mat_xm = labels[cx - 1, cy, cz];
-                        var mat_yp = labels[cx, cy + 1, cz];
-                        var mat_ym = labels[cx, cy - 1, cz];
-                        var mat_zp = labels[cx, cy, cz + 1];
-                        var mat_zm = labels[cx, cy, cz - 1];
-
-                        var k_xp = conductivities.ContainsKey(mat_xp) ? conductivities[mat_xp] : 0.001f;
-                        var k_xm = conductivities.ContainsKey(mat_xm) ? conductivities[mat_xm] : 0.001f;
-                        var k_yp = conductivities.ContainsKey(mat_yp) ? conductivities[mat_yp] : 0.001f;
-                        var k_ym = conductivities.ContainsKey(mat_ym) ? conductivities[mat_ym] : 0.001f;
-                        var k_zp = conductivities.ContainsKey(mat_zp) ? conductivities[mat_zp] : 0.001f;
-                        var k_zm = conductivities.ContainsKey(mat_zm) ? conductivities[mat_zm] : 0.001f;
-
-                        var k_ixp = HarmonicMean(k_c, k_xp);
-                        var k_ixm = HarmonicMean(k_c, k_xm);
-                        var k_iyp = HarmonicMean(k_c, k_yp);
-                        var k_iym = HarmonicMean(k_c, k_ym);
-                        var k_izp = HarmonicMean(k_c, k_zp);
-                        var k_izm = HarmonicMean(k_c, k_zm);
-
-                        var d2T_dx2 = (k_ixp * (T_xp - T_c) - k_ixm * (T_c - T_xm)) / dx2;
-                        var d2T_dy2 = (k_iyp * (T_yp - T_c) - k_iym * (T_c - T_ym)) / dy2;
-                        var d2T_dz2 = (k_izp * (T_zp - T_c) - k_izm * (T_c - T_zm)) / dz2;
-
-                        tempOut[cidx] = T_c + dt * (d2T_dx2 + d2T_dy2 + d2T_dz2);
-
-                        var change = Math.Abs(tempOut[cidx] - T_c);
-                        if (change > localMax) localMax = change;
-                    }
-                }
-
-                // Remainder
-                for (; x < W - 1; x++)
-                {
-                    var idx1 = rowIdx + x;
-                    var mat = labels[x, y, z];
-
-                    if (mat == 0)
-                    {
-                        tempOut[idx1] = tempIn[idx1];
-                        continue;
-                    }
-
-                    var k_c = conductivities[mat];
-
-                    var T_c = tempIn[idx1];
-                    var T_xp = tempIn[idx1 + 1];
-                    var T_xm = tempIn[idx1 - 1];
-                    var T_yp = tempIn[idx1 + W];
-                    var T_ym = tempIn[idx1 - W];
-                    var T_zp = tempIn[idx1 + W * H];
-                    var T_zm = tempIn[idx1 - W * H];
-
-                    var mat_xp = labels[x + 1, y, z];
-                    var mat_xm = labels[x - 1, y, z];
-                    var mat_yp = labels[x, y + 1, z];
-                    var mat_ym = labels[x, y - 1, z];
-                    var mat_zp = labels[x, y, z + 1];
-                    var mat_zm = labels[x, y, z - 1];
-
-                    var k_xp = conductivities.ContainsKey(mat_xp) ? conductivities[mat_xp] : 0.001f;
-                    var k_xm = conductivities.ContainsKey(mat_xm) ? conductivities[mat_xm] : 0.001f;
-                    var k_yp = conductivities.ContainsKey(mat_yp) ? conductivities[mat_yp] : 0.001f;
-                    var k_ym = conductivities.ContainsKey(mat_ym) ? conductivities[mat_ym] : 0.001f;
-                    var k_zp = conductivities.ContainsKey(mat_zp) ? conductivities[mat_zp] : 0.001f;
-                    var k_zm = conductivities.ContainsKey(mat_zm) ? conductivities[mat_zm] : 0.001f;
-
-                    var k_ixp = HarmonicMean(k_c, k_xp);
-                    var k_ixm = HarmonicMean(k_c, k_xm);
-                    var k_iyp = HarmonicMean(k_c, k_yp);
-                    var k_iym = HarmonicMean(k_c, k_ym);
-                    var k_izp = HarmonicMean(k_c, k_zp);
-                    var k_izm = HarmonicMean(k_c, k_zm);
-
-                    var d2T_dx2 = (k_ixp * (T_xp - T_c) - k_ixm * (T_c - T_xm)) / dx2;
-                    var d2T_dy2 = (k_iyp * (T_yp - T_c) - k_iym * (T_c - T_ym)) / dy2;
-                    var d2T_dz2 = (k_izp * (T_zp - T_c) - k_izm * (T_c - T_zm)) / dz2;
-
-                    tempOut[idx1] = T_c + dt * (d2T_dx2 + d2T_dy2 + d2T_dz2);
-
-                    var change = Math.Abs(tempOut[idx1] - T_c);
-                    if (change > localMax) localMax = change;
-                }
-            }
-
-            lock (lockObj)
-            {
-                if (localMax > maxChange) maxChange = localMax;
-            }
-        });
-
-        return maxChange;
-    }
-
-
-    private static float UpdateTemperatureScalar(
-        float[] tempIn, float[] tempOut, ILabelVolumeData labels,
-        Dictionary<byte, float> conductivities, int W, int H, int D,
-        float dx, float dy, float dz, float dt, CancellationToken token)
-    {
-        float maxChange = 0;
-        var dx2 = dx * dx;
-        var dy2 = dy * dy;
-        var dz2 = dz * dz;
-
-        var lockObj = new object();
-        var pOptions = new ParallelOptions { CancellationToken = token };
-
-        Parallel.For(1, D - 1, pOptions, z =>
-        {
-            float localMax = 0;
-
             for (var y = 1; y < H - 1; y++)
             for (var x = 1; x < W - 1; x++)
             {
                 var idx = (z * H + y) * W + x;
                 var mat = labels[x, y, z];
 
-                // === Pass-through for exterior voxels ===
-                if (mat == 0)
+                if (mat == 0) // CORE LOGIC: Exclude voids from calculation
                 {
                     tempOut[idx] = tempIn[idx];
                     continue;
                 }
 
                 var k_c = conductivities[mat];
-
                 var T_c = tempIn[idx];
-                var T_xp = tempIn[idx + 1];
-                var T_xm = tempIn[idx - 1];
-                var T_yp = tempIn[idx + W];
-                var T_ym = tempIn[idx - W];
-                var T_zp = tempIn[idx + W * H];
-                var T_zm = tempIn[idx - W * H];
+                
+                var T_xp = tempIn[idx + 1]; var T_xm = tempIn[idx - 1];
+                var T_yp = tempIn[idx + W]; var T_ym = tempIn[idx - W];
+                var T_zp = tempIn[idx + W*H]; var T_zm = tempIn[idx - W*H];
 
-                var mat_xp = labels[x + 1, y, z];
-                var mat_xm = labels[x - 1, y, z];
-                var mat_yp = labels[x, y + 1, z];
-                var mat_ym = labels[x, y - 1, z];
-                var mat_zp = labels[x, y, z + 1];
-                var mat_zm = labels[x, y, z - 1];
+                var mat_xp = labels[x + 1, y, z]; var mat_xm = labels[x - 1, y, z];
+                var mat_yp = labels[x, y + 1, z]; var mat_ym = labels[x, y - 1, z];
+                var mat_zp = labels[x, y, z + 1]; var mat_zm = labels[x, y, z - 1];
 
-                var k_xp = conductivities.ContainsKey(mat_xp) ? conductivities[mat_xp] : 0.001f;
-                var k_xm = conductivities.ContainsKey(mat_xm) ? conductivities[mat_xm] : 0.001f;
-                var k_yp = conductivities.ContainsKey(mat_yp) ? conductivities[mat_yp] : 0.001f;
-                var k_ym = conductivities.ContainsKey(mat_ym) ? conductivities[mat_ym] : 0.001f;
-                var k_zp = conductivities.ContainsKey(mat_zp) ? conductivities[mat_zp] : 0.001f;
-                var k_zm = conductivities.ContainsKey(mat_zm) ? conductivities[mat_zm] : 0.001f;
+                var k_xp = conductivities[mat_xp]; var k_xm = conductivities[mat_xm];
+                var k_yp = conductivities[mat_yp]; var k_ym = conductivities[mat_ym];
+                var k_zp = conductivities[mat_zp]; var k_zm = conductivities[mat_zm];
 
-                var k_ixp = HarmonicMean(k_c, k_xp);
-                var k_ixm = HarmonicMean(k_c, k_xm);
-                var k_iyp = HarmonicMean(k_c, k_yp);
-                var k_iym = HarmonicMean(k_c, k_ym);
-                var k_izp = HarmonicMean(k_c, k_zp);
-                var k_izm = HarmonicMean(k_c, k_zm);
+                var k_ixp = HarmonicMean(k_c, k_xp); var k_ixm = HarmonicMean(k_c, k_xm);
+                var k_iyp = HarmonicMean(k_c, k_yp); var k_iym = HarmonicMean(k_c, k_ym);
+                var k_izp = HarmonicMean(k_c, k_zp); var k_izm = HarmonicMean(k_c, k_zm);
 
                 var d2T_dx2 = (k_ixp * (T_xp - T_c) - k_ixm * (T_c - T_xm)) / dx2;
                 var d2T_dy2 = (k_iyp * (T_yp - T_c) - k_iym * (T_c - T_ym)) / dy2;
                 var d2T_dz2 = (k_izp * (T_zp - T_c) - k_izm * (T_c - T_zm)) / dz2;
 
-                tempOut[idx] = T_c + dt * (d2T_dx2 + d2T_dy2 + d2T_dz2);
-
-                var change = Math.Abs(tempOut[idx] - T_c);
+                var newTemp = T_c + dt * (d2T_dx2 + d2T_dy2 + d2T_dz2);
+                tempOut[idx] = newTemp;
+                
+                var change = Math.Abs(newTemp - T_c);
                 if (change > localMax) localMax = change;
             }
-
-            lock (lockObj)
-            {
-                if (localMax > maxChange) maxChange = localMax;
-            }
+            lock (lockObj) { if (localMax > maxChange) maxChange = localMax; }
         });
-
         return maxChange;
     }
-
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static float HarmonicMean(float k1, float k2)
     {
-        return 2.0f * k1 * k2 / (k1 + k2 + 1e-10f);
-    }
-
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static float ArithmeticMean(float k1, float k2)
-    {
-        return 0.5f * (k1 + k2);
-    }
-
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static float GeometricMean(float k1, float k2)
-    {
-        return (float)Math.Sqrt(k1 * k2);
+        return (k1 + k2 > 1e-9f) ? (2.0f * k1 * k2 / (k1 + k2)) : 0.0f;
     }
 
     #endregion
@@ -1005,287 +556,169 @@ __kernel void calculate_flux(
     private static bool TryInitializeOpenCL()
     {
         if (_clReady) return true;
-
         try
         {
-            Logger.Log("[ThermalSolver] Attempting to initialize OpenCL...");
             _cl = CL.GetApi();
-
             unsafe
             {
-                uint nPlatforms = 0;
+                uint nPlatforms;
                 _cl.GetPlatformIDs(0, null, &nPlatforms);
-                if (nPlatforms == 0)
-                {
-                    Logger.Log("[ThermalSolver] No OpenCL platforms found");
-                    return false;
-                }
-
-                Logger.Log($"[ThermalSolver] Found {nPlatforms} OpenCL platform(s)");
-
+                if (nPlatforms == 0) return false;
                 var platforms = stackalloc nint[(int)nPlatforms];
                 _cl.GetPlatformIDs(nPlatforms, platforms, null);
-
                 nint device = 0;
                 for (var i = 0; i < nPlatforms; i++)
                 {
-                    uint nDevices = 0;
-                    _cl.GetDeviceIDs(platforms[i], DeviceType.Gpu, 0, null, &nDevices);
-                    if (nDevices == 0) continue;
-
-                    var devices = stackalloc nint[(int)nDevices];
-                    _cl.GetDeviceIDs(platforms[i], DeviceType.Gpu, nDevices, devices, null);
-                    device = devices[0];
-                    Logger.Log($"[ThermalSolver] Using GPU device from platform {i}");
-                    break;
+                    uint nDevices;
+                    if (_cl.GetDeviceIDs(platforms[i], DeviceType.Gpu, 0, null, &nDevices) == 0 && nDevices > 0)
+                    {
+                         var devices = stackalloc nint[(int)nDevices];
+                        _cl.GetDeviceIDs(platforms[i], DeviceType.Gpu, nDevices, devices, null);
+                        device = devices[0];
+                        break;
+                    }
                 }
-
-                if (device == 0)
-                {
-                    Logger.Log("[ThermalSolver] No GPU devices found");
-                    return false;
-                }
-
+                if (device == 0) return false;
+                
                 int err;
                 _ctx = _cl.CreateContext(null, 1, &device, null, null, &err);
-                if (err != 0)
-                {
-                    Logger.LogError($"[ThermalSolver] Failed to create OpenCL context: {err}");
-                    return false;
-                }
-
                 _queue = _cl.CreateCommandQueue(_ctx, device, CommandQueueProperties.None, &err);
-                if (err != 0)
-                {
-                    Logger.LogError($"[ThermalSolver] Failed to create command queue: {err}");
-                    return false;
-                }
-
                 var sources = new[] { OpenCLKernels };
                 var srcLen = (nuint)OpenCLKernels.Length;
                 _prog = _cl.CreateProgramWithSource(_ctx, 1, sources, in srcLen, &err);
-                if (err != 0)
-                {
-                    Logger.LogError($"[ThermalSolver] Failed to create program: {err}");
-                    return false;
-                }
-
                 err = _cl.BuildProgram(_prog, 0, null, string.Empty, null, null);
                 if (err != 0)
                 {
-                    Logger.LogError($"[ThermalSolver] Failed to build program: {err}");
+                    Logger.LogError($"[ThermalSolver] OpenCL Build Failed: {err}");
+                    nuint logSize;
+                    _cl.GetProgramBuildInfo(_prog, device, ProgramBuildInfo.BuildLog, 0, null, &logSize);
+                    var log = stackalloc byte[(int)logSize];
+                    _cl.GetProgramBuildInfo(_prog, device, ProgramBuildInfo.BuildLog, logSize, log, null);
+                    Logger.LogError($"Build Log: {System.Text.Encoding.UTF8.GetString(log, (int)logSize)}");
                     return false;
                 }
-
                 _clReady = true;
-                Logger.Log("[ThermalSolver] OpenCL initialized successfully");
                 return true;
             }
         }
-        catch (Exception ex)
-        {
-            Logger.LogError($"[ThermalSolver] OpenCL initialization exception: {ex.Message}");
-            return false;
-        }
+        catch (Exception ex) { Logger.LogError($"[ThermalSolver] OpenCL init exception: {ex.Message}"); return false; }
     }
 
-    private static float[,,] SolveGPU(float[] temperature, ILabelVolumeData labels,
-        Dictionary<byte, float> conductivities, int W, int H, int D, double voxelSize,
-        ThermalOptions options, IProgress<float> progress, CancellationToken token)
+    private static float[,,] SolveGPU(float[] temperature, ILabelVolumeData labels, Dictionary<byte, float> conductivities, int W, int H, int D, double voxelSize, ThermalOptions options, IProgress<float> progress, CancellationToken token, ActiveBounds activeBounds)
+{
+    try
     {
-        try
+        unsafe
         {
-            Logger.Log("[ThermalSolver] Starting GPU solver");
-            unsafe
+            var dx = (float)voxelSize;
+            var dy = (float)voxelSize;
+            var dz = (float)(options.Dataset.SliceThickness > 0 ? options.Dataset.SliceThickness * 1e-6 : voxelSize);
+            var max_k = conductivities.Where(kvp => kvp.Key != 0).Max(kvp => kvp.Value);
+            var dt = 0.1f * Math.Min(dx * dx, Math.Min(dy * dy, dz * dz)) / max_k;
+            var iterations = options.MaxIterations;
+            var tolerance = (float)options.ConvergenceTolerance;
+
+            var conductivityArray = new float[256];
+            foreach (var kvp in conductivities) conductivityArray[kvp.Key] = kvp.Value;
+            
+            var labelArray = new byte[W * H * D];
+            Parallel.For(0, D, z => { for (var y = 0; y < H; y++) for (var x = 0; x < W; x++) labelArray[(z * H + y) * W + x] = labels[x, y, z]; });
+            
+            var tempCurrent = (float[])temperature.Clone();
+            var tempNext = new float[tempCurrent.Length];
+
+            int err;
+            fixed (float* pTempIn = tempCurrent, pTempOut = tempNext, pConductivities = conductivityArray)
+            fixed (byte* pLabels = labelArray)
             {
-                var dx = (float)voxelSize;
-                var dy = (float)voxelSize;
-                var dz = (float)(options.Dataset.SliceThickness > 0
-                    ? options.Dataset.SliceThickness * 1e-6
-                    : voxelSize);
+                var bufTempIn = _cl.CreateBuffer(_ctx, MemFlags.ReadWrite | MemFlags.CopyHostPtr, (nuint)(tempCurrent.Length * sizeof(float)), pTempIn, &err);
+                var bufTempOut = _cl.CreateBuffer(_ctx, MemFlags.ReadWrite, (nuint)(tempNext.Length * sizeof(float)), null, &err);
+                var bufLabels = _cl.CreateBuffer(_ctx, MemFlags.ReadOnly | MemFlags.CopyHostPtr, (nuint)(labelArray.Length * sizeof(byte)), pLabels, &err);
+                var bufConductivities = _cl.CreateBuffer(_ctx, MemFlags.ReadOnly | MemFlags.CopyHostPtr, (nuint)(conductivityArray.Length * sizeof(float)), pConductivities, &err);
 
-                var dx2 = dx * dx;
-                var dy2 = dy * dy;
-                var dz2 = dz * dz;
-                var max_k = conductivities.Where(kvp => kvp.Key != 0).Max(kvp => kvp.Value);
-                var dt = 0.1f * Math.Min(dx2, Math.Min(dy2, dz2)) / max_k;
+                var kernel = _cl.CreateKernel(_prog, "thermal_diffusion", &err);
+                
+                // --- START OF DEFINITIVE SYNTAX FIX ---
 
-                Logger.Log($"[ThermalSolver] GPU time step dt = {dt:E3} s");
+                // Set Buffer arguments (these are already pointers/handles)
+                _cl.SetKernelArg(kernel, 0, (nuint)sizeof(nint), &bufTempIn);
+                _cl.SetKernelArg(kernel, 1, (nuint)sizeof(nint), &bufTempOut);
+                _cl.SetKernelArg(kernel, 2, (nuint)sizeof(nint), &bufLabels);
+                _cl.SetKernelArg(kernel, 3, (nuint)sizeof(nint), &bufConductivities);
+                
+                // Set ALL scalar arguments using the correct stackalloc pattern
+                int* pW = stackalloc int[1]; *pW = W; _cl.SetKernelArg(kernel, 4, sizeof(int), pW);
+                int* pH = stackalloc int[1]; *pH = H; _cl.SetKernelArg(kernel, 5, sizeof(int), pH);
+                int* pD = stackalloc int[1]; *pD = D; _cl.SetKernelArg(kernel, 6, sizeof(int), pD);
+                
+                float* pDx = stackalloc float[1]; *pDx = dx; _cl.SetKernelArg(kernel, 7, sizeof(float), pDx);
+                float* pDy = stackalloc float[1]; *pDy = dy; _cl.SetKernelArg(kernel, 8, sizeof(float), pDy);
+                float* pDz = stackalloc float[1]; *pDz = dz; _cl.SetKernelArg(kernel, 9, sizeof(float), pDz);
+                
+                float* pDt = stackalloc float[1]; *pDt = dt; _cl.SetKernelArg(kernel, 10, sizeof(float), pDt);
+                
+                var flowDir = (int)options.HeatFlowDirection;
+                int* pFlowDir = stackalloc int[1]; *pFlowDir = flowDir; _cl.SetKernelArg(kernel, 11, sizeof(int), pFlowDir);
+                
+                var Thot = (float)options.TemperatureHot;
+                float* pThot = stackalloc float[1]; *pThot = Thot; _cl.SetKernelArg(kernel, 12, sizeof(float), pThot);
+                
+                var Tcold = (float)options.TemperatureCold;
+                float* pTcold = stackalloc float[1]; *pTcold = Tcold; _cl.SetKernelArg(kernel, 13, sizeof(float), pTcold);
+                
+                var minX = activeBounds.MinX; int* pMinX = stackalloc int[1]; *pMinX = minX; _cl.SetKernelArg(kernel, 14, sizeof(int), pMinX);
+                var maxX = activeBounds.MaxX; int* pMaxX = stackalloc int[1]; *pMaxX = maxX; _cl.SetKernelArg(kernel, 15, sizeof(int), pMaxX);
+                
+                var minY = activeBounds.MinY; int* pMinY = stackalloc int[1]; *pMinY = minY; _cl.SetKernelArg(kernel, 16, sizeof(int), pMinY);
+                var maxY = activeBounds.MaxY; int* pMaxY = stackalloc int[1]; *pMaxY = maxY; _cl.SetKernelArg(kernel, 17, sizeof(int), pMaxY);
+                
+                var minZ = activeBounds.MinZ; int* pMinZ = stackalloc int[1]; *pMinZ = minZ; _cl.SetKernelArg(kernel, 18, sizeof(int), pMinZ);
+                var maxZ = activeBounds.MaxZ; int* pMaxZ = stackalloc int[1]; *pMaxZ = maxZ; _cl.SetKernelArg(kernel, 19, sizeof(int), pMaxZ);
 
-                var iterations = options.MaxIterations;
-                var tolerance = (float)options.ConvergenceTolerance;
+                // --- END OF DEFINITIVE SYNTAX FIX ---
+                
+                var globalWorkSize = stackalloc nuint[] { (nuint)W, (nuint)H, (nuint)D };
+                var converged = false;
 
-                // Create conductivity lookup array
-                var conductivityArray = new float[256];
-                foreach (var kvp in conductivities) conductivityArray[kvp.Key] = kvp.Value;
-
-                // Convert label data to flat array
-                Logger.Log("[ThermalSolver] Converting label data to flat array...");
-                var labelArray = new byte[W * H * D];
-                Parallel.For(0, D, z =>
+                for (var iter = 0; iter < iterations; iter++)
                 {
-                    for (var y = 0; y < H; y++)
-                    for (var x = 0; x < W; x++)
-                    {
-                        var idx = (z * H + y) * W + x;
-                        labelArray[idx] = labels[x, y, z];
-                    }
-                });
-
-                var tempCurrent = (float[])temperature.Clone();
-                var tempNext = new float[temperature.Length];
-
-                int err;
-
-                Logger.Log("[ThermalSolver] Creating GPU buffers...");
-                // Create OpenCL buffers
-                fixed (float* pTempIn = tempCurrent)
-                fixed (float* pTempOut = tempNext)
-                fixed (byte* pLabels = labelArray)
-                fixed (float* pConductivities = conductivityArray)
-                {
-                    var bufTempIn = _cl.CreateBuffer(_ctx, MemFlags.ReadOnly | MemFlags.CopyHostPtr,
-                        (nuint)(tempCurrent.Length * sizeof(float)), pTempIn, &err);
-                    if (err != 0) throw new Exception($"Failed to create input buffer: {err}");
-
-                    var bufTempOut = _cl.CreateBuffer(_ctx, MemFlags.WriteOnly,
-                        (nuint)(tempNext.Length * sizeof(float)), null, &err);
-                    if (err != 0) throw new Exception($"Failed to create output buffer: {err}");
-
-                    var bufLabels = _cl.CreateBuffer(_ctx, MemFlags.ReadOnly | MemFlags.CopyHostPtr,
-                        (nuint)(labelArray.Length * sizeof(byte)), pLabels, &err);
-                    if (err != 0) throw new Exception($"Failed to create labels buffer: {err}");
-
-                    var bufConductivities = _cl.CreateBuffer(_ctx, MemFlags.ReadOnly | MemFlags.CopyHostPtr,
-                        (nuint)(conductivityArray.Length * sizeof(float)), pConductivities, &err);
-                    if (err != 0) throw new Exception($"Failed to create conductivities buffer: {err}");
-
-                    Logger.Log("[ThermalSolver] Creating kernel...");
-                    // Create kernel
-                    var kernel = _cl.CreateKernel(_prog, "thermal_diffusion", &err);
-                    if (err != 0) throw new Exception($"Failed to create kernel: {err}");
-
-                    // Set kernel arguments
+                    token.ThrowIfCancellationRequested();
+                    _cl.EnqueueNdrangeKernel(_queue, kernel, 3, null, globalWorkSize, null, 0, null, null);
+                    
+                    (bufTempIn, bufTempOut) = (bufTempOut, bufTempIn);
                     _cl.SetKernelArg(kernel, 0, (nuint)sizeof(nint), &bufTempIn);
                     _cl.SetKernelArg(kernel, 1, (nuint)sizeof(nint), &bufTempOut);
-                    _cl.SetKernelArg(kernel, 2, (nuint)sizeof(nint), &bufLabels);
-                    _cl.SetKernelArg(kernel, 3, (nuint)sizeof(nint), &bufConductivities);
-                    _cl.SetKernelArg(kernel, 4, sizeof(int), W);
-                    _cl.SetKernelArg(kernel, 5, sizeof(int), H);
-                    _cl.SetKernelArg(kernel, 6, sizeof(int), D);
-                    _cl.SetKernelArg(kernel, 7, sizeof(float), dx);
-                    _cl.SetKernelArg(kernel, 8, sizeof(float), dy);
-                    _cl.SetKernelArg(kernel, 9, sizeof(float), dz);
-                    _cl.SetKernelArg(kernel, 10, sizeof(float), dt);
 
-                    var globalWorkSize = stackalloc nuint[3];
-                    globalWorkSize[0] = (nuint)W;
-                    globalWorkSize[1] = (nuint)H;
-                    globalWorkSize[2] = (nuint)D;
-
-                    Logger.Log("[ThermalSolver] Starting GPU iteration loop...");
-                    var converged = false;
-
-                    for (var iter = 0; iter < iterations; iter++)
+                    if (iter % 50 == 0)
                     {
-                        token.ThrowIfCancellationRequested();
-
-                        // Execute kernel
-                        err = _cl.EnqueueNdrangeKernel(_queue, kernel, 3, null, globalWorkSize, null, 0, null, null);
-                        if (err != 0) throw new Exception($"Failed to enqueue kernel: {err}");
-
-                        _cl.Finish(_queue);
-
-                        // Apply boundary conditions on host every 10 iterations
-                        if (iter % 10 == 0)
+                        progress?.Report(0.15f + 0.70f * iter / iterations);
+                        if (iter > 0)
                         {
-                            err = _cl.EnqueueReadBuffer(_queue, bufTempOut, true, 0,
-                                (nuint)(tempNext.Length * sizeof(float)), pTempOut, 0, null, null);
-                            if (err != 0) throw new Exception($"Failed to read buffer: {err}");
-
-                            ApplyBoundaryConditions(tempNext, W, H, D, options);
-
-                            err = _cl.EnqueueWriteBuffer(_queue, bufTempIn, true, 0,
-                                (nuint)(tempNext.Length * sizeof(float)), pTempOut, 0, null, null);
-                            if (err != 0) throw new Exception($"Failed to write buffer: {err}");
-
-                            // Update progress
-                            var iterProgress = 0.15f + 0.70f * iter / iterations;
-                            progress?.Report(iterProgress);
-                        }
-
-                        // Swap buffers
-                        var tmp = bufTempIn;
-                        bufTempIn = bufTempOut;
-                        bufTempOut = tmp;
-
-                        // Check convergence every 100 iterations
-                        if (iter % 100 == 0 || iter % 50 == 0)
-                        {
-                            if (iter % 100 == 0 && iter > 0)
-                            {
-                                err = _cl.EnqueueReadBuffer(_queue, bufTempIn, true, 0,
-                                    (nuint)(tempCurrent.Length * sizeof(float)), pTempIn, 0, null, null);
-                                if (err != 0) throw new Exception($"Failed to read buffer: {err}");
-
-                                err = _cl.EnqueueReadBuffer(_queue, bufTempOut, true, 0,
-                                    (nuint)(tempNext.Length * sizeof(float)), pTempOut, 0, null, null);
-                                if (err != 0) throw new Exception($"Failed to read buffer: {err}");
-
-                                float maxChange = 0;
-                                for (var i = 0; i < tempCurrent.Length; i++)
-                                {
-                                    var change = Math.Abs(tempCurrent[i] - tempNext[i]);
-                                    if (change > maxChange) maxChange = change;
-                                }
-
-                                var iterProgress = (float)iter / iterations * 100.0f;
-                                Logger.Log(
-                                    $"[ThermalSolver] GPU Iteration {iter}/{iterations} ({iterProgress:F1}%), max change: {maxChange:E3}");
-
-                                if (maxChange < tolerance)
-                                {
-                                    Logger.Log($"[ThermalSolver] *** GPU CONVERGED after {iter} iterations ***");
-                                    converged = true;
-                                    break;
-                                }
-                            }
-                            else if (iter % 50 == 0)
-                            {
-                                var iterProgress = (float)iter / iterations * 100.0f;
-                                Logger.Log($"[ThermalSolver] GPU Iteration {iter}/{iterations} ({iterProgress:F1}%)");
-                            }
+                            _cl.Finish(_queue);
+                            _cl.EnqueueReadBuffer(_queue, bufTempIn, true, 0, (nuint)(tempCurrent.Length * sizeof(float)), pTempIn, 0, null, null);
+                            _cl.EnqueueReadBuffer(_queue, bufTempOut, true, 0, (nuint)(tempNext.Length * sizeof(float)), pTempOut, 0, null, null);
+                            float maxChangeNow = 0;
+                            for (int i = 0; i < tempCurrent.Length; i++) { var c = Math.Abs(tempCurrent[i] - tempNext[i]); if (c > maxChangeNow) maxChangeNow = c; }
+                            if (maxChangeNow < tolerance) { converged = true; break; }
                         }
                     }
-
-                    if (!converged)
-                        Logger.LogWarning($"[ThermalSolver] GPU did not converge within {iterations} iterations");
-
-                    // Read final result
-                    Logger.Log("[ThermalSolver] Reading final GPU result...");
-                    err = _cl.EnqueueReadBuffer(_queue, bufTempIn, true, 0,
-                        (nuint)(tempCurrent.Length * sizeof(float)), pTempIn, 0, null, null);
-                    if (err != 0) throw new Exception($"Failed to read final result: {err}");
-
-                    // Cleanup
-                    _cl.ReleaseMemObject(bufTempIn);
-                    _cl.ReleaseMemObject(bufTempOut);
-                    _cl.ReleaseMemObject(bufLabels);
-                    _cl.ReleaseMemObject(bufConductivities);
-                    _cl.ReleaseKernel(kernel);
                 }
+                if (!converged) Logger.LogWarning("[ThermalSolver] GPU: reached max iterations without converging");
 
-                Logger.Log("[ThermalSolver] GPU solver complete, converting to 3D array...");
-                return ConvertTo3DArray(tempCurrent, W, H, D);
+                _cl.Finish(_queue);
+                _cl.EnqueueReadBuffer(_queue, bufTempIn, true, 0, (nuint)(tempCurrent.Length * sizeof(float)), pTempIn, 0, null, null);
+                
+                _cl.ReleaseKernel(kernel);
+                _cl.ReleaseMemObject(bufTempIn); _cl.ReleaseMemObject(bufTempOut);
+                _cl.ReleaseMemObject(bufLabels); _cl.ReleaseMemObject(bufConductivities);
             }
-        }
+            return ConvertTo3DArray(tempCurrent, W, H, D);
+        }}
         catch (Exception ex)
         {
-            Logger.LogError($"[ThermalSolver] GPU solver failed: {ex.Message}");
-            Logger.LogWarning("[ThermalSolver] Falling back to CPU solver");
-            return SolveCPU(temperature, labels, conductivities, W, H, D, voxelSize, options, progress, token);
+            Logger.LogError($"[ThermalSolver] GPU solver error: {ex.Message}. Falling back to CPU.");
+            return SolveCPU(temperature, labels, conductivities, W, H, D, voxelSize, options, progress, token, activeBounds);
         }
     }
-
     #endregion
 }

@@ -556,7 +556,7 @@ void main()
 
         ImGui.Render();
         DrawImGui(ImGui.GetDrawData(), gd, cl);
-        ViewerScreenshotUtility.ProcessDeferredCaptures();
+        ScreenshotUtility.ProcessDeferredCaptures();
         _frameBegun = false;
     }
 

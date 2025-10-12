@@ -2,6 +2,7 @@
 
 using System.Numerics;
 using GeoscientistToolkit.Data.Mesh3D;
+using GeoscientistToolkit.Data.VolumeData; // Added for ILabelVolumeData
 
 namespace GeoscientistToolkit.Analysis;
 
@@ -28,8 +29,10 @@ public static class IsosurfaceGenerator
     /// <summary>
     ///     Generates a 3D mesh (isosurface) from a 3D scalar field for a given isovalue.
     ///     This operation is performed asynchronously to avoid blocking the UI thread.
+    ///     MODIFIED: Now requires labelData to exclude voxels with material ID 0.
     /// </summary>
     /// <param name="scalarField">The 3D array of scalar values.</param>
+    /// <param name="labelData">The 3D volume of material IDs. Voxels with ID 0 will be excluded.</param>
     /// <param name="isovalue">The threshold value to generate the surface at.</param>
     /// <param name="voxelSize">The physical size of a voxel for scaling.</param>
     /// <param name="progress">A progress reporter for updating the UI.</param>
@@ -37,6 +40,7 @@ public static class IsosurfaceGenerator
     /// <returns>A Task that resolves to a Mesh3DDataset containing the generated surface mesh.</returns>
     public static async Task<Mesh3DDataset> GenerateIsosurfaceAsync(
         float[,,] scalarField,
+        ILabelVolumeData labelData, // MODIFIED: Added labelData parameter
         float isovalue,
         Vector3 voxelSize,
         IProgress<(float progress, string message)> progress,
@@ -74,6 +78,25 @@ public static class IsosurfaceGenerator
                 for (var y = 0; y < dimY - 1; y++)
                 for (var x = 0; x < dimX - 1; x++)
                 {
+                    // --- MODIFICATION START: Check for void voxels (Material ID 0) ---
+                    // A cube is skipped if any of its 8 corners are in a void region.
+                    // This prevents generating surfaces in or connected to excluded areas.
+                    bool containsVoid = false;
+                    for (int i = 0; i < 8; i++)
+                    {
+                        var cornerPos = new Vector3(x, y, z) + _cubeCorners[i];
+                        if (labelData[(int)cornerPos.X, (int)cornerPos.Y, (int)cornerPos.Z] == 0)
+                        {
+                            containsVoid = true;
+                            break;
+                        }
+                    }
+                    if (containsVoid)
+                    {
+                        continue; // Skip this cube entirely
+                    }
+                    // --- MODIFICATION END ---
+                    
                     var cubeCase = 0;
                     for (var i = 0; i < 8; i++)
                     {
@@ -174,11 +197,13 @@ public static class IsosurfaceGenerator
 
     /// <summary>
     ///     Generates 2D isocontours (lines) from a 2D scalar field for a given isovalue.
+    ///     MODIFIED: Now requires labelSlice to exclude pixels with material ID 0.
     /// </summary>
     /// <param name="scalarField">The 2D array of scalar values.</param>
+    /// <param name="labelSlice">The 2D array of material IDs. Pixels with ID 0 will be excluded.</param>
     /// <param name="isovalue">The threshold value to generate the lines at.</param>
     /// <returns>A list of line segments, where each segment is a tuple of two Vector2 points.</returns>
-    public static List<(Vector2, Vector2)> GenerateIsocontours(float[,] scalarField, float isovalue)
+    public static List<(Vector2, Vector2)> GenerateIsocontours(float[,] scalarField, byte[,] labelSlice, float isovalue)
     {
         var lines = new List<(Vector2, Vector2)>();
         var dimX = scalarField.GetLength(0);
@@ -187,6 +212,17 @@ public static class IsosurfaceGenerator
         for (var y = 0; y < dimY - 1; y++)
         for (var x = 0; x < dimX - 1; x++)
         {
+            // --- MODIFICATION START: Check for void pixels (Material ID 0) ---
+            // Skip this cell if any of its 4 corners are in a void.
+            if (labelSlice[x, y] == 0 ||
+                labelSlice[x + 1, y] == 0 ||
+                labelSlice[x + 1, y + 1] == 0 ||
+                labelSlice[x, y + 1] == 0)
+            {
+                continue;
+            }
+            // --- MODIFICATION END ---
+            
             var cellCorners = new Vector2[] { new(x, y), new(x + 1, y), new(x + 1, y + 1), new(x, y + 1) };
             var cellValues = new[]
             {

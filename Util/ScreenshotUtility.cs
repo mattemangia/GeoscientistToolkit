@@ -25,7 +25,9 @@ public static class ScreenshotUtility
     private static readonly List<DeferredScreenshot> _deferredCaptures = new();
 
     /// <summary>
-    ///     Captures a screenshot of a Veldrid texture/render target
+    ///     Captures a screenshot of a Veldrid texture/render target.
+    ///     Note: This method is for standard textures. For capturing the main window,
+    ///     use CaptureFullFramebuffer or CaptureFramebufferRegion.
     /// </summary>
     public static bool CaptureTexture(Texture texture, string filePath, ImageFormat format = ImageFormat.PNG,
         int jpegQuality = 90)
@@ -36,6 +38,12 @@ public static class ScreenshotUtility
             return false;
         }
 
+        // Prevent direct use on the swapchain's backbuffer which can be problematic.
+        if ((texture.Usage & TextureUsage.RenderTarget) != 0 && texture.Width == VeldridManager.MainWindow.Width && texture.Height == VeldridManager.MainWindow.Height)
+        {
+             Logger.LogWarning("[Screenshot] CaptureTexture used on a render target resembling the backbuffer. Consider using CaptureFullFramebuffer for reliability.");
+        }
+        
         try
         {
             var gd = VeldridManager.GraphicsDevice;
@@ -63,7 +71,6 @@ public static class ScreenshotUtility
                 {
                     var width = (int)texture.Width;
                     var height = (int)texture.Height;
-                    var pixelSizeBytes = GetPixelSizeInBytes(texture.Format);
                     var rowPitch = (int)mappedResource.RowPitch;
 
                     // Handle different pixel formats
@@ -85,7 +92,7 @@ public static class ScreenshotUtility
             return false;
         }
     }
-
+    
     /// <summary>
     ///     Captures an ImGui window by its name
     /// </summary>
@@ -94,8 +101,7 @@ public static class ScreenshotUtility
         try
         {
             // Get window rect from ImGui internal state
-            Vector2 windowPos, windowSize;
-            if (!GetImGuiWindowRect(windowName, out windowPos, out windowSize))
+            if (!GetImGuiWindowRect(windowName, out var windowPos, out var windowSize))
             {
                 Logger.LogError($"[Screenshot] Could not get window rect for '{windowName}'");
                 return false;
@@ -123,7 +129,6 @@ public static class ScreenshotUtility
         size = Vector2.Zero;
 
         // Use Begin/End to access window properties. This is a common ImGui pattern.
-        // It might bring the window to focus, but it's the most reliable way to get its state.
         if (!ImGui.Begin(windowName))
         {
             ImGui.End(); // Ensure End is called even if Begin returns false
@@ -143,13 +148,10 @@ public static class ScreenshotUtility
     {
         try
         {
-            var gd = VeldridManager.GraphicsDevice;
-            var swapchain = gd.MainSwapchain;
-
-            // Get the backbuffer texture
-            var backbuffer = swapchain.Framebuffer.ColorTargets[0].Target;
-
-            return CaptureTexture(backbuffer, filePath, format);
+            var fullImageData = GetBackbufferData(out var width, out var height);
+            if (fullImageData == null) return false;
+            
+            return SaveImage(fullImageData, width, height, filePath, format);
         }
         catch (Exception ex)
         {
@@ -164,23 +166,12 @@ public static class ScreenshotUtility
     public static bool CaptureFramebufferRegion(int x, int y, int width, int height,
         string filePath, ImageFormat format = ImageFormat.PNG)
     {
-        // Clamp dimensions to be within the framebuffer
         var gd = VeldridManager.GraphicsDevice;
-        var swapchain = gd.MainSwapchain;
-        var backbuffer = swapchain.Framebuffer.ColorTargets[0].Target;
+        var backbuffer = gd.MainSwapchain.Framebuffer.ColorTargets[0].Target;
 
-        if (x < 0)
-        {
-            width += x;
-            x = 0;
-        }
-
-        if (y < 0)
-        {
-            height += y;
-            y = 0;
-        }
-
+        // Clamp dimensions to be within the framebuffer
+        if (x < 0) { width += x; x = 0; }
+        if (y < 0) { height += y; y = 0; }
         if (x + width > backbuffer.Width) width = (int)backbuffer.Width - x;
         if (y + height > backbuffer.Height) height = (int)backbuffer.Height - y;
 
@@ -192,37 +183,22 @@ public static class ScreenshotUtility
 
         try
         {
-            var factory = gd.ResourceFactory;
+            // Get the entire backbuffer data using the reliable method
+            var fullImageData = GetBackbufferData(out var fullWidth, out _);
+            if (fullImageData == null) return false;
 
-            // 1. Create a destination texture for the cropped image
-            var cropDesc = TextureDescription.Texture2D(
-                (uint)width, (uint)height, 1, 1,
-                backbuffer.Format, TextureUsage.Sampled);
-
-            using (var croppedTexture = factory.CreateTexture(cropDesc))
-            using (var cl = factory.CreateCommandList())
+            // Manually crop the desired region from the full image data on the CPU
+            var croppedData = new byte[width * height * 4];
+            for (var row = 0; row < height; row++)
             {
-                // 2. Begin a command list to copy the texture region
-                cl.Begin();
-
-                // 3. Copy the specified region from the backbuffer to our new texture
-                cl.CopyTexture(
-                    backbuffer,
-                    (uint)x, (uint)y, 0,
-                    0, 0,
-                    croppedTexture,
-                    0, 0, 0,
-                    0, 0,
-                    (uint)width, (uint)height, 1,
-                    1);
-
-                cl.End();
-                gd.SubmitCommands(cl);
-                gd.WaitForIdle(); // Ensure the copy operation is complete
-
-                // 4. Use the existing CaptureTexture utility on the new, smaller texture
-                return CaptureTexture(croppedTexture, filePath, format);
+                var srcY = y + row;
+                var srcOffset = (srcY * fullWidth + x) * 4;
+                var dstOffset = row * width * 4;
+                Buffer.BlockCopy(fullImageData, srcOffset, croppedData, dstOffset, width * 4);
             }
+
+            // Save the cropped image data
+            return SaveImage(croppedData, width, height, filePath, format);
         }
         catch (Exception ex)
         {
@@ -230,6 +206,57 @@ public static class ScreenshotUtility
             return false;
         }
     }
+    
+    /// <summary>
+    ///     Reliably copies the backbuffer to a CPU-accessible byte array using an intermediate texture.
+    ///     This avoids issues with copying directly from the swapchain on certain backends (e.g., Metal).
+    /// </summary>
+    private static byte[] GetBackbufferData(out int width, out int height)
+    {
+        var gd = VeldridManager.GraphicsDevice;
+        var factory = gd.ResourceFactory;
+        var backbuffer = gd.MainSwapchain.Framebuffer.ColorTargets[0].Target;
+
+        width = (int)backbuffer.Width;
+        height = (int)backbuffer.Height;
+
+        // Create an intermediate texture to copy the backbuffer to (GPU-to-GPU)
+        var copyDesc = TextureDescription.Texture2D(
+            backbuffer.Width, backbuffer.Height, 1, 1,
+            backbuffer.Format, TextureUsage.Sampled);
+
+        // Create the final staging texture for CPU access
+        var stagingDesc = TextureDescription.Texture2D(
+            backbuffer.Width, backbuffer.Height, 1, 1,
+            backbuffer.Format, TextureUsage.Staging);
+
+        using (var copyTarget = factory.CreateTexture(copyDesc))
+        using (var stagingTexture = factory.CreateTexture(stagingDesc))
+        using (var cl = factory.CreateCommandList())
+        {
+            cl.Begin();
+            // 1. Copy from the (potentially problematic) backbuffer to a normal texture on the GPU
+            cl.CopyTexture(backbuffer, copyTarget);
+            // 2. Copy from the normal texture to a CPU-readable staging texture
+            cl.CopyTexture(copyTarget, stagingTexture);
+            cl.End();
+            gd.SubmitCommands(cl);
+            gd.WaitForIdle();
+
+            // 3. Map the staging texture to get the pixel data
+            var mapped = gd.Map(stagingTexture, MapMode.Read, 0);
+            try
+            {
+                // Convert to a standard RGBA format and return the byte array
+                return ConvertToRGBA(mapped.Data, width, height, (int)mapped.RowPitch, backbuffer.Format);
+            }
+            finally
+            {
+                gd.Unmap(stagingTexture, 0);
+            }
+        }
+    }
+
 
     /// <summary>
     ///     Defers a screenshot capture until after the current frame is rendered
@@ -296,72 +323,66 @@ public static class ScreenshotUtility
         int rowPitch, PixelFormat format)
     {
         var result = new byte[width * height * 4];
-
         var srcPtr = (byte*)data.ToPointer();
 
-        switch (format)
+        // If rowPitch matches the width, we can do a single fast copy for RGBA formats.
+        if (rowPitch == width * 4 && (format == PixelFormat.R8_G8_B8_A8_UNorm || format == PixelFormat.R8_G8_B8_A8_UNorm_SRgb))
         {
-            case PixelFormat.R8_G8_B8_A8_UNorm:
-            case PixelFormat.R8_G8_B8_A8_UNorm_SRgb:
-                // Direct copy
-                for (var y = 0; y < height; y++)
-                    Marshal.Copy(new IntPtr(srcPtr + y * rowPitch),
-                        result, y * width * 4, width * 4);
-                break;
-
-            case PixelFormat.B8_G8_R8_A8_UNorm:
-            case PixelFormat.B8_G8_R8_A8_UNorm_SRgb:
-                // Swap R and B channels
-                for (var y = 0; y < height; y++)
-                for (var x = 0; x < width; x++)
-                {
-                    var srcIdx = y * rowPitch + x * 4;
-                    var dstIdx = (y * width + x) * 4;
-
-                    result[dstIdx + 0] = srcPtr[srcIdx + 2]; // R
-                    result[dstIdx + 1] = srcPtr[srcIdx + 1]; // G
-                    result[dstIdx + 2] = srcPtr[srcIdx + 0]; // B
-                    result[dstIdx + 3] = srcPtr[srcIdx + 3]; // A
-                }
-
-                break;
-
-            case PixelFormat.R8_UNorm:
-                // Grayscale to RGBA
-                for (var y = 0; y < height; y++)
-                for (var x = 0; x < width; x++)
-                {
-                    var gray = srcPtr[y * rowPitch + x];
-                    var dstIdx = (y * width + x) * 4;
-
-                    result[dstIdx + 0] = gray;
-                    result[dstIdx + 1] = gray;
-                    result[dstIdx + 2] = gray;
-                    result[dstIdx + 3] = 255;
-                }
-
-                break;
-
-            default:
-                // Fallback: copy what we can
-                var bytesPerPixel = GetPixelSizeInBytes(format);
-                var copySize = Math.Min(bytesPerPixel, 4);
-
-                for (var y = 0; y < height; y++)
-                for (var x = 0; x < width; x++)
-                {
-                    var srcIdx = y * rowPitch + x * bytesPerPixel;
-                    var dstIdx = (y * width + x) * 4;
-
-                    for (var i = 0; i < copySize; i++) result[dstIdx + i] = srcPtr[srcIdx + i];
-
-                    // Fill alpha if not present
-                    if (copySize < 4) result[dstIdx + 3] = 255;
-                }
-
-                break;
+            Marshal.Copy(data, result, 0, result.Length);
+            return result;
         }
+        
+        // Otherwise, process row by row.
+        for (var y = 0; y < height; y++)
+        {
+            var srcRowOffset = y * rowPitch;
+            var dstRowOffset = y * width * 4;
 
+            switch (format)
+            {
+                case PixelFormat.R8_G8_B8_A8_UNorm:
+                case PixelFormat.R8_G8_B8_A8_UNorm_SRgb:
+                    Marshal.Copy(new IntPtr(srcPtr + srcRowOffset), result, dstRowOffset, width * 4);
+                    break;
+
+                case PixelFormat.B8_G8_R8_A8_UNorm:
+                case PixelFormat.B8_G8_R8_A8_UNorm_SRgb:
+                    for (var x = 0; x < width; x++)
+                    {
+                        var srcIdx = srcRowOffset + x * 4;
+                        var dstIdx = dstRowOffset + x * 4;
+                        result[dstIdx + 0] = srcPtr[srcIdx + 2]; // R
+                        result[dstIdx + 1] = srcPtr[srcIdx + 1]; // G
+                        result[dstIdx + 2] = srcPtr[srcIdx + 0]; // B
+                        result[dstIdx + 3] = srcPtr[srcIdx + 3]; // A
+                    }
+                    break;
+
+                case PixelFormat.R8_UNorm:
+                    for (var x = 0; x < width; x++)
+                    {
+                        var gray = srcPtr[srcRowOffset + x];
+                        var dstIdx = dstRowOffset + x * 4;
+                        result[dstIdx + 0] = gray;
+                        result[dstIdx + 1] = gray;
+                        result[dstIdx + 2] = gray;
+                        result[dstIdx + 3] = 255;
+                    }
+                    break;
+
+                default: // Fallback for other formats
+                    var bytesPerPixel = GetPixelSizeInBytes(format);
+                    var copySize = Math.Min(bytesPerPixel, 4);
+                    for (var x = 0; x < width; x++)
+                    {
+                        var srcIdx = srcRowOffset + x * bytesPerPixel;
+                        var dstIdx = dstRowOffset + x * 4;
+                        for (var i = 0; i < copySize; i++) result[dstIdx + i] = srcPtr[srcIdx + i];
+                        if (copySize < 4) result[dstIdx + 3] = 255; // Fill alpha
+                    }
+                    break;
+            }
+        }
         return result;
     }
 
@@ -370,38 +391,21 @@ public static class ScreenshotUtility
     {
         try
         {
-            // Ensure directory exists
             var directory = Path.GetDirectoryName(filePath);
-            if (!string.IsNullOrEmpty(directory) && !Directory.Exists(directory)) Directory.CreateDirectory(directory);
+            if (!string.IsNullOrEmpty(directory) && !Directory.Exists(directory)) 
+                Directory.CreateDirectory(directory);
 
             using (var stream = new FileStream(filePath, FileMode.Create, FileAccess.Write))
             {
                 var writer = new ImageWriter();
-
+                var components = ColorComponents.RedGreenBlueAlpha;
                 switch (format)
                 {
-                    case ImageFormat.PNG:
-                        writer.WritePng(imageData, width, height,
-                            ColorComponents.RedGreenBlueAlpha, stream);
-                        break;
-
-                    case ImageFormat.JPEG:
-                        writer.WriteJpg(imageData, width, height,
-                            ColorComponents.RedGreenBlueAlpha, stream, jpegQuality);
-                        break;
-
-                    case ImageFormat.BMP:
-                        writer.WriteBmp(imageData, width, height,
-                            ColorComponents.RedGreenBlueAlpha, stream);
-                        break;
-
-                    case ImageFormat.TGA:
-                        writer.WriteTga(imageData, width, height,
-                            ColorComponents.RedGreenBlueAlpha, stream);
-                        break;
-
-                    default:
-                        throw new NotSupportedException($"Image format {format} not supported");
+                    case ImageFormat.PNG: writer.WritePng(imageData, width, height, components, stream); break;
+                    case ImageFormat.JPEG: writer.WriteJpg(imageData, width, height, components, stream, jpegQuality); break;
+                    case ImageFormat.BMP: writer.WriteBmp(imageData, width, height, components, stream); break;
+                    case ImageFormat.TGA: writer.WriteTga(imageData, width, height, components, stream); break;
+                    default: throw new NotSupportedException($"Image format {format} not supported");
                 }
             }
 
@@ -427,20 +431,12 @@ public static class ScreenshotUtility
     {
         if (!Directory.Exists(baseDirectory)) Directory.CreateDirectory(baseDirectory);
 
-        var extension = format switch
-        {
-            ImageFormat.PNG => ".png",
-            ImageFormat.JPEG => ".jpg",
-            ImageFormat.BMP => ".bmp",
-            ImageFormat.TGA => ".tga",
-            _ => ".png"
-        };
+        var extension = format.ToString().ToLower();
 
         for (var i = 0; i < textures.Length; i++)
         {
-            var fileName = $"{prefix}_{i:D4}_{DateTime.Now:yyyyMMdd_HHmmss}{extension}";
+            var fileName = $"{prefix}_{i:D4}_{DateTime.Now:yyyyMMdd_HHmmss}.{extension}";
             var filePath = Path.Combine(baseDirectory, fileName);
-
             CaptureTexture(textures[i], filePath, format);
         }
     }
@@ -451,16 +447,8 @@ public static class ScreenshotUtility
     public static string GenerateTimestampedFilename(string prefix = "screenshot",
         ImageFormat format = ImageFormat.PNG)
     {
-        var extension = format switch
-        {
-            ImageFormat.PNG => ".png",
-            ImageFormat.JPEG => ".jpg",
-            ImageFormat.BMP => ".bmp",
-            ImageFormat.TGA => ".tga",
-            _ => ".png"
-        };
-
-        return $"{prefix}_{DateTime.Now:yyyyMMdd_HHmmss}{extension}";
+        var extension = format.ToString().ToLower();
+        return $"{prefix}_{DateTime.Now:yyyyMMdd_HHmmss}.{extension}";
     }
 
     #endregion

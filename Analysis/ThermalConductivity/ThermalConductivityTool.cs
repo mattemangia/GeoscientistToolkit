@@ -194,17 +194,34 @@ public class ThermalConductivityTool : IDatasetTools, IDisposable
             else
             {
                 if (ImGui.BeginTable("MaterialsTable", 6,
-                        ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.ScrollY |
-                        ImGuiTableFlags.SizingFixedFit,
-                        new Vector2(0, 200)))
+                        ImGuiTableFlags.Borders
+                        | ImGuiTableFlags.RowBg
+                        | ImGuiTableFlags.ScrollY
+                        | ImGuiTableFlags.ScrollX
+                        | ImGuiTableFlags.SizingFixedFit    // honor fixed widths; allow scroll if too narrow
+                        | ImGuiTableFlags.Resizable,
+                        new Vector2(0, 230)))
                 {
-                    ImGui.TableSetupColumn("", ImGuiTableColumnFlags.WidthFixed, 25);
-                    ImGui.TableSetupColumn("Material", ImGuiTableColumnFlags.WidthFixed, 120);
-                    ImGui.TableSetupColumn("k (W/m·K)", ImGuiTableColumnFlags.WidthFixed, 90);
-                    ImGui.TableSetupColumn("Library", ImGuiTableColumnFlags.WidthFixed, 100);
-                    ImGui.TableSetupColumn("Properties", ImGuiTableColumnFlags.WidthFixed, 80);
-                    ImGui.TableSetupColumn("Actions", ImGuiTableColumnFlags.WidthStretch);
+                    ImGui.TableSetupScrollFreeze(0, 1);
+
+                    // Tighten up the early columns
+                    ImGui.TableSetupColumn("",            ImGuiTableColumnFlags.WidthFixed, 24);   // color
+                    ImGui.TableSetupColumn("Material",    ImGuiTableColumnFlags.WidthFixed, 100);  // smaller
+                    ImGui.TableSetupColumn("k (W/m·K)",   ImGuiTableColumnFlags.WidthFixed, 90);
+                    ImGui.TableSetupColumn("Library",     ImGuiTableColumnFlags.WidthFixed, 88);
+                    ImGui.TableSetupColumn("Properties",  ImGuiTableColumnFlags.WidthFixed, 80);
+
+                    // Give Actions room; can't be hidden
+                    ImGui.TableSetupColumn("Actions",
+                        ImGuiTableColumnFlags.WidthFixed | ImGuiTableColumnFlags.NoHide, 220);
+
                     ImGui.TableHeadersRow();
+
+                    // (Optional) enforce minimum runtime width in case user resized too small
+                    ImGui.TableSetColumnIndex(5); // Actions col index
+                    var w = ImGui.GetColumnWidth(5);
+                    
+
 
                     foreach (var material in visibleMaterials)
                     {
@@ -797,154 +814,209 @@ public class ThermalConductivityTool : IDatasetTools, IDisposable
             if (slice != null) ExportSliceToCsv(_sliceCsvExportDialog.SelectedPath, slice);
         }
     }
-
+    
     private void DrawSliceViewer()
     {
-        var maxSlice = 0;
+        // ---- UI controls (unchanged) ----
         var selectedDirection = (HeatFlowDirection)_selectedSliceDirectionInt;
-        switch (selectedDirection)
+        int maxSlice = selectedDirection switch
         {
-            case HeatFlowDirection.X: maxSlice = _options.Dataset.Width - 1; break;
-            case HeatFlowDirection.Y: maxSlice = _options.Dataset.Height - 1; break;
-            case HeatFlowDirection.Z: maxSlice = _options.Dataset.Depth - 1; break;
-        }
-
+            HeatFlowDirection.X => _options.Dataset.Width - 1,
+            HeatFlowDirection.Y => _options.Dataset.Height - 1,
+            _ => _options.Dataset.Depth - 1
+        };
         _selectedSliceIndex = Math.Clamp(_selectedSliceIndex, 0, maxSlice);
 
         ImGui.SetNextItemWidth(120);
         if (ImGui.Combo("Axis", ref _selectedSliceDirectionInt, "X\0Y\0Z\0"))
         {
             _selectedSliceIndex = 0;
-            _cachedIsocontoursKey = (-1, -1, -1, -1); // Invalidate cache
+            _cachedIsocontoursKey = (-1, -1, -1, -1);
+            _sliceCacheDirty = true;
         }
 
         ImGui.SameLine();
-        ImGui.SetNextItemWidth(200);
+        ImGui.SetNextItemWidth(120);
         if (ImGui.SliderInt("Slice", ref _selectedSliceIndex, 0, maxSlice))
-            _cachedIsocontoursKey = (-1, -1, -1, -1); // Invalidate cache
+        {
+            _cachedIsocontoursKey = (-1, -1, -1, -1);
+            _sliceCacheDirty = true;
+        }
 
         ImGui.SameLine();
         ImGui.SetNextItemWidth(120);
         if (ImGui.Combo("Colormap", ref _colorMapIndex, "Hot\0Rainbow\0"))
-            _cachedIsocontoursKey = (-1, -1, -1, -1); // Invalidate cache
+        {
+            _cachedIsocontoursKey = (-1, -1, -1, -1);
+            _sliceCacheDirty = true;
+        }
 
         if (ImGui.Checkbox("Show Isocontours", ref _showIsocontours))
-            _cachedIsocontoursKey = (-1, -1, -1, -1); // Invalidate cache
+            _cachedIsocontoursKey = (-1, -1, -1, -1);
 
         if (_showIsocontours)
         {
             ImGui.SameLine();
             ImGui.SetNextItemWidth(150);
             if (ImGui.SliderInt("Count", ref _numIsocontours, 2, 20))
-                _cachedIsocontoursKey = (-1, -1, -1, -1); // Invalidate cache
+                _cachedIsocontoursKey = (-1, -1, -1, -1);
         }
 
-        var (slice, width, height) = GetSelectedSlice();
+        // ---- Get slice data (thermal and label) ----
+        var (slice, srcW, srcH) = GetSelectedSlice();
         if (slice == null) return;
+    
+        var (labelSlice, _, _) = GetSelectedLabelSlice();
+        if (labelSlice == null) return;
 
-        // Render slice
-        var available = ImGui.GetContentRegionAvail();
+        // ---- Layout canvas ----
+        var avail = ImGui.GetContentRegionAvail();
         var dl = ImGui.GetWindowDrawList();
         var canvasPos = ImGui.GetCursorScreenPos();
 
-        var aspectRatio = (float)width / height;
-        var canvasSize = new Vector2(
-            Math.Min(available.X - 100, available.Y * aspectRatio),
-            Math.Min(available.Y - 20, (available.X - 100) / aspectRatio)
-        );
+        float aspect = (float)srcW / Math.Max(1, srcH);
+        var canvasW = MathF.Min(avail.X - 100f, avail.Y * aspect);
+        var canvasH = MathF.Min(avail.Y - 20f, (avail.X - 100f) / aspect);
+        var canvasSize = new Vector2(canvasW, canvasH);
 
+        // Background
         dl.AddRectFilled(canvasPos, canvasPos + canvasSize, 0xFF202020);
 
-        // Render with adaptive sampling
-        var pixelSkip = Math.Max(1, Math.Max(width, height) / 512);
+        // ---- Downsample budget: keep <= 256x256 cells (<= 65k rects) ----
+        const int MAX_CELLS = 256;
+        int gridW = Math.Min(srcW, MAX_CELLS);
+        int gridH = Math.Min(srcH, MAX_CELLS);
 
-        Parallel.For(0, height / pixelSkip, y =>
+        // Map from grid to src
+        float sx = (float)srcW / gridW;
+        float sy = (float)srcH / gridH;
+
+        // Precompute and cache the colorized grid so we don’t recompute per frame
+        var cacheKey = (_selectedSliceDirectionInt, _selectedSliceIndex, _colorMapIndex,
+                        (float)_options.TemperatureHot, (float)_options.TemperatureCold, gridW, gridH);
+
+        if (_sliceCache == null || !_sliceCacheKey.Equals(cacheKey) || _sliceCacheDirty)
         {
-            for (var x = 0; x < width; x += pixelSkip)
+            _sliceCache = _sliceCache ?? new uint[gridW * gridH];
+            if (_sliceCache.Length != gridW * gridH) _sliceCache = new uint[gridW * gridH];
+
+            float tHot = (float)_options.TemperatureHot;
+            float tCold = (float)_options.TemperatureCold;
+            float invRange = 1.0f / MathF.Max(1e-6f, tHot - tCold);
+
+            for (int gy = 0; gy < gridH; gy++)
             {
-                var actualY = y * pixelSkip;
-                var temp = slice[x, actualY];
-                var normalizedTemp = (temp - _options.TemperatureCold) /
-                                     (_options.TemperatureHot - _options.TemperatureCold);
-                normalizedTemp = Math.Clamp(normalizedTemp, 0.0, 1.0);
-                var color = ApplyColorMap((float)normalizedTemp, _colorMapIndex);
-
-                var px = canvasPos.X + (float)x / width * canvasSize.X;
-                var py = canvasPos.Y + (float)actualY / height * canvasSize.Y;
-                var pw = canvasSize.X / width * pixelSkip;
-                var ph = canvasSize.Y / height * pixelSkip;
-
-                dl.AddRectFilled(new Vector2(px, py), new Vector2(px + pw, py + ph), ImGui.GetColorU32(color));
-            }
-        });
-
-        // Draw CACHED isocontours
-        if (_showIsocontours)
-        {
-            var tempRange = _options.TemperatureHot - _options.TemperatureCold;
-
-            // Check if we need to regenerate cache
-            var currentKey = (_selectedSliceDirectionInt, _selectedSliceIndex, (float)tempRange, _numIsocontours);
-            if (currentKey != _cachedIsocontoursKey)
-            {
-                // Regenerate all isocontours at once
-                _cachedIsocontours.Clear();
-                for (var i = 1; i <= _numIsocontours; i++)
+                int syi = Math.Min(srcH - 1, (int)(gy * sy));
+                for (int gx = 0; gx < gridW; gx++)
                 {
-                    var isovalue = _options.TemperatureCold + i * tempRange / (_numIsocontours + 1);
-                    var lines = IsosurfaceGenerator.GenerateIsocontours(slice, (float)isovalue);
-                    _cachedIsocontours.AddRange(lines);
-                }
+                    int sxi = Math.Min(srcW - 1, (int)(gx * sx));
+                
+                    byte materialId = labelSlice[sxi, syi];
+                    uint colorU32;
 
-                _cachedIsocontoursKey = currentKey;
+                    if (materialId == 0)
+                    {
+                        colorU32 = ImGui.GetColorU32(new Vector4(0.125f, 0.125f, 0.125f, 1.0f));
+                    }
+                    else
+                    {
+                        float temp = slice[sxi, syi];
+                        float n = Math.Clamp((temp - tCold) * invRange, 0f, 1f);
+                        var col = ApplyColorMap(n, _colorMapIndex);
+                        colorU32 = ImGui.GetColorU32(col);
+                    }
+                    _sliceCache[gy * gridW + gx] = colorU32;
+                }
             }
 
-            // Draw cached contours
-            var contourColorOuter = new Vector4(0.1f, 0.1f, 0.1f, 0.7f);
-            var contourColorInner = new Vector4(1.0f, 1.0f, 1.0f, 0.9f);
+            _sliceCacheKey = cacheKey;
+            _sliceCacheDirty = false;
+        }
 
-            foreach (var (p1, p2) in _cachedIsocontours)
+        // ---- Pixel-snapped drawing ----
+        for (int gy = 0; gy < gridH; gy++)
+        {
+            int y0 = (int)MathF.Floor(canvasPos.Y + (gy * canvasH) / gridH);
+            int y1 = (int)MathF.Floor(canvasPos.Y + ((gy + 1f) * canvasH) / gridH);
+            if (y1 <= y0) y1 = y0 + 1;
+
+            for (int gx = 0; gx < gridW; gx++)
             {
-                var sp1 = canvasPos + new Vector2(p1.X / width * canvasSize.X, p1.Y / height * canvasSize.Y);
-                var sp2 = canvasPos + new Vector2(p2.X / width * canvasSize.X, p2.Y / height * canvasSize.Y);
-                dl.AddLine(sp1, sp2, ImGui.GetColorU32(contourColorOuter), 2.5f);
-                dl.AddLine(sp1, sp2, ImGui.GetColorU32(contourColorInner), 1.0f);
+                int x0 = (int)MathF.Floor(canvasPos.X + (gx * canvasW) / gridW);
+                int x1 = (int)MathF.Floor(canvasPos.X + ((gx + 1f) * canvasW) / gridW);
+                if (x1 <= x0) x1 = x0 + 1;
+
+                dl.AddRectFilled(new Vector2(x0, y0), new Vector2(x1, y1), _sliceCache[gy * gridW + gx]);
             }
         }
 
         dl.AddRect(canvasPos, canvasPos + canvasSize, 0xFFFFFFFF, 0, 0, 1.0f);
-
         ImGui.Dummy(canvasSize);
 
-        // Tooltip
+        // ---- Tooltip ----
         if (ImGui.IsItemHovered())
         {
-            var mousePos = ImGui.GetMousePos();
-            var relativePos = mousePos - canvasPos;
-            var hoverX = (int)(relativePos.X / canvasSize.X * width);
-            var hoverY = (int)(relativePos.Y / canvasSize.Y * height);
-
-            if (hoverX >= 0 && hoverX < width && hoverY >= 0 && hoverY < height)
+            var mouse = ImGui.GetMousePos();
+            var rel = mouse - canvasPos;
+            int hx = (int)(rel.X / canvasW * srcW);
+            int hy = (int)(rel.Y / canvasH * srcH);
+            if (hx >= 0 && hx < srcW && hy >= 0 && hy < srcH)
             {
-                var temp = slice[hoverX, hoverY];
-                var tempC = temp - 273.15;
-                ImGui.SetTooltip($"Pos: ({hoverX}, {hoverY})\nT: {temp:F2} K ({tempC:F2} C)");
+                if (labelSlice[hx, hy] != 0)
+                {
+                    float t = slice[hx, hy];
+                    ImGui.SetTooltip($"Pos: ({hx}, {hy})\nT: {t:F2} K ({t - 273.15f:F2} °C)");
+                }
+                else
+                {
+                    ImGui.SetTooltip($"Pos: ({hx}, {hy})\nVoid (Material 0)");
+                }
             }
         }
 
-        // Legend
+        // ---- Isocontours (cached and void-aware) ----
+        if (_showIsocontours)
+        {
+            var tempRange = _options.TemperatureHot - _options.TemperatureCold;
+            var key = (_selectedSliceDirectionInt, _selectedSliceIndex, (float)tempRange, _numIsocontours);
+            if (key != _cachedIsocontoursKey)
+            {
+                _cachedIsocontours.Clear();
+                for (int i = 1; i <= _numIsocontours; i++)
+                {
+                    var iso = _options.TemperatureCold + i * tempRange / (_numIsocontours + 1);
+                    // MODIFIED: Pass labelSlice to the generator
+                    var lines = IsosurfaceGenerator.GenerateIsocontours(slice, labelSlice, (float)iso);
+                    _cachedIsocontours.AddRange(lines);
+                }
+                _cachedIsocontoursKey = key;
+            }
+
+            var outer = new Vector4(0.1f, 0.1f, 0.1f, 0.7f);
+            var inner = new Vector4(1f, 1f, 1f, 0.9f);
+            foreach (var (p1, p2) in _cachedIsocontours)
+            {
+                var sp1 = canvasPos + new Vector2(p1.X / srcW * canvasW, p1.Y / srcH * canvasH);
+                var sp2 = canvasPos + new Vector2(p2.X / srcW * canvasW, p2.Y / srcH * canvasH);
+                dl.AddLine(sp1, sp2, ImGui.GetColorU32(outer), 2.5f);
+                dl.AddLine(sp1, sp2, ImGui.GetColorU32(inner), 1.0f);
+            }
+        }
+
+        // ---- Legend & exports (unchanged) ----
         ImGui.SameLine();
         DrawColorScaleLegend(ImGui.GetCursorScreenPos(), new Vector2(30, canvasSize.Y));
 
-        // Export buttons
         ImGui.Spacing();
         if (ImGui.Button("Export Slice as PNG", new Vector2(180, 0)))
             _pngExportDialog.Open($"Slice_{(HeatFlowDirection)_selectedSliceDirectionInt}{_selectedSliceIndex}.png");
         ImGui.SameLine();
         if (ImGui.Button("Export Slice to CSV", new Vector2(180, 0)))
-            _sliceCsvExportDialog.Open(
-                $"SliceData_{(HeatFlowDirection)_selectedSliceDirectionInt}{_selectedSliceIndex}.csv");
+            _sliceCsvExportDialog.Open($"SliceData_{(HeatFlowDirection)_selectedSliceDirectionInt}{_selectedSliceIndex}.csv");
     }
+    private uint[] _sliceCache;
+    private (int axis, int slice, int cmap, float hot, float cold, int gw, int gh) _sliceCacheKey;
+    private bool _sliceCacheDirty = true;
 
     private void DrawColorScaleLegend(Vector2 pos, Vector2 size)
     {
@@ -982,6 +1054,13 @@ public class ThermalConductivityTool : IDatasetTools, IDisposable
     {
         var results = _options.Dataset.ThermalResults;
         if (results?.TemperatureField == null) return;
+        
+        // Ensure label data is available for isosurface generation
+        if (_options.Dataset.LabelData == null)
+        {
+            ImGui.TextDisabled("Label data is required for isosurface generation. Please segment the dataset.");
+            return;
+        }
 
         if (_isosurfaceProgressDialog.IsActive)
         {
@@ -1076,6 +1155,7 @@ public class ThermalConductivityTool : IDatasetTools, IDisposable
         try
         {
             var results = _options.Dataset.ThermalResults;
+            var labelData = _options.Dataset.LabelData;
             Logger.Log($"[ThermalTool] Generating isosurface at {temperature:F2} K");
 
             var progress =
@@ -1088,8 +1168,10 @@ public class ThermalConductivityTool : IDatasetTools, IDisposable
                 _options.Dataset.SliceThickness * 1e-6f
             );
 
+            // MODIFIED: Pass labelData to the generator
             var mesh = await IsosurfaceGenerator.GenerateIsosurfaceAsync(
                 results.TemperatureField,
+                labelData,
                 (float)temperature,
                 voxelSize,
                 progress,
@@ -1127,6 +1209,7 @@ public class ThermalConductivityTool : IDatasetTools, IDisposable
         try
         {
             var results = _options.Dataset.ThermalResults;
+            var labelData = _options.Dataset.LabelData;
             var tempRange = _options.TemperatureHot - _options.TemperatureCold;
             var voxelSize = new Vector3(
                 _options.Dataset.PixelSize * 1e-6f,
@@ -1144,8 +1227,10 @@ public class ThermalConductivityTool : IDatasetTools, IDisposable
                 _isosurfaceProgressDialog.Update(overallProgress, $"Surface {i}/{count} at {temperature:F2} K");
 
                 var subProgress = new Progress<(float p, string msg)>();
+                // MODIFIED: Pass labelData to the generator
                 var mesh = await IsosurfaceGenerator.GenerateIsosurfaceAsync(
                     results.TemperatureField,
+                    labelData,
                     (float)temperature,
                     voxelSize,
                     subProgress,
@@ -1235,8 +1320,6 @@ public class ThermalConductivityTool : IDatasetTools, IDisposable
             finally
             {
                 Logger.Log("[ThermalTool] Simulation task has finished.");
-                // The UI thread is responsible for detecting task completion and updating its own state.
-                // We ensure the dialog is closed from the background thread.
                 _progressDialog.Close();
             }
         });
@@ -1330,24 +1413,37 @@ public class ThermalConductivityTool : IDatasetTools, IDisposable
     {
         try
         {
+            var (labelSlice, _, _) = GetSelectedLabelSlice();
+            if (labelSlice == null) return;
+            
             var imageData = new byte[width * height * 4];
 
             Parallel.For(0, height, y =>
             {
                 for (var x = 0; x < width; x++)
                 {
-                    var temp = slice[x, y];
-                    var normalizedTemp = (temp - _options.TemperatureCold) /
-                                         (_options.TemperatureHot - _options.TemperatureCold);
-                    normalizedTemp = Math.Clamp(normalizedTemp, 0.0, 1.0);
-
-                    var color = ApplyColorMap((float)normalizedTemp, _colorMapIndex);
-
                     var idx = (y * width + x) * 4;
-                    imageData[idx + 0] = (byte)(color.X * 255);
-                    imageData[idx + 1] = (byte)(color.Y * 255);
-                    imageData[idx + 2] = (byte)(color.Z * 255);
-                    imageData[idx + 3] = (byte)(color.W * 255);
+                    if (labelSlice[x,y] == 0)
+                    {
+                        imageData[idx] = 32;
+                        imageData[idx + 1] = 32;
+                        imageData[idx + 2] = 32;
+                        imageData[idx + 3] = 255;
+                    }
+                    else
+                    {
+                        var temp = slice[x, y];
+                        var normalizedTemp = (temp - _options.TemperatureCold) /
+                                             (_options.TemperatureHot - _options.TemperatureCold);
+                        normalizedTemp = Math.Clamp(normalizedTemp, 0.0, 1.0);
+
+                        var color = ApplyColorMap((float)normalizedTemp, _colorMapIndex);
+                        
+                        imageData[idx + 0] = (byte)(color.X * 255);
+                        imageData[idx + 1] = (byte)(color.Y * 255);
+                        imageData[idx + 2] = (byte)(color.Z * 255);
+                        imageData[idx + 3] = (byte)(color.W * 255);
+                    }
                 }
             });
 
@@ -1357,7 +1453,7 @@ public class ThermalConductivityTool : IDatasetTools, IDisposable
                 for (var i = 1; i <= _numIsocontours; i++)
                 {
                     var isovalue = _options.TemperatureCold + i * tempRange / (_numIsocontours + 1);
-                    var lines = IsosurfaceGenerator.GenerateIsocontours(slice, (float)isovalue);
+                    var lines = IsosurfaceGenerator.GenerateIsocontours(slice, labelSlice, (float)isovalue);
 
                     foreach (var (p1, p2) in lines)
                         DrawLineOnImage(imageData, width, height,
@@ -1417,7 +1513,8 @@ public class ThermalConductivityTool : IDatasetTools, IDisposable
         try
         {
             var (slice, sliceWidth, sliceHeight) = GetSelectedSlice();
-            if (slice == null) return;
+            var (labelSlice, _, _) = GetSelectedLabelSlice();
+            if (slice == null || labelSlice == null) return;
 
             var padding = 20;
             var legendWidth = 60;
@@ -1433,16 +1530,26 @@ public class ThermalConductivityTool : IDatasetTools, IDisposable
             for (var y = 0; y < sliceHeight; y++)
             for (var x = 0; x < sliceWidth; x++)
             {
-                var temp = slice[x, y];
-                var norm = Math.Clamp(
-                    (temp - _options.TemperatureCold) / (_options.TemperatureHot - _options.TemperatureCold), 0.0, 1.0);
-                var color = ApplyColorMap((float)norm, _colorMapIndex);
-
                 var destIdx = ((y + padding) * compositeWidth + x + padding) * 4;
-                buffer[destIdx + 0] = (byte)(color.X * 255);
-                buffer[destIdx + 1] = (byte)(color.Y * 255);
-                buffer[destIdx + 2] = (byte)(color.Z * 255);
-                buffer[destIdx + 3] = 255;
+                if(labelSlice[x,y] == 0)
+                {
+                     buffer[destIdx + 0] = 32;
+                     buffer[destIdx + 1] = 32;
+                     buffer[destIdx + 2] = 32;
+                     buffer[destIdx + 3] = 255;
+                }
+                else
+                {
+                    var temp = slice[x, y];
+                    var norm = Math.Clamp(
+                        (temp - _options.TemperatureCold) / (_options.TemperatureHot - _options.TemperatureCold), 0.0, 1.0);
+                    var color = ApplyColorMap((float)norm, _colorMapIndex);
+
+                    buffer[destIdx + 0] = (byte)(color.X * 255);
+                    buffer[destIdx + 1] = (byte)(color.Y * 255);
+                    buffer[destIdx + 2] = (byte)(color.Z * 255);
+                    buffer[destIdx + 3] = 255;
+                }
             }
 
             // Draw color legend
@@ -1559,6 +1666,48 @@ public class ThermalConductivityTool : IDatasetTools, IDisposable
                     for (var y = 0; y < H; y++) sliceZ[x, y] = results.TemperatureField[x, y, _selectedSliceIndex];
                 });
                 results.TemperatureSlices[('Z', _selectedSliceIndex)] = sliceZ;
+                return (sliceZ, W, H);
+        }
+
+        return (null, 0, 0);
+    }
+    
+    private (byte[,] slice, int width, int height) GetSelectedLabelSlice()
+    {
+        var labels = _options.Dataset.LabelData;
+        if (labels == null) return (null, 0, 0);
+
+        var W = _options.Dataset.Width;
+        var H = _options.Dataset.Height;
+        var D = _options.Dataset.Depth;
+        var selectedDirection = (HeatFlowDirection)_selectedSliceDirectionInt;
+        
+        _selectedSliceIndex = Math.Clamp(_selectedSliceIndex, 0,
+            selectedDirection == HeatFlowDirection.X ? W - 1 :
+            selectedDirection == HeatFlowDirection.Y ? H - 1 : D - 1);
+
+        switch (selectedDirection)
+        {
+            case HeatFlowDirection.X:
+                var sliceX = new byte[H, D];
+                Parallel.For(0, H, y =>
+                {
+                    for (var z = 0; z < D; z++) sliceX[y, z] = labels[_selectedSliceIndex, y, z];
+                });
+                return (sliceX, H, D);
+            case HeatFlowDirection.Y:
+                var sliceY = new byte[W, D];
+                Parallel.For(0, W, x =>
+                {
+                    for (var z = 0; z < D; z++) sliceY[x, z] = labels[x, _selectedSliceIndex, z];
+                });
+                return (sliceY, W, D);
+            case HeatFlowDirection.Z:
+                var sliceZ = new byte[W, H];
+                Parallel.For(0, W, x =>
+                {
+                    for (var y = 0; y < H; y++) sliceZ[x, y] = labels[x, y, _selectedSliceIndex];
+                });
                 return (sliceZ, W, H);
         }
 
