@@ -165,6 +165,7 @@ public static class CommandRegistry
             new ContourCommand(),
 
             // Thermodynamics Commands
+            new CreateDiagramCommand(),
             new EquilibrateCommand(),
             new SaturationCommand(),
             new BalanceReactionCommand(),
@@ -1026,6 +1027,252 @@ public abstract class ThermoCommandBase
 
         return state;
     }
+}
+
+public class CreateDiagramCommand : IGeoScriptCommand
+{
+    public string Name => "CREATE_DIAGRAM";
+    public string HelpText => "Generates thermodynamic phase diagrams from components or sample data.";
+
+    public string Usage =>
+        "CREATE_DIAGRAM <type> [options]\n" +
+        "  BINARY FROM '<c1>' AND '<c2>' TEMP <val> K PRES <val> BAR\n" +
+        "  TERNARY FROM '<c1>', '<c2>', '<c3>' TEMP <val> K PRES <val> BAR\n" +
+        "  PT FOR COMP('<c1>'=<m1>,...) T_RANGE(<min>-<max>) K P_RANGE(<min>-<max>) BAR\n" +
+        "  ENERGY FROM '<c1>' AND '<c2>' TEMP <val> K PRES <val> BAR\n" +
+        "  COMPOSITION FROM '<col1>', '<col2>', '<col3>'";
+
+    public Task<Dataset> ExecuteAsync(GeoScriptContext context, AstNode node)
+    {
+        var cmd = (CommandNode)node;
+        var generator = new PhaseDiagramGenerator();
+
+        // Match for different diagram types
+        var binaryMatch = Regex.Match(cmd.FullText,
+            @"BINARY FROM '([^']+)' AND '([^']+)' TEMP ([\d\.]+) K PRES ([\d\.]+) BAR", RegexOptions.IgnoreCase);
+        var ternaryMatch = Regex.Match(cmd.FullText,
+            @"TERNARY FROM '([^']+)',\s*'([^']+)',\s*'([^']+)' TEMP ([\d\.]+) K PRES ([\d\.]+) BAR",
+            RegexOptions.IgnoreCase);
+        var ptMatch = Regex.Match(cmd.FullText,
+            @"PT FOR COMP\(([^)]+)\) T_RANGE\(([\d\.]+)-([\d\.]+)\) K P_RANGE\(([\d\.]+)-([\d\.]+)\) BAR",
+            RegexOptions.IgnoreCase);
+        var energyMatch = Regex.Match(cmd.FullText,
+            @"ENERGY FROM '([^']+)' AND '([^']+)' TEMP ([\d\.]+) K PRES ([\d\.]+) BAR", RegexOptions.IgnoreCase);
+        var compositionMatch = Regex.Match(cmd.FullText, @"COMPOSITION FROM '([^']+)', '([^']+)', '([^']+)'",
+            RegexOptions.IgnoreCase);
+
+        if (binaryMatch.Success)
+        {
+            var comp1 = binaryMatch.Groups[1].Value;
+            var comp2 = binaryMatch.Groups[2].Value;
+            var temp = double.Parse(binaryMatch.Groups[3].Value, CultureInfo.InvariantCulture);
+            var pres = double.Parse(binaryMatch.Groups[4].Value, CultureInfo.InvariantCulture);
+
+            var diagramData = generator.GenerateBinaryDiagram(comp1, comp2, temp, pres);
+            var resultTable = ExportBinaryToTable(diagramData);
+            return Task.FromResult<Dataset>(new TableDataset("BinaryDiagram", resultTable));
+        }
+
+        if (ternaryMatch.Success)
+        {
+            var comp1 = ternaryMatch.Groups[1].Value;
+            var comp2 = ternaryMatch.Groups[2].Value;
+            var comp3 = ternaryMatch.Groups[3].Value;
+            var temp = double.Parse(ternaryMatch.Groups[4].Value, CultureInfo.InvariantCulture);
+            var pres = double.Parse(ternaryMatch.Groups[5].Value, CultureInfo.InvariantCulture);
+
+            var diagramData = generator.GenerateTernaryDiagram(comp1, comp2, comp3, temp, pres);
+            var resultTable = ExportTernaryToTable(diagramData);
+            return Task.FromResult<Dataset>(new TableDataset("TernaryDiagram", resultTable));
+        }
+
+        if (ptMatch.Success)
+        {
+            var compStr = ptMatch.Groups[1].Value;
+            var minT = double.Parse(ptMatch.Groups[2].Value, CultureInfo.InvariantCulture);
+            var maxT = double.Parse(ptMatch.Groups[3].Value, CultureInfo.InvariantCulture);
+            var minP = double.Parse(ptMatch.Groups[4].Value, CultureInfo.InvariantCulture);
+            var maxP = double.Parse(ptMatch.Groups[5].Value, CultureInfo.InvariantCulture);
+
+            var composition = ParseComposition(compStr);
+            var diagramData = generator.GeneratePTDiagram(composition, minT, maxT, minP, maxP);
+            var resultTable = ExportPTToTable(diagramData);
+            return Task.FromResult<Dataset>(new TableDataset("PT_Diagram", resultTable));
+        }
+
+        if (energyMatch.Success)
+        {
+            var comp1 = energyMatch.Groups[1].Value;
+            var comp2 = energyMatch.Groups[2].Value;
+            var temp = double.Parse(energyMatch.Groups[3].Value, CultureInfo.InvariantCulture);
+            var pres = double.Parse(energyMatch.Groups[4].Value, CultureInfo.InvariantCulture);
+
+            var diagramData = generator.GenerateEnergyDiagram(comp1, comp2, temp, pres);
+            var resultTable = ExportEnergyToTable(diagramData);
+            return Task.FromResult<Dataset>(new TableDataset("EnergyDiagram", resultTable));
+        }
+
+        if (compositionMatch.Success)
+        {
+            if (context.InputDataset is not TableDataset tableDs)
+                throw new NotSupportedException("COMPOSITION diagram requires a Table Dataset as input.");
+
+            var comp1Col = compositionMatch.Groups[1].Value;
+            var comp2Col = compositionMatch.Groups[2].Value;
+            var comp3Col = compositionMatch.Groups[3].Value;
+            var resultTable = CreateCompositionPlotData(tableDs, comp1Col, comp2Col, comp3Col);
+            return Task.FromResult<Dataset>(new TableDataset("SampleComposition", resultTable));
+        }
+
+        throw new ArgumentException($"Invalid CREATE_DIAGRAM syntax. Usage:\n{Usage}");
+    }
+
+    private Dictionary<string, double> ParseComposition(string compStr)
+    {
+        var composition = new Dictionary<string, double>();
+        var parts = compStr.Split(',');
+        foreach (var part in parts)
+        {
+            var pair = part.Split('=');
+            if (pair.Length == 2)
+            {
+                var name = pair[0].Trim().Trim('\'');
+                var moles = double.Parse(pair[1].Trim(), CultureInfo.InvariantCulture);
+                composition[name] = moles;
+            }
+        }
+
+        return composition;
+    }
+
+    private DataTable CreateCompositionPlotData(TableDataset tableDs, string comp1Col, string comp2Col,
+        string comp3Col)
+    {
+        var sourceTable = tableDs.GetDataTable();
+        if (!sourceTable.Columns.Contains(comp1Col) || !sourceTable.Columns.Contains(comp2Col) ||
+            !sourceTable.Columns.Contains(comp3Col))
+            throw new ArgumentException("Input table is missing one or more specified component columns.");
+
+        var resultTable = new DataTable("CompositionPlotData");
+        resultTable.Columns.Add("PlotX", typeof(double));
+        resultTable.Columns.Add("PlotY", typeof(double));
+        foreach (DataColumn col in sourceTable.Columns)
+            if (!resultTable.Columns.Contains(col.ColumnName))
+                resultTable.Columns.Add(col.ColumnName, col.DataType);
+
+        foreach (DataRow row in sourceTable.Rows)
+        {
+            var val1 = Convert.ToDouble(row[comp1Col]);
+            var val2 = Convert.ToDouble(row[comp2Col]);
+            var val3 = Convert.ToDouble(row[comp3Col]);
+            var total = val1 + val2 + val3;
+            if (total == 0) continue;
+
+            var x2 = val2 / total;
+            var x3 = val3 / total;
+            var plotX = x2 + 0.5 * x3;
+            var plotY = Math.Sqrt(3) / 2.0 * x3;
+            var newRow = resultTable.NewRow();
+            newRow["PlotX"] = plotX;
+            newRow["PlotY"] = plotY;
+            foreach (DataColumn col in sourceTable.Columns) newRow[col.ColumnName] = row[col];
+            resultTable.Rows.Add(newRow);
+        }
+
+        return resultTable;
+    }
+
+    #region Private Table Exporters
+
+    private DataTable ExportBinaryToTable(BinaryPhaseDiagramData data)
+    {
+        var table = new DataTable("BinaryPhaseDiagram");
+        table.Columns.Add("X_" + data.Component1, typeof(double));
+        table.Columns.Add("X_" + data.Component2, typeof(double));
+        table.Columns.Add("Phases", typeof(string));
+        table.Columns.Add("pH", typeof(double));
+        table.Columns.Add("IonicStrength", typeof(double));
+        table.Columns.Add("Precipitates", typeof(string));
+
+        foreach (var point in data.Points)
+            table.Rows.Add(
+                point.X_Component1,
+                point.X_Component2,
+                string.Join(", ", point.PhasesPresent),
+                point.pH,
+                point.IonicStrength,
+                string.Join(", ", point.PrecipitatingMinerals)
+            );
+        return table;
+    }
+
+    private DataTable ExportTernaryToTable(TernaryPhaseDiagramData data)
+    {
+        var table = new DataTable("TernaryPhaseDiagram");
+        table.Columns.Add("X_" + data.Component1, typeof(double));
+        table.Columns.Add("X_" + data.Component2, typeof(double));
+        table.Columns.Add("X_" + data.Component3, typeof(double));
+        table.Columns.Add("Phases", typeof(string));
+        table.Columns.Add("Precipitates", typeof(string));
+        table.Columns.Add("pH", typeof(double));
+        table.Columns.Add("IonicStrength", typeof(double));
+
+        foreach (var point in data.Points)
+            table.Rows.Add(
+                point.X_Component1,
+                point.X_Component2,
+                point.X_Component3,
+                string.Join(", ", point.PhasesPresent),
+                string.Join(", ", point.PrecipitatingMinerals),
+                point.pH,
+                point.IonicStrength
+            );
+        return table;
+    }
+
+    private DataTable ExportPTToTable(PTPhaseDiagramData data)
+    {
+        var table = new DataTable("PTPhaseDiagram");
+        table.Columns.Add("Temperature_K", typeof(double));
+        table.Columns.Add("Pressure_bar", typeof(double));
+        table.Columns.Add("Phases", typeof(string));
+        table.Columns.Add("DominantPhase", typeof(string));
+        table.Columns.Add("MolarVolume", typeof(double));
+
+        foreach (var point in data.Points)
+            table.Rows.Add(
+                point.Temperature_K,
+                point.Pressure_bar,
+                string.Join(", ", point.PhasesPresent),
+                point.DominantPhase,
+                point.MolarVolume
+            );
+        return table;
+    }
+
+    private DataTable ExportEnergyToTable(EnergyDiagramData data)
+    {
+        var table = new DataTable("EnergyDiagram");
+        table.Columns.Add("X_" + data.Component1, typeof(double));
+        table.Columns.Add("GibbsEnergy", typeof(double));
+        table.Columns.Add("Enthalpy", typeof(double));
+        table.Columns.Add("Entropy", typeof(double));
+        table.Columns.Add("ChemicalPotential_" + data.Component1, typeof(double));
+        table.Columns.Add("ChemicalPotential_" + data.Component2, typeof(double));
+
+        foreach (var point in data.Points)
+            table.Rows.Add(
+                point.X_Component1,
+                point.GibbsEnergy,
+                point.Enthalpy,
+                point.Entropy,
+                point.ChemicalPotential1,
+                point.ChemicalPotential2
+            );
+        return table;
+    }
+
+    #endregion
 }
 
 public class EquilibrateCommand : ThermoCommandBase, IGeoScriptCommand

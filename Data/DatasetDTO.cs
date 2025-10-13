@@ -166,6 +166,9 @@ public class PNMDatasetDTO : DatasetDTO
     public float LatticeBoltzmannPermeability { get; set; }
     public List<PoreDTO> Pores { get; set; } = new();
     public List<ThroatDTO> Throats { get; set; } = new();
+    public int ImageWidth { get; set; }
+    public int ImageHeight { get; set; }
+    public int ImageDepth { get; set; }
 }
 
 // --- NEW DTOS FOR SIMULATION RESULTS ---

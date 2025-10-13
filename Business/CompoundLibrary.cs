@@ -36,8 +36,26 @@ public enum CompoundPhase
     Solid,
     Aqueous,
     Gas,
-    Liquid
+    Liquid,
+    Surface // ENHANCEMENT: For surface complexation species
 }
+
+// ENHANCEMENT: Add classes for solid solution modeling
+public enum SolidSolutionMixingModel
+{
+    Ideal,
+    Regular
+}
+
+public class SolidSolution
+{
+    public string Name { get; set; } = string.Empty;
+    public List<string> EndMembers { get; set; } = new();
+    public SolidSolutionMixingModel MixingModel { get; set; } = SolidSolutionMixingModel.Ideal;
+    // Interaction parameters (W) for regular solution model (in kJ/mol)
+    public List<double> InteractionParameters { get; set; } = new();
+}
+
 
 /// <summary>
 ///     Represents a chemical compound with comprehensive thermodynamic and physical properties
@@ -106,6 +124,20 @@ public sealed class ChemicalCompound
     /// <summary>Specific surface area (m²/g) - typical for reactive transport</summary>
     public double? SpecificSurfaceArea_m2_g { get; set; }
 
+    // ENHANCEMENT: Additional kinetic parameters from Steefel & Lasaga (1994)
+    /// <summary>Order of the acid catalysis term in the rate law</summary>
+    public double? AcidCatalysisOrder { get; set; }
+
+    /// <summary>Order of the base (OH-) catalysis term in the rate law</summary>
+    public double? BaseCatalysisOrder { get; set; }
+
+    /// <summary>Exponent 'p' in the thermodynamic driving force term [1 - Ω^p]^q</summary>
+    public double? ReactionOrder_p { get; set; }
+
+    /// <summary>Exponent 'q' in the thermodynamic driving force term [1 - Ω^p]^q</summary>
+    public double? ReactionOrder_q { get; set; }
+
+
     // --- Temperature-Dependent Parameters ---
 
     /// <summary>Heat capacity polynomial coefficients: Cp = a + bT + cT² + dT⁻²</summary>
@@ -114,7 +146,7 @@ public sealed class ChemicalCompound
     /// <summary>Temperature range validity (K) [min, max]</summary>
     public double[]? TemperatureRange_K { get; set; }
 
-    // --- Aqueous Species Properties ---
+    // --- Aqueous, Gas, and Surface Species Properties ---
 
     /// <summary>Ionic charge (for aqueous species)</summary>
     public int? IonicCharge { get; set; }
@@ -124,6 +156,31 @@ public sealed class ChemicalCompound
 
     /// <summary>Limiting ionic conductivity (S·cm²/mol) at 25°C</summary>
     public double? IonicConductivity_S_cm2_mol { get; set; }
+
+    // ENHANCEMENT: Properties for reaction generation and speciation
+    /// <summary>Is this species the primary basis species for its main element?</summary>
+    public bool IsPrimaryElementSpecies { get; set; } = false;
+
+    /// <summary>Oxidation state of the primary element in the species</summary>
+    public int? OxidationState { get; set; }
+
+    /// <summary>Henry's Law constant (mol·L⁻¹·atm⁻¹) for gas dissolution</summary>
+    public double? HenrysLawConstant_mol_L_atm { get; set; }
+
+    /// <summary>Is this a primary surface site (e.g., >SOH) from which others are derived?</summary>
+    public bool IsPrimarySurfaceSite { get; set; } = false;
+
+    /// <summary>Site density (mol/g) for minerals used as surface sorbents</summary>
+    public double? SiteDensity_mol_g { get; set; }
+
+    /// <summary>Inner-sphere vs outer-sphere complex flag for Stern Layer modeling.</summary>
+    public bool? IsInnerSphereComplex { get; set; }
+    
+    /// <summary>Capacitance of the mineral surface (F/m²) for advanced surface models.</summary>
+    public double? SurfaceCapacitance_F_m2 { get; set; }
+    
+    /// <summary>Thickness of the Stern layer (nm) for surface complexation models.</summary>
+    public double? SternLayerThickness_nm { get; set; }
 
     // --- Additional Physical Properties ---
 
@@ -164,11 +221,15 @@ public sealed class CompoundLibrary
     private static readonly Lazy<CompoundLibrary> _lazy = new(() => new CompoundLibrary());
     private readonly List<ChemicalCompound> _compounds = new();
     private readonly List<Element> _elements = new();
+    // ENHANCEMENT: Add support for solid solutions
+    public List<SolidSolution> SolidSolutions { get; private set; } = new();
+
 
     private CompoundLibrary()
     {
         SeedElements(); // Seed elements first
         SeedDefaults(); // Then seed compounds
+        SeedSolidSolutions(); // Then define solid solutions
     }
 
     public static CompoundLibrary Instance => _lazy.Value;
@@ -306,6 +367,77 @@ public sealed class CompoundLibrary
         _compounds.Clear();
 
         // ═══════════════════════════════════════════════════════════════════════
+        // FUNDAMENTAL AQUEOUS SPECIES
+        // ═══════════════════════════════════════════════════════════════════════
+        _compounds.Add(new ChemicalCompound
+        {
+            Name = "Water",
+            ChemicalFormula = "H₂O",
+            Synonyms = new List<string> { "H2O" },
+            Phase = CompoundPhase.Liquid,
+            GibbsFreeEnergyFormation_kJ_mol = -237.1,
+            EnthalpyFormation_kJ_mol = -285.8,
+            Entropy_J_molK = 70.0,
+            HeatCapacity_J_molK = 75.3,
+            MolecularWeight_g_mol = 18.015,
+            MolarVolume_cm3_mol = 18.068,
+            Density_g_cm3 = 0.997,
+            Notes = "The solvent.",
+            Sources = { "NIST Chemistry WebBook" },
+            IsUserCompound = false
+        });
+
+        _compounds.Add(new ChemicalCompound
+        {
+            Name = "Proton",
+            ChemicalFormula = "H⁺",
+            Synonyms = new List<string> { "H+" },
+            Phase = CompoundPhase.Aqueous,
+            GibbsFreeEnergyFormation_kJ_mol = 0.0,
+            EnthalpyFormation_kJ_mol = 0.0,
+            Entropy_J_molK = 0.0,
+            MolecularWeight_g_mol = 1.008,
+            IonicCharge = 1,
+            IsPrimaryElementSpecies = true,
+            OxidationState = 1,
+            Notes = "Basis of pH. Thermodynamic properties are zero by convention.",
+            Sources = { "Stumm & Morgan (1996)" },
+            IsUserCompound = false
+        });
+
+        _compounds.Add(new ChemicalCompound
+        {
+            Name = "Hydroxide",
+            ChemicalFormula = "OH⁻",
+            Synonyms = new List<string> { "OH-" },
+            Phase = CompoundPhase.Aqueous,
+            GibbsFreeEnergyFormation_kJ_mol = -157.2,
+            EnthalpyFormation_kJ_mol = -230.0,
+            Entropy_J_molK = -10.9,
+            MolecularWeight_g_mol = 17.008,
+            IonicCharge = -1,
+            Sources = { "PHREEQC database" },
+            IsUserCompound = false
+        });
+
+        _compounds.Add(new ChemicalCompound
+        {
+            Name = "Electron",
+            ChemicalFormula = "e⁻",
+            Synonyms = new List<string> { "e-" },
+            Phase = CompoundPhase.Aqueous,
+            GibbsFreeEnergyFormation_kJ_mol = 0.0,
+            EnthalpyFormation_kJ_mol = 0.0,
+            Entropy_J_molK = 0.0,
+            MolecularWeight_g_mol = 5.4858e-4,
+            IonicCharge = -1,
+            IsPrimaryElementSpecies = true,
+            Notes = "Basis of pe. Thermodynamic properties are zero by convention.",
+            Sources = { "Stumm & Morgan (1996)" },
+            IsUserCompound = false
+        });
+
+        // ═══════════════════════════════════════════════════════════════════════
         // CARBONATES - Critical for reservoir geochemistry
         // ═══════════════════════════════════════════════════════════════════════
 
@@ -325,8 +457,9 @@ public sealed class CompoundLibrary
             LogKsp_25C = -8.48,
             Solubility_g_100mL_25C = 0.0014,
             DissolutionEnthalpy_kJ_mol = -12.3,
-            ActivationEnergy_Dissolution_kJ_mol = 42.0,
-            RateConstant_Dissolution_mol_m2_s = 1.6e-9,
+            ActivationEnergy_Dissolution_kJ_mol = 23.5, // Neutral mechanism
+            RateConstant_Dissolution_mol_m2_s = 1.0e-6,
+            AcidCatalysisOrder = 1.0, // log k = -0.37 + 1.0 log(aH+)
             ReactionOrder_Dissolution = 1.0,
             SpecificSurfaceArea_m2_g = 0.2,
             MohsHardness = 3.0,
@@ -338,9 +471,8 @@ public sealed class CompoundLibrary
             Sources = new List<string>
             {
                 "Robie & Hemingway (1995): Thermodynamic Properties of Minerals, USGS Bulletin 2131, p.136",
-                "Plummer et al. (1978): Am. J. Sci. 278, 179-216 (dissolution kinetics)",
-                "Parkhurst & Appelo (2013): PHREEQC Version 3, USGS Techniques and Methods 6-A43 (Ksp)",
-                "Rimstidt (1997): Geochim. Cosmochim. Acta 61, 2553-2558 (activation energy)"
+                "Palandri & Kharaka (2004): USGS Open-File Report 2004-1068 (kinetics)",
+                "Parkhurst & Appelo (2013): PHREEQC Version 3, USGS Techniques and Methods 6-A43 (Ksp)"
             },
             IsUserCompound = false
         });
@@ -428,6 +560,32 @@ public sealed class CompoundLibrary
             },
             IsUserCompound = false
         });
+
+        _compounds.Add(new ChemicalCompound
+        {
+            Name = "Aragonite",
+            ChemicalFormula = "CaCO₃",
+            Phase = CompoundPhase.Solid,
+            CrystalSystem = CrystalSystem.Orthorhombic,
+            GibbsFreeEnergyFormation_kJ_mol = -1127.8,
+            EnthalpyFormation_kJ_mol = -1207.4,
+            Entropy_J_molK = 88.0,
+            HeatCapacity_J_molK = 81.25,
+            MolarVolume_cm3_mol = 34.15,
+            MolecularWeight_g_mol = 100.09,
+            Density_g_cm3 = 2.93,
+            LogKsp_25C = -8.34,
+            MohsHardness = 3.5,
+            Color = "Colorless to white",
+            Notes = "Metastable CaCO₃ polymorph. Transforms to calcite. Common in biogenic carbonates.",
+            Sources = new List<string>
+            {
+                "Robie & Hemingway (1995): USGS Bulletin 2131, p.84",
+                "Plummer & Busenberg (1982): Geochim. Cosmochim. Acta 46, 1011-1040"
+            },
+            IsUserCompound = false
+        });
+
 
         // ═══════════════════════════════════════════════════════════════════════
         // SULFATES - Important in evaporite sequences
@@ -614,17 +772,18 @@ public sealed class CompoundLibrary
             MolarVolume_cm3_mol = 22.688,
             MolecularWeight_g_mol = 60.08,
             Density_g_cm3 = 2.65,
-            LogKsp_25C = -3.98,
+            LogKsp_25C = -3.98, // For SiO2(q) + 2H2O = H4SiO4
             Solubility_g_100mL_25C = 0.0012,
             ActivationEnergy_Dissolution_kJ_mol = 87.7,
+            RateConstant_Dissolution_mol_m2_s = 1.26e-10, // Neutral mechanism
+            BaseCatalysisOrder = 0.29, // for OH-
             MohsHardness = 7.0,
             Color = "Colorless, various",
-            Notes =
-                "Extremely slow dissolution kinetics. Thermodynamically stable silica polymorph at surface conditions.",
+            Notes = "Extremely slow dissolution kinetics. Thermodynamically stable silica polymorph at surface conditions.",
             Sources = new List<string>
             {
                 "Robie & Hemingway (1995): USGS Bulletin 2131, p.356",
-                "Rimstidt & Barnes (1980): Geochim. Cosmochim. Acta 44, 1683-1699 (kinetics)",
+                "Palandri & Kharaka (2004): USGS Open-File Report 2004-1068 (kinetics)",
                 "Dove & Rimstidt (1994): Rev. Mineral. Geochem. 29, 259-308 (dissolution mechanisms)"
             },
             IsUserCompound = false
@@ -633,14 +792,14 @@ public sealed class CompoundLibrary
         _compounds.Add(new ChemicalCompound
         {
             Name = "Amorphous Silica",
-            ChemicalFormula = "SiO₂·nH₂O",
+            ChemicalFormula = "SiO₂",
             Phase = CompoundPhase.Solid,
             CrystalSystem = CrystalSystem.Amorphous,
             GibbsFreeEnergyFormation_kJ_mol = -849.0,
             EnthalpyFormation_kJ_mol = -903.5,
             MolecularWeight_g_mol = 60.08,
             Density_g_cm3 = 2.2,
-            LogKsp_25C = -2.71,
+            LogKsp_25C = -2.71, // For SiO2(am) + 2H2O = H4SiO4
             Solubility_g_100mL_25C = 0.012,
             Notes = "Metastable phase. Higher solubility than quartz. Forms opal.",
             Sources = new List<string>
@@ -702,6 +861,50 @@ public sealed class CompoundLibrary
             IsUserCompound = false
         });
 
+        _compounds.Add(new ChemicalCompound
+        {
+            Name = "K-Feldspar",
+            Synonyms = new List<string> { "Microcline" },
+            ChemicalFormula = "KAlSi₃O₈",
+            Phase = CompoundPhase.Solid,
+            CrystalSystem = CrystalSystem.Triclinic,
+            GibbsFreeEnergyFormation_kJ_mol = -3744.1,
+            EnthalpyFormation_kJ_mol = -3989.4,
+            Entropy_J_molK = 214.2,
+            MolarVolume_cm3_mol = 109.1,
+            MolecularWeight_g_mol = 278.33,
+            Density_g_cm3 = 2.55,
+            ActivationEnergy_Dissolution_kJ_mol = 51.7,
+            RateConstant_Dissolution_mol_m2_s = 6.17e-13, // Neutral mechanism
+            AcidCatalysisOrder = 0.5,
+            BaseCatalysisOrder = 0.3,
+            MohsHardness = 6.0,
+            Color = "White to pink",
+            Notes = "Potassium feldspar, common in granites and arkosic sandstones.",
+            Sources = { "Robie & Hemingway (1995)", "Palandri & Kharaka (2004)" },
+            IsUserCompound = false
+        });
+
+        _compounds.Add(new ChemicalCompound
+        {
+            Name = "Muscovite",
+            ChemicalFormula = "KAl₂(AlSi₃O₁₀)(OH)₂",
+            Phase = CompoundPhase.Solid,
+            CrystalSystem = CrystalSystem.Monoclinic,
+            GibbsFreeEnergyFormation_kJ_mol = -5608.0,
+            EnthalpyFormation_kJ_mol = -5988.6,
+            Entropy_J_molK = 287.9,
+            MolarVolume_cm3_mol = 140.7,
+            MolecularWeight_g_mol = 398.31,
+            Density_g_cm3 = 2.83,
+            MohsHardness = 2.5,
+            Color = "Colorless, silver-white",
+            Notes = "Common mica mineral, indicates metamorphic grade.",
+            Sources = { "Robie & Hemingway (1995)" },
+            IsUserCompound = false
+        });
+
+
         // ═══════════════════════════════════════════════════════════════════════
         // OXIDES & HYDROXIDES - Alteration products
         // ═══════════════════════════════════════════════════════════════════════
@@ -720,6 +923,7 @@ public sealed class CompoundLibrary
             MolecularWeight_g_mol = 159.69,
             Density_g_cm3 = 5.27,
             MohsHardness = 6.5,
+            SiteDensity_mol_g = 1.0e-5, // Typical value for surface complexation
             Color = "Red to steel-gray",
             Notes = "Iron oxide. Forms in oxidizing conditions. Red beds.",
             Sources = new List<string>
@@ -733,7 +937,7 @@ public sealed class CompoundLibrary
         _compounds.Add(new ChemicalCompound
         {
             Name = "Goethite",
-            ChemicalFormula = "α-FeO(OH)",
+            ChemicalFormula = "FeO(OH)",
             Phase = CompoundPhase.Solid,
             CrystalSystem = CrystalSystem.Orthorhombic,
             GibbsFreeEnergyFormation_kJ_mol = -488.6,
@@ -745,6 +949,7 @@ public sealed class CompoundLibrary
             Density_g_cm3 = 4.27,
             LogKsp_25C = -41.0,
             MohsHardness = 5.5,
+            SiteDensity_mol_g = 1.2e-5, // Typical value for surface complexation
             Color = "Yellow-brown",
             Notes = "Most stable iron oxyhydroxide at Earth surface conditions.",
             Sources = new List<string>
@@ -752,6 +957,25 @@ public sealed class CompoundLibrary
                 "Robie & Hemingway (1995): USGS Bulletin 2131, p.217",
                 "Cornell & Schwertmann (2003): The Iron Oxides"
             },
+            IsUserCompound = false
+        });
+
+        _compounds.Add(new ChemicalCompound
+        {
+            Name = "Magnetite",
+            ChemicalFormula = "Fe₃O₄",
+            Phase = CompoundPhase.Solid,
+            CrystalSystem = CrystalSystem.Cubic,
+            GibbsFreeEnergyFormation_kJ_mol = -1015.4,
+            EnthalpyFormation_kJ_mol = -1118.4,
+            Entropy_J_molK = 146.4,
+            MolarVolume_cm3_mol = 44.5,
+            MolecularWeight_g_mol = 231.53,
+            Density_g_cm3 = 5.20,
+            MohsHardness = 6.0,
+            Color = "Black",
+            Notes = "Ferrimagnetic iron oxide. Common in igneous rocks and BIFs.",
+            Sources = { "Robie & Hemingway (1995)" },
             IsUserCompound = false
         });
 
@@ -788,6 +1012,7 @@ public sealed class CompoundLibrary
         {
             Name = "Calcium Ion",
             ChemicalFormula = "Ca²⁺",
+            Synonyms = { "Ca+2" },
             Phase = CompoundPhase.Aqueous,
             GibbsFreeEnergyFormation_kJ_mol = -553.5,
             EnthalpyFormation_kJ_mol = -543.0,
@@ -795,14 +1020,11 @@ public sealed class CompoundLibrary
             HeatCapacity_J_molK = -31.5,
             MolecularWeight_g_mol = 40.08,
             IonicCharge = 2,
+            IsPrimaryElementSpecies = true,
+            OxidationState = 2,
             IonicConductivity_S_cm2_mol = 59.5,
             Notes = "Major cation in natural waters. Key player in carbonate equilibria.",
-            Sources = new List<string>
-            {
-                "Shock & Helgeson (1988): Geochim. Cosmochim. Acta 52, 2009-2036",
-                "Marcus (1997): Ion Properties, Marcel Dekker",
-                "PHREEQC database"
-            },
+            Sources = { "Shock & Helgeson (1988)", "Marcus (1997)", "PHREEQC database" },
             IsUserCompound = false
         });
 
@@ -810,6 +1032,7 @@ public sealed class CompoundLibrary
         {
             Name = "Magnesium Ion",
             ChemicalFormula = "Mg²⁺",
+            Synonyms = { "Mg+2" },
             Phase = CompoundPhase.Aqueous,
             GibbsFreeEnergyFormation_kJ_mol = -454.8,
             EnthalpyFormation_kJ_mol = -467.0,
@@ -817,20 +1040,191 @@ public sealed class CompoundLibrary
             HeatCapacity_J_molK = 23.8,
             MolecularWeight_g_mol = 24.31,
             IonicCharge = 2,
+            IsPrimaryElementSpecies = true,
+            OxidationState = 2,
             IonicConductivity_S_cm2_mol = 53.1,
             Notes = "Important in dolomitization and clay mineral formation.",
-            Sources = new List<string>
-            {
-                "Shock & Helgeson (1988): Geochim. Cosmochim. Acta 52, 2009-2036",
-                "PHREEQC database"
-            },
+            Sources = { "Shock & Helgeson (1988)", "PHREEQC database" },
             IsUserCompound = false
         });
 
         _compounds.Add(new ChemicalCompound
         {
-            Name = "Bicarbonate Ion",
+            Name = "Sulfate Ion",
+            ChemicalFormula = "SO₄²⁻",
+            Synonyms = { "SO4-2" },
+            Phase = CompoundPhase.Aqueous,
+            GibbsFreeEnergyFormation_kJ_mol = -744.0,
+            EnthalpyFormation_kJ_mol = -909.3,
+            Entropy_J_molK = 18.5,
+            HeatCapacity_J_molK = -293.0,
+            MolecularWeight_g_mol = 96.06,
+            IonicCharge = -2,
+            IsPrimaryElementSpecies = true,
+            OxidationState = 6,
+            IonicConductivity_S_cm2_mol = 80.0,
+            Notes = "Major anion in seawater and formation waters.",
+            Sources = { "Shock & Helgeson (1988)", "PHREEQC database" },
+            IsUserCompound = false
+        });
+
+        _compounds.Add(new ChemicalCompound
+        {
+            Name = "Chloride Ion",
+            ChemicalFormula = "Cl⁻",
+            Synonyms = { "Cl-" },
+            Phase = CompoundPhase.Aqueous,
+            GibbsFreeEnergyFormation_kJ_mol = -131.2,
+            EnthalpyFormation_kJ_mol = -167.1,
+            Entropy_J_molK = 56.6,
+            HeatCapacity_J_molK = -136.4,
+            MolecularWeight_g_mol = 35.45,
+            IonicCharge = -1,
+            IsPrimaryElementSpecies = true,
+            OxidationState = -1,
+            IonicConductivity_S_cm2_mol = 76.3,
+            Notes = "Conservative tracer. Most abundant anion in saline waters.",
+            Sources = { "Shock & Helgeson (1988)", "NIST Chemistry WebBook" },
+            IsUserCompound = false
+        });
+
+        _compounds.Add(new ChemicalCompound
+        {
+            Name = "Sodium Ion",
+            ChemicalFormula = "Na⁺",
+            Synonyms = { "Na+" },
+            Phase = CompoundPhase.Aqueous,
+            GibbsFreeEnergyFormation_kJ_mol = -261.9,
+            EnthalpyFormation_kJ_mol = -240.3,
+            Entropy_J_molK = 58.4,
+            HeatCapacity_J_molK = 46.4,
+            MolecularWeight_g_mol = 22.99,
+            IonicCharge = 1,
+            IsPrimaryElementSpecies = true,
+            OxidationState = 1,
+            IonicConductivity_S_cm2_mol = 50.1,
+            Notes = "Dominant cation in seawater.",
+            Sources = { "Shock & Helgeson (1988)" },
+            IsUserCompound = false
+        });
+
+        _compounds.Add(new ChemicalCompound
+        {
+            Name = "Potassium Ion",
+            ChemicalFormula = "K⁺",
+            Synonyms = { "K+" },
+            Phase = CompoundPhase.Aqueous,
+            GibbsFreeEnergyFormation_kJ_mol = -282.5,
+            EnthalpyFormation_kJ_mol = -252.1,
+            Entropy_J_molK = 101.2,
+            MolecularWeight_g_mol = 39.10,
+            IonicCharge = 1,
+            IsPrimaryElementSpecies = true,
+            OxidationState = 1,
+            Notes = "Important nutrient and component of clay minerals.",
+            Sources = { "Shock & Helgeson (1988)" },
+            IsUserCompound = false
+        });
+
+        _compounds.Add(new ChemicalCompound
+        {
+            Name = "Ferrous Iron",
+            ChemicalFormula = "Fe²⁺",
+            Synonyms = { "Fe+2" },
+            Phase = CompoundPhase.Aqueous,
+            GibbsFreeEnergyFormation_kJ_mol = -90.5,
+            EnthalpyFormation_kJ_mol = -89.1,
+            Entropy_J_molK = -137.7,
+            MolecularWeight_g_mol = 55.85,
+            IonicCharge = 2,
+            IsPrimaryElementSpecies = true,
+            OxidationState = 2,
+            Notes = "Dominant form of iron in anoxic waters.",
+            Sources = { "Stumm & Morgan (1996)" },
+            IsUserCompound = false
+        });
+
+        _compounds.Add(new ChemicalCompound
+        {
+            Name = "Ferric Iron",
+            ChemicalFormula = "Fe³⁺",
+            Synonyms = { "Fe+3" },
+            Phase = CompoundPhase.Aqueous,
+            GibbsFreeEnergyFormation_kJ_mol = -16.7,
+            EnthalpyFormation_kJ_mol = -48.5,
+            Entropy_J_molK = -315.9,
+            MolecularWeight_g_mol = 55.85,
+            IonicCharge = 3,
+            OxidationState = 3,
+            Notes = "Dominant form of iron in oxic waters; highly insoluble above pH 3.5.",
+            Sources = { "Stumm & Morgan (1996)" },
+            IsUserCompound = false
+        });
+
+        _compounds.Add(new ChemicalCompound
+        {
+            Name = "Aluminum Ion",
+            ChemicalFormula = "Al³⁺",
+            Synonyms = { "Al+3" },
+            Phase = CompoundPhase.Aqueous,
+            GibbsFreeEnergyFormation_kJ_mol = -489.4,
+            EnthalpyFormation_kJ_mol = -531.0,
+            Entropy_J_molK = -321.7,
+            MolecularWeight_g_mol = 26.98,
+            IonicCharge = 3,
+            IsPrimaryElementSpecies = true,
+            OxidationState = 3,
+            Notes = "Important in weathering, only significant at low pH.",
+            Sources = { "PHREEQC database" },
+            IsUserCompound = false
+        });
+
+        _compounds.Add(new ChemicalCompound
+        {
+            Name = "Silicic Acid",
+            ChemicalFormula = "H₄SiO₄",
+            Synonyms = { "Si(OH)4" },
+            Phase = CompoundPhase.Aqueous,
+            GibbsFreeEnergyFormation_kJ_mol = -1308.0,
+            EnthalpyFormation_kJ_mol = -1460.0,
+            Entropy_J_molK = 180.0,
+            MolecularWeight_g_mol = 96.12,
+            IonicCharge = 0,
+            IsPrimaryElementSpecies = true,
+            OxidationState = 4,
+            Notes = "Primary dissolved form of silicon in most natural waters.",
+            Sources = { "PHREEQC database" },
+            IsUserCompound = false
+        });
+
+
+        // ═══════════════════════════════════════════════════════════════════════
+        // AQUEOUS COMPLEXES AND DISSOLVED GASES
+        // ═══════════════════════════════════════════════════════════════════════
+
+        _compounds.Add(new ChemicalCompound
+        {
+            Name = "Aqueous Carbon Dioxide",
+            ChemicalFormula = "CO₂(aq)",
+            Synonyms = { "CO2(aq)" },
+            Phase = CompoundPhase.Aqueous,
+            GibbsFreeEnergyFormation_kJ_mol = -385.9,
+            EnthalpyFormation_kJ_mol = -413.8,
+            Entropy_J_molK = 117.6,
+            MolecularWeight_g_mol = 44.01,
+            IonicCharge = 0,
+            IsPrimaryElementSpecies = true,
+            OxidationState = 4,
+            Notes = "Represents dissolved CO2 and H2CO3.",
+            Sources = { "Stumm & Morgan (1996)" },
+            IsUserCompound = false
+        });
+
+        _compounds.Add(new ChemicalCompound
+        {
+            Name = "Bicarbonate",
             ChemicalFormula = "HCO₃⁻",
+            Synonyms = { "HCO3-" },
             Phase = CompoundPhase.Aqueous,
             GibbsFreeEnergyFormation_kJ_mol = -586.8,
             EnthalpyFormation_kJ_mol = -689.9,
@@ -840,73 +1234,160 @@ public sealed class CompoundLibrary
             IonicCharge = -1,
             IonicConductivity_S_cm2_mol = 44.5,
             Notes = "Dominant carbonate species at pH 6.5-10.3. Critical for pH buffering.",
-            Sources = new List<string>
-            {
-                "Shock & Helgeson (1988): Geochim. Cosmochim. Acta 52, 2009-2036",
-                "Stumm & Morgan (1996): Aquatic Chemistry, 3rd ed."
-            },
+            Sources = { "Shock & Helgeson (1988)", "Stumm & Morgan (1996)" },
             IsUserCompound = false
         });
 
         _compounds.Add(new ChemicalCompound
         {
-            Name = "Sulfate Ion",
-            ChemicalFormula = "SO₄²⁻",
+            Name = "Carbonate",
+            ChemicalFormula = "CO₃²⁻",
+            Synonyms = { "CO3-2" },
             Phase = CompoundPhase.Aqueous,
-            GibbsFreeEnergyFormation_kJ_mol = -744.0,
-            EnthalpyFormation_kJ_mol = -909.3,
-            Entropy_J_molK = 18.5,
-            HeatCapacity_J_molK = -293.0,
-            MolecularWeight_g_mol = 96.06,
+            GibbsFreeEnergyFormation_kJ_mol = -527.8,
+            EnthalpyFormation_kJ_mol = -677.1,
+            Entropy_J_molK = -59.0,
+            MolecularWeight_g_mol = 60.01,
             IonicCharge = -2,
-            IonicConductivity_S_cm2_mol = 80.0,
-            Notes = "Major anion in seawater and formation waters.",
-            Sources = new List<string>
-            {
-                "Shock & Helgeson (1988): Geochim. Cosmochim. Acta 52, 2009-2036",
-                "PHREEQC database"
-            },
+            Notes = "Dominant carbonate species above pH 10.3.",
+            Sources = { "Shock & Helgeson (1988)" },
             IsUserCompound = false
         });
 
         _compounds.Add(new ChemicalCompound
         {
-            Name = "Chloride Ion",
-            ChemicalFormula = "Cl⁻",
+            Name = "Aqueous Hydrogen Sulfide",
+            ChemicalFormula = "H₂S(aq)",
+            Synonyms = { "H2S(aq)" },
             Phase = CompoundPhase.Aqueous,
-            GibbsFreeEnergyFormation_kJ_mol = -131.2,
-            EnthalpyFormation_kJ_mol = -167.1,
-            Entropy_J_molK = 56.6,
-            HeatCapacity_J_molK = -136.4,
-            MolecularWeight_g_mol = 35.45,
+            GibbsFreeEnergyFormation_kJ_mol = -27.8,
+            EnthalpyFormation_kJ_mol = -39.7,
+            Entropy_J_molK = 83.7,
+            MolecularWeight_g_mol = 34.08,
+            IonicCharge = 0,
+            IsPrimaryElementSpecies = true,
+            OxidationState = -2,
+            Notes = "Dissolved hydrogen sulfide gas.",
+            Sources = { "PHREEQC database" },
+            IsUserCompound = false
+        });
+
+        _compounds.Add(new ChemicalCompound
+        {
+            Name = "Bisulfide",
+            ChemicalFormula = "HS⁻",
+            Synonyms = { "HS-" },
+            Phase = CompoundPhase.Aqueous,
+            GibbsFreeEnergyFormation_kJ_mol = 12.1,
+            EnthalpyFormation_kJ_mol = -17.6,
+            Entropy_J_molK = 62.8,
+            MolecularWeight_g_mol = 33.07,
             IonicCharge = -1,
-            IonicConductivity_S_cm2_mol = 76.3,
-            Notes = "Conservative tracer. Most abundant anion in saline waters.",
-            Sources = new List<string>
-            {
-                "Shock & Helgeson (1988): Geochim. Cosmochim. Acta 52, 2009-2036",
-                "NIST Chemistry WebBook"
-            },
+            OxidationState = -2,
+            Notes = "Dominant sulfide species between pH 7 and 13.",
+            Sources = { "PHREEQC database" },
             IsUserCompound = false
         });
 
         _compounds.Add(new ChemicalCompound
         {
-            Name = "Sodium Ion",
-            ChemicalFormula = "Na⁺",
+            Name = "Sulfide",
+            ChemicalFormula = "S²⁻",
+            Synonyms = { "S-2" },
             Phase = CompoundPhase.Aqueous,
-            GibbsFreeEnergyFormation_kJ_mol = -261.9,
-            EnthalpyFormation_kJ_mol = -240.3,
-            Entropy_J_molK = 58.4,
-            HeatCapacity_J_molK = 46.4,
-            MolecularWeight_g_mol = 22.99,
+            GibbsFreeEnergyFormation_kJ_mol = 85.8,
+            EnthalpyFormation_kJ_mol = 33.1,
+            Entropy_J_molK = -14.6,
+            MolecularWeight_g_mol = 32.06,
+            IonicCharge = -2,
+            OxidationState = -2,
+            Notes = "Only dominant at very high pH.",
+            Sources = { "PHREEQC database" },
+            IsUserCompound = false
+        });
+
+        // ═══════════════════════════════════════════════════════════════════════
+        // GAS PHASE SPECIES
+        // ═══════════════════════════════════════════════════════════════════════
+
+        _compounds.Add(new ChemicalCompound
+        {
+            Name = "Carbon Dioxide (g)",
+            ChemicalFormula = "CO₂(g)",
+            Phase = CompoundPhase.Gas,
+            GibbsFreeEnergyFormation_kJ_mol = -394.38,
+            EnthalpyFormation_kJ_mol = -393.5,
+            Entropy_J_molK = 213.8,
+            HenrysLawConstant_mol_L_atm = 3.4e-2,
+            Sources = { "NIST Chemistry WebBook", "Sander (2015) Atmos. Chem. Phys." },
+            IsUserCompound = false
+        });
+
+        _compounds.Add(new ChemicalCompound
+        {
+            Name = "Oxygen (g)",
+            ChemicalFormula = "O₂(g)",
+            Phase = CompoundPhase.Gas,
+            GibbsFreeEnergyFormation_kJ_mol = 0.0,
+            EnthalpyFormation_kJ_mol = 0.0,
+            Entropy_J_molK = 205.2,
+            HenrysLawConstant_mol_L_atm = 1.3e-3,
+            Sources = { "NIST Chemistry WebBook", "Sander (2015)" },
+            IsUserCompound = false
+        });
+
+        _compounds.Add(new ChemicalCompound
+        {
+            Name = "Hydrogen Sulfide (g)",
+            ChemicalFormula = "H₂S(g)",
+            Phase = CompoundPhase.Gas,
+            GibbsFreeEnergyFormation_kJ_mol = -33.5,
+            EnthalpyFormation_kJ_mol = -20.6,
+            Entropy_J_molK = 205.8,
+            HenrysLawConstant_mol_L_atm = 1.0e-1,
+            Sources = { "NIST Chemistry WebBook", "Sander (2015)" },
+            IsUserCompound = false
+        });
+
+
+        // ═══════════════════════════════════════════════════════════════════════
+        // SURFACE SPECIES (using generic >SOH for HFO - Hydrous Ferric Oxide)
+        // ═══════════════════════════════════════════════════════════════════════
+        _compounds.Add(new ChemicalCompound
+        {
+            Name = ">SOH",
+            ChemicalFormula = ">SOH",
+            Phase = CompoundPhase.Surface,
+            IsPrimarySurfaceSite = true,
+            IonicCharge = 0,
+            LogKsp_25C = 7.29, // pKa1 for >SOH + H+ = >SOH2+
+            Notes = "Primary neutral surface hydroxyl site. Data from Dzombak & Morel (1990) for HFO.",
+            Sources = { "Dzombak & Morel (1990). Surface Complexation Modeling." },
+            IsUserCompound = false
+        });
+
+        _compounds.Add(new ChemicalCompound
+        {
+            Name = ">SOH₂⁺",
+            ChemicalFormula = ">SOH₂⁺",
+            Synonyms = { ">SOH2+" },
+            Phase = CompoundPhase.Surface,
             IonicCharge = 1,
-            IonicConductivity_S_cm2_mol = 50.1,
-            Notes = "Dominant cation in seawater.",
-            Sources = new List<string>
-            {
-                "Shock & Helgeson (1988): Geochim. Cosmochim. Acta 52, 2009-2036"
-            },
+            Notes = "Protonated surface site.",
+            Sources = { "Dzombak & Morel (1990)" },
+            IsUserCompound = false
+        });
+
+        _compounds.Add(new ChemicalCompound
+        {
+            Name = ">SO⁻",
+            ChemicalFormula = ">SO⁻",
+            Synonyms = { ">SO-" },
+            Phase = CompoundPhase.Surface,
+            IonicCharge = -1,
+            LogKsp_25C = -8.93, // pKa2 for >SOH = >SO- + H+
+            Notes = "Deprotonated surface site.",
+            Sources = { "Dzombak & Morel (1990)" },
             IsUserCompound = false
         });
 
@@ -962,32 +1443,25 @@ public sealed class CompoundLibrary
             IsUserCompound = false
         });
 
-        _compounds.Add(new ChemicalCompound
+        Logger.Log($"[CompoundLibrary] Seeded {_compounds.Count} default compounds");
+    }
+
+    /// <summary>
+    /// ENHANCEMENT: Seeds solid solution definitions.
+    /// </summary>
+    private void SeedSolidSolutions()
+    {
+        SolidSolutions.Clear();
+
+        SolidSolutions.Add(new SolidSolution
         {
-            Name = "Aragonite",
-            ChemicalFormula = "CaCO₃",
-            Phase = CompoundPhase.Solid,
-            CrystalSystem = CrystalSystem.Orthorhombic,
-            GibbsFreeEnergyFormation_kJ_mol = -1127.8,
-            EnthalpyFormation_kJ_mol = -1207.4,
-            Entropy_J_molK = 88.0,
-            HeatCapacity_J_molK = 81.25,
-            MolarVolume_cm3_mol = 34.15,
-            MolecularWeight_g_mol = 100.09,
-            Density_g_cm3 = 2.93,
-            LogKsp_25C = -8.34,
-            MohsHardness = 3.5,
-            Color = "Colorless to white",
-            Notes = "Metastable CaCO₃ polymorph. Transforms to calcite. Common in biogenic carbonates.",
-            Sources = new List<string>
-            {
-                "Robie & Hemingway (1995): USGS Bulletin 2131, p.84",
-                "Plummer & Busenberg (1982): Geochim. Cosmochim. Acta 46, 1011-1040"
-            },
-            IsUserCompound = false
+            Name = "Calcite-Magnesite Solid Solution",
+            EndMembers = new List<string> { "Calcite", "Magnesite" },
+            MixingModel = SolidSolutionMixingModel.Regular,
+            InteractionParameters = new List<double> { 5.0, 5.0 } // Simplified interaction parameter (W)
         });
 
-        Logger.Log($"[CompoundLibrary] Seeded {_compounds.Count} default compounds");
+        Logger.Log($"[CompoundLibrary] Seeded {SolidSolutions.Count} solid solutions.");
     }
 
     /// <summary>

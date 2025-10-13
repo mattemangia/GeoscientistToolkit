@@ -76,6 +76,9 @@ public class PNMDataset : Dataset, ISerializableDataset
 
     // --- Physical/network properties ---
     public float VoxelSize { get; set; } // µm
+    public int ImageWidth { get; set; }
+    public int ImageHeight { get; set; }
+    public int ImageDepth { get; set; }
     public float Tortuosity { get; set; }
     public float DarcyPermeability { get; set; } // mD
     public float NavierStokesPermeability { get; set; } // mD
@@ -107,6 +110,9 @@ public class PNMDataset : Dataset, ISerializableDataset
             Name = Name,
             FilePath = FilePath,
             VoxelSize = VoxelSize,
+            ImageWidth = ImageWidth,
+            ImageHeight = ImageHeight,
+            ImageDepth = ImageDepth,
             Tortuosity = Tortuosity,
             DarcyPermeability = DarcyPermeability,
             NavierStokesPermeability = NavierStokesPermeability,
@@ -317,6 +323,9 @@ public class PNMDataset : Dataset, ISerializableDataset
             Name = Name,
             FilePath = FilePath,
             VoxelSize = VoxelSize,
+            ImageWidth = ImageWidth,
+            ImageHeight = ImageHeight,
+            ImageDepth = ImageDepth,
             Tortuosity = Tortuosity,
             DarcyPermeability = DarcyPermeability,
             NavierStokesPermeability = NavierStokesPermeability,
@@ -500,6 +509,9 @@ public class PNMDataset : Dataset, ISerializableDataset
     public void ImportFromDTO(PNMDatasetDTO dto)
     {
         VoxelSize = dto.VoxelSize;
+        ImageWidth = dto.ImageWidth;
+        ImageHeight = dto.ImageHeight;
+        ImageDepth = dto.ImageDepth;
         Tortuosity = dto.Tortuosity;
         DarcyPermeability = dto.DarcyPermeability;
         NavierStokesPermeability = dto.NavierStokesPermeability;

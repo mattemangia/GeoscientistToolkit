@@ -318,18 +318,34 @@ public class RealTimeTomographyViewer : IDisposable
 
     private string FormatVelocity(float velocity)
     {
-        if (velocity == 0) return "0";
+        // --- FIX START: Improved velocity formatting to avoid jarring unit changes ---
+        if (velocity < 1e-9f) return "0";
 
-        // Use adaptive formatting based on magnitude
+        // For numbers >= 10,000, use 'k' suffix
+        if (velocity >= 10000.0f)
+            return $"{velocity / 1000.0f:F1}k";
+        
+        // For numbers from 1000 to 9999, show the full integer value
         if (velocity >= 1000.0f)
-            return $"{velocity / 1000.0f:F2}k";
-        if (velocity >= 1.0f)
+            return $"{velocity:F0}";
+
+        // Show increasing precision for smaller numbers
+        if (velocity >= 100.0f)
+            return $"{velocity:F1}";
+        if (velocity >= 10.0f)
             return $"{velocity:F2}";
+        if (velocity >= 1.0f)
+            return $"{velocity:F3}";
+
+        // Handle sub-unit values
         if (velocity >= 0.001f)
             return $"{velocity * 1000.0f:F2}m";
         if (velocity >= 0.000001f)
             return $"{velocity * 1000000.0f:F2}µ";
+
+        // Default to scientific notation for very small numbers
         return $"{velocity:E2}";
+        // --- FIX END ---
     }
 
     private void RequestUpdate()

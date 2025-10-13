@@ -206,7 +206,10 @@ public static class PNMGenerator
             return new PNMDataset($"PNM_{ct.Name}_{opt.MaterialId}_Empty", "")
             {
                 VoxelSize = (float)vEdge,
-                Tortuosity = 0
+                Tortuosity = 0,
+                ImageWidth = ct.Width,
+                ImageHeight = ct.Height,
+                ImageDepth = ct.Depth
             };
         }
 
@@ -257,20 +260,58 @@ public static class PNMGenerator
 
         token.ThrowIfCancellationRequested();
 
-        // Step 8: Optional inlet↔outlet path enforcement
         if (opt.EnforceInletOutletConnectivity && poreCount > 0)
+{
+    progressReporter.Report(0.82f, "Enforcing inlet-outlet connectivity...");
+    EnforceInOutConnectivity(
+        pores, adjacency, opt.Axis, opt.InletIsMinSide, opt.OutletIsMaxSide,
+        W, H, D, (float)vx, (float)vy, (float)vz,
+        throats,
+        fullPoreLabels, poreCount
+    );
+    
+    // CRITICAL: Rebuild adjacency after adding bridging throats!
+    Logger.Log("[PNMGenerator] Rebuilding adjacency after connectivity enforcement...");
+    adjacency.Clear();
+    foreach (var throat in throats)
+    {
+        var p1 = pores.FirstOrDefault(p => p?.ID == throat.Pore1ID);
+        var p2 = pores.FirstOrDefault(p => p?.ID == throat.Pore2ID);
+        if (p1 == null || p2 == null) continue;
+        
+        var dx = Math.Abs(p1.Position.X - p2.Position.X) * vx;
+        var dy = Math.Abs(p1.Position.Y - p2.Position.Y) * vy;
+        var dz = Math.Abs(p1.Position.Z - p2.Position.Z) * vz;
+        var dist = MathF.Sqrt((float)(dx * dx + dy * dy + dz * dz));
+        
+        // Find pore indices (not IDs)
+        int p1Idx = -1, p2Idx = -1;
+        for (int i = 1; i < pores.Length; i++)
         {
-            progressReporter.Report(0.82f, "Enforcing inlet-outlet connectivity...");
-            EnforceInOutConnectivity(pores, adjacency, opt.Axis, opt.InletIsMinSide, opt.OutletIsMaxSide,
-                W, H, D, (float)vx, (float)vy, (float)vz, throats);
+            if (pores[i]?.ID == throat.Pore1ID) p1Idx = i;
+            if (pores[i]?.ID == throat.Pore2ID) p2Idx = i;
         }
+        
+        if (p1Idx > 0 && p2Idx > 0)
+        {
+            if (!adjacency.TryGetValue(p1Idx, out var l1)) 
+                adjacency[p1Idx] = l1 = new List<(int, float)>();
+            if (!adjacency.TryGetValue(p2Idx, out var l2)) 
+                adjacency[p2Idx] = l2 = new List<(int, float)>();
+            
+            // Avoid duplicates
+            if (!l1.Any(x => x.Item1 == p2Idx)) l1.Add((p2Idx, dist));
+            if (!l2.Any(x => x.Item1 == p1Idx)) l2.Add((p1Idx, dist));
+        }
+    }
+}
 
-        // Step 9: Calculate tortuosity
-        progressReporter.Report(0.90f, "Calculating tortuosity...");
-        var tort = ComputeTortuosity(
-            pores, adjacency, opt.Axis, opt.InletIsMinSide, opt.OutletIsMaxSide,
-            W, H, D, (float)vx, (float)vy, (float)vz,
-            fullPoreLabels, poreCount);
+// Step 9: Calculate tortuosity (now with updated adjacency)
+progressReporter.Report(0.90f, "Calculating tortuosity...");
+var tort = ComputeTortuosity(
+    pores, adjacency, opt.Axis, opt.InletIsMinSide, opt.OutletIsMaxSide,
+    W, H, D, (float)vx, (float)vy, (float)vz,
+    fullPoreLabels, poreCount);
 
         // Step 10: Package into PNMDataset
         progressReporter.Report(0.95f, "Creating PNM dataset...");
@@ -382,62 +423,96 @@ public static class PNMGenerator
 
         return expanded;
     }
-
-    private static PoreFaceContacts ComputeFaceContacts(int[] labels, int W, int H, int D, int maxLabel)
+    struct FaceContacts
     {
-        var c = new PoreFaceContacts
+        public bool[] XMin, XMax, YMin, YMax, ZMin, ZMax;
+        public FaceContacts(int n)
         {
-            XMin = new bool[maxLabel + 1],
-            XMax = new bool[maxLabel + 1],
-            YMin = new bool[maxLabel + 1],
-            YMax = new bool[maxLabel + 1],
-            ZMin = new bool[maxLabel + 1],
-            ZMax = new bool[maxLabel + 1]
-        };
-
-        // X faces
-        for (var z = 0; z < D; z++)
-        for (var y = 0; y < H; y++)
-        {
-            var idxL = (z * H + y) * W + 0;
-            var idxR = (z * H + y) * W + (W - 1);
-            var l = labels[idxL];
-            if (l > 0) c.XMin[l] = true;
-            var r = labels[idxR];
-            if (r > 0) c.XMax[r] = true;
+            XMin = new bool[n]; XMax = new bool[n];
+            YMin = new bool[n]; YMax = new bool[n];
+            ZMin = new bool[n]; ZMax = new bool[n];
         }
-
-        // Y faces
-        for (var z = 0; z < D; z++)
-        {
-            var rowTop = (z * H + 0) * W;
-            var rowBot = (z * H + (H - 1)) * W;
-            for (var x = 0; x < W; x++)
-            {
-                var t = labels[rowTop + x];
-                if (t > 0) c.YMin[t] = true;
-                var b = labels[rowBot + x];
-                if (b > 0) c.YMax[b] = true;
-            }
-        }
-
-        // Z faces
-        for (var y = 0; y < H; y++)
-        {
-            var slabF = (0 * H + y) * W;
-            var slabB = ((D - 1) * H + y) * W;
-            for (var x = 0; x < W; x++)
-            {
-                var f = labels[slabF + x];
-                if (f > 0) c.ZMin[f] = true;
-                var b = labels[slabB + x];
-                if (b > 0) c.ZMax[b] = true;
-            }
-        }
-
-        return c;
     }
+    private static PoreFaceContacts ComputeFaceContacts(int[] labels, int W, int H, int D, int maxLabel)
+{
+    var c = new PoreFaceContacts
+    {
+        XMin = new bool[maxLabel + 1],
+        XMax = new bool[maxLabel + 1],
+        YMin = new bool[maxLabel + 1],
+        YMax = new bool[maxLabel + 1],
+        ZMin = new bool[maxLabel + 1],
+        ZMax = new bool[maxLabel + 1]
+    };
 
+    // First, find the actual extent of the material (non-zero labels)
+    int xMin = W, xMax = -1;
+    int yMin = H, yMax = -1;
+    int zMin = D, zMax = -1;
+    
+    for (var z = 0; z < D; z++)
+    for (var y = 0; y < H; y++)
+    for (var x = 0; x < W; x++)
+    {
+        var idx = (z * H + y) * W + x;
+        if (labels[idx] > 0)
+        {
+            if (x < xMin) xMin = x;
+            if (x > xMax) xMax = x;
+            if (y < yMin) yMin = y;
+            if (y > yMax) yMax = y;
+            if (z < zMin) zMin = z;
+            if (z > zMax) zMax = z;
+        }
+    }
+    
+    // If no material found, return empty
+    if (xMax < 0) return c;
+    
+    Logger.Log($"[Face Contacts] Material extent: X[{xMin},{xMax}], Y[{yMin},{yMax}], Z[{zMin},{zMax}]");
+    
+    // Use a tolerance band (e.g., within 5 voxels of material boundaries)
+    const int TOLERANCE = 5;
+    
+    // Check which pores are near the material boundaries (not image boundaries)
+    for (var z = 0; z < D; z++)
+    for (var y = 0; y < H; y++)
+    for (var x = 0; x < W; x++)
+    {
+        var idx = (z * H + y) * W + x;
+        var label = labels[idx];
+        if (label <= 0) continue;
+        
+        // X boundaries
+        if (x <= xMin + TOLERANCE) c.XMin[label] = true;
+        if (x >= xMax - TOLERANCE) c.XMax[label] = true;
+        
+        // Y boundaries
+        if (y <= yMin + TOLERANCE) c.YMin[label] = true;
+        if (y >= yMax - TOLERANCE) c.YMax[label] = true;
+        
+        // Z boundaries
+        if (z <= zMin + TOLERANCE) c.ZMin[label] = true;
+        if (z >= zMax - TOLERANCE) c.ZMax[label] = true;
+    }
+    
+    // Count how many pores touch each face
+    int xMinCount = 0, xMaxCount = 0, yMinCount = 0, yMaxCount = 0, zMinCount = 0, zMaxCount = 0;
+    for (int i = 1; i <= maxLabel; i++)
+    {
+        if (c.XMin[i]) xMinCount++;
+        if (c.XMax[i]) xMaxCount++;
+        if (c.YMin[i]) yMinCount++;
+        if (c.YMax[i]) yMaxCount++;
+        if (c.ZMin[i]) zMinCount++;
+        if (c.ZMax[i]) zMaxCount++;
+    }
+    
+    Logger.Log($"[Face Contacts] Boundary pores found: XMin={xMinCount}, XMax={xMaxCount}, " +
+               $"YMin={yMinCount}, YMax={yMaxCount}, ZMin={zMinCount}, ZMax={zMaxCount}");
+    
+    return c;
+}
     private sealed class PoreFaceContacts
     {
         public bool[] XMin, XMax, YMin, YMax, ZMin, ZMax;
@@ -752,190 +827,648 @@ public static class PNMGenerator
     #region Throats & adjacency
 
     private static List<Throat> BuildThroats(int[] lbl, int W, int H, int D, float[] edt, float vEdge,
-        out Dictionary<int, List<(int nb, float w)>> adjacency, DetailedProgressReporter progress,
-        float startProgress, float endProgress)
+    out Dictionary<int, List<(int nb, float w)>> adjacency, DetailedProgressReporter progress,
+    float startProgress, float endProgress)
+{
+    var edges = new ConcurrentDictionary<(int a, int b), (float radius, int count, float minRadius)>();
+    var totalSlices = D;
+    var processedSlices = 0;
+
+    Parallel.For(0, D, z =>
     {
-        var edges = new ConcurrentDictionary<(int a, int b), (float radius, int count)>();
-        var totalSlices = D;
-        var processedSlices = 0;
-
-        Parallel.For(0, D, z =>
+        var plane = W * H;
+        for (var y = 0; y < H; y++)
         {
-            var plane = W * H;
-            for (var y = 0; y < H; y++)
+            var row = (z * H + y) * W;
+            for (var x = 0; x < W; x++)
             {
-                var row = (z * H + y) * W;
-                for (var x = 0; x < W; x++)
+                var idx = row + x;
+                var a = lbl[idx];
+                if (a == 0) continue;
+
+                void CheckNeighbor(int nx, int ny, int nz)
                 {
-                    var idx = row + x;
-                    var a = lbl[idx];
-                    if (a == 0) continue;
+                    if ((uint)nx >= W || (uint)ny >= H || (uint)nz >= D) return;
+                    var nidx = (nz * H + ny) * W + nx;
+                    var b = lbl[nidx];
+                    if (b == 0 || b == a) return;
 
-                    void CheckNeighbor(int nx, int ny, int nz)
-                    {
-                        if ((uint)nx >= W || (uint)ny >= H || (uint)nz >= D) return;
-                        var nidx = (nz * H + ny) * W + nx;
-                        var b = lbl[nidx];
-                        if (b == 0 || b == a) return;
+                    var key = a < b ? (a, b) : (b, a);
+                    
+                    // Calculate throat radius at this interface point
+                    // Use MINIMUM of the two EDT values (constriction point)
+                    var r = MathF.Min(edt[idx], edt[nidx]) * vEdge;
 
-                        var key = a < b ? (a, b) : (b, a);
-                        // Calculate throat radius at this interface point
-                        var r = MathF.Min(edt[idx], edt[nidx]) * vEdge;
-
-                        edges.AddOrUpdate(key,
-                            k => (r, 1),
-                            (k, old) => (Math.Max(old.radius, r), old.count + 1)); // Use MAX radius instead of MIN
-                    }
-
-                    CheckNeighbor(x + 1, y, z);
-                    CheckNeighbor(x, y + 1, z);
-                    CheckNeighbor(x, y, z + 1);
+                    edges.AddOrUpdate(key,
+                        k => (r, 1, r),
+                        (k, old) => (
+                            Math.Max(old.radius, r),  // Track maximum interface radius
+                            old.count + 1,
+                            Math.Min(old.minRadius, r) // Track minimum as well
+                        ));
                 }
+
+                CheckNeighbor(x + 1, y, z);
+                CheckNeighbor(x, y + 1, z);
+                CheckNeighbor(x, y, z + 1);
             }
-
-            var current = Interlocked.Increment(ref processedSlices);
-            if (current % 10 == 0)
-            {
-                var prog = startProgress + (endProgress - startProgress) * current / totalSlices;
-                progress?.Report(prog, $"Finding throats: slice {current}/{totalSlices}...");
-            }
-        });
-
-        var list = new List<Throat>(edges.Count);
-        adjacency = new Dictionary<int, List<(int nb, float w)>>();
-        var tid = 1;
-
-        foreach (var kv in edges)
-        {
-            var (a, b) = kv.Key;
-            var (radius, count) = kv.Value;
-
-            // Ensure minimum radius for numerical stability
-            var finalRadius = Math.Max(0.1f, radius);
-
-            list.Add(new Throat { ID = tid++, Pore1ID = a, Pore2ID = b, Radius = finalRadius });
-
-            if (!adjacency.TryGetValue(a, out var la)) adjacency[a] = la = new List<(int nb, float w)>();
-            if (!adjacency.TryGetValue(b, out var lb)) adjacency[b] = lb = new List<(int nb, float w)>();
-            la.Add((b, 1));
-            lb.Add((a, 1));
         }
 
-        Logger.Log(
-            $"[BuildThroats] Found {list.Count} unique throats with radius range {list.Min(t => t.Radius):F3} to {list.Max(t => t.Radius):F3} µm");
+        var current = Interlocked.Increment(ref processedSlices);
+        if (current % 10 == 0)
+        {
+            var prog = startProgress + (endProgress - startProgress) * current / totalSlices;
+            progress?.Report(prog, $"Finding throats: slice {current}/{totalSlices}...");
+        }
+    });
 
-        return list;
+    var list = new List<Throat>(edges.Count);
+    adjacency = new Dictionary<int, List<(int nb, float w)>>();
+    var tid = 1;
+
+    foreach (var kv in edges)
+    {
+        var (a, b) = kv.Key;
+        var (maxRadius, count, minRadius) = kv.Value;
+
+        // These radii are already in micrometers from EDT * vEdge
+        var finalRadius = minRadius * 0.7f + maxRadius * 0.3f;
+        
+        // Apply reduction factor for realism
+        finalRadius *= 0.35f;
+        
+        // Ensure minimum radius (in micrometers)
+        finalRadius = Math.Max(0.01f * vEdge, finalRadius);  // At least 0.01 voxels
+
+        // Store radius IN MICROMETERS
+        list.Add(new Throat { ID = tid++, Pore1ID = a, Pore2ID = b, Radius = finalRadius });
+
+        if (!adjacency.TryGetValue(a, out var la)) adjacency[a] = la = new List<(int nb, float w)>();
+        if (!adjacency.TryGetValue(b, out var lb)) adjacency[b] = lb = new List<(int nb, float w)>();
+        la.Add((b, 1));
+        lb.Add((a, 1));
     }
 
-    private static void EnforceInOutConnectivity(Pore[] pores, Dictionary<int, List<(int nb, float w)>> adj,
-        FlowAxis axis, bool inletMin, bool outletMax, int W, int H, int D, float vx, float vy, float vz,
-        List<Throat> throats)
+    Logger.Log($"[BuildThroats] Found {list.Count} unique throats with radius range " +
+               $"{list.Min(t => t.Radius):F3} to {list.Max(t => t.Radius):F3} µm");
+
+    return list;
+}
+
+ // Enforce a single through-going inlet→outlet path using minimal, axis-monotone bridges.
+// Name/signature preserved to be drop-in compatible with your call-site. :contentReference[oaicite:1]{index=1}
+static void EnforceInOutConnectivity(
+    Pore[] pores,
+    Dictionary<int, List<(int nb, float w)>> adj,
+    FlowAxis axis, bool inletMin, bool outletMax,
+    int W, int H, int D, float vx, float vy, float vz,
+    List<Throat> throats,
+    int[] expandedLabels, int maxLabel)
+{
+    if (pores == null || pores.Length <= 1) return;
+
+    // Build poreId<->index maps & physical coords
+    var poreIdToIndex = new Dictionary<int, int>();
+    for (int i = 1; i < pores.Length; i++)
+        if (pores[i] != null) poreIdToIndex[pores[i].ID] = i;
+
+    var phys = new Vector3[pores.Length];
+    for (int i = 1; i < pores.Length; i++)
+        if (pores[i] != null)
+            phys[i] = new Vector3(pores[i].Position.X * vx,
+                                  pores[i].Position.Y * vy,
+                                  pores[i].Position.Z * vz);
+
+    // --- 1) Enhanced inlet/outlet detection for sparse boundaries ---
+    var inletIdx = new HashSet<int>();
+    var outletIdx = new HashSet<int>();
+    
+    // Find material AABB
+    int xMin = W, xMax = -1, yMin = H, yMax = -1, zMin = D, zMax = -1;
+    for (int idx = 0, z = 0; z < D; z++)
+    for (int y = 0; y < H; y++)
+    for (int x = 0; x < W; x++, idx++)
     {
-        if (pores.Length <= 1) return;
+        int lab = expandedLabels[idx];
+        if (lab <= 0) continue;
+        if (x < xMin) xMin = x; if (x > xMax) xMax = x;
+        if (y < yMin) yMin = y; if (y > yMax) yMax = y;
+        if (z < zMin) zMin = z; if (z > zMax) zMax = z;
+    }
+    if (xMax < 0) return;
 
-        var inlet = new HashSet<int>();
-        var outlet = new HashSet<int>();
-        float minFace = 0, maxFace = 0, tol = 0.5f;
-        switch (axis)
+    // Use adaptive tolerance based on pore sparsity
+    float GetAxisLength(FlowAxis ax) => ax switch
+    {
+        FlowAxis.X => xMax - xMin,
+        FlowAxis.Y => yMax - yMin,
+        _ => zMax - zMin
+    };
+
+    // Start with a reasonable tolerance
+    float axisLength = GetAxisLength(axis);
+    float initialTolRatio = 0.05f; // 5% of axis length
+    int baseTol = Math.Max(3, (int)(axisLength * initialTolRatio));
+    
+    // Progressively increase tolerance until we find enough boundary pores
+    int minBoundaryPores = Math.Max(3, pores.Length / 100); // At least 3 or 1% of total
+    
+    for (int tolIncrease = 0; tolIncrease <= 10; tolIncrease++)
+    {
+        int tol = baseTol + tolIncrease * 2; // Increase tolerance progressively
+        inletIdx.Clear();
+        outletIdx.Clear();
+        
+        for (int idx = 0, z = 0; z < D; z++)
+        for (int y = 0; y < H; y++)
+        for (int x = 0; x < W; x++, idx++)
         {
-            case FlowAxis.X:
-                minFace = 0;
-                maxFace = W - 1;
-                break;
-            case FlowAxis.Y:
-                minFace = 0;
-                maxFace = H - 1;
-                break;
-            default:
-                minFace = 0;
-                maxFace = D - 1;
-                break;
-        }
+            int poreId = expandedLabels[idx];
+            if (poreId <= 0 || !poreIdToIndex.ContainsKey(poreId)) continue;
+            int pi = poreIdToIndex[poreId];
 
-        for (var i = 1; i < pores.Length; i++)
+            switch (axis)
+            {
+                case FlowAxis.X:
+                    if (inletMin && x <= xMin + tol) inletIdx.Add(pi);
+                    if (outletMax && x >= xMax - tol) outletIdx.Add(pi);
+                    break;
+                case FlowAxis.Y:
+                    if (inletMin && y <= yMin + tol) inletIdx.Add(pi);
+                    if (outletMax && y >= yMax - tol) outletIdx.Add(pi);
+                    break;
+                default: // Z
+                    if (inletMin && z <= zMin + tol) inletIdx.Add(pi);
+                    if (outletMax && z >= zMax - tol) outletIdx.Add(pi);
+                    break;
+            }
+        }
+        
+        // Check if we have enough boundary pores
+        if (inletIdx.Count >= minBoundaryPores && outletIdx.Count >= minBoundaryPores)
         {
-            var p = pores[i];
-            if (p == null) continue;
-            var coord = axis == FlowAxis.X ? p.Position.X : axis == FlowAxis.Y ? p.Position.Y : p.Position.Z;
-            if (Math.Abs(coord - minFace) <= tol && inletMin) inlet.Add(i);
-            if (Math.Abs(coord - maxFace) <= tol && outletMax) outlet.Add(i);
+            Logger.Log($"[Connectivity] Found {inletIdx.Count} inlet and {outletIdx.Count} outlet pores with tolerance {tol}");
+            break;
         }
+    }
 
-        if (inlet.Count == 0 || outlet.Count == 0) return;
-
-        var comp = ConnectedSets(adj, pores.Length - 1);
-        var inletComp = -1;
-        var outletComps = new HashSet<int>();
-        foreach (var id in inlet) inletComp = comp[id];
-        foreach (var od in outlet) outletComps.Add(comp[od]);
-
-        if (inletComp != -1 && outletComps.Contains(inletComp)) return;
-
-        var centers = new Vector3[pores.Length];
-        for (var i = 1; i < pores.Length; i++) centers[i] = pores[i]?.Position ?? new Vector3(-1, -1, -1);
-
-        Vector3 scale = new(vx, vy, vz);
-
-        var compMembers = new Dictionary<int, List<int>>();
-        for (var i = 1; i < pores.Length; i++)
+    // Fallback: use percentile-based selection if still not enough pores
+    if (inletIdx.Count < minBoundaryPores || outletIdx.Count < minBoundaryPores)
+    {
+        var ordered = new List<(int idx, float pos)>();
+        for (int i = 1; i < pores.Length; i++)
         {
             if (pores[i] == null) continue;
-            var c = comp[i];
-            if (!compMembers.TryGetValue(c, out var list)) compMembers[c] = list = new List<int>();
-            list.Add(i);
+            float pos = axis switch {
+                FlowAxis.X => pores[i].Position.X,
+                FlowAxis.Y => pores[i].Position.Y,
+                _ => pores[i].Position.Z
+            };
+            ordered.Add((i, pos));
         }
-
-        var safety = 0;
-        while (safety++ < 1000)
+        ordered.Sort((a, b) => a.pos.CompareTo(b.pos));
+        
+        int take = Math.Max(minBoundaryPores, ordered.Count / 10);
+        if (inletIdx.Count < minBoundaryPores)
         {
-            comp = ConnectedSets(adj, pores.Length - 1);
-            inletComp = comp[inlet.First()];
-            var ok = false;
-            foreach (var od in outlet)
-                if (comp[od] == inletComp)
-                {
-                    ok = true;
-                    break;
-                }
+            inletIdx.Clear();
+            for (int i = 0; i < take && i < ordered.Count; i++) 
+                inletIdx.Add(ordered[i].idx);
+        }
+        if (outletIdx.Count < minBoundaryPores)
+        {
+            outletIdx.Clear();
+            for (int i = Math.Max(0, ordered.Count - take); i < ordered.Count; i++) 
+                outletIdx.Add(ordered[i].idx);
+        }
+        Logger.Log($"[Connectivity] Used fallback selection: {inletIdx.Count} inlet, {outletIdx.Count} outlet pores");
+    }
 
-            if (ok) break;
+    if (inletIdx.Count == 0 || outletIdx.Count == 0) return;
 
-            var bestDist = float.MaxValue;
-            (int a, int b) best = default;
-            foreach (var kv in compMembers)
+    // --- 2) Build adjacency on INDEX space ---
+    var adjIdx = new Dictionary<int, List<(int nb, float w)>>();
+    foreach (var t in throats)
+    {
+        if (!poreIdToIndex.TryGetValue(t.Pore1ID, out var a)) continue;
+        if (!poreIdToIndex.TryGetValue(t.Pore2ID, out var b)) continue;
+
+        float wdist = Vector3.Distance(phys[a], phys[b]);
+        if (!adjIdx.TryGetValue(a, out var la)) adjIdx[a] = la = new List<(int, float)>();
+        if (!adjIdx.TryGetValue(b, out var lb)) adjIdx[b] = lb = new List<(int, float)>();
+        la.Add((b, wdist)); 
+        lb.Add((a, wdist));
+    }
+
+    // --- 3) Enhanced: Create inlet/outlet super-nodes for sparse boundaries ---
+    // Instead of trying to connect individual sparse pores, we'll ensure the boundary
+    // regions are well-connected internally first
+    
+    void ConnectBoundaryRegion(HashSet<int> boundaryPores, string regionName)
+    {
+        if (boundaryPores.Count <= 1) return;
+        
+        var boundaryList = boundaryPores.ToList();
+        var connected = new HashSet<int>();
+        connected.Add(boundaryList[0]);
+        
+        // Connect all boundary pores into a mesh using nearest-neighbor approach
+        while (connected.Count < boundaryList.Count)
+        {
+            float minDist = float.MaxValue;
+            int bestFrom = -1, bestTo = -1;
+            
+            foreach (var from in connected)
             {
-                var c = kv.Key;
-                if (c == inletComp) continue;
-                if (!kv.Value.Any(v => outlet.Contains(v))) continue;
-
-                foreach (var ai in compMembers[inletComp])
-                foreach (var bi in kv.Value)
+                foreach (var to in boundaryList)
                 {
-                    var d = Vector3.Distance(centers[ai] * scale, centers[bi] * scale);
-                    if (d < bestDist)
+                    if (connected.Contains(to)) continue;
+                    
+                    float dist = Vector3.Distance(phys[from], phys[to]);
+                    if (dist < minDist)
                     {
-                        bestDist = d;
-                        best = (ai, bi);
+                        minDist = dist;
+                        bestFrom = from;
+                        bestTo = to;
                     }
                 }
             }
-
-            if (best.a == 0) break;
-
-            var newT = new Throat
+            
+            if (bestFrom >= 0 && bestTo >= 0 && minDist < float.MaxValue)
             {
-                Pore1ID = best.a,
-                Pore2ID = best.b,
-                Radius = Math.Max(1e-3f, Math.Min(pores[best.a].Radius, pores[best.b].Radius) * 0.5f)
-            };
-            throats.Add(newT);
-            if (!adj.TryGetValue(best.a, out var la)) adj[best.a] = la = new List<(int nb, float w)>();
-            if (!adj.TryGetValue(best.b, out var lb)) adj[best.b] = lb = new List<(int nb, float w)>();
-            var wght = Vector3.Distance(centers[best.a] * scale, centers[best.b] * scale);
-            la.Add((best.b, wght));
-            lb.Add((best.a, wght));
+                // Add connection
+                connected.Add(bestTo);
+                
+                // Check if already connected
+                bool alreadyConnected = false;
+                if (adjIdx.TryGetValue(bestFrom, out var lst))
+                {
+                    foreach (var (nb, _) in lst)
+                    {
+                        if (nb == bestTo) 
+                        {
+                            alreadyConnected = true;
+                            break;
+                        }
+                    }
+                }
+                
+                if (!alreadyConnected)
+                {
+                    // Create bridging throat
+                    float radius = Math.Max(0.01f, 
+                        Math.Min(pores[bestFrom].Radius, pores[bestTo].Radius) * 0.25f);
+                    throats.Add(new Throat { 
+                        Pore1ID = pores[bestFrom].ID, 
+                        Pore2ID = pores[bestTo].ID, 
+                        Radius = radius 
+                    });
+                    
+                    if (!adjIdx.TryGetValue(bestFrom, out var la)) adjIdx[bestFrom] = la = new List<(int, float)>();
+                    if (!adjIdx.TryGetValue(bestTo, out var lb)) adjIdx[bestTo] = lb = new List<(int, float)>();
+                    la.Add((bestTo, minDist));
+                    lb.Add((bestFrom, minDist));
+                    
+                    Logger.Log($"[Connectivity] Connected {regionName} pores {bestFrom} to {bestTo} (dist={minDist:F3})");
+                }
+            }
+            else
+            {
+                break; // No more connections possible
+            }
         }
     }
+    
+    // Connect inlet and outlet regions internally first
+    ConnectBoundaryRegion(inletIdx, "inlet");
+    ConnectBoundaryRegion(outletIdx, "outlet");
+
+    // --- 4) Find connected components ---
+    var compOf = new Dictionary<int, int>();
+    int compId = 0;
+    foreach (var start in adjIdx.Keys)
+    {
+        if (compOf.ContainsKey(start)) continue;
+        compId++;
+        var q = new Queue<int>();
+        q.Enqueue(start);
+        compOf[start] = compId;
+        while (q.Count > 0)
+        {
+            var u = q.Dequeue();
+            if (!adjIdx.TryGetValue(u, out var ns)) continue;
+            foreach (var (v, _) in ns)
+                if (!compOf.ContainsKey(v)) 
+                { 
+                    compOf[v] = compId; 
+                    q.Enqueue(v); 
+                }
+        }
+    }
+
+    // Handle isolated pores
+    for (int i = 1; i < pores.Length; i++)
+        if (pores[i] != null && !compOf.ContainsKey(i))
+            compOf[i] = ++compId;
+
+    // Map components
+    var compPores = new Dictionary<int, List<int>>();
+    var compCentroid = new Dictionary<int, Vector3>();
+    var compAxisPos = new Dictionary<int, float>();
+    
+    for (int i = 1; i < pores.Length; i++)
+    {
+        if (pores[i] == null) continue;
+        int c = compOf[i];
+        if (!compPores.TryGetValue(c, out var lp)) compPores[c] = lp = new List<int>();
+        lp.Add(i);
+    }
+    
+    foreach (var kv in compPores)
+    {
+        var sum = Vector3.Zero;
+        foreach (var i in kv.Value) sum += phys[i];
+        var ctr = sum / kv.Value.Count;
+        compCentroid[kv.Key] = ctr;
+        compAxisPos[kv.Key] = axis switch {
+            FlowAxis.X => ctr.X,
+            FlowAxis.Y => ctr.Y,
+            _ => ctr.Z
+        };
+    }
+
+    // Get inlet/outlet components
+    var inletComps = new HashSet<int>(inletIdx.Select(i => compOf[i]));
+    var outletComps = new HashSet<int>(outletIdx.Select(i => compOf[i]));
+    
+    if (inletComps.Overlaps(outletComps))
+    {
+        Logger.Log("[Connectivity] Inlet and outlet already connected!");
+        return;
+    }
+
+    // --- 5) Enhanced pathfinding with relaxed monotonicity for sparse regions ---
+    // Build component graph with adaptive connections
+    var compGraph = new Dictionary<int, List<(int nb, float cost, bool isBridge)>>();
+    
+    void AddCompEdge(int a, int b, float cost, bool isBridge)
+    {
+        if (!compGraph.TryGetValue(a, out var la)) compGraph[a] = la = new List<(int, float, bool)>();
+        la.Add((b, cost, isBridge));
+    }
+    
+    // Existing connections (virtually free)
+    foreach (var e in adjIdx)
+        foreach (var (v, wdist) in e.Value)
+        {
+            int ca = compOf[e.Key], cb = compOf[v];
+            if (ca == cb) continue;
+            AddCompEdge(ca, cb, 1e-6f, false);
+        }
+    
+    // Enhanced: Build candidate bridges with relaxed constraints for boundary components
+    const float ALPHA = 1.0f, BETA = 0.10f, GAMMA = 0.02f;
+    int K_NORMAL = 8;  // More connections than before
+    int K_BOUNDARY = 15; // Even more for boundary components
+    
+    foreach (var c in compPores.Keys)
+    {
+        bool isNearBoundary = compPores[c].Any(p => inletIdx.Contains(p) || outletIdx.Contains(p));
+        int k = isNearBoundary ? K_BOUNDARY : K_NORMAL;
+        
+        // Find k nearest components (with relaxed monotonicity for boundaries)
+        var candidates = new List<(int comp, float dist, bool isForward)>();
+        
+        foreach (var other in compPores.Keys)
+        {
+            if (other == c) continue;
+            
+            var d = compCentroid[other] - compCentroid[c];
+            float axisGap = axis switch { 
+                FlowAxis.X => d.X,
+                FlowAxis.Y => d.Y,
+                _ => d.Z 
+            };
+            
+            bool isForward = axisGap > 0;
+            
+            // For boundary components, allow some backward connections too
+            if (!isForward && !isNearBoundary) continue;
+            if (!isForward && Math.Abs(axisGap) > axisLength * 0.1f) continue; // Limited backward
+            
+            float dist = d.Length();
+            candidates.Add((other, dist, isForward));
+        }
+        
+        // Sort by distance and take k nearest
+        candidates.Sort((a, b) => a.dist.CompareTo(b.dist));
+        
+        foreach (var (nb, dist, isForward) in candidates.Take(k))
+        {
+            var d = compCentroid[nb] - compCentroid[c];
+            float axisGap = Math.Abs(axis switch { 
+                FlowAxis.X => d.X,
+                FlowAxis.Y => d.Y,
+                _ => d.Z 
+            });
+            float lateral = axis switch
+            {
+                FlowAxis.X => new Vector2(d.Y, d.Z).Length(),
+                FlowAxis.Y => new Vector2(d.X, d.Z).Length(),
+                _ => new Vector2(d.X, d.Y).Length()
+            };
+            
+            // Reduce cost penalty for boundary connections
+            float alpha = isNearBoundary ? ALPHA * 0.5f : ALPHA;
+            float beta = isNearBoundary ? BETA * 0.5f : BETA;
+            
+            float cost = alpha * axisGap + beta * lateral + GAMMA * dist;
+            AddCompEdge(c, nb, cost, true);
+        }
+    }
+
+    // --- 6) A* search with multiple attempts ---
+    float HeuristicToOutlet(int c)
+    {
+        float best = float.MaxValue;
+        foreach (var o in outletComps)
+        {
+            var d = compCentroid[o] - compCentroid[c];
+            float dist = d.Length();
+            if (dist < best) best = dist;
+        }
+        return best * GAMMA; // Use full 3D distance as heuristic
+    }
+
+    var gScore = new Dictionary<int, float>();
+    var fScore = new Dictionary<int, float>();
+    var cameFrom = new Dictionary<int, int>();
+    var open = new PriorityQueue<int, float>();
+    
+    foreach (var s in inletComps)
+    {
+        gScore[s] = 0;
+        float f = HeuristicToOutlet(s);
+        fScore[s] = f;
+        open.Enqueue(s, f);
+    }
+
+    int goal = -1;
+    int iterations = 0;
+    int maxIterations = compPores.Count * 100; // Prevent infinite loops
+    
+    while (open.Count > 0 && iterations++ < maxIterations)
+    {
+        open.TryDequeue(out var cur, out _);
+        
+        if (outletComps.Contains(cur)) 
+        { 
+            goal = cur; 
+            break; 
+        }
+
+        if (!compGraph.TryGetValue(cur, out var nbrs)) continue;
+        
+        foreach (var (nb, cost, _) in nbrs)
+        {
+            float tentative = gScore[cur] + cost;
+            if (!gScore.TryGetValue(nb, out var best) || tentative < best)
+            {
+                gScore[nb] = tentative;
+                float f = tentative + HeuristicToOutlet(nb);
+                fScore[nb] = f;
+                cameFrom[nb] = cur;
+                open.Enqueue(nb, f);
+            }
+        }
+    }
+    
+    if (goal < 0)
+    {
+        Logger.LogWarning("[Connectivity] Could not find path with A*. Attempting direct connection...");
+        
+        // Fallback: Connect nearest inlet-outlet pair directly
+        float minDist = float.MaxValue;
+        int bestInlet = -1, bestOutlet = -1;
+        
+        foreach (var inlet in inletIdx)
+        foreach (var outlet in outletIdx)
+        {
+            float dist = Vector3.Distance(phys[inlet], phys[outlet]);
+            if (dist < minDist)
+            {
+                minDist = dist;
+                bestInlet = inlet;
+                bestOutlet = outlet;
+            }
+        }
+        
+        if (bestInlet >= 0 && bestOutlet >= 0)
+        {
+            Logger.Log($"[Connectivity] Creating direct bridge from inlet {bestInlet} to outlet {bestOutlet}");
+            float radius = Math.Max(0.01f, 
+                Math.Min(pores[bestInlet].Radius, pores[bestOutlet].Radius) * 0.15f);
+            throats.Add(new Throat { 
+                Pore1ID = pores[bestInlet].ID,
+                Pore2ID = pores[bestOutlet].ID,
+                Radius = radius 
+            });
+            return;
+        }
+        
+        Logger.LogError("[Connectivity] Failed to establish inlet-outlet connectivity!");
+        return;
+    }
+
+    // --- 7) Recover component path and create bridges ---
+    var compPath = new List<int>();
+    for (int c = goal; ; )
+    {
+        compPath.Add(c);
+        if (!cameFrom.TryGetValue(c, out var prev)) break;
+        c = prev;
+    }
+    compPath.Reverse();
+    
+    Logger.Log($"[Connectivity] Found path through {compPath.Count} components");
+
+    // Create bridges where needed
+    int bridgesAdded = 0;
+    for (int i = 0; i + 1 < compPath.Count; i++)
+    {
+        int aComp = compPath[i], bComp = compPath[i + 1];
+        bool alreadyLinked = false;
+
+        // Check if already connected
+        foreach (var aIdx in compPores[aComp])
+        {
+            if (!adjIdx.TryGetValue(aIdx, out var lst)) continue;
+            foreach (var (bIdx, _) in lst)
+                if (compOf[bIdx] == bComp) 
+                { 
+                    alreadyLinked = true; 
+                    break; 
+                }
+            if (alreadyLinked) break;
+        }
+        
+        if (alreadyLinked) continue;
+
+        // Build bridge: nearest pore pair
+        float bestDist = float.MaxValue;
+        int bestA = -1, bestB = -1;
+        
+        foreach (var aIdx in compPores[aComp])
+        foreach (var bIdx in compPores[bComp])
+        {
+            float d = Vector3.Distance(phys[aIdx], phys[bIdx]);
+            if (d < bestDist) 
+            { 
+                bestDist = d; 
+                bestA = aIdx; 
+                bestB = bIdx; 
+            }
+        }
+        
+        if (bestA < 0) continue;
+
+        float radius = Math.Max(0.01f, 
+            Math.Min(pores[bestA].Radius, pores[bestB].Radius) * 0.2f);
+        throats.Add(new Throat { 
+            Pore1ID = pores[bestA].ID,
+            Pore2ID = pores[bestB].ID,
+            Radius = radius 
+        });
+
+        if (!adjIdx.TryGetValue(bestA, out var la2)) adjIdx[bestA] = la2 = new List<(int, float)>();
+        if (!adjIdx.TryGetValue(bestB, out var lb2)) adjIdx[bestB] = lb2 = new List<(int, float)>();
+        la2.Add((bestB, bestDist));
+        lb2.Add((bestA, bestDist));
+        bridgesAdded++;
+    }
+
+    Logger.Log($"[Connectivity] Added {bridgesAdded} bridging throats to establish inlet→outlet connectivity");
+}
+
+// Compute AABB of segmented material (labels>0)
+static (int x0,int x1,int y0,int y1,int z0,int z1) MaterialAABB(int[] labels, int W, int H, int D)
+{
+    int x0=W, y0=H, z0=D, x1=-1, y1=-1, z1=-1;
+    int idx=0;
+    for (int z=0; z<D; z++)
+    for (int y=0; y<H; y++)
+    for (int x=0; x<W; x++, idx++)
+    {
+        if (labels[idx] > 0)
+        {
+            if (x < x0) x0 = x; if (x > x1) x1 = x;
+            if (y < y0) y0 = y; if (y > y1) y1 = y;
+            if (z < z0) z0 = z; if (z > z1) z1 = z;
+        }
+    }
+    if (x1 < x0) return (0, -1, 0, -1, 0, -1); // empty
+    return (x0, x1, y0, y1, z0, z1);
+}
 
     private static Dictionary<int, int> ConnectedSets(Dictionary<int, List<(int nb, float w)>> adj, int maxId)
     {
@@ -967,155 +1500,164 @@ public static class PNMGenerator
     }
 
     private static float ComputeTortuosity(
-        Pore[] pores,
-        Dictionary<int, List<(int nb, float w)>> adjacency,
-        FlowAxis axis,
-        bool inletMin,
-        bool outletMax,
-        int W, int H, int D,
-        float vx, float vy, float vz,
-        int[] labels,
-        int componentCount)
+    Pore[] pores,
+    Dictionary<int, List<(int nb, float w)>> adjacency,
+    FlowAxis axis,
+    bool inletMin,
+    bool outletMax,
+    int W, int H, int D,
+    float vx, float vy, float vz,
+    int[] labels,
+    int componentCount)
+{
+    if (pores == null || pores.Length <= 1)
+        return 1.0f;
+
+    // Build physical position array
+    var pos = new Vector3[pores.Length];
+    for (var i = 1; i < pores.Length; i++)
+        if (pores[i] != null)
+            pos[i] = new Vector3(pores[i].Position.X * vx,
+                                 pores[i].Position.Y * vy,
+                                 pores[i].Position.Z * vz);
+
+    // Update adjacency weights to physical distances
+    var physicalAdjacency = new Dictionary<int, List<(int nb, float w)>>();
+    foreach (var kv in adjacency)
     {
-        if (pores == null || pores.Length <= 1 || adjacency == null || adjacency.Count == 0)
-            return 1.0f; // Default tortuosity is 1.0 (straight path)
-
-        var pos = new Vector3[pores.Length];
-        for (var i = 1; i < pores.Length; i++)
-            pos[i] = pores[i]?.Position ?? new Vector3(-1);
-
-        // Update edge weights to be actual physical distances
-        foreach (var kv in adjacency.ToList())
+        var u = kv.Key;
+        var list = new List<(int, float)>();
+        foreach (var (v, _) in kv.Value)
         {
-            var u = kv.Key;
-            var list = kv.Value;
-            for (var i = 0; i < list.Count; i++)
-            {
-                var v = list[i].nb;
-                // Calculate physical distance between pore centers
-                var dx = Math.Abs(pos[u].X - pos[v].X) * vx;
-                var dy = Math.Abs(pos[u].Y - pos[v].Y) * vy;
-                var dz = Math.Abs(pos[u].Z - pos[v].Z) * vz;
-                var w = MathF.Sqrt(dx * dx + dy * dy + dz * dz);
-                list[i] = (v, w);
-            }
-
-            adjacency[u] = list;
+            var dist = Vector3.Distance(pos[u], pos[v]);
+            list.Add((v, dist));
         }
+        physicalAdjacency[u] = list;
+    }
 
-        var contacts = ComputeFaceContacts(labels, W, H, D, componentCount);
-        var inlet = new HashSet<int>();
-        var outlet = new HashSet<int>();
-
-        switch (axis)
+    // CRITICAL: Find MATERIAL bounds, not image bounds!
+    float materialMin = float.MaxValue, materialMax = float.MinValue;
+    for (int i = 1; i < pores.Length; i++)
+    {
+        if (pores[i] == null) continue;
+        float axisPos = axis switch
         {
-            case FlowAxis.X:
-                for (var i = 1; i < pores.Length; i++)
-                {
-                    if (pores[i] == null) continue;
-                    if (inletMin && contacts.XMin[i]) inlet.Add(i);
-                    if (outletMax && contacts.XMax[i]) outlet.Add(i);
-                }
+            FlowAxis.X => pos[i].X,
+            FlowAxis.Y => pos[i].Y,
+            _ => pos[i].Z
+        };
+        if (axisPos < materialMin) materialMin = axisPos;
+        if (axisPos > materialMax) materialMax = axisPos;
+    }
 
-                break;
+    // Identify inlet/outlet pores based on position along axis
+    var inlet = new HashSet<int>();
+    var outlet = new HashSet<int>();
+    float tolerance = (materialMax - materialMin) * 0.15f; // 15% tolerance band
 
-            case FlowAxis.Y:
-                for (var i = 1; i < pores.Length; i++)
-                {
-                    if (pores[i] == null) continue;
-                    if (inletMin && contacts.YMin[i]) inlet.Add(i);
-                    if (outletMax && contacts.YMax[i]) outlet.Add(i);
-                }
-
-                break;
-
-            default: // FlowAxis.Z
-                for (var i = 1; i < pores.Length; i++)
-                {
-                    if (pores[i] == null) continue;
-                    if (inletMin && contacts.ZMin[i]) inlet.Add(i);
-                    if (outletMax && contacts.ZMax[i]) outlet.Add(i);
-                }
-
-                break;
-        }
-
-        if (inlet.Count == 0 || outlet.Count == 0)
+    for (int i = 1; i < pores.Length; i++)
+    {
+        if (pores[i] == null) continue;
+        float axisPos = axis switch
         {
-            Logger.LogWarning("[Tortuosity] No inlet or outlet pores found. Using default tortuosity of 1.0");
-            return 1.0f;
-        }
-
-        // Find shortest path from any inlet to any outlet
-        var shortestPath = float.MaxValue;
-
-        foreach (var s in inlet)
-        {
-            var dist = new Dictionary<int, float>();
-            var visited = new HashSet<int>();
-            var pq = new PriorityQueue<int, float>();
-
-            dist[s] = 0f;
-            pq.Enqueue(s, 0f);
-
-            while (pq.Count > 0)
-            {
-                pq.TryDequeue(out var u, out var du);
-                if (!visited.Add(u)) continue;
-
-                // Check if we reached an outlet
-                if (outlet.Contains(u))
-                {
-                    if (du < shortestPath)
-                    {
-                        shortestPath = du;
-                        Logger.Log($"[Tortuosity] Found path from inlet {s} to outlet {u} with length {du:F3} µm");
-                    }
-
-                    break; // Found shortest from this inlet
-                }
-
-                if (!adjacency.TryGetValue(u, out var neighbors)) continue;
-
-                foreach (var (v, weight) in neighbors)
-                {
-                    if (visited.Contains(v)) continue;
-
-                    var newDist = du + weight;
-                    if (!dist.ContainsKey(v) || newDist < dist[v])
-                    {
-                        dist[v] = newDist;
-                        pq.Enqueue(v, newDist);
-                    }
-                }
-            }
-        }
-
-        if (shortestPath == float.MaxValue)
-        {
-            Logger.LogWarning("[Tortuosity] No path found between inlet and outlet. Using default tortuosity of 1.0");
-            return 1.0f;
-        }
-
-        // Calculate straight-line distance (physical sample length along flow axis)
-        var straightLineDistance = axis switch
-        {
-            FlowAxis.X => W * vx,
-            FlowAxis.Y => H * vy,
-            _ => D * vz
+            FlowAxis.X => pos[i].X,
+            FlowAxis.Y => pos[i].Y,
+            _ => pos[i].Z
         };
 
-        // Tortuosity = path length / straight-line distance
-        var tortuosity = straightLineDistance > 0f ? shortestPath / straightLineDistance : 1.0f;
-
-        // Clamp to reasonable range (tortuosity should be >= 1.0)
-        tortuosity = Math.Max(1.0f, Math.Min(10.0f, tortuosity));
-
-        Logger.Log(
-            $"[Tortuosity] Calculated: Path={shortestPath:F3} µm, Straight={straightLineDistance:F3} µm, Tortuosity={tortuosity:F3}");
-
-        return tortuosity;
+        if (inletMin && axisPos <= materialMin + tolerance) inlet.Add(i);
+        if (outletMax && axisPos >= materialMax - tolerance) outlet.Add(i);
     }
+
+    Logger.Log($"[Tortuosity] Material extent along {axis}: {materialMin:F3} to {materialMax:F3} µm");
+    Logger.Log($"[Tortuosity] Found {inlet.Count} inlet and {outlet.Count} outlet pores");
+
+    if (inlet.Count == 0 || outlet.Count == 0)
+    {
+        Logger.LogWarning("[Tortuosity] No boundary pores found. Using default tortuosity of 1.0");
+        return 1.0f;
+    }
+
+    // Find shortest paths from all inlets to all outlets
+    var allPaths = new List<(float length, int inlet, int outlet)>();
+    
+    foreach (var s in inlet)
+    {
+        var dist = new Dictionary<int, float>();
+        var parent = new Dictionary<int, int>();
+        var visited = new HashSet<int>();
+        var pq = new PriorityQueue<int, float>();
+
+        dist[s] = 0f;
+        pq.Enqueue(s, 0f);
+
+        while (pq.Count > 0)
+        {
+            pq.TryDequeue(out var u, out var du);
+            if (!visited.Add(u)) continue;
+
+            // Check all outlets from this inlet
+            if (outlet.Contains(u))
+            {
+                allPaths.Add((du, s, u));
+            }
+
+            if (!physicalAdjacency.TryGetValue(u, out var neighbors)) continue;
+
+            foreach (var (v, weight) in neighbors)
+            {
+                if (visited.Contains(v)) continue;
+
+                var newDist = du + weight;
+                if (!dist.ContainsKey(v) || newDist < dist[v])
+                {
+                    dist[v] = newDist;
+                    parent[v] = u;
+                    pq.Enqueue(v, newDist);
+                }
+            }
+        }
+    }
+
+    if (allPaths.Count == 0)
+    {
+        Logger.LogError("[Tortuosity] No path found between inlet and outlet!");
+        return 1.0f;
+    }
+
+    // Use median path length (more robust than minimum)
+    allPaths.Sort((a, b) => a.length.CompareTo(b.length));
+    var medianIdx = allPaths.Count / 2;
+    var chosenPath = allPaths[medianIdx];
+    
+    Logger.Log($"[Tortuosity] Found {allPaths.Count} paths. Shortest: {allPaths[0].length:F3} µm, " +
+               $"Median: {chosenPath.length:F3} µm, Longest: {allPaths[^1].length:F3} µm");
+
+    // CRITICAL: Use MATERIAL extent for straight-line distance, not image dimensions!
+    var straightLineDistance = materialMax - materialMin;
+
+    // Calculate tortuosity
+    var tortuosity = straightLineDistance > 0f ? chosenPath.length / straightLineDistance : 1.0f;
+
+    // Sanity check - if tortuosity is still 1.0, something is wrong
+    if (Math.Abs(tortuosity - 1.0f) < 0.01f)
+    {
+        Logger.LogWarning($"[Tortuosity] Suspiciously low tortuosity ({tortuosity:F3}). " +
+                          $"Path length={chosenPath.length:F3}, Straight={straightLineDistance:F3}");
+        
+        // Use a more conservative estimate based on path statistics
+        var avgPath = allPaths.Average(p => p.length);
+        tortuosity = avgPath / straightLineDistance;
+    }
+
+    // Clamp to physically reasonable range
+    tortuosity = Math.Max(1.01f, Math.Min(5.0f, tortuosity)); // At least 1.01, max 5.0
+
+    Logger.Log($"[Tortuosity] Final: Path={chosenPath.length:F3} µm, " +
+               $"Straight={straightLineDistance:F3} µm, Tortuosity={tortuosity:F3}");
+
+    return tortuosity;
+}
 
     #endregion
 

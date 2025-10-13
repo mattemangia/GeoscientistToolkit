@@ -15,6 +15,37 @@ public class VelocityTomographyGenerator : IDisposable
     }
 
     /// <summary>
+    ///     Applies a simple 3x3 box blur to smooth the velocity data and reduce checkerboarding.
+    /// </summary>
+    private float[] ApplyBoxBlur(float[] data, int width, int height)
+    {
+        var smoothedData = new float[data.Length];
+        for (var y = 0; y < height; y++)
+        {
+            for (var x = 0; x < width; x++)
+            {
+                float sum = 0;
+                int count = 0;
+                for (var j = -1; j <= 1; j++)
+                {
+                    for (var i = -1; i <= 1; i++)
+                    {
+                        var nx = x + i;
+                        var ny = y + j;
+                        if (nx >= 0 && nx < width && ny >= 0 && ny < height)
+                        {
+                            sum += data[ny * width + nx];
+                            count++;
+                        }
+                    }
+                }
+                smoothedData[y * width + x] = count > 0 ? sum / count : 0;
+            }
+        }
+        return smoothedData;
+    }
+
+    /// <summary>
     ///     Generates a 2D tomography image from a slice of the 3D simulation results.
     /// </summary>
     /// <param name="results">The simulation results containing the wave fields.</param>
@@ -88,6 +119,10 @@ public class VelocityTomographyGenerator : IDisposable
             velocities[flat_idx++] = (float)Math.Sqrt(vx * vx + vy * vy + vz * vz);
         }
 
+        // --- FIX START: Apply smoothing to reduce checkerboarding ---
+        var smoothedVelocities = ApplyBoxBlur(velocities, width, height);
+        // --- FIX END ---
+        
         // Step 2: Calculate min/max based on filtering AND visible material
         var minVelForScale = float.MaxValue;
         var maxVelForScale = float.MinValue;
@@ -114,7 +149,8 @@ public class VelocityTomographyGenerator : IDisposable
 
             if (shouldIncludeInScale)
             {
-                var v = velocities[flat_idx];
+                // --- FIX: Use smoothed velocities for scale calculation ---
+                var v = smoothedVelocities[flat_idx];
 
                 // FIX: Only include non-zero values in the scale calculation
                 // This prevents low velocities from being washed out by zeros
@@ -154,7 +190,8 @@ public class VelocityTomographyGenerator : IDisposable
         for (var x_slice = 0; x_slice < width; x_slice++)
         {
             var current_flat_idx = y_slice * width + x_slice;
-            var velocity = velocities[current_flat_idx];
+            // --- FIX: Use smoothed velocities for color generation ---
+            var velocity = smoothedVelocities[current_flat_idx];
 
             // Apply log scale if needed
             var velForColor = velocity;

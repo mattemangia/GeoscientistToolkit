@@ -198,102 +198,91 @@ public static class AbsolutePermeability
     }
 
     private static StressDependentGeometry ApplyConfiningPressureEffects(PNMDataset pnm, PermeabilityOptions options)
+{
+    var result = new StressDependentGeometry
     {
-        var result = new StressDependentGeometry
-        {
-            PoreRadii = new float[pnm.Pores.Count],
-            ThroatRadii = new float[pnm.Throats.Count],
-            ThroatOpen = new bool[pnm.Throats.Count]
-        };
+        PoreRadii = new float[pnm.Pores.Count],
+        ThroatRadii = new float[pnm.Throats.Count],
+        ThroatOpen = new bool[pnm.Throats.Count]
+    };
 
-        if (!options.UseConfiningPressure || options.ConfiningPressure <= 0)
-        {
-            // No confining pressure - use original radii
-            for (var i = 0; i < pnm.Pores.Count; i++)
-                result.PoreRadii[i] = pnm.Pores[i].Radius;
-
-            for (var i = 0; i < pnm.Throats.Count; i++)
-            {
-                result.ThroatRadii[i] = pnm.Throats[i].Radius;
-                result.ThroatOpen[i] = true;
-            }
-
-            result.PoreReduction = 0;
-            result.ThroatReduction = 0;
-            result.ClosedThroats = 0;
-            return result;
-        }
-
-        var P = options.ConfiningPressure; // MPa
-        var Pc = options.CriticalPressure; // MPa
-        var αp = options.PoreCompressibility; // 1/MPa
-        var αt = options.ThroatCompressibility; // 1/MPa
-
-        // Use a modified exponential model that prevents complete closure
-        // r(P) = r₀ * [exp(-α*P) * (1 - P/Pc) + (P/Pc) * r_min/r₀]
-        // This ensures radii approach r_min as P approaches Pc
-
-        var minRadiusFactor = 0.01f; // Minimum radius is 1% of original
-        var closureThreshold = 0.05f; // Throats close when radius < 5% of original
-
-        float poreSum = 0;
-        float throatSum = 0;
-        var closedCount = 0;
-
-        // Apply pressure effects to pores
+    if (!options.UseConfiningPressure || options.ConfiningPressure <= 0)
+    {
+        // No confining pressure - use original radii (IN MICROMETERS)
         for (var i = 0; i < pnm.Pores.Count; i++)
-        {
-            var r0 = pnm.Pores[i].Radius;
+            result.PoreRadii[i] = pnm.Pores[i].Radius;  // Already in μm
 
-            // Exponential reduction with minimum limit
-            var reduction = MathF.Exp(-αp * P);
-
-            // Ensure minimum radius
-            reduction = Math.Max(reduction, minRadiusFactor);
-
-            // Apply heterogeneity: smaller pores are more compressible
-            var sizeEffect =
-                1.0f + (1.0f - r0 / pnm.MaxPoreRadius) * 0.5f; // Up to 50% more compressible for small pores
-            reduction = MathF.Pow(reduction, sizeEffect);
-
-            result.PoreRadii[i] = r0 * reduction;
-            poreSum += 1 - reduction;
-        }
-
-        // Apply pressure effects to throats (more sensitive)
         for (var i = 0; i < pnm.Throats.Count; i++)
         {
-            var r0 = pnm.Throats[i].Radius;
-
-            // Exponential reduction
-            var reduction = MathF.Exp(-αt * P);
-
-            // Size-dependent compressibility (smaller throats close first)
-            var sizeEffect = 1.0f + (1.0f - r0 / pnm.MaxThroatRadius) * 1.0f; // Up to 100% more compressible
-            reduction = MathF.Pow(reduction, sizeEffect);
-
-            // Check for closure
-            if (reduction < closureThreshold)
-            {
-                result.ThroatRadii[i] = 0;
-                result.ThroatOpen[i] = false;
-                closedCount++;
-                throatSum += 1.0f; // Complete closure
-            }
-            else
-            {
-                result.ThroatRadii[i] = r0 * Math.Max(reduction, minRadiusFactor);
-                result.ThroatOpen[i] = true;
-                throatSum += 1 - reduction;
-            }
+            result.ThroatRadii[i] = pnm.Throats[i].Radius;  // Already in μm
+            result.ThroatOpen[i] = true;
         }
 
-        result.PoreReduction = poreSum / Math.Max(1, pnm.Pores.Count);
-        result.ThroatReduction = throatSum / Math.Max(1, pnm.Throats.Count);
-        result.ClosedThroats = closedCount;
-
+        result.PoreReduction = 0;
+        result.ThroatReduction = 0;
+        result.ClosedThroats = 0;
         return result;
     }
+
+    // Rest of the function remains the same, just remember radii are in μm
+    var P = options.ConfiningPressure;
+    var Pc = options.CriticalPressure;
+    var αp = options.PoreCompressibility;
+    var αt = options.ThroatCompressibility;
+
+    var minRadiusFactor = 0.01f;
+    var closureThreshold = 0.05f;
+
+    float poreSum = 0;
+    float throatSum = 0;
+    var closedCount = 0;
+
+    // Apply pressure effects to pores
+    for (var i = 0; i < pnm.Pores.Count; i++)
+    {
+        var r0 = pnm.Pores[i].Radius;  // In μm
+
+        var reduction = MathF.Exp(-αp * P);
+        reduction = Math.Max(reduction, minRadiusFactor);
+
+        var sizeEffect = 1.0f + (1.0f - r0 / pnm.MaxPoreRadius) * 0.5f;
+        reduction = MathF.Pow(reduction, sizeEffect);
+
+        result.PoreRadii[i] = r0 * reduction;  // Still in μm
+        poreSum += 1 - reduction;
+    }
+
+    // Apply pressure effects to throats
+    for (var i = 0; i < pnm.Throats.Count; i++)
+    {
+        var r0 = pnm.Throats[i].Radius;  // In μm
+
+        var reduction = MathF.Exp(-αt * P);
+        var sizeEffect = 1.0f + (1.0f - r0 / pnm.MaxThroatRadius) * 1.0f;
+        reduction = MathF.Pow(reduction, sizeEffect);
+
+        if (reduction < closureThreshold)
+        {
+            result.ThroatRadii[i] = 0;
+            result.ThroatOpen[i] = false;
+            closedCount++;
+            throatSum += 1.0f;
+        }
+        else
+        {
+            result.ThroatRadii[i] = r0 * Math.Max(reduction, minRadiusFactor);  // Still in μm
+            result.ThroatOpen[i] = true;
+            throatSum += 1 - reduction;
+        }
+    }
+
+    result.PoreReduction = poreSum / Math.Max(1, pnm.Pores.Count);
+    result.ThroatReduction = throatSum / Math.Max(1, pnm.Throats.Count);
+    result.ClosedThroats = closedCount;
+
+    return result;
+}
+
 
     private static void ValidateAndWarnResults()
     {
@@ -425,10 +414,13 @@ public static class AbsolutePermeability
                 !poreMap.TryGetValue(throat.Pore2ID, out var p2))
                 continue;
 
-            // Use stress-modified radii
-            var r_p1 = stressGeom.PoreRadii[pnm.Pores.IndexOf(p1)] * voxelSize_m;
-            var r_p2 = stressGeom.PoreRadii[pnm.Pores.IndexOf(p2)] * voxelSize_m;
-            var r_t = stressGeom.ThroatRadii[throatIdx] * voxelSize_m;
+            // CRITICAL FIX: Pore radii are ALREADY IN MICROMETERS, not voxels!
+            // Convert from μm to m directly (multiply by 1e-6, NOT by voxelSize_m)
+            var poreIndex1 = pnm.Pores.IndexOf(p1);
+            var poreIndex2 = pnm.Pores.IndexOf(p2);
+            var r_p1 = stressGeom.PoreRadii[poreIndex1] * 1e-6f;  // μm to m
+            var r_p2 = stressGeom.PoreRadii[poreIndex2] * 1e-6f;  // μm to m
+            var r_t = stressGeom.ThroatRadii[throatIdx] * 1e-6f;   // μm to m
 
             var conductance = CalculateConductanceWithStress(p1.Position, p2.Position,
                 r_p1, r_p2, r_t, engine, voxelSize_m, viscosity_PaS);
@@ -441,7 +433,8 @@ public static class AbsolutePermeability
 
             if (p1_inlet && !p2_inlet)
                 totalFlow += Math.Max(0, flowRate);
-            else if (!p1_inlet && p2_inlet) totalFlow += Math.Max(0, -flowRate);
+            else if (!p1_inlet && p2_inlet) 
+                totalFlow += Math.Max(0, -flowRate);
         }
 
         return totalFlow;
@@ -538,190 +531,282 @@ public static class AbsolutePermeability
 
         return distances;
     }
+    
+   private static (HashSet<int> inlets, HashSet<int> outlets, float L, float A)
+    GetBoundaryPores(PNMDataset pnm, FlowAxis axis)
+{
+    if (pnm.Pores.Count == 0)
+        return (new HashSet<int>(), new HashSet<int>(), 0, 0);
 
-    private static (HashSet<int> inlets, HashSet<int> outlets, float L, float A)
-        GetBoundaryPores(PNMDataset pnm, FlowAxis axis)
+    var voxelSize_m = pnm.VoxelSize * 1e-6f;
+    
+    // CRITICAL: Find the actual extent of PORES, not the image!
+    float minPos = float.MaxValue, maxPos = float.MinValue;
+    float minCross1 = float.MaxValue, maxCross1 = float.MinValue;
+    float minCross2 = float.MaxValue, maxCross2 = float.MinValue;
+    
+    foreach (var pore in pnm.Pores)
     {
-        if (pnm.Pores.Count == 0)
-            return (new HashSet<int>(), new HashSet<int>(), 0, 0);
-
-        var bounds = (
-            Min: new Vector3(
-                pnm.Pores.Min(p => p.Position.X),
-                pnm.Pores.Min(p => p.Position.Y),
-                pnm.Pores.Min(p => p.Position.Z)),
-            Max: new Vector3(
-                pnm.Pores.Max(p => p.Position.X),
-                pnm.Pores.Max(p => p.Position.Y),
-                pnm.Pores.Max(p => p.Position.Z))
-        );
-
-        var voxelSize_m = pnm.VoxelSize * 1e-6f;
-        var inlets = new HashSet<int>();
-        var outlets = new HashSet<int>();
-        float L = 0, A = 0;
-        var tolerance = 2.0f; // Tolerance in voxels
-
+        Vector3 pos = pore.Position;
+        
         switch (axis)
         {
             case FlowAxis.X:
-                L = (bounds.Max.X - bounds.Min.X) * voxelSize_m;
-                A = (bounds.Max.Y - bounds.Min.Y) * (bounds.Max.Z - bounds.Min.Z) * voxelSize_m * voxelSize_m;
-                foreach (var pore in pnm.Pores)
-                {
-                    if (pore.Position.X <= bounds.Min.X + tolerance) inlets.Add(pore.ID);
-                    if (pore.Position.X >= bounds.Max.X - tolerance) outlets.Add(pore.ID);
-                }
-
+                if (pos.X < minPos) minPos = pos.X;
+                if (pos.X > maxPos) maxPos = pos.X;
+                if (pos.Y < minCross1) minCross1 = pos.Y;
+                if (pos.Y > maxCross1) maxCross1 = pos.Y;
+                if (pos.Z < minCross2) minCross2 = pos.Z;
+                if (pos.Z > maxCross2) maxCross2 = pos.Z;
                 break;
-
             case FlowAxis.Y:
-                L = (bounds.Max.Y - bounds.Min.Y) * voxelSize_m;
-                A = (bounds.Max.X - bounds.Min.X) * (bounds.Max.Z - bounds.Min.Z) * voxelSize_m * voxelSize_m;
-                foreach (var pore in pnm.Pores)
-                {
-                    if (pore.Position.Y <= bounds.Min.Y + tolerance) inlets.Add(pore.ID);
-                    if (pore.Position.Y >= bounds.Max.Y - tolerance) outlets.Add(pore.ID);
-                }
-
+                if (pos.Y < minPos) minPos = pos.Y;
+                if (pos.Y > maxPos) maxPos = pos.Y;
+                if (pos.X < minCross1) minCross1 = pos.X;
+                if (pos.X > maxCross1) maxCross1 = pos.X;
+                if (pos.Z < minCross2) minCross2 = pos.Z;
+                if (pos.Z > maxCross2) maxCross2 = pos.Z;
                 break;
-
             case FlowAxis.Z:
-                L = (bounds.Max.Z - bounds.Min.Z) * voxelSize_m;
-                A = (bounds.Max.X - bounds.Min.X) * (bounds.Max.Y - bounds.Min.Y) * voxelSize_m * voxelSize_m;
-                foreach (var pore in pnm.Pores)
-                {
-                    if (pore.Position.Z <= bounds.Min.Z + tolerance) inlets.Add(pore.ID);
-                    if (pore.Position.Z >= bounds.Max.Z - tolerance) outlets.Add(pore.ID);
-                }
-
+                if (pos.Z < minPos) minPos = pos.Z;
+                if (pos.Z > maxPos) maxPos = pos.Z;
+                if (pos.X < minCross1) minCross1 = pos.X;
+                if (pos.X > maxCross1) maxCross1 = pos.X;
+                if (pos.Y < minCross2) minCross2 = pos.Y;
+                if (pos.Y > maxCross2) maxCross2 = pos.Y;
                 break;
         }
-
-        Logger.Log($"[Boundary Detection] Axis={axis}, L={L * 1e6:F1} μm, A={A * 1e12:F3} μm²");
-        Logger.Log($"[Boundary Detection] Found {inlets.Count} inlet pores, {outlets.Count} outlet pores");
-
-        return (inlets, outlets, L, A);
     }
-
-    private static (SparseMatrix, float[]) BuildLinearSystemWithStress(PNMDataset pnm, string engine,
-        HashSet<int> inlets, HashSet<int> outlets, float viscosity_cP, float voxelSize_m,
-        float inletPressure, float outletPressure, StressDependentGeometry stressGeom)
+    
+    // Calculate physical dimensions based on PORE extent
+    float L = (maxPos - minPos) * voxelSize_m;
+    float A = (maxCross1 - minCross1) * (maxCross2 - minCross2) * voxelSize_m * voxelSize_m;
+    
+    // Adaptive tolerance based on pore density
+    float axisLength = maxPos - minPos;
+    float tolerance = Math.Max(5.0f, axisLength * 0.1f); // 10% of material length
+    
+    var inlets = new HashSet<int>();
+    var outlets = new HashSet<int>();
+    
+    // First pass: try with initial tolerance
+    foreach (var pore in pnm.Pores)
     {
-        var maxId = pnm.Pores.Max(p => p.ID);
-        var poreMap = pnm.Pores.ToDictionary(p => p.ID);
-        var matrix = new SparseMatrix(maxId + 1);
-        var b = new float[maxId + 1];
-
-        var viscosity_PaS = viscosity_cP * 0.001f;
-
-        // Build conductance matrix with stress-modified geometry
-        for (var throatIdx = 0; throatIdx < pnm.Throats.Count; throatIdx++)
+        float pos = axis switch
         {
-            var throat = pnm.Throats[throatIdx];
-
-            // Skip closed throats
-            if (!stressGeom.ThroatOpen[throatIdx])
-                continue;
-
-            if (!poreMap.TryGetValue(throat.Pore1ID, out var p1) ||
-                !poreMap.TryGetValue(throat.Pore2ID, out var p2))
-                continue;
-
-            // Use stress-modified radii
-            var r_p1 = stressGeom.PoreRadii[pnm.Pores.IndexOf(p1)] * voxelSize_m;
-            var r_p2 = stressGeom.PoreRadii[pnm.Pores.IndexOf(p2)] * voxelSize_m;
-            var r_t = stressGeom.ThroatRadii[throatIdx] * voxelSize_m;
-
-            var conductance = CalculateConductanceWithStress(p1.Position, p2.Position,
-                r_p1, r_p2, r_t, engine, voxelSize_m, viscosity_PaS);
-
-            // Add to system matrix (off-diagonal negative, diagonal positive)
-            matrix.Add(p1.ID, p1.ID, conductance);
-            matrix.Add(p2.ID, p2.ID, conductance);
-            matrix.Add(p1.ID, p2.ID, -conductance);
-            matrix.Add(p2.ID, p1.ID, -conductance);
-        }
-
-        // Apply boundary conditions (Dirichlet)
-        foreach (var id in inlets)
-        {
-            matrix.ClearRow(id);
-            matrix.Set(id, id, 1.0f);
-            b[id] = inletPressure;
-        }
-
-        foreach (var id in outlets)
-        {
-            matrix.ClearRow(id);
-            matrix.Set(id, id, 1.0f);
-            b[id] = outletPressure;
-        }
-
-        return (matrix, b);
+            FlowAxis.X => pore.Position.X,
+            FlowAxis.Y => pore.Position.Y,
+            _ => pore.Position.Z
+        };
+        
+        if (pos <= minPos + tolerance) inlets.Add(pore.ID);
+        if (pos >= maxPos - tolerance) outlets.Add(pore.ID);
     }
+    
+    // If too few boundary pores, progressively expand tolerance
+    int minRequired = Math.Max(5, pnm.Pores.Count / 50); // At least 5 or 2% of pores
+    
+    while ((inlets.Count < minRequired || outlets.Count < minRequired) && tolerance < axisLength * 0.3f)
+    {
+        tolerance *= 1.5f; // Increase tolerance by 50%
+        inlets.Clear();
+        outlets.Clear();
+        
+        foreach (var pore in pnm.Pores)
+        {
+            float pos = axis switch
+            {
+                FlowAxis.X => pore.Position.X,
+                FlowAxis.Y => pore.Position.Y,
+                _ => pore.Position.Z
+            };
+            
+            if (pos <= minPos + tolerance) inlets.Add(pore.ID);
+            if (pos >= maxPos - tolerance) outlets.Add(pore.ID);
+        }
+        
+        Logger.Log($"[Boundary Detection] Expanded tolerance to {tolerance:F1} voxels");
+    }
+
+    Logger.Log($"[Boundary Detection] Pore extent along {axis}: {minPos:F1} to {maxPos:F1} voxels");
+    Logger.Log($"[Boundary Detection] Physical L={L * 1e6:F1} µm, A={A * 1e12:F3} µm²");
+    Logger.Log($"[Boundary Detection] Found {inlets.Count} inlet pores, {outlets.Count} outlet pores");
+
+    // Final check - ensure we have at least some boundary pores
+    if (inlets.Count == 0 || outlets.Count == 0)
+    {
+        Logger.LogWarning("[Boundary Detection] Failed to find boundary pores. Using extremes.");
+        
+        // Sort pores by position and take extremes
+        var sortedPores = pnm.Pores.OrderBy(p => axis switch
+        {
+            FlowAxis.X => p.Position.X,
+            FlowAxis.Y => p.Position.Y,
+            _ => p.Position.Z
+        }).ToList();
+        
+        int takeCount = Math.Max(5, sortedPores.Count / 10);
+        
+        for (int i = 0; i < takeCount && i < sortedPores.Count; i++)
+            inlets.Add(sortedPores[i].ID);
+        
+        for (int i = sortedPores.Count - takeCount; i < sortedPores.Count && i >= 0; i++)
+            outlets.Add(sortedPores[i].ID);
+    }
+
+    return (inlets, outlets, L, A);
+}
+private static float EstimateAveragePoreSpacing(PNMDataset pnm, FlowAxis axis)
+{
+    if (pnm.Pores.Count < 2) return 10.0f; // Default
+    
+    // Sample pore positions along the flow axis
+    var positions = axis switch
+    {
+        FlowAxis.X => pnm.Pores.Select(p => p.Position.X).OrderBy(x => x).ToList(),
+        FlowAxis.Y => pnm.Pores.Select(p => p.Position.Y).OrderBy(y => y).ToList(),
+        _ => pnm.Pores.Select(p => p.Position.Z).OrderBy(z => z).ToList()
+    };
+    
+    if (positions.Count < 2) return 10.0f;
+    
+    // Calculate average spacing between consecutive pores
+    float totalSpacing = 0;
+    int count = 0;
+    
+    for (int i = 1; i < positions.Count; i++)
+    {
+        var spacing = positions[i] - positions[i - 1];
+        if (spacing > 0.1f) // Ignore duplicates
+        {
+            totalSpacing += spacing;
+            count++;
+        }
+    }
+    
+    return count > 0 ? totalSpacing / count : 10.0f;
+}
+    private static (SparseMatrix, float[]) BuildLinearSystemWithStress(PNMDataset pnm, string engine,
+    HashSet<int> inlets, HashSet<int> outlets, float viscosity_cP, float voxelSize_m,
+    float inletPressure, float outletPressure, StressDependentGeometry stressGeom)
+{
+    var maxId = pnm.Pores.Max(p => p.ID);
+    var poreMap = pnm.Pores.ToDictionary(p => p.ID);
+    var matrix = new SparseMatrix(maxId + 1);
+    var b = new float[maxId + 1];
+
+    var viscosity_PaS = viscosity_cP * 0.001f;
+
+    // Build conductance matrix with stress-modified geometry
+    for (var throatIdx = 0; throatIdx < pnm.Throats.Count; throatIdx++)
+    {
+        var throat = pnm.Throats[throatIdx];
+
+        // Skip closed throats
+        if (!stressGeom.ThroatOpen[throatIdx])
+            continue;
+
+        if (!poreMap.TryGetValue(throat.Pore1ID, out var p1) ||
+            !poreMap.TryGetValue(throat.Pore2ID, out var p2))
+            continue;
+
+        // CRITICAL FIX: Radii are ALREADY IN MICROMETERS!
+        var poreIndex1 = pnm.Pores.IndexOf(p1);
+        var poreIndex2 = pnm.Pores.IndexOf(p2);
+        var r_p1 = stressGeom.PoreRadii[poreIndex1] * 1e-6f;  // μm to m
+        var r_p2 = stressGeom.PoreRadii[poreIndex2] * 1e-6f;  // μm to m
+        var r_t = stressGeom.ThroatRadii[throatIdx] * 1e-6f;   // μm to m
+
+        var conductance = CalculateConductanceWithStress(p1.Position, p2.Position,
+            r_p1, r_p2, r_t, engine, voxelSize_m, viscosity_PaS);
+
+        // Add to system matrix (off-diagonal negative, diagonal positive)
+        matrix.Add(p1.ID, p1.ID, conductance);
+        matrix.Add(p2.ID, p2.ID, conductance);
+        matrix.Add(p1.ID, p2.ID, -conductance);
+        matrix.Add(p2.ID, p1.ID, -conductance);
+    }
+
+    // Apply boundary conditions (Dirichlet)
+    foreach (var id in inlets)
+    {
+        matrix.ClearRow(id);
+        matrix.Set(id, id, 1.0f);
+        b[id] = inletPressure;
+    }
+
+    foreach (var id in outlets)
+    {
+        matrix.ClearRow(id);
+        matrix.Set(id, id, 1.0f);
+        b[id] = outletPressure;
+    }
+
+    return (matrix, b);
+}
 
     private static float CalculateConductanceWithStress(Vector3 pos1, Vector3 pos2,
-        float r_p1, float r_p2, float r_t, string engine, float voxelSize_m, float viscosity_PaS)
+    float r_p1, float r_p2, float r_t, string engine, float voxelSize_m, float viscosity_PaS)
+{
+    // r_p1, r_p2, r_t are already in meters
+    
+    // Physical distance between pore centers
+    var dx = Math.Abs(pos1.X - pos2.X) * voxelSize_m;
+    var dy = Math.Abs(pos1.Y - pos2.Y) * voxelSize_m;
+    var dz = Math.Abs(pos1.Z - pos2.Z) * voxelSize_m;
+    var length = MathF.Sqrt(dx * dx + dy * dy + dz * dz);
+
+    if (length < 1e-12f) length = 1e-12f;
+
+    // Check for closed throat
+    if (r_t <= 0) return 0;
+
+    // CRITICAL: Shape factor should be between 0.5-0.7 for real rocks
+    // Too low gives unrealistic permeabilities
+    const float SHAPE_FACTOR = 0.6f; // Adjusted for more realistic values
+    
+    // Hagen-Poiseuille conductance: g = (π*r^4) / (8*μ*L)
+    switch (engine)
     {
-        // Physical distance between pore centers
-        var dx = Math.Abs(pos1.X - pos2.X) * voxelSize_m;
-        var dy = Math.Abs(pos1.Y - pos2.Y) * voxelSize_m;
-        var dz = Math.Abs(pos1.Z - pos2.Z) * voxelSize_m;
-        var length = MathF.Sqrt(dx * dx + dy * dy + dz * dz);
+        case "Darcy":
+            return SHAPE_FACTOR * (float)(Math.PI * Math.Pow(r_t, 4)) / (8 * viscosity_PaS * length);
 
-        if (length < 1e-12f) length = 1e-12f; // Prevent division by zero
+        case "NavierStokes":
+            // Include entrance effects
+            var velocity = 1e-4f; // m/s
+            var density = 1000f; // kg/m³
+            var Re_throat = density * velocity * 2 * r_t / viscosity_PaS;
+            
+            var entranceLength = Math.Min(0.06f * Re_throat * r_t, 0.1f * length);
+            var constrictionFactor = 1.0f + 0.3f * MathF.Pow(r_t / Math.Max(r_p1, r_p2), 2);
+            
+            var effectiveLength = (length + entranceLength) * constrictionFactor;
+            return SHAPE_FACTOR * (float)(Math.PI * Math.Pow(r_t, 4)) / (8 * viscosity_PaS * effectiveLength);
 
-        // Check for closed throat
-        if (r_t <= 0) return 0;
+        case "LatticeBoltzmann":
+            // Include pore body resistance
+            var l_p1 = r_p1 * 0.5f;
+            var l_p2 = r_p2 * 0.5f;
+            var l_t = Math.Max(1e-12f, length - l_p1 - l_p2);
 
-        // Hagen-Poiseuille conductance: g = π*r^4 / (8*μ*L)
-        switch (engine)
-        {
-            case "Darcy":
-                // Simple model with stress-modified radius
-                return (float)(Math.PI * Math.Pow(r_t, 4)) / (8 * viscosity_PaS * length);
+            var g_p1 = SHAPE_FACTOR * (float)(Math.PI * Math.Pow(r_p1, 4)) / (8 * viscosity_PaS * Math.Max(l_p1, 1e-12f));
+            var g_p2 = SHAPE_FACTOR * (float)(Math.PI * Math.Pow(r_p2, 4)) / (8 * viscosity_PaS * Math.Max(l_p2, 1e-12f));
+            var g_t = SHAPE_FACTOR * (float)(Math.PI * Math.Pow(r_t, 4)) / (8 * viscosity_PaS * l_t);
 
-            case "NavierStokes":
-                // Include entrance effects with Reynolds number correction
-                // Account for constriction at throat entrance
-                var Re_throat = 2 * r_t * 1000 / viscosity_PaS; // Simplified Reynolds
-                var entranceLength = 0.06f * Re_throat * r_t;
+            // Junction losses (reduced for more realistic values)
+            var junctionLoss1 = 0.3f * MathF.Pow(Math.Max(0, 1 - r_t / r_p1), 2);
+            var junctionLoss2 = 0.3f * MathF.Pow(Math.Max(0, 1 - r_t / r_p2), 2);
 
-                // Additional resistance from pore-throat transitions
-                var constrictionFactor = 1.0f + 0.5f * MathF.Pow(r_t / Math.Min(r_p1, r_p2), 2);
+            var totalResistance = 1 / g_p1 * (1 + junctionLoss1) +
+                                  1 / g_t +
+                                  1 / g_p2 * (1 + junctionLoss2);
 
-                var effectiveLength = (length + entranceLength) * constrictionFactor;
-                return (float)(Math.PI * Math.Pow(r_t, 4)) / (8 * viscosity_PaS * effectiveLength);
+            return 1 / totalResistance;
 
-            case "LatticeBoltzmann":
-                // Include pore body resistance with stress-modified radii
-                // Pore bodies contribute to flow resistance
-                var l_p1 = r_p1 * 0.5f; // Effective pore body length
-                var l_p2 = r_p2 * 0.5f;
-                var l_t = Math.Max(1e-12f, length - l_p1 - l_p2);
-
-                // Individual conductances
-                var g_p1 = (float)(Math.PI * Math.Pow(r_p1, 4)) / (8 * viscosity_PaS * Math.Max(l_p1, 1e-12f));
-                var g_p2 = (float)(Math.PI * Math.Pow(r_p2, 4)) / (8 * viscosity_PaS * Math.Max(l_p2, 1e-12f));
-                var g_t = (float)(Math.PI * Math.Pow(r_t, 4)) / (8 * viscosity_PaS * l_t);
-
-                // Include junction losses at pore-throat interfaces
-                var junctionLoss1 = 0.5f * MathF.Pow(1 - r_t / r_p1, 2);
-                var junctionLoss2 = 0.5f * MathF.Pow(1 - r_t / r_p2, 2);
-
-                // Total resistance (resistances in series plus junction losses)
-                var totalResistance = 1 / g_p1 * (1 + junctionLoss1) +
-                                      1 / g_t +
-                                      1 / g_p2 * (1 + junctionLoss2);
-
-                return 1 / totalResistance;
-
-            default:
-                return (float)(Math.PI * Math.Pow(r_t, 4)) / (8 * viscosity_PaS * length);
-        }
+        default:
+            return SHAPE_FACTOR * (float)(Math.PI * Math.Pow(r_t, 4)) / (8 * viscosity_PaS * length);
     }
-
+}
     // --- CPU CONJUGATE GRADIENT SOLVER ---
 
     private static float[] SolveWithCpu(SparseMatrix A, float[] b, float tolerance = 1e-6f, int maxIterations = 5000)

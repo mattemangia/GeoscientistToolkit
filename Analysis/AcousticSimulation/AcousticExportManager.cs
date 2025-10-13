@@ -21,11 +21,13 @@ public class AcousticExportManager : IDisposable
 {
     private readonly ImGuiExportFileDialog _exportDialog;
     private readonly ProgressBarDialog _progressDialog;
+    private readonly ProgressBarDialog _waveformCreationDialog;
     private CalibrationData _calibrationData;
     private float _combinedFieldMaxVelocity;
     private float[,,] _damageField;
     private float _damageFieldMaxValue; // NEW: Store max value for denormalization
     private float[,,] _densityVolume;
+    private bool _isCreatingWaveformViewer;
     private bool _isWaveformViewerOpen;
     private SimulationParameters _parameters;
     private float _pixelSize;
@@ -45,6 +47,7 @@ public class AcousticExportManager : IDisposable
         _exportDialog = new ImGuiExportFileDialog("AcousticExport", "Export Acoustic Volume");
         _exportDialog.SetExtensions((".acvol", "Acoustic Volume Package"));
         _progressDialog = new ProgressBarDialog("Exporting Acoustic Volume");
+        _waveformCreationDialog = new ProgressBarDialog("Preparing Waveform Viewer");
     }
 
     public void Dispose()
@@ -90,15 +93,19 @@ public class AcousticExportManager : IDisposable
             _exportDialog.Open(defaultName);
         }
 
-        if (ImGui.Button("View Waveforms", new Vector2(-1, 0)))
+        if (_isCreatingWaveformViewer)
         {
-            if (_waveformViewer == null)
-            {
-                var tempDataset = CreateTemporaryDataset();
-                _waveformViewer = new WaveformViewer(tempDataset);
-            }
-
-            _isWaveformViewerOpen = true;
+            ImGui.BeginDisabled();
+            ImGui.Button("Loading Waveforms...", new Vector2(-1, 0));
+            ImGui.EndDisabled();
+        }
+        else
+        {
+            if (ImGui.Button("View Waveforms", new Vector2(-1, 0)))
+                if (_waveformViewer == null)
+                    _ = CreateWaveformViewerAsync();
+                else
+                    _isWaveformViewerOpen = true;
         }
 
         HandleDialogs();
@@ -121,6 +128,7 @@ public class AcousticExportManager : IDisposable
     private void HandleDialogs()
     {
         _progressDialog.Submit();
+        _waveformCreationDialog.Submit();
         if (_exportDialog.Submit())
             _ = ExportAcousticVolumeAsync(_exportDialog.SelectedPath);
     }
@@ -321,7 +329,8 @@ public class AcousticExportManager : IDisposable
     ///     Creates a ChunkedVolume from a float field, normalizing to byte range.
     ///     Returns the max value used for normalization (for later denormalization).
     /// </summary>
-    private ChunkedVolume CreateVolumeFromField(float[,,] field, bool isSigned, out float maxValue)
+    private ChunkedVolume CreateVolumeFromField(float[,,] field, bool isSigned, out float maxValue,
+        Action<float, string> progressCallback = null)
     {
         if (field == null)
         {
@@ -336,15 +345,22 @@ public class AcousticExportManager : IDisposable
         var volume = new ChunkedVolume(width, height, depth);
         volume.PixelSize = _pixelSize;
 
+        progressCallback?.Invoke(0.0f, "Scanning values...");
         // Find max for normalization using percentile to avoid source saturation
-        var allValues = new List<float>();
+        var allValues = new List<float>(field.Length);
         for (var z = 0; z < depth; z++)
-        for (var y = 0; y < height; y++)
-        for (var x = 0; x < width; x++)
-            allValues.Add(Math.Abs(field[x, y, z]));
+        {
+            for (var y = 0; y < height; y++)
+            for (var x = 0; x < width; x++)
+                allValues.Add(Math.Abs(field[x, y, z]));
 
+            if (z % 10 == 0) progressCallback?.Invoke(0.4f * z / depth, $"Scanning slice {z + 1}/{depth}");
+        }
+
+        progressCallback?.Invoke(0.4f, "Sorting values...");
         allValues.Sort();
 
+        progressCallback?.Invoke(0.5f, "Calculating percentile...");
         // Use 99.5th percentile as max to exclude extreme outliers (source voxels)
         var percentileIndex = (int)(allValues.Count * 0.995);
         maxValue = allValues[Math.Min(percentileIndex, allValues.Count - 1)];
@@ -355,6 +371,7 @@ public class AcousticExportManager : IDisposable
         Logger.Log($"[Export] Normalization: 0 to {maxValue:E3} (99.5th percentile)");
         Logger.Log($"[Export] Actual max: {allValues[allValues.Count - 1]:E3}");
 
+        progressCallback?.Invoke(0.6f, "Writing volume...");
         // Apply logarithmic compression for better visualization
         var useLogCompression = true;
 
@@ -377,6 +394,7 @@ public class AcousticExportManager : IDisposable
                     slice[idx++] = (byte)(normalized * 255);
                 }
 
+                if (z % 10 == 0) progressCallback?.Invoke(0.6f + 0.4f * z / depth, $"Writing slice {z + 1}/{depth}");
                 volume.WriteSliceZ(z, slice);
             }
         }
@@ -401,10 +419,12 @@ public class AcousticExportManager : IDisposable
                     slice[idx++] = (byte)(Math.Clamp(normalized, 0f, 1f) * 255);
                 }
 
+                if (z % 10 == 0) progressCallback?.Invoke(0.6f + 0.4f * z / depth, $"Writing slice {z + 1}/{depth}");
                 volume.WriteSliceZ(z, slice);
             }
         }
 
+        progressCallback?.Invoke(1.0f, "Complete.");
         return volume;
     }
 
@@ -494,7 +514,45 @@ public class AcousticExportManager : IDisposable
         File.WriteAllText(calibrationPath, json);
     }
 
-    private AcousticVolumeDataset CreateTemporaryDataset()
+    private async Task CreateWaveformViewerAsync()
+    {
+        if (_isCreatingWaveformViewer) return;
+
+        _isCreatingWaveformViewer = true;
+        _waveformCreationDialog.Open("Initializing waveform data...");
+
+        try
+        {
+            var tempDataset = await Task.Run(() =>
+            {
+                var progress =
+                    new Progress<(float, string)>(value => _waveformCreationDialog.Update(value.Item1, value.Item2));
+                return CreateTemporaryDataset(progress);
+            }, _waveformCreationDialog.CancellationToken);
+
+            _waveformCreationDialog.Update(1.0f, "Initializing viewer...");
+            await Task.Delay(100);
+
+            _waveformViewer = new WaveformViewer(tempDataset);
+            _isWaveformViewerOpen = true;
+            Logger.Log("[AcousticExportManager] Waveform viewer created successfully.");
+        }
+        catch (OperationCanceledException)
+        {
+            Logger.Log("[AcousticExportManager] Waveform viewer creation cancelled by user.");
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError($"[AcousticExportManager] Failed to create waveform viewer: {ex.Message}");
+        }
+        finally
+        {
+            _waveformCreationDialog.Close();
+            _isCreatingWaveformViewer = false;
+        }
+    }
+
+    private AcousticVolumeDataset CreateTemporaryDataset(IProgress<(float progress, string message)> progress = null)
     {
         var dataset = new AcousticVolumeDataset("Temp", Path.GetTempPath())
         {
@@ -508,7 +566,6 @@ public class AcousticExportManager : IDisposable
             ConfiningPressureMPa = _parameters.ConfiningPressureMPa,
             SourceFrequencyKHz = _parameters.SourceFrequencyKHz,
             SourceEnergyJ = _parameters.SourceEnergyJ,
-            TimeSeriesSnapshots = ConvertTimeSeriesForViewer(_results.TimeSeriesSnapshots),
             Calibration = _calibrationData,
             PWaveFieldMaxVelocity = _pWaveFieldMaxVelocity,
             SWaveFieldMaxVelocity = _sWaveFieldMaxVelocity,
@@ -516,15 +573,44 @@ public class AcousticExportManager : IDisposable
             DamageFieldMaxValue = _damageFieldMaxValue
         };
 
-        if (_results.WaveFieldVx != null)
-            dataset.PWaveField = CreateVolumeFromField(_results.WaveFieldVx, false, out _);
-        if (_results.WaveFieldVy != null)
-            dataset.SWaveField = CreateVolumeFromField(_results.WaveFieldVy, false, out _);
-        if (_results.WaveFieldVz != null)
-            dataset.CombinedWaveField = CreateVolumeFromField(_results.WaveFieldVz, false, out _);
-        if (_damageField != null)
-            dataset.DamageField = CreateVolumeFromField(_damageField, false, out _);
+        progress?.Report((0.05f, "Converting time series..."));
+        dataset.TimeSeriesSnapshots = ConvertTimeSeriesForViewer(_results.TimeSeriesSnapshots);
 
+        var pWaveStart = 0.1f;
+        var sWaveStart = 0.35f;
+        var combinedStart = 0.60f;
+        var damageStart = 0.85f;
+        var stepSize = 0.25f;
+
+        if (_results.WaveFieldVx != null)
+        {
+            Action<float, string> pWaveProgress = (p, m) =>
+                progress?.Report((pWaveStart + p * stepSize, $"P-Wave: {m}"));
+            dataset.PWaveField = CreateVolumeFromField(_results.WaveFieldVx, false, out _, pWaveProgress);
+        }
+
+        if (_results.WaveFieldVy != null)
+        {
+            Action<float, string> sWaveProgress = (p, m) =>
+                progress?.Report((sWaveStart + p * stepSize, $"S-Wave: {m}"));
+            dataset.SWaveField = CreateVolumeFromField(_results.WaveFieldVy, false, out _, sWaveProgress);
+        }
+
+        if (_results.WaveFieldVz != null)
+        {
+            Action<float, string> combinedProgress = (p, m) =>
+                progress?.Report((combinedStart + p * stepSize, $"Combined: {m}"));
+            dataset.CombinedWaveField = CreateVolumeFromField(_results.WaveFieldVz, false, out _, combinedProgress);
+        }
+
+        if (_damageField != null)
+        {
+            Action<float, string> damageProgress = (p, m) =>
+                progress?.Report((damageStart + p * (1.0f - damageStart), $"Damage: {m}"));
+            dataset.DamageField = CreateVolumeFromField(_damageField, false, out _, damageProgress);
+        }
+
+        progress?.Report((1.0f, "Finalizing dataset..."));
         return dataset;
     }
 
