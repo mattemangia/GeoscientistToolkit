@@ -45,10 +45,40 @@ public class NMRSimulation
         _depth = dataset.Depth;
         _random = new Random(config.RandomSeed);
 
-        Logger.Log($"[NMRSimulation] Initialized: {_width}x{_height}x{_depth}, {config.NumberOfWalkers} walkers");
-        Logger.Log($"[NMRSimulation] Pore shape factor: {config.PoreShapeFactor} (3.0=sphere, 2.0=cylinder, 1.0=slit)");
-    }
+        // UNIT VERIFICATION: Ensure voxel size is in reasonable range for meters
+        VerifyVoxelSizeUnits(config.VoxelSize);
 
+        Logger.Log($"[NMRSimulation] Initialized: {_width}x{_height}x{_depth}, {config.NumberOfWalkers} walkers");
+        Logger.Log($"[NMRSimulation] Voxel size: {config.VoxelSize:E6} m = {config.VoxelSize * 1e6f:F2} µm");
+        Logger.Log($"[NMRSimulation] Diffusion coefficient: {config.DiffusionCoefficient:E3} m²/s");
+        Logger.Log($"[NMRSimulation] Pore shape factor: {config.PoreShapeFactor:F1} (3.0=sphere, 2.0=cylinder, 1.0=slit)");
+    }
+    /// <summary>
+    /// Verify voxel size is in reasonable range for meters
+    /// </summary>
+    private static void VerifyVoxelSizeUnits(double voxelSize)
+    {
+        // Typical µCT: 0.1-100 µm = 1e-7 to 1e-4 meters
+        // Warning if outside 1nm to 1mm range
+        if (voxelSize < 1e-9)
+        {
+            Logger.LogError($"[NMRSimulation] Voxel size {voxelSize:E3} m is suspiciously small (< 1 nm). Unit error?");
+            throw new ArgumentException("Voxel size appears to be in wrong units. Expected meters.");
+        }
+        else if (voxelSize > 1e-3)
+        {
+            Logger.LogError($"[NMRSimulation] Voxel size {voxelSize:E3} m is suspiciously large (> 1 mm). Unit error?");
+            throw new ArgumentException("Voxel size appears to be in wrong units. Expected meters.");
+        }
+        else if (voxelSize < 1e-8)
+        {
+            Logger.LogWarning($"[NMRSimulation] Very small voxel size: {voxelSize * 1e9f:F2} nm. Verify units.");
+        }
+        else if (voxelSize > 1e-4)
+        {
+            Logger.LogWarning($"[NMRSimulation] Large voxel size: {voxelSize * 1e3f:F2} mm. NMR physics may not apply at this scale.");
+        }
+    }
     public async Task<NMRResults> RunSimulationAsync(IProgress<(float progress, string message)> progress)
     {
         var stopwatch = Stopwatch.StartNew();
@@ -315,57 +345,70 @@ public class NMRSimulation
     }
 
     private void ProcessSingleWalker(ref Walker walker, int stepSize)
+{
+    if (!walker.IsActive) return;
+
+    // Random direction
+    var direction = Directions[_random.Next(6)];
+
+    // Try to move
+    var newX = walker.X + direction.dx * stepSize;
+    var newY = walker.Y + direction.dy * stepSize;
+    var newZ = walker.Z + direction.dz * stepSize;
+
+    // Check boundaries
+    if (newX < 0 || newX >= _width || newY < 0 || newY >= _height || newZ < 0 || newZ >= _depth)
     {
-        if (!walker.IsActive) return;
-
-        // Random direction
-        var direction = Directions[_random.Next(6)];
-
-        // Try to move
-        var newX = walker.X + direction.dx * stepSize;
-        var newY = walker.Y + direction.dy * stepSize;
-        var newZ = walker.Z + direction.dz * stepSize;
-
-        // Check boundaries
-        if (newX < 0 || newX >= _width || newY < 0 || newY >= _height || newZ < 0 || newZ >= _depth)
-        {
-            // Hit boundary - reflect
-            newX = Math.Clamp(newX, 0, _width - 1);
-            newY = Math.Clamp(newY, 0, _height - 1);
-            newZ = Math.Clamp(newZ, 0, _depth - 1);
-        }
-
-        var materialID = _labelVolume[newX, newY, newZ];
-
-        if (materialID == _config.PoreMaterialID)
-        {
-            // Still in pore space - move freely
-            walker.X = newX;
-            walker.Y = newY;
-            walker.Z = newZ;
-        }
-        else
-        {
-            // Hit a MATRIX surface - apply relaxation
-            if (_config.MaterialRelaxivities.TryGetValue(materialID, out var relaxConfig))
-            {
-                // Surface relaxivity effect: M(t+dt) = M(t) * exp(-ρ * dt / a)
-                // where ρ is surface relaxivity (μm/s), a is voxel size (μm)
-                var relaxationRate = relaxConfig.SurfaceRelaxivity; // μm/s
-                var dt = _config.TimeStepMs * 1e-3; // convert to seconds
-                var voxelSizeUm = _config.VoxelSize * 1e6; // convert to μm
-                var relaxationFactor = Math.Exp(-relaxationRate * dt / voxelSizeUm);
-
-                walker.Magnetization *= relaxationFactor;
-
-                // Deactivate if magnetization drops too low
-                if (walker.Magnetization < 0.001)
-                    walker.IsActive = false;
-            }
-
-            // Don't move - walker stays at boundary
-        }
+        // Hit boundary - reflect
+        newX = Math.Clamp(newX, 0, _width - 1);
+        newY = Math.Clamp(newY, 0, _height - 1);
+        newZ = Math.Clamp(newZ, 0, _depth - 1);
     }
+
+    var materialID = _labelVolume[newX, newY, newZ];
+
+    if (materialID == _config.PoreMaterialID)
+    {
+        // Still in pore space - move freely
+        walker.X = newX;
+        walker.Y = newY;
+        walker.Z = newZ;
+    }
+    else
+    {
+        // Hit a MATRIX surface - apply relaxation
+        if (_config.MaterialRelaxivities.TryGetValue(materialID, out var relaxConfig))
+        {
+            // CRITICAL: Verify units in relaxation calculation
+            // Surface relaxivity effect: M(t+dt) = M(t) * exp(-ρ * dt / a)
+            // ρ: surface relaxivity (µm/s)
+            // dt: time step (s)
+            // a: voxel size (µm)
+            // Result: dimensionless exponent ✓
+            
+            var relaxationRate = relaxConfig.SurfaceRelaxivity; // µm/s
+            var dt = _config.TimeStepMs * 1e-3; // ms → s
+            var voxelSizeUm = _config.VoxelSize * 1e6; // m → µm
+            
+            // Sanity check
+            if (voxelSizeUm < 0.001 || voxelSizeUm > 10000)
+            {
+                Logger.LogError($"[NMRSimulation] Invalid voxel size in relaxation: {voxelSizeUm} µm from {_config.VoxelSize} m");
+            }
+            
+            var exponent = -relaxationRate * dt / voxelSizeUm;
+            var relaxationFactor = Math.Exp(exponent);
+
+            walker.Magnetization *= relaxationFactor;
+
+            // Deactivate if magnetization drops too low
+            if (walker.Magnetization < 0.001)
+                walker.IsActive = false;
+        }
+
+        // Don't move - walker stays at boundary
+    }
+}
 
     private void ComputeT2Distribution(NMRResults results)
     {

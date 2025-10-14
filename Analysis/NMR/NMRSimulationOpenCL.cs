@@ -55,12 +55,39 @@ public unsafe class NMRSimulationOpenCL : IDisposable
 
         _cl = CL.GetApi();
 
+        // UNIT VERIFICATION
+        VerifyVoxelSizeUnits(config.VoxelSize);
+
         Logger.Log($"[NMRSimulationOpenCL] Initializing GPU: {_width}x{_height}x{_depth}");
-        Logger.Log($"[NMRSimulationOpenCL] Pore shape factor: {config.PoreShapeFactor}");
+        Logger.Log($"[NMRSimulationOpenCL] Voxel size: {config.VoxelSize:E6} m = {config.VoxelSize * 1e6f:F2} µm");
+        Logger.Log($"[NMRSimulationOpenCL] Pore shape factor: {config.PoreShapeFactor:F1}");
 
         InitializeOpenCL();
     }
-
+    /// <summary>
+    /// Verify voxel size is in reasonable range for meters
+    /// </summary>
+    private static void VerifyVoxelSizeUnits(double voxelSize)
+    {
+        if (voxelSize < 1e-9)
+        {
+            Logger.LogError($"[NMRSimulationOpenCL] Voxel size {voxelSize:E3} m is suspiciously small (< 1 nm). Unit error?");
+            throw new ArgumentException("Voxel size appears to be in wrong units. Expected meters.");
+        }
+        else if (voxelSize > 1e-3)
+        {
+            Logger.LogError($"[NMRSimulationOpenCL] Voxel size {voxelSize:E3} m is suspiciously large (> 1 mm). Unit error?");
+            throw new ArgumentException("Voxel size appears to be in wrong units. Expected meters.");
+        }
+        else if (voxelSize < 1e-8)
+        {
+            Logger.LogWarning($"[NMRSimulationOpenCL] Very small voxel size: {voxelSize * 1e9f:F2} nm. Verify units.");
+        }
+        else if (voxelSize > 1e-4)
+        {
+            Logger.LogWarning($"[NMRSimulationOpenCL] Large voxel size: {voxelSize * 1e3f:F2} mm. NMR physics may not apply.");
+        }
+    }
     public void Dispose()
     {
         if (_disposed) return;
@@ -160,83 +187,119 @@ public unsafe class NMRSimulationOpenCL : IDisposable
     }
 
     private void InitializeOpenCL()
+{
+    // Get platform
+    uint numPlatforms = 0;
+    _cl.GetPlatformIDs(0, null, &numPlatforms);
+
+    if (numPlatforms == 0) throw new InvalidOperationException("No OpenCL platforms found");
+
+    var platforms = stackalloc nint[(int)numPlatforms];
+    _cl.GetPlatformIDs(numPlatforms, platforms, null);
+
+    var platform = platforms[0];
+
+    // Get GPU device
+    uint numDevices = 0;
+    _cl.GetDeviceIDs(platform, DeviceType.Gpu, 0, null, &numDevices);
+
+    if (numDevices == 0)
     {
-        // Get platform
-        uint numPlatforms = 0;
-        _cl.GetPlatformIDs(0, null, &numPlatforms);
-
-        if (numPlatforms == 0) throw new InvalidOperationException("No OpenCL platforms found");
-
-        var platforms = stackalloc nint[(int)numPlatforms];
-        _cl.GetPlatformIDs(numPlatforms, platforms, null);
-
-        var platform = platforms[0];
-
-        // Get GPU device
-        uint numDevices = 0;
-        _cl.GetDeviceIDs(platform, DeviceType.Gpu, 0, null, &numDevices);
-
-        if (numDevices == 0)
-        {
-            Logger.LogWarning("[NMRSimulationOpenCL] No GPU found, falling back to CPU");
-            _cl.GetDeviceIDs(platform, DeviceType.Cpu, 0, null, &numDevices);
-        }
-
-        var devices = stackalloc nint[(int)numDevices];
-        _cl.GetDeviceIDs(platform, numDevices > 0 ? DeviceType.Gpu : DeviceType.Cpu, numDevices, devices, null);
-
-        var device = devices[0];
-
-        LogDeviceInfo(device);
-
-        // Create context
-        int errorCode;
-        _context = _cl.CreateContext(null, 1, &device, null, null, &errorCode);
-        CheckError(errorCode, "CreateContext");
-
-        _commandQueue = _cl.CreateCommandQueue(_context, device, (CommandQueueProperties)0, &errorCode);
-        CheckError(errorCode, "CreateCommandQueue");
-
-        // Load and compile kernel
-        var kernelSource = LoadKernelSource();
-        var sourceBytes = Encoding.UTF8.GetBytes(kernelSource);
-        var lengths = stackalloc nuint[] { (nuint)sourceBytes.Length };
-
-        fixed (byte* sourcesPtr = sourceBytes)
-        {
-            var sources = stackalloc byte*[] { sourcesPtr };
-            _program = _cl.CreateProgramWithSource(_context, 1, sources, lengths, &errorCode);
-            CheckError(errorCode, "CreateProgramWithSource");
-        }
-
-        errorCode = _cl.BuildProgram(_program, 1, &device, (byte*)null, null, null);
-        if (errorCode != 0)
-        {
-            nuint logSize;
-            _cl.GetProgramBuildInfo(_program, device, (uint)ProgramBuildInfo.BuildLog, 0, null, &logSize);
-            var log = new byte[logSize];
-            fixed (byte* logPtr = log)
-            {
-                _cl.GetProgramBuildInfo(_program, device, (uint)ProgramBuildInfo.BuildLog, logSize, logPtr, null);
-            }
-
-            var buildLog = Encoding.UTF8.GetString(log);
-            Logger.LogError($"[NMRSimulationOpenCL] Build log:\n{buildLog}");
-            CheckError(errorCode, "BuildProgram");
-        }
-
-        // Create kernels
-        _kernelRandomWalk = _cl.CreateKernel(_program, "randomWalkStep", &errorCode);
-        CheckError(errorCode, "CreateKernel randomWalkStep");
-
-        _kernelCountActive = _cl.CreateKernel(_program, "countActiveWalkers", &errorCode);
-        CheckError(errorCode, "CreateKernel countActiveWalkers");
-
-        _kernelInitialize = _cl.CreateKernel(_program, "initializeWalkers", &errorCode);
-        CheckError(errorCode, "CreateKernel initializeWalkers");
-
-        Logger.Log("[NMRSimulationOpenCL] OpenCL initialized successfully");
+        Logger.LogWarning("[NMRSimulationOpenCL] No GPU found, falling back to CPU");
+        _cl.GetDeviceIDs(platform, DeviceType.Cpu, 0, null, &numDevices);
     }
+
+    var devices = stackalloc nint[(int)numDevices];
+    _cl.GetDeviceIDs(platform, numDevices > 0 ? DeviceType.Gpu : DeviceType.Cpu, numDevices, devices, null);
+
+    var device = devices[0];
+
+    LogDeviceInfo(device);
+
+    // Create context
+    int errorCode;
+    _context = _cl.CreateContext(null, 1, &device, null, null, &errorCode);
+    CheckError(errorCode, "CreateContext");
+
+    _commandQueue = _cl.CreateCommandQueue(_context, device, (CommandQueueProperties)0, &errorCode);
+    CheckError(errorCode, "CreateCommandQueue");
+
+    // Load and compile kernel
+    var kernelSource = LoadKernelSource();
+    
+    // CRITICAL: Ensure kernel source is not empty
+    if (string.IsNullOrEmpty(kernelSource))
+    {
+        throw new InvalidOperationException("Kernel source is empty!");
+    }
+    
+    Logger.Log($"[NMRSimulationOpenCL] Kernel source length: {kernelSource.Length} characters");
+    
+    var sourceBytes = Encoding.UTF8.GetBytes(kernelSource);
+    var lengths = stackalloc nuint[] { (nuint)sourceBytes.Length };
+
+    fixed (byte* sourcesPtr = sourceBytes)
+    {
+        var sources = stackalloc byte*[] { sourcesPtr };
+        _program = _cl.CreateProgramWithSource(_context, 1, sources, lengths, &errorCode);
+        CheckError(errorCode, "CreateProgramWithSource");
+    }
+
+    // Build with better error handling
+    Logger.Log("[NMRSimulationOpenCL] Compiling OpenCL kernels...");
+    errorCode = _cl.BuildProgram(_program, 1, &device, (byte*)null, null, null);
+
+    // ALWAYS retrieve build log (even on success, for warnings)
+    nuint logSize;
+    _cl.GetProgramBuildInfo(_program, device, (uint)ProgramBuildInfo.BuildLog, 0, null, &logSize);
+    
+    if (logSize > 1)  // > 1 because it includes null terminator
+    {
+        var log = new byte[logSize];
+        fixed (byte* logPtr = log)
+        {
+            _cl.GetProgramBuildInfo(_program, device, (uint)ProgramBuildInfo.BuildLog, logSize, logPtr, null);
+        }
+
+        var buildLog = Encoding.UTF8.GetString(log).TrimEnd('\0');
+        
+        if (!string.IsNullOrWhiteSpace(buildLog))
+        {
+            if (errorCode != 0)
+            {
+                Logger.LogError($"[NMRSimulationOpenCL] Build FAILED with error {errorCode}:");
+                Logger.LogError("=== OpenCL Build Log ===");
+                Logger.LogError(buildLog);
+                Logger.LogError("========================");
+                throw new InvalidOperationException($"OpenCL kernel compilation failed: {buildLog}");
+            }
+            else
+            {
+                Logger.LogWarning("[NMRSimulationOpenCL] Build warnings:");
+                Logger.LogWarning(buildLog);
+            }
+        }
+    }
+    
+    if (errorCode != 0)
+    {
+        throw new InvalidOperationException($"OpenCL BuildProgram failed with error {errorCode} (no build log available)");
+    }
+    
+    Logger.Log("[NMRSimulationOpenCL] Kernels compiled successfully");
+
+    // Create kernels
+    _kernelRandomWalk = _cl.CreateKernel(_program, "randomWalkStep", &errorCode);
+    CheckError(errorCode, "CreateKernel randomWalkStep");
+
+    _kernelCountActive = _cl.CreateKernel(_program, "countActiveWalkers", &errorCode);
+    CheckError(errorCode, "CreateKernel countActiveWalkers");
+
+    _kernelInitialize = _cl.CreateKernel(_program, "initializeWalkers", &errorCode);
+    CheckError(errorCode, "CreateKernel initializeWalkers");
+
+    Logger.Log("[NMRSimulationOpenCL] OpenCL initialized successfully");
+}
 
     private void UploadDataToGPU()
     {
@@ -303,7 +366,6 @@ public unsafe class NMRSimulationOpenCL : IDisposable
 
     private int InitializeWalkersGPU()
 {
-    // CRITICAL FIX: Calculate material bounds first (like CPU version)
     var (xMin, xMax, yMin, yMax, zMin, zMax) = CalculateMaterialBounds();
     
     if (xMin > xMax)
@@ -318,8 +380,7 @@ public unsafe class NMRSimulationOpenCL : IDisposable
     var materialVolume = materialWidth * materialHeight * materialDepth;
     
     Logger.Log($"[NMRSimulationOpenCL] Material extent: [{xMin},{xMax}] x [{yMin},{yMax}] x [{zMin},{zMax}]");
-    Logger.Log($"[NMRSimulationOpenCL] Material occupies {materialVolume:N0} / {_width * _height * _depth:N0} voxels " +
-               $"({100.0 * materialVolume / (_width * _height * _depth):F1}% of volume)");
+    Logger.Log($"[NMRSimulationOpenCL] Material occupies {materialVolume:N0} / {_width * _height * _depth:N0} voxels");
     
     var argIndex = 0;
     var bufLabelVolume = _bufferLabelVolume;
@@ -349,7 +410,6 @@ public unsafe class NMRSimulationOpenCL : IDisposable
     _cl.SetKernelArg(_kernelInitialize, (uint)argIndex++, sizeof(byte), &poreMaterialID);
     _cl.SetKernelArg(_kernelInitialize, (uint)argIndex++, sizeof(uint), &seed);
     _cl.SetKernelArg(_kernelInitialize, (uint)argIndex++, sizeof(int), &maxAttempts);
-    // NEW: Pass material bounds to kernel
     _cl.SetKernelArg(_kernelInitialize, (uint)argIndex++, sizeof(int), &xMin);
     _cl.SetKernelArg(_kernelInitialize, (uint)argIndex++, sizeof(int), &xMax);
     _cl.SetKernelArg(_kernelInitialize, (uint)argIndex++, sizeof(int), &yMin);
@@ -360,18 +420,30 @@ public unsafe class NMRSimulationOpenCL : IDisposable
     var zero = 0;
     _cl.EnqueueWriteBuffer(_commandQueue, bufValidWalkerCount, true, 0, sizeof(int), &zero, 0, null, null);
 
+    // FIXED: Explicit pointer casts
     var globalSize = (nuint)_config.NumberOfWalkers;
-    _cl.EnqueueNdrangeKernel(_commandQueue, _kernelInitialize, 1, null, &globalSize, null, 0, null, null);
+    var err = _cl.EnqueueNdrangeKernel(
+        _commandQueue, 
+        _kernelInitialize, 
+        1,                      // work_dim
+        (nuint*)null,           // global_work_offset
+        &globalSize,            // global_work_size
+        (nuint*)null,           // local_work_size
+        0,                      // num_events_in_wait_list
+        (nint*)null,            // event_wait_list
+        (nint*)null);           // event
+
+    if (err != 0)
+        throw new Exception($"EnqueueNdrangeKernel (initialize) failed: {err}");
+
     _cl.Finish(_commandQueue);
 
     var validCount = 0;
     _cl.EnqueueReadBuffer(_commandQueue, bufValidWalkerCount, true, 0, sizeof(int), &validCount, 0, null, null);
 
-    var efficiency = validCount / (float)_config.NumberOfWalkers * 100;
-    Logger.Log($"[NMRSimulationOpenCL] Initialized {validCount} walkers on GPU ({efficiency:F1}% success rate)");
+    Logger.Log($"[NMRSimulationOpenCL] Initialized {validCount} walkers on GPU");
     return validCount;
 }
-
 /// <summary>
 /// Calculate the bounding box of the selected material (same approach as PNM)
 /// </summary>
@@ -399,72 +471,85 @@ private (int xMin, int xMax, int yMin, int yMax, int zMin, int zMax) CalculateMa
     return (xMin, xMax, yMin, yMax, zMin, zMax);
 }
     private void SimulateRandomWalkGPU(NMRResults results, IProgress<(float, string)> progress)
+{
+    var stepSize = Math.Max(1,
+        (int)(Math.Sqrt(6.0 * _config.DiffusionCoefficient * _config.TimeStepMs * 1e-3) / _config.VoxelSize));
+    
+    var timeStepSec = (float)(_config.TimeStepMs * 1e-3);
+    var voxelSizeUm = (float)(_config.VoxelSize * 1e6);
+    var seed = (uint)_config.RandomSeed;
+
+    var bufLabelVolume = _bufferLabelVolume;
+    var bufWalkerPosX = _bufferWalkerPosX;
+    var bufWalkerPosY = _bufferWalkerPosY;
+    var bufWalkerPosZ = _bufferWalkerPosZ;
+    var bufWalkerMag = _bufferWalkerMag;
+    var bufWalkerActive = _bufferWalkerActive;
+    var bufMaterialRelaxivities = _bufferMaterialRelaxivities;
+    var bufStepMagnetization = _bufferStepMagnetization;
+    var numWalkers = _config.NumberOfWalkers;
+    var width = _width;
+    var height = _height;
+    var depth = _depth;
+    var poreMaterialID = _config.PoreMaterialID;
+
+    Logger.Log($"[NMRSimulationOpenCL] Step size: {stepSize} voxels, voxel size: {voxelSizeUm:F2} µm");
+
+    for (var step = 0; step < _config.NumberOfSteps; step++)
     {
-        var stepSize = Math.Max(1,
-            (int)(Math.Sqrt(6.0 * _config.DiffusionCoefficient * _config.TimeStepMs * 1e-3) / _config.VoxelSize));
-        var timeStepSec = (float)(_config.TimeStepMs * 1e-3);
-        var voxelSizeUm = (float)(_config.VoxelSize * 1e6); // Convert to μm for kernel
-        var seed = (uint)_config.RandomSeed;
-
-        var bufLabelVolume = _bufferLabelVolume;
-        var bufWalkerPosX = _bufferWalkerPosX;
-        var bufWalkerPosY = _bufferWalkerPosY;
-        var bufWalkerPosZ = _bufferWalkerPosZ;
-        var bufWalkerMag = _bufferWalkerMag;
-        var bufWalkerActive = _bufferWalkerActive;
-        var bufMaterialRelaxivities = _bufferMaterialRelaxivities;
-        var bufStepMagnetization = _bufferStepMagnetization;
-        var numWalkers = _config.NumberOfWalkers;
-        var width = _width;
-        var height = _height;
-        var depth = _depth;
-        var poreMaterialID = _config.PoreMaterialID;
-
-        Logger.Log($"[NMRSimulationOpenCL] Step size: {stepSize} voxels, voxel size: {voxelSizeUm:F2} μm");
-
-        for (var step = 0; step < _config.NumberOfSteps; step++)
+        if (step % 100 == 0)
         {
-            if (step % 100 == 0)
-            {
-                var progressPercent = 0.15f + 0.7f * (step / (float)_config.NumberOfSteps);
-                progress?.Report((progressPercent, $"GPU step {step}/{_config.NumberOfSteps}..."));
-            }
-
-            var zero = 0f;
-            _cl.EnqueueWriteBuffer(_commandQueue, bufStepMagnetization, true, 0, sizeof(float), &zero, 0, null, null);
-
-            var argIndex = 0;
-            _cl.SetKernelArg(_kernelRandomWalk, (uint)argIndex++, (nuint)sizeof(nint), &bufLabelVolume);
-            _cl.SetKernelArg(_kernelRandomWalk, (uint)argIndex++, (nuint)sizeof(nint), &bufWalkerPosX);
-            _cl.SetKernelArg(_kernelRandomWalk, (uint)argIndex++, (nuint)sizeof(nint), &bufWalkerPosY);
-            _cl.SetKernelArg(_kernelRandomWalk, (uint)argIndex++, (nuint)sizeof(nint), &bufWalkerPosZ);
-            _cl.SetKernelArg(_kernelRandomWalk, (uint)argIndex++, (nuint)sizeof(nint), &bufWalkerMag);
-            _cl.SetKernelArg(_kernelRandomWalk, (uint)argIndex++, (nuint)sizeof(nint), &bufWalkerActive);
-            _cl.SetKernelArg(_kernelRandomWalk, (uint)argIndex++, (nuint)sizeof(nint), &bufMaterialRelaxivities);
-            _cl.SetKernelArg(_kernelRandomWalk, (uint)argIndex++, (nuint)sizeof(nint), &bufStepMagnetization);
-            _cl.SetKernelArg(_kernelRandomWalk, (uint)argIndex++, sizeof(int), &numWalkers);
-            _cl.SetKernelArg(_kernelRandomWalk, (uint)argIndex++, sizeof(int), &width);
-            _cl.SetKernelArg(_kernelRandomWalk, (uint)argIndex++, sizeof(int), &height);
-            _cl.SetKernelArg(_kernelRandomWalk, (uint)argIndex++, sizeof(int), &depth);
-            _cl.SetKernelArg(_kernelRandomWalk, (uint)argIndex++, sizeof(int), &stepSize);
-            _cl.SetKernelArg(_kernelRandomWalk, (uint)argIndex++, sizeof(float), &timeStepSec);
-            _cl.SetKernelArg(_kernelRandomWalk, (uint)argIndex++, sizeof(float), &voxelSizeUm);
-            _cl.SetKernelArg(_kernelRandomWalk, (uint)argIndex++, sizeof(byte), &poreMaterialID);
-            _cl.SetKernelArg(_kernelRandomWalk, (uint)argIndex++, sizeof(uint), &seed);
-            _cl.SetKernelArg(_kernelRandomWalk, (uint)argIndex++, sizeof(int), &step);
-
-            var globalSize = (nuint)numWalkers;
-            _cl.EnqueueNdrangeKernel(_commandQueue, _kernelRandomWalk, 1, null, &globalSize, null, 0, null, null);
-
-            var totalMag = 0f;
-            _cl.EnqueueReadBuffer(_commandQueue, bufStepMagnetization, true, 0, sizeof(float), &totalMag, 0, null,
-                null);
-
-            results.Magnetization[step] = totalMag / results.NumberOfWalkers;
+            var progressPercent = 0.15f + 0.7f * (step / (float)_config.NumberOfSteps);
+            progress?.Report((progressPercent, $"GPU step {step}/{_config.NumberOfSteps}..."));
         }
 
-        _cl.Finish(_commandQueue);
+        var zero = 0f;
+        _cl.EnqueueWriteBuffer(_commandQueue, bufStepMagnetization, true, 0, sizeof(float), &zero, 0, null, null);
+
+        var argIndex = 0;
+        _cl.SetKernelArg(_kernelRandomWalk, (uint)argIndex++, (nuint)sizeof(nint), &bufLabelVolume);
+        _cl.SetKernelArg(_kernelRandomWalk, (uint)argIndex++, (nuint)sizeof(nint), &bufWalkerPosX);
+        _cl.SetKernelArg(_kernelRandomWalk, (uint)argIndex++, (nuint)sizeof(nint), &bufWalkerPosY);
+        _cl.SetKernelArg(_kernelRandomWalk, (uint)argIndex++, (nuint)sizeof(nint), &bufWalkerPosZ);
+        _cl.SetKernelArg(_kernelRandomWalk, (uint)argIndex++, (nuint)sizeof(nint), &bufWalkerMag);
+        _cl.SetKernelArg(_kernelRandomWalk, (uint)argIndex++, (nuint)sizeof(nint), &bufWalkerActive);
+        _cl.SetKernelArg(_kernelRandomWalk, (uint)argIndex++, (nuint)sizeof(nint), &bufMaterialRelaxivities);
+        _cl.SetKernelArg(_kernelRandomWalk, (uint)argIndex++, (nuint)sizeof(nint), &bufStepMagnetization);
+        _cl.SetKernelArg(_kernelRandomWalk, (uint)argIndex++, sizeof(int), &numWalkers);
+        _cl.SetKernelArg(_kernelRandomWalk, (uint)argIndex++, sizeof(int), &width);
+        _cl.SetKernelArg(_kernelRandomWalk, (uint)argIndex++, sizeof(int), &height);
+        _cl.SetKernelArg(_kernelRandomWalk, (uint)argIndex++, sizeof(int), &depth);
+        _cl.SetKernelArg(_kernelRandomWalk, (uint)argIndex++, sizeof(int), &stepSize);
+        _cl.SetKernelArg(_kernelRandomWalk, (uint)argIndex++, sizeof(float), &timeStepSec);
+        _cl.SetKernelArg(_kernelRandomWalk, (uint)argIndex++, sizeof(float), &voxelSizeUm);
+        _cl.SetKernelArg(_kernelRandomWalk, (uint)argIndex++, sizeof(byte), &poreMaterialID);
+        _cl.SetKernelArg(_kernelRandomWalk, (uint)argIndex++, sizeof(uint), &seed);
+        _cl.SetKernelArg(_kernelRandomWalk, (uint)argIndex++, sizeof(int), &step);
+
+        // FIXED: Explicit pointer casts for null parameters
+        var globalSize = (nuint)numWalkers;
+        var err = _cl.EnqueueNdrangeKernel(
+            _commandQueue, 
+            _kernelRandomWalk, 
+            1,                      // work_dim
+            (nuint*)null,           // global_work_offset (explicitly typed)
+            &globalSize,            // global_work_size
+            (nuint*)null,           // local_work_size (explicitly typed)
+            0,                      // num_events_in_wait_list
+            (nint*)null,            // event_wait_list (explicitly typed)
+            (nint*)null);           // event (explicitly typed)
+
+        if (err != 0)
+            throw new Exception($"EnqueueNdrangeKernel failed at step {step}: {err}");
+
+        var totalMag = 0f;
+        _cl.EnqueueReadBuffer(_commandQueue, bufStepMagnetization, true, 0, sizeof(float), &totalMag, 0, null, null);
+
+        results.Magnetization[step] = totalMag / results.NumberOfWalkers;
     }
+
+    _cl.Finish(_commandQueue);
+}
 
     private void ComputeT2Distribution(NMRResults results)
     {
@@ -605,12 +690,14 @@ private (int xMin, int xMax, int yMin, int yMax, int zMin, int zMax) CalculateMa
         results.T2PeakValue = results.T2HistogramBins[maxIndex];
     }
 
-    private string LoadKernelSource()
-    {
-        // FIXED: Correct physics in OpenCL kernel
-        return @"
-// NMR Random Walk Kernel for OpenCL
-// FIXED: Correct surface relaxation physics
+  private string LoadKernelSource()
+{
+    return @"
+// NMR Random Walk Kernel for OpenCL 1.2
+// FIXED: Use OpenCL 1.2 compatible atomic operations
+
+// Enable required extensions for OpenCL 1.2
+#pragma OPENCL EXTENSION cl_khr_global_int32_base_atomics : enable
 
 uint xorshift(uint state) {
     state ^= state << 13;
@@ -632,6 +719,26 @@ uchar getLabelValue(
     return labelVolume[index];
 }
 
+// OpenCL 1.2 compatible atomic float addition
+// Since OpenCL 1.2 doesn't have atomic_add for floats, we use atomic_cmpxchg
+inline void atomic_add_float(__global float* addr, float val)
+{
+    union {
+        unsigned int u32;
+        float f32;
+    } next, expected, current;
+    
+    current.f32 = *addr;
+    do {
+        expected.f32 = current.f32;
+        next.f32 = expected.f32 + val;
+        current.u32 = atomic_cmpxchg((__global unsigned int*)addr, expected.u32, next.u32);
+    } while (current.u32 != expected.u32);
+}
+
+// ============================================================================
+// MAIN RANDOM WALK KERNEL
+// ============================================================================
 __kernel void randomWalkStep(
     __global const uchar* labelVolume,
     __global float* walkerPositionsX,
@@ -687,15 +794,12 @@ __kernel void randomWalkStep(
     uchar materialID = getLabelValue(labelVolume, newX, newY, newZ, width, height, depth);
     
     if (materialID == poreMaterialID) {
-        // Still in pore space - move freely
         walkerPositionsX[walkerId] = (float)newX;
         walkerPositionsY[walkerId] = (float)newY;
         walkerPositionsZ[walkerId] = (float)newZ;
-    } else {
-        // Hit MATRIX surface - apply relaxation
-        // FIXED PHYSICS: M(t+dt) = M(t) * exp(-ρ * dt / a)
-        // where ρ is in μm/s, dt in s, a in μm
-        float surfaceRelaxivity = materialRelaxivities[materialID]; // μm/s
+    } 
+    else {
+        float surfaceRelaxivity = materialRelaxivities[materialID];
         float relaxationRate = surfaceRelaxivity * timeStepSec / voxelSizeUm;
         float relaxationFactor = exp(-relaxationRate);
         
@@ -708,26 +812,14 @@ __kernel void randomWalkStep(
     }
     
     if (walkerActive[walkerId] != 0) {
-        atomic_add_global(&stepMagnetization[0], walkerMagnetization[walkerId]);
+        // FIXED: Use OpenCL 1.2 compatible atomic float addition
+        atomic_add_float(&stepMagnetization[0], walkerMagnetization[walkerId]);
     }
 }
 
-__kernel void countActiveWalkers(
-    __global const uchar* walkerActive,
-    __global int* activeCount,
-    const int numWalkers)
-{
-    int walkerId = get_global_id(0);
-    
-    if (walkerId >= numWalkers) {
-        return;
-    }
-    
-    if (walkerActive[walkerId] != 0) {
-        atomic_add_global(activeCount, 1);
-    }
-}
-
+// ============================================================================
+// WALKER INITIALIZATION KERNEL
+// ============================================================================
 __kernel void initializeWalkers(
     __global const uchar* labelVolume,
     __global float* walkerPositionsX,
@@ -742,7 +834,7 @@ __kernel void initializeWalkers(
     const uchar poreMaterialID,
     const uint randomSeed,
     const int maxAttempts,
-    const int xMin,      // NEW: Material bounds
+    const int xMin,
     const int xMax,
     const int yMin,
     const int yMax,
@@ -756,13 +848,11 @@ __kernel void initializeWalkers(
     int attempts = 0;
     bool found = false;
     
-    // CRITICAL FIX: Calculate material dimensions
     int matWidth = xMax - xMin + 1;
     int matHeight = yMax - yMin + 1;
     int matDepth = zMax - zMin + 1;
     
     while (attempts < maxAttempts && !found) {
-        // Generate random position WITHIN material bounds
         rngState = xorshift(rngState);
         int x = xMin + (rngState % matWidth);
         
@@ -780,7 +870,8 @@ __kernel void initializeWalkers(
             walkerPositionsZ[walkerId] = (float)z;
             walkerMagnetization[walkerId] = 1.0f;
             walkerActive[walkerId] = 1;
-            atomic_add_global(validWalkerCount, 1);
+            // FIXED: Use OpenCL 1.2 compatible atomic int addition
+            atom_inc((__global int*)validWalkerCount);
             found = true;
         }
         
@@ -792,9 +883,28 @@ __kernel void initializeWalkers(
         walkerMagnetization[walkerId] = 0.0f;
     }
 }
-";
-    }
 
+// ============================================================================
+// ACTIVE WALKER COUNTER
+// ============================================================================
+__kernel void countActiveWalkers(
+    __global const uchar* walkerActive,
+    __global int* activeCount,
+    const int numWalkers)
+{
+    int walkerId = get_global_id(0);
+    
+    if (walkerId >= numWalkers) {
+        return;
+    }
+    
+    if (walkerActive[walkerId] != 0) {
+        // FIXED: Use OpenCL 1.2 compatible atomic int addition
+        atom_inc((__global int*)activeCount);
+    }
+}
+";
+}
     private void LogDeviceInfo(nint device)
     {
         var name = GetDeviceInfoString(device, DeviceInfo.Name);
@@ -820,9 +930,63 @@ __kernel void initializeWalkers(
     }
 
     private void CheckError(int errorCode, string operation)
+{
+    if (errorCode != 0)
     {
-        if (errorCode != 0) throw new Exception($"OpenCL error in {operation}: {errorCode}");
+        var errorName = errorCode switch
+        {
+            -1 => "CL_DEVICE_NOT_FOUND",
+            -2 => "CL_DEVICE_NOT_AVAILABLE",
+            -3 => "CL_COMPILER_NOT_AVAILABLE",
+            -4 => "CL_MEM_OBJECT_ALLOCATION_FAILURE",
+            -5 => "CL_OUT_OF_RESOURCES",
+            -6 => "CL_OUT_OF_HOST_MEMORY",
+            -7 => "CL_PROFILING_INFO_NOT_AVAILABLE",
+            -8 => "CL_MEM_COPY_OVERLAP",
+            -9 => "CL_IMAGE_FORMAT_MISMATCH",
+            -10 => "CL_IMAGE_FORMAT_NOT_SUPPORTED",
+            -11 => "CL_BUILD_PROGRAM_FAILURE",
+            -12 => "CL_MAP_FAILURE",
+            -30 => "CL_INVALID_VALUE",
+            -31 => "CL_INVALID_DEVICE_TYPE",
+            -32 => "CL_INVALID_PLATFORM",
+            -33 => "CL_INVALID_DEVICE",
+            -34 => "CL_INVALID_CONTEXT",
+            -35 => "CL_INVALID_QUEUE_PROPERTIES",
+            -36 => "CL_INVALID_COMMAND_QUEUE",
+            -37 => "CL_INVALID_HOST_PTR",
+            -38 => "CL_INVALID_MEM_OBJECT",
+            -39 => "CL_INVALID_IMAGE_FORMAT_DESCRIPTOR",
+            -40 => "CL_INVALID_IMAGE_SIZE",
+            -41 => "CL_INVALID_SAMPLER",
+            -42 => "CL_INVALID_BINARY",
+            -43 => "CL_INVALID_BUILD_OPTIONS",
+            -44 => "CL_INVALID_PROGRAM",
+            -45 => "CL_INVALID_PROGRAM_EXECUTABLE",
+            -46 => "CL_INVALID_KERNEL_NAME",
+            -47 => "CL_INVALID_KERNEL_DEFINITION",
+            -48 => "CL_INVALID_KERNEL",
+            -49 => "CL_INVALID_ARG_INDEX",
+            -50 => "CL_INVALID_ARG_VALUE",
+            -51 => "CL_INVALID_ARG_SIZE",
+            -52 => "CL_INVALID_KERNEL_ARGS",
+            -53 => "CL_INVALID_WORK_DIMENSION",
+            -54 => "CL_INVALID_WORK_GROUP_SIZE",
+            -55 => "CL_INVALID_WORK_ITEM_SIZE",
+            -56 => "CL_INVALID_GLOBAL_OFFSET",
+            -57 => "CL_INVALID_EVENT_WAIT_LIST",
+            -58 => "CL_INVALID_EVENT",
+            -59 => "CL_INVALID_OPERATION",
+            -60 => "CL_INVALID_GL_OBJECT",
+            -61 => "CL_INVALID_BUFFER_SIZE",
+            -62 => "CL_INVALID_MIP_LEVEL",
+            -63 => "CL_INVALID_GLOBAL_WORK_SIZE",
+            _ => $"UNKNOWN_ERROR_{errorCode}"
+        };
+        
+        throw new Exception($"OpenCL error in {operation}: {errorCode} ({errorName})");
     }
+}
 
     private int EstimateSpeedup()
     {

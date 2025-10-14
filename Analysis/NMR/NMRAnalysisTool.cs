@@ -111,38 +111,88 @@ public class NMRAnalysisTool : IDatasetTools
         if (_exportDialog.Submit()) HandleExport(_exportDialog.SelectedPath);
     }
 
-    private void InitializeDefaultConfig(CtImageStackDataset dataset)
+   private void InitializeDefaultConfig(CtImageStackDataset dataset)
+{
+    // FIXED: Proper unit conversion without modifying CtImageStackDataset
+    float voxelSizeMeters = ConvertToMeters(dataset.PixelSize, dataset.Unit);
+    float voxelSizeUm = voxelSizeMeters * 1e6f;
+    
+    _config.VoxelSize = voxelSizeMeters; // Store in METERS (SI base unit)
+
+    Logger.Log($"[NMRAnalysisTool] Voxel size: {voxelSizeUm:F2} µm ({dataset.PixelSize} {dataset.Unit})");
+
+    // Warn if voxel size is unusual
+    if (voxelSizeUm < 0.01f)
+        Logger.LogWarning($"[NMRAnalysisTool] Very small voxel size ({voxelSizeUm:F4} µm). Check units!");
+    else if (voxelSizeUm > 1000f)
+        Logger.LogWarning($"[NMRAnalysisTool] Very large voxel size ({voxelSizeUm:F1} µm). NMR may not be appropriate for mm-scale pores.");
+
+    _config.MaterialRelaxivities.Clear();
+
+    // Add default relaxivities ONLY for non-pore materials
+    foreach (var material in dataset.Materials)
     {
-        // FIXED: Use proper unit conversion
-        _config.VoxelSize = dataset.GetPixelSizeInMeters();
-        var voxelSizeUm = dataset.GetPixelSizeInMicrometers();
+        if (material.ID == 0) continue; // Skip exterior
 
-        Logger.Log($"[NMRAnalysisTool] Voxel size: {voxelSizeUm:F2} µm ({dataset.PixelSize} {dataset.Unit})");
-
-        // Warn if voxel size is unusual
-        if (voxelSizeUm < 0.01)
-            Logger.LogWarning($"[NMRAnalysisTool] Very small voxel size ({voxelSizeUm:F4} µm). Check units!");
-        else if (voxelSizeUm > 1000)
-            Logger.LogWarning(
-                $"[NMRAnalysisTool] Very large voxel size ({voxelSizeUm:F1} µm). Pores at mm scale - consider if NMR is appropriate.");
-
-        _config.MaterialRelaxivities.Clear();
-
-        // Add default relaxivities ONLY for non-pore materials
-        foreach (var material in dataset.Materials)
+        // Initialize all materials but mark which is pore space
+        _config.MaterialRelaxivities[material.ID] = new MaterialRelaxivityConfig
         {
-            if (material.ID == 0) continue; // Skip exterior
+            MaterialName = material.Name,
+            SurfaceRelaxivity = 10.0, // Default value in µm/s for matrix materials
+            Color = material.Color
+        };
+    }
+}
 
-            // Initialize all materials but mark which is pore space
-            _config.MaterialRelaxivities[material.ID] = new MaterialRelaxivityConfig
-            {
-                MaterialName = material.Name,
-                SurfaceRelaxivity = 10.0, // Default value for matrix materials
-                Color = material.Color
-            };
-        }
+/// <summary>
+/// Convert pixel size to meters handling various unit strings
+/// </summary>
+private static float ConvertToMeters(float pixelSize, string unit)
+{
+    if (string.IsNullOrWhiteSpace(unit))
+    {
+        Logger.LogWarning("[NMRAnalysisTool] No unit specified, assuming µm");
+        return pixelSize * 1e-6f;
     }
 
+    var unitLower = unit.ToLowerInvariant().Trim();
+    
+    return unitLower switch
+    {
+        "m" or "meter" or "meters" => pixelSize,
+        "mm" or "millimeter" or "millimeters" => pixelSize * 1e-3f,
+        "µm" or "um" or "micrometer" or "micrometers" or "micron" or "microns" => pixelSize * 1e-6f,
+        "nm" or "nanometer" or "nanometers" => pixelSize * 1e-9f,
+        "pm" or "picometer" or "picometers" => pixelSize * 1e-12f,
+        "km" or "kilometer" or "kilometers" => pixelSize * 1e3f,
+        "cm" or "centimeter" or "centimeters" => pixelSize * 1e-2f,
+        _ => HandleUnknownUnit(pixelSize, unit)
+    };
+}
+/// <summary>
+/// Format voxel size for display with appropriate units
+/// </summary>
+private static string FormatVoxelSize(float voxelSizeMeters)
+{
+    var sizeUm = voxelSizeMeters * 1e6f;
+    
+    if (sizeUm >= 1000f)
+        return $"{sizeUm / 1000f:F2} mm";
+    else if (sizeUm >= 1f)
+        return $"{sizeUm:F2} µm";
+    else if (sizeUm >= 0.001f)
+        return $"{sizeUm * 1000f:F2} nm";
+    else
+        return $"{sizeUm * 1e6f:F2} pm";
+}
+/// <summary>
+/// Handle unknown units with warning
+/// </summary>
+private static float HandleUnknownUnit(float pixelSize, string unit)
+{
+    Logger.LogWarning($"[NMRAnalysisTool] Unknown unit '{unit}', assuming µm");
+    return pixelSize * 1e-6f; // Default to micrometers (most common for µCT)
+}
     private void DrawConfigurationPanel()
     {
         ImGui.SeparatorText("Configuration");
@@ -1283,67 +1333,91 @@ public class NMRAnalysisTool : IDatasetTools
     }
 
     private void ExportReport(string filePath)
+{
+    var results = _currentDataset.NmrResults;
+    double voxelSizeMeters = _config.VoxelSize;
+    var voxelSizeUm = voxelSizeMeters * 1e6f;
+
+    var sb = new StringBuilder();
+    sb.AppendLine("NMR ANALYSIS REPORT");
+    sb.AppendLine("===================");
+    sb.AppendLine();
+    sb.AppendLine($"Dataset: {_currentDataset.Name}");
+    sb.AppendLine($"Pore Material: {results.PoreMaterial}");
+    sb.AppendLine($"Analysis Date: {DateTime.Now}");
+    sb.AppendLine();
+    sb.AppendLine("VOXEL INFORMATION");
+    sb.AppendLine("-----------------");
+    sb.AppendLine($"Original Dataset: {_currentDataset.PixelSize} {_currentDataset.Unit}");
+    sb.AppendLine($"Converted: {FormatVoxelSize((float)voxelSizeMeters)}");
+    sb.AppendLine($"Internal Storage: {voxelSizeMeters:E6} m (SI base unit)");
+    sb.AppendLine($"Volume Dimensions: {_currentDataset.Width} x {_currentDataset.Height} x {_currentDataset.Depth}");
+    sb.AppendLine();
+    sb.AppendLine("SIMULATION PARAMETERS");
+    sb.AppendLine("---------------------");
+    sb.AppendLine($"Number of Walkers: {results.NumberOfWalkers:N0}");
+    sb.AppendLine($"Time Steps: {results.TotalSteps}");
+    sb.AppendLine($"Time Step: {results.TimeStep} ms");
+    sb.AppendLine($"Diffusion Coefficient: {_config.DiffusionCoefficient:E3} m²/s");
+    sb.AppendLine($"Computation Time: {results.ComputationTime.TotalSeconds:F2}s");
+    sb.AppendLine($"Method: {results.ComputationMethod}");
+    sb.AppendLine();
+    sb.AppendLine("MATERIAL SURFACE RELAXIVITIES");
+    sb.AppendLine("-----------------------------");
+    foreach (var mat in _config.MaterialRelaxivities.Where(m => m.Key != _config.PoreMaterialID))
     {
-        var results = _currentDataset.NmrResults;
-        var voxelSizeUm = _currentDataset.GetPixelSizeInMicrometers();
+        sb.AppendLine($"{mat.Value.MaterialName}: {mat.Value.SurfaceRelaxivity:F1} µm/s");
+    }
+    sb.AppendLine();
+    sb.AppendLine("RESULTS");
+    sb.AppendLine("-------");
+    sb.AppendLine($"Mean T2: {results.MeanT2:F2} ms");
+    sb.AppendLine($"Geometric Mean T2: {results.GeometricMeanT2:F2} ms");
+    sb.AppendLine($"Peak T2: {results.T2PeakValue:F2} ms");
 
-        var sb = new StringBuilder();
-        sb.AppendLine("NMR ANALYSIS REPORT");
-        sb.AppendLine("===================");
+    if (results.PoreSizes != null)
+    {
+        var meanPoreSize = results.PoreSizes.Zip(results.PoreSizeDistribution, (s, d) => s * d).Sum() /
+                           results.PoreSizeDistribution.Sum();
         sb.AppendLine();
-        sb.AppendLine($"Dataset: {_currentDataset.Name}");
-        sb.AppendLine($"Pore Material: {results.PoreMaterial}");
-        sb.AppendLine($"Analysis Date: {DateTime.Now}");
-        sb.AppendLine();
-        sb.AppendLine("VOXEL INFORMATION");
-        sb.AppendLine("-----------------");
-        sb.AppendLine($"Voxel Size: {voxelSizeUm:F2} µm ({_currentDataset.PixelSize:F2} {_currentDataset.Unit})");
-        sb.AppendLine(
-            $"Volume Dimensions: {_currentDataset.Width} x {_currentDataset.Height} x {_currentDataset.Depth}");
-        sb.AppendLine();
-        sb.AppendLine("SIMULATION PARAMETERS");
-        sb.AppendLine("---------------------");
-        sb.AppendLine($"Number of Walkers: {results.NumberOfWalkers:N0}");
-        sb.AppendLine($"Time Steps: {results.TotalSteps}");
-        sb.AppendLine($"Time Step: {results.TimeStep} ms");
-        sb.AppendLine($"Computation Time: {results.ComputationTime.TotalSeconds:F2}s");
-        sb.AppendLine($"Method: {results.ComputationMethod}");
-        sb.AppendLine();
-        sb.AppendLine("RESULTS");
-        sb.AppendLine("-------");
-        sb.AppendLine($"Mean T2: {results.MeanT2:F2} ms");
-        sb.AppendLine($"Geometric Mean T2: {results.GeometricMeanT2:F2} ms");
-        sb.AppendLine($"Peak T2: {results.T2PeakValue:F2} ms");
-
-        if (results.PoreSizes != null)
-        {
-            var meanPoreSize = results.PoreSizes.Zip(results.PoreSizeDistribution, (s, d) => s * d).Sum() /
-                               results.PoreSizeDistribution.Sum();
-            sb.AppendLine();
-            sb.AppendLine("PORE SIZE ANALYSIS");
-            sb.AppendLine("------------------");
-            if (meanPoreSize > 1000)
-                sb.AppendLine($"Mean Pore Radius: {meanPoreSize / 1000:F3} mm");
-            else if (meanPoreSize < 1)
-                sb.AppendLine($"Mean Pore Radius: {meanPoreSize * 1000:F2} nm");
-            else
-                sb.AppendLine($"Mean Pore Radius: {meanPoreSize:F2} µm");
-        }
-
-        if (results.HasT1T2Data)
-        {
-            sb.AppendLine();
-            sb.AppendLine("T1-T2 CORRELATION");
-            sb.AppendLine("-----------------");
-            sb.AppendLine($"T1/T2 Ratio: {_config.T1T2Ratio:F2}");
-            sb.AppendLine($"T1 Range: {results.T1HistogramBins[0]:F2} - {results.T1HistogramBins[^1]:F2} ms");
-            sb.AppendLine($"T2 Range: {results.T2HistogramBins[0]:F2} - {results.T2HistogramBins[^1]:F2} ms");
-            sb.AppendLine("2D T1-T2 map computed successfully");
-        }
-
-        File.WriteAllText(filePath, sb.ToString());
+        sb.AppendLine("PORE SIZE ANALYSIS");
+        sb.AppendLine("------------------");
+        sb.AppendLine($"Shape Factor: {_config.PoreShapeFactor:F1} (1.0=slit, 2.0=cylinder, 3.0=sphere)");
+        
+        if (meanPoreSize > 1000)
+            sb.AppendLine($"Mean Pore Radius: {meanPoreSize / 1000:F3} mm");
+        else if (meanPoreSize < 1)
+            sb.AppendLine($"Mean Pore Radius: {meanPoreSize * 1000:F2} nm");
+        else
+            sb.AppendLine($"Mean Pore Radius: {meanPoreSize:F2} µm");
+            
+        sb.AppendLine($"Pore Size Range: {results.PoreSizes.Min():F3} - {results.PoreSizes.Max():F2} µm");
     }
 
+    if (results.HasT1T2Data)
+    {
+        sb.AppendLine();
+        sb.AppendLine("T1-T2 CORRELATION");
+        sb.AppendLine("-----------------");
+        sb.AppendLine($"T1/T2 Ratio: {_config.T1T2Ratio:F2}");
+        sb.AppendLine($"T1 Range: {results.T1HistogramBins[0]:F2} - {results.T1HistogramBins[^1]:F2} ms");
+        sb.AppendLine($"T2 Range: {results.T2HistogramBins[0]:F2} - {results.T2HistogramBins[^1]:F2} ms");
+        sb.AppendLine("2D T1-T2 map computed successfully");
+    }
+    
+    sb.AppendLine();
+    sb.AppendLine("UNIT VERIFICATION");
+    sb.AppendLine("-----------------");
+    sb.AppendLine("Internal units used in calculations:");
+    sb.AppendLine($"  Voxel size: meters ({voxelSizeMeters:E6} m)");
+    sb.AppendLine($"  Diffusion coefficient: m²/s ({_config.DiffusionCoefficient:E3})");
+    sb.AppendLine($"  Time step: milliseconds ({_config.TimeStepMs:F3} ms)");
+    sb.AppendLine($"  Surface relaxivity: µm/s (typical: 1-100)");
+    sb.AppendLine($"  T2 values: milliseconds");
+    sb.AppendLine($"  Pore sizes: micrometers");
+
+    File.WriteAllText(filePath, sb.ToString());
+}
     private void ImportAsTableDataset()
     {
         try
