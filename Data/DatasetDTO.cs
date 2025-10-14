@@ -164,6 +164,13 @@ public class PNMDatasetDTO : DatasetDTO
     public float DarcyPermeability { get; set; }
     public float NavierStokesPermeability { get; set; }
     public float LatticeBoltzmannPermeability { get; set; }
+    
+    // --- NEW: Diffusivity Results ---
+    public float BulkDiffusivity { get; set; }
+    public float EffectiveDiffusivity { get; set; }
+    public float FormationFactor { get; set; }
+    public float TransportTortuosity { get; set; }
+    
     public List<PoreDTO> Pores { get; set; } = new();
     public List<ThroatDTO> Throats { get; set; } = new();
     public int ImageWidth { get; set; }

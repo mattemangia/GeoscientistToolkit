@@ -83,6 +83,12 @@ public class PNMDataset : Dataset, ISerializableDataset
     public float DarcyPermeability { get; set; } // mD
     public float NavierStokesPermeability { get; set; } // mD
     public float LatticeBoltzmannPermeability { get; set; } // mD
+    
+    // --- NEW: Diffusivity Properties ---
+    public float BulkDiffusivity { get; set; } // m²/s
+    public float EffectiveDiffusivity { get; set; } // m²/s
+    public float FormationFactor { get; set; }
+    public float TransportTortuosity { get; set; }
 
     /// <summary> Visible pores after filtering. </summary>
     public List<Pore> Pores { get; private set; } = new();
@@ -117,6 +123,11 @@ public class PNMDataset : Dataset, ISerializableDataset
             DarcyPermeability = DarcyPermeability,
             NavierStokesPermeability = NavierStokesPermeability,
             LatticeBoltzmannPermeability = LatticeBoltzmannPermeability,
+            // --- NEW: Save diffusivity results ---
+            BulkDiffusivity = BulkDiffusivity,
+            EffectiveDiffusivity = EffectiveDiffusivity,
+            FormationFactor = FormationFactor,
+            TransportTortuosity = TransportTortuosity,
             Pores = _poresOriginal.Select(p => new PoreDTO
             {
                 ID = p.ID,
@@ -516,6 +527,13 @@ public class PNMDataset : Dataset, ISerializableDataset
         DarcyPermeability = dto.DarcyPermeability;
         NavierStokesPermeability = dto.NavierStokesPermeability;
         LatticeBoltzmannPermeability = dto.LatticeBoltzmannPermeability;
+
+        // --- NEW: Load diffusivity results ---
+        BulkDiffusivity = dto.BulkDiffusivity;
+        EffectiveDiffusivity = dto.EffectiveDiffusivity;
+        FormationFactor = dto.FormationFactor;
+        TransportTortuosity = dto.TransportTortuosity;
+
 
         // Fill visible first:
         Pores = dto.Pores?.Select(p => new Pore

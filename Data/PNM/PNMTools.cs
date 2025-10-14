@@ -28,6 +28,28 @@ public class PNMTools : IDatasetTools
         "Oil (Heavy, 100.0 cP)",
         "Custom"
     };
+    
+    // --- NEW: Diffusivity Fluid Presets ---
+    private readonly string[] _diffusivityFluidTypes =
+    {
+        "Water Self-diffusion (25°C)",
+        "Methane in Water (25°C)",
+        "CO₂ in Water (25°C)",
+        "Oil in Water (Light, 25°C)",
+        "Oil in Water (Heavy, 25°C)",
+        "Custom"
+    };
+
+    private readonly float[] _bulkDiffusivities =
+    {
+        2.299e-9f, // Water self-diffusion in m²/s
+        1.49e-9f,  // Methane in water
+        1.92e-9f,  // CO2 in water
+        5.0e-10f,  // Light oil in water (approximate)
+        1.0e-10f,  // Heavy oil in water (approximate)
+        1.0e-9f    // Custom default
+    };
+
 
     private readonly float[] _fluidViscosities =
     {
@@ -80,6 +102,16 @@ public class PNMTools : IDatasetTools
 
     // --- Permeability Calculator State ---
     private bool _isCalculating;
+    
+    // --- NEW: Diffusivity Calculator State ---
+    private bool _isCalculatingDiffusivity;
+    private string _diffusivityStatus = "";
+    private int _diffusivityFluidIndex;
+    private float _customBulkDiffusivity = 1.0e-9f; // m²/s
+    private int _diffusivityWalkers = 50000;
+    private int _diffusivitySteps = 2000;
+    private DiffusivityResults _lastDiffusivityResults;
+
 
     // Store last results for display
     private PermeabilityResults _lastResults;
@@ -122,6 +154,13 @@ public class PNMTools : IDatasetTools
             DrawPermeabilityCalculator(pnm);
 
         ImGui.Spacing();
+        
+        // --- NEW: Molecular Diffusivity Calculator ---
+        if (ImGui.CollapsingHeader("Molecular Diffusivity Calculator", ImGuiTreeNodeFlags.DefaultOpen))
+            DrawDiffusivityCalculator(pnm);
+
+
+        ImGui.Spacing();
 
         // Export Options
         if (ImGui.CollapsingHeader("Export")) DrawExportSection(pnm);
@@ -129,78 +168,272 @@ public class PNMTools : IDatasetTools
         // Handle dialogs
         HandleDialogs(pnm);
     }
-
-    private void DrawNetworkStatistics(PNMDataset pnm)
+    
+    private void DrawDiffusivityCalculator(PNMDataset pnm)
     {
         ImGui.Indent();
 
-        // Create a table for better layout
-        if (ImGui.BeginTable("NetStatsTable", 2, ImGuiTableFlags.BordersInner))
+        // Display last results if available
+        if (_lastDiffusivityResults != null || pnm.EffectiveDiffusivity > 0)
         {
-            ImGui.TableSetupColumn("Property", ImGuiTableColumnFlags.WidthFixed, 150);
-            ImGui.TableSetupColumn("Value", ImGuiTableColumnFlags.WidthStretch);
+            DrawDiffusivityResults(pnm); // Pass the pnm object
+            ImGui.Separator();
+        }
 
-            ImGui.TableNextRow();
-            ImGui.TableSetColumnIndex(0);
-            ImGui.Text("Pores:");
-            ImGui.TableSetColumnIndex(1);
-            ImGui.Text($"{pnm.Pores.Count:N0}");
+        // Fluid properties section
+        ImGui.Text("Fluid Properties:");
+        ImGui.SetNextItemWidth(250);
+        if (ImGui.Combo("Fluid Type##Diff", ref _diffusivityFluidIndex, _diffusivityFluidTypes, _diffusivityFluidTypes.Length))
+        {
+            if (_diffusivityFluidIndex < _bulkDiffusivities.Length - 1)
+                _customBulkDiffusivity = _bulkDiffusivities[_diffusivityFluidIndex];
+        }
 
-            ImGui.TableNextRow();
-            ImGui.TableSetColumnIndex(0);
-            ImGui.Text("Throats:");
-            ImGui.TableSetColumnIndex(1);
-            ImGui.Text($"{pnm.Throats.Count:N0}");
+        if (_diffusivityFluidIndex == _diffusivityFluidTypes.Length - 1) // Custom
+        {
+            ImGui.SetNextItemWidth(150);
+            ImGui.InputFloat("Bulk Diffusivity (m²/s)", ref _customBulkDiffusivity, 1e-11f, 1e-10f, "%.2e");
+            _customBulkDiffusivity = Math.Clamp(_customBulkDiffusivity, 1e-12f, 1e-7f);
+        }
+        else
+        {
+            ImGui.Text($"Bulk Diffusivity (D₀): {_bulkDiffusivities[_diffusivityFluidIndex]:E3} m²/s");
+        }
 
-            ImGui.TableNextRow();
-            ImGui.TableSetColumnIndex(0);
-            ImGui.Text("Avg. Connectivity:");
-            ImGui.TableSetColumnIndex(1);
-            ImGui.Text($"{(pnm.Pores.Count > 0 ? pnm.Throats.Count * 2.0f / pnm.Pores.Count : 0):F2}");
+        ImGui.Spacing();
+        ImGui.Separator();
 
-            ImGui.TableNextRow();
-            ImGui.TableSetColumnIndex(0);
-            ImGui.Text("Voxel Size:");
-            ImGui.TableSetColumnIndex(1);
-            ImGui.Text($"{pnm.VoxelSize:F3} μm");
+        // Simulation parameters
+        ImGui.Text("Simulation Parameters:");
+        ImGui.SetNextItemWidth(150);
+        ImGui.InputInt("Number of Walkers", ref _diffusivityWalkers, 1000, 10000);
+        _diffusivityWalkers = Math.Clamp(_diffusivityWalkers, 100, 1000000);
 
-            ImGui.TableNextRow();
-            ImGui.TableSetColumnIndex(0);
-            ImGui.Text("Tortuosity:");
-            ImGui.TableSetColumnIndex(1);
-            ImGui.Text($"{pnm.Tortuosity:F4}");
+        ImGui.SetNextItemWidth(150);
+        ImGui.InputInt("Simulation Steps", ref _diffusivitySteps, 100, 1000);
+        _diffusivitySteps = Math.Clamp(_diffusivitySteps, 100, 100000);
 
-            // Porosity estimate
-            if (pnm.Pores.Count > 0)
+        ImGui.Spacing();
+        ImGui.Separator();
+
+        // Calculate button
+        if (_isCalculatingDiffusivity)
+        {
+            ImGui.BeginDisabled();
+            ImGui.Button("Calculating...", new Vector2(-1, 30));
+            ImGui.EndDisabled();
+            ImGui.TextColored(new Vector4(1, 1, 0, 1), _diffusivityStatus);
+        }
+        else
+        {
+            var canCalculate = pnm.Pores.Count > 0 && pnm.Throats.Count > 0;
+            if (!canCalculate) ImGui.BeginDisabled();
+
+            if (ImGui.Button("Calculate Diffusivity", new Vector2(-1, 30)))
             {
-                var minBounds = new Vector3(
-                    pnm.Pores.Min(p => p.Position.X),
-                    pnm.Pores.Min(p => p.Position.Y),
-                    pnm.Pores.Min(p => p.Position.Z));
-                var maxBounds = new Vector3(
-                    pnm.Pores.Max(p => p.Position.X),
-                    pnm.Pores.Max(p => p.Position.Y),
-                    pnm.Pores.Max(p => p.Position.Z));
-
-                var totalVolume = (maxBounds.X - minBounds.X) *
-                                  (maxBounds.Y - minBounds.Y) *
-                                  (maxBounds.Z - minBounds.Z);
-                var poreVolume = pnm.Pores.Sum(p => p.VolumeVoxels);
-                var porosity = totalVolume > 0 ? poreVolume / totalVolume : 0;
-
-                ImGui.TableNextRow();
-                ImGui.TableSetColumnIndex(0);
-                ImGui.Text("Est. Porosity:");
-                ImGui.TableSetColumnIndex(1);
-                ImGui.Text($"{porosity:P2}");
+                var options = new DiffusivityOptions
+                {
+                    Dataset = pnm,
+                    BulkDiffusivity = _diffusivityFluidIndex == _diffusivityFluidTypes.Length - 1
+                        ? _customBulkDiffusivity
+                        : _bulkDiffusivities[_diffusivityFluidIndex],
+                    NumberOfWalkers = _diffusivityWalkers,
+                    NumberOfSteps = _diffusivitySteps
+                };
+                StartDiffusivityCalculation(options);
             }
 
-            ImGui.EndTable();
+            if (!canCalculate) ImGui.EndDisabled();
         }
 
         ImGui.Unindent();
     }
+    
+   private void DrawDiffusivityResults(PNMDataset pnm)
+{
+    var results = _lastDiffusivityResults;
 
+    // Prefer results; fall back to dataset members that already exist in your codebase.
+    double D0   = results?.BulkDiffusivity      ?? pnm.BulkDiffusivity;
+    double Deff = results?.EffectiveDiffusivity ?? pnm.EffectiveDiffusivity;
+
+    // Formation factor: recompute safely if needed
+    double F = results?.FormationFactor ?? ((D0 > 0 && Deff > 0) ? (D0 / Deff) : pnm.FormationFactor);
+
+    // Transport tortuosity "τ²" as stored
+    double tau2Raw = results?.Tortuosity ?? pnm.TransportTortuosity;
+
+    // BUGFIX: if τ² was saved as a percent-style fraction (<1), rescale for display
+    double tau2Display = (tau2Raw > 0.0 && tau2Raw < 1.0) ? tau2Raw * 100.0 : tau2Raw;
+
+    // Also show τ for sanity checks
+    double tauDisplay = (tau2Display > 0.0) ? Math.Sqrt(tau2Display) : 0.0;
+
+    // Geometric tortuosity as-is
+    double tauGeom = results?.GeometricTortuosity ?? pnm.Tortuosity;
+
+    // Porosity: use only what we are sure exists (from results). If absent, show "—".
+    bool hasPhi = results != null && results.Porosity > 0.0;
+    double phi = hasPhi ? results.Porosity : double.NaN;
+
+    ImGui.PushStyleColor(ImGuiCol.ChildBg, new Vector4(0.10f, 0.15f, 0.10f, 0.50f));
+    ImGui.BeginChild("DiffusivityResults", new Vector2(-1, 220), ImGuiChildFlags.Border);
+
+    ImGui.Text("Molecular Diffusivity Results");
+    ImGui.Separator();
+
+    if (ImGui.BeginTable("DiffResultsTable", 2, ImGuiTableFlags.BordersInner | ImGuiTableFlags.RowBg | ImGuiTableFlags.PadOuterX))
+    {
+        ImGui.TableSetupColumn("Parameter", ImGuiTableColumnFlags.WidthFixed, 190);
+        ImGui.TableSetupColumn("Value", ImGuiTableColumnFlags.WidthStretch);
+        ImGui.TableHeadersRow();
+
+        ImGui.TableNextRow();
+        ImGui.TableSetColumnIndex(0); ImGui.Text("Bulk Diffusivity (D₀):");
+        ImGui.TableSetColumnIndex(1); ImGui.Text($"{D0:E3} m²/s");
+
+        ImGui.TableNextRow();
+        ImGui.TableSetColumnIndex(0); ImGui.TextColored(new Vector4(0.5f,1,0.5f,1), "Effective Diffusivity (D_eff):");
+        ImGui.TableSetColumnIndex(1); ImGui.TextColored(new Vector4(0.5f,1,0.5f,1), $"{Deff:E3} m²/s");
+
+        ImGui.TableNextRow();
+        ImGui.TableSetColumnIndex(0); ImGui.Text("Formation Factor (F):");
+        ImGui.TableSetColumnIndex(1); ImGui.Text($"{F:F3}");
+
+        ImGui.TableNextRow();
+        ImGui.TableSetColumnIndex(0); ImGui.Text("Network Porosity (φ):");
+        ImGui.TableSetColumnIndex(1);
+        if (hasPhi) ImGui.Text($"{phi:P2}"); else ImGui.Text("—");
+
+        ImGui.TableNextRow();
+        ImGui.TableSetColumnIndex(0); ImGui.Text("Transport Tortuosity (τ²):");
+        ImGui.TableSetColumnIndex(1); ImGui.Text($"{tau2Display:F3}");
+
+        ImGui.TableNextRow();
+        ImGui.TableSetColumnIndex(0); ImGui.Text("Transport Tortuosity (τ):");
+        ImGui.TableSetColumnIndex(1); ImGui.Text($"{tauDisplay:F3}");
+
+        ImGui.TableNextRow();
+        ImGui.TableSetColumnIndex(0); ImGui.Text("Geometric Tortuosity (τ_geo):");
+        ImGui.TableSetColumnIndex(1); ImGui.Text($"{tauGeom:F3}");
+
+        ImGui.EndTable();
+    }
+
+    ImGui.EndChild();
+    ImGui.PopStyleColor();
+}
+    private void StartDiffusivityCalculation(DiffusivityOptions options)
+    {
+        _isCalculatingDiffusivity = true;
+        _diffusivityStatus = "Initializing random walk...";
+        var pnm = options.Dataset;
+
+        Task.Run(() =>
+        {
+            try
+            {
+                _lastDiffusivityResults = MolecularDiffusivity.Calculate(options,
+                    progress => _diffusivityStatus = progress);
+                _diffusivityStatus = "Calculation complete!";
+
+                // --- NEW: Save results to the dataset object ---
+                if (_lastDiffusivityResults != null)
+                {
+                    pnm.BulkDiffusivity = _lastDiffusivityResults.BulkDiffusivity;
+                    pnm.EffectiveDiffusivity = _lastDiffusivityResults.EffectiveDiffusivity;
+                    pnm.FormationFactor = _lastDiffusivityResults.FormationFactor;
+                    pnm.TransportTortuosity = _lastDiffusivityResults.Tortuosity;
+                    
+                    // Notify the UI and project manager that data has changed
+                    ProjectManager.Instance.NotifyDatasetDataChanged(pnm);
+                }
+            }
+            catch (Exception ex)
+            {
+                _diffusivityStatus = $"Error: {ex.Message}";
+                Logger.LogError($"[Diffusivity] Calculation failed: {ex}");
+            }
+            finally
+            {
+                Thread.Sleep(1000);
+                _isCalculatingDiffusivity = false;
+            }
+        });
+    }
+    private void DrawNetworkStatistics(PNMDataset pnm)
+{
+    ImGui.Indent();
+
+    if (ImGui.BeginTable("NetStatsTable", 2, ImGuiTableFlags.BordersInner))
+    {
+        ImGui.TableSetupColumn("Property", ImGuiTableColumnFlags.WidthFixed, 150);
+        ImGui.TableSetupColumn("Value", ImGuiTableColumnFlags.WidthStretch);
+
+        ImGui.TableNextRow();
+        ImGui.TableSetColumnIndex(0);
+        ImGui.Text("Pores:");
+        ImGui.TableSetColumnIndex(1);
+        ImGui.Text($"{pnm.Pores.Count:N0}");
+
+        ImGui.TableNextRow();
+        ImGui.TableSetColumnIndex(0);
+        ImGui.Text("Throats:");
+        ImGui.TableSetColumnIndex(1);
+        ImGui.Text($"{pnm.Throats.Count:N0}");
+
+        ImGui.TableNextRow();
+        ImGui.TableSetColumnIndex(0);
+        ImGui.Text("Avg. Connectivity:");
+        ImGui.TableSetColumnIndex(1);
+        ImGui.Text($"{(pnm.Pores.Count > 0 ? pnm.Throats.Count * 2.0f / pnm.Pores.Count : 0):F2}");
+
+        ImGui.TableNextRow();
+        ImGui.TableSetColumnIndex(0);
+        ImGui.Text("Voxel Size:");
+        ImGui.TableSetColumnIndex(1);
+        ImGui.Text($"{pnm.VoxelSize:F3} μm");
+
+        ImGui.TableNextRow();
+        ImGui.TableSetColumnIndex(0);
+        ImGui.Text("Tortuosity:");
+        ImGui.TableSetColumnIndex(1);
+        ImGui.Text($"{pnm.Tortuosity:F4}");
+
+        // Porosity based on MATERIAL bounding box
+        if (pnm.Pores.Count > 0)
+        {
+            var minBounds = new Vector3(
+                pnm.Pores.Min(p => p.Position.X),
+                pnm.Pores.Min(p => p.Position.Y),
+                pnm.Pores.Min(p => p.Position.Z));
+            var maxBounds = new Vector3(
+                pnm.Pores.Max(p => p.Position.X),
+                pnm.Pores.Max(p => p.Position.Y),
+                pnm.Pores.Max(p => p.Position.Z));
+            
+            // Add margin for pore radii
+            var margin = pnm.MaxPoreRadius;
+            var materialVolumeVoxels = (maxBounds.X - minBounds.X + 2 * margin) *
+                                       (maxBounds.Y - minBounds.Y + 2 * margin) *
+                                       (maxBounds.Z - minBounds.Z + 2 * margin);
+            
+            var poreVolume = pnm.Pores.Sum(p => p.VolumeVoxels);
+            var porosity = materialVolumeVoxels > 0 ? poreVolume / materialVolumeVoxels : 0;
+            porosity = Math.Clamp(porosity, 0, 1);
+
+            ImGui.TableNextRow();
+            ImGui.TableSetColumnIndex(0);
+            ImGui.Text("Est. Porosity:");
+            ImGui.TableSetColumnIndex(1);
+            ImGui.Text($"{porosity:P2}");
+        }
+
+        ImGui.EndTable();
+    }
+
+    ImGui.Unindent();
+}
     private void DrawPermeabilityCalculator(PNMDataset pnm)
     {
         ImGui.Indent();

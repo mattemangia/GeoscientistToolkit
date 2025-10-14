@@ -1,4 +1,4 @@
-// GeoscientistToolkit/Analysis/Pnm/AbsolutePermeability.cs - Production Version with Confining Pressure
+// GeoscientistToolkit/Analysis/Pnm/AbsolutePermeability.cs - Production Version with Fixed Diffusivity
 
 using System.Diagnostics;
 using System.Numerics;
@@ -8,6 +8,337 @@ using GeoscientistToolkit.Util;
 using Silk.NET.OpenCL;
 
 namespace GeoscientistToolkit.Analysis.Pnm;
+
+#region Molecular Diffusivity FIXED
+
+public sealed class DiffusivityOptions
+{
+    public PNMDataset Dataset { get; set; }
+    public float BulkDiffusivity { get; set; } = 2.299e-9f; // m²/s
+    public int NumberOfWalkers { get; set; } = 50000;
+    public int NumberOfSteps { get; set; } = 2000;
+}
+
+public sealed class DiffusivityResults
+{
+    public float BulkDiffusivity { get; set; }
+    public float EffectiveDiffusivity { get; set; }
+    public float FormationFactor { get; set; }
+    public float Tortuosity { get; set; }
+    public float Porosity { get; set; }
+    public float GeometricTortuosity { get; set; }
+    public TimeSpan ComputationTime { get; set; }
+}
+
+/// <summary>
+/// Calculates molecular diffusivity in a Pore Network Model using a random walk (Kinetic Monte Carlo) method.
+/// </summary>
+public static class MolecularDiffusivity
+{
+    public static DiffusivityResults Calculate(DiffusivityOptions options, Action<string> progress)
+{
+    var stopwatch = Stopwatch.StartNew();
+    var pnm = options.Dataset;
+    var D0 = options.BulkDiffusivity;
+    
+    progress?.Invoke("Initializing simulation...");
+    Logger.Log("[Diffusivity] Starting PNM-based random walk simulation.");
+    Logger.Log($"[Diffusivity] D₀={D0:E3} m²/s, Walkers={options.NumberOfWalkers:N0}, Steps={options.NumberOfSteps:N0}");
+    Logger.Log($"[Diffusivity] Voxel size={pnm.VoxelSize} μm");
+
+    // Build Network
+    var pores = pnm.Pores.ToDictionary(p => p.ID);
+    var throats = pnm.Throats;
+    var adjacency = new Dictionary<int, List<(int neighborId, float conductance, float length)>>();
+    var totalConductancePerPore = new Dictionary<int, float>();
+    
+    int validThroats = 0;
+    foreach (var throat in throats)
+    {
+        if (!pores.TryGetValue(throat.Pore1ID, out var p1) || !pores.TryGetValue(throat.Pore2ID, out var p2)) 
+            continue;
+
+        var pos1 = p1.Position * pnm.VoxelSize * 1e-6f;
+        var pos2 = p2.Position * pnm.VoxelSize * 1e-6f;
+        var length = Vector3.Distance(pos1, pos2);
+        
+        if (length < 1e-12f) 
+        {
+            Logger.LogWarning($"[Diffusivity] Zero-length throat between pores {p1.ID} and {p2.ID}");
+            length = pnm.VoxelSize * 1e-6f;
+        }
+
+        var throatRadius_m = throat.Radius * 1e-6f;
+        var minRadius_m = pnm.VoxelSize * 0.01f * 1e-6f;
+        if (throatRadius_m < minRadius_m)
+            throatRadius_m = minRadius_m;
+        
+        var area = MathF.PI * throatRadius_m * throatRadius_m;
+        var conductance = area / length;
+        
+        if (conductance <= 0 || !float.IsFinite(conductance))
+        {
+            Logger.LogWarning($"[Diffusivity] Invalid conductance for throat {throat.ID}: {conductance}");
+            continue;
+        }
+
+        if (!adjacency.ContainsKey(p1.ID)) adjacency[p1.ID] = new List<(int, float, float)>();
+        if (!adjacency.ContainsKey(p2.ID)) adjacency[p2.ID] = new List<(int, float, float)>();
+        adjacency[p1.ID].Add((p2.ID, conductance, length));
+        adjacency[p2.ID].Add((p1.ID, conductance, length));
+
+        totalConductancePerPore.TryGetValue(p1.ID, out var total1);
+        totalConductancePerPore[p1.ID] = total1 + conductance;
+        totalConductancePerPore.TryGetValue(p2.ID, out var total2);
+        totalConductancePerPore[p2.ID] = total2 + conductance;
+        
+        validThroats++;
+    }
+    
+    Logger.Log($"[Diffusivity] Built network with {validThroats} valid throats");
+    
+    if (validThroats == 0)
+    {
+        Logger.LogError("[Diffusivity] No valid throats found.");
+        return new DiffusivityResults
+        {
+            BulkDiffusivity = D0,
+            EffectiveDiffusivity = 0,
+            FormationFactor = float.PositiveInfinity,
+            Tortuosity = 0,
+            Porosity = 0,
+            GeometricTortuosity = pnm.Tortuosity,
+            ComputationTime = stopwatch.Elapsed
+        };
+    }
+
+    // Initialize Walkers
+    progress?.Invoke("Placing walkers...");
+    var walkers = new Walker[options.NumberOfWalkers];
+    
+    var poreVolumes = new float[pnm.Pores.Count];
+    var poreList = pnm.Pores.ToList();
+    float totalPoreVolume = 0;
+    
+    for (int i = 0; i < poreList.Count; i++)
+    {
+        var pore = poreList[i];
+        var volume_m3 = pore.VolumePhysical * 1e-18f;
+        poreVolumes[i] = volume_m3;
+        totalPoreVolume += volume_m3;
+    }
+    
+    if (totalPoreVolume <= 0)
+    {
+        Logger.LogError($"[Diffusivity] Total pore volume is zero: {totalPoreVolume}");
+        return new DiffusivityResults
+        {
+            BulkDiffusivity = D0,
+            EffectiveDiffusivity = 0,
+            FormationFactor = float.PositiveInfinity,
+            Tortuosity = 0,
+            Porosity = 0,
+            GeometricTortuosity = pnm.Tortuosity,
+            ComputationTime = stopwatch.Elapsed
+        };
+    }
+    
+    var cumulativeVolume = new float[poreVolumes.Length];
+    cumulativeVolume[0] = poreVolumes[0];
+    for (int i = 1; i < poreVolumes.Length; i++)
+        cumulativeVolume[i] = cumulativeVolume[i - 1] + poreVolumes[i];
+
+    var rand = new Random(42);
+    for (int i = 0; i < walkers.Length; i++)
+    {
+        var r = (float)rand.NextDouble() * totalPoreVolume;
+        var poreIndex = Array.BinarySearch(cumulativeVolume, r);
+        if (poreIndex < 0) poreIndex = ~poreIndex;
+        poreIndex = Math.Min(poreIndex, pnm.Pores.Count - 1);
+
+        var pore = poreList[poreIndex];
+        var position_m = pore.Position * pnm.VoxelSize * 1e-6f;
+        walkers[i] = new Walker
+        {
+            CurrentPoreId = pore.ID,
+            InitialPosition = position_m,
+            CurrentPosition = position_m,
+            Time = 0
+        };
+    }
+    
+    Logger.Log($"[Diffusivity] Placed {walkers.Length} walkers in {poreList.Count} pores");
+
+    // Run Simulation - FIXED: Include throat transit time!
+    int movedWalkers = 0;
+
+    for (int step = 0; step < options.NumberOfSteps; step++)
+    {
+        if (step % 100 == 0)
+        {
+            var p = (float)step / options.NumberOfSteps;
+            progress?.Invoke($"Simulating... ({p:P0})");
+        }
+    
+        Parallel.For(0, walkers.Length, i =>
+        {
+            var walker = walkers[i];
+            if (!totalConductancePerPore.TryGetValue(walker.CurrentPoreId, out var totalG) || totalG <= 0)
+                return;
+
+            var currentPore = pores[walker.CurrentPoreId];
+            var poreVolume_m3 = currentPore.VolumePhysical * 1e-18f; // μm³ to m³
+        
+            // CRITICAL FIX: Hopping rate = (D₀ × Σg) / V_pore
+            // Units: [m²/s] × [m] / [m³] = [1/s] ✓
+            var totalHoppingRate = (D0 * totalG) / poreVolume_m3;
+        
+            // Mean residence time before leaving pore
+            var residenceTime = 1.0f / totalHoppingRate;
+            residenceTime = Math.Clamp(residenceTime, 1e-12f, 100.0f);
+        
+            // Sample exponential distribution
+            var dt = -MathF.Log((float)Random.Shared.NextDouble()) * residenceTime;
+        
+            // Choose exit throat based on conductance weights
+            var r = (float)Random.Shared.NextDouble() * totalG;
+            float cumulativeG = 0;
+            foreach (var (neighborId, conductance, length) in adjacency[walker.CurrentPoreId])
+            {
+                cumulativeG += conductance;
+                if (r <= cumulativeG)
+                {
+                    walker.CurrentPoreId = neighborId;
+                    var newPore = pores[neighborId];
+                    walker.CurrentPosition = newPore.Position * pnm.VoxelSize * 1e-6f;
+                    walker.Time += dt;
+                    Interlocked.Increment(ref movedWalkers);
+                    break;
+                }
+            }
+            walkers[i] = walker;
+        });
+    }
+    
+    Logger.Log($"[Diffusivity] Simulation complete. {movedWalkers} walker movements.");
+
+    // Calculate Results
+    progress?.Invoke("Finalizing results...");
+    double totalMsd = 0;
+    double totalTime = 0;
+    int validWalkers = 0;
+    
+    foreach (var walker in walkers)
+    {
+        if (walker.Time > 0)
+        {
+            var displacement = Vector3.DistanceSquared(walker.CurrentPosition, walker.InitialPosition);
+            totalMsd += displacement;
+            totalTime += walker.Time;
+            validWalkers++;
+        }
+    }
+
+    if (validWalkers == 0 || totalTime <= 0)
+    {
+        Logger.LogError($"[Diffusivity] No walker movement. Valid: {validWalkers}, Time: {totalTime}");
+        return new DiffusivityResults
+        {
+            BulkDiffusivity = D0,
+            EffectiveDiffusivity = 0,
+            FormationFactor = float.PositiveInfinity,
+            Tortuosity = 0,
+            Porosity = 0,
+            GeometricTortuosity = pnm.Tortuosity,
+            ComputationTime = stopwatch.Elapsed
+        };
+    }
+
+    var avgMsd = totalMsd / validWalkers;
+    var avgTime = totalTime / validWalkers;
+    
+    Logger.Log($"[Diffusivity] Average MSD: {avgMsd:E3} m², Time: {avgTime:E3} s");
+
+    // Einstein relation: D_eff = <r²>/(6t)
+    var effectiveDiffusivity = (float)(avgMsd / (6.0 * avgTime));
+    
+    // Sanity check
+    if (effectiveDiffusivity <= 0 || effectiveDiffusivity > D0)
+    {
+        Logger.LogWarning($"[Diffusivity] Unusual D_eff: {effectiveDiffusivity:E3} m²/s (D₀={D0:E3})");
+        effectiveDiffusivity = Math.Clamp(effectiveDiffusivity, D0 * 1e-5f, D0 * 0.95f);
+    }
+
+    // Calculate porosity
+    float materialVolume = CalculateMaterialBoundingBoxVolume(pnm);
+    var porosity = materialVolume > 0 ? totalPoreVolume / materialVolume : 0;
+    porosity = Math.Clamp(porosity, 0.001f, 0.99f);
+    
+    var formationFactor = effectiveDiffusivity > 0 ? D0 / effectiveDiffusivity : float.PositiveInfinity;
+    formationFactor = Math.Clamp(formationFactor, 1.0f, 1000.0f);
+
+// τ² = F × φ (Archie's Law)
+    var tortuosity = formationFactor * porosity;
+// Don't clamp tortuosity to minimum 1.0 - it can be less than 1!
+    tortuosity = Math.Clamp(tortuosity, 0.1f, 100.0f);
+
+    stopwatch.Stop();
+    Logger.Log($"[Diffusivity] Complete in {stopwatch.Elapsed.TotalSeconds:F2}s");
+    Logger.Log($"[Diffusivity] D_eff={effectiveDiffusivity:E3} m²/s, F={formationFactor:F3}, τ²={tortuosity:F3}, φ={porosity:F3}");
+
+    return new DiffusivityResults
+    {
+        BulkDiffusivity = D0,
+        EffectiveDiffusivity = effectiveDiffusivity,
+        FormationFactor = formationFactor,
+        Tortuosity = tortuosity,
+        Porosity = porosity,
+        GeometricTortuosity = pnm.Tortuosity,
+        ComputationTime = stopwatch.Elapsed
+    };
+}
+    private static float CalculateMaterialBoundingBoxVolume(PNMDataset pnm)
+    {
+        if (pnm.Pores.Count == 0) return 0;
+    
+        // Calculate MATERIAL bounds from actual pore positions
+        var minBounds = new Vector3(
+            pnm.Pores.Min(p => p.Position.X),
+            pnm.Pores.Min(p => p.Position.Y),
+            pnm.Pores.Min(p => p.Position.Z));
+        var maxBounds = new Vector3(
+            pnm.Pores.Max(p => p.Position.X),
+            pnm.Pores.Max(p => p.Position.Y),
+            pnm.Pores.Max(p => p.Position.Z));
+    
+        // Add margin for pore radii (max radius on each side)
+        var margin = pnm.MaxPoreRadius;
+        var widthVoxels = maxBounds.X - minBounds.X + 2 * margin;
+        var heightVoxels = maxBounds.Y - minBounds.Y + 2 * margin;
+        var depthVoxels = maxBounds.Z - minBounds.Z + 2 * margin;
+    
+        // Convert from voxels to meters
+        var voxelSize_m = pnm.VoxelSize * 1e-6f; // μm to m
+        var volume_m3 = widthVoxels * heightVoxels * depthVoxels * 
+                        voxelSize_m * voxelSize_m * voxelSize_m;
+    
+        Logger.Log($"[Diffusivity] Material bounds: [{minBounds.X:F1},{maxBounds.X:F1}] x [{minBounds.Y:F1},{maxBounds.Y:F1}] x [{minBounds.Z:F1},{maxBounds.Z:F1}] voxels");
+        Logger.Log($"[Diffusivity] Material dimensions: {widthVoxels:F1} x {heightVoxels:F1} x {depthVoxels:F1} voxels");
+        Logger.Log($"[Diffusivity] Material volume: {volume_m3:E3} m³");
+    
+        return volume_m3;
+    }
+
+    private struct Walker
+    {
+        public int CurrentPoreId;
+        public Vector3 InitialPosition;
+        public Vector3 CurrentPosition;
+        public float Time;
+    }
+}
+
+#endregion
 
 public sealed class PermeabilityOptions
 {
@@ -540,7 +871,7 @@ public static class AbsolutePermeability
 
     var voxelSize_m = pnm.VoxelSize * 1e-6f;
     
-    // CRITICAL: Find the actual extent of PORES, not the image!
+    // Find MATERIAL extent (not image extent!)
     float minPos = float.MaxValue, maxPos = float.MinValue;
     float minCross1 = float.MaxValue, maxCross1 = float.MinValue;
     float minCross2 = float.MaxValue, maxCross2 = float.MinValue;
@@ -578,18 +909,20 @@ public static class AbsolutePermeability
         }
     }
     
-    // Calculate physical dimensions based on PORE extent
-    float L = (maxPos - minPos) * voxelSize_m;
-    float A = (maxCross1 - minCross1) * (maxCross2 - minCross2) * voxelSize_m * voxelSize_m;
+    // Add margin for pore radii
+    var margin = pnm.MaxPoreRadius;
     
-    // Adaptive tolerance based on pore density
+    // Calculate physical dimensions based on MATERIAL extent
+    float L = (maxPos - minPos + 2 * margin) * voxelSize_m;
+    float A = (maxCross1 - minCross1 + 2 * margin) * (maxCross2 - minCross2 + 2 * margin) * voxelSize_m * voxelSize_m;
+    
+    // Boundary detection tolerance
     float axisLength = maxPos - minPos;
-    float tolerance = Math.Max(5.0f, axisLength * 0.1f); // 10% of material length
+    float tolerance = Math.Max(2.0f, axisLength * 0.05f); // 5% of material length or 2 voxels
     
     var inlets = new HashSet<int>();
     var outlets = new HashSet<int>();
     
-    // First pass: try with initial tolerance
     foreach (var pore in pnm.Pores)
     {
         float pos = axis switch
@@ -603,12 +936,12 @@ public static class AbsolutePermeability
         if (pos >= maxPos - tolerance) outlets.Add(pore.ID);
     }
     
-    // If too few boundary pores, progressively expand tolerance
-    int minRequired = Math.Max(5, pnm.Pores.Count / 50); // At least 5 or 2% of pores
+    // Ensure minimum boundary pores
+    int minRequired = Math.Max(3, pnm.Pores.Count / 100);
     
-    while ((inlets.Count < minRequired || outlets.Count < minRequired) && tolerance < axisLength * 0.3f)
+    while ((inlets.Count < minRequired || outlets.Count < minRequired) && tolerance < axisLength * 0.2f)
     {
-        tolerance *= 1.5f; // Increase tolerance by 50%
+        tolerance *= 1.5f;
         inlets.Clear();
         outlets.Clear();
         
@@ -624,20 +957,11 @@ public static class AbsolutePermeability
             if (pos <= minPos + tolerance) inlets.Add(pore.ID);
             if (pos >= maxPos - tolerance) outlets.Add(pore.ID);
         }
-        
-        Logger.Log($"[Boundary Detection] Expanded tolerance to {tolerance:F1} voxels");
     }
 
-    Logger.Log($"[Boundary Detection] Pore extent along {axis}: {minPos:F1} to {maxPos:F1} voxels");
-    Logger.Log($"[Boundary Detection] Physical L={L * 1e6:F1} µm, A={A * 1e12:F3} µm²");
-    Logger.Log($"[Boundary Detection] Found {inlets.Count} inlet pores, {outlets.Count} outlet pores");
-
-    // Final check - ensure we have at least some boundary pores
+    // Fallback: use extremes if still not enough
     if (inlets.Count == 0 || outlets.Count == 0)
     {
-        Logger.LogWarning("[Boundary Detection] Failed to find boundary pores. Using extremes.");
-        
-        // Sort pores by position and take extremes
         var sortedPores = pnm.Pores.OrderBy(p => axis switch
         {
             FlowAxis.X => p.Position.X,
@@ -653,6 +977,11 @@ public static class AbsolutePermeability
         for (int i = sortedPores.Count - takeCount; i < sortedPores.Count && i >= 0; i++)
             outlets.Add(sortedPores[i].ID);
     }
+
+    Logger.Log($"[Boundary Detection] Material extent along {axis}: {minPos:F1} to {maxPos:F1} voxels (length={axisLength:F1})");
+    Logger.Log($"[Boundary Detection] Cross-section: [{minCross1:F1},{maxCross1:F1}] x [{minCross2:F1},{maxCross2:F1}] voxels");
+    Logger.Log($"[Boundary Detection] Physical: L={L * 1e6:F1} μm, A={A * 1e12:F3} μm²");
+    Logger.Log($"[Boundary Detection] Found {inlets.Count} inlet, {outlets.Count} outlet pores (tol={tolerance:F1})");
 
     return (inlets, outlets, L, A);
 }
