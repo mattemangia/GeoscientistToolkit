@@ -5,6 +5,9 @@ using GeoscientistToolkit.Business;
 using GeoscientistToolkit.Data;
 using GeoscientistToolkit.Data.GIS;
 using GeoscientistToolkit.Data.Mesh3D;
+// ADDED: For TableDataset and DataTable
+using GeoscientistToolkit.Data.Table;
+using System.Data;
 using GeoscientistToolkit.Settings;
 using GeoscientistToolkit.UI.GIS;
 using GeoscientistToolkit.UI.Utils;
@@ -388,6 +391,28 @@ public class MainWindow
                 };
                 ProjectManager.Instance.AddDataset(emptyGIS);
                 Logger.Log("Created new empty GIS map");
+            }
+
+            if (ImGui.MenuItem("New Empty Table..."))
+            {
+                // Create a new empty DataTable
+                var timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
+                var tableName = $"New_Table_{timestamp}";
+                var newTable = new DataTable(tableName);
+
+                // Add a default column so it's not completely empty
+                newTable.Columns.Add("Column1", typeof(string));
+                newTable.Rows.Add("Sample value");
+
+                // Create a new TableDataset from the DataTable
+                var newTableDataset = new TableDataset(tableName, newTable);
+
+                // Add it to the project
+                ProjectManager.Instance.AddDataset(newTableDataset);
+                Logger.Log($"Created new empty table: {tableName}");
+
+                // Optionally, select it
+                OnDatasetSelected(newTableDataset);
             }
 
             ImGui.Separator();

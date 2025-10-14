@@ -8,12 +8,12 @@ using ImGuiNET;
 namespace GeoscientistToolkit.UI.Windows;
 
 /// <summary>
-///     A window that hosts the GeoScript editor, providing a terminal-like interface.
+///     A window that hosts the GeoScript interpreter, providing a terminal-like interface.
 ///     This window supports being "popped out" into its own native window.
 /// </summary>
 public class GeoScriptTerminalWindow
 {
-    private readonly GeoScriptEditor _editor = new();
+    private readonly GeoScriptInterpreter _interpreter = new();
     private bool _isOpen;
     private bool _isPoppedOut;
     private bool _pendingPopIn; // Flag to defer pop-in until safe
@@ -29,7 +29,7 @@ public class GeoScriptTerminalWindow
         {
             _selectedDatasetIndex = 0;
             _selectedContextDataset = ProjectManager.Instance.LoadedDatasets[_selectedDatasetIndex];
-            _editor.SetAssociatedDataset(_selectedContextDataset);
+            _interpreter.SetAssociatedDataset(_selectedContextDataset);
         }
     }
 
@@ -83,8 +83,64 @@ public class GeoScriptTerminalWindow
     {
         DrawDatasetSelector();
         ImGui.Separator();
-        _editor.Draw();
+        
+        if (_selectedContextDataset == null)
+        {
+            DrawNoDatasetWarning();
+        }
+        else
+        {
+            _interpreter.Draw();
+        }
     }
+    
+    /// <summary>
+    ///     Draws a warning panel when no dataset is selected for context.
+    ///     This logic is adapted from the original GeoScriptEditor.
+    /// </summary>
+    private void DrawNoDatasetWarning()
+    {
+        var style = ImGui.GetStyle();
+        ImGui.BeginChild("##NoDatasetWarning", Vector2.Zero, ImGuiChildFlags.None,
+            ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoMove);
+
+        var windowSize = ImGui.GetWindowSize();
+        var drawList = ImGui.GetWindowDrawList();
+        var windowPos = ImGui.GetWindowPos();
+        
+        var titleBarHeight = ImGui.GetTextLineHeight() + style.FramePadding.Y * 2;
+        drawList.AddRectFilled(
+            windowPos,
+            new Vector2(windowPos.X + windowSize.X, windowPos.Y + titleBarHeight),
+            ImGui.GetColorU32(new Vector4(0.7f, 0.2f, 0.2f, 1.0f))
+        );
+
+        drawList.AddRect(
+            windowPos,
+            new Vector2(windowPos.X + windowSize.X, windowPos.Y + windowSize.Y),
+            ImGui.GetColorU32(new Vector4(0.7f, 0.2f, 0.2f, 1.0f)),
+            style.ChildRounding
+        );
+        
+        var title = "⚠ No Dataset Selected";
+        var titleSize = ImGui.CalcTextSize(title);
+        ImGui.SetCursorPos(new Vector2(
+            (windowSize.X - titleSize.X) * 0.5f,
+            (titleBarHeight - titleSize.Y) * 0.5f
+        ));
+        ImGui.Text(title);
+        
+        ImGui.SetCursorPos(new Vector2(style.WindowPadding.X, titleBarHeight + style.WindowPadding.Y));
+        ImGui.BeginGroup();
+        ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(1.0f, 0.8f, 0.8f, 1.0f));
+        ImGui.TextWrapped(
+            "The GeoScript Terminal requires an active dataset to act upon. Please select a 'Context Dataset' from the dropdown list above to begin scripting.");
+        ImGui.PopStyleColor();
+        ImGui.EndGroup();
+
+        ImGui.EndChild();
+    }
+
 
     /// <summary>
     ///     Handles the drawing logic when the terminal is in a separate window.
@@ -95,8 +151,7 @@ public class GeoScriptTerminalWindow
         // Draw the terminal content filling the entire pop-out window.
         ImGui.SetNextWindowSize(ImGui.GetMainViewport().Size);
         ImGui.SetNextWindowPos(Vector2.Zero);
-
-        // Use a local variable instead of _isPoppedOut to avoid modifying state during rendering
+        
         var windowOpen = true;
 
         if (ImGui.Begin("GeoScript Terminal##PoppedOut",
@@ -113,8 +168,7 @@ public class GeoScriptTerminalWindow
 
             DrawContents();
         }
-
-        // If the window was closed via the title bar (though we disabled it)
+        
         if (!windowOpen) RequestPopIn();
 
         ImGui.End();
@@ -126,8 +180,7 @@ public class GeoScriptTerminalWindow
     private void PopOut()
     {
         if (_isPoppedOut) return;
-
-        // SIZING FIX: Enforce a minimum size to prevent a "hyper small" window.
+        
         const float minWidth = 400;
         const float minHeight = 300;
         var size = ImGui.GetWindowSize();
@@ -158,8 +211,7 @@ public class GeoScriptTerminalWindow
     private void PerformPopIn()
     {
         if (!_isPoppedOut) return;
-
-        // Dispose the pop-out window
+        
         _popOutWindow?.Dispose();
         _popOutWindow = null;
         _isPoppedOut = false;
@@ -171,30 +223,27 @@ public class GeoScriptTerminalWindow
         if (!loadedDatasets.Any())
         {
             ImGui.Text("Context Dataset: (No datasets loaded)");
-            // Ensure the editor knows there is no context if all datasets are removed
             if (_selectedContextDataset != null)
             {
                 _selectedContextDataset = null;
-                _editor.SetAssociatedDataset(null);
+                _interpreter.SetAssociatedDataset(null);
             }
 
             return;
         }
 
         var datasetNames = loadedDatasets.Select(d => d.Name).ToArray();
-
-        // If the current index is invalid (e.g., dataset was removed), reset it.
+        
         if (_selectedDatasetIndex >= datasetNames.Length)
         {
             _selectedDatasetIndex = -1;
             _selectedContextDataset = null;
-            _editor.SetAssociatedDataset(null);
+            _interpreter.SetAssociatedDataset(null);
         }
         else if (_selectedDatasetIndex != -1 && loadedDatasets[_selectedDatasetIndex] != _selectedContextDataset)
         {
-            // Sync selection if out of date
             _selectedContextDataset = loadedDatasets[_selectedDatasetIndex];
-            _editor.SetAssociatedDataset(_selectedContextDataset);
+            _interpreter.SetAssociatedDataset(_selectedContextDataset);
         }
 
         ImGui.Text("Context Dataset:");
@@ -204,7 +253,7 @@ public class GeoScriptTerminalWindow
             if (_selectedDatasetIndex >= 0 && _selectedDatasetIndex < loadedDatasets.Count)
             {
                 _selectedContextDataset = loadedDatasets[_selectedDatasetIndex];
-                _editor.SetAssociatedDataset(_selectedContextDataset);
+                _interpreter.SetAssociatedDataset(_selectedContextDataset);
             }
     }
 }
