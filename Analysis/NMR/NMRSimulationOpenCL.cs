@@ -302,50 +302,102 @@ public unsafe class NMRSimulationOpenCL : IDisposable
     }
 
     private int InitializeWalkersGPU()
+{
+    // CRITICAL FIX: Calculate material bounds first (like CPU version)
+    var (xMin, xMax, yMin, yMax, zMin, zMax) = CalculateMaterialBounds();
+    
+    if (xMin > xMax)
     {
-        var argIndex = 0;
-        var bufLabelVolume = _bufferLabelVolume;
-        var bufWalkerPosX = _bufferWalkerPosX;
-        var bufWalkerPosY = _bufferWalkerPosY;
-        var bufWalkerPosZ = _bufferWalkerPosZ;
-        var bufWalkerMag = _bufferWalkerMag;
-        var bufWalkerActive = _bufferWalkerActive;
-        var bufValidWalkerCount = _bufferValidWalkerCount;
-        var width = _width;
-        var height = _height;
-        var depth = _depth;
-        var poreMaterialID = _config.PoreMaterialID;
-        var seed = (uint)_config.RandomSeed;
-        var maxAttempts = 100;
-
-        _cl.SetKernelArg(_kernelInitialize, (uint)argIndex++, (nuint)sizeof(nint), &bufLabelVolume);
-        _cl.SetKernelArg(_kernelInitialize, (uint)argIndex++, (nuint)sizeof(nint), &bufWalkerPosX);
-        _cl.SetKernelArg(_kernelInitialize, (uint)argIndex++, (nuint)sizeof(nint), &bufWalkerPosY);
-        _cl.SetKernelArg(_kernelInitialize, (uint)argIndex++, (nuint)sizeof(nint), &bufWalkerPosZ);
-        _cl.SetKernelArg(_kernelInitialize, (uint)argIndex++, (nuint)sizeof(nint), &bufWalkerMag);
-        _cl.SetKernelArg(_kernelInitialize, (uint)argIndex++, (nuint)sizeof(nint), &bufWalkerActive);
-        _cl.SetKernelArg(_kernelInitialize, (uint)argIndex++, (nuint)sizeof(nint), &bufValidWalkerCount);
-        _cl.SetKernelArg(_kernelInitialize, (uint)argIndex++, sizeof(int), &width);
-        _cl.SetKernelArg(_kernelInitialize, (uint)argIndex++, sizeof(int), &height);
-        _cl.SetKernelArg(_kernelInitialize, (uint)argIndex++, sizeof(int), &depth);
-        _cl.SetKernelArg(_kernelInitialize, (uint)argIndex++, sizeof(byte), &poreMaterialID);
-        _cl.SetKernelArg(_kernelInitialize, (uint)argIndex++, sizeof(uint), &seed);
-        _cl.SetKernelArg(_kernelInitialize, (uint)argIndex++, sizeof(int), &maxAttempts);
-
-        var zero = 0;
-        _cl.EnqueueWriteBuffer(_commandQueue, bufValidWalkerCount, true, 0, sizeof(int), &zero, 0, null, null);
-
-        var globalSize = (nuint)_config.NumberOfWalkers;
-        _cl.EnqueueNdrangeKernel(_commandQueue, _kernelInitialize, 1, null, &globalSize, null, 0, null, null);
-        _cl.Finish(_commandQueue);
-
-        var validCount = 0;
-        _cl.EnqueueReadBuffer(_commandQueue, bufValidWalkerCount, true, 0, sizeof(int), &validCount, 0, null, null);
-
-        Logger.Log($"[NMRSimulationOpenCL] Initialized {validCount} walkers on GPU");
-        return validCount;
+        Logger.LogError($"[NMRSimulationOpenCL] No voxels found for material ID {_config.PoreMaterialID}");
+        return 0;
     }
+    
+    var materialWidth = xMax - xMin + 1;
+    var materialHeight = yMax - yMin + 1;
+    var materialDepth = zMax - zMin + 1;
+    var materialVolume = materialWidth * materialHeight * materialDepth;
+    
+    Logger.Log($"[NMRSimulationOpenCL] Material extent: [{xMin},{xMax}] x [{yMin},{yMax}] x [{zMin},{zMax}]");
+    Logger.Log($"[NMRSimulationOpenCL] Material occupies {materialVolume:N0} / {_width * _height * _depth:N0} voxels " +
+               $"({100.0 * materialVolume / (_width * _height * _depth):F1}% of volume)");
+    
+    var argIndex = 0;
+    var bufLabelVolume = _bufferLabelVolume;
+    var bufWalkerPosX = _bufferWalkerPosX;
+    var bufWalkerPosY = _bufferWalkerPosY;
+    var bufWalkerPosZ = _bufferWalkerPosZ;
+    var bufWalkerMag = _bufferWalkerMag;
+    var bufWalkerActive = _bufferWalkerActive;
+    var bufValidWalkerCount = _bufferValidWalkerCount;
+    var width = _width;
+    var height = _height;
+    var depth = _depth;
+    var poreMaterialID = _config.PoreMaterialID;
+    var seed = (uint)_config.RandomSeed;
+    var maxAttempts = 100;
 
+    _cl.SetKernelArg(_kernelInitialize, (uint)argIndex++, (nuint)sizeof(nint), &bufLabelVolume);
+    _cl.SetKernelArg(_kernelInitialize, (uint)argIndex++, (nuint)sizeof(nint), &bufWalkerPosX);
+    _cl.SetKernelArg(_kernelInitialize, (uint)argIndex++, (nuint)sizeof(nint), &bufWalkerPosY);
+    _cl.SetKernelArg(_kernelInitialize, (uint)argIndex++, (nuint)sizeof(nint), &bufWalkerPosZ);
+    _cl.SetKernelArg(_kernelInitialize, (uint)argIndex++, (nuint)sizeof(nint), &bufWalkerMag);
+    _cl.SetKernelArg(_kernelInitialize, (uint)argIndex++, (nuint)sizeof(nint), &bufWalkerActive);
+    _cl.SetKernelArg(_kernelInitialize, (uint)argIndex++, (nuint)sizeof(nint), &bufValidWalkerCount);
+    _cl.SetKernelArg(_kernelInitialize, (uint)argIndex++, sizeof(int), &width);
+    _cl.SetKernelArg(_kernelInitialize, (uint)argIndex++, sizeof(int), &height);
+    _cl.SetKernelArg(_kernelInitialize, (uint)argIndex++, sizeof(int), &depth);
+    _cl.SetKernelArg(_kernelInitialize, (uint)argIndex++, sizeof(byte), &poreMaterialID);
+    _cl.SetKernelArg(_kernelInitialize, (uint)argIndex++, sizeof(uint), &seed);
+    _cl.SetKernelArg(_kernelInitialize, (uint)argIndex++, sizeof(int), &maxAttempts);
+    // NEW: Pass material bounds to kernel
+    _cl.SetKernelArg(_kernelInitialize, (uint)argIndex++, sizeof(int), &xMin);
+    _cl.SetKernelArg(_kernelInitialize, (uint)argIndex++, sizeof(int), &xMax);
+    _cl.SetKernelArg(_kernelInitialize, (uint)argIndex++, sizeof(int), &yMin);
+    _cl.SetKernelArg(_kernelInitialize, (uint)argIndex++, sizeof(int), &yMax);
+    _cl.SetKernelArg(_kernelInitialize, (uint)argIndex++, sizeof(int), &zMin);
+    _cl.SetKernelArg(_kernelInitialize, (uint)argIndex++, sizeof(int), &zMax);
+
+    var zero = 0;
+    _cl.EnqueueWriteBuffer(_commandQueue, bufValidWalkerCount, true, 0, sizeof(int), &zero, 0, null, null);
+
+    var globalSize = (nuint)_config.NumberOfWalkers;
+    _cl.EnqueueNdrangeKernel(_commandQueue, _kernelInitialize, 1, null, &globalSize, null, 0, null, null);
+    _cl.Finish(_commandQueue);
+
+    var validCount = 0;
+    _cl.EnqueueReadBuffer(_commandQueue, bufValidWalkerCount, true, 0, sizeof(int), &validCount, 0, null, null);
+
+    var efficiency = validCount / (float)_config.NumberOfWalkers * 100;
+    Logger.Log($"[NMRSimulationOpenCL] Initialized {validCount} walkers on GPU ({efficiency:F1}% success rate)");
+    return validCount;
+}
+
+/// <summary>
+/// Calculate the bounding box of the selected material (same approach as PNM)
+/// </summary>
+private (int xMin, int xMax, int yMin, int yMax, int zMin, int zMax) CalculateMaterialBounds()
+{
+    int xMin = _width, xMax = -1;
+    int yMin = _height, yMax = -1;
+    int zMin = _depth, zMax = -1;
+    
+    for (var z = 0; z < _depth; z++)
+    for (var y = 0; y < _height; y++)
+    for (var x = 0; x < _width; x++)
+    {
+        if (_labelVolume[x, y, z] == _config.PoreMaterialID)
+        {
+            if (x < xMin) xMin = x;
+            if (x > xMax) xMax = x;
+            if (y < yMin) yMin = y;
+            if (y > yMax) yMax = y;
+            if (z < zMin) zMin = z;
+            if (z > zMax) zMax = z;
+        }
+    }
+    
+    return (xMin, xMax, yMin, yMax, zMin, zMax);
+}
     private void SimulateRandomWalkGPU(NMRResults results, IProgress<(float, string)> progress)
     {
         var stepSize = Math.Max(1,
@@ -689,7 +741,13 @@ __kernel void initializeWalkers(
     const int depth,
     const uchar poreMaterialID,
     const uint randomSeed,
-    const int maxAttempts)
+    const int maxAttempts,
+    const int xMin,      // NEW: Material bounds
+    const int xMax,
+    const int yMin,
+    const int yMax,
+    const int zMin,
+    const int zMax)
 {
     int walkerId = get_global_id(0);
     
@@ -698,15 +756,21 @@ __kernel void initializeWalkers(
     int attempts = 0;
     bool found = false;
     
+    // CRITICAL FIX: Calculate material dimensions
+    int matWidth = xMax - xMin + 1;
+    int matHeight = yMax - yMin + 1;
+    int matDepth = zMax - zMin + 1;
+    
     while (attempts < maxAttempts && !found) {
+        // Generate random position WITHIN material bounds
         rngState = xorshift(rngState);
-        int x = rngState % width;
+        int x = xMin + (rngState % matWidth);
         
         rngState = xorshift(rngState);
-        int y = rngState % height;
+        int y = yMin + (rngState % matHeight);
         
         rngState = xorshift(rngState);
-        int z = rngState % depth;
+        int z = zMin + (rngState % matDepth);
         
         uchar materialID = getLabelValue(labelVolume, x, y, z, width, height, depth);
         

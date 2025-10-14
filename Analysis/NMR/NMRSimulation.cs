@@ -117,17 +117,36 @@ public class NMRSimulation
 
     private Walker[] InitializeWalkers()
     {
+        // CRITICAL FIX: Calculate material extent FIRST (like PNM does)
+        var (xMin, xMax, yMin, yMax, zMin, zMax) = CalculateMaterialBounds();
+        
+        if (xMin > xMax)
+        {
+            Logger.LogError($"[NMRSimulation] No voxels found for material ID {_config.PoreMaterialID}");
+            return Array.Empty<Walker>();
+        }
+        
+        var materialWidth = xMax - xMin + 1;
+        var materialHeight = yMax - yMin + 1;
+        var materialDepth = zMax - zMin + 1;
+        var materialVolume = materialWidth * materialHeight * materialDepth;
+        
+        Logger.Log($"[NMRSimulation] Material extent: [{xMin},{xMax}] x [{yMin},{yMax}] x [{zMin},{zMax}]");
+        Logger.Log($"[NMRSimulation] Material occupies {materialVolume:N0} / {_width * _height * _depth:N0} voxels " +
+                   $"({100.0 * materialVolume / (_width * _height * _depth):F1}% of volume)");
+
         var walkers = new List<Walker>();
         var maxAttempts = _config.NumberOfWalkers * 10;
         var attempts = 0;
 
         Logger.Log($"[NMRSimulation] Finding valid starting positions for {_config.NumberOfWalkers} walkers...");
 
+        // Search only within material bounds (MUCH more efficient!)
         while (walkers.Count < _config.NumberOfWalkers && attempts < maxAttempts)
         {
-            var x = _random.Next(0, _width);
-            var y = _random.Next(0, _height);
-            var z = _random.Next(0, _depth);
+            var x = _random.Next(xMin, xMax + 1);  // ✓ Only search material region
+            var y = _random.Next(yMin, yMax + 1);
+            var z = _random.Next(zMin, zMax + 1);
 
             // Only start walkers in PORE SPACE (not matrix)
             if (_labelVolume[x, y, z] == _config.PoreMaterialID)
@@ -143,10 +162,36 @@ public class NMRSimulation
             attempts++;
         }
 
-        Logger.Log($"[NMRSimulation] Initialized {walkers.Count} walkers in {attempts} attempts");
+        var efficiency = walkers.Count / (float)attempts * 100;
+        Logger.Log($"[NMRSimulation] Initialized {walkers.Count} walkers in {attempts} attempts ({efficiency:F1}% efficiency)");
         return walkers.ToArray();
     }
-
+    /// <summary>
+    /// Calculate the bounding box of the selected material (same approach as PNM)
+    /// </summary>
+    private (int xMin, int xMax, int yMin, int yMax, int zMin, int zMax) CalculateMaterialBounds()
+    {
+        int xMin = _width, xMax = -1;
+        int yMin = _height, yMax = -1;
+        int zMin = _depth, zMax = -1;
+        
+        for (var z = 0; z < _depth; z++)
+        for (var y = 0; y < _height; y++)
+        for (var x = 0; x < _width; x++)
+        {
+            if (_labelVolume[x, y, z] == _config.PoreMaterialID)
+            {
+                if (x < xMin) xMin = x;
+                if (x > xMax) xMax = x;
+                if (y < yMin) yMin = y;
+                if (y > yMax) yMax = y;
+                if (z < zMin) zMin = z;
+                if (z > zMax) zMax = z;
+            }
+        }
+        
+        return (xMin, xMax, yMin, yMax, zMin, zMax);
+    }
     private void SimulateRandomWalk(Walker[] walkers, NMRResults results, IProgress<(float, string)> progress)
     {
         // Calculate step size based on diffusion coefficient
