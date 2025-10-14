@@ -83,7 +83,7 @@ public class PNMDataset : Dataset, ISerializableDataset
     public float DarcyPermeability { get; set; } // mD
     public float NavierStokesPermeability { get; set; } // mD
     public float LatticeBoltzmannPermeability { get; set; } // mD
-    
+
     // --- NEW: Diffusivity Properties ---
     public float BulkDiffusivity { get; set; } // m²/s
     public float EffectiveDiffusivity { get; set; } // m²/s

@@ -21,27 +21,25 @@ public class VelocityTomographyGenerator : IDisposable
     {
         var smoothedData = new float[data.Length];
         for (var y = 0; y < height; y++)
+        for (var x = 0; x < width; x++)
         {
-            for (var x = 0; x < width; x++)
+            float sum = 0;
+            var count = 0;
+            for (var j = -1; j <= 1; j++)
+            for (var i = -1; i <= 1; i++)
             {
-                float sum = 0;
-                int count = 0;
-                for (var j = -1; j <= 1; j++)
+                var nx = x + i;
+                var ny = y + j;
+                if (nx >= 0 && nx < width && ny >= 0 && ny < height)
                 {
-                    for (var i = -1; i <= 1; i++)
-                    {
-                        var nx = x + i;
-                        var ny = y + j;
-                        if (nx >= 0 && nx < width && ny >= 0 && ny < height)
-                        {
-                            sum += data[ny * width + nx];
-                            count++;
-                        }
-                    }
+                    sum += data[ny * width + nx];
+                    count++;
                 }
-                smoothedData[y * width + x] = count > 0 ? sum / count : 0;
             }
+
+            smoothedData[y * width + x] = count > 0 ? sum / count : 0;
         }
+
         return smoothedData;
     }
 
@@ -122,7 +120,7 @@ public class VelocityTomographyGenerator : IDisposable
         // --- FIX START: Apply smoothing to reduce checkerboarding ---
         var smoothedVelocities = ApplyBoxBlur(velocities, width, height);
         // --- FIX END ---
-        
+
         // Step 2: Calculate min/max based on filtering AND visible material
         var minVelForScale = float.MaxValue;
         var maxVelForScale = float.MinValue;

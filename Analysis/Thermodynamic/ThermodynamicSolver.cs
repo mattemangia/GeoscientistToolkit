@@ -21,7 +21,7 @@ using MathNet.Numerics.LinearAlgebra;
 namespace GeoscientistToolkit.Business.Thermodynamics;
 
 /// <summary>
-/// ENHANCEMENT: Represents a surface site for complexation modeling.
+///     ENHANCEMENT: Represents a surface site for complexation modeling.
 /// </summary>
 public class SurfaceSite
 {
@@ -55,13 +55,13 @@ public class ThermodynamicState
 
     /// <summary>pH of the system (if aqueous)</summary>
     public double pH { get; set; } = 7.0;
-    
+
     /// <summary>pe of the system (redox potential)</summary>
     public double pe { get; set; } = 4.0;
 
     /// <summary>Ionic strength in mol/kg (for aqueous systems)</summary>
     public double IonicStrength_molkg { get; set; }
-    
+
     // ENHANCEMENT: Properties for surface complexation
     public List<SurfaceSite> SurfaceSites { get; set; } = new();
     public double? SurfaceCharge_mol_L { get; set; }
@@ -92,7 +92,7 @@ public class ChemicalReaction
 
     /// <summary>Standard entropy change (J/mol·K) at 298.15 K</summary>
     public double DeltaS0_J_molK { get; set; }
-    
+
     /// <summary>Standard heat capacity change (J/mol·K) at 298.15K</summary>
     public double DeltaCp0_J_molK { get; set; }
 
@@ -103,10 +103,10 @@ public class ChemicalReaction
     public ReactionType Type { get; set; }
 
     /// <summary>
-    /// ENHANCEMENT: Calculate equilibrium constant at a given temperature using the integrated van't Hoff equation.
-    /// This form includes the effect of heat capacity and is more accurate over wide temperature ranges.
-    /// logK(T) = logK(Tr) - (ΔH°/R) * (1/T - 1/Tr) / ln(10) + (ΔCp°/R) * [(Tr/T - 1) - ln(Tr/T)] / ln(10)
-    /// Source: Anderson & Crerar, 1993. Thermodynamics in Geochemistry, Oxford University Press.
+    ///     ENHANCEMENT: Calculate equilibrium constant at a given temperature using the integrated van't Hoff equation.
+    ///     This form includes the effect of heat capacity and is more accurate over wide temperature ranges.
+    ///     logK(T) = logK(Tr) - (ΔH°/R) * (1/T - 1/Tr) / ln(10) + (ΔCp°/R) * [(Tr/T - 1) - ln(Tr/T)] / ln(10)
+    ///     Source: Anderson & Crerar, 1993. Thermodynamics in Geochemistry, Oxford University Press.
     /// </summary>
     public double CalculateLogK(double temperature_K)
     {
@@ -117,20 +117,20 @@ public class ChemicalReaction
             return LogK_25C;
 
         // Term 1: logK at reference temperature
-        double logK_T = LogK_25C;
-        
+        var logK_T = LogK_25C;
+
         // Term 2: Enthalpy contribution (classic van't Hoff)
         if (Math.Abs(DeltaH0_kJ_mol) > 1e-9)
         {
-            double deltaH_J = DeltaH0_kJ_mol * 1000.0;
-            logK_T -= (deltaH_J / (R * Math.Log(10))) * (1.0 / temperature_K - 1.0 / T_ref);
+            var deltaH_J = DeltaH0_kJ_mol * 1000.0;
+            logK_T -= deltaH_J / (R * Math.Log(10)) * (1.0 / temperature_K - 1.0 / T_ref);
         }
 
         // Term 3: Heat capacity contribution
         if (Math.Abs(DeltaCp0_J_molK) > 1e-9)
         {
-            double deltaCp = DeltaCp0_J_molK;
-            logK_T += (deltaCp / (R * Math.Log(10))) * ((T_ref / temperature_K) - 1.0 - Math.Log(T_ref / temperature_K));
+            var deltaCp = DeltaCp0_J_molK;
+            logK_T += deltaCp / (R * Math.Log(10)) * (T_ref / temperature_K - 1.0 - Math.Log(T_ref / temperature_K));
         }
 
         return logK_T;
@@ -158,6 +158,9 @@ public class ThermodynamicSolver
     private const double TOLERANCE_MOLES = 1e-12;
     private const double TOLERANCE_GIBBS = 1e-10;
     private const int MAX_ITERATIONS = 100;
+
+
+    internal static readonly double R_GAS_CONSTANT = 8.314462618e-3; // kJ/(mol·K)
     private readonly ActivityCoefficientCalculator _activityCalculator;
     private readonly CompoundLibrary _compoundLibrary;
     private readonly ReactionGenerator _reactionGenerator;
@@ -204,15 +207,15 @@ public class ThermodynamicSolver
     }
 
     /// <summary>
-    /// ENHANCEMENT: Calculate saturation indices for all minerals, now including solid solutions.
-    /// SI = log10(IAP/K)
-    /// For solid solutions, SI is calculated for each end-member: SI_i = log10(IAP_i / (K_i * a_i))
-    /// where a_i is the activity of the end-member in the solid phase.
+    ///     ENHANCEMENT: Calculate saturation indices for all minerals, now including solid solutions.
+    ///     SI = log10(IAP/K)
+    ///     For solid solutions, SI is calculated for each end-member: SI_i = log10(IAP_i / (K_i * a_i))
+    ///     where a_i is the activity of the end-member in the solid phase.
     /// </summary>
     public Dictionary<string, double> CalculateSaturationIndices(ThermodynamicState state)
     {
         var saturationIndices = new Dictionary<string, double>();
-        
+
         // Handle pure minerals
         var mineralReactions = _reactionGenerator.GenerateDissolutionReactions(state);
         foreach (var reaction in mineralReactions)
@@ -227,10 +230,10 @@ public class ThermodynamicSolver
         var solidSolutions = _compoundLibrary.SolidSolutions;
         foreach (var ss in solidSolutions)
         {
-            double totalSSMoles = ss.EndMembers.Sum(em => state.SpeciesMoles.GetValueOrDefault(em, 0.0));
+            var totalSSMoles = ss.EndMembers.Sum(em => state.SpeciesMoles.GetValueOrDefault(em, 0.0));
             if (totalSSMoles < TOLERANCE_MOLES) continue;
 
-            for (int i = 0; i < ss.EndMembers.Count; i++)
+            for (var i = 0; i < ss.EndMembers.Count; i++)
             {
                 var endMemberName = ss.EndMembers[i];
                 var endMemberCompound = _compoundLibrary.Find(endMemberName);
@@ -244,15 +247,14 @@ public class ThermodynamicSolver
 
                 // Calculate activity of the end-member in the solid solution
                 var moleFraction = state.SpeciesMoles.GetValueOrDefault(endMemberName, 0.0) / totalSSMoles;
-                double activityCoeff = ss.MixingModel == SolidSolutionMixingModel.Ideal 
-                    ? 1.0 
-                    : Math.Exp(ss.InteractionParameters[i] * Math.Pow(1 - moleFraction, 2) / (ThermodynamicSolver.R_GAS_CONSTANT * state.Temperature_K));
+                var activityCoeff = ss.MixingModel == SolidSolutionMixingModel.Ideal
+                    ? 1.0
+                    : Math.Exp(ss.InteractionParameters[i] * Math.Pow(1 - moleFraction, 2) /
+                               (R_GAS_CONSTANT * state.Temperature_K));
                 var activity_solid = moleFraction * activityCoeff;
 
                 if (activity_solid > 1e-20)
-                {
-                   saturationIndices[endMemberName] = logIAP - (logK + Math.Log10(activity_solid));
-                }
+                    saturationIndices[endMemberName] = logIAP - (logK + Math.Log10(activity_solid));
             }
         }
 
@@ -263,28 +265,25 @@ public class ThermodynamicSolver
     {
         var logIAP = 0.0;
         foreach (var (species, coeff) in reaction.Stoichiometry)
-        {
             // Only consider products (aqueous species) for IAP
             if (coeff > 0)
             {
                 if (state.Activities.TryGetValue(species, out var activity))
                     logIAP += coeff * Math.Log10(Math.Max(activity, 1e-30));
                 else
-                {
                     // If an ion is missing, IAP is effectively zero, SI is -infinity
                     return double.NegativeInfinity;
-                }
             }
-        }
+
         return logIAP;
     }
 
     /// <summary>
-    /// Selects a set of basis species from a list of all available species.
-    /// Basis species are the fundamental components (e.g., primary ions, neutral molecules, surface sites)
-    /// from which all other (secondary) species can be formed via chemical reactions.
-    /// This selection relies on the `IsPrimaryElementSpecies` and `IsPrimarySurfaceSite` flags
-    /// defined for each compound in the CompoundLibrary.
+    ///     Selects a set of basis species from a list of all available species.
+    ///     Basis species are the fundamental components (e.g., primary ions, neutral molecules, surface sites)
+    ///     from which all other (secondary) species can be formed via chemical reactions.
+    ///     This selection relies on the `IsPrimaryElementSpecies` and `IsPrimarySurfaceSite` flags
+    ///     defined for each compound in the CompoundLibrary.
     /// </summary>
     /// <param name="allSpecies">A list containing the names of all species present in the system.</param>
     /// <returns>A list of names for the selected basis species.</returns>
@@ -296,321 +295,311 @@ public class ThermodynamicSolver
         {
             var compound = _compoundLibrary.Find(speciesName);
             if (compound != null)
-            {
                 // A species is chosen for the basis if it is designated as a "primary"
                 // representative for an element (e.g., Na+, Ca2+, H+, e-) or if it is a
                 // primary surface site (e.g., >SOH).
                 if (compound.IsPrimaryElementSpecies || compound.IsPrimarySurfaceSite)
-                {
                     basisSpecies.Add(speciesName);
-                }
-            }
         }
 
         // If no basis species are found, the system is ill-defined, and the solver cannot proceed.
         // This usually indicates a problem with the compound library's definitions.
         if (basisSpecies.Count == 0 && allSpecies.Any())
-        {
-            Logger.LogWarning("[ThermodynamicSolver] Could not identify any basis species from the provided list. Speciation is likely to fail.");
-        }
+            Logger.LogWarning(
+                "[ThermodynamicSolver] Could not identify any basis species from the provided list. Speciation is likely to fail.");
 
         return basisSpecies.ToList();
     }
+
     /// <summary>
-/// IMPROVED: Better initial guess for aqueous speciation solver.
-/// Replaces arbitrary 1e-8 with chemically informed estimates.
-/// Source: Bethke, 2008. Geochemical Modeling, Section 4.4.
-/// </summary>
-public ThermodynamicState SolveSpeciation(ThermodynamicState state)
-{
-    Logger.Log("[ThermodynamicSolver] Solving aqueous speciation");
-
-    var reactions = _reactionGenerator.GenerateComplexationReactions(state);
-    reactions.AddRange(_reactionGenerator.GenerateAcidBaseReactions(state));
-    reactions.AddRange(_reactionGenerator.GenerateRedoxReactions(state));
-    reactions.AddRange(_reactionGenerator.GenerateSurfaceComplexationReactions(state));
-
-    var species = GetAllAqueousAndSurfaceSpecies(state, reactions);
-    var basisSpecies = SelectBasisSpecies(species);
-    var secondarySpecies = species.Except(basisSpecies).ToList();
-
-    var iteration = 0;
-    var converged = false;
-
-    // IMPROVED: Chemically informed initial guess
-    InitializeBasisSpeciesActivities(state, basisSpecies);
-
-    while (iteration < MAX_ITERATIONS && !converged)
+    ///     IMPROVED: Better initial guess for aqueous speciation solver.
+    ///     Replaces arbitrary 1e-8 with chemically informed estimates.
+    ///     Source: Bethke, 2008. Geochemical Modeling, Section 4.4.
+    /// </summary>
+    public ThermodynamicState SolveSpeciation(ThermodynamicState state)
     {
-        UpdateIonicStrength(state);
-        _activityCalculator.CalculateActivityCoefficients(state);
+        Logger.Log("[ThermodynamicSolver] Solving aqueous speciation");
 
-        UpdateSecondarySpecies(state, reactions, secondarySpecies);
+        var reactions = _reactionGenerator.GenerateComplexationReactions(state);
+        reactions.AddRange(_reactionGenerator.GenerateAcidBaseReactions(state));
+        reactions.AddRange(_reactionGenerator.GenerateRedoxReactions(state));
+        reactions.AddRange(_reactionGenerator.GenerateSurfaceComplexationReactions(state));
 
-        var (jacobian, residual) = BuildSpeciationSystem(state, basisSpecies, secondarySpecies, reactions);
+        var species = GetAllAqueousAndSurfaceSpecies(state, reactions);
+        var basisSpecies = SelectBasisSpecies(species);
+        var secondarySpecies = species.Except(basisSpecies).ToList();
 
-        Vector<double> delta;
-        try
+        var iteration = 0;
+        var converged = false;
+
+        // IMPROVED: Chemically informed initial guess
+        InitializeBasisSpeciesActivities(state, basisSpecies);
+
+        while (iteration < MAX_ITERATIONS && !converged)
         {
-            delta = jacobian.Solve(-residual);
-        }
-        catch (Exception ex)
-        {
-            Logger.LogError($"[ThermodynamicSolver] Linear solve failed: {ex.Message}");
-            
-            // Fallback: Use damped steepest descent
-            delta = -residual * 0.01;
+            UpdateIonicStrength(state);
+            _activityCalculator.CalculateActivityCoefficients(state);
+
+            UpdateSecondarySpecies(state, reactions, secondarySpecies);
+
+            var (jacobian, residual) = BuildSpeciationSystem(state, basisSpecies, secondarySpecies, reactions);
+
+            Vector<double> delta;
+            try
+            {
+                delta = jacobian.Solve(-residual);
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError($"[ThermodynamicSolver] Linear solve failed: {ex.Message}");
+
+                // Fallback: Use damped steepest descent
+                delta = -residual * 0.01;
+            }
+
+            var dampingFactor = CalculateDampingFactor(delta, state, basisSpecies);
+            UpdateBasisSpeciesConcentrations(state, delta, dampingFactor, basisSpecies);
+
+            UpdateAllSpeciesMolesFromActivities(state, species);
+
+            converged = residual.L2Norm() < TOLERANCE_MOLES;
+            iteration++;
+
+            if (iteration % 20 == 0)
+                Logger.Log($"[ThermodynamicSolver] Iteration {iteration}: ||residual|| = {residual.L2Norm():E3}");
         }
 
-        var dampingFactor = CalculateDampingFactor(delta, state, basisSpecies);
-        UpdateBasisSpeciesConcentrations(state, delta, dampingFactor, basisSpecies);
-        
-        UpdateAllSpeciesMolesFromActivities(state, species);
+        if (!converged)
+            Logger.LogWarning($"[ThermodynamicSolver] Speciation did not converge after {MAX_ITERATIONS} iterations");
+        else
+            Logger.Log($"[ThermodynamicSolver] Speciation converged in {iteration} iterations");
 
-        converged = residual.L2Norm() < TOLERANCE_MOLES;
-        iteration++;
-        
-        if (iteration % 20 == 0)
-        {
-            Logger.Log($"[ThermodynamicSolver] Iteration {iteration}: ||residual|| = {residual.L2Norm():E3}");
-        }
+        CalculateAqueousProperties(state);
+        return state;
     }
 
-    if (!converged)
-        Logger.LogWarning($"[ThermodynamicSolver] Speciation did not converge after {MAX_ITERATIONS} iterations");
-    else
-        Logger.Log($"[ThermodynamicSolver] Speciation converged in {iteration} iterations");
-
-    CalculateAqueousProperties(state);
-    return state;
-}
-/// <summary>
-/// COMPLETE: Initialize basis species activities using chemical intuition.
-/// Much better than arbitrary 1e-8 for all species.
-/// </summary>
-private void InitializeBasisSpeciesActivities(ThermodynamicState state, List<string> basisSpecies)
-{
-    foreach (var speciesName in basisSpecies)
+    /// <summary>
+    ///     COMPLETE: Initialize basis species activities using chemical intuition.
+    ///     Much better than arbitrary 1e-8 for all species.
+    /// </summary>
+    private void InitializeBasisSpeciesActivities(ThermodynamicState state, List<string> basisSpecies)
     {
-        var compound = _compoundLibrary.Find(speciesName);
-        if (compound == null) continue;
-        
-        // Check if activity already exists from previous calculations
-        if (state.Activities.ContainsKey(speciesName) && state.Activities[speciesName] > 0)
-            continue;
-        
-        // Use chemically informed initial guesses
-        if (speciesName == "H⁺" || speciesName == "H+")
+        foreach (var speciesName in basisSpecies)
         {
-            // Initialize from pH (if available) or assume neutral
-            var pH = state.pH > 0 ? state.pH : 7.0;
-            state.Activities[speciesName] = Math.Pow(10, -pH);
-        }
-        else if (speciesName == "OH⁻" || speciesName == "OH-")
-        {
-            // From water dissociation: Kw = [H+][OH-] = 10^-14
-            var h_activity = state.Activities.GetValueOrDefault("H⁺", 1e-7);
-            state.Activities[speciesName] = 1e-14 / h_activity;
-        }
-        else if (speciesName == "e⁻" || speciesName == "e-")
-        {
-            // Initialize from pe (if available) or assume oxidizing
-            var pe = state.pe > 0 ? state.pe : 4.0;
-            state.Activities[speciesName] = Math.Pow(10, -pe);
-        }
-        else if (speciesName == "H₂O" || speciesName == "H2O")
-        {
-            // Water activity ~ 1
-            state.Activities[speciesName] = 1.0;
-        }
-        else if (compound.IonicCharge.HasValue)
-        {
-            // For ions: estimate from total elemental composition
-            var formula = _reactionGenerator.ParseChemicalFormula(compound.ChemicalFormula); // FIX: Added _reactionGenerator.
-            var primaryElement = formula.Keys.FirstOrDefault(k => k != "O" && k != "H");
-            
-            if (primaryElement != null && state.ElementalComposition.ContainsKey(primaryElement))
+            var compound = _compoundLibrary.Find(speciesName);
+            if (compound == null) continue;
+
+            // Check if activity already exists from previous calculations
+            if (state.Activities.ContainsKey(speciesName) && state.Activities[speciesName] > 0)
+                continue;
+
+            // Use chemically informed initial guesses
+            if (speciesName == "H⁺" || speciesName == "H+")
             {
-                var totalMoles = state.ElementalComposition[primaryElement];
-                var molality = totalMoles / state.Volume_L;
-                
-                // Start with assumption that primary ion has 50% of total element
-                state.Activities[speciesName] = molality * 0.5;
+                // Initialize from pH (if available) or assume neutral
+                var pH = state.pH > 0 ? state.pH : 7.0;
+                state.Activities[speciesName] = Math.Pow(10, -pH);
+            }
+            else if (speciesName == "OH⁻" || speciesName == "OH-")
+            {
+                // From water dissociation: Kw = [H+][OH-] = 10^-14
+                var h_activity = state.Activities.GetValueOrDefault("H⁺", 1e-7);
+                state.Activities[speciesName] = 1e-14 / h_activity;
+            }
+            else if (speciesName == "e⁻" || speciesName == "e-")
+            {
+                // Initialize from pe (if available) or assume oxidizing
+                var pe = state.pe > 0 ? state.pe : 4.0;
+                state.Activities[speciesName] = Math.Pow(10, -pe);
+            }
+            else if (speciesName == "H₂O" || speciesName == "H2O")
+            {
+                // Water activity ~ 1
+                state.Activities[speciesName] = 1.0;
+            }
+            else if (compound.IonicCharge.HasValue)
+            {
+                // For ions: estimate from total elemental composition
+                var formula =
+                    _reactionGenerator.ParseChemicalFormula(compound.ChemicalFormula); // FIX: Added _reactionGenerator.
+                var primaryElement = formula.Keys.FirstOrDefault(k => k != "O" && k != "H");
+
+                if (primaryElement != null && state.ElementalComposition.ContainsKey(primaryElement))
+                {
+                    var totalMoles = state.ElementalComposition[primaryElement];
+                    var molality = totalMoles / state.Volume_L;
+
+                    // Start with assumption that primary ion has 50% of total element
+                    state.Activities[speciesName] = molality * 0.5;
+                }
+                else
+                {
+                    // Generic low concentration
+                    state.Activities[speciesName] = 1e-8;
+                }
             }
             else
             {
-                // Generic low concentration
-                state.Activities[speciesName] = 1e-8;
+                // Neutral species: low concentration
+                state.Activities[speciesName] = 1e-10;
             }
+
+            // Ensure minimum value for numerical stability
+            state.Activities[speciesName] = Math.Max(state.Activities[speciesName], 1e-30);
         }
-        else
-        {
-            // Neutral species: low concentration
-            state.Activities[speciesName] = 1e-10;
-        }
-        
-        // Ensure minimum value for numerical stability
-        state.Activities[speciesName] = Math.Max(state.Activities[speciesName], 1e-30);
     }
-}
-/// <summary>
-/// IMPROVED: Better damping factor calculation with adaptive scaling.
-/// Prevents oscillations in highly non-linear systems.
-/// </summary>
-private double CalculateDampingFactor(Vector<double> delta, ThermodynamicState state, List<string> basisSpecies)
-{
-    double maxAllowedChange = 0.7; // Don't let activities change by more than factor of 2 (0.7 in log space)
-    double dampingFactor = 1.0;
-    
-    for (int i = 0; i < delta.Count; i++)
+
+    /// <summary>
+    ///     IMPROVED: Better damping factor calculation with adaptive scaling.
+    ///     Prevents oscillations in highly non-linear systems.
+    /// </summary>
+    private double CalculateDampingFactor(Vector<double> delta, ThermodynamicState state, List<string> basisSpecies)
     {
-        var speciesName = basisSpecies[i];
-        var currentActivity = state.Activities.GetValueOrDefault(speciesName, 1e-10);
-        
-        // delta is in ln(activity) space, so actual change is exp(delta)
-        // We want: |ln(a_new/a_old)| < maxAllowedChange
-        // Which means: |delta_damped| < maxAllowedChange
-        
-        if (Math.Abs(delta[i]) > maxAllowedChange)
+        var maxAllowedChange = 0.7; // Don't let activities change by more than factor of 2 (0.7 in log space)
+        var dampingFactor = 1.0;
+
+        for (var i = 0; i < delta.Count; i++)
         {
-            var requiredDamping = maxAllowedChange / Math.Abs(delta[i]);
-            dampingFactor = Math.Min(dampingFactor, requiredDamping);
-        }
-        
-        // Also prevent activities from going negative (in real space)
-        // ln(a_new) = ln(a_old) + damp*delta
-        // a_new = a_old * exp(damp*delta)
-        // We need a_new > 0, which is always satisfied, but we want a_new > 1e-30
-        var projectedActivity = currentActivity * Math.Exp(dampingFactor * delta[i]);
-        if (projectedActivity < 1e-30)
-        {
-            // Reduce damping to keep activity above floor
-            var maxDelta = Math.Log(1e-30 / currentActivity);
-            if (delta[i] < maxDelta)
+            var speciesName = basisSpecies[i];
+            var currentActivity = state.Activities.GetValueOrDefault(speciesName, 1e-10);
+
+            // delta is in ln(activity) space, so actual change is exp(delta)
+            // We want: |ln(a_new/a_old)| < maxAllowedChange
+            // Which means: |delta_damped| < maxAllowedChange
+
+            if (Math.Abs(delta[i]) > maxAllowedChange)
             {
-                dampingFactor = Math.Min(dampingFactor, maxDelta / delta[i]);
+                var requiredDamping = maxAllowedChange / Math.Abs(delta[i]);
+                dampingFactor = Math.Min(dampingFactor, requiredDamping);
+            }
+
+            // Also prevent activities from going negative (in real space)
+            // ln(a_new) = ln(a_old) + damp*delta
+            // a_new = a_old * exp(damp*delta)
+            // We need a_new > 0, which is always satisfied, but we want a_new > 1e-30
+            var projectedActivity = currentActivity * Math.Exp(dampingFactor * delta[i]);
+            if (projectedActivity < 1e-30)
+            {
+                // Reduce damping to keep activity above floor
+                var maxDelta = Math.Log(1e-30 / currentActivity);
+                if (delta[i] < maxDelta) dampingFactor = Math.Min(dampingFactor, maxDelta / delta[i]);
             }
         }
-    }
-    
-    // Adaptive damping: increase damping if residual is decreasing
-    // This helps convergence in the final iterations
-    dampingFactor = Math.Max(0.01, dampingFactor); // Minimum 1% of full Newton step
-    
-    return dampingFactor;
-}
 
-/// <summary>
-/// IMPROVED: Update species concentrations with better handling of extreme values.
-/// </summary>
-private void UpdateBasisSpeciesConcentrations(ThermodynamicState state, Vector<double> delta, 
-    double dampingFactor, List<string> basisSpecies)
-{
-    for (int i = 0; i < basisSpecies.Count; i++)
-    {
-        var species = basisSpecies[i];
-        var currentActivity = state.Activities.GetValueOrDefault(species, 1e-10);
-        
-        // Update: ln(a_new) = ln(a_old) + damp*delta
-        var newLogActivity = Math.Log(currentActivity) + dampingFactor * delta[i];
-        
-        // Clamp to reasonable range
-        newLogActivity = Math.Max(-100, Math.Min(10, newLogActivity)); // 10^-100 to 10^10
-        
-        state.Activities[species] = Math.Exp(newLogActivity);
-    }
-}
+        // Adaptive damping: increase damping if residual is decreasing
+        // This helps convergence in the final iterations
+        dampingFactor = Math.Max(0.01, dampingFactor); // Minimum 1% of full Newton step
 
-/// <summary>
-/// IMPROVED: Ionic strength calculation with better handling of very dilute solutions.
-/// </summary>
-private void UpdateIonicStrength(ThermodynamicState state)
-{
-    // I = 0.5 * Σ(m_i * z_i²)
-    double I = 0.0;
-    double solventMass_kg = state.Volume_L; // Approximation
-    
-    // Get better solvent mass estimate
-    var (_, rho_water) = WaterPropertiesIAPWS.GetWaterPropertiesCached(state.Temperature_K, state.Pressure_bar);
-    solventMass_kg = state.Volume_L * (rho_water / 1000.0);
-    
-    foreach (var (species, moles) in state.SpeciesMoles)
+        return dampingFactor;
+    }
+
+    /// <summary>
+    ///     IMPROVED: Update species concentrations with better handling of extreme values.
+    /// </summary>
+    private void UpdateBasisSpeciesConcentrations(ThermodynamicState state, Vector<double> delta,
+        double dampingFactor, List<string> basisSpecies)
     {
-        var compound = _compoundLibrary.Find(species);
-        if (compound?.IonicCharge != null && compound.Phase == CompoundPhase.Aqueous)
+        for (var i = 0; i < basisSpecies.Count; i++)
         {
-            var molality = moles / solventMass_kg;
-            var z = compound.IonicCharge.Value;
-            I += 0.5 * molality * z * z;
+            var species = basisSpecies[i];
+            var currentActivity = state.Activities.GetValueOrDefault(species, 1e-10);
+
+            // Update: ln(a_new) = ln(a_old) + damp*delta
+            var newLogActivity = Math.Log(currentActivity) + dampingFactor * delta[i];
+
+            // Clamp to reasonable range
+            newLogActivity = Math.Max(-100, Math.Min(10, newLogActivity)); // 10^-100 to 10^10
+
+            state.Activities[species] = Math.Exp(newLogActivity);
         }
     }
-    
-    // For very dilute solutions, add minimum ionic strength for numerical stability
-    // This prevents division by zero in activity coefficient calculations
-    state.IonicStrength_molkg = Math.Max(I, 1e-10);
-    
-    // Warn if ionic strength is very high
-    if (I > 6.0)
-    {
-        Logger.LogWarning($"[ThermodynamicSolver] Very high ionic strength: {I:F2} mol/kg. " +
-                         "Pitzer model may be less accurate above 6 M.");
-    }
-}
 
-/// <summary>
-/// IMPROVED: Calculate aqueous properties with validation.
-/// </summary>
-private void CalculateAqueousProperties(ThermodynamicState state)
-{
-    // Calculate pH from H+ activity
-    var hActivity = state.Activities.GetValueOrDefault("H⁺", 
-                    state.Activities.GetValueOrDefault("H+", 1e-7));
-    
-    state.pH = -Math.Log10(Math.Max(hActivity, 1e-14));
-    
-    // Validate pH is in reasonable range
-    if (state.pH < 0 || state.pH > 14)
+    /// <summary>
+    ///     IMPROVED: Ionic strength calculation with better handling of very dilute solutions.
+    /// </summary>
+    private void UpdateIonicStrength(ThermodynamicState state)
     {
-        Logger.LogWarning($"[ThermodynamicSolver] pH out of normal range: {state.pH:F2}");
+        // I = 0.5 * Σ(m_i * z_i²)
+        var I = 0.0;
+        var solventMass_kg = state.Volume_L; // Approximation
+
+        // Get better solvent mass estimate
+        var (_, rho_water) = WaterPropertiesIAPWS.GetWaterPropertiesCached(state.Temperature_K, state.Pressure_bar);
+        solventMass_kg = state.Volume_L * (rho_water / 1000.0);
+
+        foreach (var (species, moles) in state.SpeciesMoles)
+        {
+            var compound = _compoundLibrary.Find(species);
+            if (compound?.IonicCharge != null && compound.Phase == CompoundPhase.Aqueous)
+            {
+                var molality = moles / solventMass_kg;
+                var z = compound.IonicCharge.Value;
+                I += 0.5 * molality * z * z;
+            }
+        }
+
+        // For very dilute solutions, add minimum ionic strength for numerical stability
+        // This prevents division by zero in activity coefficient calculations
+        state.IonicStrength_molkg = Math.Max(I, 1e-10);
+
+        // Warn if ionic strength is very high
+        if (I > 6.0)
+            Logger.LogWarning($"[ThermodynamicSolver] Very high ionic strength: {I:F2} mol/kg. " +
+                              "Pitzer model may be less accurate above 6 M.");
     }
-    
-    // Calculate pe from e- activity
-    var eActivity = state.Activities.GetValueOrDefault("e⁻",
-                    state.Activities.GetValueOrDefault("e-", 1e-4));
-    
-    state.pe = -Math.Log10(Math.Max(eActivity, 1e-20));
-    
-    // Validate pe is in reasonable range
-    if (state.pe < -10 || state.pe > 20)
+
+    /// <summary>
+    ///     IMPROVED: Calculate aqueous properties with validation.
+    /// </summary>
+    private void CalculateAqueousProperties(ThermodynamicState state)
     {
-        Logger.LogWarning($"[ThermodynamicSolver] pe out of normal range: {state.pe:F2}");
+        // Calculate pH from H+ activity
+        var hActivity = state.Activities.GetValueOrDefault("H⁺",
+            state.Activities.GetValueOrDefault("H+", 1e-7));
+
+        state.pH = -Math.Log10(Math.Max(hActivity, 1e-14));
+
+        // Validate pH is in reasonable range
+        if (state.pH < 0 || state.pH > 14)
+            Logger.LogWarning($"[ThermodynamicSolver] pH out of normal range: {state.pH:F2}");
+
+        // Calculate pe from e- activity
+        var eActivity = state.Activities.GetValueOrDefault("e⁻",
+            state.Activities.GetValueOrDefault("e-", 1e-4));
+
+        state.pe = -Math.Log10(Math.Max(eActivity, 1e-20));
+
+        // Validate pe is in reasonable range
+        if (state.pe < -10 || state.pe > 20)
+            Logger.LogWarning($"[ThermodynamicSolver] pe out of normal range: {state.pe:F2}");
+
+        // Calculate ionic strength
+        UpdateIonicStrength(state);
+
+        // Log summary
+        Logger.Log(
+            $"[ThermodynamicSolver] Final: pH={state.pH:F2}, pe={state.pe:F2}, I={state.IonicStrength_molkg:F4} M");
     }
-    
-    // Calculate ionic strength
-    UpdateIonicStrength(state);
-    
-    // Log summary
-    Logger.Log($"[ThermodynamicSolver] Final: pH={state.pH:F2}, pe={state.pe:F2}, I={state.IonicStrength_molkg:F4} M");
-}
+
     private List<string> GetAllAqueousAndSurfaceSpecies(ThermodynamicState state, List<ChemicalReaction> reactions)
     {
         var species = new HashSet<string>();
-        
+
         foreach (var s in state.SpeciesMoles.Keys)
         {
             var compound = _compoundLibrary.Find(s);
             if (compound?.Phase == CompoundPhase.Aqueous || compound?.Phase == CompoundPhase.Surface)
                 species.Add(s);
         }
+
         foreach (var reaction in reactions)
+        foreach (var s in reaction.Stoichiometry.Keys)
         {
-            foreach (var s in reaction.Stoichiometry.Keys)
-            {
-                var compound = _compoundLibrary.Find(s);
-                if (compound?.Phase == CompoundPhase.Aqueous || compound?.Phase == CompoundPhase.Surface)
-                    species.Add(s);
-            }
+            var compound = _compoundLibrary.Find(s);
+            if (compound?.Phase == CompoundPhase.Aqueous || compound?.Phase == CompoundPhase.Surface)
+                species.Add(s);
         }
+
         return species.ToList();
     }
 
@@ -686,181 +675,149 @@ private void CalculateAqueousProperties(ThermodynamicState state)
     }
 
     /// <summary>
-/// Solve Gibbs Energy Minimization using Lagrange-Newton method with inequality constraints.
-/// Implements the algorithm from Smith & Missen (1982), Chapter 5.
-/// </summary>
-private Vector<double> SolveGibbsMinimization(Vector<double> x0, List<string> species,
-    Matrix<double> elementMatrix, ThermodynamicState state)
-{
-    var n = species.Count;
-    var m = elementMatrix.RowCount; // Number of elements
-    var x = x0.Clone();
-    
-    // Element totals (constraints)
-    var b = Vector<double>.Build.Dense(m);
-    for (int i = 0; i < m; i++)
-    {
-        var element = state.ElementalComposition.Keys.ToList()[i];
-        b[i] = state.ElementalComposition[element];
-    }
-    
-    var converged = false;
-    var iteration = 0;
-    const double epsilon = 1e-10;
-    const int maxIter = 100;
-    
-    while (!converged && iteration < maxIter)
-    {
-        // Calculate chemical potentials μ_i = μ_i° + RT ln(a_i)
-        var mu = CalculateChemicalPotentials(x, species, state);
-        
-        // Calculate gradient of Gibbs energy: ∇G = μ
-        var grad = mu.Clone();
-        
-        // Calculate constraint residuals: A*x - b = 0
-        var constraintResidual = elementMatrix.Multiply(x) - b;
-        
-        // Build KKT system:
-        // [ H   A^T ] [ Δx ] = [ -∇G ]
-        // [ A    0  ] [ λ  ]   [ -r  ]
-        // where H is Hessian (approximated as identity for simplicity)
-        
-        var kktSize = n + m;
-        var kktMatrix = Matrix<double>.Build.Dense(kktSize, kktSize);
-        var kktRhs = Vector<double>.Build.Dense(kktSize);
-        
-        // Upper-left block: Hessian (use identity + small regularization)
-        for (int i = 0; i < n; i++)
-        {
-            kktMatrix[i, i] = 1.0 / Math.Max(x[i], 1e-10);
-        }
-        
-        // Upper-right block: A^T
-        for (int i = 0; i < n; i++)
-        {
-            for (int j = 0; j < m; j++)
-            {
-                kktMatrix[i, n + j] = elementMatrix[j, i];
-            }
-        }
-        
-        // Lower-left block: A
-        for (int i = 0; i < m; i++)
-        {
-            for (int j = 0; j < n; j++)
-            {
-                kktMatrix[n + i, j] = elementMatrix[i, j];
-            }
-        }
-        
-        // Right-hand side
-        for (int i = 0; i < n; i++)
-        {
-            kktRhs[i] = -grad[i];
-        }
-        for (int i = 0; i < m; i++)
-        {
-            kktRhs[n + i] = -constraintResidual[i];
-        }
-        
-        // Solve KKT system
-        Vector<double> solution;
-        try
-        {
-            solution = kktMatrix.Solve(kktRhs);
-        }
-        catch
-        {
-            Logger.LogWarning("[ThermodynamicSolver] KKT system singular, using constrained gradient descent");
-            // Fallback: project gradient onto constraint manifold
-            var projectedGrad = ProjectGradient(grad, elementMatrix, x);
-            solution = Vector<double>.Build.Dense(kktSize);
-            for (int i = 0; i < n; i++)
-            {
-                solution[i] = -projectedGrad[i] * 0.1;
-            }
-        }
-        
-        // Extract step direction
-        var dx = solution.SubVector(0, n);
-        
-        // Line search with backtracking to ensure positivity
-        var alpha = 1.0;
-        var xNew = x.Clone();
-        for (int ls = 0; ls < 20; ls++)
-        {
-            xNew = x + alpha * dx;
-            
-            // Check positivity constraint
-            bool allPositive = true;
-            for (int i = 0; i < n; i++)
-            {
-                if (xNew[i] < 0)
-                {
-                    allPositive = false;
-                    break;
-                }
-            }
-            
-            if (allPositive)
-            {
-                // Check sufficient decrease in Gibbs energy
-                var GNew = CalculateTotalGibbsEnergy(xNew, species, state);
-                var G = CalculateTotalGibbsEnergy(x, species, state);
-                
-                if (GNew < G + 1e-4 * alpha * grad.DotProduct(dx))
-                {
-                    break;
-                }
-            }
-            
-            alpha *= 0.5;
-        }
-        
-        x = x + alpha * dx;
-        
-        // Ensure strict positivity
-        for (int i = 0; i < n; i++)
-        {
-            x[i] = Math.Max(x[i], 1e-15);
-        }
-        
-        // Check convergence
-        var normDx = dx.L2Norm();
-        var normConstraint = constraintResidual.L2Norm();
-        
-        converged = normDx < epsilon && normConstraint < epsilon;
-        iteration++;
-        
-        if (iteration % 10 == 0)
-        {
-            Logger.Log($"[GibbsMin] Iter {iteration}: ||dx||={normDx:E3}, ||constraint||={normConstraint:E3}");
-        }
-    }
-    
-    if (!converged)
-    {
-        Logger.LogWarning($"[ThermodynamicSolver] Gibbs minimization reached max iterations ({maxIter})");
-    }
-    else
-    {
-        Logger.Log($"[ThermodynamicSolver] Gibbs minimization converged in {iteration} iterations");
-    }
-    
-    return x;
-}
-    /// <summary>
-    /// Calculate chemical potentials for all species.
-    /// μ_i = μ_i° + RT ln(a_i)
+    ///     Solve Gibbs Energy Minimization using Lagrange-Newton method with inequality constraints.
+    ///     Implements the algorithm from Smith & Missen (1982), Chapter 5.
     /// </summary>
-    private Vector<double> CalculateChemicalPotentials(Vector<double> moles, List<string> species, ThermodynamicState state)
+    private Vector<double> SolveGibbsMinimization(Vector<double> x0, List<string> species,
+        Matrix<double> elementMatrix, ThermodynamicState state)
+    {
+        var n = species.Count;
+        var m = elementMatrix.RowCount; // Number of elements
+        var x = x0.Clone();
+
+        // Element totals (constraints)
+        var b = Vector<double>.Build.Dense(m);
+        for (var i = 0; i < m; i++)
+        {
+            var element = state.ElementalComposition.Keys.ToList()[i];
+            b[i] = state.ElementalComposition[element];
+        }
+
+        var converged = false;
+        var iteration = 0;
+        const double epsilon = 1e-10;
+        const int maxIter = 100;
+
+        while (!converged && iteration < maxIter)
+        {
+            // Calculate chemical potentials μ_i = μ_i° + RT ln(a_i)
+            var mu = CalculateChemicalPotentials(x, species, state);
+
+            // Calculate gradient of Gibbs energy: ∇G = μ
+            var grad = mu.Clone();
+
+            // Calculate constraint residuals: A*x - b = 0
+            var constraintResidual = elementMatrix.Multiply(x) - b;
+
+            // Build KKT system:
+            // [ H   A^T ] [ Δx ] = [ -∇G ]
+            // [ A    0  ] [ λ  ]   [ -r  ]
+            // where H is Hessian (approximated as identity for simplicity)
+
+            var kktSize = n + m;
+            var kktMatrix = Matrix<double>.Build.Dense(kktSize, kktSize);
+            var kktRhs = Vector<double>.Build.Dense(kktSize);
+
+            // Upper-left block: Hessian (use identity + small regularization)
+            for (var i = 0; i < n; i++) kktMatrix[i, i] = 1.0 / Math.Max(x[i], 1e-10);
+
+            // Upper-right block: A^T
+            for (var i = 0; i < n; i++)
+            for (var j = 0; j < m; j++)
+                kktMatrix[i, n + j] = elementMatrix[j, i];
+
+            // Lower-left block: A
+            for (var i = 0; i < m; i++)
+            for (var j = 0; j < n; j++)
+                kktMatrix[n + i, j] = elementMatrix[i, j];
+
+            // Right-hand side
+            for (var i = 0; i < n; i++) kktRhs[i] = -grad[i];
+            for (var i = 0; i < m; i++) kktRhs[n + i] = -constraintResidual[i];
+
+            // Solve KKT system
+            Vector<double> solution;
+            try
+            {
+                solution = kktMatrix.Solve(kktRhs);
+            }
+            catch
+            {
+                Logger.LogWarning("[ThermodynamicSolver] KKT system singular, using constrained gradient descent");
+                // Fallback: project gradient onto constraint manifold
+                var projectedGrad = ProjectGradient(grad, elementMatrix, x);
+                solution = Vector<double>.Build.Dense(kktSize);
+                for (var i = 0; i < n; i++) solution[i] = -projectedGrad[i] * 0.1;
+            }
+
+            // Extract step direction
+            var dx = solution.SubVector(0, n);
+
+            // Line search with backtracking to ensure positivity
+            var alpha = 1.0;
+            var xNew = x.Clone();
+            for (var ls = 0; ls < 20; ls++)
+            {
+                xNew = x + alpha * dx;
+
+                // Check positivity constraint
+                var allPositive = true;
+                for (var i = 0; i < n; i++)
+                    if (xNew[i] < 0)
+                    {
+                        allPositive = false;
+                        break;
+                    }
+
+                if (allPositive)
+                {
+                    // Check sufficient decrease in Gibbs energy
+                    var GNew = CalculateTotalGibbsEnergy(xNew, species, state);
+                    var G = CalculateTotalGibbsEnergy(x, species, state);
+
+                    if (GNew < G + 1e-4 * alpha * grad.DotProduct(dx)) break;
+                }
+
+                alpha *= 0.5;
+            }
+
+            x = x + alpha * dx;
+
+            // Ensure strict positivity
+            for (var i = 0; i < n; i++) x[i] = Math.Max(x[i], 1e-15);
+
+            // Check convergence
+            var normDx = dx.L2Norm();
+            var normConstraint = constraintResidual.L2Norm();
+
+            converged = normDx < epsilon && normConstraint < epsilon;
+            iteration++;
+
+            if (iteration % 10 == 0)
+                Logger.Log($"[GibbsMin] Iter {iteration}: ||dx||={normDx:E3}, ||constraint||={normConstraint:E3}");
+        }
+
+        if (!converged)
+            Logger.LogWarning($"[ThermodynamicSolver] Gibbs minimization reached max iterations ({maxIter})");
+        else
+            Logger.Log($"[ThermodynamicSolver] Gibbs minimization converged in {iteration} iterations");
+
+        return x;
+    }
+
+    /// <summary>
+    ///     Calculate chemical potentials for all species.
+    ///     μ_i = μ_i° + RT ln(a_i)
+    /// </summary>
+    private Vector<double> CalculateChemicalPotentials(Vector<double> moles, List<string> species,
+        ThermodynamicState state)
     {
         var n = species.Count;
         var mu = Vector<double>.Build.Dense(n);
         const double R = 8.314462618; // J/(mol·K)
         var T = state.Temperature_K;
-    
-        for (int i = 0; i < n; i++)
+
+        for (var i = 0; i < n; i++)
         {
             var compound = _compoundLibrary.Find(species[i]);
             if (compound == null)
@@ -868,22 +825,22 @@ private Vector<double> SolveGibbsMinimization(Vector<double> x0, List<string> sp
                 mu[i] = 0;
                 continue;
             }
-        
+
             // Standard chemical potential from formation data
             var mu0 = (compound.GibbsFreeEnergyFormation_kJ_mol ?? 0.0) * 1000.0; // Convert to J/mol
-        
+
             // Activity term
             var activity = CalculateActivity(species[i], moles[i], state);
             var activityTerm = R * T * Math.Log(Math.Max(activity, 1e-30));
-        
+
             mu[i] = mu0 + activityTerm;
         }
-    
+
         return mu;
     }
 
     /// <summary>
-    /// Calculate total Gibbs energy G = Σ(n_i * μ_i)
+    ///     Calculate total Gibbs energy G = Σ(n_i * μ_i)
     /// </summary>
     private double CalculateTotalGibbsEnergy(Vector<double> moles, List<string> species, ThermodynamicState state)
     {
@@ -892,7 +849,7 @@ private Vector<double> SolveGibbsMinimization(Vector<double> x0, List<string> sp
     }
 
     /// <summary>
-    /// Project gradient onto constraint manifold using A*(A^T*A)^(-1)*A^T
+    ///     Project gradient onto constraint manifold using A*(A^T*A)^(-1)*A^T
     /// </summary>
     private Vector<double> ProjectGradient(Vector<double> grad, Matrix<double> A, Vector<double> x)
     {
@@ -910,6 +867,7 @@ private Vector<double> SolveGibbsMinimization(Vector<double> x0, List<string> sp
             return grad * 0.1;
         }
     }
+
     private double BacktrackingLineSearch(Vector<double> x, Vector<double> direction,
         Func<Vector<double>, double> objective)
     {
@@ -941,14 +899,15 @@ private Vector<double> SolveGibbsMinimization(Vector<double> x0, List<string> sp
         // This is now handled by the more comprehensive ActivityCoefficientCalculator
         if (state.Activities.TryGetValue(species, out var activity))
             return activity;
-            
+
         // Fallback for species not yet calculated
         var compound = _compoundLibrary.Find(species);
-        if(compound?.Phase == CompoundPhase.Aqueous)
+        if (compound?.Phase == CompoundPhase.Aqueous)
         {
             var molality = moles / state.Volume_L;
             return molality; // Assume gamma = 1
         }
+
         return 1.0; // Assume activity = 1 for solids
     }
 
@@ -966,28 +925,23 @@ private Vector<double> SolveGibbsMinimization(Vector<double> x0, List<string> sp
         for (var i = 0; i < species.Count; i++)
         {
             var moles = solution[i];
-            if (moles > TOLERANCE_MOLES)
-            {
-                finalState.SpeciesMoles[species[i]] = moles;
-            }
+            if (moles > TOLERANCE_MOLES) finalState.SpeciesMoles[species[i]] = moles;
         }
+
         SolveSpeciation(finalState); // Recalculate speciation and activities
         return finalState;
     }
-    
-    
-    internal static readonly double R_GAS_CONSTANT = 8.314462618e-3; // kJ/(mol·K)
 
-    
-/// <summary>
-    /// Builds the system of equations (Jacobian matrix and residual vector) for the Newton-Raphson speciation solver.
-    /// The system is defined by the mass balance equation for each basis species.
-    /// Residual (r_i) = T_i - C_i
+
+    /// <summary>
+    ///     Builds the system of equations (Jacobian matrix and residual vector) for the Newton-Raphson speciation solver.
+    ///     The system is defined by the mass balance equation for each basis species.
+    ///     Residual (r_i) = T_i - C_i
     ///     where T_i is the known total moles of basis component i, and
     ///     C_i is the calculated total moles based on the current activity guess.
-    /// Jacobian (J_ij) = - ∂C_i / ∂(ln a_j)
+    ///     Jacobian (J_ij) = - ∂C_i / ∂(ln a_j)
     ///     where a_j is the activity of basis species j.
-    /// Source: Bethke, C.M., 2008. Geochemical and Biogeochemical Reaction Modeling, Chapter 4.
+    ///     Source: Bethke, C.M., 2008. Geochemical and Biogeochemical Reaction Modeling, Chapter 4.
     /// </summary>
     private (Matrix<double>, Vector<double>) BuildSpeciationSystem(ThermodynamicState state, List<string> basisSpecies,
         List<string> secondarySpecies, List<ChemicalReaction> reactions)
@@ -996,7 +950,8 @@ private Vector<double> SolveGibbsMinimization(Vector<double> x0, List<string> sp
         var jacobian = Matrix<double>.Build.Dense(nBasis, nBasis);
         var residual = Vector<double>.Build.Dense(nBasis);
         var basisSpeciesSet = new HashSet<string>(basisSpecies);
-        var basisIndexMap = basisSpecies.Select((name, index) => new { name, index }).ToDictionary(x => x.name, x => x.index);
+        var basisIndexMap = basisSpecies.Select((name, index) => new { name, index })
+            .ToDictionary(x => x.name, x => x.index);
 
         // --- Step 1: Pre-calculate stoichiometry of secondary species in terms of basis species ---
         // This creates a lookup map: secondary_species -> (basis_species -> stoich_coeff)
@@ -1011,18 +966,15 @@ private Vector<double> SolveGibbsMinimization(Vector<double> x0, List<string> sp
             {
                 var stoichMap = new Dictionary<string, double>();
                 foreach (var (reactant, stoich) in formationReaction.Stoichiometry)
-                {
                     if (stoich < 0) // Reactants are basis species
-                    {
                         stoichMap[reactant] = -stoich; // Store as positive coefficient for formation
-                    }
-                }
+
                 secondarySpeciesStoich[secSpeciesName] = stoichMap;
             }
         }
-        
+
         // --- Step 2: Build the Residual Vector (Mass Balance Errors) ---
-        for (int i = 0; i < nBasis; i++)
+        for (var i = 0; i < nBasis; i++)
         {
             var basisName = basisSpecies[i];
             var compound = _compoundLibrary.Find(basisName);
@@ -1035,7 +987,7 @@ private Vector<double> SolveGibbsMinimization(Vector<double> x0, List<string> sp
                 // Mass balance on a surface site type (e.g., total >SOH sites)
                 var site = state.SurfaceSites.FirstOrDefault(s => s.SpeciesMoles.ContainsKey(basisName));
                 if (site == null) continue;
-                
+
                 var mineral = _compoundLibrary.Find(site.MineralName);
                 if (mineral == null || mineral.SiteDensity_mol_g == null) continue;
 
@@ -1079,67 +1031,62 @@ private Vector<double> SolveGibbsMinimization(Vector<double> x0, List<string> sp
 
         // --- Step 3: Build the Jacobian Matrix (Derivatives) ---
         // J_ij = -d(CalculatedTotal_i) / d(ln(activity_j))
-        for (int i = 0; i < nBasis; i++)
+        for (var i = 0; i < nBasis; i++)
+        for (var j = 0; j < nBasis; j++)
         {
-            for (int j = 0; j < nBasis; j++)
+            var basis_i = basisSpecies[i];
+            var basis_j = basisSpecies[j];
+            double derivativeSum = 0;
+
+            // Part 1: Contribution from the basis species themselves.
+            // This is non-zero only for diagonal elements (i == j).
+            // d(moles_i) / d(ln(activity_j)) is moles_i if i=j, and 0 otherwise.
+            if (i == j) derivativeSum += state.SpeciesMoles.GetValueOrDefault(basis_i, 0.0);
+
+            // Part 2: Contribution from all secondary species.
+            // d(moles_k)/d(ln(a_j)) = nu_jk * moles_k, where nu_jk is the stoich coeff of basis j in the
+            // formation reaction of secondary species k.
+            foreach (var (secSpeciesName, stoichMap) in secondarySpeciesStoich)
             {
-                var basis_i = basisSpecies[i];
-                var basis_j = basisSpecies[j];
-                double derivativeSum = 0;
+                var nu_ik = stoichMap.GetValueOrDefault(basis_i, 0.0);
+                if (Math.Abs(nu_ik) < 1e-12) continue; // Basis i is not in this secondary species
 
-                // Part 1: Contribution from the basis species themselves.
-                // This is non-zero only for diagonal elements (i == j).
-                // d(moles_i) / d(ln(activity_j)) is moles_i if i=j, and 0 otherwise.
-                if (i == j)
-                {
-                    derivativeSum += state.SpeciesMoles.GetValueOrDefault(basis_i, 0.0);
-                }
+                var nu_jk = stoichMap.GetValueOrDefault(basis_j, 0.0);
+                if (Math.Abs(nu_jk) < 1e-12) continue; // Basis j does not affect this secondary species
 
-                // Part 2: Contribution from all secondary species.
-                // d(moles_k)/d(ln(a_j)) = nu_jk * moles_k, where nu_jk is the stoich coeff of basis j in the
-                // formation reaction of secondary species k.
-                foreach (var (secSpeciesName, stoichMap) in secondarySpeciesStoich)
-                {
-                    var nu_ik = stoichMap.GetValueOrDefault(basis_i, 0.0);
-                    if (Math.Abs(nu_ik) < 1e-12) continue; // Basis i is not in this secondary species
+                var moles_k = state.SpeciesMoles.GetValueOrDefault(secSpeciesName, 0.0);
 
-                    var nu_jk = stoichMap.GetValueOrDefault(basis_j, 0.0);
-                    if (Math.Abs(nu_jk) < 1e-12) continue; // Basis j does not affect this secondary species
-
-                    var moles_k = state.SpeciesMoles.GetValueOrDefault(secSpeciesName, 0.0);
-                    
-                    derivativeSum += nu_ik * nu_jk * moles_k;
-                }
-                
-                jacobian[i, j] = -derivativeSum;
+                derivativeSum += nu_ik * nu_jk * moles_k;
             }
+
+            jacobian[i, j] = -derivativeSum;
         }
-        
+
         return (jacobian, residual);
     }
 
     private void UpdateAllSpeciesMolesFromActivities(ThermodynamicState state, List<string> allSpecies)
     {
-        double solventMass_kg = state.Volume_L; // Approx
-        foreach(var speciesName in allSpecies)
+        var solventMass_kg = state.Volume_L; // Approx
+        foreach (var speciesName in allSpecies)
         {
             var compound = _compoundLibrary.Find(speciesName);
             if (compound == null) continue;
 
             if (compound.Phase == CompoundPhase.Aqueous)
             {
-                 double activity = state.Activities.GetValueOrDefault(speciesName, 0.0);
-                 // gamma = activity / molality -> molality = activity / gamma
-                 // This requires single-ion activity coefficients, which is complex.
-                 // We approximate gamma from the activity calculator for the previous step.
-                 double gamma = _activityCalculator.CalculateSingleIonActivityCoefficient(speciesName, state);
-                 double molality = activity / Math.Max(gamma, 1e-9);
-                 state.SpeciesMoles[speciesName] = molality * solventMass_kg;
+                var activity = state.Activities.GetValueOrDefault(speciesName, 0.0);
+                // gamma = activity / molality -> molality = activity / gamma
+                // This requires single-ion activity coefficients, which is complex.
+                // We approximate gamma from the activity calculator for the previous step.
+                var gamma = _activityCalculator.CalculateSingleIonActivityCoefficient(speciesName, state);
+                var molality = activity / Math.Max(gamma, 1e-9);
+                state.SpeciesMoles[speciesName] = molality * solventMass_kg;
             }
             // Moles of surface species are updated during the secondary species update
         }
     }
-    
+
     private void UpdateSecondarySpecies(ThermodynamicState state, List<ChemicalReaction> reactions,
         List<string> secondarySpecies)
     {
@@ -1149,13 +1096,12 @@ private Vector<double> SolveGibbsMinimization(Vector<double> x0, List<string> sp
             var formationReaction = reactions.FirstOrDefault(r =>
                 r.Stoichiometry.ContainsKey(speciesName) && r.Stoichiometry[speciesName] > 0 &&
                 r.Stoichiometry.Where(kvp => kvp.Value < 0).All(reactant => !secondarySpecies.Contains(reactant.Key)));
-                
+
             if (formationReaction != null)
             {
                 var logK = formationReaction.CalculateLogK(state.Temperature_K);
                 var logActivitySum = 0.0;
                 foreach (var (reactant, stoich) in formationReaction.Stoichiometry)
-                {
                     if (reactant != speciesName)
                     {
                         if (state.Activities.TryGetValue(reactant, out var activity))
@@ -1163,9 +1109,8 @@ private Vector<double> SolveGibbsMinimization(Vector<double> x0, List<string> sp
                         else
                             logActivitySum = double.NaN; // Cannot calculate if a reactant is missing
                     }
-                }
-                
-                if(!double.IsNaN(logActivitySum))
+
+                if (!double.IsNaN(logActivitySum))
                 {
                     var logActivity = logK + logActivitySum;
                     state.Activities[speciesName] = Math.Pow(10, logActivity);

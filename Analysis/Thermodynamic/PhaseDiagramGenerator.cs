@@ -1,26 +1,24 @@
 // GeoscientistToolkit/Business/Thermodynamics/PhaseDiagramGenerator.cs
 
 using System.Collections.Concurrent;
+using System.Data;
 using GeoscientistToolkit.Data.Materials;
-using GeoscientistToolkit.Data.Table;
-using GeoscientistToolkit.Util;
 using OxyPlot;
 using OxyPlot.Axes;
 using OxyPlot.Series;
-using System.Data;
 
 namespace GeoscientistToolkit.Business.Thermodynamics;
 
 /// <summary>
-/// Generates various phase diagrams from thermodynamic calculations.
-/// Supports binary/ternary, P-T, energy, and composition diagrams.
+///     Generates various phase diagrams from thermodynamic calculations.
+///     Supports binary/ternary, P-T, energy, and composition diagrams.
 /// </summary>
 public class PhaseDiagramGenerator
 {
-    private readonly ThermodynamicSolver _solver;
+    private readonly ActivityCoefficientCalculator _activityCalculator;
     private readonly CompoundLibrary _compoundLibrary;
     private readonly ReactionGenerator _reactionGenerator;
-    private readonly ActivityCoefficientCalculator _activityCalculator;
+    private readonly ThermodynamicSolver _solver;
 
     public PhaseDiagramGenerator()
     {
@@ -33,7 +31,7 @@ public class PhaseDiagramGenerator
     #region Binary Phase Diagrams
 
     /// <summary>
-    /// Generate a binary phase diagram for two components.
+    ///     Generate a binary phase diagram for two components.
     /// </summary>
     public BinaryPhaseDiagramData GenerateBinaryDiagram(
         string component1,
@@ -101,12 +99,9 @@ public class PhaseDiagramGenerator
             if (compound != null)
             {
                 phases.Add(compound.Phase.ToString());
-                
+
                 // Add specific mineral names if solid
-                if (compound.Phase == CompoundPhase.Solid)
-                {
-                    phases.Add(species);
-                }
+                if (compound.Phase == CompoundPhase.Solid) phases.Add(species);
             }
         }
 
@@ -116,7 +111,7 @@ public class PhaseDiagramGenerator
     private List<PhaseRegion> IdentifyPhaseRegions(List<BinaryPhaseDiagramPoint> points)
     {
         var regions = new List<PhaseRegion>();
-        
+
         // Group consecutive points with the same phase assemblage
         var currentRegion = new PhaseRegion
         {
@@ -124,15 +119,15 @@ public class PhaseDiagramGenerator
             Phases = points.FirstOrDefault()?.PhasesPresent ?? new List<string>()
         };
 
-        for (int i = 1; i < points.Count; i++)
+        for (var i = 1; i < points.Count; i++)
         {
             var currentPhases = string.Join(",", points[i].PhasesPresent.OrderBy(p => p));
-            var previousPhases = string.Join(",", points[i-1].PhasesPresent.OrderBy(p => p));
+            var previousPhases = string.Join(",", points[i - 1].PhasesPresent.OrderBy(p => p));
 
             if (currentPhases != previousPhases)
             {
                 // Phase boundary detected
-                currentRegion.EndComposition = points[i-1].X_Component1;
+                currentRegion.EndComposition = points[i - 1].X_Component1;
                 regions.Add(currentRegion);
 
                 currentRegion = new PhaseRegion
@@ -155,7 +150,7 @@ public class PhaseDiagramGenerator
     #region Ternary Phase Diagrams
 
     /// <summary>
-    /// Generate a ternary phase diagram for three components.
+    ///     Generate a ternary phase diagram for three components.
     /// </summary>
     public TernaryPhaseDiagramData GenerateTernaryDiagram(
         string component1,
@@ -179,10 +174,10 @@ public class PhaseDiagramGenerator
         // Generate triangular grid points
         Parallel.For(0, gridResolution + 1, i =>
         {
-            for (int j = 0; j <= gridResolution - i; j++)
+            for (var j = 0; j <= gridResolution - i; j++)
             {
                 var k = gridResolution - i - j;
-                
+
                 var x1 = (double)i / gridResolution;
                 var x2 = (double)j / gridResolution;
                 var x3 = (double)k / gridResolution;
@@ -221,11 +216,11 @@ public class PhaseDiagramGenerator
 
         return data;
     }
-    
+
     /// <summary>
-    /// COMPLETE IMPLEMENTATION: Identify phase boundaries using a grid traversal algorithm.
-    /// This method treats the calculated points as a triangular grid and finds the edges
-    /// between adjacent points that have different phase assemblages.
+    ///     COMPLETE IMPLEMENTATION: Identify phase boundaries using a grid traversal algorithm.
+    ///     This method treats the calculated points as a triangular grid and finds the edges
+    ///     between adjacent points that have different phase assemblages.
     /// </summary>
     private List<PhaseBoundary> CalculatePhaseBoundaries(
         List<TernaryPhaseDiagramPoint> points,
@@ -238,49 +233,43 @@ public class PhaseDiagramGenerator
         var pointGrid = new Dictionary<(int, int), TernaryPhaseDiagramPoint>();
         foreach (var p in points)
         {
-            int i = (int)Math.Round(p.X_Component1 * gridResolution);
-            int j = (int)Math.Round(p.X_Component2 * gridResolution);
+            var i = (int)Math.Round(p.X_Component1 * gridResolution);
+            var j = (int)Math.Round(p.X_Component2 * gridResolution);
             pointGrid[(i, j)] = p;
         }
 
         // 2. Iterate through the grid and check neighbors for phase changes.
-        for (int i = 0; i <= gridResolution; i++)
+        for (var i = 0; i <= gridResolution; i++)
+        for (var j = 0; j <= gridResolution - i; j++)
         {
-            for (int j = 0; j <= gridResolution - i; j++)
-            {
-                if (!pointGrid.TryGetValue((i, j), out var currentPoint)) continue;
+            if (!pointGrid.TryGetValue((i, j), out var currentPoint)) continue;
 
-                // Check "right" neighbor (along constant component 2 axis)
-                if (pointGrid.TryGetValue((i + 1, j), out var rightNeighbor))
-                {
-                    if (!ArePhasesEqual(currentPoint.PhasesPresent, rightNeighbor.PhasesPresent))
+            // Check "right" neighbor (along constant component 2 axis)
+            if (pointGrid.TryGetValue((i + 1, j), out var rightNeighbor))
+                if (!ArePhasesEqual(currentPoint.PhasesPresent, rightNeighbor.PhasesPresent))
+                    boundaries.Add(new PhaseBoundary
                     {
-                        boundaries.Add(new PhaseBoundary
-                        {
-                            Point1 = new[] { currentPoint.X_Component1, currentPoint.X_Component2, currentPoint.X_Component3 },
-                            Point2 = new[] { rightNeighbor.X_Component1, rightNeighbor.X_Component2, rightNeighbor.X_Component3 },
-                            Phase1 = currentPoint.PhasesPresent,
-                            Phase2 = rightNeighbor.PhasesPresent
-                        });
-                    }
-                }
+                        Point1 = new[]
+                            { currentPoint.X_Component1, currentPoint.X_Component2, currentPoint.X_Component3 },
+                        Point2 = new[]
+                            { rightNeighbor.X_Component1, rightNeighbor.X_Component2, rightNeighbor.X_Component3 },
+                        Phase1 = currentPoint.PhasesPresent,
+                        Phase2 = rightNeighbor.PhasesPresent
+                    });
 
-                // Check "up" neighbor (along constant component 1 axis)
-                if (pointGrid.TryGetValue((i, j + 1), out var upNeighbor))
-                {
-                    if (!ArePhasesEqual(currentPoint.PhasesPresent, upNeighbor.PhasesPresent))
+            // Check "up" neighbor (along constant component 1 axis)
+            if (pointGrid.TryGetValue((i, j + 1), out var upNeighbor))
+                if (!ArePhasesEqual(currentPoint.PhasesPresent, upNeighbor.PhasesPresent))
+                    boundaries.Add(new PhaseBoundary
                     {
-                        boundaries.Add(new PhaseBoundary
-                        {
-                            Point1 = new[] { currentPoint.X_Component1, currentPoint.X_Component2, currentPoint.X_Component3 },
-                            Point2 = new[] { upNeighbor.X_Component1, upNeighbor.X_Component2, upNeighbor.X_Component3 },
-                            Phase1 = currentPoint.PhasesPresent,
-                            Phase2 = upNeighbor.PhasesPresent
-                        });
-                    }
-                }
-            }
+                        Point1 = new[]
+                            { currentPoint.X_Component1, currentPoint.X_Component2, currentPoint.X_Component3 },
+                        Point2 = new[] { upNeighbor.X_Component1, upNeighbor.X_Component2, upNeighbor.X_Component3 },
+                        Phase1 = currentPoint.PhasesPresent,
+                        Phase2 = upNeighbor.PhasesPresent
+                    });
         }
+
         return boundaries;
     }
 
@@ -297,7 +286,7 @@ public class PhaseDiagramGenerator
     #region P-T Phase Diagrams
 
     /// <summary>
-    /// Generate a pressure-temperature phase diagram for a given composition.
+    ///     Generate a pressure-temperature phase diagram for a given composition.
     /// </summary>
     public PTPhaseDiagramData GeneratePTDiagram(
         Dictionary<string, double> composition,
@@ -320,7 +309,7 @@ public class PhaseDiagramGenerator
 
         Parallel.For(0, gridPoints, i =>
         {
-            for (int j = 0; j < gridPoints; j++)
+            for (var j = 0; j < gridPoints; j++)
             {
                 var T = minT_K + (maxT_K - minT_K) * i / (gridPoints - 1);
                 var P = minP_bar + (maxP_bar - minP_bar) * j / (gridPoints - 1);
@@ -354,40 +343,36 @@ public class PhaseDiagramGenerator
         int gridSize)
     {
         var curves = new List<PhaseTransitionCurve>();
-        
+
         // Find contiguous curves where phase changes occur
-        for (int i = 1; i < points.Count; i++)
-        {
-            if (!ArePhasesEqual(points[i-1].PhasesPresent, points[i].PhasesPresent))
-            {
+        for (var i = 1; i < points.Count; i++)
+            if (!ArePhasesEqual(points[i - 1].PhasesPresent, points[i].PhasesPresent))
                 curves.Add(new PhaseTransitionCurve
                 {
                     Temperature = points[i].Temperature_K,
                     Pressure = points[i].Pressure_bar,
-                    PhaseBefore = points[i-1].DominantPhase,
+                    PhaseBefore = points[i - 1].DominantPhase,
                     PhaseAfter = points[i].DominantPhase,
-                    Type = ClassifyTransition(points[i-1].DominantPhase, points[i].DominantPhase)
+                    Type = ClassifyTransition(points[i - 1].DominantPhase, points[i].DominantPhase)
                 });
-            }
-        }
 
         return curves;
     }
 
     private string ClassifyTransition(string phase1, string phase2)
     {
-        if ((phase1 == "Solid" && phase2 == "Liquid") || 
+        if ((phase1 == "Solid" && phase2 == "Liquid") ||
             (phase1 == "Liquid" && phase2 == "Solid"))
             return "Melting/Freezing";
-        
-        if ((phase1 == "Liquid" && phase2 == "Gas") || 
+
+        if ((phase1 == "Liquid" && phase2 == "Gas") ||
             (phase1 == "Gas" && phase2 == "Liquid"))
             return "Vaporization/Condensation";
-        
-        if ((phase1 == "Solid" && phase2 == "Gas") || 
+
+        if ((phase1 == "Solid" && phase2 == "Gas") ||
             (phase1 == "Gas" && phase2 == "Solid"))
             return "Sublimation/Deposition";
-        
+
         return "Phase Transition";
     }
 
@@ -396,7 +381,7 @@ public class PhaseDiagramGenerator
     #region Energy Diagrams
 
     /// <summary>
-    /// Generate a Gibbs energy diagram as a function of composition.
+    ///     Generate a Gibbs energy diagram as a function of composition.
     /// </summary>
     public EnergyDiagramData GenerateEnergyDiagram(
         string component1,
@@ -415,7 +400,7 @@ public class PhaseDiagramGenerator
 
         var results = new List<EnergyDiagramPoint>();
 
-        for (int i = 0; i < points; i++)
+        for (var i = 0; i < points; i++)
         {
             var x1 = (double)i / (points - 1);
             var x2 = 1.0 - x1;
@@ -446,11 +431,11 @@ public class PhaseDiagramGenerator
     private double CalculateTotalGibbsEnergy(ThermodynamicState state)
     {
         double totalG = 0;
-        
+
         foreach (var (species, moles) in state.SpeciesMoles)
         {
             if (moles < 1e-9) continue;
-            
+
             var compound = _compoundLibrary.Find(species);
             if (compound?.GibbsFreeEnergyFormation_kJ_mol != null)
             {
@@ -460,43 +445,38 @@ public class PhaseDiagramGenerator
                 totalG += moles * mu;
             }
         }
-        
+
         return totalG;
     }
 
     private double CalculateTotalEnthalpy(ThermodynamicState state)
     {
         double totalH = 0;
-        
+
         foreach (var (species, moles) in state.SpeciesMoles)
         {
             if (moles < 1e-9) continue;
-            
+
             var compound = _compoundLibrary.Find(species);
             if (compound?.EnthalpyFormation_kJ_mol != null)
-            {
                 totalH += moles * compound.EnthalpyFormation_kJ_mol.Value * 1000; // J
-            }
         }
-        
+
         return totalH;
     }
 
     private double CalculateTotalEntropy(ThermodynamicState state)
     {
         double totalS = 0;
-        
+
         foreach (var (species, moles) in state.SpeciesMoles)
         {
             if (moles < 1e-9) continue;
-            
+
             var compound = _compoundLibrary.Find(species);
-            if (compound?.Entropy_J_molK != null)
-            {
-                totalS += moles * compound.Entropy_J_molK.Value;
-            }
+            if (compound?.Entropy_J_molK != null) totalS += moles * compound.Entropy_J_molK.Value;
         }
-        
+
         return totalS;
     }
 
@@ -504,10 +484,10 @@ public class PhaseDiagramGenerator
     {
         var compound = _compoundLibrary.Find(component);
         if (compound == null) return 0;
-        
+
         var G0 = compound.GibbsFreeEnergyFormation_kJ_mol ?? 0;
         var activity = state.Activities.GetValueOrDefault(component, 1.0);
-        
+
         return G0 * 1000 + 8.314 * state.Temperature_K * Math.Log(Math.Max(activity, 1e-30));
     }
 
@@ -515,11 +495,11 @@ public class PhaseDiagramGenerator
     {
         double totalVolume = 0;
         double totalMoles = 0;
-        
+
         foreach (var (species, moles) in state.SpeciesMoles)
         {
             if (moles < 1e-9) continue;
-            
+
             var compound = _compoundLibrary.Find(species);
             if (compound?.MolarVolume_cm3_mol != null)
             {
@@ -527,7 +507,7 @@ public class PhaseDiagramGenerator
                 totalMoles += moles;
             }
         }
-        
+
         return totalMoles > 0 ? totalVolume / totalMoles : 0;
     }
 
@@ -536,7 +516,7 @@ public class PhaseDiagramGenerator
     #region Helper Methods
 
     private ThermodynamicState CreateBinaryState(
-        string comp1, string comp2, 
+        string comp1, string comp2,
         double x1, double x2,
         double T, double P)
     {
@@ -549,7 +529,7 @@ public class PhaseDiagramGenerator
 
         AddComponentToState(state, comp1, x1);
         AddComponentToState(state, comp2, x2);
-        
+
         return state;
     }
 
@@ -568,7 +548,7 @@ public class PhaseDiagramGenerator
         AddComponentToState(state, comp1, x1);
         AddComponentToState(state, comp2, x2);
         AddComponentToState(state, comp3, x3);
-        
+
         return state;
     }
 
@@ -583,11 +563,8 @@ public class PhaseDiagramGenerator
             Volume_L = 1.0
         };
 
-        foreach (var (component, moles) in composition)
-        {
-            AddComponentToState(state, component, moles);
-        }
-        
+        foreach (var (component, moles) in composition) AddComponentToState(state, component, moles);
+
         return state;
     }
 
@@ -595,30 +572,25 @@ public class PhaseDiagramGenerator
     {
         var compound = _compoundLibrary.Find(componentName);
         if (compound == null) return;
-        
+
         state.SpeciesMoles[componentName] = moles;
-        
+
         var composition = _reactionGenerator.ParseChemicalFormula(compound.ChemicalFormula);
         foreach (var (element, stoich) in composition)
-        {
-            state.ElementalComposition[element] = 
+            state.ElementalComposition[element] =
                 state.ElementalComposition.GetValueOrDefault(element, 0) + moles * stoich;
-        }
     }
 
     private string GetDominantPhase(ThermodynamicState state)
     {
         var phaseMoles = new Dictionary<CompoundPhase, double>();
-        
+
         foreach (var (species, moles) in state.SpeciesMoles)
         {
             var compound = _compoundLibrary.Find(species);
-            if (compound != null)
-            {
-                phaseMoles[compound.Phase] = phaseMoles.GetValueOrDefault(compound.Phase, 0) + moles;
-            }
+            if (compound != null) phaseMoles[compound.Phase] = phaseMoles.GetValueOrDefault(compound.Phase, 0) + moles;
         }
-        
+
         return phaseMoles.OrderByDescending(p => p.Value).FirstOrDefault().Key.ToString();
     }
 
@@ -627,19 +599,19 @@ public class PhaseDiagramGenerator
     #region Export Methods
 
     /// <summary>
-    /// Export phase diagram data to a DataTable for visualization or analysis.
+    ///     Export phase diagram data to a DataTable for visualization or analysis.
     /// </summary>
     public DataTable ExportBinaryDiagramToTable(BinaryPhaseDiagramData data)
     {
         var table = new DataTable("BinaryPhaseDiagram");
-        
+
         table.Columns.Add("X_" + data.Component1, typeof(double));
         table.Columns.Add("X_" + data.Component2, typeof(double));
         table.Columns.Add("Phases", typeof(string));
         table.Columns.Add("pH", typeof(double));
         table.Columns.Add("IonicStrength", typeof(double));
         table.Columns.Add("Precipitates", typeof(string));
-        
+
         foreach (var point in data.Points)
         {
             var row = table.NewRow();
@@ -651,18 +623,19 @@ public class PhaseDiagramGenerator
             row["Precipitates"] = string.Join(", ", point.PrecipitatingMinerals);
             table.Rows.Add(row);
         }
-        
+
         return table;
     }
 
     /// <summary>
-    /// Create an OxyPlot model for visualization.
+    ///     Create an OxyPlot model for visualization.
     /// </summary>
     public PlotModel CreateBinaryDiagramPlot(BinaryPhaseDiagramData data)
     {
         var model = new PlotModel
         {
-            Title = $"{data.Component1}-{data.Component2} Phase Diagram at {data.Temperature_K:F0}K, {data.Pressure_bar:F1} bar"
+            Title =
+                $"{data.Component1}-{data.Component2} Phase Diagram at {data.Temperature_K:F0}K, {data.Pressure_bar:F1} bar"
         };
 
         // Add axes
@@ -673,7 +646,7 @@ public class PhaseDiagramGenerator
             Minimum = 0,
             Maximum = 1
         });
-        
+
         model.Axes.Add(new LinearAxis
         {
             Position = AxisPosition.Left,
@@ -690,18 +663,15 @@ public class PhaseDiagramGenerator
                 Title = string.Join("+", region.Phases.Distinct()),
                 StrokeThickness = 2
             };
-            
+
             // Add points for the region
             var regionPoints = data.Points
-                .Where(p => p.X_Component1 >= region.StartComposition && 
-                           p.X_Component1 <= region.EndComposition)
+                .Where(p => p.X_Component1 >= region.StartComposition &&
+                            p.X_Component1 <= region.EndComposition)
                 .ToList();
-                
-            foreach (var point in regionPoints)
-            {
-                series.Points.Add(new DataPoint(point.X_Component1, point.pH));
-            }
-            
+
+            foreach (var point in regionPoints) series.Points.Add(new DataPoint(point.X_Component1, point.pH));
+
             model.Series.Add(series);
         }
 

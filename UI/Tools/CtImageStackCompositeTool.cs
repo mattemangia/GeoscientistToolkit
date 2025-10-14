@@ -22,7 +22,7 @@ namespace GeoscientistToolkit.UI.Tools;
 ///     Categorized tool panel for CT Image Stack datasets.
 ///     Uses a compact dropdown + tabs navigation to maximize usable space.
 /// </summary>
-public class CtImageStackCompositeTool : IDatasetTools, IDisposable
+public partial class CtImageStackCompositeTool : IDatasetTools, IDisposable
 {
     private readonly Dictionary<ToolCategory, string> _categoryDescriptions;
     private readonly Dictionary<ToolCategory, string> _categoryNames;
@@ -460,26 +460,4 @@ public class CtImageStackCompositeTool : IDatasetTools, IDisposable
     }
 
     // --- Adapter for RockCoreExtractorTool ---
-    private sealed class RockCoreAdapter : IDatasetTools
-    {
-        public RockCoreAdapter(RockCoreExtractorTool tool)
-        {
-            Tool = tool ?? throw new ArgumentNullException(nameof(tool));
-        }
-
-        public RockCoreExtractorTool Tool { get; }
-
-        public void Draw(Dataset dataset)
-        {
-            if (dataset is CtImageStackDataset ct)
-            {
-                Tool.AttachDataset(ct);
-                Tool.DrawUI(ct);
-            }
-            else
-            {
-                ImGui.TextDisabled("Rock Core tool requires a CT Image Stack dataset.");
-            }
-        }
-    }
 }

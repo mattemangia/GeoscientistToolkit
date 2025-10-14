@@ -1,19 +1,19 @@
 // GeoscientistToolkit/UI/MainWindow.cs
 
+using System.Data;
 using System.Numerics;
 using GeoscientistToolkit.Business;
 using GeoscientistToolkit.Data;
 using GeoscientistToolkit.Data.GIS;
 using GeoscientistToolkit.Data.Mesh3D;
-// ADDED: For TableDataset and DataTable
 using GeoscientistToolkit.Data.Table;
-using System.Data;
 using GeoscientistToolkit.Settings;
 using GeoscientistToolkit.UI.GIS;
 using GeoscientistToolkit.UI.Utils;
 using GeoscientistToolkit.UI.Windows;
 using GeoscientistToolkit.Util;
 using ImGuiNET;
+// ADDED: For TableDataset and DataTable
 
 // ADDED: To access the new editor window
 

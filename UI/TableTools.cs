@@ -4,7 +4,6 @@ using System.Data;
 using System.Globalization;
 using System.Numerics;
 using System.Text;
-using System.Text.RegularExpressions;
 using GeoscientistToolkit.Business;
 using GeoscientistToolkit.Business.Thermodynamics;
 using GeoscientistToolkit.Data;
@@ -906,31 +905,31 @@ public class TableTools : IDatasetTools
             }
         }
     }
-    
+
     /// <summary>
     ///     UI and logic for generating thermodynamic phase diagrams.
     /// </summary>
     private class DiagramGeneratorTool : IDatasetTools
     {
         private readonly string[] _diagramTypes = { "Binary", "Ternary", "P-T", "Energy", "Composition" };
-        private int _selectedDiagramType;
 
         // UI state variables
         private string _comp1 = "H₂O", _comp2 = "NaCl", _comp3 = "CaCl₂";
         private int _comp1Index, _comp2Index, _comp3Index;
-        private string _ptComposition = "'H₂O'=55.5, 'CO₂'=1.0";
-        
-        private float _temperature = 298.15f;
-        private float _pressure = 1.0f;
-        private float _minT = 273.15f, _maxT = 473.15f;
-        private float _minP = 1.0f, _maxP = 1000.0f;
-        
+
         private int _gridPoints = 25;
+        private float _minP = 1.0f, _maxP = 1000.0f;
+        private float _minT = 273.15f, _maxT = 473.15f;
+        private float _pressure = 1.0f;
+        private string _ptComposition = "'H₂O'=55.5, 'CO₂'=1.0";
+        private int _selectedDiagramType;
+
+        private float _temperature = 298.15f;
 
         public void Draw(Dataset dataset)
         {
             if (dataset is not TableDataset tableDataset) return;
-            
+
             ImGui.SetNextItemWidth(200);
             ImGui.Combo("Diagram Type", ref _selectedDiagramType, _diagramTypes, _diagramTypes.Length);
             ImGui.Separator();
@@ -946,10 +945,7 @@ public class TableTools : IDatasetTools
             }
 
             ImGui.Separator();
-            if (ImGui.Button("Generate Diagram"))
-            {
-                GenerateDiagram(tableDataset);
-            }
+            if (ImGui.Button("Generate Diagram")) GenerateDiagram(tableDataset);
         }
 
         private void DrawBinaryOptions()
@@ -970,15 +966,17 @@ public class TableTools : IDatasetTools
             ImGui.DragFloat("Pressure (bar)", ref _pressure, 0.1f, 0, 2000, "%.2f bar");
             ImGui.SliderInt("Grid Resolution", ref _gridPoints, 10, 50);
         }
-        
+
         private void DrawPTOptions()
         {
             ImGui.InputText("Composition (moles)", ref _ptComposition, 256);
-            ImGui.DragFloatRange2("Temperature Range (K)", ref _minT, ref _maxT, 5, 273, 2000, "Min: %.2f K", "Max: %.2f K");
-            ImGui.DragFloatRange2("Pressure Range (bar)", ref _minP, ref _maxP, 10, 1, 10000, "Min: %.2f bar", "Max: %.2f bar");
+            ImGui.DragFloatRange2("Temperature Range (K)", ref _minT, ref _maxT, 5, 273, 2000, "Min: %.2f K",
+                "Max: %.2f K");
+            ImGui.DragFloatRange2("Pressure Range (bar)", ref _minP, ref _maxP, 10, 1, 10000, "Min: %.2f bar",
+                "Max: %.2f bar");
             ImGui.SliderInt("Grid Points", ref _gridPoints, 10, 50);
         }
-        
+
         private void DrawEnergyOptions()
         {
             ImGui.InputText("Component 1", ref _comp1, 64);
@@ -996,6 +994,7 @@ public class TableTools : IDatasetTools
                 ImGui.TextDisabled("This diagram requires at least 3 numeric columns.");
                 return;
             }
+
             ImGui.Combo("Component 1 (Apex)", ref _comp1Index, columnNames, columnNames.Length);
             ImGui.Combo("Component 2 (Left)", ref _comp2Index, columnNames, columnNames.Length);
             ImGui.Combo("Component 3 (Right)", ref _comp3Index, columnNames, columnNames.Length);
@@ -1007,27 +1006,30 @@ public class TableTools : IDatasetTools
             {
                 var generator = new PhaseDiagramGenerator();
                 DataTable resultTable = null;
-                string diagramName = "Diagram";
+                var diagramName = "Diagram";
 
                 switch (_diagramTypes[_selectedDiagramType])
                 {
                     case "Binary":
-                        var binaryData = generator.GenerateBinaryDiagram(_comp1, _comp2, _temperature, _pressure, _gridPoints);
+                        var binaryData =
+                            generator.GenerateBinaryDiagram(_comp1, _comp2, _temperature, _pressure, _gridPoints);
                         resultTable = generator.ExportBinaryDiagramToTable(binaryData);
                         diagramName = $"Binary_{_comp1}-{_comp2}";
                         break;
                     case "Ternary":
-                        var ternaryData = generator.GenerateTernaryDiagram(_comp1, _comp2, _comp3, _temperature, _pressure, _gridPoints);
+                        var ternaryData = generator.GenerateTernaryDiagram(_comp1, _comp2, _comp3, _temperature,
+                            _pressure, _gridPoints);
                         resultTable = new DataTable("TernaryDiagramData");
                         resultTable.Columns.Add("PlotX", typeof(double));
                         resultTable.Columns.Add("PlotY", typeof(double));
                         resultTable.Columns.Add("Phases", typeof(string));
                         foreach (var p in ternaryData.Points)
                         {
-                           var plotX = p.X_Component2 + 0.5 * p.X_Component3;
-                           var plotY = Math.Sqrt(3) / 2.0 * p.X_Component3;
-                           resultTable.Rows.Add(plotX, plotY, string.Join(",", p.PhasesPresent));
+                            var plotX = p.X_Component2 + 0.5 * p.X_Component3;
+                            var plotY = Math.Sqrt(3) / 2.0 * p.X_Component3;
+                            resultTable.Rows.Add(plotX, plotY, string.Join(",", p.PhasesPresent));
                         }
+
                         diagramName = $"Ternary_{_comp1}-{_comp2}-{_comp3}";
                         break;
                     case "P-T":
@@ -1037,49 +1039,53 @@ public class TableTools : IDatasetTools
                         resultTable.Columns.Add("Temperature_K", typeof(double));
                         resultTable.Columns.Add("Pressure_bar", typeof(double));
                         resultTable.Columns.Add("DominantPhase", typeof(string));
-                        foreach (var p in ptData.Points) resultTable.Rows.Add(p.Temperature_K, p.Pressure_bar, p.DominantPhase);
-                        diagramName = $"PT_Diagram";
+                        foreach (var p in ptData.Points)
+                            resultTable.Rows.Add(p.Temperature_K, p.Pressure_bar, p.DominantPhase);
+                        diagramName = "PT_Diagram";
                         break;
                     case "Energy":
-                        var energyData = generator.GenerateEnergyDiagram(_comp1, _comp2, _temperature, _pressure, _gridPoints);
+                        var energyData =
+                            generator.GenerateEnergyDiagram(_comp1, _comp2, _temperature, _pressure, _gridPoints);
                         resultTable = new DataTable("EnergyDiagramData");
                         resultTable.Columns.Add("X_" + _comp1, typeof(double));
                         resultTable.Columns.Add("GibbsEnergy", typeof(double));
-                        foreach(var p in energyData.Points) resultTable.Rows.Add(p.X_Component1, p.GibbsEnergy);
+                        foreach (var p in energyData.Points) resultTable.Rows.Add(p.X_Component1, p.GibbsEnergy);
                         diagramName = $"Energy_{_comp1}-{_comp2}";
                         break;
                     case "Composition":
-                         var sourceTable = tableDataset.GetDataTable();
-                         var col1 = sourceTable.Columns[_comp1Index].ColumnName;
-                         var col2 = sourceTable.Columns[_comp2Index].ColumnName;
-                         var col3 = sourceTable.Columns[_comp3Index].ColumnName;
-                         resultTable = new DataTable("CompositionPlotData");
-                         resultTable.Columns.Add("PlotX", typeof(double));
-                         resultTable.Columns.Add("PlotY", typeof(double));
-                         foreach (DataColumn col in sourceTable.Columns) resultTable.Columns.Add(col.ColumnName, col.DataType);
-                         
-                         foreach(DataRow row in sourceTable.Rows)
-                         {
-                             double v1 = Convert.ToDouble(row[col1]);
-                             double v2 = Convert.ToDouble(row[col2]);
-                             double v3 = Convert.ToDouble(row[col3]);
-                             var total = v1 + v2 + v3;
-                             if (total == 0) continue;
-                             
-                             var x1_norm = v1 / total;
-                             var x2_norm = v2 / total;
-                             var x3_norm = v3 / total;
-                             
-                             var plotX = x2_norm + 0.5 * x3_norm;
-                             var plotY = Math.Sqrt(3) / 2.0 * x3_norm;
-                             
-                             var newRow = resultTable.NewRow();
-                             newRow["PlotX"] = plotX;
-                             newRow["PlotY"] = plotY;
-                             foreach (DataColumn col in sourceTable.Columns) newRow[col.ColumnName] = row[col];
-                             resultTable.Rows.Add(newRow);
-                         }
-                         diagramName = $"Composition_{col1}-{col2}-{col3}";
+                        var sourceTable = tableDataset.GetDataTable();
+                        var col1 = sourceTable.Columns[_comp1Index].ColumnName;
+                        var col2 = sourceTable.Columns[_comp2Index].ColumnName;
+                        var col3 = sourceTable.Columns[_comp3Index].ColumnName;
+                        resultTable = new DataTable("CompositionPlotData");
+                        resultTable.Columns.Add("PlotX", typeof(double));
+                        resultTable.Columns.Add("PlotY", typeof(double));
+                        foreach (DataColumn col in sourceTable.Columns)
+                            resultTable.Columns.Add(col.ColumnName, col.DataType);
+
+                        foreach (DataRow row in sourceTable.Rows)
+                        {
+                            var v1 = Convert.ToDouble(row[col1]);
+                            var v2 = Convert.ToDouble(row[col2]);
+                            var v3 = Convert.ToDouble(row[col3]);
+                            var total = v1 + v2 + v3;
+                            if (total == 0) continue;
+
+                            var x1_norm = v1 / total;
+                            var x2_norm = v2 / total;
+                            var x3_norm = v3 / total;
+
+                            var plotX = x2_norm + 0.5 * x3_norm;
+                            var plotY = Math.Sqrt(3) / 2.0 * x3_norm;
+
+                            var newRow = resultTable.NewRow();
+                            newRow["PlotX"] = plotX;
+                            newRow["PlotY"] = plotY;
+                            foreach (DataColumn col in sourceTable.Columns) newRow[col.ColumnName] = row[col];
+                            resultTable.Rows.Add(newRow);
+                        }
+
+                        diagramName = $"Composition_{col1}-{col2}-{col3}";
                         break;
                 }
 
@@ -1095,7 +1101,7 @@ public class TableTools : IDatasetTools
                 Logger.LogError($"Failed to generate diagram: {ex.Message}");
             }
         }
-        
+
         private Dictionary<string, double> ParseComposition(string compStr)
         {
             var composition = new Dictionary<string, double>();
@@ -1110,6 +1116,7 @@ public class TableTools : IDatasetTools
                     composition[name] = moles;
                 }
             }
+
             return composition;
         }
     }

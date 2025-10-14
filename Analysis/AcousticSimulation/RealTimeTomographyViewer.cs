@@ -324,7 +324,7 @@ public class RealTimeTomographyViewer : IDisposable
         // For numbers >= 10,000, use 'k' suffix
         if (velocity >= 10000.0f)
             return $"{velocity / 1000.0f:F1}k";
-        
+
         // For numbers from 1000 to 9999, show the full integer value
         if (velocity >= 1000.0f)
             return $"{velocity:F0}";

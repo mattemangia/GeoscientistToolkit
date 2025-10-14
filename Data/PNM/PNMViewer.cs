@@ -26,7 +26,7 @@ public class PNMViewer : IDatasetViewer
         "Pressure (Pores)",
         "Pressure Drop (Throats)",
         "Local Tortuosity",
-        "Effective Diffusivity"  // NEW
+        "Effective Diffusivity" // NEW
     };
 
     // Dataset & Veldrid Resources
@@ -38,17 +38,15 @@ public class PNMViewer : IDatasetViewer
     // Platform detection
     private readonly bool _isMetal;
     private readonly string _legendWindowId = "##PNMLegend";
+
+    // NEW: Diffusivity visualization data
+    private readonly ConcurrentDictionary<int, float> _localDiffusivity = new();
     private readonly ConcurrentDictionary<int, float> _localTortuosity = new();
     private readonly ConcurrentBag<int> _outletPoreIds = new();
 
     // Flow visualization data
     private readonly ConcurrentDictionary<int, float> _porePressures = new();
 
-    // NEW: Diffusivity visualization data
-    private readonly ConcurrentDictionary<int, float> _localDiffusivity = new();
-    private volatile bool _hasDiffusivityData;
-    private bool _useLogScaleForDiffusivity = true;
-    
     // Screenshot functionality
     private readonly ImGuiExportFileDialog _screenshotDialog;
     private readonly string _selectedWindowId = "##PNMSelected";
@@ -72,6 +70,7 @@ public class PNMViewer : IDatasetViewer
     private string _flowAxis = "Z";
     private Vector3 _flowDirection = new(0, 0, 1);
     private Framebuffer _framebuffer;
+    private volatile bool _hasDiffusivityData;
     private volatile bool _hasFlowData;
     private bool _isDragging;
     private bool _isPanning;
@@ -117,6 +116,7 @@ public class PNMViewer : IDatasetViewer
     // Throat (Line) rendering resources
     private DeviceBuffer _throatVertexBuffer;
     private uint _throatVertexCount;
+    private bool _useLogScaleForDiffusivity = true;
 
     // Camera & Interaction
     private Matrix4x4 _viewMatrix, _projMatrix;
@@ -182,39 +182,39 @@ public class PNMViewer : IDatasetViewer
             if (_dataset.EffectiveDiffusivity > 0 && _dataset.BulkDiffusivity > 0)
             {
                 _localDiffusivity.Clear();
-                
+
                 // Calculate local effective diffusivity for each pore
                 // Based on connectivity and local network topology
                 var D0 = _dataset.BulkDiffusivity;
                 var Deff_global = _dataset.EffectiveDiffusivity;
                 var F_global = _dataset.FormationFactor;
-                
+
                 foreach (var pore in _dataset.Pores)
                 {
                     // Local diffusivity based on:
                     // 1. Connectivity (more connections = less restricted)
                     // 2. Local tortuosity
                     // 3. Pore size (larger pores = less restricted)
-                    
+
                     var avgConnectivity = _dataset.Pores.Average(p => p.Connections);
                     var connectivityFactor = pore.Connections / Math.Max(1, avgConnectivity);
-                    
-                    float localTort = 1.0f;
+
+                    var localTort = 1.0f;
                     if (_localTortuosity.TryGetValue(pore.ID, out var tort))
                         localTort = tort;
-                    
+
                     var sizeFactor = pore.Radius / Math.Max(0.1f, _dataset.MaxPoreRadius);
-                    
+
                     // Local formation factor
                     var F_local = F_global / (connectivityFactor * sizeFactor * (2.0f / localTort));
                     F_local = Math.Clamp(F_local, 1.0f, F_global * 2.0f);
-                    
+
                     // Local effective diffusivity
                     var D_local = D0 / F_local;
-                    
+
                     _localDiffusivity.TryAdd(pore.ID, (float)D_local);
                 }
-                
+
                 _hasDiffusivityData = true;
                 Logger.Log($"[PNMViewer] Loaded diffusivity data for {_localDiffusivity.Count} pores");
             }
@@ -267,8 +267,13 @@ public class PNMViewer : IDatasetViewer
                     var minZ = _dataset.Pores.Min(p => p.Position.Z);
                     var maxZ = _dataset.Pores.Max(p => p.Position.Z);
 
-                    while (_inletPoreIds.TryTake(out _)) { }
-                    while (_outletPoreIds.TryTake(out _)) { }
+                    while (_inletPoreIds.TryTake(out _))
+                    {
+                    }
+
+                    while (_outletPoreIds.TryTake(out _))
+                    {
+                    }
 
                     var axis = (_flowAxis ?? "Z").ToUpperInvariant();
                     foreach (var pore in _dataset.Pores)
@@ -288,7 +293,8 @@ public class PNMViewer : IDatasetViewer
                                 break;
                         }
 
-                    Logger.Log($"[PNMViewer] Identified {_inletPoreIds.Count} inlet and {_outletPoreIds.Count} outlet pores");
+                    Logger.Log(
+                        $"[PNMViewer] Identified {_inletPoreIds.Count} inlet and {_outletPoreIds.Count} outlet pores");
                 }
 
                 CalculateLocalTortuosity();
@@ -298,8 +304,13 @@ public class PNMViewer : IDatasetViewer
             {
                 _hasFlowData = false;
                 _showFlowVisualization = false;
-                while (_inletPoreIds.TryTake(out _)) { }
-                while (_outletPoreIds.TryTake(out _)) { }
+                while (_inletPoreIds.TryTake(out _))
+                {
+                }
+
+                while (_outletPoreIds.TryTake(out _))
+                {
+                }
             }
         }
     }
@@ -402,107 +413,108 @@ public class PNMViewer : IDatasetViewer
     }
 
     private void CreateColorRampTexture(ResourceFactory factory)
-{
-    const int mapSize = 256;
-    var colorMapData = new RgbaFloat[mapSize];
-    for (var i = 0; i < mapSize; i++)
     {
-        var t = i / (float)(mapSize - 1);
-        float r, g, b;
+        const int mapSize = 256;
+        var colorMapData = new RgbaFloat[mapSize];
+        for (var i = 0; i < mapSize; i++)
+        {
+            var t = i / (float)(mapSize - 1);
+            float r, g, b;
 
-        if (_colorByIndex == 3 || _colorByIndex == 4) // Pressure-based
-        {
-            r = t;
-            g = 1.0f - Math.Abs(2.0f * t - 1.0f);
-            b = 1.0f - t;
-            colorMapData[i] = new RgbaFloat(r, g, b, 1.0f);
-        }
-        else if (_colorByIndex == 5) // Tortuosity
-        {
-            r = Math.Min(1.0f, 2.0f * t);
-            g = Math.Min(1.0f, 2.0f * (1.0f - t));
-            b = 0.0f;
-            colorMapData[i] = new RgbaFloat(r, g, b, 1.0f);
-        }
-        else if (_colorByIndex == 6) // Diffusivity - high contrast gradient
-        {
-            // Blue (low/restricted) -> Cyan -> Green -> Yellow -> Red (high/unrestricted)
-            if (t < 0.25f)
+            if (_colorByIndex == 3 || _colorByIndex == 4) // Pressure-based
             {
-                // Blue to Cyan
-                var local_t = t / 0.25f;
-                r = 0f;
-                g = local_t;
-                b = 1f;
+                r = t;
+                g = 1.0f - Math.Abs(2.0f * t - 1.0f);
+                b = 1.0f - t;
+                colorMapData[i] = new RgbaFloat(r, g, b, 1.0f);
             }
-            else if (t < 0.5f)
+            else if (_colorByIndex == 5) // Tortuosity
             {
-                // Cyan to Green
-                var local_t = (t - 0.25f) / 0.25f;
-                r = 0f;
-                g = 1f;
-                b = 1f - local_t;
+                r = Math.Min(1.0f, 2.0f * t);
+                g = Math.Min(1.0f, 2.0f * (1.0f - t));
+                b = 0.0f;
+                colorMapData[i] = new RgbaFloat(r, g, b, 1.0f);
             }
-            else if (t < 0.75f)
+            else if (_colorByIndex == 6) // Diffusivity - high contrast gradient
             {
-                // Green to Yellow
-                var local_t = (t - 0.5f) / 0.25f;
-                r = local_t;
-                g = 1f;
-                b = 0f;
-            }
-            else
-            {
-                // Yellow to Red
-                var local_t = (t - 0.75f) / 0.25f;
-                r = 1f;
-                g = 1f - local_t;
-                b = 0f;
-            }
-            colorMapData[i] = new RgbaFloat(r, g, b, 1.0f);
-        }
-        else // Default turbo colormap
-        {
-            if (t < 0.2f)
-            {
-                r = 0.9f + 0.1f * (t / 0.2f);
-                g = 0.2f + 0.6f * (t / 0.2f);
-                b = 0.1f;
-            }
-            else if (t < 0.4f)
-            {
-                r = 1.0f;
-                g = 0.8f + 0.2f * ((t - 0.2f) / 0.2f);
-                b = 0.1f + 0.2f * ((t - 0.2f) / 0.2f);
-            }
-            else if (t < 0.6f)
-            {
-                r = 1.0f - 0.5f * ((t - 0.4f) / 0.2f);
-                g = 1.0f;
-                b = 0.3f + 0.3f * ((t - 0.4f) / 0.2f);
-            }
-            else if (t < 0.8f)
-            {
-                r = 0.5f - 0.3f * ((t - 0.6f) / 0.2f);
-                g = 1.0f - 0.2f * ((t - 0.6f) / 0.2f);
-                b = 0.6f + 0.3f * ((t - 0.6f) / 0.2f);
-            }
-            else
-            {
-                r = 0.2f + 0.3f * ((t - 0.8f) / 0.2f);
-                g = 0.8f - 0.3f * ((t - 0.8f) / 0.2f);
-                b = 0.9f + 0.1f * ((t - 0.8f) / 0.2f);
-            }
+                // Blue (low/restricted) -> Cyan -> Green -> Yellow -> Red (high/unrestricted)
+                if (t < 0.25f)
+                {
+                    // Blue to Cyan
+                    var local_t = t / 0.25f;
+                    r = 0f;
+                    g = local_t;
+                    b = 1f;
+                }
+                else if (t < 0.5f)
+                {
+                    // Cyan to Green
+                    var local_t = (t - 0.25f) / 0.25f;
+                    r = 0f;
+                    g = 1f;
+                    b = 1f - local_t;
+                }
+                else if (t < 0.75f)
+                {
+                    // Green to Yellow
+                    var local_t = (t - 0.5f) / 0.25f;
+                    r = local_t;
+                    g = 1f;
+                    b = 0f;
+                }
+                else
+                {
+                    // Yellow to Red
+                    var local_t = (t - 0.75f) / 0.25f;
+                    r = 1f;
+                    g = 1f - local_t;
+                    b = 0f;
+                }
 
-            colorMapData[i] = new RgbaFloat(r, g, b, 1.0f);
+                colorMapData[i] = new RgbaFloat(r, g, b, 1.0f);
+            }
+            else // Default turbo colormap
+            {
+                if (t < 0.2f)
+                {
+                    r = 0.9f + 0.1f * (t / 0.2f);
+                    g = 0.2f + 0.6f * (t / 0.2f);
+                    b = 0.1f;
+                }
+                else if (t < 0.4f)
+                {
+                    r = 1.0f;
+                    g = 0.8f + 0.2f * ((t - 0.2f) / 0.2f);
+                    b = 0.1f + 0.2f * ((t - 0.2f) / 0.2f);
+                }
+                else if (t < 0.6f)
+                {
+                    r = 1.0f - 0.5f * ((t - 0.4f) / 0.2f);
+                    g = 1.0f;
+                    b = 0.3f + 0.3f * ((t - 0.4f) / 0.2f);
+                }
+                else if (t < 0.8f)
+                {
+                    r = 0.5f - 0.3f * ((t - 0.6f) / 0.2f);
+                    g = 1.0f - 0.2f * ((t - 0.6f) / 0.2f);
+                    b = 0.6f + 0.3f * ((t - 0.6f) / 0.2f);
+                }
+                else
+                {
+                    r = 0.2f + 0.3f * ((t - 0.8f) / 0.2f);
+                    g = 0.8f - 0.3f * ((t - 0.8f) / 0.2f);
+                    b = 0.9f + 0.1f * ((t - 0.8f) / 0.2f);
+                }
+
+                colorMapData[i] = new RgbaFloat(r, g, b, 1.0f);
+            }
         }
+
+        _colorRampTexture?.Dispose();
+        _colorRampTexture = factory.CreateTexture(TextureDescription.Texture2D(mapSize, 1, 1, 1,
+            PixelFormat.R32_G32_B32_A32_Float, TextureUsage.Sampled));
+        VeldridManager.GraphicsDevice.UpdateTexture(_colorRampTexture, colorMapData, 0, 0, 0, mapSize, 1, 1, 0, 0);
     }
-
-    _colorRampTexture?.Dispose();
-    _colorRampTexture = factory.CreateTexture(TextureDescription.Texture2D(mapSize, 1, 1, 1,
-        PixelFormat.R32_G32_B32_A32_Float, TextureUsage.Sampled));
-    VeldridManager.GraphicsDevice.UpdateTexture(_colorRampTexture, colorMapData, 0, 0, 0, mapSize, 1, 1, 0, 0);
-}
 
     private void DrawScreenshotNotification(Vector2 viewPos, Vector2 viewSize)
     {
@@ -628,9 +640,11 @@ public class PNMViewer : IDatasetViewer
     {
         var (vertices, indices) = CreateSphereGeometry();
 
-        _poreVertexBuffer = factory.CreateBuffer(new BufferDescription((uint)(vertices.Length * 12), BufferUsage.VertexBuffer));
+        _poreVertexBuffer =
+            factory.CreateBuffer(new BufferDescription((uint)(vertices.Length * 12), BufferUsage.VertexBuffer));
         VeldridManager.GraphicsDevice.UpdateBuffer(_poreVertexBuffer, 0, vertices);
-        _poreIndexBuffer = factory.CreateBuffer(new BufferDescription((uint)(indices.Length * 2), BufferUsage.IndexBuffer));
+        _poreIndexBuffer =
+            factory.CreateBuffer(new BufferDescription((uint)(indices.Length * 2), BufferUsage.IndexBuffer));
         VeldridManager.GraphicsDevice.UpdateBuffer(_poreIndexBuffer, 0, indices);
 
         var vertexShader = @"
@@ -918,6 +932,7 @@ void main()
                     _showInletPores = true;
                     _showOutletPores = true;
                 }
+
                 RebuildGeometryFromDataset();
             }
 
@@ -1185,7 +1200,8 @@ void main()
         if (_throatVertexCount > 0)
         {
             var vertSize = (uint)Marshal.SizeOf<ThroatVertexData>();
-            _throatVertexBuffer = factory.CreateBuffer(new BufferDescription(vertSize * _throatVertexCount, BufferUsage.VertexBuffer));
+            _throatVertexBuffer =
+                factory.CreateBuffer(new BufferDescription(vertSize * _throatVertexCount, BufferUsage.VertexBuffer));
             VeldridManager.GraphicsDevice.UpdateBuffer(_throatVertexBuffer, 0, throatVertices.ToArray());
         }
         else
@@ -1221,6 +1237,7 @@ void main()
                         return MathF.Log10(diff);
                     return -20f; // Floor value for zero/invalid
                 }
+
                 return -20f;
             default: return p.Radius;
         }
@@ -1315,6 +1332,7 @@ void main()
                         minVal = _porePressures.Values.Min();
                         maxVal = _porePressures.Values.Max();
                     }
+
                     break;
                 case 4:
                     if (_porePressures.Any())
@@ -1328,9 +1346,11 @@ void main()
                                 if (drop < minDrop) minDrop = drop;
                                 if (drop > maxDrop) maxDrop = drop;
                             }
+
                         minVal = minDrop != float.MaxValue ? minDrop : 0;
                         maxVal = maxDrop;
                     }
+
                     break;
                 case 5:
                     if (_localTortuosity.Any())
@@ -1338,6 +1358,7 @@ void main()
                         minVal = _localTortuosity.Values.Min();
                         maxVal = _localTortuosity.Values.Max();
                     }
+
                     break;
                 case 6: // NEW: Diffusivity
                     if (_localDiffusivity.Any())
@@ -1345,6 +1366,7 @@ void main()
                         minVal = _localDiffusivity.Values.Min();
                         maxVal = _localDiffusivity.Values.Max();
                     }
+
                     break;
             }
         }
@@ -1530,266 +1552,271 @@ void main()
     }
 
     private void DrawLegendContent()
-{
-    var title = _colorByIndex < _colorByOptions.Length ? _colorByOptions[_colorByIndex] : "Unknown";
-    ImGui.Text(title);
-    ImGui.Separator();
-
-    float minVal = 0, maxVal = 1;
-    float actualMin = 0, actualMax = 1, actualMid = 0.5f;
-    var unit = "";
-    var useActualValues = false;
-
-    if (_showFlowVisualization && _hasFlowData && (_showInletPores || _showOutletPores))
     {
-        minVal = 0;
-        maxVal = 1;
-        unit = " (Flow)";
-        actualMin = 0;
-        actualMax = 1;
-        actualMid = 0.5f;
-    }
-    else
-    {
-        switch (_colorByIndex)
+        var title = _colorByIndex < _colorByOptions.Length ? _colorByOptions[_colorByIndex] : "Unknown";
+        ImGui.Text(title);
+        ImGui.Separator();
+
+        float minVal = 0, maxVal = 1;
+        float actualMin = 0, actualMax = 1, actualMid = 0.5f;
+        var unit = "";
+        var useActualValues = false;
+
+        if (_showFlowVisualization && _hasFlowData && (_showInletPores || _showOutletPores))
         {
-            case 0:
-                minVal = _dataset.MinPoreRadius * _dataset.VoxelSize;
-                maxVal = _dataset.MaxPoreRadius * _dataset.VoxelSize;
-                unit = " μm";
-                actualMin = minVal;
-                actualMax = maxVal;
-                actualMid = (minVal + maxVal) / 2f;
-                break;
-            case 1:
-                minVal = _dataset.Pores.Any() ? _dataset.Pores.Min(p => p.Connections) : 0;
-                maxVal = _dataset.Pores.Any() ? _dataset.Pores.Max(p => p.Connections) : 1;
-                unit = "";
-                actualMin = minVal;
-                actualMax = maxVal;
-                actualMid = (minVal + maxVal) / 2f;
-                break;
-            case 2:
-                minVal = _dataset.Pores.Any() ? _dataset.Pores.Min(p => p.VolumePhysical) : 0;
-                maxVal = _dataset.Pores.Any() ? _dataset.Pores.Max(p => p.VolumePhysical) : 1;
-                unit = " μm³";
-                actualMin = minVal;
-                actualMax = maxVal;
-                actualMid = (minVal + maxVal) / 2f;
-                break;
-            case 3:
-                if (_porePressures.Any())
-                {
-                    minVal = _porePressures.Values.Min();
-                    maxVal = _porePressures.Values.Max();
-                    unit = " Pa";
+            minVal = 0;
+            maxVal = 1;
+            unit = " (Flow)";
+            actualMin = 0;
+            actualMax = 1;
+            actualMid = 0.5f;
+        }
+        else
+        {
+            switch (_colorByIndex)
+            {
+                case 0:
+                    minVal = _dataset.MinPoreRadius * _dataset.VoxelSize;
+                    maxVal = _dataset.MaxPoreRadius * _dataset.VoxelSize;
+                    unit = " μm";
                     actualMin = minVal;
                     actualMax = maxVal;
                     actualMid = (minVal + maxVal) / 2f;
-                }
-                break;
-            case 4:
-                if (_throatFlowRates.Any())
-                {
-                    float minDrop = float.MaxValue, maxDrop = 0;
-                    foreach (var throat in _dataset.Throats)
-                        if (_porePressures.TryGetValue(throat.Pore1ID, out var p1) &&
-                            _porePressures.TryGetValue(throat.Pore2ID, out var p2))
-                        {
-                            var drop = Math.Abs(p1 - p2);
-                            minDrop = Math.Min(minDrop, drop);
-                            maxDrop = Math.Max(maxDrop, drop);
-                        }
-                    minVal = minDrop != float.MaxValue ? minDrop : 0;
-                    maxVal = maxDrop;
-                    unit = " Pa";
-                    actualMin = minVal;
-                    actualMax = maxVal;
-                    actualMid = (minVal + maxVal) / 2f;
-                }
-                break;
-            case 5:
-                if (_localTortuosity.Any())
-                {
-                    minVal = _localTortuosity.Values.Min();
-                    maxVal = _localTortuosity.Values.Max();
+                    break;
+                case 1:
+                    minVal = _dataset.Pores.Any() ? _dataset.Pores.Min(p => p.Connections) : 0;
+                    maxVal = _dataset.Pores.Any() ? _dataset.Pores.Max(p => p.Connections) : 1;
                     unit = "";
                     actualMin = minVal;
                     actualMax = maxVal;
                     actualMid = (minVal + maxVal) / 2f;
-                }
-                break;
-            case 6: // Diffusivity with LOG SCALE
-                if (_localDiffusivity.Any())
-                {
-                    actualMin = _localDiffusivity.Values.Min();
-                    actualMax = _localDiffusivity.Values.Max();
-                    
-                    // Use log scale for visualization
-                    minVal = actualMin > 0 ? MathF.Log10(actualMin) : -20f;
-                    maxVal = actualMax > 0 ? MathF.Log10(actualMax) : -10f;
-                    actualMid = MathF.Pow(10, (minVal + maxVal) / 2f);
-                    
-                    unit = " m²/s";
-                    useActualValues = true;
-                }
-                break;
+                    break;
+                case 2:
+                    minVal = _dataset.Pores.Any() ? _dataset.Pores.Min(p => p.VolumePhysical) : 0;
+                    maxVal = _dataset.Pores.Any() ? _dataset.Pores.Max(p => p.VolumePhysical) : 1;
+                    unit = " μm³";
+                    actualMin = minVal;
+                    actualMax = maxVal;
+                    actualMid = (minVal + maxVal) / 2f;
+                    break;
+                case 3:
+                    if (_porePressures.Any())
+                    {
+                        minVal = _porePressures.Values.Min();
+                        maxVal = _porePressures.Values.Max();
+                        unit = " Pa";
+                        actualMin = minVal;
+                        actualMax = maxVal;
+                        actualMid = (minVal + maxVal) / 2f;
+                    }
+
+                    break;
+                case 4:
+                    if (_throatFlowRates.Any())
+                    {
+                        float minDrop = float.MaxValue, maxDrop = 0;
+                        foreach (var throat in _dataset.Throats)
+                            if (_porePressures.TryGetValue(throat.Pore1ID, out var p1) &&
+                                _porePressures.TryGetValue(throat.Pore2ID, out var p2))
+                            {
+                                var drop = Math.Abs(p1 - p2);
+                                minDrop = Math.Min(minDrop, drop);
+                                maxDrop = Math.Max(maxDrop, drop);
+                            }
+
+                        minVal = minDrop != float.MaxValue ? minDrop : 0;
+                        maxVal = maxDrop;
+                        unit = " Pa";
+                        actualMin = minVal;
+                        actualMax = maxVal;
+                        actualMid = (minVal + maxVal) / 2f;
+                    }
+
+                    break;
+                case 5:
+                    if (_localTortuosity.Any())
+                    {
+                        minVal = _localTortuosity.Values.Min();
+                        maxVal = _localTortuosity.Values.Max();
+                        unit = "";
+                        actualMin = minVal;
+                        actualMax = maxVal;
+                        actualMid = (minVal + maxVal) / 2f;
+                    }
+
+                    break;
+                case 6: // Diffusivity with LOG SCALE
+                    if (_localDiffusivity.Any())
+                    {
+                        actualMin = _localDiffusivity.Values.Min();
+                        actualMax = _localDiffusivity.Values.Max();
+
+                        // Use log scale for visualization
+                        minVal = actualMin > 0 ? MathF.Log10(actualMin) : -20f;
+                        maxVal = actualMax > 0 ? MathF.Log10(actualMax) : -10f;
+                        actualMid = MathF.Pow(10, (minVal + maxVal) / 2f);
+
+                        unit = " m²/s";
+                        useActualValues = true;
+                    }
+
+                    break;
+            }
+        }
+
+        var drawList = ImGui.GetWindowDrawList();
+        var pos = ImGui.GetCursorScreenPos();
+        float width = 30;
+        float height = 180;
+
+        var steps = 20;
+        for (var i = 0; i < steps; i++)
+        {
+            var t1 = (float)(steps - i - 1) / steps;
+            var t2 = (float)(steps - i) / steps;
+
+            var c1 = GetColorForMode(t1);
+            var c2 = GetColorForMode(t2);
+
+            drawList.AddRectFilledMultiColor(
+                new Vector2(pos.X, pos.Y + i * height / steps),
+                new Vector2(pos.X + width, pos.Y + (i + 1) * height / steps),
+                ImGui.GetColorU32(c1), ImGui.GetColorU32(c1),
+                ImGui.GetColorU32(c2), ImGui.GetColorU32(c2));
+        }
+
+        // Display values
+        ImGui.SetCursorScreenPos(new Vector2(pos.X + width + 5, pos.Y));
+        if (useActualValues)
+            ImGui.Text($"{actualMax:E2}{unit}");
+        else if (_colorByIndex == 6)
+            ImGui.Text($"{maxVal:E2}{unit}");
+        else
+            ImGui.Text($"{maxVal:F2}{unit}");
+
+        ImGui.SetCursorScreenPos(new Vector2(pos.X + width + 5, pos.Y + height / 2 - ImGui.GetTextLineHeight() / 2));
+        if (useActualValues)
+            ImGui.Text($"{actualMid:E2}{unit}");
+        else if (_colorByIndex == 6)
+            ImGui.Text($"{(minVal + maxVal) / 2:E2}{unit}");
+        else
+            ImGui.Text($"{(minVal + maxVal) / 2:F2}{unit}");
+
+        ImGui.SetCursorScreenPos(new Vector2(pos.X + width + 5, pos.Y + height - ImGui.GetTextLineHeight()));
+        if (useActualValues)
+            ImGui.Text($"{actualMin:E2}{unit}");
+        else if (_colorByIndex == 6)
+            ImGui.Text($"{minVal:E2}{unit}");
+        else
+            ImGui.Text($"{minVal:F2}{unit}");
+
+        if (_colorByIndex >= 3 && _colorByIndex <= 5 && !_hasFlowData)
+        {
+            ImGui.Spacing();
+            ImGui.TextWrapped("Run permeability calculation to enable flow visualization");
+        }
+
+        if (_colorByIndex == 6 && !_hasDiffusivityData)
+        {
+            ImGui.Spacing();
+            ImGui.TextWrapped("Run diffusivity calculation to enable diffusivity visualization");
         }
     }
 
-    var drawList = ImGui.GetWindowDrawList();
-    var pos = ImGui.GetCursorScreenPos();
-    float width = 30;
-    float height = 180;
-
-    var steps = 20;
-    for (var i = 0; i < steps; i++)
+    private Vector4 GetColorForMode(float t)
     {
-        var t1 = (float)(steps - i - 1) / steps;
-        var t2 = (float)(steps - i) / steps;
-
-        var c1 = GetColorForMode(t1);
-        var c2 = GetColorForMode(t2);
-
-        drawList.AddRectFilledMultiColor(
-            new Vector2(pos.X, pos.Y + i * height / steps),
-            new Vector2(pos.X + width, pos.Y + (i + 1) * height / steps),
-            ImGui.GetColorU32(c1), ImGui.GetColorU32(c1),
-            ImGui.GetColorU32(c2), ImGui.GetColorU32(c2));
-    }
-
-    // Display values
-    ImGui.SetCursorScreenPos(new Vector2(pos.X + width + 5, pos.Y));
-    if (useActualValues)
-        ImGui.Text($"{actualMax:E2}{unit}");
-    else if (_colorByIndex == 6)
-        ImGui.Text($"{maxVal:E2}{unit}");
-    else
-        ImGui.Text($"{maxVal:F2}{unit}");
-
-    ImGui.SetCursorScreenPos(new Vector2(pos.X + width + 5, pos.Y + height / 2 - ImGui.GetTextLineHeight() / 2));
-    if (useActualValues)
-        ImGui.Text($"{actualMid:E2}{unit}");
-    else if (_colorByIndex == 6)
-        ImGui.Text($"{(minVal + maxVal) / 2:E2}{unit}");
-    else
-        ImGui.Text($"{(minVal + maxVal) / 2:F2}{unit}");
-
-    ImGui.SetCursorScreenPos(new Vector2(pos.X + width + 5, pos.Y + height - ImGui.GetTextLineHeight()));
-    if (useActualValues)
-        ImGui.Text($"{actualMin:E2}{unit}");
-    else if (_colorByIndex == 6)
-        ImGui.Text($"{minVal:E2}{unit}");
-    else
-        ImGui.Text($"{minVal:F2}{unit}");
-
-    if (_colorByIndex >= 3 && _colorByIndex <= 5 && !_hasFlowData)
-    {
-        ImGui.Spacing();
-        ImGui.TextWrapped("Run permeability calculation to enable flow visualization");
-    }
-    
-    if (_colorByIndex == 6 && !_hasDiffusivityData)
-    {
-        ImGui.Spacing();
-        ImGui.TextWrapped("Run diffusivity calculation to enable diffusivity visualization");
-    }
-}
-
-   private Vector4 GetColorForMode(float t)
-{
-    if (_colorByIndex == 3 || _colorByIndex == 4) // Pressure
-    {
-        var r = t;
-        var g = 1.0f - Math.Abs(2.0f * t - 1.0f);
-        var b = 1.0f - t;
-        return new Vector4(r, g, b, 1.0f);
-    }
-
-    if (_colorByIndex == 5) // Tortuosity
-    {
-        var r = Math.Min(1.0f, 2.0f * t);
-        var g = Math.Min(1.0f, 2.0f * (1.0f - t));
-        var b = 0.0f;
-        return new Vector4(r, g, b, 1.0f);
-    }
-    
-    if (_colorByIndex == 6) // Diffusivity - match the gradient
-    {
-        float r, g, b;
-        
-        if (t < 0.25f)
+        if (_colorByIndex == 3 || _colorByIndex == 4) // Pressure
         {
-            // Blue to Cyan
-            var local_t = t / 0.25f;
-            r = 0f;
-            g = local_t;
-            b = 1f;
+            var r = t;
+            var g = 1.0f - Math.Abs(2.0f * t - 1.0f);
+            var b = 1.0f - t;
+            return new Vector4(r, g, b, 1.0f);
         }
-        else if (t < 0.5f)
+
+        if (_colorByIndex == 5) // Tortuosity
         {
-            // Cyan to Green
-            var local_t = (t - 0.25f) / 0.25f;
-            r = 0f;
-            g = 1f;
-            b = 1f - local_t;
+            var r = Math.Min(1.0f, 2.0f * t);
+            var g = Math.Min(1.0f, 2.0f * (1.0f - t));
+            var b = 0.0f;
+            return new Vector4(r, g, b, 1.0f);
         }
-        else if (t < 0.75f)
+
+        if (_colorByIndex == 6) // Diffusivity - match the gradient
         {
-            // Green to Yellow
-            var local_t = (t - 0.5f) / 0.25f;
-            r = local_t;
-            g = 1f;
-            b = 0f;
+            float r, g, b;
+
+            if (t < 0.25f)
+            {
+                // Blue to Cyan
+                var local_t = t / 0.25f;
+                r = 0f;
+                g = local_t;
+                b = 1f;
+            }
+            else if (t < 0.5f)
+            {
+                // Cyan to Green
+                var local_t = (t - 0.25f) / 0.25f;
+                r = 0f;
+                g = 1f;
+                b = 1f - local_t;
+            }
+            else if (t < 0.75f)
+            {
+                // Green to Yellow
+                var local_t = (t - 0.5f) / 0.25f;
+                r = local_t;
+                g = 1f;
+                b = 0f;
+            }
+            else
+            {
+                // Yellow to Red
+                var local_t = (t - 0.75f) / 0.25f;
+                r = 1f;
+                g = 1f - local_t;
+                b = 0f;
+            }
+
+            return new Vector4(r, g, b, 1.0f);
+        }
+
+        // Default turbo colormap
+        float r_default, g_default, b_default;
+
+        if (t < 0.2f)
+        {
+            r_default = 0.9f + 0.1f * (t / 0.2f);
+            g_default = 0.2f + 0.6f * (t / 0.2f);
+            b_default = 0.1f;
+        }
+        else if (t < 0.4f)
+        {
+            r_default = 1.0f;
+            g_default = 0.8f + 0.2f * ((t - 0.2f) / 0.2f);
+            b_default = 0.1f + 0.2f * ((t - 0.2f) / 0.2f);
+        }
+        else if (t < 0.6f)
+        {
+            r_default = 1.0f - 0.5f * ((t - 0.4f) / 0.2f);
+            g_default = 1.0f;
+            b_default = 0.3f + 0.3f * ((t - 0.4f) / 0.2f);
+        }
+        else if (t < 0.8f)
+        {
+            r_default = 0.5f - 0.3f * ((t - 0.6f) / 0.2f);
+            g_default = 1.0f - 0.2f * ((t - 0.6f) / 0.2f);
+            b_default = 0.6f + 0.3f * ((t - 0.6f) / 0.2f);
         }
         else
         {
-            // Yellow to Red
-            var local_t = (t - 0.75f) / 0.25f;
-            r = 1f;
-            g = 1f - local_t;
-            b = 0f;
+            r_default = 0.2f + 0.3f * ((t - 0.8f) / 0.2f);
+            g_default = 0.8f - 0.3f * ((t - 0.8f) / 0.2f);
+            b_default = 0.9f + 0.1f * ((t - 0.8f) / 0.2f);
         }
-        
-        return new Vector4(r, g, b, 1.0f);
-    }
-    
-    // Default turbo colormap
-    float r_default, g_default, b_default;
 
-    if (t < 0.2f)
-    {
-        r_default = 0.9f + 0.1f * (t / 0.2f);
-        g_default = 0.2f + 0.6f * (t / 0.2f);
-        b_default = 0.1f;
+        return new Vector4(r_default, g_default, b_default, 1.0f);
     }
-    else if (t < 0.4f)
-    {
-        r_default = 1.0f;
-        g_default = 0.8f + 0.2f * ((t - 0.2f) / 0.2f);
-        b_default = 0.1f + 0.2f * ((t - 0.2f) / 0.2f);
-    }
-    else if (t < 0.6f)
-    {
-        r_default = 1.0f - 0.5f * ((t - 0.4f) / 0.2f);
-        g_default = 1.0f;
-        b_default = 0.3f + 0.3f * ((t - 0.4f) / 0.2f);
-    }
-    else if (t < 0.8f)
-    {
-        r_default = 0.5f - 0.3f * ((t - 0.6f) / 0.2f);
-        g_default = 1.0f - 0.2f * ((t - 0.6f) / 0.2f);
-        b_default = 0.6f + 0.3f * ((t - 0.6f) / 0.2f);
-    }
-    else
-    {
-        r_default = 0.2f + 0.3f * ((t - 0.8f) / 0.2f);
-        g_default = 0.8f - 0.3f * ((t - 0.8f) / 0.2f);
-        b_default = 0.9f + 0.1f * ((t - 0.8f) / 0.2f);
-    }
-
-    return new Vector4(r_default, g_default, b_default, 1.0f);
-}
 
     private void DrawStatisticsContent()
     {
@@ -1807,14 +1834,14 @@ void main()
         ImGui.NextColumn();
 
         ImGui.Text("Transport Properties:");
-        
+
         // Show diffusivity if available
         if (_dataset.EffectiveDiffusivity > 0)
         {
             ImGui.Text($"D_eff: {_dataset.EffectiveDiffusivity:E3} m²/s");
             ImGui.Text($"Form. Factor: {_dataset.FormationFactor:F2}");
         }
-        
+
         // Show permeability if available
         if (_dataset.DarcyPermeability > 0)
         {
@@ -1869,17 +1896,17 @@ void main()
             else if (_outletPoreIds.Contains(_selectedPore.ID))
                 ImGui.TextColored(new Vector4(0, 0.5f, 1, 1), "⇒ OUTLET PORE");
         }
-        
+
         // NEW: Show diffusivity if available
         if (_hasDiffusivityData && _localDiffusivity.TryGetValue(_selectedPore.ID, out var diffusivity))
         {
             ImGui.Separator();
             ImGui.Text("Diffusivity:");
             ImGui.Text($"D_local: {diffusivity:E3} m²/s");
-            
+
             if (_dataset.BulkDiffusivity > 0)
             {
-                var restriction = 1.0f - (diffusivity / _dataset.BulkDiffusivity);
+                var restriction = 1.0f - diffusivity / _dataset.BulkDiffusivity;
                 ImGui.Text($"Restriction: {restriction:P1}");
             }
         }

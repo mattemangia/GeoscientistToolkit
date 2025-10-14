@@ -15,6 +15,27 @@ namespace GeoscientistToolkit.UI;
 
 public class PNMTools : IDatasetTools
 {
+    private readonly float[] _bulkDiffusivities =
+    {
+        2.299e-9f, // Water self-diffusion in m²/s
+        1.49e-9f, // Methane in water
+        1.92e-9f, // CO2 in water
+        5.0e-10f, // Light oil in water (approximate)
+        1.0e-10f, // Heavy oil in water (approximate)
+        1.0e-9f // Custom default
+    };
+
+    // --- NEW: Diffusivity Fluid Presets ---
+    private readonly string[] _diffusivityFluidTypes =
+    {
+        "Water Self-diffusion (25°C)",
+        "Methane in Water (25°C)",
+        "CO₂ in Water (25°C)",
+        "Oil in Water (Light, 25°C)",
+        "Oil in Water (Heavy, 25°C)",
+        "Custom"
+    };
+
     private readonly ImGuiExportFileDialog _exportDialog;
     private readonly ImGuiExportFileDialog _exportResultsDialog;
 
@@ -27,27 +48,6 @@ public class PNMTools : IDatasetTools
         "Oil (Light, 5.0 cP)",
         "Oil (Heavy, 100.0 cP)",
         "Custom"
-    };
-    
-    // --- NEW: Diffusivity Fluid Presets ---
-    private readonly string[] _diffusivityFluidTypes =
-    {
-        "Water Self-diffusion (25°C)",
-        "Methane in Water (25°C)",
-        "CO₂ in Water (25°C)",
-        "Oil in Water (Light, 25°C)",
-        "Oil in Water (Heavy, 25°C)",
-        "Custom"
-    };
-
-    private readonly float[] _bulkDiffusivities =
-    {
-        2.299e-9f, // Water self-diffusion in m²/s
-        1.49e-9f,  // Methane in water
-        1.92e-9f,  // CO2 in water
-        5.0e-10f,  // Light oil in water (approximate)
-        1.0e-10f,  // Heavy oil in water (approximate)
-        1.0e-9f    // Custom default
     };
 
 
@@ -93,7 +93,12 @@ public class PNMTools : IDatasetTools
     private string _calculationStatus = "";
     private float _confiningPressure = 5.0f; // MPa (typical reservoir pressure)
     private bool _correctForTortuosity = true;
+    private float _customBulkDiffusivity = 1.0e-9f; // m²/s
     private float _customViscosity = 1.0f; // cP
+    private int _diffusivityFluidIndex;
+    private string _diffusivityStatus = "";
+    private int _diffusivitySteps = 2000;
+    private int _diffusivityWalkers = 50000;
     private int _flowAxisIndex = 2; // Z-axis
     private int _fluidTypeIndex;
 
@@ -102,14 +107,9 @@ public class PNMTools : IDatasetTools
 
     // --- Permeability Calculator State ---
     private bool _isCalculating;
-    
+
     // --- NEW: Diffusivity Calculator State ---
     private bool _isCalculatingDiffusivity;
-    private string _diffusivityStatus = "";
-    private int _diffusivityFluidIndex;
-    private float _customBulkDiffusivity = 1.0e-9f; // m²/s
-    private int _diffusivityWalkers = 50000;
-    private int _diffusivitySteps = 2000;
     private DiffusivityResults _lastDiffusivityResults;
 
 
@@ -154,7 +154,7 @@ public class PNMTools : IDatasetTools
             DrawPermeabilityCalculator(pnm);
 
         ImGui.Spacing();
-        
+
         // --- NEW: Molecular Diffusivity Calculator ---
         if (ImGui.CollapsingHeader("Molecular Diffusivity Calculator", ImGuiTreeNodeFlags.DefaultOpen))
             DrawDiffusivityCalculator(pnm);
@@ -168,7 +168,7 @@ public class PNMTools : IDatasetTools
         // Handle dialogs
         HandleDialogs(pnm);
     }
-    
+
     private void DrawDiffusivityCalculator(PNMDataset pnm)
     {
         ImGui.Indent();
@@ -183,11 +183,10 @@ public class PNMTools : IDatasetTools
         // Fluid properties section
         ImGui.Text("Fluid Properties:");
         ImGui.SetNextItemWidth(250);
-        if (ImGui.Combo("Fluid Type##Diff", ref _diffusivityFluidIndex, _diffusivityFluidTypes, _diffusivityFluidTypes.Length))
-        {
+        if (ImGui.Combo("Fluid Type##Diff", ref _diffusivityFluidIndex, _diffusivityFluidTypes,
+                _diffusivityFluidTypes.Length))
             if (_diffusivityFluidIndex < _bulkDiffusivities.Length - 1)
                 _customBulkDiffusivity = _bulkDiffusivities[_diffusivityFluidIndex];
-        }
 
         if (_diffusivityFluidIndex == _diffusivityFluidTypes.Length - 1) // Custom
         {
@@ -248,81 +247,97 @@ public class PNMTools : IDatasetTools
 
         ImGui.Unindent();
     }
-    
-   private void DrawDiffusivityResults(PNMDataset pnm)
-{
-    var results = _lastDiffusivityResults;
 
-    // Prefer results; fall back to dataset members that already exist in your codebase.
-    double D0   = results?.BulkDiffusivity      ?? pnm.BulkDiffusivity;
-    double Deff = results?.EffectiveDiffusivity ?? pnm.EffectiveDiffusivity;
-
-    // Formation factor: recompute safely if needed
-    double F = results?.FormationFactor ?? ((D0 > 0 && Deff > 0) ? (D0 / Deff) : pnm.FormationFactor);
-
-    // Transport tortuosity "τ²" as stored
-    double tau2Raw = results?.Tortuosity ?? pnm.TransportTortuosity;
-
-    // BUGFIX: if τ² was saved as a percent-style fraction (<1), rescale for display
-    double tau2Display = (tau2Raw > 0.0 && tau2Raw < 1.0) ? tau2Raw * 100.0 : tau2Raw;
-
-    // Also show τ for sanity checks
-    double tauDisplay = (tau2Display > 0.0) ? Math.Sqrt(tau2Display) : 0.0;
-
-    // Geometric tortuosity as-is
-    double tauGeom = results?.GeometricTortuosity ?? pnm.Tortuosity;
-
-    // Porosity: use only what we are sure exists (from results). If absent, show "—".
-    bool hasPhi = results != null && results.Porosity > 0.0;
-    double phi = hasPhi ? results.Porosity : double.NaN;
-
-    ImGui.PushStyleColor(ImGuiCol.ChildBg, new Vector4(0.10f, 0.15f, 0.10f, 0.50f));
-    ImGui.BeginChild("DiffusivityResults", new Vector2(-1, 220), ImGuiChildFlags.Border);
-
-    ImGui.Text("Molecular Diffusivity Results");
-    ImGui.Separator();
-
-    if (ImGui.BeginTable("DiffResultsTable", 2, ImGuiTableFlags.BordersInner | ImGuiTableFlags.RowBg | ImGuiTableFlags.PadOuterX))
+    private void DrawDiffusivityResults(PNMDataset pnm)
     {
-        ImGui.TableSetupColumn("Parameter", ImGuiTableColumnFlags.WidthFixed, 190);
-        ImGui.TableSetupColumn("Value", ImGuiTableColumnFlags.WidthStretch);
-        ImGui.TableHeadersRow();
+        var results = _lastDiffusivityResults;
 
-        ImGui.TableNextRow();
-        ImGui.TableSetColumnIndex(0); ImGui.Text("Bulk Diffusivity (D₀):");
-        ImGui.TableSetColumnIndex(1); ImGui.Text($"{D0:E3} m²/s");
+        // Prefer results; fall back to dataset members that already exist in your codebase.
+        double D0 = results?.BulkDiffusivity ?? pnm.BulkDiffusivity;
+        double Deff = results?.EffectiveDiffusivity ?? pnm.EffectiveDiffusivity;
 
-        ImGui.TableNextRow();
-        ImGui.TableSetColumnIndex(0); ImGui.TextColored(new Vector4(0.5f,1,0.5f,1), "Effective Diffusivity (D_eff):");
-        ImGui.TableSetColumnIndex(1); ImGui.TextColored(new Vector4(0.5f,1,0.5f,1), $"{Deff:E3} m²/s");
+        // Formation factor: recompute safely if needed
+        var F = results?.FormationFactor ?? (D0 > 0 && Deff > 0 ? D0 / Deff : pnm.FormationFactor);
 
-        ImGui.TableNextRow();
-        ImGui.TableSetColumnIndex(0); ImGui.Text("Formation Factor (F):");
-        ImGui.TableSetColumnIndex(1); ImGui.Text($"{F:F3}");
+        // Transport tortuosity "τ²" as stored
+        double tau2Raw = results?.Tortuosity ?? pnm.TransportTortuosity;
 
-        ImGui.TableNextRow();
-        ImGui.TableSetColumnIndex(0); ImGui.Text("Network Porosity (φ):");
-        ImGui.TableSetColumnIndex(1);
-        if (hasPhi) ImGui.Text($"{phi:P2}"); else ImGui.Text("—");
+        // BUGFIX: if τ² was saved as a percent-style fraction (<1), rescale for display
+        var tau2Display = tau2Raw > 0.0 && tau2Raw < 1.0 ? tau2Raw * 100.0 : tau2Raw;
 
-        ImGui.TableNextRow();
-        ImGui.TableSetColumnIndex(0); ImGui.Text("Transport Tortuosity (τ²):");
-        ImGui.TableSetColumnIndex(1); ImGui.Text($"{tau2Display:F3}");
+        // Also show τ for sanity checks
+        var tauDisplay = tau2Display > 0.0 ? Math.Sqrt(tau2Display) : 0.0;
 
-        ImGui.TableNextRow();
-        ImGui.TableSetColumnIndex(0); ImGui.Text("Transport Tortuosity (τ):");
-        ImGui.TableSetColumnIndex(1); ImGui.Text($"{tauDisplay:F3}");
+        // Geometric tortuosity as-is
+        double tauGeom = results?.GeometricTortuosity ?? pnm.Tortuosity;
 
-        ImGui.TableNextRow();
-        ImGui.TableSetColumnIndex(0); ImGui.Text("Geometric Tortuosity (τ_geo):");
-        ImGui.TableSetColumnIndex(1); ImGui.Text($"{tauGeom:F3}");
+        // Porosity: use only what we are sure exists (from results). If absent, show "—".
+        var hasPhi = results != null && results.Porosity > 0.0;
+        var phi = hasPhi ? results.Porosity : double.NaN;
 
-        ImGui.EndTable();
+        ImGui.PushStyleColor(ImGuiCol.ChildBg, new Vector4(0.10f, 0.15f, 0.10f, 0.50f));
+        ImGui.BeginChild("DiffusivityResults", new Vector2(-1, 220), ImGuiChildFlags.Border);
+
+        ImGui.Text("Molecular Diffusivity Results");
+        ImGui.Separator();
+
+        if (ImGui.BeginTable("DiffResultsTable", 2,
+                ImGuiTableFlags.BordersInner | ImGuiTableFlags.RowBg | ImGuiTableFlags.PadOuterX))
+        {
+            ImGui.TableSetupColumn("Parameter", ImGuiTableColumnFlags.WidthFixed, 190);
+            ImGui.TableSetupColumn("Value", ImGuiTableColumnFlags.WidthStretch);
+            ImGui.TableHeadersRow();
+
+            ImGui.TableNextRow();
+            ImGui.TableSetColumnIndex(0);
+            ImGui.Text("Bulk Diffusivity (D₀):");
+            ImGui.TableSetColumnIndex(1);
+            ImGui.Text($"{D0:E3} m²/s");
+
+            ImGui.TableNextRow();
+            ImGui.TableSetColumnIndex(0);
+            ImGui.TextColored(new Vector4(0.5f, 1, 0.5f, 1), "Effective Diffusivity (D_eff):");
+            ImGui.TableSetColumnIndex(1);
+            ImGui.TextColored(new Vector4(0.5f, 1, 0.5f, 1), $"{Deff:E3} m²/s");
+
+            ImGui.TableNextRow();
+            ImGui.TableSetColumnIndex(0);
+            ImGui.Text("Formation Factor (F):");
+            ImGui.TableSetColumnIndex(1);
+            ImGui.Text($"{F:F3}");
+
+            ImGui.TableNextRow();
+            ImGui.TableSetColumnIndex(0);
+            ImGui.Text("Network Porosity (φ):");
+            ImGui.TableSetColumnIndex(1);
+            if (hasPhi) ImGui.Text($"{phi:P2}");
+            else ImGui.Text("—");
+
+            ImGui.TableNextRow();
+            ImGui.TableSetColumnIndex(0);
+            ImGui.Text("Transport Tortuosity (τ²):");
+            ImGui.TableSetColumnIndex(1);
+            ImGui.Text($"{tau2Display:F3}");
+
+            ImGui.TableNextRow();
+            ImGui.TableSetColumnIndex(0);
+            ImGui.Text("Transport Tortuosity (τ):");
+            ImGui.TableSetColumnIndex(1);
+            ImGui.Text($"{tauDisplay:F3}");
+
+            ImGui.TableNextRow();
+            ImGui.TableSetColumnIndex(0);
+            ImGui.Text("Geometric Tortuosity (τ_geo):");
+            ImGui.TableSetColumnIndex(1);
+            ImGui.Text($"{tauGeom:F3}");
+
+            ImGui.EndTable();
+        }
+
+        ImGui.EndChild();
+        ImGui.PopStyleColor();
     }
 
-    ImGui.EndChild();
-    ImGui.PopStyleColor();
-}
     private void StartDiffusivityCalculation(DiffusivityOptions options)
     {
         _isCalculatingDiffusivity = true;
@@ -344,7 +359,7 @@ public class PNMTools : IDatasetTools
                     pnm.EffectiveDiffusivity = _lastDiffusivityResults.EffectiveDiffusivity;
                     pnm.FormationFactor = _lastDiffusivityResults.FormationFactor;
                     pnm.TransportTortuosity = _lastDiffusivityResults.Tortuosity;
-                    
+
                     // Notify the UI and project manager that data has changed
                     ProjectManager.Instance.NotifyDatasetDataChanged(pnm);
                 }
@@ -361,79 +376,81 @@ public class PNMTools : IDatasetTools
             }
         });
     }
+
     private void DrawNetworkStatistics(PNMDataset pnm)
-{
-    ImGui.Indent();
-
-    if (ImGui.BeginTable("NetStatsTable", 2, ImGuiTableFlags.BordersInner))
     {
-        ImGui.TableSetupColumn("Property", ImGuiTableColumnFlags.WidthFixed, 150);
-        ImGui.TableSetupColumn("Value", ImGuiTableColumnFlags.WidthStretch);
+        ImGui.Indent();
 
-        ImGui.TableNextRow();
-        ImGui.TableSetColumnIndex(0);
-        ImGui.Text("Pores:");
-        ImGui.TableSetColumnIndex(1);
-        ImGui.Text($"{pnm.Pores.Count:N0}");
-
-        ImGui.TableNextRow();
-        ImGui.TableSetColumnIndex(0);
-        ImGui.Text("Throats:");
-        ImGui.TableSetColumnIndex(1);
-        ImGui.Text($"{pnm.Throats.Count:N0}");
-
-        ImGui.TableNextRow();
-        ImGui.TableSetColumnIndex(0);
-        ImGui.Text("Avg. Connectivity:");
-        ImGui.TableSetColumnIndex(1);
-        ImGui.Text($"{(pnm.Pores.Count > 0 ? pnm.Throats.Count * 2.0f / pnm.Pores.Count : 0):F2}");
-
-        ImGui.TableNextRow();
-        ImGui.TableSetColumnIndex(0);
-        ImGui.Text("Voxel Size:");
-        ImGui.TableSetColumnIndex(1);
-        ImGui.Text($"{pnm.VoxelSize:F3} μm");
-
-        ImGui.TableNextRow();
-        ImGui.TableSetColumnIndex(0);
-        ImGui.Text("Tortuosity:");
-        ImGui.TableSetColumnIndex(1);
-        ImGui.Text($"{pnm.Tortuosity:F4}");
-
-        // Porosity based on MATERIAL bounding box
-        if (pnm.Pores.Count > 0)
+        if (ImGui.BeginTable("NetStatsTable", 2, ImGuiTableFlags.BordersInner))
         {
-            var minBounds = new Vector3(
-                pnm.Pores.Min(p => p.Position.X),
-                pnm.Pores.Min(p => p.Position.Y),
-                pnm.Pores.Min(p => p.Position.Z));
-            var maxBounds = new Vector3(
-                pnm.Pores.Max(p => p.Position.X),
-                pnm.Pores.Max(p => p.Position.Y),
-                pnm.Pores.Max(p => p.Position.Z));
-            
-            // Add margin for pore radii
-            var margin = pnm.MaxPoreRadius;
-            var materialVolumeVoxels = (maxBounds.X - minBounds.X + 2 * margin) *
-                                       (maxBounds.Y - minBounds.Y + 2 * margin) *
-                                       (maxBounds.Z - minBounds.Z + 2 * margin);
-            
-            var poreVolume = pnm.Pores.Sum(p => p.VolumeVoxels);
-            var porosity = materialVolumeVoxels > 0 ? poreVolume / materialVolumeVoxels : 0;
-            porosity = Math.Clamp(porosity, 0, 1);
+            ImGui.TableSetupColumn("Property", ImGuiTableColumnFlags.WidthFixed, 150);
+            ImGui.TableSetupColumn("Value", ImGuiTableColumnFlags.WidthStretch);
 
             ImGui.TableNextRow();
             ImGui.TableSetColumnIndex(0);
-            ImGui.Text("Est. Porosity:");
+            ImGui.Text("Pores:");
             ImGui.TableSetColumnIndex(1);
-            ImGui.Text($"{porosity:P2}");
+            ImGui.Text($"{pnm.Pores.Count:N0}");
+
+            ImGui.TableNextRow();
+            ImGui.TableSetColumnIndex(0);
+            ImGui.Text("Throats:");
+            ImGui.TableSetColumnIndex(1);
+            ImGui.Text($"{pnm.Throats.Count:N0}");
+
+            ImGui.TableNextRow();
+            ImGui.TableSetColumnIndex(0);
+            ImGui.Text("Avg. Connectivity:");
+            ImGui.TableSetColumnIndex(1);
+            ImGui.Text($"{(pnm.Pores.Count > 0 ? pnm.Throats.Count * 2.0f / pnm.Pores.Count : 0):F2}");
+
+            ImGui.TableNextRow();
+            ImGui.TableSetColumnIndex(0);
+            ImGui.Text("Voxel Size:");
+            ImGui.TableSetColumnIndex(1);
+            ImGui.Text($"{pnm.VoxelSize:F3} μm");
+
+            ImGui.TableNextRow();
+            ImGui.TableSetColumnIndex(0);
+            ImGui.Text("Tortuosity:");
+            ImGui.TableSetColumnIndex(1);
+            ImGui.Text($"{pnm.Tortuosity:F4}");
+
+            // Porosity based on MATERIAL bounding box
+            if (pnm.Pores.Count > 0)
+            {
+                var minBounds = new Vector3(
+                    pnm.Pores.Min(p => p.Position.X),
+                    pnm.Pores.Min(p => p.Position.Y),
+                    pnm.Pores.Min(p => p.Position.Z));
+                var maxBounds = new Vector3(
+                    pnm.Pores.Max(p => p.Position.X),
+                    pnm.Pores.Max(p => p.Position.Y),
+                    pnm.Pores.Max(p => p.Position.Z));
+
+                // Add margin for pore radii
+                var margin = pnm.MaxPoreRadius;
+                var materialVolumeVoxels = (maxBounds.X - minBounds.X + 2 * margin) *
+                                           (maxBounds.Y - minBounds.Y + 2 * margin) *
+                                           (maxBounds.Z - minBounds.Z + 2 * margin);
+
+                var poreVolume = pnm.Pores.Sum(p => p.VolumeVoxels);
+                var porosity = materialVolumeVoxels > 0 ? poreVolume / materialVolumeVoxels : 0;
+                porosity = Math.Clamp(porosity, 0, 1);
+
+                ImGui.TableNextRow();
+                ImGui.TableSetColumnIndex(0);
+                ImGui.Text("Est. Porosity:");
+                ImGui.TableSetColumnIndex(1);
+                ImGui.Text($"{porosity:P2}");
+            }
+
+            ImGui.EndTable();
         }
 
-        ImGui.EndTable();
+        ImGui.Unindent();
     }
 
-    ImGui.Unindent();
-}
     private void DrawPermeabilityCalculator(PNMDataset pnm)
     {
         ImGui.Indent();
@@ -937,293 +954,297 @@ public class PNMTools : IDatasetTools
                 Logger.LogError($"[PNMTools] Results export failed: {ex.Message}");
             }
     }
-private void ExportResults(string path, PNMDataset pnm)
-{
-    var results = _lastResults ?? AbsolutePermeability.GetLastResults();
-    var diffResults = _lastDiffusivityResults;
-    
-    // Check if we have any results to export
-    if (results == null && diffResults == null && 
-        pnm.DarcyPermeability == 0 && pnm.NavierStokesPermeability == 0 && 
-        pnm.LatticeBoltzmannPermeability == 0 && pnm.EffectiveDiffusivity == 0)
-    {
-        Logger.LogWarning("[PNMTools] No results to export");
-        return;
-    }
 
-    var ext = Path.GetExtension(path).ToLower();
-
-    if (ext == ".csv")
+    private void ExportResults(string path, PNMDataset pnm)
     {
-        // Export as CSV
-        using (var writer = new StreamWriter(path, false, Encoding.UTF8))
+        var results = _lastResults ?? AbsolutePermeability.GetLastResults();
+        var diffResults = _lastDiffusivityResults;
+
+        // Check if we have any results to export
+        if (results == null && diffResults == null &&
+            pnm.DarcyPermeability == 0 && pnm.NavierStokesPermeability == 0 &&
+            pnm.LatticeBoltzmannPermeability == 0 && pnm.EffectiveDiffusivity == 0)
         {
-            writer.WriteLine("Pore Network Analysis Results");
-            writer.WriteLine($"Dataset,{pnm.Name}");
-            writer.WriteLine($"Date,{DateTime.Now:yyyy-MM-dd HH:mm:ss}");
-            writer.WriteLine();
-
-            // Network Statistics
-            writer.WriteLine("Network Statistics");
-            writer.WriteLine("Parameter,Value,Unit");
-            writer.WriteLine($"Pore Count,{pnm.Pores.Count},");
-            writer.WriteLine($"Throat Count,{pnm.Throats.Count},");
-            writer.WriteLine($"Voxel Size,{pnm.VoxelSize:F3},μm");
-            writer.WriteLine($"Geometric Tortuosity,{pnm.Tortuosity:F4},");
-            
-            if (pnm.Pores.Count > 0)
-            {
-                var avgConnectivity = pnm.Throats.Count * 2.0 / pnm.Pores.Count;
-                writer.WriteLine($"Average Connectivity,{avgConnectivity:F2},");
-            }
-            writer.WriteLine();
-
-            // Permeability Results Section
-            if (results != null || pnm.DarcyPermeability > 0 || pnm.NavierStokesPermeability > 0 || 
-                pnm.LatticeBoltzmannPermeability > 0)
-            {
-                writer.WriteLine("Permeability Analysis");
-                writer.WriteLine("Parameter,Value,Unit");
-                
-                if (results != null)
-                {
-                    writer.WriteLine($"Flow Axis,{results.FlowAxis},");
-                    writer.WriteLine($"Model Length,{results.ModelLength * 1e6:F3},μm");
-                    writer.WriteLine($"Cross-sectional Area,{results.CrossSectionalArea * 1e12:F3},μm²");
-                    writer.WriteLine($"Pressure Drop,{results.UsedPressureDrop:F3},Pa");
-                    writer.WriteLine($"Fluid Viscosity,{results.UsedViscosity:F3},cP");
-                    writer.WriteLine($"Total Flow Rate,{results.TotalFlowRate:E3},m³/s");
-
-                    if (results.AppliedConfiningPressure > 0)
-                    {
-                        writer.WriteLine($"Confining Pressure,{results.AppliedConfiningPressure:F1},MPa");
-                        writer.WriteLine($"Pore Reduction,{results.EffectivePoreReduction:F1},%");
-                        writer.WriteLine($"Throat Reduction,{results.EffectiveThroatReduction:F1},%");
-                        writer.WriteLine($"Closed Throats,{results.ClosedThroats},");
-                    }
-                }
-
-                writer.WriteLine();
-                writer.WriteLine("Permeability Results");
-                writer.WriteLine("Method,Uncorrected (mD),τ²-Corrected (mD),Uncorrected (D),τ²-Corrected (D)");
-
-                if ((results?.DarcyUncorrected ?? pnm.DarcyPermeability) > 0)
-                {
-                    var darcyUnc = results?.DarcyUncorrected ?? pnm.DarcyPermeability;
-                    var darcyCor = results?.DarcyCorrected ?? 
-                                   (pnm.Tortuosity > 0 ? darcyUnc / (pnm.Tortuosity * pnm.Tortuosity) : darcyUnc);
-                    writer.WriteLine($"Darcy,{darcyUnc:F6},{darcyCor:F6}," +
-                                   $"{darcyUnc / 1000:F9},{darcyCor / 1000:F9}");
-                }
-
-                if ((results?.NavierStokesUncorrected ?? pnm.NavierStokesPermeability) > 0)
-                {
-                    var nsUnc = results?.NavierStokesUncorrected ?? pnm.NavierStokesPermeability;
-                    var nsCor = results?.NavierStokesCorrected ?? 
-                                (pnm.Tortuosity > 0 ? nsUnc / (pnm.Tortuosity * pnm.Tortuosity) : nsUnc);
-                    writer.WriteLine($"Navier-Stokes,{nsUnc:F6},{nsCor:F6}," +
-                                   $"{nsUnc / 1000:F9},{nsCor / 1000:F9}");
-                }
-
-                if ((results?.LatticeBoltzmannUncorrected ?? pnm.LatticeBoltzmannPermeability) > 0)
-                {
-                    var lbUnc = results?.LatticeBoltzmannUncorrected ?? pnm.LatticeBoltzmannPermeability;
-                    var lbCor = results?.LatticeBoltzmannCorrected ?? 
-                                (pnm.Tortuosity > 0 ? lbUnc / (pnm.Tortuosity * pnm.Tortuosity) : lbUnc);
-                    writer.WriteLine($"Lattice-Boltzmann,{lbUnc:F6},{lbCor:F6}," +
-                                   $"{lbUnc / 1000:F9},{lbCor / 1000:F9}");
-                }
-                
-                writer.WriteLine();
-            }
-
-            // Diffusivity Results Section
-            if (diffResults != null || pnm.EffectiveDiffusivity > 0)
-            {
-                writer.WriteLine("Molecular Diffusivity Analysis");
-                writer.WriteLine("Parameter,Value,Unit");
-
-                var D0 = diffResults?.BulkDiffusivity ?? pnm.BulkDiffusivity;
-                var Deff = diffResults?.EffectiveDiffusivity ?? pnm.EffectiveDiffusivity;
-                var F = diffResults?.FormationFactor ?? 
-                        ((D0 > 0 && Deff > 0) ? (D0 / Deff) : pnm.FormationFactor);
-                var tau2Raw = diffResults?.Tortuosity ?? pnm.TransportTortuosity;
-                var tau2Display = (tau2Raw > 0.0 && tau2Raw < 1.0) ? tau2Raw * 100.0 : tau2Raw;
-                var tauDisplay = (tau2Display > 0.0) ? Math.Sqrt(tau2Display) : 0.0;
-                var tauGeom = diffResults?.GeometricTortuosity ?? pnm.Tortuosity;
-                var phi = diffResults?.Porosity ?? double.NaN;
-
-                writer.WriteLine($"Bulk Diffusivity (D₀),{D0:E3},m²/s");
-                writer.WriteLine($"Effective Diffusivity (D_eff),{Deff:E3},m²/s");
-                writer.WriteLine($"Formation Factor (F),{F:F3},");
-                
-                if (!double.IsNaN(phi) && phi > 0)
-                    writer.WriteLine($"Network Porosity (φ),{phi:F6},");
-                
-                writer.WriteLine($"Transport Tortuosity (τ²),{tau2Display:F3},");
-                writer.WriteLine($"Transport Tortuosity (τ),{tauDisplay:F3},");
-                writer.WriteLine($"Geometric Tortuosity (τ_geo),{tauGeom:F4},");
-                writer.WriteLine();
-            }
+            Logger.LogWarning("[PNMTools] No results to export");
+            return;
         }
-    }
-    else
-    {
-        // Export as text report
-        using (var writer = new StreamWriter(path, false, Encoding.UTF8))
-        {
-            writer.WriteLine("================================================================================");
-            writer.WriteLine("                    PORE NETWORK ANALYSIS REPORT");
-            writer.WriteLine("================================================================================");
-            writer.WriteLine();
-            writer.WriteLine($"Dataset: {pnm.Name}");
-            writer.WriteLine($"Date: {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
-            writer.WriteLine();
-            
-            writer.WriteLine("NETWORK PROPERTIES");
-            writer.WriteLine("------------------");
-            writer.WriteLine($"  Pores:                {pnm.Pores.Count:N0}");
-            writer.WriteLine($"  Throats:              {pnm.Throats.Count:N0}");
-            writer.WriteLine($"  Voxel Size:           {pnm.VoxelSize:F3} μm");
-            writer.WriteLine($"  Geometric Tortuosity: {pnm.Tortuosity:F4}");
-            
-            if (pnm.Pores.Count > 0)
-            {
-                var avgConnectivity = pnm.Throats.Count * 2.0 / pnm.Pores.Count;
-                writer.WriteLine($"  Avg. Connectivity:    {avgConnectivity:F2}");
-            }
-            
-            writer.WriteLine();
 
-            // Permeability Results Section
-            if (results != null || pnm.DarcyPermeability > 0 || pnm.NavierStokesPermeability > 0 || 
-                pnm.LatticeBoltzmannPermeability > 0)
+        var ext = Path.GetExtension(path).ToLower();
+
+        if (ext == ".csv")
+            // Export as CSV
+            using (var writer = new StreamWriter(path, false, Encoding.UTF8))
             {
-                writer.WriteLine("================================================================================");
-                writer.WriteLine("                        PERMEABILITY ANALYSIS");
-                writer.WriteLine("================================================================================");
+                writer.WriteLine("Pore Network Analysis Results");
+                writer.WriteLine($"Dataset,{pnm.Name}");
+                writer.WriteLine($"Date,{DateTime.Now:yyyy-MM-dd HH:mm:ss}");
                 writer.WriteLine();
-                
-                if (results != null)
-                {
-                    writer.WriteLine("FLOW CONFIGURATION");
-                    writer.WriteLine("------------------");
-                    writer.WriteLine($"  Flow Axis:            {results.FlowAxis}");
-                    writer.WriteLine($"  Model Length:         {results.ModelLength * 1e6:F3} μm");
-                    writer.WriteLine($"  Cross-sectional Area: {results.CrossSectionalArea * 1e12:F3} μm²");
-                    writer.WriteLine($"  Inlet Pressure:       {_inletPressure:F3} Pa");
-                    writer.WriteLine($"  Outlet Pressure:      {_outletPressure:F3} Pa");
-                    writer.WriteLine($"  Pressure Drop:        {results.UsedPressureDrop:F3} Pa");
-                    writer.WriteLine($"  Fluid Viscosity:      {results.UsedViscosity:F3} cP");
-                    writer.WriteLine($"  Total Flow Rate:      {results.TotalFlowRate:E3} m³/s");
 
-                    if (results.AppliedConfiningPressure > 0)
+                // Network Statistics
+                writer.WriteLine("Network Statistics");
+                writer.WriteLine("Parameter,Value,Unit");
+                writer.WriteLine($"Pore Count,{pnm.Pores.Count},");
+                writer.WriteLine($"Throat Count,{pnm.Throats.Count},");
+                writer.WriteLine($"Voxel Size,{pnm.VoxelSize:F3},μm");
+                writer.WriteLine($"Geometric Tortuosity,{pnm.Tortuosity:F4},");
+
+                if (pnm.Pores.Count > 0)
+                {
+                    var avgConnectivity = pnm.Throats.Count * 2.0 / pnm.Pores.Count;
+                    writer.WriteLine($"Average Connectivity,{avgConnectivity:F2},");
+                }
+
+                writer.WriteLine();
+
+                // Permeability Results Section
+                if (results != null || pnm.DarcyPermeability > 0 || pnm.NavierStokesPermeability > 0 ||
+                    pnm.LatticeBoltzmannPermeability > 0)
+                {
+                    writer.WriteLine("Permeability Analysis");
+                    writer.WriteLine("Parameter,Value,Unit");
+
+                    if (results != null)
                     {
-                        writer.WriteLine();
-                        writer.WriteLine("CONFINING PRESSURE EFFECTS");
-                        writer.WriteLine("--------------------------");
-                        writer.WriteLine($"  Applied Pressure:     {results.AppliedConfiningPressure:F1} MPa");
-                        writer.WriteLine($"  Pore Reduction:       {results.EffectivePoreReduction:F1}%");
-                        writer.WriteLine($"  Throat Reduction:     {results.EffectiveThroatReduction:F1}%");
-                        writer.WriteLine($"  Closed Throats:       {results.ClosedThroats:N0}");
+                        writer.WriteLine($"Flow Axis,{results.FlowAxis},");
+                        writer.WriteLine($"Model Length,{results.ModelLength * 1e6:F3},μm");
+                        writer.WriteLine($"Cross-sectional Area,{results.CrossSectionalArea * 1e12:F3},μm²");
+                        writer.WriteLine($"Pressure Drop,{results.UsedPressureDrop:F3},Pa");
+                        writer.WriteLine($"Fluid Viscosity,{results.UsedViscosity:F3},cP");
+                        writer.WriteLine($"Total Flow Rate,{results.TotalFlowRate:E3},m³/s");
+
+                        if (results.AppliedConfiningPressure > 0)
+                        {
+                            writer.WriteLine($"Confining Pressure,{results.AppliedConfiningPressure:F1},MPa");
+                            writer.WriteLine($"Pore Reduction,{results.EffectivePoreReduction:F1},%");
+                            writer.WriteLine($"Throat Reduction,{results.EffectiveThroatReduction:F1},%");
+                            writer.WriteLine($"Closed Throats,{results.ClosedThroats},");
+                        }
+                    }
+
+                    writer.WriteLine();
+                    writer.WriteLine("Permeability Results");
+                    writer.WriteLine("Method,Uncorrected (mD),τ²-Corrected (mD),Uncorrected (D),τ²-Corrected (D)");
+
+                    if ((results?.DarcyUncorrected ?? pnm.DarcyPermeability) > 0)
+                    {
+                        var darcyUnc = results?.DarcyUncorrected ?? pnm.DarcyPermeability;
+                        var darcyCor = results?.DarcyCorrected ??
+                                       (pnm.Tortuosity > 0 ? darcyUnc / (pnm.Tortuosity * pnm.Tortuosity) : darcyUnc);
+                        writer.WriteLine($"Darcy,{darcyUnc:F6},{darcyCor:F6}," +
+                                         $"{darcyUnc / 1000:F9},{darcyCor / 1000:F9}");
+                    }
+
+                    if ((results?.NavierStokesUncorrected ?? pnm.NavierStokesPermeability) > 0)
+                    {
+                        var nsUnc = results?.NavierStokesUncorrected ?? pnm.NavierStokesPermeability;
+                        var nsCor = results?.NavierStokesCorrected ??
+                                    (pnm.Tortuosity > 0 ? nsUnc / (pnm.Tortuosity * pnm.Tortuosity) : nsUnc);
+                        writer.WriteLine($"Navier-Stokes,{nsUnc:F6},{nsCor:F6}," +
+                                         $"{nsUnc / 1000:F9},{nsCor / 1000:F9}");
+                    }
+
+                    if ((results?.LatticeBoltzmannUncorrected ?? pnm.LatticeBoltzmannPermeability) > 0)
+                    {
+                        var lbUnc = results?.LatticeBoltzmannUncorrected ?? pnm.LatticeBoltzmannPermeability;
+                        var lbCor = results?.LatticeBoltzmannCorrected ??
+                                    (pnm.Tortuosity > 0 ? lbUnc / (pnm.Tortuosity * pnm.Tortuosity) : lbUnc);
+                        writer.WriteLine($"Lattice-Boltzmann,{lbUnc:F6},{lbCor:F6}," +
+                                         $"{lbUnc / 1000:F9},{lbCor / 1000:F9}");
                     }
 
                     writer.WriteLine();
                 }
 
-                writer.WriteLine("PERMEABILITY RESULTS");
-                writer.WriteLine("--------------------");
-
-                var tortuosity = results?.Tortuosity ?? pnm.Tortuosity;
-                var tau2Correction = tortuosity > 0 ? 1.0f / (tortuosity * tortuosity) : 1.0f;
-
-                if ((results?.DarcyUncorrected ?? pnm.DarcyPermeability) > 0)
+                // Diffusivity Results Section
+                if (diffResults != null || pnm.EffectiveDiffusivity > 0)
                 {
-                    var darcyUnc = results?.DarcyUncorrected ?? pnm.DarcyPermeability;
-                    var darcyCor = results?.DarcyCorrected ?? darcyUnc * tau2Correction;
-                    
-                    writer.WriteLine("  Darcy Method:");
-                    writer.WriteLine($"    Uncorrected:        {darcyUnc:F6} mD ({darcyUnc / 1000:F9} D)");
-                    writer.WriteLine($"    τ²-Corrected:       {darcyCor:F6} mD ({darcyCor / 1000:F9} D)");
-                }
+                    writer.WriteLine("Molecular Diffusivity Analysis");
+                    writer.WriteLine("Parameter,Value,Unit");
 
-                if ((results?.NavierStokesUncorrected ?? pnm.NavierStokesPermeability) > 0)
-                {
-                    var nsUnc = results?.NavierStokesUncorrected ?? pnm.NavierStokesPermeability;
-                    var nsCor = results?.NavierStokesCorrected ?? nsUnc * tau2Correction;
-                    
-                    writer.WriteLine("  Navier-Stokes Method:");
-                    writer.WriteLine($"    Uncorrected:        {nsUnc:F6} mD ({nsUnc / 1000:F9} D)");
-                    writer.WriteLine($"    τ²-Corrected:       {nsCor:F6} mD ({nsCor / 1000:F9} D)");
-                }
+                    var D0 = diffResults?.BulkDiffusivity ?? pnm.BulkDiffusivity;
+                    var Deff = diffResults?.EffectiveDiffusivity ?? pnm.EffectiveDiffusivity;
+                    var F = diffResults?.FormationFactor ??
+                            (D0 > 0 && Deff > 0 ? D0 / Deff : pnm.FormationFactor);
+                    var tau2Raw = diffResults?.Tortuosity ?? pnm.TransportTortuosity;
+                    var tau2Display = tau2Raw > 0.0 && tau2Raw < 1.0 ? tau2Raw * 100.0 : tau2Raw;
+                    var tauDisplay = tau2Display > 0.0 ? Math.Sqrt(tau2Display) : 0.0;
+                    var tauGeom = diffResults?.GeometricTortuosity ?? pnm.Tortuosity;
+                    var phi = diffResults?.Porosity ?? double.NaN;
 
-                if ((results?.LatticeBoltzmannUncorrected ?? pnm.LatticeBoltzmannPermeability) > 0)
-                {
-                    var lbUnc = results?.LatticeBoltzmannUncorrected ?? pnm.LatticeBoltzmannPermeability;
-                    var lbCor = results?.LatticeBoltzmannCorrected ?? lbUnc * tau2Correction;
-                    
-                    writer.WriteLine("  Lattice-Boltzmann Method:");
-                    writer.WriteLine($"    Uncorrected:        {lbUnc:F6} mD ({lbUnc / 1000:F9} D)");
-                    writer.WriteLine($"    τ²-Corrected:       {lbCor:F6} mD ({lbCor / 1000:F9} D)");
-                }
+                    writer.WriteLine($"Bulk Diffusivity (D₀),{D0:E3},m²/s");
+                    writer.WriteLine($"Effective Diffusivity (D_eff),{Deff:E3},m²/s");
+                    writer.WriteLine($"Formation Factor (F),{F:F3},");
 
-                writer.WriteLine();
+                    if (!double.IsNaN(phi) && phi > 0)
+                        writer.WriteLine($"Network Porosity (φ),{phi:F6},");
+
+                    writer.WriteLine($"Transport Tortuosity (τ²),{tau2Display:F3},");
+                    writer.WriteLine($"Transport Tortuosity (τ),{tauDisplay:F3},");
+                    writer.WriteLine($"Geometric Tortuosity (τ_geo),{tauGeom:F4},");
+                    writer.WriteLine();
+                }
             }
-
-            // Diffusivity Results Section
-            if (diffResults != null || pnm.EffectiveDiffusivity > 0)
+        else
+            // Export as text report
+            using (var writer = new StreamWriter(path, false, Encoding.UTF8))
             {
                 writer.WriteLine("================================================================================");
-                writer.WriteLine("                    MOLECULAR DIFFUSIVITY ANALYSIS");
+                writer.WriteLine("                    PORE NETWORK ANALYSIS REPORT");
                 writer.WriteLine("================================================================================");
                 writer.WriteLine();
-
-                var D0 = diffResults?.BulkDiffusivity ?? pnm.BulkDiffusivity;
-                var Deff = diffResults?.EffectiveDiffusivity ?? pnm.EffectiveDiffusivity;
-                var F = diffResults?.FormationFactor ?? 
-                        ((D0 > 0 && Deff > 0) ? (D0 / Deff) : pnm.FormationFactor);
-                var tau2Raw = diffResults?.Tortuosity ?? pnm.TransportTortuosity;
-                var tau2Display = (tau2Raw > 0.0 && tau2Raw < 1.0) ? tau2Raw * 100.0 : tau2Raw;
-                var tauDisplay = (tau2Display > 0.0) ? Math.Sqrt(tau2Display) : 0.0;
-                var tauGeom = diffResults?.GeometricTortuosity ?? pnm.Tortuosity;
-                var phi = diffResults?.Porosity ?? double.NaN;
-
-                writer.WriteLine("DIFFUSIVITY PARAMETERS");
-                writer.WriteLine("----------------------");
-                writer.WriteLine($"  Bulk Diffusivity (D₀):         {D0:E3} m²/s");
-                writer.WriteLine($"  Effective Diffusivity (D_eff): {Deff:E3} m²/s");
-                writer.WriteLine();
-                
-                writer.WriteLine("TRANSPORT PROPERTIES");
-                writer.WriteLine("--------------------");
-                writer.WriteLine($"  Formation Factor (F):          {F:F3}");
-                
-                if (!double.IsNaN(phi) && phi > 0)
-                    writer.WriteLine($"  Network Porosity (φ):          {phi:P2}");
-                
-                writer.WriteLine($"  Transport Tortuosity (τ²):     {tau2Display:F3}");
-                writer.WriteLine($"  Transport Tortuosity (τ):      {tauDisplay:F3}");
-                writer.WriteLine($"  Geometric Tortuosity (τ_geo):  {tauGeom:F4}");
+                writer.WriteLine($"Dataset: {pnm.Name}");
+                writer.WriteLine($"Date: {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
                 writer.WriteLine();
 
-                writer.WriteLine("RELATIONSHIPS");
-                writer.WriteLine("-------------");
-                writer.WriteLine($"  D_eff = D₀ / F = {D0:E3} / {F:F3} = {Deff:E3} m²/s");
-                writer.WriteLine($"  F = D₀ / D_eff = φ × τ² (Archie's Law)");
-                if (!double.IsNaN(phi) && phi > 0 && tau2Display > 0)
+                writer.WriteLine("NETWORK PROPERTIES");
+                writer.WriteLine("------------------");
+                writer.WriteLine($"  Pores:                {pnm.Pores.Count:N0}");
+                writer.WriteLine($"  Throats:              {pnm.Throats.Count:N0}");
+                writer.WriteLine($"  Voxel Size:           {pnm.VoxelSize:F3} μm");
+                writer.WriteLine($"  Geometric Tortuosity: {pnm.Tortuosity:F4}");
+
+                if (pnm.Pores.Count > 0)
                 {
-                    var archieCheck = phi * tau2Display / 100.0;
-                    writer.WriteLine($"  φ × τ² = {phi:F4} × {tau2Display:F3} = {archieCheck:F3}");
+                    var avgConnectivity = pnm.Throats.Count * 2.0 / pnm.Pores.Count;
+                    writer.WriteLine($"  Avg. Connectivity:    {avgConnectivity:F2}");
                 }
-                writer.WriteLine();
-            }
 
-            writer.WriteLine("================================================================================");
-            writer.WriteLine("                              END OF REPORT");
-            writer.WriteLine("================================================================================");
-        }
+                writer.WriteLine();
+
+                // Permeability Results Section
+                if (results != null || pnm.DarcyPermeability > 0 || pnm.NavierStokesPermeability > 0 ||
+                    pnm.LatticeBoltzmannPermeability > 0)
+                {
+                    writer.WriteLine(
+                        "================================================================================");
+                    writer.WriteLine("                        PERMEABILITY ANALYSIS");
+                    writer.WriteLine(
+                        "================================================================================");
+                    writer.WriteLine();
+
+                    if (results != null)
+                    {
+                        writer.WriteLine("FLOW CONFIGURATION");
+                        writer.WriteLine("------------------");
+                        writer.WriteLine($"  Flow Axis:            {results.FlowAxis}");
+                        writer.WriteLine($"  Model Length:         {results.ModelLength * 1e6:F3} μm");
+                        writer.WriteLine($"  Cross-sectional Area: {results.CrossSectionalArea * 1e12:F3} μm²");
+                        writer.WriteLine($"  Inlet Pressure:       {_inletPressure:F3} Pa");
+                        writer.WriteLine($"  Outlet Pressure:      {_outletPressure:F3} Pa");
+                        writer.WriteLine($"  Pressure Drop:        {results.UsedPressureDrop:F3} Pa");
+                        writer.WriteLine($"  Fluid Viscosity:      {results.UsedViscosity:F3} cP");
+                        writer.WriteLine($"  Total Flow Rate:      {results.TotalFlowRate:E3} m³/s");
+
+                        if (results.AppliedConfiningPressure > 0)
+                        {
+                            writer.WriteLine();
+                            writer.WriteLine("CONFINING PRESSURE EFFECTS");
+                            writer.WriteLine("--------------------------");
+                            writer.WriteLine($"  Applied Pressure:     {results.AppliedConfiningPressure:F1} MPa");
+                            writer.WriteLine($"  Pore Reduction:       {results.EffectivePoreReduction:F1}%");
+                            writer.WriteLine($"  Throat Reduction:     {results.EffectiveThroatReduction:F1}%");
+                            writer.WriteLine($"  Closed Throats:       {results.ClosedThroats:N0}");
+                        }
+
+                        writer.WriteLine();
+                    }
+
+                    writer.WriteLine("PERMEABILITY RESULTS");
+                    writer.WriteLine("--------------------");
+
+                    var tortuosity = results?.Tortuosity ?? pnm.Tortuosity;
+                    var tau2Correction = tortuosity > 0 ? 1.0f / (tortuosity * tortuosity) : 1.0f;
+
+                    if ((results?.DarcyUncorrected ?? pnm.DarcyPermeability) > 0)
+                    {
+                        var darcyUnc = results?.DarcyUncorrected ?? pnm.DarcyPermeability;
+                        var darcyCor = results?.DarcyCorrected ?? darcyUnc * tau2Correction;
+
+                        writer.WriteLine("  Darcy Method:");
+                        writer.WriteLine($"    Uncorrected:        {darcyUnc:F6} mD ({darcyUnc / 1000:F9} D)");
+                        writer.WriteLine($"    τ²-Corrected:       {darcyCor:F6} mD ({darcyCor / 1000:F9} D)");
+                    }
+
+                    if ((results?.NavierStokesUncorrected ?? pnm.NavierStokesPermeability) > 0)
+                    {
+                        var nsUnc = results?.NavierStokesUncorrected ?? pnm.NavierStokesPermeability;
+                        var nsCor = results?.NavierStokesCorrected ?? nsUnc * tau2Correction;
+
+                        writer.WriteLine("  Navier-Stokes Method:");
+                        writer.WriteLine($"    Uncorrected:        {nsUnc:F6} mD ({nsUnc / 1000:F9} D)");
+                        writer.WriteLine($"    τ²-Corrected:       {nsCor:F6} mD ({nsCor / 1000:F9} D)");
+                    }
+
+                    if ((results?.LatticeBoltzmannUncorrected ?? pnm.LatticeBoltzmannPermeability) > 0)
+                    {
+                        var lbUnc = results?.LatticeBoltzmannUncorrected ?? pnm.LatticeBoltzmannPermeability;
+                        var lbCor = results?.LatticeBoltzmannCorrected ?? lbUnc * tau2Correction;
+
+                        writer.WriteLine("  Lattice-Boltzmann Method:");
+                        writer.WriteLine($"    Uncorrected:        {lbUnc:F6} mD ({lbUnc / 1000:F9} D)");
+                        writer.WriteLine($"    τ²-Corrected:       {lbCor:F6} mD ({lbCor / 1000:F9} D)");
+                    }
+
+                    writer.WriteLine();
+                }
+
+                // Diffusivity Results Section
+                if (diffResults != null || pnm.EffectiveDiffusivity > 0)
+                {
+                    writer.WriteLine(
+                        "================================================================================");
+                    writer.WriteLine("                    MOLECULAR DIFFUSIVITY ANALYSIS");
+                    writer.WriteLine(
+                        "================================================================================");
+                    writer.WriteLine();
+
+                    var D0 = diffResults?.BulkDiffusivity ?? pnm.BulkDiffusivity;
+                    var Deff = diffResults?.EffectiveDiffusivity ?? pnm.EffectiveDiffusivity;
+                    var F = diffResults?.FormationFactor ??
+                            (D0 > 0 && Deff > 0 ? D0 / Deff : pnm.FormationFactor);
+                    var tau2Raw = diffResults?.Tortuosity ?? pnm.TransportTortuosity;
+                    var tau2Display = tau2Raw > 0.0 && tau2Raw < 1.0 ? tau2Raw * 100.0 : tau2Raw;
+                    var tauDisplay = tau2Display > 0.0 ? Math.Sqrt(tau2Display) : 0.0;
+                    var tauGeom = diffResults?.GeometricTortuosity ?? pnm.Tortuosity;
+                    var phi = diffResults?.Porosity ?? double.NaN;
+
+                    writer.WriteLine("DIFFUSIVITY PARAMETERS");
+                    writer.WriteLine("----------------------");
+                    writer.WriteLine($"  Bulk Diffusivity (D₀):         {D0:E3} m²/s");
+                    writer.WriteLine($"  Effective Diffusivity (D_eff): {Deff:E3} m²/s");
+                    writer.WriteLine();
+
+                    writer.WriteLine("TRANSPORT PROPERTIES");
+                    writer.WriteLine("--------------------");
+                    writer.WriteLine($"  Formation Factor (F):          {F:F3}");
+
+                    if (!double.IsNaN(phi) && phi > 0)
+                        writer.WriteLine($"  Network Porosity (φ):          {phi:P2}");
+
+                    writer.WriteLine($"  Transport Tortuosity (τ²):     {tau2Display:F3}");
+                    writer.WriteLine($"  Transport Tortuosity (τ):      {tauDisplay:F3}");
+                    writer.WriteLine($"  Geometric Tortuosity (τ_geo):  {tauGeom:F4}");
+                    writer.WriteLine();
+
+                    writer.WriteLine("RELATIONSHIPS");
+                    writer.WriteLine("-------------");
+                    writer.WriteLine($"  D_eff = D₀ / F = {D0:E3} / {F:F3} = {Deff:E3} m²/s");
+                    writer.WriteLine("  F = D₀ / D_eff = φ × τ² (Archie's Law)");
+                    if (!double.IsNaN(phi) && phi > 0 && tau2Display > 0)
+                    {
+                        var archieCheck = phi * tau2Display / 100.0;
+                        writer.WriteLine($"  φ × τ² = {phi:F4} × {tau2Display:F3} = {archieCheck:F3}");
+                    }
+
+                    writer.WriteLine();
+                }
+
+                writer.WriteLine("================================================================================");
+                writer.WriteLine("                              END OF REPORT");
+                writer.WriteLine("================================================================================");
+            }
     }
-}
+
     private void StartCalculation(PermeabilityOptions options)
     {
         _isCalculating = true;

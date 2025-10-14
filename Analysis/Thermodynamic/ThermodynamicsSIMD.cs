@@ -355,243 +355,245 @@ public static class ThermodynamicsSIMD
     {
         return VectorPow256Improved(x, y);
     }
-/// <summary>
-/// Fast vectorized natural logarithm using minimax polynomial approximation.
-/// Accurate to ~10 significant digits for geochemical calculations.
-/// Based on: Cody & Waite, 1980. Software Manual for Elementary Functions. Prentice-Hall.
-/// </summary>
-[MethodImpl(MethodImplOptions.AggressiveInlining)]
-private static Vector256<double> VectorLog256(Vector256<double> x)
-{
-    // Clamp to valid range
-    var minVal = Vector256.Create(1e-308);
-    var maxVal = Vector256.Create(1e308);
-    x = Avx.Max(minVal, Avx.Min(maxVal, x));
-    
-    // Extract exponent and mantissa
-    // ln(x) = ln(2^e * m) = e*ln(2) + ln(m), where 1 <= m < 2
-    
-    var vOne = Vector256.Create(1.0);
-    var vTwo = Vector256.Create(2.0);
-    var vHalf = Vector256.Create(0.5);
-    var ln2 = Vector256.Create(0.69314718055994530942);
-    
-    // Approximate exponent extraction using frexp-like operation
-    // For simplicity, use iterative normalization
-    var exponent = Vector256<double>.Zero;
-    var mantissa = x;
-    
-    // Normalize mantissa to [1, 2)
-    var mask = Avx.CompareLessThan(mantissa, vOne);
-    for (int i = 0; i < 10; i++) // Sufficient for most values
-    {
-        var needsShift = Avx.CompareLessThan(mantissa, vOne);
-        mantissa = Avx.BlendVariable(mantissa, Avx.Multiply(mantissa, vTwo), needsShift);
-        exponent = Avx.BlendVariable(exponent, Avx.Subtract(exponent, vOne), needsShift);
-        
-        needsShift = Avx.CompareGreaterThanOrEqual(mantissa, vTwo);
-        mantissa = Avx.BlendVariable(mantissa, Avx.Multiply(mantissa, vHalf), needsShift);
-        exponent = Avx.BlendVariable(exponent, Avx.Add(exponent, vOne), needsShift);
-    }
-    
-    // Polynomial approximation for ln(m) where m in [1,2]
-    // Use minimax polynomial: ln(1+x) ≈ x - x²/2 + x³/3 - x⁴/4 + x⁵/5 - x⁶/6 + x⁷/7
-    var z = Avx.Subtract(mantissa, vOne);
-    var z2 = Avx.Multiply(z, z);
-    var z3 = Avx.Multiply(z2, z);
-    var z4 = Avx.Multiply(z3, z);
-    var z5 = Avx.Multiply(z4, z);
-    var z6 = Avx.Multiply(z5, z);
-    var z7 = Avx.Multiply(z6, z);
-    
-    var c1 = Vector256.Create(1.0);
-    var c2 = Vector256.Create(-0.5);
-    var c3 = Vector256.Create(1.0 / 3.0);
-    var c4 = Vector256.Create(-0.25);
-    var c5 = Vector256.Create(0.2);
-    var c6 = Vector256.Create(-1.0 / 6.0);
-    var c7 = Vector256.Create(1.0 / 7.0);
-    
-    var poly = z;
-    poly = Avx.Add(poly, Avx.Multiply(z2, c2));
-    poly = Avx.Add(poly, Avx.Multiply(z3, c3));
-    poly = Avx.Add(poly, Avx.Multiply(z4, c4));
-    poly = Avx.Add(poly, Avx.Multiply(z5, c5));
-    poly = Avx.Add(poly, Avx.Multiply(z6, c6));
-    poly = Avx.Add(poly, Avx.Multiply(z7, c7));
-    
-    // Result: e*ln(2) + ln(m)
-    var result = Avx.Add(Avx.Multiply(exponent, ln2), poly);
-    
-    return result;
-}
-/// <summary>
-/// Improved fast vectorized exponential using Padé approximant.
-/// More accurate than Taylor series for larger arguments.
-/// Based on: Abramowitz & Stegun, 1964. Handbook of Mathematical Functions.
-/// </summary>
-[MethodImpl(MethodImplOptions.AggressiveInlining)]
-private static Vector256<double> VectorExpImproved(Vector256<double> x)
-{
-    // Clamp to safe range
-    var minVal = Vector256.Create(-700.0);
-    var maxVal = Vector256.Create(700.0);
-    x = Avx.Max(minVal, Avx.Min(maxVal, x));
-    
-    // Range reduction: e^x = e^(n*ln(2) + r) = 2^n * e^r
-    // where |r| <= ln(2)/2
-    var ln2 = Vector256.Create(0.69314718055994530942);
-    var invLn2 = Vector256.Create(1.4426950408889634074);
-    
-    // n = round(x / ln(2))
-    var n = Avx.RoundToNearestInteger(Avx.Multiply(x, invLn2));
-    
-    // r = x - n*ln(2)
-    var r = Avx.Subtract(x, Avx.Multiply(n, ln2));
-    
-    // Padé approximation for e^r: P(r)/Q(r)
-    // P(r) = 1 + r/2 + r²/9 + r³/72
-    // Q(r) = 1 - r/2 + r²/9 - r³/72
-    
-    var r2 = Avx.Multiply(r, r);
-    var r3 = Avx.Multiply(r2, r);
-    
-    var c0 = Vector256.Create(1.0);
-    var c1 = Vector256.Create(0.5);
-    var c2 = Vector256.Create(1.0 / 9.0);
-    var c3 = Vector256.Create(1.0 / 72.0);
-    
-    // Numerator
-    var P = c0;
-    P = Avx.Add(P, Avx.Multiply(r, c1));
-    P = Avx.Add(P, Avx.Multiply(r2, c2));
-    P = Avx.Add(P, Avx.Multiply(r3, c3));
-    
-    // Denominator
-    var Q = c0;
-    Q = Avx.Subtract(Q, Avx.Multiply(r, c1));
-    Q = Avx.Add(Q, Avx.Multiply(r2, c2));
-    Q = Avx.Subtract(Q, Avx.Multiply(r3, c3));
-    
-    // e^r ≈ P/Q
-    var eToR = Avx.Divide(P, Q);
-    
-    // Reconstruct: 2^n * e^r
-    // For 2^n, use bit manipulation (convert n to integer exponent)
-    // Simplified: use pow approximation
-    var result = MultiplyBy2ToN(eToR, n);
-    
-    return result;
-}
-/// <summary>
-/// Multiply by 2^n using exponent manipulation.
-/// </summary>
-[MethodImpl(MethodImplOptions.AggressiveInlining)]
-private static Vector256<double> MultiplyBy2ToN(Vector256<double> x, Vector256<double> n)
-{
-    // Convert doubles to integers and extract components
-    Span<double> xVals = stackalloc double[4];
-    Span<double> nVals = stackalloc double[4];
-    Span<double> results = stackalloc double[4];
-    
-    xVals[0] = x.GetElement(0);
-    xVals[1] = x.GetElement(1);
-    xVals[2] = x.GetElement(2);
-    xVals[3] = x.GetElement(3);
-    
-    nVals[0] = n.GetElement(0);
-    nVals[1] = n.GetElement(1);
-    nVals[2] = n.GetElement(2);
-    nVals[3] = n.GetElement(3);
-    
-    for (int i = 0; i < 4; i++)
-    {
-        // Multiply by 2^n using Math.Pow for now
-        // A full SIMD implementation would manipulate the exponent bits directly
-        results[i] = xVals[i] * Math.Pow(2.0, nVals[i]);
-    }
-    
-    return Vector256.Create(results[0], results[1], results[2], results[3]);
-}
 
-/// <summary>
-/// Complete vectorized power function x^y = exp(y*ln(x)) using improved implementations.
-/// </summary>
-[MethodImpl(MethodImplOptions.AggressiveInlining)]
-private static Vector256<double> VectorPow256Improved(Vector256<double> x, Vector256<double> y)
-{
-    // x^y = exp(y * ln(x))
-    var minVal = Vector256.Create(1e-30);
-    x = Avx.Max(x, minVal); // Ensure positive
-    
-    var logX = VectorLog256(x);
-    var yLogX = Avx.Multiply(y, logX);
-    var result = VectorExpImproved(yLogX);
-    
-    return result;
-}
-/// <summary>
-/// 128-bit versions for ARM NEON (using scalar fallback for precision).
-/// </summary>
-[MethodImpl(MethodImplOptions.AggressiveInlining)]
-private static Vector128<double> VectorLog128(Vector128<double> x)
-{
-    Span<double> values = stackalloc double[2];
-    Span<double> results = stackalloc double[2];
-    
-    values[0] = x.GetElement(0);
-    values[1] = x.GetElement(1);
-    
-    for (int i = 0; i < 2; i++)
+    /// <summary>
+    ///     Fast vectorized natural logarithm using minimax polynomial approximation.
+    ///     Accurate to ~10 significant digits for geochemical calculations.
+    ///     Based on: Cody & Waite, 1980. Software Manual for Elementary Functions. Prentice-Hall.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static Vector256<double> VectorLog256(Vector256<double> x)
     {
-        results[i] = Math.Log(Math.Max(values[i], 1e-308));
-    }
-    
-    return Vector128.Create(results[0], results[1]);
-}
-[MethodImpl(MethodImplOptions.AggressiveInlining)]
-private static Vector128<double> VectorExpImproved128(Vector128<double> x)
-{
-    Span<double> values = stackalloc double[2];
-    Span<double> results = stackalloc double[2];
-    
-    values[0] = x.GetElement(0);
-    values[1] = x.GetElement(1);
-    
-    for (int i = 0; i < 2; i++)
-    {
-        var val = Math.Max(-700.0, Math.Min(700.0, values[i]));
-        results[i] = Math.Exp(val);
-    }
-    
-    return Vector128.Create(results[0], results[1]);
-}
-[MethodImpl(MethodImplOptions.AggressiveInlining)]
-private static Vector128<double> VectorMultiply128(Vector128<double> x, Vector128<double> y)
-{
-    // ARM NEON doesn't have native double-precision multiply, use scalar fallback
-    Span<double> xVals = stackalloc double[2];
-    Span<double> yVals = stackalloc double[2];
-    
-    xVals[0] = x.GetElement(0);
-    xVals[1] = x.GetElement(1);
-    yVals[0] = y.GetElement(0);
-    yVals[1] = y.GetElement(1);
-    
-    return Vector128.Create(xVals[0] * yVals[0], xVals[1] * yVals[1]);
-}
-[MethodImpl(MethodImplOptions.AggressiveInlining)]
-private static Vector128<double> VectorPow128Improved(Vector128<double> x, Vector128<double> y)
-{
-    var logX = VectorLog128(x);
-    var yLogX = VectorMultiply128(y, logX);
-    return VectorExpImproved128(yLogX);
-}
+        // Clamp to valid range
+        var minVal = Vector256.Create(1e-308);
+        var maxVal = Vector256.Create(1e308);
+        x = Avx.Max(minVal, Avx.Min(maxVal, x));
 
-private static Vector128<double> VectorPow128(Vector128<double> x, Vector128<double> y)
-{
-    return VectorPow128Improved(x, y);
-}
+        // Extract exponent and mantissa
+        // ln(x) = ln(2^e * m) = e*ln(2) + ln(m), where 1 <= m < 2
+
+        var vOne = Vector256.Create(1.0);
+        var vTwo = Vector256.Create(2.0);
+        var vHalf = Vector256.Create(0.5);
+        var ln2 = Vector256.Create(0.69314718055994530942);
+
+        // Approximate exponent extraction using frexp-like operation
+        // For simplicity, use iterative normalization
+        var exponent = Vector256<double>.Zero;
+        var mantissa = x;
+
+        // Normalize mantissa to [1, 2)
+        var mask = Avx.CompareLessThan(mantissa, vOne);
+        for (var i = 0; i < 10; i++) // Sufficient for most values
+        {
+            var needsShift = Avx.CompareLessThan(mantissa, vOne);
+            mantissa = Avx.BlendVariable(mantissa, Avx.Multiply(mantissa, vTwo), needsShift);
+            exponent = Avx.BlendVariable(exponent, Avx.Subtract(exponent, vOne), needsShift);
+
+            needsShift = Avx.CompareGreaterThanOrEqual(mantissa, vTwo);
+            mantissa = Avx.BlendVariable(mantissa, Avx.Multiply(mantissa, vHalf), needsShift);
+            exponent = Avx.BlendVariable(exponent, Avx.Add(exponent, vOne), needsShift);
+        }
+
+        // Polynomial approximation for ln(m) where m in [1,2]
+        // Use minimax polynomial: ln(1+x) ≈ x - x²/2 + x³/3 - x⁴/4 + x⁵/5 - x⁶/6 + x⁷/7
+        var z = Avx.Subtract(mantissa, vOne);
+        var z2 = Avx.Multiply(z, z);
+        var z3 = Avx.Multiply(z2, z);
+        var z4 = Avx.Multiply(z3, z);
+        var z5 = Avx.Multiply(z4, z);
+        var z6 = Avx.Multiply(z5, z);
+        var z7 = Avx.Multiply(z6, z);
+
+        var c1 = Vector256.Create(1.0);
+        var c2 = Vector256.Create(-0.5);
+        var c3 = Vector256.Create(1.0 / 3.0);
+        var c4 = Vector256.Create(-0.25);
+        var c5 = Vector256.Create(0.2);
+        var c6 = Vector256.Create(-1.0 / 6.0);
+        var c7 = Vector256.Create(1.0 / 7.0);
+
+        var poly = z;
+        poly = Avx.Add(poly, Avx.Multiply(z2, c2));
+        poly = Avx.Add(poly, Avx.Multiply(z3, c3));
+        poly = Avx.Add(poly, Avx.Multiply(z4, c4));
+        poly = Avx.Add(poly, Avx.Multiply(z5, c5));
+        poly = Avx.Add(poly, Avx.Multiply(z6, c6));
+        poly = Avx.Add(poly, Avx.Multiply(z7, c7));
+
+        // Result: e*ln(2) + ln(m)
+        var result = Avx.Add(Avx.Multiply(exponent, ln2), poly);
+
+        return result;
+    }
+
+    /// <summary>
+    ///     Improved fast vectorized exponential using Padé approximant.
+    ///     More accurate than Taylor series for larger arguments.
+    ///     Based on: Abramowitz & Stegun, 1964. Handbook of Mathematical Functions.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static Vector256<double> VectorExpImproved(Vector256<double> x)
+    {
+        // Clamp to safe range
+        var minVal = Vector256.Create(-700.0);
+        var maxVal = Vector256.Create(700.0);
+        x = Avx.Max(minVal, Avx.Min(maxVal, x));
+
+        // Range reduction: e^x = e^(n*ln(2) + r) = 2^n * e^r
+        // where |r| <= ln(2)/2
+        var ln2 = Vector256.Create(0.69314718055994530942);
+        var invLn2 = Vector256.Create(1.4426950408889634074);
+
+        // n = round(x / ln(2))
+        var n = Avx.RoundToNearestInteger(Avx.Multiply(x, invLn2));
+
+        // r = x - n*ln(2)
+        var r = Avx.Subtract(x, Avx.Multiply(n, ln2));
+
+        // Padé approximation for e^r: P(r)/Q(r)
+        // P(r) = 1 + r/2 + r²/9 + r³/72
+        // Q(r) = 1 - r/2 + r²/9 - r³/72
+
+        var r2 = Avx.Multiply(r, r);
+        var r3 = Avx.Multiply(r2, r);
+
+        var c0 = Vector256.Create(1.0);
+        var c1 = Vector256.Create(0.5);
+        var c2 = Vector256.Create(1.0 / 9.0);
+        var c3 = Vector256.Create(1.0 / 72.0);
+
+        // Numerator
+        var P = c0;
+        P = Avx.Add(P, Avx.Multiply(r, c1));
+        P = Avx.Add(P, Avx.Multiply(r2, c2));
+        P = Avx.Add(P, Avx.Multiply(r3, c3));
+
+        // Denominator
+        var Q = c0;
+        Q = Avx.Subtract(Q, Avx.Multiply(r, c1));
+        Q = Avx.Add(Q, Avx.Multiply(r2, c2));
+        Q = Avx.Subtract(Q, Avx.Multiply(r3, c3));
+
+        // e^r ≈ P/Q
+        var eToR = Avx.Divide(P, Q);
+
+        // Reconstruct: 2^n * e^r
+        // For 2^n, use bit manipulation (convert n to integer exponent)
+        // Simplified: use pow approximation
+        var result = MultiplyBy2ToN(eToR, n);
+
+        return result;
+    }
+
+    /// <summary>
+    ///     Multiply by 2^n using exponent manipulation.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static Vector256<double> MultiplyBy2ToN(Vector256<double> x, Vector256<double> n)
+    {
+        // Convert doubles to integers and extract components
+        Span<double> xVals = stackalloc double[4];
+        Span<double> nVals = stackalloc double[4];
+        Span<double> results = stackalloc double[4];
+
+        xVals[0] = x.GetElement(0);
+        xVals[1] = x.GetElement(1);
+        xVals[2] = x.GetElement(2);
+        xVals[3] = x.GetElement(3);
+
+        nVals[0] = n.GetElement(0);
+        nVals[1] = n.GetElement(1);
+        nVals[2] = n.GetElement(2);
+        nVals[3] = n.GetElement(3);
+
+        for (var i = 0; i < 4; i++)
+            // Multiply by 2^n using Math.Pow for now
+            // A full SIMD implementation would manipulate the exponent bits directly
+            results[i] = xVals[i] * Math.Pow(2.0, nVals[i]);
+
+        return Vector256.Create(results[0], results[1], results[2], results[3]);
+    }
+
+    /// <summary>
+    ///     Complete vectorized power function x^y = exp(y*ln(x)) using improved implementations.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static Vector256<double> VectorPow256Improved(Vector256<double> x, Vector256<double> y)
+    {
+        // x^y = exp(y * ln(x))
+        var minVal = Vector256.Create(1e-30);
+        x = Avx.Max(x, minVal); // Ensure positive
+
+        var logX = VectorLog256(x);
+        var yLogX = Avx.Multiply(y, logX);
+        var result = VectorExpImproved(yLogX);
+
+        return result;
+    }
+
+    /// <summary>
+    ///     128-bit versions for ARM NEON (using scalar fallback for precision).
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static Vector128<double> VectorLog128(Vector128<double> x)
+    {
+        Span<double> values = stackalloc double[2];
+        Span<double> results = stackalloc double[2];
+
+        values[0] = x.GetElement(0);
+        values[1] = x.GetElement(1);
+
+        for (var i = 0; i < 2; i++) results[i] = Math.Log(Math.Max(values[i], 1e-308));
+
+        return Vector128.Create(results[0], results[1]);
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static Vector128<double> VectorExpImproved128(Vector128<double> x)
+    {
+        Span<double> values = stackalloc double[2];
+        Span<double> results = stackalloc double[2];
+
+        values[0] = x.GetElement(0);
+        values[1] = x.GetElement(1);
+
+        for (var i = 0; i < 2; i++)
+        {
+            var val = Math.Max(-700.0, Math.Min(700.0, values[i]));
+            results[i] = Math.Exp(val);
+        }
+
+        return Vector128.Create(results[0], results[1]);
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static Vector128<double> VectorMultiply128(Vector128<double> x, Vector128<double> y)
+    {
+        // ARM NEON doesn't have native double-precision multiply, use scalar fallback
+        Span<double> xVals = stackalloc double[2];
+        Span<double> yVals = stackalloc double[2];
+
+        xVals[0] = x.GetElement(0);
+        xVals[1] = x.GetElement(1);
+        yVals[0] = y.GetElement(0);
+        yVals[1] = y.GetElement(1);
+
+        return Vector128.Create(xVals[0] * yVals[0], xVals[1] * yVals[1]);
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static Vector128<double> VectorPow128Improved(Vector128<double> x, Vector128<double> y)
+    {
+        var logX = VectorLog128(x);
+        var yLogX = VectorMultiply128(y, logX);
+        return VectorExpImproved128(yLogX);
+    }
+
+    private static Vector128<double> VectorPow128(Vector128<double> x, Vector128<double> y)
+    {
+        return VectorPow128Improved(x, y);
+    }
 
     /// <summary>
     ///     Matrix-vector multiplication optimized with SIMD.

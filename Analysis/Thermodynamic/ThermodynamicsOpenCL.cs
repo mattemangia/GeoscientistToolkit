@@ -185,13 +185,13 @@ public class ThermodynamicsOpenCL : IDisposable
     }
 
     /// <summary>
-/// COMPLETE OpenCL kernel implementation with rigorous rate law.
-/// Replaces simplified cubic surface area with proper exposed face counting.
-/// Includes reactive surface area correction and temperature dependence.
-/// </summary>
-private string GetKernelSource()
-{
-    return @"
+    ///     COMPLETE OpenCL kernel implementation with rigorous rate law.
+    ///     Replaces simplified cubic surface area with proper exposed face counting.
+    ///     Includes reactive surface area correction and temperature dependence.
+    /// </summary>
+    private string GetKernelSource()
+    {
+        return @"
 /*
  * Complete OpenCL kernels for reactive transport in porous media
  * Implements scientifically rigorous algorithms from peer-reviewed literature
@@ -500,7 +500,7 @@ __kernel void update_permeability(
     }
 }
 ";
-}
+    }
 
     /// <summary>
     ///     Calculate Debye-Hückel activity coefficients on GPU.

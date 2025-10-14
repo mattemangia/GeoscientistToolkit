@@ -6,7 +6,6 @@ using System.Text;
 using GeoscientistToolkit.Business;
 using GeoscientistToolkit.Business.GeoScript;
 using GeoscientistToolkit.Data;
-using GeoscientistToolkit.Util;
 using ImGuiNET;
 
 namespace GeoscientistToolkit.UI;
@@ -22,9 +21,9 @@ public class GeoScriptInterpreter
     private readonly List<string> _suggestions = new();
 
     private Dataset _associatedDataset;
+    private string _currentInput = "";
     private int _historyIndex = -1;
     private bool _isExecuting;
-    private string _currentInput = "";
     private bool _needsToSetFocus;
     private bool _scrollToBottom;
 
@@ -115,15 +114,11 @@ public class GeoScriptInterpreter
             {
                 UpdateSuggestions(data);
                 if (_suggestions.Count == 1)
-                {
                     // Single suggestion, complete it directly
                     InsertSuggestion(_suggestions[0], data);
-                }
                 else if (_suggestions.Count > 1)
-                {
                     // Multiple suggestions, list them in the output
                     LogToOutput($"Suggestions: {string.Join("  ", _suggestions)}");
-                }
 
                 break;
             }
@@ -150,13 +145,13 @@ public class GeoScriptInterpreter
         var text = Marshal.PtrToStringUTF8((IntPtr)data->Buf, data->BufTextLen) ?? "";
         var wordStart = data->CursorPos;
         while (wordStart > 0 && !char.IsWhiteSpace(text[wordStart - 1])) wordStart--;
-        
+
         var textBefore = text.Substring(0, wordStart);
         var newText = textBefore + suggestion + " ";
-        
+
         UpdateBuffer(data, newText);
     }
-    
+
     private unsafe void UpdateSuggestions(ImGuiInputTextCallbackData* data)
     {
         var text = Marshal.PtrToStringUTF8((IntPtr)data->Buf, data->BufTextLen) ?? "";
@@ -166,7 +161,7 @@ public class GeoScriptInterpreter
 
         _suggestions.Clear();
         if (string.IsNullOrWhiteSpace(currentWord)) return;
-        
+
         _suggestions.AddRange(CommandRegistry.GetAllCommands()
             .Where(c => c.Name.StartsWith(currentWord, StringComparison.OrdinalIgnoreCase))
             .Select(c => c.Name));
@@ -183,10 +178,7 @@ public class GeoScriptInterpreter
         _isExecuting = true;
         LogToOutput($"> {command}");
 
-        if (_commandHistory.LastOrDefault() != command)
-        {
-            _commandHistory.Add(command);
-        }
+        if (_commandHistory.LastOrDefault() != command) _commandHistory.Add(command);
         _historyIndex = -1;
 
         try
@@ -197,7 +189,7 @@ public class GeoScriptInterpreter
             }
             else if (command.Trim().Equals("CLEAR", StringComparison.OrdinalIgnoreCase))
             {
-                 _outputLog.Clear();
+                _outputLog.Clear();
                 _scrollToBottom = true;
             }
             else
@@ -235,12 +227,9 @@ public class GeoScriptInterpreter
         helpBuilder.AppendLine("-------------------");
         helpBuilder.AppendLine("HELP          - Displays this help message.");
         helpBuilder.AppendLine("CLEAR         - Clears the terminal screen.");
-        
+
         var commands = CommandRegistry.GetAllCommands().OrderBy(c => c.Name);
-        foreach (var cmd in commands)
-        {
-            helpBuilder.AppendLine($"{cmd.Name.PadRight(14)}- {cmd.HelpText}");
-        }
+        foreach (var cmd in commands) helpBuilder.AppendLine($"{cmd.Name.PadRight(14)}- {cmd.HelpText}");
         helpBuilder.AppendLine("\nTip: Use Arrow Up/Down for history and Tab for autocompletion.");
         LogToOutput(helpBuilder.ToString());
     }

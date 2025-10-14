@@ -51,11 +51,12 @@ public class SolidSolution
 {
     public string Name { get; set; } = string.Empty;
     public List<string> EndMembers { get; set; } = new();
+
     public SolidSolutionMixingModel MixingModel { get; set; } = SolidSolutionMixingModel.Ideal;
+
     // Interaction parameters (W) for regular solution model (in kJ/mol)
     public List<double> InteractionParameters { get; set; } = new();
 }
-
 
 /// <summary>
 ///     Represents a chemical compound with comprehensive thermodynamic and physical properties
@@ -159,7 +160,7 @@ public sealed class ChemicalCompound
 
     // ENHANCEMENT: Properties for reaction generation and speciation
     /// <summary>Is this species the primary basis species for its main element?</summary>
-    public bool IsPrimaryElementSpecies { get; set; } = false;
+    public bool IsPrimaryElementSpecies { get; set; }
 
     /// <summary>Oxidation state of the primary element in the species</summary>
     public int? OxidationState { get; set; }
@@ -168,17 +169,17 @@ public sealed class ChemicalCompound
     public double? HenrysLawConstant_mol_L_atm { get; set; }
 
     /// <summary>Is this a primary surface site (e.g., >SOH) from which others are derived?</summary>
-    public bool IsPrimarySurfaceSite { get; set; } = false;
+    public bool IsPrimarySurfaceSite { get; set; }
 
     /// <summary>Site density (mol/g) for minerals used as surface sorbents</summary>
     public double? SiteDensity_mol_g { get; set; }
 
     /// <summary>Inner-sphere vs outer-sphere complex flag for Stern Layer modeling.</summary>
     public bool? IsInnerSphereComplex { get; set; }
-    
+
     /// <summary>Capacitance of the mineral surface (F/m²) for advanced surface models.</summary>
     public double? SurfaceCapacitance_F_m2 { get; set; }
-    
+
     /// <summary>Thickness of the Stern layer (nm) for surface complexation models.</summary>
     public double? SternLayerThickness_nm { get; set; }
 
@@ -221,8 +222,6 @@ public sealed class CompoundLibrary
     private static readonly Lazy<CompoundLibrary> _lazy = new(() => new CompoundLibrary());
     private readonly List<ChemicalCompound> _compounds = new();
     private readonly List<Element> _elements = new();
-    // ENHANCEMENT: Add support for solid solutions
-    public List<SolidSolution> SolidSolutions { get; private set; } = new();
 
 
     private CompoundLibrary()
@@ -231,6 +230,9 @@ public sealed class CompoundLibrary
         SeedDefaults(); // Then seed compounds
         SeedSolidSolutions(); // Then define solid solutions
     }
+
+    // ENHANCEMENT: Add support for solid solutions
+    public List<SolidSolution> SolidSolutions { get; } = new();
 
     public static CompoundLibrary Instance => _lazy.Value;
     public IReadOnlyList<ChemicalCompound> Compounds => _compounds;
@@ -779,7 +781,8 @@ public sealed class CompoundLibrary
             BaseCatalysisOrder = 0.29, // for OH-
             MohsHardness = 7.0,
             Color = "Colorless, various",
-            Notes = "Extremely slow dissolution kinetics. Thermodynamically stable silica polymorph at surface conditions.",
+            Notes =
+                "Extremely slow dissolution kinetics. Thermodynamically stable silica polymorph at surface conditions.",
             Sources = new List<string>
             {
                 "Robie & Hemingway (1995): USGS Bulletin 2131, p.356",
@@ -1447,7 +1450,7 @@ public sealed class CompoundLibrary
     }
 
     /// <summary>
-    /// ENHANCEMENT: Seeds solid solution definitions.
+    ///     ENHANCEMENT: Seeds solid solution definitions.
     /// </summary>
     private void SeedSolidSolutions()
     {
