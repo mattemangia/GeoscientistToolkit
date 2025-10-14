@@ -743,7 +743,7 @@ public class MainWindow
         ImGui.SetNextWindowPos(ImGui.GetMainViewport().GetCenter(), ImGuiCond.Appearing, new Vector2(0.5f, 0.5f));
         if (ImGui.BeginPopupModal("Close Application?###WindowCloseDialog", ImGuiWindowFlags.AlwaysAutoResize))
         {
-            ImGui.Text("Your project has unsaved changes.");
+            ImGui.Text("⚠ Your project has unsaved changes.");
             ImGui.Text("Do you want to save before closing?");
             ImGui.Spacing();
             ImGui.Separator();
@@ -814,12 +814,12 @@ public class MainWindow
         // ============================================================================
         if (_showUnsavedChangesPopup)
         {
-            ImGui.OpenPopup("Unsaved Changes###RegularUnsavedChanges");
+            ImGui.OpenPopup("⚠ Unsaved Changes###RegularUnsavedChanges");
             _showUnsavedChangesPopup = false;
         }
 
         ImGui.SetNextWindowPos(ImGui.GetMainViewport().GetCenter(), ImGuiCond.Appearing, new Vector2(0.5f, 0.5f));
-        if (ImGui.BeginPopupModal("Unsaved Changes###RegularUnsavedChanges", ImGuiWindowFlags.AlwaysAutoResize))
+        if (ImGui.BeginPopupModal("⚠ Unsaved Changes###RegularUnsavedChanges", ImGuiWindowFlags.AlwaysAutoResize))
         {
             ImGui.Text("Your project has unsaved changes. Do you want to save them?");
             ImGui.Spacing();
