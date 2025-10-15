@@ -104,93 +104,88 @@ public class GeomechanicalExportManager : IDisposable
     }
 
     private void ExportCompleteDataset(GeomechanicalResults results,
-    CtImageStackDataset sourceDataset, string basePath)
-{
-    var datasetDir = Path.ChangeExtension(basePath, null);
-    Directory.CreateDirectory(datasetDir);
-
-    _progressDialog.Update(0.1f, "Exporting stress fields...");
-
-    // Export stress tensor components
-    ExportField(results.StressXX, Path.Combine(datasetDir, "StressXX.bin"));
-    ExportField(results.StressYY, Path.Combine(datasetDir, "StressYY.bin"));
-    ExportField(results.StressZZ, Path.Combine(datasetDir, "StressZZ.bin"));
-    ExportField(results.StressXY, Path.Combine(datasetDir, "StressXY.bin"));
-    ExportField(results.StressXZ, Path.Combine(datasetDir, "StressXZ.bin"));
-    ExportField(results.StressYZ, Path.Combine(datasetDir, "StressYZ.bin"));
-
-    _progressDialog.Update(0.3f, "Exporting principal stresses...");
-
-    ExportField(results.Sigma1, Path.Combine(datasetDir, "Sigma1.bin"));
-    ExportField(results.Sigma2, Path.Combine(datasetDir, "Sigma2.bin"));
-    ExportField(results.Sigma3, Path.Combine(datasetDir, "Sigma3.bin"));
-
-    _progressDialog.Update(0.5f, "Exporting failure data...");
-
-    ExportField(results.FailureIndex, Path.Combine(datasetDir, "FailureIndex.bin"));
-    ExportByteField(results.DamageField, Path.Combine(datasetDir, "DamageField.bin"));
-
-    // Export geothermal fields if present
-    if (results.TemperatureField != null)
+        CtImageStackDataset sourceDataset, string basePath)
     {
-        _progressDialog.Update(0.6f, "Exporting geothermal data...");
-        ExportField(results.TemperatureField, Path.Combine(datasetDir, "Temperature.bin"));
-    }
+        var datasetDir = Path.ChangeExtension(basePath, null);
+        Directory.CreateDirectory(datasetDir);
 
-    // Export fluid fields if present
-    if (results.PressureField != null)
-    {
-        _progressDialog.Update(0.65f, "Exporting fluid pressure data...");
-        ExportField(results.PressureField, Path.Combine(datasetDir, "Pressure.bin"));
-        
-        if (results.FluidVelocityX != null)
+        _progressDialog.Update(0.1f, "Exporting stress fields...");
+
+        // Export stress tensor components
+        ExportField(results.StressXX, Path.Combine(datasetDir, "StressXX.bin"));
+        ExportField(results.StressYY, Path.Combine(datasetDir, "StressYY.bin"));
+        ExportField(results.StressZZ, Path.Combine(datasetDir, "StressZZ.bin"));
+        ExportField(results.StressXY, Path.Combine(datasetDir, "StressXY.bin"));
+        ExportField(results.StressXZ, Path.Combine(datasetDir, "StressXZ.bin"));
+        ExportField(results.StressYZ, Path.Combine(datasetDir, "StressYZ.bin"));
+
+        _progressDialog.Update(0.3f, "Exporting principal stresses...");
+
+        ExportField(results.Sigma1, Path.Combine(datasetDir, "Sigma1.bin"));
+        ExportField(results.Sigma2, Path.Combine(datasetDir, "Sigma2.bin"));
+        ExportField(results.Sigma3, Path.Combine(datasetDir, "Sigma3.bin"));
+
+        _progressDialog.Update(0.5f, "Exporting failure data...");
+
+        ExportField(results.FailureIndex, Path.Combine(datasetDir, "FailureIndex.bin"));
+        ExportByteField(results.DamageField, Path.Combine(datasetDir, "DamageField.bin"));
+
+        // Export geothermal fields if present
+        if (results.TemperatureField != null)
         {
-            ExportField(results.FluidVelocityX, Path.Combine(datasetDir, "VelocityX.bin"));
-            ExportField(results.FluidVelocityY, Path.Combine(datasetDir, "VelocityY.bin"));
-            ExportField(results.FluidVelocityZ, Path.Combine(datasetDir, "VelocityZ.bin"));
+            _progressDialog.Update(0.6f, "Exporting geothermal data...");
+            ExportField(results.TemperatureField, Path.Combine(datasetDir, "Temperature.bin"));
         }
-        
-        if (results.FractureAperture != null)
+
+        // Export fluid fields if present
+        if (results.PressureField != null)
         {
-            ExportField(results.FractureAperture, Path.Combine(datasetDir, "FractureAperture.bin"));
+            _progressDialog.Update(0.65f, "Exporting fluid pressure data...");
+            ExportField(results.PressureField, Path.Combine(datasetDir, "Pressure.bin"));
+
+            if (results.FluidVelocityX != null)
+            {
+                ExportField(results.FluidVelocityX, Path.Combine(datasetDir, "VelocityX.bin"));
+                ExportField(results.FluidVelocityY, Path.Combine(datasetDir, "VelocityY.bin"));
+                ExportField(results.FluidVelocityZ, Path.Combine(datasetDir, "VelocityZ.bin"));
+            }
+
+            if (results.FractureAperture != null)
+                ExportField(results.FractureAperture, Path.Combine(datasetDir, "FractureAperture.bin"));
+
+            if (results.EffectiveStressXX != null)
+            {
+                ExportField(results.EffectiveStressXX, Path.Combine(datasetDir, "EffectiveStressXX.bin"));
+                ExportField(results.EffectiveStressYY, Path.Combine(datasetDir, "EffectiveStressYY.bin"));
+                ExportField(results.EffectiveStressZZ, Path.Combine(datasetDir, "EffectiveStressZZ.bin"));
+            }
         }
-        
-        if (results.EffectiveStressXX != null)
-        {
-            ExportField(results.EffectiveStressXX, Path.Combine(datasetDir, "EffectiveStressXX.bin"));
-            ExportField(results.EffectiveStressYY, Path.Combine(datasetDir, "EffectiveStressYY.bin"));
-            ExportField(results.EffectiveStressZZ, Path.Combine(datasetDir, "EffectiveStressZZ.bin"));
-        }
+
+        _progressDialog.Update(0.7f, "Exporting metadata...");
+
+        ExportMetadata(results, Path.Combine(datasetDir, "metadata.json"));
+
+        _progressDialog.Update(0.9f, "Exporting statistics...");
+
+        ExportStatisticsCSV(results, Path.Combine(datasetDir, "statistics.csv"));
+        ExportMohrData(results, Path.Combine(datasetDir, "mohr_circles.csv"));
+
+        // Export time series if present
+        if (results.TimePoints != null && results.TimePoints.Count > 0)
+            ExportTimeSeriesData(results, Path.Combine(datasetDir, "fluid_timeseries.csv"));
+
+        // Export fracture network if present
+        if (results.FractureNetwork != null && results.FractureNetwork.Count > 0)
+            ExportFractureNetwork(results, Path.Combine(datasetDir, "fracture_network.csv"));
+
+        _progressDialog.Update(1.0f, "Export complete!");
     }
 
-    _progressDialog.Update(0.7f, "Exporting metadata...");
-
-    ExportMetadata(results, Path.Combine(datasetDir, "metadata.json"));
-
-    _progressDialog.Update(0.9f, "Exporting statistics...");
-
-    ExportStatisticsCSV(results, Path.Combine(datasetDir, "statistics.csv"));
-    ExportMohrData(results, Path.Combine(datasetDir, "mohr_circles.csv"));
-    
-    // Export time series if present
-    if (results.TimePoints != null && results.TimePoints.Count > 0)
-    {
-        ExportTimeSeriesData(results, Path.Combine(datasetDir, "fluid_timeseries.csv"));
-    }
-    
-    // Export fracture network if present
-    if (results.FractureNetwork != null && results.FractureNetwork.Count > 0)
-    {
-        ExportFractureNetwork(results, Path.Combine(datasetDir, "fracture_network.csv"));
-    }
-
-    _progressDialog.Update(1.0f, "Export complete!");
-}
     private void ExportTimeSeriesData(GeomechanicalResults results, string path)
     {
         var sb = new StringBuilder();
         sb.AppendLine("Time_s,InjectionPressure_MPa,FlowRate_m3ps,FractureVolume_m3,EnergyExtraction_MW");
-    
+
         for (var i = 0; i < results.TimePoints.Count; i++)
         {
             sb.Append($"{results.TimePoints[i]:F2},");
@@ -199,7 +194,7 @@ public class GeomechanicalExportManager : IDisposable
             sb.Append($"{(i < results.FractureVolumeHistory.Count ? results.FractureVolumeHistory[i] : 0):F6},");
             sb.AppendLine($"{(i < results.EnergyExtractionHistory.Count ? results.EnergyExtractionHistory[i] : 0):F4}");
         }
-    
+
         File.WriteAllText(path, sb.ToString());
         Logger.Log($"[GeomechExport] Exported time series data to {path}");
     }
@@ -207,20 +202,20 @@ public class GeomechanicalExportManager : IDisposable
     private void ExportFractureNetwork(GeomechanicalResults results, string path)
     {
         var sb = new StringBuilder();
-        sb.AppendLine("StartX,StartY,StartZ,EndX,EndY,EndZ,Aperture_m,Permeability_m2,Pressure_Pa,Temperature_C,Connected");
-    
+        sb.AppendLine(
+            "StartX,StartY,StartZ,EndX,EndY,EndZ,Aperture_m,Permeability_m2,Pressure_Pa,Temperature_C,Connected");
+
         foreach (var segment in results.FractureNetwork)
-        {
             sb.AppendLine($"{segment.Start.X:F6},{segment.Start.Y:F6},{segment.Start.Z:F6}," +
                           $"{segment.End.X:F6},{segment.End.Y:F6},{segment.End.Z:F6}," +
                           $"{segment.Aperture:E4},{segment.Permeability:E4}," +
                           $"{segment.Pressure:F2},{segment.Temperature:F2}," +
                           $"{segment.IsConnectedToInjection}");
-        }
-    
+
         File.WriteAllText(path, sb.ToString());
         Logger.Log($"[GeomechExport] Exported fracture network ({results.FractureNetwork.Count} segments) to {path}");
     }
+
     private void ExportField(float[,,] field, string path)
     {
         var w = field.GetLength(0);
@@ -286,66 +281,67 @@ public class GeomechanicalExportManager : IDisposable
         File.WriteAllText(path, json);
     }
 
-   private void ExportStatisticsCSV(GeomechanicalResults results, string path)
-{
-    var sb = new StringBuilder();
-    sb.AppendLine("Property,Value,Unit");
-    sb.AppendLine($"Computation Time,{results.ComputationTime.TotalSeconds:F2},seconds");
-    sb.AppendLine($"Iterations,{results.IterationsPerformed},");
-    sb.AppendLine($"Converged,{results.Converged},");
-    sb.AppendLine($"Mean Stress,{results.MeanStress / 1e6f:F4},MPa");
-    sb.AppendLine($"Max Shear Stress,{results.MaxShearStress / 1e6f:F4},MPa");
-    sb.AppendLine($"Von Mises Stress (Mean),{results.VonMisesStress_Mean / 1e6f:F4},MPa");
-    sb.AppendLine($"Von Mises Stress (Max),{results.VonMisesStress_Max / 1e6f:F4},MPa");
-    sb.AppendLine($"Volumetric Strain,{results.VolumetricStrain:E4},");
-    sb.AppendLine($"Total Voxels,{results.TotalVoxels},");
-    sb.AppendLine($"Failed Voxels,{results.FailedVoxels},");
-    sb.AppendLine($"Failure Percentage,{results.FailedVoxelPercentage:F2},%");
-
-    // Geothermal statistics
-    if (results.TemperatureField != null)
+    private void ExportStatisticsCSV(GeomechanicalResults results, string path)
     {
+        var sb = new StringBuilder();
+        sb.AppendLine("Property,Value,Unit");
+        sb.AppendLine($"Computation Time,{results.ComputationTime.TotalSeconds:F2},seconds");
+        sb.AppendLine($"Iterations,{results.IterationsPerformed},");
+        sb.AppendLine($"Converged,{results.Converged},");
+        sb.AppendLine($"Mean Stress,{results.MeanStress / 1e6f:F4},MPa");
+        sb.AppendLine($"Max Shear Stress,{results.MaxShearStress / 1e6f:F4},MPa");
+        sb.AppendLine($"Von Mises Stress (Mean),{results.VonMisesStress_Mean / 1e6f:F4},MPa");
+        sb.AppendLine($"Von Mises Stress (Max),{results.VonMisesStress_Max / 1e6f:F4},MPa");
+        sb.AppendLine($"Volumetric Strain,{results.VolumetricStrain:E4},");
+        sb.AppendLine($"Total Voxels,{results.TotalVoxels},");
+        sb.AppendLine($"Failed Voxels,{results.FailedVoxels},");
+        sb.AppendLine($"Failure Percentage,{results.FailedVoxelPercentage:F2},%");
+
+        // Geothermal statistics
+        if (results.TemperatureField != null)
+        {
+            sb.AppendLine();
+            sb.AppendLine("Geothermal Results");
+            sb.AppendLine($"Average Thermal Gradient,{results.AverageThermalGradient:F2},°C/km");
+            sb.AppendLine($"Geothermal Energy Potential,{results.GeothermalEnergyPotential:F2},MWh");
+        }
+
+        // Fluid injection statistics
+        if (results.PressureField != null)
+        {
+            sb.AppendLine();
+            sb.AppendLine("Hydraulic Fracturing Results");
+            sb.AppendLine($"Breakdown Pressure,{results.BreakdownPressure:F2},MPa");
+            sb.AppendLine($"Propagation Pressure,{results.PropagationPressure:F2},MPa");
+            sb.AppendLine($"Peak Injection Pressure,{results.PeakInjectionPressure:F2},MPa");
+            sb.AppendLine($"Min Fluid Pressure,{results.MinFluidPressure / 1e6f:F2},MPa");
+            sb.AppendLine($"Max Fluid Pressure,{results.MaxFluidPressure / 1e6f:F2},MPa");
+            sb.AppendLine($"Total Fluid Injected,{results.TotalFluidInjected:F4},m³");
+            sb.AppendLine($"Total Fracture Volume,{results.TotalFractureVolume:F6},m³");
+            sb.AppendLine($"Fracture Voxel Count,{results.FractureVoxelCount},");
+            sb.AppendLine($"Fracture Network Segments,{results.FractureNetwork?.Count ?? 0},");
+        }
+
         sb.AppendLine();
-        sb.AppendLine("Geothermal Results");
-        sb.AppendLine($"Average Thermal Gradient,{results.AverageThermalGradient:F2},°C/km");
-        sb.AppendLine($"Geothermal Energy Potential,{results.GeothermalEnergyPotential:F2},MWh");
+        sb.AppendLine("Applied Loading");
+        sb.AppendLine($"Loading Mode,{results.Parameters.LoadingMode},");
+        sb.AppendLine($"Sigma 1,{results.Parameters.Sigma1:F2},MPa");
+        sb.AppendLine($"Sigma 2,{results.Parameters.Sigma2:F2},MPa");
+        sb.AppendLine($"Sigma 3,{results.Parameters.Sigma3:F2},MPa");
+
+        sb.AppendLine();
+        sb.AppendLine("Material Properties");
+        sb.AppendLine($"Young's Modulus,{results.Parameters.YoungModulus:F0},MPa");
+        sb.AppendLine($"Poisson's Ratio,{results.Parameters.PoissonRatio:F4},");
+        sb.AppendLine($"Cohesion,{results.Parameters.Cohesion:F2},MPa");
+        sb.AppendLine($"Friction Angle,{results.Parameters.FrictionAngle:F2},degrees");
+        sb.AppendLine($"Tensile Strength,{results.Parameters.TensileStrength:F2},MPa");
+        sb.AppendLine($"Density,{results.Parameters.Density:F0},kg/m³");
+
+        File.WriteAllText(path, sb.ToString());
+        Logger.Log($"[GeomechExport] Exported statistics to {path}");
     }
 
-    // Fluid injection statistics
-    if (results.PressureField != null)
-    {
-        sb.AppendLine();
-        sb.AppendLine("Hydraulic Fracturing Results");
-        sb.AppendLine($"Breakdown Pressure,{results.BreakdownPressure:F2},MPa");
-        sb.AppendLine($"Propagation Pressure,{results.PropagationPressure:F2},MPa");
-        sb.AppendLine($"Peak Injection Pressure,{results.PeakInjectionPressure:F2},MPa");
-        sb.AppendLine($"Min Fluid Pressure,{results.MinFluidPressure/1e6f:F2},MPa");
-        sb.AppendLine($"Max Fluid Pressure,{results.MaxFluidPressure/1e6f:F2},MPa");
-        sb.AppendLine($"Total Fluid Injected,{results.TotalFluidInjected:F4},m³");
-        sb.AppendLine($"Total Fracture Volume,{results.TotalFractureVolume:F6},m³");
-        sb.AppendLine($"Fracture Voxel Count,{results.FractureVoxelCount},");
-        sb.AppendLine($"Fracture Network Segments,{results.FractureNetwork?.Count ?? 0},");
-    }
-
-    sb.AppendLine();
-    sb.AppendLine("Applied Loading");
-    sb.AppendLine($"Loading Mode,{results.Parameters.LoadingMode},");
-    sb.AppendLine($"Sigma 1,{results.Parameters.Sigma1:F2},MPa");
-    sb.AppendLine($"Sigma 2,{results.Parameters.Sigma2:F2},MPa");
-    sb.AppendLine($"Sigma 3,{results.Parameters.Sigma3:F2},MPa");
-
-    sb.AppendLine();
-    sb.AppendLine("Material Properties");
-    sb.AppendLine($"Young's Modulus,{results.Parameters.YoungModulus:F0},MPa");
-    sb.AppendLine($"Poisson's Ratio,{results.Parameters.PoissonRatio:F4},");
-    sb.AppendLine($"Cohesion,{results.Parameters.Cohesion:F2},MPa");
-    sb.AppendLine($"Friction Angle,{results.Parameters.FrictionAngle:F2},degrees");
-    sb.AppendLine($"Tensile Strength,{results.Parameters.TensileStrength:F2},MPa");
-    sb.AppendLine($"Density,{results.Parameters.Density:F0},kg/m³");
-
-    File.WriteAllText(path, sb.ToString());
-    Logger.Log($"[GeomechExport] Exported statistics to {path}");
-}
     private void ExportMohrData(GeomechanicalResults results, string path)
     {
         var sb = new StringBuilder();

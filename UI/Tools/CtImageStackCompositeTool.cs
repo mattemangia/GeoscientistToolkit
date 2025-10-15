@@ -196,6 +196,14 @@ public partial class CtImageStackCompositeTool : IDatasetTools, IDisposable
                         Description = "Simulate steady-state heat flow to find effective thermal conductivity.",
                         Tool = new ThermalConductivityTool(),
                         Category = ToolCategory.Analysis
+                    },
+                    new()
+                    {
+                        Name = "Geomechanical Simulation",
+                        Description =
+                            "Stress/strain analysis with Mohr circles, failure prediction, and hydraulic fracturing",
+                        Tool = new GeomechanicalSimulationTool(),
+                        Category = ToolCategory.Analysis
                     }
                 }
             },
@@ -440,24 +448,4 @@ public partial class CtImageStackCompositeTool : IDatasetTools, IDisposable
         RockCoreIntegration.UnregisterTool(ds);
         _registered.RemoveWhere(tuple => ReferenceEquals(tuple.ds, ds));
     }
-
-    // Tool categories
-    private enum ToolCategory
-    {
-        Preprocessing,
-        Segmentation,
-        PhysicalProperties,
-        Analysis,
-        Export
-    }
-
-    private class ToolEntry
-    {
-        public string Name { get; set; }
-        public string Description { get; set; }
-        public IDatasetTools Tool { get; set; }
-        public ToolCategory Category { get; set; }
-    }
-
-    // --- Adapter for RockCoreExtractorTool ---
 }

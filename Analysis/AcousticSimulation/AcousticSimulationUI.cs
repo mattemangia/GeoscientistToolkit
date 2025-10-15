@@ -62,11 +62,23 @@ internal static class AcousticIntegration
         _placingWhich = which;
     }
 
-
     public static void StopPlacement()
     {
         IsPlacing = false;
         _placingWhich = null;
+    }
+
+    /// <summary>
+    ///     ADDED: Completely clears all integration state, including the active dataset.
+    ///     This should be called when disposing the acoustic simulation tool.
+    /// </summary>
+    public static void ClearActiveDataset()
+    {
+        _targetDataset = null;
+        IsPlacing = false;
+        _placingWhich = null;
+        _activeExtent = null;
+        ShouldDrawExtent = false;
     }
 
     public static bool IsPlacingFor(Dataset d)
@@ -114,7 +126,7 @@ internal static class AcousticIntegration
 
         if (_placingWhich == "TX")
             TxPosition = finalPos;
-        else if (_placingWhich == "RX") // Explicitly check for RX
+        else if (_placingWhich == "RX")
             RxPosition = finalPos;
 
         OnPositionsChanged?.Invoke();
@@ -201,10 +213,10 @@ public class AcousticSimulationUI : IDisposable
         _parameters = new SimulationParameters();
         _calibrationManager = new UnifiedCalibrationManager();
         _exportManager = new AcousticExportManager();
-        _tomographyViewer = new RealTimeTomographyViewer(); // Initialize the new viewer
+        _tomographyViewer = new RealTimeTomographyViewer();
         _offloadDirectory = Path.Combine(Path.GetTempPath(), "AcousticSimulation");
         _extentCalculationDialog = new ProgressBarDialog("Calculating Bounding Box");
-        _autoPlaceDialog = new ProgressBarDialog("Auto-placing Transducers"); // ADDED
+        _autoPlaceDialog = new ProgressBarDialog("Auto-placing Transducers");
         Directory.CreateDirectory(_offloadDirectory);
         AcousticIntegration.OnPositionsChanged += OnTransducerMoved;
 
@@ -215,10 +227,10 @@ public class AcousticSimulationUI : IDisposable
     public void Dispose()
     {
         AcousticIntegration.OnPositionsChanged -= OnTransducerMoved;
-        if (_currentDataset != null && AcousticIntegration.IsActiveFor(_currentDataset))
-            AcousticIntegration.StopPlacement();
 
-        AcousticIntegration.Configure(null, false);
+        // FIXED: Unconditionally clear the active dataset to ensure transducer overlay is removed
+        // when switching away from the acoustic simulation tool
+        AcousticIntegration.ClearActiveDataset();
 
         _cancellationTokenSource?.Cancel();
         _cancellationTokenSource?.Dispose();
@@ -245,6 +257,7 @@ public class AcousticSimulationUI : IDisposable
         _rxPosition = AcousticIntegration.RxPosition;
         _timeStepsDirty = true;
     }
+
 
     public void DrawPanel(CtImageStackDataset dataset)
     {

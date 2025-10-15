@@ -19,16 +19,18 @@ public class GeomechanicalSimulationUI : IDisposable
     private readonly GeomechanicalCalibrationManager _calibrationManager;
     private readonly GeomechanicalExportManager _exportManager;
     private readonly ProgressBarDialog _extentDialog;
+    private readonly FluidGeothermalVisualizationRenderer _fluidGeothermalRenderer;
     private readonly MohrCircleRenderer _mohrRenderer;
     private readonly ImGuiExportFileDialog _offloadDirectoryDialog;
     private readonly ImGuiExportFileDialog _permeabilityFileDialog;
     private readonly ImGuiExportFileDialog _pnmFileDialog;
     private readonly ProgressBarDialog _progressDialog;
-    private bool _showFluidTimeSeries = false;
-    
+
     // Material selection
     private readonly HashSet<byte> _selectedMaterialIDs = new();
     private string _acousticDatasetPath = "";
+    private float _aquiferPermeability = 1e-15f;
+    private float _aquiferPressure = 15f;
     private bool _autoCropToSelection = true;
     private float _biotCoefficient = 0.8f;
     private CancellationTokenSource _cancellationTokenSource;
@@ -39,10 +41,17 @@ public class GeomechanicalSimulationUI : IDisposable
     private float _damageThreshold = 0.8f;
     private float _density = 2700f;
     private float _dilationAngle = 10f;
+
+    private bool _enableAquifer;
     private bool _enableDamageEvolution = true;
+
+    private bool _enableFluidInjection;
+
+    private bool _enableFractureFlow = true;
+
+    private bool _enableGeothermal;
     private bool _enableMultiMaterial;
-    private readonly FluidGeothermalVisualizationRenderer _fluidGeothermalRenderer;
-    
+
     // Memory management for huge datasets
     private bool _enableOffloading;
 
@@ -51,13 +60,22 @@ public class GeomechanicalSimulationUI : IDisposable
 
     // Failure criterion
     private int _failureCriterionIndex; // Mohr-Coulomb
+    private float _fluidDensity = 1000f;
+    private float _fluidTimeStep = 1f;
+    private float _fluidViscosity = 1e-3f;
+    private float _fractureApertureCoeff = 1e-6f;
     private float _frictionAngle = 30f;
+    private float _geothermalGradient = 25f;
     private float _hoekBrown_a = 0.5f;
     private float _hoekBrown_mb = 1.5f;
 
     // Hoek-Brown parameters
     private float _hoekBrown_mi = 10f;
     private float _hoekBrown_s = 0.004f;
+    private Vector3 _injectionLocation = new(0.5f, 0.5f, 0.5f);
+    private float _injectionPressure = 50f;
+    private int _injectionRadius = 5;
+    private float _injectionRate = 0.1f;
     private bool _isCalculatingExtent;
     private bool _isSimulating;
     private GeomechanicalResults _lastResults;
@@ -65,6 +83,8 @@ public class GeomechanicalSimulationUI : IDisposable
     // Loading conditions
     private int _loadingModeIndex = 2; // Triaxial
     private int _maxIterations = 1000;
+    private float _maxSimTime = 3600f;
+    private float _minFractureAperture = 1e-6f;
     private string _offloadDirectory = "";
     private GeomechanicalParameters _params;
     private string _permeabilityCsvPath = "";
@@ -73,7 +93,10 @@ public class GeomechanicalSimulationUI : IDisposable
     private string _pnmDatasetPath = "";
     private float _poissonRatio = 0.25f;
     private float _porePressure = 10f;
+    private float _porosity = 0.10f;
+    private float _rockPermeability = 1e-18f;
     private int _selectedMaterialIndex;
+    private bool _showFluidTimeSeries;
 
     // Mohr circle viewer
     private bool _showMohrCircles;
@@ -84,7 +107,9 @@ public class GeomechanicalSimulationUI : IDisposable
 
     // Simulation extent
     private BoundingBox _simulationExtent;
+    private float _surfaceTemperature = 15f;
     private float _tensileStrength = 5f;
+    private float _thermalExpansion = 10e-6f;
     private float _tolerance = 1e-4f;
 
     // Computational settings
@@ -97,31 +122,6 @@ public class GeomechanicalSimulationUI : IDisposable
     // Material properties
     private float _youngModulus = 30000f;
 
-    private bool _enableGeothermal = false;
-    private float _surfaceTemperature = 15f;
-    private float _geothermalGradient = 25f;
-    private float _thermalExpansion = 10e-6f;
-
-    private bool _enableFluidInjection = false;
-    private float _fluidViscosity = 1e-3f;
-    private float _fluidDensity = 1000f;
-    private float _injectionPressure = 50f;
-    private float _injectionRate = 0.1f;
-    private Vector3 _injectionLocation = new Vector3(0.5f, 0.5f, 0.5f);
-    private int _injectionRadius = 5;
-    private float _maxSimTime = 3600f;
-    private float _fluidTimeStep = 1f;
-
-    private bool _enableFractureFlow = true;
-    private float _fractureApertureCoeff = 1e-6f;
-    private float _minFractureAperture = 1e-6f;
-
-    private bool _enableAquifer = false;
-    private float _aquiferPressure = 15f;
-    private float _aquiferPermeability = 1e-15f;
-    private float _rockPermeability = 1e-18f;
-    private float _porosity = 0.10f;
-    
     public GeomechanicalSimulationUI()
     {
         _calibrationManager = new GeomechanicalCalibrationManager();
@@ -209,11 +209,11 @@ public class GeomechanicalSimulationUI : IDisposable
         // Geothermal Settings
         if (ImGui.CollapsingHeader("Geothermal Settings")) DrawGeothermalSettings();
         ImGui.Separator();
-        
+
         // Fluid Injection Settings
         if (ImGui.CollapsingHeader("Geothermal Settings")) DrawFluidInjectionSettings();
         ImGui.Separator();
-        
+
         // Memory Management (NEW)
         if (ImGui.CollapsingHeader("Memory Management")) DrawMemoryManagement();
         ImGui.Separator();
@@ -253,23 +253,25 @@ public class GeomechanicalSimulationUI : IDisposable
         if (_showMohrCircles && _lastResults?.MohrCircles != null) DrawMohrCircleWindow();
         DrawFluidTimeSeriesWindow();
     }
+
     private void DrawFluidGeothermalVisualizationWindow()
     {
         ImGui.SetNextWindowSize(new Vector2(900, 700), ImGuiCond.FirstUseEver);
-    
+
         if (ImGui.BeginPopupModal("FluidGeothermalViz", ImGuiWindowFlags.None))
         {
             _fluidGeothermalRenderer.DrawVisualization(_lastResults, _params);
-        
+
             ImGui.Spacing();
             ImGui.Separator();
-        
+
             if (ImGui.Button("Close", new Vector2(-1, 0)))
                 ImGui.CloseCurrentPopup();
-        
+
             ImGui.EndPopup();
         }
     }
+
     private void DrawMaterialSelection(CtImageStackDataset dataset)
     {
         ImGui.Text("Target Material(s):");
@@ -814,18 +816,15 @@ public class GeomechanicalSimulationUI : IDisposable
 
             ImGui.Spacing();
 
-            if (ImGui.Button("View Mohr Circles", new Vector2(-1, 0))) 
+            if (ImGui.Button("View Mohr Circles", new Vector2(-1, 0)))
                 _showMohrCircles = true;
-        
+
             // Add button for fluid/geothermal visualization if data exists
             if (_lastResults.TemperatureField != null || _lastResults.PressureField != null)
             {
                 ImGui.SameLine();
-                if (ImGui.Button("Fluid/Thermal Viz", new Vector2(-1, 0)))
-                {
-                    ImGui.OpenPopup("FluidGeothermalViz");
-                }
-            
+                if (ImGui.Button("Fluid/Thermal Viz", new Vector2(-1, 0))) ImGui.OpenPopup("FluidGeothermalViz");
+
                 DrawFluidGeothermalVisualizationWindow();
             }
 
@@ -909,211 +908,208 @@ public class GeomechanicalSimulationUI : IDisposable
     }
 
     private async Task RunSimulationAsync(CtImageStackDataset dataset)
-{
-    if (_isSimulating) return;
-
-    _isSimulating = true;
-    _cancellationTokenSource = new CancellationTokenSource();
-    _progressDialog.Open("Preparing simulation...");
-
-    try
     {
-        // Ensure offload directory exists if offloading is enabled
-        if (_enableOffloading)
-        {
-            if (string.IsNullOrEmpty(_offloadDirectory))
-                _offloadDirectory = Path.Combine(
-                    Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                    "GeoscientistToolkit", "GeomechOffload");
+        if (_isSimulating) return;
 
-            if (!Directory.Exists(_offloadDirectory)) 
-                Directory.CreateDirectory(_offloadDirectory);
+        _isSimulating = true;
+        _cancellationTokenSource = new CancellationTokenSource();
+        _progressDialog.Open("Preparing simulation...");
+
+        try
+        {
+            // Ensure offload directory exists if offloading is enabled
+            if (_enableOffloading)
+            {
+                if (string.IsNullOrEmpty(_offloadDirectory))
+                    _offloadDirectory = Path.Combine(
+                        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                        "GeoscientistToolkit", "GeomechOffload");
+
+                if (!Directory.Exists(_offloadDirectory))
+                    Directory.CreateDirectory(_offloadDirectory);
+            }
+
+            // Build parameters
+            var extent = _autoCropToSelection && _simulationExtent != null
+                ? _simulationExtent
+                : new BoundingBox(0, 0, 0, dataset.Width, dataset.Height, dataset.Depth);
+
+            _params = new GeomechanicalParameters
+            {
+                // Basic geometry
+                Width = extent.Width,
+                Height = extent.Height,
+                Depth = extent.Depth,
+                PixelSize = dataset.PixelSize,
+                SimulationExtent = extent,
+                SelectedMaterialIDs = new HashSet<byte>(_selectedMaterialIDs),
+
+                // Material properties
+                YoungModulus = _youngModulus,
+                PoissonRatio = _poissonRatio,
+                Cohesion = _cohesion,
+                FrictionAngle = _frictionAngle,
+                TensileStrength = _tensileStrength,
+                Density = _density,
+
+                // Loading conditions
+                LoadingMode = (LoadingMode)_loadingModeIndex,
+                Sigma1 = _sigma1,
+                Sigma2 = _sigma2,
+                Sigma3 = _sigma3,
+                Sigma1Direction = _sigma1Direction,
+
+                // Pore pressure
+                UsePorePressure = _usePorePressure,
+                PorePressure = _porePressure,
+                BiotCoefficient = _biotCoefficient,
+
+                // Failure criterion
+                FailureCriterion = (FailureCriterion)_failureCriterionIndex,
+                DilationAngle = _dilationAngle,
+
+                // Hoek-Brown parameters
+                HoekBrown_mi = _hoekBrown_mi,
+                HoekBrown_mb = _hoekBrown_mb,
+                HoekBrown_s = _hoekBrown_s,
+                HoekBrown_a = _hoekBrown_a,
+
+                // Computational settings
+                UseGPU = _useGPU,
+                MaxIterations = _maxIterations,
+                Tolerance = _tolerance,
+                EnableDamageEvolution = _enableDamageEvolution,
+                DamageThreshold = _damageThreshold,
+                EnablePlasticity = false, // Can be added to UI if needed
+
+                // Memory management
+                EnableOffloading = _enableOffloading,
+                OffloadDirectory = _offloadDirectory,
+
+                // Data integration
+                PnmDatasetPath = _pnmDatasetPath,
+                PermeabilityCsvPath = _permeabilityCsvPath,
+                AcousticDatasetPath = _acousticDatasetPath,
+
+                // Visualization
+                EnableRealTimeVisualization = _enableRealTimeViz,
+                VisualizationUpdateInterval = _vizUpdateInterval,
+
+                // ========== GEOTHERMAL PARAMETERS ==========
+                EnableGeothermal = _enableGeothermal,
+                SurfaceTemperature = _surfaceTemperature,
+                GeothermalGradient = _geothermalGradient,
+                ThermalExpansionCoefficient = _thermalExpansion,
+                CalculateEnergyPotential = true,
+
+                // ========== FLUID INJECTION PARAMETERS ==========
+                EnableFluidInjection = _enableFluidInjection,
+                FluidViscosity = _fluidViscosity,
+                FluidDensity = _fluidDensity,
+                InitialPorePressure = _usePorePressure ? _porePressure : 10f,
+                InjectionPressure = _injectionPressure,
+                InjectionRate = _injectionRate,
+                InjectionLocation = _injectionLocation,
+                InjectionRadius = _injectionRadius,
+                MaxSimulationTime = _maxSimTime,
+                FluidTimeStep = _fluidTimeStep,
+
+                // ========== FRACTURE MECHANICS ==========
+                EnableFractureFlow = _enableFractureFlow,
+                FractureAperture_Coefficient = _fractureApertureCoeff,
+                MinimumFractureAperture = _minFractureAperture,
+                FractureToughness = 1.0f, // Can add to UI
+                CriticalStrainEnergy = 100f, // Can add to UI
+
+                // ========== AQUIFER INTERACTION ==========
+                EnableAquifer = _enableAquifer,
+                AquiferPressure = _aquiferPressure,
+                AquiferPermeability = _aquiferPermeability,
+                RockPermeability = _rockPermeability,
+                Porosity = _porosity,
+
+                // ========== POROELASTIC COUPLING ==========
+                EnablePoroelasticity = true,
+                SkemptonCoefficient = 0.7f,
+
+                // ========== SIMULATION CONTROL ==========
+                FluidIterationsPerMechanicalStep = 10,
+                UseSequentialCoupling = true
+            };
+
+            // Load integrated data
+            await LoadIntegratedDataAsync(_params, dataset);
+
+            // Extract volume data
+            _progressDialog.Update(0.1f, "Extracting volume labels...");
+            var labels = await ExtractLabelsAsync(dataset, extent);
+
+            _progressDialog.Update(0.2f, "Extracting density field...");
+            var density = await ExtractDensityAsync(dataset, extent);
+
+            // Run simulation
+            _progressDialog.Update(0.3f, "Running simulation...");
+
+            var progress = new Progress<float>(p =>
+            {
+                var status = p < 0.4f ? "Initializing..." :
+                    p < 0.8f ? "Equilibrating stress field..." :
+                    p < 0.9f ? "Calculating principal stresses..." :
+                    p < 0.95f ? "Evaluating failure..." :
+                    "Finalizing...";
+                _progressDialog.Update(0.3f + p * 0.7f, status);
+            });
+
+            GeomechanicalResults results;
+
+            if (_useGPU)
+            {
+                using var simulator = new GeomechanicalSimulatorGPU(_params);
+                results = await Task.Run(() =>
+                    simulator.Simulate(labels, density, progress, _cancellationTokenSource.Token));
+            }
+            else
+            {
+                var simulator = new GeomechanicalSimulatorCPU(_params);
+                results = await Task.Run(() =>
+                    simulator.Simulate(labels, density, progress, _cancellationTokenSource.Token));
+            }
+
+            _lastResults = results;
+
+            // Update visualization
+            if (_enableRealTimeViz)
+                UpdateVisualization(dataset, results);
+
+            _progressDialog.Close();
+            Logger.Log($"[Geomechanics] Simulation complete: {results.FailedVoxelPercentage:F2}% failure");
+
+            if (results.BreakdownPressure > 0)
+                Logger.Log($"[Geomechanics] Breakdown pressure: {results.BreakdownPressure:F1} MPa");
+
+            if (results.GeothermalEnergyPotential > 0)
+                Logger.Log($"[Geomechanics] Geothermal energy potential: {results.GeothermalEnergyPotential:F2} MWh");
         }
-
-        // Build parameters
-        var extent = _autoCropToSelection && _simulationExtent != null
-            ? _simulationExtent
-            : new BoundingBox(0, 0, 0, dataset.Width, dataset.Height, dataset.Depth);
-
-        _params = new GeomechanicalParameters
+        catch (OperationCanceledException)
         {
-            // Basic geometry
-            Width = extent.Width,
-            Height = extent.Height,
-            Depth = extent.Depth,
-            PixelSize = dataset.PixelSize,
-            SimulationExtent = extent,
-            SelectedMaterialIDs = new HashSet<byte>(_selectedMaterialIDs),
-            
-            // Material properties
-            YoungModulus = _youngModulus,
-            PoissonRatio = _poissonRatio,
-            Cohesion = _cohesion,
-            FrictionAngle = _frictionAngle,
-            TensileStrength = _tensileStrength,
-            Density = _density,
-            
-            // Loading conditions
-            LoadingMode = (LoadingMode)_loadingModeIndex,
-            Sigma1 = _sigma1,
-            Sigma2 = _sigma2,
-            Sigma3 = _sigma3,
-            Sigma1Direction = _sigma1Direction,
-            
-            // Pore pressure
-            UsePorePressure = _usePorePressure,
-            PorePressure = _porePressure,
-            BiotCoefficient = _biotCoefficient,
-            
-            // Failure criterion
-            FailureCriterion = (FailureCriterion)_failureCriterionIndex,
-            DilationAngle = _dilationAngle,
-            
-            // Hoek-Brown parameters
-            HoekBrown_mi = _hoekBrown_mi,
-            HoekBrown_mb = _hoekBrown_mb,
-            HoekBrown_s = _hoekBrown_s,
-            HoekBrown_a = _hoekBrown_a,
-            
-            // Computational settings
-            UseGPU = _useGPU,
-            MaxIterations = _maxIterations,
-            Tolerance = _tolerance,
-            EnableDamageEvolution = _enableDamageEvolution,
-            DamageThreshold = _damageThreshold,
-            EnablePlasticity = false, // Can be added to UI if needed
-            
-            // Memory management
-            EnableOffloading = _enableOffloading,
-            OffloadDirectory = _offloadDirectory,
-            
-            // Data integration
-            PnmDatasetPath = _pnmDatasetPath,
-            PermeabilityCsvPath = _permeabilityCsvPath,
-            AcousticDatasetPath = _acousticDatasetPath,
-            
-            // Visualization
-            EnableRealTimeVisualization = _enableRealTimeViz,
-            VisualizationUpdateInterval = _vizUpdateInterval,
-            
-            // ========== GEOTHERMAL PARAMETERS ==========
-            EnableGeothermal = _enableGeothermal,
-            SurfaceTemperature = _surfaceTemperature,
-            GeothermalGradient = _geothermalGradient,
-            ThermalExpansionCoefficient = _thermalExpansion,
-            CalculateEnergyPotential = true,
-            
-            // ========== FLUID INJECTION PARAMETERS ==========
-            EnableFluidInjection = _enableFluidInjection,
-            FluidViscosity = _fluidViscosity,
-            FluidDensity = _fluidDensity,
-            InitialPorePressure = _usePorePressure ? _porePressure : 10f,
-            InjectionPressure = _injectionPressure,
-            InjectionRate = _injectionRate,
-            InjectionLocation = _injectionLocation,
-            InjectionRadius = _injectionRadius,
-            MaxSimulationTime = _maxSimTime,
-            FluidTimeStep = _fluidTimeStep,
-            
-            // ========== FRACTURE MECHANICS ==========
-            EnableFractureFlow = _enableFractureFlow,
-            FractureAperture_Coefficient = _fractureApertureCoeff,
-            MinimumFractureAperture = _minFractureAperture,
-            FractureToughness = 1.0f, // Can add to UI
-            CriticalStrainEnergy = 100f, // Can add to UI
-            
-            // ========== AQUIFER INTERACTION ==========
-            EnableAquifer = _enableAquifer,
-            AquiferPressure = _aquiferPressure,
-            AquiferPermeability = _aquiferPermeability,
-            RockPermeability = _rockPermeability,
-            Porosity = _porosity,
-            
-            // ========== POROELASTIC COUPLING ==========
-            EnablePoroelasticity = true,
-            SkemptonCoefficient = 0.7f,
-            
-            // ========== SIMULATION CONTROL ==========
-            FluidIterationsPerMechanicalStep = 10,
-            UseSequentialCoupling = true
-        };
-
-        // Load integrated data
-        await LoadIntegratedDataAsync(_params, dataset);
-
-        // Extract volume data
-        _progressDialog.Update(0.1f, "Extracting volume labels...");
-        var labels = await ExtractLabelsAsync(dataset, extent);
-
-        _progressDialog.Update(0.2f, "Extracting density field...");
-        var density = await ExtractDensityAsync(dataset, extent);
-
-        // Run simulation
-        _progressDialog.Update(0.3f, "Running simulation...");
-
-        var progress = new Progress<float>(p =>
-        {
-            var status = p < 0.4f ? "Initializing..." :
-                p < 0.8f ? "Equilibrating stress field..." :
-                p < 0.9f ? "Calculating principal stresses..." :
-                p < 0.95f ? "Evaluating failure..." :
-                "Finalizing...";
-            _progressDialog.Update(0.3f + p * 0.7f, status);
-        });
-
-        GeomechanicalResults results;
-
-        if (_useGPU)
-        {
-            using var simulator = new GeomechanicalSimulatorGPU(_params);
-            results = await Task.Run(() =>
-                simulator.Simulate(labels, density, progress, _cancellationTokenSource.Token));
+            _progressDialog.Close();
+            Logger.Log("[Geomechanics] Simulation cancelled");
         }
-        else
+        catch (Exception ex)
         {
-            var simulator = new GeomechanicalSimulatorCPU(_params);
-            results = await Task.Run(() =>
-                simulator.Simulate(labels, density, progress, _cancellationTokenSource.Token));
+            _progressDialog.Close();
+            Logger.LogError($"[Geomechanics] Simulation failed: {ex.Message}");
         }
-
-        _lastResults = results;
-
-        // Update visualization
-        if (_enableRealTimeViz) 
-            UpdateVisualization(dataset, results);
-
-        _progressDialog.Close();
-        Logger.Log($"[Geomechanics] Simulation complete: {results.FailedVoxelPercentage:F2}% failure");
-        
-        if (results.BreakdownPressure > 0)
+        finally
         {
-            Logger.Log($"[Geomechanics] Breakdown pressure: {results.BreakdownPressure:F1} MPa");
-        }
-        
-        if (results.GeothermalEnergyPotential > 0)
-        {
-            Logger.Log($"[Geomechanics] Geothermal energy potential: {results.GeothermalEnergyPotential:F2} MWh");
+            _isSimulating = false;
         }
     }
-    catch (OperationCanceledException)
-    {
-        _progressDialog.Close();
-        Logger.Log("[Geomechanics] Simulation cancelled");
-    }
-    catch (Exception ex)
-    {
-        _progressDialog.Close();
-        Logger.LogError($"[Geomechanics] Simulation failed: {ex.Message}");
-    }
-    finally
-    {
-        _isSimulating = false;
-    }
-}
+
     private void DrawFluidGeothermalResults()
     {
         if (_lastResults == null) return;
-    
+
         // Geothermal Results
         if (_lastResults.TemperatureField != null)
         {
@@ -1127,7 +1123,7 @@ public class GeomechanicalSimulationUI : IDisposable
                 ImGui.SetTooltip("Recoverable thermal energy assuming 10% extraction efficiency");
             ImGui.Unindent();
         }
-    
+
         // Fluid Injection Results
         if (_lastResults.PressureField != null)
         {
@@ -1139,229 +1135,235 @@ public class GeomechanicalSimulationUI : IDisposable
             ImGui.Text($"Propagation Pressure: {_lastResults.PropagationPressure:F1} MPa");
             ImGui.Text($"Peak Injection Pressure: {_lastResults.PeakInjectionPressure:F1} MPa");
             ImGui.Spacing();
-            ImGui.Text($"Pressure Range: {_lastResults.MinFluidPressure/1e6f:F1} - {_lastResults.MaxFluidPressure/1e6f:F1} MPa");
-            ImGui.Text($"Total Fracture Volume: {_lastResults.TotalFractureVolume*1e6:F2} cm³");
+            ImGui.Text(
+                $"Pressure Range: {_lastResults.MinFluidPressure / 1e6f:F1} - {_lastResults.MaxFluidPressure / 1e6f:F1} MPa");
+            ImGui.Text($"Total Fracture Volume: {_lastResults.TotalFractureVolume * 1e6:F2} cm³");
             ImGui.Text($"Fracture Voxel Count: {_lastResults.FractureVoxelCount:N0}");
             ImGui.Text($"Fracture Network Segments: {_lastResults.FractureNetwork.Count:N0}");
             ImGui.Unindent();
-        
+
             // Plot time series
             if (_lastResults.TimePoints != null && _lastResults.TimePoints.Count > 10)
             {
                 ImGui.Spacing();
-                if (ImGui.Button("View Pressure/Flow History", new Vector2(-1, 0)))
-                {
-                    _showFluidTimeSeries = true;
-                }
+                if (ImGui.Button("View Pressure/Flow History", new Vector2(-1, 0))) _showFluidTimeSeries = true;
             }
         }
     }
-private void DrawFluidTimeSeriesWindow()
-{
-    if (!_showFluidTimeSeries || _lastResults == null) return;
-    
-    ImGui.SetNextWindowSize(new Vector2(800, 600), ImGuiCond.FirstUseEver);
-    
-    if (ImGui.Begin("Fluid Injection History", ref _showFluidTimeSeries))
-    {
-        if (_lastResults.TimePoints != null && _lastResults.TimePoints.Count > 0)
-        {
-            ImGui.Text($"Simulation Time: {_lastResults.TimePoints.Last():F1} seconds");
-            ImGui.Text($"Data Points: {_lastResults.TimePoints.Count}");
-            
-            ImGui.Spacing();
-            ImGui.Separator();
-            ImGui.Spacing();
-            
-            // Plot injection pressure
-            if (_lastResults.InjectionPressureHistory.Count > 0)
-            {
-                ImGui.Text("Injection Pressure vs Time:");
-                var values = _lastResults.InjectionPressureHistory.ToArray();
-                ImGui.PlotLines("##PressureHistory", ref values[0], values.Length, 0,
-                    $"Max: {values.Max():F1} MPa", 0f, values.Max() * 1.2f, new Vector2(-1, 150));
-            }
-            
-            ImGui.Spacing();
-            
-            // Plot fracture volume
-            if (_lastResults.FractureVolumeHistory.Count > 0)
-            {
-                ImGui.Text("Fracture Volume vs Time:");
-                var values = _lastResults.FractureVolumeHistory.ToArray();
-                ImGui.PlotLines("##FractureVolHistory", ref values[0], values.Length, 0,
-                    $"Final: {values.Last()*1e6:F2} cm³", 0f, values.Max() * 1.2f, new Vector2(-1, 150));
-            }
-            
-            ImGui.Spacing();
-            
-            // Plot flow rate
-            if (_lastResults.FlowRateHistory.Count > 0)
-            {
-                ImGui.Text("Flow Rate vs Time:");
-                var values = _lastResults.FlowRateHistory.ToArray();
-                ImGui.PlotLines("##FlowRateHistory", ref values[0], values.Length, 0,
-                    $"Avg: {values.Average():F4} m³/s", 0f, values.Max() * 1.2f, new Vector2(-1, 150));
-            }
-            
-            // Geothermal energy extraction
-            if (_enableGeothermal && _lastResults.EnergyExtractionHistory.Count > 0)
-            {
-                ImGui.Spacing();
-                ImGui.Text("Energy Extraction Rate vs Time:");
-                var values = _lastResults.EnergyExtractionHistory.ToArray();
-                ImGui.PlotLines("##EnergyHistory", ref values[0], values.Length, 0,
-                    $"Avg: {values.Average():F2} MW", 0f, values.Max() * 1.2f, new Vector2(-1, 150));
-            }
-        }
-        else
-        {
-            ImGui.Text("No time series data available.");
-        }
-    }
-    ImGui.End();
-}
-private void DrawGeothermalSettings()
-{
-    ImGui.Separator();
-    
-    if (ImGui.CollapsingHeader("Geothermal Simulation"))
-    {
-        ImGui.Checkbox("Enable Geothermal Gradient", ref _enableGeothermal);
-        
-        if (ImGui.IsItemHovered())
-            ImGui.SetTooltip("Simulates temperature increasing with depth and thermal effects on rock");
-        
-        if (_enableGeothermal)
-        {
-            ImGui.Indent();
-            ImGui.Spacing();
-            
-            ImGui.DragFloat("Surface Temperature (°C)", ref _surfaceTemperature, 1f, -20f, 50f);
-            ImGui.DragFloat("Geothermal Gradient (°C/km)", ref _geothermalGradient, 1f, 10f, 100f);
-            
-            if (ImGui.IsItemHovered())
-                ImGui.SetTooltip("Typical values: 25-30 °C/km (normal crust), 40-80 °C/km (geothermal areas)");
-            
-            ImGui.DragFloat("Thermal Expansion Coef. (1/K)", ref _thermalExpansion, 1e-7f, 1e-6f, 50e-6f, "%.2e");
-            
-            ImGui.Spacing();
-            ImGui.TextColored(new Vector4(0.7f, 0.9f, 1f, 1),
-                "Calculates thermal stress and geothermal energy potential");
-            ImGui.Unindent();
-        }
-    }
-}
 
-private void DrawFluidInjectionSettings()
-{
-    ImGui.Separator();
-    
-    if (ImGui.CollapsingHeader("Hydraulic Fracturing / Fluid Injection"))
+    private void DrawFluidTimeSeriesWindow()
     {
-        ImGui.Checkbox("Enable Fluid Injection", ref _enableFluidInjection);
-        
-        if (ImGui.IsItemHovered())
-            ImGui.SetTooltip("Simulates fluid injection, pressure diffusion, and hydraulic fracturing");
-        
-        if (_enableFluidInjection)
+        if (!_showFluidTimeSeries || _lastResults == null) return;
+
+        ImGui.SetNextWindowSize(new Vector2(800, 600), ImGuiCond.FirstUseEver);
+
+        if (ImGui.Begin("Fluid Injection History", ref _showFluidTimeSeries))
         {
-            ImGui.Indent();
-            ImGui.Spacing();
-            
-            // Fluid Properties
-            if (ImGui.TreeNode("Fluid Properties"))
+            if (_lastResults.TimePoints != null && _lastResults.TimePoints.Count > 0)
             {
-                ImGui.DragFloat("Viscosity (Pa·s)", ref _fluidViscosity, 1e-4f, 1e-4f, 1e-1f, "%.2e");
-                if (ImGui.IsItemHovered())
-                    ImGui.SetTooltip("Water ≈ 1e-3 Pa·s, Oil ≈ 1e-2 Pa·s");
-                
-                ImGui.DragFloat("Density (kg/m³)", ref _fluidDensity, 10f, 800f, 1200f);
-                ImGui.TreePop();
-            }
-            
-            // Injection Parameters
-            if (ImGui.TreeNode("Injection Parameters"))
-            {
-                ImGui.DragFloat("Injection Pressure (MPa)", ref _injectionPressure, 1f, 10f, 200f);
-                ImGui.DragFloat("Injection Rate (m³/s)", ref _injectionRate, 0.01f, 0.001f, 1f, "%.3f");
-                
+                ImGui.Text($"Simulation Time: {_lastResults.TimePoints.Last():F1} seconds");
+                ImGui.Text($"Data Points: {_lastResults.TimePoints.Count}");
+
                 ImGui.Spacing();
-                ImGui.Text("Injection Location (normalized 0-1):");
+                ImGui.Separator();
+                ImGui.Spacing();
+
+                // Plot injection pressure
+                if (_lastResults.InjectionPressureHistory.Count > 0)
+                {
+                    ImGui.Text("Injection Pressure vs Time:");
+                    var values = _lastResults.InjectionPressureHistory.ToArray();
+                    ImGui.PlotLines("##PressureHistory", ref values[0], values.Length, 0,
+                        $"Max: {values.Max():F1} MPa", 0f, values.Max() * 1.2f, new Vector2(-1, 150));
+                }
+
+                ImGui.Spacing();
+
+                // Plot fracture volume
+                if (_lastResults.FractureVolumeHistory.Count > 0)
+                {
+                    ImGui.Text("Fracture Volume vs Time:");
+                    var values = _lastResults.FractureVolumeHistory.ToArray();
+                    ImGui.PlotLines("##FractureVolHistory", ref values[0], values.Length, 0,
+                        $"Final: {values.Last() * 1e6:F2} cm³", 0f, values.Max() * 1.2f, new Vector2(-1, 150));
+                }
+
+                ImGui.Spacing();
+
+                // Plot flow rate
+                if (_lastResults.FlowRateHistory.Count > 0)
+                {
+                    ImGui.Text("Flow Rate vs Time:");
+                    var values = _lastResults.FlowRateHistory.ToArray();
+                    ImGui.PlotLines("##FlowRateHistory", ref values[0], values.Length, 0,
+                        $"Avg: {values.Average():F4} m³/s", 0f, values.Max() * 1.2f, new Vector2(-1, 150));
+                }
+
+                // Geothermal energy extraction
+                if (_enableGeothermal && _lastResults.EnergyExtractionHistory.Count > 0)
+                {
+                    ImGui.Spacing();
+                    ImGui.Text("Energy Extraction Rate vs Time:");
+                    var values = _lastResults.EnergyExtractionHistory.ToArray();
+                    ImGui.PlotLines("##EnergyHistory", ref values[0], values.Length, 0,
+                        $"Avg: {values.Average():F2} MW", 0f, values.Max() * 1.2f, new Vector2(-1, 150));
+                }
+            }
+            else
+            {
+                ImGui.Text("No time series data available.");
+            }
+        }
+
+        ImGui.End();
+    }
+
+    private void DrawGeothermalSettings()
+    {
+        ImGui.Separator();
+
+        if (ImGui.CollapsingHeader("Geothermal Simulation"))
+        {
+            ImGui.Checkbox("Enable Geothermal Gradient", ref _enableGeothermal);
+
+            if (ImGui.IsItemHovered())
+                ImGui.SetTooltip("Simulates temperature increasing with depth and thermal effects on rock");
+
+            if (_enableGeothermal)
+            {
                 ImGui.Indent();
-                var loc = _injectionLocation;
-                ImGui.DragFloat("X", ref loc.X, 0.01f, 0f, 1f);
-                ImGui.DragFloat("Y", ref loc.Y, 0.01f, 0f, 1f);
-                ImGui.DragFloat("Z", ref loc.Z, 0.01f, 0f, 1f);
-                _injectionLocation = loc;
-                ImGui.Unindent();
-                
-                ImGui.DragInt("Injection Radius (voxels)", ref _injectionRadius, 1, 1, 20);
-                
                 ImGui.Spacing();
-                ImGui.DragFloat("Max Simulation Time (s)", ref _maxSimTime, 100f, 60f, 86400f);
+
+                ImGui.DragFloat("Surface Temperature (°C)", ref _surfaceTemperature, 1f, -20f, 50f);
+                ImGui.DragFloat("Geothermal Gradient (°C/km)", ref _geothermalGradient, 1f, 10f, 100f);
+
                 if (ImGui.IsItemHovered())
-                    ImGui.SetTooltip("1 hour = 3600s, 1 day = 86400s");
-                
-                ImGui.DragFloat("Fluid Time Step (s)", ref _fluidTimeStep, 0.1f, 0.1f, 10f);
-                ImGui.TreePop();
+                    ImGui.SetTooltip("Typical values: 25-30 °C/km (normal crust), 40-80 °C/km (geothermal areas)");
+
+                ImGui.DragFloat("Thermal Expansion Coef. (1/K)", ref _thermalExpansion, 1e-7f, 1e-6f, 50e-6f, "%.2e");
+
+                ImGui.Spacing();
+                ImGui.TextColored(new Vector4(0.7f, 0.9f, 1f, 1),
+                    "Calculates thermal stress and geothermal energy potential");
+                ImGui.Unindent();
             }
-            
-            // Fracture Mechanics
-            if (ImGui.TreeNode("Fracture Mechanics"))
-            {
-                ImGui.Checkbox("Enable Fracture Flow", ref _enableFractureFlow);
-                if (ImGui.IsItemHovered())
-                    ImGui.SetTooltip("Fluid flows preferentially through fractures (enhanced permeability)");
-                
-                if (_enableFractureFlow)
-                {
-                    ImGui.Indent();
-                    ImGui.DragFloat("Aperture Coefficient (m/MPa)", ref _fractureApertureCoeff, 1e-7f, 1e-7f, 1e-5f, "%.2e");
-                    ImGui.DragFloat("Min Aperture (m)", ref _minFractureAperture, 1e-7f, 1e-7f, 1e-5f, "%.2e");
-                    if (ImGui.IsItemHovered())
-                        ImGui.SetTooltip("Typical: 1-10 µm for induced fractures");
-                    ImGui.Unindent();
-                }
-                ImGui.TreePop();
-            }
-            
-            // Rock Properties
-            if (ImGui.TreeNode("Porous Media Properties"))
-            {
-                ImGui.DragFloat("Rock Permeability (m²)", ref _rockPermeability, 1e-19f, 1e-21f, 1e-12f, "%.2e");
-                if (ImGui.IsItemHovered())
-                    ImGui.SetTooltip("1e-18 m² ≈ 1 mD (typical tight rock)\n1e-15 m² ≈ 1000 mD (sandstone)");
-                
-                ImGui.DragFloat("Porosity", ref _porosity, 0.01f, 0.01f, 0.40f, "%.2f");
-                ImGui.TreePop();
-            }
-            
-            // Aquifer Boundary
-            if (ImGui.TreeNode("Aquifer Interaction"))
-            {
-                ImGui.Checkbox("Enable Aquifer Boundary", ref _enableAquifer);
-                if (ImGui.IsItemHovered())
-                    ImGui.SetTooltip("Exterior voxels act as constant-pressure reservoir (infinite aquifer)");
-                
-                if (_enableAquifer)
-                {
-                    ImGui.Indent();
-                    ImGui.DragFloat("Aquifer Pressure (MPa)", ref _aquiferPressure, 1f, 5f, 50f);
-                    ImGui.DragFloat("Aquifer Permeability (m²)", ref _aquiferPermeability, 1e-16f, 1e-18f, 1e-12f, "%.2e");
-                    ImGui.Unindent();
-                }
-                ImGui.TreePop();
-            }
-            
-            ImGui.Spacing();
-            ImGui.TextWrapped("⚠ Note: Fluid simulation adds significant computation time.");
-            ImGui.TextWrapped("Fractures form when effective stress (σ - αP) exceeds failure criterion.");
-            
-            ImGui.Unindent();
         }
     }
-}
+
+    private void DrawFluidInjectionSettings()
+    {
+        ImGui.Separator();
+
+        if (ImGui.CollapsingHeader("Hydraulic Fracturing / Fluid Injection"))
+        {
+            ImGui.Checkbox("Enable Fluid Injection", ref _enableFluidInjection);
+
+            if (ImGui.IsItemHovered())
+                ImGui.SetTooltip("Simulates fluid injection, pressure diffusion, and hydraulic fracturing");
+
+            if (_enableFluidInjection)
+            {
+                ImGui.Indent();
+                ImGui.Spacing();
+
+                // Fluid Properties
+                if (ImGui.TreeNode("Fluid Properties"))
+                {
+                    ImGui.DragFloat("Viscosity (Pa·s)", ref _fluidViscosity, 1e-4f, 1e-4f, 1e-1f, "%.2e");
+                    if (ImGui.IsItemHovered())
+                        ImGui.SetTooltip("Water ≈ 1e-3 Pa·s, Oil ≈ 1e-2 Pa·s");
+
+                    ImGui.DragFloat("Density (kg/m³)", ref _fluidDensity, 10f, 800f, 1200f);
+                    ImGui.TreePop();
+                }
+
+                // Injection Parameters
+                if (ImGui.TreeNode("Injection Parameters"))
+                {
+                    ImGui.DragFloat("Injection Pressure (MPa)", ref _injectionPressure, 1f, 10f, 200f);
+                    ImGui.DragFloat("Injection Rate (m³/s)", ref _injectionRate, 0.01f, 0.001f, 1f, "%.3f");
+
+                    ImGui.Spacing();
+                    ImGui.Text("Injection Location (normalized 0-1):");
+                    ImGui.Indent();
+                    var loc = _injectionLocation;
+                    ImGui.DragFloat("X", ref loc.X, 0.01f, 0f, 1f);
+                    ImGui.DragFloat("Y", ref loc.Y, 0.01f, 0f, 1f);
+                    ImGui.DragFloat("Z", ref loc.Z, 0.01f, 0f, 1f);
+                    _injectionLocation = loc;
+                    ImGui.Unindent();
+
+                    ImGui.DragInt("Injection Radius (voxels)", ref _injectionRadius, 1, 1, 20);
+
+                    ImGui.Spacing();
+                    ImGui.DragFloat("Max Simulation Time (s)", ref _maxSimTime, 100f, 60f, 86400f);
+                    if (ImGui.IsItemHovered())
+                        ImGui.SetTooltip("1 hour = 3600s, 1 day = 86400s");
+
+                    ImGui.DragFloat("Fluid Time Step (s)", ref _fluidTimeStep, 0.1f, 0.1f, 10f);
+                    ImGui.TreePop();
+                }
+
+                // Fracture Mechanics
+                if (ImGui.TreeNode("Fracture Mechanics"))
+                {
+                    ImGui.Checkbox("Enable Fracture Flow", ref _enableFractureFlow);
+                    if (ImGui.IsItemHovered())
+                        ImGui.SetTooltip("Fluid flows preferentially through fractures (enhanced permeability)");
+
+                    if (_enableFractureFlow)
+                    {
+                        ImGui.Indent();
+                        ImGui.DragFloat("Aperture Coefficient (m/MPa)", ref _fractureApertureCoeff, 1e-7f, 1e-7f, 1e-5f,
+                            "%.2e");
+                        ImGui.DragFloat("Min Aperture (m)", ref _minFractureAperture, 1e-7f, 1e-7f, 1e-5f, "%.2e");
+                        if (ImGui.IsItemHovered())
+                            ImGui.SetTooltip("Typical: 1-10 µm for induced fractures");
+                        ImGui.Unindent();
+                    }
+
+                    ImGui.TreePop();
+                }
+
+                // Rock Properties
+                if (ImGui.TreeNode("Porous Media Properties"))
+                {
+                    ImGui.DragFloat("Rock Permeability (m²)", ref _rockPermeability, 1e-19f, 1e-21f, 1e-12f, "%.2e");
+                    if (ImGui.IsItemHovered())
+                        ImGui.SetTooltip("1e-18 m² ≈ 1 mD (typical tight rock)\n1e-15 m² ≈ 1000 mD (sandstone)");
+
+                    ImGui.DragFloat("Porosity", ref _porosity, 0.01f, 0.01f, 0.40f, "%.2f");
+                    ImGui.TreePop();
+                }
+
+                // Aquifer Boundary
+                if (ImGui.TreeNode("Aquifer Interaction"))
+                {
+                    ImGui.Checkbox("Enable Aquifer Boundary", ref _enableAquifer);
+                    if (ImGui.IsItemHovered())
+                        ImGui.SetTooltip("Exterior voxels act as constant-pressure reservoir (infinite aquifer)");
+
+                    if (_enableAquifer)
+                    {
+                        ImGui.Indent();
+                        ImGui.DragFloat("Aquifer Pressure (MPa)", ref _aquiferPressure, 1f, 5f, 50f);
+                        ImGui.DragFloat("Aquifer Permeability (m²)", ref _aquiferPermeability, 1e-16f, 1e-18f, 1e-12f,
+                            "%.2e");
+                        ImGui.Unindent();
+                    }
+
+                    ImGui.TreePop();
+                }
+
+                ImGui.Spacing();
+                ImGui.TextWrapped("⚠ Note: Fluid simulation adds significant computation time.");
+                ImGui.TextWrapped("Fractures form when effective stress (σ - αP) exceeds failure criterion.");
+
+                ImGui.Unindent();
+            }
+        }
+    }
+
     private async Task LoadIntegratedDataAsync(GeomechanicalParameters parameters,
         CtImageStackDataset dataset)
     {

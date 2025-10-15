@@ -21,8 +21,10 @@ public unsafe class GeomechanicalSimulatorGPU : IDisposable
     private readonly string _offloadPath;
     private readonly GeomechanicalParameters _params;
     private readonly int _workGroupSize = 256;
+    private nint _bufConnectivity;
     private nint _bufDisplacement, _bufForce;
     private nint _bufElementNodes, _bufElementE, _bufElementNu;
+    private nint _bufFractureAperture, _bufFluidSaturation;
     private nint _bufIsDirichlet, _bufDirichletValue;
     private nint _bufLabels, _bufFractured;
 
@@ -32,6 +34,8 @@ public unsafe class GeomechanicalSimulatorGPU : IDisposable
     private nint _bufPrincipalStresses, _bufFailureIndex, _bufDamage;
     private nint _bufRowPtr, _bufColIdx, _bufValues;
     private nint _bufStressFields, _bufStrainFields;
+    private nint _bufTemperature, _bufPressure, _bufPressureNew;
+    private nint _bufVelocityX, _bufVelocityY, _bufVelocityZ;
     private Queue<int> _chunkAccessOrder = new();
     private HashSet<int> _chunkAccessSet = new();
 
@@ -59,10 +63,6 @@ public unsafe class GeomechanicalSimulatorGPU : IDisposable
     private nint _kernelVectorOps;
     private long _maxGPUMemoryBytes;
     private int _maxLoadedChunks;
-    private nint _bufTemperature, _bufPressure, _bufPressureNew;
-    private nint _bufFractureAperture, _bufFluidSaturation;
-    private nint _bufVelocityX, _bufVelocityY, _bufVelocityZ;
-    private nint _bufConnectivity;
 
     // Host-side data
     private float[] _nodeX, _nodeY, _nodeZ;
@@ -176,72 +176,72 @@ public unsafe class GeomechanicalSimulatorGPU : IDisposable
     }
 
     private void BuildProgram()
-{
-    var source = GetKernelSource();
-    var sourceBytes = Encoding.UTF8.GetBytes(source);
-
-    int error;
-    fixed (byte* sourcePtr = sourceBytes)
     {
-        var lengths = stackalloc nuint[1];
-        lengths[0] = (nuint)sourceBytes.Length;
-        var sourcePtrs = stackalloc byte*[1];
-        sourcePtrs[0] = sourcePtr;
-        _program = _cl.CreateProgramWithSource(_context, 1, sourcePtrs, lengths, &error);
-        CheckError(error, "CreateProgramWithSource");
-    }
+        var source = GetKernelSource();
+        var sourceBytes = Encoding.UTF8.GetBytes(source);
 
-    var devices = stackalloc nint[1];
-    devices[0] = _device;
-    error = _cl.BuildProgram(_program, 1, devices, (byte*)null, null, null);
-    if (error != 0)
-    {
-        nuint logSize;
-        _cl.GetProgramBuildInfo(_program, _device, (uint)ProgramBuildInfo.BuildLog, 0, null, &logSize);
-        var log = new byte[logSize];
-        fixed (byte* logPtr = log)
+        int error;
+        fixed (byte* sourcePtr = sourceBytes)
         {
-            _cl.GetProgramBuildInfo(_program, _device, (uint)ProgramBuildInfo.BuildLog, logSize, logPtr, null);
+            var lengths = stackalloc nuint[1];
+            lengths[0] = (nuint)sourceBytes.Length;
+            var sourcePtrs = stackalloc byte*[1];
+            sourcePtrs[0] = sourcePtr;
+            _program = _cl.CreateProgramWithSource(_context, 1, sourcePtrs, lengths, &error);
+            CheckError(error, "CreateProgramWithSource");
         }
 
-        var logString = Encoding.UTF8.GetString(log);
-        throw new Exception($"OpenCL build failed:\n{logString}");
+        var devices = stackalloc nint[1];
+        devices[0] = _device;
+        error = _cl.BuildProgram(_program, 1, devices, (byte*)null, null, null);
+        if (error != 0)
+        {
+            nuint logSize;
+            _cl.GetProgramBuildInfo(_program, _device, (uint)ProgramBuildInfo.BuildLog, 0, null, &logSize);
+            var log = new byte[logSize];
+            fixed (byte* logPtr = log)
+            {
+                _cl.GetProgramBuildInfo(_program, _device, (uint)ProgramBuildInfo.BuildLog, logSize, logPtr, null);
+            }
+
+            var logString = Encoding.UTF8.GetString(log);
+            throw new Exception($"OpenCL build failed:\n{logString}");
+        }
+
+        // Create all kernels
+        _kernelAssembleElement = _cl.CreateKernel(_program, "assemble_element_stiffness", &error);
+        CheckError(error, "CreateKernel assemble_element_stiffness");
+
+        _kernelApplyBC = _cl.CreateKernel(_program, "apply_boundary_conditions", &error);
+        CheckError(error, "CreateKernel apply_boundary_conditions");
+
+        _kernelSpMV = _cl.CreateKernel(_program, "sparse_matvec", &error);
+        CheckError(error, "CreateKernel sparse_matvec");
+
+        _kernelDotProduct = _cl.CreateKernel(_program, "dot_product", &error);
+        CheckError(error, "CreateKernel dot_product");
+
+        _kernelVectorOps = _cl.CreateKernel(_program, "vector_ops", &error);
+        CheckError(error, "CreateKernel vector_ops");
+
+        _kernelCalculateStrains = _cl.CreateKernel(_program, "calculate_strains_stresses", &error);
+        CheckError(error, "CreateKernel calculate_strains_stresses");
+
+        _kernelCalculatePrincipal = _cl.CreateKernel(_program, "calculate_principal_stresses", &error);
+        CheckError(error, "CreateKernel calculate_principal_stresses");
+
+        _kernelEvaluateFailure = _cl.CreateKernel(_program, "evaluate_failure", &error);
+        CheckError(error, "CreateKernel evaluate_failure");
+
+        _kernelPlasticCorrection = _cl.CreateKernel(_program, "apply_plastic_correction", &error);
+        CheckError(error, "CreateKernel apply_plastic_correction");
+
+        Logger.Log("[GeomechGPU] All kernels created successfully");
     }
 
-    // Create all kernels
-    _kernelAssembleElement = _cl.CreateKernel(_program, "assemble_element_stiffness", &error);
-    CheckError(error, "CreateKernel assemble_element_stiffness");
-
-    _kernelApplyBC = _cl.CreateKernel(_program, "apply_boundary_conditions", &error);
-    CheckError(error, "CreateKernel apply_boundary_conditions");
-
-    _kernelSpMV = _cl.CreateKernel(_program, "sparse_matvec", &error);
-    CheckError(error, "CreateKernel sparse_matvec");
-
-    _kernelDotProduct = _cl.CreateKernel(_program, "dot_product", &error);
-    CheckError(error, "CreateKernel dot_product");
-
-    _kernelVectorOps = _cl.CreateKernel(_program, "vector_ops", &error);
-    CheckError(error, "CreateKernel vector_ops");
-
-    _kernelCalculateStrains = _cl.CreateKernel(_program, "calculate_strains_stresses", &error);
-    CheckError(error, "CreateKernel calculate_strains_stresses");
-
-    _kernelCalculatePrincipal = _cl.CreateKernel(_program, "calculate_principal_stresses", &error);
-    CheckError(error, "CreateKernel calculate_principal_stresses");
-
-    _kernelEvaluateFailure = _cl.CreateKernel(_program, "evaluate_failure", &error);
-    CheckError(error, "CreateKernel evaluate_failure");
-
-    _kernelPlasticCorrection = _cl.CreateKernel(_program, "apply_plastic_correction", &error);
-    CheckError(error, "CreateKernel apply_plastic_correction");
-
-    Logger.Log("[GeomechGPU] All kernels created successfully");
-}
-
     private string GetKernelSource()
-{
-    return @"
+    {
+        return @"
 #pragma OPENCL EXTENSION cl_khr_fp64 : enable
 
 // ============================================================================
@@ -1278,7 +1278,7 @@ __kernel void detect_hydraulic_fractures(
     }
 }
 ";
-}
+    }
 
     public GeomechanicalResults Simulate(byte[,,] labels, float[,,] density,
         IProgress<float> progress, CancellationToken token)
@@ -1341,7 +1341,7 @@ __kernel void detect_hydraulic_fractures(
             Logger.Log("[GeomechGPU] Computing principal stresses on GPU...");
             CalculatePrincipalStressesGPU(labels);
             token.ThrowIfCancellationRequested();
-            
+
             // STEP 7.5: Initialize geothermal and fluid fields
             if (_params.EnableGeothermal || _params.EnableFluidInjection)
             {
@@ -1350,7 +1350,7 @@ __kernel void detect_hydraulic_fractures(
                 InitializeGeothermalAndFluidGPU(labels, extent);
                 token.ThrowIfCancellationRequested();
             }
-            
+
 
             // STEP 8: Evaluate failure with progressive damage on GPU
             progress?.Report(0.90f);
@@ -1373,7 +1373,7 @@ __kernel void detect_hydraulic_fractures(
             var results = DownloadResults(extent, labels);
             results.Converged = converged;
             results.IterationsPerformed = _iterationsPerformed;
-            
+
             // STEP 10.5: Simulate fluid injection and hydraulic fracturing (AFTER results object exists)
             if (_params.EnableFluidInjection)
             {
@@ -1395,13 +1395,14 @@ __kernel void detect_hydraulic_fractures(
                 Logger.Log("[GeomechGPU] Finalizing geothermal and fluid results...");
                 PopulateGeothermalAndFluidResultsGPU(results);
             }
-            
+
             // STEP 13: Populate geothermal and fluid results
             if (_params.EnableGeothermal || _params.EnableFluidInjection)
             {
                 Logger.Log("[GeomechGPU] Finalizing geothermal and fluid results...");
                 PopulateGeothermalAndFluidResultsGPU(results);
             }
+
             results.ComputationTime = DateTime.Now - startTime;
 
             progress?.Report(1.0f);
@@ -2049,491 +2050,500 @@ __kernel void detect_hydraulic_fractures(
     }
 
     private void EvaluateFailureGPU(byte[,,] labels)
-{
-    Logger.Log("[GeomechGPU] Evaluating failure");
-
-    var extent = _params.SimulationExtent;
-    var numVoxels = extent.Width * extent.Height * extent.Depth;
-
-    int error;
-    _bufFailureIndex = CreateBuffer<float>(numVoxels, MemFlags.WriteOnly, out error);
-    _bufDamage = CreateBuffer<byte>(numVoxels, MemFlags.WriteOnly, out error);
-    _bufFractured = CreateBuffer<byte>(numVoxels, MemFlags.WriteOnly, out error);
-
-    var cohesion = _params.Cohesion * 1e6f;
-    var frictionAngle = _params.FrictionAngle;
-    var tensileStrength = _params.TensileStrength * 1e6f;
-    var failureCrit = (int)_params.FailureCriterion;
-
-    var sigma1Buf = (nint)((long)_bufPrincipalStresses + 0 * numVoxels * sizeof(float));
-    var sigma2Buf = (nint)((long)_bufPrincipalStresses + 1 * numVoxels * sizeof(float));
-    var sigma3Buf = (nint)((long)_bufPrincipalStresses + 2 * numVoxels * sizeof(float));
-
-    // Stress component buffers
-    var stressXXBuf = (nint)((long)_bufStressFields + 0 * numVoxels * sizeof(float));
-    var stressYYBuf = (nint)((long)_bufStressFields + 1 * numVoxels * sizeof(float));
-    var stressZZBuf = (nint)((long)_bufStressFields + 2 * numVoxels * sizeof(float));
-    var stressXYBuf = (nint)((long)_bufStressFields + 3 * numVoxels * sizeof(float));
-    var stressXZBuf = (nint)((long)_bufStressFields + 4 * numVoxels * sizeof(float));
-    var stressYZBuf = (nint)((long)_bufStressFields + 5 * numVoxels * sizeof(float));
-
-    var argIdx = 0;
-    SetKernelArg(_kernelEvaluateFailure, argIdx++, sigma1Buf);
-    SetKernelArg(_kernelEvaluateFailure, argIdx++, sigma2Buf);
-    SetKernelArg(_kernelEvaluateFailure, argIdx++, sigma3Buf);
-    SetKernelArg(_kernelEvaluateFailure, argIdx++, _bufFailureIndex);
-    SetKernelArg(_kernelEvaluateFailure, argIdx++, _bufDamage);
-    SetKernelArg(_kernelEvaluateFailure, argIdx++, _bufFractured);
-    SetKernelArg(_kernelEvaluateFailure, argIdx++, _bufLabels);
-    SetKernelArg(_kernelEvaluateFailure, argIdx++, cohesion);
-    SetKernelArg(_kernelEvaluateFailure, argIdx++, frictionAngle);
-    SetKernelArg(_kernelEvaluateFailure, argIdx++, tensileStrength);
-    SetKernelArg(_kernelEvaluateFailure, argIdx++, failureCrit);
-    SetKernelArg(_kernelEvaluateFailure, argIdx++, numVoxels);
-    SetKernelArg(_kernelEvaluateFailure, argIdx++, stressXXBuf);
-    SetKernelArg(_kernelEvaluateFailure, argIdx++, stressYYBuf);
-    SetKernelArg(_kernelEvaluateFailure, argIdx++, stressZZBuf);
-    SetKernelArg(_kernelEvaluateFailure, argIdx++, stressXYBuf);
-    SetKernelArg(_kernelEvaluateFailure, argIdx++, stressXZBuf);
-    SetKernelArg(_kernelEvaluateFailure, argIdx++, stressYZBuf);
-
-    var globalSize = (nuint)((numVoxels + _workGroupSize - 1) / _workGroupSize * _workGroupSize);
-    var localSize = (nuint)_workGroupSize;
-
-    error = _cl.EnqueueNdrangeKernel(_queue, _kernelEvaluateFailure, 1, null, &globalSize, &localSize, 0, null,
-        null);
-    CheckError(error, "EnqueueNDRange evaluateFailure");
-
-    _cl.Finish(_queue);
-    Logger.Log("[GeomechGPU] Failure evaluation complete");
-}
-private void InitializeGeothermalAndFluidGPU(byte[,,] labels, BoundingBox extent)
-{
-    if (!_params.EnableGeothermal && !_params.EnableFluidInjection)
-        return;
-
-    var w = extent.Width;
-    var h = extent.Height;
-    var d = extent.Depth;
-    var numVoxels = w * h * d;
-    var dx = _params.PixelSize / 1e6f;
-
-    Logger.Log("[GeomechGPU] Initializing geothermal and fluid fields on GPU...");
-
-    int error;
-
-    // Temperature field
-    if (_params.EnableGeothermal)
     {
-        _bufTemperature = CreateBuffer<float>(numVoxels, MemFlags.ReadWrite, out error);
-        CheckError(error, "Create temperature buffer");
+        Logger.Log("[GeomechGPU] Evaluating failure");
 
-        var kernelInitTemp = _cl.CreateKernel(_program, "initialize_geothermal", &error);
-        CheckError(error, "CreateKernel initialize_geothermal");
+        var extent = _params.SimulationExtent;
+        var numVoxels = extent.Width * extent.Height * extent.Depth;
+
+        int error;
+        _bufFailureIndex = CreateBuffer<float>(numVoxels, MemFlags.WriteOnly, out error);
+        _bufDamage = CreateBuffer<byte>(numVoxels, MemFlags.WriteOnly, out error);
+        _bufFractured = CreateBuffer<byte>(numVoxels, MemFlags.WriteOnly, out error);
+
+        var cohesion = _params.Cohesion * 1e6f;
+        var frictionAngle = _params.FrictionAngle;
+        var tensileStrength = _params.TensileStrength * 1e6f;
+        var failureCrit = (int)_params.FailureCriterion;
+
+        var sigma1Buf = (nint)((long)_bufPrincipalStresses + 0 * numVoxels * sizeof(float));
+        var sigma2Buf = (nint)((long)_bufPrincipalStresses + 1 * numVoxels * sizeof(float));
+        var sigma3Buf = (nint)((long)_bufPrincipalStresses + 2 * numVoxels * sizeof(float));
+
+        // Stress component buffers
+        var stressXXBuf = (nint)((long)_bufStressFields + 0 * numVoxels * sizeof(float));
+        var stressYYBuf = (nint)((long)_bufStressFields + 1 * numVoxels * sizeof(float));
+        var stressZZBuf = (nint)((long)_bufStressFields + 2 * numVoxels * sizeof(float));
+        var stressXYBuf = (nint)((long)_bufStressFields + 3 * numVoxels * sizeof(float));
+        var stressXZBuf = (nint)((long)_bufStressFields + 4 * numVoxels * sizeof(float));
+        var stressYZBuf = (nint)((long)_bufStressFields + 5 * numVoxels * sizeof(float));
+
+        var argIdx = 0;
+        SetKernelArg(_kernelEvaluateFailure, argIdx++, sigma1Buf);
+        SetKernelArg(_kernelEvaluateFailure, argIdx++, sigma2Buf);
+        SetKernelArg(_kernelEvaluateFailure, argIdx++, sigma3Buf);
+        SetKernelArg(_kernelEvaluateFailure, argIdx++, _bufFailureIndex);
+        SetKernelArg(_kernelEvaluateFailure, argIdx++, _bufDamage);
+        SetKernelArg(_kernelEvaluateFailure, argIdx++, _bufFractured);
+        SetKernelArg(_kernelEvaluateFailure, argIdx++, _bufLabels);
+        SetKernelArg(_kernelEvaluateFailure, argIdx++, cohesion);
+        SetKernelArg(_kernelEvaluateFailure, argIdx++, frictionAngle);
+        SetKernelArg(_kernelEvaluateFailure, argIdx++, tensileStrength);
+        SetKernelArg(_kernelEvaluateFailure, argIdx++, failureCrit);
+        SetKernelArg(_kernelEvaluateFailure, argIdx++, numVoxels);
+        SetKernelArg(_kernelEvaluateFailure, argIdx++, stressXXBuf);
+        SetKernelArg(_kernelEvaluateFailure, argIdx++, stressYYBuf);
+        SetKernelArg(_kernelEvaluateFailure, argIdx++, stressZZBuf);
+        SetKernelArg(_kernelEvaluateFailure, argIdx++, stressXYBuf);
+        SetKernelArg(_kernelEvaluateFailure, argIdx++, stressXZBuf);
+        SetKernelArg(_kernelEvaluateFailure, argIdx++, stressYZBuf);
+
+        var globalSize = (nuint)((numVoxels + _workGroupSize - 1) / _workGroupSize * _workGroupSize);
+        var localSize = (nuint)_workGroupSize;
+
+        error = _cl.EnqueueNdrangeKernel(_queue, _kernelEvaluateFailure, 1, null, &globalSize, &localSize, 0, null,
+            null);
+        CheckError(error, "EnqueueNDRange evaluateFailure");
+
+        _cl.Finish(_queue);
+        Logger.Log("[GeomechGPU] Failure evaluation complete");
+    }
+
+    private void InitializeGeothermalAndFluidGPU(byte[,,] labels, BoundingBox extent)
+    {
+        if (!_params.EnableGeothermal && !_params.EnableFluidInjection)
+            return;
+
+        var w = extent.Width;
+        var h = extent.Height;
+        var d = extent.Depth;
+        var numVoxels = w * h * d;
+        var dx = _params.PixelSize / 1e6f;
+
+        Logger.Log("[GeomechGPU] Initializing geothermal and fluid fields on GPU...");
+
+        int error;
+
+        // Temperature field
+        if (_params.EnableGeothermal)
+        {
+            _bufTemperature = CreateBuffer<float>(numVoxels, MemFlags.ReadWrite, out error);
+            CheckError(error, "Create temperature buffer");
+
+            var kernelInitTemp = _cl.CreateKernel(_program, "initialize_geothermal", &error);
+            CheckError(error, "CreateKernel initialize_geothermal");
+
+            try
+            {
+                var argIdx = 0;
+                SetKernelArg(kernelInitTemp, argIdx++, _bufTemperature);
+                SetKernelArg(kernelInitTemp, argIdx++, _bufLabels);
+                SetKernelArg(kernelInitTemp, argIdx++, w);
+                SetKernelArg(kernelInitTemp, argIdx++, h);
+                SetKernelArg(kernelInitTemp, argIdx++, d);
+                SetKernelArg(kernelInitTemp, argIdx++, dx);
+                SetKernelArg(kernelInitTemp, argIdx++, _params.SurfaceTemperature);
+                SetKernelArg(kernelInitTemp, argIdx++, _params.GeothermalGradient);
+
+                var globalSize = stackalloc nuint[3];
+                globalSize[0] = (nuint)w;
+                globalSize[1] = (nuint)h;
+                globalSize[2] = (nuint)d;
+
+                var localSize = stackalloc nuint[3];
+                localSize[0] = 8;
+                localSize[1] = 8;
+                localSize[2] = 4;
+
+                error = _cl.EnqueueNdrangeKernel(_queue, kernelInitTemp, 3, null, globalSize, localSize, 0, null, null);
+                CheckError(error, "EnqueueNDRange initialize_geothermal");
+
+                _cl.Finish(_queue);
+            }
+            finally
+            {
+                _cl.ReleaseKernel(kernelInitTemp);
+            }
+
+            Logger.Log("[GeomechGPU] Geothermal field initialized");
+        }
+
+        // Pressure and fluid fields
+        if (_params.EnableFluidInjection || _params.UsePorePressure)
+        {
+            _bufPressure = CreateBuffer<float>(numVoxels, MemFlags.ReadWrite, out error);
+            CheckError(error, "Create pressure buffer");
+            _bufPressureNew = CreateBuffer<float>(numVoxels, MemFlags.ReadWrite, out error);
+            CheckError(error, "Create pressure new buffer");
+
+            _bufFractureAperture = CreateBuffer<float>(numVoxels, MemFlags.ReadWrite, out error);
+            CheckError(error, "Create fracture aperture buffer");
+            _bufFluidSaturation = CreateBuffer<float>(numVoxels, MemFlags.ReadWrite, out error);
+            CheckError(error, "Create fluid saturation buffer");
+            _bufConnectivity = CreateBuffer<byte>(numVoxels, MemFlags.ReadWrite, out error);
+            CheckError(error, "Create connectivity buffer");
+
+            // Initialize pressure with hydrostatic gradient
+            var P0 = _params.InitialPorePressure * 1e6f;
+            var rho_water = 1000f;
+            var g = 9.81f;
+
+            var pressureInit = new float[numVoxels];
+            var apertureInit = new float[numVoxels];
+            var saturationInit = new float[numVoxels];
+
+            var idx = 0;
+            for (var z = 0; z < d; z++)
+            {
+                var depth_m = z * dx;
+                var hydrostaticP = P0 + rho_water * g * depth_m;
+
+                for (var y = 0; y < h; y++)
+                for (var x = 0; x < w; x++)
+                {
+                    if (labels[x, y, z] != 0)
+                    {
+                        pressureInit[idx] = hydrostaticP;
+                        saturationInit[idx] = _params.Porosity;
+                        apertureInit[idx] = 0f;
+                    }
+                    else if (_params.EnableAquifer)
+                    {
+                        pressureInit[idx] = _params.AquiferPressure * 1e6f;
+                    }
+
+                    idx++;
+                }
+            }
+
+            EnqueueWriteBuffer(_bufPressure, pressureInit);
+            EnqueueWriteBuffer(_bufPressureNew, pressureInit);
+            EnqueueWriteBuffer(_bufFractureAperture, apertureInit);
+            EnqueueWriteBuffer(_bufFluidSaturation, saturationInit);
+
+            var connectivityInit = new byte[numVoxels];
+            EnqueueWriteBuffer(_bufConnectivity, connectivityInit);
+
+            _cl.Finish(_queue);
+            Logger.Log($"[GeomechGPU] Pressure field initialized (P0={P0 / 1e6f:F1} MPa)");
+        }
+    }
+
+    private void SimulateFluidInjectionAndFracturingGPU(GeomechanicalResults results, byte[,,] labels,
+        IProgress<float> progress, CancellationToken token)
+    {
+        if (!_params.EnableFluidInjection)
+            return;
+
+        Logger.Log("[GeomechGPU] ========== GPU FLUID INJECTION & FRACTURING ==========");
+
+        var extent = _params.SimulationExtent;
+        var w = extent.Width;
+        var h = extent.Height;
+        var d = extent.Depth;
+        var dx = _params.PixelSize / 1e6f;
+        var numVoxels = w * h * d;
+
+        var injX = (int)(_params.InjectionLocation.X * w);
+        var injY = (int)(_params.InjectionLocation.Y * h);
+        var injZ = (int)(_params.InjectionLocation.Z * d);
+        injX = Math.Clamp(injX, 0, w - 1);
+        injY = Math.Clamp(injY, 0, h - 1);
+        injZ = Math.Clamp(injZ, 0, d - 1);
+
+        Logger.Log($"[GeomechGPU] Injection point: ({injX}, {injY}, {injZ})");
+
+        var P_inj = _params.InjectionPressure * 1e6f;
+        var dt_fluid = _params.FluidTimeStep;
+        var maxTime = _params.MaxSimulationTime;
+        var numSteps = (int)(maxTime / dt_fluid);
+
+        int error;
+        var kernelDiffusion = _cl.CreateKernel(_program, "pressure_diffusion", &error);
+        CheckError(error, "CreateKernel pressure_diffusion");
+        var kernelEffStress = _cl.CreateKernel(_program, "calculate_effective_stress", &error);
+        CheckError(error, "CreateKernel calculate_effective_stress");
+        var kernelUpdateAperture = _cl.CreateKernel(_program, "update_fracture_apertures", &error);
+        CheckError(error, "CreateKernel update_fracture_apertures");
+        var kernelDetectFrac = _cl.CreateKernel(_program, "detect_hydraulic_fractures", &error);
+        CheckError(error, "CreateKernel detect_hydraulic_fractures");
+        var kernelApplyInj = _cl.CreateKernel(_program, "apply_injection_source", &error);
+        CheckError(error, "CreateKernel apply_injection_source");
+
+        // Create effective stress buffers
+        var bufEffStressXX = CreateBuffer<float>(numVoxels, MemFlags.ReadWrite, out error);
+        CheckError(error, "Create bufEffStressXX");
+        var bufEffStressYY = CreateBuffer<float>(numVoxels, MemFlags.ReadWrite, out error);
+        CheckError(error, "Create bufEffStressYY");
+        var bufEffStressZZ = CreateBuffer<float>(numVoxels, MemFlags.ReadWrite, out error);
+        CheckError(error, "Create bufEffStressZZ");
 
         try
         {
-            var argIdx = 0;
-            SetKernelArg(kernelInitTemp, argIdx++, _bufTemperature);
-            SetKernelArg(kernelInitTemp, argIdx++, _bufLabels);
-            SetKernelArg(kernelInitTemp, argIdx++, w);
-            SetKernelArg(kernelInitTemp, argIdx++, h);
-            SetKernelArg(kernelInitTemp, argIdx++, d);
-            SetKernelArg(kernelInitTemp, argIdx++, dx);
-            SetKernelArg(kernelInitTemp, argIdx++, _params.SurfaceTemperature);
-            SetKernelArg(kernelInitTemp, argIdx++, _params.GeothermalGradient);
+            var globalSize3D = stackalloc nuint[3];
+            globalSize3D[0] = (nuint)w;
+            globalSize3D[1] = (nuint)h;
+            globalSize3D[2] = (nuint)d;
 
-            var globalSize = stackalloc nuint[3];
-            globalSize[0] = (nuint)w;
-            globalSize[1] = (nuint)h;
-            globalSize[2] = (nuint)d;
+            var localSize3D = stackalloc nuint[3];
+            localSize3D[0] = 8;
+            localSize3D[1] = 8;
+            localSize3D[2] = 4;
 
-            var localSize = stackalloc nuint[3];
-            localSize[0] = 8;
-            localSize[1] = 8;
-            localSize[2] = 4;
+            var sigma1Buf = (nint)((long)_bufPrincipalStresses + 0 * numVoxels * sizeof(float));
+            var sigma3Buf = (nint)((long)_bufPrincipalStresses + 2 * numVoxels * sizeof(float));
 
-            error = _cl.EnqueueNdrangeKernel(_queue, kernelInitTemp, 3, null, globalSize, localSize, 0, null, null);
-            CheckError(error, "EnqueueNDRange initialize_geothermal");
-            
-            _cl.Finish(_queue);
+            var breakdownDetected = false;
+            results.BreakdownPressure = 0f;
+
+            for (var step = 0; step < numSteps; step++)
+            {
+                token.ThrowIfCancellationRequested();
+
+                // Apply injection source
+                var argIdx = 0;
+                SetKernelArg(kernelApplyInj, argIdx++, _bufPressure);
+                SetKernelArg(kernelApplyInj, argIdx++, _bufLabels);
+                SetKernelArg(kernelApplyInj, argIdx++, w);
+                SetKernelArg(kernelApplyInj, argIdx++, h);
+                SetKernelArg(kernelApplyInj, argIdx++, d);
+                SetKernelArg(kernelApplyInj, argIdx++, injX);
+                SetKernelArg(kernelApplyInj, argIdx++, injY);
+                SetKernelArg(kernelApplyInj, argIdx++, injZ);
+                SetKernelArg(kernelApplyInj, argIdx++, _params.InjectionRadius);
+                SetKernelArg(kernelApplyInj, argIdx++, P_inj);
+
+                error = _cl.EnqueueNdrangeKernel(_queue, kernelApplyInj, 3, null, globalSize3D, localSize3D, 0, null,
+                    null);
+                CheckError(error, "EnqueueNDRange apply_injection");
+
+                // Diffuse pressure
+                for (var subStep = 0; subStep < _params.FluidIterationsPerMechanicalStep; subStep++)
+                {
+                    argIdx = 0;
+                    SetKernelArg(kernelDiffusion, argIdx++, _bufPressure);
+                    SetKernelArg(kernelDiffusion, argIdx++, _bufPressureNew);
+                    SetKernelArg(kernelDiffusion, argIdx++, _bufLabels);
+                    SetKernelArg(kernelDiffusion, argIdx++, _bufFractureAperture);
+                    SetKernelArg(kernelDiffusion, argIdx++, w);
+                    SetKernelArg(kernelDiffusion, argIdx++, h);
+                    SetKernelArg(kernelDiffusion, argIdx++, d);
+                    SetKernelArg(kernelDiffusion, argIdx++, dx);
+                    SetKernelArg(kernelDiffusion, argIdx++, dt_fluid / _params.FluidIterationsPerMechanicalStep);
+                    SetKernelArg(kernelDiffusion, argIdx++, _params.RockPermeability);
+                    SetKernelArg(kernelDiffusion, argIdx++, _params.FluidViscosity);
+                    SetKernelArg(kernelDiffusion, argIdx++, _params.Porosity);
+                    SetKernelArg(kernelDiffusion, argIdx++, _params.AquiferPressure * 1e6f);
+                    SetKernelArg(kernelDiffusion, argIdx++, _params.EnableAquifer ? 1 : 0);
+
+                    error = _cl.EnqueueNdrangeKernel(_queue, kernelDiffusion, 3, null, globalSize3D, localSize3D, 0,
+                        null, null);
+                    CheckError(error, "EnqueueNDRange diffusion");
+
+                    var temp = _bufPressure;
+                    _bufPressure = _bufPressureNew;
+                    _bufPressureNew = temp;
+                }
+
+                // Update effective stress
+                var stressOffset = 0;
+                var stressXXBuf = (nint)((long)_bufStressFields + stressOffset++ * numVoxels * sizeof(float));
+                var stressYYBuf = (nint)((long)_bufStressFields + stressOffset++ * numVoxels * sizeof(float));
+                var stressZZBuf = (nint)((long)_bufStressFields + stressOffset++ * numVoxels * sizeof(float));
+
+                argIdx = 0;
+                SetKernelArg(kernelEffStress, argIdx++, stressXXBuf);
+                SetKernelArg(kernelEffStress, argIdx++, stressYYBuf);
+                SetKernelArg(kernelEffStress, argIdx++, stressZZBuf);
+                SetKernelArg(kernelEffStress, argIdx++, _bufPressure);
+                SetKernelArg(kernelEffStress, argIdx++, bufEffStressXX);
+                SetKernelArg(kernelEffStress, argIdx++, bufEffStressYY);
+                SetKernelArg(kernelEffStress, argIdx++, bufEffStressZZ);
+                SetKernelArg(kernelEffStress, argIdx++, _bufLabels);
+                SetKernelArg(kernelEffStress, argIdx++, _params.BiotCoefficient);
+                SetKernelArg(kernelEffStress, argIdx++, numVoxels);
+
+                var globalSize1D = (nuint)((numVoxels + _workGroupSize - 1) / _workGroupSize * _workGroupSize);
+                var localSize1D = (nuint)_workGroupSize;
+
+                error = _cl.EnqueueNdrangeKernel(_queue, kernelEffStress, 1, null, &globalSize1D, &localSize1D, 0, null,
+                    null);
+                CheckError(error, "EnqueueNDRange effective_stress");
+
+                // Detect new fractures
+                argIdx = 0;
+                SetKernelArg(kernelDetectFrac, argIdx++, sigma1Buf);
+                SetKernelArg(kernelDetectFrac, argIdx++, sigma3Buf);
+                SetKernelArg(kernelDetectFrac, argIdx++, _bufPressure);
+                SetKernelArg(kernelDetectFrac, argIdx++, _bufFractured);
+                SetKernelArg(kernelDetectFrac, argIdx++, _bufDamage);
+                SetKernelArg(kernelDetectFrac, argIdx++, _bufFractureAperture);
+                SetKernelArg(kernelDetectFrac, argIdx++, _bufLabels);
+                SetKernelArg(kernelDetectFrac, argIdx++, _params.Cohesion * 1e6f);
+                SetKernelArg(kernelDetectFrac, argIdx++, _params.FrictionAngle);
+                SetKernelArg(kernelDetectFrac, argIdx++, _params.TensileStrength * 1e6f);
+                SetKernelArg(kernelDetectFrac, argIdx++, _params.BiotCoefficient);
+                SetKernelArg(kernelDetectFrac, argIdx++, _params.MinimumFractureAperture);
+                SetKernelArg(kernelDetectFrac, argIdx++, _params.FractureToughness);
+                SetKernelArg(kernelDetectFrac, argIdx++, _params.YoungModulus);
+                SetKernelArg(kernelDetectFrac, argIdx++, _params.PoissonRatio);
+                SetKernelArg(kernelDetectFrac, argIdx++, dx);
+                SetKernelArg(kernelDetectFrac, argIdx++, numVoxels);
+
+                error = _cl.EnqueueNdrangeKernel(_queue, kernelDetectFrac, 1, null, &globalSize1D, &localSize1D, 0,
+                    null, null);
+                CheckError(error, "EnqueueNDRange detect_fractures");
+
+                // Update fracture apertures
+                if (_params.EnableFractureFlow)
+                {
+                    argIdx = 0;
+                    SetKernelArg(kernelUpdateAperture, argIdx++, _bufPressure);
+                    SetKernelArg(kernelUpdateAperture, argIdx++, sigma3Buf);
+                    SetKernelArg(kernelUpdateAperture, argIdx++, _bufFractureAperture);
+                    SetKernelArg(kernelUpdateAperture, argIdx++, _bufFractured);
+                    SetKernelArg(kernelUpdateAperture, argIdx++, _bufLabels);
+                    SetKernelArg(kernelUpdateAperture, argIdx++, _params.MinimumFractureAperture);
+                    SetKernelArg(kernelUpdateAperture, argIdx++, _params.YoungModulus);
+                    SetKernelArg(kernelUpdateAperture, argIdx++, _params.PoissonRatio);
+                    SetKernelArg(kernelUpdateAperture, argIdx++, _params.BiotCoefficient);
+                    SetKernelArg(kernelUpdateAperture, argIdx++, dx);
+                    SetKernelArg(kernelUpdateAperture, argIdx++, numVoxels);
+
+                    error = _cl.EnqueueNdrangeKernel(_queue, kernelUpdateAperture, 1, null, &globalSize1D, &localSize1D,
+                        0, null, null);
+                    CheckError(error, "EnqueueNDRange update_apertures");
+                }
+
+                _cl.Finish(_queue);
+
+                // Check for breakdown
+                if (!breakdownDetected && step == numSteps / 10)
+                {
+                    var pressureData = new float[numVoxels];
+                    EnqueueReadBuffer(_bufPressure, pressureData);
+                    var injIdx = (injZ * h + injY) * w + injX;
+                    results.BreakdownPressure = pressureData[injIdx] / 1e6f;
+                    breakdownDetected = true;
+                    Logger.Log($"[GeomechGPU] *** BREAKDOWN detected, P={results.BreakdownPressure:F1} MPa ***");
+                }
+
+                if (step % 100 == 0)
+                {
+                    var prog = 0.92f + 0.08f * step / numSteps;
+                    progress?.Report(prog);
+                    Logger.Log($"[GeomechGPU] Fluid step {step}/{numSteps}");
+                }
+            }
+
+            Logger.Log("[GeomechGPU] Fluid injection simulation complete");
         }
         finally
         {
-            _cl.ReleaseKernel(kernelInitTemp);
+            _cl.ReleaseKernel(kernelDiffusion);
+            _cl.ReleaseKernel(kernelEffStress);
+            _cl.ReleaseKernel(kernelUpdateAperture);
+            _cl.ReleaseKernel(kernelDetectFrac);
+            _cl.ReleaseKernel(kernelApplyInj);
+            _cl.ReleaseMemObject(bufEffStressXX);
+            _cl.ReleaseMemObject(bufEffStressYY);
+            _cl.ReleaseMemObject(bufEffStressZZ);
         }
-
-        Logger.Log("[GeomechGPU] Geothermal field initialized");
     }
 
-    // Pressure and fluid fields
-    if (_params.EnableFluidInjection || _params.UsePorePressure)
+    private void PopulateGeothermalAndFluidResultsGPU(GeomechanicalResults results)
     {
-        _bufPressure = CreateBuffer<float>(numVoxels, MemFlags.ReadWrite, out error);
-        CheckError(error, "Create pressure buffer");
-        _bufPressureNew = CreateBuffer<float>(numVoxels, MemFlags.ReadWrite, out error);
-        CheckError(error, "Create pressure new buffer");
+        if (!_params.EnableGeothermal && !_params.EnableFluidInjection)
+            return;
 
-        _bufFractureAperture = CreateBuffer<float>(numVoxels, MemFlags.ReadWrite, out error);
-        CheckError(error, "Create fracture aperture buffer");
-        _bufFluidSaturation = CreateBuffer<float>(numVoxels, MemFlags.ReadWrite, out error);
-        CheckError(error, "Create fluid saturation buffer");
-        _bufConnectivity = CreateBuffer<byte>(numVoxels, MemFlags.ReadWrite, out error);
-        CheckError(error, "Create connectivity buffer");
+        var extent = _params.SimulationExtent;
+        var w = extent.Width;
+        var h = extent.Height;
+        var d = extent.Depth;
+        var numVoxels = w * h * d;
+        var dx = _params.PixelSize / 1e6f;
 
-        // Initialize pressure with hydrostatic gradient
-        var P0 = _params.InitialPorePressure * 1e6f;
-        var rho_water = 1000f;
-        var g = 9.81f;
+        Logger.Log("[GeomechGPU] Downloading geothermal and fluid results from GPU...");
 
-        var pressureInit = new float[numVoxels];
-        var apertureInit = new float[numVoxels];
-        var saturationInit = new float[numVoxels];
-
-        var idx = 0;
-        for (var z = 0; z < d; z++)
+        // Download temperature field
+        if (_params.EnableGeothermal && _bufTemperature != 0)
         {
-            var depth_m = z * dx;
-            var hydrostaticP = P0 + rho_water * g * depth_m;
+            var tempData = new float[numVoxels];
+            EnqueueReadBuffer(_bufTemperature, tempData);
 
+            results.TemperatureField = new float[w, h, d];
+            var idx = 0;
+            for (var z = 0; z < d; z++)
             for (var y = 0; y < h; y++)
             for (var x = 0; x < w; x++)
-            {
-                if (labels[x, y, z] != 0)
-                {
-                    pressureInit[idx] = hydrostaticP;
-                    saturationInit[idx] = _params.Porosity;
-                    apertureInit[idx] = 0f;
-                }
-                else if (_params.EnableAquifer)
-                {
-                    pressureInit[idx] = _params.AquiferPressure * 1e6f;
-                }
-                idx++;
-            }
+                results.TemperatureField[x, y, z] = tempData[idx++];
+
+            // Calculate statistics
+            var T_top = results.TemperatureField[w / 2, h / 2, 0];
+            var T_bottom = results.TemperatureField[w / 2, h / 2, d - 1];
+            var depth_m = d * dx;
+            results.AverageThermalGradient = (T_bottom - T_top) / depth_m * 1000f; // °C/km
+
+            Logger.Log(
+                $"[GeomechGPU] Temperature field downloaded, gradient: {results.AverageThermalGradient:F1} °C/km");
         }
 
-        EnqueueWriteBuffer(_bufPressure, pressureInit);
-        EnqueueWriteBuffer(_bufPressureNew, pressureInit);
-        EnqueueWriteBuffer(_bufFractureAperture, apertureInit);
-        EnqueueWriteBuffer(_bufFluidSaturation, saturationInit);
-
-        var connectivityInit = new byte[numVoxels];
-        EnqueueWriteBuffer(_bufConnectivity, connectivityInit);
-
-        _cl.Finish(_queue);
-        Logger.Log($"[GeomechGPU] Pressure field initialized (P0={P0/1e6f:F1} MPa)");
-    }
-}
-private void SimulateFluidInjectionAndFracturingGPU(GeomechanicalResults results, byte[,,] labels,
-    IProgress<float> progress, CancellationToken token)
-{
-    if (!_params.EnableFluidInjection)
-        return;
-
-    Logger.Log("[GeomechGPU] ========== GPU FLUID INJECTION & FRACTURING ==========");
-
-    var extent = _params.SimulationExtent;
-    var w = extent.Width;
-    var h = extent.Height;
-    var d = extent.Depth;
-    var dx = _params.PixelSize / 1e6f;
-    var numVoxels = w * h * d;
-
-    var injX = (int)(_params.InjectionLocation.X * w);
-    var injY = (int)(_params.InjectionLocation.Y * h);
-    var injZ = (int)(_params.InjectionLocation.Z * d);
-    injX = Math.Clamp(injX, 0, w - 1);
-    injY = Math.Clamp(injY, 0, h - 1);
-    injZ = Math.Clamp(injZ, 0, d - 1);
-
-    Logger.Log($"[GeomechGPU] Injection point: ({injX}, {injY}, {injZ})");
-
-    var P_inj = _params.InjectionPressure * 1e6f;
-    var dt_fluid = _params.FluidTimeStep;
-    var maxTime = _params.MaxSimulationTime;
-    var numSteps = (int)(maxTime / dt_fluid);
-
-    int error;
-    var kernelDiffusion = _cl.CreateKernel(_program, "pressure_diffusion", &error);
-    CheckError(error, "CreateKernel pressure_diffusion");
-    var kernelEffStress = _cl.CreateKernel(_program, "calculate_effective_stress", &error);
-    CheckError(error, "CreateKernel calculate_effective_stress");
-    var kernelUpdateAperture = _cl.CreateKernel(_program, "update_fracture_apertures", &error);
-    CheckError(error, "CreateKernel update_fracture_apertures");
-    var kernelDetectFrac = _cl.CreateKernel(_program, "detect_hydraulic_fractures", &error);
-    CheckError(error, "CreateKernel detect_hydraulic_fractures");
-    var kernelApplyInj = _cl.CreateKernel(_program, "apply_injection_source", &error);
-    CheckError(error, "CreateKernel apply_injection_source");
-
-    // Create effective stress buffers
-    var bufEffStressXX = CreateBuffer<float>(numVoxels, MemFlags.ReadWrite, out error);
-    CheckError(error, "Create bufEffStressXX");
-    var bufEffStressYY = CreateBuffer<float>(numVoxels, MemFlags.ReadWrite, out error);
-    CheckError(error, "Create bufEffStressYY");
-    var bufEffStressZZ = CreateBuffer<float>(numVoxels, MemFlags.ReadWrite, out error);
-    CheckError(error, "Create bufEffStressZZ");
-
-    try
-    {
-        var globalSize3D = stackalloc nuint[3];
-        globalSize3D[0] = (nuint)w;
-        globalSize3D[1] = (nuint)h;
-        globalSize3D[2] = (nuint)d;
-
-        var localSize3D = stackalloc nuint[3];
-        localSize3D[0] = 8;
-        localSize3D[1] = 8;
-        localSize3D[2] = 4;
-
-        var sigma1Buf = (nint)((long)_bufPrincipalStresses + 0 * numVoxels * sizeof(float));
-        var sigma3Buf = (nint)((long)_bufPrincipalStresses + 2 * numVoxels * sizeof(float));
-
-        var breakdownDetected = false;
-        results.BreakdownPressure = 0f;
-
-        for (var step = 0; step < numSteps; step++)
+        // Download pressure and fluid fields
+        if (_params.EnableFluidInjection && _bufPressure != 0)
         {
-            token.ThrowIfCancellationRequested();
+            var pressureData = new float[numVoxels];
+            EnqueueReadBuffer(_bufPressure, pressureData);
 
-            // Apply injection source
-            var argIdx = 0;
-            SetKernelArg(kernelApplyInj, argIdx++, _bufPressure);
-            SetKernelArg(kernelApplyInj, argIdx++, _bufLabels);
-            SetKernelArg(kernelApplyInj, argIdx++, w);
-            SetKernelArg(kernelApplyInj, argIdx++, h);
-            SetKernelArg(kernelApplyInj, argIdx++, d);
-            SetKernelArg(kernelApplyInj, argIdx++, injX);
-            SetKernelArg(kernelApplyInj, argIdx++, injY);
-            SetKernelArg(kernelApplyInj, argIdx++, injZ);
-            SetKernelArg(kernelApplyInj, argIdx++, _params.InjectionRadius);
-            SetKernelArg(kernelApplyInj, argIdx++, P_inj);
+            results.PressureField = new float[w, h, d];
+            var idx = 0;
+            float minP = float.MaxValue, maxP = float.MinValue;
 
-            error = _cl.EnqueueNdrangeKernel(_queue, kernelApplyInj, 3, null, globalSize3D, localSize3D, 0, null, null);
-            CheckError(error, "EnqueueNDRange apply_injection");
-
-            // Diffuse pressure
-            for (var subStep = 0; subStep < _params.FluidIterationsPerMechanicalStep; subStep++)
-            {
-                argIdx = 0;
-                SetKernelArg(kernelDiffusion, argIdx++, _bufPressure);
-                SetKernelArg(kernelDiffusion, argIdx++, _bufPressureNew);
-                SetKernelArg(kernelDiffusion, argIdx++, _bufLabels);
-                SetKernelArg(kernelDiffusion, argIdx++, _bufFractureAperture);
-                SetKernelArg(kernelDiffusion, argIdx++, w);
-                SetKernelArg(kernelDiffusion, argIdx++, h);
-                SetKernelArg(kernelDiffusion, argIdx++, d);
-                SetKernelArg(kernelDiffusion, argIdx++, dx);
-                SetKernelArg(kernelDiffusion, argIdx++, dt_fluid / _params.FluidIterationsPerMechanicalStep);
-                SetKernelArg(kernelDiffusion, argIdx++, _params.RockPermeability);
-                SetKernelArg(kernelDiffusion, argIdx++, _params.FluidViscosity);
-                SetKernelArg(kernelDiffusion, argIdx++, _params.Porosity);
-                SetKernelArg(kernelDiffusion, argIdx++, _params.AquiferPressure * 1e6f);
-                SetKernelArg(kernelDiffusion, argIdx++, _params.EnableAquifer ? 1 : 0);
-
-                error = _cl.EnqueueNdrangeKernel(_queue, kernelDiffusion, 3, null, globalSize3D, localSize3D, 0, null, null);
-                CheckError(error, "EnqueueNDRange diffusion");
-
-                var temp = _bufPressure;
-                _bufPressure = _bufPressureNew;
-                _bufPressureNew = temp;
-            }
-
-            // Update effective stress
-            var stressOffset = 0;
-            var stressXXBuf = (nint)((long)_bufStressFields + stressOffset++ * numVoxels * sizeof(float));
-            var stressYYBuf = (nint)((long)_bufStressFields + stressOffset++ * numVoxels * sizeof(float));
-            var stressZZBuf = (nint)((long)_bufStressFields + stressOffset++ * numVoxels * sizeof(float));
-
-            argIdx = 0;
-            SetKernelArg(kernelEffStress, argIdx++, stressXXBuf);
-            SetKernelArg(kernelEffStress, argIdx++, stressYYBuf);
-            SetKernelArg(kernelEffStress, argIdx++, stressZZBuf);
-            SetKernelArg(kernelEffStress, argIdx++, _bufPressure);
-            SetKernelArg(kernelEffStress, argIdx++, bufEffStressXX);
-            SetKernelArg(kernelEffStress, argIdx++, bufEffStressYY);
-            SetKernelArg(kernelEffStress, argIdx++, bufEffStressZZ);
-            SetKernelArg(kernelEffStress, argIdx++, _bufLabels);
-            SetKernelArg(kernelEffStress, argIdx++, _params.BiotCoefficient);
-            SetKernelArg(kernelEffStress, argIdx++, numVoxels);
-
-            var globalSize1D = (nuint)((numVoxels + _workGroupSize - 1) / _workGroupSize * _workGroupSize);
-            var localSize1D = (nuint)_workGroupSize;
-
-            error = _cl.EnqueueNdrangeKernel(_queue, kernelEffStress, 1, null, &globalSize1D, &localSize1D, 0, null, null);
-            CheckError(error, "EnqueueNDRange effective_stress");
-
-            // Detect new fractures
-            argIdx = 0;
-            SetKernelArg(kernelDetectFrac, argIdx++, sigma1Buf);
-            SetKernelArg(kernelDetectFrac, argIdx++, sigma3Buf);
-            SetKernelArg(kernelDetectFrac, argIdx++, _bufPressure);
-            SetKernelArg(kernelDetectFrac, argIdx++, _bufFractured);
-            SetKernelArg(kernelDetectFrac, argIdx++, _bufDamage);
-            SetKernelArg(kernelDetectFrac, argIdx++, _bufFractureAperture);
-            SetKernelArg(kernelDetectFrac, argIdx++, _bufLabels);
-            SetKernelArg(kernelDetectFrac, argIdx++, _params.Cohesion * 1e6f);
-            SetKernelArg(kernelDetectFrac, argIdx++, _params.FrictionAngle);
-            SetKernelArg(kernelDetectFrac, argIdx++, _params.TensileStrength * 1e6f);
-            SetKernelArg(kernelDetectFrac, argIdx++, _params.BiotCoefficient);
-            SetKernelArg(kernelDetectFrac, argIdx++, _params.MinimumFractureAperture);
-            SetKernelArg(kernelDetectFrac, argIdx++, _params.FractureToughness);
-            SetKernelArg(kernelDetectFrac, argIdx++, _params.YoungModulus);
-            SetKernelArg(kernelDetectFrac, argIdx++, _params.PoissonRatio);
-            SetKernelArg(kernelDetectFrac, argIdx++, dx);
-            SetKernelArg(kernelDetectFrac, argIdx++, numVoxels);
-
-            error = _cl.EnqueueNdrangeKernel(_queue, kernelDetectFrac, 1, null, &globalSize1D, &localSize1D, 0, null, null);
-            CheckError(error, "EnqueueNDRange detect_fractures");
-
-            // Update fracture apertures
-            if (_params.EnableFractureFlow)
-            {
-                argIdx = 0;
-                SetKernelArg(kernelUpdateAperture, argIdx++, _bufPressure);
-                SetKernelArg(kernelUpdateAperture, argIdx++, sigma3Buf);
-                SetKernelArg(kernelUpdateAperture, argIdx++, _bufFractureAperture);
-                SetKernelArg(kernelUpdateAperture, argIdx++, _bufFractured);
-                SetKernelArg(kernelUpdateAperture, argIdx++, _bufLabels);
-                SetKernelArg(kernelUpdateAperture, argIdx++, _params.MinimumFractureAperture);
-                SetKernelArg(kernelUpdateAperture, argIdx++, _params.YoungModulus);
-                SetKernelArg(kernelUpdateAperture, argIdx++, _params.PoissonRatio);
-                SetKernelArg(kernelUpdateAperture, argIdx++, _params.BiotCoefficient);
-                SetKernelArg(kernelUpdateAperture, argIdx++, dx);
-                SetKernelArg(kernelUpdateAperture, argIdx++, numVoxels);
-
-                error = _cl.EnqueueNdrangeKernel(_queue, kernelUpdateAperture, 1, null, &globalSize1D, &localSize1D, 0, null, null);
-                CheckError(error, "EnqueueNDRange update_apertures");
-            }
-
-            _cl.Finish(_queue);
-
-            // Check for breakdown
-            if (!breakdownDetected && step == numSteps / 10)
-            {
-                var pressureData = new float[numVoxels];
-                EnqueueReadBuffer(_bufPressure, pressureData);
-                var injIdx = (injZ * h + injY) * w + injX;
-                results.BreakdownPressure = pressureData[injIdx] / 1e6f;
-                breakdownDetected = true;
-                Logger.Log($"[GeomechGPU] *** BREAKDOWN detected, P={results.BreakdownPressure:F1} MPa ***");
-            }
-
-            if (step % 100 == 0)
-            {
-                var prog = 0.92f + 0.08f * step / numSteps;
-                progress?.Report(prog);
-                Logger.Log($"[GeomechGPU] Fluid step {step}/{numSteps}");
-            }
-        }
-
-        Logger.Log("[GeomechGPU] Fluid injection simulation complete");
-    }
-    finally
-    {
-        _cl.ReleaseKernel(kernelDiffusion);
-        _cl.ReleaseKernel(kernelEffStress);
-        _cl.ReleaseKernel(kernelUpdateAperture);
-        _cl.ReleaseKernel(kernelDetectFrac);
-        _cl.ReleaseKernel(kernelApplyInj);
-        _cl.ReleaseMemObject(bufEffStressXX);
-        _cl.ReleaseMemObject(bufEffStressYY);
-        _cl.ReleaseMemObject(bufEffStressZZ);
-    }
-}
-private void PopulateGeothermalAndFluidResultsGPU(GeomechanicalResults results)
-{
-    if (!_params.EnableGeothermal && !_params.EnableFluidInjection)
-        return;
-
-    var extent = _params.SimulationExtent;
-    var w = extent.Width;
-    var h = extent.Height;
-    var d = extent.Depth;
-    var numVoxels = w * h * d;
-    var dx = _params.PixelSize / 1e6f;
-
-    Logger.Log("[GeomechGPU] Downloading geothermal and fluid results from GPU...");
-
-    // Download temperature field
-    if (_params.EnableGeothermal && _bufTemperature != 0)
-    {
-        var tempData = new float[numVoxels];
-        EnqueueReadBuffer(_bufTemperature, tempData);
-
-        results.TemperatureField = new float[w, h, d];
-        var idx = 0;
-        for (var z = 0; z < d; z++)
-        for (var y = 0; y < h; y++)
-        for (var x = 0; x < w; x++)
-            results.TemperatureField[x, y, z] = tempData[idx++];
-
-        // Calculate statistics
-        var T_top = results.TemperatureField[w/2, h/2, 0];
-        var T_bottom = results.TemperatureField[w/2, h/2, d-1];
-        var depth_m = d * dx;
-        results.AverageThermalGradient = (T_bottom - T_top) / depth_m * 1000f; // °C/km
-
-        Logger.Log($"[GeomechGPU] Temperature field downloaded, gradient: {results.AverageThermalGradient:F1} °C/km");
-    }
-
-    // Download pressure and fluid fields
-    if (_params.EnableFluidInjection && _bufPressure != 0)
-    {
-        var pressureData = new float[numVoxels];
-        EnqueueReadBuffer(_bufPressure, pressureData);
-
-        results.PressureField = new float[w, h, d];
-        var idx = 0;
-        float minP = float.MaxValue, maxP = float.MinValue;
-        
-        for (var z = 0; z < d; z++)
-        for (var y = 0; y < h; y++)
-        for (var x = 0; x < w; x++)
-        {
-            var P = pressureData[idx++];
-            results.PressureField[x, y, z] = P;
-            if (results.MaterialLabels[x, y, z] != 0)
-            {
-                if (P < minP) minP = P;
-                if (P > maxP) maxP = P;
-            }
-        }
-
-        results.MinFluidPressure = minP;
-        results.MaxFluidPressure = maxP;
-        results.PeakInjectionPressure = maxP / 1e6f;
-
-        // Download fracture apertures
-        if (_bufFractureAperture != 0)
-        {
-            var apertureData = new float[numVoxels];
-            EnqueueReadBuffer(_bufFractureAperture, apertureData);
-
-            results.FractureAperture = new float[w, h, d];
-            idx = 0;
-            var fractureVolume = 0.0;
-            
             for (var z = 0; z < d; z++)
             for (var y = 0; y < h; y++)
             for (var x = 0; x < w; x++)
             {
-                var aperture = apertureData[idx++];
-                results.FractureAperture[x, y, z] = aperture;
-                if (aperture > _params.MinimumFractureAperture)
+                var P = pressureData[idx++];
+                results.PressureField[x, y, z] = P;
+                if (results.MaterialLabels[x, y, z] != 0)
                 {
-                    fractureVolume += aperture * dx * dx; // Aperture × face area
+                    if (P < minP) minP = P;
+                    if (P > maxP) maxP = P;
                 }
             }
 
-            results.TotalFractureVolume = (float)fractureVolume;
+            results.MinFluidPressure = minP;
+            results.MaxFluidPressure = maxP;
+            results.PeakInjectionPressure = maxP / 1e6f;
+
+            // Download fracture apertures
+            if (_bufFractureAperture != 0)
+            {
+                var apertureData = new float[numVoxels];
+                EnqueueReadBuffer(_bufFractureAperture, apertureData);
+
+                results.FractureAperture = new float[w, h, d];
+                idx = 0;
+                var fractureVolume = 0.0;
+
+                for (var z = 0; z < d; z++)
+                for (var y = 0; y < h; y++)
+                for (var x = 0; x < w; x++)
+                {
+                    var aperture = apertureData[idx++];
+                    results.FractureAperture[x, y, z] = aperture;
+                    if (aperture > _params.MinimumFractureAperture)
+                        fractureVolume += aperture * dx * dx; // Aperture × face area
+                }
+
+                results.TotalFractureVolume = (float)fractureVolume;
+            }
+
+            Logger.Log($"[GeomechGPU] Fluid fields downloaded, P range: {minP / 1e6f:F1} - {maxP / 1e6f:F1} MPa");
         }
 
-        Logger.Log($"[GeomechGPU] Fluid fields downloaded, P range: {minP/1e6f:F1} - {maxP/1e6f:F1} MPa");
+        _cl.Finish(_queue);
     }
 
-    _cl.Finish(_queue);
-}
     private GeomechanicalResults DownloadResults(BoundingBox extent, byte[,,] labels)
     {
         Logger.Log("[GeomechGPU] Downloading results from GPU");
@@ -2886,45 +2896,46 @@ private void PopulateGeothermalAndFluidResultsGPU(GeomechanicalResults results)
     }
 
     private void ReleaseAllGPUBuffers()
-{
-    foreach (var buffers in _chunkBuffers.Values)
-        buffers.Release(_cl);
-    _chunkBuffers.Clear();
+    {
+        foreach (var buffers in _chunkBuffers.Values)
+            buffers.Release(_cl);
+        _chunkBuffers.Clear();
 
-    if (_bufNodeX != 0) _cl.ReleaseMemObject(_bufNodeX);
-    if (_bufNodeY != 0) _cl.ReleaseMemObject(_bufNodeY);
-    if (_bufNodeZ != 0) _cl.ReleaseMemObject(_bufNodeZ);
-    if (_bufElementNodes != 0) _cl.ReleaseMemObject(_bufElementNodes);
-    if (_bufElementE != 0) _cl.ReleaseMemObject(_bufElementE);
-    if (_bufElementNu != 0) _cl.ReleaseMemObject(_bufElementNu);
-    if (_bufRowPtr != 0) _cl.ReleaseMemObject(_bufRowPtr);
-    if (_bufColIdx != 0) _cl.ReleaseMemObject(_bufColIdx);
-    if (_bufValues != 0) _cl.ReleaseMemObject(_bufValues);
-    if (_bufDisplacement != 0) _cl.ReleaseMemObject(_bufDisplacement);
-    if (_bufForce != 0) _cl.ReleaseMemObject(_bufForce);
-    if (_bufIsDirichlet != 0) _cl.ReleaseMemObject(_bufIsDirichlet);
-    if (_bufDirichletValue != 0) _cl.ReleaseMemObject(_bufDirichletValue);
-    if (_bufStressFields != 0) _cl.ReleaseMemObject(_bufStressFields);
-    if (_bufStrainFields != 0) _cl.ReleaseMemObject(_bufStrainFields);
-    if (_bufPrincipalStresses != 0) _cl.ReleaseMemObject(_bufPrincipalStresses);
-    if (_bufFailureIndex != 0) _cl.ReleaseMemObject(_bufFailureIndex);
-    if (_bufDamage != 0) _cl.ReleaseMemObject(_bufDamage);
-    if (_bufLabels != 0) _cl.ReleaseMemObject(_bufLabels);
-    if (_bufFractured != 0) _cl.ReleaseMemObject(_bufFractured);
-    if (_bufPartialSums != 0) _cl.ReleaseMemObject(_bufPartialSums);
-    if (_bufTempVector != 0) _cl.ReleaseMemObject(_bufTempVector);
-    
-    // Geothermal and fluid buffers
-    if (_bufTemperature != 0) _cl.ReleaseMemObject(_bufTemperature);
-    if (_bufPressure != 0) _cl.ReleaseMemObject(_bufPressure);
-    if (_bufPressureNew != 0) _cl.ReleaseMemObject(_bufPressureNew);
-    if (_bufFractureAperture != 0) _cl.ReleaseMemObject(_bufFractureAperture);
-    if (_bufFluidSaturation != 0) _cl.ReleaseMemObject(_bufFluidSaturation);
-    if (_bufVelocityX != 0) _cl.ReleaseMemObject(_bufVelocityX);
-    if (_bufVelocityY != 0) _cl.ReleaseMemObject(_bufVelocityY);
-    if (_bufVelocityZ != 0) _cl.ReleaseMemObject(_bufVelocityZ);
-    if (_bufConnectivity != 0) _cl.ReleaseMemObject(_bufConnectivity);
-}
+        if (_bufNodeX != 0) _cl.ReleaseMemObject(_bufNodeX);
+        if (_bufNodeY != 0) _cl.ReleaseMemObject(_bufNodeY);
+        if (_bufNodeZ != 0) _cl.ReleaseMemObject(_bufNodeZ);
+        if (_bufElementNodes != 0) _cl.ReleaseMemObject(_bufElementNodes);
+        if (_bufElementE != 0) _cl.ReleaseMemObject(_bufElementE);
+        if (_bufElementNu != 0) _cl.ReleaseMemObject(_bufElementNu);
+        if (_bufRowPtr != 0) _cl.ReleaseMemObject(_bufRowPtr);
+        if (_bufColIdx != 0) _cl.ReleaseMemObject(_bufColIdx);
+        if (_bufValues != 0) _cl.ReleaseMemObject(_bufValues);
+        if (_bufDisplacement != 0) _cl.ReleaseMemObject(_bufDisplacement);
+        if (_bufForce != 0) _cl.ReleaseMemObject(_bufForce);
+        if (_bufIsDirichlet != 0) _cl.ReleaseMemObject(_bufIsDirichlet);
+        if (_bufDirichletValue != 0) _cl.ReleaseMemObject(_bufDirichletValue);
+        if (_bufStressFields != 0) _cl.ReleaseMemObject(_bufStressFields);
+        if (_bufStrainFields != 0) _cl.ReleaseMemObject(_bufStrainFields);
+        if (_bufPrincipalStresses != 0) _cl.ReleaseMemObject(_bufPrincipalStresses);
+        if (_bufFailureIndex != 0) _cl.ReleaseMemObject(_bufFailureIndex);
+        if (_bufDamage != 0) _cl.ReleaseMemObject(_bufDamage);
+        if (_bufLabels != 0) _cl.ReleaseMemObject(_bufLabels);
+        if (_bufFractured != 0) _cl.ReleaseMemObject(_bufFractured);
+        if (_bufPartialSums != 0) _cl.ReleaseMemObject(_bufPartialSums);
+        if (_bufTempVector != 0) _cl.ReleaseMemObject(_bufTempVector);
+
+        // Geothermal and fluid buffers
+        if (_bufTemperature != 0) _cl.ReleaseMemObject(_bufTemperature);
+        if (_bufPressure != 0) _cl.ReleaseMemObject(_bufPressure);
+        if (_bufPressureNew != 0) _cl.ReleaseMemObject(_bufPressureNew);
+        if (_bufFractureAperture != 0) _cl.ReleaseMemObject(_bufFractureAperture);
+        if (_bufFluidSaturation != 0) _cl.ReleaseMemObject(_bufFluidSaturation);
+        if (_bufVelocityX != 0) _cl.ReleaseMemObject(_bufVelocityX);
+        if (_bufVelocityY != 0) _cl.ReleaseMemObject(_bufVelocityY);
+        if (_bufVelocityZ != 0) _cl.ReleaseMemObject(_bufVelocityZ);
+        if (_bufConnectivity != 0) _cl.ReleaseMemObject(_bufConnectivity);
+    }
+
     private void Cleanup()
     {
         if (!string.IsNullOrEmpty(_offloadPath) && Directory.Exists(_offloadPath))

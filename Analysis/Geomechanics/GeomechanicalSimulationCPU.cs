@@ -178,7 +178,7 @@ public partial class GeomechanicalSimulatorCPU
             Logger.Log("[GeomechCPU] Evaluating failure criteria...");
             EvaluateFailureChunked(results, labels, progress, token);
             token.ThrowIfCancellationRequested();
-            
+
             // STEP 7.5: Initialize geothermal and fluid fields
             if (_params.EnableGeothermal || _params.EnableFluidInjection)
             {
@@ -187,7 +187,7 @@ public partial class GeomechanicalSimulatorCPU
                 InitializeGeothermalAndFluid(labels, extent);
                 token.ThrowIfCancellationRequested();
             }
-            
+
             // STEP 7.6: Simulate fluid injection and hydraulic fracturing
             if (_params.EnableFluidInjection)
             {
@@ -195,12 +195,12 @@ public partial class GeomechanicalSimulatorCPU
                 Logger.Log("[GeomechCPU] Simulating fluid injection and fracturing...");
                 SimulateFluidInjectionAndFracturing(results, labels, progress, token);
                 token.ThrowIfCancellationRequested();
-    
+
                 // Recalculate failure with updated pressure field
                 Logger.Log("[GeomechCPU] Recalculating failure with pore pressure effects...");
                 EvaluateFailureChunked(results, labels, progress, token);
             }
-            
+
             // STEP 8: Apply plasticity correction if enabled
             if (_params.EnablePlasticity)
             {
@@ -225,7 +225,7 @@ public partial class GeomechanicalSimulatorCPU
                 Logger.Log("[GeomechCPU] Finalizing geothermal and fluid results...");
                 PopulateGeothermalAndFluidResults(results);
             }
-            
+
             results.ComputationTime = DateTime.Now - startTime;
             progress?.Report(1.0f);
 
@@ -618,242 +618,234 @@ public partial class GeomechanicalSimulatorCPU
     }
 
     private void ApplyBoundaryConditionsAndLoading(byte[,,] labels)
-{
-    var extent = _params.SimulationExtent;
-    var w = extent.Width;
-    var h = extent.Height;
-    var d = extent.Depth;
-
-    // Convert to Pa
-    var sigma1_Pa = _params.Sigma1 * 1e6f;
-    var sigma2_Pa = _params.Sigma2 * 1e6f;
-    var sigma3_Pa = _params.Sigma3 * 1e6f;
-
-    // Apply effective stress principle
-    if (_params.UsePorePressure)
     {
-        var pp_Pa = _params.PorePressure * 1e6f;
-        var alpha = _params.BiotCoefficient;
-        sigma1_Pa -= alpha * pp_Pa;
-        sigma2_Pa -= alpha * pp_Pa;
-        sigma3_Pa -= alpha * pp_Pa;
-    }
+        var extent = _params.SimulationExtent;
+        var w = extent.Width;
+        var h = extent.Height;
+        var d = extent.Depth;
 
-    var dx = _params.PixelSize / 1e6f;
+        // Convert to Pa
+        var sigma1_Pa = _params.Sigma1 * 1e6f;
+        var sigma2_Pa = _params.Sigma2 * 1e6f;
+        var sigma3_Pa = _params.Sigma3 * 1e6f;
 
-    Logger.Log("[GeomechCPU] Applying boundary conditions with proper tributary areas");
-
-    // Calculate nodal tributary areas using proper FEM assembly
-    // For each surface node, sum contributions from adjacent surface elements
-    var nodalArea = new Dictionary<int, float>();
-
-    // Top surface (Z = d-1): Apply σ₁
-    for (var y = 0; y < h - 1; y++)
-    for (var x = 0; x < w - 1; x++)
-    {
-        // Check if element exists (at least one node has material)
-        var hasMaterial = labels[x, y, d - 2] != 0 || labels[x + 1, y, d - 2] != 0 ||
-                          labels[x, y + 1, d - 2] != 0 || labels[x + 1, y + 1, d - 2] != 0;
-
-        if (!hasMaterial) continue;
-
-        // Element face area
-        var faceArea = dx * dx;
-
-        // Distribute to 4 corner nodes (bilinear shape functions at ξ=η=0 surface)
-        // Each node gets 1/4 of the element face area
-        var nodes = new[]
+        // Apply effective stress principle
+        if (_params.UsePorePressure)
         {
-            (d - 1) * h * w + y * w + x,
-            (d - 1) * h * w + y * w + (x + 1),
-            (d - 1) * h * w + (y + 1) * w + (x + 1),
-            (d - 1) * h * w + (y + 1) * w + x
-        };
-
-        foreach (var node in nodes)
-        {
-            if (!nodalArea.ContainsKey(node))
-                nodalArea[node] = 0f;
-            nodalArea[node] += faceArea / 4f;
+            var pp_Pa = _params.PorePressure * 1e6f;
+            var alpha = _params.BiotCoefficient;
+            sigma1_Pa -= alpha * pp_Pa;
+            sigma2_Pa -= alpha * pp_Pa;
+            sigma3_Pa -= alpha * pp_Pa;
         }
-    }
 
-    // Apply loads to top surface nodes
-    foreach (var kvp in nodalArea)
-    {
-        var nodeIdx = kvp.Key;
-        var area = kvp.Value;
-        var dofZ = _nodeToDOF[nodeIdx] + 2;
+        var dx = _params.PixelSize / 1e6f;
 
-        if (!_isDirichletDOF[dofZ])
+        Logger.Log("[GeomechCPU] Applying boundary conditions with proper tributary areas");
+
+        // Calculate nodal tributary areas using proper FEM assembly
+        // For each surface node, sum contributions from adjacent surface elements
+        var nodalArea = new Dictionary<int, float>();
+
+        // Top surface (Z = d-1): Apply σ₁
+        for (var y = 0; y < h - 1; y++)
+        for (var x = 0; x < w - 1; x++)
         {
-            // Traction boundary condition: t = σ·n, where n = [0, 0, -1] for top surface
-            // Force = traction × area = σ₁ × area (negative because pushing down)
-            _force[dofZ] -= sigma1_Pa * area;
+            // Check if element exists (at least one node has material)
+            var hasMaterial = labels[x, y, d - 2] != 0 || labels[x + 1, y, d - 2] != 0 ||
+                              labels[x, y + 1, d - 2] != 0 || labels[x + 1, y + 1, d - 2] != 0;
+
+            if (!hasMaterial) continue;
+
+            // Element face area
+            var faceArea = dx * dx;
+
+            // Distribute to 4 corner nodes (bilinear shape functions at ξ=η=0 surface)
+            // Each node gets 1/4 of the element face area
+            var nodes = new[]
+            {
+                (d - 1) * h * w + y * w + x,
+                (d - 1) * h * w + y * w + x + 1,
+                (d - 1) * h * w + (y + 1) * w + x + 1,
+                (d - 1) * h * w + (y + 1) * w + x
+            };
+
+            foreach (var node in nodes)
+            {
+                if (!nodalArea.ContainsKey(node))
+                    nodalArea[node] = 0f;
+                nodalArea[node] += faceArea / 4f;
+            }
         }
-    }
 
-    Logger.Log($"[GeomechCPU] Applied σ₁={_params.Sigma1} MPa to {nodalArea.Count} top surface nodes");
-
-    // Fix bottom surface (Z=0) - Dirichlet BC
-    for (var y = 0; y < h; y++)
-    for (var x = 0; x < w; x++)
-    {
-        var nodeIdx = (0 * h + y) * w + x;
-        var dofZ = _nodeToDOF[nodeIdx] + 2;
-        _isDirichletDOF[dofZ] = true;
-        _dirichletValue[dofZ] = 0.0f;
-    }
-
-    // Y- and Y+ faces: Apply σ₂
-    nodalArea.Clear();
-
-    // Y- face (y=0)
-    for (var z = 0; z < d - 1; z++)
-    for (var x = 0; x < w - 1; x++)
-    {
-        var hasMaterial = labels[x, 0, z] != 0 || labels[x + 1, 0, z] != 0 ||
-                          labels[x, 0, z + 1] != 0 || labels[x + 1, 0, z + 1] != 0;
-
-        if (!hasMaterial) continue;
-
-        var faceArea = dx * dx;
-        var nodes = new[]
+        // Apply loads to top surface nodes
+        foreach (var kvp in nodalArea)
         {
-            z * h * w + 0 * w + x,
-            z * h * w + 0 * w + (x + 1),
-            (z + 1) * h * w + 0 * w + (x + 1),
-            (z + 1) * h * w + 0 * w + x
-        };
+            var nodeIdx = kvp.Key;
+            var area = kvp.Value;
+            var dofZ = _nodeToDOF[nodeIdx] + 2;
 
-        foreach (var node in nodes)
-        {
-            if (!nodalArea.ContainsKey(node))
-                nodalArea[node] = 0f;
-            nodalArea[node] += faceArea / 4f;
+            if (!_isDirichletDOF[dofZ])
+                // Traction boundary condition: t = σ·n, where n = [0, 0, -1] for top surface
+                // Force = traction × area = σ₁ × area (negative because pushing down)
+                _force[dofZ] -= sigma1_Pa * area;
         }
-    }
 
-    foreach (var kvp in nodalArea)
-    {
-        var nodeIdx = kvp.Key;
-        var area = kvp.Value;
-        var dofY = _nodeToDOF[nodeIdx] + 1;
+        Logger.Log($"[GeomechCPU] Applied σ₁={_params.Sigma1} MPa to {nodalArea.Count} top surface nodes");
 
-        if (!_isDirichletDOF[dofY])
+        // Fix bottom surface (Z=0) - Dirichlet BC
+        for (var y = 0; y < h; y++)
+        for (var x = 0; x < w; x++)
         {
-            // Normal points in -Y direction, so force is positive for compression
-            _force[dofY] += sigma2_Pa * area;
+            var nodeIdx = (0 * h + y) * w + x;
+            var dofZ = _nodeToDOF[nodeIdx] + 2;
+            _isDirichletDOF[dofZ] = true;
+            _dirichletValue[dofZ] = 0.0f;
         }
-    }
 
-    // Y+ face (y=h-1)
-    nodalArea.Clear();
-    for (var z = 0; z < d - 1; z++)
-    for (var x = 0; x < w - 1; x++)
-    {
-        var hasMaterial = labels[x, h - 2, z] != 0 || labels[x + 1, h - 2, z] != 0 ||
-                          labels[x, h - 2, z + 1] != 0 || labels[x + 1, h - 2, z + 1] != 0;
+        // Y- and Y+ faces: Apply σ₂
+        nodalArea.Clear();
 
-        if (!hasMaterial) continue;
-
-        var faceArea = dx * dx;
-        var nodes = new[]
+        // Y- face (y=0)
+        for (var z = 0; z < d - 1; z++)
+        for (var x = 0; x < w - 1; x++)
         {
-            z * h * w + (h - 1) * w + x,
-            z * h * w + (h - 1) * w + (x + 1),
-            (z + 1) * h * w + (h - 1) * w + (x + 1),
-            (z + 1) * h * w + (h - 1) * w + x
-        };
+            var hasMaterial = labels[x, 0, z] != 0 || labels[x + 1, 0, z] != 0 ||
+                              labels[x, 0, z + 1] != 0 || labels[x + 1, 0, z + 1] != 0;
 
-        foreach (var node in nodes)
-        {
-            if (!nodalArea.ContainsKey(node))
-                nodalArea[node] = 0f;
-            nodalArea[node] += faceArea / 4f;
+            if (!hasMaterial) continue;
+
+            var faceArea = dx * dx;
+            var nodes = new[]
+            {
+                z * h * w + 0 * w + x,
+                z * h * w + 0 * w + x + 1,
+                (z + 1) * h * w + 0 * w + x + 1,
+                (z + 1) * h * w + 0 * w + x
+            };
+
+            foreach (var node in nodes)
+            {
+                if (!nodalArea.ContainsKey(node))
+                    nodalArea[node] = 0f;
+                nodalArea[node] += faceArea / 4f;
+            }
         }
-    }
 
-    foreach (var kvp in nodalArea)
-    {
-        var nodeIdx = kvp.Key;
-        var area = kvp.Value;
-        var dofY = _nodeToDOF[nodeIdx] + 1;
-
-        if (!_isDirichletDOF[dofY])
+        foreach (var kvp in nodalArea)
         {
-            // Normal points in +Y direction, force is negative for compression
-            _force[dofY] -= sigma2_Pa * area;
+            var nodeIdx = kvp.Key;
+            var area = kvp.Value;
+            var dofY = _nodeToDOF[nodeIdx] + 1;
+
+            if (!_isDirichletDOF[dofY])
+                // Normal points in -Y direction, so force is positive for compression
+                _force[dofY] += sigma2_Pa * area;
         }
-    }
 
-    Logger.Log($"[GeomechCPU] Applied σ₂={_params.Sigma2} MPa to Y-faces");
-
-    // X- face (x=0): Fix to prevent rigid body motion
-    for (var z = 0; z < d; z++)
-    for (var y = 0; y < h; y++)
-    {
-        var nodeIdx = (z * h + y) * w + 0;
-        var dofX = _nodeToDOF[nodeIdx] + 0;
-        _isDirichletDOF[dofX] = true;
-        _dirichletValue[dofX] = 0.0f;
-    }
-
-    // X+ face (x=w-1): Apply σ₃
-    nodalArea.Clear();
-    for (var z = 0; z < d - 1; z++)
-    for (var y = 0; y < h - 1; y++)
-    {
-        var hasMaterial = labels[w - 2, y, z] != 0 || labels[w - 2, y + 1, z] != 0 ||
-                          labels[w - 2, y, z + 1] != 0 || labels[w - 2, y + 1, z + 1] != 0;
-
-        if (!hasMaterial) continue;
-
-        var faceArea = dx * dx;
-        var nodes = new[]
+        // Y+ face (y=h-1)
+        nodalArea.Clear();
+        for (var z = 0; z < d - 1; z++)
+        for (var x = 0; x < w - 1; x++)
         {
-            z * h * w + y * w + (w - 1),
-            z * h * w + (y + 1) * w + (w - 1),
-            (z + 1) * h * w + (y + 1) * w + (w - 1),
-            (z + 1) * h * w + y * w + (w - 1)
-        };
+            var hasMaterial = labels[x, h - 2, z] != 0 || labels[x + 1, h - 2, z] != 0 ||
+                              labels[x, h - 2, z + 1] != 0 || labels[x + 1, h - 2, z + 1] != 0;
 
-        foreach (var node in nodes)
-        {
-            if (!nodalArea.ContainsKey(node))
-                nodalArea[node] = 0f;
-            nodalArea[node] += faceArea / 4f;
+            if (!hasMaterial) continue;
+
+            var faceArea = dx * dx;
+            var nodes = new[]
+            {
+                z * h * w + (h - 1) * w + x,
+                z * h * w + (h - 1) * w + x + 1,
+                (z + 1) * h * w + (h - 1) * w + x + 1,
+                (z + 1) * h * w + (h - 1) * w + x
+            };
+
+            foreach (var node in nodes)
+            {
+                if (!nodalArea.ContainsKey(node))
+                    nodalArea[node] = 0f;
+                nodalArea[node] += faceArea / 4f;
+            }
         }
-    }
 
-    foreach (var kvp in nodalArea)
-    {
-        var nodeIdx = kvp.Key;
-        var area = kvp.Value;
-        var dofX = _nodeToDOF[nodeIdx] + 0;
-
-        if (!_isDirichletDOF[dofX])
+        foreach (var kvp in nodalArea)
         {
-            // Normal points in +X direction, force is negative for compression
-            _force[dofX] -= sigma3_Pa * area;
+            var nodeIdx = kvp.Key;
+            var area = kvp.Value;
+            var dofY = _nodeToDOF[nodeIdx] + 1;
+
+            if (!_isDirichletDOF[dofY])
+                // Normal points in +Y direction, force is negative for compression
+                _force[dofY] -= sigma2_Pa * area;
         }
+
+        Logger.Log($"[GeomechCPU] Applied σ₂={_params.Sigma2} MPa to Y-faces");
+
+        // X- face (x=0): Fix to prevent rigid body motion
+        for (var z = 0; z < d; z++)
+        for (var y = 0; y < h; y++)
+        {
+            var nodeIdx = (z * h + y) * w + 0;
+            var dofX = _nodeToDOF[nodeIdx] + 0;
+            _isDirichletDOF[dofX] = true;
+            _dirichletValue[dofX] = 0.0f;
+        }
+
+        // X+ face (x=w-1): Apply σ₃
+        nodalArea.Clear();
+        for (var z = 0; z < d - 1; z++)
+        for (var y = 0; y < h - 1; y++)
+        {
+            var hasMaterial = labels[w - 2, y, z] != 0 || labels[w - 2, y + 1, z] != 0 ||
+                              labels[w - 2, y, z + 1] != 0 || labels[w - 2, y + 1, z + 1] != 0;
+
+            if (!hasMaterial) continue;
+
+            var faceArea = dx * dx;
+            var nodes = new[]
+            {
+                z * h * w + y * w + (w - 1),
+                z * h * w + (y + 1) * w + (w - 1),
+                (z + 1) * h * w + (y + 1) * w + (w - 1),
+                (z + 1) * h * w + y * w + (w - 1)
+            };
+
+            foreach (var node in nodes)
+            {
+                if (!nodalArea.ContainsKey(node))
+                    nodalArea[node] = 0f;
+                nodalArea[node] += faceArea / 4f;
+            }
+        }
+
+        foreach (var kvp in nodalArea)
+        {
+            var nodeIdx = kvp.Key;
+            var area = kvp.Value;
+            var dofX = _nodeToDOF[nodeIdx] + 0;
+
+            if (!_isDirichletDOF[dofX])
+                // Normal points in +X direction, force is negative for compression
+                _force[dofX] -= sigma3_Pa * area;
+        }
+
+        Logger.Log($"[GeomechCPU] Applied σ₃={_params.Sigma3} MPa to X+ face");
+
+        // Fix one corner to prevent rigid body translation and rotation
+        var cornerNode = 0;
+        for (var i = 0; i < 3; i++)
+        {
+            _isDirichletDOF[_nodeToDOF[cornerNode] + i] = true;
+            _dirichletValue[_nodeToDOF[cornerNode] + i] = 0.0f;
+        }
+
+        var totalForce = _force.Sum(f => Math.Abs(f));
+        var fixedDOFs = _isDirichletDOF.Count(b => b);
+        Logger.Log($"[GeomechCPU] Total applied force magnitude: {totalForce / 1e6f:F2} MN");
+        Logger.Log($"[GeomechCPU] Fixed DOFs: {fixedDOFs} / {_numDOFs}");
     }
-
-    Logger.Log($"[GeomechCPU] Applied σ₃={_params.Sigma3} MPa to X+ face");
-
-    // Fix one corner to prevent rigid body translation and rotation
-    var cornerNode = 0;
-    for (var i = 0; i < 3; i++)
-    {
-        _isDirichletDOF[_nodeToDOF[cornerNode] + i] = true;
-        _dirichletValue[_nodeToDOF[cornerNode] + i] = 0.0f;
-    }
-
-    var totalForce = _force.Sum(f => Math.Abs(f));
-    var fixedDOFs = _isDirichletDOF.Count(b => b);
-    Logger.Log($"[GeomechCPU] Total applied force magnitude: {totalForce / 1e6f:F2} MN");
-    Logger.Log($"[GeomechCPU] Fixed DOFs: {fixedDOFs} / {_numDOFs}");
-}
 
     private bool SolveDisplacements(IProgress<float> progress, CancellationToken token)
     {
@@ -1221,121 +1213,120 @@ public partial class GeomechanicalSimulatorCPU
     }
 
     private void ApplyPlasticCorrection(GeomechanicalResults results, byte[,,] labels,
-    IProgress<float> progress, CancellationToken token)
-{
-    if (!_params.EnablePlasticity) return;
-
-    Logger.Log("[GeomechCPU] Applying elasto-plastic correction with strain hardening");
-
-    var w = results.StressXX.GetLength(0);
-    var h = results.StressYY.GetLength(1);
-    var d = results.StressZZ.GetLength(2);
-
-    // Plasticity parameters
-    var yield0 = _params.Cohesion * 1e6f * 2f; // Initial yield stress σ_y = 2c (von Mises)
-    var H = _params.YoungModulus * 1e6f * 0.01f; // Isotropic hardening modulus
-    var E = _params.YoungModulus * 1e6f;
-    var nu = _params.PoissonRatio;
-    var mu = E / (2f * (1f + nu)); // Shear modulus
-    var K = E / (3f * (1f - 2f * nu)); // Bulk modulus
-
-    // Initialize plastic strain field if needed
-    if (results.StrainYY == null) // Reusing StrainYY to store equivalent plastic strain
+        IProgress<float> progress, CancellationToken token)
     {
-        results.StrainYY = new float[w, h, d];
+        if (!_params.EnablePlasticity) return;
+
+        Logger.Log("[GeomechCPU] Applying elasto-plastic correction with strain hardening");
+
+        var w = results.StressXX.GetLength(0);
+        var h = results.StressYY.GetLength(1);
+        var d = results.StressZZ.GetLength(2);
+
+        // Plasticity parameters
+        var yield0 = _params.Cohesion * 1e6f * 2f; // Initial yield stress σ_y = 2c (von Mises)
+        var H = _params.YoungModulus * 1e6f * 0.01f; // Isotropic hardening modulus
+        var E = _params.YoungModulus * 1e6f;
+        var nu = _params.PoissonRatio;
+        var mu = E / (2f * (1f + nu)); // Shear modulus
+        var K = E / (3f * (1f - 2f * nu)); // Bulk modulus
+
+        // Initialize plastic strain field if needed
+        if (results.StrainYY == null) // Reusing StrainYY to store equivalent plastic strain
+            results.StrainYY = new float[w, h, d];
+
+        var plasticVoxels = 0;
+        var maxPlasticStrain = 0f;
+
+        Parallel.For(0, d, z =>
+        {
+            var localPlastic = 0;
+            var localMaxEpEq = 0f;
+
+            for (var y = 0; y < h; y++)
+            for (var x = 0; x < w; x++)
+            {
+                if (labels[x, y, z] == 0) continue;
+
+                // Get stress tensor
+                var sxx = results.StressXX[x, y, z];
+                var syy = results.StressYY[x, y, z];
+                var szz = results.StressZZ[x, y, z];
+                var sxy = results.StressXY[x, y, z];
+                var sxz = results.StressXZ[x, y, z];
+                var syz = results.StressYZ[x, y, z];
+
+                // Mean stress (hydrostatic pressure)
+                var p = (sxx + syy + szz) / 3f;
+
+                // Deviatoric stress tensor
+                var sxx_dev = sxx - p;
+                var syy_dev = syy - p;
+                var szz_dev = szz - p;
+
+                // Von Mises equivalent stress: σ_eq = √(3·J₂)
+                var J2 = 0.5f * (sxx_dev * sxx_dev + syy_dev * syy_dev + szz_dev * szz_dev) +
+                         sxy * sxy + sxz * sxz + syz * syz;
+                var sigma_eq = MathF.Sqrt(3f * J2);
+
+                // Current equivalent plastic strain
+                var ep_eq = results.StrainYY[x, y, z]; // Stored from previous iteration
+
+                // Yield stress with isotropic hardening: σ_y = σ_y0 + H·εᵖ_eq
+                var sigma_y = yield0 + H * ep_eq;
+
+                // Yield function: f = σ_eq - σ_y
+                var f = sigma_eq - sigma_y;
+
+                if (f > 0) // Plastic loading
+                {
+                    localPlastic++;
+
+                    // Plastic multiplier (radial return mapping)
+                    // Δλ = f / (3μ + H)
+                    var delta_lambda = f / (3f * mu + H);
+
+                    // Return factor for deviatoric stress
+                    // σ'_dev_new = σ'_dev · (σ_y / σ_eq)
+                    var return_factor = sigma_y / sigma_eq;
+
+                    // Update deviatoric stresses (return to yield surface)
+                    sxx_dev *= return_factor;
+                    syy_dev *= return_factor;
+                    szz_dev *= return_factor;
+                    sxy *= return_factor;
+                    sxz *= return_factor;
+                    syz *= return_factor;
+
+                    // Reconstruct total stress (hydrostatic part unchanged in J2 plasticity)
+                    results.StressXX[x, y, z] = sxx_dev + p;
+                    results.StressYY[x, y, z] = syy_dev + p;
+                    results.StressZZ[x, y, z] = szz_dev + p;
+                    results.StressXY[x, y, z] = sxy;
+                    results.StressXZ[x, y, z] = sxz;
+                    results.StressYZ[x, y, z] = syz;
+
+                    // Update equivalent plastic strain
+                    // Δεᵖ_eq = √(2/3) · Δλ (for von Mises)
+                    var delta_ep_eq = MathF.Sqrt(2f / 3f) * delta_lambda;
+                    results.StrainYY[x, y, z] = ep_eq + delta_ep_eq;
+
+                    localMaxEpEq = Math.Max(localMaxEpEq, results.StrainYY[x, y, z]);
+                }
+            }
+
+            lock (results)
+            {
+                plasticVoxels += localPlastic;
+                maxPlasticStrain = Math.Max(maxPlasticStrain, localMaxEpEq);
+            }
+        });
+
+        Logger.Log($"[GeomechCPU] Plasticity: {plasticVoxels} voxels yielded " +
+                   $"({100f * plasticVoxels / results.TotalVoxels:F2}%), " +
+                   $"max plastic strain: {maxPlasticStrain:E3}");
     }
 
-    var plasticVoxels = 0;
-    var maxPlasticStrain = 0f;
-
-    Parallel.For(0, d, z =>
-    {
-        var localPlastic = 0;
-        var localMaxEpEq = 0f;
-
-        for (var y = 0; y < h; y++)
-        for (var x = 0; x < w; x++)
-        {
-            if (labels[x, y, z] == 0) continue;
-
-            // Get stress tensor
-            var sxx = results.StressXX[x, y, z];
-            var syy = results.StressYY[x, y, z];
-            var szz = results.StressZZ[x, y, z];
-            var sxy = results.StressXY[x, y, z];
-            var sxz = results.StressXZ[x, y, z];
-            var syz = results.StressYZ[x, y, z];
-
-            // Mean stress (hydrostatic pressure)
-            var p = (sxx + syy + szz) / 3f;
-
-            // Deviatoric stress tensor
-            var sxx_dev = sxx - p;
-            var syy_dev = syy - p;
-            var szz_dev = szz - p;
-
-            // Von Mises equivalent stress: σ_eq = √(3·J₂)
-            var J2 = 0.5f * (sxx_dev * sxx_dev + syy_dev * syy_dev + szz_dev * szz_dev) +
-                     sxy * sxy + sxz * sxz + syz * syz;
-            var sigma_eq = MathF.Sqrt(3f * J2);
-
-            // Current equivalent plastic strain
-            var ep_eq = results.StrainYY[x, y, z]; // Stored from previous iteration
-
-            // Yield stress with isotropic hardening: σ_y = σ_y0 + H·εᵖ_eq
-            var sigma_y = yield0 + H * ep_eq;
-
-            // Yield function: f = σ_eq - σ_y
-            var f = sigma_eq - sigma_y;
-
-            if (f > 0) // Plastic loading
-            {
-                localPlastic++;
-
-                // Plastic multiplier (radial return mapping)
-                // Δλ = f / (3μ + H)
-                var delta_lambda = f / (3f * mu + H);
-
-                // Return factor for deviatoric stress
-                // σ'_dev_new = σ'_dev · (σ_y / σ_eq)
-                var return_factor = sigma_y / sigma_eq;
-
-                // Update deviatoric stresses (return to yield surface)
-                sxx_dev *= return_factor;
-                syy_dev *= return_factor;
-                szz_dev *= return_factor;
-                sxy *= return_factor;
-                sxz *= return_factor;
-                syz *= return_factor;
-
-                // Reconstruct total stress (hydrostatic part unchanged in J2 plasticity)
-                results.StressXX[x, y, z] = sxx_dev + p;
-                results.StressYY[x, y, z] = syy_dev + p;
-                results.StressZZ[x, y, z] = szz_dev + p;
-                results.StressXY[x, y, z] = sxy;
-                results.StressXZ[x, y, z] = sxz;
-                results.StressYZ[x, y, z] = syz;
-
-                // Update equivalent plastic strain
-                // Δεᵖ_eq = √(2/3) · Δλ (for von Mises)
-                var delta_ep_eq = MathF.Sqrt(2f / 3f) * delta_lambda;
-                results.StrainYY[x, y, z] = ep_eq + delta_ep_eq;
-
-                localMaxEpEq = Math.Max(localMaxEpEq, results.StrainYY[x, y, z]);
-            }
-        }
-
-        lock (results)
-        {
-            plasticVoxels += localPlastic;
-            maxPlasticStrain = Math.Max(maxPlasticStrain, localMaxEpEq);
-        }
-    });
-
-    Logger.Log($"[GeomechCPU] Plasticity: {plasticVoxels} voxels yielded " +
-               $"({100f * plasticVoxels / results.TotalVoxels:F2}%), " +
-               $"max plastic strain: {maxPlasticStrain:E3}");
-}
     private void ValidateChunkBoundaries()
     {
         for (var i = 0; i < _chunks.Count - 1; i++)
@@ -1425,168 +1416,169 @@ public partial class GeomechanicalSimulatorCPU
         return (sigma1, sigma2, sigma3);
     }
 
-    
 
     private void EvaluateFailureChunked(GeomechanicalResults results, byte[,,] labels,
-    IProgress<float> progress, CancellationToken token)
-{
-    var w = results.StressXX.GetLength(0);
-    var h = results.StressXX.GetLength(1);
-    var d = results.StressXX.GetLength(2);
-
-    var cohesion_Pa = _params.Cohesion * 1e6f;
-    var phi = _params.FrictionAngle * MathF.PI / 180f;
-    var tensileStrength_Pa = _params.TensileStrength * 1e6f;
-
-    // Progressive damage parameters (Mazars 1986 model)
-    const float DAMAGE_INITIATION = 0.7f;
-    const float DAMAGE_EXPONENT = 2.0f;
-    const float RESIDUAL_STRENGTH = 0.05f;
-
-    var failedCount = 0;
-    var totalCount = 0;
-
-    // Apply pore pressure correction if needed
-    var alpha = _params.BiotCoefficient;
-    var pp_Pa = _params.UsePorePressure ? _params.PorePressure * 1e6f : 0f;
-
-    Parallel.For(0, d, z =>
+        IProgress<float> progress, CancellationToken token)
     {
-        var localFailed = 0;
-        var localTotal = 0;
+        var w = results.StressXX.GetLength(0);
+        var h = results.StressXX.GetLength(1);
+        var d = results.StressXX.GetLength(2);
 
-        for (var y = 0; y < h; y++)
-        for (var x = 0; x < w; x++)
+        var cohesion_Pa = _params.Cohesion * 1e6f;
+        var phi = _params.FrictionAngle * MathF.PI / 180f;
+        var tensileStrength_Pa = _params.TensileStrength * 1e6f;
+
+        // Progressive damage parameters (Mazars 1986 model)
+        const float DAMAGE_INITIATION = 0.7f;
+        const float DAMAGE_EXPONENT = 2.0f;
+        const float RESIDUAL_STRENGTH = 0.05f;
+
+        var failedCount = 0;
+        var totalCount = 0;
+
+        // Apply pore pressure correction if needed
+        var alpha = _params.BiotCoefficient;
+        var pp_Pa = _params.UsePorePressure ? _params.PorePressure * 1e6f : 0f;
+
+        Parallel.For(0, d, z =>
         {
-            if (labels[x, y, z] == 0) continue;
+            var localFailed = 0;
+            var localTotal = 0;
 
-            localTotal++;
-
-            // Get principal stresses (already calculated)
-            var sigma1 = results.Sigma1[x, y, z];
-            var sigma2 = results.Sigma2[x, y, z];
-            var sigma3 = results.Sigma3[x, y, z];
-
-            // Apply effective stress if using pore pressure
-            if (_params.UsePorePressure)
+            for (var y = 0; y < h; y++)
+            for (var x = 0; x < w; x++)
             {
-                sigma1 -= alpha * pp_Pa;
-                sigma2 -= alpha * pp_Pa;
-                sigma3 -= alpha * pp_Pa;
+                if (labels[x, y, z] == 0) continue;
+
+                localTotal++;
+
+                // Get principal stresses (already calculated)
+                var sigma1 = results.Sigma1[x, y, z];
+                var sigma2 = results.Sigma2[x, y, z];
+                var sigma3 = results.Sigma3[x, y, z];
+
+                // Apply effective stress if using pore pressure
+                if (_params.UsePorePressure)
+                {
+                    sigma1 -= alpha * pp_Pa;
+                    sigma2 -= alpha * pp_Pa;
+                    sigma3 -= alpha * pp_Pa;
+                }
+
+                // Calculate failure index using PROPER σ₁, σ₂, σ₃
+                var failureIndex = CalculateFailureIndex(sigma1, sigma2, sigma3,
+                    cohesion_Pa, phi, tensileStrength_Pa);
+
+                results.FailureIndex[x, y, z] = failureIndex;
+
+                // Progressive damage calculation
+                var damage = 0f;
+
+                if (failureIndex >= DAMAGE_INITIATION)
+                {
+                    if (failureIndex >= 1.0f)
+                    {
+                        // Complete failure with exponential softening (Mazars law)
+                        var overstress = failureIndex - 1.0f;
+                        damage = 1.0f - RESIDUAL_STRENGTH * MathF.Exp(-DAMAGE_EXPONENT * overstress);
+                        damage = Math.Clamp(damage, 0f, 1.0f - RESIDUAL_STRENGTH);
+
+                        results.FractureField[x, y, z] = true;
+                        localFailed++;
+                    }
+                    else
+                    {
+                        // Progressive damage before failure (Kachanov damage mechanics)
+                        // D = ((f - f₀)/(1 - f₀))^m
+                        var normalizedLoad = (failureIndex - DAMAGE_INITIATION) / (1.0f - DAMAGE_INITIATION);
+                        damage = MathF.Pow(normalizedLoad, DAMAGE_EXPONENT);
+                        damage = Math.Clamp(damage, 0f, 0.8f);
+                    }
+                }
+
+                results.DamageField[x, y, z] = (byte)(damage * 255);
+
+                // Apply damage to stresses (Continuum Damage Mechanics)
+                // σ_damaged = (1 - D) · σ
+                var degradationFactor = 1.0f - damage;
+                results.StressXX[x, y, z] *= degradationFactor;
+                results.StressYY[x, y, z] *= degradationFactor;
+                results.StressZZ[x, y, z] *= degradationFactor;
+                results.StressXY[x, y, z] *= degradationFactor;
+                results.StressXZ[x, y, z] *= degradationFactor;
+                results.StressYZ[x, y, z] *= degradationFactor;
             }
 
-            // Calculate failure index using PROPER σ₁, σ₂, σ₃
-            var failureIndex = CalculateFailureIndex(sigma1, sigma2, sigma3,
-                cohesion_Pa, phi, tensileStrength_Pa);
-
-            results.FailureIndex[x, y, z] = failureIndex;
-
-            // Progressive damage calculation
-            var damage = 0f;
-
-            if (failureIndex >= DAMAGE_INITIATION)
+            lock (results)
             {
-                if (failureIndex >= 1.0f)
-                {
-                    // Complete failure with exponential softening (Mazars law)
-                    var overstress = failureIndex - 1.0f;
-                    damage = 1.0f - RESIDUAL_STRENGTH * MathF.Exp(-DAMAGE_EXPONENT * overstress);
-                    damage = Math.Clamp(damage, 0f, 1.0f - RESIDUAL_STRENGTH);
-
-                    results.FractureField[x, y, z] = true;
-                    localFailed++;
-                }
-                else
-                {
-                    // Progressive damage before failure (Kachanov damage mechanics)
-                    // D = ((f - f₀)/(1 - f₀))^m
-                    var normalizedLoad = (failureIndex - DAMAGE_INITIATION) / (1.0f - DAMAGE_INITIATION);
-                    damage = MathF.Pow(normalizedLoad, DAMAGE_EXPONENT);
-                    damage = Math.Clamp(damage, 0f, 0.8f);
-                }
+                failedCount += localFailed;
+                totalCount += localTotal;
             }
+        });
 
-            results.DamageField[x, y, z] = (byte)(damage * 255);
+        results.FailedVoxels = failedCount;
+        results.TotalVoxels = totalCount;
+        results.FailedVoxelPercentage = totalCount > 0 ? 100f * failedCount / totalCount : 0;
 
-            // Apply damage to stresses (Continuum Damage Mechanics)
-            // σ_damaged = (1 - D) · σ
-            var degradationFactor = 1.0f - damage;
-            results.StressXX[x, y, z] *= degradationFactor;
-            results.StressYY[x, y, z] *= degradationFactor;
-            results.StressZZ[x, y, z] *= degradationFactor;
-            results.StressXY[x, y, z] *= degradationFactor;
-            results.StressXZ[x, y, z] *= degradationFactor;
-            results.StressYZ[x, y, z] *= degradationFactor;
-        }
-
-        lock (results)
-        {
-            failedCount += localFailed;
-            totalCount += localTotal;
-        }
-    });
-
-    results.FailedVoxels = failedCount;
-    results.TotalVoxels = totalCount;
-    results.FailedVoxelPercentage = totalCount > 0 ? 100f * failedCount / totalCount : 0;
-
-    Logger.Log($"[GeomechCPU] Progressive damage: {failedCount} fractured, " +
-               $"avg damage = {CalculateAverageDamage(results):F2}%");
-}
-    private float CalculateFailureIndex(float sigma1, float sigma2, float sigma3,
-    float cohesion, float phi, float tensileStrength)
-{
-    switch (_params.FailureCriterion)
-    {
-        case FailureCriterion.MohrCoulomb:
-            // Mohr-Coulomb: |σ₁ - σ₃| = 2c·cos(φ) + (σ₁ + σ₃)·sin(φ)
-            var left = sigma1 - sigma3;
-            var right = 2 * cohesion * MathF.Cos(phi) + (sigma1 + sigma3) * MathF.Sin(phi);
-            return right > 1e-9f ? left / right : left;
-
-        case FailureCriterion.DruckerPrager:
-            // Drucker-Prager: √J₂ = α·I₁ + k
-            // Uses all three principal stresses
-            var I1 = sigma1 + sigma2 + sigma3;
-            var s1_dev = sigma1 - I1/3f;
-            var s2_dev = sigma2 - I1/3f;
-            var s3_dev = sigma3 - I1/3f;
-            var J2 = (s1_dev*s1_dev + s2_dev*s2_dev + s3_dev*s3_dev) / 2f;
-            var q = MathF.Sqrt(3f * J2);
-            
-            var alpha_dp = 2 * MathF.Sin(phi) / (MathF.Sqrt(3f) * (3 - MathF.Sin(phi)));
-            var k = 6 * cohesion * MathF.Cos(phi) / (MathF.Sqrt(3f) * (3 - MathF.Sin(phi)));
-            return k > 1e-9f ? (q - alpha_dp * I1) / k : q - alpha_dp * I1;
-
-        case FailureCriterion.HoekBrown:
-            // Hoek-Brown: σ₁ = σ₃ + σ_ci·(m_b·σ₃/σ_ci + s)^a
-            var ucs_Pa = 2 * cohesion * MathF.Cos(phi) / (1 - MathF.Sin(phi));
-            var mb = _params.HoekBrown_mb;
-            var s = _params.HoekBrown_s;
-            var a = _params.HoekBrown_a;
-            
-            if (sigma3 < 0 && s < 0.001f) // Tension region
-                return tensileStrength > 1e-9f ? -sigma3 / tensileStrength : -sigma3;
-            
-            var term = mb * sigma3 / ucs_Pa + s;
-            if (term < 0) term = 0; // Cannot have negative term under root
-            
-            var strength = sigma3 + ucs_Pa * MathF.Pow(term, a);
-            return strength > 1e-9f ? sigma1 / strength : sigma1;
-
-        case FailureCriterion.Griffith:
-            // Griffith: For 3D state, use minimum principal stress
-            if (sigma3 < 0) // Tensile
-                return tensileStrength > 1e-9f ? -sigma3 / tensileStrength : -sigma3;
-            else // Compression: (σ₁ - σ₃)² = 8T₀(σ₁ + σ₃)
-                return tensileStrength * 8 > 1e-9f ? 
-                    MathF.Pow(sigma1 - sigma3, 2) / (8 * tensileStrength * (sigma1 + sigma3 + 1e-6f)) : 
-                    sigma1 - sigma3;
-
-        default:
-            return 0f;
+        Logger.Log($"[GeomechCPU] Progressive damage: {failedCount} fractured, " +
+                   $"avg damage = {CalculateAverageDamage(results):F2}%");
     }
-}
+
+    private float CalculateFailureIndex(float sigma1, float sigma2, float sigma3,
+        float cohesion, float phi, float tensileStrength)
+    {
+        switch (_params.FailureCriterion)
+        {
+            case FailureCriterion.MohrCoulomb:
+                // Mohr-Coulomb: |σ₁ - σ₃| = 2c·cos(φ) + (σ₁ + σ₃)·sin(φ)
+                var left = sigma1 - sigma3;
+                var right = 2 * cohesion * MathF.Cos(phi) + (sigma1 + sigma3) * MathF.Sin(phi);
+                return right > 1e-9f ? left / right : left;
+
+            case FailureCriterion.DruckerPrager:
+                // Drucker-Prager: √J₂ = α·I₁ + k
+                // Uses all three principal stresses
+                var I1 = sigma1 + sigma2 + sigma3;
+                var s1_dev = sigma1 - I1 / 3f;
+                var s2_dev = sigma2 - I1 / 3f;
+                var s3_dev = sigma3 - I1 / 3f;
+                var J2 = (s1_dev * s1_dev + s2_dev * s2_dev + s3_dev * s3_dev) / 2f;
+                var q = MathF.Sqrt(3f * J2);
+
+                var alpha_dp = 2 * MathF.Sin(phi) / (MathF.Sqrt(3f) * (3 - MathF.Sin(phi)));
+                var k = 6 * cohesion * MathF.Cos(phi) / (MathF.Sqrt(3f) * (3 - MathF.Sin(phi)));
+                return k > 1e-9f ? (q - alpha_dp * I1) / k : q - alpha_dp * I1;
+
+            case FailureCriterion.HoekBrown:
+                // Hoek-Brown: σ₁ = σ₃ + σ_ci·(m_b·σ₃/σ_ci + s)^a
+                var ucs_Pa = 2 * cohesion * MathF.Cos(phi) / (1 - MathF.Sin(phi));
+                var mb = _params.HoekBrown_mb;
+                var s = _params.HoekBrown_s;
+                var a = _params.HoekBrown_a;
+
+                if (sigma3 < 0 && s < 0.001f) // Tension region
+                    return tensileStrength > 1e-9f ? -sigma3 / tensileStrength : -sigma3;
+
+                var term = mb * sigma3 / ucs_Pa + s;
+                if (term < 0) term = 0; // Cannot have negative term under root
+
+                var strength = sigma3 + ucs_Pa * MathF.Pow(term, a);
+                return strength > 1e-9f ? sigma1 / strength : sigma1;
+
+            case FailureCriterion.Griffith:
+                // Griffith: For 3D state, use minimum principal stress
+                if (sigma3 < 0) // Tensile
+                    return tensileStrength > 1e-9f ? -sigma3 / tensileStrength : -sigma3;
+                // Compression: (σ₁ - σ₃)² = 8T₀(σ₁ + σ₃)
+                return tensileStrength * 8 > 1e-9f
+                    ? MathF.Pow(sigma1 - sigma3, 2) / (8 * tensileStrength * (sigma1 + sigma3 + 1e-6f))
+                    : sigma1 - sigma3;
+
+            default:
+                return 0f;
+        }
+    }
+
     private float CalculateAverageDamage(GeomechanicalResults results)
     {
         long sum = 0;
