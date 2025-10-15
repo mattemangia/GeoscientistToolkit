@@ -45,6 +45,8 @@ public class GeomechanicalParameters
     public float Sigma3 { get; set; } = 20f; // MPa (min principal/confining)
     public Vector3 Sigma1Direction { get; set; } = new(0, 0, 1); // Z-axis default
 
+    public bool EnablePlasticity { get; set; } = false;
+
     // Pore pressure effects
     public bool UsePorePressure { get; set; }
     public float PorePressure { get; set; } = 10f; // MPa

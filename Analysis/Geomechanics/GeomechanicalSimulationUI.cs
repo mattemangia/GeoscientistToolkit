@@ -20,9 +20,9 @@ public class GeomechanicalSimulationUI : IDisposable
     private readonly GeomechanicalExportManager _exportManager;
     private readonly ProgressBarDialog _extentDialog;
     private readonly MohrCircleRenderer _mohrRenderer;
+    private readonly ImGuiExportFileDialog _offloadDirectoryDialog;
     private readonly ImGuiExportFileDialog _permeabilityFileDialog;
     private readonly ImGuiExportFileDialog _pnmFileDialog;
-    private readonly ImGuiExportFileDialog _offloadDirectoryDialog;
     private readonly ProgressBarDialog _progressDialog;
 
     // Material selection
@@ -41,12 +41,11 @@ public class GeomechanicalSimulationUI : IDisposable
     private bool _enableDamageEvolution = true;
     private bool _enableMultiMaterial;
 
+    // Memory management for huge datasets
+    private bool _enableOffloading;
+
     // Real-time visualization
     private bool _enableRealTimeViz = true;
-
-    // Memory management for huge datasets
-    private bool _enableOffloading = false;
-    private string _offloadDirectory = "";
 
     // Failure criterion
     private int _failureCriterionIndex; // Mohr-Coulomb
@@ -64,6 +63,7 @@ public class GeomechanicalSimulationUI : IDisposable
     // Loading conditions
     private int _loadingModeIndex = 2; // Triaxial
     private int _maxIterations = 1000;
+    private string _offloadDirectory = "";
     private GeomechanicalParameters _params;
     private string _permeabilityCsvPath = "";
 
@@ -207,7 +207,7 @@ public class GeomechanicalSimulationUI : IDisposable
             _permeabilityCsvPath = _permeabilityFileDialog.SelectedPath;
         if (_acousticFileDialog.Submit())
             _acousticDatasetPath = _acousticFileDialog.SelectedPath;
-        
+
         // For directory selection, use CurrentDirectory when dialog is submitted
         if (_offloadDirectoryDialog.Submit())
             _offloadDirectory = _offloadDirectoryDialog.CurrentDirectory;
@@ -445,8 +445,8 @@ public class GeomechanicalSimulationUI : IDisposable
         var mu = E / (2 * (1 + nu));
         var K = E / (3 * (1 - 2 * nu));
 
-        ImGui.Text($"Shear Modulus: {(mu / 1e6f):F0} MPa");
-        ImGui.Text($"Bulk Modulus: {(K / 1e6f):F0} MPa");
+        ImGui.Text($"Shear Modulus: {mu / 1e6f:F0} MPa");
+        ImGui.Text($"Bulk Modulus: {K / 1e6f:F0} MPa");
 
         ImGui.Unindent();
     }
@@ -532,50 +532,38 @@ public class GeomechanicalSimulationUI : IDisposable
         ImGui.Spacing();
 
         ImGui.Checkbox("Enable Data Offloading", ref _enableOffloading);
-        
+
         if (ImGui.IsItemHovered())
-        {
             ImGui.SetTooltip("Offloads chunk data to disk when memory is constrained.\n" +
-                           "Recommended for datasets requiring >16 GB RAM.\n" +
-                           "May reduce performance but allows processing huge volumes.");
-        }
+                             "Recommended for datasets requiring >16 GB RAM.\n" +
+                             "May reduce performance but allows processing huge volumes.");
 
         if (_enableOffloading)
         {
             ImGui.Indent();
             ImGui.Spacing();
-            
+
             ImGui.Text("Offload Directory:");
             ImGui.SameLine();
-            if (ImGui.Button("Browse##Offload"))
-            {
-                _offloadDirectoryDialog.Open("", _offloadDirectory);
-            }
-            
+            if (ImGui.Button("Browse##Offload")) _offloadDirectoryDialog.Open("", _offloadDirectory);
+
             if (ImGui.IsItemHovered())
-            {
                 ImGui.SetTooltip("Navigate to the desired directory and click 'Export' to select it.\n" +
-                               "You can create new folders using the 'New Folder' button.");
-            }
-            
+                                 "You can create new folders using the 'New Folder' button.");
+
             ImGui.SameLine();
-            if (ImGui.Button("Clear##Offload"))
-            {
-                ClearOffloadCache();
-            }
-            
+            if (ImGui.Button("Clear##Offload")) ClearOffloadCache();
+
             if (ImGui.IsItemHovered())
-            {
                 ImGui.SetTooltip("Delete all temporary files in the offload directory.\n" +
-                               "Safe to use when no simulation is running.");
-            }
-            
+                                 "Safe to use when no simulation is running.");
+
             ImGui.TextWrapped(_offloadDirectory);
-            
+
             if (!string.IsNullOrEmpty(_offloadDirectory))
             {
                 ImGui.Spacing();
-                
+
                 // Show directory info and cache size
                 try
                 {
@@ -583,49 +571,45 @@ public class GeomechanicalSimulationUI : IDisposable
                     {
                         var drive = new DriveInfo(Path.GetPathRoot(_offloadDirectory));
                         var freeSpace = drive.AvailableFreeSpace / (1024.0 * 1024 * 1024);
-                        
+
                         // Calculate cache size
                         var cacheSize = CalculateDirectorySize(_offloadDirectory);
                         var cacheSizeGB = cacheSize / (1024.0 * 1024 * 1024);
-                        
-                        ImGui.TextColored(new Vector4(0.7f, 0.7f, 1f, 1), 
+
+                        ImGui.TextColored(new Vector4(0.7f, 0.7f, 1f, 1),
                             $"Available space: {freeSpace:F1} GB");
-                        
+
                         if (cacheSize > 0)
-                        {
-                            ImGui.TextColored(new Vector4(1f, 0.8f, 0.4f, 1), 
+                            ImGui.TextColored(new Vector4(1f, 0.8f, 0.4f, 1),
                                 $"Cache size: {cacheSizeGB:F2} GB");
-                        }
-                        
+
                         if (freeSpace < 50)
-                        {
-                            ImGui.TextColored(new Vector4(1, 0.5f, 0, 1), 
+                            ImGui.TextColored(new Vector4(1, 0.5f, 0, 1),
                                 "⚠ Warning: Low disk space!");
-                        }
                     }
                     else
                     {
-                        ImGui.TextColored(new Vector4(1, 1, 0, 1), 
+                        ImGui.TextColored(new Vector4(1, 1, 0, 1),
                             "Directory will be created on simulation start");
                     }
                 }
                 catch (Exception ex)
                 {
-                    ImGui.TextColored(new Vector4(1, 0, 0, 1), 
+                    ImGui.TextColored(new Vector4(1, 0, 0, 1),
                         $"Unable to access directory: {ex.Message}");
                 }
             }
-            
+
             ImGui.Spacing();
-            ImGui.TextColored(new Vector4(0.7f, 0.7f, 0.7f, 1), 
+            ImGui.TextColored(new Vector4(0.7f, 0.7f, 0.7f, 1),
                 "Note: Temporary files are automatically cleaned up after simulation");
-            
+
             ImGui.Unindent();
         }
         else
         {
             ImGui.Spacing();
-            ImGui.TextColored(new Vector4(0.7f, 0.7f, 0.7f, 1), 
+            ImGui.TextColored(new Vector4(0.7f, 0.7f, 0.7f, 1),
                 "All data will be kept in RAM (faster, but requires more memory)");
         }
     }
@@ -647,9 +631,8 @@ public class GeomechanicalSimulationUI : IDisposable
             {
                 var files = Directory.GetFiles(_offloadDirectory, "*.*", SearchOption.AllDirectories);
                 var fileCount = files.Length;
-                
+
                 foreach (var file in files)
-                {
                     try
                     {
                         File.Delete(file);
@@ -658,14 +641,12 @@ public class GeomechanicalSimulationUI : IDisposable
                     {
                         Logger.LogWarning($"[Geomechanics] Could not delete file {file}: {ex.Message}");
                     }
-                }
 
                 // Remove empty subdirectories
                 var directories = Directory.GetDirectories(_offloadDirectory, "*", SearchOption.AllDirectories)
                     .OrderByDescending(d => d.Length); // Delete deepest first
 
                 foreach (var dir in directories)
-                {
                     try
                     {
                         if (!Directory.EnumerateFileSystemEntries(dir).Any())
@@ -675,7 +656,6 @@ public class GeomechanicalSimulationUI : IDisposable
                     {
                         Logger.LogWarning($"[Geomechanics] Could not delete directory {dir}: {ex.Message}");
                     }
-                }
 
                 Logger.Log($"[Geomechanics] Cleared offload cache: {fileCount} file(s) deleted");
             }
@@ -763,8 +743,8 @@ public class GeomechanicalSimulationUI : IDisposable
 
             ImGui.Text("Stress Statistics:");
             ImGui.Indent();
-            ImGui.Text($"Mean Stress: {(_lastResults.MeanStress / 1e6f):F2} MPa");
-            ImGui.Text($"Max Shear Stress: {(_lastResults.MaxShearStress / 1e6f):F2} MPa");
+            ImGui.Text($"Mean Stress: {_lastResults.MeanStress / 1e6f:F2} MPa");
+            ImGui.Text($"Max Shear Stress: {_lastResults.MaxShearStress / 1e6f:F2} MPa");
             ImGui.Unindent();
 
             ImGui.Spacing();
@@ -872,16 +852,11 @@ public class GeomechanicalSimulationUI : IDisposable
             if (_enableOffloading)
             {
                 if (string.IsNullOrEmpty(_offloadDirectory))
-                {
                     _offloadDirectory = Path.Combine(
                         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
                         "GeoscientistToolkit", "GeomechOffload");
-                }
-                
-                if (!Directory.Exists(_offloadDirectory))
-                {
-                    Directory.CreateDirectory(_offloadDirectory);
-                }
+
+                if (!Directory.Exists(_offloadDirectory)) Directory.CreateDirectory(_offloadDirectory);
             }
 
             // Build parameters

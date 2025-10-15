@@ -13,6 +13,7 @@ using GeoscientistToolkit.UI.Utils;
 using GeoscientistToolkit.UI.Windows;
 using GeoscientistToolkit.Util;
 using ImGuiNET;
+
 // ADDED: For TableDataset and DataTable
 
 // ADDED: To access the new editor window
