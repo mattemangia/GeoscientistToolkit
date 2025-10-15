@@ -814,348 +814,509 @@ public partial class GeomechanicalSimulatorCPU
         }
     }
 
-    private void ApplyBoundaryConditionsAndLoading(byte[,,] labels)
+   private void ApplyBoundaryConditionsAndLoading(byte[,,] labels)
+{
+    var extent = _params.SimulationExtent;
+    var w = extent.Width;
+    var h = extent.Height;
+    var d = extent.Depth;
+
+    // Convert to Pa
+    var sigma1_Pa = _params.Sigma1 * 1e6f;
+    var sigma2_Pa = _params.Sigma2 * 1e6f;
+    var sigma3_Pa = _params.Sigma3 * 1e6f;
+
+    // Apply effective stress principle
+    if (_params.UsePorePressure)
     {
-        var extent = _params.SimulationExtent;
-        var w = extent.Width;
-        var h = extent.Height;
-        var d = extent.Depth;
+        var pp_Pa = _params.PorePressure * 1e6f;
+        var alpha = _params.BiotCoefficient;
+        sigma1_Pa -= alpha * pp_Pa;
+        sigma2_Pa -= alpha * pp_Pa;
+        sigma3_Pa -= alpha * pp_Pa;
+    }
 
-        // Convert to Pa
-        var sigma1_Pa = _params.Sigma1 * 1e6f;
-        var sigma2_Pa = _params.Sigma2 * 1e6f;
-        var sigma3_Pa = _params.Sigma3 * 1e6f;
+    var dx = _params.PixelSize / 1e6f;
 
-        // Apply effective stress principle
-        if (_params.UsePorePressure)
+    // Find the actual extent of the material
+    int minX = w, maxX = -1;
+    int minY = h, maxY = -1;
+    int minZ = d, maxZ = -1;
+
+    for (var z = 0; z < d; z++)
+    for (var y = 0; y < h; y++)
+    for (var x = 0; x < w; x++)
+    {
+        if (labels[x, y, z] != 0)
         {
-            var pp_Pa = _params.PorePressure * 1e6f;
-            var alpha = _params.BiotCoefficient;
-            sigma1_Pa -= alpha * pp_Pa;
-            sigma2_Pa -= alpha * pp_Pa;
-            sigma3_Pa -= alpha * pp_Pa;
+            if (x < minX) minX = x;
+            if (x > maxX) maxX = x;
+            if (y < minY) minY = y;
+            if (y > maxY) maxY = y;
+            if (z < minZ) minZ = z;
+            if (z > maxZ) maxZ = z;
         }
+    }
 
-        var dx = _params.PixelSize / 1e6f;
+    Logger.Log($"[GeomechCPU] Material bounding box: X[{minX},{maxX}] Y[{minY},{maxY}] Z[{minZ},{maxZ}]");
 
-        Logger.Log("[GeomechCPU] Applying boundary conditions with proper tributary areas");
+    var nodalArea = new Dictionary<int, float>();
+    int topForces = 0, bottomFixed = 0;
+    int frontForces = 0, backForces = 0;
+    int leftFixed = 0, rightForces = 0;
 
-        // Calculate nodal tributary areas using proper FEM assembly
-        // For each surface node, sum contributions from adjacent surface elements
-        var nodalArea = new Dictionary<int, float>();
-
-        // Top surface (Z = d-1): Apply σ₁
-        for (var y = 0; y < h - 1; y++)
-        for (var x = 0; x < w - 1; x++)
+    // ========== Z DIRECTION: Top surface (maxZ + 1) ==========
+    for (var y = 0; y < h - 1; y++)
+    for (var x = 0; x < w - 1; x++)
+    {
+        // Check if element at maxZ has material
+        if (maxZ >= 0 && maxZ < d - 1)
         {
-            // Check if element exists (at least one node has material)
-            var hasMaterial = labels[x, y, d - 2] != 0 || labels[x + 1, y, d - 2] != 0 ||
-                              labels[x, y + 1, d - 2] != 0 || labels[x + 1, y + 1, d - 2] != 0;
-
-            if (!hasMaterial) continue;
-
-            // Element face area
-            var faceArea = dx * dx;
-
-            // Distribute to 4 corner nodes (bilinear shape functions at ξ=η=0 surface)
-            // Each node gets 1/4 of the element face area
-            var nodes = new[]
-            {
-                (d - 1) * h * w + y * w + x,
-                (d - 1) * h * w + y * w + x + 1,
-                (d - 1) * h * w + (y + 1) * w + x + 1,
-                (d - 1) * h * w + (y + 1) * w + x
-            };
-
-            foreach (var node in nodes)
-            {
-                if (!nodalArea.ContainsKey(node))
-                    nodalArea[node] = 0f;
-                nodalArea[node] += faceArea / 4f;
-            }
-        }
-
-        // Apply loads to top surface nodes
-        foreach (var kvp in nodalArea)
-        {
-            var nodeIdx = kvp.Key;
-            var area = kvp.Value;
-            var dofZ = _nodeToDOF[nodeIdx] + 2;
-
-            if (!_isDirichletDOF[dofZ])
-                // Traction boundary condition: t = σ·n, where n = [0, 0, -1] for top surface
-                // Force = traction × area = σ₁ × area (negative because pushing down)
-                _force[dofZ] -= sigma1_Pa * area;
-        }
-
-        Logger.Log($"[GeomechCPU] Applied σ₁={_params.Sigma1} MPa to {nodalArea.Count} top surface nodes");
-
-        // Fix bottom surface (Z=0) - Dirichlet BC
-        for (var y = 0; y < h; y++)
-        for (var x = 0; x < w; x++)
-        {
-            var nodeIdx = (0 * h + y) * w + x;
-            var dofZ = _nodeToDOF[nodeIdx] + 2;
-            _isDirichletDOF[dofZ] = true;
-            _dirichletValue[dofZ] = 0.0f;
-        }
-
-        // Y- and Y+ faces: Apply σ₂
-        nodalArea.Clear();
-
-        // Y- face (y=0)
-        for (var z = 0; z < d - 1; z++)
-        for (var x = 0; x < w - 1; x++)
-        {
-            var hasMaterial = labels[x, 0, z] != 0 || labels[x + 1, 0, z] != 0 ||
-                              labels[x, 0, z + 1] != 0 || labels[x + 1, 0, z + 1] != 0;
+            var hasMaterial = labels[x, y, maxZ] != 0 || labels[x + 1, y, maxZ] != 0 ||
+                              labels[x, y + 1, maxZ] != 0 || labels[x + 1, y + 1, maxZ] != 0;
 
             if (!hasMaterial) continue;
 
             var faceArea = dx * dx;
             var nodes = new[]
             {
-                z * h * w + 0 * w + x,
-                z * h * w + 0 * w + x + 1,
-                (z + 1) * h * w + 0 * w + x + 1,
-                (z + 1) * h * w + 0 * w + x
+                ((maxZ + 1) * h + y) * w + x,
+                ((maxZ + 1) * h + y) * w + x + 1,
+                ((maxZ + 1) * h + (y + 1)) * w + x + 1,
+                ((maxZ + 1) * h + (y + 1)) * w + x
             };
 
             foreach (var node in nodes)
             {
+                if (node >= _numNodes) continue;
                 if (!nodalArea.ContainsKey(node))
                     nodalArea[node] = 0f;
                 nodalArea[node] += faceArea / 4f;
             }
         }
+    }
 
-        foreach (var kvp in nodalArea)
+    foreach (var kvp in nodalArea)
+    {
+        var nodeIdx = kvp.Key;
+        if (nodeIdx >= _numNodes) continue;
+        var area = kvp.Value;
+        var dofZ = _nodeToDOF[nodeIdx] + 2;
+
+        if (!_isDirichletDOF[dofZ])
         {
-            var nodeIdx = kvp.Key;
-            var area = kvp.Value;
-            var dofY = _nodeToDOF[nodeIdx] + 1;
+            _force[dofZ] -= sigma1_Pa * area;
+            topForces++;
+        }
+    }
 
-            if (!_isDirichletDOF[dofY])
-                // Normal points in -Y direction, so force is positive for compression
-                _force[dofY] += sigma2_Pa * area;
+    Logger.Log($"[GeomechCPU] Applied σ₁={_params.Sigma1} MPa to {topForces} nodes at z={maxZ + 1}");
+
+    // Fix bottom surface (minZ)
+    for (var y = 0; y < h; y++)
+    for (var x = 0; x < w; x++)
+    {
+        // Check if there's an element above this node
+        bool hasElementAbove = false;
+        for (int ex = Math.Max(0, x - 1); ex <= Math.Min(w - 2, x); ex++)
+        for (int ey = Math.Max(0, y - 1); ey <= Math.Min(h - 2, y); ey++)
+        {
+            if (minZ >= 0 && minZ < d - 1 && labels[ex, ey, minZ] != 0)
+            {
+                hasElementAbove = true;
+                break;
+            }
         }
 
-        // Y+ face (y=h-1)
-        nodalArea.Clear();
-        for (var z = 0; z < d - 1; z++)
-        for (var x = 0; x < w - 1; x++)
+        if (hasElementAbove)
         {
-            var hasMaterial = labels[x, h - 2, z] != 0 || labels[x + 1, h - 2, z] != 0 ||
-                              labels[x, h - 2, z + 1] != 0 || labels[x + 1, h - 2, z + 1] != 0;
+            var nodeIdx = (minZ * h + y) * w + x;
+            if (nodeIdx < _numNodes)
+            {
+                var dofZ = _nodeToDOF[nodeIdx] + 2;
+                _isDirichletDOF[dofZ] = true;
+                _dirichletValue[dofZ] = 0.0f;
+                bottomFixed++;
+            }
+        }
+    }
+
+    Logger.Log($"[GeomechCPU] Fixed {bottomFixed} nodes at bottom z={minZ}");
+
+    // ========== Y DIRECTION ==========
+    nodalArea.Clear();
+
+    // Front face (minY)
+    for (var z = 0; z < d - 1; z++)
+    for (var x = 0; x < w - 1; x++)
+    {
+        if (minY >= 0 && minY < h - 1)
+        {
+            var hasMaterial = labels[x, minY, z] != 0 || labels[x + 1, minY, z] != 0 ||
+                              labels[x, minY, z + 1] != 0 || labels[x + 1, minY, z + 1] != 0;
 
             if (!hasMaterial) continue;
 
             var faceArea = dx * dx;
             var nodes = new[]
             {
-                z * h * w + (h - 1) * w + x,
-                z * h * w + (h - 1) * w + x + 1,
-                (z + 1) * h * w + (h - 1) * w + x + 1,
-                (z + 1) * h * w + (h - 1) * w + x
+                z * h * w + minY * w + x,
+                z * h * w + minY * w + x + 1,
+                (z + 1) * h * w + minY * w + x + 1,
+                (z + 1) * h * w + minY * w + x
             };
 
             foreach (var node in nodes)
             {
+                if (node >= _numNodes) continue;
                 if (!nodalArea.ContainsKey(node))
                     nodalArea[node] = 0f;
                 nodalArea[node] += faceArea / 4f;
             }
         }
+    }
 
-        foreach (var kvp in nodalArea)
+    foreach (var kvp in nodalArea)
+    {
+        var nodeIdx = kvp.Key;
+        if (nodeIdx >= _numNodes) continue;
+        var area = kvp.Value;
+        var dofY = _nodeToDOF[nodeIdx] + 1;
+
+        if (!_isDirichletDOF[dofY])
         {
-            var nodeIdx = kvp.Key;
-            var area = kvp.Value;
-            var dofY = _nodeToDOF[nodeIdx] + 1;
-
-            if (!_isDirichletDOF[dofY])
-                // Normal points in +Y direction, force is negative for compression
-                _force[dofY] -= sigma2_Pa * area;
+            _force[dofY] += sigma2_Pa * area;
+            frontForces++;
         }
+    }
 
-        Logger.Log($"[GeomechCPU] Applied σ₂={_params.Sigma2} MPa to Y-faces");
-
-        // X- face (x=0): Fix to prevent rigid body motion
-        for (var z = 0; z < d; z++)
-        for (var y = 0; y < h; y++)
+    // Back face (maxY + 1)
+    nodalArea.Clear();
+    for (var z = 0; z < d - 1; z++)
+    for (var x = 0; x < w - 1; x++)
+    {
+        if (maxY >= 0 && maxY < h - 1)
         {
-            var nodeIdx = (z * h + y) * w + 0;
-            var dofX = _nodeToDOF[nodeIdx] + 0;
-            _isDirichletDOF[dofX] = true;
-            _dirichletValue[dofX] = 0.0f;
-        }
-
-        // X+ face (x=w-1): Apply σ₃
-        nodalArea.Clear();
-        for (var z = 0; z < d - 1; z++)
-        for (var y = 0; y < h - 1; y++)
-        {
-            var hasMaterial = labels[w - 2, y, z] != 0 || labels[w - 2, y + 1, z] != 0 ||
-                              labels[w - 2, y, z + 1] != 0 || labels[w - 2, y + 1, z + 1] != 0;
+            var hasMaterial = labels[x, maxY, z] != 0 || labels[x + 1, maxY, z] != 0 ||
+                              labels[x, maxY, z + 1] != 0 || labels[x + 1, maxY, z + 1] != 0;
 
             if (!hasMaterial) continue;
 
             var faceArea = dx * dx;
             var nodes = new[]
             {
-                z * h * w + y * w + (w - 1),
-                z * h * w + (y + 1) * w + (w - 1),
-                (z + 1) * h * w + (y + 1) * w + (w - 1),
-                (z + 1) * h * w + y * w + (w - 1)
+                z * h * w + (maxY + 1) * w + x,
+                z * h * w + (maxY + 1) * w + x + 1,
+                (z + 1) * h * w + (maxY + 1) * w + x + 1,
+                (z + 1) * h * w + (maxY + 1) * w + x
             };
 
             foreach (var node in nodes)
             {
+                if (node >= _numNodes) continue;
                 if (!nodalArea.ContainsKey(node))
                     nodalArea[node] = 0f;
                 nodalArea[node] += faceArea / 4f;
             }
         }
+    }
 
-        foreach (var kvp in nodalArea)
+    foreach (var kvp in nodalArea)
+    {
+        var nodeIdx = kvp.Key;
+        if (nodeIdx >= _numNodes) continue;
+        var area = kvp.Value;
+        var dofY = _nodeToDOF[nodeIdx] + 1;
+
+        if (!_isDirichletDOF[dofY])
         {
-            var nodeIdx = kvp.Key;
-            var area = kvp.Value;
-            var dofX = _nodeToDOF[nodeIdx] + 0;
+            _force[dofY] -= sigma2_Pa * area;
+            backForces++;
+        }
+    }
 
-            if (!_isDirichletDOF[dofX])
-                // Normal points in +X direction, force is negative for compression
-                _force[dofX] -= sigma3_Pa * area;
+    Logger.Log($"[GeomechCPU] Applied σ₂={_params.Sigma2} MPa: {frontForces} front, {backForces} back");
+
+    // ========== X DIRECTION ==========
+    // Fix left face (minX)
+    for (var z = 0; z < d; z++)
+    for (var y = 0; y < h; y++)
+    {
+        bool hasElement = false;
+        for (int ey = Math.Max(0, y - 1); ey <= Math.Min(h - 2, y); ey++)
+        for (int ez = Math.Max(0, z - 1); ez <= Math.Min(d - 2, z); ez++)
+        {
+            if (minX >= 0 && minX < w - 1 && labels[minX, ey, ez] != 0)
+            {
+                hasElement = true;
+                break;
+            }
         }
 
-        Logger.Log($"[GeomechCPU] Applied σ₃={_params.Sigma3} MPa to X+ face");
+        if (hasElement)
+        {
+            var nodeIdx = (z * h + y) * w + minX;
+            if (nodeIdx < _numNodes)
+            {
+                var dofX = _nodeToDOF[nodeIdx] + 0;
+                _isDirichletDOF[dofX] = true;
+                _dirichletValue[dofX] = 0.0f;
+                leftFixed++;
+            }
+        }
+    }
 
-        // Fix one corner to prevent rigid body translation and rotation
-        var cornerNode = 0;
+    // Right face (maxX + 1): Apply σ₃
+    nodalArea.Clear();
+    for (var z = 0; z < d - 1; z++)
+    for (var y = 0; y < h - 1; y++)
+    {
+        if (maxX >= 0 && maxX < w - 1)
+        {
+            var hasMaterial = labels[maxX, y, z] != 0 || labels[maxX, y + 1, z] != 0 ||
+                              labels[maxX, y, z + 1] != 0 || labels[maxX, y + 1, z + 1] != 0;
+
+            if (!hasMaterial) continue;
+
+            var faceArea = dx * dx;
+            var nodes = new[]
+            {
+                z * h * w + y * w + (maxX + 1),
+                z * h * w + (y + 1) * w + (maxX + 1),
+                (z + 1) * h * w + (y + 1) * w + (maxX + 1),
+                (z + 1) * h * w + y * w + (maxX + 1)
+            };
+
+            foreach (var node in nodes)
+            {
+                if (node >= _numNodes) continue;
+                if (!nodalArea.ContainsKey(node))
+                    nodalArea[node] = 0f;
+                nodalArea[node] += faceArea / 4f;
+            }
+        }
+    }
+
+    foreach (var kvp in nodalArea)
+    {
+        var nodeIdx = kvp.Key;
+        if (nodeIdx >= _numNodes) continue;
+        var area = kvp.Value;
+        var dofX = _nodeToDOF[nodeIdx] + 0;
+
+        if (!_isDirichletDOF[dofX])
+        {
+            _force[dofX] -= sigma3_Pa * area;
+            rightForces++;
+        }
+    }
+
+    Logger.Log($"[GeomechCPU] Applied σ₃={_params.Sigma3} MPa: {leftFixed} fixed, {rightForces} loaded");
+
+    // Fix one corner completely
+    var cornerNode = (minZ * h + minY) * w + minX;
+    if (cornerNode < _numNodes)
+    {
         for (var i = 0; i < 3; i++)
         {
             _isDirichletDOF[_nodeToDOF[cornerNode] + i] = true;
             _dirichletValue[_nodeToDOF[cornerNode] + i] = 0.0f;
         }
-
-        var totalForce = _force.Sum(f => Math.Abs(f));
-        var fixedDOFs = _isDirichletDOF.Count(b => b);
-        Logger.Log($"[GeomechCPU] Total applied force magnitude: {totalForce / 1e6f:F2} MN");
-        Logger.Log($"[GeomechCPU] Fixed DOFs: {fixedDOFs} / {_numDOFs}");
     }
 
-    private bool SolveDisplacements(IProgress<float> progress, CancellationToken token)
+    var totalForces = topForces + frontForces + backForces + rightForces;
+    var totalFixed = bottomFixed + leftFixed;
+    Logger.Log($"[GeomechCPU] TOTAL: {totalForces} force nodes, {totalFixed} fixed nodes");
+
+    var totalForce = _force.Sum(f => Math.Abs(f));
+    Logger.Log($"[GeomechCPU] Total applied force magnitude: {totalForce / 1e6f:F2} MN");
+}
+private float[] _diagonalValues;
+private bool SolveDisplacements(IProgress<float> progress, CancellationToken token)
+{
+    var maxIter = _params.MaxIterations;
+    var tolerance = _params.Tolerance;
+
+    if (tolerance > 1e-4f)
+        tolerance = 1e-6f;
+
+    ApplyDirichletBC();
+    Array.Clear(_displacement, 0, _numDOFs);
+
+    for (var i = 0; i < _numDOFs; i++)
+        if (_isDirichletDOF[i])
+            _displacement[i] = _dirichletValue[i];
+
+    var r = new float[_numDOFs];
+    var Ku = new float[_numDOFs];
+    MatrixVectorMultiply(Ku, _displacement);
+
+    for (var i = 0; i < _numDOFs; i++)
+        r[i] = _force[i] - Ku[i];
+
+    bool isMatrixFree = (_rowPtr == null);
+
+    // FIX: Compute diagonal properly in matrix-free mode
+    if (isMatrixFree && _diagonalValues == null)
     {
-        var maxIter = _params.MaxIterations;
-        var tolerance = _params.Tolerance;
+        ComputeDiagonalMatrixFree();
+    }
 
-        // FIX: Use tighter default tolerance
-        if (tolerance > 1e-4f)
-            tolerance = 1e-6f;
-
-        ApplyDirichletBC();
-        Array.Clear(_displacement, 0, _numDOFs);
-
-        for (var i = 0; i < _numDOFs; i++)
-            if (_isDirichletDOF[i])
-                _displacement[i] = _dirichletValue[i];
-
-        var r = new float[_numDOFs];
-        var Ku = new float[_numDOFs];
-        MatrixVectorMultiply(Ku, _displacement);
-
-        for (var i = 0; i < _numDOFs; i++)
-            r[i] = _force[i] - Ku[i];
-
-        var M_inv = new float[_numDOFs];
-        for (var i = 0; i < _numDOFs; i++)
+    var z = new float[_numDOFs];
+    
+    if (isMatrixFree)
+    {
+        // Use PROPER Jacobi preconditioner
+        for (int i = 0; i < _numDOFs; i++)
         {
             var diag = GetDiagonalElement(i);
-            M_inv[i] = diag > 1e-12f ? 1.0f / diag : 1.0f;
+            z[i] = Math.Abs(diag) > 1e-12f ? r[i] / diag : r[i];
         }
-
-        var z = new float[_numDOFs];
-        for (var i = 0; i < _numDOFs; i++)
-            z[i] = M_inv[i] * r[i];
-
-        var p = new float[_numDOFs];
-        Array.Copy(z, p, _numDOFs);
-
-        var rho = DotProduct(r, z);
-        var rho0 = rho;
-
-        var converged = false;
-        var iter = 0;
-
-        Logger.Log($"[GeomechCPU] Starting PCG solver with tolerance {tolerance:E2}");
-
-        while (iter < maxIter && !converged)
-        {
-            token.ThrowIfCancellationRequested();
-
-            var q = new float[_numDOFs];
-            MatrixVectorMultiply(q, p);
-
-            var pq = DotProduct(p, q);
-            if (MathF.Abs(pq) < 1e-20f)
-                break;
-
-            var alpha = rho / pq;
-
-            for (var i = 0; i < _numDOFs; i++)
-                if (!_isDirichletDOF[i])
-                    _displacement[i] += alpha * p[i];
-
-            for (var i = 0; i < _numDOFs; i++)
-                r[i] -= alpha * q[i];
-
-            var residualNorm = VectorNorm(r);
-            var relativeResidual = residualNorm / MathF.Sqrt(rho0);
-
-            if (relativeResidual < tolerance)
-            {
-                converged = true;
-                Logger.Log(
-                    $"[GeomechCPU] PCG converged at iteration {iter} with relative residual {relativeResidual:E4}");
-                break;
-            }
-
-            for (var i = 0; i < _numDOFs; i++)
-                z[i] = M_inv[i] * r[i];
-
-            var rho_new = DotProduct(r, z);
-            var beta = rho_new / rho;
-
-            for (var i = 0; i < _numDOFs; i++)
-                p[i] = z[i] + beta * p[i];
-
-            rho = rho_new;
-            iter++;
-
-            if (iter % 10 == 0)
-            {
-                var prog = 0.35f + 0.4f * iter / maxIter;
-                progress?.Report(prog);
-
-                if (iter % 100 == 0)
-                    Logger.Log($"[GeomechCPU] PCG iteration {iter}, relative residual: {relativeResidual:E4}");
-
-                if (_isHugeDataset && iter % 50 == 0)
-                {
-                    GC.Collect(GC.MaxGeneration, GCCollectionMode.Optimized, false);
-                    UpdateMemoryUsage();
-                }
-            }
-        }
-
-        _iterationsPerformed = iter;
-
-        if (!converged)
-            Logger.LogWarning($"[GeomechCPU] PCG did not converge after {maxIter} iterations");
-
-        return converged;
+    }
+    else
+    {
+        ApplySSORPreconditioner(z, r);
     }
 
+    var p = new float[_numDOFs];
+    Array.Copy(z, p, _numDOFs);
+
+    var rho = DotProduct(r, z);
+    var rho0 = rho;
+
+    var converged = false;
+    var iter = 0;
+
+    Logger.Log(isMatrixFree
+        ? "[GeomechCPU] Starting PCG solver with Jacobi preconditioner (matrix-free)"
+        : $"[GeomechCPU] Starting PCG solver with SSOR preconditioner, tolerance {tolerance:E2}");
+
+
+    while (iter < maxIter && !converged)
+    {
+        token.ThrowIfCancellationRequested();
+
+        var q = new float[_numDOFs];
+        MatrixVectorMultiply(q, p);
+
+        var pq = DotProduct(p, q);
+        if (MathF.Abs(pq) < 1e-20f)
+            break;
+
+        var alpha = rho / pq;
+
+        for (var i = 0; i < _numDOFs; i++)
+            if (!_isDirichletDOF[i])
+                _displacement[i] += alpha * p[i];
+
+        for (var i = 0; i < _numDOFs; i++)
+            r[i] -= alpha * q[i];
+
+        var residualNorm = VectorNorm(r);
+        var relativeResidual = rho0 > 1e-20 ? residualNorm / MathF.Sqrt(rho0) : residualNorm;
+
+        if (relativeResidual < tolerance)
+        {
+            converged = true;
+            Logger.Log(
+                $"[GeomechCPU] PCG converged at iteration {iter} with relative residual {relativeResidual:E4}");
+            break;
+        }
+
+        // FIX: Re-apply the correct preconditioner inside the loop
+        if (isMatrixFree)
+        {
+            for (int i = 0; i < _numDOFs; i++)
+            {
+                var diag = GetDiagonalElement(i);
+                z[i] = Math.Abs(diag) > 1e-12f ? r[i] / diag : r[i];
+            }
+        }
+        else
+        {
+            ApplySSORPreconditioner(z, r);
+        }
+
+        var rho_new = DotProduct(r, z);
+        var beta = rho_new / rho;
+
+        for (var i = 0; i < _numDOFs; i++)
+            p[i] = z[i] + beta * p[i];
+
+        rho = rho_new;
+        iter++;
+
+        if (iter % 10 == 0)
+        {
+            var prog = 0.35f + 0.4f * iter / maxIter;
+            progress?.Report(prog);
+            if (iter % 100 == 0)
+                Logger.Log($"[GeomechCPU] PCG iteration {iter}, relative residual: {relativeResidual:E4}");
+        }
+    }
+
+    _iterationsPerformed = iter;
+
+    if (!converged)
+        Logger.LogWarning($"[GeomechCPU] PCG did not converge after {maxIter} iterations");
+
+    return converged;
+}
+private void ApplySSORPreconditioner(float[] z, float[] r)
+    {
+        // Omega (ω) is the relaxation parameter. A value between 1.0 and 1.5 is typically effective.
+        const float omega = 1.2f;
+
+        // The SSOR preconditioning step solves Mz = r, where M is the SSOR matrix.
+        // This is done without forming M, using a forward and then a backward triangular solve.
+
+        // Step 1: Forward substitution. Solves (D/ω + L)y = r for a temporary vector y.
+        var y = new float[_numDOFs];
+        for (int i = 0; i < _numDOFs; i++)
+        {
+            float sum = 0;
+            int rowStart = _rowPtr[i];
+            int rowEnd = _rowPtr[i + 1];
+
+            // This loop calculates the dot product of the i-th row of L with the vector y.
+            for (int j = rowStart; j < rowEnd; j++)
+            {
+                int col = _colIdx[j];
+                if (col < i) // Only consider elements in the lower triangle (L)
+                {
+                    sum += _values[j] * y[col];
+                }
+            }
+
+            var diag = GetDiagonalElement(i);
+            if (Math.Abs(diag) < 1e-12f) diag = 1.0f;
+
+            y[i] = (r[i] - sum) / (diag / omega);
+        }
+
+        // Step 2: Backward substitution. Solves (I + ωD⁻¹U)z = y for the final vector z.
+        for (int i = _numDOFs - 1; i >= 0; i--)
+        {
+            float sum = 0;
+            int rowStart = _rowPtr[i];
+            int rowEnd = _rowPtr[i + 1];
+
+            // This loop calculates the dot product of the i-th row of U with the vector z.
+            for (int j = rowStart; j < rowEnd; j++)
+            {
+                int col = _colIdx[j];
+                if (col > i) // Only consider elements in the upper triangle (U)
+                {
+                    sum += _values[j] * z[col];
+                }
+            }
+            
+            var diag = GetDiagonalElement(i);
+            if (Math.Abs(diag) < 1e-12f) diag = 1.0f;
+            
+            z[i] = y[i] - (omega / diag) * sum;
+        }
+    }
     private void ApplyDirichletBC()
     {
         for (var i = 0; i < _numDOFs; i++)
@@ -1262,6 +1423,86 @@ private void MatrixVectorMultiplyMatrixFree(float[] y, float[] x)
                 y[i] = x[i];
         }
     }
+private void ComputeDiagonalMatrixFree()
+{
+    Logger.Log("[GeomechCPU] Computing diagonal for Jacobi preconditioner (matrix-free)...");
+    
+    _diagonalValues = new float[_numDOFs];
+    var diagLocks = new object[_numDOFs];
+    for (int i = 0; i < _numDOFs; i++)
+        diagLocks[i] = new object();
+
+    var gp = 1.0f / MathF.Sqrt(3.0f);
+    var gaussPoints = new (float xi, float eta, float zeta, float weight)[]
+    {
+        (-gp, -gp, -gp, 1.0f), (+gp, -gp, -gp, 1.0f),
+        (+gp, +gp, -gp, 1.0f), (-gp, +gp, -gp, 1.0f),
+        (-gp, -gp, +gp, 1.0f), (+gp, -gp, +gp, 1.0f),
+        (+gp, +gp, +gp, 1.0f), (-gp, +gp, +gp, 1.0f)
+    };
+
+    Parallel.For(0, _numElements, e =>
+    {
+        var nodes = new int[8];
+        for (int i = 0; i < 8; i++)
+            nodes[i] = _elementNodes[e * 8 + i];
+
+        float[] ex = new float[8], ey = new float[8], ez = new float[8];
+        for (int i = 0; i < 8; i++)
+        {
+            ex[i] = _nodeX[nodes[i]];
+            ey[i] = _nodeY[nodes[i]];
+            ez[i] = _nodeZ[nodes[i]];
+        }
+
+        var E = _elementE[e];
+        var nu = _elementNu[e];
+        var D = ComputeElasticityMatrix(E, nu);
+        var Ke = new float[24, 24];
+
+        foreach (var (xi, eta, zeta, w) in gaussPoints)
+        {
+            var dN_dxi = ComputeShapeFunctionDerivatives(xi, eta, zeta);
+            var J = ComputeJacobian(dN_dxi, ex, ey, ez);
+            var detJ = Determinant3x3(J);
+
+            if (detJ <= 0) continue;
+
+            var Jinv = Inverse3x3(J);
+            var dN_dx = MatrixMultiply(Jinv, dN_dxi);
+            var B = ComputeStrainDisplacementMatrix(dN_dx);
+            AddToElementStiffness(Ke, B, D, detJ * w);
+        }
+
+        // Extract diagonal entries and add to global diagonal
+        for (int i = 0; i < 8; i++)
+        {
+            for (int di = 0; di < 3; di++)
+            {
+                int globalDOF = _nodeToDOF[nodes[i]] + di;
+                int localDOF = i * 3 + di;
+                float diagValue = Ke[localDOF, localDOF];
+                
+                lock (diagLocks[globalDOF])
+                {
+                    _diagonalValues[globalDOF] += diagValue;
+                }
+            }
+        }
+    });
+
+    // Handle Dirichlet DOFs
+    for (int i = 0; i < _numDOFs; i++)
+    {
+        if (_isDirichletDOF[i])
+            _diagonalValues[i] = 1.0f;
+        else if (Math.Abs(_diagonalValues[i]) < 1e-12f)
+            _diagonalValues[i] = 1.0f;
+    }
+
+    Logger.Log("[GeomechCPU] Diagonal computation complete");
+}
+
     private void MatrixVectorMultiply(float[] y, float[] x)
     {
         Array.Clear(y, 0, _numDOFs);
@@ -1301,17 +1542,15 @@ private void MatrixVectorMultiplyMatrixFree(float[] y, float[] x)
 
     private float GetDiagonalElement(int row)
     {
-        // FIX: Handle matrix-free mode
+        // Use precomputed diagonal in matrix-free mode
         if (_rowPtr == null || _colIdx == null || _values == null)
         {
-            // In matrix-free mode, estimate diagonal as Young's modulus scaled value
-            // This is a rough approximation for the preconditioner
-            var E = _elementE != null && _elementE.Length > 0 ? _elementE[0] : _params.YoungModulus * 1e6f;
-            var dx = _params.PixelSize / 1e6f;
-            var volumeElement = dx * dx * dx;
-            return E / volumeElement; // Rough scaling
+            if (_diagonalValues != null && row < _diagonalValues.Length)
+                return _diagonalValues[row];
+            return 1.0f;
         }
 
+        // CSR mode - search for diagonal
         var rowStart = _rowPtr[row];
         var rowEnd = _rowPtr[row + 1];
 
