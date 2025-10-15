@@ -13,7 +13,7 @@ using System.Runtime.CompilerServices;
 
 namespace GeoscientistToolkit.Analysis.Geomechanics;
 
-public class GeomechanicalSimulatorCPU
+public partial class GeomechanicalSimulatorCPU
 {
     private readonly GeomechanicalParameters _params;
     private List<int> _colIdx;

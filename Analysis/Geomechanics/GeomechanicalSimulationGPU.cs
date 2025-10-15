@@ -17,7 +17,7 @@ using Silk.NET.OpenCL;
 
 namespace GeoscientistToolkit.Analysis.Geomechanics;
 
-public unsafe class GeomechanicalSimulatorGPU : IDisposable
+public unsafe partial class GeomechanicalSimulatorGPU : IDisposable
 {
     private readonly CL _cl;
     private readonly GeomechanicalParameters _params;

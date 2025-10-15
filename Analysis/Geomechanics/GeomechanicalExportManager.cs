@@ -13,7 +13,7 @@ using SkiaSharp;
 
 namespace GeoscientistToolkit.Analysis.Geomechanics;
 
-public class GeomechanicalExportManager : IDisposable
+public partial class GeomechanicalExportManager : IDisposable
 {
     private readonly ImGuiExportFileDialog _csvDialog;
     private readonly ImGuiExportFileDialog _exportDialog;
