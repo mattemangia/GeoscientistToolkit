@@ -5,6 +5,7 @@ using GeoscientistToolkit.Business;
 using GeoscientistToolkit.Data.AcousticVolume;
 using GeoscientistToolkit.Data.CtImageStack;
 using GeoscientistToolkit.Data.Loaders;
+using GeoscientistToolkit.Data.Materials;
 using GeoscientistToolkit.Data.Pnm;
 using GeoscientistToolkit.UI;
 using GeoscientistToolkit.UI.Utils;
@@ -82,6 +83,10 @@ public class GeomechanicalSimulationUI : IDisposable
 
     // Loading conditions
     private int _loadingModeIndex = 2; // Triaxial
+
+    // Material library browser
+    private string _materialLibrarySearchFilter = "";
+
     private int _maxIterations = 1000;
     private float _maxSimTime = 3600f;
     private float _minFractureAperture = 1e-6f;
@@ -95,8 +100,10 @@ public class GeomechanicalSimulationUI : IDisposable
     private float _porePressure = 10f;
     private float _porosity = 0.10f;
     private float _rockPermeability = 1e-18f;
+    private PhysicalMaterial _selectedLibraryMaterial;
     private int _selectedMaterialIndex;
     private bool _showFluidTimeSeries;
+    private bool _showMaterialLibraryBrowser;
 
     // Mohr circle viewer
     private bool _showMohrCircles;
@@ -210,11 +217,11 @@ public class GeomechanicalSimulationUI : IDisposable
         if (ImGui.CollapsingHeader("Geothermal Settings")) DrawGeothermalSettings();
         ImGui.Separator();
 
-        // Fluid Injection Settings
-        if (ImGui.CollapsingHeader("Geothermal Settings")) DrawFluidInjectionSettings();
+        // Fluid Injection Settings (FIXED - was duplicating "Geothermal Settings")
+        if (ImGui.CollapsingHeader("Fluid Injection Settings")) DrawFluidInjectionSettings();
         ImGui.Separator();
 
-        // Memory Management (NEW)
+        // Memory Management
         if (ImGui.CollapsingHeader("Memory Management")) DrawMemoryManagement();
         ImGui.Separator();
 
@@ -252,6 +259,9 @@ public class GeomechanicalSimulationUI : IDisposable
         // Mohr circle window
         if (_showMohrCircles && _lastResults?.MohrCircles != null) DrawMohrCircleWindow();
         DrawFluidTimeSeriesWindow();
+
+        // Material library browser
+        if (_showMaterialLibraryBrowser) DrawMaterialLibraryBrowser();
     }
 
     private void DrawFluidGeothermalVisualizationWindow()
@@ -445,6 +455,12 @@ public class GeomechanicalSimulationUI : IDisposable
     {
         var primaryMaterial = dataset.Materials.FirstOrDefault(m => _selectedMaterialIDs.Contains(m.ID));
 
+        // Button to browse material library
+        if (ImGui.Button("Browse Material Library", new Vector2(-1, 0))) _showMaterialLibraryBrowser = true;
+
+        ImGui.Spacing();
+        ImGui.Separator();
+
         if (primaryMaterial != null && !string.IsNullOrEmpty(primaryMaterial.PhysicalMaterialName))
         {
             var physMat = MaterialLibrary.Instance.Find(primaryMaterial.PhysicalMaterialName);
@@ -453,32 +469,7 @@ public class GeomechanicalSimulationUI : IDisposable
                 ImGui.TextColored(new Vector4(0.8f, 0.8f, 1f, 1),
                     $"Physical Material: {physMat.Name}");
 
-                if (ImGui.Button("Apply Library Values"))
-                {
-                    _youngModulus = (float)(physMat.YoungModulus_GPa ?? 30) * 1000f;
-                    _poissonRatio = (float)(physMat.PoissonRatio ?? 0.25);
-                    _density = (float)(physMat.Density_kg_m3 ?? 2700);
-
-                    // Estimate strength parameters from rock type
-                    if (physMat.Name.Contains("Sandstone"))
-                    {
-                        _cohesion = 20f;
-                        _frictionAngle = 35f;
-                        _tensileStrength = 5f;
-                    }
-                    else if (physMat.Name.Contains("Limestone"))
-                    {
-                        _cohesion = 30f;
-                        _frictionAngle = 40f;
-                        _tensileStrength = 8f;
-                    }
-                    else if (physMat.Name.Contains("Granite"))
-                    {
-                        _cohesion = 50f;
-                        _frictionAngle = 55f;
-                        _tensileStrength = 15f;
-                    }
-                }
+                if (ImGui.Button("Apply Library Values")) ApplyLibraryMaterial(physMat);
 
                 ImGui.Separator();
             }
@@ -507,6 +498,229 @@ public class GeomechanicalSimulationUI : IDisposable
         ImGui.Unindent();
     }
 
+    private void DrawMaterialLibraryBrowser()
+    {
+        ImGui.SetNextWindowSize(new Vector2(900, 700), ImGuiCond.FirstUseEver);
+        var isOpen = true;
+
+        if (ImGui.Begin("Material Library Browser##Geomech", ref isOpen, ImGuiWindowFlags.NoCollapse))
+        {
+            ImGui.TextWrapped("Select a material to apply its properties to the simulation.");
+            ImGui.Separator();
+
+            // Search filter
+            ImGui.SetNextItemWidth(-1);
+            ImGui.InputTextWithHint("##search", "Search materials...", ref _materialLibrarySearchFilter, 256);
+            ImGui.Spacing();
+
+            // Two-column layout
+            if (ImGui.BeginTable("MatLibTable", 2, ImGuiTableFlags.Resizable | ImGuiTableFlags.BordersInnerV))
+            {
+                ImGui.TableSetupColumn("Materials", ImGuiTableColumnFlags.WidthFixed, 300);
+                ImGui.TableSetupColumn("Properties", ImGuiTableColumnFlags.WidthStretch);
+
+                ImGui.TableNextRow();
+                ImGui.TableNextColumn();
+
+                // Material list
+                if (ImGui.BeginChild("MatLibList", new Vector2(0, -80), ImGuiChildFlags.Border))
+                {
+                    var materials = MaterialLibrary.Instance.Materials
+                        .Where(m => string.IsNullOrEmpty(_materialLibrarySearchFilter) ||
+                                    m.Name.Contains(_materialLibrarySearchFilter, StringComparison.OrdinalIgnoreCase))
+                        .OrderBy(m => m.Phase)
+                        .ThenBy(m => m.Name)
+                        .ToList();
+
+                    var currentPhase = "";
+                    foreach (var mat in materials)
+                    {
+                        if (mat.Phase.ToString() != currentPhase)
+                        {
+                            currentPhase = mat.Phase.ToString();
+                            ImGui.SeparatorText(currentPhase);
+                        }
+
+                        var isSelected = _selectedLibraryMaterial == mat;
+                        if (ImGui.Selectable($"{mat.Name}##{mat.Name}", isSelected)) _selectedLibraryMaterial = mat;
+                    }
+                }
+
+                ImGui.EndChild();
+
+                ImGui.TableNextColumn();
+
+                // Property details
+                if (ImGui.BeginChild("MatLibProps", new Vector2(0, -80), ImGuiChildFlags.Border))
+                {
+                    if (_selectedLibraryMaterial != null)
+                    {
+                        var mat = _selectedLibraryMaterial;
+
+                        ImGui.TextColored(new Vector4(0.5f, 1, 1, 1), mat.Name);
+                        ImGui.TextDisabled($"Phase: {mat.Phase}");
+
+                        if (!string.IsNullOrEmpty(mat.Notes))
+                        {
+                            ImGui.Spacing();
+                            ImGui.PushTextWrapPos();
+                            ImGui.TextWrapped(mat.Notes);
+                            ImGui.PopTextWrapPos();
+                        }
+
+                        ImGui.Spacing();
+                        ImGui.SeparatorText("Mechanical Properties");
+
+                        if (ImGui.BeginTable("Props", 2, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg))
+                        {
+                            ImGui.TableSetupColumn("Property");
+                            ImGui.TableSetupColumn("Value");
+                            ImGui.TableHeadersRow();
+
+                            void AddRow(string name, string value)
+                            {
+                                ImGui.TableNextRow();
+                                ImGui.TableNextColumn();
+                                ImGui.Text(name);
+                                ImGui.TableNextColumn();
+                                ImGui.Text(value);
+                            }
+
+                            if (mat.Density_kg_m3.HasValue)
+                                AddRow("Density", $"{mat.Density_kg_m3:F0} kg/m³");
+                            if (mat.YoungModulus_GPa.HasValue)
+                                AddRow("Young's Modulus", $"{mat.YoungModulus_GPa * 1000:F0} MPa");
+                            if (mat.PoissonRatio.HasValue)
+                                AddRow("Poisson Ratio", $"{mat.PoissonRatio:F3}");
+                            if (mat.CompressiveStrength_MPa.HasValue)
+                                AddRow("Compressive Strength", $"{mat.CompressiveStrength_MPa:F1} MPa");
+                            if (mat.TensileStrength_MPa.HasValue)
+                                AddRow("Tensile Strength", $"{mat.TensileStrength_MPa:F1} MPa");
+                            if (mat.FrictionAngle_deg.HasValue)
+                                AddRow("Friction Angle", $"{mat.FrictionAngle_deg:F1}°");
+                            if (mat.MohsHardness.HasValue)
+                                AddRow("Mohs Hardness", $"{mat.MohsHardness:F1}");
+
+                            ImGui.EndTable();
+                        }
+
+                        // Preview what will be applied
+                        ImGui.Spacing();
+                        ImGui.SeparatorText("Will Apply");
+                        ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(0.5f, 1, 0.5f, 1));
+                        if (mat.YoungModulus_GPa.HasValue)
+                            ImGui.BulletText($"Young's Modulus: {mat.YoungModulus_GPa * 1000:F0} MPa");
+                        if (mat.PoissonRatio.HasValue)
+                            ImGui.BulletText($"Poisson Ratio: {mat.PoissonRatio:F3}");
+                        if (mat.Density_kg_m3.HasValue)
+                            ImGui.BulletText($"Density: {mat.Density_kg_m3:F0} kg/m³");
+                        ImGui.PopStyleColor();
+                    }
+                    else
+                    {
+                        ImGui.TextDisabled("Select a material to view properties");
+                    }
+                }
+
+                ImGui.EndChild();
+
+                ImGui.EndTable();
+            }
+
+            ImGui.Separator();
+
+            // Action buttons
+            ImGui.BeginDisabled(_selectedLibraryMaterial == null);
+            if (ImGui.Button("Apply Material Properties", new Vector2(-130, 0)))
+                if (_selectedLibraryMaterial != null)
+                {
+                    ApplyLibraryMaterial(_selectedLibraryMaterial);
+                    _showMaterialLibraryBrowser = false;
+                }
+
+            ImGui.EndDisabled();
+
+            ImGui.SameLine();
+            if (ImGui.Button("Close", new Vector2(120, 0))) _showMaterialLibraryBrowser = false;
+        }
+
+        ImGui.End();
+
+        if (!isOpen) _showMaterialLibraryBrowser = false;
+    }
+
+    private void ApplyLibraryMaterial(PhysicalMaterial physMat)
+    {
+        // Apply mechanical properties
+        if (physMat.YoungModulus_GPa.HasValue)
+        {
+            _youngModulus = (float)(physMat.YoungModulus_GPa.Value * 1000); // GPa to MPa
+            Logger.Log($"[Geomechanics] Applied Young's Modulus: {_youngModulus:F0} MPa");
+        }
+
+        if (physMat.PoissonRatio.HasValue)
+        {
+            _poissonRatio = (float)physMat.PoissonRatio.Value;
+            Logger.Log($"[Geomechanics] Applied Poisson Ratio: {_poissonRatio:F3}");
+        }
+
+        if (physMat.Density_kg_m3.HasValue)
+        {
+            _density = (float)physMat.Density_kg_m3.Value;
+            Logger.Log($"[Geomechanics] Applied Density: {_density:F0} kg/m³");
+        }
+
+        // Estimate strength parameters from rock type
+        if (physMat.Name.Contains("Sandstone", StringComparison.OrdinalIgnoreCase))
+        {
+            _cohesion = 20f;
+            _frictionAngle = 35f;
+            _tensileStrength = 5f;
+            Logger.Log("[Geomechanics] Applied typical sandstone strength parameters");
+        }
+        else if (physMat.Name.Contains("Limestone", StringComparison.OrdinalIgnoreCase))
+        {
+            _cohesion = 30f;
+            _frictionAngle = 40f;
+            _tensileStrength = 8f;
+            Logger.Log("[Geomechanics] Applied typical limestone strength parameters");
+        }
+        else if (physMat.Name.Contains("Granite", StringComparison.OrdinalIgnoreCase))
+        {
+            _cohesion = 50f;
+            _frictionAngle = 55f;
+            _tensileStrength = 15f;
+            Logger.Log("[Geomechanics] Applied typical granite strength parameters");
+        }
+        else if (physMat.Name.Contains("Shale", StringComparison.OrdinalIgnoreCase))
+        {
+            _cohesion = 15f;
+            _frictionAngle = 25f;
+            _tensileStrength = 2f;
+            Logger.Log("[Geomechanics] Applied typical shale strength parameters");
+        }
+        else if (physMat.Name.Contains("Basalt", StringComparison.OrdinalIgnoreCase))
+        {
+            _cohesion = 40f;
+            _frictionAngle = 50f;
+            _tensileStrength = 15f;
+            Logger.Log("[Geomechanics] Applied typical basalt strength parameters");
+        }
+        else
+        {
+            // Use library values if available
+            if (physMat.CompressiveStrength_MPa.HasValue)
+                // Estimate cohesion from UCS (rough approximation)
+                _cohesion = (float)(physMat.CompressiveStrength_MPa.Value * 0.25);
+
+            if (physMat.FrictionAngle_deg.HasValue) _frictionAngle = (float)physMat.FrictionAngle_deg.Value;
+
+            if (physMat.TensileStrength_MPa.HasValue) _tensileStrength = (float)physMat.TensileStrength_MPa.Value;
+        }
+
+        Logger.Log($"[Geomechanics] Applied properties from library material: {physMat.Name}");
+    }
+
     private void DrawPorePressure()
     {
         ImGui.Checkbox("Include pore pressure effects", ref _usePorePressure);
@@ -526,39 +740,133 @@ public class GeomechanicalSimulationUI : IDisposable
 
     private void DrawFailureCriterion()
     {
+        ImGui.Text("Failure Criterion:");
+
         string[] criteria = { "Mohr-Coulomb", "Drucker-Prager", "Hoek-Brown", "Griffith" };
-        ImGui.Combo("Failure Criterion", ref _failureCriterionIndex, criteria, criteria.Length);
+
+        // Calculate this once at the top since multiple cases need it
+        var phi_rad = _frictionAngle * MathF.PI / 180f;
+
+        // Make the combo box more prominent
+        ImGui.SetNextItemWidth(-1);
+        if (ImGui.Combo("##FailureCriterion", ref _failureCriterionIndex, criteria, criteria.Length))
+            Logger.Log($"[Geomechanics] Failure criterion changed to: {criteria[_failureCriterionIndex]}");
+
+        ImGui.Spacing();
+        ImGui.Separator();
+        ImGui.Spacing();
+
+        // Visual indicator of selected criterion
+        var selectedColor = new Vector4(0.3f, 0.8f, 1f, 1f);
+        ImGui.PushStyleColor(ImGuiCol.Text, selectedColor);
+        ImGui.Text($"Selected: {criteria[_failureCriterionIndex]}");
+        ImGui.PopStyleColor();
 
         ImGui.Spacing();
 
         switch (_failureCriterionIndex)
         {
             case 0: // Mohr-Coulomb
-                ImGui.TextWrapped("τ = c + σn·tan(φ)");
-                ImGui.Text($"Using: c = {_cohesion} MPa, φ = {_frictionAngle}°");
+                ImGui.BeginChild("MohrCoulombParams", new Vector2(0, 120), ImGuiChildFlags.Border);
+                ImGui.TextWrapped("Linear failure envelope in τ-σ space:");
+                ImGui.TextColored(new Vector4(1f, 1f, 0.7f, 1f), "τ = c + σn·tan(φ)");
+                ImGui.Spacing();
+                ImGui.Text("Using parameters:");
+                ImGui.BulletText($"Cohesion: {_cohesion} MPa");
+                ImGui.BulletText($"Friction Angle: {_frictionAngle}°");
+                ImGui.Spacing();
+                ImGui.TextWrapped("Best for: Rocks, soils, general geomaterials");
+                ImGui.EndChild();
                 break;
 
             case 1: // Drucker-Prager
-                ImGui.TextWrapped("√J2 = α·I1 + k");
-                ImGui.Text($"Derived from: c = {_cohesion} MPa, φ = {_frictionAngle}°");
+                ImGui.BeginChild("DruckerPragerParams", new Vector2(0, 150), ImGuiChildFlags.Border);
+                ImGui.TextWrapped("Smooth conical surface in principal stress space:");
+                ImGui.TextColored(new Vector4(1f, 1f, 0.7f, 1f), "√J₂ = α·I₁ + k");
+                ImGui.Spacing();
+                ImGui.Text("Derived from:");
+                ImGui.BulletText($"Cohesion: {_cohesion} MPa");
+                ImGui.BulletText($"Friction Angle: {_frictionAngle}°");
+                ImGui.Spacing();
+                var alpha_dp = 2 * MathF.Sin(phi_rad) / (3 - MathF.Sin(phi_rad));
+                var k_dp = 6 * _cohesion * MathF.Cos(phi_rad) / (3 - MathF.Sin(phi_rad));
+                ImGui.Text($"α = {alpha_dp:F3}, k = {k_dp:F2} MPa");
+                ImGui.Spacing();
+                ImGui.TextWrapped("Best for: Smooth 3D stress states, metal plasticity");
+                ImGui.EndChild();
                 break;
 
             case 2: // Hoek-Brown
-                ImGui.TextWrapped("σ1 = σ3 + σci·(mb·σ3/σci + s)^a");
+                ImGui.BeginChild("HoekBrownParams", new Vector2(0, 250), ImGuiChildFlags.Border);
+                ImGui.TextWrapped("Non-linear empirical criterion for rock masses:");
+                ImGui.TextColored(new Vector4(1f, 1f, 0.7f, 1f), "σ₁ = σ₃ + σci·(mb·σ₃/σci + s)^a");
+                ImGui.Spacing();
+
+                ImGui.Text("Rock Mass Parameters:");
+                ImGui.Separator();
                 ImGui.DragFloat("Material constant mi", ref _hoekBrown_mi, 0.5f, 1f, 30f);
+                if (ImGui.IsItemHovered())
+                    ImGui.SetTooltip("Intact rock: 5-10 (weak), 10-20 (medium), 20-30 (strong)");
+
                 ImGui.DragFloat("Reduced constant mb", ref _hoekBrown_mb, 0.1f, 0.1f, 10f);
-                ImGui.DragFloat("Rock mass parameter s", ref _hoekBrown_s, 0.001f, 0f, 1f);
-                ImGui.DragFloat("Exponent a", ref _hoekBrown_a, 0.05f, 0.5f, 0.65f);
+                if (ImGui.IsItemHovered())
+                    ImGui.SetTooltip("mb = mi · exp((GSI-100)/(28-14D))");
+
+                ImGui.DragFloat("Rock mass parameter s", ref _hoekBrown_s, 0.001f, 0f, 1f, "%.4f");
+                if (ImGui.IsItemHovered())
+                    ImGui.SetTooltip("Intact: s=1, Heavily fractured: s→0");
+
+                ImGui.DragFloat("Exponent a", ref _hoekBrown_a, 0.01f, 0.5f, 0.65f, "%.3f");
+                if (ImGui.IsItemHovered())
+                    ImGui.SetTooltip("Intact: a=0.5, Disturbed: a=0.65");
+
+                ImGui.Spacing();
+                var ucs_hb = 2 * _cohesion * MathF.Cos(phi_rad) / (1 - MathF.Sin(phi_rad));
+                ImGui.Text($"Implied UCS: {ucs_hb:F1} MPa");
+                ImGui.TextWrapped("Best for: Fractured rock masses, tunneling");
+                ImGui.EndChild();
                 break;
 
             case 3: // Griffith
-                ImGui.TextWrapped("For tensile failure");
-                ImGui.Text($"Using: T0 = {_tensileStrength} MPa");
+                ImGui.BeginChild("GriffithParams", new Vector2(0, 140), ImGuiChildFlags.Border);
+                ImGui.TextWrapped("Tensile crack propagation criterion:");
+                ImGui.TextColored(new Vector4(1f, 1f, 0.7f, 1f), "(σ₁-σ₃)² = 8T₀(σ₁+σ₃)");
+                ImGui.Spacing();
+                ImGui.Text("Using parameter:");
+                ImGui.BulletText($"Tensile Strength: {_tensileStrength} MPa");
+                ImGui.Spacing();
+                ImGui.TextWrapped("Parabolic envelope, accounts for crack closure in compression");
+                ImGui.Spacing();
+                ImGui.TextWrapped("Best for: Brittle materials, tensile failure, low confining pressure");
+                ImGui.EndChild();
                 break;
         }
 
         ImGui.Spacing();
+        ImGui.Separator();
+        ImGui.Spacing();
+
+        // Common parameter (applies to all)
+        ImGui.Text("Post-Failure Behavior:");
         ImGui.DragFloat("Dilation Angle (°)", ref _dilationAngle, 1f, 0f, _frictionAngle);
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip("Volume expansion angle during shear failure (0° = no dilation, typically φ/3 to φ)");
+
+        ImGui.Spacing();
+
+        // Visual comparison helper
+        if (ImGui.TreeNode("Criterion Comparison Guide"))
+        {
+            ImGui.TextWrapped("Quick Selection Guide:");
+            ImGui.Spacing();
+
+            ImGui.BulletText("Mohr-Coulomb: Most common, simple, conservative");
+            ImGui.BulletText("Drucker-Prager: Smooth surface, better for numerical stability");
+            ImGui.BulletText("Hoek-Brown: Rock masses with joints/fractures");
+            ImGui.BulletText("Griffith: Brittle materials, tensile-dominated failure");
+
+            ImGui.TreePop();
+        }
     }
 
     private void DrawComputationalSettings()
@@ -1220,147 +1528,137 @@ public class GeomechanicalSimulationUI : IDisposable
 
     private void DrawGeothermalSettings()
     {
-        ImGui.Separator();
+        ImGui.Checkbox("Enable Geothermal Gradient", ref _enableGeothermal);
 
-        if (ImGui.CollapsingHeader("Geothermal Simulation"))
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip("Simulates temperature increasing with depth and thermal effects on rock");
+
+        if (_enableGeothermal)
         {
-            ImGui.Checkbox("Enable Geothermal Gradient", ref _enableGeothermal);
+            ImGui.Indent();
+            ImGui.Spacing();
+
+            ImGui.DragFloat("Surface Temperature (°C)", ref _surfaceTemperature, 1f, -20f, 50f);
+            ImGui.DragFloat("Geothermal Gradient (°C/km)", ref _geothermalGradient, 1f, 10f, 100f);
 
             if (ImGui.IsItemHovered())
-                ImGui.SetTooltip("Simulates temperature increasing with depth and thermal effects on rock");
+                ImGui.SetTooltip("Typical values: 25-30 °C/km (normal crust), 40-80 °C/km (geothermal areas)");
 
-            if (_enableGeothermal)
-            {
-                ImGui.Indent();
-                ImGui.Spacing();
+            ImGui.DragFloat("Thermal Expansion Coef. (1/K)", ref _thermalExpansion, 1e-7f, 1e-6f, 50e-6f, "%.2e");
 
-                ImGui.DragFloat("Surface Temperature (°C)", ref _surfaceTemperature, 1f, -20f, 50f);
-                ImGui.DragFloat("Geothermal Gradient (°C/km)", ref _geothermalGradient, 1f, 10f, 100f);
-
-                if (ImGui.IsItemHovered())
-                    ImGui.SetTooltip("Typical values: 25-30 °C/km (normal crust), 40-80 °C/km (geothermal areas)");
-
-                ImGui.DragFloat("Thermal Expansion Coef. (1/K)", ref _thermalExpansion, 1e-7f, 1e-6f, 50e-6f, "%.2e");
-
-                ImGui.Spacing();
-                ImGui.TextColored(new Vector4(0.7f, 0.9f, 1f, 1),
-                    "Calculates thermal stress and geothermal energy potential");
-                ImGui.Unindent();
-            }
+            ImGui.Spacing();
+            ImGui.TextColored(new Vector4(0.7f, 0.9f, 1f, 1),
+                "Calculates thermal stress and geothermal energy potential");
+            ImGui.Unindent();
         }
     }
 
     private void DrawFluidInjectionSettings()
     {
-        ImGui.Separator();
+        ImGui.Checkbox("Enable Fluid Injection", ref _enableFluidInjection);
 
-        if (ImGui.CollapsingHeader("Hydraulic Fracturing / Fluid Injection"))
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip("Simulates fluid injection, pressure diffusion, and hydraulic fracturing");
+
+        if (_enableFluidInjection)
         {
-            ImGui.Checkbox("Enable Fluid Injection", ref _enableFluidInjection);
+            ImGui.Indent();
+            ImGui.Spacing();
 
-            if (ImGui.IsItemHovered())
-                ImGui.SetTooltip("Simulates fluid injection, pressure diffusion, and hydraulic fracturing");
-
-            if (_enableFluidInjection)
+            // Fluid Properties
+            if (ImGui.TreeNode("Fluid Properties"))
             {
-                ImGui.Indent();
-                ImGui.Spacing();
+                ImGui.DragFloat("Viscosity (Pa·s)", ref _fluidViscosity, 1e-4f, 1e-4f, 1e-1f, "%.2e");
+                if (ImGui.IsItemHovered())
+                    ImGui.SetTooltip("Water ≈ 1e-3 Pa·s, Oil ≈ 1e-2 Pa·s");
 
-                // Fluid Properties
-                if (ImGui.TreeNode("Fluid Properties"))
-                {
-                    ImGui.DragFloat("Viscosity (Pa·s)", ref _fluidViscosity, 1e-4f, 1e-4f, 1e-1f, "%.2e");
-                    if (ImGui.IsItemHovered())
-                        ImGui.SetTooltip("Water ≈ 1e-3 Pa·s, Oil ≈ 1e-2 Pa·s");
-
-                    ImGui.DragFloat("Density (kg/m³)", ref _fluidDensity, 10f, 800f, 1200f);
-                    ImGui.TreePop();
-                }
-
-                // Injection Parameters
-                if (ImGui.TreeNode("Injection Parameters"))
-                {
-                    ImGui.DragFloat("Injection Pressure (MPa)", ref _injectionPressure, 1f, 10f, 200f);
-                    ImGui.DragFloat("Injection Rate (m³/s)", ref _injectionRate, 0.01f, 0.001f, 1f, "%.3f");
-
-                    ImGui.Spacing();
-                    ImGui.Text("Injection Location (normalized 0-1):");
-                    ImGui.Indent();
-                    var loc = _injectionLocation;
-                    ImGui.DragFloat("X", ref loc.X, 0.01f, 0f, 1f);
-                    ImGui.DragFloat("Y", ref loc.Y, 0.01f, 0f, 1f);
-                    ImGui.DragFloat("Z", ref loc.Z, 0.01f, 0f, 1f);
-                    _injectionLocation = loc;
-                    ImGui.Unindent();
-
-                    ImGui.DragInt("Injection Radius (voxels)", ref _injectionRadius, 1, 1, 20);
-
-                    ImGui.Spacing();
-                    ImGui.DragFloat("Max Simulation Time (s)", ref _maxSimTime, 100f, 60f, 86400f);
-                    if (ImGui.IsItemHovered())
-                        ImGui.SetTooltip("1 hour = 3600s, 1 day = 86400s");
-
-                    ImGui.DragFloat("Fluid Time Step (s)", ref _fluidTimeStep, 0.1f, 0.1f, 10f);
-                    ImGui.TreePop();
-                }
-
-                // Fracture Mechanics
-                if (ImGui.TreeNode("Fracture Mechanics"))
-                {
-                    ImGui.Checkbox("Enable Fracture Flow", ref _enableFractureFlow);
-                    if (ImGui.IsItemHovered())
-                        ImGui.SetTooltip("Fluid flows preferentially through fractures (enhanced permeability)");
-
-                    if (_enableFractureFlow)
-                    {
-                        ImGui.Indent();
-                        ImGui.DragFloat("Aperture Coefficient (m/MPa)", ref _fractureApertureCoeff, 1e-7f, 1e-7f, 1e-5f,
-                            "%.2e");
-                        ImGui.DragFloat("Min Aperture (m)", ref _minFractureAperture, 1e-7f, 1e-7f, 1e-5f, "%.2e");
-                        if (ImGui.IsItemHovered())
-                            ImGui.SetTooltip("Typical: 1-10 µm for induced fractures");
-                        ImGui.Unindent();
-                    }
-
-                    ImGui.TreePop();
-                }
-
-                // Rock Properties
-                if (ImGui.TreeNode("Porous Media Properties"))
-                {
-                    ImGui.DragFloat("Rock Permeability (m²)", ref _rockPermeability, 1e-19f, 1e-21f, 1e-12f, "%.2e");
-                    if (ImGui.IsItemHovered())
-                        ImGui.SetTooltip("1e-18 m² ≈ 1 mD (typical tight rock)\n1e-15 m² ≈ 1000 mD (sandstone)");
-
-                    ImGui.DragFloat("Porosity", ref _porosity, 0.01f, 0.01f, 0.40f, "%.2f");
-                    ImGui.TreePop();
-                }
-
-                // Aquifer Boundary
-                if (ImGui.TreeNode("Aquifer Interaction"))
-                {
-                    ImGui.Checkbox("Enable Aquifer Boundary", ref _enableAquifer);
-                    if (ImGui.IsItemHovered())
-                        ImGui.SetTooltip("Exterior voxels act as constant-pressure reservoir (infinite aquifer)");
-
-                    if (_enableAquifer)
-                    {
-                        ImGui.Indent();
-                        ImGui.DragFloat("Aquifer Pressure (MPa)", ref _aquiferPressure, 1f, 5f, 50f);
-                        ImGui.DragFloat("Aquifer Permeability (m²)", ref _aquiferPermeability, 1e-16f, 1e-18f, 1e-12f,
-                            "%.2e");
-                        ImGui.Unindent();
-                    }
-
-                    ImGui.TreePop();
-                }
-
-                ImGui.Spacing();
-                ImGui.TextWrapped("⚠ Note: Fluid simulation adds significant computation time.");
-                ImGui.TextWrapped("Fractures form when effective stress (σ - αP) exceeds failure criterion.");
-
-                ImGui.Unindent();
+                ImGui.DragFloat("Density (kg/m³)", ref _fluidDensity, 10f, 800f, 1200f);
+                ImGui.TreePop();
             }
+
+            // Injection Parameters
+            if (ImGui.TreeNode("Injection Parameters"))
+            {
+                ImGui.DragFloat("Injection Pressure (MPa)", ref _injectionPressure, 1f, 10f, 200f);
+                ImGui.DragFloat("Injection Rate (m³/s)", ref _injectionRate, 0.01f, 0.001f, 1f, "%.3f");
+
+                ImGui.Spacing();
+                ImGui.Text("Injection Location (normalized 0-1):");
+                ImGui.Indent();
+                var loc = _injectionLocation;
+                ImGui.DragFloat("X", ref loc.X, 0.01f, 0f, 1f);
+                ImGui.DragFloat("Y", ref loc.Y, 0.01f, 0f, 1f);
+                ImGui.DragFloat("Z", ref loc.Z, 0.01f, 0f, 1f);
+                _injectionLocation = loc;
+                ImGui.Unindent();
+
+                ImGui.DragInt("Injection Radius (voxels)", ref _injectionRadius, 1, 1, 20);
+
+                ImGui.Spacing();
+                ImGui.DragFloat("Max Simulation Time (s)", ref _maxSimTime, 100f, 60f, 86400f);
+                if (ImGui.IsItemHovered())
+                    ImGui.SetTooltip("1 hour = 3600s, 1 day = 86400s");
+
+                ImGui.DragFloat("Fluid Time Step (s)", ref _fluidTimeStep, 0.1f, 0.1f, 10f);
+                ImGui.TreePop();
+            }
+
+            // Fracture Mechanics
+            if (ImGui.TreeNode("Fracture Mechanics"))
+            {
+                ImGui.Checkbox("Enable Fracture Flow", ref _enableFractureFlow);
+                if (ImGui.IsItemHovered())
+                    ImGui.SetTooltip("Fluid flows preferentially through fractures (enhanced permeability)");
+
+                if (_enableFractureFlow)
+                {
+                    ImGui.Indent();
+                    ImGui.DragFloat("Aperture Coefficient (m/MPa)", ref _fractureApertureCoeff, 1e-7f, 1e-7f, 1e-5f,
+                        "%.2e");
+                    ImGui.DragFloat("Min Aperture (m)", ref _minFractureAperture, 1e-7f, 1e-7f, 1e-5f, "%.2e");
+                    if (ImGui.IsItemHovered())
+                        ImGui.SetTooltip("Typical: 1-10 µm for induced fractures");
+                    ImGui.Unindent();
+                }
+
+                ImGui.TreePop();
+            }
+
+            // Rock Properties
+            if (ImGui.TreeNode("Porous Media Properties"))
+            {
+                ImGui.DragFloat("Rock Permeability (m²)", ref _rockPermeability, 1e-19f, 1e-21f, 1e-12f, "%.2e");
+                if (ImGui.IsItemHovered())
+                    ImGui.SetTooltip("1e-18 m² ≈ 1 mD (typical tight rock)\n1e-15 m² ≈ 1000 mD (sandstone)");
+
+                ImGui.DragFloat("Porosity", ref _porosity, 0.01f, 0.01f, 0.40f, "%.2f");
+                ImGui.TreePop();
+            }
+
+            // Aquifer Boundary
+            if (ImGui.TreeNode("Aquifer Interaction"))
+            {
+                ImGui.Checkbox("Enable Aquifer Boundary", ref _enableAquifer);
+                if (ImGui.IsItemHovered())
+                    ImGui.SetTooltip("Exterior voxels act as constant-pressure reservoir (infinite aquifer)");
+
+                if (_enableAquifer)
+                {
+                    ImGui.Indent();
+                    ImGui.DragFloat("Aquifer Pressure (MPa)", ref _aquiferPressure, 1f, 5f, 50f);
+                    ImGui.DragFloat("Aquifer Permeability (m²)", ref _aquiferPermeability, 1e-16f, 1e-18f, 1e-12f,
+                        "%.2e");
+                    ImGui.Unindent();
+                }
+
+                ImGui.TreePop();
+            }
+
+            ImGui.Spacing();
+            ImGui.TextWrapped("⚠ Note: Fluid simulation adds significant computation time.");
+            ImGui.TextWrapped("Fractures form when effective stress (σ - αP) exceeds failure criterion.");
+
+            ImGui.Unindent();
         }
     }
 

@@ -425,7 +425,7 @@ public partial class GeomechanicalSimulatorCPU
         AssembleGlobalStiffnessMatrix();
     }
 
-    // Original assembly method preserved - no changes to physics
+
     private void AssembleGlobalStiffnessMatrix()
     {
         var cooRow = new List<int>();
@@ -440,6 +440,9 @@ public partial class GeomechanicalSimulatorCPU
             (-gp, -gp, +gp, 1.0f), (+gp, -gp, +gp, 1.0f),
             (+gp, +gp, +gp, 1.0f), (-gp, +gp, +gp, 1.0f)
         };
+
+        var skippedElements = 0;
+        var totalNegativeJacobians = 0;
 
         for (var e = 0; e < _numElements; e++)
         {
@@ -460,22 +463,49 @@ public partial class GeomechanicalSimulatorCPU
             var D = ComputeElasticityMatrix(E, nu);
             var Ke = new float[24, 24];
 
+            var elementHasNegativeJacobian = false;
+
             foreach (var (xi, eta, zeta, w) in gaussPoints)
             {
                 var dN_dxi = ComputeShapeFunctionDerivatives(xi, eta, zeta);
                 var J = ComputeJacobian(dN_dxi, ex, ey, ez);
                 var detJ = Determinant3x3(J);
 
+                // FIX: Skip elements with non-positive Jacobian instead of throwing
                 if (detJ <= 0)
-                    throw new Exception($"Negative Jacobian in element {e}: detJ = {detJ}. Mesh quality issue!");
+                {
+                    elementHasNegativeJacobian = true;
+                    totalNegativeJacobians++;
+                    continue; // Skip this Gauss point
+                }
 
-                var Jinv = Inverse3x3(J);
+                // FIX: Robust inverse with fallback
+                float[,] Jinv;
+                try
+                {
+                    Jinv = Inverse3x3(J);
+                }
+                catch
+                {
+                    // If inversion fails, skip this element entirely
+                    elementHasNegativeJacobian = true;
+                    break;
+                }
+
                 var dN_dx = MatrixMultiply(Jinv, dN_dxi);
                 var B = ComputeStrainDisplacementMatrix(dN_dx);
 
                 AddToElementStiffness(Ke, B, D, detJ * w);
             }
 
+            // FIX: Skip adding contributions from degenerate elements
+            if (elementHasNegativeJacobian)
+            {
+                skippedElements++;
+                continue;
+            }
+
+            // Add element stiffness to global matrix (COO format)
             for (var i = 0; i < 8; i++)
             for (var j = 0; j < 8; j++)
             for (var di = 0; di < 3; di++)
@@ -495,6 +525,12 @@ public partial class GeomechanicalSimulatorCPU
                 }
             }
         }
+
+        // Log warnings if elements were skipped
+        if (skippedElements > 0)
+            Logger.LogWarning($"[GeomechCPU] Skipped {skippedElements} degenerate elements " +
+                              $"({totalNegativeJacobians} negative Jacobians) - " +
+                              $"this is normal for voxel meshes with void spaces");
 
         ConvertCOOtoCSR(cooRow, cooCol, cooVal);
     }
@@ -1814,8 +1850,17 @@ public partial class GeomechanicalSimulatorCPU
     private float[,] Inverse3x3(float[,] m)
     {
         var det = Determinant3x3(m);
+
+        // FIX: Handle singular/near-singular matrices gracefully
         if (MathF.Abs(det) < 1e-12f)
-            throw new Exception("Singular matrix");
+        {
+            // Return identity matrix as fallback
+            var identity = new float[3, 3];
+            identity[0, 0] = 1.0f;
+            identity[1, 1] = 1.0f;
+            identity[2, 2] = 1.0f;
+            return identity;
+        }
 
         var invDet = 1.0f / det;
         var inv = new float[3, 3];

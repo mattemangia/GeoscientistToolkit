@@ -386,7 +386,7 @@ void compute_D_matrix(float E, float nu, __local float* D) {
 }
 
 // ============================================================================
-// KERNEL 1: ASSEMBLE ELEMENT STIFFNESS (UNCHANGED - Already correct)
+// KERNEL 1: ASSEMBLE ELEMENT STIFFNESS - FIXED
 // ============================================================================
 
 __kernel void assemble_element_stiffness(
@@ -404,7 +404,9 @@ __kernel void assemble_element_stiffness(
     int e = get_global_id(0);
     if (e >= numElements) return;
     
+    // FIX: Declare ALL __local variables at outermost scope
     __local float dN_dxi[24], J[9], Jinv[9], dN_dx[24], B[144], D[36], Ke[576];
+    __local float DB[144];  // MOVED HERE - was inside loop before
     __local int nodes[8];
     
     for (int i = 0; i < 8; i++) {
@@ -439,7 +441,7 @@ __kernel void assemble_element_stiffness(
         matmul_3x8(Jinv, dN_dxi, dN_dx);
         compute_B_matrix(dN_dx, B);
         
-        __local float DB[144];
+        // DB is now declared at top of kernel
         for (int i = 0; i < 6; i++) {
             for (int j = 0; j < 24; j++) {
                 float sum = 0.0f;
@@ -608,7 +610,7 @@ __kernel void vector_ops(
 }
 
 // ============================================================================
-// KERNEL 6: CALCULATE STRAINS AND STRESSES (UNCHANGED)
+// KERNEL 6: CALCULATE STRAINS AND STRESSES - FIXED
 // ============================================================================
 
 __kernel void calculate_strains_stresses(
@@ -692,12 +694,21 @@ __kernel void calculate_strains_stresses(
     if (vx >= 0 && vx < width && vy >= 0 && vy < height && vz >= 0) {
         int voxelIdx = vz * height * width + vy * width + vx;
         
-        atomic_xchg((__global int*)&stressXX[voxelIdx], *((int*)&stress[0]));
-        atomic_xchg((__global int*)&stressYY[voxelIdx], *((int*)&stress[1]));
-        atomic_xchg((__global int*)&stressZZ[voxelIdx], *((int*)&stress[2]));
-        atomic_xchg((__global int*)&stressXY[voxelIdx], *((int*)&stress[3]));
-        atomic_xchg((__global int*)&stressXZ[voxelIdx], *((int*)&stress[4]));
-        atomic_xchg((__global int*)&stressYZ[voxelIdx], *((int*)&stress[5]));
+        // FIX: Create private variables for atomic operations
+        // This avoids casting __local pointers to different address spaces
+        float s0 = stress[0];
+        float s1 = stress[1];
+        float s2 = stress[2];
+        float s3 = stress[3];
+        float s4 = stress[4];
+        float s5 = stress[5];
+        
+        atomic_xchg((__global int*)&stressXX[voxelIdx], *((int*)&s0));
+        atomic_xchg((__global int*)&stressYY[voxelIdx], *((int*)&s1));
+        atomic_xchg((__global int*)&stressZZ[voxelIdx], *((int*)&s2));
+        atomic_xchg((__global int*)&stressXY[voxelIdx], *((int*)&s3));
+        atomic_xchg((__global int*)&stressXZ[voxelIdx], *((int*)&s4));
+        atomic_xchg((__global int*)&stressYZ[voxelIdx], *((int*)&s5));
     }
 }
 
