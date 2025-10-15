@@ -22,6 +22,7 @@ public class GeomechanicalSimulationUI : IDisposable
     private readonly MohrCircleRenderer _mohrRenderer;
     private readonly ImGuiExportFileDialog _permeabilityFileDialog;
     private readonly ImGuiExportFileDialog _pnmFileDialog;
+    private readonly ImGuiExportFileDialog _offloadDirectoryDialog;
     private readonly ProgressBarDialog _progressDialog;
 
     // Material selection
@@ -42,6 +43,10 @@ public class GeomechanicalSimulationUI : IDisposable
 
     // Real-time visualization
     private bool _enableRealTimeViz = true;
+
+    // Memory management for huge datasets
+    private bool _enableOffloading = false;
+    private string _offloadDirectory = "";
 
     // Failure criterion
     private int _failureCriterionIndex; // Mohr-Coulomb
@@ -98,7 +103,6 @@ public class GeomechanicalSimulationUI : IDisposable
         _progressDialog = new ProgressBarDialog("Geomechanical Simulation");
         _extentDialog = new ProgressBarDialog("Calculating Extent");
 
-        // FIX: Instantiated ImGuiExportFileDialog instead of the unknown ImGuiFileDialog
         _pnmFileDialog = new ImGuiExportFileDialog("PNMFile", "Select PNM Dataset");
         _pnmFileDialog.SetExtensions((".pnm", "PNM Dataset"));
 
@@ -107,6 +111,15 @@ public class GeomechanicalSimulationUI : IDisposable
 
         _acousticFileDialog = new ImGuiExportFileDialog("AcousticFile", "Select Acoustic Volume");
         _acousticFileDialog.SetExtensions((".acvol", "Acoustic Volume"));
+
+        _offloadDirectoryDialog = new ImGuiExportFileDialog("OffloadDir", "Select Offload Directory");
+        // For directory selection, we don't set any extensions - user will select/create folder and use current path
+        _offloadDirectoryDialog.SetExtensions(Array.Empty<(string, string)>());
+
+        // Set default offload directory
+        _offloadDirectory = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "GeoscientistToolkit", "GeomechOffload");
     }
 
     public void Dispose()
@@ -164,6 +177,10 @@ public class GeomechanicalSimulationUI : IDisposable
         if (ImGui.CollapsingHeader("Computational Settings")) DrawComputationalSettings();
         ImGui.Separator();
 
+        // Memory Management (NEW)
+        if (ImGui.CollapsingHeader("Memory Management")) DrawMemoryManagement();
+        ImGui.Separator();
+
         // Visualization
         if (ImGui.CollapsingHeader("Real-Time Visualization"))
         {
@@ -190,6 +207,10 @@ public class GeomechanicalSimulationUI : IDisposable
             _permeabilityCsvPath = _permeabilityFileDialog.SelectedPath;
         if (_acousticFileDialog.Submit())
             _acousticDatasetPath = _acousticFileDialog.SelectedPath;
+        
+        // For directory selection, use CurrentDirectory when dialog is submitted
+        if (_offloadDirectoryDialog.Submit())
+            _offloadDirectory = _offloadDirectoryDialog.CurrentDirectory;
 
         // Mohr circle window
         if (_showMohrCircles && _lastResults?.MohrCircles != null) DrawMohrCircleWindow();
@@ -239,10 +260,8 @@ public class GeomechanicalSimulationUI : IDisposable
 
         if (_autoCropToSelection && _selectedMaterialIDs.Any())
         {
-            // FIX: Changed .HasValue to a standard null check
             if (_simulationExtent != null)
             {
-                // FIX: Changed .Value to direct access
                 var ext = _simulationExtent;
                 ImGui.Text($"Simulation Extent: {ext.Width} × {ext.Height} × {ext.Depth}");
             }
@@ -426,9 +445,8 @@ public class GeomechanicalSimulationUI : IDisposable
         var mu = E / (2 * (1 + nu));
         var K = E / (3 * (1 - 2 * nu));
 
-        // FIX: Added .ToString("...") to resolve ambiguous string interpolation
-        ImGui.Text($"Shear Modulus: {(mu / 1e6f).ToString("F0")} MPa");
-        ImGui.Text($"Bulk Modulus: {(K / 1e6f).ToString("F0")} MPa");
+        ImGui.Text($"Shear Modulus: {(mu / 1e6f):F0} MPa");
+        ImGui.Text($"Bulk Modulus: {(K / 1e6f):F0} MPa");
 
         ImGui.Unindent();
     }
@@ -508,9 +526,198 @@ public class GeomechanicalSimulationUI : IDisposable
         }
     }
 
+    private void DrawMemoryManagement()
+    {
+        ImGui.TextWrapped("For extremely large datasets (>32 GB), enable data offloading to disk:");
+        ImGui.Spacing();
+
+        ImGui.Checkbox("Enable Data Offloading", ref _enableOffloading);
+        
+        if (ImGui.IsItemHovered())
+        {
+            ImGui.SetTooltip("Offloads chunk data to disk when memory is constrained.\n" +
+                           "Recommended for datasets requiring >16 GB RAM.\n" +
+                           "May reduce performance but allows processing huge volumes.");
+        }
+
+        if (_enableOffloading)
+        {
+            ImGui.Indent();
+            ImGui.Spacing();
+            
+            ImGui.Text("Offload Directory:");
+            ImGui.SameLine();
+            if (ImGui.Button("Browse##Offload"))
+            {
+                _offloadDirectoryDialog.Open("", _offloadDirectory);
+            }
+            
+            if (ImGui.IsItemHovered())
+            {
+                ImGui.SetTooltip("Navigate to the desired directory and click 'Export' to select it.\n" +
+                               "You can create new folders using the 'New Folder' button.");
+            }
+            
+            ImGui.SameLine();
+            if (ImGui.Button("Clear##Offload"))
+            {
+                ClearOffloadCache();
+            }
+            
+            if (ImGui.IsItemHovered())
+            {
+                ImGui.SetTooltip("Delete all temporary files in the offload directory.\n" +
+                               "Safe to use when no simulation is running.");
+            }
+            
+            ImGui.TextWrapped(_offloadDirectory);
+            
+            if (!string.IsNullOrEmpty(_offloadDirectory))
+            {
+                ImGui.Spacing();
+                
+                // Show directory info and cache size
+                try
+                {
+                    if (Directory.Exists(_offloadDirectory))
+                    {
+                        var drive = new DriveInfo(Path.GetPathRoot(_offloadDirectory));
+                        var freeSpace = drive.AvailableFreeSpace / (1024.0 * 1024 * 1024);
+                        
+                        // Calculate cache size
+                        var cacheSize = CalculateDirectorySize(_offloadDirectory);
+                        var cacheSizeGB = cacheSize / (1024.0 * 1024 * 1024);
+                        
+                        ImGui.TextColored(new Vector4(0.7f, 0.7f, 1f, 1), 
+                            $"Available space: {freeSpace:F1} GB");
+                        
+                        if (cacheSize > 0)
+                        {
+                            ImGui.TextColored(new Vector4(1f, 0.8f, 0.4f, 1), 
+                                $"Cache size: {cacheSizeGB:F2} GB");
+                        }
+                        
+                        if (freeSpace < 50)
+                        {
+                            ImGui.TextColored(new Vector4(1, 0.5f, 0, 1), 
+                                "⚠ Warning: Low disk space!");
+                        }
+                    }
+                    else
+                    {
+                        ImGui.TextColored(new Vector4(1, 1, 0, 1), 
+                            "Directory will be created on simulation start");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    ImGui.TextColored(new Vector4(1, 0, 0, 1), 
+                        $"Unable to access directory: {ex.Message}");
+                }
+            }
+            
+            ImGui.Spacing();
+            ImGui.TextColored(new Vector4(0.7f, 0.7f, 0.7f, 1), 
+                "Note: Temporary files are automatically cleaned up after simulation");
+            
+            ImGui.Unindent();
+        }
+        else
+        {
+            ImGui.Spacing();
+            ImGui.TextColored(new Vector4(0.7f, 0.7f, 0.7f, 1), 
+                "All data will be kept in RAM (faster, but requires more memory)");
+        }
+    }
+
+    private void ClearOffloadCache()
+    {
+        if (string.IsNullOrEmpty(_offloadDirectory))
+            return;
+
+        if (_isSimulating)
+        {
+            Logger.LogWarning("[Geomechanics] Cannot clear cache while simulation is running");
+            return;
+        }
+
+        try
+        {
+            if (Directory.Exists(_offloadDirectory))
+            {
+                var files = Directory.GetFiles(_offloadDirectory, "*.*", SearchOption.AllDirectories);
+                var fileCount = files.Length;
+                
+                foreach (var file in files)
+                {
+                    try
+                    {
+                        File.Delete(file);
+                    }
+                    catch (Exception ex)
+                    {
+                        Logger.LogWarning($"[Geomechanics] Could not delete file {file}: {ex.Message}");
+                    }
+                }
+
+                // Remove empty subdirectories
+                var directories = Directory.GetDirectories(_offloadDirectory, "*", SearchOption.AllDirectories)
+                    .OrderByDescending(d => d.Length); // Delete deepest first
+
+                foreach (var dir in directories)
+                {
+                    try
+                    {
+                        if (!Directory.EnumerateFileSystemEntries(dir).Any())
+                            Directory.Delete(dir);
+                    }
+                    catch (Exception ex)
+                    {
+                        Logger.LogWarning($"[Geomechanics] Could not delete directory {dir}: {ex.Message}");
+                    }
+                }
+
+                Logger.Log($"[Geomechanics] Cleared offload cache: {fileCount} file(s) deleted");
+            }
+            else
+            {
+                Logger.Log("[Geomechanics] Offload directory does not exist, nothing to clear");
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError($"[Geomechanics] Failed to clear offload cache: {ex.Message}");
+        }
+    }
+
+    private long CalculateDirectorySize(string directory)
+    {
+        if (!Directory.Exists(directory))
+            return 0;
+
+        try
+        {
+            var files = Directory.GetFiles(directory, "*.*", SearchOption.AllDirectories);
+            return files.Sum(file =>
+            {
+                try
+                {
+                    return new FileInfo(file).Length;
+                }
+                catch
+                {
+                    return 0;
+                }
+            });
+        }
+        catch
+        {
+            return 0;
+        }
+    }
+
     private void DrawSimulationControls(CtImageStackDataset dataset)
     {
-        // FIX: Changed .HasValue to a standard null check
         var canSimulate = _selectedMaterialIDs.Any() &&
                           (!_autoCropToSelection || _simulationExtent != null);
 
@@ -546,8 +753,7 @@ public class GeomechanicalSimulationUI : IDisposable
     {
         if (ImGui.CollapsingHeader("Simulation Results", ImGuiTreeNodeFlags.DefaultOpen))
         {
-            // FIX: Added .ToString("...") to resolve ambiguous string interpolation
-            ImGui.Text($"Computation Time: {_lastResults.ComputationTime.TotalSeconds.ToString("F2")} s");
+            ImGui.Text($"Computation Time: {_lastResults.ComputationTime.TotalSeconds:F2} s");
             ImGui.Text($"Iterations: {_lastResults.IterationsPerformed}");
             ImGui.Text($"Converged: {(_lastResults.Converged ? "Yes" : "No")}");
 
@@ -557,16 +763,16 @@ public class GeomechanicalSimulationUI : IDisposable
 
             ImGui.Text("Stress Statistics:");
             ImGui.Indent();
-            ImGui.Text($"Mean Stress: {(_lastResults.MeanStress / 1e6f).ToString("F2")} MPa");
-            ImGui.Text($"Max Shear Stress: {(_lastResults.MaxShearStress / 1e6f).ToString("F2")} MPa");
+            ImGui.Text($"Mean Stress: {(_lastResults.MeanStress / 1e6f):F2} MPa");
+            ImGui.Text($"Max Shear Stress: {(_lastResults.MaxShearStress / 1e6f):F2} MPa");
             ImGui.Unindent();
 
             ImGui.Spacing();
             ImGui.Text("Failure Statistics:");
             ImGui.Indent();
-            ImGui.Text($"Total Voxels: {_lastResults.TotalVoxels.ToString("N0")}");
-            ImGui.Text($"Failed Voxels: {_lastResults.FailedVoxels.ToString("N0")}");
-            ImGui.Text($"Failure Percentage: {_lastResults.FailedVoxelPercentage.ToString("F2")}%");
+            ImGui.Text($"Total Voxels: {_lastResults.TotalVoxels:N0}");
+            ImGui.Text($"Failed Voxels: {_lastResults.FailedVoxels:N0}");
+            ImGui.Text($"Failure Percentage: {_lastResults.FailedVoxelPercentage:F2}%");
             ImGui.Unindent();
 
             ImGui.Spacing();
@@ -662,8 +868,23 @@ public class GeomechanicalSimulationUI : IDisposable
 
         try
         {
+            // Ensure offload directory exists if offloading is enabled
+            if (_enableOffloading)
+            {
+                if (string.IsNullOrEmpty(_offloadDirectory))
+                {
+                    _offloadDirectory = Path.Combine(
+                        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                        "GeoscientistToolkit", "GeomechOffload");
+                }
+                
+                if (!Directory.Exists(_offloadDirectory))
+                {
+                    Directory.CreateDirectory(_offloadDirectory);
+                }
+            }
+
             // Build parameters
-            // FIX: Changed .HasValue and .Value to null check and direct access
             var extent = _autoCropToSelection && _simulationExtent != null
                 ? _simulationExtent
                 : new BoundingBox(0, 0, 0, dataset.Width, dataset.Height, dataset.Depth);
@@ -701,6 +922,8 @@ public class GeomechanicalSimulationUI : IDisposable
                 Tolerance = _tolerance,
                 EnableDamageEvolution = _enableDamageEvolution,
                 DamageThreshold = _damageThreshold,
+                EnableOffloading = _enableOffloading,
+                OffloadDirectory = _offloadDirectory,
                 PnmDatasetPath = _pnmDatasetPath,
                 PermeabilityCsvPath = _permeabilityCsvPath,
                 AcousticDatasetPath = _acousticDatasetPath,
@@ -769,7 +992,6 @@ public class GeomechanicalSimulationUI : IDisposable
         }
     }
 
-    // FIX: Renamed parameter 'params' to 'parameters' to avoid keyword conflict
     private async Task LoadIntegratedDataAsync(GeomechanicalParameters parameters,
         CtImageStackDataset dataset)
     {
@@ -779,23 +1001,20 @@ public class GeomechanicalSimulationUI : IDisposable
             {
                 Logger.Log($"[Geomechanics] Loading PNM data from '{parameters.PnmDatasetPath}' for integration...");
 
-                // Use the PNMLoader to load the dataset.
                 var pnmLoader = new PNMLoader { FilePath = parameters.PnmDatasetPath };
                 var pnmDataset = await pnmLoader.LoadAsync(null) as PNMDataset;
 
                 if (pnmDataset != null)
                 {
-                    // Calculate bulk porosity from the PNM data
-                    double totalPoreVolume = pnmDataset.Pores.Sum(p => p.VolumePhysical); // in um^3
+                    double totalPoreVolume = pnmDataset.Pores.Sum(p => p.VolumePhysical);
                     var totalImageVolume = pnmDataset.ImageWidth * pnmDataset.ImageHeight * pnmDataset.ImageDepth *
-                                           Math.Pow(pnmDataset.VoxelSize, 3); // in um^3
+                                           Math.Pow(pnmDataset.VoxelSize, 3);
 
                     if (totalImageVolume > 0)
                     {
                         var porosity = totalPoreVolume / totalImageVolume;
                         Logger.Log(
                             $"[Geomechanics] PNM data processed. Calculated Porosity: {porosity:P2}. Permeability: {pnmDataset.DarcyPermeability} mD.");
-                        // This data can now be used to refine simulation parameters, for example, by adjusting the Biot coefficient based on porosity.
                     }
                 }
                 else
@@ -820,7 +1039,6 @@ public class GeomechanicalSimulationUI : IDisposable
                 var lines = await File.ReadAllLinesAsync(parameters.PermeabilityCsvPath,
                     _cancellationTokenSource.Token);
 
-                // Skip header line
                 foreach (var line in lines.Skip(1))
                 {
                     if (_cancellationTokenSource.IsCancellationRequested) break;
@@ -839,11 +1057,10 @@ public class GeomechanicalSimulationUI : IDisposable
                     Logger.Log(
                         $"[Geomechanics] Successfully processed {materialPropertiesFromCsv.Count} records from permeability CSV.");
 
-                    // Check if the selected material(s) have properties defined in the CSV to use in the simulation
                     foreach (var selectedId in _selectedMaterialIDs)
                         if (materialPropertiesFromCsv.TryGetValue(selectedId, out var props))
                             Logger.Log(
-                                $"[Geomechanics] Properties found for selected Material ID {selectedId}: Permeability={props.permeability} mD, Porosity={props.porosity:P2}. This data can be used to refine pore pressure or damage models.");
+                                $"[Geomechanics] Properties found for selected Material ID {selectedId}: Permeability={props.permeability} mD, Porosity={props.porosity:P2}.");
                 }
             }
             catch (Exception ex)
@@ -857,46 +1074,31 @@ public class GeomechanicalSimulationUI : IDisposable
             {
                 Logger.Log($"[Geomechanics] Loading acoustic volume data from '{parameters.AcousticDatasetPath}'...");
 
-                // Use the AcousticVolumeLoader to load the dataset
                 var acousticLoader = new AcousticVolumeLoader { DirectoryPath = parameters.AcousticDatasetPath };
                 var acousticDataset = await acousticLoader.LoadAsync(null) as AcousticVolumeDataset;
 
                 if (acousticDataset?.DensityData != null)
                 {
                     Logger.Log(
-                        "[Geomechanics] Acoustic data loaded. Calculating average elastic properties to inform simulation...");
+                        "[Geomechanics] Acoustic data loaded. Calculating average elastic properties...");
 
                     var densityVolume = acousticDataset.DensityData;
-
-                    // Calculate the average properties from the entire acoustic volume
-                    var avgYoungsModulusPa = densityVolume.GetMeanYoungsModulus(); // in Pascals
+                    var avgYoungsModulusPa = densityVolume.GetMeanYoungsModulus();
                     var avgPoissonRatio = densityVolume.GetMeanPoissonRatio();
 
                     if (avgYoungsModulusPa > 0)
                     {
-                        // Convert from Pa to MPa for the geomechanical simulation parameters
                         var avgYoungsModulusMPa = avgYoungsModulusPa / 1e6f;
 
-                        Logger.Log($"[Geomechanics] Overriding UI material properties with acoustic data averages: " +
+                        Logger.Log($"[Geomechanics] Overriding properties with acoustic data: " +
                                    $"Young's Modulus = {avgYoungsModulusMPa:F0} MPa, Poisson's Ratio = {avgPoissonRatio:F3}");
 
-                        // Override the simulation parameters with these averaged values
                         parameters.YoungModulus = avgYoungsModulusMPa;
-                        _youngModulus = avgYoungsModulusMPa; // Update UI variable for consistency
+                        _youngModulus = avgYoungsModulusMPa;
 
                         parameters.PoissonRatio = avgPoissonRatio;
-                        _poissonRatio = avgPoissonRatio; // Update UI variable for consistency
+                        _poissonRatio = avgPoissonRatio;
                     }
-                    else
-                    {
-                        Logger.LogWarning(
-                            "[Geomechanics] Acoustic data loaded, but average Young's Modulus was zero. No properties overridden.");
-                    }
-                }
-                else
-                {
-                    Logger.LogWarning(
-                        "[Geomechanics] Acoustic volume was loaded, but it does not contain the required property data ('DensityData' was null).");
                 }
             }
             catch (Exception ex)
@@ -949,7 +1151,6 @@ public class GeomechanicalSimulationUI : IDisposable
 
     private void UpdateVisualization(CtImageStackDataset dataset, GeomechanicalResults results)
     {
-        // Create damage visualization mask
         var mask = new byte[dataset.Width * dataset.Height * dataset.Depth];
         var extent = results.Parameters.SimulationExtent;
 
@@ -967,7 +1168,7 @@ public class GeomechanicalSimulationUI : IDisposable
             }
         });
 
-        var color = new Vector4(1, 0, 0, 0.7f); // Red for damage
+        var color = new Vector4(1, 0, 0, 0.7f);
         CtImageStackTools.Update3DPreviewFromExternal(dataset, mask, color);
     }
 }

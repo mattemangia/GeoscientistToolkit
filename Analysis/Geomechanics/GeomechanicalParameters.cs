@@ -67,6 +67,10 @@ public class GeomechanicalParameters
     public bool EnableDamageEvolution { get; set; } = true;
     public float DamageThreshold { get; set; } = 0.8f; // Fraction of strength
 
+    // Memory management for huge datasets
+    public bool EnableOffloading { get; set; } = false;
+    public string OffloadDirectory { get; set; } = "";
+
     // Integration options
     public string PnmDatasetPath { get; set; }
     public string PermeabilityCsvPath { get; set; }
