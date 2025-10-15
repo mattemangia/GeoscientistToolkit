@@ -4,7 +4,7 @@ using System.Numerics;
 
 namespace GeoscientistToolkit.Analysis.Geomechanics;
 
-public class GeomechanicalResults
+public partial class GeomechanicalResults
 {
     // Stress field (Pa)
     public float[,,] StressXX { get; set; }

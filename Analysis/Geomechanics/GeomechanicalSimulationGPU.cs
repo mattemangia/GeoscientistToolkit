@@ -59,6 +59,10 @@ public unsafe class GeomechanicalSimulatorGPU : IDisposable
     private nint _kernelVectorOps;
     private long _maxGPUMemoryBytes;
     private int _maxLoadedChunks;
+    private nint _bufTemperature, _bufPressure, _bufPressureNew;
+    private nint _bufFractureAperture, _bufFluidSaturation;
+    private nint _bufVelocityX, _bufVelocityY, _bufVelocityZ;
+    private nint _bufConnectivity;
 
     // Host-side data
     private float[] _nodeX, _nodeY, _nodeZ;
@@ -172,72 +176,72 @@ public unsafe class GeomechanicalSimulatorGPU : IDisposable
     }
 
     private void BuildProgram()
+{
+    var source = GetKernelSource();
+    var sourceBytes = Encoding.UTF8.GetBytes(source);
+
+    int error;
+    fixed (byte* sourcePtr = sourceBytes)
     {
-        var source = GetKernelSource();
-        var sourceBytes = Encoding.UTF8.GetBytes(source);
-
-        int error;
-        fixed (byte* sourcePtr = sourceBytes)
-        {
-            var lengths = stackalloc nuint[1];
-            lengths[0] = (nuint)sourceBytes.Length;
-            var sourcePtrs = stackalloc byte*[1];
-            sourcePtrs[0] = sourcePtr;
-            _program = _cl.CreateProgramWithSource(_context, 1, sourcePtrs, lengths, &error);
-            CheckError(error, "CreateProgramWithSource");
-        }
-
-        var devices = stackalloc nint[1];
-        devices[0] = _device;
-        error = _cl.BuildProgram(_program, 1, devices, (byte*)null, null, null);
-        if (error != 0)
-        {
-            nuint logSize;
-            _cl.GetProgramBuildInfo(_program, _device, (uint)ProgramBuildInfo.BuildLog, 0, null, &logSize);
-            var log = new byte[logSize];
-            fixed (byte* logPtr = log)
-            {
-                _cl.GetProgramBuildInfo(_program, _device, (uint)ProgramBuildInfo.BuildLog, logSize, logPtr, null);
-            }
-
-            var logString = Encoding.UTF8.GetString(log);
-            throw new Exception($"OpenCL build failed:\n{logString}");
-        }
-
-        // Create all kernels
-        _kernelAssembleElement = _cl.CreateKernel(_program, "assemble_element_stiffness", &error);
-        CheckError(error, "CreateKernel assemble_element_stiffness");
-
-        _kernelApplyBC = _cl.CreateKernel(_program, "apply_boundary_conditions", &error);
-        CheckError(error, "CreateKernel apply_boundary_conditions");
-
-        _kernelSpMV = _cl.CreateKernel(_program, "sparse_matvec", &error);
-        CheckError(error, "CreateKernel sparse_matvec");
-
-        _kernelDotProduct = _cl.CreateKernel(_program, "dot_product", &error);
-        CheckError(error, "CreateKernel dot_product");
-
-        _kernelVectorOps = _cl.CreateKernel(_program, "vector_ops", &error);
-        CheckError(error, "CreateKernel vector_ops");
-
-        _kernelCalculateStrains = _cl.CreateKernel(_program, "calculate_strains_stresses", &error);
-        CheckError(error, "CreateKernel calculate_strains_stresses");
-
-        _kernelCalculatePrincipal = _cl.CreateKernel(_program, "calculate_principal_stresses", &error);
-        CheckError(error, "CreateKernel calculate_principal_stresses");
-
-        _kernelEvaluateFailure = _cl.CreateKernel(_program, "evaluate_failure", &error);
-        CheckError(error, "CreateKernel evaluate_failure");
-
-        _kernelPlasticCorrection = _cl.CreateKernel(_program, "apply_plastic_correction", &error);
-        CheckError(error, "CreateKernel apply_plastic_correction");
-
-        Logger.Log("[GeomechGPU] All kernels created successfully");
+        var lengths = stackalloc nuint[1];
+        lengths[0] = (nuint)sourceBytes.Length;
+        var sourcePtrs = stackalloc byte*[1];
+        sourcePtrs[0] = sourcePtr;
+        _program = _cl.CreateProgramWithSource(_context, 1, sourcePtrs, lengths, &error);
+        CheckError(error, "CreateProgramWithSource");
     }
 
-    private string GetKernelSource()
+    var devices = stackalloc nint[1];
+    devices[0] = _device;
+    error = _cl.BuildProgram(_program, 1, devices, (byte*)null, null, null);
+    if (error != 0)
     {
-        return @"
+        nuint logSize;
+        _cl.GetProgramBuildInfo(_program, _device, (uint)ProgramBuildInfo.BuildLog, 0, null, &logSize);
+        var log = new byte[logSize];
+        fixed (byte* logPtr = log)
+        {
+            _cl.GetProgramBuildInfo(_program, _device, (uint)ProgramBuildInfo.BuildLog, logSize, logPtr, null);
+        }
+
+        var logString = Encoding.UTF8.GetString(log);
+        throw new Exception($"OpenCL build failed:\n{logString}");
+    }
+
+    // Create all kernels
+    _kernelAssembleElement = _cl.CreateKernel(_program, "assemble_element_stiffness", &error);
+    CheckError(error, "CreateKernel assemble_element_stiffness");
+
+    _kernelApplyBC = _cl.CreateKernel(_program, "apply_boundary_conditions", &error);
+    CheckError(error, "CreateKernel apply_boundary_conditions");
+
+    _kernelSpMV = _cl.CreateKernel(_program, "sparse_matvec", &error);
+    CheckError(error, "CreateKernel sparse_matvec");
+
+    _kernelDotProduct = _cl.CreateKernel(_program, "dot_product", &error);
+    CheckError(error, "CreateKernel dot_product");
+
+    _kernelVectorOps = _cl.CreateKernel(_program, "vector_ops", &error);
+    CheckError(error, "CreateKernel vector_ops");
+
+    _kernelCalculateStrains = _cl.CreateKernel(_program, "calculate_strains_stresses", &error);
+    CheckError(error, "CreateKernel calculate_strains_stresses");
+
+    _kernelCalculatePrincipal = _cl.CreateKernel(_program, "calculate_principal_stresses", &error);
+    CheckError(error, "CreateKernel calculate_principal_stresses");
+
+    _kernelEvaluateFailure = _cl.CreateKernel(_program, "evaluate_failure", &error);
+    CheckError(error, "CreateKernel evaluate_failure");
+
+    _kernelPlasticCorrection = _cl.CreateKernel(_program, "apply_plastic_correction", &error);
+    CheckError(error, "CreateKernel apply_plastic_correction");
+
+    Logger.Log("[GeomechGPU] All kernels created successfully");
+}
+
+    private string GetKernelSource()
+{
+    return @"
 #pragma OPENCL EXTENSION cl_khr_fp64 : enable
 
 // ============================================================================
@@ -265,7 +269,6 @@ float det3x3(__local const float* m) {
 void inverse3x3(__local const float* m, __local float* inv) {
     float det = det3x3(m);
     if (fabs(det) < 1e-12f) {
-        // Singular matrix - return identity
         for (int i = 0; i < 9; i++) inv[i] = 0.0f;
         inv[0] = inv[4] = inv[8] = 1.0f;
         return;
@@ -284,7 +287,6 @@ void inverse3x3(__local const float* m, __local float* inv) {
 }
 
 void matmul_3x8(__local const float* A, __local const float* B, __local float* C) {
-    // C[3x8] = A[3x3] * B[3x8]
     for (int i = 0; i < 3; i++) {
         for (int j = 0; j < 8; j++) {
             C[i*8 + j] = 0.0f;
@@ -300,7 +302,6 @@ void matmul_3x8(__local const float* A, __local const float* B, __local float* C
 // ============================================================================
 
 void shape_function_derivatives(float xi, float eta, float zeta, __local float* dN) {
-    // Natural coordinates of 8-node hexahedral element
     float coords[8][3] = {
         {-1.0f, -1.0f, -1.0f}, {1.0f, -1.0f, -1.0f}, {1.0f, 1.0f, -1.0f}, {-1.0f, 1.0f, -1.0f},
         {-1.0f, -1.0f, 1.0f}, {1.0f, -1.0f, 1.0f}, {1.0f, 1.0f, 1.0f}, {-1.0f, 1.0f, 1.0f}
@@ -311,11 +312,8 @@ void shape_function_derivatives(float xi, float eta, float zeta, __local float* 
         float eta_i = coords[i][1];
         float zeta_i = coords[i][2];
         
-        // dN/dξ
         dN[i*3 + 0] = 0.125f * xi_i * (1.0f + eta_i*eta) * (1.0f + zeta_i*zeta);
-        // dN/dη
         dN[i*3 + 1] = 0.125f * (1.0f + xi_i*xi) * eta_i * (1.0f + zeta_i*zeta);
-        // dN/dζ
         dN[i*3 + 2] = 0.125f * (1.0f + xi_i*xi) * (1.0f + eta_i*eta) * zeta_i;
     }
 }
@@ -330,23 +328,19 @@ void compute_jacobian(__local const float* dN_dxi, __global const float* nodeX, 
         float y = nodeY[nodeIdx];
         float z = nodeZ[nodeIdx];
         
-        // J = [∂x/∂ξ  ∂y/∂ξ  ∂z/∂ξ]
-        //     [∂x/∂η  ∂y/∂η  ∂z/∂η]
-        //     [∂x/∂ζ  ∂y/∂ζ  ∂z/∂ζ]
-        J[0] += dN_dxi[i*3 + 0] * x;  // ∂x/∂ξ
-        J[1] += dN_dxi[i*3 + 0] * y;  // ∂y/∂ξ
-        J[2] += dN_dxi[i*3 + 0] * z;  // ∂z/∂ξ
-        J[3] += dN_dxi[i*3 + 1] * x;  // ∂x/∂η
-        J[4] += dN_dxi[i*3 + 1] * y;  // ∂y/∂η
-        J[5] += dN_dxi[i*3 + 1] * z;  // ∂z/∂η
-        J[6] += dN_dxi[i*3 + 2] * x;  // ∂x/∂ζ
-        J[7] += dN_dxi[i*3 + 2] * y;  // ∂y/∂ζ
-        J[8] += dN_dxi[i*3 + 2] * z;  // ∂z/∂ζ
+        J[0] += dN_dxi[i*3 + 0] * x;
+        J[1] += dN_dxi[i*3 + 0] * y;
+        J[2] += dN_dxi[i*3 + 0] * z;
+        J[3] += dN_dxi[i*3 + 1] * x;
+        J[4] += dN_dxi[i*3 + 1] * y;
+        J[5] += dN_dxi[i*3 + 1] * z;
+        J[6] += dN_dxi[i*3 + 2] * x;
+        J[7] += dN_dxi[i*3 + 2] * y;
+        J[8] += dN_dxi[i*3 + 2] * z;
     }
 }
 
 void compute_B_matrix(__local const float* dN_dx, __local float* B) {
-    // B[6x24] - strain-displacement matrix
     for (int i = 0; i < 144; i++) B[i] = 0.0f;
     
     for (int i = 0; i < 8; i++) {
@@ -355,33 +349,25 @@ void compute_B_matrix(__local const float* dN_dx, __local float* B) {
         float dNi_dz = dN_dx[i*3 + 2];
         int col = i * 3;
         
-        // ε_xx = ∂u/∂x
         B[0*24 + col + 0] = dNi_dx;
-        // ε_yy = ∂v/∂y
         B[1*24 + col + 1] = dNi_dy;
-        // ε_zz = ∂w/∂z
         B[2*24 + col + 2] = dNi_dz;
-        // γ_xy = ∂u/∂y + ∂v/∂x
         B[3*24 + col + 0] = dNi_dy;
         B[3*24 + col + 1] = dNi_dx;
-        // γ_xz = ∂u/∂z + ∂w/∂x
         B[4*24 + col + 0] = dNi_dz;
         B[4*24 + col + 2] = dNi_dx;
-        // γ_yz = ∂v/∂z + ∂w/∂y
         B[5*24 + col + 1] = dNi_dz;
         B[5*24 + col + 2] = dNi_dy;
     }
 }
 
 void compute_D_matrix(float E, float nu, __local float* D) {
-    // D[6x6] - elasticity matrix for isotropic material
     float lambda = E * nu / ((1.0f + nu) * (1.0f - 2.0f * nu));
     float mu = E / (2.0f * (1.0f + nu));
     float lambda_2mu = lambda + 2.0f * mu;
     
     for (int i = 0; i < 36; i++) D[i] = 0.0f;
     
-    // Normal stresses
     D[0*6 + 0] = lambda_2mu;
     D[0*6 + 1] = lambda;
     D[0*6 + 2] = lambda;
@@ -394,14 +380,13 @@ void compute_D_matrix(float E, float nu, __local float* D) {
     D[2*6 + 1] = lambda;
     D[2*6 + 2] = lambda_2mu;
     
-    // Shear stresses
     D[3*6 + 3] = mu;
     D[4*6 + 4] = mu;
     D[5*6 + 5] = mu;
 }
 
 // ============================================================================
-// KERNEL 1: ASSEMBLE ELEMENT STIFFNESS
+// KERNEL 1: ASSEMBLE ELEMENT STIFFNESS (UNCHANGED - Already correct)
 // ============================================================================
 
 __kernel void assemble_element_stiffness(
@@ -422,21 +407,17 @@ __kernel void assemble_element_stiffness(
     __local float dN_dxi[24], J[9], Jinv[9], dN_dx[24], B[144], D[36], Ke[576];
     __local int nodes[8];
     
-    // Load element nodes
     for (int i = 0; i < 8; i++) {
         nodes[i] = elementNodes[e*8 + i];
     }
     
-    // Initialize element stiffness
     for (int i = 0; i < 576; i++) Ke[i] = 0.0f;
     
-    // Get material properties
     float E = elementE[e];
     float nu = elementNu[e];
     compute_D_matrix(E, nu, D);
     
-    // 8-point Gauss quadrature
-    float gp = 0.577350269f;  // 1/√3
+    float gp = 0.577350269f;
     float gaussPts[8][4] = {
         {-gp, -gp, -gp, 1.0f}, {gp, -gp, -gp, 1.0f}, {gp, gp, -gp, 1.0f}, {-gp, gp, -gp, 1.0f},
         {-gp, -gp, gp, 1.0f}, {gp, -gp, gp, 1.0f}, {gp, gp, gp, 1.0f}, {-gp, gp, gp, 1.0f}
@@ -448,25 +429,16 @@ __kernel void assemble_element_stiffness(
         float zeta = gaussPts[gp_idx][2];
         float weight = gaussPts[gp_idx][3];
         
-        // Shape function derivatives in natural coordinates
         shape_function_derivatives(xi, eta, zeta, dN_dxi);
-        
-        // Compute Jacobian
         compute_jacobian(dN_dxi, nodeX, nodeY, nodeZ, nodes, J);
         float detJ = det3x3(J);
         
-        if (detJ <= 0.0f) continue;  // Skip invalid elements
+        if (detJ <= 0.0f) continue;
         
-        // Inverse Jacobian
         inverse3x3(J, Jinv);
-        
-        // Shape function derivatives in physical coordinates: dN/dx = J^(-1) * dN/dξ
         matmul_3x8(Jinv, dN_dxi, dN_dx);
-        
-        // Strain-displacement matrix
         compute_B_matrix(dN_dx, B);
         
-        // D*B for efficiency
         __local float DB[144];
         for (int i = 0; i < 6; i++) {
             for (int j = 0; j < 24; j++) {
@@ -478,7 +450,6 @@ __kernel void assemble_element_stiffness(
             }
         }
         
-        // Ke += B^T * D * B * detJ * weight
         float factor = detJ * weight;
         for (int i = 0; i < 24; i++) {
             for (int j = 0; j < 24; j++) {
@@ -491,7 +462,6 @@ __kernel void assemble_element_stiffness(
         }
     }
     
-    // Assemble into global stiffness matrix (CSR format)
     for (int i = 0; i < 8; i++) {
         for (int j = 0; j < 8; j++) {
             for (int di = 0; di < 3; di++) {
@@ -504,7 +474,6 @@ __kernel void assemble_element_stiffness(
                     float value = Ke[localI*24 + localJ];
                     if (fabs(value) < 1e-12f) continue;
                     
-                    // Find position in CSR structure
                     int rowStart = rowPtr[globalI];
                     int rowEnd = rowPtr[globalI + 1];
                     
@@ -521,7 +490,7 @@ __kernel void assemble_element_stiffness(
 }
 
 // ============================================================================
-// KERNEL 2: APPLY BOUNDARY CONDITIONS
+// KERNEL 2: APPLY BOUNDARY CONDITIONS (UNCHANGED)
 // ============================================================================
 
 __kernel void apply_boundary_conditions(
@@ -539,7 +508,7 @@ __kernel void apply_boundary_conditions(
 }
 
 // ============================================================================
-// KERNEL 3: SPARSE MATRIX-VECTOR MULTIPLICATION
+// KERNEL 3: SPARSE MATRIX-VECTOR MULTIPLICATION (UNCHANGED)
 // ============================================================================
 
 __kernel void sparse_matvec(
@@ -574,7 +543,7 @@ __kernel void sparse_matvec(
 }
 
 // ============================================================================
-// KERNEL 4: DOT PRODUCT (Reduction)
+// KERNEL 4: DOT PRODUCT (UNCHANGED)
 // ============================================================================
 
 __kernel void dot_product(
@@ -588,7 +557,6 @@ __kernel void dot_product(
     int lid = get_local_id(0);
     int group_size = get_local_size(0);
     
-    // Load and compute partial product
     float sum = 0.0f;
     if (gid < n) {
         sum = a[gid] * b[gid];
@@ -597,7 +565,6 @@ __kernel void dot_product(
     
     barrier(CLK_LOCAL_MEM_FENCE);
     
-    // Reduction within work group
     for (int offset = group_size / 2; offset > 0; offset >>= 1) {
         if (lid < offset) {
             scratch[lid] += scratch[lid + offset];
@@ -605,14 +572,13 @@ __kernel void dot_product(
         barrier(CLK_LOCAL_MEM_FENCE);
     }
     
-    // Write group result
     if (lid == 0) {
         partial_sums[get_group_id(0)] = scratch[0];
     }
 }
 
 // ============================================================================
-// KERNEL 5: VECTOR OPERATIONS
+// KERNEL 5: VECTOR OPERATIONS (UNCHANGED)
 // ============================================================================
 
 __kernel void vector_ops(
@@ -626,24 +592,23 @@ __kernel void vector_ops(
     int i = get_global_id(0);
     if (i >= n) return;
     
-    // Skip Dirichlet DOFs for most operations
     if (isDirichlet[i] && op_type != 2) return;
     
     switch (op_type) {
-        case 0:  // y += alpha * x
+        case 0:
             y[i] += alpha * x[i];
             break;
-        case 1:  // y = x + alpha * y
+        case 1:
             y[i] = x[i] + alpha * y[i];
             break;
-        case 2:  // y *= alpha
+        case 2:
             y[i] *= alpha;
             break;
     }
 }
 
 // ============================================================================
-// KERNEL 6: CALCULATE STRAINS AND STRESSES
+// KERNEL 6: CALCULATE STRAINS AND STRESSES (UNCHANGED)
 // ============================================================================
 
 __kernel void calculate_strains_stresses(
@@ -672,7 +637,6 @@ __kernel void calculate_strains_stresses(
     __local int nodes[8];
     __local float ue[24];
     
-    // Load element data
     for (int i = 0; i < 8; i++) {
         nodes[i] = elementNodes[e*8 + i];
         int dofBase = nodes[i] * 3;
@@ -681,7 +645,6 @@ __kernel void calculate_strains_stresses(
         ue[i*3 + 2] = displacement[dofBase + 2];
     }
     
-    // Evaluate at element center (ξ=η=ζ=0)
     shape_function_derivatives(0.0f, 0.0f, 0.0f, dN_dxi);
     compute_jacobian(dN_dxi, nodeX, nodeY, nodeZ, nodes, J);
     
@@ -692,7 +655,6 @@ __kernel void calculate_strains_stresses(
     matmul_3x8(Jinv, dN_dxi, dN_dx);
     compute_B_matrix(dN_dx, B);
     
-    // Compute strain: ε = B * u
     __local float strain[6];
     for (int i = 0; i < 6; i++) {
         strain[i] = 0.0f;
@@ -701,7 +663,6 @@ __kernel void calculate_strains_stresses(
         }
     }
     
-    // Compute stress: σ = D * ε
     float E = elementE[e];
     float nu = elementNu[e];
     compute_D_matrix(E, nu, D);
@@ -714,7 +675,6 @@ __kernel void calculate_strains_stresses(
         }
     }
     
-    // Map to voxel grid (element center)
     float cx = 0.0f, cy = 0.0f, cz = 0.0f;
     for (int i = 0; i < 8; i++) {
         cx += nodeX[nodes[i]];
@@ -732,7 +692,6 @@ __kernel void calculate_strains_stresses(
     if (vx >= 0 && vx < width && vy >= 0 && vy < height && vz >= 0) {
         int voxelIdx = vz * height * width + vy * width + vx;
         
-        // Write stress components (atomic to handle overlaps)
         atomic_xchg((__global int*)&stressXX[voxelIdx], *((int*)&stress[0]));
         atomic_xchg((__global int*)&stressYY[voxelIdx], *((int*)&stress[1]));
         atomic_xchg((__global int*)&stressZZ[voxelIdx], *((int*)&stress[2]));
@@ -743,7 +702,7 @@ __kernel void calculate_strains_stresses(
 }
 
 // ============================================================================
-// KERNEL 7: CALCULATE PRINCIPAL STRESSES
+// KERNEL 7: CALCULATE PRINCIPAL STRESSES (UNCHANGED)
 // ============================================================================
 
 __kernel void calculate_principal_stresses(
@@ -770,19 +729,16 @@ __kernel void calculate_principal_stresses(
     float sxz = stressXZ[idx];
     float syz = stressYZ[idx];
     
-    // Stress invariants
     float I1 = sxx + syy + szz;
     float I2 = sxx*syy + syy*szz + szz*sxx - sxy*sxy - sxz*sxz - syz*syz;
     float I3 = sxx*syy*szz + 2.0f*sxy*sxz*syz - sxx*syz*syz - syy*sxz*sxz - szz*sxy*sxy;
     
-    // Cubic equation solver using Cardano's method
     float p = I2 - I1*I1/3.0f;
     float q = I3 + (2.0f*I1*I1*I1 - 9.0f*I1*I2)/27.0f;
     
     float s1, s2, s3;
     
     if (fabs(p) < 1e-9f) {
-        // All eigenvalues equal
         s1 = s2 = s3 = I1 / 3.0f;
     } else {
         float r = sqrt(fmax(0.0f, -p*p*p / 27.0f));
@@ -797,7 +753,6 @@ __kernel void calculate_principal_stresses(
         s3 = offset + scale * cos((phi + 4.0f*M_PI_F) / 3.0f);
     }
     
-    // Sort: σ1 ≥ σ2 ≥ σ3
     if (s1 < s2) { float tmp = s1; s1 = s2; s2 = tmp; }
     if (s1 < s3) { float tmp = s1; s1 = s3; s3 = tmp; }
     if (s2 < s3) { float tmp = s2; s2 = s3; s3 = tmp; }
@@ -808,7 +763,7 @@ __kernel void calculate_principal_stresses(
 }
 
 // ============================================================================
-// KERNEL 8: EVALUATE FAILURE (Progressive Damage)
+// KERNEL 8: EVALUATE FAILURE - CORRECTED TO USE σ₂
 // ============================================================================
 
 float calculate_failure_index(float sigma1, float sigma2, float sigma3, 
@@ -820,27 +775,40 @@ float calculate_failure_index(float sigma1, float sigma2, float sigma3,
             float right = 2.0f*cohesion*cos(phi) + (sigma1 + sigma3)*sin(phi);
             return (right > 1e-9f) ? left / right : left;
         }
-        case 1: { // Drucker-Prager
-            float p = (sigma1 + sigma2 + sigma3) / 3.0f;
-            float q = sqrt(0.5f * (pow(sigma1-sigma2, 2.0f) + pow(sigma2-sigma3, 2.0f) + pow(sigma3-sigma1, 2.0f)));
-            float alpha = 2.0f*sin(phi) / (3.0f - sin(phi));
-            float k = 6.0f*cohesion*cos(phi) / (3.0f - sin(phi));
-            return (k > 1e-9f) ? (q - alpha*p) / k : q - alpha*p;
+        case 1: { // Drucker-Prager - CORRECTED to use σ₂
+            float I1 = sigma1 + sigma2 + sigma3;
+            float s1_dev = sigma1 - I1/3.0f;
+            float s2_dev = sigma2 - I1/3.0f;
+            float s3_dev = sigma3 - I1/3.0f;
+            float J2 = (s1_dev*s1_dev + s2_dev*s2_dev + s3_dev*s3_dev) / 2.0f;
+            float q = sqrt(3.0f * J2);
+            
+            float alpha = 2.0f*sin(phi) / (sqrt(3.0f) * (3.0f - sin(phi)));
+            float k = 6.0f*cohesion*cos(phi) / (sqrt(3.0f) * (3.0f - sin(phi)));
+            return (k > 1e-9f) ? (q - alpha*I1) / k : q - alpha*I1;
         }
         case 2: { // Hoek-Brown
             float ucs = 2.0f*cohesion*cos(phi) / (1.0f - sin(phi));
             float mb = 1.5f;
             float s = 0.004f;
             float a = 0.5f;
-            float strength = ucs * pow(fmax(0.0f, mb * sigma3 / ucs + s), a);
-            float failure_stress = sigma3 + strength;
-            return (failure_stress > 1e-9f) ? sigma1 / failure_stress : sigma1;
+            
+            if (sigma3 < 0.0f && s < 0.001f)
+                return (tensile > 1e-9f) ? -sigma3 / tensile : -sigma3;
+            
+            float term = mb * sigma3 / ucs + s;
+            if (term < 0.0f) term = 0.0f;
+            
+            float strength = sigma3 + ucs * pow(term, a);
+            return (strength > 1e-9f) ? sigma1 / strength : sigma1;
         }
         case 3: { // Griffith
             if (sigma3 < 0.0f)
                 return (tensile > 1e-9f) ? -sigma3 / tensile : -sigma3;
             else
-                return (tensile*8.0f > 1e-9f) ? (sigma1 - sigma3)/(8.0f*tensile) : sigma1 - sigma3;
+                return (tensile*8.0f > 1e-9f) ? 
+                    pow(sigma1 - sigma3, 2.0f) / (8.0f*tensile*(sigma1 + sigma3 + 1e-6f)) : 
+                    sigma1 - sigma3;
         }
         default:
             return 0.0f;
@@ -876,11 +844,11 @@ __kernel void evaluate_failure(
     float s3 = sigma3[idx];
     float phi = frictionAngle * M_PI_F / 180.0f;
     
-    // Calculate failure index
+    // Calculate failure index using CORRECTED function (includes σ₂)
     float fi = calculate_failure_index(s1, s2, s3, cohesion, phi, tensileStrength, failureCriterion);
     failureIndex[idx] = fi;
     
-    // Progressive damage parameters (Mazars-inspired)
+    // Mazars damage model
     const float DAMAGE_INITIATION = 0.7f;
     const float DAMAGE_EXPONENT = 2.0f;
     const float RESIDUAL_STRENGTH = 0.05f;
@@ -889,14 +857,12 @@ __kernel void evaluate_failure(
     
     if (fi >= DAMAGE_INITIATION) {
         if (fi >= 1.0f) {
-            // Complete failure - exponential softening
             float overstress = fi - 1.0f;
             dmg = 1.0f - RESIDUAL_STRENGTH * exp(-DAMAGE_EXPONENT * overstress);
             dmg = clamp(dmg, 0.0f, 1.0f - RESIDUAL_STRENGTH);
             
             fractured[idx] = 1;
         } else {
-            // Progressive damage before failure
             float normalizedLoad = (fi - DAMAGE_INITIATION) / (1.0f - DAMAGE_INITIATION);
             dmg = pow(normalizedLoad, DAMAGE_EXPONENT);
             dmg = clamp(dmg, 0.0f, 0.8f);
@@ -905,7 +871,6 @@ __kernel void evaluate_failure(
     
     damage[idx] = (uchar)(dmg * 255.0f);
     
-    // Apply stress degradation
     float degradation = 1.0f - dmg;
     stressXX[idx] *= degradation;
     stressYY[idx] *= degradation;
@@ -916,7 +881,7 @@ __kernel void evaluate_failure(
 }
 
 // ============================================================================
-// KERNEL 9: APPLY PLASTIC CORRECTION (Von Mises)
+// KERNEL 9: PLASTIC CORRECTION WITH PROPER STRAIN HARDENING
 // ============================================================================
 
 __kernel void apply_plastic_correction(
@@ -937,7 +902,6 @@ __kernel void apply_plastic_correction(
     if (idx >= numVoxels) return;
     if (labels[idx] == 0) return;
     
-    // Load stress tensor
     float sxx = stressXX[idx];
     float syy = stressYY[idx];
     float szz = stressZZ[idx];
@@ -945,53 +909,376 @@ __kernel void apply_plastic_correction(
     float sxz = stressXZ[idx];
     float syz = stressYZ[idx];
     
-    // Mean stress (hydrostatic pressure)
     float p = (sxx + syy + szz) / 3.0f;
     
-    // Deviatoric stress tensor
     float sxx_dev = sxx - p;
     float syy_dev = syy - p;
     float szz_dev = szz - p;
-    float sxy_dev = sxy;
-    float sxz_dev = sxz;
-    float syz_dev = syz;
     
-    // Von Mises equivalent stress
+    // Von Mises: σ_eq = √(3·J₂)
     float J2 = 0.5f * (sxx_dev*sxx_dev + syy_dev*syy_dev + szz_dev*szz_dev) +
-               sxy_dev*sxy_dev + sxz_dev*sxz_dev + syz_dev*syz_dev;
-    float vonMises = sqrt(3.0f * J2);
+               sxy*sxy + sxz*sxz + syz*syz;
+    float sigma_eq = sqrt(3.0f * J2);
     
-    // Yield function: f = σ_vm - σ_y
-    float yieldFunction = vonMises - yieldStress;
+    // Current equivalent plastic strain
+    float ep_eq = plasticStrain[idx];
     
-    if (yieldFunction > 0.0f) {
-        // Radial return mapping (closest point projection)
-        float effectiveYield = yieldStress;  // Can add: + hardeningModulus * plasticStrain[idx]
-        float returnFactor = effectiveYield / vonMises;
+    // Yield stress with isotropic hardening: σ_y = σ_y0 + H·εᵖ_eq
+    float sigma_y = yieldStress + hardeningModulus * ep_eq;
+    
+    // Yield function
+    float f = sigma_eq - sigma_y;
+    
+    if (f > 0.0f) {
+        // Plastic multiplier (radial return)
+        float delta_lambda = f / (3.0f * shearModulus + hardeningModulus);
         
-        // Plastic correction to deviatoric stress
-        sxx_dev *= returnFactor;
-        syy_dev *= returnFactor;
-        szz_dev *= returnFactor;
-        sxy_dev *= returnFactor;
-        sxz_dev *= returnFactor;
-        syz_dev *= returnFactor;
+        // Return to yield surface
+        float return_factor = sigma_y / sigma_eq;
         
-        // Update stress tensor (hydrostatic part unchanged)
+        sxx_dev *= return_factor;
+        syy_dev *= return_factor;
+        szz_dev *= return_factor;
+        sxy *= return_factor;
+        sxz *= return_factor;
+        syz *= return_factor;
+        
         stressXX[idx] = sxx_dev + p;
         stressYY[idx] = syy_dev + p;
         stressZZ[idx] = szz_dev + p;
-        stressXY[idx] = sxy_dev;
-        stressXZ[idx] = sxz_dev;
-        stressYZ[idx] = syz_dev;
+        stressXY[idx] = sxy;
+        stressXZ[idx] = sxz;
+        stressYZ[idx] = syz;
         
-        // Equivalent plastic strain increment
-        float deltaEp = yieldFunction / (3.0f * shearModulus + hardeningModulus);
-        plasticStrain[idx] += deltaEp;
+        // Update plastic strain: Δεᵖ_eq = √(2/3)·Δλ
+        float delta_ep_eq = sqrt(2.0f/3.0f) * delta_lambda;
+        plasticStrain[idx] = ep_eq + delta_ep_eq;
+    }
+}
+
+// ============================================================================
+// KERNEL 10: PRESSURE DIFFUSION - CORRECTED WITH BIOT THEORY
+// ============================================================================
+
+__kernel void pressure_diffusion(
+    __global const float* pressureIn,
+    __global float* pressureOut,
+    __global const uchar* labels,
+    __global const float* fractureAperture,
+    const int W, const int H, const int D,
+    const float dx,
+    const float dt,
+    const float rockPerm,
+    const float fluidVisc,
+    const float porosity,
+    const float aquiferPressure,
+    const int enableAquifer)
+{
+    int x = get_global_id(0);
+    int y = get_global_id(1);
+    int z = get_global_id(2);
+    
+    if (x >= W || y >= H || z >= D) return;
+    if (x == 0 || x == W-1 || y == 0 || y == H-1 || z == 0 || z == D-1) return;
+    
+    int idx = (z * H + y) * W + x;
+    uchar mat = labels[idx];
+    
+    if (mat == 0) {
+        if (enableAquifer)
+            pressureOut[idx] = aquiferPressure;
+        else
+            pressureOut[idx] = pressureIn[idx];
+        return;
+    }
+    
+    // CORRECTED: Proper Biot poroelasticity parameters
+    float K_s = 36e9f; // Solid grain bulk modulus (Pa) - quartz
+    float K_f = 2.2e9f; // Fluid bulk modulus (Pa) - water
+    float K_d = 20e9f; // Drained bulk modulus (Pa) - approximate
+    float alpha_biot = 0.8f; // Biot coefficient
+    
+    // Storage coefficient: S = φ/K_f + (α - φ)/K_s
+    float S_storage = porosity / K_f + (alpha_biot - porosity) / K_s;
+    
+    // Total compressibility
+    float c_total = S_storage / porosity;
+    
+    // Hydraulic diffusivity: D = k/(φ·μ·c_t)
+    float diffusivity = rockPerm / (porosity * fluidVisc * c_total);
+    
+    // Stability: α_CFL ≤ 1/6 for 3D explicit
+    float alpha_cfl = diffusivity * dt / (dx * dx);
+    if (alpha_cfl > 0.16667f)
+        alpha_cfl = 0.16667f;
+    
+    float P_c = pressureIn[idx];
+    
+    int idx_xp = idx + 1;
+    int idx_xm = idx - 1;
+    int idx_yp = idx + W;
+    int idx_ym = idx - W;
+    int idx_zp = idx + (W * H);
+    int idx_zm = idx - (W * H);
+    
+    float P_xp = pressureIn[idx_xp];
+    float P_xm = pressureIn[idx_xm];
+    float P_yp = pressureIn[idx_yp];
+    float P_ym = pressureIn[idx_ym];
+    float P_zp = pressureIn[idx_zp];
+    float P_zm = pressureIn[idx_zm];
+    
+    // Boundary handling
+    if (labels[idx_xp] == 0) P_xp = enableAquifer ? aquiferPressure : P_c;
+    if (labels[idx_xm] == 0) P_xm = enableAquifer ? aquiferPressure : P_c;
+    if (labels[idx_yp] == 0) P_yp = enableAquifer ? aquiferPressure : P_c;
+    if (labels[idx_ym] == 0) P_ym = enableAquifer ? aquiferPressure : P_c;
+    if (labels[idx_zp] == 0) P_zp = enableAquifer ? aquiferPressure : P_c;
+    if (labels[idx_zm] == 0) P_zm = enableAquifer ? aquiferPressure : P_c;
+    
+    // Enhanced permeability in fractures (cubic law)
+    float k_eff = rockPerm;
+    float aperture = fractureAperture[idx];
+    if (aperture > 1e-6f) {
+        k_eff = aperture * aperture / 12.0f;
+        k_eff = fmax(k_eff, rockPerm * 1000.0f); // Cap at 1000x
+    }
+    
+    // Recalculate diffusivity with effective permeability
+    diffusivity = k_eff / (porosity * fluidVisc * c_total);
+    alpha_cfl = diffusivity * dt / (dx * dx);
+    alpha_cfl = fmin(alpha_cfl, 0.16667f);
+    
+    // Gravity correction in Z-direction
+    float rho_f = 1000.0f; // kg/m³
+    float g = 9.81f;
+    float gravity_correction = rho_f * g * dx;
+    
+    // 7-point stencil with gravity
+    float laplacian = P_xp + P_xm + P_yp + P_ym + 
+                     (P_zp - gravity_correction) + (P_zm + gravity_correction) - 6.0f * P_c;
+    
+    float P_new = P_c + alpha_cfl * laplacian;
+    
+    // Physical bounds
+    if (P_new < 0.0f) P_new = 0.0f;
+    
+    pressureOut[idx] = P_new;
+}
+
+// ============================================================================
+// KERNEL 11: UPDATE FRACTURE APERTURES - CORRECTED WITH SNEDDON SOLUTION
+// ============================================================================
+
+__kernel void update_fracture_apertures(
+    __global const float* pressure,
+    __global const float* sigma3,
+    __global float* fractureAperture,
+    __global const uchar* fractureField,
+    __global const uchar* labels,
+    const float minAperture,
+    const float youngModulus,
+    const float poissonRatio,
+    const float biotCoeff,
+    const float dx,
+    const int numVoxels)
+{
+    int idx = get_global_id(0);
+    if (idx >= numVoxels) return;
+    if (labels[idx] == 0) return;
+    if (!fractureField[idx]) return;
+    
+    float P = pressure[idx];
+    float s_n_total = sigma3[idx];
+    float s_n_eff = s_n_total - biotCoeff * P;
+    
+    float delta_P = P - s_n_eff;
+    
+    if (delta_P > 0.0f) {
+        // Sneddon solution for pressurized penny-shaped crack
+        // w = (4(1-ν²)/E) · ΔP · L/2
+        float E = youngModulus * 1e6f;
+        float nu = poissonRatio;
+        float L = dx;
+        
+        float aperture_mechanical = (4.0f * (1.0f - nu * nu) / E) * delta_P * L / 2.0f;
+        
+        // Willis-Richards stress-dependent component
+        // w = w₀ · exp(β · Δσ_n)
+        float w_residual = minAperture;
+        float beta = 0.5f / 1e6f; // 0.5 MPa⁻¹
+        float aperture_stress = w_residual * exp(beta * delta_P);
+        
+        float aperture_total = aperture_mechanical + aperture_stress;
+        
+        // Physical bounds
+        aperture_total = fmax(aperture_total, minAperture);
+        aperture_total = fmin(aperture_total, dx / 10.0f);
+        
+        fractureAperture[idx] = aperture_total;
+    } else {
+        fractureAperture[idx] = minAperture;
+    }
+}
+
+// ============================================================================
+// KERNEL 12: INITIALIZE GEOTHERMAL (UNCHANGED - Already correct)
+// ============================================================================
+
+__kernel void initialize_geothermal(
+    __global float* temperature,
+    __global const uchar* labels,
+    const int W, const int H, const int D,
+    const float dx,
+    const float surfaceTemp,
+    const float gradient_per_km)
+{
+    int x = get_global_id(0);
+    int y = get_global_id(1);
+    int z = get_global_id(2);
+    
+    if (x >= W || y >= H || z >= D) return;
+    
+    int idx = (z * H + y) * W + x;
+    
+    if (labels[idx] == 0) {
+        temperature[idx] = surfaceTemp;
+        return;
+    }
+    
+    float depth_m = (float)z * dx;
+    float temp = surfaceTemp + (gradient_per_km / 1000.0f) * depth_m;
+    
+    temperature[idx] = temp;
+}
+
+// ============================================================================
+// KERNEL 13: CALCULATE EFFECTIVE STRESS (UNCHANGED - Already correct)
+// ============================================================================
+
+__kernel void calculate_effective_stress(
+    __global const float* stressXX,
+    __global const float* stressYY,
+    __global const float* stressZZ,
+    __global const float* pressure,
+    __global float* effStressXX,
+    __global float* effStressYY,
+    __global float* effStressZZ,
+    __global const uchar* labels,
+    const float biotCoeff,
+    const int numVoxels)
+{
+    int idx = get_global_id(0);
+    if (idx >= numVoxels) return;
+    if (labels[idx] == 0) return;
+    
+    float P = pressure[idx];
+    float alpha = biotCoeff;
+    
+    effStressXX[idx] = stressXX[idx] - alpha * P;
+    effStressYY[idx] = stressYY[idx] - alpha * P;
+    effStressZZ[idx] = stressZZ[idx] - alpha * P;
+}
+
+// ============================================================================
+// KERNEL 14: APPLY INJECTION SOURCE (UNCHANGED)
+// ============================================================================
+
+__kernel void apply_injection_source(
+    __global float* pressure,
+    __global const uchar* labels,
+    const int W, const int H, const int D,
+    const int injX, const int injY, const int injZ,
+    const int radius,
+    const float injectionPressure)
+{
+    int x = get_global_id(0);
+    int y = get_global_id(1);
+    int z = get_global_id(2);
+    
+    if (x >= W || y >= H || z >= D) return;
+    
+    int idx = (z * H + y) * W + x;
+    if (labels[idx] == 0) return;
+    
+    int dx = x - injX;
+    int dy = y - injY;
+    int dz = z - injZ;
+    float dist = sqrt((float)(dx*dx + dy*dy + dz*dz));
+    
+    if (dist <= (float)radius) {
+        pressure[idx] = injectionPressure;
+    }
+}
+
+// ============================================================================
+// KERNEL 15: DETECT HYDRAULIC FRACTURES - CORRECTED WITH K_I CRITERION
+// ============================================================================
+
+__kernel void detect_hydraulic_fractures(
+    __global const float* sigma1,
+    __global const float* sigma3,
+    __global const float* pressure,
+    __global uchar* fractureField,
+    __global uchar* damageField,
+    __global float* fractureAperture,
+    __global const uchar* labels,
+    const float cohesion,
+    const float frictionAngle,
+    const float tensileStrength,
+    const float biotCoeff,
+    const float minAperture,
+    const float fractureToughness,
+    const float youngModulus,
+    const float poissonRatio,
+    const float dx,
+    const int numVoxels)
+{
+    int idx = get_global_id(0);
+    if (idx >= numVoxels) return;
+    if (labels[idx] == 0) return;
+    if (fractureField[idx] != 0) return;
+    
+    float P = pressure[idx];
+    float s1_total = sigma1[idx];
+    float s3_total = sigma3[idx];
+    
+    float s1_eff = s1_total - biotCoeff * P;
+    float s3_eff = s3_total - biotCoeff * P;
+    
+    // Mohr-Coulomb criterion
+    float phi = frictionAngle * M_PI_F / 180.0f;
+    float left = s1_eff - s3_eff;
+    float right = 2.0f * cohesion * cos(phi) + (s1_eff + s3_eff) * sin(phi);
+    
+    float failureIndex = (right > 1e-9f) ? left / right : left;
+    
+    // Stress intensity factor criterion (Mode I)
+    // K_I = ΔP·√(πa) where a is crack half-length
+    float crack_half_length = dx / 2.0f;
+    float delta_P = fmax(0.0f, P - s3_eff);
+    float K_I = delta_P * sqrt(M_PI_F * crack_half_length);
+    
+    float K_Ic = fractureToughness * 1e6f; // MPa·√m to Pa·√m
+    
+    int fracture_by_stress = failureIndex >= 1.0f;
+    int fracture_by_toughness = K_I > K_Ic;
+    
+    if (fracture_by_stress || fracture_by_toughness) {
+        fractureField[idx] = 1;
+        damageField[idx] = 255;
+        
+        // Initial aperture from Sneddon solution
+        float E = youngModulus * 1e6f;
+        float nu = poissonRatio;
+        float initial_aperture = (4.0f / M_PI_F) * ((1.0f - nu * nu) / E) * delta_P * crack_half_length;
+        initial_aperture = fmax(initial_aperture, minAperture);
+        
+        fractureAperture[idx] = initial_aperture;
     }
 }
 ";
-    }
+}
 
     public GeomechanicalResults Simulate(byte[,,] labels, float[,,] density,
         IProgress<float> progress, CancellationToken token)
@@ -1054,6 +1341,16 @@ __kernel void apply_plastic_correction(
             Logger.Log("[GeomechGPU] Computing principal stresses on GPU...");
             CalculatePrincipalStressesGPU(labels);
             token.ThrowIfCancellationRequested();
+            
+            // STEP 7.5: Initialize geothermal and fluid fields
+            if (_params.EnableGeothermal || _params.EnableFluidInjection)
+            {
+                progress?.Report(0.88f);
+                Logger.Log("[GeomechGPU] Initializing geothermal and fluid simulation on GPU...");
+                InitializeGeothermalAndFluidGPU(labels, extent);
+                token.ThrowIfCancellationRequested();
+            }
+            
 
             // STEP 8: Evaluate failure with progressive damage on GPU
             progress?.Report(0.90f);
@@ -1076,6 +1373,15 @@ __kernel void apply_plastic_correction(
             var results = DownloadResults(extent, labels);
             results.Converged = converged;
             results.IterationsPerformed = _iterationsPerformed;
+            
+            // STEP 10.5: Simulate fluid injection and hydraulic fracturing (AFTER results object exists)
+            if (_params.EnableFluidInjection)
+            {
+                progress?.Report(0.96f);
+                Logger.Log("[GeomechGPU] Simulating fluid injection and fracturing on GPU...");
+                SimulateFluidInjectionAndFracturingGPU(results, labels, progress, token);
+                token.ThrowIfCancellationRequested();
+            }
 
             // STEP 11: Generate Mohr circles for visualization (CPU)
             Logger.Log("[GeomechGPU] Generating Mohr circles...");
@@ -1084,7 +1390,18 @@ __kernel void apply_plastic_correction(
             // STEP 12: Calculate global statistics (CPU)
             Logger.Log("[GeomechGPU] Calculating global statistics...");
             CalculateGlobalStatistics(results);
-
+            if (_params.EnableGeothermal || _params.EnableFluidInjection)
+            {
+                Logger.Log("[GeomechGPU] Finalizing geothermal and fluid results...");
+                PopulateGeothermalAndFluidResultsGPU(results);
+            }
+            
+            // STEP 13: Populate geothermal and fluid results
+            if (_params.EnableGeothermal || _params.EnableFluidInjection)
+            {
+                Logger.Log("[GeomechGPU] Finalizing geothermal and fluid results...");
+                PopulateGeothermalAndFluidResultsGPU(results);
+            }
             results.ComputationTime = DateTime.Now - startTime;
 
             progress?.Report(1.0f);
@@ -1732,51 +2049,491 @@ __kernel void apply_plastic_correction(
     }
 
     private void EvaluateFailureGPU(byte[,,] labels)
+{
+    Logger.Log("[GeomechGPU] Evaluating failure");
+
+    var extent = _params.SimulationExtent;
+    var numVoxels = extent.Width * extent.Height * extent.Depth;
+
+    int error;
+    _bufFailureIndex = CreateBuffer<float>(numVoxels, MemFlags.WriteOnly, out error);
+    _bufDamage = CreateBuffer<byte>(numVoxels, MemFlags.WriteOnly, out error);
+    _bufFractured = CreateBuffer<byte>(numVoxels, MemFlags.WriteOnly, out error);
+
+    var cohesion = _params.Cohesion * 1e6f;
+    var frictionAngle = _params.FrictionAngle;
+    var tensileStrength = _params.TensileStrength * 1e6f;
+    var failureCrit = (int)_params.FailureCriterion;
+
+    var sigma1Buf = (nint)((long)_bufPrincipalStresses + 0 * numVoxels * sizeof(float));
+    var sigma2Buf = (nint)((long)_bufPrincipalStresses + 1 * numVoxels * sizeof(float));
+    var sigma3Buf = (nint)((long)_bufPrincipalStresses + 2 * numVoxels * sizeof(float));
+
+    // Stress component buffers
+    var stressXXBuf = (nint)((long)_bufStressFields + 0 * numVoxels * sizeof(float));
+    var stressYYBuf = (nint)((long)_bufStressFields + 1 * numVoxels * sizeof(float));
+    var stressZZBuf = (nint)((long)_bufStressFields + 2 * numVoxels * sizeof(float));
+    var stressXYBuf = (nint)((long)_bufStressFields + 3 * numVoxels * sizeof(float));
+    var stressXZBuf = (nint)((long)_bufStressFields + 4 * numVoxels * sizeof(float));
+    var stressYZBuf = (nint)((long)_bufStressFields + 5 * numVoxels * sizeof(float));
+
+    var argIdx = 0;
+    SetKernelArg(_kernelEvaluateFailure, argIdx++, sigma1Buf);
+    SetKernelArg(_kernelEvaluateFailure, argIdx++, sigma2Buf);
+    SetKernelArg(_kernelEvaluateFailure, argIdx++, sigma3Buf);
+    SetKernelArg(_kernelEvaluateFailure, argIdx++, _bufFailureIndex);
+    SetKernelArg(_kernelEvaluateFailure, argIdx++, _bufDamage);
+    SetKernelArg(_kernelEvaluateFailure, argIdx++, _bufFractured);
+    SetKernelArg(_kernelEvaluateFailure, argIdx++, _bufLabels);
+    SetKernelArg(_kernelEvaluateFailure, argIdx++, cohesion);
+    SetKernelArg(_kernelEvaluateFailure, argIdx++, frictionAngle);
+    SetKernelArg(_kernelEvaluateFailure, argIdx++, tensileStrength);
+    SetKernelArg(_kernelEvaluateFailure, argIdx++, failureCrit);
+    SetKernelArg(_kernelEvaluateFailure, argIdx++, numVoxels);
+    SetKernelArg(_kernelEvaluateFailure, argIdx++, stressXXBuf);
+    SetKernelArg(_kernelEvaluateFailure, argIdx++, stressYYBuf);
+    SetKernelArg(_kernelEvaluateFailure, argIdx++, stressZZBuf);
+    SetKernelArg(_kernelEvaluateFailure, argIdx++, stressXYBuf);
+    SetKernelArg(_kernelEvaluateFailure, argIdx++, stressXZBuf);
+    SetKernelArg(_kernelEvaluateFailure, argIdx++, stressYZBuf);
+
+    var globalSize = (nuint)((numVoxels + _workGroupSize - 1) / _workGroupSize * _workGroupSize);
+    var localSize = (nuint)_workGroupSize;
+
+    error = _cl.EnqueueNdrangeKernel(_queue, _kernelEvaluateFailure, 1, null, &globalSize, &localSize, 0, null,
+        null);
+    CheckError(error, "EnqueueNDRange evaluateFailure");
+
+    _cl.Finish(_queue);
+    Logger.Log("[GeomechGPU] Failure evaluation complete");
+}
+private void InitializeGeothermalAndFluidGPU(byte[,,] labels, BoundingBox extent)
+{
+    if (!_params.EnableGeothermal && !_params.EnableFluidInjection)
+        return;
+
+    var w = extent.Width;
+    var h = extent.Height;
+    var d = extent.Depth;
+    var numVoxels = w * h * d;
+    var dx = _params.PixelSize / 1e6f;
+
+    Logger.Log("[GeomechGPU] Initializing geothermal and fluid fields on GPU...");
+
+    int error;
+
+    // Temperature field
+    if (_params.EnableGeothermal)
     {
-        Logger.Log("[GeomechGPU] Evaluating failure");
+        _bufTemperature = CreateBuffer<float>(numVoxels, MemFlags.ReadWrite, out error);
+        CheckError(error, "Create temperature buffer");
 
-        var extent = _params.SimulationExtent;
-        var numVoxels = extent.Width * extent.Height * extent.Depth;
+        var kernelInitTemp = _cl.CreateKernel(_program, "initialize_geothermal", &error);
+        CheckError(error, "CreateKernel initialize_geothermal");
 
-        int error;
-        _bufFailureIndex = CreateBuffer<float>(numVoxels, MemFlags.WriteOnly, out error);
-        _bufDamage = CreateBuffer<byte>(numVoxels, MemFlags.WriteOnly, out error);
-        _bufFractured = CreateBuffer<byte>(numVoxels, MemFlags.WriteOnly, out error);
+        try
+        {
+            var argIdx = 0;
+            SetKernelArg(kernelInitTemp, argIdx++, _bufTemperature);
+            SetKernelArg(kernelInitTemp, argIdx++, _bufLabels);
+            SetKernelArg(kernelInitTemp, argIdx++, w);
+            SetKernelArg(kernelInitTemp, argIdx++, h);
+            SetKernelArg(kernelInitTemp, argIdx++, d);
+            SetKernelArg(kernelInitTemp, argIdx++, dx);
+            SetKernelArg(kernelInitTemp, argIdx++, _params.SurfaceTemperature);
+            SetKernelArg(kernelInitTemp, argIdx++, _params.GeothermalGradient);
 
-        var cohesion = _params.Cohesion * 1e6f;
-        var frictionAngle = _params.FrictionAngle;
-        var tensileStrength = _params.TensileStrength * 1e6f;
-        var failureCrit = (int)_params.FailureCriterion;
+            var globalSize = stackalloc nuint[3];
+            globalSize[0] = (nuint)w;
+            globalSize[1] = (nuint)h;
+            globalSize[2] = (nuint)d;
 
-        var sigma1Buf = (nint)((long)_bufPrincipalStresses + 0 * numVoxels * sizeof(float));
-        var sigma2Buf = (nint)((long)_bufPrincipalStresses + 1 * numVoxels * sizeof(float));
-        var sigma3Buf = (nint)((long)_bufPrincipalStresses + 2 * numVoxels * sizeof(float));
+            var localSize = stackalloc nuint[3];
+            localSize[0] = 8;
+            localSize[1] = 8;
+            localSize[2] = 4;
 
-        var argIdx = 0;
-        SetKernelArg(_kernelEvaluateFailure, argIdx++, sigma1Buf);
-        SetKernelArg(_kernelEvaluateFailure, argIdx++, sigma2Buf);
-        SetKernelArg(_kernelEvaluateFailure, argIdx++, sigma3Buf);
-        SetKernelArg(_kernelEvaluateFailure, argIdx++, _bufFailureIndex);
-        SetKernelArg(_kernelEvaluateFailure, argIdx++, _bufDamage);
-        SetKernelArg(_kernelEvaluateFailure, argIdx++, _bufFractured);
-        SetKernelArg(_kernelEvaluateFailure, argIdx++, _bufLabels);
-        SetKernelArg(_kernelEvaluateFailure, argIdx++, cohesion);
-        SetKernelArg(_kernelEvaluateFailure, argIdx++, frictionAngle);
-        SetKernelArg(_kernelEvaluateFailure, argIdx++, tensileStrength);
-        SetKernelArg(_kernelEvaluateFailure, argIdx++, failureCrit);
-        SetKernelArg(_kernelEvaluateFailure, argIdx++, numVoxels);
+            error = _cl.EnqueueNdrangeKernel(_queue, kernelInitTemp, 3, null, globalSize, localSize, 0, null, null);
+            CheckError(error, "EnqueueNDRange initialize_geothermal");
+            
+            _cl.Finish(_queue);
+        }
+        finally
+        {
+            _cl.ReleaseKernel(kernelInitTemp);
+        }
 
-        var globalSize = (nuint)((numVoxels + _workGroupSize - 1) / _workGroupSize * _workGroupSize);
-        var localSize = (nuint)_workGroupSize;
-
-        error = _cl.EnqueueNdrangeKernel(_queue, _kernelEvaluateFailure, 1, null, &globalSize, &localSize, 0, null,
-            null);
-        CheckError(error, "EnqueueNDRange evaluateFailure");
-
-        _cl.Finish(_queue);
-        Logger.Log("[GeomechGPU] Failure evaluation complete");
+        Logger.Log("[GeomechGPU] Geothermal field initialized");
     }
 
+    // Pressure and fluid fields
+    if (_params.EnableFluidInjection || _params.UsePorePressure)
+    {
+        _bufPressure = CreateBuffer<float>(numVoxels, MemFlags.ReadWrite, out error);
+        CheckError(error, "Create pressure buffer");
+        _bufPressureNew = CreateBuffer<float>(numVoxels, MemFlags.ReadWrite, out error);
+        CheckError(error, "Create pressure new buffer");
+
+        _bufFractureAperture = CreateBuffer<float>(numVoxels, MemFlags.ReadWrite, out error);
+        CheckError(error, "Create fracture aperture buffer");
+        _bufFluidSaturation = CreateBuffer<float>(numVoxels, MemFlags.ReadWrite, out error);
+        CheckError(error, "Create fluid saturation buffer");
+        _bufConnectivity = CreateBuffer<byte>(numVoxels, MemFlags.ReadWrite, out error);
+        CheckError(error, "Create connectivity buffer");
+
+        // Initialize pressure with hydrostatic gradient
+        var P0 = _params.InitialPorePressure * 1e6f;
+        var rho_water = 1000f;
+        var g = 9.81f;
+
+        var pressureInit = new float[numVoxels];
+        var apertureInit = new float[numVoxels];
+        var saturationInit = new float[numVoxels];
+
+        var idx = 0;
+        for (var z = 0; z < d; z++)
+        {
+            var depth_m = z * dx;
+            var hydrostaticP = P0 + rho_water * g * depth_m;
+
+            for (var y = 0; y < h; y++)
+            for (var x = 0; x < w; x++)
+            {
+                if (labels[x, y, z] != 0)
+                {
+                    pressureInit[idx] = hydrostaticP;
+                    saturationInit[idx] = _params.Porosity;
+                    apertureInit[idx] = 0f;
+                }
+                else if (_params.EnableAquifer)
+                {
+                    pressureInit[idx] = _params.AquiferPressure * 1e6f;
+                }
+                idx++;
+            }
+        }
+
+        EnqueueWriteBuffer(_bufPressure, pressureInit);
+        EnqueueWriteBuffer(_bufPressureNew, pressureInit);
+        EnqueueWriteBuffer(_bufFractureAperture, apertureInit);
+        EnqueueWriteBuffer(_bufFluidSaturation, saturationInit);
+
+        var connectivityInit = new byte[numVoxels];
+        EnqueueWriteBuffer(_bufConnectivity, connectivityInit);
+
+        _cl.Finish(_queue);
+        Logger.Log($"[GeomechGPU] Pressure field initialized (P0={P0/1e6f:F1} MPa)");
+    }
+}
+private void SimulateFluidInjectionAndFracturingGPU(GeomechanicalResults results, byte[,,] labels,
+    IProgress<float> progress, CancellationToken token)
+{
+    if (!_params.EnableFluidInjection)
+        return;
+
+    Logger.Log("[GeomechGPU] ========== GPU FLUID INJECTION & FRACTURING ==========");
+
+    var extent = _params.SimulationExtent;
+    var w = extent.Width;
+    var h = extent.Height;
+    var d = extent.Depth;
+    var dx = _params.PixelSize / 1e6f;
+    var numVoxels = w * h * d;
+
+    var injX = (int)(_params.InjectionLocation.X * w);
+    var injY = (int)(_params.InjectionLocation.Y * h);
+    var injZ = (int)(_params.InjectionLocation.Z * d);
+    injX = Math.Clamp(injX, 0, w - 1);
+    injY = Math.Clamp(injY, 0, h - 1);
+    injZ = Math.Clamp(injZ, 0, d - 1);
+
+    Logger.Log($"[GeomechGPU] Injection point: ({injX}, {injY}, {injZ})");
+
+    var P_inj = _params.InjectionPressure * 1e6f;
+    var dt_fluid = _params.FluidTimeStep;
+    var maxTime = _params.MaxSimulationTime;
+    var numSteps = (int)(maxTime / dt_fluid);
+
+    int error;
+    var kernelDiffusion = _cl.CreateKernel(_program, "pressure_diffusion", &error);
+    CheckError(error, "CreateKernel pressure_diffusion");
+    var kernelEffStress = _cl.CreateKernel(_program, "calculate_effective_stress", &error);
+    CheckError(error, "CreateKernel calculate_effective_stress");
+    var kernelUpdateAperture = _cl.CreateKernel(_program, "update_fracture_apertures", &error);
+    CheckError(error, "CreateKernel update_fracture_apertures");
+    var kernelDetectFrac = _cl.CreateKernel(_program, "detect_hydraulic_fractures", &error);
+    CheckError(error, "CreateKernel detect_hydraulic_fractures");
+    var kernelApplyInj = _cl.CreateKernel(_program, "apply_injection_source", &error);
+    CheckError(error, "CreateKernel apply_injection_source");
+
+    // Create effective stress buffers
+    var bufEffStressXX = CreateBuffer<float>(numVoxels, MemFlags.ReadWrite, out error);
+    CheckError(error, "Create bufEffStressXX");
+    var bufEffStressYY = CreateBuffer<float>(numVoxels, MemFlags.ReadWrite, out error);
+    CheckError(error, "Create bufEffStressYY");
+    var bufEffStressZZ = CreateBuffer<float>(numVoxels, MemFlags.ReadWrite, out error);
+    CheckError(error, "Create bufEffStressZZ");
+
+    try
+    {
+        var globalSize3D = stackalloc nuint[3];
+        globalSize3D[0] = (nuint)w;
+        globalSize3D[1] = (nuint)h;
+        globalSize3D[2] = (nuint)d;
+
+        var localSize3D = stackalloc nuint[3];
+        localSize3D[0] = 8;
+        localSize3D[1] = 8;
+        localSize3D[2] = 4;
+
+        var sigma1Buf = (nint)((long)_bufPrincipalStresses + 0 * numVoxels * sizeof(float));
+        var sigma3Buf = (nint)((long)_bufPrincipalStresses + 2 * numVoxels * sizeof(float));
+
+        var breakdownDetected = false;
+        results.BreakdownPressure = 0f;
+
+        for (var step = 0; step < numSteps; step++)
+        {
+            token.ThrowIfCancellationRequested();
+
+            // Apply injection source
+            var argIdx = 0;
+            SetKernelArg(kernelApplyInj, argIdx++, _bufPressure);
+            SetKernelArg(kernelApplyInj, argIdx++, _bufLabels);
+            SetKernelArg(kernelApplyInj, argIdx++, w);
+            SetKernelArg(kernelApplyInj, argIdx++, h);
+            SetKernelArg(kernelApplyInj, argIdx++, d);
+            SetKernelArg(kernelApplyInj, argIdx++, injX);
+            SetKernelArg(kernelApplyInj, argIdx++, injY);
+            SetKernelArg(kernelApplyInj, argIdx++, injZ);
+            SetKernelArg(kernelApplyInj, argIdx++, _params.InjectionRadius);
+            SetKernelArg(kernelApplyInj, argIdx++, P_inj);
+
+            error = _cl.EnqueueNdrangeKernel(_queue, kernelApplyInj, 3, null, globalSize3D, localSize3D, 0, null, null);
+            CheckError(error, "EnqueueNDRange apply_injection");
+
+            // Diffuse pressure
+            for (var subStep = 0; subStep < _params.FluidIterationsPerMechanicalStep; subStep++)
+            {
+                argIdx = 0;
+                SetKernelArg(kernelDiffusion, argIdx++, _bufPressure);
+                SetKernelArg(kernelDiffusion, argIdx++, _bufPressureNew);
+                SetKernelArg(kernelDiffusion, argIdx++, _bufLabels);
+                SetKernelArg(kernelDiffusion, argIdx++, _bufFractureAperture);
+                SetKernelArg(kernelDiffusion, argIdx++, w);
+                SetKernelArg(kernelDiffusion, argIdx++, h);
+                SetKernelArg(kernelDiffusion, argIdx++, d);
+                SetKernelArg(kernelDiffusion, argIdx++, dx);
+                SetKernelArg(kernelDiffusion, argIdx++, dt_fluid / _params.FluidIterationsPerMechanicalStep);
+                SetKernelArg(kernelDiffusion, argIdx++, _params.RockPermeability);
+                SetKernelArg(kernelDiffusion, argIdx++, _params.FluidViscosity);
+                SetKernelArg(kernelDiffusion, argIdx++, _params.Porosity);
+                SetKernelArg(kernelDiffusion, argIdx++, _params.AquiferPressure * 1e6f);
+                SetKernelArg(kernelDiffusion, argIdx++, _params.EnableAquifer ? 1 : 0);
+
+                error = _cl.EnqueueNdrangeKernel(_queue, kernelDiffusion, 3, null, globalSize3D, localSize3D, 0, null, null);
+                CheckError(error, "EnqueueNDRange diffusion");
+
+                var temp = _bufPressure;
+                _bufPressure = _bufPressureNew;
+                _bufPressureNew = temp;
+            }
+
+            // Update effective stress
+            var stressOffset = 0;
+            var stressXXBuf = (nint)((long)_bufStressFields + stressOffset++ * numVoxels * sizeof(float));
+            var stressYYBuf = (nint)((long)_bufStressFields + stressOffset++ * numVoxels * sizeof(float));
+            var stressZZBuf = (nint)((long)_bufStressFields + stressOffset++ * numVoxels * sizeof(float));
+
+            argIdx = 0;
+            SetKernelArg(kernelEffStress, argIdx++, stressXXBuf);
+            SetKernelArg(kernelEffStress, argIdx++, stressYYBuf);
+            SetKernelArg(kernelEffStress, argIdx++, stressZZBuf);
+            SetKernelArg(kernelEffStress, argIdx++, _bufPressure);
+            SetKernelArg(kernelEffStress, argIdx++, bufEffStressXX);
+            SetKernelArg(kernelEffStress, argIdx++, bufEffStressYY);
+            SetKernelArg(kernelEffStress, argIdx++, bufEffStressZZ);
+            SetKernelArg(kernelEffStress, argIdx++, _bufLabels);
+            SetKernelArg(kernelEffStress, argIdx++, _params.BiotCoefficient);
+            SetKernelArg(kernelEffStress, argIdx++, numVoxels);
+
+            var globalSize1D = (nuint)((numVoxels + _workGroupSize - 1) / _workGroupSize * _workGroupSize);
+            var localSize1D = (nuint)_workGroupSize;
+
+            error = _cl.EnqueueNdrangeKernel(_queue, kernelEffStress, 1, null, &globalSize1D, &localSize1D, 0, null, null);
+            CheckError(error, "EnqueueNDRange effective_stress");
+
+            // Detect new fractures
+            argIdx = 0;
+            SetKernelArg(kernelDetectFrac, argIdx++, sigma1Buf);
+            SetKernelArg(kernelDetectFrac, argIdx++, sigma3Buf);
+            SetKernelArg(kernelDetectFrac, argIdx++, _bufPressure);
+            SetKernelArg(kernelDetectFrac, argIdx++, _bufFractured);
+            SetKernelArg(kernelDetectFrac, argIdx++, _bufDamage);
+            SetKernelArg(kernelDetectFrac, argIdx++, _bufFractureAperture);
+            SetKernelArg(kernelDetectFrac, argIdx++, _bufLabels);
+            SetKernelArg(kernelDetectFrac, argIdx++, _params.Cohesion * 1e6f);
+            SetKernelArg(kernelDetectFrac, argIdx++, _params.FrictionAngle);
+            SetKernelArg(kernelDetectFrac, argIdx++, _params.TensileStrength * 1e6f);
+            SetKernelArg(kernelDetectFrac, argIdx++, _params.BiotCoefficient);
+            SetKernelArg(kernelDetectFrac, argIdx++, _params.MinimumFractureAperture);
+            SetKernelArg(kernelDetectFrac, argIdx++, _params.FractureToughness);
+            SetKernelArg(kernelDetectFrac, argIdx++, _params.YoungModulus);
+            SetKernelArg(kernelDetectFrac, argIdx++, _params.PoissonRatio);
+            SetKernelArg(kernelDetectFrac, argIdx++, dx);
+            SetKernelArg(kernelDetectFrac, argIdx++, numVoxels);
+
+            error = _cl.EnqueueNdrangeKernel(_queue, kernelDetectFrac, 1, null, &globalSize1D, &localSize1D, 0, null, null);
+            CheckError(error, "EnqueueNDRange detect_fractures");
+
+            // Update fracture apertures
+            if (_params.EnableFractureFlow)
+            {
+                argIdx = 0;
+                SetKernelArg(kernelUpdateAperture, argIdx++, _bufPressure);
+                SetKernelArg(kernelUpdateAperture, argIdx++, sigma3Buf);
+                SetKernelArg(kernelUpdateAperture, argIdx++, _bufFractureAperture);
+                SetKernelArg(kernelUpdateAperture, argIdx++, _bufFractured);
+                SetKernelArg(kernelUpdateAperture, argIdx++, _bufLabels);
+                SetKernelArg(kernelUpdateAperture, argIdx++, _params.MinimumFractureAperture);
+                SetKernelArg(kernelUpdateAperture, argIdx++, _params.YoungModulus);
+                SetKernelArg(kernelUpdateAperture, argIdx++, _params.PoissonRatio);
+                SetKernelArg(kernelUpdateAperture, argIdx++, _params.BiotCoefficient);
+                SetKernelArg(kernelUpdateAperture, argIdx++, dx);
+                SetKernelArg(kernelUpdateAperture, argIdx++, numVoxels);
+
+                error = _cl.EnqueueNdrangeKernel(_queue, kernelUpdateAperture, 1, null, &globalSize1D, &localSize1D, 0, null, null);
+                CheckError(error, "EnqueueNDRange update_apertures");
+            }
+
+            _cl.Finish(_queue);
+
+            // Check for breakdown
+            if (!breakdownDetected && step == numSteps / 10)
+            {
+                var pressureData = new float[numVoxels];
+                EnqueueReadBuffer(_bufPressure, pressureData);
+                var injIdx = (injZ * h + injY) * w + injX;
+                results.BreakdownPressure = pressureData[injIdx] / 1e6f;
+                breakdownDetected = true;
+                Logger.Log($"[GeomechGPU] *** BREAKDOWN detected, P={results.BreakdownPressure:F1} MPa ***");
+            }
+
+            if (step % 100 == 0)
+            {
+                var prog = 0.92f + 0.08f * step / numSteps;
+                progress?.Report(prog);
+                Logger.Log($"[GeomechGPU] Fluid step {step}/{numSteps}");
+            }
+        }
+
+        Logger.Log("[GeomechGPU] Fluid injection simulation complete");
+    }
+    finally
+    {
+        _cl.ReleaseKernel(kernelDiffusion);
+        _cl.ReleaseKernel(kernelEffStress);
+        _cl.ReleaseKernel(kernelUpdateAperture);
+        _cl.ReleaseKernel(kernelDetectFrac);
+        _cl.ReleaseKernel(kernelApplyInj);
+        _cl.ReleaseMemObject(bufEffStressXX);
+        _cl.ReleaseMemObject(bufEffStressYY);
+        _cl.ReleaseMemObject(bufEffStressZZ);
+    }
+}
+private void PopulateGeothermalAndFluidResultsGPU(GeomechanicalResults results)
+{
+    if (!_params.EnableGeothermal && !_params.EnableFluidInjection)
+        return;
+
+    var extent = _params.SimulationExtent;
+    var w = extent.Width;
+    var h = extent.Height;
+    var d = extent.Depth;
+    var numVoxels = w * h * d;
+    var dx = _params.PixelSize / 1e6f;
+
+    Logger.Log("[GeomechGPU] Downloading geothermal and fluid results from GPU...");
+
+    // Download temperature field
+    if (_params.EnableGeothermal && _bufTemperature != 0)
+    {
+        var tempData = new float[numVoxels];
+        EnqueueReadBuffer(_bufTemperature, tempData);
+
+        results.TemperatureField = new float[w, h, d];
+        var idx = 0;
+        for (var z = 0; z < d; z++)
+        for (var y = 0; y < h; y++)
+        for (var x = 0; x < w; x++)
+            results.TemperatureField[x, y, z] = tempData[idx++];
+
+        // Calculate statistics
+        var T_top = results.TemperatureField[w/2, h/2, 0];
+        var T_bottom = results.TemperatureField[w/2, h/2, d-1];
+        var depth_m = d * dx;
+        results.AverageThermalGradient = (T_bottom - T_top) / depth_m * 1000f; // °C/km
+
+        Logger.Log($"[GeomechGPU] Temperature field downloaded, gradient: {results.AverageThermalGradient:F1} °C/km");
+    }
+
+    // Download pressure and fluid fields
+    if (_params.EnableFluidInjection && _bufPressure != 0)
+    {
+        var pressureData = new float[numVoxels];
+        EnqueueReadBuffer(_bufPressure, pressureData);
+
+        results.PressureField = new float[w, h, d];
+        var idx = 0;
+        float minP = float.MaxValue, maxP = float.MinValue;
+        
+        for (var z = 0; z < d; z++)
+        for (var y = 0; y < h; y++)
+        for (var x = 0; x < w; x++)
+        {
+            var P = pressureData[idx++];
+            results.PressureField[x, y, z] = P;
+            if (results.MaterialLabels[x, y, z] != 0)
+            {
+                if (P < minP) minP = P;
+                if (P > maxP) maxP = P;
+            }
+        }
+
+        results.MinFluidPressure = minP;
+        results.MaxFluidPressure = maxP;
+        results.PeakInjectionPressure = maxP / 1e6f;
+
+        // Download fracture apertures
+        if (_bufFractureAperture != 0)
+        {
+            var apertureData = new float[numVoxels];
+            EnqueueReadBuffer(_bufFractureAperture, apertureData);
+
+            results.FractureAperture = new float[w, h, d];
+            idx = 0;
+            var fractureVolume = 0.0;
+            
+            for (var z = 0; z < d; z++)
+            for (var y = 0; y < h; y++)
+            for (var x = 0; x < w; x++)
+            {
+                var aperture = apertureData[idx++];
+                results.FractureAperture[x, y, z] = aperture;
+                if (aperture > _params.MinimumFractureAperture)
+                {
+                    fractureVolume += aperture * dx * dx; // Aperture × face area
+                }
+            }
+
+            results.TotalFractureVolume = (float)fractureVolume;
+        }
+
+        Logger.Log($"[GeomechGPU] Fluid fields downloaded, P range: {minP/1e6f:F1} - {maxP/1e6f:F1} MPa");
+    }
+
+    _cl.Finish(_queue);
+}
     private GeomechanicalResults DownloadResults(BoundingBox extent, byte[,,] labels)
     {
         Logger.Log("[GeomechGPU] Downloading results from GPU");
@@ -2129,35 +2886,45 @@ __kernel void apply_plastic_correction(
     }
 
     private void ReleaseAllGPUBuffers()
-    {
-        foreach (var buffers in _chunkBuffers.Values)
-            buffers.Release(_cl);
-        _chunkBuffers.Clear();
+{
+    foreach (var buffers in _chunkBuffers.Values)
+        buffers.Release(_cl);
+    _chunkBuffers.Clear();
 
-        if (_bufNodeX != 0) _cl.ReleaseMemObject(_bufNodeX);
-        if (_bufNodeY != 0) _cl.ReleaseMemObject(_bufNodeY);
-        if (_bufNodeZ != 0) _cl.ReleaseMemObject(_bufNodeZ);
-        if (_bufElementNodes != 0) _cl.ReleaseMemObject(_bufElementNodes);
-        if (_bufElementE != 0) _cl.ReleaseMemObject(_bufElementE);
-        if (_bufElementNu != 0) _cl.ReleaseMemObject(_bufElementNu);
-        if (_bufRowPtr != 0) _cl.ReleaseMemObject(_bufRowPtr);
-        if (_bufColIdx != 0) _cl.ReleaseMemObject(_bufColIdx);
-        if (_bufValues != 0) _cl.ReleaseMemObject(_bufValues);
-        if (_bufDisplacement != 0) _cl.ReleaseMemObject(_bufDisplacement);
-        if (_bufForce != 0) _cl.ReleaseMemObject(_bufForce);
-        if (_bufIsDirichlet != 0) _cl.ReleaseMemObject(_bufIsDirichlet);
-        if (_bufDirichletValue != 0) _cl.ReleaseMemObject(_bufDirichletValue);
-        if (_bufStressFields != 0) _cl.ReleaseMemObject(_bufStressFields);
-        if (_bufStrainFields != 0) _cl.ReleaseMemObject(_bufStrainFields);
-        if (_bufPrincipalStresses != 0) _cl.ReleaseMemObject(_bufPrincipalStresses);
-        if (_bufFailureIndex != 0) _cl.ReleaseMemObject(_bufFailureIndex);
-        if (_bufDamage != 0) _cl.ReleaseMemObject(_bufDamage);
-        if (_bufLabels != 0) _cl.ReleaseMemObject(_bufLabels);
-        if (_bufFractured != 0) _cl.ReleaseMemObject(_bufFractured);
-        if (_bufPartialSums != 0) _cl.ReleaseMemObject(_bufPartialSums);
-        if (_bufTempVector != 0) _cl.ReleaseMemObject(_bufTempVector);
-    }
-
+    if (_bufNodeX != 0) _cl.ReleaseMemObject(_bufNodeX);
+    if (_bufNodeY != 0) _cl.ReleaseMemObject(_bufNodeY);
+    if (_bufNodeZ != 0) _cl.ReleaseMemObject(_bufNodeZ);
+    if (_bufElementNodes != 0) _cl.ReleaseMemObject(_bufElementNodes);
+    if (_bufElementE != 0) _cl.ReleaseMemObject(_bufElementE);
+    if (_bufElementNu != 0) _cl.ReleaseMemObject(_bufElementNu);
+    if (_bufRowPtr != 0) _cl.ReleaseMemObject(_bufRowPtr);
+    if (_bufColIdx != 0) _cl.ReleaseMemObject(_bufColIdx);
+    if (_bufValues != 0) _cl.ReleaseMemObject(_bufValues);
+    if (_bufDisplacement != 0) _cl.ReleaseMemObject(_bufDisplacement);
+    if (_bufForce != 0) _cl.ReleaseMemObject(_bufForce);
+    if (_bufIsDirichlet != 0) _cl.ReleaseMemObject(_bufIsDirichlet);
+    if (_bufDirichletValue != 0) _cl.ReleaseMemObject(_bufDirichletValue);
+    if (_bufStressFields != 0) _cl.ReleaseMemObject(_bufStressFields);
+    if (_bufStrainFields != 0) _cl.ReleaseMemObject(_bufStrainFields);
+    if (_bufPrincipalStresses != 0) _cl.ReleaseMemObject(_bufPrincipalStresses);
+    if (_bufFailureIndex != 0) _cl.ReleaseMemObject(_bufFailureIndex);
+    if (_bufDamage != 0) _cl.ReleaseMemObject(_bufDamage);
+    if (_bufLabels != 0) _cl.ReleaseMemObject(_bufLabels);
+    if (_bufFractured != 0) _cl.ReleaseMemObject(_bufFractured);
+    if (_bufPartialSums != 0) _cl.ReleaseMemObject(_bufPartialSums);
+    if (_bufTempVector != 0) _cl.ReleaseMemObject(_bufTempVector);
+    
+    // Geothermal and fluid buffers
+    if (_bufTemperature != 0) _cl.ReleaseMemObject(_bufTemperature);
+    if (_bufPressure != 0) _cl.ReleaseMemObject(_bufPressure);
+    if (_bufPressureNew != 0) _cl.ReleaseMemObject(_bufPressureNew);
+    if (_bufFractureAperture != 0) _cl.ReleaseMemObject(_bufFractureAperture);
+    if (_bufFluidSaturation != 0) _cl.ReleaseMemObject(_bufFluidSaturation);
+    if (_bufVelocityX != 0) _cl.ReleaseMemObject(_bufVelocityX);
+    if (_bufVelocityY != 0) _cl.ReleaseMemObject(_bufVelocityY);
+    if (_bufVelocityZ != 0) _cl.ReleaseMemObject(_bufVelocityZ);
+    if (_bufConnectivity != 0) _cl.ReleaseMemObject(_bufConnectivity);
+}
     private void Cleanup()
     {
         if (!string.IsNullOrEmpty(_offloadPath) && Directory.Exists(_offloadPath))

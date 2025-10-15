@@ -20,7 +20,7 @@ public enum FailureCriterion
     Griffith
 }
 
-public class GeomechanicalParameters
+public partial class GeomechanicalParameters
 {
     // Dataset info
     public int Width { get; set; }
