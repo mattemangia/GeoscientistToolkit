@@ -1162,11 +1162,119 @@ public partial class GeomechanicalSimulatorCPU
             if (_isDirichletDOF[i])
                 _force[i] = _dirichletValue[i];
     }
+private void MatrixVectorMultiplyMatrixFree(float[] y, float[] x)
+    {
+        // Element-by-element assembly and multiplication
+        // y = K * x by assembling each element stiffness and applying it
+        
+        var gp = 1.0f / MathF.Sqrt(3.0f);
+        var gaussPoints = new (float xi, float eta, float zeta, float weight)[]
+        {
+            (-gp, -gp, -gp, 1.0f), (+gp, -gp, -gp, 1.0f),
+            (+gp, +gp, -gp, 1.0f), (-gp, +gp, -gp, 1.0f),
+            (-gp, -gp, +gp, 1.0f), (+gp, -gp, +gp, 1.0f),
+            (+gp, +gp, +gp, 1.0f), (-gp, +gp, +gp, 1.0f)
+        };
 
+        // Process elements in parallel and accumulate contributions
+        var yLocks = new object[_numDOFs];
+        for (int i = 0; i < _numDOFs; i++)
+            yLocks[i] = new object();
+
+        Parallel.For(0, _numElements, e =>
+        {
+            var nodes = new int[8];
+            for (int i = 0; i < 8; i++)
+                nodes[i] = _elementNodes[e * 8 + i];
+
+            // Get element nodal displacements
+            var ue = new float[24];
+            for (int i = 0; i < 8; i++)
+            {
+                var dofBase = _nodeToDOF[nodes[i]];
+                ue[i * 3 + 0] = x[dofBase + 0];
+                ue[i * 3 + 1] = x[dofBase + 1];
+                ue[i * 3 + 2] = x[dofBase + 2];
+            }
+
+            // Get element coordinates
+            float[] ex = new float[8], ey = new float[8], ez = new float[8];
+            for (int i = 0; i < 8; i++)
+            {
+                ex[i] = _nodeX[nodes[i]];
+                ey[i] = _nodeY[nodes[i]];
+                ez[i] = _nodeZ[nodes[i]];
+            }
+
+            var E = _elementE[e];
+            var nu = _elementNu[e];
+            var D = ComputeElasticityMatrix(E, nu);
+
+            // Compute element stiffness matrix
+            var Ke = new float[24, 24];
+
+            foreach (var (xi, eta, zeta, w) in gaussPoints)
+            {
+                var dN_dxi = ComputeShapeFunctionDerivatives(xi, eta, zeta);
+                var J = ComputeJacobian(dN_dxi, ex, ey, ez);
+                var detJ = Determinant3x3(J);
+
+                if (detJ <= 0) continue;
+
+                var Jinv = Inverse3x3(J);
+                var dN_dx = MatrixMultiply(Jinv, dN_dxi);
+                var B = ComputeStrainDisplacementMatrix(dN_dx);
+                AddToElementStiffness(Ke, B, D, detJ * w);
+            }
+
+            // Compute element force vector: fe = Ke * ue
+            var fe = new float[24];
+            for (int i = 0; i < 24; i++)
+            {
+                float sum = 0;
+                for (int j = 0; j < 24; j++)
+                    sum += Ke[i, j] * ue[j];
+                fe[i] = sum;
+            }
+
+            // Scatter element forces to global force vector
+            for (int i = 0; i < 8; i++)
+            {
+                for (int di = 0; di < 3; di++)
+                {
+                    int globalDOF = _nodeToDOF[nodes[i]] + di;
+                    if (!_isDirichletDOF[globalDOF])
+                    {
+                        int localDOF = i * 3 + di;
+                        lock (yLocks[globalDOF])
+                        {
+                            y[globalDOF] += fe[localDOF];
+                        }
+                    }
+                }
+            }
+        });
+
+        // Apply Dirichlet BCs
+        for (int i = 0; i < _numDOFs; i++)
+        {
+            if (_isDirichletDOF[i])
+                y[i] = x[i];
+        }
+    }
     private void MatrixVectorMultiply(float[] y, float[] x)
     {
         Array.Clear(y, 0, _numDOFs);
 
+        // FIX: Check if we're in matrix-free mode
+        if (_rowPtr == null || _colIdx == null || _values == null)
+        {
+            // Matrix-free mode: recompute element contributions on-the-fly
+            MatrixVectorMultiplyMatrixFree(y, x);
+            return;
+        }
+
+        // Standard CSR sparse matrix-vector multiplication
         for (var row = 0; row < _numDOFs; row++)
         {
             if (_isDirichletDOF[row])
@@ -1193,6 +1301,17 @@ public partial class GeomechanicalSimulatorCPU
 
     private float GetDiagonalElement(int row)
     {
+        // FIX: Handle matrix-free mode
+        if (_rowPtr == null || _colIdx == null || _values == null)
+        {
+            // In matrix-free mode, estimate diagonal as Young's modulus scaled value
+            // This is a rough approximation for the preconditioner
+            var E = _elementE != null && _elementE.Length > 0 ? _elementE[0] : _params.YoungModulus * 1e6f;
+            var dx = _params.PixelSize / 1e6f;
+            var volumeElement = dx * dx * dx;
+            return E / volumeElement; // Rough scaling
+        }
+
         var rowStart = _rowPtr[row];
         var rowEnd = _rowPtr[row + 1];
 

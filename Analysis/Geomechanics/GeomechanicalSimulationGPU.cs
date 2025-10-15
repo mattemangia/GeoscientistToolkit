@@ -1712,6 +1712,16 @@ private void InitializeSparseMatrixStructureBlocked(int numBlocks)
         _bufElementNu = CreateAndFillBuffer(_elementNu, MemFlags.ReadOnly, out error);
         CheckError(error, "Create bufElementNu");
 
+        // FIX: Check if we're in matrix-free mode
+        if (_rowPtr == null || _colIdx == null || _values == null)
+        {
+            throw new NotSupportedException(
+                "GPU acceleration is not available for datasets of this size (matrix too large). " +
+                "Please use CPU solver instead, or reduce the simulation domain. " +
+                $"Current size: {_numElements:N0} elements, {_numDOFs:N0} DOFs. " +
+                "The sparse matrix would require more than 2.1 billion entries, exceeding GPU memory limits.");
+        }
+
         _bufRowPtr = CreateAndFillBuffer(_rowPtr.ToArray(), MemFlags.ReadOnly, out error);
         CheckError(error, "Create bufRowPtr");
         _bufColIdx = CreateAndFillBuffer(_colIdx.ToArray(), MemFlags.ReadOnly, out error);
@@ -1739,7 +1749,6 @@ private void InitializeSparseMatrixStructureBlocked(int numBlocks)
         _cl.Finish(_queue);
         Logger.Log("[GeomechGPU] Upload complete");
     }
-
     private void AssembleStiffnessMatrixGPU(IProgress<float> progress, CancellationToken token)
     {
         Logger.Log("[GeomechGPU] Assembling stiffness matrix on GPU");
