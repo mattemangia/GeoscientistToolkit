@@ -5,6 +5,7 @@
 using System.Numerics;
 using System.Runtime.CompilerServices;
 using GeoscientistToolkit.Util;
+using System.Collections.Concurrent;
 
 namespace GeoscientistToolkit.Analysis.Geomechanics;
 
@@ -428,113 +429,273 @@ public partial class GeomechanicalSimulatorCPU
 
     private void AssembleGlobalStiffnessMatrix()
     {
-        var cooRow = new List<int>();
-        var cooCol = new List<int>();
-        var cooVal = new List<float>();
-
-        var gp = 1.0f / MathF.Sqrt(3.0f);
-        var gaussPoints = new (float xi, float eta, float zeta, float weight)[]
+        Logger.Log("[GeomechCPU] Assembling global stiffness matrix");
+    
+        // Check if matrix will fit in memory
+        long estimatedEntries = (long)_numElements * 576;
+        bool needsMatrixFree = estimatedEntries > int.MaxValue || 
+                               estimatedEntries * sizeof(float) > _maxMemoryBudgetBytes / 2;
+    
+        if (needsMatrixFree)
         {
-            (-gp, -gp, -gp, 1.0f), (+gp, -gp, -gp, 1.0f),
-            (+gp, +gp, -gp, 1.0f), (-gp, +gp, -gp, 1.0f),
-            (-gp, -gp, +gp, 1.0f), (+gp, -gp, +gp, 1.0f),
-            (+gp, +gp, +gp, 1.0f), (-gp, +gp, +gp, 1.0f)
-        };
-
-        var skippedElements = 0;
-        var totalNegativeJacobians = 0;
-
-        for (var e = 0; e < _numElements; e++)
+            Logger.LogWarning("[GeomechCPU] Matrix too large - using matrix-free iterative solver");
+            AssembleGlobalStiffnessMatrixFree();
+        }
+        else
         {
-            var nodes = new int[8];
-            for (var i = 0; i < 8; i++)
-                nodes[i] = _elementNodes[e * 8 + i];
+            AssembleGlobalStiffnessMatrixDirect();
+        }
+    }
+    private void AssembleGlobalStiffnessMatrixDirect()
+{
+    Logger.Log("[GeomechCPU] Assembling global stiffness matrix (direct CSR)");
 
-            float[] ex = new float[8], ey = new float[8], ez = new float[8];
-            for (var i = 0; i < 8; i++)
+    var gp = 1.0f / MathF.Sqrt(3.0f);
+    var gaussPoints = new (float xi, float eta, float zeta, float weight)[]
+    {
+        (-gp, -gp, -gp, 1.0f), (+gp, -gp, -gp, 1.0f),
+        (+gp, +gp, -gp, 1.0f), (-gp, +gp, -gp, 1.0f),
+        (-gp, -gp, +gp, 1.0f), (+gp, -gp, +gp, 1.0f),
+        (+gp, +gp, +gp, 1.0f), (-gp, +gp, +gp, 1.0f)
+    };
+
+    // PASS 1: Count non-zeros per row (build sparsity pattern)
+    Logger.Log("[GeomechCPU] Pass 1: Building sparsity pattern...");
+    var rowSets = new Dictionary<int, HashSet<int>>();
+
+    for (int e = 0; e < _numElements; e++)
+    {
+        var nodes = new int[8];
+        for (int i = 0; i < 8; i++)
+            nodes[i] = _elementNodes[e * 8 + i];
+
+        for (int i = 0; i < 8; i++)
+        {
+            for (int j = 0; j < 8; j++)
             {
-                ex[i] = _nodeX[nodes[i]];
-                ey[i] = _nodeY[nodes[i]];
-                ez[i] = _nodeZ[nodes[i]];
-            }
-
-            var E = _elementE[e];
-            var nu = _elementNu[e];
-            var D = ComputeElasticityMatrix(E, nu);
-            var Ke = new float[24, 24];
-
-            var elementHasNegativeJacobian = false;
-
-            foreach (var (xi, eta, zeta, w) in gaussPoints)
-            {
-                var dN_dxi = ComputeShapeFunctionDerivatives(xi, eta, zeta);
-                var J = ComputeJacobian(dN_dxi, ex, ey, ez);
-                var detJ = Determinant3x3(J);
-
-                // FIX: Skip elements with non-positive Jacobian instead of throwing
-                if (detJ <= 0)
+                for (int di = 0; di < 3; di++)
                 {
-                    elementHasNegativeJacobian = true;
-                    totalNegativeJacobians++;
-                    continue; // Skip this Gauss point
-                }
+                    for (int dj = 0; dj < 3; dj++)
+                    {
+                        int globalI = _nodeToDOF[nodes[i]] + di;
+                        int globalJ = _nodeToDOF[nodes[j]] + dj;
 
-                // FIX: Robust inverse with fallback
-                float[,] Jinv;
-                try
-                {
-                    Jinv = Inverse3x3(J);
-                }
-                catch
-                {
-                    // If inversion fails, skip this element entirely
-                    elementHasNegativeJacobian = true;
-                    break;
-                }
-
-                var dN_dx = MatrixMultiply(Jinv, dN_dxi);
-                var B = ComputeStrainDisplacementMatrix(dN_dx);
-
-                AddToElementStiffness(Ke, B, D, detJ * w);
-            }
-
-            // FIX: Skip adding contributions from degenerate elements
-            if (elementHasNegativeJacobian)
-            {
-                skippedElements++;
-                continue;
-            }
-
-            // Add element stiffness to global matrix (COO format)
-            for (var i = 0; i < 8; i++)
-            for (var j = 0; j < 8; j++)
-            for (var di = 0; di < 3; di++)
-            for (var dj = 0; dj < 3; dj++)
-            {
-                var globalI = _nodeToDOF[nodes[i]] + di;
-                var globalJ = _nodeToDOF[nodes[j]] + dj;
-                var localI = i * 3 + di;
-                var localJ = j * 3 + dj;
-
-                var value = Ke[localI, localJ];
-                if (MathF.Abs(value) > 1e-12f)
-                {
-                    cooRow.Add(globalI);
-                    cooCol.Add(globalJ);
-                    cooVal.Add(value);
+                        if (!rowSets.ContainsKey(globalI))
+                            rowSets[globalI] = new HashSet<int>();
+                        
+                        rowSets[globalI].Add(globalJ);
+                    }
                 }
             }
         }
-
-        // Log warnings if elements were skipped
-        if (skippedElements > 0)
-            Logger.LogWarning($"[GeomechCPU] Skipped {skippedElements} degenerate elements " +
-                              $"({totalNegativeJacobians} negative Jacobians) - " +
-                              $"this is normal for voxel meshes with void spaces");
-
-        ConvertCOOtoCSR(cooRow, cooCol, cooVal);
+        
+        // Progress logging
+        if (e % 100000 == 0 && e > 0)
+        {
+            Logger.Log($"[GeomechCPU] Sparsity pattern: {e:N0}/{_numElements:N0} elements ({100.0*e/_numElements:F1}%)");
+        }
     }
 
+    // Build rowPtr from sparsity pattern
+    Logger.Log("[GeomechCPU] Building CSR row pointers...");
+    _rowPtr = new List<int>(_numDOFs + 1);
+    _rowPtr.Add(0);
+    
+    for (int i = 0; i < _numDOFs; i++)
+    {
+        int count = rowSets.ContainsKey(i) ? rowSets[i].Count : 0;
+        _rowPtr.Add(_rowPtr[i] + count);
+    }
+
+    var nnz = _rowPtr[_numDOFs];
+    
+    if (nnz > int.MaxValue)
+    {
+        Logger.LogError($"[GeomechCPU] Matrix too large: {nnz:N0} entries exceeds .NET array limit (2,147,483,647)");
+        throw new Exception($"Sparse matrix has {nnz:N0} entries, exceeds array limit. Use matrix-free mode or enable offloading.");
+    }
+    
+    Logger.Log($"[GeomechCPU] Sparse matrix: {nnz:N0} non-zeros ({100.0 * nnz / ((long)_numDOFs * _numDOFs):F6}% density)");
+    Logger.Log($"[GeomechCPU] Memory required: ~{(nnz * (sizeof(int) + sizeof(float))) / (1024.0 * 1024 * 1024):F2} GB");
+
+    // PASS 2: Allocate CSR arrays and fill column indices
+    Logger.Log("[GeomechCPU] Allocating CSR arrays...");
+    _colIdx = new List<int>(new int[nnz]);
+    _values = new List<float>(new float[nnz]);
+
+    Logger.Log("[GeomechCPU] Filling column indices...");
+    for (int i = 0; i < _numDOFs; i++)
+    {
+        if (rowSets.ContainsKey(i))
+        {
+            var sortedCols = rowSets[i].OrderBy(c => c).ToArray();
+            int pos = _rowPtr[i];
+            
+            for (int j = 0; j < sortedCols.Length; j++)
+            {
+                _colIdx[pos + j] = sortedCols[j];
+            }
+        }
+        
+        if (i % 1000000 == 0 && i > 0)
+        {
+            Logger.Log($"[GeomechCPU] Column indices: {i:N0}/{_numDOFs:N0} rows ({100.0*i/_numDOFs:F1}%)");
+        }
+    }
+
+    // Clear sparsity pattern to free memory
+    rowSets.Clear();
+    rowSets = null;
+    GC.Collect(GC.MaxGeneration, GCCollectionMode.Aggressive, true, true);
+
+    // PASS 3: Assemble element stiffness matrices in parallel
+    Logger.Log("[GeomechCPU] Pass 3: Computing element stiffness matrices...");
+    
+    var skippedElements = 0;
+    var totalNegativeJacobians = 0;
+    var processedElements = 0;
+    var lockObj = new object();
+
+    // Create row locks to prevent race conditions during assembly
+    var rowLocks = new object[_numDOFs];
+    for (int i = 0; i < _numDOFs; i++)
+        rowLocks[i] = new object();
+
+    Parallel.For(0, _numElements, new ParallelOptions { MaxDegreeOfParallelism = Environment.ProcessorCount }, e =>
+    {
+        var nodes = new int[8];
+        for (int i = 0; i < 8; i++)
+            nodes[i] = _elementNodes[e * 8 + i];
+
+        float[] ex = new float[8], ey = new float[8], ez = new float[8];
+        for (int i = 0; i < 8; i++)
+        {
+            ex[i] = _nodeX[nodes[i]];
+            ey[i] = _nodeY[nodes[i]];
+            ez[i] = _nodeZ[nodes[i]];
+        }
+
+        var E = _elementE[e];
+        var nu = _elementNu[e];
+        var D = ComputeElasticityMatrix(E, nu);
+        var Ke = new float[24, 24];
+
+        bool elementHasNegativeJacobian = false;
+
+        foreach (var (xi, eta, zeta, w) in gaussPoints)
+        {
+            var dN_dxi = ComputeShapeFunctionDerivatives(xi, eta, zeta);
+            var J = ComputeJacobian(dN_dxi, ex, ey, ez);
+            var detJ = Determinant3x3(J);
+
+            if (detJ <= 0)
+            {
+                elementHasNegativeJacobian = true;
+                Interlocked.Increment(ref totalNegativeJacobians);
+                continue;
+            }
+
+            float[,] Jinv;
+            try
+            {
+                Jinv = Inverse3x3(J);
+            }
+            catch
+            {
+                elementHasNegativeJacobian = true;
+                break;
+            }
+
+            var dN_dx = MatrixMultiply(Jinv, dN_dxi);
+            var B = ComputeStrainDisplacementMatrix(dN_dx);
+            AddToElementStiffness(Ke, B, D, detJ * w);
+        }
+
+        if (elementHasNegativeJacobian)
+        {
+            Interlocked.Increment(ref skippedElements);
+            return;
+        }
+
+        // Add element stiffness to global matrix (with row-level locking)
+        for (int i = 0; i < 8; i++)
+        {
+            for (int di = 0; di < 3; di++)
+            {
+                int globalI = _nodeToDOF[nodes[i]] + di;
+                int localI = i * 3 + di;
+
+                lock (rowLocks[globalI])
+                {
+                    int rowStart = _rowPtr[globalI];
+                    int rowEnd = _rowPtr[globalI + 1];
+
+                    for (int j = 0; j < 8; j++)
+                    {
+                        for (int dj = 0; dj < 3; dj++)
+                        {
+                            int globalJ = _nodeToDOF[nodes[j]] + dj;
+                            int localJ = j * 3 + dj;
+                            float value = Ke[localI, localJ];
+
+                            if (MathF.Abs(value) < 1e-12f) continue;
+
+                            // Binary search for column index in sorted array
+                            int left = rowStart;
+                            int right = rowEnd - 1;
+                            
+                            while (left <= right)
+                            {
+                                int mid = (left + right) / 2;
+                                if (_colIdx[mid] == globalJ)
+                                {
+                                    _values[mid] += value;
+                                    break;
+                                }
+                                else if (_colIdx[mid] < globalJ)
+                                {
+                                    left = mid + 1;
+                                }
+                                else
+                                {
+                                    right = mid - 1;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        
+        // Progress logging
+        var currentProcessed = Interlocked.Increment(ref processedElements);
+        if (currentProcessed % 100000 == 0)
+        {
+            Logger.Log($"[GeomechCPU] Assembly: {currentProcessed:N0}/{_numElements:N0} elements ({100.0*currentProcessed/_numElements:F1}%)");
+        }
+    });
+
+    if (skippedElements > 0)
+        Logger.LogWarning($"[GeomechCPU] Skipped {skippedElements:N0} degenerate elements " +
+                          $"({totalNegativeJacobians:N0} negative Jacobians) - normal for voxel meshes with voids");
+
+    Logger.Log("[GeomechCPU] Global stiffness matrix assembled successfully");
+}
+    private void AssembleGlobalStiffnessMatrixFree()
+    {
+        // Matrix-free mode: store only element data
+        Logger.Log("[GeomechCPU] Matrix-free mode: storing element connectivity only");
+    
+        // We already have _elementNodes, _elementE, _elementNu
+        // Don't build CSR - we'll recompute during SpMV
+    
+        _rowPtr = null;
+        _colIdx = null;
+        _values = null;
+    
+        Logger.Log($"[GeomechCPU] Matrix-free setup complete for {_numElements} elements");
+    }
+    
     // All original FEM methods preserved exactly
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private float[,] ComputeElasticityMatrix(float E, float nu)

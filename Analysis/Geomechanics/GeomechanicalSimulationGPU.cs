@@ -38,7 +38,8 @@ public unsafe class GeomechanicalSimulatorGPU : IDisposable
     private nint _bufVelocityX, _bufVelocityY, _bufVelocityZ;
     private Queue<int> _chunkAccessOrder = new();
     private HashSet<int> _chunkAccessSet = new();
-
+    private const int MAX_ENTRIES_PER_CHUNK = 500_000_000; 
+    
     private List<GeomechanicalChunk> _chunks;
 
     private nint _context, _queue, _program, _device;
@@ -1537,30 +1538,110 @@ __kernel void detect_hydraulic_fractures(
 
     private void InitializeSparseMatrixStructure()
     {
-        Logger.Log("[GeomechGPU] Initializing sparse matrix structure");
-
-        var cooRow = new List<int>();
-        var cooCol = new List<int>();
-        var cooVal = new List<float>();
-
-        for (var e = 0; e < _numElements; e++)
-        for (var i = 0; i < 8; i++)
-        for (var j = 0; j < 8; j++)
-        for (var di = 0; di < 3; di++)
-        for (var dj = 0; dj < 3; dj++)
+        Logger.Log("[GeomechGPU] Initializing sparse matrix structure (block-chunked)");
+    
+        // Calculate if we need blocking
+        long estimatedEntries = (long)_numElements * 576; // Upper bound
+        int numBlocks = Math.Max(1, (int)Math.Ceiling(estimatedEntries / (double)MAX_ENTRIES_PER_CHUNK));
+    
+        if (numBlocks == 1)
         {
-            var globalI = _elementNodes[e * 8 + i] * 3 + di;
-            var globalJ = _elementNodes[e * 8 + j] * 3 + dj;
-            cooRow.Add(globalI);
-            cooCol.Add(globalJ);
-            cooVal.Add(0.0f);
+            // Small enough - use direct method
+            InitializeSparseMatrixStructureDirect();
         }
-
-        ConvertCOOtoCSR(cooRow, cooCol, cooVal);
-        _nnz = _values.Count;
-
-        Logger.Log($"[GeomechGPU] Sparse matrix: {_nnz} non-zeros");
+        else
+        {
+            // Too large - use block assembly
+            Logger.Log($"[GeomechGPU] Using {numBlocks} matrix blocks for assembly");
+            InitializeSparseMatrixStructureBlocked(numBlocks);
+        }
     }
+    private void InitializeSparseMatrixStructureDirect()
+{
+    // Original two-pass algorithm for smaller problems
+    var rowNnz = new int[_numDOFs];
+    var rowSets = new Dictionary<int, HashSet<int>>();
+    
+    // PASS 1: Build sparsity pattern
+    for (int e = 0; e < _numElements; e++)
+    {
+        for (int i = 0; i < 8; i++)
+        {
+            for (int j = 0; j < 8; j++)
+            {
+                for (int di = 0; di < 3; di++)
+                {
+                    for (int dj = 0; dj < 3; dj++)
+                    {
+                        int globalI = _elementNodes[e * 8 + i] * 3 + di;
+                        int globalJ = _elementNodes[e * 8 + j] * 3 + dj;
+                        
+                        if (!rowSets.ContainsKey(globalI))
+                            rowSets[globalI] = new HashSet<int>();
+                        rowSets[globalI].Add(globalJ);
+                    }
+                }
+            }
+        }
+        
+        if (e % 10000 == 0)
+        {
+            Logger.Log($"[GeomechGPU] Pattern: {e}/{_numElements} elements ({100.0*e/_numElements:F1}%)");
+        }
+    }
+    
+    // Build rowPtr
+    _rowPtr = new List<int>(_numDOFs + 1);
+    _rowPtr.Add(0);
+    for (int i = 0; i < _numDOFs; i++)
+    {
+        int count = rowSets.ContainsKey(i) ? rowSets[i].Count : 0;
+        _rowPtr.Add(_rowPtr[i] + count);
+    }
+    
+    _nnz = _rowPtr[_numDOFs];
+    
+    if (_nnz > int.MaxValue)
+        throw new Exception($"Matrix too large: {_nnz} entries exceeds .NET array limit. Enable offloading.");
+    
+    Logger.Log($"[GeomechGPU] Sparse matrix: {_nnz:N0} non-zeros ({100.0 * _nnz / ((long)_numDOFs * _numDOFs):F6}% density)");
+    
+    // PASS 2: Allocate and fill
+    _colIdx = new List<int>(new int[_nnz]);
+    _values = new List<float>(new float[_nnz]);
+    
+    for (int i = 0; i < _numDOFs; i++)
+    {
+        if (rowSets.ContainsKey(i))
+        {
+            var sortedCols = rowSets[i].OrderBy(c => c).ToArray();
+            int pos = _rowPtr[i];
+            for (int j = 0; j < sortedCols.Length; j++)
+            {
+                _colIdx[pos + j] = sortedCols[j];
+            }
+        }
+    }
+    
+    Logger.Log("[GeomechGPU] Sparse matrix structure built");
+}
+
+private void InitializeSparseMatrixStructureBlocked(int numBlocks)
+{
+    // For extremely large problems, we cannot store full CSR in memory
+    // Solution: Use iterative solver with matrix-free approach
+    
+    Logger.LogWarning("[GeomechGPU] Matrix too large for direct storage - switching to matrix-free mode");
+    
+    // Store only element data for matrix-vector products
+    // During SpMV, we'll recompute contributions on-the-fly
+    _nnz = -1; // Flag for matrix-free mode
+    _rowPtr = null;
+    _colIdx = null;
+    _values = null;
+    
+    Logger.Log("[GeomechGPU] Using matrix-free element-by-element assembly");
+}
 
     private void ConvertCOOtoCSR(List<int> cooRow, List<int> cooCol, List<float> cooVal)
     {
