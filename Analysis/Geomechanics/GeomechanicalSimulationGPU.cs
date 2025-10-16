@@ -650,61 +650,91 @@ __kernel void calculate_element_stress(
     int e = batchStart + localIdx;
     if (e >= numElements || localIdx >= batchSize) return;
 
+    // --- 1. Get Material Properties and Lamé Parameters ---
     float E = elementE[localIdx];
     float nu = elementNu[localIdx];
-    float lambda = E * nu / ((1 + nu) * (1 - 2*nu));
-    float mu = E / (2 * (1 + nu));
+    float lambda = E * nu / ((1.0f + nu) * (1.0f - 2.0f*nu));
+    float mu = E / (2.0f * (1.0f + nu)); // Also known as Shear Modulus G
 
+    // --- 2. Get Element Nodal Displacements ---
     int nodes[8];
-    float ue[24];
+    float ue[24]; // 8 nodes * 3 DOFs
     for (int i = 0; i < 8; i++) {
         nodes[i] = elementNodes[localIdx*8 + i];
         int dof = nodes[i] * 3;
-        ue[i*3+0] = displacement[dof+0];
-        ue[i*3+1] = displacement[dof+1];
-        ue[i*3+2] = displacement[dof+2];
+        ue[i*3+0] = displacement[dof+0]; // u
+        ue[i*3+1] = displacement[dof+1]; // v
+        ue[i*3+2] = displacement[dof+2]; // w
     }
 
+    // --- 3. Calculate Geometry and Jacobian (same as in force kernel) ---
     float x0 = nodeX[nodes[0]], x6 = nodeX[nodes[6]];
     float y0 = nodeY[nodes[0]], y6 = nodeY[nodes[6]];
     float z0 = nodeZ[nodes[0]], z6 = nodeZ[nodes[6]];
-    float dx = x6 - x0, dy = y6 - y0, dz = z6 - z0;
-    
-    // Strains (same corrected calculation as in force kernel)
-    float u_right = 0.25f * (ue[1*3+0] + ue[2*3+0] + ue[5*3+0] + ue[6*3+0]);
-    float u_left  = 0.25f * (ue[0*3+0] + ue[3*3+0] + ue[4*3+0] + ue[7*3+0]);
-    float eps_xx = (u_right - u_left) / dx;
-    
-    float v_back  = 0.25f * (ue[2*3+1] + ue[3*3+1] + ue[6*3+1] + ue[7*3+1]);
-    float v_front = 0.25f * (ue[0*3+1] + ue[1*3+1] + ue[4*3+1] + ue[5*3+1]);
-    float eps_yy = (v_back - v_front) / dy;
-    
-    float w_top    = 0.25f * (ue[4*3+2] + ue[5*3+2] + ue[6*3+2] + ue[7*3+2]);
-    float w_bottom = 0.25f * (ue[0*3+2] + ue[1*3+2] + ue[2*3+2] + ue[3*3+2]);
-    float eps_zz = (w_top - w_bottom) / dz;
-    
-    // Shear strains (simplified - zero for now as we're using normal strains only)
-    float eps_xy = 0.0f;
-    float eps_xz = 0.0f;
-    float eps_yz = 0.0f;
+    float a = (x6 - x0) / 2.0f;
+    float b = (y6 - y0) / 2.0f;
+    float c_elem = (z6 - z0) / 2.0f;
 
-    // Stresses
+    // Avoid division by zero for degenerate elements
+    if (fabs(a) < 1e-12f || fabs(b) < 1e-12f || fabs(c_elem) < 1e-12f) return;
+
+    // --- 4. Compute Shape Function Derivatives in Physical Coordinates ---
+    // Derivatives in natural coordinates (ξ, η, ζ) at the element center (0,0,0)
+    float dN_dxi[8]  = {-0.125f,  0.125f,  0.125f, -0.125f, -0.125f,  0.125f,  0.125f, -0.125f};
+    float dN_deta[8] = {-0.125f, -0.125f,  0.125f,  0.125f, -0.125f, -0.125f,  0.125f,  0.125f};
+    float dN_dzeta[8]= {-0.125f, -0.125f, -0.125f, -0.125f,  0.125f,  0.125f,  0.125f,  0.125f};
+
+    // For a rectangular element, the inverse Jacobian is diagonal
+    float invJ_xx = 1.0f / a;
+    float invJ_yy = 1.0f / b;
+    float invJ_zz = 1.0f / c_elem;
+
+    // Derivatives in physical coordinates (x, y, z)
+    float dN_dx[8], dN_dy[8], dN_dz[8];
+    for (int i = 0; i < 8; i++) {
+        dN_dx[i] = dN_dxi[i]   * invJ_xx;
+        dN_dy[i] = dN_deta[i]  * invJ_yy;
+        dN_dz[i] = dN_dzeta[i] * invJ_zz;
+    }
+
+    // --- 5. Calculate Full Strain Tensor (ε = B * u) ---
+    float eps_xx = 0.0f, eps_yy = 0.0f, eps_zz = 0.0f;
+    float gamma_xy = 0.0f, gamma_yz = 0.0f, gamma_zx = 0.0f;
+
+    for (int i = 0; i < 8; i++) {
+        float u = ue[i*3+0];
+        float v = ue[i*3+1];
+        float w = ue[i*3+2];
+
+        // Normal strains
+        eps_xx += dN_dx[i] * u;
+        eps_yy += dN_dy[i] * v;
+        eps_zz += dN_dz[i] * w;
+
+        // Engineering shear strains
+        gamma_xy += dN_dy[i] * u + dN_dx[i] * v;
+        gamma_yz += dN_dz[i] * v + dN_dy[i] * w;
+        gamma_zx += dN_dz[i] * u + dN_dx[i] * w;
+    }
+
+    // --- 6. Calculate Full Stress Tensor (σ = D * ε) ---
     float trace = eps_xx + eps_yy + eps_zz;
-    float sxx = lambda * trace + 2*mu*eps_xx;
-    float syy = lambda * trace + 2*mu*eps_yy;
-    float szz = lambda * trace + 2*mu*eps_zz;
-    float sxy = 2*mu*eps_xy;
-    float sxz = 2*mu*eps_xz;
-    float syz = 2*mu*eps_yz;
+    float sxx = lambda * trace + 2.0f * mu * eps_xx;
+    float syy = lambda * trace + 2.0f * mu * eps_yy;
+    float szz = lambda * trace + 2.0f * mu * eps_zz;
+    float sxy = mu * gamma_xy;
+    float syz = mu * gamma_yz;
+    float sxz = mu * gamma_zx;
 
-    // Map to voxel (element center)
+    // --- 7. Map Stress to Voxel at Element Center ---
     float cx = (x0 + x6) / 2.0f;
     float cy = (y0 + y6) / 2.0f;
     float cz = (z0 + z6) / 2.0f;
 
-    int vx = (int)(cx / dx_voxel);
-    int vy = (int)(cy / dx_voxel);
-    int vz = (int)(cz / dx_voxel);
+    // Convert physical coordinates back to voxel indices
+    int vx = (int)rint(cx / dx_voxel);
+    int vy = (int)rint(cy / dx_voxel);
+    int vz = (int)rint(cz / dx_voxel);
 
     if (vx >= 0 && vx < width && vy >= 0 && vy < height) {
         int idx = vz * height * width + vy * width + vx;
