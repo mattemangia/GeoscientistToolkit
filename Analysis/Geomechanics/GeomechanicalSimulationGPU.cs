@@ -35,9 +35,7 @@
 //
 // ========================================================================
 
-using System;
-using System.Collections.Generic;
-using System.Linq;
+using System.Diagnostics;
 using System.Numerics;
 using System.Runtime.InteropServices;
 using System.Text;
@@ -48,68 +46,68 @@ namespace GeoscientistToolkit.Analysis.Geomechanics;
 
 public unsafe class GeomechanicalSimulatorGPU : IDisposable
 {
-    // ========== CORE STATE ==========
-    private readonly CL _cl;
-    private readonly GeomechanicalParameters _params;
-    private nint _context, _queue, _program, _device;
-    private bool _initialized;
-    private long _maxGPUMemoryBytes;
-    
     // Streaming parameters
     private const int ELEMENT_BATCH_SIZE = 100_000; // Process 100k elements at a time
     private const int VOXEL_BATCH_SIZE = 1_000_000; // Process 1M voxels at a time
 
-    // Mesh data (CPU)
-    private int _numNodes;
-    private int _numElements;
-    private long _numDOFs;
-    private float[] _nodeX, _nodeY, _nodeZ;
-    private int[] _elementNodes; // 8 nodes per hex element
-    private float[] _elementE, _elementNu;
-    
-    // Material bounds (only simulate the "teddy bear", not air)
-    private int _minX, _maxX, _minY, _maxY, _minZ, _maxZ;
-    
-    // Boundary conditions (CPU)
-    private bool[] _isDirichlet;
-    private float[] _dirichletValue;
-    private float[] _force;
-    
-    // Solution vector (CPU)
-    private float[] _displacement;
-    
-    // Fluid/thermal state (CPU)
-    private float[] _pressure;
-    private float[] _temperature;
-    private float[] _fractureAperture;
-    private bool[] _fractured;
-    
-    // GPU buffers (persistent)
-    private nint _bufNodeX, _bufNodeY, _bufNodeZ;
+    // Work group size
+    private const int WORK_GROUP_SIZE = 256;
+
+    // ========== CORE STATE ==========
+    private readonly CL _cl;
+    private readonly GeomechanicalParameters _params;
     private nint _bufDisplacement, _bufForce;
-    private nint _bufIsDirichlet, _bufDirichletValue;
-    
+
     // GPU buffers (reusable batch buffers)
     private nint _bufElementBatch;
     private nint _bufElementE_Batch;
     private nint _bufElementNu_Batch;
-    
+    private nint _bufIsDirichlet, _bufDirichletValue;
+
+    // GPU buffers (persistent)
+    private nint _bufNodeX, _bufNodeY, _bufNodeZ;
+    private nint _context, _queue, _program, _device;
+    private float[] _dirichletValue;
+
+    // Solution vector (CPU)
+    private float[] _displacement;
+    private float[] _elementE, _elementNu;
+    private int[] _elementNodes; // 8 nodes per hex element
+    private float[] _force;
+    private float[] _fractureAperture;
+    private bool[] _fractured;
+    private bool _initialized;
+
+    // Boundary conditions (CPU)
+    private bool[] _isDirichlet;
+
+    // Iteration tracking
+    private int _iterationsPerformed;
+    private nint _kernelCalcStress;
+    private nint _kernelDetectFractures;
+
     // GPU kernels
     private nint _kernelElementForce;
-    private nint _kernelCalcStress;
-    private nint _kernelPrincipalStress;
     private nint _kernelEvaluateFailure;
     private nint _kernelPlasticCorrection;
     private nint _kernelPressureDiffusion;
-    private nint _kernelUpdateAperture;
-    private nint _kernelDetectFractures;
+    private nint _kernelPrincipalStress;
     private nint _kernelThermalInit;
-    
-    // Work group size
-    private const int WORK_GROUP_SIZE = 256;
-    
-    // Iteration tracking
-    private int _iterationsPerformed;
+    private nint _kernelUpdateAperture;
+    private long _maxGPUMemoryBytes;
+
+    // Material bounds (only simulate the "teddy bear", not air)
+    private int _minX, _maxX, _minY, _maxY, _minZ, _maxZ;
+    private float[] _nodeX, _nodeY, _nodeZ;
+    private long _numDOFs;
+    private int _numElements;
+
+    // Mesh data (CPU)
+    private int _numNodes;
+
+    // Fluid/thermal state (CPU)
+    private float[] _pressure;
+    private float[] _temperature;
 
     // ========== CONSTRUCTOR ==========
     public GeomechanicalSimulatorGPU(GeomechanicalParameters parameters)
@@ -117,21 +115,48 @@ public unsafe class GeomechanicalSimulatorGPU : IDisposable
         Logger.Log("==========================================================");
         Logger.Log("[GeomechGPU] Initializing GPU Geomechanical Simulator");
         Logger.Log("==========================================================");
-        
+
         _params = parameters ?? throw new ArgumentNullException(nameof(parameters));
         _cl = CL.GetApi();
-        
+
         Logger.Log("[GeomechGPU] Validating parameters...");
         ValidateParameters();
-        
+
         Logger.Log("[GeomechGPU] Initializing OpenCL...");
         InitializeOpenCL();
-        
+
         Logger.Log("[GeomechGPU] Detecting GPU memory...");
         DetectGPUMemory();
-        
-        Logger.Log($"[GeomechGPU] Initialization complete. GPU budget: {_maxGPUMemoryBytes / (1024.0*1024*1024):F2} GB");
+
+        Logger.Log(
+            $"[GeomechGPU] Initialization complete. GPU budget: {_maxGPUMemoryBytes / (1024.0 * 1024 * 1024):F2} GB");
         Logger.Log("==========================================================");
+    }
+
+    public void Dispose()
+    {
+        Logger.Log("[GeomechGPU] Disposing GPU resources...");
+        ReleaseGPUResources();
+        ReleaseKernels();
+        if (_program != 0)
+        {
+            _cl.ReleaseProgram(_program);
+            _program = 0;
+        }
+
+        if (_queue != 0)
+        {
+            _cl.ReleaseCommandQueue(_queue);
+            _queue = 0;
+        }
+
+        if (_context != 0)
+        {
+            _cl.ReleaseContext(_context);
+            _context = 0;
+        }
+
+        Logger.Log("[GeomechGPU] Disposed successfully");
     }
 
     // ========== PUBLIC INTERFACE ==========
@@ -153,7 +178,8 @@ public unsafe class GeomechanicalSimulatorGPU : IDisposable
             Logger.Log($"Domain size: {extent.Width} × {extent.Height} × {extent.Depth} voxels");
             Logger.Log($"Total voxels: {extent.Width * extent.Height * extent.Depth:N0}");
             Logger.Log($"Voxel size: {_params.PixelSize} μm");
-            Logger.Log($"Physical size: {extent.Width * _params.PixelSize / 1000:F2} × {extent.Height * _params.PixelSize / 1000:F2} × {extent.Depth * _params.PixelSize / 1000:F2} mm");
+            Logger.Log(
+                $"Physical size: {extent.Width * _params.PixelSize / 1000:F2} × {extent.Height * _params.PixelSize / 1000:F2} × {extent.Depth * _params.PixelSize / 1000:F2} mm");
             Logger.Log($"Loading: σ₁={_params.Sigma1} MPa, σ₂={_params.Sigma2} MPa, σ₃={_params.Sigma3} MPa");
             Logger.Log($"Material: E={_params.YoungModulus} MPa, ν={_params.PoissonRatio}");
             Logger.Log($"Element batch size: {ELEMENT_BATCH_SIZE:N0}");
@@ -164,7 +190,7 @@ public unsafe class GeomechanicalSimulatorGPU : IDisposable
             Logger.Log("");
             Logger.Log("[1/10] Finding material bounds...");
             progress?.Report(0.05f);
-            var sw = System.Diagnostics.Stopwatch.StartNew();
+            var sw = Stopwatch.StartNew();
             FindMaterialBounds(labels);
             Logger.Log($"[1/10] Material bounds found in {sw.ElapsedMilliseconds} ms");
             token.ThrowIfCancellationRequested();
@@ -269,13 +295,13 @@ public unsafe class GeomechanicalSimulatorGPU : IDisposable
             sw.Restart();
             CalculateFinalStatistics(results);
             Logger.Log($"[10/10] Statistics calculated in {sw.ElapsedMilliseconds} ms");
-            
+
             results.Converged = converged;
             results.IterationsPerformed = _iterationsPerformed;
             results.ComputationTime = DateTime.Now - startTime;
-            
+
             progress?.Report(1.0f);
-            
+
             Logger.Log("");
             Logger.Log("==========================================================");
             Logger.Log("     GPU GEOMECHANICAL SIMULATION - COMPLETED");
@@ -284,12 +310,14 @@ public unsafe class GeomechanicalSimulatorGPU : IDisposable
             Logger.Log($"Convergence: {(converged ? "YES" : "NO")} ({_iterationsPerformed} iterations)");
             Logger.Log($"Mean stress: {results.MeanStress / 1e6f:F2} MPa");
             Logger.Log($"Max shear stress: {results.MaxShearStress / 1e6f:F2} MPa");
-            Logger.Log($"Failed voxels: {results.FailedVoxels:N0} / {results.TotalVoxels:N0} ({results.FailedVoxelPercentage:F2}%)");
+            Logger.Log(
+                $"Failed voxels: {results.FailedVoxels:N0} / {results.TotalVoxels:N0} ({results.FailedVoxelPercentage:F2}%)");
             if (_params.EnableFluidInjection)
             {
                 Logger.Log($"Breakdown pressure: {results.BreakdownPressure:F2} MPa");
                 Logger.Log($"Fracture volume: {results.TotalFractureVolume * 1e9:F2} mm³");
             }
+
             Logger.Log("==========================================================");
 
             return results;
@@ -316,17 +344,6 @@ public unsafe class GeomechanicalSimulatorGPU : IDisposable
         }
     }
 
-    public void Dispose()
-    {
-        Logger.Log("[GeomechGPU] Disposing GPU resources...");
-        ReleaseGPUResources();
-        ReleaseKernels();
-        if (_program != 0) { _cl.ReleaseProgram(_program); _program = 0; }
-        if (_queue != 0) { _cl.ReleaseCommandQueue(_queue); _queue = 0; }
-        if (_context != 0) { _cl.ReleaseContext(_context); _context = 0; }
-        Logger.Log("[GeomechGPU] Disposed successfully");
-    }
-
     // ========== INITIALIZATION ==========
     private void ValidateParameters()
     {
@@ -336,7 +353,7 @@ public unsafe class GeomechanicalSimulatorGPU : IDisposable
             throw new ArgumentException("Poisson's ratio must be in (0, 0.5)");
         if (_params.YoungModulus <= 0)
             throw new ArgumentException("Young's modulus must be positive");
-        
+
         Logger.Log("[GeomechGPU] All parameters validated successfully");
     }
 
@@ -345,12 +362,12 @@ public unsafe class GeomechanicalSimulatorGPU : IDisposable
         try
         {
             Logger.Log("[GeomechGPU] Querying OpenCL platforms...");
-            
+
             // Get platform and device
             uint numPlatforms;
             _cl.GetPlatformIDs(0, null, &numPlatforms);
             if (numPlatforms == 0) throw new Exception("No OpenCL platforms found");
-            
+
             Logger.Log($"[GeomechGPU] Found {numPlatforms} OpenCL platform(s)");
 
             var platforms = stackalloc nint[(int)numPlatforms];
@@ -367,7 +384,7 @@ public unsafe class GeomechanicalSimulatorGPU : IDisposable
 
             if (numDevices == 0)
                 throw new Exception("No OpenCL devices found");
-            
+
             Logger.Log($"[GeomechGPU] Found {numDevices} device(s)");
 
             var devices = stackalloc nint[(int)numDevices];
@@ -382,6 +399,7 @@ public unsafe class GeomechanicalSimulatorGPU : IDisposable
             {
                 _cl.GetDeviceInfo(_device, DeviceInfo.Name, nameSize, namePtr, null);
             }
+
             var deviceName = Encoding.UTF8.GetString(nameBytes).TrimEnd('\0');
             Logger.Log($"[GeomechGPU] Using device: {deviceName}");
 
@@ -396,7 +414,7 @@ public unsafe class GeomechanicalSimulatorGPU : IDisposable
 
             Logger.Log("[GeomechGPU] Building OpenCL kernels...");
             BuildKernels();
-            
+
             _initialized = true;
             Logger.Log("[GeomechGPU] OpenCL initialized successfully");
         }
@@ -430,8 +448,8 @@ public unsafe class GeomechanicalSimulatorGPU : IDisposable
 
     private void BuildKernels()
     {
-        var sw = System.Diagnostics.Stopwatch.StartNew();
-        
+        var sw = Stopwatch.StartNew();
+
         Logger.Log("[GeomechGPU] Compiling kernel source...");
         var source = GetKernelSource();
         var sourceBytes = Encoding.UTF8.GetBytes(source);
@@ -452,7 +470,7 @@ public unsafe class GeomechanicalSimulatorGPU : IDisposable
         var devices = stackalloc nint[1];
         devices[0] = _device;
         error = _cl.BuildProgram(_program, 1, devices, (byte*)null, null, null);
-        
+
         if (error != 0)
         {
             Logger.LogError("[GeomechGPU] Kernel build failed!");
@@ -463,6 +481,7 @@ public unsafe class GeomechanicalSimulatorGPU : IDisposable
             {
                 _cl.GetProgramBuildInfo(_program, _device, (uint)ProgramBuildInfo.BuildLog, logSize, logPtr, null);
             }
+
             var buildLog = Encoding.UTF8.GetString(log);
             Logger.LogError($"[GeomechGPU] Build log:\n{buildLog}");
             throw new Exception($"Kernel build failed:\n{buildLog}");
@@ -1042,14 +1061,250 @@ __kernel void detect_hydraulic_fractures(
         fractured[idx] = 1;
     }
 }
+// ============================================================================
+// PLASTICITY - Von Mises with Isotropic Hardening (Radial Return)
+// ============================================================================
+__kernel void apply_plasticity(
+    __global float* stressXX,
+    __global float* stressYY,
+    __global float* stressZZ,
+    __global float* stressXY,
+    __global float* stressXZ,
+    __global float* stressYZ,
+    __global float* plasticStrain,
+    __global float* yieldStress,
+    __global const uchar* labels,
+    const float shearModulus,
+    const float hardeningModulus,
+    const float initialYieldStress,
+    const int batchStart,
+    const int batchSize,
+    const int numVoxels)
+{
+    int localIdx = get_global_id(0);
+    int idx = batchStart + localIdx;
+    if (idx >= numVoxels || localIdx >= batchSize) return;
+    if (labels[idx] == 0) return;
+
+    // Get current stress state
+    float sxx = stressXX[idx];
+    float syy = stressYY[idx];
+    float szz = stressZZ[idx];
+    float sxy = stressXY[idx];
+    float sxz = stressXZ[idx];
+    float syz = stressYZ[idx];
+
+    // Decompose into volumetric and deviatoric parts
+    float p = (sxx + syy + szz) / 3.0f;  // Mean stress
+    float sxx_dev = sxx - p;
+    float syy_dev = syy - p;
+    float szz_dev = szz - p;
+
+    // Calculate von Mises equivalent stress
+    float J2 = 0.5f * (sxx_dev * sxx_dev + syy_dev * syy_dev + szz_dev * szz_dev)
+             + sxy * sxy + sxz * sxz + syz * syz;
+    float q = sqrt(3.0f * J2);  // von Mises stress
+
+    // Initialize yield stress if first time
+    float sigma_y = yieldStress[idx];
+    if (sigma_y < 1.0f) {
+        sigma_y = initialYieldStress;
+        yieldStress[idx] = sigma_y;
+    }
+
+    // Check yield criterion: f = q - sigma_y
+    float f = q - sigma_y;
+
+    if (f > 0.0f)  // Yielding
+    {
+        // Radial return mapping
+        // delta_eps_p = f / (3*mu + H)
+        float mu = shearModulus;
+        float H = hardeningModulus;
+        float delta_eps_p = f / (3.0f * mu + H);
+
+        // Update plastic strain
+        plasticStrain[idx] += delta_eps_p;
+
+        // Update yield stress (isotropic hardening)
+        yieldStress[idx] += H * delta_eps_p;
+
+        // Return to yield surface: scale deviatoric stress
+        float scale = (q - 3.0f * mu * delta_eps_p) / q;
+        scale = fmax(0.0f, scale);  // Safety check
+
+        // Update stress state
+        sxx_dev *= scale;
+        syy_dev *= scale;
+        szz_dev *= scale;
+        sxy *= scale;
+        sxz *= scale;
+        syz *= scale;
+
+        // Reconstruct total stress
+        stressXX[idx] = sxx_dev + p;
+        stressYY[idx] = syy_dev + p;
+        stressZZ[idx] = szz_dev + p;
+        stressXY[idx] = sxy;
+        stressXZ[idx] = sxz;
+        stressYZ[idx] = syz;
+    }
+}
+// ============================================================================
+// DAMAGE EVOLUTION - Continuum Damage Mechanics
+// ============================================================================
+
+// Calculate equivalent strain from stress
+float calculate_equivalent_strain(
+    float sxx, float syy, float szz,
+    float sxy, float sxz, float syz,
+    float E, float nu)
+{
+    // Stress to strain conversion
+    float eps_xx = (sxx - nu * (syy + szz)) / E;
+    float eps_yy = (syy - nu * (sxx + szz)) / E;
+    float eps_zz = (szz - nu * (sxx + syy)) / E;
+    float gamma_xy = 2.0f * (1.0f + nu) * sxy / E;
+    float gamma_xz = 2.0f * (1.0f + nu) * sxz / E;
+    float gamma_yz = 2.0f * (1.0f + nu) * syz / E;
+    
+    // Equivalent strain (von Mises)
+    float eps_m = (eps_xx + eps_yy + eps_zz) / 3.0f;
+    float eps_xx_dev = eps_xx - eps_m;
+    float eps_yy_dev = eps_yy - eps_m;
+    float eps_zz_dev = eps_zz - eps_m;
+    
+    float eps_eq_sq = (2.0f/3.0f) * (
+        eps_xx_dev * eps_xx_dev + 
+        eps_yy_dev * eps_yy_dev + 
+        eps_zz_dev * eps_zz_dev +
+        0.5f * (gamma_xy * gamma_xy + gamma_xz * gamma_xz + gamma_yz * gamma_yz)
+    );
+    
+    return sqrt(fmax(0.0f, eps_eq_sq));
+}
+
+__kernel void update_damage(
+    __global const float* stressXX,
+    __global const float* stressYY,
+    __global const float* stressZZ,
+    __global const float* stressXY,
+    __global const float* stressXZ,
+    __global const float* stressYZ,
+    __global float* damageVariable,
+    __global float* strainHistory,
+    __global uchar* damageField,
+    __global const uchar* labels,
+    const float youngModulus,
+    const float poissonRatio,
+    const float eps_0,              // Damage threshold
+    const float eps_f,              // Critical strain
+    const float damageExponent,     // Evolution rate
+    const int damageModel,          // 0=exponential, 1=linear
+    const int batchStart,
+    const int batchSize,
+    const int numVoxels)
+{
+    int localIdx = get_global_id(0);
+    int idx = batchStart + localIdx;
+    if (idx >= numVoxels || localIdx >= batchSize) return;
+    if (labels[idx] == 0) return;
+
+    // Get current stress state
+    float sxx = stressXX[idx];
+    float syy = stressYY[idx];
+    float szz = stressZZ[idx];
+    float sxy = stressXY[idx];
+    float sxz = stressXZ[idx];
+    float syz = stressYZ[idx];
+
+    // Calculate equivalent strain
+    float eps_eq = calculate_equivalent_strain(
+        sxx, syy, szz, sxy, sxz, syz, youngModulus, poissonRatio);
+
+    // Update strain history (maximum strain experienced)
+    float eps_max = strainHistory[idx];
+    if (eps_eq > eps_max) {
+        eps_max = eps_eq;
+        strainHistory[idx] = eps_max;
+    }
+
+    // Calculate damage variable
+    float D_old = damageVariable[idx];
+    float D_new;
+
+    if (eps_max < eps_0) {
+        // Below damage threshold - no damage
+        D_new = 0.0f;
+    } else {
+        if (damageModel == 0) {
+            // Exponential damage evolution (Mazars model)
+            float ratio = eps_0 / eps_max;
+            float exponent = -damageExponent * (eps_max - eps_0);
+            D_new = 1.0f - ratio * exp(exponent);
+        } else {
+            // Linear damage evolution
+            if (eps_max >= eps_f) {
+                D_new = 1.0f;
+            } else {
+                D_new = (eps_max - eps_0) / (eps_f - eps_0);
+            }
+        }
+    }
+
+    // Ensure monotonic increase (damage doesn't heal)
+    D_new = fmax(D_old, D_new);
+    
+    // Clamp to [0,1]
+    D_new = clamp(D_new, 0.0f, 1.0f);
+
+    // Store damage variable
+    damageVariable[idx] = D_new;
+
+    // Update damage field for visualization (0-255)
+    damageField[idx] = (uchar)(D_new * 255.0f);
+}
+
+__kernel void apply_damage_to_stress(
+    __global float* stressXX,
+    __global float* stressYY,
+    __global float* stressZZ,
+    __global float* stressXY,
+    __global float* stressXZ,
+    __global float* stressYZ,
+    __global const float* damageVariable,
+    __global const uchar* labels,
+    const int batchStart,
+    const int batchSize,
+    const int numVoxels)
+{
+    int localIdx = get_global_id(0);
+    int idx = batchStart + localIdx;
+    if (idx >= numVoxels || localIdx >= batchSize) return;
+    if (labels[idx] == 0) return;
+
+    float D = damageVariable[idx];
+    
+    if (D > 0.01f) {
+        // Degrade stiffness: sigma_eff = (1-D) * sigma
+        float factor = 1.0f - D;
+        
+        stressXX[idx] *= factor;
+        stressYY[idx] *= factor;
+        stressZZ[idx] *= factor;
+        stressXY[idx] *= factor;
+        stressXZ[idx] *= factor;
+        stressYZ[idx] *= factor;
+    }
+}
 ";
     }
 
     // ========== MESH GENERATION (CPU) ==========
     private void FindMaterialBounds(byte[,,] labels)
     {
-        var sw = System.Diagnostics.Stopwatch.StartNew();
-        
+        var sw = Stopwatch.StartNew();
+
         var extent = _params.SimulationExtent;
         _minX = extent.Width;
         _maxX = -1;
@@ -1059,181 +1314,161 @@ __kernel void detect_hydraulic_fractures(
         _maxZ = -1;
 
         Logger.Log("[GeomechGPU] Scanning volume for material voxels...");
-        
-        int materialVoxels = 0;
-        for (int z = 0; z < extent.Depth; z++)
+
+        var materialVoxels = 0;
+        for (var z = 0; z < extent.Depth; z++)
         {
-            for (int y = 0; y < extent.Height; y++)
-            {
-                for (int x = 0; x < extent.Width; x++)
+            for (var y = 0; y < extent.Height; y++)
+            for (var x = 0; x < extent.Width; x++)
+                if (labels[x, y, z] != 0)
                 {
-                    if (labels[x, y, z] != 0)
-                    {
-                        materialVoxels++;
-                        if (x < _minX) _minX = x;
-                        if (x > _maxX) _maxX = x;
-                        if (y < _minY) _minY = y;
-                        if (y > _maxY) _maxY = y;
-                        if (z < _minZ) _minZ = z;
-                        if (z > _maxZ) _maxZ = z;
-                    }
+                    materialVoxels++;
+                    if (x < _minX) _minX = x;
+                    if (x > _maxX) _maxX = x;
+                    if (y < _minY) _minY = y;
+                    if (y > _maxY) _maxY = y;
+                    if (z < _minZ) _minZ = z;
+                    if (z > _maxZ) _maxZ = z;
                 }
-            }
-            
-            if (z % 10 == 0)
-            {
-                Logger.Log($"[GeomechGPU] Scanning... {100.0*z/extent.Depth:F1}% complete");
-            }
+
+            if (z % 10 == 0) Logger.Log($"[GeomechGPU] Scanning... {100.0 * z / extent.Depth:F1}% complete");
         }
 
         var totalVoxels = extent.Width * extent.Height * extent.Depth;
         var materialPercent = 100.0 * materialVoxels / totalVoxels;
-        
+
         Logger.Log($"[GeomechGPU] Material voxels: {materialVoxels:N0} / {totalVoxels:N0} ({materialPercent:F2}%)");
         Logger.Log($"[GeomechGPU] Bounding box: X=[{_minX},{_maxX}] Y=[{_minY},{_maxY}] Z=[{_minZ},{_maxZ}]");
-        Logger.Log($"[GeomechGPU] Bounding box size: {_maxX-_minX+1} × {_maxY-_minY+1} × {_maxZ-_minZ+1}");
+        Logger.Log($"[GeomechGPU] Bounding box size: {_maxX - _minX + 1} × {_maxY - _minY + 1} × {_maxZ - _minZ + 1}");
         Logger.Log($"[GeomechGPU] Scan completed in {sw.ElapsedMilliseconds} ms");
     }
 
     private void GenerateMesh(byte[,,] labels)
-{
-    var sw = System.Diagnostics.Stopwatch.StartNew();
-    
-    var extent = _params.SimulationExtent;
-    var w = _maxX - _minX + 2;
-    var h = _maxY - _minY + 2;
-    var d = _maxZ - _minZ + 2;
-    
-    // CRITICAL: Work in mm instead of m for better conditioning
-    var dx = _params.PixelSize / 1e3f;  // CHANGED: Convert μm to mm instead of m
-
-    Logger.Log($"[GeomechGPU] Mesh region: {w} × {h} × {d} nodes");
-    Logger.Log($"[GeomechGPU] Element size: {dx} mm");  // CHANGED: log in mm
-
-    // Create nodes
-    _numNodes = w * h * d;
-    _nodeX = new float[_numNodes];
-    _nodeY = new float[_numNodes];
-    _nodeZ = new float[_numNodes];
-
-    Logger.Log($"[GeomechGPU] Creating {_numNodes:N0} nodes...");
-    
-    int nodeIdx = 0;
-    for (int z = 0; z < d; z++)
     {
-        for (int y = 0; y < h; y++)
+        var sw = Stopwatch.StartNew();
+
+        var extent = _params.SimulationExtent;
+        var w = _maxX - _minX + 2;
+        var h = _maxY - _minY + 2;
+        var d = _maxZ - _minZ + 2;
+
+        // CRITICAL: Work in mm instead of m for better conditioning
+        var dx = _params.PixelSize / 1e3f; // CHANGED: Convert μm to mm instead of m
+
+        Logger.Log($"[GeomechGPU] Mesh region: {w} × {h} × {d} nodes");
+        Logger.Log($"[GeomechGPU] Element size: {dx} mm"); // CHANGED: log in mm
+
+        // Create nodes
+        _numNodes = w * h * d;
+        _nodeX = new float[_numNodes];
+        _nodeY = new float[_numNodes];
+        _nodeZ = new float[_numNodes];
+
+        Logger.Log($"[GeomechGPU] Creating {_numNodes:N0} nodes...");
+
+        var nodeIdx = 0;
+        for (var z = 0; z < d; z++)
         {
-            for (int x = 0; x < w; x++)
+            for (var y = 0; y < h; y++)
+            for (var x = 0; x < w; x++)
             {
                 _nodeX[nodeIdx] = (_minX + x) * dx;
                 _nodeY[nodeIdx] = (_minY + y) * dx;
                 _nodeZ[nodeIdx] = (_minZ + z) * dx;
                 nodeIdx++;
             }
-        }
-        
-        if (z % 10 == 0)
-        {
-            Logger.Log($"[GeomechGPU] Creating nodes... {100.0*z/d:F1}% complete");
-        }
-    }
 
-    // Create elements (only for material voxels)
-    Logger.Log("[GeomechGPU] Creating elements for material voxels...");
-    
-    var elementList = new List<int[]>();
-    for (int z = _minZ; z < _maxZ; z++)
-    {
-        for (int y = _minY; y < _maxY; y++)
+            if (z % 10 == 0) Logger.Log($"[GeomechGPU] Creating nodes... {100.0 * z / d:F1}% complete");
+        }
+
+        // Create elements (only for material voxels)
+        Logger.Log("[GeomechGPU] Creating elements for material voxels...");
+
+        var elementList = new List<int[]>();
+        for (var z = _minZ; z < _maxZ; z++)
         {
-            for (int x = _minX; x < _maxX; x++)
+            for (var y = _minY; y < _maxY; y++)
+            for (var x = _minX; x < _maxX; x++)
             {
                 if (labels[x, y, z] == 0) continue;
 
-                int lx = x - _minX;
-                int ly = y - _minY;
-                int lz = z - _minZ;
-                int n0 = (lz * h + ly) * w + lx;
+                var lx = x - _minX;
+                var ly = y - _minY;
+                var lz = z - _minZ;
+                var n0 = (lz * h + ly) * w + lx;
 
                 var elem = new int[8];
                 elem[0] = n0;
                 elem[1] = n0 + 1;
                 elem[2] = n0 + w + 1;
                 elem[3] = n0 + w;
-                elem[4] = n0 + w*h;
-                elem[5] = n0 + w*h + 1;
-                elem[6] = n0 + w*h + w + 1;
-                elem[7] = n0 + w*h + w;
-                
+                elem[4] = n0 + w * h;
+                elem[5] = n0 + w * h + 1;
+                elem[6] = n0 + w * h + w + 1;
+                elem[7] = n0 + w * h + w;
+
                 elementList.Add(elem);
             }
+
+            if ((z - _minZ) % 10 == 0)
+                Logger.Log($"[GeomechGPU] Creating elements... {100.0 * (z - _minZ) / (_maxZ - _minZ):F1}% complete");
         }
-        
-        if ((z - _minZ) % 10 == 0)
+
+        _numElements = elementList.Count;
+        _elementNodes = new int[_numElements * 8];
+
+        Logger.Log($"[GeomechGPU] Flattening {_numElements:N0} elements...");
+        for (var e = 0; e < _numElements; e++)
         {
-            Logger.Log($"[GeomechGPU] Creating elements... {100.0*(z-_minZ)/(_maxZ-_minZ):F1}% complete");
+            for (var n = 0; n < 8; n++) _elementNodes[e * 8 + n] = elementList[e][n];
+
+            if (e % 100000 == 0 && e > 0)
+                Logger.Log($"[GeomechGPU] Processing elements... {100.0 * e / _numElements:F1}% complete");
         }
+
+        // Material properties - KEEP IN MPA (no change needed)
+        _elementE = new float[_numElements];
+        _elementNu = new float[_numElements];
+        Array.Fill(_elementE, _params.YoungModulus); // CHANGED: Keep in MPa, not Pa
+        Array.Fill(_elementNu, _params.PoissonRatio);
+
+        _numDOFs = _numNodes * 3;
+
+        var memoryMB = (_numNodes * 3 * sizeof(float) * 3 +
+                        _numElements * 8 * sizeof(int) +
+                        _numElements * 2 * sizeof(float) +
+                        _numDOFs * sizeof(float) * 2) / (1024.0 * 1024.0);
+
+        Logger.Log("==========================================================");
+        Logger.Log("[GeomechGPU] MESH STATISTICS:");
+        Logger.Log($"  Nodes: {_numNodes:N0}");
+        Logger.Log($"  Elements: {_numElements:N0}");
+        Logger.Log($"  DOFs: {_numDOFs:N0}");
+        Logger.Log($"  Element size: {dx:F6} mm"); // CHANGED
+        Logger.Log($"  Est. memory: {memoryMB:F1} MB");
+        Logger.Log($"  Batch count: {(_numElements + ELEMENT_BATCH_SIZE - 1) / ELEMENT_BATCH_SIZE:N0}");
+        Logger.Log("==========================================================");
+        Logger.Log($"[GeomechGPU] Mesh generation completed in {sw.Elapsed.TotalSeconds:F2} s");
     }
 
-    _numElements = elementList.Count;
-    _elementNodes = new int[_numElements * 8];
-    
-    Logger.Log($"[GeomechGPU] Flattening {_numElements:N0} elements...");
-    for (int e = 0; e < _numElements; e++)
-    {
-        for (int n = 0; n < 8; n++)
-        {
-            _elementNodes[e*8 + n] = elementList[e][n];
-        }
-        
-        if (e % 100000 == 0 && e > 0)
-        {
-            Logger.Log($"[GeomechGPU] Processing elements... {100.0*e/_numElements:F1}% complete");
-        }
-    }
-
-    // Material properties - KEEP IN MPA (no change needed)
-    _elementE = new float[_numElements];
-    _elementNu = new float[_numElements];
-    Array.Fill(_elementE, _params.YoungModulus);  // CHANGED: Keep in MPa, not Pa
-    Array.Fill(_elementNu, _params.PoissonRatio);
-
-    _numDOFs = _numNodes * 3;
-
-    var memoryMB = (_numNodes * 3 * sizeof(float) * 3 +
-                   _numElements * 8 * sizeof(int) +
-                   _numElements * 2 * sizeof(float) +
-                   _numDOFs * sizeof(float) * 2) / (1024.0 * 1024.0);
-
-    Logger.Log("==========================================================");
-    Logger.Log($"[GeomechGPU] MESH STATISTICS:");
-    Logger.Log($"  Nodes: {_numNodes:N0}");
-    Logger.Log($"  Elements: {_numElements:N0}");
-    Logger.Log($"  DOFs: {_numDOFs:N0}");
-    Logger.Log($"  Element size: {dx:F6} mm");  // CHANGED
-    Logger.Log($"  Est. memory: {memoryMB:F1} MB");
-    Logger.Log($"  Batch count: {(_numElements + ELEMENT_BATCH_SIZE - 1) / ELEMENT_BATCH_SIZE:N0}");
-    Logger.Log("==========================================================");
-    Logger.Log($"[GeomechGPU] Mesh generation completed in {sw.Elapsed.TotalSeconds:F2} s");
-}
     private void UploadPersistentData()
     {
-        var sw = System.Diagnostics.Stopwatch.StartNew();
-        
+        var sw = Stopwatch.StartNew();
+
         Logger.Log("[GeomechGPU] Allocating GPU buffers...");
 
         int error;
         _bufNodeX = CreateAndFillBuffer(_nodeX, MemFlags.ReadOnly, out error);
         CheckError(error, "bufNodeX");
-        Logger.Log($"[GeomechGPU] Uploaded nodeX: {_nodeX.Length * sizeof(float) / (1024.0*1024):F2} MB");
+        Logger.Log($"[GeomechGPU] Uploaded nodeX: {_nodeX.Length * sizeof(float) / (1024.0 * 1024):F2} MB");
 
         _bufNodeY = CreateAndFillBuffer(_nodeY, MemFlags.ReadOnly, out error);
         CheckError(error, "bufNodeY");
-        Logger.Log($"[GeomechGPU] Uploaded nodeY: {_nodeY.Length * sizeof(float) / (1024.0*1024):F2} MB");
+        Logger.Log($"[GeomechGPU] Uploaded nodeY: {_nodeY.Length * sizeof(float) / (1024.0 * 1024):F2} MB");
 
         _bufNodeZ = CreateAndFillBuffer(_nodeZ, MemFlags.ReadOnly, out error);
         CheckError(error, "bufNodeZ");
-        Logger.Log($"[GeomechGPU] Uploaded nodeZ: {_nodeZ.Length * sizeof(float) / (1024.0*1024):F2} MB");
+        Logger.Log($"[GeomechGPU] Uploaded nodeZ: {_nodeZ.Length * sizeof(float) / (1024.0 * 1024):F2} MB");
 
         // For element data, we'll use batch buffers
         Logger.Log($"[GeomechGPU] Creating batch buffer for {ELEMENT_BATCH_SIZE:N0} elements...");
@@ -1248,11 +1483,11 @@ __kernel void detect_hydraulic_fractures(
 
         _bufDisplacement = CreateBuffer<float>(_numDOFs, MemFlags.ReadWrite, out error);
         CheckError(error, "bufDisplacement");
-        Logger.Log($"[GeomechGPU] Created displacement buffer: {_numDOFs * sizeof(float) / (1024.0*1024):F2} MB");
+        Logger.Log($"[GeomechGPU] Created displacement buffer: {_numDOFs * sizeof(float) / (1024.0 * 1024):F2} MB");
 
         _bufForce = CreateBuffer<float>(_numDOFs, MemFlags.ReadWrite, out error);
         CheckError(error, "bufForce");
-        Logger.Log($"[GeomechGPU] Created force buffer: {_numDOFs * sizeof(float) / (1024.0*1024):F2} MB");
+        Logger.Log($"[GeomechGPU] Created force buffer: {_numDOFs * sizeof(float) / (1024.0 * 1024):F2} MB");
 
         _cl.Finish(_queue);
         Logger.Log($"[GeomechGPU] Persistent data uploaded in {sw.ElapsedMilliseconds} ms");
@@ -1260,186 +1495,176 @@ __kernel void detect_hydraulic_fractures(
 
     // ========== BOUNDARY CONDITIONS (CPU) ==========
     private void ApplyBoundaryConditions(byte[,,] labels)
-{
-    var sw = System.Diagnostics.Stopwatch.StartNew();
-    
-    Logger.Log("[GeomechGPU] Setting up boundary conditions...");
-
-    _isDirichlet = new bool[_numDOFs];
-    _dirichletValue = new float[_numDOFs];
-    _force = new float[_numDOFs];
-    _displacement = new float[_numDOFs];
-
-    var w = _maxX - _minX + 2;
-    var h = _maxY - _minY + 2;
-    var d = _maxZ - _minZ + 2;
-    var dx = _params.PixelSize / 1e3f;  // mm
-
-    var sigma1 = _params.Sigma1;  // MPa
-    var sigma2 = _params.Sigma2;
-    var sigma3 = _params.Sigma3;
-    var E = _params.YoungModulus;  // MPa
-    var nu = _params.PoissonRatio;
-
-    Logger.Log($"[GeomechGPU] Applied loads: σ₁={sigma1:F1} MPa, σ₂={sigma2:F1} MPa, σ₃={sigma3:F1} MPa");
-    Logger.Log($"[GeomechGPU] Mesh dimensions: {w}×{h}×{d} nodes");
-
-    // Physical dimensions
-    float height = (d-2) * dx;  // mm
-    float width = (w-2) * dx;
-    float depth = (h-2) * dx;
-
-    Logger.Log($"[GeomechGPU] Physical dimensions: {width:F3} × {depth:F3} × {height:F3} mm");
-
-    // Calculate displacements from stresses using elasticity
-    // For uniaxial stress: ε = σ/E, δ = ε*L
-    // For confined compression (all 3 principal stresses):
-    // ε₁ = (σ₁ - ν(σ₂+σ₃))/E
-    float eps_z = (sigma1 - nu*(sigma2 + sigma3)) / E;
-    float eps_x = (sigma3 - nu*(sigma1 + sigma2)) / E;
-    float eps_y = (sigma2 - nu*(sigma1 + sigma3)) / E;
-    
-    float delta_z = eps_z * height;  // mm (compression in Z)
-    float delta_x = eps_x * width;   // mm (compression in X)
-    float delta_y = eps_y * depth;   // mm (compression in Y)
-
-    Logger.Log($"[GeomechGPU] Target strains: εx={eps_x:E3}, εy={eps_y:E3}, εz={eps_z:E3}");
-    Logger.Log($"[GeomechGPU] Target displacements: δx={delta_x*1000:F3} μm, δy={delta_y*1000:F3} μm, δz={delta_z*1000:F3} μm");
-
-    // DISPLACEMENT-CONTROLLED BOUNDARY CONDITIONS
-    
-    // 1. Fix bottom surface completely (prevent rigid body motion)
-    Logger.Log("[GeomechGPU] Fixing bottom surface (Z = 0)...");
-    int bottomFixed = 0;
-    for (int y = 0; y < h; y++)
     {
-        for (int x = 0; x < w; x++)
+        var sw = Stopwatch.StartNew();
+
+        Logger.Log("[GeomechGPU] Setting up boundary conditions...");
+
+        _isDirichlet = new bool[_numDOFs];
+        _dirichletValue = new float[_numDOFs];
+        _force = new float[_numDOFs];
+        _displacement = new float[_numDOFs];
+
+        var w = _maxX - _minX + 2;
+        var h = _maxY - _minY + 2;
+        var d = _maxZ - _minZ + 2;
+        var dx = _params.PixelSize / 1e3f; // mm
+
+        var sigma1 = _params.Sigma1; // MPa
+        var sigma2 = _params.Sigma2;
+        var sigma3 = _params.Sigma3;
+        var E = _params.YoungModulus; // MPa
+        var nu = _params.PoissonRatio;
+
+        Logger.Log($"[GeomechGPU] Applied loads: σ₁={sigma1:F1} MPa, σ₂={sigma2:F1} MPa, σ₃={sigma3:F1} MPa");
+        Logger.Log($"[GeomechGPU] Mesh dimensions: {w}×{h}×{d} nodes");
+
+        // Physical dimensions
+        var height = (d - 2) * dx; // mm
+        var width = (w - 2) * dx;
+        var depth = (h - 2) * dx;
+
+        Logger.Log($"[GeomechGPU] Physical dimensions: {width:F3} × {depth:F3} × {height:F3} mm");
+
+        // Calculate displacements from stresses using elasticity
+        // For uniaxial stress: ε = σ/E, δ = ε*L
+        // For confined compression (all 3 principal stresses):
+        // ε₁ = (σ₁ - ν(σ₂+σ₃))/E
+        var eps_z = (sigma1 - nu * (sigma2 + sigma3)) / E;
+        var eps_x = (sigma3 - nu * (sigma1 + sigma2)) / E;
+        var eps_y = (sigma2 - nu * (sigma1 + sigma3)) / E;
+
+        var delta_z = eps_z * height; // mm (compression in Z)
+        var delta_x = eps_x * width; // mm (compression in X)
+        var delta_y = eps_y * depth; // mm (compression in Y)
+
+        Logger.Log($"[GeomechGPU] Target strains: εx={eps_x:E3}, εy={eps_y:E3}, εz={eps_z:E3}");
+        Logger.Log(
+            $"[GeomechGPU] Target displacements: δx={delta_x * 1000:F3} μm, δy={delta_y * 1000:F3} μm, δz={delta_z * 1000:F3} μm");
+
+        // DISPLACEMENT-CONTROLLED BOUNDARY CONDITIONS
+
+        // 1. Fix bottom surface completely (prevent rigid body motion)
+        Logger.Log("[GeomechGPU] Fixing bottom surface (Z = 0)...");
+        var bottomFixed = 0;
+        for (var y = 0; y < h; y++)
+        for (var x = 0; x < w; x++)
         {
-            int nodeIdx = (0 * h + y) * w + x;
-            _isDirichlet[nodeIdx*3+0] = true;
-            _isDirichlet[nodeIdx*3+1] = true;
-            _isDirichlet[nodeIdx*3+2] = true;
-            _dirichletValue[nodeIdx*3+0] = 0;
-            _dirichletValue[nodeIdx*3+1] = 0;
-            _dirichletValue[nodeIdx*3+2] = 0;
+            var nodeIdx = (0 * h + y) * w + x;
+            _isDirichlet[nodeIdx * 3 + 0] = true;
+            _isDirichlet[nodeIdx * 3 + 1] = true;
+            _isDirichlet[nodeIdx * 3 + 2] = true;
+            _dirichletValue[nodeIdx * 3 + 0] = 0;
+            _dirichletValue[nodeIdx * 3 + 1] = 0;
+            _dirichletValue[nodeIdx * 3 + 2] = 0;
             bottomFixed++;
         }
-    }
 
-    // 2. Apply displacement on top surface (compression)
-    Logger.Log($"[GeomechGPU] Applying displacement to top surface (Z = {d-2}): δz = {delta_z*1000:F3} μm...");
-    int topConstrained = 0;
-    for (int y = 0; y < h; y++)
-    {
-        for (int x = 0; x < w; x++)
+        // 2. Apply displacement on top surface (compression)
+        Logger.Log($"[GeomechGPU] Applying displacement to top surface (Z = {d - 2}): δz = {delta_z * 1000:F3} μm...");
+        var topConstrained = 0;
+        for (var y = 0; y < h; y++)
+        for (var x = 0; x < w; x++)
         {
-            int nodeIdx = ((d-2) * h + y) * w + x;
-            _isDirichlet[nodeIdx*3+2] = true;
-            _dirichletValue[nodeIdx*3+2] = delta_z;  // Negative for compression
+            var nodeIdx = ((d - 2) * h + y) * w + x;
+            _isDirichlet[nodeIdx * 3 + 2] = true;
+            _dirichletValue[nodeIdx * 3 + 2] = delta_z; // Negative for compression
             topConstrained++;
         }
+
+        // 3. Apply lateral displacement on sides (if lateral stress is significant)
+        if (MathF.Abs(sigma3) > 1e-3)
+        {
+            Logger.Log($"[GeomechGPU] Applying lateral displacement on X faces: δx = {delta_x * 1000:F3} μm...");
+            var sideConstrained = 0;
+
+            // Left face: X = 0 (fixed at 0)
+            for (var z = 1; z < d - 1; z++)
+            for (var y = 0; y < h; y++)
+            {
+                var nodeIdx = (z * h + y) * w + 0;
+                _isDirichlet[nodeIdx * 3 + 0] = true;
+                _dirichletValue[nodeIdx * 3 + 0] = 0;
+                sideConstrained++;
+            }
+
+            // Right face: X = w-2 (displacement)
+            for (var z = 1; z < d - 1; z++)
+            for (var y = 0; y < h; y++)
+            {
+                var nodeIdx = (z * h + y) * w + (w - 2);
+                _isDirichlet[nodeIdx * 3 + 0] = true;
+                _dirichletValue[nodeIdx * 3 + 0] = delta_x;
+                sideConstrained++;
+            }
+
+            Logger.Log($"[GeomechGPU] Constrained {sideConstrained} nodes on X faces");
+        }
+
+        if (MathF.Abs(sigma2) > 1e-3)
+        {
+            Logger.Log($"[GeomechGPU] Applying lateral displacement on Y faces: δy = {delta_y * 1000:F3} μm...");
+            var sideConstrained = 0;
+
+            // Front face: Y = 0 (fixed at 0)
+            for (var z = 1; z < d - 1; z++)
+            for (var x = 0; x < w; x++)
+            {
+                var nodeIdx = (z * h + 0) * w + x;
+                _isDirichlet[nodeIdx * 3 + 1] = true;
+                _dirichletValue[nodeIdx * 3 + 1] = 0;
+                sideConstrained++;
+            }
+
+            // Back face: Y = h-2 (displacement)
+            for (var z = 1; z < d - 1; z++)
+            for (var x = 0; x < w; x++)
+            {
+                var nodeIdx = (z * h + (h - 2)) * w + x;
+                _isDirichlet[nodeIdx * 3 + 1] = true;
+                _dirichletValue[nodeIdx * 3 + 1] = delta_y;
+                sideConstrained++;
+            }
+
+            Logger.Log($"[GeomechGPU] Constrained {sideConstrained} nodes on Y faces");
+        }
+
+        var fixedDOFs = _isDirichlet.Count(b => b);
+        var freeDOFs = _numDOFs - fixedDOFs;
+
+        Logger.Log("==========================================================");
+        Logger.Log("[GeomechGPU] BOUNDARY CONDITIONS SUMMARY:");
+        Logger.Log("  Type: DISPLACEMENT-CONTROLLED");
+        Logger.Log($"  Bottom fixed nodes: {bottomFixed:N0} (all DOFs)");
+        Logger.Log($"  Top displacement: {delta_z * 1000:F3} μm ({topConstrained:N0} nodes)");
+        Logger.Log($"  Total fixed DOFs: {fixedDOFs:N0}");
+        Logger.Log($"  Free DOFs: {freeDOFs:N0}");
+        Logger.Log("  No external forces (displacement-driven)");
+        Logger.Log("  Units: mm-MPa system");
+        Logger.Log("==========================================================");
+
+        // Upload to GPU
+        Logger.Log("[GeomechGPU] Uploading BC to GPU...");
+        var isDirichletByte = _isDirichlet.Select(b => (byte)(b ? 1 : 0)).ToArray();
+        int error;
+        _bufIsDirichlet = CreateAndFillBuffer(isDirichletByte, MemFlags.ReadOnly, out error);
+        CheckError(error, "bufIsDirichlet");
+        _bufDirichletValue = CreateAndFillBuffer(_dirichletValue, MemFlags.ReadOnly, out error);
+        CheckError(error, "bufDirichletValue");
+
+        EnqueueWriteBuffer(_bufForce, _force); // All zeros for displacement-controlled
+        _cl.Finish(_queue);
+
+        Logger.Log($"[GeomechGPU] Boundary conditions applied in {sw.ElapsedMilliseconds} ms");
     }
 
-    // 3. Apply lateral displacement on sides (if lateral stress is significant)
-    if (MathF.Abs(sigma3) > 1e-3)
-    {
-        Logger.Log($"[GeomechGPU] Applying lateral displacement on X faces: δx = {delta_x*1000:F3} μm...");
-        int sideConstrained = 0;
-        
-        // Left face: X = 0 (fixed at 0)
-        for (int z = 1; z < d-1; z++)
-        {
-            for (int y = 0; y < h; y++)
-            {
-                int nodeIdx = (z * h + y) * w + 0;
-                _isDirichlet[nodeIdx*3+0] = true;
-                _dirichletValue[nodeIdx*3+0] = 0;
-                sideConstrained++;
-            }
-        }
-        
-        // Right face: X = w-2 (displacement)
-        for (int z = 1; z < d-1; z++)
-        {
-            for (int y = 0; y < h; y++)
-            {
-                int nodeIdx = (z * h + y) * w + (w-2);
-                _isDirichlet[nodeIdx*3+0] = true;
-                _dirichletValue[nodeIdx*3+0] = delta_x;
-                sideConstrained++;
-            }
-        }
-        
-        Logger.Log($"[GeomechGPU] Constrained {sideConstrained} nodes on X faces");
-    }
-
-    if (MathF.Abs(sigma2) > 1e-3)
-    {
-        Logger.Log($"[GeomechGPU] Applying lateral displacement on Y faces: δy = {delta_y*1000:F3} μm...");
-        int sideConstrained = 0;
-        
-        // Front face: Y = 0 (fixed at 0)
-        for (int z = 1; z < d-1; z++)
-        {
-            for (int x = 0; x < w; x++)
-            {
-                int nodeIdx = (z * h + 0) * w + x;
-                _isDirichlet[nodeIdx*3+1] = true;
-                _dirichletValue[nodeIdx*3+1] = 0;
-                sideConstrained++;
-            }
-        }
-        
-        // Back face: Y = h-2 (displacement)
-        for (int z = 1; z < d-1; z++)
-        {
-            for (int x = 0; x < w; x++)
-            {
-                int nodeIdx = (z * h + (h-2)) * w + x;
-                _isDirichlet[nodeIdx*3+1] = true;
-                _dirichletValue[nodeIdx*3+1] = delta_y;
-                sideConstrained++;
-            }
-        }
-        
-        Logger.Log($"[GeomechGPU] Constrained {sideConstrained} nodes on Y faces");
-    }
-
-    int fixedDOFs = _isDirichlet.Count(b => b);
-    long freeDOFs = _numDOFs - fixedDOFs;
-
-    Logger.Log("==========================================================");
-    Logger.Log($"[GeomechGPU] BOUNDARY CONDITIONS SUMMARY:");
-    Logger.Log($"  Type: DISPLACEMENT-CONTROLLED");
-    Logger.Log($"  Bottom fixed nodes: {bottomFixed:N0} (all DOFs)");
-    Logger.Log($"  Top displacement: {delta_z*1000:F3} μm ({topConstrained:N0} nodes)");
-    Logger.Log($"  Total fixed DOFs: {fixedDOFs:N0}");
-    Logger.Log($"  Free DOFs: {freeDOFs:N0}");
-    Logger.Log($"  No external forces (displacement-driven)");
-    Logger.Log($"  Units: mm-MPa system");
-    Logger.Log("==========================================================");
-
-    // Upload to GPU
-    Logger.Log("[GeomechGPU] Uploading BC to GPU...");
-    var isDirichletByte = _isDirichlet.Select(b => (byte)(b ? 1 : 0)).ToArray();
-    int error;
-    _bufIsDirichlet = CreateAndFillBuffer(isDirichletByte, MemFlags.ReadOnly, out error);
-    CheckError(error, "bufIsDirichlet");
-    _bufDirichletValue = CreateAndFillBuffer(_dirichletValue, MemFlags.ReadOnly, out error);
-    CheckError(error, "bufDirichletValue");
-
-    EnqueueWriteBuffer(_bufForce, _force);  // All zeros for displacement-controlled
-    _cl.Finish(_queue);
-    
-    Logger.Log($"[GeomechGPU] Boundary conditions applied in {sw.ElapsedMilliseconds} ms");
-}
     // ========== FLUID/THERMAL INITIALIZATION ==========
     private void InitializeFluidThermalFields(byte[,,] labels, BoundingBox extent)
     {
-        var sw = System.Diagnostics.Stopwatch.StartNew();
-        
+        var sw = Stopwatch.StartNew();
+
         var numVoxels = extent.Width * extent.Height * extent.Depth;
-        
+
         Logger.Log($"[GeomechGPU] Initializing fluid/thermal fields for {numVoxels:N0} voxels...");
 
         _pressure = new float[numVoxels];
@@ -1451,19 +1676,16 @@ __kernel void detect_hydraulic_fractures(
         {
             Logger.Log("[GeomechGPU] Setting up geothermal gradient...");
             var dx = _params.PixelSize / 1e6f;
-            int idx = 0;
-            for (int z = 0; z < extent.Depth; z++)
+            var idx = 0;
+            for (var z = 0; z < extent.Depth; z++)
             {
                 var depth_m = z * dx;
-                var temp = _params.SurfaceTemperature + (_params.GeothermalGradient / 1000.0f) * depth_m;
-                for (int y = 0; y < extent.Height; y++)
-                {
-                    for (int x = 0; x < extent.Width; x++)
-                    {
-                        _temperature[idx++] = labels[x, y, z] != 0 ? temp : _params.SurfaceTemperature;
-                    }
-                }
+                var temp = _params.SurfaceTemperature + _params.GeothermalGradient / 1000.0f * depth_m;
+                for (var y = 0; y < extent.Height; y++)
+                for (var x = 0; x < extent.Width; x++)
+                    _temperature[idx++] = labels[x, y, z] != 0 ? temp : _params.SurfaceTemperature;
             }
+
             Logger.Log($"[GeomechGPU] Temperature range: {_params.SurfaceTemperature:F1} - {_temperature.Max():F1} °C");
         }
 
@@ -1475,22 +1697,19 @@ __kernel void detect_hydraulic_fractures(
             var rho_water = 1000f;
             var g = 9.81f;
 
-            int idx = 0;
-            for (int z = 0; z < extent.Depth; z++)
+            var idx = 0;
+            for (var z = 0; z < extent.Depth; z++)
             {
                 var depth_m = z * dx;
                 var hydrostaticP = P0 + rho_water * g * depth_m;
-                
-                for (int y = 0; y < extent.Height; y++)
-                {
-                    for (int x = 0; x < extent.Width; x++)
-                    {
-                        _pressure[idx++] = labels[x, y, z] != 0 ? hydrostaticP : 
-                            (_params.EnableAquifer ? _params.AquiferPressure * 1e6f : 0);
-                    }
-                }
+
+                for (var y = 0; y < extent.Height; y++)
+                for (var x = 0; x < extent.Width; x++)
+                    _pressure[idx++] = labels[x, y, z] != 0 ? hydrostaticP :
+                        _params.EnableAquifer ? _params.AquiferPressure * 1e6f : 0;
             }
-            Logger.Log($"[GeomechGPU] Pressure range: {P0/1e6:F2} - {_pressure.Max()/1e6:F2} MPa");
+
+            Logger.Log($"[GeomechGPU] Pressure range: {P0 / 1e6:F2} - {_pressure.Max() / 1e6:F2} MPa");
         }
 
         Logger.Log($"[GeomechGPU] Fluid/thermal initialization completed in {sw.ElapsedMilliseconds} ms");
@@ -1498,238 +1717,423 @@ __kernel void detect_hydraulic_fractures(
 
     // ========== SOLVER (CPU with GPU acceleration) ==========
     private bool SolveSystem(IProgress<float> progress, CancellationToken token)
-{
-    var sw = System.Diagnostics.Stopwatch.StartNew();
-    
-    Logger.Log("[GeomechGPU] Starting PCG solver with streamed matrix-vector products");
-    Logger.Log($"[GeomechGPU] Problem size: {_numDOFs:N0} DOFs");
-    Logger.Log($"[GeomechGPU] Element batches: {(_numElements + ELEMENT_BATCH_SIZE - 1) / ELEMENT_BATCH_SIZE:N0}");
-
-    const int maxIter = 1000;
-    const float tol = 1e-6f;
-
-    var r = new float[_numDOFs];
-    var p = new float[_numDOFs];
-    var Ap = new float[_numDOFs];
-
-    // CRITICAL FIX: Initialize with boundary displacements
-    Logger.Log("[GeomechGPU] Initializing displacement with boundary conditions...");
-    Array.Copy(_dirichletValue, _displacement, _numDOFs);
-    
-    int nonZeroDisp = 0;
-    float maxDisp = 0;
-    for (int i = 0; i < _numDOFs; i++)
     {
-        if (MathF.Abs(_displacement[i]) > 1e-12f)
-        {
-            nonZeroDisp++;
-            maxDisp = MathF.Max(maxDisp, MathF.Abs(_displacement[i]));
-        }
-    }
-    Logger.Log($"[GeomechGPU] Initial displacement: {nonZeroDisp:N0} non-zero DOFs, max = {maxDisp*1000:F3} μm");
+        var sw = Stopwatch.StartNew();
 
-    Logger.Log("[GeomechGPU] Computing initial residual...");
-    
-    // r = f - K*u
-    Array.Clear(r, 0, r.Length);
-    StreamedMatrixVectorProduct(r, _displacement);  // r = K*u
-    
-    for (int i = 0; i < _numDOFs; i++)
-    {
-        r[i] = _force[i] - r[i];  // r = f - K*u
-    }
-    ApplyDirichlet(r);  // Enforce r = 0 at Dirichlet DOFs
+        Logger.Log("[GeomechGPU] Starting PCG solver with streamed matrix-vector products");
+        Logger.Log($"[GeomechGPU] Problem size: {_numDOFs:N0} DOFs");
+        Logger.Log($"[GeomechGPU] Element batches: {(_numElements + ELEMENT_BATCH_SIZE - 1) / ELEMENT_BATCH_SIZE:N0}");
 
-    // DIAGNOSTIC: Check residual
-    float rNorm0 = 0;
-    int nonZeroRes = 0;
-    for (int i = 0; i < _numDOFs; i++)
-    {
-        if (!_isDirichlet[i])
-        {
-            rNorm0 += r[i] * r[i];
-            if (MathF.Abs(r[i]) > 1e-12f)
-                nonZeroRes++;
-        }
-    }
-    rNorm0 = MathF.Sqrt(rNorm0);
-    
-    Logger.Log($"[GeomechGPU] Initial residual norm: {rNorm0:E6}");
-    Logger.Log($"[GeomechGPU] Non-zero residual entries: {nonZeroRes:N0}");
-    Logger.Log($"[GeomechGPU] Convergence tolerance: {tol:E6}");
-    
-    if (rNorm0 < tol)
-    {
-        Logger.Log($"[GeomechGPU] Already converged! (||r|| = {rNorm0:E6} < {tol:E6})");
-        _iterationsPerformed = 0;
-        return true;
-    }
-    
-    Logger.Log("----------------------------------------------------------");
+        const int maxIter = 1000;
+        const float tol = 1e-6f;
 
-    // p = r
-    Array.Copy(r, p, _numDOFs);
+        var r = new float[_numDOFs];
+        var p = new float[_numDOFs];
+        var Ap = new float[_numDOFs];
 
-    float rDotR = DotProduct(r, r);
+        // CRITICAL FIX: Initialize with boundary displacements
+        Logger.Log("[GeomechGPU] Initializing displacement with boundary conditions...");
+        Array.Copy(_dirichletValue, _displacement, _numDOFs);
 
-    for (int iter = 0; iter < maxIter; iter++)
-    {
-        token.ThrowIfCancellationRequested();
+        var nonZeroDisp = 0;
+        float maxDisp = 0;
+        for (var i = 0; i < _numDOFs; i++)
+            if (MathF.Abs(_displacement[i]) > 1e-12f)
+            {
+                nonZeroDisp++;
+                maxDisp = MathF.Max(maxDisp, MathF.Abs(_displacement[i]));
+            }
 
-        // Ap = K*p
-        Array.Clear(Ap, 0, Ap.Length);
-        StreamedMatrixVectorProduct(Ap, p);
-        ApplyDirichlet(Ap);
+        Logger.Log($"[GeomechGPU] Initial displacement: {nonZeroDisp:N0} non-zero DOFs, max = {maxDisp * 1000:F3} μm");
 
-        // alpha = r.r / (p.Ap)
-        float pDotAp = DotProduct(p, Ap);
-        
-        if (MathF.Abs(pDotAp) < 1e-20f)
-        {
-            Logger.LogWarning($"[GeomechGPU] Solver breakdown at iteration {iter}: p·Ap ≈ 0");
-            Logger.LogWarning($"[GeomechGPU]   Exact value: p·Ap = {pDotAp:E20}");
-            break;
-        }
-        float alpha = rDotR / pDotAp;
+        Logger.Log("[GeomechGPU] Computing initial residual...");
 
-        // u = u + alpha * p
-        for (int i = 0; i < _numDOFs; i++)
-        {
-            if (!_isDirichlet[i])
-                _displacement[i] += alpha * p[i];
-        }
+        // r = f - K*u
+        Array.Clear(r, 0, r.Length);
+        StreamedMatrixVectorProduct(r, _displacement); // r = K*u
 
-        // r_new = r - alpha * Ap
-        float rDotR_new = 0;
-        for (int i = 0; i < _numDOFs; i++)
-        {
+        for (var i = 0; i < _numDOFs; i++) r[i] = _force[i] - r[i]; // r = f - K*u
+        ApplyDirichlet(r); // Enforce r = 0 at Dirichlet DOFs
+
+        // DIAGNOSTIC: Check residual
+        float rNorm0 = 0;
+        var nonZeroRes = 0;
+        for (var i = 0; i < _numDOFs; i++)
             if (!_isDirichlet[i])
             {
-                r[i] -= alpha * Ap[i];
-                rDotR_new += r[i] * r[i];
+                rNorm0 += r[i] * r[i];
+                if (MathF.Abs(r[i]) > 1e-12f)
+                    nonZeroRes++;
             }
-        }
 
-        float rNorm = MathF.Sqrt(rDotR_new);
-        float relResidual = rNorm / (rNorm0 + 1e-20f);
+        rNorm0 = MathF.Sqrt(rNorm0);
 
-        if (iter % 10 == 0 || iter < 5)
-        {
-            Logger.Log($"  Iter {iter,4}: ||r|| = {rNorm:E6}, rel = {relResidual:E6}, α = {alpha:E6}");
-        }
-        
-        if (iter % 100 == 0)
-        {
-            progress?.Report(0.25f + 0.50f * iter / maxIter);
-        }
+        Logger.Log($"[GeomechGPU] Initial residual norm: {rNorm0:E6}");
+        Logger.Log($"[GeomechGPU] Non-zero residual entries: {nonZeroRes:N0}");
+        Logger.Log($"[GeomechGPU] Convergence tolerance: {tol:E6}");
 
-        if (relResidual < tol)
+        if (rNorm0 < tol)
         {
-            Logger.Log("----------------------------------------------------------");
-            Logger.Log($"[GeomechGPU] *** CONVERGED in {iter} iterations ***");
-            Logger.Log($"[GeomechGPU] Final residual: {rNorm:E6}");
-            Logger.Log($"[GeomechGPU] Relative residual: {relResidual:E6}");
-            _iterationsPerformed = iter;
+            Logger.Log($"[GeomechGPU] Already converged! (||r|| = {rNorm0:E6} < {tol:E6})");
+            _iterationsPerformed = 0;
             return true;
         }
 
-        // beta = r_new.r_new / r.r
-        float beta = rDotR_new / rDotR;
-        rDotR = rDotR_new;
+        Logger.Log("----------------------------------------------------------");
 
-        // p = r + beta * p
-        for (int i = 0; i < _numDOFs; i++)
+        // p = r
+        Array.Copy(r, p, _numDOFs);
+
+        var rDotR = DotProduct(r, r);
+
+        for (var iter = 0; iter < maxIter; iter++)
         {
-            if (!_isDirichlet[i])
-                p[i] = r[i] + beta * p[i];
+            token.ThrowIfCancellationRequested();
+
+            // Ap = K*p
+            Array.Clear(Ap, 0, Ap.Length);
+            StreamedMatrixVectorProduct(Ap, p);
+            ApplyDirichlet(Ap);
+
+            // alpha = r.r / (p.Ap)
+            var pDotAp = DotProduct(p, Ap);
+
+            if (MathF.Abs(pDotAp) < 1e-20f)
+            {
+                Logger.LogWarning($"[GeomechGPU] Solver breakdown at iteration {iter}: p·Ap ≈ 0");
+                Logger.LogWarning($"[GeomechGPU]   Exact value: p·Ap = {pDotAp:E20}");
+                break;
+            }
+
+            var alpha = rDotR / pDotAp;
+
+            // u = u + alpha * p
+            for (var i = 0; i < _numDOFs; i++)
+                if (!_isDirichlet[i])
+                    _displacement[i] += alpha * p[i];
+
+            // r_new = r - alpha * Ap
+            float rDotR_new = 0;
+            for (var i = 0; i < _numDOFs; i++)
+                if (!_isDirichlet[i])
+                {
+                    r[i] -= alpha * Ap[i];
+                    rDotR_new += r[i] * r[i];
+                }
+
+            var rNorm = MathF.Sqrt(rDotR_new);
+            var relResidual = rNorm / (rNorm0 + 1e-20f);
+
+            if (iter % 10 == 0 || iter < 5)
+                Logger.Log($"  Iter {iter,4}: ||r|| = {rNorm:E6}, rel = {relResidual:E6}, α = {alpha:E6}");
+
+            if (iter % 100 == 0) progress?.Report(0.25f + 0.50f * iter / maxIter);
+
+            if (relResidual < tol)
+            {
+                Logger.Log("----------------------------------------------------------");
+                Logger.Log($"[GeomechGPU] *** CONVERGED in {iter} iterations ***");
+                Logger.Log($"[GeomechGPU] Final residual: {rNorm:E6}");
+                Logger.Log($"[GeomechGPU] Relative residual: {relResidual:E6}");
+                _iterationsPerformed = iter;
+                return true;
+            }
+
+            // beta = r_new.r_new / r.r
+            var beta = rDotR_new / rDotR;
+            rDotR = rDotR_new;
+
+            // p = r + beta * p
+            for (var i = 0; i < _numDOFs; i++)
+                if (!_isDirichlet[i])
+                    p[i] = r[i] + beta * p[i];
         }
+
+        Logger.Log("----------------------------------------------------------");
+        Logger.LogWarning($"[GeomechGPU] Did NOT converge in {maxIter} iterations");
+        Logger.LogWarning("[GeomechGPU] Using best available solution");
+        _iterationsPerformed = maxIter;
+        return false;
     }
 
-    Logger.Log("----------------------------------------------------------");
-    Logger.LogWarning($"[GeomechGPU] Did NOT converge in {maxIter} iterations");
-    Logger.LogWarning($"[GeomechGPU] Using best available solution");
-    _iterationsPerformed = maxIter;
-    return false;
-}
-private void StreamedMatrixVectorProduct(float[] result, float[] vector)
-{
-    var sw = System.Diagnostics.Stopwatch.StartNew();
-    
-    // Upload vector to GPU
-    EnqueueWriteBuffer(_bufDisplacement, vector);
-    EnqueueWriteBuffer(_bufForce, result); // Zero output
-
-    int numBatches = (_numElements + ELEMENT_BATCH_SIZE - 1) / ELEMENT_BATCH_SIZE;
-    
-    // Process elements in batches
-    for (int batch = 0; batch < numBatches; batch++)
+    private void ApplyDamageGPU(GeomechanicalResults results, IProgress<float> progress, CancellationToken token)
     {
-        int batchStart = batch * ELEMENT_BATCH_SIZE;
-        int batchSize = Math.Min(ELEMENT_BATCH_SIZE, _numElements - batchStart);
+        var sw = Stopwatch.StartNew();
 
-        // Upload this batch's element data
-        var elementBatch = new int[batchSize * 8];
-        var eBatch = new float[batchSize];
-        var nuBatch = new float[batchSize];
+        Logger.Log("[GeomechGPU] Applying damage evolution...");
 
-        Array.Copy(_elementNodes, batchStart * 8, elementBatch, 0, batchSize * 8);
-        Array.Copy(_elementE, batchStart, eBatch, 0, batchSize);
-        Array.Copy(_elementNu, batchStart, nuBatch, 0, batchSize);
+        var w = results.StressXX.GetLength(0);
+        var h = results.StressYY.GetLength(1);
+        var d = results.StressZZ.GetLength(2);
+        var numVoxels = w * h * d;
 
-        EnqueueWriteBuffer(_bufElementBatch, elementBatch);
-        EnqueueWriteBuffer(_bufElementE_Batch, eBatch);
-        EnqueueWriteBuffer(_bufElementNu_Batch, nuBatch);
+        // Flatten arrays
+        var stressXX = Flatten(results.StressXX);
+        var stressYY = Flatten(results.StressYY);
+        var stressZZ = Flatten(results.StressZZ);
+        var stressXY = Flatten(results.StressXY);
+        var stressXZ = Flatten(results.StressXZ);
+        var stressYZ = Flatten(results.StressYZ);
 
-        // Launch kernel for this batch - NOW WITH BC FLAGS
-        var argIdx = 0;
-        SetKernelArg(_kernelElementForce, argIdx++, _bufElementBatch);
-        SetKernelArg(_kernelElementForce, argIdx++, _bufElementE_Batch);
-        SetKernelArg(_kernelElementForce, argIdx++, _bufElementNu_Batch);
-        SetKernelArg(_kernelElementForce, argIdx++, _bufNodeX);
-        SetKernelArg(_kernelElementForce, argIdx++, _bufNodeY);
-        SetKernelArg(_kernelElementForce, argIdx++, _bufNodeZ);
-        SetKernelArg(_kernelElementForce, argIdx++, _bufDisplacement);
-        SetKernelArg(_kernelElementForce, argIdx++, _bufForce);
-        SetKernelArg(_kernelElementForce, argIdx++, _bufIsDirichlet);  // ADDED
-        SetKernelArg(_kernelElementForce, argIdx++, batchStart);
-        SetKernelArg(_kernelElementForce, argIdx++, batchSize);
-        SetKernelArg(_kernelElementForce, argIdx++, _numElements);
+        var damageVariable = new float[numVoxels];
+        var strainHistory = new float[numVoxels];
+        var damageField = new byte[numVoxels];
 
-        var globalSize = (nuint)((batchSize + WORK_GROUP_SIZE - 1) / WORK_GROUP_SIZE * WORK_GROUP_SIZE);
-        var localSize = (nuint)WORK_GROUP_SIZE;
+        var labelsFlat = new byte[numVoxels];
+        var idx = 0;
+        for (var z = 0; z < d; z++)
+        for (var y = 0; y < h; y++)
+        for (var x = 0; x < w; x++)
+            labelsFlat[idx++] = results.MaterialLabels[x, y, z];
 
-        _cl.EnqueueNdrangeKernel(_queue, _kernelElementForce, 1, null, &globalSize, &localSize, 0, null, null);
+        // Create GPU buffers
+        int error;
+        var bufStressXX = CreateAndFillBuffer(stressXX, MemFlags.ReadWrite, out error);
+        var bufStressYY = CreateAndFillBuffer(stressYY, MemFlags.ReadWrite, out error);
+        var bufStressZZ = CreateAndFillBuffer(stressZZ, MemFlags.ReadWrite, out error);
+        var bufStressXY = CreateAndFillBuffer(stressXY, MemFlags.ReadWrite, out error);
+        var bufStressXZ = CreateAndFillBuffer(stressXZ, MemFlags.ReadWrite, out error);
+        var bufStressYZ = CreateAndFillBuffer(stressYZ, MemFlags.ReadWrite, out error);
+        var bufDamageVar = CreateAndFillBuffer(damageVariable, MemFlags.ReadWrite, out error);
+        var bufStrainHist = CreateAndFillBuffer(strainHistory, MemFlags.ReadWrite, out error);
+        var bufDamageField = CreateAndFillBuffer(damageField, MemFlags.WriteOnly, out error);
+        var bufLabels = CreateAndFillBuffer(labelsFlat, MemFlags.ReadOnly, out error);
+
+        // Create update_damage kernel
+        int updateError;
+        var kernelUpdateDamage = _cl.CreateKernel(_program, "update_damage", &updateError);
+        CheckError(updateError, "CreateKernel update_damage");
+
+        var kernelApplyDamage = _cl.CreateKernel(_program, "apply_damage_to_stress", &updateError);
+        CheckError(updateError, "CreateKernel apply_damage_to_stress");
+
+        var E = _params.YoungModulus * 1e6f;
+        var nu = _params.PoissonRatio;
+        var eps_0 = _params.DamageThreshold;
+        var eps_f = _params.DamageCriticalStrain;
+        var damageExp = _params.DamageEvolutionRate;
+        var damageModel = (int)_params.DamageModel;
+
+        // Process in batches
+        var numBatches = (numVoxels + VOXEL_BATCH_SIZE - 1) / VOXEL_BATCH_SIZE;
+        Logger.Log($"[GeomechGPU] Processing {numBatches:N0} batches for damage evolution...");
+
+        for (var batch = 0; batch < numBatches; batch++)
+        {
+            token.ThrowIfCancellationRequested();
+
+            var batchStart = batch * VOXEL_BATCH_SIZE;
+            var batchSize = Math.Min(VOXEL_BATCH_SIZE, numVoxels - batchStart);
+
+            // Update damage kernel
+            var argIdx = 0;
+            SetKernelArg(kernelUpdateDamage, argIdx++, bufStressXX);
+            SetKernelArg(kernelUpdateDamage, argIdx++, bufStressYY);
+            SetKernelArg(kernelUpdateDamage, argIdx++, bufStressZZ);
+            SetKernelArg(kernelUpdateDamage, argIdx++, bufStressXY);
+            SetKernelArg(kernelUpdateDamage, argIdx++, bufStressXZ);
+            SetKernelArg(kernelUpdateDamage, argIdx++, bufStressYZ);
+            SetKernelArg(kernelUpdateDamage, argIdx++, bufDamageVar);
+            SetKernelArg(kernelUpdateDamage, argIdx++, bufStrainHist);
+            SetKernelArg(kernelUpdateDamage, argIdx++, bufDamageField);
+            SetKernelArg(kernelUpdateDamage, argIdx++, bufLabels);
+            SetKernelArg(kernelUpdateDamage, argIdx++, E);
+            SetKernelArg(kernelUpdateDamage, argIdx++, nu);
+            SetKernelArg(kernelUpdateDamage, argIdx++, eps_0);
+            SetKernelArg(kernelUpdateDamage, argIdx++, eps_f);
+            SetKernelArg(kernelUpdateDamage, argIdx++, damageExp);
+            SetKernelArg(kernelUpdateDamage, argIdx++, damageModel);
+            SetKernelArg(kernelUpdateDamage, argIdx++, batchStart);
+            SetKernelArg(kernelUpdateDamage, argIdx++, batchSize);
+            SetKernelArg(kernelUpdateDamage, argIdx++, numVoxels);
+
+            var globalSize = (nuint)((batchSize + WORK_GROUP_SIZE - 1) / WORK_GROUP_SIZE * WORK_GROUP_SIZE);
+            var localSize = (nuint)WORK_GROUP_SIZE;
+
+            _cl.EnqueueNdrangeKernel(_queue, kernelUpdateDamage, 1, null, &globalSize, &localSize, 0, null, null);
+
+            if (batch % 5 == 0) Logger.Log($"[GeomechGPU] Damage evolution: {100.0 * batch / numBatches:F1}% complete");
+        }
+
+        _cl.Finish(_queue);
+
+        // Apply damage to stresses if enabled
+        if (_params.ApplyDamageToStiffness)
+        {
+            Logger.Log("[GeomechGPU] Applying damage to stress field...");
+
+            for (var batch = 0; batch < numBatches; batch++)
+            {
+                var batchStart = batch * VOXEL_BATCH_SIZE;
+                var batchSize = Math.Min(VOXEL_BATCH_SIZE, numVoxels - batchStart);
+
+                var argIdx = 0;
+                SetKernelArg(kernelApplyDamage, argIdx++, bufStressXX);
+                SetKernelArg(kernelApplyDamage, argIdx++, bufStressYY);
+                SetKernelArg(kernelApplyDamage, argIdx++, bufStressZZ);
+                SetKernelArg(kernelApplyDamage, argIdx++, bufStressXY);
+                SetKernelArg(kernelApplyDamage, argIdx++, bufStressXZ);
+                SetKernelArg(kernelApplyDamage, argIdx++, bufStressYZ);
+                SetKernelArg(kernelApplyDamage, argIdx++, bufDamageVar);
+                SetKernelArg(kernelApplyDamage, argIdx++, bufLabels);
+                SetKernelArg(kernelApplyDamage, argIdx++, batchStart);
+                SetKernelArg(kernelApplyDamage, argIdx++, batchSize);
+                SetKernelArg(kernelApplyDamage, argIdx++, numVoxels);
+
+                var globalSize = (nuint)((batchSize + WORK_GROUP_SIZE - 1) / WORK_GROUP_SIZE * WORK_GROUP_SIZE);
+                var localSize = (nuint)WORK_GROUP_SIZE;
+
+                _cl.EnqueueNdrangeKernel(_queue, kernelApplyDamage, 1, null, &globalSize, &localSize, 0, null, null);
+            }
+
+            _cl.Finish(_queue);
+        }
+
+        // Download results
+        Logger.Log("[GeomechGPU] Downloading damage results...");
+        EnqueueReadBuffer(bufStressXX, stressXX);
+        EnqueueReadBuffer(bufStressYY, stressYY);
+        EnqueueReadBuffer(bufStressZZ, stressZZ);
+        EnqueueReadBuffer(bufStressXY, stressXY);
+        EnqueueReadBuffer(bufStressXZ, stressXZ);
+        EnqueueReadBuffer(bufStressYZ, stressYZ);
+        EnqueueReadBuffer(bufDamageVar, damageVariable);
+        EnqueueReadBuffer(bufStrainHist, strainHistory);
+        EnqueueReadBuffer(bufDamageField, damageField);
+
+        // Copy back to results
+        if (_params.ApplyDamageToStiffness)
+        {
+            results.StressXX = To3D(stressXX, w, h, d);
+            results.StressYY = To3D(stressYY, w, h, d);
+            results.StressZZ = To3D(stressZZ, w, h, d);
+            results.StressXY = To3D(stressXY, w, h, d);
+            results.StressXZ = To3D(stressXZ, w, h, d);
+            results.StressYZ = To3D(stressYZ, w, h, d);
+        }
+
+        results.DamageVariableField = To3D(damageVariable, w, h, d);
+        results.DamageField = To3D(damageField, w, h, d);
+
+        // Calculate statistics
+        var damagedVoxels = 0;
+        var criticalDamage = 0;
+        double totalDamage = 0;
+        float maxDamage = 0;
+
+        for (var i = 0; i < numVoxels; i++)
+            if (labelsFlat[i] != 0 && damageVariable[i] > 0.01f)
+            {
+                damagedVoxels++;
+                totalDamage += damageVariable[i];
+                maxDamage = Math.Max(maxDamage, damageVariable[i]);
+
+                if (damageVariable[i] >= 0.99f)
+                    criticalDamage++;
+            }
+
+        results.DamagedVoxels = damagedVoxels;
+        results.CriticallyDamagedVoxels = criticalDamage;
+        results.AverageDamage = damagedVoxels > 0 ? (float)(totalDamage / damagedVoxels) : 0f;
+        results.MaximumDamage = maxDamage;
+
+        // Release buffers
+        _cl.ReleaseMemObject(bufStressXX);
+        _cl.ReleaseMemObject(bufStressYY);
+        _cl.ReleaseMemObject(bufStressZZ);
+        _cl.ReleaseMemObject(bufStressXY);
+        _cl.ReleaseMemObject(bufStressXZ);
+        _cl.ReleaseMemObject(bufStressYZ);
+        _cl.ReleaseMemObject(bufDamageVar);
+        _cl.ReleaseMemObject(bufStrainHist);
+        _cl.ReleaseMemObject(bufDamageField);
+        _cl.ReleaseMemObject(bufLabels);
+        _cl.ReleaseKernel(kernelUpdateDamage);
+        _cl.ReleaseKernel(kernelApplyDamage);
+
+        Logger.Log($"[GeomechGPU] Damage evolution completed in {sw.Elapsed.TotalSeconds:F2} s");
+        Logger.Log($"[GeomechGPU] Damaged voxels: {damagedVoxels:N0} ({100f * damagedVoxels / numVoxels:F2}%)");
+        Logger.Log($"[GeomechGPU] Critically damaged: {criticalDamage:N0}");
+        Logger.Log($"[GeomechGPU] Average damage: {results.AverageDamage:F4}");
+        Logger.Log($"[GeomechGPU] Maximum damage: {maxDamage:F4}");
     }
 
-    _cl.Finish(_queue);
-    EnqueueReadBuffer(_bufForce, result);
-}
+    private void StreamedMatrixVectorProduct(float[] result, float[] vector)
+    {
+        var sw = Stopwatch.StartNew();
+
+        // Upload vector to GPU
+        EnqueueWriteBuffer(_bufDisplacement, vector);
+        EnqueueWriteBuffer(_bufForce, result); // Zero output
+
+        var numBatches = (_numElements + ELEMENT_BATCH_SIZE - 1) / ELEMENT_BATCH_SIZE;
+
+        // Process elements in batches
+        for (var batch = 0; batch < numBatches; batch++)
+        {
+            var batchStart = batch * ELEMENT_BATCH_SIZE;
+            var batchSize = Math.Min(ELEMENT_BATCH_SIZE, _numElements - batchStart);
+
+            // Upload this batch's element data
+            var elementBatch = new int[batchSize * 8];
+            var eBatch = new float[batchSize];
+            var nuBatch = new float[batchSize];
+
+            Array.Copy(_elementNodes, batchStart * 8, elementBatch, 0, batchSize * 8);
+            Array.Copy(_elementE, batchStart, eBatch, 0, batchSize);
+            Array.Copy(_elementNu, batchStart, nuBatch, 0, batchSize);
+
+            EnqueueWriteBuffer(_bufElementBatch, elementBatch);
+            EnqueueWriteBuffer(_bufElementE_Batch, eBatch);
+            EnqueueWriteBuffer(_bufElementNu_Batch, nuBatch);
+
+            // Launch kernel for this batch - NOW WITH BC FLAGS
+            var argIdx = 0;
+            SetKernelArg(_kernelElementForce, argIdx++, _bufElementBatch);
+            SetKernelArg(_kernelElementForce, argIdx++, _bufElementE_Batch);
+            SetKernelArg(_kernelElementForce, argIdx++, _bufElementNu_Batch);
+            SetKernelArg(_kernelElementForce, argIdx++, _bufNodeX);
+            SetKernelArg(_kernelElementForce, argIdx++, _bufNodeY);
+            SetKernelArg(_kernelElementForce, argIdx++, _bufNodeZ);
+            SetKernelArg(_kernelElementForce, argIdx++, _bufDisplacement);
+            SetKernelArg(_kernelElementForce, argIdx++, _bufForce);
+            SetKernelArg(_kernelElementForce, argIdx++, _bufIsDirichlet); // ADDED
+            SetKernelArg(_kernelElementForce, argIdx++, batchStart);
+            SetKernelArg(_kernelElementForce, argIdx++, batchSize);
+            SetKernelArg(_kernelElementForce, argIdx++, _numElements);
+
+            var globalSize = (nuint)((batchSize + WORK_GROUP_SIZE - 1) / WORK_GROUP_SIZE * WORK_GROUP_SIZE);
+            var localSize = (nuint)WORK_GROUP_SIZE;
+
+            _cl.EnqueueNdrangeKernel(_queue, _kernelElementForce, 1, null, &globalSize, &localSize, 0, null, null);
+        }
+
+        _cl.Finish(_queue);
+        EnqueueReadBuffer(_bufForce, result);
+    }
+
     private void ApplyDirichlet(float[] vector)
     {
-        for (int i = 0; i < _numDOFs; i++)
-        {
+        for (var i = 0; i < _numDOFs; i++)
             if (_isDirichlet[i])
                 vector[i] = _dirichletValue[i];
-        }
     }
 
     private float DotProduct(float[] a, float[] b)
     {
         double sum = 0;
-        for (int i = 0; i < _numDOFs; i++)
-        {
+        for (var i = 0; i < _numDOFs; i++)
             if (!_isDirichlet[i])
                 sum += (double)a[i] * b[i];
-        }
         return (float)sum;
     }
 
     // ========== POST-PROCESSING ==========
-    private GeomechanicalResults CalculateStresses(byte[,,] labels, BoundingBox extent, 
+    private GeomechanicalResults CalculateStresses(byte[,,] labels, BoundingBox extent,
         IProgress<float> progress, CancellationToken token)
     {
-        var swTotal = System.Diagnostics.Stopwatch.StartNew();
-        
+        var swTotal = Stopwatch.StartNew();
+
         Logger.Log("[GeomechGPU] Computing stresses with streamed GPU processing");
 
         var w = extent.Width;
@@ -1758,15 +2162,11 @@ private void StreamedMatrixVectorProduct(float[] result, float[] vector)
         var bufStressYZ = CreateAndFillBuffer(stressYZ, MemFlags.WriteOnly, out error);
 
         var labelsFlat = new byte[numVoxels];
-        int idx = 0;
-        for (int z = 0; z < d; z++)
-        {
-            for (int y = 0; y < h; y++)
-            {
-                for (int x = 0; x < w; x++)
-                    labelsFlat[idx++] = labels[x, y, z];
-            }
-        }
+        var idx = 0;
+        for (var z = 0; z < d; z++)
+        for (var y = 0; y < h; y++)
+        for (var x = 0; x < w; x++)
+            labelsFlat[idx++] = labels[x, y, z];
 
         var bufLabels = CreateAndFillBuffer(labelsFlat, MemFlags.ReadOnly, out error);
 
@@ -1775,15 +2175,15 @@ private void StreamedMatrixVectorProduct(float[] result, float[] vector)
         EnqueueWriteBuffer(_bufDisplacement, _displacement);
 
         // Process elements in batches
-        int numBatches = (_numElements + ELEMENT_BATCH_SIZE - 1) / ELEMENT_BATCH_SIZE;
+        var numBatches = (_numElements + ELEMENT_BATCH_SIZE - 1) / ELEMENT_BATCH_SIZE;
         Logger.Log($"[GeomechGPU] Processing {numBatches:N0} element batches...");
 
-        for (int batch = 0; batch < numBatches; batch++)
+        for (var batch = 0; batch < numBatches; batch++)
         {
             token.ThrowIfCancellationRequested();
-            
-            int batchStart = batch * ELEMENT_BATCH_SIZE;
-            int batchSize = Math.Min(ELEMENT_BATCH_SIZE, _numElements - batchStart);
+
+            var batchStart = batch * ELEMENT_BATCH_SIZE;
+            var batchSize = Math.Min(ELEMENT_BATCH_SIZE, _numElements - batchStart);
 
             // Upload batch data
             var elementBatch = new int[batchSize * 8];
@@ -1825,10 +2225,10 @@ private void StreamedMatrixVectorProduct(float[] result, float[] vector)
             var localSize = (nuint)WORK_GROUP_SIZE;
 
             _cl.EnqueueNdrangeKernel(_queue, _kernelCalcStress, 1, null, &globalSize, &localSize, 0, null, null);
-            
+
             if (batch % 10 == 0)
             {
-                Logger.Log($"[GeomechGPU] Stress calculation: {100.0*batch/numBatches:F1}% complete");
+                Logger.Log($"[GeomechGPU] Stress calculation: {100.0 * batch / numBatches:F1}% complete");
                 progress?.Report(0.75f + 0.08f * batch / numBatches);
             }
         }
@@ -1880,8 +2280,8 @@ private void StreamedMatrixVectorProduct(float[] result, float[] vector)
 
     private void PostProcessResults(GeomechanicalResults results, IProgress<float> progress, CancellationToken token)
     {
-        var swTotal = System.Diagnostics.Stopwatch.StartNew();
-        
+        var swTotal = Stopwatch.StartNew();
+
         Logger.Log("[GeomechGPU] Computing principal stresses and failure criteria");
 
         var w = results.StressXX.GetLength(0);
@@ -1901,15 +2301,11 @@ private void StreamedMatrixVectorProduct(float[] result, float[] vector)
         var fractured = new byte[numVoxels];
 
         var labelsFlat = new byte[numVoxels];
-        int idx = 0;
-        for (int z = 0; z < d; z++)
-        {
-            for (int y = 0; y < h; y++)
-            {
-                for (int x = 0; x < w; x++)
-                    labelsFlat[idx++] = results.MaterialLabels[x, y, z];
-            }
-        }
+        var idx = 0;
+        for (var z = 0; z < d; z++)
+        for (var y = 0; y < h; y++)
+        for (var x = 0; x < w; x++)
+            labelsFlat[idx++] = results.MaterialLabels[x, y, z];
 
         int error;
         Logger.Log("[GeomechGPU] Creating GPU buffers for post-processing...");
@@ -1925,15 +2321,15 @@ private void StreamedMatrixVectorProduct(float[] result, float[] vector)
         var bufLabels = CreateAndFillBuffer(labelsFlat, MemFlags.ReadOnly, out error);
 
         // Process in batches
-        int numBatches = (numVoxels + VOXEL_BATCH_SIZE - 1) / VOXEL_BATCH_SIZE;
+        var numBatches = (numVoxels + VOXEL_BATCH_SIZE - 1) / VOXEL_BATCH_SIZE;
         Logger.Log($"[GeomechGPU] Processing {numBatches:N0} voxel batches for principal stresses...");
 
-        for (int batch = 0; batch < numBatches; batch++)
+        for (var batch = 0; batch < numBatches; batch++)
         {
             token.ThrowIfCancellationRequested();
-            
-            int batchStart = batch * VOXEL_BATCH_SIZE;
-            int batchSize = Math.Min(VOXEL_BATCH_SIZE, numVoxels - batchStart);
+
+            var batchStart = batch * VOXEL_BATCH_SIZE;
+            var batchSize = Math.Min(VOXEL_BATCH_SIZE, numVoxels - batchStart);
 
             var argIdx = 0;
             SetKernelArg(_kernelPrincipalStress, argIdx++, bufStressXX);
@@ -1951,23 +2347,32 @@ private void StreamedMatrixVectorProduct(float[] result, float[] vector)
             var localSize = (nuint)WORK_GROUP_SIZE;
 
             _cl.EnqueueNdrangeKernel(_queue, _kernelPrincipalStress, 1, null, &globalSize, &localSize, 0, null, null);
-            
+
             if (batch % 5 == 0)
-            {
-                Logger.Log($"[GeomechGPU] Principal stresses: {100.0*batch/numBatches:F1}% complete");
-            }
+                Logger.Log($"[GeomechGPU] Principal stresses: {100.0 * batch / numBatches:F1}% complete");
         }
 
         _cl.Finish(_queue);
+        if (_params.EnablePlasticity)
+        {
+            Logger.Log("[GeomechGPU] Applying plasticity correction...");
+            ApplyPlasticityGPU(results, progress, token);
+        }
+
+        if (_params.EnableDamageEvolution)
+        {
+            Logger.Log("[GeomechGPU] Applying damage evolution...");
+            ApplyDamageGPU(results, progress, token);
+        }
 
         Logger.Log($"[GeomechGPU] Processing {numBatches:N0} voxel batches for failure evaluation...");
         // Evaluate failure
-        for (int batch = 0; batch < numBatches; batch++)
+        for (var batch = 0; batch < numBatches; batch++)
         {
             token.ThrowIfCancellationRequested();
-            
-            int batchStart = batch * VOXEL_BATCH_SIZE;
-            int batchSize = Math.Min(VOXEL_BATCH_SIZE, numVoxels - batchStart);
+
+            var batchStart = batch * VOXEL_BATCH_SIZE;
+            var batchSize = Math.Min(VOXEL_BATCH_SIZE, numVoxels - batchStart);
 
             var argIdx = 0;
             SetKernelArg(_kernelEvaluateFailure, argIdx++, bufSigma1);
@@ -1989,11 +2394,9 @@ private void StreamedMatrixVectorProduct(float[] result, float[] vector)
             var localSize = (nuint)WORK_GROUP_SIZE;
 
             _cl.EnqueueNdrangeKernel(_queue, _kernelEvaluateFailure, 1, null, &globalSize, &localSize, 0, null, null);
-            
+
             if (batch % 5 == 0)
-            {
-                Logger.Log($"[GeomechGPU] Failure evaluation: {100.0*batch/numBatches:F1}% complete");
-            }
+                Logger.Log($"[GeomechGPU] Failure evaluation: {100.0 * batch / numBatches:F1}% complete");
         }
 
         _cl.Finish(_queue);
@@ -2016,14 +2419,10 @@ private void StreamedMatrixVectorProduct(float[] result, float[] vector)
         results.DamageField = To3D(damage, w, h, d);
 
         idx = 0;
-        for (int z = 0; z < d; z++)
-        {
-            for (int y = 0; y < h; y++)
-            {
-                for (int x = 0; x < w; x++)
-                    results.FractureField[x, y, z] = fractured[idx++] != 0;
-            }
-        }
+        for (var z = 0; z < d; z++)
+        for (var y = 0; y < h; y++)
+        for (var x = 0; x < w; x++)
+            results.FractureField[x, y, z] = fractured[idx++] != 0;
 
         // Release buffers
         _cl.ReleaseMemObject(bufStressXX);
@@ -2040,12 +2439,145 @@ private void StreamedMatrixVectorProduct(float[] result, float[] vector)
         Logger.Log($"[GeomechGPU] Post-processing completed in {swTotal.Elapsed.TotalSeconds:F2} s");
     }
 
+    private void ApplyPlasticityGPU(GeomechanicalResults results, IProgress<float> progress, CancellationToken token)
+    {
+        var sw = Stopwatch.StartNew();
+
+        var w = results.StressXX.GetLength(0);
+        var h = results.StressYY.GetLength(1);
+        var d = results.StressZZ.GetLength(2);
+        var numVoxels = w * h * d;
+
+        // Flatten arrays
+        var stressXX = Flatten(results.StressXX);
+        var stressYY = Flatten(results.StressYY);
+        var stressZZ = Flatten(results.StressZZ);
+        var stressXY = Flatten(results.StressXY);
+        var stressXZ = Flatten(results.StressXZ);
+        var stressYZ = Flatten(results.StressYZ);
+
+        var plasticStrain = new float[numVoxels];
+        var yieldStress = new float[numVoxels];
+
+        var labelsFlat = new byte[numVoxels];
+        var idx = 0;
+        for (var z = 0; z < d; z++)
+        for (var y = 0; y < h; y++)
+        for (var x = 0; x < w; x++)
+            labelsFlat[idx++] = results.MaterialLabels[x, y, z];
+
+        // Create GPU buffers
+        int error;
+        var bufStressXX = CreateAndFillBuffer(stressXX, MemFlags.ReadWrite, out error);
+        var bufStressYY = CreateAndFillBuffer(stressYY, MemFlags.ReadWrite, out error);
+        var bufStressZZ = CreateAndFillBuffer(stressZZ, MemFlags.ReadWrite, out error);
+        var bufStressXY = CreateAndFillBuffer(stressXY, MemFlags.ReadWrite, out error);
+        var bufStressXZ = CreateAndFillBuffer(stressXZ, MemFlags.ReadWrite, out error);
+        var bufStressYZ = CreateAndFillBuffer(stressYZ, MemFlags.ReadWrite, out error);
+        var bufPlasticStrain = CreateAndFillBuffer(plasticStrain, MemFlags.ReadWrite, out error);
+        var bufYieldStress = CreateAndFillBuffer(yieldStress, MemFlags.ReadWrite, out error);
+        var bufLabels = CreateAndFillBuffer(labelsFlat, MemFlags.ReadOnly, out error);
+
+        // Calculate material constants
+        var E = _params.YoungModulus * 1e6f;
+        var nu = _params.PoissonRatio;
+        var mu = E / (2f * (1f + nu));
+        var H = _params.PlasticHardeningModulus * 1e6f;
+        var initialYield = _params.Cohesion * 1e6f * 2f;
+
+        // Process in batches
+        var numBatches = (numVoxels + VOXEL_BATCH_SIZE - 1) / VOXEL_BATCH_SIZE;
+        Logger.Log($"[GeomechGPU] Processing {numBatches:N0} batches for plasticity...");
+
+        for (var batch = 0; batch < numBatches; batch++)
+        {
+            token.ThrowIfCancellationRequested();
+
+            var batchStart = batch * VOXEL_BATCH_SIZE;
+            var batchSize = Math.Min(VOXEL_BATCH_SIZE, numVoxels - batchStart);
+
+            var argIdx = 0;
+            SetKernelArg(_kernelPlasticCorrection, argIdx++, bufStressXX);
+            SetKernelArg(_kernelPlasticCorrection, argIdx++, bufStressYY);
+            SetKernelArg(_kernelPlasticCorrection, argIdx++, bufStressZZ);
+            SetKernelArg(_kernelPlasticCorrection, argIdx++, bufStressXY);
+            SetKernelArg(_kernelPlasticCorrection, argIdx++, bufStressXZ);
+            SetKernelArg(_kernelPlasticCorrection, argIdx++, bufStressYZ);
+            SetKernelArg(_kernelPlasticCorrection, argIdx++, bufPlasticStrain);
+            SetKernelArg(_kernelPlasticCorrection, argIdx++, bufYieldStress);
+            SetKernelArg(_kernelPlasticCorrection, argIdx++, bufLabels);
+            SetKernelArg(_kernelPlasticCorrection, argIdx++, mu);
+            SetKernelArg(_kernelPlasticCorrection, argIdx++, H);
+            SetKernelArg(_kernelPlasticCorrection, argIdx++, initialYield);
+            SetKernelArg(_kernelPlasticCorrection, argIdx++, batchStart);
+            SetKernelArg(_kernelPlasticCorrection, argIdx++, batchSize);
+            SetKernelArg(_kernelPlasticCorrection, argIdx++, numVoxels);
+
+            var globalSize = (nuint)((batchSize + WORK_GROUP_SIZE - 1) / WORK_GROUP_SIZE * WORK_GROUP_SIZE);
+            var localSize = (nuint)WORK_GROUP_SIZE;
+
+            _cl.EnqueueNdrangeKernel(_queue, _kernelPlasticCorrection, 1, null, &globalSize, &localSize, 0, null, null);
+
+            if (batch % 5 == 0) Logger.Log($"[GeomechGPU] Plasticity: {100.0 * batch / numBatches:F1}% complete");
+        }
+
+        _cl.Finish(_queue);
+
+        // Download results
+        Logger.Log("[GeomechGPU] Downloading plasticity results...");
+        EnqueueReadBuffer(bufStressXX, stressXX);
+        EnqueueReadBuffer(bufStressYY, stressYY);
+        EnqueueReadBuffer(bufStressZZ, stressZZ);
+        EnqueueReadBuffer(bufStressXY, stressXY);
+        EnqueueReadBuffer(bufStressXZ, stressXZ);
+        EnqueueReadBuffer(bufStressYZ, stressYZ);
+        EnqueueReadBuffer(bufPlasticStrain, plasticStrain);
+        EnqueueReadBuffer(bufYieldStress, yieldStress);
+
+        // Copy back to results
+        results.StressXX = To3D(stressXX, w, h, d);
+        results.StressYY = To3D(stressYY, w, h, d);
+        results.StressZZ = To3D(stressZZ, w, h, d);
+        results.StressXY = To3D(stressXY, w, h, d);
+        results.StressXZ = To3D(stressXZ, w, h, d);
+        results.StressYZ = To3D(stressYZ, w, h, d);
+        results.PlasticStrainField = To3D(plasticStrain, w, h, d);
+
+        // Calculate statistics
+        var yieldedVoxels = 0;
+        double totalPlasticStrain = 0;
+        for (var i = 0; i < numVoxels; i++)
+            if (labelsFlat[i] != 0 && plasticStrain[i] > 1e-9f)
+            {
+                yieldedVoxels++;
+                totalPlasticStrain += plasticStrain[i];
+            }
+
+        results.YieldedVoxels = yieldedVoxels;
+        results.AveragePlasticStrain = yieldedVoxels > 0 ? (float)(totalPlasticStrain / yieldedVoxels) : 0f;
+
+        // Release buffers
+        _cl.ReleaseMemObject(bufStressXX);
+        _cl.ReleaseMemObject(bufStressYY);
+        _cl.ReleaseMemObject(bufStressZZ);
+        _cl.ReleaseMemObject(bufStressXY);
+        _cl.ReleaseMemObject(bufStressXZ);
+        _cl.ReleaseMemObject(bufStressYZ);
+        _cl.ReleaseMemObject(bufPlasticStrain);
+        _cl.ReleaseMemObject(bufYieldStress);
+        _cl.ReleaseMemObject(bufLabels);
+
+        Logger.Log($"[GeomechGPU] Plasticity correction completed in {sw.Elapsed.TotalSeconds:F2} s");
+        Logger.Log($"[GeomechGPU] Yielded voxels: {yieldedVoxels:N0} ({100f * yieldedVoxels / numVoxels:F2}%)");
+        Logger.Log($"[GeomechGPU] Average plastic strain: {results.AveragePlasticStrain:E4}");
+    }
+
     // ========== FLUID INJECTION SIMULATION ==========
     private void SimulateFluidInjection(GeomechanicalResults results, byte[,,] labels, BoundingBox extent,
         IProgress<float> progress, CancellationToken token)
     {
-        var swTotal = System.Diagnostics.Stopwatch.StartNew();
-        
+        var swTotal = Stopwatch.StartNew();
+
         Logger.Log("[GeomechGPU] Setting up fluid injection simulation");
 
         var w = extent.Width;
@@ -2074,10 +2606,7 @@ private void StreamedMatrixVectorProduct(float[] result, float[] vector)
         results.InjectionPressureHistory = new List<float>();
         results.FractureVolumeHistory = new List<float>();
         results.FlowRateHistory = new List<float>();
-        if (_params.EnableGeothermal)
-        {
-            results.EnergyExtractionHistory = new List<float>();
-        }
+        if (_params.EnableGeothermal) results.EnergyExtractionHistory = new List<float>();
 
         // Flatten arrays for GPU
         var labelsFlat = new byte[numVoxels];
@@ -2089,21 +2618,17 @@ private void StreamedMatrixVectorProduct(float[] result, float[] vector)
         var apertureFlat = new float[numVoxels];
         var temperatureFlat = _params.EnableGeothermal ? Flatten(results.TemperatureField) : new float[numVoxels];
 
-        int idx = 0;
-        for (int z = 0; z < d; z++)
+        var idx = 0;
+        for (var z = 0; z < d; z++)
+        for (var y = 0; y < h; y++)
+        for (var x = 0; x < w; x++)
         {
-            for (int y = 0; y < h; y++)
-            {
-                for (int x = 0; x < w; x++)
-                {
-                    labelsFlat[idx] = labels[x, y, z];
-                    pressureIn[idx] = _pressure[idx];
-                    pressureOut[idx] = _pressure[idx];
-                    fracturedFlat[idx] = results.FractureField[x, y, z] ? (byte)1 : (byte)0;
-                    apertureFlat[idx] = _fractureAperture[idx];
-                    idx++;
-                }
-            }
+            labelsFlat[idx] = labels[x, y, z];
+            pressureIn[idx] = _pressure[idx];
+            pressureOut[idx] = _pressure[idx];
+            fracturedFlat[idx] = results.FractureField[x, y, z] ? (byte)1 : (byte)0;
+            apertureFlat[idx] = _fractureAperture[idx];
+            idx++;
         }
 
         // Create GPU buffers
@@ -2117,9 +2642,9 @@ private void StreamedMatrixVectorProduct(float[] result, float[] vector)
         var bufFractured = CreateAndFillBuffer(fracturedFlat, MemFlags.ReadWrite, out error);
         var bufAperture = CreateAndFillBuffer(apertureFlat, MemFlags.ReadWrite, out error);
 
-        bool breakdownDetected = false;
+        var breakdownDetected = false;
         float breakdownPressure = 0;
-        int breakdownStep = 0;
+        var breakdownStep = 0;
         float lastFractureVolume = 0;
 
         Logger.Log("----------------------------------------------------------");
@@ -2127,34 +2652,27 @@ private void StreamedMatrixVectorProduct(float[] result, float[] vector)
         Logger.Log("----------------------------------------------------------");
 
         // Time-stepping loop
-        for (int step = 0; step < numSteps; step++)
+        for (var step = 0; step < numSteps; step++)
         {
             token.ThrowIfCancellationRequested();
 
             // Apply injection source
-            int injIdx = (injZ * h + injY) * w + injX;
-            for (int dz = -_params.InjectionRadius; dz <= _params.InjectionRadius; dz++)
+            var injIdx = (injZ * h + injY) * w + injX;
+            for (var dz = -_params.InjectionRadius; dz <= _params.InjectionRadius; dz++)
+            for (var dy = -_params.InjectionRadius; dy <= _params.InjectionRadius; dy++)
+            for (var dx_inj = -_params.InjectionRadius; dx_inj <= _params.InjectionRadius; dx_inj++)
             {
-                for (int dy = -_params.InjectionRadius; dy <= _params.InjectionRadius; dy++)
+                var x = injX + dx_inj;
+                var y = injY + dy;
+                var z = injZ + dz;
+
+                if (x >= 0 && x < w && y >= 0 && y < h && z >= 0 && z < d)
                 {
-                    for (int dx_inj = -_params.InjectionRadius; dx_inj <= _params.InjectionRadius; dx_inj++)
-                    {
-                        int x = injX + dx_inj;
-                        int y = injY + dy;
-                        int z = injZ + dz;
-                        
-                        if (x >= 0 && x < w && y >= 0 && y < h && z >= 0 && z < d)
-                        {
-                            int vidx = (z * h + y) * w + x;
-                            if (labelsFlat[vidx] != 0)
-                            {
-                                pressureIn[vidx] = P_inj;
-                            }
-                        }
-                    }
+                    var vidx = (z * h + y) * w + x;
+                    if (labelsFlat[vidx] != 0) pressureIn[vidx] = P_inj;
                 }
             }
-            
+
             EnqueueWriteBuffer(bufPressureIn, pressureIn);
 
             // Pressure diffusion (process in 3D batches for large volumes)
@@ -2169,8 +2687,8 @@ private void StreamedMatrixVectorProduct(float[] result, float[] vector)
             localSize3D[2] = 4;
 
             // Sub-step for stability
-            int subSteps = _params.FluidIterationsPerMechanicalStep;
-            for (int sub = 0; sub < subSteps; sub++)
+            var subSteps = _params.FluidIterationsPerMechanicalStep;
+            for (var sub = 0; sub < subSteps; sub++)
             {
                 var argIdx = 0;
                 SetKernelArg(_kernelPressureDiffusion, argIdx++, bufPressureIn);
@@ -2186,8 +2704,9 @@ private void StreamedMatrixVectorProduct(float[] result, float[] vector)
                 SetKernelArg(_kernelPressureDiffusion, argIdx++, _params.FluidViscosity);
                 SetKernelArg(_kernelPressureDiffusion, argIdx++, _params.Porosity);
 
-                _cl.EnqueueNdrangeKernel(_queue, _kernelPressureDiffusion, 3, null, globalSize3D, localSize3D, 0, null, null);
-                
+                _cl.EnqueueNdrangeKernel(_queue, _kernelPressureDiffusion, 3, null, globalSize3D, localSize3D, 0, null,
+                    null);
+
                 // Swap buffers
                 var temp = bufPressureIn;
                 bufPressureIn = bufPressureOut;
@@ -2197,11 +2716,11 @@ private void StreamedMatrixVectorProduct(float[] result, float[] vector)
             _cl.Finish(_queue);
 
             // Detect new fractures (batched)
-            int numBatches = (numVoxels + VOXEL_BATCH_SIZE - 1) / VOXEL_BATCH_SIZE;
-            for (int batch = 0; batch < numBatches; batch++)
+            var numBatches = (numVoxels + VOXEL_BATCH_SIZE - 1) / VOXEL_BATCH_SIZE;
+            for (var batch = 0; batch < numBatches; batch++)
             {
-                int batchStart = batch * VOXEL_BATCH_SIZE;
-                int batchSize = Math.Min(VOXEL_BATCH_SIZE, numVoxels - batchStart);
+                var batchStart = batch * VOXEL_BATCH_SIZE;
+                var batchSize = Math.Min(VOXEL_BATCH_SIZE, numVoxels - batchStart);
 
                 var argIdx = 0;
                 SetKernelArg(_kernelDetectFractures, argIdx++, bufSigma1);
@@ -2218,16 +2737,17 @@ private void StreamedMatrixVectorProduct(float[] result, float[] vector)
                 var globalSize = (nuint)((batchSize + WORK_GROUP_SIZE - 1) / WORK_GROUP_SIZE * WORK_GROUP_SIZE);
                 var localSize = (nuint)WORK_GROUP_SIZE;
 
-                _cl.EnqueueNdrangeKernel(_queue, _kernelDetectFractures, 1, null, &globalSize, &localSize, 0, null, null);
+                _cl.EnqueueNdrangeKernel(_queue, _kernelDetectFractures, 1, null, &globalSize, &localSize, 0, null,
+                    null);
             }
 
             _cl.Finish(_queue);
 
             // Update fracture apertures (batched)
-            for (int batch = 0; batch < numBatches; batch++)
+            for (var batch = 0; batch < numBatches; batch++)
             {
-                int batchStart = batch * VOXEL_BATCH_SIZE;
-                int batchSize = Math.Min(VOXEL_BATCH_SIZE, numVoxels - batchStart);
+                var batchStart = batch * VOXEL_BATCH_SIZE;
+                var batchSize = Math.Min(VOXEL_BATCH_SIZE, numVoxels - batchStart);
 
                 var argIdx = 0;
                 SetKernelArg(_kernelUpdateAperture, argIdx++, bufPressureIn);
@@ -2245,7 +2765,8 @@ private void StreamedMatrixVectorProduct(float[] result, float[] vector)
                 var globalSize = (nuint)((batchSize + WORK_GROUP_SIZE - 1) / WORK_GROUP_SIZE * WORK_GROUP_SIZE);
                 var localSize = (nuint)WORK_GROUP_SIZE;
 
-                _cl.EnqueueNdrangeKernel(_queue, _kernelUpdateAperture, 1, null, &globalSize, &localSize, 0, null, null);
+                _cl.EnqueueNdrangeKernel(_queue, _kernelUpdateAperture, 1, null, &globalSize, &localSize, 0, null,
+                    null);
             }
 
             _cl.Finish(_queue);
@@ -2256,25 +2777,23 @@ private void StreamedMatrixVectorProduct(float[] result, float[] vector)
                 EnqueueReadBuffer(bufPressureIn, pressureIn);
                 EnqueueReadBuffer(bufFractured, fracturedFlat);
                 EnqueueReadBuffer(bufAperture, apertureFlat);
-                
+
                 // Calculate fracture volume
                 double volume = 0;
-                int fractureCount = 0;
-                for (int i = 0; i < numVoxels; i++)
-                {
+                var fractureCount = 0;
+                for (var i = 0; i < numVoxels; i++)
                     if (fracturedFlat[i] != 0 && labelsFlat[i] != 0)
                     {
                         fractureCount++;
                         volume += apertureFlat[i] * dx * dx;
                     }
-                }
 
                 // Calculate flow rate (change in fracture volume)
-                float flowRate = (float)((volume - lastFractureVolume) / (10 * dt));
+                var flowRate = (float)((volume - lastFractureVolume) / (10 * dt));
                 lastFractureVolume = (float)volume;
 
                 // Record data
-                float currentTime = step * dt;
+                var currentTime = step * dt;
                 results.TimePoints.Add(currentTime);
                 results.InjectionPressureHistory.Add(pressureIn[injIdx] / 1e6f);
                 results.FractureVolumeHistory.Add((float)volume);
@@ -2283,8 +2802,8 @@ private void StreamedMatrixVectorProduct(float[] result, float[] vector)
                 // Calculate energy extraction if geothermal enabled
                 if (_params.EnableGeothermal)
                 {
-                    double energyRate = CalculateEnergyExtractionRate(
-                        pressureIn, temperatureFlat, fracturedFlat, labelsFlat, 
+                    var energyRate = CalculateEnergyExtractionRate(
+                        pressureIn, temperatureFlat, fracturedFlat, labelsFlat,
                         dx, flowRate, w, h, d);
                     results.EnergyExtractionHistory.Add((float)energyRate);
                 }
@@ -2325,39 +2844,36 @@ private void StreamedMatrixVectorProduct(float[] result, float[] vector)
         // Update results
         results.PressureField = To3D(pressureIn, w, h, d);
         results.FractureAperture = To3D(apertureFlat, w, h, d);
-        
+
         // Update fracture field and calculate final statistics
         idx = 0;
-        int totalFractured = 0;
+        var totalFractured = 0;
         double fractureVolume = 0;
         var fractureSegments = new List<FractureSegment>();
-        
-        for (int z = 0; z < d; z++)
+
+        for (var z = 0; z < d; z++)
+        for (var y = 0; y < h; y++)
+        for (var x = 0; x < w; x++)
         {
-            for (int y = 0; y < h; y++)
+            var isFractured = fracturedFlat[idx] != 0;
+            results.FractureField[x, y, z] = isFractured;
+
+            if (isFractured && labelsFlat[idx] != 0)
             {
-                for (int x = 0; x < w; x++)
+                totalFractured++;
+                fractureVolume += apertureFlat[idx] * dx * dx;
+
+                // Create fracture segment (simplified - just store location and aperture)
+                fractureSegments.Add(new FractureSegment
                 {
-                    bool isFractured = fracturedFlat[idx] != 0;
-                    results.FractureField[x, y, z] = isFractured;
-                    
-                    if (isFractured && labelsFlat[idx] != 0)
-                    {
-                        totalFractured++;
-                        fractureVolume += apertureFlat[idx] * dx * dx;
-                        
-                        // Create fracture segment (simplified - just store location and aperture)
-                        fractureSegments.Add(new FractureSegment
-                        {
-                            Start = new Vector3(x * dx, y * dx, z * dx),
-                            End = new Vector3((x+1) * dx, (y+1) * dx, (z+1) * dx),
-                            Aperture = apertureFlat[idx],
-                            Permeability = apertureFlat[idx] * apertureFlat[idx] / 12.0f
-                        });
-                    }
-                    idx++;
-                }
+                    Start = new Vector3(x * dx, y * dx, z * dx),
+                    End = new Vector3((x + 1) * dx, (y + 1) * dx, (z + 1) * dx),
+                    Aperture = apertureFlat[idx],
+                    Permeability = apertureFlat[idx] * apertureFlat[idx] / 12.0f
+                });
             }
+
+            idx++;
         }
 
         // Set final results
@@ -2386,66 +2902,65 @@ private void StreamedMatrixVectorProduct(float[] result, float[] vector)
         {
             Logger.Log($"  Breakdown pressure: {breakdownPressure:F2} MPa");
             Logger.Log($"  Propagation pressure: {results.PropagationPressure:F2} MPa");
-            Logger.Log($"  Breakdown at step: {breakdownStep}/{numSteps} (t={breakdownStep*dt:F1}s)");
+            Logger.Log($"  Breakdown at step: {breakdownStep}/{numSteps} (t={breakdownStep * dt:F1}s)");
         }
+
         Logger.Log($"  Total fractured voxels: {totalFractured:N0}");
         Logger.Log($"  Fracture volume: {fractureVolume * 1e9:F2} mm³");
         Logger.Log($"  Fracture network segments: {fractureSegments.Count:N0}");
-        Logger.Log($"  Pressure range: {results.MinFluidPressure/1e6:F2} - {results.MaxFluidPressure/1e6:F2} MPa");
+        Logger.Log($"  Pressure range: {results.MinFluidPressure / 1e6:F2} - {results.MaxFluidPressure / 1e6:F2} MPa");
         Logger.Log($"  Time series data points: {results.TimePoints.Count}");
         Logger.Log("==========================================================");
         Logger.Log($"[GeomechGPU] Fluid injection simulation completed in {swTotal.Elapsed.TotalSeconds:F2} s");
     }
 
-    private double CalculateEnergyExtractionRate(float[] pressure, float[] temperature, 
+    private double CalculateEnergyExtractionRate(float[] pressure, float[] temperature,
         byte[] fractured, byte[] labels, float dx, float flowRate, int w, int h, int d)
     {
         // Calculate thermal energy extraction rate
         // E_dot = m_dot * cp * (T_hot - T_cold)
-        
+
         const float specificHeat = 4186; // J/(kg·K) for water
         const float fluidDensity = 1000; // kg/m³
         const float T_injection = 20; // °C (cold water injected)
-        
+
         double totalEnergyRate = 0;
-        int fractureVoxelCount = 0;
+        var fractureVoxelCount = 0;
         double avgTemperature = 0;
-        
+
         // Calculate average temperature in fractured zones
-        for (int i = 0; i < pressure.Length; i++)
-        {
+        for (var i = 0; i < pressure.Length; i++)
             if (fractured[i] != 0 && labels[i] != 0)
             {
                 avgTemperature += temperature[i];
                 fractureVoxelCount++;
             }
-        }
-        
+
         if (fractureVoxelCount > 0)
         {
             avgTemperature /= fractureVoxelCount;
-            
+
             // Mass flow rate (kg/s)
-            float massFlowRate = Math.Abs(flowRate) * fluidDensity;
-            
+            var massFlowRate = Math.Abs(flowRate) * fluidDensity;
+
             // Temperature difference
-            float deltaT = (float)avgTemperature - T_injection;
-            
+            var deltaT = (float)avgTemperature - T_injection;
+
             // Power (Watts)
             double power = massFlowRate * specificHeat * deltaT;
-            
+
             // Convert to MW
             totalEnergyRate = power / 1e6;
         }
-        
+
         return totalEnergyRate;
     }
 
     // ========== STATISTICS ==========
     private void CalculateFinalStatistics(GeomechanicalResults results)
     {
-        var sw = System.Diagnostics.Stopwatch.StartNew();
-        
+        var sw = Stopwatch.StartNew();
+
         Logger.Log("[GeomechGPU] Computing final statistics...");
 
         var w = results.StressXX.GetLength(0);
@@ -2454,50 +2969,46 @@ private void StreamedMatrixVectorProduct(float[] result, float[] vector)
 
         double sumStress = 0;
         double sumVonMises = 0;
-        int validVoxels = 0;
-        int failedVoxels = 0;
+        var validVoxels = 0;
+        var failedVoxels = 0;
         float maxShear = 0;
         float maxVonMises = 0;
 
-        for (int z = 0; z < d; z++)
+        for (var z = 0; z < d; z++)
+        for (var y = 0; y < h; y++)
+        for (var x = 0; x < w; x++)
         {
-            for (int y = 0; y < h; y++)
-            {
-                for (int x = 0; x < w; x++)
-                {
-                    if (results.MaterialLabels[x, y, z] == 0) continue;
+            if (results.MaterialLabels[x, y, z] == 0) continue;
 
-                    validVoxels++;
+            validVoxels++;
 
-                    var sxx = results.StressXX[x, y, z];
-                    var syy = results.StressYY[x, y, z];
-                    var szz = results.StressZZ[x, y, z];
-                    var sxy = results.StressXY[x, y, z];
-                    var sxz = results.StressXZ[x, y, z];
-                    var syz = results.StressYZ[x, y, z];
+            var sxx = results.StressXX[x, y, z];
+            var syy = results.StressYY[x, y, z];
+            var szz = results.StressZZ[x, y, z];
+            var sxy = results.StressXY[x, y, z];
+            var sxz = results.StressXZ[x, y, z];
+            var syz = results.StressYZ[x, y, z];
 
-                    var mean = (sxx + syy + szz) / 3.0f;
-                    sumStress += mean;
+            var mean = (sxx + syy + szz) / 3.0f;
+            sumStress += mean;
 
-                    var shear = (results.Sigma1[x, y, z] - results.Sigma3[x, y, z]) / 2.0f;
-                    maxShear = MathF.Max(maxShear, shear);
+            var shear = (results.Sigma1[x, y, z] - results.Sigma3[x, y, z]) / 2.0f;
+            maxShear = MathF.Max(maxShear, shear);
 
-                    // Von Mises stress
-                    var s_dev_xx = sxx - mean;
-                    var s_dev_yy = syy - mean;
-                    var s_dev_zz = szz - mean;
-                    var vonMises = MathF.Sqrt(0.5f * (
-                        s_dev_xx * s_dev_xx + s_dev_yy * s_dev_yy + s_dev_zz * s_dev_zz +
-                        s_dev_xx * s_dev_yy + s_dev_yy * s_dev_zz + s_dev_zz * s_dev_xx
-                    ) + 3.0f * (sxy * sxy + sxz * sxz + syz * syz));
+            // Von Mises stress
+            var s_dev_xx = sxx - mean;
+            var s_dev_yy = syy - mean;
+            var s_dev_zz = szz - mean;
+            var vonMises = MathF.Sqrt(0.5f * (
+                s_dev_xx * s_dev_xx + s_dev_yy * s_dev_yy + s_dev_zz * s_dev_zz +
+                s_dev_xx * s_dev_yy + s_dev_yy * s_dev_zz + s_dev_zz * s_dev_xx
+            ) + 3.0f * (sxy * sxy + sxz * sxz + syz * syz));
 
-                    sumVonMises += vonMises;
-                    maxVonMises = MathF.Max(maxVonMises, vonMises);
+            sumVonMises += vonMises;
+            maxVonMises = MathF.Max(maxVonMises, vonMises);
 
-                    if (results.FractureField[x, y, z])
-                        failedVoxels++;
-                }
-            }
+            if (results.FractureField[x, y, z])
+                failedVoxels++;
         }
 
         results.MeanStress = validVoxels > 0 ? (float)(sumStress / validVoxels) : 0;
@@ -2521,30 +3032,24 @@ private void StreamedMatrixVectorProduct(float[] result, float[] vector)
     private float[,,] To3D(float[] flat, int w, int h, int d)
     {
         var result = new float[w, h, d];
-        int idx = 0;
-        for (int z = 0; z < d; z++)
-        {
-            for (int y = 0; y < h; y++)
-            {
-                for (int x = 0; x < w; x++)
-                    result[x, y, z] = flat[idx++];
-            }
-        }
+        var idx = 0;
+        for (var z = 0; z < d; z++)
+        for (var y = 0; y < h; y++)
+        for (var x = 0; x < w; x++)
+            result[x, y, z] = flat[idx++];
+
         return result;
     }
 
     private byte[,,] To3D(byte[] flat, int w, int h, int d)
     {
         var result = new byte[w, h, d];
-        int idx = 0;
-        for (int z = 0; z < d; z++)
-        {
-            for (int y = 0; y < h; y++)
-            {
-                for (int x = 0; x < w; x++)
-                    result[x, y, z] = flat[idx++];
-            }
-        }
+        var idx = 0;
+        for (var z = 0; z < d; z++)
+        for (var y = 0; y < h; y++)
+        for (var x = 0; x < w; x++)
+            result[x, y, z] = flat[idx++];
+
         return result;
     }
 
@@ -2554,15 +3059,12 @@ private void StreamedMatrixVectorProduct(float[] result, float[] vector)
         var h = array.GetLength(1);
         var d = array.GetLength(2);
         var result = new float[w * h * d];
-        int idx = 0;
-        for (int z = 0; z < d; z++)
-        {
-            for (int y = 0; y < h; y++)
-            {
-                for (int x = 0; x < w; x++)
-                    result[idx++] = array[x, y, z];
-            }
-        }
+        var idx = 0;
+        for (var z = 0; z < d; z++)
+        for (var y = 0; y < h; y++)
+        for (var x = 0; x < w; x++)
+            result[idx++] = array[x, y, z];
+
         return result;
     }
 
@@ -2630,35 +3132,128 @@ private void StreamedMatrixVectorProduct(float[] result, float[] vector)
     private void ReleaseGPUResources()
     {
         Logger.Log("[GeomechGPU] Releasing GPU buffers...");
-        
-        if (_bufNodeX != 0) { _cl.ReleaseMemObject(_bufNodeX); _bufNodeX = 0; }
-        if (_bufNodeY != 0) { _cl.ReleaseMemObject(_bufNodeY); _bufNodeY = 0; }
-        if (_bufNodeZ != 0) { _cl.ReleaseMemObject(_bufNodeZ); _bufNodeZ = 0; }
-        if (_bufElementBatch != 0) { _cl.ReleaseMemObject(_bufElementBatch); _bufElementBatch = 0; }
-        if (_bufElementE_Batch != 0) { _cl.ReleaseMemObject(_bufElementE_Batch); _bufElementE_Batch = 0; }
-        if (_bufElementNu_Batch != 0) { _cl.ReleaseMemObject(_bufElementNu_Batch); _bufElementNu_Batch = 0; }
-        if (_bufDisplacement != 0) { _cl.ReleaseMemObject(_bufDisplacement); _bufDisplacement = 0; }
-        if (_bufForce != 0) { _cl.ReleaseMemObject(_bufForce); _bufForce = 0; }
-        if (_bufIsDirichlet != 0) { _cl.ReleaseMemObject(_bufIsDirichlet); _bufIsDirichlet = 0; }
-        if (_bufDirichletValue != 0) { _cl.ReleaseMemObject(_bufDirichletValue); _bufDirichletValue = 0; }
-        
+
+        if (_bufNodeX != 0)
+        {
+            _cl.ReleaseMemObject(_bufNodeX);
+            _bufNodeX = 0;
+        }
+
+        if (_bufNodeY != 0)
+        {
+            _cl.ReleaseMemObject(_bufNodeY);
+            _bufNodeY = 0;
+        }
+
+        if (_bufNodeZ != 0)
+        {
+            _cl.ReleaseMemObject(_bufNodeZ);
+            _bufNodeZ = 0;
+        }
+
+        if (_bufElementBatch != 0)
+        {
+            _cl.ReleaseMemObject(_bufElementBatch);
+            _bufElementBatch = 0;
+        }
+
+        if (_bufElementE_Batch != 0)
+        {
+            _cl.ReleaseMemObject(_bufElementE_Batch);
+            _bufElementE_Batch = 0;
+        }
+
+        if (_bufElementNu_Batch != 0)
+        {
+            _cl.ReleaseMemObject(_bufElementNu_Batch);
+            _bufElementNu_Batch = 0;
+        }
+
+        if (_bufDisplacement != 0)
+        {
+            _cl.ReleaseMemObject(_bufDisplacement);
+            _bufDisplacement = 0;
+        }
+
+        if (_bufForce != 0)
+        {
+            _cl.ReleaseMemObject(_bufForce);
+            _bufForce = 0;
+        }
+
+        if (_bufIsDirichlet != 0)
+        {
+            _cl.ReleaseMemObject(_bufIsDirichlet);
+            _bufIsDirichlet = 0;
+        }
+
+        if (_bufDirichletValue != 0)
+        {
+            _cl.ReleaseMemObject(_bufDirichletValue);
+            _bufDirichletValue = 0;
+        }
+
         Logger.Log("[GeomechGPU] GPU buffers released");
     }
 
     private void ReleaseKernels()
     {
         Logger.Log("[GeomechGPU] Releasing kernels...");
-        
-        if (_kernelElementForce != 0) { _cl.ReleaseKernel(_kernelElementForce); _kernelElementForce = 0; }
-        if (_kernelCalcStress != 0) { _cl.ReleaseKernel(_kernelCalcStress); _kernelCalcStress = 0; }
-        if (_kernelPrincipalStress != 0) { _cl.ReleaseKernel(_kernelPrincipalStress); _kernelPrincipalStress = 0; }
-        if (_kernelEvaluateFailure != 0) { _cl.ReleaseKernel(_kernelEvaluateFailure); _kernelEvaluateFailure = 0; }
-        if (_kernelPlasticCorrection != 0) { _cl.ReleaseKernel(_kernelPlasticCorrection); _kernelPlasticCorrection = 0; }
-        if (_kernelPressureDiffusion != 0) { _cl.ReleaseKernel(_kernelPressureDiffusion); _kernelPressureDiffusion = 0; }
-        if (_kernelUpdateAperture != 0) { _cl.ReleaseKernel(_kernelUpdateAperture); _kernelUpdateAperture = 0; }
-        if (_kernelDetectFractures != 0) { _cl.ReleaseKernel(_kernelDetectFractures); _kernelDetectFractures = 0; }
-        if (_kernelThermalInit != 0) { _cl.ReleaseKernel(_kernelThermalInit); _kernelThermalInit = 0; }
-        
+
+        if (_kernelElementForce != 0)
+        {
+            _cl.ReleaseKernel(_kernelElementForce);
+            _kernelElementForce = 0;
+        }
+
+        if (_kernelCalcStress != 0)
+        {
+            _cl.ReleaseKernel(_kernelCalcStress);
+            _kernelCalcStress = 0;
+        }
+
+        if (_kernelPrincipalStress != 0)
+        {
+            _cl.ReleaseKernel(_kernelPrincipalStress);
+            _kernelPrincipalStress = 0;
+        }
+
+        if (_kernelEvaluateFailure != 0)
+        {
+            _cl.ReleaseKernel(_kernelEvaluateFailure);
+            _kernelEvaluateFailure = 0;
+        }
+
+        if (_kernelPlasticCorrection != 0)
+        {
+            _cl.ReleaseKernel(_kernelPlasticCorrection);
+            _kernelPlasticCorrection = 0;
+        }
+
+        if (_kernelPressureDiffusion != 0)
+        {
+            _cl.ReleaseKernel(_kernelPressureDiffusion);
+            _kernelPressureDiffusion = 0;
+        }
+
+        if (_kernelUpdateAperture != 0)
+        {
+            _cl.ReleaseKernel(_kernelUpdateAperture);
+            _kernelUpdateAperture = 0;
+        }
+
+        if (_kernelDetectFractures != 0)
+        {
+            _cl.ReleaseKernel(_kernelDetectFractures);
+            _kernelDetectFractures = 0;
+        }
+
+        if (_kernelThermalInit != 0)
+        {
+            _cl.ReleaseKernel(_kernelThermalInit);
+            _kernelThermalInit = 0;
+        }
+
         Logger.Log("[GeomechGPU] Kernels released");
     }
 }

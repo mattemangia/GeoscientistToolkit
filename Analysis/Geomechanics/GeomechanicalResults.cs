@@ -51,6 +51,16 @@ public partial class GeomechanicalResults
     public float FinalError { get; set; }
     public bool Converged { get; set; }
 
+    public float[,,] PlasticStrainField { get; set; }
+    public int YieldedVoxels { get; set; }
+    public float AveragePlasticStrain { get; set; }
+    public float[,,] DamageVariableField { get; set; } // D ∈ [0,1]
+    public int DamagedVoxels { get; set; }
+    public int CriticallyDamagedVoxels { get; set; }
+    public float AverageDamage { get; set; }
+
+    public float MaximumDamage { get; set; }
+
     // Context for visualization
     public byte[,,] MaterialLabels { get; set; }
     public GeomechanicalParameters Parameters { get; set; }

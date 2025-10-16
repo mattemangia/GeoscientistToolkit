@@ -30,6 +30,7 @@ public class GeomechanicalSimulationUI : IDisposable
     // Material selection
     private readonly HashSet<byte> _selectedMaterialIDs = new();
     private string _acousticDatasetPath = "";
+    private bool _applyDamageToStiffness = true;
     private float _aquiferPermeability = 1e-15f;
     private float _aquiferPressure = 15f;
     private bool _autoCropToSelection = true;
@@ -39,6 +40,10 @@ public class GeomechanicalSimulationUI : IDisposable
 
     // UI State
     private CtImageStackDataset _currentDataset;
+
+    private float _damageCriticalStrain = 0.01f;
+    private float _damageEvolutionRate = 100f;
+    private int _damageModelIndex; // 0=Exponential, 1=Linear
     private float _damageThreshold = 0.8f;
     private float _density = 2700f;
     private float _dilationAngle = 10f;
@@ -55,6 +60,7 @@ public class GeomechanicalSimulationUI : IDisposable
 
     // Memory management for huge datasets
     private bool _enableOffloading;
+    private bool _enablePlasticity;
 
     // Real-time visualization
     private bool _enableRealTimeViz = true;
@@ -93,6 +99,7 @@ public class GeomechanicalSimulationUI : IDisposable
     private string _offloadDirectory = "";
     private GeomechanicalParameters _params;
     private string _permeabilityCsvPath = "";
+    private float _plasticHardeningModulus = 1000f;
 
     // Integration
     private string _pnmDatasetPath = "";
@@ -880,12 +887,78 @@ public class GeomechanicalSimulationUI : IDisposable
 
         ImGui.Spacing();
         ImGui.Checkbox("Enable Damage Evolution", ref _enableDamageEvolution);
+        ImGui.Text("Damage Evolution:");
+        ImGui.Checkbox("Enable Damage Evolution", ref _enableDamageEvolution);
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip("Progressive material degradation based on strain history.\n" +
+                             "Damage variable D ∈ [0,1]: 0=intact, 1=fully damaged.");
+
         if (_enableDamageEvolution)
         {
             ImGui.Indent();
-            ImGui.DragFloat("Damage Threshold", ref _damageThreshold, 0.05f, 0.5f, 1f);
+
+            // Damage model selection
+            string[] damageModels = { "Exponential (Mazars)", "Linear" };
+            ImGui.Combo("Damage Model", ref _damageModelIndex, damageModels, damageModels.Length);
             if (ImGui.IsItemHovered())
-                ImGui.SetTooltip("Fraction of failure stress at which damage begins");
+            {
+                if (_damageModelIndex == 0)
+                    ImGui.SetTooltip("Exponential evolution: D = 1 - (ε₀/εₘₐₓ)·exp[-α(εₘₐₓ-ε₀)]");
+                else
+                    ImGui.SetTooltip("Linear evolution: D = (εₘₐₓ - ε₀)/(εf - ε₀)");
+            }
+
+            ImGui.Spacing();
+
+            ImGui.DragFloat("Damage Threshold", ref _damageThreshold, 0.0001f, 0.0001f, 0.01f, "%.4f");
+            if (ImGui.IsItemHovered())
+                ImGui.SetTooltip("Equivalent strain at which damage begins.\n" +
+                                 "Typical: 0.0005-0.002 for rocks");
+
+            ImGui.DragFloat("Critical Strain", ref _damageCriticalStrain, 0.001f, 0.001f, 0.1f, "%.4f");
+            if (ImGui.IsItemHovered())
+                ImGui.SetTooltip("Strain at complete failure (D→1).\n" +
+                                 "Typical: 0.005-0.02 for rocks");
+
+            if (_damageModelIndex == 0) // Exponential only
+            {
+                ImGui.DragFloat("Evolution Rate", ref _damageEvolutionRate, 10f, 10f, 1000f);
+                if (ImGui.IsItemHovered())
+                    ImGui.SetTooltip("Controls damage growth speed.\n" +
+                                     "Higher = faster damage accumulation.\n" +
+                                     "Typical: 50-200");
+            }
+
+            ImGui.Spacing();
+            ImGui.Checkbox("Apply Damage to Stiffness", ref _applyDamageToStiffness);
+            if (ImGui.IsItemHovered())
+                ImGui.SetTooltip("Reduces effective modulus: E_eff = (1-D)·E\n" +
+                                 "More realistic but may affect convergence");
+
+            ImGui.Spacing();
+            ImGui.TextColored(new Vector4(0.7f, 0.7f, 1f, 1),
+                "Damage is irreversible and accumulates with loading");
+
+            ImGui.Unindent();
+        }
+
+        ImGui.Spacing();
+        ImGui.Separator();
+        ImGui.Spacing();
+
+        ImGui.Text("Plasticity Settings:");
+        ImGui.Checkbox("Enable Plasticity", ref _enablePlasticity);
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip("Von Mises plasticity with isotropic hardening.\n" +
+                             "Corrects stresses that exceed yield criterion.");
+
+        if (_enablePlasticity)
+        {
+            ImGui.Indent();
+            ImGui.DragFloat("Hardening Modulus (MPa)", ref _plasticHardeningModulus, 10f, 100f, 10000f);
+            if (ImGui.IsItemHovered())
+                ImGui.SetTooltip("Controls strain hardening rate.\n" +
+                                 "Typical values: 500-2000 MPa for rocks");
             ImGui.Unindent();
         }
     }
@@ -1118,6 +1191,38 @@ public class GeomechanicalSimulationUI : IDisposable
             ImGui.Text($"Failed Voxels: {_lastResults.FailedVoxels:N0}");
             ImGui.Text($"Failure Percentage: {_lastResults.FailedVoxelPercentage:F2}%");
             ImGui.Unindent();
+            if (_lastResults.YieldedVoxels > 0)
+            {
+                ImGui.Spacing();
+                ImGui.Text("Plasticity Statistics:");
+                ImGui.Indent();
+                ImGui.Text($"Yielded Voxels: {_lastResults.YieldedVoxels:N0} " +
+                           $"({100f * _lastResults.YieldedVoxels / _lastResults.TotalVoxels:F2}%)");
+                ImGui.Text($"Average Plastic Strain: {_lastResults.AveragePlasticStrain:E4}");
+                ImGui.Unindent();
+            }
+
+            // Damage results
+            if (_lastResults.DamagedVoxels > 0)
+            {
+                ImGui.Spacing();
+                ImGui.Text("Damage Statistics:");
+                ImGui.Indent();
+                ImGui.Text($"Damaged Voxels: {_lastResults.DamagedVoxels:N0} " +
+                           $"({100f * _lastResults.DamagedVoxels / _lastResults.TotalVoxels:F2}%)");
+                ImGui.Text($"Critically Damaged: {_lastResults.CriticallyDamagedVoxels:N0}");
+                ImGui.Text($"Average Damage: {_lastResults.AverageDamage:F4}");
+                ImGui.Text($"Maximum Damage: {_lastResults.MaximumDamage:F4}");
+
+                // Visual indicator
+                var damageColor = _lastResults.MaximumDamage > 0.9f ? new Vector4(1, 0, 0, 1) :
+                    _lastResults.MaximumDamage > 0.5f ? new Vector4(1, 0.5f, 0, 1) :
+                    new Vector4(1, 1, 0, 1);
+
+                ImGui.ProgressBar(_lastResults.MaximumDamage, new Vector2(-1, 0),
+                    $"Max Damage: {_lastResults.MaximumDamage:P0}");
+                ImGui.Unindent();
+            }
 
             // Add geothermal and fluid results
             DrawFluidGeothermalResults();
@@ -1260,6 +1365,8 @@ public class GeomechanicalSimulationUI : IDisposable
                 TensileStrength = _tensileStrength,
                 Density = _density,
 
+                PlasticHardeningModulus = _plasticHardeningModulus,
+
                 // Loading conditions
                 LoadingMode = (LoadingMode)_loadingModeIndex,
                 Sigma1 = _sigma1,
@@ -1288,7 +1395,11 @@ public class GeomechanicalSimulationUI : IDisposable
                 Tolerance = _tolerance,
                 EnableDamageEvolution = _enableDamageEvolution,
                 DamageThreshold = _damageThreshold,
-                EnablePlasticity = false, // Can be added to UI if needed
+                EnablePlasticity = _enablePlasticity, // Can be added to UI if needed
+                DamageCriticalStrain = _damageCriticalStrain,
+                DamageEvolutionRate = _damageEvolutionRate,
+                DamageModel = (DamageModel)_damageModelIndex,
+                ApplyDamageToStiffness = _applyDamageToStiffness,
 
                 // Memory management
                 EnableOffloading = _enableOffloading,

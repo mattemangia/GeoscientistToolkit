@@ -296,6 +296,25 @@ public class GeomechanicalExportManager : IDisposable
         sb.AppendLine($"Total Voxels,{results.TotalVoxels},");
         sb.AppendLine($"Failed Voxels,{results.FailedVoxels},");
         sb.AppendLine($"Failure Percentage,{results.FailedVoxelPercentage:F2},%");
+// Plasticity statistics
+        if (results.YieldedVoxels > 0)
+        {
+            sb.AppendLine();
+            sb.AppendLine("Plasticity Results");
+            sb.AppendLine($"Yielded Voxels,{results.YieldedVoxels},");
+            sb.AppendLine($"Average Plastic Strain,{results.AveragePlasticStrain:E4},");
+        }
+
+        // Damage statistics
+        if (results.DamagedVoxels > 0)
+        {
+            sb.AppendLine();
+            sb.AppendLine("Damage Evolution Results");
+            sb.AppendLine($"Damaged Voxels,{results.DamagedVoxels},");
+            sb.AppendLine($"Critically Damaged Voxels,{results.CriticallyDamagedVoxels},");
+            sb.AppendLine($"Average Damage,{results.AverageDamage:F4},");
+            sb.AppendLine($"Maximum Damage,{results.MaximumDamage:F4},");
+        }
 
         // Geothermal statistics
         if (results.TemperatureField != null)

@@ -66,8 +66,15 @@ public partial class GeomechanicalParameters
     public bool UseGPU { get; set; } = true;
     public int MaxIterations { get; set; } = 1000;
     public float Tolerance { get; set; } = 1e-4f;
-    public bool EnableDamageEvolution { get; set; } = true;
-    public float DamageThreshold { get; set; } = 0.8f; // Fraction of strength
+
+    public bool EnableDamageEvolution { get; set; }
+    public float DamageThreshold { get; set; } = 0.001f; // Strain at which damage initiates
+    public float DamageCriticalStrain { get; set; } = 0.01f; // Strain at complete failure
+    public float DamageEvolutionRate { get; set; } = 100f; // Controls damage growth speed
+    public DamageModel DamageModel { get; set; } = DamageModel.Exponential;
+    public bool ApplyDamageToStiffness { get; set; } = true; // Degrade material stiffness
+
+    public float PlasticHardeningModulus { get; set; } = 1000f; // MPa
 
     // Memory management for huge datasets
     public bool EnableOffloading { get; set; } = false;

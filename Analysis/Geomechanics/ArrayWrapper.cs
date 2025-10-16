@@ -1,25 +1,23 @@
 // GeoscientistToolkit/Analysis/Geomechanics/ArrayWrapper.cs
-using System;
-using System.IO;
-using System.Numerics;
+
 using System.Runtime.InteropServices;
 
 namespace GeoscientistToolkit.Analysis.Geomechanics;
 
 /// <summary>
-/// Abstract base class to provide array-like access to data that could be in memory or on disk.
+///     Abstract base class to provide array-like access to data that could be in memory or on disk.
 /// </summary>
 public abstract class ArrayWrapper<T> : IDisposable where T : struct
 {
     public long Length { get; protected set; }
     public abstract T this[long index] { get; set; }
+    public abstract void Dispose();
     public abstract void ReadChunk(long startIndex, T[] buffer);
     public abstract void WriteChunk(long startIndex, T[] buffer);
-    public abstract void Dispose();
 }
 
 /// <summary>
-/// An ArrayWrapper that uses a standard in-memory T[] array.
+///     An ArrayWrapper that uses a standard in-memory T[] array.
 /// </summary>
 public class MemoryBackedArray<T> : ArrayWrapper<T> where T : struct
 {
@@ -30,7 +28,7 @@ public class MemoryBackedArray<T> : ArrayWrapper<T> where T : struct
         Length = size;
         _data = new T[size];
     }
-    
+
     public MemoryBackedArray(T[] existingData)
     {
         Length = existingData.Length;
@@ -47,30 +45,34 @@ public class MemoryBackedArray<T> : ArrayWrapper<T> where T : struct
     {
         Array.Copy(_data, startIndex, buffer, 0, buffer.Length);
     }
-    
+
     public override void WriteChunk(long startIndex, T[] buffer)
     {
         Array.Copy(buffer, 0, _data, startIndex, buffer.Length);
     }
-    
+
     // Nothing to dispose for in-memory array
-    public override void Dispose() { }
+    public override void Dispose()
+    {
+    }
 
     // Allows direct access to the underlying array when not offloading
-    public T[] GetInternalArray() => _data;
+    public T[] GetInternalArray()
+    {
+        return _data;
+    }
 }
 
-
 /// <summary>
-/// An ArrayWrapper that stores data in a temporary file on disk.
+///     An ArrayWrapper that stores data in a temporary file on disk.
 /// </summary>
 public class DiskBackedArray<T> : ArrayWrapper<T> where T : struct
 {
     private readonly string _filePath;
-    private readonly FileStream _stream;
     private readonly BinaryReader _reader;
-    private readonly BinaryWriter _writer;
+    private readonly FileStream _stream;
     private readonly int _typeSize;
+    private readonly BinaryWriter _writer;
 
     public DiskBackedArray(long size, string offloadDirectory)
     {
@@ -124,6 +126,7 @@ public class DiskBackedArray<T> : ArrayWrapper<T> where T : struct
             _stream.Seek(startIndex * _typeSize, SeekOrigin.Begin);
             _stream.Read(bytes, 0, bytesToRead);
         }
+
         Buffer.BlockCopy(bytes, 0, buffer, 0, bytesToRead);
     }
 
@@ -146,10 +149,7 @@ public class DiskBackedArray<T> : ArrayWrapper<T> where T : struct
         _stream?.Dispose();
         try
         {
-            if (File.Exists(_filePath))
-            {
-                File.Delete(_filePath);
-            }
+            if (File.Exists(_filePath)) File.Delete(_filePath);
         }
         catch (Exception ex)
         {
