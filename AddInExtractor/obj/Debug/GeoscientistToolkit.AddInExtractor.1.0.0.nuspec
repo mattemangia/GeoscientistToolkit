@@ -8,7 +8,7 @@
     <packageTypes>
       <packageType name="DotnetTool" />
     </packageTypes>
-    <repository type="git" commit="e6fdde535f78f1a9c8371fb49cc94f6804e6abf7" />
+    <repository type="git" commit="09c9a434a732e98fc9f8da526026e22b18ff5407" />
   </metadata>
   <files>
     <file src="/Users/matteo/RiderProjects/GeoscientistToolkit/AddInExtractor/obj/DotnetToolSettings.xml" target="tools/net8.0/any/DotnetToolSettings.xml" />
