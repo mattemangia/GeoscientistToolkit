@@ -1360,7 +1360,7 @@ public class GeomechanicalSimulationUI : IDisposable
 
             var progress = new Progress<float>(p =>
             {
-                var status = p < 0.4f ? "Initializing..." :
+                var status = p < 0.4f ? "Running PCG Solver..." :
                     p < 0.8f ? "Equilibrating stress field..." :
                     p < 0.9f ? "Calculating principal stresses..." :
                     p < 0.95f ? "Evaluating failure..." :
