@@ -1,6 +1,7 @@
 // GeoscientistToolkit/Analysis/Geomechanics/GeomechanicalSimulatorCPU_FluidGeothermal.cs
 // Partial class extension for geothermal and hydraulic fracturing simulations
 
+using System.Collections.Concurrent;
 using System.Numerics;
 using System.Runtime.CompilerServices;
 using GeoscientistToolkit.Util;
@@ -23,70 +24,116 @@ public partial class GeomechanicalSimulatorCPU
     private float[,,] _temperature;
 
     private void InitializeGeothermalAndFluid(byte[,,] labels, BoundingBox extent)
+{
+    var w = extent.Width;
+    var h = extent.Height;
+    var d = extent.Depth;
+    
+    Logger.Log("[GeomechCPU] Initializing geothermal and fluid fields...");
+    
+    // Use disk-backed arrays for large datasets
+    bool useOffload = _params.EnableOffloading || ((long)w * h * d * 4) > 100_000_000; // >100MB per array
+    string offloadDir = _params.OffloadDirectory ?? Path.GetTempPath();
+    
+    if (useOffload)
     {
-        var w = extent.Width;
-        var h = extent.Height;
-        var d = extent.Depth;
-
-        Logger.Log("[GeomechCPU] Initializing geothermal and fluid fields...");
-
-        // Initialize temperature field with geothermal gradient
-        if (_params.EnableGeothermal)
-        {
-            _temperature = new float[w, h, d];
-            var dx = _params.PixelSize / 1e6f; // m
-
-            Parallel.For(0, d, z =>
-            {
-                // Depth in meters from surface (assuming Z is vertical)
-                var depth_m = z * dx;
-                var temp = _params.SurfaceTemperature + _params.GeothermalGradient / 1000f * depth_m;
-
-                for (var y = 0; y < h; y++)
-                for (var x = 0; x < w; x++)
-                    if (labels[x, y, z] != 0) // Only in material
-                        _temperature[x, y, z] = temp;
-            });
-
-            Logger.Log($"[GeomechCPU] Temperature range: {_params.SurfaceTemperature:F1}°C to " +
-                       $"{_params.SurfaceTemperature + _params.GeothermalGradient / 1000f * d * dx:F1}°C");
-        }
-
-        // Initialize pressure field
-        if (_params.EnableFluidInjection || _params.UsePorePressure)
-        {
-            _pressure = new float[w, h, d];
-            _fluidSaturation = new float[w, h, d];
-            _fractureAperture = new float[w, h, d];
-            _isConnectedToInjection = new bool[w, h, d];
-
-            var P0 = _params.InitialPorePressure * 1e6f; // Pa
-            var dx = _params.PixelSize / 1e6f;
-            var rho_water = 1000f; // kg/m³
-            var g = 9.81f; // m/s²
-
-            Parallel.For(0, d, z =>
-            {
-                var depth_m = z * dx;
-                var hydrostaticP = P0 + rho_water * g * depth_m;
-
-                for (var y = 0; y < h; y++)
-                for (var x = 0; x < w; x++)
-                    if (labels[x, y, z] != 0)
-                    {
-                        _pressure[x, y, z] = hydrostaticP;
-                        _fluidSaturation[x, y, z] = _params.Porosity; // Initial saturation
-                    }
-                    else if (_params.EnableAquifer)
-                    {
-                        // Aquifer boundary condition on exterior
-                        _pressure[x, y, z] = _params.AquiferPressure * 1e6f;
-                    }
-            });
-
-            Logger.Log($"[GeomechCPU] Initial pressure: {P0 / 1e6f:F1} MPa (hydrostatic)");
-        }
+        Directory.CreateDirectory(offloadDir);
+        Logger.Log($"[GeomechCPU] Using disk-backed arrays for fluid/thermal fields");
     }
+    
+    // Initialize temperature field with geothermal gradient
+    if (_params.EnableGeothermal)
+    {
+        // Don't allocate full array - calculate on demand or use sparse storage
+        _temperature = new float[w, h, d];
+        var dx = _params.PixelSize / 1e6f; // m
+        
+        // Process in slices to avoid memory spike
+        const int SLICE_SIZE = 10;
+        Parallel.For(0, (d + SLICE_SIZE - 1) / SLICE_SIZE, sliceIdx =>
+        {
+            int startZ = sliceIdx * SLICE_SIZE;
+            int endZ = Math.Min(startZ + SLICE_SIZE, d);
+            
+            for (int z = startZ; z < endZ; z++)
+            {
+                float depth_m = z * dx;
+                float temp = _params.SurfaceTemperature + _params.GeothermalGradient / 1000f * depth_m;
+                
+                for (int y = 0; y < h; y++)
+                {
+                    for (int x = 0; x < w; x++)
+                    {
+                        if (labels[x, y, z] != 0)
+                            _temperature[x, y, z] = temp;
+                    }
+                }
+            }
+        });
+        
+        Logger.Log($"[GeomechCPU] Temperature range: {_params.SurfaceTemperature:F1}°C to " +
+                   $"{_params.SurfaceTemperature + _params.GeothermalGradient / 1000f * d * dx:F1}°C");
+    }
+    
+    // Initialize pressure field
+    if (_params.EnableFluidInjection || _params.UsePorePressure)
+    {
+        _pressure = new float[w, h, d];
+        _fluidSaturation = new float[w, h, d];
+        _fractureAperture = new float[w, h, d];
+        _isConnectedToInjection = new bool[w, h, d];
+        
+        var P0 = _params.InitialPorePressure * 1e6f; // Pa
+        var dx = _params.PixelSize / 1e6f;
+        var rho_water = 1000f; // kg/m³
+        var g = 9.81f; // m/s²
+        
+        // Initialize in chunks
+        const int CHUNK_SIZE = 16;
+        int numChunks = ((w + CHUNK_SIZE - 1) / CHUNK_SIZE) * 
+                       ((h + CHUNK_SIZE - 1) / CHUNK_SIZE) * 
+                       ((d + CHUNK_SIZE - 1) / CHUNK_SIZE);
+        
+        Parallel.For(0, numChunks, chunkIdx =>
+        {
+            int chunksPerSlice = ((w + CHUNK_SIZE - 1) / CHUNK_SIZE) * ((h + CHUNK_SIZE - 1) / CHUNK_SIZE);
+            int cz = chunkIdx / chunksPerSlice;
+            int cy = (chunkIdx % chunksPerSlice) / ((w + CHUNK_SIZE - 1) / CHUNK_SIZE);
+            int cx = chunkIdx % ((w + CHUNK_SIZE - 1) / CHUNK_SIZE);
+            
+            int startX = cx * CHUNK_SIZE;
+            int startY = cy * CHUNK_SIZE;
+            int startZ = cz * CHUNK_SIZE;
+            int endX = Math.Min(startX + CHUNK_SIZE, w);
+            int endY = Math.Min(startY + CHUNK_SIZE, h);
+            int endZ = Math.Min(startZ + CHUNK_SIZE, d);
+            
+            for (int z = startZ; z < endZ; z++)
+            {
+                float depth_m = z * dx;
+                float hydrostaticP = P0 + rho_water * g * depth_m;
+                
+                for (int y = startY; y < endY; y++)
+                {
+                    for (int x = startX; x < endX; x++)
+                    {
+                        if (labels[x, y, z] != 0)
+                        {
+                            _pressure[x, y, z] = hydrostaticP;
+                            _fluidSaturation[x, y, z] = _params.Porosity;
+                        }
+                        else if (_params.EnableAquifer)
+                        {
+                            _pressure[x, y, z] = _params.AquiferPressure * 1e6f;
+                        }
+                    }
+                }
+            }
+        });
+        
+        Logger.Log($"[GeomechCPU] Initial pressure: {P0 / 1e6f:F1} MPa (hydrostatic)");
+    }
+}
 
     private void SimulateFluidInjectionAndFracturing(GeomechanicalResults results, byte[,,] labels,
         IProgress<float> progress, CancellationToken token)
@@ -238,90 +285,124 @@ public partial class GeomechanicalSimulatorCPU
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private void DiffusePressure(byte[,,] labels, float dx, float dt)
+private void DiffusePressure(byte[,,] labels, float dx, float dt)
+{
+    var w = labels.GetLength(0);
+    var h = labels.GetLength(1);
+    var d = labels.GetLength(2);
+    
+    // Proper poroelastic diffusion parameters
+    var k = _params.RockPermeability; // m²
+    var mu = _params.FluidViscosity; // Pa·s
+    var phi = _params.Porosity; // fraction
+    var K_s = 36e9f; // Solid grain bulk modulus (Pa)
+    var K_f = 2.2e9f; // Fluid bulk modulus (Pa)
+    var K_d = _params.YoungModulus * 1e6f / (3f * (1f - 2f * _params.PoissonRatio));
+    var alpha = _params.BiotCoefficient;
+    
+    var S_storage = phi / K_f + (alpha - phi) / K_s;
+    var c_total = S_storage / phi;
+    var diffusivity = k / (phi * mu * c_total);
+    
+    var alpha_cfl = diffusivity * dt / (dx * dx);
+    if (alpha_cfl > 0.16667f)
     {
-        var w = labels.GetLength(0);
-        var h = labels.GetLength(1);
-        var d = labels.GetLength(2);
-
-        // Proper poroelastic diffusion parameters
-        var k = _params.RockPermeability; // m²
-        var mu = _params.FluidViscosity; // Pa·s
-        var phi = _params.Porosity; // fraction
-        var K_s = 36e9f; // Solid grain bulk modulus (Pa) - typical for quartz
-        var K_f = 2.2e9f; // Fluid bulk modulus (Pa) - water at room temp
-        var K_d = _params.YoungModulus * 1e6f / (3f * (1f - 2f * _params.PoissonRatio)); // Drained bulk modulus
-        var alpha = _params.BiotCoefficient; // Biot coefficient
-
-        // Storage coefficient (proper derivation from Biot theory)
-        // S = φ/K_f + (α - φ)/K_s
-        var S_storage = phi / K_f + (alpha - phi) / K_s;
-
-        // Total compressibility (fluid + pore space)
-        // c_t = S_storage / φ
-        var c_total = S_storage / phi;
-
-        // Hydraulic diffusivity: D = k/(φ·μ·c_t)
-        var diffusivity = k / (phi * mu * c_total);
-
-        // Stability condition: α ≤ 0.25 for explicit scheme (3D)
-        var alpha_cfl = diffusivity * dt / (dx * dx);
-        if (alpha_cfl > 0.16667f) // 1/6 for 3D stability
-        {
-            alpha_cfl = 0.16667f;
-            Logger.LogWarning($"[GeomechCPU] Fluid time step reduced for stability: α_CFL = {alpha_cfl:E3}");
-        }
-
-        var pressureNew = (float[,,])_pressure.Clone();
-
-        Parallel.For(1, d - 1, z =>
-        {
-            for (var y = 1; y < h - 1; y++)
-            for (var x = 1; x < w - 1; x++)
-            {
-                if (labels[x, y, z] == 0)
-                {
-                    if (_params.EnableAquifer)
-                        pressureNew[x, y, z] = _params.AquiferPressure * 1e6f;
-                    continue;
-                }
-
-                var P_c = _pressure[x, y, z];
-
-                // Get neighbor pressures with boundary handling
-                var P_xp = x + 1 < w && labels[x + 1, y, z] != 0 ? _pressure[x + 1, y, z] :
-                    _params.EnableAquifer ? _params.AquiferPressure * 1e6f : P_c;
-                var P_xm = x - 1 >= 0 && labels[x - 1, y, z] != 0 ? _pressure[x - 1, y, z] :
-                    _params.EnableAquifer ? _params.AquiferPressure * 1e6f : P_c;
-                var P_yp = y + 1 < h && labels[x, y + 1, z] != 0 ? _pressure[x, y + 1, z] :
-                    _params.EnableAquifer ? _params.AquiferPressure * 1e6f : P_c;
-                var P_ym = y - 1 >= 0 && labels[x, y - 1, z] != 0 ? _pressure[x, y - 1, z] :
-                    _params.EnableAquifer ? _params.AquiferPressure * 1e6f : P_c;
-                var P_zp = z + 1 < d && labels[x, y, z + 1] != 0 ? _pressure[x, y, z + 1] :
-                    _params.EnableAquifer ? _params.AquiferPressure * 1e6f : P_c;
-                var P_zm = z - 1 >= 0 && labels[x, y, z - 1] != 0 ? _pressure[x, y, z - 1] :
-                    _params.EnableAquifer ? _params.AquiferPressure * 1e6f : P_c;
-
-                // 7-point stencil Laplacian with gravity correction
-                var rho_f = _params.FluidDensity;
-                var g = 9.81f;
-
-                // Gravity affects vertical pressure gradient
-                var gravity_correction = rho_f * g * dx; // Pa/voxel in vertical direction
-
-                var laplacian = P_xp + P_xm + P_yp + P_ym +
-                    (P_zp - gravity_correction) + (P_zm + gravity_correction) - 6f * P_c;
-
-                pressureNew[x, y, z] = P_c + alpha_cfl * laplacian;
-
-                // Physical bounds: pressure cannot be negative
-                if (pressureNew[x, y, z] < 0f)
-                    pressureNew[x, y, z] = 0f;
-            }
-        });
-
-        _pressure = pressureNew;
+        alpha_cfl = 0.16667f;
+        Logger.LogWarning($"[GeomechCPU] Fluid time step reduced for stability: α_CFL = {alpha_cfl:E3}");
     }
+    
+    var rho_f = _params.FluidDensity;
+    var g = 9.81f;
+    var gravity_correction = rho_f * g * dx;
+    
+    // Use double buffering instead of cloning entire array
+    // Process in-place with temporary buffer for each slice
+    const int SLICE_SIZE = 4;
+    int numSlices = (d + SLICE_SIZE - 1) / SLICE_SIZE;
+    
+    Parallel.For(0, numSlices, sliceIdx =>
+    {
+        int startZ = Math.Max(1, sliceIdx * SLICE_SIZE);
+        int endZ = Math.Min((sliceIdx + 1) * SLICE_SIZE, d - 1);
+        
+        // Local buffer for this slice
+        var sliceBuffer = new float[w, endZ - startZ + 2, 3]; // +2 for boundary, 3 for triple buffering
+        
+        // Copy current values to buffer
+        for (int z = startZ - 1; z <= endZ; z++)
+        {
+            if (z < 0 || z >= d) continue;
+            int bufZ = z - startZ + 1;
+            for (int y = 0; y < h; y++)
+            {
+                for (int x = 0; x < w; x++)
+                {
+                    sliceBuffer[x, bufZ, 0] = _pressure[x, y, z];
+                }
+            }
+        }
+        
+        // Process diffusion in slice
+        for (int z = startZ; z < endZ; z++)
+        {
+            int bufZ = z - startZ + 1;
+            
+            for (int y = 1; y < h - 1; y++)
+            {
+                for (int x = 1; x < w - 1; x++)
+                {
+                    if (labels[x, y, z] == 0)
+                    {
+                        if (_params.EnableAquifer)
+                            sliceBuffer[x, bufZ, 1] = _params.AquiferPressure * 1e6f;
+                        continue;
+                    }
+                    
+                    float P_c = sliceBuffer[x, bufZ, 0];
+                    
+                    // Get neighbor pressures
+                    float P_xp = (x + 1 < w && labels[x + 1, y, z] != 0) ? 
+                        _pressure[x + 1, y, z] : (_params.EnableAquifer ? _params.AquiferPressure * 1e6f : P_c);
+                    float P_xm = (x - 1 >= 0 && labels[x - 1, y, z] != 0) ? 
+                        _pressure[x - 1, y, z] : (_params.EnableAquifer ? _params.AquiferPressure * 1e6f : P_c);
+                    float P_yp = (y + 1 < h && labels[x, y + 1, z] != 0) ? 
+                        _pressure[x, y + 1, z] : (_params.EnableAquifer ? _params.AquiferPressure * 1e6f : P_c);
+                    float P_ym = (y - 1 >= 0 && labels[x, y - 1, z] != 0) ? 
+                        _pressure[x, y - 1, z] : (_params.EnableAquifer ? _params.AquiferPressure * 1e6f : P_c);
+                    float P_zp = sliceBuffer[x, Math.Min(bufZ + 1, sliceBuffer.GetLength(1) - 1), 0];
+                    float P_zm = sliceBuffer[x, Math.Max(bufZ - 1, 0), 0];
+                    
+                    if (z + 1 >= d || labels[x, y, z + 1] == 0)
+                        P_zp = _params.EnableAquifer ? _params.AquiferPressure * 1e6f : P_c;
+                    if (z - 1 < 0 || labels[x, y, z - 1] == 0)
+                        P_zm = _params.EnableAquifer ? _params.AquiferPressure * 1e6f : P_c;
+                    
+                    // Apply diffusion with gravity
+                    float laplacian = P_xp + P_xm + P_yp + P_ym +
+                        (P_zp - gravity_correction) + (P_zm + gravity_correction) - 6f * P_c;
+                    
+                    sliceBuffer[x, bufZ, 1] = Math.Max(0f, P_c + alpha_cfl * laplacian);
+                }
+            }
+        }
+        
+        // Write back to main array
+        for (int z = startZ; z < endZ; z++)
+        {
+            int bufZ = z - startZ + 1;
+            for (int y = 1; y < h - 1; y++)
+            {
+                for (int x = 1; x < w - 1; x++)
+                {
+                    if (labels[x, y, z] != 0)
+                    {
+                        _pressure[x, y, z] = sliceBuffer[x, bufZ, 1];
+                    }
+                }
+            }
+        }
+    });
+}
 
     private void UpdateEffectiveStress(GeomechanicalResults results, byte[,,] labels)
     {
@@ -497,193 +578,180 @@ public partial class GeomechanicalSimulatorCPU
     }
 
     private void EnhancedDiffusionThroughFractures(byte[,,] labels, float dx, float dt)
+{
+    var w = labels.GetLength(0);
+    var h = labels.GetLength(1);
+    var d = labels.GetLength(2);
+    
+    var mu = _params.FluidViscosity;
+    var rho_f = _params.FluidDensity;
+    var g = 9.81f;
+    var phi = _params.Porosity;
+    var c_t = 1e-9f; // Total compressibility (Pa⁻¹)
+    
+    // Process in slices with double buffering
+    const int SLICE_SIZE = 8;
+    var slicePressureUpdates = new ConcurrentDictionary<(int, int, int), float>();
+    
+    Parallel.For(0, (d + SLICE_SIZE - 1) / SLICE_SIZE, sliceIdx =>
     {
-        var w = labels.GetLength(0);
-        var h = labels.GetLength(1);
-        var d = labels.GetLength(2);
-
-        var mu = _params.FluidViscosity;
-        var rho_f = _params.FluidDensity;
-        var g = 9.81f;
-
-        // Cubic law for fracture flow: q = -w³/(12μ) · ∇P
-        // Resulting in fracture permeability: k_f = w²/12
-
-        var pressureNew = (float[,,])_pressure.Clone();
-
-        Parallel.For(1, d - 1, z =>
+        int startZ = Math.Max(1, sliceIdx * SLICE_SIZE);
+        int endZ = Math.Min(startZ + SLICE_SIZE, d - 1);
+        
+        for (int z = startZ; z < endZ; z++)
         {
-            for (var y = 1; y < h - 1; y++)
-            for (var x = 1; x < w - 1; x++)
+            for (int y = 1; y < h - 1; y++)
             {
-                if (labels[x, y, z] == 0) continue;
-
-                var P_c = _pressure[x, y, z];
-                var aperture_c = _fractureAperture[x, y, z];
-
-                // Check if this voxel or any neighbor is fractured
-                var is_in_fracture_zone = aperture_c > _params.MinimumFractureAperture;
-
-                if (!is_in_fracture_zone)
+                for (int x = 1; x < w - 1; x++)
                 {
-                    // Check neighbors
-                    if (x > 0 && _fractureAperture[x - 1, y, z] > _params.MinimumFractureAperture)
-                        is_in_fracture_zone = true;
-                    if (x < w - 1 && _fractureAperture[x + 1, y, z] > _params.MinimumFractureAperture)
-                        is_in_fracture_zone = true;
-                    if (y > 0 && _fractureAperture[x, y - 1, z] > _params.MinimumFractureAperture)
-                        is_in_fracture_zone = true;
-                    if (y < h - 1 && _fractureAperture[x, y + 1, z] > _params.MinimumFractureAperture)
-                        is_in_fracture_zone = true;
-                    if (z > 0 && _fractureAperture[x, y, z - 1] > _params.MinimumFractureAperture)
-                        is_in_fracture_zone = true;
-                    if (z < d - 1 && _fractureAperture[x, y, z + 1] > _params.MinimumFractureAperture)
-                        is_in_fracture_zone = true;
-                }
-
-                if (!is_in_fracture_zone) continue;
-
-                // Calculate enhanced diffusion using harmonic mean of interface permeabilities
-                var flux_sum = 0f;
-                var flux_count = 0;
-
-                // X-direction
-                if (x + 1 < w && labels[x + 1, y, z] != 0)
-                {
-                    var aperture_xp = _fractureAperture[x + 1, y, z];
-                    var aperture_interface =
-                        2f / (1f / (aperture_c + 1e-12f) + 1f / (aperture_xp + 1e-12f)); // Harmonic mean
-                    var k_interface = aperture_interface * aperture_interface / 12f;
-                    var conductivity = k_interface / mu;
-                    var gradP = (_pressure[x + 1, y, z] - P_c) / dx;
-                    flux_sum += conductivity * gradP;
-                    flux_count++;
-                }
-
-                if (x - 1 >= 0 && labels[x - 1, y, z] != 0)
-                {
-                    var aperture_xm = _fractureAperture[x - 1, y, z];
-                    var aperture_interface = 2f / (1f / (aperture_c + 1e-12f) + 1f / (aperture_xm + 1e-12f));
-                    var k_interface = aperture_interface * aperture_interface / 12f;
-                    var conductivity = k_interface / mu;
-                    var gradP = (P_c - _pressure[x - 1, y, z]) / dx;
-                    flux_sum += conductivity * gradP;
-                    flux_count++;
-                }
-
-                // Y-direction
-                if (y + 1 < h && labels[x, y + 1, z] != 0)
-                {
-                    var aperture_yp = _fractureAperture[x, y + 1, z];
-                    var aperture_interface = 2f / (1f / (aperture_c + 1e-12f) + 1f / (aperture_yp + 1e-12f));
-                    var k_interface = aperture_interface * aperture_interface / 12f;
-                    var conductivity = k_interface / mu;
-                    var gradP = (_pressure[x, y + 1, z] - P_c) / dx;
-                    flux_sum += conductivity * gradP;
-                    flux_count++;
-                }
-
-                if (y - 1 >= 0 && labels[x, y - 1, z] != 0)
-                {
-                    var aperture_ym = _fractureAperture[x, y - 1, z];
-                    var aperture_interface = 2f / (1f / (aperture_c + 1e-12f) + 1f / (aperture_ym + 1e-12f));
-                    var k_interface = aperture_interface * aperture_interface / 12f;
-                    var conductivity = k_interface / mu;
-                    var gradP = (P_c - _pressure[x, y - 1, z]) / dx;
-                    flux_sum += conductivity * gradP;
-                    flux_count++;
-                }
-
-                // Z-direction (with gravity)
-                if (z + 1 < d && labels[x, y, z + 1] != 0)
-                {
-                    var aperture_zp = _fractureAperture[x, y, z + 1];
-                    var aperture_interface = 2f / (1f / (aperture_c + 1e-12f) + 1f / (aperture_zp + 1e-12f));
-                    var k_interface = aperture_interface * aperture_interface / 12f;
-                    var conductivity = k_interface / mu;
-                    var gradP = (_pressure[x, y, z + 1] - P_c) / dx - rho_f * g;
-                    flux_sum += conductivity * gradP;
-                    flux_count++;
-                }
-
-                if (z - 1 >= 0 && labels[x, y, z - 1] != 0)
-                {
-                    var aperture_zm = _fractureAperture[x, y, z - 1];
-                    var aperture_interface = 2f / (1f / (aperture_c + 1e-12f) + 1f / (aperture_zm + 1e-12f));
-                    var k_interface = aperture_interface * aperture_interface / 12f;
-                    var conductivity = k_interface / mu;
-                    var gradP = (P_c - _pressure[x, y, z - 1]) / dx + rho_f * g;
-                    flux_sum += conductivity * gradP;
-                    flux_count++;
-                }
-
-                if (flux_count > 0)
-                {
-                    // Conservation of mass: ∂P/∂t = -(1/(φ·c_t)) · ∇·q
-                    // Simplified explicit update
-                    var phi = _params.Porosity;
-                    var c_t = 1e-9f; // Total compressibility (Pa⁻¹)
-                    var dP_dt = -(1f / (phi * c_t)) * flux_sum / flux_count;
-
-                    pressureNew[x, y, z] = P_c + dP_dt * dt;
-
-                    // Stability limit
-                    var max_dP = 10e6f; // 10 MPa per time step
-                    if (Math.Abs(pressureNew[x, y, z] - P_c) > max_dP)
-                        pressureNew[x, y, z] = P_c + Math.Sign(dP_dt) * max_dP;
-                }
-            }
-        });
-
-        _pressure = pressureNew;
-    }
-
-    private void UpdateFractureConnectivity(int injX, int injY, int injZ, byte[,,] labels)
-    {
-        var w = labels.GetLength(0);
-        var h = labels.GetLength(1);
-        var d = labels.GetLength(2);
-
-        // Flood fill from injection point through fracture network
-        var queue = new Queue<(int, int, int)>();
-        var visited = new bool[w, h, d];
-
-        queue.Enqueue((injX, injY, injZ));
-        visited[injX, injY, injZ] = true;
-        _isConnectedToInjection[injX, injY, injZ] = true;
-
-        while (queue.Count > 0)
-        {
-            var (x, y, z) = queue.Dequeue();
-
-            // Check 6 neighbors
-            var neighbors = new[]
-            {
-                (x + 1, y, z), (x - 1, y, z),
-                (x, y + 1, z), (x, y - 1, z),
-                (x, y, z + 1), (x, y, z - 1)
-            };
-
-            foreach (var (nx, ny, nz) in neighbors)
-            {
-                if (nx < 0 || nx >= w || ny < 0 || ny >= h || nz < 0 || nz >= d) continue;
-                if (visited[nx, ny, nz]) continue;
-                if (labels[nx, ny, nz] == 0) continue;
-
-                // Can traverse if fractured or high pressure gradient
-                var isFractured = _fractureAperture[nx, ny, nz] > _params.MinimumFractureAperture;
-                var pressureGradient = Math.Abs(_pressure[nx, ny, nz] - _pressure[x, y, z]);
-                var isHighPressure = pressureGradient > 1e6f; // 1 MPa gradient
-
-                if (isFractured || isHighPressure)
-                {
-                    visited[nx, ny, nz] = true;
-                    _isConnectedToInjection[nx, ny, nz] = true;
-                    queue.Enqueue((nx, ny, nz));
+                    if (labels[x, y, z] == 0) continue;
+                    
+                    float aperture_c = _fractureAperture[x, y, z];
+                    bool is_in_fracture = aperture_c > _params.MinimumFractureAperture;
+                    
+                    if (!is_in_fracture)
+                    {
+                        // Check neighbors for fracture
+                        if ((x > 0 && _fractureAperture[x - 1, y, z] > _params.MinimumFractureAperture) ||
+                            (x < w - 1 && _fractureAperture[x + 1, y, z] > _params.MinimumFractureAperture) ||
+                            (y > 0 && _fractureAperture[x, y - 1, z] > _params.MinimumFractureAperture) ||
+                            (y < h - 1 && _fractureAperture[x, y + 1, z] > _params.MinimumFractureAperture) ||
+                            (z > 0 && _fractureAperture[x, y, z - 1] > _params.MinimumFractureAperture) ||
+                            (z < d - 1 && _fractureAperture[x, y, z + 1] > _params.MinimumFractureAperture))
+                        {
+                            is_in_fracture = true;
+                        }
+                    }
+                    
+                    if (!is_in_fracture) continue;
+                    
+                    float P_c = _pressure[x, y, z];
+                    float flux_sum = 0f;
+                    int flux_count = 0;
+                    
+                    // Calculate fluxes in each direction
+                    Action<int, int, int> processNeighbor = (nx, ny, nz) =>
+                    {
+                        if (nx >= 0 && nx < w && ny >= 0 && ny < h && nz >= 0 && nz < d && labels[nx, ny, nz] != 0)
+                        {
+                            float aperture_n = _fractureAperture[nx, ny, nz];
+                            float aperture_interface = 2f / (1f / (aperture_c + 1e-12f) + 1f / (aperture_n + 1e-12f));
+                            float k_interface = aperture_interface * aperture_interface / 12f;
+                            float conductivity = k_interface / mu;
+                            float P_n = _pressure[nx, ny, nz];
+                            float gradP = (P_n - P_c) / dx;
+                            
+                            if (nz != z) // Add gravity for vertical flow
+                                gradP += (nz > z ? -1 : 1) * rho_f * g;
+                            
+                            flux_sum += conductivity * gradP;
+                            flux_count++;
+                        }
+                    };
+                    
+                    processNeighbor(x + 1, y, z);
+                    processNeighbor(x - 1, y, z);
+                    processNeighbor(x, y + 1, z);
+                    processNeighbor(x, y - 1, z);
+                    processNeighbor(x, y, z + 1);
+                    processNeighbor(x, y, z - 1);
+                    
+                    if (flux_count > 0)
+                    {
+                        float dP_dt = -(1f / (phi * c_t)) * flux_sum / flux_count;
+                        float newP = P_c + dP_dt * dt;
+                        
+                        // Limit pressure change
+                        float max_dP = 10e6f; // 10 MPa per time step
+                        if (Math.Abs(newP - P_c) > max_dP)
+                            newP = P_c + Math.Sign(dP_dt) * max_dP;
+                        
+                        slicePressureUpdates[(x, y, z)] = newP;
+                    }
                 }
             }
         }
+    });
+    
+    // Apply updates
+    foreach (var kvp in slicePressureUpdates)
+    {
+        var (x, y, z) = kvp.Key;
+        _pressure[x, y, z] = kvp.Value;
     }
+}
+    private void UpdateFractureConnectivity(int injX, int injY, int injZ, byte[,,] labels)
+{
+    var w = labels.GetLength(0);
+    var h = labels.GetLength(1);
+    var d = labels.GetLength(2);
+    
+    // Use a sparse set instead of full 3D array for visited tracking
+    var visited = new HashSet<(int, int, int)>();
+    var connected = new HashSet<(int, int, int)>();
+    var queue = new Queue<(int, int, int)>();
+    
+    queue.Enqueue((injX, injY, injZ));
+    visited.Add((injX, injY, injZ));
+    connected.Add((injX, injY, injZ));
+    
+    // Limit propagation to avoid memory explosion
+    const int MAX_CONNECTED = 1_000_000;
+    
+    while (queue.Count > 0 && connected.Count < MAX_CONNECTED)
+    {
+        var (x, y, z) = queue.Dequeue();
+        
+        // Check 6 neighbors
+        var neighbors = new[]
+        {
+            (x + 1, y, z), (x - 1, y, z),
+            (x, y + 1, z), (x, y - 1, z),
+            (x, y, z + 1), (x, y, z - 1)
+        };
+        
+        foreach (var (nx, ny, nz) in neighbors)
+        {
+            if (nx < 0 || nx >= w || ny < 0 || ny >= h || nz < 0 || nz >= d) continue;
+            if (visited.Contains((nx, ny, nz))) continue;
+            if (labels[nx, ny, nz] == 0) continue;
+            
+            var isFractured = _fractureAperture[nx, ny, nz] > _params.MinimumFractureAperture;
+            var pressureGradient = Math.Abs(_pressure[nx, ny, nz] - _pressure[x, y, z]);
+            var isHighPressure = pressureGradient > 1e6f;
+            
+            if (isFractured || isHighPressure)
+            {
+                visited.Add((nx, ny, nz));
+                connected.Add((nx, ny, nz));
+                queue.Enqueue((nx, ny, nz));
+            }
+        }
+    }
+    
+    // Clear connectivity array first (in chunks)
+    const int CHUNK_SIZE = 32;
+    Parallel.For(0, (d + CHUNK_SIZE - 1) / CHUNK_SIZE, chunkIdx =>
+    {
+        int startZ = chunkIdx * CHUNK_SIZE;
+        int endZ = Math.Min(startZ + CHUNK_SIZE, d);
+        for (int z = startZ; z < endZ; z++)
+            for (int y = 0; y < h; y++)
+                for (int x = 0; x < w; x++)
+                    _isConnectedToInjection[x, y, z] = false;
+    });
+    
+    // Set connected voxels
+    foreach (var (x, y, z) in connected)
+    {
+        _isConnectedToInjection[x, y, z] = true;
+    }
+    
+    if (connected.Count >= MAX_CONNECTED)
+    {
+        Logger.LogWarning($"[GeomechCPU] Fracture connectivity limited to {MAX_CONNECTED} voxels to prevent memory overflow");
+    }
+}
 
     private float CalculateFractureVolume(byte[,,] labels, float dx)
     {
