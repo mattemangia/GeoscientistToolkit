@@ -1,5 +1,7 @@
+using System.Diagnostics;
 using System.Drawing;
 using System.Numerics;
+using System.Text;
 using GeoscientistToolkit.Business.Stratigraphies;
 using GeoscientistToolkit.UI.Utils;
 using GeoscientistToolkit.Util;
@@ -13,7 +15,8 @@ namespace GeoscientistToolkit.UI.Windows;
 public class StratigraphyCorrelationViewer
 {
     private readonly List<bool> _columnVisibility = new();
-    private readonly ImGuiExportFileDialog _exportDialog;
+    private readonly ImGuiExportFileDialog _exportDialog = new("StratExportDlg", "Export Stratigraphy");
+
 
     // Major orogenic events to mark (in Ma)
     private readonly List<OrogenicEvent> _orogenicEvents = new()
@@ -26,9 +29,12 @@ public class StratigraphyCorrelationViewer
 
     private readonly List<IStratigraphy> _stratigraphies = new();
     private float _ageScale = 1.0f; // pixels per million years
+    private float _columnSpacing = 10f; // Space between columns
     private float _columnWidth = 200f;
     private StratigraphicLevel _displayLevel = StratigraphicLevel.Epoch;
+    private bool _exportDialogInitialized;
     private bool _isVisible;
+    private double _lastExportMs;
     private Vector2 _scrollPosition = Vector2.Zero;
     private float _scrollY;
     private string _selectedStratigraphyCode = "";
@@ -69,7 +75,7 @@ public class StratigraphyCorrelationViewer
         ImGui.SetNextWindowSize(new Vector2(1200, 800), ImGuiCond.FirstUseEver);
         // Add the ImGuiWindowFlags.NoMove flag here to restrict movement to the title bar
         if (ImGui.Begin("Stratigraphy Correlation Viewer", ref _isVisible,
-                ImGuiWindowFlags.MenuBar | ImGuiWindowFlags.NoMove))
+                ImGuiWindowFlags.MenuBar))
         {
             DrawMenuBar();
             DrawToolbar();
@@ -139,6 +145,10 @@ public class StratigraphyCorrelationViewer
 
     private void DrawToolbar()
     {
+        ImGui.SameLine();
+        if (ImGui.Button("Export PNG"))
+            _exportDialog.Open($"stratigraphy_correlation_{DateTime.Now:yyyyMMdd_HHmmss}");
+        ImGui.SameLine();
         ImGui.Text("Display Level:");
         ImGui.SameLine();
 
@@ -164,6 +174,12 @@ public class StratigraphyCorrelationViewer
         ImGui.SliderFloat("##ColWidth", ref _columnWidth, 100f, 400f, "%.0f px");
 
         ImGui.SameLine();
+        ImGui.Text("Spacing:");
+        ImGui.SameLine();
+        ImGui.SetNextItemWidth(100);
+        ImGui.SliderFloat("##ColSpacing", ref _columnSpacing, 5f, 100f, "%.0f px");
+
+        ImGui.SameLine();
         ImGui.Text("Time Scale:");
         ImGui.SameLine();
         ImGui.SetNextItemWidth(100);
@@ -181,6 +197,7 @@ public class StratigraphyCorrelationViewer
         {
             _zoomLevel = 1.0f;
             _columnWidth = 200f;
+            _columnSpacing = 10f;
             _ageScale = 1.0f;
         }
 
@@ -222,6 +239,9 @@ public class StratigraphyCorrelationViewer
         var logSpacing = 80f * _zoomLevel;
         var zoomedAgeScale = _ageScale * _zoomLevel;
 
+        StratigraphicUnit hoveredUnit = null;
+        IStratigraphy hoveredStrat = null;
+
         ImGui.BeginChild("CorrelationScrollRegion", Vector2.Zero, ImGuiChildFlags.Border,
             ImGuiWindowFlags.HorizontalScrollbar | ImGuiWindowFlags.AlwaysVerticalScrollbar);
 
@@ -249,14 +269,14 @@ public class StratigraphyCorrelationViewer
             {
                 var ts = ImGui.CalcTextSize(line);
                 var tp = new Vector2(headerCenter.X - ts.X * 0.5f, ty);
-                dl.AddText(tp, ImGui.ColorConvertFloat4ToU32(new Vector4(0.2f, 0.2f, 0.2f, 1)), line);
+                dl.AddText(tp, ImGui.ColorConvertFloat4ToU32(new Vector4(1f, 1f, 1f, 1)), line);
                 ty += ts.Y + 2;
             }
 
             var lang = $"[{strat.LanguageCode}]";
             var ls = ImGui.CalcTextSize(lang);
             var lp = new Vector2(headerCenter.X - ls.X * 0.5f, ty + 5);
-            dl.AddText(lp, ImGui.ColorConvertFloat4ToU32(new Vector4(0.5f, 0.5f, 0.5f, 1)), lang);
+            dl.AddText(lp, ImGui.ColorConvertFloat4ToU32(new Vector4(0.8f, 0.8f, 0.8f, 1)), lang);
 
             xOffset += logWidth + logSpacing;
         }
@@ -327,6 +347,13 @@ public class StratigraphyCorrelationViewer
 
                 var mouse = ImGui.GetMousePos();
                 var hovered = mouse.X >= r0.X && mouse.X <= r1.X && mouse.Y >= r0.Y && mouse.Y <= r1.Y;
+
+                if (hovered)
+                {
+                    hoveredUnit = u;
+                    hoveredStrat = strat;
+                }
+
                 if (hovered && ImGui.IsMouseClicked(ImGuiMouseButton.Left))
                 {
                     _selectedUnitIndex = i;
@@ -338,7 +365,7 @@ public class StratigraphyCorrelationViewer
                     var txt = u.Code;
                     var ts = ImGui.CalcTextSize(txt);
                     var tp = new Vector2(r1.X + 5f, yStart + (h - ts.Y) * 0.5f);
-                    dl.AddText(tp, ImGui.ColorConvertFloat4ToU32(new Vector4(0.1f, 0.1f, 0.1f, 1)), txt);
+                    dl.AddText(tp, ImGui.ColorConvertFloat4ToU32(new Vector4(0.95f, 0.95f, 0.95f, 1)), txt);
                 }
 
                 // overlay outlines
@@ -367,6 +394,22 @@ public class StratigraphyCorrelationViewer
 
         dl.ChannelsMerge();
         dl.PopClipRect();
+
+        if (hoveredUnit != null)
+        {
+            ImGui.BeginTooltip();
+            ImGui.Text($"Unit: {hoveredUnit.Name} ({hoveredUnit.Code})");
+            ImGui.Text($"Age: {hoveredUnit.StartAge:F2} - {hoveredUnit.EndAge:F2} Ma");
+            ImGui.Text($"Stratigraphy: {hoveredStrat.Name}");
+            if (!string.IsNullOrEmpty(hoveredUnit.InternationalCorrelationCode))
+            {
+                ImGui.Separator();
+                ImGui.Text($"Correlation: {hoveredUnit.InternationalCorrelationCode}");
+            }
+
+            ImGui.EndTooltip();
+        }
+
         ImGui.EndChild();
     }
 
@@ -375,6 +418,9 @@ public class StratigraphyCorrelationViewer
     {
         var zoomedColumnWidth = _columnWidth * _zoomLevel;
         var zoomedAgeScale = _ageScale * _zoomLevel;
+
+        StratigraphicUnit hoveredUnit = null;
+        IStratigraphy hoveredStrat = null;
 
         // ---- Scrollable region with clipping ----
         ImGui.BeginChild("CorrelationScrollRegion", Vector2.Zero, ImGuiChildFlags.Border,
@@ -423,7 +469,7 @@ public class StratigraphyCorrelationViewer
                 headerPos.Y + headerHeight - ls.Y - 5);
             dl.AddText(lp, ImGui.ColorConvertFloat4ToU32(new Vector4(0.7f, 0.7f, 0.7f, 1)), lang);
 
-            xOffset += zoomedColumnWidth + 10f * _zoomLevel;
+            xOffset += zoomedColumnWidth + _columnSpacing * _zoomLevel;
         }
 
         ImGui.SetCursorPosY(ImGui.GetCursorPosY() + headerHeight + 10f);
@@ -477,6 +523,13 @@ public class StratigraphyCorrelationViewer
                 // Hover/select handling (overlay channel for outlines)
                 var mouse = ImGui.GetMousePos();
                 var hovered = mouse.X >= r0.X && mouse.X <= r1.X && mouse.Y >= r0.Y && mouse.Y <= r1.Y;
+
+                if (hovered)
+                {
+                    hoveredUnit = u;
+                    hoveredStrat = strat;
+                }
+
                 if (hovered && ImGui.IsMouseClicked(ImGuiMouseButton.Left))
                 {
                     _selectedUnitIndex = i;
@@ -511,7 +564,7 @@ public class StratigraphyCorrelationViewer
                 dl.ChannelsSetCurrent(1);
             }
 
-            xOffset += zoomedColumnWidth + 10f * _zoomLevel;
+            xOffset += zoomedColumnWidth + _columnSpacing * _zoomLevel;
         }
 
         // ---------- OVERLAY: correlation lines + labels + age scale ----------
@@ -533,6 +586,22 @@ public class StratigraphyCorrelationViewer
         // Merge & pop
         dl.ChannelsMerge();
         dl.PopClipRect();
+
+        if (hoveredUnit != null)
+        {
+            ImGui.BeginTooltip();
+            ImGui.Text($"Unit: {hoveredUnit.Name} ({hoveredUnit.Code})");
+            ImGui.Text($"Age: {hoveredUnit.StartAge:F2} - {hoveredUnit.EndAge:F2} Ma");
+            ImGui.Text($"Stratigraphy: {hoveredStrat.Name}");
+            if (!string.IsNullOrEmpty(hoveredUnit.InternationalCorrelationCode))
+            {
+                ImGui.Separator();
+                ImGui.Text($"Correlation: {hoveredUnit.InternationalCorrelationCode}");
+            }
+
+            ImGui.EndTooltip();
+        }
+
         ImGui.EndChild();
     }
 
@@ -630,29 +699,58 @@ public class StratigraphyCorrelationViewer
         List<float> logCenterPositions, float logWidth, List<List<StratigraphicUnit>> columnUnits, double maxAge,
         float zoomedAgeScale)
     {
-        for (var col1 = 0; col1 < columnUnits.Count - 1; col1++)
-        for (var col2 = col1 + 1; col2 < columnUnits.Count; col2++)
+        for (var c1 = 0; c1 < columnUnits.Count - 1; c1++)
         {
-            var units1 = columnUnits[col1];
-            var units2 = columnUnits[col2];
+            var c2 = c1 + 1;
+            var left = columnUnits[c1];
+            var right = columnUnits[c2];
 
-            foreach (var unit1 in units1.Where(u => !string.IsNullOrEmpty(u.InternationalCorrelationCode)))
+            foreach (var u1 in left.Where(u => !string.IsNullOrWhiteSpace(u.InternationalCorrelationCode)))
             {
-                var correlationCodes = unit1.InternationalCorrelationCode.Split(',');
-                foreach (var unit2 in units2.Where(u => !string.IsNullOrEmpty(u.InternationalCorrelationCode)))
+                StratigraphicUnit? best = null;
+                double bestOv = -1;
+
+                foreach (var u2 in right.Where(u => !string.IsNullOrWhiteSpace(u.InternationalCorrelationCode)))
                 {
-                    var codes2 = unit2.InternationalCorrelationCode.Split(',');
-                    if (correlationCodes.Any(c1 => codes2.Any(c2 => c1.Trim() == c2.Trim())))
+                    var codes1 = u1.InternationalCorrelationCode.Split(',').Select(s => s.Trim());
+                    var codes2 = u2.InternationalCorrelationCode.Split(',').Select(s => s.Trim());
+                    if (!codes1.Any(c => codes2.Contains(c))) continue;
+
+                    var (hasOv, yOv, oOv) = OverlapBounds(u1, u2);
+                    var ov = hasOv ? oOv - yOv : 0.0;
+                    if (ov > bestOv)
                     {
-                        var y1 = contentStartPos.Y + (float)unit1.StartAge * zoomedAgeScale;
-                        var y2 = contentStartPos.Y + (float)unit2.StartAge * zoomedAgeScale;
-
-                        var x1 = contentStartPos.X + logCenterPositions[col1] + logWidth * 0.5f;
-                        var x2 = contentStartPos.X + logCenterPositions[col2] - logWidth * 0.5f;
-
-                        drawList.AddLine(new Vector2(x1, y1), new Vector2(x2, y2),
-                            ImGui.ColorConvertFloat4ToU32(new Vector4(0.4f, 0.4f, 0.6f, 0.7f)), 1.5f * _zoomLevel);
+                        bestOv = ov;
+                        best = u2;
                     }
+                }
+
+                if (best == null) continue;
+
+                var x1 = contentStartPos.X + logCenterPositions[c1] + logWidth * 0.5f;
+                var x2 = contentStartPos.X + logCenterPositions[c2] - logWidth * 0.5f;
+
+                var (hasOverlap, younger, older) = OverlapBounds(u1, best);
+
+                if (hasOverlap)
+                {
+                    var yTop = contentStartPos.Y + (float)younger * zoomedAgeScale;
+                    var yBase = contentStartPos.Y + (float)older * zoomedAgeScale;
+
+                    drawList.AddLine(new Vector2(x1, yTop), new Vector2(x2, yTop),
+                        ImGui.ColorConvertFloat4ToU32(new Vector4(0.4f, 0.4f, 0.6f, 0.85f)), 1.5f * _zoomLevel);
+
+                    drawList.AddLine(new Vector2(x1, yBase), new Vector2(x2, yBase),
+                        ImGui.ColorConvertFloat4ToU32(new Vector4(0.4f, 0.4f, 0.6f, 0.65f)), 1.5f * _zoomLevel);
+                }
+                else
+                {
+                    var (aAnc, bAnc) = ClosestBoundaryPair(u1, best);
+                    var y1 = contentStartPos.Y + (float)aAnc * zoomedAgeScale;
+                    var y2 = contentStartPos.Y + (float)bAnc * zoomedAgeScale;
+
+                    drawList.AddLine(new Vector2(x1, y1), new Vector2(x2, y2),
+                        ImGui.ColorConvertFloat4ToU32(new Vector4(0.4f, 0.4f, 0.6f, 0.85f)), 1.5f * _zoomLevel);
                 }
             }
         }
@@ -661,30 +759,172 @@ public class StratigraphyCorrelationViewer
     private void DrawCorrelationLines(ImDrawListPtr drawList, Vector2 contentStartPos, List<float> columnPositions,
         List<List<StratigraphicUnit>> columnUnits, double maxAge, float zoomedColumnWidth, float zoomedAgeScale)
     {
-        for (var col1 = 0; col1 < columnUnits.Count - 1; col1++)
-        for (var col2 = col1 + 1; col2 < columnUnits.Count; col2++)
+        // Only connect adjacent columns; one best match per unit
+        for (var c1 = 0; c1 < columnUnits.Count - 1; c1++)
         {
-            var units1 = columnUnits[col1];
-            var units2 = columnUnits[col2];
+            var c2 = c1 + 1;
+            var left = columnUnits[c1];
+            var right = columnUnits[c2];
 
-            foreach (var unit1 in units1.Where(u => !string.IsNullOrEmpty(u.InternationalCorrelationCode)))
+            foreach (var u1 in left.Where(u => !string.IsNullOrWhiteSpace(u.InternationalCorrelationCode)))
             {
-                var correlationCodes = unit1.InternationalCorrelationCode.Split(',');
-                foreach (var unit2 in units2.Where(u => !string.IsNullOrEmpty(u.InternationalCorrelationCode)))
+                StratigraphicUnit? best = null;
+                double bestOv = -1;
+
+                foreach (var u2 in right.Where(u => !string.IsNullOrWhiteSpace(u.InternationalCorrelationCode)))
                 {
-                    var codes2 = unit2.InternationalCorrelationCode.Split(',');
-                    if (correlationCodes.Any(c1 => codes2.Any(c2 => c1.Trim() == c2.Trim())))
+                    var codes1 = u1.InternationalCorrelationCode.Split(',').Select(s => s.Trim());
+                    var codes2 = u2.InternationalCorrelationCode.Split(',').Select(s => s.Trim());
+                    if (!codes1.Any(c => codes2.Contains(c))) continue;
+
+                    var (hasOv, yOv, oOv) = OverlapBounds(u1, u2);
+                    var ov = hasOv ? oOv - yOv : 0.0;
+                    if (ov > bestOv)
                     {
-                        var y1 = contentStartPos.Y + (float)unit1.StartAge * zoomedAgeScale;
-                        var y2 = contentStartPos.Y + (float)unit2.StartAge * zoomedAgeScale;
-
-                        var x1 = contentStartPos.X + columnPositions[col1] + zoomedColumnWidth;
-                        var x2 = contentStartPos.X + columnPositions[col2];
-
-                        DrawDashedLine(drawList, new Vector2(x1, y1), new Vector2(x2, y2),
-                            ImGui.ColorConvertFloat4ToU32(new Vector4(0.5f, 0.5f, 0.7f, 0.5f)), 1.5f * _zoomLevel,
-                            10f * _zoomLevel);
+                        bestOv = ov;
+                        best = u2;
                     }
+                    else if (Math.Abs(ov - bestOv) < 1e-6 && best != null)
+                    {
+                        // tie-break: closest boundary distance
+                        var (_, bTop) = ClosestBoundaryPair(u1, u2);
+                        var (_, bestTop) = ClosestBoundaryPair(u1, best);
+                        if (Math.Abs((u1.EndAge + u1.StartAge) * 0.5 - bTop) <
+                            Math.Abs((u1.EndAge + u1.StartAge) * 0.5 - bestTop))
+                            best = u2;
+                    }
+                }
+
+                if (best == null) continue;
+
+                // Anchor(s) at boundaries
+                var (hasOverlap, younger, older) = OverlapBounds(u1, best);
+
+                // Xs on column edges
+                var x1 = contentStartPos.X + columnPositions[c1] + zoomedColumnWidth;
+                var x2 = contentStartPos.X + columnPositions[c2];
+
+                if (hasOverlap)
+                {
+                    // Younger overlapping boundary (tops)
+                    var yTop1 = contentStartPos.Y + (float)younger * zoomedAgeScale;
+                    var yTop2 = contentStartPos.Y + (float)younger * zoomedAgeScale;
+                    DrawDashedLine(drawList, new Vector2(x1, yTop1), new Vector2(x2, yTop2),
+                        ImGui.ColorConvertFloat4ToU32(new Vector4(0.5f, 0.5f, 0.7f, 0.7f)),
+                        1.5f * _zoomLevel, 10f * _zoomLevel);
+
+                    // Older overlapping boundary (bases)
+                    var yBase1 = contentStartPos.Y + (float)older * zoomedAgeScale;
+                    var yBase2 = contentStartPos.Y + (float)older * zoomedAgeScale;
+                    DrawDashedLine(drawList, new Vector2(x1, yBase1), new Vector2(x2, yBase2),
+                        ImGui.ColorConvertFloat4ToU32(new Vector4(0.5f, 0.5f, 0.7f, 0.5f)),
+                        1.5f * _zoomLevel, 10f * _zoomLevel);
+                }
+                else
+                {
+                    // No overlap: connect closest boundary pair (top↔top or base↔base)
+                    var (aAnc, bAnc) = ClosestBoundaryPair(u1, best);
+                    var y1 = contentStartPos.Y + (float)aAnc * zoomedAgeScale;
+                    var y2 = contentStartPos.Y + (float)bAnc * zoomedAgeScale;
+
+                    DrawDashedLine(drawList, new Vector2(x1, y1), new Vector2(x2, y2),
+                        ImGui.ColorConvertFloat4ToU32(new Vector4(0.5f, 0.5f, 0.7f, 0.7f)),
+                        1.5f * _zoomLevel, 10f * _zoomLevel);
+                }
+            }
+        }
+    }
+
+    private StratigraphyExportSettings BuildCurrentExportSettings()
+    {
+        // Collect visible columns (strat + original index)
+        var visibleStratigraphies = new List<(IStratigraphy strat, int index)>();
+        for (var i = 0; i < _stratigraphies.Count; i++)
+            if (_columnVisibility[i])
+                visibleStratigraphies.Add((_stratigraphies[i], i));
+
+        // Per-column units for the current display level, ordered older→younger top-down drawing (StartAge desc)
+        var columnUnits = new List<List<StratigraphicUnit>>();
+        var maxAge = 0.0;
+
+        foreach (var (strat, _) in visibleStratigraphies)
+        {
+            var units = strat.GetUnitsByLevel(_displayLevel)
+                .OrderByDescending(u => u.StartAge)
+                .ToList();
+            columnUnits.Add(units);
+
+            // Use the oldest boundary among all units to size the canvas
+            if (units.Any())
+                maxAge = Math.Max(maxAge, units.Max(u => u.StartAge));
+        }
+
+        if (maxAge <= 0.0) maxAge = 541.0; // safe fallback (Phanerozoic cap)
+
+        return new StratigraphyExportSettings
+        {
+            VisibleStratigraphies = visibleStratigraphies,
+            ColumnUnits = columnUnits,
+            OrogenicEvents = _orogenicEvents,
+            MaxAge = maxAge,
+            ZoomLevel = _zoomLevel,
+            ColumnWidth = _columnWidth,
+            AgeScale = _ageScale,
+            ShowCorrelationLines = _showCorrelationLines,
+            ShowAgeScale = _showAgeScale,
+            DisplayLevel = _displayLevel
+        };
+    }
+
+    private void OpenExportDialog()
+    {
+        // Suggest a filename like "Stratigraphy_[level].png" in the user's Documents folder
+        var suggested = $"Stratigraphy_{_displayLevel}.png";
+        var docs = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
+        _exportDialog.Open(Path.GetFileNameWithoutExtension(suggested), docs);
+    }
+
+    private void DrawExportUI()
+    {
+        // 1) Export button (put it where you want in your toolbar)
+        if (ImGui.Button("Export"))
+            OpenExportDialog();
+
+        // Optional keyboard shortcut: Ctrl+E
+        if (ImGui.GetIO().KeyCtrl && ImGui.IsKeyPressed(ImGuiKey.E, false))
+            OpenExportDialog();
+
+        // 2) Show/save dialog
+        if (_exportDialog.IsOpen)
+        {
+            // lazy-init: set extension filters only once
+            if (!_exportDialogInitialized)
+            {
+                _exportDialog.SetExtensions(
+                    new ImGuiExportFileDialog.ExtensionOption(".png", "PNG image"));
+                _exportDialogInitialized = true;
+            }
+
+            if (_exportDialog.Submit())
+            {
+                var targetPath = _exportDialog.SelectedPath;
+                try
+                {
+                    Directory.CreateDirectory(Path.GetDirectoryName(targetPath)!);
+
+                    var settings = BuildCurrentExportSettings(); // packs current viewer state
+                    var exporter = new StratigraphyImageExporter(settings);
+                    var t0 = Stopwatch.GetTimestamp();
+                    exporter.Export(targetPath);
+                    var t1 = Stopwatch.GetTimestamp();
+                    _lastExportMs = 1000.0 * (t1 - t0) / Stopwatch.Frequency;
+
+                    Logger.Log(
+                        $"[StratigraphyCorrelationViewer] Exported PNG to: {targetPath} in {_lastExportMs:F1} ms");
+                }
+                catch (Exception ex)
+                {
+                    Logger.LogError($"[StratigraphyCorrelationViewer] Export failed: {ex.Message}");
                 }
             }
         }
@@ -777,9 +1017,191 @@ public class StratigraphyCorrelationViewer
         return 500;
     }
 
+// Helpers
+    private static bool CodesIntersect(string codes1, string codes2, out HashSet<string> common)
+    {
+        common = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        if (string.IsNullOrWhiteSpace(codes1) || string.IsNullOrWhiteSpace(codes2)) return false;
+
+        var set1 = new HashSet<string>(
+            codes1.Split(',').Select(c => c.Trim()).Where(c => c.Length > 0),
+            StringComparer.OrdinalIgnoreCase);
+
+        foreach (var c in codes2.Split(',').Select(c => c.Trim()).Where(c => c.Length > 0))
+            if (set1.Contains(c))
+                common.Add(c);
+
+        return common.Count > 0;
+    }
+
+    private static double RangeOverlapMa(StratigraphicUnit a, StratigraphicUnit b)
+    {
+        // Ages are Ma; StartAge > EndAge typically (older to younger). Normalize to [younger, older].
+        var aMin = Math.Min(a.StartAge, a.EndAge);
+        var aMax = Math.Max(a.StartAge, a.EndAge);
+        var bMin = Math.Min(b.StartAge, b.EndAge);
+        var bMax = Math.Max(b.StartAge, b.EndAge);
+
+        var overlap = Math.Max(0.0, Math.Min(aMax, bMax) - Math.Max(aMin, bMin));
+        return overlap; // in Ma
+    }
+
+    private static double MidAge(StratigraphicUnit u)
+    {
+        return 0.5 * (u.StartAge + u.EndAge);
+    }
+
     private void ExportCorrelationTable()
     {
-        // This functionality remains as is.
+        try
+        {
+            // 1) Gather visible stratigraphies in the same order you draw/export
+            var visibleStratigraphies = new List<(IStratigraphy strat, int index)>();
+            for (var i = 0; i < _stratigraphies.Count; i++)
+                if (_columnVisibility[i])
+                    visibleStratigraphies.Add((_stratigraphies[i], i));
+
+            if (visibleStratigraphies.Count < 2)
+            {
+                Logger.LogWarning(
+                    "[StratigraphyCorrelationViewer] Need at least two visible stratigraphies to export a correlation table.");
+                return;
+            }
+
+            // Build per-column units at the current display level (top-down by StartAge)
+            var columnUnits = new List<List<StratigraphicUnit>>();
+            foreach (var (strat, _) in visibleStratigraphies)
+                columnUnits.Add(strat.GetUnitsByLevel(_displayLevel).OrderByDescending(u => u.StartAge).ToList());
+
+            // 2) Correlate adjacent columns by shared InternationalCorrelationCode tokens
+            //    For each unit pair (u1, u2) that shares at least one code, emit a CSV row.
+            var sb = new StringBuilder();
+            sb.AppendLine(string.Join(",",
+                "LeftStratigraphy", "LeftUnitCode", "LeftUnitName", "LeftStartAgeMa", "LeftEndAgeMa",
+                "RightStratigraphy", "RightUnitCode", "RightUnitName", "RightStartAgeMa", "RightEndAgeMa",
+                "CommonCodes", "Relation", "YoungerBoundaryMa", "OlderBoundaryMa", "BoundaryPair",
+                "BoundaryAgeDiffMa"));
+
+            for (var c1 = 0; c1 < columnUnits.Count - 1; c1++)
+            {
+                var c2 = c1 + 1;
+                var leftName = visibleStratigraphies[c1].strat.Name;
+                var rightName = visibleStratigraphies[c2].strat.Name;
+
+                var left = columnUnits[c1];
+                var right = columnUnits[c2];
+
+                foreach (var u1 in left.Where(u => !string.IsNullOrWhiteSpace(u.InternationalCorrelationCode)))
+                {
+                    var codes1 = new HashSet<string>(
+                        u1.InternationalCorrelationCode.Split(',').Select(s => s.Trim()).Where(s => s.Length > 0),
+                        StringComparer.OrdinalIgnoreCase);
+
+                    foreach (var u2 in right.Where(u => !string.IsNullOrWhiteSpace(u.InternationalCorrelationCode)))
+                    {
+                        var codes2 = new HashSet<string>(
+                            u2.InternationalCorrelationCode.Split(',').Select(s => s.Trim()).Where(s => s.Length > 0),
+                            StringComparer.OrdinalIgnoreCase);
+
+                        var common = codes1.Intersect(codes2, StringComparer.OrdinalIgnoreCase).ToArray();
+                        if (common.Length == 0) continue;
+
+                        // Boundary logic
+                        // Overlap on age axis (Ma): younger = max(EndAge), older = min(StartAge)
+                        var youngerOverlap = Math.Max(u1.EndAge, u2.EndAge);
+                        var olderOverlap = Math.Min(u1.StartAge, u2.StartAge);
+                        var hasOverlap = youngerOverlap <= olderOverlap;
+                        string relation, boundaryPair;
+                        double youngerOut = double.NaN, olderOut = double.NaN, diffOut = double.NaN;
+
+                        if (hasOverlap)
+                        {
+                            relation = "Overlap";
+                            boundaryPair = "";
+                            youngerOut = youngerOverlap;
+                            olderOut = olderOverlap;
+                            diffOut = olderOut - youngerOut; // overlap thickness (Ma)
+                        }
+                        else
+                        {
+                            // No overlap → connect the closest boundary pair (top↔top or base↔base)
+                            var dTop = Math.Abs(u1.EndAge - u2.EndAge);
+                            var dBase = Math.Abs(u1.StartAge - u2.StartAge);
+                            if (dTop <= dBase)
+                            {
+                                relation = "NoOverlap";
+                                boundaryPair = "Top-Top";
+                                youngerOut =
+                                    u1.EndAge; // report the two anchors as YoungerBoundary/OlderBoundary for convenience
+                                olderOut = u2.EndAge;
+                                diffOut = dTop;
+                            }
+                            else
+                            {
+                                relation = "NoOverlap";
+                                boundaryPair = "Base-Base";
+                                youngerOut = u1.StartAge;
+                                olderOut = u2.StartAge;
+                                diffOut = dBase;
+                            }
+                        }
+
+                        // CSV row
+                        sb.AppendLine(string.Join(",",
+                            Csv(leftName),
+                            Csv(u1.Code), Csv(u1.Name), u1.StartAge.ToString("0.###"), u1.EndAge.ToString("0.###"),
+                            Csv(rightName),
+                            Csv(u2.Code), Csv(u2.Name), u2.StartAge.ToString("0.###"), u2.EndAge.ToString("0.###"),
+                            Csv(string.Join("|", common)),
+                            Csv(relation),
+                            double.IsNaN(youngerOut) ? "" : youngerOut.ToString("0.###"),
+                            double.IsNaN(olderOut) ? "" : olderOut.ToString("0.###"),
+                            Csv(hasOverlap ? "" : boundaryPair),
+                            double.IsNaN(diffOut) ? "" : diffOut.ToString("0.###")
+                        ));
+                    }
+                }
+            }
+
+            // 3) Save to Documents with timestamp
+            var docs = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
+            var filePath = Path.Combine(docs, $"stratigraphy_correlations_{DateTime.Now:yyyyMMdd_HHmmss}.csv");
+            File.WriteAllText(filePath, sb.ToString(), Encoding.UTF8);
+
+            Logger.Log($"[StratigraphyCorrelationViewer] Correlation table exported: {filePath}");
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(
+                $"[StratigraphyCorrelationViewer] Failed to export correlation table: {ex.Message}\n{ex.StackTrace}");
+        }
+
+        // --- local helper ---
+        static string Csv(string s)
+        {
+            if (string.IsNullOrEmpty(s)) return "";
+            // escape quotes and wrap if needed
+            var needsQuotes = s.Contains(',') || s.Contains('"') || s.Contains('\n') || s.Contains('\r');
+            var escaped = s.Replace("\"", "\"\"");
+            return needsQuotes ? $"\"{escaped}\"" : escaped;
+        }
+    }
+
+    private static (bool hasOverlap, double youngerOverlap, double olderOverlap) OverlapBounds(StratigraphicUnit a,
+        StratigraphicUnit b)
+    {
+        // Ages are Ma: StartAge = older, EndAge = younger
+        var olderOverlap = Math.Min(a.StartAge, b.StartAge);
+        var youngerOverlap = Math.Max(a.EndAge, b.EndAge);
+        return (youngerOverlap <= olderOverlap, youngerOverlap, olderOverlap);
+    }
+
+    private static (double aAnchor, double bAnchor) ClosestBoundaryPair(StratigraphicUnit a, StratigraphicUnit b)
+    {
+        // Candidate pairs: top↔top (EndAge), base↔base (StartAge)
+        var dTop = Math.Abs(a.EndAge - b.EndAge);
+        var dBase = Math.Abs(a.StartAge - b.StartAge);
+        return dTop <= dBase ? (a.EndAge, b.EndAge) : (a.StartAge, b.StartAge);
     }
 
     private void ExportToPng(string filePath)
