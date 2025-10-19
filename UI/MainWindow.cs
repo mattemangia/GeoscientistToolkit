@@ -42,7 +42,7 @@ public class MainWindow
     private readonly SystemInfoWindow _systemInfoWindow = new();
     private readonly SettingsWindow _settingsWindow = new();
     private readonly Volume3DDebugWindow _volume3DDebugWindow = new();
-
+    private readonly StratigraphyCorrelationViewer _stratigraphyViewer = new();
     private readonly MaterialLibraryWindow _materialLibraryWindow = new();
 
     // ADDED: Instance of the compound library editor window
@@ -229,7 +229,7 @@ public class MainWindow
         // ADDED: Draw the compound library editor window
         _compoundLibraryEditorWindow.Draw();
         _geoScriptTerminalWindow.Draw();
-
+        _stratigraphyViewer.Draw();
         // Handle create mesh dialog
         HandleCreateMeshDialog();
 
@@ -458,6 +458,7 @@ public class MainWindow
         if (ImGui.BeginMenu("Tools"))
         {
             if (ImGui.MenuItem("GeoScript Terminal")) _geoScriptTerminalWindow.Show();
+            if (ImGui.MenuItem("Stratigraphy Correlation Viewer")) _stratigraphyViewer.Show();
             ImGui.Separator();
             if (ImGui.MenuItem("Screenshot Fullscreen")) _screenshotTool.TakeFullScreenshot();
             if (ImGui.MenuItem("Screenshot Window...")) _screenshotTool.StartSelection();
