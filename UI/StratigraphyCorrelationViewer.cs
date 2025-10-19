@@ -699,6 +699,7 @@ public class StratigraphyCorrelationViewer
         List<float> logCenterPositions, float logWidth, List<List<StratigraphicUnit>> columnUnits, double maxAge,
         float zoomedAgeScale)
     {
+        // Connect adjacent columns only
         for (var c1 = 0; c1 < columnUnits.Count - 1; c1++)
         {
             var c2 = c1 + 1;
@@ -710,6 +711,7 @@ public class StratigraphyCorrelationViewer
                 StratigraphicUnit? best = null;
                 double bestOv = -1;
 
+                // Find best matching unit in the right column
                 foreach (var u2 in right.Where(u => !string.IsNullOrWhiteSpace(u.InternationalCorrelationCode)))
                 {
                     var codes1 = u1.InternationalCorrelationCode.Split(',').Select(s => s.Trim());
@@ -727,31 +729,22 @@ public class StratigraphyCorrelationViewer
 
                 if (best == null) continue;
 
+                // Calculate actual positions
                 var x1 = contentStartPos.X + logCenterPositions[c1] + logWidth * 0.5f;
                 var x2 = contentStartPos.X + logCenterPositions[c2] - logWidth * 0.5f;
 
-                var (hasOverlap, younger, older) = OverlapBounds(u1, best);
+                // Get the actual Y positions of the unit boundaries
+                var u1Top = contentStartPos.Y + (float)u1.EndAge * zoomedAgeScale;
+                var u1Bottom = contentStartPos.Y + (float)u1.StartAge * zoomedAgeScale;
+                var u2Top = contentStartPos.Y + (float)best.EndAge * zoomedAgeScale;
+                var u2Bottom = contentStartPos.Y + (float)best.StartAge * zoomedAgeScale;
 
-                if (hasOverlap)
-                {
-                    var yTop = contentStartPos.Y + (float)younger * zoomedAgeScale;
-                    var yBase = contentStartPos.Y + (float)older * zoomedAgeScale;
+                // Draw lines connecting the tops and bottoms
+                drawList.AddLine(new Vector2(x1, u1Top), new Vector2(x2, u2Top),
+                    ImGui.ColorConvertFloat4ToU32(new Vector4(0.4f, 0.6f, 0.8f, 0.85f)), 2.0f * _zoomLevel);
 
-                    drawList.AddLine(new Vector2(x1, yTop), new Vector2(x2, yTop),
-                        ImGui.ColorConvertFloat4ToU32(new Vector4(0.4f, 0.4f, 0.6f, 0.85f)), 1.5f * _zoomLevel);
-
-                    drawList.AddLine(new Vector2(x1, yBase), new Vector2(x2, yBase),
-                        ImGui.ColorConvertFloat4ToU32(new Vector4(0.4f, 0.4f, 0.6f, 0.65f)), 1.5f * _zoomLevel);
-                }
-                else
-                {
-                    var (aAnc, bAnc) = ClosestBoundaryPair(u1, best);
-                    var y1 = contentStartPos.Y + (float)aAnc * zoomedAgeScale;
-                    var y2 = contentStartPos.Y + (float)bAnc * zoomedAgeScale;
-
-                    drawList.AddLine(new Vector2(x1, y1), new Vector2(x2, y2),
-                        ImGui.ColorConvertFloat4ToU32(new Vector4(0.4f, 0.4f, 0.6f, 0.85f)), 1.5f * _zoomLevel);
-                }
+                drawList.AddLine(new Vector2(x1, u1Bottom), new Vector2(x2, u2Bottom),
+                    ImGui.ColorConvertFloat4ToU32(new Vector4(0.4f, 0.6f, 0.8f, 0.65f)), 2.0f * _zoomLevel);
             }
         }
     }
@@ -759,7 +752,7 @@ public class StratigraphyCorrelationViewer
     private void DrawCorrelationLines(ImDrawListPtr drawList, Vector2 contentStartPos, List<float> columnPositions,
         List<List<StratigraphicUnit>> columnUnits, double maxAge, float zoomedColumnWidth, float zoomedAgeScale)
     {
-        // Only connect adjacent columns; one best match per unit
+        // Only connect adjacent columns
         for (var c1 = 0; c1 < columnUnits.Count - 1; c1++)
         {
             var c2 = c1 + 1;
@@ -771,6 +764,7 @@ public class StratigraphyCorrelationViewer
                 StratigraphicUnit? best = null;
                 double bestOv = -1;
 
+                // Find best matching unit in the right column
                 foreach (var u2 in right.Where(u => !string.IsNullOrWhiteSpace(u.InternationalCorrelationCode)))
                 {
                     var codes1 = u1.InternationalCorrelationCode.Split(',').Select(s => s.Trim());
@@ -784,53 +778,30 @@ public class StratigraphyCorrelationViewer
                         bestOv = ov;
                         best = u2;
                     }
-                    else if (Math.Abs(ov - bestOv) < 1e-6 && best != null)
-                    {
-                        // tie-break: closest boundary distance
-                        var (_, bTop) = ClosestBoundaryPair(u1, u2);
-                        var (_, bestTop) = ClosestBoundaryPair(u1, best);
-                        if (Math.Abs((u1.EndAge + u1.StartAge) * 0.5 - bTop) <
-                            Math.Abs((u1.EndAge + u1.StartAge) * 0.5 - bestTop))
-                            best = u2;
-                    }
                 }
 
                 if (best == null) continue;
 
-                // Anchor(s) at boundaries
-                var (hasOverlap, younger, older) = OverlapBounds(u1, best);
-
-                // Xs on column edges
+                // X positions at column edges
                 var x1 = contentStartPos.X + columnPositions[c1] + zoomedColumnWidth;
                 var x2 = contentStartPos.X + columnPositions[c2];
 
-                if (hasOverlap)
-                {
-                    // Younger overlapping boundary (tops)
-                    var yTop1 = contentStartPos.Y + (float)younger * zoomedAgeScale;
-                    var yTop2 = contentStartPos.Y + (float)younger * zoomedAgeScale;
-                    DrawDashedLine(drawList, new Vector2(x1, yTop1), new Vector2(x2, yTop2),
-                        ImGui.ColorConvertFloat4ToU32(new Vector4(0.5f, 0.5f, 0.7f, 0.7f)),
-                        1.5f * _zoomLevel, 10f * _zoomLevel);
+                // Get the actual Y positions of the unit boundaries
+                var u1Top = contentStartPos.Y + (float)u1.EndAge * zoomedAgeScale;
+                var u1Bottom = contentStartPos.Y + (float)u1.StartAge * zoomedAgeScale;
+                var u2Top = contentStartPos.Y + (float)best.EndAge * zoomedAgeScale;
+                var u2Bottom = contentStartPos.Y + (float)best.StartAge * zoomedAgeScale;
 
-                    // Older overlapping boundary (bases)
-                    var yBase1 = contentStartPos.Y + (float)older * zoomedAgeScale;
-                    var yBase2 = contentStartPos.Y + (float)older * zoomedAgeScale;
-                    DrawDashedLine(drawList, new Vector2(x1, yBase1), new Vector2(x2, yBase2),
-                        ImGui.ColorConvertFloat4ToU32(new Vector4(0.5f, 0.5f, 0.7f, 0.5f)),
-                        1.5f * _zoomLevel, 10f * _zoomLevel);
-                }
-                else
-                {
-                    // No overlap: connect closest boundary pair (top↔top or base↔base)
-                    var (aAnc, bAnc) = ClosestBoundaryPair(u1, best);
-                    var y1 = contentStartPos.Y + (float)aAnc * zoomedAgeScale;
-                    var y2 = contentStartPos.Y + (float)bAnc * zoomedAgeScale;
+                // Draw lines connecting the actual unit boundaries
+                // Top to top
+                DrawDashedLine(drawList, new Vector2(x1, u1Top), new Vector2(x2, u2Top),
+                    ImGui.ColorConvertFloat4ToU32(new Vector4(0.5f, 0.5f, 0.9f, 0.8f)),
+                    2.0f * _zoomLevel, 10f * _zoomLevel);
 
-                    DrawDashedLine(drawList, new Vector2(x1, y1), new Vector2(x2, y2),
-                        ImGui.ColorConvertFloat4ToU32(new Vector4(0.5f, 0.5f, 0.7f, 0.7f)),
-                        1.5f * _zoomLevel, 10f * _zoomLevel);
-                }
+                // Bottom to bottom
+                DrawDashedLine(drawList, new Vector2(x1, u1Bottom), new Vector2(x2, u2Bottom),
+                    ImGui.ColorConvertFloat4ToU32(new Vector4(0.5f, 0.5f, 0.9f, 0.6f)),
+                    2.0f * _zoomLevel, 10f * _zoomLevel);
             }
         }
     }
