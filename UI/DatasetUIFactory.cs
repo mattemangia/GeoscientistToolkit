@@ -2,12 +2,14 @@
 
 using GeoscientistToolkit.Data;
 using GeoscientistToolkit.Data.AcousticVolume;
+using GeoscientistToolkit.Data.Borehole;
 using GeoscientistToolkit.Data.CtImageStack;
 using GeoscientistToolkit.Data.GIS;
 using GeoscientistToolkit.Data.Image;
 using GeoscientistToolkit.Data.Mesh3D;
 using GeoscientistToolkit.Data.Pnm;
 using GeoscientistToolkit.Data.Table;
+using GeoscientistToolkit.UI.Borehole;
 using GeoscientistToolkit.UI.GIS;
 using GeoscientistToolkit.UI.Interfaces;
 using GeoscientistToolkit.UI.Tools;
@@ -51,6 +53,9 @@ public static class DatasetUIFactory
             // PNM Dataset
             PNMDataset pnmDataset => new PNMViewer(pnmDataset),
 
+            // Borehole Dataset
+            BoreholeDataset boreholeDataset => new BoreholeViewer(boreholeDataset),
+
             // Dataset groups cannot be opened in a viewer
             DatasetGroup => throw new InvalidOperationException(
                 "Cannot open a DatasetGroup in a viewer. Please open individual datasets."),
@@ -71,6 +76,7 @@ public static class DatasetUIFactory
             AcousticVolumeDataset => new AcousticVolumeProperties(),
             PNMDataset => new PNMPropertiesRenderer(), // Added for PNM
             DatasetGroup => new DatasetGroupProperties(),
+            BoreholeDataset => new BoreholePropertiesRenderer(),
             _ => new DefaultPropertiesRenderer()
         };
     }
@@ -90,6 +96,7 @@ public static class DatasetUIFactory
             AcousticVolumeDataset => new AcousticVolumeTools(),
             PNMDataset => new PNMTools(), // Added for PNM
             ImageDataset => new ImageTools(),
+            BoreholeDataset => new BoreholeTools(),
             _ => new DefaultTools()
         };
     }

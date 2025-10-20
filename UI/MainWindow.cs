@@ -4,6 +4,7 @@ using System.Data;
 using System.Numerics;
 using GeoscientistToolkit.Business;
 using GeoscientistToolkit.Data;
+using GeoscientistToolkit.Data.Borehole;
 using GeoscientistToolkit.Data.GIS;
 using GeoscientistToolkit.Data.Mesh3D;
 using GeoscientistToolkit.Data.Table;
@@ -384,6 +385,8 @@ public class MainWindow
             // NEW: Add empty mesh creation
             if (ImGui.MenuItem("New 3D Model...")) OnCreateEmptyMesh();
 
+            if (ImGui.MenuItem("New Borehole/Well Log...")) OnCreateEmptyBorehole();
+
             if (ImGui.MenuItem("New GIS Map..."))
             {
                 var emptyGIS = new GISDataset("New Map", "")
@@ -568,6 +571,55 @@ public class MainWindow
             ? "NewProject"
             : ProjectManager.Instance.ProjectName;
         _saveProjectDialog.Open(null, new[] { ".gtp" }, defaultName);
+    }
+
+    private void OnCreateEmptyBorehole()
+    {
+        try
+        {
+            var timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
+            var wellName = $"Well_{timestamp}";
+
+            // Get user's documents folder as default location
+            var documentsPath = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
+            var defaultPath = Path.Combine(documentsPath, "Boreholes");
+
+            // Create the directory if it doesn't exist
+            if (!Directory.Exists(defaultPath))
+                try
+                {
+                    Directory.CreateDirectory(defaultPath);
+                }
+                catch
+                {
+                    defaultPath = documentsPath;
+                }
+
+            var filePath = Path.Combine(defaultPath, $"{wellName}.borehole");
+
+            // Create empty borehole dataset
+            var borehole = new BoreholeDataset(wellName, filePath)
+            {
+                Field = "Unknown Field",
+                TotalDepth = 100.0f,
+                WellDiameter = 0.15f,
+                Elevation = 0f
+            };
+
+            // Save initial file
+            borehole.SaveToFile(filePath);
+
+            // Add to project
+            ProjectManager.Instance.AddDataset(borehole);
+            Logger.Log($"Created new borehole: {wellName}");
+
+            // Auto-select and open
+            OnDatasetSelected(borehole);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError($"Failed to create empty borehole: {ex.Message}");
+        }
     }
 
     private void OnCreateEmptyMesh()

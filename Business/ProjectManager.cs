@@ -6,6 +6,7 @@ using GeoscientistToolkit.Analysis.NMR;
 using GeoscientistToolkit.Analysis.ThermalConductivity;
 using GeoscientistToolkit.Data;
 using GeoscientistToolkit.Data.AcousticVolume;
+using GeoscientistToolkit.Data.Borehole;
 using GeoscientistToolkit.Data.CtImageStack;
 using GeoscientistToolkit.Data.GIS;
 using GeoscientistToolkit.Data.Image;
@@ -310,6 +311,70 @@ public class ProjectManager
 
                 dataset = streamingDataset;
                 break;
+
+            case BoreholeDatasetDTO boreholeDto:
+            {
+                var boreholeDataset = new BoreholeDataset(boreholeDto.Name, boreholeDto.FilePath)
+                {
+                    WellName = boreholeDto.WellName,
+                    Field = boreholeDto.Field,
+                    TotalDepth = boreholeDto.TotalDepth,
+                    WellDiameter = boreholeDto.WellDiameter,
+                    SurfaceCoordinates = boreholeDto.SurfaceCoordinates,
+                    Elevation = boreholeDto.Elevation,
+                    DepthScaleFactor = boreholeDto.DepthScaleFactor,
+                    ShowGrid = boreholeDto.ShowGrid,
+                    ShowLegend = boreholeDto.ShowLegend,
+                    TrackWidth = boreholeDto.TrackWidth,
+                    IsMissing = !File.Exists(boreholeDto.FilePath)
+                };
+
+                // Restore lithology units
+                if (boreholeDto.LithologyUnits != null)
+                    foreach (var unitDto in boreholeDto.LithologyUnits)
+                    {
+                        var unit = new LithologyUnit
+                        {
+                            ID = unitDto.ID,
+                            Name = unitDto.Name,
+                            LithologyType = unitDto.LithologyType,
+                            DepthFrom = unitDto.DepthFrom,
+                            DepthTo = unitDto.DepthTo,
+                            Color = unitDto.Color,
+                            Description = unitDto.Description,
+                            GrainSize = unitDto.GrainSize,
+                            Parameters = unitDto.Parameters ?? new Dictionary<string, float>(),
+                            ParameterSources = unitDto.ParameterSources ?? new Dictionary<string, ParameterSource>()
+                        };
+                        boreholeDataset.LithologyUnits.Add(unit);
+                    }
+
+                // Restore parameter tracks
+                if (boreholeDto.ParameterTracks != null)
+                    foreach (var kvp in boreholeDto.ParameterTracks)
+                    {
+                        var trackDto = kvp.Value;
+                        var track = new ParameterTrack
+                        {
+                            Name = trackDto.Name,
+                            Unit = trackDto.Unit,
+                            MinValue = trackDto.MinValue,
+                            MaxValue = trackDto.MaxValue,
+                            IsLogarithmic = trackDto.IsLogarithmic,
+                            Color = trackDto.Color,
+                            IsVisible = trackDto.IsVisible,
+                            Points = trackDto.Points ?? new List<ParameterPoint>()
+                        };
+                        boreholeDataset.ParameterTracks[kvp.Key] = track;
+                    }
+
+                if (boreholeDataset.IsMissing)
+                    Logger.LogWarning(
+                        $"Source file not found for Borehole dataset: {boreholeDto.Name} at {boreholeDto.FilePath}");
+
+                dataset = boreholeDataset;
+                break;
+            }
 
             case Mesh3DDatasetDTO mesh3DDto:
                 var mesh3DDataset = new Mesh3DDataset(mesh3DDto.Name, mesh3DDto.FilePath)

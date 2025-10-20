@@ -466,6 +466,7 @@ public class DatasetPanel : BasePanel
             DatasetType.GIS => "[GIS]",
             DatasetType.AcousticVolume => "[ACOUSTIC]",
             DatasetType.PNM => "[PNM]", // Added for PNM
+            DatasetType.Borehole => "[WELL]",
             _ => "[DATA]"
         };
     }
