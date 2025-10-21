@@ -5,7 +5,6 @@ using System.Numerics;
 using GeoscientistToolkit.Business;
 using GeoscientistToolkit.Data.GIS;
 using GeoscientistToolkit.Data.Table;
-using GeoscientistToolkit.UI.Utils;
 using GeoscientistToolkit.Util;
 using ImGuiNET;
 
@@ -15,7 +14,8 @@ public class ShapefileCreationDialog
 {
     private readonly List<string> _availableColumns = new();
     private readonly string[] _geometryTypes = { "Point", "Line", "Polygon" };
-    private readonly ImGuiExportFileDialog _saveDialog;
+
+    // --- REMOVED: Save dialog is not needed for layer creation ---
 
     private bool _isOpen;
     private int _latColumnIndex = -1;
@@ -30,12 +30,6 @@ public class ShapefileCreationDialog
     private TableDataset _selectedTable;
     private GISDataset _targetDataset;
 
-    public ShapefileCreationDialog()
-    {
-        _saveDialog = new ImGuiExportFileDialog("SaveShapefile", "Save Shapefile");
-        _saveDialog.SetExtensions((".shp", "ESRI Shapefile"));
-    }
-
     public void OpenEmpty(GISDataset targetDataset)
     {
         _isOpen = true;
@@ -49,6 +43,7 @@ public class ShapefileCreationDialog
         _isOpen = true;
         _targetDataset = targetDataset;
         _mode = CreationMode.FromTable;
+        _newLayerName = "Points from Table";
 
         // Find available tables
         _selectedTable = ProjectManager.Instance.LoadedDatasets
@@ -62,20 +57,13 @@ public class ShapefileCreationDialog
     {
         if (!_isOpen) return;
 
-        // Handle save dialog
-        if (_saveDialog.Submit())
-        {
-            var path = _saveDialog.SelectedPath;
-            if (_mode == CreationMode.Empty)
-                CreateEmptyShapefile(path);
-            else if (_mode == CreationMode.FromTable) CreateShapefileFromTable(path);
-        }
+        // --- REMOVED: Save dialog handling ---
 
         ImGui.SetNextWindowSize(new Vector2(600, 400), ImGuiCond.FirstUseEver);
         var center = ImGui.GetMainViewport().GetCenter();
         ImGui.SetNextWindowPos(center, ImGuiCond.Appearing, new Vector2(0.5f, 0.5f));
 
-        if (ImGui.Begin("Create Shapefile", ref _isOpen, ImGuiWindowFlags.NoCollapse))
+        if (ImGui.Begin("Create New Layer", ref _isOpen, ImGuiWindowFlags.NoCollapse))
         {
             if (_mode == CreationMode.Empty)
                 DrawEmptyShapefileOptions();
@@ -88,7 +76,7 @@ public class ShapefileCreationDialog
 
     private void DrawEmptyShapefileOptions()
     {
-        ImGui.TextWrapped("Create a new empty shapefile layer with the specified geometry type.");
+        ImGui.TextWrapped("Create a new empty vector layer in the current dataset.");
         ImGui.Separator();
         ImGui.Spacing();
 
@@ -104,7 +92,7 @@ public class ShapefileCreationDialog
         ImGui.Spacing();
         ImGui.Separator();
 
-        if (ImGui.Button("Create and Save...", new Vector2(150, 0))) _saveDialog.Open(_newLayerName);
+        if (ImGui.Button("Create Layer", new Vector2(150, 0))) CreateEmptyLayer();
 
         ImGui.SameLine();
         if (ImGui.Button("Cancel", new Vector2(100, 0))) _isOpen = false;
@@ -112,7 +100,7 @@ public class ShapefileCreationDialog
 
     private void DrawFromTableOptions()
     {
-        ImGui.TextWrapped("Create a shapefile from a table dataset by selecting coordinate columns.");
+        ImGui.TextWrapped("Create a new point layer from a table by selecting coordinate columns.");
         ImGui.Separator();
         ImGui.Spacing();
 
@@ -177,7 +165,7 @@ public class ShapefileCreationDialog
             }
 
             ImGui.Spacing();
-            ImGui.Text("Layer Name:");
+            ImGui.Text("New Layer Name:");
             ImGui.SetNextItemWidth(300);
             ImGui.InputText("##LayerNameFromTable", ref _newLayerName, 256);
         }
@@ -189,7 +177,8 @@ public class ShapefileCreationDialog
 
         if (!canCreate) ImGui.BeginDisabled();
 
-        if (ImGui.Button("Create and Save...", new Vector2(150, 0))) _saveDialog.Open(_newLayerName);
+        if (ImGui.Button("Create Layer", new Vector2(150, 0))) CreateLayerFromTable();
+
 
         if (!canCreate) ImGui.EndDisabled();
 
@@ -222,10 +211,11 @@ public class ShapefileCreationDialog
         }
     }
 
-    private void CreateEmptyShapefile(string path)
+    private void CreateEmptyLayer()
     {
         try
         {
+            // --- MODIFIED: Creates a layer, does not save a file ---
             var featureType = _selectedGeometryType switch
             {
                 0 => FeatureType.Point,
@@ -240,23 +230,24 @@ public class ShapefileCreationDialog
                 Type = LayerType.Vector,
                 IsVisible = true,
                 IsEditable = true,
-                Color = new Vector4(0.2f, 0.5f, 1.0f, 1.0f)
+                Color = new Vector4(Random.Shared.NextSingle(), Random.Shared.NextSingle(), Random.Shared.NextSingle(),
+                    1.0f)
             };
 
             _targetDataset.Layers.Add(layer);
-            _targetDataset.SaveAsGeoJSON(path.Replace(".shp", ".geojson"));
 
-            Logger.Log($"Created empty shapefile layer: {_newLayerName}");
+            Logger.Log($"Created empty layer: {_newLayerName}");
             _isOpen = false;
         }
         catch (Exception ex)
         {
-            Logger.LogError($"Failed to create empty shapefile: {ex.Message}");
+            Logger.LogError($"Failed to create empty layer: {ex.Message}");
         }
     }
 
-    private void CreateShapefileFromTable(string path)
+    private void CreateLayerFromTable()
     {
+        // --- MODIFIED: Creates a layer, does not save a file ---
         var dataTable = _selectedTable?.GetDataTable();
         if (dataTable == null) return;
 
@@ -267,7 +258,7 @@ public class ShapefileCreationDialog
                 Name = _newLayerName,
                 Type = LayerType.Vector,
                 IsVisible = true,
-                IsEditable = false,
+                IsEditable = true,
                 Color = new Vector4(1.0f, 0.2f, 0.2f, 1.0f)
             };
 
@@ -301,14 +292,13 @@ public class ShapefileCreationDialog
 
             _targetDataset.Layers.Add(layer);
             _targetDataset.UpdateBounds();
-            _targetDataset.SaveAsGeoJSON(path.Replace(".shp", ".geojson"));
 
-            Logger.Log($"Created shapefile from table with {layer.Features.Count} points");
+            Logger.Log($"Created layer from table with {layer.Features.Count} points");
             _isOpen = false;
         }
         catch (Exception ex)
         {
-            Logger.LogError($"Failed to create shapefile from table: {ex.Message}");
+            Logger.LogError($"Failed to create layer from table: {ex.Message}");
         }
     }
 

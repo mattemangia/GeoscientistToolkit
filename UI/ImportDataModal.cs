@@ -14,6 +14,8 @@ public class ImportDataModal
 {
     private readonly ImGuiFileDialog _acousticDialog;
     private readonly AcousticVolumeLoader _acousticVolumeLoader;
+    private readonly ImGuiFileDialog _boreholeBinaryDialog;
+    private readonly BoreholeBinaryLoader _boreholeBinaryLoader;
     private readonly CTStackLoaderWrapper _ctStackLoader;
 
     private readonly string[] _datasetTypeNames =
@@ -54,8 +56,6 @@ public class ImportDataModal
     private readonly ImGuiFileDialog _tableDialog;
     private readonly TableLoader _tableLoader;
     private readonly ImGuiFileDialog _tiffDialog;
-    private readonly BoreholeBinaryLoader _boreholeBinaryLoader;
-    private readonly ImGuiFileDialog _boreholeBinaryDialog;
     private ImportState _currentState = ImportState.Idle;
     private Task<Dataset> _importTask;
     private Dataset _pendingDataset;
@@ -80,7 +80,8 @@ public class ImportDataModal
             "Select Segmentation File");
         _pnmDialog =
             new ImGuiFileDialog("ImportPNMDialog", FileDialogType.OpenFile, "Select PNM File"); // Added for PNM
-        _boreholeBinaryDialog = new ImGuiFileDialog("ImportBoreholeBinaryDialog", FileDialogType.OpenFile, "Select Borehole Binary File");
+        _boreholeBinaryDialog = new ImGuiFileDialog("ImportBoreholeBinaryDialog", FileDialogType.OpenFile,
+            "Select Borehole Binary File");
         _organizerDialog = new ImageStackOrganizerDialog();
 
         // Initialize loaders
@@ -166,7 +167,7 @@ public class ImportDataModal
         if (_segmentationDialog.Submit()) _segmentationLoader.SegmentationPath = _segmentationDialog.SelectedPath;
 
         if (_fileDialog.Submit()) _singleImageLoader.ImagePath = _fileDialog.SelectedPath;
-        
+
         if (_boreholeBinaryDialog.Submit()) _boreholeBinaryLoader.FilePath = _boreholeBinaryDialog.SelectedPath;
 
         if (_tiffDialog.Submit())
@@ -247,7 +248,7 @@ public class ImportDataModal
         ImGui.Separator();
         DrawButtons();
     }
-    
+
     private void DrawBoreholeBinaryOptions()
     {
         ImGui.TextWrapped("Import a borehole log dataset from a custom binary format (.bhb). " +

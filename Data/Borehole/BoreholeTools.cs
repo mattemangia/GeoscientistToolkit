@@ -8,10 +8,9 @@ using GeoscientistToolkit.Data.Borehole;
 using GeoscientistToolkit.Data.CtImageStack;
 using GeoscientistToolkit.Data.Pnm;
 using GeoscientistToolkit.UI.Interfaces;
+using GeoscientistToolkit.UI.Utils;
 using GeoscientistToolkit.Util;
 using ImGuiNET;
-using GeoscientistToolkit.UI.Utils;
-
 
 namespace GeoscientistToolkit.UI.Borehole;
 
@@ -20,6 +19,8 @@ namespace GeoscientistToolkit.UI.Borehole;
 /// </summary>
 public class BoreholeTools : IDatasetTools
 {
+    private readonly ImGuiExportFileDialog _exportBinaryDialog;
+
     private readonly string[] _grainSizes = new[]
     {
         "Clay", "Silt", "Very Fine", "Fine", "Medium", "Coarse", "Very Coarse", "Gravel"
@@ -52,7 +53,6 @@ public class BoreholeTools : IDatasetTools
     private bool _showAddUnitDialog;
     private bool _showEditUnitDialog;
     private bool _showImportParametersDialog;
-    private readonly ImGuiExportFileDialog _exportBinaryDialog;
 
     public BoreholeTools()
     {
@@ -189,20 +189,13 @@ public class BoreholeTools : IDatasetTools
                 ImGui.TextDisabled("Select a unit to import parameters");
             }
         }
-        
+
         // Export section
         if (ImGui.CollapsingHeader("Export"))
-        {
             if (ImGui.Button("Export to Binary (.bhb)..."))
-            {
                 _exportBinaryDialog.Open(borehole.Name);
-            }
-        }
 
-        if (_exportBinaryDialog.Submit())
-        {
-            borehole.SaveToBinaryFile(_exportBinaryDialog.SelectedPath);
-        }
+        if (_exportBinaryDialog.Submit()) borehole.SaveToBinaryFile(_exportBinaryDialog.SelectedPath);
 
         // Parameter tracks visibility
         if (ImGui.CollapsingHeader("Track Visibility"))
