@@ -3,23 +3,17 @@
 using System.Data;
 using System.Numerics;
 using GeoscientistToolkit.Business;
-using GeoscientistToolkit.Business.GIS;
 using GeoscientistToolkit.Data;
 using GeoscientistToolkit.Data.Borehole;
 using GeoscientistToolkit.Data.GIS;
 using GeoscientistToolkit.Data.Mesh3D;
 using GeoscientistToolkit.Data.Table;
-using GeoscientistToolkit.Data.TwoDGeology;
 using GeoscientistToolkit.Settings;
 using GeoscientistToolkit.UI.GIS;
 using GeoscientistToolkit.UI.Utils;
 using GeoscientistToolkit.UI.Windows;
 using GeoscientistToolkit.Util;
 using ImGuiNET;
-
-// ADDED: For TableDataset and DataTable
-
-// ADDED: To access the new editor window
 
 namespace GeoscientistToolkit.UI;
 
@@ -628,59 +622,14 @@ public class MainWindow
 
     private void OnCreateEmpty2DGeology()
     {
-        try
+        // The MainWindow no longer knows HOW to create the profile.
+        // It just asks the ProjectManager to do it.
+        Dataset newProfile = ProjectManager.Instance.CreateNew2DGeologyProfile();
+
+        // If the creation was successful, select the new dataset in the UI.
+        if (newProfile != null)
         {
-            var timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
-            var profileName = $"CrossSection_{timestamp}";
-
-            // Get user's documents folder as default location
-            var documentsPath = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
-            var defaultPath = Path.Combine(documentsPath, "2D Geology");
-
-            // Create the directory if it doesn't exist
-            if (!Directory.Exists(defaultPath))
-                try
-                {
-                    Directory.CreateDirectory(defaultPath);
-                }
-                catch
-                {
-                    defaultPath = documentsPath;
-                }
-
-            var filePath = Path.Combine(defaultPath, $"{profileName}.2dgeo");
-
-            // Create empty 2D geology dataset with default profile
-            var twoDGeo = TwoDGeologyDataset.CreateEmpty(profileName, filePath);
-
-            if (twoDGeo == null)
-            {
-                Logger.LogError("Failed to create empty 2D geology profile");
-                return;
-            }
-
-            // Save the initial profile to the selected location
-            try
-            {
-                TwoDGeologySerializer.Write(filePath, twoDGeo.ProfileData);
-                Logger.Log($"Saved initial 2D geology profile to {filePath}");
-            }
-            catch (Exception saveEx)
-            {
-                Logger.LogError($"Failed to save initial 2D geology profile: {saveEx.Message}");
-            }
-
-            // Add to project
-            ProjectManager.Instance.AddDataset(twoDGeo);
-            Logger.Log($"Created new 2D geology profile: {profileName}");
-
-            // Auto-select and open
-            OnDatasetSelected(twoDGeo);
-        }
-        catch (Exception ex)
-        {
-            Logger.LogError($"Failed to create empty 2D geology profile: {ex.Message}");
-            Logger.LogError($"Stack trace: {ex.StackTrace}");
+            OnDatasetSelected(newProfile);
         }
     }
 
