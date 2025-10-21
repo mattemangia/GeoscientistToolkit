@@ -1,6 +1,7 @@
 // GeoscientistToolkit/UI/GIS/TwoDGeologyTools.cs
 
 using System.Numerics;
+using System.Reflection;
 using GeoscientistToolkit.Business.GIS;
 using GeoscientistToolkit.Data;
 using GeoscientistToolkit.Data.TwoDGeology;
@@ -25,12 +26,20 @@ public class TwoDGeologyTools : IDatasetTools
     {
         _categoryNames = new Dictionary<ToolCategory, string>
         {
+            { ToolCategory.Creation, "Creation" },
             { ToolCategory.Editing, "Editing" },
             { ToolCategory.Analysis, "Analysis" }
         };
 
         _toolsByCategory = new Dictionary<ToolCategory, List<ToolEntry>>
         {
+            // ADD THIS ENTIRE BLOCK:
+            {
+                ToolCategory.Creation, new List<ToolEntry>
+                {
+                    new() { Name = "Profile Setup", Tool = new TwoDGeologyCreationTools() }
+                }
+            },
             {
                 ToolCategory.Editing, new List<ToolEntry>
                 {
@@ -88,6 +97,7 @@ public class TwoDGeologyTools : IDatasetTools
 
     private enum ToolCategory
     {
+        Creation,
         Editing,
         Analysis
     }
@@ -108,6 +118,9 @@ public class TwoDGeologyTools : IDatasetTools
         private static readonly ImGuiExportFileDialog _svgExportDialog =
             new("SvgExportStandalone", "Export Current View as SVG");
 
+        private static readonly ImGuiExportFileDialog _singleFrameExportDialog =
+            new("SingleFrameExportDialog", "Export Single Frame");
+
         private static readonly AnimationExporter _animationExporter = new();
 
         // SVG export options
@@ -116,7 +129,9 @@ public class TwoDGeologyTools : IDatasetTools
         private static bool _svgIncludeLegend = true;
         private static int _svgWidth = 1920;
         private static int _svgHeight = 1080;
-        private static bool _show2DGeoExportInfo;
+
+        private static readonly ImGuiExportFileDialog _2dGeoExportDialog =
+            new("2DGeoExportDialog", "Save 2D Geology Profile");
 
         public void Draw(Dataset dataset)
         {
@@ -175,7 +190,17 @@ public class TwoDGeologyTools : IDatasetTools
             _animationExporter.DrawUI();
 
             if (ImGui.Button("🖼️ Export Single Frame as PNG/BMP...", new Vector2(-1, 0)))
-                ExportSingleFrame(twoDDataset);
+            {
+                _singleFrameExportDialog.SetExtensions(
+                    (".png", "PNG Image"),
+                    (".bmp", "BMP Image")
+                );
+                _singleFrameExportDialog.Open($"cross_section_{DateTime.Now:yyyyMMdd_HHmmss}");
+            }
+
+            if (_singleFrameExportDialog.Submit())
+                ExportSingleFrame(twoDDataset, _singleFrameExportDialog.SelectedPath);
+
 
             ImGui.Separator();
 
@@ -186,26 +211,20 @@ public class TwoDGeologyTools : IDatasetTools
 
             if (ImGui.Button("💾 Save as 2D Geology Dataset...", new Vector2(-1, 0)))
             {
-                // This would trigger the same export as in GeologicalMappingViewer
-                Logger.Log("Use 'Export as 2D Geology Dataset' from the profile generation window.");
-                _show2DGeoExportInfo = true;
-                ImGui.OpenPopup("Info##2DGeoExport");
+                _2dGeoExportDialog.SetExtensions((".2dgeo", "2D Geology Profile"));
+                _2dGeoExportDialog.Open($"{twoDDataset.Name}_{DateTime.Now:yyyyMMdd}");
             }
 
-            if (ImGui.BeginPopupModal("Info##2DGeoExport", ref _show2DGeoExportInfo, ImGuiWindowFlags.AlwaysAutoResize))
-            {
-                ImGui.Text("To export in 2D Geology format:");
-                ImGui.BulletText("Generate the profile from the Geological Mapping Viewer");
-                ImGui.BulletText("Click 'Export as 2D Geology Dataset' in the cross-section window");
-                ImGui.Spacing();
-                if (ImGui.Button("OK", new Vector2(120, 0)))
+            if (_2dGeoExportDialog.Submit())
+                try
                 {
-                    _show2DGeoExportInfo = false;
-                    ImGui.CloseCurrentPopup();
+                    TwoDGeologySerializer.Write(_2dGeoExportDialog.SelectedPath, twoDDataset.ProfileData);
+                    Logger.Log($"Successfully exported 2D Geology profile to: {_2dGeoExportDialog.SelectedPath}");
                 }
-
-                ImGui.EndPopup();
-            }
+                catch (Exception ex)
+                {
+                    Logger.LogError($"Failed to save 2D Geology profile: {ex.Message}");
+                }
 
             ImGui.Separator();
 
@@ -218,70 +237,381 @@ public class TwoDGeologyTools : IDatasetTools
             ImGui.BulletText("2D Geology: Native format, preserves all data");
         }
 
-        private void ExportSingleFrame(TwoDGeologyDataset dataset)
+        private void ExportSingleFrame(TwoDGeologyDataset dataset, string outputPath)
         {
-            // Create a temporary restoration object just to use the rendering
-            var restoration = new StructuralRestoration(dataset.ProfileData);
-
-            var outputPath = Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),
-                $"cross_section_{DateTime.Now:yyyyMMdd_HHmmss}.png");
-
-            // Use the animation exporter to create a single frame
-            var exporter = new AnimationExporter();
-
-            // Create temporary folder for single frame
-            var tempFolder = Path.Combine(Path.GetTempPath(), $"geotk_export_{Guid.NewGuid()}");
-            Directory.CreateDirectory(tempFolder);
-
             try
             {
-                // Export one frame at current state (0% = original)
-                restoration.Restore(0f); // This just copies the original
-
-                // Render frame manually
                 var frameData = RenderFrameForExport(dataset.ProfileData);
-                var fileName = "frame_00000.png";
-                var filePath = Path.Combine(tempFolder, fileName);
-
-                SaveFrameAsPng(frameData, filePath, 1920, 1080);
-
-                // Move to final location
-                var finalPath = Path.Combine(
-                    Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),
-                    $"cross_section_{DateTime.Now:yyyyMMdd_HHmmss}.png");
-
-                File.Move(filePath, finalPath);
-
-                Logger.Log($"Exported single frame to: {finalPath}");
+                SaveFrame(frameData, outputPath);
+                Logger.Log($"Exported single frame to: {outputPath}");
             }
-            finally
+            catch (Exception ex)
             {
-                // Cleanup temp folder
-                try
-                {
-                    Directory.Delete(tempFolder, true);
-                }
-                catch
-                {
-                }
+                Logger.LogError($"Failed to export single frame: {ex.Message}");
+            }
+        }
+
+        private void SaveFrame(byte[] imageData, string filePath)
+        {
+            var writer = new ImageWriter();
+            var uiSettings = _animationExporter.GetType()
+                .GetField("_imageWidth", BindingFlags.NonPublic | BindingFlags.Instance).GetValue(_animationExporter);
+            var imageWidth = (int)uiSettings;
+            var imageHeight = (int)_animationExporter.GetType()
+                .GetField("_imageHeight", BindingFlags.NonPublic | BindingFlags.Instance).GetValue(_animationExporter);
+
+
+            if (filePath.EndsWith(".png", StringComparison.OrdinalIgnoreCase))
+            {
+                using var stream = File.OpenWrite(filePath);
+                writer.WritePng(imageData, imageWidth, imageHeight, ColorComponents.RedGreenBlueAlpha, stream);
+            }
+            else if (filePath.EndsWith(".bmp", StringComparison.OrdinalIgnoreCase))
+            {
+                using var stream = File.OpenWrite(filePath);
+                writer.WriteBmp(imageData, imageWidth, imageHeight, ColorComponents.RedGreenBlueAlpha, stream);
             }
         }
 
         private byte[] RenderFrameForExport(GeologicalMapping.CrossSectionGenerator.CrossSection section)
         {
-            // This would use the same rendering logic as AnimationExporter
-            // For now, just return a placeholder
-            Logger.LogWarning("Single frame export not fully implemented yet - use animation export with 1 frame");
-            return new byte[1920 * 1080 * 4]; // Placeholder
+            // Reflectively get UI settings from the shared AnimationExporter instance
+            var imageWidth = (int)_animationExporter.GetType()
+                .GetField("_imageWidth", BindingFlags.NonPublic | BindingFlags.Instance).GetValue(_animationExporter);
+            var imageHeight = (int)_animationExporter.GetType()
+                .GetField("_imageHeight", BindingFlags.NonPublic | BindingFlags.Instance).GetValue(_animationExporter);
+            var includeLabels = (bool)_animationExporter.GetType()
+                .GetField("_includeLabels", BindingFlags.NonPublic | BindingFlags.Instance)
+                .GetValue(_animationExporter);
+
+            // Create RGBA image buffer
+            var imageData = new byte[imageWidth * imageHeight * 4];
+
+            // Fill with white background
+            for (var i = 0; i < imageData.Length; i += 4)
+            {
+                imageData[i] = 255; // R
+                imageData[i + 1] = 255; // G
+                imageData[i + 2] = 255; // B
+                imageData[i + 3] = 255; // A
+            }
+
+            // Calculate drawing area
+            var margin = 80;
+            var drawWidth = imageWidth - margin * 2;
+            var drawHeight = imageHeight - margin * 2 - (includeLabels ? 80 : 0);
+
+            var profile = section.Profile;
+            var distRange = profile.TotalDistance;
+            var elevRange = profile.MaxElevation - profile.MinElevation;
+            if (elevRange < 1f) elevRange = 1f;
+
+            var ve = section.VerticalExaggeration;
+
+            // Helper function to convert world to screen coordinates
+            (int x, int y) WorldToScreen(Vector2 worldPos)
+            {
+                var x = worldPos.X / distRange * drawWidth + margin;
+                var y = imageHeight - margin - (includeLabels ? 80 : 0) -
+                        (worldPos.Y - profile.MinElevation) / elevRange * drawHeight * ve;
+                return ((int)x, (int)y);
+            }
+
+            // Draw formations (filled polygons)
+            foreach (var formation in section.Formations)
+            {
+                if (formation.TopBoundary.Count < 2) continue;
+
+                var polyPoints = new List<(int x, int y)>();
+                foreach (var p in formation.TopBoundary) polyPoints.Add(WorldToScreen(p));
+                foreach (var p in formation.BottomBoundary.AsEnumerable().Reverse()) polyPoints.Add(WorldToScreen(p));
+
+                if (polyPoints.Count > 2)
+                {
+                    var color = new Color4(
+                        (byte)(formation.Color.X * 255),
+                        (byte)(formation.Color.Y * 255),
+                        (byte)(formation.Color.Z * 255),
+                        180 // Semi-transparent
+                    );
+
+                    FillPolygon(imageData, imageWidth, imageHeight, polyPoints, color);
+                    DrawPolygon(imageData, imageWidth, imageHeight, polyPoints, new Color4(0, 0, 0, 255), 2);
+                }
+            }
+
+            // Draw faults
+            foreach (var fault in section.Faults)
+            {
+                var faultPoints = fault.FaultTrace.Select(p => WorldToScreen(p)).ToList();
+                if (faultPoints.Count > 1)
+                    DrawPolyline(imageData, imageWidth, imageHeight, faultPoints, new Color4(255, 0, 0, 255), 3);
+            }
+
+            // Draw topography
+            var topoPoints = profile.Points
+                .Select(p => WorldToScreen(new Vector2(p.Distance, p.Elevation)))
+                .ToList();
+            if (topoPoints.Count > 1)
+                DrawPolyline(imageData, imageWidth, imageHeight, topoPoints, new Color4(0, 0, 0, 255), 3);
+
+            // Draw labels
+            if (includeLabels)
+            {
+                var title = "Geological Cross-Section";
+                DrawText(imageData, imageWidth, imageHeight, title, margin, 30, 2.0f, new Color4(0, 0, 0, 255));
+            }
+
+            return imageData;
         }
 
-        private void SaveFrameAsPng(byte[] imageData, string filePath, int width, int height)
+        #region Drawing Primitives (Copied from AnimationExporter)
+
+        private struct Color4
         {
-            using var stream = File.OpenWrite(filePath);
-            var writer = new ImageWriter();
-            writer.WritePng(imageData, width, height, ColorComponents.RedGreenBlueAlpha, stream);
+            public readonly byte R;
+            public readonly byte G;
+            public readonly byte B;
+            public readonly byte A;
+
+            public Color4(byte r, byte g, byte b, byte a)
+            {
+                R = r;
+                G = g;
+                B = b;
+                A = a;
+            }
         }
+
+        private void SetPixel(byte[] imageData, int width, int height, int x, int y, Color4 color)
+        {
+            if (x < 0 || x >= width || y < 0 || y >= height) return;
+
+            var index = (y * width + x) * 4;
+
+            if (color.A == 255)
+            {
+                imageData[index] = color.R;
+                imageData[index + 1] = color.G;
+                imageData[index + 2] = color.B;
+                imageData[index + 3] = color.A;
+            }
+            else
+            {
+                var alpha = color.A / 255f;
+                var invAlpha = 1f - alpha;
+
+                imageData[index] = (byte)(color.R * alpha + imageData[index] * invAlpha);
+                imageData[index + 1] = (byte)(color.G * alpha + imageData[index + 1] * invAlpha);
+                imageData[index + 2] = (byte)(color.B * alpha + imageData[index + 2] * invAlpha);
+            }
+        }
+
+        private void DrawLine(byte[] imageData, int width, int height, int x0, int y0, int x1, int y1,
+            Color4 color, int thickness = 1)
+        {
+            var dx = Math.Abs(x1 - x0);
+            var dy = Math.Abs(y1 - y0);
+            var sx = x0 < x1 ? 1 : -1;
+            var sy = y0 < y1 ? 1 : -1;
+            var err = dx - dy;
+
+            int x = x0, y = y0;
+
+            while (true)
+            {
+                for (var tx = -thickness / 2; tx <= thickness / 2; tx++)
+                for (var ty = -thickness / 2; ty <= thickness / 2; ty++)
+                    SetPixel(imageData, width, height, x + tx, y + ty, color);
+
+                if (x == x1 && y == y1) break;
+
+                var e2 = 2 * err;
+                if (e2 > -dy)
+                {
+                    err -= dy;
+                    x += sx;
+                }
+
+                if (e2 < dx)
+                {
+                    err += dx;
+                    y += sy;
+                }
+            }
+        }
+
+        private void DrawPolyline(byte[] imageData, int width, int height, List<(int x, int y)> points,
+            Color4 color, int thickness)
+        {
+            for (var i = 0; i < points.Count - 1; i++)
+                DrawLine(imageData, width, height,
+                    points[i].x, points[i].y,
+                    points[i + 1].x, points[i + 1].y,
+                    color, thickness);
+        }
+
+        private void DrawPolygon(byte[] imageData, int width, int height, List<(int x, int y)> points,
+            Color4 color, int thickness)
+        {
+            for (var i = 0; i < points.Count; i++)
+            {
+                var p1 = points[i];
+                var p2 = points[(i + 1) % points.Count];
+                DrawLine(imageData, width, height, p1.x, p1.y, p2.x, p2.y, color, thickness);
+            }
+        }
+
+        private void FillPolygon(byte[] imageData, int width, int height, List<(int x, int y)> points, Color4 color)
+        {
+            if (points.Count < 3) return;
+
+            var minY = points.Min(p => p.y);
+            var maxY = points.Max(p => p.y);
+            var minX = points.Min(p => p.x);
+            var maxX = points.Max(p => p.x);
+
+            for (var y = minY; y <= maxY; y++)
+            {
+                var intersections = new List<int>();
+
+                for (var i = 0; i < points.Count; i++)
+                {
+                    var p1 = points[i];
+                    var p2 = points[(i + 1) % points.Count];
+
+                    if ((p1.y <= y && p2.y > y) || (p2.y <= y && p1.y > y))
+                    {
+                        var t = (y - p1.y) / (float)(p2.y - p1.y);
+                        var x = (int)(p1.x + t * (p2.x - p1.x));
+                        intersections.Add(x);
+                    }
+                }
+
+                intersections.Sort();
+
+                for (var i = 0; i < intersections.Count - 1; i += 2)
+                {
+                    var x1 = Math.Max(minX, intersections[i]);
+                    var x2 = Math.Min(maxX, intersections[i + 1]);
+
+                    for (var x = x1; x <= x2; x++) SetPixel(imageData, width, height, x, y, color);
+                }
+            }
+        }
+
+        private void DrawText(byte[] imageData, int width, int height, string text, int x, int y,
+            float scale, Color4 color)
+        {
+            var charWidth = (int)(8 * scale);
+
+            for (var i = 0; i < text.Length; i++)
+            {
+                var charX = x + i * charWidth;
+                DrawChar(imageData, width, height, text[i], charX, y, scale, color);
+            }
+        }
+
+        private void DrawChar(byte[] imageData, int width, int height, char c, int x, int y,
+            float scale, Color4 color)
+        {
+            var charData = GetCharBitmap(c);
+            if (charData == null) return;
+
+            for (var cy = 0; cy < 8; cy++)
+            {
+                var row = charData[cy];
+                for (var cx = 0; cx < 8; cx++)
+                    if ((row & (1 << (7 - cx))) != 0)
+                        for (var sy = 0; sy < scale; sy++)
+                        for (var sx = 0; sx < scale; sx++)
+                            SetPixel(imageData, width, height,
+                                x + (int)(cx * scale) + sx,
+                                y + (int)(cy * scale) + sy,
+                                color);
+            }
+        }
+
+        private byte[] GetCharBitmap(char c)
+        {
+            // Simple 8x8 bitmap font - each byte represents one row of 8 pixels
+            return c switch
+            {
+                'A' => new byte[] { 0x18, 0x3C, 0x66, 0x66, 0x7E, 0x66, 0x66, 0x00 },
+                'B' => new byte[] { 0x7C, 0x66, 0x66, 0x7C, 0x66, 0x66, 0x7C, 0x00 },
+                'C' => new byte[] { 0x3C, 0x66, 0x60, 0x60, 0x60, 0x66, 0x3C, 0x00 },
+                'D' => new byte[] { 0x78, 0x6C, 0x66, 0x66, 0x66, 0x6C, 0x78, 0x00 },
+                'E' => new byte[] { 0x7E, 0x60, 0x60, 0x7C, 0x60, 0x60, 0x7E, 0x00 },
+                'F' => new byte[] { 0x7E, 0x60, 0x60, 0x7C, 0x60, 0x60, 0x60, 0x00 },
+                'G' => new byte[] { 0x3C, 0x66, 0x60, 0x6E, 0x66, 0x66, 0x3C, 0x00 },
+                'H' => new byte[] { 0x66, 0x66, 0x66, 0x7E, 0x66, 0x66, 0x66, 0x00 },
+                'I' => new byte[] { 0x3C, 0x18, 0x18, 0x18, 0x18, 0x18, 0x3C, 0x00 },
+                'J' => new byte[] { 0x06, 0x06, 0x06, 0x06, 0x06, 0x66, 0x3C, 0x00 },
+                'K' => new byte[] { 0x66, 0x6C, 0x78, 0x70, 0x78, 0x6C, 0x66, 0x00 },
+                'L' => new byte[] { 0x60, 0x60, 0x60, 0x60, 0x60, 0x60, 0x7E, 0x00 },
+                'M' => new byte[] { 0x63, 0x77, 0x7F, 0x6B, 0x63, 0x63, 0x63, 0x00 },
+                'N' => new byte[] { 0x66, 0x76, 0x7E, 0x7E, 0x6E, 0x66, 0x66, 0x00 },
+                'O' => new byte[] { 0x3C, 0x66, 0x66, 0x66, 0x66, 0x66, 0x3C, 0x00 },
+                'P' => new byte[] { 0x7C, 0x66, 0x66, 0x7C, 0x60, 0x60, 0x60, 0x00 },
+                'Q' => new byte[] { 0x3C, 0x66, 0x66, 0x66, 0x66, 0x3C, 0x0E, 0x00 },
+                'R' => new byte[] { 0x7C, 0x66, 0x66, 0x7C, 0x6C, 0x66, 0x63, 0x00 },
+                'S' => new byte[] { 0x3C, 0x66, 0x60, 0x3C, 0x06, 0x66, 0x3C, 0x00 },
+                'T' => new byte[] { 0x7E, 0x18, 0x18, 0x18, 0x18, 0x18, 0x18, 0x00 },
+                'U' => new byte[] { 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x3C, 0x00 },
+                'V' => new byte[] { 0x66, 0x66, 0x66, 0x66, 0x66, 0x3C, 0x18, 0x00 },
+                'W' => new byte[] { 0x63, 0x63, 0x63, 0x6B, 0x7F, 0x77, 0x63, 0x00 },
+                'X' => new byte[] { 0x66, 0x66, 0x3C, 0x18, 0x3C, 0x66, 0x66, 0x00 },
+                'Y' => new byte[] { 0x66, 0x66, 0x66, 0x3C, 0x18, 0x18, 0x18, 0x00 },
+                'Z' => new byte[] { 0x7E, 0x06, 0x0C, 0x18, 0x30, 0x60, 0x7E, 0x00 },
+                'a' => new byte[] { 0x00, 0x00, 0x3C, 0x06, 0x3E, 0x66, 0x3E, 0x00 },
+                'b' => new byte[] { 0x60, 0x60, 0x7C, 0x66, 0x66, 0x66, 0x7C, 0x00 },
+                'c' => new byte[] { 0x00, 0x00, 0x3C, 0x60, 0x60, 0x60, 0x3C, 0x00 },
+                'd' => new byte[] { 0x06, 0x06, 0x3E, 0x66, 0x66, 0x66, 0x3E, 0x00 },
+                'e' => new byte[] { 0x00, 0x00, 0x3C, 0x66, 0x7E, 0x60, 0x3C, 0x00 },
+                'f' => new byte[] { 0x0E, 0x18, 0x18, 0x7E, 0x18, 0x18, 0x18, 0x00 },
+                'g' => new byte[] { 0x00, 0x00, 0x3E, 0x66, 0x66, 0x3E, 0x06, 0x3C },
+                'h' => new byte[] { 0x60, 0x60, 0x7C, 0x66, 0x66, 0x66, 0x66, 0x00 },
+                'i' => new byte[] { 0x18, 0x00, 0x38, 0x18, 0x18, 0x18, 0x3C, 0x00 },
+                'j' => new byte[] { 0x18, 0x00, 0x38, 0x18, 0x18, 0x18, 0x18, 0x70 },
+                'k' => new byte[] { 0x60, 0x60, 0x66, 0x6C, 0x78, 0x6C, 0x66, 0x00 },
+                'l' => new byte[] { 0x38, 0x18, 0x18, 0x18, 0x18, 0x18, 0x3C, 0x00 },
+                'm' => new byte[] { 0x00, 0x00, 0x76, 0x7F, 0x6B, 0x6B, 0x63, 0x00 },
+                'n' => new byte[] { 0x00, 0x00, 0x7C, 0x66, 0x66, 0x66, 0x66, 0x00 },
+                'o' => new byte[] { 0x00, 0x00, 0x3C, 0x66, 0x66, 0x66, 0x3C, 0x00 },
+                'p' => new byte[] { 0x00, 0x00, 0x7C, 0x66, 0x66, 0x7C, 0x60, 0x60 },
+                'q' => new byte[] { 0x00, 0x00, 0x3E, 0x66, 0x66, 0x3E, 0x06, 0x06 },
+                'r' => new byte[] { 0x00, 0x00, 0x7C, 0x66, 0x60, 0x60, 0x60, 0x00 },
+                's' => new byte[] { 0x00, 0x00, 0x3E, 0x60, 0x3C, 0x06, 0x7C, 0x00 },
+                't' => new byte[] { 0x18, 0x18, 0x7E, 0x18, 0x18, 0x18, 0x0E, 0x00 },
+                'u' => new byte[] { 0x00, 0x00, 0x66, 0x66, 0x66, 0x66, 0x3E, 0x00 },
+                'v' => new byte[] { 0x00, 0x00, 0x66, 0x66, 0x66, 0x3C, 0x18, 0x00 },
+                'w' => new byte[] { 0x00, 0x00, 0x63, 0x6B, 0x6B, 0x7F, 0x36, 0x00 },
+                'x' => new byte[] { 0x00, 0x00, 0x66, 0x3C, 0x18, 0x3C, 0x66, 0x00 },
+                'y' => new byte[] { 0x00, 0x00, 0x66, 0x66, 0x66, 0x3E, 0x06, 0x3C },
+                'z' => new byte[] { 0x00, 0x00, 0x7E, 0x0C, 0x18, 0x30, 0x7E, 0x00 },
+                '0' => new byte[] { 0x3C, 0x66, 0x6E, 0x76, 0x66, 0x66, 0x3C, 0x00 },
+                '1' => new byte[] { 0x18, 0x38, 0x18, 0x18, 0x18, 0x18, 0x7E, 0x00 },
+                '2' => new byte[] { 0x3C, 0x66, 0x06, 0x0C, 0x18, 0x30, 0x7E, 0x00 },
+                '3' => new byte[] { 0x7E, 0x0C, 0x18, 0x0C, 0x06, 0x66, 0x3C, 0x00 },
+                '4' => new byte[] { 0x0C, 0x1C, 0x3C, 0x6C, 0x7E, 0x0C, 0x0C, 0x00 },
+                '5' => new byte[] { 0x7E, 0x60, 0x7C, 0x06, 0x06, 0x66, 0x3C, 0x00 },
+                '6' => new byte[] { 0x1C, 0x30, 0x60, 0x7C, 0x66, 0x66, 0x3C, 0x00 },
+                '7' => new byte[] { 0x7E, 0x06, 0x0C, 0x18, 0x30, 0x30, 0x30, 0x00 },
+                '8' => new byte[] { 0x3C, 0x66, 0x66, 0x3C, 0x66, 0x66, 0x3C, 0x00 },
+                '9' => new byte[] { 0x3C, 0x66, 0x66, 0x3E, 0x06, 0x0C, 0x38, 0x00 },
+                '%' => new byte[] { 0x62, 0x66, 0x0C, 0x18, 0x30, 0x66, 0x46, 0x00 },
+                '.' => new byte[] { 0x00, 0x00, 0x00, 0x00, 0x00, 0x18, 0x18, 0x00 },
+                ':' => new byte[] { 0x00, 0x18, 0x18, 0x00, 0x00, 0x18, 0x18, 0x00 },
+                '-' => new byte[] { 0x00, 0x00, 0x00, 0x7E, 0x00, 0x00, 0x00, 0x00 },
+                '(' => new byte[] { 0x0C, 0x18, 0x30, 0x30, 0x30, 0x18, 0x0C, 0x00 },
+                ')' => new byte[] { 0x30, 0x18, 0x0C, 0x0C, 0x0C, 0x18, 0x30, 0x00 },
+                '/' => new byte[] { 0x02, 0x06, 0x0C, 0x18, 0x30, 0x60, 0x40, 0x00 },
+                ' ' => new byte[] { 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 },
+                _ => null
+            };
+        }
+
+        #endregion
     }
 
     private class VertexEditorTool : IDatasetTools
