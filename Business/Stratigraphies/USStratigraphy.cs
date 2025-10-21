@@ -1,4 +1,4 @@
-//GeoscientistToolkit/Business/Stratigraphies/UsStratigraphy.cs
+//GeoscientistToolkit/Business/Stratigraphies/USStratigraphy.cs
 
 using System.Drawing;
 
@@ -8,11 +8,11 @@ namespace GeoscientistToolkit.Business.Stratigraphies;
 ///     United States regional stratigraphy with North American-specific units and nomenclature
 ///     Includes regional series like Cincinnatian, Champlainian, Gulf Coast stages, etc.
 /// </summary>
-public class UsStratigraphy : IStratigraphy
+public class USStratigraphy : IStratigraphy
 {
     private readonly List<StratigraphicUnit> _units;
 
-    public UsStratigraphy()
+    public USStratigraphy()
     {
         _units = InitializeUnits();
     }

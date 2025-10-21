@@ -10,6 +10,8 @@ using GeoscientistToolkit.Util;
 using NetTopologySuite.Geometries;
 using NetTopologySuite.IO;
 using ProjNet.CoordinateSystems;
+using GeoscientistToolkit.Business.GIS;
+
 
 // Required for GISOperationsImpl
 // Required for BasemapManager
@@ -47,6 +49,8 @@ public class GISDataset : Dataset, ISerializableDataset
     // Basemap
     public BasemapType BasemapType { get; set; } = BasemapType.None;
     public string BasemapPath { get; set; }
+    public string ActiveBasemapLayerName { get; set; }
+
 
     // Edit state
     public bool IsEditable { get; set; } = true;
@@ -70,10 +74,41 @@ public class GISDataset : Dataset, ISerializableDataset
                 IsVisible = l.IsVisible,
                 IsEditable = l.IsEditable,
                 Color = l.Color,
-                FeatureCount = l.Features.Count
+                Features = l.Features.Select(f =>
+                {
+                    var dto = new GISFeatureDTO
+                    {
+                        Type = f.Type,
+                        Coordinates = new List<Vector2>(f.Coordinates),
+                        Properties = new Dictionary<string, object>(f.Properties),
+                        Id = f.Id
+                    };
+
+                    if (f is GeologicalMapping.GeologicalFeature geoFeature)
+                    {
+                        dto.GeologicalType = geoFeature.GeologicalType;
+                        dto.Strike = geoFeature.Strike;
+                        dto.Dip = geoFeature.Dip;
+                        dto.DipDirection = geoFeature.DipDirection;
+                        dto.Plunge = geoFeature.Plunge;
+                        dto.Trend = geoFeature.Trend;
+                        dto.FormationName = geoFeature.FormationName;
+                        dto.BoreholeName = geoFeature.BoreholeName;
+                        dto.LithologyCode = geoFeature.LithologyCode;
+                        dto.AgeCode = geoFeature.AgeCode;
+                        dto.Description = geoFeature.Description;
+                        dto.Thickness = geoFeature.Thickness;
+                        dto.Displacement = geoFeature.Displacement;
+                        dto.MovementSense = geoFeature.MovementSense;
+                        dto.IsInferred = geoFeature.IsInferred;
+                        dto.IsCovered = geoFeature.IsCovered;
+                    }
+                    return dto;
+                }).ToList()
             }).ToList(),
             BasemapType = BasemapType.ToString(),
             BasemapPath = BasemapPath,
+            ActiveBasemapLayerName = ActiveBasemapLayerName,
             Center = Center,
             DefaultZoom = DefaultZoom,
             Tags = (long)Tags,
@@ -621,11 +656,11 @@ public class GISDataset : Dataset, ISerializableDataset
     private void LoadGeoTIFF()
     {
         Logger.Log($"Loading GeoTIFF: {FilePath}");
-
+    
         var geoTiffData = BasemapManager.Instance.LoadGeoTiff(FilePath);
         if (geoTiffData == null)
             throw new InvalidOperationException("Failed to load GeoTIFF data using BasemapManager.");
-
+    
         // Convert byte[] RGBA to float[,] for the first band (typical for DEM)
         var width = geoTiffData.Width;
         var height = geoTiffData.Height;
@@ -636,27 +671,23 @@ public class GISDataset : Dataset, ISerializableDataset
             var index = (y * width + x) * 4;
             pixelData[x, y] = geoTiffData.Data[index]; // Using Red channel as grayscale value
         }
-
+    
         var bounds = new BoundingBox
         {
             Min = new Vector2((float)geoTiffData.OriginX,
                 (float)(geoTiffData.OriginY + geoTiffData.PixelHeight * height)),
             Max = new Vector2((float)(geoTiffData.OriginX + geoTiffData.PixelWidth * width), (float)geoTiffData.OriginY)
         };
-
+    
         var layer = new GISRasterLayer(pixelData, bounds)
         {
             Name = Path.GetFileNameWithoutExtension(FilePath),
             IsVisible = true,
             RasterPath = FilePath
         };
-
+    
         Layers.Clear();
         Layers.Add(layer);
-
-        // Also set as basemap for viewing convenience
-        BasemapType = BasemapType.GeoTIFF;
-        BasemapPath = FilePath;
     }
 
     public Geometry ConvertToNTSGeometry(GISFeature feature)
@@ -866,9 +897,18 @@ public class GISDataset : Dataset, ISerializableDataset
         float minx = float.MaxValue, miny = float.MaxValue;
         float maxx = float.MinValue, maxy = float.MinValue;
 
-        foreach (var layer in Layers.Where(l => l.Type == LayerType.Vector))
-        foreach (var feature in layer.Features)
-        foreach (var coord in feature.Coordinates)
+        var allCoords = Layers.Where(l => l.Type == LayerType.Vector).SelectMany(l => l.Features).SelectMany(f => f.Coordinates);
+
+        if (!allCoords.Any())
+        {
+            // Handle case with layers but no vector features
+            Bounds = new BoundingBox { Min = Vector2.Zero, Max = Vector2.One * 100 };
+            Center = Bounds.Center;
+            return;
+        }
+
+
+        foreach (var coord in allCoords)
         {
             minx = Math.Min(minx, coord.X);
             miny = Math.Min(miny, coord.Y);
@@ -1141,18 +1181,9 @@ public class GISDatasetDTO : DatasetDTO
     public List<GISLayerDTO> Layers { get; set; }
     public string BasemapType { get; set; }
     public string BasemapPath { get; set; }
+    public string ActiveBasemapLayerName { get; set; }
     public Vector2 Center { get; set; }
     public float DefaultZoom { get; set; }
     public long Tags { get; set; }
     public Dictionary<string, string> GISMetadata { get; set; } = new();
-}
-
-public class GISLayerDTO
-{
-    public string Name { get; set; }
-    public string Type { get; set; }
-    public bool IsVisible { get; set; }
-    public bool IsEditable { get; set; }
-    public Vector4 Color { get; set; }
-    public int FeatureCount { get; set; }
 }

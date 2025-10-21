@@ -2,6 +2,8 @@
 
 using System.Numerics;
 using GeoscientistToolkit.Data.Materials;
+using GeoscientistToolkit.Data.GIS;
+using GeoscientistToolkit.Business.GIS;
 
 // ADDED: For enums used in ChemicalCompoundDTO
 
@@ -271,4 +273,48 @@ public class ChemicalCompoundDTO
     public string Notes { get; set; } = "";
     public List<string> Sources { get; set; } = new();
     public Dictionary<string, double> CustomParams { get; set; } = new();
+}
+
+// --- NEW AND MODIFIED DTOS FOR GIS ---
+
+/// <summary>
+/// DTO for serializing both standard and geological features.
+/// If GeologicalType is not null, it's treated as a GeologicalFeature.
+/// </summary>
+public class GISFeatureDTO
+{
+    // Base properties
+    public FeatureType Type { get; set; }
+    public List<Vector2> Coordinates { get; set; }
+    public Dictionary<string, object> Properties { get; set; }
+    public string Id { get; set; }
+
+    // Nullable geological properties
+    public GeologicalMapping.GeologicalFeatureType? GeologicalType { get; set; }
+    public float? Strike { get; set; }
+    public float? Dip { get; set; }
+    public string DipDirection { get; set; }
+    public float? Plunge { get; set; }
+    public float? Trend { get; set; }
+    public string FormationName { get; set; }
+    public string BoreholeName { get; set; }
+    public string LithologyCode { get; set; }
+    public string AgeCode { get; set; }
+    public string Description { get; set; }
+    public float? Thickness { get; set; }
+    public float? Displacement { get; set; }
+    public string MovementSense { get; set; }
+    public bool? IsInferred { get; set; }
+    public bool? IsCovered { get; set; }
+}
+
+
+public class GISLayerDTO
+{
+    public string Name { get; set; }
+    public string Type { get; set; }
+    public bool IsVisible { get; set; }
+    public bool IsEditable { get; set; }
+    public Vector4 Color { get; set; }
+    public List<GISFeatureDTO> Features { get; set; } = new();
 }

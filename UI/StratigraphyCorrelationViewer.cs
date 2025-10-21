@@ -51,7 +51,7 @@ public class StratigraphyCorrelationViewer
         _stratigraphies.Add(new GermanStratigraphy());
         _stratigraphies.Add(new FrenchStratigraphy());
         _stratigraphies.Add(new ItalianStratigraphy());
-        _stratigraphies.Add(new UsStratigraphy());
+        _stratigraphies.Add(new USStratigraphy());
         _stratigraphies.Add(new UkStratigraphy());
         _stratigraphies.Add(new SpanishStratigraphy());
         _stratigraphies.Add(new MammalAgesStratigraphy());

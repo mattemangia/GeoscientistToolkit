@@ -247,7 +247,13 @@ public class GISTools : IDatasetTools
         {
             if (dataset is not GISDataset gisDataset) return;
             ImGui.Text($"Layers: {gisDataset.Layers.Count}");
+            ImGui.SameLine(ImGui.GetContentRegionAvail().X - 120);
+            if (ImGui.Button("Clear Basemap"))
+            {
+                gisDataset.ActiveBasemapLayerName = null;
+            }
             ImGui.Separator();
+
             for (var i = 0; i < gisDataset.Layers.Count; i++)
             {
                 var layer = gisDataset.Layers[i];
@@ -258,9 +264,9 @@ public class GISTools : IDatasetTools
                 if (ImGui.TreeNode(layer.Name))
                 {
                     ImGui.Text($"Type: {layer.Type}");
-                    ImGui.Text($"Features: {layer.Features.Count}");
                     if (layer.Type == LayerType.Vector)
                     {
+                        ImGui.Text($"Features: {layer.Features.Count}");
                         var color = layer.Color;
                         if (ImGui.ColorEdit4("Color", ref color)) layer.Color = color;
                         var lineWidth = layer.LineWidth;
@@ -270,13 +276,22 @@ public class GISTools : IDatasetTools
                         var editable = layer.IsEditable;
                         if (ImGui.Checkbox("Editable", ref editable)) layer.IsEditable = editable;
                     }
-
+                    else if (layer is GISRasterLayer rasterLayer)
+                    {
+                        ImGui.Text($"Resolution: {rasterLayer.Width}x{rasterLayer.Height}");
+                        if (ImGui.Button("Set as Basemap"))
+                        {
+                            gisDataset.ActiveBasemapLayerName = rasterLayer.Name;
+                            Logger.Log($"Set '{rasterLayer.Name}' as active basemap.");
+                        }
+                    }
+        
                     ImGui.TreePop();
                 }
-
+        
                 ImGui.PopID();
             }
-
+        
             ImGui.Separator();
             ImGui.Text("Add Layer:");
             ImGui.SetNextItemWidth(150);

@@ -13,10 +13,10 @@ namespace GeoscientistToolkit.UI.GIS;
 public class GISViewer : IDatasetViewer
 {
     private readonly CoordinateFormat _coordinateFormat = CoordinateFormat.DecimalDegrees;
-    private readonly List<Vector2> _currentDrawing = new();
+    protected readonly List<Vector2> _currentDrawing = new();
 
-    private readonly GISDataset _dataset;
-    private readonly List<GISDataset> _datasets = new();
+    protected readonly GISDataset _dataset;
+    protected readonly List<GISDataset> _datasets = new();
     private readonly GISDataset _primaryDataset;
 
     private readonly ImGuiExportFileDialog _screenshotDialog;
@@ -30,13 +30,11 @@ public class GISViewer : IDatasetViewer
     private Vector2 _currentScreenPos;
     private int _currentTileZoom = 5;
     private Vector2 _currentWorldPos;
-    private float _currentZoom = 1.0f;
+    public float _currentZoom = 1.0f;
     private FeatureType _drawingType = FeatureType.Point;
     private EditMode _editMode = EditMode.None;
     private bool _gdalErrorDialogOpened;
     private string _gdalErrorMessage;
-    private GeoTiffData _geoTiffData;
-    private TextureManager _geoTiffTexture;
     private bool _isLoadingTiles;
     private Vector2 _lastMousePos;
     private bool _requestScreenshot;
@@ -55,6 +53,10 @@ public class GISViewer : IDatasetViewer
     private bool _showScaleBar = true;
     private string _statusMessage = "";
     private Matrix3x2 _viewTransform = Matrix3x2.Identity;
+    
+    // --- NEW: Texture cache for raster layers ---
+    private readonly Dictionary<GISRasterLayer, TextureManager> _rasterLayerTextures = new();
+
 
     public GISViewer(GISDataset dataset)
     {
@@ -65,11 +67,6 @@ public class GISViewer : IDatasetViewer
 
         _screenshotDialog = new ImGuiExportFileDialog("GISScreenshot", "Save Screenshot");
         _screenshotDialog.SetExtensions((".bmp", "Bitmap Image"));
-
-        // Only initialize basemap if one is configured
-        if (dataset.BasemapType == BasemapType.GeoTIFF && !string.IsNullOrEmpty(dataset.BasemapPath))
-            if (InitializeBasemapManager())
-                LoadGeoTiffBasemap(dataset.BasemapPath);
     }
 
     public GISViewer(List<GISDataset> datasets)
@@ -90,19 +87,11 @@ public class GISViewer : IDatasetViewer
 
         _screenshotDialog = new ImGuiExportFileDialog("GISScreenshot", "Save Screenshot");
         _screenshotDialog.SetExtensions((".bmp", "Bitmap Image"));
-
-        // Load basemap from first dataset that has one
-        foreach (var ds in _datasets)
-            if (ds.BasemapType == BasemapType.GeoTIFF && !string.IsNullOrEmpty(ds.BasemapPath))
-            {
-                if (InitializeBasemapManager()) LoadGeoTiffBasemap(ds.BasemapPath);
-                break;
-            }
-
+        
         UpdateCombinedBounds();
     }
 
-    public void DrawToolbarControls()
+    public virtual void DrawToolbarControls()
     {
         // Edit mode buttons
         if (ImGui.Button("Select")) _editMode = EditMode.None;
@@ -177,21 +166,21 @@ public class GISViewer : IDatasetViewer
         if (ImGui.Button("Screenshot")) _screenshotDialog.Open($"{_primaryDataset.Name}_capture");
     }
 
-    public void DrawContent(ref float zoom, ref Vector2 pan)
+    public virtual void DrawContent(ref float zoom, ref Vector2 pan)
     {
         _currentZoom = zoom;
         _currentPan = pan;
-
+    
         var drawList = ImGui.GetWindowDrawList();
         var canvas_pos = ImGui.GetCursorScreenPos();
         var canvas_size = ImGui.GetContentRegionAvail();
-
+    
         var statusBarHeight = ImGui.GetFrameHeight() + ImGui.GetStyle().ItemSpacing.Y * 2;
         canvas_size.Y -= statusBarHeight;
-
+    
         if (canvas_size.X < 50.0f) canvas_size.X = 50.0f;
         if (canvas_size.Y < 50.0f) canvas_size.Y = 50.0f;
-
+    
         // Handle screenshot dialog
         if (_screenshotDialog.Submit())
         {
@@ -200,51 +189,79 @@ public class GISViewer : IDatasetViewer
             _screenshotRectMax = canvas_pos + canvas_size;
             _requestScreenshot = true;
         }
-
+    
         ImGui.InvisibleButton("GISCanvas", canvas_size);
         var io = ImGui.GetIO();
         var is_hovered = ImGui.IsItemHovered();
-
+    
         _currentScreenPos = io.MousePos - canvas_pos;
         if (is_hovered) _currentWorldPos = ScreenToWorld(_currentScreenPos, canvas_pos, canvas_size, zoom, pan);
         HandleInput(io, ref zoom, ref pan, canvas_pos, canvas_size, is_hovered, ImGui.IsItemActive());
         _lastMousePos = io.MousePos;
-
+    
         var center = canvas_pos + canvas_size * 0.5f;
         _viewTransform = Matrix3x2.CreateTranslation(-_primaryDataset.Center) * Matrix3x2.CreateScale(zoom) *
                          Matrix3x2.CreateTranslation(center + pan);
-
+    
         drawList.PushClipRect(canvas_pos, canvas_pos + canvas_size, true);
-
-        // Only draw basemap if manager is available
-        if (_basemapManager != null &&
-            (_dataset.BasemapType != BasemapType.None || _basemapManager.CurrentProvider != null))
-            DrawBasemap(drawList, canvas_pos, canvas_size, zoom, pan);
-
-        if (_showGrid) DrawGrid(drawList, canvas_pos, canvas_size, zoom, pan);
-
+    
+        // 1. Draw online tile basemap if active
+        if (_basemapManager != null && _basemapManager.CurrentProvider != null)
+        {
+            DrawTileBasemap(drawList, canvas_pos, canvas_size, zoom, pan);
+        }
+    
+        // 2. Find and draw the designated raster basemap layer
+        GISLayer basemapLayer = null;
         foreach (var dataset in _datasets)
-        foreach (var layer in dataset.Layers.Where(l => l.IsVisible && l.Type == LayerType.Vector))
-            DrawLayer(drawList, layer, canvas_pos, canvas_size, zoom, pan);
-
+        {
+            if (!string.IsNullOrEmpty(dataset.ActiveBasemapLayerName))
+            {
+                basemapLayer = dataset.Layers.FirstOrDefault(l => l.Name == dataset.ActiveBasemapLayerName && l is GISRasterLayer);
+                if (basemapLayer != null)
+                {
+                    DrawRasterLayer(drawList, (GISRasterLayer)basemapLayer, canvas_pos, canvas_size, zoom, pan);
+                    break; // Assume only one active basemap at a time
+                }
+            }
+        }
+    
+        if (_showGrid) DrawGrid(drawList, canvas_pos, canvas_size, zoom, pan);
+    
+        // 3. Draw all other visible layers, skipping the one used as basemap
+        foreach (var dataset in _datasets)
+        {
+            foreach (var layer in dataset.Layers.Where(l => l.IsVisible && l != basemapLayer))
+            {
+                if (layer is GISRasterLayer rasterLayer)
+                {
+                    DrawRasterLayer(drawList, rasterLayer, canvas_pos, canvas_size, zoom, pan);
+                }
+                else if (layer.Type == LayerType.Vector)
+                {
+                    DrawVectorLayer(drawList, layer, canvas_pos, canvas_size, zoom, pan);
+                }
+            }
+        }
+    
         if (_currentDrawing.Count > 0) DrawCurrentDrawing(drawList, canvas_pos, canvas_size, zoom, pan);
         if (_showScaleBar) DrawScaleBar(drawList, canvas_pos, canvas_size, zoom, pan);
         if (_showNorthArrow) DrawNorthArrow(drawList, canvas_pos, canvas_size);
-
+    
         drawList.PopClipRect();
-
+    
         // Take screenshot if requested
         if (_requestScreenshot)
         {
             TakeScreenshot(_screenshotPath, _screenshotRectMin, _screenshotRectMax);
             _requestScreenshot = false;
         }
-
+    
         DrawStatusBar(canvas_pos + new Vector2(0, canvas_size.Y), new Vector2(canvas_size.X, statusBarHeight),
             is_hovered);
-
+    
         if (_showBasemapSettings) DrawBasemapSettings();
-
+    
         // Draw GDAL error dialog
         DrawGdalErrorDialog();
     }
@@ -252,7 +269,13 @@ public class GISViewer : IDatasetViewer
     public void Dispose()
     {
         ClearTileCache();
-        _geoTiffTexture?.Dispose();
+        
+        // --- NEW: Dispose raster layer textures ---
+        foreach (var texture in _rasterLayerTextures.Values)
+        {
+            texture.Dispose();
+        }
+        _rasterLayerTextures.Clear();
     }
 
     private bool InitializeBasemapManager()
@@ -504,7 +527,7 @@ public class GISViewer : IDatasetViewer
                 return;
             }
 
-            ImGui.Text("Basemap Provider:");
+            ImGui.Text("Online Basemap Provider:");
             ImGui.SetNextItemWidth(250);
             var providers = BasemapManager.Providers;
             var providerNames = providers.Select(p => p.Name).ToArray();
@@ -530,16 +553,6 @@ public class GISViewer : IDatasetViewer
             }
 
             ImGui.Separator();
-            if (ImGui.Button("Load GeoTIFF..."))
-                _statusMessage = "GeoTIFF loading dialog would open here";
-
-            if (_geoTiffData != null)
-            {
-                ImGui.Text($"GeoTIFF: {_geoTiffData.Width}x{_geoTiffData.Height}");
-                ImGui.Text($"Bands: {_geoTiffData.BandCount}");
-            }
-
-            ImGui.Separator();
             var cacheSize = _basemapManager.GetCacheSize();
             ImGui.Text($"Tile Cache: {FormatBytes(cacheSize)}");
             ImGui.Text($"Cached Tiles: {_tileCache.Count}");
@@ -553,30 +566,47 @@ public class GISViewer : IDatasetViewer
         }
     }
 
-    private void DrawBasemap(ImDrawListPtr drawList, Vector2 canvasPos, Vector2 canvasSize, float zoom, Vector2 pan)
+    private void DrawRasterLayer(ImDrawListPtr drawList, GISRasterLayer layer, Vector2 canvasPos, Vector2 canvasSize, float zoom, Vector2 pan)
     {
-        if (_basemapManager == null)
-            return;
-
-        if (_dataset.BasemapType == BasemapType.GeoTIFF && _geoTiffTexture != null)
-            DrawGeoTiffBasemap(drawList, canvasPos, canvasSize, zoom, pan);
-        else if (_dataset.BasemapType == BasemapType.TileServer || _basemapManager.CurrentProvider != null)
-            DrawTileBasemap(drawList, canvasPos, canvasSize, zoom, pan);
-    }
-
-    private void DrawGeoTiffBasemap(ImDrawListPtr drawList, Vector2 canvasPos, Vector2 canvasSize, float zoom,
-        Vector2 pan)
-    {
-        if (_geoTiffData == null || _geoTiffTexture == null || !_geoTiffTexture.IsValid) return;
-
-        var topLeft = new Vector2((float)_geoTiffData.OriginX, (float)_geoTiffData.OriginY);
-        var bottomRight = new Vector2((float)(_geoTiffData.OriginX + _geoTiffData.PixelWidth * _geoTiffData.Width),
-            (float)(_geoTiffData.OriginY + _geoTiffData.PixelHeight * _geoTiffData.Height));
-        var screenTL = WorldToScreen(topLeft, canvasPos, canvasSize, zoom, pan);
-        var screenBR = WorldToScreen(bottomRight, canvasPos, canvasSize, zoom, pan);
-        var textureId = _geoTiffTexture.GetImGuiTextureId();
+        if (!_rasterLayerTextures.TryGetValue(layer, out var textureManager))
+        {
+            // --- NEW: Create texture on demand for the raster layer ---
+            try
+            {
+                var pixelData = layer.GetPixelData();
+                // Convert float[,] to byte[] RGBA
+                var byteData = new byte[layer.Width * layer.Height * 4];
+                for (int y = 0; y < layer.Height; y++)
+                {
+                    for (int x = 0; x < layer.Width; x++)
+                    {
+                        var val = (byte)Math.Clamp(pixelData[x, y], 0, 255);
+                        var index = (y * layer.Width + x) * 4;
+                        byteData[index] = val;     // R
+                        byteData[index + 1] = val; // G
+                        byteData[index + 2] = val; // B
+                        byteData[index + 3] = 255; // A
+                    }
+                }
+                textureManager = TextureManager.CreateFromPixelData(byteData, (uint)layer.Width, (uint)layer.Height);
+                _rasterLayerTextures[layer] = textureManager;
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError($"Failed to create texture for raster layer '{layer.Name}': {ex.Message}");
+                _rasterLayerTextures[layer] = null; // Mark as failed to avoid retrying
+                return;
+            }
+        }
+    
+        if (textureManager == null || !textureManager.IsValid) return;
+    
+        var screenTL = WorldToScreen(layer.Bounds.Min, canvasPos, canvasSize, zoom, pan);
+        var screenBR = WorldToScreen(layer.Bounds.Max, canvasPos, canvasSize, zoom, pan);
+    
+        var textureId = textureManager.GetImGuiTextureId();
         if (textureId != IntPtr.Zero)
-            drawList.AddImage(textureId, screenTL, screenBR, new Vector2(0, 0), new Vector2(1, 1),
+            drawList.AddImage(textureId, screenTL, screenBR, new Vector2(0, 1), new Vector2(1, 0),
                 ImGui.GetColorU32(new Vector4(1, 1, 1, 0.8f)));
     }
 
@@ -671,31 +701,6 @@ public class GISViewer : IDatasetViewer
         }
     }
 
-    private void LoadGeoTiffBasemap(string path)
-    {
-        if (_basemapManager == null)
-        {
-            Logger.LogWarning("Cannot load GeoTIFF: BasemapManager not available");
-            return;
-        }
-
-        _geoTiffData = _basemapManager.LoadGeoTiff(path);
-        if (_geoTiffData != null && _geoTiffData.Data != null)
-            VeldridManager.ExecuteOnMainThread(() =>
-            {
-                try
-                {
-                    _geoTiffTexture = TextureManager.CreateFromPixelData(_geoTiffData.Data, (uint)_geoTiffData.Width,
-                        (uint)_geoTiffData.Height);
-                    _statusMessage = $"Loaded GeoTIFF: {_geoTiffData.Width}x{_geoTiffData.Height}";
-                }
-                catch (Exception ex)
-                {
-                    Logger.LogError($"Failed to create GeoTIFF texture: {ex.Message}");
-                }
-            });
-    }
-
     private void UpdateTileZoomLevel(float mapZoom)
     {
         var newTileZoom = (int)(Math.Log2(mapZoom) + 5);
@@ -772,7 +777,7 @@ public class GISViewer : IDatasetViewer
         }
     }
 
-    private void DrawLayer(ImDrawListPtr drawList, GISLayer layer, Vector2 canvasPos, Vector2 canvasSize, float zoom,
+    private void DrawVectorLayer(ImDrawListPtr drawList, GISLayer layer, Vector2 canvasPos, Vector2 canvasSize, float zoom,
         Vector2 pan)
     {
         var color = ImGui.GetColorU32(layer.Color);
@@ -844,7 +849,7 @@ public class GISViewer : IDatasetViewer
         }
     }
 
-    private void DrawDashedLine(ImDrawListPtr drawList, Vector2 start, Vector2 end, uint color, float thickness)
+    protected void DrawDashedLine(ImDrawListPtr drawList, Vector2 start, Vector2 end, uint color, float thickness)
     {
         var dir = end - start;
         var length = dir.Length();
@@ -946,14 +951,14 @@ public class GISViewer : IDatasetViewer
         return R * c;
     }
 
-    private Vector2 WorldToScreen(Vector2 worldPos, Vector2 canvasPos, Vector2 canvasSize, float zoom, Vector2 pan)
+    protected Vector2 WorldToScreen(Vector2 worldPos, Vector2 canvasPos, Vector2 canvasSize, float zoom, Vector2 pan)
     {
         var center = canvasPos + canvasSize * 0.5f + pan;
         var offset = (worldPos - _primaryDataset.Center) * zoom;
         return center + new Vector2(offset.X, -offset.Y);
     }
 
-    private Vector2 ScreenToWorld(Vector2 screenPos, Vector2 canvasPos, Vector2 canvasSize, float zoom, Vector2 pan)
+    protected Vector2 ScreenToWorld(Vector2 screenPos, Vector2 canvasPos, Vector2 canvasSize, float zoom, Vector2 pan)
     {
         var center = canvasSize * 0.5f + pan;
         var offset = screenPos - center;

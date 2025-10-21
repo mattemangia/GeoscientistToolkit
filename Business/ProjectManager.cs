@@ -16,6 +16,7 @@ using GeoscientistToolkit.Data.Pnm;
 using GeoscientistToolkit.Data.Table;
 using GeoscientistToolkit.Settings;
 using GeoscientistToolkit.Util;
+using GeoscientistToolkit.Business.GIS;
 // ADDED: To access CompoundLibrary and ChemicalCompound
 using AcousticVolumeDatasetDTO = GeoscientistToolkit.Data.AcousticVolumeDatasetDTO;
 
@@ -239,17 +240,7 @@ public class ProjectManager
                 if (dataset != null)
                 {
                     createdDatasets[dataset.FilePath] = dataset;
-
-                    if (!dataset.IsMissing)
-                        try
-                        {
-                            dataset.Load();
-                            Logger.Log($"Loaded data for dataset: {dataset.Name}");
-                        }
-                        catch (Exception ex)
-                        {
-                            Logger.LogError($"Failed to load data for dataset '{dataset.Name}': {ex.Message}");
-                        }
+                    // Loading logic is now handled inside CreateDatasetFromDTO
                 }
             }
 
@@ -577,12 +568,90 @@ public class ProjectManager
                     BasemapPath = gisDto.BasemapPath,
                     Center = gisDto.Center,
                     DefaultZoom = gisDto.DefaultZoom,
-                    IsMissing = !File.Exists(gisDto.FilePath)
+                    Tags = (GISTag)gisDto.Tags,
+                    IsMissing = !string.IsNullOrEmpty(gisDto.FilePath) && !File.Exists(gisDto.FilePath)
                 };
+            
                 if (Enum.TryParse<BasemapType>(gisDto.BasemapType, out var basemapType))
                     gisDataset.BasemapType = basemapType;
+            
+                // Restore layers and features from DTO if they exist
+                if (gisDto.Layers.Any(l => l.Features.Any()))
+                {
+                    gisDataset.Layers.Clear(); // Remove the default layer
+                    foreach (var layerDto in gisDto.Layers)
+                    {
+                        var layer = new GISLayer
+                        {
+                            Name = layerDto.Name,
+                            Type = Enum.TryParse<LayerType>(layerDto.Type, out var lType) ? lType : LayerType.Vector,
+                            IsVisible = layerDto.IsVisible,
+                            IsEditable = layerDto.IsEditable,
+                            Color = layerDto.Color
+                        };
+            
+                        foreach (var featureDto in layerDto.Features)
+                        {
+                            GISFeature feature;
+                            // Check if it's a geological feature by looking at the nullable type
+                            if (featureDto.GeologicalType.HasValue)
+                            {
+                                var geoFeature = new GeologicalMapping.GeologicalFeature
+                                {
+                                    GeologicalType = featureDto.GeologicalType.Value,
+                                    Strike = featureDto.Strike,
+                                    Dip = featureDto.Dip,
+                                    DipDirection = featureDto.DipDirection,
+                                    Plunge = featureDto.Plunge,
+                                    Trend = featureDto.Trend,
+                                    FormationName = featureDto.FormationName,
+                                    BoreholeName = featureDto.BoreholeName,
+                                    LithologyCode = featureDto.LithologyCode,
+                                    AgeCode = featureDto.AgeCode,
+                                    Description = featureDto.Description,
+                                    Thickness = featureDto.Thickness,
+                                    Displacement = featureDto.Displacement,
+                                    MovementSense = featureDto.MovementSense,
+                                    IsInferred = featureDto.IsInferred ?? false,
+                                    IsCovered = featureDto.IsCovered ?? false
+                                };
+                                feature = geoFeature;
+                            }
+                            else
+                            {
+                                feature = new GISFeature();
+                            }
+            
+                            // Populate base properties
+                            feature.Type = featureDto.Type;
+                            feature.Coordinates = featureDto.Coordinates;
+                            feature.Properties = featureDto.Properties;
+                            feature.Id = featureDto.Id;
+            
+                            layer.Features.Add(feature);
+                        }
+                        gisDataset.Layers.Add(layer);
+                    }
+                    gisDataset.UpdateBounds(); // Update bounds from restored features
+                    Logger.Log($"Restored {gisDataset.Layers.Sum(l=>l.Features.Count)} features from project file for: {gisDataset.Name}");
+                }
+                else if (!gisDataset.IsMissing)
+                {
+                    // Only load from file if no features were serialized in the project
+                    try
+                    {
+                        gisDataset.Load();
+                        Logger.Log($"Loaded data for dataset from source file: {gisDataset.Name}");
+                    }
+                    catch (Exception ex)
+                    {
+                        Logger.LogError($"Failed to load data for dataset '{gisDataset.Name}': {ex.Message}");
+                    }
+                }
+            
                 if (gisDataset.IsMissing)
                     Logger.LogWarning($"Source file not found for GIS dataset: {gisDto.Name} at {gisDto.FilePath}");
+                
                 dataset = gisDataset;
                 break;
             }

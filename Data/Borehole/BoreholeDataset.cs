@@ -7,6 +7,7 @@ using GeoscientistToolkit.Data.AcousticVolume;
 using GeoscientistToolkit.Data.CtImageStack;
 using GeoscientistToolkit.Data.Pnm;
 using GeoscientistToolkit.Util;
+using System.IO;
 
 namespace GeoscientistToolkit.Data.Borehole;
 
@@ -577,6 +578,204 @@ public class BoreholeDataset : Dataset, ISerializableDataset
         catch (Exception ex)
         {
             Logger.LogError($"Failed to save borehole dataset: {ex.Message}");
+        }
+    }
+
+    public void SaveToBinaryFile(string path)
+    {
+        try
+        {
+            using var stream = new FileStream(path, FileMode.Create, FileAccess.Write);
+            using var writer = new BinaryWriter(stream);
+            
+            // Header
+            writer.Write(new[] { (byte)'G', (byte)'T', (byte)'B', (byte)'H', (byte)'B' }); // Signature
+            writer.Write(1); // Version
+            
+            // Well Info
+            writer.Write(WellName ?? "");
+            writer.Write(Field ?? "");
+            writer.Write(TotalDepth);
+            writer.Write(WellDiameter);
+            writer.Write(SurfaceCoordinates.X);
+            writer.Write(SurfaceCoordinates.Y);
+            writer.Write(Elevation);
+            
+            // Display Settings
+            writer.Write(DepthScaleFactor);
+            writer.Write(ShowGrid);
+            writer.Write(ShowLegend);
+            writer.Write(TrackWidth);
+            
+            // Lithology Units
+            writer.Write(LithologyUnits.Count);
+            foreach (var unit in LithologyUnits)
+            {
+                writer.Write(unit.ID ?? "");
+                writer.Write(unit.Name ?? "");
+                writer.Write(unit.LithologyType ?? "");
+                writer.Write(unit.DepthFrom);
+                writer.Write(unit.DepthTo);
+                writer.Write(unit.Color.X); writer.Write(unit.Color.Y); writer.Write(unit.Color.Z); writer.Write(unit.Color.W);
+                writer.Write(unit.Description ?? "");
+                writer.Write(unit.GrainSize ?? "");
+
+                writer.Write(unit.Parameters.Count);
+                foreach (var param in unit.Parameters)
+                {
+                    writer.Write(param.Key);
+                    writer.Write(param.Value);
+                }
+
+                writer.Write(unit.ParameterSources.Count);
+                foreach (var source in unit.ParameterSources)
+                {
+                    writer.Write(source.Key);
+                    writer.Write(source.Value.DatasetName ?? "");
+                    writer.Write(source.Value.DatasetPath ?? "");
+                    writer.Write((int)source.Value.DatasetType);
+                    writer.Write(source.Value.SourceDepthFrom);
+                    writer.Write(source.Value.SourceDepthTo);
+                    writer.Write(source.Value.Value);
+                    writer.Write(source.Value.LastUpdated.ToBinary());
+                }
+            }
+
+            // Parameter Tracks
+            writer.Write(ParameterTracks.Count);
+            foreach (var track in ParameterTracks)
+            {
+                writer.Write(track.Key);
+                writer.Write(track.Value.Name ?? "");
+                writer.Write(track.Value.Unit ?? "");
+                writer.Write(track.Value.MinValue);
+                writer.Write(track.Value.MaxValue);
+                writer.Write(track.Value.IsLogarithmic);
+                writer.Write(track.Value.Color.X); writer.Write(track.Value.Color.Y); writer.Write(track.Value.Color.Z); writer.Write(track.Value.Color.W);
+                writer.Write(track.Value.IsVisible);
+
+                writer.Write(track.Value.Points.Count);
+                foreach (var point in track.Value.Points)
+                {
+                    writer.Write(point.Depth);
+                    writer.Write(point.Value);
+                    writer.Write(point.SourceDataset ?? "");
+                }
+            }
+
+            FilePath = path;
+            Logger.Log($"Saved borehole dataset to binary file {path}");
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError($"Failed to save borehole dataset to binary file: {ex.Message}");
+        }
+    }
+
+    public void LoadFromBinaryFile(string path)
+    {
+        try
+        {
+            using var stream = new FileStream(path, FileMode.Open, FileAccess.Read);
+            using var reader = new BinaryReader(stream);
+
+            // Header
+            var signature = new string(reader.ReadChars(5));
+            if (signature != "GTBHB") throw new InvalidDataException("Invalid borehole binary file signature.");
+            var version = reader.ReadInt32();
+            if (version != 1) throw new NotSupportedException($"Unsupported borehole binary version: {version}.");
+
+            // Well Info
+            WellName = reader.ReadString();
+            Field = reader.ReadString();
+            TotalDepth = reader.ReadSingle();
+            WellDiameter = reader.ReadSingle();
+            SurfaceCoordinates = new Vector2(reader.ReadSingle(), reader.ReadSingle());
+            Elevation = reader.ReadSingle();
+
+            // Display Settings
+            DepthScaleFactor = reader.ReadSingle();
+            ShowGrid = reader.ReadBoolean();
+            ShowLegend = reader.ReadBoolean();
+            TrackWidth = reader.ReadSingle();
+            
+            // Lithology Units
+            LithologyUnits.Clear();
+            var unitCount = reader.ReadInt32();
+            for (int i = 0; i < unitCount; i++)
+            {
+                var unit = new LithologyUnit
+                {
+                    ID = reader.ReadString(),
+                    Name = reader.ReadString(),
+                    LithologyType = reader.ReadString(),
+                    DepthFrom = reader.ReadSingle(),
+                    DepthTo = reader.ReadSingle(),
+                    Color = new Vector4(reader.ReadSingle(), reader.ReadSingle(), reader.ReadSingle(), reader.ReadSingle()),
+                    Description = reader.ReadString(),
+                    GrainSize = reader.ReadString()
+                };
+
+                var paramCount = reader.ReadInt32();
+                for (int j = 0; j < paramCount; j++)
+                    unit.Parameters[reader.ReadString()] = reader.ReadSingle();
+
+                var sourceCount = reader.ReadInt32();
+                for (int j = 0; j < sourceCount; j++)
+                {
+                    var key = reader.ReadString();
+                    unit.ParameterSources[key] = new ParameterSource
+                    {
+                        DatasetName = reader.ReadString(),
+                        DatasetPath = reader.ReadString(),
+                        DatasetType = (DatasetType)reader.ReadInt32(),
+                        SourceDepthFrom = reader.ReadSingle(),
+                        SourceDepthTo = reader.ReadSingle(),
+                        Value = reader.ReadSingle(),
+                        LastUpdated = DateTime.FromBinary(reader.ReadInt64())
+                    };
+                }
+                LithologyUnits.Add(unit);
+            }
+
+            // Parameter Tracks
+            ParameterTracks.Clear();
+            var trackCount = reader.ReadInt32();
+            for (int i = 0; i < trackCount; i++)
+            {
+                var key = reader.ReadString();
+                var track = new ParameterTrack
+                {
+                    Name = reader.ReadString(),
+                    Unit = reader.ReadString(),
+                    MinValue = reader.ReadSingle(),
+                    MaxValue = reader.ReadSingle(),
+                    IsLogarithmic = reader.ReadBoolean(),
+                    Color = new Vector4(reader.ReadSingle(), reader.ReadSingle(), reader.ReadSingle(), reader.ReadSingle()),
+                    IsVisible = reader.ReadBoolean()
+                };
+
+                var pointCount = reader.ReadInt32();
+                for (int j = 0; j < pointCount; j++)
+                {
+                    track.Points.Add(new ParameterPoint
+                    {
+                        Depth = reader.ReadSingle(),
+                        Value = reader.ReadSingle(),
+                        SourceDataset = reader.ReadString()
+                    });
+                }
+                ParameterTracks[key] = track;
+            }
+            
+            FilePath = path;
+            Logger.Log($"Loaded borehole dataset from binary file {path}");
+
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError($"Failed to load borehole dataset from binary file: {ex.Message}");
+            IsMissing = true;
         }
     }
 

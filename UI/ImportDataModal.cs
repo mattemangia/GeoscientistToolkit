@@ -1,4 +1,4 @@
-// GeoscientistToolkit/UI/ImportDataModal.cs - Complete with Segmentation Import
+// GeoscientistToolkit/UI/ImportDataModal.cs
 
 using System.Data;
 using System.Numerics;
@@ -25,10 +25,11 @@ public class ImportDataModal
         "3D Object (OBJ/STL)",
         "Labeled Volume Stack (Color-coded Materials)",
         "Table/Spreadsheet (CSV/TSV)",
-        "GIS Map (Shapefile/GeoJSON/KML)",
+        "GIS Map (Vectorial Shapefile/Raster GeoJSON/Points KML)",
         "Acoustic Volume (Simulation Results)",
         "Segmentation/Labels (Standalone)",
-        "Pore Network Model (PNM)" // Added for PNM
+        "Pore Network Model (PNM)",
+        "Borehole Log (Binary)"
     };
 
     private readonly ImGuiFileDialog _fileDialog;
@@ -53,6 +54,8 @@ public class ImportDataModal
     private readonly ImGuiFileDialog _tableDialog;
     private readonly TableLoader _tableLoader;
     private readonly ImGuiFileDialog _tiffDialog;
+    private readonly BoreholeBinaryLoader _boreholeBinaryLoader;
+    private readonly ImGuiFileDialog _boreholeBinaryDialog;
     private ImportState _currentState = ImportState.Idle;
     private Task<Dataset> _importTask;
     private Dataset _pendingDataset;
@@ -77,6 +80,7 @@ public class ImportDataModal
             "Select Segmentation File");
         _pnmDialog =
             new ImGuiFileDialog("ImportPNMDialog", FileDialogType.OpenFile, "Select PNM File"); // Added for PNM
+        _boreholeBinaryDialog = new ImGuiFileDialog("ImportBoreholeBinaryDialog", FileDialogType.OpenFile, "Select Borehole Binary File");
         _organizerDialog = new ImageStackOrganizerDialog();
 
         // Initialize loaders
@@ -90,6 +94,7 @@ public class ImportDataModal
         _acousticVolumeLoader = new AcousticVolumeLoader();
         _segmentationLoader = new SegmentationLoader();
         _pnmLoader = new PNMLoader(); // Added for PNM
+        _boreholeBinaryLoader = new BoreholeBinaryLoader();
     }
 
     public void Open()
@@ -161,6 +166,8 @@ public class ImportDataModal
         if (_segmentationDialog.Submit()) _segmentationLoader.SegmentationPath = _segmentationDialog.SelectedPath;
 
         if (_fileDialog.Submit()) _singleImageLoader.ImagePath = _fileDialog.SelectedPath;
+        
+        if (_boreholeBinaryDialog.Submit()) _boreholeBinaryLoader.FilePath = _boreholeBinaryDialog.SelectedPath;
 
         if (_tiffDialog.Submit())
             switch (_selectedDatasetTypeIndex)
@@ -231,11 +238,46 @@ public class ImportDataModal
             case 10: // PNM
                 DrawPNMOptions();
                 break;
+            case 11: // Borehole Binary
+                DrawBoreholeBinaryOptions();
+                break;
         }
 
         ImGui.SetCursorPosY(ImGui.GetWindowHeight() - ImGui.GetFrameHeightWithSpacing() * 1.5f);
         ImGui.Separator();
         DrawButtons();
+    }
+    
+    private void DrawBoreholeBinaryOptions()
+    {
+        ImGui.TextWrapped("Import a borehole log dataset from a custom binary format (.bhb). " +
+                          "This format contains all well information, lithology units, and parameter tracks.");
+
+        ImGui.Spacing();
+        ImGui.Separator();
+        ImGui.Spacing();
+
+        ImGui.Text("Borehole Binary File (.bhb):");
+        var path = _boreholeBinaryLoader.FilePath ?? "";
+        ImGui.InputText("##BoreholePath", ref path, 260, ImGuiInputTextFlags.ReadOnly);
+        ImGui.SameLine();
+        if (ImGui.Button("Browse...##BoreholeFile"))
+        {
+            string[] bhbExtensions = { ".bhb" };
+            _boreholeBinaryDialog.Open(null, bhbExtensions);
+        }
+
+        if (!string.IsNullOrEmpty(_boreholeBinaryLoader.FilePath) && File.Exists(_boreholeBinaryLoader.FilePath))
+        {
+            ImGui.Spacing();
+            ImGui.Separator();
+            ImGui.Spacing();
+            ImGui.Text("File Information:");
+            var info = new FileInfo(_boreholeBinaryLoader.FilePath);
+            ImGui.BulletText($"File: {info.Name}");
+            ImGui.BulletText($"Size: {info.Length / 1024} KB");
+            ImGui.TextColored(new Vector4(0.0f, 1.0f, 0.5f, 1.0f), "✓ Ready to import borehole dataset");
+        }
     }
 
     private void DrawPNMOptions()
@@ -757,7 +799,7 @@ public class ImportDataModal
 
     private void DrawGISOptions()
     {
-        ImGui.TextWrapped("Import GIS data or create a new empty map for editing.");
+        ImGui.TextWrapped("Import GIS data (Vectorial / Raster) or create a new empty map for editing.");
 
         ImGui.Spacing();
         ImGui.Separator();
@@ -865,6 +907,7 @@ public class ImportDataModal
             8 => _acousticVolumeLoader,
             9 => _segmentationLoader,
             10 => _pnmLoader, // Added for PNM
+            11 => _boreholeBinaryLoader,
             _ => null
         };
     }
@@ -932,6 +975,7 @@ public class ImportDataModal
         _acousticVolumeLoader.Reset();
         _segmentationLoader.Reset();
         _pnmLoader.Reset(); // Added for PNM
+        _boreholeBinaryLoader.Reset();
 
         // Reset state
         _importTask = null;
