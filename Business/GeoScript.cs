@@ -163,7 +163,6 @@ public static class CommandRegistry
             new SlopeCommand(),
             new AspectCommand(),
             new ContourCommand(),
-            new RasterCalcCommand(),
 
             // Thermodynamics Commands
             new CreateDiagramCommand(),
@@ -778,101 +777,6 @@ public class CleanCommand : IGeoScriptCommand
 #endregion
 
 #region --- GIS Raster Command Implementations ---
-
-public class RasterCalcCommand : IGeoScriptCommand
-{
-    public string Name => "RASTERCALC";
-    public string HelpText => "Performs map algebra on raster layers within a single dataset.";
-
-    public string Usage =>
-        "RASTERCALC 'NewLayerName' = <expression involving layer names as strings, e.g., \"\\\"DEM\\\" * 2\">";
-
-    public Task<Dataset> ExecuteAsync(GeoScriptContext context, AstNode node)
-    {
-        if (context.InputDataset is not GISDataset gisDs)
-            throw new NotSupportedException("RASTERCALC only works on GIS Datasets.");
-
-        var cmd = (CommandNode)node;
-        var match = Regex.Match(cmd.FullText, @"RASTERCALC\s+'([^']+)'\s*=\s*(.*)", RegexOptions.IgnoreCase);
-        if (!match.Success)
-            throw new ArgumentException("Invalid RASTERCALC syntax.");
-
-        var newLayerName = match.Groups[1].Value;
-        var expression = match.Groups[2].Value;
-
-        var availableRasters = gisDs.Layers.OfType<GISRasterLayer>().ToDictionary(l => l.Name, l => l);
-        if (!availableRasters.Any())
-            throw new DataException("No raster layers found in the input dataset.");
-
-        var referencedLayerNames = Regex.Matches(expression, @"\""([^\""]+)\""").Select(m => m.Groups[1].Value)
-            .Distinct().ToList();
-
-        if (!referencedLayerNames.Any())
-            throw new ArgumentException(
-                "Expression does not reference any raster layers. Enclose layer names in double quotes.");
-
-        var referencedLayers = new Dictionary<string, GISRasterLayer>();
-        foreach (var layerName in referencedLayerNames)
-        {
-            if (!availableRasters.TryGetValue(layerName, out var layer))
-                throw new ArgumentException($"Referenced raster layer '{layerName}' not found in the dataset.");
-            referencedLayers[layerName] = layer;
-        }
-
-        var firstLayer = referencedLayers.First().Value;
-        var width = firstLayer.Width;
-        var height = firstLayer.Height;
-
-        if (referencedLayers.Values.Any(l => l.Width != width || l.Height != height))
-            Logger.LogWarning(
-                "Rasters have different dimensions. Calculation will proceed but may produce unexpected results.");
-
-        var resultData = new float[width, height];
-        var layerData = referencedLayers.ToDictionary(kvp => kvp.Key, kvp => kvp.Value.GetPixelData());
-
-        var dt = new DataTable();
-        // The DataTable Compute method does not support scientific notation in expressions, so we use a simple evaluation loop.
-
-        for (var y = 0; y < height; y++)
-        for (var x = 0; x < width; x++)
-        {
-            var expressionWithValues = expression;
-            foreach (var layerName in referencedLayerNames)
-            {
-                var pixelValue = layerData[layerName][x, y];
-                // Replace the quoted layer name with its value.
-                expressionWithValues = expressionWithValues.Replace($"\"{layerName}\"", pixelValue.ToString("F6"));
-            }
-
-            try
-            {
-                resultData[x, y] = Convert.ToSingle(dt.Compute(expressionWithValues, ""));
-            }
-            catch (Exception ex)
-            {
-                Logger.LogError($"Error evaluating expression at pixel ({x},{y}): {ex.Message}");
-                resultData[x, y] = 0; // or float.NaN
-            }
-        }
-
-        var newLayer = new GISRasterLayer(resultData, firstLayer.Bounds)
-        {
-            Name = newLayerName,
-            IsVisible = true
-        };
-
-        var newDataset = new GISDataset(newLayer.Name, "")
-        {
-            Tags = gisDs.Tags | GISTag.Generated,
-            Projection = gisDs.Projection
-        };
-        newDataset.Layers.Clear();
-        newDataset.Layers.Add(newLayer);
-        newDataset.UpdateBounds();
-
-        return Task.FromResult<Dataset>(newDataset);
-    }
-}
 
 public class ReclassifyCommand : IGeoScriptCommand
 {

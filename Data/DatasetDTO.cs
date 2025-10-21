@@ -1,9 +1,9 @@
 ﻿// GeoscientistToolkit/Data/DatasetDTO.cs
 
 using System.Numerics;
-using GeoscientistToolkit.Business.GIS;
-using GeoscientistToolkit.Data.GIS;
 using GeoscientistToolkit.Data.Materials;
+using GeoscientistToolkit.Data.GIS;
+using GeoscientistToolkit.Business.GIS;
 
 // ADDED: For enums used in ChemicalCompoundDTO
 
@@ -278,8 +278,8 @@ public class ChemicalCompoundDTO
 // --- NEW AND MODIFIED DTOS FOR GIS ---
 
 /// <summary>
-///     DTO for serializing both standard and geological features.
-///     If GeologicalType is not null, it's treated as a GeologicalFeature.
+/// DTO for serializing both standard and geological features.
+/// If GeologicalType is not null, it's treated as a GeologicalFeature.
 /// </summary>
 public class GISFeatureDTO
 {
@@ -307,6 +307,7 @@ public class GISFeatureDTO
     public bool? IsInferred { get; set; }
     public bool? IsCovered { get; set; }
 }
+
 
 public class GISLayerDTO
 {

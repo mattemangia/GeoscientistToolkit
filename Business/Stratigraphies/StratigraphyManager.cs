@@ -1,13 +1,19 @@
 // GeoscientistToolkit/Business/Stratigraphies/StratigraphyManager.cs
 
+using System.Reflection;
+
 namespace GeoscientistToolkit.Business.Stratigraphies;
 
 /// <summary>
-///     Manages available stratigraphy systems and the currently active one.
+/// Manages available stratigraphy systems and the currently active one.
 /// </summary>
 public class StratigraphyManager
 {
     private static StratigraphyManager _instance;
+    public static StratigraphyManager Instance => _instance ??= new StratigraphyManager();
+
+    public List<IStratigraphy> AvailableStratigraphies { get; }
+    public IStratigraphy CurrentStratigraphy { get; set; }
 
     private StratigraphyManager()
     {
@@ -26,17 +32,12 @@ public class StratigraphyManager
         };
 
         // Set the International chart as the default on startup.
-        CurrentStratigraphy = AvailableStratigraphies.FirstOrDefault(s => s.LanguageCode == "en-INT")
+        CurrentStratigraphy = AvailableStratigraphies.FirstOrDefault(s => s.LanguageCode == "en-INT") 
                               ?? AvailableStratigraphies.FirstOrDefault();
     }
 
-    public static StratigraphyManager Instance => _instance ??= new StratigraphyManager();
-
-    public List<IStratigraphy> AvailableStratigraphies { get; }
-    public IStratigraphy CurrentStratigraphy { get; set; }
-
     /// <summary>
-    ///     Gets a stratigraphic unit by its unique code from the currently active stratigraphy.
+    /// Gets a stratigraphic unit by its unique code from the currently active stratigraphy.
     /// </summary>
     /// <param name="code">The code of the unit to find.</param>
     /// <returns>The found StratigraphicUnit, or null if not found.</returns>
