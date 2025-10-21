@@ -644,7 +644,9 @@ public static class GeologicalMapping
                     Type = fault.GeologicalType,
                     Dip = dip,
                     DipDirection = fault.DipDirection,
-                    FaultTrace = faultTrace
+                    FaultTrace = faultTrace,
+                    // --- MODIFICATION ---
+                    Displacement = fault.Displacement
                 };
             }
 
@@ -672,7 +674,11 @@ public static class GeologicalMapping
             public GeologicalFeatureType Type { get; set; }
             public List<Vector2> FaultTrace { get; set; } = new();
             public float Dip { get; set; }
+
             public string DipDirection { get; set; }
+
+            // --- MODIFICATION ---
+            public float? Displacement { get; set; }
         }
     }
 

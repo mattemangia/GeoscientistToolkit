@@ -2,9 +2,12 @@
 
 using System.Numerics;
 using GeoscientistToolkit.Business;
+using GeoscientistToolkit.Business.GIS;
 using GeoscientistToolkit.Business.Stratigraphies;
 using GeoscientistToolkit.Data.Borehole;
 using GeoscientistToolkit.Data.GIS;
+using GeoscientistToolkit.Data.TwoDGeology;
+using GeoscientistToolkit.UI.Utils;
 using GeoscientistToolkit.Util;
 using ImGuiNET;
 using static GeoscientistToolkit.Business.GIS.GeologicalMapping;
@@ -18,6 +21,7 @@ public class GeologicalMappingViewer : GISViewer
 {
     // --- NEW: Snapping and Vertex Editing ---
     private const float SnappingThresholdScreen = 10.0f; // pixels
+    private readonly ImGuiExportFileDialog _2dGeologyExportDialog;
     private readonly List<Vector2> _profileLine = new();
     private readonly List<ProfileGenerator.TopographicProfile> _savedProfiles = new();
 
@@ -72,6 +76,8 @@ public class GeologicalMappingViewer : GISViewer
     {
         InitializeGeologicalLayer(dataset);
         InitializeStratigraphy();
+        _2dGeologyExportDialog = new ImGuiExportFileDialog("2DGeologyExport", "Export as 2D Geology Profile");
+        _2dGeologyExportDialog.SetExtensions((".2dgeo", "2D Geology Profile"));
     }
 
     public GeologicalMappingViewer(List<GISDataset> datasets) : base(datasets)
@@ -275,6 +281,7 @@ public class GeologicalMappingViewer : GISViewer
                 2f);
         }
 
+        if (_2dGeologyExportDialog.Submit()) ExportCrossSectionAsDataset(_2dGeologyExportDialog.SelectedPath);
         drawList.PopClipRect();
 
         // Handle input for geological and profile tools
@@ -302,6 +309,34 @@ public class GeologicalMappingViewer : GISViewer
 
         if (_showCrossSectionWindow && _currentCrossSection != null)
             DrawCrossSectionWindow();
+    }
+
+    private void ExportCrossSectionAsDataset(string path)
+    {
+        if (_currentCrossSection == null)
+        {
+            Logger.LogError("No active cross-section to export.");
+            return;
+        }
+
+        try
+        {
+            // 1. Serialize the cross-section data to the selected binary file path.
+            TwoDGeologySerializer.Write(path, _currentCrossSection);
+
+            // 2. Create a new TwoDGeologyDataset instance pointing to the new file.
+            var datasetName = Path.GetFileNameWithoutExtension(path);
+            var newDataset = new TwoDGeologyDataset(datasetName, path);
+
+            // 3. Add the new dataset to the project.
+            ProjectManager.Instance.AddDataset(newDataset);
+
+            Logger.Log($"Successfully exported cross-section to new 2D Geology dataset: {datasetName}");
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError($"Failed to export cross-section: {ex.Message}");
+        }
     }
 
     private void DrawGeologicalSymbols(ImDrawListPtr drawList, Vector2 canvasPos, Vector2 canvasSize,
@@ -750,6 +785,10 @@ public class GeologicalMappingViewer : GISViewer
 
             var ve = _currentCrossSection.VerticalExaggeration;
             if (ImGui.SliderFloat("VE", ref ve, 1f, 10f, "%.1fx")) _currentCrossSection.VerticalExaggeration = ve;
+            ImGui.SameLine();
+            if (ImGui.Button("Export as 2D Geology Dataset..."))
+                _2dGeologyExportDialog.Open($"{_currentCrossSection.Profile.Name}");
+
             ImGui.Separator();
 
             var drawList = ImGui.GetWindowDrawList();

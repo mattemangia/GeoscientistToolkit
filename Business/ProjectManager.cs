@@ -15,6 +15,7 @@ using GeoscientistToolkit.Data.Materials;
 using GeoscientistToolkit.Data.Mesh3D;
 using GeoscientistToolkit.Data.Pnm;
 using GeoscientistToolkit.Data.Table;
+using GeoscientistToolkit.Data.TwoDGeology;
 using GeoscientistToolkit.Settings;
 using GeoscientistToolkit.Util;
 // ADDED: To access CompoundLibrary and ChemicalCompound
@@ -555,6 +556,18 @@ public class ProjectManager
                         $"Source file not found for PNM dataset: {pnmDto.Name} at {pnmDto.FilePath}. Data was restored from project file.");
 
                 dataset = pnmDataset;
+                break;
+            }
+            case TwoDGeologyDatasetDTO geo2dDto:
+            {
+                var geo2dDataset = new TwoDGeologyDataset(geo2dDto.Name, geo2dDto.FilePath)
+                {
+                    IsMissing = !File.Exists(geo2dDto.FilePath)
+                };
+                if (geo2dDataset.IsMissing)
+                    Logger.LogWarning(
+                        $"Source file not found for 2D Geology dataset: {geo2dDto.Name} at {geo2dDto.FilePath}");
+                dataset = geo2dDataset;
                 break;
             }
 

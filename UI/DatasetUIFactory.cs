@@ -9,6 +9,7 @@ using GeoscientistToolkit.Data.Image;
 using GeoscientistToolkit.Data.Mesh3D;
 using GeoscientistToolkit.Data.Pnm;
 using GeoscientistToolkit.Data.Table;
+using GeoscientistToolkit.Data.TwoDGeology;
 using GeoscientistToolkit.UI.Borehole;
 using GeoscientistToolkit.UI.GIS;
 using GeoscientistToolkit.UI.Interfaces;
@@ -56,6 +57,9 @@ public static class DatasetUIFactory
             // Borehole Dataset
             BoreholeDataset boreholeDataset => new BoreholeViewer(boreholeDataset),
 
+            // 2DGeology
+            TwoDGeologyDataset geology2DDataset => new TwoDGeologyViewer(geology2DDataset),
+
             // Dataset groups cannot be opened in a viewer
             DatasetGroup => throw new InvalidOperationException(
                 "Cannot open a DatasetGroup in a viewer. Please open individual datasets."),
@@ -77,6 +81,7 @@ public static class DatasetUIFactory
             PNMDataset => new PNMPropertiesRenderer(), // Added for PNM
             DatasetGroup => new DatasetGroupProperties(),
             BoreholeDataset => new BoreholePropertiesRenderer(),
+            TwoDGeologyDataset => new TwoDGeologyProperties(),
             _ => new DefaultPropertiesRenderer()
         };
     }
@@ -85,11 +90,8 @@ public static class DatasetUIFactory
     {
         return dataset switch
         {
-            // --- MODIFIED: Use the composite tool for all CT-related tools ---
             CtImageStackDataset => new CtImageStackCompositeTool(),
             StreamingCtVolumeDataset sds when sds.EditablePartner != null => new CtImageStackCompositeTool(),
-            // --- END MODIFICATION ---
-
             Mesh3DDataset => new Mesh3DTools(),
             TableDataset => new TableTools(),
             GISDataset => new GISTools(),
@@ -97,6 +99,7 @@ public static class DatasetUIFactory
             PNMDataset => new PNMTools(), // Added for PNM
             ImageDataset => new ImageTools(),
             BoreholeDataset => new BoreholeTools(),
+            TwoDGeologyDataset => new TwoDGeologyTools(),
             _ => new DefaultTools()
         };
     }

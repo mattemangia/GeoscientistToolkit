@@ -12,6 +12,8 @@ namespace GeoscientistToolkit.UI;
 
 public class ImportDataModal
 {
+    private readonly ImGuiFileDialog _2dGeologyDialog;
+    private readonly TwoDGeologyLoader _2dGeologyLoader;
     private readonly ImGuiFileDialog _acousticDialog;
     private readonly AcousticVolumeLoader _acousticVolumeLoader;
     private readonly ImGuiFileDialog _boreholeBinaryDialog;
@@ -31,11 +33,11 @@ public class ImportDataModal
         "Acoustic Volume (Simulation Results)",
         "Segmentation/Labels (Standalone)",
         "Pore Network Model (PNM)",
-        "Borehole Log (Binary)"
+        "Borehole Log (Binary)",
+        "2D Geology Profile (.2dgeo)"
     };
 
     private readonly ImGuiFileDialog _fileDialog;
-
     private readonly ImGuiFileDialog _folderDialog;
     private readonly ImGuiFileDialog _gisDialog;
     private readonly GISLoader _gisLoader;
@@ -80,6 +82,8 @@ public class ImportDataModal
             "Select Segmentation File");
         _pnmDialog =
             new ImGuiFileDialog("ImportPNMDialog", FileDialogType.OpenFile, "Select PNM File"); // Added for PNM
+        _2dGeologyDialog =
+            new ImGuiFileDialog("Import2DGeologyDialog", FileDialogType.OpenFile, "Select 2D Geology Profile");
         _boreholeBinaryDialog = new ImGuiFileDialog("ImportBoreholeBinaryDialog", FileDialogType.OpenFile,
             "Select Borehole Binary File");
         _organizerDialog = new ImageStackOrganizerDialog();
@@ -168,6 +172,8 @@ public class ImportDataModal
 
         if (_fileDialog.Submit()) _singleImageLoader.ImagePath = _fileDialog.SelectedPath;
 
+        if (_2dGeologyDialog.Submit()) _2dGeologyLoader.FilePath = _2dGeologyDialog.SelectedPath;
+
         if (_boreholeBinaryDialog.Submit()) _boreholeBinaryLoader.FilePath = _boreholeBinaryDialog.SelectedPath;
 
         if (_tiffDialog.Submit())
@@ -242,11 +248,39 @@ public class ImportDataModal
             case 11: // Borehole Binary
                 DrawBoreholeBinaryOptions();
                 break;
+            case 12:
+                Draw2DGeologyOptions();
+                break;
         }
 
         ImGui.SetCursorPosY(ImGui.GetWindowHeight() - ImGui.GetFrameHeightWithSpacing() * 1.5f);
         ImGui.Separator();
         DrawButtons();
+    }
+
+    private void Draw2DGeologyOptions()
+    {
+        ImGui.TextWrapped("Import a pre-generated 2D geological cross-section profile from a binary (.2dgeo) file.");
+
+        ImGui.Spacing();
+        ImGui.Separator();
+        ImGui.Spacing();
+
+        ImGui.Text("2D Geology Profile File (.2dgeo):");
+        var path = _2dGeologyLoader.FilePath ?? "";
+        ImGui.InputText("##2DGeoPath", ref path, 260, ImGuiInputTextFlags.ReadOnly);
+        ImGui.SameLine();
+        if (ImGui.Button("Browse...##2DGeoFile"))
+        {
+            string[] geoExtensions = { ".2dgeo" };
+            _2dGeologyDialog.Open(null, geoExtensions);
+        }
+
+        if (!string.IsNullOrEmpty(_2dGeologyLoader.FilePath) && File.Exists(_2dGeologyLoader.FilePath))
+        {
+            ImGui.Spacing();
+            ImGui.TextColored(new Vector4(0.0f, 1.0f, 0.5f, 1.0f), "✓ Ready to import 2D geology profile.");
+        }
     }
 
     private void DrawBoreholeBinaryOptions()
@@ -909,6 +943,7 @@ public class ImportDataModal
             9 => _segmentationLoader,
             10 => _pnmLoader, // Added for PNM
             11 => _boreholeBinaryLoader,
+            12 => _2dGeologyLoader,
             _ => null
         };
     }
@@ -977,7 +1012,7 @@ public class ImportDataModal
         _segmentationLoader.Reset();
         _pnmLoader.Reset(); // Added for PNM
         _boreholeBinaryLoader.Reset();
-
+        _2dGeologyLoader.Reset();
         // Reset state
         _importTask = null;
         _progress = 0;

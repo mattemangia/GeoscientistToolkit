@@ -317,3 +317,8 @@ public class GISLayerDTO
     public Vector4 Color { get; set; }
     public List<GISFeatureDTO> Features { get; set; } = new();
 }
+
+public class TwoDGeologyDatasetDTO : DatasetDTO
+{
+    // All data is stored in the binary file, so only base properties are needed for project serialization.
+}

@@ -16,7 +16,8 @@ public enum DatasetType
     GIS,
     AcousticVolume,
     PNM,
-    Borehole
+    Borehole,
+    TwoDGeology
 }
 
 public abstract class Dataset
