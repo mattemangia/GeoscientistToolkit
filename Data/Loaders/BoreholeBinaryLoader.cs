@@ -25,7 +25,7 @@ public class BoreholeBinaryLoader : IDataLoader
                 var dataset = new BoreholeDataset(datasetName, FilePath);
 
                 progressReporter?.Report((0.2f, "Parsing binary data..."));
-
+                
                 dataset.LoadFromBinaryFile(FilePath);
 
                 progressReporter?.Report((1.0f, "Borehole dataset loaded successfully."));

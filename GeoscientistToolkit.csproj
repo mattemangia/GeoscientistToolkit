@@ -19,6 +19,8 @@
         <Compile Remove="AddInExtractor\**"/>
         <EmbeddedResource Remove="AddInExtractor\**"/>
         <None Remove="AddInExtractor\**"/>
+        <Compile Remove="Data\GIS\RasterTools\IsolineCreatorTool.cs" />
+        <Compile Remove="Data\GIS\RasterTools\RasterCalculatorTool.cs" />
     </ItemGroup>
 
     <!-- FIX 2: All PackageReference items are correctly placed within a single ItemGroup -->
@@ -64,6 +66,9 @@
     <!-- In Release mode, we must EXCLUDE the add-in source from the main compile. -->
     <ItemGroup Condition="'$(Configuration)' == 'Release'">
         <Compile Remove="AddIns\Development\**\*.cs"/>
+    </ItemGroup>
+    <ItemGroup>
+      <Folder Include="Data\GIS\RasterTools\" />
     </ItemGroup>
 
     <!-- First, ensure the AddInExtractor is built -->

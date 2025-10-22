@@ -4,7 +4,6 @@ using System.IO.Compression;
 using System.Numerics;
 using GeoscientistToolkit.Analysis.NMR;
 using GeoscientistToolkit.Analysis.ThermalConductivity;
-using GeoscientistToolkit.Business.GIS;
 using GeoscientistToolkit.Data;
 using GeoscientistToolkit.Data.AcousticVolume;
 using GeoscientistToolkit.Data.Borehole;
@@ -17,6 +16,7 @@ using GeoscientistToolkit.Data.Pnm;
 using GeoscientistToolkit.Data.Table;
 using GeoscientistToolkit.Settings;
 using GeoscientistToolkit.Util;
+using GeoscientistToolkit.Business.GIS;
 // ADDED: To access CompoundLibrary and ChemicalCompound
 using AcousticVolumeDatasetDTO = GeoscientistToolkit.Data.AcousticVolumeDatasetDTO;
 
@@ -237,8 +237,11 @@ public class ProjectManager
             else
             {
                 var dataset = CreateDatasetFromDTO(datasetDto, null);
-                if (dataset != null) createdDatasets[dataset.FilePath] = dataset;
-                // Loading logic is now handled inside CreateDatasetFromDTO
+                if (dataset != null)
+                {
+                    createdDatasets[dataset.FilePath] = dataset;
+                    // Loading logic is now handled inside CreateDatasetFromDTO
+                }
             }
 
         // PASS 2: Create streaming datasets and link partners.
@@ -568,10 +571,10 @@ public class ProjectManager
                     Tags = (GISTag)gisDto.Tags,
                     IsMissing = !string.IsNullOrEmpty(gisDto.FilePath) && !File.Exists(gisDto.FilePath)
                 };
-
+            
                 if (Enum.TryParse<BasemapType>(gisDto.BasemapType, out var basemapType))
                     gisDataset.BasemapType = basemapType;
-
+            
                 // Restore layers and features from DTO if they exist
                 if (gisDto.Layers.Any(l => l.Features.Any()))
                 {
@@ -586,7 +589,7 @@ public class ProjectManager
                             IsEditable = layerDto.IsEditable,
                             Color = layerDto.Color
                         };
-
+            
                         foreach (var featureDto in layerDto.Features)
                         {
                             GISFeature feature;
@@ -618,22 +621,19 @@ public class ProjectManager
                             {
                                 feature = new GISFeature();
                             }
-
+            
                             // Populate base properties
                             feature.Type = featureDto.Type;
                             feature.Coordinates = featureDto.Coordinates;
                             feature.Properties = featureDto.Properties;
                             feature.Id = featureDto.Id;
-
+            
                             layer.Features.Add(feature);
                         }
-
                         gisDataset.Layers.Add(layer);
                     }
-
                     gisDataset.UpdateBounds(); // Update bounds from restored features
-                    Logger.Log(
-                        $"Restored {gisDataset.Layers.Sum(l => l.Features.Count)} features from project file for: {gisDataset.Name}");
+                    Logger.Log($"Restored {gisDataset.Layers.Sum(l=>l.Features.Count)} features from project file for: {gisDataset.Name}");
                 }
                 else if (!gisDataset.IsMissing)
                 {
@@ -648,10 +648,10 @@ public class ProjectManager
                         Logger.LogError($"Failed to load data for dataset '{gisDataset.Name}': {ex.Message}");
                     }
                 }
-
+            
                 if (gisDataset.IsMissing)
                     Logger.LogWarning($"Source file not found for GIS dataset: {gisDto.Name} at {gisDto.FilePath}");
-
+                
                 dataset = gisDataset;
                 break;
             }

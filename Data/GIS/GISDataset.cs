@@ -5,12 +5,12 @@ using System.Numerics;
 using System.Text;
 using System.Text.Json;
 using System.Xml.Linq;
-using GeoscientistToolkit.Business.GIS;
 using GeoscientistToolkit.UI.GIS;
 using GeoscientistToolkit.Util;
 using NetTopologySuite.Geometries;
 using NetTopologySuite.IO;
 using ProjNet.CoordinateSystems;
+using GeoscientistToolkit.Business.GIS;
 
 
 // Required for GISOperationsImpl
@@ -103,7 +103,6 @@ public class GISDataset : Dataset, ISerializableDataset
                         dto.IsInferred = geoFeature.IsInferred;
                         dto.IsCovered = geoFeature.IsCovered;
                     }
-
                     return dto;
                 }).ToList()
             }).ToList(),
@@ -657,11 +656,11 @@ public class GISDataset : Dataset, ISerializableDataset
     private void LoadGeoTIFF()
     {
         Logger.Log($"Loading GeoTIFF: {FilePath}");
-
+    
         var geoTiffData = BasemapManager.Instance.LoadGeoTiff(FilePath);
         if (geoTiffData == null)
             throw new InvalidOperationException("Failed to load GeoTIFF data using BasemapManager.");
-
+    
         // Convert byte[] RGBA to float[,] for the first band (typical for DEM)
         var width = geoTiffData.Width;
         var height = geoTiffData.Height;
@@ -672,21 +671,21 @@ public class GISDataset : Dataset, ISerializableDataset
             var index = (y * width + x) * 4;
             pixelData[x, y] = geoTiffData.Data[index]; // Using Red channel as grayscale value
         }
-
+    
         var bounds = new BoundingBox
         {
             Min = new Vector2((float)geoTiffData.OriginX,
                 (float)(geoTiffData.OriginY + geoTiffData.PixelHeight * height)),
             Max = new Vector2((float)(geoTiffData.OriginX + geoTiffData.PixelWidth * width), (float)geoTiffData.OriginY)
         };
-
+    
         var layer = new GISRasterLayer(pixelData, bounds)
         {
             Name = Path.GetFileNameWithoutExtension(FilePath),
             IsVisible = true,
             RasterPath = FilePath
         };
-
+    
         Layers.Clear();
         Layers.Add(layer);
     }
@@ -898,8 +897,7 @@ public class GISDataset : Dataset, ISerializableDataset
         float minx = float.MaxValue, miny = float.MaxValue;
         float maxx = float.MinValue, maxy = float.MinValue;
 
-        var allCoords = Layers.Where(l => l.Type == LayerType.Vector).SelectMany(l => l.Features)
-            .SelectMany(f => f.Coordinates);
+        var allCoords = Layers.Where(l => l.Type == LayerType.Vector).SelectMany(l => l.Features).SelectMany(f => f.Coordinates);
 
         if (!allCoords.Any())
         {
