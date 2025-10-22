@@ -48,8 +48,8 @@ public class TwoDGeologyViewer : IDisposable
     private bool _showRestorationOverlay = false;
     
     // Colors
-    private readonly Vector4 _backgroundColor = new Vector4(0.95f, 0.95f, 0.95f, 1.0f);
-    private readonly Vector4 _gridColor = new Vector4(0.7f, 0.7f, 0.7f, 0.5f);
+    private readonly Vector4 _backgroundColor = new Vector4(0.1f, 0.1f, 0.12f, 1.0f);
+    private readonly Vector4 _gridColor = new Vector4(0.4f, 0.4f, 0.4f, 0.5f);
     private readonly Vector4 _topographyColor = new Vector4(0.3f, 0.5f, 0.2f, 1.0f);
     private readonly Vector4 _faultColor = new Vector4(1.0f, 0.0f, 0.0f, 1.0f);
     private readonly Vector4 _selectionColor = new Vector4(1.0f, 1.0f, 0.0f, 1.0f);
@@ -145,10 +145,12 @@ public class TwoDGeologyViewer : IDisposable
         ImGui.Text($"Zoom: {_zoom:F2}x");
         
         ImGui.SameLine();
+        ImGui.PushItemWidth(120f); // Set a fixed width for the slider
         if (ImGui.SliderFloat("V.E.", ref _verticalExaggeration, 0.5f, 10.0f))
         {
             _crossSection.VerticalExaggeration = _verticalExaggeration;
         }
+        ImGui.PopItemWidth();
     }
     
     private void RenderViewport()

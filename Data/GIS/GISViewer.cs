@@ -205,6 +205,9 @@ public class GISViewer : IDatasetViewer
     
         drawList.PushClipRect(canvas_pos, canvas_pos + canvas_size, true);
     
+        // 0. Draw background
+        drawList.AddRectFilled(canvas_pos, canvas_pos + canvas_size, ImGui.GetColorU32(new Vector4(0.1f, 0.1f, 0.12f, 1.0f)));
+
         // 1. Draw online tile basemap if active
         if (_basemapManager != null && _basemapManager.CurrentProvider != null)
         {
