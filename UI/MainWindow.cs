@@ -15,10 +15,6 @@ using GeoscientistToolkit.UI.Windows;
 using GeoscientistToolkit.Util;
 using ImGuiNET;
 
-// ADDED: For TableDataset and DataTable
-
-// ADDED: To access the new editor window
-
 namespace GeoscientistToolkit.UI;
 
 public class MainWindow
@@ -387,6 +383,8 @@ public class MainWindow
 
             if (ImGui.MenuItem("New Borehole/Well Log...")) OnCreateEmptyBorehole();
 
+            if (ImGui.MenuItem("New 2D Geology Profile...")) OnCreateEmpty2DGeology();
+
             if (ImGui.MenuItem("New GIS Map..."))
             {
                 var emptyGIS = new GISDataset("New Map", "")
@@ -619,6 +617,19 @@ public class MainWindow
         catch (Exception ex)
         {
             Logger.LogError($"Failed to create empty borehole: {ex.Message}");
+        }
+    }
+
+    private void OnCreateEmpty2DGeology()
+    {
+        // The MainWindow no longer knows HOW to create the profile.
+        // It just asks the ProjectManager to do it.
+        Dataset newProfile = ProjectManager.Instance.CreateNew2DGeologyProfile();
+
+        // If the creation was successful, select the new dataset in the UI.
+        if (newProfile != null)
+        {
+            OnDatasetSelected(newProfile);
         }
     }
 
