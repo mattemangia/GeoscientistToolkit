@@ -8,16 +8,13 @@ using GeoscientistToolkit.Data.Borehole;
 using GeoscientistToolkit.Data.GIS;
 using GeoscientistToolkit.Data.Mesh3D;
 using GeoscientistToolkit.Data.Table;
+using GeoscientistToolkit.Data.TwoDGeology;
 using GeoscientistToolkit.Settings;
 using GeoscientistToolkit.UI.GIS;
 using GeoscientistToolkit.UI.Utils;
 using GeoscientistToolkit.UI.Windows;
 using GeoscientistToolkit.Util;
 using ImGuiNET;
-
-// ADDED: For TableDataset and DataTable
-
-// ADDED: To access the new editor window
 
 namespace GeoscientistToolkit.UI;
 
@@ -395,6 +392,24 @@ public class MainWindow
                 };
                 ProjectManager.Instance.AddDataset(emptyGIS);
                 Logger.Log("Created new empty GIS map");
+            }
+
+            if (ImGui.MenuItem("New 2D Geology Profile..."))
+            {
+                // Generate a unique name with timestamp
+                var timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
+                var profileName = $"New_Profile_{timestamp}";
+                var filePath = Path.Combine(Path.GetTempPath(), $"{profileName}.2dgeo");
+                
+                // Create empty 2D geology dataset
+                var emptyProfile = TwoDGeologyDataset.CreateEmpty(profileName, filePath);
+                
+                // Add to project
+                ProjectManager.Instance.AddDataset(emptyProfile);
+                Logger.Log($"Created new empty 2D geology profile: {profileName}");
+                
+                // Optionally, select it
+                OnDatasetSelected(emptyProfile);
             }
 
             if (ImGui.MenuItem("New Empty Table..."))
