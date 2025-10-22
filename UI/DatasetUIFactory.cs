@@ -1,5 +1,6 @@
 ﻿// GeoscientistToolkit/UI/DatasetUIFactory.cs
 
+using System.Numerics;
 using GeoscientistToolkit.Data;
 using GeoscientistToolkit.Data.AcousticVolume;
 using GeoscientistToolkit.Data.Borehole;
@@ -9,14 +10,12 @@ using GeoscientistToolkit.Data.Image;
 using GeoscientistToolkit.Data.Mesh3D;
 using GeoscientistToolkit.Data.Pnm;
 using GeoscientistToolkit.Data.Table;
+using GeoscientistToolkit.Data.TwoDGeology;
 using GeoscientistToolkit.UI.Borehole;
 using GeoscientistToolkit.UI.GIS;
 using GeoscientistToolkit.UI.Interfaces;
 using GeoscientistToolkit.UI.Tools;
 using ImGuiNET;
-
-// Added for PNM
-// Added for CompositeTool
 
 namespace GeoscientistToolkit.UI;
 
@@ -47,6 +46,7 @@ public static class DatasetUIFactory
             GISDataset gisDataset => new GISViewer(gisDataset),
             DatasetGroup group when group.Datasets.All(d => d is GISDataset) =>
                 new GISViewer(group.Datasets.Cast<GISDataset>().ToList()),
+            
             // Acoustic Volume datasets
             AcousticVolumeDataset acousticDataset => new AcousticVolumeViewer(acousticDataset),
 
@@ -55,6 +55,9 @@ public static class DatasetUIFactory
 
             // Borehole Dataset
             BoreholeDataset boreholeDataset => new BoreholeViewer(boreholeDataset),
+
+            // 2D Geology Dataset
+            TwoDGeologyDataset twoDGeologyDataset => new TwoDGeologyViewerWrapper(twoDGeologyDataset),
 
             // Dataset groups cannot be opened in a viewer
             DatasetGroup => throw new InvalidOperationException(
@@ -74,9 +77,10 @@ public static class DatasetUIFactory
             TableDataset => new TableProperties(),
             GISDataset => new GISProperties(),
             AcousticVolumeDataset => new AcousticVolumeProperties(),
-            PNMDataset => new PNMPropertiesRenderer(), // Added for PNM
+            PNMDataset => new PNMPropertiesRenderer(),
             DatasetGroup => new DatasetGroupProperties(),
             BoreholeDataset => new BoreholePropertiesRenderer(),
+            TwoDGeologyDataset => new TwoDGeologyProperties(),
             _ => new DefaultPropertiesRenderer()
         };
     }
@@ -94,9 +98,10 @@ public static class DatasetUIFactory
             TableDataset => new TableTools(),
             GISDataset => new GISTools(),
             AcousticVolumeDataset => new AcousticVolumeTools(),
-            PNMDataset => new PNMTools(), // Added for PNM
+            PNMDataset => new PNMTools(),
             ImageDataset => new ImageTools(),
             BoreholeDataset => new BoreholeTools(),
+            TwoDGeologyDataset => new TwoDGeologyToolsWrapper(),
             _ => new DefaultTools()
         };
     }
@@ -192,6 +197,81 @@ public static class DatasetUIFactory
                 ImGui.Separator();
                 ImGui.TextDisabled("Additional image tools coming soon");
             }
+        }
+    }
+
+    // Wrapper for TwoDGeologyTools to conform to IDatasetTools interface
+    private class TwoDGeologyToolsWrapper : IDatasetTools
+    {
+        private TwoDGeologyTools _tools;
+        private TwoDGeologyViewer _viewer;
+        
+        public void Draw(Dataset dataset)
+        {
+            if (dataset is not TwoDGeologyDataset twoDGeoDataset)
+            {
+                ImGui.TextDisabled("Invalid dataset type for 2D Geology tools.");
+                return;
+            }
+
+            // Get or create the viewer reference
+            if (_viewer == null)
+            {
+                _viewer = twoDGeoDataset.GetViewer();
+                
+                if (_viewer == null)
+                {
+                    ImGui.TextWrapped("Please open the dataset in a viewer first to access editing tools.");
+                    return;
+                }
+            }
+
+            // Initialize tools if needed
+            if (_tools == null && _viewer != null)
+            {
+                _tools = new TwoDGeologyTools(_viewer, twoDGeoDataset);
+            }
+
+            // Draw the tools panel
+            if (_tools != null)
+            {
+                _tools.RenderToolsPanel();
+            }
+            else
+            {
+                ImGui.TextWrapped("2D Geology tools are available when viewing the dataset.");
+            }
+        }
+    }
+
+    // Wrapper for TwoDGeologyViewer to conform to IDatasetViewer interface
+    private class TwoDGeologyViewerWrapper : IDatasetViewer
+    {
+        private readonly TwoDGeologyViewer _viewer;
+        private readonly TwoDGeologyDataset _dataset;
+
+        public TwoDGeologyViewerWrapper(TwoDGeologyDataset dataset)
+        {
+            _dataset = dataset ?? throw new ArgumentNullException(nameof(dataset));
+            _viewer = new TwoDGeologyViewer(dataset);
+        }
+
+        public void DrawToolbarControls()
+        {
+            // The TwoDGeologyViewer's toolbar is rendered as part of its Render() method
+            // We don't need separate toolbar controls here
+        }
+
+        public void DrawContent(ref float zoom, ref Vector2 pan)
+        {
+            // The TwoDGeologyViewer manages its own zoom and pan internally
+            // Just render the viewer
+            _viewer.Render();
+        }
+
+        public void Dispose()
+        {
+            _viewer?.Dispose();
         }
     }
 }
