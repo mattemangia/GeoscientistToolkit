@@ -29,6 +29,15 @@ public class TwoDGeologyCreationTools : IDatasetTools
             return;
         }
 
+        // Ensure data is loaded
+        twoDDataset.Load();
+        
+        // Initialize profile data if null
+        if (twoDDataset.ProfileData == null)
+        {
+            InitializeEmptyProfile(twoDDataset);
+        }
+
         if (ImGui.BeginTabBar("CreationToolsTabs"))
         {
             if (ImGui.BeginTabItem("Profile Setup"))
@@ -56,6 +65,51 @@ public class TwoDGeologyCreationTools : IDatasetTools
             }
 
             ImGui.EndTabBar();
+        }
+    }
+
+    private void InitializeEmptyProfile(TwoDGeologyDataset dataset)
+    {
+        dataset.ProfileData = new GeologicalMapping.CrossSectionGenerator.CrossSection
+        {
+            Profile = new GeologicalMapping.ProfileGenerator.TopographicProfile
+            {
+                Name = "New Profile",
+                TotalDistance = 10000f,
+                MinElevation = -2000f,
+                MaxElevation = 1000f,
+                StartPoint = new Vector2(0, 0),
+                EndPoint = new Vector2(10000f, 0),
+                CreatedAt = DateTime.Now,
+                VerticalExaggeration = 2.0f,
+                Points = new List<GeologicalMapping.ProfileGenerator.ProfilePoint>()
+            },
+            VerticalExaggeration = 2.0f,
+            Formations = new List<GeologicalMapping.CrossSectionGenerator.ProjectedFormation>(),
+            Faults = new List<GeologicalMapping.CrossSectionGenerator.ProjectedFault>()
+        };
+
+        // Generate default flat topography
+        GenerateDefaultTopography(dataset.ProfileData.Profile);
+        Logger.Log("Initialized empty profile for creation tools");
+    }
+
+    private void GenerateDefaultTopography(GeologicalMapping.ProfileGenerator.TopographicProfile profile)
+    {
+        profile.Points.Clear();
+        var numPoints = 50;
+        var meanElevation = 0f; // Sea level
+
+        for (var i = 0; i <= numPoints; i++)
+        {
+            var distance = i / (float)numPoints * profile.TotalDistance;
+            profile.Points.Add(new GeologicalMapping.ProfileGenerator.ProfilePoint
+            {
+                Position = new Vector2(distance, meanElevation),
+                Distance = distance,
+                Elevation = meanElevation,
+                Features = new List<GeologicalMapping.GeologicalFeature>()
+            });
         }
     }
 
@@ -96,7 +150,8 @@ public class TwoDGeologyCreationTools : IDatasetTools
             ImGui.Separator();
             ImGui.Spacing();
 
-            if (ImGui.Button("Apply Configuration", new Vector2(-1, 0))) ApplyConfiguration(dataset);
+            if (ImGui.Button("Apply Configuration", new Vector2(-1, 0))) 
+                ApplyConfiguration(dataset);
 
             ImGui.Spacing();
             ImGui.TextColored(new Vector4(0.7f, 0.7f, 0.7f, 1f), "Current Configuration:");
@@ -117,7 +172,6 @@ public class TwoDGeologyCreationTools : IDatasetTools
         {
             if (dataset.ProfileData == null)
             {
-                // Create new profile from scratch
                 dataset.ProfileData = new GeologicalMapping.CrossSectionGenerator.CrossSection
                 {
                     Profile = new GeologicalMapping.ProfileGenerator.TopographicProfile
@@ -129,25 +183,32 @@ public class TwoDGeologyCreationTools : IDatasetTools
                         StartPoint = new Vector2(0, 0),
                         EndPoint = new Vector2(_profileLength, 0),
                         CreatedAt = DateTime.Now,
-                        VerticalExaggeration = _verticalExaggeration
+                        VerticalExaggeration = _verticalExaggeration,
+                        Points = new List<GeologicalMapping.ProfileGenerator.ProfilePoint>()
                     },
-                    VerticalExaggeration = _verticalExaggeration
+                    VerticalExaggeration = _verticalExaggeration,
+                    Formations = new List<GeologicalMapping.CrossSectionGenerator.ProjectedFormation>(),
+                    Faults = new List<GeologicalMapping.CrossSectionGenerator.ProjectedFault>()
                 };
 
-                // Generate default flat topography
                 GenerateDefaultTopography(dataset.ProfileData.Profile);
-
                 Logger.Log($"Created new profile: {_profileName}, Length: {_profileLength}m");
             }
             else
             {
-                // Update existing profile
                 dataset.ProfileData.Profile.Name = _profileName;
                 dataset.ProfileData.Profile.TotalDistance = _profileLength;
                 dataset.ProfileData.Profile.MinElevation = _minElevation;
                 dataset.ProfileData.Profile.MaxElevation = _maxElevation;
                 dataset.ProfileData.Profile.EndPoint = new Vector2(_profileLength, 0);
                 dataset.ProfileData.VerticalExaggeration = _verticalExaggeration;
+
+                // Regenerate topography points if length changed significantly
+                if (dataset.ProfileData.Profile.Points.Count == 0 || 
+                    Math.Abs(dataset.ProfileData.Profile.Points.Last().Distance - _profileLength) > 1f)
+                {
+                    GenerateDefaultTopography(dataset.ProfileData.Profile);
+                }
 
                 Logger.Log("Updated profile configuration");
             }
@@ -166,7 +227,8 @@ public class TwoDGeologyCreationTools : IDatasetTools
                 {
                     Position = new Vector2(distance, meanElevation),
                     Distance = distance,
-                    Elevation = meanElevation
+                    Elevation = meanElevation,
+                    Features = new List<GeologicalMapping.GeologicalFeature>()
                 });
             }
         }
@@ -178,7 +240,7 @@ public class TwoDGeologyCreationTools : IDatasetTools
 
     private class TopographyEditorTool
     {
-        private readonly int _selectedPointIndex = -1;
+        private int _selectedPointIndex = -1;
         private float _amplitude = 200f;
         private string _presetName = "Flat";
         private float _wavelength = 2000f;
@@ -199,7 +261,6 @@ public class TwoDGeologyCreationTools : IDatasetTools
             ImGui.Text($"Points: {profile.Points.Count}");
             ImGui.Spacing();
 
-            // Presets
             ImGui.TextColored(new Vector4(0.3f, 0.8f, 1f, 1f), "Quick Presets:");
 
             if (ImGui.BeginCombo("##TopoPreset", _presetName))
@@ -233,7 +294,6 @@ public class TwoDGeologyCreationTools : IDatasetTools
 
             ImGui.Separator();
 
-            // Custom sine wave generator
             ImGui.TextColored(new Vector4(0.3f, 0.8f, 1f, 1f), "Custom Sine Wave:");
 
             ImGui.Text("Amplitude (m):");
@@ -247,30 +307,13 @@ public class TwoDGeologyCreationTools : IDatasetTools
 
             ImGui.Separator();
 
-            // Manual editing info
             ImGui.TextColored(new Vector4(0.3f, 0.8f, 1f, 1f), "Manual Editing:");
             ImGui.TextWrapped("Use the viewer to click and drag topography points.");
-
-            if (_selectedPointIndex >= 0 && _selectedPointIndex < profile.Points.Count)
-            {
-                var point = profile.Points[_selectedPointIndex];
-                ImGui.Text($"Selected Point {_selectedPointIndex}:");
-                ImGui.BulletText($"Distance: {point.Distance:F1} m");
-
-                var elevation = point.Elevation;
-                if (ImGui.SliderFloat("Elevation##SelectedPoint", ref elevation,
-                        profile.MinElevation, profile.MaxElevation, "%.1f m"))
-                {
-                    point.Elevation = elevation;
-                    point.Position = new Vector2(point.Distance, elevation);
-                    profile.Points[_selectedPointIndex] = point;
-                }
-            }
         }
 
         private void ApplyFlatTopography(GeologicalMapping.ProfileGenerator.TopographicProfile profile)
         {
-            var meanElevation = (profile.MaxElevation + profile.MinElevation) / 2;
+            var meanElevation = 0f; // Sea level
             for (var i = 0; i < profile.Points.Count; i++)
             {
                 var point = profile.Points[i];
@@ -285,7 +328,7 @@ public class TwoDGeologyCreationTools : IDatasetTools
         private void ApplyHillyTopography(GeologicalMapping.ProfileGenerator.TopographicProfile profile,
             float amplitude, float wavelength)
         {
-            var meanElevation = (profile.MaxElevation + profile.MinElevation) / 2;
+            var meanElevation = 0f; // Sea level
             for (var i = 0; i < profile.Points.Count; i++)
             {
                 var point = profile.Points[i];
@@ -302,7 +345,7 @@ public class TwoDGeologyCreationTools : IDatasetTools
 
         private void ApplyValleyTopography(GeologicalMapping.ProfileGenerator.TopographicProfile profile)
         {
-            var meanElevation = (profile.MaxElevation + profile.MinElevation) / 2;
+            var meanElevation = 100f; // Slightly above sea level
             var centerX = profile.TotalDistance / 2;
 
             for (var i = 0; i < profile.Points.Count; i++)
@@ -343,54 +386,95 @@ public class TwoDGeologyCreationTools : IDatasetTools
 
             var section = dataset.ProfileData;
 
-            ImGui.TextWrapped("Build your stratigraphic column by adding horizontal layers.");
+            ImGui.TextWrapped("Build your stratigraphic column by adding and organizing horizontal layers.");
             ImGui.Separator();
 
             // Basement depth
             ImGui.TextColored(new Vector4(1f, 0.8f, 0.3f, 1f), "Basement Configuration:");
             ImGui.Text("Basement Depth (m below sea level):");
             if (ImGui.SliderFloat("##BasementDepth", ref _basementDepth, 1000f, 10000f, "%.0f m"))
-                UpdateBasement(section);
+            {
+                // Update basement immediately as slider moves
+            }
 
-            if (ImGui.Button("Set Basement", new Vector2(-1, 0))) UpdateBasement(section);
+            if (ImGui.Button("Set Basement", new Vector2(-1, 0))) 
+                UpdateBasement(section);
 
             ImGui.Separator();
 
             // Layer list
-            ImGui.TextColored(new Vector4(0.3f, 0.8f, 1f, 1f), "Stratigraphic Layers:");
-            ImGui.Text($"Layers: {section.Formations.Count}");
+            ImGui.TextColored(new Vector4(0.3f, 0.8f, 1f, 1f), "Stratigraphic Layers (Top to Bottom):");
             ImGui.Spacing();
 
-            // Display existing layers (top to bottom)
-            var nonBasementLayers = section.Formations.Where(f => f.Name != "Basement").ToList();
-            for (var i = nonBasementLayers.Count - 1; i >= 0; i--)
+            var nonBasementLayers = section.Formations
+                .Where(f => f.Name != "Basement" && f.TopBoundary != null && f.TopBoundary.Any())
+                .OrderByDescending(f => f.TopBoundary.Average(p => p.Y))
+                .ToList();
+
+            if (nonBasementLayers.Count == 0)
+                ImGui.TextDisabled("No layers defined. Add a layer to begin.");
+
+            for (var i = 0; i < nonBasementLayers.Count; i++)
             {
                 var formation = nonBasementLayers[i];
                 var actualIndex = section.Formations.IndexOf(formation);
                 var isSelected = actualIndex == _selectedLayerIndex;
 
+                ImGui.PushID($"Layer_{actualIndex}");
+
                 if (isSelected)
                     ImGui.PushStyleColor(ImGuiCol.Button, new Vector4(0.4f, 0.6f, 1f, 1f));
 
-                var buttonLabel = $"{formation.Name}##Layer{actualIndex}";
-                if (ImGui.Button(buttonLabel, new Vector2(-40, 0))) _selectedLayerIndex = actualIndex;
+                if (ImGui.Button(formation.Name, new Vector2(ImGui.GetContentRegionAvail().X - 140, 0)))
+                    _selectedLayerIndex = actualIndex;
 
                 if (isSelected)
                     ImGui.PopStyleColor();
 
                 ImGui.SameLine();
-                if (ImGui.Button($"X##Del{actualIndex}", new Vector2(30, 0)))
+                ImGui.ColorButton("##Color", formation.Color, ImGuiColorEditFlags.NoTooltip, new Vector2(20, 20));
+
+                ImGui.SameLine();
+                if (i > 0)
+                {
+                    if (ImGui.ArrowButton("Up", ImGuiDir.Up))
+                    {
+                        SwapLayers(section, i, i - 1, nonBasementLayers);
+                        ImGui.PopID();
+                        break;
+                    }
+                }
+                else
+                {
+                    ImGui.Dummy(new Vector2(23, 23));
+                }
+
+                ImGui.SameLine();
+                if (i < nonBasementLayers.Count - 1)
+                {
+                    if (ImGui.ArrowButton("Down", ImGuiDir.Down))
+                    {
+                        SwapLayers(section, i, i + 1, nonBasementLayers);
+                        ImGui.PopID();
+                        break;
+                    }
+                }
+                else
+                {
+                    ImGui.Dummy(new Vector2(23, 23));
+                }
+
+                ImGui.SameLine();
+                if (ImGui.Button("X"))
                 {
                     section.Formations.RemoveAt(actualIndex);
                     _selectedLayerIndex = -1;
                     Logger.Log($"Removed formation: {formation.Name}");
+                    ImGui.PopID();
+                    break;
                 }
 
-                // Show color swatch
-                var colorButtonSize = new Vector2(20, 20);
-                ImGui.SameLine();
-                ImGui.ColorButton($"##Color{actualIndex}", formation.Color, ImGuiColorEditFlags.NoTooltip,
-                    colorButtonSize);
+                ImGui.PopID();
             }
 
             ImGui.Separator();
@@ -407,44 +491,84 @@ public class TwoDGeologyCreationTools : IDatasetTools
             ImGui.Text("Color:");
             ImGui.ColorEdit4("##NewLayerColor", ref _newLayerColor);
 
-            if (ImGui.Button("Add Layer to Top", new Vector2(-1, 0))) AddLayer(section, true);
+            if (ImGui.Button("Add Layer to Top", new Vector2(-1, 0))) 
+                AddLayer(section, true);
 
-            if (ImGui.Button("Add Layer to Bottom", new Vector2(-1, 0))) AddLayer(section, false);
+            if (ImGui.Button("Add Layer to Bottom", new Vector2(-1, 0))) 
+                AddLayer(section, false);
 
             ImGui.Separator();
 
             // Quick stack generator
             ImGui.TextColored(new Vector4(1f, 0.8f, 0.3f, 1f), "Quick Layer Stack:");
 
-            if (ImGui.Button("Generate Standard Stack (5 layers)", new Vector2(-1, 0))) GenerateStandardStack(section);
+            if (ImGui.Button("Generate Standard Stack (5 layers)", new Vector2(-1, 0))) 
+                GenerateStandardStack(section);
 
             if (ImGui.Button("Clear All Layers", new Vector2(-1, 0)))
             {
-                section.Formations.Clear();
+                section.Formations.RemoveAll(f => f.Name != "Basement");
                 _selectedLayerIndex = -1;
-                Logger.Log("Cleared all formations");
+                Logger.Log("Cleared all non-basement formations");
             }
+        }
+
+        private void SwapLayers(GeologicalMapping.CrossSectionGenerator.CrossSection section, int i, int j,
+            List<GeologicalMapping.CrossSectionGenerator.ProjectedFormation> orderedLayers)
+        {
+            var temp = orderedLayers[i];
+            orderedLayers[i] = orderedLayers[j];
+            orderedLayers[j] = temp;
+            RebuildStack(section, orderedLayers);
+        }
+
+        private void RebuildStack(GeologicalMapping.CrossSectionGenerator.CrossSection section,
+            List<GeologicalMapping.CrossSectionGenerator.ProjectedFormation> orderedLayers)
+        {
+            var profile = section.Profile;
+            float currentTop = 0;
+            
+            foreach (var formation in orderedLayers)
+            {
+                var thickness = Math.Abs(formation.TopBoundary.Average(p => p.Y) - formation.BottomBoundary.Average(p => p.Y));
+                if (thickness < 1f) thickness = 200f;
+
+                formation.TopBoundary.Clear();
+                formation.BottomBoundary.Clear();
+
+                var numPoints = 20;
+                for (var i = 0; i <= numPoints; i++)
+                {
+                    var distance = i / (float)numPoints * profile.TotalDistance;
+                    formation.TopBoundary.Add(new Vector2(distance, currentTop));
+                    formation.BottomBoundary.Add(new Vector2(distance, currentTop - thickness));
+                }
+
+                currentTop -= thickness;
+            }
+
+            Logger.Log("Rebuilt stratigraphic stack");
         }
 
         private void UpdateBasement(GeologicalMapping.CrossSectionGenerator.CrossSection section)
         {
             var profile = section.Profile;
-            var topElevation = -100f; // Start basement 100m below sea level
+            var topElevation = -100f;
             var bottomElevation = -_basementDepth;
 
-            // Create or update basement formation
             var basement = section.Formations.FirstOrDefault(f => f.Name == "Basement");
             if (basement == null)
             {
                 basement = new GeologicalMapping.CrossSectionGenerator.ProjectedFormation
                 {
                     Name = "Basement",
-                    Color = new Vector4(0.6f, 0.3f, 0.3f, 1f)
+                    Color = new Vector4(0.6f, 0.3f, 0.3f, 1f),
+                    TopBoundary = new List<Vector2>(),
+                    BottomBoundary = new List<Vector2>()
                 };
-                section.Formations.Insert(0, basement); // Add at bottom
+                section.Formations.Insert(0, basement);
             }
 
-            // Generate basement boundaries
             basement.TopBoundary.Clear();
             basement.BottomBoundary.Clear();
 
@@ -470,39 +594,30 @@ public class TwoDGeologyCreationTools : IDatasetTools
                 BottomBoundary = new List<Vector2>()
             };
 
-            // Determine elevation
-            float topElevation, bottomElevation;
-
-            var nonBasementFormations = section.Formations.Where(f => f.Name != "Basement").ToList();
+            float topElevation;
+            var nonBasementFormations = section.Formations
+                .Where(f => f.Name != "Basement" && f.TopBoundary != null && f.TopBoundary.Any())
+                .ToList();
 
             if (toTop)
             {
-                // Add above existing layers
-                var topPoints = nonBasementFormations.SelectMany(f => f.TopBoundary);
-                if (topPoints.Any())
-                    topElevation = topPoints.Max(p => p.Y);
-                else
-                    topElevation = 0f;
-                bottomElevation = topElevation - _newLayerThickness;
+                topElevation = nonBasementFormations.Any()
+                    ? nonBasementFormations.Max(f => f.TopBoundary.Average(p => p.Y)) + _newLayerThickness
+                    : 0f;
             }
             else
             {
-                // Add below existing layers (above basement)
-                var bottomPoints = nonBasementFormations.SelectMany(f => f.BottomBoundary);
-                if (bottomPoints.Any())
-                    bottomElevation = bottomPoints.Min(p => p.Y);
-                else
-                    bottomElevation = -500f;
-                topElevation = bottomElevation + _newLayerThickness;
+                topElevation = nonBasementFormations.Any()
+                    ? nonBasementFormations.Min(f => f.BottomBoundary.Average(p => p.Y))
+                    : -500f;
             }
 
-            // Generate horizontal boundaries
             var numPoints = 20;
             for (var i = 0; i <= numPoints; i++)
             {
                 var distance = i / (float)numPoints * profile.TotalDistance;
                 newFormation.TopBoundary.Add(new Vector2(distance, topElevation));
-                newFormation.BottomBoundary.Add(new Vector2(distance, bottomElevation));
+                newFormation.BottomBoundary.Add(new Vector2(distance, topElevation - _newLayerThickness));
             }
 
             section.Formations.Add(newFormation);
@@ -511,7 +626,7 @@ public class TwoDGeologyCreationTools : IDatasetTools
 
         private void GenerateStandardStack(GeologicalMapping.CrossSectionGenerator.CrossSection section)
         {
-            section.Formations.Clear();
+            section.Formations.RemoveAll(f => f.Name != "Basement");
 
             var layers = new[]
             {
@@ -525,7 +640,7 @@ public class TwoDGeologyCreationTools : IDatasetTools
             var profile = section.Profile;
             var currentTop = 0f;
 
-            foreach (var (name, thickness, color) in layers)
+            foreach (var (name, thickness, color) in layers.Reverse())
             {
                 var formation = new GeologicalMapping.CrossSectionGenerator.ProjectedFormation
                 {
@@ -568,23 +683,28 @@ public class TwoDGeologyCreationTools : IDatasetTools
             ImGui.TextWrapped("Apply pre-configured geological scenarios to quickly build complete profiles.");
             ImGui.Separator();
 
-            if (ImGui.Button("Flat-Lying Sediments", new Vector2(-1, 0))) ApplyFlatTemplate(dataset.ProfileData);
+            if (ImGui.Button("Flat-Lying Sediments", new Vector2(-1, 0))) 
+                ApplyFlatTemplate(dataset.ProfileData);
             ImGui.TextWrapped("→ Simple horizontal stratigraphy with no deformation");
             ImGui.Spacing();
 
-            if (ImGui.Button("Gentle Monocline", new Vector2(-1, 0))) ApplyMonoclineTemplate(dataset.ProfileData);
+            if (ImGui.Button("Gentle Monocline", new Vector2(-1, 0))) 
+                ApplyMonoclineTemplate(dataset.ProfileData);
             ImGui.TextWrapped("→ Layers dipping gently to one side");
             ImGui.Spacing();
 
-            if (ImGui.Button("Simple Anticline", new Vector2(-1, 0))) ApplyAnticlineTemplate(dataset.ProfileData);
+            if (ImGui.Button("Simple Anticline", new Vector2(-1, 0))) 
+                ApplyAnticlineTemplate(dataset.ProfileData);
             ImGui.TextWrapped("→ Symmetrical upward fold");
             ImGui.Spacing();
 
-            if (ImGui.Button("Normal Fault Block", new Vector2(-1, 0))) ApplyNormalFaultTemplate(dataset.ProfileData);
+            if (ImGui.Button("Normal Fault Block", new Vector2(-1, 0))) 
+                ApplyNormalFaultTemplate(dataset.ProfileData);
             ImGui.TextWrapped("→ Extensional faulting with downthrown block");
             ImGui.Spacing();
 
-            if (ImGui.Button("Thrust Fault System", new Vector2(-1, 0))) ApplyThrustTemplate(dataset.ProfileData);
+            if (ImGui.Button("Thrust Fault System", new Vector2(-1, 0))) 
+                ApplyThrustTemplate(dataset.ProfileData);
             ImGui.TextWrapped("→ Compressional tectonics with overthrust");
             ImGui.Spacing();
 
@@ -599,7 +719,6 @@ public class TwoDGeologyCreationTools : IDatasetTools
             section.Formations.Clear();
             section.Faults.Clear();
 
-            // Create 4 flat layers
             var layers = new[]
             {
                 ("Sandstone", 0f, -300f, new Vector4(0.9f, 0.8f, 0.5f, 1f)),
@@ -619,7 +738,7 @@ public class TwoDGeologyCreationTools : IDatasetTools
             section.Formations.Clear();
             section.Faults.Clear();
 
-            var dipAngle = 10f * MathF.PI / 180f; // 10 degree dip
+            var dipAngle = 10f * MathF.PI / 180f;
             var layers = new[]
             {
                 ("Sandstone", 0f, 300f, new Vector4(0.9f, 0.8f, 0.5f, 1f)),
@@ -627,8 +746,12 @@ public class TwoDGeologyCreationTools : IDatasetTools
                 ("Limestone", 200f, 400f, new Vector4(0.6f, 0.8f, 0.9f, 1f))
             };
 
-            foreach (var (name, topZ, thickness, color) in layers)
-                AddDippingFormation(section, name, topZ, thickness, dipAngle, color);
+            var currentTop = 0f;
+            foreach (var (name, _, thickness, color) in layers)
+            {
+                AddDippingFormation(section, name, currentTop, thickness, dipAngle, color);
+                currentTop -= thickness;
+            }
 
             Logger.Log("Applied monocline template");
         }
@@ -665,10 +788,8 @@ public class TwoDGeologyCreationTools : IDatasetTools
             section.Formations.Clear();
             section.Faults.Clear();
 
-            // Create flat layers
             ApplyFlatTemplate(section);
 
-            // Add normal fault
             var profile = section.Profile;
             var faultX = profile.TotalDistance * 0.4f;
             var displacement = 200f;
@@ -681,21 +802,23 @@ public class TwoDGeologyCreationTools : IDatasetTools
                 FaultTrace = new List<Vector2>
                 {
                     new(faultX, 0),
-                    new(faultX - 1000, -1732f) // 60 degree dip
+                    new(faultX + 1000 / MathF.Tan(60 * MathF.PI / 180f), -1000f)
                 }
             };
 
             section.Faults.Add(fault);
 
-            // Offset hanging wall
             foreach (var formation in section.Formations)
             {
                 for (var i = 0; i < formation.TopBoundary.Count; i++)
                     if (formation.TopBoundary[i].X > faultX)
-                        formation.TopBoundary[i] -= new Vector2(0, displacement);
+                        formation.TopBoundary[i] = new Vector2(formation.TopBoundary[i].X, 
+                            formation.TopBoundary[i].Y - displacement);
+                
                 for (var i = 0; i < formation.BottomBoundary.Count; i++)
                     if (formation.BottomBoundary[i].X > faultX)
-                        formation.BottomBoundary[i] -= new Vector2(0, displacement);
+                        formation.BottomBoundary[i] = new Vector2(formation.BottomBoundary[i].X,
+                            formation.BottomBoundary[i].Y - displacement);
             }
 
             Logger.Log("Applied normal fault template");
@@ -706,13 +829,13 @@ public class TwoDGeologyCreationTools : IDatasetTools
             section.Formations.Clear();
             section.Faults.Clear();
 
-            // Create flat layers
             ApplyFlatTemplate(section);
 
-            // Add thrust fault
             var profile = section.Profile;
             var faultX = profile.TotalDistance * 0.6f;
             var displacement = 1500f;
+            var heave = displacement * MathF.Cos(30 * MathF.PI / 180f);
+            var throw_ = displacement * MathF.Sin(30 * MathF.PI / 180f);
 
             var fault = new GeologicalMapping.CrossSectionGenerator.ProjectedFault
             {
@@ -722,21 +845,35 @@ public class TwoDGeologyCreationTools : IDatasetTools
                 FaultTrace = new List<Vector2>
                 {
                     new(faultX, 0),
-                    new(faultX - 2600f, -1500f) // 30 degree ramp
+                    new(faultX - 2600f, -1500f)
                 }
             };
 
             section.Faults.Add(fault);
 
-            // Offset hanging wall (left side moves over right)
             foreach (var formation in section.Formations)
             {
-                for (var i = 0; i < formation.TopBoundary.Count; i++)
-                    if (formation.TopBoundary[i].X < faultX)
-                        formation.TopBoundary[i] += new Vector2(displacement, 0);
-                for (var i = 0; i < formation.BottomBoundary.Count; i++)
-                    if (formation.BottomBoundary[i].X < faultX)
-                        formation.BottomBoundary[i] += new Vector2(displacement, 0);
+                var newTop = new List<Vector2>();
+                var newBottom = new List<Vector2>();
+                
+                foreach (var p in formation.TopBoundary)
+                {
+                    if (p.X < faultX)
+                        newTop.Add(new Vector2(p.X + heave, p.Y + throw_));
+                    else
+                        newTop.Add(p);
+                }
+                
+                foreach (var p in formation.BottomBoundary)
+                {
+                    if (p.X < faultX)
+                        newBottom.Add(new Vector2(p.X + heave, p.Y + throw_));
+                    else
+                        newBottom.Add(p);
+                }
+                
+                formation.TopBoundary = newTop;
+                formation.BottomBoundary = newBottom;
             }
 
             Logger.Log("Applied thrust fault template");
@@ -809,7 +946,7 @@ public class TwoDGeologyCreationTools : IDatasetTools
             {
                 var distance = i / (float)numPoints * profile.TotalDistance;
                 var phase = 2f * MathF.PI * (distance - centerX) / wavelength;
-                var foldOffset = amplitude * MathF.Sin(phase);
+                var foldOffset = amplitude * MathF.Cos(phase);
 
                 var topElev = -baseDepth + foldOffset;
                 var bottomElev = topElev - thickness;
