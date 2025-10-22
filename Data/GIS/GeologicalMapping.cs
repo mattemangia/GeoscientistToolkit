@@ -61,6 +61,23 @@ public static class GeologicalMapping
         Mine,
         Borehole
     }
+    public enum FoldStyle
+    {
+        Concentric,      // Concentric folds (parallel folds)
+        Similar,         // Similar folds (convergent) 
+        Chevron,         // Chevron folds (sharp angular)
+        Kink,            // Kink bands
+        Ptygmatic,       // Ptygmatic folds (chaotic)
+        Recumbent,       // Recumbent folds (overturned)
+        Isoclinal,       // Isoclinal folds (tight, parallel limbs)
+        Box,             // Box folds
+        Disharmonic,     // Disharmonic folds
+        Parallel,    // Parallel Fold
+        Tight,           // Tight folds
+        Open,            // Open folds
+        Gentle,          // Gentle folds
+        Closed           // Closed folds
+    }
 
     public class GeologicalFeature : GISFeature
     {
@@ -635,14 +652,15 @@ public static class GeologicalMapping
             public Vector4 Color { get; set; }
             public List<Vector2> TopBoundary { get; set; } = new();
             public List<Vector2> BottomBoundary { get; set; } = new();
+            public FoldStyle? FoldStyle { get; set; }  
         }
-        
         public class ProjectedFault
         {
             public GeologicalFeatureType Type { get; set; }
             public List<Vector2> FaultTrace { get; set; } = new();
             public float Dip { get; set; }
             public string DipDirection { get; set; }
+            public float? Displacement { get; set; } 
         }
         
         /// <summary>

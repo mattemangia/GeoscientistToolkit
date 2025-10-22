@@ -1,4 +1,4 @@
-// GeoscientistToolkit/UI/GIS/GISProperties.cs (Updated)
+// GeoscientistToolkit/UI/GIS/GISProperties.cs (Updated with Basemap Configuration)
 
 using System.Numerics;
 using GeoscientistToolkit.Data;
@@ -25,6 +25,11 @@ public class GISProperties : IDatasetPropertiesRenderer
 
         ImGui.Separator();
 
+        // Basemap Configuration Section
+        DrawBasemapConfiguration(gisDataset);
+
+        ImGui.Separator();
+
         // Tags Section
         DrawTagsSection(gisDataset);
 
@@ -32,23 +37,10 @@ public class GISProperties : IDatasetPropertiesRenderer
         DrawLayerOrdering(gisDataset);
 
         ImGui.Separator();
+
         // Projection Info
         ImGui.Text($"Projection: {gisDataset.Projection.Name}");
         ImGui.Text($"EPSG: {gisDataset.Projection.EPSG}");
-
-        ImGui.Separator();
-
-        // Basemap Info
-        if (gisDataset.BasemapType != BasemapType.None)
-        {
-            ImGui.Text($"Basemap: {gisDataset.BasemapType}");
-            if (!string.IsNullOrEmpty(gisDataset.BasemapPath))
-                ImGui.Text($"Path: {gisDataset.BasemapPath}");
-        }
-        else
-        {
-            ImGui.TextDisabled("No basemap");
-        }
 
         ImGui.Separator();
 
@@ -63,6 +55,133 @@ public class GISProperties : IDatasetPropertiesRenderer
 
         // Available Operations
         DrawAvailableOperations(gisDataset);
+    }
+
+    private void DrawBasemapConfiguration(GISDataset dataset)
+    {
+        if (ImGui.CollapsingHeader("Basemap Configuration", ImGuiTreeNodeFlags.DefaultOpen))
+        {
+            var hasRasterLayers = dataset.Layers.Any(l => l is GISRasterLayer);
+            
+            if (!hasRasterLayers)
+            {
+                ImGui.TextDisabled("No raster layers available for basemap configuration");
+                ImGui.Spacing();
+                ImGui.TextWrapped("Load a GeoTIFF file to use as a basemap, or add the Basemap tag to automatically configure it.");
+                return;
+            }
+
+            // Current basemap status
+            if (dataset.BasemapType != BasemapType.None && !string.IsNullOrEmpty(dataset.ActiveBasemapLayerName))
+            {
+                ImGui.TextColored(new Vector4(0.5f, 1.0f, 0.5f, 1.0f), "â— Active Basemap:");
+                ImGui.SameLine();
+                ImGui.Text(dataset.ActiveBasemapLayerName);
+                
+                ImGui.Text($"Type: {dataset.BasemapType}");
+                
+                if (!string.IsNullOrEmpty(dataset.BasemapPath))
+                {
+                    ImGui.Text("Path:");
+                    ImGui.SameLine();
+                    ImGui.TextDisabled(Path.GetFileName(dataset.BasemapPath));
+                    if (ImGui.IsItemHovered())
+                    {
+                        ImGui.BeginTooltip();
+                        ImGui.Text(dataset.BasemapPath);
+                        ImGui.EndTooltip();
+                    }
+                }
+
+                ImGui.Spacing();
+                if (ImGui.Button("Clear Basemap"))
+                {
+                    dataset.ClearBasemap();
+                }
+                if (ImGui.IsItemHovered())
+                {
+                    ImGui.SetTooltip("Remove basemap configuration. The layer will become a regular raster layer.");
+                }
+            }
+            else
+            {
+                ImGui.TextColored(new Vector4(1.0f, 1.0f, 0.5f, 1.0f), "No basemap configured");
+                ImGui.Spacing();
+            }
+
+            // Raster layer selection for basemap
+            ImGui.Separator();
+            ImGui.Text("Configure Raster Layer as Basemap:");
+            
+            var rasterLayers = dataset.Layers.Where(l => l is GISRasterLayer).ToList();
+            
+            foreach (var layer in rasterLayers)
+            {
+                var isCurrentBasemap = dataset.IsLayerBasemap(layer.Name);
+                
+                ImGui.PushID(layer.Name);
+                
+                if (isCurrentBasemap)
+                {
+                    ImGui.TextColored(new Vector4(0.5f, 1.0f, 0.5f, 1.0f), "â—");
+                    ImGui.SameLine();
+                }
+                else
+                {
+                    ImGui.Text("  ");
+                    ImGui.SameLine();
+                }
+
+                // Show layer color indicator
+                var colorSize = new Vector2(16, 16);
+                var cursorPos = ImGui.GetCursorScreenPos();
+                ImGui.GetWindowDrawList().AddRectFilled(
+                    cursorPos,
+                    cursorPos + colorSize,
+                    ImGui.ColorConvertFloat4ToU32(layer.Color)
+                );
+                ImGui.GetWindowDrawList().AddRect(
+                    cursorPos,
+                    cursorPos + colorSize,
+                    ImGui.ColorConvertFloat4ToU32(new Vector4(0.5f, 0.5f, 0.5f, 1.0f))
+                );
+                ImGui.Dummy(colorSize);
+                ImGui.SameLine();
+
+                ImGui.Text(layer.Name);
+                ImGui.SameLine();
+
+                if (!isCurrentBasemap)
+                {
+                    if (ImGui.SmallButton("Set as Basemap"))
+                    {
+                        dataset.SetLayerAsBasemap(layer.Name);
+                    }
+                    if (ImGui.IsItemHovered())
+                    {
+                        ImGui.SetTooltip($"Use '{layer.Name}' as the background basemap layer");
+                    }
+                }
+                else
+                {
+                    ImGui.TextDisabled("(Active)");
+                }
+
+                ImGui.PopID();
+            }
+
+            ImGui.Spacing();
+            ImGui.Separator();
+            ImGui.TextColored(new Vector4(0.7f, 0.7f, 0.7f, 1.0f), "ℹ About Basemaps:");
+            ImGui.TextWrapped(
+                "Basemaps are drawn as background layers. When a raster layer is configured as a basemap, " +
+                "it will be rendered behind all other visible layers. You can have only one active basemap at a time.");
+            
+            ImGui.Spacing();
+            ImGui.TextWrapped(
+                "Tip: Name your GeoTIFF files with 'basemap', 'background', or 'base_map' to have them " +
+                "automatically configured as basemaps when loaded.");
+        }
     }
 
     private void DrawTagsSection(GISDataset dataset)
@@ -144,7 +263,8 @@ public class GISProperties : IDatasetPropertiesRenderer
             if (capabilities.Any())
             {
                 ImGui.TextColored(new Vector4(0.5f, 1.0f, 1.0f, 1.0f), "Capabilities:");
-                foreach (var cap in capabilities) ImGui.BulletText(cap);
+                foreach (var cap in capabilities) 
+                    ImGui.BulletText(cap);
             }
         }
     }
@@ -165,11 +285,11 @@ public class GISProperties : IDatasetPropertiesRenderer
                 ImGui.Spacing();
 
                 if (ImGui.BeginChild("OperationsList", new Vector2(0, 150), ImGuiChildFlags.Border))
+                {
                     foreach (var operation in operations)
                     {
                         ImGui.BulletText(operation);
 
-                        // Add tooltip for some operations
                         if (ImGui.IsItemHovered())
                         {
                             ImGui.BeginTooltip();
@@ -177,7 +297,7 @@ public class GISProperties : IDatasetPropertiesRenderer
                             ImGui.EndTooltip();
                         }
                     }
-
+                }
                 ImGui.EndChild();
 
                 ImGui.Spacing();
@@ -209,9 +329,20 @@ public class GISProperties : IDatasetPropertiesRenderer
 
                     // Visibility checkbox
                     var visible = layer.IsVisible;
-                    if (ImGui.Checkbox("##vis", ref visible)) layer.IsVisible = visible;
+                    if (ImGui.Checkbox("##vis", ref visible)) 
+                        layer.IsVisible = visible;
 
                     ImGui.SameLine();
+
+                    // Show basemap indicator
+                    var isBasemap = dataset.IsLayerBasemap(layer.Name);
+                    if (isBasemap)
+                    {
+                        ImGui.TextColored(new Vector4(1.0f, 0.8f, 0.3f, 1.0f), "[BG]");
+                        if (ImGui.IsItemHovered())
+                            ImGui.SetTooltip("This layer is configured as the basemap (background)");
+                        ImGui.SameLine();
+                    }
 
                     // Layer color indicator
                     var colorSize = new Vector2(16, 16);
@@ -235,44 +366,50 @@ public class GISProperties : IDatasetPropertiesRenderer
                         ? new Vector4(1.0f, 1.0f, 1.0f, 1.0f)
                         : new Vector4(0.5f, 0.5f, 0.5f, 1.0f);
                     ImGui.PushStyleColor(ImGuiCol.Text, textColor);
-                    ImGui.Text($"{layer.Name} ({layer.Features.Count} features)");
+                    
+                    var layerType = layer is GISRasterLayer ? "Raster" : "Vector";
+                    ImGui.Text($"{layer.Name} ({layerType}, {layer.Features.Count} features)");
+                    
                     ImGui.PopStyleColor();
 
-                    // Right-aligned buttons
-                    ImGui.SameLine();
-                    var availWidth = ImGui.GetContentRegionAvail().X;
-                    ImGui.SetCursorPosX(ImGui.GetCursorPosX() + availWidth - 60);
-
-                    // Move up button
-                    if (i > 0)
+                    // Right-aligned buttons (only for non-basemap layers)
+                    if (!isBasemap)
                     {
-                        if (ImGui.SmallButton("▲"))
+                        ImGui.SameLine();
+                        var availWidth = ImGui.GetContentRegionAvail().X;
+                        ImGui.SetCursorPosX(ImGui.GetCursorPosX() + availWidth - 60);
+
+                        // Move up button
+                        if (i > 0)
                         {
-                            var temp = dataset.Layers[i];
-                            dataset.Layers[i] = dataset.Layers[i - 1];
-                            dataset.Layers[i - 1] = temp;
+                            if (ImGui.SmallButton("â–²"))
+                            {
+                                var temp = dataset.Layers[i];
+                                dataset.Layers[i] = dataset.Layers[i - 1];
+                                dataset.Layers[i - 1] = temp;
+                            }
+                            if (ImGui.IsItemHovered()) 
+                                ImGui.SetTooltip("Move layer up (drawn later/on top)");
+                        }
+                        else
+                        {
+                            ImGui.Dummy(new Vector2(25, 0));
                         }
 
-                        if (ImGui.IsItemHovered()) ImGui.SetTooltip("Move layer up (drawn later/on top)");
-                    }
-                    else
-                    {
-                        ImGui.Dummy(new Vector2(25, 0));
-                    }
+                        ImGui.SameLine();
 
-                    ImGui.SameLine();
-
-                    // Move down button
-                    if (i < dataset.Layers.Count - 1)
-                    {
-                        if (ImGui.SmallButton("▼"))
+                        // Move down button
+                        if (i < dataset.Layers.Count - 1)
                         {
-                            var temp = dataset.Layers[i];
-                            dataset.Layers[i] = dataset.Layers[i + 1];
-                            dataset.Layers[i + 1] = temp;
+                            if (ImGui.SmallButton("â–¼"))
+                            {
+                                var temp = dataset.Layers[i];
+                                dataset.Layers[i] = dataset.Layers[i + 1];
+                                dataset.Layers[i + 1] = temp;
+                            }
+                            if (ImGui.IsItemHovered()) 
+                                ImGui.SetTooltip("Move layer down (drawn earlier/behind)");
                         }
-
-                        if (ImGui.IsItemHovered()) ImGui.SetTooltip("Move layer down (drawn earlier/behind)");
                     }
 
                     ImGui.PopID();
@@ -282,7 +419,7 @@ public class GISProperties : IDatasetPropertiesRenderer
             }
 
             ImGui.Spacing();
-            ImGui.TextDisabled("Tip: Uncheck the visibility checkbox to hide a layer");
+            ImGui.TextDisabled("Tip: Basemap layers are always drawn first (in the background)");
         }
     }
 

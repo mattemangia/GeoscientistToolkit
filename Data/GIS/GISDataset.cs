@@ -38,7 +38,6 @@ public class GISDataset : Dataset, ISerializableDataset
         };
         Layers.Add(defaultLayer);
     }
-
     // Map properties
     public List<GISLayer> Layers { get; set; } = new();
     public GISProjection Projection { get; set; } = new();
@@ -117,10 +116,83 @@ public class GISDataset : Dataset, ISerializableDataset
                     kvp.Key, kvp.Value?.ToString() ?? "")))
         };
     }
-
-    // --- NEW METHOD: CloneWithFeatures ---
     /// <summary>
-    ///     Creates a clone of the dataset's structure but with a new set of features.
+    /// Sets a raster layer as the active basemap.
+    /// This will configure the layer to be drawn as a background and update basemap properties.
+    /// </summary>
+    /// <param name="layerName">The name of the raster layer to use as basemap</param>
+    /// <returns>True if successful, false if layer not found or not a raster layer</returns>
+    public bool SetLayerAsBasemap(string layerName)
+    {
+        var layer = Layers.FirstOrDefault(l => l.Name == layerName);
+        
+        if (layer == null)
+        {
+            Logger.LogWarning($"Layer '{layerName}' not found");
+            return false;
+        }
+
+        if (layer is not GISRasterLayer rasterLayer)
+        {
+            Logger.LogWarning($"Layer '{layerName}' is not a raster layer and cannot be used as basemap");
+            return false;
+        }
+
+        // Configure as basemap
+        ActiveBasemapLayerName = layerName;
+        BasemapType = BasemapType.GeoTIFF;
+        BasemapPath = rasterLayer.RasterPath;
+        
+        // Add basemap tag if not present
+        if (!HasTag(GISTag.Basemap))
+        {
+            AddTag(GISTag.Basemap);
+        }
+
+        Logger.Log($"Configured layer '{layerName}' as active basemap");
+        return true;
+    }
+    /// <summary>
+    /// Clears the active basemap configuration, allowing the layer to be treated as a regular raster.
+    /// </summary>
+    public void ClearBasemap()
+    {
+        if (!string.IsNullOrEmpty(ActiveBasemapLayerName))
+        {
+            Logger.Log($"Cleared basemap configuration for layer '{ActiveBasemapLayerName}'");
+        }
+
+        ActiveBasemapLayerName = null;
+        BasemapType = BasemapType.None;
+        BasemapPath = null;
+        
+        // Remove basemap tag if no other basemap layers exist
+        if (!Layers.Any(l => l.Properties.ContainsKey("IsBasemap") && (bool)l.Properties["IsBasemap"]))
+        {
+            RemoveTag(GISTag.Basemap);
+        }
+    }
+    /// <summary>
+    /// Gets the active basemap layer if configured.
+    /// </summary>
+    public GISRasterLayer GetBasemapLayer()
+    {
+        if (string.IsNullOrEmpty(ActiveBasemapLayerName))
+            return null;
+
+        return Layers.FirstOrDefault(l => l.Name == ActiveBasemapLayerName && l is GISRasterLayer) as GISRasterLayer;
+    }
+    /// <summary>
+    /// Checks if a layer is currently configured as the basemap.
+    /// </summary>
+    public bool IsLayerBasemap(string layerName)
+    {
+        return !string.IsNullOrEmpty(ActiveBasemapLayerName) && 
+               ActiveBasemapLayerName.Equals(layerName, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// Creates a clone of the dataset's structure but with a new set of features.
     /// </summary>
     public GISDataset CloneWithFeatures(List<GISFeature> features, string nameSuffix)
     {
@@ -130,7 +202,7 @@ public class GISDataset : Dataset, ISerializableDataset
             Projection = Projection,
             Tags = Tags | GISTag.Generated
         };
-        newDataset.Layers.Clear(); // Remove the default layer
+        newDataset.Layers.Clear();
 
         var newLayer = new GISLayer
         {
@@ -197,7 +269,6 @@ public class GISDataset : Dataset, ISerializableDataset
     {
         if (string.IsNullOrEmpty(FilePath))
         {
-            // New empty dataset
             AddTag(GISTag.Editable);
             Logger.Log($"Created new GIS dataset: {Name}");
             return;
@@ -257,24 +328,22 @@ public class GISDataset : Dataset, ISerializableDataset
                 if (!HasTag(tag))
                     AddTag(tag);
 
-            // Check for attributes
-            if (Layers.Any(l => l.Features.Any(f => f.Properties.Count > 0)))
-                AddTag(GISTag.Attributed);
-
-            // Check for multi-layer
-            if (Layers.Count > 1)
-                AddTag(GISTag.MultiLayer);
-
-            // Mark as imported
-            AddTag(GISTag.Imported);
-
             UpdateBounds();
-            Logger.Log(
-                $"Loaded GIS dataset: {Name} with {Layers.Count} layers and tags: {string.Join(", ", Tags.GetFlags().Select(t => t.GetDisplayName()))}");
+            if (HasTag(GISTag.Basemap) && Layers.Count > 0)
+            {
+                var rasterLayer = Layers.FirstOrDefault(l => l is GISRasterLayer);
+                if (rasterLayer != null)
+                {
+                    SetLayerAsBasemap(rasterLayer.Name);
+                    Logger.Log($"Auto-configured '{rasterLayer.Name}' as basemap based on Basemap tag");
+                }
+            }
+
+            Logger.Log($"Loaded GIS dataset: {Name} with {Layers.Sum(l => l.Features.Count)} features");
         }
         catch (Exception ex)
         {
-            Logger.LogError($"Failed to load GIS dataset '{Name}': {ex.Message}");
+            Logger.LogError($"Failed to load GIS dataset: {ex.Message}");
             throw;
         }
     }
@@ -652,44 +721,6 @@ public class GISDataset : Dataset, ISerializableDataset
         return coords;
     }
 
-    // --- MODIFIED: LoadGeoTIFF now loads pixel data into a GISRasterLayer ---
-    private void LoadGeoTIFF()
-    {
-        Logger.Log($"Loading GeoTIFF: {FilePath}");
-    
-        var geoTiffData = BasemapManager.Instance.LoadGeoTiff(FilePath);
-        if (geoTiffData == null)
-            throw new InvalidOperationException("Failed to load GeoTIFF data using BasemapManager.");
-    
-        // Convert byte[] RGBA to float[,] for the first band (typical for DEM)
-        var width = geoTiffData.Width;
-        var height = geoTiffData.Height;
-        var pixelData = new float[width, height];
-        for (var y = 0; y < height; y++)
-        for (var x = 0; x < width; x++)
-        {
-            var index = (y * width + x) * 4;
-            pixelData[x, y] = geoTiffData.Data[index]; // Using Red channel as grayscale value
-        }
-    
-        var bounds = new BoundingBox
-        {
-            Min = new Vector2((float)geoTiffData.OriginX,
-                (float)(geoTiffData.OriginY + geoTiffData.PixelHeight * height)),
-            Max = new Vector2((float)(geoTiffData.OriginX + geoTiffData.PixelWidth * width), (float)geoTiffData.OriginY)
-        };
-    
-        var layer = new GISRasterLayer(pixelData, bounds)
-        {
-            Name = Path.GetFileNameWithoutExtension(FilePath),
-            IsVisible = true,
-            RasterPath = FilePath
-        };
-    
-        Layers.Clear();
-        Layers.Add(layer);
-    }
-
     public Geometry ConvertToNTSGeometry(GISFeature feature)
     {
         try
@@ -870,62 +901,99 @@ public class GISDataset : Dataset, ISerializableDataset
 
         return layer;
     }
-
+    /// <summary>
+    /// Loads a GeoTIFF as a raster layer. This does NOT automatically make it a basemap.
+    /// Use SetLayerAsBasemap() to explicitly configure it as a basemap, or add the Basemap tag
+    /// to have it auto-configured during loading.
+    /// </summary>
+    private void LoadGeoTIFF()
+    {
+        Logger.Log($"Loading GeoTIFF: {FilePath}");
+    
+        var geoTiffData = BasemapManager.Instance.LoadGeoTiff(FilePath);
+        if (geoTiffData == null)
+            throw new InvalidOperationException("Failed to load GeoTIFF data using BasemapManager.");
+    
+        // Convert byte[] RGBA to float[,] for the first band (typical for DEM)
+        var width = geoTiffData.Width;
+        var height = geoTiffData.Height;
+        var pixelData = new float[width, height];
+        for (var y = 0; y < height; y++)
+        for (var x = 0; x < width; x++)
+        {
+            var index = (y * width + x) * 4;
+            pixelData[x, y] = geoTiffData.Data[index]; // Using Red channel as grayscale value
+        }
+    
+        var bounds = new BoundingBox
+        {
+            Min = new Vector2((float)geoTiffData.OriginX,
+                (float)(geoTiffData.OriginY + geoTiffData.PixelHeight * height)),
+            Max = new Vector2((float)(geoTiffData.OriginX + geoTiffData.PixelWidth * width), (float)geoTiffData.OriginY)
+        };
+    
+        var layer = new GISRasterLayer(pixelData, bounds)
+        {
+            Name = Path.GetFileNameWithoutExtension(FilePath),
+            IsVisible = true,
+            RasterPath = FilePath
+        };
+    
+        Layers.Clear();
+        Layers.Add(layer);
+        
+        Logger.Log($"Loaded GeoTIFF as raster layer. Use SetLayerAsBasemap() to configure as basemap.");
+    }
     public void UpdateBounds()
     {
-        if (Layers.Count == 0 || Layers.All(l => l.Type == LayerType.Raster && l.Features.Count == 0))
+        if (Layers.Count == 0 || Layers.All(l => l.Features.Count == 0 && l is not GISRasterLayer))
         {
-            // If only raster layers, use their bounds
-            if (Layers.Any(l => l is GISRasterLayer))
+            Bounds = new BoundingBox
             {
-                var rasterLayers = Layers.OfType<GISRasterLayer>().ToList();
-                var minX = rasterLayers.Min(l => l.Bounds.Min.X);
-                var minY = rasterLayers.Min(l => l.Bounds.Min.Y);
-                var maxX = rasterLayers.Max(l => l.Bounds.Max.X);
-                var maxY = rasterLayers.Max(l => l.Bounds.Max.Y);
-                Bounds = new BoundingBox { Min = new Vector2(minX, minY), Max = new Vector2(maxX, maxY) };
+                Min = new Vector2(-180, -90),
+                Max = new Vector2(180, 90)
+            };
+            Center = Vector2.Zero;
+            return;
+        }
+
+        var minX = float.MaxValue;
+        var minY = float.MaxValue;
+        var maxX = float.MinValue;
+        var maxY = float.MinValue;
+
+        foreach (var layer in Layers)
+        {
+            if (layer is GISRasterLayer rasterLayer)
+            {
+                minX = Math.Min(minX, rasterLayer.Bounds.Min.X);
+                minY = Math.Min(minY, rasterLayer.Bounds.Min.Y);
+                maxX = Math.Max(maxX, rasterLayer.Bounds.Max.X);
+                maxY = Math.Max(maxY, rasterLayer.Bounds.Max.Y);
             }
             else
             {
-                Bounds = new BoundingBox { Min = Vector2.Zero, Max = Vector2.One * 100 };
+                foreach (var feature in layer.Features)
+                foreach (var coord in feature.Coordinates)
+                {
+                    minX = Math.Min(minX, coord.X);
+                    minY = Math.Min(minY, coord.Y);
+                    maxX = Math.Max(maxX, coord.X);
+                    maxY = Math.Max(maxY, coord.Y);
+                }
             }
+        }
 
+        if (minX != float.MaxValue)
+        {
+            Bounds = new BoundingBox
+            {
+                Min = new Vector2(minX, minY),
+                Max = new Vector2(maxX, maxY)
+            };
             Center = Bounds.Center;
-            return;
         }
-
-        float minx = float.MaxValue, miny = float.MaxValue;
-        float maxx = float.MinValue, maxy = float.MinValue;
-
-        var allCoords = Layers.Where(l => l.Type == LayerType.Vector).SelectMany(l => l.Features).SelectMany(f => f.Coordinates);
-
-        if (!allCoords.Any())
-        {
-            // Handle case with layers but no vector features
-            Bounds = new BoundingBox { Min = Vector2.Zero, Max = Vector2.One * 100 };
-            Center = Bounds.Center;
-            return;
-        }
-
-
-        foreach (var coord in allCoords)
-        {
-            minx = Math.Min(minx, coord.X);
-            miny = Math.Min(miny, coord.Y);
-            maxx = Math.Max(maxx, coord.X);
-            maxy = Math.Max(maxy, coord.Y);
-        }
-
-        Bounds = new BoundingBox
-        {
-            Min = new Vector2(minx, miny),
-            Max = new Vector2(maxx, maxy)
-        };
-
-        Center = (Bounds.Min + Bounds.Max) * 0.5f;
     }
-
-    // --- EXPORT METHODS REMOVED, a synchronous GeoJSON export is kept for now ---
 
     public void SaveAsGeoJSON(string path)
     {
@@ -1076,11 +1144,10 @@ public class GISLayer
     public Vector4 Color { get; set; } = new(0.2f, 0.5f, 1.0f, 1.0f);
     public float LineWidth { get; set; } = 2.0f;
     public float PointSize { get; set; } = 5.0f;
-    public string RasterPath { get; set; } // For raster layers
+    public string RasterPath { get; set; }
     public Dictionary<string, object> Properties { get; set; } = new();
 }
 
-// --- NEW CLASS: GISRasterLayer ---
 public class GISRasterLayer : GISLayer
 {
     private readonly float[,] _pixelData;
@@ -1112,13 +1179,11 @@ public class GISFeature
     public bool IsSelected { get; set; }
     public string Id { get; set; } = Guid.NewGuid().ToString();
 
-    // --- NEW METHOD: Clone ---
     public GISFeature Clone()
     {
         return new GISFeature
         {
             Type = Type,
-            // Create new collections to ensure a deep copy
             Coordinates = new List<Vector2>(Coordinates),
             Properties = new Dictionary<string, object>(Properties),
             IsSelected = IsSelected,
@@ -1129,7 +1194,7 @@ public class GISFeature
 
 public class GISProjection
 {
-    public string EPSG { get; set; } = "EPSG:4326"; // WGS84 by default
+    public string EPSG { get; set; } = "EPSG:4326";
     public string Name { get; set; } = "WGS 84";
     public ProjectionType Type { get; set; } = ProjectionType.Geographic;
 }

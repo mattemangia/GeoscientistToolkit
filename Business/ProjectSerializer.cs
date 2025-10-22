@@ -11,6 +11,7 @@ using GeoscientistToolkit.Data.Image;
 using GeoscientistToolkit.Data.Mesh3D;
 using GeoscientistToolkit.Data.Pnm;
 using GeoscientistToolkit.Data.Table;
+using GeoscientistToolkit.Data.TwoDGeology;
 using GeoscientistToolkit.Util;
 using AcousticVolumeDatasetDTO = GeoscientistToolkit.Data.AcousticVolumeDatasetDTO;
 
@@ -194,6 +195,8 @@ public class DatasetDTOConverter : JsonConverter<DatasetDTO>
                         options),
                     nameof(PNMDataset) => JsonSerializer.Deserialize<PNMDatasetDTO>(rawText, options),
                     nameof(GISDataset) => JsonSerializer.Deserialize<GISDatasetDTO>(rawText, options),
+                    nameof(TwoDGeologyDataset) => JsonSerializer.Deserialize<TwoDGeologyDatasetDTO>(rawText, options),
+                    
                     _ => throw new JsonException($"Unknown dataset type: {typeName}")
                 };
             }
