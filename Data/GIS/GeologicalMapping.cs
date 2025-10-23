@@ -29,6 +29,7 @@ public static class GeologicalMapping
         Fault_Thrust,
         Fault_Detachment,
         Fault_Undefined,
+        Fault_Strike_Slip,
         
         // Folds
         Anticline,
@@ -76,7 +77,8 @@ public static class GeologicalMapping
         Tight,           // Tight folds
         Open,            // Open folds
         Gentle,          // Gentle folds
-        Closed           // Closed folds
+        Closed,           // Closed folds
+        Anticline
     }
 
     public class GeologicalFeature : GISFeature

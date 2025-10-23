@@ -19,6 +19,7 @@ public class TwoDGeologyEditorTools : IDatasetTools
     private readonly FaultEditor _faultEditor = new();
     private readonly LayerManipulator _layerManipulator = new();
     private readonly StructuralElementCreator _structuralCreator = new();
+    private readonly StructuralRestorationTool _restorationTool = new();
 
     public void Draw(Dataset dataset)
     {
@@ -45,6 +46,12 @@ public class TwoDGeologyEditorTools : IDatasetTools
             if (ImGui.BeginTabItem("Create Structures"))
             {
                 _structuralCreator.Draw(twoDDataset);
+                ImGui.EndTabItem();
+            }
+
+            if (ImGui.BeginTabItem("Structural Restoration"))
+            {
+                _restorationTool.Draw(twoDDataset);
                 ImGui.EndTabItem();
             }
 
@@ -741,6 +748,71 @@ public class TwoDGeologyEditorTools : IDatasetTools
             ThrustSystem,
             FoldPair,
             Detachment
+        }
+    }
+
+    #endregion
+    
+    #region Structural Restoration Tool
+    
+    private class StructuralRestorationTool
+    {
+        private float _restorationPercentage = 0f;
+        private StructuralRestoration _restorationProcessor;
+        private GeologicalMapping.CrossSectionGenerator.CrossSection _lastRestoredSection;
+
+        public void Draw(TwoDGeologyDataset dataset)
+        {
+            if (dataset?.ProfileData == null)
+            {
+                ImGui.TextDisabled("Load a profile to use restoration tools.");
+                return;
+            }
+
+            ImGui.TextWrapped("Unfold and unfault the cross-section to its pre-deformation state. The result is shown as a semi-transparent overlay.");
+            ImGui.Separator();
+
+            // Initialize the processor if the dataset has changed
+            if (_restorationProcessor == null)
+            {
+                _restorationProcessor = new StructuralRestoration(dataset.ProfileData);
+            }
+
+            if (ImGui.SliderFloat("Restoration %", ref _restorationPercentage, 0f, 100f, "%.0f%%"))
+            {
+                _restorationProcessor.Restore(_restorationPercentage);
+                _lastRestoredSection = _restorationProcessor.RestoredSection;
+                dataset.GetViewer()?.SetRestorationData(_lastRestoredSection);
+            }
+
+            ImGui.Separator();
+            
+            if (ImGui.Button("Clear Overlay", new Vector2(-1, 0)))
+            {
+                dataset.GetViewer()?.ClearRestorationData();
+                _restorationPercentage = 0f;
+            }
+            
+            if (ImGui.Button("Apply Restored State", new Vector2(-1, 0)))
+            {
+                if (_lastRestoredSection != null)
+                {
+                    // This is a destructive action, replace the current profile data
+                    dataset.ProfileData = _lastRestoredSection;
+                    dataset.MarkAsModified();
+                    
+                    // Reset tool
+                    _restorationProcessor = new StructuralRestoration(dataset.ProfileData);
+                    _lastRestoredSection = null;
+                    _restorationPercentage = 0f;
+                    dataset.GetViewer()?.ClearRestorationData();
+                    Logger.Log("Applied restored state to the current profile.");
+                }
+            }
+            if (ImGui.IsItemHovered())
+            {
+                ImGui.SetTooltip("Warning: This will replace the current section with the restored version.");
+            }
         }
     }
 

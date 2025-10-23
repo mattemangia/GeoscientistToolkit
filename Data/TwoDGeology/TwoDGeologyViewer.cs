@@ -9,6 +9,7 @@ using Veldrid;
 using static GeoscientistToolkit.Business.GIS.GeologicalMapping;
 using static GeoscientistToolkit.Business.GIS.GeologicalMapping.CrossSectionGenerator;
 using static GeoscientistToolkit.Business.GIS.GeologicalMapping.ProfileGenerator;
+using GeoscientistToolkit.UI.Utils;
 
 namespace GeoscientistToolkit.UI.GIS;
 
@@ -24,23 +25,27 @@ public class TwoDGeologyViewer : IDisposable
     // Undo/Redo system
     public UndoRedoManager UndoRedo { get; } = new();
     
-    // Tools system - NEW: Added reference to tools
+    // Tools system
     public TwoDGeologyTools Tools { get; private set; }
-    
+    public CustomTopographyDrawTool CustomTopographyDrawer { get; private set; }
+
     // View state
     private Vector2 _panOffset = Vector2.Zero;
     private float _zoom = 1.0f;
     private float _verticalExaggeration = 2.0f;
     
-    // Selection state - now managed by tools
+    // Selection state
     private ProjectedFormation _selectedFormation;
     private ProjectedFault _selectedFault;
     private int _selectedVertexIndex = -1;
     private bool _isDraggingVertex = false;
+    private Vector2 _dragStartPos;
     
     // Mouse state
     private bool _isPanning = false;
+    private Vector2 _lastMousePos = Vector2.Zero;
     private Vector2 _lastMouseWorldPos = Vector2.Zero;
+    private bool _wasMouseDown = false;
     
     // Display options
     private bool _showFormations = true;
@@ -48,13 +53,20 @@ public class TwoDGeologyViewer : IDisposable
     private bool _showTopography = true;
     private bool _showGrid = true;
     private bool _showRestorationOverlay = false;
+    private bool _showLayersPanel = true;
     
     // Colors
     private readonly uint _backgroundColor = ImGui.ColorConvertFloat4ToU32(new Vector4(0.1f, 0.1f, 0.12f, 1.0f));
-    private readonly uint _gridColor = ImGui.ColorConvertFloat4ToU32(new Vector4(0.4f, 0.4f, 0.4f, 0.5f));
+    private readonly uint _gridColor = ImGui.ColorConvertFloat4ToU32(new Vector4(0.3f, 0.3f, 0.3f, 0.3f));
     private readonly uint _topographyColor = ImGui.ColorConvertFloat4ToU32(new Vector4(0.3f, 0.5f, 0.2f, 1.0f));
     private readonly uint _faultColor = ImGui.ColorConvertFloat4ToU32(new Vector4(1.0f, 0.0f, 0.0f, 1.0f));
     private readonly uint _selectionColor = ImGui.ColorConvertFloat4ToU32(new Vector4(1.0f, 1.0f, 0.0f, 1.0f));
+    
+    // Layer panel state
+    private int _selectedLayerIndex = -1;
+    private int _selectedFaultIndex = -1;
+    private bool _renamingLayer = false;
+    private string _renameBuffer = "";
     
     public TwoDGeologyViewer(TwoDGeologyDataset dataset)
     {
@@ -65,15 +77,72 @@ public class TwoDGeologyViewer : IDisposable
         _dataset.Load();
         _crossSection = _dataset.ProfileData;
         
+        // Ensure we have a valid profile
+        if (_crossSection == null)
+        {
+            _crossSection = CreateDefaultProfile();
+            _dataset.ProfileData = _crossSection;
+        }
+        
         if (_crossSection != null)
         {
             _verticalExaggeration = _crossSection.VerticalExaggeration;
+            // Initialize view to fit the profile
+            FitViewToProfile();
         }
         
-        // Initialize tools - NEW: Create tools instance
+        // Initialize tools
         Tools = new TwoDGeologyTools(this, _dataset);
+        CustomTopographyDrawer = new CustomTopographyDrawTool();
         
         Logger.Log($"TwoDGeologyViewer initialized for '{dataset.Name}'");
+    }
+    
+    private CrossSection CreateDefaultProfile()
+    {
+        var profile = new CrossSection
+        {
+            Profile = new TopographicProfile
+            {
+                Name = "Default Profile",
+                TotalDistance = 10000f, // 10km
+                MinElevation = -2000f,
+                MaxElevation = 1000f,
+                StartPoint = new Vector2(0, 0),
+                EndPoint = new Vector2(10000f, 0),
+                CreatedAt = DateTime.Now,
+                VerticalExaggeration = 2.0f,
+                Points = new List<ProfilePoint>()
+            },
+            VerticalExaggeration = 2.0f,
+            Formations = new List<ProjectedFormation>(),
+            Faults = new List<ProjectedFault>()
+        };
+        
+        // Generate default flat topography at sea level
+        var numPoints = 50;
+        for (var i = 0; i <= numPoints; i++)
+        {
+            var distance = i / (float)numPoints * profile.Profile.TotalDistance;
+            profile.Profile.Points.Add(new ProfilePoint
+            {
+                Position = new Vector2(distance, 0),
+                Distance = distance,
+                Elevation = 0, // Sea level
+                Features = new List<GeologicalFeature>()
+            });
+        }
+        
+        return profile;
+    }
+    
+    private void FitViewToProfile()
+    {
+        if (_crossSection?.Profile == null) return;
+        
+        // Reset pan and set appropriate zoom to fit the profile
+        _panOffset = Vector2.Zero;
+        _zoom = 0.8f; // Start at 80% to leave some margin
     }
     
     /// <summary>
@@ -102,14 +171,40 @@ public class TwoDGeologyViewer : IDisposable
         if (_crossSection == null)
         {
             ImGui.Text("No cross-section data loaded.");
+            if (ImGui.Button("Create Default Profile"))
+            {
+                _crossSection = CreateDefaultProfile();
+                _dataset.ProfileData = _crossSection;
+                FitViewToProfile();
+            }
             return;
         }
         
         RenderToolbar();
         ImGui.Separator();
+        
+        // Split view between viewport and layers panel
+        var availSize = ImGui.GetContentRegionAvail();
+        var layersPanelWidth = _showLayersPanel ? 250f : 0f;
+        
+        // Main viewport
+        ImGui.BeginChild("Viewport", new Vector2(availSize.X - layersPanelWidth - 5, availSize.Y * 0.75f), ImGuiChildFlags.Border);
         RenderViewport();
-        ImGui.Separator();
+        ImGui.EndChild();
+        
+        // Layers panel (right side)
+        if (_showLayersPanel)
+        {
+            ImGui.SameLine();
+            ImGui.BeginChild("LayersPanel", new Vector2(layersPanelWidth, availSize.Y * 0.75f), ImGuiChildFlags.Border);
+            RenderLayersPanel();
+            ImGui.EndChild();
+        }
+        
+        // Properties panel (bottom)
+        ImGui.BeginChild("Properties", new Vector2(-1, -1), ImGuiChildFlags.Border);
         RenderPropertiesPanel();
+        ImGui.EndChild();
     }
     
     private void RenderToolbar()
@@ -121,13 +216,32 @@ public class TwoDGeologyViewer : IDisposable
         ImGui.TextUnformatted("|");
         ImGui.SameLine();
         
+        if (ImGui.Button("Fit View")) FitViewToProfile();
+        ImGui.SameLine();
+        if (ImGui.Button("Reset Zoom")) _zoom = 1.0f;
+        ImGui.SameLine();
+
+        if (ImGui.Button("Export SVG"))
+        {
+            var exporter = new SvgExporter();
+            var outputFolder = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "GeoscientistToolkitExports");
+            Directory.CreateDirectory(outputFolder);
+            var filePath = Path.Combine(outputFolder, $"{_dataset.Name}_{DateTime.Now:yyyyMMdd_HHmmss}.svg");
+            exporter.SaveToFile(filePath, _crossSection);
+        }
+        ImGui.SameLine();
+        ImGui.TextUnformatted("|");
+        ImGui.SameLine();
+        
+        ImGui.Checkbox("Grid", ref _showGrid);
+        ImGui.SameLine();
+        ImGui.Checkbox("Topography", ref _showTopography);
+        ImGui.SameLine();
         ImGui.Checkbox("Formations", ref _showFormations);
         ImGui.SameLine();
         ImGui.Checkbox("Faults", ref _showFaults);
         ImGui.SameLine();
-        ImGui.Checkbox("Topography", ref _showTopography);
-        ImGui.SameLine();
-        ImGui.Checkbox("Grid", ref _showGrid);
+        ImGui.Checkbox("Layers Panel", ref _showLayersPanel);
         
         if (_restorationData != null)
         {
@@ -150,321 +264,891 @@ public class TwoDGeologyViewer : IDisposable
         ImGui.PopItemWidth();
     }
     
+    private void RenderLayersPanel()
+    {
+        ImGui.Text("Layers");
+        ImGui.Separator();
+        
+        // Add new formation button
+        if (ImGui.Button("Add Formation", new Vector2(-1, 0)))
+        {
+            var newFormation = new ProjectedFormation
+            {
+                Name = $"Formation {_crossSection.Formations.Count + 1}",
+                Color = GetNextFormationColor(),
+                TopBoundary = new List<Vector2>(),
+                BottomBoundary = new List<Vector2>()
+            };
+            
+            // Create default boundaries
+            var profile = _crossSection.Profile;
+            if (profile != null)
+            {
+                var baseElevation = -500f * _crossSection.Formations.Count;
+                for (int i = 0; i < 5; i++)
+                {
+                    var x = i * profile.TotalDistance / 4f;
+                    newFormation.TopBoundary.Add(new Vector2(x, baseElevation));
+                    newFormation.BottomBoundary.Add(new Vector2(x, baseElevation - 300f));
+                }
+            }
+            
+            var cmd = new AddFormationCommand(_crossSection, newFormation);
+            UndoRedo.ExecuteCommand(cmd);
+        }
+        
+        if (ImGui.Button("Add Fault", new Vector2(-1, 0)))
+        {
+            var newFault = new ProjectedFault
+            {
+                Type = GeologicalFeatureType.Fault_Normal,
+                FaultTrace = new List<Vector2>(),
+                Dip = 60f,
+                DipDirection = "East"
+            };
+            
+            // Create default fault trace
+            var profile = _crossSection.Profile;
+            if (profile != null)
+            {
+                var x = profile.TotalDistance / 2f;
+                newFault.FaultTrace.Add(new Vector2(x, profile.MaxElevation));
+                newFault.FaultTrace.Add(new Vector2(x + 500f, profile.MinElevation));
+            }
+            
+            var cmd = new AddFaultCommand(_crossSection, newFault);
+            UndoRedo.ExecuteCommand(cmd);
+        }
+        
+        ImGui.Separator();
+        ImGui.Text("Formations:");
+        
+        // List formations
+        for (int i = _crossSection.Formations.Count - 1; i >= 0; i--)
+        {
+            var formation = _crossSection.Formations[i];
+            var isSelected = (_selectedLayerIndex == i && _selectedFormation == formation);
+            
+            ImGui.PushID($"formation_{i}");
+            
+            // Visibility checkbox
+            var visible = formation.GetIsVisible();
+            if (ImGui.Checkbox("##vis", ref visible))
+            {
+                formation.SetIsVisible(visible);
+            }
+            ImGui.SameLine();
+            
+            // Color indicator
+            ImGui.ColorButton("##color", formation.Color, ImGuiColorEditFlags.NoTooltip | ImGuiColorEditFlags.NoPicker, new Vector2(20, 20));
+            ImGui.SameLine();
+            
+            // Formation name (selectable)
+            if (ImGui.Selectable(formation.Name, isSelected))
+            {
+                _selectedLayerIndex = i;
+                _selectedFormation = formation;
+                _selectedFault = null;
+                _selectedFaultIndex = -1;
+                Tools?.SetSelectedFormation(formation);
+            }
+            
+            // Right-click context menu
+            if (ImGui.BeginPopupContextItem($"formation_context_{i}"))
+            {
+                if (ImGui.MenuItem("Rename"))
+                {
+                    _renamingLayer = true;
+                    _renameBuffer = formation.Name;
+                    _selectedLayerIndex = i;
+                    _selectedFormation = formation;
+                }
+                
+                if (ImGui.MenuItem("Change Color"))
+                {
+                    ImGui.OpenPopup($"color_picker_{i}");
+                }
+                
+                if (ImGui.MenuItem("Move Up") && i < _crossSection.Formations.Count - 1)
+                {
+                    (_crossSection.Formations[i], _crossSection.Formations[i + 1]) = 
+                        (_crossSection.Formations[i + 1], _crossSection.Formations[i]);
+                }
+                
+                if (ImGui.MenuItem("Move Down") && i > 0)
+                {
+                    (_crossSection.Formations[i], _crossSection.Formations[i - 1]) = 
+                        (_crossSection.Formations[i - 1], _crossSection.Formations[i]);
+                }
+                
+                ImGui.Separator();
+                
+                if (ImGui.MenuItem("Delete"))
+                {
+                    var cmd = new RemoveFormationCommand(_crossSection, formation);
+                    UndoRedo.ExecuteCommand(cmd);
+                }
+                
+                ImGui.EndPopup();
+            }
+            
+            // Color picker popup
+            if (ImGui.BeginPopup($"color_picker_{i}"))
+            {
+                var color = formation.Color;
+                if (ImGui.ColorPicker4("Formation Color", ref color))
+                {
+                    formation.Color = color;
+                }
+                ImGui.EndPopup();
+            }
+            
+            ImGui.PopID();
+        }
+        
+        ImGui.Separator();
+        ImGui.Text("Faults:");
+        
+        // List faults
+        for (int i = 0; i < _crossSection.Faults.Count; i++)
+        {
+            var fault = _crossSection.Faults[i];
+            var isSelected = (_selectedFaultIndex == i && _selectedFault == fault);
+            
+            ImGui.PushID($"fault_{i}");
+            
+            var faultName = $"{fault.Type.ToString().Replace("Fault_", "")} Fault {i + 1}";
+            if (ImGui.Selectable(faultName, isSelected))
+            {
+                _selectedFaultIndex = i;
+                _selectedFault = fault;
+                _selectedFormation = null;
+                _selectedLayerIndex = -1;
+                Tools?.SetSelectedFault(fault);
+            }
+            
+            // Right-click context menu
+            if (ImGui.BeginPopupContextItem($"fault_context_{i}"))
+            {
+                if (ImGui.MenuItem("Delete"))
+                {
+                    var cmd = new RemoveFaultCommand(_crossSection, fault);
+                    UndoRedo.ExecuteCommand(cmd);
+                }
+                ImGui.EndPopup();
+            }
+            
+            ImGui.PopID();
+        }
+        
+        // Rename dialog
+        if (_renamingLayer && _selectedFormation != null)
+        {
+            ImGui.OpenPopup("Rename Layer");
+            if (ImGui.BeginPopupModal("Rename Layer"))
+            {
+                ImGui.InputText("New Name", ref _renameBuffer, 256);
+                
+                if (ImGui.Button("OK"))
+                {
+                    var cmd = new RenameFormationCommand(_selectedFormation, _selectedFormation.Name, _renameBuffer);
+                    UndoRedo.ExecuteCommand(cmd);
+                    _renamingLayer = false;
+                    ImGui.CloseCurrentPopup();
+                }
+                ImGui.SameLine();
+                if (ImGui.Button("Cancel"))
+                {
+                    _renamingLayer = false;
+                    ImGui.CloseCurrentPopup();
+                }
+                
+                ImGui.EndPopup();
+            }
+        }
+    }
+    
+    private Vector4 GetNextFormationColor()
+    {
+        // Predefined color palette for geological formations
+        var colors = new[]
+        {
+            new Vector4(0.8f, 0.6f, 0.4f, 0.8f), // Sandstone
+            new Vector4(0.6f, 0.6f, 0.7f, 0.8f), // Shale
+            new Vector4(0.9f, 0.9f, 0.7f, 0.8f), // Limestone
+            new Vector4(0.7f, 0.5f, 0.5f, 0.8f), // Mudstone
+            new Vector4(0.5f, 0.7f, 0.5f, 0.8f), // Siltstone
+            new Vector4(0.9f, 0.7f, 0.5f, 0.8f), // Dolomite
+            new Vector4(0.4f, 0.4f, 0.6f, 0.8f), // Basalt
+            new Vector4(0.8f, 0.8f, 0.8f, 0.8f), // Granite
+        };
+        
+        return colors[_crossSection.Formations.Count % colors.Length];
+    }
+    
     private void RenderViewport()
     {
         var availSize = ImGui.GetContentRegionAvail();
+        if (availSize.X <= 0 || availSize.Y <= 0) return;
+        
         var drawList = ImGui.GetWindowDrawList();
         var screenPos = ImGui.GetCursorScreenPos();
+        
+        // Create clipping rectangle for the viewport
+        drawList.PushClipRect(screenPos, screenPos + availSize);
         
         // Draw background
         drawList.AddRectFilled(screenPos, screenPos + availSize, _backgroundColor);
         
         // FIXED RENDERING ORDER:
-        // 1. Back plane - Grid (background)
+        // 1. Grid (background)
         if (_showGrid) 
             RenderGrid(drawList, screenPos, availSize);
         
-        // 2. Background layer - Topography (drawn first, behind formations)
-        if (_showTopography && _crossSection.Profile != null) 
-            RenderTopography(drawList, screenPos, availSize);
-        
-        // 3. Middle layer - Formations (filled polygons)
+        // 2. Formations (filled polygons)
         if (_showFormations) 
             RenderFormations(drawList, screenPos, availSize, _crossSection.Formations, false);
         
-        // 4. Middle layer - Restoration overlay (if active)
+        // 3. Topography (line on top of formations)
+        if (_showTopography && _crossSection.Profile != null) 
+            RenderTopography(drawList, screenPos, availSize);
+        
+        // 4. Restoration overlay (if active)
         if (_showRestorationOverlay && _restorationData != null) 
             RenderRestorationOverlay(drawList, screenPos, availSize);
         
-        // 5. Foreground layer - Faults (lines on top)
+        // 5. Faults (lines on top)
         if (_showFaults) 
             RenderFaults(drawList, screenPos, availSize, _crossSection.Faults, false);
         
-        // 6. Overlay layer - Selection highlights
+        // 6. Selection highlights
         RenderSelection(drawList, screenPos, availSize);
         
-        // 7. Top overlay - Tools overlay (temp points, measurements, etc.)
+        // 7. Tools overlay (temp points, measurements, etc.)
         Tools?.RenderOverlay(drawList, pos => WorldToScreen(pos, screenPos, availSize));
+        CustomTopographyDrawer?.RenderDrawPreview(drawList, pos => WorldToScreen(pos, screenPos, availSize));
         
-        // Create invisible button for input handling BEFORE handling input
+        // 8. Axes and labels
+        RenderAxes(drawList, screenPos, availSize);
+        
+        drawList.PopClipRect();
+        
+        // Create invisible button for input handling
+        ImGui.SetCursorScreenPos(screenPos);
         ImGui.InvisibleButton("viewport", availSize);
         
         // Handle mouse input
         HandleMouseInput(screenPos, availSize);
     }
     
-    private void HandleMouseInput(Vector2 screenPos, Vector2 availSize)
-    {
-        var io = ImGui.GetIO();
-        
-        // Handle input only when the viewport is hovered
-        if (!ImGui.IsItemHovered())
-        {
-            _isPanning = false;
-            return;
-        }
-
-        var localMousePos = io.MousePos - screenPos;
-        var worldMousePos = ScreenToWorld(localMousePos, availSize);
-        _lastMouseWorldPos = worldMousePos;
-        
-        // Handle keyboard input for tools
-        Tools?.HandleKeyboardInput();
-        
-        // Check if we should handle panning or pass to tools
-        bool isMiddleOrRightDragging = ImGui.IsMouseDragging(ImGuiMouseButton.Middle) || 
-                                       ImGui.IsMouseDragging(ImGuiMouseButton.Right);
-        
-        // Pan with middle or right mouse button
-        if (isMiddleOrRightDragging)
-        {
-            if (!_isPanning)
-            {
-                _isPanning = true;
-            }
-            // Panning sensitivity is increased for a better feel
-            _panOffset += io.MouseDelta * 1.5f; 
-        }
-        else
-        {
-            _isPanning = false;
-            
-            // NEW: Pass mouse input to tools when not panning
-            if (Tools != null)
-            {
-                bool leftClick = ImGui.IsMouseClicked(ImGuiMouseButton.Left);
-                bool rightClick = ImGui.IsMouseClicked(ImGuiMouseButton.Right);
-                bool isDragging = ImGui.IsMouseDragging(ImGuiMouseButton.Left);
-                
-                Tools.HandleMouseInput(worldMousePos, leftClick, rightClick, isDragging);
-                
-                // Update selection state from tools
-                _selectedFormation = Tools.GetSelectedFormation();
-                _selectedFault = Tools.GetSelectedFault();
-            }
-        }
-        
-        // Zoom with mouse wheel, centered on the cursor
-        if (Math.Abs(io.MouseWheel) > 0.001f)
-        {
-            var oldZoom = _zoom;
-            var oldMouseWorld = ScreenToWorld(localMousePos, availSize);
-
-            _zoom *= MathF.Pow(1.1f, io.MouseWheel);
-            _zoom = Math.Clamp(_zoom, 0.1f, 100.0f);
-
-            var newMouseWorld = ScreenToWorld(localMousePos, availSize);
-            
-            // Adjust pan offset to keep the point under the cursor stationary
-            _panOffset.X -= (newMouseWorld.X - oldMouseWorld.X) * (availSize.X / _crossSection.Profile.TotalDistance) * _zoom;
-            _panOffset.Y += (newMouseWorld.Y - oldMouseWorld.Y) * (availSize.Y / (_crossSection.Profile.MaxElevation - _crossSection.Profile.MinElevation)) * _zoom;
-        }
-    }
-    
     private void RenderGrid(ImDrawListPtr drawList, Vector2 screenPos, Vector2 availSize)
     {
         if (_crossSection.Profile == null) return;
         
-        var minWorld = ScreenToWorld(Vector2.Zero, availSize);
-        var maxWorld = ScreenToWorld(availSize, availSize);
+        var profile = _crossSection.Profile;
         
-        // Determine a dynamic grid spacing based on zoom level
-        float xSpacing = MathF.Pow(10, MathF.Ceiling(MathF.Log10((maxWorld.X - minWorld.X) / 10)));
-        float ySpacing = MathF.Pow(10, MathF.Ceiling(MathF.Log10((maxWorld.Y - minWorld.Y) / 10)));
-
-        // Draw vertical grid lines
-        for (float x = MathF.Floor(minWorld.X / xSpacing) * xSpacing; x < maxWorld.X; x += xSpacing)
+        // Determine grid spacing based on zoom level
+        float[] possibleSpacings = { 100, 250, 500, 1000, 2500, 5000, 10000 };
+        var targetPixelSpacing = 50f; // Target spacing in pixels
+        var worldSpacingPerPixel = profile.TotalDistance / (availSize.X * _zoom);
+        var idealSpacing = targetPixelSpacing * worldSpacingPerPixel;
+        
+        float gridSpacingX = possibleSpacings[0];
+        foreach (var spacing in possibleSpacings)
         {
-            var p1 = WorldToScreen(new Vector2(x, minWorld.Y), screenPos, availSize);
-            var p2 = WorldToScreen(new Vector2(x, maxWorld.Y), screenPos, availSize);
-            drawList.AddLine(p1, p2, _gridColor);
+            if (spacing >= idealSpacing)
+            {
+                gridSpacingX = spacing;
+                break;
+            }
         }
-
-        // Draw horizontal grid lines
-        for (float y = MathF.Floor(minWorld.Y / ySpacing) * ySpacing; y < maxWorld.Y; y += ySpacing)
+        
+        // Vertical grid lines
+        for (float x = 0; x <= profile.TotalDistance; x += gridSpacingX)
         {
-            var p1 = WorldToScreen(new Vector2(minWorld.X, y), screenPos, availSize);
-            var p2 = WorldToScreen(new Vector2(maxWorld.X, y), screenPos, availSize);
-            drawList.AddLine(p1, p2, _gridColor);
+            var worldPos = new Vector2(x, profile.MinElevation);
+            var screenPosBottom = WorldToScreen(worldPos, screenPos, availSize);
+            worldPos.Y = profile.MaxElevation;
+            var screenPosTop = WorldToScreen(worldPos, screenPos, availSize);
+            
+            drawList.AddLine(screenPosBottom, screenPosTop, _gridColor, 1.0f);
         }
+        
+        // Horizontal grid lines
+        var elevRange = profile.MaxElevation - profile.MinElevation;
+        var gridSpacingY = GetNiceSpacing(elevRange / 10f);
+        
+        for (float y = profile.MinElevation; y <= profile.MaxElevation; y += gridSpacingY)
+        {
+            var worldPos = new Vector2(0, y);
+            var screenPosLeft = WorldToScreen(worldPos, screenPos, availSize);
+            worldPos.X = profile.TotalDistance;
+            var screenPosRight = WorldToScreen(worldPos, screenPos, availSize);
+            
+            drawList.AddLine(screenPosLeft, screenPosRight, _gridColor, 1.0f);
+        }
+    }
+    
+    private float GetNiceSpacing(float roughSpacing)
+    {
+        float[] niceNumbers = { 1, 2, 5 };
+        var magnitude = MathF.Pow(10, MathF.Floor(MathF.Log10(roughSpacing)));
+        var normalized = roughSpacing / magnitude;
+        
+        foreach (var nice in niceNumbers)
+        {
+            if (normalized <= nice)
+                return nice * magnitude;
+        }
+        
+        return 10 * magnitude;
     }
     
     private void RenderTopography(ImDrawListPtr drawList, Vector2 screenPos, Vector2 availSize)
     {
         var profile = _crossSection.Profile;
-        if (profile.Points.Count < 2) return;
+        if (profile?.Points == null || profile.Points.Count < 2) return;
         
+        // Draw topography as a thick line
         for (int i = 0; i < profile.Points.Count - 1; i++)
         {
-            var p1 = new Vector2(profile.Points[i].Distance, profile.Points[i].Elevation);
-            var p2 = new Vector2(profile.Points[i + 1].Distance, profile.Points[i + 1].Elevation);
+            var worldPos1 = new Vector2(profile.Points[i].Distance, profile.Points[i].Elevation);
+            var worldPos2 = new Vector2(profile.Points[i + 1].Distance, profile.Points[i + 1].Elevation);
             
-            drawList.AddLine(
-                WorldToScreen(p1, screenPos, availSize), 
-                WorldToScreen(p2, screenPos, availSize), 
-                _topographyColor, 3.0f);
+            var screenPos1 = WorldToScreen(worldPos1, screenPos, availSize);
+            var screenPos2 = WorldToScreen(worldPos2, screenPos, availSize);
+            
+            drawList.AddLine(screenPos1, screenPos2, _topographyColor, 3.0f);
+        }
+        
+        // Draw points
+        foreach (var point in profile.Points)
+        {
+            var worldPos = new Vector2(point.Distance, point.Elevation);
+            var screenPosPoint = WorldToScreen(worldPos, screenPos, availSize);
+            drawList.AddCircleFilled(screenPosPoint, 3f, _topographyColor);
         }
     }
     
-    private void RenderFormations(ImDrawListPtr drawList, Vector2 screenPos, Vector2 availSize, List<ProjectedFormation> formations, bool isOverlay)
+    private void RenderFormations(ImDrawListPtr drawList, Vector2 screenPos, Vector2 availSize, 
+        List<ProjectedFormation> formations, bool isOverlay)
     {
+        if (formations == null || formations.Count == 0) return;
+        
+        // Render formations from bottom to top (first in list is bottom)
         foreach (var formation in formations)
         {
+            if (!formation.GetIsVisible()) continue;
             if (formation.TopBoundary.Count < 2 || formation.BottomBoundary.Count < 2) continue;
             
-            var baseColor = formation.Color;
-            var color = isOverlay 
-                ? ImGui.ColorConvertFloat4ToU32(new Vector4(baseColor.X, baseColor.Y, baseColor.Z, 0.4f))
-                : ImGui.ColorConvertFloat4ToU32(baseColor);
+            // Create polygon vertices
+            var vertices = new List<Vector2>();
             
-            // Build polygon: top boundary forward, bottom boundary backward
-            var polygon = new List<Vector2>();
-            foreach (var point in formation.TopBoundary) 
-                polygon.Add(WorldToScreen(point, screenPos, availSize));
-            for (int i = formation.BottomBoundary.Count - 1; i >= 0; i--) 
-                polygon.Add(WorldToScreen(formation.BottomBoundary[i], screenPos, availSize));
+            // Add top boundary points
+            foreach (var point in formation.TopBoundary)
+            {
+                vertices.Add(WorldToScreen(point, screenPos, availSize));
+            }
             
-            if (polygon.Count >= 3)
+            // Add bottom boundary points in reverse
+            for (int i = formation.BottomBoundary.Count - 1; i >= 0; i--)
+            {
+                vertices.Add(WorldToScreen(formation.BottomBoundary[i], screenPos, availSize));
+            }
+            
+            if (vertices.Count >= 3)
             {
                 // Draw filled polygon
-                var firstPoint = polygon[0];
-                drawList.AddConvexPolyFilled(ref firstPoint, polygon.Count, color);
+                var color = ImGui.ColorConvertFloat4ToU32(formation.Color);
+                if (isOverlay) color = (color & 0x00FFFFFF) | 0x80000000; // Make semi-transparent
                 
-                // Draw outline for better visibility
-                var outlineColor = ImGui.ColorConvertFloat4ToU32(new Vector4(0.2f, 0.2f, 0.2f, 0.5f));
-                for (int i = 0; i < polygon.Count; i++)
+                drawList.AddConvexPolyFilled(ref vertices.ToArray()[0], vertices.Count, color);
+                
+                // Draw outline
+                var outlineColor = ImGui.ColorConvertFloat4ToU32(new Vector4(0, 0, 0, 0.5f));
+                for (int i = 0; i < formation.TopBoundary.Count - 1; i++)
                 {
-                    var nextIdx = (i + 1) % polygon.Count;
-                    drawList.AddLine(polygon[i], polygon[nextIdx], outlineColor, 1.0f);
+                    drawList.AddLine(
+                        WorldToScreen(formation.TopBoundary[i], screenPos, availSize),
+                        WorldToScreen(formation.TopBoundary[i + 1], screenPos, availSize),
+                        outlineColor, 1.0f);
+                }
+                
+                for (int i = 0; i < formation.BottomBoundary.Count - 1; i++)
+                {
+                    drawList.AddLine(
+                        WorldToScreen(formation.BottomBoundary[i], screenPos, availSize),
+                        WorldToScreen(formation.BottomBoundary[i + 1], screenPos, availSize),
+                        outlineColor, 1.0f);
                 }
             }
         }
     }
     
-    private void RenderFaults(ImDrawListPtr drawList, Vector2 screenPos, Vector2 availSize, List<ProjectedFault> faults, bool isOverlay)
+    private void RenderFaults(ImDrawListPtr drawList, Vector2 screenPos, Vector2 availSize,
+        List<ProjectedFault> faults, bool isOverlay)
     {
-        var color = isOverlay
-            ? ImGui.ColorConvertFloat4ToU32(new Vector4(1,0,0,0.5f))
-            : _faultColor;
-
+        if (faults == null) return;
+        
         foreach (var fault in faults)
         {
             if (fault.FaultTrace.Count < 2) continue;
             
+            var color = isOverlay ? 
+                ImGui.ColorConvertFloat4ToU32(new Vector4(1.0f, 0.5f, 0.0f, 0.5f)) : 
+                _faultColor;
+            
             for (int i = 0; i < fault.FaultTrace.Count - 1; i++)
             {
-                drawList.AddLine(
-                    WorldToScreen(fault.FaultTrace[i], screenPos, availSize), 
-                    WorldToScreen(fault.FaultTrace[i + 1], screenPos, availSize), 
-                    color, 3.0f);
+                var screenPos1 = WorldToScreen(fault.FaultTrace[i], screenPos, availSize);
+                var screenPos2 = WorldToScreen(fault.FaultTrace[i + 1], screenPos, availSize);
+                
+                drawList.AddLine(screenPos1, screenPos2, color, 3.0f);
+            }
+            
+            // Draw fault type indicator
+            if (fault.FaultTrace.Count >= 2)
+            {
+                var midPoint = fault.FaultTrace[fault.FaultTrace.Count / 2];
+                var screenMid = WorldToScreen(midPoint, screenPos, availSize);
+                
+                // Draw appropriate symbol based on fault type
+                switch (fault.Type)
+                {
+                    case GeologicalFeatureType.Fault_Normal:
+                        // Draw downward arrows
+                        drawList.AddLine(screenMid, screenMid + new Vector2(-10, 10), color, 2.0f);
+                        drawList.AddLine(screenMid, screenMid + new Vector2(10, 10), color, 2.0f);
+                        break;
+                    case GeologicalFeatureType.Fault_Reverse:
+                        // Draw upward arrows
+                        drawList.AddLine(screenMid, screenMid + new Vector2(-10, -10), color, 2.0f);
+                        drawList.AddLine(screenMid, screenMid + new Vector2(10, -10), color, 2.0f);
+                        break;
+                    case GeologicalFeatureType.Fault_Strike_Slip:
+                        // Draw horizontal arrows
+                        drawList.AddLine(screenMid + new Vector2(-15, 0), screenMid + new Vector2(-5, 0), color, 2.0f);
+                        drawList.AddLine(screenMid + new Vector2(5, 0), screenMid + new Vector2(15, 0), color, 2.0f);
+                        break;
+                }
             }
         }
     }
     
     private void RenderRestorationOverlay(ImDrawListPtr drawList, Vector2 screenPos, Vector2 availSize)
     {
+        if (_restorationData == null) return;
+        
+        // Render restored formations with transparency
         RenderFormations(drawList, screenPos, availSize, _restorationData.Formations, true);
         RenderFaults(drawList, screenPos, availSize, _restorationData.Faults, true);
     }
     
     private void RenderSelection(ImDrawListPtr drawList, Vector2 screenPos, Vector2 availSize)
     {
+        // Highlight selected formation
         if (_selectedFormation != null)
         {
-            // Highlight boundaries and vertices of the selected formation
-            var top = _selectedFormation.TopBoundary;
-            var bottom = _selectedFormation.BottomBoundary;
-
-            for (int i = 0; i < top.Count - 1; i++)
-                drawList.AddLine(WorldToScreen(top[i], screenPos, availSize), WorldToScreen(top[i+1], screenPos, availSize), _selectionColor, 3.0f);
-            foreach(var p in top) 
-                drawList.AddCircleFilled(WorldToScreen(p, screenPos, availSize), 5f, _selectionColor);
-
-            for (int i = 0; i < bottom.Count - 1; i++)
-                drawList.AddLine(WorldToScreen(bottom[i], screenPos, availSize), WorldToScreen(bottom[i+1], screenPos, availSize), _selectionColor, 3.0f);
-            foreach(var p in bottom) 
-                drawList.AddCircleFilled(WorldToScreen(p, screenPos, availSize), 5f, _selectionColor);
+            // Draw thicker outlines for selected formation
+            if (_selectedFormation.TopBoundary.Count >= 2)
+            {
+                for (int i = 0; i < _selectedFormation.TopBoundary.Count - 1; i++)
+                {
+                    drawList.AddLine(
+                        WorldToScreen(_selectedFormation.TopBoundary[i], screenPos, availSize),
+                        WorldToScreen(_selectedFormation.TopBoundary[i + 1], screenPos, availSize),
+                        _selectionColor, 3.0f);
+                }
+            }
+            
+            if (_selectedFormation.BottomBoundary.Count >= 2)
+            {
+                for (int i = 0; i < _selectedFormation.BottomBoundary.Count - 1; i++)
+                {
+                    drawList.AddLine(
+                        WorldToScreen(_selectedFormation.BottomBoundary[i], screenPos, availSize),
+                        WorldToScreen(_selectedFormation.BottomBoundary[i + 1], screenPos, availSize),
+                        _selectionColor, 3.0f);
+                }
+            }
+            
+            // Draw vertex handles
+            foreach (var vertex in _selectedFormation.TopBoundary)
+            {
+                var screenVertex = WorldToScreen(vertex, screenPos, availSize);
+                drawList.AddCircle(screenVertex, 6f, _selectionColor, 12, 2.0f);
+            }
+            
+            foreach (var vertex in _selectedFormation.BottomBoundary)
+            {
+                var screenVertex = WorldToScreen(vertex, screenPos, availSize);
+                drawList.AddCircle(screenVertex, 6f, _selectionColor, 12, 2.0f);
+            }
         }
         
-        if (_selectedFault != null)
+        // Highlight selected fault
+        if (_selectedFault != null && _selectedFault.FaultTrace.Count >= 2)
         {
-            // Highlight trace and vertices of the selected fault
-            var trace = _selectedFault.FaultTrace;
-            for (int i = 0; i < trace.Count - 1; i++)
-                drawList.AddLine(WorldToScreen(trace[i], screenPos, availSize), WorldToScreen(trace[i+1], screenPos, availSize), _selectionColor, 3.0f);
-            foreach(var p in trace) 
-                drawList.AddCircleFilled(WorldToScreen(p, screenPos, availSize), 5f, _selectionColor);
+            for (int i = 0; i < _selectedFault.FaultTrace.Count - 1; i++)
+            {
+                drawList.AddLine(
+                    WorldToScreen(_selectedFault.FaultTrace[i], screenPos, availSize),
+                    WorldToScreen(_selectedFault.FaultTrace[i + 1], screenPos, availSize),
+                    _selectionColor, 5.0f);
+            }
+            
+            // Draw vertex handles
+            foreach (var vertex in _selectedFault.FaultTrace)
+            {
+                var screenVertex = WorldToScreen(vertex, screenPos, availSize);
+                drawList.AddCircle(screenVertex, 6f, _selectionColor, 12, 2.0f);
+            }
         }
+    }
+    
+    private void RenderAxes(ImDrawListPtr drawList, Vector2 screenPos, Vector2 availSize)
+    {
+        if (_crossSection.Profile == null) return;
+        
+        var profile = _crossSection.Profile;
+        var textColor = ImGui.ColorConvertFloat4ToU32(new Vector4(0.8f, 0.8f, 0.8f, 1.0f));
+        
+        // Draw distance labels
+        var distanceStep = GetNiceSpacing(profile.TotalDistance / 5f);
+        for (float x = 0; x <= profile.TotalDistance; x += distanceStep)
+        {
+            var worldPos = new Vector2(x, profile.MinElevation);
+            var screenPosLabel = WorldToScreen(worldPos, screenPos, availSize);
+            screenPosLabel.Y = screenPos.Y + availSize.Y - 20;
+            
+            var label = $"{x:F0}m";
+            drawList.AddText(screenPosLabel - new Vector2(ImGui.CalcTextSize(label).X / 2f, 0), 
+                textColor, label);
+        }
+        
+        // Draw elevation labels
+        var elevStep = GetNiceSpacing((profile.MaxElevation - profile.MinElevation) / 5f);
+        for (float y = profile.MinElevation; y <= profile.MaxElevation; y += elevStep)
+        {
+            var worldPos = new Vector2(0, y);
+            var screenPosLabel = WorldToScreen(worldPos, screenPos, availSize);
+            screenPosLabel.X = screenPos.X + 5;
+            
+            var label = $"{y:F0}m";
+            drawList.AddText(screenPosLabel, textColor, label);
+        }
+    }
+    
+    private void HandleMouseInput(Vector2 screenPos, Vector2 availSize)
+    {
+        var io = ImGui.GetIO();
+        
+        // Check if viewport is hovered
+        if (!ImGui.IsItemHovered())
+        {
+            _isPanning = false;
+            _isDraggingVertex = false;
+            return;
+        }
+        
+        var localMousePos = io.MousePos - screenPos;
+        var worldMousePos = ScreenToWorld(localMousePos, availSize);
+        
+        // Handle zooming with mouse wheel
+        if (io.MouseWheel != 0)
+        {
+            var zoomDelta = io.MouseWheel * 0.1f;
+            var oldZoom = _zoom;
+            _zoom = Math.Clamp(_zoom + zoomDelta, 0.1f, 10.0f);
+            
+            // Zoom towards mouse position
+            if (_zoom != oldZoom)
+            {
+                var zoomRatio = _zoom / oldZoom;
+                var mouseOffset = localMousePos - availSize / 2f;
+                _panOffset = _panOffset * zoomRatio - mouseOffset * (zoomRatio - 1f);
+            }
+        }
+        
+        // Handle panning with middle mouse or right mouse
+        if (ImGui.IsMouseDragging(ImGuiMouseButton.Middle) || 
+            (ImGui.IsMouseDragging(ImGuiMouseButton.Right) && !Tools.IsActive() && !CustomTopographyDrawer.IsDrawing))
+        {
+            _panOffset += io.MouseDelta;
+            _isPanning = true;
+        }
+        else
+        {
+            _isPanning = false;
+        }
+        
+        // Handle left mouse button for tools or selection
+        if (ImGui.IsMouseClicked(ImGuiMouseButton.Left))
+        {
+            _lastMousePos = localMousePos;
+            _dragStartPos = worldMousePos;
+            
+            // Check if clicking on a vertex
+            if (_selectedFormation != null)
+            {
+                _selectedVertexIndex = FindNearestVertex(worldMousePos, _selectedFormation);
+                if (_selectedVertexIndex >= 0)
+                {
+                    _isDraggingVertex = true;
+                }
+            }
+            else if (_selectedFault != null)
+            {
+                _selectedVertexIndex = FindNearestFaultVertex(worldMousePos, _selectedFault);
+                if (_selectedVertexIndex >= 0)
+                {
+                    _isDraggingVertex = true;
+                }
+            }
+        }
+        
+        // Handle vertex dragging
+        if (_isDraggingVertex && ImGui.IsMouseDragging(ImGuiMouseButton.Left))
+        {
+            if (_selectedFormation != null && _selectedVertexIndex >= 0)
+            {
+                // Determine if it's a top or bottom boundary vertex
+                if (_selectedVertexIndex < _selectedFormation.TopBoundary.Count)
+                {
+                    _selectedFormation.TopBoundary[_selectedVertexIndex] = worldMousePos;
+                }
+                else
+                {
+                    var bottomIndex = _selectedVertexIndex - _selectedFormation.TopBoundary.Count;
+                    if (bottomIndex < _selectedFormation.BottomBoundary.Count)
+                    {
+                        _selectedFormation.BottomBoundary[bottomIndex] = worldMousePos;
+                    }
+                }
+            }
+            else if (_selectedFault != null && _selectedVertexIndex >= 0 && 
+                     _selectedVertexIndex < _selectedFault.FaultTrace.Count)
+            {
+                _selectedFault.FaultTrace[_selectedVertexIndex] = worldMousePos;
+            }
+        }
+        
+        if (ImGui.IsMouseReleased(ImGuiMouseButton.Left))
+        {
+            _isDraggingVertex = false;
+            _selectedVertexIndex = -1;
+        }
+        
+        // Pass input to tools if not handling other operations
+        if (!_isPanning && !_isDraggingVertex)
+        {
+            var leftClick = ImGui.IsMouseClicked(ImGuiMouseButton.Left);
+            var rightClick = ImGui.IsMouseClicked(ImGuiMouseButton.Right);
+            var isDragging = ImGui.IsMouseDragging(ImGuiMouseButton.Left);
+            var isMouseDown = ImGui.IsMouseDown(ImGuiMouseButton.Left);
+
+            if (CustomTopographyDrawer.IsDrawing)
+            {
+                CustomTopographyDrawer.HandleDrawingInput(worldMousePos, isMouseDown, leftClick);
+            }
+            else
+            {
+                 Tools?.HandleMouseInput(worldMousePos, leftClick, rightClick, isDragging);
+            }
+        }
+        
+        // Handle keyboard shortcuts
+        Tools?.HandleKeyboardInput();
+        
+        // Store mouse position for next frame
+        _lastMouseWorldPos = worldMousePos;
+    }
+    
+    private int FindNearestVertex(Vector2 worldPos, ProjectedFormation formation)
+    {
+        const float threshold = 100f; // World units
+        float minDist = threshold;
+        int nearestIndex = -1;
+        
+        // Check top boundary vertices
+        for (int i = 0; i < formation.TopBoundary.Count; i++)
+        {
+            var dist = Vector2.Distance(worldPos, formation.TopBoundary[i]);
+            if (dist < minDist)
+            {
+                minDist = dist;
+                nearestIndex = i;
+            }
+        }
+        
+        // Check bottom boundary vertices
+        for (int i = 0; i < formation.BottomBoundary.Count; i++)
+        {
+            var dist = Vector2.Distance(worldPos, formation.BottomBoundary[i]);
+            if (dist < minDist)
+            {
+                minDist = dist;
+                nearestIndex = formation.TopBoundary.Count + i;
+            }
+        }
+        
+        return nearestIndex;
+    }
+    
+    private int FindNearestFaultVertex(Vector2 worldPos, ProjectedFault fault)
+    {
+        const float threshold = 100f; // World units
+        float minDist = threshold;
+        int nearestIndex = -1;
+        
+        for (int i = 0; i < fault.FaultTrace.Count; i++)
+        {
+            var dist = Vector2.Distance(worldPos, fault.FaultTrace[i]);
+            if (dist < minDist)
+            {
+                minDist = dist;
+                nearestIndex = i;
+            }
+        }
+        
+        return nearestIndex;
     }
     
     private void RenderPropertiesPanel()
     {
-        ImGui.Text("Properties");
-        
         if (_selectedFormation != null)
         {
-            ImGui.Text($"Formation: {_selectedFormation.Name}");
+            ImGui.Text($"Selected Formation: {_selectedFormation.Name}");
+            ImGui.Separator();
             
+            // Name
+            var name = _selectedFormation.Name;
+            if (ImGui.InputText("Name", ref name, 256))
+            {
+                _selectedFormation.Name = name;
+            }
+            
+            // Color
             var color = _selectedFormation.Color;
             if (ImGui.ColorEdit4("Color", ref color))
             {
-                var cmd = new ChangeFormationColorCommand(_selectedFormation, _selectedFormation.Color, color);
-                UndoRedo.ExecuteCommand(cmd);
+                _selectedFormation.Color = color;
             }
             
-            var name = _selectedFormation.Name ?? "";
-            if (ImGui.InputText("Name", ref name, 256, ImGuiInputTextFlags.EnterReturnsTrue))
+            // Fold style
+            var hasFold = _selectedFormation.FoldStyle.HasValue;
+            if (ImGui.Checkbox("Has Fold", ref hasFold))
             {
-                var cmd = new RenameFormationCommand(_selectedFormation, _selectedFormation.Name, name);
-                UndoRedo.ExecuteCommand(cmd);
+                _selectedFormation.FoldStyle = hasFold ? FoldStyle.Anticline : null;
             }
+            
+            if (_selectedFormation.FoldStyle.HasValue)
+            {
+                var foldStyle = _selectedFormation.FoldStyle.Value;
+                if (ImGui.BeginCombo("Fold Type", foldStyle.ToString()))
+                {
+                    foreach (var style in Enum.GetValues<FoldStyle>())
+                    {
+                        if (ImGui.Selectable(style.ToString(), foldStyle == style))
+                        {
+                            _selectedFormation.FoldStyle = style;
+                        }
+                    }
+                    ImGui.EndCombo();
+                }
+            }
+            
+            ImGui.Separator();
+            ImGui.Text($"Top Boundary Points: {_selectedFormation.TopBoundary.Count}");
+            ImGui.Text($"Bottom Boundary Points: {_selectedFormation.BottomBoundary.Count}");
         }
         else if (_selectedFault != null)
         {
-            ImGui.Text($"Fault: {_selectedFault.Type.ToString().Replace("Fault_", "")}");
-            ImGui.Text($"Dip: {_selectedFault.Dip:F1}°");
+            ImGui.Text($"Selected Fault");
+            ImGui.Separator();
             
-            var disp = _selectedFault.Displacement ?? 0f;
-            if (ImGui.InputFloat("Displacement", ref disp, 10f, 100f, "%.1f m", ImGuiInputTextFlags.EnterReturnsTrue))
+            // Fault type
+            var faultType = _selectedFault.Type;
+            if (ImGui.BeginCombo("Type", faultType.ToString().Replace("Fault_", "")))
             {
-                var cmd = new ModifyFaultPropertiesCommand(_selectedFault, _selectedFault.Dip, _selectedFault.Dip, "", "", _selectedFault.Displacement, disp);
-                UndoRedo.ExecuteCommand(cmd);
+                foreach (var type in Enum.GetValues<GeologicalFeatureType>().Where(t => t.ToString().Contains("Fault")))
+                {
+                    if (ImGui.Selectable(type.ToString().Replace("Fault_", ""), faultType == type))
+                    {
+                        _selectedFault.Type = type;
+                    }
+                }
+                ImGui.EndCombo();
             }
+            
+            // Dip
+            var dip = _selectedFault.Dip;
+            if (ImGui.SliderFloat("Dip", ref dip, 0f, 90f, "%.1f°"))
+            {
+                _selectedFault.Dip = dip;
+            }
+            
+            // Dip direction
+            var dipDir = _selectedFault.DipDirection ?? "";
+            if (ImGui.InputText("Dip Direction", ref dipDir, 256))
+            {
+                _selectedFault.DipDirection = dipDir;
+            }
+            
+            // Displacement
+            var hasDisplacement = _selectedFault.Displacement.HasValue;
+            if (ImGui.Checkbox("Has Displacement", ref hasDisplacement))
+            {
+                _selectedFault.Displacement = hasDisplacement ? 100f : null;
+            }
+            
+            if (_selectedFault.Displacement.HasValue)
+            {
+                var displacement = _selectedFault.Displacement.Value;
+                if (ImGui.InputFloat("Displacement (m)", ref displacement))
+                {
+                    _selectedFault.Displacement = displacement;
+                }
+            }
+            
+            ImGui.Separator();
+            ImGui.Text($"Trace Points: {_selectedFault.FaultTrace.Count}");
         }
         else
         {
-            ImGui.Text("No selection");
+            ImGui.TextDisabled("No feature selected");
+            ImGui.Separator();
+            ImGui.TextWrapped("Click on a formation or fault to select it, or use the Layers Panel to manage features.");
         }
     }
     
     public Vector2 WorldToScreen(Vector2 worldPos, Vector2 screenPos, Vector2 availSize)
     {
-        if (_crossSection.Profile == null) return screenPos;
+        if (_crossSection.Profile == null || _zoom == 0) return screenPos;
         
         var profile = _crossSection.Profile;
         
-        // Define world space boundaries
+        // Normalize world coordinates to [0, 1]
         float worldXMin = 0;
         float worldXMax = profile.TotalDistance;
         float worldYMin = profile.MinElevation;
         float worldYMax = profile.MaxElevation;
         
-        // Normalize world coordinates to a 0-1 range
         float normX = (worldPos.X - worldXMin) / (worldXMax - worldXMin);
         float normY = (worldPos.Y - worldYMin) / (worldYMax - worldYMin);
         
-        // Apply vertical exaggeration to the normalized Y
+        // Apply vertical exaggeration
         normY *= _verticalExaggeration;
         
-        // Scale to the viewport size
+        // Scale to viewport size with zoom
         float viewX = normX * availSize.X * _zoom;
         float viewY = normY * availSize.Y * _zoom;
         
         // Apply pan offset
-        viewX -= _panOffset.X;
-        viewY -= _panOffset.Y;
+        viewX += _panOffset.X;
+        viewY += _panOffset.Y;
         
-        // Invert Y-axis for screen coordinates (0,0 is top-left)
+        // Invert Y-axis for screen coordinates
         return screenPos + new Vector2(viewX, availSize.Y - viewY);
     }
     
@@ -478,8 +1162,8 @@ public class TwoDGeologyViewer : IDisposable
         Vector2 viewPos = new Vector2(localScreenPos.X, availSize.Y - localScreenPos.Y);
         
         // Remove pan offset
-        viewPos.X += _panOffset.X;
-        viewPos.Y += _panOffset.Y;
+        viewPos.X -= _panOffset.X;
+        viewPos.Y -= _panOffset.Y;
         
         // Un-scale from viewport size
         float normX = viewPos.X / (availSize.X * _zoom);
@@ -489,7 +1173,7 @@ public class TwoDGeologyViewer : IDisposable
         normY /= _verticalExaggeration;
         
         // Un-normalize to get world coordinates
-        float worldX = normX * (profile.TotalDistance) + 0;
+        float worldX = normX * profile.TotalDistance;
         float worldY = normY * (profile.MaxElevation - profile.MinElevation) + profile.MinElevation;
         
         return new Vector2(worldX, worldY);
@@ -497,7 +1181,7 @@ public class TwoDGeologyViewer : IDisposable
     
     public void Dispose()
     {
-        // No unmanaged resources to dispose in this class
+        // No unmanaged resources to dispose
     }
     
     #region Command Implementations
@@ -606,24 +1290,6 @@ public class TwoDGeologyViewer : IDisposable
         public string Description => $"Remove Fault ({_fault.Type.ToString().Replace("Fault_", "")})";
     }
     
-    public class ChangeFormationColorCommand : ICommand
-    {
-        private readonly ProjectedFormation _formation;
-        private readonly Vector4 _oldColor;
-        private readonly Vector4 _newColor;
-        
-        public ChangeFormationColorCommand(ProjectedFormation formation, Vector4 oldColor, Vector4 newColor)
-        {
-            _formation = formation;
-            _oldColor = oldColor;
-            _newColor = newColor;
-        }
-        
-        public void Execute() => _formation.Color = _newColor;
-        public void Undo() => _formation.Color = _oldColor;
-        public string Description => $"Change Color of '{_formation.Name}'";
-    }
-    
     public class RenameFormationCommand : ICommand
     {
         private readonly ProjectedFormation _formation;
@@ -642,37 +1308,21 @@ public class TwoDGeologyViewer : IDisposable
         public string Description => $"Rename Formation from '{_oldName}' to '{_newName}'";
     }
     
-    public class ModifyFaultPropertiesCommand : ICommand
+    #endregion
+}
+
+// Extension to support visibility in formations
+public static class FormationExtensions
+{
+    private static readonly Dictionary<ProjectedFormation, bool> _visibilityMap = new();
+    
+    public static bool GetIsVisible(this ProjectedFormation formation)
     {
-        private readonly ProjectedFault _fault;
-        private readonly float _oldDip, _newDip;
-        private readonly string _oldDipDirection, _newDipDirection;
-        private readonly float? _oldDisplacement, _newDisplacement;
-        
-        public ModifyFaultPropertiesCommand(ProjectedFault fault, float oldDip, float newDip, string oldDipDirection, string newDipDirection, float? oldDisplacement, float? newDisplacement)
-        {
-            _fault = fault;
-            _oldDip = oldDip; _newDip = newDip;
-            _oldDipDirection = oldDipDirection; _newDipDirection = newDipDirection;
-            _oldDisplacement = oldDisplacement; _newDisplacement = newDisplacement;
-        }
-        
-        public void Execute()
-        {
-            _fault.Dip = _newDip;
-            _fault.DipDirection = _newDipDirection;
-            _fault.Displacement = _newDisplacement;
-        }
-        
-        public void Undo()
-        {
-            _fault.Dip = _oldDip;
-            _fault.DipDirection = _oldDipDirection;
-            _fault.Displacement = _oldDisplacement;
-        }
-        
-        public string Description => $"Modify Fault Properties";
+        return _visibilityMap.TryGetValue(formation, out var visible) ? visible : true;
     }
     
-    #endregion
+    public static void SetIsVisible(this ProjectedFormation formation, bool value)
+    {
+        _visibilityMap[formation] = value;
+    }
 }

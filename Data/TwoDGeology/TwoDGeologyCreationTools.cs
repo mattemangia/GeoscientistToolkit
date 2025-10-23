@@ -240,11 +240,9 @@ public class TwoDGeologyCreationTools : IDatasetTools
 
     private class TopographyEditorTool
     {
-        private int _selectedPointIndex = -1;
-        private float _amplitude = 200f;
-        private string _presetName = "Flat";
-        private float _wavelength = 2000f;
-
+        private TopographyPresets.PresetType _selectedPreset = TopographyPresets.PresetType.Flat;
+        private float _presetAmplitude = 1.0f;
+        
         public void Draw(TwoDGeologyDataset dataset)
         {
             if (dataset.ProfileData?.Profile == null)
@@ -255,112 +253,65 @@ public class TwoDGeologyCreationTools : IDatasetTools
 
             var profile = dataset.ProfileData.Profile;
 
-            ImGui.TextWrapped("Edit the topographic surface of your profile.");
+            ImGui.TextWrapped("Edit the topographic surface of your profile using presets or by drawing interactively.");
             ImGui.Separator();
 
-            ImGui.Text($"Points: {profile.Points.Count}");
-            ImGui.Spacing();
+            ImGui.TextColored(new Vector4(0.3f, 0.8f, 1f, 1f), "Topography Presets:");
 
-            ImGui.TextColored(new Vector4(0.3f, 0.8f, 1f, 1f), "Quick Presets:");
-
-            if (ImGui.BeginCombo("##TopoPreset", _presetName))
+            if (ImGui.BeginCombo("Preset", TopographyPresets.GetPresetName(_selectedPreset)))
             {
-                if (ImGui.Selectable("Flat", _presetName == "Flat"))
+                foreach (TopographyPresets.PresetType type in Enum.GetValues(typeof(TopographyPresets.PresetType)))
                 {
-                    _presetName = "Flat";
-                    ApplyFlatTopography(profile);
+                    if (ImGui.Selectable(TopographyPresets.GetPresetName(type), type == _selectedPreset))
+                    {
+                        _selectedPreset = type;
+                    }
+                    if (ImGui.IsItemHovered())
+                    {
+                        ImGui.SetTooltip(TopographyPresets.GetPresetDescription(type));
+                    }
                 }
-
-                if (ImGui.Selectable("Gentle Hills", _presetName == "Gentle Hills"))
-                {
-                    _presetName = "Gentle Hills";
-                    ApplyHillyTopography(profile, 100f, 3000f);
-                }
-
-                if (ImGui.Selectable("Mountains", _presetName == "Mountains"))
-                {
-                    _presetName = "Mountains";
-                    ApplyHillyTopography(profile, 400f, 2000f);
-                }
-
-                if (ImGui.Selectable("Valley", _presetName == "Valley"))
-                {
-                    _presetName = "Valley";
-                    ApplyValleyTopography(profile);
-                }
-
                 ImGui.EndCombo();
             }
+            
+            ImGui.SliderFloat("Amplitude Factor", ref _presetAmplitude, 0.1f, 5.0f);
 
+            if (ImGui.Button("Apply Preset", new Vector2(-1, 0)))
+            {
+                TopographyPresets.ApplyPreset(profile, _selectedPreset, _presetAmplitude);
+                dataset.MarkAsModified();
+                Logger.Log($"Applied topography preset: {TopographyPresets.GetPresetName(_selectedPreset)}");
+            }
+            
             ImGui.Separator();
 
-            ImGui.TextColored(new Vector4(0.3f, 0.8f, 1f, 1f), "Custom Sine Wave:");
-
-            ImGui.Text("Amplitude (m):");
-            ImGui.SliderFloat("##Amplitude", ref _amplitude, 50f, 1000f, "%.0f m");
-
-            ImGui.Text("Wavelength (m):");
-            ImGui.SliderFloat("##Wavelength", ref _wavelength, 500f, 10000f, "%.0f m");
-
-            if (ImGui.Button("Apply Sine Wave", new Vector2(-1, 0)))
-                ApplyHillyTopography(profile, _amplitude, _wavelength);
+            if (ImGui.Button("Clip Formations to Surface", new Vector2(-1, 0)))
+            {
+                var topographyPoints = profile.Points.Select(p => new Vector2(p.Distance, p.Elevation)).ToList();
+                foreach (var formation in dataset.ProfileData.Formations)
+                {
+                    GeologyGeometryUtils.ClipFormationToTopography(formation, topographyPoints);
+                }
+                dataset.MarkAsModified();
+                Logger.Log("Clipped all formations to topography.");
+            }
+            if (ImGui.IsItemHovered())
+            {
+                ImGui.SetTooltip("Ensures all geological layers are below the topographic surface.");
+            }
 
             ImGui.Separator();
-
-            ImGui.TextColored(new Vector4(0.3f, 0.8f, 1f, 1f), "Manual Editing:");
-            ImGui.TextWrapped("Use the viewer to click and drag topography points.");
-        }
-
-        private void ApplyFlatTopography(GeologicalMapping.ProfileGenerator.TopographicProfile profile)
-        {
-            var meanElevation = 0f; // Sea level
-            for (var i = 0; i < profile.Points.Count; i++)
+            
+            // Interactive Drawing Tools
+            var customDrawTool = dataset.GetViewer()?.CustomTopographyDrawer;
+            if (customDrawTool != null)
             {
-                var point = profile.Points[i];
-                point.Elevation = meanElevation;
-                point.Position = new Vector2(point.Distance, meanElevation);
-                profile.Points[i] = point;
+                customDrawTool.Draw(dataset);
             }
-
-            Logger.Log("Applied flat topography");
-        }
-
-        private void ApplyHillyTopography(GeologicalMapping.ProfileGenerator.TopographicProfile profile,
-            float amplitude, float wavelength)
-        {
-            var meanElevation = 0f; // Sea level
-            for (var i = 0; i < profile.Points.Count; i++)
+            else
             {
-                var point = profile.Points[i];
-                var phase = 2f * MathF.PI * point.Distance / wavelength;
-                var elevation = meanElevation + amplitude * MathF.Sin(phase);
-
-                point.Elevation = elevation;
-                point.Position = new Vector2(point.Distance, elevation);
-                profile.Points[i] = point;
+                ImGui.TextDisabled("Interactive drawing tool not available.");
             }
-
-            Logger.Log($"Applied hilly topography: amplitude={amplitude}m, wavelength={wavelength}m");
-        }
-
-        private void ApplyValleyTopography(GeologicalMapping.ProfileGenerator.TopographicProfile profile)
-        {
-            var meanElevation = 100f; // Slightly above sea level
-            var centerX = profile.TotalDistance / 2;
-
-            for (var i = 0; i < profile.Points.Count; i++)
-            {
-                var point = profile.Points[i];
-                var distFromCenter = Math.Abs(point.Distance - centerX);
-                var normalized = distFromCenter / (profile.TotalDistance / 2);
-                var elevation = meanElevation - 300f * (1 - normalized);
-
-                point.Elevation = elevation;
-                point.Position = new Vector2(point.Distance, elevation);
-                profile.Points[i] = point;
-            }
-
-            Logger.Log("Applied valley topography");
         }
     }
 
