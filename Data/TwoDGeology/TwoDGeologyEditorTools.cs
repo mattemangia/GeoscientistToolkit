@@ -367,6 +367,74 @@ public class TwoDGeologyEditorTools : IDatasetTools
             }
 
             ImGui.Separator();
+            ImGui.TextColored(new Vector4(0.3f, 0.8f, 1f, 1f), "Geometry Editing");
+            
+            var viewer = dataset.GetViewer();
+
+            // Add Point
+            if (ImGui.Button("Add Point to Middle", new Vector2(-1, 0)))
+            {
+                if (selectedFault.FaultTrace.Count >= 2)
+                {
+                    // Find longest segment
+                    var insertIndex = -1;
+                    var maxLenSq = 0f;
+                    for (var i = 0; i < selectedFault.FaultTrace.Count - 1; i++)
+                    {
+                        var lenSq = Vector2.DistanceSquared(selectedFault.FaultTrace[i], selectedFault.FaultTrace[i + 1]);
+                        if (lenSq > maxLenSq)
+                        {
+                            maxLenSq = lenSq;
+                            insertIndex = i;
+                        }
+                    }
+
+                    if (insertIndex != -1)
+                    {
+                        var p1 = selectedFault.FaultTrace[insertIndex];
+                        var p2 = selectedFault.FaultTrace[insertIndex + 1];
+                        var midPoint = Vector2.Lerp(p1, p2, 0.5f);
+                        
+                        var cmd = new InsertItemCommand<Vector2>(selectedFault.FaultTrace, insertIndex + 1, midPoint, "Fault Vertex");
+                        viewer?.UndoRedo.ExecuteCommand(cmd);
+                        Logger.Log("Added new vertex to fault middle.");
+                    }
+                }
+            }
+            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Adds a new vertex to the middle of the longest segment of the fault trace.");
+
+            // Remove Point
+            var canRemove = viewer != null && viewer.SelectedVertexIndex != -1 && selectedFault.FaultTrace.Count > 2;
+            if (!canRemove)
+            {
+                ImGui.BeginDisabled();
+            }
+
+            if (ImGui.Button("Remove Selected Point", new Vector2(-1, 0)))
+            {
+                var cmd = new RemoveItemAtCommand<Vector2>(selectedFault.FaultTrace, viewer.SelectedVertexIndex, "Fault Vertex");
+                viewer.UndoRedo.ExecuteCommand(cmd);
+                viewer.SelectedVertexIndex = -1; // Deselect
+                Logger.Log("Removed selected vertex from fault.");
+            }
+
+            if (!canRemove)
+            {
+                ImGui.EndDisabled();
+                if (ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled))
+                {
+                    if (selectedFault.FaultTrace.Count <= 2)
+                    {
+                        ImGui.SetTooltip("Cannot remove points from a 2-point fault.");
+                    }
+                    else
+                    {
+                        ImGui.SetTooltip("Select a vertex in the viewport to remove it.");
+                    }
+                }
+            }
+
+            ImGui.Separator();
 
             // Actions
             if (ImGui.Button("Reverse Fault Direction", new Vector2(-1, 0))) ReverseFaultDirection(selectedFault);
@@ -377,9 +445,11 @@ public class TwoDGeologyEditorTools : IDatasetTools
 
             if (ImGui.Button("Delete Fault", new Vector2(-1, 0)))
             {
-                dataset.ProfileData.Faults.RemoveAt(_selectedFaultIndex);
+                var faultToDelete = dataset.ProfileData.Faults[_selectedFaultIndex];
+                var cmd = new TwoDGeologyViewer.RemoveFaultCommand(dataset.ProfileData, faultToDelete);
+                dataset.GetViewer()?.UndoRedo.ExecuteCommand(cmd);
+
                 _selectedFaultIndex = -1;
-                Logger.Log("Deleted fault");
             }
         }
 
@@ -392,21 +462,25 @@ public class TwoDGeologyEditorTools : IDatasetTools
 
         private void UpdateFaultGeometry(GeologicalMapping.CrossSectionGenerator.ProjectedFault fault)
         {
-            // Adjust fault trace to match new dip
-            if (fault.FaultTrace.Count >= 2)
-            {
-                var surfacePoint = fault.FaultTrace[0];
-                var dipRad = fault.Dip * MathF.PI / 180f;
+            // Only auto-adjust simple two-point faults. This preserves user-drawn complex faults.
+            if (fault.FaultTrace.Count != 2) return;
+        
+            var topPoint = fault.FaultTrace[0];
+            var dipRad = fault.Dip * MathF.PI / 180f;
+            if (Math.Abs(dipRad) < 0.001) return;
 
-                for (var i = 1; i < fault.FaultTrace.Count; i++)
-                {
-                    var verticalDist = surfacePoint.Y - fault.FaultTrace[i].Y;
-                    var horizontalDist = verticalDist / MathF.Tan(dipRad);
-                    fault.FaultTrace[i] = new Vector2(
-                        surfacePoint.X + horizontalDist,
-                        surfacePoint.Y - verticalDist);
-                }
+            // Preserve the vertical drop but recalculate horizontal position based on new dip
+            var verticalDist = Math.Abs(topPoint.Y - fault.FaultTrace[1].Y);
+            var horizontalDist = verticalDist / MathF.Tan(dipRad);
+
+            // Check original direction to maintain it (e.g., dipping left vs. right)
+            var originalHorizontalDist = fault.FaultTrace[1].X - topPoint.X;
+            if (Math.Sign(originalHorizontalDist) != 0)
+            {
+                horizontalDist *= Math.Sign(originalHorizontalDist);
             }
+
+            fault.FaultTrace[1] = new Vector2(topPoint.X + horizontalDist, topPoint.Y - verticalDist);
         }
 
         private float CalculateFaultLength(GeologicalMapping.CrossSectionGenerator.ProjectedFault fault)

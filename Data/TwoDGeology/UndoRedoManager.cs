@@ -326,6 +326,56 @@ public class RemoveItemCommand<T> : CommandBase
 }
 
 /// <summary>
+/// Command for inserting an item into a list at a specific index
+/// </summary>
+public class InsertItemCommand<T> : CommandBase
+{
+    private readonly IList<T> _list;
+    private readonly int _index;
+    private readonly T _item;
+    private readonly string _itemName;
+
+    public InsertItemCommand(IList<T> list, int index, T item, string itemName = null)
+    {
+        _list = list ?? throw new ArgumentNullException(nameof(list));
+        _index = index;
+        _item = item;
+        _itemName = itemName ?? "Item";
+    }
+
+    public override void Execute() => _list.Insert(_index, _item);
+    public override void Undo() => _list.RemoveAt(_index);
+    public override string Description => $"Insert {_itemName}";
+}
+
+/// <summary>
+/// Command for removing an item from a list at a specific index
+/// </summary>
+public class RemoveItemAtCommand<T> : CommandBase
+{
+    private readonly IList<T> _list;
+    private readonly int _index;
+    private T _item; // Store the item to re-insert it
+    private readonly string _itemName;
+
+    public RemoveItemAtCommand(IList<T> list, int index, string itemName = null)
+    {
+        _list = list ?? throw new ArgumentNullException(nameof(list));
+        _index = index;
+        _itemName = itemName ?? "Item";
+    }
+    
+    public override void Execute()
+    {
+        // Store item before removing
+        _item = _list[_index];
+        _list.RemoveAt(_index);
+    }
+    public override void Undo() => _list.Insert(_index, _item);
+    public override string Description => $"Remove {_itemName}";
+}
+
+/// <summary>
 /// Command group that executes multiple commands as one atomic operation
 /// </summary>
 public class CompositeCommand : CommandBase

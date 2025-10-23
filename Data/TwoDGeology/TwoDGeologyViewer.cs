@@ -38,6 +38,7 @@ public class TwoDGeologyViewer : IDisposable
     private ProjectedFormation _selectedFormation;
     private ProjectedFault _selectedFault;
     private int _selectedVertexIndex = -1;
+    public int SelectedVertexIndex { get => _selectedVertexIndex; set => _selectedVertexIndex = value; }
     private bool _isDraggingVertex = false;
     private Vector2 _dragStartPos;
     
@@ -67,6 +68,10 @@ public class TwoDGeologyViewer : IDisposable
     private int _selectedFaultIndex = -1;
     private bool _renamingLayer = false;
     private string _renameBuffer = "";
+
+    // Context menu state
+    private int _contextualSegmentIndex = -1;
+    private Vector2 _contextualPoint;
     
     public TwoDGeologyViewer(TwoDGeologyDataset dataset)
     {
@@ -537,8 +542,9 @@ public class TwoDGeologyViewer : IDisposable
         ImGui.SetCursorScreenPos(screenPos);
         ImGui.InvisibleButton("viewport", availSize);
         
-        // Handle mouse input
+        // Handle mouse input and context menus
         HandleMouseInput(screenPos, availSize);
+        RenderFaultContextMenus();
     }
     
     private void RenderGrid(ImDrawListPtr drawList, Vector2 screenPos, Vector2 availSize)
@@ -634,55 +640,68 @@ public class TwoDGeologyViewer : IDisposable
         List<ProjectedFormation> formations, bool isOverlay)
     {
         if (formations == null || formations.Count == 0) return;
-        
-        // Render formations from bottom to top (first in list is bottom)
+
         foreach (var formation in formations)
         {
-            if (!formation.GetIsVisible()) continue;
-            if (formation.TopBoundary.Count < 2 || formation.BottomBoundary.Count < 2) continue;
+            if (!formation.GetIsVisible() || formation.TopBoundary.Count < 2 || formation.BottomBoundary.Count < 2) continue;
+
+            var color = ImGui.ColorConvertFloat4ToU32(formation.Color);
+            if (isOverlay) color = (color & 0x00FFFFFF) | 0x80000000; // Make semi-transparent
             
-            // Create polygon vertices
-            var vertices = new List<Vector2>();
-            
-            // Add top boundary points
-            foreach (var point in formation.TopBoundary)
+            var outlineColor = ImGui.ColorConvertFloat4ToU32(new Vector4(0, 0, 0, isOverlay ? 0.3f : 0.5f));
+
+            // Render formation as a strip of quads to handle non-convex shapes robustly
+            for (int i = 0; i < formation.TopBoundary.Count - 1; i++)
             {
-                vertices.Add(WorldToScreen(point, screenPos, availSize));
+                if (i + 1 >= formation.BottomBoundary.Count) break;
+
+                var p1_top = WorldToScreen(formation.TopBoundary[i], screenPos, availSize);
+                var p2_top = WorldToScreen(formation.TopBoundary[i + 1], screenPos, availSize);
+                var p1_bot = WorldToScreen(formation.BottomBoundary[i], screenPos, availSize);
+                var p2_bot = WorldToScreen(formation.BottomBoundary[i + 1], screenPos, availSize);
+
+                drawList.AddQuadFilled(p1_top, p2_top, p2_bot, p1_bot, color);
             }
             
-            // Add bottom boundary points in reverse
-            for (int i = formation.BottomBoundary.Count - 1; i >= 0; i--)
+            // Draw the outline separately for a clean look
+            for (int i = 0; i < formation.TopBoundary.Count - 1; i++)
             {
-                vertices.Add(WorldToScreen(formation.BottomBoundary[i], screenPos, availSize));
+                drawList.AddLine(
+                    WorldToScreen(formation.TopBoundary[i], screenPos, availSize),
+                    WorldToScreen(formation.TopBoundary[i + 1], screenPos, availSize),
+                    outlineColor, 1.0f);
             }
-            
-            if (vertices.Count >= 3)
+            for (int i = 0; i < formation.BottomBoundary.Count - 1; i++)
             {
-                // Draw filled polygon
-                var color = ImGui.ColorConvertFloat4ToU32(formation.Color);
-                if (isOverlay) color = (color & 0x00FFFFFF) | 0x80000000; // Make semi-transparent
-                
-                drawList.AddConvexPolyFilled(ref vertices.ToArray()[0], vertices.Count, color);
-                
-                // Draw outline
-                var outlineColor = ImGui.ColorConvertFloat4ToU32(new Vector4(0, 0, 0, 0.5f));
-                for (int i = 0; i < formation.TopBoundary.Count - 1; i++)
-                {
-                    drawList.AddLine(
-                        WorldToScreen(formation.TopBoundary[i], screenPos, availSize),
-                        WorldToScreen(formation.TopBoundary[i + 1], screenPos, availSize),
-                        outlineColor, 1.0f);
-                }
-                
-                for (int i = 0; i < formation.BottomBoundary.Count - 1; i++)
-                {
-                    drawList.AddLine(
-                        WorldToScreen(formation.BottomBoundary[i], screenPos, availSize),
-                        WorldToScreen(formation.BottomBoundary[i + 1], screenPos, availSize),
-                        outlineColor, 1.0f);
-                }
+                drawList.AddLine(
+                    WorldToScreen(formation.BottomBoundary[i], screenPos, availSize),
+                    WorldToScreen(formation.BottomBoundary[i + 1], screenPos, availSize),
+                    outlineColor, 1.0f);
             }
         }
+    }
+    
+    private List<Vector2> InterpolateCatmullRom(List<Vector2> points, int pointsPerSegment)
+    {
+        if (points.Count < 2) return points;
+
+        var result = new List<Vector2>();
+        for (var i = 0; i < points.Count - 1; i++)
+        {
+            var p0 = i > 0 ? points[i - 1] : points[i];
+            var p1 = points[i];
+            var p2 = points[i + 1];
+            var p3 = i < points.Count - 2 ? points[i + 2] : p2;
+
+            for (var j = 0; j < pointsPerSegment; j++)
+            {
+                var t = j / (float)pointsPerSegment;
+                var interpolatedPoint = InterpolationUtils.CatmullRom(p0, p1, p2, p3, t);
+                result.Add(interpolatedPoint);
+            }
+        }
+        result.Add(points.Last());
+        return result;
     }
     
     private void RenderFaults(ImDrawListPtr drawList, Vector2 screenPos, Vector2 availSize,
@@ -697,12 +716,23 @@ public class TwoDGeologyViewer : IDisposable
             var color = isOverlay ? 
                 ImGui.ColorConvertFloat4ToU32(new Vector4(1.0f, 0.5f, 0.0f, 0.5f)) : 
                 _faultColor;
-            
-            for (int i = 0; i < fault.FaultTrace.Count - 1; i++)
+
+            if (fault.FaultTrace.Count > 2)
             {
-                var screenPos1 = WorldToScreen(fault.FaultTrace[i], screenPos, availSize);
-                var screenPos2 = WorldToScreen(fault.FaultTrace[i + 1], screenPos, availSize);
-                
+                // Draw as a curve for 3+ points
+                var splinePoints = InterpolateCatmullRom(fault.FaultTrace, 10);
+                for (var j = 0; j < splinePoints.Count - 1; j++)
+                {
+                    var screenPos1 = WorldToScreen(splinePoints[j], screenPos, availSize);
+                    var screenPos2 = WorldToScreen(splinePoints[j + 1], screenPos, availSize);
+                    drawList.AddLine(screenPos1, screenPos2, color, 3.0f);
+                }
+            }
+            else
+            {
+                // Draw as a straight line for 2 points
+                var screenPos1 = WorldToScreen(fault.FaultTrace[0], screenPos, availSize);
+                var screenPos2 = WorldToScreen(fault.FaultTrace[1], screenPos, availSize);
                 drawList.AddLine(screenPos1, screenPos2, color, 3.0f);
             }
             
@@ -789,12 +819,26 @@ public class TwoDGeologyViewer : IDisposable
         // Highlight selected fault
         if (_selectedFault != null && _selectedFault.FaultTrace.Count >= 2)
         {
-            for (int i = 0; i < _selectedFault.FaultTrace.Count - 1; i++)
+            var color = _selectionColor;
+            var thickness = 5.0f;
+            
+            if (_selectedFault.FaultTrace.Count > 2)
             {
-                drawList.AddLine(
-                    WorldToScreen(_selectedFault.FaultTrace[i], screenPos, availSize),
-                    WorldToScreen(_selectedFault.FaultTrace[i + 1], screenPos, availSize),
-                    _selectionColor, 5.0f);
+                // Draw as a curve for 3+ points
+                var splinePoints = InterpolateCatmullRom(_selectedFault.FaultTrace, 10);
+                for (var j = 0; j < splinePoints.Count - 1; j++)
+                {
+                    var screenPos1 = WorldToScreen(splinePoints[j], screenPos, availSize);
+                    var screenPos2 = WorldToScreen(splinePoints[j + 1], screenPos, availSize);
+                    drawList.AddLine(screenPos1, screenPos2, color, thickness);
+                }
+            }
+            else
+            {
+                // Draw as a straight line for 2 points
+                var screenPos1 = WorldToScreen(_selectedFault.FaultTrace[0], screenPos, availSize);
+                var screenPos2 = WorldToScreen(_selectedFault.FaultTrace[1], screenPos, availSize);
+                drawList.AddLine(screenPos1, screenPos2, color, thickness);
             }
             
             // Draw vertex handles
@@ -836,6 +880,38 @@ public class TwoDGeologyViewer : IDisposable
             
             var label = $"{y:F0}m";
             drawList.AddText(screenPosLabel, textColor, label);
+        }
+    }
+    
+    private void RenderFaultContextMenus()
+    {
+        if (ImGui.BeginPopup("FaultVertexContextMenu"))
+        {
+            if (ImGui.MenuItem("Remove Vertex") && _selectedFault != null && _selectedVertexIndex != -1)
+            {
+                // Can't remove if it leaves less than 2 points
+                if (_selectedFault.FaultTrace.Count > 2)
+                {
+                    var cmd = new RemoveItemAtCommand<Vector2>(_selectedFault.FaultTrace, _selectedVertexIndex, "Vertex");
+                    UndoRedo.ExecuteCommand(cmd);
+                    _selectedVertexIndex = -1; // Deselect vertex
+                }
+                else
+                {
+                    Logger.LogWarning("Cannot remove vertex, fault needs at least 2 points.");
+                }
+            }
+            ImGui.EndPopup();
+        }
+
+        if (ImGui.BeginPopup("FaultSegmentContextMenu"))
+        {
+            if (ImGui.MenuItem("Add Vertex Here") && _selectedFault != null && _contextualSegmentIndex != -1)
+            {
+                var cmd = new InsertItemCommand<Vector2>(_selectedFault.FaultTrace, _contextualSegmentIndex + 1, _contextualPoint, "Vertex");
+                UndoRedo.ExecuteCommand(cmd);
+            }
+            ImGui.EndPopup();
         }
     }
     
@@ -936,7 +1012,7 @@ public class TwoDGeologyViewer : IDisposable
         if (ImGui.IsMouseReleased(ImGuiMouseButton.Left))
         {
             _isDraggingVertex = false;
-            _selectedVertexIndex = -1;
+            // Don't reset _selectedVertexIndex here, we might want to operate on it (e.g., delete)
         }
         
         // Pass input to tools if not handling other operations
@@ -947,6 +1023,27 @@ public class TwoDGeologyViewer : IDisposable
             var isDragging = ImGui.IsMouseDragging(ImGuiMouseButton.Left);
             var isMouseDown = ImGui.IsMouseDown(ImGuiMouseButton.Left);
 
+            // Handle context menus for fault editing before passing to general tools
+            if (rightClick && _selectedFault != null)
+            {
+                var nearestVertex = FindNearestFaultVertex(worldMousePos, _selectedFault);
+                if (nearestVertex != -1)
+                {
+                    _selectedVertexIndex = nearestVertex;
+                    ImGui.OpenPopup("FaultVertexContextMenu");
+                }
+                else
+                {
+                    var (segmentIndex, closestPoint) = FindNearestFaultSegment(worldMousePos, _selectedFault);
+                    if (segmentIndex != -1)
+                    {
+                        _contextualSegmentIndex = segmentIndex;
+                        _contextualPoint = closestPoint;
+                        ImGui.OpenPopup("FaultSegmentContextMenu");
+                    }
+                }
+            }
+            
             if (CustomTopographyDrawer.IsDrawing)
             {
                 CustomTopographyDrawer.HandleDrawingInput(worldMousePos, isMouseDown, leftClick);
@@ -997,21 +1094,52 @@ public class TwoDGeologyViewer : IDisposable
     
     private int FindNearestFaultVertex(Vector2 worldPos, ProjectedFault fault)
     {
-        const float threshold = 100f; // World units
-        float minDist = threshold;
+        // Increase threshold based on zoom for easier selection
+        var threshold = 50f / _zoom; 
+        float minDistSq = threshold * threshold;
         int nearestIndex = -1;
         
         for (int i = 0; i < fault.FaultTrace.Count; i++)
         {
-            var dist = Vector2.Distance(worldPos, fault.FaultTrace[i]);
-            if (dist < minDist)
+            var distSq = Vector2.DistanceSquared(worldPos, fault.FaultTrace[i]);
+            if (distSq < minDistSq)
             {
-                minDist = dist;
+                minDistSq = distSq;
                 nearestIndex = i;
             }
         }
         
         return nearestIndex;
+    }
+    
+    private (int segmentIndex, Vector2 closestPoint) FindNearestFaultSegment(Vector2 worldPos, ProjectedFault fault)
+    {
+        var threshold = 50f / _zoom;
+        float minDistance = threshold;
+        int nearestSegmentIndex = -1;
+        Vector2 closestPointOnSegment = Vector2.Zero;
+
+        for (int i = 0; i < fault.FaultTrace.Count - 1; i++)
+        {
+            var p1 = fault.FaultTrace[i];
+            var p2 = fault.FaultTrace[i + 1];
+
+            var dist = ProfileGenerator.DistanceToLineSegment(worldPos, p1, p2);
+
+            if (dist < minDistance)
+            {
+                minDistance = dist;
+                nearestSegmentIndex = i;
+
+                // Find the actual closest point for insertion
+                var ap = worldPos - p1;
+                var ab = p2 - p1;
+                var t = Math.Clamp(Vector2.Dot(ap, ab) / ab.LengthSquared(), 0f, 1f);
+                closestPointOnSegment = p1 + ab * t;
+            }
+        }
+        
+        return (nearestSegmentIndex, closestPointOnSegment);
     }
     
     private void RenderPropertiesPanel()
@@ -1134,21 +1262,29 @@ public class TwoDGeologyViewer : IDisposable
         float worldYMin = profile.MinElevation;
         float worldYMax = profile.MaxElevation;
         
-        float normX = (worldPos.X - worldXMin) / (worldXMax - worldXMin);
-        float normY = (worldPos.Y - worldYMin) / (worldYMax - worldYMin);
+        float normX = (worldXMax - worldXMin) == 0 ? 0 : (worldPos.X - worldXMin) / (worldXMax - worldXMin);
+        float normY = (worldYMax - worldYMin) == 0 ? 0 : (worldPos.Y - worldYMin) / (worldYMax - worldYMin);
+        
+        // Calculate the center of the viewport in normalized coordinates
+        float centerX = 0.5f;
+        float centerY = 0.5f;
+
+        // Scale coordinates from the center
+        normX = centerX + (normX - centerX) * _zoom;
+        normY = centerY + (normY - centerY) * _zoom;
         
         // Apply vertical exaggeration
         normY *= _verticalExaggeration;
         
-        // Scale to viewport size with zoom
-        float viewX = normX * availSize.X * _zoom;
-        float viewY = normY * availSize.Y * _zoom;
+        // Scale to viewport size
+        float viewX = normX * availSize.X;
+        float viewY = normY * availSize.Y;
         
-        // Apply pan offset
+        // Apply pan offset (pan is applied after zoom)
         viewX += _panOffset.X;
         viewY += _panOffset.Y;
-        
-        // Invert Y-axis for screen coordinates
+
+        // Invert Y-axis for screen coordinates and add viewport position
         return screenPos + new Vector2(viewX, availSize.Y - viewY);
     }
     
@@ -1160,17 +1296,28 @@ public class TwoDGeologyViewer : IDisposable
         
         // Invert Y-axis from screen coordinates
         Vector2 viewPos = new Vector2(localScreenPos.X, availSize.Y - localScreenPos.Y);
-        
+
         // Remove pan offset
         viewPos.X -= _panOffset.X;
         viewPos.Y -= _panOffset.Y;
         
         // Un-scale from viewport size
-        float normX = viewPos.X / (availSize.X * _zoom);
-        float normY = viewPos.Y / (availSize.Y * _zoom);
-        
+        float normX = viewPos.X / availSize.X;
+        float normY = viewPos.Y / availSize.Y;
+
         // Remove vertical exaggeration
-        normY /= _verticalExaggeration;
+        if (_verticalExaggeration != 0)
+        {
+            normY /= _verticalExaggeration;
+        }
+
+        // Calculate center of viewport in normalized coords
+        float centerX = 0.5f;
+        float centerY = 0.5f;
+
+        // Un-zoom from the center
+        normX = centerX + (normX - centerX) / _zoom;
+        normY = centerY + (normY - centerY) / _zoom;
         
         // Un-normalize to get world coordinates
         float worldX = normX * profile.TotalDistance;

@@ -194,7 +194,7 @@ public class TwoDGeologyDataset : Dataset, ISerializableDataset
         {
             var distance = i / (float)numPoints * profile.Profile.TotalDistance;
             var topElevation = profile.Profile.Points[i].Elevation - 100f; // 100m below surface
-            var bottomElevation = topElevation - 500f; // 500m thick
+            var bottomElevation = profile.Profile.MinElevation; // Extends to the bottom of the profile view
             
             defaultFormation.TopBoundary.Add(new Vector2(distance, topElevation));
             defaultFormation.BottomBoundary.Add(new Vector2(distance, bottomElevation));
