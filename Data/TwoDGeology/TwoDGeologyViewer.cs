@@ -100,6 +100,30 @@ public class TwoDGeologyViewer : IDisposable
         Tools = new TwoDGeologyTools(this, _dataset);
         CustomTopographyDrawer = new CustomTopographyDrawTool();
         
+        // Subscribe to tool selection events to keep viewer selection in sync
+        Tools.FormationSelected += (formation) => {
+            _selectedFormation = formation;
+            _selectedFault = null;
+            // Find the index for layer panel highlighting
+            _selectedLayerIndex = _crossSection.Formations.IndexOf(formation);
+            _selectedFaultIndex = -1;
+        };
+        
+        Tools.FaultSelected += (fault) => {
+            _selectedFault = fault;
+            _selectedFormation = null;
+            // Find the index for layer panel highlighting
+            _selectedFaultIndex = _crossSection.Faults.IndexOf(fault);
+            _selectedLayerIndex = -1;
+        };
+        
+        Tools.SelectionCleared += () => {
+            _selectedFormation = null;
+            _selectedFault = null;
+            _selectedLayerIndex = -1;
+            _selectedFaultIndex = -1;
+        };
+        
         Logger.Log($"TwoDGeologyViewer initialized for '{dataset.Name}'");
     }
     
@@ -540,10 +564,14 @@ public class TwoDGeologyViewer : IDisposable
         
         // Create invisible button for input handling
         ImGui.SetCursorScreenPos(screenPos);
-        ImGui.InvisibleButton("viewport", availSize);
+        ImGui.InvisibleButton("viewport", availSize, ImGuiButtonFlags.MouseButtonLeft | ImGuiButtonFlags.MouseButtonRight | ImGuiButtonFlags.MouseButtonMiddle);
+        
+        // Check if viewport is active (allows interaction even with popups open)
+        bool isViewportHovered = ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenBlockedByPopup | ImGuiHoveredFlags.AllowWhenBlockedByActiveItem);
+        bool isViewportActive = ImGui.IsItemActive() || isViewportHovered;
         
         // Handle mouse input and context menus
-        HandleMouseInput(screenPos, availSize);
+        HandleMouseInput(screenPos, availSize, isViewportActive);
         RenderFaultContextMenus();
     }
     
@@ -776,6 +804,20 @@ public class TwoDGeologyViewer : IDisposable
     
     private void RenderSelection(ImDrawListPtr drawList, Vector2 screenPos, Vector2 availSize)
     {
+        // Validate that selected formation still exists in the list
+        if (_selectedFormation != null && !_crossSection.Formations.Contains(_selectedFormation))
+        {
+            _selectedFormation = null;
+            _selectedLayerIndex = -1;
+        }
+        
+        // Validate that selected fault still exists in the list
+        if (_selectedFault != null && !_crossSection.Faults.Contains(_selectedFault))
+        {
+            _selectedFault = null;
+            _selectedFaultIndex = -1;
+        }
+        
         // Highlight selected formation
         if (_selectedFormation != null)
         {
@@ -915,12 +957,12 @@ public class TwoDGeologyViewer : IDisposable
         }
     }
     
-    private void HandleMouseInput(Vector2 screenPos, Vector2 availSize)
+    private void HandleMouseInput(Vector2 screenPos, Vector2 availSize, bool isViewportActive)
     {
         var io = ImGui.GetIO();
         
-        // Check if viewport is hovered
-        if (!ImGui.IsItemHovered())
+        // Only process input if viewport is active
+        if (!isViewportActive)
         {
             _isPanning = false;
             _isDraggingVertex = false;

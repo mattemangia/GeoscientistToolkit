@@ -7,6 +7,7 @@ using GeoscientistToolkit.Util;
 using ImGuiNET;
 using static GeoscientistToolkit.Business.GIS.GeologicalMapping;
 using static GeoscientistToolkit.Business.GIS.GeologicalMapping.CrossSectionGenerator;
+using static GeoscientistToolkit.Business.GIS.GeologicalMapping.ProfileGenerator;
 
 namespace GeoscientistToolkit.UI.GIS;
 
@@ -32,7 +33,8 @@ public class TwoDGeologyTools
         MeasureDistance,
         MeasureAngle,
         SplitFormation,
-        MergeFormations
+        MergeFormations,
+        EditTopography
     }
 
     public EditMode CurrentEditMode { get; set; } = EditMode.None;
@@ -42,6 +44,11 @@ public class TwoDGeologyTools
     private ProjectedFault _selectedFault;
     private readonly List<Vector2> _tempPoints = new();
     private bool _isDrawing = false;
+    
+    // Selection change events
+    public event Action<ProjectedFormation> FormationSelected;
+    public event Action<ProjectedFault> FaultSelected;
+    public event Action SelectionCleared;
 
     // Measurement state
     private readonly List<Vector2> _measurementPoints = new();
@@ -62,6 +69,10 @@ public class TwoDGeologyTools
     private readonly float _snapRadius = 50.0f; // World units
     private Vector2? _snapPoint;
     private bool _enableSnapping = true;
+    
+    // Topography editing state
+    private int _selectedTopographyPointIndex = -1;
+    private bool _isDraggingTopographyPoint = false;
     
     // Mouse hover state
     private Vector2 _lastMouseWorldPos;
@@ -185,6 +196,28 @@ public class TwoDGeologyTools
 
         ImGui.Text("Modification Tools:");
         
+        if (ImGui.Button("Edit Topography (T)", buttonSize))
+        {
+            CurrentEditMode = EditMode.EditTopography;
+            ClearTempPoints();
+            _selectedTopographyPointIndex = -1;
+        }
+        
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip("Click and drag topography points to modify the surface profile");
+        
+        if (CurrentEditMode == EditMode.EditTopography)
+        {
+            ImGui.Indent();
+            ImGui.TextColored(new Vector4(0.7f, 0.9f, 1f, 1f), "Click on a topography point to select it");
+            ImGui.TextColored(new Vector4(0.7f, 0.9f, 1f, 1f), "Drag to move the point vertically");
+            if (_selectedTopographyPointIndex >= 0)
+            {
+                ImGui.Text($"Selected Point: {_selectedTopographyPointIndex}");
+            }
+            ImGui.Unindent();
+        }
+        
         if (ImGui.Button("Split Formation", buttonSize))
         {
             CurrentEditMode = EditMode.SplitFormation;
@@ -223,6 +256,104 @@ public class TwoDGeologyTools
         
         ImGui.Separator();
         
+        ImGui.Text("Geological Presets:");
+        if (ImGui.Button("Load Preset...", buttonSize))
+        {
+            ImGui.OpenPopup("GeologicalPresets");
+        }
+        
+        if (ImGui.BeginPopup("GeologicalPresets"))
+        {
+            ImGui.Text("Select a geological scenario:");
+            ImGui.Separator();
+            
+            foreach (var scenario in Enum.GetValues<GeologicalLayerPresets.PresetScenario>())
+            {
+                if (ImGui.MenuItem(GeologicalLayerPresets.GetPresetName(scenario)))
+                {
+                    ApplyGeologicalPreset(scenario);
+                    ImGui.CloseCurrentPopup();
+                }
+                
+                if (ImGui.IsItemHovered())
+                {
+                    ImGui.BeginTooltip();
+                    ImGui.Text(GeologicalLayerPresets.GetPresetDescription(scenario));
+                    ImGui.EndTooltip();
+                }
+            }
+            
+            ImGui.EndPopup();
+        }
+        
+        ImGui.Separator();
+        
+        ImGui.Text("Structural Restoration:");
+        if (ImGui.Button("Restore Section...", buttonSize))
+        {
+            ImGui.OpenPopup("StructuralRestoration");
+        }
+        
+        if (ImGui.BeginPopup("StructuralRestoration"))
+        {
+            ImGui.Text("Structural Restoration & Forward Modeling");
+            ImGui.Separator();
+            
+            ImGui.TextWrapped("Unfold and unfault geological structures to their pre-deformation state, or forward model deformation.");
+            ImGui.Separator();
+            
+            if (ImGui.MenuItem("Restore (Unfold/Unfault)"))
+            {
+                PerformRestoration(100f);
+                ImGui.CloseCurrentPopup();
+            }
+            
+            if (ImGui.IsItemHovered())
+                ImGui.SetTooltip("Restore the section to its undeformed state (100% restoration)");
+            
+            if (ImGui.MenuItem("Partial Restore (50%)"))
+            {
+                PerformRestoration(50f);
+                ImGui.CloseCurrentPopup();
+            }
+            
+            if (ImGui.IsItemHovered())
+                ImGui.SetTooltip("Partially restore the section (50% of total deformation removed)");
+            
+            if (ImGui.MenuItem("Forward Model (Re-deform)"))
+            {
+                PerformForwardModeling(100f);
+                ImGui.CloseCurrentPopup();
+            }
+            
+            if (ImGui.IsItemHovered())
+                ImGui.SetTooltip("Apply deformation to an undeformed or partially restored section");
+            
+            ImGui.Separator();
+            
+            if (ImGui.MenuItem("Create Flat Reference"))
+            {
+                CreateFlatReference();
+                ImGui.CloseCurrentPopup();
+            }
+            
+            if (ImGui.IsItemHovered())
+                ImGui.SetTooltip("Create a completely undeformed reference state");
+            
+            ImGui.Separator();
+            
+            if (ImGui.MenuItem("Clear Restoration Overlay"))
+            {
+                _dataset.ClearRestorationData();
+                Logger.Log("Cleared restoration overlay");
+                ImGui.CloseCurrentPopup();
+            }
+            
+            ImGui.EndPopup();
+        }
+        
+        ImGui.Separator();
+        
         ImGui.Text("Options:");
         ImGui.Checkbox("Enable Snapping", ref _enableSnapping);
         if (_enableSnapping)
@@ -252,6 +383,7 @@ public class TwoDGeologyTools
         ImGui.TextDisabled("Q - Select mode");
         ImGui.TextDisabled("W - Draw formation");
         ImGui.TextDisabled("E - Draw fault");
+        ImGui.TextDisabled("T - Edit topography");
         ImGui.TextDisabled("M - Measure");
         ImGui.TextDisabled("DEL - Delete selected");
         ImGui.TextDisabled("ESC - Cancel operation");
@@ -268,6 +400,7 @@ public class TwoDGeologyTools
             EditMode.MeasureDistance => "Measuring",
             EditMode.SplitFormation => "Split Formation",
             EditMode.MergeFormations => "Merge Formations",
+            EditMode.EditTopography => _selectedTopographyPointIndex >= 0 ? $"Editing Topography (Point {_selectedTopographyPointIndex})" : "Edit Topography",
             _ => CurrentEditMode.ToString()
         };
     }
@@ -323,6 +456,10 @@ public class TwoDGeologyTools
                     if (_tempPoints.Count >= 2) SplitFormation();
                 }
                 break;
+                
+            case EditMode.EditTopography:
+                HandleTopographyEditing(worldPos, leftClick, isDragging);
+                break;
         }
     }
 
@@ -351,6 +488,12 @@ public class TwoDGeologyTools
             {
                 CurrentEditMode = EditMode.DrawFault;
                 ClearTempPoints();
+            }
+            if (ImGui.IsKeyPressed(ImGuiKey.T))
+            {
+                CurrentEditMode = EditMode.EditTopography;
+                ClearTempPoints();
+                _selectedTopographyPointIndex = -1;
             }
             if (ImGui.IsKeyPressed(ImGuiKey.M))
             {
@@ -587,6 +730,8 @@ public class TwoDGeologyTools
         _tempPoints.Clear();
         _measurementPoints.Clear();
         _isDrawing = false;
+        _selectedTopographyPointIndex = -1;
+        _isDraggingTopographyPoint = false;
         
         if (CurrentEditMode != EditMode.SelectFormation)
         {
@@ -811,6 +956,95 @@ public class TwoDGeologyTools
             drawList.AddLine(cursorScreen - new Vector2(size, 0), cursorScreen + new Vector2(size, 0), crosshairColor);
             drawList.AddLine(cursorScreen - new Vector2(0, size), cursorScreen + new Vector2(0, size), crosshairColor);
         }
+        
+        // Draw selected topography point when in edit topography mode
+        if (CurrentEditMode == EditMode.EditTopography && _selectedTopographyPointIndex >= 0)
+        {
+            var profile = _dataset.ProfileData?.Profile;
+            if (profile != null && _selectedTopographyPointIndex < profile.Points.Count)
+            {
+                var point = profile.Points[_selectedTopographyPointIndex];
+                var pointPos = new Vector2(point.Distance, point.Elevation);
+                var screenPos = worldToScreen(pointPos);
+                
+                // Draw large highlight circle
+                drawList.AddCircle(screenPos, 10f, yellow, 16, 3.0f);
+                drawList.AddCircleFilled(screenPos, 5f, yellow);
+                
+                // Draw elevation guide line
+                var leftScreen = worldToScreen(new Vector2(0, point.Elevation));
+                var rightScreen = worldToScreen(new Vector2(profile.TotalDistance, point.Elevation));
+                var guideColor = ImGui.ColorConvertFloat4ToU32(new Vector4(1, 1, 0, 0.3f));
+                drawList.AddLine(leftScreen, rightScreen, guideColor, 1.0f);
+                
+                // Draw elevation text
+                var textPos = screenPos + new Vector2(15, -15);
+                drawList.AddText(textPos, white, $"Elev: {point.Elevation:F1}m");
+            }
+        }
+    }
+    
+    private void HandleTopographyEditing(Vector2 worldPos, bool leftClick, bool isDragging)
+    {
+        var profile = _dataset.ProfileData?.Profile;
+        if (profile == null || profile.Points.Count == 0) return;
+        
+        // If clicking, find nearest topography point
+        if (leftClick && !_isDraggingTopographyPoint)
+        {
+            _selectedTopographyPointIndex = FindNearestTopographyPoint(worldPos, profile);
+            if (_selectedTopographyPointIndex >= 0)
+            {
+                _isDraggingTopographyPoint = true;
+                Logger.Log($"Selected topography point {_selectedTopographyPointIndex}");
+            }
+        }
+        
+        // If dragging a selected point, update its elevation
+        if (_isDraggingTopographyPoint && _selectedTopographyPointIndex >= 0 && _selectedTopographyPointIndex < profile.Points.Count)
+        {
+            if (isDragging)
+            {
+                var point = profile.Points[_selectedTopographyPointIndex];
+                // Only update Y (elevation), keep X (distance) the same
+                point.Elevation = worldPos.Y;
+                point.Position = new Vector2(point.Distance, worldPos.Y);
+                profile.Points[_selectedTopographyPointIndex] = point;
+                
+                // Update profile elevation range
+                profile.MinElevation = profile.Points.Min(p => p.Elevation);
+                profile.MaxElevation = profile.Points.Max(p => p.Elevation);
+                
+                _dataset.MarkAsModified();
+            }
+            else
+            {
+                // Stop dragging when mouse released
+                _isDraggingTopographyPoint = false;
+                Logger.Log($"Updated topography point {_selectedTopographyPointIndex} to elevation {profile.Points[_selectedTopographyPointIndex].Elevation:F2}m");
+            }
+        }
+    }
+    
+    private int FindNearestTopographyPoint(Vector2 worldPos, GeologicalMapping.ProfileGenerator.TopographicProfile profile)
+    {
+        const float threshold = 100f; // World units
+        float minDist = threshold;
+        int nearestIndex = -1;
+        
+        for (int i = 0; i < profile.Points.Count; i++)
+        {
+            var point = profile.Points[i];
+            var pointPos = new Vector2(point.Distance, point.Elevation);
+            var dist = Vector2.Distance(worldPos, pointPos);
+            if (dist < minDist)
+            {
+                minDist = dist;
+                nearestIndex = i;
+            }
+        }
+        
+        return nearestIndex;
     }
     
     public ProjectedFormation GetSelectedFormation() => _selectedFormation;
@@ -821,17 +1055,144 @@ public class TwoDGeologyTools
     {
         _selectedFormation = formation;
         _selectedFault = null;
+        FormationSelected?.Invoke(formation);
     }
     
     public void SetSelectedFault(ProjectedFault fault)
     {
         _selectedFault = fault;
         _selectedFormation = null;
+        FaultSelected?.Invoke(fault);
     }
     
     public void ClearSelection()
     {
         _selectedFormation = null;
         _selectedFault = null;
+        SelectionCleared?.Invoke();
     }
+    
+    #region Geological Presets and Restoration
+    
+    private void ApplyGeologicalPreset(GeologicalLayerPresets.PresetScenario scenario)
+    {
+        try
+        {
+            // Create the preset cross-section
+            var presetSection = GeologicalLayerPresets.CreatePreset(
+                scenario, 
+                _dataset.ProfileData.Profile.TotalDistance,
+                _dataset.ProfileData.Profile.MinElevation
+            );
+            
+            // Replace the current section data
+            _dataset.ProfileData.Profile = presetSection.Profile;
+            _dataset.ProfileData.Formations.Clear();
+            foreach (var formation in presetSection.Formations)
+            {
+                _dataset.ProfileData.Formations.Add(formation);
+            }
+            
+            _dataset.ProfileData.Faults.Clear();
+            foreach (var fault in presetSection.Faults)
+            {
+                _dataset.ProfileData.Faults.Add(fault);
+            }
+            
+            _dataset.MarkAsModified();
+            
+            Logger.Log($"Applied geological preset: {GeologicalLayerPresets.GetPresetName(scenario)}");
+            Logger.Log($"Created {presetSection.Formations.Count} formations and {presetSection.Faults.Count} faults");
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError($"Failed to apply geological preset: {ex.Message}");
+        }
+    }
+    
+    private void PerformRestoration(float percentage)
+    {
+        try
+        {
+            if (_dataset.ProfileData == null)
+            {
+                Logger.LogError("No cross-section data available for restoration");
+                return;
+            }
+            
+            // Create restoration object
+            var restoration = new StructuralRestoration(_dataset.ProfileData);
+            
+            // Perform restoration
+            restoration.Restore(percentage);
+            
+            // Set the restored section as overlay
+            _dataset.SetRestorationData(restoration.RestoredSection);
+            
+            Logger.Log($"Performed structural restoration at {percentage}%");
+            Logger.Log("Restored section is displayed as overlay (semi-transparent)");
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError($"Failed to perform restoration: {ex.Message}");
+        }
+    }
+    
+    private void PerformForwardModeling(float percentage)
+    {
+        try
+        {
+            if (_dataset.ProfileData == null)
+            {
+                Logger.LogError("No cross-section data available for forward modeling");
+                return;
+            }
+            
+            // Create restoration object
+            var restoration = new StructuralRestoration(_dataset.ProfileData);
+            
+            // Perform forward modeling (deformation)
+            restoration.Deform(percentage);
+            
+            // Set the deformed section as overlay
+            _dataset.SetRestorationData(restoration.RestoredSection);
+            
+            Logger.Log($"Performed forward modeling at {percentage}%");
+            Logger.Log("Deformed section is displayed as overlay (semi-transparent)");
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError($"Failed to perform forward modeling: {ex.Message}");
+        }
+    }
+    
+    private void CreateFlatReference()
+    {
+        try
+        {
+            if (_dataset.ProfileData == null)
+            {
+                Logger.LogError("No cross-section data available");
+                return;
+            }
+            
+            // Create restoration object
+            var restoration = new StructuralRestoration(_dataset.ProfileData);
+            
+            // Create flat reference
+            restoration.CreateFlatReference();
+            
+            // Set the flat reference as overlay
+            _dataset.SetRestorationData(restoration.RestoredSection);
+            
+            Logger.Log("Created flat reference state");
+            Logger.Log("Completely undeformed section is displayed as overlay");
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError($"Failed to create flat reference: {ex.Message}");
+        }
+    }
+    
+    #endregion
 }

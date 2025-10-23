@@ -78,7 +78,8 @@ public static class GeologicalMapping
         Open,            // Open folds
         Gentle,          // Gentle folds
         Closed,           // Closed folds
-        Anticline
+        Anticline,
+        Syncline
     }
 
     public class GeologicalFeature : GISFeature
