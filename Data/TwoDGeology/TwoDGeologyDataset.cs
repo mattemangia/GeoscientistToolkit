@@ -13,7 +13,7 @@ namespace GeoscientistToolkit.Data.TwoDGeology;
 /// </summary>
 public class TwoDGeologyDataset : Dataset, ISerializableDataset
 {
-    private TwoDGeologyViewer _viewer; // Reference to the viewer instance
+    private TwoDGeologyViewer _viewer;
     private bool _hasUnsavedChanges = false;
 
     public TwoDGeologyDataset(string name, string filePath) : base(name, filePath)
@@ -39,7 +39,6 @@ public class TwoDGeologyDataset : Dataset, ISerializableDataset
         };
     }
 
-    // Allow viewer to register itself with the dataset
     public void RegisterViewer(TwoDGeologyViewer viewer)
     {
         _viewer = viewer;
@@ -50,7 +49,6 @@ public class TwoDGeologyDataset : Dataset, ISerializableDataset
         return _viewer;
     }
 
-    // Methods for the Flatten Tool to communicate with the viewer
     public void SetRestorationData(CrossSection data)
     {
         _viewer?.SetRestorationData(data);
@@ -157,19 +155,15 @@ public class TwoDGeologyDataset : Dataset, ISerializableDataset
             Faults = new List<GeologicalMapping.CrossSectionGenerator.ProjectedFault>()
         };
 
-        // Generate default topography with some variation
+        // Generate default flat topography at sea level
         var numPoints = 50;
-        var random = new Random(42); // Fixed seed for reproducibility
         
         for (var i = 0; i <= numPoints; i++)
         {
             var distance = i / (float)numPoints * profile.Profile.TotalDistance;
             
-            // Create gentle hills using sine waves
+            // Simple flat topography at sea level
             var baseElevation = 0f;
-            baseElevation += 100f * MathF.Sin(distance / 2000f * MathF.PI);
-            baseElevation += 50f * MathF.Sin(distance / 500f * MathF.PI);
-            baseElevation += 25f * (float)(random.NextDouble() - 0.5); // Small random variation
             
             profile.Profile.Points.Add(new GeologicalMapping.ProfileGenerator.ProfilePoint
             {
@@ -180,27 +174,8 @@ public class TwoDGeologyDataset : Dataset, ISerializableDataset
             });
         }
         
-        // Add a default formation as an example
-        var defaultFormation = new ProjectedFormation
-        {
-            Name = "Bedrock",
-            Color = new Vector4(0.6f, 0.6f, 0.7f, 0.8f), // Gray color
-            TopBoundary = new List<Vector2>(),
-            BottomBoundary = new List<Vector2>()
-        };
-        
-        // Create bedrock formation below topography
-        for (var i = 0; i <= numPoints; i++)
-        {
-            var distance = i / (float)numPoints * profile.Profile.TotalDistance;
-            var topElevation = profile.Profile.Points[i].Elevation - 100f; // 100m below surface
-            var bottomElevation = profile.Profile.MinElevation; // Extends to the bottom of the profile view
-            
-            defaultFormation.TopBoundary.Add(new Vector2(distance, topElevation));
-            defaultFormation.BottomBoundary.Add(new Vector2(distance, bottomElevation));
-        }
-        
-        profile.Formations.Add(defaultFormation);
+        // NO DEFAULT BEDROCK - start with a clean slate
+        // Users can add formations as needed using the tools
         
         return profile;
     }

@@ -12,7 +12,7 @@ namespace GeoscientistToolkit.UI.GIS;
 
 /// <summary>
 ///     Advanced editing tools for 2D geological cross-sections.
-///     Allows manipulation of layers, faults, and structural elements.
+///     Now properly synchronized with the viewer.
 /// </summary>
 public class TwoDGeologyEditorTools : IDatasetTools
 {
@@ -69,6 +69,10 @@ public class TwoDGeologyEditorTools : IDatasetTools
         private int _selectedFormationIndex = -1;
         private float _thicknessScale = 1.0f;
         private float _verticalOffset;
+        
+        // Store original state for undo
+        private List<Vector2> _originalTopBoundary;
+        private List<Vector2> _originalBottomBoundary;
 
         public void Draw(TwoDGeologyDataset dataset)
         {
@@ -97,6 +101,13 @@ public class TwoDGeologyEditorTools : IDatasetTools
                     {
                         _selectedFormationIndex = i;
                         ResetTransforms();
+                        // Store original state
+                        var formation = formations[i];
+                        _originalTopBoundary = new List<Vector2>(formation.TopBoundary);
+                        _originalBottomBoundary = new List<Vector2>(formation.BottomBoundary);
+                        
+                        // Sync with viewer
+                        dataset.GetViewer()?.Tools.SetSelectedFormation(formation);
                     }
 
                 ImGui.EndCombo();
@@ -112,23 +123,44 @@ public class TwoDGeologyEditorTools : IDatasetTools
 
             ImGui.Separator();
             ImGui.TextColored(new Vector4(0.3f, 0.8f, 1f, 1f), "Layer Transformations");
+            
+            // Check for overlap and show warning
+            bool hasOverlap = GeologicalConstraints.DoesFormationOverlapAny(selectedFormation,
+                formations.Where(f => f != selectedFormation).ToList());
+            
+            if (hasOverlap)
+            {
+                ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(1f, 0.3f, 0.3f, 1f));
+                ImGui.TextWrapped("⚠ WARNING: Formation currently overlaps with another!");
+                ImGui.PopStyleColor();
+                ImGui.Separator();
+            };
 
             // Vertical offset
             ImGui.Text("Vertical Offset:");
             if (ImGui.SliderFloat("##VertOffset", ref _verticalOffset, -500f, 500f, "%.1f m"))
+            {
                 ApplyVerticalOffset(selectedFormation, _verticalOffset);
+                dataset.MarkAsModified();
+            }
 
             // Horizontal offset
             ImGui.Text("Horizontal Offset:");
             if (ImGui.SliderFloat("##HorizOffset", ref _horizontalOffset, -1000f, 1000f, "%.1f m"))
+            {
                 ApplyHorizontalOffset(selectedFormation, _horizontalOffset);
+                dataset.MarkAsModified();
+            }
 
             ImGui.Separator();
 
             // Rotation
             ImGui.Text("Rotation (Dip Change):");
             if (ImGui.SliderFloat("##Rotation", ref _rotationAngle, -45f, 45f, "%.1f°"))
+            {
                 ApplyRotation(selectedFormation, _rotationAngle, _rotationPivot);
+                dataset.MarkAsModified();
+            }
 
             ImGui.Text("Pivot Point:");
             ImGui.InputFloat2("##Pivot", ref _rotationPivot);
@@ -140,14 +172,52 @@ public class TwoDGeologyEditorTools : IDatasetTools
             // Thickness adjustment
             ImGui.Text("Thickness Scale:");
             if (ImGui.SliderFloat("##ThicknessScale", ref _thicknessScale, 0.1f, 3.0f, "%.2fx"))
+            {
                 ApplyThicknessScale(selectedFormation, _thicknessScale);
+                dataset.MarkAsModified();
+            }
 
             ImGui.Separator();
 
             // Action buttons
-            if (ImGui.Button("Reset All Transforms", new Vector2(-1, 0))) ResetTransforms();
+            if (ImGui.Button("Apply and Reset", new Vector2(-1, 0)))
+            {
+                // Check for overlaps before applying
+                if (GeologicalConstraints.DoesFormationOverlapAny(selectedFormation, 
+                    formations.Where(f => f != selectedFormation).ToList()))
+                {
+                    Logger.LogWarning("Cannot apply: Transformation would create overlaps");
+                    // Revert to original
+                    if (_originalTopBoundary != null && _originalBottomBoundary != null)
+                    {
+                        selectedFormation.TopBoundary = new List<Vector2>(_originalTopBoundary);
+                        selectedFormation.BottomBoundary = new List<Vector2>(_originalBottomBoundary);
+                    }
+                }
+                else
+                {
+                    ResetTransforms();
+                    _originalTopBoundary = new List<Vector2>(selectedFormation.TopBoundary);
+                    _originalBottomBoundary = new List<Vector2>(selectedFormation.BottomBoundary);
+                    Logger.Log("Transformations applied successfully");
+                }
+            }
+            
+            if (ImGui.Button("Revert to Original", new Vector2(-1, 0)))
+            {
+                if (_originalTopBoundary != null && _originalBottomBoundary != null)
+                {
+                    selectedFormation.TopBoundary = new List<Vector2>(_originalTopBoundary);
+                    selectedFormation.BottomBoundary = new List<Vector2>(_originalBottomBoundary);
+                    ResetTransforms();
+                    dataset.MarkAsModified();
+                }
+            }
 
-            if (ImGui.Button("Duplicate Formation", new Vector2(-1, 0))) DuplicateFormation(dataset, selectedFormation);
+            if (ImGui.Button("Duplicate Formation", new Vector2(-1, 0)))
+            {
+                DuplicateFormation(dataset, selectedFormation);
+            }
 
             if (ImGui.Button("Delete Formation", new Vector2(-1, 0)))
             {
@@ -164,68 +234,84 @@ public class TwoDGeologyEditorTools : IDatasetTools
             _thicknessScale = 1.0f;
         }
 
-        private void ApplyVerticalOffset(GeologicalMapping.CrossSectionGenerator.ProjectedFormation formation,
-            float offset)
+        private void ApplyVerticalOffset(GeologicalMapping.CrossSectionGenerator.ProjectedFormation formation, float offset)
         {
-            var baseTop = formation.TopBoundary.ToList();
-            var baseBottom = formation.BottomBoundary.ToList();
-
+            if (_originalTopBoundary == null || _originalBottomBoundary == null) return;
+            
             formation.TopBoundary.Clear();
             formation.BottomBoundary.Clear();
 
-            foreach (var point in baseTop) formation.TopBoundary.Add(new Vector2(point.X, point.Y + offset));
+            foreach (var point in _originalTopBoundary)
+                formation.TopBoundary.Add(new Vector2(point.X, point.Y + offset));
 
-            foreach (var point in baseBottom) formation.BottomBoundary.Add(new Vector2(point.X, point.Y + offset));
+            foreach (var point in _originalBottomBoundary)
+                formation.BottomBoundary.Add(new Vector2(point.X, point.Y + offset));
         }
 
-        private void ApplyHorizontalOffset(GeologicalMapping.CrossSectionGenerator.ProjectedFormation formation,
-            float offset)
+        private void ApplyHorizontalOffset(GeologicalMapping.CrossSectionGenerator.ProjectedFormation formation, float offset)
         {
-            var baseTop = formation.TopBoundary.ToList();
-            var baseBottom = formation.BottomBoundary.ToList();
-
+            if (_originalTopBoundary == null || _originalBottomBoundary == null) return;
+            
             formation.TopBoundary.Clear();
             formation.BottomBoundary.Clear();
 
-            foreach (var point in baseTop) formation.TopBoundary.Add(new Vector2(point.X + offset, point.Y));
+            foreach (var point in _originalTopBoundary)
+                formation.TopBoundary.Add(new Vector2(point.X + offset, point.Y));
 
-            foreach (var point in baseBottom) formation.BottomBoundary.Add(new Vector2(point.X + offset, point.Y));
+            foreach (var point in _originalBottomBoundary)
+                formation.BottomBoundary.Add(new Vector2(point.X + offset, point.Y));
         }
 
         private void ApplyRotation(GeologicalMapping.CrossSectionGenerator.ProjectedFormation formation,
             float angleDegrees, Vector2 pivot)
         {
+            if (_originalTopBoundary == null || _originalBottomBoundary == null) return;
+            
             var angleRad = angleDegrees * MathF.PI / 180f;
             var rotation = Matrix3x2.CreateRotation(angleRad, pivot);
 
-            for (var i = 0; i < formation.TopBoundary.Count; i++)
-                formation.TopBoundary[i] = Vector2.Transform(formation.TopBoundary[i], rotation);
+            formation.TopBoundary.Clear();
+            formation.BottomBoundary.Clear();
 
-            for (var i = 0; i < formation.BottomBoundary.Count; i++)
-                formation.BottomBoundary[i] = Vector2.Transform(formation.BottomBoundary[i], rotation);
+            foreach (var point in _originalTopBoundary)
+                formation.TopBoundary.Add(Vector2.Transform(point, rotation));
+
+            foreach (var point in _originalBottomBoundary)
+                formation.BottomBoundary.Add(Vector2.Transform(point, rotation));
         }
 
-        private void ApplyThicknessScale(GeologicalMapping.CrossSectionGenerator.ProjectedFormation formation,
-            float scale)
+        private void ApplyThicknessScale(GeologicalMapping.CrossSectionGenerator.ProjectedFormation formation, float scale)
         {
-            // Scale bottom boundary away from top boundary
-            for (var i = 0; i < Math.Min(formation.TopBoundary.Count, formation.BottomBoundary.Count); i++)
+            if (_originalTopBoundary == null || _originalBottomBoundary == null) return;
+            
+            formation.TopBoundary.Clear();
+            formation.BottomBoundary.Clear();
+
+            // Copy original top
+            foreach (var point in _originalTopBoundary)
+                formation.TopBoundary.Add(point);
+
+            // Scale bottom relative to top
+            for (var i = 0; i < Math.Min(_originalTopBoundary.Count, _originalBottomBoundary.Count); i++)
             {
-                var top = formation.TopBoundary[i];
-                var bottom = formation.BottomBoundary[i];
-                var thickness = bottom - top;
-                formation.BottomBoundary[i] = top + thickness * scale;
+                var top = _originalTopBoundary[i];
+                var bottom = _originalBottomBoundary[i];
+                var diff = bottom - top;
+                var scaled = top + diff * scale;
+                formation.BottomBoundary.Add(scaled);
             }
         }
 
         private Vector2 CalculateFormationCenter(GeologicalMapping.CrossSectionGenerator.ProjectedFormation formation)
         {
-            var allPoints = formation.TopBoundary.Concat(formation.BottomBoundary).ToList();
-            if (allPoints.Count == 0) return Vector2.Zero;
+            if (formation.TopBoundary.Count == 0) return Vector2.Zero;
 
-            var sumX = allPoints.Sum(p => p.X);
-            var sumY = allPoints.Sum(p => p.Y);
-            return new Vector2(sumX / allPoints.Count, sumY / allPoints.Count);
+            var avgX = formation.TopBoundary.Average(p => p.X);
+            var avgTopY = formation.TopBoundary.Average(p => p.Y);
+            var avgBottomY = formation.BottomBoundary.Average(p => p.Y);
+            var avgY = (avgTopY + avgBottomY) / 2;
+
+            return new Vector2(avgX, avgY);
         }
 
         private void DuplicateFormation(TwoDGeologyDataset dataset,
@@ -236,16 +322,20 @@ public class TwoDGeologyEditorTools : IDatasetTools
                 Name = formation.Name + " (Copy)",
                 Color = formation.Color,
                 TopBoundary = new List<Vector2>(formation.TopBoundary),
-                BottomBoundary = new List<Vector2>(formation.BottomBoundary)
+                BottomBoundary = new List<Vector2>(formation.BottomBoundary),
+                FoldStyle = formation.FoldStyle
             };
 
-            // Offset slightly to make it visible
-            for (var i = 0; i < duplicate.TopBoundary.Count; i++) duplicate.TopBoundary[i] += new Vector2(100, 50);
+            // Offset slightly
+            for (var i = 0; i < duplicate.TopBoundary.Count; i++)
+                duplicate.TopBoundary[i] += new Vector2(0, 100f);
+
             for (var i = 0; i < duplicate.BottomBoundary.Count; i++)
-                duplicate.BottomBoundary[i] += new Vector2(100, 50);
+                duplicate.BottomBoundary[i] += new Vector2(0, 100f);
 
             dataset.ProfileData.Formations.Add(duplicate);
-            Logger.Log($"Duplicated formation: {formation.Name}");
+            dataset.MarkAsModified();
+            Logger.Log($"Duplicated formation '{formation.Name}'");
         }
 
         private void DeleteFormation(TwoDGeologyDataset dataset, int index)
@@ -254,7 +344,12 @@ public class TwoDGeologyEditorTools : IDatasetTools
             {
                 var name = dataset.ProfileData.Formations[index].Name;
                 dataset.ProfileData.Formations.RemoveAt(index);
-                Logger.Log($"Deleted formation: {name}");
+                dataset.MarkAsModified();
+                
+                // Sync with viewer
+                dataset.GetViewer()?.Tools.ClearSelection();
+                
+                Logger.Log($"Deleted formation '{name}'");
             }
         }
     }
@@ -265,280 +360,151 @@ public class TwoDGeologyEditorTools : IDatasetTools
 
     private class FaultEditor
     {
-        private float _newDip = 60f;
-        private float _newDisplacement = 100f;
-
-        private GeologicalMapping.GeologicalFeatureType _newFaultType =
-            GeologicalMapping.GeologicalFeatureType.Fault_Normal;
-
         private int _selectedFaultIndex = -1;
+        private float _dipAngle = 60f;
+        private float _displacement = 100f;
+        private string _dipDirection = "E";
 
         public void Draw(TwoDGeologyDataset dataset)
         {
             if (dataset?.ProfileData == null) return;
 
-            ImGui.TextWrapped("Edit fault properties and geometry.");
+            ImGui.TextWrapped("Edit existing faults or create new ones with finite extent.");
             ImGui.Separator();
 
             var faults = dataset.ProfileData.Faults;
-            if (faults.Count == 0)
-            {
-                ImGui.TextDisabled("No faults available.");
-                return;
-            }
 
             // Fault selection
             ImGui.Text("Select Fault:");
             ImGui.SetNextItemWidth(-1);
             if (ImGui.BeginCombo("##FaultSelect",
                     _selectedFaultIndex >= 0 && _selectedFaultIndex < faults.Count
-                        ? $"Fault {_selectedFaultIndex + 1} ({faults[_selectedFaultIndex].Type})"
+                        ? $"{faults[_selectedFaultIndex].Type.ToString().Replace("Fault_", "")} Fault"
                         : "None"))
             {
                 for (var i = 0; i < faults.Count; i++)
                 {
-                    var label = $"Fault {i + 1} ({faults[i].Type})";
+                    var fault = faults[i];
+                    string label = $"{fault.Type.ToString().Replace("Fault_", "")} - Dip: {fault.Dip:F0}°";
                     if (ImGui.Selectable(label, _selectedFaultIndex == i))
                     {
                         _selectedFaultIndex = i;
-                        LoadFaultProperties(faults[i]);
+                        _dipAngle = fault.Dip;
+                        _displacement = fault.Displacement ?? 0f;
+                        _dipDirection = fault.DipDirection ?? "E";
+                        
+                        // Sync with viewer
+                        dataset.GetViewer()?.Tools.SetSelectedFault(fault);
                     }
                 }
 
                 ImGui.EndCombo();
             }
 
-            if (_selectedFaultIndex < 0 || _selectedFaultIndex >= faults.Count)
+            if (_selectedFaultIndex >= 0 && _selectedFaultIndex < faults.Count)
             {
-                ImGui.TextDisabled("Select a fault to edit.");
-                return;
-            }
+                var selectedFault = faults[_selectedFaultIndex];
 
-            var selectedFault = faults[_selectedFaultIndex];
+                ImGui.Separator();
+                ImGui.TextColored(new Vector4(1f, 0.7f, 0.7f, 1f), "Fault Properties");
 
-            ImGui.Separator();
-            ImGui.TextColored(new Vector4(1f, 0.3f, 0.3f, 1f), "Fault Properties");
-
-            // Fault type
-            ImGui.Text("Fault Type:");
-            ImGui.SetNextItemWidth(-1);
-            if (ImGui.BeginCombo("##FaultType", _newFaultType.ToString()))
-            {
-                var faultTypes = new[]
+                // Dip angle
+                ImGui.Text("Dip Angle:");
+                if (ImGui.SliderFloat("##Dip", ref _dipAngle, 0f, 90f, "%.1f°"))
                 {
-                    GeologicalMapping.GeologicalFeatureType.Fault_Normal,
-                    GeologicalMapping.GeologicalFeatureType.Fault_Reverse,
-                    GeologicalMapping.GeologicalFeatureType.Fault_Thrust,
-                    GeologicalMapping.GeologicalFeatureType.Fault_Transform,
-                    GeologicalMapping.GeologicalFeatureType.Fault_Detachment
-                };
+                    selectedFault.Dip = _dipAngle;
+                    UpdateFaultGeometry(selectedFault);
+                    dataset.MarkAsModified();
+                }
 
-                foreach (var type in faultTypes)
-                    if (ImGui.Selectable(type.ToString(), _newFaultType == type))
+                // Dip direction
+                ImGui.Text("Dip Direction:");
+                ImGui.InputText("##DipDir", ref _dipDirection, 64);
+                if (ImGui.IsItemDeactivatedAfterEdit())
+                {
+                    selectedFault.DipDirection = _dipDirection;
+                    dataset.MarkAsModified();
+                }
+
+                // Displacement
+                ImGui.Text("Displacement:");
+                if (ImGui.InputFloat("##Displacement", ref _displacement))
+                {
+                    selectedFault.Displacement = _displacement;
+                    
+                    // Apply displacement to formations following geological constraints
+                    if (_displacement != 0 && selectedFault.FaultTrace.Count >= 2)
                     {
-                        _newFaultType = type;
-                        selectedFault.Type = type;
+                        GeologicalConstraints.ApplyFaultDisplacement(
+                            selectedFault,
+                            dataset.ProfileData.Formations,
+                            _displacement
+                        );
                     }
+                    
+                    dataset.MarkAsModified();
+                }
 
-                ImGui.EndCombo();
-            }
-
-            // Dip angle
-            ImGui.Text("Dip Angle:");
-            if (ImGui.SliderFloat("##Dip", ref _newDip, 0f, 90f, "%.1f°"))
-            {
-                selectedFault.Dip = _newDip;
-                UpdateFaultGeometry(selectedFault);
-            }
-
-            // Displacement
-            ImGui.Text("Displacement:");
-            if (ImGui.SliderFloat("##Displacement", ref _newDisplacement, 0f, 2000f, "%.1f m"))
-                selectedFault.Displacement = _newDisplacement;
-
-            ImGui.Separator();
-
-            // Geometry info
-            ImGui.Text($"Fault trace points: {selectedFault.FaultTrace.Count}");
-            if (selectedFault.FaultTrace.Count >= 2)
-            {
-                var length = CalculateFaultLength(selectedFault);
-                ImGui.Text($"Fault length: {length:F1} m");
-            }
-
-            ImGui.Separator();
-            ImGui.TextColored(new Vector4(0.3f, 0.8f, 1f, 1f), "Geometry Editing");
-            
-            var viewer = dataset.GetViewer();
-
-            // Add Point
-            if (ImGui.Button("Add Point to Middle", new Vector2(-1, 0)))
-            {
-                if (selectedFault.FaultTrace.Count >= 2)
+                // Fault type
+                ImGui.Text("Fault Type:");
+                var currentType = selectedFault.Type;
+                if (ImGui.BeginCombo("##FaultType", currentType.ToString().Replace("Fault_", "")))
                 {
-                    // Find longest segment
-                    var insertIndex = -1;
-                    var maxLenSq = 0f;
-                    for (var i = 0; i < selectedFault.FaultTrace.Count - 1; i++)
+                    foreach (var type in Enum.GetValues<GeologicalMapping.GeologicalFeatureType>()
+                        .Where(t => t.ToString().StartsWith("Fault_")))
                     {
-                        var lenSq = Vector2.DistanceSquared(selectedFault.FaultTrace[i], selectedFault.FaultTrace[i + 1]);
-                        if (lenSq > maxLenSq)
+                        if (ImGui.Selectable(type.ToString().Replace("Fault_", ""), currentType == type))
                         {
-                            maxLenSq = lenSq;
-                            insertIndex = i;
+                            selectedFault.Type = type;
+                            dataset.MarkAsModified();
                         }
                     }
-
-                    if (insertIndex != -1)
-                    {
-                        var p1 = selectedFault.FaultTrace[insertIndex];
-                        var p2 = selectedFault.FaultTrace[insertIndex + 1];
-                        var midPoint = Vector2.Lerp(p1, p2, 0.5f);
-                        
-                        var cmd = new InsertItemCommand<Vector2>(selectedFault.FaultTrace, insertIndex + 1, midPoint, "Fault Vertex");
-                        viewer?.UndoRedo.ExecuteCommand(cmd);
-                        Logger.Log("Added new vertex to fault middle.");
-                    }
+                    ImGui.EndCombo();
                 }
-            }
-            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Adds a new vertex to the middle of the longest segment of the fault trace.");
 
-            // Remove Point
-            var canRemove = viewer != null && viewer.SelectedVertexIndex != -1 && selectedFault.FaultTrace.Count > 2;
-            if (!canRemove)
-            {
-                ImGui.BeginDisabled();
-            }
+                ImGui.Separator();
 
-            if (ImGui.Button("Remove Selected Point", new Vector2(-1, 0)))
-            {
-                var cmd = new RemoveItemAtCommand<Vector2>(selectedFault.FaultTrace, viewer.SelectedVertexIndex, "Fault Vertex");
-                viewer.UndoRedo.ExecuteCommand(cmd);
-                viewer.SelectedVertexIndex = -1; // Deselect
-                Logger.Log("Removed selected vertex from fault.");
-            }
+                // Info
+                ImGui.Text($"Vertices: {selectedFault.FaultTrace.Count}");
+                ImGui.TextWrapped("Use the viewer to add/remove vertices by right-clicking on the fault.");
 
-            if (!canRemove)
-            {
-                ImGui.EndDisabled();
-                if (ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled))
+                ImGui.Separator();
+
+                if (ImGui.Button("Delete Fault", new Vector2(-1, 0)))
                 {
-                    if (selectedFault.FaultTrace.Count <= 2)
-                    {
-                        ImGui.SetTooltip("Cannot remove points from a 2-point fault.");
-                    }
-                    else
-                    {
-                        ImGui.SetTooltip("Select a vertex in the viewport to remove it.");
-                    }
+                    dataset.ProfileData.Faults.RemoveAt(_selectedFaultIndex);
+                    _selectedFaultIndex = -1;
+                    dataset.MarkAsModified();
+                    
+                    // Sync with viewer
+                    dataset.GetViewer()?.Tools.ClearSelection();
+                    
+                    Logger.Log("Deleted fault");
                 }
             }
-
-            ImGui.Separator();
-
-            // Actions
-            if (ImGui.Button("Reverse Fault Direction", new Vector2(-1, 0))) ReverseFaultDirection(selectedFault);
-
-            if (ImGui.Button("Extend to Basement", new Vector2(-1, 0))) ExtendFaultToDepth(selectedFault, -5000f);
-
-            if (ImGui.Button("Make Listric", new Vector2(-1, 0))) MakeFaultListric(selectedFault);
-
-            if (ImGui.Button("Delete Fault", new Vector2(-1, 0)))
+            else
             {
-                var faultToDelete = dataset.ProfileData.Faults[_selectedFaultIndex];
-                var cmd = new TwoDGeologyViewer.RemoveFaultCommand(dataset.ProfileData, faultToDelete);
-                dataset.GetViewer()?.UndoRedo.ExecuteCommand(cmd);
-
-                _selectedFaultIndex = -1;
+                ImGui.TextDisabled("Select a fault to edit, or draw one in the viewer.");
             }
-        }
-
-        private void LoadFaultProperties(GeologicalMapping.CrossSectionGenerator.ProjectedFault fault)
-        {
-            _newDip = fault.Dip;
-            _newDisplacement = fault.Displacement ?? 100f;
-            _newFaultType = fault.Type;
         }
 
         private void UpdateFaultGeometry(GeologicalMapping.CrossSectionGenerator.ProjectedFault fault)
         {
-            // Only auto-adjust simple two-point faults. This preserves user-drawn complex faults.
-            if (fault.FaultTrace.Count != 2) return;
-        
-            var topPoint = fault.FaultTrace[0];
-            var dipRad = fault.Dip * MathF.PI / 180f;
-            if (Math.Abs(dipRad) < 0.001) return;
-
-            // Preserve the vertical drop but recalculate horizontal position based on new dip
-            var verticalDist = Math.Abs(topPoint.Y - fault.FaultTrace[1].Y);
-            var horizontalDist = verticalDist / MathF.Tan(dipRad);
-
-            // Check original direction to maintain it (e.g., dipping left vs. right)
-            var originalHorizontalDist = fault.FaultTrace[1].X - topPoint.X;
-            if (Math.Sign(originalHorizontalDist) != 0)
+            // Update the fault trace based on the new dip angle
+            // Keep the start point, recalculate the end point
+            if (fault.FaultTrace.Count >= 2)
             {
-                horizontalDist *= Math.Sign(originalHorizontalDist);
+                var start = fault.FaultTrace[0];
+                var length = Vector2.Distance(start, fault.FaultTrace[^1]);
+                
+                var dipRad = fault.Dip * MathF.PI / 180f;
+                var dx = length * MathF.Cos(dipRad);
+                var dy = length * MathF.Sin(dipRad);
+                
+                // Assuming dipping to the right for simplicity
+                var end = new Vector2(start.X + dx, start.Y - dy);
+                fault.FaultTrace[^1] = end;
             }
-
-            fault.FaultTrace[1] = new Vector2(topPoint.X + horizontalDist, topPoint.Y - verticalDist);
-        }
-
-        private float CalculateFaultLength(GeologicalMapping.CrossSectionGenerator.ProjectedFault fault)
-        {
-            var length = 0f;
-            for (var i = 0; i < fault.FaultTrace.Count - 1; i++)
-                length += Vector2.Distance(fault.FaultTrace[i], fault.FaultTrace[i + 1]);
-            return length;
-        }
-
-        private void ReverseFaultDirection(GeologicalMapping.CrossSectionGenerator.ProjectedFault fault)
-        {
-            fault.FaultTrace.Reverse();
-            Logger.Log("Reversed fault direction");
-        }
-
-        private void ExtendFaultToDepth(GeologicalMapping.CrossSectionGenerator.ProjectedFault fault,
-            float targetDepth)
-        {
-            if (fault.FaultTrace.Count < 2) return;
-
-            var lastPoint = fault.FaultTrace[^1];
-            var dipRad = fault.Dip * MathF.PI / 180f;
-            var depthToGo = lastPoint.Y - targetDepth;
-            var horizontalExtent = depthToGo / MathF.Tan(dipRad);
-
-            fault.FaultTrace.Add(new Vector2(lastPoint.X + horizontalExtent, targetDepth));
-            Logger.Log($"Extended fault to depth: {targetDepth} m");
-        }
-
-        private void MakeFaultListric(GeologicalMapping.CrossSectionGenerator.ProjectedFault fault)
-        {
-            if (fault.FaultTrace.Count < 2) return;
-
-            // Convert planar fault to listric (curved) geometry
-            var surfacePoint = fault.FaultTrace[0];
-            var initialDip = fault.Dip;
-            var detachmentDepth = -3000f;
-
-            fault.FaultTrace.Clear();
-            fault.FaultTrace.Add(surfacePoint);
-
-            var segments = 10;
-            for (var i = 1; i <= segments; i++)
-            {
-                var depth = (surfacePoint.Y - detachmentDepth) * i / segments;
-
-                // Dip decreases exponentially with depth (typical listric geometry)
-                var dip = initialDip * MathF.Exp(-depth / 2000f);
-                var dipRad = dip * MathF.PI / 180f;
-
-                var x = surfacePoint.X + depth / MathF.Tan(dipRad);
-                var y = surfacePoint.Y - depth;
-
-                fault.FaultTrace.Add(new Vector2(x, y));
-            }
-
-            Logger.Log("Converted fault to listric geometry");
         }
     }
 
@@ -548,96 +514,82 @@ public class TwoDGeologyEditorTools : IDatasetTools
 
     private class StructuralElementCreator
     {
-        private float _displacement = 500f;
-        private float _faultDip = 60f;
-        private float _positionX = 5000f;
-        private float _structureDepth = 1000f;
         private StructureType _structureType = StructureType.Graben;
+        private float _positionX = 5000f;
+        private float _topElevation = 0f;
         private float _structureWidth = 2000f;
-        private float _topElevation;
+        private float _structureDepth = 1500f;
+        private float _faultDip = 60f;
+        private float _displacement = 200f;
 
         public void Draw(TwoDGeologyDataset dataset)
         {
             if (dataset?.ProfileData == null) return;
 
-            ImGui.TextWrapped("Create complex geological structures automatically.");
+            ImGui.TextWrapped("Create complete structural features like grabens, horsts, and thrust systems.");
             ImGui.Separator();
 
-            // Structure type selection
+            // Structure type
             ImGui.Text("Structure Type:");
             ImGui.SetNextItemWidth(-1);
             if (ImGui.BeginCombo("##StructType", _structureType.ToString()))
             {
                 foreach (var type in Enum.GetValues<StructureType>())
+                {
                     if (ImGui.Selectable(type.ToString(), _structureType == type))
+                    {
                         _structureType = type;
-
+                    }
+                }
                 ImGui.EndCombo();
             }
 
             ImGui.Separator();
 
-            // Common parameters
-            ImGui.Text("Position (X):");
-            ImGui.SliderFloat("##PosX", ref _positionX, 0f, 20000f, "%.0f m");
+            // Parameters
+            ImGui.Text("Position along profile:");
+            ImGui.SliderFloat("##PosX", ref _positionX, 0f, dataset.ProfileData.Profile.TotalDistance, "%.0f m");
 
             ImGui.Text("Top Elevation:");
-            ImGui.SliderFloat("##TopElev", ref _topElevation, -1000f, 1000f, "%.0f m");
+            ImGui.InputFloat("##TopElev", ref _topElevation);
 
             ImGui.Text("Structure Width:");
             ImGui.SliderFloat("##Width", ref _structureWidth, 500f, 5000f, "%.0f m");
 
             ImGui.Text("Structure Depth:");
-            ImGui.SliderFloat("##Depth", ref _structureDepth, 500f, 5000f, "%.0f m");
-
-            ImGui.Text("Fault Dip:");
-            ImGui.SliderFloat("##FaultDip", ref _faultDip, 30f, 90f, "%.1f°");
+            ImGui.SliderFloat("##Depth", ref _structureDepth, 500f, 3000f, "%.0f m");
 
             if (_structureType != StructureType.FoldPair)
             {
-                ImGui.Text("Displacement:");
-                ImGui.SliderFloat("##Disp", ref _displacement, 100f, 2000f, "%.0f m");
+                ImGui.Text("Fault Dip:");
+                ImGui.SliderFloat("##FDip", ref _faultDip, 30f, 90f, "%.0f°");
             }
 
-            ImGui.Separator();
-
-            // Structure-specific info
-            DrawStructureInfo();
+            ImGui.Text("Displacement/Amplitude:");
+            ImGui.InputFloat("##Disp", ref _displacement);
 
             ImGui.Separator();
 
             // Create button
-            if (ImGui.Button($"Create {_structureType}", new Vector2(-1, 0))) CreateStructure(dataset);
-        }
-
-        private void DrawStructureInfo()
-        {
-            ImGui.TextColored(new Vector4(0.7f, 0.7f, 1f, 1f), "Structure Info:");
-
-            switch (_structureType)
+            if (ImGui.Button("Create Structure", new Vector2(-1, 0)))
             {
-                case StructureType.Graben:
-                    ImGui.BulletText("Downthrown block between two normal faults");
-                    ImGui.BulletText("Creates subsidence basin");
-                    break;
-                case StructureType.Horst:
-                    ImGui.BulletText("Uplifted block between two normal faults");
-                    ImGui.BulletText("Creates structural high");
-                    break;
-                case StructureType.ThrustSystem:
-                    ImGui.BulletText("Imbricate thrust faults");
-                    ImGui.BulletText("Creates compressional structures");
-                    break;
-                case StructureType.FoldPair:
-                    ImGui.BulletText("Anticline and syncline pair");
-                    ImGui.BulletText("No faulting, pure folding");
-                    break;
-                case StructureType.Detachment:
-                    ImGui.BulletText("Low-angle detachment fault");
-                    ImGui.BulletText("Creates extensional province");
-                    break;
+                CreateStructure(dataset);
             }
+
+            // Description
+            ImGui.Separator();
+            ImGui.TextColored(new Vector4(0.7f, 0.7f, 0.7f, 1f), GetStructureDescription(_structureType));
         }
+
+        private string GetStructureDescription(StructureType type) => type switch
+        {
+            StructureType.Graben => "Down-dropped block between two normal faults dipping towards each other",
+            StructureType.Horst => "Up-thrown block between two normal faults dipping away from each other",
+            StructureType.ThrustSystem => "Imbricate thrust faults with decreasing displacement",
+            StructureType.FoldPair => "Anticline-syncline pair by folding existing formations",
+            StructureType.Detachment => "Low-angle extensional detachment fault",
+            _ => ""
+        };
 
         private void CreateStructure(TwoDGeologyDataset dataset)
         {
@@ -659,19 +611,20 @@ public class TwoDGeologyEditorTools : IDatasetTools
                     CreateDetachment(dataset);
                     break;
             }
+
+            dataset.MarkAsModified();
         }
 
         private void CreateGraben(TwoDGeologyDataset dataset)
         {
-            // Create two normal faults dipping toward each other
-            var leftFault = CreateFault(
+            var leftFault = CreateFiniteFault(
                 new Vector2(_positionX - _structureWidth / 2, _topElevation),
                 _faultDip,
                 _structureDepth,
                 GeologicalMapping.GeologicalFeatureType.Fault_Normal,
                 true);
 
-            var rightFault = CreateFault(
+            var rightFault = CreateFiniteFault(
                 new Vector2(_positionX + _structureWidth / 2, _topElevation),
                 _faultDip,
                 _structureDepth,
@@ -689,15 +642,14 @@ public class TwoDGeologyEditorTools : IDatasetTools
 
         private void CreateHorst(TwoDGeologyDataset dataset)
         {
-            // Create two normal faults dipping away from each other
-            var leftFault = CreateFault(
+            var leftFault = CreateFiniteFault(
                 new Vector2(_positionX - _structureWidth / 2, _topElevation),
                 _faultDip,
                 _structureDepth,
                 GeologicalMapping.GeologicalFeatureType.Fault_Normal,
                 false);
 
-            var rightFault = CreateFault(
+            var rightFault = CreateFiniteFault(
                 new Vector2(_positionX + _structureWidth / 2, _topElevation),
                 _faultDip,
                 _structureDepth,
@@ -715,21 +667,19 @@ public class TwoDGeologyEditorTools : IDatasetTools
 
         private void CreateThrustSystem(TwoDGeologyDataset dataset)
         {
-            // Create imbricate thrust system
             var numFaults = 3;
             var spacing = _structureWidth / numFaults;
 
             for (var i = 0; i < numFaults; i++)
             {
-                var thrust = CreateFault(
+                var thrust = CreateFiniteFault(
                     new Vector2(_positionX + i * spacing, _topElevation),
-                    30f, // Typical thrust dip
+                    30f,
                     _structureDepth,
                     GeologicalMapping.GeologicalFeatureType.Fault_Thrust,
                     false);
 
-                thrust.Displacement = _displacement / (i + 1); // Decreasing displacement
-
+                thrust.Displacement = _displacement / (i + 1);
                 dataset.ProfileData.Faults.Add(thrust);
             }
 
@@ -738,7 +688,6 @@ public class TwoDGeologyEditorTools : IDatasetTools
 
         private void CreateFoldPair(TwoDGeologyDataset dataset)
         {
-            // Create anticline-syncline pair by deforming existing formations
             var wavelength = _structureWidth;
             var amplitude = _displacement;
 
@@ -750,26 +699,23 @@ public class TwoDGeologyEditorTools : IDatasetTools
 
         private void CreateDetachment(TwoDGeologyDataset dataset)
         {
-            // Create low-angle detachment fault
             var detachment = new GeologicalMapping.CrossSectionGenerator.ProjectedFault
             {
                 Type = GeologicalMapping.GeologicalFeatureType.Fault_Detachment,
-                Dip = 15f, // Low-angle
+                Dip = 15f,
                 Displacement = _displacement,
                 FaultTrace = new List<Vector2>()
             };
 
-            // Create gently dipping surface
             detachment.FaultTrace.Add(new Vector2(_positionX, _topElevation));
             detachment.FaultTrace.Add(new Vector2(_positionX + _structureWidth, _topElevation - 500f));
             detachment.FaultTrace.Add(new Vector2(_positionX + _structureWidth * 2, _topElevation - _structureDepth));
 
             dataset.ProfileData.Faults.Add(detachment);
-
             Logger.Log("Created detachment fault");
         }
 
-        private GeologicalMapping.CrossSectionGenerator.ProjectedFault CreateFault(
+        private GeologicalMapping.CrossSectionGenerator.ProjectedFault CreateFiniteFault(
             Vector2 surfacePoint, float dip, float depth,
             GeologicalMapping.GeologicalFeatureType type, bool dippingRight)
         {
@@ -826,9 +772,9 @@ public class TwoDGeologyEditorTools : IDatasetTools
     }
 
     #endregion
-    
+
     #region Structural Restoration Tool
-    
+
     private class StructuralRestorationTool
     {
         private float _restorationPercentage = 0f;
@@ -843,10 +789,10 @@ public class TwoDGeologyEditorTools : IDatasetTools
                 return;
             }
 
-            ImGui.TextWrapped("Unfold and unfault the cross-section to its pre-deformation state. The result is shown as a semi-transparent overlay.");
+            ImGui.TextWrapped("Unfold and unfault the cross-section to its pre-deformation state. The result is shown as a semi-transparent overlay in the viewer.");
             ImGui.Separator();
 
-            // Initialize the processor if the dataset has changed
+            // Initialize the processor if needed
             if (_restorationProcessor == null)
             {
                 _restorationProcessor = new StructuralRestoration(dataset.ProfileData);
@@ -860,22 +806,20 @@ public class TwoDGeologyEditorTools : IDatasetTools
             }
 
             ImGui.Separator();
-            
+
             if (ImGui.Button("Clear Overlay", new Vector2(-1, 0)))
             {
                 dataset.GetViewer()?.ClearRestorationData();
                 _restorationPercentage = 0f;
             }
-            
+
             if (ImGui.Button("Apply Restored State", new Vector2(-1, 0)))
             {
                 if (_lastRestoredSection != null)
                 {
-                    // This is a destructive action, replace the current profile data
                     dataset.ProfileData = _lastRestoredSection;
                     dataset.MarkAsModified();
-                    
-                    // Reset tool
+
                     _restorationProcessor = new StructuralRestoration(dataset.ProfileData);
                     _lastRestoredSection = null;
                     _restorationPercentage = 0f;
