@@ -9,7 +9,7 @@ namespace GeoscientistToolkit.Business.GIS;
 
 /// <summary>
 /// Provides complete geological cross-section presets with multiple layers
-/// FINAL VERSION: Layers touch topography, crystalline basement always present, no bypassing
+/// FIXED VERSION: Proper fault displacement applied to formations
 /// </summary>
 public static class GeologicalLayerPresets
 {
@@ -44,7 +44,7 @@ public static class GeologicalLayerPresets
             _ => CreateSimpleLayers(totalDistance, baseElevation)
         };
         
-        // CRITICAL: Validate geology
+        // CRITICAL: Validate and fix geology
         ValidateAndFixGeology(section);
         
         return section;
@@ -55,130 +55,225 @@ public static class GeologicalLayerPresets
         if (section.Profile == null || section.Formations.Count == 0)
             return;
         
-        // Ensure first layer touches topography
-        EnsureTopLayerTouchesTopography(section);
+        // Fix all formations to properly contact topography without gaps
+        ClipAllFormationsToTopography(section);
         
-        // Clip all formations to topography
-        foreach (var formation in section.Formations)
-        {
-            ClipFormationToTopography(formation, section.Profile);
-        }
+        // Ensure proper layer continuity when dipping
+        EnsureLayerContinuity(section);
         
-        // Fix overlaps
+        // Fix overlaps while maintaining contact
         FixOverlappingFormations(section.Formations);
-        
-        // Ensure all layers respect basement
-        EnsureAllLayersRespectBasement(section);
     }
     
     /// <summary>
-    /// CRITICAL: Make sure the topmost sedimentary layer touches the topography exactly
+    /// Apply fault displacement to formations - CRITICAL for restoration to work
     /// </summary>
-    private static void EnsureTopLayerTouchesTopography(CrossSection section)
+    private static void ApplyFaultDisplacement(CrossSection section, ProjectedFault fault, float displacement)
     {
-        // Find the first non-basement formation (topmost sedimentary layer)
-        var topFormation = section.Formations.FirstOrDefault(f => f.Name != "Crystalline Basement");
+        if (fault.FaultTrace.Count < 2) return;
         
-        if (topFormation == null || topFormation.TopBoundary.Count == 0)
-            return;
+        // Calculate displacement vector based on fault type and dip
+        var dipRad = fault.Dip * MathF.PI / 180f;
+        Vector2 displacementVector;
         
-        var profile = section.Profile;
-        
-        // Force top boundary to match topography exactly
-        for (int i = 0; i < topFormation.TopBoundary.Count && i < profile.Points.Count; i++)
+        switch (fault.Type)
         {
-            float x = topFormation.TopBoundary[i].X;
-            float topoElevation = GetTopographyElevationAt(profile, x);
-            
-            topFormation.TopBoundary[i] = new Vector2(x, topoElevation);
+            case GeologicalFeatureType.Fault_Normal:
+                // Normal fault - hanging wall moves down
+                displacementVector = new Vector2(
+                    displacement * MathF.Cos(dipRad) * 0.3f, // Small horizontal component
+                    -displacement * MathF.Sin(dipRad)); // Downward vertical component
+                break;
+                
+            case GeologicalFeatureType.Fault_Reverse:
+            case GeologicalFeatureType.Fault_Thrust:
+                // Thrust/reverse fault - hanging wall moves up and over
+                displacementVector = new Vector2(
+                    displacement * MathF.Cos(dipRad), // Horizontal component (overthrust)
+                    displacement * MathF.Sin(dipRad)); // Upward vertical component
+                break;
+                
+            default:
+                displacementVector = new Vector2(0, -displacement);
+                break;
         }
-    }
-    
-    /// <summary>
-    /// CRITICAL: Ensure no layer goes below crystalline basement
-    /// </summary>
-    private static void EnsureAllLayersRespectBasement(CrossSection section)
-    {
-        // Find the basement
-        var basement = section.Formations.FirstOrDefault(f => f.Name == "Crystalline Basement");
         
-        if (basement == null || basement.TopBoundary.Count == 0)
-            return;
-        
-        // Clip all other formations to not go below basement top
+        // Apply displacement to all formations
         foreach (var formation in section.Formations)
         {
             if (formation.Name == "Crystalline Basement")
-                continue;
-            
-            for (int i = 0; i < formation.BottomBoundary.Count && i < basement.TopBoundary.Count; i++)
-            {
-                float basementTop = basement.TopBoundary[i].Y;
+                continue; // Don't displace basement
                 
-                // Bottom boundary cannot go below basement
-                if (formation.BottomBoundary[i].Y < basementTop)
+            // Displace top boundary
+            for (int i = 0; i < formation.TopBoundary.Count; i++)
+            {
+                if (IsInHangingWall(formation.TopBoundary[i], fault))
+                {
+                    formation.TopBoundary[i] += displacementVector;
+                }
+            }
+            
+            // Displace bottom boundary
+            for (int i = 0; i < formation.BottomBoundary.Count; i++)
+            {
+                if (IsInHangingWall(formation.BottomBoundary[i], fault))
+                {
+                    formation.BottomBoundary[i] += displacementVector;
+                }
+            }
+        }
+    }
+    
+    /// <summary>
+    /// Determine if a point is in the hanging wall of a fault
+    /// </summary>
+    private static bool IsInHangingWall(Vector2 point, ProjectedFault fault)
+    {
+        if (fault.FaultTrace.Count < 2) return false;
+        
+        // Find closest segment on fault trace
+        float minDist = float.MaxValue;
+        int closestSegment = 0;
+        
+        for (int i = 0; i < fault.FaultTrace.Count - 1; i++)
+        {
+            var dist = DistanceToLineSegment(point, fault.FaultTrace[i], fault.FaultTrace[i + 1]);
+            if (dist < minDist)
+            {
+                minDist = dist;
+                closestSegment = i;
+            }
+        }
+        
+        var p1 = fault.FaultTrace[closestSegment];
+        var p2 = fault.FaultTrace[closestSegment + 1];
+        
+        // Use cross product to determine which side of fault
+        var cross = (p2.X - p1.X) * (point.Y - p1.Y) - (p2.Y - p1.Y) * (point.X - p1.X);
+        
+        // For thrust faults dipping to the right (increasing X), hanging wall is on left (negative cross product)
+        // For normal faults, hanging wall is typically on the downthrown side
+        bool isDippingRight = p2.X > p1.X && p2.Y < p1.Y;
+        
+        if (fault.Type == GeologicalFeatureType.Fault_Thrust)
+        {
+            // Thrust faults - hanging wall is above the fault
+            return isDippingRight ? cross < 0 : cross > 0;
+        }
+        else if (fault.Type == GeologicalFeatureType.Fault_Normal)
+        {
+            // Normal faults - hanging wall is on the downthrown side
+            return isDippingRight ? cross > 0 : cross < 0;
+        }
+        
+        return false;
+    }
+    
+    private static float DistanceToLineSegment(Vector2 point, Vector2 lineStart, Vector2 lineEnd)
+    {
+        var line = lineEnd - lineStart;
+        var lineLength = line.Length();
+        
+        if (lineLength < 1e-6f)
+            return Vector2.Distance(point, lineStart);
+        
+        var t = Math.Max(0, Math.Min(1, Vector2.Dot(point - lineStart, line) / (lineLength * lineLength)));
+        var projection = lineStart + t * line;
+        
+        return Vector2.Distance(point, projection);
+    }
+    
+    /// <summary>
+    /// CRITICAL FIX: Ensure all formations are properly clipped to topography with NO GAPS
+    /// </summary>
+    private static void ClipAllFormationsToTopography(CrossSection section)
+    {
+        var topographyPoints = section.Profile.Points.Select(p => new Vector2(p.Distance, p.Elevation)).ToList();
+        
+        foreach (var formation in section.Formations)
+        {
+            if (formation.Name == "Crystalline Basement")
+                continue; // Don't clip basement
+                
+            // Clip each point to be AT OR BELOW topography (no gaps!)
+            for (int i = 0; i < formation.TopBoundary.Count; i++)
+            {
+                var point = formation.TopBoundary[i];
+                float topoElevation = GetTopographyElevationAt(section.Profile, point.X);
+                
+                // If point is above topography, bring it DOWN to topography exactly
+                if (point.Y > topoElevation)
+                {
+                    formation.TopBoundary[i] = new Vector2(point.X, topoElevation);
+                }
+            }
+            
+            // Ensure bottom boundary doesn't go above top
+            for (int i = 0; i < formation.BottomBoundary.Count && i < formation.TopBoundary.Count; i++)
+            {
+                if (formation.BottomBoundary[i].Y > formation.TopBoundary[i].Y)
                 {
                     formation.BottomBoundary[i] = new Vector2(
                         formation.BottomBoundary[i].X,
-                        basementTop
-                    );
-                }
-                
-                // If top also goes below basement, clip it too
-                if (i < formation.TopBoundary.Count && formation.TopBoundary[i].Y < basementTop)
-                {
-                    formation.TopBoundary[i] = new Vector2(
-                        formation.TopBoundary[i].X,
-                        basementTop
+                        formation.TopBoundary[i].Y - 10f // Minimum thickness
                     );
                 }
             }
         }
     }
     
-    private static void ClipFormationToTopography(ProjectedFormation formation, GeologicalMapping.ProfileGenerator.TopographicProfile profile)
+    /// <summary>
+    /// FIX: Ensure layer continuity when dipping - new layers appear on top
+    /// </summary>
+    private static void EnsureLayerContinuity(CrossSection section)
     {
-        if (formation.TopBoundary.Count == 0 || formation.Name == "Crystalline Basement")
-            return;
+        // When a layer dips below another, ensure the upper layer extends to fill the space
+        var sortedFormations = section.Formations
+            .Where(f => f.Name != "Crystalline Basement")
+            .OrderByDescending(f => f.TopBoundary.Count > 0 ? f.TopBoundary.Average(p => p.Y) : float.MinValue)
+            .ToList();
         
-        for (int i = 0; i < formation.TopBoundary.Count; i++)
+        for (int i = 0; i < sortedFormations.Count - 1; i++)
         {
-            var point = formation.TopBoundary[i];
-            float topoElevation = GetTopographyElevationAt(profile, point.X);
+            var upperFormation = sortedFormations[i];
+            var lowerFormation = sortedFormations[i + 1];
             
-            if (point.Y > topoElevation)
+            // Ensure upper formation's bottom follows lower formation's top
+            for (int j = 0; j < upperFormation.BottomBoundary.Count && j < lowerFormation.TopBoundary.Count; j++)
             {
-                formation.TopBoundary[i] = new Vector2(point.X, topoElevation);
-            }
-            
-            if (i < formation.BottomBoundary.Count)
-            {
-                var bottomPoint = formation.BottomBoundary[i];
-                if (bottomPoint.Y > formation.TopBoundary[i].Y)
-                {
-                    formation.BottomBoundary[i] = new Vector2(bottomPoint.X, formation.TopBoundary[i].Y);
-                }
+                upperFormation.BottomBoundary[j] = new Vector2(
+                    upperFormation.BottomBoundary[j].X,
+                    lowerFormation.TopBoundary[j].Y
+                );
             }
         }
     }
     
     private static float GetTopographyElevationAt(GeologicalMapping.ProfileGenerator.TopographicProfile profile, float x)
     {
+        if (profile.Points.Count == 0) return 0f;
+        
+        // Find bracketing points and interpolate
         for (int i = 0; i < profile.Points.Count - 1; i++)
         {
-            if (x >= profile.Points[i].Distance && x <= profile.Points[i + 1].Distance)
+            var p1 = profile.Points[i];
+            var p2 = profile.Points[i + 1];
+            
+            if (x >= p1.Distance && x <= p2.Distance)
             {
-                float t = (x - profile.Points[i].Distance) / (profile.Points[i + 1].Distance - profile.Points[i].Distance);
-                return profile.Points[i].Elevation + t * (profile.Points[i + 1].Elevation - profile.Points[i].Elevation);
+                if (p2.Distance - p1.Distance < 0.001f)
+                    return p1.Elevation;
+                    
+                float t = (x - p1.Distance) / (p2.Distance - p1.Distance);
+                return p1.Elevation + t * (p2.Elevation - p1.Elevation);
             }
         }
         
-        if (x < profile.Points[0].Distance)
+        // Return edge values if outside range
+        if (x <= profile.Points[0].Distance)
             return profile.Points[0].Elevation;
-        if (x > profile.Points[^1].Distance)
-            return profile.Points[^1].Elevation;
         
-        return profile.Points[0].Elevation;
+        return profile.Points[^1].Elevation;
     }
     
     private static void FixOverlappingFormations(List<ProjectedFormation> formations)
@@ -192,6 +287,7 @@ public static class GeologicalLayerPresets
             var currentFormation = sorted[i];
             var formationAbove = sorted[i - 1];
             
+            // Ensure current formation's top doesn't go above the formation above's bottom
             for (int j = 0; j < currentFormation.TopBoundary.Count && j < formationAbove.BottomBoundary.Count; j++)
             {
                 float maxAllowedElevation = formationAbove.BottomBoundary[j].Y;
@@ -201,15 +297,6 @@ public static class GeologicalLayerPresets
                     currentFormation.TopBoundary[j] = new Vector2(
                         currentFormation.TopBoundary[j].X,
                         maxAllowedElevation
-                    );
-                }
-                
-                if (j < currentFormation.BottomBoundary.Count && 
-                    currentFormation.BottomBoundary[j].Y > currentFormation.TopBoundary[j].Y)
-                {
-                    currentFormation.BottomBoundary[j] = new Vector2(
-                        currentFormation.BottomBoundary[j].X,
-                        currentFormation.TopBoundary[j].Y
                     );
                 }
             }
@@ -226,9 +313,12 @@ public static class GeologicalLayerPresets
             new LayerDefinition { Name = "Tertiary Molasse", Color = new Vector4(0.85f, 0.75f, 0.5f, 0.8f), Thickness = 200f },
             new LayerDefinition { Name = "Upper Cretaceous Limestone", Color = new Vector4(0.7f, 0.85f, 0.7f, 0.8f), Thickness = 300f },
             new LayerDefinition { Name = "Lower Cretaceous Marl", Color = new Vector4(0.6f, 0.7f, 0.6f, 0.8f), Thickness = 250f },
-            new LayerDefinition { Name = "Jurassic Limestone", Color = new Vector4(0.75f, 0.8f, 0.85f, 0.8f), Thickness = 400f },
-            new LayerDefinition { Name = "Triassic Sandstone", Color = new Vector4(0.9f, 0.65f, 0.4f, 0.8f), Thickness = 300f },
-            new LayerDefinition { Name = "Permian Shale", Color = new Vector4(0.5f, 0.4f, 0.4f, 0.8f), Thickness = 200f },
+            new LayerDefinition { Name = "Malm Limestone", Color = new Vector4(0.75f, 0.8f, 0.85f, 0.8f), Thickness = 400f },
+            new LayerDefinition { Name = "Dogger Oolite", Color = new Vector4(0.85f, 0.85f, 0.75f, 0.8f), Thickness = 300f },
+            new LayerDefinition { Name = "Lias Marl", Color = new Vector4(0.65f, 0.75f, 0.65f, 0.8f), Thickness = 350f },
+            new LayerDefinition { Name = "Keuper Evaporites", Color = new Vector4(0.9f, 0.7f, 0.5f, 0.8f), Thickness = 200f },
+            new LayerDefinition { Name = "Muschelkalk Limestone", Color = new Vector4(0.7f, 0.75f, 0.8f, 0.8f), Thickness = 250f },
+            new LayerDefinition { Name = "Buntsandstein", Color = new Vector4(0.9f, 0.65f, 0.4f, 0.8f), Thickness = 300f },
         };
     }
     
@@ -242,23 +332,41 @@ public static class GeologicalLayerPresets
     #endregion
     
     #region Preset Implementations
-    
-    private static CrossSection CreateSimpleLayers(float totalDistance, float baseElevation)
+
+    private static CrossSection CreateJuraMountains(float totalDistance, float baseElevation)
     {
-        var section = CreateBaseCrossSection(totalDistance, baseElevation, 100f);
-        var layers = GetStandardStratigraphicColumn();
+        var section = CreateBaseCrossSection(totalDistance, baseElevation, 0f);
         
-        float regionalDip = 5f;
+        // Create Jura-style topography
         var profile = section.Profile;
+        for (int i = 0; i < profile.Points.Count; i++)
+        {
+            float t = i / (float)(profile.Points.Count - 1);
+            float x = t * totalDistance;
+            
+            // Multiple gentle hills
+            float hill1 = 150f * MathF.Sin(x / (totalDistance * 0.3f) * MathF.PI);
+            float hill2 = 80f * MathF.Sin(x / (totalDistance * 0.15f) * MathF.PI);
+            float hill3 = 40f * MathF.Sin(x / (totalDistance * 0.08f) * MathF.PI);
+            float elevation = hill1 + hill2 + hill3 + 200f;
+            
+            profile.Points[i].Elevation = elevation;
+            profile.Points[i].Position = new Vector2(x, elevation);
+        }
+        profile.MinElevation = 0f;
+        profile.MaxElevation = 400f;
         
-        // 🔥 FIRST: Add crystalline basement
-        var basement = CreateCrystallineBasement(totalDistance, baseElevation, 0f);
+        // CRITICAL: Add crystalline basement with 2° dip (Alpine subduction)
+        var basement = CreateCrystallineBasement(totalDistance, baseElevation, 2f);
         section.Formations.Add(basement);
         
-        // Then add sedimentary layers ABOVE basement
-        for (int layerIdx = 0; layerIdx < layers.Length; layerIdx++)
+        var layers = GetStandardStratigraphicColumn().Skip(3).Take(6).ToArray();
+        
+        // Create initial undeformed layers
+        float currentBase = -200f;
+        
+        foreach (var layer in layers)
         {
-            var layer = layers[layerIdx];
             var formation = new ProjectedFormation
             {
                 Name = layer.Name,
@@ -267,32 +375,238 @@ public static class GeologicalLayerPresets
                 BottomBoundary = new List<Vector2>()
             };
             
-            for (int i = 0; i < profile.Points.Count; i++)
+            // Create initially flat layers
+            int numPoints = 100;
+            for (int i = 0; i <= numPoints; i++)
             {
-                float x = profile.Points[i].Distance;
-                float dipOffset = (x / totalDistance) * totalDistance * MathF.Tan(regionalDip * MathF.PI / 180f);
-                float topElevation;
-                
-                if (layerIdx == 0)
-                {
-                    // 🔥 First layer: MUST start at topography
-                    topElevation = profile.Points[i].Elevation;
-                }
-                else
-                {
-                    // Subsequent layers: start at previous layer's bottom
-                    var prevFormation = section.Formations[layerIdx]; // +1 because basement is at index 0
-                    topElevation = prevFormation.BottomBoundary[i].Y;
-                }
-                
-                topElevation -= dipOffset * layerIdx * 0.05f;
-                
-                formation.TopBoundary.Add(new Vector2(x, topElevation));
-                formation.BottomBoundary.Add(new Vector2(x, topElevation - layer.Thickness));
+                float x = i / (float)numPoints * totalDistance;
+                formation.TopBoundary.Add(new Vector2(x, currentBase));
+                formation.BottomBoundary.Add(new Vector2(x, currentBase - layer.Thickness));
             }
             
             section.Formations.Add(formation);
+            currentBase -= layer.Thickness;
         }
+        
+        // FIRST: Apply folding to create Jura-style folds
+        float[] foldCenters = { totalDistance * 0.2f, totalDistance * 0.5f, totalDistance * 0.8f };
+        float[] foldAmplitudes = { 400f, 500f, 350f };
+        float foldWidth = totalDistance * 0.25f;
+        
+        foreach (var formation in section.Formations.Where(f => f.Name != "Crystalline Basement"))
+        {
+            ApplyMultipleFolds(formation, foldCenters, foldAmplitudes, foldWidth);
+        }
+        
+        // THEN: Create thrust faults and apply their displacement
+        var thrust1 = new ProjectedFault
+        {
+            Type = GeologicalFeatureType.Fault_Thrust,
+            Dip = 30f,
+            DipDirection = "Northwest",
+            Displacement = 1200f,
+            FaultTrace = new List<Vector2>
+            {
+                new Vector2(totalDistance * 0.15f, 250f),
+                new Vector2(totalDistance * 0.35f, -800f)
+            }
+        };
+        section.Faults.Add(thrust1);
+        ApplyFaultDisplacement(section, thrust1, thrust1.Displacement.Value);
+        
+        var thrust2 = new ProjectedFault
+        {
+            Type = GeologicalFeatureType.Fault_Thrust,
+            Dip = 25f,
+            DipDirection = "Northwest",
+            Displacement = 1500f,
+            FaultTrace = new List<Vector2>
+            {
+                new Vector2(totalDistance * 0.45f, 300f),
+                new Vector2(totalDistance * 0.65f, -900f)
+            }
+        };
+        section.Faults.Add(thrust2);
+        ApplyFaultDisplacement(section, thrust2, thrust2.Displacement.Value);
+        
+        var thrust3 = new ProjectedFault
+        {
+            Type = GeologicalFeatureType.Fault_Thrust,
+            Dip = 35f,
+            DipDirection = "Northwest",
+            Displacement = 1000f,
+            FaultTrace = new List<Vector2>
+            {
+                new Vector2(totalDistance * 0.75f, 280f),
+                new Vector2(totalDistance * 0.9f, -700f)
+            }
+        };
+        section.Faults.Add(thrust3);
+        ApplyFaultDisplacement(section, thrust3, thrust3.Displacement.Value);
+        
+        // Add back thrust (vergence opposite)
+        var backThrust = new ProjectedFault
+        {
+            Type = GeologicalFeatureType.Fault_Thrust,
+            Dip = 40f,
+            DipDirection = "Southeast",
+            Displacement = 600f,
+            FaultTrace = new List<Vector2>
+            {
+                new Vector2(totalDistance * 0.6f, 250f),
+                new Vector2(totalDistance * 0.48f, -500f)
+            }
+        };
+        section.Faults.Add(backThrust);
+        ApplyFaultDisplacement(section, backThrust, backThrust.Displacement.Value);
+        
+        return section;
+    }
+    
+    private static void ApplyMultipleFolds(ProjectedFormation formation, float[] foldCenters, 
+        float[] foldAmplitudes, float foldWidth)
+    {
+        // Apply multiple fold axes to create complex Jura-style folding
+        for (int i = 0; i < formation.TopBoundary.Count; i++)
+        {
+            var point = formation.TopBoundary[i];
+            float totalOffset = 0f;
+            
+            // Sum contributions from multiple fold axes
+            for (int f = 0; f < foldCenters.Length; f++)
+            {
+                float distFromCenter = Math.Abs(point.X - foldCenters[f]);
+                float foldFactor = MathF.Exp(-(distFromCenter * distFromCenter) / (foldWidth * foldWidth * 0.3f));
+                totalOffset += foldAmplitudes[f] * foldFactor;
+            }
+            
+            formation.TopBoundary[i] = new Vector2(point.X, point.Y + totalOffset);
+        }
+        
+        // Apply same folding to bottom boundary
+        for (int i = 0; i < formation.BottomBoundary.Count; i++)
+        {
+            var point = formation.BottomBoundary[i];
+            float totalOffset = 0f;
+            
+            for (int f = 0; f < foldCenters.Length; f++)
+            {
+                float distFromCenter = Math.Abs(point.X - foldCenters[f]);
+                float foldFactor = MathF.Exp(-(distFromCenter * distFromCenter) / (foldWidth * foldWidth * 0.3f));
+                totalOffset += foldAmplitudes[f] * foldFactor;
+            }
+            
+            formation.BottomBoundary[i] = new Vector2(point.X, point.Y + totalOffset);
+        }
+    }
+    
+    private static CrossSection CreateThrustFault(float totalDistance, float baseElevation)
+    {
+        var section = CreateBaseCrossSection(totalDistance, baseElevation, 100f);
+        
+        // Add crystalline basement
+        var basement = CreateCrystallineBasement(totalDistance, baseElevation, 2f);
+        section.Formations.Add(basement);
+        
+        // Create initial flat layers
+        var layers = GetStandardStratigraphicColumn().Take(5).ToArray();
+        float currentTop = 100f;
+        
+        foreach (var layer in layers)
+        {
+            var formation = CreateFlatLayer(layer.Name, layer.Color, totalDistance, currentTop, layer.Thickness);
+            section.Formations.Add(formation);
+            currentTop -= layer.Thickness;
+        }
+        
+        // Create thrust fault system with proper displacement
+        var mainThrust = new ProjectedFault
+        {
+            Type = GeologicalFeatureType.Fault_Thrust,
+            Dip = 22f,
+            DipDirection = "West",
+            Displacement = 3000f,
+            FaultTrace = new List<Vector2>
+            {
+                new Vector2(totalDistance * 0.7f, 150f),
+                new Vector2(totalDistance * 0.2f, -1200f)
+            }
+        };
+        section.Faults.Add(mainThrust);
+        ApplyFaultDisplacement(section, mainThrust, mainThrust.Displacement.Value);
+        
+        // Imbricate thrust
+        var imbricateThrust = new ProjectedFault
+        {
+            Type = GeologicalFeatureType.Fault_Thrust,
+            Dip = 30f,
+            DipDirection = "West",
+            Displacement = 800f,
+            FaultTrace = new List<Vector2>
+            {
+                new Vector2(totalDistance * 0.5f, 120f),
+                new Vector2(totalDistance * 0.35f, -600f)
+            }
+        };
+        section.Faults.Add(imbricateThrust);
+        ApplyFaultDisplacement(section, imbricateThrust, imbricateThrust.Displacement.Value);
+        
+        // Floor thrust
+        var floorThrust = new ProjectedFault
+        {
+            Type = GeologicalFeatureType.Fault_Thrust,
+            Dip = 15f,
+            DipDirection = "West",
+            Displacement = 5000f,
+            FaultTrace = new List<Vector2>
+            {
+                new Vector2(totalDistance * 0.9f, -500f),
+                new Vector2(totalDistance * 0.1f, -1500f)
+            }
+        };
+        section.Faults.Add(floorThrust);
+        ApplyFaultDisplacement(section, floorThrust, floorThrust.Displacement.Value);
+        
+        return section;
+    }
+    
+    private static CrossSection CreateFaultedLayers(float totalDistance, float baseElevation)
+    {
+        // Start with simple layers
+        var section = CreateSimpleLayers(totalDistance, baseElevation);
+        
+        // Create graben with two normal faults
+        float fault1X = totalDistance * 0.35f;
+        var fault1 = new ProjectedFault
+        {
+            Type = GeologicalFeatureType.Fault_Normal,
+            Dip = 65f,
+            DipDirection = "East",
+            Displacement = 400f,
+            FaultTrace = new List<Vector2>
+            {
+                new Vector2(fault1X, section.Profile.MaxElevation),
+                new Vector2(fault1X + 600f, baseElevation + 200f)
+            }
+        };
+        section.Faults.Add(fault1);
+        ApplyFaultDisplacement(section, fault1, fault1.Displacement.Value);
+        
+        float fault2X = totalDistance * 0.65f;
+        var fault2 = new ProjectedFault
+        {
+            Type = GeologicalFeatureType.Fault_Normal,
+            Dip = 60f,
+            DipDirection = "West",
+            Displacement = 350f,
+            FaultTrace = new List<Vector2>
+            {
+                new Vector2(fault2X, section.Profile.MaxElevation),
+                new Vector2(fault2X - 700f, baseElevation + 200f)
+            }
+        };
+        section.Faults.Add(fault2);
+        ApplyFaultDisplacement(section, fault2, fault2.Displacement.Value);
         
         return section;
     }
@@ -301,41 +615,41 @@ public static class GeologicalLayerPresets
     {
         var section = CreateBaseCrossSection(totalDistance, baseElevation, 0f);
         
+        // Create valley topography
         var profile = section.Profile;
         for (int i = 0; i < profile.Points.Count; i++)
         {
             float t = i / (float)(profile.Points.Count - 1);
             float x = t * totalDistance;
             float centerDist = Math.Abs(x - totalDistance / 2f) / (totalDistance / 2f);
-            float valleyDepth = 200f * (1f - centerDist * centerDist);
+            float valleyDepth = 300f * (1f - centerDist * centerDist);
             profile.Points[i].Elevation = -valleyDepth;
             profile.Points[i].Position = new Vector2(x, -valleyDepth);
         }
-        profile.MinElevation = -200f;
+        profile.MinElevation = -300f;
         profile.MaxElevation = 0f;
         
-        // 🔥 Add crystalline basement
-        var basement = CreateCrystallineBasement(totalDistance, baseElevation, 0f);
+        // Add crystalline basement with 2° dip
+        var basement = CreateCrystallineBasement(totalDistance, baseElevation, 2f);
         section.Formations.Add(basement);
         
-        var layers = GetStandardStratigraphicColumn().Skip(1).Take(5).ToArray();
+        var layers = GetStandardStratigraphicColumn().Skip(2).Take(5).ToArray();
         
         float centerX = totalDistance / 2f;
         float foldWidth = totalDistance * 0.7f;
-        float amplitude = 500f;
+        float amplitude = 600f;
         
-        float currentBase = -700f;
-        
-        foreach (var layer in layers)
+        // Create eroded anticline layers
+        for (int idx = 0; idx < layers.Length; idx++)
         {
-            var formation = CreateAnticlineLayer(layer.Name, layer.Color, totalDistance,
-                currentBase, layer.Thickness, centerX, foldWidth, amplitude, profile);
+            var layer = layers[idx];
+            var formation = CreateErodedAnticlineLayer(layer.Name, layer.Color, totalDistance,
+                -500f - idx * layer.Thickness, layer.Thickness, centerX, foldWidth, 
+                amplitude * (1f - idx * 0.15f), profile);
             section.Formations.Add(formation);
-            currentBase -= layer.Thickness;
-            amplitude *= 0.9f;
         }
         
-        // 🔥 Valley fill - MUST touch topography
+        // Add valley fill that EXACTLY touches topography
         var valleyFill = new ProjectedFormation
         {
             Name = "Quaternary Valley Fill",
@@ -347,22 +661,23 @@ public static class GeologicalLayerPresets
         for (int i = 0; i < profile.Points.Count; i++)
         {
             float x = profile.Points[i].Distance;
-            float topoElev = profile.Points[i].Elevation; // 🔥 Exactly at topography
+            float topoElev = profile.Points[i].Elevation; // EXACTLY at topography
             float centerDist = Math.Abs(x - totalDistance / 2f) / (totalDistance / 2f);
-            float fillDepth = 100f * (1f - centerDist * centerDist);
+            float fillDepth = 150f * (1f - centerDist * centerDist);
             
             valleyFill.TopBoundary.Add(new Vector2(x, topoElev));
             valleyFill.BottomBoundary.Add(new Vector2(x, topoElev - fillDepth));
         }
         
-        section.Formations.Insert(1, valleyFill); // After basement
+        section.Formations.Insert(1, valleyFill);
         
+        // Add normal fault cutting through the anticline and apply displacement
         var fault = new ProjectedFault
         {
             Type = GeologicalFeatureType.Fault_Normal,
             Dip = 70f,
             DipDirection = "West",
-            Displacement = 250f,
+            Displacement = 350f,
             FaultTrace = new List<Vector2>
             {
                 new Vector2(totalDistance * 0.35f, 50f),
@@ -370,410 +685,219 @@ public static class GeologicalLayerPresets
             }
         };
         section.Faults.Add(fault);
+        ApplyFaultDisplacement(section, fault, fault.Displacement.Value);
         
         return section;
     }
+
+    // --- FIX START: Implement missing methods ---
     
     private static CrossSection CreateErodedSyncline(float totalDistance, float baseElevation)
     {
-        var section = CreateBaseCrossSection(totalDistance, baseElevation, 0f);
-        
+        var section = CreateBaseCrossSection(totalDistance, baseElevation, 200f);
+
+        // Create ridge topography
         var profile = section.Profile;
         for (int i = 0; i < profile.Points.Count; i++)
         {
-            float t = i / (float)(profile.Points.Count - 1);
-            float elevation = 50f * MathF.Sin(t * MathF.PI * 2f);
-            profile.Points[i].Elevation = elevation;
-            profile.Points[i].Position = new Vector2(profile.Points[i].Distance, elevation);
-        }
-        profile.MinElevation = -50f;
-        profile.MaxElevation = 50f;
-        
-        // 🔥 Add basement
-        var basement = CreateCrystallineBasement(totalDistance, baseElevation, 0f);
-        section.Formations.Add(basement);
-        
-        var layers = GetStandardStratigraphicColumn().Skip(1).Take(5).ToArray();
-        
-        float centerX = totalDistance / 2f;
-        float foldWidth = totalDistance * 0.7f;
-        float amplitude = 500f;
-        
-        float currentBase = -100f;
-        
-        foreach (var layer in layers)
-        {
-            var formation = CreateSynclineLayer(layer.Name, layer.Color, totalDistance,
-                currentBase, layer.Thickness, centerX, foldWidth, amplitude, profile);
-            section.Formations.Add(formation);
-            currentBase -= layer.Thickness;
-        }
-        
-        return section;
-    }
-    
-    private static CrossSection CreateJuraMountains(float totalDistance, float baseElevation)
-    {
-        var section = CreateBaseCrossSection(totalDistance, baseElevation, 0f);
-        
-        var profile = section.Profile;
-        for (int i = 0; i < profile.Points.Count; i++)
-        {
-            float t = i / (float)(profile.Points.Count - 1);
-            float x = t * totalDistance;
-            
-            float hill1 = 80f * MathF.Sin(x / (totalDistance * 0.3f) * MathF.PI);
-            float hill2 = 50f * MathF.Sin(x / (totalDistance * 0.15f) * MathF.PI);
-            float elevation = hill1 + hill2 + 100f;
-            
-            profile.Points[i].Elevation = elevation;
-            profile.Points[i].Position = new Vector2(x, elevation);
+            float x = profile.Points[i].Distance;
+            float centerDist = Math.Abs(x - totalDistance / 2f) / (totalDistance / 2f);
+            float ridgeHeight = 250f * centerDist * centerDist;
+            profile.Points[i].Elevation = ridgeHeight;
+            profile.Points[i].Position = new Vector2(x, ridgeHeight);
         }
         profile.MinElevation = 0f;
         profile.MaxElevation = 250f;
-        
-        // 🔥 Basement
-        var basement = CreateCrystallineBasement(totalDistance, baseElevation, 0f);
+
+        var basement = CreateCrystallineBasement(totalDistance, baseElevation, -1f);
         section.Formations.Add(basement);
-        
-        var layers = GetStandardStratigraphicColumn().Skip(2).Take(4).ToArray();
-        
-        float center1 = totalDistance * 0.25f;
-        float center2 = totalDistance * 0.5f;
-        float center3 = totalDistance * 0.75f;
-        float foldWidth = totalDistance * 0.2f;
-        float amplitude = 300f;
-        
-        float currentBase = -300f;
-        
+
+        var layers = GetStandardStratigraphicColumn().Take(4).ToArray();
+        float currentBase = 0;
         foreach (var layer in layers)
         {
-            var formation = CreateJuraStyleFold(layer.Name, layer.Color, totalDistance,
-                currentBase, layer.Thickness, center1, center2, center3, foldWidth, amplitude, profile);
+            var formation = CreateFlatLayer(layer.Name, layer.Color, totalDistance, currentBase, layer.Thickness);
+            
+            // Apply syncline fold
+            ApplyFold(formation, totalDistance / 2f, -500f, totalDistance * 0.8f);
+
             section.Formations.Add(formation);
             currentBase -= layer.Thickness;
         }
-        
-        // 🔥 Multiple thrust faults
-        var thrust1 = new ProjectedFault
-        {
-            Type = GeologicalFeatureType.Fault_Thrust,
-            Dip = 25f,
-            DipDirection = "East",
-            Displacement = 800f,
-            FaultTrace = new List<Vector2>
-            {
-                new Vector2(totalDistance * 0.2f, 200f),
-                new Vector2(totalDistance * 0.3f, baseElevation + 600f)
-            }
-        };
-        section.Faults.Add(thrust1);
-        
-        var thrust2 = new ProjectedFault
-        {
-            Type = GeologicalFeatureType.Fault_Thrust,
-            Dip = 30f,
-            DipDirection = "East",
-            Displacement = 1000f,
-            FaultTrace = new List<Vector2>
-            {
-                new Vector2(totalDistance * 0.45f, 220f),
-                new Vector2(totalDistance * 0.55f, baseElevation + 700f)
-            }
-        };
-        section.Faults.Add(thrust2);
-        
-        var thrust3 = new ProjectedFault
-        {
-            Type = GeologicalFeatureType.Fault_Thrust,
-            Dip = 28f,
-            DipDirection = "East",
-            Displacement = 900f,
-            FaultTrace = new List<Vector2>
-            {
-                new Vector2(totalDistance * 0.7f, 210f),
-                new Vector2(totalDistance * 0.78f, baseElevation + 650f)
-            }
-        };
-        section.Faults.Add(thrust3);
-        
-        var backThrust = new ProjectedFault
-        {
-            Type = GeologicalFeatureType.Fault_Thrust,
-            Dip = 35f,
-            DipDirection = "West",
-            Displacement = 500f,
-            FaultTrace = new List<Vector2>
-            {
-                new Vector2(totalDistance * 0.6f, 180f),
-                new Vector2(totalDistance * 0.53f, baseElevation + 550f)
-            }
-        };
-        section.Faults.Add(backThrust);
-        
+
         return section;
     }
-    
-    private static CrossSection CreateFaultedLayers(float totalDistance, float baseElevation)
-    {
-        var section = CreateSimpleLayers(totalDistance, baseElevation);
-        
-        float fault1X = totalDistance * 0.45f;
-        var fault1 = new ProjectedFault
-        {
-            Type = GeologicalFeatureType.Fault_Normal,
-            Dip = 65f,
-            DipDirection = "West",
-            Displacement = 400f,
-            FaultTrace = new List<Vector2>
-            {
-                new Vector2(fault1X, section.Profile.MaxElevation + 100f),
-                new Vector2(fault1X - 500f, baseElevation + 200f)
-            }
-        };
-        section.Faults.Add(fault1);
-        
-        foreach (var formation in section.Formations)
-        {
-            if (formation.Name != "Crystalline Basement")
-                OffsetFormationByFault(formation, fault1X, 400f, true);
-        }
-        
-        float fault2X = totalDistance * 0.65f;
-        var fault2 = new ProjectedFault
-        {
-            Type = GeologicalFeatureType.Fault_Normal,
-            Dip = 50f,
-            DipDirection = "East",
-            Displacement = 200f,
-            FaultTrace = new List<Vector2>
-            {
-                new Vector2(fault2X, section.Profile.MaxElevation + 80f),
-                new Vector2(fault2X + 350f, baseElevation + 200f)
-            }
-        };
-        section.Faults.Add(fault2);
-        
-        return section;
-    }
-    
-    private static CrossSection CreateThrustFault(float totalDistance, float baseElevation)
-    {
-        var section = CreateSimpleLayers(totalDistance, baseElevation);
-        
-        float faultX = totalDistance * 0.65f;
-        var mainThrust = new ProjectedFault
-        {
-            Type = GeologicalFeatureType.Fault_Thrust,
-            Dip = 20f,
-            DipDirection = "West",
-            Displacement = 2500f,
-            FaultTrace = new List<Vector2>
-            {
-                new Vector2(faultX, section.Profile.MaxElevation + 50f),
-                new Vector2(faultX - 2500f, baseElevation + 600f)
-            }
-        };
-        section.Faults.Add(mainThrust);
-        
-        var shortcutThrust = new ProjectedFault
-        {
-            Type = GeologicalFeatureType.Fault_Thrust,
-            Dip = 35f,
-            DipDirection = "West",
-            Displacement = 400f,
-            FaultTrace = new List<Vector2>
-            {
-                new Vector2(totalDistance * 0.4f, 100f),
-                new Vector2(totalDistance * 0.32f, baseElevation + 500f)
-            }
-        };
-        section.Faults.Add(shortcutThrust);
-        
-        return section;
-    }
-    
+
     private static CrossSection CreateFoldedSequence(float totalDistance, float baseElevation)
     {
-        var section = CreateBaseCrossSection(totalDistance, baseElevation, 100f);
-        
-        // 🔥 Basement
-        var basement = CreateCrystallineBasement(totalDistance, baseElevation, 0f);
+        var section = CreateBaseCrossSection(totalDistance, baseElevation, 150f);
+        var basement = CreateCrystallineBasement(totalDistance, baseElevation, 1f);
         section.Formations.Add(basement);
-        
+
         var layers = GetStandardStratigraphicColumn().Take(5).ToArray();
-        
         float currentBase = -100f;
-        
         foreach (var layer in layers)
         {
-            var formation = CreateWavyLayer(layer.Name, layer.Color, totalDistance,
-                currentBase, layer.Thickness, 3, 120f, section.Profile);
+            var formation = CreateFlatLayer(layer.Name, layer.Color, totalDistance, currentBase, layer.Thickness);
             
+            // Apply multiple folds
+            ApplyFold(formation, totalDistance * 0.25f, 300f, totalDistance * 0.4f); // Anticline
+            ApplyFold(formation, totalDistance * 0.75f, -300f, totalDistance * 0.4f); // Syncline
+
             section.Formations.Add(formation);
             currentBase -= layer.Thickness;
         }
-        
-        var reverseFault = new ProjectedFault
-        {
-            Type = GeologicalFeatureType.Fault_Reverse,
-            Dip = 55f,
-            DipDirection = "East",
-            Displacement = 350f,
-            FaultTrace = new List<Vector2>
-            {
-                new Vector2(totalDistance * 0.6f, 150f),
-                new Vector2(totalDistance * 0.68f, baseElevation + 500f)
-            }
-        };
-        section.Faults.Add(reverseFault);
-        
         return section;
     }
-    
+
     private static CrossSection CreateUnconformitySequence(float totalDistance, float baseElevation)
     {
         var section = CreateBaseCrossSection(totalDistance, baseElevation, 50f);
-        
-        // 🔥 Basement first
         var basement = CreateCrystallineBasement(totalDistance, baseElevation, 0f);
         section.Formations.Add(basement);
-        
-        // 🔥 Lower tilted sequence (older rocks) - 30 degree dip
-        var lowerLayers = new[]
-        {
-            new LayerDefinition { Name = "Devonian Sandstone", Color = new Vector4(0.7f, 0.6f, 0.5f, 0.8f), Thickness = 250f },
-            new LayerDefinition { Name = "Silurian Shale", Color = new Vector4(0.6f, 0.6f, 0.7f, 0.8f), Thickness = 200f },
-            new LayerDefinition { Name = "Ordovician Limestone", Color = new Vector4(0.5f, 0.5f, 0.6f, 0.8f), Thickness = 300f }
-        };
-        
-        float tiltAngle = 30f; // Steep dip for dramatic unconformity
-        float currentTop = -500f;
-        
+
+        // Create lower, tilted sequence
+        var lowerLayers = GetStandardStratigraphicColumn().Skip(5).Take(3).ToArray();
+        float currentBase = -800f;
+        float dip = 15f; // 15 degrees dip
         foreach (var layer in lowerLayers)
         {
-            var formation = CreateTiltedLayer(layer.Name, layer.Color, totalDistance,
-                currentTop, layer.Thickness, tiltAngle);
+            var formation = CreateDippingLayer(layer.Name, layer.Color, totalDistance, currentBase, layer.Thickness, dip);
             section.Formations.Add(formation);
-            currentTop -= layer.Thickness * 0.7f;
+            currentBase -= layer.Thickness;
         }
         
-        // 🔥 FAULT cutting lower sequence
-        var preFault = new ProjectedFault
+        // Define unconformity surface (erosional surface)
+        float unconformityElevation = -500f;
+
+        // Truncate lower layers at the unconformity
+        foreach(var f in section.Formations.Where(f => f.Name != "Crystalline Basement"))
         {
-            Type = GeologicalFeatureType.Fault_Normal,
-            Dip = 70f,
-            DipDirection = "East",
-            Displacement = 400f,
-            FaultTrace = new List<Vector2>
+            for(int i=0; i<f.TopBoundary.Count; i++)
             {
-                new Vector2(totalDistance * 0.35f, -300f),
-                new Vector2(totalDistance * 0.42f, baseElevation + 300f)
+                if(f.TopBoundary[i].Y > unconformityElevation)
+                    f.TopBoundary[i] = new Vector2(f.TopBoundary[i].X, unconformityElevation);
             }
-        };
-        section.Faults.Add(preFault);
-        
-        // Apply fault offset to lower layers only
-        for (int i = 1; i <= lowerLayers.Length; i++)
-        {
-            OffsetFormationByFault(section.Formations[i], totalDistance * 0.35f, 400f, false);
         }
-        
-        // 🔥 Upper horizontal sequence (above unconformity - younger rocks)
-        var upperLayers = new[]
+
+        // Create upper, flat-lying sequence
+        var upperLayers = GetStandardStratigraphicColumn().Take(2).ToArray();
+        currentBase = unconformityElevation;
+        foreach(var layer in upperLayers)
         {
-            new LayerDefinition { Name = "Permian Conglomerate", Color = new Vector4(0.8f, 0.7f, 0.6f, 0.8f), Thickness = 120f },
-            new LayerDefinition { Name = "Triassic Sandstone", Color = new Vector4(0.9f, 0.65f, 0.4f, 0.8f), Thickness = 180f },
-            new LayerDefinition { Name = "Jurassic Limestone", Color = new Vector4(0.75f, 0.8f, 0.85f, 0.8f), Thickness = 150f }
-        };
-        
-        // Create unconformity surface - this is where erosion truncated the tilted layers
-        currentTop = -250f;
-        foreach (var layer in upperLayers)
-        {
-            var formation = CreateFlatLayer(layer.Name, layer.Color, totalDistance, currentTop, layer.Thickness);
+            var formation = CreateFlatLayer(layer.Name, layer.Color, totalDistance, currentBase, layer.Thickness);
             section.Formations.Add(formation);
-            currentTop -= layer.Thickness;
+            currentBase -= layer.Thickness;
         }
-        
+
         return section;
     }
-    
+
     private static CrossSection CreateBasinFilling(float totalDistance, float baseElevation)
     {
         var section = CreateBaseCrossSection(totalDistance, baseElevation, 0f);
-        
-        var profile = section.Profile;
-        for (int i = 0; i < profile.Points.Count; i++)
+        var basement = new ProjectedFormation
         {
-            profile.Points[i].Elevation = 0f;
-            profile.Points[i].Position = new Vector2(profile.Points[i].Distance, 0f);
-        }
+            Name = "Crystalline Basement",
+            Color = new Vector4(0.5f, 0.3f, 0.4f, 0.95f),
+            TopBoundary = new List<Vector2>(),
+            BottomBoundary = new List<Vector2>()
+        };
         
-        // 🔥 Basement
-        var basement = CreateCrystallineBasement(totalDistance, baseElevation, 0f);
+        // Create bowl-shaped basement
+        int numPoints = 50;
+        for (int i = 0; i <= numPoints; i++)
+        {
+            float x = i / (float)numPoints * totalDistance;
+            float centerDist = Math.Abs(x - totalDistance / 2f) / (totalDistance / 2f);
+            float basementTop = -1000f - 1500f * (1 - centerDist * centerDist);
+            basement.TopBoundary.Add(new Vector2(x, basementTop));
+            basement.BottomBoundary.Add(new Vector2(x, baseElevation));
+        }
         section.Formations.Add(basement);
-        
-        float centerX = totalDistance / 2f;
-        float basinWidth = totalDistance * 0.8f;
-        
-        var basinLayers = new[]
+
+        // Fill with onlapping layers
+        var layers = GetStandardStratigraphicColumn().Take(4).ToArray();
+        for(int layerIdx = 0; layerIdx < layers.Length; layerIdx++)
         {
-            new LayerDefinition { Name = "Deep Marine Shale", Color = new Vector4(0.4f, 0.4f, 0.5f, 0.8f), Thickness = 400f },
-            new LayerDefinition { Name = "Turbidites", Color = new Vector4(0.6f, 0.6f, 0.65f, 0.8f), Thickness = 300f },
-            new LayerDefinition { Name = "Slope Sediments", Color = new Vector4(0.7f, 0.7f, 0.6f, 0.8f), Thickness = 250f },
-            new LayerDefinition { Name = "Shallow Marine Sand", Color = new Vector4(0.85f, 0.8f, 0.6f, 0.8f), Thickness = 200f },
-            new LayerDefinition { Name = "Deltaic Deposits", Color = new Vector4(0.8f, 0.75f, 0.55f, 0.8f), Thickness = 150f }
-        };
-        
-        float currentTop = -800f;
-        float currentBasinDepth = 800f;
-        
-        foreach (var layer in basinLayers)
-        {
-            var formation = CreateBasinLayer(layer.Name, layer.Color, totalDistance, centerX, basinWidth,
-                currentTop, layer.Thickness, currentBasinDepth);
-            section.Formations.Add(formation);
-            currentTop += layer.Thickness * 0.7f;
-            currentBasinDepth -= layer.Thickness * 0.5f;
-        }
-        
-        var basinFault = new ProjectedFault
-        {
-            Type = GeologicalFeatureType.Fault_Normal,
-            Dip = 60f,
-            DipDirection = "East",
-            Displacement = 600f,
-            FaultTrace = new List<Vector2>
+            var layer = layers[layerIdx];
+            var formation = new ProjectedFormation { Name = layer.Name, Color = layer.Color };
+            var onlapFactor = 1.0f - (layerIdx * 0.2f);
+            
+            for(int i=0; i <= numPoints; i++)
             {
-                new Vector2(totalDistance * 0.8f, 50f),
-                new Vector2(totalDistance * 0.85f, baseElevation + 400f)
+                var x = i / (float)numPoints * totalDistance;
+                var prevLayerTop = GetElevationAtX(section.Formations.Last().TopBoundary, x);
+                var top = prevLayerTop + layer.Thickness * onlapFactor;
+                var bottom = prevLayerTop;
+
+                // Ensure layer pinches out at basin edge
+                var basinEdgeX = (1 - onlapFactor) * totalDistance / 2f;
+                if(x < basinEdgeX || x > totalDistance - basinEdgeX)
+                {
+                    top = bottom;
+                }
+
+                formation.TopBoundary.Add(new Vector2(x, top));
+                formation.BottomBoundary.Add(new Vector2(x, bottom));
             }
-        };
-        section.Faults.Add(basinFault);
-        
+            section.Formations.Add(formation);
+        }
+
         return section;
     }
-    
+
     private static CrossSection CreateChannelFill(float totalDistance, float baseElevation)
     {
         var section = CreateSimpleLayers(totalDistance, baseElevation);
+
+        // Carve a channel into the top layers
+        var channelDepth = 200f;
+        var channelWidth = totalDistance * 0.2f;
+        var channelCenter = totalDistance * 0.6f;
+        var channelBase = GetTopographyElevationAt(section.Profile, channelCenter) - channelDepth;
         
-        float channelCenter = totalDistance * 0.5f;
-        float channelWidth = 1500f;
-        float incisionDepth = 100f;
+        var channelProfile = new List<Vector2>();
+        for(int i=0; i<= 50; i++)
+        {
+            var x = (channelCenter - channelWidth/2f) + i/50f * channelWidth;
+            var relX = (x-channelCenter)/(channelWidth/2f);
+            var y = channelBase + channelDepth * (relX * relX);
+            channelProfile.Add(new Vector2(x, y));
+        }
         
-        UpdateTopographyWithChannel(section.Profile, totalDistance, channelCenter, channelWidth, incisionDepth);
+        // Truncate existing layers
+        foreach(var f in section.Formations.Where(f => f.Name != "Crystalline Basement"))
+        {
+            for(int i=0; i < f.TopBoundary.Count; i++)
+            {
+                var p = f.TopBoundary[i];
+                var channelElev = GetElevationAtX(channelProfile, p.X, float.MaxValue);
+                if(p.Y > channelElev)
+                {
+                    f.TopBoundary[i] = new Vector2(p.X, channelElev);
+                }
+            }
+        }
         
-        var channelFill = CreateChannelFillFormation("Quaternary Channel Fill",
-            new Vector4(0.85f, 0.8f, 0.6f, 0.8f),
-            totalDistance, channelCenter, channelWidth, incisionDepth, section.Profile);
-        
-        section.Formations.Insert(1, channelFill); // After basement
-        
+        // Add channel fill formation
+        var channelFill = new ProjectedFormation
+        {
+            Name = "Channel Sandstone",
+            Color = new Vector4(0.9f, 0.8f, 0.3f, 0.8f),
+            TopBoundary = new List<Vector2>(),
+            BottomBoundary = channelProfile
+        };
+        foreach(var p in channelProfile)
+        {
+            channelFill.TopBoundary.Add(new Vector2(p.X, GetTopographyElevationAt(section.Profile, p.X)));
+        }
+        section.Formations.Add(channelFill);
+
         return section;
     }
     
+    // --- FIX END ---
     #endregion
     
     #region Helper Methods
@@ -797,14 +921,14 @@ public static class GeologicalLayerPresets
         for (int i = 0; i <= numPoints; i++)
         {
             float distance = i / (float)numPoints * totalDistance;
-            float elevation = topElevation + 50f * MathF.Sin(distance / 2000f * MathF.PI);
+            float elevation = topElevation + 30f * MathF.Sin(distance / 2000f * MathF.PI);
             
             profile.Points.Add(new GeologicalMapping.ProfileGenerator.ProfilePoint
             {
                 Position = new Vector2(distance, elevation),
                 Distance = distance,
                 Elevation = elevation,
-                Features = new List<GeologicalFeature>()
+                Features = new List<GeologicalMapping.GeologicalFeature>()
             });
         }
         
@@ -818,28 +942,32 @@ public static class GeologicalLayerPresets
     }
     
     /// <summary>
-    /// 🔥 CRITICAL: Create crystalline basement that all layers sit on
+    /// CRITICAL: Create crystalline basement with slight dip (Jura/Alps style)
     /// </summary>
-    private static ProjectedFormation CreateCrystallineBasement(float totalDistance, float baseElevation, float regionalDip)
+    private static ProjectedFormation CreateCrystallineBasement(float totalDistance, float baseElevation, float dipDegrees)
     {
         var basement = new ProjectedFormation
         {
             Name = "Crystalline Basement",
-            Color = new Vector4(0.4f, 0.4f, 0.5f, 0.9f), // Dark gray/blue
+            Color = new Vector4(0.5f, 0.3f, 0.4f, 0.95f), // Pinkish-gray crystalline color
             TopBoundary = new List<Vector2>(),
             BottomBoundary = new List<Vector2>()
         };
         
         int numPoints = 50;
-        float dipRad = regionalDip * MathF.PI / 180f;
+        float dipRad = dipDegrees * MathF.PI / 180f;
         
         for (int i = 0; i <= numPoints; i++)
         {
             float x = i / (float)numPoints * totalDistance;
             
-            // Basement top can have gentle dip or be flat
-            float basementTop = -1200f - (x / totalDistance * totalDistance * MathF.Tan(dipRad));
-            float basementBottom = baseElevation; // Always at the very bottom
+            // Basement top with gentle dip (2° for Jura/Alps)
+            float basementTop = -1200f - (x * MathF.Tan(dipRad));
+            
+            // Add slight undulations to simulate real basement
+            basementTop += 50f * MathF.Sin(x / 2000f * MathF.PI);
+            
+            float basementBottom = baseElevation;
             
             basement.TopBoundary.Add(new Vector2(x, basementTop));
             basement.BottomBoundary.Add(new Vector2(x, basementBottom));
@@ -868,8 +996,31 @@ public static class GeologicalLayerPresets
         
         return formation;
     }
+
+    private static ProjectedFormation CreateDippingLayer(string name, Vector4 color, float totalDistance, float top, float thickness, float dipDegrees)
+    {
+        var formation = new ProjectedFormation
+        {
+            Name = name,
+            Color = color,
+            TopBoundary = new List<Vector2>(),
+            BottomBoundary = new List<Vector2>()
+        };
+        
+        float dipRad = dipDegrees * MathF.PI / 180f;
+        int numPoints = 50;
+        for (int i = 0; i <= numPoints; i++)
+        {
+            float x = i / (float)numPoints * totalDistance;
+            float dipOffset = x * MathF.Tan(dipRad);
+            formation.TopBoundary.Add(new Vector2(x, top - dipOffset));
+            formation.BottomBoundary.Add(new Vector2(x, top - thickness - dipOffset));
+        }
+        
+        return formation;
+    }
     
-    private static ProjectedFormation CreateAnticlineLayer(string name, Vector4 color, float totalDistance,
+    private static ProjectedFormation CreateErodedAnticlineLayer(string name, Vector4 color, float totalDistance,
         float baseTop, float thickness, float centerX, float foldWidth, float amplitude,
         GeologicalMapping.ProfileGenerator.TopographicProfile profile)
     {
@@ -887,254 +1038,122 @@ public static class GeologicalLayerPresets
         {
             float x = i / (float)numPoints * totalDistance;
             float distFromCenter = Math.Abs(x - centerX);
-            float foldFactor = Math.Max(0, 1 - (distFromCenter / (foldWidth / 2f)));
-            foldFactor = foldFactor * foldFactor;
+            
+            // Smooth Gaussian-like fold shape
+            float foldFactor = MathF.Exp(-(distFromCenter * distFromCenter) / (foldWidth * foldWidth * 0.25f));
             
             float foldOffset = amplitude * foldFactor;
             float topElev = baseTop + foldOffset;
             
-            formation.TopBoundary.Add(new Vector2(x, topElev));
-            formation.BottomBoundary.Add(new Vector2(x, topElev - thickness));
-        }
-        
-        return formation;
-    }
-    
-    private static ProjectedFormation CreateSynclineLayer(string name, Vector4 color, float totalDistance,
-        float baseTop, float thickness, float centerX, float foldWidth, float amplitude,
-        GeologicalMapping.ProfileGenerator.TopographicProfile profile)
-    {
-        var formation = new ProjectedFormation
-        {
-            Name = name,
-            Color = color,
-            TopBoundary = new List<Vector2>(),
-            BottomBoundary = new List<Vector2>(),
-            FoldStyle = FoldStyle.Syncline
-        };
-        
-        int numPoints = 100;
-        for (int i = 0; i <= numPoints; i++)
-        {
-            float x = i / (float)numPoints * totalDistance;
-            float distFromCenter = Math.Abs(x - centerX);
-            float foldFactor = Math.Max(0, 1 - (distFromCenter / (foldWidth / 2f)));
-            foldFactor = foldFactor * foldFactor;
+            // Check if eroded (above topography)
+            float topoElev = GetTopographyElevationAt(profile, x);
             
-            float foldOffset = -amplitude * foldFactor;
-            float topElev = baseTop + foldOffset;
-            
-            formation.TopBoundary.Add(new Vector2(x, topElev));
-            formation.BottomBoundary.Add(new Vector2(x, topElev - thickness));
-        }
-        
-        return formation;
-    }
-    
-    private static ProjectedFormation CreateJuraStyleFold(string name, Vector4 color, float totalDistance,
-        float baseTop, float thickness, float center1, float center2, float center3, float foldWidth, float amplitude,
-        GeologicalMapping.ProfileGenerator.TopographicProfile profile)
-    {
-        var formation = new ProjectedFormation
-        {
-            Name = name,
-            Color = color,
-            TopBoundary = new List<Vector2>(),
-            BottomBoundary = new List<Vector2>()
-        };
-        
-        int numPoints = 100;
-        for (int i = 0; i <= numPoints; i++)
-        {
-            float x = i / (float)numPoints * totalDistance;
-            
-            float distFromCenter1 = Math.Abs(x - center1);
-            float foldFactor1 = Math.Max(0, 1 - (distFromCenter1 / (foldWidth / 2f)));
-            foldFactor1 = foldFactor1 * foldFactor1;
-            
-            float distFromCenter2 = Math.Abs(x - center2);
-            float foldFactor2 = Math.Max(0, 1 - (distFromCenter2 / (foldWidth / 2f)));
-            foldFactor2 = foldFactor2 * foldFactor2;
-            
-            float distFromCenter3 = Math.Abs(x - center3);
-            float foldFactor3 = Math.Max(0, 1 - (distFromCenter3 / (foldWidth / 2f)));
-            foldFactor3 = foldFactor3 * foldFactor3;
-            
-            float foldOffset = amplitude * (foldFactor1 + foldFactor2 + foldFactor3);
-            float topElev = baseTop + foldOffset;
-            
-            formation.TopBoundary.Add(new Vector2(x, topElev));
-            formation.BottomBoundary.Add(new Vector2(x, topElev - thickness));
-        }
-        
-        return formation;
-    }
-    
-    private static ProjectedFormation CreateWavyLayer(string name, Vector4 color, float totalDistance,
-        float baseTop, float thickness, int numWaves, float amplitude,
-        GeologicalMapping.ProfileGenerator.TopographicProfile profile)
-    {
-        var formation = new ProjectedFormation
-        {
-            Name = name,
-            Color = color,
-            TopBoundary = new List<Vector2>(),
-            BottomBoundary = new List<Vector2>()
-        };
-        
-        int numPoints = 100;
-        for (int i = 0; i <= numPoints; i++)
-        {
-            float x = i / (float)numPoints * totalDistance;
-            float t = i / (float)numPoints;
-            
-            float wave = amplitude * MathF.Sin(t * MathF.PI * 2f * numWaves);
-            float topElev = baseTop + wave;
-            
-            formation.TopBoundary.Add(new Vector2(x, topElev));
-            formation.BottomBoundary.Add(new Vector2(x, topElev - thickness));
-        }
-        
-        return formation;
-    }
-    
-    private static ProjectedFormation CreateTiltedLayer(string name, Vector4 color, float totalDistance,
-        float topAtStart, float thickness, float tiltAngle)
-    {
-        var formation = new ProjectedFormation
-        {
-            Name = name,
-            Color = color,
-            TopBoundary = new List<Vector2>(),
-            BottomBoundary = new List<Vector2>()
-        };
-        
-        float tiltRad = tiltAngle * MathF.PI / 180f;
-        float slope = MathF.Tan(tiltRad);
-        
-        int numPoints = 50;
-        for (int i = 0; i <= numPoints; i++)
-        {
-            float x = i / (float)numPoints * totalDistance;
-            float topElev = topAtStart - (x / totalDistance) * totalDistance * slope;
-            
-            formation.TopBoundary.Add(new Vector2(x, topElev));
-            formation.BottomBoundary.Add(new Vector2(x, topElev - thickness));
-        }
-        
-        return formation;
-    }
-    
-    private static ProjectedFormation CreateBasinLayer(string name, Vector4 color, float totalDistance,
-        float centerX, float basinWidth, float baseTop, float thickness, float basinDepth)
-    {
-        var formation = new ProjectedFormation
-        {
-            Name = name,
-            Color = color,
-            TopBoundary = new List<Vector2>(),
-            BottomBoundary = new List<Vector2>()
-        };
-        
-        int numPoints = 100;
-        for (int i = 0; i <= numPoints; i++)
-        {
-            float x = i / (float)numPoints * totalDistance;
-            float distFromCenter = Math.Abs(x - centerX);
-            float basinFactor = Math.Max(0, 1 - (distFromCenter / (basinWidth / 2f)));
-            basinFactor = basinFactor * basinFactor;
-            
-            float subsidence = basinDepth * basinFactor;
-            float topElev = baseTop - subsidence;
-            
-            formation.TopBoundary.Add(new Vector2(x, topElev));
-            formation.BottomBoundary.Add(new Vector2(x, topElev - thickness));
-        }
-        
-        return formation;
-    }
-    
-    private static ProjectedFormation CreateChannelFillFormation(string name, Vector4 color, float totalDistance,
-        float channelCenter, float channelWidth, float incisionDepth,
-        GeologicalMapping.ProfileGenerator.TopographicProfile profile)
-    {
-        var formation = new ProjectedFormation
-        {
-            Name = name,
-            Color = color,
-            TopBoundary = new List<Vector2>(),
-            BottomBoundary = new List<Vector2>()
-        };
-        
-        int numPoints = 100;
-        for (int i = 0; i <= numPoints; i++)
-        {
-            float x = i / (float)numPoints * totalDistance;
-            float distFromCenter = Math.Abs(x - channelCenter);
-            
-            if (distFromCenter < channelWidth / 2f)
+            // If layer would be above topography, it's eroded - bring it to topography
+            if (topElev > topoElev)
             {
-                float topoElev = GetTopographyElevationAt(profile, x);
-                float channelFactor = 1 - (distFromCenter / (channelWidth / 2f));
-                channelFactor = channelFactor * channelFactor;
-                float channelBottom = topoElev - incisionDepth * channelFactor;
-                
-                formation.TopBoundary.Add(new Vector2(x, topoElev));
-                formation.BottomBoundary.Add(new Vector2(x, channelBottom));
+                topElev = topoElev;
             }
+            
+            formation.TopBoundary.Add(new Vector2(x, topElev));
+            formation.BottomBoundary.Add(new Vector2(x, topElev - thickness));
         }
         
         return formation;
     }
     
-    private static void UpdateTopographyWithChannel(GeologicalMapping.ProfileGenerator.TopographicProfile profile,
-        float totalDistance, float channelCenter, float channelWidth, float incisionDepth)
+    private static CrossSection CreateSimpleLayers(float totalDistance, float baseElevation)
     {
-        for (int i = 0; i < profile.Points.Count; i++)
+        var section = CreateBaseCrossSection(totalDistance, baseElevation, 100f);
+        var layers = GetStandardStratigraphicColumn().Take(6).ToArray();
+        
+        // FIRST: Add crystalline basement with slight 2° dip (Jura-style)
+        var basement = CreateCrystallineBasement(totalDistance, baseElevation, 2f);
+        section.Formations.Add(basement);
+        
+        // Add sedimentary layers with slight regional dip
+        float regionalDip = 5f;
+        float currentTop = 100f; // Start at topography
+        
+        for (int layerIdx = 0; layerIdx < layers.Length; layerIdx++)
         {
-            float x = profile.Points[i].Distance;
-            float distFromCenter = Math.Abs(x - channelCenter);
-            
-            if (distFromCenter < channelWidth / 2f)
+            var layer = layers[layerIdx];
+            var formation = new ProjectedFormation
             {
-                float channelFactor = 1 - (distFromCenter / (channelWidth / 2f));
-                channelFactor = channelFactor * channelFactor;
-                float incision = incisionDepth * channelFactor;
+                Name = layer.Name,
+                Color = layer.Color,
+                TopBoundary = new List<Vector2>(),
+                BottomBoundary = new List<Vector2>()
+            };
+            
+            for (int i = 0; i <= 50; i++)
+            {
+                float x = i / 50f * totalDistance;
+                float dipOffset = (x / totalDistance) * totalDistance * MathF.Tan(regionalDip * MathF.PI / 180f);
                 
-                profile.Points[i].Elevation -= incision;
-                profile.Points[i].Position = new Vector2(x, profile.Points[i].Elevation);
+                float topElevation;
+                if (layerIdx == 0)
+                {
+                    // First layer MUST follow topography exactly
+                    topElevation = GetTopographyElevationAt(section.Profile, x);
+                }
+                else
+                {
+                    // Other layers follow previous layer's bottom
+                    var prevFormation = section.Formations[layerIdx]; // +1 for basement
+                    if (i < prevFormation.BottomBoundary.Count)
+                    {
+                        topElevation = prevFormation.BottomBoundary[i].Y;
+                    }
+                    else
+                    {
+                        topElevation = currentTop - dipOffset;
+                    }
+                }
+                
+                formation.TopBoundary.Add(new Vector2(x, topElevation));
+                formation.BottomBoundary.Add(new Vector2(x, topElevation - layer.Thickness));
             }
+            
+            currentTop -= layer.Thickness;
+            section.Formations.Add(formation);
         }
         
-        profile.MinElevation = profile.Points.Min(p => p.Elevation);
-        profile.MaxElevation = profile.Points.Max(p => p.Elevation);
+        return section;
     }
     
-    private static void OffsetFormationByFault(ProjectedFormation formation, float faultX, float displacement, bool offsetWestSide)
+    private static void ApplyFold(ProjectedFormation formation, float centerX, float amplitude, float foldWidth)
     {
         for (int i = 0; i < formation.TopBoundary.Count; i++)
         {
-            if ((offsetWestSide && formation.TopBoundary[i].X < faultX) ||
-                (!offsetWestSide && formation.TopBoundary[i].X >= faultX))
-            {
-                formation.TopBoundary[i] = new Vector2(
-                    formation.TopBoundary[i].X,
-                    formation.TopBoundary[i].Y - displacement
-                );
-            }
+            var point = formation.TopBoundary[i];
+            float distFromCenter = Math.Abs(point.X - centerX);
+            float foldFactor = MathF.Exp(-(distFromCenter * distFromCenter) / (foldWidth * foldWidth * 0.25f));
+            float foldOffset = amplitude * foldFactor;
+            formation.TopBoundary[i] = new Vector2(point.X, point.Y + foldOffset);
         }
         
         for (int i = 0; i < formation.BottomBoundary.Count; i++)
         {
-            if ((offsetWestSide && formation.BottomBoundary[i].X < faultX) ||
-                (!offsetWestSide && formation.BottomBoundary[i].X >= faultX))
+            var point = formation.BottomBoundary[i];
+            float distFromCenter = Math.Abs(point.X - centerX);
+            float foldFactor = MathF.Exp(-(distFromCenter * distFromCenter) / (foldWidth * foldWidth * 0.25f));
+            float foldOffset = amplitude * foldFactor;
+            formation.BottomBoundary[i] = new Vector2(point.X, point.Y + foldOffset);
+        }
+    }
+
+    private static float GetElevationAtX(List<Vector2> points, float x, float defaultValue = 0)
+    {
+        if (points == null || points.Count == 0) return defaultValue;
+        for (int i = 0; i < points.Count - 1; i++)
+        {
+            if (x >= points[i].X && x <= points[i + 1].X)
             {
-                formation.BottomBoundary[i] = new Vector2(
-                    formation.BottomBoundary[i].X,
-                    formation.BottomBoundary[i].Y - displacement
-                );
+                float t = (x - points[i].X) / (points[i + 1].X - points[i].X);
+                return points[i].Y + t * (points[i + 1].Y - points[i].Y);
             }
         }
+        return defaultValue;
     }
     
     #endregion
@@ -1144,11 +1163,11 @@ public static class GeologicalLayerPresets
         PresetScenario.SimpleLayers => "Simple Dipping Layers",
         PresetScenario.ErodedAnticline => "Eroded Anticline with Valley Fill",
         PresetScenario.ErodedSyncline => "Eroded Syncline",
-        PresetScenario.JuraMountains => "Jura Mountains (Gentle Folds + 4 Thrusts)",
+        PresetScenario.JuraMountains => "Jura Mountains (Multiple Folds + Thrusts)",
         PresetScenario.FaultedLayers => "Faulted Layers (Graben)",
         PresetScenario.ThrustFault => "Thrust Fault System",
-        PresetScenario.FoldedSequence => "Folded Sequence with Reverse Fault",
-        PresetScenario.UnconformitySequence => "Angular Unconformity with Fault",
+        PresetScenario.FoldedSequence => "Folded Sequence",
+        PresetScenario.UnconformitySequence => "Angular Unconformity",
         PresetScenario.BasinFilling => "Sedimentary Basin",
         PresetScenario.ChannelFill => "Incised Valley Channel",
         _ => "Unknown"
@@ -1156,16 +1175,16 @@ public static class GeologicalLayerPresets
     
     public static string GetPresetDescription(PresetScenario scenario) => scenario switch
     {
-        PresetScenario.SimpleLayers => "Dipping sedimentary sequence on crystalline basement",
-        PresetScenario.ErodedAnticline => "Anticline eroded and filled, with normal fault",
-        PresetScenario.ErodedSyncline => "Syncline fold on crystalline basement",
-        PresetScenario.JuraMountains => "Realistic Jura-style gentle folds with 4 thrust faults on basement",
-        PresetScenario.FaultedLayers => "Graben structure with two normal faults",
-        PresetScenario.ThrustFault => "Major thrust system with footwall shortcut",
-        PresetScenario.FoldedSequence => "Multiple folds cut by reverse fault, on basement",
-        PresetScenario.UnconformitySequence => "Angular unconformity: tilted lower sequence (cut by fault) overlain by flat upper sequence, all on basement",
-        PresetScenario.BasinFilling => "Progressive basin filling with basin-bounding fault",
-        PresetScenario.ChannelFill => "Incised valley with fluvial deposits",
+        PresetScenario.SimpleLayers => "Gently dipping sedimentary sequence on crystalline basement (2° dip)",
+        PresetScenario.ErodedAnticline => "Anticline eroded with valley fill, layers continue through erosion",
+        PresetScenario.ErodedSyncline => "Syncline with realistic erosion patterns",
+        PresetScenario.JuraMountains => "Realistic Jura-style: multiple gentle folds with thrust faults on crystalline basement",
+        PresetScenario.FaultedLayers => "Graben structure showing proper layer continuity",
+        PresetScenario.ThrustFault => "Complete thrust system with floor, imbricate and main thrusts",
+        PresetScenario.FoldedSequence => "Multiple folds with proper layer continuity",
+        PresetScenario.UnconformitySequence => "Angular unconformity with proper contact relationships",
+        PresetScenario.BasinFilling => "Progressive basin filling with syn-sedimentary faulting",
+        PresetScenario.ChannelFill => "Incised valley with channel deposits",
         _ => "Unknown"
     };
 }

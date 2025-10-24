@@ -20,7 +20,15 @@ public class TwoDGeologyViewer : IDisposable
 {
     private readonly TwoDGeologyDataset _dataset;
     private CrossSection _crossSection;
+    
+    // Restoration System
     private CrossSection _restorationData; // For displaying restoration results
+    private StructuralRestoration _restorationProcessor; // Restoration processor
+    private float _restorationPercentage = 0f;
+    private bool _showRestorationOverlay = false;
+    private bool _restorationInitialized = false;
+    private readonly List<(float percentage, CrossSection snapshot)> _restorationHistory = new();
+    private int _currentRestorationStep = -1;
     
     // Undo/Redo system
     public UndoRedoManager UndoRedo { get; } = new();
@@ -53,7 +61,6 @@ public class TwoDGeologyViewer : IDisposable
     private bool _showFaults = true;
     private bool _showTopography = true;
     private bool _showGrid = true;
-    private bool _showRestorationOverlay = false;
     private bool _showLayersPanel = true;
     
     // Colors
@@ -175,6 +182,26 @@ public class TwoDGeologyViewer : IDisposable
     }
     
     /// <summary>
+    /// Initialize or reinitialize the restoration processor
+    /// </summary>
+    private void InitializeRestoration()
+    {
+        if (_crossSection == null) return;
+        
+        _restorationProcessor = new StructuralRestoration(_crossSection);
+        _restorationHistory.Clear();
+        _currentRestorationStep = -1;
+        _restorationPercentage = 0f;
+        _restorationInitialized = true;
+        
+        // Add initial state
+        _restorationHistory.Add((0f, DeepCopySection(_crossSection)));
+        _currentRestorationStep = 0;
+        
+        Logger.Log("Initialized structural restoration processor");
+    }
+    
+    /// <summary>
     /// Set restoration data to display as overlay
     /// </summary>
     public void SetRestorationData(CrossSection restorationData)
@@ -190,6 +217,10 @@ public class TwoDGeologyViewer : IDisposable
     {
         _restorationData = null;
         _showRestorationOverlay = false;
+        _restorationPercentage = 0f;
+        _restorationHistory.Clear();
+        _currentRestorationStep = -1;
+        _restorationInitialized = false;
     }
     
     /// <summary>
@@ -272,10 +303,113 @@ public class TwoDGeologyViewer : IDisposable
         ImGui.SameLine();
         ImGui.Checkbox("Layers Panel", ref _showLayersPanel);
         
-        if (_restorationData != null)
+        ImGui.SameLine();
+        ImGui.TextUnformatted("|");
+        ImGui.SameLine();
+        
+        // RESTORATION CONTROLS
+        ImGui.TextColored(new Vector4(0.7f, 1f, 0.7f, 1f), "Restoration:");
+        ImGui.SameLine();
+        
+        // Initialize button if needed
+        if (!_restorationInitialized)
         {
+            if (ImGui.Button("Initialize Restoration"))
+            {
+                InitializeRestoration();
+            }
+            if (ImGui.IsItemHovered())
+            {
+                ImGui.SetTooltip("Initialize the restoration system for this cross-section");
+            }
+        }
+        else
+        {
+            // Show/Hide overlay checkbox
+            if (ImGui.Checkbox("Show Overlay", ref _showRestorationOverlay))
+            {
+                if (_showRestorationOverlay && _restorationData == null && _restorationProcessor != null)
+                {
+                    // Generate restoration at current percentage
+                    _restorationProcessor.Restore(_restorationPercentage);
+                    _restorationData = _restorationProcessor.RestoredSection;
+                }
+            }
             ImGui.SameLine();
-            ImGui.Checkbox("Show Restoration", ref _showRestorationOverlay);
+            
+            // Step backward button
+            if (ImGui.Button("<"))
+            {
+                StepRestorationBackward();
+            }
+            if (ImGui.IsItemHovered())
+            {
+                ImGui.SetTooltip("Step backward (Deform)");
+            }
+            ImGui.SameLine();
+            
+            // Restoration percentage slider
+            ImGui.PushItemWidth(150f);
+            if (ImGui.SliderFloat("##Restoration", ref _restorationPercentage, 0f, 100f, "%.0f%%"))
+            {
+                ApplyRestoration(_restorationPercentage);
+            }
+            ImGui.PopItemWidth();
+            ImGui.SameLine();
+            
+            // Step forward button
+            if (ImGui.Button(">"))
+            {
+                StepRestorationForward();
+            }
+            if (ImGui.IsItemHovered())
+            {
+                ImGui.SetTooltip("Step forward (Restore)");
+            }
+            ImGui.SameLine();
+            
+            // Quick presets
+            if (ImGui.Button("0%"))
+            {
+                _restorationPercentage = 0f;
+                ApplyRestoration(0f);
+            }
+            if (ImGui.IsItemHovered())
+            {
+                ImGui.SetTooltip("Original (fully deformed)");
+            }
+            ImGui.SameLine();
+            
+            if (ImGui.Button("50%"))
+            {
+                _restorationPercentage = 50f;
+                ApplyRestoration(50f);
+            }
+            if (ImGui.IsItemHovered())
+            {
+                ImGui.SetTooltip("Half restored");
+            }
+            ImGui.SameLine();
+            
+            if (ImGui.Button("100%"))
+            {
+                _restorationPercentage = 100f;
+                ApplyRestoration(100f);
+            }
+            if (ImGui.IsItemHovered())
+            {
+                ImGui.SetTooltip("Fully restored (flat)");
+            }
+            ImGui.SameLine();
+            
+            if (ImGui.Button("Clear"))
+            {
+                ClearRestorationData();
+            }
+            if (ImGui.IsItemHovered())
+            {
+                ImGui.SetTooltip("Clear restoration and reset");
+            }
         }
 
         ImGui.SameLine();
@@ -291,6 +425,79 @@ public class TwoDGeologyViewer : IDisposable
             _crossSection.VerticalExaggeration = _verticalExaggeration;
         }
         ImGui.PopItemWidth();
+    }
+    
+    private void StepRestorationForward()
+    {
+        _restorationPercentage = Math.Min(100f, _restorationPercentage + 10f);
+        ApplyRestoration(_restorationPercentage);
+    }
+    
+    private void StepRestorationBackward()
+    {
+        _restorationPercentage = Math.Max(0f, _restorationPercentage - 10f);
+        ApplyRestoration(_restorationPercentage);
+    }
+    
+    private void ApplyRestoration(float percentage)
+    {
+        if (_restorationProcessor == null)
+        {
+            InitializeRestoration();
+        }
+        
+        _restorationProcessor.Restore(percentage);
+        _restorationData = _restorationProcessor.RestoredSection;
+        
+        // Add to history if it's a new step
+        bool found = false;
+        for (int i = 0; i < _restorationHistory.Count; i++)
+        {
+            if (Math.Abs(_restorationHistory[i].percentage - percentage) < 0.1f)
+            {
+                _currentRestorationStep = i;
+                found = true;
+                break;
+            }
+        }
+        
+        if (!found)
+        {
+            _restorationHistory.Add((percentage, DeepCopySection(_restorationData)));
+            _currentRestorationStep = _restorationHistory.Count - 1;
+        }
+        
+        if (_showRestorationOverlay)
+        {
+            Logger.Log($"Applied restoration at {percentage:F0}%");
+        }
+    }
+    
+    private CrossSection DeepCopySection(CrossSection source)
+    {
+        if (source == null) return null;
+        
+        return new CrossSection
+        {
+            Profile = source.Profile,
+            VerticalExaggeration = source.VerticalExaggeration,
+            Formations = source.Formations.Select(f => new ProjectedFormation
+            {
+                Name = f.Name,
+                Color = f.Color,
+                TopBoundary = new List<Vector2>(f.TopBoundary),
+                BottomBoundary = new List<Vector2>(f.BottomBoundary),
+                FoldStyle = f.FoldStyle
+            }).ToList(),
+            Faults = source.Faults.Select(f => new ProjectedFault
+            {
+                Type = f.Type,
+                Dip = f.Dip,
+                DipDirection = f.DipDirection,
+                Displacement = f.Displacement,
+                FaultTrace = new List<Vector2>(f.FaultTrace)
+            }).ToList()
+        };
     }
     
     private void RenderLayersPanel()
@@ -324,6 +531,13 @@ public class TwoDGeologyViewer : IDisposable
             
             var cmd = new AddFormationCommand(_crossSection, newFormation);
             UndoRedo.ExecuteCommand(cmd);
+            
+            // Reinitialize restoration if active
+            if (_restorationInitialized)
+            {
+                InitializeRestoration();
+                ApplyRestoration(_restorationPercentage);
+            }
         }
         
         if (ImGui.Button("Add Fault", new Vector2(-1, 0)))
@@ -347,6 +561,13 @@ public class TwoDGeologyViewer : IDisposable
             
             var cmd = new AddFaultCommand(_crossSection, newFault);
             UndoRedo.ExecuteCommand(cmd);
+            
+            // Reinitialize restoration if active
+            if (_restorationInitialized)
+            {
+                InitializeRestoration();
+                ApplyRestoration(_restorationPercentage);
+            }
         }
         
         ImGui.Separator();
@@ -534,26 +755,26 @@ public class TwoDGeologyViewer : IDisposable
         if (_showGrid) 
             RenderGrid(drawList, screenPos, availSize);
         
-        // 2. Formations (filled polygons)
+        // 2. Formations (filled polygons) - rendered from bottom to top
         if (_showFormations) 
             RenderFormations(drawList, screenPos, availSize, _crossSection.Formations, false);
         
-        // 3. Topography (line on top of formations)
+        // 3. Faults (RED lines with proper symbols)
+        if (_showFaults) 
+            RenderFaults(drawList, screenPos, availSize, _crossSection.Faults, false);
+        
+        // 4. Topography (LAST to be on top of everything)
         if (_showTopography && _crossSection.Profile != null) 
             RenderTopography(drawList, screenPos, availSize);
         
-        // 4. Restoration overlay (if active)
+        // 5. Restoration overlay (if active)
         if (_showRestorationOverlay && _restorationData != null) 
             RenderRestorationOverlay(drawList, screenPos, availSize);
-        
-        // 5. Faults (lines on top)
-        if (_showFaults) 
-            RenderFaults(drawList, screenPos, availSize, _crossSection.Faults, false);
         
         // 6. Selection highlights
         RenderSelection(drawList, screenPos, availSize);
         
-        // 7. Tools overlay (temp points, measurements, etc.)
+        // 7. Tools overlay
         Tools?.RenderOverlay(drawList, pos => WorldToScreen(pos, screenPos, availSize));
         CustomTopographyDrawer?.RenderDrawPreview(drawList, pos => WorldToScreen(pos, screenPos, availSize));
         
@@ -562,17 +783,145 @@ public class TwoDGeologyViewer : IDisposable
         
         drawList.PopClipRect();
         
-        // Create invisible button for input handling
+        // Handle input
         ImGui.SetCursorScreenPos(screenPos);
         ImGui.InvisibleButton("viewport", availSize, ImGuiButtonFlags.MouseButtonLeft | ImGuiButtonFlags.MouseButtonRight | ImGuiButtonFlags.MouseButtonMiddle);
         
-        // Check if viewport is active (allows interaction even with popups open)
         bool isViewportHovered = ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenBlockedByPopup | ImGuiHoveredFlags.AllowWhenBlockedByActiveItem);
         bool isViewportActive = ImGui.IsItemActive() || isViewportHovered;
         
-        // Handle mouse input and context menus
         HandleMouseInput(screenPos, availSize, isViewportActive);
         RenderFaultContextMenus();
+    }
+
+    private void RenderFaults(ImDrawListPtr drawList, Vector2 screenPos, Vector2 availSize,
+        List<ProjectedFault> faults, bool isOverlay)
+    {
+        if (faults == null) return;
+        
+        foreach (var fault in faults)
+        {
+            if (fault.FaultTrace.Count < 2) continue;
+            
+            // FIXED: Proper red color for all faults
+            uint color = _faultColor; // This is already red (1.0f, 0.0f, 0.0f, 1.0f)
+            
+            // Special colors for thrust faults to make them more visible
+            if (fault.Type == GeologicalFeatureType.Fault_Thrust)
+            {
+                color = ImGui.ColorConvertFloat4ToU32(new Vector4(0.8f, 0.0f, 0.2f, 1.0f)); // Slightly different red
+            }
+            
+            if (isOverlay)
+            {
+                color = ImGui.ColorConvertFloat4ToU32(new Vector4(1.0f, 0.5f, 0.0f, 0.5f)); // Orange for overlay
+            }
+
+            // Draw fault trace with appropriate thickness
+            float thickness = fault.Type == GeologicalFeatureType.Fault_Thrust ? 4.0f : 3.0f;
+
+            if (fault.FaultTrace.Count > 2)
+            {
+                // Draw as smooth curve for 3+ points
+                var splinePoints = InterpolateCatmullRom(fault.FaultTrace, 10);
+                for (var j = 0; j < splinePoints.Count - 1; j++)
+                {
+                    var screenPos1 = WorldToScreen(splinePoints[j], screenPos, availSize);
+                    var screenPos2 = WorldToScreen(splinePoints[j + 1], screenPos, availSize);
+                    drawList.AddLine(screenPos1, screenPos2, color, thickness);
+                }
+            }
+            else
+            {
+                // Draw as straight line for 2 points
+                var screenPos1 = WorldToScreen(fault.FaultTrace[0], screenPos, availSize);
+                var screenPos2 = WorldToScreen(fault.FaultTrace[1], screenPos, availSize);
+                drawList.AddLine(screenPos1, screenPos2, color, thickness);
+            }
+            
+            // Draw fault type indicators
+            DrawFaultSymbols(drawList, screenPos, availSize, fault, color);
+        }
+    }
+
+    private void DrawFaultSymbols(ImDrawListPtr drawList, Vector2 screenPos, Vector2 availSize, 
+        ProjectedFault fault, uint color)
+    {
+        if (fault.FaultTrace.Count < 2) return;
+        
+        // Draw symbols along the fault trace
+        int numSymbols = Math.Max(2, fault.FaultTrace.Count - 1);
+        
+        for (int i = 0; i < numSymbols; i++)
+        {
+            float t = (i + 0.5f) / numSymbols;
+            int segmentIndex = (int)(t * (fault.FaultTrace.Count - 1));
+            
+            if (segmentIndex >= fault.FaultTrace.Count - 1)
+                segmentIndex = fault.FaultTrace.Count - 2;
+                
+            var p1 = fault.FaultTrace[segmentIndex];
+            var p2 = fault.FaultTrace[segmentIndex + 1];
+            var midPoint = Vector2.Lerp(p1, p2, 0.5f);
+            var screenMid = WorldToScreen(midPoint, screenPos, availSize);
+            
+            // Calculate fault direction
+            var direction = Vector2.Normalize(p2 - p1);
+            var perpendicular = new Vector2(-direction.Y, direction.X);
+            
+            switch (fault.Type)
+            {
+                case GeologicalFeatureType.Fault_Normal:
+                    // Downward ticks on hanging wall
+                    var tick1 = screenMid + perpendicular * 15f;
+                    var tick2 = screenMid + perpendicular * 15f + new Vector2(0, 10f);
+                    drawList.AddLine(screenMid, tick1, color, 2.0f);
+                    drawList.AddLine(tick1, tick2, color, 2.0f);
+                    break;
+                    
+                case GeologicalFeatureType.Fault_Reverse:
+                    // Upward ticks
+                    var tickR1 = screenMid + perpendicular * 15f;
+                    var tickR2 = screenMid + perpendicular * 15f - new Vector2(0, 10f);
+                    drawList.AddLine(screenMid, tickR1, color, 2.0f);
+                    drawList.AddLine(tickR1, tickR2, color, 2.0f);
+                    break;
+                    
+                case GeologicalFeatureType.Fault_Thrust:
+                    // Triangle teeth on hanging wall (characteristic thrust symbol)
+                    for (int j = -1; j <= 1; j++)
+                    {
+                        var toothBase = screenMid + direction * (j * 20f);
+                        var toothTip = toothBase + perpendicular * 15f;
+                        
+                        // Draw filled triangle
+                        var triangle = new Vector2[]
+                        {
+                            toothBase - direction * 5f,
+                            toothBase + direction * 5f,
+                            toothTip
+                        };
+                        
+                        // Draw triangle outline
+                        drawList.AddTriangle(triangle[0], triangle[1], triangle[2], color, 2.0f);
+                        // Fill triangle
+                        drawList.AddTriangleFilled(triangle[0], triangle[1], triangle[2], 
+                            ImGui.ColorConvertFloat4ToU32(new Vector4(0.8f, 0.0f, 0.2f, 0.3f)));
+                    }
+                    break;
+                    
+                case GeologicalFeatureType.Fault_Strike_Slip:
+                    // Horizontal arrows
+                    drawList.AddLine(screenMid - direction * 20f, screenMid - direction * 10f, color, 2.0f);
+                    drawList.AddLine(screenMid + direction * 10f, screenMid + direction * 20f, color, 2.0f);
+                    // Arrow heads
+                    drawList.AddLine(screenMid - direction * 10f, 
+                        screenMid - direction * 10f + perpendicular * 5f, color, 2.0f);
+                    drawList.AddLine(screenMid + direction * 10f, 
+                        screenMid + direction * 10f - perpendicular * 5f, color, 2.0f);
+                    break;
+            }
+        }
     }
     
     private void RenderGrid(ImDrawListPtr drawList, Vector2 screenPos, Vector2 availSize)
@@ -732,70 +1081,14 @@ public class TwoDGeologyViewer : IDisposable
         return result;
     }
     
-    private void RenderFaults(ImDrawListPtr drawList, Vector2 screenPos, Vector2 availSize,
-        List<ProjectedFault> faults, bool isOverlay)
-    {
-        if (faults == null) return;
-        
-        foreach (var fault in faults)
-        {
-            if (fault.FaultTrace.Count < 2) continue;
-            
-            var color = isOverlay ? 
-                ImGui.ColorConvertFloat4ToU32(new Vector4(1.0f, 0.5f, 0.0f, 0.5f)) : 
-                _faultColor;
-
-            if (fault.FaultTrace.Count > 2)
-            {
-                // Draw as a curve for 3+ points
-                var splinePoints = InterpolateCatmullRom(fault.FaultTrace, 10);
-                for (var j = 0; j < splinePoints.Count - 1; j++)
-                {
-                    var screenPos1 = WorldToScreen(splinePoints[j], screenPos, availSize);
-                    var screenPos2 = WorldToScreen(splinePoints[j + 1], screenPos, availSize);
-                    drawList.AddLine(screenPos1, screenPos2, color, 3.0f);
-                }
-            }
-            else
-            {
-                // Draw as a straight line for 2 points
-                var screenPos1 = WorldToScreen(fault.FaultTrace[0], screenPos, availSize);
-                var screenPos2 = WorldToScreen(fault.FaultTrace[1], screenPos, availSize);
-                drawList.AddLine(screenPos1, screenPos2, color, 3.0f);
-            }
-            
-            // Draw fault type indicator
-            if (fault.FaultTrace.Count >= 2)
-            {
-                var midPoint = fault.FaultTrace[fault.FaultTrace.Count / 2];
-                var screenMid = WorldToScreen(midPoint, screenPos, availSize);
-                
-                // Draw appropriate symbol based on fault type
-                switch (fault.Type)
-                {
-                    case GeologicalFeatureType.Fault_Normal:
-                        // Draw downward arrows
-                        drawList.AddLine(screenMid, screenMid + new Vector2(-10, 10), color, 2.0f);
-                        drawList.AddLine(screenMid, screenMid + new Vector2(10, 10), color, 2.0f);
-                        break;
-                    case GeologicalFeatureType.Fault_Reverse:
-                        // Draw upward arrows
-                        drawList.AddLine(screenMid, screenMid + new Vector2(-10, -10), color, 2.0f);
-                        drawList.AddLine(screenMid, screenMid + new Vector2(10, -10), color, 2.0f);
-                        break;
-                    case GeologicalFeatureType.Fault_Strike_Slip:
-                        // Draw horizontal arrows
-                        drawList.AddLine(screenMid + new Vector2(-15, 0), screenMid + new Vector2(-5, 0), color, 2.0f);
-                        drawList.AddLine(screenMid + new Vector2(5, 0), screenMid + new Vector2(15, 0), color, 2.0f);
-                        break;
-                }
-            }
-        }
-    }
-    
     private void RenderRestorationOverlay(ImDrawListPtr drawList, Vector2 screenPos, Vector2 availSize)
     {
         if (_restorationData == null) return;
+        
+        // Draw label
+        var labelPos = screenPos + new Vector2(10, 10);
+        var labelColor = ImGui.ColorConvertFloat4ToU32(new Vector4(1f, 1f, 0f, 1f));
+        drawList.AddText(labelPos, labelColor, $"Restoration: {_restorationPercentage:F0}%");
         
         // Render restored formations with transparency
         RenderFormations(drawList, screenPos, availSize, _restorationData.Formations, true);
@@ -1186,6 +1479,19 @@ public class TwoDGeologyViewer : IDisposable
     
     private void RenderPropertiesPanel()
     {
+        // Restoration status
+        if (_restorationInitialized)
+        {
+            ImGui.TextColored(new Vector4(0.7f, 1f, 0.7f, 1f), "Restoration Status:");
+            ImGui.Text($"Current: {_restorationPercentage:F0}% restored");
+            if (_restorationData != null)
+            {
+                ImGui.Text($"Formations: {_restorationData.Formations.Count}");
+                ImGui.Text($"Faults: {_restorationData.Faults.Count}");
+            }
+            ImGui.Separator();
+        }
+        
         if (_selectedFormation != null)
         {
             ImGui.Text($"Selected Formation: {_selectedFormation.Name}");
