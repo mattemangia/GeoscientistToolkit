@@ -1,5 +1,6 @@
 // GeoscientistToolkit/UI/TableViewer.cs
 
+using System;
 using System.Data;
 using System.Numerics;
 using System.Text;
@@ -28,6 +29,12 @@ public class TableViewer : IDatasetViewer
     private DataTable _dataTable;
     private bool _exportFiltered;
     private int _exportFormat; // 0 = CSV, 1 = TSV
+
+    // Cell editing state
+    private (int Row, int Col) _editingCell = (-1, -1);
+    private string _editBuffer = "";
+    private bool _startEditing;
+
 
     // Export dialog state
     private string _exportPath = "";
@@ -156,20 +163,23 @@ public class TableViewer : IDatasetViewer
     }
 
     /// <summary>
-    ///     Opens native save-file dialogs (CSV / TSV) and calls ExportTable()
-    ///     when the user confirms.  Follows the same pattern as TableTools.
+    ///     Checks for and handles submissions from the CSV and TSV file dialogs.
     /// </summary>
     private void HandleExportDialogs()
     {
         // ── CSV ────────────────────────────────────────────────────────────────────
         if (_csvExportDialog.Submit())
+        {
             // Use comma as delimiter
             ExportTable(_csvExportDialog.SelectedPath, ",", _includeHeaders, _exportFiltered);
+        }
 
         // ── TSV ────────────────────────────────────────────────────────────────────
         if (_tsvExportDialog.Submit())
+        {
             // Use tab as delimiter
             ExportTable(_tsvExportDialog.SelectedPath, "\t", _includeHeaders, _exportFiltered);
+        }
     }
 
     private void RefreshData()
@@ -204,6 +214,20 @@ public class TableViewer : IDatasetViewer
 
             _columnWidths[i] = Math.Max(nameWidth, Math.Min(dataWidth, 300f));
         }
+    }
+
+    private void StopEditing(bool commitChange)
+    {
+        if (commitChange)
+        {
+            // Find the original row index in the unfiltered _dataTable
+            var dataRow = _filteredRows[_editingCell.Row];
+            var originalRowIndex = _dataTable.Rows.IndexOf(dataRow);
+
+            if (originalRowIndex != -1)
+                _dataset.UpdateCellValue(originalRowIndex, _editingCell.Col, _editBuffer);
+        }
+        _editingCell = (-1, -1);
     }
 
     private void DrawTable()
@@ -289,37 +313,68 @@ public class TableViewer : IDatasetViewer
                 for (var col = 0; col < _dataTable.Columns.Count; col++)
                 {
                     ImGui.TableNextColumn();
-
-                    var isSelected = _selectedRow == row && _selectedColumn == col;
-
-                    if (isSelected) ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(1.0f, 1.0f, 0.0f, 1.0f));
-
-                    var cellValue = dataRow[col]?.ToString() ?? "";
-
-                    // Make cell selectable
                     ImGui.PushID($"cell_{row}_{col}");
-                    if (ImGui.Selectable(cellValue, isSelected, ImGuiSelectableFlags.SpanAllColumns))
-                    {
-                        _selectedRow = row;
-                        _selectedColumn = col;
-                    }
 
+                    bool isEditingThisCell = _editingCell.Row == row && _editingCell.Col == col;
+
+                    if (isEditingThisCell)
+                    {
+                        // This block executes when the cell is in edit mode.
+                        if (_startEditing)
+                        {
+                            _editBuffer = dataRow[col]?.ToString() ?? "";
+                            ImGui.SetKeyboardFocusHere();
+                            _startEditing = false;
+                        }
+
+                        ImGui.SetNextItemWidth(-1);
+                        bool enterPressed = ImGui.InputText("##edit", ref _editBuffer, 256, ImGuiInputTextFlags.EnterReturnsTrue | ImGuiInputTextFlags.AutoSelectAll);
+
+                        // --- FIX START ---
+                        // The corrected logic for stopping the edit.
+                        // We check for Escape first to cancel.
+                        // Then, we check if Enter was pressed OR if the input box lost focus (was deactivated).
+                        if (ImGui.IsKeyPressed(ImGuiKey.Escape))
+                        {
+                            StopEditing(false); // Cancel edit
+                        }
+                        else if (enterPressed || ImGui.IsItemDeactivated())
+                        {
+                            StopEditing(true); // Commit edit
+                        }
+                        // --- FIX END ---
+                    }
+                    else
+                    {
+                        // This block executes for a normal, non-editing cell.
+                        var isSelected = _selectedRow == row && _selectedColumn == col;
+                        var cellValue = dataRow[col]?.ToString() ?? "";
+
+                        if (ImGui.Selectable(cellValue, isSelected, ImGuiSelectableFlags.SpanAllColumns | ImGuiSelectableFlags.AllowDoubleClick))
+                        {
+                            _selectedRow = row;
+                            _selectedColumn = col;
+                            if (ImGui.IsMouseDoubleClicked(ImGuiMouseButton.Left))
+                            {
+                                _editingCell = (row, col);
+                                _startEditing = true;
+                            }
+                        }
+
+                        // Show tooltip for truncated text
+                        if (ImGui.IsItemHovered() && ImGui.CalcTextSize(cellValue).X > _columnWidths.GetValueOrDefault(col, DEFAULT_COLUMN_WIDTH))
+                            ImGui.SetTooltip(cellValue);
+
+                        // Context menu for cell
+                        if (ImGui.BeginPopupContextItem())
+                        {
+                            if (ImGui.MenuItem("Copy Cell")) ImGui.SetClipboardText(cellValue);
+                            if (ImGui.MenuItem("Copy Row")) CopyRowToClipboard(dataRow);
+                            if (ImGui.MenuItem("Copy Column")) CopyColumnToClipboard(col);
+                            ImGui.EndPopup();
+                        }
+                    }
                     ImGui.PopID();
-
-                    // Show tooltip for truncated text
-                    if (ImGui.IsItemHovered() && ImGui.CalcTextSize(cellValue).X >
-                        _columnWidths.GetValueOrDefault(col, DEFAULT_COLUMN_WIDTH)) ImGui.SetTooltip(cellValue);
-
-                    // Context menu for cell
-                    if (ImGui.BeginPopupContextItem($"cell_context_{row}_{col}"))
-                    {
-                        if (ImGui.MenuItem("Copy Cell")) ImGui.SetClipboardText(cellValue);
-                        if (ImGui.MenuItem("Copy Row")) CopyRowToClipboard(dataRow);
-                        if (ImGui.MenuItem("Copy Column")) CopyColumnToClipboard(col);
-                        ImGui.EndPopup();
-                    }
-
-                    if (isSelected) ImGui.PopStyleColor();
                 }
             }
 
@@ -489,42 +544,6 @@ public class TableViewer : IDatasetViewer
     {
         var values = _filteredRows.Select(row => row[columnIndex]?.ToString() ?? "");
         ImGui.SetClipboardText(string.Join("\n", values));
-    }
-
-    private void DrawExportPopup()
-    {
-        if (ImGui.BeginPopupModal("ExportTablePopup", ImGuiWindowFlags.AlwaysAutoResize))
-        {
-            ImGui.Text("Export Table");
-            ImGui.Separator();
-
-            ImGui.InputTextWithHint("File Path", "path/to/export.csv", ref _exportPath, 260);
-            ImGui.SameLine();
-            if (ImGui.Button("Browse..."))
-                // In a real implementation, you'd open a file save dialog here
-                _exportPath = Path.Combine(
-                    Environment.GetFolderPath(Environment.SpecialFolder.Desktop),
-                    $"{_dataset.Name}_export.csv");
-
-            ImGui.Combo("Format", ref _exportFormat, "CSV (Comma-separated)\0TSV (Tab-separated)\0");
-            ImGui.Checkbox("Include Headers", ref _includeHeaders);
-            ImGui.Checkbox("Export Filtered Rows Only", ref _exportFiltered);
-
-            ImGui.Separator();
-
-            if (ImGui.Button("Export", new Vector2(120, 0)))
-                if (!string.IsNullOrEmpty(_exportPath))
-                {
-                    ExportTable(_exportPath, _exportFormat == 1 ? "\t" : ",", _includeHeaders, _exportFiltered);
-                    ImGui.CloseCurrentPopup();
-                }
-
-            ImGui.SameLine();
-
-            if (ImGui.Button("Cancel", new Vector2(120, 0))) ImGui.CloseCurrentPopup();
-
-            ImGui.EndPopup();
-        }
     }
 
     private void ExportTable(string path, string delimiter, bool includeHeaders, bool filteredOnly)
