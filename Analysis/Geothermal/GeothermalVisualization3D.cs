@@ -49,6 +49,11 @@ public class GeothermalVisualization3D : IDisposable
     private Sampler _linearSampler;
     private Sampler _pointSampler;
     
+    // Render target for offscreen rendering
+    private Texture _renderTarget;
+    private TextureView _renderTargetView;
+    private Framebuffer _framebuffer;
+    
     // Visualization data
     private GeothermalSimulationResults _results;
     private GeothermalMesh _mesh;
@@ -85,6 +90,10 @@ public class GeothermalVisualization3D : IDisposable
     private bool _isRotating = false;
     private bool _isPanning = false;
     private Vector2 _lastMousePos;
+    
+    // Render dimensions
+    private uint _renderWidth = 800;
+    private uint _renderHeight = 600;
     
     public enum RenderMode
     {
@@ -156,6 +165,9 @@ public class GeothermalVisualization3D : IDisposable
     
     private void InitializeResources()
     {
+        // Create render target for offscreen rendering
+        CreateRenderTarget(_renderWidth, _renderHeight);
+        
         // Create uniform buffer
         _uniformBuffer = _factory.CreateBuffer(new BufferDescription(
             (uint)Marshal.SizeOf<UniformData>(),
@@ -197,6 +209,36 @@ public class GeothermalVisualization3D : IDisposable
         ));
         
         CreatePipelines();
+    }
+    
+    private void CreateRenderTarget(uint width, uint height)
+    {
+        _renderTarget?.Dispose();
+        _renderTargetView?.Dispose();
+        _framebuffer?.Dispose();
+        
+        _renderWidth = width;
+        _renderHeight = height;
+        
+        // Create render target texture
+        _renderTarget = _factory.CreateTexture(new TextureDescription(
+            width, height, 1, 1, 1,
+            PixelFormat.R8G8B8A8_UNorm,
+            TextureUsage.RenderTarget | TextureUsage.Sampled,
+            TextureType.Texture2D));
+        
+        _renderTargetView = _factory.CreateTextureView(_renderTarget);
+        
+        // Create depth buffer
+        var depthTexture = _factory.CreateTexture(new TextureDescription(
+            width, height, 1, 1, 1,
+            PixelFormat.D24_UNorm_S8_UInt,
+            TextureUsage.DepthStencil,
+            TextureType.Texture2D));
+        
+        _framebuffer = _factory.CreateFramebuffer(new FramebufferDescription(
+            depthTexture,
+            _renderTarget));
     }
     
     private void CreatePipelines()
@@ -272,7 +314,7 @@ public class GeothermalVisualization3D : IDisposable
             ShaderSet = new ShaderSetDescription(
                 vertexLayouts: new[] { vertexLayout },
                 shaders: new[] { shaders.vertex, shaders.fragment }),
-            Outputs = _graphicsDevice.SwapchainFramebuffer.OutputDescription
+            Outputs = _framebuffer.OutputDescription
         };
         
         return _factory.CreateGraphicsPipeline(pipelineDescription);
@@ -286,9 +328,16 @@ public class GeothermalVisualization3D : IDisposable
         _results = results;
         _mesh = mesh;
         
+        // Validate data before processing
+        if (results?.FinalTemperatureField == null || mesh == null)
+        {
+            return;
+        }
+        
         GenerateMeshGeometry();
         CreateDataTextures();
         UpdateBuffers();
+        UpdateResourceSet();
     }
     
     /// <summary>
@@ -298,6 +347,9 @@ public class GeothermalVisualization3D : IDisposable
     {
         _vertices.Clear();
         _indices.Clear();
+        
+        if (_mesh == null || _mesh.RadialPoints == 0 || _mesh.AngularPoints == 0 || _mesh.VerticalPoints == 0)
+            return;
         
         var nr = _mesh.RadialPoints;
         var nth = _mesh.AngularPoints;
@@ -319,32 +371,26 @@ public class GeothermalVisualization3D : IDisposable
                     var y = r * MathF.Sin(theta);
                     var position = new Vector3(x, y, z);
                     
-                    // Get data values
-                    var temperature = _results.FinalTemperatureField?[i, j, k] ?? 293.15f;
-                    var velocity = 0f;
-                    if (_results.DarcyVelocityField != null)
-                    {
-                        var vr = _results.DarcyVelocityField[i, j, k, 0];
-                        var vth = _results.DarcyVelocityField[i, j, k, 1];
-                        var vz = _results.DarcyVelocityField[i, j, k, 2];
-                        velocity = MathF.Sqrt(vr * vr + vth * vth + vz * vz);
-                    }
+                    // Get temperature value
+                    var temp = _results.FinalTemperatureField[i, j, k];
+                    var normalizedTemp = (temp - _temperatureMin) / (_temperatureMax - _temperatureMin);
                     
-                    // Calculate normal (approximate)
-                    var normal = Vector3.Normalize(new Vector3(x, y, 0));
+                    // Calculate normal (pointing outward in cylindrical coords)
+                    var normal = new Vector3(MathF.Cos(theta), MathF.Sin(theta), 0);
+                    normal = Vector3.Normalize(normal);
                     
-                    // Map to texture coordinates
-                    var texCoord = new Vector2((float)j / nth, (float)k / nz);
+                    // Texture coordinates
+                    var texCoord = new Vector2((float)i / (nr - 1), (float)k / (nz - 1));
                     
-                    // Create vertex
-                    var color = TemperatureToColor(temperature);
-                    _vertices.Add(new VertexPositionColorTexture(
-                        position, color, normal, texCoord, temperature));
+                    // Color based on temperature
+                    var color = ColorMapValue(normalizedTemp);
+                    
+                    _vertices.Add(new VertexPositionColorTexture(position, color, normal, texCoord, temp));
                 }
             }
         }
         
-        // Generate indices for triangles
+        // Generate indices for cylindrical mesh
         for (int i = 0; i < nr - 1; i++)
         {
             for (int j = 0; j < nth; j++)
@@ -353,37 +399,37 @@ public class GeothermalVisualization3D : IDisposable
                 {
                     var j1 = (j + 1) % nth;
                     
-                    // Current layer indices
-                    uint idx00 = (uint)(i * nth * nz + j * nz + k);
-                    uint idx01 = (uint)(i * nth * nz + j * nz + k + 1);
-                    uint idx10 = (uint)(i * nth * nz + j1 * nz + k);
-                    uint idx11 = (uint)(i * nth * nz + j1 * nz + k + 1);
+                    // Current layer vertices
+                    var v00 = (uint)(i * nth * nz + j * nz + k);
+                    var v01 = (uint)(i * nth * nz + j * nz + k + 1);
+                    var v10 = (uint)(i * nth * nz + j1 * nz + k);
+                    var v11 = (uint)(i * nth * nz + j1 * nz + k + 1);
                     
-                    // Next radial layer indices
-                    uint idx20 = (uint)((i + 1) * nth * nz + j * nz + k);
-                    uint idx21 = (uint)((i + 1) * nth * nz + j * nz + k + 1);
-                    uint idx30 = (uint)((i + 1) * nth * nz + j1 * nz + k);
-                    uint idx31 = (uint)((i + 1) * nth * nz + j1 * nz + k + 1);
+                    // Next radial layer vertices
+                    var v20 = (uint)((i + 1) * nth * nz + j * nz + k);
+                    var v21 = (uint)((i + 1) * nth * nz + j * nz + k + 1);
+                    var v30 = (uint)((i + 1) * nth * nz + j1 * nz + k);
+                    var v31 = (uint)((i + 1) * nth * nz + j1 * nz + k + 1);
                     
                     // Create quads (as two triangles each)
                     // Radial faces
-                    _indices.Add(idx00); _indices.Add(idx01); _indices.Add(idx21);
-                    _indices.Add(idx00); _indices.Add(idx21); _indices.Add(idx20);
+                    _indices.AddRange(new[] { v00, v20, v21, v00, v21, v01 });
+                    _indices.AddRange(new[] { v10, v11, v31, v10, v31, v30 });
                     
                     // Angular faces
-                    _indices.Add(idx00); _indices.Add(idx10); _indices.Add(idx11);
-                    _indices.Add(idx00); _indices.Add(idx11); _indices.Add(idx01);
+                    _indices.AddRange(new[] { v00, v01, v11, v00, v11, v10 });
+                    _indices.AddRange(new[] { v20, v30, v31, v20, v31, v21 });
                     
                     // Vertical faces
-                    _indices.Add(idx00); _indices.Add(idx20); _indices.Add(idx30);
-                    _indices.Add(idx00); _indices.Add(idx30); _indices.Add(idx10);
+                    _indices.AddRange(new[] { v00, v10, v30, v00, v30, v20 });
+                    _indices.AddRange(new[] { v01, v21, v31, v01, v31, v11 });
                 }
             }
         }
     }
     
     /// <summary>
-    /// Creates 3D textures from simulation data.
+    /// Creates 3D textures for temperature and velocity data.
     /// </summary>
     private void CreateDataTextures()
     {
@@ -425,7 +471,7 @@ public class GeothermalVisualization3D : IDisposable
             _velocityTexture3D = _factory.CreateTexture(new TextureDescription(
                 (uint)nr, (uint)nth, (uint)nz,
                 1, 1,
-                PixelFormat.R32G32B32A32_Float,
+                PixelFormat.R32G32B32A32_SFloat,  // Fixed: was R32G32B32A32_Float
                 TextureUsage.Sampled,
                 TextureType.Texture3D));
             
@@ -482,47 +528,59 @@ public class GeothermalVisualization3D : IDisposable
             (uint)(_indices.Count * sizeof(uint)),
             BufferUsage.IndexBuffer));
         _graphicsDevice.UpdateBuffer(_indexBuffer, 0, _indices.ToArray());
-        
-        // Update resource set
+    }
+    
+    /// <summary>
+    /// Updates the resource set with current textures and buffers.
+    /// </summary>
+    private void UpdateResourceSet()
+    {
         _resourceSet?.Dispose();
+        
+        // Create placeholder textures if needed
+        if (_velocityView == null)
+        {
+            var dummyVelocity = _factory.CreateTexture(new TextureDescription(
+                1, 1, 1, 1, 1,
+                PixelFormat.R32G32B32A32_SFloat,
+                TextureUsage.Sampled,
+                TextureType.Texture3D));
+            _velocityView = _factory.CreateTextureView(dummyVelocity);
+        }
+        
         _resourceSet = _factory.CreateResourceSet(new ResourceSetDescription(
             _resourceLayout,
             _uniformBuffer,
-            _colorMapView ?? _temperatureView,
+            _colorMapView,
             _linearSampler,
             _temperatureView,
-            _velocityView ?? _temperatureView,
+            _velocityView,
             _pointSampler
         ));
     }
     
     /// <summary>
-    /// Renders the visualization.
+    /// Renders the visualization to the offscreen framebuffer.
     /// </summary>
-    public void Render(CommandList commandList)
+    public void Render()
     {
-        if (_vertexBuffer == null || _indexBuffer == null || _resourceSet == null)
+        if (_results == null || _vertexBuffer == null || _indexBuffer == null)
             return;
         
-        // Update uniform buffer
-        var uniformData = new UniformData
-        {
-            ViewMatrix = _viewMatrix,
-            ProjectionMatrix = _projectionMatrix,
-            ModelMatrix = Matrix4x4.Identity,
-            LightDirection = Vector4.Normalize(new Vector4(1, 1, 2, 0)),
-            ViewPosition = new Vector4(_cameraPosition, 1),
-            ColorMapRange = new Vector4(_temperatureMin, _temperatureMax, 0, 0),
-            SliceInfo = new Vector4(_sliceDepth, 0, 0, 1),
-            RenderSettings = new Vector4((float)_renderMode, _opacity, 0, _isoValue)
-        };
+        var commandList = _graphicsDevice.ResourceFactory.CreateCommandList();
+        commandList.Begin();
         
-        commandList.UpdateBuffer(_uniformBuffer, 0, uniformData);
+        // Set render target
+        commandList.SetFramebuffer(_framebuffer);
+        commandList.ClearColorTarget(0, RgbaFloat.Black);
+        commandList.ClearDepthStencil(1.0f);
+        
+        // Update uniforms
+        UpdateUniforms();
         
         // Select pipeline based on render mode
-        Pipeline pipeline = _renderMode switch
+        var pipeline = _renderMode switch
         {
-            RenderMode.Temperature => _temperaturePipeline,
             RenderMode.Velocity => _velocityPipeline,
             RenderMode.Streamlines => _streamlinePipeline,
             RenderMode.Isosurface => _isosurfacePipeline,
@@ -555,6 +613,12 @@ public class GeothermalVisualization3D : IDisposable
         {
             RenderVelocityVectors(commandList);
         }
+        
+        commandList.End();
+        _graphicsDevice.SubmitCommands(commandList);
+        _graphicsDevice.WaitForIdle();
+        
+        commandList.Dispose();
     }
     
     /// <summary>
@@ -628,12 +692,50 @@ public class GeothermalVisualization3D : IDisposable
             return;
         
         // Use the borehole mesh from results
-        // This would render the actual borehole geometry
-        // Implementation depends on the Mesh3DDataset structure
+        var boreholeVertices = new List<VertexPositionColorTexture>();
+        var boreholeIndices = new List<uint>();
+        
+        var vertices = _results.BoreholeMesh.Vertices;
+        var indices = _results.BoreholeMesh.Indices;
+        
+        for (int i = 0; i < vertices.Count; i++)
+        {
+            var v = vertices[i];
+            var color = new Vector4(0.8f, 0.2f, 0.2f, 1.0f); // Red for borehole
+            boreholeVertices.Add(new VertexPositionColorTexture(
+                v.Position,
+                color,
+                v.Normal,
+                Vector2.Zero,
+                0
+            ));
+        }
+        
+        boreholeIndices.AddRange(indices);
+        
+        if (boreholeVertices.Count > 0)
+        {
+            var boreholeVB = _factory.CreateBuffer(new BufferDescription(
+                (uint)(boreholeVertices.Count * Marshal.SizeOf<VertexPositionColorTexture>()),
+                BufferUsage.VertexBuffer));
+            _graphicsDevice.UpdateBuffer(boreholeVB, 0, boreholeVertices.ToArray());
+            
+            var boreholeIB = _factory.CreateBuffer(new BufferDescription(
+                (uint)(boreholeIndices.Count * sizeof(uint)),
+                BufferUsage.IndexBuffer));
+            _graphicsDevice.UpdateBuffer(boreholeIB, 0, boreholeIndices.ToArray());
+            
+            commandList.SetVertexBuffer(0, boreholeVB);
+            commandList.SetIndexBuffer(boreholeIB, IndexFormat.UInt32);
+            commandList.DrawIndexed((uint)boreholeIndices.Count);
+            
+            boreholeVB.Dispose();
+            boreholeIB.Dispose();
+        }
     }
     
     /// <summary>
-    /// Renders velocity vectors.
+    /// Renders velocity vectors as arrows.
     /// </summary>
     private void RenderVelocityVectors(CommandList commandList)
     {
@@ -647,15 +749,16 @@ public class GeothermalVisualization3D : IDisposable
         var nth = _mesh.AngularPoints;
         var nz = _mesh.VerticalPoints;
         
-        // Sample vectors at regular intervals
-        var skip = 5;
-        uint vertexIdx = 0;
+        uint vertexOffset = 0;
+        var skipR = Math.Max(1, nr / 10);
+        var skipTheta = Math.Max(1, nth / 20);
+        var skipZ = Math.Max(1, nz / 10);
         
-        for (int i = 0; i < nr; i += skip)
+        for (int i = 0; i < nr; i += skipR)
         {
-            for (int j = 0; j < nth; j += skip)
+            for (int j = 0; j < nth; j += skipTheta)
             {
-                for (int k = 0; k < nz; k += skip)
+                for (int k = 0; k < nz; k += skipZ)
                 {
                     var r = _mesh.R[i];
                     var theta = _mesh.Theta[j];
@@ -665,28 +768,27 @@ public class GeothermalVisualization3D : IDisposable
                     var y = r * MathF.Sin(theta);
                     var start = new Vector3(x, y, z);
                     
-                    var vr = _results.DarcyVelocityField[i, j, k, 0];
-                    var vth = _results.DarcyVelocityField[i, j, k, 1];
-                    var vz = _results.DarcyVelocityField[i, j, k, 2];
+                    var vel = new Vector3(
+                        _results.DarcyVelocityField[i, j, k, 0],
+                        _results.DarcyVelocityField[i, j, k, 1],
+                        _results.DarcyVelocityField[i, j, k, 2]
+                    );
                     
-                    // Convert to Cartesian
-                    var vx = vr * MathF.Cos(theta) - vth * MathF.Sin(theta);
-                    var vy = vr * MathF.Sin(theta) + vth * MathF.Cos(theta);
-                    var velocity = new Vector3(vx, vy, vz);
-                    
-                    var magnitude = velocity.Length();
+                    var magnitude = vel.Length();
                     if (magnitude < 1e-10f)
                         continue;
                     
-                    var end = start + velocity * _vectorScale;
-                    var color = ColorMapValue(magnitude / _velocityMax);
+                    var end = start + vel * _vectorScale;
+                    var t = magnitude / _velocityMax;
+                    var color = ColorMapValue(t);
                     
                     vectorVertices.Add(new VertexPositionColorTexture(start, color, Vector3.Zero, Vector2.Zero, magnitude));
                     vectorVertices.Add(new VertexPositionColorTexture(end, color, Vector3.Zero, Vector2.One, magnitude));
                     
-                    vectorIndices.Add(vertexIdx);
-                    vectorIndices.Add(vertexIdx + 1);
-                    vertexIdx += 2;
+                    vectorIndices.Add(vertexOffset);
+                    vectorIndices.Add(vertexOffset + 1);
+                    
+                    vertexOffset += 2;
                 }
             }
         }
@@ -703,7 +805,7 @@ public class GeothermalVisualization3D : IDisposable
                 BufferUsage.IndexBuffer));
             _graphicsDevice.UpdateBuffer(vectorIB, 0, vectorIndices.ToArray());
             
-            commandList.SetPipeline(_streamlinePipeline); // Use line pipeline
+            commandList.SetPipeline(_streamlinePipeline);
             commandList.SetVertexBuffer(0, vectorVB);
             commandList.SetIndexBuffer(vectorIB, IndexFormat.UInt32);
             commandList.DrawIndexed((uint)vectorIndices.Count);
@@ -714,148 +816,144 @@ public class GeothermalVisualization3D : IDisposable
     }
     
     /// <summary>
-    /// Draws the ImGui controls for the visualization.
+    /// Updates uniform buffer with current transformation matrices and settings.
     /// </summary>
-    public void DrawImGuiControls()
+    private void UpdateUniforms()
     {
-        if (ImGui.Begin("Geothermal Visualization"))
+        var uniforms = new UniformData
         {
-            ImGui.Text("Render Mode");
-            if (ImGui.RadioButton("Temperature", _renderMode == RenderMode.Temperature))
-                _renderMode = RenderMode.Temperature;
-            if (ImGui.RadioButton("Velocity", _renderMode == RenderMode.Velocity))
-                _renderMode = RenderMode.Velocity;
-            if (ImGui.RadioButton("Pressure", _renderMode == RenderMode.Pressure))
-                _renderMode = RenderMode.Pressure;
-            if (ImGui.RadioButton("Streamlines", _renderMode == RenderMode.Streamlines))
-                _renderMode = RenderMode.Streamlines;
-            if (ImGui.RadioButton("Isosurface", _renderMode == RenderMode.Isosurface))
-                _renderMode = RenderMode.Isosurface;
-            if (ImGui.RadioButton("Slices", _renderMode == RenderMode.Slices))
-                _renderMode = RenderMode.Slices;
-            
-            ImGui.Separator();
-            
-            ImGui.Text("Color Map");
-            if (ImGui.Combo("##ColorMap", ref Unsafe.As<ColorMap, int>(ref _currentColorMap), 
-                new[] { "Turbo", "Viridis", "Plasma", "Inferno", "Magma", "Jet", "Rainbow", "Thermal", "Blue-Red" }, 9))
-            {
-                UpdateColorMap();
-            }
-            
-            ImGui.Separator();
-            
-            ImGui.Text("Range Settings");
-            ImGui.DragFloat("Temp Min (°C)", ref _temperatureMin, 1f, 0f, 200f);
-            _temperatureMin = Math.Max(0, _temperatureMin) + 273.15f;
-            ImGui.DragFloat("Temp Max (°C)", ref _temperatureMax, 1f, 0f, 200f);
-            _temperatureMax = Math.Max(_temperatureMin, _temperatureMax) + 273.15f;
-            
-            ImGui.DragFloat("Velocity Min", ref _velocityMin, 0.0001f, 0f, 0.1f, "%.6f");
-            ImGui.DragFloat("Velocity Max", ref _velocityMax, 0.0001f, 0f, 0.1f, "%.6f");
-            
-            ImGui.Separator();
-            
-            ImGui.Text("Display Options");
-            ImGui.Checkbox("Show Mesh", ref _showMesh);
-            ImGui.Checkbox("Show Borehole", ref _showBorehole);
-            ImGui.Checkbox("Show Velocity Vectors", ref _showVectors);
-            
-            if (_showVectors)
-            {
-                ImGui.DragFloat("Vector Scale", ref _vectorScale, 0.1f, 0.1f, 100f);
-            }
-            
-            ImGui.DragFloat("Opacity", ref _opacity, 0.01f, 0f, 1f);
-            
-            if (_renderMode == RenderMode.Isosurface)
-            {
-                ImGui.DragFloat("Iso Value (°C)", ref _isoValue, 1f, 0f, 100f);
-                _isoValue += 273.15f;
-            }
-            
-            if (_renderMode == RenderMode.Slices)
-            {
-                ImGui.SliderFloat("Slice Depth", ref _sliceDepth, 0f, 1f);
-            }
-            
-            ImGui.Separator();
-            
-            ImGui.Text("Camera");
-            ImGui.DragFloat("Distance", ref _cameraDistance, 1f, 10f, 1000f);
-            ImGui.DragFloat("Azimuth", ref _cameraAzimuth, 1f, -180f, 180f);
-            ImGui.DragFloat("Elevation", ref _cameraElevation, 1f, -90f, 90f);
-            
-            if (ImGui.Button("Reset Camera"))
-            {
-                ResetCamera();
-            }
-            
-            ImGui.Separator();
-            
-            if (_results != null)
-            {
-                ImGui.Text("Results Info");
-                ImGui.Text($"Avg Heat Extraction: {_results.AverageHeatExtractionRate:F0} W");
-                ImGui.Text($"Total Energy: {_results.TotalExtractedEnergy / 1e9:F2} GJ");
-                ImGui.Text($"Thermal Radius: {_results.ThermalInfluenceRadius:F1} m");
-                if (_results.OutletTemperature?.Any() == true)
-                {
-                    var lastTemp = _results.OutletTemperature.Last().temperature - 273.15;
-                    ImGui.Text($"Outlet Temp: {lastTemp:F1} °C");
-                }
-            }
-        }
-        ImGui.End();
+            ViewMatrix = _viewMatrix,
+            ProjectionMatrix = _projectionMatrix,
+            ModelMatrix = Matrix4x4.Identity,
+            LightDirection = Vector4.Normalize(new Vector4(-1, -1, -2, 0)),
+            ViewPosition = new Vector4(_cameraPosition, 1),
+            ColorMapRange = new Vector4(_temperatureMin, _temperatureMax, _velocityMax, 0),
+            SliceInfo = new Vector4(_sliceDepth, 0, 0, 1), // Z-slice by default
+            RenderSettings = new Vector4((float)_renderMode, _opacity, 0, _isoValue)
+        };
+        
+        _graphicsDevice.UpdateBuffer(_uniformBuffer, 0, ref uniforms);
     }
     
     /// <summary>
-    /// Updates camera matrices.
+    /// Updates camera matrices based on current position and orientation.
     /// </summary>
     private void UpdateCamera()
     {
-        // Calculate camera position from spherical coordinates
-        var azimuthRad = _cameraAzimuth * MathF.PI / 180f;
-        var elevationRad = _cameraElevation * MathF.PI / 180f;
+        // Convert spherical to Cartesian for camera position
+        var azimRad = _cameraAzimuth * MathF.PI / 180f;
+        var elevRad = _cameraElevation * MathF.PI / 180f;
         
         _cameraPosition = new Vector3(
-            _cameraDistance * MathF.Cos(elevationRad) * MathF.Cos(azimuthRad),
-            _cameraDistance * MathF.Cos(elevationRad) * MathF.Sin(azimuthRad),
-            _cameraDistance * MathF.Sin(elevationRad)
+            _cameraDistance * MathF.Cos(elevRad) * MathF.Cos(azimRad),
+            _cameraDistance * MathF.Cos(elevRad) * MathF.Sin(azimRad),
+            _cameraDistance * MathF.Sin(elevRad)
         );
         
         _viewMatrix = Matrix4x4.CreateLookAt(_cameraPosition, _cameraTarget, _cameraUp);
         _projectionMatrix = Matrix4x4.CreatePerspectiveFieldOfView(
-            MathF.PI / 4f, // 45 degree FOV
-            (float)_graphicsDevice.SwapchainFramebuffer.Width / _graphicsDevice.SwapchainFramebuffer.Height,
+            45f * MathF.PI / 180f,
+            (float)_renderWidth / _renderHeight,
             0.1f,
-            10000f
+            1000f
         );
     }
     
     /// <summary>
-    /// Resets camera to default position.
+    /// Renders the visualization controls using ImGui.
     /// </summary>
-    private void ResetCamera()
+    public void RenderControls()
     {
-        _cameraDistance = 200f;
-        _cameraAzimuth = 45f;
-        _cameraElevation = 30f;
+        ImGui.Text("3D Visualization Controls");
+        ImGui.Separator();
+        
+        // Render mode selection
+        if (ImGui.BeginCombo("Render Mode", _renderMode.ToString()))
+        {
+            foreach (RenderMode mode in Enum.GetValues<RenderMode>())
+            {
+                if (ImGui.Selectable(mode.ToString(), _renderMode == mode))
+                {
+                    _renderMode = mode;
+                }
+            }
+            ImGui.EndCombo();
+        }
+        
+        // Color map selection
+        if (ImGui.BeginCombo("Color Map", _currentColorMap.ToString()))
+        {
+            foreach (ColorMap map in Enum.GetValues<ColorMap>())
+            {
+                if (ImGui.Selectable(map.ToString(), _currentColorMap == map))
+                {
+                    _currentColorMap = map;
+                    InitializeColorMaps();
+                }
+            }
+            ImGui.EndCombo();
+        }
+        
+        // Temperature range
+        ImGui.DragFloatRange2("Temperature Range (°C)",
+            ref _temperatureMin, ref _temperatureMax,
+            0.1f, 0f, 200f);
+        _temperatureMin += 273.15f; // Convert to Kelvin
+        _temperatureMax += 273.15f;
+        
+        // Visualization options
+        ImGui.Checkbox("Show Borehole", ref _showBorehole);
+        ImGui.SameLine();
+        ImGui.Checkbox("Show Mesh", ref _showMesh);
+        ImGui.SameLine();
+        ImGui.Checkbox("Show Vectors", ref _showVectors);
+        
+        ImGui.SliderFloat("Opacity", ref _opacity, 0f, 1f);
+        
+        if (_renderMode == RenderMode.Isosurface)
+        {
+            ImGui.SliderFloat("Iso Value (°C)", ref _isoValue, 0f, 100f);
+            _isoValue += 273.15f; // Convert to Kelvin
+        }
+        
+        if (_renderMode == RenderMode.Slices)
+        {
+            ImGui.SliderFloat("Slice Depth", ref _sliceDepth, 0f, 1f);
+        }
+        
+        if (_showVectors)
+        {
+            ImGui.SliderFloat("Vector Scale", ref _vectorScale, 1f, 100f);
+        }
+        
+        // Camera controls
+        ImGui.Separator();
+        ImGui.Text("Camera");
+        ImGui.SliderFloat("Distance", ref _cameraDistance, 10f, 500f);
+        ImGui.SliderFloat("Azimuth", ref _cameraAzimuth, 0f, 360f);
+        ImGui.SliderFloat("Elevation", ref _cameraElevation, -90f, 90f);
+        
+        if (ImGui.Button("Reset Camera"))
+        {
+            _cameraDistance = 200f;
+            _cameraAzimuth = 45f;
+            _cameraElevation = 30f;
+        }
+        
         UpdateCamera();
     }
     
     /// <summary>
     /// Handles mouse input for camera control.
     /// </summary>
-    public void HandleMouseInput(Vector2 mousePos, bool leftButton, bool rightButton, bool middleButton, float wheelDelta)
+    public void HandleMouseInput(Vector2 mousePos, bool leftButton, bool rightButton)
     {
-        var mouseDelta = mousePos - _lastMousePos;
-        
         if (leftButton && !_isRotating)
         {
             _isRotating = true;
+            _lastMousePos = mousePos;
         }
-        else if (!leftButton && _isRotating)
+        else if (!leftButton)
         {
             _isRotating = false;
         }
@@ -863,49 +961,65 @@ public class GeothermalVisualization3D : IDisposable
         if (rightButton && !_isPanning)
         {
             _isPanning = true;
+            _lastMousePos = mousePos;
         }
-        else if (!rightButton && _isPanning)
+        else if (!rightButton)
         {
             _isPanning = false;
         }
         
         if (_isRotating)
         {
-            _cameraAzimuth += mouseDelta.X * 0.5f;
-            _cameraElevation = Math.Clamp(_cameraElevation - mouseDelta.Y * 0.5f, -89f, 89f);
+            var delta = mousePos - _lastMousePos;
+            _cameraAzimuth += delta.X * 0.5f;
+            _cameraElevation = Math.Clamp(_cameraElevation - delta.Y * 0.5f, -89f, 89f);
+            _lastMousePos = mousePos;
             UpdateCamera();
         }
         
         if (_isPanning)
         {
-            var right = Vector3.Cross(_cameraUp, Vector3.Normalize(_cameraPosition - _cameraTarget));
-            var up = Vector3.Cross(Vector3.Normalize(_cameraPosition - _cameraTarget), right);
-            
-            _cameraTarget += right * mouseDelta.X * 0.1f + up * mouseDelta.Y * 0.1f;
-            UpdateCamera();
+            var delta = mousePos - _lastMousePos;
+            // Implement panning logic here if needed
+            _lastMousePos = mousePos;
         }
-        
-        if (Math.Abs(wheelDelta) > 0.001f)
+    }
+    
+    /// <summary>
+    /// Handles mouse wheel for zooming.
+    /// </summary>
+    public void HandleMouseWheel(float delta)
+    {
+        _cameraDistance = Math.Clamp(_cameraDistance - delta * 10f, 10f, 500f);
+        UpdateCamera();
+    }
+    
+    /// <summary>
+    /// Gets the current render target as an ImGui texture ID.
+    /// </summary>
+    public IntPtr GetRenderTargetImGuiBinding()
+    {
+        return _graphicsDevice.GetOrCreateImGuiBinding(_factory, _renderTargetView);
+    }
+    
+    /// <summary>
+    /// Resizes the render target if needed.
+    /// </summary>
+    public void Resize(uint width, uint height)
+    {
+        if (width != _renderWidth || height != _renderHeight)
         {
-            _cameraDistance = Math.Clamp(_cameraDistance - wheelDelta * 10f, 10f, 1000f);
+            CreateRenderTarget(width, height);
+            // Recreate pipelines with new framebuffer
+            CreatePipelines();
             UpdateCamera();
         }
-        
-        _lastMousePos = mousePos;
     }
     
     /// <summary>
     /// Initializes color map textures.
     /// </summary>
     private void InitializeColorMaps()
-    {
-        UpdateColorMap();
-    }
-    
-    /// <summary>
-    /// Updates the active color map texture.
-    /// </summary>
-    private void UpdateColorMap()
     {
         _colorMapTexture?.Dispose();
         _colorMapView?.Dispose();
@@ -914,7 +1028,7 @@ public class GeothermalVisualization3D : IDisposable
         
         _colorMapTexture = _factory.CreateTexture(new TextureDescription(
             256, 1, 1, 1, 1,
-            PixelFormat.R8G8B8A8_UNorm,
+            PixelFormat.R8G8B8A8_UNorm,  // This is correct
             TextureUsage.Sampled,
             TextureType.Texture1D
         ));
@@ -924,201 +1038,120 @@ public class GeothermalVisualization3D : IDisposable
     }
     
     /// <summary>
-    /// Generates color map data for the specified color map.
+    /// Generates color map data for the specified map type.
     /// </summary>
-    private byte[] GenerateColorMapData(ColorMap colorMap)
+    private byte[] GenerateColorMapData(ColorMap map)
     {
-        var data = new byte[256 * 4];
+        var data = new byte[256 * 4]; // RGBA
         
         for (int i = 0; i < 256; i++)
         {
             var t = i / 255f;
-            var color = GetColorMapColor(colorMap, t);
+            var color = GetColorMapColor(map, t);
             
             data[i * 4 + 0] = (byte)(color.X * 255);
             data[i * 4 + 1] = (byte)(color.Y * 255);
             data[i * 4 + 2] = (byte)(color.Z * 255);
-            data[i * 4 + 3] = 255;
+            data[i * 4 + 3] = 255; // Alpha
         }
         
         return data;
     }
     
     /// <summary>
-    /// Gets color from color map at normalized position.
+    /// Gets color from a specific color map at parameter t.
     /// </summary>
-    private Vector3 GetColorMapColor(ColorMap colorMap, float t)
+    private Vector3 GetColorMapColor(ColorMap map, float t)
     {
         t = Math.Clamp(t, 0f, 1f);
         
-        return colorMap switch
+        return map switch
         {
-            ColorMap.Turbo => GetTurboColor(t),
-            ColorMap.Viridis => GetViridisColor(t),
-            ColorMap.Plasma => GetPlasmaColor(t),
-            ColorMap.Inferno => GetInfernoColor(t),
-            ColorMap.Magma => GetMagmaColor(t),
-            ColorMap.Jet => GetJetColor(t),
-            ColorMap.Rainbow => GetRainbowColor(t),
-            ColorMap.Thermal => GetThermalColor(t),
-            ColorMap.BlueRed => GetBlueRedColor(t),
-            _ => new Vector3(t, t, t)
+            ColorMap.Turbo => TurboColorMap(t),
+            ColorMap.Viridis => ViridisColorMap(t),
+            ColorMap.Plasma => PlasmaColorMap(t),
+            ColorMap.Jet => JetColorMap(t),
+            ColorMap.Thermal => new Vector3(t, t * (1 - t) * 4, 1 - t),
+            ColorMap.BlueRed => new Vector3(t, 0, 1 - t),
+            _ => new Vector3(t, t, t) // Grayscale fallback
         };
     }
     
-    // Individual color map implementations
-    private Vector3 GetTurboColor(float t)
+    private Vector3 TurboColorMap(float t)
     {
-        // Turbo colormap approximation
-        float r = Math.Max(0, Math.Min(1, 2.0f * t - 0.5f));
-        float g = Math.Max(0, Math.Min(1, 4.0f * t * (1 - t)));
-        float b = Math.Max(0, Math.Min(1, 1.5f - Math.Abs(2.0f * t - 1.0f)));
-        return new Vector3(r, g, b);
-    }
-    
-    private Vector3 GetViridisColor(float t)
-    {
-        // Viridis colormap approximation
-        float r = 0.267f + t * (0.004f + t * (0.329f + t * 2.755f));
-        float g = 0.004f + t * (0.108f + t * (1.524f - t * 0.720f));
-        float b = 0.329f + t * (1.558f - t * (1.448f - t * 0.290f));
-        return new Vector3(Math.Clamp(r, 0, 1), Math.Clamp(g, 0, 1), Math.Clamp(b, 0, 1));
-    }
-    
-    private Vector3 GetPlasmaColor(float t)
-    {
-        // Plasma colormap approximation
-        float r = 0.050f + t * (2.788f - t * (3.222f - t * 1.882f));
-        float g = 0.029f + t * (0.024f + t * (0.878f + t * 0.291f));
-        float b = 0.527f + t * (1.351f - t * (2.315f - t * 1.509f));
-        return new Vector3(Math.Clamp(r, 0, 1), Math.Clamp(g, 0, 1), Math.Clamp(b, 0, 1));
-    }
-    
-    private Vector3 GetInfernoColor(float t)
-    {
-        // Inferno colormap approximation
-        float r = 0.001f + t * (1.975f - t * (1.076f - t * 0.156f));
-        float g = t * (0.012f + t * (0.663f + t * 0.559f));
-        float b = 0.014f + t * (1.409f - t * (3.892f - t * 3.524f));
-        return new Vector3(Math.Clamp(r, 0, 1), Math.Clamp(g, 0, 1), Math.Clamp(b, 0, 1));
-    }
-    
-    private Vector3 GetMagmaColor(float t)
-    {
-        // Magma colormap approximation
-        float r = 0.001f + t * (1.463f + t * (0.421f - t * 0.025f));
-        float g = t * t * (0.662f + t * 0.547f);
-        float b = 0.014f + t * (1.787f - t * (4.299f - t * 3.700f));
-        return new Vector3(Math.Clamp(r, 0, 1), Math.Clamp(g, 0, 1), Math.Clamp(b, 0, 1));
-    }
-    
-    private Vector3 GetJetColor(float t)
-    {
-        // Jet colormap
-        float r = Math.Clamp(1.5f - Math.Abs(4.0f * t - 3.0f), 0, 1);
-        float g = Math.Clamp(1.5f - Math.Abs(4.0f * t - 2.0f), 0, 1);
-        float b = Math.Clamp(1.5f - Math.Abs(4.0f * t - 1.0f), 0, 1);
-        return new Vector3(r, g, b);
-    }
-    
-    private Vector3 GetRainbowColor(float t)
-    {
-        // HSV to RGB with full saturation and value
-        float h = t * 360f;
-        float c = 1.0f;
-        float x = c * (1 - Math.Abs((h / 60f) % 2 - 1));
-        float m = 0f;
-        
-        Vector3 rgb;
-        if (h < 60) rgb = new Vector3(c, x, 0);
-        else if (h < 120) rgb = new Vector3(x, c, 0);
-        else if (h < 180) rgb = new Vector3(0, c, x);
-        else if (h < 240) rgb = new Vector3(0, x, c);
-        else if (h < 300) rgb = new Vector3(x, 0, c);
-        else rgb = new Vector3(c, 0, x);
-        
-        return rgb + new Vector3(m, m, m);
-    }
-    
-    private Vector3 GetThermalColor(float t)
-    {
-        // Thermal camera style (black -> red -> yellow -> white)
-        if (t < 0.33f)
-        {
-            float s = t * 3;
-            return new Vector3(s, 0, 0);
-        }
-        else if (t < 0.67f)
-        {
-            float s = (t - 0.33f) * 3;
-            return new Vector3(1, s, 0);
-        }
+        // Simplified Turbo colormap
+        if (t < 0.25f)
+            return Vector3.Lerp(new Vector3(0.2f, 0.1f, 0.5f), new Vector3(0.1f, 0.5f, 0.8f), t * 4);
+        else if (t < 0.5f)
+            return Vector3.Lerp(new Vector3(0.1f, 0.5f, 0.8f), new Vector3(0.2f, 0.8f, 0.2f), (t - 0.25f) * 4);
+        else if (t < 0.75f)
+            return Vector3.Lerp(new Vector3(0.2f, 0.8f, 0.2f), new Vector3(0.9f, 0.7f, 0.1f), (t - 0.5f) * 4);
         else
-        {
-            float s = (t - 0.67f) * 3;
-            return new Vector3(1, 1, s);
-        }
+            return Vector3.Lerp(new Vector3(0.9f, 0.7f, 0.1f), new Vector3(0.9f, 0.1f, 0.1f), (t - 0.75f) * 4);
     }
     
-    private Vector3 GetBlueRedColor(float t)
+    private Vector3 ViridisColorMap(float t)
     {
-        // Blue to Red diverging
+        // Simplified Viridis colormap
+        var r = 0.267f + 0.004780f * t + 0.329f * t * t - 0.698f * t * t * t;
+        var g = 0.004f + 1.384f * t - 0.394f * t * t;
+        var b = 0.329f + 1.267f * t - 2.572f * t * t + 1.977f * t * t * t;
+        return new Vector3(r, g, b);
+    }
+    
+    private Vector3 PlasmaColorMap(float t)
+    {
+        // Simplified Plasma colormap
         if (t < 0.5f)
-        {
-            float s = t * 2;
-            return new Vector3(s, s, 1);
-        }
+            return Vector3.Lerp(new Vector3(0.1f, 0.0f, 0.5f), new Vector3(0.9f, 0.1f, 0.5f), t * 2);
         else
-        {
-            float s = (t - 0.5f) * 2;
-            return new Vector3(1, 1 - s, 1 - s);
-        }
+            return Vector3.Lerp(new Vector3(0.9f, 0.1f, 0.5f), new Vector3(0.9f, 0.9f, 0.1f), (t - 0.5f) * 2);
     }
     
-    /// <summary>
-    /// Maps temperature to color.
-    /// </summary>
-    private Vector4 TemperatureToColor(float temperature)
+    private Vector3 JetColorMap(float t)
     {
-        var t = (temperature - _temperatureMin) / (_temperatureMax - _temperatureMin);
-        return ColorMapValue(t);
+        // Classic Jet colormap
+        if (t < 0.125f)
+            return new Vector3(0, 0, 0.5f + t * 4);
+        else if (t < 0.375f)
+            return new Vector3(0, (t - 0.125f) * 4, 1);
+        else if (t < 0.625f)
+            return new Vector3((t - 0.375f) * 4, 1, 1 - (t - 0.375f) * 4);
+        else if (t < 0.875f)
+            return new Vector3(1, 1 - (t - 0.625f) * 4, 0);
+        else
+            return new Vector3(1 - (t - 0.875f) * 4, 0, 0);
     }
     
     /// <summary>
-    /// Gets color from current color map.
+    /// Gets color value from current color map.
     /// </summary>
     private Vector4 ColorMapValue(float t)
     {
-        var color = GetColorMapColor(_currentColorMap, t);
-        return new Vector4(color, _opacity);
+        var rgb = GetColorMapColor(_currentColorMap, t);
+        return new Vector4(rgb, 1f);
     }
     
-    // Shader code generation methods
-    private string GetVertexShaderCode(string name)
+    // Shader code getters
+    private string GetVertexShaderCode(string shaderName) => shaderName switch
     {
-        return name switch
-        {
-            "Temperature" => GetTemperatureVertexShader(),
-            "Velocity" => GetVelocityVertexShader(),
-            "Streamline" => GetStreamlineVertexShader(),
-            "Isosurface" => GetIsosurfaceVertexShader(),
-            "Slice" => GetSliceVertexShader(),
-            _ => GetBasicVertexShader()
-        };
-    }
+        "Temperature" => GetTemperatureVertexShader(),
+        "Velocity" => GetVelocityVertexShader(),
+        "Streamline" => GetStreamlineVertexShader(),
+        "Isosurface" => GetIsosurfaceVertexShader(),
+        "Slice" => GetSliceVertexShader(),
+        _ => GetBasicVertexShader()
+    };
     
-    private string GetFragmentShaderCode(string name)
+    private string GetFragmentShaderCode(string shaderName) => shaderName switch
     {
-        return name switch
-        {
-            "Temperature" => GetTemperatureFragmentShader(),
-            "Velocity" => GetVelocityFragmentShader(),
-            "Streamline" => GetStreamlineFragmentShader(),
-            "Isosurface" => GetIsosurfaceFragmentShader(),
-            "Slice" => GetSliceFragmentShader(),
-            _ => GetBasicFragmentShader()
-        };
-    }
+        "Temperature" => GetTemperatureFragmentShader(),
+        "Velocity" => GetVelocityFragmentShader(),
+        "Streamline" => GetStreamlineFragmentShader(),
+        "Isosurface" => GetIsosurfaceFragmentShader(),
+        "Slice" => GetSliceFragmentShader(),
+        _ => GetBasicFragmentShader()
+    };
     
     private string GetBasicVertexShader() => @"
 #version 450
@@ -1128,6 +1161,12 @@ layout(location = 1) in vec4 Color;
 layout(location = 2) in vec3 Normal;
 layout(location = 3) in vec2 TexCoord;
 layout(location = 4) in float Value;
+
+layout(location = 0) out vec4 frag_Color;
+layout(location = 1) out vec3 frag_Normal;
+layout(location = 2) out vec2 frag_TexCoord;
+layout(location = 3) out float frag_Value;
+layout(location = 4) out vec3 frag_WorldPos;
 
 layout(set = 0, binding = 0) uniform UniformData {
     mat4 ViewMatrix;
@@ -1140,20 +1179,15 @@ layout(set = 0, binding = 0) uniform UniformData {
     vec4 RenderSettings;
 } ubo;
 
-layout(location = 0) out vec4 frag_Color;
-layout(location = 1) out vec3 frag_Normal;
-layout(location = 2) out vec2 frag_TexCoord;
-layout(location = 3) out float frag_Value;
-layout(location = 4) out vec3 frag_WorldPos;
-
 void main() {
     vec4 worldPos = ubo.ModelMatrix * vec4(Position, 1.0);
-    frag_WorldPos = worldPos.xyz;
     gl_Position = ubo.ProjectionMatrix * ubo.ViewMatrix * worldPos;
+    
     frag_Color = Color;
     frag_Normal = mat3(ubo.ModelMatrix) * Normal;
     frag_TexCoord = TexCoord;
     frag_Value = Value;
+    frag_WorldPos = worldPos.xyz;
 }";
     
     private string GetBasicFragmentShader() => @"
@@ -1395,5 +1429,9 @@ void main() {
         
         _linearSampler?.Dispose();
         _pointSampler?.Dispose();
+        
+        _renderTarget?.Dispose();
+        _renderTargetView?.Dispose();
+        _framebuffer?.Dispose();
     }
 }

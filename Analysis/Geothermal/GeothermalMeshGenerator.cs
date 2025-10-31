@@ -3,6 +3,7 @@
 using System.Numerics;
 using GeoscientistToolkit.Data.Borehole;
 using GeoscientistToolkit.Data.Mesh3D;
+using System.IO;
 
 namespace GeoscientistToolkit.Analysis.Geothermal;
 
@@ -16,6 +17,16 @@ public static class GeothermalMeshGenerator
     /// </summary>
     public static GeothermalMesh GenerateCylindricalMesh(BoreholeDataset borehole, GeothermalSimulationOptions options)
     {
+        // Validate input
+        if (borehole == null)
+            throw new ArgumentNullException(nameof(borehole));
+        
+        if (borehole.TotalDepth <= 0)
+            throw new ArgumentException("Borehole depth must be positive", nameof(borehole));
+        
+        if (borehole.Diameter <= 0)
+            throw new ArgumentException("Borehole diameter must be positive", nameof(borehole));
+        
         var mesh = new GeothermalMesh();
         
         // Calculate domain bounds
@@ -41,6 +52,10 @@ public static class GeothermalMeshGenerator
         var rMin = (float)(borehole.Diameter / 2000.0); // Convert mm to m
         var rMax = (float)options.DomainRadius;
         
+        // Ensure valid radius values
+        if (rMin <= 0) rMin = 0.05f; // Default 50mm radius if invalid
+        if (rMax <= rMin) rMax = Math.Max(50f, rMin * 1000); // Ensure domain is large enough
+        
         for (int i = 0; i < nr; i++)
         {
             if (i < 10) // Fine spacing near borehole
@@ -64,12 +79,18 @@ public static class GeothermalMeshGenerator
         }
         
         // Generate vertical coordinates (refined near layers)
-        var layerDepths = borehole.Lithology
-            .Select(l => l.DepthFrom)
-            .Concat(borehole.Lithology.Select(l => l.DepthTo))
-            .Distinct()
-            .OrderBy(d => d)
-            .ToList();
+        var layerDepths = new List<float>();
+        
+        // Only add layer depths if lithology exists
+        if (borehole.Lithology != null && borehole.Lithology.Any())
+        {
+            layerDepths = borehole.Lithology
+                .SelectMany(l => new[] { (float)l.DepthFrom, (float)l.DepthTo })
+                .Where(d => d >= minDepth && d <= maxDepth)
+                .Distinct()
+                .OrderBy(d => d)
+                .ToList();
+        }
         
         mesh.Z = GenerateRefinedVerticalGrid((float)minDepth, (float)maxDepth, nz, layerDepths);
         
@@ -96,11 +117,16 @@ public static class GeothermalMeshGenerator
                     var dtheta = 2f * MathF.PI / ntheta;
                     var dz = (k < nz - 1) ? mesh.Z[k + 1] - mesh.Z[k] : mesh.Z[k] - mesh.Z[k - 1];
                     
-                    mesh.CellVolumes[i, j, k] = r * dr * dtheta * dz;
+                    mesh.CellVolumes[i, j, k] = r * dr * dtheta * Math.Abs(dz);
                     
                     // Determine geological layer at this depth
                     var depth = mesh.Z[k];
-                    var layer = borehole.Lithology.FirstOrDefault(l => depth >= l.DepthFrom && depth <= l.DepthTo);
+                    LithologyUnit layer = null;
+                    
+                    if (borehole.Lithology != null && borehole.Lithology.Any())
+                    {
+                        layer = borehole.Lithology.FirstOrDefault(l => depth >= l.DepthFrom && depth <= l.DepthTo);
+                    }
                     
                     if (layer != null)
                     {
@@ -108,10 +134,6 @@ public static class GeothermalMeshGenerator
                         mesh.MaterialIds[i, j, k] = (byte)(borehole.Lithology.IndexOf(layer) + 1);
                         
                         var layerName = layer.RockType ?? "Unknown";
-
-                        // --- CORRECTED LOGIC START ---
-                        // This block now prioritizes specific data from the BoreholeDataset's LithologyUnit.
-                        // If a specific value is not found, it falls back to the generic value from the SimulationOptions.
 
                         // 1. Thermal Conductivity (W/m·K)
                         if (layer.Parameters.TryGetValue("Thermal Conductivity", out var specificConductivity))
@@ -123,7 +145,7 @@ public static class GeothermalMeshGenerator
                             mesh.ThermalConductivities[i, j, k] = (float)options.LayerThermalConductivities.GetValueOrDefault(layerName, 2.5);
                         }
 
-                        // 2. Specific Heat (J/kg·K) - Assumes the key is "Specific Heat" if present
+                        // 2. Specific Heat (J/kg·K)
                         if (layer.Parameters.TryGetValue("Specific Heat", out var specificHeat))
                         {
                             mesh.SpecificHeats[i, j, k] = specificHeat;
@@ -133,7 +155,7 @@ public static class GeothermalMeshGenerator
                             mesh.SpecificHeats[i, j, k] = (float)options.LayerSpecificHeats.GetValueOrDefault(layerName, 900);
                         }
 
-                        // 3. Density (kg/m³) - Assumes the key is "Density" if present
+                        // 3. Density (kg/m³)
                         if (layer.Parameters.TryGetValue("Density", out var specificDensity))
                         {
                             mesh.Densities[i, j, k] = specificDensity;
@@ -157,44 +179,43 @@ public static class GeothermalMeshGenerator
                         // 5. Permeability (m²)
                         if (layer.Parameters.TryGetValue("Permeability", out var specificPermeability))
                         {
-                            // BoreholeDataset stores permeability in mD, simulation needs m^2
-                            // 1 Darcy ≈ 9.869233e-13 m², 1 mD = 1e-3 Darcy
-                            mesh.Permeabilities[i, j, k] = specificPermeability * 9.869233e-16f;
+                            mesh.Permeabilities[i, j, k] = specificPermeability;
                         }
                         else
                         {
                             mesh.Permeabilities[i, j, k] = (float)options.LayerPermeabilities.GetValueOrDefault(layerName, 1e-14);
                         }
-                        // --- CORRECTED LOGIC END ---
                     }
                     else
                     {
-                        // Default properties outside borehole range (for the extended domain)
+                        // Use default material properties for unknown zones
                         mesh.MaterialIds[i, j, k] = 0;
-                        mesh.ThermalConductivities[i, j, k] = 2.5f;
+                        mesh.ThermalConductivities[i, j, k] = 2.5f;    // Default granite-like
                         mesh.SpecificHeats[i, j, k] = 900f;
                         mesh.Densities[i, j, k] = 2650f;
-                        mesh.Porosities[i, j, k] = 0.1f;
-                        mesh.Permeabilities[i, j, k] = 1e-14f;
-                    }
-                    
-                    // Mark heat exchanger region
-                    if (r <= rMin * 1.1f && depth >= 0 && depth <= borehole.TotalDepth)
-                    {
-                        mesh.MaterialIds[i, j, k] = 255; // Special ID for heat exchanger
+                        mesh.Porosities[i, j, k] = 0.05f;
+                        mesh.Permeabilities[i, j, k] = 1e-15f;
                     }
                 }
             }
         }
         
-        // Create fracture network if enabled
-        if (options.SimulateFractures && borehole.Fractures != null && borehole.Fractures.Any())
+        // Calculate face areas and transmissivities
+        CalculateFaceAreas(mesh);
+        CalculateTransmissivities(mesh);
+        
+        // Generate fracture network if enabled
+        if (options.SimulateFractures)
         {
-            mesh.FractureNetwork = GenerateFractureNetwork(borehole, mesh, options);
+            GenerateFractureNetwork(mesh, borehole, options);
         }
+        
+        // Generate borehole geometry
+        mesh.BoreholeElements = GenerateBoreholeElements(borehole, mesh, options);
         
         return mesh;
     }
+    
     /// <summary>
     /// Generates a refined vertical grid with higher resolution near layer boundaries.
     /// </summary>
@@ -208,316 +229,392 @@ public static class GeothermalMeshGenerator
         {
             if (depth > minZ && depth < maxZ)
             {
-                refinementZones.Add((depth, 2f)); // 2m refinement zone
+                refinementZones.Add((depth, 2.0f)); // 2m refinement zone
             }
         }
         
-        // Generate points with refinement
+        // Generate base uniform grid
         for (int i = 0; i < nz; i++)
         {
             var t = (float)i / (nz - 1);
-            var zUniform = minZ + (maxZ - minZ) * t;
-            
-            // Apply refinement function
-            var zRefined = zUniform;
-            foreach (var (center, width) in refinementZones)
-            {
-                var dist = Math.Abs(zUniform - center);
-                if (dist < width)
-                {
-                    var pull = 0.5f * (1f - dist / width);
-                    zRefined = zRefined * (1f - pull) + center * pull;
-                }
-            }
-            
-            z[i] = zRefined;
+            z[i] = minZ + (maxZ - minZ) * t;
         }
         
-        // Sort to ensure monotonic increasing
-        Array.Sort(z);
+        // Apply refinement if there are zones defined
+        if (refinementZones.Any())
+        {
+            // Apply local refinement around each zone
+            for (int iter = 0; iter < 3; iter++) // Multiple iterations for smoothing
+            {
+                var newZ = new float[nz];
+                newZ[0] = z[0];
+                newZ[nz - 1] = z[nz - 1];
+                
+                for (int i = 1; i < nz - 1; i++)
+                {
+                    var pos = z[i];
+                    var refinementFactor = 1.0f;
+                    
+                    // Check proximity to refinement zones
+                    foreach (var (center, width) in refinementZones)
+                    {
+                        var dist = Math.Abs(pos - center);
+                        if (dist < width)
+                        {
+                            var localFactor = 0.25f + 0.75f * (dist / width);
+                            refinementFactor = Math.Min(refinementFactor, localFactor);
+                        }
+                    }
+                    
+                    // Adjust spacing based on refinement
+                    var dz1 = z[i] - z[i - 1];
+                    var dz2 = z[i + 1] - z[i];
+                    var targetDz = (dz1 + dz2) * 0.5f * refinementFactor;
+                    
+                    newZ[i] = 0.5f * (z[i - 1] + z[i + 1]);
+                }
+                
+                z = newZ;
+            }
+        }
         
         return z;
     }
     
     /// <summary>
-    /// Generates fracture network representation.
+    /// Calculates face areas for finite volume discretization.
     /// </summary>
-    private static FractureNetwork GenerateFractureNetwork(BoreholeDataset borehole, GeothermalMesh mesh, GeothermalSimulationOptions options)
+    private static void CalculateFaceAreas(GeothermalMesh mesh)
     {
-        var network = new FractureNetwork();
+        var nr = mesh.RadialPoints;
+        var nth = mesh.AngularPoints;
+        var nz = mesh.VerticalPoints;
         
-        foreach (var fracture in borehole.Fractures)
-        {
-            var frac = new Fracture3D
-            {
-                Depth = fracture.Depth,
-                Strike = fracture.Strike ?? 0,
-                Dip = fracture.Dip ?? 45,
-                Aperture = (float)options.FractureAperture,
-                Permeability = (float)options.FracturePermeability,
-                Length = 10f // Assume 10m fracture length
-            };
-            
-            // Calculate fracture plane in 3D
-            var strikeRad = frac.Strike * MathF.PI / 180f;
-            var dipRad = frac.Dip * MathF.PI / 180f;
-            
-            frac.Normal = new Vector3(
-                MathF.Sin(strikeRad) * MathF.Sin(dipRad),
-                MathF.Cos(strikeRad) * MathF.Sin(dipRad),
-                MathF.Cos(dipRad)
-            );
-            
-            frac.Origin = new Vector3(0, 0, frac.Depth);
-            
-            network.Fractures.Add(frac);
-        }
+        mesh.RadialFaceAreas = new float[nr + 1, nth, nz];
+        mesh.AngularFaceAreas = new float[nr, nth + 1, nz];
+        mesh.VerticalFaceAreas = new float[nr, nth, nz + 1];
         
-        // Build connectivity between fractures
-        for (int i = 0; i < network.Fractures.Count; i++)
+        // Radial face areas
+        for (int i = 0; i <= nr; i++)
         {
-            for (int j = i + 1; j < network.Fractures.Count; j++)
+            var r = (i == 0) ? mesh.R[0] * 0.5f : 
+                    (i == nr) ? mesh.R[nr - 1] * 1.5f : 
+                    0.5f * (mesh.R[i - 1] + mesh.R[i]);
+            
+            for (int j = 0; j < nth; j++)
             {
-                var f1 = network.Fractures[i];
-                var f2 = network.Fractures[j];
+                var dtheta = 2f * MathF.PI / nth;
                 
-                // Check if fractures intersect (simplified)
-                if (Math.Abs(f1.Depth - f2.Depth) < f1.Length + f2.Length)
+                for (int k = 0; k < nz; k++)
                 {
-                    network.Connections.Add((i, j));
+                    var dz = (k < nz - 1) ? mesh.Z[k + 1] - mesh.Z[k] : mesh.Z[k] - mesh.Z[k - 1];
+                    mesh.RadialFaceAreas[i, j, k] = r * dtheta * Math.Abs(dz);
                 }
             }
         }
         
-        return network;
+        // Angular face areas
+        for (int i = 0; i < nr; i++)
+        {
+            var dr = (i < nr - 1) ? mesh.R[i + 1] - mesh.R[i] : mesh.R[i] - mesh.R[i - 1];
+            
+            for (int k = 0; k < nz; k++)
+            {
+                var dz = (k < nz - 1) ? mesh.Z[k + 1] - mesh.Z[k] : mesh.Z[k] - mesh.Z[k - 1];
+                
+                for (int j = 0; j <= nth; j++)
+                {
+                    mesh.AngularFaceAreas[i, j, k] = dr * Math.Abs(dz);
+                }
+            }
+        }
+        
+        // Vertical face areas
+        for (int i = 0; i < nr; i++)
+        {
+            var r = mesh.R[i];
+            var dr = (i < nr - 1) ? mesh.R[i + 1] - mesh.R[i] : mesh.R[i] - mesh.R[i - 1];
+            
+            for (int j = 0; j < nth; j++)
+            {
+                var dtheta = 2f * MathF.PI / nth;
+                var area = r * dr * dtheta;
+                
+                for (int k = 0; k <= nz; k++)
+                {
+                    mesh.VerticalFaceAreas[i, j, k] = area;
+                }
+            }
+        }
     }
     
     /// <summary>
-    /// Creates a 3D mesh representation of the borehole for visualization.
+    /// Calculates thermal transmissivities between cells.
+    /// </summary>
+    private static void CalculateTransmissivities(GeothermalMesh mesh)
+    {
+        var nr = mesh.RadialPoints;
+        var nth = mesh.AngularPoints;
+        var nz = mesh.VerticalPoints;
+        
+        mesh.RadialTransmissivities = new float[nr + 1, nth, nz];
+        mesh.AngularTransmissivities = new float[nr, nth + 1, nz];
+        mesh.VerticalTransmissivities = new float[nr, nth, nz + 1];
+        
+        // Radial transmissivities
+        for (int i = 1; i < nr; i++)
+        {
+            for (int j = 0; j < nth; j++)
+            {
+                for (int k = 0; k < nz; k++)
+                {
+                    var k1 = mesh.ThermalConductivities[i - 1, j, k];
+                    var k2 = mesh.ThermalConductivities[i, j, k];
+                    var dr1 = (i > 1) ? mesh.R[i - 1] - mesh.R[i - 2] : mesh.R[1] - mesh.R[0];
+                    var dr2 = mesh.R[i] - mesh.R[i - 1];
+                    
+                    // Harmonic mean
+                    var keff = 2 * k1 * k2 / (k1 * dr2 + k2 * dr1);
+                    mesh.RadialTransmissivities[i, j, k] = keff * mesh.RadialFaceAreas[i, j, k] / ((dr1 + dr2) * 0.5f);
+                }
+            }
+        }
+        
+        // Angular transmissivities (periodic boundary)
+        for (int i = 0; i < nr; i++)
+        {
+            var r = mesh.R[i];
+            var dtheta = 2f * MathF.PI / nth;
+            
+            for (int j = 0; j <= nth; j++)
+            {
+                for (int k = 0; k < nz; k++)
+                {
+                    var j1 = (j - 1 + nth) % nth;
+                    var j2 = j % nth;
+                    
+                    var k1 = mesh.ThermalConductivities[i, j1, k];
+                    var k2 = mesh.ThermalConductivities[i, j2, k];
+                    
+                    var keff = 2 * k1 * k2 / (k1 + k2);
+                    mesh.AngularTransmissivities[i, j, k] = keff * mesh.AngularFaceAreas[i, j, k] / (r * dtheta);
+                }
+            }
+        }
+        
+        // Vertical transmissivities
+        for (int i = 0; i < nr; i++)
+        {
+            for (int j = 0; j < nth; j++)
+            {
+                for (int k = 1; k < nz; k++)
+                {
+                    var k1 = mesh.ThermalConductivities[i, j, k - 1];
+                    var k2 = mesh.ThermalConductivities[i, j, k];
+                    var dz1 = (k > 1) ? Math.Abs(mesh.Z[k - 1] - mesh.Z[k - 2]) : Math.Abs(mesh.Z[1] - mesh.Z[0]);
+                    var dz2 = Math.Abs(mesh.Z[k] - mesh.Z[k - 1]);
+                    
+                    var keff = 2 * k1 * k2 / (k1 * dz2 + k2 * dz1);
+                    mesh.VerticalTransmissivities[i, j, k] = keff * mesh.VerticalFaceAreas[i, j, k] / ((dz1 + dz2) * 0.5f);
+                }
+            }
+        }
+    }
+    
+    /// <summary>
+    /// Generates a stochastic fracture network if enabled.
+    /// </summary>
+    private static void GenerateFractureNetwork(GeothermalMesh mesh, BoreholeDataset borehole, GeothermalSimulationOptions options)
+    {
+        // Simple fracture network generation
+        var random = new Random(42); // Fixed seed for reproducibility
+        var fractures = new List<FractureElement>();
+        
+        // Generate major fractures based on lithology
+        foreach (var unit in borehole.Lithology)
+        {
+            if (unit.RockType != null && (unit.RockType.Contains("Granite") || unit.RockType.Contains("Basalt")))
+            {
+                // Higher fracture density in crystalline rocks
+                var numFractures = random.Next(5, 15);
+                
+                for (int i = 0; i < numFractures; i++)
+                {
+                    var fracture = new FractureElement
+                    {
+                        Position = new Vector3(
+                            (float)(random.NextDouble() * options.DomainRadius),
+                            (float)(random.NextDouble() * 2 * Math.PI),
+                            (float)(unit.DepthFrom + random.NextDouble() * (unit.DepthTo - unit.DepthFrom))
+                        ),
+                        Normal = Vector3.Normalize(new Vector3(
+                            (float)(random.NextDouble() - 0.5),
+                            (float)(random.NextDouble() - 0.5),
+                            (float)(random.NextDouble() - 0.5)
+                        )),
+                        Length = (float)(10 + random.NextDouble() * 50),
+                        Aperture = (float)options.FractureAperture,
+                        Permeability = (float)options.FracturePermeability
+                    };
+                    
+                    fractures.Add(fracture);
+                }
+            }
+        }
+        
+        mesh.Fractures = fractures;
+    }
+    
+    /// <summary>
+    /// Generates borehole element connectivity for heat exchanger.
+    /// </summary>
+    private static List<BoreholeElement> GenerateBoreholeElements(
+        BoreholeDataset borehole, 
+        GeothermalMesh mesh, 
+        GeothermalSimulationOptions options)
+    {
+        var elements = new List<BoreholeElement>();
+        var nz = 20; // Number of elements along borehole
+        
+        for (int i = 0; i < nz; i++)
+        {
+            var z = i * borehole.TotalDepth / (nz - 1);
+            
+            // Find mesh cell containing this borehole element
+            int kMesh = 0;
+            for (int k = 0; k < mesh.VerticalPoints - 1; k++)
+            {
+                if (z >= -mesh.Z[k] && z <= -mesh.Z[k + 1])
+                {
+                    kMesh = k;
+                    break;
+                }
+            }
+            
+            var element = new BoreholeElement
+            {
+                Depth = (float)z,
+                MeshIndices = new[] { 0, 0, kMesh }, // Center of cylindrical mesh
+                FlowArea = (float)(Math.PI * Math.Pow(options.PipeInnerDiameter / 2, 2)),
+                WetPerimeter = (float)(Math.PI * options.PipeInnerDiameter),
+                Length = (float)(borehole.TotalDepth / (nz - 1))
+            };
+            
+            // Calculate local heat transfer properties
+            if (options.HeatExchangerType == HeatExchangerType.UTube)
+            {
+                element.HeatTransferArea = 2 * element.WetPerimeter * element.Length;
+            }
+            else // Coaxial
+            {
+                element.HeatTransferArea = element.WetPerimeter * element.Length;
+            }
+            
+            elements.Add(element);
+        }
+        
+        return elements;
+    }
+    
+    /// <summary>
+    /// Creates a 3D mesh for visualizing the borehole.
     /// </summary>
     public static Mesh3DDataset CreateBoreholeMesh(BoreholeDataset borehole, GeothermalSimulationOptions options)
     {
         var vertices = new List<Vector3>();
         var faces = new List<int[]>();
         
-        var radius = (float)(borehole.Diameter / 2000.0); // mm to m
-        var segments = 16; // Angular resolution
+        int angularSegments = 24;
+        int verticalSegments = 50;
         
-        // Generate vertices along borehole
-        var depths = new List<float> { 0 };
-        foreach (var layer in borehole.Lithology)
-        {
-            depths.Add(layer.DepthFrom);
-            depths.Add(layer.DepthTo);
-        }
-        depths.Add(borehole.TotalDepth);
-        depths = depths.Distinct().OrderBy(d => d).ToList();
+        var radius = (float)(borehole.Diameter / 2.0);
+        var totalDepth = (float)borehole.TotalDepth;
         
-        foreach (var depth in depths)
+        // Create vertices
+        for (int i = 0; i <= verticalSegments; i++)
         {
-            for (int i = 0; i < segments; i++)
+            var z = -i * totalDepth / verticalSegments;
+            for (int j = 0; j < angularSegments; j++)
             {
-                var angle = 2f * MathF.PI * i / segments;
+                var angle = j * 2.0f * MathF.PI / angularSegments;
                 var x = radius * MathF.Cos(angle);
                 var y = radius * MathF.Sin(angle);
-                vertices.Add(new Vector3(x, y, -depth)); // Negative for display
+                vertices.Add(new Vector3(x, y, z));
             }
         }
-        
+
         // Create faces
-        for (int d = 0; d < depths.Count - 1; d++)
+        for (int i = 0; i < verticalSegments; i++)
         {
-            var offset1 = d * segments;
-            var offset2 = (d + 1) * segments;
-            
-            for (int i = 0; i < segments; i++)
+            for (int j = 0; j < angularSegments; j++)
             {
-                var i1 = i;
-                var i2 = (i + 1) % segments;
-                
-                // Two triangles per quad
-                faces.Add(new[] { offset1 + i1, offset2 + i1, offset2 + i2 });
-                faces.Add(new[] { offset1 + i1, offset2 + i2, offset1 + i2 });
+                int nextJ = (j + 1) % angularSegments;
+
+                int v0 = i * angularSegments + j;
+                int v1 = i * angularSegments + nextJ;
+                int v2 = (i + 1) * angularSegments + j;
+                int v3 = (i + 1) * angularSegments + nextJ;
+
+                faces.Add(new[] { v0, v2, v1 });
+                faces.Add(new[] { v1, v2, v3 });
             }
         }
         
-        // Add heat exchanger pipes
-        if (options.HeatExchangerType == HeatExchangerType.UTube)
-        {
-            AddUTubeMesh(vertices, faces, borehole, options);
-        }
-        else if (options.HeatExchangerType == HeatExchangerType.Coaxial)
-        {
-            AddCoaxialMesh(vertices, faces, borehole, options);
-        }
+        string tempPath = Path.Combine(Path.GetTempPath(), $"{borehole.Name}_borehole_mesh.obj");
         
-        var mesh = Mesh3DDataset.CreateFromData(
-            "Borehole_HeatExchanger",
-            Path.Combine(Path.GetTempPath(), "borehole_mesh.obj"),
+        return Mesh3DDataset.CreateFromData(
+            $"{borehole.Name}_Borehole",
+            tempPath,
             vertices,
             faces,
             1.0f,
             "m"
         );
-        
-        return mesh;
-    }
-    
-    private static void AddUTubeMesh(List<Vector3> vertices, List<int[]> faces, BoreholeDataset borehole, GeothermalSimulationOptions options)
-    {
-        var pipeRadius = (float)(options.PipeOuterDiameter / 2);
-        var spacing = (float)(options.PipeSpacing / 2);
-        var segments = 8;
-        var verticalSegments = 20;
-        
-        var baseVertexCount = vertices.Count;
-        
-        // Generate two pipes
-        for (int pipe = 0; pipe < 2; pipe++)
-        {
-            var xOffset = pipe == 0 ? -spacing : spacing;
-            
-            for (int v = 0; v <= verticalSegments; v++)
-            {
-                var depth = borehole.TotalDepth * v / verticalSegments;
-                
-                for (int s = 0; s < segments; s++)
-                {
-                    var angle = 2f * MathF.PI * s / segments;
-                    var x = xOffset + pipeRadius * MathF.Cos(angle);
-                    var y = pipeRadius * MathF.Sin(angle);
-                    vertices.Add(new Vector3(x, y, -depth));
-                }
-            }
-            
-            // Create pipe faces
-            for (int v = 0; v < verticalSegments; v++)
-            {
-                var offset1 = baseVertexCount + pipe * (verticalSegments + 1) * segments + v * segments;
-                var offset2 = offset1 + segments;
-                
-                for (int s = 0; s < segments; s++)
-                {
-                    var s1 = s;
-                    var s2 = (s + 1) % segments;
-                    
-                    faces.Add(new[] { offset1 + s1, offset2 + s1, offset2 + s2 });
-                    faces.Add(new[] { offset1 + s1, offset2 + s2, offset1 + s2 });
-                }
-            }
-        }
-        
-        // Add U-bend at bottom
-        var bendVertexStart = vertices.Count;
-        var bendSegments = 10;
-        
-        for (int b = 0; b <= bendSegments; b++)
-        {
-            var t = (float)b / bendSegments;
-            var angle = MathF.PI * t;
-            var x = spacing * MathF.Cos(angle);
-            var z = -borehole.TotalDepth - spacing * MathF.Sin(angle);
-            
-            for (int s = 0; s < segments; s++)
-            {
-                var ringAngle = 2f * MathF.PI * s / segments;
-                var rx = x + pipeRadius * MathF.Cos(ringAngle) * MathF.Sin(angle);
-                var ry = pipeRadius * MathF.Sin(ringAngle);
-                vertices.Add(new Vector3(rx, ry, z));
-            }
-        }
-        
-        // Create bend faces
-        for (int b = 0; b < bendSegments; b++)
-        {
-            var offset1 = bendVertexStart + b * segments;
-            var offset2 = offset1 + segments;
-            
-            for (int s = 0; s < segments; s++)
-            {
-                var s1 = s;
-                var s2 = (s + 1) % segments;
-                
-                faces.Add(new[] { offset1 + s1, offset2 + s1, offset2 + s2 });
-                faces.Add(new[] { offset1 + s1, offset2 + s2, offset1 + s2 });
-            }
-        }
-    }
-    
-    private static void AddCoaxialMesh(List<Vector3> vertices, List<int[]> faces, BoreholeDataset borehole, GeothermalSimulationOptions options)
-    {
-        var innerRadius = (float)(options.PipeOuterDiameter / 2);
-        var outerRadius = (float)(options.PipeSpacing / 2); // Outer pipe inner radius
-        var segments = 12;
-        var verticalSegments = 20;
-        
-        var baseVertexCount = vertices.Count;
-        
-        // Generate inner and outer pipes
-        for (int v = 0; v <= verticalSegments; v++)
-        {
-            var depth = borehole.TotalDepth * v / verticalSegments;
-            
-            // Inner pipe
-            for (int s = 0; s < segments; s++)
-            {
-                var angle = 2f * MathF.PI * s / segments;
-                var x = innerRadius * MathF.Cos(angle);
-                var y = innerRadius * MathF.Sin(angle);
-                vertices.Add(new Vector3(x, y, -depth));
-            }
-            
-            // Outer pipe
-            for (int s = 0; s < segments; s++)
-            {
-                var angle = 2f * MathF.PI * s / segments;
-                var x = outerRadius * MathF.Cos(angle);
-                var y = outerRadius * MathF.Sin(angle);
-                vertices.Add(new Vector3(x, y, -depth));
-            }
-        }
-        
-        // Create faces for both pipes
-        for (int v = 0; v < verticalSegments; v++)
-        {
-            // Inner pipe
-            var innerOffset1 = baseVertexCount + v * segments * 2;
-            var innerOffset2 = innerOffset1 + segments * 2;
-            
-            // Outer pipe
-            var outerOffset1 = innerOffset1 + segments;
-            var outerOffset2 = innerOffset2 + segments;
-            
-            for (int s = 0; s < segments; s++)
-            {
-                var s1 = s;
-                var s2 = (s + 1) % segments;
-                
-                // Inner pipe faces
-                faces.Add(new[] { innerOffset1 + s1, innerOffset2 + s1, innerOffset2 + s2 });
-                faces.Add(new[] { innerOffset1 + s1, innerOffset2 + s2, innerOffset1 + s2 });
-                
-                // Outer pipe faces
-                faces.Add(new[] { outerOffset1 + s1, outerOffset2 + s1, outerOffset2 + s2 });
-                faces.Add(new[] { outerOffset1 + s1, outerOffset2 + s2, outerOffset1 + s2 });
-            }
-        }
     }
 }
 
 /// <summary>
-/// Represents a 3D cylindrical mesh for geothermal simulation.
+/// Represents a fracture element in the mesh.
+/// </summary>
+public class FractureElement
+{
+    public Vector3 Position { get; set; }
+    public Vector3 Normal { get; set; }
+    public float Length { get; set; }
+    public float Aperture { get; set; }
+    public float Permeability { get; set; }
+    public List<int[]> ConnectedCells { get; set; } = new();
+}
+
+/// <summary>
+/// Represents a borehole heat exchanger element.
+/// </summary>
+public class BoreholeElement
+{
+    public float Depth { get; set; }
+    public int[] MeshIndices { get; set; } // i, j, k indices in mesh
+    public float FlowArea { get; set; }
+    public float WetPerimeter { get; set; }
+    public float HeatTransferArea { get; set; }
+    public float Length { get; set; }
+}
+
+/// <summary>
+/// Specialized mesh structure for geothermal simulations.
 /// </summary>
 public class GeothermalMesh
 {
+    // Grid dimensions
     public int RadialPoints { get; set; }
     public int AngularPoints { get; set; }
     public int VerticalPoints { get; set; }
     
-    public float[] R { get; set; }
-    public float[] Theta { get; set; }
-    public float[] Z { get; set; }
+    // Coordinates
+    public float[] R { get; set; }          // Radial coordinates
+    public float[] Theta { get; set; }      // Angular coordinates
+    public float[] Z { get; set; }          // Vertical coordinates (negative = down)
     
+    // Cell properties
     public float[,,] CellVolumes { get; set; }
     public byte[,,] MaterialIds { get; set; }
     public float[,,] ThermalConductivities { get; set; }
@@ -526,29 +623,38 @@ public class GeothermalMesh
     public float[,,] Porosities { get; set; }
     public float[,,] Permeabilities { get; set; }
     
-    public FractureNetwork FractureNetwork { get; set; }
-}
-
-/// <summary>
-/// Represents a network of fractures in the rock.
-/// </summary>
-public class FractureNetwork
-{
-    public List<Fracture3D> Fractures { get; set; } = new();
-    public List<(int, int)> Connections { get; set; } = new();
-}
-
-/// <summary>
-/// Represents a single fracture in 3D space.
-/// </summary>
-public class Fracture3D
-{
-    public float Depth { get; set; }
-    public float Strike { get; set; }
-    public float Dip { get; set; }
-    public float Aperture { get; set; }
-    public float Permeability { get; set; }
-    public float Length { get; set; }
-    public Vector3 Origin { get; set; }
-    public Vector3 Normal { get; set; }
+    // Face areas for finite volume
+    public float[,,] RadialFaceAreas { get; set; }
+    public float[,,] AngularFaceAreas { get; set; }
+    public float[,,] VerticalFaceAreas { get; set; }
+    
+    // Transmissivities
+    public float[,,] RadialTransmissivities { get; set; }
+    public float[,,] AngularTransmissivities { get; set; }
+    public float[,,] VerticalTransmissivities { get; set; }
+    
+    // Special elements
+    public List<FractureElement> Fractures { get; set; }
+    public List<BoreholeElement> BoreholeElements { get; set; }
+    
+    /// <summary>
+    /// Gets the total number of cells in the mesh.
+    /// </summary>
+    public int TotalCells => RadialPoints * AngularPoints * VerticalPoints;
+    
+    /// <summary>
+    /// Converts mesh indices to Cartesian coordinates.
+    /// </summary>
+    public Vector3 GetCartesianPosition(int i, int j, int k)
+    {
+        var r = R[i];
+        var theta = Theta[j];
+        var z = Z[k];
+        
+        return new Vector3(
+            r * MathF.Cos(theta),
+            r * MathF.Sin(theta),
+            z
+        );
+    }
 }
