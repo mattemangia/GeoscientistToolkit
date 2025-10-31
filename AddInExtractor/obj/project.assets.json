@@ -1804,31 +1804,24 @@
     ]
   },
   "packageFolders": {
-    "C:\\Users\\Matteo\\.nuget\\packages\\": {},
-    "C:\\Program Files (x86)\\Microsoft Visual Studio\\Shared\\NuGetPackages": {}
+    "/Users/user/.nuget/packages/": {}
   },
   "project": {
     "version": "1.0.0",
     "restore": {
-      "projectUniqueName": "C:\\Users\\Matteo\\RiderProjects\\GeoscientistToolkit\\AddInExtractor\\AddInExtractor.csproj",
+      "projectUniqueName": "/Users/user/RiderProjects/GeoscientistToolkit/AddInExtractor/AddInExtractor.csproj",
       "projectName": "GeoscientistToolkit.AddInExtractor",
-      "projectPath": "C:\\Users\\Matteo\\RiderProjects\\GeoscientistToolkit\\AddInExtractor\\AddInExtractor.csproj",
-      "packagesPath": "C:\\Users\\Matteo\\.nuget\\packages\\",
-      "outputPath": "C:\\Users\\Matteo\\RiderProjects\\GeoscientistToolkit\\AddInExtractor\\obj\\",
+      "projectPath": "/Users/user/RiderProjects/GeoscientistToolkit/AddInExtractor/AddInExtractor.csproj",
+      "packagesPath": "/Users/user/.nuget/packages/",
+      "outputPath": "/Users/user/RiderProjects/GeoscientistToolkit/AddInExtractor/obj/",
       "projectStyle": "PackageReference",
-      "fallbackFolders": [
-        "C:\\Program Files (x86)\\Microsoft Visual Studio\\Shared\\NuGetPackages"
-      ],
       "configFilePaths": [
-        "C:\\Users\\Matteo\\AppData\\Roaming\\NuGet\\NuGet.Config",
-        "C:\\Program Files (x86)\\NuGet\\Config\\Microsoft.VisualStudio.FallbackLocation.config",
-        "C:\\Program Files (x86)\\NuGet\\Config\\Microsoft.VisualStudio.Offline.config"
+        "/Users/user/.nuget/NuGet/NuGet.Config"
       ],
       "originalTargetFrameworks": [
         "net8.0"
       ],
       "sources": {
-        "C:\\Program Files (x86)\\Microsoft SDKs\\NuGetPackages\\": {},
         "https://api.nuget.org/v3/index.json": {}
       },
       "frameworks": {
@@ -1846,8 +1839,7 @@
         "enableAudit": "true",
         "auditLevel": "low",
         "auditMode": "direct"
-      },
-      "SdkAnalysisLevel": "9.0.300"
+      }
     },
     "frameworks": {
       "net8.0": {
@@ -1886,7 +1878,7 @@
             "privateAssets": "all"
           }
         },
-        "runtimeIdentifierGraphPath": "C:\\Program Files\\dotnet\\sdk\\9.0.300/PortableRuntimeIdentifierGraph.json"
+        "runtimeIdentifierGraphPath": "/usr/local/share/dotnet/sdk/8.0.415/PortableRuntimeIdentifierGraph.json"
       }
     }
   }

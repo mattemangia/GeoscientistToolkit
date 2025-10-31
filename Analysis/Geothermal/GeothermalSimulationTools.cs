@@ -12,6 +12,7 @@ using GeoscientistToolkit.UI.Visualization;
 using GeoscientistToolkit.Util;
 using ImGuiNET;
 using Veldrid;
+using System.IO;
 
 namespace GeoscientistToolkit.Analysis.Geothermal;
 
@@ -189,10 +190,10 @@ public class GeothermalSimulationTools : IDatasetTools, IDisposable
         // Heat Exchanger Configuration
         if (ImGui.CollapsingHeader("Heat Exchanger Configuration"))
         {
-            ImGui.Combo("Type", ref _selectedHeatExchangerType, new[] { "U-Tube", "Coaxial" });
+            ImGui.Combo("Type", ref _selectedHeatExchangerType, "U-Tube\0Coaxial\0");
             _options.HeatExchangerType = (HeatExchangerType)_selectedHeatExchangerType;
             
-            ImGui.Combo("Flow", ref _selectedFlowConfig, new[] { "Counter Flow", "Parallel Flow" });
+            ImGui.Combo("Flow", ref _selectedFlowConfig, "Counter Flow\0Parallel Flow\0");
             _options.FlowConfiguration = (FlowConfiguration)_selectedFlowConfig;
             
             var pipeInnerDiam = (float)(_options.PipeInnerDiameter * 1000);
@@ -345,8 +346,10 @@ public class GeothermalSimulationTools : IDatasetTools, IDisposable
         // Groundwater Flow
         if (ImGui.CollapsingHeader("Groundwater Flow"))
         {
-            ImGui.Checkbox("Simulate Groundwater Flow", ref _options.SimulateGroundwaterFlow);
-            
+            var simulateGroundwaterFlow = _options.SimulateGroundwaterFlow;
+            if (ImGui.Checkbox("Simulate Groundwater Flow", ref simulateGroundwaterFlow))
+                _options.SimulateGroundwaterFlow = simulateGroundwaterFlow;
+
             if (_options.SimulateGroundwaterFlow)
             {
                 var gwVel = _options.GroundwaterVelocity;
@@ -394,10 +397,18 @@ public class GeothermalSimulationTools : IDatasetTools, IDisposable
                 var domainExt = (float)_options.DomainExtension;
                 if (ImGui.SliderFloat("Domain Extension (m)", ref domainExt, 0, 50))
                     _options.DomainExtension = domainExt;
-                
-                ImGui.SliderInt("Radial Grid Points", ref _options.RadialGridPoints, 20, 100);
-                ImGui.SliderInt("Angular Grid Points", ref _options.AngularGridPoints, 12, 72);
-                ImGui.SliderInt("Vertical Grid Points", ref _options.VerticalGridPoints, 50, 200);
+
+                var radialGridPoints = _options.RadialGridPoints;
+                if (ImGui.SliderInt("Radial Grid Points", ref radialGridPoints, 20, 100))
+                    _options.RadialGridPoints = radialGridPoints;
+
+                var angularGridPoints = _options.AngularGridPoints;
+                if (ImGui.SliderInt("Angular Grid Points", ref angularGridPoints, 12, 72))
+                    _options.AngularGridPoints = angularGridPoints;
+
+                var verticalGridPoints = _options.VerticalGridPoints;
+                if (ImGui.SliderInt("Vertical Grid Points", ref verticalGridPoints, 50, 200))
+                    _options.VerticalGridPoints = verticalGridPoints;
             }
             
             if (ImGui.CollapsingHeader("Solver Settings"))
@@ -409,16 +420,22 @@ public class GeothermalSimulationTools : IDatasetTools, IDisposable
                 var timeStep = (float)(_options.TimeStep / 3600);
                 if (ImGui.InputFloat("Time Step (hours)", ref timeStep))
                     _options.TimeStep = timeStep * 3600;
-                
-                ImGui.InputInt("Save Interval", ref _options.SaveInterval);
-                
+
+                var saveInterval = _options.SaveInterval;
+                if (ImGui.InputInt("Save Interval", ref saveInterval))
+                    _options.SaveInterval = saveInterval;
+
                 var tolerance = (float)_options.ConvergenceTolerance;
                 if (ImGui.InputFloat("Convergence Tolerance", ref tolerance, 0, 0, "%.0e"))
                     _options.ConvergenceTolerance = tolerance;
-                
-                ImGui.InputInt("Max Iterations/Step", ref _options.MaxIterationsPerStep);
-                
-                ImGui.Checkbox("Use SIMD", ref _options.UseSIMD);
+
+                var maxIterationsPerStep = _options.MaxIterationsPerStep;
+                if (ImGui.InputInt("Max Iterations/Step", ref maxIterationsPerStep))
+                    _options.MaxIterationsPerStep = maxIterationsPerStep;
+
+                var useSIMD = _options.UseSIMD;
+                if (ImGui.Checkbox("Use SIMD", ref useSIMD))
+                    _options.UseSIMD = useSIMD;
             }
         }
     }
@@ -702,7 +719,7 @@ public class GeothermalSimulationTools : IDatasetTools, IDisposable
         var controlSize = new Vector2(availableSize.X * 0.3f - 10, availableSize.Y);
         
         // 3D View
-        ImGui.BeginChild("3DView", viewSize, true);
+        ImGui.BeginChild("3DView", viewSize, ImGuiChildFlags.Border);
         {
             var viewportSize = ImGui.GetContentRegionAvail();
             _visualization3D.Resize((uint)viewportSize.X, (uint)viewportSize.Y);
@@ -733,7 +750,7 @@ public class GeothermalSimulationTools : IDatasetTools, IDisposable
         ImGui.SameLine();
         
         // Controls
-        ImGui.BeginChild("3DControls", controlSize, true);
+        ImGui.BeginChild("3DControls", controlSize, ImGuiChildFlags.Border);
         {
             _visualization3D.RenderControls();
         }
@@ -871,22 +888,29 @@ public class GeothermalSimulationTools : IDatasetTools, IDisposable
         }
         
         // Create a mesh from streamlines
-        var streamlineMesh = new Mesh3DDataset { Name = "Streamlines" };
-        
+        var streamlineMesh = Mesh3DDataset.CreateEmpty("Streamlines", Path.Combine(Path.GetTempPath(), "streamlines_export.obj"));
+        streamlineMesh.Vertices.Clear(); // Clear default cube
+        streamlineMesh.Faces.Clear();
+        streamlineMesh.Normals.Clear();
+
         foreach (var streamline in _results.Streamlines)
         {
+            int baseVertexIndex = streamlineMesh.Vertices.Count;
+            for (int i = 0; i < streamline.Count; i++)
+            {
+                streamlineMesh.Vertices.Add(streamline[i]);
+                streamlineMesh.Normals.Add(Vector3.UnitZ); // Add a dummy normal
+            }
+            
             for (int i = 0; i < streamline.Count - 1; i++)
             {
-                // Add line segments as degenerate triangles or actual line primitives
-                streamlineMesh.Vertices.Add(new Mesh3DDataset.Vertex 
-                { 
-                    Position = streamline[i],
-                    Normal = Vector3.Zero,
-                    Color = new Vector4(0.5f, 0.5f, 1f, 1f)
-                });
+                // Create a degenerate triangle to represent a line segment
+                streamlineMesh.Faces.Add(new int[] { baseVertexIndex + i, baseVertexIndex + i + 1, baseVertexIndex + i + 1 });
             }
         }
         
+        streamlineMesh.VertexCount = streamlineMesh.Vertices.Count;
+        streamlineMesh.FaceCount = streamlineMesh.Faces.Count;
         _visualizationMeshes.Add(streamlineMesh);
         Logger.Log("Streamlines exported to visualization.");
     }

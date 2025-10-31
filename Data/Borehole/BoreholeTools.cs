@@ -87,7 +87,7 @@ public class BoreholeTools : IDatasetTools
         _exportBinaryDialog = new ImGuiExportFileDialog("ExportBoreholeBinary", "Export Borehole to Binary");
         _exportBinaryDialog.SetExtensions(new ImGuiExportFileDialog.ExtensionOption(".bhb", "Borehole Binary File"));
 
-        _geothermalTool = new GeothermalSimulationTools();
+        _geothermalTool = new GeothermalSimulationTools(VeldridManager.GraphicsDevice);
 
         _categoryNames = new Dictionary<ToolCategory, string>
         {

@@ -9,6 +9,7 @@ using System.Runtime.InteropServices;
 using GeoscientistToolkit.Analysis.Geothermal;
 using GeoscientistToolkit.Data.Borehole;
 using GeoscientistToolkit.Data.Mesh3D;
+using GeoscientistToolkit.Util;
 using ImGuiNET;
 using Veldrid;
 using Veldrid.SPIRV;
@@ -223,7 +224,7 @@ public class GeothermalVisualization3D : IDisposable
         // Create render target texture
         _renderTarget = _factory.CreateTexture(new TextureDescription(
             width, height, 1, 1, 1,
-            PixelFormat.R8G8B8A8_UNorm,
+            PixelFormat.R8_G8_B8_A8_UNorm,
             TextureUsage.RenderTarget | TextureUsage.Sampled,
             TextureType.Texture2D));
         
@@ -471,7 +472,7 @@ public class GeothermalVisualization3D : IDisposable
             _velocityTexture3D = _factory.CreateTexture(new TextureDescription(
                 (uint)nr, (uint)nth, (uint)nz,
                 1, 1,
-                PixelFormat.R32G32B32A32_SFloat,  // Fixed: was R32G32B32A32_Float
+                PixelFormat.R32_G32_B32_A32_Float,
                 TextureUsage.Sampled,
                 TextureType.Texture3D));
             
@@ -542,7 +543,7 @@ public class GeothermalVisualization3D : IDisposable
         {
             var dummyVelocity = _factory.CreateTexture(new TextureDescription(
                 1, 1, 1, 1, 1,
-                PixelFormat.R32G32B32A32_SFloat,
+                PixelFormat.R32_G32_B32_A32_Float,
                 TextureUsage.Sampled,
                 TextureType.Texture3D));
             _velocityView = _factory.CreateTextureView(dummyVelocity);
@@ -696,22 +697,40 @@ public class GeothermalVisualization3D : IDisposable
         var boreholeIndices = new List<uint>();
         
         var vertices = _results.BoreholeMesh.Vertices;
-        var indices = _results.BoreholeMesh.Indices;
+        var normals = _results.BoreholeMesh.Normals;
+        var faces = _results.BoreholeMesh.Faces;
         
         for (int i = 0; i < vertices.Count; i++)
         {
             var v = vertices[i];
+            var n = (i < normals.Count) ? normals[i] : Vector3.UnitZ;
             var color = new Vector4(0.8f, 0.2f, 0.2f, 1.0f); // Red for borehole
             boreholeVertices.Add(new VertexPositionColorTexture(
-                v.Position,
+                v,
                 color,
-                v.Normal,
+                n,
                 Vector2.Zero,
                 0
             ));
         }
         
-        boreholeIndices.AddRange(indices);
+        // Flatten the faces list into a triangle list
+        foreach (var face in faces)
+        {
+            if (face.Length >= 3)
+            {
+                boreholeIndices.Add((uint)face[0]);
+                boreholeIndices.Add((uint)face[1]);
+                boreholeIndices.Add((uint)face[2]);
+            }
+            // Triangulate if it's a quad
+            if (face.Length == 4)
+            {
+                boreholeIndices.Add((uint)face[0]);
+                boreholeIndices.Add((uint)face[2]);
+                boreholeIndices.Add((uint)face[3]);
+            }
+        }
         
         if (boreholeVertices.Count > 0)
         {
@@ -999,7 +1018,7 @@ public class GeothermalVisualization3D : IDisposable
     /// </summary>
     public IntPtr GetRenderTargetImGuiBinding()
     {
-        return _graphicsDevice.GetOrCreateImGuiBinding(_factory, _renderTargetView);
+        return VeldridManager.ImGuiController.GetOrCreateImGuiBinding(_factory, _renderTargetView);
     }
     
     /// <summary>
@@ -1007,7 +1026,7 @@ public class GeothermalVisualization3D : IDisposable
     /// </summary>
     public void Resize(uint width, uint height)
     {
-        if (width != _renderWidth || height != _renderHeight)
+        if (width > 0 && height > 0 && (width != _renderWidth || height != _renderHeight))
         {
             CreateRenderTarget(width, height);
             // Recreate pipelines with new framebuffer
@@ -1028,7 +1047,7 @@ public class GeothermalVisualization3D : IDisposable
         
         _colorMapTexture = _factory.CreateTexture(new TextureDescription(
             256, 1, 1, 1, 1,
-            PixelFormat.R8G8B8A8_UNorm,  // This is correct
+            PixelFormat.R8_G8_B8_A8_UNorm,
             TextureUsage.Sampled,
             TextureType.Texture1D
         ));
