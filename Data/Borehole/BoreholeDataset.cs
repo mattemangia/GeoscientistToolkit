@@ -19,6 +19,11 @@ public class LithologyUnit
     public string ID { get; set; } = Guid.NewGuid().ToString();
     public string Name { get; set; } = "Unknown";
     public string LithologyType { get; set; } = "Sandstone"; // Sandstone, Shale, Limestone, etc.
+    
+    // Compatibility aliases
+    public string Lithology => LithologyType; // Alias for LithologyType
+    public string RockType => LithologyType; // Alias for LithologyType
+    
     public float DepthFrom { get; set; }
     public float DepthTo { get; set; }
     public Vector4 Color { get; set; } = new(0.8f, 0.8f, 0.8f, 1.0f);
@@ -86,6 +91,18 @@ public enum LithologyPattern
 }
 
 /// <summary>
+///     Represents a fracture detected in the borehole
+/// </summary>
+public class FractureData
+{
+    public float Depth { get; set; }
+    public float? Strike { get; set; }
+    public float? Dip { get; set; }
+    public float? Aperture { get; set; }
+    public string Description { get; set; } = "";
+}
+
+/// <summary>
 ///     Dataset representing a borehole/well log with geological and petrophysical data
 /// </summary>
 public class BoreholeDataset : Dataset, ISerializableDataset
@@ -107,8 +124,19 @@ public class BoreholeDataset : Dataset, ISerializableDataset
     public Vector2 SurfaceCoordinates { get; set; } // X, Y in project coordinates
     public float Elevation { get; set; } // meters above sea level
 
+
+    // Alias properties for compatibility with geothermal tools
+    public float Diameter => WellDiameter; // Alias for WellDiameter (in meters)
+    public float WaterTableDepth { get; set; } = 5.0f; // Depth to water table in meters
+
     // Lithology units
     public List<LithologyUnit> LithologyUnits { get; set; } = new();
+    
+    // Alias for compatibility
+    public List<LithologyUnit> Lithology => LithologyUnits;
+
+    // Fractures collection
+    public List<FractureData> Fractures { get; set; } = new();
 
     // Parameter tracks
     public Dictionary<string, ParameterTrack> ParameterTracks { get; set; } = new();

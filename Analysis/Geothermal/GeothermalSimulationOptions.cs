@@ -143,8 +143,41 @@ public class GeothermalSimulationOptions
     /// </summary>
     public double FluidThermalConductivity { get; set; } = 0.6; // Water
     
+    // HVAC & Performance Parameters
+    
+    /// <summary>
+    /// The target supply temperature for the HVAC system (e.g., heated or chilled water loop) in Kelvin.
+    /// Used for calculating the Coefficient of Performance (COP).
+    /// If null, a default of 308.15 K (35°C) is used for heating calculations.
+    /// </summary>
+    public double? HvacSupplyTemperatureKelvin { get; set; } = null;
+
+    /// <summary>
+    /// The isentropic efficiency of the heat pump's compressor (0 to 1).
+    /// Used for calculating a realistic Coefficient of Performance (COP).
+    /// If null, a default efficiency of 0.6 (60%) is used.
+    /// </summary>
+    public double? CompressorIsentropicEfficiency { get; set; } = null;
+    
     // Ground Properties
     
+    /// <summary>
+    /// Defines the initial ground temperature profile.
+    /// If empty, the profile will be generated from SurfaceTemperature and AverageGeothermalGradient.
+    /// List of (Depth in m, Temperature in K).
+    /// </summary>
+    public List<(double Depth, double Temperature)> InitialTemperatureProfile { get; set; } = new();
+
+    /// <summary>
+    /// Average surface temperature of the ground (K). Used if InitialTemperatureProfile is not set.
+    /// </summary>
+    public double SurfaceTemperature { get; set; } = 283.15; // 10°C
+
+    /// <summary>
+    /// Average geothermal gradient (K/m). Used if InitialTemperatureProfile is not set.
+    /// </summary>
+    public double AverageGeothermalGradient { get; set; } = 0.03; // 30 K/km
+
     /// <summary>
     /// Dictionary mapping geological layer names to their thermal conductivities (W/m·K).
     /// </summary>
@@ -213,6 +246,19 @@ public class GeothermalSimulationOptions
     /// Hydraulic head at bottom boundary (m).
     /// </summary>
     public double HydraulicHeadBottom { get; set; } = -10;
+    
+    /// <summary>
+    /// Longitudinal dispersivity length of the porous medium (m).
+    /// Represents dispersion in the direction of flow.
+    /// </summary>
+    public double LongitudinalDispersivity { get; set; } = 0.5;
+
+    /// <summary>
+    /// Transverse dispersivity length of the porous medium (m).
+    /// Represents dispersion perpendicular to the direction of flow.
+    /// Typically a fraction (e.g., 1/10th) of the longitudinal dispersivity.
+    /// </summary>
+    public double TransverseDispersivity { get; set; } = 0.05;
     
     // Simulation Domain
     

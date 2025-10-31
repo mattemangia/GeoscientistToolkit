@@ -71,7 +71,7 @@ public static class GeothermalMeshGenerator
             .OrderBy(d => d)
             .ToList();
         
-        mesh.Z = GenerateRefinedVerticalGrid(minDepth, maxDepth, nz, layerDepths);
+        mesh.Z = GenerateRefinedVerticalGrid((float)minDepth, (float)maxDepth, nz, layerDepths);
         
         // Initialize property arrays
         var totalCells = nr * ntheta * nz;
@@ -108,15 +108,68 @@ public static class GeothermalMeshGenerator
                         mesh.MaterialIds[i, j, k] = (byte)(borehole.Lithology.IndexOf(layer) + 1);
                         
                         var layerName = layer.RockType ?? "Unknown";
-                        mesh.ThermalConductivities[i, j, k] = (float)options.LayerThermalConductivities.GetValueOrDefault(layerName, 2.5);
-                        mesh.SpecificHeats[i, j, k] = (float)options.LayerSpecificHeats.GetValueOrDefault(layerName, 900);
-                        mesh.Densities[i, j, k] = (float)options.LayerDensities.GetValueOrDefault(layerName, 2650);
-                        mesh.Porosities[i, j, k] = (float)options.LayerPorosities.GetValueOrDefault(layerName, 0.1);
-                        mesh.Permeabilities[i, j, k] = (float)options.LayerPermeabilities.GetValueOrDefault(layerName, 1e-14);
+
+                        // --- CORRECTED LOGIC START ---
+                        // This block now prioritizes specific data from the BoreholeDataset's LithologyUnit.
+                        // If a specific value is not found, it falls back to the generic value from the SimulationOptions.
+
+                        // 1. Thermal Conductivity (W/m·K)
+                        if (layer.Parameters.TryGetValue("Thermal Conductivity", out var specificConductivity))
+                        {
+                            mesh.ThermalConductivities[i, j, k] = specificConductivity;
+                        }
+                        else
+                        {
+                            mesh.ThermalConductivities[i, j, k] = (float)options.LayerThermalConductivities.GetValueOrDefault(layerName, 2.5);
+                        }
+
+                        // 2. Specific Heat (J/kg·K) - Assumes the key is "Specific Heat" if present
+                        if (layer.Parameters.TryGetValue("Specific Heat", out var specificHeat))
+                        {
+                            mesh.SpecificHeats[i, j, k] = specificHeat;
+                        }
+                        else
+                        {
+                            mesh.SpecificHeats[i, j, k] = (float)options.LayerSpecificHeats.GetValueOrDefault(layerName, 900);
+                        }
+
+                        // 3. Density (kg/m³) - Assumes the key is "Density" if present
+                        if (layer.Parameters.TryGetValue("Density", out var specificDensity))
+                        {
+                            mesh.Densities[i, j, k] = specificDensity;
+                        }
+                        else
+                        {
+                            mesh.Densities[i, j, k] = (float)options.LayerDensities.GetValueOrDefault(layerName, 2650);
+                        }
+
+                        // 4. Porosity (fraction, 0-1)
+                        if (layer.Parameters.TryGetValue("Porosity", out var specificPorosity))
+                        {
+                            // BoreholeDataset stores porosity in %, simulation needs a fraction
+                            mesh.Porosities[i, j, k] = specificPorosity / 100.0f;
+                        }
+                        else
+                        {
+                            mesh.Porosities[i, j, k] = (float)options.LayerPorosities.GetValueOrDefault(layerName, 0.1);
+                        }
+
+                        // 5. Permeability (m²)
+                        if (layer.Parameters.TryGetValue("Permeability", out var specificPermeability))
+                        {
+                            // BoreholeDataset stores permeability in mD, simulation needs m^2
+                            // 1 Darcy ≈ 9.869233e-13 m², 1 mD = 1e-3 Darcy
+                            mesh.Permeabilities[i, j, k] = specificPermeability * 9.869233e-16f;
+                        }
+                        else
+                        {
+                            mesh.Permeabilities[i, j, k] = (float)options.LayerPermeabilities.GetValueOrDefault(layerName, 1e-14);
+                        }
+                        // --- CORRECTED LOGIC END ---
                     }
                     else
                     {
-                        // Default properties outside borehole range
+                        // Default properties outside borehole range (for the extended domain)
                         mesh.MaterialIds[i, j, k] = 0;
                         mesh.ThermalConductivities[i, j, k] = 2.5f;
                         mesh.SpecificHeats[i, j, k] = 900f;
@@ -142,7 +195,6 @@ public static class GeothermalMeshGenerator
         
         return mesh;
     }
-    
     /// <summary>
     /// Generates a refined vertical grid with higher resolution near layer boundaries.
     /// </summary>

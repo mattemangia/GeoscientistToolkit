@@ -21,11 +21,12 @@ public class GeothermalSimulationSolver
     
     // Field arrays
     private float[,,] _temperature;
+    private float[,,] _initialTemperature;
     private float[,,] _pressure;
     private float[,,] _hydraulicHead;
     private float[,,,] _velocity; // [r,theta,z,component]
     private float[,,] _pecletNumber;
-    private float[,,] _dispersivity;
+    private float[,,] _dispersionCoefficient; // Changed from _dispersivity
     
     // Heat exchanger states
     private float[] _fluidTempDown;
@@ -104,7 +105,7 @@ public class GeothermalSimulationSolver
         results.HydraulicHeadField = (float[,,])_hydraulicHead.Clone();
         results.DarcyVelocityField = (float[,,,])_velocity.Clone();
         results.PecletNumberField = (float[,,])_pecletNumber.Clone();
-        results.DispersivityField = (float[,,])_dispersivity.Clone();
+        results.DispersivityField = (float[,,])_dispersionCoefficient.Clone(); // Corrected field name
         
         // Calculate performance metrics
         CalculatePerformanceMetrics(results);
@@ -138,20 +139,69 @@ public class GeothermalSimulationSolver
         _hydraulicHead = new float[nr, nth, nz];
         _velocity = new float[nr, nth, nz, 3]; // r, theta, z components
         _pecletNumber = new float[nr, nth, nz];
-        _dispersivity = new float[nr, nth, nz];
+        _dispersionCoefficient = new float[nr, nth, nz];
         
-        // Initialize temperature with geothermal gradient
-        var surfaceTemp = (float)_options.OuterBoundaryTemperature;
-        var gradient = 0.03f; // 30°C/km typical
-        
+        // NEW, ROBUST LOGIC for Initial Temperature Field
+        Func<float, float> getTempAtDepth;
+
+        if (_options.InitialTemperatureProfile != null && _options.InitialTemperatureProfile.Any())
+        {
+            var sortedProfile = _options.InitialTemperatureProfile.OrderBy(p => p.Depth).ToList();
+            
+            getTempAtDepth = (depth) =>
+            {
+                if (sortedProfile.Count == 1)
+                {
+                    return (float)sortedProfile[0].Temperature;
+                }
+
+                // Find points to interpolate between
+                for (int i = 0; i < sortedProfile.Count - 1; i++)
+                {
+                    var p1 = sortedProfile[i];
+                    var p2 = sortedProfile[i+1];
+                    if (depth >= p1.Depth && depth <= p2.Depth)
+                    {
+                        // Linear interpolation
+                        var t = (depth - p1.Depth) / (p2.Depth - p1.Depth);
+                        return (float)(p1.Temperature + t * (p2.Temperature - p1.Temperature));
+                    }
+                }
+                
+                // Extrapolate if outside the defined range
+                if (depth < sortedProfile.First().Depth)
+                {
+                    var p1 = sortedProfile[0];
+                    var p2 = sortedProfile[1];
+                    var gradient = (p2.Temperature - p1.Temperature) / (p2.Depth - p1.Depth);
+                    return (float)(p1.Temperature - (p1.Depth - depth) * gradient);
+                }
+                else // depth > sortedProfile.Last().Depth
+                {
+                    var p1 = sortedProfile[sortedProfile.Count - 2];
+                    var p2 = sortedProfile.Last();
+                    var gradient = (p2.Temperature - p1.Temperature) / (p2.Depth - p1.Depth);
+                    return (float)(p2.Temperature + (depth - p2.Depth) * gradient);
+                }
+            };
+        }
+        else
+        {
+            // Fallback to linear gradient based on options
+            var surfaceTemp = (float)_options.SurfaceTemperature;
+            var gradient = (float)_options.AverageGeothermalGradient;
+            getTempAtDepth = (depth) => surfaceTemp + gradient * depth;
+        }
+
         for (int i = 0; i < nr; i++)
         {
             for (int j = 0; j < nth; j++)
             {
                 for (int k = 0; k < nz; k++)
                 {
+                    // Note: mesh Z is negative downwards, so depth is -Z
                     var depth = Math.Max(0, -_mesh.Z[k]);
-                    _temperature[i, j, k] = surfaceTemp + gradient * depth;
+                    _temperature[i, j, k] = getTempAtDepth(depth);
                     
                     // Initialize hydraulic head
                     var z = _mesh.Z[k];
@@ -164,6 +214,9 @@ public class GeothermalSimulationSolver
                 }
             }
         }
+
+        // Store a copy for calculating temperature changes later
+        _initialTemperature = (float[,,])_temperature.Clone();
         
         // Initialize heat exchanger
         var nzHE = 20; // Discretization along heat exchanger
@@ -192,16 +245,16 @@ public class GeothermalSimulationSolver
             
             for (int iter = 0; iter < _options.MaxIterationsPerStep; iter++)
             {
-                var maxChange = 0f;
+                float maxChange;
                 
                 // Interior points - SIMD optimized
                 if (_options.UseSIMD && Avx2.IsSupported)
                 {
-                    SolveGroundwaterFlowSIMD(newHead, ref maxChange);
+                    maxChange = SolveGroundwaterFlowSIMD(newHead);
                 }
                 else
                 {
-                    SolveGroundwaterFlowScalar(newHead, ref maxChange);
+                    maxChange = SolveGroundwaterFlowScalar(newHead);
                 }
                 
                 // Swap arrays
@@ -219,156 +272,184 @@ public class GeothermalSimulationSolver
     /// <summary>
     /// SIMD-optimized groundwater flow solver.
     /// </summary>
-    private void SolveGroundwaterFlowSIMD(float[,,] newHead, ref float maxChange)
+    private float SolveGroundwaterFlowSIMD(float[,,] newHead)
     {
         var nr = _mesh.RadialPoints;
         var nth = _mesh.AngularPoints;
         var nz = _mesh.VerticalPoints;
         var vecSize = Vector256<float>.Count;
+        float maxChange = 0f;
+        var lockObj = new object();
         
-        Parallel.For(1, nr - 1, i =>
-        {
-            for (int k = 1; k < nz - 1; k++)
+        Parallel.For(1, nr - 1, 
+            () => 0f,
+            (i, loopState, localMaxChange) =>
             {
-                var r = _mesh.R[i];
-                var dr_m = _mesh.R[i] - _mesh.R[i-1];
-                var dr_p = _mesh.R[i+1] - _mesh.R[i];
-                var dz_m = _mesh.Z[k] - _mesh.Z[k-1];
-                var dz_p = _mesh.Z[k+1] - _mesh.Z[k];
-                
-                // Process multiple angular points at once
-                int j = 0;
-                for (; j <= nth - vecSize; j += vecSize)
+                for (int k = 1; k < nz - 1; k++)
                 {
-                    // Load permeabilities
-                    var K = Vector256.Create(
-                        _mesh.Permeabilities[i,j,k], _mesh.Permeabilities[i,j+1,k],
-                        _mesh.Permeabilities[i,j+2,k], _mesh.Permeabilities[i,j+3,k],
-                        _mesh.Permeabilities[i,j+4,k], _mesh.Permeabilities[i,j+5,k],
-                        _mesh.Permeabilities[i,j+6,k], _mesh.Permeabilities[i,j+7,k]
-                    );
+                    var r = _mesh.R[i];
+                    var dr_m = _mesh.R[i] - _mesh.R[i-1];
+                    var dr_p = _mesh.R[i+1] - _mesh.R[i];
+                    var dz_m = _mesh.Z[k] - _mesh.Z[k-1];
+                    var dz_p = _mesh.Z[k+1] - _mesh.Z[k];
                     
-                    // Finite difference coefficients
-                    var invR2 = Vector256.Create(1f / (r * r));
-                    var invDr2 = Vector256.Create(2f / (dr_m * dr_p));
-                    var invDz2 = Vector256.Create(2f / (dz_m * dz_p));
-                    var invDth2 = Vector256.Create((float)(nth * nth / (4 * Math.PI * Math.PI)));
-                    
-                    // Load neighboring heads
-                    var h_c = Vector256.Create(
-                        _hydraulicHead[i,j,k], _hydraulicHead[i,j+1,k],
-                        _hydraulicHead[i,j+2,k], _hydraulicHead[i,j+3,k],
-                        _hydraulicHead[i,j+4,k], _hydraulicHead[i,j+5,k],
-                        _hydraulicHead[i,j+6,k], _hydraulicHead[i,j+7,k]
-                    );
-                    
-                    // Radial neighbors
-                    var h_rm = Vector256.Create(
-                        _hydraulicHead[i-1,j,k], _hydraulicHead[i-1,j+1,k],
-                        _hydraulicHead[i-1,j+2,k], _hydraulicHead[i-1,j+3,k],
-                        _hydraulicHead[i-1,j+4,k], _hydraulicHead[i-1,j+5,k],
-                        _hydraulicHead[i-1,j+6,k], _hydraulicHead[i-1,j+7,k]
-                    );
-                    
-                    var h_rp = Vector256.Create(
-                        _hydraulicHead[i+1,j,k], _hydraulicHead[i+1,j+1,k],
-                        _hydraulicHead[i+1,j+2,k], _hydraulicHead[i+1,j+3,k],
-                        _hydraulicHead[i+1,j+4,k], _hydraulicHead[i+1,j+5,k],
-                        _hydraulicHead[i+1,j+6,k], _hydraulicHead[i+1,j+7,k]
-                    );
-                    
-                    // Angular neighbors (with periodic BC)
-                    var jm = new int[vecSize];
-                    var jp = new int[vecSize];
-                    for (int v = 0; v < vecSize; v++)
+                    // Process multiple angular points at once
+                    int j = 0;
+                    for (; j <= nth - vecSize; j += vecSize)
                     {
-                        jm[v] = (j + v - 1 + nth) % nth;
-                        jp[v] = (j + v + 1) % nth;
+                        // Load permeabilities
+                        var K = Vector256.Create(
+                            _mesh.Permeabilities[i,j,k], _mesh.Permeabilities[i,j+1,k],
+                            _mesh.Permeabilities[i,j+2,k], _mesh.Permeabilities[i,j+3,k],
+                            _mesh.Permeabilities[i,j+4,k], _mesh.Permeabilities[i,j+5,k],
+                            _mesh.Permeabilities[i,j+6,k], _mesh.Permeabilities[i,j+7,k]
+                        );
+                        
+                        // Finite difference coefficients
+                        var invR2 = Vector256.Create(1f / (r * r));
+                        var invDr2 = Vector256.Create(2f / (dr_m * dr_p));
+                        var invDz2 = Vector256.Create(2f / (dz_m * dz_p));
+                        var invDth2 = Vector256.Create((float)(nth * nth / (4 * Math.PI * Math.PI)));
+                        
+                        // Load neighboring heads
+                        var h_c = Vector256.Create(
+                            _hydraulicHead[i,j,k], _hydraulicHead[i,j+1,k],
+                            _hydraulicHead[i,j+2,k], _hydraulicHead[i,j+3,k],
+                            _hydraulicHead[i,j+4,k], _hydraulicHead[i,j+5,k],
+                            _hydraulicHead[i,j+6,k], _hydraulicHead[i,j+7,k]
+                        );
+                        
+                        // Radial neighbors
+                        var h_rm = Vector256.Create(
+                            _hydraulicHead[i-1,j,k], _hydraulicHead[i-1,j+1,k],
+                            _hydraulicHead[i-1,j+2,k], _hydraulicHead[i-1,j+3,k],
+                            _hydraulicHead[i-1,j+4,k], _hydraulicHead[i-1,j+5,k],
+                            _hydraulicHead[i-1,j+6,k], _hydraulicHead[i-1,j+7,k]
+                        );
+                        
+                        var h_rp = Vector256.Create(
+                            _hydraulicHead[i+1,j,k], _hydraulicHead[i+1,j+1,k],
+                            _hydraulicHead[i+1,j+2,k], _hydraulicHead[i+1,j+3,k],
+                            _hydraulicHead[i+1,j+4,k], _hydraulicHead[i+1,j+5,k],
+                            _hydraulicHead[i+1,j+6,k], _hydraulicHead[i+1,j+7,k]
+                        );
+                        
+                        // Angular neighbors (with periodic BC)
+                        var jm = new int[vecSize];
+                        var jp = new int[vecSize];
+                        for (int v = 0; v < vecSize; v++)
+                        {
+                            jm[v] = (j + v - 1 + nth) % nth;
+                            jp[v] = (j + v + 1) % nth;
+                        }
+                        
+                        var h_thm = Vector256.Create(
+                            _hydraulicHead[i,jm[0],k], _hydraulicHead[i,jm[1],k],
+                            _hydraulicHead[i,jm[2],k], _hydraulicHead[i,jm[3],k],
+                            _hydraulicHead[i,jm[4],k], _hydraulicHead[i,jm[5],k],
+                            _hydraulicHead[i,jm[6],k], _hydraulicHead[i,jm[7],k]
+                        );
+                        
+                        var h_thp = Vector256.Create(
+                            _hydraulicHead[i,jp[0],k], _hydraulicHead[i,jp[1],k],
+                            _hydraulicHead[i,jp[2],k], _hydraulicHead[i,jp[3],k],
+                            _hydraulicHead[i,jp[4],k], _hydraulicHead[i,jp[5],k],
+                            _hydraulicHead[i,jp[6],k], _hydraulicHead[i,jp[7],k]
+                        );
+                        
+                        // Vertical neighbors
+                        var h_zm = Vector256.Create(
+                            _hydraulicHead[i,j,k-1], _hydraulicHead[i,j+1,k-1],
+                            _hydraulicHead[i,j+2,k-1], _hydraulicHead[i,j+3,k-1],
+                            _hydraulicHead[i,j+4,k-1], _hydraulicHead[i,j+5,k-1],
+                            _hydraulicHead[i,j+6,k-1], _hydraulicHead[i,j+7,k-1]
+                        );
+                        
+                        var h_zp = Vector256.Create(
+                            _hydraulicHead[i,j,k+1], _hydraulicHead[i,j+1,k+1],
+                            _hydraulicHead[i,j+2,k+1], _hydraulicHead[i,j+3,k+1],
+                            _hydraulicHead[i,j+4,k+1], _hydraulicHead[i,j+5,k+1],
+                            _hydraulicHead[i,j+6,k+1], _hydraulicHead[i,j+7,k+1]
+                        );
+                        
+                        // Laplacian in cylindrical coordinates
+                        var laplacian = Avx2.Multiply(invDr2, Avx2.Subtract(h_rp, Avx2.Subtract(Avx2.Multiply(Vector256.Create(2f), h_c), h_rm)));
+                        laplacian = Avx2.Add(laplacian, Avx2.Multiply(invR2, Avx2.Multiply(invDth2, 
+                            Avx2.Subtract(h_thp, Avx2.Subtract(Avx2.Multiply(Vector256.Create(2f), h_c), h_thm)))));
+                        laplacian = Avx2.Add(laplacian, Avx2.Multiply(invDz2, Avx2.Subtract(h_zp, Avx2.Subtract(Avx2.Multiply(Vector256.Create(2f), h_c), h_zm))));
+                        
+                        // Add radial derivative term
+                        var radialTerm = Avx2.Divide(Avx2.Subtract(h_rp, h_rm), Vector256.Create(r * (dr_p + dr_m)));
+                        laplacian = Avx2.Add(laplacian, radialTerm);
+                        
+                        // Update with relaxation
+                        var omega = Vector256.Create(1.5f); // SOR factor
+                        var h_new = Avx2.Add(h_c, Avx2.Multiply(omega, Avx2.Multiply(K, laplacian)));
+                        
+                        // Store results
+                        for (int v = 0; v < vecSize && j + v < nth; v++)
+                        {
+                            newHead[i, j + v, k] = h_new.GetElement(v);
+                            var change = Math.Abs(h_new.GetElement(v) - h_c.GetElement(v));
+                            localMaxChange = Math.Max(localMaxChange, change);
+                        }
                     }
                     
-                    var h_thm = Vector256.Create(
-                        _hydraulicHead[i,jm[0],k], _hydraulicHead[i,jm[1],k],
-                        _hydraulicHead[i,jm[2],k], _hydraulicHead[i,jm[3],k],
-                        _hydraulicHead[i,jm[4],k], _hydraulicHead[i,jm[5],k],
-                        _hydraulicHead[i,jm[6],k], _hydraulicHead[i,jm[7],k]
-                    );
-                    
-                    var h_thp = Vector256.Create(
-                        _hydraulicHead[i,jp[0],k], _hydraulicHead[i,jp[1],k],
-                        _hydraulicHead[i,jp[2],k], _hydraulicHead[i,jp[3],k],
-                        _hydraulicHead[i,jp[4],k], _hydraulicHead[i,jp[5],k],
-                        _hydraulicHead[i,jp[6],k], _hydraulicHead[i,jp[7],k]
-                    );
-                    
-                    // Vertical neighbors
-                    var h_zm = Vector256.Create(
-                        _hydraulicHead[i,j,k-1], _hydraulicHead[i,j+1,k-1],
-                        _hydraulicHead[i,j+2,k-1], _hydraulicHead[i,j+3,k-1],
-                        _hydraulicHead[i,j+4,k-1], _hydraulicHead[i,j+5,k-1],
-                        _hydraulicHead[i,j+6,k-1], _hydraulicHead[i,j+7,k-1]
-                    );
-                    
-                    var h_zp = Vector256.Create(
-                        _hydraulicHead[i,j,k+1], _hydraulicHead[i,j+1,k+1],
-                        _hydraulicHead[i,j+2,k+1], _hydraulicHead[i,j+3,k+1],
-                        _hydraulicHead[i,j+4,k+1], _hydraulicHead[i,j+5,k+1],
-                        _hydraulicHead[i,j+6,k+1], _hydraulicHead[i,j+7,k+1]
-                    );
-                    
-                    // Laplacian in cylindrical coordinates
-                    var laplacian = Avx2.Multiply(invDr2, Avx2.Subtract(h_rp, Avx2.Subtract(Avx2.Multiply(Vector256.Create(2f), h_c), h_rm)));
-                    laplacian = Avx2.Add(laplacian, Avx2.Multiply(invR2, Avx2.Multiply(invDth2, 
-                        Avx2.Subtract(h_thp, Avx2.Subtract(Avx2.Multiply(Vector256.Create(2f), h_c), h_thm)))));
-                    laplacian = Avx2.Add(laplacian, Avx2.Multiply(invDz2, Avx2.Subtract(h_zp, Avx2.Subtract(Avx2.Multiply(Vector256.Create(2f), h_c), h_zm))));
-                    
-                    // Add radial derivative term
-                    var radialTerm = Avx2.Divide(Avx2.Subtract(h_rp, h_rm), Vector256.Create(r * (dr_p + dr_m)));
-                    laplacian = Avx2.Add(laplacian, radialTerm);
-                    
-                    // Update with relaxation
-                    var omega = Vector256.Create(1.5f); // SOR factor
-                    var h_new = Avx2.Add(h_c, Avx2.Multiply(omega, Avx2.Multiply(K, laplacian)));
-                    
-                    // Store results
-                    for (int v = 0; v < vecSize && j + v < nth; v++)
+                    // Handle remaining elements
+                    for (; j < nth; j++)
                     {
-                        newHead[i, j + v, k] = h_new.GetElement(v);
-                        var change = Math.Abs(h_new.GetElement(v) - h_c.GetElement(v));
-                        maxChange = Math.Max(maxChange, change);
+                        var change = SolveGroundwaterFlowSinglePoint(i, j, k, newHead);
+                        localMaxChange = Math.Max(localMaxChange, change);
                     }
                 }
-                
-                // Handle remaining elements
-                for (; j < nth; j++)
+                return localMaxChange;
+            },
+            (localMaxChange) =>
+            {
+                lock (lockObj)
                 {
-                    SolveGroundwaterFlowSinglePoint(i, j, k, newHead, ref maxChange);
+                    maxChange = Math.Max(maxChange, localMaxChange);
                 }
-            }
-        });
+            });
+        return maxChange;
     }
     
     /// <summary>
     /// Scalar fallback for groundwater flow solver.
     /// </summary>
-    private void SolveGroundwaterFlowScalar(float[,,] newHead, ref float maxChange)
+    private float SolveGroundwaterFlowScalar(float[,,] newHead)
     {
         var nr = _mesh.RadialPoints;
         var nth = _mesh.AngularPoints;
         var nz = _mesh.VerticalPoints;
-        
-        Parallel.For(1, nr - 1, i =>
-        {
-            for (int j = 0; j < nth; j++)
+        float maxChange = 0f;
+        var lockObj = new object();
+
+        Parallel.For(1, nr - 1,
+            () => 0f, // localInit
+            (i, loopState, localMaxChange) =>
             {
-                for (int k = 1; k < nz - 1; k++)
+                for (int j = 0; j < nth; j++)
                 {
-                    SolveGroundwaterFlowSinglePoint(i, j, k, newHead, ref maxChange);
+                    for (int k = 1; k < nz - 1; k++)
+                    {
+                        var change = SolveGroundwaterFlowSinglePoint(i, j, k, newHead);
+                        localMaxChange = Math.Max(localMaxChange, change);
+                    }
                 }
-            }
-        });
+                return localMaxChange;
+            },
+            (localMaxChange) =>
+            {
+                lock (lockObj)
+                {
+                    maxChange = Math.Max(maxChange, localMaxChange);
+                }
+            });
+        return maxChange;
     }
     
-    private void SolveGroundwaterFlowSinglePoint(int i, int j, int k, float[,,] newHead, ref float maxChange)
+    private float SolveGroundwaterFlowSinglePoint(int i, int j, int k, float[,,] newHead)
     {
         var nth = _mesh.AngularPoints;
         var r = _mesh.R[i];
@@ -384,17 +465,16 @@ public class GeothermalSimulationSolver
         var dz_p = _mesh.Z[k+1] - _mesh.Z[k];
         
         // Laplacian in cylindrical coordinates
-        var d2h_dr2 = (_hydraulicHead[i+1,j,k] - 2*_hydraulicHead[i,j,k] + _hydraulicHead[i-1,j,k]) / (0.5f * dr_m * dr_p);
+        var d2h_dr2 = (_hydraulicHead[i+1,j,k] - 2*_hydraulicHead[i,j,k] + _hydraulicHead[i-1,j,k]) / (dr_m * dr_p);
         var dh_dr = (_hydraulicHead[i+1,j,k] - _hydraulicHead[i-1,j,k]) / (dr_p + dr_m);
         var d2h_dth2 = (_hydraulicHead[i,jp,k] - 2*_hydraulicHead[i,j,k] + _hydraulicHead[i,jm,k]) / (r * r * dth * dth);
-        var d2h_dz2 = (_hydraulicHead[i,j,k+1] - 2*_hydraulicHead[i,j,k] + _hydraulicHead[i,j,k-1]) / (0.5f * dz_m * dz_p);
+        var d2h_dz2 = (_hydraulicHead[i,j,k+1] - 2*_hydraulicHead[i,j,k] + _hydraulicHead[i,j,k-1]) / (dz_m * dz_p);
         
         var laplacian = d2h_dr2 + dh_dr/r + d2h_dth2 + d2h_dz2;
         
         newHead[i,j,k] = _hydraulicHead[i,j,k] + 1.5f * K * laplacian;
         
-        var change = Math.Abs(newHead[i,j,k] - _hydraulicHead[i,j,k]);
-        maxChange = Math.Max(maxChange, change);
+        return Math.Abs(newHead[i,j,k] - _hydraulicHead[i,j,k]);
     }
     
     /// <summary>
@@ -465,17 +545,17 @@ public class GeothermalSimulationSolver
             
             for (int iter = 0; iter < _options.MaxIterationsPerStep; iter++)
             {
-                var maxChange = 0f;
+                float maxChange;
                 _totalIterations++;
                 
                 // Interior points
                 if (_options.UseSIMD && Avx2.IsSupported)
                 {
-                    SolveHeatTransferSIMD(newTemp, dt, ref maxChange);
+                    maxChange = SolveHeatTransferSIMD(newTemp, dt);
                 }
                 else
                 {
-                    SolveHeatTransferScalar(newTemp, dt, ref maxChange);
+                    maxChange = SolveHeatTransferScalar(newTemp, dt);
                 }
                 
                 // Apply boundary conditions
@@ -498,119 +578,168 @@ public class GeothermalSimulationSolver
     /// <summary>
     /// SIMD-optimized heat transfer solver.
     /// </summary>
-    private void SolveHeatTransferSIMD(float[,,] newTemp, float dt, ref float maxChange)
+    private float SolveHeatTransferSIMD(float[,,] newTemp, float dt)
     {
         var nr = _mesh.RadialPoints;
         var nth = _mesh.AngularPoints;
         var nz = _mesh.VerticalPoints;
         var vecSize = Vector256<float>.Count;
+        float maxChange = 0f;
+        var lockObj = new object();
         
-        Parallel.For(1, nr - 1, i =>
-        {
-            for (int k = 1; k < nz - 1; k++)
+        Parallel.For(1, nr - 1, 
+            () => 0f, // localInit
+            (i, loopState, localMaxChange) =>
             {
-                var r = _mesh.R[i];
-                var dr_m = _mesh.R[i] - _mesh.R[i-1];
-                var dr_p = _mesh.R[i+1] - _mesh.R[i];
-                var dz_m = _mesh.Z[k] - _mesh.Z[k-1];
-                var dz_p = _mesh.Z[k+1] - _mesh.Z[k];
-                
-                int j = 0;
-                for (; j <= nth - vecSize; j += vecSize)
+                for (int k = 1; k < nz - 1; k++)
                 {
-                    // Load material properties
-                    var lambda = Vector256.Create(
-                        _mesh.ThermalConductivities[i,j,k], _mesh.ThermalConductivities[i,j+1,k],
-                        _mesh.ThermalConductivities[i,j+2,k], _mesh.ThermalConductivities[i,j+3,k],
-                        _mesh.ThermalConductivities[i,j+4,k], _mesh.ThermalConductivities[i,j+5,k],
-                        _mesh.ThermalConductivities[i,j+6,k], _mesh.ThermalConductivities[i,j+7,k]
-                    );
+                    var r = _mesh.R[i];
+                    var dr_m = _mesh.R[i] - _mesh.R[i-1];
+                    var dr_p = _mesh.R[i+1] - _mesh.R[i];
+                    var dth = 2f * MathF.PI / nth;
+                    var dz_m = _mesh.Z[k] - _mesh.Z[k-1];
+                    var dz_p = _mesh.Z[k+1] - _mesh.Z[k];
                     
-                    var rho_cp = Vector256.Create(
-                        _mesh.Densities[i,j,k] * _mesh.SpecificHeats[i,j,k],
-                        _mesh.Densities[i,j+1,k] * _mesh.SpecificHeats[i,j+1,k],
-                        _mesh.Densities[i,j+2,k] * _mesh.SpecificHeats[i,j+2,k],
-                        _mesh.Densities[i,j+3,k] * _mesh.SpecificHeats[i,j+3,k],
-                        _mesh.Densities[i,j+4,k] * _mesh.SpecificHeats[i,j+4,k],
-                        _mesh.Densities[i,j+5,k] * _mesh.SpecificHeats[i,j+5,k],
-                        _mesh.Densities[i,j+6,k] * _mesh.SpecificHeats[i,j+6,k],
-                        _mesh.Densities[i,j+7,k] * _mesh.SpecificHeats[i,j+7,k]
-                    );
-                    
-                    // Thermal diffusivity
-                    var alpha = Avx2.Divide(lambda, rho_cp);
-                    
-                    // Load temperatures (similar to hydraulic head)
-                    var T_c = Vector256.Create(
-                        _temperature[i,j,k], _temperature[i,j+1,k],
-                        _temperature[i,j+2,k], _temperature[i,j+3,k],
-                        _temperature[i,j+4,k], _temperature[i,j+5,k],
-                        _temperature[i,j+6,k], _temperature[i,j+7,k]
-                    );
-                    
-                    // Calculate Laplacian (similar structure to groundwater)
-                    // ... (implement similar to groundwater but with temperature)
-                    
-                    // Add advection term if groundwater flow is enabled
-                    var advection = Vector256<float>.Zero;
-                    if (_options.SimulateGroundwaterFlow)
+                    int j = 0;
+                    for (; j <= nth - vecSize; j += vecSize)
                     {
-                        // Load velocities
-                        var vr = Vector256.Create(
-                            _velocity[i,j,k,0], _velocity[i,j+1,k,0],
-                            _velocity[i,j+2,k,0], _velocity[i,j+3,k,0],
-                            _velocity[i,j+4,k,0], _velocity[i,j+5,k,0],
-                            _velocity[i,j+6,k,0], _velocity[i,j+7,k,0]
+                        // Load material properties
+                        var lambda = Vector256.Create(
+                            _mesh.ThermalConductivities[i,j,k], _mesh.ThermalConductivities[i,j+1,k],
+                            _mesh.ThermalConductivities[i,j+2,k], _mesh.ThermalConductivities[i,j+3,k],
+                            _mesh.ThermalConductivities[i,j+4,k], _mesh.ThermalConductivities[i,j+5,k],
+                            _mesh.ThermalConductivities[i,j+6,k], _mesh.ThermalConductivities[i,j+7,k]
                         );
                         
-                        // Temperature gradients
-                        var dT_dr = Vector256<float>.Zero; // Calculate gradient
+                        var rho_cp = Vector256.Create(
+                            _mesh.Densities[i,j,k] * _mesh.SpecificHeats[i,j,k],
+                            _mesh.Densities[i,j+1,k] * _mesh.SpecificHeats[i,j+1,k],
+                            _mesh.Densities[i,j+2,k] * _mesh.SpecificHeats[i,j+2,k],
+                            _mesh.Densities[i,j+3,k] * _mesh.SpecificHeats[i,j+3,k],
+                            _mesh.Densities[i,j+4,k] * _mesh.SpecificHeats[i,j+4,k],
+                            _mesh.Densities[i,j+5,k] * _mesh.SpecificHeats[i,j+5,k],
+                            _mesh.Densities[i,j+6,k] * _mesh.SpecificHeats[i,j+6,k],
+                            _mesh.Densities[i,j+7,k] * _mesh.SpecificHeats[i,j+7,k]
+                        );
                         
-                        // Advection = -v·∇T
-                        advection = Avx2.Multiply(Vector256.Create(-1f), Avx2.Multiply(vr, dT_dr));
-                    }
-                    
-                    // Add dispersion if Peclet number is high
-                    var dispersion = Vector256<float>.Zero;
-                    if (_options.SimulateGroundwaterFlow)
-                    {
+                        // Effective thermal diffusivity (alpha_thermal + dispersion_coeff)
+                        var alpha_thermal = Avx2.Divide(lambda, rho_cp);
                         var disp_coeff = Vector256.Create(
-                            _dispersivity[i,j,k], _dispersivity[i,j+1,k],
-                            _dispersivity[i,j+2,k], _dispersivity[i,j+3,k],
-                            _dispersivity[i,j+4,k], _dispersivity[i,j+5,k],
-                            _dispersivity[i,j+6,k], _dispersivity[i,j+7,k]
+                            _dispersionCoefficient[i,j,k], _dispersionCoefficient[i,j+1,k],
+                            _dispersionCoefficient[i,j+2,k], _dispersionCoefficient[i,j+3,k],
+                            _dispersionCoefficient[i,j+4,k], _dispersionCoefficient[i,j+5,k],
+                            _dispersionCoefficient[i,j+6,k], _dispersionCoefficient[i,j+7,k]
                         );
+                        var alpha_eff = Avx2.Add(alpha_thermal, disp_coeff);
                         
-                        // Calculate dispersive heat flux
-                        // ... (implement mechanical dispersion)
+                        // Load temperatures
+                        var T_c = Vector256.Create(_temperature[i,j,k], _temperature[i,j+1,k], _temperature[i,j+2,k], _temperature[i,j+3,k], _temperature[i,j+4,k], _temperature[i,j+5,k], _temperature[i,j+6,k], _temperature[i,j+7,k]);
+                        var T_rm = Vector256.Create(_temperature[i-1,j,k], _temperature[i-1,j+1,k], _temperature[i-1,j+2,k], _temperature[i-1,j+3,k], _temperature[i-1,j+4,k], _temperature[i-1,j+5,k], _temperature[i-1,j+6,k], _temperature[i-1,j+7,k]);
+                        var T_rp = Vector256.Create(_temperature[i+1,j,k], _temperature[i+1,j+1,k], _temperature[i+1,j+2,k], _temperature[i+1,j+3,k], _temperature[i+1,j+4,k], _temperature[i+1,j+5,k], _temperature[i+1,j+6,k], _temperature[i+1,j+7,k]);
+                        var T_zm = Vector256.Create(_temperature[i,j,k-1], _temperature[i,j+1,k-1], _temperature[i,j+2,k-1], _temperature[i,j+3,k-1], _temperature[i,j+4,k-1], _temperature[i,j+5,k-1], _temperature[i,j+6,k-1], _temperature[i,j+7,k-1]);
+                        var T_zp = Vector256.Create(_temperature[i,j,k+1], _temperature[i,j+1,k+1], _temperature[i,j+2,k+1], _temperature[i,j+3,k+1], _temperature[i,j+4,k+1], _temperature[i,j+5,k+1], _temperature[i,j+6,k+1], _temperature[i,j+7,k+1]);
+
+                        var jm = new int[vecSize]; var jp = new int[vecSize];
+                        for (int v = 0; v < vecSize; v++) { jm[v] = (j + v - 1 + nth) % nth; jp[v] = (j + v + 1) % nth; }
+                        var T_thm = Vector256.Create(_temperature[i,jm[0],k], _temperature[i,jm[1],k], _temperature[i,jm[2],k], _temperature[i,jm[3],k], _temperature[i,jm[4],k], _temperature[i,jm[5],k], _temperature[i,jm[6],k], _temperature[i,jm[7],k]);
+                        var T_thp = Vector256.Create(_temperature[i,jp[0],k], _temperature[i,jp[1],k], _temperature[i,jp[2],k], _temperature[i,jp[3],k], _temperature[i,jp[4],k], _temperature[i,jp[5],k], _temperature[i,jp[6],k], _temperature[i,jp[7],k]);
+
+                        // Laplacian
+                        var two_vec = Vector256.Create(2f);
+                        var d2T_dr2 = Avx2.Divide(Avx2.Subtract(Avx2.Add(T_rp, T_rm), Avx2.Multiply(two_vec, T_c)), Vector256.Create(dr_m * dr_p));
+                        var dT_dr_term = Avx2.Divide(Avx2.Subtract(T_rp, T_rm), Vector256.Create(r * (dr_p + dr_m)));
+                        var d2T_dth2 = Avx2.Divide(Avx2.Subtract(Avx2.Add(T_thp, T_thm), Avx2.Multiply(two_vec, T_c)), Vector256.Create(r * r * dth * dth));
+                        var d2T_dz2 = Avx2.Divide(Avx2.Subtract(Avx2.Add(T_zp, T_zm), Avx2.Multiply(two_vec, T_c)), Vector256.Create(dz_m * dz_p));
+                        var laplacian = Avx2.Add(d2T_dr2, Avx2.Add(dT_dr_term, Avx2.Add(d2T_dth2, d2T_dz2)));
+                        
+                        // Advection term
+                        var advection = Vector256<float>.Zero;
+                        if (_options.SimulateGroundwaterFlow)
+                        {
+                            var vr = Vector256.Create(_velocity[i,j,k,0], _velocity[i,j+1,k,0], _velocity[i,j+2,k,0], _velocity[i,j+3,k,0], _velocity[i,j+4,k,0], _velocity[i,j+5,k,0], _velocity[i,j+6,k,0], _velocity[i,j+7,k,0]);
+                            var vth = Vector256.Create(_velocity[i,j,k,1], _velocity[i,j+1,k,1], _velocity[i,j+2,k,1], _velocity[i,j+3,k,1], _velocity[i,j+4,k,1], _velocity[i,j+5,k,1], _velocity[i,j+6,k,1], _velocity[i,j+7,k,1]);
+                            var vz = Vector256.Create(_velocity[i,j,k,2], _velocity[i,j+1,k,2], _velocity[i,j+2,k,2], _velocity[i,j+3,k,2], _velocity[i,j+4,k,2], _velocity[i,j+5,k,2], _velocity[i,j+6,k,2], _velocity[i,j+7,k,2]);
+                            
+                            var dT_dr = Avx2.Divide(Avx2.Subtract(T_rp, T_rm), Vector256.Create(dr_p + dr_m));
+                            var dT_dth = Avx2.Divide(Avx2.Subtract(T_thp, T_thm), Vector256.Create(2f * r * dth));
+                            var dT_dz = Avx2.Divide(Avx2.Subtract(T_zp, T_zm), Vector256.Create(dz_p + dz_m));
+                            
+                            var adv_term = Avx2.Add(Avx2.Multiply(vr, dT_dr), Avx2.Add(Avx2.Multiply(vth, dT_dth), Avx2.Multiply(vz, dT_dz)));
+                            advection = Avx2.Multiply(Vector256.Create(-1f), adv_term);
+                        }
+                        
+                        // Time integration
+                        var diffusion_term = Avx2.Multiply(alpha_eff, laplacian);
+                        var dT_dt = Avx2.Add(diffusion_term, advection);
+                        var T_new = Avx2.Add(T_c, Avx2.Multiply(Vector256.Create(dt), dT_dt));
+                        
+                        // Store results
+                        for (int v = 0; v < vecSize && j + v < nth; v++)
+                        {
+                            newTemp[i, j + v, k] = T_new.GetElement(v);
+                            var change = Math.Abs(T_new.GetElement(v) - T_c.GetElement(v));
+                            localMaxChange = Math.Max(localMaxChange, change);
+                        }
                     }
                     
-                    // Time integration (explicit)
-                    var dT_dt = alpha; // * laplacian + advection + dispersion
-                    var T_new = Avx2.Add(T_c, Avx2.Multiply(Vector256.Create(dt), dT_dt));
-                    
-                    // Store results
-                    for (int v = 0; v < vecSize && j + v < nth; v++)
+                    // Handle remaining elements
+                    for (; j < nth; j++)
                     {
-                        newTemp[i, j + v, k] = T_new.GetElement(v);
-                        var change = Math.Abs(T_new.GetElement(v) - T_c.GetElement(v));
-                        maxChange = Math.Max(maxChange, change);
+                       var change = SolveHeatTransferSinglePoint(i, j, k, newTemp, dt);
+                       localMaxChange = Math.Max(localMaxChange, change);
                     }
                 }
-                
-                // Handle remaining elements
-                for (; j < nth; j++)
+                return localMaxChange;
+            },
+            (localMaxChange) =>
+            {
+                lock(lockObj)
                 {
-                    SolveHeatTransferSinglePoint(i, j, k, newTemp, dt, ref maxChange);
+                    maxChange = Math.Max(maxChange, localMaxChange);
                 }
-            }
-        });
+            });
+        return maxChange;
+    }
+
+    /// <summary>
+    /// Scalar fallback for the heat transfer solver.
+    /// </summary>
+    private float SolveHeatTransferScalar(float[,,] newTemp, float dt)
+    {
+        var nr = _mesh.RadialPoints;
+        var nth = _mesh.AngularPoints;
+        var nz = _mesh.VerticalPoints;
+        float maxChange = 0f;
+        var lockObj = new object();
+
+        Parallel.For(1, nr - 1,
+            () => 0f, // localInit
+            (i, loopState, localMaxChange) =>
+            {
+                for (int j = 0; j < nth; j++)
+                {
+                    for (int k = 1; k < nz - 1; k++)
+                    {
+                        var change = SolveHeatTransferSinglePoint(i, j, k, newTemp, dt);
+                        localMaxChange = Math.Max(localMaxChange, change);
+                    }
+                }
+                return localMaxChange;
+            },
+            (localMaxChange) =>
+            {
+                lock (lockObj)
+                {
+                    maxChange = Math.Max(maxChange, localMaxChange);
+                }
+            });
+        return maxChange;
     }
     
     /// <summary>
     /// Scalar heat transfer solver for single point.
     /// </summary>
-    private void SolveHeatTransferSinglePoint(int i, int j, int k, float[,,] newTemp, float dt, ref float maxChange)
+    private float SolveHeatTransferSinglePoint(int i, int j, int k, float[,,] newTemp, float dt)
     {
         var nth = _mesh.AngularPoints;
         var r = _mesh.R[i];
@@ -618,7 +747,9 @@ public class GeothermalSimulationSolver
         var lambda = _mesh.ThermalConductivities[i,j,k];
         var rho = _mesh.Densities[i,j,k];
         var cp = _mesh.SpecificHeats[i,j,k];
-        var alpha = lambda / (rho * cp);
+        var alpha_thermal = lambda / (rho * cp);
+        var disp_coeff = _dispersionCoefficient[i,j,k];
+        var alpha_eff = alpha_thermal + disp_coeff;
         
         var T_old = _temperature[i,j,k];
         
@@ -632,11 +763,10 @@ public class GeothermalSimulationSolver
         var dz_m = _mesh.Z[k] - _mesh.Z[k-1];
         var dz_p = _mesh.Z[k+1] - _mesh.Z[k];
         
-        // Second derivatives
-        var d2T_dr2 = (_temperature[i+1,j,k] - 2*T_old + _temperature[i-1,j,k]) / (0.5f * dr_m * dr_p);
+        var d2T_dr2 = (_temperature[i+1,j,k] - 2*T_old + _temperature[i-1,j,k]) / (dr_m * dr_p);
         var dT_dr = (_temperature[i+1,j,k] - _temperature[i-1,j,k]) / (dr_p + dr_m);
         var d2T_dth2 = (_temperature[i,jp,k] - 2*T_old + _temperature[i,jm,k]) / (r * r * dth * dth);
-        var d2T_dz2 = (_temperature[i,j,k+1] - 2*T_old + _temperature[i,j,k-1]) / (0.5f * dz_m * dz_p);
+        var d2T_dz2 = (_temperature[i,j,k+1] - 2*T_old + _temperature[i,j,k-1]) / (dz_m * dz_p);
         
         var laplacian = d2T_dr2 + dT_dr/r + d2T_dth2 + d2T_dz2;
         
@@ -649,17 +779,15 @@ public class GeothermalSimulationSolver
             var vz = _velocity[i,j,k,2];
             
             var dT_dth = (_temperature[i,jp,k] - _temperature[i,jm,k]) / (2f * r * dth);
-            var dT_dz = (k > 0 && k < _mesh.VerticalPoints-1) ? 
-                (_temperature[i,j,k+1] - _temperature[i,j,k-1]) / (dz_p + dz_m) : 0f;
+            var dT_dz = (_temperature[i,j,k+1] - _temperature[i,j,k-1]) / (dz_p + dz_m);
             
             advection = -(vr * dT_dr + vth * dT_dth + vz * dT_dz);
         }
         
         // Update temperature
-        newTemp[i,j,k] = T_old + dt * (alpha * laplacian + advection);
+        newTemp[i,j,k] = T_old + dt * (alpha_eff * laplacian + advection);
         
-        var change = Math.Abs(newTemp[i,j,k] - T_old);
-        maxChange = Math.Max(maxChange, change);
+        return Math.Abs(newTemp[i,j,k] - T_old);
     }
     
     /// <summary>
@@ -806,7 +934,7 @@ public class GeothermalSimulationSolver
             var Tground = InterpolateGroundTemperature(depth);
             
             // Heat transfer
-            var U = CalculateHeatTransferCoefficient(i);
+            var U = CalculateHeatTransferCoefficient();
             var A = 2f * MathF.PI * (float)_options.PipeOuterDiameter * dz;
             var Q = U * A * (Tground - _fluidTempDown[i-1]);
             
@@ -823,7 +951,7 @@ public class GeothermalSimulationSolver
                 var depth = i * dz;
                 var Tground = InterpolateGroundTemperature(depth);
                 
-                var U = CalculateHeatTransferCoefficient(i);
+                var U = CalculateHeatTransferCoefficient();
                 var A = 2f * MathF.PI * (float)_options.PipeOuterDiameter * dz;
                 var Q = U * A * (Tground - _fluidTempUp[i+1]);
                 
@@ -865,27 +993,50 @@ public class GeothermalSimulationSolver
     }
     
     /// <summary>
-    /// Calculates heat transfer coefficient.
+    /// Calculates overall heat transfer coefficient using robust correlations.
     /// </summary>
-    private float CalculateHeatTransferCoefficient(int index)
+    private float CalculateHeatTransferCoefficient()
     {
-        // Simplified model - could be enhanced with Nusselt correlations
-        var Re = (float)(_options.FluidMassFlowRate * _options.PipeInnerDiameter / 
-                        (_options.FluidViscosity * Math.PI * _options.PipeInnerDiameter * _options.PipeInnerDiameter / 4));
-        
+        // Reynolds number: Re = (rho * v * D) / mu = (4 * mdot) / (pi * D * mu)
+        var D_inner = (float)_options.PipeInnerDiameter;
+        var mu = (float)_options.FluidViscosity;
+        var mdot = (float)_options.FluidMassFlowRate;
+        var Re = 4.0f * mdot / (MathF.PI * D_inner * mu);
+
         var Pr = (float)(_options.FluidViscosity * _options.FluidSpecificHeat / _options.FluidThermalConductivity);
         
-        // Dittus-Boelter correlation
-        var Nu = 0.023f * MathF.Pow(Re, 0.8f) * MathF.Pow(Pr, 0.4f);
+        float Nu;
+        if (Re < 2300)
+        {
+            // Laminar flow. Nusselt number is constant for fully developed flow.
+            // Using 4.36 for constant heat flux condition, which is more applicable here.
+            Nu = 4.36f;
+        }
+        else
+        {
+            // Turbulent or Transitional flow. Use Gnielinski correlation.
+            // It is more accurate than Dittus-Boelter and covers the transition zone.
+            
+            // Friction factor (Petukhov correlation, valid for 3000 < Re < 5e6)
+            var f = MathF.Pow(0.79f * MathF.Log(Re) - 1.64f, -2.0f);
+            
+            Nu = (f / 8.0f) * (Re - 1000.0f) * Pr / 
+                 (1.0f + 12.7f * MathF.Pow(f / 8.0f, 0.5f) * (MathF.Pow(Pr, 2.0f / 3.0f) - 1.0f));
+        }
         
-        var h_fluid = Nu * (float)_options.FluidThermalConductivity / (float)_options.PipeInnerDiameter;
+        var h_fluid = Nu * (float)_options.FluidThermalConductivity / D_inner;
         
-        // Overall heat transfer coefficient
-        var r_i = (float)(_options.PipeInnerDiameter / 2);
-        var r_o = (float)(_options.PipeOuterDiameter / 2);
+        // Overall heat transfer coefficient (U) based on series of thermal resistances
+        var r_i = D_inner / 2f;
+        var r_o = (float)_options.PipeOuterDiameter / 2f;
         var k_pipe = (float)_options.PipeThermalConductivity;
         
-        var U = 1f / (1f/h_fluid + r_i * MathF.Log(r_o/r_i) / k_pipe);
+        // Resistances: R_fluid (convection) + R_pipe (conduction)
+        var R_fluid = 1f / h_fluid;
+        var R_pipe = r_i * MathF.Log(r_o / r_i) / k_pipe;
+        
+        // U is based on inner pipe area
+        var U = 1f / (R_fluid + R_pipe);
         
         return U;
     }
@@ -898,6 +1049,9 @@ public class GeothermalSimulationSolver
         var nr = _mesh.RadialPoints;
         var nth = _mesh.AngularPoints;
         var nz = _mesh.VerticalPoints;
+        // Longitudinal dispersivity length (alpha_L) should be a physically-based input parameter.
+        // It is a property of the geological medium.
+        var longitudinalDispersivityLength = (float)(_options.LongitudinalDispersivity); // e.g., 0.5 meters
         
         Parallel.For(0, nr, i =>
         {
@@ -911,7 +1065,7 @@ public class GeothermalSimulationSolver
                     var vz = _velocity[i,j,k,2];
                     var v_mag = MathF.Sqrt(vr*vr + vth*vth + vz*vz);
                     
-                    // Characteristic length (grain size or mesh size)
+                    // Characteristic length (e.g., average grain size or mesh size)
                     var L = Math.Min(_mesh.R[1] - _mesh.R[0], _mesh.Z[1] - _mesh.Z[0]);
                     
                     // Thermal diffusivity
@@ -921,15 +1075,8 @@ public class GeothermalSimulationSolver
                     // Péclet number
                     _pecletNumber[i,j,k] = v_mag * L / alpha;
                     
-                    // Dispersivity (simplified model)
-                    if (_pecletNumber[i,j,k] > 1)
-                    {
-                        _dispersivity[i,j,k] = 0.1f * L * MathF.Log(_pecletNumber[i,j,k]);
-                    }
-                    else
-                    {
-                        _dispersivity[i,j,k] = 0.01f * L;
-                    }
+                    // Mechanical dispersion coefficient D_m = alpha_L * |v|
+                    _dispersionCoefficient[i,j,k] = longitudinalDispersivityLength * v_mag;
                 }
             }
         });
@@ -953,8 +1100,54 @@ public class GeothermalSimulationSolver
         results.HeatExtractionRate.Add((currentTime, Q));
         results.OutletTemperature.Add((currentTime, outletTemp));
         
-        // Simple COP calculation
-        var cop = Math.Abs(Q) / 1000; // Simplified, assumes 1kW compressor
+        // Robust COP calculation based on Carnot cycle
+        // These parameters should be defined in GeothermalSimulationOptions
+        var hvacSupplyTempK = _options.HvacSupplyTemperatureKelvin ?? (273.15 + 35.0); // Default: 35 C for radiant heating
+        var compressorEfficiency = _options.CompressorIsentropicEfficiency ?? 0.6; // Typical isentropic efficiency
+        
+        var inletTempK = _options.FluidInletTemperature + 273.15;
+        var outletTempK = outletTemp + 273.15;
+        var avgFluidTempK = (inletTempK + outletTempK) / 2.0;
+
+        double cop;
+        var Q_abs = Math.Abs(Q); // Absolute heat transfer with ground, in Watts
+
+        if (Q > 0) // Heating mode: Q is positive (heat extracted from ground)
+        {
+            var T_hot_k = hvacSupplyTempK;
+            var T_cold_k = avgFluidTempK;
+            
+            if (T_hot_k > T_cold_k)
+            {
+                var carnotCop = T_hot_k / (T_hot_k - T_cold_k);
+                var idealWork = Q_abs / (carnotCop - 1);
+                var actualWork = idealWork / compressorEfficiency;
+                // COP_heating = Q_hot / W = (Q_cold + W) / W
+                cop = (actualWork > 0) ? (Q_abs + actualWork) / actualWork : double.PositiveInfinity;
+            }
+            else
+            {
+                cop = double.PositiveInfinity; // No work needed if ground is hotter than supply
+            }
+        }
+        else // Cooling mode: Q is negative (heat rejected to ground)
+        {
+            var T_hot_k = avgFluidTempK;
+            var T_cold_k = hvacSupplyTempK; // Here T_cold is the building (chilled water) temperature
+            
+            if (T_hot_k > T_cold_k)
+            {
+                var carnotCopCooling = T_cold_k / (T_hot_k - T_cold_k);
+                var idealWork = Q_abs / carnotCopCooling;
+                var actualWork = idealWork / compressorEfficiency;
+                // COP_cooling = Q_cold / W
+                cop = (actualWork > 0) ? Q_abs / actualWork : double.PositiveInfinity;
+            }
+            else
+            {
+                cop = double.PositiveInfinity; // No work needed if ground is colder than chilled water setpoint
+            }
+        }
         results.CoefficientOfPerformance.Add((currentTime, cop));
     }
     
@@ -973,10 +1166,17 @@ public class GeothermalSimulationSolver
         var Tin = _options.FluidInletTemperature;
         var Tout = results.OutletTemperature.Last().temperature;
         var Tground = InterpolateGroundTemperature((float)(_options.BoreholeDataset.TotalDepth / 2));
-        var Q = results.AverageHeatExtractionRate;
+        var Q_avg = results.AverageHeatExtractionRate;
         
-        results.BoreholeThermalResistance = Math.Abs((Tground - 0.5 * (Tin + Tout)) / Q);
-        
+        if (Math.Abs(Q_avg) > 1e-6)
+        {
+            results.BoreholeThermalResistance = Math.Abs((Tground - 0.5 * (Tin + Tout)) / Q_avg);
+        }
+        else
+        {
+            results.BoreholeThermalResistance = 0;
+        }
+
         // Effective ground properties
         CalculateEffectiveGroundProperties(results);
         
@@ -1009,9 +1209,10 @@ public class GeothermalSimulationSolver
         }
         results.AveragePecletNumber = count > 0 ? totalPe / count : 0;
         
-        // Dispersivities
-        results.LongitudinalDispersivity = 0.1 * _options.DomainRadius / 50; // Simplified
-        results.TransverseDispersivity = results.LongitudinalDispersivity / 10;
+        // Report the input dispersivity length scales used in the simulation.
+        // These are material properties and should be part of the simulation options.
+        results.LongitudinalDispersivity = _options.LongitudinalDispersivity;
+        results.TransverseDispersivity = _options.TransverseDispersivity;
     }
     
     /// <summary>
@@ -1043,8 +1244,53 @@ public class GeothermalSimulationSolver
         results.EffectiveGroundConductivity = totalConductivity / totalVolume;
         results.GroundThermalDiffusivity = totalDiffusivity / totalVolume;
         
-        // Thermal influence radius (approximate)
-        results.ThermalInfluenceRadius = 2 * Math.Sqrt(results.GroundThermalDiffusivity * _options.SimulationTime);
+        // Thermal influence radius determined by analyzing the temperature field
+        var halfDepthIndex = _mesh.VerticalPoints / 2;
+        var tempChangeAtWall = Math.Abs(_temperature[1, 0, halfDepthIndex] - _initialTemperature[1, 0, halfDepthIndex]);
+        var threshold = 0.05 * tempChangeAtWall; // Threshold is 5% of the change at the borehole wall
+        double thermalRadius = _mesh.R[1];
+
+        if (tempChangeAtWall > 1e-3)
+        {
+            for (int i = 2; i < _mesh.RadialPoints; i++)
+            {
+                double avgTempChange = 0;
+                for (int j = 0; j < _mesh.AngularPoints; j++)
+                {
+                    avgTempChange += Math.Abs(_temperature[i, j, halfDepthIndex] - _initialTemperature[i, j, halfDepthIndex]);
+                }
+                avgTempChange /= _mesh.AngularPoints;
+
+                if (avgTempChange < threshold)
+                {
+                    // Interpolate between the last two points for a more precise radius
+                    double prevChange = 0;
+                    for (int j = 0; j < _mesh.AngularPoints; j++)
+                    {
+                        prevChange += Math.Abs(_temperature[i - 1, j, halfDepthIndex] - _initialTemperature[i - 1, j, halfDepthIndex]);
+                    }
+                    prevChange /= _mesh.AngularPoints;
+                    
+                    if (prevChange > threshold)
+                    {
+                        var fraction = (prevChange - threshold) / (prevChange - avgTempChange);
+                        thermalRadius = _mesh.R[i - 1] + fraction * (_mesh.R[i] - _mesh.R[i - 1]);
+                    }
+                    else
+                    {
+                         thermalRadius = _mesh.R[i-1];
+                    }
+                    break;
+                }
+                
+                if (i == _mesh.RadialPoints - 1)
+                {
+                    // Influence reaches the edge of the domain
+                    thermalRadius = _mesh.R[i];
+                }
+            }
+        }
+        results.ThermalInfluenceRadius = thermalRadius;
     }
     
     /// <summary>
@@ -1056,27 +1302,113 @@ public class GeothermalSimulationSolver
         var layerTempChanges = new Dictionary<string, double>();
         var layerFlowRates = new Dictionary<string, double>();
         
-        foreach (var layer in _options.BoreholeDataset.Lithology)
+        // Map material ID back to layer name
+        var materialIdToLayerName = new Dictionary<int, string>();
+        var lithologyList = _options.BoreholeDataset.Lithology;
+        for(int i = 0; i < lithologyList.Count; i++)
         {
-            var layerName = layer.RockType ?? "Unknown";
+            var layerName = lithologyList[i].RockType ?? "Unknown";
+            materialIdToLayerName[i + 1] = layerName; // Material ID is index + 1
+            
             if (!layerHeatFluxes.ContainsKey(layerName))
             {
                 layerHeatFluxes[layerName] = 0;
                 layerTempChanges[layerName] = 0;
                 layerFlowRates[layerName] = 0;
             }
-            
-            // Calculate contribution
-            // ... (implement detailed layer analysis)
+        }
+
+        var layerCellCounts = new Dictionary<string, int>();
+        foreach (var key in layerHeatFluxes.Keys)
+        {
+            layerCellCounts[key] = 0;
+        }
+
+        // Iterate through mesh cells to aggregate data
+        for (int k = 0; k < _mesh.VerticalPoints; k++)
+        {
+            for (int j = 0; j < _mesh.AngularPoints; j++)
+            {
+                for (int i = 0; i < _mesh.RadialPoints; i++)
+                {
+                    var matId = _mesh.MaterialIds[i, j, k];
+                    if (materialIdToLayerName.TryGetValue(matId, out var layerName))
+                    {
+                        // Temperature Change
+                        layerTempChanges[layerName] += _temperature[i, j, k] - _initialTemperature[i, j, k];
+                        layerCellCounts[layerName]++;
+
+                        // Groundwater Flow Rate (radial component towards/away from borehole)
+                        if (_options.SimulateGroundwaterFlow)
+                        {
+                            var r = _mesh.R[i];
+                            var dtheta = 2f * MathF.PI / _mesh.AngularPoints;
+                            var dz = (k < _mesh.VerticalPoints - 1) ? _mesh.Z[k + 1] - _mesh.Z[k] : _mesh.Z[k] - _mesh.Z[k - 1];
+                            var faceArea = r * dtheta * dz;
+                            layerFlowRates[layerName] += _velocity[i, j, k, 0] * faceArea; 
+                        }
+                    }
+                }
+            }
+        }
+
+        // Calculate Heat Flux at the borehole wall (approximated at the second radial node)
+        int borehole_wall_r_index = 1; 
+        if (_mesh.RadialPoints > 1)
+        {
+            var r0 = _mesh.R[borehole_wall_r_index - 1];
+            var r1 = _mesh.R[borehole_wall_r_index];
+            var dr = r1 - r0;
+
+            if (dr > 1e-6)
+            {
+                for (int k = 0; k < _mesh.VerticalPoints; k++)
+                {
+                    // Assume material is consistent around circumference for a given depth
+                    var matId = _mesh.MaterialIds[borehole_wall_r_index, 0, k]; 
+                    if (materialIdToLayerName.TryGetValue(matId, out var layerName))
+                    {
+                        double totalLayerHeatFlow = 0;
+                        for (int j = 0; j < _mesh.AngularPoints; j++)
+                        {
+                            var T0 = _temperature[borehole_wall_r_index - 1, j, k];
+                            var T1 = _temperature[borehole_wall_r_index, j, k];
+                            var lambda = _mesh.ThermalConductivities[borehole_wall_r_index, j, k];
+                            
+                            var dT_dr = (T1 - T0) / dr;
+                            var q_r = -lambda * dT_dr; // Radial heat flux (W/m^2)
+
+                            var dz = (k < _mesh.VerticalPoints - 1) ? _mesh.Z[k + 1] - _mesh.Z[k] : _mesh.Z[k] - _mesh.Z[k - 1];
+                            var dtheta = 2f * MathF.PI / _mesh.AngularPoints;
+                            var area = r1 * dtheta * dz;
+
+                            totalLayerHeatFlow += q_r * area; // Total heat flow (W)
+                        }
+                        layerHeatFluxes[layerName] += totalLayerHeatFlow;
+                    }
+                }
+            }
         }
         
-        // Normalize to percentages
-        var totalFlux = layerHeatFluxes.Values.Sum();
-        foreach (var key in layerHeatFluxes.Keys.ToList())
+        // Finalize averages
+        foreach (var key in layerCellCounts.Keys.ToList())
         {
-            results.LayerHeatFluxContributions[key] = 100 * layerHeatFluxes[key] / totalFlux;
-            results.LayerTemperatureChanges[key] = layerTempChanges[key];
-            results.LayerFlowRates[key] = layerFlowRates[key];
+            if (layerCellCounts.ContainsKey(key) && layerCellCounts[key] > 0)
+            {
+                layerTempChanges[key] /= layerCellCounts[key];
+            }
+        }
+
+        // Normalize to percentages
+        var totalFlux = layerHeatFluxes.Values.Sum(Math.Abs);
+        if (totalFlux > 1e-6)
+        {
+            foreach (var key in layerHeatFluxes.Keys.ToList())
+            {
+                results.LayerHeatFluxContributions[key] = 100 * Math.Abs(layerHeatFluxes[key]) / totalFlux;
+                results.LayerTemperatureChanges[key] = layerTempChanges[key];
+                results.LayerFlowRates[key] = layerFlowRates[key];
+            }
         }
     }
     
@@ -1235,7 +1567,7 @@ public class GeothermalSimulationSolver
             }
         }
         
-        ith = (int)(theta / (2 * MathF.PI) * _mesh.AngularPoints) % _mesh.AngularPoints;
+        ith = (int)(theta / (2 * Math.PI) * _mesh.AngularPoints) % _mesh.AngularPoints;
         
         for (int k = 0; k < _mesh.VerticalPoints - 1; k++)
         {
@@ -1267,25 +1599,29 @@ public class GeothermalSimulationSolver
         var faces = new List<int[]>();
         
         // Create cylindrical mesh
-        var nr = Math.Min(10, _mesh.RadialPoints);
-        var nth = Math.Min(24, _mesh.AngularPoints);
-        var nz = Math.Min(20, _mesh.VerticalPoints);
+        var nr_vis = Math.Min(10, _mesh.RadialPoints);
+        var nth_vis = Math.Min(24, _mesh.AngularPoints);
+        var nz_vis = Math.Min(20, _mesh.VerticalPoints);
         
         // Sample points from mesh
-        var rIndices = Enumerable.Range(0, _mesh.RadialPoints).Where((x, i) => i % (_mesh.RadialPoints/nr) == 0).Take(nr);
-        var thIndices = Enumerable.Range(0, _mesh.AngularPoints).Where((x, i) => i % (_mesh.AngularPoints/nth) == 0).Take(nth);
-        var zIndices = Enumerable.Range(0, _mesh.VerticalPoints).Where((x, i) => i % (_mesh.VerticalPoints/nz) == 0).Take(nz);
+        var rIndices = Enumerable.Range(0, _mesh.RadialPoints).Where((x, i) => i % (_mesh.RadialPoints/nr_vis) == 0).Take(nr_vis).ToList();
+        var thIndices = Enumerable.Range(0, _mesh.AngularPoints).Where((x, i) => i % (_mesh.AngularPoints/nth_vis) == 0).Take(nth_vis).ToList();
+        var zIndices = Enumerable.Range(0, _mesh.VerticalPoints).Where((x, i) => i % (_mesh.VerticalPoints/nz_vis) == 0).Take(nz_vis).ToList();
         
+        nr_vis = rIndices.Count;
+        nth_vis = thIndices.Count;
+        nz_vis = zIndices.Count;
+
         // Generate vertices
-        foreach (var k in zIndices)
+        foreach (var z_idx in zIndices)
         {
-            foreach (var j in thIndices)
+            foreach (var th_idx in thIndices)
             {
-                foreach (var i in rIndices)
+                foreach (var r_idx in rIndices)
                 {
-                    var r = _mesh.R[i];
-                    var theta = _mesh.Theta[j];
-                    var z = _mesh.Z[k];
+                    var r = _mesh.R[r_idx];
+                    var theta = _mesh.Theta[th_idx];
+                    var z = _mesh.Z[z_idx];
                     
                     var x = r * MathF.Cos(theta);
                     var y = r * MathF.Sin(theta);
@@ -1295,8 +1631,28 @@ public class GeothermalSimulationSolver
             }
         }
         
-        // Create faces (simplified - just outer surface)
-        // ... (implement mesh face generation)
+        // Create faces for the outer cylindrical surface
+        for (int k = 0; k < nz_vis - 1; k++)
+        {
+            for (int j = 0; j < nth_vis; j++)
+            {
+                // Quad vertices on the outer shell (i = nr_vis - 1)
+                int i_outer = nr_vis - 1;
+                
+                // Wrap around for theta index
+                int j_next = (j + 1) % nth_vis;
+
+                // Vertex indices
+                int v0 = k * (nth_vis * nr_vis) + j * nr_vis + i_outer;      // bottom-left
+                int v1 = k * (nth_vis * nr_vis) + j_next * nr_vis + i_outer; // bottom-right
+                int v2 = (k + 1) * (nth_vis * nr_vis) + j * nr_vis + i_outer;  // top-left
+                int v3 = (k + 1) * (nth_vis * nr_vis) + j_next * nr_vis + i_outer; // top-right
+
+                // Create two triangles for the quad
+                faces.Add(new[] { v0, v2, v1 });
+                faces.Add(new[] { v1, v2, v3 });
+            }
+        }
         
         return Mesh3DDataset.CreateFromData(
             "SimulationDomain",
@@ -1320,6 +1676,47 @@ internal class SimpleLabelVolume : ILabelVolumeData
     {
         Data = new byte[nx, ny, nz];
     }
-    
-    public byte this[int x, int y, int z] => Data[x, y, z];
+
+    public int Width => Data.GetLength(0);
+    public int Height => Data.GetLength(1);
+    public int Depth => Data.GetLength(2);
+
+    public byte this[int x, int y, int z]
+    {
+        get => Data[x, y, z];
+        set => Data[x, y, z] = value;
+    }
+
+    public void ReadSliceZ(int z, byte[] buffer)
+    {
+        if (buffer == null || buffer.Length != Width * Height)
+            throw new ArgumentException("Buffer size must match slice dimensions (Width * Height).");
+
+        for (int y = 0; y < Height; y++)
+        {
+            for (int x = 0; x < Width; x++)
+            {
+                buffer[y * Width + x] = Data[x, y, z];
+            }
+        }
+    }
+
+    public void WriteSliceZ(int z, byte[] data)
+    {
+        if (data == null || data.Length != Width * Height)
+            throw new ArgumentException("Data size must match slice dimensions (Width * Height).");
+
+        for (int y = 0; y < Height; y++)
+        {
+            for (int x = 0; x < Width; x++)
+            {
+                Data[x, y, z] = data[y * Width + x];
+            }
+        }
+    }
+
+    public void Dispose()
+    {
+        // Nothing to dispose in this simple in-memory implementation
+    }
 }

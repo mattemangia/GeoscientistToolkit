@@ -1,21 +1,24 @@
-﻿// GeoscientistToolkit/Tools/GeothermalSimulationTool.cs
+﻿// GeoscientistToolkit/Analysis/Geothermal/GeothermalSimulationTools.cs
 
 using System.Numerics;
 using GeoscientistToolkit.Analysis.Geothermal;
+using GeoscientistToolkit.Data;
 using GeoscientistToolkit.Data.Borehole;
 using GeoscientistToolkit.Data.Mesh3D;
+using GeoscientistToolkit.UI;
+using GeoscientistToolkit.UI.Interfaces;
+using GeoscientistToolkit.UI.Utils;
 using GeoscientistToolkit.Util;
 using ImGuiNET;
 
-namespace GeoscientistToolkit.Tools;
+
+namespace GeoscientistToolkit.Analysis.Geothermal;
 
 /// <summary>
 /// ImGui tool for configuring and running geothermal simulations on borehole data.
 /// </summary>
-public class GeothermalSimulationTool : ITool
+public class GeothermalSimulationTools : IDatasetTools
 {
-    private readonly Dictionary<string, BoreholeDataset> _boreholeDatasets;
-    private BoreholeDataset _selectedDataset;
     private GeothermalSimulationOptions _options = new();
     private GeothermalSimulationResults _results;
     
@@ -45,52 +48,33 @@ public class GeothermalSimulationTool : ITool
     private int _selectedIsosurface = 0;
     private float _newIsosurfaceTemp = 20f;
     
-    public GeothermalSimulationTool()
-    {
-        _boreholeDatasets = DatasetManager.GetDatasets<BoreholeDataset>();
-    }
+    // Export file dialog
+    private ImGuiExportFileDialog _exportDialog = new ImGuiExportFileDialog("geothermal_export", "Export Geothermal Results");
+   
     
-    public string Name => "Geothermal Simulation";
-    public string Icon => FontAwesome.IconFireFlameSimple;
-    public string Tooltip => "Run geothermal heat exchanger simulations on borehole data";
-    
-    public void Render()
+    public void Draw(Dataset dataset)
     {
-        if (!_boreholeDatasets.Any())
+        if (dataset is not BoreholeDataset boreholeDataset)
         {
-            ImGui.TextColored(new Vector4(1, 0.7f, 0, 1), "No borehole datasets loaded!");
-            ImGui.Text("Please load a borehole dataset first.");
+            ImGui.TextColored(new Vector4(1, 0.7f, 0, 1), "This tool requires a borehole dataset!");
             return;
         }
         
-        // Dataset selection
-        if (ImGui.BeginCombo("Borehole Dataset", _selectedDataset?.Name ?? "Select dataset..."))
+        // Initialize options if needed
+        if (_options.BoreholeDataset != boreholeDataset)
         {
-            foreach (var dataset in _boreholeDatasets.Values)
-            {
-                bool isSelected = dataset == _selectedDataset;
-                if (ImGui.Selectable(dataset.Name, isSelected))
-                {
-                    _selectedDataset = dataset;
-                    _options.BoreholeDataset = dataset;
-                    _options.SetDefaultValues();
-                    InitializeLayerProperties();
-                }
-                if (isSelected)
-                    ImGui.SetItemDefaultFocus();
-            }
-            ImGui.EndCombo();
+            _options.BoreholeDataset = boreholeDataset;
+            _options.SetDefaultValues();
+            InitializeLayerProperties(boreholeDataset);
         }
-        
-        if (_selectedDataset == null) return;
         
         ImGui.Separator();
         
         // Show dataset info
-        ImGui.Text($"Depth: {_selectedDataset.TotalDepth:F1} m");
-        ImGui.Text($"Diameter: {_selectedDataset.Diameter:F0} mm");
-        ImGui.Text($"Layers: {_selectedDataset.Lithology.Count}");
-        ImGui.Text($"Water Table: {_selectedDataset.WaterTableDepth:F1} m");
+        ImGui.Text($"Well: {boreholeDataset.WellName}");
+        ImGui.Text($"Depth: {boreholeDataset.TotalDepth:F1} m");
+        ImGui.Text($"Diameter: {boreholeDataset.WellDiameter * 1000:F0} mm");
+        ImGui.Text($"Lithology Units: {boreholeDataset.LithologyUnits.Count}");
         
         ImGui.Separator();
         
@@ -105,6 +89,16 @@ public class GeothermalSimulationTool : ITool
         else
         {
             RenderConfiguration();
+        }
+        
+        // Handle export dialog
+        if (_exportDialog.IsOpen)
+        {
+            if (_exportDialog.Submit())
+            {
+                var selectedPath = _exportDialog.SelectedPath;
+                ExportResults(selectedPath);
+            }
         }
     }
     
@@ -232,108 +226,94 @@ public class GeothermalSimulationTool : ITool
             _options.FluidMassFlowRate = massFlow;
         
         float inletTemp = (float)(_options.FluidInletTemperature - 273.15);
-        if (ImGui.DragFloat("Inlet Temperature", ref inletTemp, 0.5f, -10f, 30f, "%.1f °C"))
+        if (ImGui.DragFloat("Inlet Temperature", ref inletTemp, 0.5f, 0f, 50f, "%.1f °C"))
             _options.FluidInletTemperature = inletTemp + 273.15;
         
-        if (ImGui.CollapsingHeader("Advanced Fluid Properties"))
-        {
-            float cp = (float)_options.FluidSpecificHeat;
-            if (ImGui.InputFloat("Specific Heat", ref cp, 10f, 100f, "%.0f J/kg·K"))
-                _options.FluidSpecificHeat = cp;
-            
-            float density = (float)_options.FluidDensity;
-            if (ImGui.InputFloat("Density", ref density, 10f, 100f, "%.0f kg/m³"))
-                _options.FluidDensity = density;
-            
-            float visc = (float)(_options.FluidViscosity * 1000);
-            if (ImGui.InputFloat("Viscosity", ref visc, 0.1f, 1f, "%.1f mPa·s"))
-                _options.FluidViscosity = visc / 1000;
-            
-            float fluidCond = (float)_options.FluidThermalConductivity;
-            if (ImGui.InputFloat("Thermal Conductivity", ref fluidCond, 0.01f, 0.1f, "%.2f W/m·K"))
-                _options.FluidThermalConductivity = fluidCond;
-        }
+        float specificHeat = (float)_options.FluidSpecificHeat;
+        if (ImGui.DragFloat("Specific Heat", ref specificHeat, 10f, 1000f, 6000f, "%.0f J/kg·K"))
+            _options.FluidSpecificHeat = specificHeat;
+        
+        float density = (float)_options.FluidDensity;
+        if (ImGui.DragFloat("Density", ref density, 10f, 500f, 1500f, "%.0f kg/m³"))
+            _options.FluidDensity = density;
+        
+        float viscosity = (float)_options.FluidViscosity;
+        if (ImGui.DragFloat("Viscosity", ref viscosity, 0.0001f, 0.0001f, 0.01f, "%.4f Pa·s"))
+            _options.FluidViscosity = viscosity;
+        
+        float fluidCond = (float)_options.FluidThermalConductivity;
+        if (ImGui.DragFloat("Fluid Conductivity", ref fluidCond, 0.01f, 0.1f, 2f, "%.2f W/m·K"))
+            _options.FluidThermalConductivity = fluidCond;
     }
     
     private void RenderGroundPropertiesConfig()
     {
-        ImGui.Text("Geological Layer Properties:");
-        ImGui.Spacing();
+        ImGui.Text("Layer Properties:");
+        ImGui.Separator();
         
-        if (ImGui.BeginTable("LayerProperties", 6, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.Resizable))
+        if (ImGui.BeginTable("LayerProperties", 6, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.ScrollY))
         {
             ImGui.TableSetupColumn("Layer");
-            ImGui.TableSetupColumn("λ (W/m·K)");
-            ImGui.TableSetupColumn("cp (J/kg·K)");
+            ImGui.TableSetupColumn("k (W/m·K)");
+            ImGui.TableSetupColumn("Cp (J/kg·K)");
             ImGui.TableSetupColumn("ρ (kg/m³)");
-            ImGui.TableSetupColumn("φ (-)");
-            ImGui.TableSetupColumn("k (m²)");
+            ImGui.TableSetupColumn("φ");
+            ImGui.TableSetupColumn("K (m²)");
             ImGui.TableHeadersRow();
             
-            var layersToRemove = new List<string>();
-            
-            foreach (var layerName in _options.LayerThermalConductivities.Keys)
+            var layersToEdit = _options.LayerThermalConductivities.Keys.ToList();
+            foreach (var layer in layersToEdit)
             {
                 ImGui.TableNextRow();
-                ImGui.TableNextColumn();
-                ImGui.Text(layerName);
                 
-                ImGui.TableNextColumn();
-                float lambda = (float)_options.LayerThermalConductivities[layerName];
-                if (ImGui.DragFloat($"##lambda_{layerName}", ref lambda, 0.01f, 0.1f, 10f, "%.2f"))
-                    _options.LayerThermalConductivities[layerName] = lambda;
+                ImGui.TableSetColumnIndex(0);
+                ImGui.Text(layer);
                 
-                ImGui.TableNextColumn();
-                float cp = (float)_options.LayerSpecificHeats[layerName];
-                if (ImGui.DragFloat($"##cp_{layerName}", ref cp, 10f, 100f, 5000f, "%.0f"))
-                    _options.LayerSpecificHeats[layerName] = cp;
+                ImGui.TableSetColumnIndex(1);
+                float k = (float)_options.LayerThermalConductivities[layer];
+                ImGui.SetNextItemWidth(-1);
+                if (ImGui.DragFloat($"##k_{layer}", ref k, 0.1f, 0.1f, 10f, "%.1f"))
+                    _options.LayerThermalConductivities[layer] = k;
                 
-                ImGui.TableNextColumn();
-                float rho = (float)_options.LayerDensities[layerName];
-                if (ImGui.DragFloat($"##rho_{layerName}", ref rho, 10f, 1000f, 4000f, "%.0f"))
-                    _options.LayerDensities[layerName] = rho;
+                ImGui.TableSetColumnIndex(2);
+                float cp = (float)_options.LayerSpecificHeats.GetValueOrDefault(layer, 1000);
+                ImGui.SetNextItemWidth(-1);
+                if (ImGui.DragFloat($"##cp_{layer}", ref cp, 10f, 100f, 3000f, "%.0f"))
+                    _options.LayerSpecificHeats[layer] = cp;
                 
-                ImGui.TableNextColumn();
-                float phi = (float)_options.LayerPorosities[layerName];
-                if (ImGui.DragFloat($"##phi_{layerName}", ref phi, 0.01f, 0f, 0.7f, "%.2f"))
-                    _options.LayerPorosities[layerName] = phi;
+                ImGui.TableSetColumnIndex(3);
+                float rho = (float)_options.LayerDensities.GetValueOrDefault(layer, 2500);
+                ImGui.SetNextItemWidth(-1);
+                if (ImGui.DragFloat($"##rho_{layer}", ref rho, 10f, 1000f, 5000f, "%.0f"))
+                    _options.LayerDensities[layer] = rho;
                 
-                ImGui.TableNextColumn();
-                float k = (float)Math.Log10(_options.LayerPermeabilities[layerName]);
-                if (ImGui.DragFloat($"##k_{layerName}", ref k, 0.1f, -20f, -8f, "1e%.0f"))
-                    _options.LayerPermeabilities[layerName] = Math.Pow(10, k);
+                ImGui.TableSetColumnIndex(4);
+                float phi = (float)_options.LayerPorosities.GetValueOrDefault(layer, 0.1);
+                ImGui.SetNextItemWidth(-1);
+                if (ImGui.DragFloat($"##phi_{layer}", ref phi, 0.01f, 0f, 1f, "%.2f"))
+                    _options.LayerPorosities[layer] = phi;
                 
-                ImGui.SameLine();
-                if (ImGui.SmallButton($"X##del_{layerName}"))
-                    layersToRemove.Add(layerName);
-            }
-            
-            // Remove marked layers
-            foreach (var layer in layersToRemove)
-            {
-                _options.LayerThermalConductivities.Remove(layer);
-                _options.LayerSpecificHeats.Remove(layer);
-                _options.LayerDensities.Remove(layer);
-                _options.LayerPorosities.Remove(layer);
-                _options.LayerPermeabilities.Remove(layer);
+                ImGui.TableSetColumnIndex(5);
+                float perm = (float)_options.LayerPermeabilities.GetValueOrDefault(layer, 1e-14);
+                ImGui.SetNextItemWidth(-1);
+                if (ImGui.DragFloat($"##K_{layer}", ref perm, 1e-15f, 1e-18f, 1e-10f, "%.2e"))
+                    _options.LayerPermeabilities[layer] = perm;
             }
             
             ImGui.EndTable();
         }
         
         ImGui.Separator();
-        ImGui.Text("Add New Layer Type:");
+        ImGui.Text("Add New Layer:");
         
-        ImGui.InputText("Layer Name", ref _newLayerName, 50);
-        ImGui.DragFloat("Thermal Conductivity", ref _newLayerConductivity, 0.01f, 0.1f, 10f, "%.2f W/m·K");
-        ImGui.DragFloat("Specific Heat", ref _newLayerSpecificHeat, 10f, 100f, 5000f, "%.0f J/kg·K");
-        ImGui.DragFloat("Density", ref _newLayerDensity, 10f, 1000f, 4000f, "%.0f kg/m³");
-        ImGui.DragFloat("Porosity", ref _newLayerPorosity, 0.01f, 0f, 0.7f, "%.2f");
-        float logPerm = MathF.Log10(_newLayerPermeability);
-        if (ImGui.DragFloat("Permeability", ref logPerm, 0.1f, -20f, -8f, "1e%.0f m²"))
-            _newLayerPermeability = MathF.Pow(10, logPerm);
+        ImGui.InputText("Layer Name", ref _newLayerName, 100);
+        ImGui.DragFloat("Conductivity", ref _newLayerConductivity, 0.1f, 0.1f, 10f, "%.1f W/m·K");
+        ImGui.DragFloat("Specific Heat", ref _newLayerSpecificHeat, 10f, 100f, 3000f, "%.0f J/kg·K");
+        ImGui.DragFloat("Density", ref _newLayerDensity, 10f, 1000f, 5000f, "%.0f kg/m³");
+        ImGui.DragFloat("Porosity", ref _newLayerPorosity, 0.01f, 0f, 1f, "%.2f");
+        ImGui.DragFloat("Permeability", ref _newLayerPermeability, 1e-15f, 1e-18f, 1e-10f, "%.2e m²");
         
-        if (ImGui.Button("Add Layer Type") && !string.IsNullOrWhiteSpace(_newLayerName))
+        if (ImGui.Button("Add Layer") && !string.IsNullOrWhiteSpace(_newLayerName))
         {
             _options.LayerThermalConductivities[_newLayerName] = _newLayerConductivity;
             _options.LayerSpecificHeats[_newLayerName] = _newLayerSpecificHeat;
@@ -342,198 +322,208 @@ public class GeothermalSimulationTool : ITool
             _options.LayerPermeabilities[_newLayerName] = _newLayerPermeability;
             _newLayerName = "";
         }
-        
-        ImGui.Separator();
-        
-        ImGui.Text("Fracture Properties:");
-        ImGui.Checkbox("Simulate Fractures", ref _options.SimulateFractures);
-        
-        if (_options.SimulateFractures)
-        {
-            float aperture = (float)(_options.FractureAperture * 1000);
-            if (ImGui.DragFloat("Fracture Aperture", ref aperture, 0.1f, 0.1f, 10f, "%.1f mm"))
-                _options.FractureAperture = aperture / 1000;
-            
-            float fracPerm = (float)Math.Log10(_options.FracturePermeability);
-            if (ImGui.DragFloat("Fracture Permeability", ref fracPerm, 0.1f, -12f, -6f, "1e%.0f m²"))
-                _options.FracturePermeability = Math.Pow(10, fracPerm);
-        }
     }
     
     private void RenderFlowConfig()
     {
-        ImGui.Checkbox("Simulate Groundwater Flow", ref _options.SimulateGroundwaterFlow);
+        bool simulateGroundwaterFlow = _options.SimulateGroundwaterFlow;
+        if (ImGui.Checkbox("Simulate Groundwater Flow", ref simulateGroundwaterFlow))
+            _options.SimulateGroundwaterFlow = simulateGroundwaterFlow;
         
         if (_options.SimulateGroundwaterFlow)
         {
             ImGui.Separator();
             ImGui.Text("Regional Groundwater Flow:");
             
-            var gwVelocity = _options.GroundwaterVelocity;
-            float vx = gwVelocity.X * 1e6f; // Convert to mm/s for display
-            float vy = gwVelocity.Y * 1e6f;
-            float vz = gwVelocity.Z * 1e6f;
+            var velocity = _options.GroundwaterVelocity;
+            float vx = velocity.X * 1e6f; // Convert to µm/s for better UI scaling
+            float vy = velocity.Y * 1e6f;
+            float vz = velocity.Z * 1e6f;
             
-            if (ImGui.DragFloat("Vx", ref vx, 0.01f, -10f, 10f, "%.2f mm/s"))
-                gwVelocity.X = vx * 1e-6f;
+            if (ImGui.DragFloat("Velocity X (µm/s)", ref vx, 0.1f, -100f, 100f, "%.1f"))
+                _options.GroundwaterVelocity = new Vector3(vx / 1e6f, velocity.Y, velocity.Z);
             
-            if (ImGui.DragFloat("Vy", ref vy, 0.01f, -10f, 10f, "%.2f mm/s"))
-                gwVelocity.Y = vy * 1e-6f;
+            if (ImGui.DragFloat("Velocity Y (µm/s)", ref vy, 0.1f, -100f, 100f, "%.1f"))
+                _options.GroundwaterVelocity = new Vector3(velocity.X, vy / 1e6f, velocity.Z);
             
-            if (ImGui.DragFloat("Vz", ref vz, 0.01f, -10f, 10f, "%.2f mm/s"))
-                gwVelocity.Z = vz * 1e-6f;
-            
-            _options.GroundwaterVelocity = gwVelocity;
+            if (ImGui.DragFloat("Velocity Z (µm/s)", ref vz, 0.1f, -100f, 100f, "%.1f"))
+                _options.GroundwaterVelocity = new Vector3(velocity.X, velocity.Y, vz / 1e6f);
             
             float gwTemp = (float)(_options.GroundwaterTemperature - 273.15);
-            if (ImGui.DragFloat("Groundwater Temperature", ref gwTemp, 0.5f, 0f, 30f, "%.1f °C"))
+            if (ImGui.DragFloat("Groundwater Temperature", ref gwTemp, 0.5f, 0f, 50f, "%.1f °C"))
                 _options.GroundwaterTemperature = gwTemp + 273.15;
             
-            ImGui.Separator();
-            ImGui.Text("Hydraulic Head:");
-            
             float headTop = (float)_options.HydraulicHeadTop;
-            if (ImGui.DragFloat("Head at Top", ref headTop, 0.1f, -50f, 50f, "%.1f m"))
+            if (ImGui.DragFloat("Hydraulic Head (Top)", ref headTop, 0.5f, -100f, 100f, "%.1f m"))
                 _options.HydraulicHeadTop = headTop;
             
             float headBottom = (float)_options.HydraulicHeadBottom;
-            if (ImGui.DragFloat("Head at Bottom", ref headBottom, 0.1f, -100f, 0f, "%.1f m"))
+            if (ImGui.DragFloat("Hydraulic Head (Bottom)", ref headBottom, 0.5f, -100f, 100f, "%.1f m"))
                 _options.HydraulicHeadBottom = headBottom;
+                
+            ImGui.Separator();
+            ImGui.Text("Dispersion Properties:");
             
-            var gradient = (headBottom - headTop) / (_selectedDataset.TotalDepth + 2 * _options.DomainExtension);
-            ImGui.Text($"Hydraulic Gradient: {gradient:F4} m/m");
-            
-            if (_options.SimulateFractures)
-            {
-                ImGui.Separator();
-                ImGui.TextColored(new Vector4(1, 0.7f, 0, 1), "Fracture Flow Active");
-                ImGui.Text($"Detected {_selectedDataset.Fractures?.Count ?? 0} fractures");
-            }
+            float longDisp = (float)_options.LongitudinalDispersivity;
+            if (ImGui.DragFloat("Longitudinal Dispersivity", ref longDisp, 0.01f, 0f, 10f, "%.2f m"))
+                _options.LongitudinalDispersivity = longDisp;
+
+            float transDisp = (float)_options.TransverseDispersivity;
+            if (ImGui.DragFloat("Transverse Dispersivity", ref transDisp, 0.01f, 0f, 5f, "%.2f m"))
+                _options.TransverseDispersivity = transDisp;
         }
-        else
+        
+        ImGui.Separator();
+        
+        bool simulateFractures = _options.SimulateFractures;
+        if (ImGui.Checkbox("Simulate Fractures", ref simulateFractures))
+            _options.SimulateFractures = simulateFractures;
+        
+        if (_options.SimulateFractures)
         {
-            ImGui.TextDisabled("Enable groundwater flow to access flow settings");
+            float fractureAperture = (float)(_options.FractureAperture * 1000);
+            if (ImGui.DragFloat("Fracture Aperture", ref fractureAperture, 0.01f, 0.1f, 10f, "%.2f mm"))
+                _options.FractureAperture = fractureAperture / 1000;
+            
+            float fracturePerm = (float)_options.FracturePermeability;
+            if (ImGui.DragFloat("Fracture Permeability", ref fracturePerm, 1e-9f, 1e-12f, 1e-6f, "%.2e m²"))
+                _options.FracturePermeability = fracturePerm;
         }
     }
     
     private void RenderBoundaryConfig()
     {
-        ImGui.Text("Outer Radial Boundary:");
+        ImGui.Text("Simulation Domain:");
+        
+        float domainRadius = (float)_options.DomainRadius;
+        if (ImGui.DragFloat("Domain Radius", ref domainRadius, 1f, 10f, 500f, "%.0f m"))
+            _options.DomainRadius = domainRadius;
+        
+        float domainExtension = (float)_options.DomainExtension;
+        if (ImGui.DragFloat("Domain Extension", ref domainExtension, 1f, 0f, 100f, "%.0f m"))
+            _options.DomainExtension = domainExtension;
+        
+        ImGui.Separator();
+        ImGui.Text("Outer Boundary:");
+        
         int outerBC = (int)_options.OuterBoundaryCondition;
-        ImGui.RadioButton("Fixed Temperature", ref outerBC, 0);
-        ImGui.RadioButton("Fixed Heat Flux", ref outerBC, 1);
-        ImGui.RadioButton("Convective", ref outerBC, 2);
-        ImGui.RadioButton("Adiabatic", ref outerBC, 3);
-        _options.OuterBoundaryCondition = (BoundaryConditionType)outerBC;
+        string[] bcTypes = { "Dirichlet", "Neumann", "Robin", "Adiabatic" };
+        if (ImGui.Combo("Boundary Type##Outer", ref outerBC, bcTypes, bcTypes.Length))
+            _options.OuterBoundaryCondition = (BoundaryConditionType)outerBC;
         
         if (_options.OuterBoundaryCondition == BoundaryConditionType.Dirichlet)
         {
             float outerTemp = (float)(_options.OuterBoundaryTemperature - 273.15);
-            if (ImGui.DragFloat("Outer Temperature", ref outerTemp, 0.5f, -10f, 40f, "%.1f °C"))
+            if (ImGui.DragFloat("Temperature##Outer", ref outerTemp, 0.5f, 0f, 50f, "%.1f °C"))
                 _options.OuterBoundaryTemperature = outerTemp + 273.15;
         }
         else if (_options.OuterBoundaryCondition == BoundaryConditionType.Neumann)
         {
             float outerFlux = (float)_options.OuterBoundaryHeatFlux;
-            if (ImGui.DragFloat("Outer Heat Flux", ref outerFlux, 0.1f, -100f, 100f, "%.1f W/m²"))
+            if (ImGui.DragFloat("Heat Flux##Outer", ref outerFlux, 0.001f, -0.5f, 0.5f, "%.3f W/m²"))
                 _options.OuterBoundaryHeatFlux = outerFlux;
         }
         
         ImGui.Separator();
         ImGui.Text("Top Boundary:");
+        
         int topBC = (int)_options.TopBoundaryCondition;
-        ImGui.RadioButton("Fixed Temperature##top", ref topBC, 0);
-        ImGui.RadioButton("Fixed Heat Flux##top", ref topBC, 1);
-        ImGui.RadioButton("Adiabatic##top", ref topBC, 3);
-        _options.TopBoundaryCondition = (BoundaryConditionType)topBC;
+        if (ImGui.Combo("Boundary Type##Top", ref topBC, bcTypes, bcTypes.Length))
+            _options.TopBoundaryCondition = (BoundaryConditionType)topBC;
         
         if (_options.TopBoundaryCondition == BoundaryConditionType.Dirichlet)
         {
             float topTemp = (float)(_options.TopBoundaryTemperature - 273.15);
-            if (ImGui.DragFloat("Top Temperature", ref topTemp, 0.5f, -10f, 40f, "%.1f °C"))
+            if (ImGui.DragFloat("Temperature##Top", ref topTemp, 0.5f, 0f, 50f, "%.1f °C"))
                 _options.TopBoundaryTemperature = topTemp + 273.15;
         }
         
         ImGui.Separator();
         ImGui.Text("Bottom Boundary:");
-        int bottomBC = (int)_options.BottomBoundaryCondition;
-        ImGui.RadioButton("Fixed Temperature##bottom", ref bottomBC, 0);
-        ImGui.RadioButton("Geothermal Heat Flux##bottom", ref bottomBC, 1);
-        ImGui.RadioButton("Adiabatic##bottom", ref bottomBC, 3);
-        _options.BottomBoundaryCondition = (BoundaryConditionType)bottomBC;
         
-        if (_options.BottomBoundaryCondition == BoundaryConditionType.Neumann)
-        {
-            float geoFlux = (float)(_options.GeothermalHeatFlux * 1000);
-            if (ImGui.DragFloat("Geothermal Heat Flux", ref geoFlux, 0.5f, 0f, 200f, "%.1f mW/m²"))
-                _options.GeothermalHeatFlux = geoFlux / 1000;
-        }
+        int bottomBC = (int)_options.BottomBoundaryCondition;
+        if (ImGui.Combo("Boundary Type##Bottom", ref bottomBC, bcTypes, bcTypes.Length))
+            _options.BottomBoundaryCondition = (BoundaryConditionType)bottomBC;
+        
+        float geothermalFlux = (float)(_options.GeothermalHeatFlux * 1000);
+        if (ImGui.DragFloat("Geothermal Heat Flux", ref geothermalFlux, 1f, 0f, 200f, "%.0f mW/m²"))
+            _options.GeothermalHeatFlux = geothermalFlux / 1000;
     }
     
     private void RenderSolverConfig()
     {
-        ImGui.Text("Simulation Domain:");
+        ImGui.Text("Time Settings:");
         
-        float domainRadius = (float)_options.DomainRadius;
-        if (ImGui.DragFloat("Domain Radius", ref domainRadius, 1f, 10f, 200f, "%.0f m"))
-            _options.DomainRadius = domainRadius;
+        float simTime = (float)(_options.SimulationTime / 86400);
+        if (ImGui.DragFloat("Simulation Time", ref simTime, 1f, 1f, 3650f, "%.0f days"))
+            _options.SimulationTime = simTime * 86400;
         
-        float domainExt = (float)_options.DomainExtension;
-        if (ImGui.DragFloat("Vertical Extension", ref domainExt, 1f, 0f, 100f, "%.0f m"))
-            _options.DomainExtension = domainExt;
+        float timeStep = (float)(_options.TimeStep / 3600);
+        if (ImGui.DragFloat("Time Step", ref timeStep, 0.1f, 0.1f, 24f, "%.1f hours"))
+            _options.TimeStep = timeStep * 3600;
+        
+        int saveInterval = _options.SaveInterval;
+        if (ImGui.DragInt("Save Interval", ref saveInterval, 1, 1, 1000, "%d steps"))
+            _options.SaveInterval = saveInterval;
         
         ImGui.Separator();
         ImGui.Text("Grid Resolution:");
         
-        ImGui.DragInt("Radial Points", ref _options.RadialGridPoints, 1f, 20, 100);
-        ImGui.DragInt("Angular Points", ref _options.AngularGridPoints, 1f, 12, 72);
-        ImGui.DragInt("Vertical Points", ref _options.VerticalGridPoints, 1f, 50, 200);
+        int radialGridPoints = _options.RadialGridPoints;
+        if (ImGui.DragInt("Radial Points", ref radialGridPoints, 1, 10, 200))
+            _options.RadialGridPoints = radialGridPoints;
         
-        var totalCells = _options.RadialGridPoints * _options.AngularGridPoints * _options.VerticalGridPoints;
-        ImGui.Text($"Total Grid Cells: {totalCells:N0}");
+        int angularGridPoints = _options.AngularGridPoints;
+        if (ImGui.DragInt("Angular Points", ref angularGridPoints, 1, 8, 72))
+            _options.AngularGridPoints = angularGridPoints;
         
-        ImGui.Separator();
-        ImGui.Text("Time Stepping:");
-        
-        float simDays = (float)(_options.SimulationTime / 86400);
-        if (ImGui.DragFloat("Simulation Time", ref simDays, 1f, 1f, 3650f, "%.0f days"))
-            _options.SimulationTime = simDays * 86400;
-        
-        float dtHours = (float)(_options.TimeStep / 3600);
-        if (ImGui.DragFloat("Time Step", ref dtHours, 0.1f, 0.1f, 24f, "%.1f hours"))
-            _options.TimeStep = dtHours * 3600;
-        
-        ImGui.DragInt("Save Interval", ref _options.SaveInterval, 1f, 1, 100);
-        
-        var totalSteps = (int)(_options.SimulationTime / _options.TimeStep);
-        var savedSteps = totalSteps / _options.SaveInterval;
-        ImGui.Text($"Total Time Steps: {totalSteps}");
-        ImGui.Text($"Saved Time Steps: {savedSteps}");
+        int verticalGridPoints = _options.VerticalGridPoints;
+        if (ImGui.DragInt("Vertical Points", ref verticalGridPoints, 1, 20, 500))
+            _options.VerticalGridPoints = verticalGridPoints;
         
         ImGui.Separator();
-        ImGui.Text("Convergence:");
+        ImGui.Text("Solver Settings:");
         
         float tolerance = (float)Math.Log10(_options.ConvergenceTolerance);
         if (ImGui.DragFloat("Convergence Tolerance", ref tolerance, 0.1f, -10f, -3f, "1e%.0f"))
             _options.ConvergenceTolerance = Math.Pow(10, tolerance);
         
-        ImGui.DragInt("Max Iterations/Step", ref _options.MaxIterationsPerStep, 10f, 100, 5000);
+        int maxIter = _options.MaxIterationsPerStep;
+        if (ImGui.DragInt("Max Iterations", ref maxIter, 10, 100, 10000))
+            _options.MaxIterationsPerStep = maxIter;
+        
+        bool useSIMD = _options.UseSIMD;
+        if (ImGui.Checkbox("Use SIMD Optimizations", ref useSIMD))
+            _options.UseSIMD = useSIMD;
+        
+        bool useGPU = _options.UseGPU;
+        if (ImGui.Checkbox("Use GPU Acceleration", ref useGPU))
+            _options.UseGPU = useGPU;
+        
+        if (_options.UseGPU)
+        {
+            ImGui.TextColored(new Vector4(1, 0.7f, 0, 1), "GPU acceleration not yet implemented");
+        }
         
         ImGui.Separator();
-        ImGui.Text("Performance:");
-        
-        ImGui.Checkbox("Use SIMD Optimizations", ref _options.UseSIMD);
-        
-        ImGui.BeginDisabled(true);
-        ImGui.Checkbox("Use GPU Acceleration", ref _options.UseGPU);
-        ImGui.EndDisabled();
-        ImGui.SameLine();
-        ImGui.TextDisabled("(Not yet implemented)");
+        ImGui.Text("Performance Calculation:");
+
+        float hvacTemp = (float)((_options.HvacSupplyTemperatureKelvin ?? 308.15) - 273.15);
+        if (ImGui.DragFloat("HVAC Supply Temperature", ref hvacTemp, 0.5f, 5f, 60f, "%.1f °C"))
+            _options.HvacSupplyTemperatureKelvin = hvacTemp + 273.15;
+            
+        float compressorEff = (float)(_options.CompressorIsentropicEfficiency ?? 0.6) * 100f;
+        if (ImGui.DragFloat("Compressor Efficiency", ref compressorEff, 1f, 30f, 95f, "%.0f %%"))
+            _options.CompressorIsentropicEfficiency = compressorEff / 100.0;
     }
     
     private void RenderVisualizationConfig()
     {
-        ImGui.Checkbox("Generate 3D Temperature Isosurfaces", ref _options.Generate3DIsosurfaces);
+        ImGui.Text("3D Visualization:");
+        
+        bool generate3D = _options.Generate3DIsosurfaces;
+        if (ImGui.Checkbox("Generate 3D Isosurfaces", ref generate3D))
+            _options.Generate3DIsosurfaces = generate3D;
         
         if (_options.Generate3DIsosurfaces)
         {
@@ -542,18 +532,19 @@ public class GeothermalSimulationTool : ITool
             for (int i = 0; i < _options.IsosurfaceTemperatures.Count; i++)
             {
                 float temp = (float)(_options.IsosurfaceTemperatures[i] - 273.15);
-                if (ImGui.DragFloat($"##iso{i}", ref temp, 0.5f, -10f, 100f, "%.1f °C"))
+                ImGui.PushID(i);
+                if (ImGui.DragFloat("##iso", ref temp, 0.5f, 0f, 100f, "%.1f °C"))
                     _options.IsosurfaceTemperatures[i] = temp + 273.15;
-                
                 ImGui.SameLine();
-                if (ImGui.SmallButton($"X##deliso{i}"))
+                if (ImGui.Button("X"))
                 {
                     _options.IsosurfaceTemperatures.RemoveAt(i);
-                    break;
+                    i--;
                 }
+                ImGui.PopID();
             }
             
-            ImGui.InputFloat("New Temperature", ref _newIsosurfaceTemp, 1f, 5f, "%.1f °C");
+            ImGui.DragFloat("New Isosurface", ref _newIsosurfaceTemp, 0.5f, 0f, 100f, "%.1f °C");
             ImGui.SameLine();
             if (ImGui.Button("Add"))
             {
@@ -563,46 +554,29 @@ public class GeothermalSimulationTool : ITool
         
         ImGui.Separator();
         
-        ImGui.Checkbox("Generate Flow Streamlines", ref _options.GenerateStreamlines);
+        bool generateStreamlines = _options.GenerateStreamlines;
+        if (ImGui.Checkbox("Generate Streamlines", ref generateStreamlines))
+            _options.GenerateStreamlines = generateStreamlines;
         
         if (_options.GenerateStreamlines)
         {
-            ImGui.DragInt("Number of Streamlines", ref _options.StreamlineCount, 1f, 10, 200);
+            int streamlineCount = _options.StreamlineCount;
+            if (ImGui.DragInt("Streamline Count", ref streamlineCount, 1, 10, 200))
+                _options.StreamlineCount = streamlineCount;
         }
         
         ImGui.Separator();
         
-        ImGui.Checkbox("Generate 2D Slices", ref _options.Generate2DSlices);
-        
-        if (_options.Generate2DSlices)
-        {
-            ImGui.Text("Slice Depths (% of total):");
-            
-            for (int i = 0; i < _options.SlicePositions.Count; i++)
-            {
-                float pos = (float)(_options.SlicePositions[i] * 100);
-                if (ImGui.DragFloat($"##slice{i}", ref pos, 0.5f, 0f, 100f, "%.1f %%"))
-                    _options.SlicePositions[i] = pos / 100;
-                
-                ImGui.SameLine();
-                if (ImGui.SmallButton($"X##delslice{i}"))
-                {
-                    _options.SlicePositions.RemoveAt(i);
-                    break;
-                }
-            }
-            
-            if (ImGui.Button("Add Slice"))
-            {
-                _options.SlicePositions.Add(0.5);
-            }
-        }
+        bool generate2D = _options.Generate2DSlices;
+        if (ImGui.Checkbox("Generate 2D Slices", ref generate2D))
+            _options.Generate2DSlices = generate2D;
     }
     
     private void RenderSimulationProgress()
     {
         ImGui.Text("Simulation Running...");
-        ImGui.ProgressBar(_simulationProgress, new Vector2(-1, 0), _simulationMessage);
+        ImGui.ProgressBar(_simulationProgress, new Vector2(-1, 0), $"{_simulationProgress * 100:F0}%");
+        ImGui.Text(_simulationMessage);
         
         ImGui.Spacing();
         
@@ -614,19 +588,22 @@ public class GeothermalSimulationTool : ITool
     
     private void RenderResults()
     {
-        if (ImGui.Button("Back to Configuration"))
+        if (ImGui.Button("< Back to Configuration"))
         {
             _showResults = false;
             return;
         }
         
         ImGui.SameLine();
+        
         if (ImGui.Button("Export Results"))
         {
-            ExportResults();
+            _exportDialog.SetExtensions((".csv", "CSV Files"), (".txt", "Text Files"));
+            _exportDialog.Open("geothermal_results", null);
         }
         
         ImGui.SameLine();
+        
         if (ImGui.Button("Generate Report"))
         {
             GenerateReport();
@@ -642,19 +619,25 @@ public class GeothermalSimulationTool : ITool
                 ImGui.EndTabItem();
             }
             
-            if (ImGui.BeginTabItem("Thermal Performance"))
+            if (ImGui.BeginTabItem("Performance"))
             {
-                RenderThermalResults();
+                RenderPerformanceResults();
                 ImGui.EndTabItem();
             }
             
-            if (ImGui.BeginTabItem("Flow Analysis"))
+            if (ImGui.BeginTabItem("Temperature"))
+            {
+                RenderTemperatureResults();
+                ImGui.EndTabItem();
+            }
+            
+            if (ImGui.BeginTabItem("Flow"))
             {
                 RenderFlowResults();
                 ImGui.EndTabItem();
             }
             
-            if (ImGui.BeginTabItem("Layer Analysis"))
+            if (ImGui.BeginTabItem("Layers"))
             {
                 RenderLayerResults();
                 ImGui.EndTabItem();
@@ -675,76 +658,105 @@ public class GeothermalSimulationTool : ITool
         ImGui.TextWrapped(_results.GenerateSummaryReport());
     }
     
-    private void RenderThermalResults()
+    private void RenderPerformanceResults()
     {
-        // Heat extraction plot
-        if (ImPlot.BeginPlot("Heat Extraction Rate", new Vector2(-1, 300)))
-        {
-            var times = _results.HeatExtractionRate.Select(h => h.time / 86400.0).ToArray();
-            var heatRates = _results.HeatExtractionRate.Select(h => h.heatRate).ToArray();
-            
-            ImPlot.PlotLine("Heat Rate", ref times[0], ref heatRates[0], times.Length);
-            
-            ImPlot.SetupAxes("Time (days)", "Heat Rate (W)");
-            ImPlot.EndPlot();
-        }
+        ImGui.Text("Thermal Performance:");
+        ImGui.Separator();
         
-        // Temperature profile plot
-        if (ImPlot.BeginPlot("Fluid Temperature Profile", new Vector2(-1, 300)))
+        ImGui.Text($"Average Heat Extraction: {_results.AverageHeatExtractionRate:F0} W");
+        ImGui.Text($"Total Energy Extracted: {_results.TotalExtractedEnergy / 1e9:F2} GJ");
+
+        if (_results.CoefficientOfPerformance.Any())
         {
-            var depths = _results.FluidTemperatureProfile.Select(p => p.depth).ToArray();
-            var tempDown = _results.FluidTemperatureProfile.Select(p => p.temperatureDown - 273.15).ToArray();
-            var tempUp = _results.FluidTemperatureProfile.Select(p => p.temperatureUp - 273.15).ToArray();
-            
-            ImPlot.PlotLine("Downward Flow", ref depths[0], ref tempDown[0], depths.Length);
-            ImPlot.PlotLine("Upward Flow", ref depths[0], ref tempUp[0], depths.Length);
-            
-            ImPlot.SetupAxes("Depth (m)", "Temperature (°C)");
-            ImPlot.EndPlot();
+            double averageCop = _results.CoefficientOfPerformance.Select(item => item.cop).Where(c => !double.IsInfinity(c)).Average();
+            ImGui.Text($"Average Coefficient of Performance: {averageCop:F2}");
         }
-        
+
         ImGui.Text($"Borehole Thermal Resistance: {_results.BoreholeThermalResistance:F3} m·K/W");
-        ImGui.Text($"Thermal Influence Radius: {_results.ThermalInfluenceRadius:F1} m");
         ImGui.Text($"Effective Ground Conductivity: {_results.EffectiveGroundConductivity:F2} W/m·K");
-        ImGui.Text($"Ground Thermal Diffusivity: {_results.GroundThermalDiffusivity:E3} m²/s");
+        ImGui.Text($"Thermal Influence Radius: {_results.ThermalInfluenceRadius:F1} m");
+        
+        ImGui.Spacing();
+        ImGui.Text("Computational Performance:");
+        ImGui.Separator();
+        
+        ImGui.Text($"Computation Time: {_results.ComputationTime.TotalMinutes:F1} minutes");
+        ImGui.Text($"Time Steps: {_results.TimeStepsComputed}");
+        ImGui.Text($"Average Iterations/Step: {_results.AverageIterationsPerStep:F1}");
+        ImGui.Text($"Final Convergence Error: {_results.FinalConvergenceError:E2}");
+        ImGui.Text($"Peak Memory Usage: {_results.PeakMemoryUsage:F0} MB");
+    }
+    
+    private void RenderTemperatureResults()
+    {
+        if (_results.FluidTemperatureProfile.Any())
+        {
+            ImGui.Text("Fluid Temperature Profile:");
+            
+            if (ImGui.BeginTable("TempProfile", 3, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.ScrollY))
+            {
+                ImGui.TableSetupColumn("Depth (m)");
+                ImGui.TableSetupColumn("Down (°C)");
+                ImGui.TableSetupColumn("Up (°C)");
+                ImGui.TableHeadersRow();
+                
+                foreach (var point in _results.FluidTemperatureProfile)
+                {
+                    ImGui.TableNextRow();
+                    ImGui.TableSetColumnIndex(0);
+                    ImGui.Text($"{point.depth:F1}");
+                    ImGui.TableSetColumnIndex(1);
+                    ImGui.Text($"{point.temperatureDown - 273.15:F2}");
+                    ImGui.TableSetColumnIndex(2);
+                    ImGui.Text($"{point.temperatureUp - 273.15:F2}");
+                }
+                
+                ImGui.EndTable();
+            }
+        }
+        
+        ImGui.Separator();
+        
+        if (_results.OutletTemperature.Any())
+        {
+            ImGui.Text("Outlet Temperature Over Time:");
+            var lastTemp = _results.OutletTemperature.Last();
+            ImGui.Text($"Final Outlet Temperature: {lastTemp.temperature - 273.15:F1} °C");
+            ImGui.Text($"at t = {lastTemp.time / 86400:F1} days");
+        }
     }
     
     private void RenderFlowResults()
     {
-        if (!_options.SimulateGroundwaterFlow)
+        if (_options.SimulateGroundwaterFlow)
         {
-            ImGui.TextDisabled("Groundwater flow was not simulated");
-            return;
-        }
-        
-        ImGui.Text($"Average Péclet Number: {_results.AveragePecletNumber:F2}");
-        ImGui.Text($"Longitudinal Dispersivity: {_results.LongitudinalDispersivity:F3} m");
-        ImGui.Text($"Transverse Dispersivity: {_results.TransverseDispersivity:F3} m");
-        ImGui.Text($"Pressure Drawdown: {_results.PressureDrawdown:F0} Pa");
-        
-        // Flow interpretation
-        ImGui.Separator();
-        ImGui.Text("Flow Regime:");
-        if (_results.AveragePecletNumber < 1)
-        {
-            ImGui.TextColored(new Vector4(0, 1, 0, 1), "Diffusion-dominated");
-            ImGui.TextWrapped("Heat transfer is primarily by conduction. Groundwater flow has minimal impact.");
-        }
-        else if (_results.AveragePecletNumber < 10)
-        {
-            ImGui.TextColored(new Vector4(1, 1, 0, 1), "Mixed regime");
-            ImGui.TextWrapped("Both advection and diffusion are important for heat transfer.");
+            ImGui.Text("Groundwater Flow Analysis:");
+            ImGui.Separator();
+            
+            ImGui.Text($"Average Péclet Number: {_results.AveragePecletNumber:F2}");
+            ImGui.Text($"Longitudinal Dispersivity: {_results.LongitudinalDispersivity:F3} m");
+            ImGui.Text($"Transverse Dispersivity: {_results.TransverseDispersivity:F3} m");
+            ImGui.Text($"Pressure Drawdown: {_results.PressureDrawdown:F0} Pa");
+            
+            ImGui.Spacing();
+            
+            if (_results.Streamlines.Any())
+            {
+                ImGui.Text($"Generated {_results.Streamlines.Count} streamlines");
+            }
         }
         else
         {
-            ImGui.TextColored(new Vector4(1, 0, 0, 1), "Advection-dominated");
-            ImGui.TextWrapped("Heat transfer is significantly enhanced by groundwater flow.");
+            ImGui.TextColored(new Vector4(0.7f, 0.7f, 0.7f, 1), "Groundwater flow not simulated");
         }
     }
     
     private void RenderLayerResults()
     {
-        if (ImGui.BeginTable("LayerContributions", 4, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg))
+        ImGui.Text("Layer Contributions:");
+        ImGui.Separator();
+        
+        if (ImGui.BeginTable("LayerResults", 4, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg))
         {
             ImGui.TableSetupColumn("Layer");
             ImGui.TableSetupColumn("Heat Flux (%)");
@@ -755,19 +767,20 @@ public class GeothermalSimulationTool : ITool
             foreach (var layer in _results.LayerHeatFluxContributions.OrderByDescending(l => l.Value))
             {
                 ImGui.TableNextRow();
-                ImGui.TableNextColumn();
+                
+                ImGui.TableSetColumnIndex(0);
                 ImGui.Text(layer.Key);
                 
-                ImGui.TableNextColumn();
-                ImGui.Text($"{layer.Value:F1}%");
+                ImGui.TableSetColumnIndex(1);
+                ImGui.Text($"{layer.Value:F1}");
                 
-                ImGui.TableNextColumn();
+                ImGui.TableSetColumnIndex(2);
                 var tempChange = _results.LayerTemperatureChanges.GetValueOrDefault(layer.Key, 0);
                 ImGui.Text($"{tempChange:F2}");
                 
-                ImGui.TableNextColumn();
+                ImGui.TableSetColumnIndex(3);
                 var flowRate = _results.LayerFlowRates.GetValueOrDefault(layer.Key, 0);
-                ImGui.Text($"{flowRate:E3}");
+                ImGui.Text($"{flowRate:E2}");
             }
             
             ImGui.EndTable();
@@ -821,24 +834,16 @@ public class GeothermalSimulationTool : ITool
         {
             ImGui.Separator();
             ImGui.Text("2D Slices:");
-            
-            // Temperature slice display
-            var firstSlice = _results.TemperatureSlices.First();
-            var sliceData = firstSlice.Value;
-            var nr = sliceData.GetLength(0);
-            var nth = sliceData.GetLength(1);
-            
-            // Create heatmap texture
-            // ... (implement heatmap visualization)
+            ImGui.Text($"{_results.TemperatureSlices.Count} slices available");
         }
     }
     
-    private void InitializeLayerProperties()
+    private void InitializeLayerProperties(BoreholeDataset boreholeDataset)
     {
         // Initialize properties for layers in the borehole
-        foreach (var layer in _selectedDataset.Lithology)
+        foreach (var layer in boreholeDataset.LithologyUnits)
         {
-            var layerName = layer.RockType ?? "Unknown";
+            var layerName = layer.LithologyType ?? "Unknown";
             
             if (!_options.LayerThermalConductivities.ContainsKey(layerName))
             {
@@ -850,6 +855,7 @@ public class GeothermalSimulationTool : ITool
     
     private void StartSimulation()
     {
+        Logger.Log("Starting geothermal simulation...");
         _isSimulationRunning = true;
         _simulationProgress = 0f;
         _simulationMessage = "Initializing...";
@@ -857,13 +863,16 @@ public class GeothermalSimulationTool : ITool
         
         _cancellationTokenSource = new CancellationTokenSource();
         
+        // Run simulation asynchronously to prevent UI hang
         Task.Run(async () =>
         {
             try
             {
                 // Create mesh
                 _simulationMessage = "Generating mesh...";
+                Logger.Log("Generating computational mesh...");
                 var mesh = GeothermalMeshGenerator.GenerateCylindricalMesh(_options.BoreholeDataset, _options);
+                Logger.Log("Mesh generation complete.");
                 
                 // Create solver
                 var progress = new Progress<(float progress, string message)>(update =>
@@ -872,68 +881,93 @@ public class GeothermalSimulationTool : ITool
                     _simulationMessage = update.message;
                 });
                 
+                Logger.Log("Initializing simulation solver...");
                 var solver = new GeothermalSimulationSolver(_options, mesh, progress, _cancellationTokenSource.Token);
                 
                 // Run simulation
+                Logger.Log("Executing simulation time stepping...");
                 _results = await solver.RunSimulationAsync();
                 
                 _isSimulationRunning = false;
                 _showResults = true;
+                Logger.Log("Geothermal simulation completed successfully.");
             }
             catch (OperationCanceledException)
             {
                 _simulationMessage = "Simulation cancelled";
+                Logger.LogWarning("Geothermal simulation was cancelled by the user.");
                 _isSimulationRunning = false;
             }
             catch (Exception ex)
             {
                 _simulationMessage = $"Error: {ex.Message}";
+                Logger.LogError($"An error occurred during the geothermal simulation: {ex.Message}");
+                Logger.LogError($"Stack Trace: {ex.StackTrace}");
                 _isSimulationRunning = false;
-                Console.WriteLine($"Simulation error: {ex}");
             }
         });
     }
     
-    private void ExportResults()
+    private void ExportResults(string basePath)
     {
-        if (_results == null) return;
+        if (_results == null)
+        {
+            Logger.LogWarning("Attempted to export results, but no results are available.");
+            return;
+        }
         
-        var basePath = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.Desktop),
-            $"GeothermalResults_{DateTime.Now:yyyyMMdd_HHmmss}"
-        );
-        
-        _results.ExportToCSV(basePath);
-        
-        // Also save the summary report
-        File.WriteAllText($"{basePath}_report.txt", _results.GenerateSummaryReport());
-        
-        Console.WriteLine($"Results exported to: {basePath}");
+        try
+        {
+            Logger.Log($"Exporting simulation results to '{basePath}'...");
+            _results.ExportToCSV(basePath);
+            
+            // Also save the summary report
+            var reportPath = Path.ChangeExtension(basePath, ".txt");
+            File.WriteAllText(reportPath, _results.GenerateSummaryReport());
+            
+            Logger.Log($"Results successfully exported to: {basePath} and {reportPath}");
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError($"Failed to export results: {ex.Message}");
+        }
     }
     
     private void GenerateReport()
     {
-        // Create a detailed PDF report
-        // ... (implement PDF generation)
+        if (_results == null)
+        {
+            Logger.LogWarning("Cannot generate report, no simulation results available.");
+            return;
+        }
+
+        try
+        {
+            // Create a detailed report with a more descriptive name
+            var reportPath = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.Desktop),
+                $"GeothermalReport_{_options.BoreholeDataset.WellName}_{DateTime.Now:yyyyMMdd_HHmmss}.txt"
+            );
+            
+            Logger.Log($"Generating summary report at: {reportPath}");
+            File.WriteAllText(reportPath, _results.GenerateSummaryReport());
+            Logger.Log("Summary report generated successfully.");
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError($"Failed to generate report: {ex.Message}");
+        }
     }
     
     private void UpdateVisualization()
     {
+        // Update visualization would need access to a 3D viewer
+        // This is a placeholder for the actual implementation
         _visualizationMeshes.Clear();
         
         if (_selectedIsosurface < _results.TemperatureIsosurfaces.Count)
         {
             _visualizationMeshes.Add(_results.TemperatureIsosurfaces[_selectedIsosurface]);
-        }
-        
-        // Update the 3D viewer
-        foreach (var viewer in ToolManager.GetTools<Mesh3DViewer>())
-        {
-            viewer.ClearMeshes();
-            foreach (var mesh in _visualizationMeshes)
-            {
-                viewer.AddMesh(mesh);
-            }
         }
     }
     
@@ -941,16 +975,6 @@ public class GeothermalSimulationTool : ITool
     {
         _visualizationMeshes.Clear();
         _visualizationMeshes.AddRange(_results.TemperatureIsosurfaces);
-        
-        // Update viewer
-        foreach (var viewer in ToolManager.GetTools<Mesh3DViewer>())
-        {
-            viewer.ClearMeshes();
-            foreach (var mesh in _visualizationMeshes)
-            {
-                viewer.AddMesh(mesh);
-            }
-        }
     }
     
     private void ShowBoreholeMesh()
@@ -958,11 +982,6 @@ public class GeothermalSimulationTool : ITool
         if (_results.BoreholeMesh != null)
         {
             _visualizationMeshes.Add(_results.BoreholeMesh);
-            
-            foreach (var viewer in ToolManager.GetTools<Mesh3DViewer>())
-            {
-                viewer.AddMesh(_results.BoreholeMesh);
-            }
         }
     }
     
@@ -995,16 +1014,5 @@ public class GeothermalSimulationTool : ITool
         );
         
         _visualizationMeshes.Add(streamlineMesh);
-        
-        foreach (var viewer in ToolManager.GetTools<Mesh3DViewer>())
-        {
-            viewer.AddMesh(streamlineMesh);
-        }
-    }
-    
-    public void Dispose()
-    {
-        _cancellationTokenSource?.Cancel();
-        _cancellationTokenSource?.Dispose();
     }
 }
