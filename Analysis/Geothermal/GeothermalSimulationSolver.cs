@@ -589,7 +589,131 @@ public class GeothermalSimulationSolver
             }
         });
     }
-    
+    /// <summary>
+    /// Validates the simulation options and borehole dataset before starting simulation.
+    /// This method should be called at the beginning of RunSimulationAsync().
+    /// </summary>
+    public static void ValidateSimulationInputs(GeothermalSimulationOptions options)
+    {
+        // Check for null references
+        if (options == null)
+            throw new ArgumentNullException(nameof(options), "Simulation options cannot be null.");
+        
+        if (options.BoreholeDataset == null)
+            throw new ArgumentNullException(nameof(options.BoreholeDataset), "Borehole dataset cannot be null.");
+        
+        // Check for invalid borehole depth
+        if (options.BoreholeDataset.TotalDepth <= 0)
+        {
+            throw new InvalidOperationException(
+                $"Invalid borehole depth: {options.BoreholeDataset.TotalDepth} meters. " +
+                "The borehole must have a positive depth. Please ensure the borehole dataset is properly initialized.");
+        }
+        
+        // Check for empty lithology units
+        if (options.BoreholeDataset.LithologyUnits == null || options.BoreholeDataset.LithologyUnits.Count == 0)
+        {
+            throw new InvalidOperationException(
+                "The borehole dataset has no lithology units defined. " +
+                "At least one lithology unit is required for simulation. " +
+                "Please define geological layers before running the simulation.");
+        }
+        
+        // Validate lithology units
+        foreach (var unit in options.BoreholeDataset.LithologyUnits)
+        {
+            if (unit.DepthTo <= unit.DepthFrom)
+            {
+                throw new InvalidOperationException(
+                    $"Invalid lithology unit '{unit.Name}': DepthTo ({unit.DepthTo}) must be greater than DepthFrom ({unit.DepthFrom}).");
+            }
+            
+            if (unit.DepthFrom < 0)
+            {
+                throw new InvalidOperationException(
+                    $"Invalid lithology unit '{unit.Name}': DepthFrom ({unit.DepthFrom}) cannot be negative.");
+            }
+        }
+        
+        // Check simulation parameters
+        if (options.SimulationTime <= 0)
+            throw new ArgumentException("Simulation time must be positive.", nameof(options.SimulationTime));
+        
+        if (options.TimeStep <= 0)
+            throw new ArgumentException("Time step must be positive.", nameof(options.TimeStep));
+        
+        if (options.TimeStep > options.SimulationTime)
+            throw new ArgumentException("Time step cannot be larger than simulation time.");
+        
+        // Check domain parameters
+        if (options.DomainRadius <= 0)
+            throw new ArgumentException("Domain radius must be positive.", nameof(options.DomainRadius));
+        
+        if (options.RadialGridPoints < 3)
+            throw new ArgumentException("Radial grid points must be at least 3.", nameof(options.RadialGridPoints));
+        
+        if (options.AngularGridPoints < 4)
+            throw new ArgumentException("Angular grid points must be at least 4.", nameof(options.AngularGridPoints));
+        
+        if (options.VerticalGridPoints < 3)
+            throw new ArgumentException("Vertical grid points must be at least 3.", nameof(options.VerticalGridPoints));
+        
+        // Check heat exchanger parameters
+        if (options.PipeInnerDiameter <= 0 || options.PipeOuterDiameter <= 0)
+            throw new ArgumentException("Pipe diameters must be positive.");
+        
+        if (options.PipeInnerDiameter >= options.PipeOuterDiameter)
+            throw new ArgumentException("Pipe inner diameter must be less than outer diameter.");
+        
+        if (options.FluidMassFlowRate <= 0)
+            throw new ArgumentException("Fluid mass flow rate must be positive.", nameof(options.FluidMassFlowRate));
+        
+        // Check thermal properties
+        if (options.FluidSpecificHeat <= 0)
+            throw new ArgumentException("Fluid specific heat must be positive.", nameof(options.FluidSpecificHeat));
+        
+        if (options.FluidDensity <= 0)
+            throw new ArgumentException("Fluid density must be positive.", nameof(options.FluidDensity));
+        
+        if (options.FluidViscosity <= 0)
+            throw new ArgumentException("Fluid viscosity must be positive.", nameof(options.FluidViscosity));
+        
+        if (options.FluidThermalConductivity <= 0)
+            throw new ArgumentException("Fluid thermal conductivity must be positive.", nameof(options.FluidThermalConductivity));
+        
+        // Check layer properties
+        if (!options.LayerThermalConductivities.Any())
+        {
+            // Set defaults if not specified
+            options.SetDefaultValues();
+        }
+        
+        // Validate layer properties
+        foreach (var kvp in options.LayerThermalConductivities)
+        {
+            if (kvp.Value <= 0)
+                throw new ArgumentException($"Thermal conductivity for layer '{kvp.Key}' must be positive.");
+        }
+        
+        foreach (var kvp in options.LayerSpecificHeats)
+        {
+            if (kvp.Value <= 0)
+                throw new ArgumentException($"Specific heat for layer '{kvp.Key}' must be positive.");
+        }
+        
+        foreach (var kvp in options.LayerDensities)
+        {
+            if (kvp.Value <= 0)
+                throw new ArgumentException($"Density for layer '{kvp.Key}' must be positive.");
+        }
+        
+        // Check convergence parameters
+        if (options.ConvergenceTolerance <= 0)
+            throw new ArgumentException("Convergence tolerance must be positive.", nameof(options.ConvergenceTolerance));
+        
+        if (options.MaxIterationsPerStep < 1)
+            throw new ArgumentException("Maximum iterations per step must be at least 1.", nameof(options.MaxIterationsPerStep));
+    }
     /// <summary>
     /// SIMD-optimized heat transfer solver.
     /// </summary>
