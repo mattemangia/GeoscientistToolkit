@@ -256,7 +256,15 @@ public class GeothermalSimulationSolver
                 {
                     maxChange = SolveGroundwaterFlowScalar(newHead);
                 }
-                
+                if (float.IsNaN(maxChange) || float.IsInfinity(maxChange))
+                {
+                    // The solver has exploded. Throw a specific, informative exception.
+                    throw new ArithmeticException(
+                        "Groundwater flow solver diverged. The solution exploded to Infinity or NaN. " +
+                        "This is likely caused by numerical instability. " +
+                        "Try reducing the 'Time Step' or increasing grid spacing."
+                    );
+                }
                 // Swap arrays
                 (_hydraulicHead, newHead) = (newHead, _hydraulicHead);
                 
@@ -557,7 +565,14 @@ public class GeothermalSimulationSolver
                 {
                     maxChange = SolveHeatTransferScalar(newTemp, dt);
                 }
-                
+                if (float.IsNaN(maxChange) || float.IsInfinity(maxChange))
+                {
+                    throw new ArithmeticException(
+                        "Heat transfer solver diverged. The solution exploded to Infinity or NaN. " +
+                        "This is likely caused by numerical instability. " +
+                        "Try reducing the 'Time Step'. Check for extreme thermal properties."
+                    );
+                }
                 // Apply boundary conditions
                 ApplyBoundaryConditions(newTemp);
                 
