@@ -1,0 +1,315 @@
+﻿// GeoscientistToolkit/Analysis/Geothermal/GeothermalSimulationResults.cs
+
+using System.Numerics;
+using GeoscientistToolkit.Data.Mesh3D;
+
+namespace GeoscientistToolkit.Analysis.Geothermal;
+
+/// <summary>
+/// Stores all outputs from a geothermal borehole simulation.
+/// </summary>
+public class GeothermalSimulationResults
+{
+    /// <summary>
+    /// A copy of the options used to generate these results.
+    /// </summary>
+    public GeothermalSimulationOptions Options { get; set; }
+    
+    // Temperature Fields
+    
+    /// <summary>
+    /// 3D temperature field at each saved time step.
+    /// Dictionary key is time in seconds, value is 3D array [r, theta, z].
+    /// </summary>
+    public Dictionary<double, float[,,]> TemperatureFields { get; set; } = new();
+    
+    /// <summary>
+    /// Final steady-state temperature field [r, theta, z].
+    /// </summary>
+    public float[,,] FinalTemperatureField { get; set; }
+    
+    /// <summary>
+    /// Fluid temperature along the heat exchanger at final time.
+    /// </summary>
+    public List<(double depth, double temperatureDown, double temperatureUp)> FluidTemperatureProfile { get; set; } = new();
+    
+    // Flow Fields
+    
+    /// <summary>
+    /// 3D pressure field (Pa) [r, theta, z].
+    /// </summary>
+    public float[,,] PressureField { get; set; }
+    
+    /// <summary>
+    /// 3D hydraulic head field (m) [r, theta, z].
+    /// </summary>
+    public float[,,] HydraulicHeadField { get; set; }
+    
+    /// <summary>
+    /// 3D Darcy velocity field (m/s) [r, theta, z, component].
+    /// </summary>
+    public float[,,,] DarcyVelocityField { get; set; }
+    
+    /// <summary>
+    /// Streamline data for flow visualization.
+    /// </summary>
+    public List<List<Vector3>> Streamlines { get; set; } = new();
+    
+    // Heat Transfer Analysis
+    
+    /// <summary>
+    /// Total heat extraction rate over time (W).
+    /// </summary>
+    public List<(double time, double heatRate)> HeatExtractionRate { get; set; } = new();
+    
+    /// <summary>
+    /// Outlet fluid temperature over time (K).
+    /// </summary>
+    public List<(double time, double temperature)> OutletTemperature { get; set; } = new();
+    
+    /// <summary>
+    /// Coefficient of Performance (COP) over time.
+    /// </summary>
+    public List<(double time, double cop)> CoefficientOfPerformance { get; set; } = new();
+    
+    /// <summary>
+    /// Total extracted energy (J).
+    /// </summary>
+    public double TotalExtractedEnergy { get; set; }
+    
+    /// <summary>
+    /// Average heat extraction rate (W).
+    /// </summary>
+    public double AverageHeatExtractionRate { get; set; }
+    
+    // Transport Parameters
+    
+    /// <summary>
+    /// Péclet number field (dimensionless) [r, theta, z].
+    /// </summary>
+    public float[,,] PecletNumberField { get; set; }
+    
+    /// <summary>
+    /// Thermal dispersivity field (m) [r, theta, z].
+    /// </summary>
+    public float[,,] DispersivityField { get; set; }
+    
+    /// <summary>
+    /// Average Péclet number in aquifer zones.
+    /// </summary>
+    public double AveragePecletNumber { get; set; }
+    
+    /// <summary>
+    /// Calculated longitudinal dispersivity (m).
+    /// </summary>
+    public double LongitudinalDispersivity { get; set; }
+    
+    /// <summary>
+    /// Calculated transverse dispersivity (m).
+    /// </summary>
+    public double TransverseDispersivity { get; set; }
+    
+    // Performance Metrics
+    
+    /// <summary>
+    /// Borehole thermal resistance (m·K/W).
+    /// </summary>
+    public double BoreholeThermalResistance { get; set; }
+    
+    /// <summary>
+    /// Effective ground thermal conductivity (W/m·K).
+    /// </summary>
+    public double EffectiveGroundConductivity { get; set; }
+    
+    /// <summary>
+    /// Ground thermal diffusivity (m²/s).
+    /// </summary>
+    public double GroundThermalDiffusivity { get; set; }
+    
+    /// <summary>
+    /// Thermal influence radius at final time (m).
+    /// </summary>
+    public double ThermalInfluenceRadius { get; set; }
+    
+    /// <summary>
+    /// Pressure drawdown at borehole (Pa).
+    /// </summary>
+    public double PressureDrawdown { get; set; }
+    
+    // Layer Analysis
+    
+    /// <summary>
+    /// Heat flux contribution from each geological layer.
+    /// </summary>
+    public Dictionary<string, double> LayerHeatFluxContributions { get; set; } = new();
+    
+    /// <summary>
+    /// Average temperature change in each layer.
+    /// </summary>
+    public Dictionary<string, double> LayerTemperatureChanges { get; set; } = new();
+    
+    /// <summary>
+    /// Groundwater flow rate through each layer (m³/s).
+    /// </summary>
+    public Dictionary<string, double> LayerFlowRates { get; set; } = new();
+    
+    // Visualization Data
+    
+    /// <summary>
+    /// Generated 3D temperature isosurfaces.
+    /// </summary>
+    public List<Mesh3DDataset> TemperatureIsosurfaces { get; set; } = new();
+    
+    /// <summary>
+    /// 2D temperature slices at specified depths.
+    /// </summary>
+    public Dictionary<double, float[,]> TemperatureSlices { get; set; } = new();
+    
+    /// <summary>
+    /// 2D pressure slices at specified depths.
+    /// </summary>
+    public Dictionary<double, float[,]> PressureSlices { get; set; } = new();
+    
+    /// <summary>
+    /// 2D velocity magnitude slices at specified depths.
+    /// </summary>
+    public Dictionary<double, float[,]> VelocityMagnitudeSlices { get; set; } = new();
+    
+    /// <summary>
+    /// 3D mesh representing the simulation domain.
+    /// </summary>
+    public Mesh3DDataset DomainMesh { get; set; }
+    
+    /// <summary>
+    /// 3D mesh representing the borehole and heat exchanger.
+    /// </summary>
+    public Mesh3DDataset BoreholeMesh { get; set; }
+    
+    // Computational Information
+    
+    /// <summary>
+    /// Total simulation time elapsed.
+    /// </summary>
+    public TimeSpan ComputationTime { get; set; }
+    
+    /// <summary>
+    /// Number of time steps computed.
+    /// </summary>
+    public int TimeStepsComputed { get; set; }
+    
+    /// <summary>
+    /// Average iterations per time step.
+    /// </summary>
+    public double AverageIterationsPerStep { get; set; }
+    
+    /// <summary>
+    /// Final convergence error.
+    /// </summary>
+    public double FinalConvergenceError { get; set; }
+    
+    /// <summary>
+    /// Memory usage peak (MB).
+    /// </summary>
+    public double PeakMemoryUsage { get; set; }
+    
+    // Summary Report
+    
+    /// <summary>
+    /// Generate a summary report of the simulation results.
+    /// </summary>
+    public string GenerateSummaryReport()
+    {
+        var sb = new System.Text.StringBuilder();
+        
+        sb.AppendLine("=== Geothermal Simulation Results Summary ===");
+        sb.AppendLine();
+        
+        sb.AppendLine($"Simulation Configuration:");
+        sb.AppendLine($"  - Heat Exchanger Type: {Options.HeatExchangerType}");
+        sb.AppendLine($"  - Borehole Depth: {Options.BoreholeDataset.TotalDepth:F1} m");
+        sb.AppendLine($"  - Simulation Time: {Options.SimulationTime / 86400:F1} days");
+        sb.AppendLine($"  - Domain Radius: {Options.DomainRadius:F1} m");
+        sb.AppendLine();
+        
+        sb.AppendLine($"Thermal Performance:");
+        sb.AppendLine($"  - Average Heat Extraction Rate: {AverageHeatExtractionRate:F0} W");
+        sb.AppendLine($"  - Total Extracted Energy: {TotalExtractedEnergy / 1e9:F2} GJ");
+        sb.AppendLine($"  - Final Outlet Temperature: {OutletTemperature.LastOrDefault().temperature - 273.15:F1} °C");
+        sb.AppendLine($"  - Borehole Thermal Resistance: {BoreholeThermalResistance:F3} m·K/W");
+        sb.AppendLine($"  - Thermal Influence Radius: {ThermalInfluenceRadius:F1} m");
+        sb.AppendLine();
+        
+        if (Options.SimulateGroundwaterFlow)
+        {
+            sb.AppendLine($"Groundwater Flow:");
+            sb.AppendLine($"  - Average Péclet Number: {AveragePecletNumber:F2}");
+            sb.AppendLine($"  - Longitudinal Dispersivity: {LongitudinalDispersivity:F3} m");
+            sb.AppendLine($"  - Transverse Dispersivity: {TransverseDispersivity:F3} m");
+            sb.AppendLine($"  - Pressure Drawdown: {PressureDrawdown:F0} Pa");
+            sb.AppendLine();
+        }
+        
+        sb.AppendLine($"Layer Contributions:");
+        foreach (var layer in LayerHeatFluxContributions.OrderByDescending(l => l.Value))
+        {
+            sb.AppendLine($"  - {layer.Key}: {layer.Value:F1}% of heat flux");
+        }
+        sb.AppendLine();
+        
+        sb.AppendLine($"Computational Performance:");
+        sb.AppendLine($"  - Total Computation Time: {ComputationTime.TotalMinutes:F1} minutes");
+        sb.AppendLine($"  - Time Steps Computed: {TimeStepsComputed}");
+        sb.AppendLine($"  - Average Iterations/Step: {AverageIterationsPerStep:F1}");
+        sb.AppendLine($"  - Peak Memory Usage: {PeakMemoryUsage:F0} MB");
+        
+        return sb.ToString();
+    }
+    
+    /// <summary>
+    /// Export results to CSV format for further analysis.
+    /// </summary>
+    public void ExportToCSV(string basePath)
+    {
+        // Export time series data
+        using (var writer = new System.IO.StreamWriter($"{basePath}_timeseries.csv"))
+        {
+            writer.WriteLine("Time_s,Time_days,HeatRate_W,OutletTemp_C,COP");
+            
+            for (int i = 0; i < HeatExtractionRate.Count; i++)
+            {
+                var time = HeatExtractionRate[i].time;
+                var heat = HeatExtractionRate[i].heatRate;
+                var temp = i < OutletTemperature.Count ? OutletTemperature[i].temperature - 273.15 : 0;
+                var cop = i < CoefficientOfPerformance.Count ? CoefficientOfPerformance[i].cop : 0;
+                
+                writer.WriteLine($"{time},{time/86400:F2},{heat:F1},{temp:F2},{cop:F2}");
+            }
+        }
+        
+        // Export fluid temperature profile
+        using (var writer = new System.IO.StreamWriter($"{basePath}_fluid_profile.csv"))
+        {
+            writer.WriteLine("Depth_m,TempDown_C,TempUp_C");
+            
+            foreach (var point in FluidTemperatureProfile)
+            {
+                writer.WriteLine($"{point.depth:F1},{point.temperatureDown-273.15:F2},{point.temperatureUp-273.15:F2}");
+            }
+        }
+        
+        // Export layer analysis
+        using (var writer = new System.IO.StreamWriter($"{basePath}_layers.csv"))
+        {
+            writer.WriteLine("Layer,HeatFlux_%,TempChange_K,FlowRate_m3/s");
+            
+            foreach (var layer in LayerHeatFluxContributions.Keys)
+            {
+                var flux = LayerHeatFluxContributions.GetValueOrDefault(layer, 0);
+                var temp = LayerTemperatureChanges.GetValueOrDefault(layer, 0);
+                var flow = LayerFlowRates.GetValueOrDefault(layer, 0);
+                
+                writer.WriteLine($"{layer},{flux:F1},{temp:F2},{flow:E3}");
+            }
+        }
+    }
+}
