@@ -13,9 +13,13 @@ namespace GeoscientistToolkit.UI.Borehole
 {
     /// <summary>
     /// Borehole/well log viewer:
-    /// - Single vertical scrollbar on the right drives Y (depth) for both content and left depth scale.
-    /// - Single horizontal scrollbar at the bottom drives X for header & body.
-    /// - Legend is a separate floating ImGui window (movable/resizable).
+    /// - Bottom horizontal scrollbar drives X for header & body.
+    /// - Right-side PROXY vertical scrollbar drives visible depth range (virtual scroll).
+    /// - Body drawing window itself never scrolls vertically; only the range changes.
+    /// - Legend is a separate floating ImGui window.
+    /// - Default is FULL LOG view (0..TotalDepth); auto-range adapts to dataset changes.
+    /// - Proxy vertical scrollbar is disabled while the shown range spans the entire log.
+    /// - Optional hover tooltips for lithologies and tracks (controlled by "Enable Tooltip").
     /// </summary>
     public class BoreholeViewer : IDatasetViewer, IDisposable
     {
@@ -35,7 +39,7 @@ namespace GeoscientistToolkit.UI.Borehole
         private readonly float _lithologyColumnWidth = 150f;
         private readonly float _trackSpacing = 10f;
 
-        // depth range
+        // depth range (in meters)
         private bool  _autoScaleDepth = true;
         private float _depthStart;
         private float _depthEnd;
@@ -45,9 +49,10 @@ namespace GeoscientistToolkit.UI.Borehole
         private bool _showLithologyNames  = true;
         private bool _showParameterValues = true;
         private bool _showLegend          = true;
+        private bool _enableTooltip       = true; // <--- NEW
 
         // Legend window initial placement (first frame only)
-        private bool   _legendInit  = false;
+        private bool    _legendInit     = false;
         private Vector2 _legendInitPos  = new(60f, 60f);
         private Vector2 _legendInitSize = new(320f, 240f);
 
@@ -55,16 +60,9 @@ namespace GeoscientistToolkit.UI.Borehole
         {
             _dataset = dataset ?? throw new ArgumentNullException(nameof(dataset));
 
-            if (_dataset.LithologyUnits.Any())
-            {
-                _depthStart = _dataset.LithologyUnits.Min(u => u.DepthFrom);
-                _depthEnd   = _dataset.LithologyUnits.Max(u => u.DepthTo);
-            }
-            else
-            {
-                _depthStart = 0;
-                _depthEnd   = Math.Max(_dataset.TotalDepth, 1f);
-            }
+            // Default to FULL LOG view (0..TotalDepth).
+            _depthStart = 0f;
+            _depthEnd   = Math.Max(_dataset.TotalDepth, 1f);
         }
 
         public void DrawToolbarControls()
@@ -74,10 +72,10 @@ namespace GeoscientistToolkit.UI.Borehole
 
             if (ImGui.Checkbox("Auto", ref _autoScaleDepth))
             {
-                if (_autoScaleDepth && _dataset.LithologyUnits.Any())
+                if (_autoScaleDepth)
                 {
-                    _depthStart = _dataset.LithologyUnits.Min(u => u.DepthFrom);
-                    _depthEnd   = _dataset.LithologyUnits.Max(u => u.DepthTo);
+                    _depthStart = 0f;
+                    _depthEnd   = Math.Max(_dataset.TotalDepth, 1f);
                 }
             }
 
@@ -85,13 +83,21 @@ namespace GeoscientistToolkit.UI.Borehole
             {
                 ImGui.SameLine();
                 ImGui.SetNextItemWidth(80);
-                ImGui.DragFloat("##StartDepth", ref _depthStart, 0.1f, 0, _dataset.TotalDepth, "%.1f m");
+                if (ImGui.DragFloat("##StartDepth", ref _depthStart, 0.1f, 0, _dataset.TotalDepth, "%.1f m"))
+                {
+                    _depthStart = Math.Clamp(_depthStart, 0f, Math.Max(0f, _dataset.TotalDepth - 0.001f));
+                    if (_depthEnd <= _depthStart) _depthEnd = Math.Min(_dataset.TotalDepth, _depthStart + 0.001f);
+                }
 
                 ImGui.SameLine(); ImGui.Text("to");
 
                 ImGui.SameLine();
                 ImGui.SetNextItemWidth(80);
-                ImGui.DragFloat("##EndDepth", ref _depthEnd, 0.1f, _depthStart, _dataset.TotalDepth, "%.1f m");
+                if (ImGui.DragFloat("##EndDepth", ref _depthEnd, 0.1f, 0, _dataset.TotalDepth, "%.1f m"))
+                {
+                    _depthEnd   = Math.Clamp(_depthEnd, 0.001f, Math.Max(0.001f, _dataset.TotalDepth));
+                    if (_depthEnd <= _depthStart) _depthStart = Math.Max(0f, _depthEnd - 0.001f);
+                }
             }
 
             ImGui.SameLine(); ImGui.Separator();
@@ -99,10 +105,17 @@ namespace GeoscientistToolkit.UI.Borehole
             ImGui.SameLine(); ImGui.Checkbox("Names",  ref _showLithologyNames);
             ImGui.SameLine(); ImGui.Checkbox("Values", ref _showParameterValues);
             ImGui.SameLine(); ImGui.Checkbox("Legend (window)", ref _showLegend);
+            ImGui.SameLine(); ImGui.Checkbox("Enable Tooltip", ref _enableTooltip); // <--- NEW
         }
 
         public void DrawContent(ref float zoom, ref Vector2 pan)
         {
+            if (_autoScaleDepth)
+            {
+                _depthStart = 0f;
+                _depthEnd   = Math.Max(_dataset.TotalDepth, 1f);
+            }
+
             var availAll = ImGui.GetContentRegionAvail();
             if (availAll.X < 5 || availAll.Y < 5) return;
 
@@ -117,26 +130,25 @@ namespace GeoscientistToolkit.UI.Borehole
             float row2Height = availAll.Y - HeaderHeight - BottomBarHeight;
             if (row2Height < 1f) row2Height = 1f;
 
-            float depthRange     = Math.Max(1f, _depthEnd - _depthStart);
-            float pixelsPerMeter = Math.Max(0.0001f, (row2Height - 20f) / depthRange * zoom);
-            float gridInterval   = GetAdaptiveGridInterval(pixelsPerMeter);
-
-            float maxDepthMeters = Math.Max(_dataset.TotalDepth, 10_000f);
-            float totalHeight    = Math.Max(1f, (maxDepthMeters - _depthStart) * pixelsPerMeter);
+            float rangeMeters     = Math.Max(0.001f, _depthEnd - _depthStart);
+            float pixelsPerMeter  = Math.Max(1e-4f, (row2Height - 20f) / rangeMeters * zoom);
+            float gridInterval    = GetAdaptiveGridInterval(pixelsPerMeter);
+            float totalDepth      = Math.Max(_dataset.TotalDepth, 1f);
+            bool  isFullRangeView = rangeMeters >= totalDepth - 1e-3f;
 
             ImGui.PushStyleVar(ImGuiStyleVar.WindowPadding, Vector2.Zero);
 
             var origin   = ImGui.GetCursorScreenPos();
             var fullSize = availAll;
 
-            // Frozen backgrounds (header strip + left depth bar)
+            // Frozen backgrounds
             var dlRoot = ImGui.GetWindowDrawList();
             dlRoot.AddRectFilled(origin, origin + new Vector2(fullSize.X, HeaderHeight),
                                  ImGui.GetColorU32(new Vector4(0.20f, 0.20f, 0.20f, 1)));
             dlRoot.AddRectFilled(origin, origin + new Vector2(DepthScaleWidth, fullSize.Y),
                                  ImGui.GetColorU32(new Vector4(0.15f, 0.15f, 0.15f, 1)));
 
-            // ---------------- Bottom horizontal scrollbar (single X) ----------------
+            // ---------------- Bottom horizontal scrollbar ----------------
             ImGui.SetCursorScreenPos(origin + new Vector2(DepthScaleWidth, HeaderHeight + row2Height));
             ImGui.BeginChild("BottomHSB",
                 new Vector2(fullSize.X - DepthScaleWidth, BottomBarHeight),
@@ -191,25 +203,18 @@ namespace GeoscientistToolkit.UI.Borehole
             }
             ImGui.EndChild();
 
-            // ---------------- Body (single vertical scrollbar; source of Y) ----------------
+            // ---------------- Body + PROXY vertical scrollbar ----------------
+            float vScrollbarW = ImGui.GetStyle().ScrollbarSize;
+            float bodyW       = fullSize.X - DepthScaleWidth - vScrollbarW;
+
             ImGui.SetCursorScreenPos(origin + new Vector2(DepthScaleWidth, HeaderHeight));
-            ImGui.BeginChild("BodyVSB",
-                new Vector2(fullSize.X - DepthScaleWidth, row2Height),
+            ImGui.BeginChild("BodyView",
+                new Vector2(bodyW, row2Height),
                 ImGuiChildFlags.None,
-                ImGuiWindowFlags.AlwaysVerticalScrollbar | ImGuiWindowFlags.NoScrollbar);
+                ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse);
 
-            if (reset) ImGui.SetScrollY(0);
-
-            var bodyPos      = ImGui.GetCursorScreenPos();    // capture BEFORE dummy
-            var bodyViewport = ImGui.GetContentRegionAvail(); // capture BEFORE dummy
-
-            // define vertical scroll range
-            ImGui.Dummy(new Vector2(Math.Max(1f, bodyViewport.X), Math.Max(totalHeight, bodyViewport.Y + 1f)));
-            float globalScrollY = ImGui.GetScrollY();
-
-            // Visible depth window (derived from single source of truth: globalScrollY)
-            float visTopDepth    = _depthStart + globalScrollY / pixelsPerMeter;
-            float visBottomDepth = visTopDepth + bodyViewport.Y / pixelsPerMeter;
+            var bodyPos      = ImGui.GetCursorScreenPos();
+            var bodyViewport = ImGui.GetContentRegionAvail();
 
             {
                 var dl = ImGui.GetWindowDrawList();
@@ -217,20 +222,21 @@ namespace GeoscientistToolkit.UI.Borehole
                 var clipMax = bodyPos + bodyViewport;
                 dl.PushClipRect(clipMin, clipMax, true);
 
-                // visible band background
                 float xLeft  = bodyPos.X - globalScrollX;
                 float xRight = xLeft + contentWidthX;
                 dl.AddRectFilled(new Vector2(xLeft, bodyPos.Y),
                                  new Vector2(xRight, bodyPos.Y + bodyViewport.Y),
                                  ImGui.GetColorU32(new Vector4(0.10f, 0.10f, 0.10f, 1.0f)));
 
-                // content origin aligned to shared scrolls
                 float originX = xLeft;
-                float originY = bodyPos.Y - globalScrollY;
+                float originY = bodyPos.Y;
+
+                float topDepth    = _depthStart;
+                float bottomDepth = _depthEnd;
 
                 // lithology column
                 DrawLithologyVisible(dl, new Vector2(originX, originY),
-                    _lithologyColumnWidth, pixelsPerMeter, gridInterval, visTopDepth, visBottomDepth);
+                    _lithologyColumnWidth, pixelsPerMeter, gridInterval, topDepth, bottomDepth);
 
                 float x = originX + _lithologyColumnWidth;
 
@@ -241,7 +247,7 @@ namespace GeoscientistToolkit.UI.Borehole
                     foreach (var t in visibleTracks)
                     {
                         DrawTrackVisible(dl, t, new Vector2(x, originY),
-                            _dataset.TrackWidth, pixelsPerMeter, gridInterval, visTopDepth, visBottomDepth);
+                            _dataset.TrackWidth, pixelsPerMeter, gridInterval, topDepth, bottomDepth);
                         x += _dataset.TrackWidth + _trackSpacing;
                     }
                 }
@@ -250,33 +256,65 @@ namespace GeoscientistToolkit.UI.Borehole
             }
             ImGui.EndChild();
 
-            // ---------------- Left depth scale (no bar; hard-locked to body Y) ----------------
+            // Depth scale (left)
             ImGui.SetCursorScreenPos(origin + new Vector2(0, HeaderHeight));
             ImGui.BeginChild("DepthView",
                 new Vector2(DepthScaleWidth, row2Height),
                 ImGuiChildFlags.None,
                 ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse);
 
-            var depthInnerPos = ImGui.GetCursorScreenPos();     // BEFORE dummy
-            var depthViewport = ImGui.GetContentRegionAvail();  // BEFORE dummy
-
-            ImGui.Dummy(new Vector2(1f, Math.Max(totalHeight, depthViewport.Y + 1f)));
-            ImGui.SetScrollY(globalScrollY); // hard lock to body
-
+            var depthInnerPos = ImGui.GetCursorScreenPos();
+            var depthViewport = ImGui.GetContentRegionAvail();
+            ImGui.Dummy(new Vector2(1f, depthViewport.Y));
             {
                 var dl = ImGui.GetWindowDrawList();
                 var clipMin = depthInnerPos;
                 var clipMax = depthInnerPos + depthViewport;
                 dl.PushClipRect(clipMin, clipMax, true);
 
-                float originY = depthInnerPos.Y - globalScrollY;
-
-                DrawDepthVisible(dl, new Vector2(depthInnerPos.X, originY),
-                    pixelsPerMeter, gridInterval, visTopDepth, visBottomDepth);
+                DrawDepthVisible(dl, new Vector2(depthInnerPos.X, depthInnerPos.Y),
+                    pixelsPerMeter, gridInterval, _depthStart, _depthEnd);
 
                 dl.PopClipRect();
             }
             ImGui.EndChild();
+
+            // -------- PROXY vertical scrollbar (separate child so body never scrolls) --------
+            ImGui.SetCursorScreenPos(origin + new Vector2(DepthScaleWidth + bodyW, HeaderHeight));
+            var proxyFlags = isFullRangeView
+                ? (ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse)
+                : (ImGuiWindowFlags.AlwaysVerticalScrollbar);
+            ImGui.BeginChild("VScrollProxy",
+                new Vector2(vScrollbarW, row2Height),
+                ImGuiChildFlags.None,
+                proxyFlags);
+
+            var proxyAvail = ImGui.GetContentRegionAvail();
+
+            float virtualScrollMaxMeters = Math.Max(0f, totalDepth - rangeMeters);
+            float virtualContentPixels   = isFullRangeView
+                ? proxyAvail.Y
+                : Math.Max(proxyAvail.Y + 1f, (virtualScrollMaxMeters + rangeMeters) * pixelsPerMeter);
+
+            ImGui.Dummy(new Vector2(1f, virtualContentPixels));
+
+            if (!_autoScaleDepth && !isFullRangeView)
+            {
+                float proxyScroll = ImGui.GetScrollY();
+                float topMeters   = Math.Clamp(proxyScroll / Math.Max(1e-6f, pixelsPerMeter), 0f, virtualScrollMaxMeters);
+
+                _depthStart = topMeters;
+                _depthEnd   = Math.Min(totalDepth, _depthStart + rangeMeters);
+
+                float desiredScroll = Math.Clamp(_depthStart * pixelsPerMeter, 0f, Math.Max(0f, virtualContentPixels - proxyAvail.Y));
+                ImGui.SetScrollY(desiredScroll);
+            }
+            else
+            {
+                ImGui.SetScrollY(0f);
+                _depthStart = 0f;
+                _depthEnd   = totalDepth;
+            }
 
             // frozen separators
             var dlSep = ImGui.GetWindowDrawList();
@@ -302,7 +340,6 @@ namespace GeoscientistToolkit.UI.Borehole
 
                 ImGui.Begin("Borehole Legend", ref _showLegend, flags);
 
-                // tracks
                 if (visibleTracks.Count > 0)
                 {
                     ImGui.TextColored(_mutedText, "Tracks");
@@ -314,12 +351,8 @@ namespace GeoscientistToolkit.UI.Borehole
                         foreach (var t in visibleTracks)
                         {
                             ImGui.TableNextRow();
-
-                            // swatch
                             ImGui.TableSetColumnIndex(0);
                             DrawColorSwatch(t.Color);
-
-                            // label
                             ImGui.TableSetColumnIndex(1);
                             var label = string.IsNullOrWhiteSpace(t.Unit) ? t.Name : $"{t.Name} [{t.Unit}]";
                             ImGui.TextUnformatted(label);
@@ -329,7 +362,6 @@ namespace GeoscientistToolkit.UI.Borehole
                     }
                 }
 
-                // lithologies (unique types, derive color from first matching unit or fallback)
                 var lithoTypes = _dataset.LithologyUnits
                     .Select(u => u.LithologyType)
                     .Where(s => !string.IsNullOrWhiteSpace(s))
@@ -353,12 +385,8 @@ namespace GeoscientistToolkit.UI.Borehole
                             var col = first != null ? first.Color : GetDefaultLithologyColor(lt);
 
                             ImGui.TableNextRow();
-
-                            // swatch (with a faint hatch overlay)
                             ImGui.TableSetColumnIndex(0);
                             DrawColorSwatch(col, hatch: true);
-
-                            // label
                             ImGui.TableSetColumnIndex(1);
                             ImGui.TextUnformatted(lt);
                         }
@@ -370,7 +398,7 @@ namespace GeoscientistToolkit.UI.Borehole
                 ImGui.End(); // Borehole Legend
             }
 
-            HandleInput(ref zoom);
+            HandleInput(ref zoom, row2Height);
         }
 
         private float GetAdaptiveGridInterval(float ppm)
@@ -392,7 +420,6 @@ namespace GeoscientistToolkit.UI.Borehole
 
         private void DrawColorSwatch(Vector4 col, bool hatch = false)
         {
-            // Draw a small 14x12 swatch occupying the current cursor row height.
             var dl = ImGui.GetWindowDrawList();
             var p  = ImGui.GetCursorScreenPos();
             var sz = new Vector2(14f, 12f);
@@ -411,7 +438,6 @@ namespace GeoscientistToolkit.UI.Borehole
 
         private Vector4 GetDefaultLithologyColor(string lithologyType)
         {
-            // Conservative, readable defaults if no unit is available to sample from
             return lithologyType switch
             {
                 "Sandstone"    => new Vector4(0.80f, 0.70f, 0.55f, 1.0f),
@@ -429,7 +455,7 @@ namespace GeoscientistToolkit.UI.Borehole
             };
         }
 
-        // ---------------- drawing helpers ----------------
+        // ---------------- drawing helpers (all use current visible window top/bottom) ----------------
 
         private void DrawDepthVisible(ImDrawListPtr dl, Vector2 pos, float ppm, float step, float top, float bottom)
         {
@@ -438,14 +464,12 @@ namespace GeoscientistToolkit.UI.Borehole
 
             for (float d = Math.Max(0, start); d <= end; d += step)
             {
-                float y = pos.Y + (d - _depthStart) * ppm;
+                float y = pos.Y + (d - top) * ppm;
 
-                // tick
                 dl.AddLine(new Vector2(pos.X + DepthScaleWidth - 12, y),
                            new Vector2(pos.X + DepthScaleWidth - 2,  y),
                            ImGui.GetColorU32(_textColor), 1f);
 
-                // label
                 string label = step >= 1000 ? $"{d / 1000f:F1} km" : $"{d:0} m";
                 var ts = ImGui.CalcTextSize(label);
                 dl.AddText(new Vector2(pos.X + DepthScaleWidth - ts.X - 14, y - ts.Y * 0.5f),
@@ -477,10 +501,10 @@ namespace GeoscientistToolkit.UI.Borehole
         private void DrawLithologyVisible(ImDrawListPtr dl, Vector2 origin, float width,
                                           float ppm, float step, float top, float bottom)
         {
-            float yTop = origin.Y + (top    - _depthStart) * ppm;
-            float yBot = origin.Y + (bottom - _depthStart) * ppm;
+            float yTop = origin.Y;
+            float yBot = origin.Y + (bottom - top) * ppm;
 
-            dl.AddRect(origin + new Vector2(0, yTop - origin.Y),
+            dl.AddRect(origin + new Vector2(0, 0),
                        origin + new Vector2(width, yBot - origin.Y),
                        ImGui.GetColorU32(new Vector4(0.5f, 0.5f, 0.5f, 1)), 0, ImDrawFlags.None, 1f);
 
@@ -488,17 +512,19 @@ namespace GeoscientistToolkit.UI.Borehole
             {
                 if (u.DepthTo < top || u.DepthFrom > bottom) continue;
 
-                float y1 = origin.Y + (u.DepthFrom - _depthStart) * ppm;
-                float y2 = origin.Y + (u.DepthTo   - _depthStart) * ppm;
+                float y1 = origin.Y + (u.DepthFrom - top) * ppm;
+                float y2 = origin.Y + (u.DepthTo   - top) * ppm;
 
                 float y1c = Math.Max(y1, yTop);
                 float y2c = Math.Min(y2, yBot);
                 if (y2c <= y1c + 0.5f) continue;
 
+                // draw pattern
                 DrawLithologyPattern(dl, new Vector2(origin.X, y1c),
                                      new Vector2(width, y2c - y1c),
                                      u.Color, GetPatternForLithology(u.LithologyType));
 
+                // outline of full unit extent
                 dl.AddRect(new Vector2(origin.X, y1), new Vector2(origin.X + width, y2),
                            ImGui.GetColorU32(new Vector4(0.3f, 0.3f, 0.3f, 1)), 0, ImDrawFlags.None, 1f);
 
@@ -509,6 +535,25 @@ namespace GeoscientistToolkit.UI.Borehole
                         dl.AddText(new Vector2(origin.X + (width - ts.X) * 0.5f, y1 + ((y2 - y1) - ts.Y) * 0.5f),
                                    ImGui.GetColorU32(new Vector4(0, 0, 0, 1)), name);
                 }
+
+                // --------- TOOLTIP for lithology ---------
+                if (_enableTooltip)
+                {
+                    var mouse = ImGui.GetIO().MousePos;
+                    var rectMin = new Vector2(origin.X, y1c);
+                    var rectMax = new Vector2(origin.X + width, y2c);
+                    if (mouse.X >= rectMin.X && mouse.X <= rectMax.X && mouse.Y >= rectMin.Y && mouse.Y <= rectMax.Y)
+                    {
+                        ImGui.BeginTooltip();
+                        ImGui.TextUnformatted(string.IsNullOrWhiteSpace(u.Name) ? "Lithology unit" : u.Name);
+                        if (!string.IsNullOrWhiteSpace(u.LithologyType))
+                            ImGui.TextUnformatted($"Type: {u.LithologyType}");
+                        ImGui.TextUnformatted($"From: {u.DepthFrom:0.###} m");
+                        ImGui.TextUnformatted($"To:   {u.DepthTo:0.###} m");
+                        ImGui.TextUnformatted($"Thk:  {Math.Max(0, u.DepthTo - u.DepthFrom):0.###} m");
+                        ImGui.EndTooltip();
+                    }
+                }
             }
 
             if (_showDepthGrid)
@@ -517,7 +562,7 @@ namespace GeoscientistToolkit.UI.Borehole
                 float end   = (float)Math.Ceiling(bottom / step) * step + step;
                 for (float d = Math.Max(0, start); d <= end; d += step)
                 {
-                    float y = origin.Y + (d - _depthStart) * ppm;
+                    float y = origin.Y + (d - top) * ppm;
                     dl.AddLine(new Vector2(origin.X, y), new Vector2(origin.X + width, y), ImGui.GetColorU32(_gridColor), 1f);
                 }
             }
@@ -526,9 +571,10 @@ namespace GeoscientistToolkit.UI.Borehole
         private void DrawTrackVisible(ImDrawListPtr dl, ParameterTrack track, Vector2 origin,
                                       float width, float ppm, float step, float top, float bottom)
         {
-            float yTop = origin.Y + (top    - _depthStart) * ppm;
-            float yBot = origin.Y + (bottom - _depthStart) * ppm;
+            float yTop = origin.Y;
+            float yBot = origin.Y + (bottom - top) * ppm;
 
+            // background + border
             dl.AddRectFilled(new Vector2(origin.X, yTop), new Vector2(origin.X + width, yBot),
                              ImGui.GetColorU32(new Vector4(0.10f, 0.10f, 0.10f, 1)));
             dl.AddRect(new Vector2(origin.X, yTop), new Vector2(origin.X + width, yBot),
@@ -546,8 +592,8 @@ namespace GeoscientistToolkit.UI.Borehole
                     var p1 = pts[i]; var p2 = pts[i + 1];
                     if (Math.Max(p1.Depth, p2.Depth) < fromD || Math.Min(p1.Depth, p2.Depth) > toD) continue;
 
-                    float y1 = origin.Y + (p1.Depth - _depthStart) * ppm;
-                    float y2 = origin.Y + (p2.Depth - _depthStart) * ppm;
+                    float y1 = origin.Y + (p1.Depth - top) * ppm;
+                    float y2 = origin.Y + (p2.Depth - top) * ppm;
 
                     float x1, x2;
                     if (track.IsLogarithmic)
@@ -578,9 +624,75 @@ namespace GeoscientistToolkit.UI.Borehole
                 float end   = (float)Math.Ceiling(bottom / step) * step + step;
                 for (float d = Math.Max(0, start); d <= end; d += step)
                 {
-                    float y = origin.Y + (d - _depthStart) * ppm;
+                    float y = origin.Y + (d - top) * ppm;
                     dl.AddLine(new Vector2(origin.X, y), new Vector2(origin.X + width, y), ImGui.GetColorU32(_gridColor), 1f);
                 }
+            }
+
+            // --------- TOOLTIP for tracks/graphs ---------
+            if (_enableTooltip)
+            {
+                var io    = ImGui.GetIO();
+                var mouse = io.MousePos;
+                var rectMin = new Vector2(origin.X, yTop);
+                var rectMax = new Vector2(origin.X + width, yBot);
+
+                if (mouse.X >= rectMin.X && mouse.X <= rectMax.X && mouse.Y >= rectMin.Y && mouse.Y <= rectMax.Y)
+                {
+                    // depth under mouse:
+                    float tY    = (mouse.Y - origin.Y);
+                    float depth = top + tY / Math.Max(1e-6f, ppm);
+                    depth = Math.Clamp(depth, top, bottom);
+
+                    // interpolate value at depth
+                    var (hasVal, value) = EvaluateTrackAtDepth(track, depth);
+
+                    ImGui.BeginTooltip();
+                    var label = string.IsNullOrWhiteSpace(track.Unit) ? track.Name : $"{track.Name} [{track.Unit}]";
+                    ImGui.TextUnformatted(label);
+                    ImGui.TextUnformatted($"Depth: {depth:0.###} m");
+                    if (hasVal)
+                        ImGui.TextUnformatted($"Value: {value:0.###}");
+                    else
+                        ImGui.TextUnformatted("Value: n/a");
+                    ImGui.TextUnformatted($"Range: {track.MinValue:0.###} – {track.MaxValue:0.###}");
+                    ImGui.EndTooltip();
+                }
+            }
+        }
+
+        private (bool ok, float v) EvaluateTrackAtDepth(ParameterTrack track, float depth)
+        {
+            if (track?.Points == null || track.Points.Count == 0) return (false, 0f);
+            var pts = track.Points.OrderBy(p => p.Depth).ToList();
+
+            // handle before/after ends
+            if (depth <= pts[0].Depth) return (true, pts[0].Value);
+            if (depth >= pts[^1].Depth) return (true, pts[^1].Value);
+
+            // binary search for segment
+            int lo = 0, hi = pts.Count - 1;
+            while (hi - lo > 1)
+            {
+                int mid = (lo + hi) >> 1;
+                if (pts[mid].Depth <= depth) lo = mid; else hi = mid;
+            }
+
+            var p1 = pts[lo];
+            var p2 = pts[hi];
+            float span = Math.Max(1e-6f, p2.Depth - p1.Depth);
+            float a = (depth - p1.Depth) / span;
+
+            if (track.IsLogarithmic)
+            {
+                float v1 = (float)Math.Log10(Math.Max(p1.Value, 1e-6f));
+                float v2 = (float)Math.Log10(Math.Max(p2.Value, 1e-6f));
+                float vLog = v1 + a * (v2 - v1);
+                return (true, (float)Math.Pow(10, vLog));
+            }
+            else
+            {
+                return (true, p1.Value + a * (p2.Value - p1.Value));
             }
         }
 
@@ -619,6 +731,7 @@ namespace GeoscientistToolkit.UI.Borehole
                         }
                     break;
                 case LithologyPattern.Sand:
+                {
                     var rnd = new Random(0);
                     for (int i = 0; i < (int)(size.X * size.Y / 20); i++)
                     {
@@ -627,6 +740,7 @@ namespace GeoscientistToolkit.UI.Borehole
                         dl.AddCircleFilled(pos + new Vector2(xx, yy), 1f, pc);
                     }
                     break;
+                }
                 case LithologyPattern.Bricks:
                     for (float yy = 0; yy < size.Y; yy += 10)
                     {
@@ -636,7 +750,8 @@ namespace GeoscientistToolkit.UI.Borehole
                     }
                     break;
                 case LithologyPattern.Limestone:
-                    rnd = new Random(1);
+                {
+                    var rnd = new Random(1);
                     for (int i = 0; i < (int)(size.X * size.Y / 30); i++)
                     {
                         float xx = (float)rnd.NextDouble() * size.X;
@@ -645,6 +760,7 @@ namespace GeoscientistToolkit.UI.Borehole
                         dl.AddCircle(pos + new Vector2(xx, yy), r, pc);
                     }
                     break;
+                }
                 case LithologyPattern.Solid:
                 default:
                     break;
@@ -658,17 +774,49 @@ namespace GeoscientistToolkit.UI.Borehole
             return LithologyPattern.Solid;
         }
 
-        private void HandleInput(ref float zoom)
+        // ---------------- input & zoom ----------------
+        private void HandleInput(ref float zoom, float bodyHeightPx)
         {
             var io = ImGui.GetIO();
             if (!ImGui.IsWindowHovered()) return;
 
+            // Zoom with wheel; Ctrl accelerates.
             if (io.MouseWheel != 0)
             {
-                const float zf = 1.2f;
-                zoom = io.MouseWheel > 0 ? zoom * zf : zoom / zf;
-                zoom = Math.Clamp(zoom, 0.01f, 20f);
+                float mouseY = io.MousePos.Y;
+                float viewTopY = ImGui.GetCursorScreenPos().Y + HeaderHeight; // approx top of drawing area
+                float t = Math.Clamp((mouseY - viewTopY) / Math.Max(1f, bodyHeightPx), 0f, 1f);
+                float focusDepth = _depthStart + t * Math.Max(1e-3f, _depthEnd - _depthStart);
+
+                float zfBase = 1.2f;
+                float zf = (io.KeyCtrl ? (zfBase * 1.25f) : zfBase);
+                float newZoom = io.MouseWheel > 0 ? zoom * zf : zoom / zf;
+                newZoom = Math.Clamp(newZoom, 0.01f, 20f);
+
+                if (!_autoScaleDepth)
+                {
+                    float currentRange = Math.Max(1e-3f, _depthEnd - _depthStart);
+                    float newRange = Math.Max(1e-3f, currentRange * (zoom / newZoom)); // inverse with zoom
+                    float newStart = Math.Clamp(focusDepth - t * newRange, 0f, Math.Max(0f, _dataset.TotalDepth - newRange));
+                    _depthStart = newStart;
+                    _depthEnd   = Math.Min(Math.Max(_dataset.TotalDepth, 1f), _depthStart + newRange);
+                }
+
+                zoom = newZoom;
+            }
+
+            // Reset zoom
+            if (ImGui.IsKeyPressed(ImGuiKey.R))
+            {
+                zoom = 1f;
+                if (_autoScaleDepth)
+                {
+                    _depthStart = 0f;
+                    _depthEnd   = Math.Max(_dataset.TotalDepth, 1f);
+                }
             }
         }
+
+        private static bool NearlyEqual(float a, float b, float eps = 1e-3f) => Math.Abs(a - b) <= eps;
     }
 }

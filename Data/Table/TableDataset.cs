@@ -11,6 +11,9 @@ namespace GeoscientistToolkit.Data.Table;
 
 public class TableDataset : Dataset, ISerializableDataset
 {
+    // Notify listeners when data changes (viewer, stats, etc.)
+    public event Action<TableDataset>? DataChanged;
+
     // Statistics cache
     private readonly Dictionary<string, ColumnStatistics> _columnStats = new();
 
@@ -97,6 +100,7 @@ public class TableDataset : Dataset, ISerializableDataset
             // For generated tables, ensure metadata and stats are correct
             UpdateMetadata();
             CalculateStatistics();
+            DataChanged?.Invoke(this);
             return;
         }
 
@@ -136,6 +140,7 @@ public class TableDataset : Dataset, ISerializableDataset
             UpdateMetadata();
             CalculateStatistics();
             Logger.Log($"Loaded table dataset: {Name} ({RowCount} rows, {ColumnCount} columns)");
+            DataChanged?.Invoke(this);
         }
         catch (Exception ex)
         {
@@ -208,7 +213,6 @@ public class TableDataset : Dataset, ISerializableDataset
     private void LoadExcelFile()
     {
         _dataTable = new DataTable(Name);
-
 
         using (var workbook = new XLWorkbook(FilePath))
         {
@@ -448,6 +452,7 @@ public class TableDataset : Dataset, ISerializableDataset
             _dataTable = null;
             _columnStats.Clear();
         }
+        DataChanged?.Invoke(this);
     }
 
     public DataTable GetDataTable()
@@ -473,6 +478,7 @@ public class TableDataset : Dataset, ISerializableDataset
             CalculateStatistics();
             Logger.Log($"Dataset '{Name}' was updated.");
         }
+        DataChanged?.Invoke(this);
     }
     
     public void UpdateCellValue(int rowIndex, int colIndex, object newValue)
@@ -500,7 +506,6 @@ public class TableDataset : Dataset, ISerializableDataset
                 _dataTable.Rows[rowIndex][colIndex] = convertedValue;
                 
                 // Recalculate stats for the changed column
-                // This could be optimized to update stats incrementally
                 CalculateStatistics(); 
             }
             catch (Exception ex)
@@ -509,6 +514,9 @@ public class TableDataset : Dataset, ISerializableDataset
                 // Optionally revert the change or handle the error
             }
         }
+
+        // Notify listeners so UI refreshes immediately
+        DataChanged?.Invoke(this);
     }
 
     public void SaveAsCsv(string filePath, string delimiter = ",", bool includeHeaders = true)

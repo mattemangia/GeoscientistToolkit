@@ -362,7 +362,20 @@ public class ProjectManager
                 if (boreholeDataset.IsMissing)
                     Logger.LogWarning(
                         $"Source file not found for Borehole dataset: {boreholeDto.Name} at {boreholeDto.FilePath}");
-
+                if (!boreholeDataset.IsMissing && !string.IsNullOrEmpty(boreholeDataset.FilePath))
+                {
+                    var ext = Path.GetExtension(boreholeDataset.FilePath)?.ToLowerInvariant();
+                    try
+                    {
+                        if (ext == ".bhb") boreholeDataset.LoadFromBinaryFile(boreholeDataset.FilePath);
+                        else if (ext == ".borehole" || ext == ".json") boreholeDataset.Load();
+                        Logger.Log($"Reloaded borehole data from source: {boreholeDataset.FilePath}");
+                    }
+                    catch (Exception ex)
+                    {
+                        Logger.LogWarning($"Falling back to DTO data for '{boreholeDataset.Name}': {ex.Message}");
+                    }
+                }
                 dataset = boreholeDataset;
                 break;
             }
