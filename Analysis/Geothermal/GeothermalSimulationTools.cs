@@ -18,14 +18,15 @@ namespace GeoscientistToolkit.Analysis.Geothermal;
 /// </summary>
 public class GeothermalSimulationTools : IDatasetTools, IDisposable
 {
-    private CancellationTokenSource _cancellationTokenSource;
-    private GeothermalSimulationSolver _currentSolver; // Track the active solver
-
     // Export file dialog
     private readonly ImGuiExportFileDialog _exportDialog = new("geothermal_export", "Export Geothermal Results");
 
     // Graphics device reference for 3D visualization
     private readonly GraphicsDevice _graphicsDevice;
+    private readonly float _newLayerPermeability = 1e-14f;
+    private readonly GeothermalSimulationOptions _options = new();
+    private CancellationTokenSource _cancellationTokenSource;
+    private GeothermalSimulationSolver _currentSolver; // Track the active solver
 
     private bool _isSimulationRunning;
 
@@ -36,10 +37,8 @@ public class GeothermalSimulationTools : IDatasetTools, IDisposable
 
     // Material property editing
     private string _newLayerName = "";
-    private readonly float _newLayerPermeability = 1e-14f;
     private float _newLayerPorosity = 0.1f;
     private float _newLayerSpecificHeat = 900f;
-    private readonly GeothermalSimulationOptions _options = new();
     private GeothermalSimulationResults _results;
     private int _selectedFlowConfig;
 
@@ -53,9 +52,6 @@ public class GeothermalSimulationTools : IDatasetTools, IDisposable
     private string _simulationMessage = "";
     private float _simulationProgress;
     private GeothermalVisualization3D _visualization3D;
-
-    // Visualization
-    private readonly List<Mesh3DDataset> _visualizationMeshes = new();
 
     public GeothermalSimulationTools(GraphicsDevice graphicsDevice)
     {
@@ -566,6 +562,8 @@ public class GeothermalSimulationTools : IDatasetTools, IDisposable
         {
             _showResults = false;
             _show3DVisualization = false;
+            _visualization3D?.Dispose();
+            _visualization3D = null;
         }
 
         ImGui.SameLine();
@@ -575,49 +573,52 @@ public class GeothermalSimulationTools : IDatasetTools, IDisposable
         if (ImGui.Button("3D Visualization"))
         {
             _show3DVisualization = !_show3DVisualization;
-            if (_show3DVisualization && _visualization3D == null) InitializeVisualization();
+            if (_show3DVisualization)
+            {
+                InitializeVisualization();
+            }
+            else
+            {
+                _visualization3D?.Dispose();
+                _visualization3D = null;
+            }
         }
 
         if (_show3DVisualization && _visualization3D != null)
         {
-            Render3DVisualization();
-            return;
+            Render3DVisualizationWithControls();
         }
-
-        // Result tabs
-        if (ImGui.BeginTabBar("ResultTabs"))
+        else
         {
-            if (ImGui.BeginTabItem("Summary"))
+            // Result tabs
+            if (ImGui.BeginTabBar("ResultTabs"))
             {
-                RenderSummaryTab();
-                ImGui.EndTabItem();
-            }
+                if (ImGui.BeginTabItem("Summary"))
+                {
+                    RenderSummaryTab();
+                    ImGui.EndTabItem();
+                }
 
-            if (ImGui.BeginTabItem("Thermal Performance"))
-            {
-                RenderThermalPerformanceTab();
-                ImGui.EndTabItem();
-            }
+                if (ImGui.BeginTabItem("Thermal Performance"))
+                {
+                    RenderThermalPerformanceTab();
+                    ImGui.EndTabItem();
+                }
 
-            if (ImGui.BeginTabItem("Flow Analysis"))
-            {
-                RenderFlowAnalysisTab();
-                ImGui.EndTabItem();
-            }
+                if (ImGui.BeginTabItem("Flow Analysis"))
+                {
+                    RenderFlowAnalysisTab();
+                    ImGui.EndTabItem();
+                }
 
-            if (ImGui.BeginTabItem("Layer Analysis"))
-            {
-                RenderLayerAnalysisTab();
-                ImGui.EndTabItem();
-            }
+                if (ImGui.BeginTabItem("Layer Analysis"))
+                {
+                    RenderLayerAnalysisTab();
+                    ImGui.EndTabItem();
+                }
 
-            if (ImGui.BeginTabItem("Visualization"))
-            {
-                RenderVisualizationTab();
-                ImGui.EndTabItem();
+                ImGui.EndTabBar();
             }
-
-            ImGui.EndTabBar();
         }
     }
 
@@ -745,8 +746,9 @@ public class GeothermalSimulationTools : IDatasetTools, IDisposable
         if (_results.TemperatureIsosurfaces.Any())
         {
             ImGui.Text($"Temperature Isosurfaces: {_results.TemperatureIsosurfaces.Count}");
-            ImGui.SliderInt("Selected Isosurface", ref _selectedIsosurface,
-                0, _results.TemperatureIsosurfaces.Count - 1);
+            var isoNames = _results.TemperatureIsosurfaces
+                .Select(iso => $"{Path.GetFileNameWithoutExtension(iso.Name)}").ToArray();
+            ImGui.ListBox("Isosurfaces", ref _selectedIsosurface, isoNames, isoNames.Length);
 
             if (ImGui.Button("View Single Isosurface")) ViewSingleIsosurface();
 
@@ -757,13 +759,17 @@ public class GeothermalSimulationTools : IDatasetTools, IDisposable
         // Temperature slices
         if (_results.TemperatureSlices.Any())
         {
-            ImGui.Text($"Temperature Slices: {_results.TemperatureSlices.Count}");
+            ImGui.Separator();
+            ImGui.Text("2D Slices:");
 
             foreach (var slice in _results.TemperatureSlices)
                 if (ImGui.Button($"View Slice at {slice.Key:F1} m"))
-                {
-                    // View slice implementation
-                }
+                    if (_visualization3D != null)
+                    {
+                        var normalizedDepth = slice.Key / _options.BoreholeDataset.TotalDepth;
+                        _visualization3D.SetRenderMode(GeothermalVisualization3D.RenderMode.Slices);
+                        _visualization3D.SetSliceDepth((float)normalizedDepth);
+                    }
         }
 
         // Add new isosurface
@@ -773,10 +779,9 @@ public class GeothermalSimulationTools : IDatasetTools, IDisposable
 
         // Export options
         ImGui.Separator();
-        if (ImGui.Button("Export 3D Mesh")) Export3DMesh();
-
+        if (ImGui.Button("Show Streamlines")) ShowStreamlines();
         ImGui.SameLine();
-        if (ImGui.Button("Export Streamlines")) ExportStreamlines();
+        if (ImGui.Button("Clear Dynamic Meshes")) _visualization3D?.ClearDynamicMeshes();
     }
 
     private void InitializeVisualization()
@@ -785,31 +790,58 @@ public class GeothermalSimulationTools : IDatasetTools, IDisposable
         {
             _visualization3D = new GeothermalVisualization3D(_graphicsDevice);
 
-            if (_results != null && _mesh != null) _visualization3D.LoadResults(_results, _mesh);
+            if (_results != null && _mesh != null)
+                _visualization3D.LoadResults(_results, _mesh, _options);
         }
     }
 
-    private void Render3DVisualization()
+    private void Render3DVisualizationWithControls()
     {
         if (_visualization3D == null) return;
 
-        // Create a child window for the 3D view
         var availableSize = ImGui.GetContentRegionAvail();
-        var viewSize = new Vector2(availableSize.X * 0.7f, availableSize.Y);
-        var controlSize = new Vector2(availableSize.X * 0.3f - 10, availableSize.Y);
+        var controlPanelWidth = Math.Max(300, availableSize.X * 0.25f);
+        var viewWidth = availableSize.X - controlPanelWidth - ImGui.GetStyle().ItemSpacing.X;
 
-        // 3D View
-        ImGui.BeginChild("3DView", viewSize, ImGuiChildFlags.Border);
+        // Controls Panel on the left
+        ImGui.BeginChild("3DControls", new Vector2(controlPanelWidth, availableSize.Y), ImGuiChildFlags.Border);
+        {
+            _visualization3D.RenderControls();
+
+            ImGui.Separator();
+
+            // Move the tab bar into the control panel
+            if (ImGui.BeginTabBar("ResultTabs"))
+            {
+                if (ImGui.BeginTabItem("Summary"))
+                {
+                    RenderSummaryTab();
+                    ImGui.EndTabItem();
+                }
+
+                if (ImGui.BeginTabItem("Visualization"))
+                {
+                    RenderVisualizationTab();
+                    ImGui.EndTabItem();
+                }
+
+                ImGui.EndTabBar();
+            }
+        }
+        ImGui.EndChild();
+
+        ImGui.SameLine();
+
+        // 3D View Panel on the right
+        ImGui.BeginChild("3DView", new Vector2(viewWidth, availableSize.Y), ImGuiChildFlags.Border);
         {
             var viewportSize = ImGui.GetContentRegionAvail();
             _visualization3D.Resize((uint)viewportSize.X, (uint)viewportSize.Y);
             _visualization3D.Render();
 
-            // Display the rendered texture
             var textureId = _visualization3D.GetRenderTargetImGuiBinding();
             ImGui.Image(textureId, viewportSize);
 
-            // Handle mouse input
             if (ImGui.IsItemHovered())
             {
                 var mousePos = ImGui.GetMousePos() - ImGui.GetItemRectMin();
@@ -823,16 +855,8 @@ public class GeothermalSimulationTools : IDatasetTools, IDisposable
             }
         }
         ImGui.EndChild();
-
-        ImGui.SameLine();
-
-        // Controls
-        ImGui.BeginChild("3DControls", controlSize, ImGuiChildFlags.Border);
-        {
-            _visualization3D.RenderControls();
-        }
-        ImGui.EndChild();
     }
+
 
     private void StartSimulation()
     {
@@ -925,64 +949,108 @@ public class GeothermalSimulationTools : IDatasetTools, IDisposable
 
     private void ViewSingleIsosurface()
     {
-        _visualizationMeshes.Clear();
+        if (_visualization3D == null) return;
+        _visualization3D.ClearDynamicMeshes();
         if (_selectedIsosurface < _results.TemperatureIsosurfaces.Count)
-            _visualizationMeshes.Add(_results.TemperatureIsosurfaces[_selectedIsosurface]);
+        {
+            _visualization3D.AddMesh(_results.TemperatureIsosurfaces[_selectedIsosurface]);
+            _visualization3D.SetRenderMode(GeothermalVisualization3D.RenderMode.Isosurface);
+        }
     }
 
     private void ViewAllIsosurfaces()
     {
-        _visualizationMeshes.Clear();
-        _visualizationMeshes.AddRange(_results.TemperatureIsosurfaces);
+        if (_visualization3D == null) return;
+        _visualization3D.ClearDynamicMeshes();
+        _visualization3D.AddMeshes(_results.TemperatureIsosurfaces);
+        _visualization3D.SetRenderMode(GeothermalVisualization3D.RenderMode.Isosurface);
     }
 
     private void GenerateNewIsosurface(float temperature)
     {
-        // Implementation for generating new isosurface at specified temperature
+        if (_visualization3D == null || _results.FinalTemperatureField == null) return;
+
         Logger.Log($"Generating isosurface at {temperature - 273.15:F1}°C");
 
-        if (_results?.BoreholeMesh != null) _visualizationMeshes.Add(_results.BoreholeMesh);
-    }
-
-    private void Export3DMesh()
-    {
-        // Export visualization meshes to file
-        Logger.Log("Exporting 3D mesh...");
-    }
-
-    private void ExportStreamlines()
-    {
-        if (_results?.Streamlines == null || !_results.Streamlines.Any())
+        Task.Run(async () =>
         {
-            Logger.LogWarning("No streamlines to export.");
+            try
+            {
+                var labelData = new SimpleLabelVolume(_mesh.RadialPoints, _mesh.AngularPoints, _mesh.VerticalPoints);
+                for (var i = 0; i < _mesh.RadialPoints; i++)
+                for (var j = 0; j < _mesh.AngularPoints; j++)
+                for (var k = 0; k < _mesh.VerticalPoints; k++)
+                    labelData.Data[i, j, k] = _mesh.MaterialIds[i, j, k] == 255 ? (byte)0 : (byte)1;
+
+                var isosurface = await IsosurfaceGenerator.GenerateIsosurfaceAsync(
+                    _results.FinalTemperatureField,
+                    labelData,
+                    temperature,
+                    new Vector3(1, 1, 1),
+                    null,
+                    CancellationToken.None
+                );
+                isosurface.Name = $"Isosurface_{temperature - 273.15:F1}C";
+
+                // This needs to be marshalled back to the UI thread if you have strict threading.
+                // For now, we assume the renderer can handle this.
+                _results.TemperatureIsosurfaces.Add(isosurface);
+                _visualization3D.AddMesh(isosurface);
+                _visualization3D.SetRenderMode(GeothermalVisualization3D.RenderMode.Isosurface);
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError($"Failed to generate isosurface: {ex.Message}");
+            }
+        });
+    }
+
+    // GeoscientistToolkit/Analysis/Geothermal/GeothermalSimulationTools.cs
+
+    private void ShowStreamlines()
+    {
+        if (_visualization3D == null || _results?.Streamlines == null || !_results.Streamlines.Any())
+        {
+            Logger.LogWarning("No streamlines to display.");
             return;
         }
 
-        // Create a mesh from streamlines
         var streamlineMesh =
             Mesh3DDataset.CreateEmpty("Streamlines", Path.Combine(Path.GetTempPath(), "streamlines_export.obj"));
-        streamlineMesh.Vertices.Clear(); // Clear default cube
-        streamlineMesh.Faces.Clear();
-        streamlineMesh.Normals.Clear();
+
+        var vertices = new List<Vector3>();
+        var faces = new List<int[]>();
 
         foreach (var streamline in _results.Streamlines)
         {
-            var baseVertexIndex = streamlineMesh.Vertices.Count;
-            for (var i = 0; i < streamline.Count; i++)
-            {
-                streamlineMesh.Vertices.Add(streamline[i]);
-                streamlineMesh.Normals.Add(Vector3.UnitZ); // Add a dummy normal
-            }
+            var baseVertexIndex = vertices.Count;
+            vertices.AddRange(streamline);
 
             for (var i = 0; i < streamline.Count - 1; i++)
-                // Create a degenerate triangle to represent a line segment
-                streamlineMesh.Faces.Add(
-                    new[] { baseVertexIndex + i, baseVertexIndex + i + 1, baseVertexIndex + i + 1 });
+                // Represent a line segment as a face with two indices. The renderer will handle it.
+                faces.Add(new[] { baseVertexIndex + i, baseVertexIndex + i + 1 });
         }
 
+        // --- Start of Correction ---
+        // The 'UpdateData' method does not exist. Instead, we manually clear and repopulate the mesh data lists.
+        streamlineMesh.Vertices.Clear();
+        streamlineMesh.Faces.Clear();
+        streamlineMesh.Normals.Clear(); // Also clear normals for consistency
+
+        streamlineMesh.Vertices.AddRange(vertices);
+        streamlineMesh.Faces.AddRange(faces);
+
+        // It's good practice to add dummy normals if the renderer requires them for streamlines
+        for (var i = 0; i < streamlineMesh.Vertices.Count; i++) streamlineMesh.Normals.Add(Vector3.UnitZ);
+
+        // Update the mesh's internal counts
         streamlineMesh.VertexCount = streamlineMesh.Vertices.Count;
         streamlineMesh.FaceCount = streamlineMesh.Faces.Count;
-        _visualizationMeshes.Add(streamlineMesh);
-        Logger.Log("Streamlines exported to visualization.");
+        // --- End of Correction ---
+
+        _visualization3D.ClearDynamicMeshes();
+        _visualization3D.AddMesh(streamlineMesh);
+        _visualization3D.SetRenderMode(GeothermalVisualization3D.RenderMode.Streamlines);
+        Logger.Log("Streamlines added to visualization.");
     }
 }
