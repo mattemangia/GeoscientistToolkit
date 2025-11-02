@@ -26,6 +26,8 @@ public class BoreholeViewer : IDatasetViewer, IDisposable
     private readonly BoreholeDataset _dataset;
     private readonly Vector4 _depthTextColor = new(0.85f, 0.85f, 0.85f, 1.00f);
     private readonly Vector4 _gridColor = new(0.30f, 0.30f, 0.30f, 0.50f);
+    private readonly Vector2 _legendInitPos = new(60f, 60f);
+    private readonly Vector2 _legendInitSize = new(320f, 240f);
 
     private readonly float _lithologyColumnWidth = 150f;
     private readonly Vector4 _mutedText = new(0.75f, 0.75f, 0.75f, 1.00f);
@@ -39,11 +41,11 @@ public class BoreholeViewer : IDatasetViewer, IDisposable
     private float _depthEnd;
     private float _depthStart;
     private bool _enableTooltip = true; // <--- NEW
+    private bool _isRenderingLegend; // Re-entry guard
+    private int _lastLegendFrame = -1; // Track which frame legend was last rendered
 
     // Legend window initial placement (first frame only)
     private bool _legendInit;
-    private readonly Vector2 _legendInitPos = new(60f, 60f);
-    private readonly Vector2 _legendInitSize = new(320f, 240f);
 
     // toggles
     private bool _showDepthGrid = true;
@@ -239,7 +241,7 @@ public class BoreholeViewer : IDatasetViewer, IDisposable
 
             // lithology column
             DrawLithologyVisible(dl, new Vector2(originX, originY),
-                _lithologyColumnWidth, pixelsPerMeter, gridInterval, topDepth, bottomDepth);
+                _lithologyColumnWidth, pixelsPerMeter, gridInterval, topDepth, bottomDepth, clipMin, clipMax);
 
             var x = originX + _lithologyColumnWidth;
 
@@ -250,7 +252,7 @@ public class BoreholeViewer : IDatasetViewer, IDisposable
                 foreach (var t in visibleTracks)
                 {
                     DrawTrackVisible(dl, t, new Vector2(x, originY),
-                        _dataset.TrackWidth, pixelsPerMeter, gridInterval, topDepth, bottomDepth);
+                        _dataset.TrackWidth, pixelsPerMeter, gridInterval, topDepth, bottomDepth, clipMin, clipMax);
                     x += _dataset.TrackWidth + _trackSpacing;
                 }
             }
@@ -329,9 +331,36 @@ public class BoreholeViewer : IDatasetViewer, IDisposable
 
         ImGui.PopStyleVar();
 
-        // ---------------- Legend as a separate window ----------------
-        if (_showLegend)
+        // Legend is now rendered separately via DrawLegendWindow() to prevent docking flicker
+        // DO NOT render legend here - it causes circular dependency when docked
+
+        HandleInput(ref zoom, row2Height);
+    }
+
+    public void Dispose()
+    {
+    }
+
+    /// <summary>
+    ///     Renders the legend window separately from DrawContent() to avoid docking feedback loops.
+    ///     This method should be called from outside the viewer's draw cycle.
+    /// </summary>
+    public void DrawLegendWindow()
+    {
+        if (!_showLegend || _isRenderingLegend) return;
+
+        var currentFrame = ImGui.GetFrameCount();
+        if (_lastLegendFrame == currentFrame) return; // Already rendered this frame
+
+        _isRenderingLegend = true;
+        _lastLegendFrame = currentFrame;
+
+        try
         {
+            // CRITICAL: Use unique window ID per dataset to prevent docking conflicts
+            // This makes ImGui treat it as a completely separate window
+            var uniqueWindowName = $"Borehole Legend###{_dataset.GetHashCode()}";
+
             if (!_legendInit)
             {
                 ImGui.SetNextWindowPos(_legendInitPos, ImGuiCond.FirstUseEver);
@@ -339,75 +368,84 @@ public class BoreholeViewer : IDatasetViewer, IDisposable
                 _legendInit = true;
             }
 
-            // FIXED: Removed AlwaysAutoResize to prevent infinite resize loop when docked
-            // FIXED: Removed NoSavedSettings to allow docking state to be saved
-            var flags = ImGuiWindowFlags.NoCollapse;
+            // CRITICAL: Prevent docking to avoid feedback loop entirely
+            var flags = ImGuiWindowFlags.NoCollapse | ImGuiWindowFlags.NoDocking;
+            var legendOpen = _showLegend;
 
-            ImGui.Begin("Borehole Legend", ref _showLegend, flags);
-
-            if (visibleTracks.Count > 0)
+            if (ImGui.Begin(uniqueWindowName, ref legendOpen, flags))
             {
-                ImGui.TextColored(_mutedText, "Tracks");
-                if (ImGui.BeginTable("tbl_tracks", 2, ImGuiTableFlags.SizingFixedFit))
+                // Show a note that docking is disabled to prevent flickering
+                ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(1f, 0.8f, 0.3f, 1f));
+                ImGui.TextWrapped("ℹ️ Docking disabled for this window to prevent UI flickering");
+                ImGui.PopStyleColor();
+                ImGui.Separator();
+
+                var visibleTracks = _dataset.ParameterTracks.Values.Where(t => t.IsVisible).ToList();
+
+                if (visibleTracks.Count > 0)
                 {
-                    ImGui.TableSetupColumn("Swatch", ImGuiTableColumnFlags.WidthFixed, 20);
-                    ImGui.TableSetupColumn("Label", ImGuiTableColumnFlags.WidthStretch);
-
-                    foreach (var t in visibleTracks)
+                    ImGui.TextColored(_mutedText, "Tracks");
+                    if (ImGui.BeginTable("tbl_tracks", 2, ImGuiTableFlags.SizingFixedFit))
                     {
-                        ImGui.TableNextRow();
-                        ImGui.TableSetColumnIndex(0);
-                        DrawColorSwatch(t.Color);
-                        ImGui.TableSetColumnIndex(1);
-                        var label = string.IsNullOrWhiteSpace(t.Unit) ? t.Name : $"{t.Name} [{t.Unit}]";
-                        ImGui.TextUnformatted(label);
-                    }
+                        ImGui.TableSetupColumn("Swatch", ImGuiTableColumnFlags.WidthFixed, 20);
+                        ImGui.TableSetupColumn("Label", ImGuiTableColumnFlags.WidthStretch);
 
-                    ImGui.EndTable();
+                        foreach (var t in visibleTracks)
+                        {
+                            ImGui.TableNextRow();
+                            ImGui.TableSetColumnIndex(0);
+                            DrawColorSwatch(t.Color);
+                            ImGui.TableSetColumnIndex(1);
+                            var label = string.IsNullOrWhiteSpace(t.Unit) ? t.Name : $"{t.Name} [{t.Unit}]";
+                            ImGui.TextUnformatted(label);
+                        }
+
+                        ImGui.EndTable();
+                    }
+                }
+
+                var lithoTypes = _dataset.LithologyUnits
+                    .Select(u => u.LithologyType)
+                    .Where(s => !string.IsNullOrWhiteSpace(s))
+                    .Distinct()
+                    .OrderBy(s => s)
+                    .ToList();
+
+                if (lithoTypes.Count > 0)
+                {
+                    if (visibleTracks.Count > 0) ImGui.Separator();
+                    ImGui.TextColored(_mutedText, "Lithologies");
+
+                    if (ImGui.BeginTable("tbl_litho", 2, ImGuiTableFlags.SizingFixedFit))
+                    {
+                        ImGui.TableSetupColumn("Swatch", ImGuiTableColumnFlags.WidthFixed, 20);
+                        ImGui.TableSetupColumn("Label", ImGuiTableColumnFlags.WidthStretch);
+
+                        foreach (var lt in lithoTypes)
+                        {
+                            var first = _dataset.LithologyUnits.FirstOrDefault(u => u.LithologyType == lt);
+                            var col = first != null ? first.Color : GetDefaultLithologyColor(lt);
+
+                            ImGui.TableNextRow();
+                            ImGui.TableSetColumnIndex(0);
+                            DrawColorSwatch(col, true);
+                            ImGui.TableSetColumnIndex(1);
+                            ImGui.TextUnformatted(lt);
+                        }
+
+                        ImGui.EndTable();
+                    }
                 }
             }
 
-            var lithoTypes = _dataset.LithologyUnits
-                .Select(u => u.LithologyType)
-                .Where(s => !string.IsNullOrWhiteSpace(s))
-                .Distinct()
-                .OrderBy(s => s)
-                .ToList();
+            ImGui.End();
 
-            if (lithoTypes.Count > 0)
-            {
-                if (visibleTracks.Count > 0) ImGui.Separator();
-                ImGui.TextColored(_mutedText, "Lithologies");
-
-                if (ImGui.BeginTable("tbl_litho", 2, ImGuiTableFlags.SizingFixedFit))
-                {
-                    ImGui.TableSetupColumn("Swatch", ImGuiTableColumnFlags.WidthFixed, 20);
-                    ImGui.TableSetupColumn("Label", ImGuiTableColumnFlags.WidthStretch);
-
-                    foreach (var lt in lithoTypes)
-                    {
-                        var first = _dataset.LithologyUnits.FirstOrDefault(u => u.LithologyType == lt);
-                        var col = first != null ? first.Color : GetDefaultLithologyColor(lt);
-
-                        ImGui.TableNextRow();
-                        ImGui.TableSetColumnIndex(0);
-                        DrawColorSwatch(col, true);
-                        ImGui.TableSetColumnIndex(1);
-                        ImGui.TextUnformatted(lt);
-                    }
-
-                    ImGui.EndTable();
-                }
-            }
-
-            ImGui.End(); // Borehole Legend
+            _showLegend = legendOpen;
         }
-
-        HandleInput(ref zoom, row2Height);
-    }
-
-    public void Dispose()
-    {
+        finally
+        {
+            _isRenderingLegend = false;
+        }
     }
 
     private float GetAdaptiveGridInterval(float ppm)
@@ -507,7 +545,7 @@ public class BoreholeViewer : IDatasetViewer, IDisposable
     }
 
     private void DrawLithologyVisible(ImDrawListPtr dl, Vector2 origin, float width,
-        float ppm, float step, float top, float bottom)
+        float ppm, float step, float top, float bottom, Vector2 clipMin, Vector2 clipMax)
     {
         var yTop = origin.Y;
         var yBot = origin.Y + (bottom - top) * ppm;
@@ -549,18 +587,28 @@ public class BoreholeViewer : IDatasetViewer, IDisposable
             if (_enableTooltip)
             {
                 var mouse = ImGui.GetIO().MousePos;
-                var rectMin = new Vector2(origin.X, y1c);
-                var rectMax = new Vector2(origin.X + width, y2c);
-                if (mouse.X >= rectMin.X && mouse.X <= rectMax.X && mouse.Y >= rectMin.Y && mouse.Y <= rectMax.Y)
+
+                // CRITICAL FIX: Check if mouse is within visible window bounds first
+                // clipMin and clipMax define the actual visible viewport area
+                var isMouseInVisibleArea = mouse.X >= clipMin.X && mouse.X <= clipMax.X &&
+                                           mouse.Y >= clipMin.Y && mouse.Y <= clipMax.Y;
+
+                if (isMouseInVisibleArea)
                 {
-                    ImGui.BeginTooltip();
-                    ImGui.TextUnformatted(string.IsNullOrWhiteSpace(u.Name) ? "Lithology unit" : u.Name);
-                    if (!string.IsNullOrWhiteSpace(u.LithologyType))
-                        ImGui.TextUnformatted($"Type: {u.LithologyType}");
-                    ImGui.TextUnformatted($"From: {u.DepthFrom:0.###} m");
-                    ImGui.TextUnformatted($"To:   {u.DepthTo:0.###} m");
-                    ImGui.TextUnformatted($"Thk:  {Math.Max(0, u.DepthTo - u.DepthFrom):0.###} m");
-                    ImGui.EndTooltip();
+                    var rectMin = new Vector2(origin.X, y1c);
+                    var rectMax = new Vector2(origin.X + width, y2c);
+
+                    if (mouse.X >= rectMin.X && mouse.X <= rectMax.X && mouse.Y >= rectMin.Y && mouse.Y <= rectMax.Y)
+                    {
+                        ImGui.BeginTooltip();
+                        ImGui.TextUnformatted(string.IsNullOrWhiteSpace(u.Name) ? "Lithology unit" : u.Name);
+                        if (!string.IsNullOrWhiteSpace(u.LithologyType))
+                            ImGui.TextUnformatted($"Type: {u.LithologyType}");
+                        ImGui.TextUnformatted($"From: {u.DepthFrom:0.###} m");
+                        ImGui.TextUnformatted($"To:   {u.DepthTo:0.###} m");
+                        ImGui.TextUnformatted($"Thk:  {Math.Max(0, u.DepthTo - u.DepthFrom):0.###} m");
+                        ImGui.EndTooltip();
+                    }
                 }
             }
         }
@@ -579,7 +627,7 @@ public class BoreholeViewer : IDatasetViewer, IDisposable
     }
 
     private void DrawTrackVisible(ImDrawListPtr dl, ParameterTrack track, Vector2 origin,
-        float width, float ppm, float step, float top, float bottom)
+        float width, float ppm, float step, float top, float bottom, Vector2 clipMin, Vector2 clipMax)
     {
         var yTop = origin.Y;
         var yBot = origin.Y + (bottom - top) * ppm;
@@ -648,29 +696,38 @@ public class BoreholeViewer : IDatasetViewer, IDisposable
         {
             var io = ImGui.GetIO();
             var mouse = io.MousePos;
-            var rectMin = new Vector2(origin.X, yTop);
-            var rectMax = new Vector2(origin.X + width, yBot);
 
-            if (mouse.X >= rectMin.X && mouse.X <= rectMax.X && mouse.Y >= rectMin.Y && mouse.Y <= rectMax.Y)
+            // CRITICAL FIX: Check if mouse is within visible window bounds first
+            // clipMin and clipMax define the actual visible viewport area
+            var isMouseInVisibleArea = mouse.X >= clipMin.X && mouse.X <= clipMax.X &&
+                                       mouse.Y >= clipMin.Y && mouse.Y <= clipMax.Y;
+
+            if (isMouseInVisibleArea)
             {
-                // depth under mouse:
-                var tY = mouse.Y - origin.Y;
-                var depth = top + tY / Math.Max(1e-6f, ppm);
-                depth = Math.Clamp(depth, top, bottom);
+                var rectMin = new Vector2(origin.X, yTop);
+                var rectMax = new Vector2(origin.X + width, yBot);
 
-                // interpolate value at depth
-                var (hasVal, value) = EvaluateTrackAtDepth(track, depth);
+                if (mouse.X >= rectMin.X && mouse.X <= rectMax.X && mouse.Y >= rectMin.Y && mouse.Y <= rectMax.Y)
+                {
+                    // depth under mouse:
+                    var tY = mouse.Y - origin.Y;
+                    var depth = top + tY / Math.Max(1e-6f, ppm);
+                    depth = Math.Clamp(depth, top, bottom);
 
-                ImGui.BeginTooltip();
-                var label = string.IsNullOrWhiteSpace(track.Unit) ? track.Name : $"{track.Name} [{track.Unit}]";
-                ImGui.TextUnformatted(label);
-                ImGui.TextUnformatted($"Depth: {depth:0.###} m");
-                if (hasVal)
-                    ImGui.TextUnformatted($"Value: {value:0.###}");
-                else
-                    ImGui.TextUnformatted("Value: n/a");
-                ImGui.TextUnformatted($"Range: {track.MinValue:0.###} â€“ {track.MaxValue:0.###}");
-                ImGui.EndTooltip();
+                    // interpolate value at depth
+                    var (hasVal, value) = EvaluateTrackAtDepth(track, depth);
+
+                    ImGui.BeginTooltip();
+                    var label = string.IsNullOrWhiteSpace(track.Unit) ? track.Name : $"{track.Name} [{track.Unit}]";
+                    ImGui.TextUnformatted(label);
+                    ImGui.TextUnformatted($"Depth: {depth:0.###} m");
+                    if (hasVal)
+                        ImGui.TextUnformatted($"Value: {value:0.###}");
+                    else
+                        ImGui.TextUnformatted("Value: n/a");
+                    ImGui.TextUnformatted($"Range: {track.MinValue:0.###} – {track.MaxValue:0.###}");
+                    ImGui.EndTooltip();
+                }
             }
         }
     }

@@ -185,8 +185,14 @@ public class GeothermalVisualization3D : IDisposable
 
         _renderTargetView = _factory.CreateTextureView(_renderTarget);
 
+        // Use backend-compatible depth format
+        // Metal and Vulkan require D32_Float_S8_UInt, D3D11 can use D24_UNorm_S8_UInt
+        var depthFormat = _graphicsDevice.BackendType == GraphicsBackend.Direct3D11
+            ? PixelFormat.D24_UNorm_S8_UInt
+            : PixelFormat.D32_Float_S8_UInt;
+
         var depthTexture = _factory.CreateTexture(TextureDescription.Texture2D(
-            width, height, 1, 1, PixelFormat.D24_UNorm_S8_UInt, TextureUsage.DepthStencil));
+            width, height, 1, 1, depthFormat, TextureUsage.DepthStencil));
 
         _framebuffer = _factory.CreateFramebuffer(new FramebufferDescription(depthTexture, _renderTarget));
     }
@@ -479,7 +485,9 @@ public class GeothermalVisualization3D : IDisposable
         commandList.ClearDepthStencil(1.0f);
 
         UpdateUniforms();
-        commandList.SetGraphicsResourceSet(0, _resourceSet);
+
+        // CRITICAL FIX: Must set pipeline BEFORE setting resource sets
+        // We'll set the resource set after each SetPipeline call
 
         // Render domain mesh
         if (_showDomainMesh && _domainGpuMesh.VertexBuffer != null)
@@ -506,6 +514,7 @@ public class GeothermalVisualization3D : IDisposable
             else
             {
                 commandList.SetPipeline(pipeline);
+                commandList.SetGraphicsResourceSet(0, _resourceSet); // After pipeline
                 commandList.SetVertexBuffer(0, _domainGpuMesh.VertexBuffer);
                 commandList.SetIndexBuffer(_domainGpuMesh.IndexBuffer, IndexFormat.UInt32);
                 commandList.DrawIndexed(_domainGpuMesh.IndexCount);
@@ -517,6 +526,7 @@ public class GeothermalVisualization3D : IDisposable
         {
             var pipeline = _renderMode == RenderMode.Streamlines ? _streamlinePipeline : _isosurfacePipeline;
             commandList.SetPipeline(pipeline);
+            commandList.SetGraphicsResourceSet(0, _resourceSet); // After pipeline
             foreach (var gpuMesh in _dynamicGpuMeshes)
             {
                 if (gpuMesh.VertexBuffer == null) continue;
@@ -530,6 +540,7 @@ public class GeothermalVisualization3D : IDisposable
         if (_renderMode == RenderMode.Slices && _sliceQuad.VertexBuffer != null)
         {
             commandList.SetPipeline(_slicePipeline);
+            commandList.SetGraphicsResourceSet(0, _resourceSet); // After pipeline
             commandList.SetVertexBuffer(0, _sliceQuad.VertexBuffer);
             commandList.SetIndexBuffer(_sliceQuad.IndexBuffer, IndexFormat.UInt32);
             commandList.DrawIndexed(_sliceQuad.IndexCount);
@@ -539,6 +550,7 @@ public class GeothermalVisualization3D : IDisposable
         if (_showBorehole && _boreholeGpuMesh.VertexBuffer != null)
         {
             commandList.SetPipeline(_isosurfacePipeline); // Use a simple solid shader
+            commandList.SetGraphicsResourceSet(0, _resourceSet); // After pipeline
             commandList.SetVertexBuffer(0, _boreholeGpuMesh.VertexBuffer);
             commandList.SetIndexBuffer(_boreholeGpuMesh.IndexBuffer, IndexFormat.UInt32);
             commandList.DrawIndexed(_boreholeGpuMesh.IndexCount);
@@ -928,9 +940,27 @@ void main() {
     {
         return @"
 #version 450
-layout(location = 0) in vec4 frag_Color;
+layout(location = 0) in vec4 frag_Color; layout(location = 1) in vec3 frag_Normal; layout(location = 2) in vec3 frag_UVW;
+layout(location = 3) in vec3 frag_WorldPos;
 layout(location = 0) out vec4 FragColor;
-void main() { FragColor = vec4(0.9, 0.1, 0.9, 1.0); }";
+layout(set = 0, binding = 0) uniform UniformData {
+    mat4 v; mat4 p; mat4 m; vec4 LightDirection; vec4 ViewPosition; vec4 ColorMapRange; vec4 si; vec4 RenderSettings; vec4 di;
+} ubo;
+layout(set = 0, binding = 1) uniform texture1D ColorMap; layout(set = 0, binding = 2) uniform sampler ColorMapSampler;
+layout(set = 0, binding = 4) uniform texture3D VelocityData; layout(set = 0, binding = 5) uniform sampler DataSampler;
+void main() { 
+    // Sample velocity at this location to color streamline by flow speed
+    vec3 velocity = texture(sampler3D(VelocityData, DataSampler), frag_UVW).xyz;
+    float magnitude = length(velocity);
+    float t = clamp(magnitude / ubo.ColorMapRange.z, 0.0, 1.0);
+    
+    // Use color map for velocity-based coloring
+    vec4 color = texture(sampler1D(ColorMap, ColorMapSampler), t);
+    
+    // Make streamlines bright and easy to see
+    vec3 finalColor = mix(vec3(0.9, 0.1, 0.9), color.rgb, 0.7);
+    FragColor = vec4(finalColor, 1.0); 
+}";
     }
 
     private string GetSliceFragmentShader()
@@ -972,6 +1002,7 @@ void main() {
         return @"
 #version 450
 layout(location = 0) in vec4 frag_Color; layout(location = 1) in vec3 frag_Normal; layout(location = 2) in vec3 frag_UVW;
+layout(location = 3) in vec3 frag_WorldPos;
 layout(location = 0) out vec4 FragColor;
 layout(set = 0, binding = 0) uniform UniformData {
     mat4 v; mat4 p; mat4 m; vec4 LightDirection; vec4 ViewPosition; vec4 ColorMapRange; vec4 si; vec4 RenderSettings; vec4 di;
@@ -981,11 +1012,23 @@ layout(set = 0, binding = 4) uniform texture3D VelocityData; layout(set = 0, bin
 void main() {
     vec3 velocity = texture(sampler3D(VelocityData, DataSampler), frag_UVW).xyz;
     float magnitude = length(velocity);
+    
+    // Color based on velocity magnitude
     float t = clamp(magnitude / ubo.ColorMapRange.z, 0.0, 1.0);
     vec4 color = texture(sampler1D(ColorMap, ColorMapSampler), t);
+    
+    // Add directional highlighting: create stripes based on velocity direction
+    vec3 vel_normalized = magnitude > 1e-6 ? normalize(velocity) : vec3(0, 0, 1);
+    float stripePattern = sin(dot(frag_WorldPos, vel_normalized) * 3.14159 * 2.0) * 0.5 + 0.5;
+    float directionStrength = 0.3 * stripePattern * t; // Only visible where velocity is significant
+    
+    // Lighting
     vec3 normal = normalize(frag_Normal);
     float diffuse = max(dot(normal, normalize(ubo.LightDirection.xyz)), 0.3);
-    FragColor = vec4(color.rgb * diffuse, ubo.RenderSettings.y);
+    
+    // Final color with directional pattern
+    vec3 finalColor = color.rgb * diffuse + vec3(directionStrength);
+    FragColor = vec4(finalColor, ubo.RenderSettings.y);
 }";
     }
 

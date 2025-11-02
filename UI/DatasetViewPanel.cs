@@ -3,6 +3,7 @@
 using System.Numerics;
 using GeoscientistToolkit.Data;
 using GeoscientistToolkit.Data.CtImageStack;
+using GeoscientistToolkit.UI.Borehole;
 using GeoscientistToolkit.UI.Interfaces;
 using ImGuiNET;
 
@@ -53,6 +54,13 @@ public class DatasetViewPanel : BasePanel
         ImGui.BeginChild("ViewerContent", contentSize);
         _viewer.DrawContent(ref _zoom, ref _pan);
         ImGui.EndChild();
+        
+        // CRITICAL FIX: Render legend AFTER viewer content is complete
+        // This prevents circular dependency when legend is docked to the viewer
+        if (_viewer is BoreholeViewer boreholeViewer)
+        {
+            boreholeViewer.DrawLegendWindow();
+        }
     }
 
     private void DrawToolbar()
@@ -86,9 +94,9 @@ public class DatasetViewPanel : BasePanel
         ImGui.Separator();
 
         // Prepare text content
-        var statusBarText = $"Dataset: {Dataset.Name} | Type: {Dataset.Type} | Zoom: {_zoom:F1}×";
+        var statusBarText = $"Dataset: {Dataset.Name} | Type: {Dataset.Type} | Zoom: {_zoom:F1}Ã—";
         if (Dataset is CtImageStackDataset ct && ct.Width > 0)
-            statusBarText += $" | Size: {ct.Width}×{ct.Height}×{ct.Depth}";
+            statusBarText += $" | Size: {ct.Width}Ã—{ct.Height}Ã—{ct.Depth}";
 
         // --- Draw a background for the status bar text ---
         var padding = 4f;

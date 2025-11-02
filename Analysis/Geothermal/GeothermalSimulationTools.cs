@@ -20,9 +20,6 @@ public class GeothermalSimulationTools : IDatasetTools, IDisposable
 {
     // Export file dialog
     private readonly ImGuiExportFileDialog _exportDialog = new("geothermal_export", "Export Geothermal Results");
-
-    // Graphics device reference for 3D visualization
-    private readonly GraphicsDevice _graphicsDevice;
     private readonly float _newLayerPermeability = 1e-14f;
     private readonly GeothermalSimulationOptions _options = new();
     private CancellationTokenSource _cancellationTokenSource;
@@ -31,6 +28,7 @@ public class GeothermalSimulationTools : IDatasetTools, IDisposable
     private bool _isSimulationRunning;
 
     private GeothermalMesh _mesh;
+    private GeothermalMeshPreview _meshPreview;
     private float _newIsosurfaceTemp = 20f;
     private float _newLayerConductivity = 2.5f;
     private float _newLayerDensity = 2650f;
@@ -49,15 +47,13 @@ public class GeothermalSimulationTools : IDatasetTools, IDisposable
     private int _selectedResultTab = 0;
     private bool _show3DVisualization;
     private bool _showAdvancedOptions;
+    private bool _showMeshPreview;
     private bool _showResults;
     private string _simulationMessage = "";
     private float _simulationProgress;
     private GeothermalVisualization3D _visualization3D;
 
-    public GeothermalSimulationTools(GraphicsDevice graphicsDevice)
-    {
-        _graphicsDevice = graphicsDevice;
-    }
+    private bool _meshPreviewWindowLoggedOnce;
 
     public void Draw(Dataset dataset)
     {
@@ -112,6 +108,13 @@ public class GeothermalSimulationTools : IDatasetTools, IDisposable
         else
             RenderConfiguration();
 
+        // CRITICAL: Render mesh preview window ALWAYS when flag is true
+        // Don't check _meshPreview - let the window show error state if needed
+        if (_showMeshPreview)
+        {
+            RenderMeshPreviewWindow();
+        }
+
         // Handle export dialog
         if (_exportDialog.IsOpen)
             if (_exportDialog.Submit())
@@ -124,6 +127,7 @@ public class GeothermalSimulationTools : IDatasetTools, IDisposable
     public void Dispose()
     {
         _visualization3D?.Dispose();
+        _meshPreview?.Dispose();
         _cancellationTokenSource?.Dispose();
     }
 
@@ -237,7 +241,50 @@ public class GeothermalSimulationTools : IDatasetTools, IDisposable
         ImGui.SameLine();
         if (_results != null && ImGui.Button("Show Results", new Vector2(200, 30))) _showResults = true;
 
+        ImGui.SameLine();
+        if (ImGui.Button("Mesh Preview", new Vector2(200, 30)))
+        {
+            _showMeshPreview = !_showMeshPreview;
+            Logger.Log($"Mesh Preview button clicked. _showMeshPreview = {_showMeshPreview}");
+            
+            if (_showMeshPreview)
+            {
+                Logger.Log("Initializing mesh preview...");
+                InitializeMeshPreview(_options.BoreholeDataset);
+            }
+            else
+            {
+                Logger.Log("Closing mesh preview");
+                _meshPreview?.Dispose();
+                _meshPreview = null;
+            }
+        }
+
         ImGui.Separator();
+
+        // Handle GraphicsDevice unavailable popup
+        if (ImGui.BeginPopupModal("GraphicsDevice Unavailable", ref _showMeshPreview,
+                ImGuiWindowFlags.AlwaysAutoResize))
+        {
+            ImGui.Text("Graphics device is not available for 3D mesh preview.");
+            ImGui.Spacing();
+            ImGui.TextWrapped(
+                "The mesh preview requires a graphics device which is not currently initialized. This typically happens when:");
+            ImGui.BulletText("The application is still starting up");
+            ImGui.BulletText("You're running in a headless environment");
+            ImGui.BulletText("Graphics initialization failed");
+            ImGui.Spacing();
+            ImGui.TextColored(new Vector4(0.7f, 0.9f, 1.0f, 1.0f),
+                "You can still run simulations - only the 3D preview is affected.");
+            ImGui.Spacing();
+            if (ImGui.Button("OK", new Vector2(120, 0)))
+            {
+                ImGui.CloseCurrentPopup();
+                _showMeshPreview = false;
+            }
+
+            ImGui.EndPopup();
+        }
 
         // Heat Exchanger Configuration
         if (ImGui.CollapsingHeader("Heat Exchanger Configuration"))
@@ -527,6 +574,10 @@ public class GeothermalSimulationTools : IDatasetTools, IDisposable
                 var useSIMD = _options.UseSIMD;
                 if (ImGui.Checkbox("Use SIMD", ref useSIMD))
                     _options.UseSIMD = useSIMD;
+
+                var useGPU = _options.UseGPU;
+                if (ImGui.Checkbox("Use GPU", ref useGPU))
+                    _options.UseGPU = useGPU;
             }
         }
     }
@@ -930,17 +981,146 @@ public class GeothermalSimulationTools : IDatasetTools, IDisposable
             ImGui.SetItemTooltip("Visualize groundwater flow paths");
 
             ImGui.SameLine();
+            if (ImGui.Button("Show Velocity Field")) ShowVelocityField();
+            ImGui.SetItemTooltip("Display velocity magnitude on the domain surface");
+
+            ImGui.Text("Flux Visualization:");
+            ImGui.TextColored(new Vector4(0.7f, 0.9f, 1.0f, 1.0f),
+                "• Use 'Velocity' render mode to see flux magnitude with directional patterns");
+            ImGui.TextColored(new Vector4(0.7f, 0.9f, 1.0f, 1.0f),
+                "• Streamlines show flow paths colored by velocity");
         }
 
         if (ImGui.Button("Clear Visualizations")) _visualization3D?.ClearDynamicMeshes();
         ImGui.SetItemTooltip("Remove all dynamically generated visualization objects");
     }
 
+    private void InitializeMeshPreview(BoreholeDataset borehole)
+    {
+        Logger.Log("=== InitializeMeshPreview START ===");
+        Logger.Log($"VeldridManager.GraphicsDevice: {(VeldridManager.GraphicsDevice != null ? "OK" : "NULL")}");
+        Logger.Log($"BoreholeDataset: {(borehole != null ? "OK" : "NULL")}");
+        
+        // Check if GraphicsDevice is available in VeldridManager
+        if (VeldridManager.GraphicsDevice == null)
+        {
+            Logger.LogWarning("VeldridManager.GraphicsDevice not available. Mesh preview cannot be generated.");
+            ImGui.OpenPopup("GraphicsDevice Unavailable");
+            _showMeshPreview = false;
+            return;
+        }
+
+        try
+        {
+            Logger.Log("Creating GeothermalMeshPreview...");
+            
+            // Create mesh preview if it doesn't exist
+            if (_meshPreview == null)
+            {
+                _meshPreview = new GeothermalMeshPreview();
+                Logger.Log("New GeothermalMeshPreview created");
+            }
+            else
+            {
+                // If mesh preview exists, dispose and recreate
+                Logger.Log("Disposing existing mesh preview");
+                _meshPreview.Dispose();
+                _meshPreview = new GeothermalMeshPreview();
+                Logger.Log("Mesh preview recreated");
+            }
+
+            // Generate preview using VeldridManager graphics device
+            Logger.Log("Calling GeneratePreview...");
+            _meshPreview.GeneratePreview(borehole, _options);
+            Logger.Log("GeneratePreview completed successfully");
+            Logger.Log("=== InitializeMeshPreview END (SUCCESS) ===");
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError($"Failed to initialize mesh preview: {ex.Message}");
+            Logger.LogError($"Stack trace: {ex.StackTrace}");
+            _meshPreview?.Dispose();
+            _meshPreview = null;
+            _showMeshPreview = false;
+            ImGui.OpenPopup("GraphicsDevice Unavailable");
+            Logger.Log("=== InitializeMeshPreview END (FAILED) ===");
+        }
+    }
+
+    private void RenderMeshPreviewWindow()
+    {
+        // Debug: Log first time
+        if (!_meshPreviewWindowLoggedOnce)
+        {
+            Logger.Log("=== RenderMeshPreviewWindow CALLED ===");
+            _meshPreviewWindowLoggedOnce = true;
+        }
+        
+        // FORCE window to appear - simplest possible approach
+        ImGui.SetNextWindowSize(new Vector2(1000, 700), ImGuiCond.FirstUseEver);
+        ImGui.SetNextWindowPos(new Vector2(100, 100), ImGuiCond.FirstUseEver);
+        
+        // Use local variable to avoid ref issues
+        var isOpen = _showMeshPreview;
+        
+        var windowResult = ImGui.Begin("Geothermal Mesh Preview", ref isOpen, ImGuiWindowFlags.None);
+        
+        if (!_meshPreviewWindowLoggedOnce)
+            Logger.Log($"ImGui.Begin returned: {windowResult}, isOpen: {isOpen}");
+        
+        if (windowResult)
+        {
+            try
+            {
+                // Header with info
+                ImGui.TextColored(new Vector4(0.3f, 0.8f, 1.0f, 1.0f), 
+                    "Mesh Configuration Preview - Pre-Simulation");
+                ImGui.Separator();
+                ImGui.Spacing();
+
+                // Check if mesh preview exists
+                if (_meshPreview != null && _options.BoreholeDataset != null)
+                {
+                    ImGui.Text("Rendering mesh preview...");
+                    _meshPreview.Render(_options.BoreholeDataset, _options);
+                }
+                else
+                {
+                    ImGui.TextColored(new Vector4(1, 1, 0, 1), "Initializing mesh preview...");
+                    if (_meshPreview == null)
+                        ImGui.Text("_meshPreview is null - initialization may have failed");
+                    if (_options.BoreholeDataset == null)
+                        ImGui.Text("_options.BoreholeDataset is null");
+                        
+                    ImGui.Spacing();
+                    ImGui.Text("Check console log for details");
+                }
+            }
+            catch (Exception ex)
+            {
+                ImGui.TextColored(new Vector4(1, 0, 0, 1), $"Error: {ex.Message}");
+                Logger.LogError($"Mesh preview render error: {ex.Message}");
+            }
+        }
+        ImGui.End();
+
+        // Update the flag
+        _showMeshPreview = isOpen;
+
+        // If window was closed via X button, clean up
+        if (!_showMeshPreview)
+        {
+            _meshPreview?.Dispose();
+            _meshPreview = null;
+        }
+    }
+
     private void InitializeVisualization()
     {
-        if (_visualization3D == null && _graphicsDevice != null)
+        var graphicsDevice = VeldridManager.GraphicsDevice;
+        if (_visualization3D == null && graphicsDevice != null)
         {
-            _visualization3D = new GeothermalVisualization3D(_graphicsDevice);
+            _visualization3D = new GeothermalVisualization3D(graphicsDevice);
 
             if (_results != null && _mesh != null)
                 _visualization3D.LoadResults(_results, _mesh, _options);
@@ -1214,5 +1394,21 @@ public class GeothermalSimulationTools : IDatasetTools, IDisposable
         _visualization3D.AddMesh(streamlineMesh);
         _visualization3D.SetRenderMode(GeothermalVisualization3D.RenderMode.Streamlines);
         Logger.Log("Streamlines added to visualization.");
+    }
+
+    private void ShowVelocityField()
+    {
+        if (_visualization3D == null || _results?.DarcyVelocityField == null)
+        {
+            Logger.LogWarning("No velocity field data available.");
+            return;
+        }
+
+        // Simply switch to velocity render mode which will show the flux magnitude
+        // with directional patterns on the domain surface
+        _visualization3D.ClearDynamicMeshes();
+        _visualization3D.SetRenderMode(GeothermalVisualization3D.RenderMode.Velocity);
+        Logger.Log(
+            "Velocity field visualization activated. The domain surface now shows flux magnitude with directional indicators.");
     }
 }

@@ -5,16 +5,20 @@ using System.Runtime.Intrinsics;
 using System.Runtime.Intrinsics.X86;
 using GeoscientistToolkit.Data.Mesh3D;
 using GeoscientistToolkit.Data.VolumeData;
+using GeoscientistToolkit.Util;
 
 namespace GeoscientistToolkit.Analysis.Geothermal;
 
 /// <summary>
 ///     Implements the numerical solver for coupled heat transfer and groundwater flow in geothermal systems.
 /// </summary>
-public class GeothermalSimulationSolver
+public class GeothermalSimulationSolver : IDisposable
 {
     private readonly CancellationToken _cancellationToken;
     private readonly GeothermalMesh _mesh;
+
+    // OpenCL acceleration
+    private readonly GeothermalOpenCLSolver _openCLSolver;
     private readonly GeothermalSimulationOptions _options;
     private readonly IProgress<(float progress, string message)> _progress;
 
@@ -39,6 +43,7 @@ public class GeothermalSimulationSolver
 
     // Performance tracking
     private int _totalIterations;
+    private bool _useOpenCL;
     private float[,,,] _velocity; // [r,theta,z,component]
 
     public GeothermalSimulationSolver(
@@ -53,6 +58,42 @@ public class GeothermalSimulationSolver
         _cancellationToken = cancellationToken;
 
         ValidateAndSanitizeMesh(); // ADDED
+
+        // Initialize OpenCL if GPU acceleration is enabled
+        if (_options.UseGPU)
+            try
+            {
+                _openCLSolver = new GeothermalOpenCLSolver();
+                if (_openCLSolver.IsAvailable)
+                {
+                    if (_openCLSolver.InitializeBuffers(mesh, options))
+                    {
+                        _useOpenCL = true;
+                        Logger.Log($"OpenCL acceleration enabled: {_openCLSolver.DeviceName}");
+                        Logger.Log($"Device memory: {_openCLSolver.DeviceGlobalMemory / (1024 * 1024)} MB");
+                    }
+                    else
+                    {
+                        Logger.LogWarning("Failed to initialize OpenCL buffers, falling back to CPU");
+                        _openCLSolver?.Dispose();
+                        _openCLSolver = null;
+                    }
+                }
+                else
+                {
+                    Logger.LogWarning("OpenCL not available, using CPU");
+                    _openCLSolver?.Dispose();
+                    _openCLSolver = null;
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.LogWarning($"OpenCL initialization failed: {ex.Message}. Using CPU.");
+                _openCLSolver?.Dispose();
+                _openCLSolver = null;
+                _useOpenCL = false;
+            }
+
         InitializeFields();
     }
 
@@ -64,6 +105,14 @@ public class GeothermalSimulationSolver
     public int CurrentTimeStep { get; private set; }
     public double CurrentSimulationTime { get; private set; }
     public string ConvergenceStatus { get; private set; } = "Initializing...";
+
+    /// <summary>
+    ///     Disposes OpenCL resources.
+    /// </summary>
+    public void Dispose()
+    {
+        _openCLSolver?.Dispose();
+    }
 
     /// <summary>
     ///     Validates and sanitizes mesh properties to prevent numerical issues. (ADDED)
@@ -718,7 +767,7 @@ public class GeothermalSimulationSolver
     }
 
     /// <summary>
-    ///     Solves the heat transfer equation. (MODIFIED)
+    ///     Solves the heat transfer equation. (MODIFIED - with OpenCL support)
     /// </summary>
     private async Task SolveHeatTransferAsync(float dt)
     {
@@ -742,17 +791,70 @@ public class GeothermalSimulationSolver
                 float maxChange;
                 _totalIterations++;
 
-                // Interior points
-                if (_options.UseSIMD && Avx2.IsSupported)
-                    maxChange = SolveHeatTransferSIMD(newTemp, dt);
+                // Choose solver: OpenCL GPU or CPU
+                if (_useOpenCL)
+                {
+                    try
+                    {
+                        maxChange = _openCLSolver.SolveHeatTransferGPU(
+                            _temperature,
+                            _velocity,
+                            _dispersionCoefficient,
+                            dt,
+                            _options.SimulateGroundwaterFlow);
+
+                        // CRITICAL FIX: OpenCL updates _temperature directly, but we still need to apply
+                        // boundary conditions and heat exchanger which aren't in the kernel
+                        ApplyBoundaryConditions(_temperature);
+                        ApplyHeatExchangerSource(_temperature, dt);
+                        
+                        // Ensure physically reasonable temperatures after GPU computation
+                        for (var i = 0; i < nr; i++)
+                        for (var j = 0; j < nth; j++)
+                        for (var k = 0; k < nz; k++)
+                        {
+                            _temperature[i, j, k] = Math.Max(273f, Math.Min(473f, _temperature[i, j, k]));
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        Logger.LogWarning($"OpenCL error: {ex.Message}. Falling back to CPU.");
+                        _useOpenCL = false;
+
+                        // Fallback to CPU
+                        if (_options.UseSIMD && Avx2.IsSupported)
+                            maxChange = SolveHeatTransferSIMD(newTemp, dt);
+                        else
+                            maxChange = SolveHeatTransferScalar(newTemp, dt);
+                    }
+                }
                 else
-                    maxChange = SolveHeatTransferScalar(newTemp, dt);
+                {
+                    // CPU solvers
+                    if (_options.UseSIMD && Avx2.IsSupported)
+                        maxChange = SolveHeatTransferSIMD(newTemp, dt);
+                    else
+                        maxChange = SolveHeatTransferScalar(newTemp, dt);
 
-                // Apply boundary conditions
-                ApplyBoundaryConditions(newTemp);
+                    // Apply boundary conditions
+                    ApplyBoundaryConditions(newTemp);
 
-                // Apply heat exchanger source/sink
-                ApplyHeatExchangerSource(newTemp, dt); // MODIFIED: added dt
+                    // Apply heat exchanger source/sink
+                    ApplyHeatExchangerSource(newTemp, dt);
+
+                    // Under-relaxed update for CPU path
+                    for (var i = 0; i < nr; i++)
+                    for (var j = 0; j < nth; j++)
+                    for (var k = 0; k < nz; k++)
+                    {
+                        var tempNew = newTemp[i, j, k];
+                        var tempOld = _temperature[i, j, k];
+                        _temperature[i, j, k] = (1 - _adaptiveRelaxation) * tempOld + _adaptiveRelaxation * tempNew;
+
+                        // Ensure physically reasonable temperatures
+                        _temperature[i, j, k] = Math.Max(273f, Math.Min(473f, _temperature[i, j, k])); // 0-200°C
+                    }
+                }
 
                 // Check for divergence (MODIFIED)
                 if (float.IsNaN(maxChange) || float.IsInfinity(maxChange))
@@ -776,29 +878,20 @@ public class GeothermalSimulationSolver
                 // Track convergence
                 HeatConvergenceHistory.Add(maxChange);
 
-                // Under-relaxed update (ADDED)
-                for (var i = 0; i < nr; i++)
-                for (var j = 0; j < nth; j++)
-                for (var k = 0; k < nz; k++)
-                {
-                    var tempNew = newTemp[i, j, k];
-                    var tempOld = _temperature[i, j, k];
-                    _temperature[i, j, k] = (1 - _adaptiveRelaxation) * tempOld + _adaptiveRelaxation * tempNew;
-
-                    // Ensure physically reasonable temperatures
-                    _temperature[i, j, k] = Math.Max(273f, Math.Min(473f, _temperature[i, j, k])); // 0-200°C
-                }
-
                 _maxError = maxChange;
 
                 // Report progress
                 if (iter % 100 == 0)
+                {
+                    var solverType = _useOpenCL ? "GPU" : "CPU";
                     ConvergenceStatus =
-                        $"Heat iteration {iter}/{_options.MaxIterationsPerStep}, error: {maxChange:E3}, dt: {dt:E2}s";
+                        $"Heat iteration {iter}/{_options.MaxIterationsPerStep} ({solverType}), error: {maxChange:E3}, dt: {dt:E2}s";
+                }
 
                 if (maxChange < _options.ConvergenceTolerance * 10) // Less strict convergence
                 {
-                    ConvergenceStatus = $"Heat converged in {iter} iterations, error: {maxChange:E3}";
+                    var solverType = _useOpenCL ? "GPU" : "CPU";
+                    ConvergenceStatus = $"Heat converged in {iter} iterations ({solverType}), error: {maxChange:E3}";
                     break;
                 }
             }
