@@ -208,7 +208,7 @@ public class GeothermalSimulationOptions
     /// <summary>
     ///     Enable fracture flow simulation.
     /// </summary>
-    public bool SimulateFractures { get; set; } = false;
+    public bool SimulateFractures { get; set; }
 
     /// <summary>
     ///     Fracture aperture (m).
@@ -464,4 +464,377 @@ public class GeothermalSimulationOptions
                 { "Basalt", 1e-15 }
             };
     }
+
+    /// <summary>
+    ///     Applies a preset configuration to the options.
+    /// </summary>
+    public void ApplyPreset(GeothermalSimulationPreset preset)
+    {
+        switch (preset)
+        {
+            case GeothermalSimulationPreset.ShallowGSHP:
+                ApplyShallowGSHPPreset();
+                break;
+            case GeothermalSimulationPreset.MediumDepthHeating:
+                ApplyMediumDepthHeatingPreset();
+                break;
+            case GeothermalSimulationPreset.DeepGeothermalProduction:
+                ApplyDeepGeothermalProductionPreset();
+                break;
+            case GeothermalSimulationPreset.EnhancedGeothermalSystem:
+                ApplyEnhancedGeothermalSystemPreset();
+                break;
+            case GeothermalSimulationPreset.AquiferThermalStorage:
+                ApplyAquiferThermalStoragePreset();
+                break;
+            case GeothermalSimulationPreset.ExplorationTest:
+                ApplyExplorationTestPreset();
+                break;
+            case GeothermalSimulationPreset.Custom:
+                // Do nothing - keep user's current settings
+                break;
+        }
+    }
+
+    private void ApplyShallowGSHPPreset()
+    {
+        // Shallow Ground Source Heat Pump (50-200m)
+        HeatExchangerType = HeatExchangerType.UTube;
+        FlowConfiguration = FlowConfiguration.CounterFlow;
+
+        // Small residential pipes
+        PipeInnerDiameter = 0.032; // 32 mm
+        PipeOuterDiameter = 0.040; // 40 mm
+        PipeSpacing = 0.080; // 80 mm
+        PipeThermalConductivity = 0.4; // HDPE
+        GroutThermalConductivity = 2.0;
+
+        // Low flow rate for residential
+        FluidMassFlowRate = 0.5; // kg/s
+        FluidInletTemperature = 283.15; // 10°C
+        FluidSpecificHeat = 4186;
+        FluidDensity = 1000;
+        FluidViscosity = 0.001;
+        FluidThermalConductivity = 0.6;
+
+        // Shallow ground conditions
+        SurfaceTemperature = 283.15; // 10°C
+        AverageGeothermalGradient = 0.025; // 25 K/km (low gradient)
+        GeothermalHeatFlux = 0.060; // 60 mW/m²
+
+        // Small domain for shallow system
+        DomainRadius = 30;
+        DomainExtension = 10;
+        RadialGridPoints = 40;
+        AngularGridPoints = 24;
+        VerticalGridPoints = 80;
+
+        // Moderate groundwater flow
+        SimulateGroundwaterFlow = true;
+        GroundwaterVelocity = new Vector3(1e-7f, 0, 0); // ~0.01 m/day
+
+        // Short simulation for quick tests
+        SimulationTime = 86400 * 30; // 30 days
+        TimeStep = 60; // 1 minute
+        SaveInterval = 60; // 1 hour
+    }
+
+    private void ApplyMediumDepthHeatingPreset()
+    {
+        // Medium depth district heating (500-1500m)
+        HeatExchangerType = HeatExchangerType.UTube;
+        FlowConfiguration = FlowConfiguration.CounterFlow;
+
+        // Medium commercial pipes
+        PipeInnerDiameter = 0.065; // 65 mm
+        PipeOuterDiameter = 0.075; // 75 mm
+        PipeSpacing = 0.150; // 150 mm
+        PipeThermalConductivity = 0.4; // HDPE
+        GroutThermalConductivity = 2.2;
+
+        // Medium flow rate
+        FluidMassFlowRate = 3.0; // kg/s
+        FluidInletTemperature = 288.15; // 15°C
+        FluidSpecificHeat = 4186;
+        FluidDensity = 1000;
+        FluidViscosity = 0.001;
+        FluidThermalConductivity = 0.6;
+
+        // Moderate geothermal gradient
+        SurfaceTemperature = 285.15; // 12°C
+        AverageGeothermalGradient = 0.030; // 30 K/km
+        GeothermalHeatFlux = 0.065; // 65 mW/m²
+
+        // Medium domain
+        DomainRadius = 75;
+        DomainExtension = 20;
+        RadialGridPoints = 50;
+        AngularGridPoints = 32;
+        VerticalGridPoints = 120;
+
+        // Weak groundwater flow
+        SimulateGroundwaterFlow = true;
+        GroundwaterVelocity = new Vector3(5e-8f, 0, 0); // ~0.004 m/day
+
+        // Medium-term simulation
+        SimulationTime = 86400 * 90; // 90 days
+        TimeStep = 120; // 2 minutes
+        SaveInterval = 60; // 2 hours
+    }
+
+    private void ApplyDeepGeothermalProductionPreset()
+    {
+        // Deep geothermal production (2000-5000m)
+        HeatExchangerType = HeatExchangerType.Coaxial;
+        FlowConfiguration = FlowConfiguration.CounterFlow;
+
+        // Large production well pipes
+        PipeInnerDiameter = 0.125; // 125 mm
+        PipeOuterDiameter = 0.140; // 140 mm
+        PipeSpacing = 0.200; // 200 mm (coaxial outer diameter)
+        PipeThermalConductivity = 45.0; // Steel pipes for deep wells
+        GroutThermalConductivity = 2.5;
+
+        // High flow rate for production
+        FluidMassFlowRate = 15.0; // kg/s
+        FluidInletTemperature = 293.15; // 20°C (return temperature)
+        FluidSpecificHeat = 4186;
+        FluidDensity = 1000;
+        FluidViscosity = 0.0005; // Hot water has lower viscosity
+        FluidThermalConductivity = 0.65;
+
+        // High geothermal gradient
+        SurfaceTemperature = 288.15; // 15°C
+        AverageGeothermalGradient = 0.035; // 35 K/km
+        GeothermalHeatFlux = 0.075; // 75 mW/m²
+
+        // Large domain for deep system
+        DomainRadius = 150;
+        DomainExtension = 50;
+        RadialGridPoints = 60;
+        AngularGridPoints = 36;
+        VerticalGridPoints = 150;
+
+        // Minimal groundwater flow at depth
+        SimulateGroundwaterFlow = true;
+        GroundwaterVelocity = new Vector3(1e-8f, 0, 0); // ~0.001 m/day
+
+        // Long-term production simulation
+        SimulationTime = 86400 * 365; // 1 year
+        TimeStep = 300; // 5 minutes
+        SaveInterval = 48; // 4 hours
+    }
+
+    private void ApplyEnhancedGeothermalSystemPreset()
+    {
+        // Enhanced Geothermal System (EGS) with fractures (3000-6000m)
+        HeatExchangerType = HeatExchangerType.Coaxial;
+        FlowConfiguration = FlowConfiguration.CounterFlow;
+
+        // Large diameter for EGS
+        PipeInnerDiameter = 0.150; // 150 mm
+        PipeOuterDiameter = 0.168; // 168 mm
+        PipeSpacing = 0.250; // 250 mm
+        PipeThermalConductivity = 45.0; // Steel
+        GroutThermalConductivity = 2.8;
+
+        // Very high flow rate
+        FluidMassFlowRate = 30.0; // kg/s
+        FluidInletTemperature = 313.15; // 40°C (warm return from surface)
+        FluidSpecificHeat = 4186;
+        FluidDensity = 950; // Hot water
+        FluidViscosity = 0.0003; // Very hot water
+        FluidThermalConductivity = 0.68;
+
+        // Very high geothermal gradient
+        SurfaceTemperature = 288.15; // 15°C
+        AverageGeothermalGradient = 0.040; // 40 K/km
+        GeothermalHeatFlux = 0.085; // 85 mW/m²
+
+        // Fracture properties
+        SimulateFractures = true;
+        FractureAperture = 0.005; // 5 mm
+        FracturePermeability = 1e-10; // High permeability
+
+        // Very large domain
+        DomainRadius = 200;
+        DomainExtension = 100;
+        RadialGridPoints = 70;
+        AngularGridPoints = 36;
+        VerticalGridPoints = 180;
+
+        // Enhanced flow through fractures
+        SimulateGroundwaterFlow = true;
+        GroundwaterVelocity = new Vector3(5e-7f, 0, 0); // ~0.04 m/day through fractures
+        LongitudinalDispersivity = 10.0;
+        TransverseDispersivity = 1.0;
+
+        // Long-term EGS operation
+        SimulationTime = 86400 * 365; // 1 year
+        TimeStep = 600; // 10 minutes
+        SaveInterval = 36; // 6 hours
+    }
+
+    private void ApplyAquiferThermalStoragePreset()
+    {
+        // Aquifer Thermal Energy Storage (ATES) (50-300m)
+        HeatExchangerType = HeatExchangerType.UTube;
+        FlowConfiguration = FlowConfiguration.CounterFlow;
+
+        // Medium pipes
+        PipeInnerDiameter = 0.080; // 80 mm
+        PipeOuterDiameter = 0.090; // 90 mm
+        PipeSpacing = 0.180; // 180 mm
+        PipeThermalConductivity = 0.4; // HDPE
+        GroutThermalConductivity = 2.5;
+
+        // Variable flow for seasonal storage
+        FluidMassFlowRate = 5.0; // kg/s
+        FluidInletTemperature = 293.15; // 20°C (charging phase)
+        FluidSpecificHeat = 4186;
+        FluidDensity = 1000;
+        FluidViscosity = 0.001;
+        FluidThermalConductivity = 0.6;
+
+        // Shallow aquifer conditions
+        SurfaceTemperature = 285.15; // 12°C
+        AverageGeothermalGradient = 0.025; // 25 K/km
+        GeothermalHeatFlux = 0.060; // 60 mW/m²
+
+        // Medium domain for aquifer storage
+        DomainRadius = 100;
+        DomainExtension = 30;
+        RadialGridPoints = 55;
+        AngularGridPoints = 36;
+        VerticalGridPoints = 100;
+
+        // Strong groundwater flow in aquifer
+        SimulateGroundwaterFlow = true;
+        GroundwaterVelocity = new Vector3(5e-6f, 0, 0); // ~0.4 m/day
+        LongitudinalDispersivity = 5.0;
+        TransverseDispersivity = 0.5;
+
+        // Seasonal storage cycle
+        SimulationTime = 86400 * 180; // 6 months
+        TimeStep = 180; // 3 minutes
+        SaveInterval = 40; // 2 hours
+    }
+
+    private void ApplyExplorationTestPreset()
+    {
+        // Quick exploration/feasibility test (any depth)
+        HeatExchangerType = HeatExchangerType.UTube;
+        FlowConfiguration = FlowConfiguration.CounterFlow;
+
+        // Standard test pipes
+        PipeInnerDiameter = 0.050; // 50 mm
+        PipeOuterDiameter = 0.063; // 63 mm
+        PipeSpacing = 0.125; // 125 mm
+        PipeThermalConductivity = 0.4;
+        GroutThermalConductivity = 2.0;
+
+        // Test flow rate
+        FluidMassFlowRate = 1.5; // kg/s
+        FluidInletTemperature = 288.15; // 15°C
+        FluidSpecificHeat = 4186;
+        FluidDensity = 1000;
+        FluidViscosity = 0.001;
+        FluidThermalConductivity = 0.6;
+
+        // Default ground conditions
+        SurfaceTemperature = 285.15; // 12°C
+        AverageGeothermalGradient = 0.030; // 30 K/km
+        GeothermalHeatFlux = 0.065; // 65 mW/m²
+
+        // Coarse grid for fast computation
+        DomainRadius = 50;
+        DomainExtension = 20;
+        RadialGridPoints = 35;
+        AngularGridPoints = 24;
+        VerticalGridPoints = 60;
+
+        // Optional groundwater
+        SimulateGroundwaterFlow = true;
+        GroundwaterVelocity = new Vector3(1e-7f, 0, 0);
+
+        // Short test simulation
+        SimulationTime = 86400 * 7; // 7 days
+        TimeStep = 60; // 1 minute
+        SaveInterval = 60; // 1 hour
+
+        // Relaxed convergence for speed
+        ConvergenceTolerance = 2e-3;
+        MaxIterationsPerStep = 40;
+    }
+
+    /// <summary>
+    ///     Gets a description of a preset.
+    /// </summary>
+    public static string GetPresetDescription(GeothermalSimulationPreset preset)
+    {
+        return preset switch
+        {
+            GeothermalSimulationPreset.Custom => "Custom user-defined parameters",
+            GeothermalSimulationPreset.ShallowGSHP =>
+                "Shallow GSHP (50-200m): 0.5 kg/s, 30 days, residential heating/cooling",
+            GeothermalSimulationPreset.MediumDepthHeating =>
+                "Medium Depth (500-1500m): 3 kg/s, 90 days, district heating",
+            GeothermalSimulationPreset.DeepGeothermalProduction =>
+                "Deep Production (2000-5000m): 15 kg/s, 1 year, utility-scale power",
+            GeothermalSimulationPreset.EnhancedGeothermalSystem =>
+                "EGS (3000-6000m): 30 kg/s, 1 year, fracture flow, high temperature",
+            GeothermalSimulationPreset.AquiferThermalStorage =>
+                "ATES (50-300m): 5 kg/s, 6 months, seasonal energy storage",
+            GeothermalSimulationPreset.ExplorationTest =>
+                "Quick Test (any depth): 1.5 kg/s, 7 days, coarse grid for rapid assessment",
+            _ => "Unknown preset"
+        };
+    }
+}
+
+/// <summary>
+///     Predefined geothermal simulation presets.
+/// </summary>
+public enum GeothermalSimulationPreset
+{
+    /// <summary>
+    ///     User-defined custom configuration (no preset applied).
+    /// </summary>
+    Custom,
+
+    /// <summary>
+    ///     Shallow ground source heat pump (50-200m, residential/small commercial).
+    ///     Low flow (0.5 kg/s), small pipes, short duration.
+    /// </summary>
+    ShallowGSHP,
+
+    /// <summary>
+    ///     Medium depth district heating (500-1500m, commercial).
+    ///     Medium flow (3 kg/s), medium pipes, 90 days.
+    /// </summary>
+    MediumDepthHeating,
+
+    /// <summary>
+    ///     Deep geothermal production well (2000-5000m, utility scale).
+    ///     High flow (15 kg/s), large pipes, 1 year operation.
+    /// </summary>
+    DeepGeothermalProduction,
+
+    /// <summary>
+    ///     Enhanced Geothermal System with fractures (3000-6000m).
+    ///     Very high flow (30 kg/s), very large pipes, fracture flow enabled.
+    /// </summary>
+    EnhancedGeothermalSystem,
+
+    /// <summary>
+    ///     Aquifer Thermal Energy Storage (50-300m, seasonal storage).
+    ///     Medium-high flow (5 kg/s), strong groundwater flow, 6 months.
+    /// </summary>
+    AquiferThermalStorage,
+
+    /// <summary>
+    ///     Quick exploration test (any depth, coarse grid, 7 days).
+    ///     For rapid feasibility assessments.
+    /// </summary>
+    ExplorationTest
 }

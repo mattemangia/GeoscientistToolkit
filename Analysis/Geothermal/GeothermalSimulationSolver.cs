@@ -201,11 +201,22 @@ public class GeothermalSimulationSolver
 
             currentTime += actualTimeStep;
 
-            // Adapt time step for next iteration (ADDED)
+            // Adapt time step for next iteration (IMPROVED)
             if (stepSuccessful && _divergenceCount == 0)
             {
-                // Gradually increase time step if stable
-                actualTimeStep = Math.Min(_options.TimeStep, actualTimeStep * 1.1);
+                // Only increase time step if convergence is good (not just successful)
+                var recentConvergence = ConvergenceHistory.Skip(Math.Max(0, ConvergenceHistory.Count - 10)).ToList();
+                var avgRecentConvergence = recentConvergence.Any() ? recentConvergence.Average() : _maxError;
+
+                // Increase time step more conservatively based on convergence quality
+                if (avgRecentConvergence < _options.ConvergenceTolerance * 0.1)
+                    // Excellent convergence - increase by 5%
+                    actualTimeStep = Math.Min(_options.TimeStep, actualTimeStep * 1.05);
+                else if (avgRecentConvergence < _options.ConvergenceTolerance * 0.5)
+                    // Good convergence - increase by 2%
+                    actualTimeStep = Math.Min(_options.TimeStep, actualTimeStep * 1.02);
+                // else: maintain current time step
+
                 _lastStableTimeStep = (float)actualTimeStep;
             }
         }
@@ -1686,7 +1697,17 @@ public class GeothermalSimulationSolver
         if (results.HeatExtractionRate.Any())
         {
             results.AverageHeatExtractionRate = results.HeatExtractionRate.Average(h => h.heatRate);
-            results.TotalExtractedEnergy = results.HeatExtractionRate.Sum(h => h.heatRate * _options.TimeStep);
+
+            // FIXED: Calculate total energy by integrating over actual time intervals
+            // Use trapezoidal rule for better accuracy
+            results.TotalExtractedEnergy = 0.0;
+            for (var i = 1; i < results.HeatExtractionRate.Count; i++)
+            {
+                var dt = results.HeatExtractionRate[i].time - results.HeatExtractionRate[i - 1].time;
+                var avgPower = (results.HeatExtractionRate[i].heatRate + results.HeatExtractionRate[i - 1].heatRate) /
+                               2.0;
+                results.TotalExtractedEnergy += avgPower * dt;
+            }
         }
 
         // FIXED: Borehole thermal resistance calculation
@@ -1881,7 +1902,12 @@ public class GeothermalSimulationSolver
         var lithologyList = _options.BoreholeDataset.Lithology;
         for (var i = 0; i < lithologyList.Count; i++)
         {
-            var layerName = lithologyList[i].RockType ?? "Unknown";
+            // CRITICAL FIX: Use actual unit name, not generic RockType
+            // RockType/LithologyType is just a category (e.g., "Sandstone")
+            // Name is the specific formation (e.g., "Sandstone Aquifer 1")
+            var layerName = !string.IsNullOrEmpty(lithologyList[i].Name)
+                ? lithologyList[i].Name
+                : lithologyList[i].RockType ?? "Unknown";
             materialIdToLayerName[i + 1] = layerName; // Material ID is index + 1
 
             if (!layerHeatFluxes.ContainsKey(layerName))

@@ -45,6 +45,7 @@ public class GeothermalSimulationTools : IDatasetTools, IDisposable
     // UI state
     private int _selectedHeatExchangerType;
     private int _selectedIsosurface;
+    private int _selectedPreset; // Add preset selection state
     private int _selectedResultTab = 0;
     private bool _show3DVisualization;
     private bool _showAdvancedOptions;
@@ -70,8 +71,17 @@ public class GeothermalSimulationTools : IDatasetTools, IDisposable
         if (_options.BoreholeDataset != boreholeDataset)
         {
             _options.BoreholeDataset = boreholeDataset;
-            _options.SetDefaultValues();
+
+            // CRITICAL FIX: Clear existing layer data when loading new borehole
+            _options.LayerThermalConductivities.Clear();
+            _options.LayerSpecificHeats.Clear();
+            _options.LayerDensities.Clear();
+            _options.LayerPorosities.Clear();
+            _options.LayerPermeabilities.Clear();
+
+            // Now initialize from borehole FIRST, then fill in any missing defaults
             InitializeLayerProperties(boreholeDataset);
+            _options.SetDefaultValues(); // Only fills in layers that don't exist
         }
 
         ImGui.Separator();
@@ -119,51 +129,44 @@ public class GeothermalSimulationTools : IDatasetTools, IDisposable
 
     private void InitializeLayerProperties(BoreholeDataset boreholeDataset)
     {
-        // Initialize with borehole-specific lithology if available
+        // Initialize with borehole-specific lithology
+        // This will use the ACTUAL layer names from the borehole
         foreach (var unit in boreholeDataset.LithologyUnits)
         {
-            var name = unit.RockType ?? "Unknown";
+            // CRITICAL FIX: Use actual unit Name, not generic RockType
+            // RockType is a category (e.g., "Sandstone")
+            // Name is the specific unit (e.g., "Sandstone Aquifer 1")
+            var name = !string.IsNullOrEmpty(unit.Name) ? unit.Name : unit.RockType ?? "Unknown";
 
-            if (!_options.LayerThermalConductivities.ContainsKey(name))
-            {
-                // Try to get from unit parameters, otherwise use defaults
-                var conductivity = unit.Parameters.TryGetValue("Thermal Conductivity", out var tc)
-                    ? tc
+            // Always use borehole parameters if available, otherwise reasonable defaults
+            var conductivity = unit.Parameters.TryGetValue("ThermalConductivity", out var tc)
+                ? tc
+                : unit.Parameters.TryGetValue("Thermal Conductivity", out var tc2)
+                    ? tc2
                     : 2.5;
-                _options.LayerThermalConductivities[name] = conductivity;
-            }
+            _options.LayerThermalConductivities[name] = conductivity;
 
-            if (!_options.LayerSpecificHeats.ContainsKey(name))
-            {
-                var specificHeat = unit.Parameters.TryGetValue("Specific Heat", out var sh)
-                    ? sh
+            var specificHeat = unit.Parameters.TryGetValue("SpecificHeat", out var sh)
+                ? sh
+                : unit.Parameters.TryGetValue("Specific Heat", out var sh2)
+                    ? sh2
                     : 900;
-                _options.LayerSpecificHeats[name] = specificHeat;
-            }
+            _options.LayerSpecificHeats[name] = specificHeat;
 
-            if (!_options.LayerDensities.ContainsKey(name))
-            {
-                var density = unit.Parameters.TryGetValue("Density", out var d)
-                    ? d
-                    : 2650;
-                _options.LayerDensities[name] = density;
-            }
+            var density = unit.Parameters.TryGetValue("Density", out var d)
+                ? d
+                : 2650;
+            _options.LayerDensities[name] = density;
 
-            if (!_options.LayerPorosities.ContainsKey(name))
-            {
-                var porosity = unit.Parameters.TryGetValue("Porosity", out var p)
-                    ? p / 100.0
-                    : 0.1; // Convert from percentage if needed
-                _options.LayerPorosities[name] = porosity;
-            }
+            var porosity = unit.Parameters.TryGetValue("Porosity", out var p)
+                ? p > 1 ? p / 100.0 : p // Handle both percentage and decimal
+                : 0.1;
+            _options.LayerPorosities[name] = porosity;
 
-            if (!_options.LayerPermeabilities.ContainsKey(name))
-            {
-                var permeability = unit.Parameters.TryGetValue("Permeability", out var k)
-                    ? k
-                    : 1e-14;
-                _options.LayerPermeabilities[name] = permeability;
-            }
+            var permeability = unit.Parameters.TryGetValue("Permeability", out var k)
+                ? k
+                : 1e-14;
+            _options.LayerPermeabilities[name] = permeability;
         }
     }
 
@@ -171,6 +174,63 @@ public class GeothermalSimulationTools : IDatasetTools, IDisposable
     {
         ImGui.Text("Simulation Configuration");
         ImGui.Separator();
+
+        // Preset Selector
+        ImGui.PushStyleColor(ImGuiCol.Header, new Vector4(0.2f, 0.4f, 0.7f, 1.0f));
+        if (ImGui.CollapsingHeader("Simulation Presets", ImGuiTreeNodeFlags.DefaultOpen))
+        {
+            ImGui.PopStyleColor();
+
+            ImGui.TextWrapped(
+                "Select a preset to quickly configure the simulation for common scenarios. You can modify any parameter after applying a preset.");
+            ImGui.Spacing();
+
+            var presetNames = new[]
+            {
+                "Custom (Current Settings)",
+                "Shallow GSHP (50-200m)",
+                "Medium Depth Heating (500-1500m)",
+                "Deep Geothermal Production (2000-5000m)",
+                "Enhanced Geothermal System (3000-6000m)",
+                "Aquifer Thermal Storage (50-300m)",
+                "Quick Exploration Test"
+            };
+
+            var currentPreset = _selectedPreset;
+            if (ImGui.Combo("Preset Configuration", ref currentPreset, presetNames, presetNames.Length))
+            {
+                _selectedPreset = currentPreset;
+                if (_selectedPreset > 0) // Not "Custom"
+                {
+                    var preset = (GeothermalSimulationPreset)_selectedPreset;
+                    _options.ApplyPreset(preset);
+
+                    // Update UI state to match preset
+                    _selectedHeatExchangerType = (int)_options.HeatExchangerType;
+                    _selectedFlowConfig = (int)_options.FlowConfiguration;
+                }
+            }
+
+            // Show description of selected preset
+            if (_selectedPreset > 0)
+            {
+                var preset = (GeothermalSimulationPreset)_selectedPreset;
+                var description = GeothermalSimulationOptions.GetPresetDescription(preset);
+                ImGui.TextColored(new Vector4(0.7f, 0.9f, 1.0f, 1.0f), $"📋 {description}");
+            }
+            else
+            {
+                ImGui.TextColored(new Vector4(0.9f, 0.9f, 0.5f, 1.0f),
+                    "💡 Using custom parameters. Any changes will switch to Custom mode.");
+            }
+
+            ImGui.Spacing();
+            ImGui.Separator();
+        }
+        else
+        {
+            ImGui.PopStyleColor();
+        }
 
         if (ImGui.Button("Run Simulation", new Vector2(200, 30))) StartSimulation();
 
@@ -182,59 +242,102 @@ public class GeothermalSimulationTools : IDatasetTools, IDisposable
         // Heat Exchanger Configuration
         if (ImGui.CollapsingHeader("Heat Exchanger Configuration"))
         {
-            ImGui.Combo("Type", ref _selectedHeatExchangerType, "U-Tube\0Coaxial\0");
-            _options.HeatExchangerType = (HeatExchangerType)_selectedHeatExchangerType;
+            var heatExType = _selectedHeatExchangerType;
+            if (ImGui.Combo("Type", ref heatExType, "U-Tube\0Coaxial\0"))
+            {
+                _selectedHeatExchangerType = heatExType;
+                _options.HeatExchangerType = (HeatExchangerType)_selectedHeatExchangerType;
+                _selectedPreset = 0; // Switch to Custom
+            }
 
-            ImGui.Combo("Flow", ref _selectedFlowConfig, "Counter Flow\0Parallel Flow\0");
-            _options.FlowConfiguration = (FlowConfiguration)_selectedFlowConfig;
+            var flowConfig = _selectedFlowConfig;
+            if (ImGui.Combo("Flow", ref flowConfig, "Counter Flow\0Parallel Flow\0"))
+            {
+                _selectedFlowConfig = flowConfig;
+                _options.FlowConfiguration = (FlowConfiguration)_selectedFlowConfig;
+                _selectedPreset = 0; // Switch to Custom
+            }
 
             var pipeInnerDiam = (float)(_options.PipeInnerDiameter * 1000);
-            if (ImGui.SliderFloat("Pipe Inner Diameter (mm)", ref pipeInnerDiam, 20, 100))
+            if (ImGui.SliderFloat("Pipe Inner Diameter (mm)", ref pipeInnerDiam, 20, 200))
+            {
                 _options.PipeInnerDiameter = pipeInnerDiam / 1000;
+                _selectedPreset = 0; // Switch to Custom
+            }
 
             var pipeOuterDiam = (float)(_options.PipeOuterDiameter * 1000);
-            if (ImGui.SliderFloat("Pipe Outer Diameter (mm)", ref pipeOuterDiam, 25, 120))
+            if (ImGui.SliderFloat("Pipe Outer Diameter (mm)", ref pipeOuterDiam, 25, 220))
+            {
                 _options.PipeOuterDiameter = pipeOuterDiam / 1000;
+                _selectedPreset = 0; // Switch to Custom
+            }
 
             var pipeSpacing = (float)(_options.PipeSpacing * 1000);
-            if (ImGui.SliderFloat("Pipe Spacing (mm)", ref pipeSpacing, 50, 200))
+            if (ImGui.SliderFloat("Pipe Spacing (mm)", ref pipeSpacing, 50, 300))
+            {
                 _options.PipeSpacing = pipeSpacing / 1000;
+                _selectedPreset = 0; // Switch to Custom
+            }
 
             var pipeConductivity = (float)_options.PipeThermalConductivity;
-            if (ImGui.SliderFloat("Pipe Conductivity (W/m·K)", ref pipeConductivity, 0.1f, 1.0f))
+            if (ImGui.SliderFloat("Pipe Conductivity (W/m·K)", ref pipeConductivity, 0.1f, 50.0f))
+            {
                 _options.PipeThermalConductivity = pipeConductivity;
+                _selectedPreset = 0; // Switch to Custom
+            }
 
             var groutConductivity = (float)_options.GroutThermalConductivity;
-            if (ImGui.SliderFloat("Grout Conductivity (W/m·K)", ref groutConductivity, 1.0f, 3.0f))
+            if (ImGui.SliderFloat("Grout Conductivity (W/m·K)", ref groutConductivity, 1.0f, 5.0f))
+            {
                 _options.GroutThermalConductivity = groutConductivity;
+                _selectedPreset = 0; // Switch to Custom
+            }
         }
 
         // Fluid Properties
         if (ImGui.CollapsingHeader("Fluid Properties"))
         {
             var massFlow = (float)_options.FluidMassFlowRate;
-            if (ImGui.SliderFloat("Mass Flow Rate (kg/s)", ref massFlow, 0.1f, 2.0f))
+            if (ImGui.SliderFloat("Mass Flow Rate (kg/s)", ref massFlow, 0.1f, 50.0f))
+            {
                 _options.FluidMassFlowRate = massFlow;
+                _selectedPreset = 0; // Switch to Custom
+            }
 
             var inletTemp = (float)(_options.FluidInletTemperature - 273.15);
-            if (ImGui.SliderFloat("Inlet Temperature (°C)", ref inletTemp, 0, 30))
+            if (ImGui.SliderFloat("Inlet Temperature (°C)", ref inletTemp, 0, 50))
+            {
                 _options.FluidInletTemperature = inletTemp + 273.15;
+                _selectedPreset = 0; // Switch to Custom
+            }
 
             var specificHeat = (float)_options.FluidSpecificHeat;
             if (ImGui.InputFloat("Specific Heat (J/kg·K)", ref specificHeat))
+            {
                 _options.FluidSpecificHeat = specificHeat;
+                _selectedPreset = 0; // Switch to Custom
+            }
 
             var density = (float)_options.FluidDensity;
             if (ImGui.InputFloat("Density (kg/m³)", ref density))
+            {
                 _options.FluidDensity = density;
+                _selectedPreset = 0; // Switch to Custom
+            }
 
             var viscosity = (float)(_options.FluidViscosity * 1000);
             if (ImGui.InputFloat("Viscosity (mPa·s)", ref viscosity))
+            {
                 _options.FluidViscosity = viscosity / 1000;
+                _selectedPreset = 0; // Switch to Custom
+            }
 
             var thermalCond = (float)_options.FluidThermalConductivity;
             if (ImGui.InputFloat("Thermal Conductivity (W/m·K)", ref thermalCond))
+            {
                 _options.FluidThermalConductivity = thermalCond;
+                _selectedPreset = 0; // Switch to Custom
+            }
         }
 
         // Ground Properties
@@ -576,12 +679,26 @@ public class GeothermalSimulationTools : IDatasetTools, IDisposable
             if (_show3DVisualization)
             {
                 InitializeVisualization();
+
+                // Verify initialization succeeded
+                if (_visualization3D == null)
+                {
+                    Logger.LogError("Failed to initialize 3D visualization. GraphicsDevice may be unavailable.");
+                    _show3DVisualization = false;
+                }
             }
             else
             {
                 _visualization3D?.Dispose();
                 _visualization3D = null;
             }
+        }
+
+        // Add status indicator
+        if (_show3DVisualization)
+        {
+            ImGui.SameLine();
+            ImGui.TextColored(new Vector4(0.2f, 1.0f, 0.2f, 1.0f), "● 3D View Active");
         }
 
         if (_show3DVisualization && _visualization3D != null)
@@ -740,48 +857,83 @@ public class GeothermalSimulationTools : IDatasetTools, IDisposable
 
     private void RenderVisualizationTab()
     {
-        ImGui.Text("Visualization Options:");
+        ImGui.TextColored(new Vector4(0.7f, 0.9f, 1.0f, 1.0f), "3D Visualization Options");
+        ImGui.Separator();
+
+        // Show generation status
+        if (!_results.TemperatureIsosurfaces.Any() && !_results.TemperatureSlices.Any())
+        {
+            ImGui.TextColored(new Vector4(1.0f, 0.8f, 0.2f, 1.0f), "⚠ No visualization data generated yet.");
+            ImGui.TextWrapped(
+                "Isosurfaces and slices are generated during simulation. You can also manually generate them below:");
+            ImGui.Spacing();
+        }
+
+        // Always show controls to generate new visualizations
+        ImGui.Text("Generate New Visualizations:");
+        ImGui.InputFloat("Isosurface Temperature (°C)", ref _newIsosurfaceTemp);
+        if (ImGui.Button("Generate Isosurface")) GenerateNewIsosurface(_newIsosurfaceTemp + 273.15f);
+        ImGui.SetItemTooltip("Create a 3D surface where temperature equals this value");
+
+        ImGui.Separator();
 
         // Temperature isosurfaces
         if (_results.TemperatureIsosurfaces.Any())
         {
-            ImGui.Text($"Temperature Isosurfaces: {_results.TemperatureIsosurfaces.Count}");
+            ImGui.Text($"Temperature Isosurfaces ({_results.TemperatureIsosurfaces.Count} available):");
             var isoNames = _results.TemperatureIsosurfaces
                 .Select(iso => $"{Path.GetFileNameWithoutExtension(iso.Name)}").ToArray();
-            ImGui.ListBox("Isosurfaces", ref _selectedIsosurface, isoNames, isoNames.Length);
+            ImGui.ListBox("##Isosurfaces", ref _selectedIsosurface, isoNames, Math.Min(5, isoNames.Length));
 
-            if (ImGui.Button("View Single Isosurface")) ViewSingleIsosurface();
+            if (ImGui.Button("View Selected Isosurface")) ViewSingleIsosurface();
+            ImGui.SetItemTooltip("Show only the selected isosurface");
 
             ImGui.SameLine();
             if (ImGui.Button("View All Isosurfaces")) ViewAllIsosurfaces();
+            ImGui.SetItemTooltip("Show all isosurfaces together");
+
+            ImGui.Separator();
+        }
+        else
+        {
+            ImGui.TextColored(new Vector4(0.7f, 0.7f, 0.7f, 1.0f), "No isosurfaces available. Generate one above.");
+            ImGui.Separator();
         }
 
         // Temperature slices
         if (_results.TemperatureSlices.Any())
         {
-            ImGui.Separator();
-            ImGui.Text("2D Slices:");
+            ImGui.Text($"2D Temperature Slices ({_results.TemperatureSlices.Count} available):");
 
             foreach (var slice in _results.TemperatureSlices)
-                if (ImGui.Button($"View Slice at {slice.Key:F1} m"))
+                if (ImGui.Button($"View Slice at {slice.Key:F1} m depth"))
                     if (_visualization3D != null)
                     {
                         var normalizedDepth = slice.Key / _options.BoreholeDataset.TotalDepth;
                         _visualization3D.SetRenderMode(GeothermalVisualization3D.RenderMode.Slices);
                         _visualization3D.SetSliceDepth((float)normalizedDepth);
                     }
+
+            ImGui.Separator();
+        }
+        else
+        {
+            ImGui.TextColored(new Vector4(0.7f, 0.7f, 0.7f, 1.0f), "No 2D slices available.");
+            ImGui.Text("Slices are generated during simulation if 'Generate2DSlices' is enabled.");
+            ImGui.Separator();
         }
 
-        // Add new isosurface
-        ImGui.Separator();
-        ImGui.InputFloat("New Isosurface Temp (°C)", ref _newIsosurfaceTemp);
-        if (ImGui.Button("Generate Isosurface")) GenerateNewIsosurface(_newIsosurfaceTemp + 273.15f);
+        // Streamlines
+        if (_options.SimulateGroundwaterFlow)
+        {
+            if (ImGui.Button("Show Streamlines")) ShowStreamlines();
+            ImGui.SetItemTooltip("Visualize groundwater flow paths");
 
-        // Export options
-        ImGui.Separator();
-        if (ImGui.Button("Show Streamlines")) ShowStreamlines();
-        ImGui.SameLine();
-        if (ImGui.Button("Clear Dynamic Meshes")) _visualization3D?.ClearDynamicMeshes();
+            ImGui.SameLine();
+        }
+
+        if (ImGui.Button("Clear Visualizations")) _visualization3D?.ClearDynamicMeshes();
+        ImGui.SetItemTooltip("Remove all dynamically generated visualization objects");
     }
 
     private void InitializeVisualization()
@@ -806,6 +958,16 @@ public class GeothermalSimulationTools : IDatasetTools, IDisposable
         // Controls Panel on the left
         ImGui.BeginChild("3DControls", new Vector2(controlPanelWidth, availableSize.Y), ImGuiChildFlags.Border);
         {
+            ImGui.TextColored(new Vector4(0.3f, 0.7f, 1.0f, 1.0f), "3D Visualization Controls");
+            ImGui.Separator();
+
+            // Instructions
+            ImGui.TextWrapped("Mouse Controls:");
+            ImGui.BulletText("Left drag: Rotate view");
+            ImGui.BulletText("Right drag: Pan camera");
+            ImGui.BulletText("Scroll: Zoom in/out");
+            ImGui.Separator();
+
             _visualization3D.RenderControls();
 
             ImGui.Separator();
