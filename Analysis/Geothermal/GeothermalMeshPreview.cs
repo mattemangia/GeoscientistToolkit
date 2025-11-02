@@ -118,12 +118,32 @@ public class GeothermalMeshPreview : IDisposable
 
         if (_visualization3D != null)
         {
-            // Render controls
+            // Render controls at the top
             RenderVisualizationControls();
             ImGui.Separator();
 
-            // Render 3D view
+            // Get remaining space for the 3D view
+            var viewRegion = ImGui.GetContentRegionAvail();
+            
+            // Resize render target if needed
+            if (viewRegion.X > 0 && viewRegion.Y > 0)
+            {
+                _visualization3D.Resize((uint)viewRegion.X, (uint)viewRegion.Y);
+            }
+
+            // Render 3D view to texture
             _visualization3D.Render();
+            
+            // Display the rendered texture in ImGui
+            var renderTargetBinding = _visualization3D.GetRenderTargetImGuiBinding();
+            if (renderTargetBinding != IntPtr.Zero && viewRegion.X > 0 && viewRegion.Y > 0)
+            {
+                ImGui.Image(renderTargetBinding, viewRegion);
+            }
+            else
+            {
+                ImGui.Text("Render target not available");
+            }
         }
 
         ImGui.EndChild();
@@ -204,7 +224,7 @@ public class GeothermalMeshPreview : IDisposable
             ImGui.Indent();
             RenderInfoRow("Type:", options.HeatExchangerType.ToString());
             RenderInfoRow("Pipe Diameter:", $"{options.PipeInnerDiameter * 1000:F1} mm");
-            RenderInfoRow("Grout Conductivity:", $"{options.GroutThermalConductivity:F2} W/(mÃ‚Â·K)");
+            RenderInfoRow("Grout Conductivity:", $"{options.GroutThermalConductivity:F2} W/(mÃƒâ€šÃ‚Â·K)");
 
             if (options.HeatExchangerType == HeatExchangerType.UTube)
                 RenderInfoRow("Pipe Spacing:", $"{options.PipeSpacing * 1000:F1} mm");
@@ -216,11 +236,11 @@ public class GeothermalMeshPreview : IDisposable
         if (ImGui.CollapsingHeader("Operating Conditions", ImGuiTreeNodeFlags.DefaultOpen))
         {
             ImGui.Indent();
-            // FluidMassFlowRate is in kg/s, convert to L/min (assuming water density ~1000 kg/mÃ‚Â³)
+            // FluidMassFlowRate is in kg/s, convert to L/min (assuming water density ~1000 kg/mÃƒâ€šÃ‚Â³)
             var flowRateLmin = options.FluidMassFlowRate * 60.0; // kg/s to L/min (for water)
             RenderInfoRow("Flow Rate:", $"{flowRateLmin:F2} L/min");
-            RenderInfoRow("Inlet Temp:", $"{options.FluidInletTemperature - 273.15:F1} Ã‚Â°C");
-            RenderInfoRow("Surface Temp:", $"{options.SurfaceTemperature - 273.15:F1} Ã‚Â°C");
+            RenderInfoRow("Inlet Temp:", $"{options.FluidInletTemperature - 273.15:F1} Ãƒâ€šÃ‚Â°C");
+            RenderInfoRow("Surface Temp:", $"{options.SurfaceTemperature - 273.15:F1} Ãƒâ€šÃ‚Â°C");
             RenderInfoRow("Simulation Time:", $"{options.SimulationTime / (365.25 * 24 * 3600):F1} years");
             ImGui.Unindent();
             ImGui.Spacing();
@@ -261,19 +281,19 @@ public class GeothermalMeshPreview : IDisposable
                     var layerName = !string.IsNullOrEmpty(unit.Name) ? unit.Name : unit.RockType ?? "Unknown";
 
                     if (options.LayerThermalConductivities.TryGetValue(layerName, out var conductivity))
-                        RenderInfoRow("Conductivity:", $"{conductivity:F2} W/(mÃ‚Â·K)");
+                        RenderInfoRow("Conductivity:", $"{conductivity:F2} W/(mÃƒâ€šÃ‚Â·K)");
 
                     if (options.LayerSpecificHeats.TryGetValue(layerName, out var specificHeat))
-                        RenderInfoRow("Specific Heat:", $"{specificHeat:F0} J/(kgÃ‚Â·K)");
+                        RenderInfoRow("Specific Heat:", $"{specificHeat:F0} J/(kgÃƒâ€šÃ‚Â·K)");
 
                     if (options.LayerDensities.TryGetValue(layerName, out var density))
-                        RenderInfoRow("Density:", $"{density:F0} kg/mÃ‚Â³");
+                        RenderInfoRow("Density:", $"{density:F0} kg/mÃƒâ€šÃ‚Â³");
 
                     if (options.LayerPorosities.TryGetValue(layerName, out var porosity))
                         RenderInfoRow("Porosity:", $"{porosity * 100:F1} %");
 
                     if (options.LayerPermeabilities.TryGetValue(layerName, out var permeability))
-                        RenderInfoRow("Permeability:", $"{permeability:E2} mÃ‚Â²");
+                        RenderInfoRow("Permeability:", $"{permeability:E2} mÃƒâ€šÃ‚Â²");
 
                     ImGui.PopStyleColor();
                     ImGui.Unindent();
@@ -294,18 +314,18 @@ public class GeothermalMeshPreview : IDisposable
             // Check for potential issues
             var totalCells = options.RadialGridPoints * options.AngularGridPoints * options.VerticalGridPoints;
 
-            if (totalCells > 100000) ImGui.TextWrapped("Ã¢Å¡Â  High cell count may result in long simulation times.");
+            if (totalCells > 100000) ImGui.TextWrapped("ÃƒÂ¢Ã…Â¡Ã‚Â  High cell count may result in long simulation times.");
 
             if (options.DomainRadius < borehole.TotalDepth * 0.5)
             {
                 ImGui.Spacing();
-                ImGui.TextWrapped("Ã¢Å¡Â  Domain radius seems small relative to borehole depth. Consider increasing it.");
+                ImGui.TextWrapped("ÃƒÂ¢Ã…Â¡Ã‚Â  Domain radius seems small relative to borehole depth. Consider increasing it.");
             }
 
             if (borehole.LithologyUnits.Count == 0)
             {
                 ImGui.Spacing();
-                ImGui.TextWrapped("Ã¢â€žÂ¹ No lithology units defined. Default properties will be used.");
+                ImGui.TextWrapped("ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¹ No lithology units defined. Default properties will be used.");
             }
 
             // Recommendations

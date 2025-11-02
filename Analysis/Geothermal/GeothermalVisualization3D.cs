@@ -62,6 +62,7 @@ public class GeothermalVisualization3D : IDisposable
     private Framebuffer _framebuffer;
     private Pipeline _isosurfacePipeline;
     private float _isoValue = 20f; // Celsius
+    private Pipeline _wireframePipeline; // Add wireframe pipeline for lines
 
     private bool _isPanning;
     private bool _isRotating;
@@ -104,12 +105,20 @@ public class GeothermalVisualization3D : IDisposable
 
     public GeothermalVisualization3D(GraphicsDevice graphicsDevice)
     {
+        Logger.Log("[GeothermalVisualization3D] Constructor starting...");
         _graphicsDevice = graphicsDevice;
         _factory = graphicsDevice.ResourceFactory;
 
+        Logger.Log("[GeothermalVisualization3D] Calling InitializeColorMaps...");
+        InitializeColorMaps(); // Must be called BEFORE InitializeResources
+        
+        Logger.Log("[GeothermalVisualization3D] Calling InitializeResources...");
         InitializeResources();
-        InitializeColorMaps();
+        
+        Logger.Log("[GeothermalVisualization3D] Calling UpdateCamera...");
         UpdateCamera();
+        
+        Logger.Log("[GeothermalVisualization3D] Constructor complete!");
     }
 
     public void Dispose()
@@ -119,6 +128,7 @@ public class GeothermalVisualization3D : IDisposable
         _streamlinePipeline?.Dispose();
         _isosurfacePipeline?.Dispose();
         _slicePipeline?.Dispose();
+        _wireframePipeline?.Dispose();
 
         _uniformBuffer?.Dispose();
 
@@ -148,15 +158,21 @@ public class GeothermalVisualization3D : IDisposable
 
     private void InitializeResources()
     {
+        Logger.Log("[InitializeResources] Starting...");
+        
+        Logger.Log("[InitializeResources] Creating render target...");
         CreateRenderTarget(_renderWidth, _renderHeight);
 
+        Logger.Log("[InitializeResources] Creating uniform buffer...");
         _uniformBuffer = _factory.CreateBuffer(new BufferDescription(
             (uint)Marshal.SizeOf<UniformData>(),
             BufferUsage.UniformBuffer | BufferUsage.Dynamic));
 
+        Logger.Log("[InitializeResources] Creating samplers...");
         _linearSampler = _factory.CreateSampler(SamplerDescription.Linear);
         _pointSampler = _factory.CreateSampler(SamplerDescription.Point);
 
+        Logger.Log("[InitializeResources] Creating resource layout...");
         _resourceLayout = _factory.CreateResourceLayout(new ResourceLayoutDescription(
             new ResourceLayoutElementDescription("UniformData", ResourceKind.UniformBuffer,
                 ShaderStages.Vertex | ShaderStages.Fragment),
@@ -168,7 +184,104 @@ public class GeothermalVisualization3D : IDisposable
             new ResourceLayoutElementDescription("DataSampler", ResourceKind.Sampler, ShaderStages.Fragment)
         ));
 
+        Logger.Log("[InitializeResources] Creating pipelines...");
         CreatePipelines();
+        
+        Logger.Log("[InitializeResources] Creating dummy textures...");
+        // Create dummy textures for preview mode
+        CreateDummyTextures();
+        
+        Logger.Log("[InitializeResources] Initializing resource set...");
+        // Initialize resource set
+        InitializeResourceSet();
+        
+        Logger.Log("[InitializeResources] Complete!");
+    }
+
+    private void CreateDummyTextures()
+    {
+        Logger.Log("[CreateDummyTextures] Starting...");
+        
+        // Create dummy temperature texture if not exists
+        if (_temperatureTexture3D == null)
+        {
+            Logger.Log("[CreateDummyTextures] Creating temperature texture...");
+            _temperatureTexture3D = _factory.CreateTexture(TextureDescription.Texture3D(1, 1, 1, 1,
+                PixelFormat.R32_Float, TextureUsage.Sampled));
+            _temperatureView?.Dispose();
+            _temperatureView = _factory.CreateTextureView(_temperatureTexture3D);
+            
+            if (_temperatureView == null)
+            {
+                throw new InvalidOperationException("Failed to create temperature texture view");
+            }
+            
+            // Fill with dummy data
+            var dummyData = new float[] { 293.15f }; // 20°C in Kelvin
+            _graphicsDevice.UpdateTexture(_temperatureTexture3D, dummyData, 0, 0, 0, 1, 1, 1, 0, 0);
+            Logger.Log("[CreateDummyTextures] Temperature texture created successfully");
+        }
+
+        // Create dummy velocity texture if not exists
+        if (_velocityTexture3D == null)
+        {
+            Logger.Log("[CreateDummyTextures] Creating velocity texture...");
+            _velocityTexture3D = _factory.CreateTexture(TextureDescription.Texture3D(1, 1, 1, 1,
+                PixelFormat.R32_G32_B32_A32_Float, TextureUsage.Sampled));
+            _velocityView?.Dispose();
+            _velocityView = _factory.CreateTextureView(_velocityTexture3D);
+            
+            if (_velocityView == null)
+            {
+                throw new InvalidOperationException("Failed to create velocity texture view");
+            }
+            
+            // Fill with dummy data
+            var dummyData = new Vector4[] { Vector4.Zero };
+            _graphicsDevice.UpdateTexture(_velocityTexture3D, dummyData, 0, 0, 0, 1, 1, 1, 0, 0);
+            Logger.Log("[CreateDummyTextures] Velocity texture created successfully");
+        }
+        
+        Logger.Log($"[CreateDummyTextures] Complete. TempView={(_temperatureView != null)}, VelView={(_velocityView != null)}");
+    }
+
+    private void InitializeResourceSet()
+    {
+        try
+        {
+            Logger.Log("[InitializeResourceSet] Starting...");
+            _resourceSet?.Dispose();
+            
+            Logger.Log($"[InitializeResourceSet] Checking resources:");
+            Logger.Log($"  _uniformBuffer: {(_uniformBuffer != null ? "OK" : "NULL")}");
+            Logger.Log($"  _colorMapView: {(_colorMapView != null ? "OK" : "NULL")}");
+            Logger.Log($"  _linearSampler: {(_linearSampler != null ? "OK" : "NULL")}");
+            Logger.Log($"  _temperatureView: {(_temperatureView != null ? "OK" : "NULL")}");
+            Logger.Log($"  _velocityView: {(_velocityView != null ? "OK" : "NULL")}");
+            Logger.Log($"  _pointSampler: {(_pointSampler != null ? "OK" : "NULL")}");
+            
+            if (_uniformBuffer == null) throw new InvalidOperationException("_uniformBuffer is null");
+            if (_colorMapView == null) throw new InvalidOperationException("_colorMapView is null");
+            if (_linearSampler == null) throw new InvalidOperationException("_linearSampler is null");
+            if (_temperatureView == null) throw new InvalidOperationException("_temperatureView is null");
+            if (_velocityView == null) throw new InvalidOperationException("_velocityView is null");
+            if (_pointSampler == null) throw new InvalidOperationException("_pointSampler is null");
+            
+            Logger.Log("[InitializeResourceSet] Creating resource set...");
+            _resourceSet = _factory.CreateResourceSet(new ResourceSetDescription(
+                _resourceLayout,
+                _uniformBuffer, _colorMapView, _linearSampler,
+                _temperatureView, _velocityView, _pointSampler
+            ));
+            
+            Logger.Log($"[InitializeResourceSet] Success! ResourceSet created: {(_resourceSet != null)}");
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError($"[InitializeResourceSet] FAILED: {ex.Message}");
+            Logger.LogError($"[InitializeResourceSet] Stack: {ex.StackTrace}");
+            throw;
+        }
     }
 
     private void CreateRenderTarget(uint width, uint height)
@@ -214,6 +327,11 @@ public class GeothermalVisualization3D : IDisposable
 
         var sliceShaders = CreateShaders("Slice");
         _slicePipeline = CreatePipeline(sliceShaders, BlendStateDescription.SingleAlphaBlend);
+        
+        // Create wireframe pipeline for line rendering
+        var wireframeShaders = CreateShaders("Isosurface"); // Use basic shader
+        _wireframePipeline = CreatePipeline(wireframeShaders, BlendStateDescription.SingleAlphaBlend,
+            PrimitiveTopology.LineList);
     }
 
     private (Shader vertex, Shader fragment) CreateShaders(string name)
@@ -290,7 +408,11 @@ public class GeothermalVisualization3D : IDisposable
             ));
 
         var indices = new List<uint>();
-        if (isStreamline) // For streamlines, faces are pairs of indices for lines
+        
+        // Check if this is a wireframe mesh (has 2-vertex faces)
+        bool isWireframe = mesh.Faces.Any() && mesh.Faces.All(f => f.Length == 2);
+        
+        if (isStreamline || isWireframe) // For streamlines and wireframes, faces are pairs of indices for lines
             foreach (var face in mesh.Faces)
             {
                 if (face.Length < 2) continue;
@@ -322,7 +444,14 @@ public class GeothermalVisualization3D : IDisposable
             BufferUsage.IndexBuffer));
         _graphicsDevice.UpdateBuffer(ib, 0, indices.ToArray());
 
-        return new GpuMesh { VertexBuffer = vb, IndexBuffer = ib, IndexCount = (uint)indices.Count, Source = mesh };
+        return new GpuMesh 
+        { 
+            VertexBuffer = vb, 
+            IndexBuffer = ib, 
+            IndexCount = (uint)indices.Count, 
+            Source = mesh,
+            IsWireframe = isWireframe || isStreamline // Set flag for wireframe rendering
+        };
     }
 
     private void GenerateDomainAndBoreholeGpuMeshes()
@@ -456,27 +585,17 @@ public class GeothermalVisualization3D : IDisposable
 
     private void UpdateResourceSet()
     {
-        _resourceSet?.Dispose();
-
-        if (_velocityView == null)
-        {
-            var dummyTex = _factory.CreateTexture(TextureDescription.Texture3D(1, 1, 1, 1,
-                PixelFormat.R32_G32_B32_A32_Float, TextureUsage.Sampled));
-            _velocityView = _factory.CreateTextureView(dummyTex);
-            // Dispose the dummy texture right away if it's not needed elsewhere
-            dummyTex.Dispose();
-        }
-
-        _resourceSet = _factory.CreateResourceSet(new ResourceSetDescription(
-            _resourceLayout,
-            _uniformBuffer, _colorMapView, _linearSampler,
-            _temperatureView, _velocityView, _pointSampler
-        ));
+        // Ensure dummy textures exist
+        CreateDummyTextures();
+        
+        // Recreate resource set with current textures
+        InitializeResourceSet();
     }
 
     public void Render()
     {
-        if (_results == null) return;
+        // Allow rendering in preview mode (without simulation results)
+        var isPreviewMode = _results == null;
 
         var commandList = _graphicsDevice.ResourceFactory.CreateCommandList();
         commandList.Begin();
@@ -484,76 +603,128 @@ public class GeothermalVisualization3D : IDisposable
         commandList.ClearColorTarget(0, RgbaFloat.Black);
         commandList.ClearDepthStencil(1.0f);
 
-        UpdateUniforms();
+        if (!isPreviewMode)
+        {
+            UpdateUniforms();
+        }
+        else
+        {
+            // In preview mode, update uniforms with basic camera/lighting only
+            UpdatePreviewUniforms();
+        }
 
         // CRITICAL FIX: Must set pipeline BEFORE setting resource sets
         // We'll set the resource set after each SetPipeline call
 
-        // Render domain mesh
-        if (_showDomainMesh && _domainGpuMesh.VertexBuffer != null)
+        if (!isPreviewMode)
         {
-            // CORRECTED: Use a switch statement to select the pipeline
-            Pipeline pipeline;
-            switch (_renderMode)
+            // Full rendering mode with simulation results
+            // Render domain mesh
+            if (_showDomainMesh && _domainGpuMesh.VertexBuffer != null)
             {
-                case RenderMode.Velocity:
-                    pipeline = _velocityPipeline;
-                    break;
-                case RenderMode.Temperature:
-                default:
-                    pipeline = _temperaturePipeline;
-                    break;
+                // CORRECTED: Use a switch statement to select the pipeline
+                Pipeline pipeline;
+                switch (_renderMode)
+                {
+                    case RenderMode.Velocity:
+                        pipeline = _velocityPipeline;
+                        break;
+                    case RenderMode.Temperature:
+                    default:
+                        pipeline = _temperaturePipeline;
+                        break;
+                }
+
+                // The domain mesh should not be rendered in these modes
+                if (_renderMode == RenderMode.Slices || _renderMode == RenderMode.Isosurface ||
+                    _renderMode == RenderMode.Streamlines)
+                {
+                    // Do nothing, or render a wireframe
+                }
+                else
+                {
+                    commandList.SetPipeline(pipeline);
+                    commandList.SetGraphicsResourceSet(0, _resourceSet); // After pipeline
+                    commandList.SetVertexBuffer(0, _domainGpuMesh.VertexBuffer);
+                    commandList.SetIndexBuffer(_domainGpuMesh.IndexBuffer, IndexFormat.UInt32);
+                    commandList.DrawIndexed(_domainGpuMesh.IndexCount);
+                }
             }
 
-            // The domain mesh should not be rendered in these modes
-            if (_renderMode == RenderMode.Slices || _renderMode == RenderMode.Isosurface ||
-                _renderMode == RenderMode.Streamlines)
+            // Render dynamic meshes (isosurfaces, streamlines)
+            if (_dynamicGpuMeshes.Any())
             {
-                // Do nothing, or render a wireframe
-            }
-            else
-            {
+                var pipeline = _renderMode == RenderMode.Streamlines ? _streamlinePipeline : _isosurfacePipeline;
                 commandList.SetPipeline(pipeline);
                 commandList.SetGraphicsResourceSet(0, _resourceSet); // After pipeline
-                commandList.SetVertexBuffer(0, _domainGpuMesh.VertexBuffer);
-                commandList.SetIndexBuffer(_domainGpuMesh.IndexBuffer, IndexFormat.UInt32);
-                commandList.DrawIndexed(_domainGpuMesh.IndexCount);
+                foreach (var gpuMesh in _dynamicGpuMeshes)
+                {
+                    if (gpuMesh.VertexBuffer == null) continue;
+                    commandList.SetVertexBuffer(0, gpuMesh.VertexBuffer);
+                    commandList.SetIndexBuffer(gpuMesh.IndexBuffer, IndexFormat.UInt32);
+                    commandList.DrawIndexed(gpuMesh.IndexCount);
+                }
             }
-        }
 
-        // Render dynamic meshes (isosurfaces, streamlines)
-        if (_dynamicGpuMeshes.Any())
-        {
-            var pipeline = _renderMode == RenderMode.Streamlines ? _streamlinePipeline : _isosurfacePipeline;
-            commandList.SetPipeline(pipeline);
-            commandList.SetGraphicsResourceSet(0, _resourceSet); // After pipeline
-            foreach (var gpuMesh in _dynamicGpuMeshes)
+            // Render slices
+            if (_renderMode == RenderMode.Slices && _sliceQuad.VertexBuffer != null)
             {
-                if (gpuMesh.VertexBuffer == null) continue;
-                commandList.SetVertexBuffer(0, gpuMesh.VertexBuffer);
-                commandList.SetIndexBuffer(gpuMesh.IndexBuffer, IndexFormat.UInt32);
-                commandList.DrawIndexed(gpuMesh.IndexCount);
+                commandList.SetPipeline(_slicePipeline);
+                commandList.SetGraphicsResourceSet(0, _resourceSet); // After pipeline
+                commandList.SetVertexBuffer(0, _sliceQuad.VertexBuffer);
+                commandList.SetIndexBuffer(_sliceQuad.IndexBuffer, IndexFormat.UInt32);
+                commandList.DrawIndexed(_sliceQuad.IndexCount);
+            }
+
+            // Render borehole
+            if (_showBorehole && _boreholeGpuMesh.VertexBuffer != null)
+            {
+                commandList.SetPipeline(_isosurfacePipeline); // Use a simple solid shader
+                commandList.SetGraphicsResourceSet(0, _resourceSet); // After pipeline
+                commandList.SetVertexBuffer(0, _boreholeGpuMesh.VertexBuffer);
+                commandList.SetIndexBuffer(_boreholeGpuMesh.IndexBuffer, IndexFormat.UInt32);
+                commandList.DrawIndexed(_boreholeGpuMesh.IndexCount);
             }
         }
-
-        // Render slices
-        if (_renderMode == RenderMode.Slices && _sliceQuad.VertexBuffer != null)
+        else
         {
-            commandList.SetPipeline(_slicePipeline);
-            commandList.SetGraphicsResourceSet(0, _resourceSet); // After pipeline
-            commandList.SetVertexBuffer(0, _sliceQuad.VertexBuffer);
-            commandList.SetIndexBuffer(_sliceQuad.IndexBuffer, IndexFormat.UInt32);
-            commandList.DrawIndexed(_sliceQuad.IndexCount);
-        }
-
-        // Render borehole
-        if (_showBorehole && _boreholeGpuMesh.VertexBuffer != null)
-        {
-            commandList.SetPipeline(_isosurfacePipeline); // Use a simple solid shader
-            commandList.SetGraphicsResourceSet(0, _resourceSet); // After pipeline
-            commandList.SetVertexBuffer(0, _boreholeGpuMesh.VertexBuffer);
-            commandList.SetIndexBuffer(_boreholeGpuMesh.IndexBuffer, IndexFormat.UInt32);
-            commandList.DrawIndexed(_boreholeGpuMesh.IndexCount);
+            // Preview mode: render only dynamic meshes (preview meshes)
+            if (_dynamicGpuMeshes.Any())
+            {
+                // Group meshes by rendering type
+                var wireframeMeshes = _dynamicGpuMeshes.Where(m => m.IsWireframe).ToList();
+                var solidMeshes = _dynamicGpuMeshes.Where(m => !m.IsWireframe).ToList();
+                
+                // Render wireframe meshes with line topology
+                if (wireframeMeshes.Any())
+                {
+                    commandList.SetPipeline(_wireframePipeline);
+                    commandList.SetGraphicsResourceSet(0, _resourceSet);
+                    
+                    foreach (var gpuMesh in wireframeMeshes)
+                    {
+                        if (gpuMesh.VertexBuffer == null) continue;
+                        commandList.SetVertexBuffer(0, gpuMesh.VertexBuffer);
+                        commandList.SetIndexBuffer(gpuMesh.IndexBuffer, IndexFormat.UInt32);
+                        commandList.DrawIndexed(gpuMesh.IndexCount);
+                    }
+                }
+                
+                // Render solid meshes with triangle topology
+                if (solidMeshes.Any())
+                {
+                    commandList.SetPipeline(_isosurfacePipeline);
+                    commandList.SetGraphicsResourceSet(0, _resourceSet);
+                    
+                    foreach (var gpuMesh in solidMeshes)
+                    {
+                        if (gpuMesh.VertexBuffer == null) continue;
+                        commandList.SetVertexBuffer(0, gpuMesh.VertexBuffer);
+                        commandList.SetIndexBuffer(gpuMesh.IndexBuffer, IndexFormat.UInt32);
+                        commandList.DrawIndexed(gpuMesh.IndexCount);
+                    }
+                }
+            }
         }
 
         commandList.End();
@@ -578,6 +749,25 @@ public class GeothermalVisualization3D : IDisposable
             RenderSettings =
                 new Vector4((float)_renderMode, _opacity, 0, _isoValue + 273.15f), // Pass Iso value in Kelvin
             DomainInfo = new Vector4((float)_options.DomainRadius, _mesh.Z[0], _mesh.Z.Last() - _mesh.Z[0], 0)
+        };
+
+        _graphicsDevice.UpdateBuffer(_uniformBuffer, 0, ref uniforms);
+    }
+
+    private void UpdatePreviewUniforms()
+    {
+        // Simplified uniforms for preview mode (without simulation results)
+        var uniforms = new UniformData
+        {
+            ViewMatrix = _viewMatrix,
+            ProjectionMatrix = _projectionMatrix,
+            ModelMatrix = Matrix4x4.Identity,
+            LightDirection = Vector4.Normalize(new Vector4(-1, -1, -2, 0)),
+            ViewPosition = new Vector4(_cameraPosition, 1),
+            ColorMapRange = new Vector4(0, 100, 0.001f, 0),
+            SliceInfo = new Vector4(0, 0, 0, 0),
+            RenderSettings = new Vector4(0, 1.0f, 0, 293.15f), // opacity = 1.0
+            DomainInfo = new Vector4(100, -100, 100, 0)
         };
 
         _graphicsDevice.UpdateBuffer(_uniformBuffer, 0, ref uniforms);
@@ -759,14 +949,44 @@ public class GeothermalVisualization3D : IDisposable
 
     private void InitializeColorMaps()
     {
-        _colorMapTexture?.Dispose();
-        _colorMapView?.Dispose();
-        var colorMapData = GenerateColorMapData(_currentColorMap);
-        _colorMapTexture =
-            _factory.CreateTexture(TextureDescription.Texture1D(256, 1, 1, PixelFormat.R8_G8_B8_A8_UNorm,
+        try
+        {
+            Logger.Log("[InitializeColorMaps] Starting...");
+            _colorMapTexture?.Dispose();
+            _colorMapView?.Dispose();
+            
+            Logger.Log("[InitializeColorMaps] Generating color map data...");
+            var colorMapData = GenerateColorMapData(_currentColorMap);
+            
+            Logger.Log($"[InitializeColorMaps] Creating Texture1D with {colorMapData.Length} bytes...");
+            _colorMapTexture = _factory.CreateTexture(TextureDescription.Texture1D(
+                256, 1, 1, 
+                PixelFormat.R8_G8_B8_A8_UNorm,
                 TextureUsage.Sampled));
-        _graphicsDevice.UpdateTexture(_colorMapTexture, colorMapData, 0, 0, 0, 256, 1, 1, 0, 0);
-        _colorMapView = _factory.CreateTextureView(_colorMapTexture);
+            
+            if (_colorMapTexture == null)
+            {
+                throw new InvalidOperationException("Failed to create color map texture");
+            }
+            
+            Logger.Log("[InitializeColorMaps] Updating texture data...");
+            _graphicsDevice.UpdateTexture(_colorMapTexture, colorMapData, 0, 0, 0, 256, 1, 1, 0, 0);
+            
+            Logger.Log("[InitializeColorMaps] Creating texture view...");
+            _colorMapView = _factory.CreateTextureView(_colorMapTexture);
+            
+            if (_colorMapView == null)
+            {
+                throw new InvalidOperationException("Failed to create color map texture view");
+            }
+            
+            Logger.Log($"[InitializeColorMaps] Success! Texture={_colorMapTexture != null}, View={_colorMapView != null}");
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError($"[InitializeColorMaps] FAILED: {ex.Message}");
+            throw;
+        }
     }
 
     private byte[] GenerateColorMapData(ColorMap map)
@@ -1039,6 +1259,7 @@ void main() {
         public DeviceBuffer IndexBuffer;
         public uint IndexCount;
         public Mesh3DDataset Source;
+        public bool IsWireframe; // Flag to indicate if this should be rendered as lines
 
         public void Dispose()
         {

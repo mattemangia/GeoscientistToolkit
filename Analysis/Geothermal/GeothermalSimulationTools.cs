@@ -29,6 +29,7 @@ public class GeothermalSimulationTools : IDatasetTools, IDisposable
 
     private GeothermalMesh _mesh;
     private GeothermalMeshPreview _meshPreview;
+    private string _meshPreviewInitError; // Store init errors to show in window
     private float _newIsosurfaceTemp = 20f;
     private float _newLayerConductivity = 2.5f;
     private float _newLayerDensity = 2650f;
@@ -48,11 +49,11 @@ public class GeothermalSimulationTools : IDatasetTools, IDisposable
     private bool _show3DVisualization;
     private bool _showAdvancedOptions;
     private bool _showMeshPreview;
+    private bool _showMeshPreviewInPanel; // NEW: Alternative rendering mode
     private bool _showResults;
     private string _simulationMessage = "";
     private float _simulationProgress;
     private GeothermalVisualization3D _visualization3D;
-
     private bool _meshPreviewWindowLoggedOnce;
 
     public void Draw(Dataset dataset)
@@ -103,16 +104,16 @@ public class GeothermalSimulationTools : IDatasetTools, IDisposable
 
         if (_isSimulationRunning)
             RenderSimulationProgress();
-        else if (_results != null && _showResults)
-            RenderResults();
         else
             RenderConfiguration();
 
-        // CRITICAL: Render mesh preview window ALWAYS when flag is true
-        // Don't check _meshPreview - let the window show error state if needed
-        if (_showMeshPreview)
+        // Always call RenderMeshPreviewModal to handle the popup lifecycle
+        RenderMeshPreviewModal();
+
+        // Render results in a separate window when available
+        if (_results != null && _showResults)
         {
-            RenderMeshPreviewWindow();
+            RenderResultsWindow();
         }
 
         // Handle export dialog
@@ -178,6 +179,42 @@ public class GeothermalSimulationTools : IDatasetTools, IDisposable
     {
         ImGui.Text("Simulation Configuration");
         ImGui.Separator();
+
+        // Quick Results Summary (if available)
+        if (_results != null)
+        {
+            ImGui.PushStyleColor(ImGuiCol.Header, new Vector4(0.2f, 0.7f, 0.4f, 1.0f));
+            if (ImGui.CollapsingHeader("📊 Quick Results Summary", ImGuiTreeNodeFlags.DefaultOpen))
+            {
+                ImGui.PopStyleColor();
+                ImGui.Indent();
+                
+                ImGui.TextColored(new Vector4(0.3f, 1.0f, 0.5f, 1.0f), "Key Performance Metrics:");
+                ImGui.Separator();
+                
+                ImGui.Text($"Average Heat Rate: {_results.AverageHeatExtractionRate:F0} W");
+                ImGui.Text($"Total Energy Extracted: {_results.TotalExtractedEnergy / 1e9:F2} GJ");
+                ImGui.Text($"Borehole Resistance: {_results.BoreholeThermalResistance:F3} m·K/W");
+                ImGui.Text($"Thermal Influence Radius: {_results.ThermalInfluenceRadius:F1} m");
+                
+                if (_results.OutletTemperature.Any())
+                {
+                    var finalTemp = _results.OutletTemperature.Last().temperature - 273.15;
+                    ImGui.Text($"Final Outlet Temperature: {finalTemp:F1} °C");
+                }
+                
+                ImGui.Spacing();
+                ImGui.TextColored(new Vector4(0.7f, 0.9f, 1.0f, 1.0f), 
+                    "👉 Click 'Show Results' for detailed analysis");
+                
+                ImGui.Unindent();
+            }
+            else
+            {
+                ImGui.PopStyleColor();
+            }
+            ImGui.Separator();
+        }
 
         // Preset Selector
         ImGui.PushStyleColor(ImGuiCol.Header, new Vector4(0.2f, 0.4f, 0.7f, 1.0f));
@@ -251,13 +288,35 @@ public class GeothermalSimulationTools : IDatasetTools, IDisposable
             {
                 Logger.Log("Initializing mesh preview...");
                 InitializeMeshPreview(_options.BoreholeDataset);
+                
+                // ALWAYS open the popup, even if initialization failed
+                // We'll show the error inside the popup
+                ImGui.OpenPopup("Mesh Preview Window");
+                Logger.Log("Called ImGui.OpenPopup - popup should open next frame");
             }
             else
             {
                 Logger.Log("Closing mesh preview");
                 _meshPreview?.Dispose();
                 _meshPreview = null;
+                _showMeshPreviewInPanel = false;
             }
+        }
+        
+        // NEW: Add alternative rendering option
+        if (_meshPreview != null)
+        {
+            ImGui.SameLine();
+            if (ImGui.Checkbox("Show in Panel", ref _showMeshPreviewInPanel))
+            {
+                Logger.Log($"Show in Panel toggled: {_showMeshPreviewInPanel}");
+                // Close modal if showing in panel
+                if (_showMeshPreviewInPanel)
+                {
+                    _showMeshPreview = true; // Keep preview alive
+                }
+            }
+            ImGui.SetItemTooltip("Alternative: Show preview directly in this panel instead of popup");
         }
 
         ImGui.Separator();
@@ -580,6 +639,42 @@ public class GeothermalSimulationTools : IDatasetTools, IDisposable
                     _options.UseGPU = useGPU;
             }
         }
+        
+        // ALTERNATIVE RENDERING: Show preview directly in panel if requested
+        if (_showMeshPreviewInPanel && _meshPreview != null && _options.BoreholeDataset != null)
+        {
+            ImGui.Separator();
+            ImGui.TextColored(new Vector4(0.3f, 0.8f, 1.0f, 1.0f), "🔍 Mesh Preview (In-Panel Mode)");
+            ImGui.Separator();
+            
+            // Show error if present
+            if (!string.IsNullOrEmpty(_meshPreviewInitError))
+            {
+                ImGui.TextColored(new Vector4(1, 0.2f, 0.2f, 1), $"❌ Error: {_meshPreviewInitError}");
+                if (ImGui.Button("Retry"))
+                {
+                    InitializeMeshPreview(_options.BoreholeDataset);
+                }
+            }
+            else
+            {
+                // Render in a scrollable child window
+                var availSpace = ImGui.GetContentRegionAvail();
+                if (ImGui.BeginChild("MeshPreviewInPanel", new Vector2(availSpace.X, Math.Min(600, availSpace.Y)), 
+                    ImGuiChildFlags.Border))
+                {
+                    try
+                    {
+                        _meshPreview.Render(_options.BoreholeDataset, _options);
+                    }
+                    catch (Exception ex)
+                    {
+                        ImGui.TextColored(new Vector4(1, 0, 0, 1), $"Error: {ex.Message}");
+                    }
+                }
+                ImGui.EndChild();
+            }
+        }
     }
 
     private void RenderSimulationProgress()
@@ -707,21 +802,28 @@ public class GeothermalSimulationTools : IDatasetTools, IDisposable
         if (ImGui.Button("Cancel")) _cancellationTokenSource?.Cancel();
     }
 
-    private void RenderResults()
+    private void RenderResultsWindow()
     {
-        ImGui.Text("Simulation Results");
-        ImGui.Separator();
-
-        if (ImGui.Button("Back to Configuration"))
+        ImGui.SetNextWindowSize(new Vector2(1200, 800), ImGuiCond.FirstUseEver);
+        ImGui.SetNextWindowPos(new Vector2(150, 150), ImGuiCond.FirstUseEver);
+        
+        var isOpen = _showResults;
+        
+        if (!ImGui.Begin("Geothermal Simulation Results", ref isOpen, ImGuiWindowFlags.None))
         {
-            _showResults = false;
-            _show3DVisualization = false;
-            _visualization3D?.Dispose();
-            _visualization3D = null;
+            ImGui.End();
+            _showResults = isOpen;
+            return;
         }
+        
+        // Header with controls
+        ImGui.TextColored(new Vector4(0.3f, 0.8f, 1.0f, 1.0f), "Simulation Results");
+        ImGui.Separator();
+        ImGui.Spacing();
 
-        ImGui.SameLine();
-        if (ImGui.Button("Export Results...")) _exportDialog.Open();
+        // Control buttons
+        if (ImGui.Button("Export Results..."))
+            _exportDialog.Open();
 
         ImGui.SameLine();
         if (ImGui.Button("3D Visualization"))
@@ -752,6 +854,9 @@ public class GeothermalSimulationTools : IDatasetTools, IDisposable
             ImGui.TextColored(new Vector4(0.2f, 1.0f, 0.2f, 1.0f), "● 3D View Active");
         }
 
+        ImGui.Separator();
+
+        // Show 3D visualization or tabs
         if (_show3DVisualization && _visualization3D != null)
         {
             Render3DVisualizationWithControls();
@@ -788,6 +893,23 @@ public class GeothermalSimulationTools : IDatasetTools, IDisposable
                 ImGui.EndTabBar();
             }
         }
+        
+        ImGui.End();
+        _showResults = isOpen;
+        
+        // Cleanup when window is closed
+        if (!_showResults)
+        {
+            _show3DVisualization = false;
+            _visualization3D?.Dispose();
+            _visualization3D = null;
+        }
+    }
+
+    private void RenderResults()
+    {
+        // Legacy method - now just calls the window version
+        RenderResultsWindow();
     }
 
     private void RenderSummaryTab()
@@ -1005,8 +1127,8 @@ public class GeothermalSimulationTools : IDatasetTools, IDisposable
         if (VeldridManager.GraphicsDevice == null)
         {
             Logger.LogWarning("VeldridManager.GraphicsDevice not available. Mesh preview cannot be generated.");
-            ImGui.OpenPopup("GraphicsDevice Unavailable");
-            _showMeshPreview = false;
+            // DON'T reset the flag - let the window show the error
+            _meshPreviewInitError = "Graphics device not available. Check if GPU is initialized.";
             return;
         }
 
@@ -1033,86 +1155,169 @@ public class GeothermalSimulationTools : IDatasetTools, IDisposable
             Logger.Log("Calling GeneratePreview...");
             _meshPreview.GeneratePreview(borehole, _options);
             Logger.Log("GeneratePreview completed successfully");
+            _meshPreviewInitError = null; // Clear any previous errors
             Logger.Log("=== InitializeMeshPreview END (SUCCESS) ===");
         }
         catch (Exception ex)
         {
             Logger.LogError($"Failed to initialize mesh preview: {ex.Message}");
             Logger.LogError($"Stack trace: {ex.StackTrace}");
-            _meshPreview?.Dispose();
-            _meshPreview = null;
-            _showMeshPreview = false;
-            ImGui.OpenPopup("GraphicsDevice Unavailable");
+            
+            // Store error but DON'T close the window - show error in window
+            _meshPreviewInitError = $"Initialization failed: {ex.Message}";
+            
+            // Keep partial state if needed
+            // _meshPreview?.Dispose();
+            // _meshPreview = null;
+            
+            // DON'T DO THIS - it causes the flicker!
+            // _showMeshPreview = false;
+            
             Logger.Log("=== InitializeMeshPreview END (FAILED) ===");
         }
     }
 
-    private void RenderMeshPreviewWindow()
+    private void RenderMeshPreviewModal()
     {
-        // Debug: Log first time
-        if (!_meshPreviewWindowLoggedOnce)
+        // CRITICAL: Only clean up AFTER the popup is confirmed closed
+        // Check if popup is actually open using ImGui's internal state
+        bool popupIsOpen = ImGui.IsPopupOpen("Mesh Preview Window");
+        
+        // If _showMeshPreview is true, ensure popup is open
+        if (_showMeshPreview && !popupIsOpen)
         {
-            Logger.Log("=== RenderMeshPreviewWindow CALLED ===");
-            _meshPreviewWindowLoggedOnce = true;
+            ImGui.SetNextWindowSize(new Vector2(1400, 900), ImGuiCond.FirstUseEver);
+            // Popup not yet opened, will open next frame
         }
         
-        // FORCE window to appear - simplest possible approach
-        ImGui.SetNextWindowSize(new Vector2(1000, 700), ImGuiCond.FirstUseEver);
-        ImGui.SetNextWindowPos(new Vector2(100, 100), ImGuiCond.FirstUseEver);
+        // Use a dummy bool for the modal - we control closing manually via our Close button
+        bool dummyOpen = true;
         
-        // Use local variable to avoid ref issues
-        var isOpen = _showMeshPreview;
-        
-        var windowResult = ImGui.Begin("Geothermal Mesh Preview", ref isOpen, ImGuiWindowFlags.None);
-        
-        if (!_meshPreviewWindowLoggedOnce)
-            Logger.Log($"ImGui.Begin returned: {windowResult}, isOpen: {isOpen}");
-        
-        if (windowResult)
+        // Only render if popup is actually open
+        if (ImGui.BeginPopupModal("Mesh Preview Window", ref dummyOpen, ImGuiWindowFlags.None))
         {
+            // Debug: Log first time only
+            if (!_meshPreviewWindowLoggedOnce)
+            {
+                Logger.Log("=== Mesh Preview Modal OPENED AND RENDERING ===");
+                Logger.Log($"State check: _meshPreview={((_meshPreview != null) ? "EXISTS" : "NULL")}, _options.BoreholeDataset={((_options.BoreholeDataset != null) ? "EXISTS" : "NULL")}, _meshPreviewInitError={(string.IsNullOrEmpty(_meshPreviewInitError) ? "NONE" : _meshPreviewInitError)}");
+                _meshPreviewWindowLoggedOnce = true;
+            }
+            
             try
             {
                 // Header with info
                 ImGui.TextColored(new Vector4(0.3f, 0.8f, 1.0f, 1.0f), 
-                    "Mesh Configuration Preview - Pre-Simulation");
+                    "🔍 Mesh Configuration Preview - Pre-Simulation");
                 ImGui.Separator();
                 ImGui.Spacing();
-
-                // Check if mesh preview exists
-                if (_meshPreview != null && _options.BoreholeDataset != null)
+                
+                // DEBUG: Show actual state
+                ImGui.Text($"Debug State: _meshPreview={((_meshPreview != null) ? "EXISTS" : "NULL")}, Dataset={((_options.BoreholeDataset != null) ? "EXISTS" : "NULL")}");
+                if (!string.IsNullOrEmpty(_meshPreviewInitError))
                 {
-                    ImGui.Text("Rendering mesh preview...");
+                    ImGui.Text($"Error: {_meshPreviewInitError}");
+                }
+                ImGui.Separator();
+
+                // Show initialization error if present
+                if (!string.IsNullOrEmpty(_meshPreviewInitError))
+                {
+                    ImGui.TextColored(new Vector4(1, 0.2f, 0.2f, 1), "❌ Initialization Error:");
+                    ImGui.Spacing();
+                    ImGui.PushStyleColor(ImGuiCol.ChildBg, new Vector4(0.3f, 0.1f, 0.1f, 0.5f));
+                    if (ImGui.BeginChild("ErrorBox", new Vector2(0, 150), ImGuiChildFlags.Border))
+                    {
+                        ImGui.TextWrapped(_meshPreviewInitError);
+                        ImGui.Spacing();
+                        ImGui.Separator();
+                        ImGui.Spacing();
+                        ImGui.TextWrapped("This usually means:");
+                        ImGui.BulletText("Graphics device initialization failed");
+                        ImGui.BulletText("Resource creation error (textures, buffers)");
+                        ImGui.BulletText("GPU driver issue");
+                        ImGui.Spacing();
+                        ImGui.TextColored(new Vector4(0.7f, 0.9f, 1.0f, 1.0f), 
+                            "Check the console log for detailed error messages.");
+                    }
+                    ImGui.EndChild();
+                    ImGui.PopStyleColor();
+                    ImGui.Spacing();
+                }
+                // Check if mesh preview exists and initialized successfully
+                else if (_meshPreview != null && _options.BoreholeDataset != null)
+                {
+                    ImGui.Text("Calling _meshPreview.Render()...");
                     _meshPreview.Render(_options.BoreholeDataset, _options);
                 }
                 else
                 {
-                    ImGui.TextColored(new Vector4(1, 1, 0, 1), "Initializing mesh preview...");
+                    ImGui.TextColored(new Vector4(1, 1, 0, 1), "⚠️ Mesh preview not ready");
                     if (_meshPreview == null)
-                        ImGui.Text("_meshPreview is null - initialization may have failed");
+                    {
+                        ImGui.Text("  • Preview object not initialized (_meshPreview is NULL)");
+                        ImGui.Text("     This means InitializeMeshPreview either:");
+                        ImGui.Text("     1. Never ran");
+                        ImGui.Text("     2. Threw an exception silently");
+                        ImGui.Text("     3. Set _meshPreview but it was cleared");
+                    }
                     if (_options.BoreholeDataset == null)
-                        ImGui.Text("_options.BoreholeDataset is null");
+                        ImGui.Text("  • Borehole dataset not available");
                         
                     ImGui.Spacing();
-                    ImGui.Text("Check console log for details");
+                    ImGui.TextColored(new Vector4(0.7f, 0.7f, 0.7f, 1.0f), 
+                        "No errors in console? Check if initialization completed.");
+                    ImGui.Text("Click 'Force Reinitialize' to try again with verbose logging.");
+                }
+                
+                ImGui.Spacing();
+                ImGui.Separator();
+                
+                // Always show retry button
+                if (ImGui.Button("Force Reinitialize", new Vector2(200, 0)))
+                {
+                    Logger.Log("========================================");
+                    Logger.Log("USER CLICKED FORCE REINITIALIZE");
+                    Logger.Log($"Current state: _meshPreview={(_meshPreview != null)}, _meshPreviewInitError={_meshPreviewInitError}");
+                    Logger.Log("========================================");
+                    InitializeMeshPreview(_options.BoreholeDataset);
+                    Logger.Log($"After init: _meshPreview={(_meshPreview != null)}, _meshPreviewInitError={_meshPreviewInitError}");
+                }
+                ImGui.SameLine();
+                
+                // MANUAL close button - this is the ONLY way to close the popup
+                if (ImGui.Button("Close", new Vector2(120, 0)))
+                {
+                    Logger.Log("User clicked Close button - closing modal");
+                    _showMeshPreview = false;
+                    ImGui.CloseCurrentPopup();
                 }
             }
             catch (Exception ex)
             {
-                ImGui.TextColored(new Vector4(1, 0, 0, 1), $"Error: {ex.Message}");
-                Logger.LogError($"Mesh preview render error: {ex.Message}");
+                ImGui.TextColored(new Vector4(1, 0, 0, 1), $"❌ Render Error: {ex.Message}");
+                Logger.LogError($"Mesh preview render error: {ex.Message}\n{ex.StackTrace}");
             }
+            
+            ImGui.EndPopup();
         }
-        ImGui.End();
-
-        // Update the flag
-        _showMeshPreview = isOpen;
-
-        // If window was closed via X button, clean up
-        if (!_showMeshPreview)
+        
+        // CRITICAL FIX: Only cleanup when popup is confirmed closed AND flag is false
+        // This prevents premature cleanup before the popup has had a chance to open
+        if (!_showMeshPreview && !popupIsOpen && _meshPreview != null)
         {
+            Logger.Log("Cleaning up mesh preview resources (popup confirmed closed)");
             _meshPreview?.Dispose();
             _meshPreview = null;
+            _meshPreviewInitError = null;
+            _meshPreviewWindowLoggedOnce = false; // Reset for next time
         }
+    }
+    
+    // Keep old method for compatibility but redirect to modal
+    private void RenderMeshPreviewWindow()
+    {
+        RenderMeshPreviewModal();
     }
 
     private void InitializeVisualization()
