@@ -317,7 +317,7 @@ public class ProjectManager
                     ShowGrid = boreholeDto.ShowGrid,
                     ShowLegend = boreholeDto.ShowLegend,
                     TrackWidth = boreholeDto.TrackWidth,
-                    IsMissing = !File.Exists(boreholeDto.FilePath)
+                    IsMissing = !string.IsNullOrEmpty(boreholeDto.FilePath) && !File.Exists(boreholeDto.FilePath)
                 };
 
                 // Restore lithology units
@@ -573,6 +573,15 @@ public class ProjectManager
                 dataset = pnmDataset;
                 break;
             }
+                
+            case SubsurfaceGISDatasetDTO subsurfaceDto:
+            {
+                var subsurfaceDataset = new SubsurfaceGISDataset(subsurfaceDto);
+                dataset = subsurfaceDataset;
+                Logger.Log($"Loaded subsurface GIS dataset: {subsurfaceDto.Name} with {subsurfaceDto.VoxelGrid?.Count ?? 0} voxels");
+                break;
+            }
+
 
             case GISDatasetDTO gisDto:
             {
@@ -708,6 +717,10 @@ public class ProjectManager
             Notes = dto.Notes,
             CustomFields = new Dictionary<string, string>(dto.CustomFields ?? new Dictionary<string, string>())
         };
+
+        if (dto.CoordinatesX.HasValue && dto.CoordinatesY.HasValue)
+            meta.Coordinates = new Vector2(dto.CoordinatesX.Value, dto.CoordinatesY.Value);
+
 
         if (dto.SizeX.HasValue && dto.SizeY.HasValue && dto.SizeZ.HasValue)
             meta.Size = new Vector3(dto.SizeX.Value, dto.SizeY.Value, dto.SizeZ.Value);

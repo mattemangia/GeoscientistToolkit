@@ -1,4 +1,4 @@
-// GeoscientistToolkit/UI/DatasetPanel.cs (Fixed Unicode Issue)
+// GeoscientistToolkit/UI/DatasetPanel.cs
 
 using System.Numerics;
 using GeoscientistToolkit.Business;
@@ -11,6 +11,7 @@ using GeoscientistToolkit.Data.Pnm;
 using GeoscientistToolkit.Data.Table;
 using GeoscientistToolkit.UI.AcousticVolume;
 using ImGuiNET;
+using System.Linq; // Added for LINQ queries
 
 // Added for PNM
 
@@ -29,6 +30,12 @@ public class DatasetPanel : BasePanel
     private Action _onImportClicked;
     private List<Dataset> _orderedDatasets = new(); // To maintain order for shift-selection
     private string _searchFilter = "";
+    
+    // --- NEW: State for renaming a group ---
+    private DatasetGroup _groupToRename;
+    private string _newGroupName = "";
+    private bool _openRenamePopup;
+
 
     public DatasetPanel() : base("Datasets", new Vector2(250, 400))
     {
@@ -110,6 +117,16 @@ public class DatasetPanel : BasePanel
                     }
                 }
         }
+
+        // --- NEW: Trigger the modal popup if the flag is set ---
+        if (_openRenamePopup)
+        {
+            ImGui.OpenPopup("Rename Group");
+            _openRenamePopup = false;
+        }
+        
+        // --- Draw the rename popup if it's been opened ---
+        DrawRenameGroupPopup();
 
         _acousticToCtConverterDialog.Draw();
         _metadataEditor.Submit();
@@ -325,9 +342,26 @@ public class DatasetPanel : BasePanel
         // Group-specific options
         if (dataset is DatasetGroup group)
         {
-            if (ImGui.MenuItem("View Thumbnails"))
+            // MODIFIED: Rename option sets a flag instead of opening popup directly
+            if (ImGui.MenuItem("Rename"))
+            {
+                _groupToRename = group;
+                _newGroupName = group.Name;
+                _openRenamePopup = true;
+            }
+            
+            // MODIFIED: Only enable thumbnail viewer if there are images in the group
+            bool hasImages = group.Datasets.Any(d => d.Type == DatasetType.SingleImage || d.Type == DatasetType.CtImageStack);
+            
+            if (ImGui.MenuItem("View Thumbnails", null, false, hasImages))
+            {
                 // Signal to open thumbnail viewer
                 OnOpenThumbnailViewer?.Invoke(group);
+            }
+            if (ImGui.IsItemHovered() && !hasImages)
+            {
+                ImGui.SetTooltip("This group contains no image datasets to display.");
+            }
 
             if (ImGui.MenuItem("Ungroup")) UngroupDataset(group);
         }
@@ -416,6 +450,62 @@ public class DatasetPanel : BasePanel
 
         _lastSelectedDataset = dataset;
     }
+    
+    // --- NEW: Method to draw the modal popup for renaming a group ---
+    private void DrawRenameGroupPopup()
+    {
+        // --- MODIFIED: Center the modal on screen ---
+        var center = ImGui.GetMainViewport().GetCenter();
+        ImGui.SetNextWindowPos(center, ImGuiCond.Appearing, new Vector2(0.5f, 0.5f));
+
+        var p_open = true;
+        if (ImGui.BeginPopupModal("Rename Group", ref p_open, ImGuiWindowFlags.AlwaysAutoResize))
+        {
+            ImGui.Text("Enter a new name for the group:");
+            ImGui.Separator();
+            
+            // Auto-focus the input text field when the popup appears
+            if (ImGui.IsWindowAppearing())
+            {
+                ImGui.SetKeyboardFocusHere(0);
+            }
+
+            // Submit on pressing Enter
+            if (ImGui.InputText("##NewGroupName", ref _newGroupName, 256, ImGuiInputTextFlags.EnterReturnsTrue))
+            {
+                if (_groupToRename != null && !string.IsNullOrWhiteSpace(_newGroupName))
+                {
+                    _groupToRename.Name = _newGroupName;
+                    ProjectManager.Instance.HasUnsavedChanges = true; // Mark project as modified
+                }
+                _groupToRename = null;
+                ImGui.CloseCurrentPopup();
+            }
+
+            ImGui.Spacing();
+
+            if (ImGui.Button("OK", new Vector2(120, 0)))
+            {
+                if (_groupToRename != null && !string.IsNullOrWhiteSpace(_newGroupName))
+                {
+                    _groupToRename.Name = _newGroupName;
+                    ProjectManager.Instance.HasUnsavedChanges = true; // Mark project as modified
+                }
+                _groupToRename = null;
+                ImGui.CloseCurrentPopup();
+            }
+
+            ImGui.SameLine();
+
+            if (ImGui.Button("Cancel", new Vector2(120, 0)))
+            {
+                _groupToRename = null;
+                ImGui.CloseCurrentPopup();
+            }
+            ImGui.EndPopup();
+        }
+    }
+
 
     // Add this event at the top of the class with other fields
     public event Action<DatasetGroup> OnOpenThumbnailViewer;
@@ -423,19 +513,27 @@ public class DatasetPanel : BasePanel
     private void CreateGroup()
     {
         if (_selectedDatasets.Count < 2) return;
-
+    
         // Create group name
         var groupName = $"Group {ProjectManager.Instance.LoadedDatasets.Count(d => d is DatasetGroup) + 1}";
-
+    
+        var datasetsToGroup = _selectedDatasets.ToList();
+    
         // Create the group
-        var group = new DatasetGroup(groupName, _selectedDatasets.ToList());
-
-        // Remove individual datasets from the project
-        foreach (var dataset in _selectedDatasets) ProjectManager.Instance.RemoveDataset(dataset);
-
-        // Add the group
-        ProjectManager.Instance.AddDataset(group);
-
+        var group = new DatasetGroup(groupName, datasetsToGroup);
+    
+        // Remove individual datasets from the project's root list.
+        // We must do this manually instead of calling ProjectManager.RemoveDataset(), because the latter
+        // calls dataset.Unload(), which clears the data and causes this bug.
+        // By avoiding the Unload() call, the datasets inside the group remain fully loaded and viewable.
+        foreach (var dataset in datasetsToGroup)
+        {
+            ProjectManager.Instance.LoadedDatasets.Remove(dataset);
+        }
+    
+        // Add the new group to the project
+        ProjectManager.Instance.AddDataset(group); // This also sets HasUnsavedChanges
+    
         // Clear selection
         _selectedDatasets.Clear();
     }

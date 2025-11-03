@@ -5,6 +5,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using GeoscientistToolkit.Data;
 using GeoscientistToolkit.Data.AcousticVolume;
+using GeoscientistToolkit.Data.Borehole;
 using GeoscientistToolkit.Data.CtImageStack;
 using GeoscientistToolkit.Data.GIS;
 using GeoscientistToolkit.Data.Image;
@@ -92,6 +93,8 @@ public static class ProjectSerializer
             LocationName = meta.LocationName,
             Latitude = meta.Latitude,
             Longitude = meta.Longitude,
+            CoordinatesX = meta.Coordinates?.X,
+            CoordinatesY = meta.Coordinates?.Y,
             Depth = meta.Depth,
             SizeX = meta.Size?.X,
             SizeY = meta.Size?.Y,
@@ -121,6 +124,9 @@ public static class ProjectSerializer
             Notes = dto.Notes,
             CustomFields = new Dictionary<string, string>(dto.CustomFields ?? new Dictionary<string, string>())
         };
+
+        if (dto.CoordinatesX.HasValue && dto.CoordinatesY.HasValue)
+            meta.Coordinates = new Vector2(dto.CoordinatesX.Value, dto.CoordinatesY.Value);
 
         if (dto.SizeX.HasValue && dto.SizeY.HasValue && dto.SizeZ.HasValue)
             meta.Size = new Vector3(dto.SizeX.Value, dto.SizeY.Value, dto.SizeZ.Value);
@@ -194,9 +200,11 @@ public class DatasetDTOConverter : JsonConverter<DatasetDTO>
                     nameof(AcousticVolumeDataset) => JsonSerializer.Deserialize<AcousticVolumeDatasetDTO>(rawText,
                         options),
                     nameof(PNMDataset) => JsonSerializer.Deserialize<PNMDatasetDTO>(rawText, options),
+                    nameof(BoreholeDataset) => JsonSerializer.Deserialize<Data.Borehole.BoreholeDatasetDTO>(rawText, options),
+                    nameof(SubsurfaceGISDataset) => JsonSerializer.Deserialize<SubsurfaceGISDatasetDTO>(rawText, options),
                     nameof(GISDataset) => JsonSerializer.Deserialize<GISDatasetDTO>(rawText, options),
                     nameof(TwoDGeologyDataset) => JsonSerializer.Deserialize<TwoDGeologyDatasetDTO>(rawText, options),
-                    
+
                     _ => throw new JsonException($"Unknown dataset type: {typeName}")
                 };
             }

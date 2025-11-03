@@ -37,6 +37,8 @@ public class DatasetMetadataDTO
     public string LocationName { get; set; }
     public double? Latitude { get; set; }
     public double? Longitude { get; set; }
+    public float? CoordinatesX { get; set; } // ADDED
+    public float? CoordinatesY { get; set; } // ADDED
     public double? Depth { get; set; }
     public float? SizeX { get; set; }
     public float? SizeY { get; set; }
@@ -93,7 +95,7 @@ public class CtImageStackDatasetDTO : DatasetDTO
     public NMRResultsDTO NmrResults { get; set; }
 }
 
-public class DatasetGroupDTO : DatasetDTO
+public partial class DatasetGroupDTO : DatasetDTO
 {
     public List<DatasetDTO> Datasets { get; set; } = new();
 }
@@ -287,4 +289,43 @@ public class TwoDGeologyDatasetDTO : DatasetDTO
 {
     // Base properties from DatasetDTO are inherited (TypeName, Name, FilePath, Metadata)
     // The actual CrossSection data is stored/loaded separately via TwoDGeologySerializer
+}
+// DTO for SubsurfaceGISDataset
+public class SubsurfaceVoxelDTO
+{
+    public Vector3 Position { get; set; }
+    public string LithologyType { get; set; }
+    public Dictionary<string, float> Parameters { get; set; } = new();
+    public float Confidence { get; set; }
+}
+
+public class SubsurfaceLayerBoundaryDTO
+{
+    public string LayerName { get; set; }
+    public List<Vector3> Points { get; set; } = new();
+    public float[,] ElevationGrid { get; set; }
+    public BoundingBoxDTO GridBounds { get; set; }
+}
+
+public class BoundingBoxDTO
+{
+    public Vector2 Min { get; set; }
+    public Vector2 Max { get; set; }
+}
+
+public class SubsurfaceGISDatasetDTO : GISDatasetDTO
+{
+    public List<string> SourceBoreholeNames { get; set; } = new();
+    public List<SubsurfaceVoxelDTO> VoxelGrid { get; set; } = new();
+    public List<SubsurfaceLayerBoundaryDTO> LayerBoundaries { get; set; } = new();
+    public Vector3 GridOrigin { get; set; }
+    public Vector3 GridSize { get; set; }
+    public Vector3 VoxelSize { get; set; }
+    public int GridResolutionX { get; set; }
+    public int GridResolutionY { get; set; }
+    public int GridResolutionZ { get; set; }
+    public float InterpolationRadius { get; set; }
+    public int InterpolationMethod { get; set; }
+    public float IDWPower { get; set; }
+    public string HeightmapDatasetName { get; set; }
 }

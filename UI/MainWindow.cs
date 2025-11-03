@@ -14,24 +14,25 @@ using GeoscientistToolkit.UI.GIS;
 using GeoscientistToolkit.UI.Utils;
 using GeoscientistToolkit.UI.Windows;
 using GeoscientistToolkit.Util;
+using GeoscientistToolkit.Analysis.Geothermal;
 using ImGuiNET;
 
 namespace GeoscientistToolkit.UI;
 
 public class MainWindow
 {
-    // ──────────────────────────────────────────────────────────────────────
+    // ----------------------------------------------------------------------
     // Events
-    // ──────────────────────────────────────────────────────────────────────
+    // ----------------------------------------------------------------------
     /// <summary>
     ///     Event raised when the user confirms they want to exit the application.
     ///     Application.cs subscribes to this to know when to stop the main loop.
     /// </summary>
     public event Action OnExitConfirmed;
 
-    // ──────────────────────────────────────────────────────────────────────
+    // ----------------------------------------------------------------------
     // Fields & state
-    // ──────────────────────────────────────────────────────────────────────
+    // ----------------------------------------------------------------------
     private readonly DatasetPanel _datasets = new();
     private readonly PropertiesPanel _properties = new();
     private readonly LogPanel _log = new();
@@ -100,9 +101,9 @@ public class MainWindow
         );
     }
 
-    // ──────────────────────────────────────────────────────────────────────
+    // ----------------------------------------------------------------------
     // Dataset removal handler
-    // ──────────────────────────────────────────────────────────────────────
+    // ----------------------------------------------------------------------
     private void OnDatasetRemoved(Dataset dataset)
     {
         // Close any viewers showing this dataset
@@ -126,9 +127,9 @@ public class MainWindow
         if (_selectedDataset == dataset) _selectedDataset = null;
     }
 
-    // ──────────────────────────────────────────────────────────────────────
+    // ----------------------------------------------------------------------
     // Per-frame entry
-    // ──────────────────────────────────────────────────────────────────────
+    // ----------------------------------------------------------------------
     public void SubmitUI(bool windowCloseRequested = false)
     {
         VeldridManager.ProcessMainThreadActions();
@@ -272,9 +273,9 @@ public class MainWindow
         }
     }
 
-    // ──────────────────────────────────────────────────────────────────────
+    // ----------------------------------------------------------------------
     // DockBuilder (conditional)
-    // ──────────────────────────────────────────────────────────────────────
+    // ----------------------------------------------------------------------
     private static void TryBuildDockLayout(uint rootId, Vector2 size)
     {
         var io = ImGui.GetIO();
@@ -312,14 +313,14 @@ public class MainWindow
             if (_warned) return;
             _warned = true;
             System.Diagnostics.Debug.WriteLine("[MainWindow] DockBuilder API not available. " +
-                                              "Panels will float — upgrade to a docking build and define IMGUI_HAS_DOCK_BUILDER.");
+                                              "Panels will float â€” upgrade to a docking build and define IMGUI_HAS_DOCK_BUILDER.");
         }
     }
 #endif
 
-    // ──────────────────────────────────────────────────────────────────────
+    // ----------------------------------------------------------------------
     // Menu-bar
-    // ──────────────────────────────────────────────────────────────────────
+    // ----------------------------------------------------------------------
     private void SubmitMainMenu()
     {
         if (!ImGui.BeginMenuBar()) return;
@@ -505,6 +506,9 @@ public class MainWindow
 
             ImGui.Separator();
             if (ImGui.MenuItem("3D Volume Debug...")) _volume3DDebugWindow.Show();
+            
+            ImGui.Separator();
+            if (ImGui.MenuItem("Create Debug Geothermal Boreholes")) OnCreateDebugGeothermalBoreholes();
 
             ImGui.EndMenu();
         }
@@ -513,7 +517,7 @@ public class MainWindow
         {
             // Space to the far right
             var frameH = ImGui.GetTextLineHeight() + ImGui.GetStyle().FramePadding.Y * 2f;
-            var icon = VeldridManager.IsFullScreen ? "🗗" : "⛶";
+            var icon = VeldridManager.IsFullScreen ? "ðŸ——" : "â›¶";
 
             var iconSize = ImGui.CalcTextSize(icon);
             var btnW = iconSize.X + ImGui.GetStyle().FramePadding.X * 2f;
@@ -533,9 +537,9 @@ public class MainWindow
         ImGui.EndMenuBar();
     }
 
-    // ──────────────────────────────────────────────────────────────────────
+    // ----------------------------------------------------------------------
     // Pop-ups & callbacks
-    // ──────────────────────────────────────────────────────────────────────
+    // ----------------------------------------------------------------------
     private void TryOnNewProject()
     {
         CheckForUnsavedChanges(OnNewProject);
@@ -669,6 +673,38 @@ public class MainWindow
         }
     }
 
+    private void OnCreateDebugGeothermalBoreholes()
+    {
+        try
+        {
+            Logger.Log("Creating debug deep geothermal boreholes...");
+
+            // Create multiple test boreholes
+            var boreholes = SubsurfaceGeothermalTools.CreateDebugDeepGeothermalBoreholes();
+
+            // Add all boreholes to the project
+            foreach (var borehole in boreholes)
+            {
+                ProjectManager.Instance.AddDataset(borehole);
+                Logger.Log($"Added borehole {borehole.WellName} to project");
+            }
+
+            Logger.Log($"Successfully created {boreholes.Count} debug geothermal boreholes");
+            Logger.Log("Select multiple boreholes with Ctrl+Click, then right-click and choose 'Group Selected'");
+            Logger.Log("Select the group to access Multi-Borehole Tools in the Tools panel!");
+
+            // Optionally, select the first borehole
+            if (boreholes.Count > 0)
+            {
+                OnDatasetSelected(boreholes[0]);
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError($"Failed to create debug geothermal boreholes: {ex.Message}");
+        }
+    }
+
     private void HandleCreateMeshDialog()
     {
         if (_createMeshDialog.Submit())
@@ -789,7 +825,7 @@ public class MainWindow
         {
             ImGui.Text("Welcome to GeoscientistToolkit!");
             ImGui.Separator();
-            ImGui.TextWrapped("Import data via File → Import Data. Use the 'Pop-Out' button to pop-out panels.");
+            ImGui.TextWrapped("Import data via File â†’ Import Data. Use the 'Pop-Out' button to pop-out panels.");
             ImGui.Spacing();
             if (ImGui.Button("Let's go!", new Vector2(100, 0))) ImGui.CloseCurrentPopup();
 
@@ -812,7 +848,7 @@ public class MainWindow
         ImGui.SetNextWindowPos(ImGui.GetMainViewport().GetCenter(), ImGuiCond.Appearing, new Vector2(0.5f, 0.5f));
         if (ImGui.BeginPopupModal("Close Application?###WindowCloseDialog", ImGuiWindowFlags.AlwaysAutoResize))
         {
-            ImGui.Text("⚠ Your project has unsaved changes.");
+            ImGui.Text("âš  Your project has unsaved changes.");
             ImGui.Text("Do you want to save before closing?");
             ImGui.Spacing();
             ImGui.Separator();
@@ -879,16 +915,16 @@ public class MainWindow
         }
 
         // ============================================================================
-        // Regular unsaved changes popup (from File→Exit or other menu actions)
+        // Regular unsaved changes popup (from Fileâ†’Exit or other menu actions)
         // ============================================================================
         if (_showUnsavedChangesPopup)
         {
-            ImGui.OpenPopup("⚠ Unsaved Changes###RegularUnsavedChanges");
+            ImGui.OpenPopup("âš  Unsaved Changes###RegularUnsavedChanges");
             _showUnsavedChangesPopup = false;
         }
 
         ImGui.SetNextWindowPos(ImGui.GetMainViewport().GetCenter(), ImGuiCond.Appearing, new Vector2(0.5f, 0.5f));
-        if (ImGui.BeginPopupModal("⚠ Unsaved Changes###RegularUnsavedChanges", ImGuiWindowFlags.AlwaysAutoResize))
+        if (ImGui.BeginPopupModal("âš  Unsaved Changes###RegularUnsavedChanges", ImGuiWindowFlags.AlwaysAutoResize))
         {
             ImGui.Text("Your project has unsaved changes. Do you want to save them?");
             ImGui.Spacing();
@@ -943,7 +979,7 @@ public class MainWindow
         ImGui.SetNextWindowPos(ImGui.GetMainViewport().GetCenter(), ImGuiCond.Appearing, new Vector2(0.5f, 0.5f));
         if (ImGui.BeginPopupModal("About GeoscientistToolkit", ref _showAboutPopup, ImGuiWindowFlags.AlwaysAutoResize))
         {
-            ImGui.Text("GeoscientistToolkit – Preview Build");
+            ImGui.Text("GeoscientistToolkit â€“ Preview Build");
             ImGui.Separator();
             ImGui.TextWrapped(
                 "Open-source toolkit for geoscience data visualisation and analysis, built with Veldrid + ImGui.NET.");

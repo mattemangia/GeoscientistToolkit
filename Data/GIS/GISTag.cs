@@ -47,8 +47,8 @@ public enum GISTag : long
     // Analysis Types
     DEM = 1 << 28, // Digital Elevation Model
     DSM = 1 << 29, // Digital Surface Model
-    DTM = 1 << 30, // Digital Terrain Model
-    Slope = 1 << 31,
+    DTM = 1L << 30, // Digital Terrain Model
+    Slope = 1L << 31,
     Aspect = 1L << 32,
     Hillshade = 1L << 33,
     Contours = 1L << 34,
@@ -79,7 +79,8 @@ public enum GISTag : long
     FieldData = 1L << 55,
     LiDAR = 1L << 56,
     UAV = 1L << 57, // Unmanned Aerial Vehicle / Drone
-    GPS = 1L << 58
+    GPS = 1L << 58,
+    Subsurface = 1L << 59, // ADDED
 }
 
 public static class GISTagExtensions
@@ -119,6 +120,7 @@ public static class GISTagExtensions
         { GISTag.LandUse, "Land Use" },
         { GISTag.Bathymetry, "Bathymetry" },
         { GISTag.Seismic, "Seismic Data" },
+        { GISTag.Subsurface, "Subsurface Data" }, // ADDED
 
         // Analysis Types
         { GISTag.DEM, "Digital Elevation Model" },
