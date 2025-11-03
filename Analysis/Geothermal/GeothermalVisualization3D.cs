@@ -515,6 +515,16 @@ public class GeothermalVisualization3D : IDisposable
         var nr = (uint)_mesh.RadialPoints;
         var nth = (uint)_mesh.AngularPoints;
         var nz = (uint)_mesh.VerticalPoints;
+        
+        Logger.Log($"[CreateDataTextures] Creating 3D textures: {nr}x{nth}x{nz} = {nr * nth * nz} voxels");
+        
+        // Safety check for texture size (limit to 512^3 = ~134M voxels)
+        var totalVoxels = nr * nth * nz;
+        if (totalVoxels > 134217728)
+        {
+            Logger.LogError($"[CreateDataTextures] ERROR: Texture too large ({totalVoxels} voxels). Maximum is 134M voxels.");
+            throw new InvalidOperationException($"3D texture size ({nr}x{nth}x{nz}) exceeds GPU limits");
+        }
 
         _temperatureTexture3D?.Dispose();
         _temperatureTexture3D =
@@ -531,6 +541,7 @@ public class GeothermalVisualization3D : IDisposable
             // Veldrid texture data is ordered by Z, then Y, then X (or in our case, Z, Theta, R)
             tempData[k * nr * nth + j * nr + i] = _results.FinalTemperatureField[i, j, k];
         _graphicsDevice.UpdateTexture(_temperatureTexture3D, tempData, 0, 0, 0, nr, nth, nz, 0, 0);
+        Logger.Log("[CreateDataTextures] Temperature texture created and uploaded successfully");
 
 
         if (_results.DarcyVelocityField != null)
@@ -557,7 +568,10 @@ public class GeothermalVisualization3D : IDisposable
 
             // Explicitly specify the generic type argument
             _graphicsDevice.UpdateTexture(_velocityTexture3D, velData, 0, 0, 0, nr, nth, nz, 0, 0);
+            Logger.Log("[CreateDataTextures] Velocity texture created and uploaded successfully");
         }
+        
+        Logger.Log("[CreateDataTextures] Complete");
     }
 
     private void CreateSliceQuad()
@@ -729,7 +743,6 @@ public class GeothermalVisualization3D : IDisposable
 
         commandList.End();
         _graphicsDevice.SubmitCommands(commandList);
-        _graphicsDevice.WaitForIdle();
         commandList.Dispose();
     }
 

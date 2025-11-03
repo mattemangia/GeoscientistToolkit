@@ -6,6 +6,7 @@ using GeoscientistToolkit.Data;
 using GeoscientistToolkit.Data.AcousticVolume;
 using GeoscientistToolkit.Data.CtImageStack;
 using GeoscientistToolkit.Data.GIS;
+using GeoscientistToolkit.Data.Image; // Added for ImageDataset
 using GeoscientistToolkit.Data.Mesh3D;
 using GeoscientistToolkit.Data.Pnm;
 using GeoscientistToolkit.Data.Table;
@@ -43,6 +44,8 @@ public class DatasetPanel : BasePanel
 
     public event Action<GISDataset> OnCreateShapefileFromTable;
     public event Action<GISDataset> OnCreateEmptyShapefile;
+    public event Action<DatasetGroup> OnOpenThumbnailViewer;
+    public event Action<DatasetGroup> OnComposePanorama; // Added for Panorama
 
     public void Submit(ref bool pOpen, Action<Dataset> onDatasetSelected, Action onImportClicked)
     {
@@ -364,6 +367,17 @@ public class DatasetPanel : BasePanel
             }
 
             if (ImGui.MenuItem("Ungroup")) UngroupDataset(group);
+
+            ImGui.Separator();
+            bool canComposePanorama = group.Datasets.Count > 1 && group.Datasets.All(d => d is ImageDataset);
+            if (ImGui.MenuItem("Compose Panorama...", null, false, canComposePanorama))
+            {
+                OnComposePanorama?.Invoke(group);
+            }
+            if (ImGui.IsItemHovered() && !canComposePanorama)
+            {
+                ImGui.SetTooltip("Group must contain at least two image datasets to compose a panorama.");
+            }
         }
 
         if (dataset is AcousticVolumeDataset acousticDataset)
@@ -505,10 +519,6 @@ public class DatasetPanel : BasePanel
             ImGui.EndPopup();
         }
     }
-
-
-    // Add this event at the top of the class with other fields
-    public event Action<DatasetGroup> OnOpenThumbnailViewer;
 
     private void CreateGroup()
     {
