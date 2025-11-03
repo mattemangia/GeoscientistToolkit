@@ -43,6 +43,7 @@ CtImageStackDataset ctDataset => new CtCombinedViewer(ctDataset),
         TableDataset tableDataset => new TableViewer(tableDataset),
 
         // GIS datasets
+        SubsurfaceGISDataset subsurfaceGisDataset => new GISViewer(subsurfaceGisDataset),
         GISDataset gisDataset => new GISViewer(gisDataset),
         DatasetGroup group when group.Datasets.All(d => d is GISDataset) =>
             new GISViewer(group.Datasets.Cast<GISDataset>().ToList()),
@@ -75,6 +76,7 @@ public static IDatasetPropertiesRenderer CreatePropertiesRenderer(Dataset datase
         CtImageStackDataset or StreamingCtVolumeDataset => new CtImageStackPropertiesRenderer(),
         Mesh3DDataset => new Mesh3DProperties(),
         TableDataset => new TableProperties(),
+        SubsurfaceGISDataset => new GISProperties(),
         GISDataset => new GISProperties(),
         AcousticVolumeDataset => new AcousticVolumeProperties(),
         PNMDataset => new PNMPropertiesRenderer(),
@@ -96,6 +98,7 @@ public static IDatasetTools CreateTools(Dataset dataset)
 
         Mesh3DDataset => new Mesh3DTools(),
         TableDataset => new TableTools(),
+        SubsurfaceGISDataset => new SubsurfaceGISTools(),
         GISDataset => new GISTools(),
         AcousticVolumeDataset => new AcousticVolumeTools(),
         PNMDataset => new PNMTools(),

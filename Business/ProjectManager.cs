@@ -19,6 +19,7 @@ using GeoscientistToolkit.Util;
 using GeoscientistToolkit.Business.GIS;
 // ADDED: To access CompoundLibrary and ChemicalCompound
 using AcousticVolumeDatasetDTO = GeoscientistToolkit.Data.AcousticVolumeDatasetDTO;
+using SubsurfaceGISDatasetDTO = GeoscientistToolkit.Data.GIS.SubsurfaceGISDatasetDTO;
 
 namespace GeoscientistToolkit.Business;
 
@@ -574,7 +575,7 @@ public class ProjectManager
                 break;
             }
                 
-            case SubsurfaceGISDatasetDTO subsurfaceDto:
+            case Data.SubsurfaceGISDatasetDTO subsurfaceDto:
             {
                 var subsurfaceDataset = new SubsurfaceGISDataset(subsurfaceDto);
                 dataset = subsurfaceDataset;

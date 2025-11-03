@@ -65,6 +65,9 @@
     <ItemGroup Condition="'$(Configuration)' == 'Release'">
         <Compile Remove="AddIns\Development\**\*.cs"/>
     </ItemGroup>
+    <ItemGroup>
+      <Folder Include="LASExample\" />
+    </ItemGroup>
 
     <!-- First, ensure the AddInExtractor is built -->
     <Target Name="BuildAddInExtractor" BeforeTargets="ExtractAddIns" Condition="'$(Configuration)' == 'Release'">

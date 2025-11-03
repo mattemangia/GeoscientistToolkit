@@ -15,6 +15,7 @@ using GeoscientistToolkit.Data.Table;
 using GeoscientistToolkit.Data.TwoDGeology;
 using GeoscientistToolkit.Util;
 using AcousticVolumeDatasetDTO = GeoscientistToolkit.Data.AcousticVolumeDatasetDTO;
+using SubsurfaceGISDatasetDTO = GeoscientistToolkit.Data.GIS.SubsurfaceGISDatasetDTO;
 
 namespace GeoscientistToolkit.Business;
 

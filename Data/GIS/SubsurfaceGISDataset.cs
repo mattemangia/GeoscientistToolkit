@@ -38,13 +38,13 @@ public class SubsurfaceGISDataset : GISDataset
 {
     public SubsurfaceGISDataset(string name, string filePath) : base(name, filePath)
     {
-        Type = DatasetType.GIS;
+        Type = DatasetType.SubsurfaceGIS;
         Tags |= GISTag.ThreeDimensional | GISTag.Generated | GISTag.Subsurface;
     }
 
-    public SubsurfaceGISDataset(SubsurfaceGISDatasetDTO dto) : base(dto.Name, dto.FilePath)
+    public SubsurfaceGISDataset(Data.SubsurfaceGISDatasetDTO dto) : base(dto.Name, dto.FilePath)
     {
-        Type = DatasetType.GIS;
+        Type = DatasetType.SubsurfaceGIS;
         Tags |= GISTag.ThreeDimensional | GISTag.Generated | GISTag.Subsurface;
         SourceBoreholeNames = dto.SourceBoreholeNames ?? new List<string>();
         VoxelGrid = dto.VoxelGrid?.Select(v => new SubsurfaceVoxel
@@ -98,6 +98,58 @@ public class SubsurfaceGISDataset : GISDataset
     
     // Heightmap reference (if used)
     public string HeightmapDatasetName { get; set; }
+    
+    /// <summary>
+    /// Converts the dataset to a serializable DTO
+    /// </summary>
+    public new object ToSerializableObject()
+    {
+        var baseDto = base.ToSerializableObject() as GISDatasetDTO;
+        
+        return new SubsurfaceGISDatasetDTO
+        {
+            TypeName = nameof(SubsurfaceGISDataset),
+            Name = Name,
+            FilePath = FilePath,
+            Layers = baseDto.Layers,
+            BasemapType = baseDto.BasemapType,
+            BasemapPath = baseDto.BasemapPath,
+            ActiveBasemapLayerName = baseDto.ActiveBasemapLayerName,
+            Center = baseDto.Center,
+            DefaultZoom = baseDto.DefaultZoom,
+            Tags = baseDto.Tags,
+            GISMetadata = baseDto.GISMetadata,
+            SourceBoreholeNames = new List<string>(SourceBoreholeNames),
+            VoxelGrid = VoxelGrid.Select(v => new SubsurfaceVoxelDTO
+            {
+                Position = v.Position,
+                LithologyType = v.LithologyType,
+                Parameters = new Dictionary<string, float>(v.Parameters),
+                Confidence = v.Confidence
+            }).ToList(),
+            LayerBoundaries = LayerBoundaries.Select(b => new SubsurfaceLayerBoundaryDTO
+            {
+                LayerName = b.LayerName,
+                Points = new List<Vector3>(b.Points),
+                ElevationGrid = b.ElevationGrid,
+                GridBounds = b.GridBounds != null ? new BoundingBoxDTO 
+                { 
+                    Min = b.GridBounds.Min, 
+                    Max = b.GridBounds.Max 
+                } : null
+            }).ToList(),
+            GridOrigin = GridOrigin,
+            GridSize = GridSize,
+            VoxelSize = VoxelSize,
+            GridResolutionX = GridResolutionX,
+            GridResolutionY = GridResolutionY,
+            GridResolutionZ = GridResolutionZ,
+            InterpolationRadius = InterpolationRadius,
+            InterpolationMethod = (int)Method,
+            IDWPower = IDWPower,
+            HeightmapDatasetName = HeightmapDatasetName
+        };
+    }
     
     /// <summary>
     /// Build the 3D subsurface model from a list of boreholes
@@ -216,7 +268,7 @@ public class SubsurfaceGISDataset : GISDataset
     }
 
     /// <summary>
-    /// Interpolate elevation from heightmap at given coordinates
+    /// Interpolate elevation from heightmap at a given position
     /// </summary>
     private float? InterpolateHeightmapAt(GISRasterLayer heightmap, float x, float y)
     {
@@ -225,62 +277,51 @@ public class SubsurfaceGISDataset : GISDataset
         var bounds = heightmap.Bounds;
         var pixelData = heightmap.GetPixelData();
 
+        // Check if position is within heightmap bounds
+        if (x < bounds.Min.X || x > bounds.Max.X || y < bounds.Min.Y || y > bounds.Max.Y)
+            return null;
+
         // Convert world coordinates to pixel coordinates
         float normalizedX = (x - bounds.Min.X) / bounds.Width;
         float normalizedY = (y - bounds.Min.Y) / bounds.Height;
 
-        if (normalizedX < 0 || normalizedX > 1 || normalizedY < 0 || normalizedY > 1)
-            return null;
+        int pixelX = (int)(normalizedX * heightmap.Width);
+        int pixelY = (int)(normalizedY * heightmap.Height);
 
-        int pixelX = (int)(normalizedX * (heightmap.Width - 1));
-        int pixelY = (int)(normalizedY * (heightmap.Height - 1));
+        // Clamp to valid range
+        pixelX = Math.Clamp(pixelX, 0, heightmap.Width - 1);
+        pixelY = Math.Clamp(pixelY, 0, heightmap.Height - 1);
 
-        // Bilinear interpolation
-        int x0 = Math.Clamp(pixelX, 0, heightmap.Width - 1);
-        int x1 = Math.Clamp(pixelX + 1, 0, heightmap.Width - 1);
-        int y0 = Math.Clamp(pixelY, 0, heightmap.Height - 1);
-        int y1 = Math.Clamp(pixelY + 1, 0, heightmap.Height - 1);
-
-        float fx = normalizedX * (heightmap.Width - 1) - pixelX;
-        float fy = normalizedY * (heightmap.Height - 1) - pixelY;
-
-        float v00 = pixelData[x0, y0];
-        float v10 = pixelData[x1, y0];
-        float v01 = pixelData[x0, y1];
-        float v11 = pixelData[x1, y1];
-
-        float v0 = v00 * (1 - fx) + v10 * fx;
-        float v1 = v01 * (1 - fx) + v11 * fx;
-
-        return v0 * (1 - fy) + v1 * fy;
+        return pixelData[pixelX, pixelY];
     }
 
     /// <summary>
-    /// Interpolate elevation from nearby boreholes using IDW
+    /// Interpolate elevation from nearby boreholes
     /// </summary>
-    private float? InterpolateElevationFromBoreholes(BoreholeDataset target, List<BoreholeDataset> boreholes)
+    private float? InterpolateElevationFromBoreholes(BoreholeDataset targetBorehole, List<BoreholeDataset> allBoreholes)
     {
-        var nearbyBoreholes = boreholes
-            .Where(b => b != target && b.Elevation != 0)
+        var nearbyBoreholes = allBoreholes
+            .Where(b => b != targetBorehole && b.Elevation != 0)
             .Select(b => new
             {
                 Borehole = b,
-                Distance = Vector2.Distance(target.SurfaceCoordinates, b.SurfaceCoordinates)
+                Distance = Vector2.Distance(targetBorehole.SurfaceCoordinates, b.SurfaceCoordinates)
             })
-            .Where(x => x.Distance < InterpolationRadius && x.Distance > 0)
+            .Where(x => x.Distance < InterpolationRadius)
             .OrderBy(x => x.Distance)
-            .Take(4)
+            .Take(5)
             .ToList();
 
         if (nearbyBoreholes.Count == 0)
             return null;
 
+        // IDW interpolation
         float weightSum = 0;
         float elevationSum = 0;
 
         foreach (var nearby in nearbyBoreholes)
         {
-            float weight = 1.0f / MathF.Pow(nearby.Distance, IDWPower);
+            float weight = nearby.Distance < 0.001f ? 1000f : 1.0f / MathF.Pow(nearby.Distance, IDWPower);
             weightSum += weight;
             elevationSum += nearby.Borehole.Elevation * weight;
         }
@@ -289,142 +330,94 @@ public class SubsurfaceGISDataset : GISDataset
     }
 
     /// <summary>
-    /// Build layer boundaries by interpolating contacts between lithology units
+    /// Build layer boundaries from boreholes
     /// </summary>
     private void BuildLayerBoundaries(List<BoreholeDataset> boreholes)
     {
-        LayerBoundaries.Clear();
+        // Get all unique layer names across all boreholes
+        var layerNames = boreholes
+            .SelectMany(b => b.LithologyUnits.Select(u => u.LithologyType))
+            .Distinct()
+            .ToList();
 
-        // Collect all unique layer names across all boreholes
-        var allLayers = new HashSet<string>();
-        foreach (var borehole in boreholes)
-        {
-            foreach (var unit in borehole.LithologyUnits)
-            {
-                allLayers.Add(unit.LithologyType);
-            }
-        }
+        Logger.Log($"Found {layerNames.Count} unique lithology types");
 
-        foreach (var layerName in allLayers)
+        foreach (var layerName in layerNames)
         {
             var boundary = new SubsurfaceLayerBoundary
             {
-                LayerName = layerName,
-                GridBounds = new BoundingBox
-                {
-                    Min = new Vector2(GridOrigin.X, GridOrigin.Y),
-                    Max = new Vector2(GridOrigin.X + GridSize.X, GridOrigin.Y + GridSize.Y)
-                }
+                LayerName = layerName
             };
 
-            // Create elevation grid for this layer boundary
-            boundary.ElevationGrid = new float[GridResolutionX, GridResolutionY];
-
-            // Interpolate layer top elevation at each grid point
-            for (int ix = 0; ix < GridResolutionX; ix++)
+            // For each borehole, find the top of this layer
+            foreach (var borehole in boreholes)
             {
-                for (int iy = 0; iy < GridResolutionY; iy++)
+                var unit = borehole.LithologyUnits.FirstOrDefault(u => u.LithologyType == layerName);
+                if (unit != null)
                 {
-                    float x = GridOrigin.X + ix * VoxelSize.X;
-                    float y = GridOrigin.Y + iy * VoxelSize.Y;
-
-                    boundary.ElevationGrid[ix, iy] = InterpolateLayerElevation(
-                        boreholes, layerName, x, y
-                    );
+                    float topElevation = borehole.Elevation - unit.DepthFrom;
+                    boundary.Points.Add(new Vector3(
+                        borehole.SurfaceCoordinates.X,
+                        borehole.SurfaceCoordinates.Y,
+                        topElevation
+                    ));
                 }
             }
 
-            LayerBoundaries.Add(boundary);
-        }
-
-        Logger.Log($"Built {LayerBoundaries.Count} layer boundaries");
-    }
-
-    /// <summary>
-    /// Interpolate the elevation of a specific layer at a given position
-    /// </summary>
-    private float InterpolateLayerElevation(List<BoreholeDataset> boreholes, string layerName, float x, float y)
-    {
-        var targetPos = new Vector2(x, y);
-
-        // Find boreholes that have this layer
-        var boreholesWithLayer = new List<(BoreholeDataset Borehole, float TopElevation, float Distance)>();
-
-        foreach (var borehole in boreholes)
-        {
-            var unit = borehole.LithologyUnits.FirstOrDefault(u => u.LithologyType == layerName);
-            if (unit != null)
+            if (boundary.Points.Count > 0)
             {
-                float topElevation = borehole.Elevation - unit.DepthFrom;
-                float distance = Vector2.Distance(targetPos, borehole.SurfaceCoordinates);
-                
-                if (distance < InterpolationRadius)
-                {
-                    boreholesWithLayer.Add((borehole, topElevation, distance));
-                }
+                LayerBoundaries.Add(boundary);
             }
         }
-
-        if (boreholesWithLayer.Count == 0)
-        {
-            // Layer not found in any nearby borehole
-            return GridOrigin.Z;
-        }
-
-        // Inverse Distance Weighted interpolation
-        float weightSum = 0;
-        float elevationSum = 0;
-
-        foreach (var (borehole, topElevation, distance) in boreholesWithLayer)
-        {
-            float weight = distance < 0.001f ? 1000f : 1.0f / MathF.Pow(distance, IDWPower);
-            weightSum += weight;
-            elevationSum += topElevation * weight;
-        }
-
-        return elevationSum / weightSum;
     }
 
     /// <summary>
-    /// Build the 3D voxel grid by interpolating borehole data
+    /// Build the voxel grid by interpolating borehole data
     /// </summary>
     private void BuildVoxelGrid(List<BoreholeDataset> boreholes)
     {
-        VoxelGrid.Clear();
-
         Logger.Log($"Building voxel grid: {GridResolutionX}x{GridResolutionY}x{GridResolutionZ}");
 
         int totalVoxels = GridResolutionX * GridResolutionY * GridResolutionZ;
-        int processedVoxels = 0;
+        int voxelsProcessed = 0;
+        int voxelsCreated = 0;
 
-        for (int ix = 0; ix < GridResolutionX; ix++)
+        for (int i = 0; i < GridResolutionX; i++)
         {
-            for (int iy = 0; iy < GridResolutionY; iy++)
+            for (int j = 0; j < GridResolutionY; j++)
             {
-                for (int iz = 0; iz < GridResolutionZ; iz++)
+                for (int k = 0; k < GridResolutionZ; k++)
                 {
-                    float x = GridOrigin.X + ix * VoxelSize.X;
-                    float y = GridOrigin.Y + iy * VoxelSize.Y;
-                    float z = GridOrigin.Z + iz * VoxelSize.Z;
+                    Vector3 position = new Vector3(
+                        GridOrigin.X + (i + 0.5f) * VoxelSize.X,
+                        GridOrigin.Y + (j + 0.5f) * VoxelSize.Y,
+                        GridOrigin.Z + (k + 0.5f) * VoxelSize.Z
+                    );
 
-                    var voxel = InterpolateVoxel(boreholes, new Vector3(x, y, z));
+                    var voxel = InterpolateVoxel(boreholes, position);
                     if (voxel != null)
                     {
                         VoxelGrid.Add(voxel);
+                        voxelsCreated++;
                     }
 
-                    processedVoxels++;
-                    if (processedVoxels % 10000 == 0)
+                    voxelsProcessed++;
+
+                    // Log progress every 10%
+                    if (voxelsProcessed % (totalVoxels / 10) == 0)
                     {
-                        Logger.Log($"Voxel grid progress: {processedVoxels}/{totalVoxels}");
+                        float progress = (float)voxelsProcessed / totalVoxels * 100;
+                        Logger.Log($"Voxel grid progress: {progress:F1}% ({voxelsCreated} voxels created)");
                     }
                 }
             }
         }
+
+        Logger.Log($"Voxel grid complete: {voxelsCreated} voxels created out of {totalVoxels} positions");
     }
 
     /// <summary>
-    /// Interpolate voxel properties at a given 3D position
+    /// Interpolate voxel properties from nearby boreholes
     /// </summary>
     private SubsurfaceVoxel InterpolateVoxel(List<BoreholeDataset> boreholes, Vector3 position)
     {
