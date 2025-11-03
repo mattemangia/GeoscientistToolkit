@@ -1,4 +1,100 @@
 ﻿// GeoscientistToolkit/Analysis/Geothermal/GeothermalSimulationSolver.cs
+//
+// ================================================================================================
+// REFERENCES (APA Format):
+// ================================================================================================
+// This numerical solver for coupled heat transfer and groundwater flow in geothermal systems
+// is based on established methods and approaches documented in the following scientific literature:
+//
+// Al-Khoury, R., Bonnier, P. G., & Brinkgreve, R. B. J. (2010). Efficient numerical modeling of 
+//     borehole heat exchangers. Computers & Geosciences, 36(10), 1301-1315. 
+//     https://doi.org/10.1016/j.cageo.2009.12.010
+//
+// Chen, C., Shao, H., Naumov, D., Kong, Y., Tu, K., & Kolditz, O. (2019). Numerical investigation 
+//     on the performance, sustainability, and efficiency of the deep borehole heat exchanger system 
+//     for building heating. Geothermal Energy, 7(18), 1-23. https://doi.org/10.1186/s40517-019-0133-8
+//
+// Conti, P., Testi, D., & Grassi, W. (2018). Transient forced convection from an infinite cylindrical 
+//     heat source in a saturated Darcian porous medium. International Journal of Heat and Mass Transfer, 
+//     117, 154-166. https://doi.org/10.1016/j.ijheatmasstransfer.2017.10.012
+//
+// Diao, N., Li, Q., & Fang, Z. (2004). Heat transfer in ground heat exchangers with groundwater 
+//     advection. International Journal of Thermal Sciences, 43(12), 1203-1211. 
+//     https://doi.org/10.1016/j.ijthermalsci.2004.04.009
+//
+// Diersch, H. J., Bauer, D., Heidemann, W., Rühaak, W., & Schätzl, P. (2011). Finite element modeling 
+//     of borehole heat exchanger systems: Part 2. Numerical simulation. Computers & Geosciences, 37(8), 
+//     1136-1147. https://doi.org/10.1016/j.cageo.2010.08.002
+//
+// Fang, L., Diao, N., Shao, Z., Zhu, K., & Fang, Z. (2018). A computationally efficient numerical 
+//     model for heat transfer simulation of deep borehole heat exchangers. Energy and Buildings, 167, 
+//     79-88. https://doi.org/10.1016/j.enbuild.2018.02.013
+//
+// Gao, Q., Zeng, L., Shi, Z., Xu, P., Yao, Y., & Shang, X. (2022). The numerical simulation of heat 
+//     and mass transfer on geothermal system—A case study in Laoling area, Shandong, China. 
+//     Mathematical Problems in Engineering, 2022, Article 3398965. https://doi.org/10.1155/2022/3398965
+//
+// He, M. (2012). Numerical modelling of geothermal borehole heat exchanger systems [Doctoral dissertation, 
+//     De Montfort University]. https://www.dora.dmu.ac.uk/handle/2086/7407
+//
+// Hu, X., Banks, J., Wu, L., & Liu, W. V. (2020). Numerical modeling of a coaxial borehole heat 
+//     exchanger to exploit geothermal energy from abandoned petroleum wells in Hinton, Alberta. 
+//     Renewable Energy, 148, 1110-1123. https://doi.org/10.1016/j.renene.2019.09.141
+//
+// Kong, Y., Chen, C., Shao, H., Pang, Z., Xiong, L., & Wang, J. (2017). Principle and capacity 
+//     quantification of deep-borehole heat exchangers. Chinese Journal of Geophysics, 60(12), 4741-4752. 
+//     https://doi.org/10.6038/cjg20171216
+//
+// Li, M., & Lai, A. C. K. (2015). Review of analytical models for heat transfer by vertical ground 
+//     heat exchangers (GHEs): A perspective of time and space scales. Applied Energy, 151, 178-191. 
+//     https://doi.org/10.1016/j.apenergy.2015.04.070
+//
+// Ma, Y., Li, S., Zhang, L., Liu, S., Liu, Z., Li, H., & Zhai, J. (2020). Numerical simulation on 
+//     heat extraction performance of enhanced geothermal system under the different well layout. 
+//     Energy Exploration & Exploitation, 38(1), 274-297. https://doi.org/10.1177/0144598719880350
+//
+// Renaud, T., Verdin, P., & Falcone, G. (2019). Numerical simulation of a deep borehole heat 
+//     exchanger in the Krafla geothermal system. International Journal of Heat and Mass Transfer, 
+//     143, Article 118496. https://doi.org/10.1016/j.ijheatmasstransfer.2019.118496
+//
+// Song, X., Wang, G., Shi, Y., Li, R., Xu, Z., Zheng, R., Wang, Y., & Li, J. (2018). Numerical 
+//     analysis of heat extraction performance of a deep coaxial borehole heat exchanger geothermal 
+//     system. Energy, 164, 1298-1310. https://doi.org/10.1016/j.energy.2018.08.056
+//
+// Wang, Z., Wang, F., Liu, J., Ma, Z., Han, E., & Song, M. (2022). Influence factors on EGS 
+//     geothermal reservoir extraction performance. Geofluids, 2022, Article 5174456. 
+//     https://doi.org/10.1155/2022/5174456
+//
+// Yang, W., Kong, L., & Chen, Y. (2019). Transient numerical model for a coaxial borehole heat 
+//     exchanger with the effect of borehole heat capacity. International Journal of Energy Research, 
+//     43(10), 5622-5638. https://doi.org/10.1002/er.4457
+//
+// Zhang, W., Yang, H., Lu, L., & Fang, Z. (2015). Investigation on influential factors of engineering 
+//     design of geothermal heat exchangers. Applied Thermal Engineering, 84, 310-319. 
+//     https://doi.org/10.1016/j.applthermaleng.2015.03.077
+//
+// Zhang, X., Zhang, Y., Hu, L., Liu, Y., & Zhang, C. (2020). Numerical simulation on heat transfer 
+//     characteristics of water flowing through the fracture of high-temperature rock. Geofluids, 2020, 
+//     Article 8864028. https://doi.org/10.1155/2020/8864028
+//
+// ------------------------------------------------------------------------------------------------
+// METHODOLOGY NOTES:
+// ------------------------------------------------------------------------------------------------
+// The finite difference method, adaptive time stepping, Courant-Friedrichs-Lewy (CFL) stability 
+// criteria, and iterative convergence techniques implemented in this solver follow standard 
+// numerical methods for solving coupled partial differential equations in porous media as described 
+// in the above references. Key approaches include:
+//
+// 1. Dual-continuum finite element approach for borehole-ground coupling (Al-Khoury et al., 2010; 
+//    Diersch et al., 2011)
+// 2. Adaptive time stepping based on CFL conditions and convergence behavior (Fang et al., 2018)
+// 3. Coupled thermal-hydraulic-mechanical (THM) processes in fractured geothermal systems 
+//    (Chen et al., 2019; Wang et al., 2022)
+// 4. Heat transfer with groundwater advection in porous media (Diao et al., 2004; Conti et al., 2018)
+// 5. Stability analysis and convergence acceleration techniques for nonlinear coupled systems 
+//    (Gao et al., 2022; Ma et al., 2020)
+// ================================================================================================
+
 
 using System.Numerics;
 using System.Runtime.Intrinsics;
