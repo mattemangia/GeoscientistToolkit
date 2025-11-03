@@ -69,20 +69,29 @@ public class LASLoader : IDataLoader
                 
                 progressReporter?.Report((0.3f, "Creating borehole dataset..."));
                 
-                // Create borehole dataset
+                // Create borehole dataset - no file path since it's memory-only from LAS import
                 var wellName = lasData.WellInfo.GetValueOrDefault("WELL", Path.GetFileNameWithoutExtension(_filePath));
-                var dataset = new BoreholeDataset(wellName, _filePath);
+                var dataset = new BoreholeDataset(wellName, "");
+                
+                // Store original LAS source in metadata for reference
+                dataset.DatasetMetadata.CustomFields["ImportedFromLAS"] = _filePath;
                 
                 // Set well information
                 progressReporter?.Report((0.4f, "Setting well information..."));
                 SetWellInformation(dataset, lasData);
                 
+                // Clear default parameter tracks - we'll add only LAS curves
+                progressReporter?.Report((0.5f, "Clearing default tracks..."));
+                dataset.ParameterTracks.Clear();
+                dataset.LithologyUnits.Clear();
+                dataset.Fractures.Clear();
+                
                 // Add parameter tracks
-                progressReporter?.Report((0.5f, "Adding parameter tracks..."));
+                progressReporter?.Report((0.6f, "Adding parameter tracks..."));
                 AddParameterTracks(dataset, lasData);
                 
                 // Populate data points
-                progressReporter?.Report((0.7f, "Loading log data..."));
+                progressReporter?.Report((0.75f, "Loading log data..."));
                 PopulateLogData(dataset, lasData);
                 
                 // Estimate lithology if possible
@@ -368,7 +377,7 @@ public class LASLoader : IDataLoader
             float.TryParse(elevStr, NumberStyles.Float, CultureInfo.InvariantCulture, out var elev))
             dataset.Elevation = elev;
         
-        // Total depth - find max depth from data
+        // Total depth - calculate from depth range (will be normalized to start at 0)
         var depthIndex = GetDepthCurveIndex(lasData);
         if (depthIndex >= 0)
         {
@@ -379,7 +388,17 @@ public class LASLoader : IDataLoader
             
             if (depths.Any())
             {
-                dataset.TotalDepth = depths.Max();
+                var firstDepth = depths.First();
+                var lastDepth = depths.Last();
+                var minDepth = depths.Min();
+                var maxDepth = depths.Max();
+                
+                // Total depth is always the absolute span
+                dataset.TotalDepth = Math.Abs(maxDepth - minDepth);
+                
+                // Store original depth range in metadata
+                dataset.DatasetMetadata.CustomFields["OriginalDepthStart"] = firstDepth.ToString(CultureInfo.InvariantCulture);
+                dataset.DatasetMetadata.CustomFields["OriginalDepthEnd"] = lastDepth.ToString(CultureInfo.InvariantCulture);
             }
         }
         
@@ -455,13 +474,42 @@ public class LASLoader : IDataLoader
         var depthIndex = GetDepthCurveIndex(lasData);
         if (depthIndex < 0) return;
         
+        // Get all depth values in original order
+        var depthValues = lasData.DataRows
+            .Where(row => row[depthIndex].HasValue)
+            .Select(row => row[depthIndex].Value)
+            .ToList();
+        
+        if (!depthValues.Any()) return;
+        
+        // Determine if depths are increasing or decreasing
+        var firstDepth = depthValues.First();
+        var lastDepth = depthValues.Last();
+        var isDecreasing = firstDepth > lastDepth;
+        
+        // Reference depth is the first data point
+        var referenceDepth = firstDepth;
+        
         foreach (var row in lasData.DataRows)
         {
             // Get depth value
             if (!row[depthIndex].HasValue)
                 continue;
             
-            var depth = row[depthIndex].Value;
+            // Normalize depth so first data point is at 0
+            var originalDepth = row[depthIndex].Value;
+            float normalizedDepth;
+            
+            if (isDecreasing)
+            {
+                // Depths decrease: 1670 -> 1660, so 1670 becomes 0, 1660 becomes 10
+                normalizedDepth = referenceDepth - originalDepth;
+            }
+            else
+            {
+                // Depths increase: 1660 -> 1670, so 1660 becomes 0, 1670 becomes 10
+                normalizedDepth = originalDepth - referenceDepth;
+            }
             
             // Add data point to each curve
             for (int i = 0; i < lasData.Curves.Count; i++)
@@ -476,7 +524,7 @@ public class LASLoader : IDataLoader
                     {
                         track.Points.Add(new ParameterPoint
                         {
-                            Depth = depth,
+                            Depth = normalizedDepth,
                             Value = row[i].Value,
                             SourceDataset = dataset.Name
                         });
@@ -509,7 +557,7 @@ public class LASLoader : IDataLoader
             return;
         }
         
-        // Get gamma ray track
+        // Get gamma ray track (already has normalized depths)
         if (!dataset.ParameterTracks.TryGetValue(grCurve.Mnemonic, out var grTrack))
             return;
         
@@ -560,6 +608,19 @@ public class LASLoader : IDataLoader
         if (lithUnits.Count < sortedPoints.Count / 10)
         {
             dataset.LithologyUnits.AddRange(lithUnits);
+        }
+        else
+        {
+            // Too many small units - just create one default unit
+            dataset.LithologyUnits.Add(new LithologyUnit
+            {
+                Name = "Mixed Formation",
+                LithologyType = "Sandstone",
+                DepthFrom = 0,
+                DepthTo = dataset.TotalDepth,
+                Color = new Vector4(0.8f, 0.8f, 0.7f, 1.0f),
+                Description = "Lithology varies - check gamma ray log"
+            });
         }
     }
     
