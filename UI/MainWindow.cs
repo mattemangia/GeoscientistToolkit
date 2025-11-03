@@ -313,7 +313,7 @@ public class MainWindow
             if (_warned) return;
             _warned = true;
             System.Diagnostics.Debug.WriteLine("[MainWindow] DockBuilder API not available. " +
-                                              "Panels will float â€” upgrade to a docking build and define IMGUI_HAS_DOCK_BUILDER.");
+                                              "Panels will float — upgrade to a docking build and define IMGUI_HAS_DOCK_BUILDER.");
         }
     }
 #endif
@@ -517,7 +517,7 @@ public class MainWindow
         {
             // Space to the far right
             var frameH = ImGui.GetTextLineHeight() + ImGui.GetStyle().FramePadding.Y * 2f;
-            var icon = VeldridManager.IsFullScreen ? "ðŸ——" : "â›¶";
+            var icon = VeldridManager.IsFullScreen ? "🗗" : "🗖";
 
             var iconSize = ImGui.CalcTextSize(icon);
             var btnW = iconSize.X + ImGui.GetStyle().FramePadding.X * 2f;
@@ -825,7 +825,7 @@ public class MainWindow
         {
             ImGui.Text("Welcome to GeoscientistToolkit!");
             ImGui.Separator();
-            ImGui.TextWrapped("Import data via File â†’ Import Data. Use the 'Pop-Out' button to pop-out panels.");
+            ImGui.TextWrapped("Import data via File → Import Data. Use the 'Pop-Out' button to pop-out panels.");
             ImGui.Spacing();
             if (ImGui.Button("Let's go!", new Vector2(100, 0))) ImGui.CloseCurrentPopup();
 
@@ -848,7 +848,7 @@ public class MainWindow
         ImGui.SetNextWindowPos(ImGui.GetMainViewport().GetCenter(), ImGuiCond.Appearing, new Vector2(0.5f, 0.5f));
         if (ImGui.BeginPopupModal("Close Application?###WindowCloseDialog", ImGuiWindowFlags.AlwaysAutoResize))
         {
-            ImGui.Text("âš  Your project has unsaved changes.");
+            ImGui.Text("⚠ Your project has unsaved changes.");
             ImGui.Text("Do you want to save before closing?");
             ImGui.Spacing();
             ImGui.Separator();
@@ -915,16 +915,16 @@ public class MainWindow
         }
 
         // ============================================================================
-        // Regular unsaved changes popup (from Fileâ†’Exit or other menu actions)
+        // Regular unsaved changes popup (from File→Exit or other menu actions)
         // ============================================================================
         if (_showUnsavedChangesPopup)
         {
-            ImGui.OpenPopup("âš  Unsaved Changes###RegularUnsavedChanges");
+            ImGui.OpenPopup("⚠ Unsaved Changes###RegularUnsavedChanges");
             _showUnsavedChangesPopup = false;
         }
 
         ImGui.SetNextWindowPos(ImGui.GetMainViewport().GetCenter(), ImGuiCond.Appearing, new Vector2(0.5f, 0.5f));
-        if (ImGui.BeginPopupModal("âš  Unsaved Changes###RegularUnsavedChanges", ImGuiWindowFlags.AlwaysAutoResize))
+        if (ImGui.BeginPopupModal("⚠ Unsaved Changes###RegularUnsavedChanges", ImGuiWindowFlags.AlwaysAutoResize))
         {
             ImGui.Text("Your project has unsaved changes. Do you want to save them?");
             ImGui.Spacing();
@@ -979,7 +979,7 @@ public class MainWindow
         ImGui.SetNextWindowPos(ImGui.GetMainViewport().GetCenter(), ImGuiCond.Appearing, new Vector2(0.5f, 0.5f));
         if (ImGui.BeginPopupModal("About GeoscientistToolkit", ref _showAboutPopup, ImGuiWindowFlags.AlwaysAutoResize))
         {
-            ImGui.Text("GeoscientistToolkit â€“ Preview Build");
+            ImGui.Text("GeoscientistToolkit – Preview Build");
             ImGui.Separator();
             ImGui.TextWrapped(
                 "Open-source toolkit for geoscience data visualisation and analysis, built with Veldrid + ImGui.NET.");
