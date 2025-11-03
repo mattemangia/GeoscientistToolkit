@@ -56,7 +56,7 @@ public class FeatureMatch
 public class StitchGraph
 {
     private readonly Dictionary<Guid, PanoramaImage> _nodes = new();
-    private readonly Dictionary<Guid, List<(Guid neighbor, List<FeatureMatch> matches, Matrix3x2 homography)>> _adj = new();
+    public readonly Dictionary<Guid, List<(Guid neighbor, List<FeatureMatch> matches, Matrix3x2 homography)>> _adj = new();
 
     public StitchGraph(IEnumerable<PanoramaImage> images)
     {

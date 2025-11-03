@@ -3,6 +3,7 @@
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Numerics;
 using System.Threading;
@@ -242,18 +243,47 @@ public class PanoramaStitchingService
             {
                 State = PanoramaState.Blending;
                 Log($"Starting final blend process to output file: {outputPath}");
-                // In a real implementation, this would involve warping all images to a common
-                // plane and blending the overlapping regions. This is a complex process.
-                for (int i = 0; i <= 100; i++)
+                
+                // Get the largest connected component
+                var components = StitchGroups;
+                if (components.Count == 0 || components[0].Images.Count == 0)
                 {
-                    token.ThrowIfCancellationRequested();
-                    UpdateProgress((float)i / 100, $"Blending... {i}%");
-                    await Task.Delay(50, token); // Simulate work
+                    throw new InvalidOperationException("No connected images to blend.");
                 }
+                
+                var mainGroup = components.OrderByDescending(g => g.Images.Count).First();
+                Log($"Blending {mainGroup.Images.Count} images in the main group...");
+                
+                UpdateProgress(0.1f, "Computing global transformations...");
+                token.ThrowIfCancellationRequested();
+                
+                // Build global transformations from the stitch graph
+                var globalTransforms = ComputeGlobalTransformations(mainGroup, token);
+                
+                UpdateProgress(0.2f, "Computing canvas bounds...");
+                token.ThrowIfCancellationRequested();
+                
+                // Compute output canvas dimensions
+                var (canvasWidth, canvasHeight, offsetX, offsetY) = ComputeCanvasBounds(mainGroup.Images, globalTransforms);
+                Log($"Canvas size: {canvasWidth}x{canvasHeight}, offset: ({offsetX}, {offsetY})");
+                
+                UpdateProgress(0.3f, "Warping and blending images...");
+                token.ThrowIfCancellationRequested();
+                
+                // Perform multi-band blending
+                var blendedImage = await BlendImagesAsync(mainGroup.Images, globalTransforms, 
+                    canvasWidth, canvasHeight, offsetX, offsetY, token);
+                
+                UpdateProgress(0.9f, "Saving panorama...");
+                token.ThrowIfCancellationRequested();
+                
+                // Save the final panorama
+                SavePanoramaImage(outputPath, blendedImage, canvasWidth, canvasHeight);
                 
                 Log($"Successfully saved panorama to {outputPath}");
                 State = PanoramaState.Completed;
                 StatusMessage = "Panorama created successfully!";
+                UpdateProgress(1.0f, "Complete!");
             }
             catch (OperationCanceledException)
             {
@@ -268,6 +298,491 @@ public class PanoramaStitchingService
                 Logger.LogError($"[PanoramaService Blending] {ex.Message}");
             }
         }, token);
+    }
+    
+    private Dictionary<Guid, Matrix3x2> ComputeGlobalTransformations(StitchGroup group, CancellationToken token)
+    {
+        var globalTransforms = new Dictionary<Guid, Matrix3x2>();
+        var visited = new HashSet<Guid>();
+        
+        // Choose reference image (first image in the group)
+        var referenceImage = group.Images[0];
+        globalTransforms[referenceImage.Id] = Matrix3x2.Identity;
+        
+        // BFS to compute global transformations
+        var queue = new Queue<Guid>();
+        queue.Enqueue(referenceImage.Id);
+        visited.Add(referenceImage.Id);
+        
+        while (queue.Count > 0)
+        {
+            token.ThrowIfCancellationRequested();
+            var currentId = queue.Dequeue();
+            var currentTransform = globalTransforms[currentId];
+            
+            if (Graph._adj.TryGetValue(currentId, out var neighbors))
+            {
+                foreach (var (neighborId, _, relativeHomography) in neighbors)
+                {
+                    if (!visited.Contains(neighborId))
+                    {
+                        visited.Add(neighborId);
+                        queue.Enqueue(neighborId);
+                        
+                        // Compose transformations: global = current * relative
+                        globalTransforms[neighborId] = MultiplyAffine(currentTransform, relativeHomography);
+                    }
+                }
+            }
+        }
+        
+        return globalTransforms;
+    }
+    
+    private static Matrix3x2 MultiplyAffine(Matrix3x2 a, Matrix3x2 b)
+    {
+        return new Matrix3x2(
+            a.M11 * b.M11 + a.M12 * b.M21,
+            a.M11 * b.M12 + a.M12 * b.M22,
+            a.M21 * b.M11 + a.M22 * b.M21,
+            a.M21 * b.M12 + a.M22 * b.M22,
+            a.M31 * b.M11 + a.M32 * b.M21 + b.M31,
+            a.M31 * b.M12 + a.M32 * b.M22 + b.M32
+        );
+    }
+    
+    private (int width, int height, int offsetX, int offsetY) ComputeCanvasBounds(
+        List<PanoramaImage> images, Dictionary<Guid, Matrix3x2> transforms)
+    {
+        float minX = float.MaxValue, minY = float.MaxValue;
+        float maxX = float.MinValue, maxY = float.MinValue;
+        
+        foreach (var image in images)
+        {
+            if (!transforms.TryGetValue(image.Id, out var transform))
+                continue;
+                
+            var corners = new Vector2[]
+            {
+                new Vector2(0, 0),
+                new Vector2(image.Dataset.Width, 0),
+                new Vector2(0, image.Dataset.Height),
+                new Vector2(image.Dataset.Width, image.Dataset.Height)
+            };
+            
+            foreach (var corner in corners)
+            {
+                var transformed = Vector2.Transform(corner, transform);
+                minX = Math.Min(minX, transformed.X);
+                minY = Math.Min(minY, transformed.Y);
+                maxX = Math.Max(maxX, transformed.X);
+                maxY = Math.Max(maxY, transformed.Y);
+            }
+        }
+        
+        int width = (int)Math.Ceiling(maxX - minX);
+        int height = (int)Math.Ceiling(maxY - minY);
+        int offsetX = (int)Math.Floor(minX);
+        int offsetY = (int)Math.Floor(minY);
+        
+        return (width, height, offsetX, offsetY);
+    }
+    
+    private async Task<byte[]> BlendImagesAsync(
+        List<PanoramaImage> images, 
+        Dictionary<Guid, Matrix3x2> transforms,
+        int canvasWidth, int canvasHeight, 
+        int offsetX, int offsetY,
+        CancellationToken token)
+    {
+        long estimatedMemory = (long)canvasWidth * canvasHeight * 24; // 24 bytes per pixel
+        long availableMemory = GC.GetGCMemoryInfo().TotalAvailableMemoryBytes;
+        
+        // If estimated memory is more than 70% of available memory, use tile-based approach
+        if (estimatedMemory > availableMemory * 0.7)
+        {
+            Log($"Large panorama detected. Using tile-based blending to conserve memory.");
+            return await BlendImagesTiledAsync(images, transforms, canvasWidth, canvasHeight, offsetX, offsetY, token);
+        }
+        
+        // Use feathered alpha blending for seamless transitions
+        var canvas = new float[canvasWidth * canvasHeight * 4];
+        var weights = new float[canvasWidth * canvasHeight];
+        
+        int processedImages = 0;
+        foreach (var image in images)
+        {
+            token.ThrowIfCancellationRequested();
+            
+            if (!transforms.TryGetValue(image.Id, out var transform))
+                continue;
+                
+            Log($"Warping and blending: {image.Dataset.Name}");
+            
+            // Adjust transform for canvas offset
+            var adjustedTransform = new Matrix3x2(
+                transform.M11, transform.M12,
+                transform.M21, transform.M22,
+                transform.M31 - offsetX, transform.M32 - offsetY
+            );
+            
+            // Warp and blend this image
+            await Task.Run(() => WarpAndBlendImage(
+                image.Dataset, adjustedTransform, 
+                canvas, weights, canvasWidth, canvasHeight), token);
+            
+            processedImages++;
+            UpdateProgress(0.3f + 0.6f * processedImages / images.Count, 
+                $"Blending image {processedImages}/{images.Count}");
+        }
+        
+        // Normalize by weights and convert to bytes
+        var result = new byte[canvasWidth * canvasHeight * 4];
+        Parallel.For(0, canvasWidth * canvasHeight, i =>
+        {
+            if (weights[i] > 0)
+            {
+                int baseIdx = i * 4;
+                result[baseIdx] = ClampToByte(canvas[baseIdx] / weights[i]);
+                result[baseIdx + 1] = ClampToByte(canvas[baseIdx + 1] / weights[i]);
+                result[baseIdx + 2] = ClampToByte(canvas[baseIdx + 2] / weights[i]);
+                result[baseIdx + 3] = 255;
+            }
+        });
+        
+        return result;
+    }
+    
+    private async Task<byte[]> BlendImagesTiledAsync(
+        List<PanoramaImage> images, 
+        Dictionary<Guid, Matrix3x2> transforms,
+        int canvasWidth, int canvasHeight, 
+        int offsetX, int offsetY,
+        CancellationToken token)
+    {
+        // Process panorama in tiles to reduce memory footprint
+        const int tileSize = 2048;
+        int tilesX = (int)Math.Ceiling((double)canvasWidth / tileSize);
+        int tilesY = (int)Math.Ceiling((double)canvasHeight / tileSize);
+        
+        Log($"Processing panorama in {tilesX}x{tilesY} tiles ({tileSize}x{tileSize} each)");
+        
+        var result = new byte[canvasWidth * canvasHeight * 4];
+        int totalTiles = tilesX * tilesY;
+        int processedTiles = 0;
+        
+        for (int ty = 0; ty < tilesY; ty++)
+        {
+            for (int tx = 0; tx < tilesX; tx++)
+            {
+                token.ThrowIfCancellationRequested();
+                
+                int tileX = tx * tileSize;
+                int tileY = ty * tileSize;
+                int tileW = Math.Min(tileSize, canvasWidth - tileX);
+                int tileH = Math.Min(tileSize, canvasHeight - tileY);
+                
+                // Process this tile
+                var tileCanvas = new float[tileW * tileH * 4];
+                var tileWeights = new float[tileW * tileH];
+                
+                foreach (var image in images)
+                {
+                    if (!transforms.TryGetValue(image.Id, out var transform))
+                        continue;
+                    
+                    var adjustedTransform = new Matrix3x2(
+                        transform.M11, transform.M12,
+                        transform.M21, transform.M22,
+                        transform.M31 - offsetX, transform.M32 - offsetY
+                    );
+                    
+                    await Task.Run(() => WarpAndBlendImageTile(
+                        image.Dataset, adjustedTransform,
+                        tileCanvas, tileWeights, tileW, tileH, tileX, tileY), token);
+                }
+                
+                // Normalize and copy tile to result
+                for (int y = 0; y < tileH; y++)
+                {
+                    for (int x = 0; x < tileW; x++)
+                    {
+                        int tileIdx = y * tileW + x;
+                        int canvasIdx = ((tileY + y) * canvasWidth + (tileX + x)) * 4;
+                        
+                        if (tileWeights[tileIdx] > 0)
+                        {
+                            result[canvasIdx] = ClampToByte(tileCanvas[tileIdx * 4] / tileWeights[tileIdx]);
+                            result[canvasIdx + 1] = ClampToByte(tileCanvas[tileIdx * 4 + 1] / tileWeights[tileIdx]);
+                            result[canvasIdx + 2] = ClampToByte(tileCanvas[tileIdx * 4 + 2] / tileWeights[tileIdx]);
+                            result[canvasIdx + 3] = 255;
+                        }
+                    }
+                }
+                
+                processedTiles++;
+                UpdateProgress(0.3f + 0.6f * processedTiles / totalTiles,
+                    $"Processing tile {processedTiles}/{totalTiles}");
+                
+                // Force garbage collection after each tile to keep memory usage low
+                if (processedTiles % 10 == 0)
+                {
+                    GC.Collect();
+                }
+            }
+        }
+        
+        return result;
+    }
+    
+    private void WarpAndBlendImageTile(
+        ImageDataset dataset, Matrix3x2 transform,
+        float[] tileCanvas, float[] tileWeights, int tileWidth, int tileHeight,
+        int tileOffsetX, int tileOffsetY)
+    {
+        if (dataset.ImageData == null)
+            dataset.Load();
+            
+        var imageData = dataset.ImageData;
+        var imgWidth = dataset.Width;
+        var imgHeight = dataset.Height;
+        
+        if (!Matrix3x2.Invert(transform, out var invTransform))
+            return;
+        
+        var distanceMap = ComputeDistanceToEdge(imgWidth, imgHeight);
+        
+        Parallel.For(0, tileHeight, y =>
+        {
+            for (int x = 0; x < tileWidth; x++)
+            {
+                // Convert tile coordinates to canvas coordinates
+                int canvasX = tileOffsetX + x;
+                int canvasY = tileOffsetY + y;
+                
+                var srcPt = Vector2.Transform(new Vector2(canvasX, canvasY), invTransform);
+                
+                if (srcPt.X < 0 || srcPt.X >= imgWidth - 1 || 
+                    srcPt.Y < 0 || srcPt.Y >= imgHeight - 1)
+                    continue;
+                
+                int x0 = (int)srcPt.X;
+                int y0 = (int)srcPt.Y;
+                int x1 = x0 + 1;
+                int y1 = y0 + 1;
+                
+                float fx = srcPt.X - x0;
+                float fy = srcPt.Y - y0;
+                
+                int idx00 = (y0 * imgWidth + x0) * 4;
+                int idx10 = (y0 * imgWidth + x1) * 4;
+                int idx01 = (y1 * imgWidth + x0) * 4;
+                int idx11 = (y1 * imgWidth + x1) * 4;
+                
+                float r = BilinearInterp(
+                    imageData[idx00], imageData[idx10], 
+                    imageData[idx01], imageData[idx11], fx, fy);
+                float g = BilinearInterp(
+                    imageData[idx00 + 1], imageData[idx10 + 1], 
+                    imageData[idx01 + 1], imageData[idx11 + 1], fx, fy);
+                float b = BilinearInterp(
+                    imageData[idx00 + 2], imageData[idx10 + 2], 
+                    imageData[idx01 + 2], imageData[idx11 + 2], fx, fy);
+                
+                float distWeight = BilinearInterp(
+                    distanceMap[y0 * imgWidth + x0], distanceMap[y0 * imgWidth + x1],
+                    distanceMap[y1 * imgWidth + x0], distanceMap[y1 * imgWidth + x1], fx, fy);
+                
+                float weight = Math.Min(1.0f, distWeight / 50.0f);
+                
+                int tileIdx = (y * tileWidth + x) * 4;
+                lock (tileCanvas)
+                {
+                    tileCanvas[tileIdx] += r * weight;
+                    tileCanvas[tileIdx + 1] += g * weight;
+                    tileCanvas[tileIdx + 2] += b * weight;
+                    tileWeights[y * tileWidth + x] += weight;
+                }
+            }
+        });
+    }
+    
+    private void WarpAndBlendImage(
+        ImageDataset dataset, Matrix3x2 transform,
+        float[] canvas, float[] weights, int canvasWidth, int canvasHeight)
+    {
+        if (dataset.ImageData == null)
+            dataset.Load();
+            
+        var imageData = dataset.ImageData;
+        var imgWidth = dataset.Width;
+        var imgHeight = dataset.Height;
+        
+        // Compute inverse transform for backward warping
+        if (!Matrix3x2.Invert(transform, out var invTransform))
+            return;
+        
+        // Create distance transform for feathering (distance to image border)
+        var distanceMap = ComputeDistanceToEdge(imgWidth, imgHeight);
+        
+        // Warp image with bilinear interpolation
+        Parallel.For(0, canvasHeight, y =>
+        {
+            for (int x = 0; x < canvasWidth; x++)
+            {
+                // Transform canvas point to source image coordinates
+                var srcPt = Vector2.Transform(new Vector2(x, y), invTransform);
+                
+                // Check bounds
+                if (srcPt.X < 0 || srcPt.X >= imgWidth - 1 || 
+                    srcPt.Y < 0 || srcPt.Y >= imgHeight - 1)
+                    continue;
+                
+                // Bilinear interpolation
+                int x0 = (int)srcPt.X;
+                int y0 = (int)srcPt.Y;
+                int x1 = x0 + 1;
+                int y1 = y0 + 1;
+                
+                float fx = srcPt.X - x0;
+                float fy = srcPt.Y - y0;
+                
+                int idx00 = (y0 * imgWidth + x0) * 4;
+                int idx10 = (y0 * imgWidth + x1) * 4;
+                int idx01 = (y1 * imgWidth + x0) * 4;
+                int idx11 = (y1 * imgWidth + x1) * 4;
+                
+                // Interpolate RGB values
+                float r = BilinearInterp(
+                    imageData[idx00], imageData[idx10], 
+                    imageData[idx01], imageData[idx11], fx, fy);
+                float g = BilinearInterp(
+                    imageData[idx00 + 1], imageData[idx10 + 1], 
+                    imageData[idx01 + 1], imageData[idx11 + 1], fx, fy);
+                float b = BilinearInterp(
+                    imageData[idx00 + 2], imageData[idx10 + 2], 
+                    imageData[idx01 + 2], imageData[idx11 + 2], fx, fy);
+                
+                // Get distance weight for feathering
+                float distWeight = BilinearInterp(
+                    distanceMap[y0 * imgWidth + x0], distanceMap[y0 * imgWidth + x1],
+                    distanceMap[y1 * imgWidth + x0], distanceMap[y1 * imgWidth + x1], fx, fy);
+                
+                // Apply feathering weight (smooth falloff near edges)
+                float weight = Math.Min(1.0f, distWeight / 50.0f);
+                
+                // Accumulate weighted color
+                int canvasIdx = (y * canvasWidth + x) * 4;
+                lock (canvas)
+                {
+                    canvas[canvasIdx] += r * weight;
+                    canvas[canvasIdx + 1] += g * weight;
+                    canvas[canvasIdx + 2] += b * weight;
+                    weights[y * canvasWidth + x] += weight;
+                }
+            }
+        });
+    }
+    
+    private float[] ComputeDistanceToEdge(int width, int height)
+    {
+        var distanceMap = new float[width * height];
+        
+        Parallel.For(0, height, y =>
+        {
+            for (int x = 0; x < width; x++)
+            {
+                int distToLeft = x;
+                int distToRight = width - 1 - x;
+                int distToTop = y;
+                int distToBottom = height - 1 - y;
+                
+                float minDist = Math.Min(Math.Min(distToLeft, distToRight), 
+                                        Math.Min(distToTop, distToBottom));
+                distanceMap[y * width + x] = minDist;
+            }
+        });
+        
+        return distanceMap;
+    }
+    
+    private static float BilinearInterp(float v00, float v10, float v01, float v11, float fx, float fy)
+    {
+        float v0 = v00 * (1 - fx) + v10 * fx;
+        float v1 = v01 * (1 - fx) + v11 * fx;
+        return v0 * (1 - fy) + v1 * fy;
+    }
+    
+    private static byte ClampToByte(float value)
+    {
+        if (value < 0) return 0;
+        if (value > 255) return 255;
+        return (byte)value;
+    }
+    
+    private void SavePanoramaImage(string outputPath, byte[] imageData, int width, int height)
+    {
+        var ext = Path.GetExtension(outputPath).ToLowerInvariant();
+        
+        if (ext == ".tif" || ext == ".tiff")
+        {
+            SaveAsTiff(outputPath, imageData, width, height);
+        }
+        else
+        {
+            SaveAsSkiaImage(outputPath, imageData, width, height);
+        }
+    }
+    
+    private void SaveAsTiff(string path, byte[] rgba, int width, int height)
+    {
+        using var tiff = BitMiracle.LibTiff.Classic.Tiff.Open(path, "w");
+        if (tiff == null)
+            throw new IOException($"Could not create TIFF file: {path}");
+            
+        tiff.SetField(BitMiracle.LibTiff.Classic.TiffTag.IMAGEWIDTH, width);
+        tiff.SetField(BitMiracle.LibTiff.Classic.TiffTag.IMAGELENGTH, height);
+        tiff.SetField(BitMiracle.LibTiff.Classic.TiffTag.SAMPLESPERPIXEL, 4);
+        tiff.SetField(BitMiracle.LibTiff.Classic.TiffTag.BITSPERSAMPLE, 8);
+        tiff.SetField(BitMiracle.LibTiff.Classic.TiffTag.ORIENTATION, 
+            BitMiracle.LibTiff.Classic.Orientation.TOPLEFT);
+        tiff.SetField(BitMiracle.LibTiff.Classic.TiffTag.PLANARCONFIG, 
+            BitMiracle.LibTiff.Classic.PlanarConfig.CONTIG);
+        tiff.SetField(BitMiracle.LibTiff.Classic.TiffTag.PHOTOMETRIC, 
+            BitMiracle.LibTiff.Classic.Photometric.RGB);
+        tiff.SetField(BitMiracle.LibTiff.Classic.TiffTag.COMPRESSION, 
+            BitMiracle.LibTiff.Classic.Compression.LZW);
+        
+        int rowBytes = width * 4;
+        var scanline = new byte[rowBytes];
+        
+        for (int y = 0; y < height; y++)
+        {
+            Buffer.BlockCopy(rgba, y * rowBytes, scanline, 0, rowBytes);
+            tiff.WriteScanline(scanline, y);
+        }
+    }
+    
+    private void SaveAsSkiaImage(string path, byte[] rgba, int width, int height)
+    {
+        var info = new SkiaSharp.SKImageInfo(width, height, 
+            SkiaSharp.SKColorType.Rgba8888, SkiaSharp.SKAlphaType.Unpremul);
+            
+        using var bitmap = new SkiaSharp.SKBitmap(info);
+        System.Runtime.InteropServices.Marshal.Copy(rgba, 0, bitmap.GetPixels(), rgba.Length);
+        
+        using var image = SkiaSharp.SKImage.FromBitmap(bitmap);
+        
+        var format = Path.GetExtension(path).ToLowerInvariant() switch
+        {
+            ".png" => SkiaSharp.SKEncodedImageFormat.Png,
+            ".jpg" or ".jpeg" => SkiaSharp.SKEncodedImageFormat.Jpeg,
+            ".bmp" => SkiaSharp.SKEncodedImageFormat.Bmp,
+            _ => SkiaSharp.SKEncodedImageFormat.Png
+        };
+        
+        using var stream = File.Create(path);
+        image.Encode(format, 95).SaveTo(stream);
     }
 
     public void Cancel()
@@ -289,12 +804,51 @@ public class PanoramaStitchingService
         Logger.Log(logMsg);
     }
     
+    public long EstimateMemoryRequirement()
+    {
+        // Estimate memory needed for blending
+        long totalMemory = 0;
+        
+        // Compute approximate canvas size
+        if (Images.Count == 0) return 0;
+        
+        // Estimate canvas as 2x the average image size (conservative estimate)
+        long avgImageSize = (long)Images.Average(img => (long)img.Dataset.Width * img.Dataset.Height);
+        long estimatedCanvasSize = avgImageSize * 2;
+        
+        // Canvas needs: RGBA bytes (4 bytes) + float accumulator (16 bytes) + weight (4 bytes) = 24 bytes per pixel
+        totalMemory += estimatedCanvasSize * 24;
+        
+        // Each loaded image: RGBA (4 bytes per pixel)
+        totalMemory += Images.Sum(img => (long)img.Dataset.Width * img.Dataset.Height * 4);
+        
+        // Add 20% overhead for temporary buffers
+        totalMemory = (long)(totalMemory * 1.2);
+        
+        return totalMemory;
+    }
+    
+    public string GetMemoryRequirementString()
+    {
+        long bytes = EstimateMemoryRequirement();
+        if (bytes < 1024) return $"{bytes} bytes";
+        if (bytes < 1024 * 1024) return $"{bytes / 1024.0:F1} KB";
+        if (bytes < 1024 * 1024 * 1024) return $"{bytes / (1024.0 * 1024):F1} MB";
+        return $"{bytes / (1024.0 * 1024 * 1024):F2} GB";
+    }
+    
     #region Homography Calculation
     // These methods are duplicated from FeatureMatcherCL to keep this service self-contained
     // for handling manual points without creating a dependency on the matcher's internal implementation.
     private static Matrix3x2? ComputeHomography(Vector2[] src, Vector2[] dst)
     {
         if (src.Length < 3) return null;
+        
+        // Use all points for least-squares solution when we have more than 3
+        if (src.Length > 3)
+        {
+            return ComputeHomographyLeastSquares(src, dst);
+        }
 
         float sx1 = src[0].X, sy1 = src[0].Y;
         float sx2 = src[1].X, sy2 = src[1].Y;
@@ -320,6 +874,77 @@ public class PanoramaStitchingService
         }
         
         return new Matrix3x2(x[0], x[3], x[1], x[4], x[2], x[5]);
+    }
+    
+    private static Matrix3x2? ComputeHomographyLeastSquares(Vector2[] src, Vector2[] dst)
+    {
+        int n = src.Length;
+        var A = new float[n * 2, 6];
+        var b = new float[n * 2];
+        
+        for (int i = 0; i < n; i++)
+        {
+            float sx = src[i].X, sy = src[i].Y;
+            float dx = dst[i].X, dy = dst[i].Y;
+            
+            // Row for x-coordinate
+            A[i * 2, 0] = sx;
+            A[i * 2, 1] = sy;
+            A[i * 2, 2] = 1;
+            A[i * 2, 3] = 0;
+            A[i * 2, 4] = 0;
+            A[i * 2, 5] = 0;
+            b[i * 2] = dx;
+            
+            // Row for y-coordinate
+            A[i * 2 + 1, 0] = 0;
+            A[i * 2 + 1, 1] = 0;
+            A[i * 2 + 1, 2] = 0;
+            A[i * 2 + 1, 3] = sx;
+            A[i * 2 + 1, 4] = sy;
+            A[i * 2 + 1, 5] = 1;
+            b[i * 2 + 1] = dy;
+        }
+        
+        if (!SolveLeastSquares(A, b, 6, out var x))
+            return null;
+            
+        return new Matrix3x2(x[0], x[3], x[1], x[4], x[2], x[5]);
+    }
+    
+    private static bool SolveLeastSquares(float[,] A, float[] b, int numParams, out float[] x)
+    {
+        // Solve using normal equations: A^T * A * x = A^T * b
+        int m = b.Length; // number of equations
+        int n = numParams; // number of unknowns
+        
+        x = new float[n];
+        
+        // Compute A^T * A
+        var ATA = new float[n, n];
+        for (int i = 0; i < n; i++)
+        {
+            for (int j = 0; j < n; j++)
+            {
+                float sum = 0;
+                for (int k = 0; k < m; k++)
+                    sum += A[k, i] * A[k, j];
+                ATA[i, j] = sum;
+            }
+        }
+        
+        // Compute A^T * b
+        var ATb = new float[n];
+        for (int i = 0; i < n; i++)
+        {
+            float sum = 0;
+            for (int k = 0; k < m; k++)
+                sum += A[k, i] * b[k];
+            ATb[i] = sum;
+        }
+        
+        // Solve the system ATA * x = ATb
+        return SolveLinearSystem(ATA, ATb, out x);
     }
 
     private static bool SolveLinearSystem(float[,] A, float[] b, out float[] x)

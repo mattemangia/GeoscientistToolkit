@@ -248,9 +248,10 @@ public class FeatureMatcherCL : IDisposable
         
         if (bestInliers.Count >= 4)
         {
+            // Refine with least squares using all inliers for better accuracy
             var finalSrc = bestInliers.Select(m => srcPoints[matches.IndexOf(m)]).ToArray();
             var finalDst = bestInliers.Select(m => dstPoints[matches.IndexOf(m)]).ToArray();
-            var refinedHomography = ComputeHomography(finalSrc, finalDst);
+            var refinedHomography = ComputeHomographyLeastSquares(finalSrc, finalDst);
             bestHomography = refinedHomography ?? bestHomography;
         } else {
              bestInliers.Clear();
@@ -262,6 +263,10 @@ public class FeatureMatcherCL : IDisposable
     private static Matrix3x2? ComputeHomography(Vector2[] src, Vector2[] dst)
     {
         if (src.Length < 3) return null;
+        
+        // For 4 points, use least squares directly for better stability
+        if (src.Length >= 4)
+            return ComputeHomographyLeastSquares(src, dst);
 
         float sx1 = src[0].X, sy1 = src[0].Y;
         float sx2 = src[1].X, sy2 = src[1].Y;
@@ -280,6 +285,77 @@ public class FeatureMatcherCL : IDisposable
         if (!SolveLinearSystem(A, b, out var x)) return null;
         
         return new Matrix3x2(x[0], x[3], x[1], x[4], x[2], x[5]);
+    }
+    
+    private static Matrix3x2? ComputeHomographyLeastSquares(Vector2[] src, Vector2[] dst)
+    {
+        int n = src.Length;
+        var A = new float[n * 2, 6];
+        var b = new float[n * 2];
+        
+        for (int i = 0; i < n; i++)
+        {
+            float sx = src[i].X, sy = src[i].Y;
+            float dx = dst[i].X, dy = dst[i].Y;
+            
+            // Row for x-coordinate
+            A[i * 2, 0] = sx;
+            A[i * 2, 1] = sy;
+            A[i * 2, 2] = 1;
+            A[i * 2, 3] = 0;
+            A[i * 2, 4] = 0;
+            A[i * 2, 5] = 0;
+            b[i * 2] = dx;
+            
+            // Row for y-coordinate
+            A[i * 2 + 1, 0] = 0;
+            A[i * 2 + 1, 1] = 0;
+            A[i * 2 + 1, 2] = 0;
+            A[i * 2 + 1, 3] = sx;
+            A[i * 2 + 1, 4] = sy;
+            A[i * 2 + 1, 5] = 1;
+            b[i * 2 + 1] = dy;
+        }
+        
+        if (!SolveLeastSquares(A, b, 6, out var x))
+            return null;
+            
+        return new Matrix3x2(x[0], x[3], x[1], x[4], x[2], x[5]);
+    }
+    
+    private static bool SolveLeastSquares(float[,] A, float[] b, int numParams, out float[] x)
+    {
+        // Solve using normal equations: A^T * A * x = A^T * b
+        int m = b.Length; // number of equations
+        int n = numParams; // number of unknowns
+        
+        x = new float[n];
+        
+        // Compute A^T * A
+        var ATA = new float[n, n];
+        for (int i = 0; i < n; i++)
+        {
+            for (int j = 0; j < n; j++)
+            {
+                float sum = 0;
+                for (int k = 0; k < m; k++)
+                    sum += A[k, i] * A[k, j];
+                ATA[i, j] = sum;
+            }
+        }
+        
+        // Compute A^T * b
+        var ATb = new float[n];
+        for (int i = 0; i < n; i++)
+        {
+            float sum = 0;
+            for (int k = 0; k < m; k++)
+                sum += A[k, i] * b[k];
+            ATb[i] = sum;
+        }
+        
+        // Solve the system ATA * x = ATb
+        return SolveLinearSystem(ATA, ATb, out x);
     }
 
     private static bool SolveLinearSystem(float[,] A, float[] b, out float[] x)
