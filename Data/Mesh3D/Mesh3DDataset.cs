@@ -1,18 +1,19 @@
 // GeoscientistToolkit/Data/Mesh3D/Mesh3DDataset.cs
 
+using System;
+using System.Collections.Generic;
 using System.Globalization;
+using System.IO;
 using System.Numerics;
 using System.Text;
 using GeoscientistToolkit.Util;
-
-// Added
 
 namespace GeoscientistToolkit.Data.Mesh3D;
 
 /// <summary>
 ///     Dataset for 3D mesh objects (OBJ, STL files)
 /// </summary>
-public class Mesh3DDataset : Dataset, ISerializableDataset
+public partial class Mesh3DDataset : Dataset, ISerializableDataset
 {
     public Mesh3DDataset(string name, string filePath) : base(name, filePath)
     {
@@ -23,7 +24,7 @@ public class Mesh3DDataset : Dataset, ISerializableDataset
         Faces = new List<int[]>();
 
         // Determine format from extension
-        var ext = Path.GetExtension(filePath).ToLower();
+        var ext = Path.GetExtension(filePath).ToLowerInvariant();
         FileFormat = ext switch
         {
             ".obj" => "OBJ",
@@ -47,6 +48,11 @@ public class Mesh3DDataset : Dataset, ISerializableDataset
     public List<int[]> Faces { get; private set; } // Each face is an array of vertex indices
     public bool IsLoaded { get; private set; }
 
+    /// <summary>
+    ///     Gets or sets the file path to the texture image associated with this mesh.
+    /// </summary>
+    public string TexturePath { get; set; }
+
     public object ToSerializableObject()
     {
         return new Mesh3DDatasetDTO
@@ -60,81 +66,46 @@ public class Mesh3DDataset : Dataset, ISerializableDataset
             FaceCount = FaceCount,
             BoundingBoxMin = BoundingBoxMin,
             BoundingBoxMax = BoundingBoxMax,
-            Center = Center
+            Center = Center,
+            TexturePath = TexturePath,
+            TextureCoordinates = TextureCoordinates
         };
     }
 
-    /// <summary>
-    ///     Create an empty mesh dataset that can be edited
-    /// </summary>
-    /// <summary>
-    ///     Create an empty mesh dataset that can be edited
-    /// </summary>
     public static Mesh3DDataset CreateEmpty(string name, string filePath)
     {
         var dataset = new Mesh3DDataset(name, filePath)
         {
             FileFormat = "OBJ",
-            IsLoaded = true,
-            BoundingBoxMin = Vector3.Zero,
-            BoundingBoxMax = Vector3.Zero,
-            Center = Vector3.Zero,
-            VertexCount = 0,
-            FaceCount = 0
+            IsLoaded = true
         };
-
-        // Initialize empty collections
-        dataset.Vertices = new List<Vector3>();
-        dataset.Faces = new List<int[]>();
-        dataset.Normals = new List<Vector3>();
-        dataset.TextureCoordinates = new List<Vector2>();
-
-        // Create a simple initial cube so the viewer has something to display
         dataset.AddInitialCube();
-
         Logger.Log($"Created empty mesh: {name}");
         return dataset;
     }
 
-    /// <summary>
-    ///     Add a simple unit cube as the initial geometry
-    /// </summary>
     private void AddInitialCube()
     {
-        // Define 8 cube vertices (unit cube centered at origin)
-        var cubeVertices = new[]
+        Vertices.AddRange(new[]
         {
             new Vector3(-0.5f, -0.5f, -0.5f), new Vector3(0.5f, -0.5f, -0.5f),
             new Vector3(0.5f, 0.5f, -0.5f), new Vector3(-0.5f, 0.5f, -0.5f),
             new Vector3(-0.5f, -0.5f, 0.5f), new Vector3(0.5f, -0.5f, 0.5f),
             new Vector3(0.5f, 0.5f, 0.5f), new Vector3(-0.5f, 0.5f, 0.5f)
-        };
+        });
 
-        Vertices.AddRange(cubeVertices);
-
-        // Define 12 triangular faces (2 per cube face)
-        var cubeFaces = new[]
+        Faces.AddRange(new[]
         {
-            // Front
             new[] { 0, 1, 2 }, new[] { 0, 2, 3 },
-            // Back
             new[] { 5, 4, 7 }, new[] { 5, 7, 6 },
-            // Left
             new[] { 4, 0, 3 }, new[] { 4, 3, 7 },
-            // Right
             new[] { 1, 5, 6 }, new[] { 1, 6, 2 },
-            // Top
             new[] { 3, 2, 6 }, new[] { 3, 6, 7 },
-            // Bottom
             new[] { 4, 5, 1 }, new[] { 4, 1, 0 }
-        };
-
-        Faces.AddRange(cubeFaces);
+        });
 
         VertexCount = Vertices.Count;
         FaceCount = Faces.Count;
-
-        // Generate normals
         GenerateNormals();
         CalculateBounds();
     }
@@ -146,15 +117,10 @@ public class Mesh3DDataset : Dataset, ISerializableDataset
         {
             Vertices = vertices,
             Faces = faces,
-            FileFormat = "OBJ" // We are saving as OBJ
+            FileFormat = "OBJ"
         };
 
-        // Adjust vertex positions based on physical voxel size, converting to millimeters
-        float scaleFactor;
-        if (unit.Equals("µm", StringComparison.OrdinalIgnoreCase))
-            scaleFactor = voxelSize / 1000.0f; // Convert micrometers to millimeters
-        else // Assume millimeters
-            scaleFactor = voxelSize;
+        float scaleFactor = unit.Equals("µm", StringComparison.OrdinalIgnoreCase) ? voxelSize / 1000.0f : voxelSize;
 
         if (Math.Abs(scaleFactor - 1.0f) > 1e-6f)
             for (var i = 0; i < dataset.Vertices.Count; i++)
@@ -162,16 +128,10 @@ public class Mesh3DDataset : Dataset, ISerializableDataset
 
         dataset.VertexCount = dataset.Vertices.Count;
         dataset.FaceCount = dataset.Faces.Count;
-
         dataset.GenerateNormals();
         dataset.CalculateBounds();
-
-        // Save the data to the specified file path
         dataset.WriteOBJ(filePath);
-
-        // Mark as loaded since data is already in memory
         dataset.IsLoaded = true;
-
         return dataset;
     }
 
@@ -180,36 +140,62 @@ public class Mesh3DDataset : Dataset, ISerializableDataset
         var culture = CultureInfo.InvariantCulture;
         var sb = new StringBuilder();
 
-        // Header
-        sb.AppendLine("# Generated by Geoscientist Toolkit - Surface Nets Mesher");
+        sb.AppendLine("# Generated by Geoscientist Toolkit");
         sb.AppendLine($"# Vertices: {VertexCount}");
         sb.AppendLine($"# Faces: {FaceCount}");
+        if (!string.IsNullOrEmpty(TexturePath))
+            sb.AppendLine($"mtllib {Path.GetFileNameWithoutExtension(path)}.mtl");
         sb.AppendLine();
 
-        // Vertices
         foreach (var vertex in Vertices)
             sb.AppendLine($"v {vertex.X.ToString(culture)} {vertex.Y.ToString(culture)} {vertex.Z.ToString(culture)}");
         sb.AppendLine();
 
-        // Normals
+        if (TextureCoordinates != null && TextureCoordinates.Count > 0)
+        {
+            foreach (var uv in TextureCoordinates)
+                sb.AppendLine($"vt {uv.X.ToString(culture)} {uv.Y.ToString(culture)}");
+            sb.AppendLine();
+        }
+
         foreach (var normal in Normals)
             sb.AppendLine($"vn {normal.X.ToString(culture)} {normal.Y.ToString(culture)} {normal.Z.ToString(culture)}");
         sb.AppendLine();
 
-        // Faces (OBJ is 1-based, so add 1 to each index)
-        // Format: f v1//vn1 v2//vn2 v3//vn3
+        if (!string.IsNullOrEmpty(TexturePath))
+            sb.AppendLine($"usemtl TexturedMaterial");
+
+        bool hasTexCoords = TextureCoordinates != null && TextureCoordinates.Count == Vertices.Count;
         foreach (var face in Faces)
-            if (face.Length >= 3) // It's a triangle or quad, we handle triangles
-            {
-                var i0 = face[0] + 1;
-                var i1 = face[1] + 1;
-                var i2 = face[2] + 1;
+        {
+            if (face.Length < 3) continue;
+
+            var i0 = face[0] + 1;
+            var i1 = face[1] + 1;
+            var i2 = face[2] + 1;
+
+            if (hasTexCoords)
+                sb.AppendLine($"f {i0}/{i0}/{i0} {i1}/{i1}/{i1} {i2}/{i2}/{i2}");
+            else
                 sb.AppendLine($"f {i0}//{i0} {i1}//{i1} {i2}//{i2}");
-            }
+        }
 
         try
         {
             File.WriteAllText(path, sb.ToString());
+            if (!string.IsNullOrEmpty(TexturePath))
+            {
+                var mtlPath = Path.ChangeExtension(path, ".mtl");
+                var mtlContent = new StringBuilder();
+                mtlContent.AppendLine("newmtl TexturedMaterial");
+                mtlContent.AppendLine("Ka 1.0 1.0 1.0");
+                mtlContent.AppendLine("Kd 1.0 1.0 1.0");
+                mtlContent.AppendLine("Ks 0.0 0.0 0.0");
+                mtlContent.AppendLine("d 1.0");
+                mtlContent.AppendLine("illum 2");
+                mtlContent.AppendLine($"map_Kd {Path.GetFileName(TexturePath)}");
+                File.WriteAllText(mtlPath, mtlContent.ToString());
+            }
             Logger.Log($"Saved generated mesh to {path}");
         }
         catch (Exception ex)
@@ -221,45 +207,32 @@ public class Mesh3DDataset : Dataset, ISerializableDataset
 
     public override long GetSizeInBytes()
     {
-        if (File.Exists(FilePath)) return new FileInfo(FilePath).Length;
-        return 0;
+        return File.Exists(FilePath) ? new FileInfo(FilePath).Length : 0;
     }
 
     public override void Load()
     {
         if (IsLoaded) return;
-
-        // If file doesn't exist and we already have vertices, we're a new empty mesh
-        if (!File.Exists(FilePath) && Vertices != null && Vertices.Count > 0)
+        if (!File.Exists(FilePath) && Vertices?.Count > 0)
         {
-            Logger.Log($"Empty mesh already loaded in memory: {Name}");
             IsLoaded = true;
             return;
         }
-
         if (!File.Exists(FilePath))
         {
             Logger.LogError($"3D model file not found: {FilePath}");
             IsMissing = true;
             return;
         }
-
         try
         {
             Logger.Log($"Loading 3D model: {FilePath}");
-
             switch (FileFormat)
             {
-                case "OBJ":
-                    LoadOBJ();
-                    break;
-                case "STL":
-                    LoadSTL();
-                    break;
-                default:
-                    throw new NotSupportedException($"Unsupported 3D file format: {FileFormat}");
+                case "OBJ": LoadOBJ(); break;
+                case "STL": LoadSTL(); break;
+                default: throw new NotSupportedException($"Unsupported 3D file format: {FileFormat}");
             }
-
             CalculateBounds();
             IsLoaded = true;
             Logger.Log($"3D model loaded: {VertexCount} vertices, {FaceCount} faces");
@@ -271,9 +244,6 @@ public class Mesh3DDataset : Dataset, ISerializableDataset
         }
     }
 
-    /// <summary>
-    ///     Save the current mesh to its file path
-    /// </summary>
     public void Save()
     {
         if (string.IsNullOrEmpty(FilePath))
@@ -281,20 +251,12 @@ public class Mesh3DDataset : Dataset, ISerializableDataset
             Logger.LogError("Cannot save mesh: no file path specified");
             return;
         }
-
         try
         {
-            // Ensure directory exists
             var directory = Path.GetDirectoryName(FilePath);
             if (!string.IsNullOrEmpty(directory) && !Directory.Exists(directory)) Directory.CreateDirectory(directory);
-
-            // Recalculate bounds before saving
             CalculateBounds();
-
-            // Write OBJ file
             WriteOBJ(FilePath);
-
-            Logger.Log($"Saved mesh to {FilePath}");
         }
         catch (Exception ex)
         {
@@ -303,9 +265,6 @@ public class Mesh3DDataset : Dataset, ISerializableDataset
         }
     }
 
-    /// <summary>
-    ///     Make CalculateBounds public so editor can call it
-    /// </summary>
     public void CalculateBounds()
     {
         if (Vertices.Count == 0)
@@ -315,16 +274,13 @@ public class Mesh3DDataset : Dataset, ISerializableDataset
             Center = Vector3.Zero;
             return;
         }
-
         BoundingBoxMin = new Vector3(float.MaxValue);
         BoundingBoxMax = new Vector3(float.MinValue);
-
         foreach (var vertex in Vertices)
         {
             BoundingBoxMin = Vector3.Min(BoundingBoxMin, vertex);
             BoundingBoxMax = Vector3.Max(BoundingBoxMax, vertex);
         }
-
         Center = (BoundingBoxMin + BoundingBoxMax) * 0.5f;
     }
 
@@ -572,4 +528,6 @@ public class Mesh3DDatasetDTO : DatasetDTO
     public Vector3 BoundingBoxMin { get; set; }
     public Vector3 BoundingBoxMax { get; set; }
     public Vector3 Center { get; set; }
+    public string TexturePath { get; set; }
+    public List<Vector2> TextureCoordinates { get; set; }
 }

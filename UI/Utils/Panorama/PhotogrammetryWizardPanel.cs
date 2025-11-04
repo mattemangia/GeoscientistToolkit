@@ -25,7 +25,7 @@ internal class GroundControlPointEditor : IDisposable
     private readonly GraphicsDevice _graphicsDevice;
     private readonly ResourceFactory _resourceFactory;
     private readonly ImGuiRenderer _imGuiRenderer;
-    
+
     private struct VeldridTextureBinding : IDisposable
     {
         public readonly IntPtr ImGuiBinding;
@@ -52,11 +52,11 @@ internal class GroundControlPointEditor : IDisposable
             _disposed = true;
         }
     }
-    
+
     public bool IsOpen;
     private PhotogrammetryImage _currentImage;
     private VeldridTextureBinding? _imageBinding;
-    
+
     private Vector2 _pan = Vector2.Zero;
     private float _zoom = 1.0f;
     private GroundControlPoint _selectedGCP;
@@ -65,17 +65,17 @@ internal class GroundControlPointEditor : IDisposable
     private string _gcpX = "";
     private string _gcpY = "";
     private string _gcpZ = "";
-    
+
     public Action<PhotogrammetryImage, GroundControlPoint> OnGCPUpdated;
     public Action<PhotogrammetryImage, GroundControlPoint> OnGCPRemoved;
-    
+
     public GroundControlPointEditor(GraphicsDevice graphicsDevice, ImGuiRenderer imGuiRenderer)
     {
         _graphicsDevice = graphicsDevice;
         _resourceFactory = graphicsDevice.ResourceFactory;
         _imGuiRenderer = imGuiRenderer;
     }
-    
+
     public void Open(PhotogrammetryImage image)
     {
         _currentImage = image;
@@ -88,11 +88,11 @@ internal class GroundControlPointEditor : IDisposable
         IsOpen = true;
         ImGui.OpenPopup("Ground Control Point Editor");
     }
-    
+
     private VeldridTextureBinding? CreateTextureBinding(Data.Image.ImageDataset dataset)
     {
         if (dataset?.ImageData == null) return null;
-        
+
         var texture = _resourceFactory.CreateTexture(TextureDescription.Texture2D(
             (uint)dataset.Width, (uint)dataset.Height, 1, 1,
             PixelFormat.R8_G8_B8_A8_UNorm, TextureUsage.Sampled));
@@ -102,18 +102,18 @@ internal class GroundControlPointEditor : IDisposable
 
         var textureView = _resourceFactory.CreateTextureView(texture);
         var imGuiBinding = _imGuiRenderer.GetOrCreateImGuiBinding(_resourceFactory, textureView);
-        
+
         return new VeldridTextureBinding(texture, textureView, imGuiBinding, _imGuiRenderer);
     }
-    
+
     public void Draw()
     {
         if (!IsOpen) return;
-        
+
         var center = ImGui.GetMainViewport().GetCenter();
         ImGui.SetNextWindowPos(center, ImGuiCond.Appearing, new Vector2(0.5f, 0.5f));
         ImGui.SetNextWindowSize(new Vector2(1200, 700), ImGuiCond.Appearing);
-        
+
         if (ImGui.BeginPopupModal("Ground Control Point Editor", ref IsOpen, ImGuiWindowFlags.NoCollapse))
         {
             if (_currentImage == null || _imageBinding == null)
@@ -123,38 +123,38 @@ internal class GroundControlPointEditor : IDisposable
                 ImGui.EndPopup();
                 return;
             }
-            
+
             ImGui.Text($"Image: {_currentImage.Dataset.Name}");
             if (_currentImage.IsGeoreferenced)
             {
-                ImGui.TextColored(new Vector4(0, 1, 0, 1), 
+                ImGui.TextColored(new Vector4(0, 1, 0, 1),
                     $"Georeferenced: Lat={_currentImage.Latitude:F6}, Lon={_currentImage.Longitude:F6}, Alt={_currentImage.Altitude?.ToString("F2") ?? "N/A"}");
             }
             ImGui.Separator();
-            
+
             ImGui.Columns(2, "GCPLayout", true);
             DrawImagePanel();
             ImGui.NextColumn();
             DrawControlPanel();
             ImGui.Columns(1);
-            
+
             ImGui.Separator();
             if (ImGui.Button("Close", new Vector2(120, 0))) IsOpen = false;
-            
+
             ImGui.EndPopup();
         }
-        
+
         if (!IsOpen) DisposeBinding();
     }
-    
+
     private void DrawImagePanel()
     {
         ImGui.Text("Click on image to place/select GCP. Mouse wheel to zoom, middle button to pan.");
         ImGui.BeginChild("ImagePanel", Vector2.Zero, ImGuiChildFlags.Border, ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse);
-        
+
         var panelTopLeft = ImGui.GetCursorScreenPos();
         var drawList = ImGui.GetWindowDrawList();
-        
+
         if (ImGui.IsWindowHovered())
         {
             var io = ImGui.GetIO();
@@ -168,11 +168,11 @@ internal class GroundControlPointEditor : IDisposable
             }
             if (ImGui.IsMouseDown(ImGuiMouseButton.Middle)) _pan += io.MouseDelta;
         }
-        
+
         var imgTopLeft = panelTopLeft + _pan;
         var imgBottomRight = imgTopLeft + new Vector2(_currentImage.Dataset.Width, _currentImage.Dataset.Height) * _zoom;
         drawList.AddImage(_imageBinding.Value.ImGuiBinding, imgTopLeft, imgBottomRight);
-        
+
         // Draw existing GCPs
         foreach (var gcp in _currentImage.GroundControlPoints)
         {
@@ -182,20 +182,20 @@ internal class GroundControlPointEditor : IDisposable
             drawList.AddCircle(screenPos, 6, 0xFF000000, 12, 2f);
             drawList.AddText(screenPos + new Vector2(10, -10), 0xFFFFFFFF, gcp.Name);
         }
-        
+
         if (ImGui.IsWindowHovered() && ImGui.IsMouseClicked(ImGuiMouseButton.Left))
         {
             var imageCoords = (ImGui.GetMousePos() - (panelTopLeft + _pan)) / _zoom;
-            if (imageCoords.X >= 0 && imageCoords.Y >= 0 && 
+            if (imageCoords.X >= 0 && imageCoords.Y >= 0 &&
                 imageCoords.X <= _currentImage.Dataset.Width && imageCoords.Y <= _currentImage.Dataset.Height)
             {
                 HandleImageClick(imageCoords);
             }
         }
-        
+
         ImGui.EndChild();
     }
-    
+
     private void HandleImageClick(Vector2 imageCoords)
     {
         foreach (var gcp in _currentImage.GroundControlPoints)
@@ -212,7 +212,7 @@ internal class GroundControlPointEditor : IDisposable
                 return;
             }
         }
-        
+
         if (_isPlacingNew)
         {
             var newGCP = new GroundControlPoint
@@ -226,12 +226,12 @@ internal class GroundControlPointEditor : IDisposable
             OnGCPUpdated?.Invoke(_currentImage, newGCP);
         }
     }
-    
+
     private void DrawControlPanel()
     {
         ImGui.Text("Ground Control Points");
         ImGui.Separator();
-        
+
         if (ImGui.Button("Add New GCP", new Vector2(-1, 0)))
         {
             _isPlacingNew = true;
@@ -239,12 +239,12 @@ internal class GroundControlPointEditor : IDisposable
             _gcpName = $"GCP_{_currentImage.GroundControlPoints.Count + 1}";
             _gcpX = ""; _gcpY = ""; _gcpZ = "";
         }
-        
+
         if (_isPlacingNew)
             ImGui.TextColored(new Vector4(1, 1, 0, 1), "Click on image to place GCP");
-        
+
         ImGui.Separator();
-        
+
         if (_selectedGCP != null)
         {
             ImGui.Text("Selected GCP:");
@@ -253,7 +253,7 @@ internal class GroundControlPointEditor : IDisposable
             ImGui.InputText("X (or Longitude)", ref _gcpX, 32);
             ImGui.InputText("Y (or Latitude)", ref _gcpY, 32);
             ImGui.InputText("Z (or Altitude)", ref _gcpZ, 32);
-            
+
             if (ImGui.Button("Update Coordinates", new Vector2(-1, 0)))
             {
                 if (float.TryParse(_gcpX, out float x) &&
@@ -265,25 +265,25 @@ internal class GroundControlPointEditor : IDisposable
                     OnGCPUpdated?.Invoke(_currentImage, _selectedGCP);
                 }
             }
-            
+
             if (ImGui.Button("Remove GCP", new Vector2(-1, 0)))
             {
                 OnGCPRemoved?.Invoke(_currentImage, _selectedGCP);
                 _selectedGCP = null;
             }
         }
-        
+
         ImGui.Separator();
         ImGui.Text($"Total GCPs: {_currentImage.GroundControlPoints.Count}");
         ImGui.Text($"Confirmed: {_currentImage.GroundControlPoints.Count(g => g.IsConfirmed)}");
     }
-    
+
     private void DisposeBinding()
     {
         _imageBinding?.Dispose();
         _imageBinding = null;
     }
-    
+
     public void Dispose() => DisposeBinding();
 }
 
@@ -293,71 +293,86 @@ public class PhotogrammetryWizardPanel : BasePanel
     private readonly List<string> _logBuffer = new();
     private readonly GraphicsDevice _graphicsDevice;
     private readonly ImGuiRenderer _imGuiRenderer;
-    
+
     private readonly GroundControlPointEditor _gcpEditor;
     private readonly ImGuiExportFileDialog _exportDialog;
-    
+
     private PhotogrammetryImage _imageToDiscard;
     private PhotogrammetryImage _groupLinkImage1;
     private PhotogrammetryImage _groupLinkImage2;
-    
+
     private DenseCloudOptions _denseCloudOptions = new();
     private MeshOptions _meshOptions = new();
-    
+    private OrthomosaicOptions _orthoOptions = new();
+    private DEMOptions _demOptions = new();
+    private bool _showOrthoDialog;
+    private bool _showDemDialog;
+
     private bool _showDenseCloudDialog;
     private bool _showMeshDialog;
     private bool _addToProject = true;
-    
+
     public bool IsOpen { get; private set; }
     public string Title { get; }
-    
+
     public PhotogrammetryWizardPanel(DatasetGroup imageGroup, GraphicsDevice graphicsDevice, ImGuiRenderer imGuiRenderer)
         : base($"Photogrammetry: {imageGroup.Name}", new Vector2(900, 700))
     {
         Title = $"Photogrammetry: {imageGroup.Name}";
         _graphicsDevice = graphicsDevice;
         _imGuiRenderer = imGuiRenderer;
-        
+
         _job = new PhotogrammetryJob(imageGroup);
         _job.Service.StartProcessingAsync();
-        
+
         _exportDialog = new ImGuiExportFileDialog("photogrammetryExport", "Export");
-        
+
         _gcpEditor = new GroundControlPointEditor(graphicsDevice, imGuiRenderer);
         _gcpEditor.OnGCPUpdated = (img, gcp) => _job.Service.AddOrUpdateGroundControlPoint(img, gcp);
         _gcpEditor.OnGCPRemoved = (img, gcp) => _job.Service.RemoveGroundControlPoint(img, gcp);
     }
-    
+
     public void Open() => IsOpen = true;
-    
+
     public void Submit()
     {
         bool pOpen = IsOpen;
         base.Submit(ref pOpen);
         IsOpen = pOpen;
-        
+
         if (!IsOpen)
         {
             _job.Service.Cancel();
             _gcpEditor.Dispose();
         }
     }
-    
+
     protected override void DrawContent()
     {
         UpdateLogs();
-        
+
         if (_imageToDiscard != null)
         {
             _job.Service.RemoveImage(_imageToDiscard);
             _imageToDiscard = null;
         }
-        
+
         _gcpEditor.Draw();
-        
+
         var service = _job.Service;
         ImGui.ProgressBar(service.Progress, new Vector2(-1, 0), service.StatusMessage);
         
+        // --- Extra actions toolbar ---
+        ImGui.Separator();
+        if (ImGui.Button("Build Dense Cloud...", new Vector2(200, 0))) _showDenseCloudDialog = true;
+        ImGui.SameLine();
+        if (ImGui.Button("Build Mesh...", new Vector2(200, 0))) _showMeshDialog = true;
+        ImGui.SameLine();
+        if (ImGui.Button("Build Orthomosaic...", new Vector2(200, 0))) _showOrthoDialog = true;
+        ImGui.SameLine();
+        if (ImGui.Button("Build DEM...", new Vector2(200, 0))) _showDemDialog = true;
+        ImGui.Separator();
+
         if (ImGui.BeginTabBar("PhotogrammetryTabs"))
         {
             if (ImGui.BeginTabItem("Processing Log")) { DrawLog(); ImGui.EndTabItem(); }
@@ -368,14 +383,14 @@ public class PhotogrammetryWizardPanel : BasePanel
             if (service.GeneratedMesh != null && ImGui.BeginTabItem("Mesh")) { DrawMeshView(); ImGui.EndTabItem(); }
             ImGui.EndTabBar();
         }
-        
-        if (service.State == PhotogrammetryState.Failed) 
+
+        if (service.State == PhotogrammetryState.Failed)
             ImGui.TextColored(new Vector4(1, 0, 0, 1), "Process failed. Check log.");
-        
+
         DrawBuildDialogs();
         HandleExportDialog();
     }
-    
+
     private void UpdateLogs()
     {
         while (_job.Service.Logs.TryDequeue(out var log))
@@ -384,7 +399,7 @@ public class PhotogrammetryWizardPanel : BasePanel
             if (_logBuffer.Count > 500) _logBuffer.RemoveAt(0);
         }
     }
-    
+
     private void DrawLog()
     {
         ImGui.BeginChild("LogRegion", Vector2.Zero, ImGuiChildFlags.None, ImGuiWindowFlags.HorizontalScrollbar);
@@ -392,12 +407,12 @@ public class PhotogrammetryWizardPanel : BasePanel
         if (ImGui.GetScrollY() >= ImGui.GetScrollMaxY()) ImGui.SetScrollHereY(1.0f);
         ImGui.EndChild();
     }
-    
+
     private void DrawManualInputUI()
     {
         var imageGroups = _job.Service.ImageGroups;
         var imagesWithNoFeatures = _job.Service.Images.Where(img => img.Features.KeyPoints.Count < 20).ToList();
-        
+
         if (imagesWithNoFeatures.Any())
         {
             if (ImGui.CollapsingHeader($"Images with too few features ({imagesWithNoFeatures.Count})###NoFeat", ImGuiTreeNodeFlags.DefaultOpen))
@@ -410,7 +425,7 @@ public class PhotogrammetryWizardPanel : BasePanel
                 }
             }
         }
-        
+
         if (imageGroups.Count > 1)
         {
             if (ImGui.CollapsingHeader($"Unconnected Groups ({imageGroups.Count})###Groups", ImGuiTreeNodeFlags.DefaultOpen))
@@ -428,12 +443,12 @@ public class PhotogrammetryWizardPanel : BasePanel
                 }
             }
         }
-        
+
         ImGui.Separator();
         if (ImGui.CollapsingHeader("Ground Control Points###GCP", ImGuiTreeNodeFlags.DefaultOpen))
         {
             ImGui.TextWrapped("Add ground control points to georeference the model.");
-            
+
             foreach (var image in _job.Service.Images)
             {
                 var label = $"{image.Dataset.Name} ({image.GroundControlPoints.Count} GCPs)";
@@ -451,14 +466,14 @@ public class PhotogrammetryWizardPanel : BasePanel
             }
         }
     }
-    
+
     private void DrawReconstructionUI()
     {
         var service = _job.Service;
-        
+
         ImGui.TextWrapped("Build 3D reconstruction products:");
         ImGui.Separator();
-        
+
         bool hasSparse = service.SparseCloud != null;
         if (hasSparse)
             ImGui.TextColored(new Vector4(0, 1, 0, 1), $"✓ Sparse Cloud: {service.SparseCloud.Points.Count} points");
@@ -467,9 +482,9 @@ public class PhotogrammetryWizardPanel : BasePanel
             if (ImGui.Button("Build Sparse Cloud", new Vector2(-1, 30)))
                 _ = service.BuildSparseCloudAsync();
         }
-        
+
         ImGui.Separator();
-        
+
         bool hasDense = service.DenseCloud != null;
         if (hasDense)
             ImGui.TextColored(new Vector4(0, 1, 0, 1), $"✓ Dense Cloud: {service.DenseCloud.Points.Count} points");
@@ -480,9 +495,9 @@ public class PhotogrammetryWizardPanel : BasePanel
                 _showDenseCloudDialog = true;
             if (!hasSparse) ImGui.EndDisabled();
         }
-        
+
         ImGui.Separator();
-        
+
         bool hasMesh = service.GeneratedMesh != null;
         if (hasMesh)
             ImGui.TextColored(new Vector4(0, 1, 0, 1), $"✓ Mesh: {service.GeneratedMesh.VertexCount} vertices");
@@ -495,23 +510,23 @@ public class PhotogrammetryWizardPanel : BasePanel
             if (!canBuild) ImGui.EndDisabled();
         }
     }
-    
+
     private void DrawPointCloudView(PhotogrammetryPointCloud cloud)
     {
         ImGui.Text($"Points: {cloud.Points.Count}");
         ImGui.Text($"Type: {(cloud.IsDense ? "Dense" : "Sparse")}");
         ImGui.Text($"Bounds: {cloud.BoundingBoxMin} to {cloud.BoundingBoxMax}");
-        
+
         ImGui.BeginChild("Preview", Vector2.Zero, ImGuiChildFlags.Border);
         var drawList = ImGui.GetWindowDrawList();
         var pos = ImGui.GetCursorScreenPos();
         var size = ImGui.GetContentRegionAvail();
-        
+
         if (size.X > 10 && size.Y > 10 && cloud.Points.Count > 0)
         {
             var range = cloud.BoundingBoxMax - cloud.BoundingBoxMin;
             float scale = Math.Min(size.X / range.X, size.Y / range.Y) * 0.9f;
-            
+
             foreach (var pt in cloud.Points.Take(3000))
             {
                 var p2d = new Vector2(pt.Position.X, pt.Position.Y) - new Vector2(cloud.BoundingBoxMin.X, cloud.BoundingBoxMin.Y);
@@ -521,7 +536,7 @@ public class PhotogrammetryWizardPanel : BasePanel
             }
         }
         ImGui.EndChild();
-        
+
         if (ImGui.Button("Export Point Cloud...", new Vector2(-1, 0)))
         {
             _exportDialog.SetExtensions(
@@ -531,17 +546,17 @@ public class PhotogrammetryWizardPanel : BasePanel
             _exportDialog.Open($"{_job.ImageGroup.Name}_{(cloud.IsDense ? "dense" : "sparse")}_cloud");
         }
     }
-    
+
     private void DrawMeshView()
     {
         var mesh = _job.Service.GeneratedMesh;
         ImGui.Text($"Vertices: {mesh.VertexCount}");
         ImGui.Text($"Faces: {mesh.FaceCount}");
         ImGui.Text($"Bounds: {mesh.BoundingBoxMin} to {mesh.BoundingBoxMax}");
-        
+
         ImGui.Separator();
         ImGui.Checkbox("Add to project", ref _addToProject);
-        
+
         if (_addToProject && mesh != null && !ProjectManager.Instance.LoadedDatasets.Contains(mesh))
         {
             if (ImGui.Button("Add Mesh to Project Now", new Vector2(-1, 0)))
@@ -551,7 +566,7 @@ public class PhotogrammetryWizardPanel : BasePanel
             }
         }
     }
-    
+
     private void DrawBuildDialogs()
     {
         if (_showDenseCloudDialog)
@@ -565,12 +580,13 @@ public class PhotogrammetryWizardPanel : BasePanel
         {
             ImGui.Text("Configure dense cloud generation:");
             ImGui.Separator();
-            
+
             int quality = _denseCloudOptions.Quality;
             if (ImGui.SliderInt("Quality", ref quality, 0, 4))
                 _denseCloudOptions.Quality = quality;
 
-            ImGui.Text(_denseCloudOptions.Quality switch {
+            ImGui.Text(_denseCloudOptions.Quality switch
+            {
                 0 => "Lowest (fastest)", 1 => "Low", 2 => "Medium", 3 => "High", 4 => "Ultra", _ => ""
             });
 
@@ -590,10 +606,10 @@ public class PhotogrammetryWizardPanel : BasePanel
             }
             ImGui.SameLine();
             if (ImGui.Button("Cancel", new Vector2(120, 0))) ImGui.CloseCurrentPopup();
-            
+
             ImGui.EndPopup();
         }
-        
+
         if (_showMeshDialog)
         {
             ImGui.OpenPopup("Mesh Options");
@@ -605,7 +621,7 @@ public class PhotogrammetryWizardPanel : BasePanel
         {
             ImGui.Text("Configure mesh generation:");
             ImGui.Separator();
-            
+
             int src = (int)_meshOptions.Source;
             if (ImGui.Combo("Source Data", ref src, "Sparse Cloud\0Dense Cloud\0"))
                 _meshOptions.Source = (MeshOptions.SourceData)src;
@@ -613,7 +629,7 @@ public class PhotogrammetryWizardPanel : BasePanel
             int faceCount = _meshOptions.FaceCount;
             if (ImGui.InputInt("Target Faces", ref faceCount))
                 _meshOptions.FaceCount = faceCount;
-            
+
             bool simplify = _meshOptions.SimplifyMesh;
             if (ImGui.Checkbox("Simplify", ref simplify))
                 _meshOptions.SimplifyMesh = simplify;
@@ -621,10 +637,10 @@ public class PhotogrammetryWizardPanel : BasePanel
             bool smooth = _meshOptions.SmoothNormals;
             if (ImGui.Checkbox("Smooth Normals", ref smooth))
                 _meshOptions.SmoothNormals = smooth;
-            
+
             ImGui.Separator();
             ImGui.Checkbox("Add to project", ref _addToProject);
-            
+
             if (ImGui.Button("Build", new Vector2(120, 0)))
             {
                 _exportDialog.SetExtensions(
@@ -636,7 +652,82 @@ public class PhotogrammetryWizardPanel : BasePanel
             }
             ImGui.SameLine();
             if (ImGui.Button("Cancel", new Vector2(120, 0))) ImGui.CloseCurrentPopup();
-            
+
+            ImGui.EndPopup();
+        }
+
+        // Orthomosaic dialog
+        if (_showOrthoDialog)
+        {
+            ImGui.OpenPopup("Orthomosaic Options");
+            _showOrthoDialog = false;
+        }
+        bool isOrthoPopupOpen = true;
+        if (ImGui.BeginPopupModal("Orthomosaic Options", ref isOrthoPopupOpen, ImGuiWindowFlags.AlwaysAutoResize))
+        {
+            float gsd = _orthoOptions.GroundSamplingDistance;
+            if (ImGui.InputFloat("GSD (m/px)", ref gsd)) _orthoOptions.GroundSamplingDistance = MathF.Max(1e-6f, gsd);
+
+            int src = (int)_orthoOptions.Source;
+            if (ImGui.Combo("Source", ref src, "Mesh\0PointCloud\0")) _orthoOptions.Source = (OrthomosaicOptions.SourceData)src;
+
+            bool blend = _orthoOptions.EnableBlending;
+            if (ImGui.Checkbox("Blend images", ref blend)) _orthoOptions.EnableBlending = blend;
+
+            ImGui.Separator();
+            ImGui.Checkbox("Add to project", ref _addToProject);
+
+            if (ImGui.Button("Build", new Vector2(120, 0)))
+            {
+                _exportDialog.SetExtensions(
+                    new ImGuiExportFileDialog.ExtensionOption(".png", "PNG Image"),
+                    new ImGuiExportFileDialog.ExtensionOption(".tif", "TIFF Image")
+                );
+                _exportDialog.Open($"{_job.ImageGroup.Name}_orthomosaic");
+                ImGui.CloseCurrentPopup();
+            }
+            ImGui.SameLine();
+            if (ImGui.Button("Cancel", new Vector2(120, 0))) ImGui.CloseCurrentPopup();
+
+            ImGui.EndPopup();
+        }
+
+        // DEM dialog
+        if (_showDemDialog)
+        {
+            ImGui.OpenPopup("DEM Options");
+            _showDemDialog = false;
+        }
+        bool isDEMPopupOpen = true;
+        if (ImGui.BeginPopupModal("DEM Options", ref isDEMPopupOpen, ImGuiWindowFlags.AlwaysAutoResize))
+        {
+            float res = _demOptions.Resolution;
+            if (ImGui.InputFloat("Resolution (m/px)", ref res)) _demOptions.Resolution = MathF.Max(1e-6f, res);
+
+            int srcDEM = (int)_demOptions.Source;
+            if (ImGui.Combo("Source", ref srcDEM, "Mesh\0PointCloud\0")) _demOptions.Source = (DEMOptions.SourceData)srcDEM;
+
+            bool fill = _demOptions.FillHoles;
+            if (ImGui.Checkbox("Fill small holes", ref fill)) _demOptions.FillHoles = fill;
+
+            bool smooth = _demOptions.SmoothSurface;
+            if (ImGui.Checkbox("Smooth (box blur)", ref smooth)) _demOptions.SmoothSurface = smooth;
+
+            ImGui.Separator();
+            ImGui.Checkbox("Add to project", ref _addToProject);
+
+            if (ImGui.Button("Build", new Vector2(120, 0)))
+            {
+                _exportDialog.SetExtensions(
+                    new ImGuiExportFileDialog.ExtensionOption(".png", "PNG Heightmap"),
+                    new ImGuiExportFileDialog.ExtensionOption(".tif", "TIFF (8-bit)")
+                );
+                _exportDialog.Open($"{_job.ImageGroup.Name}_dem");
+                ImGui.CloseCurrentPopup();
+            }
+            ImGui.SameLine();
+            if (ImGui.Button("Cancel", new Vector2(120, 0))) ImGui.CloseCurrentPopup();
+
             ImGui.EndPopup();
         }
     }
@@ -646,23 +737,33 @@ public class PhotogrammetryWizardPanel : BasePanel
         if (_exportDialog.Submit() && !string.IsNullOrEmpty(_exportDialog.SelectedPath))
         {
             var path = _exportDialog.SelectedPath;
-            if (path.EndsWith(".obj") || path.EndsWith(".stl"))
+            var lowerPath = path.ToLower();
+
+            // Route based on file extension
+            if (lowerPath.EndsWith(".obj") || lowerPath.EndsWith(".stl"))
             {
                 _ = _job.Service.BuildMeshAsync(_meshOptions, path);
             }
-            else if (path.EndsWith(".xyz") || path.EndsWith(".ply"))
+            else if (lowerPath.EndsWith(".xyz") || lowerPath.EndsWith(".ply"))
             {
                 ExportPointCloud(path);
             }
+            else if (lowerPath.EndsWith(".png") || lowerPath.EndsWith(".tif"))
+            {
+                if (lowerPath.Contains("orthomosaic"))
+                    _ = _job.Service.BuildOrthomosaicAsync(_orthoOptions, path);
+                else if (lowerPath.Contains("dem"))
+                    _ = _job.Service.BuildDEMAsync(_demOptions, path);
+            }
         }
     }
-    
+
     private void ExportPointCloud(string path)
     {
         var cloud = _job.Service.DenseCloud ?? _job.Service.SparseCloud;
         if (cloud == null) return;
-        
-        if (path.EndsWith(".xyz"))
+
+        if (path.EndsWith(".xyz", StringComparison.OrdinalIgnoreCase))
         {
             using var writer = new StreamWriter(path);
             foreach (var pt in cloud.Points)
@@ -670,7 +771,49 @@ public class PhotogrammetryWizardPanel : BasePanel
                 writer.WriteLine($"{pt.Position.X} {pt.Position.Y} {pt.Position.Z} {(int)(pt.Color.X * 255)} {(int)(pt.Color.Y * 255)} {(int)(pt.Color.Z * 255)}");
             }
         }
-        
+        else if (path.EndsWith(".ply", StringComparison.OrdinalIgnoreCase))
+        {
+            try
+            {
+                using var stream = new FileStream(path, FileMode.Create);
+                using var writer = new BinaryWriter(stream);
+
+                // --- PLY Header ---
+                var header = $@"ply
+format binary_little_endian 1.0
+comment Generated by GeoscientistToolkit
+element vertex {cloud.Points.Count}
+property float x
+property float y
+property float z
+property uchar red
+property uchar green
+property uchar blue
+end_header
+";
+                writer.Write(System.Text.Encoding.ASCII.GetBytes(header));
+
+                // --- PLY Body (Binary) ---
+                foreach (var pt in cloud.Points)
+                {
+                    // Write position (X, Y, Z) as floats
+                    writer.Write(pt.Position.X);
+                    writer.Write(pt.Position.Y);
+                    writer.Write(pt.Position.Z);
+
+                    // Write color (R, G, B) as uchar
+                    writer.Write((byte)(pt.Color.X * 255));
+                    writer.Write((byte)(pt.Color.Y * 255));
+                    writer.Write((byte)(pt.Color.Z * 255));
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError($"Failed to export PLY file: {ex.Message}");
+            }
+        }
+
+
         if (_addToProject)
         {
             Logger.Log($"Exported point cloud: {path}");
