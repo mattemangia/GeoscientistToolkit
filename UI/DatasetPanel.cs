@@ -6,37 +6,31 @@ using GeoscientistToolkit.Data;
 using GeoscientistToolkit.Data.AcousticVolume;
 using GeoscientistToolkit.Data.CtImageStack;
 using GeoscientistToolkit.Data.GIS;
-using GeoscientistToolkit.Data.Image; // Added for ImageDataset
+using GeoscientistToolkit.Data.Image; 
 using GeoscientistToolkit.Data.Mesh3D;
 using GeoscientistToolkit.Data.Pnm;
 using GeoscientistToolkit.Data.Table;
 using GeoscientistToolkit.UI.AcousticVolume;
 using ImGuiNET;
-using System.Linq; // Added for LINQ queries
-
-// Added for PNM
+using System.Linq;
+using System.Collections.Generic;
+using System;
 
 namespace GeoscientistToolkit.UI;
 
 public class DatasetPanel : BasePanel
 {
     private readonly AcousticToCtConverterDialog _acousticToCtConverterDialog = new();
-
     private readonly MetadataEditor _metadataEditor = new();
-
-    // Multi-selection state
     private readonly HashSet<Dataset> _selectedDatasets = new();
     private Dataset _lastSelectedDataset;
     private Action<Dataset> _onDatasetSelected;
     private Action _onImportClicked;
-    private List<Dataset> _orderedDatasets = new(); // To maintain order for shift-selection
+    private List<Dataset> _orderedDatasets = new();
     private string _searchFilter = "";
-    
-    // --- NEW: State for renaming a group ---
     private DatasetGroup _groupToRename;
     private string _newGroupName = "";
     private bool _openRenamePopup;
-
 
     public DatasetPanel() : base("Datasets", new Vector2(250, 400))
     {
@@ -45,7 +39,8 @@ public class DatasetPanel : BasePanel
     public event Action<GISDataset> OnCreateShapefileFromTable;
     public event Action<GISDataset> OnCreateEmptyShapefile;
     public event Action<DatasetGroup> OnOpenThumbnailViewer;
-    public event Action<DatasetGroup> OnComposePanorama; // Added for Panorama
+    public event Action<DatasetGroup> OnComposePanorama;
+    public event Action<DatasetGroup> OnProcessPhotogrammetry; // Added for Photogrammetry
 
     public void Submit(ref bool pOpen, Action<Dataset> onDatasetSelected, Action onImportClicked)
     {
@@ -62,7 +57,6 @@ public class DatasetPanel : BasePanel
 
         var datasets = ProjectManager.Instance.LoadedDatasets;
 
-        // Update ordered datasets list for shift-selection
         _orderedDatasets = datasets
             .Where(d => string.IsNullOrEmpty(_searchFilter) ||
                         d.Name.Contains(_searchFilter, StringComparison.OrdinalIgnoreCase))
@@ -72,7 +66,6 @@ public class DatasetPanel : BasePanel
 
         if (datasets.Count == 0)
         {
-            // --- Show empty state UI ---
             var windowWidth = ImGui.GetWindowSize().X;
             var textWidth = ImGui.CalcTextSize("No datasets loaded").X;
             ImGui.SetCursorPosX((windowWidth - textWidth) * 0.5f);
@@ -88,12 +81,10 @@ public class DatasetPanel : BasePanel
         }
         else
         {
-            // Check for clicks outside any dataset to clear selection
             if (ImGui.IsMouseClicked(ImGuiMouseButton.Left) && ImGui.IsWindowHovered() &&
                 !ImGui.IsAnyItemHovered())
                 _selectedDatasets.Clear();
 
-            // --- Group datasets by type ---
             var datasetsByType = _orderedDatasets
                 .GroupBy(d => d.Type)
                 .OrderBy(g => g.Key.ToString());
@@ -121,14 +112,12 @@ public class DatasetPanel : BasePanel
                 }
         }
 
-        // --- NEW: Trigger the modal popup if the flag is set ---
         if (_openRenamePopup)
         {
             ImGui.OpenPopup("Rename Group");
             _openRenamePopup = false;
         }
         
-        // --- Draw the rename popup if it's been opened ---
         DrawRenameGroupPopup();
 
         _acousticToCtConverterDialog.Draw();
@@ -142,15 +131,12 @@ public class DatasetPanel : BasePanel
     {
         ImGui.PushID(dataset.GetHashCode());
 
-        // Apply indentation for grouped items
         if (indentLevel > 0) ImGui.Indent(20f * indentLevel);
 
         var isSelected = _selectedDatasets.Contains(dataset);
 
-        // Change color if dataset is missing
         if (dataset.IsMissing) ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(1.0f, 0.4f, 0.4f, 1.0f));
 
-        // Check if dataset has metadata
         var hasMetadata = !string.IsNullOrEmpty(dataset.DatasetMetadata?.SampleName) ||
                           !string.IsNullOrEmpty(dataset.DatasetMetadata?.LocationName) ||
                           dataset.DatasetMetadata?.Latitude.HasValue == true ||
@@ -158,22 +144,16 @@ public class DatasetPanel : BasePanel
 
         var displayName = dataset.Name;
         if (hasMetadata)
-            // Use simple text indicator instead of Unicode emoji
-            displayName = "[M] " + displayName; // [M] for Metadata
+            displayName = "[M] " + displayName;
 
-        // Handle selection
         if (ImGui.Selectable(displayName, isSelected)) HandleDatasetSelection(dataset);
 
         if (dataset.IsMissing) ImGui.PopStyleColor();
 
-        // Show enhanced tooltip with metadata
         if (ImGui.IsItemHovered()) ShowDatasetTooltipWithMetadata(dataset);
 
-        // Context menu
         if (ImGui.BeginPopupContextItem())
         {
-            // If right-clicking on an item that is not selected, clear 
-            // the current selection and select only this one.
             if (!isSelected)
             {
                 _selectedDatasets.Clear();
@@ -185,7 +165,6 @@ public class DatasetPanel : BasePanel
             ImGui.EndPopup();
         }
 
-        // If this is a group, draw its children
         if (dataset is DatasetGroup group)
             foreach (var child in group.Datasets)
                 DrawDatasetItem(child, indentLevel + 1);
@@ -206,62 +185,32 @@ public class DatasetPanel : BasePanel
         ImGui.TextUnformatted($"Type: {dataset.Type}");
         ImGui.TextUnformatted($"Path: {dataset.FilePath}");
 
-        // Show metadata if available
         var meta = dataset.DatasetMetadata;
         if (meta != null)
         {
             var hasAnyMetadata = false;
-
             if (!string.IsNullOrEmpty(meta.SampleName))
             {
-                if (!hasAnyMetadata)
-                {
-                    ImGui.Separator();
-                    ImGui.Text("Metadata:");
-                    hasAnyMetadata = true;
-                }
-
+                if (!hasAnyMetadata) { ImGui.Separator(); ImGui.Text("Metadata:"); hasAnyMetadata = true; }
                 ImGui.TextUnformatted($"  Sample: {meta.SampleName}");
             }
-
             if (!string.IsNullOrEmpty(meta.LocationName))
             {
-                if (!hasAnyMetadata)
-                {
-                    ImGui.Separator();
-                    ImGui.Text("Metadata:");
-                    hasAnyMetadata = true;
-                }
-
+                if (!hasAnyMetadata) { ImGui.Separator(); ImGui.Text("Metadata:"); hasAnyMetadata = true; }
                 ImGui.TextUnformatted($"  Location: {meta.LocationName}");
             }
-
             if (meta.Latitude.HasValue && meta.Longitude.HasValue)
             {
-                if (!hasAnyMetadata)
-                {
-                    ImGui.Separator();
-                    ImGui.Text("Metadata:");
-                    hasAnyMetadata = true;
-                }
-
+                if (!hasAnyMetadata) { ImGui.Separator(); ImGui.Text("Metadata:"); hasAnyMetadata = true; }
                 ImGui.TextUnformatted($"  Coordinates: {meta.Latitude:F6}°, {meta.Longitude:F6}°");
             }
-
             if (meta.Depth.HasValue)
             {
-                if (!hasAnyMetadata)
-                {
-                    ImGui.Separator();
-                    ImGui.Text("Metadata:");
-                    hasAnyMetadata = true;
-                }
-
+                if (!hasAnyMetadata) { ImGui.Separator(); ImGui.Text("Metadata:"); hasAnyMetadata = true; }
                 ImGui.TextUnformatted($"  Depth: {meta.Depth:F2} m");
             }
         }
 
-        // Show type-specific information
         if (dataset is CtImageStackDataset ctDataset)
         {
             ImGui.Separator();
@@ -273,8 +222,7 @@ public class DatasetPanel : BasePanel
         else if (dataset is StreamingCtVolumeDataset streamingCt)
         {
             ImGui.Separator();
-            ImGui.TextUnformatted(
-                $"Full Size: {streamingCt.FullWidth}x{streamingCt.FullHeight}x{streamingCt.FullDepth}");
+            ImGui.TextUnformatted($"Full Size: {streamingCt.FullWidth}x{streamingCt.FullHeight}x{streamingCt.FullDepth}");
             ImGui.TextUnformatted($"LOD Levels: {streamingCt.LodCount}");
             ImGui.TextUnformatted($"Brick Size: {streamingCt.BrickSize}");
             if (streamingCt.EditablePartner != null)
@@ -334,18 +282,14 @@ public class DatasetPanel : BasePanel
 
     private void DrawContextMenuWithMetadata(Dataset dataset)
     {
-        // View option
         if (ImGui.MenuItem("View", null, false, !(dataset is DatasetGroup) && !dataset.IsMissing))
             _onDatasetSelected?.Invoke(dataset);
 
-        // Edit Metadata option
         ImGui.Separator();
         if (ImGui.MenuItem("Edit Metadata...", null, false, !(dataset is DatasetGroup))) _metadataEditor.Open(dataset);
 
-        // Group-specific options
         if (dataset is DatasetGroup group)
         {
-            // MODIFIED: Rename option sets a flag instead of opening popup directly
             if (ImGui.MenuItem("Rename"))
             {
                 _groupToRename = group;
@@ -353,12 +297,10 @@ public class DatasetPanel : BasePanel
                 _openRenamePopup = true;
             }
             
-            // MODIFIED: Only enable thumbnail viewer if there are images in the group
             bool hasImages = group.Datasets.Any(d => d.Type == DatasetType.SingleImage || d.Type == DatasetType.CtImageStack);
             
             if (ImGui.MenuItem("View Thumbnails", null, false, hasImages))
             {
-                // Signal to open thumbnail viewer
                 OnOpenThumbnailViewer?.Invoke(group);
             }
             if (ImGui.IsItemHovered() && !hasImages)
@@ -369,14 +311,26 @@ public class DatasetPanel : BasePanel
             if (ImGui.MenuItem("Ungroup")) UngroupDataset(group);
 
             ImGui.Separator();
-            bool canComposePanorama = group.Datasets.Count > 1 && group.Datasets.All(d => d is ImageDataset);
-            if (ImGui.MenuItem("Compose Panorama...", null, false, canComposePanorama))
+            
+            // --- MODIFIED: Added Panorama and Photogrammetry options ---
+            bool canProcessImages = group.Datasets.Count > 1 && group.Datasets.All(d => d is ImageDataset);
+
+            if (ImGui.MenuItem("Compose Panorama...", null, false, canProcessImages))
             {
                 OnComposePanorama?.Invoke(group);
             }
-            if (ImGui.IsItemHovered() && !canComposePanorama)
+            if (ImGui.IsItemHovered() && !canProcessImages)
             {
-                ImGui.SetTooltip("Group must contain at least two image datasets to compose a panorama.");
+                ImGui.SetTooltip("Group must contain at least two single image datasets.");
+            }
+
+            if (ImGui.MenuItem("Process Photogrammetry...", null, false, canProcessImages))
+            {
+                OnProcessPhotogrammetry?.Invoke(group);
+            }
+            if (ImGui.IsItemHovered() && !canProcessImages)
+            {
+                ImGui.SetTooltip("Group must contain at least two single image datasets.");
             }
         }
 
@@ -395,14 +349,12 @@ public class DatasetPanel : BasePanel
             if (ImGui.MenuItem("Create Empty Shapefile...")) OnCreateEmptyShapefile?.Invoke(gisDataset);
         }
 
-        // Multi-selection grouping
         if (_selectedDatasets.Count > 1 && _selectedDatasets.Contains(dataset))
             if (ImGui.MenuItem("Group Selected"))
                 CreateGroup();
 
         ImGui.Separator();
 
-        // Close/Remove option - now acts on all selected items
         if (ImGui.MenuItem("Close"))
         {
             var itemsToClose = _selectedDatasets.ToList();
@@ -410,7 +362,6 @@ public class DatasetPanel : BasePanel
             foreach (var item in itemsToClose)
             {
                 if (item is DatasetGroup grp)
-                    // Also remove all datasets within the group
                     foreach (var child in grp.Datasets.ToList())
                         ProjectManager.Instance.RemoveDataset(child);
 
@@ -424,7 +375,6 @@ public class DatasetPanel : BasePanel
     private void HandleDatasetSelection(Dataset dataset)
     {
         if (dataset.IsMissing)
-            // Optionally prevent interaction with missing datasets
             return;
 
         var ctrlHeld = ImGui.GetIO().KeyCtrl;
@@ -432,7 +382,6 @@ public class DatasetPanel : BasePanel
 
         if (ctrlHeld)
         {
-            // Toggle selection
             if (_selectedDatasets.Contains(dataset))
                 _selectedDatasets.Remove(dataset);
             else
@@ -440,7 +389,6 @@ public class DatasetPanel : BasePanel
         }
         else if (shiftHeld && _lastSelectedDataset != null)
         {
-            // Range selection
             var startIdx = _orderedDatasets.IndexOf(_lastSelectedDataset);
             var endIdx = _orderedDatasets.IndexOf(dataset);
 
@@ -450,13 +398,12 @@ public class DatasetPanel : BasePanel
                 var maxIdx = Math.Max(startIdx, endIdx);
 
                 for (var i = minIdx; i <= maxIdx; i++)
-                    if (!_orderedDatasets[i].IsMissing) // Don't select missing items in range
+                    if (!_orderedDatasets[i].IsMissing)
                         _selectedDatasets.Add(_orderedDatasets[i]);
             }
         }
         else
         {
-            // Single selection
             _selectedDatasets.Clear();
             _selectedDatasets.Add(dataset);
             _onDatasetSelected?.Invoke(dataset);
@@ -465,10 +412,8 @@ public class DatasetPanel : BasePanel
         _lastSelectedDataset = dataset;
     }
     
-    // --- NEW: Method to draw the modal popup for renaming a group ---
     private void DrawRenameGroupPopup()
     {
-        // --- MODIFIED: Center the modal on screen ---
         var center = ImGui.GetMainViewport().GetCenter();
         ImGui.SetNextWindowPos(center, ImGuiCond.Appearing, new Vector2(0.5f, 0.5f));
 
@@ -478,19 +423,17 @@ public class DatasetPanel : BasePanel
             ImGui.Text("Enter a new name for the group:");
             ImGui.Separator();
             
-            // Auto-focus the input text field when the popup appears
             if (ImGui.IsWindowAppearing())
             {
                 ImGui.SetKeyboardFocusHere(0);
             }
 
-            // Submit on pressing Enter
             if (ImGui.InputText("##NewGroupName", ref _newGroupName, 256, ImGuiInputTextFlags.EnterReturnsTrue))
             {
                 if (_groupToRename != null && !string.IsNullOrWhiteSpace(_newGroupName))
                 {
                     _groupToRename.Name = _newGroupName;
-                    ProjectManager.Instance.HasUnsavedChanges = true; // Mark project as modified
+                    ProjectManager.Instance.HasUnsavedChanges = true;
                 }
                 _groupToRename = null;
                 ImGui.CloseCurrentPopup();
@@ -503,7 +446,7 @@ public class DatasetPanel : BasePanel
                 if (_groupToRename != null && !string.IsNullOrWhiteSpace(_newGroupName))
                 {
                     _groupToRename.Name = _newGroupName;
-                    ProjectManager.Instance.HasUnsavedChanges = true; // Mark project as modified
+                    ProjectManager.Instance.HasUnsavedChanges = true;
                 }
                 _groupToRename = null;
                 ImGui.CloseCurrentPopup();
@@ -524,36 +467,22 @@ public class DatasetPanel : BasePanel
     {
         if (_selectedDatasets.Count < 2) return;
     
-        // Create group name
         var groupName = $"Group {ProjectManager.Instance.LoadedDatasets.Count(d => d is DatasetGroup) + 1}";
-    
         var datasetsToGroup = _selectedDatasets.ToList();
-    
-        // Create the group
         var group = new DatasetGroup(groupName, datasetsToGroup);
     
-        // Remove individual datasets from the project's root list.
-        // We must do this manually instead of calling ProjectManager.RemoveDataset(), because the latter
-        // calls dataset.Unload(), which clears the data and causes this bug.
-        // By avoiding the Unload() call, the datasets inside the group remain fully loaded and viewable.
         foreach (var dataset in datasetsToGroup)
         {
             ProjectManager.Instance.LoadedDatasets.Remove(dataset);
         }
     
-        // Add the new group to the project
-        ProjectManager.Instance.AddDataset(group); // This also sets HasUnsavedChanges
-    
-        // Clear selection
+        ProjectManager.Instance.AddDataset(group);
         _selectedDatasets.Clear();
     }
 
     private void UngroupDataset(DatasetGroup group)
     {
-        // Add all datasets back to the project
         foreach (var dataset in group.Datasets) ProjectManager.Instance.AddDataset(dataset);
-
-        // Remove the group
         ProjectManager.Instance.RemoveDataset(group);
         _selectedDatasets.Remove(group);
     }
@@ -573,10 +502,10 @@ public class DatasetPanel : BasePanel
             DatasetType.Table => "[TABLE]",
             DatasetType.GIS => "[GIS]",
             DatasetType.AcousticVolume => "[ACOUSTIC]",
-            DatasetType.PNM => "[PNM]", // Added for PNM
+            DatasetType.PNM => "[PNM]",
             DatasetType.Borehole => "[WELL]",
             DatasetType.TwoDGeology => "[2DGEOL]",
-            
+            DatasetType.SubsurfaceGIS => "[SUBSGIS]",
             _ => "[DATA]"
         };
     }
