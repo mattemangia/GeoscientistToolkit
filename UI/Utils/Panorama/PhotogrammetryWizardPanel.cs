@@ -24,17 +24,19 @@ internal class GroundControlPointEditor : IDisposable
 {
     private readonly GraphicsDevice _graphicsDevice;
     private readonly ResourceFactory _resourceFactory;
-    private readonly ImGuiRenderer _imGuiRenderer;
+    // CORRECTED: Use the project's ImGuiController
+    private readonly ImGuiController _imGuiController;
 
     private struct VeldridTextureBinding : IDisposable
     {
         public readonly IntPtr ImGuiBinding;
         private readonly Texture _texture;
         private readonly TextureView _textureView;
-        private readonly ImGuiRenderer _renderer;
+        // CORRECTED: Use the project's ImGuiController
+        private readonly ImGuiController _renderer;
         private bool _disposed;
 
-        public VeldridTextureBinding(Texture texture, TextureView view, IntPtr binding, ImGuiRenderer renderer)
+        public VeldridTextureBinding(Texture texture, TextureView view, IntPtr binding, ImGuiController renderer)
         {
             _texture = texture;
             _textureView = view;
@@ -69,11 +71,12 @@ internal class GroundControlPointEditor : IDisposable
     public Action<PhotogrammetryImage, GroundControlPoint> OnGCPUpdated;
     public Action<PhotogrammetryImage, GroundControlPoint> OnGCPRemoved;
 
-    public GroundControlPointEditor(GraphicsDevice graphicsDevice, ImGuiRenderer imGuiRenderer)
+    // CORRECTED: Constructor now uses the project's ImGuiController
+    public GroundControlPointEditor(GraphicsDevice graphicsDevice, ImGuiController imGuiController)
     {
         _graphicsDevice = graphicsDevice;
         _resourceFactory = graphicsDevice.ResourceFactory;
-        _imGuiRenderer = imGuiRenderer;
+        _imGuiController = imGuiController;
     }
 
     public void Open(PhotogrammetryImage image)
@@ -101,9 +104,9 @@ internal class GroundControlPointEditor : IDisposable
         _graphicsDevice.UpdateTexture(texture, dataset.ImageData, 0, 0, 0, (uint)dataset.Width, (uint)dataset.Height, 1, 0, 0);
 
         var textureView = _resourceFactory.CreateTextureView(texture);
-        var imGuiBinding = _imGuiRenderer.GetOrCreateImGuiBinding(_resourceFactory, textureView);
+        var imGuiBinding = _imGuiController.GetOrCreateImGuiBinding(_resourceFactory, textureView);
 
-        return new VeldridTextureBinding(texture, textureView, imGuiBinding, _imGuiRenderer);
+        return new VeldridTextureBinding(texture, textureView, imGuiBinding, _imGuiController);
     }
 
     public void Draw()
@@ -292,7 +295,8 @@ public class PhotogrammetryWizardPanel : BasePanel
     private readonly PhotogrammetryJob _job;
     private readonly List<string> _logBuffer = new();
     private readonly GraphicsDevice _graphicsDevice;
-    private readonly ImGuiRenderer _imGuiRenderer;
+    // CORRECTED: Use the project's ImGuiController
+    private readonly ImGuiController _imGuiController;
 
     private readonly GroundControlPointEditor _gcpEditor;
     private readonly ImGuiExportFileDialog _exportDialog;
@@ -315,19 +319,20 @@ public class PhotogrammetryWizardPanel : BasePanel
     public bool IsOpen { get; private set; }
     public string Title { get; }
 
-    public PhotogrammetryWizardPanel(DatasetGroup imageGroup, GraphicsDevice graphicsDevice, ImGuiRenderer imGuiRenderer)
+    // CORRECTED: Constructor now uses the project's ImGuiController
+    public PhotogrammetryWizardPanel(DatasetGroup imageGroup, GraphicsDevice graphicsDevice, ImGuiController imGuiController)
         : base($"Photogrammetry: {imageGroup.Name}", new Vector2(900, 700))
     {
         Title = $"Photogrammetry: {imageGroup.Name}";
         _graphicsDevice = graphicsDevice;
-        _imGuiRenderer = imGuiRenderer;
+        _imGuiController = imGuiController;
 
         _job = new PhotogrammetryJob(imageGroup);
         _job.Service.StartProcessingAsync();
 
         _exportDialog = new ImGuiExportFileDialog("photogrammetryExport", "Export");
 
-        _gcpEditor = new GroundControlPointEditor(graphicsDevice, imGuiRenderer);
+        _gcpEditor = new GroundControlPointEditor(graphicsDevice, imGuiController);
         _gcpEditor.OnGCPUpdated = (img, gcp) => _job.Service.AddOrUpdateGroundControlPoint(img, gcp);
         _gcpEditor.OnGCPRemoved = (img, gcp) => _job.Service.RemoveGroundControlPoint(img, gcp);
     }

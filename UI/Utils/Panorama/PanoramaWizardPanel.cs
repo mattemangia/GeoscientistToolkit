@@ -22,17 +22,19 @@ internal class ManualLinkEditor : IDisposable
 {
     private readonly GraphicsDevice _graphicsDevice;
     private readonly ResourceFactory _resourceFactory;
-    private readonly ImGuiRenderer _imGuiRenderer;
+    // CORRECTED: Use the project's ImGuiController
+    private readonly ImGuiController _imGuiController;
 
     private struct VeldridTextureBinding : IDisposable
     {
         public readonly IntPtr ImGuiBinding;
         private readonly Texture _texture;
         private readonly TextureView _textureView;
-        private readonly ImGuiRenderer _renderer;
+        // CORRECTED: Use the project's ImGuiController
+        private readonly ImGuiController _renderer;
         private bool _disposed;
 
-        public VeldridTextureBinding(Texture texture, TextureView view, IntPtr binding, ImGuiRenderer renderer)
+        public VeldridTextureBinding(Texture texture, TextureView view, IntPtr binding, ImGuiController renderer)
         {
             _texture = texture;
             _textureView = view;
@@ -44,7 +46,6 @@ internal class ManualLinkEditor : IDisposable
         public void Dispose()
         {
             if (_disposed) return;
-            // CORRECTED: The method requires a TextureView, not an IntPtr.
             _renderer.RemoveImGuiBinding(_textureView);
             _textureView.Dispose();
             _texture.Dispose();
@@ -68,11 +69,12 @@ internal class ManualLinkEditor : IDisposable
 
     public Action<PanoramaImage, PanoramaImage, List<(Vector2 P1, Vector2 P2)>> OnConfirm;
 
-    public ManualLinkEditor(GraphicsDevice graphicsDevice, ImGuiRenderer imGuiRenderer)
+    // CORRECTED: Constructor now uses the project's ImGuiController
+    public ManualLinkEditor(GraphicsDevice graphicsDevice, ImGuiController imGuiController)
     {
         _graphicsDevice = graphicsDevice;
         _resourceFactory = graphicsDevice.ResourceFactory;
-        _imGuiRenderer = imGuiRenderer;
+        _imGuiController = imGuiController;
     }
 
     public void Open(PanoramaImage image1, PanoramaImage image2)
@@ -246,9 +248,9 @@ internal class ManualLinkEditor : IDisposable
         }
 
         var textureView = _resourceFactory.CreateTextureView(texture);
-        var imGuiBinding = _imGuiRenderer.GetOrCreateImGuiBinding(_resourceFactory, textureView);
+        var imGuiBinding = _imGuiController.GetOrCreateImGuiBinding(_resourceFactory, textureView);
 
-        return new VeldridTextureBinding(texture, textureView, imGuiBinding, _imGuiRenderer);
+        return new VeldridTextureBinding(texture, textureView, imGuiBinding, _imGuiController);
     }
     
     private void DisposeBindings()
@@ -277,10 +279,11 @@ public class PanoramaWizardPanel : BasePanel
     public bool IsOpen { get; private set; }
     public string Title { get; }
 
-    public PanoramaWizardPanel(DatasetGroup imageGroup, GraphicsDevice graphicsDevice, ImGuiRenderer imGuiRenderer) 
+    // CORRECTED: Constructor now uses the project's ImGuiController
+    public PanoramaWizardPanel(DatasetGroup imageGroup, GraphicsDevice graphicsDevice, ImGuiController imGuiController) 
         : base($"Panorama Wizard: {imageGroup.Name}", new Vector2(800, 600))
     {
-        // CORRECTED: Store the title from the base constructor in the public property.
+        Title = $"Panorama Wizard: {imageGroup.Name}"; // Added this line
        
         _job = new PanoramaStitchJob(imageGroup);
         _job.Service.StartProcessingAsync();
@@ -288,12 +291,9 @@ public class PanoramaWizardPanel : BasePanel
         _exportFileDialog = new ImGuiExportFileDialog("panoramaExport", "Export Panorama");
         _exportFileDialog.SetExtensions(new ImGuiExportFileDialog.ExtensionOption(".png", "PNG Image"), new ImGuiExportFileDialog.ExtensionOption(".jpg", "JPEG Image"));
         
-        _manualLinkEditor = new ManualLinkEditor(graphicsDevice, imGuiRenderer);
+        _manualLinkEditor = new ManualLinkEditor(graphicsDevice, imGuiController);
         _manualLinkEditor.OnConfirm = (img1, img2, points) =>
         {
-            // CORRECTED: Use the static application logger.
-            // This also assumes that the PanoramaStitchingService will be updated to include a public
-            // method for processing these manual links.
             Logger.Log($"Confirmed {points.Count} manual links for {img1.Dataset.Name} and {img2.Dataset.Name}.");
             // e.g., _job.Service.AddManualLinkAndRecompute(img1, img2, points);
         };
@@ -317,9 +317,7 @@ public class PanoramaWizardPanel : BasePanel
     protected override void DrawContent()
     {
         UpdateLogs();
-
-        // CORRECTED: These method calls are valid, assuming the PanoramaStitchingService exposes
-        // them as part of its public API for the UI to consume.
+        
         if (_imageToDiscard != null)
         {
             _job.Service.RemoveImage(_imageToDiscard);

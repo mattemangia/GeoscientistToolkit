@@ -21,8 +21,8 @@ public class PanoramaManager
     /// </summary>
     /// <param name="imageGroup">The group of images to stitch.</param>
     /// <param name="graphicsDevice">The active Veldrid GraphicsDevice.</param>
-    /// <param name="imGuiRenderer">The active Veldrid ImGuiRenderer.</param>
-    public void StartPanorama(DatasetGroup imageGroup, GraphicsDevice graphicsDevice, ImGuiRenderer imGuiRenderer)
+    /// <param name="imGuiController">The active GeoscientistToolkit ImGuiController.</param>
+    public void StartPanorama(DatasetGroup imageGroup, GraphicsDevice graphicsDevice, ImGuiController imGuiController)
     {
         // If a wizard is already open, bring its window to the front.
         if (_wizardPanel != null && _wizardPanel.IsOpen)
@@ -31,8 +31,8 @@ public class PanoramaManager
             return;
         }
         
-        // CORRECTED: The constructor now requires the Veldrid graphics objects, which are passed in.
-        _wizardPanel = new PanoramaWizardPanel(imageGroup, graphicsDevice, imGuiRenderer);
+        // CORRECTED: The constructor now receives the correct ImGuiController type.
+        _wizardPanel = new PanoramaWizardPanel(imageGroup, graphicsDevice, imGuiController);
         _wizardPanel.Open();
     }
 
@@ -42,6 +42,13 @@ public class PanoramaManager
     public void SubmitUI()
     {
         // The Submit method inside the panel handles its own lifecycle, including closing.
-        _wizardPanel?.Submit();
+        if (_wizardPanel != null)
+        {
+            _wizardPanel.Submit();
+            if (!_wizardPanel.IsOpen)
+            {
+                _wizardPanel = null; // Clean up after closing
+            }
+        }
     }
 }
