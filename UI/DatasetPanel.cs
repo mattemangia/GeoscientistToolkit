@@ -6,7 +6,7 @@ using GeoscientistToolkit.Data;
 using GeoscientistToolkit.Data.AcousticVolume;
 using GeoscientistToolkit.Data.CtImageStack;
 using GeoscientistToolkit.Data.GIS;
-using GeoscientistToolkit.Data.Image; 
+using GeoscientistToolkit.Data.Image;
 using GeoscientistToolkit.Data.Mesh3D;
 using GeoscientistToolkit.Data.Pnm;
 using GeoscientistToolkit.Data.Table;
@@ -15,11 +15,17 @@ using ImGuiNET;
 using System.Linq;
 using System.Collections.Generic;
 using System;
+using GeoscientistToolkit.UI.Panorama; // Added
+using GeoscientistToolkit.UI.Photogrammetry; // Added
+using Veldrid; // Added
 
 namespace GeoscientistToolkit.UI;
 
 public class DatasetPanel : BasePanel
 {
+    private readonly GraphicsDevice _graphicsDevice; // Added
+    private readonly ImGuiRenderer _imGuiRenderer; // Added
+
     private readonly AcousticToCtConverterDialog _acousticToCtConverterDialog = new();
     private readonly MetadataEditor _metadataEditor = new();
     private readonly HashSet<Dataset> _selectedDatasets = new();
@@ -32,21 +38,44 @@ public class DatasetPanel : BasePanel
     private string _newGroupName = "";
     private bool _openRenamePopup;
 
-    public DatasetPanel() : base("Datasets", new Vector2(250, 400))
+    private PanoramaWizardPanel _panoramaWizard; // Added
+    private PhotogrammetryWizardPanel _photogrammetryWizard; // Added
+
+    // MODIFIED: Constructor now requires graphics device and renderer
+    public DatasetPanel(GraphicsDevice graphicsDevice, ImGuiRenderer imGuiRenderer) : base("Datasets", new Vector2(250, 400))
     {
+        _graphicsDevice = graphicsDevice;
+        _imGuiRenderer = imGuiRenderer;
     }
 
     public event Action<GISDataset> OnCreateShapefileFromTable;
     public event Action<GISDataset> OnCreateEmptyShapefile;
     public event Action<DatasetGroup> OnOpenThumbnailViewer;
-    public event Action<DatasetGroup> OnComposePanorama;
-    public event Action<DatasetGroup> OnProcessPhotogrammetry; // Added for Photogrammetry
+
+    // REMOVED: Unused events
+    // public event Action<DatasetGroup> OnComposePanorama;
+    // public event Action<DatasetGroup> OnProcessPhotogrammetry;
 
     public void Submit(ref bool pOpen, Action<Dataset> onDatasetSelected, Action onImportClicked)
     {
         _onDatasetSelected = onDatasetSelected;
         _onImportClicked = onImportClicked;
         base.Submit(ref pOpen);
+
+        // ADDED: Submit and manage wizard panels
+        if (_panoramaWizard != null)
+        {
+            _panoramaWizard.Submit();
+            if (!_panoramaWizard.IsOpen)
+                _panoramaWizard = null;
+        }
+
+        if (_photogrammetryWizard != null)
+        {
+            _photogrammetryWizard.Submit();
+            if (!_photogrammetryWizard.IsOpen)
+                _photogrammetryWizard = null;
+        }
     }
 
     protected override void DrawContent()
@@ -117,7 +146,7 @@ public class DatasetPanel : BasePanel
             ImGui.OpenPopup("Rename Group");
             _openRenamePopup = false;
         }
-        
+
         DrawRenameGroupPopup();
 
         _acousticToCtConverterDialog.Draw();
@@ -296,9 +325,9 @@ public class DatasetPanel : BasePanel
                 _newGroupName = group.Name;
                 _openRenamePopup = true;
             }
-            
+
             bool hasImages = group.Datasets.Any(d => d.Type == DatasetType.SingleImage || d.Type == DatasetType.CtImageStack);
-            
+
             if (ImGui.MenuItem("View Thumbnails", null, false, hasImages))
             {
                 OnOpenThumbnailViewer?.Invoke(group);
@@ -311,22 +340,32 @@ public class DatasetPanel : BasePanel
             if (ImGui.MenuItem("Ungroup")) UngroupDataset(group);
 
             ImGui.Separator();
-            
+
             // --- MODIFIED: Added Panorama and Photogrammetry options ---
             bool canProcessImages = group.Datasets.Count > 1 && group.Datasets.All(d => d is ImageDataset);
 
+            // MODIFIED: Logic to create and open the panorama wizard
             if (ImGui.MenuItem("Compose Panorama...", null, false, canProcessImages))
             {
-                OnComposePanorama?.Invoke(group);
+                if (_panoramaWizard == null)
+                {
+                    _panoramaWizard = new PanoramaWizardPanel(group, _graphicsDevice, _imGuiRenderer);
+                    _panoramaWizard.Open();
+                }
             }
             if (ImGui.IsItemHovered() && !canProcessImages)
             {
                 ImGui.SetTooltip("Group must contain at least two single image datasets.");
             }
 
+            // MODIFIED: Logic to create and open the photogrammetry wizard
             if (ImGui.MenuItem("Process Photogrammetry...", null, false, canProcessImages))
             {
-                OnProcessPhotogrammetry?.Invoke(group);
+                if (_photogrammetryWizard == null)
+                {
+                    _photogrammetryWizard = new PhotogrammetryWizardPanel(group, _graphicsDevice, _imGuiRenderer);
+                    _photogrammetryWizard.Open();
+                }
             }
             if (ImGui.IsItemHovered() && !canProcessImages)
             {
@@ -411,7 +450,7 @@ public class DatasetPanel : BasePanel
 
         _lastSelectedDataset = dataset;
     }
-    
+
     private void DrawRenameGroupPopup()
     {
         var center = ImGui.GetMainViewport().GetCenter();
@@ -422,7 +461,7 @@ public class DatasetPanel : BasePanel
         {
             ImGui.Text("Enter a new name for the group:");
             ImGui.Separator();
-            
+
             if (ImGui.IsWindowAppearing())
             {
                 ImGui.SetKeyboardFocusHere(0);
@@ -466,16 +505,16 @@ public class DatasetPanel : BasePanel
     private void CreateGroup()
     {
         if (_selectedDatasets.Count < 2) return;
-    
+
         var groupName = $"Group {ProjectManager.Instance.LoadedDatasets.Count(d => d is DatasetGroup) + 1}";
         var datasetsToGroup = _selectedDatasets.ToList();
         var group = new DatasetGroup(groupName, datasetsToGroup);
-    
+
         foreach (var dataset in datasetsToGroup)
         {
             ProjectManager.Instance.LoadedDatasets.Remove(dataset);
         }
-    
+
         ProjectManager.Instance.AddDataset(group);
         _selectedDatasets.Clear();
     }
