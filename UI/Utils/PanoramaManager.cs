@@ -51,4 +51,36 @@ public class PanoramaManager
             }
         }
     }
+    private static Dictionary<Guid, List<Guid>> BuildMatchGraph(
+        IEnumerable<(Guid A, Guid B, int Inliers)> edges)
+    {
+        var g = new Dictionary<Guid, List<Guid>>();
+        void add(Guid u, Guid v)
+        {
+            if (!g.TryGetValue(u, out var list)) g[u] = list = new List<Guid>();
+            if (!list.Contains(v)) list.Add(v);
+        }
+        foreach (var (a, b, _) in edges)
+        {
+            add(a, b);
+            add(b, a);
+        }
+        return g;
+    }
+
+    private static HashSet<Guid> BFS(Dictionary<Guid, List<Guid>> g, Guid start)
+    {
+        var vis = new HashSet<Guid>();
+        var q = new Queue<Guid>();
+        vis.Add(start); q.Enqueue(start);
+        while (q.Count > 0)
+        {
+            var u = q.Dequeue();
+            if (!g.TryGetValue(u, out var nb)) continue;
+            foreach (var v in nb)
+                if (vis.Add(v)) q.Enqueue(v);
+        }
+        return vis;
+    }
+
 }

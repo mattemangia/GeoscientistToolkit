@@ -46,7 +46,7 @@ public class ImportDataModal
     private readonly Mesh3DLoader _mesh3DLoader;
     private readonly ImageStackOrganizerDialog _organizerDialog;
 
-    private readonly string[] _pixelSizeUnits = { "Ã‚Âµm", "mm" };
+    private readonly string[] _pixelSizeUnits = { "µm", "mm" };
     private readonly ImGuiFileDialog _pnmDialog; // Added for PNM
     private readonly PNMLoader _pnmLoader; // Added for PNM
     private readonly ImGuiFileDialog _segmentationDialog;
@@ -308,7 +308,7 @@ public class ImportDataModal
             var info = new FileInfo(_boreholeBinaryLoader.FilePath);
             ImGui.BulletText($"File: {info.Name}");
             ImGui.BulletText($"Size: {info.Length / 1024} KB");
-            ImGui.TextColored(new Vector4(0.0f, 1.0f, 0.5f, 1.0f), "Ã¢Å“â€œ Ready to import borehole dataset");
+            ImGui.TextColored(new Vector4(0.0f, 1.0f, 0.5f, 1.0f), "✓ Ready to import borehole dataset");
         }
     }
 
@@ -423,7 +423,7 @@ public class ImportDataModal
             var info = new FileInfo(_twoDGeologyLoader.FilePath);
             ImGui.BulletText($"File: {info.Name}");
             ImGui.BulletText($"Size: {info.Length / 1024} KB");
-            ImGui.TextColored(new Vector4(0.0f, 1.0f, 0.5f, 1.0f), "Ã¢Å“â€œ Ready to import 2D geology profile");
+            ImGui.TextColored(new Vector4(0.0f, 1.0f, 0.5f, 1.0f), "✓ Ready to import 2D geology profile");
         }
     }
 
@@ -479,7 +479,7 @@ public class ImportDataModal
                 }
             }
             
-            ImGui.TextColored(new Vector4(0.0f, 1.0f, 0.5f, 1.0f), "âœ“ Ready to import subsurface GIS model");
+            ImGui.TextColored(new Vector4(0.0f, 1.0f, 0.5f, 1.0f), "✓ Ready to import subsurface GIS model");
         }
     }
 
@@ -511,7 +511,7 @@ public class ImportDataModal
             var info = new FileInfo(_pnmLoader.FilePath);
             ImGui.BulletText($"File: {info.Name}");
             ImGui.BulletText($"Size: {info.Length / 1024} KB");
-            ImGui.TextColored(new Vector4(0.0f, 1.0f, 0.5f, 1.0f), "Ã¢Å“â€œ Ready to import PNM dataset");
+            ImGui.TextColored(new Vector4(0.0f, 1.0f, 0.5f, 1.0f), "✓ Ready to import PNM dataset");
         }
     }
 
@@ -555,14 +555,14 @@ public class ImportDataModal
 
             if (info.HasMaterialsFile)
                 ImGui.TextColored(new Vector4(0.0f, 1.0f, 0.5f, 1.0f),
-                    "Ã¢Å“â€œ Material definitions found (.materials.json)");
+                    "✓ Material definitions found (.materials.json)");
             else
                 ImGui.TextColored(new Vector4(1.0f, 0.8f, 0.0f, 1.0f),
-                    "Ã¢Å¡Â  No material definitions found - colors will be used to generate materials");
+                    "⚠ No material definitions found - colors will be used to generate materials");
 
             ImGui.Spacing();
             ImGui.TextColored(new Vector4(0.0f, 1.0f, 0.5f, 1.0f),
-                "Ã¢Å“â€œ Ready to import segmentation");
+                "✓ Ready to import segmentation");
         }
     }
 
@@ -611,12 +611,12 @@ public class ImportDataModal
 
                 ImGui.Spacing();
                 ImGui.TextColored(new Vector4(0.0f, 1.0f, 0.5f, 1.0f),
-                    "Ã¢Å“â€œ Ready to import acoustic volume");
+                    "✓ Ready to import acoustic volume");
             }
             else
             {
                 ImGui.TextColored(new Vector4(1.0f, 0.5f, 0.0f, 1.0f),
-                    "Ã¢Å¡Â  Invalid acoustic volume directory");
+                    "⚠ Invalid acoustic volume directory");
 
                 if (!string.IsNullOrEmpty(info.ErrorMessage)) ImGui.TextWrapped($"Error: {info.ErrorMessage}");
 
@@ -756,7 +756,7 @@ public class ImportDataModal
         ImGui.SetNextItemWidth(230);
         int[] binningOptions = { 1, 2, 4, 8 };
         string[] binningLabels =
-            { "1Ãƒâ€”1Ãƒâ€”1 (None)", "2Ãƒâ€”2Ãƒâ€”2 (8x smaller)", "4Ãƒâ€”4Ãƒâ€”4 (64x smaller)", "8Ãƒâ€”8Ãƒâ€”8 (512x smaller)" };
+            { "1×1×1 (None)", "2×2×2 (8x smaller)", "4×4×4 (64x smaller)", "8×8×8 (512x smaller)" };
         var binningIndex = Array.IndexOf(binningOptions, _ctStackLoader.BinningFactor);
         if (ImGui.Combo("##Binning", ref binningIndex, binningLabels, binningLabels.Length))
             _ctStackLoader.BinningFactor = binningOptions[binningIndex];
@@ -811,7 +811,7 @@ public class ImportDataModal
             ImGui.BulletText($"Format: {info.Format}");
             ImGui.BulletText($"Size: {info.FileSize / 1024} KB");
 
-            if (info.IsSupported) ImGui.TextColored(new Vector4(0, 1, 0, 1), "Ã¢Å“â€œ Ready to import");
+            if (info.IsSupported) ImGui.TextColored(new Vector4(0, 1, 0, 1), "✓ Ready to import");
         }
     }
 
@@ -893,7 +893,7 @@ public class ImportDataModal
 
             ImGui.Spacing();
             ImGui.TextColored(new Vector4(0.0f, 1.0f, 0.5f, 1.0f),
-                "Ã¢Å“â€œ Ready to import. Unique colors will be identified as materials.");
+                "✓ Ready to import. Unique colors will be identified as materials.");
         }
     }
 
@@ -995,7 +995,7 @@ public class ImportDataModal
 
                 ImGui.Text(
                     $"Preview showing {Math.Min(5, preview.Rows.Count)} of {preview.Rows.Count} rows, {preview.Columns.Count} columns");
-                ImGui.TextColored(new Vector4(0.0f, 1.0f, 0.5f, 1.0f), "Ã¢Å“â€œ Ready to import");
+                ImGui.TextColored(new Vector4(0.0f, 1.0f, 0.5f, 1.0f), "✓ Ready to import");
             }
         }
     }
@@ -1030,7 +1030,7 @@ public class ImportDataModal
 
             ImGui.Spacing();
             ImGui.TextColored(new Vector4(0.0f, 1.0f, 0.5f, 1.0f),
-                "Ã¢Å“â€œ Ready to create empty map");
+                "✓ Ready to create empty map");
         }
         else
         {
@@ -1066,7 +1066,7 @@ public class ImportDataModal
 
                 if (info.IsValid)
                     ImGui.TextColored(new Vector4(0.0f, 1.0f, 0.5f, 1.0f),
-                        "Ã¢Å“â€œ Ready to import");
+                        "✓ Ready to import");
             }
         }
     }
@@ -1074,9 +1074,9 @@ public class ImportDataModal
     private void DrawCheckmark(bool hasComponent, string label)
     {
         if (hasComponent)
-            ImGui.TextColored(new Vector4(0.0f, 1.0f, 0.0f, 1.0f), "Ã¢Å“â€œ");
+            ImGui.TextColored(new Vector4(0.0f, 1.0f, 0.0f, 1.0f), "✓");
         else
-            ImGui.TextColored(new Vector4(1.0f, 0.0f, 0.0f, 1.0f), "Ã¢Å“â€”");
+            ImGui.TextColored(new Vector4(1.0f, 0.0f, 0.0f, 1.0f), "✗");
         ImGui.SameLine();
         ImGui.Text(label);
     }

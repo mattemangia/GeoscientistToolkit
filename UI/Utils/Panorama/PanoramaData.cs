@@ -27,6 +27,11 @@ public class PanoramaImage
     public Guid Id { get; } = Guid.NewGuid();
     public DetectedFeatures Features { get; set; }
 
+    /// <summary>
+    /// Global rotation matrix (from world to camera). This is computed during bundle adjustment.
+    /// </summary>
+    public Matrix3x3 GlobalRotation { get; set; } = Matrix3x3.Identity;
+
     public PanoramaImage(ImageDataset dataset)
     {
         Dataset = dataset;
@@ -57,7 +62,14 @@ public class FeatureMatch
 public class StitchGraph
 {
     private readonly Dictionary<Guid, PanoramaImage> _nodes = new();
-    internal readonly Dictionary<Guid, List<(Guid neighbor, List<FeatureMatch> matches, Matrix3x3 homography)>> _adj = new();
+    internal readonly Dictionary<Guid, List<(Guid neighbor, List<FeatureMatch> matches, Matrix3x3 relativeRotation)>> _adj = new();
+    
+    public ICollection<PanoramaImage> Images => _nodes.Values;
+
+    public PanoramaImage GetImageById(Guid id)
+    {
+        return _nodes.TryGetValue(id, out var img) ? img : null;
+    }
 
     public StitchGraph(IEnumerable<PanoramaImage> images)
     {
@@ -68,41 +80,18 @@ public class StitchGraph
         }
     }
 
-    public void AddEdge(PanoramaImage img1, PanoramaImage img2, List<FeatureMatch> matches, Matrix3x3 homography)
+    public void AddEdge(PanoramaImage img1, PanoramaImage img2, List<FeatureMatch> matches, Matrix3x3 relativeRotation)
     {
         lock (_adj)
         {
             if (!_adj.ContainsKey(img1.Id) || !_adj.ContainsKey(img2.Id)) return;
             
-            _adj[img1.Id].Add((img2.Id, matches, homography));
+            _adj[img1.Id].Add((img2.Id, matches, relativeRotation));
             
-            // Compute inverse homography for bidirectional edge
-            var invHomography = InvertMatrix3x3(homography);
-            if (invHomography.HasValue)
-            {
-                _adj[img2.Id].Add((img1.Id, matches, invHomography.Value));
-            }
+            // The inverse of a rotation matrix is its transpose.
+            var invRotation = Matrix3x3.Transpose(relativeRotation);
+            _adj[img2.Id].Add((img1.Id, matches, invRotation));
         }
-    }
-    
-    private Matrix3x3? InvertMatrix3x3(Matrix3x3 h)
-    {
-        float det = Matrix3x3.Determinant(h);
-        if (Math.Abs(det) < 1e-8f) return null;
-
-        float invDet = 1.0f / det;
-        
-        return new Matrix3x3(
-            invDet * (h.M22 * h.M33 - h.M23 * h.M32),
-            invDet * (h.M13 * h.M32 - h.M12 * h.M33),
-            invDet * (h.M12 * h.M23 - h.M13 * h.M22),
-            invDet * (h.M23 * h.M31 - h.M21 * h.M33),
-            invDet * (h.M11 * h.M33 - h.M13 * h.M31),
-            invDet * (h.M13 * h.M21 - h.M11 * h.M23),
-            invDet * (h.M21 * h.M32 - h.M22 * h.M31),
-            invDet * (h.M12 * h.M31 - h.M11 * h.M32),
-            invDet * (h.M11 * h.M22 - h.M12 * h.M21)
-        );
     }
     
     public void RemoveNode(Guid nodeId)
