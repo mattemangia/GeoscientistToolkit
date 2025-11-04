@@ -2,377 +2,432 @@
 
 using System;
 using System.Collections.Generic;
-using System.Linq;
-using System.Numerics;
+using System.Drawing;
 using System.Runtime.InteropServices;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
-using GeoscientistToolkit.Data.Image;
 using Silk.NET.OpenCL;
+using SkiaSharp;
 
 namespace GeoscientistToolkit.Business.Panorama;
 
-/// <summary>
-/// An ORB (Oriented FAST and Rotated BRIEF) feature detector.
-/// It uses OpenCL for GPU acceleration when available, with a full C# implementation as a fallback for CPU-only environments.
-/// </summary>
 public class OrbFeatureDetectorCL : IDisposable
 {
-    [StructLayout(LayoutKind.Sequential)]
-    public struct Vector4i
-    {
-        public int X, Y, Z, W;
-        public Vector4i(int x, int y, int z, int w) { X = x; Y = y; Z = z; W = w; }
-    }
+    private readonly CL _cl;
+    private nint _context;
+    private nint _commandQueue;
+    private nint _program;
+    private nint _fastKernel;
+    private bool _disposed;
+    
+    // ORB parameters
+    private const int FAST_THRESHOLD = 20;
+    private const int MAX_FEATURES = 1000;
+    private const int BRIEF_DESCRIPTOR_SIZE = 32; // 256 bits
+    private const int PATCH_SIZE = 31;
+    private const int HALF_PATCH_SIZE = 15;
 
-    private const string OrbKernelsSource = @"
-        #pragma OPENCL EXTENSION cl_khr_byte_addressable_store : enable
-        __constant sampler_t smp_clamp_nearest = CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP_TO_EDGE | CLK_FILTER_NEAREST;
-        __constant sampler_t smp_clamp_linear = CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP_TO_EDGE | CLK_FILTER_LINEAR;
+    // Pre-generated random pattern for BRIEF descriptor for consistency.
+    private static readonly (Point P1, Point P2)[] _briefPattern;
 
-        __kernel void to_grayscale(__read_only image2d_t src, __write_only image2d_t dst) {
-            int2 pos = (int2)(get_global_id(0), get_global_id(1));
-            float4 pixel = read_imagef(src, smp_clamp_nearest, pos);
-            float gray = dot(pixel.xyz, (float3)(0.299f, 0.587f, 0.114f));
-            write_imagef(dst, pos, (float4)(gray, 0, 0, 0));
-        }
-
-        __constant int2 fast_offsets[16] = {
-            (int2)(0, 3), (int2)(1, 3), (int2)(2, 2), (int2)(3, 1), (int2)(3, 0), (int2)(3, -1), (int2)(2, -2), (int2)(1, -3),
-            (int2)(0, -3), (int2)(-1, -3), (int2)(-2, -2), (int2)(-3, -1), (int2)(-3, 0), (int2)(-3, 1), (int2)(-2, 2), (int2)(-1, 3)
+    private const string KernelSource = @"
+        constant int fast_circle[16][2] = {
+            {0, 3}, {1, 3}, {2, 2}, {3, 1},
+            {3, 0}, {3, -1}, {2, -2}, {1, -3},
+            {0, -3}, {-1, -3}, {-2, -2}, {-3, -1},
+            {-3, 0}, {-3, 1}, {-2, 2}, {-1, 3}
         };
-
-        __kernel void fast9_detect(__read_only image2d_t src, __global uint* corners, __global int* corner_count, int max_corners, float threshold) {
-            int2 pos = (int2)(get_global_id(0), get_global_id(1));
-            if(pos.x < 3 || pos.y < 3 || pos.x >= get_image_width(src) - 3 || pos.y >= get_image_height(src) - 3) return;
-            float p = read_imagef(src, smp_clamp_nearest, pos).x;
-            float upper = p + threshold;
-            float lower = p - threshold;
-            int continuous = 0;
-            for(int i = 0; i < 25; i++) {
-                float val = read_imagef(src, smp_clamp_nearest, pos + fast_offsets[i % 16]).x;
-                if(val > upper || val < lower) { continuous++; } else { continuous = 0; }
-                if(continuous >= 9) {
-                    int index = atomic_add(corner_count, 1);
-                    if (index < max_corners) { corners[index] = (pos.y << 16) | pos.x; }
-                    return;
-                }
-            }
-        }
         
-        __kernel void compute_orientation(__read_only image2d_t src, __global uint* keypoints, __global float4* oriented_keypoints, int num_keypoints, int patch_size) {
-            int gid = get_global_id(0);
-            if (gid >= num_keypoints) return;
-            uint packed_coords = keypoints[gid];
-            float2 pos = (float2)(packed_coords & 0xFFFF, packed_coords >> 16);
-            int half_patch = patch_size / 2;
-            float m10 = 0.0f, m01 = 0.0f;
-            for (int y = -half_patch; y <= half_patch; ++y) {
-                for (int x = -half_patch; x <= half_patch; ++x) {
-                    float val = read_imagef(src, smp_clamp_nearest, pos + (float2)(x, y)).x;
-                    m10 += x * val;
-                    m01 += y * val;
+        __kernel void detect_fast_corners(
+            __global const uchar* image,
+            __global uchar* corners,
+            const int width,
+            const int height,
+            const int threshold)
+        {
+            int x = get_global_id(0);
+            int y = get_global_id(1);
+            
+            if (x < 3 || x >= width - 3 || y < 3 || y >= height - 3) {
+                corners[y * width + x] = 0;
+                return;
+            }
+            
+            uchar center = image[y * width + x];
+            int bright_threshold = center + threshold;
+            int dark_threshold = center - threshold;
+            
+            int consecutive_bright = 0, consecutive_dark = 0;
+            int max_consecutive_bright = 0, max_consecutive_dark = 0;
+            
+            for (int i = 0; i < 32; i++) {
+                int idx = i % 16;
+                int px = x + fast_circle[idx][0];
+                int py = y + fast_circle[idx][1];
+                uchar pixel = image[py * width + px];
+                
+                if (pixel > bright_threshold) {
+                    consecutive_bright++;
+                    consecutive_dark = 0;
+                    max_consecutive_bright = max(max_consecutive_bright, consecutive_bright);
+                } else if (pixel < dark_threshold) {
+                    consecutive_dark++;
+                    consecutive_bright = 0;
+                    max_consecutive_dark = max(max_consecutive_dark, consecutive_dark);
+                } else {
+                    consecutive_bright = 0;
+                    consecutive_dark = 0;
                 }
             }
-            oriented_keypoints[gid] = (float4)(pos.x, pos.y, atan2(m01, m10), 0.0f);
-        }
-
-        __kernel void compute_rbrief(__read_only image2d_t src, __global const float4* keypoints, __global ulong4* descriptors, __global const int4* patterns, int num_keypoints) {
-            int gid = get_global_id(0);
-            if (gid >= num_keypoints) return;
-            float4 kp = keypoints[gid];
-            float2 center = kp.xy;
-            float angle = kp.z;
-            float cos_a = cos(angle);
-            float sin_a = sin(angle);
-            ulong descriptor[4] = {0, 0, 0, 0};
-            for (int i = 0; i < 256; ++i) {
-                int4 p = patterns[i];
-                float x1 = p.x * cos_a - p.y * sin_a; float y1 = p.x * sin_a + p.y * cos_a;
-                float x2 = p.z * cos_a - p.w * sin_a; float y2 = p.z * sin_a + p.w * cos_a;
-                float v1 = read_imagef(src, smp_clamp_linear, center + (float2)(x1, y1)).x;
-                float v2 = read_imagef(src, smp_clamp_linear, center + (float2)(x2, y2)).x;
-                if (v1 < v2) {
-                    descriptor[i / 64] |= (1UL << (i % 64));
-                }
-            }
-            descriptors[gid] = (ulong4)(descriptor[0], descriptor[1], descriptor[2], descriptor[3]);
+            
+            corners[y * width + x] = (max_consecutive_bright >= 9 || max_consecutive_dark >= 9) ? 255 : 0;
         }
     ";
-
-    private const int MaxFeatures = 2000;
-    private const float FastThreshold = 0.08f;
-    private const int OrientationPatchSize = 31;
-
-    private readonly bool _useOpenCL;
-    private readonly CL _cl;
-    private readonly IntPtr _program;
-    private readonly IntPtr _grayKernel, _fastKernel, _orientKernel, _briefKernel;
-    private readonly IntPtr _patternBuffer;
-
-    public unsafe OrbFeatureDetectorCL()
+    
+    static OrbFeatureDetectorCL()
     {
-        OpenCLService.Initialize();
-        if (OpenCLService.IsInitialized)
+        _briefPattern = new (Point P1, Point P2)[BRIEF_DESCRIPTOR_SIZE * 8];
+        var random = new Random(12345); 
+        for (int i = 0; i < _briefPattern.Length; i++)
         {
-            _useOpenCL = true;
-            _cl = OpenCLService.Cl;
-            _program = OpenCLService.CreateProgram(OrbKernelsSource);
-            int err;
-            _grayKernel = _cl.CreateKernel(_program, "to_grayscale", &err); err.Throw();
-            _fastKernel = _cl.CreateKernel(_program, "fast9_detect", &err); err.Throw();
-            _orientKernel = _cl.CreateKernel(_program, "compute_orientation", &err); err.Throw();
-            _briefKernel = _cl.CreateKernel(_program, "compute_rbrief", &err); err.Throw();
-            
-            var patterns = BriefPattern.GetPattern();
-            fixed(Vector4i* p = patterns)
-            {
-                _patternBuffer = _cl.CreateBuffer(OpenCLService.Context, MemFlags.CopyHostPtr | MemFlags.ReadOnly, (nuint)(patterns.Length * sizeof(Vector4i)), p, &err);
-                err.Throw();
-            }
-        }
-    }
-
-    public Task<DetectedFeatures> DetectAsync(ImageDataset image, CancellationToken token)
-    {
-        return _useOpenCL 
-            ? Task.Run(() => DetectOnGpu(image, token), token) 
-            : Task.Run(() => DetectOnCpu(image, token), token);
-    }
-
-    private unsafe DetectedFeatures DetectOnGpu(ImageDataset image, CancellationToken token)
-    {
-        var features = new DetectedFeatures();
-        int width = image.Width;
-        int height = image.Height;
-        int err;
-        IntPtr orientedKeypointsBuffer = IntPtr.Zero, descriptorsBuffer = IntPtr.Zero;
-
-        var rgbaFormat = new ImageFormat(ChannelOrder.Rgba, ChannelType.UnsignedInt8);
-        var grayFormat = new ImageFormat(ChannelOrder.R, ChannelType.Float);
-
-        var pinnedHandle = GCHandle.Alloc(image.ImageData, GCHandleType.Pinned);
-        var srcImage = _cl.CreateImage2D(OpenCLService.Context, MemFlags.CopyHostPtr | MemFlags.ReadOnly, &rgbaFormat, (nuint)width, (nuint)height, 0, (void*)pinnedHandle.AddrOfPinnedObject(), &err); err.Throw();
-        var grayImage = _cl.CreateImage2D(OpenCLService.Context, MemFlags.ReadWrite, &grayFormat, (nuint)width, (nuint)height, 0, null, &err); err.Throw();
-
-        var globalWorkSize = new nuint[] { (nuint)width, (nuint)height };
-        _cl.SetKernelArg(_grayKernel, 0, (nuint)sizeof(IntPtr), srcImage);
-        _cl.SetKernelArg(_grayKernel, 1, (nuint)sizeof(IntPtr), grayImage);
-        fixed(nuint* pGlobal = globalWorkSize) { _cl.EnqueueNdrangeKernel(OpenCLService.CommandQueue, _grayKernel, 2, (nuint*)null, pGlobal, (nuint*)null, 0, null, null).Throw(); }
-
-        var cornersBuffer = _cl.CreateBuffer(OpenCLService.Context, MemFlags.ReadWrite, (nuint)(MaxFeatures * 2 * sizeof(uint)), null, &err); err.Throw();
-        var cornerCountBuffer = _cl.CreateBuffer(OpenCLService.Context, MemFlags.ReadWrite, (nuint)sizeof(int), null, &err); err.Throw();
-        int zero = 0;
-        _cl.EnqueueWriteBuffer(OpenCLService.CommandQueue, cornerCountBuffer, true, 0, (nuint)sizeof(int), &zero, 0, null, null).Throw();
-        float fastThreshold = FastThreshold;
-        int maxInitialFeatures = MaxFeatures * 2;
-        _cl.SetKernelArg(_fastKernel, 0, (nuint)sizeof(IntPtr), grayImage);
-        _cl.SetKernelArg(_fastKernel, 1, (nuint)sizeof(IntPtr), cornersBuffer);
-        _cl.SetKernelArg(_fastKernel, 2, (nuint)sizeof(IntPtr), cornerCountBuffer);
-        _cl.SetKernelArg(_fastKernel, 3, sizeof(int), &maxInitialFeatures);
-        _cl.SetKernelArg(_fastKernel, 4, sizeof(float), &fastThreshold);
-        fixed(nuint* pGlobal = globalWorkSize) { _cl.EnqueueNdrangeKernel(OpenCLService.CommandQueue, _fastKernel, 2, (nuint*)null, pGlobal, (nuint*)null, 0, null, null).Throw(); }
-
-        int cornerCount = 0;
-        _cl.EnqueueReadBuffer(OpenCLService.CommandQueue, cornerCountBuffer, true, 0, sizeof(int), &cornerCount, 0, null, null).Throw();
-        if (cornerCount == 0) goto cleanup;
-        
-        uint[] packedCorners = new uint[cornerCount];
-        fixed(uint* pCorners = packedCorners) { _cl.EnqueueReadBuffer(OpenCLService.CommandQueue, cornersBuffer, true, 0, (nuint)(cornerCount * sizeof(uint)), pCorners, 0, null, null).Throw(); }
-        
-        var finalPackedCorners = packedCorners.Distinct().Take(MaxFeatures).ToArray();
-        cornerCount = finalPackedCorners.Length;
-        fixed(uint* pFinalCorners = finalPackedCorners) { _cl.EnqueueWriteBuffer(OpenCLService.CommandQueue, cornersBuffer, true, 0, (nuint)(cornerCount * sizeof(uint)), pFinalCorners, 0, null, null).Throw(); }
-
-        orientedKeypointsBuffer = _cl.CreateBuffer(OpenCLService.Context, MemFlags.ReadWrite, (nuint)(cornerCount * sizeof(Vector4)), null, &err); err.Throw();
-        int patchSize = OrientationPatchSize;
-        var orientWorkSize = new nuint[] {(nuint)cornerCount};
-        _cl.SetKernelArg(_orientKernel, 0, (nuint)sizeof(IntPtr), grayImage);
-        _cl.SetKernelArg(_orientKernel, 1, (nuint)sizeof(IntPtr), cornersBuffer);
-        _cl.SetKernelArg(_orientKernel, 2, (nuint)sizeof(IntPtr), orientedKeypointsBuffer);
-        _cl.SetKernelArg(_orientKernel, 3, sizeof(int), &cornerCount);
-        _cl.SetKernelArg(_orientKernel, 4, sizeof(int), &patchSize);
-        fixed(nuint* pOrient = orientWorkSize) { _cl.EnqueueNdrangeKernel(OpenCLService.CommandQueue, _orientKernel, 1, (nuint*)null, pOrient, (nuint*)null, 0, null, null).Throw(); }
-
-        descriptorsBuffer = _cl.CreateBuffer(OpenCLService.Context, MemFlags.WriteOnly, (nuint)(cornerCount * 32), null, &err); err.Throw();
-        var briefWorkSize = new nuint[] {(nuint)cornerCount};
-        // CORRECTED: Pass the IntPtr directly, not its address.
-        _cl.SetKernelArg(_briefKernel, 0, (nuint)sizeof(IntPtr), grayImage);
-        _cl.SetKernelArg(_briefKernel, 1, (nuint)sizeof(IntPtr), orientedKeypointsBuffer);
-        _cl.SetKernelArg(_briefKernel, 2, (nuint)sizeof(IntPtr), descriptorsBuffer);
-        _cl.SetKernelArg(_briefKernel, 3, (nuint)sizeof(IntPtr), _patternBuffer);
-        _cl.SetKernelArg(_briefKernel, 4, sizeof(int), &cornerCount);
-        fixed(nuint* pBrief = briefWorkSize) { _cl.EnqueueNdrangeKernel(OpenCLService.CommandQueue, _briefKernel, 1, (nuint*)null, pBrief, (nuint*)null, 0, null, null).Throw(); }
-
-        var finalKeypoints = new Vector4[cornerCount];
-        var finalDescriptors = new byte[cornerCount * 32];
-        fixed(void* pKeypoints = finalKeypoints, pDescriptors = finalDescriptors)
-        {
-            _cl.EnqueueReadBuffer(OpenCLService.CommandQueue, orientedKeypointsBuffer, true, 0, (nuint)(cornerCount * sizeof(Vector4)), pKeypoints, 0, null, null).Throw();
-            _cl.EnqueueReadBuffer(OpenCLService.CommandQueue, descriptorsBuffer, true, 0, (nuint)(cornerCount * 32), pDescriptors, 0, null, null).Throw();
-        }
-
-        features.KeyPoints = finalKeypoints.Select(kp => new KeyPoint { X = kp.X, Y = kp.Y, Angle = kp.Z }).ToList();
-        features.Descriptors = finalDescriptors;
-
-    cleanup:
-        _cl.ReleaseMemObject(srcImage);
-        _cl.ReleaseMemObject(grayImage);
-        _cl.ReleaseMemObject(cornersBuffer);
-        _cl.ReleaseMemObject(cornerCountBuffer);
-        if(orientedKeypointsBuffer != IntPtr.Zero) _cl.ReleaseMemObject(orientedKeypointsBuffer);
-        if(descriptorsBuffer != IntPtr.Zero) _cl.ReleaseMemObject(descriptorsBuffer);
-        pinnedHandle.Free();
-        
-        token.ThrowIfCancellationRequested();
-        return features;
-    }
-
-    private DetectedFeatures DetectOnCpu(ImageDataset image, CancellationToken token)
-    {
-        var features = new DetectedFeatures();
-        int width = image.Width; int height = image.Height;
-        var grayPixels = new byte[width * height];
-        for (int i = 0, j = 0; i < image.ImageData.Length; i += 4, j++)
-            grayPixels[j] = (byte)(image.ImageData[i] * 0.299f + image.ImageData[i + 1] * 0.587f + image.ImageData[i + 2] * 0.114f);
-        
-        var fastCorners = new List<Point>();
-        var fastOffsets = new Point[] {
-            new(0, 3), new(1, 3), new(2, 2), new(3, 1), new(3, 0), new(3, -1), new(2, -2), new(1, -3),
-            new(0, -3), new(-1, -3), new(-2, -2), new(-3, -1), new(-3, 0), new(-3, 1), new(-2, 2), new(-1, 3) };
-        for (int y = 3; y < height - 3; y++) {
-            for (int x = 3; x < width - 3; x++) {
-                byte p = grayPixels[y * width + x];
-                int upper = p + (int)(FastThreshold * 255);
-                int lower = p - (int)(FastThreshold * 255);
-                int continuous = 0;
-                for (int i = 0; i < 25; i++) {
-                    var offset = fastOffsets[i % 16];
-                    byte val = grayPixels[(y + offset.Y) * width + (x + offset.X)];
-                    if (val > upper || val < lower) continuous++; else continuous = 0;
-                    if (continuous >= 9) { fastCorners.Add(new Point(x, y)); break; }
-                }
-            }
-        }
-        if (!fastCorners.Any()) return features;
-
-        var scoredCorners = ScoreAndSuppressCorners(fastCorners, grayPixels, width, height, token);
-
-        foreach (var corner in scoredCorners) {
-            float m10 = 0.0f, m01 = 0.0f;
-            int halfPatch = OrientationPatchSize / 2;
-            for (int y = -halfPatch; y <= halfPatch; y++) {
-                for (int x = -halfPatch; x <= halfPatch; x++) {
-                    if (corner.X + x < 0 || corner.X + x >= width || corner.Y + y < 0 || corner.Y + y >= height) continue;
-                    m10 += x * grayPixels[(corner.Y + y) * width + (corner.X + x)];
-                    m01 += y * grayPixels[(corner.Y + y) * width + (corner.X + x)];
-                }
-            }
-            features.KeyPoints.Add(new KeyPoint { X = corner.X, Y = corner.Y, Angle = (float)Math.Atan2(m01, m10) });
-        }
-        
-        var descriptors = new List<byte>();
-        var patterns = BriefPattern.GetPattern();
-        foreach (var kp in features.KeyPoints) {
-            token.ThrowIfCancellationRequested();
-            float cosA = (float)Math.Cos(kp.Angle), sinA = (float)Math.Sin(kp.Angle);
-            byte[] descriptor = new byte[32];
-            for (int i = 0; i < 256; i++) {
-                var p = patterns[i];
-                float x1 = p.X*cosA - p.Y*sinA, y1 = p.X*sinA + p.Y*cosA;
-                float x2 = p.Z*cosA - p.W*sinA, y2 = p.Z*sinA + p.W*cosA;
-                if (GetInterpolatedValue(grayPixels, width, height, kp.X + x1, kp.Y + y1) < GetInterpolatedValue(grayPixels, width, height, kp.X + x2, kp.Y + y2))
-                    descriptor[i / 8] |= (byte)(1 << (i % 8));
-            }
-            descriptors.AddRange(descriptor);
-        }
-        features.Descriptors = descriptors.ToArray();
-        return features;
-    }
-
-    private List<Point> ScoreAndSuppressCorners(List<Point> corners, byte[] gray, int width, int height, CancellationToken token)
-    {
-        var scoredCorners = new List<(Point p, float score)>(corners.Count);
-        float[] gradientsX = new float[width*height], gradientsY = new float[width*height];
-        
-        for (int y = 1; y < height - 1; y++) {
-            for (int x = 1; x < width - 1; x++) {
-                gradientsX[y*width+x] = (gray[(y-1)*width+x+1] + 2*gray[y*width+x+1] + gray[(y+1)*width+x+1]) - (gray[(y-1)*width+x-1] + 2*gray[y*width+x-1] + gray[(y+1)*width+x-1]);
-                gradientsY[y*width+x] = (gray[(y+1)*width+x-1] + 2*gray[(y+1)*width+x] + gray[(y+1)*width+x+1]) - (gray[(y-1)*width+x-1] + 2*gray[(y-1)*width+x] + gray[(y-1)*width+x+1]);
-            }
-        }
-        
-        foreach (var c in corners) {
-            token.ThrowIfCancellationRequested();
-            float sumIxx = 0, sumIyy = 0, sumIxy = 0;
-            for (int y = -3; y <= 3; y++) {
-                for (int x = -3; x <= 3; x++) {
-                    int sy = c.Y + y, sx = c.X + x;
-                    if (sy < 0 || sy >= height || sx < 0 || sx >= width) continue;
-                    float ix = gradientsX[sy*width+sx], iy = gradientsY[sy*width+sx];
-                    sumIxx += ix * ix; sumIyy += iy * iy; sumIxy += ix * iy;
-                }
-            }
-            float det = (sumIxx * sumIyy) - (sumIxy * sumIxy), trace = sumIxx + sumIyy;
-            scoredCorners.Add((c, det - 0.04f * trace * trace));
-        }
-
-        scoredCorners.Sort((a, b) => b.score.CompareTo(a.score));
-        var finalCorners = new List<Point>();
-        var isSuppressedGrid = new bool[width * height];
-        foreach (var (p, score) in scoredCorners) {
-            token.ThrowIfCancellationRequested();
-            if (!isSuppressedGrid[p.Y * width + p.X]) {
-                finalCorners.Add(p);
-                if (finalCorners.Count >= MaxFeatures) break;
-                for (int y = -10; y <= 10; y++) {
-                    for (int x = -10; x <= 10; x++) {
-                        if (x*x + y*y <= 100) {
-                            int sx = p.X+x, sy = p.Y+y;
-                            if (sx >= 0 && sx < width && sy >= 0 && sy < height) isSuppressedGrid[sy * width + sx] = true;
-                        }
-                    }
-                }
-            }
-        }
-        return finalCorners;
-    }
-
-    private byte GetInterpolatedValue(byte[] s, int w, int h, float x, float y)
-    {
-        int xf = (int)x, yf = (int)y;
-        if (xf < 0 || xf+1 >= w || yf < 0 || yf+1 >= h) return s[Math.Clamp((int)y,0,h-1)*w + Math.Clamp((int)x,0,w-1)];
-        float xr = x-xf, yr = y-yf; int idx=yf*w+xf;
-        float v00=s[idx], v10=s[idx+1], v01=s[idx+w], v11=s[idx+w+1];
-        return (byte)((1-yr)*((1-xr)*v00+xr*v10) + yr*((1-xr)*v01+xr*v11));
-    }
-
-    public void Dispose()
-    {
-        if (_useOpenCL)
-        {
-            _cl.ReleaseMemObject(_patternBuffer);
-            _cl.ReleaseKernel(_grayKernel);
-            _cl.ReleaseKernel(_fastKernel);
-            _cl.ReleaseKernel(_orientKernel);
-            _cl.ReleaseKernel(_briefKernel);
-            _cl.ReleaseProgram(_program);
+            int x1 = random.Next(-HALF_PATCH_SIZE, HALF_PATCH_SIZE + 1);
+            int y1 = random.Next(-HALF_PATCH_SIZE, HALF_PATCH_SIZE + 1);
+            int x2 = random.Next(-HALF_PATCH_SIZE, HALF_PATCH_SIZE + 1);
+            int y2 = random.Next(-HALF_PATCH_SIZE, HALF_PATCH_SIZE + 1);
+            _briefPattern[i] = (new Point(x1, y1), new Point(x2, y2));
         }
     }
     
-    private struct Point { public int X, Y; public Point(int x, int y) { X=x; Y=y; } }
-
-    private static class BriefPattern
+    public unsafe OrbFeatureDetectorCL()
     {
-        private static Vector4i[] _pattern;
-        public static Vector4i[] GetPattern() => _pattern ??= Generate();
-        private static Vector4i[] Generate()
+        _cl = CL.GetApi();
+        
+        uint platformCount;
+        _cl.GetPlatformIDs(0, null, &platformCount);
+        if (platformCount == 0) throw new Exception("No OpenCL platforms found");
+        
+        var platforms = new nint[platformCount];
+        fixed (nint* platformsPtr = platforms) { _cl.GetPlatformIDs(platformCount, platformsPtr, null); }
+        var platform = platforms[0];
+        
+        uint deviceCount;
+        _cl.GetDeviceIDs(platform, DeviceType.Gpu, 0, null, &deviceCount);
+        if (deviceCount == 0) _cl.GetDeviceIDs(platform, DeviceType.Cpu, 0, null, &deviceCount);
+        if (deviceCount == 0) throw new Exception("No OpenCL devices found");
+        
+        var devices = new nint[deviceCount];
+        fixed (nint* devicesPtr = devices)
         {
-            var p = new Vector4i[256];
-            var r = new Random(12345);
-            for (int i = 0; i < p.Length; i++)
-                p[i] = new Vector4i(r.Next(-15, 16), r.Next(-15, 16), r.Next(-15, 16), r.Next(-15, 16));
-            return p;
+            _cl.GetDeviceIDs(platform, DeviceType.Gpu, deviceCount, devicesPtr, null);
+            if(deviceCount == 0) _cl.GetDeviceIDs(platform, DeviceType.Cpu, deviceCount, devicesPtr, null);
         }
+        var device = devices[0];
+        
+        int error;
+        var contextProperties = stackalloc nint[3] { (nint)ContextProperties.Platform, platform, 0 };
+        _context = _cl.CreateContext(contextProperties, 1, &device, null, null, &error);
+        CheckError(error, "Failed to create context");
+        
+        _commandQueue = _cl.CreateCommandQueue(_context, device, CommandQueueProperties.None, &error);
+        CheckError(error, "Failed to create command queue");
+        
+        var sourcePtr = Marshal.StringToHGlobalAnsi(KernelSource);
+        try
+        {
+            var sourceLength = (nuint)KernelSource.Length;
+            _program = _cl.CreateProgramWithSource(_context, 1, (byte**)&sourcePtr, &sourceLength, &error);
+            CheckError(error, "Failed to create program");
+            
+            // CORRECTED: Explicitly cast the 'null' for build options to byte* to resolve ambiguity.
+            error = _cl.BuildProgram(_program, 1, &device, (byte*)null, null, null);
+            if (error != (int)ErrorCodes.Success)
+            {
+                nuint logSize;
+                _cl.GetProgramBuildInfo(_program, device, ProgramBuildInfo.BuildLog, 0, null, &logSize);
+                var log = new byte[logSize];
+                fixed (byte* logPtr = log) { _cl.GetProgramBuildInfo(_program, device, ProgramBuildInfo.BuildLog, logSize, logPtr, null); }
+                throw new Exception($"Failed to build program: {Encoding.UTF8.GetString(log)}");
+            }
+            
+            _fastKernel = _cl.CreateKernel(_program, "detect_fast_corners", &error);
+            CheckError(error, "Failed to create FAST kernel");
+        }
+        finally
+        {
+            Marshal.FreeHGlobal((nint)sourcePtr);
+        }
+    }
+    private void NormalizeContrast(byte[] img, int w, int h)
+    {
+        // Simple per-image linear stretch (1%–99% robust min/max)
+        int histBins = 256;
+        int[] hist = new int[histBins];
+        for (int i = 0; i < img.Length; i++) hist[img[i]]++;
+
+        int total = w * h;
+        int clip = (int)(0.01 * total);
+        int lo = 0, hi = 255, csum = 0;
+        while (lo < 255 && (csum += hist[lo]) < clip) lo++;
+        csum = 0;
+        while (hi > 0 && (csum += hist[hi]) < clip) hi--;
+
+        float scale = (hi > lo) ? 255f / (hi - lo) : 1f;
+        for (int i = 0; i < img.Length; i++)
+        {
+            int v = img[i];
+            if (v <= lo) img[i] = 0;
+            else if (v >= hi) img[i] = 255;
+            else img[i] = (byte)((v - lo) * scale + 0.5f);
+        }
+    }
+
+    private void BoxBlur3x3(byte[] img, int w, int h)
+    {
+        var outImg = new byte[img.Length];
+        for (int y = 1; y < h - 1; y++)
+        {
+            int yw = y * w;
+            for (int x = 1; x < w - 1; x++)
+            {
+                int idx = yw + x;
+                int acc =
+                    img[idx - w - 1] + img[idx - w] + img[idx - w + 1] +
+                    img[idx - 1]     + img[idx]     + img[idx + 1] +
+                    img[idx + w - 1] + img[idx + w] + img[idx + w + 1];
+                outImg[idx] = (byte)(acc / 9);
+            }
+        }
+        // keep borders unchanged
+        for (int x = 0; x < w; x++) { outImg[x] = img[x]; outImg[(h - 1) * w + x] = img[(h - 1) * w + x]; }
+        for (int y = 0; y < h; y++) { outImg[y * w] = img[y * w]; outImg[y * w + (w - 1)] = img[y * w + (w - 1)]; }
+        Buffer.BlockCopy(outImg, 0, img, 0, img.Length);
+    }
+
+    public Task<DetectedFeatures> DetectFeaturesAsync(SKBitmap bitmap, CancellationToken token)
+    {
+        return Task.Run(() => DetectFeaturesGPU(bitmap, token), token);
+    }
+    
+    private unsafe DetectedFeatures DetectFeaturesGPU(SKBitmap bitmap, CancellationToken token)
+    {
+        byte[] grayImage = ConvertToGrayscale(bitmap);
+        
+        int width = bitmap.Width;
+        int height = bitmap.Height;
+        NormalizeContrast(grayImage, width, height);
+        BoxBlur3x3(grayImage, width, height);
+
+        var keypoints = new List<KeyPoint>();
+        var descriptors = new List<byte[]>();
+        
+        var corners = DetectFastCornersGPU(grayImage, width, height);
+        
+        var candidates = new List<(int x, int y, float response)>();
+        for (int y = HALF_PATCH_SIZE; y < height - HALF_PATCH_SIZE; y++)
+        {
+            for (int x = HALF_PATCH_SIZE; x < width - HALF_PATCH_SIZE; x++)
+            {
+                if (corners[y * width + x] > 0)
+                {
+                    float response = ComputeHarrisResponse(grayImage, x, y, width, height);
+                    candidates.Add((x, y, response));
+                }
+            }
+        }
+        
+        candidates.Sort((a, b) => b.response.CompareTo(a.response));
+        
+        var selectedKeypoints = new List<KeyPoint>();
+        var suppressionRadiusSq = 10.0f * 10.0f; 
+        
+        foreach (var (x, y, response) in candidates)
+        {
+            bool suppressed = false;
+            foreach (var kp in selectedKeypoints)
+            {
+                float dx = x - kp.X;
+                float dy = y - kp.Y;
+                if (dx * dx + dy * dy < suppressionRadiusSq)
+                {
+                    suppressed = true;
+                    break;
+                }
+            }
+            
+            if (!suppressed)
+            {
+                selectedKeypoints.Add(new KeyPoint { X = x, Y = y });
+                if (selectedKeypoints.Count >= MAX_FEATURES) break;
+            }
+        }
+        
+        foreach (var kp in selectedKeypoints)
+        {
+            float angle = ComputeOrientation(grayImage, (int)kp.X, (int)kp.Y, width, height);
+            
+            var descriptor = ComputeBriefDescriptor(grayImage, (int)kp.X, (int)kp.Y, width, height, angle);
+            
+            keypoints.Add(new KeyPoint { X = kp.X, Y = kp.Y, Angle = angle });
+            descriptors.Add(descriptor);
+        }
+        
+        var descriptorArray = new byte[descriptors.Count * BRIEF_DESCRIPTOR_SIZE];
+        for (int i = 0; i < descriptors.Count; i++)
+        {
+            Buffer.BlockCopy(descriptors[i], 0, descriptorArray, i * BRIEF_DESCRIPTOR_SIZE, BRIEF_DESCRIPTOR_SIZE);
+        }
+        
+        return new DetectedFeatures
+        {
+            KeyPoints = keypoints,
+            Descriptors = descriptorArray
+        };
+    }
+    
+    private float ComputeOrientation(byte[] image, int x, int y, int width, int height)
+    {
+        float m01 = 0, m10 = 0;
+        
+        for (int dy = -HALF_PATCH_SIZE; dy <= HALF_PATCH_SIZE; dy++)
+        {
+            for (int dx = -HALF_PATCH_SIZE; dx <= HALF_PATCH_SIZE; dx++)
+            {
+                if (dx * dx + dy * dy <= HALF_PATCH_SIZE * HALF_PATCH_SIZE)
+                {
+                    int sampleX = Math.Clamp(x + dx, 0, width - 1);
+                    int sampleY = Math.Clamp(y + dy, 0, height - 1);
+                    
+                    byte intensity = image[sampleY * width + sampleX];
+                    m10 += dx * intensity;
+                    m01 += dy * intensity;
+                }
+            }
+        }
+        
+        return (float)Math.Atan2(m01, m10);
+    }
+
+    private byte[] ComputeBriefDescriptor(byte[] image, int x, int y, int width, int height, float angle)
+    {
+        var descriptor = new byte[BRIEF_DESCRIPTOR_SIZE];
+        float cosAngle = (float)Math.Cos(angle);
+        float sinAngle = (float)Math.Sin(angle);
+
+        for (int i = 0; i < BRIEF_DESCRIPTOR_SIZE; i++)
+        {
+            byte value = 0;
+            for (int j = 0; j < 8; j++)
+            {
+                var (p1, p2) = _briefPattern[i * 8 + j];
+
+                float p1x = p1.X * cosAngle - p1.Y * sinAngle;
+                float p1y = p1.X * sinAngle + p1.Y * cosAngle;
+                float p2x = p2.X * cosAngle - p2.Y * sinAngle;
+                float p2y = p2.X * sinAngle + p2.Y * cosAngle;
+
+                int sampleX1 = Math.Clamp(x + (int)Math.Round(p1x), 0, width - 1);
+                int sampleY1 = Math.Clamp(y + (int)Math.Round(p1y), 0, height - 1);
+                int sampleX2 = Math.Clamp(x + (int)Math.Round(p2x), 0, width - 1);
+                int sampleY2 = Math.Clamp(y + (int)Math.Round(p2y), 0, height - 1);
+                
+                if (image[sampleY1 * width + sampleX1] < image[sampleY2 * width + sampleX2])
+                {
+                    value |= (byte)(1 << j);
+                }
+            }
+            descriptor[i] = value;
+        }
+        
+        return descriptor;
+    }
+
+    private unsafe byte[] DetectFastCornersGPU(byte[] image, int width, int height)
+    {
+        int error;
+        nint imageBuffer = 0, cornersBuffer = 0;
+        var corners = new byte[width * height];
+        
+        try
+        {
+            fixed (byte* imagePtr = image)
+            {
+                imageBuffer = _cl.CreateBuffer(_context, MemFlags.ReadOnly | MemFlags.CopyHostPtr, (nuint)(width * height), imagePtr, &error);
+                CheckError(error, "Failed to create image buffer");
+            }
+            
+            cornersBuffer = _cl.CreateBuffer(_context, MemFlags.WriteOnly, (nuint)(width * height), null, &error);
+            CheckError(error, "Failed to create corners buffer");
+            
+            _cl.SetKernelArg(_fastKernel, 0, (nuint)sizeof(nint), &imageBuffer);
+            _cl.SetKernelArg(_fastKernel, 1, (nuint)sizeof(nint), &cornersBuffer);
+            _cl.SetKernelArg(_fastKernel, 2, (nuint)sizeof(int), &width);
+            _cl.SetKernelArg(_fastKernel, 3, (nuint)sizeof(int), &height);
+            int threshold = FAST_THRESHOLD;
+            _cl.SetKernelArg(_fastKernel, 4, (nuint)sizeof(int), &threshold);
+            
+            var globalWorkSize = stackalloc nuint[2] { (nuint)width, (nuint)height };
+            
+            _cl.EnqueueNdrangeKernel(_commandQueue, _fastKernel, 2, null, globalWorkSize, null, 0, null, null);
+            
+            fixed (byte* cornersPtr = corners)
+            {
+                _cl.EnqueueReadBuffer(_commandQueue, cornersBuffer, true, 0, (nuint)(width * height), cornersPtr, 0, null, null);
+            }
+            
+            _cl.Finish(_commandQueue);
+        }
+        finally
+        {
+            if (imageBuffer != 0) _cl.ReleaseMemObject(imageBuffer);
+            if (cornersBuffer != 0) _cl.ReleaseMemObject(cornersBuffer);
+        }
+        
+        return corners;
+    }
+    
+    private byte[] ConvertToGrayscale(SKBitmap bitmap)
+    {
+        var grayImage = new byte[bitmap.Width * bitmap.Height];
+        for (int y = 0; y < bitmap.Height; y++)
+        {
+            for (int x = 0; x < bitmap.Width; x++)
+            {
+                var pixel = bitmap.GetPixel(x, y);
+                grayImage[y * bitmap.Width + x] = (byte)(0.299 * pixel.Red + 0.587 * pixel.Green + 0.114 * pixel.Blue);
+            }
+        }
+        return grayImage;
+    }
+    
+    private float ComputeHarrisResponse(byte[] image, int x, int y, int width, int height)
+    {
+        float ix = (image[y * width + x + 1] - image[y * width + x - 1]) / 2.0f;
+        float iy = (image[(y + 1) * width + x] - image[(y - 1) * width + x]) / 2.0f;
+
+        float ixx = ix * ix;
+        float iyy = iy * iy;
+        float ixy = ix * iy;
+
+        return (ixx * iyy - ixy * ixy) - 0.04f * (ixx + iyy) * (ixx + iyy);
+    }
+    
+    private void CheckError(int error, string message)
+    {
+        if (error != (int)ErrorCodes.Success)
+            throw new Exception($"{message}: {(ErrorCodes)error}");
+    }
+    
+    public void Dispose()
+    {
+        if (_disposed) return;
+        
+        if (_fastKernel != 0) _cl.ReleaseKernel(_fastKernel);
+        if (_program != 0) _cl.ReleaseProgram(_program);
+        if (_commandQueue != 0) _cl.ReleaseCommandQueue(_commandQueue);
+        if (_context != 0) _cl.ReleaseContext(_context);
+        
+        _disposed = true;
+        GC.SuppressFinalize(this);
     }
 }

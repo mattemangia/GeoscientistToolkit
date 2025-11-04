@@ -83,13 +83,28 @@ internal class GroundControlPointEditor : IDisposable
     {
         _currentImage = image;
         DisposeBinding();
+        
+        // Ensure image data is loaded
+        if (_currentImage?.Dataset?.ImageData == null)
+        {
+            Util.Logger.LogError($"Cannot open GCP editor: Image data not loaded for {_currentImage?.Dataset?.Name ?? "null"}");
+            IsOpen = false;
+            return;
+        }
+        
         _imageBinding = CreateTextureBinding(_currentImage.Dataset);
+        if (_imageBinding == null)
+        {
+            Util.Logger.LogError($"Failed to create texture binding for {_currentImage.Dataset.Name}");
+            IsOpen = false;
+            return;
+        }
+        
         _pan = Vector2.Zero;
         _zoom = 1.0f;
         _selectedGCP = null;
         _isPlacingNew = false;
         IsOpen = true;
-        ImGui.OpenPopup("Ground Control Point Editor");
     }
 
     private VeldridTextureBinding? CreateTextureBinding(Data.Image.ImageDataset dataset)
@@ -112,6 +127,12 @@ internal class GroundControlPointEditor : IDisposable
     public void Draw()
     {
         if (!IsOpen) return;
+
+        // Open the modal if it's not already open
+        if (!ImGui.IsPopupOpen("Ground Control Point Editor"))
+        {
+            ImGui.OpenPopup("Ground Control Point Editor");
+        }
 
         var center = ImGui.GetMainViewport().GetCenter();
         ImGui.SetNextWindowPos(center, ImGuiCond.Appearing, new Vector2(0.5f, 0.5f));
@@ -416,7 +437,8 @@ public class PhotogrammetryWizardPanel : BasePanel
     private void DrawManualInputUI()
     {
         var imageGroups = _job.Service.ImageGroups;
-        var imagesWithNoFeatures = _job.Service.Images.Where(img => img.Features.KeyPoints.Count < 20).ToList();
+        var imagesWithNoFeatures = _job.Service.Images.Where(img => 
+            img.SiftFeatures == null || img.SiftFeatures.KeyPoints.Count < 20).ToList();
 
         if (imagesWithNoFeatures.Any())
         {

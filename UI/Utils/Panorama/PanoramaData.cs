@@ -3,6 +3,7 @@
 using System;
 using System.Collections.Generic;
 using System.Numerics;
+using GeoscientistToolkit.Business.Photogrammetry.Math;
 using GeoscientistToolkit.Data.Image;
 
 namespace GeoscientistToolkit.Business.Panorama;
@@ -56,18 +57,18 @@ public class FeatureMatch
 public class StitchGraph
 {
     private readonly Dictionary<Guid, PanoramaImage> _nodes = new();
-    public readonly Dictionary<Guid, List<(Guid neighbor, List<FeatureMatch> matches, Matrix3x2 homography)>> _adj = new();
+    internal readonly Dictionary<Guid, List<(Guid neighbor, List<FeatureMatch> matches, Matrix3x3 homography)>> _adj = new();
 
     public StitchGraph(IEnumerable<PanoramaImage> images)
     {
         foreach (var image in images)
         {
             _nodes.Add(image.Id, image);
-            _adj.Add(image.Id, new List<(Guid, List<FeatureMatch>, Matrix3x2)>());
+            _adj.Add(image.Id, new List<(Guid, List<FeatureMatch>, Matrix3x3)>());
         }
     }
 
-    public void AddEdge(PanoramaImage img1, PanoramaImage img2, List<FeatureMatch> matches, Matrix3x2 homography)
+    public void AddEdge(PanoramaImage img1, PanoramaImage img2, List<FeatureMatch> matches, Matrix3x3 homography)
     {
         lock (_adj)
         {
@@ -75,11 +76,33 @@ public class StitchGraph
             
             _adj[img1.Id].Add((img2.Id, matches, homography));
             
-            if (Matrix3x2.Invert(homography, out var invHomography))
+            // Compute inverse homography for bidirectional edge
+            var invHomography = InvertMatrix3x3(homography);
+            if (invHomography.HasValue)
             {
-                _adj[img2.Id].Add((img1.Id, matches, invHomography));
+                _adj[img2.Id].Add((img1.Id, matches, invHomography.Value));
             }
         }
+    }
+    
+    private Matrix3x3? InvertMatrix3x3(Matrix3x3 h)
+    {
+        float det = Matrix3x3.Determinant(h);
+        if (Math.Abs(det) < 1e-8f) return null;
+
+        float invDet = 1.0f / det;
+        
+        return new Matrix3x3(
+            invDet * (h.M22 * h.M33 - h.M23 * h.M32),
+            invDet * (h.M13 * h.M32 - h.M12 * h.M33),
+            invDet * (h.M12 * h.M23 - h.M13 * h.M22),
+            invDet * (h.M23 * h.M31 - h.M21 * h.M33),
+            invDet * (h.M11 * h.M33 - h.M13 * h.M31),
+            invDet * (h.M13 * h.M21 - h.M11 * h.M23),
+            invDet * (h.M21 * h.M32 - h.M22 * h.M31),
+            invDet * (h.M12 * h.M31 - h.M11 * h.M32),
+            invDet * (h.M11 * h.M22 - h.M12 * h.M21)
+        );
     }
     
     public void RemoveNode(Guid nodeId)

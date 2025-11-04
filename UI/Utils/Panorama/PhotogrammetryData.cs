@@ -4,6 +4,7 @@ using System;
 using System.Collections.Generic;
 using System.Numerics;
 using GeoscientistToolkit.Business.Panorama; // Reuse DetectedFeatures, KeyPoint, FeatureMatch
+using GeoscientistToolkit.Business.Photogrammetry;
 using GeoscientistToolkit.Data.Image;
 
 namespace GeoscientistToolkit;
@@ -30,7 +31,8 @@ public class PhotogrammetryImage
 {
     public ImageDataset Dataset { get; }
     public Guid Id { get; } = Guid.NewGuid();
-    public DetectedFeatures Features { get; set; }
+    public DetectedFeatures Features { get; set; }  // ORB features (legacy/fallback)
+    public SiftFeatures SiftFeatures { get; set; }  // SIFT features (preferred for photogrammetry)
     
     // Camera intrinsic parameters (K matrix)
     public Matrix4x4 IntrinsicMatrix { get; set; }
@@ -100,6 +102,3 @@ public class PhotogrammetryPointCloud
     public Vector3 BoundingBoxMin { get; set; }
     public Vector3 BoundingBoxMax { get; set; }
 }
-
-
-

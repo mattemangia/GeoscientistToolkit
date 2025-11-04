@@ -10,6 +10,7 @@ using GeoscientistToolkit.Business.Panorama;
 using GeoscientistToolkit.Business.Photogrammetry;
 using GeoscientistToolkit.Business.Photogrammetry.Math;
 using GeoscientistToolkit.Data.Image;
+using GeoscientistToolkit.Util;
 
 namespace GeoscientistToolkit
 {
@@ -32,9 +33,13 @@ namespace GeoscientistToolkit
             CancellationToken token,
             Action<float, string> updateProgress)
         {
-            _service.Log("Detecting ORB features in all images...");
+            _service.Log("Detecting SIFT features for photogrammetry...");
 
-            using var detector = new OrbFeatureDetectorCL();
+            using var detector = new SiftFeatureDetectorCL
+            {
+                EnableDiagnostics = true,
+                DiagnosticLogger = msg => Logger.Log(msg)
+            };
             var totalImages = images.Count;
             var processedCount = 0;
 
@@ -42,9 +47,9 @@ namespace GeoscientistToolkit
             {
                 try
                 {
-                    _service.Log($"Detecting features in {image.Dataset.Name}...");
-                    image.Features = await detector.DetectAsync(image.Dataset, token);
-                    _service.Log($"Found {image.Features.KeyPoints.Count} keypoints in {image.Dataset.Name}.");
+                    _service.Log($"Detecting SIFT features in {image.Dataset.Name}...");
+                    image.SiftFeatures = await detector.DetectAsync(image.Dataset, token);
+                    _service.Log($"Found {image.SiftFeatures.KeyPoints.Count} SIFT keypoints in {image.Dataset.Name}.");
                 }
                 catch (Exception ex)
                 {
@@ -61,7 +66,7 @@ namespace GeoscientistToolkit
             });
 
             await Task.WhenAll(tasks);
-            _service.Log("Feature detection complete.");
+            _service.Log("SIFT feature detection complete.");
         }
 
         public async Task MatchFeaturesAsync(
@@ -70,12 +75,12 @@ namespace GeoscientistToolkit
             CancellationToken token,
             Action<float, string> updateProgress)
         {
-            _service.Log("Matching features and computing relative poses...");
+            _service.Log("Matching SIFT features and computing relative poses...");
 
             var pairs = GenerateImagePairs(images);
             int processedCount = 0;
 
-            using var matcher = new FeatureMatcherCL();
+            using var matcher = new SiftFeatureMatcherCL();
 
             var tasks = pairs.Select(async pair =>
             {
@@ -89,7 +94,7 @@ namespace GeoscientistToolkit
             });
 
             await Task.WhenAll(tasks);
-            _service.Log("Feature matching complete.");
+            _service.Log("SIFT feature matching complete.");
         }
 
         public Matrix4x4? ComputeManualPose(
@@ -105,12 +110,12 @@ namespace GeoscientistToolkit
 
             var dummyFeatures1 = new DetectedFeatures
             {
-                KeyPoints = points.Select(p => new KeyPoint { X = p.P1.X, Y = p.P1.Y }).ToList()
+                KeyPoints = points.Select(p => new Business.Panorama.KeyPoint { X = p.P1.X, Y = p.P1.Y }).ToList()
             };
 
             var dummyFeatures2 = new DetectedFeatures
             {
-                KeyPoints = points.Select(p => new KeyPoint { X = p.P2.X, Y = p.P2.Y }).ToList()
+                KeyPoints = points.Select(p => new Business.Panorama.KeyPoint { X = p.P2.X, Y = p.P2.Y }).ToList()
             };
 
             var tempImg1 = new PhotogrammetryImage(img1.Dataset)
@@ -148,21 +153,24 @@ namespace GeoscientistToolkit
         private async Task ProcessImagePair(
             (PhotogrammetryImage img1, PhotogrammetryImage img2) pair,
             PhotogrammetryGraph graph,
-            FeatureMatcherCL matcher,
+            SiftFeatureMatcherCL matcher,
             CancellationToken token)
         {
             var (image1, image2) = pair;
             
-            if (image1.Features.KeyPoints.Count <= 50 || image2.Features.KeyPoints.Count <= 50)
+            if (image1.SiftFeatures == null || image2.SiftFeatures == null)
+                return;
+            
+            if (image1.SiftFeatures.KeyPoints.Count <= 50 || image2.SiftFeatures.KeyPoints.Count <= 50)
                 return;
 
             var matches = await matcher.MatchFeaturesAsync(
-                image1.Features, image2.Features, token);
+                image1.SiftFeatures, image2.SiftFeatures, token);
 
             if (matches.Count <= 50)
                 return;
 
-            var (pose, inliers) = ComputeRelativePose(image1, image2, matches);
+            var (pose, inliers) = ComputeRelativePoseSift(image1, image2, matches);
 
             if (inliers.Count > 20 && pose.HasValue)
             {
@@ -182,8 +190,8 @@ namespace GeoscientistToolkit
             Matrix4x4? bestPose = null;
             var random = new Random();
 
-            var points1 = matches.Select(m => image1.Features.KeyPoints[m.QueryIndex]).ToList();
-            var points2 = matches.Select(m => image2.Features.KeyPoints[m.TrainIndex]).ToList();
+            var points1 = matches.Select(m => image1.Features.KeyPoints[m.QueryIndex]).Select(kp => new KeyPoint { X = kp.X, Y = kp.Y }).ToList();
+            var points2 = matches.Select(m => image2.Features.KeyPoints[m.TrainIndex]).Select(kp => new KeyPoint { X = kp.X, Y = kp.Y }).ToList();
 
             var k1 = image1.IntrinsicMatrix;
             var k2 = image2.IntrinsicMatrix;
@@ -392,6 +400,82 @@ namespace GeoscientistToolkit
                 var p2 = new Vector2(
                     image2.Features.KeyPoints[match.TrainIndex].X,
                     image2.Features.KeyPoints[match.TrainIndex].Y);
+
+                var p3D = Triangulation.TriangulatePoint(p1, p2, k1, k2, pose.Value);
+
+                if (p3D.HasValue && p3D.Value.Z > 0)
+                {
+                    var p3DTransformed = Vector3.Transform(p3D.Value, pose.Value);
+                    if (p3DTransformed.Z > 0)
+                    {
+                        pointsInFront++;
+                    }
+                }
+            }
+
+            return pointsInFront > sampleCount / 2;
+        }
+        
+        private (Matrix4x4? Pose, List<FeatureMatch> Inliers) ComputeRelativePoseSift(
+            PhotogrammetryImage image1,
+            PhotogrammetryImage image2,
+            List<FeatureMatch> matches,
+            int ransacIterations = RANSAC_ITERATIONS,
+            float reprojectionThreshold = REPROJECTION_THRESHOLD)
+        {
+            var bestInliers = new List<FeatureMatch>();
+            Matrix4x4? bestPose = null;
+            var random = new Random();
+
+            var points1 = matches.Select(m => image1.SiftFeatures.KeyPoints[m.QueryIndex]).ToList();
+            var points2 = matches.Select(m => image2.SiftFeatures.KeyPoints[m.TrainIndex]).ToList();
+
+            var k1 = image1.IntrinsicMatrix;
+            var k2 = image2.IntrinsicMatrix;
+
+            for (int iter = 0; iter < ransacIterations; iter++)
+            {
+                var sampleResult = ProcessRANSACSample(
+                    matches, points1, points2, k1, k2, 
+                    random, reprojectionThreshold);
+
+                if (sampleResult.Inliers.Count > bestInliers.Count)
+                {
+                    if (VerifyPoseGeometrySift(sampleResult.Pose, sampleResult.Inliers, 
+                                          image1, image2, k1, k2))
+                    {
+                        bestInliers = sampleResult.Inliers;
+                        bestPose = sampleResult.Pose;
+                    }
+                }
+            }
+
+            return (bestPose, bestInliers);
+        }
+        
+        private bool VerifyPoseGeometrySift(
+            Matrix4x4? pose,
+            List<FeatureMatch> inliers,
+            PhotogrammetryImage image1,
+            PhotogrammetryImage image2,
+            Matrix4x4 k1,
+            Matrix4x4 k2)
+        {
+            if (!pose.HasValue || inliers.Count == 0)
+                return false;
+
+            int pointsInFront = 0;
+            int sampleCount = Math.Min(10, inliers.Count);
+
+            for (int i = 0; i < sampleCount; i++)
+            {
+                var match = inliers[i];
+                var p1 = new Vector2(
+                    image1.SiftFeatures.KeyPoints[match.QueryIndex].X,
+                    image1.SiftFeatures.KeyPoints[match.QueryIndex].Y);
+                var p2 = new Vector2(
+                    image2.SiftFeatures.KeyPoints[match.TrainIndex].X,
+                    image2.SiftFeatures.KeyPoints[match.TrainIndex].Y);
 
                 var p3D = Triangulation.TriangulatePoint(p1, p2, k1, k2, pose.Value);
 

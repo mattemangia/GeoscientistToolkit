@@ -225,27 +225,21 @@ internal class ManualLinkEditor : IDisposable
         ImGui.EndChild();
     }
 
-    private unsafe VeldridTextureBinding? CreateTextureBindingForImage(Data.Image.ImageDataset dataset)
+    private VeldridTextureBinding? CreateTextureBindingForImage(Data.Image.ImageDataset dataset)
     {
-        ImageResult image;
-        try
+        // CORRECTED: Check for pre-loaded image data, same as the fix in PhotogrammetryWizardPanel.
+        if (dataset?.ImageData == null)
         {
-            var fileBytes = System.IO.File.ReadAllBytes(dataset.FilePath);
-            image = ImageResult.FromMemory(fileBytes, ColorComponents.RedGreenBlueAlpha);
-        }
-        catch(Exception ex)
-        {
-            Logger.LogError($"Failed to load image for manual linking: {dataset.FilePath}. Reason: {ex.Message}");
+            Logger.LogError($"Cannot create texture binding: Image data not loaded for {dataset?.Name ?? "null"}");
             return null;
         }
 
         var texture = _resourceFactory.CreateTexture(TextureDescription.Texture2D(
-            (uint)image.Width, (uint)image.Height, 1, 1, PixelFormat.R8_G8_B8_A8_UNorm, TextureUsage.Sampled));
+            (uint)dataset.Width, (uint)dataset.Height, 1, 1,
+            PixelFormat.R8_G8_B8_A8_UNorm, TextureUsage.Sampled));
 
-        fixed (byte* ptr = image.Data)
-        {
-            _graphicsDevice.UpdateTexture(texture, (IntPtr)ptr, (uint)image.Data.Length, 0, 0, 0, (uint)image.Width, (uint)image.Height, 1, 0, 0);
-        }
+        // CORRECTED: Use the pre-loaded RGBA data directly, removing file I/O and the 'unsafe' block.
+        _graphicsDevice.UpdateTexture(texture, dataset.ImageData, 0, 0, 0, (uint)dataset.Width, (uint)dataset.Height, 1, 0, 0);
 
         var textureView = _resourceFactory.CreateTextureView(texture);
         var imGuiBinding = _imGuiController.GetOrCreateImGuiBinding(_resourceFactory, textureView);
@@ -283,7 +277,7 @@ public class PanoramaWizardPanel : BasePanel
     public PanoramaWizardPanel(DatasetGroup imageGroup, GraphicsDevice graphicsDevice, ImGuiController imGuiController) 
         : base($"Panorama Wizard: {imageGroup.Name}", new Vector2(800, 600))
     {
-        Title = $"Panorama Wizard: {imageGroup.Name}"; // Added this line
+        Title = $"Panorama Wizard: {imageGroup.Name}";
        
         _job = new PanoramaStitchJob(imageGroup);
         _job.Service.StartProcessingAsync();
@@ -295,7 +289,8 @@ public class PanoramaWizardPanel : BasePanel
         _manualLinkEditor.OnConfirm = (img1, img2, points) =>
         {
             Logger.Log($"Confirmed {points.Count} manual links for {img1.Dataset.Name} and {img2.Dataset.Name}.");
-            // e.g., _job.Service.AddManualLinkAndRecompute(img1, img2, points);
+            // CORRECTED: Call the service method to add the manual link and re-run the analysis.
+            _job.Service.AddManualLinkAndRecompute(img1, img2, points);
         };
     }
 
@@ -419,22 +414,64 @@ public class PanoramaWizardPanel : BasePanel
     }
 
     private void DrawPreviewUI()
+{
+    ImGui.TextWrapped("All images are linked. Preview shows the aligned images. Click 'Stitch Panorama' to begin the final blending process.");
+    
+    ImGui.BeginChild("PreviewRegion", new Vector2(-1, ImGui.GetContentRegionAvail().Y - 100), ImGuiChildFlags.Border);
+    
+    var drawList = ImGui.GetWindowDrawList();
+    var p0 = ImGui.GetCursorScreenPos();
+    var availSize = ImGui.GetContentRegionAvail();
+    
+    // Draw background
+    drawList.AddRectFilled(p0, p0 + availSize, ImGui.GetColorU32(ImGuiCol.FrameBg));
+    
+    // Compute preview bounds
+    var components = _job.Service.StitchGroups;
+    if (components.Count > 0 && components[0].Images.Count > 0)
     {
-        ImGui.TextWrapped("All images are linked. Click 'Stitch Panorama' to begin the final blending process.");
-        ImGui.BeginChild("PreviewRegion", new Vector2(-1, ImGui.GetContentRegionAvail().Y - 100), ImGuiChildFlags.Border);
-        var p0 = ImGui.GetCursorScreenPos();
-        ImGui.GetWindowDrawList().AddRectFilled(p0, p0 + ImGui.GetContentRegionAvail(), ImGui.GetColorU32(ImGuiCol.FrameBg));
-        ImGui.SetCursorScreenPos(p0 + new Vector2(10, 10));
-        ImGui.Text("A full implementation would render the warped preview here.");
-        ImGui.EndChild();
-        ImGui.Separator();
-
-        bool isBusy = _job.Service.State == PanoramaState.Blending || _job.Service.State == PanoramaState.Completed;
-        if (isBusy) ImGui.BeginDisabled();
-        if (ImGui.Button("Stitch Panorama", new Vector2(-1, 40)))
+        var mainGroup = components[0];
+        
+        // Simple preview: show image boundaries as overlapping rectangles
+        float scale = 0.1f; // Scale down for preview
+        var offset = new Vector2(availSize.X / 2, availSize.Y / 2);
+        
+        foreach (var image in mainGroup.Images)
         {
-            _exportFileDialog.Open($"{_job.ImageGroup.Name}_panorama");
+            // Draw a rectangle for each image showing its relative position
+            var imgSize = new Vector2(image.Dataset.Width * scale, image.Dataset.Height * scale);
+            var imgPos = p0 + offset - imgSize / 2;
+            
+            // Draw semi-transparent filled rect
+            uint color = ImGui.GetColorU32(new Vector4(0.3f, 0.5f, 0.7f, 0.3f));
+            drawList.AddRectFilled(imgPos, imgPos + imgSize, color);
+            
+            // Draw border
+            drawList.AddRect(imgPos, imgPos + imgSize, ImGui.GetColorU32(ImGuiCol.Text), 0, ImDrawFlags.None, 1);
+            
+            // Draw image name
+            drawList.AddText(imgPos + new Vector2(5, 5), ImGui.GetColorU32(ImGuiCol.Text), image.Dataset.Name);
         }
-        if (isBusy) ImGui.EndDisabled();
+        
+        // Show statistics
+        ImGui.SetCursorScreenPos(p0 + new Vector2(10, availSize.Y - 30));
+        ImGui.Text($"Images: {mainGroup.Images.Count} | Estimated size: {_job.Service.GetMemoryRequirementString()}");
     }
+    else
+    {
+        ImGui.SetCursorScreenPos(p0 + new Vector2(10, 10));
+        ImGui.Text("No preview available - ensure images are properly linked.");
+    }
+    
+    ImGui.EndChild();
+    ImGui.Separator();
+
+    bool isBusy = _job.Service.State == PanoramaState.Blending || _job.Service.State == PanoramaState.Completed;
+    if (isBusy) ImGui.BeginDisabled();
+    if (ImGui.Button("Stitch Panorama", new Vector2(-1, 40)))
+    {
+        _exportFileDialog.Open($"{_job.ImageGroup.Name}_panorama");
+    }
+    if (isBusy) ImGui.EndDisabled();
+}
 }
