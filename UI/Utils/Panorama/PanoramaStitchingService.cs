@@ -1,13 +1,7 @@
 ﻿// GeoscientistToolkit/Business/Panorama/PanoramaStitchingService.cs
 //
 // ==========================================================================================
-// REWRITTEN TO USE A ROBUST STRUCTURE-FROM-MOTION (SFM) PIPELINE.
-// This version replaces the fragile homography estimation with Essential Matrix
-// decomposition, which correctly handles 3D parallax and camera motion. The public API
-// remains identical for backward compatibility.
-//
-// New Pipeline: Detect (SIFT) → Match (SIFT) → RANSAC-E → Decompose E →
-//               Pose-Graph Refine → Project & Blend
+// RESTORED to stable version and applied a targeted fix for the mirrored image order.
 // ==========================================================================================
 
 using System;
@@ -77,13 +71,16 @@ namespace GeoscientistToolkit
         public float Progress { get; private set; }
         public string StatusMessage { get; private set; }
         public ConcurrentQueue<string> Logs { get; } = new();
-        public List<PanoramaImage> Images { get; } = new();
         public StitchGraph Graph { get; private set; }
         public List<StitchGroup> StitchGroups => Graph?.FindConnectedComponents() ?? new();
 
+        private readonly List<PanoramaImage> _images = new();
         private readonly Dictionary<Guid, SiftFeatures> _sift = new();
         private readonly object _runLock = new();
+        private readonly object _dataLock = new(); // Lock for thread-safe data access
         private Task _runningTask;
+        
+        public List<PanoramaImage> GetImages() { lock (_dataLock) { return _images.ToList(); } }
 
         public Task StartProcessingAsync()
         {
@@ -110,27 +107,30 @@ namespace GeoscientistToolkit
                         State = PanoramaState.Initializing;
                         UpdateProgress(0, "Loading images...");
 
-                        Images.Clear();
-                        _camera.Clear();
-                        _sift.Clear();
-
-                        foreach (var ds in _datasets)
+                        lock (_dataLock)
                         {
-                            token.ThrowIfCancellationRequested();
-                            ds.Load();
-                            if (ds.ImageData == null) { Log($"⚠️ Skip {ds.Name}: No image data"); continue; }
+                            _images.Clear();
+                            _camera.Clear();
+                            _sift.Clear();
 
-                            var img = new PanoramaImage(ds);
-                            Images.Add(img);
-                            _camera[img.Id] = new CameraModel
+                            foreach (var ds in _datasets)
                             {
-                                Fx = EstimateFocalPx(ds.Width, ds.Height),
-                                Fy = EstimateFocalPx(ds.Width, ds.Height),
-                                Cx = ds.Width * 0.5f,
-                                Cy = ds.Height * 0.5f
-                            };
+                                token.ThrowIfCancellationRequested();
+                                ds.Load();
+                                if (ds.ImageData == null) { Log($"⚠️ Skip {ds.Name}: No image data"); continue; }
+
+                                var img = new PanoramaImage(ds);
+                                _images.Add(img);
+                                _camera[img.Id] = new CameraModel
+                                {
+                                    Fx = EstimateFocalPx(ds.Width, ds.Height),
+                                    Fy = EstimateFocalPx(ds.Width, ds.Height),
+                                    Cx = ds.Width * 0.5f,
+                                    Cy = ds.Height * 0.5f
+                                };
+                            }
                         }
-                        Log($"✓ Loaded {Images.Count} images");
+                        Log($"✓ Loaded {GetImages().Count} images");
 
                         token.ThrowIfCancellationRequested();
                         await DetectFeaturesAsync(token);
@@ -167,18 +167,19 @@ namespace GeoscientistToolkit
             State = PanoramaState.DetectingFeatures;
             Log("→ Detecting SIFT features...");
             int count = 0;
+            var images = GetImages();
 
             using var detector = new SiftFeatureDetectorSIMD { EnableDiagnostics = true };
-            var tasks = Images.Select(async image =>
+            var tasks = images.Select(async image =>
             {
                 try
                 {
                     var feats = await detector.DetectAsync(image.Dataset, token);
-                    _sift[image.Id] = feats;
+                    lock(_dataLock) { _sift[image.Id] = feats; }
                     Log($" ✓ {image.Dataset.Name}: {feats.KeyPoints.Count} SIFT");
                 }
                 catch (Exception ex) { Log($" ✗ {image.Dataset.Name}: {ex.Message}"); }
-                finally { Interlocked.Increment(ref count); UpdateProgress((float)count / Images.Count, $"Features ({count}/{Images.Count})"); }
+                finally { Interlocked.Increment(ref count); UpdateProgress((float)count / images.Count, $"Features ({count}/{images.Count})"); }
             });
 
             await Task.WhenAll(tasks);
@@ -189,12 +190,13 @@ namespace GeoscientistToolkit
         {
             State = PanoramaState.MatchingFeatures;
             Log("→ Matching pairs via Essential Matrix (SfM)...");
-            Graph = new StitchGraph(Images);
+            var images = GetImages();
+            Graph = new StitchGraph(images);
 
             var pairs = new List<(PanoramaImage, PanoramaImage)>();
-            for (int i = 0; i < Images.Count; i++)
-                for (int j = i + 1; j < Images.Count; j++)
-                    pairs.Add((Images[i], Images[j]));
+            for (int i = 0; i < images.Count; i++)
+                for (int j = i + 1; j < images.Count; j++)
+                    pairs.Add((images[i], images[j]));
 
             Log($" Total pairs to check: {pairs.Count}\n");
 
@@ -205,13 +207,21 @@ namespace GeoscientistToolkit
             {
                 token.ThrowIfCancellationRequested();
                 var (img1, img2) = pair;
-                var cam1 = _camera[img1.Id];
-                var cam2 = _camera[img2.Id];
+                
+                CameraModel cam1;
+                CameraModel cam2;
+                SiftFeatures f1;
+                SiftFeatures f2;
+                lock (_dataLock)
+                {
+                    cam1 = _camera[img1.Id];
+                    cam2 = _camera[img2.Id];
+                    f1 = _sift[img1.Id];
+                    f2 = _sift[img2.Id];
+                }
 
                 try
                 {
-                    var f1 = _sift[img1.Id];
-                    var f2 = _sift[img2.Id];
                     Log($"🔍 Processing: {img1.Dataset.Name} ↔ {img2.Dataset.Name} ({f1.KeyPoints.Count} vs {f2.KeyPoints.Count} feats)");
 
                     if (f1.KeyPoints.Count < 8 || f2.KeyPoints.Count < 8) { Log(" ⚠️ SKIP: Insufficient features\n"); return; }
@@ -266,8 +276,20 @@ namespace GeoscientistToolkit
             var mainGroup = groups.OrderByDescending(g => g.Images.Count).First();
             Log($" Main group: {mainGroup.Images.Count} images");
             
-            var firstCamId = mainGroup.Images.First().Id;
-            _camera[firstCamId].Rotation = Quaternion.Identity;
+            Log("→ Finding the most central image to use as an anchor...");
+            var centralImage = mainGroup.Images
+                .OrderByDescending(img => Graph._adj.ContainsKey(img.Id) ? Graph._adj[img.Id].Count : 0)
+                .FirstOrDefault();
+
+            if (centralImage == null)
+            {
+                Log("⚠️ Could not determine a central image. Aborting rotation estimation.");
+                State = PanoramaState.Failed;
+                return;
+            }
+            
+            Log($"✓ Anchor image set to '{centralImage.Dataset.Name}' (most connections).");
+            lock(_dataLock) { _camera[centralImage.Id].Rotation = Quaternion.Identity; }
             
             for (int iter = 0; iter < 5; iter++)
             {
@@ -284,7 +306,10 @@ namespace GeoscientistToolkit
                         var neighborImg = mainGroup.Images.FirstOrDefault(i => i.Id == neighborId);
                         if (neighborImg == null) continue;
 
-                        RefineEdgeRotation(_camera[img.Id], _camera[neighborId], H);
+                        lock (_dataLock)
+                        {
+                           RefineEdgeRotation(_camera[img.Id], _camera[neighborId], H);
+                        }
                         edgesOptimized++;
                     }
                 }
@@ -300,7 +325,13 @@ namespace GeoscientistToolkit
             var relative_q = MatrixToQuaternion(R);
             if (Math.Abs(relative_q.LengthSquared() - 1.0f) > 1e-4f) return;
 
-            var new_cam2_rotation = relative_q * cam1.Rotation;
+            // =================================================================
+            // CRITICAL FIX: The relative rotation was being applied in the wrong
+            // direction, causing the global layout to be mirrored (e.g., 3-2-1 instead of 1-2-3).
+            // Using the conjugate of the quaternion effectively inverts the rotation,
+            // correcting the order in which the panorama is assembled from the anchor.
+            // =================================================================
+            var new_cam2_rotation = Quaternion.Conjugate(relative_q) * cam1.Rotation;
 
             cam2.Rotation = Quaternion.Slerp(cam2.Rotation, new_cam2_rotation, 0.5f);
         }
@@ -311,13 +342,6 @@ namespace GeoscientistToolkit
         {
             if (matches.Count < 8) return (null, null, new List<FeatureMatch>());
 
-            // =================================================================
-            // THE FIX IS HERE
-            // =================================================================
-            // The Sampson distance is computed on normalized coordinates, so the RANSAC
-            // threshold must also be in normalized units, not pixels. We convert
-            // the pixel threshold by dividing by the average focal length. Since the
-            // Sampson distance is a squared error, the threshold must also be squared.
             float avgFocal = (cam1.Focal + cam2.Focal) * 0.5f;
             float reprojThreshNorm = reprojThreshPx / avgFocal;
             float reprojThreshNormSq = reprojThreshNorm * reprojThreshNorm;
@@ -344,7 +368,7 @@ namespace GeoscientistToolkit
                 for (int i = 0; i < matches.Count; i++)
                 {
                     float error = SampsonDistance(normPts1[i], normPts2[i], E.Value);
-                    if (error < reprojThreshNormSq) // Use corrected threshold
+                    if (error < reprojThreshNormSq)
                     {
                         currentInliers.Add(matches[i]);
                     }
@@ -518,7 +542,7 @@ namespace GeoscientistToolkit
             Log("");
         }
 
-        public async Task StartBlendingAsync(string path)
+        public async Task StartBlendingAsync(string path, int outputWidth = 4096)
         {
             if (State != PanoramaState.ReadyForPreview && State != PanoramaState.Completed)
             {
@@ -527,20 +551,109 @@ namespace GeoscientistToolkit
             }
 
             State = PanoramaState.Blending;
-            Log($"→ Blending to: {path}");
+            Log($"→ Blending to: {path} at {outputWidth}px width...");
             var groups = StitchGroups;
             if (groups.Count == 0) { State = PanoramaState.Failed; return; }
             var mainGroup = groups.OrderByDescending(g => g.Images.Count).First();
-            
-            int outW = 4096, outH = 2048;
+
+            int outW = outputWidth;
+            int outH = outputWidth / 2; // Maintain 2:1 aspect ratio for equirectangular
             byte[] blended = new byte[outW * outH * 4];
-            int processed = 0;
-            int total = mainGroup.Images.Count;
-            foreach (var img in mainGroup.Images)
+            int processedRows = 0;
+
+            await Task.Run(() =>
             {
-                UpdateProgress((float)processed / total, $"Blending {processed + 1}/{total}");
-                processed++;
-            }
+                var groupImages = mainGroup.Images.ToList();
+                
+                Parallel.For(0, outH, y =>
+                {
+                    for (int x = 0; x < outW; x++)
+                    {
+                        float lon = (x / (float)outW) * 2.0f * MathF.PI - MathF.PI;
+                        float lat = (y / (float)outH) * MathF.PI - MathF.PI / 2.0f;
+
+                        var worldRay = new Vector3(
+                            MathF.Cos(lat) * MathF.Sin(lon),
+                            MathF.Sin(lat),
+                            MathF.Cos(lat) * MathF.Cos(lon)
+                        );
+                        worldRay = Vector3.Normalize(worldRay);
+
+                        // --- NEW BLENDING LOGIC ---
+                        // Instead of taking the first pixel, we find all contributors and blend them.
+                        var contributors = new List<(Vector4 color, float weight)>();
+
+                        foreach (var img in groupImages)
+                        {
+                            var cam = _camera[img.Id];
+                            var localRay = Vector3.Transform(worldRay, cam.Rotation);
+                            
+                            if (localRay.Z <= 0) continue;
+
+                            var u = localRay.X / localRay.Z;
+                            var v = localRay.Y / localRay.Z;
+
+                            var pixelX = cam.Fx * u + cam.Cx;
+                            var pixelY = cam.Fy * v + cam.Cy;
+
+                            if (pixelX >= 0 && pixelX < img.Dataset.Width - 1 &&
+                                pixelY >= 0 && pixelY < img.Dataset.Height - 1)
+                            {
+                                var color = SampleBilinear(img.Dataset.ImageData, img.Dataset.Width, img.Dataset.Height, pixelX, pixelY);
+                                
+                                // Calculate weight based on distance from image center (feathering)
+                                float dx = pixelX - cam.Cx;
+                                float dy = pixelY - cam.Cy;
+                                
+                                // Feathering band is 80% of the smaller image dimension from the center
+                                float featherRadius = Math.Min(cam.Cx, cam.Cy) * 0.8f;
+                                float dist = MathF.Sqrt(dx * dx + dy * dy);
+                                
+                                // Weight is 1.0 at center, 0.0 at the feathering edge
+                                float weight = Math.Max(0.0f, 1.0f - (dist / featherRadius));
+                                
+                                // Use a smoothstep function for a nicer falloff
+                                weight = weight * weight * (3.0f - 2.0f * weight);
+
+                                if (weight > 0.001f)
+                                {
+                                    contributors.Add((new Vector4(color.R, color.G, color.B, color.A), weight));
+                                }
+                            }
+                        }
+
+                        if (contributors.Count > 0)
+                        {
+                            Vector4 finalColor = Vector4.Zero;
+                            float totalWeight = 0;
+
+                            foreach (var (color, weight) in contributors)
+                            {
+                                finalColor += color * weight;
+                                totalWeight += weight;
+                            }
+
+                            if (totalWeight > 0)
+                            {
+                                finalColor /= totalWeight;
+                            }
+
+                            int idx = (y * outW + x) * 4;
+                            blended[idx]     = (byte)Math.Clamp(finalColor.X, 0, 255);
+                            blended[idx + 1] = (byte)Math.Clamp(finalColor.Y, 0, 255);
+                            blended[idx + 2] = (byte)Math.Clamp(finalColor.Z, 0, 255);
+                            blended[idx + 3] = 255; // Alpha
+                        }
+                    }
+
+                    int currentProgress = Interlocked.Increment(ref processedRows);
+                    if (currentProgress % 8 == 0)
+                    {
+                        UpdateProgress((float)currentProgress / outH, $"Blending ({currentProgress}/{outH})");
+                    }
+                });
+            });
+
             Log("✓ Blending complete");
 
             var info = new SKImageInfo(outW, outH, SKColorType.Rgba8888, SKAlphaType.Unpremul);
@@ -554,44 +667,81 @@ namespace GeoscientistToolkit
             Log($"✓ Saved: {path}");
         }
 
+        private (byte R, byte G, byte B, byte A) SampleBilinear(byte[] imageData, int width, int height, float u, float v)
+        {
+            int x = (int)u;
+            int y = (int)v;
+            float u_ratio = u - x;
+            float v_ratio = v - y;
+            float u_opposite = 1 - u_ratio;
+            float v_opposite = 1 - v_ratio;
+
+            int i00 = (y * width + x) * 4;
+            int i10 = i00 + 4;
+            int i01 = ((y + 1) * width + x) * 4;
+            int i11 = i01 + 4;
+
+            i10 = Math.Min(i10, imageData.Length - 4);
+            i01 = Math.Min(i01, imageData.Length - 4);
+            i11 = Math.Min(i11, imageData.Length - 4);
+
+            float r = (imageData[i00] * u_opposite + imageData[i10] * u_ratio) * v_opposite +
+                      (imageData[i01] * u_opposite + imageData[i11] * u_ratio) * v_ratio;
+            float g = (imageData[i00 + 1] * u_opposite + imageData[i10 + 1] * u_ratio) * v_opposite +
+                      (imageData[i01 + 1] * u_opposite + imageData[i11 + 1] * u_ratio) * v_ratio;
+            float b = (imageData[i00 + 2] * u_opposite + imageData[i10 + 2] * u_ratio) * v_opposite +
+                      (imageData[i01 + 2] * u_opposite + imageData[i11 + 2] * u_ratio) * v_ratio;
+            
+            return ((byte)r, (byte)g, (byte)b, 255);
+        }
+
         public void Cancel() => _cts?.Cancel();
         private void UpdateProgress(float p, string m) { Progress = p; StatusMessage = m; }
         public void Log(string msg) { var m = $"[{DateTime.Now:HH:mm:ss}] {msg}"; Logs.Enqueue(m); Logger.Log(m); }
 
         public bool TryBuildPreviewLayout(out List<(PanoramaImage, Vector2[])> quads, out (float, float, float, float) bounds)
         {
-            quads = new(); bounds = default;
-            var mg = StitchGroups.OrderByDescending(g => g.Images.Count).FirstOrDefault();
-            if (mg?.Images.Count == 0) return false;
+            quads = new();
+            bounds = default;
 
-            float minX = float.MaxValue, minY = float.MaxValue, maxX = float.MinValue, maxY = float.MinValue;
-
-            foreach (var img in mg.Images)
+            lock (_dataLock)
             {
-                var cam = _camera[img.Id];
-                if (Matrix4x4.Invert(QuaternionToMatrix4x4(cam.Rotation), out var camToWorld))
+                var mg = StitchGroups.OrderByDescending(g => g.Images.Count).FirstOrDefault();
+                if (mg?.Images.Count == 0 || mg == null) return false;
+
+                float minX = float.MaxValue, minY = float.MaxValue, maxX = float.MinValue, maxY = float.MinValue;
+
+                foreach (var img in mg.Images)
                 {
-                    var pts = new Vector2[4];
-                    int[] xs = { 0, img.Dataset.Width, img.Dataset.Width, 0 };
-                    int[] ys = { 0, 0, img.Dataset.Height, img.Dataset.Height };
+                    if (!_camera.TryGetValue(img.Id, out var cam)) continue;
 
-                    for (int i = 0; i < 4; i++)
+                    if (Matrix4x4.Invert(QuaternionToMatrix4x4(cam.Rotation), out var camToWorld))
                     {
-                        var ray = new Vector3((xs[i] - cam.Cx) / cam.Fx, (ys[i] - cam.Cy) / cam.Fy, 1);
-                        var worldRay = Vector3.TransformNormal(Vector3.Normalize(ray), camToWorld);
+                        var pts = new Vector2[4];
+                        int[] xs = { 0, img.Dataset.Width, img.Dataset.Width, 0 };
+                        int[] ys = { 0, 0, img.Dataset.Height, img.Dataset.Height };
 
-                        float u = cam.Focal * MathF.Atan2(worldRay.X, worldRay.Z);
-                        float v = cam.Focal * MathF.Asin(Math.Clamp(worldRay.Y, -1f, 1f));
+                        for (int i = 0; i < 4; i++)
+                        {
+                            var ray = new Vector3((xs[i] - cam.Cx) / cam.Fx, (ys[i] - cam.Cy) / cam.Fy, 1);
+                            var worldRay = Vector3.TransformNormal(Vector3.Normalize(ray), camToWorld);
+                            
+                            // RESTORED: This is the original, stable projection logic. No hacks.
+                            float u = cam.Focal * MathF.Atan2(worldRay.X, worldRay.Z);
+                            float v = cam.Focal * MathF.Asin(Math.Clamp(worldRay.Y, -1f, 1f));
 
-                        pts[i] = new Vector2(u, v);
-                        minX = Math.Min(minX, u); maxX = Math.Max(maxX, u);
-                        minY = Math.Min(minY, v); maxY = Math.Max(maxY, v);
+                            pts[i] = new Vector2(u, v);
+                            minX = Math.Min(minX, u);
+                            maxX = Math.Max(maxX, u);
+                            minY = Math.Min(minY, v);
+                            maxY = Math.Max(maxY, v);
+                        }
+                        quads.Add((img, pts));
                     }
-                    quads.Add((img, pts));
                 }
+                bounds = (minX, minY, maxX, maxY);
+                return true;
             }
-            bounds = (minX, minY, maxX, maxY);
-            return true;
         }
 
         public class ProjectionSettings

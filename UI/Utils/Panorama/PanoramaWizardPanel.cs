@@ -1,10 +1,10 @@
 ﻿// GeoscientistToolkit/UI/Utils/Panorama/PanoramaWizardPanel.cs
 //
 // ==========================================================================================
-// FIXED:
-// 1. Corrected the pan and zoom calculations in `FitViewTo` to properly center the content.
-// 2. Refined `HandlePanZoom` to ensure smooth and intuitive viewport control. This
-//    resolves the issue where panning and zooming appeared to be ineffective.
+// FINAL VERSION:
+// 1. Implemented a clipping rectangle on the canvas to provide a true crop/zoom experience.
+// 2. Added panning via left-click-and-drag for intuitive positioning of the panorama
+//    within the viewport.
 // ==========================================================================================
 
 using System;
@@ -39,11 +39,12 @@ namespace GeoscientistToolkit
         private bool _enableTooltips = true;
         private readonly ImGuiExportFileDialog _fileDialog;
 
-        // Canvas
+        // Canvas & Projection Controls
         private Vector2 _canvasMin, _canvasMax;
         private Vector2 _pan = Vector2.Zero;
         private float _zoom = 1.0f;
         private bool _fittedOnce = false;
+        private float _previewStraighten = 0.0f;
 
         // Filtri render (solo UI)
         private readonly HashSet<Guid> _hiddenImages = new();
@@ -90,20 +91,27 @@ namespace GeoscientistToolkit
             Title = title ?? $"Panorama Wizard: {_group?.Name ?? "Group"}";
             IsOpen = open;
         }
-
+        
         // ────────── API storica ──────────
         public void Open()  => IsOpen = true;
         public void Close() => IsOpen = false;
 
+        private void Recompute()
+        {
+            _job?.Service.Cancel();
+            _hiddenImages.Clear();
+            _manualMsg = "";
+            _job = new PanoramaStitchJob(_group);
+            _ = _job.Service.StartProcessingAsync();
+            _fittedOnce = false;
+        }
+        
         public void Submit()
         {
             var s = _job.Service.State;
             if (s != PanoramaState.ReadyForPreview && s != PanoramaState.Completed)
             {
-                _hiddenImages.Clear();
-                _manualMsg = "";
-                _ = _job.Service.StartProcessingAsync();
-                _fittedOnce = false;
+                Recompute();
             }
             else
             {
@@ -175,11 +183,7 @@ namespace GeoscientistToolkit
 
             if (ImGui.Button("Run (Recompute)"))
             {
-                _hiddenImages.Clear();
-                _manualMsg = "";
-                _job = new PanoramaStitchJob(_group);
-                _ = _job.Service.StartProcessingAsync();
-                _fittedOnce = false;
+                Recompute();
             }
             ImGui.SameLine();
             if (ImGui.Button("Cancel")) _job.Service.Cancel();
@@ -197,13 +201,17 @@ namespace GeoscientistToolkit
             ImGui.EndChild();
         }
 
+        /// <summary>
+        /// Draws the interactive preview and stitching controls tab.
+        /// </summary>
         private void DrawPreviewTab()
         {
+            // --- HEADER CONTROLS ---
             if (ImGui.Button("Fit View")) { _fittedOnce = false; }
             ImGui.SameLine();
-            ImGui.TextDisabled("(Pan: MMB,  Zoom: Wheel)");
+            ImGui.TextDisabled("(Pan: Drag or MMB, Zoom: Wheel/Slider)"); // UI Hint Updated
             ImGui.SameLine(); ImGui.Spacing(); ImGui.SameLine();
-            
+
             var createButtonText = "Create Panorama...";
             var buttonWidth = ImGui.CalcTextSize(createButtonText).X + ImGui.GetStyle().FramePadding.X * 2;
             ImGui.SetCursorPosX(ImGui.GetCursorPosX() + ImGui.GetContentRegionAvail().X - buttonWidth);
@@ -215,26 +223,49 @@ namespace GeoscientistToolkit
                 _fileDialog.Open("panorama.png", Environment.GetFolderPath(Environment.SpecialFolder.MyPictures));
             }
             if (!canExport) ImGui.EndDisabled();
-
             ImGui.Separator();
 
+            // --- PROJECTION & CROP CONTROLS ---
+            ImGui.PushItemWidth(ImGui.GetContentRegionAvail().X * 0.4f);
+            if (canExport)
+            {
+                ImGui.SliderFloat("FOV/Zoom", ref _zoom, 0.1f, 10.0f, "%.2fx");
+                ImGui.SameLine();
+                ImGui.SliderFloat("Straighten", ref _previewStraighten, 0.0f, 1.0f);
+            }
+            else // Show disabled sliders
+            {
+                ImGui.BeginDisabled();
+                float disabledZoom = 1.0f, disabledStraighten = 0.0f;
+                ImGui.SliderFloat("FOV/Zoom", ref disabledZoom, 0.1f, 10.0f, "%.2fx");
+                ImGui.SameLine();
+                ImGui.SliderFloat("Straighten", ref disabledStraighten, 0.0f, 1.0f);
+                ImGui.EndDisabled();
+            }
+            ImGui.PopItemWidth();
+            ImGui.Separator();
+
+            // --- CANVAS SETUP ---
             var dl = ImGui.GetWindowDrawList();
             _canvasMin = ImGui.GetCursorScreenPos();
             var avail = ImGui.GetContentRegionAvail();
             _canvasMax = _canvasMin + new Vector2(Math.Max(32, avail.X), Math.Max(200, avail.Y - 6));
 
-            ImGui.InvisibleButton("pano_canvas", _canvasMax - _canvasMin,
-                ImGuiButtonFlags.MouseButtonLeft | ImGuiButtonFlags.MouseButtonMiddle | ImGuiButtonFlags.MouseButtonRight);
+            ImGui.InvisibleButton("pano_canvas", _canvasMax - _canvasMin, ImGuiButtonFlags.MouseButtonLeft | ImGuiButtonFlags.MouseButtonMiddle | ImGuiButtonFlags.MouseButtonRight);
             bool hovered = ImGui.IsItemHovered();
 
             HandlePanZoom(hovered);
 
             dl.AddRectFilled(_canvasMin, _canvasMax, ImGui.GetColorU32(new Vector4(0.08f, 0.08f, 0.08f, 1f)));
             dl.AddRect(_canvasMin, _canvasMax, ImGui.GetColorU32(new Vector4(0.35f, 0.35f, 0.35f, 1f)));
+            
+            dl.PushClipRect(_canvasMin, _canvasMax, true);
 
+            // --- DRAWING LOGIC ---
             if (_job.Service.TryBuildPreviewLayout(out var quads, out var bounds))
             {
                 if (!_fittedOnce) FitViewTo(bounds);
+
                 DrawBounds(dl, bounds);
 
                 foreach (var (img, pts) in quads)
@@ -243,14 +274,15 @@ namespace GeoscientistToolkit
                     uint col = ImGui.GetColorU32(new Vector4(0.9f, 0.9f, 0.9f, 1f));
                     for (int i = 0; i < 4; i++)
                     {
-                        dl.AddLine(ToScreen(pts[i]), ToScreen(pts[(i + 1) & 3]), col, 1.0f);
+                        var p1 = ToScreen(pts[i], bounds);
+                        var p2 = ToScreen(pts[(i + 1) & 3], bounds);
+                        dl.AddLine(p1, p2, col, 1.0f);
                     }
 
                     if (_enableTooltips && hovered)
                     {
-                        var center = (pts[0] + pts[2]) * 0.5f;
-                        var scr = ToScreen(center);
-                        if (PointInCanvas(scr) && (ImGui.GetMousePos() - scr).Length() < 14f)
+                        var center = ToScreen((pts[0] + pts[2]) * 0.5f, bounds);
+                        if (PointInCanvas(center) && (ImGui.GetMousePos() - center).Length() < 14f)
                         {
                             ImGui.BeginTooltip();
                             ImGui.TextUnformatted(img.Dataset.Name);
@@ -260,6 +292,7 @@ namespace GeoscientistToolkit
                     }
                 }
 
+                // --- CONTEXT MENU ---
                 if (hovered && ImGui.IsMouseReleased(ImGuiMouseButton.Right))
                     ImGui.OpenPopup("pano_ctx");
 
@@ -267,16 +300,12 @@ namespace GeoscientistToolkit
                 {
                     if (ImGui.MenuItem("Recompute"))
                     {
-                        _hiddenImages.Clear();
-                        _manualMsg = "";
-                        _job = new PanoramaStitchJob(_group);
-                        _ = _job.Service.StartProcessingAsync();
-                        _fittedOnce = false;
+                        Recompute();
                     }
                     ImGui.Separator();
                     if (ImGui.BeginMenu("Hide/Show Images"))
                     {
-                        foreach (var img in _job.Service.Images)
+                        foreach (var img in _job.Service.GetImages())
                         {
                             bool hidden = _hiddenImages.Contains(img.Id);
                             if (ImGui.MenuItem($"{(hidden ? "Show" : "Hide")} {img.Dataset.Name}"))
@@ -292,18 +321,18 @@ namespace GeoscientistToolkit
             }
             else
             {
-                var hint = _job.Service.State == PanoramaState.Idle || _job.Service.State == PanoramaState.Failed
-                    ? "Run the pipeline to see the preview layout."
-                    : "Processing... Please wait.";
+                var hint = _job.Service.State == PanoramaState.Idle || _job.Service.State == PanoramaState.Failed ? "Run the pipeline to see the preview layout." : "Processing... Please wait.";
                 var sz = ImGui.CalcTextSize(hint);
                 var mid = _canvasMin + (_canvasMax - _canvasMin - sz) * 0.5f;
                 dl.AddText(mid, ImGui.GetColorU32(new Vector4(0.6f, 0.6f, 0.6f, 1f)), hint);
             }
+            
+            dl.PopClipRect();
         }
-
+        
         private void DrawManualLinkTab()
         {
-            var imgs = _job.Service.Images;
+            var imgs = _job.Service.GetImages();
             if (imgs.Count < 2) { ImGui.TextDisabled("Load and run at least 2 images first."); return; }
 
             if (_selImgA >= imgs.Count) _selImgA = 0;
@@ -331,10 +360,10 @@ namespace GeoscientistToolkit
         
         private void DrawBounds(ImGuiNET.ImDrawListPtr dl, (float xmin, float ymin, float xmax, float ymax) b)
         {
-            var p0 = ToScreen(new Vector2(b.xmin, b.ymin));
-            var p1 = ToScreen(new Vector2(b.xmax, b.ymin));
-            var p2 = ToScreen(new Vector2(b.xmax, b.ymax));
-            var p3 = ToScreen(new Vector2(b.xmin, b.ymax));
+            var p0 = ToScreen(new Vector2(b.xmin, b.ymin), b);
+            var p1 = ToScreen(new Vector2(b.xmax, b.ymin), b);
+            var p2 = ToScreen(new Vector2(b.xmax, b.ymax), b);
+            var p3 = ToScreen(new Vector2(b.xmin, b.ymax), b);
             uint col = ImGui.GetColorU32(new Vector4(0.4f, 0.7f, 0.9f, 1f));
             dl.AddLine(p0, p1, col, 1f);
             dl.AddLine(p1, p2, col, 1f);
@@ -356,11 +385,6 @@ namespace GeoscientistToolkit
             var worldCenter = new Vector2((b.xmin + b.xmax) * 0.5f, (b.ymin + b.ymax) * 0.5f);
             var screenCenter = (_canvasMin + _canvasMax) * 0.5f;
 
-            // =================================================================
-            // CRITICAL FIX: The pan calculation must account for the canvas origin (_canvasMin)
-            // to correctly center the content.
-            // new_pan = screen_center - canvas_origin - (world_center * zoom)
-            // =================================================================
             _pan = screenCenter - _canvasMin - (worldCenter * _zoom);
             _fittedOnce = true;
         }
@@ -369,13 +393,13 @@ namespace GeoscientistToolkit
         {
             if (!hovered) return;
 
-            // Panning: Directly add mouse delta to the pan vector.
-            if (ImGui.IsMouseDown(ImGuiMouseButton.Middle))
+            // Panning with either Left or Middle mouse button
+            if (ImGui.IsMouseDragging(ImGuiMouseButton.Left) || ImGui.IsMouseDragging(ImGuiMouseButton.Middle))
             {
                 _pan += ImGui.GetIO().MouseDelta;
             }
 
-            // Zooming: Adjust zoom and pan to keep the point under the mouse stationary.
+            // Zooming with mouse wheel
             float wheel = ImGui.GetIO().MouseWheel;
             if (Math.Abs(wheel) > float.Epsilon)
             {
@@ -386,26 +410,42 @@ namespace GeoscientistToolkit
                 _zoom *= MathF.Pow(1.1f, wheel);
                 _zoom = Math.Clamp(_zoom, 0.05f, 20f);
                 
-                // The change in pan required to keep the world point under the mouse is:
-                // delta_pan = world_point * (old_zoom - new_zoom)
                 _pan += worldPosBeforeZoom * (oldZoom - _zoom);
             }
         }
+        
+        private Vector2 ToScreen(Vector2 world, (float xmin, float ymin, float xmax, float ymax) bounds)
+        {
+            Vector2 finalWorldPos = world;
 
-        private Vector2 ToScreen(Vector2 world) => _canvasMin + _pan + world * _zoom;
-        private Vector2 ScreenToWorld(Vector2 screen) => (screen - _canvasMin - _pan) / Math.Max(1e-6f, _zoom);
+            if (_previewStraighten > 0.001f && bounds.xmax > bounds.xmin)
+            {
+                float worldWidth = bounds.xmax - bounds.xmin;
+                float worldCenterX = bounds.xmin + worldWidth * 0.5f;
+                float normalizedX = (world.X - worldCenterX) / (worldWidth * 0.5f);
+                float warpFactor = normalizedX * normalizedX;
+                float yOffset = -world.Y * warpFactor * _previewStraighten;
+                finalWorldPos = new Vector2(world.X, world.Y + yOffset);
+            }
+
+            return _canvasMin + _pan + finalWorldPos * _zoom;
+        }
+
+        private Vector2 ScreenToWorld(Vector2 screen)
+        {
+             return (screen - _canvasMin - _pan) / Math.Max(1e-6f, _zoom);
+        }
+
         private bool PointInCanvas(Vector2 p) =>
             p.X >= _canvasMin.X && p.X <= _canvasMax.X && p.Y >= _canvasMin.Y && p.Y <= _canvasMax.Y;
 
         private bool TryCall_AddManualLinkAndRecompute(PanoramaImage a, PanoramaImage b, List<(Vector2 P1, Vector2 P2)> pairs)
         {
-            // Implementation unchanged
             return false;
         }
 
         private bool TryCall_RemoveImage(PanoramaImage img)
         {
-            // Implementation unchanged
             return false;
         }
     }
