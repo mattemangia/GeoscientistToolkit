@@ -80,7 +80,7 @@ namespace GeoscientistToolkit
             var pairs = GenerateImagePairs(images);
             int processedCount = 0;
 
-            using var matcher = new SiftFeatureMatcherSIMD();
+            using var matcher = new SIFTFeatureMatcherSIMD();
 
             var tasks = pairs.Select(async pair =>
             {
@@ -153,7 +153,7 @@ namespace GeoscientistToolkit
         private async Task ProcessImagePair(
             (PhotogrammetryImage img1, PhotogrammetryImage img2) pair,
             PhotogrammetryGraph graph,
-            SiftFeatureMatcherSIMD matcher,
+            SIFTFeatureMatcherSIMD matcher,
             CancellationToken token)
         {
             var (image1, image2) = pair;

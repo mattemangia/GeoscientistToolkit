@@ -20,12 +20,12 @@ namespace GeoscientistToolkit;
 /// <summary>
 /// CPU-accelerated SIFT feature matcher using L2 distance, SIMD, and multi-threading.
 /// </summary>
-public class SiftFeatureMatcherSIMD : IDisposable
+public class SIFTFeatureMatcherSIMD : IDisposable
 {
     public bool EnableDiagnostics { get; set; }
     public Action<string> DiagnosticLogger { get; set; }
 
-    public SiftFeatureMatcherSIMD()
+    public SIFTFeatureMatcherSIMD()
     {
         Log("Initialized CPU-based SIFT feature matcher (SIMD-accelerated with fixed-ratio test).");
     }

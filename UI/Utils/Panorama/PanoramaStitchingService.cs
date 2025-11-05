@@ -199,7 +199,7 @@ namespace GeoscientistToolkit
             Log($" Total pairs to check: {pairs.Count}\n");
 
             int processed = 0;
-            using var matcher = new SiftFeatureMatcherSIMD { EnableDiagnostics = true };
+            using var matcher = new SIFTFeatureMatcherSIMD { EnableDiagnostics = true };
 
             var tasks = pairs.Select(async pair =>
             {
