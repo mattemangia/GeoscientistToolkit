@@ -1,7 +1,9 @@
 ﻿// GeoscientistToolkit/Business/Panorama/PanoramaStitchingService.cs
 //
 // ==========================================================================================
-// RESTORED to stable version and applied a targeted fix for the mirrored image order.
+// FINAL CONSOLIDATED VERSION:
+// This version includes the critical fix for mirrored image ordering (Quaternion.Conjugate)
+// along with the manual control point optimization logic and all previous enhancements.
 // ==========================================================================================
 
 using System;
@@ -77,7 +79,7 @@ namespace GeoscientistToolkit
         private readonly List<PanoramaImage> _images = new();
         private readonly Dictionary<Guid, SiftFeatures> _sift = new();
         private readonly object _runLock = new();
-        private readonly object _dataLock = new(); // Lock for thread-safe data access
+        private readonly object _dataLock = new();
         private Task _runningTask;
         
         public List<PanoramaImage> GetImages() { lock (_dataLock) { return _images.ToList(); } }
@@ -325,12 +327,7 @@ namespace GeoscientistToolkit
             var relative_q = MatrixToQuaternion(R);
             if (Math.Abs(relative_q.LengthSquared() - 1.0f) > 1e-4f) return;
 
-            // =================================================================
-            // CRITICAL FIX: The relative rotation was being applied in the wrong
-            // direction, causing the global layout to be mirrored (e.g., 3-2-1 instead of 1-2-3).
-            // Using the conjugate of the quaternion effectively inverts the rotation,
-            // correcting the order in which the panorama is assembled from the anchor.
-            // =================================================================
+            // THIS IS THE RESTORED, CRITICAL FIX for the mirrored image order.
             var new_cam2_rotation = Quaternion.Conjugate(relative_q) * cam1.Rotation;
 
             cam2.Rotation = Quaternion.Slerp(cam2.Rotation, new_cam2_rotation, 0.5f);
@@ -349,7 +346,13 @@ namespace GeoscientistToolkit
             var normPts1 = matches.Select(m => NormalizePoint(k1[m.QueryIndex], cam1)).ToList();
             var normPts2 = matches.Select(m => NormalizePoint(k2[m.TrainIndex], cam2)).ToList();
 
-            var rng = new Random();
+            // =================================================================
+            // CRITICAL FIX: Make the RANSAC process deterministic.
+            // By seeding the Random Number Generator with a constant value (e.g., 0),
+            // we ensure that the "random" selection of points is identical on every
+            // run, leading to consistent and repeatable stitching results.
+            // =================================================================
+            var rng = new Random(0); 
             List<FeatureMatch> bestInliers = new List<FeatureMatch>();
 
             for (int it = 0; it < maxIters; it++)
@@ -541,6 +544,87 @@ namespace GeoscientistToolkit
             }
             Log("");
         }
+        
+        public Task AddManualLinksAndRecomputeAsync(Guid img1Id, Guid img2Id, List<(Vector2 P1, Vector2 P2)> manualPairs)
+        {
+            return Task.Run(async () =>
+            {
+                try
+                {
+                    Log("══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════");
+                    Log($"→ Optimizing with {manualPairs.Count} manual link(s) between selected images...");
+                    State = PanoramaState.MatchingFeatures;
+
+                    SiftFeatures f1, f2;
+                    CameraModel cam1, cam2;
+                    PanoramaImage img1, img2;
+                    lock (_dataLock)
+                    {
+                        f1 = _sift[img1Id];
+                        f2 = _sift[img2Id];
+                        cam1 = _camera[img1Id];
+                        cam2 = _camera[img2Id];
+                        img1 = _images.First(i => i.Id == img1Id);
+                        img2 = _images.First(i => i.Id == img2Id);
+                    }
+                    
+                    var manualMatches = new List<FeatureMatch>();
+                    foreach (var (p1, p2) in manualPairs)
+                    {
+                        int bestIdx1 = -1, bestIdx2 = -1;
+                        float minDist1 = float.MaxValue, minDist2 = float.MaxValue;
+
+                        for (int i = 0; i < f1.KeyPoints.Count; i++)
+                        {
+                            float dist = Vector2.DistanceSquared(new Vector2(f1.KeyPoints[i].X, f1.KeyPoints[i].Y), p1);
+                            if (dist < minDist1) { minDist1 = dist; bestIdx1 = i; }
+                        }
+                        for (int i = 0; i < f2.KeyPoints.Count; i++)
+                        {
+                            float dist = Vector2.DistanceSquared(new Vector2(f2.KeyPoints[i].X, f2.KeyPoints[i].Y), p2);
+                            if (dist < minDist2) { minDist2 = dist; bestIdx2 = i; }
+                        }
+
+                        if (bestIdx1 != -1 && bestIdx2 != -1)
+                        {
+                            manualMatches.Add(new FeatureMatch { QueryIndex = bestIdx1, TrainIndex = bestIdx2, Distance = 0.1f });
+                            Log($"  - Manual match created: Img1-Feat{bestIdx1} ↔ Img2-Feat{bestIdx2}");
+                        }
+                    }
+
+                    if (manualMatches.Count < 8)
+                    {
+                        Log($"⚠️ Not enough valid manual matches found ({manualMatches.Count}) to form a robust link. Need at least 8.");
+                        State = PanoramaState.ReadyForPreview;
+                        return;
+                    }
+
+                    var (R, t, inliers) = FindPoseRANSAC(manualMatches, f1.KeyPoints, f2.KeyPoints, cam1, cam2, 100, 1.5f);
+
+                    if (R.HasValue && inliers.Count >= 8)
+                    {
+                        Log($"✓ Robust model found from manual points! Inliers: {inliers.Count}/{manualMatches.Count}");
+                        var H = cam2.K * R.Value * cam1.K_inv;
+                        Graph.AddEdge(img1, img2, inliers, H);
+                        Log("✅ Manual edge added to the stitch graph.");
+                        
+                        await EstimateCameraRotationsAsync(_cts.Token);
+                        State = PanoramaState.ReadyForPreview;
+                    }
+                    else
+                    {
+                        Log("✗ Failed to find a robust geometric model from manual points.");
+                        State = PanoramaState.ReadyForPreview;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    State = PanoramaState.Failed;
+                    Log($"❌ FATAL in manual linking: {ex.Message}");
+                    Logger.LogError($"[Panorama] {ex}");
+                }
+            });
+        }
 
         public async Task StartBlendingAsync(string path, int outputWidth = 4096)
         {
@@ -557,7 +641,7 @@ namespace GeoscientistToolkit
             var mainGroup = groups.OrderByDescending(g => g.Images.Count).First();
 
             int outW = outputWidth;
-            int outH = outputWidth / 2; // Maintain 2:1 aspect ratio for equirectangular
+            int outH = outputWidth / 2;
             byte[] blended = new byte[outW * outH * 4];
             int processedRows = 0;
 
@@ -569,9 +653,11 @@ namespace GeoscientistToolkit
                 {
                     for (int x = 0; x < outW; x++)
                     {
+                        // 1. Convert the output pixel coordinate (x,y) to a spherical angle (longitude, latitude)
                         float lon = (x / (float)outW) * 2.0f * MathF.PI - MathF.PI;
                         float lat = (y / (float)outH) * MathF.PI - MathF.PI / 2.0f;
 
+                        // 2. Convert the spherical angle into a 3D direction vector (a ray into the world)
                         var worldRay = new Vector3(
                             MathF.Cos(lat) * MathF.Sin(lon),
                             MathF.Sin(lat),
@@ -579,41 +665,45 @@ namespace GeoscientistToolkit
                         );
                         worldRay = Vector3.Normalize(worldRay);
 
-                        // --- NEW BLENDING LOGIC ---
-                        // Instead of taking the first pixel, we find all contributors and blend them.
                         var contributors = new List<(Vector4 color, float weight)>();
 
                         foreach (var img in groupImages)
                         {
                             var cam = _camera[img.Id];
+                            // 3. Transform the world ray into the local coordinate system of the current camera
                             var localRay = Vector3.Transform(worldRay, cam.Rotation);
                             
+                            // A point must be in front of the camera to be visible
                             if (localRay.Z <= 0) continue;
 
+                            // =================================================================
+                            // CRITICAL FIX: The rendering must use the correct pinhole camera
+                            // model to project the 3D ray back onto the flat source image.
+                            // The previous cylindrical math (Atan2) caused the fisheye distortion.
+                            // This is the correct and standard planar projection formula.
+                            // =================================================================
+                            
+                            // 4. Project the 3D ray onto the camera's normalized (Z=1) image plane
                             var u = localRay.X / localRay.Z;
                             var v = localRay.Y / localRay.Z;
-
+                            
+                            // 5. Convert from normalized coordinates to pixel coordinates
                             var pixelX = cam.Fx * u + cam.Cx;
                             var pixelY = cam.Fy * v + cam.Cy;
+
 
                             if (pixelX >= 0 && pixelX < img.Dataset.Width - 1 &&
                                 pixelY >= 0 && pixelY < img.Dataset.Height - 1)
                             {
                                 var color = SampleBilinear(img.Dataset.ImageData, img.Dataset.Width, img.Dataset.Height, pixelX, pixelY);
                                 
-                                // Calculate weight based on distance from image center (feathering)
+                                // Calculate feathering weight
                                 float dx = pixelX - cam.Cx;
                                 float dy = pixelY - cam.Cy;
-                                
-                                // Feathering band is 80% of the smaller image dimension from the center
                                 float featherRadius = Math.Min(cam.Cx, cam.Cy) * 0.8f;
                                 float dist = MathF.Sqrt(dx * dx + dy * dy);
-                                
-                                // Weight is 1.0 at center, 0.0 at the feathering edge
                                 float weight = Math.Max(0.0f, 1.0f - (dist / featherRadius));
-                                
-                                // Use a smoothstep function for a nicer falloff
-                                weight = weight * weight * (3.0f - 2.0f * weight);
+                                weight = weight * weight * (3.0f - 2.0f * weight); // Smoothstep
 
                                 if (weight > 0.001f)
                                 {
@@ -622,6 +712,7 @@ namespace GeoscientistToolkit
                             }
                         }
 
+                        // 6. Blend all contributing pixels
                         if (contributors.Count > 0)
                         {
                             Vector4 finalColor = Vector4.Zero;
@@ -642,7 +733,7 @@ namespace GeoscientistToolkit
                             blended[idx]     = (byte)Math.Clamp(finalColor.X, 0, 255);
                             blended[idx + 1] = (byte)Math.Clamp(finalColor.Y, 0, 255);
                             blended[idx + 2] = (byte)Math.Clamp(finalColor.Z, 0, 255);
-                            blended[idx + 3] = 255; // Alpha
+                            blended[idx + 3] = 255;
                         }
                     }
 
@@ -726,7 +817,6 @@ namespace GeoscientistToolkit
                             var ray = new Vector3((xs[i] - cam.Cx) / cam.Fx, (ys[i] - cam.Cy) / cam.Fy, 1);
                             var worldRay = Vector3.TransformNormal(Vector3.Normalize(ray), camToWorld);
                             
-                            // RESTORED: This is the original, stable projection logic. No hacks.
                             float u = cam.Focal * MathF.Atan2(worldRay.X, worldRay.Z);
                             float v = cam.Focal * MathF.Asin(Math.Clamp(worldRay.Y, -1f, 1f));
 
