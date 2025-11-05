@@ -1,4 +1,6 @@
 ﻿// GeoscientistToolkit/Business/Panorama/PanoramaData.cs
+// FINAL CORRECTION: The StitchGraph was incorrectly using Matrix.Transpose instead of a
+// proper Matrix.Invert for the reverse edge, causing rotation estimation to fail.
 
 using System;
 using System.Collections.Generic;
@@ -6,7 +8,7 @@ using System.Numerics;
 using GeoscientistToolkit.Business.Photogrammetry.Math;
 using GeoscientistToolkit.Data.Image;
 
-namespace GeoscientistToolkit.Business.Panorama;
+namespace GeoscientistToolkit;
 
 public enum PanoramaState
 {
@@ -44,6 +46,12 @@ public struct KeyPoint
     public float Size;
     public float Angle;
     public int Octave;
+
+    public float Response;
+    // --- Fields required for multi-scale feature detection ---
+    public int Level;      // The pyramid level where the feature was detected
+    public int LevelX;     // The feature's X-coordinate on its pyramid level
+    public int LevelY;     // The feature's Y-coordinate on its pyramid level
 }
 
 public class DetectedFeatures
@@ -62,7 +70,8 @@ public class FeatureMatch
 public class StitchGraph
 {
     private readonly Dictionary<Guid, PanoramaImage> _nodes = new();
-    internal readonly Dictionary<Guid, List<(Guid neighbor, List<FeatureMatch> matches, Matrix3x3 relativeRotation)>> _adj = new();
+    // This now stores the homography, not a pre-calculated rotation
+    internal readonly Dictionary<Guid, List<(Guid neighbor, List<FeatureMatch> matches, Matrix3x3 homography)>> _adj = new();
     
     public ICollection<PanoramaImage> Images => _nodes.Values;
 
@@ -80,17 +89,21 @@ public class StitchGraph
         }
     }
 
-    public void AddEdge(PanoramaImage img1, PanoramaImage img2, List<FeatureMatch> matches, Matrix3x3 relativeRotation)
+    public void AddEdge(PanoramaImage img1, PanoramaImage img2, List<FeatureMatch> matches, Matrix3x3 homography)
     {
         lock (_adj)
         {
             if (!_adj.ContainsKey(img1.Id) || !_adj.ContainsKey(img2.Id)) return;
             
-            _adj[img1.Id].Add((img2.Id, matches, relativeRotation));
+            // Add the forward edge (img1 -> img2) with the calculated homography
+            _adj[img1.Id].Add((img2.Id, matches, homography));
             
-            // The inverse of a rotation matrix is its transpose.
-            var invRotation = Matrix3x3.Transpose(relativeRotation);
-            _adj[img2.Id].Add((img1.Id, matches, invRotation));
+            // THE FIX: Calculate the true inverse of the homography for the reverse edge.
+            if (Matrix3x3.Invert(homography, out var invHomography))
+            {
+                // Add the reverse edge (img2 -> img1) with the inverted homography
+                _adj[img2.Id].Add((img1.Id, matches, invHomography));
+            }
         }
     }
     
@@ -103,7 +116,6 @@ public class StitchGraph
             _nodes.Remove(nodeId);
             _adj.Remove(nodeId);
 
-            // Remove all edges from other nodes that point to the removed node
             foreach (var key in _adj.Keys)
             {
                 _adj[key].RemoveAll(edge => edge.neighbor == nodeId);

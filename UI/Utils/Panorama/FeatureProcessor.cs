@@ -35,7 +35,7 @@ namespace GeoscientistToolkit
         {
             _service.Log("Detecting SIFT features for photogrammetry...");
 
-            using var detector = new SiftFeatureDetectorCL
+            using var detector = new SiftFeatureDetectorSIMD
             {
                 EnableDiagnostics = true,
                 DiagnosticLogger = msg => Logger.Log(msg)
@@ -80,7 +80,7 @@ namespace GeoscientistToolkit
             var pairs = GenerateImagePairs(images);
             int processedCount = 0;
 
-            using var matcher = new SiftFeatureMatcherCL();
+            using var matcher = new SiftFeatureMatcherSIMD();
 
             var tasks = pairs.Select(async pair =>
             {
@@ -110,12 +110,12 @@ namespace GeoscientistToolkit
 
             var dummyFeatures1 = new DetectedFeatures
             {
-                KeyPoints = points.Select(p => new Business.Panorama.KeyPoint { X = p.P1.X, Y = p.P1.Y }).ToList()
+                KeyPoints = points.Select(p => new KeyPoint { X = p.P1.X, Y = p.P1.Y }).ToList()
             };
 
             var dummyFeatures2 = new DetectedFeatures
             {
-                KeyPoints = points.Select(p => new Business.Panorama.KeyPoint { X = p.P2.X, Y = p.P2.Y }).ToList()
+                KeyPoints = points.Select(p => new KeyPoint { X = p.P2.X, Y = p.P2.Y }).ToList()
             };
 
             var tempImg1 = new PhotogrammetryImage(img1.Dataset)
@@ -153,7 +153,7 @@ namespace GeoscientistToolkit
         private async Task ProcessImagePair(
             (PhotogrammetryImage img1, PhotogrammetryImage img2) pair,
             PhotogrammetryGraph graph,
-            SiftFeatureMatcherCL matcher,
+            SiftFeatureMatcherSIMD matcher,
             CancellationToken token)
         {
             var (image1, image2) = pair;

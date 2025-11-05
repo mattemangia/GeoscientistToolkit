@@ -2,7 +2,7 @@
 
 using System.Numerics;
 using GeoscientistToolkit.Business.Photogrammetry.Math;
-
+using MathNet.Numerics.LinearAlgebra;
 namespace GeoscientistToolkit
 {
     /// <summary>
@@ -50,6 +50,20 @@ namespace GeoscientistToolkit
 
         public static Matrix3x3 ToMatrix3x3(this double[,] m)
         {
+            return new Matrix3x3(
+                (float)m[0, 0], (float)m[0, 1], (float)m[0, 2],
+                (float)m[1, 0], (float)m[1, 1], (float)m[1, 2],
+                (float)m[2, 0], (float)m[2, 1], (float)m[2, 2]
+            );
+        }
+        
+        public static Matrix3x3 ToMatrix3x3(this Matrix<double> m)
+        {
+            if (m.RowCount != 3 || m.ColumnCount != 3)
+            {
+                throw new ArgumentException("Matrix must be 3x3 to convert to Matrix3x3.", nameof(m));
+            }
+
             return new Matrix3x3(
                 (float)m[0, 0], (float)m[0, 1], (float)m[0, 2],
                 (float)m[1, 0], (float)m[1, 1], (float)m[1, 2],

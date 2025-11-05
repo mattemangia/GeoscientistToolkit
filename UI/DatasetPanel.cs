@@ -58,7 +58,7 @@ public class DatasetPanel : BasePanel
         // ADDED: Manage and draw the wizards if they exist
         if (_panoramaWizard != null)
         {
-            _panoramaWizard.Submit();
+            _panoramaWizard.Draw();
             if (!_panoramaWizard.IsOpen)
                 _panoramaWizard = null;
         }

@@ -41,10 +41,10 @@ public class PanoramaManager
     /// </summary>
     public void SubmitUI()
     {
-        // The Submit method inside the panel handles its own lifecycle, including closing.
+        // CORRECTED: The Draw method handles rendering and lifecycle. Submit is for actions.
         if (_wizardPanel != null)
         {
-            _wizardPanel.Submit();
+            _wizardPanel.Draw();
             if (!_wizardPanel.IsOpen)
             {
                 _wizardPanel = null; // Clean up after closing

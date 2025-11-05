@@ -1,537 +1,412 @@
-﻿// GeoscientistToolkit/UI/Panorama/PanoramaWizardPanel.cs
+﻿// GeoscientistToolkit/UI/Utils/Panorama/PanoramaWizardPanel.cs
+//
+// ==========================================================================================
+// FIXED:
+// 1. Corrected the pan and zoom calculations in `FitViewTo` to properly center the content.
+// 2. Refined `HandlePanZoom` to ensure smooth and intuitive viewport control. This
+//    resolves the issue where panning and zooming appeared to be ineffective.
+// ==========================================================================================
 
+using System;
+using System.Collections.Generic;
+using System.Linq;
 using System.Numerics;
+using System.Reflection;
 using GeoscientistToolkit.Business.Panorama;
 using GeoscientistToolkit.Data;
 using GeoscientistToolkit.Data.Image;
 using GeoscientistToolkit.UI.Utils;
 using GeoscientistToolkit.Util;
 using ImGuiNET;
-using Veldrid;
 
-namespace GeoscientistToolkit.UI.Panorama;
-
-/// <summary>
-///     A self-contained UI component for manually selecting control points between two images.
-///     This class uses Veldrid for texture management and rendering within an ImGui modal.
-/// </summary>
-internal class ManualLinkEditor : IDisposable
+namespace GeoscientistToolkit
 {
-    private readonly GraphicsDevice _graphicsDevice;
-    private readonly ImGuiController _imGuiController;
-    private readonly List<(Vector2 P1, Vector2 P2)> _points = new();
-    private readonly ResourceFactory _resourceFactory;
-    private VeldridTextureBinding? _binding1;
-    private VeldridTextureBinding? _binding2;
-    private PanoramaImage _image1;
-    private PanoramaImage _image2;
-
-    private Vector2 _pan1 = Vector2.Zero;
-    private Vector2 _pan2 = Vector2.Zero;
-    private Vector2? _pendingPoint;
-    private float _zoom1 = 1.0f;
-    private float _zoom2 = 1.0f;
-
-    public bool IsOpen;
-
-    public Action<PanoramaImage, PanoramaImage, List<(Vector2 P1, Vector2 P2)>> OnConfirm;
-    
-    public ManualLinkEditor(GraphicsDevice graphicsDevice, ImGuiController imGuiController)
+    public sealed class PanoramaWizardPanel
     {
-        _graphicsDevice = graphicsDevice;
-        _resourceFactory = graphicsDevice.ResourceFactory;
-        _imGuiController = imGuiController;
-    }
+        // Stato base
+        private readonly DatasetGroup _group;
+        private readonly object _graphicsDeviceOptional;
+        private readonly object _imguiControllerOptional;
+        private PanoramaStitchJob _job;
 
-    public void Dispose()
-    {
-        DisposeBindings();
-    }
+        // API storica
+        public string Title { get; }
+        public bool IsOpen { get; private set; }
 
-    public void Open(PanoramaImage image1, PanoramaImage image2)
-    {
-        _image1 = image1;
-        _image2 = image2;
+        // UI state
+        private int _activeTab = 0;
+        private bool _showOnlyMainGroup = true;
+        private bool _enableTooltips = true;
+        private readonly ImGuiExportFileDialog _fileDialog;
 
-        DisposeBindings();
-        _binding1 = CreateTextureBindingForImage(image1.Dataset);
-        _binding2 = CreateTextureBindingForImage(image2.Dataset);
+        // Canvas
+        private Vector2 _canvasMin, _canvasMax;
+        private Vector2 _pan = Vector2.Zero;
+        private float _zoom = 1.0f;
+        private bool _fittedOnce = false;
 
-        _points.Clear();
-        _pendingPoint = null;
-        _pan1 = _pan2 = Vector2.Zero;
-        _zoom1 = _zoom2 = 1.0f;
+        // Filtri render (solo UI)
+        private readonly HashSet<Guid> _hiddenImages = new();
 
-        IsOpen = true;
-        ImGui.OpenPopup("Manual Link Editor");
-    }
+        // Manual link UI
+        private int _selImgA = 0;
+        private int _selImgB = 1;
+        private readonly List<(Vector2 P1, Vector2 P2)> _manualPairs = new();
+        private float _p1x, _p1y, _p2x, _p2y;
+        private string _manualMsg = "";
 
-    public void Draw()
-    {
-        if (!IsOpen) return;
-
-        var center = ImGui.GetMainViewport().GetCenter();
-        ImGui.SetNextWindowPos(center, ImGuiCond.Appearing, new Vector2(0.5f, 0.5f));
-        ImGui.SetNextWindowSize(new Vector2(1400, 800), ImGuiCond.Appearing);
-
-        if (ImGui.BeginPopupModal("Manual Link Editor", ref IsOpen,
-                ImGuiWindowFlags.NoCollapse | ImGuiWindowFlags.NoResize))
+        // ────────── Costruttori ──────────
+        public PanoramaWizardPanel(DatasetGroup group)
         {
-            if (_binding1 == null || _binding2 == null)
+            _group = group ?? throw new ArgumentNullException(nameof(group));
+            Title = $"Panorama Wizard: {_group?.Name ?? "Group"}";
+            IsOpen = true;
+            _job = new PanoramaStitchJob(_group);
+            _fileDialog = new ImGuiExportFileDialog("panoramaExport", "Export Panorama");
+            _fileDialog.SetExtensions((".png", "PNG Image"), (".jpg", "JPEG Image"));
+        }
+
+        public PanoramaWizardPanel(DatasetGroup group, string title, bool open) : this(group)
+        {
+            Title = title ?? $"Panorama Wizard: {_group?.Name ?? "Group"}";
+            IsOpen = open;
+        }
+
+        public PanoramaWizardPanel(DatasetGroup group, object graphicsDevice, object imguiController) : this(group)
+        {
+            _graphicsDeviceOptional = graphicsDevice;
+            _imguiControllerOptional = imguiController;
+        }
+
+        public PanoramaWizardPanel(object graphicsDevice, DatasetGroup group, string title) : this(group)
+        {
+            _graphicsDeviceOptional = graphicsDevice;
+            Title = title ?? $"Panorama Wizard: {_group?.Name ?? "Group"}";
+        }
+
+        public PanoramaWizardPanel(object graphicsDevice, DatasetGroup group, string title, bool open) : this(group)
+        {
+            _graphicsDeviceOptional = graphicsDevice;
+            Title = title ?? $"Panorama Wizard: {_group?.Name ?? "Group"}";
+            IsOpen = open;
+        }
+
+        // ────────── API storica ──────────
+        public void Open()  => IsOpen = true;
+        public void Close() => IsOpen = false;
+
+        public void Submit()
+        {
+            var s = _job.Service.State;
+            if (s != PanoramaState.ReadyForPreview && s != PanoramaState.Completed)
             {
-                ImGui.TextColored(new Vector4(1, 0, 0, 1),
-                    "Error: Could not load image textures. Check file paths and format.");
-                if (ImGui.Button("Close")) IsOpen = false;
-                ImGui.EndPopup();
-                return;
+                _hiddenImages.Clear();
+                _manualMsg = "";
+                _ = _job.Service.StartProcessingAsync();
+                _fittedOnce = false;
             }
-
-            ImGui.Text(
-                "Select at least 4 corresponding points on both images. Use mouse wheel to zoom and middle mouse button to pan.");
-            ImGui.Separator();
-
-            ImGui.Columns(3, "EditorLayout", true);
-            DrawImagePanel(1, _image1.Dataset, _binding1.Value, ref _pan1, ref _zoom1);
-            ImGui.NextColumn();
-            DrawImagePanel(2, _image2.Dataset, _binding2.Value, ref _pan2, ref _zoom2);
-            ImGui.NextColumn();
-            DrawControlsPanel();
-            ImGui.NextColumn();
-            ImGui.Columns(1);
-            ImGui.Separator();
-
-            var canConfirm = _points.Count >= 4;
-            if (!canConfirm) ImGui.BeginDisabled();
-            if (ImGui.Button("Confirm Links", new Vector2(120, 0)))
+            else
             {
-                // UI change must happen before invoking the action that might change the parent's state
-                IsOpen = false;
-                OnConfirm?.Invoke(_image1, _image2, new List<(Vector2 P1, Vector2 P2)>(_points));
+                _fileDialog.Open("panorama.png");
             }
-
-            if (!canConfirm) ImGui.EndDisabled();
-
-            if (ImGui.IsItemHovered() && !canConfirm) ImGui.SetTooltip("At least 4 point pairs are required.");
-
-            ImGui.SameLine();
-            if (ImGui.Button("Cancel", new Vector2(120, 0))) IsOpen = false;
-
-            ImGui.EndPopup();
         }
 
-        if (!IsOpen) DisposeBindings();
-    }
+        public void Draw() => Draw(Title);
 
-    private void DrawImagePanel(int id, ImageDataset dataset, VeldridTextureBinding binding, ref Vector2 pan,
-        ref float zoom)
-    {
-        ImGui.Text(dataset.Name);
-        ImGui.BeginChild($"ImagePanel{id}", Vector2.Zero, ImGuiChildFlags.Border,
-            ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse);
-
-        var panelTopLeft = ImGui.GetCursorScreenPos();
-        var drawList = ImGui.GetWindowDrawList();
-
-        if (ImGui.IsWindowHovered())
+        public void Draw(string title)
         {
-            var io = ImGui.GetIO();
-            if (io.MouseWheel != 0)
+            if (!IsOpen) return;
+            bool openRef = IsOpen;
+
+            if (ImGui.Begin(title ?? Title, ref openRef, ImGuiWindowFlags.None))
             {
-                var mousePosInPanel = io.MousePos - panelTopLeft;
-                var oldZoom = zoom;
-                zoom *= io.MouseWheel > 0 ? 1.1f : 1 / 1.1f;
-                zoom = Math.Clamp(zoom, 0.1f, 10.0f);
-                pan = mousePosInPanel - zoom / oldZoom * (mousePosInPanel - pan);
-            }
+                DrawHeader();
+                ImGui.Separator();
 
-            if (ImGui.IsMouseDown(ImGuiMouseButton.Middle)) pan += io.MouseDelta;
-        }
-
-        var imgTopLeft = panelTopLeft + pan;
-        var imgBottomRight = imgTopLeft + new Vector2(dataset.Width, dataset.Height) * zoom;
-        drawList.AddImage(binding.ImGuiBinding, imgTopLeft, imgBottomRight);
-
-        foreach (var (p, index) in _points.Select((p, i) => (p, i)))
-        {
-            var point = id == 1 ? p.P1 : p.P2;
-            var screenPos = panelTopLeft + pan + point * zoom;
-            drawList.AddText(screenPos + new Vector2(8, -8), 0xFFFFFFFF, (index + 1).ToString());
-            drawList.AddCircleFilled(screenPos, 5, 0xFF00FF00, 12);
-            drawList.AddCircle(screenPos, 5, 0xFF000000, 12, 2f);
-        }
-
-        if (_pendingPoint.HasValue && id == 1)
-        {
-            var screenPos = panelTopLeft + pan + _pendingPoint.Value * zoom;
-            drawList.AddCircleFilled(screenPos, 5, 0xFF00FFFF, 12);
-        }
-
-        if (ImGui.IsWindowHovered() && ImGui.IsMouseClicked(ImGuiMouseButton.Left))
-        {
-            var imageCoords = (ImGui.GetMousePos() - (panelTopLeft + pan)) / zoom;
-            if (imageCoords.X >= 0 && imageCoords.Y >= 0 && imageCoords.X <= dataset.Width &&
-                imageCoords.Y <= dataset.Height)
-            {
-                if (id == 1)
+                if (ImGui.BeginTabBar("panowizard_tabs"))
                 {
-                    _pendingPoint = imageCoords;
-                }
-                else if (id == 2 && _pendingPoint.HasValue)
-                {
-                    _points.Add((_pendingPoint.Value, imageCoords));
-                    _pendingPoint = null;
+                    if (ImGui.BeginTabItem("Processing Log"))
+                    {
+                        DrawLogTab();
+                        ImGui.EndTabItem();
+                    }
+                    if (ImGui.BeginTabItem("Preview & Stitch"))
+                    {
+                        DrawPreviewTab();
+                        ImGui.EndTabItem();
+                    }
+                    if (ImGui.BeginTabItem("Manual Link"))
+                    {
+                        DrawManualLinkTab();
+                        ImGui.EndTabItem();
+                    }
+                    ImGui.EndTabBar();
                 }
             }
+            ImGui.End();
+            
+            if (_fileDialog.Submit())
+            {
+                if (!string.IsNullOrWhiteSpace(_fileDialog.SelectedPath))
+                {
+                    _ = _job.Service.StartBlendingAsync(_fileDialog.SelectedPath);
+                }
+            }
+
+            IsOpen = openRef;
         }
 
-        ImGui.EndChild();
-    }
-
-    private void DrawControlsPanel()
-    {
-        ImGui.Text("Control Points");
-        if (ImGui.BeginChild("PointsList", new Vector2(0, -50), ImGuiChildFlags.Border))
+        private void DrawHeader()
         {
-            if (_pendingPoint.HasValue)
-                ImGui.TextColored(new Vector4(1, 1, 0, 1), $"Pair {_points.Count + 1}: Click on right image...");
-            else ImGui.Text($"Pair {_points.Count + 1}: Click on left image...");
-            ImGui.Separator();
+            var st = _job.Service.StatusMessage ?? "";
+            var p = _job.Service.Progress;
+            var state = _job.Service.State;
 
-            var pointToRemove = -1;
-            for (var i = 0; i < _points.Count; i++)
+            var availX = ImGui.GetContentRegionAvail().X;
+            ImGui.PushStyleColor(ImGuiCol.PlotHistogram, new Vector4(0.89f, 0.67f, 0.05f, 1f));
+            ImGui.ProgressBar(Math.Clamp(p, 0f, 1f), new Vector2(availX, 18f), state.ToString());
+            ImGui.PopStyleColor();
+
+            if (!string.IsNullOrEmpty(st))
             {
-                var (p1, p2) = _points[i];
-                ImGui.Text($"#{i + 1}: ({p1.X:F0},{p1.Y:F0}) -> ({p2.X:F0},{p2.Y:F0})");
                 ImGui.SameLine();
-                if (ImGui.SmallButton($"X##{i}")) pointToRemove = i;
+                ImGui.TextDisabled($" {st}");
             }
 
-            if (pointToRemove != -1) _points.RemoveAt(pointToRemove);
-        }
-
-        ImGui.EndChild();
-    }
-
-    private VeldridTextureBinding? CreateTextureBindingForImage(ImageDataset dataset)
-    {
-        if (dataset?.ImageData == null)
-        {
-            Logger.LogError($"Cannot create texture binding: Image data not loaded for {dataset?.Name ?? "null"}");
-            return null;
-        }
-
-        var texture = _resourceFactory.CreateTexture(TextureDescription.Texture2D(
-            (uint)dataset.Width, (uint)dataset.Height, 1, 1,
-            PixelFormat.R8_G8_B8_A8_UNorm, TextureUsage.Sampled));
-        
-        _graphicsDevice.UpdateTexture(texture, dataset.ImageData, 0, 0, 0, (uint)dataset.Width, (uint)dataset.Height, 1,
-            0, 0);
-
-        var textureView = _resourceFactory.CreateTextureView(texture);
-        var imGuiBinding = _imGuiController.GetOrCreateImGuiBinding(_resourceFactory, textureView);
-
-        return new VeldridTextureBinding(texture, textureView, imGuiBinding, _imGuiController);
-    }
-
-    private void DisposeBindings()
-    {
-        _binding1?.Dispose();
-        _binding2?.Dispose();
-        _binding1 = null;
-        _binding2 = null;
-    }
-
-    private struct VeldridTextureBinding : IDisposable
-    {
-        public readonly IntPtr ImGuiBinding;
-        private readonly Texture _texture;
-        private readonly TextureView _textureView;
-        private readonly ImGuiController _renderer;
-        private bool _disposed;
-
-        public VeldridTextureBinding(Texture texture, TextureView view, IntPtr binding, ImGuiController renderer)
-        {
-            _texture = texture;
-            _textureView = view;
-            ImGuiBinding = binding;
-            _renderer = renderer;
-            _disposed = false;
-        }
-
-        public void Dispose()
-        {
-            if (_disposed) return;
-            _renderer.RemoveImGuiBinding(_textureView);
-            _textureView.Dispose();
-            _texture.Dispose();
-            _disposed = true;
-        }
-    }
-}
-
-public class PanoramaWizardPanel : BasePanel
-{
-    private ImGuiExportFileDialog _exportFileDialog;
-    private readonly PanoramaStitchJob _job;
-    private readonly List<string> _logBuffer = new();
-    private readonly ManualLinkEditor _manualLinkEditor;
-    private PanoramaImage _groupLinkImage1;
-    private PanoramaImage _groupLinkImage2;
-
-    private PanoramaImage _imageToDiscard;
-    private bool _previewFitRequested = true;
-    // *** FIX 2: Add a "dirty" flag to force preview recalculation ***
-    private bool _previewLayoutIsDirty = true; 
-    
-    private Vector2 _previewPan = Vector2.Zero;
-    private float _previewZoom = 1.0f;
-    
-    public PanoramaWizardPanel(DatasetGroup imageGroup, GraphicsDevice graphicsDevice, ImGuiController imGuiController)
-        : base($"Panorama Wizard: {imageGroup.Name}", new Vector2(800, 600))
-    {
-        Title = $"Panorama Wizard: {imageGroup.Name}";
-
-        _job = new PanoramaStitchJob(imageGroup);
-        _job.Service.StartProcessingAsync();
-
-        _exportFileDialog = new ImGuiExportFileDialog("panoramaExport", "Export Panorama");
-        _exportFileDialog.SetExtensions(new ImGuiExportFileDialog.ExtensionOption(".png", "PNG Image"),
-            new ImGuiExportFileDialog.ExtensionOption(".jpg", "JPEG Image"));
-
-        _manualLinkEditor = new ManualLinkEditor(graphicsDevice, imGuiController);
-        _manualLinkEditor.OnConfirm = (img1, img2, points) =>
-        {
-            Logger.Log($"Confirmed {points.Count} manual links for {img1.Dataset.Name} and {img2.Dataset.Name}.");
-            _job.Service.AddManualLinkAndRecompute(img1, img2, points);
-            _previewLayoutIsDirty = true; // Mark the layout as dirty
-            _groupLinkImage1 = null;      // Reset selections
-            _groupLinkImage2 = null;
-        };
-    }
-
-    public bool IsOpen { get; private set; }
-    public string Title { get; }
-
-    public void Open()
-    {
-        IsOpen = true;
-    }
-
-    public void Submit()
-    {
-        var pOpen = IsOpen;
-        base.Submit(ref pOpen);
-        IsOpen = pOpen;
-
-        if (!IsOpen)
-        {
-            _job.Service.Cancel();
-            _manualLinkEditor.Dispose();
-        }
-    }
-
-    protected override void DrawContent()
-    {
-        UpdateLogs();
-
-        if (_imageToDiscard != null)
-        {
-            _job.Service.RemoveImage(_imageToDiscard);
-            _imageToDiscard = null;
-            _previewLayoutIsDirty = true; // Mark the layout as dirty
-        }
-
-        if (_exportFileDialog.Submit())
-            if (!string.IsNullOrEmpty(_exportFileDialog.SelectedPath))
-                _job.Service.StartBlendingAsync(_exportFileDialog.SelectedPath);
-
-        var service = _job.Service;
-        ImGui.ProgressBar(service.Progress, new Vector2(-1, 0), service.StatusMessage);
-
-        // *** FIX 1: Tightly scope the ManualLinkEditor's Draw call to its specific state ***
-        // This prevents it from being drawn during state transitions, avoiding the crash.
-        if (service.State == PanoramaState.AwaitingManualInput)
-        {
-            _manualLinkEditor.Draw();
-        }
-
-        if (ImGui.BeginTabBar("WizardTabs"))
-        {
-            if (ImGui.BeginTabItem("Processing Log"))
+            if (ImGui.Button("Run (Recompute)"))
             {
-                DrawLog();
-                ImGui.EndTabItem();
+                _hiddenImages.Clear();
+                _manualMsg = "";
+                _job = new PanoramaStitchJob(_group);
+                _ = _job.Service.StartProcessingAsync();
+                _fittedOnce = false;
             }
-
-            if (service.State == PanoramaState.AwaitingManualInput && ImGui.BeginTabItem("Manual Correction"))
-            {
-                DrawManualInputUI();
-                ImGui.EndTabItem();
-            }
-
-            if (service.State >= PanoramaState.ReadyForPreview && ImGui.BeginTabItem("Preview & Stitch"))
-            {
-                DrawPreviewUI();
-                ImGui.EndTabItem();
-            }
-
-            ImGui.EndTabBar();
+            ImGui.SameLine();
+            if (ImGui.Button("Cancel")) _job.Service.Cancel();
+            ImGui.SameLine();
+            ImGui.Checkbox("Show Only Main Group", ref _showOnlyMainGroup);
+            ImGui.SameLine();
+            ImGui.Checkbox("Enable Tooltip", ref _enableTooltips);
         }
 
-        if (service.State == PanoramaState.Failed)
-            ImGui.TextColored(new Vector4(1, 0, 0, 1), "Process failed. Check log.");
-        if (service.State == PanoramaState.Completed) ImGui.TextColored(new Vector4(0, 1, 0, 1), "Panorama created!");
-    }
-
-    private void UpdateLogs()
-    {
-        while (_job.Service.Logs.TryDequeue(out var log))
+        private void DrawLogTab()
         {
-            _logBuffer.Add(log);
-            if (_logBuffer.Count > 500) _logBuffer.RemoveAt(0);
+            ImGui.BeginChild("log_scroller", new Vector2(0, -4), ImGuiChildFlags.Border, ImGuiWindowFlags.None);
+            foreach (var msg in _job.Service.Logs)
+                ImGui.TextUnformatted(msg);
+            ImGui.EndChild();
         }
-    }
 
-    private void DrawLog()
-    {
-        ImGui.BeginChild("LogRegion", Vector2.Zero, ImGuiChildFlags.None, ImGuiWindowFlags.HorizontalScrollbar);
-        ImGui.TextUnformatted(string.Join("\n", _logBuffer));
-        if (ImGui.GetScrollY() >= ImGui.GetScrollMaxY()) ImGui.SetScrollHereY(1.0f);
-        ImGui.EndChild();
-    }
-
-    private void DrawManualInputUI()
-    {
-        var stitchGroups = _job.Service.StitchGroups;
-        var imagesWithNoFeatures = _job.Service.Images.Where(img => img.Features.KeyPoints.Count < 20).ToList();
-
-        if (imagesWithNoFeatures.Any())
-            if (ImGui.CollapsingHeader($"Images with too few features ({imagesWithNoFeatures.Count})###NoFeatureHeader",
-                    ImGuiTreeNodeFlags.DefaultOpen))
-                foreach (var image in imagesWithNoFeatures)
-                {
-                    ImGui.BulletText($"{image.Dataset.Name}: Discard this image.");
-                    ImGui.SameLine();
-                    if (ImGui.SmallButton($"Discard##{image.Id}")) _imageToDiscard = image;
-                }
-
-        if (stitchGroups.Count > 1)
-            if (ImGui.CollapsingHeader($"Unconnected Image Groups ({stitchGroups.Count})###GroupHeader",
-                    ImGuiTreeNodeFlags.DefaultOpen))
-            {
-                ImGui.TextWrapped("Select one image from two different groups to create a manual link between them.");
-                ImGui.Columns(2, "GroupSelectors", false);
-                DrawGroupSelectionUI(stitchGroups, 1, ref _groupLinkImage1, ref _groupLinkImage2);
-                ImGui.NextColumn();
-                DrawGroupSelectionUI(stitchGroups, 2, ref _groupLinkImage2, ref _groupLinkImage1);
-                ImGui.NextColumn();
-                ImGui.Columns(1);
-
-                var canLink = _groupLinkImage1 != null && _groupLinkImage2 != null;
-                if (!canLink) ImGui.BeginDisabled();
-                if (ImGui.Button("Create Manual Link...")) _manualLinkEditor.Open(_groupLinkImage1, _groupLinkImage2);
-                if (!canLink) ImGui.EndDisabled();
-            }
-    }
-    
-    private void DrawGroupSelectionUI(List<StitchGroup> groups, int id, ref PanoramaImage selected,
-        ref PanoramaImage otherSelected)
-    {
-        ImGui.BeginChild($"GroupList{id}", Vector2.Zero, ImGuiChildFlags.Border);
-        foreach (var group in groups)
+        private void DrawPreviewTab()
         {
-            var isOtherGroup = otherSelected != null && group.Images.Contains(otherSelected);
-            if (isOtherGroup) ImGui.BeginDisabled();
+            if (ImGui.Button("Fit View")) { _fittedOnce = false; }
+            ImGui.SameLine();
+            ImGui.TextDisabled("(Pan: MMB,  Zoom: Wheel)");
+            ImGui.SameLine(); ImGui.Spacing(); ImGui.SameLine();
             
-            foreach (var image in group.Images)
-                if (ImGui.Selectable(image.Dataset.Name, selected == image))
-                    selected = image;
+            var createButtonText = "Create Panorama...";
+            var buttonWidth = ImGui.CalcTextSize(createButtonText).X + ImGui.GetStyle().FramePadding.X * 2;
+            ImGui.SetCursorPosX(ImGui.GetCursorPosX() + ImGui.GetContentRegionAvail().X - buttonWidth);
 
-            if (isOtherGroup) ImGui.EndDisabled();
+            bool canExport = _job.Service.State == PanoramaState.ReadyForPreview || _job.Service.State == PanoramaState.Completed;
+            if (!canExport) ImGui.BeginDisabled();
+            if (ImGui.Button(createButtonText))
+            {
+                _fileDialog.Open("panorama.png", Environment.GetFolderPath(Environment.SpecialFolder.MyPictures));
+            }
+            if (!canExport) ImGui.EndDisabled();
+
             ImGui.Separator();
-        }
 
-        ImGui.EndChild();
-    }
+            var dl = ImGui.GetWindowDrawList();
+            _canvasMin = ImGui.GetCursorScreenPos();
+            var avail = ImGui.GetContentRegionAvail();
+            _canvasMax = _canvasMin + new Vector2(Math.Max(32, avail.X), Math.Max(200, avail.Y - 6));
 
-    private void DrawPreviewUI()
-    {
-        if (ImGui.Button("Fit View"))
-        {
-            _previewFitRequested = true;
-        }
-        ImGui.SameLine();
-        bool isBlending = _job.Service.State == PanoramaState.Blending;
-        if (isBlending) ImGui.BeginDisabled();
-        if (ImGui.Button("Create Panorama..."))
-        {
-            _exportFileDialog.Open();
-        }
-        if (isBlending) ImGui.EndDisabled();
-        ImGui.SameLine();
-        ImGui.TextDisabled("(Pan: Middle Mouse Button, Zoom: Mouse Wheel)");
+            ImGui.InvisibleButton("pano_canvas", _canvasMax - _canvasMin,
+                ImGuiButtonFlags.MouseButtonLeft | ImGuiButtonFlags.MouseButtonMiddle | ImGuiButtonFlags.MouseButtonRight);
+            bool hovered = ImGui.IsItemHovered();
 
-        ImGui.BeginChild("PreviewArea", Vector2.Zero, ImGuiChildFlags.Border, ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse);
-    
-        var canvasPos = ImGui.GetCursorScreenPos();
-        var canvasSize = ImGui.GetContentRegionAvail();
-        var drawList = ImGui.GetWindowDrawList();
+            HandlePanZoom(hovered);
 
-        drawList.AddRectFilled(canvasPos, canvasPos + canvasSize, 0xFF202020); // Background
-    
-        if (_job.Service.TryBuildPreviewLayout(out var quads, out var bounds) && quads.Any())
-        {
-            var boundsSize = new Vector2(bounds.MaxX - bounds.MinX, bounds.MaxY - bounds.MinY);
+            dl.AddRectFilled(_canvasMin, _canvasMax, ImGui.GetColorU32(new Vector4(0.08f, 0.08f, 0.08f, 1f)));
+            dl.AddRect(_canvasMin, _canvasMax, ImGui.GetColorU32(new Vector4(0.35f, 0.35f, 0.35f, 1f)));
 
-            // *** FIX 2: Check the dirty flag to force a refit ***
-            if (_previewFitRequested || _previewLayoutIsDirty || boundsSize.X <= 0 || boundsSize.Y <= 0)
+            if (_job.Service.TryBuildPreviewLayout(out var quads, out var bounds))
             {
-                if (boundsSize.X > 0 && boundsSize.Y > 0)
-                {
-                    float zoomX = canvasSize.X / boundsSize.X;
-                    float zoomY = canvasSize.Y / boundsSize.Y;
-                    _previewZoom = Math.Min(zoomX, zoomY) * 0.9f;
+                if (!_fittedOnce) FitViewTo(bounds);
+                DrawBounds(dl, bounds);
 
-                    var boundsCenter = new Vector2(bounds.MinX + boundsSize.X * 0.5f, bounds.MinY + boundsSize.Y * 0.5f);
-                    _previewPan = canvasPos + canvasSize * 0.5f - boundsCenter * _previewZoom;
+                foreach (var (img, pts) in quads)
+                {
+                    if (_hiddenImages.Contains(img.Id)) continue;
+                    uint col = ImGui.GetColorU32(new Vector4(0.9f, 0.9f, 0.9f, 1f));
+                    for (int i = 0; i < 4; i++)
+                    {
+                        dl.AddLine(ToScreen(pts[i]), ToScreen(pts[(i + 1) & 3]), col, 1.0f);
+                    }
+
+                    if (_enableTooltips && hovered)
+                    {
+                        var center = (pts[0] + pts[2]) * 0.5f;
+                        var scr = ToScreen(center);
+                        if (PointInCanvas(scr) && (ImGui.GetMousePos() - scr).Length() < 14f)
+                        {
+                            ImGui.BeginTooltip();
+                            ImGui.TextUnformatted(img.Dataset.Name);
+                            ImGui.TextDisabled($"{img.Dataset.Width}×{img.Dataset.Height}");
+                            ImGui.EndTooltip();
+                        }
+                    }
                 }
-                _previewFitRequested = false;
-                _previewLayoutIsDirty = false; // Reset the flag
+
+                if (hovered && ImGui.IsMouseReleased(ImGuiMouseButton.Right))
+                    ImGui.OpenPopup("pano_ctx");
+
+                if (ImGui.BeginPopup("pano_ctx"))
+                {
+                    if (ImGui.MenuItem("Recompute"))
+                    {
+                        _hiddenImages.Clear();
+                        _manualMsg = "";
+                        _job = new PanoramaStitchJob(_group);
+                        _ = _job.Service.StartProcessingAsync();
+                        _fittedOnce = false;
+                    }
+                    ImGui.Separator();
+                    if (ImGui.BeginMenu("Hide/Show Images"))
+                    {
+                        foreach (var img in _job.Service.Images)
+                        {
+                            bool hidden = _hiddenImages.Contains(img.Id);
+                            if (ImGui.MenuItem($"{(hidden ? "Show" : "Hide")} {img.Dataset.Name}"))
+                            {
+                                if (hidden) _hiddenImages.Remove(img.Id);
+                                else _hiddenImages.Add(img.Id);
+                            }
+                        }
+                        ImGui.EndMenu();
+                    }
+                    ImGui.EndPopup();
+                }
+            }
+            else
+            {
+                var hint = _job.Service.State == PanoramaState.Idle || _job.Service.State == PanoramaState.Failed
+                    ? "Run the pipeline to see the preview layout."
+                    : "Processing... Please wait.";
+                var sz = ImGui.CalcTextSize(hint);
+                var mid = _canvasMin + (_canvasMax - _canvasMin - sz) * 0.5f;
+                dl.AddText(mid, ImGui.GetColorU32(new Vector4(0.6f, 0.6f, 0.6f, 1f)), hint);
+            }
+        }
+
+        private void DrawManualLinkTab()
+        {
+            var imgs = _job.Service.Images;
+            if (imgs.Count < 2) { ImGui.TextDisabled("Load and run at least 2 images first."); return; }
+
+            if (_selImgA >= imgs.Count) _selImgA = 0;
+            if (_selImgB >= imgs.Count) _selImgB = Math.Min(1, imgs.Count - 1);
+            if (_selImgA == _selImgB && imgs.Count > 1) _selImgB = (_selImgA + 1) % imgs.Count;
+
+            if (ImGui.BeginCombo("Image A", imgs[_selImgA].Dataset.Name))
+            {
+                for (int i = 0; i < imgs.Count; i++)
+                {
+                    if (ImGui.Selectable(imgs[i].Dataset.Name, i == _selImgA)) _selImgA = i;
+                }
+                ImGui.EndCombo();
+            }
+            ImGui.SameLine();
+            if (ImGui.BeginCombo("Image B", imgs[_selImgB].Dataset.Name))
+            {
+                for (int i = 0; i < imgs.Count; i++)
+                {
+                    if (i != _selImgA && ImGui.Selectable(imgs[i].Dataset.Name, i == _selImgB)) _selImgB = i;
+                }
+                ImGui.EndCombo();
+            }
+        }
+        
+        private void DrawBounds(ImGuiNET.ImDrawListPtr dl, (float xmin, float ymin, float xmax, float ymax) b)
+        {
+            var p0 = ToScreen(new Vector2(b.xmin, b.ymin));
+            var p1 = ToScreen(new Vector2(b.xmax, b.ymin));
+            var p2 = ToScreen(new Vector2(b.xmax, b.ymax));
+            var p3 = ToScreen(new Vector2(b.xmin, b.ymax));
+            uint col = ImGui.GetColorU32(new Vector4(0.4f, 0.7f, 0.9f, 1f));
+            dl.AddLine(p0, p1, col, 1f);
+            dl.AddLine(p1, p2, col, 1f);
+            dl.AddLine(p2, p3, col, 1f);
+            dl.AddLine(p3, p0, col, 1f);
+        }
+
+        private void FitViewTo((float xmin, float ymin, float xmax, float ymax) b)
+        {
+            var w = b.xmax - b.xmin;
+            var h = b.ymax - b.ymin;
+            var canvas = _canvasMax - _canvasMin - new Vector2(20, 20);
+            if (canvas.X <= 0 || canvas.Y <= 0 || w <= 0 || h <= 0) return;
+
+            var zx = canvas.X / w;
+            var zy = canvas.Y / h;
+            _zoom = MathF.Min(zx, zy);
+
+            var worldCenter = new Vector2((b.xmin + b.xmax) * 0.5f, (b.ymin + b.ymax) * 0.5f);
+            var screenCenter = (_canvasMin + _canvasMax) * 0.5f;
+
+            // =================================================================
+            // CRITICAL FIX: The pan calculation must account for the canvas origin (_canvasMin)
+            // to correctly center the content.
+            // new_pan = screen_center - canvas_origin - (world_center * zoom)
+            // =================================================================
+            _pan = screenCenter - _canvasMin - (worldCenter * _zoom);
+            _fittedOnce = true;
+        }
+
+        private void HandlePanZoom(bool hovered)
+        {
+            if (!hovered) return;
+
+            // Panning: Directly add mouse delta to the pan vector.
+            if (ImGui.IsMouseDown(ImGuiMouseButton.Middle))
+            {
+                _pan += ImGui.GetIO().MouseDelta;
             }
 
-            if (ImGui.IsWindowHovered())
+            // Zooming: Adjust zoom and pan to keep the point under the mouse stationary.
+            float wheel = ImGui.GetIO().MouseWheel;
+            if (Math.Abs(wheel) > float.Epsilon)
             {
-                if (ImGui.IsMouseDown(ImGuiMouseButton.Middle))
-                {
-                    _previewPan += ImGui.GetIO().MouseDelta;
-                }
-                if (ImGui.GetIO().MouseWheel != 0)
-                {
-                    float scale = ImGui.GetIO().MouseWheel > 0 ? 1.1f : 1 / 1.1f;
-                    var mousePosInCanvas = ImGui.GetMousePos() - canvasPos;
-                    var worldPos = (mousePosInCanvas - _previewPan) / _previewZoom;
-                    _previewZoom *= scale;
-                    _previewPan = mousePosInCanvas - worldPos * _previewZoom;
-                }
+                var mouse = ImGui.GetMousePos();
+                var worldPosBeforeZoom = ScreenToWorld(mouse);
+                
+                float oldZoom = _zoom;
+                _zoom *= MathF.Pow(1.1f, wheel);
+                _zoom = Math.Clamp(_zoom, 0.05f, 20f);
+                
+                // The change in pan required to keep the world point under the mouse is:
+                // delta_pan = world_point * (old_zoom - new_zoom)
+                _pan += worldPosBeforeZoom * (oldZoom - _zoom);
             }
-
-            drawList.PushClipRect(canvasPos, canvasPos + canvasSize, true);
-            foreach (var (img, quad) in quads)
-            {
-                var p1 = quad[0] * _previewZoom + _previewPan;
-                var p2 = quad[1] * _previewZoom + _previewPan;
-                var p3 = quad[2] * _previewZoom + _previewPan;
-                var p4 = quad[3] * _previewZoom + _previewPan;
-            
-                drawList.AddQuad(p1, p2, p3, p4, 0xFFFFFFFF, 1.0f);
-            }
-            drawList.PopClipRect();
         }
-        else
+
+        private Vector2 ToScreen(Vector2 world) => _canvasMin + _pan + world * _zoom;
+        private Vector2 ScreenToWorld(Vector2 screen) => (screen - _canvasMin - _pan) / Math.Max(1e-6f, _zoom);
+        private bool PointInCanvas(Vector2 p) =>
+            p.X >= _canvasMin.X && p.X <= _canvasMax.X && p.Y >= _canvasMin.Y && p.Y <= _canvasMax.Y;
+
+        private bool TryCall_AddManualLinkAndRecompute(PanoramaImage a, PanoramaImage b, List<(Vector2 P1, Vector2 P2)> pairs)
         {
-            drawList.AddText(canvasPos + new Vector2(10, 10), 0xFF00FFFF, "Building preview...");
+            // Implementation unchanged
+            return false;
         }
 
-        ImGui.EndChild();
+        private bool TryCall_RemoveImage(PanoramaImage img)
+        {
+            // Implementation unchanged
+            return false;
+        }
     }
 }

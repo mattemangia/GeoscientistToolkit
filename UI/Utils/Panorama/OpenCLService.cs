@@ -1,140 +1,149 @@
-﻿// GeoscientistToolkit/Business/Panorama/OpenCLService.cs
+﻿// GeoscientistToolkit/Business/Photogrammetry/OpenCLService.cs
 
 using System;
-using System.Text;
-using GeoscientistToolkit.Util;
 using Silk.NET.OpenCL;
 
-namespace GeoscientistToolkit.Business.Panorama;
+namespace GeoscientistToolkit;
 
 /// <summary>
-/// Manages a shared OpenCL context for GPU computations.
+/// OpenCL Service - manages OpenCL initialization and context
 /// </summary>
-internal static class OpenCLService
+public static class OpenCLService
 {
-    public static CL Cl { get; private set; }
-    public static IntPtr Platform { get; private set; }
-    public static IntPtr Device { get; private set; }
-    public static IntPtr Context { get; private set; }
-    public static IntPtr CommandQueue { get; private set; }
+    private static CL _cl;
+    private static IntPtr _device;
+    private static IntPtr _context;
+    private static IntPtr _commandQueue;
+
     public static bool IsInitialized { get; private set; }
-    private static readonly object _initLock = new();
+
+    public static CL Cl => _cl;
+    public static IntPtr Device => _device;
+    public static IntPtr Context => _context;
+    public static IntPtr CommandQueue => _commandQueue;
 
     public static unsafe void Initialize()
     {
-        lock (_initLock)
+        if (IsInitialized) return;
+
+        try
         {
-            if (IsInitialized) return;
+            _cl = CL.GetApi();
 
-            Cl = CL.GetApi();
-            int err;
+            uint platformCount = 0;
+            _cl.GetPlatformIDs(0, null, &platformCount);
 
-            uint numPlatforms = 0;
-            err = Cl.GetPlatformIDs(0, null, &numPlatforms);
-            if (err != (int)CLEnum.Success || numPlatforms == 0)
+            if (platformCount == 0)
             {
-                // No OpenCL platforms found, we can't initialize.
+                IsInitialized = false;
                 return;
             }
 
-            var platforms = new IntPtr[numPlatforms];
-            fixed (IntPtr* platformsPtr = platforms)
-            {
-                err = Cl.GetPlatformIDs(numPlatforms, platformsPtr, null);
-                err.Throw();
-            }
-            Platform = platforms[0];
+            IntPtr* platforms = stackalloc IntPtr[(int)platformCount];
+            _cl.GetPlatformIDs(platformCount, platforms, null);
 
-            uint numDevices = 0;
-            err = Cl.GetDeviceIDs(Platform, DeviceType.Gpu, 0, null, &numDevices);
-            if (err != (int)CLEnum.Success || numDevices == 0)
+            uint deviceCount = 0;
+            _cl.GetDeviceIDs(platforms[0], DeviceType.Gpu, 0, null, &deviceCount);
+
+            if (deviceCount == 0)
             {
-                // Fallback to CPU if no GPU is found
-                err = Cl.GetDeviceIDs(Platform, DeviceType.Cpu, 0, null, &numDevices);
-                if (err != (int)CLEnum.Success || numDevices == 0)
-                {
-                    // No GPU or CPU OpenCL devices found.
-                    return;
-                }
-                
-                var cpuDevices = new IntPtr[numDevices];
-                fixed (IntPtr* devicesPtr = cpuDevices)
-                {
-                    err = Cl.GetDeviceIDs(Platform, DeviceType.Cpu, numDevices, devicesPtr, null);
-                    err.Throw();
-                }
-                Device = cpuDevices[0];
-            }
-            else
-            {
-                var gpuDevices = new IntPtr[numDevices];
-                fixed (IntPtr* devicesPtr = gpuDevices)
-                {
-                    err = Cl.GetDeviceIDs(Platform, DeviceType.Gpu, numDevices, devicesPtr, null);
-                    err.Throw();
-                }
-                Device = gpuDevices[0];
+                _cl.GetDeviceIDs(platforms[0], DeviceType.Cpu, 0, null, &deviceCount);
             }
 
-            // --- Context and Command Queue ---
-            var contextProperties = stackalloc IntPtr[] { (IntPtr)ContextProperties.Platform, Platform, 0 };
-
-            // CORRECTED: The most robust way to pass a single device to CreateContext is via a fixed array.
-            var devices = new[] { Device };
-            fixed (IntPtr* devicePtr = devices)
+            if (deviceCount == 0)
             {
-                Context = Cl.CreateContext(contextProperties, 1, devicePtr, null, null, &err);
-                err.Throw();
+                IsInitialized = false;
+                return;
             }
 
-            CommandQueue = Cl.CreateCommandQueue(Context, Device, (CommandQueueProperties)0, &err);
-            err.Throw();
+            IntPtr* devices = stackalloc IntPtr[(int)deviceCount];
+            _cl.GetDeviceIDs(platforms[0], DeviceType.Gpu, deviceCount, devices, null);
+
+            if (deviceCount == 0)
+            {
+                _cl.GetDeviceIDs(platforms[0], DeviceType.Cpu, deviceCount, devices, null);
+            }
+
+            _device = devices[0];
+
+            int err;
+            
+            // Fixed statement for device pointer for CreateContext
+            fixed (IntPtr* pDevice = &_device)
+            {
+                _context = _cl.CreateContext(null, 1, pDevice, null, null, &err);
+            }
+            
+            if (err != 0)
+            {
+                IsInitialized = false;
+                return;
+            }
+
+            // Use QueueProperties overload (correct, not deprecated)
+            QueueProperties queueProperties = 0;
+            _commandQueue = _cl.CreateCommandQueueWithProperties(_context, _device, &queueProperties, &err);
+            if (err != 0)
+            {
+                IsInitialized = false;
+                return;
+            }
 
             IsInitialized = true;
+        }
+        catch
+        {
+            IsInitialized = false;
         }
     }
 
     public static unsafe IntPtr CreateProgram(string source)
     {
-        int err;
-        var program = Cl.CreateProgramWithSource(Context, 1, new[] { source }, null, &err);
-        err.Throw();
+        if (!IsInitialized) throw new InvalidOperationException("OpenCL not initialized");
 
-        err = Cl.BuildProgram(program, 1, new[] { Device }, (string)null, null, null);
-        if (err != (int)CLEnum.Success)
+        int err;
+        
+        // Use string overload of BuildProgram (not byte*)
+        IntPtr program = _cl.CreateProgramWithSource(_context, 1, new[] { source }, null, &err);
+        if (err != 0) throw new InvalidOperationException($"CreateProgramWithSource failed: {err}");
+
+        // Fixed statement for device pointer for BuildProgram - use string overload
+        fixed (IntPtr* pDevice = &_device)
         {
-            nuint logSize;
-            // CORRECTED: The enum member is BuildLog, not Log.
-            Cl.GetProgramBuildInfo(program, Device, ProgramBuildInfo.BuildLog, 0, null, &logSize);
-            byte[] log = new byte[logSize];
-            fixed (byte* logPtr = log)
+            err = _cl.BuildProgram(program, 1, pDevice, source, null, null);
+        }
+        
+        if (err != 0)
+        {
+            nuint logSize = 0;
+            _cl.GetProgramBuildInfo(program, _device, ProgramBuildInfo.BuildLog, 0, null, &logSize);
+
+            if (logSize > 0)
             {
-                Cl.GetProgramBuildInfo(program, Device, ProgramBuildInfo.BuildLog, logSize, logPtr, null);
+                byte[] log = new byte[logSize];
+                fixed (byte* pLog = log)
+                {
+                    _cl.GetProgramBuildInfo(program, _device, ProgramBuildInfo.BuildLog, logSize, pLog, null);
+                }
+                string logStr = System.Text.Encoding.ASCII.GetString(log);
+                throw new InvalidOperationException($"Build failed:\n{logStr}");
             }
-            var errorString = $"OpenCL Build Error:\n{Encoding.UTF8.GetString(log)}";
-            Logger.LogError(errorString);
-            throw new Exception(errorString);
+
+            throw new InvalidOperationException($"BuildProgram failed: {err}");
         }
 
         return program;
     }
-
-    public static void Dispose()
-    {
-        if (!IsInitialized) return;
-        Cl.ReleaseCommandQueue(CommandQueue);
-        Cl.ReleaseContext(Context);
-        IsInitialized = false;
-    }
 }
 
-internal static class OpenCLErrorExtensions
+/// <summary>
+/// Extension methods for OpenCL error handling
+/// </summary>
+public static class OpenCLExtensions
 {
-    public static void Throw(this int err)
+    public static void Throw(this int errorCode)
     {
-        if (err != (int)CLEnum.Success)
-        {
-            throw new Exception($"OpenCL Error: {(CLEnum)err}");
-        }
+        if (errorCode != 0)
+            throw new InvalidOperationException($"OpenCL error code: {errorCode}");
     }
 }
