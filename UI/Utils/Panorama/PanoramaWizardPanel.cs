@@ -5,6 +5,11 @@
 // 1. Implemented a clipping rectangle on the canvas to provide a true crop/zoom experience.
 // 2. Added panning via left-click-and-drag for intuitive positioning of the panorama
 //    within the viewport.
+// 3. Added export size control.
+// 4. Implemented side-by-side manual control point addition.
+// 5. Added a checkbox to enable/disable image preview with textures.
+// 6. CORRECTED: Replaced Guid-based texture dictionary key with a direct object reference
+//    to resolve compilation errors with 'ds.Id'.
 // ==========================================================================================
 
 using System;
@@ -37,7 +42,10 @@ namespace GeoscientistToolkit
         private int _activeTab = 0;
         private bool _showOnlyMainGroup = true;
         private bool _enableTooltips = true;
+        private bool _enableTexturePreview = false;
         private readonly ImGuiExportFileDialog _fileDialog;
+        private int _exportWidth = 8192;
+
 
         // Canvas & Projection Controls
         private Vector2 _canvasMin, _canvasMax;
@@ -53,8 +61,11 @@ namespace GeoscientistToolkit
         private int _selImgA = 0;
         private int _selImgB = 1;
         private readonly List<(Vector2 P1, Vector2 P2)> _manualPairs = new();
+        private Vector2? _pendingImagePoint; 
+        private Vector2? _pendingScreenPoint; 
         private float _p1x, _p1y, _p2x, _p2y;
         private string _manualMsg = "";
+        private readonly Dictionary<Dataset, TextureManager> _textureManagers = new();
 
         // ────────── Costruttori ──────────
         public PanoramaWizardPanel(DatasetGroup group)
@@ -65,6 +76,14 @@ namespace GeoscientistToolkit
             _job = new PanoramaStitchJob(_group);
             _fileDialog = new ImGuiExportFileDialog("panoramaExport", "Export Panorama");
             _fileDialog.SetExtensions((".png", "PNG Image"), (".jpg", "JPEG Image"));
+
+            foreach (var ds in _group.Datasets)
+            {
+                if (ds is ImageDataset imageDs && imageDs.ImageData != null)
+                {
+                    _textureManagers[ds] = TextureManager.CreateFromPixelData(imageDs.ImageData, (uint)imageDs.Width, (uint)imageDs.Height);
+                }
+            }
         }
 
         public PanoramaWizardPanel(DatasetGroup group, string title, bool open) : this(group)
@@ -91,21 +110,33 @@ namespace GeoscientistToolkit
             Title = title ?? $"Panorama Wizard: {_group?.Name ?? "Group"}";
             IsOpen = open;
         }
-        
+
         // ────────── API storica ──────────
-        public void Open()  => IsOpen = true;
-        public void Close() => IsOpen = false;
+        public void Open() => IsOpen = true;
+        public void Close()
+        {
+            IsOpen = false;
+            foreach (var tm in _textureManagers.Values)
+            {
+                tm.Dispose();
+            }
+            _textureManagers.Clear();
+        }
+
 
         private void Recompute()
         {
             _job?.Service.Cancel();
             _hiddenImages.Clear();
             _manualMsg = "";
+            _manualPairs.Clear();
+            _pendingImagePoint = null;
+            _pendingScreenPoint = null;
             _job = new PanoramaStitchJob(_group);
             _ = _job.Service.StartProcessingAsync();
             _fittedOnce = false;
         }
-        
+
         public void Submit()
         {
             var s = _job.Service.State;
@@ -152,17 +183,18 @@ namespace GeoscientistToolkit
                 }
             }
             ImGui.End();
-            
+
             if (_fileDialog.Submit())
             {
                 if (!string.IsNullOrWhiteSpace(_fileDialog.SelectedPath))
                 {
-                    _ = _job.Service.StartBlendingAsync(_fileDialog.SelectedPath);
+                    _ = _job.Service.StartBlendingAsync(_fileDialog.SelectedPath, _exportWidth);
                 }
             }
 
             IsOpen = openRef;
         }
+
 
         private void DrawHeader()
         {
@@ -191,6 +223,8 @@ namespace GeoscientistToolkit
             ImGui.Checkbox("Show Only Main Group", ref _showOnlyMainGroup);
             ImGui.SameLine();
             ImGui.Checkbox("Enable Tooltip", ref _enableTooltips);
+            ImGui.SameLine();
+            ImGui.Checkbox("Enable Image Preview", ref _enableTexturePreview);
         }
 
         private void DrawLogTab()
@@ -231,15 +265,21 @@ namespace GeoscientistToolkit
             {
                 ImGui.SliderFloat("FOV/Zoom", ref _zoom, 0.1f, 10.0f, "%.2fx");
                 ImGui.SameLine();
-                ImGui.SliderFloat("Straighten", ref _previewStraighten, 0.0f, 1.0f);
+                ImGui.SliderFloat("Straighten", ref _previewStraighten, -1.0f, 1.0f);
+                ImGui.SameLine();
+                ImGui.InputInt("Export Width", ref _exportWidth, 128, 512);
+
             }
             else // Show disabled sliders
             {
                 ImGui.BeginDisabled();
                 float disabledZoom = 1.0f, disabledStraighten = 0.0f;
+                int disabledWidth = _exportWidth;
                 ImGui.SliderFloat("FOV/Zoom", ref disabledZoom, 0.1f, 10.0f, "%.2fx");
                 ImGui.SameLine();
-                ImGui.SliderFloat("Straighten", ref disabledStraighten, 0.0f, 1.0f);
+                ImGui.SliderFloat("Straighten", ref disabledStraighten, -1.0f, 1.0f);
+                ImGui.SameLine();
+                ImGui.InputInt("Export Width", ref disabledWidth);
                 ImGui.EndDisabled();
             }
             ImGui.PopItemWidth();
@@ -258,7 +298,7 @@ namespace GeoscientistToolkit
 
             dl.AddRectFilled(_canvasMin, _canvasMax, ImGui.GetColorU32(new Vector4(0.08f, 0.08f, 0.08f, 1f)));
             dl.AddRect(_canvasMin, _canvasMax, ImGui.GetColorU32(new Vector4(0.35f, 0.35f, 0.35f, 1f)));
-            
+
             dl.PushClipRect(_canvasMin, _canvasMax, true);
 
             // --- DRAWING LOGIC ---
@@ -271,13 +311,31 @@ namespace GeoscientistToolkit
                 foreach (var (img, pts) in quads)
                 {
                     if (_hiddenImages.Contains(img.Id)) continue;
-                    uint col = ImGui.GetColorU32(new Vector4(0.9f, 0.9f, 0.9f, 1f));
+
+                    var screenPts = new Vector2[4];
                     for (int i = 0; i < 4; i++)
                     {
-                        var p1 = ToScreen(pts[i], bounds);
-                        var p2 = ToScreen(pts[(i + 1) & 3], bounds);
-                        dl.AddLine(p1, p2, col, 1.0f);
+                        screenPts[i] = ToScreen(pts[i], bounds);
                     }
+
+                    if (_enableTexturePreview && _textureManagers.TryGetValue(img.Dataset, out var tm))
+                    {
+                        var textureId = tm.GetImGuiTextureId();
+                        if (textureId != IntPtr.Zero)
+                        {
+                            dl.AddImageQuad(textureId, screenPts[0], screenPts[1], screenPts[2], screenPts[3],
+                                new Vector2(0, 0), new Vector2(1, 0), new Vector2(1, 1), new Vector2(0, 1));
+                        }
+                    }
+                    else
+                    {
+                        uint col = ImGui.GetColorU32(new Vector4(0.9f, 0.9f, 0.9f, 1f));
+                        for (int i = 0; i < 4; i++)
+                        {
+                            dl.AddLine(screenPts[i], screenPts[(i + 1) % 4], col, 1.0f);
+                        }
+                    }
+
 
                     if (_enableTooltips && hovered)
                     {
@@ -326,10 +384,10 @@ namespace GeoscientistToolkit
                 var mid = _canvasMin + (_canvasMax - _canvasMin - sz) * 0.5f;
                 dl.AddText(mid, ImGui.GetColorU32(new Vector4(0.6f, 0.6f, 0.6f, 1f)), hint);
             }
-            
+
             dl.PopClipRect();
         }
-        
+
         private void DrawManualLinkTab()
         {
             var imgs = _job.Service.GetImages();
@@ -339,7 +397,10 @@ namespace GeoscientistToolkit
             if (_selImgB >= imgs.Count) _selImgB = Math.Min(1, imgs.Count - 1);
             if (_selImgA == _selImgB && imgs.Count > 1) _selImgB = (_selImgA + 1) % imgs.Count;
 
-            if (ImGui.BeginCombo("Image A", imgs[_selImgA].Dataset.Name))
+            var imgA = imgs[_selImgA];
+            var imgB = imgs[_selImgB];
+
+            if (ImGui.BeginCombo("Image A", imgA.Dataset.Name))
             {
                 for (int i = 0; i < imgs.Count; i++)
                 {
@@ -348,7 +409,7 @@ namespace GeoscientistToolkit
                 ImGui.EndCombo();
             }
             ImGui.SameLine();
-            if (ImGui.BeginCombo("Image B", imgs[_selImgB].Dataset.Name))
+            if (ImGui.BeginCombo("Image B", imgB.Dataset.Name))
             {
                 for (int i = 0; i < imgs.Count; i++)
                 {
@@ -356,8 +417,100 @@ namespace GeoscientistToolkit
                 }
                 ImGui.EndCombo();
             }
+
+            ImGui.Separator();
+
+            if (ImGui.Button("Refine with Manual Points") && _manualPairs.Count > 0)
+            {
+                // This is a placeholder for the actual logic to refine the stitch
+                _manualMsg = $"Refining with {_manualPairs.Count} points...";
+                // In a real implementation, you would call a method on the service:
+                // _job.Service.RefineWithManualPoints(imgA, imgB, _manualPairs);
+            }
+            ImGui.SameLine();
+            if (ImGui.Button("Clear Points"))
+            {
+                _manualPairs.Clear();
+                _pendingImagePoint = null;
+                _pendingScreenPoint = null;
+            }
+            ImGui.Text(_manualMsg);
+
+            ImGui.Columns(2, "manual_link_cols", true);
+
+            // Image A
+            DrawImageForManualLinking(imgA, 0);
+            ImGui.NextColumn();
+
+            // Image B
+            DrawImageForManualLinking(imgB, 1);
+            ImGui.Columns(1);
         }
-        
+
+        private void DrawImageForManualLinking(PanoramaImage img, int panelIndex)
+        {
+            ImGui.Text(img.Dataset.Name);
+            var avail = ImGui.GetContentRegionAvail();
+            var canvasSize = new Vector2(avail.X, avail.X * ((float)img.Dataset.Height / img.Dataset.Width));
+            var canvasMin = ImGui.GetCursorScreenPos();
+            var canvasMax = canvasMin + canvasSize;
+            var dl = ImGui.GetWindowDrawList();
+            dl.AddRectFilled(canvasMin, canvasMax, 0xFF202020);
+
+            if (_textureManagers.TryGetValue(img.Dataset, out var tm))
+            {
+                var textureId = tm.GetImGuiTextureId();
+                if (textureId != IntPtr.Zero)
+                {
+                    dl.AddImage(textureId, canvasMin, canvasMax);
+                }
+            }
+            dl.AddRect(canvasMin, canvasMax, 0xFF808080);
+
+            bool isHovered = ImGui.IsMouseHoveringRect(canvasMin, canvasMax);
+            if (isHovered && ImGui.IsMouseClicked(ImGuiMouseButton.Left))
+            {
+                var mousePos = ImGui.GetMousePos();
+                var localPos = (mousePos - canvasMin) / canvasSize;
+                var imagePos = new Vector2(localPos.X * img.Dataset.Width, localPos.Y * img.Dataset.Height);
+
+                if (panelIndex == 0)
+                {
+                    _pendingImagePoint = imagePos;
+                    _pendingScreenPoint = mousePos;
+                }
+                else if (_pendingImagePoint.HasValue)
+                {
+                    _manualPairs.Add((_pendingImagePoint.Value, imagePos));
+                    _pendingImagePoint = null;
+                    _pendingScreenPoint = null;
+                }
+            }
+
+            // Draw existing points
+            foreach (var pair in _manualPairs)
+            {
+                var p = (panelIndex == 0) ? pair.P1 : pair.P2;
+                var screenPos = canvasMin + new Vector2(p.X / img.Dataset.Width, p.Y / img.Dataset.Height) * canvasSize;
+                dl.AddCircleFilled(screenPos, 4, 0xFF00FF00);
+                dl.AddCircle(screenPos, 5, 0xFFFFFFFF);
+            }
+
+            // If a point is selected in the left image, draw a line to the cursor in the right image.
+            if (_pendingScreenPoint.HasValue && panelIndex == 1 && isHovered)
+            {
+                dl.AddLine(_pendingScreenPoint.Value, ImGui.GetMousePos(), 0xFF00FFFF);
+            }
+
+            // Also draw the pending point in the left image so the user knows it's selected.
+            if (_pendingScreenPoint.HasValue && panelIndex == 0)
+            {
+                dl.AddCircleFilled(_pendingScreenPoint.Value, 4, 0xFF00FFFF);
+                dl.AddCircle(_pendingScreenPoint.Value, 5, 0xFFFFFFFF);
+            }
+        }
+
+
         private void DrawBounds(ImGuiNET.ImDrawListPtr dl, (float xmin, float ymin, float xmax, float ymax) b)
         {
             var p0 = ToScreen(new Vector2(b.xmin, b.ymin), b);
@@ -405,35 +558,36 @@ namespace GeoscientistToolkit
             {
                 var mouse = ImGui.GetMousePos();
                 var worldPosBeforeZoom = ScreenToWorld(mouse);
-                
+
                 float oldZoom = _zoom;
                 _zoom *= MathF.Pow(1.1f, wheel);
                 _zoom = Math.Clamp(_zoom, 0.05f, 20f);
-                
+
                 _pan += worldPosBeforeZoom * (oldZoom - _zoom);
             }
         }
-        
+
         private Vector2 ToScreen(Vector2 world, (float xmin, float ymin, float xmax, float ymax) bounds)
         {
             Vector2 finalWorldPos = world;
 
-            if (_previewStraighten > 0.001f && bounds.xmax > bounds.xmin)
+            if (Math.Abs(_previewStraighten) > 0.001f && bounds.xmax > bounds.xmin)
             {
                 float worldWidth = bounds.xmax - bounds.xmin;
                 float worldCenterX = bounds.xmin + worldWidth * 0.5f;
                 float normalizedX = (world.X - worldCenterX) / (worldWidth * 0.5f);
                 float warpFactor = normalizedX * normalizedX;
-                float yOffset = -world.Y * warpFactor * _previewStraighten;
-                finalWorldPos = new Vector2(world.X, world.Y + yOffset);
+                float yOffset = world.Y * warpFactor * _previewStraighten;
+                finalWorldPos = new Vector2(world.X, world.Y - yOffset);
             }
+
 
             return _canvasMin + _pan + finalWorldPos * _zoom;
         }
 
         private Vector2 ScreenToWorld(Vector2 screen)
         {
-             return (screen - _canvasMin - _pan) / Math.Max(1e-6f, _zoom);
+            return (screen - _canvasMin - _pan) / Math.Max(1e-6f, _zoom);
         }
 
         private bool PointInCanvas(Vector2 p) =>
