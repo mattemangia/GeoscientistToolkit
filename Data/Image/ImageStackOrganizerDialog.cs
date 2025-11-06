@@ -26,6 +26,14 @@ public class ImageStackOrganizerDialog
     private string _sourceFolderPath = "";
     public bool IsOpen { get; set; }
 
+    // --- ADDED: Fields for asynchronous loading ---
+    private Task _loadingTask;
+    private CancellationTokenSource _cancellationTokenSource;
+    private bool _isLoading;
+    private float _loadingProgress;
+    private string _loadingStatus = "";
+    // --- END ADDED ---
+
     public void Open(string folderPath)
     {
         IsOpen = true;
@@ -35,40 +43,75 @@ public class ImageStackOrganizerDialog
         _selectedImages.Clear();
         _selectedGroup = null;
 
-        LoadImagesFromFolder(folderPath);
-
-        if (_autoGroupBySimilarNames) AutoGroupImages();
+        // --- MODIFIED: Start asynchronous loading instead of synchronous ---
+        _isLoading = true;
+        _loadingProgress = 0f;
+        _loadingStatus = "Initializing...";
+        _cancellationTokenSource = new CancellationTokenSource();
+        _loadingTask = Task.Run(() => LoadImagesFromFolderAsync(folderPath, _cancellationTokenSource.Token));
+        // --- END MODIFIED ---
     }
 
-    private void LoadImagesFromFolder(string folderPath)
+    // --- REPLACED: Synchronous LoadImagesFromFolder with asynchronous version ---
+    private void LoadImagesFromFolderAsync(string folderPath, CancellationToken token)
     {
         try
         {
-            foreach (var file in Directory.GetFiles(folderPath))
-                if (ImageLoader.IsSupportedImageFile(file))
+            _loadingStatus = "Scanning folder for supported images...";
+            _loadingProgress = 0f;
+
+            var files = Directory.GetFiles(folderPath)
+                .Where(ImageLoader.IsSupportedImageFile)
+                .ToList();
+
+            if (token.IsCancellationRequested) return;
+
+            var loadedImages = new List<ImageFileInfo>();
+            for (var i = 0; i < files.Count; i++)
+            {
+                if (token.IsCancellationRequested) return;
+
+                var file = files[i];
+                _loadingStatus = $"({i + 1}/{files.Count}) Loading: {Path.GetFileName(file)}";
+
+                var fileInfo = new FileInfo(file);
+                var imageInfo = ImageLoader.LoadImageInfo(file);
+
+                loadedImages.Add(new ImageFileInfo
                 {
-                    var fileInfo = new FileInfo(file);
-                    var imageInfo = ImageLoader.LoadImageInfo(file);
+                    FileName = Path.GetFileName(file),
+                    FilePath = file,
+                    FileSize = fileInfo.Length,
+                    Width = imageInfo.Width,
+                    Height = imageInfo.Height,
+                    Modified = fileInfo.LastWriteTime
+                });
 
-                    _availableImages.Add(new ImageFileInfo
-                    {
-                        FileName = Path.GetFileName(file),
-                        FilePath = file,
-                        FileSize = fileInfo.Length,
-                        Width = imageInfo.Width,
-                        Height = imageInfo.Height,
-                        Modified = fileInfo.LastWriteTime
-                    });
-                }
+                _loadingProgress = (float)(i + 1) / files.Count;
+            }
 
-            // Sort by filename
-            _availableImages = _availableImages.OrderBy(img => img.FileName).ToList();
+            // This is an atomic operation, so it's safe to assign without a lock.
+            _availableImages = loadedImages.OrderBy(img => img.FileName).ToList();
+
+            if (_autoGroupBySimilarNames)
+            {
+                _loadingStatus = "Auto-grouping images...";
+                AutoGroupImages();
+            }
+
+            _loadingStatus = "Finished loading.";
         }
         catch (Exception ex)
         {
-            Logger.Log($"Error loading images: {ex.Message}");
+            Logger.LogError($"Error loading images asynchronously: {ex.Message}");
+            _loadingStatus = $"Error: {ex.Message}";
+        }
+        finally
+        {
+            _isLoading = false;
         }
     }
+    // --- END REPLACED ---
 
     private void AutoGroupImages()
     {
@@ -96,6 +139,7 @@ public class ImageStackOrganizerDialog
                 _groups[kvp.Key] = new List<ImageFileInfo>(kvp.Value);
     }
 
+    // --- MODIFIED: Submit method now handles the loading state ---
     public void Submit()
     {
         if (!IsOpen) return;
@@ -107,39 +151,76 @@ public class ImageStackOrganizerDialog
         var pOpen = IsOpen;
         if (ImGui.Begin("Organize Image Stack", ref pOpen, ImGuiWindowFlags.NoDocking))
         {
-            DrawToolbar();
-            ImGui.Separator();
+            if (_isLoading)
+            {
+                DrawLoadingState();
+            }
+            else
+            {
+                DrawToolbar();
+                ImGui.Separator();
 
-            // FIX: Wrap the main content in a child window to reserve space for the buttons at the bottom.
-            var bottomBarHeight = ImGui.GetFrameHeightWithSpacing() + 10f; // Height for buttons + padding
-            ImGui.BeginChild("MainContentRegion", new Vector2(0, -bottomBarHeight));
+                var bottomBarHeight = ImGui.GetFrameHeightWithSpacing() + 10f;
+                ImGui.BeginChild("MainContentRegion", new Vector2(0, -bottomBarHeight));
 
-            ImGui.Columns(3, "OrganizerColumns", true);
-            ImGui.SetColumnWidth(0, 300);
-            ImGui.SetColumnWidth(1, 250);
+                ImGui.Columns(3, "OrganizerColumns", true);
+                ImGui.SetColumnWidth(0, 300);
+                ImGui.SetColumnWidth(1, 250);
 
-            DrawAvailableImages();
-            ImGui.NextColumn();
+                DrawAvailableImages();
+                ImGui.NextColumn();
 
-            DrawGroups();
-            ImGui.NextColumn();
+                DrawGroups();
+                ImGui.NextColumn();
 
-            DrawGroupDetails();
+                DrawGroupDetails();
 
-            ImGui.Columns(1);
+                ImGui.Columns(1);
 
-            ImGui.EndChild(); // End MainContentRegion
+                ImGui.EndChild();
 
-            ImGui.Separator();
+                ImGui.Separator();
 
-            DrawBottomButtons();
-
+                DrawBottomButtons();
+            }
             ImGui.End();
         }
 
-        // FIX: Ensure both the 'X' button and the 'Cancel' button can close the dialog.
-        if (!pOpen) IsOpen = false;
+        if (!pOpen)
+        {
+            if (_isLoading) _cancellationTokenSource?.Cancel();
+            IsOpen = false;
+        }
     }
+    // --- END MODIFIED ---
+
+    // --- ADDED: Method to draw the loading UI ---
+    private void DrawLoadingState()
+    {
+        var windowSize = ImGui.GetWindowSize();
+        var contentRegionAvail = ImGui.GetContentRegionAvail();
+
+        // Center content vertically
+        var verticalOffset = (contentRegionAvail.Y - ImGui.GetTextLineHeightWithSpacing() * 3 - ImGui.GetFrameHeightWithSpacing()) * 0.5f;
+        ImGui.SetCursorPosY(ImGui.GetCursorPosY() + verticalOffset);
+
+        ImGui.Text("Loading Images...");
+        ImGui.TextWrapped(_loadingStatus);
+        ImGui.ProgressBar(_loadingProgress, new Vector2(-1, 0), $"{_loadingProgress * 100:0}%");
+        ImGui.Spacing();
+
+        // Center the cancel button horizontally
+        var buttonText = "Cancel";
+        var buttonWidth = ImGui.CalcTextSize(buttonText).X + ImGui.GetStyle().FramePadding.X * 2;
+        ImGui.SetCursorPosX((windowSize.X - buttonWidth) * 0.5f);
+
+        if (ImGui.Button(buttonText))
+        {
+            _cancellationTokenSource?.Cancel();
+            IsOpen = false; // Close the dialog on cancel
+        }
+    }
+    // --- END ADDED ---
 
     private void DrawToolbar()
     {
@@ -165,7 +246,6 @@ public class ImageStackOrganizerDialog
 
         var ungroupedImages = GetUngroupedImages();
 
-        // The height calculation (-30) leaves space for the text summary below this child region.
         if (ImGui.BeginChild("AvailableImagesChild", new Vector2(0, -30), ImGuiChildFlags.Border))
         {
             if (ImGui.IsMouseClicked(ImGuiMouseButton.Left) &&
@@ -245,7 +325,6 @@ public class ImageStackOrganizerDialog
 
                 if (ImGui.BeginDragDropTarget())
                 {
-                    // FIX: Added 'unsafe' block to allow pointer access.
                     unsafe
                     {
                         var payload = ImGui.AcceptDragDropPayload("IMAGES");

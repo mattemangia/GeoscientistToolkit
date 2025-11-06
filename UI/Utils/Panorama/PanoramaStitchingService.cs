@@ -56,8 +56,9 @@ namespace GeoscientistToolkit
         }
     }
 
-    public class PanoramaStitchingService
+    public class PanoramaStitchingService:IDisposable
     {
+        private bool _disposed;
         public enum PanoramaProjection { Cylindrical = 0, Equirectangular = 1, Rectilinear = 2 }
 
         private readonly List<ImageDataset> _datasets;
@@ -244,7 +245,7 @@ namespace GeoscientistToolkit
                         var H = cam2.K * R.Value * cam1.K_inv;
 
                         Graph.AddEdge(img1, img2, inliers, H);
-                        Log(" ✅ EDGE ADDED\n");
+                        Log(" ✓ EDGE ADDED\n");
                     }
                     else Log(" ✗ No robust geometric model found\n");
                 }
@@ -593,326 +594,328 @@ namespace GeoscientistToolkit
         }
         
         public async Task StartBlendingAsync(string path, int outputWidth = 4096)
+{
+    // ─────────────────────────────────────────────────────────────────────────────
+    // PANORAMA BLENDING — FAST SOFT-SEAM WITH SIMD COLOR ACCUMULATION
+    // Replaces the slow neighbor-scan near-seam logic and hard transitions.
+    // Complexity: O(#pixels × #images) but with very low constant factors due to:
+    //  - trig LUTs per row/column,
+    //  - top-K (2–3) contributor selection per pixel,
+    //  - edge/angle aware soft weights (no window scans),
+    //  - Vector4 math for RGBA accumulation.
+    // ─────────────────────────────────────────────────────────────────────────────
+
+    if (State != PanoramaState.ReadyForPreview && State != PanoramaState.Completed)
+    {
+        Log("⚠️ Not ready for blending"); return;
+    }
+
+    State = PanoramaState.Blending;
+    Log($"→ Blending to: {path} at {outputWidth}px width...");
+
+    var groups = StitchGroups;
+    if (groups.Count == 0) { State = PanoramaState.Failed; return; }
+    var mainGroup = groups.OrderByDescending(g => g.Images.Count).First();
+
+    // 1) Compute panorama angular bounds from current cameras (same as before but tighter & faster)
+    float minLon = float.MaxValue, maxLon = float.MinValue;
+    float minLat = float.MaxValue, maxLat = float.MinValue;
+
+    lock (_dataLock)
+    {
+        foreach (var img in mainGroup.Images)
         {
-            if (State != PanoramaState.ReadyForPreview && State != PanoramaState.Completed)
-            {
-                Log("⚠️ Not ready for blending");
-                return;
-            }
+            var cam = _camera[img.Id];
 
-            State = PanoramaState.Blending;
-            Log($"→ Blending to: {path} at {outputWidth}px width...");
-            var groups = StitchGroups;
-            if (groups.Count == 0) { State = PanoramaState.Failed; return; }
-            var mainGroup = groups.OrderByDescending(g => g.Images.Count).First();
-
-            // Calculate actual panorama bounds
-            float minLon = float.MaxValue, maxLon = float.MinValue;
-            float minLat = float.MaxValue, maxLat = float.MinValue;
-            
-            lock (_dataLock)
+            // Sample a light grid on the image to estimate spherical coverage
+            const int SX = 10, SY = 10;
+            for (int iy = 0; iy <= SY; iy++)
             {
-                foreach (var img in mainGroup.Images)
+                float py = (iy / (float)SY) * img.Dataset.Height;
+                float ny = (py - cam.Cy) / cam.Fy;
+
+                for (int ix = 0; ix <= SX; ix++)
                 {
-                    var cam = _camera[img.Id];
-                    
-                    // Sample image corners and edges
-                    for (int sx = 0; sx <= 10; sx++)
-                    {
-                        for (int sy = 0; sy <= 10; sy++)
-                        {
-                            float px = (sx / 10.0f) * img.Dataset.Width;
-                            float py = (sy / 10.0f) * img.Dataset.Height;
-                            
-                            // Convert pixel to camera ray
-                            var cameraRay = new Vector3((px - cam.Cx) / cam.Fx, (py - cam.Cy) / cam.Fy, 1);
-                            cameraRay = Vector3.Normalize(cameraRay);
-                            
-                            // Transform camera ray to world space using inverse rotation
-                            var worldRay = Vector3.Transform(cameraRay, Quaternion.Inverse(cam.Rotation));
-                            
-                            // Convert to spherical coordinates
-                            float lon = MathF.Atan2(worldRay.X, worldRay.Z);
-                            float lat = MathF.Asin(Math.Clamp(worldRay.Y, -1f, 1f));
-                            
-                            minLon = Math.Min(minLon, lon);
-                            maxLon = Math.Max(maxLon, lon);
-                            minLat = Math.Min(minLat, lat);
-                            maxLat = Math.Max(maxLat, lat);
-                        }
-                    }
+                    float px = (ix / (float)SX) * img.Dataset.Width;
+                    float nx = (px - cam.Cx) / cam.Fx;
+
+                    var rayCam = Vector3.Normalize(new Vector3(nx, ny, 1f));
+                    var rayWorld = Vector3.Transform(rayCam, Quaternion.Inverse(cam.Rotation));
+
+                    float lon = MathF.Atan2(rayWorld.X, rayWorld.Z);
+                    float lat = MathF.Asin(Math.Clamp(rayWorld.Y, -1f, 1f));
+                    if (lon < minLon) minLon = lon;
+                    if (lon > maxLon) maxLon = lon;
+                    if (lat < minLat) minLat = lat;
+                    if (lat > maxLat) maxLat = lat;
                 }
             }
-            
-            // Add padding
-            float lonPadding = (maxLon - minLon) * 0.05f;
-            float latPadding = (maxLat - minLat) * 0.05f;
-            minLon -= lonPadding;
-            maxLon += lonPadding;
-            minLat -= latPadding;
-            maxLat += latPadding;
-            
-            // Constrain to valid ranges
-            minLon = Math.Max(minLon, -MathF.PI);
-            maxLon = Math.Min(maxLon, MathF.PI);
-            minLat = Math.Max(minLat, -MathF.PI / 2);
-            maxLat = Math.Min(maxLat, MathF.PI / 2);
-            
-            float lonRange = maxLon - minLon;
-            float latRange = maxLat - minLat;
-            
-            int outW = outputWidth;
-            int outH = (int)(outputWidth * latRange / lonRange);
-            
-            Log($"Panorama spans: {lonRange * 180 / MathF.PI:F1}° × {latRange * 180 / MathF.PI:F1}°");
-            Log($"Output size: {outW} × {outH}");
+        }
+    }
 
-            // First pass: Create label map (which image owns each pixel)
-            Log("→ Computing optimal seams...");
-            byte[] labelMap = new byte[outW * outH];
-            float[] distanceMap = new float[outW * outH];
-            
-            // Initialize with max distance
-            for (int i = 0; i < distanceMap.Length; i++)
+    // Padding (5%) and clamping
+    float lonPadding = (maxLon - minLon) * 0.05f;
+    float latPadding = (maxLat - minLat) * 0.05f;
+    minLon = Math.Max(-MathF.PI,  minLon - lonPadding);
+    maxLon = Math.Min( MathF.PI,  maxLon + lonPadding);
+    minLat = Math.Max(-MathF.PI/2, minLat - latPadding);
+    maxLat = Math.Min( MathF.PI/2, maxLat + latPadding);
+
+    float lonRange = MathF.Max(1e-5f, maxLon - minLon);
+    float latRange = MathF.Max(1e-5f, maxLat - minLat);
+
+    int outW = outputWidth;
+    int outH = Math.Max(1, (int)(outputWidth * latRange / lonRange));
+    Log($"Panorama spans: {lonRange * 180 / MathF.PI:F1}° × {latRange * 180 / MathF.PI:F1}°");
+    Log($"Output size: {outW} × {outH}");
+
+    // 2) Precompute trig LUTs: lon per column, lat per row
+    var lonLUT = new float[outW];
+    var sinLon = new float[outW];
+    var cosLon = new float[outW];
+    for (int x = 0; x < outW; x++)
+    {
+        float lon = minLon + (x / (float)(outW - 1)) * lonRange;
+        lonLUT[x] = lon;
+        sinLon[x] = MathF.Sin(lon);
+        cosLon[x] = MathF.Cos(lon);
+    }
+
+    var latLUT = new float[outH];
+    var sinLat = new float[outH];
+    var cosLat = new float[outH];
+    for (int y = 0; y < outH; y++)
+    {
+        float lat = minLat + (y / (float)(outH - 1)) * latRange;
+        latLUT[y] = lat;
+        sinLat[y] = MathF.Sin(lat);
+        cosLat[y] = MathF.Cos(lat);
+    }
+
+    // 3) Snapshot image + camera data locally to avoid locks inside the hot path
+    List<(ImageDataset ds, CameraModel cam)> imgs;
+    lock (_dataLock)
+    {
+        imgs = mainGroup.Images.Select(i => (i.Dataset, _camera[i.Id])).ToList();
+    }
+
+    // 4) Output buffer
+    var blended = new byte[outW * outH * 4];
+
+    // 5) Fast soft-seam parameters (tune to taste)
+    const int TOPK = 3;             // up to 3 images contribute per pixel
+    const float TAU  = 0.08f;       // softness for softmin over score margins
+    const float EDGE_FEATHER = 24f; // pixels (in source image) for edge falloff
+    const float ANGLE_EXP    = 2.0f;// stronger down-weight at oblique angles
+    const float EPS = 1e-7f;
+
+    int rowsDone = 0;
+
+    await Task.Run(() =>
+    {
+        // PARALLEL ROWS
+        Parallel.For(0, outH, y =>
+        {
+            float sLat = sinLat[y];
+            float cLat = cosLat[y];
+
+            for (int x = 0; x < outW; x++)
             {
-                distanceMap[i] = float.MaxValue;
+                // Equirectangular direction in WORLD space
+                var worldRay = new Vector3(
+                    cLat * sinLon[x],
+                    sLat,
+                    cLat * cosLon[x]
+                );
+
+                // Find top-K contributors (best score = lowest)
+                // Score = center preference + slight angle penalty
+                //   centerPref ~ (Δx/cx)^2 + (Δy/cy)^2
+                //   angleWeight ~ prefer cameraRay.Z close to 1
+                Span<int>   topIdx = stackalloc int[TOPK]   { -1, -1, -1 };
+                Span<float> topSc  = stackalloc float[TOPK] { float.MaxValue, float.MaxValue, float.MaxValue };
+                Span<float> topU   = stackalloc float[TOPK];
+                Span<float> topV   = stackalloc float[TOPK];
+
+                for (int i = 0; i < imgs.Count; i++)
+                {
+                    var (ds, cam) = imgs[i];
+                    // Transform world ray to camera space
+                    var camRay = Vector3.Transform(worldRay, cam.Rotation);
+                    if (camRay.Z <= EPS) continue; // behind camera
+
+                    float u = cam.Fx * (camRay.X / camRay.Z) + cam.Cx;
+                    float v = cam.Fy * (camRay.Y / camRay.Z) + cam.Cy;
+
+                    // Inside bounds (minus 1 for bilinear)
+                    if (u < 0f || v < 0f || u >= ds.Width - 1 || v >= ds.Height - 1) continue;
+
+                    // Center preference in normalized coords
+                    float nx = (u - cam.Cx) / Math.Max(1f, cam.Cx);
+                    float ny = (v - cam.Cy) / Math.Max(1f, cam.Cy);
+                    float centerPref = nx * nx + ny * ny; // smaller better
+
+                    // Angle preference (prefer facing pixels)
+                    float cosTheta = MathF.Max(0f, camRay.Z / camRay.Length()); // ∈ [0..1]
+                    float anglePenalty = (1f - cosTheta); // 0 at frontal, 1 at grazing
+
+                    // Total score: main term centerPref + mild angle penalty
+                    float score = centerPref + 0.15f * anglePenalty;
+
+                    // Insert into top-K (simple small-K insertion)
+                    int pos = -1;
+                    if (score < topSc[TOPK-1]) pos = TOPK-1;
+                    if (pos >= 0)
+                    {
+                        // bubble up
+                        for (int k = TOPK - 1; k > 0 && score < topSc[k - 1]; k--)
+                        {
+                            topSc[k]  = topSc[k - 1];
+                            topIdx[k] = topIdx[k - 1];
+                            topU[k]   = topU[k - 1];
+                            topV[k]   = topV[k - 1];
+                        }
+                        int ins = 0;
+                        while (ins < TOPK && score >= topSc[ins]) ins++;
+                        if (ins >= TOPK) ins = TOPK - 1;
+
+                        topSc[ins]  = score;
+                        topIdx[ins] = i;
+                        topU[ins]   = u;
+                        topV[ins]   = v;
+                    }
+                }
+
+                // If nothing covers this pixel, leave transparent
+                if (topIdx[0] < 0)
+                    continue;
+
+                // Compute weights via softmin on score margins + edge & angle falloffs
+                // We normalize weights so they sum to 1.
+                float sMin = topSc[0];
+                Span<float> w = stackalloc float[TOPK] { 0f, 0f, 0f };
+                float wSum = 0f;
+
+                for (int k = 0; k < TOPK; k++)
+                {
+                    int i = topIdx[k];
+                    if (i < 0) continue;
+
+                    var (ds, cam) = imgs[i];
+
+                    // Edge falloff: distance to nearest image edge (in pixels)
+                    float du = MathF.Min(topU[k], ds.Width  - 1 - topU[k]);
+                    float dv = MathF.Min(topV[k], ds.Height - 1 - topV[k]);
+                    float dEdge = MathF.Max(0f, MathF.Min(du, dv));
+                    // Smoothstep edge factor in [0..1]
+                    float t = MathF.Max(0f, MathF.Min(1f, dEdge / EDGE_FEATHER));
+                    float edgeFactor = t * t * (3f - 2f * t);
+
+                    // Angle factor (prefer frontal)
+                    var camRayForAngle = Vector3.Transform(worldRay, imgs[i].cam.Rotation);
+                    float cosTheta = MathF.Max(0f, camRayForAngle.Z / camRayForAngle.Length());
+                    float angleFactor = MathF.Pow(cosTheta, ANGLE_EXP);
+
+                    // Softmin over score margin
+                    float margin = (topSc[k] - sMin);
+                    float soft = MathF.Exp(-margin / MathF.Max(EPS, TAU));
+
+                    float wk = soft * edgeFactor * angleFactor;
+                    w[k] = wk;
+                    wSum += wk;
+                }
+
+                if (wSum <= EPS)
+                {
+                    // Fallback to the best-only
+                    var (ds, _) = imgs[topIdx[0]];
+                    var c0 = SampleBilinearVec4(ds.ImageData, ds.Width, ds.Height, topU[0], topV[0]);
+                    WritePixel(blended, outW, x, y, c0);
+                    continue;
+                }
+
+                // Normalize weights
+                float invWSum = 1f / wSum;
+                for (int k = 0; k < TOPK; k++) w[k] *= invWSum;
+
+                // Accumulate colors with Vector4 math (SIMD-friendly)
+                Vector4 acc = Vector4.Zero;
+                for (int k = 0; k < TOPK; k++)
+                {
+                    int i = topIdx[k];
+                    if (i < 0 || w[k] <= 0f) continue;
+                    var (ds, _) = imgs[i];
+                    var c = SampleBilinearVec4(ds.ImageData, ds.Width, ds.Height, topU[k], topV[k]);
+                    acc += c * w[k];
+                }
+
+                WritePixel(blended, outW, x, y, acc);
             }
 
-            await Task.Run(() =>
+            int r = Interlocked.Increment(ref rowsDone);
+            if ((r & 0xF) == 0) // every 16 rows
             {
-                var groupImages = mainGroup.Images.ToList();
-                
-                // Find best source image for each pixel (based on distance to image center)
-                Parallel.For(0, outH, y =>
-                {
-                    for (int x = 0; x < outW; x++)
-                    {
-                        // Map pixel to panorama space
-                        float lon = minLon + (x / (float)(outW - 1)) * lonRange;
-                        float lat = minLat + (y / (float)(outH - 1)) * latRange;
+                UpdateProgress(r / (float)outH, $"Blending ({r}/{outH})");
+            }
+        });
+    });
 
-                        // Convert to 3D world direction
-                        var worldRay = new Vector3(
-                            MathF.Cos(lat) * MathF.Sin(lon),
-                            MathF.Sin(lat),
-                            MathF.Cos(lat) * MathF.Cos(lon)
-                        );
+    Log("✓ Blending complete");
 
-                        int pixelIdx = y * outW + x;
-                        byte bestImageIdx = 255;
-                        float bestDistance = float.MaxValue;
+    // 6) Save to disk (safe path using SKImage.FromPixels)
+    var info = new SKImageInfo(outW, outH, SKColorType.Rgba8888, SKAlphaType.Unpremul);
+    using var skData = SKData.CreateCopy(blended);
+    using var skImg  = SKImage.FromPixels(info, skData);
+    using var encoded = skImg.Encode(SKEncodedImageFormat.Png, 95);
+    using var f = File.Create(path);
+    encoded.SaveTo(f);
 
-                        for (byte imgIdx = 0; imgIdx < groupImages.Count; imgIdx++)
-                        {
-                            var img = groupImages[imgIdx];
-                            var cam = _camera[img.Id];
-                            
-                            // Transform world ray to camera space
-                            var cameraRay = Vector3.Transform(worldRay, cam.Rotation);
-                            
-                            if (cameraRay.Z <= 0) continue; // Behind camera
+    State = PanoramaState.Completed;
+    Log($"✓ Saved: {path}");
 
-                            // Project to image plane
-                            float u = cameraRay.X / cameraRay.Z;
-                            float v = cameraRay.Y / cameraRay.Z;
-                            
-                            float pixelX = cam.Fx * u + cam.Cx;
-                            float pixelY = cam.Fy * v + cam.Cy;
+    // ──────────────────────────────── Local helpers ───────────────────────────────
+    static Vector4 SampleBilinearVec4(byte[] img, int w, int h, float u, float v)
+    {
+        int x = (int)u;
+        int y = (int)v;
 
-                            // Check bounds
-                            if (pixelX >= 0 && pixelX < img.Dataset.Width - 1 &&
-                                pixelY >= 0 && pixelY < img.Dataset.Height - 1)
-                            {
-                                // Calculate distance from image center (normalized)
-                                float dx = (pixelX - cam.Cx) / cam.Cx;
-                                float dy = (pixelY - cam.Cy) / cam.Cy;
-                                float distance = dx * dx + dy * dy;
-                                
-                                // Prefer pixels closer to image center
-                                if (distance < bestDistance)
-                                {
-                                    bestDistance = distance;
-                                    bestImageIdx = imgIdx;
-                                }
-                            }
-                        }
+        float fu = u - x;
+        float fv = v - y;
+        float omfu = 1f - fu;
+        float omfv = 1f - fv;
 
-                        if (bestImageIdx != 255)
-                        {
-                            labelMap[pixelIdx] = bestImageIdx;
-                            distanceMap[pixelIdx] = bestDistance;
-                        }
-                    }
-                });
-            });
+        int i00 = (y * w + x) * 4;
+        int i10 = i00 + 4;
+        int i01 = i00 + w * 4;
+        int i11 = i01 + 4;
 
-            Log("→ Applying seam blending...");
-            
-            // Second pass: Create feathered transitions at seams
-            byte[] blended = new byte[outW * outH * 4];
-            int processedRows = 0;
+        // Clamp the linear indices (saves bounds branches)
+        if (i10 > img.Length - 4) i10 = img.Length - 4;
+        if (i01 > img.Length - 4) i01 = img.Length - 4;
+        if (i11 > img.Length - 4) i11 = img.Length - 4;
 
-            await Task.Run(() =>
-            {
-                var groupImages = mainGroup.Images.ToList();
-                
-                Parallel.For(0, outH, y =>
-                {
-                    for (int x = 0; x < outW; x++)
-                    {
-                        int pixelIdx = y * outW + x;
-                        byte primaryImageIdx = labelMap[pixelIdx];
-                        
-                        if (primaryImageIdx == 255)
-                        {
-                            // No image covers this pixel
-                            continue;
-                        }
+        // Bilinear mix per channel (kept in [0..255] domain to avoid extra conversions)
+        float w00 = omfu * omfv;
+        float w10 = fu   * omfv;
+        float w01 = omfu * fv;
+        float w11 = fu   * fv;
 
-                        // Map pixel to panorama space
-                        float lon = minLon + (x / (float)(outW - 1)) * lonRange;
-                        float lat = minLat + (y / (float)(outH - 1)) * latRange;
+        float r = img[i00]     * w00 + img[i10]     * w10 + img[i01]     * w01 + img[i11]     * w11;
+        float g = img[i00 + 1] * w00 + img[i10 + 1] * w10 + img[i01 + 1] * w01 + img[i11 + 1] * w11;
+        float b = img[i00 + 2] * w00 + img[i10 + 2] * w10 + img[i01 + 2] * w01 + img[i11 + 2] * w11;
+        return new Vector4(r, g, b, 255f);
+    }
 
-                        var worldRay = new Vector3(
-                            MathF.Cos(lat) * MathF.Sin(lon),
-                            MathF.Sin(lat),
-                            MathF.Cos(lat) * MathF.Cos(lon)
-                        );
+    static void WritePixel(byte[] dst, int strideW, int x, int y, in Vector4 c)
+    {
+        int idx = (y * strideW + x) * 4;
+        dst[idx + 0] = (byte)Math.Clamp(c.X + 0.5f, 0f, 255f);
+        dst[idx + 1] = (byte)Math.Clamp(c.Y + 0.5f, 0f, 255f);
+        dst[idx + 2] = (byte)Math.Clamp(c.Z + 0.5f, 0f, 255f);
+        dst[idx + 3] = 255;
+    }
+}
 
-                        // Check if we're near a seam (different neighbors)
-                        bool nearSeam = false;
-                        int seamDistance = int.MaxValue;
-                        
-                        // Check neighboring pixels for different labels
-                        int checkRadius = 30; // Feather width in pixels
-                        for (int dy = -checkRadius; dy <= checkRadius && !nearSeam; dy++)
-                        {
-                            for (int dx = -checkRadius; dx <= checkRadius && !nearSeam; dx++)
-                            {
-                                int nx = x + dx;
-                                int ny = y + dy;
-                                
-                                if (nx >= 0 && nx < outW && ny >= 0 && ny < outH)
-                                {
-                                    int neighborIdx = ny * outW + nx;
-                                    if (labelMap[neighborIdx] != 255 && labelMap[neighborIdx] != primaryImageIdx)
-                                    {
-                                        int dist = Math.Abs(dx) + Math.Abs(dy);
-                                        if (dist < seamDistance)
-                                        {
-                                            seamDistance = dist;
-                                            nearSeam = true;
-                                        }
-                                    }
-                                }
-                            }
-                        }
-
-                        Vector4 finalColor = Vector4.Zero;
-                        
-                        if (!nearSeam || seamDistance > checkRadius / 2)
-                        {
-                            // Far from seam - use single image
-                            var img = groupImages[primaryImageIdx];
-                            var cam = _camera[img.Id];
-                            
-                            var cameraRay = Vector3.Transform(worldRay, cam.Rotation);
-                            
-                            if (cameraRay.Z > 0)
-                            {
-                                float u = cameraRay.X / cameraRay.Z;
-                                float v = cameraRay.Y / cameraRay.Z;
-                                float pixelX = cam.Fx * u + cam.Cx;
-                                float pixelY = cam.Fy * v + cam.Cy;
-                                
-                                if (pixelX >= 0 && pixelX < img.Dataset.Width - 1 &&
-                                    pixelY >= 0 && pixelY < img.Dataset.Height - 1)
-                                {
-                                    var color = SampleBilinear(img.Dataset.ImageData, img.Dataset.Width, img.Dataset.Height, pixelX, pixelY);
-                                    finalColor = new Vector4(color.R, color.G, color.B, 255);
-                                }
-                            }
-                        }
-                        else
-                        {
-                            // Near seam - blend multiple images with Gaussian weights
-                            float totalWeight = 0;
-                            
-                            // Collect all contributing images at this point
-                            for (byte imgIdx = 0; imgIdx < groupImages.Count; imgIdx++)
-                            {
-                                var img = groupImages[imgIdx];
-                                var cam = _camera[img.Id];
-                                
-                                var cameraRay = Vector3.Transform(worldRay, cam.Rotation);
-                                
-                                if (cameraRay.Z <= 0) continue;
-
-                                float u = cameraRay.X / cameraRay.Z;
-                                float v = cameraRay.Y / cameraRay.Z;
-                                float pixelX = cam.Fx * u + cam.Cx;
-                                float pixelY = cam.Fy * v + cam.Cy;
-
-                                if (pixelX >= 0 && pixelX < img.Dataset.Width - 1 &&
-                                    pixelY >= 0 && pixelY < img.Dataset.Height - 1)
-                                {
-                                    var color = SampleBilinear(img.Dataset.ImageData, img.Dataset.Width, img.Dataset.Height, pixelX, pixelY);
-                                    
-                                    // Weight based on distance from seam and whether this is the primary image
-                                    float weight = 1.0f;
-                                    
-                                    if (imgIdx == primaryImageIdx)
-                                    {
-                                        // Primary image - fade out near seam
-                                        weight = (float)seamDistance / checkRadius;
-                                    }
-                                    else
-                                    {
-                                        // Secondary image - fade in near seam
-                                        weight = 1.0f - (float)seamDistance / checkRadius;
-                                    }
-                                    
-                                    // Apply Gaussian falloff for smoother blend
-                                    weight = MathF.Exp(-2.0f * (1.0f - weight) * (1.0f - weight));
-                                    
-                                    finalColor += new Vector4(color.R, color.G, color.B, color.A) * weight;
-                                    totalWeight += weight;
-                                }
-                            }
-                            
-                            if (totalWeight > 0)
-                            {
-                                finalColor /= totalWeight;
-                            }
-                        }
-
-                        int idx = pixelIdx * 4;
-                        blended[idx]     = (byte)Math.Clamp(finalColor.X, 0, 255);
-                        blended[idx + 1] = (byte)Math.Clamp(finalColor.Y, 0, 255);
-                        blended[idx + 2] = (byte)Math.Clamp(finalColor.Z, 0, 255);
-                        blended[idx + 3] = (byte)Math.Clamp(finalColor.W, 0, 255);
-                    }
-
-                    int currentProgress = Interlocked.Increment(ref processedRows);
-                    if (currentProgress % 8 == 0)
-                    {
-                        UpdateProgress((float)currentProgress / outH, $"Blending ({currentProgress}/{outH})");
-                    }
-                });
-            });
-
-            Log("✓ Blending complete");
-
-            var info = new SKImageInfo(outW, outH, SKColorType.Rgba8888, SKAlphaType.Unpremul);
-            using var skData = SKData.CreateCopy(blended);
-            using var skImg = SKImage.FromPixels(info, skData);
-            using var encoded = skImg.Encode(SKEncodedImageFormat.Png, 95);
-            using var f = File.Create(path);
-            encoded.SaveTo(f);
-
-            State = PanoramaState.Completed;
-            Log($"✓ Saved: {path}");
-        }
         private (byte R, byte G, byte B, byte A) SampleBilinear(byte[] imageData, int width, int height, float u, float v)
         {
             int x = (int)u;
@@ -990,7 +993,151 @@ namespace GeoscientistToolkit
                 return true;
             }
         }
+        public void Dispose()
+        {
+            if (_disposed) return;
+            _disposed = true;
 
+            // 1) Stop any running pipeline
+            try { _cts?.Cancel(); } catch { /* ignore */ }
+
+            // 2) Give the current run a brief chance to observe cancellation
+            try { _runningTask?.Wait(250); } catch { /* ignore */ }
+
+            // 3) Free caches and big graphs
+            try { ClearCaches(); } catch { /* ignore */ }
+
+            // 4) Dispose CTS
+            try { _cts?.Dispose(); } catch { /* ignore */ }
+            _cts = null;
+
+            
+        }
+        public static void ForceGcCompaction()
+        {
+            try
+            {
+                System.Runtime.GCSettings.LargeObjectHeapCompactionMode =
+                    System.Runtime.GCLargeObjectHeapCompactionMode.CompactOnce;
+                GC.Collect(GC.MaxGeneration, GCCollectionMode.Forced, blocking: true, compacting: true);
+            }
+            catch { /* ignore */ }
+        }
+        public void ClearCaches()
+        {
+            lock (_dataLock)
+            {
+                // SIFT feature blobs (descriptors) are usually the biggest hog
+                _sift?.Clear();
+
+                // The per-image staging list
+                _images?.Clear();
+
+                // Camera models computed for each image
+                _camera?.Clear();
+
+                // The graph (edges + transforms)
+                Graph = null;
+
+                // Empty the queue of old log messages to prevent a memory leak
+                while (Logs.TryDequeue(out _)) { }
+            }
+        }
+        /// <summary>
+        /// Refines the panorama by computing a new relative rotation from manual points and re-optimizing the global rotations.
+        /// </summary>
+        public Task RefineWithManualPointsAsync(PanoramaImage img1, PanoramaImage img2, List<(Vector2 P1, Vector2 P2)> manualPairs)
+        {
+            lock (_runLock)
+            {
+                if (_runningTask != null && !_runningTask.IsCompleted)
+                {
+                    Log("⏳ Processing already running, skipping refinement.");
+                    return _runningTask;
+                }
+
+                if (manualPairs.Count < 8)
+                {
+                    Log($"⚠️ Refinement requires at least 8 point pairs, but got {manualPairs.Count}.");
+                    return Task.CompletedTask;
+                }
+
+                _cts = new CancellationTokenSource();
+                var token = _cts.Token;
+
+                _runningTask = Task.Run(async () =>
+                {
+                    try
+                    {
+                        State = PanoramaState.MatchingFeatures;
+                        Log("════════════════════════════════════════════════════════════");
+                        Log($"→ Refining with {manualPairs.Count} manual points for {img1.Dataset.Name} ↔ {img2.Dataset.Name}");
+
+                        // 1. Get camera models
+                        CameraModel cam1, cam2;
+                        lock (_dataLock)
+                        {
+                            cam1 = _camera[img1.Id];
+                            cam2 = _camera[img2.Id];
+                        }
+
+                        // 2. Create mock KeyPoints and FeatureMatches from the manual pairs
+                        var keypoints1 = manualPairs.Select(p => new KeyPoint { X = p.P1.X, Y = p.P1.Y }).ToList();
+                        var keypoints2 = manualPairs.Select(p => new KeyPoint { X = p.P2.X, Y = p.P2.Y }).ToList();
+                        var matches = Enumerable.Range(0, manualPairs.Count)
+                            .Select(i => new FeatureMatch { QueryIndex = i, TrainIndex = i })
+                            .ToList();
+
+                        // 3. Normalize points and solve for Essential Matrix directly (no RANSAC needed)
+                        var normPts1 = matches.Select(m => NormalizePoint(keypoints1[m.QueryIndex], cam1)).ToList();
+                        var normPts2 = matches.Select(m => NormalizePoint(keypoints2[m.TrainIndex], cam2)).ToList();
+                        var E = SolveEssentialMatrix8Point(normPts1, normPts2);
+
+                        if (!E.HasValue)
+                        {
+                            throw new InvalidOperationException("Could not solve Essential Matrix from the provided manual points.");
+                        }
+
+                        // 4. Decompose E to get the refined relative rotation R
+                        var (R, t, inliers) = DecomposeEssentialMatrix(E.Value, normPts1, normPts2, matches);
+
+                        if (!R.HasValue)
+                        {
+                            throw new InvalidOperationException("Could not decompose Essential Matrix to find a valid rotation.");
+                        }
+
+                        Log($"✓ Refined relative rotation found from {inliers.Count} manual points.");
+
+                        // 5. Create a new "pseudo-homography" from the refined rotation
+                        var H_refined = cam2.K * R.Value * cam1.K_inv;
+
+                        // 6. Update the graph with this high-confidence link
+                        Graph.UpdateEdge(img1, img2, inliers, H_refined);
+                        Log("✓ Stitch graph updated with high-confidence manual link.");
+
+                        // 7. Re-run the global rotation optimization
+                        token.ThrowIfCancellationRequested();
+                        await EstimateCameraRotationsAsync(token);
+
+                        State = PanoramaState.ReadyForPreview;
+                        Log("✓ Refinement complete. Panorama is ready for preview.");
+                        Log("════════════════════════════════════════════════════════════");
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        State = PanoramaState.Failed;
+                        Log("🛑 Refinement Canceled");
+                    }
+                    catch (Exception ex)
+                    {
+                        State = PanoramaState.Failed;
+                        Log($"❌ REFINEMENT FATAL: {ex.Message}");
+                        Logger.LogError($"[Panorama Refine] {ex}");
+                    }
+                }, token);
+                return _runningTask;
+            }
+        }
         public class ProjectionSettings
         {
             public bool AutoCrop = true;

@@ -12,6 +12,15 @@
 //    to resolve compilation errors with 'ds.Id'.
 // ==========================================================================================
 
+// ==========================================================================================
+// FIX IMPLEMENTED:
+// 1. Moved texture creation from the constructor to a just-in-time method (`EnsureTexturesAreLoaded`)
+//    that runs after the stitching service has loaded the image data, resolving the root cause
+//    of textures not appearing.
+// 2. The side-by-side "Manual Link" view now correctly respects the "Enable Image Preview"
+//    checkbox, making the UI behavior consistent.
+// ==========================================================================================
+
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -61,11 +70,13 @@ namespace GeoscientistToolkit
         private int _selImgA = 0;
         private int _selImgB = 1;
         private readonly List<(Vector2 P1, Vector2 P2)> _manualPairs = new();
-        private Vector2? _pendingImagePoint; 
-        private Vector2? _pendingScreenPoint; 
+        private Vector2? _pendingImagePoint;
+        private Vector2? _pendingScreenPoint;
         private float _p1x, _p1y, _p2x, _p2y;
         private string _manualMsg = "";
         private readonly Dictionary<Dataset, TextureManager> _textureManagers = new();
+        private Guid _texturesForJobId = Guid.Empty; // FIX: Tracks textures for the current job
+
 
         // ────────── Costruttori ──────────
         public PanoramaWizardPanel(DatasetGroup group)
@@ -77,13 +88,8 @@ namespace GeoscientistToolkit
             _fileDialog = new ImGuiExportFileDialog("panoramaExport", "Export Panorama");
             _fileDialog.SetExtensions((".png", "PNG Image"), (".jpg", "JPEG Image"));
 
-            foreach (var ds in _group.Datasets)
-            {
-                if (ds is ImageDataset imageDs && imageDs.ImageData != null)
-                {
-                    _textureManagers[ds] = TextureManager.CreateFromPixelData(imageDs.ImageData, (uint)imageDs.Width, (uint)imageDs.Height);
-                }
-            }
+            // FIX: Texture creation is removed from here. It was executing before image data was loaded.
+            // It is now handled by EnsureTexturesAreLoaded().
         }
 
         public PanoramaWizardPanel(DatasetGroup group, string title, bool open) : this(group)
@@ -115,23 +121,58 @@ namespace GeoscientistToolkit
         public void Open() => IsOpen = true;
         public void Close()
         {
+            // Stop showing the panel first so nothing else draws/allocates
             IsOpen = false;
-            foreach (var tm in _textureManagers.Values)
-            {
-                tm.Dispose();
-            }
-            _textureManagers.Clear();
-        }
 
+            // 1) Stop the pipeline and dispose heavy service state
+            try
+            {
+                _job?.Service?.Cancel();
+                _job?.Service?.Dispose();   // requires methods added below
+            }
+            catch { /* ignore on close */ }
+
+            // 2) Dispose GPU textures (Veldrid/ImGui)
+            try
+            {
+                foreach (var tm in _textureManagers.Values)
+                    tm?.Dispose();
+            }
+            finally
+            {
+                _textureManagers.Clear();
+            }
+
+            // 3) Drop UI/state references so GC can reclaim memory
+            try
+            {
+                _hiddenImages.Clear();
+                _manualPairs.Clear();
+                _manualMsg = "";
+                _pendingImagePoint = null;
+                _pendingScreenPoint = null;
+            }
+            catch { /* ignore */ }
+
+            _job = null;
+
+            // 4) (Optional) compact LOH once after closing a big workspace
+            PanoramaStitchingService.ForceGcCompaction();
+        }
 
         private void Recompute()
         {
-            _job?.Service.Cancel();
+            // FIXED: Cancel and properly dispose the resources of the old job first.
+            _job?.Service?.Cancel();
+            _job?.Service?.Dispose();
+
             _hiddenImages.Clear();
             _manualMsg = "";
             _manualPairs.Clear();
             _pendingImagePoint = null;
             _pendingScreenPoint = null;
+
+            // Now, create the new job and start processing.
             _job = new PanoramaStitchJob(_group);
             _ = _job.Service.StartProcessingAsync();
             _fittedOnce = false;
@@ -159,6 +200,9 @@ namespace GeoscientistToolkit
 
             if (ImGui.Begin(title ?? Title, ref openRef, ImGuiWindowFlags.None))
             {
+                // FIX: Load textures just-in-time after image data is available.
+                EnsureTexturesAreLoaded();
+
                 DrawHeader();
                 ImGui.Separator();
 
@@ -183,7 +227,11 @@ namespace GeoscientistToolkit
                 }
             }
             ImGui.End();
-
+            if (!openRef && IsOpen)
+            {
+                Close();
+                return;
+            }
             if (_fileDialog.Submit())
             {
                 if (!string.IsNullOrWhiteSpace(_fileDialog.SelectedPath))
@@ -335,12 +383,33 @@ namespace GeoscientistToolkit
                             dl.AddLine(screenPts[i], screenPts[(i + 1) % 4], col, 1.0f);
                         }
                     }
+                    
+                    // --- BEGIN: DRAW IMAGE NAME ---
+                    // Calculate the visual center of the quad on the screen.
+                    var center = (screenPts[0] + screenPts[1] + screenPts[2] + screenPts[3]) * 0.25f;
+
+                    // Only draw the text if the center of the image is visible on the canvas.
+                    if (PointInCanvas(center))
+                    {
+                        var text = img.Dataset.Name;
+                        var textSize = ImGui.CalcTextSize(text);
+                        
+                        // Position the text in the center of the quad.
+                        var textPos = center - textSize * 0.5f;
+
+                        // Add a simple shadow for readability by drawing the text in black first, offset by 1 pixel.
+                        dl.AddText(textPos + new Vector2(1, 1), ImGui.GetColorU32(new Vector4(0, 0, 0, 0.85f)), text);
+                        
+                        // Draw the main text in white.
+                        dl.AddText(textPos, ImGui.GetColorU32(new Vector4(1, 1, 1, 1f)), text);
+                    }
+                    // --- END: DRAW IMAGE NAME ---
 
 
                     if (_enableTooltips && hovered)
                     {
-                        var center = ToScreen((pts[0] + pts[2]) * 0.5f, bounds);
-                        if (PointInCanvas(center) && (ImGui.GetMousePos() - center).Length() < 14f)
+                        var tooltipCenter = ToScreen((pts[0] + pts[2]) * 0.5f, bounds);
+                        if (PointInCanvas(tooltipCenter) && (ImGui.GetMousePos() - tooltipCenter).Length() < 14f)
                         {
                             ImGui.BeginTooltip();
                             ImGui.TextUnformatted(img.Dataset.Name);
@@ -422,10 +491,33 @@ namespace GeoscientistToolkit
 
             if (ImGui.Button("Refine with Manual Points") && _manualPairs.Count > 0)
             {
-                // This is a placeholder for the actual logic to refine the stitch
-                _manualMsg = $"Refining with {_manualPairs.Count} points...";
-                // In a real implementation, you would call a method on the service:
-                // _job.Service.RefineWithManualPoints(imgA, imgB, _manualPairs);
+                // --- REFINEMENT LOGIC IMPLEMENTED HERE ---
+                if (_manualPairs.Count < 8)
+                {
+                    _manualMsg = $"Error: At least 8 point pairs are required. You have {_manualPairs.Count}.";
+                }
+                else
+                {
+                    _manualMsg = $"Refining with {_manualPairs.Count} points...";
+                    
+                    // Create a copy of the list to pass to the async method
+                    var pairsCopy = new List<(Vector2, Vector2)>(_manualPairs);
+
+                    // Call the service asynchronously and update the UI message on completion
+                    _ = _job.Service.RefineWithManualPointsAsync(imgA, imgB, pairsCopy)
+                        .ContinueWith(task =>
+                        {
+                            if (task.IsFaulted)
+                            {
+                                _manualMsg = "Refinement failed. See log for details.";
+                            }
+                            else
+                            {
+                                _manualMsg = "Refinement complete! Preview has been updated.";
+                                _fittedOnce = false; // Force preview to re-fit to the new layout
+                            }
+                        }, System.Threading.Tasks.TaskScheduler.FromCurrentSynchronizationContext());
+                }
             }
             ImGui.SameLine();
             if (ImGui.Button("Clear Points"))
@@ -433,6 +525,7 @@ namespace GeoscientistToolkit
                 _manualPairs.Clear();
                 _pendingImagePoint = null;
                 _pendingScreenPoint = null;
+                _manualMsg = "Points cleared.";
             }
             ImGui.Text(_manualMsg);
 
@@ -446,7 +539,6 @@ namespace GeoscientistToolkit
             DrawImageForManualLinking(imgB, 1);
             ImGui.Columns(1);
         }
-
         private void DrawImageForManualLinking(PanoramaImage img, int panelIndex)
         {
             ImGui.Text(img.Dataset.Name);
@@ -457,7 +549,8 @@ namespace GeoscientistToolkit
             var dl = ImGui.GetWindowDrawList();
             dl.AddRectFilled(canvasMin, canvasMax, 0xFF202020);
 
-            if (_textureManagers.TryGetValue(img.Dataset, out var tm))
+            // FIX: This view now respects the "Enable Image Preview" checkbox for consistency.
+            if (_enableTexturePreview && _textureManagers.TryGetValue(img.Dataset, out var tm))
             {
                 var textureId = tm.GetImGuiTextureId();
                 if (textureId != IntPtr.Zero)
@@ -507,6 +600,40 @@ namespace GeoscientistToolkit
             {
                 dl.AddCircleFilled(_pendingScreenPoint.Value, 4, 0xFF00FFFF);
                 dl.AddCircle(_pendingScreenPoint.Value, 5, 0xFFFFFFFF);
+            }
+        }
+
+        /// <summary>
+        /// FIX: Creates GPU textures for the current job's images, but only after the service has loaded them.
+        /// This prevents trying to create textures from null data.
+        /// </summary>
+        private void EnsureTexturesAreLoaded()
+        {
+            // Check if the job is ready and if we haven't already loaded textures for this job instance.
+            if (_job != null && _job.Service.State >= PanoramaState.DetectingFeatures && _texturesForJobId != _job.Id)
+            {
+                // Dispose old textures to prevent leaks when recomputing.
+                foreach (var tm in _textureManagers.Values)
+                {
+                    tm?.Dispose();
+                }
+                _textureManagers.Clear();
+
+                // Get the list of images that the service successfully loaded.
+                var loadedImages = _job.Service.GetImages();
+                foreach (var panoramaImage in loadedImages)
+                {
+                    if (panoramaImage.Dataset is ImageDataset imageDs && imageDs.ImageData != null)
+                    {
+                        _textureManagers[imageDs] = TextureManager.CreateFromPixelData(
+                            imageDs.ImageData,
+                            (uint)imageDs.Width,
+                            (uint)imageDs.Height
+                        );
+                    }
+                }
+                // Mark that we've created textures for this job ID to avoid redundant work.
+                _texturesForJobId = _job.Id;
             }
         }
 

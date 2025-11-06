@@ -88,7 +88,26 @@ public class StitchGraph
             _adj.Add(image.Id, new List<(Guid, List<FeatureMatch>, Matrix3x3)>());
         }
     }
+    /// <summary>
+    /// Updates the connection between two nodes with a new, high-confidence transform.
+    /// This removes any previous connections between them before adding the new one.
+    /// </summary>
+    public void UpdateEdge(PanoramaImage img1, PanoramaImage img2, List<FeatureMatch> matches, Matrix3x3 homography)
+    {
+        lock (_adj)
+        {
+            if (!_adj.ContainsKey(img1.Id) || !_adj.ContainsKey(img2.Id)) return;
 
+            // Remove any existing edge from img1 -> img2
+            _adj[img1.Id].RemoveAll(edge => edge.neighbor == img2.Id);
+
+            // Remove any existing edge from img2 -> img1
+            _adj[img2.Id].RemoveAll(edge => edge.neighbor == img1.Id);
+
+            // Add the new, refined edge in both directions
+            AddEdge(img1, img2, matches, homography);
+        }
+    }
     public void AddEdge(PanoramaImage img1, PanoramaImage img2, List<FeatureMatch> matches, Matrix3x3 homography)
     {
         lock (_adj)
