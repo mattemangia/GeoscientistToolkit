@@ -24,7 +24,6 @@ internal class GroundControlPointEditor : IDisposable
 {
     private readonly GraphicsDevice _graphicsDevice;
     private readonly ResourceFactory _resourceFactory;
-    // CORRECTED: Use the project's ImGuiController
     private readonly ImGuiController _imGuiController;
 
     private struct VeldridTextureBinding : IDisposable
@@ -32,7 +31,6 @@ internal class GroundControlPointEditor : IDisposable
         public readonly IntPtr ImGuiBinding;
         private readonly Texture _texture;
         private readonly TextureView _textureView;
-        // CORRECTED: Use the project's ImGuiController
         private readonly ImGuiController _renderer;
         private bool _disposed;
 
@@ -71,7 +69,6 @@ internal class GroundControlPointEditor : IDisposable
     public Action<PhotogrammetryImage, GroundControlPoint> OnGCPUpdated;
     public Action<PhotogrammetryImage, GroundControlPoint> OnGCPRemoved;
 
-    // CORRECTED: Constructor now uses the project's ImGuiController
     public GroundControlPointEditor(GraphicsDevice graphicsDevice, ImGuiController imGuiController)
     {
         _graphicsDevice = graphicsDevice;
@@ -84,7 +81,6 @@ internal class GroundControlPointEditor : IDisposable
         _currentImage = image;
         DisposeBinding();
         
-        // Ensure image data is loaded
         if (_currentImage?.Dataset?.ImageData == null)
         {
             Util.Logger.LogError($"Cannot open GCP editor: Image data not loaded for {_currentImage?.Dataset?.Name ?? "null"}");
@@ -115,7 +111,6 @@ internal class GroundControlPointEditor : IDisposable
             (uint)dataset.Width, (uint)dataset.Height, 1, 1,
             PixelFormat.R8_G8_B8_A8_UNorm, TextureUsage.Sampled));
 
-        // The ImageLoader always provides RGBA data, so we can use it directly.
         _graphicsDevice.UpdateTexture(texture, dataset.ImageData, 0, 0, 0, (uint)dataset.Width, (uint)dataset.Height, 1, 0, 0);
 
         var textureView = _resourceFactory.CreateTextureView(texture);
@@ -128,7 +123,6 @@ internal class GroundControlPointEditor : IDisposable
     {
         if (!IsOpen) return;
 
-        // Open the modal if it's not already open
         if (!ImGui.IsPopupOpen("Ground Control Point Editor"))
         {
             ImGui.OpenPopup("Ground Control Point Editor");
@@ -197,7 +191,6 @@ internal class GroundControlPointEditor : IDisposable
         var imgBottomRight = imgTopLeft + new Vector2(_currentImage.Dataset.Width, _currentImage.Dataset.Height) * _zoom;
         drawList.AddImage(_imageBinding.Value.ImGuiBinding, imgTopLeft, imgBottomRight);
 
-        // Draw existing GCPs
         foreach (var gcp in _currentImage.GroundControlPoints)
         {
             var screenPos = panelTopLeft + _pan + gcp.ImagePosition * _zoom;
@@ -316,7 +309,6 @@ public class PhotogrammetryWizardPanel : BasePanel
     private readonly PhotogrammetryJob _job;
     private readonly List<string> _logBuffer = new();
     private readonly GraphicsDevice _graphicsDevice;
-    // CORRECTED: Use the project's ImGuiController
     private readonly ImGuiController _imGuiController;
 
     private readonly GroundControlPointEditor _gcpEditor;
@@ -340,7 +332,6 @@ public class PhotogrammetryWizardPanel : BasePanel
     public bool IsOpen { get; private set; }
     public string Title { get; }
 
-    // CORRECTED: Constructor now uses the project's ImGuiController
     public PhotogrammetryWizardPanel(DatasetGroup imageGroup, GraphicsDevice graphicsDevice, ImGuiController imGuiController)
         : base($"Photogrammetry: {imageGroup.Name}", new Vector2(900, 700))
     {
@@ -388,7 +379,6 @@ public class PhotogrammetryWizardPanel : BasePanel
         var service = _job.Service;
         ImGui.ProgressBar(service.Progress, new Vector2(-1, 0), service.StatusMessage);
         
-        // --- Extra actions toolbar ---
         ImGui.Separator();
         if (ImGui.Button("Build Dense Cloud...", new Vector2(200, 0))) _showDenseCloudDialog = true;
         ImGui.SameLine();
@@ -401,12 +391,68 @@ public class PhotogrammetryWizardPanel : BasePanel
 
         if (ImGui.BeginTabBar("PhotogrammetryTabs"))
         {
-            if (ImGui.BeginTabItem("Processing Log")) { DrawLog(); ImGui.EndTabItem(); }
-            if (service.State == PhotogrammetryState.AwaitingManualInput && ImGui.BeginTabItem("Manual Input")) { DrawManualInputUI(); ImGui.EndTabItem(); }
-            if (service.State >= PhotogrammetryState.ComputingSparseReconstruction && ImGui.BeginTabItem("Reconstruction")) { DrawReconstructionUI(); ImGui.EndTabItem(); }
-            if (service.SparseCloud != null && ImGui.BeginTabItem("Sparse Cloud")) { DrawPointCloudView(service.SparseCloud); ImGui.EndTabItem(); }
-            if (service.DenseCloud != null && ImGui.BeginTabItem("Dense Cloud")) { DrawPointCloudView(service.DenseCloud); ImGui.EndTabItem(); }
-            if (service.GeneratedMesh != null && ImGui.BeginTabItem("Mesh")) { DrawMeshView(); ImGui.EndTabItem(); }
+            if (ImGui.BeginTabItem("Processing Log")) 
+            { 
+                DrawLog(); 
+                ImGui.EndTabItem(); 
+            }
+            
+            if (service.State == PhotogrammetryState.AwaitingManualInput && ImGui.BeginTabItem("Manual Input")) 
+            { 
+                DrawManualInputUI(); 
+                ImGui.EndTabItem(); 
+            }
+            
+            if (service.Graph != null && ImGui.BeginTabItem("Image Groups")) 
+            { 
+                DrawImageGroupsVisualization(); 
+                ImGui.EndTabItem(); 
+            }
+            
+            if ((service.State >= PhotogrammetryState.ComputingSparseReconstruction || 
+                 (service.ImageGroups != null && service.ImageGroups.Count == 1)) && 
+                ImGui.BeginTabItem("Reconstruction")) 
+            { 
+                DrawReconstructionUI(); 
+                ImGui.EndTabItem(); 
+            }
+            
+            if (service.State >= PhotogrammetryState.ComputingSparseReconstruction || service.SparseCloud != null)
+            {
+                if (ImGui.BeginTabItem("Sparse Cloud"))
+                {
+                    if (service.SparseCloud != null)
+                        DrawPointCloudView(service.SparseCloud);
+                    else
+                        DrawSparseCloudPreview();
+                    ImGui.EndTabItem();
+                }
+            }
+            
+            if (service.SparseCloud != null || service.DenseCloud != null)
+            {
+                if (ImGui.BeginTabItem("Dense Cloud"))
+                {
+                    if (service.DenseCloud != null)
+                        DrawPointCloudView(service.DenseCloud);
+                    else
+                        DrawDenseCloudPreview();
+                    ImGui.EndTabItem();
+                }
+            }
+            
+            if (service.GeneratedMesh != null && ImGui.BeginTabItem("Mesh")) 
+            { 
+                DrawMeshView(); 
+                ImGui.EndTabItem(); 
+            }
+            
+            if (ImGui.BeginTabItem("GCP Management"))
+            {
+                DrawGCPManagementTab();
+                ImGui.EndTabItem();
+            }
+            
             ImGui.EndTabBar();
         }
 
@@ -457,16 +503,75 @@ public class PhotogrammetryWizardPanel : BasePanel
         {
             if (ImGui.CollapsingHeader($"Unconnected Groups ({imageGroups.Count})###Groups", ImGuiTreeNodeFlags.DefaultOpen))
             {
-                ImGui.TextWrapped("Select images from different groups to link them manually.");
-                ImGui.Text("Group 1:"); ImGui.SameLine();
-                foreach (var grp in imageGroups)
+                ImGui.TextWrapped("Your images are in disconnected groups. Select one image from each group to link them manually.");
+                
+                for (int i = 0; i < imageGroups.Count; i++)
                 {
-                    foreach (var img in grp.Images)
+                    var grp = imageGroups[i];
+                    if (ImGui.TreeNode($"Group {i + 1} ({grp.Images.Count} images)###grp{i}"))
                     {
-                        if (ImGui.Selectable($"{img.Dataset.Name}##{img.Id}", _groupLinkImage1 == img))
-                            _groupLinkImage1 = img;
+                        foreach (var img in grp.Images)
+                        {
+                            bool isSelected1 = _groupLinkImage1 == img;
+                            bool isSelected2 = _groupLinkImage2 == img;
+                            string suffix = isSelected1 ? " [Selected as Image 1]" : isSelected2 ? " [Selected as Image 2]" : "";
+                            
+                            ImGui.Text($"• {img.Dataset.Name}{suffix}");
+                            ImGui.SameLine();
+                            
+                            if (_groupLinkImage1 != img)
+                            {
+                                if (ImGui.SmallButton($"Select 1##{img.Id}"))
+                                {
+                                    _groupLinkImage1 = img;
+                                    _logBuffer.Add($"[{DateTime.Now:HH:mm:ss}] Selected {img.Dataset.Name} as Image 1 for manual linking");
+                                }
+                            }
+                            
+                            if (_groupLinkImage1 != null && _groupLinkImage1 != img && _groupLinkImage2 != img)
+                            {
+                                ImGui.SameLine();
+                                if (ImGui.SmallButton($"Select 2##{img.Id}"))
+                                {
+                                    _groupLinkImage2 = img;
+                                    _logBuffer.Add($"[{DateTime.Now:HH:mm:ss}] Selected {img.Dataset.Name} as Image 2 for manual linking");
+                                }
+                            }
+                        }
+                        ImGui.TreePop();
                     }
-                    ImGui.Separator();
+                }
+                
+                ImGui.Separator();
+                
+                if (_groupLinkImage1 != null || _groupLinkImage2 != null)
+                {
+                    ImGui.Text("Selected for Linking:");
+                    if (_groupLinkImage1 != null)
+                        ImGui.BulletText($"Image 1: {_groupLinkImage1.Dataset.Name}");
+                    if (_groupLinkImage2 != null)
+                        ImGui.BulletText($"Image 2: {_groupLinkImage2.Dataset.Name}");
+                    
+                    if (_groupLinkImage1 != null && _groupLinkImage2 != null)
+                    {
+                        if (ImGui.Button("Link Selected Images", new Vector2(200, 30)))
+                        {
+                            _logBuffer.Add($"[{DateTime.Now:HH:mm:ss}] Manually linking {_groupLinkImage1.Dataset.Name} and {_groupLinkImage2.Dataset.Name}");
+                            _job.Service.ManuallyLinkImages(_groupLinkImage1, _groupLinkImage2);
+                            _groupLinkImage1 = null;
+                            _groupLinkImage2 = null;
+                        }
+                        ImGui.SameLine();
+                        if (ImGui.Button("Clear Selection", new Vector2(150, 30)))
+                        {
+                            _groupLinkImage1 = null;
+                            _groupLinkImage2 = null;
+                        }
+                    }
+                }
+                else
+                {
+                    ImGui.TextColored(new Vector4(1, 1, 0, 1), "Select one image from each group you want to link.");
                 }
             }
         }
@@ -492,6 +597,48 @@ public class PhotogrammetryWizardPanel : BasePanel
                 }
             }
         }
+        
+        ImGui.Separator();
+        ImGui.Separator();
+        
+        ImGui.TextColored(new Vector4(0, 1, 0, 1), "Actions:");
+        
+        var currentGroups = _job.Service.ImageGroups;
+        bool canProceed = currentGroups.Count == 1 || imagesWithNoFeatures.Count == 0;
+        
+        if (currentGroups.Count > 1)
+        {
+            ImGui.TextColored(new Vector4(1, 0.5f, 0, 1), $"⚠ {currentGroups.Count} disconnected groups detected. Link them or discard isolated images.");
+        }
+        
+        if (!canProceed)
+        {
+            ImGui.BeginDisabled();
+        }
+        
+        if (ImGui.Button("Continue Processing", new Vector2(200, 40)))
+        {
+            _logBuffer.Add($"[{DateTime.Now:HH:mm:ss}] Resuming photogrammetry processing...");
+            _job.Service.ContinueAfterManualInput();
+        }
+        ImGui.SameLine();
+        ImGui.TextWrapped("Continue to camera alignment and sparse reconstruction");
+        
+        if (!canProceed)
+        {
+            ImGui.EndDisabled();
+            ImGui.TextColored(new Vector4(1, 0, 0, 1), "Cannot proceed: Resolve disconnected groups first.");
+        }
+        
+        ImGui.Separator();
+        
+        if (ImGui.Button("Force Continue (Skip Unmatched)", new Vector2(200, 30)))
+        {
+            _logBuffer.Add($"[{DateTime.Now:HH:mm:ss}] Force continuing, skipping unmatched images...");
+            _job.Service.ForceContinueProcessing();
+        }
+        ImGui.SameLine();
+        ImGui.TextWrapped("Continue with largest group only");
     }
 
     private void DrawReconstructionUI()
@@ -594,6 +741,217 @@ public class PhotogrammetryWizardPanel : BasePanel
         }
     }
 
+    private void DrawSparseCloudPreview()
+    {
+        ImGui.TextWrapped("The sparse point cloud will be generated from matched features between images.");
+        ImGui.Separator();
+        
+        var service = _job.Service;
+        var totalFeatures = service.Images.Sum(img => img.SiftFeatures?.KeyPoints.Count ?? 0);
+        var totalMatches = 0;
+        
+        if (service.Graph != null)
+        {
+            foreach (var img in service.Images)
+            {
+                if (service.Graph.TryGetNeighbors(img.Id, out var neighbors))
+                {
+                    totalMatches += neighbors.Sum(n => n.Matches?.Count ?? 0);
+                }
+            }
+        }
+        
+        ImGui.Text($"Total Features Detected: {totalFeatures:N0}");
+        ImGui.Text($"Total Feature Matches: {totalMatches:N0}");
+        ImGui.Text($"Estimated Sparse Points: {totalMatches / 2:N0} - {totalMatches:N0}");
+        
+        ImGui.Separator();
+        
+        if (service.State >= PhotogrammetryState.ComputingSparseReconstruction)
+        {
+            if (ImGui.Button("Build Sparse Cloud", new Vector2(200, 40)))
+            {
+                _logBuffer.Add($"[{DateTime.Now:HH:mm:ss}] Building sparse point cloud...");
+                _ = service.BuildSparseCloudAsync();
+            }
+        }
+        else
+        {
+            ImGui.TextColored(new Vector4(0.5f, 0.5f, 0.5f, 1), "Complete camera alignment first to build sparse cloud.");
+        }
+    }
+    
+    private void DrawDenseCloudPreview()
+    {
+        ImGui.TextWrapped("The dense point cloud will be generated by densifying the sparse cloud using multi-view stereo.");
+        ImGui.Separator();
+        
+        if (_job.Service.SparseCloud != null)
+        {
+            ImGui.Text($"Sparse Cloud Points: {_job.Service.SparseCloud.Points.Count:N0}");
+            ImGui.Text($"Estimated Dense Points: {_job.Service.SparseCloud.Points.Count * 50:N0} - {_job.Service.SparseCloud.Points.Count * 200:N0}");
+            
+            ImGui.Separator();
+            
+            if (ImGui.Button("Build Dense Cloud...", new Vector2(200, 40)))
+            {
+                _showDenseCloudDialog = true;
+            }
+        }
+        else
+        {
+            ImGui.TextColored(new Vector4(0.5f, 0.5f, 0.5f, 1), "Build sparse cloud first.");
+        }
+    }
+    
+    private void DrawImageGroupsVisualization()
+    {
+        var groups = _job.Service.ImageGroups;
+        
+        ImGui.Text($"Total Image Groups: {groups.Count}");
+        ImGui.Text($"Total Images: {_job.Service.Images.Count}");
+        ImGui.Separator();
+        
+        ImGui.BeginChild("GroupsVis", new Vector2(-1, 300), ImGuiChildFlags.Border);
+        
+        var drawList = ImGui.GetWindowDrawList();
+        var startPos = ImGui.GetCursorScreenPos();
+        var size = ImGui.GetContentRegionAvail();
+        
+        if (groups.Count > 0)
+        {
+            float groupWidth = size.X / groups.Count;
+            
+            for (int i = 0; i < groups.Count; i++)
+            {
+                var group = groups[i];
+                var groupX = startPos.X + i * groupWidth;
+                
+                var boxMin = new Vector2(groupX + 10, startPos.Y + 10);
+                var boxMax = new Vector2(groupX + groupWidth - 10, startPos.Y + 290);
+                
+                uint color = group.Images.Count > 1 
+                    ? ImGui.ColorConvertFloat4ToU32(new Vector4(0, 0.7f, 0, 0.3f))
+                    : ImGui.ColorConvertFloat4ToU32(new Vector4(0.7f, 0, 0, 0.3f));
+                
+                drawList.AddRectFilled(boxMin, boxMax, color);
+                drawList.AddRect(boxMin, boxMax, ImGui.ColorConvertFloat4ToU32(Vector4.One));
+                
+                var textPos = new Vector2(groupX + 15, startPos.Y + 15);
+                drawList.AddText(textPos, ImGui.ColorConvertFloat4ToU32(Vector4.One), $"Group {i + 1}");
+                drawList.AddText(new Vector2(textPos.X, textPos.Y + 20), 
+                    ImGui.ColorConvertFloat4ToU32(new Vector4(0.8f, 0.8f, 0.8f, 1)), 
+                    $"{group.Images.Count} images");
+                
+                float y = textPos.Y + 45;
+                foreach (var img in group.Images.Take(8))
+                {
+                    drawList.AddText(new Vector2(textPos.X, y), 
+                        ImGui.ColorConvertFloat4ToU32(new Vector4(0.7f, 0.7f, 0.7f, 1)), 
+                        img.Dataset.Name.Length > 15 ? img.Dataset.Name.Substring(0, 15) + "..." : img.Dataset.Name);
+                    y += 20;
+                }
+                
+                if (group.Images.Count > 8)
+                {
+                    drawList.AddText(new Vector2(textPos.X, y), 
+                        ImGui.ColorConvertFloat4ToU32(new Vector4(0.5f, 0.5f, 0.5f, 1)), 
+                        $"... +{group.Images.Count - 8} more");
+                }
+            }
+        }
+        
+        ImGui.EndChild();
+        
+        ImGui.Separator();
+        
+        if (groups.Count > 1)
+        {
+            ImGui.TextColored(new Vector4(1, 0.5f, 0, 1), 
+                "⚠ Multiple disconnected groups detected. Use Manual Input tab to link groups.");
+        }
+        else if (groups.Count == 1)
+        {
+            ImGui.TextColored(new Vector4(0, 1, 0, 1), 
+                "✓ All images connected in a single group.");
+        }
+    }
+    
+    private void DrawGCPManagementTab()
+    {
+        ImGui.TextWrapped("Manage Ground Control Points across all images for georeferencing.");
+        ImGui.Separator();
+        
+        bool georefEnabled = _job.Service.EnableGeoreferencing;
+        if (ImGui.Checkbox("Enable Georeferencing", ref georefEnabled))
+        {
+            _job.Service.EnableGeoreferencing = georefEnabled;
+        }
+
+        if (!_job.Service.EnableGeoreferencing)
+        {
+            ImGui.TextWrapped("Georeferencing is disabled. The reconstruction will use arbitrary coordinates.");
+            return;
+        }
+
+        ImGui.Separator();
+
+        var allGCPs = new Dictionary<string, List<(PhotogrammetryImage img, GroundControlPoint gcp)>>();
+        
+        foreach (var img in _job.Service.Images)
+        {
+            foreach (var gcp in img.GroundControlPoints)
+            {
+                if (!allGCPs.ContainsKey(gcp.Name))
+                    allGCPs[gcp.Name] = new List<(PhotogrammetryImage, GroundControlPoint)>();
+                allGCPs[gcp.Name].Add((img, gcp));
+            }
+        }
+        
+        ImGui.Text($"Total Unique GCPs: {allGCPs.Count}");
+        ImGui.Text($"Total GCP Observations: {_job.Service.Images.Sum(img => img.GroundControlPoints.Count)}");
+        
+        ImGui.Separator();
+        
+        if (ImGui.BeginTable("GCPTable", 4, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.Resizable))
+        {
+            ImGui.TableSetupColumn("GCP Name", ImGuiTableColumnFlags.WidthFixed, 150);
+            ImGui.TableSetupColumn("Observations", ImGuiTableColumnFlags.WidthFixed, 100);
+            ImGui.TableSetupColumn("World Coordinates", ImGuiTableColumnFlags.WidthStretch);
+            ImGui.TableSetupColumn("Actions", ImGuiTableColumnFlags.WidthFixed, 100);
+            ImGui.TableHeadersRow();
+            
+            foreach (var kvp in allGCPs)
+            {
+                ImGui.TableNextRow();
+                ImGui.TableNextColumn();
+                ImGui.Text(kvp.Key);
+                
+                ImGui.TableNextColumn();
+                ImGui.Text($"{kvp.Value.Count} images");
+                
+                ImGui.TableNextColumn();
+                var firstGcp = kvp.Value.First().gcp;
+                if (firstGcp.IsConfirmed && firstGcp.WorldPosition.HasValue)
+                {
+                    ImGui.Text($"X: {firstGcp.WorldPosition.Value.X:F2}, Y: {firstGcp.WorldPosition.Value.Y:F2}, Z: {firstGcp.WorldPosition.Value.Z:F2}");
+                }
+                else
+                {
+                    ImGui.TextColored(new Vector4(1, 0.5f, 0, 1), "Not set");
+                }
+                
+                ImGui.TableNextColumn();
+                if (ImGui.SmallButton($"Edit##{kvp.Key}"))
+                {
+                    _gcpEditor.Open(kvp.Value.First().img);
+                }
+            }
+            
+            ImGui.EndTable();
+        }
+    }
+
     private void DrawBuildDialogs()
     {
         if (_showDenseCloudDialog)
@@ -683,7 +1041,6 @@ public class PhotogrammetryWizardPanel : BasePanel
             ImGui.EndPopup();
         }
 
-        // Orthomosaic dialog
         if (_showOrthoDialog)
         {
             ImGui.OpenPopup("Orthomosaic Options");
@@ -719,7 +1076,6 @@ public class PhotogrammetryWizardPanel : BasePanel
             ImGui.EndPopup();
         }
 
-        // DEM dialog
         if (_showDemDialog)
         {
             ImGui.OpenPopup("DEM Options");
@@ -766,7 +1122,6 @@ public class PhotogrammetryWizardPanel : BasePanel
             var path = _exportDialog.SelectedPath;
             var lowerPath = path.ToLower();
 
-            // Route based on file extension
             if (lowerPath.EndsWith(".obj") || lowerPath.EndsWith(".stl"))
             {
                 _ = _job.Service.BuildMeshAsync(_meshOptions, path);
@@ -784,7 +1139,7 @@ public class PhotogrammetryWizardPanel : BasePanel
             }
         }
     }
-
+    
     private void ExportPointCloud(string path)
     {
         var cloud = _job.Service.DenseCloud ?? _job.Service.SparseCloud;
@@ -805,7 +1160,6 @@ public class PhotogrammetryWizardPanel : BasePanel
                 using var stream = new FileStream(path, FileMode.Create);
                 using var writer = new BinaryWriter(stream);
 
-                // --- PLY Header ---
                 var header = $@"ply
 format binary_little_endian 1.0
 comment Generated by GeoscientistToolkit
@@ -820,15 +1174,12 @@ end_header
 ";
                 writer.Write(System.Text.Encoding.ASCII.GetBytes(header));
 
-                // --- PLY Body (Binary) ---
                 foreach (var pt in cloud.Points)
                 {
-                    // Write position (X, Y, Z) as floats
                     writer.Write(pt.Position.X);
                     writer.Write(pt.Position.Y);
                     writer.Write(pt.Position.Z);
 
-                    // Write color (R, G, B) as uchar
                     writer.Write((byte)(pt.Color.X * 255));
                     writer.Write((byte)(pt.Color.Y * 255));
                     writer.Write((byte)(pt.Color.Z * 255));
@@ -839,7 +1190,6 @@ end_header
                 Logger.LogError($"Failed to export PLY file: {ex.Message}");
             }
         }
-
 
         if (_addToProject)
         {

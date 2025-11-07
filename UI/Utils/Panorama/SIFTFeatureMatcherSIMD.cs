@@ -129,8 +129,8 @@ public class SIFTFeatureMatcherSIMD : IDisposable
         // The previous adaptive threshold was statistically unstable and produced
         // too few matches. It has been replaced with the industry-standard
         // fixed-ratio test proposed by David Lowe in his SIFT paper.
-        // A threshold of 0.75 is a good balance between robustness and quantity.
-        const float ratioThreshold = 0.75f;
+        // A threshold of 0.8 is more permissive for repetitive patterns.
+        const float ratioThreshold = 0.8f; // Increased from 0.75f for repetitive patterns
 
         for (int i = 0; i < numQuery; i++)
         {

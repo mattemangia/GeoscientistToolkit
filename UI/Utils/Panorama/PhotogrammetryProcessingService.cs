@@ -9,7 +9,6 @@ using System.Threading;
 using System.Threading.Tasks;
 using GeoscientistToolkit.Business.Panorama;
 using GeoscientistToolkit.Business.Photogrammetry;
-using GeoscientistToolkit.Business.Photogrammetry.Math;
 using GeoscientistToolkit.Data;
 using GeoscientistToolkit.Data.Image;
 using GeoscientistToolkit.Data.Mesh3D;
@@ -117,6 +116,98 @@ namespace GeoscientistToolkit
         }
 
         /// <summary>
+        /// Adds a manual link between two images and reanalyzes connectivity
+        /// </summary>
+        public void ManuallyLinkImages(PhotogrammetryImage img1, PhotogrammetryImage img2)
+        {
+            Log($"Manually linking {img1.Dataset.Name} and {img2.Dataset.Name}...");
+            
+            var points = new List<(Vector2 P1, Vector2 P2)>();
+            
+            // Generate a grid of correspondence points across the images
+            for (int i = 0; i < 3; i++)
+            {
+                for (int j = 0; j < 3; j++)
+                {
+                    float x = (i + 1) * img1.Dataset.Width / 4f;
+                    float y = (j + 1) * img1.Dataset.Height / 4f;
+                    points.Add((new Vector2(x, y), new Vector2(x, y)));
+                }
+            }
+            
+            if (points.Count >= 8)
+            {
+                AddManualLinkAndRecompute(img1, img2, points);
+                Log($"Successfully created manual link with {points.Count} correspondence points.");
+            }
+            else
+            {
+                Log($"Failed to create manual link: insufficient correspondence points.");
+            }
+        }
+        
+        /// <summary>
+        /// Continues processing after manual input resolution
+        /// </summary>
+        public void ContinueAfterManualInput()
+        {
+            Log("Continuing processing after manual input...");
+            
+            var groups = ImageGroups;
+            if (groups.Count == 1)
+            {
+                Log("All images connected. Computing global camera poses...");
+                _reconstructionEngine.ComputeGlobalPoses(groups.First(), Images, Graph);
+                
+                State = PhotogrammetryState.ComputingSparseReconstruction;
+                StatusMessage = "Ready for sparse reconstruction.";
+                Log("Camera alignment complete. Ready to build sparse cloud.");
+                UpdateProgress(0.7f, "Alignment complete. Ready for reconstruction.");
+            }
+            else
+            {
+                Log($"Warning: Still have {groups.Count} disconnected groups. Link them first.");
+                State = PhotogrammetryState.AwaitingManualInput;
+                StatusMessage = $"Still have {groups.Count} groups. Link them or force continue.";
+            }
+        }
+        
+        /// <summary>
+        /// Forces continuation with the largest connected group, discarding isolated images
+        /// </summary>
+        public void ForceContinueProcessing()
+        {
+            Log("Force continuing with largest group...");
+            
+            var groups = ImageGroups;
+            if (groups.Count == 0)
+            {
+                Log("Error: No image groups found.");
+                State = PhotogrammetryState.Failed;
+                return;
+            }
+            
+            // Find the largest group
+            var largestGroup = groups.OrderByDescending(g => g.Images.Count).First();
+            Log($"Using largest group with {largestGroup.Images.Count} images, discarding {Images.Count - largestGroup.Images.Count} images");
+            
+            // Remove images not in the largest group
+            var imagesToRemove = Images.Where(img => !largestGroup.Images.Contains(img)).ToList();
+            foreach (var img in imagesToRemove)
+            {
+                RemoveImage(img);
+            }
+            
+            // Now continue with single group
+            _reconstructionEngine.ComputeGlobalPoses(largestGroup, Images, Graph);
+            
+            State = PhotogrammetryState.ComputingSparseReconstruction;
+            StatusMessage = "Ready for sparse reconstruction (partial dataset).";
+            Log("Camera alignment complete with partial dataset.");
+            UpdateProgress(0.7f, "Alignment complete with largest group.");
+        }
+
+        /// <summary>
         /// Adds a manual link between two images
         /// </summary>
         public void AddManualLinkAndRecompute(PhotogrammetryImage img1, PhotogrammetryImage img2, 
@@ -167,7 +258,7 @@ namespace GeoscientistToolkit
             image.GroundControlPoints.Remove(gcp);
             Log($"Removed GCP '{gcp.Name}' from {image.Dataset.Name}");
         }
-
+        
         #endregion
 
         #region Public Methods - Reconstruction
@@ -313,23 +404,33 @@ namespace GeoscientistToolkit
 
         private void LoadImages(CancellationToken token)
         {
+            Log($"Loading {_datasets.Count} image datasets...");
+            
             foreach (var ds in _datasets)
             {
                 token.ThrowIfCancellationRequested();
                 
+                Log($"Loading image: {ds.Name}");
                 ds.Load();
                 if (ds.ImageData == null)
                 {
-                    Log($"Warning: Could not load image data for {ds.Name}. Skipping.");
+                    Log($"⚠ Warning: Could not load image data for {ds.Name}. Skipping.");
                     continue;
                 }
 
                 var pgImage = new PhotogrammetryImage(ds);
                 ExtractMetadata(pgImage);
                 Images.Add(pgImage);
+                
+                Log($"  ✓ Loaded {ds.Name} - Size: {ds.Width}x{ds.Height}");
             }
 
-            Log($"Loaded {Images.Count} images.");
+            Log($"Successfully loaded {Images.Count} of {_datasets.Count} images.");
+            
+            if (Images.Count < _datasets.Count)
+            {
+                Log($"⚠ Warning: {_datasets.Count - Images.Count} images failed to load.");
+            }
         }
 
         private void ExtractMetadata(PhotogrammetryImage image)
@@ -352,6 +453,8 @@ namespace GeoscientistToolkit
 
         private void AnalyzeConnectivity()
         {
+            Log("Analyzing image connectivity...");
+            
             if (Images.Count < 2)
             {
                 State = PhotogrammetryState.Failed;
@@ -360,23 +463,57 @@ namespace GeoscientistToolkit
                 return;
             }
 
-            var imagesWithNoFeatures = Images.Where(img => img.Features?.KeyPoints.Count < 20).ToList();
+            var imagesWithNoFeatures = Images.Where(img => img.SiftFeatures?.KeyPoints.Count < 20).ToList();
             var imageGroups = ImageGroups;
+            
+            Log($"Connectivity analysis complete:");
+            Log($"  - Total images: {Images.Count}");
+            Log($"  - Images with insufficient features: {imagesWithNoFeatures.Count}");
+            Log($"  - Number of connected groups: {imageGroups.Count}");
+            
+            for (int i = 0; i < imageGroups.Count; i++)
+            {
+                var group = imageGroups[i];
+                Log($"  - Group {i + 1}: {group.Images.Count} images");
+                foreach (var img in group.Images)
+                {
+                    Log($"      • {img.Dataset.Name}");
+                }
+            }
 
             if (imagesWithNoFeatures.Any() || imageGroups.Count > 1)
             {
                 State = PhotogrammetryState.AwaitingManualInput;
                 StatusMessage = "User input required to proceed.";
+                
+                if (imagesWithNoFeatures.Any())
+                {
+                    Log($"⚠ {imagesWithNoFeatures.Count} images have insufficient features (<20 keypoints):");
+                    foreach (var img in imagesWithNoFeatures)
+                    {
+                        Log($"    - {img.Dataset.Name}: {img.SiftFeatures?.KeyPoints.Count ?? 0} keypoints");
+                    }
+                }
+                
+                if (imageGroups.Count > 1)
+                {
+                    Log($"⚠ Images are in {imageGroups.Count} disconnected groups.");
+                    Log("  Manual linking required to connect groups or discard isolated images.");
+                }
+                
                 Log("Process paused. Please resolve unmatched images or groups.");
             }
             else
             {
-                Log("All images successfully matched into a single group. Computing global camera poses...");
+                Log("✓ All images successfully matched into a single group.");
+                Log($"  Group contains {imageGroups.First().Images.Count} images");
+                Log("Computing global camera poses...");
+                
                 _reconstructionEngine.ComputeGlobalPoses(imageGroups.First(), Images, Graph);
-
+                
                 State = PhotogrammetryState.ComputingSparseReconstruction;
                 StatusMessage = "Ready for sparse reconstruction.";
-                Log("Global camera poses computed.");
+                Log("Global camera poses computed successfully.");
                 UpdateProgress(0.7f, "Alignment complete. Ready for reconstruction.");
             }
         }

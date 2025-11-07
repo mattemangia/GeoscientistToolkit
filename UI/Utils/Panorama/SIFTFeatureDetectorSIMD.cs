@@ -149,9 +149,9 @@ public class SiftFeatureDetectorSIMD : IDisposable
     private (List<float[]> dogPyramid, List<float[]> gaussianLevels) BuildDoGPyramidMemoryEfficient(
         float[] baseImage, int width, int height)
     {
-        const int numScales = 5;
+        const int numScales = 7; // Increased from 5 to capture more scale variations
         const float initialSigma = 1.6f;
-        const int numIntervals = 3;
+        const int numIntervals = 4; // Increased from 3 for better scale coverage
         float k = MathF.Pow(2.0f, 1.0f / numIntervals);
 
         var gaussianLevels = new List<float[]>(numScales);
@@ -277,7 +277,8 @@ public class SiftFeatureDetectorSIMD : IDisposable
     private List<KeyPoint> FindExtremaWithConcurrentBag(List<float[]> dogPyramid, int width, int height)
     {
         var keypointBag = new ConcurrentBag<KeyPoint>();
-        const float threshold = 0.03f;
+        const float threshold = 0.015f; // Lowered from 0.03f to detect more subtle features
+        const float edgeThreshold = 10.0f; // Edge response threshold
         
         for (int level = 1; level < dogPyramid.Count - 1; level++)
         {
@@ -321,13 +322,26 @@ public class SiftFeatureDetectorSIMD : IDisposable
 
                     if (isMax || isMin)
                     {
-                        keypointBag.Add(new KeyPoint
+                        // Edge response check (Harris corner criterion)
+                        float dxx = curr[y * width + (x + 1)] + curr[y * width + (x - 1)] - 2 * val;
+                        float dyy = curr[(y + 1) * width + x] + curr[(y - 1) * width + x] - 2 * val;
+                        float dxy = (curr[(y + 1) * width + (x + 1)] - curr[(y + 1) * width + (x - 1)] -
+                                    curr[(y - 1) * width + (x + 1)] + curr[(y - 1) * width + (x - 1)]) * 0.25f;
+                        
+                        float trace = dxx + dyy;
+                        float det = dxx * dyy - dxy * dxy;
+                        
+                        // Skip if on an edge (high ratio of principal curvatures)
+                        if (det > 0 && (trace * trace / det) < ((edgeThreshold + 1) * (edgeThreshold + 1) / edgeThreshold))
                         {
-                            X = x,
-                            Y = y,
-                            Level = level,
-                            Response = val
-                        });
+                            keypointBag.Add(new KeyPoint
+                            {
+                                X = x,
+                                Y = y,
+                                Level = level,
+                                Response = val
+                            });
+                        }
                     }
                 }
             });

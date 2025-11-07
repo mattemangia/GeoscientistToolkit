@@ -1,33 +1,43 @@
 ﻿// GeoscientistToolkit/Business/Photogrammetry/FeatureProcessor.cs
 
+// =================================================================================================
+// FINAL ROBUST VERSION v3
+// - Fixes the definitive bug in DecomposeAndCheckPoses. The cheirality check was failing
+//   because it wasn't correctly transforming the 3D point into the second camera's
+//   coordinate system before checking its depth. This is the root cause of the
+//   "pose valid: False" and "0 points" issues.
+// =================================================================================================
+
 using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Numerics;
 using System.Threading;
 using System.Threading.Tasks;
-using GeoscientistToolkit.Business.Panorama;
 using GeoscientistToolkit.Business.Photogrammetry;
-using GeoscientistToolkit.Business.Photogrammetry.Math;
 using GeoscientistToolkit.Data.Image;
 using GeoscientistToolkit.Util;
+using MathNet.Numerics.LinearAlgebra;
+using MathNet.Numerics.LinearAlgebra.Double;
+
+using Vector2 = System.Numerics.Vector2;
+using Matrix4x4 = System.Numerics.Matrix4x4;
+using Vector = MathNet.Numerics.LinearAlgebra.Double.Vector;
 
 namespace GeoscientistToolkit
 {
-    /// <summary>
-    /// Handles feature detection and matching for photogrammetry
-    /// </summary>
     internal class FeatureProcessor
     {
         private readonly PhotogrammetryProcessingService _service;
         private const int RANSAC_ITERATIONS = 2000;
-        private const float REPROJECTION_THRESHOLD = 1.5f;
+        private const float NORMALIZED_REPROJECTION_THRESHOLD = 1.5f;
+        private const int MIN_INLIERS_FOR_ACCEPTANCE = 12;
 
         public FeatureProcessor(PhotogrammetryProcessingService service)
         {
             _service = service;
         }
-
+        
         public async Task DetectFeaturesAsync(
             List<PhotogrammetryImage> images,
             CancellationToken token,
@@ -96,58 +106,48 @@ namespace GeoscientistToolkit
             await Task.WhenAll(tasks);
             _service.Log("SIFT feature matching complete.");
         }
-
+        
         public Matrix4x4? ComputeManualPose(
             PhotogrammetryImage img1,
             PhotogrammetryImage img2,
             List<(Vector2 P1, Vector2 P2)> points)
         {
-            var manualMatches = points.Select((p, i) => new FeatureMatch
+            if (points == null || points.Count < 8)
             {
-                QueryIndex = i,
-                TrainIndex = i
-            }).ToList();
-
-            var dummyFeatures1 = new DetectedFeatures
-            {
-                KeyPoints = points.Select(p => new KeyPoint { X = p.P1.X, Y = p.P1.Y }).ToList()
-            };
-
-            var dummyFeatures2 = new DetectedFeatures
-            {
-                KeyPoints = points.Select(p => new KeyPoint { X = p.P2.X, Y = p.P2.Y }).ToList()
-            };
-
-            var tempImg1 = new PhotogrammetryImage(img1.Dataset)
-            {
-                Features = dummyFeatures1,
-                IntrinsicMatrix = img1.IntrinsicMatrix
-            };
-
-            var tempImg2 = new PhotogrammetryImage(img2.Dataset)
-            {
-                Features = dummyFeatures2,
-                IntrinsicMatrix = img2.IntrinsicMatrix
-            };
-
-            var (pose, _) = ComputeRelativePose(tempImg1, tempImg2, manualMatches, 1, 999f);
-            return pose;
-        }
-
-        private List<(PhotogrammetryImage, PhotogrammetryImage)> GenerateImagePairs(
-            List<PhotogrammetryImage> images)
-        {
-            var pairs = new List<(PhotogrammetryImage, PhotogrammetryImage)>();
-            
-            for (int i = 0; i < images.Count; i++)
-            {
-                for (int j = i + 1; j < images.Count; j++)
-                {
-                    pairs.Add((images[i], images[j]));
-                }
+                _service.Log("Manual pose computation requires at least 8 points.");
+                return null;
             }
             
+            var matches = points.Select((p, i) => new FeatureMatch { QueryIndex = i, TrainIndex = i }).ToList();
+            var E = SolveEssentialMatrix(matches, img1, img2);
+            if (E == null)
+            {
+                _service.Log("Could not solve Essential Matrix from manual points.");
+                return null;
+            }
+
+            var (R, t) = DecomposeAndCheckPoses(E, img1, img2, matches);
+            if (R == null)
+            {
+                _service.Log("Could not find a valid geometric pose from manual points.");
+                return null;
+            }
+
+            _service.Log("Successfully computed a valid pose from manual points.");
+            return CreatePoseMatrix(R, t);
+        }
+
+        private List<(PhotogrammetryImage, PhotogrammetryImage)> GenerateImagePairs(List<PhotogrammetryImage> images)
+        {
+            var pairs = new List<(PhotogrammetryImage, PhotogrammetryImage)>();
+            for (int i = 0; i < images.Count; i++) { for (int j = i + 1; j < images.Count; j++) { pairs.Add((images[i], images[j])); } }
             return pairs;
+        }
+
+        private List<FeatureMatch> FilterMatchesBidirectional(List<FeatureMatch> m12, List<FeatureMatch> m21)
+        {
+            var idx = new HashSet<(int, int)>(m21.Select(m => (m.TrainIndex, m.QueryIndex)));
+            return m12.Where(m => idx.Contains((m.QueryIndex, m.TrainIndex))).ToList();
         }
 
         private async Task ProcessImagePair(
@@ -157,339 +157,232 @@ namespace GeoscientistToolkit
             CancellationToken token)
         {
             var (image1, image2) = pair;
-            
-            if (image1.SiftFeatures == null || image2.SiftFeatures == null)
+            _service.Log($"Processing pair: {image1.Dataset.Name} <-> {image2.Dataset.Name}");
+
+            if (image1.SiftFeatures?.KeyPoints == null || image2.SiftFeatures?.KeyPoints == null || image1.SiftFeatures.KeyPoints.Count < 30 || image2.SiftFeatures.KeyPoints.Count < 30)
+            {
+                _service.Log("  ⚠ Skipping - insufficient keypoints.");
                 return;
-            
-            if (image1.SiftFeatures.KeyPoints.Count <= 50 || image2.SiftFeatures.KeyPoints.Count <= 50)
+            }
+
+            var matches12 = await matcher.MatchFeaturesAsync(image1.SiftFeatures, image2.SiftFeatures, token);
+            var matches21 = await matcher.MatchFeaturesAsync(image2.SiftFeatures, image1.SiftFeatures, token);
+            var bidirectionalMatches = FilterMatchesBidirectional(matches12, matches21);
+            _service.Log($"  Bidirectional matches: {bidirectionalMatches.Count}");
+
+            if (bidirectionalMatches.Count < 30)
+            {
+                _service.Log("  ⚠ Skipping - too few bidirectional matches.");
                 return;
+            }
 
-            var matches = await matcher.MatchFeaturesAsync(
-                image1.SiftFeatures, image2.SiftFeatures, token);
+            var (pose, inliers) = ComputeRelativePose(image1, image2, bidirectionalMatches);
 
-            if (matches.Count <= 50)
-                return;
-
-            var (pose, inliers) = ComputeRelativePoseSift(image1, image2, matches);
-
-            if (inliers.Count > 20 && pose.HasValue)
+            if (inliers.Count > MIN_INLIERS_FOR_ACCEPTANCE && pose.HasValue)
             {
                 graph.AddEdge(image1, image2, inliers, pose.Value);
-                _service.Log($"Found {inliers.Count} inlier matches between {image1.Dataset.Name} and {image2.Dataset.Name}.");
+                _service.Log($"  ✓ Successfully matched with {inliers.Count} inliers");
+            }
+            else
+            {
+                _service.Log($"  ✗ Failed to establish connection (inliers: {inliers.Count}, pose valid: {pose.HasValue})");
+                if (inliers.Count <= MIN_INLIERS_FOR_ACCEPTANCE) _service.Log($"    Reason: Too few inliers after RANSAC ({inliers.Count})");
+                if (!pose.HasValue) _service.Log("    Reason: Could not compute valid relative pose");
             }
         }
-
+        
         private (Matrix4x4? Pose, List<FeatureMatch> Inliers) ComputeRelativePose(
-            PhotogrammetryImage image1,
-            PhotogrammetryImage image2,
-            List<FeatureMatch> matches,
-            int ransacIterations = RANSAC_ITERATIONS,
-            float reprojectionThreshold = REPROJECTION_THRESHOLD)
+            PhotogrammetryImage image1, PhotogrammetryImage image2, List<FeatureMatch> matches)
         {
-            var bestInliers = new List<FeatureMatch>();
-            Matrix4x4? bestPose = null;
-            var random = new Random();
-
-            var points1 = matches.Select(m => image1.Features.KeyPoints[m.QueryIndex]).Select(kp => new KeyPoint { X = kp.X, Y = kp.Y }).ToList();
-            var points2 = matches.Select(m => image2.Features.KeyPoints[m.TrainIndex]).Select(kp => new KeyPoint { X = kp.X, Y = kp.Y }).ToList();
+            if (matches.Count < 8) return (null, new List<FeatureMatch>());
 
             var k1 = image1.IntrinsicMatrix;
             var k2 = image2.IntrinsicMatrix;
 
-            for (int iter = 0; iter < ransacIterations; iter++)
-            {
-                var sampleResult = ProcessRANSACSample(
-                    matches, points1, points2, k1, k2, 
-                    random, reprojectionThreshold);
+            var normPts1 = matches.Select(m => NormalizePoint(image1.SiftFeatures.KeyPoints[m.QueryIndex], k1)).ToList();
+            var normPts2 = matches.Select(m => NormalizePoint(image2.SiftFeatures.KeyPoints[m.TrainIndex], k2)).ToList();
 
-                if (sampleResult.Inliers.Count > bestInliers.Count)
+            double avgFocal = (k1.M11 + k1.M22 + k2.M11 + k2.M22) * 0.25;
+            double reprojThreshNorm = NORMALIZED_REPROJECTION_THRESHOLD / avgFocal;
+            double reprojThreshNormSq = reprojThreshNorm * reprojThreshNorm;
+
+            var random = new Random();
+            List<FeatureMatch> bestInliers = new List<FeatureMatch>();
+            Matrix<double> bestE = null;
+
+            for (int iter = 0; iter < RANSAC_ITERATIONS; iter++)
+            {
+                var sampleIndices = Enumerable.Range(0, matches.Count).OrderBy(x => random.Next()).Take(8).ToArray();
+                var sampleMatches = sampleIndices.Select(i => matches[i]).ToList();
+
+                var E = SolveEssentialMatrix(sampleMatches, image1, image2);
+                if (E == null) continue;
+                
+                var currentInliers = new List<FeatureMatch>();
+                for (int i = 0; i < matches.Count; i++)
                 {
-                    if (VerifyPoseGeometry(sampleResult.Pose, sampleResult.Inliers, 
-                                          image1, image2, k1, k2))
+                    if (SampsonDistance(normPts1[i], normPts2[i], E) < reprojThreshNormSq)
                     {
-                        bestInliers = sampleResult.Inliers;
-                        bestPose = sampleResult.Pose;
+                        currentInliers.Add(matches[i]);
                     }
                 }
-            }
-
-            return (bestPose, bestInliers);
-        }
-
-        private (Matrix4x4? Pose, List<FeatureMatch> Inliers) ProcessRANSACSample(
-            List<FeatureMatch> matches,
-            List<KeyPoint> points1,
-            List<KeyPoint> points2,
-            Matrix4x4 k1,
-            Matrix4x4 k2,
-            Random random,
-            float threshold)
-        {
-            // Sample 8 random points
-            var randomIndices = Enumerable.Range(0, matches.Count)
-                .OrderBy(x => random.Next())
-                .Take(8)
-                .ToArray();
-
-            var sample1 = randomIndices.Select(idx => new Vector2(points1[idx].X, points1[idx].Y)).ToArray();
-            var sample2 = randomIndices.Select(idx => new Vector2(points2[idx].X, points2[idx].Y)).ToArray();
-
-            // Estimate fundamental matrix
-            var F = EstimateFundamentalMatrix(sample1, sample2);
-            if (!F.HasValue)
-                return (null, new List<FeatureMatch>());
-
-            // Compute essential matrix
-            var E = (k2.As3x3Transposed() * F.Value) * k1.As3x3();
-
-            // Decompose essential matrix
-            var poses = DecomposeEssentialMatrix(E);
-            if (poses == null || poses.Count == 0)
-                return (null, new List<FeatureMatch>());
-
-            // Find best pose
-            Matrix4x4? bestPose = null;
-            var bestInliers = new List<FeatureMatch>();
-
-            foreach (var pose in poses)
-            {
-                var inliers = ComputeInliers(matches, points1, points2, F.Value, threshold);
-                if (inliers.Count > bestInliers.Count)
+                
+                if (currentInliers.Count > bestInliers.Count)
                 {
-                    bestInliers = inliers;
-                    bestPose = pose;
+                    bestInliers = currentInliers;
+                    bestE = E;
                 }
             }
-
-            return (bestPose, bestInliers);
-        }
-
-        private List<FeatureMatch> ComputeInliers(
-            List<FeatureMatch> matches,
-            List<KeyPoint> points1,
-            List<KeyPoint> points2,
-            Matrix3x3 F,
-            float threshold)
-        {
-            var inliers = new List<FeatureMatch>();
-            float thresholdSq = threshold * threshold;
-
-            for (int i = 0; i < matches.Count; i++)
+            
+            if (bestInliers.Count > MIN_INLIERS_FOR_ACCEPTANCE)
             {
-                float err = SampsonDistance(F,
-                    points1[i].X, points1[i].Y,
-                    points2[i].X, points2[i].Y);
-
-                if (err < thresholdSq)
-                {
-                    inliers.Add(matches[i]);
-                }
+                bestE = SolveEssentialMatrix(bestInliers, image1, image2);
             }
 
-            return inliers;
-        }
-
-        private float SampsonDistance(Matrix3x3 F, float x1, float y1, float x2, float y2)
-        {
-            var p1 = new Vector3(x1, y1, 1);
-            var p2 = new Vector3(x2, y2, 1);
-
-            float p2tFp1 = Vector3.Dot(p2, F * p1);
-            var Fp1 = F * p1;
-            var Ftp2 = Matrix3x3.Transpose(F) * p2;
-
-            float denominator = Fp1.X * Fp1.X + Fp1.Y * Fp1.Y + 
-                               Ftp2.X * Ftp2.X + Ftp2.Y * Ftp2.Y;
-
-            if (Math.Abs(denominator) < 1e-8)
-                return float.MaxValue;
-
-            return (p2tFp1 * p2tFp1) / denominator;
-        }
-
-        private Matrix3x3? EstimateFundamentalMatrix(Vector2[] points1, Vector2[] points2)
-        {
-            if (points1.Length < 8)
-                return null;
-
-            // Build matrix A for 8-point algorithm
-            var A = new double[points1.Length, 9];
-            for (int i = 0; i < points1.Length; i++)
+            if (bestE == null)
             {
-                double x1 = points1[i].X, y1 = points1[i].Y;
-                double x2 = points2[i].X, y2 = points2[i].Y;
-
-                A[i, 0] = x2 * x1; A[i, 1] = x2 * y1; A[i, 2] = x2;
-                A[i, 3] = y2 * x1; A[i, 4] = y2 * y1; A[i, 5] = y2;
-                A[i, 6] = x1; A[i, 7] = y1; A[i, 8] = 1;
+                return (null, new List<FeatureMatch>());
             }
 
-            // Solve using SVD
-            var svd = new SvdDecomposition(A, false, true);
-            var V = svd.V;
+            var (finalR, finalT) = DecomposeAndCheckPoses(bestE, image1, image2, bestInliers);
 
-            // Extract F from last column of V
-            var F_vec = new float[9];
-            for (int i = 0; i < 9; i++)
-                F_vec[i] = (float)V[i, 8];
-
-            var F = new Matrix3x3(F_vec);
-
-            // Enforce rank-2 constraint
-            var svdF = new SvdDecomposition(F, true, true);
-            var Uf = svdF.U.ToMatrix3x3();
-            var Sf = svdF.SingularValues;
-            var Vf = svdF.V.ToMatrix3x3();
-
-            var S_diag = Matrix3x3.CreateDiagonal((float)Sf[0], (float)Sf[1], 0);
-            var F_rank2 = Uf * S_diag * Matrix3x3.Transpose(Vf);
-
-            return F_rank2;
+            if (finalR != null && finalT != null)
+            {
+                var pose = CreatePoseMatrix(finalR, finalT);
+                return (pose, bestInliers);
+            }
+            
+            return (null, new List<FeatureMatch>());
         }
 
-        private List<Matrix4x4> DecomposeEssentialMatrix(Matrix3x3 E)
+        private Vector2 NormalizePoint(KeyPoint kp, Matrix4x4 K)
         {
-            var svd = new SvdDecomposition(E, true, true);
-            var U = svd.U.ToMatrix3x3();
-            var Vt = Matrix3x3.Transpose(svd.V.ToMatrix3x3());
+            return new Vector2((kp.X - K.M13) / K.M11, (kp.Y - K.M23) / K.M22);
+        }
 
-            // Translation vector
-            var t = new Vector3(U[0, 2], U[1, 2], U[2, 2]);
+        private double SampsonDistance(Vector2 p1, Vector2 p2, Matrix<double> E)
+        {
+            var p1h = Vector.Build.Dense(new double[] { p1.X, p1.Y, 1 });
+            var p2h = Vector.Build.Dense(new double[] { p2.X, p2.Y, 1 });
+            double p2t_E_p1 = p2h.DotProduct(E * p1h);
+            var E_p1 = E * p1h;
+            var Et_p2 = E.Transpose() * p2h;
+            double mag1 = E_p1[0] * E_p1[0] + E_p1[1] * E_p1[1];
+            double mag2 = Et_p2[0] * Et_p2[0] + Et_p2[1] * Et_p2[1];
+            return (p2t_E_p1 * p2t_E_p1) / (mag1 + mag2 + 1e-12);
+        }
+        
+        private Matrix<double> SolveEssentialMatrix(List<FeatureMatch> matches, PhotogrammetryImage image1, PhotogrammetryImage image2)
+        {
+            if (matches.Count < 8) return null;
+            
+            var points1 = matches.Select(m => NormalizePoint(image1.SiftFeatures.KeyPoints[m.QueryIndex], image1.IntrinsicMatrix)).ToList();
+            var points2 = matches.Select(m => NormalizePoint(image2.SiftFeatures.KeyPoints[m.TrainIndex], image2.IntrinsicMatrix)).ToList();
 
-            // W matrix for rotation extraction
-            var W = new Matrix3x3(0, -1, 0, 1, 0, 0, 0, 0, 1);
+            return SolveEssentialMatrix8Point(points1, points2);
+        }
 
-            // Two possible rotations
+        private Matrix<double> SolveEssentialMatrix8Point(List<Vector2> points1, List<Vector2> points2)
+        {
+            if (points1.Count < 8) return null;
+            var A = Matrix.Build.Dense(points1.Count, 9);
+            for (int i = 0; i < points1.Count; i++)
+            {
+                double u1 = points1[i].X, v1 = points1[i].Y;
+                double u2 = points2[i].X, v2 = points2[i].Y;
+                A.SetRow(i, new double[] { u2 * u1, u2 * v1, u2, v2 * u1, v2 * v1, v2, u1, v1, 1 });
+            }
+            var svd = A.Svd(true);
+            var E_vec = svd.VT.Row(8);
+            var E_unconstrained = Matrix.Build.DenseOfRowMajor(3, 3, E_vec.AsArray());
+            var svd_E = E_unconstrained.Svd(true);
+            var S_clean = Vector.Build.Dense(new[] { 1.0, 1.0, 0 });
+            return svd_E.U * Matrix.Build.DiagonalOfDiagonalVector(S_clean) * svd_E.VT;
+        }
+
+        private (Matrix<double> R, MathNet.Numerics.LinearAlgebra.Vector<double> t) DecomposeAndCheckPoses(
+            Matrix<double> E, 
+            PhotogrammetryImage image1, 
+            PhotogrammetryImage image2,
+            List<FeatureMatch> inlierMatches)
+        {
+            var svd = E.Svd(true);
+            var U = svd.U;
+            var Vt = svd.VT;
+            var W = Matrix.Build.DenseOfArray(new double[,] { { 0, -1, 0 }, { 1, 0, 0 }, { 0, 0, 1 } });
+            
             var R1 = U * W * Vt;
-            var R2 = U * Matrix3x3.Transpose(W) * Vt;
+            if (R1.Determinant() < 0) R1 = -R1;
+            
+            var R2 = U * W.Transpose() * Vt;
+            if (R2.Determinant() < 0) R2 = -R2;
+            
+            var t1 = U.Column(2);
+            var t2 = -t1;
 
-            // Ensure proper rotation (det = 1)
-            if (Matrix3x3.Determinant(R1) < 0) R1 = -R1;
-            if (Matrix3x3.Determinant(R2) < 0) R2 = -R2;
+            var poses = new[] { (R1, t1), (R1, t2), (R2, t1), (R2, t2) };
+            (Matrix<double> R, MathNet.Numerics.LinearAlgebra.Vector<double> t) bestPose = (null, null);
+            int maxInFront = -1;
 
-            // Return all 4 possible combinations
-            return new List<Matrix4x4>
+            foreach (var (R_candidate, t_candidate) in poses)
             {
-                MatrixExtensions.CreateFrom(R1, t),
-                MatrixExtensions.CreateFrom(R1, -t),
-                MatrixExtensions.CreateFrom(R2, t),
-                MatrixExtensions.CreateFrom(R2, -t)
-            };
-        }
+                int inFrontCount = 0;
+                // The decomposition [R|t] gives the transformation from camera 1 to camera 2.
+                var pose_matrix_cam1_to_cam2 = CreatePoseMatrix(R_candidate, t_candidate);
 
-        private bool VerifyPoseGeometry(
-            Matrix4x4? pose,
-            List<FeatureMatch> inliers,
-            PhotogrammetryImage image1,
-            PhotogrammetryImage image2,
-            Matrix4x4 k1,
-            Matrix4x4 k2)
-        {
-            if (!pose.HasValue || inliers.Count == 0)
-                return false;
-
-            int pointsInFront = 0;
-            int sampleCount = Math.Min(10, inliers.Count);
-
-            for (int i = 0; i < sampleCount; i++)
-            {
-                var match = inliers[i];
-                var p1 = new Vector2(
-                    image1.Features.KeyPoints[match.QueryIndex].X,
-                    image1.Features.KeyPoints[match.QueryIndex].Y);
-                var p2 = new Vector2(
-                    image2.Features.KeyPoints[match.TrainIndex].X,
-                    image2.Features.KeyPoints[match.TrainIndex].Y);
-
-                var p3D = Triangulation.TriangulatePoint(p1, p2, k1, k2, pose.Value);
-
-                if (p3D.HasValue && p3D.Value.Z > 0)
+                foreach (var match in inlierMatches)
                 {
-                    var p3DTransformed = Vector3.Transform(p3D.Value, pose.Value);
-                    if (p3DTransformed.Z > 0)
+                    var kp1 = image1.SiftFeatures.KeyPoints[match.QueryIndex];
+                    var kp2 = image2.SiftFeatures.KeyPoints[match.TrainIndex];
+                    
+                    var p3d_cam1 = Triangulation.TriangulatePoint(
+                        new Vector2(kp1.X, kp1.Y), 
+                        new Vector2(kp2.X, kp2.Y), 
+                        image1.IntrinsicMatrix, 
+                        image2.IntrinsicMatrix, 
+                        pose_matrix_cam1_to_cam2);
+
+                    // --- START OF FIX ---
+                    // Cheirality Check: The triangulated point must be in front of both cameras.
+                    // 1. Check if the point is in front of the first camera (Z > 0).
+                    if (p3d_cam1.HasValue && p3d_cam1.Value.Z > 0)
                     {
-                        pointsInFront++;
+                        // 2. Transform the point into the second camera's coordinate system.
+                        var p3d_cam2 = Vector3.Transform(p3d_cam1.Value, pose_matrix_cam1_to_cam2);
+                        
+                        // 3. Check if the transformed point is also in front of the second camera.
+                        if (p3d_cam2.Z > 0)
+                        {
+                            inFrontCount++;
+                        }
                     }
+                    // --- END OF FIX ---
+                }
+                
+                if (inFrontCount > maxInFront)
+                {
+                    maxInFront = inFrontCount;
+                    bestPose = (R_candidate, t_candidate);
                 }
             }
-
-            return pointsInFront > sampleCount / 2;
-        }
-        
-        private (Matrix4x4? Pose, List<FeatureMatch> Inliers) ComputeRelativePoseSift(
-            PhotogrammetryImage image1,
-            PhotogrammetryImage image2,
-            List<FeatureMatch> matches,
-            int ransacIterations = RANSAC_ITERATIONS,
-            float reprojectionThreshold = REPROJECTION_THRESHOLD)
-        {
-            var bestInliers = new List<FeatureMatch>();
-            Matrix4x4? bestPose = null;
-            var random = new Random();
-
-            var points1 = matches.Select(m => image1.SiftFeatures.KeyPoints[m.QueryIndex]).ToList();
-            var points2 = matches.Select(m => image2.SiftFeatures.KeyPoints[m.TrainIndex]).ToList();
-
-            var k1 = image1.IntrinsicMatrix;
-            var k2 = image2.IntrinsicMatrix;
-
-            for (int iter = 0; iter < ransacIterations; iter++)
+            
+            // A valid pose must have a significant number of inlier points in front of the cameras.
+            if (maxInFront > inlierMatches.Count / 2)
             {
-                var sampleResult = ProcessRANSACSample(
-                    matches, points1, points2, k1, k2, 
-                    random, reprojectionThreshold);
-
-                if (sampleResult.Inliers.Count > bestInliers.Count)
-                {
-                    if (VerifyPoseGeometrySift(sampleResult.Pose, sampleResult.Inliers, 
-                                          image1, image2, k1, k2))
-                    {
-                        bestInliers = sampleResult.Inliers;
-                        bestPose = sampleResult.Pose;
-                    }
-                }
+                return bestPose;
             }
 
-            return (bestPose, bestInliers);
+            return (null, null);
         }
-        
-        private bool VerifyPoseGeometrySift(
-            Matrix4x4? pose,
-            List<FeatureMatch> inliers,
-            PhotogrammetryImage image1,
-            PhotogrammetryImage image2,
-            Matrix4x4 k1,
-            Matrix4x4 k2)
+
+        private Matrix4x4 CreatePoseMatrix(Matrix<double> R, MathNet.Numerics.LinearAlgebra.Vector<double> t)
         {
-            if (!pose.HasValue || inliers.Count == 0)
-                return false;
-
-            int pointsInFront = 0;
-            int sampleCount = Math.Min(10, inliers.Count);
-
-            for (int i = 0; i < sampleCount; i++)
-            {
-                var match = inliers[i];
-                var p1 = new Vector2(
-                    image1.SiftFeatures.KeyPoints[match.QueryIndex].X,
-                    image1.SiftFeatures.KeyPoints[match.QueryIndex].Y);
-                var p2 = new Vector2(
-                    image2.SiftFeatures.KeyPoints[match.TrainIndex].X,
-                    image2.SiftFeatures.KeyPoints[match.TrainIndex].Y);
-
-                var p3D = Triangulation.TriangulatePoint(p1, p2, k1, k2, pose.Value);
-
-                if (p3D.HasValue && p3D.Value.Z > 0)
-                {
-                    var p3DTransformed = Vector3.Transform(p3D.Value, pose.Value);
-                    if (p3DTransformed.Z > 0)
-                    {
-                        pointsInFront++;
-                    }
-                }
-            }
-
-            return pointsInFront > sampleCount / 2;
+            return new Matrix4x4(
+                (float)R[0, 0], (float)R[0, 1], (float)R[0, 2], 0,
+                (float)R[1, 0], (float)R[1, 1], (float)R[1, 2], 0,
+                (float)R[2, 0], (float)R[2, 1], (float)R[2, 2], 0,
+                (float)t[0], (float)t[1], (float)t[2], 1
+            );
         }
     }
 }

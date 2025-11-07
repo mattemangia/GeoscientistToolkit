@@ -5,7 +5,9 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Numerics;
 using System.Threading.Tasks;
-using GeoscientistToolkit.Business.Photogrammetry.Math;
+// Add using statements for MathNet
+using MathNet.Numerics.LinearAlgebra;
+using MathNet.Numerics.LinearAlgebra.Double;
 
 namespace GeoscientistToolkit
 {
@@ -43,7 +45,7 @@ namespace GeoscientistToolkit
         {
             var georefImages = images.Where(img => img.IsGeoreferenced).ToList();
             var gcpImages = images.Where(img => img.GroundControlPoints.Any(g => g.IsConfirmed)).ToList();
-            
+
             var uniqueGcpCount = gcpImages
                 .SelectMany(img => img.GroundControlPoints)
                 .Where(g => g.IsConfirmed)
@@ -77,7 +79,7 @@ namespace GeoscientistToolkit
             if (uniqueGcpCount >= 3)
             {
                 _service.Log($"Refining the model using {uniqueGcpCount} unique Ground Control Points...");
-                
+
                 if (RefineWithGCPs(cloud, gcpImages))
                 {
                     _service.Log("Model successfully refined with GCPs.");
@@ -158,7 +160,7 @@ namespace GeoscientistToolkit
 
             // Initialize parameters: identity (scale=1, rotation=I, translation=0)
             float[] parameters = new float[7]; // [log(s), rx, ry, rz, tx, ty, tz]
-            
+
             // Run Levenberg-Marquardt optimization
             OptimizeSimilarityTransform(parameters, imagesWithObs);
 
@@ -208,14 +210,14 @@ namespace GeoscientistToolkit
                     // Accept the step
                     for (int i = 0; i < 7; i++)
                         parameters[i] = trialParams[i];
-                    
+
                     lambda = System.Math.Max(1e-6, lambda * 0.5);
 
                     // Check for convergence
                     double stepNorm = 0;
                     for (int i = 0; i < 7; i++)
                         stepNorm += deltaParams[i] * deltaParams[i];
-                    
+
                     if (stepNorm < 1e-12 || System.Math.Abs(currentCost - newCost) < 1e-6)
                         break;
                 }
@@ -266,7 +268,7 @@ namespace GeoscientistToolkit
 
                         for (int col = 0; col < 7; col++)
                         {
-                            H[row, col] += jacobianU[row] * jacobianU[col] + 
+                            H[row, col] += jacobianU[row] * jacobianU[col] +
                                           jacobianV[row] * jacobianV[col];
                         }
                     }
@@ -301,14 +303,14 @@ namespace GeoscientistToolkit
         {
             var similarity = BuildSimilarityMatrix(parameters);
             var newPose = similarity * image.GlobalPose;
-            
+
             Matrix4x4.Invert(newPose, out var view);
             var cameraPoint = Vector4.Transform(new Vector4(worldPoint, 1f), view);
             var projected = Vector4.Transform(cameraPoint, image.IntrinsicMatrix);
-            
+
             if (System.Math.Abs(projected.W) < 1e-8f)
                 return new Vector2(-1, -1);
-            
+
             return new Vector2(projected.X / projected.W, projected.Y / projected.W);
         }
 
@@ -320,14 +322,14 @@ namespace GeoscientistToolkit
             var translation = new Vector3(parameters[4], parameters[5], parameters[6]);
 
             var rotation = Matrix3x3.Rodrigues(rotationVector);
-            
+
             var similarity = new Matrix4x4(
                 scale * rotation.M11, scale * rotation.M12, scale * rotation.M13, 0,
                 scale * rotation.M21, scale * rotation.M22, scale * rotation.M23, 0,
                 scale * rotation.M31, scale * rotation.M32, scale * rotation.M33, 0,
                 0, 0, 0, 1
             );
-            
+
             similarity.Translation = translation;
             return similarity;
         }
@@ -339,7 +341,7 @@ namespace GeoscientistToolkit
             double[,] L = new double[n, n];
             double[] x = new double[n];
             double[] rhs = new double[n];
-            
+
             for (int i = 0; i < n; i++)
                 rhs[i] = -b[i];
 
@@ -351,7 +353,7 @@ namespace GeoscientistToolkit
                     double sum = A[i, j];
                     for (int k = 0; k < j; k++)
                         sum -= L[i, k] * L[j, k];
-                    
+
                     if (i == j)
                     {
                         if (sum <= 1e-12)
@@ -387,13 +389,22 @@ namespace GeoscientistToolkit
             return x;
         }
 
+        private static Matrix3x3 ToMatrix3x3(Matrix<double> m)
+        {
+            return new Matrix3x3(
+                (float)m[0, 0], (float)m[0, 1], (float)m[0, 2],
+                (float)m[1, 0], (float)m[1, 1], (float)m[1, 2],
+                (float)m[2, 0], (float)m[2, 1], (float)m[2, 2]
+            );
+        }
+
         private bool ComputeSimilarityTransform(
             List<Vector3> source,
             List<Vector3> target,
             out Matrix4x4 transform)
         {
             transform = Matrix4x4.Identity;
-            
+
             if (source.Count != target.Count || source.Count < 3)
                 return false;
 
@@ -404,56 +415,64 @@ namespace GeoscientistToolkit
                 source.Average(p => p.X),
                 source.Average(p => p.Y),
                 source.Average(p => p.Z));
-            
+
             var targetCentroid = new Vector3(
                 target.Average(p => p.X),
                 target.Average(p => p.Y),
                 target.Average(p => p.Z));
 
-            // Build cross-covariance matrix
-            var H = Matrix3x3.Zero;
+            // --- START OF CORRECTION ---
+            // Build cross-covariance matrix using MathNet
+            var H = DenseMatrix.Create(3, 3, 0.0);
             for (int i = 0; i < n; i++)
             {
                 var s = source[i] - sourceCentroid;
                 var t = target[i] - targetCentroid;
-                H += Matrix3x3.CreateFromOuterProduct(s, t);
+                var s_vec = MathNet.Numerics.LinearAlgebra.Vector<double>.Build.Dense(new double[] { s.X, s.Y, s.Z });
+                var t_vec = MathNet.Numerics.LinearAlgebra.Vector<double>.Build.Dense(new double[] { t.X, t.Y, t.Z });
+                H.Add(s_vec.OuterProduct(t_vec), H);
             }
 
             // Compute rotation using SVD
-            var svd = new SvdDecomposition(H, true, true);
-            var U = svd.U.ToMatrix3x3();
-            var V = svd.V.ToMatrix3x3();
-            var R = V * Matrix3x3.Transpose(U);
+            var svd = H.Svd(true);
+            var U = svd.U;
+            var V = svd.VT.Transpose();
+            var R_mathnet = V * U.Transpose();
 
-            // Ensure proper rotation
-            if (Matrix3x3.Determinant(R) < 0)
+            // Ensure proper rotation (no reflection)
+            if (R_mathnet.Determinant() < 0)
             {
-                V[0, 2] *= -1;
-                V[1, 2] *= -1;
-                V[2, 2] *= -1;
-                R = V * Matrix3x3.Transpose(U);
+                var V_mutable = DenseMatrix.OfMatrix(V);
+                V_mutable.SetColumn(2, V.Column(2) * -1);
+                R_mathnet = V_mutable * U.Transpose();
             }
 
-            // Compute scale
+            var R = ToMatrix3x3(R_mathnet);
+            // --- END OF CORRECTION ---
+
+            // Compute optimal scale
             var sourceCentered = source.Select(p => p - sourceCentroid).ToList();
             var targetCentered = target.Select(p => p - targetCentroid).ToList();
-            
-            float scale = targetCentered.Sum(p => p.Length()) / 
-                         sourceCentered.Sum(p => p.Length());
+            float numerator = 0.0f;
+            float denominator = 0.0f;
+
+            for (int i = 0; i < n; i++)
+            {
+                numerator += Vector3.Dot(targetCentered[i], R * sourceCentered[i]);
+                denominator += sourceCentered[i].LengthSquared();
+            }
+            float scale = (denominator > 1e-8) ? numerator / denominator : 1.0f;
 
             // Compute translation
             var T = targetCentroid - scale * (R * sourceCentroid);
 
             // Build final transformation matrix
-            var scaleMatrix = Matrix4x4.CreateScale(scale);
-            var rotationMatrix = new Matrix4x4(
-                R.M11, R.M12, R.M13, 0,
-                R.M21, R.M22, R.M23, 0,
-                R.M31, R.M32, R.M33, 0,
-                0, 0, 0, 1);
-
-            transform = rotationMatrix * scaleMatrix;
-            transform.Translation = T;
+            transform = new Matrix4x4(
+                scale * R.M11, scale * R.M12, scale * R.M13, 0,
+                scale * R.M21, scale * R.M22, scale * R.M23, 0,
+                scale * R.M31, scale * R.M32, scale * R.M33, 0,
+                T.X, T.Y, T.Z, 1
+            );
 
             return true;
         }
@@ -462,7 +481,7 @@ namespace GeoscientistToolkit
         {
             double lat = latitude * System.Math.PI / 180.0;
             double lon = longitude * System.Math.PI / 180.0;
-            
+
             double sinLat = System.Math.Sin(lat);
             double cosLat = System.Math.Cos(lat);
             double N = WGS84_A / System.Math.Sqrt(1 - WGS84_E2 * sinLat * sinLat);
@@ -488,7 +507,7 @@ namespace GeoscientistToolkit
         {
             foreach (var image in images)
             {
-                image.GlobalPose = transform * image.GlobalPose;
+                image.GlobalPose = image.GlobalPose * transform;
             }
         }
 

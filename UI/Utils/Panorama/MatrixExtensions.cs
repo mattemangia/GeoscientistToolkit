@@ -1,7 +1,7 @@
 ﻿// GeoscientistToolkit/Business/Photogrammetry/Math/MatrixExtensions.cs
 
 using System.Numerics;
-using GeoscientistToolkit.Business.Photogrammetry.Math;
+using GeoscientistToolkit.Business.Photogrammetry;
 using MathNet.Numerics.LinearAlgebra;
 namespace GeoscientistToolkit
 {
@@ -69,6 +69,19 @@ namespace GeoscientistToolkit
                 (float)m[1, 0], (float)m[1, 1], (float)m[1, 2],
                 (float)m[2, 0], (float)m[2, 1], (float)m[2, 2]
             );
+        }
+        /// <summary>
+        /// Inverts the given 4x4 matrix. Returns the original matrix if inversion fails.
+        /// </summary>
+        public static Matrix4x4 As4x4Inverted(this Matrix4x4 source)
+        {
+            if (Matrix4x4.Invert(source, out var inverted))
+            {
+                return inverted;
+            }
+            // Return identity or source if inversion is not possible, to avoid crashes.
+            // For camera poses, this should not happen.
+            return source;
         }
     }
 }

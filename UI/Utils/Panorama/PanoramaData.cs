@@ -5,7 +5,7 @@
 using System;
 using System.Collections.Generic;
 using System.Numerics;
-using GeoscientistToolkit.Business.Photogrammetry.Math;
+using GeoscientistToolkit.Business.Photogrammetry;
 using GeoscientistToolkit.Data.Image;
 
 namespace GeoscientistToolkit;
