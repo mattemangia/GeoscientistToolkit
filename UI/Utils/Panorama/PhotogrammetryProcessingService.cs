@@ -280,6 +280,7 @@ namespace GeoscientistToolkit
                 await _georeferencingService.ApplyGeoreferencingAsync(SparseCloud, Images);
             }
 
+            Log($"Sparse reconstruction complete with {SparseCloud.Points.Count} points.");
             UpdateProgress(0.85f, $"Sparse cloud complete: {SparseCloud.Points.Count} points");
             State = PhotogrammetryState.Completed;
             StatusMessage = "Sparse reconstruction complete. Use Build options for further processing.";

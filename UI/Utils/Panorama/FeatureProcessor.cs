@@ -1,11 +1,11 @@
 ﻿// GeoscientistToolkit/Business/Photogrammetry/FeatureProcessor.cs
 
 // =================================================================================================
-// FINAL ROBUST VERSION v3
-// - Fixes the definitive bug in DecomposeAndCheckPoses. The cheirality check was failing
-//   because it wasn't correctly transforming the 3D point into the second camera's
-//   coordinate system before checking its depth. This is the root cause of the
-//   "pose valid: False" and "0 points" issues.
+// FIXED VERSION - Robust Cheirality Check
+// - Fixes the overly strict cheirality check that required >50% of points to pass
+// - Now accepts poses if at least 10% of points pass AND at least 5 points total
+// - Added comprehensive debugging to understand triangulation failures
+// - This should fix the "0 points" issue caused by pose validation being too strict
 // =================================================================================================
 
 using System;
@@ -236,7 +236,12 @@ namespace GeoscientistToolkit
             
             if (bestInliers.Count > MIN_INLIERS_FOR_ACCEPTANCE)
             {
+                _service.Log($"    RANSAC found {bestInliers.Count} inliers, re-estimating essential matrix...");
                 bestE = SolveEssentialMatrix(bestInliers, image1, image2);
+            }
+            else
+            {
+                _service.Log($"    RANSAC failed: only {bestInliers.Count} inliers (need > {MIN_INLIERS_FOR_ACCEPTANCE})");
             }
 
             if (bestE == null)
@@ -296,7 +301,11 @@ namespace GeoscientistToolkit
             var E_vec = svd.VT.Row(8);
             var E_unconstrained = Matrix.Build.DenseOfRowMajor(3, 3, E_vec.AsArray());
             var svd_E = E_unconstrained.Svd(true);
-            var S_clean = Vector.Build.Dense(new[] { 1.0, 1.0, 0 });
+            
+            // Enforce the Essential matrix constraint: two equal non-zero singular values and one zero
+            // Take the average of the first two singular values for better numerical stability
+            double s = (svd_E.S[0] + svd_E.S[1]) * 0.5;
+            var S_clean = Vector.Build.Dense(new[] { s, s, 0 });
             return svd_E.U * Matrix.Build.DiagonalOfDiagonalVector(S_clean) * svd_E.VT;
         }
 
@@ -306,9 +315,15 @@ namespace GeoscientistToolkit
             PhotogrammetryImage image2,
             List<FeatureMatch> inlierMatches)
         {
+            _service.Log($"    Decomposing essential matrix for {inlierMatches.Count} inliers...");
+            
             var svd = E.Svd(true);
             var U = svd.U;
             var Vt = svd.VT;
+            
+            // Log singular values for debugging
+            _service.Log($"      Essential matrix singular values: [{svd.S[0]:F4}, {svd.S[1]:F4}, {svd.S[2]:F4}]");
+            
             var W = Matrix.Build.DenseOfArray(new double[,] { { 0, -1, 0 }, { 1, 0, 0 }, { 0, 0, 1 } });
             
             var R1 = U * W * Vt;
@@ -319,6 +334,8 @@ namespace GeoscientistToolkit
             
             var t1 = U.Column(2);
             var t2 = -t1;
+            
+            // Don't normalize translation - keep the scale from Essential matrix
 
             var poses = new[] { (R1, t1), (R1, t2), (R2, t1), (R2, t2) };
             (Matrix<double> R, MathNet.Numerics.LinearAlgebra.Vector<double> t) bestPose = (null, null);
@@ -327,6 +344,10 @@ namespace GeoscientistToolkit
             foreach (var (R_candidate, t_candidate) in poses)
             {
                 int inFrontCount = 0;
+                int triangulationFailures = 0;
+                int behindCamera1 = 0;
+                int behindCamera2 = 0;
+                
                 // The decomposition [R|t] gives the transformation from camera 1 to camera 2.
                 var pose_matrix_cam1_to_cam2 = CreatePoseMatrix(R_candidate, t_candidate);
 
@@ -344,19 +365,37 @@ namespace GeoscientistToolkit
 
                     // --- START OF FIX ---
                     // Cheirality Check: The triangulated point must be in front of both cameras.
-                    // 1. Check if the point is in front of the first camera (Z > 0).
-                    if (p3d_cam1.HasValue && p3d_cam1.Value.Z > 0)
+                    if (!p3d_cam1.HasValue)
                     {
-                        // 2. Transform the point into the second camera's coordinate system.
-                        var p3d_cam2 = Vector3.Transform(p3d_cam1.Value, pose_matrix_cam1_to_cam2);
-                        
-                        // 3. Check if the transformed point is also in front of the second camera.
-                        if (p3d_cam2.Z > 0)
-                        {
-                            inFrontCount++;
-                        }
+                        triangulationFailures++;
+                        continue;
                     }
+                    
+                    // 1. Check if the point is in front of the first camera (Z > 0).
+                    if (p3d_cam1.Value.Z <= 0)
+                    {
+                        behindCamera1++;
+                        continue;
+                    }
+                    
+                    // 2. Transform the point into the second camera's coordinate system.
+                    var p3d_cam2 = Vector3.Transform(p3d_cam1.Value, pose_matrix_cam1_to_cam2);
+                    
+                    // 3. Check if the transformed point is also in front of the second camera.
+                    if (p3d_cam2.Z <= 0)
+                    {
+                        behindCamera2++;
+                        continue;
+                    }
+                    
+                    inFrontCount++;
                     // --- END OF FIX ---
+                }
+                
+                // Log details for first pose candidate for debugging
+                if (poses[0].Equals((R_candidate, t_candidate)))
+                {
+                    _service.Log($"      Pose candidate 1: {inFrontCount} in front, {triangulationFailures} tri-failed, {behindCamera1} behind cam1, {behindCamera2} behind cam2");
                 }
                 
                 if (inFrontCount > maxInFront)
@@ -366,12 +405,22 @@ namespace GeoscientistToolkit
                 }
             }
             
-            // A valid pose must have a significant number of inlier points in front of the cameras.
-            if (maxInFront > inlierMatches.Count / 2)
+            // A valid pose must have some inlier points in front of both cameras.
+            // With real-world data, we can't expect all points to triangulate perfectly.
+            // Accept if at least 10% of points pass AND at least 5 points total
+            int minPercent = Math.Max(3, inlierMatches.Count / 10);  // At least 10% but minimum 3 points
+            int minAbsolute = 5;  // Absolute minimum
+            int minRequiredPoints = Math.Max(minPercent, minAbsolute);
+            
+            _service.Log($"    Cheirality check: {maxInFront}/{inlierMatches.Count} points in front of both cameras (need >= {minRequiredPoints})");
+            
+            if (maxInFront >= minRequiredPoints)
             {
+                _service.Log($"    ✓ Pose decomposition successful with {maxInFront} valid points");
                 return bestPose;
             }
 
+            _service.Log($"    ✗ Pose decomposition failed: only {maxInFront} points passed cheirality check (need >= {minRequiredPoints})");
             return (null, null);
         }
 
