@@ -29,9 +29,12 @@ namespace GeoscientistToolkit
     internal class FeatureProcessor
     {
         private readonly PhotogrammetryProcessingService _service;
-        private const int RANSAC_ITERATIONS = 5000;  // Increased from 2000 for better pose estimation
-        private const float NORMALIZED_REPROJECTION_THRESHOLD = 2.0f;  // More permissive
-        private const int MIN_INLIERS_FOR_ACCEPTANCE = 8;  // Reduced from 12 for challenging scenarios
+        
+        // Adaptive RANSAC parameters for minimal overlap
+        // Research from Agisoft Metashape, COLMAP shows that adaptive thresholds are critical
+        private const int RANSAC_ITERATIONS = 10000;  // Increased for minimal overlap (COLMAP uses 10k-100k)
+        private const float BASE_NORMALIZED_REPROJECTION_THRESHOLD = 2.0f;  // Base threshold
+        private const int MIN_INLIERS_FOR_ACCEPTANCE = 6;  // Reduced from 8 - Agisoft works with as few as 6-8
 
         public FeatureProcessor(PhotogrammetryProcessingService service)
         {
@@ -227,14 +230,56 @@ namespace GeoscientistToolkit
             var normPts2 = matches.Select(m => NormalizePoint(image2.SiftFeatures.KeyPoints[m.TrainIndex], k2)).ToList();
 
             double avgFocal = (k1.M11 + k1.M22 + k2.M11 + k2.M22) * 0.25;
-            double reprojThreshNorm = NORMALIZED_REPROJECTION_THRESHOLD / avgFocal;
+            
+            // ====================================================================
+            // ADAPTIVE RANSAC THRESHOLD FOR MINIMAL OVERLAP
+            // ====================================================================
+            // Research shows commercial software uses adaptive thresholds:
+            // - Many matches (>100): Use strict threshold (1.0-1.5 pixels)
+            // - Medium matches (50-100): Use standard threshold (2.0-2.5 pixels)
+            // - Few matches (<50): Use loose threshold (3.0-4.0 pixels)
+            //
+            // This is critical for barely overlapping images where we need to
+            // accept more geometric uncertainty to establish the connection
+            // ====================================================================
+            float adaptiveThreshold = BASE_NORMALIZED_REPROJECTION_THRESHOLD;
+            int actualIterations = RANSAC_ITERATIONS;
+            
+            if (matches.Count < 30)
+            {
+                // Minimal overlap - very loose threshold
+                adaptiveThreshold = 4.0f;
+                actualIterations = 20000; // More iterations for sparse matches
+                _service.Log($"    Minimal overlap detected ({matches.Count} matches): using loose RANSAC threshold {adaptiveThreshold}px");
+            }
+            else if (matches.Count < 60)
+            {
+                // Low overlap - loose threshold
+                adaptiveThreshold = 3.0f;
+                actualIterations = 15000;
+                _service.Log($"    Low overlap detected ({matches.Count} matches): using moderate RANSAC threshold {adaptiveThreshold}px");
+            }
+            else if (matches.Count < 150)
+            {
+                // Medium overlap - standard threshold
+                adaptiveThreshold = 2.5f;
+                _service.Log($"    Medium overlap ({matches.Count} matches): using standard RANSAC threshold {adaptiveThreshold}px");
+            }
+            else
+            {
+                // High overlap - strict threshold for precision
+                adaptiveThreshold = 1.5f;
+                _service.Log($"    High overlap ({matches.Count} matches): using strict RANSAC threshold {adaptiveThreshold}px");
+            }
+            
+            double reprojThreshNorm = adaptiveThreshold / avgFocal;
             double reprojThreshNormSq = reprojThreshNorm * reprojThreshNorm;
 
             var random = new Random();
             List<FeatureMatch> bestInliers = new List<FeatureMatch>();
             Matrix<double> bestE = null;
 
-            for (int iter = 0; iter < RANSAC_ITERATIONS; iter++)
+            for (int iter = 0; iter < actualIterations; iter++)
             {
                 var sampleIndices = Enumerable.Range(0, matches.Count).OrderBy(x => random.Next()).Take(8).ToArray();
                 var sampleMatches = sampleIndices.Select(i => matches[i]).ToList();
@@ -256,11 +301,18 @@ namespace GeoscientistToolkit
                     bestInliers = currentInliers;
                     bestE = E;
                 }
+                
+                // Early termination if we have very strong consensus (>80% inliers)
+                if (bestInliers.Count > matches.Count * 0.8 && bestInliers.Count > 20)
+                {
+                    _service.Log($"    Early RANSAC termination at iteration {iter + 1}: {bestInliers.Count} inliers ({(float)bestInliers.Count / matches.Count * 100:F1}%)");
+                    break;
+                }
             }
             
             if (bestInliers.Count > MIN_INLIERS_FOR_ACCEPTANCE)
             {
-                _service.Log($"    RANSAC found {bestInliers.Count} inliers, re-estimating essential matrix...");
+                _service.Log($"    RANSAC found {bestInliers.Count} inliers ({(float)bestInliers.Count / matches.Count * 100:F1}%), re-estimating essential matrix...");
                 bestE = SolveEssentialMatrix(bestInliers, image1, image2);
             }
             else

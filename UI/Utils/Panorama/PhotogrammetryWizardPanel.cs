@@ -320,10 +320,16 @@ public class PhotogrammetryWizardPanel : BasePanel
 
     private DenseCloudOptions _denseCloudOptions = new();
     private MeshOptions _meshOptions = new();
+    private TextureOptions _textureOptions = new();
     private OrthomosaicOptions _orthoOptions = new();
     private DEMOptions _demOptions = new();
     private bool _showOrthoDialog;
     private bool _showDemDialog;
+    private bool _showTextureDialog;
+
+    // Point cloud visualization options
+    private int _pointCloudProjectionMode = 0; // 0=XY, 1=XZ, 2=YZ
+    private bool _pointCloudUseDepthColor = true;
 
     private bool _showDenseCloudDialog;
     private bool _showMeshDialog;
@@ -683,6 +689,20 @@ public class PhotogrammetryWizardPanel : BasePanel
                 _showMeshDialog = true;
             if (!canBuild) ImGui.EndDisabled();
         }
+
+        ImGui.Separator();
+
+        bool hasTexture = hasMesh && !string.IsNullOrEmpty(service.GeneratedMesh?.TexturePath);
+        if (hasTexture)
+            ImGui.TextColored(new Vector4(0, 1, 0, 1), $"✓ Texture: {Path.GetFileName(service.GeneratedMesh.TexturePath)}");
+        else
+        {
+            bool canBuildTexture = hasMesh && service.Images?.Count > 0;
+            if (!canBuildTexture) ImGui.BeginDisabled();
+            if (ImGui.Button("Build Texture...", new Vector2(-1, 30)))
+                _showTextureDialog = true;
+            if (!canBuildTexture) ImGui.EndDisabled();
+        }
     }
 
     private void DrawPointCloudView(PhotogrammetryPointCloud cloud)
@@ -690,6 +710,21 @@ public class PhotogrammetryWizardPanel : BasePanel
         ImGui.Text($"Points: {cloud.Points.Count}");
         ImGui.Text($"Type: {(cloud.IsDense ? "Dense" : "Sparse")}");
         ImGui.Text($"Bounds: {cloud.BoundingBoxMin} to {cloud.BoundingBoxMax}");
+        
+        ImGui.Spacing();
+        
+        // Visualization controls
+        ImGui.Text("Visualization:");
+        ImGui.SameLine();
+        if (ImGui.RadioButton("XY (Top)", ref _pointCloudProjectionMode, 0)) { }
+        ImGui.SameLine();
+        if (ImGui.RadioButton("XZ (Front)", ref _pointCloudProjectionMode, 1)) { }
+        ImGui.SameLine();
+        if (ImGui.RadioButton("YZ (Side)", ref _pointCloudProjectionMode, 2)) { }
+        
+        ImGui.Checkbox("Depth Coloring", ref _pointCloudUseDepthColor);
+        
+        ImGui.Spacing();
 
         ImGui.BeginChild("Preview", Vector2.Zero, ImGuiChildFlags.Border);
         var drawList = ImGui.GetWindowDrawList();
@@ -699,14 +734,116 @@ public class PhotogrammetryWizardPanel : BasePanel
         if (size.X > 10 && size.Y > 10 && cloud.Points.Count > 0)
         {
             var range = cloud.BoundingBoxMax - cloud.BoundingBoxMin;
-            float scale = Math.Min(size.X / range.X, size.Y / range.Y) * 0.9f;
-
-            foreach (var pt in cloud.Points.Take(3000))
+            
+            // Determine which axes to use based on projection mode
+            float rangeU, rangeV, rangeDepth;
+            string depthAxisName;
+            
+            switch (_pointCloudProjectionMode)
             {
-                var p2d = new Vector2(pt.Position.X, pt.Position.Y) - new Vector2(cloud.BoundingBoxMin.X, cloud.BoundingBoxMin.Y);
+                case 0: // XY view (Top)
+                    rangeU = range.X;
+                    rangeV = range.Y;
+                    rangeDepth = range.Z;
+                    depthAxisName = "Z";
+                    break;
+                case 1: // XZ view (Front)
+                    rangeU = range.X;
+                    rangeV = range.Z;
+                    rangeDepth = range.Y;
+                    depthAxisName = "Y";
+                    break;
+                case 2: // YZ view (Side)
+                default:
+                    rangeU = range.Y;
+                    rangeV = range.Z;
+                    rangeDepth = range.X;
+                    depthAxisName = "X";
+                    break;
+            }
+            
+            float scale = Math.Min(size.X / Math.Max(rangeU, 0.01f), size.Y / Math.Max(rangeV, 0.01f)) * 0.9f;
+
+            // Sample points for display (max 5000 for performance)
+            int step = Math.Max(1, cloud.Points.Count / 5000);
+            
+            for (int i = 0; i < cloud.Points.Count; i += step)
+            {
+                var pt = cloud.Points[i];
+                
+                // Get 2D projection coordinates based on mode
+                Vector2 p2d;
+                float depth;
+                
+                switch (_pointCloudProjectionMode)
+                {
+                    case 0: // XY view
+                        p2d = new Vector2(
+                            pt.Position.X - cloud.BoundingBoxMin.X, 
+                            pt.Position.Y - cloud.BoundingBoxMin.Y);
+                        depth = pt.Position.Z - cloud.BoundingBoxMin.Z;
+                        break;
+                    case 1: // XZ view
+                        p2d = new Vector2(
+                            pt.Position.X - cloud.BoundingBoxMin.X, 
+                            pt.Position.Z - cloud.BoundingBoxMin.Z);
+                        depth = pt.Position.Y - cloud.BoundingBoxMin.Y;
+                        break;
+                    case 2: // YZ view
+                    default:
+                        p2d = new Vector2(
+                            pt.Position.Y - cloud.BoundingBoxMin.Y, 
+                            pt.Position.Z - cloud.BoundingBoxMin.Z);
+                        depth = pt.Position.X - cloud.BoundingBoxMin.X;
+                        break;
+                }
+                
                 var screen = pos + size / 2 + new Vector2(p2d.X, -p2d.Y) * scale;
-                uint col = ImGui.ColorConvertFloat4ToU32(new Vector4(pt.Color, 1));
+                
+                // Choose color: depth-based or original point color
+                Vector4 color;
+                if (_pointCloudUseDepthColor && rangeDepth > 0.01f)
+                {
+                    // Map depth to color: blue (near) -> cyan -> green -> yellow -> red (far)
+                    float t = Math.Clamp(depth / rangeDepth, 0f, 1f);
+                    color = GetDepthColor(t);
+                }
+                else
+                {
+                    // Use original point color
+                    color = new Vector4(pt.Color, 1);
+                }
+                
+                uint col = ImGui.ColorConvertFloat4ToU32(color);
                 drawList.AddCircleFilled(screen, 2, col);
+            }
+            
+            // Draw axis labels
+            if (_pointCloudUseDepthColor && rangeDepth > 0.01f)
+            {
+                var labelPos = pos + new Vector2(10, size.Y - 60);
+                drawList.AddText(labelPos, ImGui.ColorConvertFloat4ToU32(new Vector4(1, 1, 1, 1)), 
+                    $"Depth ({depthAxisName}): {rangeDepth:F2}m");
+                
+                // Draw color scale
+                float barWidth = 200;
+                float barHeight = 20;
+                var barPos = pos + new Vector2(10, size.Y - 35);
+                
+                for (int x = 0; x < (int)barWidth; x++)
+                {
+                    float t = x / barWidth;
+                    uint col = ImGui.ColorConvertFloat4ToU32(GetDepthColor(t));
+                    drawList.AddLine(
+                        barPos + new Vector2(x, 0), 
+                        barPos + new Vector2(x, barHeight), 
+                        col, 2);
+                }
+                
+                drawList.AddText(barPos + new Vector2(0, barHeight + 2), 
+                    ImGui.ColorConvertFloat4ToU32(new Vector4(1, 1, 1, 1)), "Near");
+                drawList.AddText(barPos + new Vector2(barWidth - 20, barHeight + 2), 
+                    ImGui.ColorConvertFloat4ToU32(new Vector4(1, 1, 1, 1)), "Far");
             }
         }
         ImGui.EndChild();
@@ -718,6 +855,38 @@ public class PhotogrammetryWizardPanel : BasePanel
                 new ImGuiExportFileDialog.ExtensionOption(".ply", "PLY Format")
             );
             _exportDialog.Open($"{_job.ImageGroup.Name}_{(cloud.IsDense ? "dense" : "sparse")}_cloud");
+        }
+    }
+    
+    /// <summary>
+    /// Get color for depth visualization: blue (near) -> cyan -> green -> yellow -> red (far)
+    /// </summary>
+    private Vector4 GetDepthColor(float t)
+    {
+        // Use a perceptually uniform color ramp
+        if (t < 0.25f)
+        {
+            // Blue to Cyan
+            float s = t / 0.25f;
+            return new Vector4(0, s, 1, 1);
+        }
+        else if (t < 0.5f)
+        {
+            // Cyan to Green
+            float s = (t - 0.25f) / 0.25f;
+            return new Vector4(0, 1, 1 - s, 1);
+        }
+        else if (t < 0.75f)
+        {
+            // Green to Yellow
+            float s = (t - 0.5f) / 0.25f;
+            return new Vector4(s, 1, 0, 1);
+        }
+        else
+        {
+            // Yellow to Red
+            float s = (t - 0.75f) / 0.25f;
+            return new Vector4(1, 1 - s, 0, 1);
         }
     }
 
@@ -1013,7 +1182,19 @@ public class PhotogrammetryWizardPanel : BasePanel
 
             int faceCount = _meshOptions.FaceCount;
             if (ImGui.InputInt("Target Faces", ref faceCount))
-                _meshOptions.FaceCount = faceCount;
+                _meshOptions.FaceCount = Math.Max(1000, faceCount);
+            
+            ImGui.SameLine();
+            // Help marker
+            ImGui.TextDisabled("(?)");
+            if (ImGui.IsItemHovered())
+            {
+                ImGui.BeginTooltip();
+                ImGui.PushTextWrapPos(ImGui.GetFontSize() * 35.0f);
+                ImGui.TextUnformatted("Target number of triangles in the generated mesh. Higher values preserve more detail but increase processing time.");
+                ImGui.PopTextWrapPos();
+                ImGui.EndTooltip();
+            }
 
             bool simplify = _meshOptions.SimplifyMesh;
             if (ImGui.Checkbox("Simplify", ref simplify))
@@ -1022,6 +1203,57 @@ public class PhotogrammetryWizardPanel : BasePanel
             bool smooth = _meshOptions.SmoothNormals;
             if (ImGui.Checkbox("Smooth Normals", ref smooth))
                 _meshOptions.SmoothNormals = smooth;
+
+            ImGui.Separator();
+            ImGui.TextColored(new Vector4(0.4f, 0.8f, 1.0f, 1.0f), "Mesh Optimization");
+            
+            bool optimize = _meshOptions.OptimizeMesh;
+            if (ImGui.Checkbox("Optimize Mesh Quality", ref optimize))
+                _meshOptions.OptimizeMesh = optimize;
+            
+            ImGui.SameLine();
+            // Help marker
+            ImGui.TextDisabled("(?)");
+            if (ImGui.IsItemHovered())
+            {
+                ImGui.BeginTooltip();
+                ImGui.PushTextWrapPos(ImGui.GetFontSize() * 35.0f);
+                ImGui.TextUnformatted("Improves mesh quality using Gmsh-inspired algorithms:\n" +
+                    "• Edge swapping (Delaunay refinement)\n" +
+                    "• Laplacian smoothing\n" +
+                    "• Vertex optimization\n" +
+                    "• Sliver removal\n" +
+                    "Recommended for production-quality meshes.");
+                ImGui.PopTextWrapPos();
+                ImGui.EndTooltip();
+            }
+
+            if (_meshOptions.OptimizeMesh)
+            {
+                ImGui.Indent();
+                
+                int quality = (int)_meshOptions.OptimizationQuality;
+                if (ImGui.Combo("Quality Profile", ref quality, "Fast (Preview)\0Balanced (Recommended)\0High Quality\0"))
+                    _meshOptions.OptimizationQuality = (OptimizationQuality)quality;
+                
+                // Show profile details
+                ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(0.7f, 0.7f, 0.7f, 1.0f));
+                switch (_meshOptions.OptimizationQuality)
+                {
+                    case OptimizationQuality.Fast:
+                        ImGui.TextWrapped("• 1 optimization pass\n• Basic smoothing\n• ~10-20% processing overhead\n• Good for previews");
+                        break;
+                    case OptimizationQuality.Balanced:
+                        ImGui.TextWrapped("• 2 optimization passes\n• Enhanced smoothing & vertex optimization\n• ~30-40% processing overhead\n• Recommended for most cases");
+                        break;
+                    case OptimizationQuality.High:
+                        ImGui.TextWrapped("• 3 optimization passes\n• Maximum quality algorithms\n• ~50-70% processing overhead\n• Best for final deliverables");
+                        break;
+                }
+                ImGui.PopStyleColor();
+                
+                ImGui.Unindent();
+            }
 
             ImGui.Separator();
             ImGui.Checkbox("Add to project", ref _addToProject);
@@ -1033,6 +1265,55 @@ public class PhotogrammetryWizardPanel : BasePanel
                     new ImGuiExportFileDialog.ExtensionOption(".stl", "STL")
                 );
                 _exportDialog.Open($"{_job.ImageGroup.Name}_mesh");
+                ImGui.CloseCurrentPopup();
+            }
+            ImGui.SameLine();
+            if (ImGui.Button("Cancel", new Vector2(120, 0))) ImGui.CloseCurrentPopup();
+
+            ImGui.EndPopup();
+        }
+
+        if (_showTextureDialog)
+        {
+            ImGui.OpenPopup("Texture Options");
+            _showTextureDialog = false;
+        }
+
+        bool isTexturePopupOpen = true;
+        if (ImGui.BeginPopupModal("Texture Options", ref isTexturePopupOpen, ImGuiWindowFlags.AlwaysAutoResize))
+        {
+            ImGui.Text("Configure mesh texturing:");
+            ImGui.Separator();
+
+            int texSizeIdx = _textureOptions.TextureSize switch
+            {
+                512 => 0,
+                1024 => 1,
+                2048 => 2,
+                4096 => 3,
+                _ => 1
+            };
+
+            if (ImGui.Combo("Texture Resolution", ref texSizeIdx, "512 x 512\01024 x 1024\02048 x 2048\04096 x 4096\0"))
+            {
+                _textureOptions.TextureSize = texSizeIdx switch
+                {
+                    0 => 512,
+                    1 => 1024,
+                    2 => 2048,
+                    _ => 4096
+                };
+            }
+
+            ImGui.TextWrapped("Higher resolution preserves more detail but increases file size and processing time.");
+            
+            ImGui.Separator();
+            ImGui.Checkbox("Add to project", ref _addToProject);
+
+            if (ImGui.Button("Build", new Vector2(120, 0)))
+            {
+                string texturePath = Path.ChangeExtension(_job.Service.GeneratedMesh.FilePath, "_textured.obj");
+                _ = _job.Service.BuildTextureAsync(_textureOptions, texturePath);
                 ImGui.CloseCurrentPopup();
             }
             ImGui.SameLine();

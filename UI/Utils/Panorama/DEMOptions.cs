@@ -13,6 +13,22 @@ namespace GeoscientistToolkit.Business.Photogrammetry
             Mesh
         }
 
+        public enum InterpolationMethod
+        {
+            /// <summary>
+            /// Inverse Distance Weighting (Shepard, 1968)
+            /// </summary>
+            IDW,
+            /// <summary>
+            /// Bilinear interpolation for regular grids
+            /// </summary>
+            Bilinear,
+            /// <summary>
+            /// Priority-based propagation for feature preservation
+            /// </summary>
+            PriorityQueue
+        }
+
         /// <summary>
         /// Source geometry for elevation data
         /// </summary>
@@ -27,6 +43,11 @@ namespace GeoscientistToolkit.Business.Photogrammetry
         /// Whether to fill holes in the elevation data
         /// </summary>
         public bool FillHoles { get; set; } = true;
+
+        /// <summary>
+        /// Method for hole filling interpolation
+        /// </summary>
+        public InterpolationMethod HoleFillMethod { get; set; } = InterpolationMethod.IDW;
 
         /// <summary>
         /// Whether to apply smoothing filter

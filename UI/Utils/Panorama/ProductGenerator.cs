@@ -110,6 +110,8 @@ namespace GeoscientistToolkit
 
             // Generate orthomosaic pixels
             int reportEvery = Math.Max(1, height / 50);
+            bool useAdvancedBlending = options.Blending == OrthomosaicOptions.BlendingMode.AngleWeighted ||
+                                        options.Blending == OrthomosaicOptions.BlendingMode.Feathered;
             
             for (int j = 0; j < height; j++)
             {
@@ -122,9 +124,22 @@ namespace GeoscientistToolkit
                     if (elevationSampler.TrySampleZ(x, y, out float z))
                     {
                         var world = new Vector3(x, y, z);
-                        var color = options.EnableBlending
-                            ? SampleBlendedColor(world, images, options.MaxBlendImages)
-                            : SampleBestColor(world, images);
+                        Vector3 color;
+
+                        if (useAdvancedBlending && options.EnableBlending)
+                        {
+                            // Estimate surface normal for angle-aware blending
+                            var normal = EstimateSurfaceNormal(x, y, elevationSampler, gsd);
+                            color = SampleBlendedColorAdvanced(world, normal, images, options);
+                        }
+                        else if (options.EnableBlending)
+                        {
+                            color = SampleBlendedColor(world, images, options.MaxBlendImages);
+                        }
+                        else
+                        {
+                            color = SampleBestColor(world, images);
+                        }
 
                         int idx = (j * width + i) * 4;
                         rgba[idx] = (byte)Math.Clamp((int)(color.X * 255.0f), 0, 255);
@@ -210,7 +225,7 @@ namespace GeoscientistToolkit
 
             // Post-process elevation data
             if (options.FillHoles)
-                FillElevationHoles(elevations);
+                FillElevationHoles(elevations, options.HoleFillMethod);
             
             if (options.SmoothSurface)
                 SmoothElevations(elevations);
@@ -383,69 +398,477 @@ namespace GeoscientistToolkit
             return weightSum > 0 ? sum / weightSum : new Vector3(0.5f, 0.5f, 0.5f);
         }
 
-        private void FillElevationHoles(float[,] elevations)
+        /// <summary>
+        /// Advanced blending with angle awareness and feathering
+        /// Reference: Lin et al. (2016) - Blending zone determination for aerial orthoimages
+        /// </summary>
+        private Vector3 SampleBlendedColorAdvanced(
+            Vector3 world,
+            Vector3 normal,
+            List<PhotogrammetryImage> images,
+            OrthomosaicOptions options)
+        {
+            var candidates = new List<(float score, PhotogrammetryImage img, Vector2 px, float angle)>();
+
+            foreach (var image in images)
+            {
+                var proj = ProjectWorldToImage(world, image);
+                
+                if (IsValidProjection(proj, image))
+                {
+                    Matrix4x4.Invert(image.GlobalPose, out var view);
+                    var cameraPos = new Vector3(view.M41, view.M42, view.M43);
+                    var viewDir = Vector3.Normalize(world - cameraPos);
+                    
+                    // Angle between surface normal and viewing direction
+                    float angle = Vector3.Dot(normal, -viewDir);
+                    if (angle < 0) angle = 0; // Back-facing
+
+                    float dist = Vector3.Distance(cameraPos, world);
+                    
+                    float score = 0;
+                    switch (options.Blending)
+                    {
+                        case OrthomosaicOptions.BlendingMode.AngleWeighted:
+                            // Combine distance and angle: prefer nadir views
+                            score = angle / (1e-4f + dist);
+                            break;
+                        case OrthomosaicOptions.BlendingMode.Feathered:
+                            // Feathered: strong preference for nadir, smooth falloff
+                            score = MathF.Pow(angle, 2.0f) / (1e-4f + dist);
+                            break;
+                        case OrthomosaicOptions.BlendingMode.DistanceWeighted:
+                        default:
+                            score = 1.0f / (1e-4f + dist);
+                            break;
+                    }
+                    
+                    candidates.Add((score, image, proj, angle));
+                }
+            }
+
+            if (candidates.Count == 0)
+                return new Vector3(0.5f, 0.5f, 0.5f);
+
+            // For "Best" mode, just return the single best image
+            if (options.Blending == OrthomosaicOptions.BlendingMode.Best || !options.EnableBlending)
+            {
+                var best = candidates.OrderByDescending(c => c.score).First();
+                return SampleImageColor(best.img, (int)best.px.X, (int)best.px.Y);
+            }
+
+            // Sort by score and take best N
+            candidates.Sort((a, b) => b.score.CompareTo(a.score));
+            int take = Math.Min(options.MaxBlendImages, candidates.Count);
+
+            Vector3 sum = Vector3.Zero;
+            float weightSum = 0;
+
+            for (int i = 0; i < take; i++)
+            {
+                var c = candidates[i];
+                var color = SampleImageColor(c.img, (int)c.px.X, (int)c.px.Y);
+                
+                // Apply feathering for smooth transitions
+                float weight = c.score;
+                if (options.Blending == OrthomosaicOptions.BlendingMode.Feathered)
+                {
+                    // Additional feathering based on rank
+                    float rankWeight = 1.0f - (i / (float)take) * 0.5f;
+                    weight *= rankWeight;
+                }
+
+                sum += color * weight;
+                weightSum += weight;
+            }
+
+            return weightSum > 0 ? sum / weightSum : new Vector3(0.5f, 0.5f, 0.5f);
+        }
+
+        /// <summary>
+        /// Estimate surface normal at a point using neighboring elevation samples
+        /// </summary>
+        private Vector3 EstimateSurfaceNormal(float x, float y, ElevationSampler sampler, float gridSize = 1.0f)
+        {
+            // Sample neighbors to estimate gradient
+            bool hasLeft = sampler.TrySampleZ(x - gridSize, y, out float zLeft);
+            bool hasRight = sampler.TrySampleZ(x + gridSize, y, out float zRight);
+            bool hasDown = sampler.TrySampleZ(x, y - gridSize, out float zDown);
+            bool hasUp = sampler.TrySampleZ(x, y + gridSize, out float zUp);
+            
+            if (!sampler.TrySampleZ(x, y, out float zCenter))
+                return new Vector3(0, 0, 1); // Default upward
+
+            // Compute gradients
+            float dx = 0, dy = 0;
+            int count = 0;
+
+            if (hasLeft && hasRight)
+            {
+                dx = (zRight - zLeft) / (2 * gridSize);
+                count++;
+            }
+            else if (hasRight)
+            {
+                dx = (zRight - zCenter) / gridSize;
+                count++;
+            }
+            else if (hasLeft)
+            {
+                dx = (zCenter - zLeft) / gridSize;
+                count++;
+            }
+
+            if (hasUp && hasDown)
+            {
+                dy = (zUp - zDown) / (2 * gridSize);
+                count++;
+            }
+            else if (hasUp)
+            {
+                dy = (zUp - zCenter) / gridSize;
+                count++;
+            }
+            else if (hasDown)
+            {
+                dy = (zCenter - zDown) / gridSize;
+                count++;
+            }
+
+            if (count == 0)
+                return new Vector3(0, 0, 1);
+
+            // Normal from cross product of tangent vectors
+            Vector3 tangentX = new Vector3(1, 0, dx);
+            Vector3 tangentY = new Vector3(0, 1, dy);
+            Vector3 normal = Vector3.Cross(tangentX, tangentY);
+            
+            return Vector3.Normalize(normal);
+        }
+
+        /// <summary>
+        /// Fills elevation holes using selected interpolation method
+        /// Primary method: IDW - Reference: Shepard, D. (1968). "A two-dimensional interpolation function for irregularly-spaced data"
+        /// Alternative methods: Bilinear interpolation, Priority-based propagation
+        /// </summary>
+        private void FillElevationHoles(float[,] elevations, DEMOptions.InterpolationMethod method = DEMOptions.InterpolationMethod.IDW)
         {
             int height = elevations.GetLength(0);
             int width = elevations.GetLength(1);
 
-            // Simple nearest-neighbor hole filling
-            for (int pass = 0; pass < 3; pass++)
+            switch (method)
+            {
+                case DEMOptions.InterpolationMethod.Bilinear:
+                    FillHolesBilinear(elevations);
+                    break;
+                case DEMOptions.InterpolationMethod.PriorityQueue:
+                    FillHolesPriorityQueue(elevations);
+                    break;
+                case DEMOptions.InterpolationMethod.IDW:
+                default:
+                    FillHolesIDW(elevations);
+                    break;
+            }
+        }
+
+        /// <summary>
+        /// Fill holes using Inverse Distance Weighting
+        /// </summary>
+        private void FillHolesIDW(float[,] elevations)
+        {
+            int height = elevations.GetLength(0);
+            int width = elevations.GetLength(1);
+            int searchRadius = 8;
+            float power = 2.0f;
+            const float minDistance = 0.1f;
+
+            // Multi-pass filling for large holes
+            for (int pass = 0; pass < 5; pass++)
             {
                 var copy = (float[,])elevations.Clone();
+                int filledCount = 0;
                 
                 for (int j = 0; j < height; j++)
                 {
                     for (int i = 0; i < width; i++)
                     {
-                        if (float.IsNaN(copy[j, i]))
+                        if (!float.IsNaN(copy[j, i]))
+                            continue;
+
+                        // Collect valid neighbors within search radius using IDW
+                        float weightedSum = 0;
+                        float totalWeight = 0;
+                        bool foundNeighbors = false;
+
+                        for (int dj = -searchRadius; dj <= searchRadius; dj++)
                         {
-                            float sum = 0;
-                            int count = 0;
+                            for (int di = -searchRadius; di <= searchRadius; di++)
+                            {
+                                if (dj == 0 && di == 0) continue;
+                                
+                                int y = j + dj;
+                                int x = i + di;
 
-                            // Check 4-neighborhood
-                            if (i > 0 && !float.IsNaN(copy[j, i - 1])) { sum += copy[j, i - 1]; count++; }
-                            if (i < width - 1 && !float.IsNaN(copy[j, i + 1])) { sum += copy[j, i + 1]; count++; }
-                            if (j > 0 && !float.IsNaN(copy[j - 1, i])) { sum += copy[j - 1, i]; count++; }
-                            if (j < height - 1 && !float.IsNaN(copy[j + 1, i])) { sum += copy[j + 1, i]; count++; }
+                                if (x < 0 || x >= width || y < 0 || y >= height)
+                                    continue;
 
-                            if (count > 0)
-                                elevations[j, i] = sum / count;
+                                float value = copy[y, x];
+                                if (float.IsNaN(value))
+                                    continue;
+
+                                float distance = MathF.Sqrt(di * di + dj * dj);
+                                if (distance < minDistance)
+                                    distance = minDistance;
+
+                                float weight = 1.0f / MathF.Pow(distance, power);
+                                
+                                weightedSum += value * weight;
+                                totalWeight += weight;
+                                foundNeighbors = true;
+                            }
+                        }
+
+                        if (foundNeighbors && totalWeight > 0)
+                        {
+                            elevations[j, i] = weightedSum / totalWeight;
+                            filledCount++;
+                        }
+                    }
+                }
+
+                _service.Log($"DEM hole filling (IDW) pass {pass + 1}: filled {filledCount} pixels");
+                
+                if (filledCount == 0)
+                    break;
+            }
+        }
+
+        /// <summary>
+        /// Fill holes using bilinear interpolation for smooth transitions
+        /// </summary>
+        private void FillHolesBilinear(float[,] elevations)
+        {
+            int height = elevations.GetLength(0);
+            int width = elevations.GetLength(1);
+
+            for (int pass = 0; pass < 5; pass++)
+            {
+                var copy = (float[,])elevations.Clone();
+                int filledCount = 0;
+
+                for (int j = 1; j < height - 1; j++)
+                {
+                    for (int i = 1; i < width - 1; i++)
+                    {
+                        if (!float.IsNaN(copy[j, i]))
+                            continue;
+
+                        // Check 4-connected neighbors
+                        float sum = 0;
+                        int count = 0;
+
+                        if (!float.IsNaN(copy[j - 1, i])) { sum += copy[j - 1, i]; count++; }
+                        if (!float.IsNaN(copy[j + 1, i])) { sum += copy[j + 1, i]; count++; }
+                        if (!float.IsNaN(copy[j, i - 1])) { sum += copy[j, i - 1]; count++; }
+                        if (!float.IsNaN(copy[j, i + 1])) { sum += copy[j, i + 1]; count++; }
+
+                        if (count >= 2)
+                        {
+                            elevations[j, i] = sum / count;
+                            filledCount++;
+                        }
+                    }
+                }
+
+                _service.Log($"DEM hole filling (Bilinear) pass {pass + 1}: filled {filledCount} pixels");
+                
+                if (filledCount == 0)
+                    break;
+            }
+        }
+
+        /// <summary>
+        /// Priority queue-based hole filling for feature preservation
+        /// Reference: Criminisi et al. (2004) - Region filling and object removal by exemplar-based inpainting
+        /// </summary>
+        private void FillHolesPriorityQueue(float[,] elevations)
+        {
+            int height = elevations.GetLength(0);
+            int width = elevations.GetLength(1);
+
+            // Find boundary pixels between valid and invalid regions
+            var boundary = new System.Collections.Generic.PriorityQueue<(int x, int y), float>();
+
+            for (int j = 0; j < height; j++)
+            {
+                for (int i = 0; i < width; i++)
+                {
+                    if (float.IsNaN(elevations[j, i]))
+                    {
+                        // Check if adjacent to valid pixel
+                        bool isBoundary = false;
+                        for (int dy = -1; dy <= 1 && !isBoundary; dy++)
+                        {
+                            for (int dx = -1; dx <= 1 && !isBoundary; dx++)
+                            {
+                                if (dx == 0 && dy == 0) continue;
+                                int nx = i + dx;
+                                int ny = j + dy;
+                                if (nx >= 0 && nx < width && ny >= 0 && ny < height)
+                                {
+                                    if (!float.IsNaN(elevations[ny, nx]))
+                                        isBoundary = true;
+                                }
+                            }
+                        }
+
+                        if (isBoundary)
+                        {
+                            // Priority based on number of valid neighbors
+                            int validCount = 0;
+                            for (int dy = -1; dy <= 1; dy++)
+                            {
+                                for (int dx = -1; dx <= 1; dx++)
+                                {
+                                    if (dx == 0 && dy == 0) continue;
+                                    int nx = i + dx;
+                                    int ny = j + dy;
+                                    if (nx >= 0 && nx < width && ny >= 0 && ny < height)
+                                    {
+                                        if (!float.IsNaN(elevations[ny, nx]))
+                                            validCount++;
+                                    }
+                                }
+                            }
+                            boundary.Enqueue((i, j), -validCount); // Negative for max-heap behavior
                         }
                     }
                 }
             }
+
+            int filled = 0;
+            while (boundary.Count > 0)
+            {
+                var (x, y) = boundary.Dequeue();
+
+                if (!float.IsNaN(elevations[y, x]))
+                    continue;
+
+                // Interpolate from valid neighbors
+                float sum = 0;
+                float weightSum = 0;
+
+                for (int dy = -1; dy <= 1; dy++)
+                {
+                    for (int dx = -1; dx <= 1; dx++)
+                    {
+                        if (dx == 0 && dy == 0) continue;
+                        int nx = x + dx;
+                        int ny = y + dy;
+                        if (nx >= 0 && nx < width && ny >= 0 && ny < height)
+                        {
+                            if (!float.IsNaN(elevations[ny, nx]))
+                            {
+                                float dist = MathF.Sqrt(dx * dx + dy * dy);
+                                float weight = 1.0f / dist;
+                                sum += elevations[ny, nx] * weight;
+                                weightSum += weight;
+                            }
+                        }
+                    }
+                }
+
+                if (weightSum > 0)
+                {
+                    elevations[y, x] = sum / weightSum;
+                    filled++;
+
+                    // Add newly exposed boundary pixels
+                    for (int dy = -1; dy <= 1; dy++)
+                    {
+                        for (int dx = -1; dx <= 1; dx++)
+                        {
+                            if (dx == 0 && dy == 0) continue;
+                            int nx = x + dx;
+                            int ny = y + dy;
+                            if (nx >= 0 && nx < width && ny >= 0 && ny < height)
+                            {
+                                if (float.IsNaN(elevations[ny, nx]))
+                                {
+                                    // Count valid neighbors for priority
+                                    int validCount = 0;
+                                    for (int dy2 = -1; dy2 <= 1; dy2++)
+                                    {
+                                        for (int dx2 = -1; dx2 <= 1; dx2++)
+                                        {
+                                            int nx2 = nx + dx2;
+                                            int ny2 = ny + dy2;
+                                            if (nx2 >= 0 && nx2 < width && ny2 >= 0 && ny2 < height)
+                                            {
+                                                if (!float.IsNaN(elevations[ny2, nx2]))
+                                                    validCount++;
+                                            }
+                                        }
+                                    }
+                                    if (validCount > 0)
+                                        boundary.Enqueue((nx, ny), -validCount);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            _service.Log($"DEM hole filling (Priority Queue): filled {filled} pixels");
         }
 
+        /// <summary>
+        /// Smooths elevations using Gaussian filter to avoid terracing artifacts
+        /// Reference: Kraus, K., & Pfeifer, N. (1998). "Determination of terrain models in wooded areas with airborne laser scanner data"
+        /// ISPRS Journal of Photogrammetry and Remote Sensing, 53, 193-203
+        /// </summary>
         private void SmoothElevations(float[,] elevations)
         {
             int height = elevations.GetLength(0);
             int width = elevations.GetLength(1);
             var smoothed = new float[height, width];
 
-            // Apply 3x3 box filter
+            // 5x5 Gaussian kernel (sigma = 1.0)
+            float[,] kernel = new float[,]
+            {
+                { 1, 4, 7, 4, 1 },
+                { 4, 16, 26, 16, 4 },
+                { 7, 26, 41, 26, 7 },
+                { 4, 16, 26, 16, 4 },
+                { 1, 4, 7, 4, 1 }
+            };
+            float kernelSum = 273.0f; // Sum of all kernel weights
+
+            // Apply Gaussian filter
             for (int j = 0; j < height; j++)
             {
                 for (int i = 0; i < width; i++)
                 {
-                    float sum = 0;
-                    int count = 0;
+                    float weightedSum = 0;
+                    float totalWeight = 0;
 
-                    for (int dj = -1; dj <= 1; dj++)
+                    for (int ky = -2; ky <= 2; ky++)
                     {
-                        for (int di = -1; di <= 1; di++)
+                        for (int kx = -2; kx <= 2; kx++)
                         {
-                            int y = Math.Clamp(j + dj, 0, height - 1);
-                            int x = Math.Clamp(i + di, 0, width - 1);
+                            int y = Math.Clamp(j + ky, 0, height - 1);
+                            int x = Math.Clamp(i + kx, 0, width - 1);
                             
                             if (!float.IsNaN(elevations[y, x]))
                             {
-                                sum += elevations[y, x];
-                                count++;
+                                float weight = kernel[ky + 2, kx + 2];
+                                weightedSum += elevations[y, x] * weight;
+                                totalWeight += weight;
                             }
                         }
                     }
 
-                    smoothed[j, i] = count > 0 ? sum / count : elevations[j, i];
+                    smoothed[j, i] = totalWeight > 0 ? weightedSum / totalWeight : elevations[j, i];
                 }
             }
 

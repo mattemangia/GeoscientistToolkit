@@ -33,26 +33,133 @@ namespace GeoscientistToolkit
             _service.Log("Building 3D mesh from point cloud...");
             updateProgress(0, "Mesh generation in progress...");
 
-            return await Task.Run(() =>
+            return await Task.Run(async () =>
             {
-                _service.Log($"Using {(sourceCloud.IsDense ? "dense" : "sparse")} cloud with {sourceCloud.Points.Count} points.");
-                
-                var vertices = sourceCloud.Points.Select(p => p.Position).ToList();
-                var faces = GenerateMeshFaces(vertices, options.FaceCount);
+                try
+                {
+                    _service.Log($"Using {(sourceCloud.IsDense ? "dense" : "sparse")} cloud with {sourceCloud.Points.Count} points.");
+                    
+                    // Phase 1: Generate initial mesh (0-70%)
+                    updateProgress(0, "Generating mesh from point cloud...");
+                    var vertices = sourceCloud.Points.Select(p => p.Position).ToList();
+                    var faces = GenerateMeshFaces(vertices, options.FaceCount);
 
-                var mesh = Mesh3DDataset.CreateFromData(
-                    "Photogrammetry_Mesh",
-                    outputPath,
-                    vertices,
-                    faces,
-                    1.0f,
-                    "m");
+                    var mesh = Mesh3DDataset.CreateFromData(
+                        "Photogrammetry_Mesh",
+                        outputPath,
+                        vertices,
+                        faces,
+                        1.0f,
+                        "m");
 
-                _service.Log($"Mesh generated with {mesh.VertexCount} vertices and {mesh.FaceCount} faces.");
-                updateProgress(1.0f, "Mesh complete");
-                
-                return mesh;
+                    _service.Log($"Initial mesh: {mesh.VertexCount} vertices, {mesh.FaceCount} faces");
+                    updateProgress(0.7f, "Initial mesh generated");
+
+                    // Phase 2: Optimize mesh quality if enabled (70-100%)
+                    if (options.OptimizeMesh)
+                    {
+                        try
+                        {
+                            _service.Log("Optimizing mesh quality...");
+                            var optimizer = new MeshOptimizer(_service);
+                            var optimizationOptions = GetOptimizationOptions(options.OptimizationQuality);
+                            
+                            var optimizedMesh = await optimizer.OptimizeMeshAsync(
+                                mesh,
+                                optimizationOptions,
+                                (progress, status) =>
+                                {
+                                    // Map optimizer progress from 70% to 100%
+                                    float overallProgress = 0.7f + (progress * 0.3f);
+                                    updateProgress(overallProgress, status);
+                                });
+
+                            _service.Log($"Optimized mesh: {optimizedMesh.VertexCount} vertices, {optimizedMesh.FaceCount} faces");
+                            mesh = optimizedMesh;
+                        }
+                        catch (Exception ex)
+                        {
+                            _service.Log($"Warning: Mesh optimization failed: {ex.Message}");
+                            _service.Log("Continuing with unoptimized mesh.");
+                            // Continue with unoptimized mesh
+                        }
+                    }
+
+                    updateProgress(1.0f, "Mesh complete");
+                    _service.Log($"Final mesh: {mesh.VertexCount} vertices, {mesh.FaceCount} faces");
+                    
+                    return mesh;
+                }
+                catch (Exception ex)
+                {
+                    _service.Log($"Error during mesh generation: {ex.Message}");
+                    _service.Log($"Stack trace: {ex.StackTrace}");
+                    throw;
+                }
             });
+        }
+
+        /// <summary>
+        /// Gets mesh optimization options based on quality profile
+        /// </summary>
+        private MeshOptimizationOptions GetOptimizationOptions(OptimizationQuality quality)
+        {
+            switch (quality)
+            {
+                case OptimizationQuality.Fast:
+                    return new MeshOptimizationOptions
+                    {
+                        OptimizationPasses = 1,
+                        MaxIterations = 5,
+                        EnableEdgeSwapping = true,
+                        EnableLaplacianSmoothing = true,
+                        SmoothingIterations = 2,
+                        LaplacianDampingFactor = 0.6f,
+                        LaplacianWeightingScheme = LaplacianWeighting.Uniform,
+                        EnableVertexOptimization = false,
+                        EnableSliverRemoval = true,
+                        SliverQualityThreshold = 0.05f
+                    };
+
+                case OptimizationQuality.Balanced:
+                    return new MeshOptimizationOptions
+                    {
+                        OptimizationPasses = 2,
+                        MaxIterations = 10,
+                        EnableEdgeSwapping = true,
+                        EdgeSwapQualityThreshold = 0.01f,
+                        EnableLaplacianSmoothing = true,
+                        SmoothingIterations = 5,
+                        LaplacianDampingFactor = 0.5f,
+                        LaplacianWeightingScheme = LaplacianWeighting.InverseDistance,
+                        EnableVertexOptimization = true,
+                        OptimizationStepSize = 0.1f,
+                        OptimizationSubIterations = 5,
+                        EnableSliverRemoval = true,
+                        SliverQualityThreshold = 0.1f
+                    };
+
+                case OptimizationQuality.High:
+                    return new MeshOptimizationOptions
+                    {
+                        OptimizationPasses = 3,
+                        MaxIterations = 20,
+                        EnableEdgeSwapping = true,
+                        EdgeSwapQualityThreshold = 0.005f,
+                        EnableLaplacianSmoothing = true,
+                        SmoothingIterations = 10,
+                        LaplacianDampingFactor = 0.3f,
+                        LaplacianWeightingScheme = LaplacianWeighting.Cotangent,
+                        EnableVertexOptimization = true,
+                        OptimizationStepSize = 0.05f,
+                        OptimizationSubIterations = 15,
+                        EnableSliverRemoval = true,
+                        SliverQualityThreshold = 0.15f
+                    };
+
+                default:
+                    return new MeshOptimizationOptions(); // Default balanced
+            }
         }
 
         public async Task BuildTextureAsync(
@@ -68,8 +175,9 @@ namespace GeoscientistToolkit
             await Task.Run(() =>
             {
                 _service.Log($"Generating texture atlas ({options.TextureSize}x{options.TextureSize})...");
+                _service.Log($"UV parameterization method: {options.ParameterizationMethod}");
 
-                var uvCoords = GenerateUVCoordinates(mesh);
+                var uvCoords = GenerateUVCoordinates(mesh, options);
                 var textureAtlas = CreateTextureAtlas(
                     mesh, uvCoords, images, options, updateProgress);
 
@@ -141,7 +249,26 @@ namespace GeoscientistToolkit
             return supplementary;
         }
 
-        private List<Vector2> GenerateUVCoordinates(Mesh3DDataset mesh)
+        private List<Vector2> GenerateUVCoordinates(Mesh3DDataset mesh, TextureOptions options)
+        {
+            switch (options.ParameterizationMethod)
+            {
+                case TextureOptions.UVMethod.Cylindrical:
+                    return GenerateUVCylindrical(mesh);
+                case TextureOptions.UVMethod.Spherical:
+                    return GenerateUVSpherical(mesh);
+                case TextureOptions.UVMethod.Conformal:
+                    return GenerateUVConformal(mesh);
+                case TextureOptions.UVMethod.BoxProjection:
+                default:
+                    return GenerateUVBoxProjection(mesh);
+            }
+        }
+
+        /// <summary>
+        /// Simple box projection - fast but higher distortion
+        /// </summary>
+        private List<Vector2> GenerateUVBoxProjection(Mesh3DDataset mesh)
         {
             var uvCoords = new List<Vector2>();
             var min = mesh.BoundingBoxMin;
@@ -163,6 +290,175 @@ namespace GeoscientistToolkit
             }
 
             _service.Log($"Generated {uvCoords.Count} UV coordinates using box projection.");
+            return uvCoords;
+        }
+
+        /// <summary>
+        /// Cylindrical projection for cylindrical objects
+        /// </summary>
+        private List<Vector2> GenerateUVCylindrical(Mesh3DDataset mesh)
+        {
+            var uvCoords = new List<Vector2>();
+            var center = (mesh.BoundingBoxMin + mesh.BoundingBoxMax) * 0.5f;
+            var min = mesh.BoundingBoxMin;
+            var max = mesh.BoundingBoxMax;
+            float heightRange = max.Z - min.Z;
+            if (heightRange < 1e-6f) heightRange = 1;
+
+            foreach (var vertex in mesh.Vertices)
+            {
+                // Cylindrical coordinates
+                var relative = vertex - center;
+                float angle = MathF.Atan2(relative.Y, relative.X);
+                float u = (angle + MathF.PI) / (2 * MathF.PI); // [0, 1]
+                float v = (vertex.Z - min.Z) / heightRange; // [0, 1]
+                
+                uvCoords.Add(new Vector2(Math.Clamp(u, 0, 1), Math.Clamp(v, 0, 1)));
+            }
+
+            _service.Log($"Generated {uvCoords.Count} UV coordinates using cylindrical projection.");
+            return uvCoords;
+        }
+
+        /// <summary>
+        /// Spherical projection for sphere-like objects
+        /// </summary>
+        private List<Vector2> GenerateUVSpherical(Mesh3DDataset mesh)
+        {
+            var uvCoords = new List<Vector2>();
+            var center = (mesh.BoundingBoxMin + mesh.BoundingBoxMax) * 0.5f;
+
+            foreach (var vertex in mesh.Vertices)
+            {
+                var relative = Vector3.Normalize(vertex - center);
+                
+                // Spherical coordinates
+                float theta = MathF.Atan2(relative.Y, relative.X); // Azimuth [-π, π]
+                float phi = MathF.Asin(Math.Clamp(relative.Z, -1, 1)); // Elevation [-π/2, π/2]
+                
+                float u = (theta + MathF.PI) / (2 * MathF.PI); // [0, 1]
+                float v = (phi + MathF.PI / 2) / MathF.PI; // [0, 1]
+                
+                uvCoords.Add(new Vector2(Math.Clamp(u, 0, 1), Math.Clamp(v, 0, 1)));
+            }
+
+            _service.Log($"Generated {uvCoords.Count} UV coordinates using spherical projection.");
+            return uvCoords;
+        }
+
+        /// <summary>
+        /// Conformal (angle-preserving) parameterization using simplified LSCM approach
+        /// Reference: Lévy et al. (2002) - "Least Squares Conformal Maps for Automatic Texture Atlas Generation"
+        /// ACM Transactions on Graphics (TOG), 21(3):362-371
+        /// 
+        /// Note: This is a simplified implementation. Full LSCM requires solving a sparse linear system.
+        /// For production use, consider using established libraries like libigl or OpenMesh.
+        /// </summary>
+        private List<Vector2> GenerateUVConformal(Mesh3DDataset mesh)
+        {
+            _service.Log("Generating conformal UV parameterization (simplified LSCM)...");
+            
+            // For simplicity, we use an iterative relaxation approach
+            // Full LSCM would solve: minimize ∫|∂u/∂x - ∂v/∂y|² + |∂u/∂y + ∂v/∂x|² dA
+            
+            var uvCoords = new List<Vector2>();
+            int vertexCount = mesh.Vertices.Count;
+            
+            // Initialize with box projection
+            var min = mesh.BoundingBoxMin;
+            var max = mesh.BoundingBoxMax;
+            var range = max - min;
+            if (range.X < 1e-6f) range.X = 1;
+            if (range.Y < 1e-6f) range.Y = 1;
+
+            for (int i = 0; i < vertexCount; i++)
+            {
+                var normalized = (mesh.Vertices[i] - min) / range;
+                uvCoords.Add(new Vector2(
+                    Math.Clamp(normalized.X, 0, 1),
+                    Math.Clamp(normalized.Y, 0, 1)));
+            }
+
+            // Build adjacency information
+            var neighbors = new List<HashSet<int>>();
+            for (int i = 0; i < vertexCount; i++)
+                neighbors.Add(new HashSet<int>());
+
+            foreach (var face in mesh.Faces)
+            {
+                for (int i = 0; i < face.Length; i++)
+                {
+                    int v1 = face[i];
+                    int v2 = face[(i + 1) % face.Length];
+                    neighbors[v1].Add(v2);
+                    neighbors[v2].Add(v1);
+                }
+            }
+
+            // Iterative relaxation to minimize angle distortion
+            int iterations = 50;
+            float lambda = 0.5f; // Relaxation factor
+            
+            for (int iter = 0; iter < iterations; iter++)
+            {
+                var newUVs = new List<Vector2>(uvCoords);
+                
+                for (int i = 0; i < vertexCount; i++)
+                {
+                    if (neighbors[i].Count == 0)
+                        continue;
+
+                    // Compute weighted average of neighbors (angle-based weighting)
+                    Vector2 sum = Vector2.Zero;
+                    float weightSum = 0;
+
+                    foreach (var neighborIdx in neighbors[i])
+                    {
+                        Vector3 edge3D = mesh.Vertices[neighborIdx] - mesh.Vertices[i];
+                        float edgeLength = edge3D.Length();
+                        if (edgeLength < 1e-6f) continue;
+
+                        // Weight by inverse edge length (conformal property)
+                        float weight = 1.0f / edgeLength;
+                        sum += uvCoords[neighborIdx] * weight;
+                        weightSum += weight;
+                    }
+
+                    if (weightSum > 0)
+                    {
+                        Vector2 target = sum / weightSum;
+                        newUVs[i] = Vector2.Lerp(uvCoords[i], target, lambda);
+                    }
+                }
+
+                uvCoords = newUVs;
+            }
+
+            // Normalize to [0, 1] range
+            float minU = float.MaxValue, maxU = float.MinValue;
+            float minV = float.MaxValue, maxV = float.MinValue;
+
+            foreach (var uv in uvCoords)
+            {
+                if (uv.X < minU) minU = uv.X;
+                if (uv.X > maxU) maxU = uv.X;
+                if (uv.Y < minV) minV = uv.Y;
+                if (uv.Y > maxV) maxV = uv.Y;
+            }
+
+            float rangeU = maxU - minU;
+            float rangeV = maxV - minV;
+            if (rangeU < 1e-6f) rangeU = 1;
+            if (rangeV < 1e-6f) rangeV = 1;
+
+            for (int i = 0; i < uvCoords.Count; i++)
+            {
+                uvCoords[i] = new Vector2(
+                    (uvCoords[i].X - minU) / rangeU,
+                    (uvCoords[i].Y - minV) / rangeV);
+            }
+
+            _service.Log($"Generated {uvCoords.Count} UV coordinates using conformal parameterization.");
             return uvCoords;
         }
 
@@ -388,6 +684,12 @@ namespace GeoscientistToolkit
                 }
             }
 
+            // Apply seam hiding if requested
+            if (options.HideSeams)
+            {
+                HideTextureSeams(resultBytes, weights, options.TextureSize);
+            }
+
             // Apply color correction if requested
             if (options.ColorCorrection)
             {
@@ -395,6 +697,90 @@ namespace GeoscientistToolkit
             }
 
             return resultBytes;
+        }
+
+        /// <summary>
+        /// Hide texture seams by dilating valid pixels into empty regions
+        /// Reference: Inzerillo et al. (2018) - "High Quality Texture Mapping Process Aimed at 
+        /// the Optimization of 3D Structured Light Models"
+        /// </summary>
+        private void HideTextureSeams(byte[] texture, float[] weights, int textureSize)
+        {
+            _service.Log("Applying seam hiding...");
+
+            // Find pixels near UV seams (empty pixels adjacent to valid ones)
+            var needsFilling = new List<(int x, int y)>();
+
+            for (int y = 0; y < textureSize; y++)
+            {
+                for (int x = 0; x < textureSize; x++)
+                {
+                    int idx = y * textureSize + x;
+                    
+                    // Empty pixel
+                    if (weights[idx] == 0)
+                    {
+                        // Check if adjacent to valid pixel
+                        bool nearValid = false;
+                        for (int dy = -1; dy <= 1 && !nearValid; dy++)
+                        {
+                            for (int dx = -1; dx <= 1 && !nearValid; dx++)
+                            {
+                                if (dx == 0 && dy == 0) continue;
+                                int nx = x + dx;
+                                int ny = y + dy;
+                                if (nx >= 0 && nx < textureSize && ny >= 0 && ny < textureSize)
+                                {
+                                    if (weights[ny * textureSize + nx] > 0)
+                                        nearValid = true;
+                                }
+                            }
+                        }
+
+                        if (nearValid)
+                            needsFilling.Add((x, y));
+                    }
+                }
+            }
+
+            // Fill seam pixels with average of nearby valid pixels
+            foreach (var (x, y) in needsFilling)
+            {
+                float r = 0, g = 0, b = 0;
+                int count = 0;
+
+                // Sample in a 3x3 neighborhood
+                for (int dy = -1; dy <= 1; dy++)
+                {
+                    for (int dx = -1; dx <= 1; dx++)
+                    {
+                        int nx = x + dx;
+                        int ny = y + dy;
+                        if (nx >= 0 && nx < textureSize && ny >= 0 && ny < textureSize)
+                        {
+                            int nIdx = ny * textureSize + nx;
+                            if (weights[nIdx] > 0)
+                            {
+                                r += texture[nIdx * 4];
+                                g += texture[nIdx * 4 + 1];
+                                b += texture[nIdx * 4 + 2];
+                                count++;
+                            }
+                        }
+                    }
+                }
+
+                if (count > 0)
+                {
+                    int idx = y * textureSize + x;
+                    texture[idx * 4] = (byte)(r / count);
+                    texture[idx * 4 + 1] = (byte)(g / count);
+                    texture[idx * 4 + 2] = (byte)(b / count);
+                    texture[idx * 4 + 3] = 255;
+                }
+            }
+
+            _service.Log($"Seam hiding complete, filled {needsFilling.Count} pixels.");
         }
 
         private void ApplyColorCorrection(byte[] texture, int textureSize)

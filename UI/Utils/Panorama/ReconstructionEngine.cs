@@ -27,6 +27,8 @@ using System.Threading.Tasks;
 using GeoscientistToolkit.Business.Panorama;
 using GeoscientistToolkit.Business.Photogrammetry;
 using GeoscientistToolkit.Data.Image;
+using MathNet.Numerics.LinearAlgebra;
+using MathNet.Numerics.LinearAlgebra.Double;
 
 namespace GeoscientistToolkit
 {
@@ -541,25 +543,56 @@ namespace GeoscientistToolkit
             }
             avgCameraDist /= observingImages.Count;
             
-            // Log first few for debugging
+            // DIAGNOSTIC: Log first sparse point being processed
             if (_densePointDebugCount < 3)
             {
-                _service.Log($"  Image-space patch propagation: avg camera dist={avgCameraDist:F2}, " +
-                           $"density factor={densityFactor}, threshold={confidenceThreshold:F2}");
+                _service.Log($"  [DENSE DEBUG #{_densePointDebugCount}] Sparse point at {sparsePoint.Position}:");
+                _service.Log($"    Observed by {observingImages.Count} images, avg distance={avgCameraDist:F2}m");
+                _service.Log($"    Density factor={densityFactor}, confidence threshold={confidenceThreshold:F2}");
                 _densePointDebugCount++;
             }
             
             // PMVS-style approach: For each reference image, propagate to neighboring pixels
-            // Use the first observing image as reference
-            var refImage = observingImages[0];
-            var refProjection = ProjectWorldToImage(sparsePoint.Position, refImage);
+            // CRITICAL FIX: Try all observing images to find a valid reference, not just the first one
+            // A sparse point may not project into the first observing image due to edge effects
+            PhotogrammetryImage refImage = null;
+            Vector2 refProjection = default;
             
-            if (!IsValidProjection(refProjection, refImage))
+            foreach (var img in observingImages)
+            {
+                var projection = ProjectWorldToImage(sparsePoint.Position, img);
+                if (IsValidProjection(projection, img))
+                {
+                    refImage = img;
+                    refProjection = projection;
+                    break;
+                }
+            }
+            
+            if (refImage == null)
+            {
+                if (_densePointDebugCount <= 3)
+                {
+                    _service.Log($"    [DENSE DEBUG] Sparse point doesn't project into any observing image!");
+                }
                 return densePoints;
+            }
             
             // Compute pixel search radius based on density factor
             // Higher density = larger search radius in image space
             int pixelRadius = Math.Max(3, (int)MathF.Sqrt(densityFactor / 2.0f));
+            
+            if (_densePointDebugCount <= 3)
+            {
+                _service.Log($"    Pixel search radius: {pixelRadius} pixels around ({refProjection.X:F0}, {refProjection.Y:F0})");
+            }
+            
+            // DIAGNOSTIC: Track success/failure counts
+            int attemptedPixels = 0;
+            int failedProjection = 0;
+            int failedTriangulation = 0;
+            int failedConfidence = 0;
+            int successfulPoints = 0;
             
             // Propagate to neighboring pixels in a grid pattern (PMVS expansion step)
             var processedPixels = new HashSet<(int, int)>();
@@ -575,9 +608,14 @@ namespace GeoscientistToolkit
                     int px = (int)(refProjection.X + dx);
                     int py = (int)(refProjection.Y + dy);
                     
+                    attemptedPixels++;
+                    
                     // Skip out of bounds or already processed
                     if (px < 0 || px >= refImage.Dataset.Width || py < 0 || py >= refImage.Dataset.Height)
+                    {
+                        failedProjection++;
                         continue;
+                    }
                     
                     if (processedPixels.Contains((px, py)))
                         continue;
@@ -590,32 +628,64 @@ namespace GeoscientistToolkit
                         observingImages.Where(img => img.Id != refImage.Id).ToList(),
                         sparsePoint, avgCameraDist);
                     
-                    if (candidate3D != null)
+                    if (candidate3D == null)
                     {
-                        // Validate with photometric consistency
-                        float confidence = ComputePointConfidence(candidate3D.Value, observingImages);
-                        
-                        if (confidence >= confidenceThreshold)
+                        failedTriangulation++;
+                        continue;
+                    }
+                    
+                    // Validate with photometric consistency
+                    float confidence = ComputePointConfidence(candidate3D.Value, observingImages);
+                    
+                    if (confidence >= confidenceThreshold)
+                    {
+                        densePoints.Add(new Point3D
                         {
-                            densePoints.Add(new Point3D
-                            {
-                                Position = candidate3D.Value,
-                                Color = SampleImageColor(refImage.Dataset, px, py),
-                                Confidence = confidence,
-                                ObservingImages = new List<Guid>(observingImages.Select(img => img.Id))
-                            });
-                        }
+                            Position = candidate3D.Value,
+                            Color = SampleImageColor(refImage.Dataset, px, py),
+                            Confidence = confidence,
+                            ObservingImages = new List<Guid>(observingImages.Select(img => img.Id))
+                        });
+                        successfulPoints++;
+                    }
+                    else
+                    {
+                        failedConfidence++;
                     }
                 }
                 
                 if (densePoints.Count >= densityFactor) break;
             }
             
+            // DIAGNOSTIC: Log results for first few sparse points
+            if (_densePointDebugCount <= 3)
+            {
+                _service.Log($"    [DENSE DEBUG] Results:");
+                _service.Log($"      Attempted: {attemptedPixels} pixels");
+                _service.Log($"      Failed projection: {failedProjection}");
+                _service.Log($"      Failed triangulation: {failedTriangulation}");
+                _service.Log($"      Failed confidence ({confidenceThreshold:F2}): {failedConfidence}");
+                _service.Log($"      SUCCESS: {successfulPoints} dense points added");
+                
+                // CRITICAL DIAGNOSTIC
+                if (successfulPoints == 0)
+                {
+                    _service.Log($"      ⚠️ CRITICAL: ZERO DENSE POINTS GENERATED!");
+                    _service.Log($"         Most likely cause:");
+                    if (failedTriangulation > attemptedPixels * 0.5)
+                        _service.Log($"         - Triangulation failing (epipolar matching not finding correspondences)");
+                    else if (failedConfidence > attemptedPixels * 0.5)
+                        _service.Log($"         - Confidence threshold too high (try lowering from {confidenceThreshold:F2} to 0.05)");
+                    else if (failedProjection > attemptedPixels * 0.5)
+                        _service.Log($"         - Most pixels out of image bounds (sparse point at edge?)");
+                }
+            }
+            
             // If still not dense enough, try multi-image propagation
-            // Process other observing images as references
+            // Process other observing images as references (excluding the one we already used)
             if (densePoints.Count < densityFactor * 0.5f && observingImages.Count > 1)
             {
-                foreach (var img in observingImages.Skip(1))
+                foreach (var img in observingImages.Where(i => i.Id != refImage.Id))
                 {
                     if (densePoints.Count >= densityFactor) break;
                     
@@ -753,8 +823,11 @@ namespace GeoscientistToolkit
             }
             
             // Return match if NCC is good enough
-            // Lower threshold (0.3) to accept more matches with proper photometric validation later
-            if (bestNCC > 0.3f && bestPixel != null)
+            // CRITICAL: Lowered threshold from 0.3 to 0.15 for minimal overlap scenarios
+            // This is more permissive but followed by photometric validation
+            const float MIN_NCC_THRESHOLD = 0.15f;
+            
+            if (bestNCC > MIN_NCC_THRESHOLD && bestPixel != null)
             {
                 return (bestPixel.Value, bestNCC);
             }
@@ -763,46 +836,62 @@ namespace GeoscientistToolkit
         }
         
         /// <summary>
-        /// Get ray from camera through a pixel
-        /// Uses the inverse of ProjectWorldToImage to ensure consistent coordinate systems
+        /// Get ray from camera through a pixel using Math.NET
+        /// This is the inverse of ProjectWorldToImage, ensuring consistent coordinate systems
         /// </summary>
         private (Vector3 origin, Vector3 direction)? GetPixelRay(PhotogrammetryImage image, Vector2 pixel)
         {
-            var K = image.IntrinsicMatrix;
-            
-            // Invert intrinsics to get normalized coordinates
-            float fx = K.M11;
-            float fy = K.M22;
-            float cx = K.M13;
-            float cy = K.M23;
-            
-            if (fx == 0 || fy == 0) return null;
-            
-            // Normalized image coordinates (unprojecting from pixel to camera space)
-            float x_norm = (pixel.X - cx) / fx;
-            float y_norm = (pixel.Y - cy) / fy;
-            
-            // Direction in camera coordinates (looking down +Z axis in camera convention)
-            // This forms a ray from camera origin through the pixel
-            Vector3 dirCamera = Vector3.Normalize(new Vector3(x_norm, y_norm, 1.0f));
-            
-            // Transform from camera space to world space using GlobalPose
-            // GlobalPose is camera-to-world transform: P_world = GlobalPose * P_camera
-            // For directions (vectors), we only apply rotation (no translation)
-            
-            // Extract camera center in world space (translation part of GlobalPose)
-            Vector3 cameraCenter = new Vector3(
-                image.GlobalPose.M41, 
-                image.GlobalPose.M42, 
-                image.GlobalPose.M43
-            );
-            
-            // Transform direction to world space using GlobalPose rotation
-            // System.Numerics stores row-major, so we use TransformNormal which applies 3x3 upper-left
-            // This correctly handles roll, pitch, yaw rotations
-            Vector3 dirWorld = Vector3.TransformNormal(dirCamera, image.GlobalPose);
-            
-            return (cameraCenter, Vector3.Normalize(dirWorld));
+            try
+            {
+                var K = image.IntrinsicMatrix;
+                
+                // Extract intrinsic parameters
+                float fx = K.M11;
+                float fy = K.M22;
+                float cx = K.M13;
+                float cy = K.M23;
+                
+                if (fx == 0 || fy == 0) return null;
+                
+                // Unproject pixel to camera coordinates at depth=1
+                // This is the inverse of: u = (cam_x * fx) / cam_z + cx
+                // Solving for cam_x, cam_y when cam_z = 1:
+                double cam_x = (pixel.X - cx) / fx;
+                double cam_y = (pixel.Y - cy) / fy;
+                double cam_z = 1.0;
+                
+                // Create direction vector in camera coordinates (homogeneous, w=0 for direction)
+                var dirCamera_mathnet = MathNet.Numerics.LinearAlgebra.Vector<double>.Build.DenseOfArray(
+                    new[] { cam_x, cam_y, cam_z, 0.0 });
+                
+                // Convert GlobalPose to Math.NET (camera-to-world transform)
+                var T_cam_to_world = ConvertPoseToMathNet(image.GlobalPose);
+                
+                // Transform direction from camera to world space
+                // For direction vectors (w=0), this applies only rotation
+                var dirWorld_mathnet = T_cam_to_world * dirCamera_mathnet;
+                
+                // Extract camera center from GlobalPose (translation part)
+                Vector3 cameraCenter = new Vector3(
+                    image.GlobalPose.M41,
+                    image.GlobalPose.M42,
+                    image.GlobalPose.M43
+                );
+                
+                // Convert direction to System.Numerics and normalize
+                Vector3 dirWorld = new Vector3(
+                    (float)dirWorld_mathnet[0],
+                    (float)dirWorld_mathnet[1],
+                    (float)dirWorld_mathnet[2]
+                );
+                
+                return (cameraCenter, Vector3.Normalize(dirWorld));
+            }
+            catch (Exception ex)
+            {
+                _service.Log($"[ERROR] GetPixelRay failed: {ex.Message}");
+                return null;
+            }
         }
         
         /// <summary>
@@ -1213,21 +1302,83 @@ namespace GeoscientistToolkit
             return fallbackColor;
         }
 
+        /// <summary>
+        /// Convert System.Numerics 4x4 intrinsic matrix to Math.NET 3x3
+        /// Same implementation as FeatureProcessor for consistency
+        /// </summary>
+        private Matrix<double> ConvertIntrinsicToMathNet(Matrix4x4 K_sys)
+        {
+            return Matrix.Build.DenseOfArray(new double[,]
+            {
+                { K_sys.M11, K_sys.M12, K_sys.M13 },
+                { K_sys.M21, K_sys.M22, K_sys.M23 },
+                { K_sys.M31, K_sys.M32, K_sys.M33 }
+            });
+        }
+
+        /// <summary>
+        /// Convert System.Numerics Matrix4x4 pose to Math.NET 4x4 matrix
+        /// Direct element-by-element copy (no transpose) - same convention as FeatureProcessor
+        /// </summary>
+        private Matrix<double> ConvertPoseToMathNet(Matrix4x4 pose)
+        {
+            return Matrix.Build.DenseOfArray(new double[,]
+            {
+                { pose.M11, pose.M12, pose.M13, pose.M14 },
+                { pose.M21, pose.M22, pose.M23, pose.M24 },
+                { pose.M31, pose.M32, pose.M33, pose.M34 },
+                { pose.M41, pose.M42, pose.M43, pose.M44 }
+            });
+        }
+
+        /// <summary>
+        /// Project world point to image using Math.NET for consistency with triangulation
+        /// CRITICAL: Uses same coordinate system as triangulation to ensure points project correctly
+        /// </summary>
         private Vector2 ProjectWorldToImage(Vector3 worldPos, PhotogrammetryImage image)
         {
-            Matrix4x4.Invert(image.GlobalPose, out var viewMatrix);
-            var cameraPos = Vector4.Transform(new Vector4(worldPos, 1.0f), viewMatrix);
-            
-            // CRITICAL: Check depth - point must be in front of camera
-            if (cameraPos.Z <= 0.0f)
-                return new Vector2(-1, -1);
-            
-            var projected = Vector4.Transform(cameraPos, image.IntrinsicMatrix);
+            try
+            {
+                // Convert world point to Math.NET vector
+                var worldPoint_mathnet = MathNet.Numerics.LinearAlgebra.Vector<double>.Build.DenseOfArray(
+                    new[] { (double)worldPos.X, (double)worldPos.Y, (double)worldPos.Z, 1.0 });
 
-            if (Math.Abs(projected.W) < 1e-8)
+                // Convert GlobalPose to Math.NET (camera-to-world transform)
+                var T_cam_to_world = ConvertPoseToMathNet(image.GlobalPose);
+                
+                // Invert to get world-to-camera transform
+                var T_world_to_cam = T_cam_to_world.Inverse();
+                
+                // Transform to camera coordinates
+                var cameraPoint_mathnet = T_world_to_cam * worldPoint_mathnet;
+                
+                // Extract camera coordinates (drop homogeneous coordinate)
+                double cam_x = cameraPoint_mathnet[0];
+                double cam_y = cameraPoint_mathnet[1];
+                double cam_z = cameraPoint_mathnet[2];
+                
+                // CRITICAL: Check depth - point must be in front of camera
+                if (cam_z <= 0.0)
+                    return new Vector2(-1, -1);
+                
+                // Project to image using standard pinhole formula (same as ProjectCameraToImage)
+                // u = (cam_x * fx) / cam_z + cx
+                // v = (cam_y * fy) / cam_z + cy
+                float fx = image.IntrinsicMatrix.M11;
+                float fy = image.IntrinsicMatrix.M22;
+                float cx = image.IntrinsicMatrix.M13;
+                float cy = image.IntrinsicMatrix.M23;
+                
+                float u = (float)((cam_x * fx) / cam_z + cx);
+                float v = (float)((cam_y * fy) / cam_z + cy);
+                
+                return new Vector2(u, v);
+            }
+            catch (Exception ex)
+            {
+                _service.Log($"[ERROR] ProjectWorldToImage failed: {ex.Message}");
                 return new Vector2(-1, -1);
-
-            return new Vector2(projected.X / projected.W, projected.Y / projected.W);
+            }
         }
 
         private bool IsValidProjection(Vector2 point, PhotogrammetryImage image)
