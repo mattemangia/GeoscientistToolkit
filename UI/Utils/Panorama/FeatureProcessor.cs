@@ -29,9 +29,9 @@ namespace GeoscientistToolkit
     internal class FeatureProcessor
     {
         private readonly PhotogrammetryProcessingService _service;
-        private const int RANSAC_ITERATIONS = 2000;
-        private const float NORMALIZED_REPROJECTION_THRESHOLD = 1.5f;
-        private const int MIN_INLIERS_FOR_ACCEPTANCE = 12;
+        private const int RANSAC_ITERATIONS = 5000;  // Increased from 2000 for better pose estimation
+        private const float NORMALIZED_REPROJECTION_THRESHOLD = 2.0f;  // More permissive
+        private const int MIN_INLIERS_FOR_ACCEPTANCE = 8;  // Reduced from 12 for challenging scenarios
 
         public FeatureProcessor(PhotogrammetryProcessingService service)
         {
@@ -89,22 +89,44 @@ namespace GeoscientistToolkit
 
             var pairs = GenerateImagePairs(images);
             int processedCount = 0;
+            int successfulPairs = 0;
+            int totalInliers = 0;
 
             using var matcher = new SIFTFeatureMatcherSIMD();
 
             var tasks = pairs.Select(async pair =>
             {
-                await ProcessImagePair(pair, graph, matcher, token);
+                bool success = await ProcessImagePair(pair, graph, matcher, token);
                 
-                Interlocked.Increment(ref processedCount);
-                updateProgress(
-                    (float)processedCount / pairs.Count * 0.3f + 0.4f,
-                    $"Matching pairs... ({processedCount}/{pairs.Count})"
-                );
+                lock (this)
+                {
+                    processedCount++;
+                    if (success)
+                    {
+                        successfulPairs++;
+                        // Count inliers if available
+                        if (graph.TryGetNeighbors(pair.Item1.Id, out var neighbors))
+                        {
+                            var edge = neighbors.FirstOrDefault(n => n.NeighborId == pair.Item2.Id);
+                            if (edge.Matches != null)
+                                totalInliers += edge.Matches.Count;
+                        }
+                    }
+                    
+                    updateProgress(
+                        (float)processedCount / pairs.Count * 0.3f + 0.4f,
+                        $"Matching pairs... ({processedCount}/{pairs.Count}, {successfulPairs} successful)"
+                    );
+                }
             });
 
             await Task.WhenAll(tasks);
-            _service.Log("SIFT feature matching complete.");
+            
+            float successRate = (float)successfulPairs / pairs.Count * 100.0f;
+            float avgInliers = successfulPairs > 0 ? (float)totalInliers / successfulPairs : 0;
+            
+            _service.Log($"SIFT feature matching complete: {successfulPairs}/{pairs.Count} pairs matched ({successRate:F1}%)");
+            _service.Log($"Average inliers per successful pair: {avgInliers:F1}");
         }
         
         public Matrix4x4? ComputeManualPose(
@@ -150,7 +172,7 @@ namespace GeoscientistToolkit
             return m12.Where(m => idx.Contains((m.QueryIndex, m.TrainIndex))).ToList();
         }
 
-        private async Task ProcessImagePair(
+        private async Task<bool> ProcessImagePair(
             (PhotogrammetryImage img1, PhotogrammetryImage img2) pair,
             PhotogrammetryGraph graph,
             SIFTFeatureMatcherSIMD matcher,
@@ -162,7 +184,7 @@ namespace GeoscientistToolkit
             if (image1.SiftFeatures?.KeyPoints == null || image2.SiftFeatures?.KeyPoints == null || image1.SiftFeatures.KeyPoints.Count < 30 || image2.SiftFeatures.KeyPoints.Count < 30)
             {
                 _service.Log("  ⚠ Skipping - insufficient keypoints.");
-                return;
+                return false;
             }
 
             var matches12 = await matcher.MatchFeaturesAsync(image1.SiftFeatures, image2.SiftFeatures, token);
@@ -173,7 +195,7 @@ namespace GeoscientistToolkit
             if (bidirectionalMatches.Count < 30)
             {
                 _service.Log("  ⚠ Skipping - too few bidirectional matches.");
-                return;
+                return false;
             }
 
             var (pose, inliers) = ComputeRelativePose(image1, image2, bidirectionalMatches);
@@ -182,12 +204,14 @@ namespace GeoscientistToolkit
             {
                 graph.AddEdge(image1, image2, inliers, pose.Value);
                 _service.Log($"  ✓ Successfully matched with {inliers.Count} inliers");
+                return true;
             }
             else
             {
                 _service.Log($"  ✗ Failed to establish connection (inliers: {inliers.Count}, pose valid: {pose.HasValue})");
                 if (inliers.Count <= MIN_INLIERS_FOR_ACCEPTANCE) _service.Log($"    Reason: Too few inliers after RANSAC ({inliers.Count})");
                 if (!pose.HasValue) _service.Log("    Reason: Could not compute valid relative pose");
+                return false;
             }
         }
         
@@ -337,6 +361,10 @@ namespace GeoscientistToolkit
             
             // Don't normalize translation - keep the scale from Essential matrix
 
+            // Convert intrinsic matrices to Math.NET for triangulation
+            var K1_mathnet = ConvertIntrinsicToMathNet(image1.IntrinsicMatrix);
+            var K2_mathnet = ConvertIntrinsicToMathNet(image2.IntrinsicMatrix);
+
             var poses = new[] { (R1, t1), (R1, t2), (R2, t1), (R2, t2) };
             (Matrix<double> R, MathNet.Numerics.LinearAlgebra.Vector<double> t) bestPose = (null, null);
             int maxInFront = -1;
@@ -347,52 +375,50 @@ namespace GeoscientistToolkit
                 int triangulationFailures = 0;
                 int behindCamera1 = 0;
                 int behindCamera2 = 0;
-                
-                // The decomposition [R|t] gives the transformation from camera 1 to camera 2.
-                var pose_matrix_cam1_to_cam2 = CreatePoseMatrix(R_candidate, t_candidate);
 
                 foreach (var match in inlierMatches)
                 {
                     var kp1 = image1.SiftFeatures.KeyPoints[match.QueryIndex];
                     var kp2 = image2.SiftFeatures.KeyPoints[match.TrainIndex];
                     
+                    // Use Math.NET triangulation exclusively
+                    var p1_mathnet = Triangulation.MakePoint2D(kp1.X, kp1.Y);
+                    var p2_mathnet = Triangulation.MakePoint2D(kp2.X, kp2.Y);
+                    
                     var p3d_cam1 = Triangulation.TriangulatePoint(
-                        new Vector2(kp1.X, kp1.Y), 
-                        new Vector2(kp2.X, kp2.Y), 
-                        image1.IntrinsicMatrix, 
-                        image2.IntrinsicMatrix, 
-                        pose_matrix_cam1_to_cam2);
+                        p1_mathnet, p2_mathnet,
+                        K1_mathnet, K2_mathnet,
+                        R_candidate, t_candidate);
 
-                    // --- START OF FIX ---
-                    // Cheirality Check: The triangulated point must be in front of both cameras.
-                    if (!p3d_cam1.HasValue)
+                    // Cheirality Check: Point must be in front of both cameras
+                    if (p3d_cam1 == null)
                     {
                         triangulationFailures++;
                         continue;
                     }
                     
-                    // 1. Check if the point is in front of the first camera (Z > 0).
-                    if (p3d_cam1.Value.Z <= 0)
+                    // 1. Check if point is in front of first camera (Z > 0)
+                    if (p3d_cam1[2] <= 0)
                     {
                         behindCamera1++;
                         continue;
                     }
                     
-                    // 2. Transform the point into the second camera's coordinate system.
-                    var p3d_cam2 = Vector3.Transform(p3d_cam1.Value, pose_matrix_cam1_to_cam2);
+                    // 2. Transform point into second camera's coordinate system
+                    // p_cam2 = R * p_cam1 + t (column-vector convention)
+                    var p3d_cam2 = R_candidate * p3d_cam1 + t_candidate;
                     
-                    // 3. Check if the transformed point is also in front of the second camera.
-                    if (p3d_cam2.Z <= 0)
+                    // 3. Check if transformed point is in front of second camera
+                    if (p3d_cam2[2] <= 0)
                     {
                         behindCamera2++;
                         continue;
                     }
                     
                     inFrontCount++;
-                    // --- END OF FIX ---
                 }
                 
-                // Log details for first pose candidate for debugging
+                // Log details for first pose candidate
                 if (poses[0].Equals((R_candidate, t_candidate)))
                 {
                     _service.Log($"      Pose candidate 1: {inFrontCount} in front, {triangulationFailures} tri-failed, {behindCamera1} behind cam1, {behindCamera2} behind cam2");
@@ -405,10 +431,8 @@ namespace GeoscientistToolkit
                 }
             }
             
-            // A valid pose must have some inlier points in front of both cameras.
-            // With real-world data, we can't expect all points to triangulate perfectly.
-            // Accept if at least 10% of points pass AND at least 5 points total
-            int minPercent = Math.Max(3, inlierMatches.Count / 10);  // At least 10% but minimum 3 points
+            // Accept pose if sufficient points pass cheirality check
+            int minPercent = Math.Max(3, inlierMatches.Count / 10);  // At least 10%
             int minAbsolute = 5;  // Absolute minimum
             int minRequiredPoints = Math.Max(minPercent, minAbsolute);
             
@@ -424,13 +448,33 @@ namespace GeoscientistToolkit
             return (null, null);
         }
 
+        /// <summary>
+        /// Convert System.Numerics 4x4 intrinsic matrix to Math.NET 3x3
+        /// </summary>
+        private Matrix<double> ConvertIntrinsicToMathNet(System.Numerics.Matrix4x4 K_sys)
+        {
+            return Matrix.Build.DenseOfArray(new double[,]
+            {
+                { K_sys.M11, K_sys.M12, K_sys.M13 },
+                { K_sys.M21, K_sys.M22, K_sys.M23 },
+                { K_sys.M31, K_sys.M32, K_sys.M33 }
+            });
+        }
+
+        /// <summary>
+        /// Convert Math.NET pose (R, t) to System.Numerics Matrix4x4.
+        /// CRITICAL: Math.NET uses column-vector convention (result = R*point + t)
+        /// System.Numerics uses row-vector convention (result = point*M^T + translation)
+        /// Therefore, we store R^T in the matrix so that System.Numerics transforms work correctly.
+        /// </summary>
         private Matrix4x4 CreatePoseMatrix(Matrix<double> R, MathNet.Numerics.LinearAlgebra.Vector<double> t)
         {
+            // Store R^T (transposed) so System.Numerics Vector3.Transform gives correct results
             return new Matrix4x4(
-                (float)R[0, 0], (float)R[0, 1], (float)R[0, 2], 0,
-                (float)R[1, 0], (float)R[1, 1], (float)R[1, 2], 0,
-                (float)R[2, 0], (float)R[2, 1], (float)R[2, 2], 0,
-                (float)t[0], (float)t[1], (float)t[2], 1
+                (float)R[0, 0], (float)R[1, 0], (float)R[2, 0], 0,  // Row 1 = R column 1
+                (float)R[0, 1], (float)R[1, 1], (float)R[2, 1], 0,  // Row 2 = R column 2
+                (float)R[0, 2], (float)R[1, 2], (float)R[2, 2], 0,  // Row 3 = R column 3
+                (float)t[0],    (float)t[1],    (float)t[2],    1   // Translation
             );
         }
     }

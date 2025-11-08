@@ -123,7 +123,7 @@ namespace GeoscientistToolkit
                     {
                         var world = new Vector3(x, y, z);
                         var color = options.EnableBlending
-                            ? SampleBlendedColor(world, images)
+                            ? SampleBlendedColor(world, images, options.MaxBlendImages)
                             : SampleBestColor(world, images);
 
                         int idx = (j * width + i) * 4;

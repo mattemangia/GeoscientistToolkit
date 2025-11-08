@@ -323,10 +323,11 @@ namespace GeoscientistToolkit
 
             var rotation = Matrix3x3.Rodrigues(rotationVector);
 
+            // CRITICAL: Transpose rotation for Vector3.Transform (row-vector convention)
             var similarity = new Matrix4x4(
-                scale * rotation.M11, scale * rotation.M12, scale * rotation.M13, 0,
-                scale * rotation.M21, scale * rotation.M22, scale * rotation.M23, 0,
-                scale * rotation.M31, scale * rotation.M32, scale * rotation.M33, 0,
+                scale * rotation.M11, scale * rotation.M21, scale * rotation.M31, 0,
+                scale * rotation.M12, scale * rotation.M22, scale * rotation.M32, 0,
+                scale * rotation.M13, scale * rotation.M23, scale * rotation.M33, 0,
                 0, 0, 0, 1
             );
 
@@ -467,10 +468,11 @@ namespace GeoscientistToolkit
             var T = targetCentroid - scale * (R * sourceCentroid);
 
             // Build final transformation matrix
+            // CRITICAL: Transpose R for Vector3.Transform (which uses row-vector convention)
             transform = new Matrix4x4(
-                scale * R.M11, scale * R.M12, scale * R.M13, 0,
-                scale * R.M21, scale * R.M22, scale * R.M23, 0,
-                scale * R.M31, scale * R.M32, scale * R.M33, 0,
+                scale * R.M11, scale * R.M21, scale * R.M31, 0,  // First row = R's first COLUMN
+                scale * R.M12, scale * R.M22, scale * R.M32, 0,  // Second row = R's second COLUMN
+                scale * R.M13, scale * R.M23, scale * R.M33, 0,  // Third row = R's third COLUMN
                 T.X, T.Y, T.Z, 1
             );
 

@@ -274,6 +274,21 @@ namespace GeoscientistToolkit
 
             SparseCloud = await _reconstructionEngine.BuildSparseCloudAsync(
                 Images, Graph, EnableGeoreferencing, UpdateProgress);
+            
+            // Check if reconstruction is very poor (suggests calibration issues)
+            if (SparseCloud.Points.Count < 50 && Images.Count >= 3)
+            {
+                Log("⚠ Warning: Very sparse reconstruction detected. This often indicates incorrect camera calibration.");
+                
+                int imagesWithoutExif = Images.Count(img => !img.FocalLengthMm.HasValue || !img.SensorWidthMm.HasValue);
+                if (imagesWithoutExif > 0)
+                {
+                    Log($"⚠ {imagesWithoutExif}/{Images.Count} images are using estimated focal length.");
+                    Log("  Recommendation: Try adjusting focal length multiplier in CameraCalibration.cs");
+                    Log("  Common values: 0.8× (wide angle), 1.0× (normal), 1.3× (telephoto)");
+                    Log("  Or capture images with a camera that saves EXIF data.");
+                }
+            }
 
             if (EnableGeoreferencing)
             {
@@ -446,9 +461,31 @@ namespace GeoscientistToolkit
         private void ComputeIntrinsicsForAllImages()
         {
             Log("Computing camera intrinsic parameters...");
+            int imagesWithExif = 0;
+            int imagesWithDefault = 0;
+            
             foreach (var image in Images)
             {
                 image.IntrinsicMatrix = CameraCalibration.ComputeIntrinsics(image);
+                
+                if (image.FocalLengthMm.HasValue && image.SensorWidthMm.HasValue)
+                {
+                    imagesWithExif++;
+                    Log($"  {image.Dataset.Name}: f={image.IntrinsicMatrix.M11:F1}px (from EXIF: {image.FocalLengthMm.Value:F1}mm)");
+                }
+                else
+                {
+                    imagesWithDefault++;
+                    Log($"  {image.Dataset.Name}: f={image.IntrinsicMatrix.M11:F1}px (default estimate, no EXIF)");
+                }
+            }
+            
+            Log($"Intrinsics summary: {imagesWithExif} with EXIF, {imagesWithDefault} with default estimates");
+            
+            if (imagesWithDefault > 0)
+            {
+                Log($"⚠ Warning: {imagesWithDefault} images are using estimated focal length. " +
+                    $"Consider capturing images with EXIF data or performing camera calibration for better accuracy.");
             }
         }
 

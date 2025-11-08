@@ -464,12 +464,16 @@ namespace GeoscientistToolkit
             float ballRadius = EstimateBallRadius(vertices);
             _service.Log($"Using ball radius: {ballRadius:F3} for mesh generation");
 
+            // Maximum edge length should be limited to prevent large degenerate faces
+            float maxEdgeLength = ballRadius * 3.0f;
+            _service.Log($"Maximum edge length: {maxEdgeLength:F3}");
+
             var spatialIndex = BuildSpatialIndex(vertices, ballRadius);
             var used = new HashSet<int>();
             var edgeQueue = new Queue<(int v1, int v2)>();
 
             // Find seed triangle
-            var seedTriangle = FindSeedTriangle(vertices, ballRadius);
+            var seedTriangle = FindSeedTriangle(vertices, ballRadius, maxEdgeLength);
             if (seedTriangle.HasValue)
             {
                 faces.Add(new[] { seedTriangle.Value.v1, seedTriangle.Value.v2, seedTriangle.Value.v3 });
@@ -486,7 +490,7 @@ namespace GeoscientistToolkit
             while (edgeQueue.Count > 0 && faces.Count < targetFaceCount)
             {
                 var (v1, v2) = edgeQueue.Dequeue();
-                var pivotVertex = FindPivotVertex(v1, v2, vertices, used, ballRadius, spatialIndex);
+                var pivotVertex = FindPivotVertex(v1, v2, vertices, used, ballRadius, maxEdgeLength, spatialIndex);
 
                 if (pivotVertex >= 0)
                 {
@@ -508,21 +512,51 @@ namespace GeoscientistToolkit
             if (vertices.Count < 2)
                 return 1.0f;
 
-            // Sample average distance
+            // Compute bounding box to understand scene scale
+            var min = new Vector3(float.MaxValue);
+            var max = new Vector3(float.MinValue);
+            foreach (var v in vertices)
+            {
+                min = Vector3.Min(min, v);
+                max = Vector3.Max(max, v);
+            }
+            var extent = max - min;
+            float sceneSize = Math.Max(extent.X, Math.Max(extent.Y, extent.Z));
+
+            // Sample nearest neighbor distances
             int samples = Math.Min(100, vertices.Count / 2);
-            float totalDistance = 0;
+            float totalNearestDist = 0;
             var random = new Random();
 
             for (int i = 0; i < samples; i++)
             {
-                int idx1 = random.Next(vertices.Count);
-                int idx2 = random.Next(vertices.Count);
+                int idx = random.Next(vertices.Count);
+                var point = vertices[idx];
                 
-                if (idx1 != idx2)
-                    totalDistance += Vector3.Distance(vertices[idx1], vertices[idx2]);
+                // Find nearest neighbor
+                float minDist = float.MaxValue;
+                for (int j = 0; j < Math.Min(50, vertices.Count); j++)
+                {
+                    int candidateIdx = random.Next(vertices.Count);
+                    if (candidateIdx != idx)
+                    {
+                        float dist = Vector3.Distance(point, vertices[candidateIdx]);
+                        if (dist < minDist)
+                            minDist = dist;
+                    }
+                }
+                totalNearestDist += minDist;
             }
 
-            return totalDistance / samples / 10.0f;
+            float avgNearestDist = totalNearestDist / samples;
+            
+            // Ball radius should be 2-3x the average nearest neighbor distance
+            // but constrained relative to scene size
+            float radius = Math.Clamp(avgNearestDist * 2.5f, sceneSize / 1000.0f, sceneSize / 10.0f);
+            
+            _service.Log($"Scene size: {sceneSize:F2}, Avg nearest dist: {avgNearestDist:F4}, Ball radius: {radius:F4}");
+            
+            return radius;
         }
 
         private Dictionary<(int, int, int), List<int>> BuildSpatialIndex(
@@ -549,18 +583,23 @@ namespace GeoscientistToolkit
 
         private (int v1, int v2, int v3)? FindSeedTriangle(
             List<Vector3> vertices,
-            float ballRadius)
+            float ballRadius,
+            float maxEdgeLength)
         {
             for (int i = 0; i < Math.Min(vertices.Count, 100); i++)
             {
                 for (int j = i + 1; j < Math.Min(vertices.Count, 100); j++)
                 {
-                    if (Vector3.Distance(vertices[i], vertices[j]) < ballRadius * 2.0f)
+                    float edge1 = Vector3.Distance(vertices[i], vertices[j]);
+                    if (edge1 < maxEdgeLength && edge1 < ballRadius * 2.0f)
                     {
                         for (int k = j + 1; k < Math.Min(vertices.Count, 100); k++)
                         {
-                            if (Vector3.Distance(vertices[i], vertices[k]) < ballRadius * 2.0f &&
-                                Vector3.Distance(vertices[j], vertices[k]) < ballRadius * 2.0f)
+                            float edge2 = Vector3.Distance(vertices[i], vertices[k]);
+                            float edge3 = Vector3.Distance(vertices[j], vertices[k]);
+                            
+                            if (edge2 < maxEdgeLength && edge3 < maxEdgeLength &&
+                                edge2 < ballRadius * 2.0f && edge3 < ballRadius * 2.0f)
                             {
                                 var cross = Vector3.Cross(
                                     vertices[j] - vertices[i],
@@ -582,12 +621,17 @@ namespace GeoscientistToolkit
             List<Vector3> vertices,
             HashSet<int> used,
             float ballRadius,
+            float maxEdgeLength,
             Dictionary<(int, int, int), List<int>> spatialIndex)
         {
             Vector3 p1 = vertices[v1];
             Vector3 p2 = vertices[v2];
             var edgeCenter = (p1 + p2) * 0.5f;
             var edgeDir = Vector3.Normalize(p2 - p1);
+            
+            // Check edge length - if too long, don't expand from it
+            if (Vector3.Distance(p1, p2) > maxEdgeLength)
+                return -1;
 
             var cell = (
                 (int)(edgeCenter.X / ballRadius),
@@ -613,8 +657,12 @@ namespace GeoscientistToolkit
 
                         var candidate = vertices[candidateIdx];
                         
-                        if (Vector3.Distance(candidate, p1) < ballRadius &&
-                            Vector3.Distance(candidate, p2) < ballRadius)
+                        float dist1 = Vector3.Distance(candidate, p1);
+                        float dist2 = Vector3.Distance(candidate, p2);
+                        
+                        // Check all edges of potential triangle
+                        if (dist1 < ballRadius && dist2 < ballRadius &&
+                            dist1 < maxEdgeLength && dist2 < maxEdgeLength)
                         {
                             float angle = Math.Abs(Vector3.Dot(
                                 Vector3.Normalize(candidate - edgeCenter), edgeDir));

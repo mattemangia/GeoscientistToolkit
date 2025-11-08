@@ -3,6 +3,7 @@
 using System;
 using System.Numerics;
 using GeoscientistToolkit.Business.Photogrammetry;
+using GeoscientistToolkit.Util;
 
 namespace GeoscientistToolkit
 {
@@ -35,8 +36,14 @@ namespace GeoscientistToolkit
                 return (image.FocalLengthMm.Value / image.SensorWidthMm.Value) * image.Dataset.Width;
             }
 
-            // Default estimate: 1.2x the larger dimension
-            return 1.2f * Math.Max(image.Dataset.Width, image.Dataset.Height);
+            // Default estimate: Use 1.0x the larger dimension (more conservative than 1.2x)
+            // This corresponds to approximately 50° field of view, typical for smartphones
+            float estimate = 1.0f * Math.Max(image.Dataset.Width, image.Dataset.Height);
+            
+            Logger.Log($"[CameraCalibration] Warning: No EXIF focal length for {image.Dataset.Name}, " +
+                       $"using default estimate: {estimate:F1}px (assumes ~50° FOV)");
+            
+            return estimate;
         }
     }
 }
