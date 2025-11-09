@@ -256,8 +256,8 @@ public static class MultiBoreholeCoupledSimulation
             var lon = borehole.DatasetMetadata.Longitude ?? 0;
             var elevation = borehole.Elevation;
             
-            // Calculate hydraulic head from topography (TÃ³th, 1963)
-            // Head â‰ˆ elevation + pressure head from aquifer
+            // Calculate hydraulic head from topography (Toth, 1963)
+            // Head elevation + pressure head from aquifer
             double hydraulicHead = elevation;
             
             // Calculate hydraulic gradient by sampling nearby elevations
@@ -269,7 +269,7 @@ public static class MultiBoreholeCoupledSimulation
             // Calculate 3D hydraulic gradient including vertical component
             // Vertical gradient from aquifer depth and regional flow pattern
             double aquiferDepth = borehole.TotalDepth * 0.3; // Approximate aquifer depth (30% of total)
-            double verticalGradient = gradient.Length() * 0.05; // Vertical gradient ~5% of horizontal (TÃ³th theory)
+            double verticalGradient = gradient.Length() * 0.05; // Vertical gradient ~5% of horizontal (Toth theory)
             
             // Darcy velocity: q = -K * grad(h)
             // For anisotropic media with horizontal/vertical anisotropy
@@ -780,8 +780,8 @@ public static class MultiBoreholeCoupledSimulation
             double wellSpacing = CalculateBoreholeDistance(injection, production);
             
             // Simplified analytical model: t_bt â‰ˆ (Ï€ * d^2 * Ï• * thickness) / (4 * Q)
-            // where d = well spacing, Ï• = porosity, Q = flow rate
-            double volumetricFlowRate = config.DoubletFlowRate / 1000.0; // mÂ³/s (assuming water)
+            // where d = well spacing, phi = porosity, Q = flow rate
+            double volumetricFlowRate = config.DoubletFlowRate / 1000.0; // m³/s (assuming water)
             double analyticalBreakthrough = (Math.PI * wellSpacing * wellSpacing * 
                                             config.AquiferPorosity * config.AquiferThickness) /
                                            (4.0 * volumetricFlowRate);
