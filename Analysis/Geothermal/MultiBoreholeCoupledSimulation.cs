@@ -42,7 +42,7 @@
 // ------------------------------------------------------------------------------------------------
 // METHODOLOGY NOTES:
 // ------------------------------------------------------------------------------------------------
-// 1. Regional Groundwater Flow: Topography-driven flow using TÃ³th's basin-scale theory (1963)
+// 1. Regional Groundwater Flow: Topography-driven flow using Tóth's basin-scale theory (1963)
 //    - Hydraulic head calculated from elevation gradients
 //    - Darcy velocity from permeability and hydraulic gradients
 //    - Anisotropic permeability effects on flow direction
@@ -136,7 +136,7 @@ public class MultiBoreholeSimulationConfig
     /// <summary>
     /// Injection temperature for doublet systems (K)
     /// </summary>
-    public double InjectionTemperature { get; set; } = 285.15; // 12Â°C
+    public double InjectionTemperature { get; set; } = 285.15; // 12°C
     
     /// <summary>
     /// Production/injection flow rate for doublet systems (kg/s)
@@ -241,7 +241,7 @@ public static class MultiBoreholeCoupledSimulation
     }
     
     /// <summary>
-    /// Calculate regional groundwater flow from topography using TÃ³th theory (1963)
+    /// Calculate regional groundwater flow from topography using Tóth theory (1963)
     /// </summary>
     private static void CalculateRegionalGroundwaterFlow(
         MultiBoreholeSimulationConfig config, 
@@ -293,9 +293,9 @@ public static class MultiBoreholeCoupledSimulation
             
             double velocityMagnitude = flowVelocity.Length() * 86400; // m/day
             Logger.Log($"  {borehole.WellName}: Regional flow velocity = {velocityMagnitude:F3} m/day, " +
-                      $"direction = {Math.Atan2(flowVelocity.Y, flowVelocity.X) * 180 / Math.PI:F1}Â°, " +
+                      $"direction = {Math.Atan2(flowVelocity.Y, flowVelocity.X) * 180 / Math.PI:F1}°, " +
                       $"vertical = {flowVelocity.Z * 86400:F3} m/day, " +
-                      $"thermal diffusivity = {avgThermalDiffusivity:E2} mÂ²/s");
+                      $"thermal diffusivity = {avgThermalDiffusivity:E2} m²/s");
         }
     }
     
@@ -447,7 +447,7 @@ public static class MultiBoreholeCoupledSimulation
     
     /// <summary>
     /// Calculate thermal diffusivity from borehole lithology
-    /// Î± = k / (Ï * c_p) where k=thermal conductivity, Ï=density, c_p=specific heat
+    /// α = k / (ρ * c_p) where k=thermal conductivity, ρ=density, c_p=specific heat
     /// </summary>
     private static double CalculateThermalDiffusivity(BoreholeDataset borehole)
     {
@@ -476,7 +476,7 @@ public static class MultiBoreholeCoupledSimulation
         }
         
         // Default for rock if no lithology data
-        return 1.0e-6; // mÂ²/s (typical for crystalline rock)
+        return 1.0e-6; // m²/s (typical for crystalline rock)
     }
     
     /// <summary>
@@ -648,7 +648,7 @@ public static class MultiBoreholeCoupledSimulation
                     // Configure as injection well (lower temperature)
                     options.FluidInletTemperature = config.InjectionTemperature;
                     options.FluidMassFlowRate = config.DoubletFlowRate;
-                    Logger.Log($"  Configured as INJECTION well at {config.InjectionTemperature - 273.15:F1}Â°C");
+                    Logger.Log($"  Configured as INJECTION well at {config.InjectionTemperature - 273.15:F1}°C");
                 }
                 else if (config.DoubletPairs.ContainsValue(borehole.WellName))
                 {
@@ -779,7 +779,7 @@ public static class MultiBoreholeCoupledSimulation
             var production = config.Boreholes.First(b => b.WellName == productionWell);
             double wellSpacing = CalculateBoreholeDistance(injection, production);
             
-            // Simplified analytical model: t_bt â‰ˆ (Ï€ * d^2 * Ï• * thickness) / (4 * Q)
+            // Simplified analytical model: t_bt ≈ (π * d² * φ * thickness) / (4 * Q)
             // where d = well spacing, phi = porosity, Q = flow rate
             double volumetricFlowRate = config.DoubletFlowRate / 1000.0; // m³/s (assuming water)
             double analyticalBreakthrough = (Math.PI * wellSpacing * wellSpacing * 
@@ -819,7 +819,7 @@ public static class MultiBoreholeCoupledSimulation
             double actualBreakthrough = results.ThermalBreakthroughTimes.GetValueOrDefault<string, double>(doubletKey, config.SimulationDuration);
             
             // Calculate optimal spacing using scaling relationship
-            // t_bt âˆ d^2 (breakthrough time scales with square of distance)
+            // t_bt ∝ d² (breakthrough time scales with square of distance)
             double scaleFactor = Math.Sqrt(targetTime / actualBreakthrough);
             double optimalSpacing = currentSpacing * scaleFactor;
             
@@ -857,16 +857,16 @@ public static class MultiBoreholeCoupledSimulation
             
             if (optimalSpacing > currentSpacing * 1.2)
             {
-                Logger.Log($"    âš  WARNING: Current spacing may result in premature breakthrough!");
-                Logger.Log($"    âš  Recommend increasing well spacing by {(optimalSpacing/currentSpacing - 1)*100:F0}%");
+                Logger.Log($"    ⚠️ WARNING: Current spacing may result in premature breakthrough!");
+                Logger.Log($"    ⚠️ Recommend increasing well spacing by {(optimalSpacing/currentSpacing - 1)*100:F0}%");
             }
             else if (optimalSpacing < currentSpacing * 0.8)
             {
-                Logger.Log($"    âœ“ Current spacing is conservative and will extend system lifetime");
+                Logger.Log($"    ✓ Current spacing is conservative and will extend system lifetime");
             }
             else
             {
-                Logger.Log($"    âœ“ Current spacing is near-optimal");
+                Logger.Log($"    ✓ Current spacing is near-optimal");
             }
         }
     }
@@ -1058,7 +1058,7 @@ public static class MultiBoreholeCoupledSimulation
     
     /// <summary>
     /// SIMD-optimized batch calculation of thermal diffusivities
-    /// Î± = k / (Ï * c_p)
+    /// α = k / (ρ * c_p)
     /// </summary>
     private static unsafe void CalculateThermalDiffusivitiesBatch_SIMD(
         Span<double> thermalConductivity,
