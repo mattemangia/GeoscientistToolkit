@@ -934,7 +934,7 @@ public static class BoreholeDebugTools
         var tempTrack = new ParameterTrack
         {
             Name = "Temperature",
-            Unit = "Â°C",
+            Unit = "°C",
             MinValue = 10f,
             MaxValue = 150f,
             IsLogarithmic = false,

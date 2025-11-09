@@ -25,6 +25,14 @@ public class GeothermalSimulationTools : IDatasetTools, IDisposable
     private CancellationTokenSource _cancellationTokenSource;
     private GeothermalSimulationSolver _currentSolver; // Track the active solver
 
+    // Parameter column mapping
+    private string _mappedThermalConductivityColumn = "";
+    private string _mappedSpecificHeatColumn = "";
+    private string _mappedDensityColumn = "";
+    private string _mappedPorosityColumn = "";
+    private string _mappedPermeabilityColumn = "";
+    private bool _showParameterMapping;
+
     private bool _isSimulationRunning;
 
     private GeothermalMesh _mesh;
@@ -75,6 +83,9 @@ public class GeothermalSimulationTools : IDatasetTools, IDisposable
             _options.LayerDensities.Clear();
             _options.LayerPorosities.Clear();
             _options.LayerPermeabilities.Clear();
+
+            // Auto-detect parameter columns when loading a new dataset
+            AutoDetectParameterColumns(boreholeDataset);
 
             // Now initialize from borehole FIRST, then fill in any missing defaults
             InitializeLayerProperties(boreholeDataset);
@@ -143,36 +154,110 @@ public class GeothermalSimulationTools : IDatasetTools, IDisposable
             // Name is the specific unit (e.g., "Sandstone Aquifer 1")
             var name = !string.IsNullOrEmpty(unit.Name) ? unit.Name : unit.RockType ?? "Unknown";
 
-            // Always use borehole parameters if available, otherwise reasonable defaults
-            var conductivity = unit.Parameters.TryGetValue("ThermalConductivity", out var tc)
-                ? tc
-                : unit.Parameters.TryGetValue("Thermal Conductivity", out var tc2)
-                    ? tc2
-                    : 2.5;
+            // Try to get parameters using mapped columns first, then fall back to default names
+            var conductivity = GetParameterValue(unit, _mappedThermalConductivityColumn, 
+                new[] { "ThermalConductivity", "Thermal Conductivity", "TC", "K", "Lambda" }, 2.5);
             _options.LayerThermalConductivities[name] = conductivity;
 
-            var specificHeat = unit.Parameters.TryGetValue("SpecificHeat", out var sh)
-                ? sh
-                : unit.Parameters.TryGetValue("Specific Heat", out var sh2)
-                    ? sh2
-                    : 900;
+            var specificHeat = GetParameterValue(unit, _mappedSpecificHeatColumn,
+                new[] { "SpecificHeat", "Specific Heat", "Cp", "SH" }, 900);
             _options.LayerSpecificHeats[name] = specificHeat;
 
-            var density = unit.Parameters.TryGetValue("Density", out var d)
-                ? d
-                : 2650;
+            var density = GetParameterValue(unit, _mappedDensityColumn,
+                new[] { "Density", "Rho", "RHO", "RHOB" }, 2650);
             _options.LayerDensities[name] = density;
 
-            var porosity = unit.Parameters.TryGetValue("Porosity", out var p)
-                ? p > 1 ? p / 100.0 : p // Handle both percentage and decimal
-                : 0.1;
+            var porosity = GetParameterValue(unit, _mappedPorosityColumn,
+                new[] { "Porosity", "PHI", "PHIT", "Por" }, 0.1);
+            // Handle both percentage and decimal
+            porosity = porosity > 1 ? porosity / 100.0 : porosity;
             _options.LayerPorosities[name] = porosity;
 
-            var permeability = unit.Parameters.TryGetValue("Permeability", out var k)
-                ? k
-                : 1e-14;
+            var permeability = GetParameterValue(unit, _mappedPermeabilityColumn,
+                new[] { "Permeability", "Perm", "K", "PERM" }, 1e-14);
             _options.LayerPermeabilities[name] = permeability;
         }
+    }
+
+    /// <summary>
+    /// Gets a parameter value from a lithology unit, trying the mapped column first,
+    /// then falling back to a list of common parameter names
+    /// </summary>
+    private double GetParameterValue(LithologyUnit unit, string mappedColumn, string[] fallbackNames, double defaultValue)
+    {
+        // Try mapped column first
+        if (!string.IsNullOrEmpty(mappedColumn) && unit.Parameters.TryGetValue(mappedColumn, out var mappedValue))
+            return mappedValue;
+
+        // Try fallback names
+        foreach (var name in fallbackNames)
+        {
+            if (unit.Parameters.TryGetValue(name, out var value))
+                return value;
+        }
+
+        // Return default
+        return defaultValue;
+    }
+
+    /// <summary>
+    /// Automatically detects the best matching columns for required parameters based on common naming conventions
+    /// </summary>
+    private void AutoDetectParameterColumns(BoreholeDataset boreholeDataset)
+    {
+        if (boreholeDataset?.ParameterTracks == null || !boreholeDataset.ParameterTracks.Any())
+            return;
+
+        var availableColumns = boreholeDataset.ParameterTracks.Keys.ToList();
+
+        // Thermal Conductivity patterns
+        var tcPatterns = new[] { "thermalconductivity", "thermal_conductivity", "tc", "lambda", "conductivity", "k_thermal" };
+        _mappedThermalConductivityColumn = FindBestMatch(availableColumns, tcPatterns);
+
+        // Specific Heat patterns
+        var shPatterns = new[] { "specificheat", "specific_heat", "cp", "sh", "heat_capacity" };
+        _mappedSpecificHeatColumn = FindBestMatch(availableColumns, shPatterns);
+
+        // Density patterns
+        var densPatterns = new[] { "density", "rho", "rhob", "bulk_density", "dens" };
+        _mappedDensityColumn = FindBestMatch(availableColumns, densPatterns);
+
+        // Porosity patterns
+        var porPatterns = new[] { "porosity", "phi", "phit", "por", "poros" };
+        _mappedPorosityColumn = FindBestMatch(availableColumns, porPatterns);
+
+        // Permeability patterns
+        var permPatterns = new[] { "permeability", "perm", "k_perm", "hydraulic_conductivity" };
+        _mappedPermeabilityColumn = FindBestMatch(availableColumns, permPatterns);
+
+        Logger.Log($"Auto-detected columns: TC={_mappedThermalConductivityColumn}, SH={_mappedSpecificHeatColumn}, " +
+                   $"Dens={_mappedDensityColumn}, Por={_mappedPorosityColumn}, Perm={_mappedPermeabilityColumn}");
+    }
+
+    /// <summary>
+    /// Finds the best matching column name from available columns based on pattern matching
+    /// </summary>
+    private string FindBestMatch(List<string> availableColumns, string[] patterns)
+    {
+        foreach (var pattern in patterns)
+        {
+            // Try exact match (case-insensitive)
+            var exactMatch = availableColumns.FirstOrDefault(c => 
+                string.Equals(c, pattern, StringComparison.OrdinalIgnoreCase));
+            if (exactMatch != null)
+                return exactMatch;
+        }
+
+        // Try partial match
+        foreach (var pattern in patterns)
+        {
+            var partialMatch = availableColumns.FirstOrDefault(c =>
+                c.ToLowerInvariant().Contains(pattern));
+            if (partialMatch != null)
+                return partialMatch;
+        }
+
+        return ""; // No match found
     }
 
     private void RenderConfiguration()
@@ -263,6 +348,240 @@ public class GeothermalSimulationTools : IDatasetTools, IDisposable
             {
                 ImGui.TextColored(new Vector4(0.9f, 0.9f, 0.5f, 1.0f),
                     "💡 Using custom parameters. Any changes will switch to Custom mode.");
+            }
+
+            ImGui.Spacing();
+            ImGui.Separator();
+        }
+        else
+        {
+            ImGui.PopStyleColor();
+        }
+
+        // Parameter Column Mapping Section
+        ImGui.PushStyleColor(ImGuiCol.Header, new Vector4(0.7f, 0.4f, 0.2f, 1.0f));
+        if (ImGui.CollapsingHeader("Parameter Column Mapping", ImGuiTreeNodeFlags.None))
+        {
+            ImGui.PopStyleColor();
+
+            ImGui.TextWrapped(
+                "Map columns from your dataset (LAS file, parameter tracks, etc.) to the required simulation parameters. " +
+                "This is useful when your data uses different column names than the standard ones.");
+            ImGui.Spacing();
+
+            // Get available parameter tracks from dataset
+            var availableColumns = new List<string> { "(None - use defaults)" };
+            if (_options.BoreholeDataset?.ParameterTracks != null)
+            {
+                availableColumns.AddRange(_options.BoreholeDataset.ParameterTracks.Keys.OrderBy(k => k));
+            }
+
+            var columnsArray = availableColumns.ToArray();
+
+            ImGui.Text("Available Columns in Dataset:");
+            ImGui.Indent();
+            if (availableColumns.Count > 1)
+            {
+                ImGui.TextColored(new Vector4(0.7f, 0.9f, 1.0f, 1.0f), 
+                    string.Join(", ", availableColumns.Skip(1)));
+            }
+            else
+            {
+                ImGui.TextColored(new Vector4(1, 0.7f, 0, 1), "No parameter tracks found in dataset");
+            }
+            ImGui.Unindent();
+            ImGui.Spacing();
+
+            // Create mapping UI
+            if (ImGui.BeginTable("ParamMapping", 3, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg))
+            {
+                ImGui.TableSetupColumn("Required Parameter", ImGuiTableColumnFlags.WidthFixed, 200);
+                ImGui.TableSetupColumn("Mapped Column", ImGuiTableColumnFlags.WidthStretch);
+                ImGui.TableSetupColumn("Default Fallbacks", ImGuiTableColumnFlags.WidthFixed, 250);
+                ImGui.TableHeadersRow();
+
+                // Thermal Conductivity
+                ImGui.TableNextRow();
+                ImGui.TableNextColumn();
+                ImGui.Text("Thermal Conductivity (W/m·K)");
+                ImGui.TableNextColumn();
+                var tcIdx = Array.IndexOf(columnsArray, _mappedThermalConductivityColumn);
+                if (tcIdx < 0) tcIdx = 0;
+                if (ImGui.Combo("##TC", ref tcIdx, columnsArray, columnsArray.Length))
+                {
+                    _mappedThermalConductivityColumn = tcIdx > 0 ? columnsArray[tcIdx] : "";
+                }
+                ImGui.TableNextColumn();
+                ImGui.TextColored(new Vector4(0.6f, 0.6f, 0.6f, 1), "TC, K, Lambda");
+
+                // Specific Heat
+                ImGui.TableNextRow();
+                ImGui.TableNextColumn();
+                ImGui.Text("Specific Heat (J/kg·K)");
+                ImGui.TableNextColumn();
+                var shIdx = Array.IndexOf(columnsArray, _mappedSpecificHeatColumn);
+                if (shIdx < 0) shIdx = 0;
+                if (ImGui.Combo("##SH", ref shIdx, columnsArray, columnsArray.Length))
+                {
+                    _mappedSpecificHeatColumn = shIdx > 0 ? columnsArray[shIdx] : "";
+                }
+                ImGui.TableNextColumn();
+                ImGui.TextColored(new Vector4(0.6f, 0.6f, 0.6f, 1), "Cp, SH");
+
+                // Density
+                ImGui.TableNextRow();
+                ImGui.TableNextColumn();
+                ImGui.Text("Density (kg/m³)");
+                ImGui.TableNextColumn();
+                var densIdx = Array.IndexOf(columnsArray, _mappedDensityColumn);
+                if (densIdx < 0) densIdx = 0;
+                if (ImGui.Combo("##Dens", ref densIdx, columnsArray, columnsArray.Length))
+                {
+                    _mappedDensityColumn = densIdx > 0 ? columnsArray[densIdx] : "";
+                }
+                ImGui.TableNextColumn();
+                ImGui.TextColored(new Vector4(0.6f, 0.6f, 0.6f, 1), "Rho, RHO, RHOB");
+
+                // Porosity
+                ImGui.TableNextRow();
+                ImGui.TableNextColumn();
+                ImGui.Text("Porosity (fraction or %)");
+                ImGui.TableNextColumn();
+                var porIdx = Array.IndexOf(columnsArray, _mappedPorosityColumn);
+                if (porIdx < 0) porIdx = 0;
+                if (ImGui.Combo("##Por", ref porIdx, columnsArray, columnsArray.Length))
+                {
+                    _mappedPorosityColumn = porIdx > 0 ? columnsArray[porIdx] : "";
+                }
+                ImGui.TableNextColumn();
+                ImGui.TextColored(new Vector4(0.6f, 0.6f, 0.6f, 1), "PHI, PHIT, Por");
+
+                // Permeability
+                ImGui.TableNextRow();
+                ImGui.TableNextColumn();
+                ImGui.Text("Permeability (m²)");
+                ImGui.TableNextColumn();
+                var permIdx = Array.IndexOf(columnsArray, _mappedPermeabilityColumn);
+                if (permIdx < 0) permIdx = 0;
+                if (ImGui.Combo("##Perm", ref permIdx, columnsArray, columnsArray.Length))
+                {
+                    _mappedPermeabilityColumn = permIdx > 0 ? columnsArray[permIdx] : "";
+                }
+                ImGui.TableNextColumn();
+                ImGui.TextColored(new Vector4(0.6f, 0.6f, 0.6f, 1), "K, PERM");
+
+                ImGui.EndTable();
+            }
+
+            ImGui.Spacing();
+            
+            if (ImGui.Button("Apply Mapping & Refresh Properties", new Vector2(250, 0)))
+            {
+                // Re-initialize layer properties with new mapping
+                _options.LayerThermalConductivities.Clear();
+                _options.LayerSpecificHeats.Clear();
+                _options.LayerDensities.Clear();
+                _options.LayerPorosities.Clear();
+                _options.LayerPermeabilities.Clear();
+                InitializeLayerProperties(_options.BoreholeDataset);
+                _options.SetDefaultValues(); // Fill in any missing defaults
+            }
+            ImGui.SetItemTooltip("Re-read all parameters from the dataset using the current column mapping");
+
+            ImGui.SameLine();
+            if (ImGui.Button("Auto-Detect Columns", new Vector2(150, 0)))
+            {
+                AutoDetectParameterColumns(_options.BoreholeDataset);
+            }
+            ImGui.SetItemTooltip("Automatically detect the best matching columns based on common naming conventions");
+
+            // Show preview of extracted values
+            if (_options.BoreholeDataset?.LithologyUnits != null && _options.BoreholeDataset.LithologyUnits.Any())
+            {
+                ImGui.Spacing();
+                ImGui.TextColored(new Vector4(0.7f, 0.9f, 1.0f, 1.0f), "Preview of Extracted Values:");
+                
+                if (ImGui.BeginTable("ParamPreview", 6, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.ScrollY | ImGuiTableFlags.ScrollX, 
+                    new Vector2(0, 150)))
+                {
+                    ImGui.TableSetupColumn("Layer", ImGuiTableColumnFlags.WidthFixed, 120);
+                    ImGui.TableSetupColumn("k (W/m·K)", ImGuiTableColumnFlags.WidthFixed, 80);
+                    ImGui.TableSetupColumn("Cp (J/kg·K)", ImGuiTableColumnFlags.WidthFixed, 90);
+                    ImGui.TableSetupColumn("ρ (kg/m³)", ImGuiTableColumnFlags.WidthFixed, 80);
+                    ImGui.TableSetupColumn("φ (-)", ImGuiTableColumnFlags.WidthFixed, 70);
+                    ImGui.TableSetupColumn("K (m²)", ImGuiTableColumnFlags.WidthFixed, 90);
+                    ImGui.TableHeadersRow();
+
+                    foreach (var unit in _options.BoreholeDataset.LithologyUnits)
+                    {
+                        var name = !string.IsNullOrEmpty(unit.Name) ? unit.Name : unit.RockType ?? "Unknown";
+                        
+                        ImGui.TableNextRow();
+                        ImGui.TableNextColumn();
+                        ImGui.TextUnformatted(name.Length > 18 ? name.Substring(0, 15) + "..." : name);
+                        if (name.Length > 18)
+                            ImGui.SetItemTooltip(name);
+
+                        ImGui.TableNextColumn();
+                        var tc = GetParameterValue(unit, _mappedThermalConductivityColumn, 
+                            new[] { "ThermalConductivity", "Thermal Conductivity", "TC", "K", "Lambda" }, 2.5);
+                        var tcColor = unit.Parameters.ContainsKey(_mappedThermalConductivityColumn) || 
+                                     unit.Parameters.ContainsKey("ThermalConductivity") || 
+                                     unit.Parameters.ContainsKey("Thermal Conductivity")
+                            ? new Vector4(0.3f, 1.0f, 0.5f, 1.0f) 
+                            : new Vector4(1.0f, 0.7f, 0.3f, 1.0f); // Orange for defaults
+                        ImGui.TextColored(tcColor, $"{tc:F2}");
+
+                        ImGui.TableNextColumn();
+                        var sh = GetParameterValue(unit, _mappedSpecificHeatColumn,
+                            new[] { "SpecificHeat", "Specific Heat", "Cp", "SH" }, 900);
+                        var shColor = unit.Parameters.ContainsKey(_mappedSpecificHeatColumn) || 
+                                     unit.Parameters.ContainsKey("SpecificHeat") || 
+                                     unit.Parameters.ContainsKey("Specific Heat")
+                            ? new Vector4(0.3f, 1.0f, 0.5f, 1.0f) 
+                            : new Vector4(1.0f, 0.7f, 0.3f, 1.0f);
+                        ImGui.TextColored(shColor, $"{sh:F0}");
+
+                        ImGui.TableNextColumn();
+                        var dens = GetParameterValue(unit, _mappedDensityColumn,
+                            new[] { "Density", "Rho", "RHO", "RHOB" }, 2650);
+                        var densColor = unit.Parameters.ContainsKey(_mappedDensityColumn) || 
+                                       unit.Parameters.ContainsKey("Density")
+                            ? new Vector4(0.3f, 1.0f, 0.5f, 1.0f) 
+                            : new Vector4(1.0f, 0.7f, 0.3f, 1.0f);
+                        ImGui.TextColored(densColor, $"{dens:F0}");
+
+                        ImGui.TableNextColumn();
+                        var por = GetParameterValue(unit, _mappedPorosityColumn,
+                            new[] { "Porosity", "PHI", "PHIT", "Por" }, 0.1);
+                        por = por > 1 ? por / 100.0 : por;
+                        var porColor = unit.Parameters.ContainsKey(_mappedPorosityColumn) || 
+                                      unit.Parameters.ContainsKey("Porosity")
+                            ? new Vector4(0.3f, 1.0f, 0.5f, 1.0f) 
+                            : new Vector4(1.0f, 0.7f, 0.3f, 1.0f);
+                        ImGui.TextColored(porColor, $"{por:F3}");
+
+                        ImGui.TableNextColumn();
+                        var perm = GetParameterValue(unit, _mappedPermeabilityColumn,
+                            new[] { "Permeability", "Perm", "K", "PERM" }, 1e-14);
+                        var permColor = unit.Parameters.ContainsKey(_mappedPermeabilityColumn) || 
+                                       unit.Parameters.ContainsKey("Permeability")
+                            ? new Vector4(0.3f, 1.0f, 0.5f, 1.0f) 
+                            : new Vector4(1.0f, 0.7f, 0.3f, 1.0f);
+                        ImGui.TextColored(permColor, $"{perm:E2}");
+                    }
+
+                    ImGui.EndTable();
+                }
+                
+                ImGui.Spacing();
+                ImGui.TextColored(new Vector4(0.3f, 1.0f, 0.5f, 1.0f), "● ");
+                ImGui.SameLine();
+                ImGui.Text("Value from dataset  ");
+                ImGui.SameLine();
+                ImGui.TextColored(new Vector4(1.0f, 0.7f, 0.3f, 1.0f), "● ");
+                ImGui.SameLine();
+                ImGui.Text("Default value (not found in dataset)");
             }
 
             ImGui.Spacing();

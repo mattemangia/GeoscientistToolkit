@@ -22,7 +22,10 @@ namespace GeoscientistToolkit.UI;
 
 public static class DatasetUIFactory
 {
-public static IDatasetViewer CreateViewer(Dataset dataset)
+    // Static cache to track BoreholeViewer instances for callback connection
+    private static readonly Dictionary<BoreholeDataset, BoreholeViewer> _boreholeViewers = new();
+
+    public static IDatasetViewer CreateViewer(Dataset dataset)
 {
 return dataset switch
 {
@@ -55,7 +58,7 @@ CtImageStackDataset ctDataset => new CtCombinedViewer(ctDataset),
         PNMDataset pnmDataset => new PNMViewer(pnmDataset),
 
         // Borehole Dataset
-        BoreholeDataset boreholeDataset => new BoreholeViewer(boreholeDataset),
+        BoreholeDataset boreholeDataset => CreateBoreholeViewer(boreholeDataset),
 
         // 2D Geology Dataset
         TwoDGeologyDataset twoDGeologyDataset => new TwoDGeologyViewerWrapper(twoDGeologyDataset),
@@ -66,6 +69,27 @@ CtImageStackDataset ctDataset => new CtCombinedViewer(ctDataset),
 
         _ => throw new NotSupportedException($"No viewer available for dataset type: {dataset.GetType().Name}")
     };
+}
+
+private static BoreholeViewer CreateBoreholeViewer(BoreholeDataset dataset)
+{
+    var viewer = new BoreholeViewer(dataset);
+    _boreholeViewers[dataset] = viewer;
+    return viewer;
+}
+
+private static BoreholeTools CreateBoreholeTools(BoreholeDataset dataset)
+{
+    var tools = new BoreholeTools();
+    
+    // Connect the viewer's OnLithologyClicked callback to the tools' EditUnit method
+    // if a viewer for this dataset has been created
+    if (_boreholeViewers.TryGetValue(dataset, out var viewer))
+    {
+        viewer.OnLithologyClicked = tools.EditUnit;
+    }
+    
+    return tools;
 }
 
 public static IDatasetPropertiesRenderer CreatePropertiesRenderer(Dataset dataset)
@@ -103,7 +127,7 @@ public static IDatasetTools CreateTools(Dataset dataset)
         AcousticVolumeDataset => new AcousticVolumeTools(),
         PNMDataset => new PNMTools(),
         ImageDataset => new ImageTools(),
-        BoreholeDataset => new BoreholeTools(),
+        BoreholeDataset boreholeDataset => CreateBoreholeTools(boreholeDataset),
         TwoDGeologyDataset => new TwoDGeologyToolsWrapper(),
         // --- MODIFIED: Changed .All to .Any to make tool appear even if non-borehole datasets are in the group ---
         DatasetGroup group when group.Datasets.Any(d => d is BoreholeDataset) => new MultiBoreholeTools(),

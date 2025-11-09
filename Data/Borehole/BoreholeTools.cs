@@ -199,6 +199,22 @@ public class BoreholeTools : IDatasetTools
             ExportToLAS(borehole, _exportLasDialog.SelectedPath);
     }
 
+    /// <summary>
+    /// Apre la dialog di editing per una specifica formazione litologica e porta automaticamente
+    /// l'utente alla categoria Management. Questo metodo puÃ² essere collegato al callback
+    /// OnLithologyClicked del BoreholeViewer per permettere l'editing diretto cliccando sulla
+    /// formazione nel viewer.
+    /// </summary>
+    /// <param name="unit">L'unitÃ  litologica da editare</param>
+    public void EditUnit(LithologyUnit unit)
+    {
+        if (unit == null) return;
+        
+        _editingUnit = unit;
+        _showEditUnitDialog = true;
+        _selectedCategory = ToolCategory.Management;
+    }
+
     private void DrawCategorizedToolsUI(BoreholeDataset borehole)
     {
         ImGui.Text("Category:");
@@ -249,36 +265,35 @@ public class BoreholeTools : IDatasetTools
     {
         if (dataset is not BoreholeDataset borehole) return;
 
-        if (ImGui.BeginChild("UnitList", new Vector2(0, 200), ImGuiChildFlags.Border))
+        if (ImGui.BeginTable("LithologyTable", 5, 
+            ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.ScrollY | ImGuiTableFlags.ScrollX,
+            new Vector2(0, 200)))
         {
-            ImGui.Columns(5, "LithologyColumns");
-            ImGui.SetColumnWidth(0, 150);
-            ImGui.SetColumnWidth(1, 100);
-            ImGui.SetColumnWidth(2, 80);
-            ImGui.SetColumnWidth(3, 80);
-            ImGui.Text("Name");
-            ImGui.NextColumn();
-            ImGui.Text("Lithology");
-            ImGui.NextColumn();
-            ImGui.Text("From (m)");
-            ImGui.NextColumn();
-            ImGui.Text("To (m)");
-            ImGui.NextColumn();
-            ImGui.Text("Actions");
-            ImGui.NextColumn();
-            ImGui.Separator();
+            ImGui.TableSetupColumn("Name", ImGuiTableColumnFlags.WidthFixed, 150);
+            ImGui.TableSetupColumn("Lithology", ImGuiTableColumnFlags.WidthFixed, 100);
+            ImGui.TableSetupColumn("From (m)", ImGuiTableColumnFlags.WidthFixed, 80);
+            ImGui.TableSetupColumn("To (m)", ImGuiTableColumnFlags.WidthFixed, 80);
+            ImGui.TableSetupColumn("Actions", ImGuiTableColumnFlags.WidthFixed, 140);
+            ImGui.TableHeadersRow();
 
             foreach (var unit in borehole.LithologyUnits.ToList())
             {
+                ImGui.TableNextRow();
                 ImGui.PushID(unit.ID);
+                
+                ImGui.TableNextColumn();
                 ImGui.Text(unit.Name);
-                ImGui.NextColumn();
+                
+                ImGui.TableNextColumn();
                 ImGui.Text(unit.LithologyType);
-                ImGui.NextColumn();
+                
+                ImGui.TableNextColumn();
                 ImGui.Text($"{unit.DepthFrom:F2}");
-                ImGui.NextColumn();
+                
+                ImGui.TableNextColumn();
                 ImGui.Text($"{unit.DepthTo:F2}");
-                ImGui.NextColumn();
+                
+                ImGui.TableNextColumn();
                 if (ImGui.Button("Edit"))
                 {
                     _editingUnit = unit;
@@ -287,11 +302,11 @@ public class BoreholeTools : IDatasetTools
 
                 ImGui.SameLine();
                 if (ImGui.Button("Delete")) borehole.LithologyUnits.Remove(unit);
-                ImGui.NextColumn();
+                
                 ImGui.PopID();
             }
 
-            ImGui.EndChild();
+            ImGui.EndTable();
         }
 
         if (ImGui.Button("Add New Unit")) _showAddUnitDialog = true;

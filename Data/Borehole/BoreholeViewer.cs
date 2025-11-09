@@ -53,6 +53,19 @@ public class BoreholeViewer : IDatasetViewer, IDisposable
     private bool _showLithologyNames = true;
     private bool _showParameterValues = true;
 
+    /// <summary>
+    /// Callback invocato quando l'utente clicca su una formazione litologica nel viewer.
+    /// Per collegarlo automaticamente con BoreholeTools per l'editing:
+    /// <code>
+    /// var viewer = new BoreholeViewer(dataset);
+    /// var tools = new BoreholeTools();
+    /// viewer.OnLithologyClicked = tools.EditUnit;
+    /// </code>
+    /// Questo permetterà all'utente di cliccare su una formazione nel viewer e passare
+    /// automaticamente alla pagina di editing in BoreholeTools.
+    /// </summary>
+    public Action<LithologyUnit>? OnLithologyClicked { get; set; }
+
     public BoreholeViewer(BoreholeDataset dataset)
     {
         _dataset = dataset ?? throw new ArgumentNullException(nameof(dataset));
@@ -376,7 +389,7 @@ public class BoreholeViewer : IDatasetViewer, IDisposable
             {
                 // Show a note that docking is disabled to prevent flickering
                 ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(1f, 0.8f, 0.3f, 1f));
-                ImGui.TextWrapped("ℹ️ Docking disabled for this window to prevent UI flickering");
+                ImGui.TextWrapped("⚠ Docking disabled for this window to prevent UI flickering");
                 ImGui.PopStyleColor();
                 ImGui.Separator();
 
@@ -583,8 +596,8 @@ public class BoreholeViewer : IDatasetViewer, IDisposable
                         ImGui.GetColorU32(new Vector4(0, 0, 0, 1)), name);
             }
 
-            // --------- TOOLTIP for lithology ---------
-            if (_enableTooltip)
+            // --------- TOOLTIP and CLICK for lithology ---------
+            if (_enableTooltip || OnLithologyClicked != null)
             {
                 var mouse = ImGui.GetIO().MousePos;
 
@@ -600,14 +613,25 @@ public class BoreholeViewer : IDatasetViewer, IDisposable
 
                     if (mouse.X >= rectMin.X && mouse.X <= rectMax.X && mouse.Y >= rectMin.Y && mouse.Y <= rectMax.Y)
                     {
-                        ImGui.BeginTooltip();
-                        ImGui.TextUnformatted(string.IsNullOrWhiteSpace(u.Name) ? "Lithology unit" : u.Name);
-                        if (!string.IsNullOrWhiteSpace(u.LithologyType))
-                            ImGui.TextUnformatted($"Type: {u.LithologyType}");
-                        ImGui.TextUnformatted($"From: {u.DepthFrom:0.###} m");
-                        ImGui.TextUnformatted($"To:   {u.DepthTo:0.###} m");
-                        ImGui.TextUnformatted($"Thk:  {Math.Max(0, u.DepthTo - u.DepthFrom):0.###} m");
-                        ImGui.EndTooltip();
+                        // Show tooltip if enabled
+                        if (_enableTooltip)
+                        {
+                            ImGui.BeginTooltip();
+                            ImGui.TextUnformatted(string.IsNullOrWhiteSpace(u.Name) ? "Lithology unit" : u.Name);
+                            if (!string.IsNullOrWhiteSpace(u.LithologyType))
+                                ImGui.TextUnformatted($"Type: {u.LithologyType}");
+                            ImGui.TextUnformatted($"From: {u.DepthFrom:0.###} m");
+                            ImGui.TextUnformatted($"To:   {u.DepthTo:0.###} m");
+                            ImGui.TextUnformatted($"Thk:  {Math.Max(0, u.DepthTo - u.DepthFrom):0.###} m");
+                            ImGui.TextUnformatted("(Click to edit)");
+                            ImGui.EndTooltip();
+                        }
+
+                        // Handle click to edit
+                        if (OnLithologyClicked != null && ImGui.IsMouseClicked(ImGuiMouseButton.Left))
+                        {
+                            OnLithologyClicked.Invoke(u);
+                        }
                     }
                 }
             }
@@ -725,7 +749,7 @@ public class BoreholeViewer : IDatasetViewer, IDisposable
                         ImGui.TextUnformatted($"Value: {value:0.###}");
                     else
                         ImGui.TextUnformatted("Value: n/a");
-                    ImGui.TextUnformatted($"Range: {track.MinValue:0.###} – {track.MaxValue:0.###}");
+                    ImGui.TextUnformatted($"Range: {track.MinValue:0.###} - {track.MaxValue:0.###}");
                     ImGui.EndTooltip();
                 }
             }
