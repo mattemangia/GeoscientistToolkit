@@ -624,7 +624,7 @@ public class GeothermalOpenCLSolver : IDisposable
     ///     Solves heat transfer on GPU for one time step, iterating internally until convergence.
     ///     This version includes the definitive fix for applying boundary conditions within the GPU loop.
     /// </summary>
-    public unsafe float SolveHeatTransferGPU(
+   public unsafe float SolveHeatTransferGPU(
         float[,,] temperature,
         float[,,,] velocity,
         float[,,] dispersion,
@@ -633,7 +633,9 @@ public class GeothermalOpenCLSolver : IDisposable
         float[] fluidTempDown,
         float[] fluidTempUp,
         int maxIterations,
-        double convergenceTolerance)
+        double convergenceTolerance,
+        // NEW: Add the flow configuration option as a parameter
+        FlowConfiguration flowConfig)
     {
         if (!_isInitialized)
             throw new InvalidOperationException("OpenCL solver not initialized");
@@ -684,14 +686,11 @@ public class GeothermalOpenCLSolver : IDisposable
         var numGroups = (uint)Math.Ceiling((double)totalSize / localWorkSize);
         var reductionGlobalWorkSize = (nuint)(numGroups * localWorkSize);
 
-        // The iteration loop MUST be inside the GPU solver method to manage state correctly.
         for (int iter = 0; iter < maxIterations; iter++)
         {
-            // --- STEP 1: SOLVE INTERIOR POINTS ---
-            var currentTempBuffer = _temperatureBuffer; // Input for this iteration
-            var nextTempBuffer = _newTempBuffer;       // Output for this iteration
+            var currentTempBuffer = _temperatureBuffer;
+            var nextTempBuffer = _newTempBuffer;       
             
-            // Set all kernel arguments for the main heat transfer kernel.
             var argIdx = 0;
             _cl.SetKernelArg(_heatTransferKernel, (uint)argIdx++, (nuint)sizeof(nint), &currentTempBuffer);
             _cl.SetKernelArg(_heatTransferKernel, (uint)argIdx++, (nuint)sizeof(nint), &nextTempBuffer);
@@ -731,37 +730,34 @@ public class GeothermalOpenCLSolver : IDisposable
             _cl.SetKernelArg(_heatTransferKernel, (uint)argIdx++, sizeof(int), &nz_int);
             var gwFlow_int = simulateGroundwater ? 1 : 0;
             _cl.SetKernelArg(_heatTransferKernel, (uint)argIdx++, sizeof(int), &gwFlow_int);
-            
-            // Execute the main kernel
+
+            // NEW: Pass the flow configuration as an integer to the kernel
+            // CounterFlow = 0, CounterFlowReversed = 1
+            var flowConfig_int = (int)flowConfig;
+            _cl.SetKernelArg(_heatTransferKernel, (uint)argIdx++, sizeof(int), &flowConfig_int);
+
             _cl.EnqueueNdrangeKernel(_queue, _heatTransferKernel, 1, null, &globalWorkSize, null, 0, null, null);
 
-            // =====================================================================================
-            // DEFINITIVE FIX: APPLY BOUNDARY CONDITIONS ON THE GPU *INSIDE THE LOOP*.
-            // This corrects the stale boundary data that was causing the solver to stall.
-            // We apply it to the `nextTempBuffer`, which holds the output of the heat kernel.
-            // =====================================================================================
-            int boundaryType = 2; // Adiabatic (temp[N] = temp[N-1])
-            float boundaryValue = 0; // Not used for Adiabatic
+            int boundaryType = 2; 
+            float boundaryValue = 0; 
             var nr = _nr;
             var nth = _nth;
             var nz = _nz;
             _cl.SetKernelArg(_boundaryConditionsKernel, 0, (nuint)sizeof(nint), &nextTempBuffer);
-            _cl.SetKernelArg(_boundaryConditionsKernel, 1, sizeof(int), &nr); // CORRECTED: Pass by reference
-            _cl.SetKernelArg(_boundaryConditionsKernel, 2, sizeof(int), &nth); // CORRECTED: Pass by reference
-            _cl.SetKernelArg(_boundaryConditionsKernel, 3, sizeof(int), &nz); // CORRECTED: Pass by reference
+            _cl.SetKernelArg(_boundaryConditionsKernel, 1, sizeof(int), &nr); 
+            _cl.SetKernelArg(_boundaryConditionsKernel, 2, sizeof(int), &nth); 
+            _cl.SetKernelArg(_boundaryConditionsKernel, 3, sizeof(int), &nz); 
             _cl.SetKernelArg(_boundaryConditionsKernel, 4, sizeof(int), &boundaryType);
             _cl.SetKernelArg(_boundaryConditionsKernel, 5, sizeof(float), &boundaryValue);
 
-            // Execute the boundary kernel on the outer radial boundary (nth * nz threads)
             var boundaryWorkSize = (nuint)(_nth * _nz);
             _cl.EnqueueNdrangeKernel(_queue, _boundaryConditionsKernel, 1, null, &boundaryWorkSize, null, 0, null, null);
 
-            // --- STEP 2: CALCULATE CHANGE AND CHECK CONVERGENCE ---
             var tempChangeBuf = _temperatureChangeBuffer;
             _cl.SetKernelArg(_reductionKernel, 0, (nuint)sizeof(nint), &tempChangeBuf);
             var maxChangeBuf = _maxChangeBuffer;
             _cl.SetKernelArg(_reductionKernel, 1, (nuint)sizeof(nint), &maxChangeBuf);
-            _cl.SetKernelArg(_reductionKernel, 2, (nuint)(localWorkSize * sizeof(float)), null); // Local memory
+            _cl.SetKernelArg(_reductionKernel, 2, (nuint)(localWorkSize * sizeof(float)), null); 
             var totalSize_int = totalSize;
             _cl.SetKernelArg(_reductionKernel, 3, sizeof(int), &totalSize_int);
             var localSize = (nuint)localWorkSize;
@@ -776,7 +772,6 @@ public class GeothermalOpenCLSolver : IDisposable
             maxChange = 0f;
             for (var i = 0; i < numGroups; i++) { if (partialMaxes[i] > maxChange) maxChange = partialMaxes[i]; }
 
-            // --- STEP 3: SWAP BUFFERS FOR NEXT ITERATION ---
             var temp = _temperatureBuffer;
             _temperatureBuffer = _newTempBuffer;
             _newTempBuffer = temp;
@@ -787,8 +782,6 @@ public class GeothermalOpenCLSolver : IDisposable
             }
         }
 
-        // --- FINAL STEP: READ FINAL RESULT BACK TO CPU ---
-        // After the loop, the converged result is in _temperatureBuffer (due to the last swap).
         var finalTempFlat = new float[totalSize];
         fixed (float* newTempPtr = finalTempFlat)
         {
@@ -857,8 +850,6 @@ public class GeothermalOpenCLSolver : IDisposable
     {
         return @"
 // OpenCL 1.2 kernels for geothermal heat transfer simulation
-// DEFINITIVE FIX: Boundary conditions are now fully integrated into the main kernel
-// to ensure correct state updates during internal GPU iterations.
 
 #define M_PI_F 3.14159265358979323846f
 
@@ -866,6 +857,10 @@ public class GeothermalOpenCLSolver : IDisposable
 #define BC_DIRICHLET 0
 #define BC_NEUMANN   1
 #define BC_ADIABATIC 2
+
+// NEW: Enum mapping for FlowConfiguration
+#define FLOW_STANDARD 0
+#define FLOW_REVERSED 1
 
 // Utility function to get global index
 inline int get_idx(int i, int j, int k, int nth, int nz) {
@@ -895,14 +890,7 @@ __kernel void heat_transfer_kernel(
     const int nth,                          // Angular points
     const int nz,                           // Vertical points
     const int simulateGroundwater,          // Enable groundwater flow
-    
-    // DEFINITIVE FIX: Boundary Condition Parameters
-    const int top_bc_type,
-    const float top_bc_value,
-    const int bottom_bc_type,
-    const float bottom_bc_value,            // Geothermal heat flux for Neumann
-    const int outer_bc_type,
-    const float outer_bc_value
+    const int flow_config                   // NEW: Flow configuration flag
 )
 {
     const int idx = get_global_id(0);
@@ -915,144 +903,117 @@ __kernel void heat_transfer_kernel(
     const int j = (idx / nz) % nth;
     const int i = idx / (nz * nth);
     
-    float T_new = temperature[idx]; // Default to old value
-
-    // ========================================================================
-    // HANDLE BOUNDARY CONDITIONS FIRST
-    // ========================================================================
-    if (k == 0) { // Top boundary
-        if (top_bc_type == BC_DIRICHLET) {
-            T_new = top_bc_value;
-        } else { // Adiabatic (or Neumann, treated as no-flow at surface)
-            T_new = temperature[get_idx(i, j, 1, nth, nz)];
-        }
-    } 
-    else if (k == nz - 1) { // Bottom boundary
-        if (bottom_bc_type == BC_NEUMANN) {
-            float dz = fabs(z_coord[nz - 1] - z_coord[nz - 2]);
-            float lambda = conductivity[idx];
-            // q = -lambda * dT/dz  =>  T_new = T_prev - q * dz / lambda
-            T_new = temperature[get_idx(i, j, nz - 2, nth, nz)] - (bottom_bc_value * dz / lambda);
-        } else { // Adiabatic
-             T_new = temperature[get_idx(i, j, nz - 2, nth, nz)];
-        }
+    // Boundary conditions are handled by a separate kernel to simplify logic here
+    if (i == 0 || i >= nr - 1 || k == 0 || k >= nz - 1) {
+        newTemp[idx] = temperature[idx]; // Keep boundary values constant during this step
+        temperatureChange[idx] = 0.0f;
+        return;
     }
-    else if (i == nr - 1) { // Outer radial boundary
-        if (outer_bc_type == BC_DIRICHLET) {
-            T_new = outer_bc_value;
-        } 
-        else if (outer_bc_type == BC_NEUMANN) {
-            float dr = r_coord[nr - 1] - r_coord[nr - 2];
-            float lambda = conductivity[idx];
-            // q = -lambda * dT/dr  =>  T_new = T_prev + q * dr / lambda
-            T_new = temperature[get_idx(nr - 2, j, k, nth, nz)] + (outer_bc_value * dr / lambda);
-        }
-        else { // Adiabatic
-            T_new = temperature[get_idx(nr - 2, j, k, nth, nz)];
-        }
+    
+    const float T_old = temperature[idx];
+    
+    // Material properties
+    const float lambda = clamp(conductivity[idx], 0.1f, 10.0f);
+    const float rho = clamp(density[idx], 500.0f, 5000.0f);
+    const float cp = clamp(specificHeat[idx], 100.0f, 5000.0f);
+    const float rho_cp = rho * cp;
+    const float alpha_thermal = lambda / rho_cp;
+    
+    // Grid spacings
+    const float r = fmax(0.01f, r_coord[i]);
+    const int jm = (j - 1 + nth) % nth;
+    const int jp = (j + 1) % nth;
+    const float dr_m = fmax(0.001f, r_coord[i] - r_coord[i - 1]);
+    const float dr_p = fmax(0.001f, r_coord[i + 1] - r_coord[i]);
+    const float dth = 2.0f * M_PI_F / nth;
+    const float dz_m = fmax(0.001f, fabs(z_coord[k] - z_coord[k - 1]));
+    const float dz_p = fmax(0.001f, fabs(z_coord[k + 1] - z_coord[k]));
+    
+    // Neighbor temperatures
+    const float T_rm = temperature[get_idx(i - 1, j, k, nth, nz)];
+    const float T_rp = temperature[get_idx(i + 1, j, k, nth, nz)];
+    const float T_zm = temperature[get_idx(i, j, k - 1, nth, nz)];
+    const float T_zp = temperature[get_idx(i, j, k + 1, nth, nz)];
+    const float T_thm = temperature[get_idx(i, jm, k, nth, nz)];
+    const float T_thp = temperature[get_idx(i, jp, k, nth, nz)];
+    
+    // Explicit terms (Diffusion + Advection)
+    const float d2T_dr2 = (T_rp - 2.0f * T_old + T_rm) / (dr_m * dr_p);
+    const float dT_dr = (T_rp - T_rm) / (dr_p + dr_m);
+    const float d2T_dth2 = (T_thp - 2.0f * T_old + T_thm) / (r * r * dth * dth);
+    const float d2T_dz2 = (T_zp - 2.0f * T_old + T_zm) / (dz_m * dz_p);
+    const float laplacian = d2T_dr2 + dT_dr / r + d2T_dth2 + d2T_dz2;
+    
+    float advection = 0.0f;
+    if (simulateGroundwater) {
+        const int vel_idx = idx * 3;
+        const float vr = velocity[vel_idx];
+        const float vth = velocity[vel_idx + 1];
+        const float vz = velocity[vel_idx + 2];
+        const float dT_dr_adv = (vr >= 0.0f) ? (T_old - T_rm) / dr_m : (T_rp - T_old) / dr_p;
+        const float dT_dth_adv = (T_thp - T_thm) / (2.0f * r * dth);
+        const float dT_dz_adv = (vz >= 0.0f) ? (T_old - T_zm) / dz_m : (T_zp - T_old) / dz_p;
+        advection = -(vr * dT_dr_adv + vth * dT_dth_adv + vz * dT_dz_adv);
     }
-    else if (i == 0) { // Center axis (always adiabatic due to symmetry)
-        T_new = temperature[get_idx(1, j, k, nth, nz)];
+    
+    float dispersion_term = 0.0f;
+    if (simulateGroundwater && dispersion[idx] > 0.0f) {
+        dispersion_term = dispersion[idx] * laplacian;
     }
-    // ========================================================================
-    // HANDLE INTERIOR POINTS
-    // ========================================================================
-    else 
-    {
-        const float T_old = temperature[idx];
-        
-        // Material properties
-        const float lambda = clamp(conductivity[idx], 0.1f, 10.0f);
-        const float rho = clamp(density[idx], 500.0f, 5000.0f);
-        const float cp = clamp(specificHeat[idx], 100.0f, 5000.0f);
-        const float rho_cp = rho * cp;
-        const float alpha_thermal = lambda / rho_cp;
-        
-        // Grid spacings
-        const float r = fmax(0.01f, r_coord[i]);
-        const int jm = (j - 1 + nth) % nth;
-        const int jp = (j + 1) % nth;
-        const float dr_m = fmax(0.001f, r_coord[i] - r_coord[i - 1]);
-        const float dr_p = fmax(0.001f, r_coord[i + 1] - r_coord[i]);
-        const float dth = 2.0f * M_PI_F / nth;
-        const float dz_m = fmax(0.001f, fabs(z_coord[k] - z_coord[k - 1]));
-        const float dz_p = fmax(0.001f, fabs(z_coord[k + 1] - z_coord[k]));
-        
-        // Neighbor temperatures
-        const float T_rm = temperature[get_idx(i - 1, j, k, nth, nz)];
-        const float T_rp = temperature[get_idx(i + 1, j, k, nth, nz)];
-        const float T_zm = temperature[get_idx(i, j, k - 1, nth, nz)];
-        const float T_zp = temperature[get_idx(i, j, k + 1, nth, nz)];
-        const float T_thm = temperature[get_idx(i, jm, k, nth, nz)];
-        const float T_thp = temperature[get_idx(i, jp, k, nth, nz)];
-        
-        // Explicit terms (Diffusion + Advection)
-        const float d2T_dr2 = (T_rp - 2.0f * T_old + T_rm) / (dr_m * dr_p);
-        const float dT_dr = (T_rp - T_rm) / (dr_p + dr_m);
-        const float d2T_dth2 = (T_thp - 2.0f * T_old + T_thm) / (r * r * dth * dth);
-        const float d2T_dz2 = (T_zp - 2.0f * T_old + T_zm) / (dz_m * dz_p);
-        const float laplacian = d2T_dr2 + dT_dr / r + d2T_dth2 + d2T_dz2;
-        
-        float advection = 0.0f;
-        if (simulateGroundwater) {
-            const int vel_idx = idx * 3;
-            const float vr = velocity[vel_idx];
-            const float vth = velocity[vel_idx + 1];
-            const float vz = velocity[vel_idx + 2];
-            const float dT_dr_adv = (vr >= 0.0f) ? (T_old - T_rm) / dr_m : (T_rp - T_old) / dr_p;
-            const float dT_dth_adv = (T_thp - T_thm) / (2.0f * r * dth);
-            const float dT_dz_adv = (vz >= 0.0f) ? (T_old - T_zm) / dz_m : (T_zp - T_old) / dz_p;
-            advection = -(vr * dT_dr_adv + vth * dT_dth_adv + vz * dT_dz_adv);
-        }
-        
-        float dispersion_term = 0.0f;
-        if (simulateGroundwater && dispersion[idx] > 0.0f) {
-            dispersion_term = dispersion[idx] * laplacian;
-        }
 
-        float T_explicit = T_old + dt * (alpha_thermal * laplacian + dispersion_term + advection);
+    float T_explicit = T_old + dt * (alpha_thermal * laplacian + dispersion_term + advection);
 
-        // Heat exchanger source term (SEMI-IMPLICIT)
-        const float pipeRadius = heParams[0];
-        const float boreholeDepth = heParams[1];
-        const float rInfluence = fmax(pipeRadius * 10.0f, 0.5f);
-        T_new = T_explicit;
+    // Heat exchanger source term (SEMI-IMPLICIT)
+    const float pipeRadius = heParams[0];
+    const float boreholeDepth = heParams[1];
+    const float rInfluence = fmax(pipeRadius * 10.0f, 0.5f);
+    float T_new = T_explicit;
 
-        if (r <= rInfluence) {
-            const float depth = fmax(0.0f, -z_coord[k]);
-            if (depth <= boreholeDepth) {
-                const float baseHTC = heParams[5];
-                const float heType = heParams[6];
-                const int nzHE = (int)heParams[7];
-                const int heIndex = clamp((int)(depth / boreholeDepth * nzHE), 0, nzHE - 1);
-                
-                float Tfluid = (heType > 0.5f) ? 0.5f * (fluidTempDown[heIndex] + fluidTempUp[heIndex]) : fluidTempUp[heIndex];
-
-                float effectiveU;
-                if (r <= pipeRadius * 2.0f) {
-                    effectiveU = baseHTC * 2.0f;
-                } else if (r <= pipeRadius * 5.0f) {
-                    effectiveU = 2.0f / fmax(0.01f, r - pipeRadius);
-                } else {
-                    effectiveU = 0.5f * baseHTC * (pipeRadius * 5.0f) / r;
-                }
-                effectiveU = clamp(effectiveU, 0.0f, 1000.0f);
-                
-                const float cellVolume = fmax(1e-6f, cellVolumes[idx]);
-                const float contactArea = 2.0f * M_PI_F * r * (dz_m + dz_p) * 0.5f;
-                const float U_vol = effectiveU * contactArea / cellVolume;
-
-                const float source_explicit_part = dt * U_vol * Tfluid / rho_cp;
-                const float source_implicit_part = dt * U_vol / rho_cp;
-                T_new = (T_explicit + source_explicit_part) / (1.0f + source_implicit_part);
+    if (r <= rInfluence) {
+        const float depth = fmax(0.0f, -z_coord[k]);
+        if (depth <= boreholeDepth) {
+            const float baseHTC = heParams[5];
+            const float heType = heParams[6];
+            const int nzHE = (int)heParams[7];
+            const int heIndex = clamp((int)(depth / boreholeDepth * nzHE), 0, nzHE - 1);
+            
+            float Tfluid;
+            // NEW: Select the correct fluid stream based on flow configuration
+            if (flow_config == FLOW_REVERSED) {
+                // Reversed Flow: Ground interacts with DOWNWARD fluid in annulus
+                Tfluid = (heType > 0.5f) 
+                    ? 0.5f * (fluidTempDown[heIndex] + fluidTempUp[heIndex]) // U-Tube
+                    : fluidTempDown[heIndex]; // Coaxial Reversed
+            } else {
+                // Standard Flow: Ground interacts with UPWARD fluid in annulus
+                Tfluid = (heType > 0.5f)
+                    ? 0.5f * (fluidTempDown[heIndex] + fluidTempUp[heIndex]) // U-Tube
+                    : fluidTempUp[heIndex]; // Coaxial Standard
             }
+
+            float effectiveU;
+            if (r <= pipeRadius * 2.0f) {
+                effectiveU = baseHTC * 2.0f;
+            } else if (r <= pipeRadius * 5.0f) {
+                effectiveU = 2.0f / fmax(0.01f, r - pipeRadius);
+            } else {
+                effectiveU = 0.5f * baseHTC * (pipeRadius * 5.0f) / r;
+            }
+            effectiveU = clamp(effectiveU, 0.0f, 1000.0f);
+            
+            const float cellVolume = fmax(1e-6f, cellVolumes[idx]);
+            const float contactArea = 2.0f * M_PI_F * r * (dz_m + dz_p) * 0.5f;
+            const float U_vol = effectiveU * contactArea / cellVolume;
+
+            const float source_explicit_part = dt * U_vol * Tfluid / rho_cp;
+            const float source_implicit_part = dt * U_vol / rho_cp;
+            T_new = (T_explicit + source_explicit_part) / (1.0f + source_implicit_part);
         }
     }
     
-    // Clamp to physical bounds and write results
     T_new = clamp(T_new, 273.0f, 473.0f);
     newTemp[idx] = T_new;
-    temperatureChange[idx] = fabs(T_new - temperature[idx]);
+    temperatureChange[idx] = fabs(T_new - T_old);
 }
 
 // A correct parallel reduction kernel.

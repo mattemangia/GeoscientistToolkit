@@ -659,7 +659,7 @@ public class GeothermalSimulationTools : IDatasetTools, IDisposable
             }
 
             var flowConfig = _selectedFlowConfig;
-            if (ImGui.Combo("Flow", ref flowConfig, "Counter Flow\0Parallel Flow\0"))
+            if (ImGui.Combo("Flow", ref flowConfig, "Standard Counter-Flow\0Reversed Counter-Flow\0"))
             {
                 _selectedFlowConfig = flowConfig;
                 _options.FlowConfiguration = (FlowConfiguration)_selectedFlowConfig;
@@ -693,7 +693,16 @@ public class GeothermalSimulationTools : IDatasetTools, IDisposable
                 _options.PipeThermalConductivity = pipeConductivity;
                 _selectedPreset = 0; // Switch to Custom
             }
-
+            if (_options.HeatExchangerType == HeatExchangerType.Coaxial)
+            {
+                var innerPipeConductivity = (float)_options.InnerPipeThermalConductivity;
+                if (ImGui.SliderFloat("Inner Pipe Conductivity (W/m·K)", ref innerPipeConductivity, 0.01f, 50.0f, "%.3f", ImGuiSliderFlags.Logarithmic))
+                {
+                    _options.InnerPipeThermalConductivity = innerPipeConductivity;
+                    _selectedPreset = 0; // Switch to Custom
+                }
+                ImGui.SetItemTooltip("Controls internal heat loss.\nLow (<0.1): Insulated (VIT)\nHigh (>15): Conductive (Steel)");
+            }
             var groutConductivity = (float)_options.GroutThermalConductivity;
             if (ImGui.SliderFloat("Grout Conductivity (W/m·K)", ref groutConductivity, 1.0f, 5.0f))
             {

@@ -240,7 +240,6 @@ public class GeothermalSimulationSolver : IDisposable
             _mesh.Permeabilities[i, j, k] = Math.Max(1e-20f, Math.Min(1e-8f, _mesh.Permeabilities[i, j, k]));
         }
     }
-
     /// <summary>
     ///     Executes the geothermal simulation with enhanced stability. (MODIFIED)
     /// </summary>
@@ -250,167 +249,222 @@ public class GeothermalSimulationSolver : IDisposable
         var startTime = DateTime.Now;
 
         _progress?.Report((0f, "Initializing simulation..."));
-
-        // Diagnostic logging for debugging
         LogSimulationDiagnostics();
 
-        // Time stepping loop with adaptive control (MODIFIED)
-        var currentTime = 0.0;
+        double currentTime = 0.0;
         var saveCounter = 0;
-        var actualTimeStep = _options.TimeStep;
-        _lastStableTimeStep = (float)actualTimeStep;
-        int step = 0; // Manual step counter
 
-        // =================================================================================
-        // DEFINITIVE FIX: The main simulation loop must be a 'while' loop based on
-        // currentTime to properly support adaptive time stepping. The previous 'for' loop
-        // caused the simulation to terminate prematurely.
-        // =================================================================================
+        // Calcola un "passo di crociera" ideale basato sulla durata totale.
+        double targetTimeStep = Math.Max(60.0, _options.SimulationTime / 5000.0);
+        Logger.Log($"Target time step for this run: {targetTimeStep / 3600:F2} hours.");
+
+        // Partenza sicura e controllata.
+        double actualTimeStep = 30.0;
+        _adaptiveRelaxation = 0.1f;
+        int step = 0;
+
         while (currentTime < _options.SimulationTime)
         {
-            // Check for cancellation at the start of each step
             _cancellationToken.ThrowIfCancellationRequested();
-
-            // Update current state for UI reporting
             CurrentTimeStep = step;
             CurrentSimulationTime = currentTime;
 
-            // Progress reporting
-            if (step % 10 == 0 || step < 5)
+            if (step % 10 == 0 || step < 10)
             {
                 var progress = (float)(currentTime / _options.SimulationTime);
-                var message =
-                    $"Step {step}, t={currentTime / 86400:F2} days, dt={actualTimeStep:F1}s, " +
-                    $"relax={_adaptiveRelaxation:F2} - {ConvergenceStatus}";
+                var message = $"Step {step}, t={currentTime / 86400:F2}d, dt={actualTimeStep / 3600:F2}h, relax={_adaptiveRelaxation:F2}";
                 _progress?.Report((progress, message));
-                
-                if (step < 5)
-                {
-                    Logger.Log($"[Step {step}] Error={_maxError:E3}, Relaxation={_adaptiveRelaxation:F2}, " +
-                              $"TimeStep={actualTimeStep:F1}s, Convergence={ConvergenceStatus}");
-                }
             }
 
-            // Clear convergence history for this time step
-            var stepStartHeatIdx = HeatConvergenceHistory.Count;
-            var stepStartFlowIdx = FlowConvergenceHistory.Count;
-
-            // Try to solve with current time step
             var stepSuccessful = false;
-            var retryCount = 0;
-            const int maxRetries = 3;
-
-            while (!stepSuccessful && retryCount < maxRetries)
+            int attempt = 0;
+            while (!stepSuccessful)
+            {
                 try
                 {
-                    // Store old temperature field for rollback in case of divergence
                     _temperatureOld = (float[,,])_temperature.Clone();
-
-                    // Solve coupled system
+                    
                     if (_options.SimulateGroundwaterFlow)
                     {
                         await SolveGroundwaterFlowAsync();
                         CalculatePecletAndDispersivity();
                     }
-
-                    // Update heat exchanger with damping to prevent oscillations
-                    UpdateHeatExchanger();
                     
+                    UpdateHeatExchanger();
                     await SolveHeatTransferAsync((float)actualTimeStep);
 
-                    stepSuccessful = true;
-                    _divergenceCount = 0; // Reset divergence counter on success
-
-                    // Adjust relaxation based on convergence
-                    if (_maxError < _options.ConvergenceTolerance * 0.5)
-                    {
-                        _adaptiveRelaxation = Math.Min(0.7f, _adaptiveRelaxation * 1.02f);
-                    }
-                    else if (_maxError > _options.ConvergenceTolerance)
-                    {
-                        _adaptiveRelaxation = Math.Max(0.3f, _adaptiveRelaxation * 0.95f);
-                    }
+                    stepSuccessful = true; // Se arriviamo qui senza eccezioni, il passo è matematicamente valido.
                 }
                 catch (ArithmeticException ex) when (ex.Message.Contains("diverged"))
                 {
-                    // Rollback temperature field to the last stable state
+                    // Fallimento Catastrofico (NaN/Infinity). L'unica opzione è tagliare il time step.
                     _temperature = (float[,,])_temperatureOld.Clone();
-
-                    // Aggressively reduce time step and relaxation
                     actualTimeStep *= 0.5;
-                    _adaptiveRelaxation = Math.Max(0.2f, _adaptiveRelaxation * 0.5f);
-                    _divergenceCount++;
-
-                    retryCount++;
-                    ConvergenceStatus = $"Reducing time step to {actualTimeStep:F1}s (retry {retryCount}/{maxRetries})";
-
-                    if (retryCount >= maxRetries)
-                    {
-                        // Force continuation with a minimal step to avoid getting stuck
-                        actualTimeStep = 1.0; 
-                        stepSuccessful = true; 
-                        ConvergenceStatus = "Using minimal time step to continue";
-                    }
+                    _adaptiveRelaxation = Math.Max(0.1f, _adaptiveRelaxation * 0.8f);
+                    ConvergenceStatus = $"DIVERGENCE! Slashing dt to {actualTimeStep:F1}s";
+                    
+                    if (actualTimeStep < 10.0) // Pavimento di emergenza
+                        throw new InvalidOperationException("Simulation fundamentally unstable even at minimal time steps. Check material properties.");
                 }
+            }
 
-            // Track convergence history
-            var stepHeatConv = HeatConvergenceHistory.Skip(stepStartHeatIdx).LastOrDefault();
-            var stepFlowConv = FlowConvergenceHistory.Skip(stepStartFlowIdx).LastOrDefault();
-            ConvergenceHistory.Add(Math.Max(stepHeatConv, stepFlowConv));
+            ConvergenceHistory.Add(_maxError);
             TimeStepHistory.Add(actualTimeStep);
 
-            // Save results at specified intervals
             if (++saveCounter >= _options.SaveInterval)
             {
                 saveCounter = 0;
                 SaveTimeStepResults(results, currentTime);
             }
 
-            // Increment time and step counter
             currentTime += actualTimeStep;
             step++;
-
-            // Adapt time step for the next iteration
-            if (stepSuccessful && _divergenceCount == 0)
-            {
-                var recentConvergence = ConvergenceHistory.Skip(Math.Max(0, ConvergenceHistory.Count - 10)).Average();
-                
-                if (recentConvergence < _options.ConvergenceTolerance * 0.1)
-                {
-                    actualTimeStep = Math.Min(_options.TimeStep, actualTimeStep * 1.02);
-                }
-                else if (recentConvergence < _options.ConvergenceTolerance * 0.5)
-                {
-                    actualTimeStep = Math.Min(_options.TimeStep, actualTimeStep * 1.01);
-                }
-                
-                _lastStableTimeStep = (float)actualTimeStep;
-            }
+            
+            // Applica la nuova logica di controllo intelligente per il prossimo passo.
+            actualTimeStep = AdjustParametersAfterStep(actualTimeStep, targetTimeStep, step, ConvergenceHistory, _options);
         }
 
-        // Final results processing
         _progress?.Report((0.9f, "Processing final results..."));
-
         results.FinalTemperatureField = (float[,,])_temperature.Clone();
         results.PressureField = (float[,,])_pressure.Clone();
         results.HydraulicHeadField = (float[,,])_hydraulicHead.Clone();
         results.DarcyVelocityField = (float[,,,])_velocity.Clone();
         results.PecletNumberField = (float[,,])_pecletNumber.Clone();
         results.DispersivityField = (float[,,])_dispersionCoefficient.Clone();
-
         CalculatePerformanceMetrics(results);
         await GenerateVisualizationDataAsync(results);
-
         results.ComputationTime = DateTime.Now - startTime;
         results.TimeStepsComputed = step;
         results.AverageIterationsPerStep = (double)_totalIterations / Math.Max(1, step);
         results.FinalConvergenceError = _maxError;
         results.PeakMemoryUsage = GC.GetTotalMemory(false) / (1024.0 * 1024.0);
-
         _progress?.Report((1f, "Simulation complete"));
-
         return results;
     }
+    private double AdjustParametersAfterStep(double currentDt, double targetDt, int step, List<double> convergenceHistory, GeothermalSimulationOptions options)
+    {
+        double lastError = convergenceHistory.Last();
+        double newDt = currentDt;
+
+        // Fase 1: Partenza ultra-conservativa per i primi 30 passi per assorbire lo shock iniziale.
+        if (step < 30)
+        {
+            _adaptiveRelaxation = Math.Max(0.05f, _adaptiveRelaxation * 0.95f); // Mantieni il damping alto
+            newDt = Math.Min(newDt * 1.1, 300); // Crescita molto lenta fino a un massimo di 5 minuti
+            ConvergenceStatus = "Initial stabilization phase";
+        }
+        else // Fase 2: Operazione Normale
+        {
+            if (lastError < options.ConvergenceTolerance)
+            {
+                // SUCCESSO: La convergenza è buona.
+                // Aumenta il time step verso il nostro obiettivo e riduci leggermente il damping (più veloce).
+                newDt = Math.Min(currentDt * 1.2, targetDt);
+                _adaptiveRelaxation *= 1.1f;
+                ConvergenceStatus = "Converged. Accelerating.";
+            }
+            else
+            {
+                // DIFFICOLTÀ: Il solver ha finito ma l'errore è troppo alto.
+                // Invece di tagliare il time step, la nostra PRIMA reazione è aumentare la stabilità.
+                _adaptiveRelaxation *= 0.75f;
+                ConvergenceStatus = $"Struggling (err: {lastError:E2}). Increasing damping.";
+                // NON cambiamo il time step al primo segno di difficoltà. Diamo una possibilità al damping.
+            }
+        }
+        
+        // Limiti di sicurezza finali, applicati sempre.
+        _adaptiveRelaxation = Math.Clamp(_adaptiveRelaxation, 0.05f, 0.7f); // Damping sempre tra 5% e 70%
+        newDt = Math.Clamp(newDt, 30.0, options.TimeStep); // Time step MAI sotto i 30s e mai sopra il massimo dell'utente.
+
+        return newDt;
+    }
+    private double AdjustParametersAfterStep(double currentDt, List<double> convergenceHistory, GeothermalSimulationOptions options)
+    {
+        double lastError = convergenceHistory.Last();
+        double newDt = currentDt;
+
+        if (lastError < options.ConvergenceTolerance * 0.2)
+        {
+            // Case 1: EXCELLENT convergence. Be bold.
+            // Aggressively increase time step and make solver faster (higher relaxation).
+            newDt *= 1.5;
+            _adaptiveRelaxation *= 1.1f;
+            ConvergenceStatus = "Excellent convergence. Increasing dt.";
+        }
+        else if (lastError < options.ConvergenceTolerance)
+        {
+            // Case 2: GOOD convergence. Be cautious.
+            // Slightly increase time step, keep solver settings stable.
+            newDt *= 1.1;
+            ConvergenceStatus = "Good convergence. Cautiously increasing dt.";
+        }
+        else
+        {
+            // Case 3: STRUGGLING (finished but error is high). This is the cause of the death spiral.
+            // First priority is to add stability by reducing relaxation (more damping).
+            // Second priority is to slightly reduce the time step.
+            _adaptiveRelaxation *= 0.85f;
+            newDt *= 0.9;
+            ConvergenceStatus = $"Struggling (err: {lastError:E2}). Increasing damping.";
+        }
+        
+        // Final Safety Clamping for all cases.
+        _adaptiveRelaxation = Math.Clamp(_adaptiveRelaxation, 0.1f, 0.8f);
+        newDt = Math.Clamp(newDt, 1.0, options.TimeStep);
+
+        return newDt;
+    }
+    private double UpdateAdaptiveTimeStep(double currentDt, int step, List<double> convergenceHistory, GeothermalSimulationOptions options)
+    {
+        const double minTimeStep = 1.0; // Minimum allowed time step in seconds.
+        const double aggressiveGrowthFactor = 1.5;
+        const double moderateGrowthFactor = 1.1;
+        const double shrinkFactor = 0.75;
+        
+        // Define a target "cruising" time step based on total simulation time, aiming for ~2000-5000 steps.
+        double targetDt = options.SimulationTime / 3000.0;
+
+        double newDt = currentDt;
+
+        // Phase 1: Initial Stabilization (first 10 steps)
+        if (step < 10)
+        {
+            // Be very conservative at the start to handle the initial thermal shock.
+            if (convergenceHistory.Last() < options.ConvergenceTolerance * 0.5)
+            {
+                newDt *= 1.2; // Allow slightly faster growth if it's super stable
+            }
+            // Don't shrink here, let the divergence handler do it.
+        }
+        else // Phase 2: Normal Operation
+        {
+            var recentConvergence = convergenceHistory.Skip(Math.Max(0, convergenceHistory.Count - 3)).Average();
+
+            if (recentConvergence < options.ConvergenceTolerance * 0.1)
+            {
+                // Excellent convergence: Grow aggressively towards the target time step.
+                newDt = Math.Min(currentDt * aggressiveGrowthFactor, targetDt);
+            }
+            else if (recentConvergence < options.ConvergenceTolerance * 0.75)
+            {
+                // Good convergence: Grow moderately.
+                newDt *= moderateGrowthFactor;
+            }
+            else if (recentConvergence > options.ConvergenceTolerance)
+            {
+                // Poor convergence: Shrink the time step.
+                newDt *= shrinkFactor;
+            }
+        }
+        
+        // Final Safety Clamping: Ensure the new time step is within safe, reasonable bounds.
+        newDt = Math.Max(minTimeStep, newDt);
+        newDt = Math.Min(options.TimeStep, newDt); // Respect user's maximum setting.
+
+        return newDt;
+    }
+
     /// <summary>
     ///     Initializes all field arrays with initial conditions.
     /// </summary>
@@ -421,50 +475,40 @@ public class GeothermalSimulationSolver : IDisposable
         var nz = _mesh.VerticalPoints;
 
         _temperature = new float[nr, nth, nz];
-        _temperatureOld = new float[nr, nth, nz]; // ADDED
+        _temperatureOld = new float[nr, nth, nz];
         _pressure = new float[nr, nth, nz];
         _hydraulicHead = new float[nr, nth, nz];
-        _velocity = new float[nr, nth, nz, 3]; // r, theta, z components
+        _velocity = new float[nr, nth, nz, 3];
         _pecletNumber = new float[nr, nth, nz];
         _dispersionCoefficient = new float[nr, nth, nz];
 
-        // CORRECTED: Proper handling of depth coordinates
-        // In the mesh, Z values are NEGATIVE going down, so depth = -Z
         Func<float, float> getTempAtDepth;
 
         if (_options.InitialTemperatureProfile != null && _options.InitialTemperatureProfile.Any())
         {
             var sortedProfile = _options.InitialTemperatureProfile.OrderBy(p => p.Depth).ToList();
-
             getTempAtDepth = depth =>
             {
                 if (sortedProfile.Count == 1) return (float)sortedProfile[0].Temperature;
-
-                // Find points to interpolate between
                 for (var i = 0; i < sortedProfile.Count - 1; i++)
                 {
                     var p1 = sortedProfile[i];
                     var p2 = sortedProfile[i + 1];
                     if (depth >= p1.Depth && depth <= p2.Depth)
                     {
-                        // Linear interpolation
                         var t = (depth - p1.Depth) / (p2.Depth - p1.Depth);
                         return (float)(p1.Temperature + t * (p2.Temperature - p1.Temperature));
                     }
                 }
-
-                // Extrapolate if outside the defined range
                 if (depth < sortedProfile.First().Depth)
                 {
-                    var p1 = sortedProfile[0];
-                    var p2 = sortedProfile[1];
+                    var p1 = sortedProfile[0]; var p2 = sortedProfile[1];
                     var gradient = (p2.Temperature - p1.Temperature) / (p2.Depth - p1.Depth);
                     return (float)(p1.Temperature - (p1.Depth - depth) * gradient);
                 }
-                else // depth > sortedProfile.Last().Depth
+                else
                 {
-                    var p1 = sortedProfile[sortedProfile.Count - 2];
-                    var p2 = sortedProfile.Last();
+                    var p1 = sortedProfile[sortedProfile.Count - 2]; var p2 = sortedProfile.Last();
                     var gradient = (p2.Temperature - p1.Temperature) / (p2.Depth - p1.Depth);
                     return (float)(p2.Temperature + (depth - p2.Depth) * gradient);
                 }
@@ -472,105 +516,56 @@ public class GeothermalSimulationSolver : IDisposable
         }
         else
         {
-            // ENHANCED: Use more realistic geothermal gradient
-            var surfaceTemp = (float)_options.SurfaceTemperature; // Should be in Kelvin
-            var gradient = (float)_options.AverageGeothermalGradient; // K/m
+            var surfaceTemp = (float)_options.SurfaceTemperature;
+            var gradient = (float)_options.AverageGeothermalGradient;
+            if (gradient < 0.001) gradient = 0.03f;
             
-            // Ensure we have a reasonable gradient (default 30°C/km if not set or too low)
-            if (gradient < 0.001) gradient = 0.03f; // 30°C per 1000m = 0.03 K/m
+            Logger.Log($"Initializing temperature field: Surface={surfaceTemp - 273.15:F1}°C, Gradient={gradient * 1000:F1}°C/km");
             
-            // Log the temperature profile being used
-            Logger.Log($"Initializing temperature field: Surface={surfaceTemp}K ({surfaceTemp - 273.15:F1}°C), " +
-                      $"Gradient={gradient * 1000:F1}°C/km");
-            
-            getTempAtDepth = depth =>
-            {
-                // Temperature increases with depth (in Kelvin)
-                var tempKelvin = surfaceTemp + gradient * depth;
-                
-                // Log some sample depths for debugging
-                if (depth == 0 || Math.Abs(depth - 1000) < 1 || Math.Abs(depth - 2500) < 1)
-                {
-                    Logger.Log($"  Depth {depth:F0}m: {tempKelvin:F1}K ({tempKelvin - 273.15:F1}°C)");
-                }
-                
-                return tempKelvin;
-            };
-        }
+            // DEFINITIVE FIX: Move the diagnostic logging outside the main loop to prevent spam.
+            Logger.Log($"  - Sample Depth 0m: {surfaceTemp:F1}K ({surfaceTemp - 273.15:F1}°C)");
+            float midDepth = _options.BoreholeDataset.TotalDepth / 2.0f;
+            float bottomDepth = _options.BoreholeDataset.TotalDepth;
+            Logger.Log($"  - Sample Depth {midDepth:F0}m: {surfaceTemp + gradient * midDepth:F1}K ({(surfaceTemp + gradient * midDepth) - 273.15:F1}°C)");
+            Logger.Log($"  - Sample Depth {bottomDepth:F0}m: {surfaceTemp + gradient * bottomDepth:F1}K ({(surfaceTemp + gradient * bottomDepth) - 273.15:F1}°C)");
 
-        // ENHANCED: Initialize with proper temperature distribution
+            getTempAtDepth = depth => surfaceTemp + gradient * depth;
+        }
+        
         for (var i = 0; i < nr; i++)
         for (var j = 0; j < nth; j++)
         for (var k = 0; k < nz; k++)
         {
-            // CORRECTED: mesh Z is negative downwards, so depth is -Z
             var depth = Math.Max(0, -_mesh.Z[k]);
             var baseTemp = getTempAtDepth(depth);
             
-            // Add small radial variation to make heat exchange more visible
-            // Temperature slightly cooler near center (where heat exchanger will extract heat)
             var r = _mesh.R[i];
             var rMax = _mesh.R[nr - 1];
-            var radialVariation = 1.0f + 0.02f * (r / rMax); // Up to 2% warmer at edges
+            var radialVariation = 1.0f + 0.02f * (r / rMax);
             
             _temperature[i, j, k] = baseTemp * radialVariation;
-            _temperatureOld[i, j, k] = _temperature[i, j, k]; // ADDED
+            _temperatureOld[i, j, k] = _temperature[i, j, k];
 
-            // Initialize hydraulic head
             var z = _mesh.Z[k];
-            _hydraulicHead[i, j, k] = (float)(_options.HydraulicHeadTop +
-                                              (_options.HydraulicHeadBottom - _options.HydraulicHeadTop) *
-                                              (z - _mesh.Z[0]) / (_mesh.Z[nz - 1] - _mesh.Z[0]));
-
-            // Convert to pressure (Pa)
+            _hydraulicHead[i, j, k] = (float)(_options.HydraulicHeadTop + (_options.HydraulicHeadBottom - _options.HydraulicHeadTop) * (z - _mesh.Z[0]) / (_mesh.Z[nz - 1] - _mesh.Z[0]));
             _pressure[i, j, k] = (float)(1000 * 9.81 * _hydraulicHead[i, j, k]);
         }
 
-        // Store a copy for calculating temperature changes later
         _initialTemperature = (float[,,])_temperature.Clone();
-
-        // Initialize heat exchanger with proper sizing
-        var nzHE = Math.Max(20, (int)(_options.BoreholeDataset.TotalDepth / 50)); // At least 20 elements
+        
+        var nzHE = Math.Max(20, (int)(_options.BoreholeDataset.TotalDepth / 50));
         _fluidTempDown = new float[nzHE];
         _fluidTempUp = new float[nzHE];
-
         for (var i = 0; i < nzHE; i++)
         {
             _fluidTempDown[i] = (float)_options.FluidInletTemperature;
             _fluidTempUp[i] = (float)_options.FluidInletTemperature;
         }
         
-        Logger.Log($"Temperature field initialized: Surface={_options.SurfaceTemperature - 273.15:F1}°C, " + 
-                   $"Gradient={_options.AverageGeothermalGradient * 1000:F1}°C/km, " + 
-                   $"HE elements={nzHE}");
-                   
-        // VALIDATION: Check that temperature field has proper gradient
+        Logger.Log($"Temperature field initialized, HE elements={nzHE}");
         var topTemp = _temperature[nr/2, 0, 0];
-        var midTemp = _temperature[nr/2, 0, nz/2];
         var bottomTemp = _temperature[nr/2, 0, nz-1];
-        
-        Logger.Log($"Initial temperature profile check:");
-        Logger.Log($"  Top (z=0): {topTemp:F1}K ({topTemp - 273.15:F1}°C)");
-        Logger.Log($"  Middle (z={nz/2}): {midTemp:F1}K ({midTemp - 273.15:F1}°C)");
-        Logger.Log($"  Bottom (z={nz-1}): {bottomTemp:F1}K ({bottomTemp - 273.15:F1}°C)");
-        
-        var expectedBottomTemp = _options.SurfaceTemperature + 
-                                 _options.AverageGeothermalGradient * _options.BoreholeDataset.TotalDepth;
-        Logger.Log($"  Expected bottom temp: {expectedBottomTemp:F1}K ({expectedBottomTemp - 273.15:F1}°C)");
-        
-        // Check if gradient is reasonable
-        if (Math.Abs(bottomTemp - topTemp) < 10)
-        {
-            Logger.LogWarning("Temperature gradient too small! Check geothermal gradient settings.");
-            Logger.LogWarning($"Gradient should create ~{_options.AverageGeothermalGradient * _options.BoreholeDataset.TotalDepth:F1}K difference");
-        }
-        
-        // Check fluid inlet vs ground temperature
-        if (Math.Abs(_options.FluidInletTemperature - expectedBottomTemp) < 5)
-        {
-            Logger.LogWarning($"Fluid inlet temp ({_options.FluidInletTemperature - 273.15:F1}°C) too close to ground temp!");
-            Logger.LogWarning("Heat transfer will be minimal. Consider different inlet temperature.");
-        }
+        Logger.Log($"Initial temperature profile check: Top={topTemp - 273.15:F1}°C, Bottom={bottomTemp - 273.15:F1}°C");
     }
 
     /// <summary>
@@ -585,60 +580,61 @@ public class GeothermalSimulationSolver : IDisposable
             var nz = _mesh.VerticalPoints;
 
             var newHead = new float[nr, nth, nz];
-            var omega = 0.3f; // Conservative relaxation for groundwater (ADDED)
+            
+            // DEFINITIVE FIX: The relaxation factor MUST be adaptive. A fixed value is not
+            // robust enough. We start with a reasonably aggressive value and let the solver
+            // reduce it automatically if it struggles.
+            var omega = 0.8f; // Start more aggressively
+            double lastMaxChange = double.MaxValue;
 
             for (var iter = 0; iter < _options.MaxIterationsPerStep; iter++)
             {
                 float maxChange;
 
-                // Interior points - SIMD optimized
                 if (_options.UseSIMD && Avx2.IsSupported)
-                    maxChange = SolveGroundwaterFlowSIMD(newHead, omega); // MODIFIED: added omega
+                    maxChange = SolveGroundwaterFlowSIMD(newHead, omega);
                 else
-                    maxChange = SolveGroundwaterFlowScalar(newHead, omega); // MODIFIED: added omega
+                    maxChange = SolveGroundwaterFlowScalar(newHead, omega);
 
-                // Apply boundary conditions (ADDED)
                 ApplyGroundwaterBoundaryConditions(newHead);
 
-                // Check for divergence (MODIFIED)
-                if (float.IsNaN(maxChange) || float.IsInfinity(maxChange) || maxChange > 1e6f)
+                // Self-Stabilizing Logic
+                if (float.IsNaN(maxChange) || float.IsInfinity(maxChange) || maxChange > lastMaxChange * 2.0)
                 {
-                    ConvergenceStatus = $"Flow solver diverged at iteration {iter}";
-                    // Use smaller relaxation and continue
+                    // If the error is exploding or oscillating, the solver is diverging.
+                    // Make it much more conservative and try again from the last good state.
                     omega *= 0.5f;
-                    continue;
+                    lastMaxChange = double.MaxValue; // Reset divergence check
+                    Array.Copy(_hydraulicHead, newHead, newHead.Length); // Rollback
+                    ConvergenceStatus = $"Flow diverging, reducing omega to {omega:F2}";
+                    continue; // Skip the rest of this iteration
                 }
-
-                // Track convergence
+                
+                lastMaxChange = maxChange;
                 FlowConvergenceHistory.Add(maxChange);
 
-                // Under-relaxation update (ADDED)
+                // Under-relaxation update.
                 for (var i = 0; i < nr; i++)
                 for (var j = 0; j < nth; j++)
                 for (var k = 0; k < nz; k++)
                     _hydraulicHead[i, j, k] = (1 - omega) * _hydraulicHead[i, j, k] + omega * newHead[i, j, k];
 
-                // Report progress
-                if (iter % 100 == 0)
-                    ConvergenceStatus = $"Flow iteration {iter}/{_options.MaxIterationsPerStep}, error: {maxChange:E3}";
+                if (iter % 50 == 0)
+                    ConvergenceStatus = $"Flow iter {iter}, err: {maxChange:E3}, omega: {omega:F2}";
 
                 if (maxChange < _options.ConvergenceTolerance)
                 {
-                    ConvergenceStatus = $"Flow converged in {iter} iterations, error: {maxChange:E3}";
-                    break;
+                    ConvergenceStatus = $"Flow converged in {iter} iterations.";
+                    break; // Success
                 }
 
-                // Warn if not converging
                 if (iter == _options.MaxIterationsPerStep - 1)
                 {
-                    ConvergenceStatus = $"Flow max iterations reached, error: {maxChange:E3}";
-                    if (maxChange > _options.ConvergenceTolerance * 100)
-                        // Don't throw, just warn (MODIFIED)
-                        ConvergenceStatus += " - May affect results";
+                    ConvergenceStatus = $"Flow max iterations reached, err: {maxChange:E3}";
+                    // This is not a fatal error; the main loop will handle the high error.
                 }
             }
 
-            // Calculate velocities from hydraulic head using Darcy's law
             CalculateDarcyVelocities();
         });
     }
@@ -968,7 +964,8 @@ public class GeothermalSimulationSolver : IDisposable
                         _fluidTempDown,
                         _fluidTempUp,
                         _options.MaxIterationsPerStep,
-                        _options.ConvergenceTolerance);
+                        _options.ConvergenceTolerance,
+                        _options.FlowConfiguration); // NEW: Pass the flow configuration
 
                     ApplyBoundaryConditions(_temperature); // Apply BCs to the final result
                 }
@@ -1007,12 +1004,11 @@ public class GeothermalSimulationSolver : IDisposable
     /// </summary>
     private float RunCpuSolver(float dt)
     {
-        // =================================================================================
-        // DEFINITIVE FIX: Initialize the temporary array as a CLONE of the current state.
-        // This prevents un-calculated boundary cells from being reset to zero, which was
-        // the cause of the numerical divergence and static results.
+        // DEFINITIVE FIX #2: The temporary array MUST be initialized as a CLONE of the
+        // current state. Initializing it as a new array (`new float[,,]`) resets all
+        // boundary conditions to zero at every step, which was the root cause of the
+        // unconditional divergence.
         var newTemp = (float[,,])_temperature.Clone();
-        // =================================================================================
 
         float maxChange;
         if (_options.UseSIMD && Avx2.IsSupported)
@@ -1020,11 +1016,10 @@ public class GeothermalSimulationSolver : IDisposable
         else
             maxChange = SolveHeatTransferScalar(newTemp, dt);
 
-        // Apply boundary conditions to the temporary array
+        // Apply boundary conditions to the temporary array AFTER the interior is solved.
         ApplyBoundaryConditions(newTemp);
         
-        // Copy the fully updated temporary array back to the main state array
-        // Because newTemp is now a complete and valid field, this copy is safe.
+        // Now, copy the fully updated temporary array (with correct boundaries) back to the main state array.
         Array.Copy(newTemp, _temperature, newTemp.Length);
 
         return maxChange;
@@ -1035,84 +1030,10 @@ public class GeothermalSimulationSolver : IDisposable
     /// </summary>
     private float CalculateAdaptiveTimeStep()
     {
-        var nr = _mesh.RadialPoints;
-        var nth = _mesh.AngularPoints;
-        var nz = _mesh.VerticalPoints;
-
-        // Find minimum grid spacing
-        var minDx = float.MaxValue;
-        for (var i = 1; i < nr; i++)
-        {
-            var dx = _mesh.R[i] - _mesh.R[i - 1];
-            if (dx > 1e-10f) minDx = Math.Min(minDx, dx);
-        }
-
-        for (var k = 1; k < nz; k++)
-        {
-            var dz = Math.Abs(_mesh.Z[k] - _mesh.Z[k - 1]);
-            if (dz > 1e-10f) minDx = Math.Min(minDx, dz);
-        }
-
-        // Safety check
-        if (minDx == float.MaxValue || minDx < 1e-6f) minDx = 0.1f; // Fallback to 10 cm
-
-        // Find maximum thermal diffusivity
-        var maxAlpha = 1e-10f;
-        for (var i = 0; i < nr; i++)
-        for (var j = 0; j < nth; j++)
-        for (var k = 0; k < nz; k++)
-        {
-            var lambda = _mesh.ThermalConductivities[i, j, k];
-            var rho = _mesh.Densities[i, j, k];
-            var cp = _mesh.SpecificHeats[i, j, k];
-
-            if (rho > 0 && cp > 0)
-            {
-                var alpha = lambda / (rho * cp);
-                maxAlpha = Math.Max(maxAlpha, alpha);
-            }
-        }
-
-        // Clamp to reasonable bounds
-        maxAlpha = Math.Min(maxAlpha, 1e-3f); // Cap at 1e-3 m²/s
-        maxAlpha = Math.Max(maxAlpha, 1e-10f); // Floor at 1e-10 m²/s
-
-        // CFL condition for diffusion with safety factor (MODIFIED)
-        var dt_diffusion = 0.15f * (minDx * minDx) / (2f * maxAlpha * 3f); // More conservative
-
-        // Also consider advection CFL if groundwater flow is enabled
-        var dt_advection = float.MaxValue;
-        if (_options.SimulateGroundwaterFlow)
-        {
-            var maxVel = 0f;
-            for (var i = 0; i < nr; i++)
-            for (var j = 0; j < nth; j++)
-            for (var k = 0; k < nz; k++)
-            {
-                var v = Math.Sqrt(
-                    _velocity[i, j, k, 0] * _velocity[i, j, k, 0] +
-                    _velocity[i, j, k, 1] * _velocity[i, j, k, 1] +
-                    _velocity[i, j, k, 2] * _velocity[i, j, k, 2]
-                );
-                maxVel = Math.Max(maxVel, (float)v);
-            }
-
-            if (maxVel > 1e-10f) dt_advection = 0.3f * minDx / maxVel; // Conservative CFL
-        }
-
-        // Take the most restrictive time step
-        var dt_cfl = Math.Min(dt_diffusion, dt_advection);
-        var dt_max = (float)_options.TimeStep;
-        var dt_effective = Math.Min(dt_cfl, dt_max);
-
-        // Ensure reasonable bounds
-        dt_effective = Math.Max(0.01f, dt_effective); // Minimum 0.01 seconds
-        dt_effective = Math.Min(dt_effective, dt_max); // Maximum is user-specified
-
-        // Safety check
-        if (float.IsNaN(dt_effective) || float.IsInfinity(dt_effective)) dt_effective = 1.0f; // Fallback to 1 second
-
-        return dt_effective;
+        const float safeInitialTimeStep = 30.0f; // Start with a safe 30-second step.
+        
+        // The user's TimeStep option now acts purely as an upper limit.
+        return Math.Min(safeInitialTimeStep, (float)_options.TimeStep);
     }
 
     /// <summary>
@@ -1298,7 +1219,7 @@ public class GeothermalSimulationSolver : IDisposable
         return maxChange;
     }
 
-    /// <summary>
+     /// <summary>
     ///    DEFINITIVE FIX: Scalar heat transfer solver for a single point, now using a semi-implicit
     ///    formulation for the heat exchanger to guarantee numerical stability.
     /// </summary>
@@ -1308,10 +1229,11 @@ public class GeothermalSimulationSolver : IDisposable
         var r = Math.Max(0.01f, _mesh.R[i]);
 
         // Material properties
-        var lambda = Math.Max(0.1f, Math.Min(10f, _mesh.ThermalConductivities[i, j, k]));
-        var rho = Math.Max(500f, Math.Min(5000f, _mesh.Densities[i, j, k]));
-        var cp = Math.Max(100f, Math.Min(5000f, _mesh.SpecificHeats[i, j, k]));
+        var lambda = Math.Max(0.1f, _mesh.ThermalConductivities[i, j, k]);
+        var rho = Math.Max(500f, _mesh.Densities[i, j, k]);
+        var cp = Math.Max(100f, _mesh.SpecificHeats[i, j, k]);
         var rho_cp = rho * cp;
+        if (rho_cp < 1) rho_cp = 1000 * 1000; // Safety
         var alpha_thermal = lambda / rho_cp;
 
         var T_old = _temperature[i, j, k];
@@ -1325,7 +1247,7 @@ public class GeothermalSimulationSolver : IDisposable
         var dz_m = Math.Max(0.001f, Math.Abs(_mesh.Z[k] - _mesh.Z[k - 1]));
         var dz_p = Math.Max(0.001f, Math.Abs(_mesh.Z[k + 1] - _mesh.Z[k]));
         
-        // Neighbor temperatures
+        // Neighbor temperatures (used for the explicit part of the scheme)
         var T_rm = _temperature[i - 1, j, k];
         var T_rp = _temperature[i + 1, j, k];
         var T_zm = _temperature[i, j, k - 1];
@@ -1333,12 +1255,19 @@ public class GeothermalSimulationSolver : IDisposable
         var T_thm = _temperature[i, jm, k];
         var T_thp = _temperature[i, jp, k];
 
-        // Explicit Terms (Diffusion + Advection)
-        var d2T_dr2 = (T_rp - 2 * T_old + T_rm) / (dr_m * dr_p);
-        var dT_dr = (T_rp - T_rm) / (dr_p + dr_m);
-        var d2T_dth2 = (T_thp - 2 * T_old + T_thm) / (r * r * dth * dth);
-        var d2T_dz2 = (T_zp - 2 * T_old + T_zm) / (dz_m * dz_p);
-        var laplacian = d2T_dr2 + dT_dr / r + d2T_dth2 + d2T_dz2;
+        // --- Semi-Implicit Formulation ---
+        // The equation is: (T_new - T_old)/dt = alpha * Laplacian(T) + Source(T)
+        // We rearrange to solve for T_new:
+        // T_new * (1/dt + Implicit_Coeffs) = T_old/dt + Explicit_Terms
+
+        // Part 1: Numerator (Explicit terms and old temperature)
+        // Contribution from neighboring cells in the Laplacian
+        var diffusion_neighbors = alpha_thermal * (
+            (T_rp + T_rm) / (dr_m * dr_p) +
+            (T_zp + T_zm) / (dz_m * dz_p) +
+            (T_thp + T_thm) / (r * r * dth * dth) +
+            (T_rp - T_rm) / (r * (dr_p + dr_m)) // First-order radial term
+        );
 
         var advection = 0f;
         if (_options.SimulateGroundwaterFlow)
@@ -1351,18 +1280,22 @@ public class GeothermalSimulationSolver : IDisposable
             var dT_dz_adv = vz >= 0 ? (T_old - T_zm) / dz_m : (T_zp - T_old) / dz_p;
             advection = -(vr * dT_dr_adv + vth * dT_dth_adv + vz * dT_dz_adv);
         }
+        
+        var numerator = T_old / dt + diffusion_neighbors + advection;
 
-        var dispersion = 0f;
-        if (_options.SimulateGroundwaterFlow && _dispersionCoefficient[i, j, k] > 0)
-            dispersion = _dispersionCoefficient[i, j, k] * laplacian;
+        // Part 2: Denominator (Implicit coefficients for T_new)
+        // The central node's contribution to the Laplacian is treated implicitly for stability
+        var diffusion_center_implicit_coeff = alpha_thermal * (
+            2f / (dr_m * dr_p) +
+            2f / (dz_m * dz_p) +
+            2f / (r * r * dth * dth)
+        );
+        
+        var denominator = 1f / dt + diffusion_center_implicit_coeff;
 
-        // Temperature after explicit part of the update
-        var T_explicit = T_old + dt * (alpha_thermal * laplacian + dispersion + advection);
-        var T_new = T_explicit;
-
-        // Semi-Implicit Heat Exchanger Source Term
+        // Part 3: Heat Exchanger Source Term (also treated implicitly)
         var rHE = (float)(_options.PipeOuterDiameter / 2.0);
-        var rInfluence = Math.Max(rHE * 10.0f, 0.5f);
+        var rInfluence = Math.Max(rHE * 5.0f, 0.5f); // Smaller influence radius for stability
 
         if (r <= rInfluence)
         {
@@ -1370,30 +1303,37 @@ public class GeothermalSimulationSolver : IDisposable
             if (depth <= _options.BoreholeDataset.TotalDepth)
             {
                 var heIndex = Math.Min(_fluidTempDown.Length - 1, (int)(depth / _options.BoreholeDataset.TotalDepth * _fluidTempDown.Length));
-                var Tfluid = _options.HeatExchangerType == HeatExchangerType.UTube
-                    ? 0.5f * (_fluidTempDown[heIndex] + _fluidTempUp[heIndex])
-                    : _fluidTempDown[heIndex];
+                
+                float Tfluid;
+                if (_options.FlowConfiguration == FlowConfiguration.CounterFlowReversed) {
+                    Tfluid = _fluidTempDown[heIndex]; // Ground interacts with downward fluid in annulus
+                } else { // Standard Flow
+                    Tfluid = _options.HeatExchangerType == HeatExchangerType.UTube
+                        ? 0.5f * (_fluidTempDown[heIndex] + _fluidTempUp[heIndex])
+                        : _fluidTempUp[heIndex]; // Ground interacts with upward fluid in annulus
+                }
 
-                float effectiveU;
-                if (r <= rHE * 2.0f) effectiveU = CalculateHeatTransferCoefficient() * 2.0f;
-                else if (r <= rHE * 5.0f) effectiveU = 2.0f / Math.Max(0.01f, r - rHE);
-                else effectiveU = 0.5f * CalculateHeatTransferCoefficient() * (rHE * 5.0f) / r;
-                effectiveU = Math.Min(1000f, effectiveU);
-
+                var effectiveU = CalculateBoreholeWallHeatTransferCoefficient();
                 var cellVolume = Math.Max(1e-6f, _mesh.CellVolumes[i, j, k]);
                 var contactArea = 2f * MathF.PI * r * (dz_m + dz_p) * 0.5f;
                 var U_vol = effectiveU * contactArea / cellVolume;
 
-                var source_explicit_part = dt * U_vol * Tfluid / rho_cp;
-                var source_implicit_part = dt * U_vol / rho_cp;
-                
-                T_new = (T_explicit + source_explicit_part) / (1.0f + source_implicit_part);
+                var source_explicit_part = (U_vol / rho_cp) * Tfluid;
+                var source_implicit_part = (U_vol / rho_cp);
+
+                numerator += source_explicit_part;
+                denominator += source_implicit_part;
             }
         }
+
+        // Final Calculation
+        var T_new = numerator / denominator;
         
-        T_new = Math.Max(273f, Math.Min(473f, T_new));
+        // Safety clamp and assignment
+        T_new = Math.Max(273f, Math.Min(573f, T_new)); // Increased upper bound for deep systems
         newTemp[i, j, k] = T_new;
 
+        // Return the true, physical change for the adaptive time-stepper.
         return Math.Abs(T_new - T_old);
     }
 
@@ -1465,14 +1405,17 @@ public class GeothermalSimulationSolver : IDisposable
         var cp = (float)_options.FluidSpecificHeat;
         var dz = _options.BoreholeDataset.TotalDepth / nz;
 
-        // HTC and perimeter for heat exchange with the ground (outer pipe)
-        var U_ground = CalculateHeatTransferCoefficient();
-        var P_outer = (float)(Math.PI * _options.PipeOuterDiameter);
-        var NTU_ground = (U_ground * P_outer * dz) / (mdot * cp);
+        // DEFINITIVE FIX: Calculate two SEPARATE heat transfer coefficients.
+        // 1. U_ground: Heat transfer between the outer fluid and the borehole wall/ground.
+        // 2. U_internal: Heat transfer between the outer and inner fluid streams.
+        var U_ground = CalculateBoreholeWallHeatTransferCoefficient();
+        var U_internal = CalculateInternalHeatTransferCoefficient();
 
-        // HTC and perimeter for internal heat exchange (between inner/outer fluid)
-        var U_internal = CalculateHeatTransferCoefficient();
+        var P_outer = (float)(Math.PI * _options.PipeOuterDiameter);
         var P_inner = (float)(Math.PI * _options.PipeInnerDiameter);
+        
+        // NTU (Number of Transfer Units) is a dimensionless measure of heat exchanger effectiveness.
+        var NTU_ground = (U_ground * P_outer * dz) / (mdot * cp);
         var NTU_internal = (U_internal * P_inner * dz) / (mdot * cp);
 
         var oldFluidDown = (float[])_fluidTempDown.Clone();
@@ -1481,8 +1424,8 @@ public class GeothermalSimulationSolver : IDisposable
         var nextTempDown = (float[])_fluidTempDown.Clone();
         var nextTempUp = (float[])_fluidTempUp.Clone();
 
-        // This iterative loop is essential for the two coupled fluid streams to reach equilibrium.
-        for (int iter = 0; iter < 10; iter++)
+        // Iterative loop for the coupled fluid streams to reach equilibrium
+        for (int iter = 0; iter < 20; iter++) // Increased iterations for stability
         {
             var maxChange = 0f;
             var prevIterDown = (float[])nextTempDown.Clone();
@@ -1490,76 +1433,68 @@ public class GeothermalSimulationSolver : IDisposable
 
             if (_options.FlowConfiguration == FlowConfiguration.CounterFlowReversed)
             {
-                // COLD fluid flows DOWN the ANNULUS, HOT fluid flows UP the INNER pipe.
-                
-                // Down-flow (Annulus)
+                // REVERSED FLOW: Cold fluid down ANNULUS, Hot fluid up INNER pipe.
+                // Down-flow (Annulus - interacts with ground AND inner pipe)
                 nextTempDown[0] = (float)_options.FluidInletTemperature;
                 for (var i = 1; i < nz; i++)
                 {
                     var T_in = prevIterDown[i - 1];
                     var T_ground = InterpolateGroundTemperatureAtDepth((i - 0.5f) * dz);
-                    var T_inner_pipe = 0.5f * (prevIterUp[i] + prevIterUp[i-1]); // From previous iteration
+                    var T_inner_pipe = 0.5f * (prevIterUp[i] + prevIterUp[i - 1]);
                     
-                    // DEFINITIVE STABILITY FIX: Semi-implicit update formula
-                    // T_new = (T_old + NTU_g*T_g + NTU_i*T_i) / (1 + NTU_g + NTU_i)
                     var numerator = T_in + NTU_ground * T_ground + NTU_internal * T_inner_pipe;
-                    var denominator = 1 + NTU_ground + NTU_internal;
+                    var denominator = 1.0f + NTU_ground + NTU_internal;
                     nextTempDown[i] = numerator / denominator;
                 }
 
-                // Up-flow (Inner Pipe)
+                // Up-flow (Inner Pipe - only interacts with annulus)
                 nextTempUp[nz - 1] = nextTempDown[nz - 1]; // Turnaround at bottom
                 for (var i = nz - 2; i >= 0; i--)
                 {
                     var T_in = prevIterUp[i + 1];
-                    var T_annulus = 0.5f * (nextTempDown[i] + nextTempDown[i+1]); // From current down-flow pass
+                    var T_annulus = 0.5f * (nextTempDown[i] + nextTempDown[i + 1]);
                     
-                    // DEFINITIVE STABILITY FIX: Semi-implicit update formula
                     var numerator = T_in + NTU_internal * T_annulus;
-                    var denominator = 1 + NTU_internal;
+                    var denominator = 1.0f + NTU_internal;
                     nextTempUp[i] = numerator / denominator;
                 }
             }
-            else // Standard Flow: COLD fluid flows DOWN INNER pipe, HOT fluid flows UP ANNULUS.
+            else // STANDARD FLOW: Cold fluid down INNER pipe, Hot fluid up ANNULUS.
             {
-                // Down-flow (Inner Pipe)
+                // Down-flow (Inner Pipe - only interacts with annulus)
                 nextTempDown[0] = (float)_options.FluidInletTemperature;
                 for (var i = 1; i < nz; i++)
                 {
                     var T_in = prevIterDown[i - 1];
-                    var T_annulus = 0.5f * (prevIterUp[i] + prevIterUp[i - 1]); // From previous iteration
+                    var T_annulus = 0.5f * (prevIterUp[i] + prevIterUp[i - 1]);
                     
-                    // DEFINITIVE STABILITY FIX: Semi-implicit update formula
                     var numerator = T_in + NTU_internal * T_annulus;
-                    var denominator = 1 + NTU_internal;
+                    var denominator = 1.0f + NTU_internal;
                     nextTempDown[i] = numerator / denominator;
                 }
 
-                // Up-flow (Annulus)
+                // Up-flow (Annulus - interacts with ground AND inner pipe)
                 nextTempUp[nz - 1] = nextTempDown[nz - 1]; // Turnaround
                 for (var i = nz - 2; i >= 0; i--)
                 {
                     var T_in = prevIterUp[i + 1];
                     var T_ground = InterpolateGroundTemperatureAtDepth((i + 0.5f) * dz);
-                    var T_inner_pipe = 0.5f * (nextTempDown[i] + nextTempDown[i+1]); // From current down-flow pass
+                    var T_inner_pipe = 0.5f * (nextTempDown[i] + nextTempDown[i + 1]);
 
-                    // DEFINITIVE STABILITY FIX: Semi-implicit update formula
                     var numerator = T_in + NTU_ground * T_ground + NTU_internal * T_inner_pipe;
-                    var denominator = 1 + NTU_ground + NTU_internal;
+                    var denominator = 1.0f + NTU_ground + NTU_internal;
                     nextTempUp[i] = numerator / denominator;
                 }
             }
 
-            // Check for convergence of this internal 1D solver
             for(int i=0; i<nz; i++) {
                 maxChange = Math.Max(maxChange, Math.Abs(nextTempDown[i] - prevIterDown[i]));
                 maxChange = Math.Max(maxChange, Math.Abs(nextTempUp[i] - prevIterUp[i]));
             }
-            if (maxChange < 1e-3) break;
+            if (maxChange < 1e-4) break; // Stricter convergence
         }
 
-        // Apply damping to the final converged result to stabilize it against the main 3D solver
-        var dampingFactor = 0.5f; 
+        var dampingFactor = 0.3f; // Reduced damping for faster response
         for (var i = 0; i < nz; i++)
         {
             _fluidTempDown[i] = dampingFactor * nextTempDown[i] + (1.0f - dampingFactor) * oldFluidDown[i];
@@ -1670,6 +1605,106 @@ public class GeothermalSimulationSolver : IDisposable
     }
 
     /// <summary>
+    ///     DEFINITIVE FIX: Calculates the overall heat transfer coefficient (U-value) for the
+    ///     interaction between the outer pipe fluid and the borehole wall. This includes
+    ///     resistances from the fluid, the outer pipe wall, and the grout.
+    /// </summary>
+    private float CalculateBoreholeWallHeatTransferCoefficient()
+    {
+        // Coefficiente convettivo nel fluido dell'anello esterno (annulus)
+        var D_outer_casing = (float)_options.PipeOuterDiameter;
+        var D_inner_annulus = (float)_options.PipeSpacing; // Diametro esterno del tubo interno
+        var D_h = D_outer_casing - D_inner_annulus; // Diametro idraulico per l'anello
+        var mu = (float)_options.FluidViscosity;
+        var mdot = (float)_options.FluidMassFlowRate;
+        // La portata nell'anello è la portata totale
+        var Re = (mdot * D_h) / ((MathF.PI / 4.0f * (D_outer_casing*D_outer_casing - D_inner_annulus*D_inner_annulus)) * mu);
+        var Pr = (float)(_options.FluidViscosity * _options.FluidSpecificHeat / _options.FluidThermalConductivity);
+        float Nu;
+        if (Re < 2300) { Nu = 4.36f; }
+        else 
+        { 
+            var f = MathF.Pow(0.79f * MathF.Log(Re) - 1.64f, -2.0f);
+            Nu = (f / 8.0f) * (Re - 1000.0f) * Pr / (1.0f + 12.7f * MathF.Pow(f / 8.0f, 0.5f) * (MathF.Pow(Pr, 2.0f / 3.0f) - 1.0f));
+        }
+        var h_fluid_annulus = Nu * (float)_options.FluidThermalConductivity / D_h;
+
+        // Resistenze termiche in serie per unità di lunghezza (K·m/W)
+        var r_borehole = (float)_options.BoreholeDataset.WellDiameter / 2f;
+        var r_casing_outer = D_outer_casing / 2f;
+        var k_grout = (float)_options.GroutThermalConductivity;
+        
+        // 1. Resistenza del film di fluido nell'anello (riferita alla superficie esterna del casing)
+        var R_fluid = 1f / (h_fluid_annulus * MathF.PI * D_outer_casing);
+        
+        // 2. Resistenza del grout tra il casing e la parete del pozzo
+        var R_grout = MathF.Log(r_borehole / r_casing_outer) / (2f * MathF.PI * k_grout);
+
+        // La resistenza del casing stesso è trascurabile (metallo) ma la includiamo per completezza
+        var r_casing_inner = r_casing_outer - 0.01f; // Assumiamo 1cm di spessore
+        var k_casing = (float)_options.PipeThermalConductivity;
+        var R_casing = MathF.Log(r_casing_outer / r_casing_inner) / (2f * MathF.PI * k_casing);
+        
+        var R_total_per_meter = R_fluid + R_grout + R_casing;
+
+        if (R_total_per_meter < 1e-6) return 1000f; // Evita divisione per zero
+        
+        // U-value è l'inverso della resistenza totale per unità di area (W/m²K)
+        // Area è la circonferenza esterna del casing
+        var U = 1f / (R_total_per_meter * MathF.PI * D_outer_casing);
+
+        return Math.Max(10f, Math.Min(U, 2500f)); // Limita a un range realistico
+    }
+    
+    /// <summary>
+    ///     DEFINITIVE FIX: Calculates the overall heat transfer coefficient (U-value) for the
+    ///     parasitic heat exchange between the inner and outer fluid streams through the inner pipe wall.
+    /// </summary>
+    private float CalculateInternalHeatTransferCoefficient()
+    {
+        // Coefficiente convettivo dentro il tubo interno (flusso in un tubo)
+        var D_inner_pipe = (float)_options.PipeInnerDiameter;
+        var mu = (float)_options.FluidViscosity;
+        var mdot = (float)_options.FluidMassFlowRate;
+        var Re = 4.0f * mdot / (MathF.PI * D_inner_pipe * mu);
+        var Pr = (float)(_options.FluidViscosity * _options.FluidSpecificHeat / _options.FluidThermalConductivity);
+        float Nu;
+        if (Re < 2300) { Nu = 4.36f; }
+        else 
+        {
+            var f = MathF.Pow(0.79f * MathF.Log(Re) - 1.64f, -2.0f);
+            Nu = (f / 8.0f) * (Re - 1000.0f) * Pr / (1.0f + 12.7f * MathF.Pow(f / 8.0f, 0.5f) * (MathF.Pow(Pr, 2.0f / 3.0f) - 1.0f));
+        }
+        var h_fluid_inner = Nu * (float)_options.FluidThermalConductivity / D_inner_pipe;
+
+        // Resistenze in serie per unità di lunghezza (K·m/W)
+        var k_pipe_inner = (float)_options.InnerPipeThermalConductivity;
+        if (k_pipe_inner < 1e-6) return 0.0f; // Tubo perfettamente isolato, nessuno scambio
+
+        var r_pipe_inner_in = D_inner_pipe / 2f;
+        var r_pipe_inner_out = (float)_options.PipeSpacing / 2f; // PipeSpacing è il diametro esterno del tubo interno
+        
+        // 1. Resistenza convettiva del fluido DENTRO il tubo interno
+        var R_conv_inner = 1f / (h_fluid_inner * MathF.PI * D_inner_pipe);
+        
+        // 2. Resistenza conduttiva della parete del tubo interno
+        var R_pipe_wall = MathF.Log(r_pipe_inner_out / r_pipe_inner_in) / (2f * MathF.PI * k_pipe_inner);
+
+        // La resistenza convettiva dell'anello esterno è già calcolata nell'altro metodo,
+        // per semplicità qui usiamo un valore ragionevole. L'errore è minimo rispetto alla resistenza del tubo.
+        var h_fluid_annulus = 1500f; 
+        var R_conv_outer = 1f / (h_fluid_annulus * MathF.PI * (2 * r_pipe_inner_out));
+
+        var R_total_per_meter = R_conv_inner + R_pipe_wall + R_conv_outer;
+
+        if (R_total_per_meter < 1e-6) return 3000f;
+
+        // U-value riferito all'area della superficie interna del tubo interno
+        var U = 1f / (R_total_per_meter * MathF.PI * D_inner_pipe);
+        
+        return U;
+    }
+    /// <summary>
     ///     Calculates overall heat transfer coefficient using robust correlations.
     /// </summary>
     private float CalculateHeatTransferCoefficient()
@@ -1777,64 +1812,40 @@ public class GeothermalSimulationSolver : IDisposable
     {
         results.TemperatureFields[currentTime] = (float[,,])_temperature.Clone();
 
-        var outletTemp = _options.HeatExchangerType == HeatExchangerType.UTube
-            ? _fluidTempUp[0]
-            : _fluidTempDown[_fluidTempDown.Length - 1];
-
+        // The physically correct outlet temperature at the surface is ALWAYS the
+        // upward-flowing fluid temperature at the first element (z=0). This is now
+        // correct for all configurations because the underlying physics are fixed.
+        var outletTemp = _fluidTempUp[0];
         var inletTemp = (float)_options.FluidInletTemperature;
 
-        // FIXED: Correct heat rate calculation with proper sign convention
-        // Positive Q means extracting heat from ground (fluid temperature increases)
-        // Negative Q means rejecting heat to ground (fluid temperature decreases)
-        var Q = Math.Abs(_options.FluidMassFlowRate * _options.FluidSpecificHeat *
-                        (outletTemp - inletTemp)); // Always positive magnitude
+        // The sign of (outletTemp - inletTemp) correctly determines heat extraction (+) or rejection (-).
+        var Q = _options.FluidMassFlowRate * _options.FluidSpecificHeat * (outletTemp - inletTemp);
         
-        // Determine if we're extracting or rejecting heat
-        if (outletTemp > inletTemp)
+        if (CurrentTimeStep < 5 || CurrentTimeStep % 100 == 0)
         {
-            // Fluid is gaining heat from ground (heat extraction mode)
-            Q = Math.Abs(Q);  // Positive for heat extraction
-        }
-        else
-        {
-            // Fluid is losing heat to ground (heat rejection mode)
-            Q = -Math.Abs(Q);  // Negative for heat rejection
-        }
-        
-        // Log the heat transfer on first few time steps
-        if (CurrentTimeStep < 5)
-        {
-            Logger.Log($"[Step {CurrentTimeStep}] Heat Transfer: Tin={inletTemp - 273.15:F1}°C, " +
-                      $"Tout={outletTemp - 273.15:F1}°C, Q={Q:F0}W");
+            Logger.Log($"[Step {CurrentTimeStep}] Time: {currentTime/86400:F1}d, Tin: {inletTemp - 273.15:F1}°C, Tout: {outletTemp - 273.15:F1}°C, Q: {Q/1e6:F2} MW");
         }
 
         results.HeatExtractionRate.Add((currentTime, Q));
         results.OutletTemperature.Add((currentTime, outletTemp));
 
-        // Calculate realistic COP
-        var hvacSupplyTempK = _options.HvacSupplyTemperatureKelvin ?? 308.15; // 35°C default
+        var hvacSupplyTempK = _options.HvacSupplyTemperatureKelvin ?? 308.15;
         var compressorEfficiency = _options.CompressorIsentropicEfficiency ?? 0.6;
-
-        var cop = 4.0; // Default
-
-        if (Math.Abs(Q) > 100) // Only calculate if significant heat transfer
+        var cop = 4.0;
+        if (Math.Abs(Q) > 100)
         {
             var avgFluidTemp = (inletTemp + outletTemp) / 2.0;
-
-            if (Q > 0) // Heating mode
+            if (Q > 0)
             {
-                // COP_heating = T_hot / (T_hot - T_cold) * efficiency
                 var deltaT = Math.Max(1.0, hvacSupplyTempK - avgFluidTemp);
-                cop = Math.Min(7.0, hvacSupplyTempK / deltaT * compressorEfficiency);
+                cop = Math.Min(10.0, hvacSupplyTempK / deltaT * compressorEfficiency);
             }
-            else // Cooling mode
+            else
             {
-                // COP_cooling = T_cold / (T_hot - T_cold) * efficiency  
                 var deltaT = Math.Max(1.0, avgFluidTemp - hvacSupplyTempK);
-                cop = Math.Min(7.0, hvacSupplyTempK / deltaT * compressorEfficiency);
+                cop = Math.Min(10.0, hvacSupplyTempK / deltaT * compressorEfficiency);
             }
         }
-
         results.CoefficientOfPerformance.Add((currentTime, cop));
     }
 
