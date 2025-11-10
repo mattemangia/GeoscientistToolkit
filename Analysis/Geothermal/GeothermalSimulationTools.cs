@@ -9,7 +9,6 @@ using GeoscientistToolkit.UI.Utils;
 using GeoscientistToolkit.UI.Visualization;
 using GeoscientistToolkit.Util;
 using ImGuiNET;
-using Veldrid;
 
 namespace GeoscientistToolkit.Analysis.Geothermal;
 
@@ -25,19 +24,19 @@ public class GeothermalSimulationTools : IDatasetTools, IDisposable
     private CancellationTokenSource _cancellationTokenSource;
     private GeothermalSimulationSolver _currentSolver; // Track the active solver
 
+    private bool _isSimulationRunning;
+    private string _mappedDensityColumn = "";
+    private string _mappedPermeabilityColumn = "";
+    private string _mappedPorosityColumn = "";
+    private string _mappedSpecificHeatColumn = "";
+
     // Parameter column mapping
     private string _mappedThermalConductivityColumn = "";
-    private string _mappedSpecificHeatColumn = "";
-    private string _mappedDensityColumn = "";
-    private string _mappedPorosityColumn = "";
-    private string _mappedPermeabilityColumn = "";
-    private bool _showParameterMapping;
-
-    private bool _isSimulationRunning;
 
     private GeothermalMesh _mesh;
     private GeothermalMeshPreview _meshPreview;
     private string _meshPreviewInitError; // Store init errors to show in window
+    private bool _meshPreviewWindowLoggedOnce;
     private float _newIsosurfaceTemp = 20f;
     private float _newLayerConductivity = 2.5f;
     private float _newLayerDensity = 2650f;
@@ -58,11 +57,11 @@ public class GeothermalSimulationTools : IDatasetTools, IDisposable
     private bool _showAdvancedOptions;
     private bool _showMeshPreview;
     private bool _showMeshPreviewInPanel; // NEW: Alternative rendering mode
+    private bool _showParameterMapping;
     private bool _showResults;
     private string _simulationMessage = "";
     private float _simulationProgress;
     private GeothermalVisualization3D _visualization3D;
-    private bool _meshPreviewWindowLoggedOnce;
 
     public void Draw(Dataset dataset)
     {
@@ -122,10 +121,7 @@ public class GeothermalSimulationTools : IDatasetTools, IDisposable
         RenderMeshPreviewModal();
 
         // Render results in a separate window when available
-        if (_results != null && _showResults)
-        {
-            RenderResultsWindow();
-        }
+        if (_results != null && _showResults) RenderResultsWindow();
 
         // Handle export dialog
         if (_exportDialog.IsOpen)
@@ -155,7 +151,7 @@ public class GeothermalSimulationTools : IDatasetTools, IDisposable
             var name = !string.IsNullOrEmpty(unit.Name) ? unit.Name : unit.RockType ?? "Unknown";
 
             // Try to get parameters using mapped columns first, then fall back to default names
-            var conductivity = GetParameterValue(unit, _mappedThermalConductivityColumn, 
+            var conductivity = GetParameterValue(unit, _mappedThermalConductivityColumn,
                 new[] { "ThermalConductivity", "Thermal Conductivity", "TC", "K", "Lambda" }, 2.5);
             _options.LayerThermalConductivities[name] = conductivity;
 
@@ -180,10 +176,11 @@ public class GeothermalSimulationTools : IDatasetTools, IDisposable
     }
 
     /// <summary>
-    /// Gets a parameter value from a lithology unit, trying the mapped column first,
-    /// then falling back to a list of common parameter names
+    ///     Gets a parameter value from a lithology unit, trying the mapped column first,
+    ///     then falling back to a list of common parameter names
     /// </summary>
-    private double GetParameterValue(LithologyUnit unit, string mappedColumn, string[] fallbackNames, double defaultValue)
+    private double GetParameterValue(LithologyUnit unit, string mappedColumn, string[] fallbackNames,
+        double defaultValue)
     {
         // Try mapped column first
         if (!string.IsNullOrEmpty(mappedColumn) && unit.Parameters.TryGetValue(mappedColumn, out var mappedValue))
@@ -191,17 +188,15 @@ public class GeothermalSimulationTools : IDatasetTools, IDisposable
 
         // Try fallback names
         foreach (var name in fallbackNames)
-        {
             if (unit.Parameters.TryGetValue(name, out var value))
                 return value;
-        }
 
         // Return default
         return defaultValue;
     }
 
     /// <summary>
-    /// Automatically detects the best matching columns for required parameters based on common naming conventions
+    ///     Automatically detects the best matching columns for required parameters based on common naming conventions
     /// </summary>
     private void AutoDetectParameterColumns(BoreholeDataset boreholeDataset)
     {
@@ -211,7 +206,8 @@ public class GeothermalSimulationTools : IDatasetTools, IDisposable
         var availableColumns = boreholeDataset.ParameterTracks.Keys.ToList();
 
         // Thermal Conductivity patterns
-        var tcPatterns = new[] { "thermalconductivity", "thermal_conductivity", "tc", "lambda", "conductivity", "k_thermal" };
+        var tcPatterns = new[]
+            { "thermalconductivity", "thermal_conductivity", "tc", "lambda", "conductivity", "k_thermal" };
         _mappedThermalConductivityColumn = FindBestMatch(availableColumns, tcPatterns);
 
         // Specific Heat patterns
@@ -235,14 +231,14 @@ public class GeothermalSimulationTools : IDatasetTools, IDisposable
     }
 
     /// <summary>
-    /// Finds the best matching column name from available columns based on pattern matching
+    ///     Finds the best matching column name from available columns based on pattern matching
     /// </summary>
     private string FindBestMatch(List<string> availableColumns, string[] patterns)
     {
         foreach (var pattern in patterns)
         {
             // Try exact match (case-insensitive)
-            var exactMatch = availableColumns.FirstOrDefault(c => 
+            var exactMatch = availableColumns.FirstOrDefault(c =>
                 string.Equals(c, pattern, StringComparison.OrdinalIgnoreCase));
             if (exactMatch != null)
                 return exactMatch;
@@ -273,31 +269,32 @@ public class GeothermalSimulationTools : IDatasetTools, IDisposable
             {
                 ImGui.PopStyleColor();
                 ImGui.Indent();
-                
+
                 ImGui.TextColored(new Vector4(0.3f, 1.0f, 0.5f, 1.0f), "Key Performance Metrics:");
                 ImGui.Separator();
-                
+
                 ImGui.Text($"Average Heat Rate: {_results.AverageHeatExtractionRate:F0} W");
                 ImGui.Text($"Total Energy Extracted: {_results.TotalExtractedEnergy / 1e9:F2} GJ");
                 ImGui.Text($"Borehole Resistance: {_results.BoreholeThermalResistance:F3} m·K/W");
                 ImGui.Text($"Thermal Influence Radius: {_results.ThermalInfluenceRadius:F1} m");
-                
+
                 if (_results.OutletTemperature.Any())
                 {
                     var finalTemp = _results.OutletTemperature.Last().temperature - 273.15;
                     ImGui.Text($"Final Outlet Temperature: {finalTemp:F1} °C");
                 }
-                
+
                 ImGui.Spacing();
-                ImGui.TextColored(new Vector4(0.7f, 0.9f, 1.0f, 1.0f), 
+                ImGui.TextColored(new Vector4(0.7f, 0.9f, 1.0f, 1.0f),
                     "👉 Click 'Show Results' for detailed analysis");
-                
+
                 ImGui.Unindent();
             }
             else
             {
                 ImGui.PopStyleColor();
             }
+
             ImGui.Separator();
         }
 
@@ -372,23 +369,17 @@ public class GeothermalSimulationTools : IDatasetTools, IDisposable
             // Get available parameter tracks from dataset
             var availableColumns = new List<string> { "(None - use defaults)" };
             if (_options.BoreholeDataset?.ParameterTracks != null)
-            {
                 availableColumns.AddRange(_options.BoreholeDataset.ParameterTracks.Keys.OrderBy(k => k));
-            }
 
             var columnsArray = availableColumns.ToArray();
 
             ImGui.Text("Available Columns in Dataset:");
             ImGui.Indent();
             if (availableColumns.Count > 1)
-            {
-                ImGui.TextColored(new Vector4(0.7f, 0.9f, 1.0f, 1.0f), 
+                ImGui.TextColored(new Vector4(0.7f, 0.9f, 1.0f, 1.0f),
                     string.Join(", ", availableColumns.Skip(1)));
-            }
             else
-            {
                 ImGui.TextColored(new Vector4(1, 0.7f, 0, 1), "No parameter tracks found in dataset");
-            }
             ImGui.Unindent();
             ImGui.Spacing();
 
@@ -408,9 +399,7 @@ public class GeothermalSimulationTools : IDatasetTools, IDisposable
                 var tcIdx = Array.IndexOf(columnsArray, _mappedThermalConductivityColumn);
                 if (tcIdx < 0) tcIdx = 0;
                 if (ImGui.Combo("##TC", ref tcIdx, columnsArray, columnsArray.Length))
-                {
                     _mappedThermalConductivityColumn = tcIdx > 0 ? columnsArray[tcIdx] : "";
-                }
                 ImGui.TableNextColumn();
                 ImGui.TextColored(new Vector4(0.6f, 0.6f, 0.6f, 1), "TC, K, Lambda");
 
@@ -422,9 +411,7 @@ public class GeothermalSimulationTools : IDatasetTools, IDisposable
                 var shIdx = Array.IndexOf(columnsArray, _mappedSpecificHeatColumn);
                 if (shIdx < 0) shIdx = 0;
                 if (ImGui.Combo("##SH", ref shIdx, columnsArray, columnsArray.Length))
-                {
                     _mappedSpecificHeatColumn = shIdx > 0 ? columnsArray[shIdx] : "";
-                }
                 ImGui.TableNextColumn();
                 ImGui.TextColored(new Vector4(0.6f, 0.6f, 0.6f, 1), "Cp, SH");
 
@@ -436,9 +423,7 @@ public class GeothermalSimulationTools : IDatasetTools, IDisposable
                 var densIdx = Array.IndexOf(columnsArray, _mappedDensityColumn);
                 if (densIdx < 0) densIdx = 0;
                 if (ImGui.Combo("##Dens", ref densIdx, columnsArray, columnsArray.Length))
-                {
                     _mappedDensityColumn = densIdx > 0 ? columnsArray[densIdx] : "";
-                }
                 ImGui.TableNextColumn();
                 ImGui.TextColored(new Vector4(0.6f, 0.6f, 0.6f, 1), "Rho, RHO, RHOB");
 
@@ -450,9 +435,7 @@ public class GeothermalSimulationTools : IDatasetTools, IDisposable
                 var porIdx = Array.IndexOf(columnsArray, _mappedPorosityColumn);
                 if (porIdx < 0) porIdx = 0;
                 if (ImGui.Combo("##Por", ref porIdx, columnsArray, columnsArray.Length))
-                {
                     _mappedPorosityColumn = porIdx > 0 ? columnsArray[porIdx] : "";
-                }
                 ImGui.TableNextColumn();
                 ImGui.TextColored(new Vector4(0.6f, 0.6f, 0.6f, 1), "PHI, PHIT, Por");
 
@@ -464,9 +447,7 @@ public class GeothermalSimulationTools : IDatasetTools, IDisposable
                 var permIdx = Array.IndexOf(columnsArray, _mappedPermeabilityColumn);
                 if (permIdx < 0) permIdx = 0;
                 if (ImGui.Combo("##Perm", ref permIdx, columnsArray, columnsArray.Length))
-                {
                     _mappedPermeabilityColumn = permIdx > 0 ? columnsArray[permIdx] : "";
-                }
                 ImGui.TableNextColumn();
                 ImGui.TextColored(new Vector4(0.6f, 0.6f, 0.6f, 1), "K, PERM");
 
@@ -474,7 +455,7 @@ public class GeothermalSimulationTools : IDatasetTools, IDisposable
             }
 
             ImGui.Spacing();
-            
+
             if (ImGui.Button("Apply Mapping & Refresh Properties", new Vector2(250, 0)))
             {
                 // Re-initialize layer properties with new mapping
@@ -486,13 +467,12 @@ public class GeothermalSimulationTools : IDatasetTools, IDisposable
                 InitializeLayerProperties(_options.BoreholeDataset);
                 _options.SetDefaultValues(); // Fill in any missing defaults
             }
+
             ImGui.SetItemTooltip("Re-read all parameters from the dataset using the current column mapping");
 
             ImGui.SameLine();
             if (ImGui.Button("Auto-Detect Columns", new Vector2(150, 0)))
-            {
                 AutoDetectParameterColumns(_options.BoreholeDataset);
-            }
             ImGui.SetItemTooltip("Automatically detect the best matching columns based on common naming conventions");
 
             // Show preview of extracted values
@@ -500,9 +480,11 @@ public class GeothermalSimulationTools : IDatasetTools, IDisposable
             {
                 ImGui.Spacing();
                 ImGui.TextColored(new Vector4(0.7f, 0.9f, 1.0f, 1.0f), "Preview of Extracted Values:");
-                
-                if (ImGui.BeginTable("ParamPreview", 6, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.ScrollY | ImGuiTableFlags.ScrollX, 
-                    new Vector2(0, 150)))
+
+                if (ImGui.BeginTable("ParamPreview", 6,
+                        ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.ScrollY |
+                        ImGuiTableFlags.ScrollX,
+                        new Vector2(0, 150)))
                 {
                     ImGui.TableSetupColumn("Layer", ImGuiTableColumnFlags.WidthFixed, 120);
                     ImGui.TableSetupColumn("k (W/m·K)", ImGuiTableColumnFlags.WidthFixed, 80);
@@ -515,7 +497,7 @@ public class GeothermalSimulationTools : IDatasetTools, IDisposable
                     foreach (var unit in _options.BoreholeDataset.LithologyUnits)
                     {
                         var name = !string.IsNullOrEmpty(unit.Name) ? unit.Name : unit.RockType ?? "Unknown";
-                        
+
                         ImGui.TableNextRow();
                         ImGui.TableNextColumn();
                         ImGui.TextUnformatted(name.Length > 18 ? name.Substring(0, 15) + "..." : name);
@@ -523,31 +505,31 @@ public class GeothermalSimulationTools : IDatasetTools, IDisposable
                             ImGui.SetItemTooltip(name);
 
                         ImGui.TableNextColumn();
-                        var tc = GetParameterValue(unit, _mappedThermalConductivityColumn, 
+                        var tc = GetParameterValue(unit, _mappedThermalConductivityColumn,
                             new[] { "ThermalConductivity", "Thermal Conductivity", "TC", "K", "Lambda" }, 2.5);
-                        var tcColor = unit.Parameters.ContainsKey(_mappedThermalConductivityColumn) || 
-                                     unit.Parameters.ContainsKey("ThermalConductivity") || 
-                                     unit.Parameters.ContainsKey("Thermal Conductivity")
-                            ? new Vector4(0.3f, 1.0f, 0.5f, 1.0f) 
+                        var tcColor = unit.Parameters.ContainsKey(_mappedThermalConductivityColumn) ||
+                                      unit.Parameters.ContainsKey("ThermalConductivity") ||
+                                      unit.Parameters.ContainsKey("Thermal Conductivity")
+                            ? new Vector4(0.3f, 1.0f, 0.5f, 1.0f)
                             : new Vector4(1.0f, 0.7f, 0.3f, 1.0f); // Orange for defaults
                         ImGui.TextColored(tcColor, $"{tc:F2}");
 
                         ImGui.TableNextColumn();
                         var sh = GetParameterValue(unit, _mappedSpecificHeatColumn,
                             new[] { "SpecificHeat", "Specific Heat", "Cp", "SH" }, 900);
-                        var shColor = unit.Parameters.ContainsKey(_mappedSpecificHeatColumn) || 
-                                     unit.Parameters.ContainsKey("SpecificHeat") || 
-                                     unit.Parameters.ContainsKey("Specific Heat")
-                            ? new Vector4(0.3f, 1.0f, 0.5f, 1.0f) 
+                        var shColor = unit.Parameters.ContainsKey(_mappedSpecificHeatColumn) ||
+                                      unit.Parameters.ContainsKey("SpecificHeat") ||
+                                      unit.Parameters.ContainsKey("Specific Heat")
+                            ? new Vector4(0.3f, 1.0f, 0.5f, 1.0f)
                             : new Vector4(1.0f, 0.7f, 0.3f, 1.0f);
                         ImGui.TextColored(shColor, $"{sh:F0}");
 
                         ImGui.TableNextColumn();
                         var dens = GetParameterValue(unit, _mappedDensityColumn,
                             new[] { "Density", "Rho", "RHO", "RHOB" }, 2650);
-                        var densColor = unit.Parameters.ContainsKey(_mappedDensityColumn) || 
-                                       unit.Parameters.ContainsKey("Density")
-                            ? new Vector4(0.3f, 1.0f, 0.5f, 1.0f) 
+                        var densColor = unit.Parameters.ContainsKey(_mappedDensityColumn) ||
+                                        unit.Parameters.ContainsKey("Density")
+                            ? new Vector4(0.3f, 1.0f, 0.5f, 1.0f)
                             : new Vector4(1.0f, 0.7f, 0.3f, 1.0f);
                         ImGui.TextColored(densColor, $"{dens:F0}");
 
@@ -555,25 +537,25 @@ public class GeothermalSimulationTools : IDatasetTools, IDisposable
                         var por = GetParameterValue(unit, _mappedPorosityColumn,
                             new[] { "Porosity", "PHI", "PHIT", "Por" }, 0.1);
                         por = por > 1 ? por / 100.0 : por;
-                        var porColor = unit.Parameters.ContainsKey(_mappedPorosityColumn) || 
-                                      unit.Parameters.ContainsKey("Porosity")
-                            ? new Vector4(0.3f, 1.0f, 0.5f, 1.0f) 
+                        var porColor = unit.Parameters.ContainsKey(_mappedPorosityColumn) ||
+                                       unit.Parameters.ContainsKey("Porosity")
+                            ? new Vector4(0.3f, 1.0f, 0.5f, 1.0f)
                             : new Vector4(1.0f, 0.7f, 0.3f, 1.0f);
                         ImGui.TextColored(porColor, $"{por:F3}");
 
                         ImGui.TableNextColumn();
                         var perm = GetParameterValue(unit, _mappedPermeabilityColumn,
                             new[] { "Permeability", "Perm", "K", "PERM" }, 1e-14);
-                        var permColor = unit.Parameters.ContainsKey(_mappedPermeabilityColumn) || 
-                                       unit.Parameters.ContainsKey("Permeability")
-                            ? new Vector4(0.3f, 1.0f, 0.5f, 1.0f) 
+                        var permColor = unit.Parameters.ContainsKey(_mappedPermeabilityColumn) ||
+                                        unit.Parameters.ContainsKey("Permeability")
+                            ? new Vector4(0.3f, 1.0f, 0.5f, 1.0f)
                             : new Vector4(1.0f, 0.7f, 0.3f, 1.0f);
                         ImGui.TextColored(permColor, $"{perm:E2}");
                     }
 
                     ImGui.EndTable();
                 }
-                
+
                 ImGui.Spacing();
                 ImGui.TextColored(new Vector4(0.3f, 1.0f, 0.5f, 1.0f), "● ");
                 ImGui.SameLine();
@@ -602,12 +584,12 @@ public class GeothermalSimulationTools : IDatasetTools, IDisposable
         {
             _showMeshPreview = !_showMeshPreview;
             Logger.Log($"Mesh Preview button clicked. _showMeshPreview = {_showMeshPreview}");
-            
+
             if (_showMeshPreview)
             {
                 Logger.Log("Initializing mesh preview...");
                 InitializeMeshPreview(_options.BoreholeDataset);
-                
+
                 // ALWAYS open the popup, even if initialization failed
                 // We'll show the error inside the popup
                 ImGui.OpenPopup("Mesh Preview Window");
@@ -621,7 +603,7 @@ public class GeothermalSimulationTools : IDatasetTools, IDisposable
                 _showMeshPreviewInPanel = false;
             }
         }
-        
+
         // NEW: Add alternative rendering option
         if (_meshPreview != null)
         {
@@ -630,11 +612,9 @@ public class GeothermalSimulationTools : IDatasetTools, IDisposable
             {
                 Logger.Log($"Show in Panel toggled: {_showMeshPreviewInPanel}");
                 // Close modal if showing in panel
-                if (_showMeshPreviewInPanel)
-                {
-                    _showMeshPreview = true; // Keep preview alive
-                }
+                if (_showMeshPreviewInPanel) _showMeshPreview = true; // Keep preview alive
             }
+
             ImGui.SetItemTooltip("Alternative: Show preview directly in this panel instead of popup");
         }
 
@@ -958,30 +938,26 @@ public class GeothermalSimulationTools : IDatasetTools, IDisposable
                     _options.UseGPU = useGPU;
             }
         }
-        
+
         // ALTERNATIVE RENDERING: Show preview directly in panel if requested
         if (_showMeshPreviewInPanel && _meshPreview != null && _options.BoreholeDataset != null)
         {
             ImGui.Separator();
             ImGui.TextColored(new Vector4(0.3f, 0.8f, 1.0f, 1.0f), "🔍 Mesh Preview (In-Panel Mode)");
             ImGui.Separator();
-            
+
             // Show error if present
             if (!string.IsNullOrEmpty(_meshPreviewInitError))
             {
                 ImGui.TextColored(new Vector4(1, 0.2f, 0.2f, 1), $"❌ Error: {_meshPreviewInitError}");
-                if (ImGui.Button("Retry"))
-                {
-                    InitializeMeshPreview(_options.BoreholeDataset);
-                }
+                if (ImGui.Button("Retry")) InitializeMeshPreview(_options.BoreholeDataset);
             }
             else
             {
                 // Render in a scrollable child window
                 var availSpace = ImGui.GetContentRegionAvail();
-                if (ImGui.BeginChild("MeshPreviewInPanel", new Vector2(availSpace.X, Math.Min(600, availSpace.Y)), 
-                    ImGuiChildFlags.Border))
-                {
+                if (ImGui.BeginChild("MeshPreviewInPanel", new Vector2(availSpace.X, Math.Min(600, availSpace.Y)),
+                        ImGuiChildFlags.Border))
                     try
                     {
                         _meshPreview.Render(_options.BoreholeDataset, _options);
@@ -990,7 +966,7 @@ public class GeothermalSimulationTools : IDatasetTools, IDisposable
                     {
                         ImGui.TextColored(new Vector4(1, 0, 0, 1), $"Error: {ex.Message}");
                     }
-                }
+
                 ImGui.EndChild();
             }
         }
@@ -1125,16 +1101,16 @@ public class GeothermalSimulationTools : IDatasetTools, IDisposable
     {
         ImGui.SetNextWindowSize(new Vector2(1200, 800), ImGuiCond.FirstUseEver);
         ImGui.SetNextWindowPos(new Vector2(150, 150), ImGuiCond.FirstUseEver);
-        
+
         var isOpen = _showResults;
-        
+
         if (!ImGui.Begin("Geothermal Simulation Results", ref isOpen, ImGuiWindowFlags.None))
         {
             ImGui.End();
             _showResults = isOpen;
             return;
         }
-        
+
         // Header with controls
         ImGui.TextColored(new Vector4(0.3f, 0.8f, 1.0f, 1.0f), "Simulation Results");
         ImGui.Separator();
@@ -1212,10 +1188,10 @@ public class GeothermalSimulationTools : IDatasetTools, IDisposable
                 ImGui.EndTabBar();
             }
         }
-        
+
         ImGui.End();
         _showResults = isOpen;
-        
+
         // Cleanup when window is closed
         if (!_showResults)
         {
@@ -1441,7 +1417,7 @@ public class GeothermalSimulationTools : IDatasetTools, IDisposable
         Logger.Log("=== InitializeMeshPreview START ===");
         Logger.Log($"VeldridManager.GraphicsDevice: {(VeldridManager.GraphicsDevice != null ? "OK" : "NULL")}");
         Logger.Log($"BoreholeDataset: {(borehole != null ? "OK" : "NULL")}");
-        
+
         // Check if GraphicsDevice is available in VeldridManager
         if (VeldridManager.GraphicsDevice == null)
         {
@@ -1454,7 +1430,7 @@ public class GeothermalSimulationTools : IDatasetTools, IDisposable
         try
         {
             Logger.Log("Creating GeothermalMeshPreview...");
-            
+
             // Create mesh preview if it doesn't exist
             if (_meshPreview == null)
             {
@@ -1481,17 +1457,17 @@ public class GeothermalSimulationTools : IDatasetTools, IDisposable
         {
             Logger.LogError($"Failed to initialize mesh preview: {ex.Message}");
             Logger.LogError($"Stack trace: {ex.StackTrace}");
-            
+
             // Store error but DON'T close the window - show error in window
             _meshPreviewInitError = $"Initialization failed: {ex.Message}";
-            
+
             // Keep partial state if needed
             // _meshPreview?.Dispose();
             // _meshPreview = null;
-            
+
             // DON'T DO THIS - it causes the flicker!
             // _showMeshPreview = false;
-            
+
             Logger.Log("=== InitializeMeshPreview END (FAILED) ===");
         }
     }
@@ -1500,18 +1476,14 @@ public class GeothermalSimulationTools : IDatasetTools, IDisposable
     {
         // CRITICAL: Only clean up AFTER the popup is confirmed closed
         // Check if popup is actually open using ImGui's internal state
-        bool popupIsOpen = ImGui.IsPopupOpen("Mesh Preview Window");
-        
+        var popupIsOpen = ImGui.IsPopupOpen("Mesh Preview Window");
+
         // If _showMeshPreview is true, ensure popup is open
-        if (_showMeshPreview && !popupIsOpen)
-        {
-            ImGui.SetNextWindowSize(new Vector2(1400, 900), ImGuiCond.FirstUseEver);
-            // Popup not yet opened, will open next frame
-        }
-        
+        if (_showMeshPreview && !popupIsOpen) ImGui.SetNextWindowSize(new Vector2(1400, 900), ImGuiCond.FirstUseEver);
+        // Popup not yet opened, will open next frame
         // Use a dummy bool for the modal - we control closing manually via our Close button
-        bool dummyOpen = true;
-        
+        var dummyOpen = true;
+
         // Only render if popup is actually open
         // CRITICAL FIX: Add NoNav to prevent navigation to windows behind this modal
         if (ImGui.BeginPopupModal("Mesh Preview Window", ref dummyOpen, ImGuiWindowFlags.NoNav))
@@ -1520,24 +1492,23 @@ public class GeothermalSimulationTools : IDatasetTools, IDisposable
             if (!_meshPreviewWindowLoggedOnce)
             {
                 Logger.Log("=== Mesh Preview Modal OPENED AND RENDERING ===");
-                Logger.Log($"State check: _meshPreview={((_meshPreview != null) ? "EXISTS" : "NULL")}, _options.BoreholeDataset={((_options.BoreholeDataset != null) ? "EXISTS" : "NULL")}, _meshPreviewInitError={(string.IsNullOrEmpty(_meshPreviewInitError) ? "NONE" : _meshPreviewInitError)}");
+                Logger.Log(
+                    $"State check: _meshPreview={(_meshPreview != null ? "EXISTS" : "NULL")}, _options.BoreholeDataset={(_options.BoreholeDataset != null ? "EXISTS" : "NULL")}, _meshPreviewInitError={(string.IsNullOrEmpty(_meshPreviewInitError) ? "NONE" : _meshPreviewInitError)}");
                 _meshPreviewWindowLoggedOnce = true;
             }
-            
+
             try
             {
                 // Header with info
-                ImGui.TextColored(new Vector4(0.3f, 0.8f, 1.0f, 1.0f), 
+                ImGui.TextColored(new Vector4(0.3f, 0.8f, 1.0f, 1.0f),
                     "🔍 Mesh Configuration Preview - Pre-Simulation");
                 ImGui.Separator();
                 ImGui.Spacing();
-                
+
                 // DEBUG: Show actual state
-                ImGui.Text($"Debug State: _meshPreview={((_meshPreview != null) ? "EXISTS" : "NULL")}, Dataset={((_options.BoreholeDataset != null) ? "EXISTS" : "NULL")}");
-                if (!string.IsNullOrEmpty(_meshPreviewInitError))
-                {
-                    ImGui.Text($"Error: {_meshPreviewInitError}");
-                }
+                ImGui.Text(
+                    $"Debug State: _meshPreview={(_meshPreview != null ? "EXISTS" : "NULL")}, Dataset={(_options.BoreholeDataset != null ? "EXISTS" : "NULL")}");
+                if (!string.IsNullOrEmpty(_meshPreviewInitError)) ImGui.Text($"Error: {_meshPreviewInitError}");
                 ImGui.Separator();
 
                 // Show initialization error if present
@@ -1557,9 +1528,10 @@ public class GeothermalSimulationTools : IDatasetTools, IDisposable
                         ImGui.BulletText("Resource creation error (textures, buffers)");
                         ImGui.BulletText("GPU driver issue");
                         ImGui.Spacing();
-                        ImGui.TextColored(new Vector4(0.7f, 0.9f, 1.0f, 1.0f), 
+                        ImGui.TextColored(new Vector4(0.7f, 0.9f, 1.0f, 1.0f),
                             "Check the console log for detailed error messages.");
                     }
+
                     ImGui.EndChild();
                     ImGui.PopStyleColor();
                     ImGui.Spacing();
@@ -1581,30 +1553,34 @@ public class GeothermalSimulationTools : IDatasetTools, IDisposable
                         ImGui.Text("     2. Threw an exception silently");
                         ImGui.Text("     3. Set _meshPreview but it was cleared");
                     }
+
                     if (_options.BoreholeDataset == null)
                         ImGui.Text("  • Borehole dataset not available");
-                        
+
                     ImGui.Spacing();
-                    ImGui.TextColored(new Vector4(0.7f, 0.7f, 0.7f, 1.0f), 
+                    ImGui.TextColored(new Vector4(0.7f, 0.7f, 0.7f, 1.0f),
                         "No errors in console? Check if initialization completed.");
                     ImGui.Text("Click 'Force Reinitialize' to try again with verbose logging.");
                 }
-                
+
                 ImGui.Spacing();
                 ImGui.Separator();
-                
+
                 // Always show retry button
                 if (ImGui.Button("Force Reinitialize", new Vector2(200, 0)))
                 {
                     Logger.Log("========================================");
                     Logger.Log("USER CLICKED FORCE REINITIALIZE");
-                    Logger.Log($"Current state: _meshPreview={(_meshPreview != null)}, _meshPreviewInitError={_meshPreviewInitError}");
+                    Logger.Log(
+                        $"Current state: _meshPreview={_meshPreview != null}, _meshPreviewInitError={_meshPreviewInitError}");
                     Logger.Log("========================================");
                     InitializeMeshPreview(_options.BoreholeDataset);
-                    Logger.Log($"After init: _meshPreview={(_meshPreview != null)}, _meshPreviewInitError={_meshPreviewInitError}");
+                    Logger.Log(
+                        $"After init: _meshPreview={_meshPreview != null}, _meshPreviewInitError={_meshPreviewInitError}");
                 }
+
                 ImGui.SameLine();
-                
+
                 // MANUAL close button - this is the ONLY way to close the popup
                 if (ImGui.Button("Close", new Vector2(120, 0)))
                 {
@@ -1618,10 +1594,10 @@ public class GeothermalSimulationTools : IDatasetTools, IDisposable
                 ImGui.TextColored(new Vector4(1, 0, 0, 1), $"❌ Render Error: {ex.Message}");
                 Logger.LogError($"Mesh preview render error: {ex.Message}\n{ex.StackTrace}");
             }
-            
+
             ImGui.EndPopup();
         }
-        
+
         // CRITICAL FIX: Only cleanup when popup is confirmed closed AND flag is false
         // This prevents premature cleanup before the popup has had a chance to open
         if (!_showMeshPreview && !popupIsOpen && _meshPreview != null)
@@ -1633,7 +1609,7 @@ public class GeothermalSimulationTools : IDatasetTools, IDisposable
             _meshPreviewWindowLoggedOnce = false; // Reset for next time
         }
     }
-    
+
     // Keep old method for compatibility but redirect to modal
     private void RenderMeshPreviewWindow()
     {
@@ -1701,7 +1677,8 @@ public class GeothermalSimulationTools : IDatasetTools, IDisposable
 
         // 3D View Panel on the right
         // CRITICAL: NoMove prevents window dragging, NoScrollWithMouse allows our custom mouse handling
-        ImGui.BeginChild("3DView", new Vector2(viewWidth, availableSize.Y), ImGuiChildFlags.Border, ImGuiWindowFlags.NoMove | ImGuiWindowFlags.NoScrollWithMouse);
+        ImGui.BeginChild("3DView", new Vector2(viewWidth, availableSize.Y), ImGuiChildFlags.Border,
+            ImGuiWindowFlags.NoMove | ImGuiWindowFlags.NoScrollWithMouse);
         {
             var viewportSize = ImGui.GetContentRegionAvail();
             _visualization3D.Resize((uint)viewportSize.X, (uint)viewportSize.Y);
@@ -1726,7 +1703,7 @@ public class GeothermalSimulationTools : IDatasetTools, IDisposable
 
                 _visualization3D.HandleMouseInput(mousePos, leftButton, rightButton);
 
-                if (Math.Abs(io.MouseWheel) > 0.01f) 
+                if (Math.Abs(io.MouseWheel) > 0.01f)
                     _visualization3D.HandleMouseWheel(io.MouseWheel);
             }
         }

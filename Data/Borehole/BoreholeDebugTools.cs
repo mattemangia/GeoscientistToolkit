@@ -138,7 +138,8 @@ public static class BoreholeDebugTools
             4 => "1500m borehole through fractured carbonate formations with karst features.",
             5 => "800m borehole with multiple aquifer layers for complex groundwater flow modeling.",
             6 => "3000m volcanic geothermal site with high temperature gradients and altered zones.",
-            7 => "3200m complete Umbro-Marchigian stratigraphic sequence: includes Schlier, Marne a Fucoidi, Calcari Diasprigni, Corniola and all major formations from Marnoso-Arenacea to Burano Anhydrites.",
+            7 =>
+                "3200m complete Umbro-Marchigian stratigraphic sequence: includes Schlier, Marne a Fucoidi, Calcari Diasprigni, Corniola and all major formations from Marnoso-Arenacea to Burano Anhydrites.",
             8 => "Customizable configuration with user-defined layers and parameters.",
             _ => "Standard test configuration."
         };
@@ -558,7 +559,7 @@ public static class BoreholeDebugTools
 
         // Quaternary cover (0-50m)
         var quaternary = CreateLithologyUnit("Quaternario - Depositi continentali", "Soil", 0, 50,
-            new Vector4(0.70f, 0.60f, 0.45f, 1.0f), "Mixed", 
+            new Vector4(0.70f, 0.60f, 0.45f, 1.0f), "Mixed",
             "Quaternary continental deposits: colluvium, eluvium, and weathered bedrock");
         quaternary.Parameters["Porosity"] = 0.35f;
         quaternary.Parameters["Permeability"] = 1e-12f;
@@ -758,23 +759,23 @@ public static class BoreholeDebugTools
         borehole.LithologyUnits.Add(aniditiBurano);
 
         GenerateParameterTracks(borehole);
-        
+
         // Add realistic fracture zones: concentrated in key horizons and formation boundaries
-        AddFractures(borehole, new[] 
-        { 
-            1100f,   // Scaglia Variegata/Cinerea boundary
-            1150f,   // Top Scaglia Rossa (boundary with Scaglia Variegata)
-            1350f,   // Within Scaglia Rossa
-            1550f,   // Scaglia Rossa/Bianca boundary
-            1700f,   // Scaglia Bianca/Marne a Fucoidi boundary (Livello Bonarelli)
-            1800f,   // Marne a Fucoidi/Maiolica boundary
-            2100f,   // Maiolica/Calcari Diasprigni boundary
-            2200f,   // Calcari Diasprigni/Rosso Ammonitico boundary
-            2220f,   // Rosso Ammonitico/Corniola boundary
-            2300f,   // Corniola/Calcare Massiccio boundary (platform drowning)
-            2500f,   // Within Calcare Massiccio (karst)
-            2700f,   // Within Calcare Massiccio (karst)
-            2900f    // Calcare Massiccio/Anidriti boundary (main thrust contact)
+        AddFractures(borehole, new[]
+        {
+            1100f, // Scaglia Variegata/Cinerea boundary
+            1150f, // Top Scaglia Rossa (boundary with Scaglia Variegata)
+            1350f, // Within Scaglia Rossa
+            1550f, // Scaglia Rossa/Bianca boundary
+            1700f, // Scaglia Bianca/Marne a Fucoidi boundary (Livello Bonarelli)
+            1800f, // Marne a Fucoidi/Maiolica boundary
+            2100f, // Maiolica/Calcari Diasprigni boundary
+            2200f, // Calcari Diasprigni/Rosso Ammonitico boundary
+            2220f, // Rosso Ammonitico/Corniola boundary
+            2300f, // Corniola/Calcare Massiccio boundary (platform drowning)
+            2500f, // Within Calcare Massiccio (karst)
+            2700f, // Within Calcare Massiccio (karst)
+            2900f // Calcare Massiccio/Anidriti boundary (main thrust contact)
         });
     }
 

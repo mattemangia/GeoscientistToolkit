@@ -53,19 +53,6 @@ public class BoreholeViewer : IDatasetViewer, IDisposable
     private bool _showLithologyNames = true;
     private bool _showParameterValues = true;
 
-    /// <summary>
-    /// Callback invocato quando l'utente clicca su una formazione litologica nel viewer.
-    /// Per collegarlo automaticamente con BoreholeTools per l'editing:
-    /// <code>
-    /// var viewer = new BoreholeViewer(dataset);
-    /// var tools = new BoreholeTools();
-    /// viewer.OnLithologyClicked = tools.EditUnit;
-    /// </code>
-    /// Questo permetterÃ  all'utente di cliccare su una formazione nel viewer e passare
-    /// automaticamente alla pagina di editing in BoreholeTools.
-    /// </summary>
-    public Action<LithologyUnit>? OnLithologyClicked { get; set; }
-
     public BoreholeViewer(BoreholeDataset dataset)
     {
         _dataset = dataset ?? throw new ArgumentNullException(nameof(dataset));
@@ -74,6 +61,19 @@ public class BoreholeViewer : IDatasetViewer, IDisposable
         _depthStart = 0f;
         _depthEnd = Math.Max(_dataset.TotalDepth, 1f);
     }
+
+    /// <summary>
+    ///     Callback invocato quando l'utente clicca su una formazione litologica nel viewer.
+    ///     Per collegarlo automaticamente con BoreholeTools per l'editing:
+    ///     <code>
+    /// var viewer = new BoreholeViewer(dataset);
+    /// var tools = new BoreholeTools();
+    /// viewer.OnLithologyClicked = tools.EditUnit;
+    /// </code>
+    ///     Questo permetterÃ  all'utente di cliccare su una formazione nel viewer e passare
+    ///     automaticamente alla pagina di editing in BoreholeTools.
+    /// </summary>
+    public Action<LithologyUnit>? OnLithologyClicked { get; set; }
 
     public void DrawToolbarControls()
     {
@@ -629,14 +629,10 @@ public class BoreholeViewer : IDatasetViewer, IDisposable
 
                         // Handle click to edit - ONLY if the window is actually hovered/focused
                         if (OnLithologyClicked != null && ImGui.IsMouseClicked(ImGuiMouseButton.Left))
-                        {
                             // CRITICAL: Check if the parent child window is hovered before processing clicks
                             // This prevents the viewer from intercepting clicks when it's in the background
                             if (ImGui.IsWindowHovered(ImGuiHoveredFlags.ChildWindows))
-                            {
                                 OnLithologyClicked.Invoke(u);
-                            }
-                        }
                     }
                 }
             }
@@ -750,14 +746,14 @@ public class BoreholeViewer : IDatasetViewer, IDisposable
                     if (ImGui.IsWindowHovered(ImGuiHoveredFlags.ChildWindows))
                     {
                         ImGui.BeginTooltip();
-                    var label = string.IsNullOrWhiteSpace(track.Unit) ? track.Name : $"{track.Name} [{track.Unit}]";
-                    ImGui.TextUnformatted(label);
-                    ImGui.TextUnformatted($"Depth: {depth:0.###} m");
-                    if (hasVal)
-                        ImGui.TextUnformatted($"Value: {value:0.###}");
-                    else
-                        ImGui.TextUnformatted("Value: n/a");
-                    ImGui.TextUnformatted($"Range: {track.MinValue:0.###} - {track.MaxValue:0.###}");
+                        var label = string.IsNullOrWhiteSpace(track.Unit) ? track.Name : $"{track.Name} [{track.Unit}]";
+                        ImGui.TextUnformatted(label);
+                        ImGui.TextUnformatted($"Depth: {depth:0.###} m");
+                        if (hasVal)
+                            ImGui.TextUnformatted($"Value: {value:0.###}");
+                        else
+                            ImGui.TextUnformatted("Value: n/a");
+                        ImGui.TextUnformatted($"Range: {track.MinValue:0.###} - {track.MaxValue:0.###}");
                         ImGui.EndTooltip();
                     }
                 }

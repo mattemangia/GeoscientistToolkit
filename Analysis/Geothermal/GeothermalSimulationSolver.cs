@@ -903,14 +903,12 @@ public class GeothermalSimulationSolver : IDisposable
                         // boundary conditions and heat exchanger which aren't in the kernel
                         ApplyBoundaryConditions(_temperature);
                         ApplyHeatExchangerSource(_temperature, dt);
-                        
+
                         // Ensure physically reasonable temperatures after GPU computation
                         for (var i = 0; i < nr; i++)
                         for (var j = 0; j < nth; j++)
                         for (var k = 0; k < nz; k++)
-                        {
                             _temperature[i, j, k] = Math.Max(273f, Math.Min(473f, _temperature[i, j, k]));
-                        }
                     }
                     catch (Exception ex)
                     {

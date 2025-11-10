@@ -6,7 +6,6 @@ using GeoscientistToolkit.Data.Mesh3D;
 using GeoscientistToolkit.UI.Visualization;
 using GeoscientistToolkit.Util;
 using ImGuiNET;
-using Veldrid;
 
 namespace GeoscientistToolkit.Analysis.Geothermal;
 
@@ -17,13 +16,18 @@ namespace GeoscientistToolkit.Analysis.Geothermal;
 public class GeothermalMeshPreview : IDisposable
 {
     private Mesh3DDataset _boreholeMesh;
+    private bool _detailMode;
     private Mesh3DDataset _domainMesh;
-    private List<Mesh3DDataset> _lithologyMeshes = new List<Mesh3DDataset>(); // CRITICAL FIX: Store lithology meshes
+    private List<Mesh3DDataset> _hxMeshes = new();
     private bool _isInitialized;
+    private BoreholeDataset _lastBorehole;
+    private GeothermalSimulationOptions _lastOptions;
+    private List<Mesh3DDataset> _lithologyMeshes = new(); // CRITICAL FIX: Store lithology meshes
     private int _selectedLithologyLayer = -1;
     private bool _showBorehole = true;
     private bool _showDomain = true;
     private bool _showGridLines;
+    private bool _showHeatExchanger = true;
     private bool _showLegendOverlay = true;
     private bool _showLithologyLayers = true;
 
@@ -31,14 +35,23 @@ public class GeothermalMeshPreview : IDisposable
     private bool _showParameterOverlay = true;
     private GeothermalVisualization3D _visualization3D;
 
-    public GeothermalMeshPreview()
-    {
-        // Use VeldridManager like Mesh3DViewer does
-    }
+    private bool HasLastInputs => _lastBorehole != null && _lastOptions != null;
 
     public void Dispose()
     {
         _visualization3D?.Dispose();
+    }
+
+    public void SetDetailMode(bool enabled, BoreholeDataset borehole = null, GeothermalSimulationOptions options = null)
+    {
+        _detailMode = enabled;
+
+        // Rebuild preview meshes with the right scaling (no solver impact)
+        if (borehole != null && options != null) GeneratePreview(borehole, options);
+
+        // Reframe the camera for detail mode (keeps boundary visible)
+        if (_visualization3D != null && options != null && borehole != null)
+            _visualization3D.FrameDetailView((float)options.DomainRadius, borehole.TotalDepth);
     }
 
     /// <summary>
@@ -48,48 +61,57 @@ public class GeothermalMeshPreview : IDisposable
     {
         if (borehole == null || options == null)
             return;
-
-        // Get graphics device from VeldridManager like Mesh3DViewer does
+        _lastBorehole = borehole;
+        _lastOptions = options;
         var graphicsDevice = VeldridManager.GraphicsDevice;
-
         if (graphicsDevice == null)
         {
-            var errorMsg = "GeothermalMeshPreview: VeldridManager.GraphicsDevice is null. Cannot generate preview. " +
-                           "Ensure GraphicsDevice is properly initialized in VeldridManager.";
+            var errorMsg = "GeothermalMeshPreview: VeldridManager.GraphicsDevice is null. Cannot generate preview.";
             Console.WriteLine($"ERROR: {errorMsg}");
             throw new InvalidOperationException(errorMsg);
         }
 
         try
         {
-            // Dispose previous visualization
             _visualization3D?.Dispose();
-
-            // Create visualization using VeldridManager graphics device
             _visualization3D = new GeothermalVisualization3D(graphicsDevice);
-            
-            // Set preview options for proper domain info rendering
+
+            // Let the visualizer know the scene extents (if you have a setter, keep it; otherwise optional)
             _visualization3D.SetPreviewOptions(options, borehole.TotalDepth);
 
-            // Generate borehole mesh
-            _boreholeMesh = GeothermalMeshGenerator.CreateBoreholeMesh(borehole, options);
-
-            // Generate domain visualization mesh
+            // DOMAIN BOUNDARY (always built)
             _domainMesh = CreateDomainMesh(borehole, options);
 
-            // Generate lithology layers mesh and store them
+            // LITHOLOGIES at boundary (full cylindrical shells)
             _lithologyMeshes = CreateLithologyLayersMeshes(borehole, options);
 
-            // Add meshes to visualization
+            // BOREHOLE: physical in standard mode, visually-exaggerated in detail mode
+            _boreholeMesh = CreateBoreholePreviewMesh(borehole, options, _detailMode);
+
+            // HEAT EXCHANGER: same idea (physical vs exaggerated)
+            var hxMeshes = CreateHeatExchangerMeshes(borehole, options, _detailMode);
+
+            // ----- Add to scene (detail mode keeps boundary visible regardless of toggle) -----
+            if (_domainMesh != null)
+                _visualization3D.AddMesh(_domainMesh); // boundary always visible (as you wanted)
+
+            if (_showLithologyLayers && _lithologyMeshes != null)
+                foreach (var m in _lithologyMeshes)
+                    _visualization3D.AddMesh(m);
+
             if (_showBorehole && _boreholeMesh != null)
                 _visualization3D.AddMesh(_boreholeMesh);
 
-            if (_showDomain && _domainMesh != null)
-                _visualization3D.AddMesh(_domainMesh);
+            // If you want a separate HX toggle later, wire it in your UI; here we follow lithology toggle semantics
+            if (_showLithologyLayers && hxMeshes != null)
+                foreach (var m in hxMeshes)
+                    _visualization3D.AddMesh(m);
 
-            if (_showLithologyLayers && _lithologyMeshes != null)
-                foreach (var mesh in _lithologyMeshes)
-                    _visualization3D.AddMesh(mesh);
+            // Auto-frame for the chosen mode
+            if (_detailMode)
+                _visualization3D.FrameDetailView((float)options.DomainRadius, borehole.TotalDepth);
+            else
+                _visualization3D.SetCameraDistance(MathF.Max(20f, 1.2f * (float)options.DomainRadius));
 
             _isInitialized = true;
         }
@@ -97,7 +119,7 @@ public class GeothermalMeshPreview : IDisposable
         {
             Console.WriteLine($"Error generating preview: {ex.Message}");
             _isInitialized = false;
-            throw; // Re-throw to let caller handle it
+            throw;
         }
     }
 
@@ -119,7 +141,8 @@ public class GeothermalMeshPreview : IDisposable
         // Left side: 3D visualization with scrollbars
         // CRITICAL: NoMove prevents window dragging, NoScrollWithMouse allows our custom mouse handling
         ImGui.BeginChild("3DPreviewView", new Vector2(availRegion.X - overlayWidth, availRegion.Y),
-            ImGuiChildFlags.Border, ImGuiWindowFlags.HorizontalScrollbar | ImGuiWindowFlags.NoMove | ImGuiWindowFlags.NoScrollWithMouse);
+            ImGuiChildFlags.Border,
+            ImGuiWindowFlags.HorizontalScrollbar | ImGuiWindowFlags.NoMove | ImGuiWindowFlags.NoScrollWithMouse);
 
         if (_visualization3D != null)
         {
@@ -138,10 +161,7 @@ public class GeothermalMeshPreview : IDisposable
             var renderHeight = Math.Max(viewRegion.Y, minViewHeight);
 
             // Resize render target if needed
-            if (renderWidth > 0 && renderHeight > 0)
-            {
-                _visualization3D.Resize((uint)renderWidth, (uint)renderHeight);
-            }
+            if (renderWidth > 0 && renderHeight > 0) _visualization3D.Resize((uint)renderWidth, (uint)renderHeight);
 
             // Render 3D view to texture
             _visualization3D.Render();
@@ -151,34 +171,36 @@ public class GeothermalMeshPreview : IDisposable
             if (renderTargetBinding != IntPtr.Zero && renderWidth > 0 && renderHeight > 0)
             {
                 var imagePos = ImGui.GetCursorScreenPos();
-                
+
                 // DEFINITIVE FIX: Use InvisibleButton to capture ALL mouse input
                 // ImGui.Image() alone is NOT interactive and lets clicks fall through to parent window
                 var imageBounds = new Vector2(renderWidth, renderHeight);
-                
+
                 // Draw the image first (as background)
                 var dl = ImGui.GetWindowDrawList();
                 dl.AddImage(renderTargetBinding, imagePos, imagePos + imageBounds);
-                
+
                 // Place an invisible button over the entire image area to capture mouse input
                 ImGui.SetCursorScreenPos(imagePos);
-                ImGui.InvisibleButton("3DViewInteraction", imageBounds, ImGuiButtonFlags.MouseButtonLeft | ImGuiButtonFlags.MouseButtonRight | ImGuiButtonFlags.MouseButtonMiddle);
-                
+                ImGui.InvisibleButton("3DViewInteraction", imageBounds,
+                    ImGuiButtonFlags.MouseButtonLeft | ImGuiButtonFlags.MouseButtonRight |
+                    ImGuiButtonFlags.MouseButtonMiddle);
+
                 // CRITICAL: Store interaction state IMMEDIATELY after InvisibleButton
-                bool imageHovered = ImGui.IsItemHovered();
-                bool imageActive = ImGui.IsItemActive();
-                
+                var imageHovered = ImGui.IsItemHovered();
+                var imageActive = ImGui.IsItemActive();
+
                 // Render overlay info on top of the 3D view
                 var drawList = ImGui.GetWindowDrawList();
                 var overlayPos = new Vector2(imagePos.X + 10, imagePos.Y + 10);
-                
+
                 // Semi-transparent background for overlay
                 drawList.AddRectFilled(
-                    overlayPos, 
+                    overlayPos,
                     new Vector2(overlayPos.X + 220, overlayPos.Y + 80),
                     ImGui.GetColorU32(new Vector4(0f, 0f, 0f, 0.6f)),
                     4.0f);
-                
+
                 // Domain dimensions text
                 ImGui.SetCursorScreenPos(new Vector2(overlayPos.X + 5, overlayPos.Y + 5));
                 ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(0f, 1f, 1f, 1f));
@@ -197,19 +219,19 @@ public class GeothermalMeshPreview : IDisposable
                 {
                     var io = ImGui.GetIO();
                     var mousePos = new Vector2(io.MousePos.X - imagePos.X, io.MousePos.Y - imagePos.Y);
-                    
+
                     // CRITICAL FIX: Capture ALL mouse input to prevent interference
                     // This prevents: 1) Window dragging, 2) Parent scrolling, 3) Input bleeding
-                    bool hasMouseInput = ImGui.IsMouseDown(ImGuiMouseButton.Left) || 
-                                        ImGui.IsMouseDown(ImGuiMouseButton.Right) || 
-                                        ImGui.IsMouseDown(ImGuiMouseButton.Middle) || 
+                    var hasMouseInput = ImGui.IsMouseDown(ImGuiMouseButton.Left) ||
+                                        ImGui.IsMouseDown(ImGuiMouseButton.Right) ||
+                                        ImGui.IsMouseDown(ImGuiMouseButton.Middle) ||
                                         Math.Abs(io.MouseWheel) > 0.001f;
-                    
+
                     if (hasMouseInput || imageActive)
                     {
                         // Set focus on this child window
                         ImGui.SetWindowFocus();
-                        
+
                         // Tell ImGui we OWN all mouse input - prevents ANY parent interference
                         io.WantCaptureMouse = true;
                         io.WantCaptureMouseUnlessPopupClose = true;
@@ -219,13 +241,9 @@ public class GeothermalMeshPreview : IDisposable
                     if (ImGui.IsMouseDown(ImGuiMouseButton.Left))
                     {
                         if (ImGui.IsMouseClicked(ImGuiMouseButton.Left))
-                        {
                             _visualization3D.StartRotation(mousePos);
-                        }
                         else
-                        {
                             _visualization3D.UpdateRotation(mousePos);
-                        }
                     }
                     else if (ImGui.IsMouseReleased(ImGuiMouseButton.Left))
                     {
@@ -236,13 +254,9 @@ public class GeothermalMeshPreview : IDisposable
                     if (ImGui.IsMouseDown(ImGuiMouseButton.Right))
                     {
                         if (ImGui.IsMouseClicked(ImGuiMouseButton.Right))
-                        {
                             _visualization3D.StartPanning(mousePos);
-                        }
                         else
-                        {
                             _visualization3D.UpdatePanning(mousePos);
-                        }
                     }
                     else if (ImGui.IsMouseReleased(ImGuiMouseButton.Right))
                     {
@@ -253,13 +267,9 @@ public class GeothermalMeshPreview : IDisposable
                     if (ImGui.IsMouseDown(ImGuiMouseButton.Middle))
                     {
                         if (ImGui.IsMouseClicked(ImGuiMouseButton.Middle))
-                        {
                             _visualization3D.StartPanning(mousePos);
-                        }
                         else
-                        {
                             _visualization3D.UpdatePanning(mousePos);
-                        }
                     }
                     else if (ImGui.IsMouseReleased(ImGuiMouseButton.Middle))
                     {
@@ -267,10 +277,7 @@ public class GeothermalMeshPreview : IDisposable
                     }
 
                     // Mouse wheel - Zoom
-                    if (io.MouseWheel != 0)
-                    {
-                        _visualization3D.HandleMouseWheel(io.MouseWheel);
-                    }
+                    if (io.MouseWheel != 0) _visualization3D.HandleMouseWheel(io.MouseWheel);
                 }
             }
             else
@@ -293,27 +300,117 @@ public class GeothermalMeshPreview : IDisposable
 
         void RenderVisualizationControls()
         {
-            ImGui.Text("Visualization Options");
-            ImGui.Spacing();
+            if (_visualization3D == null)
+                return;
 
-            if (ImGui.Checkbox("Show Borehole", ref _showBorehole))
-                UpdateVisibility();
+            // A compact two-column control panel using Dear ImGui tables
+            ImGui.PushStyleVar(ImGuiStyleVar.CellPadding, new Vector2(6, 4));
+            if (ImGui.BeginTable("MeshPreviewControls", 2,
+                    ImGuiTableFlags.SizingStretchSame | ImGuiTableFlags.BordersInnerV))
+            {
+                // -------- Column 1: View mode + visibility toggles --------
+                ImGui.TableNextColumn();
 
-            if (ImGui.Checkbox("Show Domain Boundary", ref _showDomain))
-                UpdateVisibility();
+                // View mode switch
+                if (_lastBorehole != null && _lastOptions != null)
+                {
+                    if (ImGui.Button(_detailMode ? "Switch to Overview" : "Switch to Detail View (Borehole/HX)"))
+                    {
+                        // Flip mode and enforce "always-visible" set when entering Detail
+                        _detailMode = !_detailMode;
 
-            if (ImGui.Checkbox("Show Lithology Layers", ref _showLithologyLayers))
-                UpdateVisibility();
+                        if (_detailMode)
+                        {
+                            _showDomain = true; // keep boundary
+                            _showLithologyLayers = true; // always visible in detail
+                            _showBorehole = true; // detail focuses on small stuff
+                            _showHeatExchanger = true; // show HX in detail view
+                        }
 
-            ImGui.Checkbox("Show Grid Lines", ref _showGridLines);
+                        // Rebuild + frame appropriately
+                        GeneratePreview(_lastBorehole, _lastOptions);
+                        UpdateVisibility();
 
-            ImGui.Spacing();
-            ImGui.Text("Camera Controls:");
-            ImGui.BulletText("Left Mouse: Rotate");
-            ImGui.BulletText("Right Mouse: Pan");
-            ImGui.BulletText("Wheel: Zoom");
-            ImGui.BulletText("R: Reset View");
+                        if (_detailMode)
+                            _visualization3D.FrameDetailView((float)_lastOptions.DomainRadius,
+                                _lastBorehole.TotalDepth);
+                    }
+
+                    if (ImGui.IsItemHovered())
+                        ImGui.SetTooltip(
+                            "Detail View exaggerates tiny radii (preview-only) and frames camera on borehole/HX while keeping boundary and lithologies visible.");
+                }
+                else
+                {
+                    ImGui.BeginDisabled(true);
+                    ImGui.Button("Switch to Detail View (Borehole/HX)");
+                    ImGui.EndDisabled();
+
+                    if (ImGui.IsItemHovered())
+                        ImGui.SetTooltip("Load a borehole and options first.");
+                }
+
+                ImGui.Separator();
+
+                // Visibility toggles (decoupled: HX no longer tied to Borehole)
+                var changed = false;
+
+                changed |= ImGui.Checkbox("Show Boundary", ref _showDomain);
+                if (ImGui.IsItemHovered())
+                    ImGui.SetTooltip("Toggle the cylindrical domain boundary.");
+
+                changed |= ImGui.Checkbox("Show Lithology Layers", ref _showLithologyLayers);
+                if (ImGui.IsItemHovered())
+                    ImGui.SetTooltip("Toggle lithology shells along the domain boundary.");
+
+                changed |= ImGui.Checkbox("Show Borehole", ref _showBorehole);
+                if (ImGui.IsItemHovered())
+                    ImGui.SetTooltip("Toggle the borehole cylinder mesh.");
+
+                changed |= ImGui.Checkbox("Show Heat Exchanger", ref _showHeatExchanger);
+                if (ImGui.IsItemHovered())
+                    ImGui.SetTooltip("Toggle U-tube/coaxial pipes (preview only).");
+
+                if (changed)
+                    UpdateVisibility();
+
+                // -------- Column 2: Camera helpers + utilities --------
+                ImGui.TableNextColumn();
+
+                if (_lastBorehole != null && _lastOptions != null)
+                {
+                    if (ImGui.Button("Zoom to Borehole/HX"))
+                        _visualization3D.FrameDetailView((float)_lastOptions.DomainRadius, _lastBorehole.TotalDepth);
+                    if (ImGui.IsItemHovered())
+                        ImGui.SetTooltip("Frame a close view around the borehole and heat exchanger.");
+
+                    ImGui.SameLine();
+                    if (ImGui.Button("Fit Overview"))
+                        // Pull back to a comfortable overview distance
+                        _visualization3D.SetCameraDistance(MathF.Max(20f, 1.2f * (float)_lastOptions.DomainRadius));
+                    if (ImGui.IsItemHovered())
+                        ImGui.SetTooltip("Pull back to see the whole domain comfortably.");
+                }
+                else
+                {
+                    ImGui.BeginDisabled(true);
+                    ImGui.Button("Zoom to Borehole/HX");
+                    ImGui.SameLine();
+                    ImGui.Button("Fit Overview");
+                    ImGui.EndDisabled();
+                }
+
+                // Quick refresh (re-adds meshes per current toggles)
+                if (ImGui.Button("Refresh View")) UpdateVisibility();
+                if (ImGui.IsItemHovered())
+                    ImGui.SetTooltip("Re-apply current visibility toggles.");
+
+                ImGui.EndTable();
+            }
+
+            ImGui.PopStyleVar();
         }
+
 
         void RenderParameterOverlays(BoreholeDataset borehole, GeothermalSimulationOptions options)
         {
@@ -357,7 +454,7 @@ public class GeothermalMeshPreview : IDisposable
                 ImGui.Indent();
                 RenderInfoRow("Type:", options.HeatExchangerType.ToString());
                 RenderInfoRow("Pipe Diameter:", $"{options.PipeInnerDiameter * 1000:F1} mm");
-                RenderInfoRow("Grout Conductivity:", $"{options.GroutThermalConductivity:F2} W/(mÃ‚Â·K)");
+                RenderInfoRow("Grout Conductivity:", $"{options.GroutThermalConductivity:F2} W/(m·K)");
 
                 if (options.HeatExchangerType == HeatExchangerType.UTube)
                     RenderInfoRow("Pipe Spacing:", $"{options.PipeSpacing * 1000:F1} mm");
@@ -372,8 +469,8 @@ public class GeothermalMeshPreview : IDisposable
                 // FluidMassFlowRate is in kg/s, convert to L/min (assuming water density ~1000 kg/mÃ‚Â³
                 var flowRateLmin = options.FluidMassFlowRate * 60.0; // kg/s to L/min (for water)
                 RenderInfoRow("Flow Rate:", $"{flowRateLmin:F2} L/min");
-                RenderInfoRow("Inlet Temp:", $"{options.FluidInletTemperature - 273.15:F1} Ã‚Â°C");
-                RenderInfoRow("Surface Temp:", $"{options.SurfaceTemperature - 273.15:F1} Ã‚Â°C");
+                RenderInfoRow("Inlet Temp:", $"{options.FluidInletTemperature - 273.15:F1} °C");
+                RenderInfoRow("Surface Temp:", $"{options.SurfaceTemperature - 273.15:F1} °C");
                 RenderInfoRow("Simulation Time:", $"{options.SimulationTime / (365.25 * 24 * 3600):F1} years");
                 ImGui.Unindent();
                 ImGui.Spacing();
@@ -415,21 +512,21 @@ public class GeothermalMeshPreview : IDisposable
                         var layerName = !string.IsNullOrEmpty(unit.Name) ? unit.Name : unit.RockType ?? "Unknown";
 
                         if (options.LayerThermalConductivities.TryGetValue(layerName, out var conductivity))
-                            RenderInfoRow("Conductivity:", $"{conductivity:F2} W/(mÃ‚Â·K)");
+                            RenderInfoRow("Conductivity:", $"{conductivity:F2} W/(m·K)");
 
                         if (options.LayerSpecificHeats.TryGetValue(layerName, out var specificHeat))
                             RenderInfoRow("Specific Heat:",
-                                $"{specificHeat:F0} J/(kgÃ‚Â·K)");
+                                $"{specificHeat:F0} J/(kg·K)");
 
                         if (options.LayerDensities.TryGetValue(layerName, out var density))
-                            RenderInfoRow("Density:", $"{density:F0} kg/mÃ‚Â³");
+                            RenderInfoRow("Density:", $"{density:F0} kg/m³");
 
                         if (options.LayerPorosities.TryGetValue(layerName, out var porosity))
                             RenderInfoRow("Porosity:", $"{porosity * 100:F1} %");
 
                         if (options.LayerPermeabilities.TryGetValue(layerName, out var permeability))
                             RenderInfoRow("Permeability:",
-                                $"{permeability:E2} mÃ‚Â²");
+                                $"{permeability:E2} m²");
 
                         ImGui.PopStyleColor();
                         ImGui.Unindent();
@@ -456,7 +553,8 @@ public class GeothermalMeshPreview : IDisposable
                 if (options.DomainRadius < borehole.TotalDepth * 0.5)
                 {
                     ImGui.Spacing();
-                    ImGui.TextWrapped("Warning: Domain radius seems small relative to borehole depth. Consider increasing it.");
+                    ImGui.TextWrapped(
+                        "Warning: Domain radius seems small relative to borehole depth. Consider increasing it.");
                 }
 
                 if (borehole.LithologyUnits.Count == 0)
@@ -498,7 +596,7 @@ public class GeothermalMeshPreview : IDisposable
 
             if (_showDomain && _domainMesh != null)
                 _visualization3D.AddMesh(_domainMesh);
-            
+
             // CRITICAL FIX: Re-add lithology layers when visibility is toggled
             if (_showLithologyLayers && _lithologyMeshes != null)
                 foreach (var mesh in _lithologyMeshes)
@@ -507,185 +605,382 @@ public class GeothermalMeshPreview : IDisposable
     }
 
     /// <summary>
-        ///     Creates a wireframe mesh representing the simulation domain boundary.
-        /// </summary>
-        Mesh3DDataset CreateDomainMesh(BoreholeDataset borehole, GeothermalSimulationOptions options)
+    ///     Creates a wireframe mesh representing the simulation domain boundary.
+    /// </summary>
+    private Mesh3DDataset CreateDomainMesh(BoreholeDataset borehole, GeothermalSimulationOptions options)
+    {
+        var vertices = new List<Vector3>();
+        var faces = new List<int[]>();
+
+        var radius = (float)options.DomainRadius;
+        var depth = borehole.TotalDepth + (float)options.DomainExtension;
+        var topExtension = (float)options.DomainExtension;
+        var angularSegments = 32;
+
+        // Create top and bottom circles
+        for (var i = 0; i <= 1; i++)
         {
-            var vertices = new List<Vector3>();
+            var z = i == 0 ? topExtension : -depth;
+            for (var j = 0; j < angularSegments; j++)
+            {
+                var angle = j * 2.0f * MathF.PI / angularSegments;
+                var x = radius * MathF.Cos(angle);
+                var y = radius * MathF.Sin(angle);
+                vertices.Add(new Vector3(x, y, z));
+            }
+        }
+
+        // Create faces for wireframe (only edge lines)
+        // Top circle
+        for (var j = 0; j < angularSegments; j++)
+        {
+            var next = (j + 1) % angularSegments;
+            faces.Add(new[] { j, next });
+        }
+
+        // Bottom circle
+        for (var j = 0; j < angularSegments; j++)
+        {
+            var next = (j + 1) % angularSegments;
+            faces.Add(new[] { angularSegments + j, angularSegments + next });
+        }
+
+        // Vertical lines
+        for (var j = 0; j < angularSegments; j += 4) // Only every 4th line for clarity
+            faces.Add(new[] { j, angularSegments + j });
+
+        var tempPath = Path.Combine(Path.GetTempPath(), "domain_mesh_preview.obj");
+
+        var mesh = Mesh3DDataset.CreateFromData(
+            "Domain_Boundary",
+            tempPath,
+            vertices,
+            faces,
+            1.0f,
+            "m"
+        );
+
+        // Set a bright color for better visibility
+        for (var i = 0; i < mesh.Vertices.Count; i++)
+            mesh.Colors.Add(new Vector4(0.0f, 1.0f, 1.0f, 1.0f)); // Cyan wireframe
+
+        return mesh;
+    }
+
+// Builds simple cylinder meshes for the HX so it’s visible in preview.
+// U-tube: two parallel cylinders at ±PipeSpacing/2 along X.
+// Coaxial: one inner and one outer concentric cylinder.
+    private List<Mesh3DDataset> CreateHeatExchangerMeshes(BoreholeDataset borehole, GeothermalSimulationOptions options,
+        bool exaggerateSmall)
+    {
+        var meshes = new List<Mesh3DDataset>();
+
+        var depthTop = (float)options.DomainExtension;
+        var depthBot = -(borehole.TotalDepth + (float)options.DomainExtension);
+
+        int ang = 24, zseg = 48;
+
+        Mesh3DDataset MakeCylinder(string name, float r, Vector3 center, Vector4 color)
+        {
+            var verts = new List<Vector3>();
             var faces = new List<int[]>();
 
-            var radius = (float)options.DomainRadius;
-            var depth = borehole.TotalDepth + (float)options.DomainExtension;
-            var topExtension = (float)options.DomainExtension;
-            var angularSegments = 32;
-
-            // Create top and bottom circles
-            for (var i = 0; i <= 1; i++)
+            for (var i = 0; i <= zseg; i++)
             {
-                var z = i == 0 ? topExtension : -depth;
-                for (var j = 0; j < angularSegments; j++)
+                var t = i / (float)zseg;
+                var z = depthTop + (depthBot - depthTop) * t;
+                for (var j = 0; j < ang; j++)
                 {
-                    var angle = j * 2.0f * MathF.PI / angularSegments;
-                    var x = radius * MathF.Cos(angle);
-                    var y = radius * MathF.Sin(angle);
-                    vertices.Add(new Vector3(x, y, z));
+                    var a = j * 2f * MathF.PI / ang;
+                    verts.Add(new Vector3(center.X + r * MathF.Cos(a),
+                        center.Y + r * MathF.Sin(a),
+                        z));
                 }
             }
 
-            // Create faces for wireframe (only edge lines)
-            // Top circle
-            for (var j = 0; j < angularSegments; j++)
+            for (var i = 0; i < zseg; i++)
+            for (var j = 0; j < ang; j++)
             {
-                var next = (j + 1) % angularSegments;
-                faces.Add(new[] { j, next });
+                var jn = (j + 1) % ang;
+                var v0 = i * ang + j;
+                var v1 = i * ang + jn;
+                var v2 = (i + 1) * ang + j;
+                var v3 = (i + 1) * ang + jn;
+                faces.Add(new[] { v0, v2, v1 });
+                faces.Add(new[] { v1, v2, v3 });
             }
-
-            // Bottom circle
-            for (var j = 0; j < angularSegments; j++)
-            {
-                var next = (j + 1) % angularSegments;
-                faces.Add(new[] { angularSegments + j, angularSegments + next });
-            }
-
-            // Vertical lines
-            for (var j = 0; j < angularSegments; j += 4) // Only every 4th line for clarity
-                faces.Add(new[] { j, angularSegments + j });
-
-            var tempPath = Path.Combine(Path.GetTempPath(), "domain_mesh_preview.obj");
 
             var mesh = Mesh3DDataset.CreateFromData(
-                "Domain_Boundary",
-                tempPath,
-                vertices,
-                faces,
-                1.0f,
-                "m"
-            );
-            
-            // Set a bright color for better visibility
-            for (int i = 0; i < mesh.Vertices.Count; i++)
-            {
-                mesh.Colors.Add(new Vector4(0.0f, 1.0f, 1.0f, 1.0f)); // Cyan wireframe
-            }
-            
+                name,
+                Path.Combine(Path.GetTempPath(), $"{name}_hx_preview.obj"),
+                verts, faces, 1f, "m");
+
+            for (var i = 0; i < mesh.Vertices.Count; i++)
+                mesh.Colors.Add(color);
+
             return mesh;
         }
 
-        /// <summary>
-        ///     Creates cylindrical meshes for each lithology layer.
-        /// </summary>
-        List<Mesh3DDataset> CreateLithologyLayersMeshes(BoreholeDataset borehole,
-            GeothermalSimulationOptions options)
+        var domainR = (float)options.DomainRadius;
+        var minVisR = 0.015f * domainR; // 1.5% of domain for visibility
+
+        if (options.HeatExchangerType == HeatExchangerType.UTube)
         {
-            var meshes = new List<Mesh3DDataset>();
+            var roPhys = (float)(options.PipeOuterDiameter / 2.0);
+            var ro = exaggerateSmall ? MathF.Max(roPhys, minVisR) : roPhys;
 
-            if (borehole.LithologyUnits == null || borehole.LithologyUnits.Count == 0)
-                return meshes;
+            var sx = (float)(options.PipeSpacing / 2.0);
 
-            var angularSegments = 24;
-            var boreholeRadius = (float)(borehole.WellDiameter / 2.0);
-            var domainRadius = (float)options.DomainRadius;
+            meshes.Add(MakeCylinder("HX_Pipe_A", ro, new Vector3(+sx, 0, 0), new Vector4(0.95f, 0.35f, 0.10f, 1)));
+            meshes.Add(MakeCylinder("HX_Pipe_B", ro, new Vector3(-sx, 0, 0), new Vector4(0.95f, 0.35f, 0.10f, 1)));
+        }
+        else // Coaxial
+        {
+            var rInPhys = (float)(options.PipeInnerDiameter / 2.0);
+            var rOutPhys = (float)(options.PipeOuterDiameter / 2.0);
 
-            foreach (var unit in borehole.LithologyUnits)
+            var rIn = exaggerateSmall ? MathF.Max(rInPhys, 0.010f * domainR) : rInPhys;
+            var rOut = exaggerateSmall ? MathF.Max(rOutPhys, minVisR) : rOutPhys;
+
+            meshes.Add(MakeCylinder("HX_Inner", rIn, Vector3.Zero, new Vector4(0.80f, 0.20f, 0.80f, 1)));
+            meshes.Add(MakeCylinder("HX_Outer", rOut, Vector3.Zero, new Vector4(0.20f, 0.80f, 0.90f, 1)));
+        }
+
+        return meshes;
+    }
+
+    /// <summary>
+    ///     Creates cylindrical meshes for each lithology layer.
+    /// </summary>
+    // Creates cylindrical wireframe bands for each lithology layer,
+// with ring radii scaled to the domain so they remain visible at any scale.
+    private List<Mesh3DDataset> CreateLithologyLayersMeshes(BoreholeDataset borehole,
+        GeothermalSimulationOptions options)
+    {
+        var meshes = new List<Mesh3DDataset>();
+        if (borehole?.LithologyUnits == null || borehole.LithologyUnits.Count == 0)
+            return meshes;
+
+        const int ang = 64;
+        var Rdomain = (float)options.DomainRadius;
+        var Rout = 0.995f * Rdomain; // just inside domain to avoid z-fighting
+        var shell = MathF.Max(0.015f * Rdomain, 0.25f); // visual thickness
+        var Rin = MathF.Max(0f, Rout - shell);
+
+        Mesh3DDataset MakeBand(string name, float zTop, float zBot, Vector4 color)
+        {
+            var verts = new List<Vector3>();
+            var faces = new List<int[]>();
+
+            for (var j = 0; j < ang; j++)
             {
-                var vertices = new List<Vector3>();
-                var faces = new List<int[]>();
-
-                var depthFrom = -unit.DepthFrom;
-                var depthTo = -unit.DepthTo;
-
-                // Inner cylinder (borehole)
-                for (var i = 0; i <= 1; i++)
-                {
-                    var z = i == 0 ? depthFrom : depthTo;
-                    for (var j = 0; j < angularSegments; j++)
-                    {
-                        var angle = j * 2.0f * MathF.PI / angularSegments;
-                        var x = boreholeRadius * MathF.Cos(angle);
-                        var y = boreholeRadius * MathF.Sin(angle);
-                        vertices.Add(new Vector3(x, y, z));
-                    }
-                }
-
-                // Outer cylinder (domain boundary) - semi-transparent
-                var outerRadius = boreholeRadius * 3f; // Smaller visualization radius
-                for (var i = 0; i <= 1; i++)
-                {
-                    var z = i == 0 ? depthFrom : depthTo;
-                    for (var j = 0; j < angularSegments; j++)
-                    {
-                        var angle = j * 2.0f * MathF.PI / angularSegments;
-                        var x = outerRadius * MathF.Cos(angle);
-                        var y = outerRadius * MathF.Sin(angle);
-                        vertices.Add(new Vector3(x, y, z));
-                    }
-                }
-
-                // Create faces for the layer boundaries (wireframe style)
-                // Top inner ring
-                for (var j = 0; j < angularSegments; j++)
-                {
-                    var next = (j + 1) % angularSegments;
-                    faces.Add(new[] { j, next });
-                }
-
-                // Bottom inner ring
-                for (var j = 0; j < angularSegments; j++)
-                {
-                    var next = (j + 1) % angularSegments;
-                    faces.Add(new[] { angularSegments + j, angularSegments + next });
-                }
-
-                // Radial lines from inner to outer at layer boundaries
-                for (var j = 0; j < angularSegments; j += 6)
-                {
-                    faces.Add(new[] { j, 2 * angularSegments + j }); // Top
-                    faces.Add(new[] { angularSegments + j, 3 * angularSegments + j }); // Bottom
-                }
-
-                var tempPath = Path.Combine(Path.GetTempPath(), $"layer_{unit.Name}_preview.obj");
-
-                var mesh = Mesh3DDataset.CreateFromData(
-                    $"Layer_{unit.Name}",
-                    tempPath,
-                    vertices,
-                    faces,
-                    1.0f,
-                    "m"
-                );
-                
-                // Add distinct color based on lithology index for better visibility
-                var hue = (borehole.LithologyUnits.IndexOf(unit) * 360.0f / borehole.LithologyUnits.Count) % 360.0f;
-                var color = HsvToRgb(hue, 0.7f, 0.9f);
-                for (int i = 0; i < mesh.Vertices.Count; i++)
-                {
-                    mesh.Colors.Add(new Vector4(color.X, color.Y, color.Z, 0.8f));
-                }
-
-                meshes.Add(mesh);
+                var a = j * 2f * MathF.PI / ang;
+                verts.Add(new Vector3(Rout * MathF.Cos(a), Rout * MathF.Sin(a), zTop)); // 0..ang-1  : OT
             }
 
-            return meshes;
+            for (var j = 0; j < ang; j++)
+            {
+                var a = j * 2f * MathF.PI / ang;
+                verts.Add(new Vector3(Rout * MathF.Cos(a), Rout * MathF.Sin(a), zBot)); // ang..2ang-1: OB
+            }
+
+            for (var j = 0; j < ang; j++)
+            {
+                var a = j * 2f * MathF.PI / ang;
+                verts.Add(new Vector3(Rin * MathF.Cos(a), Rin * MathF.Sin(a), zTop)); // 2ang..3ang-1: IT
+            }
+
+            for (var j = 0; j < ang; j++)
+            {
+                var a = j * 2f * MathF.PI / ang;
+                verts.Add(new Vector3(Rin * MathF.Cos(a), Rin * MathF.Sin(a), zBot)); // 3ang..4ang-1: IB
+            }
+
+            int OT(int j)
+            {
+                return j;
+            }
+
+            int OB(int j)
+            {
+                return ang + j;
+            }
+
+            int IT(int j)
+            {
+                return 2 * ang + j;
+            }
+
+            int IB(int j)
+            {
+                return 3 * ang + j;
+            }
+
+            // Outer wall
+            for (var j = 0; j < ang; j++)
+            {
+                var jn = (j + 1) % ang;
+                faces.Add(new[] { OT(j), OB(j), OT(jn) });
+                faces.Add(new[] { OT(jn), OB(j), OB(jn) });
+            }
+
+            // Inner wall
+            for (var j = 0; j < ang; j++)
+            {
+                var jn = (j + 1) % ang;
+                faces.Add(new[] { IT(j), IT(jn), IB(j) });
+                faces.Add(new[] { IT(jn), IB(jn), IB(j) });
+            }
+
+            // Top annulus
+            for (var j = 0; j < ang; j++)
+            {
+                var jn = (j + 1) % ang;
+                faces.Add(new[] { OT(j), IT(j), OT(jn) });
+                faces.Add(new[] { OT(jn), IT(j), IT(jn) });
+            }
+
+            // Bottom annulus
+            for (var j = 0; j < ang; j++)
+            {
+                var jn = (j + 1) % ang;
+                faces.Add(new[] { OB(j), OB(jn), IB(j) });
+                faces.Add(new[] { OB(jn), IB(jn), IB(j) });
+            }
+
+            var mesh = Mesh3DDataset.CreateFromData(
+                name,
+                Path.Combine(Path.GetTempPath(), $"{name}_litho_preview.obj"),
+                verts, faces, 1f, "m");
+
+            // Color
+            for (var i = 0; i < mesh.Vertices.Count; i++) mesh.Colors.Add(color);
+            return mesh;
         }
-        
-        /// <summary>
-        ///     Helper method to convert HSV color space to RGB.
-        /// </summary>
-        private static Vector3 HsvToRgb(float h, float s, float v)
+
+        static Vector3 HsvToRgb(float hDeg, float s, float v)
         {
-            h = h % 360.0f;
-            float c = v * s;
-            float x = c * (1 - MathF.Abs((h / 60.0f) % 2 - 1));
-            float m = v - c;
-            
-            float r, g, b;
-            if (h < 60) { r = c; g = x; b = 0; }
-            else if (h < 120) { r = x; g = c; b = 0; }
-            else if (h < 180) { r = 0; g = c; b = x; }
-            else if (h < 240) { r = 0; g = x; b = c; }
-            else if (h < 300) { r = x; g = 0; b = c; }
-            else { r = c; g = 0; b = x; }
-            
-            return new Vector3(r + m, g + m, b + m);
+            var h = (hDeg % 360f + 360f) % 360f / 60f;
+            var i = (int)MathF.Floor(h);
+            float f = h - i, p = v * (1 - s), q = v * (1 - s * f), t = v * (1 - s * (1 - f));
+            return i switch
+            {
+                0 => new Vector3(v, t, p), 1 => new Vector3(q, v, p), 2 => new Vector3(p, v, t),
+                3 => new Vector3(p, q, v), 4 => new Vector3(t, p, v), _ => new Vector3(v, p, q)
+            };
         }
+
+        var n = borehole.LithologyUnits.Count;
+        for (var idx = 0; idx < n; idx++)
+        {
+            var u = borehole.LithologyUnits[idx];
+            float zTop = -u.DepthFrom, zBot = -u.DepthTo;
+            var hue = idx * 360f / Math.Max(1, n);
+            var rgb = HsvToRgb(hue, 0.65f, 0.95f);
+            var color = new Vector4(rgb.X, rgb.Y, rgb.Z, 0.95f);
+            meshes.Add(MakeBand($"Lithology_{u.Name}", zTop, zBot, color));
+        }
+
+        return meshes;
     }
+
+    private Mesh3DDataset CreateBoreholePreviewMesh(BoreholeDataset borehole, GeothermalSimulationOptions options,
+        bool exaggerateSmall)
+    {
+        var depthTop = (float)options.DomainExtension;
+        var depthBot = -(borehole.TotalDepth + (float)options.DomainExtension);
+
+        var physicalR = (float)(borehole.WellDiameter / 2.0);
+        var minVisR = 0.02f * (float)options.DomainRadius; // 2% of domain for visibility
+        var r = exaggerateSmall ? MathF.Max(physicalR, minVisR) : physicalR;
+
+        int ang = 32, zseg = 64;
+        var verts = new List<Vector3>();
+        var faces = new List<int[]>();
+
+        for (var i = 0; i <= zseg; i++)
+        {
+            var t = i / (float)zseg;
+            var z = depthTop + (depthBot - depthTop) * t;
+            for (var j = 0; j < ang; j++)
+            {
+                var a = j * 2f * MathF.PI / ang;
+                verts.Add(new Vector3(r * MathF.Cos(a), r * MathF.Sin(a), z));
+            }
+        }
+
+        for (var i = 0; i < zseg; i++)
+        for (var j = 0; j < ang; j++)
+        {
+            var jn = (j + 1) % ang;
+            var v0 = i * ang + j;
+            var v1 = i * ang + jn;
+            var v2 = (i + 1) * ang + j;
+            var v3 = (i + 1) * ang + jn;
+            faces.Add(new[] { v0, v2, v1 });
+            faces.Add(new[] { v1, v2, v3 });
+        }
+
+        var mesh = Mesh3DDataset.CreateFromData(
+            "Borehole_Preview",
+            Path.Combine(Path.GetTempPath(), "borehole_preview.obj"),
+            verts, faces, 1f, "m");
+
+        // Color (steel-ish)
+        for (var i = 0; i < mesh.Vertices.Count; i++)
+            mesh.Colors.Add(new Vector4(0.75f, 0.78f, 0.82f, 1f));
+
+        return mesh;
+    }
+
+    /// <summary>
+    ///     Helper method to convert HSV color space to RGB.
+    /// </summary>
+    private static Vector3 HsvToRgb(float h, float s, float v)
+    {
+        h = h % 360.0f;
+        var c = v * s;
+        var x = c * (1 - MathF.Abs(h / 60.0f % 2 - 1));
+        var m = v - c;
+
+        float r, g, b;
+        if (h < 60)
+        {
+            r = c;
+            g = x;
+            b = 0;
+        }
+        else if (h < 120)
+        {
+            r = x;
+            g = c;
+            b = 0;
+        }
+        else if (h < 180)
+        {
+            r = 0;
+            g = c;
+            b = x;
+        }
+        else if (h < 240)
+        {
+            r = 0;
+            g = x;
+            b = c;
+        }
+        else if (h < 300)
+        {
+            r = x;
+            g = 0;
+            b = c;
+        }
+        else
+        {
+            r = c;
+            g = 0;
+            b = x;
+        }
+
+        return new Vector3(r + m, g + m, b + m);
+    }
+}

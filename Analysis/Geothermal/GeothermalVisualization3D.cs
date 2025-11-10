@@ -62,7 +62,6 @@ public class GeothermalVisualization3D : IDisposable
     private Framebuffer _framebuffer;
     private Pipeline _isosurfacePipeline;
     private float _isoValue = 20f; // Celsius
-    private Pipeline _wireframePipeline; // Add wireframe pipeline for lines
 
     private bool _isPanning;
     private bool _isRotating;
@@ -73,6 +72,10 @@ public class GeothermalVisualization3D : IDisposable
     private float _opacity = 1.0f;
     private GeothermalSimulationOptions _options; // CORRECTED: Added field to store options
     private Sampler _pointSampler;
+    private float _previewBoreholeDepth;
+
+    // Preview mode state
+    private GeothermalSimulationOptions _previewOptions;
     private Matrix4x4 _projectionMatrix;
     private uint _renderHeight = 600;
     private RenderMode _renderMode = RenderMode.Temperature;
@@ -82,11 +85,7 @@ public class GeothermalVisualization3D : IDisposable
     private ResourceLayout _resourceLayout;
     private ResourceSet _resourceSet;
     private GeothermalSimulationResults _results;
-    
-    // Preview mode state
-    private GeothermalSimulationOptions _previewOptions;
-    private float _previewBoreholeDepth;
-    
+
     private bool _showBorehole = true;
     private bool _showDomainMesh = true;
     private bool _showVectors;
@@ -107,6 +106,7 @@ public class GeothermalVisualization3D : IDisposable
     private Texture _velocityTexture3D;
     private TextureView _velocityView;
     private Matrix4x4 _viewMatrix;
+    private Pipeline _wireframePipeline; // Add wireframe pipeline for lines
 
     public GeothermalVisualization3D(GraphicsDevice graphicsDevice)
     {
@@ -116,13 +116,13 @@ public class GeothermalVisualization3D : IDisposable
 
         Logger.Log("[GeothermalVisualization3D] Calling InitializeColorMaps...");
         InitializeColorMaps(); // Must be called BEFORE InitializeResources
-        
+
         Logger.Log("[GeothermalVisualization3D] Calling InitializeResources...");
         InitializeResources();
-        
+
         Logger.Log("[GeothermalVisualization3D] Calling UpdateCamera...");
         UpdateCamera();
-        
+
         Logger.Log("[GeothermalVisualization3D] Constructor complete!");
     }
 
@@ -164,7 +164,7 @@ public class GeothermalVisualization3D : IDisposable
     private void InitializeResources()
     {
         Logger.Log("[InitializeResources] Starting...");
-        
+
         Logger.Log("[InitializeResources] Creating render target...");
         CreateRenderTarget(_renderWidth, _renderHeight);
 
@@ -191,51 +191,46 @@ public class GeothermalVisualization3D : IDisposable
 
         Logger.Log("[InitializeResources] Creating pipelines...");
         CreatePipelines();
-        
+
         Logger.Log("[InitializeResources] Creating dummy textures...");
         // Create dummy textures for preview mode
         CreateDummyTextures();
-        
+
         Logger.Log("[InitializeResources] Initializing resource set...");
         // Initialize resource set
         InitializeResourceSet();
-        
+
         Logger.Log("[InitializeResources] Complete!");
     }
 
     private void CreateDummyTextures()
     {
         Logger.Log("[CreateDummyTextures] Starting...");
-        
+
         // Create dummy temperature texture if not exists
         if (_temperatureTexture3D == null)
         {
             Logger.Log("[CreateDummyTextures] Creating temperature texture...");
-            
+
             // Use 2x2x2 texture to avoid potential D3D11 edge cases with 1x1x1 3D textures
             uint texSize = 2;
             _temperatureTexture3D = _factory.CreateTexture(TextureDescription.Texture3D(
                 texSize, texSize, texSize, 1,
                 PixelFormat.R32_Float, TextureUsage.Sampled));
-            
+
             // Initialize with dummy data BEFORE creating view (required by D3D11 for some configurations)
-            int dataSize = (int)(texSize * texSize * texSize);
+            var dataSize = (int)(texSize * texSize * texSize);
             var dummyData = new float[dataSize];
-            for (int i = 0; i < dataSize; i++)
-            {
-                dummyData[i] = 293.15f; // 20°C in Kelvin
-            }
+            for (var i = 0; i < dataSize; i++) dummyData[i] = 293.15f; // 20°C in Kelvin
             _graphicsDevice.UpdateTexture(_temperatureTexture3D, dummyData, 0, 0, 0, texSize, texSize, texSize, 0, 0);
-            
+
             // Now create the view after data initialization
             _temperatureView?.Dispose();
             _temperatureView = _factory.CreateTextureView(_temperatureTexture3D);
-            
+
             if (_temperatureView == null)
-            {
                 throw new InvalidOperationException("Failed to create temperature texture view");
-            }
-            
+
             Logger.Log("[CreateDummyTextures] Temperature texture created successfully");
         }
 
@@ -243,35 +238,30 @@ public class GeothermalVisualization3D : IDisposable
         if (_velocityTexture3D == null)
         {
             Logger.Log("[CreateDummyTextures] Creating velocity texture...");
-            
+
             // Use 2x2x2 texture to avoid potential D3D11 edge cases with 1x1x1 3D textures
             uint texSize = 2;
             _velocityTexture3D = _factory.CreateTexture(TextureDescription.Texture3D(
                 texSize, texSize, texSize, 1,
                 PixelFormat.R32_G32_B32_A32_Float, TextureUsage.Sampled));
-            
+
             // Initialize with dummy data BEFORE creating view (required by D3D11 for some configurations)
-            int dataSize = (int)(texSize * texSize * texSize);
+            var dataSize = (int)(texSize * texSize * texSize);
             var dummyData = new Vector4[dataSize];
-            for (int i = 0; i < dataSize; i++)
-            {
-                dummyData[i] = Vector4.Zero;
-            }
+            for (var i = 0; i < dataSize; i++) dummyData[i] = Vector4.Zero;
             _graphicsDevice.UpdateTexture(_velocityTexture3D, dummyData, 0, 0, 0, texSize, texSize, texSize, 0, 0);
-            
+
             // Now create the view after data initialization
             _velocityView?.Dispose();
             _velocityView = _factory.CreateTextureView(_velocityTexture3D);
-            
-            if (_velocityView == null)
-            {
-                throw new InvalidOperationException("Failed to create velocity texture view");
-            }
-            
+
+            if (_velocityView == null) throw new InvalidOperationException("Failed to create velocity texture view");
+
             Logger.Log("[CreateDummyTextures] Velocity texture created successfully");
         }
-        
-        Logger.Log($"[CreateDummyTextures] Complete. TempView={(_temperatureView != null)}, VelView={(_velocityView != null)}");
+
+        Logger.Log(
+            $"[CreateDummyTextures] Complete. TempView={_temperatureView != null}, VelView={_velocityView != null}");
     }
 
     private void InitializeResourceSet()
@@ -280,30 +270,30 @@ public class GeothermalVisualization3D : IDisposable
         {
             Logger.Log("[InitializeResourceSet] Starting...");
             _resourceSet?.Dispose();
-            
-            Logger.Log($"[InitializeResourceSet] Checking resources:");
+
+            Logger.Log("[InitializeResourceSet] Checking resources:");
             Logger.Log($"  _uniformBuffer: {(_uniformBuffer != null ? "OK" : "NULL")}");
             Logger.Log($"  _colorMapView: {(_colorMapView != null ? "OK" : "NULL")}");
             Logger.Log($"  _linearSampler: {(_linearSampler != null ? "OK" : "NULL")}");
             Logger.Log($"  _temperatureView: {(_temperatureView != null ? "OK" : "NULL")}");
             Logger.Log($"  _velocityView: {(_velocityView != null ? "OK" : "NULL")}");
             Logger.Log($"  _pointSampler: {(_pointSampler != null ? "OK" : "NULL")}");
-            
+
             if (_uniformBuffer == null) throw new InvalidOperationException("_uniformBuffer is null");
             if (_colorMapView == null) throw new InvalidOperationException("_colorMapView is null");
             if (_linearSampler == null) throw new InvalidOperationException("_linearSampler is null");
             if (_temperatureView == null) throw new InvalidOperationException("_temperatureView is null");
             if (_velocityView == null) throw new InvalidOperationException("_velocityView is null");
             if (_pointSampler == null) throw new InvalidOperationException("_pointSampler is null");
-            
+
             Logger.Log("[InitializeResourceSet] Creating resource set...");
             _resourceSet = _factory.CreateResourceSet(new ResourceSetDescription(
                 _resourceLayout,
                 _uniformBuffer, _colorMapView, _linearSampler,
                 _temperatureView, _velocityView, _pointSampler
             ));
-            
-            Logger.Log($"[InitializeResourceSet] Success! ResourceSet created: {(_resourceSet != null)}");
+
+            Logger.Log($"[InitializeResourceSet] Success! ResourceSet created: {_resourceSet != null}");
         }
         catch (Exception ex)
         {
@@ -356,7 +346,7 @@ public class GeothermalVisualization3D : IDisposable
 
         var sliceShaders = CreateShaders("Slice");
         _slicePipeline = CreatePipeline(sliceShaders, BlendStateDescription.SingleAlphaBlend);
-        
+
         // Create wireframe pipeline for line rendering
         var wireframeShaders = CreateShaders("Isosurface"); // Use basic shader
         _wireframePipeline = CreatePipeline(wireframeShaders, BlendStateDescription.SingleAlphaBlend,
@@ -429,11 +419,15 @@ public class GeothermalVisualization3D : IDisposable
         for (var i = 0; i < mesh.Vertices.Count; i++)
         {
             // Use mesh color if available, otherwise default gray or bright cyan for wireframes
-            Vector4 color = i < mesh.Colors.Count ? mesh.Colors[i] : 
-                           (mesh.Faces.Any() && mesh.Faces.All(f => f.Length == 2) ? 
-                            new Vector4(0.0f, 1.0f, 1.0f, 1.0f) : // Cyan for wireframes
-                            new Vector4(0.8f, 0.8f, 0.8f, 1.0f)); // Gray for solid
-            
+            var color = i < mesh.Colors.Count
+                ? mesh.Colors[i]
+                :
+                mesh.Faces.Any() && mesh.Faces.All(f => f.Length == 2)
+                    ?
+                    new Vector4(0.0f, 1.0f, 1.0f, 1.0f)
+                    : // Cyan for wireframes
+                    new Vector4(0.8f, 0.8f, 0.8f, 1.0f); // Gray for solid
+
             vertices.Add(new VertexData(
                 mesh.Vertices[i],
                 color,
@@ -445,10 +439,10 @@ public class GeothermalVisualization3D : IDisposable
         }
 
         var indices = new List<uint>();
-        
+
         // Check if this is a wireframe mesh (has 2-vertex faces)
-        bool isWireframe = mesh.Faces.Any() && mesh.Faces.All(f => f.Length == 2);
-        
+        var isWireframe = mesh.Faces.Any() && mesh.Faces.All(f => f.Length == 2);
+
         if (isStreamline || isWireframe) // For streamlines and wireframes, faces are pairs of indices for lines
             foreach (var face in mesh.Faces)
             {
@@ -481,11 +475,11 @@ public class GeothermalVisualization3D : IDisposable
             BufferUsage.IndexBuffer));
         _graphicsDevice.UpdateBuffer(ib, 0, indices.ToArray());
 
-        return new GpuMesh 
-        { 
-            VertexBuffer = vb, 
-            IndexBuffer = ib, 
-            IndexCount = (uint)indices.Count, 
+        return new GpuMesh
+        {
+            VertexBuffer = vb,
+            IndexBuffer = ib,
+            IndexCount = (uint)indices.Count,
             Source = mesh,
             IsWireframe = isWireframe || isStreamline // Set flag for wireframe rendering
         };
@@ -552,14 +546,15 @@ public class GeothermalVisualization3D : IDisposable
         var nr = (uint)_mesh.RadialPoints;
         var nth = (uint)_mesh.AngularPoints;
         var nz = (uint)_mesh.VerticalPoints;
-        
+
         Logger.Log($"[CreateDataTextures] Creating 3D textures: {nr}x{nth}x{nz} = {nr * nth * nz} voxels");
-        
+
         // Safety check for texture size (limit to 512^3 = ~134M voxels)
         var totalVoxels = nr * nth * nz;
         if (totalVoxels > 134217728)
         {
-            Logger.LogError($"[CreateDataTextures] ERROR: Texture too large ({totalVoxels} voxels). Maximum is 134M voxels.");
+            Logger.LogError(
+                $"[CreateDataTextures] ERROR: Texture too large ({totalVoxels} voxels). Maximum is 134M voxels.");
             throw new InvalidOperationException($"3D texture size ({nr}x{nth}x{nz}) exceeds GPU limits");
         }
 
@@ -607,7 +602,7 @@ public class GeothermalVisualization3D : IDisposable
             _graphicsDevice.UpdateTexture(_velocityTexture3D, velData, 0, 0, 0, nr, nth, nz, 0, 0);
             Logger.Log("[CreateDataTextures] Velocity texture created and uploaded successfully");
         }
-        
+
         Logger.Log("[CreateDataTextures] Complete");
     }
 
@@ -638,7 +633,7 @@ public class GeothermalVisualization3D : IDisposable
     {
         // Ensure dummy textures exist
         CreateDummyTextures();
-        
+
         // Recreate resource set with current textures
         InitializeResourceSet();
     }
@@ -655,14 +650,10 @@ public class GeothermalVisualization3D : IDisposable
         commandList.ClearDepthStencil(1.0f);
 
         if (!isPreviewMode)
-        {
             UpdateUniforms();
-        }
         else
-        {
             // In preview mode, update uniforms with basic camera/lighting only
             UpdatePreviewUniforms();
-        }
 
         // CRITICAL FIX: Must set pipeline BEFORE setting resource sets
         // We'll set the resource set after each SetPipeline call
@@ -745,13 +736,13 @@ public class GeothermalVisualization3D : IDisposable
                 // Group meshes by rendering type
                 var wireframeMeshes = _dynamicGpuMeshes.Where(m => m.IsWireframe).ToList();
                 var solidMeshes = _dynamicGpuMeshes.Where(m => !m.IsWireframe).ToList();
-                
+
                 // Render wireframe meshes with line topology
                 if (wireframeMeshes.Any())
                 {
                     commandList.SetPipeline(_wireframePipeline);
                     commandList.SetGraphicsResourceSet(0, _resourceSet);
-                    
+
                     foreach (var gpuMesh in wireframeMeshes)
                     {
                         if (gpuMesh.VertexBuffer == null) continue;
@@ -760,13 +751,13 @@ public class GeothermalVisualization3D : IDisposable
                         commandList.DrawIndexed(gpuMesh.IndexCount);
                     }
                 }
-                
+
                 // Render solid meshes with triangle topology
                 if (solidMeshes.Any())
                 {
                     commandList.SetPipeline(_isosurfacePipeline);
                     commandList.SetGraphicsResourceSet(0, _resourceSet);
-                    
+
                     foreach (var gpuMesh in solidMeshes)
                     {
                         if (gpuMesh.VertexBuffer == null) continue;
@@ -804,14 +795,20 @@ public class GeothermalVisualization3D : IDisposable
         _graphicsDevice.UpdateBuffer(_uniformBuffer, 0, ref uniforms);
     }
 
+    public void SetCameraDistance(float d)
+    {
+        _cameraDistance = Math.Clamp(d, 5f, 20000f);
+        UpdateCamera();
+    }
+
     private void UpdatePreviewUniforms()
     {
         // Simplified uniforms for preview mode (without simulation results)
         // Use stored preview options if available for proper domain info
-        float domainRadius = (float)(_previewOptions?.DomainRadius ?? 100f);
-        float boreholeDepth = _previewBoreholeDepth > 0 ? _previewBoreholeDepth : 100f;
-        float domainExtension = (float)(_previewOptions?.DomainExtension ?? 10f);
-        
+        var domainRadius = (float)(_previewOptions?.DomainRadius ?? 100f);
+        var boreholeDepth = _previewBoreholeDepth > 0 ? _previewBoreholeDepth : 100f;
+        var domainExtension = (float)(_previewOptions?.DomainExtension ?? 10f);
+
         var uniforms = new UniformData
         {
             ViewMatrix = _viewMatrix,
@@ -822,10 +819,24 @@ public class GeothermalVisualization3D : IDisposable
             ColorMapRange = new Vector4(0, 100, 0.001f, 0),
             SliceInfo = new Vector4(0, 0, 0, 0),
             RenderSettings = new Vector4(0, 1.0f, 0, 293.15f), // opacity = 1.0
-            DomainInfo = new Vector4(domainRadius, -(boreholeDepth + domainExtension), boreholeDepth + domainExtension * 2, 0)
+            DomainInfo = new Vector4(domainRadius, -(boreholeDepth + domainExtension),
+                boreholeDepth + domainExtension * 2, 0)
         };
 
         _graphicsDevice.UpdateBuffer(_uniformBuffer, 0, ref uniforms);
+    }
+
+    public void FrameDetailView(float domainRadius, float totalDepth)
+    {
+        // Put the camera close enough to see small features but far enough to keep the boundary in frame.
+        // Use ~20–30% of the domain radius as viewing distance, clamped to a sane range.
+        var target = Math.Clamp(0.25f * domainRadius, 8f, 2000f);
+        _cameraDistance = target;
+
+        // Look at the borehole center (assumed at origin) around mid-depth.
+        _cameraTarget = new Vector3(0, 0, -0.5f * totalDepth);
+
+        UpdateCamera();
     }
 
     private void UpdateCamera()
@@ -840,13 +851,41 @@ public class GeothermalVisualization3D : IDisposable
         ) + _cameraTarget;
 
         _viewMatrix = Matrix4x4.CreateLookAt(_cameraPosition, _cameraTarget, _cameraUp);
+
+        // --- dynamic near/far based on preview or results ---
+        var domainRadius =
+            (float)(_options?.DomainRadius
+                    ?? _previewOptions?.DomainRadius
+                    ?? 50f);
+
+        // Use simulation mesh extent if present, otherwise preview depths
+        float zMin, zMax;
+        if (_mesh?.Z != null && _mesh.Z.Length > 0)
+        {
+            zMin = _mesh.Z[0];
+            zMax = _mesh.Z[^1];
+        }
+        else
+        {
+            var ext = (float)(_previewOptions?.DomainExtension ?? 0f);
+            zMin = -(_previewBoreholeDepth + ext);
+            zMax = +ext;
+        }
+
+        var depthExtent = MathF.Abs(zMax - zMin);
+        var sceneExtent = MathF.Max(2f * domainRadius, depthExtent);
+
+        var aspect = (float)_renderWidth / Math.Max(1, _renderHeight);
+
+        // Near as a tiny fraction of camera distance (avoid z-fighting when zoomed in)
+        var near = MathF.Max(0.01f, _cameraDistance * 0.001f);
+        // Far far enough to cover radius + depth comfortably
+        var far = MathF.Max(2000f, _cameraDistance + 3.0f * sceneExtent);
+
         _projectionMatrix = Matrix4x4.CreatePerspectiveFieldOfView(
-            45f * MathF.PI / 180f,
-            (float)_renderWidth / Math.Max(1, _renderHeight), // prevent divide by zero
-            0.1f,
-            2000f
-        );
+            45f * MathF.PI / 180f, aspect, near, far);
     }
+
 
     public void RenderControls()
     {
@@ -974,7 +1013,7 @@ public class GeothermalVisualization3D : IDisposable
     public void UpdateRotation(Vector2 mousePos)
     {
         if (!_isRotating) return;
-        
+
         var delta = mousePos - _lastMousePos;
         _cameraAzimuth += delta.X * 0.5f;
         _cameraElevation = Math.Clamp(_cameraElevation - delta.Y * 0.5f, -89f, 89f);
@@ -996,11 +1035,11 @@ public class GeothermalVisualization3D : IDisposable
     public void UpdatePanning(Vector2 mousePos)
     {
         if (!_isPanning) return;
-        
+
         var delta = mousePos - _lastMousePos;
         var right = Vector3.Normalize(Vector3.Cross(_cameraPosition - _cameraTarget, _cameraUp));
         var up = Vector3.Cross(right, Vector3.Normalize(_cameraPosition - _cameraTarget));
-        
+
         var panSpeed = _cameraDistance * 0.001f;
         _cameraTarget += right * (-delta.X * panSpeed) + up * (delta.Y * panSpeed);
         _lastMousePos = mousePos;
@@ -1048,7 +1087,7 @@ public class GeothermalVisualization3D : IDisposable
         foreach (var mesh in _dynamicGpuMeshes) mesh.Dispose();
         _dynamicGpuMeshes.Clear();
     }
-    
+
     /// <summary>
     ///     Sets preview options for proper domain information rendering in preview mode.
     /// </summary>
@@ -1056,7 +1095,7 @@ public class GeothermalVisualization3D : IDisposable
     {
         _previewOptions = options;
         _previewBoreholeDepth = boreholeDepth;
-        
+
         // Center camera target on the borehole depth
         _cameraTarget = new Vector3(0, 0, -boreholeDepth / 2f);
         UpdateCamera();
@@ -1069,33 +1108,28 @@ public class GeothermalVisualization3D : IDisposable
             Logger.Log("[InitializeColorMaps] Starting...");
             _colorMapTexture?.Dispose();
             _colorMapView?.Dispose();
-            
+
             Logger.Log("[InitializeColorMaps] Generating color map data...");
             var colorMapData = GenerateColorMapData(_currentColorMap);
-            
+
             Logger.Log($"[InitializeColorMaps] Creating Texture1D with {colorMapData.Length} bytes...");
             _colorMapTexture = _factory.CreateTexture(TextureDescription.Texture1D(
-                256, 1, 1, 
+                256, 1, 1,
                 PixelFormat.R8_G8_B8_A8_UNorm,
                 TextureUsage.Sampled));
-            
-            if (_colorMapTexture == null)
-            {
-                throw new InvalidOperationException("Failed to create color map texture");
-            }
-            
+
+            if (_colorMapTexture == null) throw new InvalidOperationException("Failed to create color map texture");
+
             Logger.Log("[InitializeColorMaps] Updating texture data...");
             _graphicsDevice.UpdateTexture(_colorMapTexture, colorMapData, 0, 0, 0, 256, 1, 1, 0, 0);
-            
+
             Logger.Log("[InitializeColorMaps] Creating texture view...");
             _colorMapView = _factory.CreateTextureView(_colorMapTexture);
-            
-            if (_colorMapView == null)
-            {
-                throw new InvalidOperationException("Failed to create color map texture view");
-            }
-            
-            Logger.Log($"[InitializeColorMaps] Success! Texture={_colorMapTexture != null}, View={_colorMapView != null}");
+
+            if (_colorMapView == null) throw new InvalidOperationException("Failed to create color map texture view");
+
+            Logger.Log(
+                $"[InitializeColorMaps] Success! Texture={_colorMapTexture != null}, View={_colorMapView != null}");
         }
         catch (Exception ex)
         {

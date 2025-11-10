@@ -183,6 +183,72 @@ public class BoreholeDataset : Dataset, ISerializableDataset
         ["Basement"] = LithologyPattern.Diagonal
     };
 
+    public object ToSerializableObject()
+    {
+        var metadata = new DatasetMetadataDTO
+        {
+            SampleName = DatasetMetadata.SampleName,
+            LocationName = DatasetMetadata.LocationName,
+            Latitude = DatasetMetadata.Latitude,
+            Longitude = DatasetMetadata.Longitude,
+            CoordinatesX = DatasetMetadata.Coordinates?.X,
+            CoordinatesY = DatasetMetadata.Coordinates?.Y,
+            Depth = DatasetMetadata.Depth,
+            SizeX = DatasetMetadata.Size?.X,
+            SizeY = DatasetMetadata.Size?.Y,
+            SizeZ = DatasetMetadata.Size?.Z,
+            SizeUnit = DatasetMetadata.SizeUnit,
+            CollectionDate = DatasetMetadata.CollectionDate,
+            Collector = DatasetMetadata.Collector,
+            Notes = DatasetMetadata.Notes,
+            CustomFields = DatasetMetadata.CustomFields
+        };
+
+        return new BoreholeDatasetDTO
+        {
+            TypeName = "Borehole",
+            Name = Name,
+            FilePath = FilePath,
+            Metadata = metadata,
+            WellName = WellName,
+            Field = Field,
+            TotalDepth = TotalDepth,
+            WellDiameter = WellDiameter,
+            SurfaceCoordinates = SurfaceCoordinates,
+            Elevation = Elevation,
+            DepthScaleFactor = DepthScaleFactor,
+            ShowGrid = ShowGrid,
+            ShowLegend = ShowLegend,
+            TrackWidth = TrackWidth,
+            LithologyUnits = LithologyUnits.Select(unit => new LithologyUnitDTO
+            {
+                ID = unit.ID,
+                Name = unit.Name,
+                LithologyType = unit.LithologyType,
+                DepthFrom = unit.DepthFrom,
+                DepthTo = unit.DepthTo,
+                Color = unit.Color,
+                Description = unit.Description,
+                GrainSize = unit.GrainSize,
+                Parameters = unit.Parameters,
+                ParameterSources = unit.ParameterSources
+            }).ToList(),
+            ParameterTracks = ParameterTracks.ToDictionary(
+                kvp => kvp.Key,
+                kvp => new ParameterTrackDTO
+                {
+                    Name = kvp.Value.Name,
+                    Unit = kvp.Value.Unit,
+                    MinValue = kvp.Value.MinValue,
+                    MaxValue = kvp.Value.MaxValue,
+                    IsLogarithmic = kvp.Value.IsLogarithmic,
+                    Color = kvp.Value.Color,
+                    IsVisible = kvp.Value.IsVisible,
+                    Points = kvp.Value.Points
+                })
+        };
+    }
+
     private void InitializeDefaultTracks()
     {
         ParameterTracks = new Dictionary<string, ParameterTrack>
@@ -842,72 +908,6 @@ public class BoreholeDataset : Dataset, ISerializableDataset
                 IsVisible = kvp.Value.IsVisible,
                 Points = kvp.Value.Points
             };
-    }
-
-    public object ToSerializableObject()
-    {
-        var metadata = new DatasetMetadataDTO
-        {
-            SampleName = DatasetMetadata.SampleName,
-            LocationName = DatasetMetadata.LocationName,
-            Latitude = DatasetMetadata.Latitude,
-            Longitude = DatasetMetadata.Longitude,
-            CoordinatesX = DatasetMetadata.Coordinates?.X,
-            CoordinatesY = DatasetMetadata.Coordinates?.Y,
-            Depth = DatasetMetadata.Depth,
-            SizeX = DatasetMetadata.Size?.X,
-            SizeY = DatasetMetadata.Size?.Y,
-            SizeZ = DatasetMetadata.Size?.Z,
-            SizeUnit = DatasetMetadata.SizeUnit,
-            CollectionDate = DatasetMetadata.CollectionDate,
-            Collector = DatasetMetadata.Collector,
-            Notes = DatasetMetadata.Notes,
-            CustomFields = DatasetMetadata.CustomFields
-        };
-
-        return new BoreholeDatasetDTO
-        {
-            TypeName = "Borehole",
-            Name = Name,
-            FilePath = FilePath,
-            Metadata = metadata,
-            WellName = WellName,
-            Field = Field,
-            TotalDepth = TotalDepth,
-            WellDiameter = WellDiameter,
-            SurfaceCoordinates = SurfaceCoordinates,
-            Elevation = Elevation,
-            DepthScaleFactor = DepthScaleFactor,
-            ShowGrid = ShowGrid,
-            ShowLegend = ShowLegend,
-            TrackWidth = TrackWidth,
-            LithologyUnits = LithologyUnits.Select(unit => new LithologyUnitDTO
-            {
-                ID = unit.ID,
-                Name = unit.Name,
-                LithologyType = unit.LithologyType,
-                DepthFrom = unit.DepthFrom,
-                DepthTo = unit.DepthTo,
-                Color = unit.Color,
-                Description = unit.Description,
-                GrainSize = unit.GrainSize,
-                Parameters = unit.Parameters,
-                ParameterSources = unit.ParameterSources
-            }).ToList(),
-            ParameterTracks = ParameterTracks.ToDictionary(
-                kvp => kvp.Key,
-                kvp => new ParameterTrackDTO
-                {
-                    Name = kvp.Value.Name,
-                    Unit = kvp.Value.Unit,
-                    MinValue = kvp.Value.MinValue,
-                    MaxValue = kvp.Value.MaxValue,
-                    IsLogarithmic = kvp.Value.IsLogarithmic,
-                    Color = kvp.Value.Color,
-                    IsVisible = kvp.Value.IsVisible,
-                    Points = kvp.Value.Points
-                })
-        };
     }
 
     public void SyncMetadata()
