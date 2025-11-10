@@ -62,6 +62,7 @@ public class GeothermalSimulationTools : IDatasetTools, IDisposable
     private string _simulationMessage = "";
     private float _simulationProgress;
     private GeothermalVisualization3D _visualization3D;
+    private BoreholeCrossSectionViewer _crossSectionViewer;
 
     public void Draw(Dataset dataset)
     {
@@ -1148,6 +1149,21 @@ public class GeothermalSimulationTools : IDatasetTools, IDisposable
             ImGui.SameLine();
             ImGui.TextColored(new Vector4(0.2f, 1.0f, 0.2f, 1.0f), "● 3D View Active");
         }
+        
+        // SURGICAL FIX 2: Add button to initialize 2D visualization if not done yet
+        if (_crossSectionViewer == null && _results != null && _mesh != null)
+        {
+            ImGui.SameLine();
+            if (ImGui.Button("Initialize 2D Viewer"))
+            {
+                _crossSectionViewer = new BoreholeCrossSectionViewer();
+                _crossSectionViewer.LoadResults(_results, _mesh, _options);
+                Logger.Log("2D cross-section viewer initialized");
+                // Run diagnostic to check temperature field
+                _crossSectionViewer.DiagnoseTemperatureField();
+            }
+            ImGui.SetItemTooltip("Initialize the 2D borehole cross-section viewer");
+        }
 
         ImGui.Separator();
 
@@ -1178,6 +1194,13 @@ public class GeothermalSimulationTools : IDatasetTools, IDisposable
                     RenderFlowAnalysisTab();
                     ImGui.EndTabItem();
                 }
+
+                if (ImGui.BeginTabItem("Borehole Cross-Section"))
+                {
+                    RenderCrossSectionTab();
+                    ImGui.EndTabItem();
+                }
+
 
                 if (ImGui.BeginTabItem("Layer Analysis"))
                 {
@@ -1624,7 +1647,15 @@ public class GeothermalSimulationTools : IDatasetTools, IDisposable
             _visualization3D = new GeothermalVisualization3D(graphicsDevice);
 
             if (_results != null && _mesh != null)
+            {
                 _visualization3D.LoadResults(_results, _mesh, _options);
+                
+                // SURGICAL FIX 1: Initialize 2D cross-section viewer
+                if (_crossSectionViewer == null)
+                    _crossSectionViewer = new BoreholeCrossSectionViewer();
+                
+                _crossSectionViewer.LoadResults(_results, _mesh, _options);
+            }
         }
     }
 
@@ -1857,8 +1888,138 @@ public class GeothermalSimulationTools : IDatasetTools, IDisposable
             }
         });
     }
+    private void RenderCrossSectionTab()
+    {
+        if (_crossSectionViewer == null)
+        {
+            ImGui.TextColored(new Vector4(1, 0.5f, 0, 1), 
+                "2D Cross-section viewer not initialized");
+            
+            if (ImGui.Button("Initialize 2D Viewer Now"))
+            {
+                if (_results != null && _mesh != null && _options != null)
+                {
+                    _crossSectionViewer = new BoreholeCrossSectionViewer();
+                    _crossSectionViewer.LoadResults(_results, _mesh, _options);
+                    Logger.Log("2D cross-section viewer initialized manually");
+                    // Run diagnostic to check temperature field
+                    _crossSectionViewer.DiagnoseTemperatureField();
+                }
+                else
+                {
+                    Logger.LogWarning("Cannot initialize 2D viewer - missing data");
+                }
+            }
+            return;
+        }
 
-    // GeoscientistToolkit/Analysis/Geothermal/GeothermalSimulationTools.cs
+        // Layout: Controls on left, plot view on right
+        ImGui.BeginChild("CrossSectionControls", new Vector2(300, 0), ImGuiChildFlags.Border);
+        _crossSectionViewer.RenderControls();
+        ImGui.EndChild();
+
+        ImGui.SameLine();
+
+        ImGui.BeginChild("CrossSectionPlot", new Vector2(0, 0), ImGuiChildFlags.Border);
+        
+        var plot = _crossSectionViewer.CreateCrossSectionPlot();
+        if (plot != null)
+        {
+            try
+            {
+                ImGui.TextColored(new Vector4(0.3f, 0.8f, 1.0f, 1.0f), "2D Borehole Cross-Section");
+                ImGui.Separator();
+                ImGui.Spacing();
+                
+                ImGui.TextWrapped("This shows a horizontal slice through the borehole at the selected depth.");
+                ImGui.Spacing();
+                
+                // Show basic plot info
+                ImGui.Text($"Plot: {plot.Title}");
+                ImGui.Text($"Series: {plot.Series.Count}");
+                ImGui.Text($"View Mode: {_crossSectionViewer?.GetType().Name ?? "Unknown"}");
+                
+                ImGui.Spacing();
+                ImGui.Separator();
+                ImGui.Spacing();
+                
+                // Quick data visualization using ImGui
+                if (_results?.FluidTemperatureProfile != null && _results.FluidTemperatureProfile.Any())
+                {
+                    ImGui.TextColored(new Vector4(0.3f, 0.8f, 1.0f, 1.0f), "Fluid Temperature Profile:");
+                    
+                    var temps = _results.FluidTemperatureProfile
+                        .Select(p => (float)(p.temperatureDown - 273.15)).ToArray();
+                    
+                    if (temps.Length > 0)
+                    {
+                        var availableSpace = ImGui.GetContentRegionAvail();
+                        ImGui.PlotLines("Down Pipe Temp (°C)", ref temps[0], temps.Length, 
+                            0, null, temps.Min() * 0.95f, temps.Max() * 1.05f, 
+                            new Vector2(availableSpace.X - 20, 200));
+                        
+                        ImGui.Spacing();
+                        ImGui.Text($"Min: {temps.Min():F1}°C, Max: {temps.Max():F1}°C, Avg: {temps.Average():F1}°C");
+                    }
+                }
+                
+                ImGui.Spacing();
+                ImGui.Separator();
+                ImGui.Spacing();
+                
+                // Export to SVG for detailed viewing
+                ImGui.TextWrapped("For detailed 2D cross-section plot:");
+                
+                var tempPath = Path.Combine(Path.GetTempPath(), "borehole_cross_section.svg");
+                
+                if (ImGui.Button("Export and Open SVG Plot", new Vector2(-1, 0)))
+                {
+                    try
+                    {
+                        var exporter = new OxyPlot.SvgExporter { Width = 800, Height = 600 };
+                        using (var stream = File.Create(tempPath))
+                        {
+                            exporter.Export(plot, stream);
+                        }
+                        
+                        Logger.Log($"2D plot exported to: {tempPath}");
+                        
+                        // Open in default viewer
+                        System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+                        {
+                            FileName = tempPath,
+                            UseShellExecute = true
+                        });
+                    }
+                    catch (Exception ex)
+                    {
+                        Logger.LogError($"Failed to export/open plot: {ex.Message}");
+                        ImGui.TextColored(new Vector4(1, 0.2f, 0.2f, 1), $"Error: {ex.Message}");
+                    }
+                }
+                ImGui.SetItemTooltip("Exports plot as SVG and opens in your default browser/viewer");
+                
+                ImGui.Spacing();
+                ImGui.TextDisabled($"Output: {tempPath}");
+                
+                ImGui.Spacing();
+                ImGui.TextWrapped("Note: Detailed cross-section plots use OxyPlot which cannot render directly in ImGui. The plot is exported to SVG format for viewing.");
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError($"Error in cross-section tab: {ex.Message}");
+                ImGui.TextColored(new Vector4(1, 0.2f, 0.2f, 1), "Error displaying cross-section");
+                ImGui.TextWrapped(ex.Message);
+            }
+        }
+        else
+        {
+            ImGui.TextColored(new Vector4(1, 0.5f, 0, 1), "No plot data available");
+            ImGui.TextWrapped("The cross-section viewer could not generate plot data. Check that simulation results are loaded correctly.");
+        }
+        
+        ImGui.EndChild();
+    }
 
     private void ShowStreamlines()
     {

@@ -43,6 +43,11 @@ public class BoreholeTools : IDatasetTools
         "Mudstone", "Marl", "Chalk", "Granite", "Basalt", "Anhydrite"
     };
 
+    private readonly string[] _contactTypes =
+    {
+        "Sharp", "Erosive", "Gradational", "Conformable", "Unconformity", "Faulted", "Intrusive", "Indistinct"
+    };
+
     private readonly Dictionary<ToolCategory, List<ToolEntry>> _toolsByCategory;
 
     private string[] _availableParameters;
@@ -56,6 +61,8 @@ public class BoreholeTools : IDatasetTools
     private string _newGrainSize = "Medium";
     private string _newLithologyType = "Sandstone";
     private string _newUnitName = "New Unit";
+    private ContactType _newUpperContactType = ContactType.Sharp;
+    private ContactType _newLowerContactType = ContactType.Sharp;
     private ToolCategory _selectedCategory = ToolCategory.Management;
     private bool[] _selectedParameters;
     private Dataset _selectedSourceDataset;
@@ -202,11 +209,11 @@ public class BoreholeTools : IDatasetTools
 
     /// <summary>
     ///     Apre la dialog di editing per una specifica formazione litologica e porta automaticamente
-    ///     l'utente alla categoria Management. Questo metodo puÃ² essere collegato al callback
+    ///     l'utente alla categoria Management. Questo metodo puÃƒÂ² essere collegato al callback
     ///     OnLithologyClicked del BoreholeViewer per permettere l'editing diretto cliccando sulla
     ///     formazione nel viewer.
     /// </summary>
-    /// <param name="unit">L'unitÃ  litologica da editare</param>
+    /// <param name="unit">L'unitÃƒÂ  litologica da editare</param>
     public void EditUnit(LithologyUnit unit)
     {
         if (unit == null) return;
@@ -266,7 +273,7 @@ public class BoreholeTools : IDatasetTools
     {
         if (dataset is not BoreholeDataset borehole) return;
 
-        if (ImGui.BeginTable("LithologyTable", 5,
+        if (ImGui.BeginTable("LithologyTable", 7,
                 ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.ScrollY | ImGuiTableFlags.ScrollX,
                 new Vector2(0, 200)))
         {
@@ -274,6 +281,8 @@ public class BoreholeTools : IDatasetTools
             ImGui.TableSetupColumn("Lithology", ImGuiTableColumnFlags.WidthFixed, 100);
             ImGui.TableSetupColumn("From (m)", ImGuiTableColumnFlags.WidthFixed, 80);
             ImGui.TableSetupColumn("To (m)", ImGuiTableColumnFlags.WidthFixed, 80);
+            ImGui.TableSetupColumn("Upper Contact", ImGuiTableColumnFlags.WidthFixed, 100);
+            ImGui.TableSetupColumn("Lower Contact", ImGuiTableColumnFlags.WidthFixed, 100);
             ImGui.TableSetupColumn("Actions", ImGuiTableColumnFlags.WidthFixed, 140);
             ImGui.TableHeadersRow();
 
@@ -293,6 +302,12 @@ public class BoreholeTools : IDatasetTools
 
                 ImGui.TableNextColumn();
                 ImGui.Text($"{unit.DepthTo:F2}");
+
+                ImGui.TableNextColumn();
+                ImGui.Text(unit.UpperContactType.ToString());
+
+                ImGui.TableNextColumn();
+                ImGui.Text(unit.LowerContactType.ToString());
 
                 ImGui.TableNextColumn();
                 if (ImGui.Button("Edit"))
@@ -524,14 +539,38 @@ public class BoreholeTools : IDatasetTools
             }
 
             ImGui.ColorEdit4("Color", ref _newColor);
+            
+            if (ImGui.BeginCombo("Upper Contact", _newUpperContactType.ToString()))
+            {
+                foreach (var type in _contactTypes)
+                    if (ImGui.Selectable(type, _newUpperContactType.ToString() == type))
+                        _newUpperContactType = Enum.Parse<ContactType>(type);
+                ImGui.EndCombo();
+            }
+            
+            if (ImGui.BeginCombo("Lower Contact", _newLowerContactType.ToString()))
+            {
+                foreach (var type in _contactTypes)
+                    if (ImGui.Selectable(type, _newLowerContactType.ToString() == type))
+                        _newLowerContactType = Enum.Parse<ContactType>(type);
+                ImGui.EndCombo();
+            }
+            
             ImGui.InputTextMultiline("Description", ref _newDescription, 1024, new Vector2(300, 100));
             ImGui.Separator();
             if (ImGui.Button("Add", new Vector2(120, 0)))
             {
                 borehole.AddLithologyUnit(new LithologyUnit
                 {
-                    Name = _newUnitName, LithologyType = _newLithologyType, DepthFrom = _newDepthFrom,
-                    DepthTo = _newDepthTo, GrainSize = _newGrainSize, Color = _newColor, Description = _newDescription
+                    Name = _newUnitName, 
+                    LithologyType = _newLithologyType, 
+                    DepthFrom = _newDepthFrom,
+                    DepthTo = _newDepthTo, 
+                    GrainSize = _newGrainSize, 
+                    Color = _newColor, 
+                    Description = _newDescription,
+                    UpperContactType = _newUpperContactType,
+                    LowerContactType = _newLowerContactType
                 });
                 _showAddUnitDialog = false;
             }
@@ -580,6 +619,25 @@ public class BoreholeTools : IDatasetTools
 
             var color = _editingUnit.Color;
             if (ImGui.ColorEdit4("Color", ref color)) _editingUnit.Color = color;
+            
+            var upperContact = _editingUnit.UpperContactType.ToString();
+            if (ImGui.BeginCombo("Upper Contact", upperContact))
+            {
+                foreach (var type in _contactTypes)
+                    if (ImGui.Selectable(type, upperContact == type))
+                        _editingUnit.UpperContactType = Enum.Parse<ContactType>(type);
+                ImGui.EndCombo();
+            }
+            
+            var lowerContact = _editingUnit.LowerContactType.ToString();
+            if (ImGui.BeginCombo("Lower Contact", lowerContact))
+            {
+                foreach (var type in _contactTypes)
+                    if (ImGui.Selectable(type, lowerContact == type))
+                        _editingUnit.LowerContactType = Enum.Parse<ContactType>(type);
+                ImGui.EndCombo();
+            }
+            
             var description = _editingUnit.Description;
             if (ImGui.InputTextMultiline("Description", ref description, 1024, new Vector2(300, 100)))
                 _editingUnit.Description = description;

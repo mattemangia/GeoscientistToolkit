@@ -1,5 +1,6 @@
 ﻿// GeoscientistToolkit/UI/Visualization/GeothermalVisualization3D.cs
 
+using System.IO;
 using System.Numerics;
 using System.Runtime.InteropServices;
 using System.Text;
@@ -89,6 +90,8 @@ public class GeothermalVisualization3D : IDisposable
     private bool _showBorehole = true;
     private bool _showDomainMesh = true;
     private bool _showVectors;
+    private bool _showHeatExchanger = true;  // Show heat exchanger by default
+    private bool _showVelocityVectors;
     private float _sliceDepth = 0.5f; // Normalized depth
     private Pipeline _slicePipeline;
     private GpuMesh _sliceQuad;
@@ -102,6 +105,13 @@ public class GeothermalVisualization3D : IDisposable
     private TextureView _temperatureView;
     private DeviceBuffer _uniformBuffer;
     private float _vectorScale = 10f;
+    
+    // Clipping planes for volume slicing
+    private bool _enableClipping = false;
+    private int _clipAxis = 0; // 0=X, 1=Y, 2=Z
+    private float _clipPosition = 0.5f; // 0-1 normalized
+    private bool _clipNegativeSide = true; // Which side to clip
+    
     private Pipeline _velocityPipeline;
     private Texture _velocityTexture3D;
     private TextureView _velocityView;
@@ -339,7 +349,7 @@ public class GeothermalVisualization3D : IDisposable
 
         var streamlineShaders = CreateShaders("Streamline");
         _streamlinePipeline = CreatePipeline(streamlineShaders, BlendStateDescription.SingleAlphaBlend,
-            PrimitiveTopology.LineList);
+            PrimitiveTopology.LineList, thickLines: true);
 
         var isosurfaceShaders = CreateShaders("Isosurface");
         _isosurfacePipeline = CreatePipeline(isosurfaceShaders, BlendStateDescription.SingleAlphaBlend);
@@ -347,10 +357,10 @@ public class GeothermalVisualization3D : IDisposable
         var sliceShaders = CreateShaders("Slice");
         _slicePipeline = CreatePipeline(sliceShaders, BlendStateDescription.SingleAlphaBlend);
 
-        // Create wireframe pipeline for line rendering
+        // Create wireframe pipeline for line rendering with thick, visible lines
         var wireframeShaders = CreateShaders("Isosurface"); // Use basic shader
         _wireframePipeline = CreatePipeline(wireframeShaders, BlendStateDescription.SingleAlphaBlend,
-            PrimitiveTopology.LineList);
+            PrimitiveTopology.LineList, thickLines: true);
     }
 
     private (Shader vertex, Shader fragment) CreateShaders(string name)
@@ -367,7 +377,7 @@ public class GeothermalVisualization3D : IDisposable
     }
 
     private Pipeline CreatePipeline((Shader vertex, Shader fragment) shaders, BlendStateDescription blendState,
-        PrimitiveTopology topology = PrimitiveTopology.TriangleList)
+        PrimitiveTopology topology = PrimitiveTopology.TriangleList, bool thickLines = false)
     {
         var vertexLayout = new VertexLayoutDescription(
             new VertexElementDescription("Position", VertexElementSemantic.TextureCoordinate,
@@ -381,12 +391,18 @@ public class GeothermalVisualization3D : IDisposable
                 VertexElementFormat.Float3) // For 3D texture sampling
         );
 
+        // For lines, disable face culling to make them more visible
+        var rasterizerState = thickLines
+            ? new RasterizerStateDescription(FaceCullMode.None, PolygonFillMode.Solid,
+                FrontFace.CounterClockwise, true, false)
+            : new RasterizerStateDescription(FaceCullMode.Back, PolygonFillMode.Solid,
+                FrontFace.CounterClockwise, true, false);
+
         var pipelineDescription = new GraphicsPipelineDescription
         {
             BlendState = blendState,
             DepthStencilState = DepthStencilStateDescription.DepthOnlyLessEqual,
-            RasterizerState = new RasterizerStateDescription(FaceCullMode.Back, PolygonFillMode.Solid,
-                FrontFace.CounterClockwise, true, false),
+            RasterizerState = rasterizerState,
             PrimitiveTopology = topology,
             ResourceLayouts = new[] { _resourceLayout },
             ShaderSet = new ShaderSetDescription(new[] { vertexLayout }, new[] { shaders.vertex, shaders.fragment }),
@@ -403,12 +419,24 @@ public class GeothermalVisualization3D : IDisposable
         _mesh = mesh;
         _options = options; // CORRECTED: Store options
 
-        if (results?.FinalTemperatureField == null || mesh == null) return;
+        Logger.Log("[LoadResults] Loading visualization data...");
+        Logger.Log($"  Temperature field: {(results?.FinalTemperatureField != null ? "OK" : "NULL")}");
+        Logger.Log($"  Mesh: {(mesh != null ? $"{mesh.RadialPoints}x{mesh.AngularPoints}x{mesh.VerticalPoints}" : "NULL")}");
+        
+        if (results?.FinalTemperatureField == null || mesh == null)
+        {
+            Logger.LogWarning("[LoadResults] Missing required data - skipping visualization setup");
+            return;
+        }
 
         GenerateDomainAndBoreholeGpuMeshes();
+        Logger.Log($"  Domain mesh: {_domainGpuMesh.IndexCount} indices");
+        
         CreateDataTextures();
         CreateSliceQuad();
         UpdateResourceSet();
+        
+        Logger.Log("[LoadResults] Visualization setup complete");
     }
 
     private GpuMesh CreateGpuMesh(Mesh3DDataset mesh, bool isStreamline = false)
@@ -495,6 +523,8 @@ public class GeothermalVisualization3D : IDisposable
         var nth = _mesh.AngularPoints;
         var nz = _mesh.VerticalPoints;
 
+        // PRODUCTION FIX: COMSOL-quality volume rendering
+        // Create all vertices with proper UVW coordinates for 3D texture sampling
         for (var k = 0; k < nz; k++)
         for (var j = 0; j < nth; j++)
         for (var i = 0; i < nr; i++)
@@ -504,12 +534,21 @@ public class GeothermalVisualization3D : IDisposable
             var z = _mesh.Z[k];
             var position = new Vector3(r * MathF.Cos(theta), r * MathF.Sin(theta), z);
             var normal = new Vector3(MathF.Cos(theta), MathF.Sin(theta), 0);
-            var uvw = new Vector3((float)i / (nr - 1), (float)j / (nth - 1), (float)k / (nz - 1));
+            
+            // UVW matches 3D texture layout [r, theta, z]
+            var uvw = new Vector3(
+                (float)i / Math.Max(1, nr - 1),    // U: radial [0,1]
+                (float)j / Math.Max(1, nth - 1),   // V: angular [0,1]
+                (float)k / Math.Max(1, nz - 1)     // W: vertical [0,1]
+            );
 
             vertices.Add(new VertexData(position, Vector4.One, normal, Vector2.Zero, 0, uvw));
         }
 
-        // Generate indices for the outer shell of the cylinder
+        // ===== PRODUCTION VOLUME RENDERING STRATEGY =====
+        // Generate DENSE mesh that fills the entire volume for proper visualization
+        
+        // 1. OUTER CYLINDRICAL SURFACE - Always visible boundary
         var i_outer = nr - 1;
         for (var k = 0; k < nz - 1; k++)
         for (var j = 0; j < nth; j++)
@@ -519,6 +558,63 @@ public class GeothermalVisualization3D : IDisposable
             var v1 = (uint)(k * nth * nr + j_next * nr + i_outer);
             var v2 = (uint)((k + 1) * nth * nr + j * nr + i_outer);
             var v3 = (uint)((k + 1) * nth * nr + j_next * nr + i_outer);
+            indices.AddRange(new[] { v0, v1, v2, v1, v3, v2 });
+        }
+        
+        // 2. DENSE RADIAL SLICES - Every single angular position for complete volume fill
+        // This creates a SOLID volume, not hollow slices
+        for (var j = 0; j < nth; j++)  // ALL angular positions
+        {
+            for (var k = 0; k < nz - 1; k++)
+            for (var i = 0; i < nr - 1; i++)
+            {
+                var v0 = (uint)(k * nth * nr + j * nr + i);
+                var v1 = (uint)(k * nth * nr + j * nr + i + 1);
+                var v2 = (uint)((k + 1) * nth * nr + j * nr + i);
+                var v3 = (uint)((k + 1) * nth * nr + j * nr + i + 1);
+                indices.AddRange(new[] { v0, v2, v1, v1, v2, v3 });
+            }
+        }
+
+        // 3. DENSE HORIZONTAL SLICES - Many layers for full volume visualization
+        var sliceStep = Math.Max(1, nz / 20);  // At least 20 horizontal slices
+        for (var k = 0; k < nz; k += sliceStep)
+        {
+            for (var j = 0; j < nth; j++)
+            for (var i = 0; i < nr - 1; i++)
+            {
+                var j_next = (j + 1) % nth;
+                var v0 = (uint)(k * nth * nr + j * nr + i);
+                var v1 = (uint)(k * nth * nr + j * nr + i + 1);
+                var v2 = (uint)(k * nth * nr + j_next * nr + i);
+                var v3 = (uint)(k * nth * nr + j_next * nr + i + 1);
+                indices.AddRange(new[] { v0, v2, v1, v1, v2, v3 });
+            }
+        }
+        
+        // 4. TOP AND BOTTOM CAPS - Seal the volume
+        // Top cap (k=0)
+        for (var j = 0; j < nth; j++)
+        for (var i = 0; i < nr - 1; i++)
+        {
+            var j_next = (j + 1) % nth;
+            var v0 = (uint)(j * nr + i);
+            var v1 = (uint)(j * nr + i + 1);
+            var v2 = (uint)(j_next * nr + i);
+            var v3 = (uint)(j_next * nr + i + 1);
+            indices.AddRange(new[] { v0, v2, v1, v1, v2, v3 });
+        }
+        
+        // Bottom cap (k=nz-1)
+        var k_bottom = nz - 1;
+        for (var j = 0; j < nth; j++)
+        for (var i = 0; i < nr - 1; i++)
+        {
+            var j_next = (j + 1) % nth;
+            var v0 = (uint)(k_bottom * nth * nr + j * nr + i);
+            var v1 = (uint)(k_bottom * nth * nr + j * nr + i + 1);
+            var v2 = (uint)(k_bottom * nth * nr + j_next * nr + i);
+            var v3 = (uint)(k_bottom * nth * nr + j_next * nr + i + 1);
             indices.AddRange(new[] { v0, v1, v2, v1, v3, v2 });
         }
 
@@ -532,10 +628,391 @@ public class GeothermalVisualization3D : IDisposable
         _graphicsDevice.UpdateBuffer(ib, 0, indices.ToArray());
         _domainGpuMesh = new GpuMesh { VertexBuffer = vb, IndexBuffer = ib, IndexCount = (uint)indices.Count };
 
+        // Generate heat exchanger geometry (U-tube or coaxial)
+        GenerateHeatExchangerGeometry();
+        
         if (_results.BoreholeMesh != null)
         {
             _boreholeGpuMesh.Dispose();
             _boreholeGpuMesh = CreateGpuMesh(_results.BoreholeMesh);
+        }
+    }
+    
+    /// <summary>
+    /// Generate 3D geometry for heat exchanger inside borehole (U-tube or coaxial pipes)
+    /// </summary>
+    private void GenerateHeatExchangerGeometry()
+    {
+        if (_options == null || _mesh == null) return;
+        
+        var heatExchangerMesh = new Mesh3DDataset("HeatExchanger", Path.Combine(Path.GetTempPath(), "heatexchanger_temp.obj"));
+        
+        // Get borehole parameters
+        var boreholeRadius = (float)(_options.BoreholeDataset?.WellDiameter / 2000.0 ?? 0.1); // mm to m
+        var depth = Math.Abs(_mesh.Z[_mesh.VerticalPoints - 1] - _mesh.Z[0]);
+        
+        // Heat exchanger type from options
+        var hxType = _options.HeatExchangerType;
+        
+        if (hxType == HeatExchangerType.UTube)
+        {
+            GenerateUTubeGeometry(heatExchangerMesh, boreholeRadius, depth, false);
+        }
+        else if (hxType == HeatExchangerType.Coaxial)
+        {
+            GenerateCoaxialGeometry(heatExchangerMesh, boreholeRadius, depth);
+        }
+        
+        // Add flow arrows along pipes
+        GenerateFlowArrows(heatExchangerMesh, boreholeRadius, depth, hxType.ToString());
+        
+        if (heatExchangerMesh.Vertices.Count > 0)
+        {
+            // Create GPU mesh for heat exchanger
+            var hxGpuMesh = CreateGpuMesh(heatExchangerMesh);
+            if (hxGpuMesh.VertexBuffer != null)
+            {
+                _dynamicGpuMeshes.Add(hxGpuMesh);
+                Logger.Log($"Heat exchanger geometry generated: {heatExchangerMesh.Vertices.Count} vertices");
+            }
+        }
+    }
+    
+    private void GenerateUTubeGeometry(Mesh3DDataset mesh, float boreholeRadius, float depth, bool isDouble)
+    {
+        // U-tube configuration: pipes go down and come back up
+        var pipeRadius = boreholeRadius * 0.15f; // Pipe is ~15% of borehole radius
+        var pipeSpacing = boreholeRadius * 0.5f; // Distance between pipes
+        
+        var numLoops = isDouble ? 2 : 1;
+        var angleStep = 360f / numLoops;
+        
+        for (int loop = 0; loop < numLoops; loop++)
+        {
+            var angle = loop * angleStep * MathF.PI / 180f;
+            var offsetX = pipeSpacing * MathF.Cos(angle);
+            var offsetY = pipeSpacing * MathF.Sin(angle);
+            
+            // Down pipe
+            GeneratePipeSegment(mesh, 
+                new Vector3(offsetX, offsetY, _mesh.Z[0]), 
+                new Vector3(offsetX, offsetY, _mesh.Z[_mesh.VerticalPoints - 1]),
+                pipeRadius, new Vector4(0.2f, 0.4f, 1.0f, 1.0f)); // Blue for cold down
+            
+            // Up pipe (parallel to down pipe)
+            var upOffsetX = -offsetX * 0.5f;
+            var upOffsetY = -offsetY * 0.5f;
+            GeneratePipeSegment(mesh,
+                new Vector3(upOffsetX, upOffsetY, _mesh.Z[_mesh.VerticalPoints - 1]),
+                new Vector3(upOffsetX, upOffsetY, _mesh.Z[0]),
+                pipeRadius, new Vector4(1.0f, 0.3f, 0.2f, 1.0f)); // Red for warm up
+            
+            // U-bend at bottom
+            GenerateUBend(mesh,
+                new Vector3(offsetX, offsetY, _mesh.Z[_mesh.VerticalPoints - 1]),
+                new Vector3(upOffsetX, upOffsetY, _mesh.Z[_mesh.VerticalPoints - 1]),
+                pipeRadius, new Vector4(0.7f, 0.4f, 0.7f, 1.0f)); // Purple transition
+        }
+    }
+    
+    private void GenerateCoaxialGeometry(Mesh3DDataset mesh, float boreholeRadius, float depth)
+    {
+        // Coaxial: inner pipe (down) and annular space (up)
+        var innerRadius = boreholeRadius * 0.25f;
+        var outerRadius = boreholeRadius * 0.45f;
+        
+        // Inner pipe (downflow - cold)
+        GeneratePipeSegment(mesh,
+            new Vector3(0, 0, _mesh.Z[0]),
+            new Vector3(0, 0, _mesh.Z[_mesh.VerticalPoints - 1]),
+            innerRadius, new Vector4(0.2f, 0.4f, 1.0f, 1.0f));
+        
+        // Outer pipe (upflow - warm) - show as translucent shell
+        GeneratePipeSegment(mesh,
+            new Vector3(0, 0, _mesh.Z[_mesh.VerticalPoints - 1]),
+            new Vector3(0, 0, _mesh.Z[0]),
+            outerRadius, new Vector4(1.0f, 0.4f, 0.2f, 0.5f));
+    }
+    
+    private void GeneratePipeSegment(Mesh3DDataset mesh, Vector3 start, Vector3 end, 
+        float radius, Vector4 color)
+    {
+        var segments = 16; // Angular segments for pipe
+        var lengthSegments = 32; // Vertical segments
+        var startIdx = mesh.Vertices.Count;
+        
+        for (int i = 0; i <= lengthSegments; i++)
+        {
+            var t = (float)i / lengthSegments;
+            var center = Vector3.Lerp(start, end, t);
+            var direction = Vector3.Normalize(end - start);
+            
+            // Create perpendicular vectors for pipe cross-section
+            var tangent = Math.Abs(direction.Z) < 0.99f ? Vector3.UnitZ : Vector3.UnitX;
+            var binormal = Vector3.Normalize(Vector3.Cross(direction, tangent));
+            tangent = Vector3.Cross(binormal, direction);
+            
+            for (int j = 0; j < segments; j++)
+            {
+                var angle = (float)j / segments * MathF.PI * 2f;
+                var offset = tangent * MathF.Cos(angle) + binormal * MathF.Sin(angle);
+                var pos = center + offset * radius;
+                var normal = Vector3.Normalize(offset);
+                
+                mesh.Vertices.Add(pos);
+                mesh.Normals.Add(normal);
+                mesh.Colors.Add(color);
+            }
+        }
+        
+        // Generate faces
+        for (int i = 0; i < lengthSegments; i++)
+        {
+            for (int j = 0; j < segments; j++)
+            {
+                var v0 = startIdx + i * segments + j;
+                var v1 = startIdx + i * segments + (j + 1) % segments;
+                var v2 = startIdx + (i + 1) * segments + j;
+                var v3 = startIdx + (i + 1) * segments + (j + 1) % segments;
+                
+                mesh.Faces.Add(new[] { v0, v2, v1 });
+                mesh.Faces.Add(new[] { v1, v2, v3 });
+            }
+        }
+    }
+    
+    private void GenerateUBend(Mesh3DDataset mesh, Vector3 start, Vector3 end, 
+        float radius, Vector4 color)
+    {
+        // Simple curved connection at bottom of U-tube
+        var segments = 16;
+        var center = (start + end) * 0.5f;
+        var bendRadius = Vector3.Distance(start, end) * 0.5f;
+        
+        var startIdx = mesh.Vertices.Count;
+        for (int i = 0; i <= segments; i++)
+        {
+            var t = (float)i / segments;
+            var angle = t * MathF.PI; // 180 degree bend
+            var pos = center + new Vector3(
+                (start.X - center.X) * MathF.Cos(angle) + (start.Y - center.Y) * MathF.Sin(angle),
+                (start.Y - center.Y) * MathF.Cos(angle) - (start.X - center.X) * MathF.Sin(angle),
+                start.Z
+            );
+            
+            mesh.Vertices.Add(pos);
+            mesh.Normals.Add(Vector3.UnitZ);
+            mesh.Colors.Add(color);
+        }
+    }
+    
+    private void GenerateFlowArrows(Mesh3DDataset mesh, float boreholeRadius, 
+        float depth, string hxType)
+    {
+        // Add velocity arrows along flow paths
+        var arrowSize = boreholeRadius * 0.3f;
+        var numArrows = 10;
+        var pipeSpacing = boreholeRadius * 0.5f;
+        
+        for (int i = 0; i < numArrows; i++)
+        {
+            var t = (float)i / (numArrows - 1);
+            var z = _mesh.Z[0] + t * (_mesh.Z[_mesh.VerticalPoints - 1] - _mesh.Z[0]);
+            
+            // Downflow arrow
+            var downPos = new Vector3(pipeSpacing, 0, z);
+            GenerateArrow(mesh, downPos, Vector3.UnitZ * -1, arrowSize, 
+                new Vector4(0.3f, 0.5f, 1.0f, 1.0f));
+            
+            // Upflow arrow
+            var upPos = new Vector3(-pipeSpacing * 0.5f, 0, z);
+            GenerateArrow(mesh, upPos, Vector3.UnitZ, arrowSize,
+                new Vector4(1.0f, 0.4f, 0.3f, 1.0f));
+        }
+    }
+    
+    private void GenerateArrow(Mesh3DDataset mesh, Vector3 position, Vector3 direction,
+        float size, Vector4 color)
+    {
+        var startIdx = mesh.Vertices.Count;
+        direction = Vector3.Normalize(direction);
+        
+        // Arrow shaft
+        var shaftStart = position - direction * size * 0.5f;
+        var shaftEnd = position + direction * size * 0.3f;
+        
+        // Arrow head (cone)
+        var headBase = shaftEnd;
+        var headTip = position + direction * size * 0.5f;
+        var headRadius = size * 0.2f;
+        
+        // Simple arrow as line segments for now
+        mesh.Vertices.Add(shaftStart);
+        mesh.Colors.Add(color);
+        mesh.Normals.Add(direction);
+        
+        mesh.Vertices.Add(headTip);
+        mesh.Colors.Add(color);
+        mesh.Normals.Add(direction);
+        
+        // Line face
+        mesh.Faces.Add(new[] { startIdx, startIdx + 1 });
+    }
+    
+    /// <summary>
+    /// Generate velocity vector field glyphs throughout the domain
+    /// </summary>
+    public void GenerateVelocityVectorField(int gridDensity = 5)
+    {
+        if (_results?.DarcyVelocityField == null || _mesh == null)
+        {
+            Logger.LogWarning("No velocity field data available for vector visualization");
+            return;
+        }
+        
+        var vectorMesh = new Mesh3DDataset("VelocityVectors", Path.Combine(Path.GetTempPath(), "velocityvectors_temp.obj"));
+        
+        var nr = _mesh.RadialPoints;
+        var nth = _mesh.AngularPoints;
+        var nz = _mesh.VerticalPoints;
+        
+        // Sample velocity field at regular grid points
+        var sampleR = Math.Max(1, nr / gridDensity);
+        var sampleTheta = Math.Max(1, nth / gridDensity);
+        var sampleZ = Math.Max(1, nz / gridDensity);
+        
+        // Find maximum velocity for scaling
+        var maxVelocity = 0f;
+        for (int i = 0; i < nr; i += sampleR)
+        for (int j = 0; j < nth; j += sampleTheta)
+        for (int k = 0; k < nz; k += sampleZ)
+        {
+            if (i >= nr || j >= nth || k >= nz) continue;
+            var vx = _results.DarcyVelocityField[i, j, k, 0];
+            var vy = _results.DarcyVelocityField[i, j, k, 1];
+            var vz = _results.DarcyVelocityField[i, j, k, 2];
+            var mag = MathF.Sqrt(vx * vx + vy * vy + vz * vz);
+            if (mag > maxVelocity) maxVelocity = mag;
+        }
+        
+        if (maxVelocity < 1e-10f)
+        {
+            Logger.LogWarning("Velocity field is essentially zero");
+            return;
+        }
+        
+        var domainSize = (float)_options.DomainRadius;
+        var arrowScale = domainSize * 0.05f / maxVelocity;
+        
+        Logger.Log($"Generating velocity vectors: max = {maxVelocity:E2} m/s");
+        
+        for (int i = 0; i < nr; i += sampleR)
+        for (int j = 0; j < nth; j += sampleTheta)
+        for (int k = 0; k < nz; k += sampleZ)
+        {
+            if (i >= nr || j >= nth || k >= nz) continue;
+            
+            var r = _mesh.R[i];
+            var theta = _mesh.Theta[j];
+            var z = _mesh.Z[k];
+            
+            var position = new Vector3(r * MathF.Cos(theta), r * MathF.Sin(theta), z);
+            
+            var vx = _results.DarcyVelocityField[i, j, k, 0];
+            var vy = _results.DarcyVelocityField[i, j, k, 1];
+            var vz = _results.DarcyVelocityField[i, j, k, 2];
+            var velocity = new Vector3(vx, vy, vz);
+            var magnitude = velocity.Length();
+            
+            if (magnitude < maxVelocity * 0.01f) continue;
+            
+            var colorT = magnitude / maxVelocity;
+            var color = new Vector4(colorT, 0.3f, 1.0f - colorT, 0.8f);
+            
+            var arrowLength = magnitude * arrowScale;
+            var direction = Vector3.Normalize(velocity);
+            GenerateVelocityArrow(vectorMesh, position, direction, arrowLength, color);
+        }
+        
+        Logger.Log($"Generated {vectorMesh.Vertices.Count} vertices for velocity field");
+        
+        if (vectorMesh.Vertices.Count > 0)
+        {
+            var gpuMesh = CreateGpuMesh(vectorMesh);
+            if (gpuMesh.VertexBuffer != null)
+            {
+                _dynamicGpuMeshes.Add(gpuMesh);
+            }
+        }
+    }
+    
+    private void GenerateVelocityArrow(Mesh3DDataset mesh, Vector3 position, 
+        Vector3 direction, float length, Vector4 color)
+    {
+        var startIdx = mesh.Vertices.Count;
+        
+        var shaftLength = length * 0.7f;
+        var shaftRadius = length * 0.02f;
+        var segments = 6;
+        
+        var start = position;
+        var shaftEnd = position + direction * shaftLength;
+        var tip = position + direction * length;
+        
+        var tangent = Math.Abs(direction.Z) < 0.99f ? Vector3.UnitZ : Vector3.UnitX;
+        var binormal = Vector3.Normalize(Vector3.Cross(direction, tangent));
+        tangent = Vector3.Cross(binormal, direction);
+        
+        for (int i = 0; i < 2; i++)
+        {
+            var pos = i == 0 ? start : shaftEnd;
+            for (int j = 0; j < segments; j++)
+            {
+                var angle = (float)j / segments * MathF.PI * 2f;
+                var offset = tangent * MathF.Cos(angle) + binormal * MathF.Sin(angle);
+                var vertex = pos + offset * shaftRadius;
+                
+                mesh.Vertices.Add(vertex);
+                mesh.Normals.Add(Vector3.Normalize(offset));
+                mesh.Colors.Add(color);
+            }
+        }
+        
+        for (int j = 0; j < segments; j++)
+        {
+            var v0 = startIdx + j;
+            var v1 = startIdx + (j + 1) % segments;
+            var v2 = startIdx + segments + j;
+            var v3 = startIdx + segments + (j + 1) % segments;
+            
+            mesh.Faces.Add(new[] { v0, v2, v1 });
+            mesh.Faces.Add(new[] { v1, v2, v3 });
+        }
+        
+        var headRadius = length * 0.08f;
+        var coneBaseIdx = mesh.Vertices.Count;
+        
+        for (int j = 0; j < segments; j++)
+        {
+            var angle = (float)j / segments * MathF.PI * 2f;
+            var offset = tangent * MathF.Cos(angle) + binormal * MathF.Sin(angle);
+            var vertex = shaftEnd + offset * headRadius;
+            
+            mesh.Vertices.Add(vertex);
+            mesh.Normals.Add(direction);
+            mesh.Colors.Add(color);
+        }
+        
+        var tipIdx = mesh.Vertices.Count;
+        mesh.Vertices.Add(tip);
+        mesh.Normals.Add(direction);
+        mesh.Colors.Add(color);
+        
+        for (int j = 0; j < segments; j++)
+        {
+            var v0 = coneBaseIdx + j;
+            var v1 = coneBaseIdx + (j + 1) % segments;
+            mesh.Faces.Add(new[] { v0, v1, tipIdx });
         }
     }
 
@@ -662,7 +1139,8 @@ public class GeothermalVisualization3D : IDisposable
         {
             // Full rendering mode with simulation results
             // Render domain mesh
-            if (_showDomainMesh && _domainGpuMesh.VertexBuffer != null)
+            // SURGICAL FIX 11: Add diagnostics for domain mesh rendering
+            if (_showDomainMesh && _domainGpuMesh.VertexBuffer != null && _domainGpuMesh.IndexCount > 0)
             {
                 // CORRECTED: Use a switch statement to select the pipeline
                 Pipeline pipeline;
@@ -671,20 +1149,25 @@ public class GeothermalVisualization3D : IDisposable
                     case RenderMode.Velocity:
                         pipeline = _velocityPipeline;
                         break;
+                    case RenderMode.Pressure:
+                        // SURGICAL FIX 9: Use temperature pipeline for pressure (reuses temperature shader)
+                        pipeline = _temperaturePipeline;
+                        break;
                     case RenderMode.Temperature:
                     default:
                         pipeline = _temperaturePipeline;
                         break;
                 }
 
-                // The domain mesh should not be rendered in these modes
+                // The domain mesh should ONLY be skipped for these specific modes
                 if (_renderMode == RenderMode.Slices || _renderMode == RenderMode.Isosurface ||
                     _renderMode == RenderMode.Streamlines)
                 {
-                    // Do nothing, or render a wireframe
+                    // Skip domain mesh rendering - these modes use their own geometry
                 }
                 else
                 {
+                    // SURGICAL FIX 9b: ALWAYS render domain for Temperature/Velocity/Pressure modes
                     commandList.SetPipeline(pipeline);
                     commandList.SetGraphicsResourceSet(0, _resourceSet); // After pipeline
                     commandList.SetVertexBuffer(0, _domainGpuMesh.VertexBuffer);
@@ -789,7 +1272,13 @@ public class GeothermalVisualization3D : IDisposable
             SliceInfo = new Vector4(_sliceDepth, 0, 0, 0),
             RenderSettings =
                 new Vector4((float)_renderMode, _opacity, 0, _isoValue + 273.15f), // Pass Iso value in Kelvin
-            DomainInfo = new Vector4((float)_options.DomainRadius, _mesh.Z[0], _mesh.Z.Last() - _mesh.Z[0], 0)
+            DomainInfo = new Vector4((float)_options.DomainRadius, _mesh.Z[0], _mesh.Z.Last() - _mesh.Z[0], 0),
+            ClipPlane = new Vector4(
+                _clipAxis,
+                _clipPosition,
+                _clipNegativeSide ? 1f : 0f,
+                _enableClipping ? 1f : 0f
+            )
         };
 
         _graphicsDevice.UpdateBuffer(_uniformBuffer, 0, ref uniforms);
@@ -820,7 +1309,8 @@ public class GeothermalVisualization3D : IDisposable
             SliceInfo = new Vector4(0, 0, 0, 0),
             RenderSettings = new Vector4(0, 1.0f, 0, 293.15f), // opacity = 1.0
             DomainInfo = new Vector4(domainRadius, -(boreholeDepth + domainExtension),
-                boreholeDepth + domainExtension * 2, 0)
+                boreholeDepth + domainExtension * 2, 0),
+            ClipPlane = Vector4.Zero // No clipping in preview mode
         };
 
         _graphicsDevice.UpdateBuffer(_uniformBuffer, 0, ref uniforms);
@@ -887,6 +1377,31 @@ public class GeothermalVisualization3D : IDisposable
     }
 
 
+    /// <summary>
+    /// Reset camera to show the full simulation domain
+    /// </summary>
+    public void ResetCameraToFullView()
+    {
+        // Use simulation results if available, otherwise preview settings
+        var domainRadius = (float)(_options?.DomainRadius ?? _previewOptions?.DomainRadius ?? 50f);
+        var totalDepth = _mesh?.Z != null && _mesh.Z.Length > 0 
+            ? Math.Abs(_mesh.Z[^1] - _mesh.Z[0])
+            : (_previewBoreholeDepth + (float)(_previewOptions?.DomainExtension ?? 10f) * 2);
+        
+        // Set camera distance to see full domain
+        _cameraDistance = Math.Max(domainRadius * 1.5f, totalDepth * 0.75f);
+        _cameraDistance = Math.Clamp(_cameraDistance, 10f, 2000f);
+        
+        // Look at center of domain
+        _cameraTarget = new Vector3(0, 0, -totalDepth * 0.5f);
+        
+        // Reset angles to default
+        _cameraAzimuth = 45f;
+        _cameraElevation = 30f;
+        
+        UpdateCamera();
+    }
+
     public void RenderControls()
     {
         ImGui.Text("3D Visualization Controls");
@@ -925,12 +1440,124 @@ public class GeothermalVisualization3D : IDisposable
         ImGui.Checkbox("Show Borehole", ref _showBorehole);
 
         ImGui.SliderFloat("Opacity", ref _opacity, 0f, 1f);
+        
+        ImGui.Separator();
+        ImGui.TextColored(new Vector4(0.3f, 0.8f, 1.0f, 1.0f), "Advanced Visualization:");
+        
+        if (ImGui.Button("Show Heat Exchanger", new Vector2(-1, 0)))
+        {
+            ClearDynamicMeshes();
+            GenerateHeatExchangerGeometry();
+            Logger.Log("Heat exchanger visualization added");
+        }
+        ImGui.SetItemTooltip("Display U-tube or coaxial heat exchanger inside borehole");
+        
+        if (_options?.SimulateGroundwaterFlow == true && _results?.DarcyVelocityField != null)
+        {
+            ImGui.Spacing();
+            if (ImGui.Button("Show Velocity Vectors", new Vector2(-1, 0)))
+            {
+                ClearDynamicMeshes();
+                GenerateVelocityVectorField(5);
+                Logger.Log("Velocity vector field generated");
+            }
+            ImGui.SetItemTooltip("Display 3D velocity field as arrows (shows groundwater flow)");
+            
+            if (ImGui.Button("Show Combined View", new Vector2(-1, 0)))
+            {
+                ClearDynamicMeshes();
+                GenerateHeatExchangerGeometry();
+                GenerateVelocityVectorField(6);
+                _showDomainMesh = true;
+                Logger.Log("Combined visualization: domain + heat exchanger + velocity");
+            }
+            ImGui.SetItemTooltip("Show everything: temperature field + heat exchanger + flow vectors");
+        }
 
         if (_renderMode == RenderMode.Isosurface)
             ImGui.SliderFloat("Iso Value (°C)", ref _isoValue, _temperatureMin, _temperatureMax);
 
         if (_renderMode == RenderMode.Slices)
             ImGui.SliderFloat("Slice Depth (0=top, 1=bottom)", ref _sliceDepth, 0f, 1f);
+
+        // SURGICAL FIX 6: Add camera controls
+        ImGui.Separator();
+        ImGui.Text("Camera Controls");
+        
+        var camDist = _cameraDistance;
+        if (ImGui.SliderFloat("Zoom", ref camDist, 5f, 2000f, "%.0f", ImGuiSliderFlags.Logarithmic))
+        {
+            SetCameraDistance(camDist);
+        }
+        ImGui.SetItemTooltip("Mouse wheel also controls zoom");
+        
+        var camAz = _cameraAzimuth;
+        var camEl = _cameraElevation;
+        if (ImGui.SliderFloat("Azimuth", ref camAz, 0f, 360f))
+        {
+            _cameraAzimuth = camAz;
+            UpdateCamera();
+        }
+        if (ImGui.SliderFloat("Elevation", ref camEl, -89f, 89f))
+        {
+            _cameraElevation = camEl;
+            UpdateCamera();
+        }
+        
+        ImGui.Spacing();
+        if (ImGui.Button("Focus on Borehole", new Vector2(-1, 0)))
+        {
+            // Zoom to borehole region
+            var boreholeRadius = _options?.BoreholeDataset?.WellDiameter / 2000.0 ?? 0.1; // Convert mm to m
+            _cameraDistance = Math.Max(1f, (float)boreholeRadius * 5f); // 5x borehole diameter
+            _cameraTarget = Vector3.Zero; // Center on borehole
+            UpdateCamera();
+            Logger.Log($"Focused on borehole (radius: {boreholeRadius:F3} m, distance: {_cameraDistance:F1} m)");
+        }
+        ImGui.SetItemTooltip("Zoom close to the borehole to see local temperature changes");
+        
+        if (ImGui.Button("View Full Domain", new Vector2(-1, 0)))
+        {
+            // Reset to full view
+            ResetCameraToFullView();
+            Logger.Log("Reset camera to full domain view");
+        }
+        ImGui.SetItemTooltip("Reset camera to show entire simulation domain");
+        
+        ImGui.Separator();
+        ImGui.Text("Volume Clipping");
+        ImGui.Checkbox("Enable Clipping Plane", ref _enableClipping);
+        if (_enableClipping)
+        {
+            var axisNames = new[] { "X (Radial)", "Y (Radial)", "Z (Depth)" };
+            if (ImGui.Combo("Clip Axis", ref _clipAxis, axisNames, axisNames.Length))
+            {
+                // Axis changed
+            }
+            ImGui.SliderFloat("Clip Position", ref _clipPosition, 0f, 1f);
+            ImGui.Checkbox("Clip Negative Side", ref _clipNegativeSide);
+            ImGui.SetItemTooltip(_clipNegativeSide ? "Showing positive side" : "Showing negative side");
+            
+            // Preset buttons
+            ImGui.Spacing();
+            if (ImGui.Button("Clip to Borehole"))
+            {
+                _clipAxis = 0; // X axis
+                _clipPosition = 0.15f; // Show inner 15% radially
+                _clipNegativeSide = false; // Show negative side (inner region)
+                _enableClipping = true;
+            }
+            ImGui.SetItemTooltip("Show only the region near the borehole");
+            
+            ImGui.SameLine();
+            if (ImGui.Button("Half Domain"))
+            {
+                _clipAxis = 1; // Y axis
+                _clipPosition = 0.5f;
+                _clipNegativeSide = true;
+            }
+            ImGui.SetItemTooltip("Cut the domain in half to see interior");
+        }
 
         ImGui.Separator();
         ImGui.Text("Camera");
@@ -1063,6 +1690,20 @@ public class GeothermalVisualization3D : IDisposable
     public void SetRenderMode(RenderMode mode)
     {
         _renderMode = mode;
+        
+        // SURGICAL FIX 7+9c: Ensure domain mesh visibility based on render mode
+        // Temperature, Velocity, and Pressure modes REQUIRE the domain mesh
+        if (mode == RenderMode.Temperature || mode == RenderMode.Velocity || mode == RenderMode.Pressure)
+        {
+            _showDomainMesh = true;
+            Logger.Log($"Switched to {mode} mode - domain mesh enabled");
+        }
+        // Isosurface and Streamline modes typically hide the domain
+        else if (mode == RenderMode.Isosurface || mode == RenderMode.Streamlines)
+        {
+            // Keep user's preference, don't force change
+            Logger.Log($"Switched to {mode} mode");
+        }
     }
 
     public void SetSliceDepth(float depth)
@@ -1233,7 +1874,7 @@ layout(location = 3) out vec3 frag_WorldPos;
 
 layout(set = 0, binding = 0) uniform UniformData {
     mat4 ViewMatrix; mat4 ProjectionMatrix; mat4 ModelMatrix; vec4 LightDirection; vec4 ViewPosition;
-    vec4 ColorMapRange; vec4 SliceInfo; vec4 RenderSettings; vec4 DomainInfo;
+    vec4 ColorMapRange; vec4 SliceInfo; vec4 RenderSettings; vec4 DomainInfo; vec4 ClipPlane;
 } ubo;
 
 void main() {
@@ -1269,18 +1910,34 @@ layout(location = 0) in vec4 frag_Color; layout(location = 1) in vec3 frag_Norma
 layout(location = 3) in vec3 frag_WorldPos;
 layout(location = 0) out vec4 FragColor;
 layout(set = 0, binding = 0) uniform UniformData {
-    mat4 v; mat4 p; mat4 m; vec4 LightDirection; vec4 ViewPosition; vec4 ColorMapRange; vec4 si; vec4 RenderSettings; vec4 di;
+    mat4 v; mat4 p; mat4 m; vec4 LightDirection; vec4 ViewPosition; vec4 ColorMapRange; vec4 si; vec4 RenderSettings; vec4 di; vec4 ClipPlane;
 } ubo;
 layout(set = 0, binding = 1) uniform texture1D ColorMap; layout(set = 0, binding = 2) uniform sampler ColorMapSampler;
 layout(set = 0, binding = 3) uniform texture3D TemperatureData; layout(set = 0, binding = 5) uniform sampler DataSampler;
 void main() {
+    // SURGICAL FIX 5: Improved clipping plane with proper coordinate handling
+    if (ubo.ClipPlane.w > 0.5) {
+        int axis = int(ubo.ClipPlane.x);
+        float position = ubo.ClipPlane.y;
+        float side = ubo.ClipPlane.z;
+        float coord = (axis == 0) ? frag_UVW.x : ((axis == 1) ? frag_UVW.y : frag_UVW.z);
+        if (side > 0.5) { if (coord < position) discard; }
+        else { if (coord > position) discard; }
+    }
+    
+    // Sample temperature from 3D texture
     float temp_K = texture(sampler3D(TemperatureData, DataSampler), frag_UVW).r;
     float temp_C = temp_K - 273.15;
-    float t = clamp((temp_C - ubo.ColorMapRange.x) / ubo.ColorMapRange.y, 0.0, 1.0);
+    
+    // SURGICAL FIX 5b: ColorMapRange.x is min, ColorMapRange.y is RANGE (max-min)
+    float tempMin = ubo.ColorMapRange.x;
+    float tempRange = max(ubo.ColorMapRange.y, 0.001);  // Avoid division by zero
+    float t = clamp((temp_C - tempMin) / tempRange, 0.0, 1.0);
+    
     vec4 color = texture(sampler1D(ColorMap, ColorMapSampler), t);
     vec3 normal = normalize(frag_Normal);
-    float diffuse = max(dot(normal, normalize(ubo.LightDirection.xyz)), 0.3);
-    FragColor = vec4(color.rgb * diffuse, ubo.RenderSettings.y);
+    float diffuse = max(dot(normal, normalize(ubo.LightDirection.xyz)), 0.4);
+    FragColor = vec4(color.rgb * (diffuse + 0.3), ubo.RenderSettings.y);
 }";
     }
 
@@ -1292,15 +1949,15 @@ layout(location = 0) in vec4 frag_Color; layout(location = 1) in vec3 frag_Norma
 layout(location = 3) in vec3 frag_WorldPos;
 layout(location = 0) out vec4 FragColor;
 layout(set = 0, binding = 0) uniform UniformData {
-    mat4 v; mat4 p; mat4 m; vec4 LightDirection; vec4 ViewPosition; vec4 ColorMapRange; vec4 si; vec4 RenderSettings; vec4 di;
+    mat4 v; mat4 p; mat4 m; vec4 LightDirection; vec4 ViewPosition; vec4 ColorMapRange; vec4 si; vec4 RenderSettings; vec4 di; vec4 ClipPlane;
 } ubo;
 void main() {
     vec3 normal = normalize(frag_Normal);
-    float diffuse = max(dot(normal, normalize(ubo.LightDirection.xyz)), 0.2);
+    float diffuse = max(dot(normal, normalize(ubo.LightDirection.xyz)), 0.3);
     vec3 viewDir = normalize(ubo.ViewPosition.xyz - frag_WorldPos);
     vec3 reflectDir = reflect(-normalize(ubo.LightDirection.xyz), normal);
-    float specular = pow(max(dot(viewDir, reflectDir), 0.0), 32);
-    vec3 finalColor = frag_Color.rgb * diffuse + vec3(0.5) * specular;
+    float specular = pow(max(dot(viewDir, reflectDir), 0.0), 64) * 0.1; // Reduced from 0.5 to 0.1, sharper highlight
+    vec3 finalColor = frag_Color.rgb * (diffuse + 0.25) + vec3(1.0) * specular;
     FragColor = vec4(finalColor, frag_Color.a * ubo.RenderSettings.y);
 }";
     }
@@ -1313,7 +1970,7 @@ layout(location = 0) in vec4 frag_Color; layout(location = 1) in vec3 frag_Norma
 layout(location = 3) in vec3 frag_WorldPos;
 layout(location = 0) out vec4 FragColor;
 layout(set = 0, binding = 0) uniform UniformData {
-    mat4 v; mat4 p; mat4 m; vec4 LightDirection; vec4 ViewPosition; vec4 ColorMapRange; vec4 si; vec4 RenderSettings; vec4 di;
+    mat4 v; mat4 p; mat4 m; vec4 LightDirection; vec4 ViewPosition; vec4 ColorMapRange; vec4 si; vec4 RenderSettings; vec4 di; vec4 ClipPlane;
 } ubo;
 layout(set = 0, binding = 1) uniform texture1D ColorMap; layout(set = 0, binding = 2) uniform sampler ColorMapSampler;
 layout(set = 0, binding = 4) uniform texture3D VelocityData; layout(set = 0, binding = 5) uniform sampler DataSampler;
@@ -1340,7 +1997,7 @@ layout(location = 0) in vec4 frag_Color; layout(location = 1) in vec3 frag_Norma
 layout(location = 3) in vec3 frag_WorldPos;
 layout(location = 0) out vec4 FragColor;
 layout(set = 0, binding = 0) uniform UniformData {
-    mat4 v; mat4 p; mat4 m; vec4 LightDirection; vec4 ViewPosition; vec4 ColorMapRange; vec4 SliceInfo; vec4 RenderSettings; vec4 DomainInfo;
+    mat4 v; mat4 p; mat4 m; vec4 LightDirection; vec4 ViewPosition; vec4 ColorMapRange; vec4 SliceInfo; vec4 RenderSettings; vec4 DomainInfo; vec4 ClipPlane;
 } ubo;
 layout(set = 0, binding = 1) uniform texture1D ColorMap; layout(set = 0, binding = 2) uniform sampler ColorMapSampler;
 layout(set = 0, binding = 3) uniform texture3D TemperatureData; layout(set = 0, binding = 5) uniform sampler DataSampler;
@@ -1359,7 +2016,12 @@ void main() {
     
     float temp_K = texture(sampler3D(TemperatureData, DataSampler), tex_coord_3d).r;
     float temp_C = temp_K - 273.15;
-    float t = clamp((temp_C - ubo.ColorMapRange.x) / ubo.ColorMapRange.y, 0.0, 1.0);
+    
+    // SURGICAL FIX 8: Proper normalization using range (same as temperature shader)
+    float tempMin = ubo.ColorMapRange.x;
+    float tempRange = max(ubo.ColorMapRange.y, 0.001);
+    float t = clamp((temp_C - tempMin) / tempRange, 0.0, 1.0);
+    
     vec4 color = texture(sampler1D(ColorMap, ColorMapSampler), t);
     
     FragColor = vec4(color.rgb, ubo.RenderSettings.y);
@@ -1374,7 +2036,7 @@ layout(location = 0) in vec4 frag_Color; layout(location = 1) in vec3 frag_Norma
 layout(location = 3) in vec3 frag_WorldPos;
 layout(location = 0) out vec4 FragColor;
 layout(set = 0, binding = 0) uniform UniformData {
-    mat4 v; mat4 p; mat4 m; vec4 LightDirection; vec4 ViewPosition; vec4 ColorMapRange; vec4 si; vec4 RenderSettings; vec4 di;
+    mat4 v; mat4 p; mat4 m; vec4 LightDirection; vec4 ViewPosition; vec4 ColorMapRange; vec4 si; vec4 RenderSettings; vec4 di; vec4 ClipPlane;
 } ubo;
 layout(set = 0, binding = 1) uniform texture1D ColorMap; layout(set = 0, binding = 2) uniform sampler ColorMapSampler;
 layout(set = 0, binding = 4) uniform texture3D VelocityData; layout(set = 0, binding = 5) uniform sampler DataSampler;
@@ -1429,6 +2091,7 @@ void main() {
         public Vector4 SliceInfo; // x=depth(0-1)
         public Vector4 RenderSettings; // x=mode, y=opacity, z=time, w=isoValue_K
         public Vector4 DomainInfo; // x=radius, y=z_min, z=z_range
+        public Vector4 ClipPlane; // x=axis(0-2), y=position(0-1), z=side(0/1), w=enabled(0/1)
     }
 
     [StructLayout(LayoutKind.Sequential)]

@@ -253,7 +253,7 @@ public class GeothermalSimulationResults
 
         sb.AppendLine("Layer Contributions:");
         foreach (var layer in LayerHeatFluxContributions.OrderByDescending(l => l.Value))
-            sb.AppendLine($"  - {layer.Key}: {layer.Value:F1}% of heat flux");
+            sb.AppendLine($"  - {layer.Key}: {Math.Round(layer.Value, 1):F1} heat flux");
         sb.AppendLine();
 
         sb.AppendLine("Computational Performance:");

@@ -11,6 +11,31 @@ using GeoscientistToolkit.Util;
 namespace GeoscientistToolkit.Data.Borehole;
 
 /// <summary>
+///     Contact type between lithological units
+///     References: Tucker, M. E. (2011). Sedimentary Petrology (3rd ed.). Wiley-Blackwell.
+///     Boggs, S. (2012). Principles of Sedimentology and Stratigraphy (5th ed.). Pearson.
+/// </summary>
+public enum ContactType
+{
+    /// <summary>Sharp, linear contact with no transition zone</summary>
+    Sharp,
+    /// <summary>Erosive contact indicating erosion before deposition</summary>
+    Erosive,
+    /// <summary>Gradational contact with transitional zone</summary>
+    Gradational,
+    /// <summary>Conformable contact representing continuous deposition</summary>
+    Conformable,
+    /// <summary>Unconformity representing a time gap</summary>
+    Unconformity,
+    /// <summary>Fault contact from tectonic activity</summary>
+    Faulted,
+    /// <summary>Intrusive contact from igneous intrusion</summary>
+    Intrusive,
+    /// <summary>Indistinct or poorly defined contact</summary>
+    Indistinct
+}
+
+/// <summary>
 ///     Represents a lithological unit in the borehole with depth range
 /// </summary>
 public class LithologyUnit
@@ -25,6 +50,13 @@ public class LithologyUnit
 
     public float DepthFrom { get; set; }
     public float DepthTo { get; set; }
+    
+    /// <summary>Upper contact type (between this unit and the one above)</summary>
+    public ContactType UpperContactType { get; set; } = ContactType.Sharp;
+    
+    /// <summary>Lower contact type (between this unit and the one below)</summary>
+    public ContactType LowerContactType { get; set; } = ContactType.Sharp;
+    
     public Vector4 Color { get; set; } = new(0.8f, 0.8f, 0.8f, 1.0f);
     public string Description { get; set; } = "";
     public string GrainSize { get; set; } = "Medium"; // Clay, Silt, Fine, Medium, Coarse, etc.
@@ -283,7 +315,7 @@ public class BoreholeDataset : Dataset, ISerializableDataset
             ["Thermal Conductivity"] = new()
             {
                 Name = "Thermal Conductivity",
-                Unit = "W/m·K",
+                Unit = "W/mÂ·K",
                 MinValue = 0.1f,
                 MaxValue = 5,
                 Color = new Vector4(1.0f, 0.6f, 0.2f, 1.0f),
@@ -292,7 +324,7 @@ public class BoreholeDataset : Dataset, ISerializableDataset
             ["Thermal Diffusivity"] = new() // ADDED
             {
                 Name = "Thermal Diffusivity",
-                Unit = "m²/s",
+                Unit = "mÂ²/s",
                 MinValue = 1e-7f,
                 MaxValue = 5e-6f,
                 Color = new Vector4(0.0f, 0.8f, 0.8f, 1.0f), // Cyan
@@ -703,6 +735,8 @@ public class BoreholeDataset : Dataset, ISerializableDataset
                 writer.Write(unit.Color.W);
                 writer.Write(unit.Description ?? "");
                 writer.Write(unit.GrainSize ?? "");
+                writer.Write((int)unit.UpperContactType);
+                writer.Write((int)unit.LowerContactType);
 
                 writer.Write(unit.Parameters.Count);
                 foreach (var param in unit.Parameters)
@@ -801,7 +835,9 @@ public class BoreholeDataset : Dataset, ISerializableDataset
                     Color = new Vector4(reader.ReadSingle(), reader.ReadSingle(), reader.ReadSingle(),
                         reader.ReadSingle()),
                     Description = reader.ReadString(),
-                    GrainSize = reader.ReadString()
+                    GrainSize = reader.ReadString(),
+                    UpperContactType = (ContactType)reader.ReadInt32(),
+                    LowerContactType = (ContactType)reader.ReadInt32()
                 };
 
                 var paramCount = reader.ReadInt32();
@@ -891,6 +927,8 @@ public class BoreholeDataset : Dataset, ISerializableDataset
                 Color = unitDto.Color,
                 Description = unitDto.Description,
                 GrainSize = unitDto.GrainSize,
+                UpperContactType = unitDto.UpperContactType,
+                LowerContactType = unitDto.LowerContactType,
                 Parameters = unitDto.Parameters,
                 ParameterSources = unitDto.ParameterSources
             });
@@ -947,6 +985,8 @@ public class LithologyUnitDTO
     public Vector4 Color { get; set; }
     public string Description { get; set; }
     public string GrainSize { get; set; }
+    public ContactType UpperContactType { get; set; }
+    public ContactType LowerContactType { get; set; }
     public Dictionary<string, float> Parameters { get; set; }
     public Dictionary<string, ParameterSource> ParameterSources { get; set; }
 }

@@ -2270,7 +2270,32 @@ public class GeothermalSimulationSolver : IDisposable
     /// </summary>
     private void GenerateStreamlines(GeothermalSimulationResults results)
     {
+        _progress?.Report((0.92f, "Generating streamlines..."));
+        
+        // Check if velocity field has any non-zero values
+        var maxVel = 0.0;
+        for (var i = 0; i < _mesh.RadialPoints; i++)
+        for (var j = 0; j < _mesh.AngularPoints; j++)
+        for (var k = 0; k < _mesh.VerticalPoints; k++)
+        {
+            var vel = Math.Sqrt(
+                _velocity[i, j, k, 0] * _velocity[i, j, k, 0] +
+                _velocity[i, j, k, 1] * _velocity[i, j, k, 1] +
+                _velocity[i, j, k, 2] * _velocity[i, j, k, 2]);
+            if (vel > maxVel) maxVel = vel;
+        }
+        
+        Console.WriteLine($"[Streamlines] Max velocity magnitude: {maxVel:E3} m/s");
+        
+        if (maxVel < 1e-10)
+        {
+            Console.WriteLine("[Streamlines] WARNING: Velocity field is essentially zero - no flow to visualize!");
+            Console.WriteLine("[Streamlines] Check: hydraulic gradient, permeability, boundary conditions");
+            return;
+        }
+        
         var random = new Random(42);
+        var successfulStreamlines = 0;
 
         for (var s = 0; s < _options.StreamlineCount; s++)
         {
@@ -2305,8 +2330,15 @@ public class GeothermalSimulationSolver : IDisposable
                     break;
             }
 
-            if (streamline.Count > 5) results.Streamlines.Add(streamline);
+            if (streamline.Count > 5)
+            {
+                results.Streamlines.Add(streamline);
+                successfulStreamlines++;
+            }
         }
+        
+        Console.WriteLine($"[Streamlines] Generated {successfulStreamlines} streamlines (requested {_options.StreamlineCount})");
+        Console.WriteLine($"[Streamlines] Total streamline points: {results.Streamlines.Sum(s => s.Count)}");
     }
 
     /// <summary>
