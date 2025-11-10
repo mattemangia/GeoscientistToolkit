@@ -976,7 +976,7 @@ public static class BoreholeDebugTools
         var thermalTrack = new ParameterTrack
         {
             Name = "Thermal Conductivity",
-            Unit = "W/mÂ·K",
+            Unit = "W/m·K",
             MinValue = 0.5f,
             MaxValue = 4.0f,
             IsLogarithmic = false,
