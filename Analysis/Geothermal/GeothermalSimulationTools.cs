@@ -9,6 +9,8 @@ using GeoscientistToolkit.UI.Utils;
 using GeoscientistToolkit.UI.Visualization;
 using GeoscientistToolkit.Util;
 using ImGuiNET;
+using OxyPlot.Axes;
+using OxyPlot.Series;
 
 namespace GeoscientistToolkit.Analysis.Geothermal;
 
@@ -1195,6 +1197,7 @@ public class GeothermalSimulationTools : IDatasetTools, IDisposable
                     ImGui.EndTabItem();
                 }
 
+                // DEFINITIVE FIX: Add the new tab for the cross-section
                 if (ImGui.BeginTabItem("Borehole Cross-Section"))
                 {
                     RenderCrossSectionTab();
@@ -1888,129 +1891,34 @@ public class GeothermalSimulationTools : IDatasetTools, IDisposable
             }
         });
     }
+    
+    // DEFINITIVE FIX: New method to render the cross-section plot directly in ImGui.
     private void RenderCrossSectionTab()
     {
         if (_crossSectionViewer == null)
         {
             ImGui.TextColored(new Vector4(1, 0.5f, 0, 1), 
-                "2D Cross-section viewer not initialized");
-            
-            if (ImGui.Button("Initialize 2D Viewer Now"))
-            {
-                if (_results != null && _mesh != null && _options != null)
-                {
-                    _crossSectionViewer = new BoreholeCrossSectionViewer();
-                    _crossSectionViewer.LoadResults(_results, _mesh, _options);
-                    Logger.Log("2D cross-section viewer initialized manually");
-                    // Run diagnostic to check temperature field
-                    _crossSectionViewer.DiagnoseTemperatureField();
-                }
-                else
-                {
-                    Logger.LogWarning("Cannot initialize 2D viewer - missing data");
-                }
-            }
+                "2D Cross-section viewer not initialized. Run a simulation first.");
             return;
         }
 
         // Layout: Controls on left, plot view on right
+        // CORRECTED: Replaced 'true' with 'ImGuiChildFlags.Border'
         ImGui.BeginChild("CrossSectionControls", new Vector2(300, 0), ImGuiChildFlags.Border);
         _crossSectionViewer.RenderControls();
         ImGui.EndChild();
 
         ImGui.SameLine();
 
-        ImGui.BeginChild("CrossSectionPlot", new Vector2(0, 0), ImGuiChildFlags.Border);
+        // CORRECTED: Replaced 'true' with 'ImGuiChildFlags.Border'
+        ImGui.BeginChild("CrossSectionPlot", Vector2.Zero, ImGuiChildFlags.Border);
         
         var plot = _crossSectionViewer.CreateCrossSectionPlot();
         if (plot != null)
         {
-            try
-            {
-                ImGui.TextColored(new Vector4(0.3f, 0.8f, 1.0f, 1.0f), "2D Borehole Cross-Section");
-                ImGui.Separator();
-                ImGui.Spacing();
-                
-                ImGui.TextWrapped("This shows a horizontal slice through the borehole at the selected depth.");
-                ImGui.Spacing();
-                
-                // Show basic plot info
-                ImGui.Text($"Plot: {plot.Title}");
-                ImGui.Text($"Series: {plot.Series.Count}");
-                ImGui.Text($"View Mode: {_crossSectionViewer?.GetType().Name ?? "Unknown"}");
-                
-                ImGui.Spacing();
-                ImGui.Separator();
-                ImGui.Spacing();
-                
-                // Quick data visualization using ImGui
-                if (_results?.FluidTemperatureProfile != null && _results.FluidTemperatureProfile.Any())
-                {
-                    ImGui.TextColored(new Vector4(0.3f, 0.8f, 1.0f, 1.0f), "Fluid Temperature Profile:");
-                    
-                    var temps = _results.FluidTemperatureProfile
-                        .Select(p => (float)(p.temperatureDown - 273.15)).ToArray();
-                    
-                    if (temps.Length > 0)
-                    {
-                        var availableSpace = ImGui.GetContentRegionAvail();
-                        ImGui.PlotLines("Down Pipe Temp (°C)", ref temps[0], temps.Length, 
-                            0, null, temps.Min() * 0.95f, temps.Max() * 1.05f, 
-                            new Vector2(availableSpace.X - 20, 200));
-                        
-                        ImGui.Spacing();
-                        ImGui.Text($"Min: {temps.Min():F1}°C, Max: {temps.Max():F1}°C, Avg: {temps.Average():F1}°C");
-                    }
-                }
-                
-                ImGui.Spacing();
-                ImGui.Separator();
-                ImGui.Spacing();
-                
-                // Export to SVG for detailed viewing
-                ImGui.TextWrapped("For detailed 2D cross-section plot:");
-                
-                var tempPath = Path.Combine(Path.GetTempPath(), "borehole_cross_section.svg");
-                
-                if (ImGui.Button("Export and Open SVG Plot", new Vector2(-1, 0)))
-                {
-                    try
-                    {
-                        var exporter = new OxyPlot.SvgExporter { Width = 800, Height = 600 };
-                        using (var stream = File.Create(tempPath))
-                        {
-                            exporter.Export(plot, stream);
-                        }
-                        
-                        Logger.Log($"2D plot exported to: {tempPath}");
-                        
-                        // Open in default viewer
-                        System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
-                        {
-                            FileName = tempPath,
-                            UseShellExecute = true
-                        });
-                    }
-                    catch (Exception ex)
-                    {
-                        Logger.LogError($"Failed to export/open plot: {ex.Message}");
-                        ImGui.TextColored(new Vector4(1, 0.2f, 0.2f, 1), $"Error: {ex.Message}");
-                    }
-                }
-                ImGui.SetItemTooltip("Exports plot as SVG and opens in your default browser/viewer");
-                
-                ImGui.Spacing();
-                ImGui.TextDisabled($"Output: {tempPath}");
-                
-                ImGui.Spacing();
-                ImGui.TextWrapped("Note: Detailed cross-section plots use OxyPlot which cannot render directly in ImGui. The plot is exported to SVG format for viewing.");
-            }
-            catch (Exception ex)
-            {
-                Logger.LogError($"Error in cross-section tab: {ex.Message}");
-                ImGui.TextColored(new Vector4(1, 0.2f, 0.2f, 1), "Error displaying cross-section");
-                ImGui.TextWrapped(ex.Message);
-            }
+            // CORRECTED: Explicit interface implementation requires casting
+            ((OxyPlot.IPlotModel)plot).Update(true);
+            RenderOxyPlotDirectly(plot);
         }
         else
         {
@@ -2021,6 +1929,161 @@ public class GeothermalSimulationTools : IDatasetTools, IDisposable
         ImGui.EndChild();
     }
 
+    // DEFINITIVE FIX: New helper method to render an OxyPlot model using ImGui draw commands.
+    private void RenderOxyPlotDirectly(OxyPlot.PlotModel plot)
+    {
+        var drawList = ImGui.GetWindowDrawList();
+        var canvas_p0 = ImGui.GetCursorScreenPos();
+        var canvas_sz = ImGui.GetContentRegionAvail();
+        if (canvas_sz.X < 50.0f || canvas_sz.Y < 50.0f)
+            return;
+        var canvas_p1 = new Vector2(canvas_p0.X + canvas_sz.X, canvas_p0.Y + canvas_sz.Y);
+
+        // Draw background and border
+        drawList.AddRectFilled(canvas_p0, canvas_p1, ImGui.GetColorU32(ImGuiCol.FrameBg));
+        drawList.AddRect(canvas_p0, canvas_p1, ImGui.GetColorU32(ImGuiCol.Border));
+
+        // Get plot elements
+        var xAxis = plot.Axes.OfType<LinearAxis>().FirstOrDefault(a => a.Position == AxisPosition.Bottom);
+        var yAxis = plot.Axes.OfType<LinearAxis>().FirstOrDefault(a => a.Position == AxisPosition.Left);
+        if (xAxis == null || yAxis == null) return;
+
+        // Define plot area with margins for labels and color bar
+        var plotArea = new System.Drawing.RectangleF(canvas_p0.X + 60, canvas_p0.Y + 40, canvas_sz.X - 140, canvas_sz.Y - 80);
+
+        // Helper function to transform plot data coordinates to screen coordinates
+        Func<double, double, Vector2> Transform = (x, y) => {
+            var screenX = (float)(plotArea.Left + (x - xAxis.ActualMinimum) / (xAxis.ActualMaximum - xAxis.ActualMinimum) * plotArea.Width);
+            var screenY = (float)(plotArea.Top + (yAxis.ActualMaximum - y) / (yAxis.ActualMaximum - yAxis.ActualMinimum) * plotArea.Height);
+            return new Vector2(screenX, screenY);
+        };
+
+        // 1. Draw HeatMapSeries
+        var heatMap = plot.Series.OfType<HeatMapSeries>().FirstOrDefault();
+        var colorAxis = plot.Axes.OfType<LinearColorAxis>().FirstOrDefault();
+        if (heatMap != null && colorAxis != null)
+        {
+            var data = heatMap.Data;
+            int resX = data.GetLength(0);
+            int resY = data.GetLength(1);
+            double dx = (heatMap.X1 - heatMap.X0) / resX;
+            double dy = (heatMap.Y1 - heatMap.Y0) / resY;
+
+            for (int i = 0; i < resX; i++)
+            {
+                for (int j = 0; j < resY; j++)
+                {
+                    double val = data[i, j];
+                    if (double.IsNaN(val)) continue;
+
+                    var p0_plot = new System.Drawing.PointF((float)(heatMap.X0 + i * dx), (float)(heatMap.Y0 + j * dy));
+                    var p1_plot = new System.Drawing.PointF((float)(p0_plot.X + dx), (float)(p0_plot.Y + dy));
+                    
+                    var p0_screen = Transform(p0_plot.X, p1_plot.Y);
+                    var p1_screen = Transform(p1_plot.X, p0_plot.Y);
+
+                    var oxyColor = colorAxis.GetColor(val);
+                    uint imColor = ImGui.ColorConvertFloat4ToU32(new Vector4(oxyColor.R / 255f, oxyColor.G / 255f, oxyColor.B / 255f, oxyColor.A / 255f));
+
+                    drawList.AddRectFilled(p0_screen, p1_screen, imColor);
+                }
+            }
+        }
+        
+        // 2. Draw LineSeries (for pipe circles, etc.)
+        foreach (var series in plot.Series.OfType<LineSeries>())
+        {
+            var oxyColor = series.Color;
+            uint imColor = ImGui.ColorConvertFloat4ToU32(new Vector4(oxyColor.R / 255f, oxyColor.G / 255f, oxyColor.B / 255f, oxyColor.A / 255f));
+            var thickness = (float)series.StrokeThickness;
+
+            if (series.Points.Count > 1)
+            {
+                 var points = series.Points.Select(p => Transform(p.X, p.Y)).ToArray();
+                 drawList.AddPolyline(ref points[0], points.Length, imColor, ImDrawFlags.None, thickness);
+            }
+        }
+        
+        // 3. Draw Annotations
+        foreach (var annotation in plot.Annotations.OfType<OxyPlot.Annotations.TextAnnotation>())
+        {
+            var pos = Transform(annotation.TextPosition.X, annotation.TextPosition.Y);
+            var oxyColor = annotation.TextColor;
+            uint imColor = ImGui.ColorConvertFloat4ToU32(new Vector4(oxyColor.R / 255f, oxyColor.G / 255f, oxyColor.B / 255f, oxyColor.A / 255f));
+            drawList.AddText(pos, imColor, annotation.Text);
+        }
+
+        // 4. Draw Axes and Color Bar
+        // X-Axis
+        drawList.AddLine(new Vector2(plotArea.Left, plotArea.Bottom), new Vector2(plotArea.Right, plotArea.Bottom), 0xFFFFFFFF, 1);
+        for(int i=0; i<=5; i++)
+        {
+            var val = xAxis.ActualMinimum + (i/5.0) * (xAxis.ActualMaximum - xAxis.ActualMinimum);
+            var pos = Transform(val, yAxis.ActualMinimum);
+            drawList.AddLine(new Vector2(pos.X, plotArea.Bottom), new Vector2(pos.X, plotArea.Bottom + 5), 0xFFFFFFFF, 1);
+            drawList.AddText(new Vector2(pos.X - 10, plotArea.Bottom + 8), 0xFFFFFFFF, $"{val:F2}");
+        }
+        // CORRECTED: Replaced GetCenter() with manual calculation
+        var xAxisTitlePos = new Vector2(plotArea.Left + plotArea.Width / 2 - 20, plotArea.Bottom + 25);
+        drawList.AddText(xAxisTitlePos, 0xFFFFFFFF, xAxis.Title ?? "X-Axis");
+        
+        // Y-Axis
+        drawList.AddLine(new Vector2(plotArea.Left, plotArea.Top), new Vector2(plotArea.Left, plotArea.Bottom), 0xFFFFFFFF, 1);
+         for(int i=0; i<=5; i++)
+        {
+            var val = yAxis.ActualMinimum + (i/5.0) * (yAxis.ActualMaximum - yAxis.ActualMinimum);
+            var pos = Transform(xAxis.ActualMinimum, val);
+            drawList.AddLine(new Vector2(plotArea.Left - 5, pos.Y), new Vector2(plotArea.Left, pos.Y), 0xFFFFFFFF, 1);
+            drawList.AddText(new Vector2(plotArea.Left - 40, pos.Y - 7), 0xFFFFFFFF, $"{val:F2}");
+        }
+
+        // Color Bar
+        if (colorAxis != null)
+        {
+            var barRect = new System.Drawing.RectangleF(plotArea.Right + 20, plotArea.Top, 20, plotArea.Height);
+            int nSteps = 100;
+            float stepHeight = barRect.Height / nSteps;
+            for (int i = 0; i < nSteps; i++)
+            {
+                double val = colorAxis.ActualMinimum + ((nSteps - 1 - i) / (double)(nSteps - 1)) * (colorAxis.ActualMaximum - colorAxis.ActualMinimum);
+                var oxyColor = colorAxis.GetColor(val);
+                uint imColor = ImGui.ColorConvertFloat4ToU32(new Vector4(oxyColor.R / 255f, oxyColor.G / 255f, oxyColor.B / 255f, oxyColor.A / 255f));
+                var p0 = new Vector2(barRect.Left, barRect.Top + i * stepHeight);
+                var p1 = new Vector2(barRect.Right, barRect.Top + (i + 1) * stepHeight);
+                drawList.AddRectFilled(p0, p1, imColor);
+            }
+            drawList.AddRect(new Vector2(barRect.Left, barRect.Top), new Vector2(barRect.Right, barRect.Bottom), 0xFFFFFFFF, 0, ImDrawFlags.None, 1);
+            drawList.AddText(new Vector2(barRect.Right + 5, barRect.Top - 7), 0xFFFFFFFF, $"{colorAxis.ActualMaximum:F0}");
+            drawList.AddText(new Vector2(barRect.Right + 5, barRect.Bottom - 7), 0xFFFFFFFF, $"{colorAxis.ActualMinimum:F0}");
+            
+            // CORRECTED: Replaced GetCenter() and custom ImGuiUtil with a self-contained helper method
+            var titlePos = new Vector2(barRect.Left + barRect.Width + 30, barRect.Top + barRect.Height / 2);
+            AddTextVertical(drawList, titlePos, 0xFFFFFFFF, colorAxis.Title ?? "Value");
+        }
+    }
+
+    /// <summary>
+    ///     CORRECTED AND PROVIDED: Helper function to render vertical text in ImGui.
+    /// </summary>
+    private void AddTextVertical(ImDrawListPtr drawList, Vector2 pos, uint color, string text)
+    {
+        var font = ImGui.GetFont();
+        var fontSize = ImGui.GetFontSize();
+
+        // Calculate the total height of the text block to center it vertically
+        var totalTextHeight = text.Length * (fontSize * 0.9f); // Use a line spacing factor
+        var startY = pos.Y - (totalTextHeight / 2);
+
+        // Iterate through each character and draw it
+        for (int i = 0; i < text.Length; i++)
+        {
+            string c = text[i].ToString();
+            // Calculate the width of the single character to center it horizontally
+            var charSize = font.CalcTextSizeA(fontSize, float.MaxValue, -1.0f, c);
+            var currentPos = new Vector2(pos.X - charSize.X / 2, startY + i * (fontSize * 0.9f));
+            drawList.AddText(currentPos, color, c);
+        }
+    }
     private void ShowStreamlines()
     {
         if (_visualization3D == null || _results?.Streamlines == null || !_results.Streamlines.Any())
@@ -2029,39 +2092,36 @@ public class GeothermalSimulationTools : IDatasetTools, IDisposable
             return;
         }
 
+        // Create an empty mesh object to hold the streamline geometry.
+        // The path is temporary and not critical for in-memory visualization.
         var streamlineMesh =
             Mesh3DDataset.CreateEmpty("Streamlines", Path.Combine(Path.GetTempPath(), "streamlines_export.obj"));
 
         var vertices = new List<Vector3>();
         var faces = new List<int[]>();
 
+        // Process each streamline path
         foreach (var streamline in _results.Streamlines)
         {
             var baseVertexIndex = vertices.Count;
             vertices.AddRange(streamline);
 
+            // Create line segments (faces with 2 vertices) connecting the points of the streamline
             for (var i = 0; i < streamline.Count - 1; i++)
-                // Represent a line segment as a face with two indices. The renderer will handle it.
+            {
                 faces.Add(new[] { baseVertexIndex + i, baseVertexIndex + i + 1 });
+            }
         }
 
-        // --- Start of Correction ---
-        // The 'UpdateData' method does not exist. Instead, we manually clear and repopulate the mesh data lists.
-        streamlineMesh.Vertices.Clear();
-        streamlineMesh.Faces.Clear();
-        streamlineMesh.Normals.Clear(); // Also clear normals for consistency
-
+        // Populate the mesh object with the generated data
         streamlineMesh.Vertices.AddRange(vertices);
         streamlineMesh.Faces.AddRange(faces);
-
-        // It's good practice to add dummy normals if the renderer requires them for streamlines
-        for (var i = 0; i < streamlineMesh.Vertices.Count; i++) streamlineMesh.Normals.Add(Vector3.UnitZ);
 
         // Update the mesh's internal counts
         streamlineMesh.VertexCount = streamlineMesh.Vertices.Count;
         streamlineMesh.FaceCount = streamlineMesh.Faces.Count;
-        // --- End of Correction ---
 
+        // Display the generated mesh in the 3D viewer
         _visualization3D.ClearDynamicMeshes();
         _visualization3D.AddMesh(streamlineMesh);
         _visualization3D.SetRenderMode(GeothermalVisualization3D.RenderMode.Streamlines);
@@ -2072,12 +2132,12 @@ public class GeothermalSimulationTools : IDatasetTools, IDisposable
     {
         if (_visualization3D == null || _results?.DarcyVelocityField == null)
         {
-            Logger.LogWarning("No velocity field data available.");
+            Logger.LogWarning("No velocity field data available to display.");
             return;
         }
 
-        // Simply switch to velocity render mode which will show the flux magnitude
-        // with directional patterns on the domain surface
+        // The visualization class handles the rendering of the velocity field.
+        // This method's job is to simply switch the renderer to the correct mode.
         _visualization3D.ClearDynamicMeshes();
         _visualization3D.SetRenderMode(GeothermalVisualization3D.RenderMode.Velocity);
         Logger.Log(

@@ -21,15 +21,17 @@ public enum HeatExchangerType
     Coaxial
 }
 
-/// <summary>
-///     Defines the flow configuration for the heat exchanger.
-/// </summary>
 public enum FlowConfiguration
 {
     /// <summary>
-    ///     Fluid flows down through one pipe and up through another.
+    ///     Standard flow: Down through one pipe/center, up through another/annulus.
     /// </summary>
     CounterFlow,
+
+    /// <summary>
+    ///     Reversed Coaxial: Down through outer annulus, up through inner pipe.
+    /// </summary>
+    CounterFlowReversed,
 
     /// <summary>
     ///     Fluid flows in the same direction (for testing).
@@ -120,8 +122,10 @@ public class GeothermalSimulationOptions
 
     /// <summary>
     ///     Inlet temperature of heat carrier fluid (K).
+    ///     For heat extraction: use cold fluid (5-10°C).
+    ///     For heat rejection: use warm fluid (30-40°C).
     /// </summary>
-    public double FluidInletTemperature { get; set; } = 283.15; // 10°C
+    public double FluidInletTemperature { get; set; } = 278.15; // 5°C for heat extraction
 
     /// <summary>
     ///     Specific heat capacity of fluid (J/kg·K).
@@ -175,8 +179,10 @@ public class GeothermalSimulationOptions
 
     /// <summary>
     ///     Average geothermal gradient (K/m). Used if InitialTemperatureProfile is not set.
+    ///     Typical values: 0.025-0.035 K/m (25-35°C/km).
+    ///     For a 2500m borehole, 0.035 K/m gives ~87.5°C temperature increase.
     /// </summary>
-    public double AverageGeothermalGradient { get; set; } = 0.03; // 30 K/km
+    public double AverageGeothermalGradient { get; set; } = 0.035; // 35 K/km for better heat extraction
 
     /// <summary>
     ///     Dictionary mapping geological layer names to their thermal conductivities (W/m·K).
@@ -334,7 +340,7 @@ public class GeothermalSimulationOptions
     /// <summary>
     ///     Time step size (s).
     /// </summary>
-    public double TimeStep { get; set; } = 60; // 1 minute (reduced for better stability)
+    public double TimeStep { get; set; } = 30; // 30 seconds - smaller for better initial stability
 
     /// <summary>
     ///     Save results every N time steps.
@@ -343,13 +349,15 @@ public class GeothermalSimulationOptions
 
     /// <summary>
     ///     Convergence tolerance for iterative solver.
+    ///     Relaxed to 0.005 to prevent oscillations and speed up convergence.
     /// </summary>
-    public double ConvergenceTolerance { get; set; } = 1e-3; // Relaxed to 0.001 for practical speed
+    public double ConvergenceTolerance { get; set; } = 5e-3; // 0.005 - prevents oscillations
 
     /// <summary>
     ///     Maximum iterations per time step.
+    ///     Reduced to 30 to avoid getting stuck in oscillating solutions.
     /// </summary>
-    public int MaxIterationsPerStep { get; set; } = 50; // Reduced from 100 to accept solutions faster
+    public int MaxIterationsPerStep { get; set; } = 30; // Accept solution earlier if oscillating
 
     /// <summary>
     ///     Enable SIMD optimizations.

@@ -1,6 +1,7 @@
 ﻿// GeoscientistToolkit/UI/Visualization/GeothermalVisualization3D.cs
 
 using System.IO;
+using System.Linq;
 using System.Numerics;
 using System.Runtime.InteropServices;
 using System.Text;
@@ -1422,6 +1423,7 @@ public class GeothermalVisualization3D : IDisposable
                 {
                     _currentColorMap = map;
                     InitializeColorMaps();
+                    UpdateResourceSet(); // FIX: Re-create the resource set with the new colormap texture
                 }
 
             ImGui.EndCombo();

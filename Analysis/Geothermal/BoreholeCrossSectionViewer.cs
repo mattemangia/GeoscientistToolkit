@@ -113,6 +113,9 @@ public class BoreholeCrossSectionViewer
             PlotAreaBorderThickness = new OxyThickness(1),
             Background = OxyColors.White
         };
+        
+        // DEFINITIVE FIX: Define a focused view radius around the borehole
+        var viewRadius = _options.BoreholeDataset.WellDiameter * 2.0;
 
         // Equal aspect ratio
         plot.Axes.Add(new LinearAxis
@@ -120,7 +123,12 @@ public class BoreholeCrossSectionViewer
             Position = AxisPosition.Bottom,
             Title = "X (m)",
             MajorGridlineStyle = _showGrid ? LineStyle.Solid : LineStyle.None,
-            MajorGridlineColor = OxyColor.FromArgb(50, 0, 0, 0)
+            MajorGridlineColor = OxyColor.FromArgb(50, 0, 0, 0),
+            IsPanEnabled = false,
+            IsZoomEnabled = false,
+            // DEFINITIVE FIX: Set explicit bounds to zoom in on the borehole
+            Minimum = -viewRadius,
+            Maximum = viewRadius
         });
 
         plot.Axes.Add(new LinearAxis
@@ -128,7 +136,12 @@ public class BoreholeCrossSectionViewer
             Position = AxisPosition.Left,
             Title = "Y (m)",
             MajorGridlineStyle = _showGrid ? LineStyle.Solid : LineStyle.None,
-            MajorGridlineColor = OxyColor.FromArgb(50, 0, 0, 0)
+            MajorGridlineColor = OxyColor.FromArgb(50, 0, 0, 0),
+            IsPanEnabled = false,
+            IsZoomEnabled = false,
+            // DEFINITIVE FIX: Set explicit bounds to zoom in on the borehole
+            Minimum = -viewRadius,
+            Maximum = viewRadius
         });
 
         // Find the vertical index closest to selected depth
@@ -164,55 +177,103 @@ public class BoreholeCrossSectionViewer
         return plot;
     }
 
+    /// <summary>
+    /// This method displays both fluid and grout temperatures.
+    /// It checks if a point is inside a pipe and retrieves the appropriate temperature from
+    /// the 1D fluid profile instead of incorrectly sampling the 3D grout field.
+    /// </summary>
     private void AddTemperatureContours(PlotModel plot, int zIndex)
     {
+        // DEFINITIVE FIX: Use a radius focused on the borehole, not the entire domain
+        var radius = _options.BoreholeDataset.WellDiameter * 2.0;
         var series = new HeatMapSeries
         {
-            X0 = -_options.BoreholeDataset.WellDiameter / 2,
-            X1 = _options.BoreholeDataset.WellDiameter / 2,
-            Y0 = -_options.BoreholeDataset.WellDiameter / 2,
-            Y1 = _options.BoreholeDataset.WellDiameter / 2,
+            X0 = -radius,
+            X1 = radius,
+            Y0 = -radius,
+            Y1 = radius,
             Interpolate = true
         };
-
-        // Sample temperature field at this depth in Cartesian grid
-        var resolution = 100;
+    
+        // Get fluid temperatures at the current depth
+        var (tempDown, tempUp) = GetFluidTemperatureAtDepth(_selectedDepthMeters);
+    
+        // Define radii for coaxial heat exchanger
+        var outerPipeRadius = _options.PipeOuterDiameter / 2.0;
+        var innerPipeRadius = _options.PipeInnerDiameter / 2.0;
+    
+        // Sample temperature field at this depth in a Cartesian grid
+        var resolution = 200; // Increased resolution for clarity
         var data = new double[resolution, resolution];
-        var radius = _options.BoreholeDataset.WellDiameter / 2;
-
+    
         for (var i = 0; i < resolution; i++)
-        for (var j = 0; j < resolution; j++)
         {
-            var x = -radius + 2 * radius * i / (resolution - 1);
-            var y = -radius + 2 * radius * j / (resolution - 1);
-            var r = Math.Sqrt(x * x + y * y);
+            for (var j = 0; j < resolution; j++)
+            {
+                var x = -radius + 2 * radius * i / (resolution - 1);
+                var y = -radius + 2 * radius * j / (resolution - 1);
+                var r = Math.Sqrt(x * x + y * y);
+    
+                double tempCelsius;
+    
+                if (_options.HeatExchangerType == HeatExchangerType.Coaxial)
+                {
+                    // =========================================================================
+                    // DEFINITIVE FIX: Check the flow configuration to assign the correct
+                    // fluid temperature to the inner pipe and outer annulus for VISUALIZATION.
+                    // =========================================================================
+                    double tempInner, tempOuter;
+                    if (_options.FlowConfiguration == FlowConfiguration.CounterFlowReversed)
+                    {
+                        // Reversed flow: UP (hot) is INNER, DOWN (cold) is OUTER
+                        tempInner = tempUp;
+                        tempOuter = tempDown;
+                    }
+                    else
+                    {
+                        // Standard flow: DOWN (cold) is INNER, UP (hot) is OUTER
+                        tempInner = tempDown;
+                        tempOuter = tempUp;
+                    }
 
-            if (r > radius)
-            {
-                data[i, j] = double.NaN; // Outside borehole
-            }
-            else
-            {
-                // Interpolate temperature from cylindrical mesh
-                var temp = InterpolateTemperature(x, y, zIndex);
-                data[i, j] = temp - 273.15; // Convert to Celsius
+                    if (r <= innerPipeRadius)
+                    {
+                        // Inside the inner pipe
+                        tempCelsius = tempInner - 273.15;
+                    }
+                    else if (r <= outerPipeRadius)
+                    {
+                        // Inside the outer annulus
+                        tempCelsius = tempOuter - 273.15;
+                    }
+                    else
+                    {
+                        // In the grout or surrounding rock
+                        tempCelsius = InterpolateTemperature(x, y, zIndex) - 273.15;
+                    }
+                }
+                else // U-Tube
+                {
+                    // Simplified for now, can be expanded for U-tube geometry
+                    tempCelsius = InterpolateTemperature(x, y, zIndex) - 273.15;
+                }
+                
+                // DEFINITIVE FIX: Do not set to NaN. Let the interpolation handle temperatures
+                // outside the borehole wall to show the thermal gradient in the surrounding rock.
+                data[i, j] = tempCelsius;
             }
         }
-
+    
         series.Data = data;
-
+    
         // Create color axis
         var colorAxis = new LinearColorAxis
         {
             Position = AxisPosition.Right,
             Title = "Temperature (°C)",
-            Palette = OxyPalette.Interpolate(100,
-                OxyColors.Blue, OxyColors.Cyan, OxyColors.Green,
-                OxyColors.Yellow, OxyColors.Orange, OxyColors.Red),
-            HighColor = OxyColors.Red,
-            LowColor = OxyColors.Blue
+            Palette = OxyPalette.Interpolate(256, _turboColormap.ToArray()),
         };
-
+    
         plot.Axes.Add(colorAxis);
         plot.Series.Add(series);
     }
@@ -371,51 +432,55 @@ public class BoreholeCrossSectionViewer
         plot.Title = "Fluid Velocity Profile - Not yet implemented";
     }
 
-    private void AddHeatExchangerGeometry(PlotModel plot)
+     private void AddHeatExchangerGeometry(PlotModel plot)
     {
-        var pipeRadius = _options.PipeSpacing / 8; // Approximate pipe radius
-
-        if (_options.HeatExchangerType == HeatExchangerType.UTube)
+        if (_options.HeatExchangerType == HeatExchangerType.Coaxial)
         {
-            // U-tube: two pipes separated by spacing
-            var spacing = _options.PipeSpacing / 2;
-
-            // Downflow pipe (left)
-            var downPipe = CreateCircleSeries(-spacing, 0, pipeRadius, OxyColors.Blue, "Down pipe");
-            plot.Series.Add(downPipe);
-
-            // Upflow pipe (right)
-            var upPipe = CreateCircleSeries(spacing, 0, pipeRadius, OxyColors.Red, "Up pipe");
-            plot.Series.Add(upPipe);
-        }
-        else if (_options.HeatExchangerType == HeatExchangerType.Coaxial)
-        {
-            // Coaxial: inner pipe and outer annulus
-            var outerRadius = _options.PipeSpacing / 2;
-            var innerRadius = outerRadius * 0.5; // Inner pipe is half the diameter
-
-            // Outer pipe
-            var outerPipe = CreateCircleSeries(0, 0, outerRadius, OxyColors.Blue, "Outer annulus", filled: false);
+            var outerRadius = _options.PipeOuterDiameter / 2.0;
+            var innerRadius = _options.PipeInnerDiameter / 2.0;
+    
+            // Outer pipe wall
+            var outerPipe = CreateCircleSeries(0, 0, outerRadius, OxyColors.Black, "Outer Pipe Wall", filled: false, thickness: 1.5);
             plot.Series.Add(outerPipe);
-
-            // Inner pipe
-            var innerPipe = CreateCircleSeries(0, 0, innerRadius, OxyColors.Red, "Inner pipe");
+    
+            // Inner pipe wall
+            var innerPipe = CreateCircleSeries(0, 0, innerRadius, OxyColors.Red, "Inner Pipe Wall", filled: false, thickness: 1.5);
             plot.Series.Add(innerPipe);
 
+            // =========================================================================
+            // DEFINITIVE FIX: The text labels must be conditional on the flow configuration
+            // to correctly show the flow direction in the visualization.
+            // =========================================================================
+            string innerFlowText, outerFlowText;
+            if (_options.FlowConfiguration == FlowConfiguration.CounterFlowReversed)
+            {
+                // Hot fluid UP the center, cold fluid DOWN the annulus
+                innerFlowText = "Up";
+                outerFlowText = "↓ Down";
+            }
+            else
+            {
+                // Standard: Cold fluid DOWN the center, hot fluid UP the annulus
+                innerFlowText = "Down";
+                outerFlowText = "↑ Up";
+            }
+    
             // Flow direction annotations
             plot.Annotations.Add(new TextAnnotation
             {
-                Text = "↓ Down",
-                TextPosition = new DataPoint(0, innerRadius / 2),
-                TextColor = OxyColors.Red,
+                Text = innerFlowText,
+                TextPosition = new DataPoint(0, 0),
+                TextColor = OxyColors.Black,
                 FontSize = 10,
-                FontWeight = FontWeights.Bold
+                FontWeight = FontWeights.Bold,
+                TextHorizontalAlignment = OxyPlot.HorizontalAlignment.Center,
+                TextVerticalAlignment = OxyPlot.VerticalAlignment.Middle
             });
-
+    
             plot.Annotations.Add(new TextAnnotation
             {
-                Text = "↑ Up",
-                TextPosition = new DataPoint(0, -outerRadius * 0.7),
+                Text = outerFlowText,
+                TextPosition = new DataPoint(0, (innerRadius + outerRadius) / 2.0),
                 TextColor = OxyColors.Blue,
                 FontSize = 10,
                 FontWeight = FontWeights.Bold
@@ -427,19 +492,19 @@ public class BoreholeCrossSectionViewer
     {
         var radius = _options.BoreholeDataset.WellDiameter / 2;
         var boundary = CreateCircleSeries(0, 0, radius, OxyColors.Black, "Borehole wall", filled: false,
-            thickness: 2);
+            thickness: 2, lineStyle: LineStyle.Dash);
         plot.Series.Add(boundary);
     }
 
     private LineSeries CreateCircleSeries(double centerX, double centerY, double radius, OxyColor color,
-        string title = null, bool filled = true, double thickness = 1.5)
+        string title = null, bool filled = true, double thickness = 1.5, LineStyle lineStyle = LineStyle.Solid)
     {
         var series = new LineSeries
         {
             Title = title,
             Color = color,
             StrokeThickness = thickness,
-            LineStyle = filled ? LineStyle.Solid : LineStyle.Dash
+            LineStyle = lineStyle
         };
 
         var points = 100;
@@ -523,6 +588,40 @@ public class BoreholeCrossSectionViewer
 
         return temp;
     }
+    
+    /// <summary>
+    /// Helper function to get the interpolated fluid temperature at a specific depth.
+    /// </summary>
+    private (double tempDown, double tempUp) GetFluidTemperatureAtDepth(float depthMeters)
+    {
+        if (_results.FluidTemperatureProfile == null || !_results.FluidTemperatureProfile.Any())
+        {
+            return (273.15, 273.15); // Return freezing if no data
+        }
+
+        // Find the two closest points in the profile to interpolate between
+        for (int i = 0; i < _results.FluidTemperatureProfile.Count - 1; i++)
+        {
+            var p1 = _results.FluidTemperatureProfile[i];
+            var p2 = _results.FluidTemperatureProfile[i+1];
+
+            if (depthMeters >= p1.depth && depthMeters <= p2.depth)
+            {
+                // Linear interpolation
+                var t = (p2.depth - p1.depth) > 1e-6 ? (depthMeters - p1.depth) / (p2.depth - p1.depth) : 0;
+                var tempDown = p1.temperatureDown + t * (p2.temperatureDown - p1.temperatureDown);
+                var tempUp = p1.temperatureUp + t * (p2.temperatureUp - p1.temperatureUp);
+                return (tempDown, tempUp);
+            }
+        }
+
+        // DEFINITIVE FIX: If outside the range, return the temperature of the closest endpoint.
+        // The compiler error occurred here because .Last() returns a 3-element tuple.
+        // The fix is to deconstruct it and return a new 2-element tuple.
+        var lastPoint = _results.FluidTemperatureProfile.Last();
+        return (lastPoint.temperatureDown, lastPoint.temperatureUp);
+    }
+
 
     private double InterpolateVelocityMagnitude(double x, double y, int zIndex)
     {
