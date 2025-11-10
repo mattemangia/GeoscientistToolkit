@@ -637,10 +637,65 @@ public class BoreholeCrossSectionViewer
         Logger.Log($"  Zero values: {zeroCount}/{count} ({100.0 * zeroCount / count:F1}%)");
 
         // Sample some specific locations
-        Logger.Log($"Sample temperatures:");
-        Logger.Log($"  Center (0,0,mid): {_results.FinalTemperatureField[0, 0, nz / 2]:F2}K");
-        Logger.Log($"  Edge (max,0,mid): {_results.FinalTemperatureField[nr - 1, 0, nz / 2]:F2}K");
-        Logger.Log($"  Mid radius (mid,0,mid): {_results.FinalTemperatureField[nr / 2, 0, nz / 2]:F2}K");
+        Logger.Log($"Sample temperatures at mid-depth (z={nz / 2}):");
+        Logger.Log($"  Borehole center (r=0): {_results.FinalTemperatureField[0, 0, nz / 2]:F2}K ({_results.FinalTemperatureField[0, 0, nz / 2] - 273.15:F2}°C)");
+        if (nr > 1) Logger.Log($"  Near borehole (r=1): {_results.FinalTemperatureField[1, 0, nz / 2]:F2}K ({_results.FinalTemperatureField[1, 0, nz / 2] - 273.15:F2}°C)");
+        if (nr > 5) Logger.Log($"  Mid radius (r=5): {_results.FinalTemperatureField[5, 0, nz / 2]:F2}K ({_results.FinalTemperatureField[5, 0, nz / 2] - 273.15:F2}°C)");
+        Logger.Log($"  Outer edge (r={nr-1}): {_results.FinalTemperatureField[nr - 1, 0, nz / 2]:F2}K ({_results.FinalTemperatureField[nr - 1, 0, nz / 2] - 273.15:F2}°C)");
+        
+        // Check radial temperature variation at mid-depth
+        Logger.Log($"\nRadial temperature profile at mid-depth:");
+        for (var i = 0; i < Math.Min(10, nr); i++)
+        {
+            var temp = _results.FinalTemperatureField[i, 0, nz / 2];
+            Logger.Log($"  r[{i}] = {_mesh.R[i]:F3}m: T = {temp:F2}K ({temp - 273.15:F2}°C)");
+        }
+        
+        // Check velocity field if available
+        if (_results.DarcyVelocityField != null)
+        {
+            Logger.Log($"\nVelocity field diagnostics:");
+            var vMin = float.MaxValue;
+            var vMax = float.MinValue;
+            var vSum = 0.0;
+            var vCount = 0;
+            
+            for (var i = 0; i < nr; i++)
+            for (var j = 0; j < nth; j++)
+            for (var k = 0; k < nz; k++)
+            {
+                var vr = _results.DarcyVelocityField[i, j, k, 0];
+                var vth = _results.DarcyVelocityField[i, j, k, 1];
+                var vz = _results.DarcyVelocityField[i, j, k, 2];
+                var vmag = Math.Sqrt(vr * vr + vth * vth + vz * vz);
+                
+                if (vmag < vMin) vMin = (float)vmag;
+                if (vmag > vMax) vMax = (float)vmag;
+                vSum += vmag;
+                vCount++;
+            }
+            
+            Logger.Log($"  Velocity magnitude: min={vMin:E3} m/s, max={vMax:E3} m/s, avg={vSum/vCount:E3} m/s");
+            
+            // Sample velocities at mid-depth
+            Logger.Log($"  Sample velocities at mid-depth:");
+            for (var i = 0; i < Math.Min(5, nr); i++)
+            {
+                var vr = _results.DarcyVelocityField[i, 0, nz / 2, 0];
+                var vz = _results.DarcyVelocityField[i, 0, nz / 2, 2];
+                Logger.Log($"    r[{i}]: vr={vr:E3} m/s, vz={vz:E3} m/s");
+            }
+        }
+        
+        // Check heat exchanger temperatures
+        if (_results.FluidTemperatureProfile != null && _results.FluidTemperatureProfile.Any())
+        {
+            Logger.Log($"\nFluid temperature profile:");
+            foreach (var (depth, tDown, tUp) in _results.FluidTemperatureProfile.Take(5))
+            {
+                Logger.Log($"  Depth {depth:F1}m: down={tDown:F2}K ({tDown - 273.15:F2}°C), up={tUp:F2}K ({tUp - 273.15:F2}°C)");
+            }
+        }
     }
 
     private void ExportPlot()

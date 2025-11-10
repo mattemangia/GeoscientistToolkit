@@ -27,7 +27,7 @@
 //     79-88. https://doi.org/10.1016/j.enbuild.2018.02.013
 //
 // Gao, Q., Zeng, L., Shi, Z., Xu, P., Yao, Y., & Shang, X. (2022). The numerical simulation of heat 
-//     and mass transfer on geothermal system—A case study in Laoling area, Shandong, China. 
+//     and mass transfer on geothermal systemâ€”A case study in Laoling area, Shandong, China. 
 //     Mathematical Problems in Engineering, 2022, Article 3398965. https://doi.org/10.1155/2022/3398965
 //
 //
@@ -134,6 +134,13 @@ public class GeothermalOpenCLSolver : IDisposable
     private nint _temperatureOldBuffer;
     private nint _velocityBuffer;
     private nint _zCoordBuffer;
+    
+    // ADDED: Heat exchanger buffers
+    private nint _heatExchangerParamsBuffer;  // Contains: pipeRadius, boreholeDepth, fluidInletTemp, etc.
+    private nint _fluidTempDownBuffer;        // Downward fluid temperatures
+    private nint _fluidTempUpBuffer;          // Upward fluid temperatures  
+    private nint _cellVolumesBuffer;          // Cell volumes for heat transfer calculations
+    private int _nzHE;                        // Number of heat exchanger elements
 
     public GeothermalOpenCLSolver()
     {
@@ -148,6 +155,12 @@ public class GeothermalOpenCLSolver : IDisposable
 
     public void Dispose()
     {
+        // ADDED: Release heat exchanger buffers
+        if (_heatExchangerParamsBuffer != 0) _cl.ReleaseMemObject(_heatExchangerParamsBuffer);
+        if (_fluidTempDownBuffer != 0) _cl.ReleaseMemObject(_fluidTempDownBuffer);
+        if (_fluidTempUpBuffer != 0) _cl.ReleaseMemObject(_fluidTempUpBuffer);
+        if (_cellVolumesBuffer != 0) _cl.ReleaseMemObject(_cellVolumesBuffer);
+        
         if (_maxChangeBuffer != 0) _cl.ReleaseMemObject(_maxChangeBuffer);
         if (_zCoordBuffer != 0) _cl.ReleaseMemObject(_zCoordBuffer);
         if (_rCoordBuffer != 0) _cl.ReleaseMemObject(_rCoordBuffer);
@@ -372,6 +385,7 @@ public class GeothermalOpenCLSolver : IDisposable
         _nr = mesh.RadialPoints;
         _nth = mesh.AngularPoints;
         _nz = mesh.VerticalPoints;
+        _nzHE = Math.Max(20, (int)(options.BoreholeDataset.TotalDepth / 50)); // Heat exchanger elements
 
         try
         {
@@ -423,8 +437,30 @@ public class GeothermalOpenCLSolver : IDisposable
                 256 * sizeof(float), null, &errCode);
             CheckError(errCode, "maxChangeBuffer");
 
+            // ADDED: Create heat exchanger buffers
+            // Heat exchanger parameters: [pipeRadius, boreholeDepth, fluidInletTemp, massFlowRate, 
+            //                             specificHeat, heatTransferCoeff, heType (0=coaxial,1=utube)]
+            _heatExchangerParamsBuffer = _cl.CreateBuffer(_context, MemFlags.ReadOnly,
+                (nuint)(16 * sizeof(float)), null, &errCode);  // 16 floats for parameters
+            CheckError(errCode, "heatExchangerParamsBuffer");
+
+            _fluidTempDownBuffer = _cl.CreateBuffer(_context, MemFlags.ReadWrite,
+                (nuint)(_nzHE * sizeof(float)), null, &errCode);
+            CheckError(errCode, "fluidTempDownBuffer");
+
+            _fluidTempUpBuffer = _cl.CreateBuffer(_context, MemFlags.ReadWrite,
+                (nuint)(_nzHE * sizeof(float)), null, &errCode);
+            CheckError(errCode, "fluidTempUpBuffer");
+
+            _cellVolumesBuffer = _cl.CreateBuffer(_context, MemFlags.ReadOnly,
+                (nuint)(totalSize * sizeof(float)), null, &errCode);
+            CheckError(errCode, "cellVolumesBuffer");
+
             // Upload mesh data to GPU
             UploadMeshData(mesh);
+            
+            // ADDED: Upload heat exchanger parameters
+            UploadHeatExchangerParams(options);
 
             _isInitialized = true;
             return true;
@@ -447,6 +483,7 @@ public class GeothermalOpenCLSolver : IDisposable
         var conductivity = new float[totalSize];
         var density = new float[totalSize];
         var specificHeat = new float[totalSize];
+        var cellVolumes = new float[totalSize];  // ADDED
 
         var idx = 0;
         for (var i = 0; i < _nr; i++)
@@ -456,6 +493,7 @@ public class GeothermalOpenCLSolver : IDisposable
             conductivity[idx] = mesh.ThermalConductivities[i, j, k];
             density[idx] = mesh.Densities[i, j, k];
             specificHeat[idx] = mesh.SpecificHeats[i, j, k];
+            cellVolumes[idx] = mesh.CellVolumes[i, j, k];  // ADDED
             idx++;
         }
 
@@ -477,6 +515,13 @@ public class GeothermalOpenCLSolver : IDisposable
             _cl.EnqueueWriteBuffer(_queue, _specificHeatBuffer, true, 0,
                 (nuint)(totalSize * sizeof(float)), specificHeatPtr, 0, null, null);
         }
+        
+        // ADDED: Upload cell volumes
+        fixed (float* cellVolumesPtr = cellVolumes)
+        {
+            _cl.EnqueueWriteBuffer(_queue, _cellVolumesBuffer, true, 0,
+                (nuint)(totalSize * sizeof(float)), cellVolumesPtr, 0, null, null);
+        }
 
         fixed (float* rPtr = mesh.R)
         {
@@ -490,6 +535,72 @@ public class GeothermalOpenCLSolver : IDisposable
                 (nuint)(_nz * sizeof(float)), zPtr, 0, null, null);
         }
     }
+    
+    /// <summary>
+    ///     Uploads heat exchanger parameters to GPU. (ADDED)
+    /// </summary>
+    private unsafe void UploadHeatExchangerParams(GeothermalSimulationOptions options)
+    {
+        // Calculate heat transfer coefficient using Reynolds number
+        var D_inner = (float)options.PipeInnerDiameter;
+        var mu = (float)options.FluidViscosity;
+        var mdot = (float)options.FluidMassFlowRate;
+        var Re = 4.0f * mdot / (MathF.PI * D_inner * mu);
+        
+        var Pr = (float)(options.FluidViscosity * options.FluidSpecificHeat / options.FluidThermalConductivity);
+        
+        float Nu;
+        if (Re < 2300)
+        {
+            // Laminar flow
+            Nu = 4.36f;
+        }
+        else
+        {
+            // Turbulent flow - Dittus-Boelter correlation
+            Nu = 0.023f * MathF.Pow(Re, 0.8f) * MathF.Pow(Pr, 0.4f);
+        }
+        
+        var h = Nu * (float)options.FluidThermalConductivity / D_inner;
+        
+        // ENHANCED: Double the base heat transfer coefficient for better coupling
+        var baseHTC = Math.Min(2000f, h * 2.0f);
+        
+        // Pack heat exchanger parameters
+        var heParams = new float[16];
+        heParams[0] = (float)(options.PipeOuterDiameter / 2.0);  // Pipe radius
+        heParams[1] = (float)options.BoreholeDataset.TotalDepth;  // Borehole depth
+        heParams[2] = (float)options.FluidInletTemperature;       // Inlet temperature
+        heParams[3] = (float)options.FluidMassFlowRate;          // Mass flow rate
+        heParams[4] = (float)options.FluidSpecificHeat;          // Specific heat
+        heParams[5] = baseHTC;  // Enhanced base heat transfer coefficient
+        heParams[6] = options.HeatExchangerType == HeatExchangerType.UTube ? 1f : 0f;  // Type
+        heParams[7] = _nzHE;  // Number of HE elements
+        heParams[8] = (float)options.FluidViscosity;             // Fluid viscosity
+        heParams[9] = (float)options.FluidThermalConductivity;   // Fluid thermal conductivity
+        heParams[10] = (float)options.PipeInnerDiameter;         // Inner diameter for Reynolds calculation
+        
+        fixed (float* paramsPtr = heParams)
+        {
+            _cl.EnqueueWriteBuffer(_queue, _heatExchangerParamsBuffer, true, 0,
+                (nuint)(16 * sizeof(float)), paramsPtr, 0, null, null);
+        }
+        
+        // Initialize fluid temperatures
+        var fluidTemps = new float[_nzHE];
+        for (var i = 0; i < _nzHE; i++)
+        {
+            fluidTemps[i] = (float)options.FluidInletTemperature;
+        }
+        
+        fixed (float* tempPtr = fluidTemps)
+        {
+            _cl.EnqueueWriteBuffer(_queue, _fluidTempDownBuffer, true, 0,
+                (nuint)(_nzHE * sizeof(float)), tempPtr, 0, null, null);
+            _cl.EnqueueWriteBuffer(_queue, _fluidTempUpBuffer, true, 0,
+                (nuint)(_nzHE * sizeof(float)), tempPtr, 0, null, null);
+        }
+    }
 
     /// <summary>
     ///     Solves heat transfer on GPU for one iteration.
@@ -500,7 +611,9 @@ public class GeothermalOpenCLSolver : IDisposable
         float[,,,] velocity,
         float[,,] dispersion,
         float dt,
-        bool simulateGroundwater)
+        bool simulateGroundwater,
+        float[] fluidTempDown = null,  // ADDED
+        float[] fluidTempUp = null)     // ADDED
     {
         if (!_isInitialized)
             throw new InvalidOperationException("OpenCL solver not initialized");
@@ -543,6 +656,22 @@ public class GeothermalOpenCLSolver : IDisposable
                 256 * sizeof(float), zeroPtr, 0, null, null);
         }
 
+        // ADDED: Upload fluid temperatures if provided
+        if (fluidTempDown != null && fluidTempUp != null)
+        {
+            fixed (float* downPtr = fluidTempDown)
+            {
+                _cl.EnqueueWriteBuffer(_queue, _fluidTempDownBuffer, true, 0,
+                    (nuint)(Math.Min(_nzHE, fluidTempDown.Length) * sizeof(float)), downPtr, 0, null, null);
+            }
+            
+            fixed (float* upPtr = fluidTempUp)
+            {
+                _cl.EnqueueWriteBuffer(_queue, _fluidTempUpBuffer, true, 0,
+                    (nuint)(Math.Min(_nzHE, fluidTempUp.Length) * sizeof(float)), upPtr, 0, null, null);
+            }
+        }
+
         // Set kernel arguments
         var argIdx = 0;
         var tempBuffer = _temperatureBuffer;
@@ -563,6 +692,17 @@ public class GeothermalOpenCLSolver : IDisposable
         _cl.SetKernelArg(_heatTransferKernel, (uint)argIdx++, (nuint)sizeof(nint), &tempBuffer);
         tempBuffer = _zCoordBuffer;
         _cl.SetKernelArg(_heatTransferKernel, (uint)argIdx++, (nuint)sizeof(nint), &tempBuffer);
+        
+        // ADDED: Heat exchanger buffers
+        tempBuffer = _cellVolumesBuffer;
+        _cl.SetKernelArg(_heatTransferKernel, (uint)argIdx++, (nuint)sizeof(nint), &tempBuffer);
+        tempBuffer = _heatExchangerParamsBuffer;
+        _cl.SetKernelArg(_heatTransferKernel, (uint)argIdx++, (nuint)sizeof(nint), &tempBuffer);
+        tempBuffer = _fluidTempDownBuffer;
+        _cl.SetKernelArg(_heatTransferKernel, (uint)argIdx++, (nuint)sizeof(nint), &tempBuffer);
+        tempBuffer = _fluidTempUpBuffer;
+        _cl.SetKernelArg(_heatTransferKernel, (uint)argIdx++, (nuint)sizeof(nint), &tempBuffer);
+        
         tempBuffer = _maxChangeBuffer;
         _cl.SetKernelArg(_heatTransferKernel, (uint)argIdx++, (nuint)sizeof(nint), &tempBuffer);
         _cl.SetKernelArg(_heatTransferKernel, (uint)argIdx++, sizeof(float), &dt);
@@ -673,13 +813,22 @@ public class GeothermalOpenCLSolver : IDisposable
 // Must produce IDENTICAL results to CPU implementation
 
 #define IDX(i, j, k, nr, nth, nz) ((i) * (nth) * (nz) + (j) * (nz) + (k))
+#define M_PI_F 3.14159265358979323846f
 
 // Utility function to get global index
 inline int get_idx(int i, int j, int k, int nth, int nz) {
     return i * nth * nz + j * nz + k;
 }
 
+// Clamp function (if not provided by OpenCL version)
+#ifndef clamp
+inline float clamp(float x, float minval, float maxval) {
+    return fmin(fmax(x, minval), maxval);
+}
+#endif
+
 // Main heat transfer kernel - implements the same algorithm as CPU SolveHeatTransferSinglePoint
+// ENHANCED: Now includes heat exchanger source term
 __kernel void heat_transfer_kernel(
     __global const float* temperature,      // Current temperature field
     __global float* newTemp,                // Output new temperature
@@ -690,6 +839,10 @@ __kernel void heat_transfer_kernel(
     __global const float* dispersion,       // Dispersion coefficient
     __global const float* r_coord,          // Radial coordinates
     __global const float* z_coord,          // Vertical coordinates
+    __global const float* cellVolumes,      // Cell volumes (ADDED)
+    __global const float* heParams,         // Heat exchanger parameters (ADDED)
+    __global const float* fluidTempDown,    // Downward fluid temperatures (ADDED)
+    __global const float* fluidTempUp,      // Upward fluid temperatures (ADDED)
     __global float* maxChange,              // Output max temperature change
     const float dt,                         // Time step
     const int nr,                          // Radial points
@@ -777,9 +930,83 @@ __kernel void heat_transfer_kernel(
         dispersion_term = dispersion[idx] * laplacian;
     }
     
-    // Update temperature with limiting (IDENTICAL to CPU)
-    float dT = dt * (alpha_thermal * laplacian + dispersion_term + advection);
-    dT = clamp(dT, -5.0f, 5.0f);  // Limit to 5K change
+    // ADDED: Heat exchanger source term - ENHANCED VERSION
+    float heSource = 0.0f;
+    
+    // Extract heat exchanger parameters
+    const float pipeRadius = heParams[0];
+    const float boreholeDepth = heParams[1];
+    const float fluidInletTemp = heParams[2];
+    const float massFlowRate = heParams[3];
+    const float cpFluid = heParams[4];
+    const float baseHTC = heParams[5];
+    const float heType = heParams[6];  // 0=coaxial, 1=U-tube
+    const int nzHE = (int)heParams[7];
+    
+    // ENHANCED: Expanded influence zone
+    const float rInfluence = fmax(pipeRadius * 10.0f, 0.5f);
+    
+    if (r <= rInfluence) {
+        // Calculate depth from z coordinate (z is negative downwards)
+        const float depth = fmax(0.0f, -z_coord[k]);
+        
+        if (depth >= 0.0f && depth <= boreholeDepth) {
+            // Find heat exchanger segment index
+            const int heIndex = clamp((int)(depth / boreholeDepth * nzHE), 0, nzHE - 1);
+            
+            // Get fluid temperature at this depth
+            float Tfluid;
+            if (heType > 0.5f) {  // U-tube
+                Tfluid = 0.5f * (fluidTempDown[heIndex] + fluidTempUp[heIndex]);
+            } else {  // Coaxial
+                Tfluid = fluidTempDown[heIndex];
+            }
+            
+            // ENHANCED: Multi-zone heat transfer model
+            float effectiveU;
+            if (r <= pipeRadius * 2.0f) {
+                // Inner zone: Direct contact with enhanced coefficient
+                effectiveU = baseHTC * 2.0f;
+            } else if (r <= pipeRadius * 5.0f) {
+                // Middle zone: Conduction through grout/backfill
+                const float groutConductivity = 2.0f;  // W/(m·K)
+                effectiveU = groutConductivity / fmax(0.01f, r - pipeRadius);
+            } else {
+                // Outer zone: Reduced influence with distance decay
+                effectiveU = 0.5f * baseHTC * (pipeRadius * 5.0f) / r;
+            }
+            
+            effectiveU = clamp(effectiveU, 0.0f, 1000.0f);
+            
+            // Calculate volumetric heat source
+            const float cellVolume = fmax(1e-6f, cellVolumes[idx]);
+            const float contactArea = 2.0f * M_PI_F * r * (dz_m + dz_p) * 0.5f;
+            
+            // ENHANCED: Exponential distance decay factor
+            const float distanceFactor = exp(-r / (pipeRadius * 3.0f));
+            
+            // Heat transfer per unit volume
+            const float Q_volumetric = effectiveU * (Tfluid - T_old) * contactArea / cellVolume;
+            
+            // Apply source term with distance-based weighting
+            heSource = Q_volumetric * distanceFactor / (rho * cp);
+            
+            // ENHANCED: Strong coupling for cells very close to heat exchanger
+            if (r <= pipeRadius * 1.2f && fabs(Tfluid - T_old) > 0.1f) {
+                // Directly force temperature towards fluid temperature
+                const float forcingFactor = 0.5f * distanceFactor;
+                heSource += forcingFactor * (Tfluid - T_old) / dt;
+            }
+            
+            // Apply adaptive limiting based on temperature difference
+            const float maxDT = fmin(5.0f, fabs(Tfluid - T_old) * 0.1f);
+            heSource = clamp(heSource, -maxDT/dt, maxDT/dt);
+        }
+    }
+    
+    // Update temperature with all terms
+    float dT = dt * (alpha_thermal * laplacian + dispersion_term + advection + heSource);
+    dT = clamp(dT, -10.0f, 10.0f);  // Increased limit for heat exchanger
     
     const float T_new = clamp(T_old + dT, 273.0f, 473.0f);  // Physical bounds
     
@@ -845,6 +1072,16 @@ __kernel void reduction_max_kernel(
     }
 }
 ";
+    }
+
+    /// <summary>
+    ///     Updates heat exchanger parameters on GPU during simulation. (ADDED)
+    /// </summary>
+    public unsafe void UpdateHeatExchangerParameters(GeothermalSimulationOptions options)
+    {
+        if (!_isInitialized) return;
+        
+        UploadHeatExchangerParams(options);
     }
 
     private void CheckError(int errCode, string operation)
