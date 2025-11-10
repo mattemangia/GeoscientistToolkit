@@ -1513,7 +1513,8 @@ public class GeothermalSimulationTools : IDatasetTools, IDisposable
         bool dummyOpen = true;
         
         // Only render if popup is actually open
-        if (ImGui.BeginPopupModal("Mesh Preview Window", ref dummyOpen, ImGuiWindowFlags.None))
+        // CRITICAL FIX: Add NoNav to prevent navigation to windows behind this modal
+        if (ImGui.BeginPopupModal("Mesh Preview Window", ref dummyOpen, ImGuiWindowFlags.NoNav))
         {
             // Debug: Log first time only
             if (!_meshPreviewWindowLoggedOnce)
@@ -1699,7 +1700,8 @@ public class GeothermalSimulationTools : IDatasetTools, IDisposable
         ImGui.SameLine();
 
         // 3D View Panel on the right
-        ImGui.BeginChild("3DView", new Vector2(viewWidth, availableSize.Y), ImGuiChildFlags.Border);
+        // CRITICAL: NoMove prevents window dragging, NoScrollWithMouse allows our custom mouse handling
+        ImGui.BeginChild("3DView", new Vector2(viewWidth, availableSize.Y), ImGuiChildFlags.Border, ImGuiWindowFlags.NoMove | ImGuiWindowFlags.NoScrollWithMouse);
         {
             var viewportSize = ImGui.GetContentRegionAvail();
             _visualization3D.Resize((uint)viewportSize.X, (uint)viewportSize.Y);
@@ -1710,14 +1712,22 @@ public class GeothermalSimulationTools : IDatasetTools, IDisposable
 
             if (ImGui.IsItemHovered())
             {
+                var io = ImGui.GetIO();
                 var mousePos = ImGui.GetMousePos() - ImGui.GetItemRectMin();
                 var leftButton = ImGui.IsMouseDown(ImGuiMouseButton.Left);
                 var rightButton = ImGui.IsMouseDown(ImGuiMouseButton.Right);
 
+                // CRITICAL FIX: Force window focus and capture all mouse input
+                if (leftButton || rightButton || Math.Abs(io.MouseWheel) > 0.01f)
+                {
+                    ImGui.SetWindowFocus();
+                    io.WantCaptureMouse = true;
+                }
+
                 _visualization3D.HandleMouseInput(mousePos, leftButton, rightButton);
 
-                var wheel = ImGui.GetIO().MouseWheel;
-                if (Math.Abs(wheel) > 0.01f) _visualization3D.HandleMouseWheel(wheel);
+                if (Math.Abs(io.MouseWheel) > 0.01f) 
+                    _visualization3D.HandleMouseWheel(io.MouseWheel);
             }
         }
         ImGui.EndChild();

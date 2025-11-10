@@ -18,6 +18,7 @@ public class GeothermalMeshPreview : IDisposable
 {
     private Mesh3DDataset _boreholeMesh;
     private Mesh3DDataset _domainMesh;
+    private List<Mesh3DDataset> _lithologyMeshes = new List<Mesh3DDataset>(); // CRITICAL FIX: Store lithology meshes
     private bool _isInitialized;
     private int _selectedLithologyLayer = -1;
     private bool _showBorehole = true;
@@ -76,8 +77,8 @@ public class GeothermalMeshPreview : IDisposable
             // Generate domain visualization mesh
             _domainMesh = CreateDomainMesh(borehole, options);
 
-            // Generate lithology layers mesh
-            var lithologyMeshes = CreateLithologyLayersMeshes(borehole, options);
+            // Generate lithology layers mesh and store them
+            _lithologyMeshes = CreateLithologyLayersMeshes(borehole, options);
 
             // Add meshes to visualization
             if (_showBorehole && _boreholeMesh != null)
@@ -86,8 +87,8 @@ public class GeothermalMeshPreview : IDisposable
             if (_showDomain && _domainMesh != null)
                 _visualization3D.AddMesh(_domainMesh);
 
-            if (_showLithologyLayers)
-                foreach (var mesh in lithologyMeshes)
+            if (_showLithologyLayers && _lithologyMeshes != null)
+                foreach (var mesh in _lithologyMeshes)
                     _visualization3D.AddMesh(mesh);
 
             _isInitialized = true;
@@ -116,8 +117,9 @@ public class GeothermalMeshPreview : IDisposable
         var overlayWidth = 300f;
 
         // Left side: 3D visualization with scrollbars
+        // CRITICAL: NoMove prevents window dragging, NoScrollWithMouse allows our custom mouse handling
         ImGui.BeginChild("3DPreviewView", new Vector2(availRegion.X - overlayWidth, availRegion.Y),
-            ImGuiChildFlags.Border, ImGuiWindowFlags.HorizontalScrollbar | ImGuiWindowFlags.NoMove);
+            ImGuiChildFlags.Border, ImGuiWindowFlags.HorizontalScrollbar | ImGuiWindowFlags.NoMove | ImGuiWindowFlags.NoScrollWithMouse);
 
         if (_visualization3D != null)
         {
@@ -149,8 +151,22 @@ public class GeothermalMeshPreview : IDisposable
             if (renderTargetBinding != IntPtr.Zero && renderWidth > 0 && renderHeight > 0)
             {
                 var imagePos = ImGui.GetCursorScreenPos();
-                // Use the render size (which may be larger than viewRegion) to enable scrolling
-                ImGui.Image(renderTargetBinding, new Vector2(renderWidth, renderHeight));
+                
+                // DEFINITIVE FIX: Use InvisibleButton to capture ALL mouse input
+                // ImGui.Image() alone is NOT interactive and lets clicks fall through to parent window
+                var imageBounds = new Vector2(renderWidth, renderHeight);
+                
+                // Draw the image first (as background)
+                var dl = ImGui.GetWindowDrawList();
+                dl.AddImage(renderTargetBinding, imagePos, imagePos + imageBounds);
+                
+                // Place an invisible button over the entire image area to capture mouse input
+                ImGui.SetCursorScreenPos(imagePos);
+                ImGui.InvisibleButton("3DViewInteraction", imageBounds, ImGuiButtonFlags.MouseButtonLeft | ImGuiButtonFlags.MouseButtonRight | ImGuiButtonFlags.MouseButtonMiddle);
+                
+                // CRITICAL: Store interaction state IMMEDIATELY after InvisibleButton
+                bool imageHovered = ImGui.IsItemHovered();
+                bool imageActive = ImGui.IsItemActive();
                 
                 // Render overlay info on top of the 3D view
                 var drawList = ImGui.GetWindowDrawList();
@@ -176,15 +192,27 @@ public class GeothermalMeshPreview : IDisposable
                 ImGui.PopStyleColor();
 
                 // Handle mouse input on the image
-                if (ImGui.IsItemHovered())
+                // CRITICAL: Use stored image states (captured immediately after Image() call)
+                if (imageHovered || imageActive)
                 {
                     var io = ImGui.GetIO();
                     var mousePos = new Vector2(io.MousePos.X - imagePos.X, io.MousePos.Y - imagePos.Y);
                     
-                    // Capture mouse to prevent window dragging
-                    if (ImGui.IsMouseDown(ImGuiMouseButton.Left) || ImGui.IsMouseDown(ImGuiMouseButton.Right))
+                    // CRITICAL FIX: Capture ALL mouse input to prevent interference
+                    // This prevents: 1) Window dragging, 2) Parent scrolling, 3) Input bleeding
+                    bool hasMouseInput = ImGui.IsMouseDown(ImGuiMouseButton.Left) || 
+                                        ImGui.IsMouseDown(ImGuiMouseButton.Right) || 
+                                        ImGui.IsMouseDown(ImGuiMouseButton.Middle) || 
+                                        Math.Abs(io.MouseWheel) > 0.001f;
+                    
+                    if (hasMouseInput || imageActive)
                     {
+                        // Set focus on this child window
                         ImGui.SetWindowFocus();
+                        
+                        // Tell ImGui we OWN all mouse input - prevents ANY parent interference
+                        io.WantCaptureMouse = true;
+                        io.WantCaptureMouseUnlessPopupClose = true;
                     }
 
                     // Left mouse button - Rotate
@@ -217,6 +245,23 @@ public class GeothermalMeshPreview : IDisposable
                         }
                     }
                     else if (ImGui.IsMouseReleased(ImGuiMouseButton.Right))
+                    {
+                        _visualization3D.StopPanning();
+                    }
+
+                    // Middle mouse button - Pan (alternative to right button)
+                    if (ImGui.IsMouseDown(ImGuiMouseButton.Middle))
+                    {
+                        if (ImGui.IsMouseClicked(ImGuiMouseButton.Middle))
+                        {
+                            _visualization3D.StartPanning(mousePos);
+                        }
+                        else
+                        {
+                            _visualization3D.UpdatePanning(mousePos);
+                        }
+                    }
+                    else if (ImGui.IsMouseReleased(ImGuiMouseButton.Middle))
                     {
                         _visualization3D.StopPanning();
                     }
@@ -312,7 +357,7 @@ public class GeothermalMeshPreview : IDisposable
                 ImGui.Indent();
                 RenderInfoRow("Type:", options.HeatExchangerType.ToString());
                 RenderInfoRow("Pipe Diameter:", $"{options.PipeInnerDiameter * 1000:F1} mm");
-                RenderInfoRow("Grout Conductivity:", $"{options.GroutThermalConductivity:F2} W/(m·K)");
+                RenderInfoRow("Grout Conductivity:", $"{options.GroutThermalConductivity:F2} W/(mÃ‚Â·K)");
 
                 if (options.HeatExchangerType == HeatExchangerType.UTube)
                     RenderInfoRow("Pipe Spacing:", $"{options.PipeSpacing * 1000:F1} mm");
@@ -324,11 +369,11 @@ public class GeothermalMeshPreview : IDisposable
             if (ImGui.CollapsingHeader("Operating Conditions", ImGuiTreeNodeFlags.DefaultOpen))
             {
                 ImGui.Indent();
-                // FluidMassFlowRate is in kg/s, convert to L/min (assuming water density ~1000 kg/m³
+                // FluidMassFlowRate is in kg/s, convert to L/min (assuming water density ~1000 kg/mÃ‚Â³
                 var flowRateLmin = options.FluidMassFlowRate * 60.0; // kg/s to L/min (for water)
                 RenderInfoRow("Flow Rate:", $"{flowRateLmin:F2} L/min");
-                RenderInfoRow("Inlet Temp:", $"{options.FluidInletTemperature - 273.15:F1} °C");
-                RenderInfoRow("Surface Temp:", $"{options.SurfaceTemperature - 273.15:F1} °C");
+                RenderInfoRow("Inlet Temp:", $"{options.FluidInletTemperature - 273.15:F1} Ã‚Â°C");
+                RenderInfoRow("Surface Temp:", $"{options.SurfaceTemperature - 273.15:F1} Ã‚Â°C");
                 RenderInfoRow("Simulation Time:", $"{options.SimulationTime / (365.25 * 24 * 3600):F1} years");
                 ImGui.Unindent();
                 ImGui.Spacing();
@@ -370,21 +415,21 @@ public class GeothermalMeshPreview : IDisposable
                         var layerName = !string.IsNullOrEmpty(unit.Name) ? unit.Name : unit.RockType ?? "Unknown";
 
                         if (options.LayerThermalConductivities.TryGetValue(layerName, out var conductivity))
-                            RenderInfoRow("Conductivity:", $"{conductivity:F2} W/(m·K)");
+                            RenderInfoRow("Conductivity:", $"{conductivity:F2} W/(mÃ‚Â·K)");
 
                         if (options.LayerSpecificHeats.TryGetValue(layerName, out var specificHeat))
                             RenderInfoRow("Specific Heat:",
-                                $"{specificHeat:F0} J/(kg·K)");
+                                $"{specificHeat:F0} J/(kgÃ‚Â·K)");
 
                         if (options.LayerDensities.TryGetValue(layerName, out var density))
-                            RenderInfoRow("Density:", $"{density:F0} kg/m³");
+                            RenderInfoRow("Density:", $"{density:F0} kg/mÃ‚Â³");
 
                         if (options.LayerPorosities.TryGetValue(layerName, out var porosity))
                             RenderInfoRow("Porosity:", $"{porosity * 100:F1} %");
 
                         if (options.LayerPermeabilities.TryGetValue(layerName, out var permeability))
                             RenderInfoRow("Permeability:",
-                                $"{permeability:E2} m²");
+                                $"{permeability:E2} mÃ‚Â²");
 
                         ImGui.PopStyleColor();
                         ImGui.Unindent();
@@ -453,6 +498,11 @@ public class GeothermalMeshPreview : IDisposable
 
             if (_showDomain && _domainMesh != null)
                 _visualization3D.AddMesh(_domainMesh);
+            
+            // CRITICAL FIX: Re-add lithology layers when visibility is toggled
+            if (_showLithologyLayers && _lithologyMeshes != null)
+                foreach (var mesh in _lithologyMeshes)
+                    _visualization3D.AddMesh(mesh);
         }
     }
 

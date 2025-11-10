@@ -61,7 +61,7 @@ public class BoreholeViewer : IDatasetViewer, IDisposable
     /// var tools = new BoreholeTools();
     /// viewer.OnLithologyClicked = tools.EditUnit;
     /// </code>
-    /// Questo permetterà all'utente di cliccare su una formazione nel viewer e passare
+    /// Questo permetterÃ  all'utente di cliccare su una formazione nel viewer e passare
     /// automaticamente alla pagina di editing in BoreholeTools.
     /// </summary>
     public Action<LithologyUnit>? OnLithologyClicked { get; set; }
@@ -389,7 +389,7 @@ public class BoreholeViewer : IDatasetViewer, IDisposable
             {
                 // Show a note that docking is disabled to prevent flickering
                 ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(1f, 0.8f, 0.3f, 1f));
-                ImGui.TextWrapped("⚠ Docking disabled for this window to prevent UI flickering");
+                ImGui.TextWrapped("âš  Docking disabled for this window to prevent UI flickering");
                 ImGui.PopStyleColor();
                 ImGui.Separator();
 
@@ -613,8 +613,8 @@ public class BoreholeViewer : IDatasetViewer, IDisposable
 
                     if (mouse.X >= rectMin.X && mouse.X <= rectMax.X && mouse.Y >= rectMin.Y && mouse.Y <= rectMax.Y)
                     {
-                        // Show tooltip if enabled
-                        if (_enableTooltip)
+                        // Show tooltip if enabled - ONLY if the window is actually hovered
+                        if (_enableTooltip && ImGui.IsWindowHovered(ImGuiHoveredFlags.ChildWindows))
                         {
                             ImGui.BeginTooltip();
                             ImGui.TextUnformatted(string.IsNullOrWhiteSpace(u.Name) ? "Lithology unit" : u.Name);
@@ -627,10 +627,15 @@ public class BoreholeViewer : IDatasetViewer, IDisposable
                             ImGui.EndTooltip();
                         }
 
-                        // Handle click to edit
+                        // Handle click to edit - ONLY if the window is actually hovered/focused
                         if (OnLithologyClicked != null && ImGui.IsMouseClicked(ImGuiMouseButton.Left))
                         {
-                            OnLithologyClicked.Invoke(u);
+                            // CRITICAL: Check if the parent child window is hovered before processing clicks
+                            // This prevents the viewer from intercepting clicks when it's in the background
+                            if (ImGui.IsWindowHovered(ImGuiHoveredFlags.ChildWindows))
+                            {
+                                OnLithologyClicked.Invoke(u);
+                            }
                         }
                     }
                 }
@@ -741,7 +746,10 @@ public class BoreholeViewer : IDatasetViewer, IDisposable
                     // interpolate value at depth
                     var (hasVal, value) = EvaluateTrackAtDepth(track, depth);
 
-                    ImGui.BeginTooltip();
+                    // CRITICAL: Only show tooltip if the window is actually hovered
+                    if (ImGui.IsWindowHovered(ImGuiHoveredFlags.ChildWindows))
+                    {
+                        ImGui.BeginTooltip();
                     var label = string.IsNullOrWhiteSpace(track.Unit) ? track.Name : $"{track.Name} [{track.Unit}]";
                     ImGui.TextUnformatted(label);
                     ImGui.TextUnformatted($"Depth: {depth:0.###} m");
@@ -750,7 +758,8 @@ public class BoreholeViewer : IDatasetViewer, IDisposable
                     else
                         ImGui.TextUnformatted("Value: n/a");
                     ImGui.TextUnformatted($"Range: {track.MinValue:0.###} - {track.MaxValue:0.###}");
-                    ImGui.EndTooltip();
+                        ImGui.EndTooltip();
+                    }
                 }
             }
         }
