@@ -20,6 +20,7 @@ public partial class Mesh3DDataset : Dataset, ISerializableDataset
         Type = DatasetType.Mesh3D;
         Vertices = new List<Vector3>();
         Normals = new List<Vector3>();
+        Colors = new List<Vector4>();
         TextureCoordinates = new List<Vector2>();
         Faces = new List<int[]>();
 
@@ -44,6 +45,7 @@ public partial class Mesh3DDataset : Dataset, ISerializableDataset
     // Mesh data
     public List<Vector3> Vertices { get; private set; }
     public List<Vector3> Normals { get; private set; }
+    public List<Vector4> Colors { get; set; } // Per-vertex colors (RGBA)
     public List<Vector2> TextureCoordinates { get; set; }
     public List<int[]> Faces { get; private set; } // Each face is an array of vertex indices
     public bool IsLoaded { get; private set; }
@@ -120,7 +122,7 @@ public partial class Mesh3DDataset : Dataset, ISerializableDataset
             FileFormat = "OBJ"
         };
 
-        float scaleFactor = unit.Equals("µm", StringComparison.OrdinalIgnoreCase) ? voxelSize / 1000.0f : voxelSize;
+        float scaleFactor = unit.Equals("Âµm", StringComparison.OrdinalIgnoreCase) ? voxelSize / 1000.0f : voxelSize;
 
         if (Math.Abs(scaleFactor - 1.0f) > 1e-6f)
             for (var i = 0; i < dataset.Vertices.Count; i++)
