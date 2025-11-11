@@ -953,8 +953,7 @@ public class GeothermalSimulationSolver : IDisposable
             {
                 try
                 {
-                    // DEFINITIVE FIX: The GPU solver now handles its own internal iterations.
-                    // We call it only ONCE per time step.
+                    
                     maxChange = _openCLSolver.SolveHeatTransferGPU(
                         _temperature,
                         _velocity,
@@ -963,8 +962,6 @@ public class GeothermalSimulationSolver : IDisposable
                         _options.SimulateGroundwaterFlow,
                         _fluidTempDown,
                         _fluidTempUp,
-                        _options.MaxIterationsPerStep,
-                        _options.ConvergenceTolerance,
                         _options.FlowConfiguration); // NEW: Pass the flow configuration
 
                     ApplyBoundaryConditions(_temperature); // Apply BCs to the final result

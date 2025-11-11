@@ -9,8 +9,6 @@ using GeoscientistToolkit.UI.Utils;
 using GeoscientistToolkit.UI.Visualization;
 using GeoscientistToolkit.Util;
 using ImGuiNET;
-using OxyPlot.Axes;
-using OxyPlot.Series;
 
 namespace GeoscientistToolkit.Analysis.Geothermal;
 
@@ -1170,8 +1168,6 @@ public class GeothermalSimulationTools : IDatasetTools, IDisposable
                 _crossSectionViewer = new BoreholeCrossSectionViewer();
                 _crossSectionViewer.LoadResults(_results, _mesh, _options);
                 Logger.Log("2D cross-section viewer initialized");
-                // Run diagnostic to check temperature field
-                _crossSectionViewer.DiagnoseTemperatureField();
             }
             ImGui.SetItemTooltip("Initialize the 2D borehole cross-section viewer");
         }
@@ -1901,7 +1897,9 @@ public class GeothermalSimulationTools : IDatasetTools, IDisposable
         });
     }
     
-    // DEFINITIVE FIX: New method to render the cross-section plot directly in ImGui.
+    /// <summary>
+    /// Renders the cross-section tab, now using the custom ImGui renderer.
+    /// </summary>
     private void RenderCrossSectionTab()
     {
         if (_crossSectionViewer == null)
@@ -1911,188 +1909,19 @@ public class GeothermalSimulationTools : IDatasetTools, IDisposable
             return;
         }
 
-        // Layout: Controls on left, plot view on right
-        // CORRECTED: Replaced 'true' with 'ImGuiChildFlags.Border'
+        // Left side panel for controls
         ImGui.BeginChild("CrossSectionControls", new Vector2(300, 0), ImGuiChildFlags.Border);
         _crossSectionViewer.RenderControls();
         ImGui.EndChild();
 
         ImGui.SameLine();
 
-        // CORRECTED: Replaced 'true' with 'ImGuiChildFlags.Border'
+        // Right side for the plot itself
         ImGui.BeginChild("CrossSectionPlot", Vector2.Zero, ImGuiChildFlags.Border);
-        
-        var plot = _crossSectionViewer.CreateCrossSectionPlot();
-        if (plot != null)
-        {
-            // CORRECTED: Explicit interface implementation requires casting
-            ((OxyPlot.IPlotModel)plot).Update(true);
-            RenderOxyPlotDirectly(plot);
-        }
-        else
-        {
-            ImGui.TextColored(new Vector4(1, 0.5f, 0, 1), "No plot data available");
-            ImGui.TextWrapped("The cross-section viewer could not generate plot data. Check that simulation results are loaded correctly.");
-        }
-        
+        _crossSectionViewer.RenderPlotInImGui();
         ImGui.EndChild();
     }
 
-    // DEFINITIVE FIX: New helper method to render an OxyPlot model using ImGui draw commands.
-    private void RenderOxyPlotDirectly(OxyPlot.PlotModel plot)
-    {
-        var drawList = ImGui.GetWindowDrawList();
-        var canvas_p0 = ImGui.GetCursorScreenPos();
-        var canvas_sz = ImGui.GetContentRegionAvail();
-        if (canvas_sz.X < 50.0f || canvas_sz.Y < 50.0f)
-            return;
-        var canvas_p1 = new Vector2(canvas_p0.X + canvas_sz.X, canvas_p0.Y + canvas_sz.Y);
-
-        // Draw background and border
-        drawList.AddRectFilled(canvas_p0, canvas_p1, ImGui.GetColorU32(ImGuiCol.FrameBg));
-        drawList.AddRect(canvas_p0, canvas_p1, ImGui.GetColorU32(ImGuiCol.Border));
-
-        // Get plot elements
-        var xAxis = plot.Axes.OfType<LinearAxis>().FirstOrDefault(a => a.Position == AxisPosition.Bottom);
-        var yAxis = plot.Axes.OfType<LinearAxis>().FirstOrDefault(a => a.Position == AxisPosition.Left);
-        if (xAxis == null || yAxis == null) return;
-
-        // Define plot area with margins for labels and color bar
-        var plotArea = new System.Drawing.RectangleF(canvas_p0.X + 60, canvas_p0.Y + 40, canvas_sz.X - 140, canvas_sz.Y - 80);
-
-        // Helper function to transform plot data coordinates to screen coordinates
-        Func<double, double, Vector2> Transform = (x, y) => {
-            var screenX = (float)(plotArea.Left + (x - xAxis.ActualMinimum) / (xAxis.ActualMaximum - xAxis.ActualMinimum) * plotArea.Width);
-            var screenY = (float)(plotArea.Top + (yAxis.ActualMaximum - y) / (yAxis.ActualMaximum - yAxis.ActualMinimum) * plotArea.Height);
-            return new Vector2(screenX, screenY);
-        };
-
-        // 1. Draw HeatMapSeries
-        var heatMap = plot.Series.OfType<HeatMapSeries>().FirstOrDefault();
-        var colorAxis = plot.Axes.OfType<LinearColorAxis>().FirstOrDefault();
-        if (heatMap != null && colorAxis != null)
-        {
-            var data = heatMap.Data;
-            int resX = data.GetLength(0);
-            int resY = data.GetLength(1);
-            double dx = (heatMap.X1 - heatMap.X0) / resX;
-            double dy = (heatMap.Y1 - heatMap.Y0) / resY;
-
-            for (int i = 0; i < resX; i++)
-            {
-                for (int j = 0; j < resY; j++)
-                {
-                    double val = data[i, j];
-                    if (double.IsNaN(val)) continue;
-
-                    var p0_plot = new System.Drawing.PointF((float)(heatMap.X0 + i * dx), (float)(heatMap.Y0 + j * dy));
-                    var p1_plot = new System.Drawing.PointF((float)(p0_plot.X + dx), (float)(p0_plot.Y + dy));
-                    
-                    var p0_screen = Transform(p0_plot.X, p1_plot.Y);
-                    var p1_screen = Transform(p1_plot.X, p0_plot.Y);
-
-                    var oxyColor = colorAxis.GetColor(val);
-                    uint imColor = ImGui.ColorConvertFloat4ToU32(new Vector4(oxyColor.R / 255f, oxyColor.G / 255f, oxyColor.B / 255f, oxyColor.A / 255f));
-
-                    drawList.AddRectFilled(p0_screen, p1_screen, imColor);
-                }
-            }
-        }
-        
-        // 2. Draw LineSeries (for pipe circles, etc.)
-        foreach (var series in plot.Series.OfType<LineSeries>())
-        {
-            var oxyColor = series.Color;
-            uint imColor = ImGui.ColorConvertFloat4ToU32(new Vector4(oxyColor.R / 255f, oxyColor.G / 255f, oxyColor.B / 255f, oxyColor.A / 255f));
-            var thickness = (float)series.StrokeThickness;
-
-            if (series.Points.Count > 1)
-            {
-                 var points = series.Points.Select(p => Transform(p.X, p.Y)).ToArray();
-                 drawList.AddPolyline(ref points[0], points.Length, imColor, ImDrawFlags.None, thickness);
-            }
-        }
-        
-        // 3. Draw Annotations
-        foreach (var annotation in plot.Annotations.OfType<OxyPlot.Annotations.TextAnnotation>())
-        {
-            var pos = Transform(annotation.TextPosition.X, annotation.TextPosition.Y);
-            var oxyColor = annotation.TextColor;
-            uint imColor = ImGui.ColorConvertFloat4ToU32(new Vector4(oxyColor.R / 255f, oxyColor.G / 255f, oxyColor.B / 255f, oxyColor.A / 255f));
-            drawList.AddText(pos, imColor, annotation.Text);
-        }
-
-        // 4. Draw Axes and Color Bar
-        // X-Axis
-        drawList.AddLine(new Vector2(plotArea.Left, plotArea.Bottom), new Vector2(plotArea.Right, plotArea.Bottom), 0xFFFFFFFF, 1);
-        for(int i=0; i<=5; i++)
-        {
-            var val = xAxis.ActualMinimum + (i/5.0) * (xAxis.ActualMaximum - xAxis.ActualMinimum);
-            var pos = Transform(val, yAxis.ActualMinimum);
-            drawList.AddLine(new Vector2(pos.X, plotArea.Bottom), new Vector2(pos.X, plotArea.Bottom + 5), 0xFFFFFFFF, 1);
-            drawList.AddText(new Vector2(pos.X - 10, plotArea.Bottom + 8), 0xFFFFFFFF, $"{val:F2}");
-        }
-        // CORRECTED: Replaced GetCenter() with manual calculation
-        var xAxisTitlePos = new Vector2(plotArea.Left + plotArea.Width / 2 - 20, plotArea.Bottom + 25);
-        drawList.AddText(xAxisTitlePos, 0xFFFFFFFF, xAxis.Title ?? "X-Axis");
-        
-        // Y-Axis
-        drawList.AddLine(new Vector2(plotArea.Left, plotArea.Top), new Vector2(plotArea.Left, plotArea.Bottom), 0xFFFFFFFF, 1);
-         for(int i=0; i<=5; i++)
-        {
-            var val = yAxis.ActualMinimum + (i/5.0) * (yAxis.ActualMaximum - yAxis.ActualMinimum);
-            var pos = Transform(xAxis.ActualMinimum, val);
-            drawList.AddLine(new Vector2(plotArea.Left - 5, pos.Y), new Vector2(plotArea.Left, pos.Y), 0xFFFFFFFF, 1);
-            drawList.AddText(new Vector2(plotArea.Left - 40, pos.Y - 7), 0xFFFFFFFF, $"{val:F2}");
-        }
-
-        // Color Bar
-        if (colorAxis != null)
-        {
-            var barRect = new System.Drawing.RectangleF(plotArea.Right + 20, plotArea.Top, 20, plotArea.Height);
-            int nSteps = 100;
-            float stepHeight = barRect.Height / nSteps;
-            for (int i = 0; i < nSteps; i++)
-            {
-                double val = colorAxis.ActualMinimum + ((nSteps - 1 - i) / (double)(nSteps - 1)) * (colorAxis.ActualMaximum - colorAxis.ActualMinimum);
-                var oxyColor = colorAxis.GetColor(val);
-                uint imColor = ImGui.ColorConvertFloat4ToU32(new Vector4(oxyColor.R / 255f, oxyColor.G / 255f, oxyColor.B / 255f, oxyColor.A / 255f));
-                var p0 = new Vector2(barRect.Left, barRect.Top + i * stepHeight);
-                var p1 = new Vector2(barRect.Right, barRect.Top + (i + 1) * stepHeight);
-                drawList.AddRectFilled(p0, p1, imColor);
-            }
-            drawList.AddRect(new Vector2(barRect.Left, barRect.Top), new Vector2(barRect.Right, barRect.Bottom), 0xFFFFFFFF, 0, ImDrawFlags.None, 1);
-            drawList.AddText(new Vector2(barRect.Right + 5, barRect.Top - 7), 0xFFFFFFFF, $"{colorAxis.ActualMaximum:F0}");
-            drawList.AddText(new Vector2(barRect.Right + 5, barRect.Bottom - 7), 0xFFFFFFFF, $"{colorAxis.ActualMinimum:F0}");
-            
-            // CORRECTED: Replaced GetCenter() and custom ImGuiUtil with a self-contained helper method
-            var titlePos = new Vector2(barRect.Left + barRect.Width + 30, barRect.Top + barRect.Height / 2);
-            AddTextVertical(drawList, titlePos, 0xFFFFFFFF, colorAxis.Title ?? "Value");
-        }
-    }
-
-    /// <summary>
-    ///     CORRECTED AND PROVIDED: Helper function to render vertical text in ImGui.
-    /// </summary>
-    private void AddTextVertical(ImDrawListPtr drawList, Vector2 pos, uint color, string text)
-    {
-        var font = ImGui.GetFont();
-        var fontSize = ImGui.GetFontSize();
-
-        // Calculate the total height of the text block to center it vertically
-        var totalTextHeight = text.Length * (fontSize * 0.9f); // Use a line spacing factor
-        var startY = pos.Y - (totalTextHeight / 2);
-
-        // Iterate through each character and draw it
-        for (int i = 0; i < text.Length; i++)
-        {
-            string c = text[i].ToString();
-            // Calculate the width of the single character to center it horizontally
-            var charSize = font.CalcTextSizeA(fontSize, float.MaxValue, -1.0f, c);
-            var currentPos = new Vector2(pos.X - charSize.X / 2, startY + i * (fontSize * 0.9f));
-            drawList.AddText(currentPos, color, c);
-        }
-    }
     private void ShowStreamlines()
     {
         if (_visualization3D == null || _results?.Streamlines == null || !_results.Streamlines.Any())

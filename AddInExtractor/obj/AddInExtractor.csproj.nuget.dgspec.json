@@ -1,20 +1,20 @@
 {
   "format": 1,
   "restore": {
-    "/Users/user/RiderProjects/GeoscientistToolkit/AddInExtractor/AddInExtractor.csproj": {}
+    "C:\\Users\\Mineralogia\\RiderProjects\\GeoscientistToolkit\\AddInExtractor\\AddInExtractor.csproj": {}
   },
   "projects": {
-    "/Users/user/RiderProjects/GeoscientistToolkit/AddInExtractor/AddInExtractor.csproj": {
+    "C:\\Users\\Mineralogia\\RiderProjects\\GeoscientistToolkit\\AddInExtractor\\AddInExtractor.csproj": {
       "version": "1.0.0",
       "restore": {
-        "projectUniqueName": "/Users/user/RiderProjects/GeoscientistToolkit/AddInExtractor/AddInExtractor.csproj",
+        "projectUniqueName": "C:\\Users\\Mineralogia\\RiderProjects\\GeoscientistToolkit\\AddInExtractor\\AddInExtractor.csproj",
         "projectName": "GeoscientistToolkit.AddInExtractor",
-        "projectPath": "/Users/user/RiderProjects/GeoscientistToolkit/AddInExtractor/AddInExtractor.csproj",
-        "packagesPath": "/Users/user/.nuget/packages/",
-        "outputPath": "/Users/user/RiderProjects/GeoscientistToolkit/AddInExtractor/obj/",
+        "projectPath": "C:\\Users\\Mineralogia\\RiderProjects\\GeoscientistToolkit\\AddInExtractor\\AddInExtractor.csproj",
+        "packagesPath": "C:\\Users\\Mineralogia\\.nuget\\packages\\",
+        "outputPath": "C:\\Users\\Mineralogia\\RiderProjects\\GeoscientistToolkit\\AddInExtractor\\obj\\",
         "projectStyle": "PackageReference",
         "configFilePaths": [
-          "/Users/user/.nuget/NuGet/NuGet.Config"
+          "C:\\Users\\Mineralogia\\AppData\\Roaming\\NuGet\\NuGet.Config"
         ],
         "originalTargetFrameworks": [
           "net8.0"
@@ -76,7 +76,7 @@
               "privateAssets": "all"
             }
           },
-          "runtimeIdentifierGraphPath": "/usr/local/share/dotnet/sdk/8.0.415/PortableRuntimeIdentifierGraph.json"
+          "runtimeIdentifierGraphPath": "C:\\Program Files\\dotnet\\sdk\\8.0.415/PortableRuntimeIdentifierGraph.json"
         }
       }
     }
