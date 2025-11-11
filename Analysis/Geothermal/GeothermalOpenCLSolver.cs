@@ -143,7 +143,7 @@ public class GeothermalOpenCLSolver : IDisposable
     private nint _cellVolumesBuffer;          // Cell volumes for heat transfer calculations
     private int _nzHE;                        // Number of heat exchanger elements
     
-    // DEFINITIVE FIX: Dedicated buffer for per-cell temperature changes to fix reduction errors
+    // FIX: Dedicated buffer for per-cell temperature changes to fix reduction errors
     private nint _temperatureChangeBuffer;
 
     public GeothermalOpenCLSolver()
@@ -177,7 +177,7 @@ public class GeothermalOpenCLSolver : IDisposable
         if (_temperatureOldBuffer != 0) _cl.ReleaseMemObject(_temperatureOldBuffer);
         if (_temperatureBuffer != 0) _cl.ReleaseMemObject(_temperatureBuffer);
         
-        // DEFINITIVE FIX: Release the change buffer
+        // FIX: Release the change buffer
         if (_temperatureChangeBuffer != 0) _cl.ReleaseMemObject(_temperatureChangeBuffer);
 
         if (_reductionKernel != 0) _cl.ReleaseKernel(_reductionKernel);

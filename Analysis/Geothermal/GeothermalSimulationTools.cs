@@ -1202,7 +1202,7 @@ public class GeothermalSimulationTools : IDatasetTools, IDisposable
                     ImGui.EndTabItem();
                 }
 
-                // DEFINITIVE FIX: Add the new tab for the cross-section
+                // FIX: Add the new tab for the cross-section
                 if (ImGui.BeginTabItem("Borehole Cross-Section"))
                 {
                     RenderCrossSectionTab();

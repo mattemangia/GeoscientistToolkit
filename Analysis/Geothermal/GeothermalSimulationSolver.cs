@@ -522,7 +522,7 @@ public class GeothermalSimulationSolver : IDisposable
             
             Logger.Log($"Initializing temperature field: Surface={surfaceTemp - 273.15:F1}°C, Gradient={gradient * 1000:F1}°C/km");
             
-            // DEFINITIVE FIX: Move the diagnostic logging outside the main loop to prevent spam.
+            // FIX: Move the diagnostic logging outside the main loop to prevent spam.
             Logger.Log($"  - Sample Depth 0m: {surfaceTemp:F1}K ({surfaceTemp - 273.15:F1}°C)");
             float midDepth = _options.BoreholeDataset.TotalDepth / 2.0f;
             float bottomDepth = _options.BoreholeDataset.TotalDepth;
@@ -581,7 +581,7 @@ public class GeothermalSimulationSolver : IDisposable
 
             var newHead = new float[nr, nth, nz];
             
-            // DEFINITIVE FIX: The relaxation factor MUST be adaptive. A fixed value is not
+            // FIX: The relaxation factor MUST be adaptive. A fixed value is not
             // robust enough. We start with a reasonably aggressive value and let the solver
             // reduce it automatically if it struggles.
             var omega = 0.8f; // Start more aggressively
@@ -1001,7 +1001,7 @@ public class GeothermalSimulationSolver : IDisposable
     /// </summary>
     private float RunCpuSolver(float dt)
     {
-        // DEFINITIVE FIX #2: The temporary array MUST be initialized as a CLONE of the
+        // FIX #2: The temporary array MUST be initialized as a CLONE of the
         // current state. Initializing it as a new array (`new float[,,]`) resets all
         // boundary conditions to zero at every step, which was the root cause of the
         // unconditional divergence.
@@ -1402,7 +1402,7 @@ public class GeothermalSimulationSolver : IDisposable
         var cp = (float)_options.FluidSpecificHeat;
         var dz = _options.BoreholeDataset.TotalDepth / nz;
 
-        // DEFINITIVE FIX: Calculate two SEPARATE heat transfer coefficients.
+        // FIX: Calculate two SEPARATE heat transfer coefficients.
         // 1. U_ground: Heat transfer between the outer fluid and the borehole wall/ground.
         // 2. U_internal: Heat transfer between the outer and inner fluid streams.
         var U_ground = CalculateBoreholeWallHeatTransferCoefficient();

@@ -172,7 +172,7 @@ public class GeothermalMeshPreview : IDisposable
             {
                 var imagePos = ImGui.GetCursorScreenPos();
 
-                // DEFINITIVE FIX: Use InvisibleButton to capture ALL mouse input
+                // FIX: Use InvisibleButton to capture ALL mouse input
                 // ImGui.Image() alone is NOT interactive and lets clicks fall through to parent window
                 var imageBounds = new Vector2(renderWidth, renderHeight);
 
