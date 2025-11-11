@@ -11,8 +11,8 @@ using GeoscientistToolkit.Util;
 using ImGuiNET;
 using Veldrid;
 using Veldrid.SPIRV;
-
-namespace GeoscientistToolkit.UI.Visualization;
+using System;
+using System.Collections.Generic;
 
 /// <summary>
 ///     3D visualization system for geothermal simulation results with advanced rendering capabilities.
@@ -112,6 +112,9 @@ public class GeothermalVisualization3D : IDisposable
     private int _clipAxis = 0; // 0=X, 1=Y, 2=Z
     private float _clipPosition = 0.5f; // 0-1 normalized
     private bool _clipNegativeSide = true; // Which side to clip
+    
+    // NEW: Borehole focus view state
+    private bool _focusOnBoreholeView = false;
     
     private Pipeline _velocityPipeline;
     private Texture _velocityTexture3D;
@@ -1140,10 +1143,8 @@ public class GeothermalVisualization3D : IDisposable
         {
             // Full rendering mode with simulation results
             // Render domain mesh
-            // SURGICAL FIX 11: Add diagnostics for domain mesh rendering
             if (_showDomainMesh && _domainGpuMesh.VertexBuffer != null && _domainGpuMesh.IndexCount > 0)
             {
-                // CORRECTED: Use a switch statement to select the pipeline
                 Pipeline pipeline;
                 switch (_renderMode)
                 {
@@ -1151,7 +1152,6 @@ public class GeothermalVisualization3D : IDisposable
                         pipeline = _velocityPipeline;
                         break;
                     case RenderMode.Pressure:
-                        // SURGICAL FIX 9: Use temperature pipeline for pressure (reuses temperature shader)
                         pipeline = _temperaturePipeline;
                         break;
                     case RenderMode.Temperature:
@@ -1160,15 +1160,9 @@ public class GeothermalVisualization3D : IDisposable
                         break;
                 }
 
-                // The domain mesh should ONLY be skipped for these specific modes
-                if (_renderMode == RenderMode.Slices || _renderMode == RenderMode.Isosurface ||
-                    _renderMode == RenderMode.Streamlines)
+                if (_renderMode != RenderMode.Slices && _renderMode != RenderMode.Isosurface &&
+                    _renderMode != RenderMode.Streamlines)
                 {
-                    // Skip domain mesh rendering - these modes use their own geometry
-                }
-                else
-                {
-                    // SURGICAL FIX 9b: ALWAYS render domain for Temperature/Velocity/Pressure modes
                     commandList.SetPipeline(pipeline);
                     commandList.SetGraphicsResourceSet(0, _resourceSet); // After pipeline
                     commandList.SetVertexBuffer(0, _domainGpuMesh.VertexBuffer);
@@ -1177,20 +1171,43 @@ public class GeothermalVisualization3D : IDisposable
                 }
             }
 
-            // Render dynamic meshes (isosurfaces, streamlines)
+            // Render dynamic meshes (isosurfaces, streamlines, borehole focus view)
             if (_dynamicGpuMeshes.Any())
             {
-                var pipeline = _renderMode == RenderMode.Streamlines ? _streamlinePipeline : _isosurfacePipeline;
-                commandList.SetPipeline(pipeline);
-                commandList.SetGraphicsResourceSet(0, _resourceSet); // After pipeline
-                foreach (var gpuMesh in _dynamicGpuMeshes)
+                var wireframeMeshes = _dynamicGpuMeshes.Where(m => m.IsWireframe).ToList();
+                var solidMeshes = _dynamicGpuMeshes.Where(m => !m.IsWireframe).ToList();
+
+                // Render solid meshes first (e.g., fluid volumes)
+                if (solidMeshes.Any())
                 {
-                    if (gpuMesh.VertexBuffer == null) continue;
-                    commandList.SetVertexBuffer(0, gpuMesh.VertexBuffer);
-                    commandList.SetIndexBuffer(gpuMesh.IndexBuffer, IndexFormat.UInt32);
-                    commandList.DrawIndexed(gpuMesh.IndexCount);
+                    // For fluid volumes, use the simple isosurface shader which respects vertex colors
+                    var solidPipeline = _renderMode == RenderMode.Streamlines ? _streamlinePipeline : _isosurfacePipeline;
+                    commandList.SetPipeline(solidPipeline);
+                    commandList.SetGraphicsResourceSet(0, _resourceSet);
+                    foreach (var gpuMesh in solidMeshes)
+                    {
+                        if (gpuMesh.VertexBuffer == null) continue;
+                        commandList.SetVertexBuffer(0, gpuMesh.VertexBuffer);
+                        commandList.SetIndexBuffer(gpuMesh.IndexBuffer, IndexFormat.UInt32);
+                        commandList.DrawIndexed(gpuMesh.IndexCount);
+                    }
+                }
+
+                // Render wireframe meshes on top (e.g., borehole outline)
+                if (wireframeMeshes.Any())
+                {
+                    commandList.SetPipeline(_wireframePipeline);
+                    commandList.SetGraphicsResourceSet(0, _resourceSet);
+                    foreach (var gpuMesh in wireframeMeshes)
+                    {
+                        if (gpuMesh.VertexBuffer == null) continue;
+                        commandList.SetVertexBuffer(0, gpuMesh.VertexBuffer);
+                        commandList.SetIndexBuffer(gpuMesh.IndexBuffer, IndexFormat.UInt32);
+                        commandList.DrawIndexed(gpuMesh.IndexCount);
+                    }
                 }
             }
+
 
             // Render slices
             if (_renderMode == RenderMode.Slices && _sliceQuad.VertexBuffer != null)
@@ -1203,7 +1220,7 @@ public class GeothermalVisualization3D : IDisposable
             }
 
             // Render borehole
-            if (_showBorehole && _boreholeGpuMesh.VertexBuffer != null)
+            if (_showBorehole && _boreholeGpuMesh.VertexBuffer != null && !_focusOnBoreholeView)
             {
                 commandList.SetPipeline(_isosurfacePipeline); // Use a simple solid shader
                 commandList.SetGraphicsResourceSet(0, _resourceSet); // After pipeline
@@ -1281,6 +1298,23 @@ public class GeothermalVisualization3D : IDisposable
                 _enableClipping ? 1f : 0f
             )
         };
+        
+        // NEW: Set uniforms for borehole focus view clipping
+        if (_focusOnBoreholeView)
+        {
+            var boreholeRadius = (float)(_options.BoreholeDataset.WellDiameter / 2000.0); // Diameter in mm to radius in m
+            float cropMargin = 1.0f; // Crop to 1m around the borehole radius
+            float cropBoxRadius = boreholeRadius + cropMargin;
+            float totalDepth = Math.Abs(_mesh.Z.Last() - _mesh.Z[0]);
+
+            uniforms.BoreholeClipBox = new Vector4(cropBoxRadius * 2, cropBoxRadius * 2, totalDepth, 1.0f);
+            uniforms.BoreholeClipCenter = new Vector4(0, 0, -totalDepth / 2.0f, 0);
+        }
+        else
+        {
+            uniforms.BoreholeClipBox = Vector4.Zero; // Disabled
+            uniforms.BoreholeClipCenter = Vector4.Zero;
+        }
 
         _graphicsDevice.UpdateBuffer(_uniformBuffer, 0, ref uniforms);
     }
@@ -1311,7 +1345,9 @@ public class GeothermalVisualization3D : IDisposable
             RenderSettings = new Vector4(0, 1.0f, 0, 293.15f), // opacity = 1.0
             DomainInfo = new Vector4(domainRadius, -(boreholeDepth + domainExtension),
                 boreholeDepth + domainExtension * 2, 0),
-            ClipPlane = Vector4.Zero // No clipping in preview mode
+            ClipPlane = Vector4.Zero, // No clipping in preview mode
+            BoreholeClipBox = Vector4.Zero, // No borehole clipping in preview
+            BoreholeClipCenter = Vector4.Zero
         };
 
         _graphicsDevice.UpdateBuffer(_uniformBuffer, 0, ref uniforms);
@@ -1321,7 +1357,7 @@ public class GeothermalVisualization3D : IDisposable
     {
         // Put the camera close enough to see small features but far enough to keep the boundary in frame.
         // Use ~20–30% of the domain radius as viewing distance, clamped to a sane range.
-        var target = Math.Clamp(0.25f * domainRadius, 8f, 2000f);
+        var target = Math.Clamp(2.5f * domainRadius, 2f, 2000f);
         _cameraDistance = target;
 
         // Look at the borehole center (assumed at origin) around mid-depth.
@@ -1424,6 +1460,7 @@ public class GeothermalVisualization3D : IDisposable
                     _currentColorMap = map;
                     InitializeColorMaps();
                     UpdateResourceSet(); // FIX: Re-create the resource set with the new colormap texture
+                    UpdateBoreholeFocusView(); // Regenerate fluid colors if in focus mode
                 }
 
             ImGui.EndCombo();
@@ -1435,6 +1472,7 @@ public class GeothermalVisualization3D : IDisposable
         {
             _temperatureMin = tempMin;
             _temperatureMax = tempMax;
+            if(_focusOnBoreholeView) UpdateBoreholeFocusView(); // Regenerate fluid colors if range changes
         }
 
         ImGui.Checkbox("Show Domain Outline", ref _showDomainMesh);
@@ -1445,6 +1483,12 @@ public class GeothermalVisualization3D : IDisposable
         
         ImGui.Separator();
         ImGui.TextColored(new Vector4(0.3f, 0.8f, 1.0f, 1.0f), "Advanced Visualization:");
+
+        if (ImGui.Checkbox("Focus on Borehole", ref _focusOnBoreholeView))
+        {
+            UpdateBoreholeFocusView();
+        }
+        ImGui.SetItemTooltip("Crop the view to the borehole and show detailed fluid temperatures.");
         
         if (ImGui.Button("Show Heat Exchanger", new Vector2(-1, 0)))
         {
@@ -1482,12 +1526,11 @@ public class GeothermalVisualization3D : IDisposable
         if (_renderMode == RenderMode.Slices)
             ImGui.SliderFloat("Slice Depth (0=top, 1=bottom)", ref _sliceDepth, 0f, 1f);
 
-        // SURGICAL FIX 6: Add camera controls
         ImGui.Separator();
         ImGui.Text("Camera Controls");
         
         var camDist = _cameraDistance;
-        if (ImGui.SliderFloat("Zoom", ref camDist, 5f, 2000f, "%.0f", ImGuiSliderFlags.Logarithmic))
+        if (ImGui.SliderFloat("Zoom", ref camDist, 1f, 10000f, "%.0f", ImGuiSliderFlags.Logarithmic))
         {
             SetCameraDistance(camDist);
         }
@@ -1509,18 +1552,18 @@ public class GeothermalVisualization3D : IDisposable
         ImGui.Spacing();
         if (ImGui.Button("Focus on Borehole", new Vector2(-1, 0)))
         {
-            // Zoom to borehole region
-            var boreholeRadius = _options?.BoreholeDataset?.WellDiameter / 2000.0 ?? 0.1; // Convert mm to m
-            _cameraDistance = Math.Max(1f, (float)boreholeRadius * 5f); // 5x borehole diameter
-            _cameraTarget = Vector3.Zero; // Center on borehole
-            UpdateCamera();
-            Logger.Log($"Focused on borehole (radius: {boreholeRadius:F3} m, distance: {_cameraDistance:F1} m)");
+            if (_options != null && _mesh != null)
+            {
+                var boreholeDiameter = (float)(_options.BoreholeDataset.WellDiameter / 1000.0);
+                var totalDepth = Math.Abs(_mesh.Z.Last() - _mesh.Z[0]);
+                FrameDetailView(boreholeDiameter * 5f, totalDepth);
+                Logger.Log($"Focused on borehole (diameter: {boreholeDiameter:F2} m, distance: {_cameraDistance:F1} m)");
+            }
         }
         ImGui.SetItemTooltip("Zoom close to the borehole to see local temperature changes");
         
         if (ImGui.Button("View Full Domain", new Vector2(-1, 0)))
         {
-            // Reset to full view
             ResetCameraToFullView();
             Logger.Log("Reset camera to full domain view");
         }
@@ -1559,21 +1602,6 @@ public class GeothermalVisualization3D : IDisposable
                 _clipNegativeSide = true;
             }
             ImGui.SetItemTooltip("Cut the domain in half to see interior");
-        }
-
-        ImGui.Separator();
-        ImGui.Text("Camera");
-        if (ImGui.SliderFloat("Distance", ref _cameraDistance, 10f, 500f)) UpdateCamera();
-        if (ImGui.SliderFloat("Azimuth", ref _cameraAzimuth, -180f, 180f)) UpdateCamera();
-        if (ImGui.SliderFloat("Elevation", ref _cameraElevation, -89f, 89f)) UpdateCamera();
-
-        if (ImGui.Button("Reset Camera"))
-        {
-            _cameraDistance = 300f;
-            _cameraAzimuth = 45f;
-            _cameraElevation = 45f;
-            _cameraTarget = Vector3.Zero;
-            UpdateCamera();
         }
     }
 
@@ -1624,7 +1652,8 @@ public class GeothermalVisualization3D : IDisposable
 
     public void HandleMouseWheel(float delta)
     {
-        _cameraDistance = Math.Clamp(_cameraDistance - delta * 10f, 10f, 1000f);
+        _cameraDistance *= MathF.Pow(0.9f, delta);
+        _cameraDistance = Math.Clamp(_cameraDistance, 0.1f, 20000f);
         UpdateCamera();
     }
 
@@ -1693,17 +1722,13 @@ public class GeothermalVisualization3D : IDisposable
     {
         _renderMode = mode;
         
-        // SURGICAL FIX 7+9c: Ensure domain mesh visibility based on render mode
-        // Temperature, Velocity, and Pressure modes REQUIRE the domain mesh
         if (mode == RenderMode.Temperature || mode == RenderMode.Velocity || mode == RenderMode.Pressure)
         {
             _showDomainMesh = true;
             Logger.Log($"Switched to {mode} mode - domain mesh enabled");
         }
-        // Isosurface and Streamline modes typically hide the domain
         else if (mode == RenderMode.Isosurface || mode == RenderMode.Streamlines)
         {
-            // Keep user's preference, don't force change
             Logger.Log($"Switched to {mode} mode");
         }
     }
@@ -1845,7 +1870,298 @@ public class GeothermalVisualization3D : IDisposable
         return new Vector3(1 - (t - 0.875f) * 4, 0, 0);
     }
 
-    // Shader code getters
+    // ####################################################################################
+    // NEW METHODS FOR BOREHOLE FOCUS VIEW
+    // ####################################################################################
+    
+    /// <summary>
+    /// Handles the state change for the borehole focus view.
+    /// Generates/clears necessary geometry and adjusts the camera.
+    /// </summary>
+    private void UpdateBoreholeFocusView()
+    {
+        ClearDynamicMeshes();
+    
+        if (_focusOnBoreholeView)
+        {
+            if (_results == null || _options == null || _mesh == null)
+            {
+                Logger.LogWarning("Cannot focus on borehole: Simulation results not loaded.");
+                _focusOnBoreholeView = false; // Revert the change
+                return;
+            }
+    
+            // 1. Generate new geometry
+            GenerateWireframeBorehole();
+            GenerateFluidVolumeGeometry();
+    
+            // 2. Frame the camera
+            var boreholeRadius = (float)(_options.BoreholeDataset.WellDiameter / 2000.0);
+            var totalDepth = Math.Abs(_mesh.Z.Last() - _mesh.Z[0]);
+    
+            FrameDetailView(boreholeRadius * 2f, totalDepth);
+            _enableClipping = false; // Disable the general clipping plane when in this mode
+        }
+        else
+        {
+            // When turning off, clear focus-specific meshes and reset camera
+            ResetCameraToFullView();
+        }
+    
+        UpdateUniforms();
+    }
+    
+    /// <summary>
+    /// Generates the 3D meshes for the fluid inside the heat exchanger,
+    /// colored by temperature.
+    /// </summary>
+    private void GenerateFluidVolumeGeometry()
+    {
+        var fluidMesh = new Mesh3DDataset("FluidVolumes", Path.Combine(Path.GetTempPath(), "fluidvolumes_temp.obj"));
+    
+        float totalDepth = Math.Abs(_mesh.Z.Last() - _mesh.Z[0]);
+        int verticalSegments = 50; // More segments for a smoother color transition
+    
+        if (_options.HeatExchangerType == HeatExchangerType.Coaxial)
+        {
+            var innerPipeRadius = (float)(_options.PipeSpacing / 2.0);
+            var outerPipeInnerRadius = (float)(_options.PipeInnerDiameter / 2.0);
+    
+            bool downIsInCenter = _options.FlowConfiguration == FlowConfiguration.CounterFlow;
+    
+            // Create inner pipe fluid volume
+            var innerPipeColorFunc = downIsInCenter ?
+                (Func<float, Vector4>)(depth => GetColorFromTemperature(GetFluidTemperaturesAtDepth(depth).down - 273.15f)) :
+                (Func<float, Vector4>)(depth => GetColorFromTemperature(GetFluidTemperaturesAtDepth(depth).up - 273.15f));
+            GenerateCylinder(fluidMesh, Vector3.Zero, innerPipeRadius, totalDepth, verticalSegments, 16, innerPipeColorFunc);
+    
+            // Create annulus fluid volume
+            var annulusColorFunc = downIsInCenter ?
+                (Func<float, Vector4>)(depth => GetColorFromTemperature(GetFluidTemperaturesAtDepth(depth).up - 273.15f)) :
+                (Func<float, Vector4>)(depth => GetColorFromTemperature(GetFluidTemperaturesAtDepth(depth).down - 273.15f));
+            GenerateHollowCylinder(fluidMesh, Vector3.Zero, innerPipeRadius, outerPipeInnerRadius, totalDepth, verticalSegments, 16, annulusColorFunc);
+        }
+        else // U-Tube
+        {
+            var pipeRadius = (float)(_options.PipeInnerDiameter / 2.0);
+            var pipeSpacing = (float)(_options.PipeSpacing / 2.0);
+    
+            var downPipeCenter = new Vector3(-pipeSpacing, 0, 0);
+            var upPipeCenter = new Vector3(pipeSpacing, 0, 0);
+    
+            var downPipeColorFunc = (Func<float, Vector4>)(depth => GetColorFromTemperature(GetFluidTemperaturesAtDepth(depth).down - 273.15f));
+            GenerateCylinder(fluidMesh, downPipeCenter, pipeRadius, totalDepth, verticalSegments, 12, downPipeColorFunc);
+    
+            var upPipeColorFunc = (Func<float, Vector4>)(depth => GetColorFromTemperature(GetFluidTemperaturesAtDepth(depth).up - 273.15f));
+            GenerateCylinder(fluidMesh, upPipeCenter, pipeRadius, totalDepth, verticalSegments, 12, upPipeColorFunc);
+        }
+    
+        if (fluidMesh.Vertices.Count > 0)
+        {
+            var gpuMesh = CreateGpuMesh(fluidMesh);
+            if (gpuMesh.VertexBuffer != null) _dynamicGpuMeshes.Add(gpuMesh);
+        }
+    }
+    
+    /// <summary>
+    /// Generates a wireframe mesh representing the borehole wall.
+    /// </summary>
+    private void GenerateWireframeBorehole()
+    {
+        var wireframeMesh = new Mesh3DDataset("BoreholeWireframe", Path.Combine(Path.GetTempPath(), "boreholewire_temp.obj"));
+        var boreholeRadius = (float)(_options.BoreholeDataset.WellDiameter / 2000.0);
+        float totalDepth = Math.Abs(_mesh.Z.Last() - _mesh.Z[0]);
+        int radialSegments = 24;
+        int heightSegments = 10;
+        var color = new Vector4(0.7f, 0.7f, 0.7f, 0.5f); // Semi-transparent gray
+    
+        // Generate vertical lines
+        for (int j = 0; j < radialSegments; j++)
+        {
+            float angle = (float)j / radialSegments * 2.0f * MathF.PI;
+            float x = MathF.Cos(angle) * boreholeRadius;
+            float y = MathF.Sin(angle) * boreholeRadius;
+            
+            var v_top_idx = wireframeMesh.Vertices.Count;
+            wireframeMesh.Vertices.Add(new Vector3(x, y, 0));
+            wireframeMesh.Colors.Add(color);
+            wireframeMesh.Normals.Add(Vector3.UnitZ);
+            
+            var v_bottom_idx = wireframeMesh.Vertices.Count;
+            wireframeMesh.Vertices.Add(new Vector3(x, y, -totalDepth));
+            wireframeMesh.Colors.Add(color);
+            wireframeMesh.Normals.Add(Vector3.UnitZ);
+
+            wireframeMesh.Faces.Add(new[] { v_top_idx, v_bottom_idx });
+        }
+    
+        // Generate horizontal rings
+        for (int i = 0; i <= heightSegments; i++)
+        {
+            float z = -(float)i / heightSegments * totalDepth;
+            int ringBaseIndex = wireframeMesh.Vertices.Count;
+            for (int j = 0; j < radialSegments; j++)
+            {
+                float angle = (float)j / radialSegments * 2.0f * MathF.PI;
+                float x = MathF.Cos(angle) * boreholeRadius;
+                float y = MathF.Sin(angle) * boreholeRadius;
+                wireframeMesh.Vertices.Add(new Vector3(x, y, z));
+                wireframeMesh.Colors.Add(color);
+                wireframeMesh.Normals.Add(Vector3.UnitZ);
+            }
+            
+            for (int j = 0; j < radialSegments; j++)
+            {
+                wireframeMesh.Faces.Add(new[] { ringBaseIndex + j, ringBaseIndex + (j + 1) % radialSegments });
+            }
+        }
+    
+        if (wireframeMesh.Vertices.Count > 0)
+        {
+            var gpuMesh = CreateGpuMesh(wireframeMesh);
+            if (gpuMesh.VertexBuffer != null) _dynamicGpuMeshes.Add(gpuMesh);
+        }
+    }
+
+    /// <summary>
+    /// Generates a solid, colored cylinder mesh.
+    /// </summary>
+    private void GenerateCylinder(Mesh3DDataset mesh, Vector3 offset, float radius, float height, int heightSegments, int radialSegments, Func<float, Vector4> colorFunc)
+    {
+        int baseVertexIndex = mesh.Vertices.Count;
+    
+        for (int i = 0; i <= heightSegments; i++)
+        {
+            float z = - (float)i / heightSegments * height;
+            float depth = (float)i / heightSegments * height;
+            Vector4 color = colorFunc(depth);
+    
+            for (int j = 0; j <= radialSegments; j++)
+            {
+                float angle = (float)j / radialSegments * 2.0f * MathF.PI;
+                float x = MathF.Cos(angle) * radius;
+                float y = MathF.Sin(angle) * radius;
+                var pos = new Vector3(x, y, z) + offset;
+                var normal = Vector3.Normalize(new Vector3(x, y, 0));
+    
+                mesh.Vertices.Add(pos);
+                mesh.Normals.Add(normal);
+                mesh.Colors.Add(color);
+            }
+        }
+    
+        for (int i = 0; i < heightSegments; i++)
+        {
+            for (int j = 0; j < radialSegments; j++)
+            {
+                int v0 = baseVertexIndex + i * (radialSegments + 1) + j;
+                int v1 = baseVertexIndex + i * (radialSegments + 1) + (j + 1);
+                int v2 = baseVertexIndex + (i + 1) * (radialSegments + 1) + j;
+                int v3 = baseVertexIndex + (i + 1) * (radialSegments + 1) + (j + 1);
+    
+                mesh.Faces.Add(new[] { v0, v2, v1 });
+                mesh.Faces.Add(new[] { v1, v2, v3 });
+            }
+        }
+    }
+    
+    /// <summary>
+    /// Generates a hollow, colored cylinder mesh.
+    /// </summary>
+    private void GenerateHollowCylinder(Mesh3DDataset mesh, Vector3 offset, float innerRadius, float outerRadius, float height, int heightSegments, int radialSegments, Func<float, Vector4> colorFunc)
+    {
+        GenerateCylinder(mesh, offset, outerRadius, height, heightSegments, radialSegments, colorFunc);
+        
+        int baseVertexIndex = mesh.Vertices.Count;
+        for (int i = 0; i <= heightSegments; i++)
+        {
+            float z = - (float)i / heightSegments * height;
+            float depth = (float)i / heightSegments * height;
+            Vector4 color = colorFunc(depth);
+    
+            for (int j = 0; j <= radialSegments; j++)
+            {
+                float angle = (float)j / radialSegments * 2.0f * MathF.PI;
+                float x = MathF.Cos(angle) * innerRadius;
+                float y = MathF.Sin(angle) * innerRadius;
+                var pos = new Vector3(x, y, z) + offset;
+                var normal = -Vector3.Normalize(new Vector3(x, y, 0)); // Flipped normal
+    
+                mesh.Vertices.Add(pos);
+                mesh.Normals.Add(normal);
+                mesh.Colors.Add(color);
+            }
+        }
+    
+        for (int i = 0; i < heightSegments; i++)
+        {
+            for (int j = 0; j < radialSegments; j++)
+            {
+                int v0 = baseVertexIndex + i * (radialSegments + 1) + j;
+                int v1 = baseVertexIndex + i * (radialSegments + 1) + (j + 1);
+                int v2 = baseVertexIndex + (i + 1) * (radialSegments + 1) + j;
+                int v3 = baseVertexIndex + (i + 1) * (radialSegments + 1) + (j + 1);
+    
+                mesh.Faces.Add(new[] { v0, v1, v2 }); // Flipped face winding
+                mesh.Faces.Add(new[] { v1, v3, v2 }); // Flipped face winding
+            }
+        }
+    }
+
+    /// <summary>
+    /// Maps a temperature in Celsius to a color using the currently selected colormap and range.
+    /// </summary>
+    private Vector4 GetColorFromTemperature(float tempC)
+    {
+        float tempRange = Math.Max(1e-5f, _temperatureMax - _temperatureMin);
+        float t = Math.Clamp((tempC - _temperatureMin) / tempRange, 0.0f, 1.0f);
+        var color = GetColorMapColor(_currentColorMap, t);
+        return new Vector4(color, 1.0f);
+    }
+
+    /// <summary>
+    /// Interpolates the downflow and upflow fluid temperatures at a specific depth.
+    /// </summary>
+    private (float down, float up) GetFluidTemperaturesAtDepth(float depth)
+    {
+        if (_results.FluidTemperatureProfile == null || !_results.FluidTemperatureProfile.Any())
+            return ((float)_options.FluidInletTemperature, (float)_options.FluidInletTemperature);
+        
+        var sortedProfile = _results.FluidTemperatureProfile.OrderBy(p => p.depth).ToList();
+        
+        if (depth < sortedProfile.First().depth)
+        {
+             return ((float)sortedProfile.First().temperatureDown, (float)sortedProfile.First().temperatureUp);
+        }
+
+        if (depth >= sortedProfile.Last().depth)
+        {
+            return ((float)sortedProfile.Last().temperatureDown, (float)sortedProfile.Last().temperatureUp);
+        }
+
+        for (int i = 0; i < sortedProfile.Count - 1; i++)
+        {
+            var p1 = sortedProfile[i];
+            var p2 = sortedProfile[i+1];
+            if (depth >= p1.depth && depth <= p2.depth)
+            {
+                var t = (p2.depth - p1.depth) > 1e-6 ? (depth - p1.depth) / (p2.depth - p1.depth) : 0;
+                if (double.IsNaN(t) || double.IsInfinity(t)) t = 0;
+                
+                var down = p1.temperatureDown + t * (p2.temperatureDown - p1.temperatureDown);
+                var up = p1.temperatureUp + t * (p2.temperatureUp - p1.temperatureUp);
+                return ((float)down, (float)up);
+            }
+        }
+        
+        var nearest = sortedProfile.OrderBy(p => Math.Abs(p.depth - depth)).First();
+        return ((float)nearest.temperatureDown, (float)nearest.temperatureUp);
+    }
+    
+    // ####################################################################################
+    // SHADERS
+    // ####################################################################################
+
     private string GetVertexShaderCode(string shaderName)
     {
         return GetBasicVertexShader();
@@ -1877,6 +2193,7 @@ layout(location = 3) out vec3 frag_WorldPos;
 layout(set = 0, binding = 0) uniform UniformData {
     mat4 ViewMatrix; mat4 ProjectionMatrix; mat4 ModelMatrix; vec4 LightDirection; vec4 ViewPosition;
     vec4 ColorMapRange; vec4 SliceInfo; vec4 RenderSettings; vec4 DomainInfo; vec4 ClipPlane;
+    vec4 BoreholeClipBox; vec4 BoreholeClipCenter;
 } ubo;
 
 void main() {
@@ -1913,11 +2230,18 @@ layout(location = 3) in vec3 frag_WorldPos;
 layout(location = 0) out vec4 FragColor;
 layout(set = 0, binding = 0) uniform UniformData {
     mat4 v; mat4 p; mat4 m; vec4 LightDirection; vec4 ViewPosition; vec4 ColorMapRange; vec4 si; vec4 RenderSettings; vec4 di; vec4 ClipPlane;
+    vec4 BoreholeClipBox; vec4 BoreholeClipCenter;
 } ubo;
 layout(set = 0, binding = 1) uniform texture1D ColorMap; layout(set = 0, binding = 2) uniform sampler ColorMapSampler;
 layout(set = 0, binding = 3) uniform texture3D TemperatureData; layout(set = 0, binding = 5) uniform sampler DataSampler;
 void main() {
-    // SURGICAL FIX 5: Improved clipping plane with proper coordinate handling
+    if (ubo.BoreholeClipBox.w > 0.5) {
+        vec3 halfSize = ubo.BoreholeClipBox.xyz / 2.0;
+        vec3 localPos = frag_WorldPos - ubo.BoreholeClipCenter.xyz;
+        if (abs(localPos.x) > halfSize.x || abs(localPos.y) > halfSize.y) {
+            discard;
+        }
+    }
     if (ubo.ClipPlane.w > 0.5) {
         int axis = int(ubo.ClipPlane.x);
         float position = ubo.ClipPlane.y;
@@ -1927,13 +2251,11 @@ void main() {
         else { if (coord > position) discard; }
     }
     
-    // Sample temperature from 3D texture
     float temp_K = texture(sampler3D(TemperatureData, DataSampler), frag_UVW).r;
     float temp_C = temp_K - 273.15;
     
-    // SURGICAL FIX 5b: ColorMapRange.x is min, ColorMapRange.y is RANGE (max-min)
     float tempMin = ubo.ColorMapRange.x;
-    float tempRange = max(ubo.ColorMapRange.y, 0.001);  // Avoid division by zero
+    float tempRange = max(ubo.ColorMapRange.y, 0.001);
     float t = clamp((temp_C - tempMin) / tempRange, 0.0, 1.0);
     
     vec4 color = texture(sampler1D(ColorMap, ColorMapSampler), t);
@@ -1952,13 +2274,30 @@ layout(location = 3) in vec3 frag_WorldPos;
 layout(location = 0) out vec4 FragColor;
 layout(set = 0, binding = 0) uniform UniformData {
     mat4 v; mat4 p; mat4 m; vec4 LightDirection; vec4 ViewPosition; vec4 ColorMapRange; vec4 si; vec4 RenderSettings; vec4 di; vec4 ClipPlane;
+    vec4 BoreholeClipBox; vec4 BoreholeClipCenter;
 } ubo;
 void main() {
+    if (ubo.BoreholeClipBox.w > 0.5) {
+        vec3 halfSize = ubo.BoreholeClipBox.xyz / 2.0;
+        vec3 localPos = frag_WorldPos - ubo.BoreholeClipCenter.xyz;
+        if (abs(localPos.x) > halfSize.x || abs(localPos.y) > halfSize.y) {
+            discard;
+        }
+    }
+    if (ubo.ClipPlane.w > 0.5) {
+        int axis = int(ubo.ClipPlane.x);
+        float position = ubo.ClipPlane.y;
+        float side = ubo.ClipPlane.z;
+        vec3 normalizedDomainPos = (frag_WorldPos - vec3(0, 0, ubo.di.y)) / vec3(ubo.di.x, ubo.di.x, ubo.di.z);
+        float coord = (axis == 0) ? normalizedDomainPos.x : ((axis == 1) ? normalizedDomainPos.y : normalizedDomainPos.z);
+        if (side > 0.5) { if (coord < position) discard; }
+        else { if (coord > position) discard; }
+    }
     vec3 normal = normalize(frag_Normal);
     float diffuse = max(dot(normal, normalize(ubo.LightDirection.xyz)), 0.3);
     vec3 viewDir = normalize(ubo.ViewPosition.xyz - frag_WorldPos);
     vec3 reflectDir = reflect(-normalize(ubo.LightDirection.xyz), normal);
-    float specular = pow(max(dot(viewDir, reflectDir), 0.0), 64) * 0.1; // Reduced from 0.5 to 0.1, sharper highlight
+    float specular = pow(max(dot(viewDir, reflectDir), 0.0), 64) * 0.1;
     vec3 finalColor = frag_Color.rgb * (diffuse + 0.25) + vec3(1.0) * specular;
     FragColor = vec4(finalColor, frag_Color.a * ubo.RenderSettings.y);
 }";
@@ -1973,19 +2312,22 @@ layout(location = 3) in vec3 frag_WorldPos;
 layout(location = 0) out vec4 FragColor;
 layout(set = 0, binding = 0) uniform UniformData {
     mat4 v; mat4 p; mat4 m; vec4 LightDirection; vec4 ViewPosition; vec4 ColorMapRange; vec4 si; vec4 RenderSettings; vec4 di; vec4 ClipPlane;
+    vec4 BoreholeClipBox; vec4 BoreholeClipCenter;
 } ubo;
 layout(set = 0, binding = 1) uniform texture1D ColorMap; layout(set = 0, binding = 2) uniform sampler ColorMapSampler;
 layout(set = 0, binding = 4) uniform texture3D VelocityData; layout(set = 0, binding = 5) uniform sampler DataSampler;
 void main() { 
-    // Sample velocity at this location to color streamline by flow speed
+    if (ubo.BoreholeClipBox.w > 0.5) {
+        vec3 halfSize = ubo.BoreholeClipBox.xyz / 2.0;
+        vec3 localPos = frag_WorldPos - ubo.BoreholeClipCenter.xyz;
+        if (abs(localPos.x) > halfSize.x || abs(localPos.y) > halfSize.y) {
+            discard;
+        }
+    }
     vec3 velocity = texture(sampler3D(VelocityData, DataSampler), frag_UVW).xyz;
     float magnitude = length(velocity);
     float t = clamp(magnitude / ubo.ColorMapRange.z, 0.0, 1.0);
-    
-    // Use color map for velocity-based coloring
     vec4 color = texture(sampler1D(ColorMap, ColorMapSampler), t);
-    
-    // Make streamlines bright and easy to see
     vec3 finalColor = mix(vec3(0.9, 0.1, 0.9), color.rgb, 0.7);
     FragColor = vec4(finalColor, 1.0); 
 }";
@@ -2000,16 +2342,14 @@ layout(location = 3) in vec3 frag_WorldPos;
 layout(location = 0) out vec4 FragColor;
 layout(set = 0, binding = 0) uniform UniformData {
     mat4 v; mat4 p; mat4 m; vec4 LightDirection; vec4 ViewPosition; vec4 ColorMapRange; vec4 SliceInfo; vec4 RenderSettings; vec4 DomainInfo; vec4 ClipPlane;
+    vec4 BoreholeClipBox; vec4 BoreholeClipCenter;
 } ubo;
 layout(set = 0, binding = 1) uniform texture1D ColorMap; layout(set = 0, binding = 2) uniform sampler ColorMapSampler;
 layout(set = 0, binding = 3) uniform texture3D TemperatureData; layout(set = 0, binding = 5) uniform sampler DataSampler;
 void main() {
     float domain_radius = ubo.DomainInfo.x;
-    
-    // Discard fragments outside the cylindrical domain
     if (length(frag_WorldPos.xy) > domain_radius) discard;
 
-    // Transform world position to cylindrical to get texture coords
     float r = length(frag_WorldPos.xy);
     float theta = atan(frag_WorldPos.y, frag_WorldPos.x);
     if (theta < 0.0) theta += 2.0 * 3.14159;
@@ -2019,13 +2359,11 @@ void main() {
     float temp_K = texture(sampler3D(TemperatureData, DataSampler), tex_coord_3d).r;
     float temp_C = temp_K - 273.15;
     
-    // SURGICAL FIX 8: Proper normalization using range (same as temperature shader)
     float tempMin = ubo.ColorMapRange.x;
     float tempRange = max(ubo.ColorMapRange.y, 0.001);
     float t = clamp((temp_C - tempMin) / tempRange, 0.0, 1.0);
     
     vec4 color = texture(sampler1D(ColorMap, ColorMapSampler), t);
-    
     FragColor = vec4(color.rgb, ubo.RenderSettings.y);
 }";
     }
@@ -2039,40 +2377,43 @@ layout(location = 3) in vec3 frag_WorldPos;
 layout(location = 0) out vec4 FragColor;
 layout(set = 0, binding = 0) uniform UniformData {
     mat4 v; mat4 p; mat4 m; vec4 LightDirection; vec4 ViewPosition; vec4 ColorMapRange; vec4 si; vec4 RenderSettings; vec4 di; vec4 ClipPlane;
+    vec4 BoreholeClipBox; vec4 BoreholeClipCenter;
 } ubo;
 layout(set = 0, binding = 1) uniform texture1D ColorMap; layout(set = 0, binding = 2) uniform sampler ColorMapSampler;
 layout(set = 0, binding = 4) uniform texture3D VelocityData; layout(set = 0, binding = 5) uniform sampler DataSampler;
 void main() {
+    if (ubo.BoreholeClipBox.w > 0.5) {
+        vec3 halfSize = ubo.BoreholeClipBox.xyz / 2.0;
+        vec3 localPos = frag_WorldPos - ubo.BoreholeClipCenter.xyz;
+        if (abs(localPos.x) > halfSize.x || abs(localPos.y) > halfSize.y) {
+            discard;
+        }
+    }
     vec3 velocity = texture(sampler3D(VelocityData, DataSampler), frag_UVW).xyz;
     float magnitude = length(velocity);
     
-    // Color based on velocity magnitude
     float t = clamp(magnitude / ubo.ColorMapRange.z, 0.0, 1.0);
     vec4 color = texture(sampler1D(ColorMap, ColorMapSampler), t);
     
-    // Add directional highlighting: create stripes based on velocity direction
     vec3 vel_normalized = magnitude > 1e-6 ? normalize(velocity) : vec3(0, 0, 1);
     float stripePattern = sin(dot(frag_WorldPos, vel_normalized) * 3.14159 * 2.0) * 0.5 + 0.5;
-    float directionStrength = 0.3 * stripePattern * t; // Only visible where velocity is significant
+    float directionStrength = 0.3 * stripePattern * t;
     
-    // Lighting
     vec3 normal = normalize(frag_Normal);
     float diffuse = max(dot(normal, normalize(ubo.LightDirection.xyz)), 0.3);
     
-    // Final color with directional pattern
     vec3 finalColor = color.rgb * diffuse + vec3(directionStrength);
     FragColor = vec4(finalColor, ubo.RenderSettings.y);
 }";
     }
 
-    // Helper struct to hold Veldrid resources for a renderable mesh
     private struct GpuMesh : IDisposable
     {
         public DeviceBuffer VertexBuffer;
         public DeviceBuffer IndexBuffer;
         public uint IndexCount;
         public Mesh3DDataset Source;
-        public bool IsWireframe; // Flag to indicate if this should be rendered as lines
+        public bool IsWireframe; 
 
         public void Dispose()
         {
@@ -2089,11 +2430,13 @@ void main() {
         public Matrix4x4 ModelMatrix;
         public Vector4 LightDirection;
         public Vector4 ViewPosition;
-        public Vector4 ColorMapRange; // x=min_temp_C, y=range_temp_C, z=vel_max
-        public Vector4 SliceInfo; // x=depth(0-1)
-        public Vector4 RenderSettings; // x=mode, y=opacity, z=time, w=isoValue_K
-        public Vector4 DomainInfo; // x=radius, y=z_min, z=z_range
-        public Vector4 ClipPlane; // x=axis(0-2), y=position(0-1), z=side(0/1), w=enabled(0/1)
+        public Vector4 ColorMapRange; 
+        public Vector4 SliceInfo; 
+        public Vector4 RenderSettings; 
+        public Vector4 DomainInfo; 
+        public Vector4 ClipPlane; 
+        public Vector4 BoreholeClipBox; // x,y,z = size, w = enabled
+        public Vector4 BoreholeClipCenter;
     }
 
     [StructLayout(LayoutKind.Sequential)]
