@@ -22,6 +22,7 @@ public class GeothermalSimulationTools : IDatasetTools, IDisposable
     private readonly float _newLayerPermeability = 1e-14f;
     private readonly GeothermalSimulationOptions _options = new();
     private CancellationTokenSource _cancellationTokenSource;
+    private BoreholeCrossSectionViewer _crossSectionViewer;
     private GeothermalSimulationSolver _currentSolver; // Track the active solver
 
     private bool _isSimulationRunning;
@@ -62,7 +63,6 @@ public class GeothermalSimulationTools : IDatasetTools, IDisposable
     private string _simulationMessage = "";
     private float _simulationProgress;
     private GeothermalVisualization3D _visualization3D;
-    private BoreholeCrossSectionViewer _crossSectionViewer;
 
     public void Draw(Dataset dataset)
     {
@@ -76,6 +76,10 @@ public class GeothermalSimulationTools : IDatasetTools, IDisposable
         if (_options.BoreholeDataset != boreholeDataset)
         {
             _options.BoreholeDataset = boreholeDataset;
+            // --- MODIFICATION START ---
+            // Ensure Heat Exchanger Depth is reset to the new borehole's total depth on dataset change
+            _options.HeatExchangerDepth = boreholeDataset.TotalDepth;
+            // --- MODIFICATION END ---
 
             // CRITICAL FIX: Clear existing layer data when loading new borehole
             _options.LayerThermalConductivities.Clear();
@@ -132,6 +136,7 @@ public class GeothermalSimulationTools : IDatasetTools, IDisposable
                 ExportResults(selectedPath);
             }
     }
+
 
     public void Dispose()
     {
@@ -691,22 +696,42 @@ public class GeothermalSimulationTools : IDatasetTools, IDisposable
                 _options.PipeThermalConductivity = pipeConductivity;
                 _selectedPreset = 0; // Switch to Custom
             }
+
             if (_options.HeatExchangerType == HeatExchangerType.Coaxial)
             {
                 var innerPipeConductivity = (float)_options.InnerPipeThermalConductivity;
-                if (ImGui.SliderFloat("Inner Pipe Conductivity (W/m·K)", ref innerPipeConductivity, 0.01f, 50.0f, "%.3f", ImGuiSliderFlags.Logarithmic))
+                if (ImGui.SliderFloat("Inner Pipe Conductivity (W/m·K)", ref innerPipeConductivity, 0.01f, 50.0f,
+                        "%.3f", ImGuiSliderFlags.Logarithmic))
                 {
                     _options.InnerPipeThermalConductivity = innerPipeConductivity;
                     _selectedPreset = 0; // Switch to Custom
                 }
-                ImGui.SetItemTooltip("Controls internal heat loss.\nLow (<0.1): Insulated (VIT)\nHigh (>15): Conductive (Steel)");
+
+                ImGui.SetItemTooltip(
+                    "Controls internal heat loss.\nLow (<0.1): Insulated (VIT)\nHigh (>15): Conductive (Steel)");
             }
+
             var groutConductivity = (float)_options.GroutThermalConductivity;
             if (ImGui.SliderFloat("Grout Conductivity (W/m·K)", ref groutConductivity, 1.0f, 5.0f))
             {
                 _options.GroutThermalConductivity = groutConductivity;
                 _selectedPreset = 0; // Switch to Custom
             }
+
+            // --- MODIFICATION START ---
+            ImGui.Separator();
+            ImGui.Text("Operational Depth");
+            var heDepth = _options.HeatExchangerDepth;
+            if (ImGui.SliderFloat("Heat Exchanger Depth (m)", ref heDepth, 10.0f, _options.BoreholeDataset.TotalDepth,
+                    "%.1f m"))
+            {
+                _options.HeatExchangerDepth = heDepth;
+                _selectedPreset = 0; // Switch to Custom
+            }
+
+            ImGui.SetItemTooltip(
+                $"Sets the active depth of the heat exchanger down to a maximum of the borehole's total depth ({_options.BoreholeDataset.TotalDepth:F1} m).");
+            // --- MODIFICATION END ---
         }
 
         // Fluid Properties
@@ -900,9 +925,13 @@ public class GeothermalSimulationTools : IDatasetTools, IDisposable
                 if (ImGui.SliderFloat("Domain Radius (m)", ref domainRadius, 20, 200))
                     _options.DomainRadius = domainRadius;
 
+                // --- MODIFICATION START ---
                 var domainExt = (float)_options.DomainExtension;
-                if (ImGui.SliderFloat("Domain Extension (m)", ref domainExt, 0, 50))
+                if (ImGui.SliderFloat("Domain Extension (m)", ref domainExt, 0, 500))
                     _options.DomainExtension = domainExt;
+                ImGui.SetItemTooltip(
+                    "How far the simulation domain extends below the borehole bottom and above the surface.\nA value of at least 50m is recommended to observe effects below the borehole.");
+                // --- MODIFICATION END ---
 
                 var radialGridPoints = _options.RadialGridPoints;
                 if (ImGui.SliderInt("Radial Grid Points", ref radialGridPoints, 20, 100))
@@ -981,6 +1010,7 @@ public class GeothermalSimulationTools : IDatasetTools, IDisposable
             }
         }
     }
+
 
     private void RenderSimulationProgress()
     {
@@ -1158,7 +1188,7 @@ public class GeothermalSimulationTools : IDatasetTools, IDisposable
             ImGui.SameLine();
             ImGui.TextColored(new Vector4(0.2f, 1.0f, 0.2f, 1.0f), "● 3D View Active");
         }
-        
+
         // SURGICAL FIX 2: Add button to initialize 2D visualization if not done yet
         if (_crossSectionViewer == null && _results != null && _mesh != null)
         {
@@ -1169,6 +1199,7 @@ public class GeothermalSimulationTools : IDatasetTools, IDisposable
                 _crossSectionViewer.LoadResults(_results, _mesh, _options);
                 Logger.Log("2D cross-section viewer initialized");
             }
+
             ImGui.SetItemTooltip("Initialize the 2D borehole cross-section viewer");
         }
 
@@ -1657,11 +1688,11 @@ public class GeothermalSimulationTools : IDatasetTools, IDisposable
             if (_results != null && _mesh != null)
             {
                 _visualization3D.LoadResults(_results, _mesh, _options);
-                
+
                 // SURGICAL FIX 1: Initialize 2D cross-section viewer
                 if (_crossSectionViewer == null)
                     _crossSectionViewer = new BoreholeCrossSectionViewer();
-                
+
                 _crossSectionViewer.LoadResults(_results, _mesh, _options);
             }
         }
@@ -1896,15 +1927,15 @@ public class GeothermalSimulationTools : IDatasetTools, IDisposable
             }
         });
     }
-    
+
     /// <summary>
-    /// Renders the cross-section tab, now using the custom ImGui renderer.
+    ///     Renders the cross-section tab, now using the custom ImGui renderer.
     /// </summary>
     private void RenderCrossSectionTab()
     {
         if (_crossSectionViewer == null)
         {
-            ImGui.TextColored(new Vector4(1, 0.5f, 0, 1), 
+            ImGui.TextColored(new Vector4(1, 0.5f, 0, 1),
                 "2D Cross-section viewer not initialized. Run a simulation first.");
             return;
         }
@@ -1946,9 +1977,7 @@ public class GeothermalSimulationTools : IDatasetTools, IDisposable
 
             // Create line segments (faces with 2 vertices) connecting the points of the streamline
             for (var i = 0; i < streamline.Count - 1; i++)
-            {
                 faces.Add(new[] { baseVertexIndex + i, baseVertexIndex + i + 1 });
-            }
         }
 
         // Populate the mesh object with the generated data

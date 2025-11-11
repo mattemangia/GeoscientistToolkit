@@ -3,7 +3,6 @@
 using System.Numerics;
 using GeoscientistToolkit.Data.Borehole;
 using GeoscientistToolkit.Data.Mesh3D;
-using GeoscientistToolkit.UI.Visualization;
 using GeoscientistToolkit.Util;
 using ImGuiNET;
 

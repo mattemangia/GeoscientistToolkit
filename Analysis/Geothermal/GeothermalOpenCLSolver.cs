@@ -111,11 +111,17 @@ public class GeothermalOpenCLSolver : IDisposable
 {
     private readonly CL _cl;
     private nint _boundaryConditionsKernel;
+    private nint _cellVolumesBuffer; // Cell volumes for heat transfer calculations
     private nint _conductivityBuffer;
     private nint _context;
     private nint _densityBuffer;
     private nint _device;
     private nint _dispersionBuffer;
+    private nint _fluidTempDownBuffer; // Downward fluid temperatures
+    private nint _fluidTempUpBuffer; // Upward fluid temperatures  
+    private nint _materialIdBuffer;
+    // ADDED: Heat exchanger buffers
+    private nint _heatExchangerParamsBuffer; // Contains: pipeRadius, boreholeDepth, fluidInletTemp, etc.
 
     // Kernels
     private nint _heatTransferKernel;
@@ -124,6 +130,7 @@ public class GeothermalOpenCLSolver : IDisposable
     private nint _maxChangeBuffer;
     private nint _newTempBuffer;
     private int _nr, _nth, _nz;
+    private int _nzHE; // Number of heat exchanger elements
     private nint _program;
     private nint _queue;
     private nint _rCoordBuffer;
@@ -132,19 +139,12 @@ public class GeothermalOpenCLSolver : IDisposable
 
     // Buffers
     private nint _temperatureBuffer;
+
+    // FIX: Dedicated buffer for per-cell temperature changes to fix reduction errors
+    private nint _temperatureChangeBuffer;
     private nint _temperatureOldBuffer;
     private nint _velocityBuffer;
     private nint _zCoordBuffer;
-    
-    // ADDED: Heat exchanger buffers
-    private nint _heatExchangerParamsBuffer;  // Contains: pipeRadius, boreholeDepth, fluidInletTemp, etc.
-    private nint _fluidTempDownBuffer;        // Downward fluid temperatures
-    private nint _fluidTempUpBuffer;          // Upward fluid temperatures  
-    private nint _cellVolumesBuffer;          // Cell volumes for heat transfer calculations
-    private int _nzHE;                        // Number of heat exchanger elements
-    
-    // FIX: Dedicated buffer for per-cell temperature changes to fix reduction errors
-    private nint _temperatureChangeBuffer;
 
     public GeothermalOpenCLSolver()
     {
@@ -164,7 +164,7 @@ public class GeothermalOpenCLSolver : IDisposable
         if (_fluidTempDownBuffer != 0) _cl.ReleaseMemObject(_fluidTempDownBuffer);
         if (_fluidTempUpBuffer != 0) _cl.ReleaseMemObject(_fluidTempUpBuffer);
         if (_cellVolumesBuffer != 0) _cl.ReleaseMemObject(_cellVolumesBuffer);
-        
+
         if (_maxChangeBuffer != 0) _cl.ReleaseMemObject(_maxChangeBuffer);
         if (_zCoordBuffer != 0) _cl.ReleaseMemObject(_zCoordBuffer);
         if (_rCoordBuffer != 0) _cl.ReleaseMemObject(_rCoordBuffer);
@@ -176,7 +176,7 @@ public class GeothermalOpenCLSolver : IDisposable
         if (_newTempBuffer != 0) _cl.ReleaseMemObject(_newTempBuffer);
         if (_temperatureOldBuffer != 0) _cl.ReleaseMemObject(_temperatureOldBuffer);
         if (_temperatureBuffer != 0) _cl.ReleaseMemObject(_temperatureBuffer);
-        
+
         // FIX: Release the change buffer
         if (_temperatureChangeBuffer != 0) _cl.ReleaseMemObject(_temperatureChangeBuffer);
 
@@ -200,7 +200,7 @@ public class GeothermalOpenCLSolver : IDisposable
         try
         {
             Logger.Log("Attempting to initialize OpenCL...");
-            
+
             // Get platform
             uint numPlatforms;
             _cl.GetPlatformIDs(0, null, &numPlatforms);
@@ -211,7 +211,7 @@ public class GeothermalOpenCLSolver : IDisposable
                 Logger.LogWarning("Please ensure GPU drivers with OpenCL support are installed.");
                 return false;
             }
-            
+
             Logger.Log($"Found {numPlatforms} OpenCL platform(s)");
 
             var platforms = new nint[numPlatforms];
@@ -321,9 +321,6 @@ public class GeothermalOpenCLSolver : IDisposable
     /// <summary>
     ///     Compiles OpenCL kernels for heat transfer simulation.
     /// </summary>
-    /// <summary>
-    ///     Compiles OpenCL kernels for heat transfer simulation.
-    /// </summary>
     private unsafe bool CompileKernels()
     {
         var kernelSource = GetKernelSource();
@@ -395,400 +392,422 @@ public class GeothermalOpenCLSolver : IDisposable
     /// <summary>
     ///     Initializes GPU buffers for simulation data.
     /// </summary>
-    public unsafe bool InitializeBuffers(GeothermalMesh mesh, GeothermalSimulationOptions options)
-{
-    if (!IsAvailable)
-        return false;
-
-    _nr   = mesh.RadialPoints;
-    _nth  = mesh.AngularPoints;
-    _nz   = mesh.VerticalPoints;
-    _nzHE = Math.Max(20, (int)(options.BoreholeDataset.TotalDepth / 50)); // elementi HE lungo il pozzo
-
-    try
-    {
-        int errCode;
-        var totalSize = _nr * _nth * _nz;
-
-        // --- campi scalari/3D della mesh
-        _temperatureBuffer = _cl.CreateBuffer(_context, MemFlags.ReadWrite,
-            (nuint)(totalSize * sizeof(float)), null, &errCode);
-        CheckError(errCode, "temperatureBuffer");
-
-        _temperatureOldBuffer = _cl.CreateBuffer(_context, MemFlags.ReadWrite,
-            (nuint)(totalSize * sizeof(float)), null, &errCode);
-        CheckError(errCode, "temperatureOldBuffer");
-
-        _newTempBuffer = _cl.CreateBuffer(_context, MemFlags.ReadWrite,
-            (nuint)(totalSize * sizeof(float)), null, &errCode);
-        CheckError(errCode, "newTempBuffer");
-
-        _conductivityBuffer = _cl.CreateBuffer(_context, MemFlags.ReadOnly,
-            (nuint)(totalSize * sizeof(float)), null, &errCode);
-        CheckError(errCode, "conductivityBuffer");
-
-        _densityBuffer = _cl.CreateBuffer(_context, MemFlags.ReadOnly,
-            (nuint)(totalSize * sizeof(float)), null, &errCode);
-        CheckError(errCode, "densityBuffer");
-
-        _specificHeatBuffer = _cl.CreateBuffer(_context, MemFlags.ReadOnly,
-            (nuint)(totalSize * sizeof(float)), null, &errCode);
-        CheckError(errCode, "specificHeatBuffer");
-
-        _velocityBuffer = _cl.CreateBuffer(_context, MemFlags.ReadOnly,
-            (nuint)(totalSize * 3 * sizeof(float)), null, &errCode);
-        CheckError(errCode, "velocityBuffer");
-
-        _dispersionBuffer = _cl.CreateBuffer(_context, MemFlags.ReadOnly,
-            (nuint)(totalSize * sizeof(float)), null, &errCode);
-        CheckError(errCode, "dispersionBuffer");
-
-        _rCoordBuffer = _cl.CreateBuffer(_context, MemFlags.ReadOnly,
-            (nuint)(_nr * sizeof(float)), null, &errCode);
-        CheckError(errCode, "rCoordBuffer");
-
-        _zCoordBuffer = _cl.CreateBuffer(_context, MemFlags.ReadOnly,
-            (nuint)(_nz * sizeof(float)), null, &errCode);
-        CheckError(errCode, "zCoordBuffer");
-
-        // --- buffer per la riduzione del max |ΔT|
-        // 1) output parziali per gruppo (dimensione iniziale conservativa: 1024 gruppi)
-        _maxChangeBuffer = _cl.CreateBuffer(_context, MemFlags.ReadWrite,
-            (nuint)(1024 * sizeof(float)), null, &errCode);
-        CheckError(errCode, "maxChangeBuffer");
-
-        // 2) buffer dedicato ai cambiamenti per cella (input della riduzione)
-        _temperatureChangeBuffer = _cl.CreateBuffer(_context, MemFlags.ReadWrite,
-            (nuint)(totalSize * sizeof(float)), null, &errCode);
-        CheckError(errCode, "temperatureChangeBuffer");
-
-        // --- buffer scambio con scambiatore (HE)
-        // [pipeRadius, boreholeDepth, inletTemp, mdot, cp_fluid, baseHTC, heType(0/1), nzHE, ...]
-        _heatExchangerParamsBuffer = _cl.CreateBuffer(_context, MemFlags.ReadOnly,
-            (nuint)(16 * sizeof(float)), null, &errCode);
-        CheckError(errCode, "heatExchangerParamsBuffer");
-
-        _fluidTempDownBuffer = _cl.CreateBuffer(_context, MemFlags.ReadWrite,
-            (nuint)(_nzHE * sizeof(float)), null, &errCode);
-        CheckError(errCode, "fluidTempDownBuffer");
-
-        _fluidTempUpBuffer = _cl.CreateBuffer(_context, MemFlags.ReadWrite,
-            (nuint)(_nzHE * sizeof(float)), null, &errCode);
-        CheckError(errCode, "fluidTempUpBuffer");
-
-        _cellVolumesBuffer = _cl.CreateBuffer(_context, MemFlags.ReadOnly,
-            (nuint)(totalSize * sizeof(float)), null, &errCode);
-        CheckError(errCode, "cellVolumesBuffer");
-
-        // Upload dei dati statici di mesh
-        UploadMeshData(mesh);
-
-        // Parametri HE iniziali (in base a options)
-        UploadHeatExchangerParams(options);
-
-        _isInitialized = true;
-        return true;
-    }
-    catch (Exception ex)
-    {
-        Console.WriteLine($"Failed to initialize OpenCL buffers: {ex.Message}");
-        return false;
-    }
-}
-
-
+   public unsafe bool InitializeBuffers(GeothermalMesh mesh, GeothermalSimulationOptions options)
+   {
+       if (!IsAvailable)
+           return false;
+   
+       _nr   = mesh.RadialPoints;
+       _nth  = mesh.AngularPoints;
+       _nz   = mesh.VerticalPoints;
+       _nzHE = Math.Max(20, (int)(options.BoreholeDataset.TotalDepth / 50));
+   
+       try
+       {
+           int errCode;
+           var totalSize = _nr * _nth * _nz;
+   
+           // --- 3D mesh field buffers
+           _temperatureBuffer = _cl.CreateBuffer(_context, MemFlags.ReadWrite,
+               (nuint)(totalSize * sizeof(float)), null, &errCode);
+           CheckError(errCode, "temperatureBuffer");
+   
+           _temperatureOldBuffer = _cl.CreateBuffer(_context, MemFlags.ReadWrite,
+               (nuint)(totalSize * sizeof(float)), null, &errCode);
+           CheckError(errCode, "temperatureOldBuffer");
+   
+           _newTempBuffer = _cl.CreateBuffer(_context, MemFlags.ReadWrite,
+               (nuint)(totalSize * sizeof(float)), null, &errCode);
+           CheckError(errCode, "newTempBuffer");
+   
+           _conductivityBuffer = _cl.CreateBuffer(_context, MemFlags.ReadOnly,
+               (nuint)(totalSize * sizeof(float)), null, &errCode);
+           CheckError(errCode, "conductivityBuffer");
+   
+           _densityBuffer = _cl.CreateBuffer(_context, MemFlags.ReadOnly,
+               (nuint)(totalSize * sizeof(float)), null, &errCode);
+           CheckError(errCode, "densityBuffer");
+   
+           _specificHeatBuffer = _cl.CreateBuffer(_context, MemFlags.ReadOnly,
+               (nuint)(totalSize * sizeof(float)), null, &errCode);
+           CheckError(errCode, "specificHeatBuffer");
+   
+           _velocityBuffer = _cl.CreateBuffer(_context, MemFlags.ReadOnly,
+               (nuint)(totalSize * 3 * sizeof(float)), null, &errCode);
+           CheckError(errCode, "velocityBuffer");
+   
+           _dispersionBuffer = _cl.CreateBuffer(_context, MemFlags.ReadOnly,
+               (nuint)(totalSize * sizeof(float)), null, &errCode);
+           CheckError(errCode, "dispersionBuffer");
+   
+           _rCoordBuffer = _cl.CreateBuffer(_context, MemFlags.ReadOnly,
+               (nuint)(_nr * sizeof(float)), null, &errCode);
+           CheckError(errCode, "rCoordBuffer");
+   
+           _zCoordBuffer = _cl.CreateBuffer(_context, MemFlags.ReadOnly,
+               (nuint)(_nz * sizeof(float)), null, &errCode);
+           CheckError(errCode, "zCoordBuffer");
+   
+           // --- DEFINITIVE FIX START ---
+           // Create a buffer for the Material IDs
+           _materialIdBuffer = _cl.CreateBuffer(_context, MemFlags.ReadOnly,
+               (nuint)(totalSize * sizeof(byte)), null, &errCode);
+           CheckError(errCode, "materialIdBuffer");
+           // --- DEFINITIVE FIX END ---
+   
+           // --- Reduction buffers for max |ΔT|
+           _maxChangeBuffer = _cl.CreateBuffer(_context, MemFlags.ReadWrite,
+               (nuint)(1024 * sizeof(float)), null, &errCode);
+           CheckError(errCode, "maxChangeBuffer");
+   
+           _temperatureChangeBuffer = _cl.CreateBuffer(_context, MemFlags.ReadWrite,
+               (nuint)(totalSize * sizeof(float)), null, &errCode);
+           CheckError(errCode, "temperatureChangeBuffer");
+   
+           // --- Heat exchanger (HE) buffers
+           _heatExchangerParamsBuffer = _cl.CreateBuffer(_context, MemFlags.ReadOnly,
+               (nuint)(16 * sizeof(float)), null, &errCode);
+           CheckError(errCode, "heatExchangerParamsBuffer");
+   
+           _fluidTempDownBuffer = _cl.CreateBuffer(_context, MemFlags.ReadWrite,
+               (nuint)(_nzHE * sizeof(float)), null, &errCode);
+           CheckError(errCode, "fluidTempDownBuffer");
+   
+           _fluidTempUpBuffer = _cl.CreateBuffer(_context, MemFlags.ReadWrite,
+               (nuint)(_nzHE * sizeof(float)), null, &errCode);
+           CheckError(errCode, "fluidTempUpBuffer");
+   
+           _cellVolumesBuffer = _cl.CreateBuffer(_context, MemFlags.ReadOnly,
+               (nuint)(totalSize * sizeof(float)), null, &errCode);
+           CheckError(errCode, "cellVolumesBuffer");
+   
+           // Upload static mesh data
+           UploadMeshData(mesh);
+   
+           // Upload initial HE parameters
+           UploadHeatExchangerParams(options);
+   
+           _isInitialized = true;
+           return true;
+       }
+       catch (Exception ex)
+       {
+           Console.WriteLine($"Failed to initialize OpenCL buffers: {ex.Message}");
+           return false;
+       }
+   }
     /// <summary>
     ///     Uploads mesh data to GPU.
     /// </summary>
     private unsafe void UploadMeshData(GeothermalMesh mesh)
+{
+    var totalSize = _nr * _nth * _nz;
+
+    // Flatten 3D arrays to 1D for GPU upload
+    var conductivity = new float[totalSize];
+    var density = new float[totalSize];
+    var specificHeat = new float[totalSize];
+    var cellVolumes = new float[totalSize];
+    // --- DEFINITIVE FIX START ---
+    var materialIds = new byte[totalSize];
+    // --- DEFINITIVE FIX END ---
+
+    var idx = 0;
+    for (var i = 0; i < _nr; i++)
+    for (var j = 0; j < _nth; j++)
+    for (var k = 0; k < _nz; k++)
     {
-        var totalSize = _nr * _nth * _nz;
+        conductivity[idx] = mesh.ThermalConductivities[i, j, k];
+        density[idx] = mesh.Densities[i, j, k];
+        specificHeat[idx] = mesh.SpecificHeats[i, j, k];
+        cellVolumes[idx] = mesh.CellVolumes[i, j, k];
+        // --- DEFINITIVE FIX START ---
+        materialIds[idx] = mesh.MaterialIds[i, j, k];
+        // --- DEFINITIVE FIX END ---
+        idx++;
+    }
 
-        // Flatten 3D arrays to 1D for GPU upload
-        var conductivity = new float[totalSize];
-        var density = new float[totalSize];
-        var specificHeat = new float[totalSize];
-        var cellVolumes = new float[totalSize];  // ADDED
+    // Upload data to GPU
+    fixed (float* conductivityPtr = conductivity)
+    {
+        _cl.EnqueueWriteBuffer(_queue, _conductivityBuffer, true, 0,
+            (nuint)(totalSize * sizeof(float)), conductivityPtr, 0, null, null);
+    }
 
-        var idx = 0;
-        for (var i = 0; i < _nr; i++)
-        for (var j = 0; j < _nth; j++)
-        for (var k = 0; k < _nz; k++)
-        {
-            conductivity[idx] = mesh.ThermalConductivities[i, j, k];
-            density[idx] = mesh.Densities[i, j, k];
-            specificHeat[idx] = mesh.SpecificHeats[i, j, k];
-            cellVolumes[idx] = mesh.CellVolumes[i, j, k];  // ADDED
-            idx++;
-        }
+    fixed (float* densityPtr = density)
+    {
+        _cl.EnqueueWriteBuffer(_queue, _densityBuffer, true, 0,
+            (nuint)(totalSize * sizeof(float)), densityPtr, 0, null, null);
+    }
 
-        // Upload data to GPU
-        fixed (float* conductivityPtr = conductivity)
-        {
-            _cl.EnqueueWriteBuffer(_queue, _conductivityBuffer, true, 0,
-                (nuint)(totalSize * sizeof(float)), conductivityPtr, 0, null, null);
-        }
-
-        fixed (float* densityPtr = density)
-        {
-            _cl.EnqueueWriteBuffer(_queue, _densityBuffer, true, 0,
-                (nuint)(totalSize * sizeof(float)), densityPtr, 0, null, null);
-        }
-
-        fixed (float* specificHeatPtr = specificHeat)
-        {
-            _cl.EnqueueWriteBuffer(_queue, _specificHeatBuffer, true, 0,
-                (nuint)(totalSize * sizeof(float)), specificHeatPtr, 0, null, null);
-        }
-        
-        // ADDED: Upload cell volumes
-        fixed (float* cellVolumesPtr = cellVolumes)
-        {
-            _cl.EnqueueWriteBuffer(_queue, _cellVolumesBuffer, true, 0,
-                (nuint)(totalSize * sizeof(float)), cellVolumesPtr, 0, null, null);
-        }
-
-        fixed (float* rPtr = mesh.R)
-        {
-            _cl.EnqueueWriteBuffer(_queue, _rCoordBuffer, true, 0,
-                (nuint)(_nr * sizeof(float)), rPtr, 0, null, null);
-        }
-
-        fixed (float* zPtr = mesh.Z)
-        {
-            _cl.EnqueueWriteBuffer(_queue, _zCoordBuffer, true, 0,
-                (nuint)(_nz * sizeof(float)), zPtr, 0, null, null);
-        }
+    fixed (float* specificHeatPtr = specificHeat)
+    {
+        _cl.EnqueueWriteBuffer(_queue, _specificHeatBuffer, true, 0,
+            (nuint)(totalSize * sizeof(float)), specificHeatPtr, 0, null, null);
     }
     
+    fixed (float* cellVolumesPtr = cellVolumes)
+    {
+        _cl.EnqueueWriteBuffer(_queue, _cellVolumesBuffer, true, 0,
+            (nuint)(totalSize * sizeof(float)), cellVolumesPtr, 0, null, null);
+    }
+
+    fixed (float* rPtr = mesh.R)
+    {
+        _cl.EnqueueWriteBuffer(_queue, _rCoordBuffer, true, 0,
+            (nuint)(_nr * sizeof(float)), rPtr, 0, null, null);
+    }
+
+    fixed (float* zPtr = mesh.Z)
+    {
+        _cl.EnqueueWriteBuffer(_queue, _zCoordBuffer, true, 0,
+            (nuint)(_nz * sizeof(float)), zPtr, 0, null, null);
+    }
+
+    // --- DEFINITIVE FIX START ---
+    // Upload the material IDs to the new buffer
+    fixed (byte* materialIdsPtr = materialIds)
+    {
+        _cl.EnqueueWriteBuffer(_queue, _materialIdBuffer, true, 0,
+            (nuint)(totalSize * sizeof(byte)), materialIdsPtr, 0, null, null);
+    }
+    // --- DEFINITIVE FIX END ---
+}
+
     /// <summary>
     ///     Uploads heat exchanger parameters to GPU. (ADDED)
     /// </summary>
     private unsafe void UploadHeatExchangerParams(GeothermalSimulationOptions options)
+{
+    // Calculate heat transfer coefficient using Reynolds number
+    var D_inner = (float)options.PipeInnerDiameter;
+    var mu = (float)options.FluidViscosity;
+    var mdot = (float)options.FluidMassFlowRate;
+    var Re = 4.0f * mdot / (MathF.PI * D_inner * mu);
+    
+    var Pr = (float)(options.FluidViscosity * options.FluidSpecificHeat / options.FluidThermalConductivity);
+    
+    float Nu;
+    if (Re < 2300)
     {
-        // Calculate heat transfer coefficient using Reynolds number
-        var D_inner = (float)options.PipeInnerDiameter;
-        var mu = (float)options.FluidViscosity;
-        var mdot = (float)options.FluidMassFlowRate;
-        var Re = 4.0f * mdot / (MathF.PI * D_inner * mu);
-        
-        var Pr = (float)(options.FluidViscosity * options.FluidSpecificHeat / options.FluidThermalConductivity);
-        
-        float Nu;
-        if (Re < 2300)
-        {
-            // Laminar flow
-            Nu = 4.36f;
-        }
-        else
-        {
-            // Turbulent flow - Dittus-Boelter correlation
-            Nu = 0.023f * MathF.Pow(Re, 0.8f) * MathF.Pow(Pr, 0.4f);
-        }
-        
-        var h = Nu * (float)options.FluidThermalConductivity / D_inner;
-        
-        // ENHANCED: Double the base heat transfer coefficient for better coupling
-        var baseHTC = Math.Min(2000f, h * 2.0f);
-        
-        // Pack heat exchanger parameters
-        var heParams = new float[16];
-        heParams[0] = (float)(options.PipeOuterDiameter / 2.0);  // Pipe radius
-        heParams[1] = (float)options.BoreholeDataset.TotalDepth;  // Borehole depth
-        heParams[2] = (float)options.FluidInletTemperature;       // Inlet temperature
-        heParams[3] = (float)options.FluidMassFlowRate;          // Mass flow rate
-        heParams[4] = (float)options.FluidSpecificHeat;          // Specific heat
-        heParams[5] = baseHTC;  // Enhanced base heat transfer coefficient
-        heParams[6] = options.HeatExchangerType == HeatExchangerType.UTube ? 1f : 0f;  // Type
-        heParams[7] = _nzHE;  // Number of HE elements
-        heParams[8] = (float)options.FluidViscosity;             // Fluid viscosity
-        heParams[9] = (float)options.FluidThermalConductivity;   // Fluid thermal conductivity
-        heParams[10] = (float)options.PipeInnerDiameter;         // Inner diameter for Reynolds calculation
-        
-        fixed (float* paramsPtr = heParams)
-        {
-            _cl.EnqueueWriteBuffer(_queue, _heatExchangerParamsBuffer, true, 0,
-                (nuint)(16 * sizeof(float)), paramsPtr, 0, null, null);
-        }
-        
-        // Initialize fluid temperatures
-        var fluidTemps = new float[_nzHE];
-        for (var i = 0; i < _nzHE; i++)
-        {
-            fluidTemps[i] = (float)options.FluidInletTemperature;
-        }
-        
-        fixed (float* tempPtr = fluidTemps)
-        {
-            _cl.EnqueueWriteBuffer(_queue, _fluidTempDownBuffer, true, 0,
-                (nuint)(_nzHE * sizeof(float)), tempPtr, 0, null, null);
-            _cl.EnqueueWriteBuffer(_queue, _fluidTempUpBuffer, true, 0,
-                (nuint)(_nzHE * sizeof(float)), tempPtr, 0, null, null);
-        }
+        // Laminar flow
+        Nu = 4.36f;
     }
+    else
+    {
+        // Turbulent flow - Dittus-Boelter correlation
+        Nu = 0.023f * MathF.Pow(Re, 0.8f) * MathF.Pow(Pr, 0.4f);
+    }
+    
+    var h = Nu * (float)options.FluidThermalConductivity / D_inner;
+    
+    // ENHANCED: Double the base heat transfer coefficient for better coupling
+    var baseHTC = Math.Min(2000f, h * 2.0f);
+    
+    // Pack heat exchanger parameters
+    var heParams = new float[16];
+    heParams[0] = (float)(options.PipeOuterDiameter / 2.0);  // Pipe radius
+    // --- DEFINITIVE FIX START ---
+    heParams[1] = (float)options.BoreholeDataset.TotalDepth; // MUST be full depth for correct indexing
+    heParams[2] = (float)options.FluidInletTemperature;
+    heParams[3] = (float)options.FluidMassFlowRate;
+    heParams[4] = (float)options.FluidSpecificHeat;
+    heParams[5] = baseHTC;
+    heParams[6] = options.HeatExchangerType == HeatExchangerType.UTube ? 1f : 0f;
+    heParams[7] = _nzHE;
+    heParams[8] = (float)options.FluidViscosity;
+    heParams[9] = (float)options.FluidThermalConductivity;
+    heParams[10] = (float)options.PipeInnerDiameter;
+    heParams[11] = (float)options.HeatExchangerDepth; // NEW: Pass the active HE depth separately
+    // --- DEFINITIVE FIX END ---
 
-   /// <summary>
+    fixed (float* paramsPtr = heParams)
+    {
+        _cl.EnqueueWriteBuffer(_queue, _heatExchangerParamsBuffer, true, 0,
+            (nuint)(16 * sizeof(float)), paramsPtr, 0, null, null);
+    }
+    
+    // Initialize fluid temperatures
+    var fluidTemps = new float[_nzHE];
+    for (var i = 0; i < _nzHE; i++)
+    {
+        fluidTemps[i] = (float)options.FluidInletTemperature;
+    }
+    
+    fixed (float* tempPtr = fluidTemps)
+    {
+        _cl.EnqueueWriteBuffer(_queue, _fluidTempDownBuffer, true, 0,
+            (nuint)(_nzHE * sizeof(float)), tempPtr, 0, null, null);
+        _cl.EnqueueWriteBuffer(_queue, _fluidTempUpBuffer, true, 0,
+            (nuint)(_nzHE * sizeof(float)), tempPtr, 0, null, null);
+    }
+}
+
+    /// <summary>
     ///     Solves heat transfer on GPU for one time step.
     ///     CORRECTED: The signature has been cleaned up to remove unused iterative solver
     ///     parameters (maxIterations, convergenceTolerance) to reflect its true purpose as a
     ///     single-pass, transient time-step solver. The core logic of executing a single
     ///     kernel pass per time step was already correct.
     /// </summary>
-  public unsafe float SolveHeatTransferGPU(
-    float[,,]   temperature,
-    float[,,,]  velocity,
-    float[,,]   dispersion,
-    float       dt,
-    bool        simulateGroundwater,
-    float[]     fluidTempDown,
-    float[]     fluidTempUp,
-    FlowConfiguration flowConfig)
-{
-    if (!_isInitialized)
-        throw new InvalidOperationException("OpenCL solver not initialized");
-
-    var totalSize = _nr * _nth * _nz;
-
-    // --- upload stato corrente (temperatura sempre; velocità/dispersione solo se aggiornate)
-    var tempFlat = FlattenArray(temperature);
-    fixed (float* tempPtr = tempFlat)
+    public unsafe float SolveHeatTransferGPU(
+        float[,,] temperature,
+        float[,,,] velocity,
+        float[,,] dispersion,
+        float dt,
+        bool simulateGroundwater,
+        float[] fluidTempDown,
+        float[] fluidTempUp,
+        FlowConfiguration flowConfig)
     {
-        _cl.EnqueueWriteBuffer(_queue, _temperatureBuffer, true, 0,
-            (nuint)(totalSize * sizeof(float)), tempPtr, 0, null, null);
-    }
+        if (!_isInitialized)
+            throw new InvalidOperationException("OpenCL solver not initialized");
 
-    if (simulateGroundwater && velocity is not null)
-    {
-        var velocityFlat = FlattenVelocityArray(velocity);
-        fixed (float* velPtr = velocityFlat)
+        var totalSize = _nr * _nth * _nz;
+
+        // --- upload stato corrente (temperatura sempre; velocità/dispersione solo se aggiornate)
+        var tempFlat = FlattenArray(temperature);
+        fixed (float* tempPtr = tempFlat)
         {
-            _cl.EnqueueWriteBuffer(_queue, _velocityBuffer, true, 0,
-                (nuint)(totalSize * 3 * sizeof(float)), velPtr, 0, null, null);
+            _cl.EnqueueWriteBuffer(_queue, _temperatureBuffer, true, 0,
+                (nuint)(totalSize * sizeof(float)), tempPtr, 0, null, null);
         }
-    }
 
-    if (dispersion is not null)
-    {
-        var dispersionFlat = FlattenArray(dispersion);
-        fixed (float* dispPtr = dispersionFlat)
+        if (simulateGroundwater && velocity is not null)
         {
-            _cl.EnqueueWriteBuffer(_queue, _dispersionBuffer, true, 0,
-                (nuint)(totalSize * sizeof(float)), dispPtr, 0, null, null);
+            var velocityFlat = FlattenVelocityArray(velocity);
+            fixed (float* velPtr = velocityFlat)
+            {
+                _cl.EnqueueWriteBuffer(_queue, _velocityBuffer, true, 0,
+                    (nuint)(totalSize * 3 * sizeof(float)), velPtr, 0, null, null);
+            }
         }
-    }
 
-    if (fluidTempDown is not null && fluidTempDown.Length > 0)
-    {
-        fixed (float* downPtr = fluidTempDown)
+        if (dispersion is not null)
         {
-            _cl.EnqueueWriteBuffer(_queue, _fluidTempDownBuffer, true, 0,
-                (nuint)(Math.Min(_nzHE, fluidTempDown.Length) * sizeof(float)), downPtr, 0, null, null);
+            var dispersionFlat = FlattenArray(dispersion);
+            fixed (float* dispPtr = dispersionFlat)
+            {
+                _cl.EnqueueWriteBuffer(_queue, _dispersionBuffer, true, 0,
+                    (nuint)(totalSize * sizeof(float)), dispPtr, 0, null, null);
+            }
         }
-    }
-    if (fluidTempUp is not null && fluidTempUp.Length > 0)
-    {
-        fixed (float* upPtr = fluidTempUp)
+
+        if (fluidTempDown is not null && fluidTempDown.Length > 0)
+            fixed (float* downPtr = fluidTempDown)
+            {
+                _cl.EnqueueWriteBuffer(_queue, _fluidTempDownBuffer, true, 0,
+                    (nuint)(Math.Min(_nzHE, fluidTempDown.Length) * sizeof(float)), downPtr, 0, null, null);
+            }
+
+        if (fluidTempUp is not null && fluidTempUp.Length > 0)
+            fixed (float* upPtr = fluidTempUp)
+            {
+                _cl.EnqueueWriteBuffer(_queue, _fluidTempUpBuffer, true, 0,
+                    (nuint)(Math.Min(_nzHE, fluidTempUp.Length) * sizeof(float)), upPtr, 0, null, null);
+            }
+
+        // --- set argomenti del kernel principale (ordine = firma kernel)
+        uint argIdx = 0;
+        var temperatureBuffer = _temperatureBuffer;
+        _cl.SetKernelArg(_heatTransferKernel, argIdx++, (nuint)sizeof(nint), &temperatureBuffer);
+        var newTempBuffer = _newTempBuffer;
+        _cl.SetKernelArg(_heatTransferKernel, argIdx++, (nuint)sizeof(nint), &newTempBuffer);
+        var conductivityBuffer = _conductivityBuffer;
+        _cl.SetKernelArg(_heatTransferKernel, argIdx++, (nuint)sizeof(nint), &conductivityBuffer);
+        var densityBuffer = _densityBuffer;
+        _cl.SetKernelArg(_heatTransferKernel, argIdx++, (nuint)sizeof(nint), &densityBuffer);
+        var specificHeatBuffer = _specificHeatBuffer;
+        _cl.SetKernelArg(_heatTransferKernel, argIdx++, (nuint)sizeof(nint), &specificHeatBuffer);
+        var velocityBuffer = _velocityBuffer;
+        _cl.SetKernelArg(_heatTransferKernel, argIdx++, (nuint)sizeof(nint), &velocityBuffer);
+        var dispersionBuffer = _dispersionBuffer;
+        _cl.SetKernelArg(_heatTransferKernel, argIdx++, (nuint)sizeof(nint), &dispersionBuffer);
+        var rCoordBuffer = _rCoordBuffer;
+        _cl.SetKernelArg(_heatTransferKernel, argIdx++, (nuint)sizeof(nint), &rCoordBuffer);
+        var zCoordBuffer = _zCoordBuffer;
+        _cl.SetKernelArg(_heatTransferKernel, argIdx++, (nuint)sizeof(nint), &zCoordBuffer);
+        var cellVolumesBuffer = _cellVolumesBuffer;
+        _cl.SetKernelArg(_heatTransferKernel, argIdx++, (nuint)sizeof(nint), &cellVolumesBuffer);
+        var heParamsBuffer = _heatExchangerParamsBuffer;
+        _cl.SetKernelArg(_heatTransferKernel, argIdx++, (nuint)sizeof(nint), &heParamsBuffer);
+        var fluidDownBuffer = _fluidTempDownBuffer;
+        _cl.SetKernelArg(_heatTransferKernel, argIdx++, (nuint)sizeof(nint), &fluidDownBuffer);
+        var fluidUpBuffer = _fluidTempUpBuffer;
+        _cl.SetKernelArg(_heatTransferKernel, argIdx++, (nuint)sizeof(nint), &fluidUpBuffer);
+        var temperatureChangeBuffer = _temperatureChangeBuffer; // input della riduzione
+        _cl.SetKernelArg(_heatTransferKernel, argIdx++, (nuint)sizeof(nint), &temperatureChangeBuffer);
+
+        var dt_f = dt;
+        _cl.SetKernelArg(_heatTransferKernel, argIdx++, sizeof(float), &dt_f);
+        var nr_i = _nr;
+        _cl.SetKernelArg(_heatTransferKernel, argIdx++, sizeof(int), &nr_i);
+        var nth_i = _nth;
+        _cl.SetKernelArg(_heatTransferKernel, argIdx++, sizeof(int), &nth_i);
+        var nz_i = _nz;
+        _cl.SetKernelArg(_heatTransferKernel, argIdx++, sizeof(int), &nz_i);
+        var gw_i = simulateGroundwater ? 1 : 0;
+        _cl.SetKernelArg(_heatTransferKernel, argIdx++, sizeof(int), &gw_i);
+        var flow_i = (int)flowConfig;
+        _cl.SetKernelArg(_heatTransferKernel, argIdx++, sizeof(int), &flow_i);
+
+        // --- lancio kernel di calcolo
+        var globalWorkSize = (nuint)totalSize;
+        _cl.EnqueueNdrangeKernel(_queue, _heatTransferKernel, 1, null, &globalWorkSize, null, 0, null, null);
+
+        // --- riduzione max(|ΔT|) su GPU
+        const int localWorkSize = 256;
+        var numGroups = (uint)Math.Ceiling((double)totalSize / localWorkSize);
+        var reductionGlobal = (nuint)(numGroups * localWorkSize);
+
+        // assicura che _maxChangeBuffer abbia spazio per numGroups risultati
         {
-            _cl.EnqueueWriteBuffer(_queue, _fluidTempUpBuffer, true, 0,
-                (nuint)(Math.Min(_nzHE, fluidTempUp.Length) * sizeof(float)), upPtr, 0, null, null);
+            // re-alloc semplice: rilascia e ricrea se necessario
+            // (evita un campo extra per tenere traccia della capacità)
+            _cl.ReleaseMemObject(_maxChangeBuffer);
+            int err;
+            _maxChangeBuffer = _cl.CreateBuffer(_context, MemFlags.ReadWrite,
+                numGroups * sizeof(float), null, &err);
+            CheckError(err, "realloc maxChangeBuffer");
         }
+
+        var inBuf = _temperatureChangeBuffer;
+        _cl.SetKernelArg(_reductionKernel, 0, (nuint)sizeof(nint), &inBuf);
+        var outBuf = _maxChangeBuffer;
+        _cl.SetKernelArg(_reductionKernel, 1, (nuint)sizeof(nint), &outBuf);
+        // scratch locale = localWorkSize * sizeof(float)
+        _cl.SetKernelArg(_reductionKernel, 2, localWorkSize * sizeof(float), null);
+        var n_int = totalSize;
+        _cl.SetKernelArg(_reductionKernel, 3, sizeof(int), &n_int);
+
+        var lsz = (nuint)localWorkSize;
+        _cl.EnqueueNdrangeKernel(_queue, _reductionKernel, 1, null, &reductionGlobal, &lsz, 0, null, null);
+
+        // --- readback massimo parziale per gruppo e calcolo max globale
+        var partial = new float[numGroups];
+        fixed (float* p = partial)
+        {
+            _cl.EnqueueReadBuffer(_queue, _maxChangeBuffer, true, 0,
+                numGroups * sizeof(float), p, 0, null, null);
+        }
+
+        var maxChange = 0f;
+        for (var g = 0; g < numGroups; g++)
+            if (partial[g] > maxChange)
+                maxChange = partial[g];
+
+        // --- lettura temperatura aggiornata
+        var finalTempFlat = new float[totalSize];
+        fixed (float* newTempPtr = finalTempFlat)
+        {
+            _cl.EnqueueReadBuffer(_queue, _newTempBuffer, true, 0,
+                (nuint)(totalSize * sizeof(float)), newTempPtr, 0, null, null);
+        }
+
+        UnflattenArray(finalTempFlat, temperature);
+
+        return maxChange;
     }
-
-    // --- set argomenti del kernel principale (ordine = firma kernel)
-    uint argIdx = 0;
-    var temperatureBuffer = _temperatureBuffer;
-    _cl.SetKernelArg(_heatTransferKernel, argIdx++, (nuint)sizeof(nint), &temperatureBuffer);
-    var newTempBuffer = _newTempBuffer;
-    _cl.SetKernelArg(_heatTransferKernel, argIdx++, (nuint)sizeof(nint), &newTempBuffer);
-    var conductivityBuffer = _conductivityBuffer;
-    _cl.SetKernelArg(_heatTransferKernel, argIdx++, (nuint)sizeof(nint), &conductivityBuffer);
-    var densityBuffer = _densityBuffer;
-    _cl.SetKernelArg(_heatTransferKernel, argIdx++, (nuint)sizeof(nint), &densityBuffer);
-    var specificHeatBuffer = _specificHeatBuffer;
-    _cl.SetKernelArg(_heatTransferKernel, argIdx++, (nuint)sizeof(nint), &specificHeatBuffer);
-    var velocityBuffer = _velocityBuffer;
-    _cl.SetKernelArg(_heatTransferKernel, argIdx++, (nuint)sizeof(nint), &velocityBuffer);
-    var dispersionBuffer = _dispersionBuffer;
-    _cl.SetKernelArg(_heatTransferKernel, argIdx++, (nuint)sizeof(nint), &dispersionBuffer);
-    var rCoordBuffer = _rCoordBuffer;
-    _cl.SetKernelArg(_heatTransferKernel, argIdx++, (nuint)sizeof(nint), &rCoordBuffer);
-    var zCoordBuffer = _zCoordBuffer;
-    _cl.SetKernelArg(_heatTransferKernel, argIdx++, (nuint)sizeof(nint), &zCoordBuffer);
-    var cellVolumesBuffer = _cellVolumesBuffer;
-    _cl.SetKernelArg(_heatTransferKernel, argIdx++, (nuint)sizeof(nint), &cellVolumesBuffer);
-    var heParamsBuffer = _heatExchangerParamsBuffer;
-    _cl.SetKernelArg(_heatTransferKernel, argIdx++, (nuint)sizeof(nint), &heParamsBuffer);
-    var fluidDownBuffer = _fluidTempDownBuffer;
-    _cl.SetKernelArg(_heatTransferKernel, argIdx++, (nuint)sizeof(nint), &fluidDownBuffer);
-    var fluidUpBuffer = _fluidTempUpBuffer;
-    _cl.SetKernelArg(_heatTransferKernel, argIdx++, (nuint)sizeof(nint), &fluidUpBuffer);
-    var temperatureChangeBuffer = _temperatureChangeBuffer; // input della riduzione
-    _cl.SetKernelArg(_heatTransferKernel, argIdx++, (nuint)sizeof(nint), &temperatureChangeBuffer);
-
-    var dt_f = dt;
-    _cl.SetKernelArg(_heatTransferKernel, argIdx++, sizeof(float), &dt_f);
-    var nr_i = _nr;   _cl.SetKernelArg(_heatTransferKernel, argIdx++, sizeof(int), &nr_i);
-    var nth_i = _nth; _cl.SetKernelArg(_heatTransferKernel, argIdx++, sizeof(int), &nth_i);
-    var nz_i = _nz;   _cl.SetKernelArg(_heatTransferKernel, argIdx++, sizeof(int), &nz_i);
-    var gw_i = simulateGroundwater ? 1 : 0;
-    _cl.SetKernelArg(_heatTransferKernel, argIdx++, sizeof(int), &gw_i);
-    var flow_i = (int)flowConfig;
-    _cl.SetKernelArg(_heatTransferKernel, argIdx++, sizeof(int), &flow_i);
-
-    // --- lancio kernel di calcolo
-    var globalWorkSize = (nuint)totalSize;
-    _cl.EnqueueNdrangeKernel(_queue, _heatTransferKernel, 1, null, &globalWorkSize, null, 0, null, null);
-
-    // --- riduzione max(|ΔT|) su GPU
-    const int localWorkSize = 256;
-    var numGroups = (uint)Math.Ceiling((double)totalSize / localWorkSize);
-    var reductionGlobal = (nuint)(numGroups * localWorkSize);
-
-    // assicura che _maxChangeBuffer abbia spazio per numGroups risultati
-    {
-        // re-alloc semplice: rilascia e ricrea se necessario
-        // (evita un campo extra per tenere traccia della capacità)
-        _cl.ReleaseMemObject(_maxChangeBuffer);
-        int err;
-        _maxChangeBuffer = _cl.CreateBuffer(_context, MemFlags.ReadWrite,
-            (nuint)(numGroups * sizeof(float)), null, &err);
-        CheckError(err, "realloc maxChangeBuffer");
-    }
-
-    var inBuf  = _temperatureChangeBuffer;
-    _cl.SetKernelArg(_reductionKernel, 0, (nuint)sizeof(nint), &inBuf);
-    var outBuf = _maxChangeBuffer;
-    _cl.SetKernelArg(_reductionKernel, 1, (nuint)sizeof(nint), &outBuf);
-    // scratch locale = localWorkSize * sizeof(float)
-    _cl.SetKernelArg(_reductionKernel, 2, (nuint)(localWorkSize * sizeof(float)), null);
-    var n_int = totalSize;
-    _cl.SetKernelArg(_reductionKernel, 3, sizeof(int), &n_int);
-
-    var lsz = (nuint)localWorkSize;
-    _cl.EnqueueNdrangeKernel(_queue, _reductionKernel, 1, null, &reductionGlobal, &lsz, 0, null, null);
-
-    // --- readback massimo parziale per gruppo e calcolo max globale
-    var partial = new float[numGroups];
-    fixed (float* p = partial)
-    {
-        _cl.EnqueueReadBuffer(_queue, _maxChangeBuffer, true, 0,
-            (nuint)(numGroups * sizeof(float)), p, 0, null, null);
-    }
-    float maxChange = 0f;
-    for (var g = 0; g < numGroups; g++)
-        if (partial[g] > maxChange) maxChange = partial[g];
-
-    // --- lettura temperatura aggiornata
-    var finalTempFlat = new float[totalSize];
-    fixed (float* newTempPtr = finalTempFlat)
-    {
-        _cl.EnqueueReadBuffer(_queue, _newTempBuffer, true, 0,
-            (nuint)(totalSize * sizeof(float)), newTempPtr, 0, null, null);
-    }
-    UnflattenArray(finalTempFlat, temperature);
-
-    return maxChange;
-}
 
     /// <summary>
     ///     Flattens 3D temperature array for GPU upload.
@@ -843,8 +862,7 @@ public class GeothermalOpenCLSolver : IDisposable
     /// <summary>
     ///     Gets the OpenCL kernel source code with integrated boundary conditions.
     /// </summary>
-   
-private string GetKernelSource()
+  private string GetKernelSource()
 {
     return @"
 // OpenCL 1.2 kernels for geothermal heat transfer simulation
@@ -869,7 +887,7 @@ __kernel void heat_transfer_kernel(
     __global const float* heParams,
     __global const float* fluidTempDown,
     __global const float* fluidTempUp,
-    __global float*       temperatureChange,   // <<< per-cell |ΔT|
+    __global float*       temperatureChange,
 
     const float dt,
     const int nr, const int nth, const int nz,
@@ -884,7 +902,7 @@ __kernel void heat_transfer_kernel(
     const int j = (idx / nz) % nth;
     const int i = idx / (nz * nth);
 
-    // Dirichlet semplice sui bordi: nessun cambiamento
+    // Skip boundary cells
     if (i==0 || i>=nr-1 || k==0 || k>=nz-1){
         newTemp[idx] = temperature[idx];
         temperatureChange[idx] = 0.0f;
@@ -892,16 +910,8 @@ __kernel void heat_transfer_kernel(
     }
 
     const float T_old = temperature[idx];
-
     const float lambda = clamp(conductivity[idx], 0.1f, 10.0f);
-    const float rho    = clamp(density[idx],     500.0f, 5000.0f);
-    const float cp     = clamp(specificHeat[idx],100.0f, 5000.0f);
-    const float rho_cp = rho*cp;
-    if (rho_cp < 1.0f){
-        newTemp[idx] = T_old;
-        temperatureChange[idx]=0.0f;
-        return;
-    }
+    const float rho_cp = fmax(1.0f, density[idx] * specificHeat[idx]);
     const float alpha = lambda / rho_cp;
 
     const float r   = fmax(0.01f, r_coord[i]);
@@ -920,7 +930,6 @@ __kernel void heat_transfer_kernel(
     const float T_thm = temperature[get_idx(i,  jm,k,  nth,nz)];
     const float T_thp = temperature[get_idx(i,  jp,k,  nth,nz)];
 
-    // --- Forma corretta semi-implicita (esplicito: soli vicini; implicito: coeff centrali)
     const float neighbor_conduction =
         (T_rp + T_rm)/(drm*drp) +
         (T_rp - T_rm)/((drp+drm)*r) +
@@ -937,40 +946,42 @@ __kernel void heat_transfer_kernel(
         advection = -(vr*dT_dr_adv + vth*dT_dth + vz*dT_dz_adv);
     }
 
-    float numerator   = T_old + dt*(alpha*neighbor_conduction + advection);
-    float denominator = 1.0f + dt*alpha*( 2.0f/(drm*drp) + 2.0f/(r*r*dth*dth) + 2.0f/(dzm*dzp) );
+    float numerator   = T_old / dt + (alpha*neighbor_conduction + advection);
+    float denominator = 1.0f / dt + alpha*( 2.0f/(drm*drp) + 2.0f/(r*r*dth*dth) + 2.0f/(dzm*dzp) );
 
-    // (opzionale) scambio termico con HE – identico alla tua logica
-    const float pipeRadius  = heParams[0];
-    const float boreDepth   = heParams[1];
-    const float rInfluence  = fmax(pipeRadius*10.0f, 0.5f);
-    if (r <= rInfluence){
-        const float depth = fmax(0.0f, -z_coord[k]);
-        if (depth <= boreDepth){
-            const float baseHTC = heParams[5];
-            const float heType  = heParams[6];
-            const int   nzHE    = (int)heParams[7];
-            const int   h = clamp((int)(depth/boreDepth*nzHE), 0, nzHE-1);
-            float Tfluid = (flow_config==FLOW_REVERSED)
-                           ? ((heType>0.5f)? 0.5f*(fluidTempDown[h]+fluidTempUp[h]) : fluidTempDown[h])
-                           : ((heType>0.5f)? 0.5f*(fluidTempDown[h]+fluidTempUp[h]) : fluidTempUp[h]);
+    // --- DEFINITIVE FIX START ---
+    const float pipeRadius    = heParams[0];
+    const float totalBoreDepth = heParams[1];
+    const float activeHeDepth  = heParams[11]; // Parameter for the active HE depth
+    const float depth         = fmax(0.0f, -z_coord[k]);
 
-            const float vol   = fmax(1e-6f, cellVolumes[idx]);
-            const float area  = 2.0f*M_PI_F*r*(dzm+dzp)*0.5f;
-            const float U_vol = baseHTC*area/vol;
+    // Conditionally apply the heat source term from the fluid
+    if (r <= (pipeRadius * 5.0f) && depth <= activeHeDepth) {
+        const float baseHTC = heParams[5];
+        const int   nzHE    = (int)heParams[7];
 
-            numerator   += dt*U_vol*Tfluid/rho_cp;
-            denominator += dt*U_vol/rho_cp;
-        }
+        // Index into the fluid temperature array, which covers the full borehole depth
+        const int h = clamp((int)(depth / totalBoreDepth * nzHE), 0, nzHE - 1);
+
+        float Tfluid = (flow_config == FLOW_REVERSED)
+                       ? fluidTempDown[h]
+                       : (heParams[6] > 0.5f ? 0.5f*(fluidTempDown[h]+fluidTempUp[h]) : fluidTempUp[h]);
+
+        const float vol   = fmax(1e-6f, cellVolumes[idx]);
+        const float area  = 2.0f * M_PI_F * r * (dzm + dzp) * 0.5f;
+        const float U_vol = baseHTC * area / vol;
+
+        numerator   += U_vol * Tfluid / rho_cp;
+        denominator += U_vol / rho_cp;
     }
+    // --- DEFINITIVE FIX END ---
 
-    float T_new = numerator/denominator;
-    T_new = clamp(T_new, 273.0f, 573.0f);
-    newTemp[idx] = T_new;
-    temperatureChange[idx] = fabs(T_new - T_old); // <<< da ridurre
+    float T_new = numerator / denominator;
+    newTemp[idx] = clamp(T_new, 273.0f, 573.0f);
+    temperatureChange[idx] = fabs(T_new - T_old);
 }
 
-// Riduzione massimo robusta
+// Reduction kernel remains the same
 __kernel void reduction_max_kernel(
     __global const float* input,
     __global float*       output,
@@ -997,14 +1008,13 @@ __kernel void reduction_max_kernel(
 }
 ";
 }
-
     /// <summary>
     ///     Updates heat exchanger parameters on GPU during simulation. (ADDED)
     /// </summary>
-    public unsafe void UpdateHeatExchangerParameters(GeothermalSimulationOptions options)
+    public void UpdateHeatExchangerParameters(GeothermalSimulationOptions options)
     {
         if (!_isInitialized) return;
-        
+
         UploadHeatExchangerParams(options);
     }
 

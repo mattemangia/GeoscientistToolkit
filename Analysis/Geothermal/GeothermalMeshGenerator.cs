@@ -12,196 +12,200 @@ namespace GeoscientistToolkit.Analysis.Geothermal;
 public static class GeothermalMeshGenerator
 {
     public static GeothermalMesh GenerateCylindricalMesh(BoreholeDataset borehole, GeothermalSimulationOptions options)
-    {
-        // Validate input
-        if (borehole == null)
-            throw new ArgumentNullException(nameof(borehole));
+{
+    // Validate input
+    if (borehole == null)
+        throw new ArgumentNullException(nameof(borehole));
 
-        if (borehole.TotalDepth <= 0)
-            throw new ArgumentException("Borehole depth must be positive", nameof(borehole));
+    if (borehole.TotalDepth <= 0)
+        throw new ArgumentException("Borehole depth must be positive", nameof(borehole));
 
-        if (borehole.Diameter <= 0)
-            throw new ArgumentException("Borehole diameter must be positive", nameof(borehole));
+    if (borehole.Diameter <= 0)
+        throw new ArgumentException("Borehole diameter must be positive", nameof(borehole));
 
-        var mesh = new GeothermalMesh();
+    var mesh = new GeothermalMesh();
 
-        // Calculate domain bounds
-        // CORRECTED: Z coordinates are negative going down
-        // Surface is at Z=0, bottom is at Z=-depth
-        var minDepth = -options.DomainExtension; // Above surface
-        var maxDepth = borehole.TotalDepth + options.DomainExtension; // Below bottom
+    // Calculate domain bounds
+    // CORRECTED: Z coordinates are negative going down
+    // Surface is at Z=0, bottom is at Z=-depth
+    var minDepth = -options.DomainExtension; // Above surface
+    var maxDepth = borehole.TotalDepth + options.DomainExtension; // Below bottom
 
-        // Create grid dimensions
-        var nr = options.RadialGridPoints;
-        var ntheta = options.AngularGridPoints;
-        var nz = options.VerticalGridPoints;
+    // Create grid dimensions
+    var nr = options.RadialGridPoints;
+    var ntheta = options.AngularGridPoints;
+    var nz = options.VerticalGridPoints;
 
-        mesh.RadialPoints = nr;
-        mesh.AngularPoints = ntheta;
-        mesh.VerticalPoints = nz;
+    mesh.RadialPoints = nr;
+    mesh.AngularPoints = ntheta;
+    mesh.VerticalPoints = nz;
 
-        // Create coordinate arrays
-        mesh.R = new float[nr];
-        mesh.Theta = new float[ntheta];
-        mesh.Z = new float[nz];
+    // Create coordinate arrays
+    mesh.R = new float[nr];
+    mesh.Theta = new float[ntheta];
+    mesh.Z = new float[nz];
 
-        // Generate radial coordinates (logarithmic spacing near borehole)
-        var rMin = (float)(borehole.Diameter / 2000.0); // Convert mm to m
-        var rMax = (float)options.DomainRadius;
+    // Generate radial coordinates (logarithmic spacing near borehole)
+    var rMin = (float)(borehole.Diameter / 2000.0); // Convert mm to m
+    var rMax = (float)options.DomainRadius;
 
-        // Ensure valid radius values
-        if (rMin <= 0) rMin = 0.05f; // Default 50mm radius if invalid
-        if (rMax <= rMin) rMax = Math.Max(50f, rMin * 1000); // Ensure domain is large enough
+    // Ensure valid radius values
+    if (rMin <= 0) rMin = 0.05f; // Default 50mm radius if invalid
+    if (rMax <= rMin) rMax = Math.Max(50f, rMin * 1000); // Ensure domain is large enough
 
-        for (var i = 0; i < nr; i++)
-            if (i < 10) // Fine spacing near borehole
-            {
-                var t = i / 9f;
-                mesh.R[i] = rMin + (1f - rMin) * t;
-            }
-            else
-            {
-                var t = (float)(i - 9) / (nr - 10);
-                var logMin = MathF.Log(1f);
-                var logMax = MathF.Log(rMax);
-                mesh.R[i] = MathF.Exp(logMin + (logMax - logMin) * t);
-            }
-
-        // Generate angular coordinates (uniform)
-        for (var j = 0; j < ntheta; j++) mesh.Theta[j] = (float)(2.0 * Math.PI * j / ntheta);
-
-        // CORRECTED: Generate vertical coordinates
-        // Z goes from positive (above surface) to negative (below surface)
-        var layerDepths = new List<float>();
-
-        // Only add layer depths if lithology exists
-        if (borehole.Lithology != null && borehole.Lithology.Any())
-            layerDepths = borehole.Lithology
-                .SelectMany(l => new[] { l.DepthFrom, l.DepthTo })
-                .Where(d => d >= 0 && d <= maxDepth)
-                .Distinct()
-                .OrderBy(d => d)
-                .ToList();
-
-        // Generate Z coordinates from top to bottom
-        mesh.Z = GenerateRefinedVerticalGrid((float)minDepth, (float)maxDepth, nz, layerDepths);
-
-        // Initialize property arrays
-        var totalCells = nr * ntheta * nz;
-        mesh.CellVolumes = new float[nr, ntheta, nz];
-        mesh.MaterialIds = new byte[nr, ntheta, nz];
-        mesh.ThermalConductivities = new float[nr, ntheta, nz];
-        mesh.SpecificHeats = new float[nr, ntheta, nz];
-        mesh.Densities = new float[nr, ntheta, nz];
-        mesh.Porosities = new float[nr, ntheta, nz];
-        mesh.Permeabilities = new float[nr, ntheta, nz];
-
-        // Calculate cell volumes and assign properties
-        for (var i = 0; i < nr; i++)
-        for (var j = 0; j < ntheta; j++)
-        for (var k = 0; k < nz; k++)
+    for (var i = 0; i < nr; i++)
+        if (i < 10) // Fine spacing near borehole
         {
-            // Cell volume calculation
-            var r = mesh.R[i];
-            var dr = i < nr - 1 ? mesh.R[i + 1] - mesh.R[i] : mesh.R[i] - mesh.R[i - 1];
-            var dtheta = 2f * MathF.PI / ntheta;
-            var dz = k < nz - 1 ? Math.Abs(mesh.Z[k + 1] - mesh.Z[k]) : Math.Abs(mesh.Z[k] - mesh.Z[k - 1]);
-
-            mesh.CellVolumes[i, j, k] = r * dr * dtheta * dz;
-
-            // CORRECTED: Determine geological layer at this depth
-            // Z is negative going down, so depth = -Z
-            var depth = -mesh.Z[k];
-            LithologyUnit layer = null;
-
-            if (borehole.Lithology != null && borehole.Lithology.Any() && depth >= 0)
-                layer = borehole.Lithology.FirstOrDefault(l => depth >= l.DepthFrom && depth <= l.DepthTo);
-
-            // Mark cells within the borehole diameter as heat exchanger
-            var distanceFromAxis = mesh.R[i];
-            var boreholeRadius = (float)(borehole.Diameter / 2000.0); // Convert mm to m
-
-            if (distanceFromAxis <= boreholeRadius * 1.5f && depth >= 0 && depth <= borehole.TotalDepth)
-                mesh.MaterialIds[i, j, k] = 255; // Special ID for heat exchanger region
-            else if (layer != null)
-                // Assign material properties based on layer
-                mesh.MaterialIds[i, j, k] = (byte)(borehole.Lithology.IndexOf(layer) + 1);
-            else
-                mesh.MaterialIds[i, j, k] = 0; // Default material
-
-            // Assign thermal and hydraulic properties
-            if (layer != null)
-            {
-                var layerName = layer.RockType ?? "Unknown";
-
-                // 1. Thermal Conductivity (W/m·K)
-                if (layer.Parameters.TryGetValue("Thermal Conductivity", out var specificConductivity))
-                    mesh.ThermalConductivities[i, j, k] = specificConductivity;
-                else
-                    mesh.ThermalConductivities[i, j, k] =
-                        (float)options.LayerThermalConductivities.GetValueOrDefault(layerName, 2.5);
-
-                // 2. Specific Heat (J/kg·K)
-                if (layer.Parameters.TryGetValue("Specific Heat", out var specificHeat))
-                    mesh.SpecificHeats[i, j, k] = specificHeat;
-                else
-                    mesh.SpecificHeats[i, j, k] = (float)options.LayerSpecificHeats.GetValueOrDefault(layerName, 900);
-
-                // 3. Density (kg/m³)
-                if (layer.Parameters.TryGetValue("Density", out var specificDensity))
-                    mesh.Densities[i, j, k] = specificDensity;
-                else
-                    mesh.Densities[i, j, k] = (float)options.LayerDensities.GetValueOrDefault(layerName, 2650);
-
-                // 4. Porosity (fraction, 0-1)
-                if (layer.Parameters.TryGetValue("Porosity", out var specificPorosity))
-                    // BoreholeDataset stores porosity in %, simulation needs a fraction
-                    mesh.Porosities[i, j, k] = specificPorosity / 100.0f;
-                else
-                    mesh.Porosities[i, j, k] = (float)options.LayerPorosities.GetValueOrDefault(layerName, 0.1);
-
-                // 5. Permeability (m²)
-                if (layer.Parameters.TryGetValue("Permeability", out var specificPermeability))
-                    mesh.Permeabilities[i, j, k] = specificPermeability;
-                else
-                    mesh.Permeabilities[i, j, k] =
-                        (float)options.LayerPermeabilities.GetValueOrDefault(layerName, 1e-14);
-            }
-            else
-            {
-                // Use default material properties for unknown zones
-                mesh.ThermalConductivities[i, j, k] = 2.5f; // Default granite-like
-                mesh.SpecificHeats[i, j, k] = 900f;
-                mesh.Densities[i, j, k] = 2650f;
-                mesh.Porosities[i, j, k] = 0.05f;
-                mesh.Permeabilities[i, j, k] = 1e-15f;
-            }
-
-            // Override properties for heat exchanger region
-            if (mesh.MaterialIds[i, j, k] == 255)
-            {
-                // Use grout properties in the borehole
-                mesh.ThermalConductivities[i, j, k] = (float)options.GroutThermalConductivity;
-                mesh.SpecificHeats[i, j, k] = 1000f; // Grout specific heat
-                mesh.Densities[i, j, k] = 1800f; // Grout density
-                mesh.Porosities[i, j, k] = 0.3f; // Grout porosity
-                mesh.Permeabilities[i, j, k] = 1e-16f; // Low permeability
-            }
+            var t = i / 9f;
+            mesh.R[i] = rMin + (1f - rMin) * t;
+        }
+        else
+        {
+            var t = (float)(i - 9) / (nr - 10);
+            var logMin = MathF.Log(1f);
+            var logMax = MathF.Log(rMax);
+            mesh.R[i] = MathF.Exp(logMin + (logMax - logMin) * t);
         }
 
-        // Calculate face areas and transmissivities
-        CalculateFaceAreas(mesh);
-        CalculateTransmissivities(mesh);
+    // Generate angular coordinates (uniform)
+    for (var j = 0; j < ntheta; j++) mesh.Theta[j] = (float)(2.0 * Math.PI * j / ntheta);
 
-        // Generate fracture network if enabled
-        if (options.SimulateFractures) GenerateFractureNetwork(mesh, borehole, options);
+    // CORRECTED: Generate vertical coordinates
+    // Z goes from positive (above surface) to negative (below surface)
+    var layerDepths = new List<float>();
 
-        // Generate borehole geometry
-        mesh.BoreholeElements = GenerateBoreholeElements(borehole, mesh, options);
+    // Only add layer depths if lithology exists
+    if (borehole.Lithology != null && borehole.Lithology.Any())
+        layerDepths = borehole.Lithology
+            .SelectMany(l => new[] { l.DepthFrom, l.DepthTo })
+            .Where(d => d >= 0 && d <= maxDepth)
+            .Distinct()
+            .OrderBy(d => d)
+            .ToList();
 
-        return mesh;
+    // Generate Z coordinates from top to bottom
+    mesh.Z = GenerateRefinedVerticalGrid((float)minDepth, (float)maxDepth, nz, layerDepths);
+
+    // Initialize property arrays
+    var totalCells = nr * ntheta * nz;
+    mesh.CellVolumes = new float[nr, ntheta, nz];
+    mesh.MaterialIds = new byte[nr, ntheta, nz];
+    mesh.ThermalConductivities = new float[nr, ntheta, nz];
+    mesh.SpecificHeats = new float[nr, ntheta, nz];
+    mesh.Densities = new float[nr, ntheta, nz];
+    mesh.Porosities = new float[nr, ntheta, nz];
+    mesh.Permeabilities = new float[nr, ntheta, nz];
+
+    // Calculate cell volumes and assign properties
+    for (var i = 0; i < nr; i++)
+    for (var j = 0; j < ntheta; j++)
+    for (var k = 0; k < nz; k++)
+    {
+        // Cell volume calculation
+        var r = mesh.R[i];
+        var dr = i < nr - 1 ? mesh.R[i + 1] - mesh.R[i] : mesh.R[i] - mesh.R[i - 1];
+        var dtheta = 2f * MathF.PI / ntheta;
+        var dz = k < nz - 1 ? Math.Abs(mesh.Z[k + 1] - mesh.Z[k]) : Math.Abs(mesh.Z[k] - mesh.Z[k - 1]);
+
+        mesh.CellVolumes[i, j, k] = r * dr * dtheta * dz;
+
+        // CORRECTED: Determine geological layer at this depth
+        // Z is negative going down, so depth = -Z
+        var depth = -mesh.Z[k];
+        LithologyUnit layer = null;
+
+        if (borehole.Lithology != null && borehole.Lithology.Any() && depth >= 0)
+            layer = borehole.Lithology.FirstOrDefault(l => depth >= l.DepthFrom && depth <= l.DepthTo);
+
+        // Mark cells within the borehole diameter as heat exchanger
+        var distanceFromAxis = mesh.R[i];
+        var boreholeRadius = (float)(borehole.Diameter / 2000.0); // Convert mm to m
+
+        // --- DEFINITIVE FIX START ---
+        // The Material ID for the borehole must extend to the FULL borehole depth.
+        // This ensures the borehole's physical presence (filled with grout) is modeled correctly,
+        // allowing for passive heat conduction below the active exchanger.
+        if (distanceFromAxis <= boreholeRadius * 1.5f && depth >= 0 && depth <= borehole.TotalDepth)
+            mesh.MaterialIds[i, j, k] = 255; // Special ID for the entire borehole region
+        // --- DEFINITIVE FIX END ---
+        else if (layer != null)
+            // Assign material properties based on layer
+            mesh.MaterialIds[i, j, k] = (byte)(borehole.Lithology.IndexOf(layer) + 1);
+        else
+            mesh.MaterialIds[i, j, k] = 0; // Default material
+
+        // Assign thermal and hydraulic properties
+        if (layer != null)
+        {
+            var layerName = layer.RockType ?? "Unknown";
+
+            // 1. Thermal Conductivity (W/m·K)
+            if (layer.Parameters.TryGetValue("Thermal Conductivity", out var specificConductivity))
+                mesh.ThermalConductivities[i, j, k] = specificConductivity;
+            else
+                mesh.ThermalConductivities[i, j, k] =
+                    (float)options.LayerThermalConductivities.GetValueOrDefault(layerName, 2.5);
+
+            // 2. Specific Heat (J/kg·K)
+            if (layer.Parameters.TryGetValue("Specific Heat", out var specificHeat))
+                mesh.SpecificHeats[i, j, k] = specificHeat;
+            else
+                mesh.SpecificHeats[i, j, k] = (float)options.LayerSpecificHeats.GetValueOrDefault(layerName, 900);
+
+            // 3. Density (kg/m³)
+            if (layer.Parameters.TryGetValue("Density", out var specificDensity))
+                mesh.Densities[i, j, k] = specificDensity;
+            else
+                mesh.Densities[i, j, k] = (float)options.LayerDensities.GetValueOrDefault(layerName, 2650);
+
+            // 4. Porosity (fraction, 0-1)
+            if (layer.Parameters.TryGetValue("Porosity", out var specificPorosity))
+                // BoreholeDataset stores porosity in %, simulation needs a fraction
+                mesh.Porosities[i, j, k] = specificPorosity / 100.0f;
+            else
+                mesh.Porosities[i, j, k] = (float)options.LayerPorosities.GetValueOrDefault(layerName, 0.1);
+
+            // 5. Permeability (m²)
+            if (layer.Parameters.TryGetValue("Permeability", out var specificPermeability))
+                mesh.Permeabilities[i, j, k] = specificPermeability;
+            else
+                mesh.Permeabilities[i, j, k] =
+                    (float)options.LayerPermeabilities.GetValueOrDefault(layerName, 1e-14);
+        }
+        else
+        {
+            // Use default material properties for unknown zones
+            mesh.ThermalConductivities[i, j, k] = 2.5f; // Default granite-like
+            mesh.SpecificHeats[i, j, k] = 900f;
+            mesh.Densities[i, j, k] = 2650f;
+            mesh.Porosities[i, j, k] = 0.05f;
+            mesh.Permeabilities[i, j, k] = 1e-15f;
+        }
+
+        // Override properties for heat exchanger region
+        if (mesh.MaterialIds[i, j, k] == 255)
+        {
+            // Use grout properties in the borehole
+            mesh.ThermalConductivities[i, j, k] = (float)options.GroutThermalConductivity;
+            mesh.SpecificHeats[i, j, k] = 1000f; // Grout specific heat
+            mesh.Densities[i, j, k] = 1800f; // Grout density
+            mesh.Porosities[i, j, k] = 0.3f; // Grout porosity
+            mesh.Permeabilities[i, j, k] = 1e-16f; // Low permeability
+        }
     }
 
+    // Calculate face areas and transmissivities
+    CalculateFaceAreas(mesh);
+    CalculateTransmissivities(mesh);
+
+    // Generate fracture network if enabled
+    if (options.SimulateFractures) GenerateFractureNetwork(mesh, borehole, options);
+
+    // Generate borehole geometry
+    mesh.BoreholeElements = GenerateBoreholeElements(borehole, mesh, options);
+
+    return mesh;
+}
     /// <summary>
     ///     Generates a refined vertical grid with higher resolution near layer boundaries.
     ///     CORRECTED: Returns Z coordinates from top (positive) to bottom (negative)

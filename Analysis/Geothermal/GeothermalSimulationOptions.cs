@@ -101,14 +101,40 @@ public class GeothermalSimulationOptions
     public int StreamlineCount { get; set; } = 50;
     public bool Generate2DSlices { get; set; } = true;
     public List<double> SlicePositions { get; set; } = new() { 0.1, 0.5, 0.9 };
+    public float HeatExchangerDepth { get; set; }
 
     public void SetDefaultValues()
     {
-        if (!LayerThermalConductivities.Any()) LayerThermalConductivities = new Dictionary<string, double> { { "Soil", 1.5 }, { "Clay", 1.2 }, { "Sand", 2.0 }, { "Gravel", 2.5 }, { "Sandstone", 2.8 }, { "Limestone", 2.9 }, { "Granite", 3.0 }, { "Basalt", 1.7 } };
-        if (!LayerSpecificHeats.Any()) LayerSpecificHeats = new Dictionary<string, double> { { "Soil", 1840 }, { "Clay", 1380 }, { "Sand", 830 }, { "Gravel", 840 }, { "Sandstone", 920 }, { "Limestone", 810 }, { "Granite", 790 }, { "Basalt", 840 } };
-        if (!LayerDensities.Any()) LayerDensities = new Dictionary<string, double> { { "Soil", 1800 }, { "Clay", 1900 }, { "Sand", 2650 }, { "Gravel", 2700 }, { "Sandstone", 2500 }, { "Limestone", 2700 }, { "Granite", 2750 }, { "Basalt", 2900 } };
-        if (!LayerPorosities.Any()) LayerPorosities = new Dictionary<string, double> { { "Soil", 0.4 }, { "Clay", 0.45 }, { "Sand", 0.35 }, { "Gravel", 0.25 }, { "Sandstone", 0.15 }, { "Limestone", 0.1 }, { "Granite", 0.01 }, { "Basalt", 0.05 } };
-        if (!LayerPermeabilities.Any()) LayerPermeabilities = new Dictionary<string, double> { { "Soil", 1e-12 }, { "Clay", 1e-15 }, { "Sand", 1e-11 }, { "Gravel", 1e-9 }, { "Sandstone", 1e-13 }, { "Limestone", 1e-14 }, { "Granite", 1e-16 }, { "Basalt", 1e-15 } };
+        if (!LayerThermalConductivities.Any())
+            LayerThermalConductivities = new Dictionary<string, double>
+            {
+                { "Soil", 1.5 }, { "Clay", 1.2 }, { "Sand", 2.0 }, { "Gravel", 2.5 }, { "Sandstone", 2.8 },
+                { "Limestone", 2.9 }, { "Granite", 3.0 }, { "Basalt", 1.7 }
+            };
+        if (!LayerSpecificHeats.Any())
+            LayerSpecificHeats = new Dictionary<string, double>
+            {
+                { "Soil", 1840 }, { "Clay", 1380 }, { "Sand", 830 }, { "Gravel", 840 }, { "Sandstone", 920 },
+                { "Limestone", 810 }, { "Granite", 790 }, { "Basalt", 840 }
+            };
+        if (!LayerDensities.Any())
+            LayerDensities = new Dictionary<string, double>
+            {
+                { "Soil", 1800 }, { "Clay", 1900 }, { "Sand", 2650 }, { "Gravel", 2700 }, { "Sandstone", 2500 },
+                { "Limestone", 2700 }, { "Granite", 2750 }, { "Basalt", 2900 }
+            };
+        if (!LayerPorosities.Any())
+            LayerPorosities = new Dictionary<string, double>
+            {
+                { "Soil", 0.4 }, { "Clay", 0.45 }, { "Sand", 0.35 }, { "Gravel", 0.25 }, { "Sandstone", 0.15 },
+                { "Limestone", 0.1 }, { "Granite", 0.01 }, { "Basalt", 0.05 }
+            };
+        if (!LayerPermeabilities.Any())
+            LayerPermeabilities = new Dictionary<string, double>
+            {
+                { "Soil", 1e-12 }, { "Clay", 1e-15 }, { "Sand", 1e-11 }, { "Gravel", 1e-9 }, { "Sandstone", 1e-13 },
+                { "Limestone", 1e-14 }, { "Granite", 1e-16 }, { "Basalt", 1e-15 }
+            };
     }
 
     public void ApplyPreset(GeothermalSimulationPreset preset)
@@ -129,97 +155,200 @@ public class GeothermalSimulationOptions
     {
         HeatExchangerType = HeatExchangerType.UTube;
         FlowConfiguration = FlowConfiguration.CounterFlow;
-        PipeInnerDiameter = 0.032; PipeOuterDiameter = 0.040; PipeSpacing = 0.080;
-        PipeThermalConductivity = 0.4; InnerPipeThermalConductivity = 0.4; GroutThermalConductivity = 2.0;
-        FluidMassFlowRate = 0.5; FluidInletTemperature = 283.15;
-        SurfaceTemperature = 283.15; AverageGeothermalGradient = 0.025; GeothermalHeatFlux = 0.060;
-        DomainRadius = 30; DomainExtension = 10;
-        RadialGridPoints = 40; AngularGridPoints = 24; VerticalGridPoints = 80;
-        SimulateGroundwaterFlow = true; GroundwaterVelocity = new Vector3(1e-7f, 0, 0);
-        SimulationTime = 86400 * 30; TimeStep = 3600 * 1; SaveInterval = 24;
+        PipeInnerDiameter = 0.032;
+        PipeOuterDiameter = 0.040;
+        PipeSpacing = 0.080;
+        PipeThermalConductivity = 0.4;
+        InnerPipeThermalConductivity = 0.4;
+        GroutThermalConductivity = 2.0;
+        FluidMassFlowRate = 0.5;
+        FluidInletTemperature = 283.15;
+        SurfaceTemperature = 283.15;
+        AverageGeothermalGradient = 0.025;
+        GeothermalHeatFlux = 0.060;
+        DomainRadius = 30;
+        DomainExtension = 10;
+        RadialGridPoints = 40;
+        AngularGridPoints = 24;
+        VerticalGridPoints = 80;
+        SimulateGroundwaterFlow = true;
+        GroundwaterVelocity = new Vector3(1e-7f, 0, 0);
+        SimulationTime = 86400 * 30;
+        TimeStep = 3600 * 1;
+        SaveInterval = 24;
     }
 
     private void ApplyMediumDepthHeatingPreset()
     {
         HeatExchangerType = HeatExchangerType.UTube;
         FlowConfiguration = FlowConfiguration.CounterFlow;
-        PipeInnerDiameter = 0.065; PipeOuterDiameter = 0.075; PipeSpacing = 0.150;
-        PipeThermalConductivity = 0.4; InnerPipeThermalConductivity = 0.4; GroutThermalConductivity = 2.2;
-        FluidMassFlowRate = 3.0; FluidInletTemperature = 288.15;
-        SurfaceTemperature = 285.15; AverageGeothermalGradient = 0.030; GeothermalHeatFlux = 0.065;
-        DomainRadius = 75; DomainExtension = 20;
-        RadialGridPoints = 50; AngularGridPoints = 32; VerticalGridPoints = 120;
-        SimulateGroundwaterFlow = true; GroundwaterVelocity = new Vector3(5e-8f, 0, 0);
-        SimulationTime = 86400 * 180; TimeStep = 3600 * 2; SaveInterval = 12;
+        PipeInnerDiameter = 0.065;
+        PipeOuterDiameter = 0.075;
+        PipeSpacing = 0.150;
+        PipeThermalConductivity = 0.4;
+        InnerPipeThermalConductivity = 0.4;
+        GroutThermalConductivity = 2.2;
+        FluidMassFlowRate = 3.0;
+        FluidInletTemperature = 288.15;
+        SurfaceTemperature = 285.15;
+        AverageGeothermalGradient = 0.030;
+        GeothermalHeatFlux = 0.065;
+        DomainRadius = 75;
+        DomainExtension = 20;
+        RadialGridPoints = 50;
+        AngularGridPoints = 32;
+        VerticalGridPoints = 120;
+        SimulateGroundwaterFlow = true;
+        GroundwaterVelocity = new Vector3(5e-8f, 0, 0);
+        SimulationTime = 86400 * 180;
+        TimeStep = 3600 * 2;
+        SaveInterval = 12;
     }
 
     private void ApplyDeepGeothermalProductionPreset()
     {
         HeatExchangerType = HeatExchangerType.Coaxial;
         FlowConfiguration = FlowConfiguration.CounterFlowReversed;
-        PipeInnerDiameter = 0.125; PipeOuterDiameter = 0.220; PipeSpacing = 0.200;
-        PipeThermalConductivity = 45.0; InnerPipeThermalConductivity = 0.01; GroutThermalConductivity = 2.5;
-        FluidMassFlowRate = 15.0; FluidInletTemperature = 293.15;
-        FluidViscosity = 0.0005; FluidThermalConductivity = 0.65;
-        SurfaceTemperature = 288.15; AverageGeothermalGradient = 0.035; GeothermalHeatFlux = 0.075;
-        DomainRadius = 150; DomainExtension = 50;
-        RadialGridPoints = 60; AngularGridPoints = 36; VerticalGridPoints = 150;
-        SimulateGroundwaterFlow = true; GroundwaterVelocity = new Vector3(1e-8f, 0, 0);
-        SimulationTime = 86400 * 365 * 5; TimeStep = 3600 * 6; SaveInterval = 4;
+        PipeInnerDiameter = 0.125;
+        PipeOuterDiameter = 0.220;
+        PipeSpacing = 0.200;
+        PipeThermalConductivity = 45.0;
+        InnerPipeThermalConductivity = 0.01;
+        GroutThermalConductivity = 2.5;
+        FluidMassFlowRate = 15.0;
+        FluidInletTemperature = 293.15;
+        FluidViscosity = 0.0005;
+        FluidThermalConductivity = 0.65;
+        SurfaceTemperature = 288.15;
+        AverageGeothermalGradient = 0.035;
+        GeothermalHeatFlux = 0.075;
+        DomainRadius = 150;
+        DomainExtension = 50;
+        RadialGridPoints = 60;
+        AngularGridPoints = 36;
+        VerticalGridPoints = 150;
+        SimulateGroundwaterFlow = true;
+        GroundwaterVelocity = new Vector3(1e-8f, 0, 0);
+        SimulationTime = 86400 * 365 * 5;
+        TimeStep = 3600 * 6;
+        SaveInterval = 4;
     }
 
     private void ApplyEnhancedGeothermalSystemPreset()
     {
         HeatExchangerType = HeatExchangerType.Coaxial;
         FlowConfiguration = FlowConfiguration.CounterFlowReversed;
-        PipeInnerDiameter = 0.150; PipeOuterDiameter = 0.250; PipeSpacing = 0.230;
-        PipeThermalConductivity = 45.0; InnerPipeThermalConductivity = 0.01; GroutThermalConductivity = 2.8;
-        FluidMassFlowRate = 30.0; FluidInletTemperature = 313.15;
-        FluidDensity = 950; FluidViscosity = 0.0003; FluidThermalConductivity = 0.68;
-        SurfaceTemperature = 288.15; AverageGeothermalGradient = 0.040; GeothermalHeatFlux = 0.085;
-        SimulateFractures = true; FractureAperture = 0.005; FracturePermeability = 1e-10;
-        DomainRadius = 200; DomainExtension = 100;
-        RadialGridPoints = 70; AngularGridPoints = 36; VerticalGridPoints = 180;
-        SimulateGroundwaterFlow = true; GroundwaterVelocity = new Vector3(5e-7f, 0, 0);
-        LongitudinalDispersivity = 10.0; TransverseDispersivity = 1.0;
-        SimulationTime = 86400 * 365 * 10; TimeStep = 3600 * 12; SaveInterval = 2;
+        PipeInnerDiameter = 0.150;
+        PipeOuterDiameter = 0.250;
+        PipeSpacing = 0.230;
+        PipeThermalConductivity = 45.0;
+        InnerPipeThermalConductivity = 0.01;
+        GroutThermalConductivity = 2.8;
+        FluidMassFlowRate = 30.0;
+        FluidInletTemperature = 313.15;
+        FluidDensity = 950;
+        FluidViscosity = 0.0003;
+        FluidThermalConductivity = 0.68;
+        SurfaceTemperature = 288.15;
+        AverageGeothermalGradient = 0.040;
+        GeothermalHeatFlux = 0.085;
+        SimulateFractures = true;
+        FractureAperture = 0.005;
+        FracturePermeability = 1e-10;
+        DomainRadius = 200;
+        DomainExtension = 100;
+        RadialGridPoints = 70;
+        AngularGridPoints = 36;
+        VerticalGridPoints = 180;
+        SimulateGroundwaterFlow = true;
+        GroundwaterVelocity = new Vector3(5e-7f, 0, 0);
+        LongitudinalDispersivity = 10.0;
+        TransverseDispersivity = 1.0;
+        SimulationTime = 86400 * 365 * 10;
+        TimeStep = 3600 * 12;
+        SaveInterval = 2;
     }
 
     private void ApplyAquiferThermalStoragePreset()
     {
         HeatExchangerType = HeatExchangerType.UTube;
         FlowConfiguration = FlowConfiguration.CounterFlow;
-        PipeInnerDiameter = 0.080; PipeOuterDiameter = 0.090; PipeSpacing = 0.180;
-        PipeThermalConductivity = 0.4; InnerPipeThermalConductivity = 0.4; GroutThermalConductivity = 2.5;
-        FluidMassFlowRate = 5.0; FluidInletTemperature = 303.15;
-        SurfaceTemperature = 285.15; AverageGeothermalGradient = 0.025; GeothermalHeatFlux = 0.060;
-        DomainRadius = 100; DomainExtension = 30;
-        RadialGridPoints = 55; AngularGridPoints = 36; VerticalGridPoints = 100;
-        SimulateGroundwaterFlow = true; GroundwaterVelocity = new Vector3(5e-6f, 0, 0);
-        LongitudinalDispersivity = 5.0; TransverseDispersivity = 0.5;
-        SimulationTime = 86400 * 180; TimeStep = 3600 * 3; SaveInterval = 8;
+        PipeInnerDiameter = 0.080;
+        PipeOuterDiameter = 0.090;
+        PipeSpacing = 0.180;
+        PipeThermalConductivity = 0.4;
+        InnerPipeThermalConductivity = 0.4;
+        GroutThermalConductivity = 2.5;
+        FluidMassFlowRate = 5.0;
+        FluidInletTemperature = 303.15;
+        SurfaceTemperature = 285.15;
+        AverageGeothermalGradient = 0.025;
+        GeothermalHeatFlux = 0.060;
+        DomainRadius = 100;
+        DomainExtension = 30;
+        RadialGridPoints = 55;
+        AngularGridPoints = 36;
+        VerticalGridPoints = 100;
+        SimulateGroundwaterFlow = true;
+        GroundwaterVelocity = new Vector3(5e-6f, 0, 0);
+        LongitudinalDispersivity = 5.0;
+        TransverseDispersivity = 0.5;
+        SimulationTime = 86400 * 180;
+        TimeStep = 3600 * 3;
+        SaveInterval = 8;
     }
 
     private void ApplyExplorationTestPreset()
     {
         HeatExchangerType = HeatExchangerType.UTube;
         FlowConfiguration = FlowConfiguration.CounterFlow;
-        PipeInnerDiameter = 0.050; PipeOuterDiameter = 0.063; PipeSpacing = 0.125;
-        PipeThermalConductivity = 0.4; InnerPipeThermalConductivity = 0.4; GroutThermalConductivity = 2.0;
-        FluidMassFlowRate = 1.5; FluidInletTemperature = 288.15;
-        SurfaceTemperature = 285.15; AverageGeothermalGradient = 0.030; GeothermalHeatFlux = 0.065;
-        DomainRadius = 50; DomainExtension = 20;
-        RadialGridPoints = 35; AngularGridPoints = 24; VerticalGridPoints = 60;
-        SimulateGroundwaterFlow = true; GroundwaterVelocity = new Vector3(1e-7f, 0, 0);
-        SimulationTime = 86400 * 7; TimeStep = 30 * 60; SaveInterval = 48;
-        ConvergenceTolerance = 2e-3; MaxIterationsPerStep = 100;
+        PipeInnerDiameter = 0.050;
+        PipeOuterDiameter = 0.063;
+        PipeSpacing = 0.125;
+        PipeThermalConductivity = 0.4;
+        InnerPipeThermalConductivity = 0.4;
+        GroutThermalConductivity = 2.0;
+        FluidMassFlowRate = 1.5;
+        FluidInletTemperature = 288.15;
+        SurfaceTemperature = 285.15;
+        AverageGeothermalGradient = 0.030;
+        GeothermalHeatFlux = 0.065;
+        DomainRadius = 50;
+        DomainExtension = 20;
+        RadialGridPoints = 35;
+        AngularGridPoints = 24;
+        VerticalGridPoints = 60;
+        SimulateGroundwaterFlow = true;
+        GroundwaterVelocity = new Vector3(1e-7f, 0, 0);
+        SimulationTime = 86400 * 7;
+        TimeStep = 30 * 60;
+        SaveInterval = 48;
+        ConvergenceTolerance = 2e-3;
+        MaxIterationsPerStep = 100;
     }
 
     public static string GetPresetDescription(GeothermalSimulationPreset preset)
     {
-        return preset switch { GeothermalSimulationPreset.Custom => "Custom user-defined parameters", GeothermalSimulationPreset.ShallowGSHP => "Shallow GSHP (50-200m): Low-flow U-Tube for residential heating/cooling.", GeothermalSimulationPreset.MediumDepthHeating => "Medium Depth (500-1500m): Medium-flow U-Tube for district heating.", GeothermalSimulationPreset.DeepGeothermalProduction => "Deep Production (2-5km): High-flow Coaxial (VIT) for utility-scale heat/power.", GeothermalSimulationPreset.EnhancedGeothermalSystem => "EGS (3-6km): Very high-flow Coaxial (VIT) with fracture flow for high-temp power.", GeothermalSimulationPreset.AquiferThermalStorage => "ATES (50-300m): High-flow U-Tube for seasonal energy storage in aquifers.", GeothermalSimulationPreset.ExplorationTest => "Quick Test (any depth): Coarse grid, 7-day run for rapid feasibility assessment.", _ => "Unknown preset" };
+        return preset switch
+        {
+            GeothermalSimulationPreset.Custom => "Custom user-defined parameters",
+            GeothermalSimulationPreset.ShallowGSHP =>
+                "Shallow GSHP (50-200m): Low-flow U-Tube for residential heating/cooling.",
+            GeothermalSimulationPreset.MediumDepthHeating =>
+                "Medium Depth (500-1500m): Medium-flow U-Tube for district heating.",
+            GeothermalSimulationPreset.DeepGeothermalProduction =>
+                "Deep Production (2-5km): High-flow Coaxial (VIT) for utility-scale heat/power.",
+            GeothermalSimulationPreset.EnhancedGeothermalSystem =>
+                "EGS (3-6km): Very high-flow Coaxial (VIT) with fracture flow for high-temp power.",
+            GeothermalSimulationPreset.AquiferThermalStorage =>
+                "ATES (50-300m): High-flow U-Tube for seasonal energy storage in aquifers.",
+            GeothermalSimulationPreset.ExplorationTest =>
+                "Quick Test (any depth): Coarse grid, 7-day run for rapid feasibility assessment.",
+            _ => "Unknown preset"
+        };
     }
 }
+
 public enum GeothermalSimulationPreset
 {
     Custom,

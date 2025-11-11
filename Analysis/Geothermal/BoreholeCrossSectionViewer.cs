@@ -1,17 +1,15 @@
 ﻿// GeoscientistToolkit/UI/Visualization/BoreholeCrossSectionViewer.cs
-using System;
-using System.Collections.Generic;
-using System.Linq;
+
 using System.Numerics;
 using GeoscientistToolkit.Analysis.Geothermal;
-using GeoscientistToolkit.Data;
 using GeoscientistToolkit.Util;
 using ImGuiNET;
 
 namespace GeoscientistToolkit.UI.Visualization;
 
 /// <summary>
-/// Fixed 2D visualization of borehole cross-section and lateral-section with correct fluid temperature display using a custom ImGui renderer.
+///     Fixed 2D visualization of borehole cross-section and lateral-section with correct fluid temperature display using a
+///     custom ImGui renderer.
 /// </summary>
 public class BoreholeCrossSectionViewer
 {
@@ -31,24 +29,25 @@ public class BoreholeCrossSectionViewer
         LateralView_YZ
     }
 
-    private ViewMode _currentView = ViewMode.CombinedTemperature;
+    private bool _autoColorScale = true;
+    private bool _autoScale = true;
     private ViewPlane _currentPlane = ViewPlane.CrossSection_XY;
+
+    private ViewMode _currentView = ViewMode.CombinedTemperature;
     private float _depthPosition = 0.5f;
+
+    // NEW: State for lateral view interactivity
+    private Vector2 _lateralViewOffset = Vector2.Zero;
+    private float _lateralViewZoom = 1.0f;
+    private float _maxTempScale = 90f;
     private GeothermalMesh _mesh;
+    private float _minTempScale = 10f;
     private GeothermalSimulationOptions _options;
     private GeothermalSimulationResults _results;
     private float _selectedDepthMeters;
     private bool _showGrid = true;
     private bool _showLegend = true;
     private float _viewScale = 1.0f;
-    private bool _autoScale = true;
-    private bool _autoColorScale = true;
-    private float _minTempScale = 10f;
-    private float _maxTempScale = 90f;
-    
-    // NEW: State for lateral view interactivity
-    private Vector2 _lateralViewOffset = Vector2.Zero;
-    private float _lateralViewZoom = 1.0f;
 
 
     public void LoadResults(GeothermalSimulationResults results, GeothermalMesh mesh,
@@ -93,14 +92,15 @@ public class BoreholeCrossSectionViewer
         if (_currentPlane == ViewPlane.CrossSection_XY && _currentView != ViewMode.FluidTemperatureProfile)
         {
             var depthMeters = _selectedDepthMeters;
-            if (ImGui.SliderFloat("Depth (m)", ref depthMeters, 0f, (float)_options.BoreholeDataset.TotalDepth))
+            if (ImGui.SliderFloat("Depth (m)", ref depthMeters, 0f, _options.BoreholeDataset.TotalDepth))
             {
                 _selectedDepthMeters = depthMeters;
-                _depthPosition = depthMeters / (float)_options.BoreholeDataset.TotalDepth;
+                _depthPosition = depthMeters / _options.BoreholeDataset.TotalDepth;
             }
+
             ImGui.Text($"At depth: {_selectedDepthMeters:F1} m ({_depthPosition * 100:F0}%)");
         }
-        
+
         // Lateral view controls
         if (_currentPlane == ViewPlane.LateralView_YZ)
         {
@@ -109,6 +109,7 @@ public class BoreholeCrossSectionViewer
                 _lateralViewOffset = Vector2.Zero;
                 _lateralViewZoom = 1.0f;
             }
+
             ImGui.Text("Right-drag to pan, scroll to zoom.");
         }
 
@@ -125,20 +126,16 @@ public class BoreholeCrossSectionViewer
 
         // Scale controls
         ImGui.Checkbox("Auto View Scale", ref _autoScale);
-        if (!_autoScale)
-        {
-            ImGui.SliderFloat("View Radius (m)", ref _viewScale, 0.1f, 10.0f);
-        }
+        if (!_autoScale) ImGui.SliderFloat("View Radius (m)", ref _viewScale, 0.1f, 10.0f);
 
-        if (_currentView == ViewMode.CombinedTemperature || _currentView == ViewMode.GroundTemperature || _currentView == ViewMode.Velocity)
+        if (_currentView == ViewMode.CombinedTemperature || _currentView == ViewMode.GroundTemperature ||
+            _currentView == ViewMode.Velocity)
         {
             ImGui.Checkbox("Auto Color Scale", ref _autoColorScale);
             if (!_autoColorScale)
-            {
                 ImGui.DragFloatRange2("Temp Range (°C)", ref _minTempScale, ref _maxTempScale, 0.5f, 0f, 150f);
-            }
         }
-        
+
         ImGui.Checkbox("Show Grid", ref _showGrid);
         ImGui.Checkbox("Show Legend", ref _showLegend);
 
@@ -147,10 +144,10 @@ public class BoreholeCrossSectionViewer
         if (ImGui.Button("Debug Data Structure", new Vector2(-1, 30)))
             DebugDataStructure();
     }
-    
+
     /// <summary>
-    /// Renders the entire plot view using ImGui draw commands.
-    /// This is the main entry point for rendering any view.
+    ///     Renders the entire plot view using ImGui draw commands.
+    ///     This is the main entry point for rendering any view.
     /// </summary>
     public void RenderPlotInImGui()
     {
@@ -173,7 +170,7 @@ public class BoreholeCrossSectionViewer
     }
 
     /// <summary>
-    /// Handles rendering for all modes in the XY Cross-Section plane.
+    ///     Handles rendering for all modes in the XY Cross-Section plane.
     /// </summary>
     private void RenderCrossSectionPlane()
     {
@@ -200,13 +197,14 @@ public class BoreholeCrossSectionViewer
             default:
                 var drawList = ImGui.GetWindowDrawList();
                 var p0 = ImGui.GetCursorScreenPos();
-                drawList.AddText(p0 + new Vector2(20, 20), 0xFFFFFFFF, $"View Mode '{_currentView}' not yet implemented.");
+                drawList.AddText(p0 + new Vector2(20, 20), 0xFFFFFFFF,
+                    $"View Mode '{_currentView}' not yet implemented.");
                 break;
         }
     }
-    
+
     /// <summary>
-    /// Renders the combined temperature heatmap view directly using ImGui.
+    ///     Renders the combined temperature heatmap view directly using ImGui.
     /// </summary>
     private void RenderCombinedTemperatureViewImGui()
     {
@@ -220,37 +218,32 @@ public class BoreholeCrossSectionViewer
         var plot_p0 = new Vector2(canvas_p0.X + margin.X, canvas_p0.Y + margin.Y);
         var plot_sz = new Vector2(canvas_sz.X - margin.X - margin.Z, canvas_sz.Y - margin.Y - margin.W);
         var plot_p1 = new Vector2(plot_p0.X + plot_sz.X, plot_p0.Y + plot_sz.Y);
-        
+
         drawList.AddRectFilled(plot_p0, plot_p1, ImGui.GetColorU32(new Vector4(0.1f, 0.1f, 0.12f, 1f)));
 
         var zIndex = FindVerticalIndex(_selectedDepthMeters);
         var fluidTemps = GetFluidTemperaturesAtDepth(_selectedDepthMeters);
-        float maxRadius = _autoScale ? 1.0f : _viewScale;
+        var maxRadius = _autoScale ? 1.0f : _viewScale;
 
         var groundTempList = new List<double>();
         var pipeOuterRadius = _options.PipeOuterDiameter / 2.0;
 
-        int gridSize = 150; 
+        var gridSize = 150;
         var data = new double[gridSize, gridSize];
-        for (int ix = 0; ix < gridSize; ix++)
+        for (var ix = 0; ix < gridSize; ix++)
+        for (var iy = 0; iy < gridSize; iy++)
         {
-            for (int iy = 0; iy < gridSize; iy++)
-            {
-                var x = -maxRadius + (2 * maxRadius * ix / (gridSize - 1));
-                var y = -maxRadius + (2 * maxRadius * iy / (gridSize - 1));
-                var r = Math.Sqrt(x * x + y * y);
-                var theta = Math.Atan2(y, x);
-                
-                double temp = GetTemperatureAtPoint(r, theta, zIndex, fluidTemps);
-                data[ix, iy] = temp - 273.15;
-                
-                if (r > pipeOuterRadius * 1.2)
-                {
-                    groundTempList.Add(data[ix, iy]);
-                }
-            }
+            var x = -maxRadius + 2 * maxRadius * ix / (gridSize - 1);
+            var y = -maxRadius + 2 * maxRadius * iy / (gridSize - 1);
+            var r = Math.Sqrt(x * x + y * y);
+            var theta = Math.Atan2(y, x);
+
+            var temp = GetTemperatureAtPoint(r, theta, zIndex, fluidTemps);
+            data[ix, iy] = temp - 273.15;
+
+            if (r > pipeOuterRadius * 1.2) groundTempList.Add(data[ix, iy]);
         }
-        
+
         double minTemp, maxTemp;
         if (_autoColorScale)
         {
@@ -260,7 +253,11 @@ public class BoreholeCrossSectionViewer
                 minTemp = groundTempList[(int)(groundTempList.Count * 0.02)];
                 maxTemp = groundTempList[(int)(groundTempList.Count * 0.98)];
             }
-            else { minTemp = 10; maxTemp = 20; }
+            else
+            {
+                minTemp = 10;
+                maxTemp = 20;
+            }
 
             var fluidTempDownC = fluidTemps.down - 273.15;
             var fluidTempUpC = fluidTemps.up - 273.15;
@@ -279,62 +276,66 @@ public class BoreholeCrossSectionViewer
         }
 
         var cell_sz = new Vector2(plot_sz.X / gridSize, plot_sz.Y / gridSize);
-        for (int ix = 0; ix < gridSize; ix++)
+        for (var ix = 0; ix < gridSize; ix++)
+        for (var iy = 0; iy < gridSize; iy++)
         {
-            for (int iy = 0; iy < gridSize; iy++)
-            {
-                var temp = data[ix, iy];
-                if (double.IsNaN(temp)) continue;
+            var temp = data[ix, iy];
+            if (double.IsNaN(temp)) continue;
 
-                var t = (temp - minTemp) / (maxTemp - minTemp);
-                var color = GetJetColor((float)t);
-                
-                var cell_p0 = new Vector2(plot_p0.X + ix * cell_sz.X, plot_p0.Y + (gridSize - 1 - iy) * cell_sz.Y); // Y is inverted for drawing
-                var cell_p1 = new Vector2(cell_p0.X + cell_sz.X, cell_p0.Y + cell_sz.Y);
+            var t = (temp - minTemp) / (maxTemp - minTemp);
+            var color = GetJetColor((float)t);
 
-                drawList.AddRectFilled(cell_p0, cell_p1, ImGui.ColorConvertFloat4ToU32(color));
-            }
+            var cell_p0 =
+                new Vector2(plot_p0.X + ix * cell_sz.X,
+                    plot_p0.Y + (gridSize - 1 - iy) * cell_sz.Y); // Y is inverted for drawing
+            var cell_p1 = new Vector2(cell_p0.X + cell_sz.X, cell_p0.Y + cell_sz.Y);
+
+            drawList.AddRectFilled(cell_p0, cell_p1, ImGui.ColorConvertFloat4ToU32(color));
         }
-        
-        Func<Vector2, Vector2> WorldToScreen = (worldPos) =>
+
+        Func<Vector2, Vector2> WorldToScreen = worldPos =>
         {
-            float screenX = plot_p0.X + (worldPos.X - (-maxRadius)) / (2 * maxRadius) * plot_sz.X;
-            float screenY = plot_p1.Y - (worldPos.Y - (-maxRadius)) / (2 * maxRadius) * plot_sz.Y;
+            var screenX = plot_p0.X + (worldPos.X - -maxRadius) / (2 * maxRadius) * plot_sz.X;
+            var screenY = plot_p1.Y - (worldPos.Y - -maxRadius) / (2 * maxRadius) * plot_sz.Y;
             return new Vector2(screenX, screenY);
         };
-        Func<float, float> ScaleRadius = (r) => (r / maxRadius) * (plot_sz.X / 2f);
+        Func<float, float> ScaleRadius = r => r / maxRadius * (plot_sz.X / 2f);
 
         var centerScreen = WorldToScreen(Vector2.Zero);
-        drawList.AddCircle(centerScreen, ScaleRadius((float)_options.BoreholeDataset.WellDiameter / 2), 0xFF000000, 0, 2f);
+        drawList.AddCircle(centerScreen, ScaleRadius(_options.BoreholeDataset.WellDiameter / 2), 0xFF000000, 0, 2f);
         drawList.AddCircle(centerScreen, ScaleRadius((float)_options.PipeOuterDiameter / 2), 0xFF808080, 0, 1.5f);
         if (_options.HeatExchangerType == HeatExchangerType.Coaxial)
-        {
             drawList.AddCircle(centerScreen, ScaleRadius((float)_options.PipeSpacing / 2), 0xFF505050, 0, 1.5f);
-        }
-        
+
         var title = $"Combined Temperature at {_selectedDepthMeters:F1} m depth";
         var titleSize = ImGui.CalcTextSize(title);
         drawList.AddText(new Vector2(plot_p0.X + plot_sz.X / 2 - titleSize.X / 2, plot_p0.Y - 30), 0xFFFFFFFF, title);
-        
+
         if (_options.FlowConfiguration == FlowConfiguration.CounterFlow)
         {
             drawList.AddText(centerScreen - new Vector2(10, 8), 0xFFFFFFFF, $"↓ {fluidTemps.down - 273.15:F0}°C");
-            var annulusPos = WorldToScreen(new Vector2((float)(_options.PipeSpacing / 2.0 + _options.PipeOuterDiameter / 2.0) / 2.0f, 0));
+            var annulusPos =
+                WorldToScreen(new Vector2((float)(_options.PipeSpacing / 2.0 + _options.PipeOuterDiameter / 2.0) / 2.0f,
+                    0));
             drawList.AddText(annulusPos - new Vector2(10, 8), 0xFFFFFFFF, $"↑ {fluidTemps.up - 273.15:F0}°C");
         }
         else if (_options.FlowConfiguration == FlowConfiguration.CounterFlowReversed)
         {
             drawList.AddText(centerScreen - new Vector2(10, 8), 0xFFFFFFFF, $"↑ {fluidTemps.up - 273.15:F0}°C");
-            var annulusPos = WorldToScreen(new Vector2((float)(_options.PipeSpacing / 2.0 + _options.PipeOuterDiameter / 2.0) / 2.0f, 0));
+            var annulusPos =
+                WorldToScreen(new Vector2((float)(_options.PipeSpacing / 2.0 + _options.PipeOuterDiameter / 2.0) / 2.0f,
+                    0));
             drawList.AddText(annulusPos - new Vector2(10, 8), 0xFFFFFFFF, $"↓ {fluidTemps.down - 273.15:F0}°C");
         }
-        
+
         DrawAxes(drawList, plot_p0, plot_sz, maxRadius, maxRadius);
-        if (_showLegend) DrawColorBar(drawList, new Vector2(plot_p1.X + 20, plot_p0.Y), new Vector2(20, plot_sz.Y), minTemp, maxTemp, "Temp (°C)");
+        if (_showLegend)
+            DrawColorBar(drawList, new Vector2(plot_p1.X + 20, plot_p0.Y), new Vector2(20, plot_sz.Y), minTemp, maxTemp,
+                "Temp (°C)");
     }
-    
+
     /// <summary>
-    /// Handles rendering for all modes in the YZ Lateral View plane.
+    ///     Handles rendering for all modes in the YZ Lateral View plane.
     /// </summary>
     private void RenderLateralPlane()
     {
@@ -351,13 +352,14 @@ public class BoreholeCrossSectionViewer
             default:
                 var drawList = ImGui.GetWindowDrawList();
                 var p0 = ImGui.GetCursorScreenPos();
-                drawList.AddText(p0 + new Vector2(20, 20), 0xFFFFFFFF, $"View Mode '{_currentView}' is not applicable in Lateral View.");
+                drawList.AddText(p0 + new Vector2(20, 20), 0xFFFFFFFF,
+                    $"View Mode '{_currentView}' is not applicable in Lateral View.");
                 break;
         }
     }
-    
+
     /// <summary>
-    /// Renders a YZ slice showing temperature along the borehole depth, with zoom and pan.
+    ///     Renders a YZ slice showing temperature along the borehole depth, with zoom and pan.
     /// </summary>
     private void RenderLateralTemperatureViewImGui()
     {
@@ -365,7 +367,7 @@ public class BoreholeCrossSectionViewer
         var canvas_p0 = ImGui.GetCursorScreenPos();
         var canvas_sz = ImGui.GetContentRegionAvail();
         if (canvas_sz.X < 50 || canvas_sz.Y < 50) return;
-        
+
         var io = ImGui.GetIO();
 
         var margin = new Vector4(80, 40, 100, 60);
@@ -385,66 +387,71 @@ public class BoreholeCrossSectionViewer
                 var mousePosAbs = ImGui.GetMousePos();
                 var mousePosRel = mousePosAbs - plot_p0;
                 var mouseWorldBeforeZoom = new Vector2(
-                    (mousePosRel.X / plot_sz.X * 2 - 1) * (_autoScale ? 5.0f : _viewScale) / _lateralViewZoom + _lateralViewOffset.X,
-                    (mousePosRel.Y / plot_sz.Y) * (float)_options.BoreholeDataset.TotalDepth / _lateralViewZoom + _lateralViewOffset.Y
+                    (mousePosRel.X / plot_sz.X * 2 - 1) * (_autoScale ? 5.0f : _viewScale) / _lateralViewZoom +
+                    _lateralViewOffset.X,
+                    mousePosRel.Y / plot_sz.Y * _options.BoreholeDataset.TotalDepth / _lateralViewZoom +
+                    _lateralViewOffset.Y
                 );
 
                 var zoomFactor = MathF.Pow(1.1f, io.MouseWheel);
                 _lateralViewZoom *= zoomFactor;
                 _lateralViewZoom = Math.Clamp(_lateralViewZoom, 0.01f, 100.0f);
-                
+
                 var mouseWorldAfterZoom = new Vector2(
-                    (mousePosRel.X / plot_sz.X * 2 - 1) * (_autoScale ? 5.0f : _viewScale) / _lateralViewZoom + _lateralViewOffset.X,
-                    (mousePosRel.Y / plot_sz.Y) * (float)_options.BoreholeDataset.TotalDepth / _lateralViewZoom + _lateralViewOffset.Y
+                    (mousePosRel.X / plot_sz.X * 2 - 1) * (_autoScale ? 5.0f : _viewScale) / _lateralViewZoom +
+                    _lateralViewOffset.X,
+                    mousePosRel.Y / plot_sz.Y * _options.BoreholeDataset.TotalDepth / _lateralViewZoom +
+                    _lateralViewOffset.Y
                 );
 
                 _lateralViewOffset += mouseWorldBeforeZoom - mouseWorldAfterZoom;
             }
+
             // Panning
             if (ImGui.IsMouseDragging(ImGuiMouseButton.Right))
             {
                 var baseRadius = (_autoScale ? 5.0f : _viewScale) / _lateralViewZoom;
-                var baseDepth = (float)_options.BoreholeDataset.TotalDepth / _lateralViewZoom;
+                var baseDepth = _options.BoreholeDataset.TotalDepth / _lateralViewZoom;
 
                 _lateralViewOffset.X -= io.MouseDelta.X / plot_sz.X * baseRadius * 2;
                 _lateralViewOffset.Y -= io.MouseDelta.Y / plot_sz.Y * baseDepth;
             }
         }
-        
-        float viewRadius = (_autoScale ? 5.0f : _viewScale) / _lateralViewZoom;
-        float viewDepth = (float)_options.BoreholeDataset.TotalDepth;
-        float viewDepthRange = viewDepth / _lateralViewZoom;
 
-        float min_y = _lateralViewOffset.X - viewRadius;
-        float max_y = _lateralViewOffset.X + viewRadius;
-        float min_z = _lateralViewOffset.Y;
-        float max_z = _lateralViewOffset.Y + viewDepthRange;
+        var viewRadius = (_autoScale ? 5.0f : _viewScale) / _lateralViewZoom;
+        var viewDepth = _options.BoreholeDataset.TotalDepth;
+        var viewDepthRange = viewDepth / _lateralViewZoom;
 
-        int gridX = 150;
-        int gridZ = 200;
+        var min_y = _lateralViewOffset.X - viewRadius;
+        var max_y = _lateralViewOffset.X + viewRadius;
+        var min_z = _lateralViewOffset.Y;
+        var max_z = _lateralViewOffset.Y + viewDepthRange;
+
+        var gridX = 150;
+        var gridZ = 200;
         var data = new double[gridX, gridZ];
         var allTemps = new List<double>();
 
-        for (int iz = 0; iz < gridZ; iz++)
+        for (var iz = 0; iz < gridZ; iz++)
         {
-            float depth = min_z + (float)iz / (gridZ - 1) * viewDepthRange;
+            var depth = min_z + (float)iz / (gridZ - 1) * viewDepthRange;
             if (depth < 0 || depth > viewDepth) continue;
-            
-            int zIndex = FindVerticalIndex(depth);
+
+            var zIndex = FindVerticalIndex(depth);
             var fluidTemps = GetFluidTemperaturesAtDepth(depth);
 
-            for (int ix = 0; ix < gridX; ix++)
+            for (var ix = 0; ix < gridX; ix++)
             {
                 var y = min_y + (max_y - min_y) * ix / (gridX - 1);
                 var r = Math.Abs(y);
-                var theta = (y >= 0) ? 0 : Math.PI;
+                var theta = y >= 0 ? 0 : Math.PI;
 
-                double temp = GetTemperatureAtPoint(r, theta, zIndex, fluidTemps);
+                var temp = GetTemperatureAtPoint(r, theta, zIndex, fluidTemps);
                 data[ix, iz] = temp - 273.15;
                 allTemps.Add(data[ix, iz]);
             }
         }
-        
+
         double minTemp, maxTemp;
         if (_autoColorScale && allTemps.Any())
         {
@@ -461,48 +468,49 @@ public class BoreholeCrossSectionViewer
             minTemp = _minTempScale;
             maxTemp = _maxTempScale;
         }
-        
+
         drawList.PushClipRect(plot_p0, plot_p1, true);
 
         var cell_sz = new Vector2(plot_sz.X / gridX, plot_sz.Y / gridZ);
-        for (int ix = 0; ix < gridX; ix++)
+        for (var ix = 0; ix < gridX; ix++)
+        for (var iz = 0; iz < gridZ; iz++)
         {
-            for (int iz = 0; iz < gridZ; iz++)
-            {
-                var temp = data[ix, iz];
-                var t = (temp - minTemp) / (maxTemp - minTemp);
-                var color = GetJetColor((float)t);
-                
-                var cell_p0 = new Vector2(plot_p0.X + ix * cell_sz.X, plot_p0.Y + iz * cell_sz.Y);
-                var cell_p1 = new Vector2(cell_p0.X + cell_sz.X, cell_p0.Y + cell_sz.Y);
-                drawList.AddRectFilled(cell_p0, cell_p1, ImGui.ColorConvertFloat4ToU32(color));
-            }
+            var temp = data[ix, iz];
+            var t = (temp - minTemp) / (maxTemp - minTemp);
+            var color = GetJetColor((float)t);
+
+            var cell_p0 = new Vector2(plot_p0.X + ix * cell_sz.X, plot_p0.Y + iz * cell_sz.Y);
+            var cell_p1 = new Vector2(cell_p0.X + cell_sz.X, cell_p0.Y + cell_sz.Y);
+            drawList.AddRectFilled(cell_p0, cell_p1, ImGui.ColorConvertFloat4ToU32(color));
         }
 
-        Func<Vector2, Vector2> WorldToScreen = (worldPos) =>
+        Func<Vector2, Vector2> WorldToScreen = worldPos =>
         {
-            float screenX = plot_p0.X + (worldPos.X - min_y) / (max_y - min_y) * plot_sz.X;
-            float screenY = plot_p0.Y + (worldPos.Y - min_z) / viewDepthRange * plot_sz.Y;
+            var screenX = plot_p0.X + (worldPos.X - min_y) / (max_y - min_y) * plot_sz.X;
+            var screenY = plot_p0.Y + (worldPos.Y - min_z) / viewDepthRange * plot_sz.Y;
             return new Vector2(screenX, screenY);
         };
-        
+
         // Draw Borehole geometry
-        var borehole_p0_world = new Vector2((float)-_options.BoreholeDataset.WellDiameter / 2, 0);
-        var borehole_p1_world = new Vector2((float)_options.BoreholeDataset.WellDiameter / 2, viewDepth);
-        drawList.AddRect(WorldToScreen(borehole_p0_world), WorldToScreen(borehole_p1_world), 0x80000000, 0, ImDrawFlags.None, Math.Max(1f, _lateralViewZoom * 0.5f));
-        
+        var borehole_p0_world = new Vector2(-_options.BoreholeDataset.WellDiameter / 2, 0);
+        var borehole_p1_world = new Vector2(_options.BoreholeDataset.WellDiameter / 2, viewDepth);
+        drawList.AddRect(WorldToScreen(borehole_p0_world), WorldToScreen(borehole_p1_world), 0x80000000, 0,
+            ImDrawFlags.None, Math.Max(1f, _lateralViewZoom * 0.5f));
+
         drawList.PopClipRect();
 
         var title = "Lateral Temperature View (YZ Plane)";
         var titleSize = ImGui.CalcTextSize(title);
         drawList.AddText(new Vector2(plot_p0.X + plot_sz.X / 2 - titleSize.X / 2, plot_p0.Y - 30), 0xFFFFFFFF, title);
-        
+
         DrawAxes(drawList, plot_p0, plot_sz, viewRadius, viewDepth, "Y (m)", "Depth (m)", true, _lateralViewOffset);
-        if (_showLegend) DrawColorBar(drawList, new Vector2(plot_p1.X + 20, plot_p0.Y), new Vector2(20, plot_sz.Y), minTemp, maxTemp, "Temp (°C)");
+        if (_showLegend)
+            DrawColorBar(drawList, new Vector2(plot_p1.X + 20, plot_p0.Y), new Vector2(20, plot_sz.Y), minTemp, maxTemp,
+                "Temp (°C)");
     }
-    
+
     /// <summary>
-    /// Renders the ground temperature only, masking the borehole.
+    ///     Renders the ground temperature only, masking the borehole.
     /// </summary>
     private void RenderGroundTemperatureOnlyImGui()
     {
@@ -516,40 +524,38 @@ public class BoreholeCrossSectionViewer
         var plot_p0 = new Vector2(canvas_p0.X + margin.X, canvas_p0.Y + margin.Y);
         var plot_sz = new Vector2(canvas_sz.X - margin.X - margin.Z, canvas_sz.Y - margin.Y - margin.W);
         var plot_p1 = new Vector2(plot_p0.X + plot_sz.X, plot_p0.Y + plot_sz.Y);
-        
+
         drawList.AddRectFilled(plot_p0, plot_p1, ImGui.GetColorU32(new Vector4(0.1f, 0.1f, 0.12f, 1f)));
 
         var zIndex = FindVerticalIndex(_selectedDepthMeters);
-        float maxRadius = _autoScale ? 2.0f : _viewScale; // Slightly larger default view
+        var maxRadius = _autoScale ? 2.0f : _viewScale; // Slightly larger default view
         var heRadius = _options.PipeOuterDiameter / 2.0 * 1.5;
 
-        int gridSize = 150; 
+        var gridSize = 150;
         var data = new double[gridSize, gridSize];
         var tempList = new List<double>();
-        
-        for (int ix = 0; ix < gridSize; ix++)
-        {
-            for (int iy = 0; iy < gridSize; iy++)
-            {
-                var x = -maxRadius + (2 * maxRadius * ix / (gridSize - 1));
-                var y = -maxRadius + (2 * maxRadius * iy / (gridSize - 1));
-                var r = Math.Sqrt(x * x + y * y);
-                var theta = Math.Atan2(y, x);
 
-                if (r < heRadius)
-                {
-                    data[ix, iy] = double.NaN; // Mask region
-                }
-                else
-                {
-                    double temp = InterpolateGroundTemperature(r, theta, zIndex);
-                    data[ix, iy] = temp - 273.15;
-                    tempList.Add(data[ix, iy]);
-                }
+        for (var ix = 0; ix < gridSize; ix++)
+        for (var iy = 0; iy < gridSize; iy++)
+        {
+            var x = -maxRadius + 2 * maxRadius * ix / (gridSize - 1);
+            var y = -maxRadius + 2 * maxRadius * iy / (gridSize - 1);
+            var r = Math.Sqrt(x * x + y * y);
+            var theta = Math.Atan2(y, x);
+
+            if (r < heRadius)
+            {
+                data[ix, iy] = double.NaN; // Mask region
+            }
+            else
+            {
+                var temp = InterpolateGroundTemperature(r, theta, zIndex);
+                data[ix, iy] = temp - 273.15;
+                tempList.Add(data[ix, iy]);
             }
         }
-        
-        double minTemp=10, maxTemp=20;
+
+        double minTemp = 10, maxTemp = 20;
         if (_autoColorScale && tempList.Any())
         {
             tempList.Sort();
@@ -563,34 +569,34 @@ public class BoreholeCrossSectionViewer
         }
 
         var cell_sz = new Vector2(plot_sz.X / gridSize, plot_sz.Y / gridSize);
-        for (int ix = 0; ix < gridSize; ix++)
+        for (var ix = 0; ix < gridSize; ix++)
+        for (var iy = 0; iy < gridSize; iy++)
         {
-            for (int iy = 0; iy < gridSize; iy++)
-            {
-                if (double.IsNaN(data[ix, iy])) continue;
-                var t = (data[ix, iy] - minTemp) / (maxTemp - minTemp);
-                var color = GetJetColor((float)t);
-                var cell_p0 = new Vector2(plot_p0.X + ix * cell_sz.X, plot_p0.Y + (gridSize - 1 - iy) * cell_sz.Y);
-                var cell_p1 = new Vector2(cell_p0.X + cell_sz.X, cell_p0.Y + cell_sz.Y);
-                drawList.AddRectFilled(cell_p0, cell_p1, ImGui.ColorConvertFloat4ToU32(color));
-            }
+            if (double.IsNaN(data[ix, iy])) continue;
+            var t = (data[ix, iy] - minTemp) / (maxTemp - minTemp);
+            var color = GetJetColor((float)t);
+            var cell_p0 = new Vector2(plot_p0.X + ix * cell_sz.X, plot_p0.Y + (gridSize - 1 - iy) * cell_sz.Y);
+            var cell_p1 = new Vector2(cell_p0.X + cell_sz.X, cell_p0.Y + cell_sz.Y);
+            drawList.AddRectFilled(cell_p0, cell_p1, ImGui.ColorConvertFloat4ToU32(color));
         }
-        
+
         // Draw a grey circle over the masked region
-        Func<float, float> ScaleRadius = (r) => (r / maxRadius) * (plot_sz.X / 2f);
+        Func<float, float> ScaleRadius = r => r / maxRadius * (plot_sz.X / 2f);
         var centerScreen = plot_p0 + plot_sz / 2;
         drawList.AddCircleFilled(centerScreen, ScaleRadius((float)heRadius), 0xFF404040);
-        
+
         var title = $"Ground Temperature at {_selectedDepthMeters:F1} m";
         var titleSize = ImGui.CalcTextSize(title);
         drawList.AddText(new Vector2(plot_p0.X + plot_sz.X / 2 - titleSize.X / 2, plot_p0.Y - 30), 0xFFFFFFFF, title);
-        
+
         DrawAxes(drawList, plot_p0, plot_sz, maxRadius, maxRadius);
-        if (_showLegend) DrawColorBar(drawList, new Vector2(plot_p1.X + 20, plot_p0.Y), new Vector2(20, plot_sz.Y), minTemp, maxTemp, "Temp (°C)");
+        if (_showLegend)
+            DrawColorBar(drawList, new Vector2(plot_p1.X + 20, plot_p0.Y), new Vector2(20, plot_sz.Y), minTemp, maxTemp,
+                "Temp (°C)");
     }
-    
+
     /// <summary>
-    /// NEW: Renders a schematic of the fluid circulation direction.
+    ///     NEW: Renders a schematic of the fluid circulation direction.
     /// </summary>
     private void RenderFluidCirculationViewImGui()
     {
@@ -603,45 +609,45 @@ public class BoreholeCrossSectionViewer
         var plot_p0 = new Vector2(canvas_p0.X + margin.X, canvas_p0.Y + margin.Y);
         var plot_sz = new Vector2(canvas_sz.X - margin.X - margin.Z, canvas_sz.Y - margin.Y - margin.W);
         var plot_p1 = new Vector2(plot_p0.X + plot_sz.X, plot_p0.Y + plot_sz.Y);
-        
-        drawList.AddRectFilled(plot_p0, plot_p1, ImGui.GetColorU32(new Vector4(0.1f, 0.1f, 0.12f, 1f)));
-        
-        float maxRadius = (float)(_options.BoreholeDataset.WellDiameter * 2);
 
-        Func<Vector2, Vector2> WorldToScreen = (worldPos) =>
+        drawList.AddRectFilled(plot_p0, plot_p1, ImGui.GetColorU32(new Vector4(0.1f, 0.1f, 0.12f, 1f)));
+
+        var maxRadius = _options.BoreholeDataset.WellDiameter * 2;
+
+        Func<Vector2, Vector2> WorldToScreen = worldPos =>
         {
-            float screenX = plot_p0.X + (worldPos.X - (-maxRadius)) / (2 * maxRadius) * plot_sz.X;
-            float screenY = plot_p1.Y - (worldPos.Y - (-maxRadius)) / (2 * maxRadius) * plot_sz.Y;
+            var screenX = plot_p0.X + (worldPos.X - -maxRadius) / (2 * maxRadius) * plot_sz.X;
+            var screenY = plot_p1.Y - (worldPos.Y - -maxRadius) / (2 * maxRadius) * plot_sz.Y;
             return new Vector2(screenX, screenY);
         };
-        Func<float, float> ScaleRadius = (r) => (r / maxRadius) * (plot_sz.X / 2f);
+        Func<float, float> ScaleRadius = r => r / maxRadius * (plot_sz.X / 2f);
 
         var centerScreen = WorldToScreen(Vector2.Zero);
-        
+
         // Draw Borehole and grout
-        drawList.AddCircleFilled(centerScreen, ScaleRadius((float)_options.BoreholeDataset.WellDiameter / 2), 0xFF606060);
-        
+        drawList.AddCircleFilled(centerScreen, ScaleRadius(_options.BoreholeDataset.WellDiameter / 2), 0xFF606060);
+
         var title = $"Fluid Circulation at {_selectedDepthMeters:F1} m";
         var titleSize = ImGui.CalcTextSize(title);
         drawList.AddText(new Vector2(plot_p0.X + plot_sz.X / 2 - titleSize.X / 2, plot_p0.Y - 30), 0xFFFFFFFF, title);
 
         var downFlowSymbol = "INTO PAGE (DOWN)";
         var upFlowSymbol = "OUT OF PAGE (UP)";
-        uint downColor = ImGui.GetColorU32(new Vector4(0.2f, 0.5f, 1.0f, 1.0f));
-        uint upColor = ImGui.GetColorU32(new Vector4(1.0f, 0.5f, 0.2f, 1.0f));
+        var downColor = ImGui.GetColorU32(new Vector4(0.2f, 0.5f, 1.0f, 1.0f));
+        var upColor = ImGui.GetColorU32(new Vector4(1.0f, 0.5f, 0.2f, 1.0f));
 
         if (_options.HeatExchangerType == HeatExchangerType.Coaxial)
         {
             var innerPipeOuterRadius = (float)_options.PipeSpacing / 2;
             var outerPipeOuterRadius = (float)_options.PipeOuterDiameter / 2;
-            
+
             drawList.AddCircleFilled(centerScreen, ScaleRadius(outerPipeOuterRadius), 0xFFA0A0A0);
             drawList.AddCircleFilled(centerScreen, ScaleRadius(innerPipeOuterRadius), 0xFFC0C0C0);
             drawList.AddCircle(centerScreen, ScaleRadius(innerPipeOuterRadius), 0xFF000000, 0, 2f);
             drawList.AddCircle(centerScreen, ScaleRadius(outerPipeOuterRadius), 0xFF000000, 0, 2f);
 
-            bool downIsInCenter = _options.FlowConfiguration == FlowConfiguration.CounterFlow;
-            
+            var downIsInCenter = _options.FlowConfiguration == FlowConfiguration.CounterFlow;
+
             // Draw symbols
             var symbolSize = ScaleRadius(innerPipeOuterRadius * 0.3f);
             if (downIsInCenter)
@@ -650,14 +656,18 @@ public class BoreholeCrossSectionViewer
                 drawList.AddCircle(centerScreen, symbolSize * 0.5f, 0xFFFFFFFF, 20, 2f);
                 var annulusPos = WorldToScreen(new Vector2(innerPipeOuterRadius * 1.5f, 0));
                 drawList.AddCircleFilled(annulusPos, symbolSize, upColor, 20);
-                drawList.AddLine(annulusPos - new Vector2(symbolSize,0)*0.3f, annulusPos + new Vector2(symbolSize,0)*0.3f, 0xFFFFFFFF, 2f);
-                drawList.AddLine(annulusPos - new Vector2(0,symbolSize)*0.3f, annulusPos + new Vector2(0,symbolSize)*0.3f, 0xFFFFFFFF, 2f);
+                drawList.AddLine(annulusPos - new Vector2(symbolSize, 0) * 0.3f,
+                    annulusPos + new Vector2(symbolSize, 0) * 0.3f, 0xFFFFFFFF, 2f);
+                drawList.AddLine(annulusPos - new Vector2(0, symbolSize) * 0.3f,
+                    annulusPos + new Vector2(0, symbolSize) * 0.3f, 0xFFFFFFFF, 2f);
             }
             else // Up is in center
             {
                 drawList.AddCircleFilled(centerScreen, symbolSize, upColor, 20);
-                drawList.AddLine(centerScreen - new Vector2(symbolSize,0)*0.3f, centerScreen + new Vector2(symbolSize,0)*0.3f, 0xFFFFFFFF, 2f);
-                drawList.AddLine(centerScreen - new Vector2(0,symbolSize)*0.3f, centerScreen + new Vector2(0,symbolSize)*0.3f, 0xFFFFFFFF, 2f);
+                drawList.AddLine(centerScreen - new Vector2(symbolSize, 0) * 0.3f,
+                    centerScreen + new Vector2(symbolSize, 0) * 0.3f, 0xFFFFFFFF, 2f);
+                drawList.AddLine(centerScreen - new Vector2(0, symbolSize) * 0.3f,
+                    centerScreen + new Vector2(0, symbolSize) * 0.3f, 0xFFFFFFFF, 2f);
                 var annulusPos = WorldToScreen(new Vector2(innerPipeOuterRadius * 1.5f, 0));
                 drawList.AddCircleFilled(annulusPos, symbolSize, downColor, 20);
                 drawList.AddCircle(annulusPos, symbolSize * 0.5f, 0xFFFFFFFF, 20, 2f);
@@ -675,13 +685,15 @@ public class BoreholeCrossSectionViewer
 
             drawList.AddCircleFilled(p1_screen, ScaleRadius(pipeRadius), downColor);
             drawList.AddCircleFilled(p2_screen, ScaleRadius(pipeRadius), upColor);
-            
+
             var symbolSize = ScaleRadius(pipeRadius * 0.5f);
             // Down pipe
-            drawList.AddCircle(p1_screen, symbolSize*0.5f, 0xFFFFFFFF, 20, 2f);
+            drawList.AddCircle(p1_screen, symbolSize * 0.5f, 0xFFFFFFFF, 20, 2f);
             // Up pipe
-            drawList.AddLine(p2_screen - new Vector2(symbolSize,0)*0.3f, p2_screen + new Vector2(symbolSize,0)*0.3f, 0xFFFFFFFF, 2f);
-            drawList.AddLine(p2_screen - new Vector2(0,symbolSize)*0.3f, p2_screen + new Vector2(0,symbolSize)*0.3f, 0xFFFFFFFF, 2f);
+            drawList.AddLine(p2_screen - new Vector2(symbolSize, 0) * 0.3f,
+                p2_screen + new Vector2(symbolSize, 0) * 0.3f, 0xFFFFFFFF, 2f);
+            drawList.AddLine(p2_screen - new Vector2(0, symbolSize) * 0.3f,
+                p2_screen + new Vector2(0, symbolSize) * 0.3f, 0xFFFFFFFF, 2f);
         }
 
         // Legend
@@ -691,9 +703,9 @@ public class BoreholeCrossSectionViewer
         drawList.AddCircleFilled(legendP + new Vector2(0, 30), 10, upColor);
         drawList.AddText(legendP + new Vector2(15, 23), 0xFFFFFFFF, upFlowSymbol);
     }
-    
+
     /// <summary>
-    /// NEW: Renders a heatmap of the fluid velocity magnitude.
+    ///     NEW: Renders a heatmap of the fluid velocity magnitude.
     /// </summary>
     private void RenderVelocityViewImGui()
     {
@@ -706,84 +718,84 @@ public class BoreholeCrossSectionViewer
         var plot_p0 = new Vector2(canvas_p0.X + margin.X, canvas_p0.Y + margin.Y);
         var plot_sz = new Vector2(canvas_sz.X - margin.X - margin.Z, canvas_sz.Y - margin.Y - margin.W);
         var plot_p1 = new Vector2(plot_p0.X + plot_sz.X, plot_p0.Y + plot_sz.Y);
-        
+
         drawList.AddRectFilled(plot_p0, plot_p1, ImGui.GetColorU32(new Vector4(0.1f, 0.1f, 0.12f, 1f)));
 
-        float maxRadius = (float)(_options.BoreholeDataset.WellDiameter * 1.2);
-        
+        var maxRadius = (float)(_options.BoreholeDataset.WellDiameter * 1.2);
+
         // Calculate velocities
         double v_down = 0, v_up = 0;
         if (_options.HeatExchangerType == HeatExchangerType.Coaxial)
         {
-            
-            var r_inner_effective = _options.PipeSpacing / 2.0; 
+            var r_inner_effective = _options.PipeSpacing / 2.0;
             var r_outer_inner = _options.PipeInnerDiameter / 2.0;
-            
+
             var area_center = Math.PI * r_inner_effective * r_inner_effective;
             var area_annulus = Math.PI * (r_outer_inner * r_outer_inner - r_inner_effective * r_inner_effective);
 
             var v_center = _options.FluidMassFlowRate / (_options.FluidDensity * area_center);
             var v_annulus = _options.FluidMassFlowRate / (_options.FluidDensity * area_annulus);
-            
-            v_down = (_options.FlowConfiguration == FlowConfiguration.CounterFlow) ? v_center : v_annulus;
-            v_up = (_options.FlowConfiguration == FlowConfiguration.CounterFlow) ? v_annulus : v_center;
+
+            v_down = _options.FlowConfiguration == FlowConfiguration.CounterFlow ? v_center : v_annulus;
+            v_up = _options.FlowConfiguration == FlowConfiguration.CounterFlow ? v_annulus : v_center;
         }
         else // U-Tube
         {
-            var area = Math.PI * Math.Pow(_options.PipeInnerDiameter/2.0, 2);
+            var area = Math.PI * Math.Pow(_options.PipeInnerDiameter / 2.0, 2);
             v_down = v_up = _options.FluidMassFlowRate / (_options.FluidDensity * area);
         }
 
-        double max_v = Math.Max(v_down, v_up);
+        var max_v = Math.Max(v_down, v_up);
         double min_v = 0; // Ground velocity is zero
 
-        int gridSize = 100;
+        var gridSize = 100;
         var cell_sz = new Vector2(plot_sz.X / gridSize, plot_sz.Y / gridSize);
 
-        for (int ix = 0; ix < gridSize; ix++)
+        for (var ix = 0; ix < gridSize; ix++)
+        for (var iy = 0; iy < gridSize; iy++)
         {
-            for (int iy = 0; iy < gridSize; iy++)
+            var x = -maxRadius + 2 * maxRadius * ix / (gridSize - 1);
+            var y = -maxRadius + 2 * maxRadius * iy / (gridSize - 1);
+
+            var r = Math.Sqrt(x * x + y * y);
+            double v = 0;
+
+            if (_options.HeatExchangerType == HeatExchangerType.Coaxial)
             {
-                var x = -maxRadius + (2 * maxRadius * ix / (gridSize - 1));
-                var y = -maxRadius + (2 * maxRadius * iy / (gridSize - 1));
-                
-                var r = Math.Sqrt(x * x + y * y);
-                double v = 0;
-
-                if (_options.HeatExchangerType == HeatExchangerType.Coaxial)
-                {
-                    if (r <= _options.PipeSpacing / 2.0)
-                        v = (_options.FlowConfiguration == FlowConfiguration.CounterFlow) ? v_down : v_up;
-                    else if (r > _options.PipeSpacing / 2.0 && r <= _options.PipeOuterDiameter / 2.0)
-                        v = (_options.FlowConfiguration == FlowConfiguration.CounterFlow) ? v_up : v_down;
-                }
-                else // U-Tube
-                {
-                    var pipe_r = _options.PipeInnerDiameter / 2.0; // Check against inner diameter for fluid
-                    var spacing = _options.PipeSpacing / 2.0;
-                    if (Math.Sqrt(Math.Pow(x-spacing,2) + y*y) <= pipe_r || Math.Sqrt(Math.Pow(x+spacing,2) + y*y) <= pipe_r)
-                        v = v_up; // Both are same magnitude
-                }
-
-                var t = max_v > min_v ? (v - min_v) / (max_v - min_v) : 0;
-                var color = GetJetColor((float)t);
-                
-                var cell_p0 = new Vector2(plot_p0.X + ix * cell_sz.X, plot_p0.Y + (gridSize - 1 - iy) * cell_sz.Y);
-                var cell_p1 = new Vector2(cell_p0.X + cell_sz.X, cell_p0.Y + cell_sz.Y);
-                drawList.AddRectFilled(cell_p0, cell_p1, ImGui.ColorConvertFloat4ToU32(color));
+                if (r <= _options.PipeSpacing / 2.0)
+                    v = _options.FlowConfiguration == FlowConfiguration.CounterFlow ? v_down : v_up;
+                else if (r > _options.PipeSpacing / 2.0 && r <= _options.PipeOuterDiameter / 2.0)
+                    v = _options.FlowConfiguration == FlowConfiguration.CounterFlow ? v_up : v_down;
             }
+            else // U-Tube
+            {
+                var pipe_r = _options.PipeInnerDiameter / 2.0; // Check against inner diameter for fluid
+                var spacing = _options.PipeSpacing / 2.0;
+                if (Math.Sqrt(Math.Pow(x - spacing, 2) + y * y) <= pipe_r ||
+                    Math.Sqrt(Math.Pow(x + spacing, 2) + y * y) <= pipe_r)
+                    v = v_up; // Both are same magnitude
+            }
+
+            var t = max_v > min_v ? (v - min_v) / (max_v - min_v) : 0;
+            var color = GetJetColor((float)t);
+
+            var cell_p0 = new Vector2(plot_p0.X + ix * cell_sz.X, plot_p0.Y + (gridSize - 1 - iy) * cell_sz.Y);
+            var cell_p1 = new Vector2(cell_p0.X + cell_sz.X, cell_p0.Y + cell_sz.Y);
+            drawList.AddRectFilled(cell_p0, cell_p1, ImGui.ColorConvertFloat4ToU32(color));
         }
-        
+
         var title = $"Fluid Velocity at {_selectedDepthMeters:F1} m";
         var titleSize = ImGui.CalcTextSize(title);
         drawList.AddText(new Vector2(plot_p0.X + plot_sz.X / 2 - titleSize.X / 2, plot_p0.Y - 30), 0xFFFFFFFF, title);
-        
+
         DrawAxes(drawList, plot_p0, plot_sz, maxRadius, maxRadius);
-        if (_showLegend) DrawColorBar(drawList, new Vector2(plot_p1.X + 20, plot_p0.Y), new Vector2(20, plot_sz.Y), min_v, max_v, "Velocity (m/s)");
+        if (_showLegend)
+            DrawColorBar(drawList, new Vector2(plot_p1.X + 20, plot_p0.Y), new Vector2(20, plot_sz.Y), min_v, max_v,
+                "Velocity (m/s)");
     }
-    
+
     /// <summary>
-    /// NEW: Renders a 2D line plot of the fluid temperature profile vs. depth.
+    ///     NEW: Renders a 2D line plot of the fluid temperature profile vs. depth.
     /// </summary>
     private void RenderFluidTemperatureProfileImGui()
     {
@@ -796,7 +808,7 @@ public class BoreholeCrossSectionViewer
         var plot_p0 = new Vector2(canvas_p0.X + margin.X, canvas_p0.Y + margin.Y);
         var plot_sz = new Vector2(canvas_sz.X - margin.X - margin.Z, canvas_sz.Y - margin.Y - margin.W);
         var plot_p1 = new Vector2(plot_p0.X + plot_sz.X, plot_p0.Y + plot_sz.Y);
-        
+
         drawList.AddRectFilled(plot_p0, plot_p1, ImGui.GetColorU32(new Vector4(0.1f, 0.1f, 0.12f, 1f)));
 
         if (_results.FluidTemperatureProfile == null || !_results.FluidTemperatureProfile.Any())
@@ -804,9 +816,9 @@ public class BoreholeCrossSectionViewer
             drawList.AddText(plot_p0 + new Vector2(20, 20), 0xFFFFFFFF, "No fluid temperature profile data available.");
             return;
         }
-        
+
         var profile = _results.FluidTemperatureProfile.OrderBy(p => p.depth).ToList();
-        
+
         var minTemp = profile.Min(p => Math.Min(p.temperatureDown, p.temperatureUp)) - 273.15;
         var maxTemp = profile.Max(p => Math.Max(p.temperatureDown, p.temperatureUp)) - 273.15;
         var maxDepth = _options.BoreholeDataset.TotalDepth;
@@ -816,79 +828,82 @@ public class BoreholeCrossSectionViewer
         minTemp -= tempRange * 0.1;
         maxTemp += tempRange * 0.1;
 
-        Func<Vector2, Vector2> WorldToScreen = (worldPos) =>
+        Func<Vector2, Vector2> WorldToScreen = worldPos =>
         {
-            float screenX = plot_p0.X + (float)((worldPos.X - minTemp) / (maxTemp - minTemp)) * plot_sz.X;
-            float screenY = plot_p0.Y + (float)((worldPos.Y - minDepth) / (maxDepth - minDepth)) * plot_sz.Y;
+            var screenX = plot_p0.X + (float)((worldPos.X - minTemp) / (maxTemp - minTemp)) * plot_sz.X;
+            var screenY = plot_p0.Y + (worldPos.Y - minDepth) / (maxDepth - minDepth) * plot_sz.Y;
             return new Vector2(screenX, screenY);
         };
-        
+
         // Draw grid
         if (_showGrid)
         {
             uint gridColor = 0x40FFFFFF;
-            for (int i = 0; i <= 4; i++) // Vertical grid lines (temp)
+            for (var i = 0; i <= 4; i++) // Vertical grid lines (temp)
             {
                 var x = plot_p0.X + i / 4.0f * plot_sz.X;
                 drawList.AddLine(new Vector2(x, plot_p0.Y), new Vector2(x, plot_p1.Y), gridColor);
             }
-            for (int i = 0; i <= 4; i++) // Horizontal grid lines (depth)
+
+            for (var i = 0; i <= 4; i++) // Horizontal grid lines (depth)
             {
                 var y = plot_p0.Y + i / 4.0f * plot_sz.Y;
                 drawList.AddLine(new Vector2(plot_p0.X, y), new Vector2(plot_p1.X, y), gridColor);
             }
         }
-        
+
         // Plot Downflow
-        uint downColor = ImGui.GetColorU32(new Vector4(0.2f, 0.5f, 1.0f, 1.0f));
-        for (int i = 0; i < profile.Count - 1; i++)
+        var downColor = ImGui.GetColorU32(new Vector4(0.2f, 0.5f, 1.0f, 1.0f));
+        for (var i = 0; i < profile.Count - 1; i++)
         {
             var p1_world = new Vector2((float)(profile[i].temperatureDown - 273.15), (float)profile[i].depth);
-            var p2_world = new Vector2((float)(profile[i+1].temperatureDown - 273.15), (float)profile[i+1].depth);
+            var p2_world = new Vector2((float)(profile[i + 1].temperatureDown - 273.15), (float)profile[i + 1].depth);
             drawList.AddLine(WorldToScreen(p1_world), WorldToScreen(p2_world), downColor, 2.0f);
         }
 
         // Plot Upflow
-        uint upColor = ImGui.GetColorU32(new Vector4(1.0f, 0.5f, 0.2f, 1.0f));
-        for (int i = 0; i < profile.Count - 1; i++)
+        var upColor = ImGui.GetColorU32(new Vector4(1.0f, 0.5f, 0.2f, 1.0f));
+        for (var i = 0; i < profile.Count - 1; i++)
         {
             var p1_world = new Vector2((float)(profile[i].temperatureUp - 273.15), (float)profile[i].depth);
-            var p2_world = new Vector2((float)(profile[i+1].temperatureUp - 273.15), (float)profile[i+1].depth);
+            var p2_world = new Vector2((float)(profile[i + 1].temperatureUp - 273.15), (float)profile[i + 1].depth);
             drawList.AddLine(WorldToScreen(p1_world), WorldToScreen(p2_world), upColor, 2.0f);
         }
-        
+
         var title = "Fluid Temperature vs. Depth";
         var titleSize = ImGui.CalcTextSize(title);
         drawList.AddText(new Vector2(plot_p0.X + plot_sz.X / 2 - titleSize.X / 2, plot_p0.Y - 30), 0xFFFFFFFF, title);
-        
+
         // Axes
-        uint axisColor = 0xFFAAAAAA;
+        var axisColor = 0xFFAAAAAA;
         // X-Axis (Temperature)
         drawList.AddLine(new Vector2(plot_p0.X, plot_p1.Y), new Vector2(plot_p1.X, plot_p1.Y), axisColor, 1f);
-        for(int i = 0; i <= 4; i++)
+        for (var i = 0; i <= 4; i++)
         {
-            var temp = minTemp + i/4.0 * (maxTemp - minTemp);
-            var pos = WorldToScreen(new Vector2((float)temp, (float)maxDepth));
+            var temp = minTemp + i / 4.0 * (maxTemp - minTemp);
+            var pos = WorldToScreen(new Vector2((float)temp, maxDepth));
             drawList.AddLine(pos, pos + new Vector2(0, 5), axisColor);
             var label = $"{temp:F1}";
             var labelSize = ImGui.CalcTextSize(label);
-            drawList.AddText(pos + new Vector2(-labelSize.X/2, 8), axisColor, label);
+            drawList.AddText(pos + new Vector2(-labelSize.X / 2, 8), axisColor, label);
         }
+
         var xLabel = "Temperature (°C)";
         var xLabelSize = ImGui.CalcTextSize(xLabel);
-        drawList.AddText(new Vector2(plot_p0.X + plot_sz.X/2 - xLabelSize.X/2, plot_p1.Y + 25), axisColor, xLabel);
+        drawList.AddText(new Vector2(plot_p0.X + plot_sz.X / 2 - xLabelSize.X / 2, plot_p1.Y + 25), axisColor, xLabel);
 
         // Y-Axis (Depth)
         drawList.AddLine(new Vector2(plot_p0.X, plot_p0.Y), new Vector2(plot_p0.X, plot_p1.Y), axisColor, 1f);
-        for(int i = 0; i <= 4; i++)
+        for (var i = 0; i <= 4; i++)
         {
-            var depth = minDepth + i/4.0 * (maxDepth - minDepth);
+            var depth = minDepth + i / 4.0 * (maxDepth - minDepth);
             var pos = WorldToScreen(new Vector2((float)minTemp, (float)depth));
             drawList.AddLine(pos, pos - new Vector2(5, 0), axisColor);
             var label = $"{depth:F0}";
             var labelSize = ImGui.CalcTextSize(label);
-            drawList.AddText(pos - new Vector2(labelSize.X + 8, labelSize.Y/2), axisColor, label);
+            drawList.AddText(pos - new Vector2(labelSize.X + 8, labelSize.Y / 2), axisColor, label);
         }
+
         AddTextVertical(drawList, new Vector2(plot_p0.X - 50, plot_p0.Y + plot_sz.Y / 2), axisColor, "Depth (m)");
 
         // Legend
@@ -901,9 +916,9 @@ public class BoreholeCrossSectionViewer
             drawList.AddText(legendP + new Vector2(25, 23), 0xFFFFFFFF, "Upflow");
         }
     }
-    
+
     /// <summary>
-    /// NEW: Renders a text-based debug view of the data at the current cross-section.
+    ///     NEW: Renders a text-based debug view of the data at the current cross-section.
     /// </summary>
     private void RenderDebugViewImGui()
     {
@@ -920,19 +935,19 @@ public class BoreholeCrossSectionViewer
 
         var zIndex = FindVerticalIndex(_selectedDepthMeters);
         var fluidTemps = GetFluidTemperaturesAtDepth(_selectedDepthMeters);
-        
+
         ImGui.Text("=== CROSS-SECTION DEBUG ===");
         ImGui.Text($"Depth: {_selectedDepthMeters:F1}m, z-index: {zIndex}");
         ImGui.Text($"Flow Configuration: {_options.FlowConfiguration}");
         ImGui.Text($"Heat Exchanger Type: {_options.HeatExchangerType}");
         ImGui.Text($"Fluid Temps - Down: {fluidTemps.down - 273.15:F1}°C, Up: {fluidTemps.up - 273.15:F1}°C");
-        
+
         var centerTemp = GetTemperatureAtPoint(0, 0, zIndex, fluidTemps) - 273.15;
         ImGui.Text($"Center Temperature (GetTemperatureAtPoint): {centerTemp:F1}°C");
-        
+
         ImGui.Separator();
         ImGui.Text("Radial Temperature Profile (theta=0):");
-        for (int i = 0; i < Math.Min(20, _mesh.RadialPoints); i++)
+        for (var i = 0; i < Math.Min(20, _mesh.RadialPoints); i++)
         {
             var r = _mesh.R[i];
             var temp = GetTemperatureAtPoint(r, 0, zIndex, fluidTemps) - 273.15;
@@ -940,82 +955,108 @@ public class BoreholeCrossSectionViewer
             if (r <= _options.PipeSpacing / 2.0) label = " [Inner Pipe]";
             else if (r <= _options.PipeOuterDiameter / 2) label = " [Annulus]";
             else label = " [Ground]";
-            
+
             ImGui.Text($"  r={r:F4}m: {temp:F1}°C{label}");
         }
+
         ImGui.EndChild();
     }
 
     /// <summary>
-    /// A flexible axis drawing function for different view planes.
+    ///     A flexible axis drawing function for different view planes.
     /// </summary>
-    private void DrawAxes(ImDrawListPtr drawList, Vector2 p0, Vector2 sz, float xMax, float yMax, string xLabel = "X (m)", string yLabel = "Y (m)", bool yInverted = false, Vector2? worldOffset = null)
+    private void DrawAxes(ImDrawListPtr drawList, Vector2 p0, Vector2 sz, float xMax, float yMax,
+        string xLabel = "X (m)", string yLabel = "Y (m)", bool yInverted = false, Vector2? worldOffset = null)
     {
         var p1 = p0 + sz;
-        uint axisColor = 0xFFAAAAAA;
+        var axisColor = 0xFFAAAAAA;
         uint gridColor = 0x40FFFFFF;
         var offset = worldOffset ?? Vector2.Zero;
 
         // X-Axis
         drawList.AddLine(new Vector2(p0.X, p1.Y), new Vector2(p1.X, p1.Y), axisColor, 1f);
-        for (int i = 0; i <= 4; i++)
+        for (var i = 0; i <= 4; i++)
         {
-            float val = yInverted ? offset.X - xMax + (i / 4f) * (2 * xMax) : -xMax + (i / 4f) * (2 * xMax);
-            float xPos = p0.X + (i / 4f) * sz.X;
+            var val = yInverted ? offset.X - xMax + i / 4f * (2 * xMax) : -xMax + i / 4f * (2 * xMax);
+            var xPos = p0.X + i / 4f * sz.X;
             if (_showGrid) drawList.AddLine(new Vector2(xPos, p0.Y), new Vector2(xPos, p1.Y), gridColor);
             drawList.AddLine(new Vector2(xPos, p1.Y), new Vector2(xPos, p1.Y + 5), axisColor);
             var label = $"{val:F1}";
             var labelSize = ImGui.CalcTextSize(label);
             drawList.AddText(new Vector2(xPos - labelSize.X / 2, p1.Y + 8), axisColor, label);
         }
+
         var xLabelSize = ImGui.CalcTextSize(xLabel);
         drawList.AddText(new Vector2(p0.X + sz.X / 2 - xLabelSize.X / 2, p1.Y + 25), axisColor, xLabel);
 
         // Y-Axis
         drawList.AddLine(new Vector2(p0.X, p0.Y), new Vector2(p0.X, p1.Y), axisColor, 1f);
-        for (int i = 0; i <= 4; i++)
+        for (var i = 0; i <= 4; i++)
         {
-            float val = yInverted ? offset.Y + (i / 4f) * (yMax / _lateralViewZoom) : -yMax + (i / 4f) * (2 * yMax);
-            float yPos = yInverted ? p0.Y + (i / 4f) * sz.Y : p1.Y - (i / 4f) * sz.Y;
+            var val = yInverted ? offset.Y + i / 4f * (yMax / _lateralViewZoom) : -yMax + i / 4f * (2 * yMax);
+            var yPos = yInverted ? p0.Y + i / 4f * sz.Y : p1.Y - i / 4f * sz.Y;
             if (_showGrid) drawList.AddLine(new Vector2(p0.X, yPos), new Vector2(p1.X, yPos), gridColor);
             drawList.AddLine(new Vector2(p0.X - 5, yPos), new Vector2(p0.X, yPos), axisColor);
             var label = yInverted ? $"{val:F0}" : $"{val:F1}";
             var labelSize = ImGui.CalcTextSize(label);
             drawList.AddText(new Vector2(p0.X - labelSize.X - 8, yPos - labelSize.Y / 2), axisColor, label);
         }
+
         AddTextVertical(drawList, new Vector2(p0.X - 50, p0.Y + sz.Y / 2), axisColor, yLabel);
     }
-    
+
     private void DrawColorBar(ImDrawListPtr drawList, Vector2 p0, Vector2 sz, double min, double max, string title)
     {
         if (!_showLegend) return;
         var p1 = p0 + sz;
-        int nSteps = 100;
-        float stepHeight = sz.Y / nSteps;
-        for (int i = 0; i < nSteps; i++)
+        var nSteps = 100;
+        var stepHeight = sz.Y / nSteps;
+        for (var i = 0; i < nSteps; i++)
         {
-            float t = (float)i / (nSteps - 1);
+            var t = (float)i / (nSteps - 1);
             var color = GetJetColor(1f - t); // Invert t because we draw from top to bottom
             var step_p0 = new Vector2(p0.X, p0.Y + i * stepHeight);
             var step_p1 = new Vector2(p1.X, p0.Y + (i + 1) * stepHeight);
             drawList.AddRectFilled(step_p0, step_p1, ImGui.ColorConvertFloat4ToU32(color));
         }
+
         drawList.AddRect(p0, p1, 0xFFFFFFFF);
-        
-        uint textColor = 0xFFAAAAAA;
+
+        var textColor = 0xFFAAAAAA;
         drawList.AddText(new Vector2(p1.X + 5, p0.Y - 7), textColor, $"{max:F1}");
         drawList.AddText(new Vector2(p1.X + 5, p1.Y - 7), textColor, $"{min:F1}");
         AddTextVertical(drawList, new Vector2(p0.X + sz.X + 15, p0.Y + sz.Y / 2), textColor, title);
     }
-    
+
     private Vector4 GetJetColor(float t)
     {
         t = Math.Clamp(t, 0.0f, 1.0f);
-        float r=0, g=0, b=0;
-        if (t < 0.34f) { r = 0; g = 0; b = 0.5f + t / 0.34f * 0.5f; }
-        else if (t < 0.61f) { r = 0; g = (t - 0.34f) / 0.27f; b = 1; }
-        else if (t < 0.84f) { r = (t - 0.61f) / 0.23f; g = 1; b = 1.0f - r; }
-        else { r = 1; g = 1.0f - (t - 0.84f) / 0.16f; b = 0; }
+        float r = 0, g = 0, b = 0;
+        if (t < 0.34f)
+        {
+            r = 0;
+            g = 0;
+            b = 0.5f + t / 0.34f * 0.5f;
+        }
+        else if (t < 0.61f)
+        {
+            r = 0;
+            g = (t - 0.34f) / 0.27f;
+            b = 1;
+        }
+        else if (t < 0.84f)
+        {
+            r = (t - 0.61f) / 0.23f;
+            g = 1;
+            b = 1.0f - r;
+        }
+        else
+        {
+            r = 1;
+            g = 1.0f - (t - 0.84f) / 0.16f;
+            b = 0;
+        }
+
         return new Vector4(r, g, b, 1.0f);
     }
 
@@ -1023,11 +1064,11 @@ public class BoreholeCrossSectionViewer
     {
         var font = ImGui.GetFont();
         var fontSize = ImGui.GetFontSize();
-        var totalTextHeight = text.Length * (fontSize * 0.7f); 
-        var startY = pos.Y - (totalTextHeight / 2);
-        for (int i = 0; i < text.Length; i++)
+        var totalTextHeight = text.Length * (fontSize * 0.7f);
+        var startY = pos.Y - totalTextHeight / 2;
+        for (var i = 0; i < text.Length; i++)
         {
-            string c = text[i].ToString();
+            var c = text[i].ToString();
             var charSize = font.CalcTextSizeA(fontSize, float.MaxValue, -1.0f, c);
             var currentPos = new Vector2(pos.X - charSize.X / 2, startY + i * (fontSize * 0.85f));
             drawList.AddText(currentPos, color, c);
@@ -1035,9 +1076,9 @@ public class BoreholeCrossSectionViewer
     }
 
     /// <summary>
-    /// *** DEFINITIVE FIX ***
-    /// Get temperature at a specific point, correctly considering heat exchanger fluid regions.
-    /// This now accurately shows the counter-flow pattern in coaxial systems.
+    ///     *** DEFINITIVE FIX ***
+    ///     Get temperature at a specific point, correctly considering heat exchanger fluid regions.
+    ///     This now accurately shows the counter-flow pattern in coaxial systems.
     /// </summary>
     private double GetTemperatureAtPoint(double r, double theta, int zIndex, (float down, float up) fluidTemps)
     {
@@ -1049,42 +1090,34 @@ public class BoreholeCrossSectionViewer
         if (_options.HeatExchangerType == HeatExchangerType.Coaxial)
         {
             // --- REGION 1: Inside the inner pipe ---
-            if (r <= innerPipeOuterRadius) 
+            if (r <= innerPipeOuterRadius)
             {
                 if (_options.FlowConfiguration == FlowConfiguration.CounterFlow)
-                {
                     // Standard: Cold fluid flows DOWN the center.
                     return fluidTemps.down;
-                }
-                else // CounterFlowReversed or ParallelFlow
-                {
-                    // Reversed: Hot fluid flows UP the center.
-                    return fluidTemps.up;
-                }
+
+                // CounterFlowReversed or ParallelFlow
+                // Reversed: Hot fluid flows UP the center.
+                return fluidTemps.up;
             }
             // --- REGION 2: In the annulus between the inner and outer pipes ---
-            else if (r > innerPipeOuterRadius && r <= pipeOuterRadius)
+
+            if (r > innerPipeOuterRadius && r <= pipeOuterRadius)
             {
                 if (_options.FlowConfiguration == FlowConfiguration.CounterFlow)
-                {
                     // Standard: Hot fluid flows UP the annulus.
                     return fluidTemps.up;
-                }
-                else // CounterFlowReversed or ParallelFlow
-                {
-                    // Reversed: Cold fluid flows DOWN the annulus.
-                    return fluidTemps.down;
-                }
+
+                // CounterFlowReversed or ParallelFlow
+                // Reversed: Cold fluid flows DOWN the annulus.
+                return fluidTemps.down;
             }
         }
         else if (_options.HeatExchangerType == HeatExchangerType.UTube)
         {
             // For a U-Tube, we can't resolve the two pipes in a simple radial view.
             // We show the average fluid temperature inside the borehole region.
-            if (r <= pipeOuterRadius)
-            {
-                return (fluidTemps.down + fluidTemps.up) / 2.0;
-            }
+            if (r <= pipeOuterRadius) return (fluidTemps.down + fluidTemps.up) / 2.0;
         }
 
         // --- REGION 3: Outside the borehole (in the ground) ---
@@ -1092,66 +1125,58 @@ public class BoreholeCrossSectionViewer
         if (r > pipeOuterRadius && r <= pipeOuterRadius * 1.2)
         {
             var groundTemp = InterpolateGroundTemperature(r, theta, zIndex);
-            
+
             // Determine the temperature of the fluid in contact with the outer pipe
             double outerFluidTemp;
             if (_options.HeatExchangerType == HeatExchangerType.Coaxial)
-            {
-                outerFluidTemp = (_options.FlowConfiguration == FlowConfiguration.CounterFlow) ? fluidTemps.up : fluidTemps.down;
-            }
+                outerFluidTemp = _options.FlowConfiguration == FlowConfiguration.CounterFlow
+                    ? fluidTemps.up
+                    : fluidTemps.down;
             else // U-Tube
-            {
                 outerFluidTemp = (fluidTemps.down + fluidTemps.up) / 2.0;
-            }
 
             // Interpolate between the outer fluid and the ground
             var t = (r - pipeOuterRadius) / (pipeOuterRadius * 0.2);
             return outerFluidTemp * (1 - t) + groundTemp * t;
         }
-        
+
         // Default: If we are clearly in the ground, interpolate from the mesh
         return InterpolateGroundTemperature(r, theta, zIndex);
     }
-    
+
     /// <summary>
-    /// Interpolate ground temperature from mesh data
+    ///     Interpolate ground temperature from mesh data
     /// </summary>
     private double InterpolateGroundTemperature(double r, double theta, int zIndex)
     {
         // Find radial indices for interpolation
         int r1 = -1, r2 = -1;
-        for (int i = 0; i < _mesh.RadialPoints - 1; i++)
-        {
+        for (var i = 0; i < _mesh.RadialPoints - 1; i++)
             if (r >= _mesh.R[i] && r <= _mesh.R[i + 1])
             {
                 r1 = i;
                 r2 = i + 1;
                 break;
             }
-        }
-        
+
         // Handle out of bounds
         if (r1 == -1)
         {
             if (r < _mesh.R[0])
-            {
                 r1 = r2 = 0;
-            }
             else
-            {
                 r1 = r2 = _mesh.RadialPoints - 1;
-            }
         }
-        
+
         // FIX: Normalize theta to prevent negative indices
         while (theta < 0) theta += 2 * Math.PI;
         while (theta >= 2 * Math.PI) theta -= 2 * Math.PI;
-        
-        var thetaIndex = (theta / (2 * Math.PI)) * _mesh.AngularPoints;
-        int th1 = (int)thetaIndex % _mesh.AngularPoints;
-        int th2 = (th1 + 1) % _mesh.AngularPoints;
+
+        var thetaIndex = theta / (2 * Math.PI) * _mesh.AngularPoints;
+        var th1 = (int)thetaIndex % _mesh.AngularPoints;
+        var th2 = (th1 + 1) % _mesh.AngularPoints;
         var thetaFrac = thetaIndex - th1;
-        
+
         // Bilinear interpolation
         if (r1 == r2)
         {
@@ -1160,12 +1185,12 @@ public class BoreholeCrossSectionViewer
             var t2 = _results.FinalTemperatureField[r1, th2, zIndex];
             return t1 + (t2 - t1) * thetaFrac;
         }
-        
+
         if (_mesh.R[r2] - _mesh.R[r1] < 1e-9) // Avoid division by zero
         {
-             var t1 = _results.FinalTemperatureField[r1, th1, zIndex];
-             var t2 = _results.FinalTemperatureField[r1, th2, zIndex];
-             return t1 + (t2 - t1) * thetaFrac;
+            var t1 = _results.FinalTemperatureField[r1, th1, zIndex];
+            var t2 = _results.FinalTemperatureField[r1, th2, zIndex];
+            return t1 + (t2 - t1) * thetaFrac;
         }
 
         // Full bilinear interpolation
@@ -1173,53 +1198,49 @@ public class BoreholeCrossSectionViewer
         var t12 = _results.FinalTemperatureField[r1, th2, zIndex];
         var t21 = _results.FinalTemperatureField[r2, th1, zIndex];
         var t22 = _results.FinalTemperatureField[r2, th2, zIndex];
-        
+
         var rFrac = (r - _mesh.R[r1]) / (_mesh.R[r2] - _mesh.R[r1]);
-        
+
         var t_th1 = t11 + (t21 - t11) * rFrac;
         var t_th2 = t12 + (t22 - t12) * rFrac;
-        
+
         return t_th1 + (t_th2 - t_th1) * thetaFrac;
     }
 
     /// <summary>
-    /// Get fluid temperatures at specific depth
+    ///     Get fluid temperatures at specific depth
     /// </summary>
     private (float down, float up) GetFluidTemperaturesAtDepth(float depth)
     {
         if (_results.FluidTemperatureProfile == null || !_results.FluidTemperatureProfile.Any())
             return ((float)_options.FluidInletTemperature, (float)_options.FluidInletTemperature);
-        
+
         var sortedProfile = _results.FluidTemperatureProfile.OrderBy(p => p.depth).ToList();
-        
+
         // Before first point
         if (depth < sortedProfile.First().depth)
-        {
-             return ((float)sortedProfile.First().temperatureDown, (float)sortedProfile.First().temperatureUp);
-        }
+            return ((float)sortedProfile.First().temperatureDown, (float)sortedProfile.First().temperatureUp);
 
         // After last point
         if (depth > sortedProfile.Last().depth)
-        {
             return ((float)sortedProfile.Last().temperatureDown, (float)sortedProfile.Last().temperatureUp);
-        }
 
         // Linear interpolation between points
-        for (int i = 0; i < sortedProfile.Count - 1; i++)
+        for (var i = 0; i < sortedProfile.Count - 1; i++)
         {
             var p1 = sortedProfile[i];
-            var p2 = sortedProfile[i+1];
+            var p2 = sortedProfile[i + 1];
             if (depth >= p1.depth && depth <= p2.depth)
             {
-                var t = (p2.depth - p1.depth) > 1e-6 ? (depth - p1.depth) / (p2.depth - p1.depth) : 0;
+                var t = p2.depth - p1.depth > 1e-6 ? (depth - p1.depth) / (p2.depth - p1.depth) : 0;
                 if (double.IsNaN(t) || double.IsInfinity(t)) t = 0;
-                
+
                 var down = p1.temperatureDown + t * (p2.temperatureDown - p1.temperatureDown);
                 var up = p1.temperatureUp + t * (p2.temperatureUp - p1.temperatureUp);
                 return ((float)down, (float)up);
             }
         }
-        
+
         // Fallback to nearest if something goes wrong
         var nearest = _results.FluidTemperatureProfile.OrderBy(p => Math.Abs(p.depth - depth)).First();
         return ((float)nearest.temperatureDown, (float)nearest.temperatureUp);
@@ -1228,21 +1249,22 @@ public class BoreholeCrossSectionViewer
     private int FindVerticalIndex(float depthMeters)
     {
         if (_mesh?.Z == null || _mesh.VerticalPoints == 0) return 0;
-        
+
         // Find the index where the mesh Z coordinate is closest to the negative depth
         var targetZ = -depthMeters;
-        int closestIndex = 0;
-        float minDiff = float.MaxValue;
+        var closestIndex = 0;
+        var minDiff = float.MaxValue;
 
         for (var k = 0; k < _mesh.VerticalPoints; k++)
         {
-            float diff = Math.Abs(_mesh.Z[k] - targetZ);
+            var diff = Math.Abs(_mesh.Z[k] - targetZ);
             if (diff < minDiff)
             {
                 minDiff = diff;
                 closestIndex = k;
             }
         }
+
         return closestIndex;
     }
 
@@ -1253,23 +1275,23 @@ public class BoreholeCrossSectionViewer
             Logger.LogError("No data loaded");
             return;
         }
-        
+
         var zIndex = FindVerticalIndex(_selectedDepthMeters);
         var fluidTemps = GetFluidTemperaturesAtDepth(_selectedDepthMeters);
-        
+
         Logger.Log("=== CROSS-SECTION DEBUG ===");
         Logger.Log($"Depth: {_selectedDepthMeters:F1}m, z-index: {zIndex}");
         Logger.Log($"Flow Configuration: {_options.FlowConfiguration}");
         Logger.Log($"Heat Exchanger Type: {_options.HeatExchangerType}");
         Logger.Log($"Fluid Temps - Down: {fluidTemps.down - 273.15:F1}°C, Up: {fluidTemps.up - 273.15:F1}°C");
-        
+
         // Check center temperature
         var centerTemp = GetTemperatureAtPoint(0, 0, zIndex, fluidTemps) - 273.15;
         Logger.Log($"Center Temperature (GetTemperatureAtPoint): {centerTemp:F1}°C");
-        
+
         // Radial temperature profile
         Logger.Log("\nRadial Temperature Profile (theta=0):");
-        for (int i = 0; i < Math.Min(10, _mesh.RadialPoints); i++)
+        for (var i = 0; i < Math.Min(10, _mesh.RadialPoints); i++)
         {
             var r = _mesh.R[i];
             var temp = GetTemperatureAtPoint(r, 0, zIndex, fluidTemps) - 273.15;
@@ -1277,10 +1299,10 @@ public class BoreholeCrossSectionViewer
             if (r <= _options.PipeSpacing / 2.0) label = " [Inner Pipe]";
             else if (r <= _options.PipeOuterDiameter / 2) label = " [Annulus]";
             else label = " [Ground]";
-            
+
             Logger.Log($"  r={r:F4}m: {temp:F1}°C{label}");
         }
-        
+
         Logger.Log("\n=== END DEBUG ===");
     }
 }
