@@ -579,70 +579,58 @@ public class GeothermalOpenCLSolver : IDisposable
     /// </summary>
     private unsafe void UploadHeatExchangerParams(GeothermalSimulationOptions options)
 {
-    // Calculate heat transfer coefficient using Reynolds number
-    var D_inner = (float)options.PipeInnerDiameter;
-    var mu = (float)options.FluidViscosity;
-    var mdot = (float)options.FluidMassFlowRate;
-    var Re = 4.0f * mdot / (MathF.PI * D_inner * mu);
-    
-    var Pr = (float)(options.FluidViscosity * options.FluidSpecificHeat / options.FluidThermalConductivity);
-    
-    float Nu;
-    if (Re < 2300)
-    {
-        // Laminar flow
-        Nu = 4.36f;
-    }
-    else
-    {
-        // Turbulent flow - Dittus-Boelter correlation
-        Nu = 0.023f * MathF.Pow(Re, 0.8f) * MathF.Pow(Pr, 0.4f);
-    }
-    
-    var h = Nu * (float)options.FluidThermalConductivity / D_inner;
-    
-    // ENHANCED: Double the base heat transfer coefficient for better coupling
-    var baseHTC = Math.Min(2000f, h * 2.0f);
-    
-    // Pack heat exchanger parameters
-    var heParams = new float[16];
-    heParams[0] = (float)(options.PipeOuterDiameter / 2.0);  // Pipe radius
-    // --- DEFINITIVE FIX START ---
-    heParams[1] = (float)options.BoreholeDataset.TotalDepth; // MUST be full depth for correct indexing
-    heParams[2] = (float)options.FluidInletTemperature;
-    heParams[3] = (float)options.FluidMassFlowRate;
-    heParams[4] = (float)options.FluidSpecificHeat;
-    heParams[5] = baseHTC;
-    heParams[6] = options.HeatExchangerType == HeatExchangerType.UTube ? 1f : 0f;
-    heParams[7] = _nzHE;
-    heParams[8] = (float)options.FluidViscosity;
-    heParams[9] = (float)options.FluidThermalConductivity;
-    heParams[10] = (float)options.PipeInnerDiameter;
-    heParams[11] = (float)options.HeatExchangerDepth; // NEW: Pass the active HE depth separately
-    // --- DEFINITIVE FIX END ---
+    // HTC base
+    float D_in = (float)Math.Max(0.01, options.PipeInnerDiameter);
+    float mu   = (float)Math.Max(1e-3, options.FluidViscosity);
+    float mdot = (float)options.FluidMassFlowRate;
+    float kf   = (float)Math.Max(0.2,  options.FluidThermalConductivity);
+    float cpf  = (float)Math.Max(1000, options.FluidSpecificHeat);
 
-    fixed (float* paramsPtr = heParams)
+    float Re = 4.0f * mdot / (MathF.PI * D_in * mu);
+    float Pr = mu * cpf / kf;
+    float Nu = (Re < 2300f) ? 4.36f : 0.023f * MathF.Pow(Re, 0.8f) * MathF.Pow(Pr, 0.4f);
+    float baseHTC = MathF.Min(2000f, Nu * kf / D_in);
+
+    // z-taper ≈ 2 * dz medio del dominio
+    float totalDepth = (float)(options.BoreholeDataset?.TotalDepth ?? 0.0);
+    int   nz         = Math.Max(2, options.VerticalGridPoints);
+    float spanZ      = (float)(totalDepth + 2.0 * options.DomainExtension);
+    float dzMean     = spanZ / (nz - 1);
+    float endTaperMeters = MathF.Max(2f * dzMean, 0.25f);
+
+    var heParams = new float[16];
+    heParams[0]  = (float)(options.PipeOuterDiameter * 0.5);     // pipeRadius
+    heParams[1]  = totalDepth;                                   // totalBoreDepth
+    heParams[2]  = (float)options.FluidInletTemperature;
+    heParams[3]  = (float)options.FluidMassFlowRate;
+    heParams[4]  = (float)options.FluidSpecificHeat;
+    heParams[5]  = baseHTC;
+    heParams[6]  = options.HeatExchangerType == HeatExchangerType.UTube ? 1f : 0f;
+    heParams[7]  = _nzHE;                                        // profili fluido length
+    heParams[8]  = (float)options.FluidViscosity;
+    heParams[9]  = (float)options.FluidThermalConductivity;
+    heParams[10] = (float)options.PipeInnerDiameter;
+    heParams[11] = (float)options.HeatExchangerDepth;            // activeHeDepth
+    heParams[12] = endTaperMeters;                                // NEW: z-taper
+
+    fixed (float* p = heParams)
     {
         _cl.EnqueueWriteBuffer(_queue, _heatExchangerParamsBuffer, true, 0,
-            (nuint)(16 * sizeof(float)), paramsPtr, 0, null, null);
+            (nuint)(heParams.Length * sizeof(float)), p, 0, null, null);
     }
-    
-    // Initialize fluid temperatures
-    var fluidTemps = new float[_nzHE];
-    for (var i = 0; i < _nzHE; i++)
-    {
-        fluidTemps[i] = (float)options.FluidInletTemperature;
-    }
-    
-    fixed (float* tempPtr = fluidTemps)
+
+    // inizializza profili fluido (inlet)
+    var init = new float[_nzHE];
+    for (int i = 0; i < _nzHE; i++) init[i] = (float)options.FluidInletTemperature;
+
+    fixed (float* t = init)
     {
         _cl.EnqueueWriteBuffer(_queue, _fluidTempDownBuffer, true, 0,
-            (nuint)(_nzHE * sizeof(float)), tempPtr, 0, null, null);
+            (nuint)(_nzHE * sizeof(float)), t, 0, null, null);
         _cl.EnqueueWriteBuffer(_queue, _fluidTempUpBuffer, true, 0,
-            (nuint)(_nzHE * sizeof(float)), tempPtr, 0, null, null);
+            (nuint)(_nzHE * sizeof(float)), t, 0, null, null);
     }
 }
-
     /// <summary>
     ///     Solves heat transfer on GPU for one time step.
     ///     CORRECTED: The signature has been cleaned up to remove unused iterative solver
@@ -862,17 +850,23 @@ public class GeothermalOpenCLSolver : IDisposable
     /// <summary>
     ///     Gets the OpenCL kernel source code with integrated boundary conditions.
     /// </summary>
-  private string GetKernelSource()
+ private string GetKernelSource()
 {
     return @"
-// OpenCL 1.2 kernels for geothermal heat transfer simulation
-
+// ======================================================================
+// OpenCL 1.2 — Heat transfer with HE taper (radial+vertical)
+// heParams[0]=pipeRadius,[1]=totalBoreDepth,[5]=baseHTC,[6]=heType,[7]=nzHE,
+// [10]=D_in,[11]=activeHeDepth,[12]=endTaperMeters
+// ======================================================================
 #define M_PI_F 3.14159265358979323846f
 #define FLOW_STANDARD 0
 #define FLOW_REVERSED 1
 
-inline int get_idx(int i,int j,int k,int nth,int nz){ return i*nth*nz + j*nz + k; }
+inline int IDX(int i,int j,int k,int nth,int nz){ return i*nth*nz + j*nz + k; }
+inline float sstep(float x){ return x*x*(3.0f - 2.0f*x); }
+inline float clampf(float x,float a,float b){ return fmin(fmax(x,a),b); }
 
+// -------------------- MAIN KERNEL --------------------
 __kernel void heat_transfer_kernel(
     __global const float* temperature,
     __global float*       newTemp,
@@ -880,7 +874,7 @@ __kernel void heat_transfer_kernel(
     __global const float* density,
     __global const float* specificHeat,
     __global const float* velocity,
-    __global const float* dispersion,
+    __global const float* dispersion,     // unused (ABI)
     __global const float* r_coord,
     __global const float* z_coord,
     __global const float* cellVolumes,
@@ -888,32 +882,34 @@ __kernel void heat_transfer_kernel(
     __global const float* fluidTempDown,
     __global const float* fluidTempUp,
     __global float*       temperatureChange,
-
     const float dt,
     const int nr, const int nth, const int nz,
     const int simulateGroundwater,
-    const int flow_config
-){
-    const int idx = get_global_id(0);
-    const int total = nr*nth*nz;
-    if (idx >= total) return;
+    const int flow_config)
+{
+    const int gid = get_global_id(0);
+    const int N = nr*nth*nz;
+    if (gid >= N) return;
 
-    const int k = idx % nz;
-    const int j = (idx / nz) % nth;
-    const int i = idx / (nz * nth);
+    const int k = gid % nz;
+    const int j = (gid / nz) % nth;
+    const int i = gid / (nz * nth);
 
-    // Skip boundary cells
-    if (i==0 || i>=nr-1 || k==0 || k>=nz-1){
-        newTemp[idx] = temperature[idx];
-        temperatureChange[idx] = 0.0f;
+    // Bordi: copia
+    if (i==0 || i==nr-1 || k==0 || k==nz-1){
+        newTemp[gid] = temperature[gid];
+        temperatureChange[gid] = 0.0f;
         return;
     }
 
-    const float T_old = temperature[idx];
-    const float lambda = clamp(conductivity[idx], 0.1f, 10.0f);
-    const float rho_cp = fmax(1.0f, density[idx] * specificHeat[idx]);
-    const float alpha = lambda / rho_cp;
+    const float T_old = temperature[gid];
+    const float lam   = clampf(conductivity[gid], 0.1f, 10.0f);
+    const float rho   = clampf(density[gid],     500.0f, 5000.0f);
+    const float cp    = clampf(specificHeat[gid],100.0f, 5000.0f);
+    const float rho_cp = fmax(1.0f, rho*cp);
+    const float alpha  = lam / rho_cp;
 
+    // Geometria
     const float r   = fmax(0.01f, r_coord[i]);
     const int   jm  = (j - 1 + nth) % nth;
     const int   jp  = (j + 1) % nth;
@@ -922,89 +918,121 @@ __kernel void heat_transfer_kernel(
     const float dth = 2.0f * M_PI_F / nth;
     const float dzm = fmax(0.001f, fabs(z_coord[k]   - z_coord[k-1]));
     const float dzp = fmax(0.001f, fabs(z_coord[k+1] - z_coord[k]));
+    const float dzc = 0.5f*(dzm+dzp);
 
-    const float T_rm  = temperature[get_idx(i-1,j,k,   nth,nz)];
-    const float T_rp  = temperature[get_idx(i+1,j,k,   nth,nz)];
-    const float T_zm  = temperature[get_idx(i,  j,k-1, nth,nz)];
-    const float T_zp  = temperature[get_idx(i,  j,k+1, nth,nz)];
-    const float T_thm = temperature[get_idx(i,  jm,k,  nth,nz)];
-    const float T_thp = temperature[get_idx(i,  jp,k,  nth,nz)];
+    // Vicini
+    const float T_rm  = temperature[IDX(i-1,j ,k ,nth,nz)];
+    const float T_rp  = temperature[IDX(i+1,j ,k ,nth,nz)];
+    const float T_zm  = temperature[IDX(i  ,j ,k-1,nth,nz)];
+    const float T_zp  = temperature[IDX(i  ,j ,k+1,nth,nz)];
+    const float T_thm = temperature[IDX(i  ,jm,k ,nth,nz)];
+    const float T_thp = temperature[IDX(i  ,jp,k ,nth,nz)];
 
-    const float neighbor_conduction =
-        (T_rp + T_rm)/(drm*drp) +
-        (T_rp - T_rm)/((drp+drm)*r) +
-        (T_thp + T_thm)/(r*r*dth*dth) +
-        (T_zp + T_zm)/(dzm*dzp);
+    // Diffusione (explicita + 1/r * dT/dr stabilizzato)
+    float neighbor =
+          (T_rp + T_rm) / (drm*drp)
+        + (T_thp + T_thm) / (r*r*dth*dth)
+        + (T_zp + T_zm) / (dzm*dzp)
+        + (T_rp - T_rm) / (drp + drm) / r;
 
-    float advection = 0.0f;
+    // Avvezione upwind
+    float adv = 0.0f;
     if (simulateGroundwater){
-        const int v = idx*3;
-        const float vr=velocity[v], vth=velocity[v+1], vz=velocity[v+2];
-        const float dT_dr_adv  = (vr >= 0.0f) ? (T_old - T_rm)/drm : (T_rp - T_old)/drp;
-        const float dT_dth     = (T_thp - T_thm)/(2.0f*r*dth);
-        const float dT_dz_adv  = (vz >= 0.0f) ? (T_old - T_zm)/dzm : (T_zp - T_old)/dzp;
-        advection = -(vr*dT_dr_adv + vth*dT_dth + vz*dT_dz_adv);
+        const int vbase = gid*3;
+        const float vr  = velocity[vbase+0];
+        const float vth = velocity[vbase+1];
+        const float vz  = velocity[vbase+2];
+        const float dTdr  = (vr>=0.0f) ? (T_old - T_rm)/drm : (T_rp - T_old)/drp;
+        const float dTdth = (T_thp - T_thm)/(2.0f*r*dth);
+        const float dTdz  = (vz>=0.0f) ? (T_old - T_zm)/dzm : (T_zp - T_old)/dzp;
+        adv = -(vr*dTdr + vth*dTdth + vz*dTdz);
     }
 
-    float numerator   = T_old / dt + (alpha*neighbor_conduction + advection);
-    float denominator = 1.0f / dt + alpha*( 2.0f/(drm*drp) + 2.0f/(r*r*dth*dth) + 2.0f/(dzm*dzp) );
+    float num = T_old + dt*(alpha*neighbor + adv);
+    float den = 1.0f + dt*alpha*(2.0f/(drm*drp) + 2.0f/(r*r*dth*dth) + 2.0f/(dzm*dzp));
 
-    // --- DEFINITIVE FIX START ---
-    const float pipeRadius    = heParams[0];
+    // -------- HE taper (radiale + verticale) --------
+    const float pipeRadius     = heParams[0];
     const float totalBoreDepth = heParams[1];
-    const float activeHeDepth  = heParams[11]; // Parameter for the active HE depth
-    const float depth         = fmax(0.0f, -z_coord[k]);
+    const float baseHTC        = heParams[5];
+    const float heType         = heParams[6];
+    const int   nzHE           = (int)heParams[7];
+    const float activeHeDepth  = heParams[11];
+    const float zTaperMeters   = fmax(heParams[12], 1e-3f);
 
-    // Conditionally apply the heat source term from the fluid
-    if (r <= (pipeRadius * 5.0f) && depth <= activeHeDepth) {
-        const float baseHTC = heParams[5];
-        const int   nzHE    = (int)heParams[7];
+    const float rInfluence = fmax(pipeRadius*5.0f, 0.25f);
+    const float depth      = fmax(0.0f, -z_coord[k]);
 
-        // Index into the fluid temperature array, which covers the full borehole depth
+    float rTaper = 0.0f;
+    if (r <= rInfluence){
+        const float u = clampf(1.0f - r / rInfluence, 0.0f, 1.0f);
+        rTaper = sstep(u);
+    }
+
+    float depthFactor = 0.0f;
+    if      (depth <= activeHeDepth)                depthFactor = 1.0f;
+    else if (depth <= activeHeDepth + zTaperMeters) depthFactor = sstep(1.0f - (depth - activeHeDepth)/zTaperMeters);
+    else                                            depthFactor = 0.0f;
+
+    const float taper = rTaper * depthFactor;
+
+    if (taper > 0.0f){
         const int h = clamp((int)(depth / totalBoreDepth * nzHE), 0, nzHE - 1);
 
-        float Tfluid = (flow_config == FLOW_REVERSED)
-                       ? fluidTempDown[h]
-                       : (heParams[6] > 0.5f ? 0.5f*(fluidTempDown[h]+fluidTempUp[h]) : fluidTempUp[h]);
+        float Tfluid;
+        if (flow_config == FLOW_REVERSED)
+            Tfluid = (heType>0.5f) ? 0.5f*(fluidTempDown[h] + fluidTempUp[h]) : fluidTempDown[h];
+        else
+            Tfluid = (heType>0.5f) ? 0.5f*(fluidTempDown[h] + fluidTempUp[h]) : fluidTempUp[h];
 
-        const float vol   = fmax(1e-6f, cellVolumes[idx]);
-        const float area  = 2.0f * M_PI_F * r * (dzm + dzp) * 0.5f;
-        const float U_vol = baseHTC * area / vol;
+        const float vol  = fmax(1e-6f, cellVolumes[gid]);
+        const float area = 2.0f * M_PI_F * r * (dzm + dzp) * 0.5f;
+        float Uvol       = (baseHTC * area / vol) * taper;
 
-        numerator   += U_vol * Tfluid / rho_cp;
-        denominator += U_vol / rho_cp;
+        num += dt * Uvol * Tfluid / rho_cp;
+        den += dt * Uvol / rho_cp;
     }
-    // --- DEFINITIVE FIX END ---
+    // -----------------------------------------------
 
-    float T_new = numerator / denominator;
-    newTemp[idx] = clamp(T_new, 273.0f, 573.0f);
-    temperatureChange[idx] = fabs(T_new - T_old);
+    const float T_new = clampf(num/den, 273.0f, 573.0f);
+    newTemp[gid] = T_new;
+    temperatureChange[gid] = fabs(T_new - T_old);
 }
 
-// Reduction kernel remains the same
+// -------------------- REDUCTION (max) --------------------
 __kernel void reduction_max_kernel(
     __global const float* input,
     __global float*       output,
-    __local  float*       scratch,
     const int n)
 {
-    const int gid = get_global_id(0);
-    const int lid = get_local_id(0);
-    const int grp = get_group_id(0);
+    __local float sdata[256]; // usa local size 256
+    const int tid = get_local_id(0);
+    const int gid = get_group_id(0);
     const int lsz = get_local_size(0);
 
-    float m = 0.0f;
-    if (gid < n) m = input[gid];
-    for (int i = gid + get_global_size(0); i < n; i += get_global_size(0))
-        m = fmax(m, input[i]);
-    scratch[lid] = m;
+    int i = (get_global_id(0)) * 2;
+    float v = 0.0f;
+    if (i < n)     v = fmax(v, fabs(input[i]));
+    if (i + 1 < n) v = fmax(v, fabs(input[i+1]));
+    sdata[tid] = v;
     barrier(CLK_LOCAL_MEM_FENCE);
 
-    for (int off = lsz>>1; off>0; off >>= 1){
-        if (lid < off) scratch[lid] = fmax(scratch[lid], scratch[lid+off]);
+    for (int s = lsz>>1; s>0; s>>=1){
+        if (tid < s) sdata[tid] = fmax(sdata[tid], sdata[tid+s]);
         barrier(CLK_LOCAL_MEM_FENCE);
     }
-    if (lid==0) output[grp] = scratch[0];
+    if (tid==0) output[gid] = sdata[0];
+}
+
+// -------------------- UTIL --------------------
+__kernel void copy_buffer_kernel(__global const float* src, __global float* dst, const int n){
+    const int i = get_global_id(0);
+    if (i < n) dst[i] = src[i];
+}
+
+__kernel void clear_buffer_kernel(__global float* buf, const int n){
+    const int i = get_global_id(0);
+    if (i < n) buf[i] = 0.0f;
 }
 ";
 }
