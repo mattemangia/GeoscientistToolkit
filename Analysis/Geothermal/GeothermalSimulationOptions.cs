@@ -102,7 +102,8 @@ public class GeothermalSimulationOptions
     public bool Generate2DSlices { get; set; } = true;
     public List<double> SlicePositions { get; set; } = new() { 0.1, 0.5, 0.9 };
     public float HeatExchangerDepth { get; set; }
-
+    
+    public double HeatExchangerEndFeatherMeters { get; set; } = 10.0;
     public void SetDefaultValues()
     {
         if (!LayerThermalConductivities.Any())

@@ -1216,25 +1216,21 @@ public class GeothermalSimulationSolver : IDisposable
     ///     DEFINITIVE FIX: Scalar heat transfer solver for a single point, now using a semi-implicit
     ///     formulation for the heat exchanger to guarantee numerical stability.
     /// </summary>
-  private float SolveHeatTransferSinglePoint(int i, int j, int k, float[,,] newTemp, float dt)
+ private float SolveHeatTransferSinglePoint(int i, int j, int k, float[,,] newTemp, float dt)
 {
     int nth = _mesh.AngularPoints;
-    float r = MathF.Max(0.01f, _mesh.R[i]);
+    float r  = MathF.Max(0.01f, _mesh.R[i]);
+    int jm   = (j - 1 + nth) % nth;
+    int jp   = (j + 1) % nth;
 
-    // Proprietà
-    float lambda = Math.Clamp(_mesh.ThermalConductivities[i, j, k], 0.1f, 10f);
+    float lambda = Math.Clamp(_mesh.ThermalConductivities[i, j, k], 0.05f, 15f);
     float rho    = MathF.Max(500f, _mesh.Densities[i, j, k]);
-    float cp     = MathF.Max(100f, _mesh.SpecificHeats[i, j, k]);
+    float cp     = MathF.Max(100f,  _mesh.SpecificHeats[i, j, k]);
     float rho_cp = MathF.Max(1f, rho * cp);
     float alpha  = lambda / rho_cp;
 
     float T_old = _temperature[i, j, k];
 
-    // Indici theta
-    int jm = (j - 1 + nth) % nth;
-    int jp = (j + 1) % nth;
-
-    // Passi
     float dr_m = MathF.Max(0.001f, _mesh.R[i]     - _mesh.R[i - 1]);
     float dr_p = MathF.Max(0.001f, _mesh.R[i + 1] - _mesh.R[i]);
     float dth  = 2f * MathF.PI / nth;
@@ -1242,7 +1238,6 @@ public class GeothermalSimulationSolver : IDisposable
     float dz_p = MathF.Max(0.001f, MathF.Abs(_mesh.Z[k + 1] - _mesh.Z[k]));
     float dz_c = 0.5f * (dz_m + dz_p);
 
-    // Vicini
     float T_rm  = _temperature[i - 1, j, k];
     float T_rp  = _temperature[i + 1, j, k];
     float T_zm  = _temperature[i, j, k - 1];
@@ -1250,14 +1245,12 @@ public class GeothermalSimulationSolver : IDisposable
     float T_thm = _temperature[i, jm, k];
     float T_thp = _temperature[i, jp, k];
 
-    // Diffusione “esplicita” dei vicini + termine 1/r * dT/dr
     float diffusion_neighbors =
           alpha * ((T_rp + T_rm) / (dr_m * dr_p)
                  + (T_thp + T_thm) / (r * r * dth * dth)
                  + (T_zp + T_zm) / (dz_m * dz_p)
                  + (T_rp - T_rm) / (dr_p + dr_m) / r);
 
-    // Avvezione upwind (se attiva)
     float advection = 0f;
     if (_options.SimulateGroundwaterFlow)
     {
@@ -1268,58 +1261,46 @@ public class GeothermalSimulationSolver : IDisposable
         float dT_dr  = (vr  >= 0f) ? (T_old - T_rm) / dr_m : (T_rp - T_old) / dr_p;
         float dT_dth = (T_thp - T_thm) / (2f * r * dth);
         float dT_dz  = (vz  >= 0f) ? (T_old - T_zm) / dz_m : (T_zp - T_old) / dz_p;
-
         advection = -(vr * dT_dr + vth * dT_dth + vz * dT_dz);
     }
 
-    // Semi-implicito: centro al denominatore
     float numerator   = T_old + dt * (diffusion_neighbors + advection);
     float denominator = 1f + dt * alpha * (2f/(dr_m*dr_p) + 2f/(r*r*dth*dth) + 2f/(dz_m*dz_p));
 
-    // ---------------- Accoppiamento HE con TAPER ----------------
-    // Profondità positiva
-    float depth = MathF.Max(0f, -_mesh.Z[k]);
-
-    // Geometria e parametri
+    // --- Coupling HE con taper (agisce sul grout/roccia attorno, nessun cut-off) ---
+    float depth          = MathF.Max(0f, -_mesh.Z[k]);
     float pipeRadius     = (float)(_options.PipeOuterDiameter * 0.5);
     float totalBoreDepth = (float)_options.BoreholeDataset.TotalDepth;
     float activeHeDepth  = (float)_options.HeatExchangerDepth;
+    float rInfluence     = MathF.Max(pipeRadius * 5f, 0.25f);
 
-    // Taper radiale (smoothstep 0..1 entro rInfluence)
-    float rInfluence = MathF.Max(pipeRadius * 5f, 0.25f);
+    static float Smooth(float x) => x * x * (3f - 2f * x);
+
     float rTaper = 0f;
-    if (r <= rInfluence)
-    {
-        float u = Math.Clamp(1f - r / rInfluence, 0f, 1f); // 1 al foro → 0 al limite
-        rTaper = u*u*(3f - 2f*u);
-    }
+    if (r <= rInfluence) { float u = Math.Clamp(1f - r / rInfluence, 0f, 1f); rTaper = Smooth(u); }
 
-    // Taper verticale (smoothstep su ~2 altezze cella sotto l'HE)
     float zTaper = MathF.Max(2f * dz_c, 0.25f);
     float depthFactor =
         (depth <= activeHeDepth) ? 1f :
-        (depth <= activeHeDepth + zTaper ? MathF.Pow(1f - (depth - activeHeDepth) / zTaper, 2f) * (3f - 2f*(1f - (depth - activeHeDepth)/zTaper)) : 0f);
+        (depth <= activeHeDepth + zTaper ? Smooth(1f - (depth - activeHeDepth) / zTaper) : 0f);
 
     float taper = rTaper * depthFactor;
 
     if (taper > 0f)
     {
-        int nzHE = Math.Max(1, _fluidTempDown?.Length ?? 1);
-        int hIdx = Math.Clamp((int)(depth / totalBoreDepth * nzHE), 0, nzHE - 1);
+        int nzHE  = Math.Max(1, _fluidTempDown?.Length ?? 1);
+        int hIdx  = Math.Clamp((int)(depth / totalBoreDepth * nzHE), 0, nzHE - 1);
+        bool uTube = _options.HeatExchangerType == HeatExchangerType.UTube;
+        float Tfluid = (_options.FlowConfiguration == FlowConfiguration.CounterFlowReversed)
+            ? (uTube ? 0.5f*(_fluidTempDown[hIdx] + _fluidTempUp[hIdx]) : _fluidTempDown[hIdx])
+            : (uTube ? 0.5f*(_fluidTempDown[hIdx] + _fluidTempUp[hIdx]) : _fluidTempUp[hIdx]);
 
-        bool isUTube = _options.HeatExchangerType == HeatExchangerType.UTube;
-        float Tfluid =
-            (_options.FlowConfiguration == FlowConfiguration.CounterFlowReversed)
-            ? (isUTube ? 0.5f*(_fluidTempDown[hIdx] + _fluidTempUp[hIdx]) : _fluidTempDown[hIdx])
-            : (isUTube ? 0.5f*(_fluidTempDown[hIdx] + _fluidTempUp[hIdx]) : _fluidTempUp[hIdx]);
-
-        // HTC base robusto (Dittus–Boelter o 4.36 laminare)
+        // HTC “robusto”
         float D_in = MathF.Max(0.01f, (float)_options.PipeInnerDiameter);
         float mu   = MathF.Max(1e-3f, (float)_options.FluidViscosity);
         float mdot = (float)_options.FluidMassFlowRate;
         float kf   = MathF.Max(0.2f,  (float)_options.FluidThermalConductivity);
         float cpf  = MathF.Max(1000f, (float)_options.FluidSpecificHeat);
-
         float Re   = 4.0f * mdot / (MathF.PI * D_in * mu);
         float Pr   = mu * cpf / kf;
         float Nu   = (Re < 2300f) ? 4.36f : 0.023f * MathF.Pow(Re, 0.8f) * MathF.Pow(Pr, 0.4f);
@@ -1332,7 +1313,6 @@ public class GeothermalSimulationSolver : IDisposable
         numerator   += dt * Uvol * Tfluid / rho_cp;
         denominator += dt * Uvol / rho_cp;
     }
-    // ------------------------------------------------------------
 
     float T_new = Math.Clamp(numerator / denominator, 273f, 573f);
     newTemp[i, j, k] = T_new;

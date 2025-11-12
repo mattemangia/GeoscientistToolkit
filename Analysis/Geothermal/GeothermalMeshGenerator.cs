@@ -344,64 +344,76 @@ public static class GeothermalMeshGenerator
     ///     Calculates thermal transmissivities between cells.
     /// </summary>
     private static void CalculateTransmissivities(GeothermalMesh mesh)
+{
+    int nr  = mesh.RadialPoints;
+    int nth = mesh.AngularPoints;
+    int nz  = mesh.VerticalPoints;
+
+    mesh.RadialTransmissivities   = new float[nr + 1, nth, nz];
+    mesh.AngularTransmissivities  = new float[nr, nth + 1, nz];
+    mesh.VerticalTransmissivities = new float[nr, nth, nz + 1];
+
+    // --- RADIALE: volto i (tra cella i-1 e i) ---
+    for (int i = 1; i < nr; i++)
     {
-        var nr = mesh.RadialPoints;
-        var nth = mesh.AngularPoints;
-        var nz = mesh.VerticalPoints;
+        // Distanze centro-volto a sinistra/destra
+        float dL = mesh.R[i]   - mesh.R[i - 1];
+        float dR = mesh.R[i + 1 < nr ? i + 1 : i] - mesh.R[i];
+        if (i == nr - 1) dR = mesh.R[i] - mesh.R[i - 1]; // bordo interno all’ultima cella
 
-        mesh.RadialTransmissivities = new float[nr + 1, nth, nz];
-        mesh.AngularTransmissivities = new float[nr, nth + 1, nz];
-        mesh.VerticalTransmissivities = new float[nr, nth, nz + 1];
-
-        // Radial transmissivities
-        for (var i = 1; i < nr; i++)
-        for (var j = 0; j < nth; j++)
-        for (var k = 0; k < nz; k++)
+        for (int j = 0; j < nth; j++)
+        for (int k = 0; k < nz;  k++)
         {
-            var k1 = mesh.ThermalConductivities[i - 1, j, k];
-            var k2 = mesh.ThermalConductivities[i, j, k];
-            var dr1 = i > 1 ? mesh.R[i - 1] - mesh.R[i - 2] : mesh.R[1] - mesh.R[0];
-            var dr2 = mesh.R[i] - mesh.R[i - 1];
+            float kL = MathF.Max(0.05f, mesh.ThermalConductivities[i - 1, j, k]);
+            float kR = MathF.Max(0.05f, mesh.ThermalConductivities[i,     j, k]);
+            float A  = mesh.RadialFaceAreas[i, j, k];
 
-            // Harmonic mean
-            var keff = 2 * k1 * k2 / (k1 * dr2 + k2 * dr1);
-            mesh.RadialTransmissivities[i, j, k] = keff * mesh.RadialFaceAreas[i, j, k] / ((dr1 + dr2) * 0.5f);
-        }
-
-        // Angular transmissivities (periodic boundary)
-        for (var i = 0; i < nr; i++)
-        {
-            var r = mesh.R[i];
-            var dtheta = 2f * MathF.PI / nth;
-
-            for (var j = 0; j <= nth; j++)
-            for (var k = 0; k < nz; k++)
-            {
-                var j1 = (j - 1 + nth) % nth;
-                var j2 = j % nth;
-
-                var k1 = mesh.ThermalConductivities[i, j1, k];
-                var k2 = mesh.ThermalConductivities[i, j2, k];
-
-                var keff = 2 * k1 * k2 / (k1 + k2);
-                mesh.AngularTransmissivities[i, j, k] = keff * mesh.AngularFaceAreas[i, j, k] / (r * dtheta);
-            }
-        }
-
-        // Vertical transmissivities
-        for (var i = 0; i < nr; i++)
-        for (var j = 0; j < nth; j++)
-        for (var k = 1; k < nz; k++)
-        {
-            var k1 = mesh.ThermalConductivities[i, j, k - 1];
-            var k2 = mesh.ThermalConductivities[i, j, k];
-            var dz1 = k > 1 ? Math.Abs(mesh.Z[k - 1] - mesh.Z[k - 2]) : Math.Abs(mesh.Z[1] - mesh.Z[0]);
-            var dz2 = Math.Abs(mesh.Z[k] - mesh.Z[k - 1]);
-
-            var keff = 2 * k1 * k2 / (k1 * dz2 + k2 * dz1);
-            mesh.VerticalTransmissivities[i, j, k] = keff * mesh.VerticalFaceAreas[i, j, k] / ((dz1 + dz2) * 0.5f);
+            float denom = (dL / kL) + (dR / kR);
+            mesh.RadialTransmissivities[i, j, k] = (denom > 1e-12f) ? (2f * A / denom) : 0f;
         }
     }
+
+    // --- ANGOLARE: volto j (tra j-1 e j) ---
+    for (int i = 0; i < nr; i++)
+    {
+        float r   = mesh.R[i];
+        float dth = 2f * MathF.PI / nth;
+        float d   = r * dth;                  // distanza centro-volto in theta (per ciascun lato)
+        for (int j = 0; j <= nth; j++)
+        for (int k = 0; k < nz;   k++)
+        {
+            int jL = (j - 1 + nth) % nth;
+            int jR = j % nth;
+
+            float kL = MathF.Max(0.05f, mesh.ThermalConductivities[i, jL, k]);
+            float kR = MathF.Max(0.05f, mesh.ThermalConductivities[i, jR, k]);
+            float A  = mesh.AngularFaceAreas[i, j, k];
+
+            float denom = (d / kL) + (d / kR);
+            mesh.AngularTransmissivities[i, j, k] = (denom > 1e-12f) ? (2f * A / denom) : 0f;
+        }
+    }
+
+    // --- VERTICALE: volto k (tra k-1 e k) ---
+    for (int i = 0; i < nr; i++)
+    for (int j = 0; j < nth; j++)
+    for (int k = 1; k < nz;  k++)
+    {
+        // spessori delle due celle adiacenti
+        float dz1 = MathF.Abs(mesh.Z[k - 1] - mesh.Z[k - 2 >= 0 ? k - 2 : k - 1]);
+        float dz2 = MathF.Abs(mesh.Z[k]     - mesh.Z[k - 1]);
+        if (k == 1) dz1 = MathF.Abs(mesh.Z[1] - mesh.Z[0]); // prima interfaccia
+
+        float kL = MathF.Max(0.05f, mesh.ThermalConductivities[i, j, k - 1]); // sopra
+        float kR = MathF.Max(0.05f, mesh.ThermalConductivities[i, j, k]);     // sotto
+        float A  = mesh.VerticalFaceAreas[i, j, k];
+
+        // resistenze in serie (metà spessore per lato -> fattore 2 in numeratore)
+        float denom = (dz1 / kL) + (dz2 / kR);
+        mesh.VerticalTransmissivities[i, j, k] = (denom > 1e-12f) ? (2f * A / denom) : 0f;
+    }
+}
+
 
     /// <summary>
     ///     Generates a stochastic fracture network if enabled.

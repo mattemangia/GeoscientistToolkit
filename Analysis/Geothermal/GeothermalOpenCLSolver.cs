@@ -854,9 +854,11 @@ public class GeothermalOpenCLSolver : IDisposable
 {
     return @"
 // ======================================================================
-// OpenCL 1.2 — Heat transfer with HE taper (radial+vertical)
-// heParams[0]=pipeRadius,[1]=totalBoreDepth,[5]=baseHTC,[6]=heType,[7]=nzHE,
-// [10]=D_in,[11]=activeHeDepth,[12]=endTaperMeters
+// OpenCL 1.2 — Heat transfer (cylindrical grid)
+// Conduction (FV) + optional advection + HE coupling with radial+vertical taper
+// heParams: [0]=pipeRadius,[1]=totalBoreDepth,[2]=Tin,[3]=mdot,[4]=cp_f,
+//           [5]=baseHTC,[6]=heType(1=U),[7]=nzHE,[8]=mu,[9]=kf,[10]=D_in,
+//           [11]=activeHeDepth,[12]=endTaperMeters
 // ======================================================================
 #define M_PI_F 3.14159265358979323846f
 #define FLOW_STANDARD 0
@@ -866,7 +868,6 @@ inline int IDX(int i,int j,int k,int nth,int nz){ return i*nth*nz + j*nz + k; }
 inline float sstep(float x){ return x*x*(3.0f - 2.0f*x); }
 inline float clampf(float x,float a,float b){ return fmin(fmax(x,a),b); }
 
-// -------------------- MAIN KERNEL --------------------
 __kernel void heat_transfer_kernel(
     __global const float* temperature,
     __global float*       newTemp,
@@ -895,21 +896,21 @@ __kernel void heat_transfer_kernel(
     const int j = (gid / nz) % nth;
     const int i = gid / (nz * nth);
 
-    // Bordi: copia
     if (i==0 || i==nr-1 || k==0 || k==nz-1){
         newTemp[gid] = temperature[gid];
         temperatureChange[gid] = 0.0f;
         return;
     }
 
+    // props
     const float T_old = temperature[gid];
-    const float lam   = clampf(conductivity[gid], 0.1f, 10.0f);
+    const float lam   = clampf(conductivity[gid], 0.05f, 15.0f);
     const float rho   = clampf(density[gid],     500.0f, 5000.0f);
     const float cp    = clampf(specificHeat[gid],100.0f, 5000.0f);
     const float rho_cp = fmax(1.0f, rho*cp);
     const float alpha  = lam / rho_cp;
 
-    // Geometria
+    // geometry
     const float r   = fmax(0.01f, r_coord[i]);
     const int   jm  = (j - 1 + nth) % nth;
     const int   jp  = (j + 1) % nth;
@@ -920,7 +921,7 @@ __kernel void heat_transfer_kernel(
     const float dzp = fmax(0.001f, fabs(z_coord[k+1] - z_coord[k]));
     const float dzc = 0.5f*(dzm+dzp);
 
-    // Vicini
+    // neighbors
     const float T_rm  = temperature[IDX(i-1,j ,k ,nth,nz)];
     const float T_rp  = temperature[IDX(i+1,j ,k ,nth,nz)];
     const float T_zm  = temperature[IDX(i  ,j ,k-1,nth,nz)];
@@ -928,14 +929,14 @@ __kernel void heat_transfer_kernel(
     const float T_thm = temperature[IDX(i  ,jm,k ,nth,nz)];
     const float T_thp = temperature[IDX(i  ,jp,k ,nth,nz)];
 
-    // Diffusione (explicita + 1/r * dT/dr stabilizzato)
+    // conduction + 1/r * dT/dr
     float neighbor =
           (T_rp + T_rm) / (drm*drp)
         + (T_thp + T_thm) / (r*r*dth*dth)
         + (T_zp + T_zm) / (dzm*dzp)
         + (T_rp - T_rm) / (drp + drm) / r;
 
-    // Avvezione upwind
+    // advection (optional)
     float adv = 0.0f;
     if (simulateGroundwater){
         const int vbase = gid*3;
@@ -951,7 +952,7 @@ __kernel void heat_transfer_kernel(
     float num = T_old + dt*(alpha*neighbor + adv);
     float den = 1.0f + dt*alpha*(2.0f/(drm*drp) + 2.0f/(r*r*dth*dth) + 2.0f/(dzm*dzp));
 
-    // -------- HE taper (radiale + verticale) --------
+    // -------- HE coupling with TAPER (no cut-off) --------
     const float pipeRadius     = heParams[0];
     const float totalBoreDepth = heParams[1];
     const float baseHTC        = heParams[5];
@@ -978,12 +979,9 @@ __kernel void heat_transfer_kernel(
 
     if (taper > 0.0f){
         const int h = clamp((int)(depth / totalBoreDepth * nzHE), 0, nzHE - 1);
-
-        float Tfluid;
-        if (flow_config == FLOW_REVERSED)
-            Tfluid = (heType>0.5f) ? 0.5f*(fluidTempDown[h] + fluidTempUp[h]) : fluidTempDown[h];
-        else
-            Tfluid = (heType>0.5f) ? 0.5f*(fluidTempDown[h] + fluidTempUp[h]) : fluidTempUp[h];
+        float Tfluid = (flow_config == FLOW_REVERSED)
+            ? ((heType>0.5f) ? 0.5f*(fluidTempDown[h] + fluidTempUp[h]) : fluidTempDown[h])
+            : ((heType>0.5f) ? 0.5f*(fluidTempDown[h] + fluidTempUp[h]) : fluidTempUp[h]);
 
         const float vol  = fmax(1e-6f, cellVolumes[gid]);
         const float area = 2.0f * M_PI_F * r * (dzm + dzp) * 0.5f;
@@ -992,7 +990,6 @@ __kernel void heat_transfer_kernel(
         num += dt * Uvol * Tfluid / rho_cp;
         den += dt * Uvol / rho_cp;
     }
-    // -----------------------------------------------
 
     const float T_new = clampf(num/den, 273.0f, 573.0f);
     newTemp[gid] = T_new;
@@ -1000,10 +997,7 @@ __kernel void heat_transfer_kernel(
 }
 
 // -------------------- REDUCTION (max) --------------------
-__kernel void reduction_max_kernel(
-    __global const float* input,
-    __global float*       output,
-    const int n)
+__kernel void reduce_max_kernel(__global const float* values, __global float* blockMax, const int n)
 {
     __local float sdata[256]; // usa local size 256
     const int tid = get_local_id(0);
@@ -1012,8 +1006,8 @@ __kernel void reduction_max_kernel(
 
     int i = (get_global_id(0)) * 2;
     float v = 0.0f;
-    if (i < n)     v = fmax(v, fabs(input[i]));
-    if (i + 1 < n) v = fmax(v, fabs(input[i+1]));
+    if (i < n)     v = fmax(v, fabs(values[i]));
+    if (i + 1 < n) v = fmax(v, fabs(values[i+1]));
     sdata[tid] = v;
     barrier(CLK_LOCAL_MEM_FENCE);
 
@@ -1021,7 +1015,7 @@ __kernel void reduction_max_kernel(
         if (tid < s) sdata[tid] = fmax(sdata[tid], sdata[tid+s]);
         barrier(CLK_LOCAL_MEM_FENCE);
     }
-    if (tid==0) output[gid] = sdata[0];
+    if (tid==0) blockMax[gid] = sdata[0];
 }
 
 // -------------------- UTIL --------------------
@@ -1029,7 +1023,6 @@ __kernel void copy_buffer_kernel(__global const float* src, __global float* dst,
     const int i = get_global_id(0);
     if (i < n) dst[i] = src[i];
 }
-
 __kernel void clear_buffer_kernel(__global float* buf, const int n){
     const int i = get_global_id(0);
     if (i < n) buf[i] = 0.0f;
