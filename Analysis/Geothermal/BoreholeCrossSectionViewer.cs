@@ -235,10 +235,10 @@ public class BoreholeCrossSectionViewer
         {
             var x = -maxRadius + 2 * maxRadius * ix / (gridSize - 1);
             var y = -maxRadius + 2 * maxRadius * iy / (gridSize - 1);
-            
+
             var temp = GetTemperatureAtPoint(x, y, zIndex, fluidTemps);
             data[ix, iy] = temp - 273.15;
-            
+
             var r = Math.Sqrt(x * x + y * y);
             if (r > pipeOuterRadius * 1.2) groundTempList.Add(data[ix, iy]);
         }
@@ -312,17 +312,21 @@ public class BoreholeCrossSectionViewer
         {
             drawList.AddCircle(centerScreen, ScaleRadius((float)_options.PipeOuterDiameter / 2), 0xFF808080, 0, 1.5f);
             drawList.AddCircle(centerScreen, ScaleRadius((float)_options.PipeSpacing / 2), 0xFF505050, 0, 1.5f);
-            
+
             if (_options.FlowConfiguration == FlowConfiguration.CounterFlow)
             {
                 drawList.AddText(centerScreen - new Vector2(10, 8), 0xFFFFFFFF, $"↓ {fluidTemps.down - 273.15:F0}°C");
-                var annulusPos = WorldToScreen(new Vector2((float)(_options.PipeSpacing / 2.0 + _options.PipeOuterDiameter / 2.0) / 2.0f, 0));
+                var annulusPos =
+                    WorldToScreen(
+                        new Vector2((float)(_options.PipeSpacing / 2.0 + _options.PipeOuterDiameter / 2.0) / 2.0f, 0));
                 drawList.AddText(annulusPos - new Vector2(10, 8), 0xFFFFFFFF, $"↑ {fluidTemps.up - 273.15:F0}°C");
             }
             else if (_options.FlowConfiguration == FlowConfiguration.CounterFlowReversed)
             {
                 drawList.AddText(centerScreen - new Vector2(10, 8), 0xFFFFFFFF, $"↑ {fluidTemps.up - 273.15:F0}°C");
-                var annulusPos = WorldToScreen(new Vector2((float)(_options.PipeSpacing / 2.0 + _options.PipeOuterDiameter / 2.0) / 2.0f, 0));
+                var annulusPos =
+                    WorldToScreen(
+                        new Vector2((float)(_options.PipeSpacing / 2.0 + _options.PipeOuterDiameter / 2.0) / 2.0f, 0));
                 drawList.AddText(annulusPos - new Vector2(10, 8), 0xFFFFFFFF, $"↓ {fluidTemps.down - 273.15:F0}°C");
             }
         }
@@ -458,7 +462,7 @@ public class BoreholeCrossSectionViewer
             for (var ix = 0; ix < gridX; ix++)
             {
                 var x = min_x + (max_x - min_x) * ix / (gridX - 1);
-                
+
                 // For a XZ slice, we assume y=0
                 var temp = GetTemperatureAtPoint(x, 0, zIndex, fluidTemps);
                 data[ix, iz] = temp - 273.15;
@@ -519,16 +523,16 @@ public class BoreholeCrossSectionViewer
 
             // Downflow pipe
             var p1_start = new Vector2(-pipeSpacing - pipeRadius, 0);
-            var p1_end = new Vector2(-pipeSpacing + pipeRadius, (float)viewDepth);
+            var p1_end = new Vector2(-pipeSpacing + pipeRadius, viewDepth);
             drawList.AddRectFilled(WorldToScreen(p1_start), WorldToScreen(p1_end), 0x90303030);
 
             // Upflow pipe
             var p2_start = new Vector2(pipeSpacing - pipeRadius, 0);
-            var p2_end = new Vector2(pipeSpacing + pipeRadius, (float)viewDepth);
+            var p2_end = new Vector2(pipeSpacing + pipeRadius, viewDepth);
             drawList.AddRectFilled(WorldToScreen(p2_start), WorldToScreen(p2_end), 0x90303030);
         }
         // --- MODIFICATION END ---
-        
+
         drawList.PopClipRect();
 
         var title = "Lateral Temperature View (XZ Plane)";
@@ -574,7 +578,7 @@ public class BoreholeCrossSectionViewer
             var x = -maxRadius + 2 * maxRadius * ix / (gridSize - 1);
             var y = -maxRadius + 2 * maxRadius * iy / (gridSize - 1);
             var r = Math.Sqrt(x * x + y * y);
-            
+
             if (r < heRadius)
             {
                 data[ix, iy] = double.NaN; // Mask region
@@ -1003,6 +1007,7 @@ public class BoreholeCrossSectionViewer
                 else if (r < _options.BoreholeDataset.WellDiameter / 2.0) label = " [Grout]";
                 else label = " [Ground]";
             }
+
             ImGui.Text($"  r={r:F4}m: {temp:F1}°C{label}");
         }
 
@@ -1135,37 +1140,27 @@ public class BoreholeCrossSectionViewer
         if (_options.HeatExchangerType == HeatExchangerType.Coaxial)
         {
             var innerPipeOuterRadius = _options.PipeSpacing / 2.0;
-            
+
             // --- REGION 1: Inside the inner pipe ---
             if (r <= innerPipeOuterRadius)
-            {
                 return _options.FlowConfiguration == FlowConfiguration.CounterFlow ? fluidTemps.down : fluidTemps.up;
-            }
             // --- REGION 2: In the annulus between the inner and outer pipes ---
             if (r > innerPipeOuterRadius && r <= pipeOuterRadius)
-            {
                 return _options.FlowConfiguration == FlowConfiguration.CounterFlow ? fluidTemps.up : fluidTemps.down;
-            }
         }
         else if (_options.HeatExchangerType == HeatExchangerType.UTube)
         {
             var pipeRadius = _options.PipeOuterDiameter / 2.0;
             var pipeSpacing = _options.PipeSpacing / 2.0;
-            
+
             var p1_x = -pipeSpacing; // Downflow pipe
-            var p2_x = pipeSpacing;  // Upflow pipe
+            var p2_x = pipeSpacing; // Upflow pipe
 
             var dist_p1_sq = (x - p1_x) * (x - p1_x) + y * y;
-            if (dist_p1_sq <= pipeRadius * pipeRadius)
-            {
-                return fluidTemps.down;
-            }
+            if (dist_p1_sq <= pipeRadius * pipeRadius) return fluidTemps.down;
 
             var dist_p2_sq = (x - p2_x) * (x - p2_x) + y * y;
-            if (dist_p2_sq <= pipeRadius * pipeRadius)
-            {
-                return fluidTemps.up;
-            }
+            if (dist_p2_sq <= pipeRadius * pipeRadius) return fluidTemps.up;
 
             // --- REGION 3 (U-TUBE): Transition from pipe to ground ---
             var wellRadius = _options.BoreholeDataset.WellDiameter / 2.0;
@@ -1174,8 +1169,8 @@ public class BoreholeCrossSectionViewer
                 var groundTemp = InterpolateGroundTemperature(x, y, zIndex);
                 // Determine temperature of the nearest fluid pipe
                 var nearestPipeDist = Math.Sqrt(Math.Min(dist_p1_sq, dist_p2_sq));
-                var nearestFluidTemp = (dist_p1_sq < dist_p2_sq) ? fluidTemps.down : fluidTemps.up;
-                
+                var nearestFluidTemp = dist_p1_sq < dist_p2_sq ? fluidTemps.down : fluidTemps.up;
+
                 // Interpolate between the nearest pipe and the ground
                 var t = (nearestPipeDist - pipeRadius) / (wellRadius - pipeRadius);
                 t = Math.Clamp(t, 0, 1);
@@ -1184,11 +1179,14 @@ public class BoreholeCrossSectionViewer
         }
 
         // --- REGION 3 (COAXIAL): Transition from outer pipe to ground ---
-        if (_options.HeatExchangerType == HeatExchangerType.Coaxial && r > pipeOuterRadius && r <= pipeOuterRadius * 1.2)
+        if (_options.HeatExchangerType == HeatExchangerType.Coaxial && r > pipeOuterRadius &&
+            r <= pipeOuterRadius * 1.2)
         {
             var groundTemp = InterpolateGroundTemperature(x, y, zIndex);
-            
-            double outerFluidTemp = _options.FlowConfiguration == FlowConfiguration.CounterFlow ? fluidTemps.up : fluidTemps.down;
+
+            double outerFluidTemp = _options.FlowConfiguration == FlowConfiguration.CounterFlow
+                ? fluidTemps.up
+                : fluidTemps.down;
 
             var t = (r - pipeOuterRadius) / (pipeOuterRadius * 0.2);
             return outerFluidTemp * (1 - t) + groundTemp * t;

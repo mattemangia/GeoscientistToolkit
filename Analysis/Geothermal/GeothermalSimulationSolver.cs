@@ -470,106 +470,115 @@ public class GeothermalSimulationSolver : IDisposable
     ///     Initializes all field arrays with initial conditions.
     /// </summary>
     private void InitializeFields()
-{
-    var nr = _mesh.RadialPoints;
-    var nth = _mesh.AngularPoints;
-    var nz = _mesh.VerticalPoints;
-
-    _temperature = new float[nr, nth, nz];
-    _temperatureOld = new float[nr, nth, nz];
-    _pressure = new float[nr, nth, nz];
-    _hydraulicHead = new float[nr, nth, nz];
-    _velocity = new float[nr, nth, nz, 3];
-    _pecletNumber = new float[nr, nth, nz];
-    _dispersionCoefficient = new float[nr, nth, nz];
-
-    Func<float, float> getTempAtDepth;
-
-    if (_options.InitialTemperatureProfile != null && _options.InitialTemperatureProfile.Any())
     {
-        var sortedProfile = _options.InitialTemperatureProfile.OrderBy(p => p.Depth).ToList();
-        getTempAtDepth = depth =>
+        var nr = _mesh.RadialPoints;
+        var nth = _mesh.AngularPoints;
+        var nz = _mesh.VerticalPoints;
+
+        _temperature = new float[nr, nth, nz];
+        _temperatureOld = new float[nr, nth, nz];
+        _pressure = new float[nr, nth, nz];
+        _hydraulicHead = new float[nr, nth, nz];
+        _velocity = new float[nr, nth, nz, 3];
+        _pecletNumber = new float[nr, nth, nz];
+        _dispersionCoefficient = new float[nr, nth, nz];
+
+        Func<float, float> getTempAtDepth;
+
+        if (_options.InitialTemperatureProfile != null && _options.InitialTemperatureProfile.Any())
         {
-            if (sortedProfile.Count == 1) return (float)sortedProfile[0].Temperature;
-            for (var i = 0; i < sortedProfile.Count - 1; i++)
+            var sortedProfile = _options.InitialTemperatureProfile.OrderBy(p => p.Depth).ToList();
+            getTempAtDepth = depth =>
             {
-                var p1 = sortedProfile[i];
-                var p2 = sortedProfile[i + 1];
-                if (depth >= p1.Depth && depth <= p2.Depth)
+                if (sortedProfile.Count == 1) return (float)sortedProfile[0].Temperature;
+                for (var i = 0; i < sortedProfile.Count - 1; i++)
                 {
-                    var t = (depth - p1.Depth) / (p2.Depth - p1.Depth);
-                    return (float)(p1.Temperature + t * (p2.Temperature - p1.Temperature));
+                    var p1 = sortedProfile[i];
+                    var p2 = sortedProfile[i + 1];
+                    if (depth >= p1.Depth && depth <= p2.Depth)
+                    {
+                        var t = (depth - p1.Depth) / (p2.Depth - p1.Depth);
+                        return (float)(p1.Temperature + t * (p2.Temperature - p1.Temperature));
+                    }
                 }
-            }
-            if (depth < sortedProfile.First().Depth)
-            {
-                var p1 = sortedProfile[0]; var p2 = sortedProfile[1];
-                var gradient = (p2.Temperature - p1.Temperature) / (p2.Depth - p1.Depth);
-                return (float)(p1.Temperature - (p1.Depth - depth) * gradient);
-            }
-            else
-            {
-                var p1 = sortedProfile[sortedProfile.Count - 2]; var p2 = sortedProfile.Last();
-                var gradient = (p2.Temperature - p1.Temperature) / (p2.Depth - p1.Depth);
-                return (float)(p2.Temperature + (depth - p2.Depth) * gradient);
-            }
-        };
-    }
-    else
-    {
-        var surfaceTemp = (float)_options.SurfaceTemperature;
-        var gradient = (float)_options.AverageGeothermalGradient;
-        if (gradient < 0.001) gradient = 0.03f;
-        
-        Logger.Log($"Initializing temperature field: Surface={surfaceTemp - 273.15:F1}°C, Gradient={gradient * 1000:F1}°C/km");
-        
-        Logger.Log($"  - Sample Depth 0m: {surfaceTemp:F1}K ({surfaceTemp - 273.15:F1}°C)");
-        float midDepth = _options.BoreholeDataset.TotalDepth / 2.0f;
-        float bottomDepth = _options.BoreholeDataset.TotalDepth;
-        Logger.Log($"  - Sample Depth {midDepth:F0}m: {surfaceTemp + gradient * midDepth:F1}K ({(surfaceTemp + gradient * midDepth) - 273.15:F1}°C)");
-        Logger.Log($"  - Sample Depth {bottomDepth:F0}m: {surfaceTemp + gradient * bottomDepth:F1}K ({(surfaceTemp + gradient * bottomDepth) - 273.15:F1}°C)");
 
-        getTempAtDepth = depth => surfaceTemp + gradient * depth;
-    }
-    
-    for (var i = 0; i < nr; i++)
-    for (var j = 0; j < nth; j++)
-    for (var k = 0; k < nz; k++)
-    {
-        var depth = Math.Max(0, -_mesh.Z[k]);
-        var baseTemp = getTempAtDepth(depth);
-        
-        var r = _mesh.R[i];
-        var rMax = _mesh.R[nr - 1];
-        var radialVariation = 1.0f + 0.02f * (r / rMax);
-        
-        _temperature[i, j, k] = baseTemp * radialVariation;
-        _temperatureOld[i, j, k] = _temperature[i, j, k];
+                if (depth < sortedProfile.First().Depth)
+                {
+                    var p1 = sortedProfile[0];
+                    var p2 = sortedProfile[1];
+                    var gradient = (p2.Temperature - p1.Temperature) / (p2.Depth - p1.Depth);
+                    return (float)(p1.Temperature - (p1.Depth - depth) * gradient);
+                }
+                else
+                {
+                    var p1 = sortedProfile[sortedProfile.Count - 2];
+                    var p2 = sortedProfile.Last();
+                    var gradient = (p2.Temperature - p1.Temperature) / (p2.Depth - p1.Depth);
+                    return (float)(p2.Temperature + (depth - p2.Depth) * gradient);
+                }
+            };
+        }
+        else
+        {
+            var surfaceTemp = (float)_options.SurfaceTemperature;
+            var gradient = (float)_options.AverageGeothermalGradient;
+            if (gradient < 0.001) gradient = 0.03f;
 
-        var z = _mesh.Z[k];
-        _hydraulicHead[i, j, k] = (float)(_options.HydraulicHeadTop + (_options.HydraulicHeadBottom - _options.HydraulicHeadTop) * (z - _mesh.Z[0]) / (_mesh.Z[nz - 1] - _mesh.Z[0]));
-        _pressure[i, j, k] = (float)(1000 * 9.81 * _hydraulicHead[i, j, k]);
-    }
+            Logger.Log(
+                $"Initializing temperature field: Surface={surfaceTemp - 273.15:F1}°C, Gradient={gradient * 1000:F1}°C/km");
 
-    _initialTemperature = (float[,,])_temperature.Clone();
-    
-    // --- MODIFICATION START ---
-    // The fluid arrays MUST be sized for the entire borehole depth to correctly model the turnaround at the physical bottom.
-    var nzHE = Math.Max(20, (int)(_options.BoreholeDataset.TotalDepth / 50));
-    // --- MODIFICATION END ---
-    _fluidTempDown = new float[nzHE];
-    _fluidTempUp = new float[nzHE];
-    for (var i = 0; i < nzHE; i++)
-    {
-        _fluidTempDown[i] = (float)_options.FluidInletTemperature;
-        _fluidTempUp[i] = (float)_options.FluidInletTemperature;
+            Logger.Log($"  - Sample Depth 0m: {surfaceTemp:F1}K ({surfaceTemp - 273.15:F1}°C)");
+            var midDepth = _options.BoreholeDataset.TotalDepth / 2.0f;
+            var bottomDepth = _options.BoreholeDataset.TotalDepth;
+            Logger.Log(
+                $"  - Sample Depth {midDepth:F0}m: {surfaceTemp + gradient * midDepth:F1}K ({surfaceTemp + gradient * midDepth - 273.15:F1}°C)");
+            Logger.Log(
+                $"  - Sample Depth {bottomDepth:F0}m: {surfaceTemp + gradient * bottomDepth:F1}K ({surfaceTemp + gradient * bottomDepth - 273.15:F1}°C)");
+
+            getTempAtDepth = depth => surfaceTemp + gradient * depth;
+        }
+
+        for (var i = 0; i < nr; i++)
+        for (var j = 0; j < nth; j++)
+        for (var k = 0; k < nz; k++)
+        {
+            var depth = Math.Max(0, -_mesh.Z[k]);
+            var baseTemp = getTempAtDepth(depth);
+
+            var r = _mesh.R[i];
+            var rMax = _mesh.R[nr - 1];
+            var radialVariation = 1.0f + 0.02f * (r / rMax);
+
+            _temperature[i, j, k] = baseTemp * radialVariation;
+            _temperatureOld[i, j, k] = _temperature[i, j, k];
+
+            var z = _mesh.Z[k];
+            _hydraulicHead[i, j, k] = (float)(_options.HydraulicHeadTop +
+                                              (_options.HydraulicHeadBottom - _options.HydraulicHeadTop) *
+                                              (z - _mesh.Z[0]) / (_mesh.Z[nz - 1] - _mesh.Z[0]));
+            _pressure[i, j, k] = (float)(1000 * 9.81 * _hydraulicHead[i, j, k]);
+        }
+
+        _initialTemperature = (float[,,])_temperature.Clone();
+
+        // --- MODIFICATION START ---
+        // The fluid arrays MUST be sized for the entire borehole depth to correctly model the turnaround at the physical bottom.
+        var nzHE = Math.Max(20, (int)(_options.BoreholeDataset.TotalDepth / 50));
+        // --- MODIFICATION END ---
+        _fluidTempDown = new float[nzHE];
+        _fluidTempUp = new float[nzHE];
+        for (var i = 0; i < nzHE; i++)
+        {
+            _fluidTempDown[i] = (float)_options.FluidInletTemperature;
+            _fluidTempUp[i] = (float)_options.FluidInletTemperature;
+        }
+
+        Logger.Log($"Temperature field initialized, HE elements={nzHE}");
+        var topTemp = _temperature[nr / 2, 0, 0];
+        var bottomTemp = _temperature[nr / 2, 0, nz - 1];
+        Logger.Log(
+            $"Initial temperature profile check: Top={topTemp - 273.15:F1}°C, Bottom={bottomTemp - 273.15:F1}°C");
     }
-    
-    Logger.Log($"Temperature field initialized, HE elements={nzHE}");
-    var topTemp = _temperature[nr/2, 0, 0];
-    var bottomTemp = _temperature[nr/2, 0, nz-1];
-    Logger.Log($"Initial temperature profile check: Top={topTemp - 273.15:F1}°C, Bottom={bottomTemp - 273.15:F1}°C");
-}
 
     /// <summary>
     ///     Solves the groundwater flow equation using SIMD-optimized iterations. (MODIFIED)
@@ -1216,108 +1225,118 @@ public class GeothermalSimulationSolver : IDisposable
     ///     DEFINITIVE FIX: Scalar heat transfer solver for a single point, now using a semi-implicit
     ///     formulation for the heat exchanger to guarantee numerical stability.
     /// </summary>
- private float SolveHeatTransferSinglePoint(int i, int j, int k, float[,,] newTemp, float dt)
-{
-    int nth = _mesh.AngularPoints;
-    float r  = MathF.Max(0.01f, _mesh.R[i]);
-    int jm   = (j - 1 + nth) % nth;
-    int jp   = (j + 1) % nth;
-
-    float lambda = Math.Clamp(_mesh.ThermalConductivities[i, j, k], 0.05f, 15f);
-    float rho    = MathF.Max(500f, _mesh.Densities[i, j, k]);
-    float cp     = MathF.Max(100f,  _mesh.SpecificHeats[i, j, k]);
-    float rho_cp = MathF.Max(1f, rho * cp);
-    float alpha  = lambda / rho_cp;
-
-    float T_old = _temperature[i, j, k];
-
-    float dr_m = MathF.Max(0.001f, _mesh.R[i]     - _mesh.R[i - 1]);
-    float dr_p = MathF.Max(0.001f, _mesh.R[i + 1] - _mesh.R[i]);
-    float dth  = 2f * MathF.PI / nth;
-    float dz_m = MathF.Max(0.001f, MathF.Abs(_mesh.Z[k]     - _mesh.Z[k - 1]));
-    float dz_p = MathF.Max(0.001f, MathF.Abs(_mesh.Z[k + 1] - _mesh.Z[k]));
-    float dz_c = 0.5f * (dz_m + dz_p);
-
-    float T_rm  = _temperature[i - 1, j, k];
-    float T_rp  = _temperature[i + 1, j, k];
-    float T_zm  = _temperature[i, j, k - 1];
-    float T_zp  = _temperature[i, j, k + 1];
-    float T_thm = _temperature[i, jm, k];
-    float T_thp = _temperature[i, jp, k];
-
-    float diffusion_neighbors =
-          alpha * ((T_rp + T_rm) / (dr_m * dr_p)
-                 + (T_thp + T_thm) / (r * r * dth * dth)
-                 + (T_zp + T_zm) / (dz_m * dz_p)
-                 + (T_rp - T_rm) / (dr_p + dr_m) / r);
-
-    float advection = 0f;
-    if (_options.SimulateGroundwaterFlow)
+    private float SolveHeatTransferSinglePoint(int i, int j, int k, float[,,] newTemp, float dt)
     {
-        float vr  = _velocity[i, j, k, 0];
-        float vth = _velocity[i, j, k, 1];
-        float vz  = _velocity[i, j, k, 2];
+        var nth = _mesh.AngularPoints;
+        var r = MathF.Max(0.01f, _mesh.R[i]);
+        var jm = (j - 1 + nth) % nth;
+        var jp = (j + 1) % nth;
 
-        float dT_dr  = (vr  >= 0f) ? (T_old - T_rm) / dr_m : (T_rp - T_old) / dr_p;
-        float dT_dth = (T_thp - T_thm) / (2f * r * dth);
-        float dT_dz  = (vz  >= 0f) ? (T_old - T_zm) / dz_m : (T_zp - T_old) / dz_p;
-        advection = -(vr * dT_dr + vth * dT_dth + vz * dT_dz);
+        var lambda = Math.Clamp(_mesh.ThermalConductivities[i, j, k], 0.05f, 15f);
+        var rho = MathF.Max(500f, _mesh.Densities[i, j, k]);
+        var cp = MathF.Max(100f, _mesh.SpecificHeats[i, j, k]);
+        var rho_cp = MathF.Max(1f, rho * cp);
+        var alpha = lambda / rho_cp;
+
+        var T_old = _temperature[i, j, k];
+
+        var dr_m = MathF.Max(0.001f, _mesh.R[i] - _mesh.R[i - 1]);
+        var dr_p = MathF.Max(0.001f, _mesh.R[i + 1] - _mesh.R[i]);
+        var dth = 2f * MathF.PI / nth;
+        var dz_m = MathF.Max(0.001f, MathF.Abs(_mesh.Z[k] - _mesh.Z[k - 1]));
+        var dz_p = MathF.Max(0.001f, MathF.Abs(_mesh.Z[k + 1] - _mesh.Z[k]));
+        var dz_c = 0.5f * (dz_m + dz_p);
+
+        var T_rm = _temperature[i - 1, j, k];
+        var T_rp = _temperature[i + 1, j, k];
+        var T_zm = _temperature[i, j, k - 1];
+        var T_zp = _temperature[i, j, k + 1];
+        var T_thm = _temperature[i, jm, k];
+        var T_thp = _temperature[i, jp, k];
+
+        var diffusion_neighbors =
+            alpha * ((T_rp + T_rm) / (dr_m * dr_p)
+                     + (T_thp + T_thm) / (r * r * dth * dth)
+                     + (T_zp + T_zm) / (dz_m * dz_p)
+                     + (T_rp - T_rm) / (dr_p + dr_m) / r);
+
+        var advection = 0f;
+        if (_options.SimulateGroundwaterFlow)
+        {
+            var vr = _velocity[i, j, k, 0];
+            var vth = _velocity[i, j, k, 1];
+            var vz = _velocity[i, j, k, 2];
+
+            var dT_dr = vr >= 0f ? (T_old - T_rm) / dr_m : (T_rp - T_old) / dr_p;
+            var dT_dth = (T_thp - T_thm) / (2f * r * dth);
+            var dT_dz = vz >= 0f ? (T_old - T_zm) / dz_m : (T_zp - T_old) / dz_p;
+            advection = -(vr * dT_dr + vth * dT_dth + vz * dT_dz);
+        }
+
+        var numerator = T_old + dt * (diffusion_neighbors + advection);
+        var denominator = 1f + dt * alpha * (2f / (dr_m * dr_p) + 2f / (r * r * dth * dth) + 2f / (dz_m * dz_p));
+
+        // --- Coupling HE con taper (agisce sul grout/roccia attorno, nessun cut-off) ---
+        var depth = MathF.Max(0f, -_mesh.Z[k]);
+        var pipeRadius = (float)(_options.PipeOuterDiameter * 0.5);
+        var totalBoreDepth = _options.BoreholeDataset.TotalDepth;
+        var activeHeDepth = _options.HeatExchangerDepth;
+        var rInfluence = MathF.Max(pipeRadius * 5f, 0.25f);
+
+        static float Smooth(float x)
+        {
+            return x * x * (3f - 2f * x);
+        }
+
+        var rTaper = 0f;
+        if (r <= rInfluence)
+        {
+            var u = Math.Clamp(1f - r / rInfluence, 0f, 1f);
+            rTaper = Smooth(u);
+        }
+
+        var zTaper = MathF.Max(2f * dz_c, 0.25f);
+        var depthFactor =
+            depth <= activeHeDepth ? 1f :
+            depth <= activeHeDepth + zTaper ? Smooth(1f - (depth - activeHeDepth) / zTaper) : 0f;
+
+        var taper = rTaper * depthFactor;
+
+        if (taper > 0f)
+        {
+            var nzHE = Math.Max(1, _fluidTempDown?.Length ?? 1);
+            var hIdx = Math.Clamp((int)(depth / totalBoreDepth * nzHE), 0, nzHE - 1);
+            var uTube = _options.HeatExchangerType == HeatExchangerType.UTube;
+            var Tfluid = _options.FlowConfiguration == FlowConfiguration.CounterFlowReversed
+                ? uTube ? 0.5f * (_fluidTempDown[hIdx] + _fluidTempUp[hIdx]) : _fluidTempDown[hIdx]
+                : uTube
+                    ? 0.5f * (_fluidTempDown[hIdx] + _fluidTempUp[hIdx])
+                    : _fluidTempUp[hIdx];
+
+            // HTC “robusto”
+            var D_in = MathF.Max(0.01f, (float)_options.PipeInnerDiameter);
+            var mu = MathF.Max(1e-3f, (float)_options.FluidViscosity);
+            var mdot = (float)_options.FluidMassFlowRate;
+            var kf = MathF.Max(0.2f, (float)_options.FluidThermalConductivity);
+            var cpf = MathF.Max(1000f, (float)_options.FluidSpecificHeat);
+            var Re = 4.0f * mdot / (MathF.PI * D_in * mu);
+            var Pr = mu * cpf / kf;
+            var Nu = Re < 2300f ? 4.36f : 0.023f * MathF.Pow(Re, 0.8f) * MathF.Pow(Pr, 0.4f);
+            var htc = MathF.Min(2000f, Nu * kf / D_in);
+
+            var vol = MathF.Max(1e-6f, _mesh.CellVolumes[i, j, k]);
+            var area = 2f * MathF.PI * r * (dz_m + dz_p) * 0.5f;
+            var Uvol = htc * area / vol * taper;
+
+            numerator += dt * Uvol * Tfluid / rho_cp;
+            denominator += dt * Uvol / rho_cp;
+        }
+
+        var T_new = Math.Clamp(numerator / denominator, 273f, 573f);
+        newTemp[i, j, k] = T_new;
+        return MathF.Abs(T_new - T_old);
     }
 
-    float numerator   = T_old + dt * (diffusion_neighbors + advection);
-    float denominator = 1f + dt * alpha * (2f/(dr_m*dr_p) + 2f/(r*r*dth*dth) + 2f/(dz_m*dz_p));
-
-    // --- Coupling HE con taper (agisce sul grout/roccia attorno, nessun cut-off) ---
-    float depth          = MathF.Max(0f, -_mesh.Z[k]);
-    float pipeRadius     = (float)(_options.PipeOuterDiameter * 0.5);
-    float totalBoreDepth = (float)_options.BoreholeDataset.TotalDepth;
-    float activeHeDepth  = (float)_options.HeatExchangerDepth;
-    float rInfluence     = MathF.Max(pipeRadius * 5f, 0.25f);
-
-    static float Smooth(float x) => x * x * (3f - 2f * x);
-
-    float rTaper = 0f;
-    if (r <= rInfluence) { float u = Math.Clamp(1f - r / rInfluence, 0f, 1f); rTaper = Smooth(u); }
-
-    float zTaper = MathF.Max(2f * dz_c, 0.25f);
-    float depthFactor =
-        (depth <= activeHeDepth) ? 1f :
-        (depth <= activeHeDepth + zTaper ? Smooth(1f - (depth - activeHeDepth) / zTaper) : 0f);
-
-    float taper = rTaper * depthFactor;
-
-    if (taper > 0f)
-    {
-        int nzHE  = Math.Max(1, _fluidTempDown?.Length ?? 1);
-        int hIdx  = Math.Clamp((int)(depth / totalBoreDepth * nzHE), 0, nzHE - 1);
-        bool uTube = _options.HeatExchangerType == HeatExchangerType.UTube;
-        float Tfluid = (_options.FlowConfiguration == FlowConfiguration.CounterFlowReversed)
-            ? (uTube ? 0.5f*(_fluidTempDown[hIdx] + _fluidTempUp[hIdx]) : _fluidTempDown[hIdx])
-            : (uTube ? 0.5f*(_fluidTempDown[hIdx] + _fluidTempUp[hIdx]) : _fluidTempUp[hIdx]);
-
-        // HTC “robusto”
-        float D_in = MathF.Max(0.01f, (float)_options.PipeInnerDiameter);
-        float mu   = MathF.Max(1e-3f, (float)_options.FluidViscosity);
-        float mdot = (float)_options.FluidMassFlowRate;
-        float kf   = MathF.Max(0.2f,  (float)_options.FluidThermalConductivity);
-        float cpf  = MathF.Max(1000f, (float)_options.FluidSpecificHeat);
-        float Re   = 4.0f * mdot / (MathF.PI * D_in * mu);
-        float Pr   = mu * cpf / kf;
-        float Nu   = (Re < 2300f) ? 4.36f : 0.023f * MathF.Pow(Re, 0.8f) * MathF.Pow(Pr, 0.4f);
-        float htc  = MathF.Min(2000f, Nu * kf / D_in);
-
-        float vol  = MathF.Max(1e-6f, _mesh.CellVolumes[i, j, k]);
-        float area = 2f * MathF.PI * r * (dz_m + dz_p) * 0.5f;
-        float Uvol = (htc * area / vol) * taper;
-
-        numerator   += dt * Uvol * Tfluid / rho_cp;
-        denominator += dt * Uvol / rho_cp;
-    }
-
-    float T_new = Math.Clamp(numerator / denominator, 273f, 573f);
-    newTemp[i, j, k] = T_new;
-    return MathF.Abs(T_new - T_old);
-}
     /// <summary>
     ///     Apply boundary conditions to the temperature field.
     /// </summary>
@@ -1377,136 +1396,139 @@ public class GeothermalSimulationSolver : IDisposable
     ///     Updates heat exchanger fluid temperatures - DEFINITIVE FIX.
     ///     This version correctly handles standard and reversed counter-flow for coaxial systems.
     /// </summary>
-   private void UpdateHeatExchanger()
-{
-    var nz = _fluidTempDown.Length;
-    if (nz == 0) return;
-
-    var mdot = (float)_options.FluidMassFlowRate;
-    var cp = (float)_options.FluidSpecificHeat;
-    var dz = (float)_options.BoreholeDataset.TotalDepth / nz;
-
-    var U_ground = CalculateBoreholeWallHeatTransferCoefficient();
-    var U_internal = CalculateInternalHeatTransferCoefficient();
-
-    var P_outer = (float)(Math.PI * _options.PipeOuterDiameter);
-    var P_inner = (float)(Math.PI * _options.PipeInnerDiameter);
-    
-    // Base NTU values, calculated once
-    var NTU_ground_base = (U_ground * P_outer * dz) / (mdot * cp);
-    var NTU_internal = (U_internal * P_inner * dz) / (mdot * cp);
-
-    var oldFluidDown = (float[])_fluidTempDown.Clone();
-    var oldFluidUp = (float[])_fluidTempUp.Clone();
-
-    var nextTempDown = (float[])_fluidTempDown.Clone();
-    var nextTempUp = (float[])_fluidTempUp.Clone();
-
-    // Iterative loop for the coupled fluid streams to reach equilibrium
-    for (int iter = 0; iter < 20; iter++) // Increased iterations for stability
+    private void UpdateHeatExchanger()
     {
-        var maxChange = 0f;
-        var prevIterDown = (float[])nextTempDown.Clone();
-        var prevIterUp = (float[])nextTempUp.Clone();
+        var nz = _fluidTempDown.Length;
+        if (nz == 0) return;
 
-        if (_options.FlowConfiguration == FlowConfiguration.CounterFlowReversed)
+        var mdot = (float)_options.FluidMassFlowRate;
+        var cp = (float)_options.FluidSpecificHeat;
+        var dz = _options.BoreholeDataset.TotalDepth / nz;
+
+        var U_ground = CalculateBoreholeWallHeatTransferCoefficient();
+        var U_internal = CalculateInternalHeatTransferCoefficient();
+
+        var P_outer = (float)(Math.PI * _options.PipeOuterDiameter);
+        var P_inner = (float)(Math.PI * _options.PipeInnerDiameter);
+
+        // Base NTU values, calculated once
+        var NTU_ground_base = U_ground * P_outer * dz / (mdot * cp);
+        var NTU_internal = U_internal * P_inner * dz / (mdot * cp);
+
+        var oldFluidDown = (float[])_fluidTempDown.Clone();
+        var oldFluidUp = (float[])_fluidTempUp.Clone();
+
+        var nextTempDown = (float[])_fluidTempDown.Clone();
+        var nextTempUp = (float[])_fluidTempUp.Clone();
+
+        // Iterative loop for the coupled fluid streams to reach equilibrium
+        for (var iter = 0; iter < 20; iter++) // Increased iterations for stability
         {
-            // REVERSED FLOW: Cold fluid down ANNULUS, Hot fluid up INNER pipe.
-            // Down-flow (Annulus)
-            nextTempDown[0] = (float)_options.FluidInletTemperature;
-            for (var i = 1; i < nz; i++)
-            {
-                var T_in = prevIterDown[i - 1];
-                var T_inner_pipe = 0.5f * (prevIterUp[i] + prevIterUp[i - 1]);
-                var current_depth = (i - 0.5f) * dz;
+            var maxChange = 0f;
+            var prevIterDown = (float[])nextTempDown.Clone();
+            var prevIterUp = (float[])nextTempUp.Clone();
 
-                // --- DEFINITIVE FIX START ---
-                if (current_depth <= _options.HeatExchangerDepth)
+            if (_options.FlowConfiguration == FlowConfiguration.CounterFlowReversed)
+            {
+                // REVERSED FLOW: Cold fluid down ANNULUS, Hot fluid up INNER pipe.
+                // Down-flow (Annulus)
+                nextTempDown[0] = (float)_options.FluidInletTemperature;
+                for (var i = 1; i < nz; i++)
                 {
-                    // ACTIVE ZONE: Exchange with ground AND inner pipe
-                    var T_ground = InterpolateGroundTemperatureAtDepth(current_depth);
-                    var numerator = T_in + NTU_ground_base * T_ground + NTU_internal * T_inner_pipe;
-                    var denominator = 1.0f + NTU_ground_base + NTU_internal;
-                    nextTempDown[i] = numerator / denominator;
+                    var T_in = prevIterDown[i - 1];
+                    var T_inner_pipe = 0.5f * (prevIterUp[i] + prevIterUp[i - 1]);
+                    var current_depth = (i - 0.5f) * dz;
+
+                    // --- DEFINITIVE FIX START ---
+                    if (current_depth <= _options.HeatExchangerDepth)
+                    {
+                        // ACTIVE ZONE: Exchange with ground AND inner pipe
+                        var T_ground = InterpolateGroundTemperatureAtDepth(current_depth);
+                        var numerator = T_in + NTU_ground_base * T_ground + NTU_internal * T_inner_pipe;
+                        var denominator = 1.0f + NTU_ground_base + NTU_internal;
+                        nextTempDown[i] = numerator / denominator;
+                    }
+                    else
+                    {
+                        // PASSIVE ZONE: Exchange ONLY with inner pipe (parasitic loss)
+                        var numerator = T_in + NTU_internal * T_inner_pipe;
+                        var denominator = 1.0f + NTU_internal;
+                        nextTempDown[i] = numerator / denominator;
+                    }
+                    // --- DEFINITIVE FIX END ---
                 }
-                else
-                {
-                    // PASSIVE ZONE: Exchange ONLY with inner pipe (parasitic loss)
-                    var numerator = T_in + NTU_internal * T_inner_pipe;
-                    var denominator = 1.0f + NTU_internal;
-                    nextTempDown[i] = numerator / denominator;
-                }
-                // --- DEFINITIVE FIX END ---
-            }
 
-            // Up-flow (Inner Pipe - only ever interacts with annulus)
-            nextTempUp[nz - 1] = nextTempDown[nz - 1]; // Turnaround at bottom
-            for (var i = nz - 2; i >= 0; i--)
-            {
-                var T_in = prevIterUp[i + 1];
-                var T_annulus = 0.5f * (nextTempDown[i] + nextTempDown[i + 1]);
-                
-                var numerator = T_in + NTU_internal * T_annulus;
-                var denominator = 1.0f + NTU_internal;
-                nextTempUp[i] = numerator / denominator;
-            }
-        }
-        else // STANDARD FLOW: Cold fluid down INNER pipe, Hot fluid up ANNULUS.
-        {
-            // Down-flow (Inner Pipe - only ever interacts with annulus)
-            nextTempDown[0] = (float)_options.FluidInletTemperature;
-            for (var i = 1; i < nz; i++)
-            {
-                var T_in = prevIterDown[i - 1];
-                var T_annulus = 0.5f * (prevIterUp[i] + prevIterUp[i - 1]);
-                
-                var numerator = T_in + NTU_internal * T_annulus;
-                var denominator = 1.0f + NTU_internal;
-                nextTempDown[i] = numerator / denominator;
-            }
-
-            // Up-flow (Annulus)
-            nextTempUp[nz - 1] = nextTempDown[nz - 1]; // Turnaround
-            for (var i = nz - 2; i >= 0; i--)
-            {
-                var T_in = prevIterUp[i + 1];
-                var T_inner_pipe = 0.5f * (nextTempDown[i] + nextTempDown[i + 1]);
-                var current_depth = (i + 0.5f) * dz;
-
-                // --- DEFINITIVE FIX START ---
-                if (current_depth <= _options.HeatExchangerDepth)
+                // Up-flow (Inner Pipe - only ever interacts with annulus)
+                nextTempUp[nz - 1] = nextTempDown[nz - 1]; // Turnaround at bottom
+                for (var i = nz - 2; i >= 0; i--)
                 {
-                    // ACTIVE ZONE: Exchange with ground AND inner pipe
-                    var T_ground = InterpolateGroundTemperatureAtDepth(current_depth);
-                    var numerator = T_in + NTU_ground_base * T_ground + NTU_internal * T_inner_pipe;
-                    var denominator = 1.0f + NTU_ground_base + NTU_internal;
-                    nextTempUp[i] = numerator / denominator;
-                }
-                else
-                {
-                    // PASSIVE ZONE: Exchange ONLY with inner pipe (parasitic gain/loss)
-                    var numerator = T_in + NTU_internal * T_inner_pipe;
+                    var T_in = prevIterUp[i + 1];
+                    var T_annulus = 0.5f * (nextTempDown[i] + nextTempDown[i + 1]);
+
+                    var numerator = T_in + NTU_internal * T_annulus;
                     var denominator = 1.0f + NTU_internal;
                     nextTempUp[i] = numerator / denominator;
                 }
-                // --- DEFINITIVE FIX END ---
             }
+            else // STANDARD FLOW: Cold fluid down INNER pipe, Hot fluid up ANNULUS.
+            {
+                // Down-flow (Inner Pipe - only ever interacts with annulus)
+                nextTempDown[0] = (float)_options.FluidInletTemperature;
+                for (var i = 1; i < nz; i++)
+                {
+                    var T_in = prevIterDown[i - 1];
+                    var T_annulus = 0.5f * (prevIterUp[i] + prevIterUp[i - 1]);
+
+                    var numerator = T_in + NTU_internal * T_annulus;
+                    var denominator = 1.0f + NTU_internal;
+                    nextTempDown[i] = numerator / denominator;
+                }
+
+                // Up-flow (Annulus)
+                nextTempUp[nz - 1] = nextTempDown[nz - 1]; // Turnaround
+                for (var i = nz - 2; i >= 0; i--)
+                {
+                    var T_in = prevIterUp[i + 1];
+                    var T_inner_pipe = 0.5f * (nextTempDown[i] + nextTempDown[i + 1]);
+                    var current_depth = (i + 0.5f) * dz;
+
+                    // --- DEFINITIVE FIX START ---
+                    if (current_depth <= _options.HeatExchangerDepth)
+                    {
+                        // ACTIVE ZONE: Exchange with ground AND inner pipe
+                        var T_ground = InterpolateGroundTemperatureAtDepth(current_depth);
+                        var numerator = T_in + NTU_ground_base * T_ground + NTU_internal * T_inner_pipe;
+                        var denominator = 1.0f + NTU_ground_base + NTU_internal;
+                        nextTempUp[i] = numerator / denominator;
+                    }
+                    else
+                    {
+                        // PASSIVE ZONE: Exchange ONLY with inner pipe (parasitic gain/loss)
+                        var numerator = T_in + NTU_internal * T_inner_pipe;
+                        var denominator = 1.0f + NTU_internal;
+                        nextTempUp[i] = numerator / denominator;
+                    }
+                    // --- DEFINITIVE FIX END ---
+                }
+            }
+
+            for (var i = 0; i < nz; i++)
+            {
+                maxChange = Math.Max(maxChange, Math.Abs(nextTempDown[i] - prevIterDown[i]));
+                maxChange = Math.Max(maxChange, Math.Abs(nextTempUp[i] - prevIterUp[i]));
+            }
+
+            if (maxChange < 1e-4) break;
         }
 
-        for(int i=0; i<nz; i++) {
-            maxChange = Math.Max(maxChange, Math.Abs(nextTempDown[i] - prevIterDown[i]));
-            maxChange = Math.Max(maxChange, Math.Abs(nextTempUp[i] - prevIterUp[i]));
+        var dampingFactor = 0.3f; // Reduced damping for faster response
+        for (var i = 0; i < nz; i++)
+        {
+            _fluidTempDown[i] = dampingFactor * nextTempDown[i] + (1.0f - dampingFactor) * oldFluidDown[i];
+            _fluidTempUp[i] = dampingFactor * nextTempUp[i] + (1.0f - dampingFactor) * oldFluidUp[i];
         }
-        if (maxChange < 1e-4) break;
     }
 
-    var dampingFactor = 0.3f; // Reduced damping for faster response
-    for (var i = 0; i < nz; i++)
-    {
-        _fluidTempDown[i] = dampingFactor * nextTempDown[i] + (1.0f - dampingFactor) * oldFluidDown[i];
-        _fluidTempUp[i] = dampingFactor * nextTempUp[i] + (1.0f - dampingFactor) * oldFluidUp[i];
-    }
-}
     /// <summary>
     ///     Interpolates ground temperature at a specific depth - NEW IMPROVED VERSION.
     /// </summary>
