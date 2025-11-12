@@ -1829,7 +1829,11 @@ public class GeothermalSimulationTools : IDatasetTools, IDisposable
                 // Run simulation
                 Logger.Log("Executing simulation time stepping...");
                 _results = await solver.RunSimulationAsync();
-
+                if (_crossSectionViewer != null)
+                {
+                    _crossSectionViewer.LoadResults(_results,_mesh,_options);
+                    Logger.Log("BoreholeCrossSectionViewer updated with new simulation results.");
+                }
                 _isSimulationRunning = false;
                 _showResults = true;
                 _currentSolver = null; // Clear solver reference

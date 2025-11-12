@@ -510,51 +510,97 @@ public static class GeothermalMeshGenerator
     {
         var vertices = new List<Vector3>();
         var faces = new List<int[]>();
+        const int angularSegments = 24; // Resolution for the pipes and borehole
 
-        var angularSegments = 24;
-        var verticalSegments = 50;
+        // 1. Create the outer borehole cylinder (representing the grout/fill)
+        var boreholeRadius = borehole.WellDiameter / 2f;
+        var boreholeDepth = (float)options.BoreholeDataset.TotalDepth;
+        CreateCylinder(vertices, faces, boreholeRadius, boreholeDepth, angularSegments, Vector3.Zero);
 
-        var radius = (float)(borehole.Diameter / 2.0);
-        var totalDepth = borehole.TotalDepth;
-
-        // Create vertices
-        for (var i = 0; i <= verticalSegments; i++)
+        // 2. Check the heat exchanger type and generate the correct internal pipes
+        if (options.HeatExchangerType == HeatExchangerType.UTube)
         {
-            var z = -i * totalDepth / verticalSegments;
-            for (var j = 0; j < angularSegments; j++)
+            // --- U-TUBE LOGIC ---
+            // A U-tube has two separate pipes offset from the center.
+            var pipeRadius = (float)options.PipeOuterDiameter / 2.0f;
+            
+            // Shank spacing is the center-to-center distance between the two pipes.
+            // Use PipeSpacing if available, otherwise a reasonable default.
+            var shankSpacing = (float)(options.PipeSpacing > 0 ? options.PipeSpacing : options.PipeOuterDiameter * 2.5);
+            var pipeOffset = shankSpacing / 2.0f;
+
+            // Create the first pipe (down-comer)
+            var offset1 = new Vector3(pipeOffset, 0, 0);
+            CreateCylinder(vertices, faces, pipeRadius, boreholeDepth, angularSegments, offset1);
+
+            // Create the second pipe (up-comer)
+            var offset2 = new Vector3(-pipeOffset, 0, 0);
+            CreateCylinder(vertices, faces, pipeRadius, boreholeDepth, angularSegments, offset2);
+        }
+        else // --- COAXIAL LOGIC ---
+        {
+            // A coaxial system has an outer pipe (casing) and an inner pipe.
+            // The outer pipe is already represented by the main borehole cylinder for visualization.
+            
+            // Create the inner pipe. Its outer radius is defined by PipeSpacing / 2.
+            var innerPipeRadius = (float)options.PipeSpacing / 2.0f;
+            if (innerPipeRadius > 0)
             {
-                var angle = j * 2.0f * MathF.PI / angularSegments;
-                var x = radius * MathF.Cos(angle);
-                var y = radius * MathF.Sin(angle);
-                vertices.Add(new Vector3(x, y, z));
+                CreateCylinder(vertices, faces, innerPipeRadius, boreholeDepth, angularSegments, Vector3.Zero);
             }
         }
-
-        // Create faces
-        for (var i = 0; i < verticalSegments; i++)
-        for (var j = 0; j < angularSegments; j++)
-        {
-            var nextJ = (j + 1) % angularSegments;
-
-            var v0 = i * angularSegments + j;
-            var v1 = i * angularSegments + nextJ;
-            var v2 = (i + 1) * angularSegments + j;
-            var v3 = (i + 1) * angularSegments + nextJ;
-
-            faces.Add(new[] { v0, v2, v1 });
-            faces.Add(new[] { v1, v2, v3 });
-        }
-
-        var tempPath = Path.Combine(Path.GetTempPath(), $"{borehole.Name}_borehole_mesh.obj");
-
+        
         return Mesh3DDataset.CreateFromData(
-            $"{borehole.Name}_Borehole",
-            tempPath,
+            "BoreholeHeatExchanger",
+            Path.Combine(Path.GetTempPath(), "borehole_mesh.obj"),
             vertices,
             faces,
             1.0f,
             "m"
         );
+    }
+
+    /// <summary>
+    ///     Helper method to generate the vertices and faces for a single cylinder.
+    /// </summary>
+    /// <param name="vertices">The master list of vertices to add to.</param>
+    /// <param name="faces">The master list of faces to add to.</param>
+    /// <param name="radius">Radius of the cylinder.</param>
+    /// <param name="depth">Height (depth) of the cylinder.</param>
+    /// <param name="segments">Number of angular segments for circular resolution.</param>
+    /// <param name="offset">3D offset from the center (0,0,0).</param>
+    private static void CreateCylinder(List<Vector3> vertices, List<int[]> faces, float radius, float depth, int segments, Vector3 offset)
+    {
+        var baseVertexIndex = vertices.Count;
+        
+        // Generate vertices for the top and bottom rings
+        for (var i = 0; i < segments; i++)
+        {
+            var angle = i * 2.0f * MathF.PI / segments;
+            var x = radius * MathF.Cos(angle);
+            var y = radius * MathF.Sin(angle);
+
+            // Top vertex
+            vertices.Add(new Vector3(x, y, 0) + offset);
+            // Bottom vertex
+            vertices.Add(new Vector3(x, y, -depth) + offset);
+        }
+
+        // Generate faces for the cylinder wall
+        for (var i = 0; i < segments; i++)
+        {
+            var next_i = (i + 1) % segments;
+
+            // Indices for the current and next segments
+            var topLeft = baseVertexIndex + i * 2;
+            var bottomLeft = baseVertexIndex + i * 2 + 1;
+            var topRight = baseVertexIndex + next_i * 2;
+            var bottomRight = baseVertexIndex + next_i * 2 + 1;
+
+            // Create two triangles for the quad face
+            faces.Add(new[] { topLeft, bottomLeft, topRight });
+            faces.Add(new[] { topRight, bottomLeft, bottomRight });
+        }
     }
 }
 
