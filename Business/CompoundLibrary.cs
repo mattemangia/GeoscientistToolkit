@@ -229,6 +229,7 @@ public sealed class CompoundLibrary
         SeedElements(); // Seed elements first
         SeedDefaults(); // Then seed compounds
         SeedSolidSolutions(); // Then define solid solutions
+        this.SeedAdditionalCompounds(); // Add extended database (from CompoundLibraryExtensions)
     }
 
     // ENHANCEMENT: Add support for solid solutions

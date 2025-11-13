@@ -170,7 +170,11 @@ public static class CommandRegistry
             new SaturationCommand(),
             new BalanceReactionCommand(),
             new EvaporateCommand(),
-            new ReactCommand()
+            new ReactCommand(),
+
+            // Thermodynamics Extensions
+            new CalculatePhasesCommand(),
+            new CalculateCarbonateAlkalinityCommand()
         };
         Commands = commandList.ToDictionary(c => c.Name.ToUpper(), c => c);
     }
@@ -1568,22 +1572,67 @@ public class ReactCommand : IGeoScriptCommand
         var solver = new ThermodynamicSolver();
         var finalState = solver.SolveEquilibrium(initialState);
 
-        // --- 5. Format the output ---
+        // --- 5. Format the output with improved phase separation ---
         var resultTable = new DataTable("ReactionProducts");
         resultTable.Columns.Add("Phase", typeof(string));
         resultTable.Columns.Add("Species", typeof(string));
+        resultTable.Columns.Add("Formula", typeof(string));
         resultTable.Columns.Add("Moles", typeof(double));
+        resultTable.Columns.Add("Mass_g", typeof(double));
+        resultTable.Columns.Add("MoleFraction", typeof(double));
+
+        // Calculate total moles for each phase
+        var phaseGroups = finalState.SpeciesMoles
+            .Where(kvp => kvp.Value > 1e-12) // Filter out negligible amounts
+            .GroupBy(kvp => compoundLib.Find(kvp.Key)?.Phase ?? CompoundPhase.Aqueous)
+            .ToDictionary(g => g.Key, g => g.Sum(kvp => kvp.Value));
 
         var sortedProducts = finalState.SpeciesMoles
-            .Where(kvp => kvp.Value > 1e-9) // Filter out negligible amounts
-            .OrderBy(kvp => compoundLib.Find(kvp.Key)?.Phase.ToString())
+            .Where(kvp => kvp.Value > 1e-12)
+            .OrderBy(kvp =>
+            {
+                var phase = compoundLib.Find(kvp.Key)?.Phase;
+                return phase switch
+                {
+                    CompoundPhase.Solid => 0,
+                    CompoundPhase.Aqueous => 1,
+                    CompoundPhase.Gas => 2,
+                    CompoundPhase.Liquid => 3,
+                    _ => 4
+                };
+            })
             .ThenByDescending(kvp => kvp.Value);
 
         foreach (var (speciesName, moles) in sortedProducts)
         {
             var compound = compoundLib.Find(speciesName);
-            resultTable.Rows.Add(compound?.Phase.ToString() ?? "Unknown", speciesName, moles);
+            if (compound == null) continue;
+
+            var phaseName = compound.Phase.ToString();
+            if (compound.Phase == CompoundPhase.Solid)
+                phaseName += " (mineral)";
+
+            var mass = moles * (compound.MolecularWeight_g_mol ?? 0);
+            var totalPhaseMoles = phaseGroups.GetValueOrDefault(compound.Phase, 1.0);
+            var moleFraction = moles / totalPhaseMoles;
+
+            resultTable.Rows.Add(
+                phaseName,
+                speciesName,
+                compound.ChemicalFormula,
+                moles,
+                mass,
+                moleFraction
+            );
         }
+
+        // Add summary row showing phase totals
+        Logger.Log("=== REACTION SUMMARY ===");
+        Logger.Log($"Temperature: {temperatureK:F2} K, Pressure: {pressureBar:F2} bar");
+        Logger.Log($"Final pH: {finalState.pH:F2}, pe: {finalState.pe:F2}");
+        Logger.Log($"Ionic Strength: {finalState.IonicStrength_molkg:E2} mol/kg");
+        foreach (var (phase, totalMoles) in phaseGroups.OrderBy(kvp => kvp.Key))
+            Logger.Log($"{phase} phase: {totalMoles:E3} total moles");
 
         return Task.FromResult<Dataset>(new TableDataset("Reaction_Products", resultTable));
     }
