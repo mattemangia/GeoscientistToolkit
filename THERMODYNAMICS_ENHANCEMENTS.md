@@ -222,8 +222,4 @@ Calculates HCO₃⁻ and CO₃²⁻ from field alkalinity measurements.
 3. Validate pH calculations against buffer solutions
 4. Compare with PHREEQC output for same input
 
----
 
-**Author**: Claude (Anthropic AI)
-**Date**: 2025-01-13
-**Version**: 1.0
