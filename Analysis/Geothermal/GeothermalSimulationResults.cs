@@ -138,6 +138,93 @@ public class GeothermalSimulationResults
     /// </summary>
     public double PressureDrawdown { get; set; }
 
+    // BTES (Borehole Thermal Energy Storage) Performance Metrics
+
+    /// <summary>
+    ///     Total energy charged into storage (J) - positive heat flow periods.
+    /// </summary>
+    public double BTESTotalEnergyCharged { get; set; }
+
+    /// <summary>
+    ///     Total energy discharged from storage (J) - negative heat flow periods.
+    /// </summary>
+    public double BTESTotalEnergyDischarged { get; set; }
+
+    /// <summary>
+    ///     Round-trip storage efficiency (%) = (discharged / charged) * 100.
+    /// </summary>
+    public double BTESStorageEfficiency { get; set; }
+
+    /// <summary>
+    ///     Number of complete charging/discharging cycles detected.
+    /// </summary>
+    public int BTESNumberOfCycles { get; set; }
+
+    /// <summary>
+    ///     Average charging power during charging periods (W).
+    /// </summary>
+    public double BTESAverageChargingPower { get; set; }
+
+    /// <summary>
+    ///     Average discharging power during discharging periods (W).
+    /// </summary>
+    public double BTESAverageDischargingPower { get; set; }
+
+    /// <summary>
+    ///     Peak charging power observed (W).
+    /// </summary>
+    public double BTESPeakChargingPower { get; set; }
+
+    /// <summary>
+    ///     Peak discharging power observed (W).
+    /// </summary>
+    public double BTESPeakDischargingPower { get; set; }
+
+    /// <summary>
+    ///     Temperature swing: maximum ground temperature minus minimum (K).
+    /// </summary>
+    public double BTESTemperatureSwing { get; set; }
+
+    /// <summary>
+    ///     Maximum ground temperature observed during simulation (K).
+    /// </summary>
+    public double BTESMaxGroundTemperature { get; set; }
+
+    /// <summary>
+    ///     Minimum ground temperature observed during simulation (K).
+    /// </summary>
+    public double BTESMinGroundTemperature { get; set; }
+
+    /// <summary>
+    ///     Seasonal Performance Factor: ratio of useful energy to input energy.
+    /// </summary>
+    public double BTESSeasonalPerformanceFactor { get; set; }
+
+    /// <summary>
+    ///     Average ground temperature at end of simulation (K).
+    /// </summary>
+    public double BTESFinalAverageGroundTemperature { get; set; }
+
+    /// <summary>
+    ///     Initial average ground temperature before BTES operation (K).
+    /// </summary>
+    public double BTESInitialAverageGroundTemperature { get; set; }
+
+    /// <summary>
+    ///     Net ground temperature change after all cycles (K).
+    /// </summary>
+    public double BTESNetGroundTemperatureChange { get; set; }
+
+    /// <summary>
+    ///     Thermal energy stored in ground at end of simulation (J).
+    /// </summary>
+    public double BTESStoredThermalEnergy { get; set; }
+
+    /// <summary>
+    ///     List of charging/discharging periods with start time, end time, and energy.
+    /// </summary>
+    public List<(double startTime, double endTime, double energy, string type)> BTESCyclePeriods { get; set; } = new();
+
     // Layer Analysis
 
     /// <summary>
@@ -241,6 +328,54 @@ public class GeothermalSimulationResults
         sb.AppendLine($"  - Thermal Influence Radius: {ThermalInfluenceRadius:F1} m");
         sb.AppendLine();
 
+        // BTES-specific metrics
+        if (Options.EnableBTESMode)
+        {
+            sb.AppendLine("=== BTES (Borehole Thermal Energy Storage) Performance ===");
+            sb.AppendLine();
+
+            sb.AppendLine("Energy Storage Metrics:");
+            sb.AppendLine($"  - Total Energy Charged: {BTESTotalEnergyCharged / 1e9:F2} GJ ({BTESTotalEnergyCharged / 3.6e9:F2} MWh)");
+            sb.AppendLine($"  - Total Energy Discharged: {BTESTotalEnergyDischarged / 1e9:F2} GJ ({BTESTotalEnergyDischarged / 3.6e9:F2} MWh)");
+            sb.AppendLine($"  - Storage Efficiency: {BTESStorageEfficiency:F1} %");
+            sb.AppendLine($"  - Net Energy Balance: {(BTESTotalEnergyCharged - BTESTotalEnergyDischarged) / 1e9:F2} GJ");
+            sb.AppendLine($"  - Thermal Energy in Ground: {BTESStoredThermalEnergy / 1e9:F2} GJ");
+            sb.AppendLine();
+
+            sb.AppendLine("Power Performance:");
+            sb.AppendLine($"  - Average Charging Power: {BTESAverageChargingPower / 1e3:F1} kW");
+            sb.AppendLine($"  - Peak Charging Power: {BTESPeakChargingPower / 1e3:F1} kW");
+            sb.AppendLine($"  - Average Discharging Power: {BTESAverageDischargingPower / 1e3:F1} kW");
+            sb.AppendLine($"  - Peak Discharging Power: {BTESPeakDischargingPower / 1e3:F1} kW");
+            sb.AppendLine($"  - Seasonal Performance Factor: {BTESSeasonalPerformanceFactor:F2}");
+            sb.AppendLine();
+
+            sb.AppendLine("Thermal Behavior:");
+            sb.AppendLine($"  - Number of Charge/Discharge Cycles: {BTESNumberOfCycles}");
+            sb.AppendLine($"  - Temperature Swing: {BTESTemperatureSwing:F1} K");
+            sb.AppendLine($"  - Maximum Ground Temperature: {BTESMaxGroundTemperature - 273.15:F1} °C");
+            sb.AppendLine($"  - Minimum Ground Temperature: {BTESMinGroundTemperature - 273.15:F1} °C");
+            sb.AppendLine($"  - Initial Average Ground Temp: {BTESInitialAverageGroundTemperature - 273.15:F1} °C");
+            sb.AppendLine($"  - Final Average Ground Temp: {BTESFinalAverageGroundTemperature - 273.15:F1} °C");
+            sb.AppendLine($"  - Net Ground Temperature Change: {BTESNetGroundTemperatureChange:F2} K");
+            sb.AppendLine();
+
+            if (BTESCyclePeriods.Any())
+            {
+                sb.AppendLine("Charging/Discharging Periods:");
+                foreach (var period in BTESCyclePeriods.Take(10)) // Show first 10 periods
+                {
+                    var days1 = period.startTime / 86400;
+                    var days2 = period.endTime / 86400;
+                    var energyGJ = period.energy / 1e9;
+                    sb.AppendLine($"  - {period.type}: Days {days1:F1}-{days2:F1}, Energy: {energyGJ:F2} GJ");
+                }
+                if (BTESCyclePeriods.Count > 10)
+                    sb.AppendLine($"  ... and {BTESCyclePeriods.Count - 10} more periods");
+                sb.AppendLine();
+            }
+        }
+
         if (Options.SimulateGroundwaterFlow)
         {
             sb.AppendLine("Groundwater Flow:");
@@ -308,6 +443,47 @@ public class GeothermalSimulationResults
                 var flow = LayerFlowRates.GetValueOrDefault(layer, 0);
 
                 writer.WriteLine($"{layer},{flux:F1},{temp:F2},{flow:E3}");
+            }
+        }
+
+        // Export BTES-specific metrics if available
+        if (Options.EnableBTESMode)
+        {
+            using (var writer = new StreamWriter($"{basePath}_btes_metrics.csv"))
+            {
+                writer.WriteLine("Metric,Value,Unit");
+                writer.WriteLine($"Total Energy Charged,{BTESTotalEnergyCharged / 1e9:F4},GJ");
+                writer.WriteLine($"Total Energy Discharged,{BTESTotalEnergyDischarged / 1e9:F4},GJ");
+                writer.WriteLine($"Storage Efficiency,{BTESStorageEfficiency:F2},%");
+                writer.WriteLine($"Number of Cycles,{BTESNumberOfCycles},cycles");
+                writer.WriteLine($"Average Charging Power,{BTESAverageChargingPower / 1e3:F2},kW");
+                writer.WriteLine($"Average Discharging Power,{BTESAverageDischargingPower / 1e3:F2},kW");
+                writer.WriteLine($"Peak Charging Power,{BTESPeakChargingPower / 1e3:F2},kW");
+                writer.WriteLine($"Peak Discharging Power,{BTESPeakDischargingPower / 1e3:F2},kW");
+                writer.WriteLine($"Temperature Swing,{BTESTemperatureSwing:F2},K");
+                writer.WriteLine($"Max Ground Temperature,{BTESMaxGroundTemperature - 273.15:F2},C");
+                writer.WriteLine($"Min Ground Temperature,{BTESMinGroundTemperature - 273.15:F2},C");
+                writer.WriteLine($"Initial Avg Ground Temp,{BTESInitialAverageGroundTemperature - 273.15:F2},C");
+                writer.WriteLine($"Final Avg Ground Temp,{BTESFinalAverageGroundTemperature - 273.15:F2},C");
+                writer.WriteLine($"Net Ground Temp Change,{BTESNetGroundTemperatureChange:F3},K");
+                writer.WriteLine($"Stored Thermal Energy,{BTESStoredThermalEnergy / 1e9:F4},GJ");
+                writer.WriteLine($"Seasonal Performance Factor,{BTESSeasonalPerformanceFactor:F3},");
+            }
+
+            // Export BTES charging/discharging periods
+            using (var writer = new StreamWriter($"{basePath}_btes_periods.csv"))
+            {
+                writer.WriteLine("StartTime_days,EndTime_days,Duration_days,Energy_GJ,Type");
+
+                foreach (var period in BTESCyclePeriods)
+                {
+                    var startDays = period.startTime / 86400;
+                    var endDays = period.endTime / 86400;
+                    var duration = endDays - startDays;
+                    var energyGJ = period.energy / 1e9;
+
+                    writer.WriteLine($"{startDays:F2},{endDays:F2},{duration:F2},{energyGJ:F4},{period.type}");
+                }
             }
         }
     }

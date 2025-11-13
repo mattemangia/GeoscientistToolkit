@@ -380,6 +380,13 @@ public class GeothermalSimulationSolver : IDisposable
         results.PecletNumberField = (float[,,])_pecletNumber.Clone();
         results.DispersivityField = (float[,,])_dispersionCoefficient.Clone();
         CalculatePerformanceMetrics(results);
+
+        // Calculate BTES-specific metrics if BTES mode is enabled
+        if (_options.EnableBTESMode)
+        {
+            CalculateBTESMetrics(results);
+        }
+
         await GenerateVisualizationDataAsync(results);
         results.ComputationTime = DateTime.Now - startTime;
         results.TimeStepsComputed = step;
@@ -2268,6 +2275,206 @@ public class GeothermalSimulationSolver : IDisposable
                 results.LayerTemperatureChanges[key] = layerTempChanges[key];
                 results.LayerFlowRates[key] = layerFlowRates[key];
             }
+    }
+
+    /// <summary>
+    ///     Calculates BTES-specific performance metrics from simulation results.
+    /// </summary>
+    private void CalculateBTESMetrics(GeothermalSimulationResults results)
+    {
+        if (!results.HeatExtractionRate.Any())
+            return;
+
+        Logger.Log("Calculating BTES performance metrics...");
+
+        // Initialize tracking variables
+        double totalCharged = 0;
+        double totalDischarged = 0;
+        double totalChargingTime = 0;
+        double totalDischargingTime = 0;
+        double sumChargingPower = 0;
+        double sumDischargingPower = 0;
+        int chargingSteps = 0;
+        int dischargingSteps = 0;
+
+        double peakChargingPower = 0;
+        double peakDischargingPower = 0;
+
+        // Track charging/discharging periods
+        bool isCharging = false;
+        bool isDischarging = false;
+        double periodStartTime = 0;
+        double periodEnergy = 0;
+        List<(double start, double end, double energy, string type)> periods = new();
+
+        // Calculate initial average ground temperature
+        double sumInitialTemp = 0;
+        int tempCount = 0;
+
+        if (results.TemperatureFields.Any())
+        {
+            var firstField = results.TemperatureFields.First().Value;
+            for (int i = 1; i < _mesh.RadialPoints - 1; i++)
+            for (int j = 0; j < _mesh.AngularPoints; j++)
+            for (int k = 1; k < _mesh.VerticalPoints - 1; k++)
+            {
+                sumInitialTemp += firstField[i, j, k];
+                tempCount++;
+            }
+            results.BTESInitialAverageGroundTemperature = tempCount > 0 ? sumInitialTemp / tempCount : 288.15;
+        }
+        else
+        {
+            results.BTESInitialAverageGroundTemperature = 288.15; // Default 15°C
+        }
+
+        // Process heat extraction time series
+        for (int i = 1; i < results.HeatExtractionRate.Count; i++)
+        {
+            var dt = results.HeatExtractionRate[i].time - results.HeatExtractionRate[i - 1].time;
+            var Q = results.HeatExtractionRate[i].heatRate;
+            var avgQ = (Q + results.HeatExtractionRate[i - 1].heatRate) / 2.0;
+            var energy = avgQ * dt;
+
+            // Track charging (positive heat flow into ground)
+            if (avgQ > 0)
+            {
+                totalCharged += energy;
+                sumChargingPower += avgQ;
+                totalChargingTime += dt;
+                chargingSteps++;
+                peakChargingPower = Math.Max(peakChargingPower, avgQ);
+
+                if (!isCharging)
+                {
+                    // Start new charging period
+                    if (isDischarging && periodEnergy != 0)
+                    {
+                        periods.Add((periodStartTime, results.HeatExtractionRate[i - 1].time, periodEnergy, "Discharging"));
+                    }
+                    isCharging = true;
+                    isDischarging = false;
+                    periodStartTime = results.HeatExtractionRate[i - 1].time;
+                    periodEnergy = energy;
+                }
+                else
+                {
+                    periodEnergy += energy;
+                }
+            }
+            // Track discharging (negative heat flow from ground)
+            else if (avgQ < 0)
+            {
+                totalDischarged += Math.Abs(energy);
+                sumDischargingPower += Math.Abs(avgQ);
+                totalDischargingTime += dt;
+                dischargingSteps++;
+                peakDischargingPower = Math.Max(peakDischargingPower, Math.Abs(avgQ));
+
+                if (!isDischarging)
+                {
+                    // Start new discharging period
+                    if (isCharging && periodEnergy != 0)
+                    {
+                        periods.Add((periodStartTime, results.HeatExtractionRate[i - 1].time, periodEnergy, "Charging"));
+                    }
+                    isDischarging = true;
+                    isCharging = false;
+                    periodStartTime = results.HeatExtractionRate[i - 1].time;
+                    periodEnergy = Math.Abs(energy);
+                }
+                else
+                {
+                    periodEnergy += Math.Abs(energy);
+                }
+            }
+        }
+
+        // Close final period
+        if (isCharging && periodEnergy != 0)
+        {
+            periods.Add((periodStartTime, results.HeatExtractionRate.Last().time, periodEnergy, "Charging"));
+        }
+        else if (isDischarging && periodEnergy != 0)
+        {
+            periods.Add((periodStartTime, results.HeatExtractionRate.Last().time, periodEnergy, "Discharging"));
+        }
+
+        // Calculate averages
+        results.BTESTotalEnergyCharged = totalCharged;
+        results.BTESTotalEnergyDischarged = totalDischarged;
+        results.BTESAverageChargingPower = chargingSteps > 0 ? sumChargingPower / chargingSteps : 0;
+        results.BTESAverageDischargingPower = dischargingSteps > 0 ? sumDischargingPower / dischargingSteps : 0;
+        results.BTESPeakChargingPower = peakChargingPower;
+        results.BTESPeakDischargingPower = peakDischargingPower;
+
+        // Calculate storage efficiency (round-trip)
+        results.BTESStorageEfficiency = totalCharged > 0 ? (totalDischarged / totalCharged) * 100.0 : 0;
+
+        // Count complete cycles (charging followed by discharging)
+        int cycleCount = 0;
+        for (int i = 0; i < periods.Count - 1; i++)
+        {
+            if (periods[i].type == "Charging" && periods[i + 1].type == "Discharging")
+            {
+                cycleCount++;
+            }
+        }
+        results.BTESNumberOfCycles = cycleCount;
+        results.BTESCyclePeriods = periods;
+
+        // Calculate final average ground temperature
+        double sumFinalTemp = 0;
+        int finalTempCount = 0;
+
+        if (results.FinalTemperatureField != null)
+        {
+            double minTemp = double.MaxValue;
+            double maxTemp = double.MinValue;
+
+            for (int i = 1; i < _mesh.RadialPoints - 1; i++)
+            for (int j = 0; j < _mesh.AngularPoints; j++)
+            for (int k = 1; k < _mesh.VerticalPoints - 1; k++)
+            {
+                var temp = results.FinalTemperatureField[i, j, k];
+                sumFinalTemp += temp;
+                finalTempCount++;
+                minTemp = Math.Min(minTemp, temp);
+                maxTemp = Math.Max(maxTemp, temp);
+            }
+
+            results.BTESFinalAverageGroundTemperature = finalTempCount > 0 ? sumFinalTemp / finalTempCount : 288.15;
+            results.BTESMinGroundTemperature = minTemp < double.MaxValue ? minTemp : 288.15;
+            results.BTESMaxGroundTemperature = maxTemp > double.MinValue ? maxTemp : 288.15;
+            results.BTESTemperatureSwing = results.BTESMaxGroundTemperature - results.BTESMinGroundTemperature;
+        }
+
+        // Calculate net ground temperature change
+        results.BTESNetGroundTemperatureChange = results.BTESFinalAverageGroundTemperature - results.BTESInitialAverageGroundTemperature;
+
+        // Calculate stored thermal energy in ground
+        // E = ∫ ρ * c_p * (T_final - T_initial) * dV
+        double storedEnergy = 0;
+        for (int i = 0; i < _mesh.RadialPoints; i++)
+        for (int j = 0; j < _mesh.AngularPoints; j++)
+        for (int k = 0; k < _mesh.VerticalPoints; k++)
+        {
+            var deltaT = _temperature[i, j, k] - _initialTemperature[i, j, k];
+            var rho = _mesh.Densities[i, j, k];
+            var cp = _mesh.SpecificHeats[i, j, k];
+            var volume = _mesh.CellVolumes[i, j, k];
+            storedEnergy += rho * cp * deltaT * volume;
+        }
+        results.BTESStoredThermalEnergy = storedEnergy;
+
+        // Calculate Seasonal Performance Factor (SPF)
+        // SPF = Useful Energy Output / Total Energy Input
+        // For BTES: SPF = Discharged Energy / (Charged Energy + Parasitic Losses)
+        // Assuming parasitic losses are minimal for simplicity
+        results.BTESSeasonalPerformanceFactor = totalCharged > 0 ? totalDischarged / totalCharged : 0;
+
+        Logger.Log($"BTES Metrics: Charged={totalCharged / 1e9:F2} GJ, Discharged={totalDischarged / 1e9:F2} GJ, Efficiency={results.BTESStorageEfficiency:F1}%");
+        Logger.Log($"BTES: {cycleCount} cycles, Temp Swing={results.BTESTemperatureSwing:F1}K, SPF={results.BTESSeasonalPerformanceFactor:F2}");
     }
 
     /// <summary>

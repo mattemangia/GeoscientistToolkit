@@ -49,6 +49,14 @@ public class BoreholeCrossSectionViewer
     private bool _showLegend = true;
     private float _viewScale = 1.0f;
 
+    // BTES Animation Support
+    private bool _btesAnimationEnabled;
+    private int _selectedTimeFrameIndex;
+    private List<double> _availableTimeFrames = new();
+    private bool _isPlaying;
+    private double _lastPlayTime;
+    private float _playbackSpeed = 1.0f; // days per second
+
 
     public void LoadResults(GeothermalSimulationResults results, GeothermalMesh mesh,
         GeothermalSimulationOptions options)
@@ -57,6 +65,20 @@ public class BoreholeCrossSectionViewer
         _mesh = mesh;
         _options = options;
         _selectedDepthMeters = (float)(_options.BoreholeDataset.TotalDepth * 0.5);
+
+        // Initialize BTES animation if multiple timeframes are available
+        if (_results.TemperatureFields.Count > 1)
+        {
+            _btesAnimationEnabled = true;
+            _availableTimeFrames = _results.TemperatureFields.Keys.OrderBy(t => t).ToList();
+            _selectedTimeFrameIndex = _availableTimeFrames.Count - 1; // Start at final frame
+            Logger.Log($"BTES Animation enabled: {_availableTimeFrames.Count} timeframes available");
+        }
+        else
+        {
+            _btesAnimationEnabled = false;
+            _availableTimeFrames.Clear();
+        }
     }
 
     public void RenderControls()
@@ -138,6 +160,89 @@ public class BoreholeCrossSectionViewer
 
         ImGui.Checkbox("Show Grid", ref _showGrid);
         ImGui.Checkbox("Show Legend", ref _showLegend);
+
+        // BTES Animation Controls
+        if (_btesAnimationEnabled)
+        {
+            ImGui.Separator();
+            ImGui.PushStyleColor(ImGuiCol.Header, new Vector4(0.8f, 0.3f, 0.2f, 1.0f));
+            if (ImGui.CollapsingHeader("🎬 BTES Animation", ImGuiTreeNodeFlags.DefaultOpen))
+            {
+                var currentTime = _availableTimeFrames[_selectedTimeFrameIndex];
+                var days = currentTime / 86400.0;
+
+                ImGui.Text($"Time: {days:F2} days ({days/365.0:F2} years)");
+                ImGui.Text($"Frame: {_selectedTimeFrameIndex + 1} / {_availableTimeFrames.Count}");
+
+                var frameIndex = _selectedTimeFrameIndex;
+                if (ImGui.SliderInt("##TimeFrame", ref frameIndex, 0, _availableTimeFrames.Count - 1))
+                {
+                    _selectedTimeFrameIndex = frameIndex;
+                }
+
+                // Playback controls
+                ImGui.Spacing();
+                if (_isPlaying)
+                {
+                    if (ImGui.Button("⏸ Pause", new Vector2(-1, 30)))
+                    {
+                        _isPlaying = false;
+                    }
+
+                    // Update animation
+                    var currentRealTime = DateTime.Now.TimeOfDay.TotalSeconds;
+                    if (_lastPlayTime > 0)
+                    {
+                        var deltaRealTime = currentRealTime - _lastPlayTime;
+                        var deltaSimDays = deltaRealTime * _playbackSpeed;
+                        var deltaSimSeconds = deltaSimDays * 86400.0;
+
+                        // Find next frame
+                        var targetTime = currentTime + deltaSimSeconds;
+                        for (int i = _selectedTimeFrameIndex + 1; i < _availableTimeFrames.Count; i++)
+                        {
+                            if (_availableTimeFrames[i] >= targetTime)
+                            {
+                                _selectedTimeFrameIndex = i;
+                                break;
+                            }
+                        }
+
+                        // Loop to beginning if reached end
+                        if (_selectedTimeFrameIndex >= _availableTimeFrames.Count - 1)
+                        {
+                            _selectedTimeFrameIndex = 0;
+                        }
+                    }
+                    _lastPlayTime = currentRealTime;
+                }
+                else
+                {
+                    if (ImGui.Button("▶ Play", new Vector2(-1, 30)))
+                    {
+                        _isPlaying = true;
+                        _lastPlayTime = DateTime.Now.TimeOfDay.TotalSeconds;
+                    }
+                }
+
+                ImGui.SliderFloat("Speed (days/sec)", ref _playbackSpeed, 0.1f, 100.0f, "%.1f", ImGuiSliderFlags.Logarithmic);
+
+                if (ImGui.Button("⏮ First Frame", new Vector2(-1, 0)))
+                {
+                    _selectedTimeFrameIndex = 0;
+                    _isPlaying = false;
+                }
+
+                ImGui.SameLine();
+
+                if (ImGui.Button("⏭ Last Frame", new Vector2(-1, 0)))
+                {
+                    _selectedTimeFrameIndex = _availableTimeFrames.Count - 1;
+                    _isPlaying = false;
+                }
+            }
+            ImGui.PopStyleColor();
+        }
 
         ImGui.Separator();
 
@@ -1198,6 +1303,7 @@ public class BoreholeCrossSectionViewer
 
     /// <summary>
     ///     Interpolate ground temperature from mesh data using cartesian coordinates.
+    ///     MODIFIED: Now supports BTES animation by using GetCurrentTemperatureField().
     /// </summary>
     private double InterpolateGroundTemperature(double x, double y, int zIndex)
     {
@@ -1233,27 +1339,30 @@ public class BoreholeCrossSectionViewer
         var th2 = (th1 + 1) % _mesh.AngularPoints;
         var thetaFrac = thetaIndex - th1;
 
+        // Get current temperature field (supports BTES animation)
+        var temperatureField = GetCurrentTemperatureField();
+
         // Bilinear interpolation
         if (r1 == r2)
         {
             // Angular interpolation only
-            var t1 = _results.FinalTemperatureField[r1, th1, zIndex];
-            var t2 = _results.FinalTemperatureField[r1, th2, zIndex];
+            var t1 = temperatureField[r1, th1, zIndex];
+            var t2 = temperatureField[r1, th2, zIndex];
             return t1 + (t2 - t1) * thetaFrac;
         }
 
         if (_mesh.R[r2] - _mesh.R[r1] < 1e-9) // Avoid division by zero
         {
-            var t1 = _results.FinalTemperatureField[r1, th1, zIndex];
-            var t2 = _results.FinalTemperatureField[r1, th2, zIndex];
+            var t1 = temperatureField[r1, th1, zIndex];
+            var t2 = temperatureField[r1, th2, zIndex];
             return t1 + (t2 - t1) * thetaFrac;
         }
 
         // Full bilinear interpolation
-        var t11 = _results.FinalTemperatureField[r1, th1, zIndex];
-        var t12 = _results.FinalTemperatureField[r1, th2, zIndex];
-        var t21 = _results.FinalTemperatureField[r2, th1, zIndex];
-        var t22 = _results.FinalTemperatureField[r2, th2, zIndex];
+        var t11 = temperatureField[r1, th1, zIndex];
+        var t12 = temperatureField[r1, th2, zIndex];
+        var t21 = temperatureField[r2, th1, zIndex];
+        var t22 = temperatureField[r2, th2, zIndex];
 
         var rFrac = (r - _mesh.R[r1]) / (_mesh.R[r2] - _mesh.R[r1]);
 
@@ -1323,6 +1432,24 @@ public class BoreholeCrossSectionViewer
         }
 
         return closestIndex;
+    }
+
+    /// <summary>
+    ///     Gets the current temperature field for visualization (supports BTES animation).
+    /// </summary>
+    private float[,,] GetCurrentTemperatureField()
+    {
+        if (_btesAnimationEnabled && _availableTimeFrames.Count > 0)
+        {
+            var selectedTime = _availableTimeFrames[_selectedTimeFrameIndex];
+            if (_results.TemperatureFields.TryGetValue(selectedTime, out var tempField))
+            {
+                return tempField;
+            }
+        }
+
+        // Fallback to final temperature field
+        return _results.FinalTemperatureField;
     }
 
     private void DebugDataStructure()
