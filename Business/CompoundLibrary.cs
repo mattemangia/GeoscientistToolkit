@@ -229,6 +229,7 @@ public sealed class CompoundLibrary
         SeedElements(); // Seed elements first
         SeedDefaults(); // Then seed compounds
         SeedSolidSolutions(); // Then define solid solutions
+        this.SeedMetamorphicMinerals(); // Add metamorphic minerals (from CompoundLibraryMetamorphicExtensions)
     }
 
     // ENHANCEMENT: Add support for solid solutions

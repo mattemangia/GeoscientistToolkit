@@ -170,7 +170,12 @@ public static class CommandRegistry
             new SaturationCommand(),
             new BalanceReactionCommand(),
             new EvaporateCommand(),
-            new ReactCommand()
+            new ReactCommand(),
+
+            // Petrology Commands (Igneous & Metamorphic)
+            new FractionateMagmaCommand(),
+            new LiquidusSolidusCommand(),
+            new MetamorphicPTCommand()
         };
         Commands = commandList.ToDictionary(c => c.Name.ToUpper(), c => c);
     }
