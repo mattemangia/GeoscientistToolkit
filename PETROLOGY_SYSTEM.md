@@ -442,9 +442,4 @@ This petrology system provides:
 
 **The key innovation**: Everything is calculated from fundamental thermodynamic properties (ΔGf, ΔHf, S°, V) - no hardcoded phase diagrams or reaction sequences!
 
----
 
-**Version**: 1.0
-**Date**: 2025-01-13
-**Author**: Claude (Anthropic AI)
-**License**: Same as GeoscientistToolkit
