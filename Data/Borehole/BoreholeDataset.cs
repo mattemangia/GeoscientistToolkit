@@ -7,7 +7,6 @@ using GeoscientistToolkit.Data.AcousticVolume;
 using GeoscientistToolkit.Data.CtImageStack;
 using GeoscientistToolkit.Data.Pnm;
 using GeoscientistToolkit.Util;
-using System.IO;
 
 namespace GeoscientistToolkit.Data.Borehole;
 
@@ -701,11 +700,11 @@ public class BoreholeDataset : Dataset, ISerializableDataset
         {
             using var stream = new FileStream(path, FileMode.Create, FileAccess.Write);
             using var writer = new BinaryWriter(stream);
-            
+
             // Header
             writer.Write(new[] { (byte)'G', (byte)'T', (byte)'B', (byte)'H', (byte)'B' }); // Signature
             writer.Write(1); // Version
-            
+
             // Well Info
             writer.Write(WellName ?? "");
             writer.Write(Field ?? "");
@@ -714,13 +713,13 @@ public class BoreholeDataset : Dataset, ISerializableDataset
             writer.Write(SurfaceCoordinates.X);
             writer.Write(SurfaceCoordinates.Y);
             writer.Write(Elevation);
-            
+
             // Display Settings
             writer.Write(DepthScaleFactor);
             writer.Write(ShowGrid);
             writer.Write(ShowLegend);
             writer.Write(TrackWidth);
-            
+
             // Lithology Units
             writer.Write(LithologyUnits.Count);
             foreach (var unit in LithologyUnits)
@@ -730,7 +729,10 @@ public class BoreholeDataset : Dataset, ISerializableDataset
                 writer.Write(unit.LithologyType ?? "");
                 writer.Write(unit.DepthFrom);
                 writer.Write(unit.DepthTo);
-                writer.Write(unit.Color.X); writer.Write(unit.Color.Y); writer.Write(unit.Color.Z); writer.Write(unit.Color.W);
+                writer.Write(unit.Color.X);
+                writer.Write(unit.Color.Y);
+                writer.Write(unit.Color.Z);
+                writer.Write(unit.Color.W);
                 writer.Write(unit.Description ?? "");
                 writer.Write(unit.GrainSize ?? "");
                 writer.Write((int)unit.UpperContactType);
@@ -767,7 +769,10 @@ public class BoreholeDataset : Dataset, ISerializableDataset
                 writer.Write(track.Value.MinValue);
                 writer.Write(track.Value.MaxValue);
                 writer.Write(track.Value.IsLogarithmic);
-                writer.Write(track.Value.Color.X); writer.Write(track.Value.Color.Y); writer.Write(track.Value.Color.Z); writer.Write(track.Value.Color.W);
+                writer.Write(track.Value.Color.X);
+                writer.Write(track.Value.Color.Y);
+                writer.Write(track.Value.Color.Z);
+                writer.Write(track.Value.Color.W);
                 writer.Write(track.Value.IsVisible);
 
                 writer.Write(track.Value.Points.Count);
@@ -814,11 +819,11 @@ public class BoreholeDataset : Dataset, ISerializableDataset
             ShowGrid = reader.ReadBoolean();
             ShowLegend = reader.ReadBoolean();
             TrackWidth = reader.ReadSingle();
-            
+
             // Lithology Units
             LithologyUnits.Clear();
             var unitCount = reader.ReadInt32();
-            for (int i = 0; i < unitCount; i++)
+            for (var i = 0; i < unitCount; i++)
             {
                 var unit = new LithologyUnit
                 {
@@ -827,7 +832,8 @@ public class BoreholeDataset : Dataset, ISerializableDataset
                     LithologyType = reader.ReadString(),
                     DepthFrom = reader.ReadSingle(),
                     DepthTo = reader.ReadSingle(),
-                    Color = new Vector4(reader.ReadSingle(), reader.ReadSingle(), reader.ReadSingle(), reader.ReadSingle()),
+                    Color = new Vector4(reader.ReadSingle(), reader.ReadSingle(), reader.ReadSingle(),
+                        reader.ReadSingle()),
                     Description = reader.ReadString(),
                     GrainSize = reader.ReadString(),
                     UpperContactType = (ContactType)reader.ReadInt32(),
@@ -835,11 +841,11 @@ public class BoreholeDataset : Dataset, ISerializableDataset
                 };
 
                 var paramCount = reader.ReadInt32();
-                for (int j = 0; j < paramCount; j++)
+                for (var j = 0; j < paramCount; j++)
                     unit.Parameters[reader.ReadString()] = reader.ReadSingle();
 
                 var sourceCount = reader.ReadInt32();
-                for (int j = 0; j < sourceCount; j++)
+                for (var j = 0; j < sourceCount; j++)
                 {
                     var key = reader.ReadString();
                     unit.ParameterSources[key] = new ParameterSource
@@ -853,13 +859,14 @@ public class BoreholeDataset : Dataset, ISerializableDataset
                         LastUpdated = DateTime.FromBinary(reader.ReadInt64())
                     };
                 }
+
                 LithologyUnits.Add(unit);
             }
 
             // Parameter Tracks
             ParameterTracks.Clear();
             var trackCount = reader.ReadInt32();
-            for (int i = 0; i < trackCount; i++)
+            for (var i = 0; i < trackCount; i++)
             {
                 var key = reader.ReadString();
                 var track = new ParameterTrack
@@ -869,26 +876,24 @@ public class BoreholeDataset : Dataset, ISerializableDataset
                     MinValue = reader.ReadSingle(),
                     MaxValue = reader.ReadSingle(),
                     IsLogarithmic = reader.ReadBoolean(),
-                    Color = new Vector4(reader.ReadSingle(), reader.ReadSingle(), reader.ReadSingle(), reader.ReadSingle()),
+                    Color = new Vector4(reader.ReadSingle(), reader.ReadSingle(), reader.ReadSingle(),
+                        reader.ReadSingle()),
                     IsVisible = reader.ReadBoolean()
                 };
 
                 var pointCount = reader.ReadInt32();
-                for (int j = 0; j < pointCount; j++)
-                {
+                for (var j = 0; j < pointCount; j++)
                     track.Points.Add(new ParameterPoint
                     {
                         Depth = reader.ReadSingle(),
                         Value = reader.ReadSingle(),
                         SourceDataset = reader.ReadString()
                     });
-                }
                 ParameterTracks[key] = track;
             }
-            
+
             FilePath = path;
             Logger.Log($"Loaded borehole dataset from binary file {path}");
-
         }
         catch (Exception ex)
         {
