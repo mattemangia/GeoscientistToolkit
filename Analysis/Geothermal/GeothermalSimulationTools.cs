@@ -4,6 +4,7 @@ using System.Numerics;
 using GeoscientistToolkit.Data;
 using GeoscientistToolkit.Data.Borehole;
 using GeoscientistToolkit.Data.Mesh3D;
+using GeoscientistToolkit.UI;
 using GeoscientistToolkit.UI.Interfaces;
 using GeoscientistToolkit.UI.Utils;
 using GeoscientistToolkit.UI.Visualization;
