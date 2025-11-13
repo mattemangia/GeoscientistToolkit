@@ -174,7 +174,12 @@ public static class CommandRegistry
 
             // Thermodynamics Extensions
             new CalculatePhasesCommand(),
-            new CalculateCarbonateAlkalinityCommand()
+            new CalculateCarbonateAlkalinityCommand(),
+
+            // Petrology Commands (Igneous & Metamorphic)
+            new FractionateMagmaCommand(),
+            new LiquidusSolidusCommand(),
+            new MetamorphicPTCommand()
         };
         Commands = commandList.ToDictionary(c => c.Name.ToUpper(), c => c);
     }
