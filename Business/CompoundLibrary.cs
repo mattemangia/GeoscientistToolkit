@@ -15,6 +15,7 @@
 
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using GeoscientistToolkit.Business;
 using GeoscientistToolkit.Util;
 
 namespace GeoscientistToolkit.Data.Materials;
