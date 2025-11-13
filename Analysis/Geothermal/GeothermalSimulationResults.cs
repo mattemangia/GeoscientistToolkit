@@ -338,6 +338,16 @@ public class GeothermalSimulationResults
     /// </summary>
     public Dictionary<string, double> TotalDissolution_mol { get; set; } = new();
 
+    /// <summary>
+    ///     pH evolution over time
+    /// </summary>
+    public List<(double time, double pH)> PHEvolution { get; set; } = new();
+
+    /// <summary>
+    ///     Saturation index evolution for different minerals over time
+    /// </summary>
+    public Dictionary<string, List<(double time, double saturationIndex)>> SaturationIndexEvolution { get; set; } = new();
+
     // Summary Report
 
     /// <summary>

@@ -1721,7 +1721,7 @@ public class GeothermalSimulationTools : IDatasetTools, IDisposable
         ImGui.Separator();
 
         // Total Precipitated/Dissolved Minerals
-        if (_results.TotalPrecipitatedMinerals.Any())
+        if (_results.TotalPrecipitation_mol.Any())
         {
             ImGui.TextColored(new Vector4(0.5f, 0.9f, 1.0f, 1.0f), "Precipitated Minerals:");
             if (ImGui.BeginTable("PrecipTable", 3, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg))
@@ -1731,7 +1731,7 @@ public class GeothermalSimulationTools : IDatasetTools, IDisposable
                 ImGui.TableSetupColumn("Mass (kg)", ImGuiTableColumnFlags.WidthStretch);
                 ImGui.TableHeadersRow();
 
-                foreach (var (mineral, moles) in _results.TotalPrecipitatedMinerals.OrderByDescending(x => x.Value))
+                foreach (var (mineral, moles) in _results.TotalPrecipitation_mol.OrderByDescending(x => x.Value))
                 {
                     ImGui.TableNextRow();
                     ImGui.TableNextColumn();
@@ -1746,7 +1746,7 @@ public class GeothermalSimulationTools : IDatasetTools, IDisposable
                     ImGui.Text($"{mass_kg:F4}");
 
                     // Visual bar for relative amount
-                    var maxMoles = _results.TotalPrecipitatedMinerals.Values.Max();
+                    var maxMoles = _results.TotalPrecipitation_mol.Values.Max();
                     var fraction = (float)(moles / maxMoles);
                     ImGui.SameLine();
                     ImGui.ProgressBar(fraction, new Vector2(100, 0), "");
@@ -1765,12 +1765,13 @@ public class GeothermalSimulationTools : IDatasetTools, IDisposable
             ImGui.TextColored(new Vector4(1.0f, 0.7f, 0.3f, 1.0f), "Permeability Evolution:");
 
             var times = _results.PermeabilityEvolution.Select(p => (float)(p.time / 86400)).ToArray(); // days
-            var permRatios = _results.PermeabilityEvolution.Select(p => (float)p.permeabilityRatio).ToArray();
+            var permRatios = _results.PermeabilityEvolution.Select(p => (float)p.averagePermeability).ToArray();
 
             if (times.Length > 0)
             {
+                var label = string.Format("Final: {0:F4}", permRatios[^1]);
                 ImGui.PlotLines("Permeability Ratio", ref permRatios[0], permRatios.Length,
-                    0, $"Final: {permRatios[^1]:F4}", 0f, 1.2f, new Vector2(0, 150));
+                    0, label, 0f, 1.2f, new Vector2(0, 150));
 
                 var finalPerm = permRatios[^1];
                 var reduction = (1.0f - finalPerm) * 100f;
@@ -1795,8 +1796,9 @@ public class GeothermalSimulationTools : IDatasetTools, IDisposable
 
             if (times.Length > 0)
             {
+                var pHLabel = string.Format("Final pH: {0:F2}", pHValues[^1]);
                 ImGui.PlotLines("pH", ref pHValues[0], pHValues.Length,
-                    0, $"Final pH: {pHValues[^1]:F2}", 0f, 14f, new Vector2(0, 100));
+                    0, pHLabel, 0f, 14f, new Vector2(0, 100));
             }
         }
 
@@ -1819,7 +1821,7 @@ public class GeothermalSimulationTools : IDatasetTools, IDisposable
                 {
                     if (!siHistory.Any()) continue;
 
-                    var finalSI = siHistory[^1].SI;
+                    var finalSI = siHistory[^1].saturationIndex;
 
                     ImGui.TableNextRow();
                     ImGui.TableNextColumn();
