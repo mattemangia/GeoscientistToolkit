@@ -115,6 +115,7 @@ public class GeothermalSimulationSolver : IDisposable
 
     // OpenCL acceleration
     private readonly GeothermalOpenCLSolver _openCLSolver;
+    private readonly BTESOpenCLSolver _btesOpenCLSolver;
     private readonly GeothermalSimulationOptions _options;
     private readonly IProgress<(float progress, string message)> _progress;
 
@@ -140,6 +141,7 @@ public class GeothermalSimulationSolver : IDisposable
     // Performance tracking
     private int _totalIterations;
     private bool _useOpenCL;
+    private bool _useBTESOpenCL;
     private float[,,,] _velocity; // [r,theta,z,component]
 
     public GeothermalSimulationSolver(
@@ -190,6 +192,41 @@ public class GeothermalSimulationSolver : IDisposable
                 _useOpenCL = false;
             }
 
+        // Initialize BTES OpenCL solver if BTES mode is enabled and GPU is available
+        if (_options.EnableBTESMode && _options.UseGPU)
+            try
+            {
+                _btesOpenCLSolver = new BTESOpenCLSolver();
+                if (_btesOpenCLSolver.IsAvailable)
+                {
+                    if (_btesOpenCLSolver.InitializeBuffers(mesh, options))
+                    {
+                        _useBTESOpenCL = true;
+                        Logger.Log($"BTES OpenCL acceleration enabled: {_btesOpenCLSolver.DeviceName}");
+                        Logger.Log($"BTES Device memory: {_btesOpenCLSolver.DeviceGlobalMemory / (1024 * 1024)} MB");
+                    }
+                    else
+                    {
+                        Logger.LogWarning("Failed to initialize BTES OpenCL buffers, using CPU");
+                        _btesOpenCLSolver?.Dispose();
+                        _btesOpenCLSolver = null;
+                    }
+                }
+                else
+                {
+                    Logger.LogWarning("BTES OpenCL not available, using CPU");
+                    _btesOpenCLSolver?.Dispose();
+                    _btesOpenCLSolver = null;
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.LogWarning($"BTES OpenCL initialization failed: {ex.Message}. Using CPU.");
+                _btesOpenCLSolver?.Dispose();
+                _btesOpenCLSolver = null;
+                _useBTESOpenCL = false;
+            }
+
         InitializeFields();
     }
 
@@ -208,6 +245,7 @@ public class GeothermalSimulationSolver : IDisposable
     public void Dispose()
     {
         _openCLSolver?.Dispose();
+        _btesOpenCLSolver?.Dispose();
     }
 
     /// <summary>
@@ -966,8 +1004,30 @@ public class GeothermalSimulationSolver : IDisposable
 
             float maxChange;
 
-            // Choose solver: OpenCL GPU or CPU
-            if (_useOpenCL)
+            // Choose solver: BTES OpenCL, Standard OpenCL GPU, or CPU
+            if (_options.EnableBTESMode && _useBTESOpenCL)
+                try
+                {
+                    maxChange = _btesOpenCLSolver.SolveBTESHeatTransferGPU(
+                        _temperature,
+                        _velocity,
+                        _dispersionCoefficient,
+                        dt,
+                        CurrentSimulationTime,
+                        _options.SimulateGroundwaterFlow,
+                        _fluidTempDown,
+                        _fluidTempUp,
+                        _options.FlowConfiguration);
+
+                    ApplyBoundaryConditions(_temperature); // Apply BCs to the final result
+                }
+                catch (Exception ex)
+                {
+                    Logger.LogWarning($"BTES OpenCL error: {ex.Message}. Falling back to CPU.");
+                    _useBTESOpenCL = false;
+                    maxChange = RunCpuSolver(dt);
+                }
+            else if (_useOpenCL)
                 try
                 {
                     maxChange = _openCLSolver.SolveHeatTransferGPU(
@@ -1004,7 +1064,7 @@ public class GeothermalSimulationSolver : IDisposable
             HeatConvergenceHistory.Add(maxChange);
             _maxError = maxChange;
 
-            var solverType = _useOpenCL ? "GPU" : "CPU";
+            var solverType = _useBTESOpenCL ? "BTES GPU" : (_useOpenCL ? "GPU" : "CPU");
             ConvergenceStatus = $"Heat converged ({solverType}), final error: {maxChange:E3}, dt: {dt:E2}s";
         });
     }

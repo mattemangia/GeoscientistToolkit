@@ -23,6 +23,9 @@ public class GeothermalSimulationTools : IDatasetTools, IDisposable
     private readonly GeothermalSimulationOptions _options = new();
     private CancellationTokenSource _cancellationTokenSource;
     private BoreholeCrossSectionViewer _crossSectionViewer;
+
+    // BTES Curve Editor
+    private ImGuiCurveEditor _btesCurveEditor;
     private GeothermalSimulationSolver _currentSolver; // Track the active solver
 
     private bool _isSimulationRunning;
@@ -135,6 +138,9 @@ public class GeothermalSimulationTools : IDatasetTools, IDisposable
                 var selectedPath = _exportDialog.SelectedPath;
                 ExportResults(selectedPath);
             }
+
+        // Handle BTES curve editor
+        HandleBTESCurveEditor();
     }
 
 
@@ -465,6 +471,16 @@ public class GeothermalSimulationTools : IDatasetTools, IDisposable
 
                     ImGui.SameLine();
                     ImGui.TextColored(new Vector4(0.6f, 0.6f, 0.6f, 1), $"({_options.SeasonalEnergyCurve.Count} days)");
+
+                    // Edit curve button
+                    if (ImGui.Button("Edit Seasonal Curve..."))
+                    {
+                        InitializeBTESCurveEditor();
+                        _btesCurveEditor?.Open();
+                    }
+
+                    ImGui.SameLine();
+                    ImGui.TextColored(new Vector4(0.7f, 0.9f, 1.0f, 1.0f), "✏ Interactive curve editor");
 
                     // Save all frames checkbox
                     var saveAllFrames = _options.SaveAllTimeFrames;
@@ -2144,5 +2160,60 @@ public class GeothermalSimulationTools : IDatasetTools, IDisposable
         _visualization3D.SetRenderMode(GeothermalVisualization3D.RenderMode.Velocity);
         Logger.Log(
             "Velocity field visualization activated. The domain surface now shows flux magnitude with directional indicators.");
+    }
+
+    /// <summary>
+    ///     Initializes the BTES curve editor with current seasonal curve data
+    /// </summary>
+    private void InitializeBTESCurveEditor()
+    {
+        if (_options.SeasonalEnergyCurve.Count == 0)
+        {
+            _options.InitializeDefaultSeasonalCurve();
+        }
+
+        // Convert seasonal curve to curve points (day, energy)
+        var curvePoints = new List<CurvePoint>();
+        for (int i = 0; i < _options.SeasonalEnergyCurve.Count; i++)
+        {
+            float day = i;
+            float energy = (float)_options.SeasonalEnergyCurve[i];
+            curvePoints.Add(new CurvePoint(day, energy));
+        }
+
+        // Find min/max for curve editor range
+        float minEnergy = (float)_options.SeasonalEnergyCurve.Min();
+        float maxEnergy = (float)_options.SeasonalEnergyCurve.Max();
+        float energyRange = Math.Max(Math.Abs(minEnergy), Math.Abs(maxEnergy));
+
+        _btesCurveEditor = new ImGuiCurveEditor(
+            "BTESSeasonalCurve",
+            "BTES Seasonal Energy Curve Editor",
+            "Day of Year",
+            "Daily Energy (kWh/day)",
+            curvePoints,
+            rangeMin: new Vector2(0, -energyRange * 1.2f),
+            rangeMax: new Vector2(364, energyRange * 1.2f)
+        );
+    }
+
+    /// <summary>
+    ///     Handles BTES curve editor submission (called every frame)
+    /// </summary>
+    private void HandleBTESCurveEditor()
+    {
+        if (_btesCurveEditor == null) return;
+
+        if (_btesCurveEditor.Submit(out float[] curveData, resolution: 365))
+        {
+            // User clicked OK - update seasonal curve
+            _options.SeasonalEnergyCurve.Clear();
+            foreach (float value in curveData)
+            {
+                _options.SeasonalEnergyCurve.Add(value);
+            }
+            Logger.Log($"BTES seasonal curve updated with {curveData.Length} points");
+            _selectedPreset = 0; // Switch to Custom
+        }
     }
 }
