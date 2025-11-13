@@ -301,6 +301,43 @@ public class GeothermalSimulationResults
     /// </summary>
     public double PeakMemoryUsage { get; set; }
 
+    // Thermodynamics and Geochemistry Results
+
+    /// <summary>
+    ///     Generated pore network model for precipitation calculations
+    /// </summary>
+    public Data.Pnm.PNMDataset PoreNetworkModel { get; set; }
+
+    /// <summary>
+    ///     Precipitation concentration field [r, theta, z] in mol/m³
+    /// </summary>
+    public Dictionary<string, float[,,]> PrecipitationFields { get; set; } = new();
+
+    /// <summary>
+    ///     Dissolution concentration field [r, theta, z] in mol/m³
+    /// </summary>
+    public Dictionary<string, float[,,]> DissolutionFields { get; set; } = new();
+
+    /// <summary>
+    ///     Pore/throat radius change over time due to precipitation/dissolution
+    /// </summary>
+    public Dictionary<int, double> PoreRadiusHistory { get; set; } = new();  // PoreID -> final radius
+
+    /// <summary>
+    ///     Permeability evolution over time due to pore radius changes
+    /// </summary>
+    public List<(double time, double averagePermeability)> PermeabilityEvolution { get; set; } = new();
+
+    /// <summary>
+    ///     Total moles of minerals precipitated by species
+    /// </summary>
+    public Dictionary<string, double> TotalPrecipitation_mol { get; set; } = new();
+
+    /// <summary>
+    ///     Total moles of minerals dissolved by species
+    /// </summary>
+    public Dictionary<string, double> TotalDissolution_mol { get; set; } = new();
+
     // Summary Report
 
     /// <summary>

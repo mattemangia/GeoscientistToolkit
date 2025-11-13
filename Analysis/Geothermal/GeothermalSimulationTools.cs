@@ -1123,6 +1123,164 @@ public class GeothermalSimulationTools : IDatasetTools, IDisposable
                 if (ImGui.Checkbox("Use GPU", ref useGPU))
                     _options.UseGPU = useGPU;
             }
+
+            // Thermodynamics and Geochemistry Section
+            ImGui.PushStyleColor(ImGuiCol.Header, new Vector4(0.7f, 0.4f, 0.9f, 1.0f));
+            if (ImGui.CollapsingHeader("⚗️ Thermodynamics & Geochemistry"))
+            {
+                ImGui.PopStyleColor();
+
+                var enableThermo = _options.EnableThermodynamics;
+                if (ImGui.Checkbox("Enable Thermodynamics", ref enableThermo))
+                    _options.EnableThermodynamics = enableThermo;
+
+                ImGui.SetItemTooltip(
+                    "Enable thermodynamic modeling for fluid-rock interactions, precipitation, and dissolution.\n" +
+                    "This allows simulation of CCUS scenarios with carbonate mineralization.");
+
+                if (_options.EnableThermodynamics)
+                {
+                    ImGui.Indent();
+
+                    // Pore Network Model Settings
+                    ImGui.Spacing();
+                    ImGui.TextColored(new Vector4(0.7f, 0.9f, 1.0f, 1.0f), "Pore Network Model:");
+
+                    var generatePNM = _options.GeneratePoreNetworkModel;
+                    if (ImGui.Checkbox("Generate PNM from Lithology", ref generatePNM))
+                        _options.GeneratePoreNetworkModel = generatePNM;
+
+                    if (_options.GeneratePoreNetworkModel)
+                    {
+                        var pnmMode = (int)_options.PnmGenerationMode;
+                        var modeNames = new[] { "Conservative (1 erosion)", "Aggressive (3 erosions)" };
+                        if (ImGui.Combo("PNM Mode", ref pnmMode, modeNames, modeNames.Length))
+                        {
+                            _options.PnmGenerationMode = pnmMode == 0
+                                ? PoreNetworkGenerationMode.Conservative
+                                : PoreNetworkGenerationMode.Aggressive;
+                            _options.PnmErosionPasses = pnmMode == 0 ? 1 : 3;
+                        }
+                    }
+
+                    // Thermodynamic Time Step
+                    ImGui.Spacing();
+                    var thermoTimeStep = (float)(_options.ThermodynamicTimeStep / 3600);
+                    if (ImGui.SliderFloat("Thermo Time Step (hours)", ref thermoTimeStep, 0.1f, 168f))
+                        _options.ThermodynamicTimeStep = thermoTimeStep * 3600;
+                    ImGui.SetItemTooltip("Time interval between thermodynamic calculations");
+
+                    // Fluid Composition Editor
+                    ImGui.Spacing();
+                    ImGui.TextColored(new Vector4(0.7f, 0.9f, 1.0f, 1.0f), "Fluid Composition:");
+
+                    if (ImGui.Button("+ Add Species"))
+                    {
+                        _options.FluidComposition.Add(new FluidCompositionEntry
+                        {
+                            SpeciesName = "CO2",
+                            Concentration_mol_L = 0.01,
+                            Units = "mol/L",
+                            Notes = ""
+                        });
+                    }
+
+                    ImGui.SameLine();
+                    if (ImGui.Button("Load CCUS Preset"))
+                    {
+                        _options.FluidComposition.Clear();
+                        _options.FluidComposition.Add(new FluidCompositionEntry
+                        {
+                            SpeciesName = "CO2",
+                            Concentration_mol_L = 0.5,
+                            Units = "mol/L",
+                            Notes = "Dissolved CO2"
+                        });
+                        _options.FluidComposition.Add(new FluidCompositionEntry
+                        {
+                            SpeciesName = "Ca2+",
+                            Concentration_mol_L = 0.01,
+                            Units = "mol/L",
+                            Notes = "Calcium ions"
+                        });
+                        _options.FluidComposition.Add(new FluidCompositionEntry
+                        {
+                            SpeciesName = "Na+",
+                            Concentration_mol_L = 0.5,
+                            Units = "mol/L",
+                            Notes = "Sodium background"
+                        });
+                        _options.FluidComposition.Add(new FluidCompositionEntry
+                        {
+                            SpeciesName = "Cl-",
+                            Concentration_mol_L = 0.52,
+                            Units = "mol/L",
+                            Notes = "Chloride"
+                        });
+                    }
+
+                    // Display fluid composition table
+                    if (_options.FluidComposition.Count > 0)
+                    {
+                        ImGui.Spacing();
+                        if (ImGui.BeginTable("FluidCompositionTable", 4,
+                                ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.ScrollY,
+                                new Vector2(0, 150)))
+                        {
+                            ImGui.TableSetupColumn("Species", ImGuiTableColumnFlags.WidthFixed, 100);
+                            ImGui.TableSetupColumn("Concentration (mol/L)", ImGuiTableColumnFlags.WidthFixed, 150);
+                            ImGui.TableSetupColumn("Notes", ImGuiTableColumnFlags.WidthStretch);
+                            ImGui.TableSetupColumn("Actions", ImGuiTableColumnFlags.WidthFixed, 60);
+                            ImGui.TableHeadersRow();
+
+                            for (int i = 0; i < _options.FluidComposition.Count; i++)
+                            {
+                                var entry = _options.FluidComposition[i];
+                                ImGui.TableNextRow();
+
+                                ImGui.TableNextColumn();
+                                var speciesName = entry.SpeciesName;
+                                ImGui.SetNextItemWidth(-1);
+                                if (ImGui.InputText($"##species{i}", ref speciesName, 50))
+                                    entry.SpeciesName = speciesName;
+
+                                ImGui.TableNextColumn();
+                                var conc = (float)entry.Concentration_mol_L;
+                                ImGui.SetNextItemWidth(-1);
+                                if (ImGui.InputFloat($"##conc{i}", ref conc, 0, 0, "%.4f"))
+                                    entry.Concentration_mol_L = conc;
+
+                                ImGui.TableNextColumn();
+                                var notes = entry.Notes ?? "";
+                                ImGui.SetNextItemWidth(-1);
+                                if (ImGui.InputText($"##notes{i}", ref notes, 200))
+                                    entry.Notes = notes;
+
+                                ImGui.TableNextColumn();
+                                if (ImGui.SmallButton($"X##{i}"))
+                                {
+                                    _options.FluidComposition.RemoveAt(i);
+                                    break;
+                                }
+                            }
+
+                            ImGui.EndTable();
+                        }
+                    }
+
+                    // Visualization Options
+                    ImGui.Spacing();
+                    var enablePrecipViz = _options.EnablePrecipitationVisualization;
+                    if (ImGui.Checkbox("Enable Precipitation Visualization", ref enablePrecipViz))
+                        _options.EnablePrecipitationVisualization = enablePrecipViz;
+
+                    ImGui.Unindent();
+                }
+            }
+            else
+            {
+                ImGui.PopStyleColor();
+            }
         }
 
         // ALTERNATIVE RENDERING: Show preview directly in panel if requested
@@ -1394,6 +1552,13 @@ public class GeothermalSimulationTools : IDatasetTools, IDisposable
                     ImGui.EndTabItem();
                 }
 
+                // Thermodynamics & Precipitation Tab
+                if (_options.EnableThermodynamics && ImGui.BeginTabItem("⚗️ Geochemistry & Precipitation"))
+                {
+                    RenderThermodynamicsTab();
+                    ImGui.EndTabItem();
+                }
+
                 ImGui.EndTabBar();
             }
         }
@@ -1529,6 +1694,199 @@ public class GeothermalSimulationTools : IDatasetTools, IDisposable
 
                 ImGui.EndTable();
             }
+        }
+    }
+
+    private void RenderThermodynamicsTab()
+    {
+        ImGui.TextColored(new Vector4(0.7f, 0.4f, 0.9f, 1.0f), "Geochemistry & Precipitation Analysis");
+        ImGui.Separator();
+        ImGui.Spacing();
+
+        // Pore Network Model Status
+        if (_results.PoreNetworkModel != null)
+        {
+            ImGui.TextColored(new Vector4(0.3f, 1.0f, 0.5f, 1.0f), "✓ Pore Network Model Generated");
+            ImGui.Text($"  Pores: {_results.PoreNetworkModel.Pores.Count}");
+            ImGui.Text($"  Throats: {_results.PoreNetworkModel.Throats.Count}");
+        }
+        else
+        {
+            ImGui.TextColored(new Vector4(1.0f, 0.7f, 0.2f, 1.0f), "⚠ No pore network model available");
+            ImGui.TextWrapped("Enable thermodynamics and generate PNM to see precipitation data.");
+            return;
+        }
+
+        ImGui.Spacing();
+        ImGui.Separator();
+
+        // Total Precipitated/Dissolved Minerals
+        if (_results.TotalPrecipitatedMinerals.Any())
+        {
+            ImGui.TextColored(new Vector4(0.5f, 0.9f, 1.0f, 1.0f), "Precipitated Minerals:");
+            if (ImGui.BeginTable("PrecipTable", 3, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg))
+            {
+                ImGui.TableSetupColumn("Mineral", ImGuiTableColumnFlags.WidthFixed, 150);
+                ImGui.TableSetupColumn("Total Moles", ImGuiTableColumnFlags.WidthFixed, 120);
+                ImGui.TableSetupColumn("Mass (kg)", ImGuiTableColumnFlags.WidthStretch);
+                ImGui.TableHeadersRow();
+
+                foreach (var (mineral, moles) in _results.TotalPrecipitatedMinerals.OrderByDescending(x => x.Value))
+                {
+                    ImGui.TableNextRow();
+                    ImGui.TableNextColumn();
+                    ImGui.Text(mineral);
+
+                    ImGui.TableNextColumn();
+                    ImGui.Text($"{moles:E3}");
+
+                    ImGui.TableNextColumn();
+                    // Estimate mass (assuming typical molar mass ~100 g/mol)
+                    var mass_kg = moles * 0.1; // rough estimate
+                    ImGui.Text($"{mass_kg:F4}");
+
+                    // Visual bar for relative amount
+                    var maxMoles = _results.TotalPrecipitatedMinerals.Values.Max();
+                    var fraction = (float)(moles / maxMoles);
+                    ImGui.SameLine();
+                    ImGui.ProgressBar(fraction, new Vector2(100, 0), "");
+                }
+
+                ImGui.EndTable();
+            }
+        }
+
+        ImGui.Spacing();
+        ImGui.Separator();
+
+        // Permeability Evolution
+        if (_results.PermeabilityEvolution.Any())
+        {
+            ImGui.TextColored(new Vector4(1.0f, 0.7f, 0.3f, 1.0f), "Permeability Evolution:");
+
+            var times = _results.PermeabilityEvolution.Select(p => (float)(p.time / 86400)).ToArray(); // days
+            var permRatios = _results.PermeabilityEvolution.Select(p => (float)p.permeabilityRatio).ToArray();
+
+            if (times.Length > 0)
+            {
+                ImGui.PlotLines("Permeability Ratio", ref permRatios[0], permRatios.Length,
+                    0, $"Final: {permRatios[^1]:F4}", 0f, 1.2f, new Vector2(0, 150));
+
+                var finalPerm = permRatios[^1];
+                var reduction = (1.0f - finalPerm) * 100f;
+                var color = reduction > 50 ? new Vector4(1.0f, 0.2f, 0.2f, 1.0f) :
+                           reduction > 20 ? new Vector4(1.0f, 0.7f, 0.2f, 1.0f) :
+                           new Vector4(0.3f, 1.0f, 0.3f, 1.0f);
+
+                ImGui.TextColored(color, $"Permeability Reduction: {reduction:F1}%");
+            }
+        }
+
+        ImGui.Spacing();
+        ImGui.Separator();
+
+        // pH Evolution
+        if (_results.PHEvolution.Any())
+        {
+            ImGui.TextColored(new Vector4(0.6f, 1.0f, 0.6f, 1.0f), "pH Evolution:");
+
+            var times = _results.PHEvolution.Select(p => (float)(p.time / 86400)).ToArray();
+            var pHValues = _results.PHEvolution.Select(p => (float)p.pH).ToArray();
+
+            if (times.Length > 0)
+            {
+                ImGui.PlotLines("pH", ref pHValues[0], pHValues.Length,
+                    0, $"Final pH: {pHValues[^1]:F2}", 0f, 14f, new Vector2(0, 100));
+            }
+        }
+
+        ImGui.Spacing();
+        ImGui.Separator();
+
+        // Saturation Indices
+        if (_results.SaturationIndexEvolution.Any())
+        {
+            ImGui.TextColored(new Vector4(0.9f, 0.7f, 1.0f, 1.0f), "Saturation Indices (Final):");
+
+            if (ImGui.BeginTable("SITable", 3, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg))
+            {
+                ImGui.TableSetupColumn("Mineral", ImGuiTableColumnFlags.WidthFixed, 150);
+                ImGui.TableSetupColumn("SI", ImGuiTableColumnFlags.WidthFixed, 80);
+                ImGui.TableSetupColumn("Status", ImGuiTableColumnFlags.WidthStretch);
+                ImGui.TableHeadersRow();
+
+                foreach (var (mineral, siHistory) in _results.SaturationIndexEvolution)
+                {
+                    if (!siHistory.Any()) continue;
+
+                    var finalSI = siHistory[^1].SI;
+
+                    ImGui.TableNextRow();
+                    ImGui.TableNextColumn();
+                    ImGui.Text(mineral);
+
+                    ImGui.TableNextColumn();
+                    ImGui.Text($"{finalSI:F2}");
+
+                    ImGui.TableNextColumn();
+                    if (finalSI > 0)
+                    {
+                        ImGui.TextColored(new Vector4(1.0f, 0.5f, 0.5f, 1.0f), "Supersaturated (Precipitating)");
+                    }
+                    else if (finalSI < 0)
+                    {
+                        ImGui.TextColored(new Vector4(0.5f, 0.7f, 1.0f, 1.0f), "Undersaturated (Dissolving)");
+                    }
+                    else
+                    {
+                        ImGui.TextColored(new Vector4(0.5f, 1.0f, 0.5f, 1.0f), "Equilibrium");
+                    }
+                }
+
+                ImGui.EndTable();
+            }
+        }
+
+        ImGui.Spacing();
+        ImGui.Separator();
+
+        // 2D Precipitation Visualization
+        ImGui.TextColored(new Vector4(0.3f, 0.8f, 1.0f, 1.0f), "2D Precipitation Maps:");
+        ImGui.TextWrapped("Precipitation concentration fields show where minerals are forming in the borehole.");
+
+        if (_results.PrecipitationFields.Any())
+        {
+            foreach (var (mineral, field) in _results.PrecipitationFields.Take(3)) // Show first 3 minerals
+            {
+                ImGui.Spacing();
+                ImGui.Text($"{mineral}:");
+
+                // Display simple statistics
+                var nr = field.GetLength(0);
+                var ntheta = field.GetLength(1);
+                var nz = field.GetLength(2);
+
+                float maxConc = 0f;
+                float totalPrecip = 0f;
+                for (int r = 0; r < nr; r++)
+                    for (int theta = 0; theta < ntheta; theta++)
+                        for (int z = 0; z < nz; z++)
+                        {
+                            var conc = field[r, theta, z];
+                            if (conc > maxConc) maxConc = conc;
+                            totalPrecip += conc;
+                        }
+
+                ImGui.BulletText($"Max concentration: {maxConc:E3} mol/m³");
+                ImGui.BulletText($"Total precipitated: {totalPrecip:E3} mol");
+
+                // TODO: Add actual 2D slice visualization here
+                ImGui.TextDisabled("  [2D slice visualization will be rendered here]");
+            }
+        }
+        else
+        {
+            ImGui.TextDisabled("No precipitation data available yet. Run simulation with thermodynamics enabled.");
         }
     }
 

@@ -159,6 +159,48 @@ public class GeothermalSimulationOptions
     /// </summary>
     public int BTESRandomSeed { get; set; } = 0;
 
+    // ===== Thermodynamics and Geochemistry Parameters =====
+
+    /// <summary>
+    ///     Enable thermodynamic simulation for fluid-rock interactions
+    /// </summary>
+    public bool EnableThermodynamics { get; set; } = false;
+
+    /// <summary>
+    ///     Fluid composition for thermodynamic calculations (ions, compounds like CO2, minerals)
+    /// </summary>
+    public List<FluidCompositionEntry> FluidComposition { get; set; } = new();
+
+    /// <summary>
+    ///     Generate pore network model from borehole lithology for precipitation calculations
+    /// </summary>
+    public bool GeneratePoreNetworkModel { get; set; } = true;
+
+    /// <summary>
+    ///     PNM generation mode: Conservative (1 erosion) or Aggressive (3 erosions)
+    /// </summary>
+    public PoreNetworkGenerationMode PnmGenerationMode { get; set; } = PoreNetworkGenerationMode.Conservative;
+
+    /// <summary>
+    ///     Number of erosion passes for PNM generation (1-3)
+    /// </summary>
+    public int PnmErosionPasses { get; set; } = 1;
+
+    /// <summary>
+    ///     Enable precipitation/dissolution visualization in 2D slices
+    /// </summary>
+    public bool EnablePrecipitationVisualization { get; set; } = true;
+
+    /// <summary>
+    ///     Time step for thermodynamic calculations (seconds)
+    /// </summary>
+    public double ThermodynamicTimeStep { get; set; } = 3600.0; // 1 hour
+
+    /// <summary>
+    ///     Minimum precipitation threshold for visualization (mol/m³)
+    /// </summary>
+    public double PrecipitationVisualizationThreshold { get; set; } = 1e-6;
+
     /// <summary>
     ///     Initialize default seasonal curve for BTES mode.
     ///     Creates a sinusoidal curve with charging in summer and discharging in winter.
@@ -499,5 +541,20 @@ public enum GeothermalSimulationPreset
     EnhancedGeothermalSystem,
     AquiferThermalStorage,
     BTESThermalBattery,
-    ExplorationTest
+    ExplorationTest,
+    CCUSCarbonateStorage
+}
+
+public enum PoreNetworkGenerationMode
+{
+    Conservative = 1,
+    Aggressive = 3
+}
+
+public class FluidCompositionEntry
+{
+    public string SpeciesName { get; set; }
+    public double Concentration_mol_L { get; set; }
+    public string Units { get; set; } = "mol/L";
+    public string Notes { get; set; }
 }
