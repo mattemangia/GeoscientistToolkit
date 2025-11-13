@@ -322,6 +322,7 @@ public class GeothermalSimulationTools : IDatasetTools, IDisposable
                 "Deep Geothermal Production (2000-5000m)",
                 "Enhanced Geothermal System (3000-6000m)",
                 "Aquifer Thermal Storage (50-300m)",
+                "BTES Thermal Battery (50-300m)",
                 "Quick Exploration Test"
             };
 
@@ -359,6 +360,135 @@ public class GeothermalSimulationTools : IDatasetTools, IDisposable
         else
         {
             ImGui.PopStyleColor();
+        }
+
+        // BTES (Thermal Battery) Mode Section
+        if (_options.EnableBTESMode)
+        {
+            ImGui.PushStyleColor(ImGuiCol.Header, new Vector4(0.8f, 0.3f, 0.2f, 1.0f));
+            if (ImGui.CollapsingHeader("🔋 BTES Thermal Battery Configuration", ImGuiTreeNodeFlags.DefaultOpen))
+            {
+                ImGui.PopStyleColor();
+
+                ImGui.TextWrapped(
+                    "Borehole Thermal Energy Storage (BTES) mode simulates seasonal heat storage cycles. " +
+                    "Heat is injected in summer (charging) and extracted in winter (discharging).");
+                ImGui.Spacing();
+
+                var btesEnabled = _options.EnableBTESMode;
+                if (ImGui.Checkbox("Enable BTES Mode", ref btesEnabled))
+                {
+                    _options.EnableBTESMode = btesEnabled;
+                    if (btesEnabled && _options.SeasonalEnergyCurve.Count == 0)
+                    {
+                        _options.InitializeDefaultSeasonalCurve();
+                    }
+                    _selectedPreset = 0; // Switch to Custom
+                }
+
+                if (_options.EnableBTESMode)
+                {
+                    ImGui.Indent();
+
+                    // Annual energy storage
+                    var annualEnergy = (float)_options.BTESAnnualEnergyStorage;
+                    if (ImGui.SliderFloat("Annual Energy Storage (MWh/year)", ref annualEnergy, 100, 5000, "%.0f"))
+                    {
+                        _options.BTESAnnualEnergyStorage = annualEnergy;
+                        _selectedPreset = 0;
+                    }
+
+                    // Peak ratio
+                    var peakRatio = (float)_options.BTESSeasonalPeakRatio;
+                    if (ImGui.SliderFloat("Peak to Average Ratio", ref peakRatio, 1.0f, 5.0f, "%.1f"))
+                    {
+                        _options.BTESSeasonalPeakRatio = peakRatio;
+                        _selectedPreset = 0;
+                    }
+
+                    // Charging temperature
+                    var chargingTemp = (float)(_options.BTESChargingTemperature - 273.15);
+                    if (ImGui.SliderFloat("Charging Temperature (°C)", ref chargingTemp, 30, 90, "%.1f"))
+                    {
+                        _options.BTESChargingTemperature = chargingTemp + 273.15;
+                        _selectedPreset = 0;
+                    }
+
+                    // Discharging temperature
+                    var dischargingTemp = (float)(_options.BTESDischargingTemperature - 273.15);
+                    if (ImGui.SliderFloat("Discharging Temperature (°C)", ref dischargingTemp, 0, 25, "%.1f"))
+                    {
+                        _options.BTESDischargingTemperature = dischargingTemp + 273.15;
+                        _selectedPreset = 0;
+                    }
+
+                    ImGui.Spacing();
+                    ImGui.Separator();
+                    ImGui.Text("Seasonal Curve Options:");
+
+                    // Random variations checkbox
+                    var applyRandomVariations = _options.BTESApplyRandomVariations;
+                    if (ImGui.Checkbox("Apply Random Weather Variations", ref applyRandomVariations))
+                    {
+                        _options.BTESApplyRandomVariations = applyRandomVariations;
+                        _selectedPreset = 0;
+                    }
+
+                    if (_options.BTESApplyRandomVariations)
+                    {
+                        ImGui.Indent();
+
+                        // Variation magnitude
+                        var variationMag = (float)_options.BTESRandomVariationMagnitude * 100f;
+                        if (ImGui.SliderFloat("Variation Magnitude (%)", ref variationMag, 0, 50, "%.0f"))
+                        {
+                            _options.BTESRandomVariationMagnitude = variationMag / 100f;
+                            _selectedPreset = 0;
+                        }
+
+                        // Random seed
+                        var randomSeed = _options.BTESRandomSeed;
+                        if (ImGui.InputInt("Random Seed (0=random)", ref randomSeed))
+                        {
+                            _options.BTESRandomSeed = Math.Max(0, randomSeed);
+                            _selectedPreset = 0;
+                        }
+
+                        ImGui.Unindent();
+                    }
+
+                    // Regenerate curve button
+                    if (ImGui.Button("Regenerate Seasonal Curve"))
+                    {
+                        _options.InitializeDefaultSeasonalCurve();
+                    }
+
+                    ImGui.SameLine();
+                    ImGui.TextColored(new Vector4(0.6f, 0.6f, 0.6f, 1), $"({_options.SeasonalEnergyCurve.Count} days)");
+
+                    // Save all frames checkbox
+                    var saveAllFrames = _options.SaveAllTimeFrames;
+                    if (ImGui.Checkbox("Save All Time Frames (for animation)", ref saveAllFrames))
+                    {
+                        _options.SaveAllTimeFrames = saveAllFrames;
+                        _selectedPreset = 0;
+                    }
+
+                    if (_options.SaveAllTimeFrames)
+                    {
+                        ImGui.SameLine();
+                        ImGui.TextColored(new Vector4(1, 0.7f, 0, 1), "⚠ May require significant memory");
+                    }
+
+                    ImGui.Unindent();
+                }
+
+                ImGui.Spacing();
+            }
+            else
+            {
+                ImGui.PopStyleColor();
+            }
         }
 
         // Parameter Column Mapping Section

@@ -278,6 +278,12 @@ public class GeothermalSimulationSolver : IDisposable
                 _progress?.Report((progress, message));
             }
 
+            // BTES MODE: Apply seasonal energy curve to modify inlet temperature
+            if (_options.EnableBTESMode && _options.SeasonalEnergyCurve.Count == 365)
+            {
+                ApplySeasonalEnergyCurve(currentTime);
+            }
+
             var stepSuccessful = false;
             var attempt = 0;
             while (!stepSuccessful)
@@ -312,7 +318,9 @@ public class GeothermalSimulationSolver : IDisposable
             ConvergenceHistory.Add(_maxError);
             TimeStepHistory.Add(actualTimeStep);
 
-            if (++saveCounter >= _options.SaveInterval)
+            // BTES MODE: Save all frames for animation, or use SaveInterval
+            bool shouldSave = _options.SaveAllTimeFrames || (++saveCounter >= _options.SaveInterval);
+            if (shouldSave)
             {
                 saveCounter = 0;
                 SaveTimeStepResults(results, currentTime);
@@ -2399,6 +2407,60 @@ public class GeothermalSimulationSolver : IDisposable
     /// <summary>
     ///     Logs comprehensive diagnostics about the simulation setup to help identify potential issues.
     /// </summary>
+    /// <summary>
+    ///     Applies seasonal energy curve to modify fluid inlet temperature for BTES mode.
+    ///     Converts daily energy (kWh/day) to temperature change.
+    /// </summary>
+    private void ApplySeasonalEnergyCurve(double currentTime)
+    {
+        // Calculate current day of year (0-364)
+        int dayOfYear = (int)((currentTime / 86400.0) % 365.0);
+
+        // Get energy for this day (kWh/day)
+        double dailyEnergy = _options.SeasonalEnergyCurve[dayOfYear];
+
+        // Convert energy to temperature
+        // Q = m_dot * cp * (T_out - T_in)
+        // For BTES: positive energy = charging (hot water in), negative = discharging (cold water in)
+
+        double mdot = _options.FluidMassFlowRate; // kg/s
+        double cp = _options.FluidSpecificHeat; // J/kg·K
+
+        // Convert kWh/day to Watts
+        double powerWatts = dailyEnergy * 1000.0 / 24.0; // kWh/day -> W
+
+        // Calculate required temperature difference
+        // Q = mdot * cp * deltaT
+        // deltaT = Q / (mdot * cp)
+        double deltaT = powerWatts / (mdot * cp);
+
+        // Set inlet temperature based on charging/discharging mode
+        if (dailyEnergy > 0)
+        {
+            // Charging mode: inject hot water
+            _options.FluidInletTemperature = _options.BTESChargingTemperature + deltaT;
+        }
+        else if (dailyEnergy < 0)
+        {
+            // Discharging mode: inject cold water
+            _options.FluidInletTemperature = _options.BTESDischargingTemperature - deltaT;
+        }
+        else
+        {
+            // No energy transfer: use neutral temperature
+            _options.FluidInletTemperature = (_options.BTESChargingTemperature + _options.BTESDischargingTemperature) / 2.0;
+        }
+
+        // Clamp to reasonable values
+        _options.FluidInletTemperature = Math.Max(273.15, Math.Min(373.15, _options.FluidInletTemperature));
+
+        // Log every 30 days
+        if (dayOfYear % 30 == 0)
+        {
+            Logger.Log($"[BTES Day {dayOfYear}] Energy: {dailyEnergy:F0} kWh/day, T_inlet: {_options.FluidInletTemperature - 273.15:F1}°C");
+        }
+    }
+
     private void LogSimulationDiagnostics()
     {
         var nr = _mesh.RadialPoints;

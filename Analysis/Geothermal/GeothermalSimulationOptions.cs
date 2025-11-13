@@ -105,6 +105,101 @@ public class GeothermalSimulationOptions
 
     public double HeatExchangerEndFeatherMeters { get; set; } = 10.0;
 
+    // ===== BTES (Borehole Thermal Energy Storage) Parameters =====
+
+    /// <summary>
+    ///     Enable BTES mode: applies seasonal energy curve to fluid inlet temperature
+    /// </summary>
+    public bool EnableBTESMode { get; set; } = false;
+
+    /// <summary>
+    ///     Seasonal energy curve for BTES (365 values, one per day).
+    ///     Positive values = heat injection (charging), Negative values = heat extraction (discharging).
+    ///     Units: kWh/day
+    /// </summary>
+    public List<double> SeasonalEnergyCurve { get; set; } = new();
+
+    /// <summary>
+    ///     Annual total energy to store in BTES mode (MWh/year)
+    /// </summary>
+    public double BTESAnnualEnergyStorage { get; set; } = 1000.0;
+
+    /// <summary>
+    ///     Peak to average ratio for seasonal curve generation
+    /// </summary>
+    public double BTESSeasonalPeakRatio { get; set; } = 2.5;
+
+    /// <summary>
+    ///     Save all time frames (for animation), not just every SaveInterval
+    /// </summary>
+    public bool SaveAllTimeFrames { get; set; } = false;
+
+    /// <summary>
+    ///     Base temperature for BTES heat injection (K) - temperature when charging
+    /// </summary>
+    public double BTESChargingTemperature { get; set; } = 313.15; // 40°C
+
+    /// <summary>
+    ///     Base temperature for BTES heat extraction (K) - temperature when discharging
+    /// </summary>
+    public double BTESDischargingTemperature { get; set; } = 278.15; // 5°C
+
+    /// <summary>
+    ///     Apply random variations to the seasonal curve to simulate realistic weather fluctuations
+    /// </summary>
+    public bool BTESApplyRandomVariations { get; set; } = false;
+
+    /// <summary>
+    ///     Magnitude of random variations (0-1, fraction of daily energy)
+    /// </summary>
+    public double BTESRandomVariationMagnitude { get; set; } = 0.15; // 15% variation
+
+    /// <summary>
+    ///     Random seed for reproducible variations (0 = random seed)
+    /// </summary>
+    public int BTESRandomSeed { get; set; } = 0;
+
+    /// <summary>
+    ///     Initialize default seasonal curve for BTES mode.
+    ///     Creates a sinusoidal curve with charging in summer and discharging in winter.
+    /// </summary>
+    public void InitializeDefaultSeasonalCurve()
+    {
+        SeasonalEnergyCurve.Clear();
+
+        // Initialize random generator with seed (or time-based if seed is 0)
+        Random random = BTESRandomSeed > 0 ? new Random(BTESRandomSeed) : new Random();
+
+        // Create a default seasonal curve (365 days)
+        // Summer (charging): positive values
+        // Winter (discharging): negative values
+        for (int day = 0; day < 365; day++)
+        {
+            // Sine wave with offset: charges in summer (day 120-270), discharges in winter
+            double dayAngle = (day - 195) * 2 * Math.PI / 365.0; // Peak at day 195 (mid-July)
+            double baseEnergy = Math.Sin(dayAngle) * BTESSeasonalPeakRatio * BTESAnnualEnergyStorage * 1000 / 365;
+
+            double dailyEnergy = baseEnergy;
+
+            // Apply random variations if enabled
+            if (BTESApplyRandomVariations)
+            {
+                // Generate smooth variations using multiple sine waves (weather patterns)
+                double shortTermVariation = Math.Sin(day * 2 * Math.PI / 7.0) * 0.3;  // Weekly variation
+                double mediumTermVariation = Math.Sin(day * 2 * Math.PI / 30.0) * 0.5; // Monthly variation
+                double randomNoise = (random.NextDouble() - 0.5) * 2.0; // Daily random noise
+
+                // Combine variations
+                double totalVariation = (shortTermVariation + mediumTermVariation + randomNoise) / 3.0;
+
+                // Apply variation (scaled by magnitude parameter)
+                dailyEnergy *= (1.0 + totalVariation * BTESRandomVariationMagnitude);
+            }
+
+            SeasonalEnergyCurve.Add(dailyEnergy);
+        }
+    }
+
     public void SetDefaultValues()
     {
         if (!LayerThermalConductivities.Any())
@@ -148,6 +243,7 @@ public class GeothermalSimulationOptions
             case GeothermalSimulationPreset.DeepGeothermalProduction: ApplyDeepGeothermalProductionPreset(); break;
             case GeothermalSimulationPreset.EnhancedGeothermalSystem: ApplyEnhancedGeothermalSystemPreset(); break;
             case GeothermalSimulationPreset.AquiferThermalStorage: ApplyAquiferThermalStoragePreset(); break;
+            case GeothermalSimulationPreset.BTESThermalBattery: ApplyBTESThermalBatteryPreset(); break;
             case GeothermalSimulationPreset.ExplorationTest: ApplyExplorationTestPreset(); break;
             case GeothermalSimulationPreset.Custom: break;
         }
@@ -300,6 +396,47 @@ public class GeothermalSimulationOptions
         SaveInterval = 8;
     }
 
+    private void ApplyBTESThermalBatteryPreset()
+    {
+        // BTES (Borehole Thermal Energy Storage) - Seasonal thermal battery
+        HeatExchangerType = HeatExchangerType.Coaxial; // Coaxial is preferred for BTES
+        FlowConfiguration = FlowConfiguration.CounterFlowReversed;
+        PipeInnerDiameter = 0.100;
+        PipeOuterDiameter = 0.160;
+        PipeSpacing = 0.150;
+        PipeThermalConductivity = 45.0; // Steel pipe for good heat transfer
+        InnerPipeThermalConductivity = 0.03; // Insulated inner pipe
+        GroutThermalConductivity = 2.5;
+        FluidMassFlowRate = 3.0;
+        FluidInletTemperature = 285.15; // This will be overridden by seasonal curve
+        SurfaceTemperature = 285.15;
+        AverageGeothermalGradient = 0.025;
+        GeothermalHeatFlux = 0.060;
+        DomainRadius = 80; // Larger domain for thermal storage
+        DomainExtension = 25;
+        RadialGridPoints = 50;
+        AngularGridPoints = 32;
+        VerticalGridPoints = 100;
+        SimulateGroundwaterFlow = true;
+        GroundwaterVelocity = new Vector3(1e-7f, 0, 0); // Low groundwater flow
+        SimulationTime = 86400 * 365 * 5; // 5 years to see multiple seasonal cycles
+        TimeStep = 3600 * 6; // 6 hour time step
+        SaveInterval = 1; // Save every step for visualization
+        ConvergenceTolerance = 5e-3;
+        MaxIterationsPerStep = 200;
+
+        // Enable BTES mode
+        EnableBTESMode = true;
+        SaveAllTimeFrames = true;
+        BTESAnnualEnergyStorage = 1000.0; // 1 GWh/year
+        BTESSeasonalPeakRatio = 2.5;
+        BTESChargingTemperature = 313.15; // 40°C for charging
+        BTESDischargingTemperature = 278.15; // 5°C for discharging
+
+        // Initialize seasonal curve
+        InitializeDefaultSeasonalCurve();
+    }
+
     private void ApplyExplorationTestPreset()
     {
         HeatExchangerType = HeatExchangerType.UTube;
@@ -344,6 +481,8 @@ public class GeothermalSimulationOptions
                 "EGS (3-6km): Very high-flow Coaxial (VIT) with fracture flow for high-temp power.",
             GeothermalSimulationPreset.AquiferThermalStorage =>
                 "ATES (50-300m): High-flow U-Tube for seasonal energy storage in aquifers.",
+            GeothermalSimulationPreset.BTESThermalBattery =>
+                "BTES (50-300m): Borehole Thermal Energy Storage with seasonal charging/discharging cycles for long-term heat storage.",
             GeothermalSimulationPreset.ExplorationTest =>
                 "Quick Test (any depth): Coarse grid, 7-day run for rapid feasibility assessment.",
             _ => "Unknown preset"
@@ -359,5 +498,6 @@ public enum GeothermalSimulationPreset
     DeepGeothermalProduction,
     EnhancedGeothermalSystem,
     AquiferThermalStorage,
+    BTESThermalBattery,
     ExplorationTest
 }
