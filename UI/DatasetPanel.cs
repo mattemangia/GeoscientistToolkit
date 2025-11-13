@@ -1,4 +1,4 @@
-// GeoscientistToolkit/UI/DatasetPanel.cs (Fixed Unicode Issue)
+// GeoscientistToolkit/UI/DatasetPanel.cs
 
 using System.Numerics;
 using GeoscientistToolkit.Business;
@@ -6,29 +6,37 @@ using GeoscientistToolkit.Data;
 using GeoscientistToolkit.Data.AcousticVolume;
 using GeoscientistToolkit.Data.CtImageStack;
 using GeoscientistToolkit.Data.GIS;
+using GeoscientistToolkit.Data.Image;
 using GeoscientistToolkit.Data.Mesh3D;
 using GeoscientistToolkit.Data.Pnm;
 using GeoscientistToolkit.Data.Table;
 using GeoscientistToolkit.UI.AcousticVolume;
 using ImGuiNET;
-
-// Added for PNM
+using System.Linq;
+using System.Collections.Generic;
+using System;
+using GeoscientistToolkit.UI.Panorama;
+using GeoscientistToolkit.UI.Photogrammetry;
+using GeoscientistToolkit.Util; // Needed for VeldridManager
 
 namespace GeoscientistToolkit.UI;
 
 public class DatasetPanel : BasePanel
 {
     private readonly AcousticToCtConverterDialog _acousticToCtConverterDialog = new();
-
     private readonly MetadataEditor _metadataEditor = new();
-
-    // Multi-selection state
     private readonly HashSet<Dataset> _selectedDatasets = new();
     private Dataset _lastSelectedDataset;
     private Action<Dataset> _onDatasetSelected;
     private Action _onImportClicked;
-    private List<Dataset> _orderedDatasets = new(); // To maintain order for shift-selection
+    private List<Dataset> _orderedDatasets = new();
     private string _searchFilter = "";
+    private DatasetGroup _groupToRename;
+    private string _newGroupName = "";
+    private bool _openRenamePopup;
+
+    private PanoramaWizardPanel _panoramaWizard;
+    private PhotogrammetryWizardPanel _photogrammetryWizard;
 
     public DatasetPanel() : base("Datasets", new Vector2(250, 400))
     {
@@ -36,12 +44,31 @@ public class DatasetPanel : BasePanel
 
     public event Action<GISDataset> OnCreateShapefileFromTable;
     public event Action<GISDataset> OnCreateEmptyShapefile;
+    public event Action<DatasetGroup> OnOpenThumbnailViewer;
+    public event Action<DatasetGroup> OnComposePanorama;
+    public event Action<DatasetGroup> OnProcessPhotogrammetry; // Added for Photogrammetry
 
+    // RESTORED: Original Submit method signature
     public void Submit(ref bool pOpen, Action<Dataset> onDatasetSelected, Action onImportClicked)
     {
         _onDatasetSelected = onDatasetSelected;
         _onImportClicked = onImportClicked;
         base.Submit(ref pOpen);
+
+        // ADDED: Manage and draw the wizards if they exist
+        if (_panoramaWizard != null)
+        {
+            _panoramaWizard.Draw();
+            if (!_panoramaWizard.IsOpen)
+                _panoramaWizard = null;
+        }
+
+        if (_photogrammetryWizard != null)
+        {
+            _photogrammetryWizard.Submit();
+            if (!_photogrammetryWizard.IsOpen)
+                _photogrammetryWizard = null;
+        }
     }
 
     protected override void DrawContent()
@@ -52,7 +79,6 @@ public class DatasetPanel : BasePanel
 
         var datasets = ProjectManager.Instance.LoadedDatasets;
 
-        // Update ordered datasets list for shift-selection
         _orderedDatasets = datasets
             .Where(d => string.IsNullOrEmpty(_searchFilter) ||
                         d.Name.Contains(_searchFilter, StringComparison.OrdinalIgnoreCase))
@@ -62,7 +88,6 @@ public class DatasetPanel : BasePanel
 
         if (datasets.Count == 0)
         {
-            // --- Show empty state UI ---
             var windowWidth = ImGui.GetWindowSize().X;
             var textWidth = ImGui.CalcTextSize("No datasets loaded").X;
             ImGui.SetCursorPosX((windowWidth - textWidth) * 0.5f);
@@ -78,12 +103,10 @@ public class DatasetPanel : BasePanel
         }
         else
         {
-            // Check for clicks outside any dataset to clear selection
             if (ImGui.IsMouseClicked(ImGuiMouseButton.Left) && ImGui.IsWindowHovered() &&
                 !ImGui.IsAnyItemHovered())
                 _selectedDatasets.Clear();
 
-            // --- Group datasets by type ---
             var datasetsByType = _orderedDatasets
                 .GroupBy(d => d.Type)
                 .OrderBy(g => g.Key.ToString());
@@ -111,6 +134,14 @@ public class DatasetPanel : BasePanel
                 }
         }
 
+        if (_openRenamePopup)
+        {
+            ImGui.OpenPopup("Rename Group");
+            _openRenamePopup = false;
+        }
+        
+        DrawRenameGroupPopup();
+
         _acousticToCtConverterDialog.Draw();
         _metadataEditor.Submit();
         ImGui.Separator();
@@ -122,15 +153,12 @@ public class DatasetPanel : BasePanel
     {
         ImGui.PushID(dataset.GetHashCode());
 
-        // Apply indentation for grouped items
         if (indentLevel > 0) ImGui.Indent(20f * indentLevel);
 
         var isSelected = _selectedDatasets.Contains(dataset);
 
-        // Change color if dataset is missing
         if (dataset.IsMissing) ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(1.0f, 0.4f, 0.4f, 1.0f));
 
-        // Check if dataset has metadata
         var hasMetadata = !string.IsNullOrEmpty(dataset.DatasetMetadata?.SampleName) ||
                           !string.IsNullOrEmpty(dataset.DatasetMetadata?.LocationName) ||
                           dataset.DatasetMetadata?.Latitude.HasValue == true ||
@@ -138,22 +166,16 @@ public class DatasetPanel : BasePanel
 
         var displayName = dataset.Name;
         if (hasMetadata)
-            // Use simple text indicator instead of Unicode emoji
-            displayName = "[M] " + displayName; // [M] for Metadata
+            displayName = "[M] " + displayName;
 
-        // Handle selection
         if (ImGui.Selectable(displayName, isSelected)) HandleDatasetSelection(dataset);
 
         if (dataset.IsMissing) ImGui.PopStyleColor();
 
-        // Show enhanced tooltip with metadata
         if (ImGui.IsItemHovered()) ShowDatasetTooltipWithMetadata(dataset);
 
-        // Context menu
         if (ImGui.BeginPopupContextItem())
         {
-            // If right-clicking on an item that is not selected, clear 
-            // the current selection and select only this one.
             if (!isSelected)
             {
                 _selectedDatasets.Clear();
@@ -165,7 +187,6 @@ public class DatasetPanel : BasePanel
             ImGui.EndPopup();
         }
 
-        // If this is a group, draw its children
         if (dataset is DatasetGroup group)
             foreach (var child in group.Datasets)
                 DrawDatasetItem(child, indentLevel + 1);
@@ -186,62 +207,32 @@ public class DatasetPanel : BasePanel
         ImGui.TextUnformatted($"Type: {dataset.Type}");
         ImGui.TextUnformatted($"Path: {dataset.FilePath}");
 
-        // Show metadata if available
         var meta = dataset.DatasetMetadata;
         if (meta != null)
         {
             var hasAnyMetadata = false;
-
             if (!string.IsNullOrEmpty(meta.SampleName))
             {
-                if (!hasAnyMetadata)
-                {
-                    ImGui.Separator();
-                    ImGui.Text("Metadata:");
-                    hasAnyMetadata = true;
-                }
-
+                if (!hasAnyMetadata) { ImGui.Separator(); ImGui.Text("Metadata:"); hasAnyMetadata = true; }
                 ImGui.TextUnformatted($"  Sample: {meta.SampleName}");
             }
-
             if (!string.IsNullOrEmpty(meta.LocationName))
             {
-                if (!hasAnyMetadata)
-                {
-                    ImGui.Separator();
-                    ImGui.Text("Metadata:");
-                    hasAnyMetadata = true;
-                }
-
+                if (!hasAnyMetadata) { ImGui.Separator(); ImGui.Text("Metadata:"); hasAnyMetadata = true; }
                 ImGui.TextUnformatted($"  Location: {meta.LocationName}");
             }
-
             if (meta.Latitude.HasValue && meta.Longitude.HasValue)
             {
-                if (!hasAnyMetadata)
-                {
-                    ImGui.Separator();
-                    ImGui.Text("Metadata:");
-                    hasAnyMetadata = true;
-                }
-
+                if (!hasAnyMetadata) { ImGui.Separator(); ImGui.Text("Metadata:"); hasAnyMetadata = true; }
                 ImGui.TextUnformatted($"  Coordinates: {meta.Latitude:F6}°, {meta.Longitude:F6}°");
             }
-
             if (meta.Depth.HasValue)
             {
-                if (!hasAnyMetadata)
-                {
-                    ImGui.Separator();
-                    ImGui.Text("Metadata:");
-                    hasAnyMetadata = true;
-                }
-
+                if (!hasAnyMetadata) { ImGui.Separator(); ImGui.Text("Metadata:"); hasAnyMetadata = true; }
                 ImGui.TextUnformatted($"  Depth: {meta.Depth:F2} m");
             }
         }
 
-        // Show type-specific information
         if (dataset is CtImageStackDataset ctDataset)
         {
             ImGui.Separator();
@@ -253,8 +244,7 @@ public class DatasetPanel : BasePanel
         else if (dataset is StreamingCtVolumeDataset streamingCt)
         {
             ImGui.Separator();
-            ImGui.TextUnformatted(
-                $"Full Size: {streamingCt.FullWidth}x{streamingCt.FullHeight}x{streamingCt.FullDepth}");
+            ImGui.TextUnformatted($"Full Size: {streamingCt.FullWidth}x{streamingCt.FullHeight}x{streamingCt.FullDepth}");
             ImGui.TextUnformatted($"LOD Levels: {streamingCt.LodCount}");
             ImGui.TextUnformatted($"Brick Size: {streamingCt.BrickSize}");
             if (streamingCt.EditablePartner != null)
@@ -314,22 +304,66 @@ public class DatasetPanel : BasePanel
 
     private void DrawContextMenuWithMetadata(Dataset dataset)
     {
-        // View option
         if (ImGui.MenuItem("View", null, false, !(dataset is DatasetGroup) && !dataset.IsMissing))
             _onDatasetSelected?.Invoke(dataset);
 
-        // Edit Metadata option
         ImGui.Separator();
         if (ImGui.MenuItem("Edit Metadata...", null, false, !(dataset is DatasetGroup))) _metadataEditor.Open(dataset);
 
-        // Group-specific options
         if (dataset is DatasetGroup group)
         {
-            if (ImGui.MenuItem("View Thumbnails"))
-                // Signal to open thumbnail viewer
+            if (ImGui.MenuItem("Rename"))
+            {
+                _groupToRename = group;
+                _newGroupName = group.Name;
+                _openRenamePopup = true;
+            }
+            
+            bool hasImages = group.Datasets.Any(d => d.Type == DatasetType.SingleImage || d.Type == DatasetType.CtImageStack);
+            
+            if (ImGui.MenuItem("View Thumbnails", null, false, hasImages))
+            {
                 OnOpenThumbnailViewer?.Invoke(group);
+            }
+            if (ImGui.IsItemHovered() && !hasImages)
+            {
+                ImGui.SetTooltip("This group contains no image datasets to display.");
+            }
 
             if (ImGui.MenuItem("Ungroup")) UngroupDataset(group);
+
+            ImGui.Separator();
+            
+            // --- MODIFIED: Added Panorama and Photogrammetry options ---
+            bool canProcessImages = group.Datasets.Count > 1 && group.Datasets.All(d => d is ImageDataset);
+
+            if (ImGui.MenuItem("Compose Panorama...", null, false, canProcessImages))
+            {
+                // CORRECTED: Create the wizard on demand using the static VeldridManager
+                if (_panoramaWizard == null)
+                {
+                    _panoramaWizard = new PanoramaWizardPanel(group, VeldridManager.GraphicsDevice, VeldridManager.ImGuiController);
+                    _panoramaWizard.Open();
+                }
+            }
+            if (ImGui.IsItemHovered() && !canProcessImages)
+            {
+                ImGui.SetTooltip("Group must contain at least two single image datasets.");
+            }
+
+            if (ImGui.MenuItem("Process Photogrammetry...", null, false, canProcessImages))
+            {
+                // CORRECTED: Create the wizard on demand using the static VeldridManager
+                if (_photogrammetryWizard == null)
+                {
+                    _photogrammetryWizard = new PhotogrammetryWizardPanel(group, VeldridManager.GraphicsDevice, VeldridManager.ImGuiController);
+                    _photogrammetryWizard.Open();
+                }
+            }
+            if (ImGui.IsItemHovered() && !canProcessImages)
+            {
+                ImGui.SetTooltip("Group must contain at least two single image datasets.");
+            }
         }
 
         if (dataset is AcousticVolumeDataset acousticDataset)
@@ -347,14 +381,12 @@ public class DatasetPanel : BasePanel
             if (ImGui.MenuItem("Create Empty Shapefile...")) OnCreateEmptyShapefile?.Invoke(gisDataset);
         }
 
-        // Multi-selection grouping
         if (_selectedDatasets.Count > 1 && _selectedDatasets.Contains(dataset))
             if (ImGui.MenuItem("Group Selected"))
                 CreateGroup();
 
         ImGui.Separator();
 
-        // Close/Remove option - now acts on all selected items
         if (ImGui.MenuItem("Close"))
         {
             var itemsToClose = _selectedDatasets.ToList();
@@ -362,7 +394,6 @@ public class DatasetPanel : BasePanel
             foreach (var item in itemsToClose)
             {
                 if (item is DatasetGroup grp)
-                    // Also remove all datasets within the group
                     foreach (var child in grp.Datasets.ToList())
                         ProjectManager.Instance.RemoveDataset(child);
 
@@ -376,7 +407,6 @@ public class DatasetPanel : BasePanel
     private void HandleDatasetSelection(Dataset dataset)
     {
         if (dataset.IsMissing)
-            // Optionally prevent interaction with missing datasets
             return;
 
         var ctrlHeld = ImGui.GetIO().KeyCtrl;
@@ -384,7 +414,6 @@ public class DatasetPanel : BasePanel
 
         if (ctrlHeld)
         {
-            // Toggle selection
             if (_selectedDatasets.Contains(dataset))
                 _selectedDatasets.Remove(dataset);
             else
@@ -392,7 +421,6 @@ public class DatasetPanel : BasePanel
         }
         else if (shiftHeld && _lastSelectedDataset != null)
         {
-            // Range selection
             var startIdx = _orderedDatasets.IndexOf(_lastSelectedDataset);
             var endIdx = _orderedDatasets.IndexOf(dataset);
 
@@ -402,13 +430,12 @@ public class DatasetPanel : BasePanel
                 var maxIdx = Math.Max(startIdx, endIdx);
 
                 for (var i = minIdx; i <= maxIdx; i++)
-                    if (!_orderedDatasets[i].IsMissing) // Don't select missing items in range
+                    if (!_orderedDatasets[i].IsMissing)
                         _selectedDatasets.Add(_orderedDatasets[i]);
             }
         }
         else
         {
-            // Single selection
             _selectedDatasets.Clear();
             _selectedDatasets.Add(dataset);
             _onDatasetSelected?.Invoke(dataset);
@@ -416,36 +443,78 @@ public class DatasetPanel : BasePanel
 
         _lastSelectedDataset = dataset;
     }
+    
+    private void DrawRenameGroupPopup()
+    {
+        var center = ImGui.GetMainViewport().GetCenter();
+        ImGui.SetNextWindowPos(center, ImGuiCond.Appearing, new Vector2(0.5f, 0.5f));
 
-    // Add this event at the top of the class with other fields
-    public event Action<DatasetGroup> OnOpenThumbnailViewer;
+        var p_open = true;
+        if (ImGui.BeginPopupModal("Rename Group", ref p_open, ImGuiWindowFlags.AlwaysAutoResize))
+        {
+            ImGui.Text("Enter a new name for the group:");
+            ImGui.Separator();
+            
+            if (ImGui.IsWindowAppearing())
+            {
+                ImGui.SetKeyboardFocusHere(0);
+            }
+
+            if (ImGui.InputText("##NewGroupName", ref _newGroupName, 256, ImGuiInputTextFlags.EnterReturnsTrue))
+            {
+                if (_groupToRename != null && !string.IsNullOrWhiteSpace(_newGroupName))
+                {
+                    _groupToRename.Name = _newGroupName;
+                    ProjectManager.Instance.HasUnsavedChanges = true;
+                }
+                _groupToRename = null;
+                ImGui.CloseCurrentPopup();
+            }
+
+            ImGui.Spacing();
+
+            if (ImGui.Button("OK", new Vector2(120, 0)))
+            {
+                if (_groupToRename != null && !string.IsNullOrWhiteSpace(_newGroupName))
+                {
+                    _groupToRename.Name = _newGroupName;
+                    ProjectManager.Instance.HasUnsavedChanges = true;
+                }
+                _groupToRename = null;
+                ImGui.CloseCurrentPopup();
+            }
+
+            ImGui.SameLine();
+
+            if (ImGui.Button("Cancel", new Vector2(120, 0)))
+            {
+                _groupToRename = null;
+                ImGui.CloseCurrentPopup();
+            }
+            ImGui.EndPopup();
+        }
+    }
 
     private void CreateGroup()
     {
         if (_selectedDatasets.Count < 2) return;
-
-        // Create group name
+    
         var groupName = $"Group {ProjectManager.Instance.LoadedDatasets.Count(d => d is DatasetGroup) + 1}";
-
-        // Create the group
-        var group = new DatasetGroup(groupName, _selectedDatasets.ToList());
-
-        // Remove individual datasets from the project
-        foreach (var dataset in _selectedDatasets) ProjectManager.Instance.RemoveDataset(dataset);
-
-        // Add the group
+        var datasetsToGroup = _selectedDatasets.ToList();
+        var group = new DatasetGroup(groupName, datasetsToGroup);
+    
+        foreach (var dataset in datasetsToGroup)
+        {
+            ProjectManager.Instance.LoadedDatasets.Remove(dataset);
+        }
+    
         ProjectManager.Instance.AddDataset(group);
-
-        // Clear selection
         _selectedDatasets.Clear();
     }
 
     private void UngroupDataset(DatasetGroup group)
     {
-        // Add all datasets back to the project
         foreach (var dataset in group.Datasets) ProjectManager.Instance.AddDataset(dataset);
-
-        // Remove the group
         ProjectManager.Instance.RemoveDataset(group);
         _selectedDatasets.Remove(group);
     }
@@ -468,6 +537,7 @@ public class DatasetPanel : BasePanel
             DatasetType.PNM => "[PNM]",
             DatasetType.Borehole => "[WELL]",
             DatasetType.TwoDGeology => "[2DGEOL]",
+            DatasetType.SubsurfaceGIS => "[SUBSGIS]",
             _ => "[DATA]"
         };
     }

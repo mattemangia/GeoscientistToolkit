@@ -15,6 +15,7 @@
 
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using GeoscientistToolkit.Business;
 using GeoscientistToolkit.Util;
 
 namespace GeoscientistToolkit.Data.Materials;
@@ -229,6 +230,8 @@ public sealed class CompoundLibrary
         SeedElements(); // Seed elements first
         SeedDefaults(); // Then seed compounds
         SeedSolidSolutions(); // Then define solid solutions
+        this.SeedAdditionalCompounds(); // Add extended database (from CompoundLibraryExtensions)
+        this.SeedMetamorphicMinerals(); // Add metamorphic minerals (from CompoundLibraryMetamorphicExtensions)
     }
 
     // ENHANCEMENT: Add support for solid solutions

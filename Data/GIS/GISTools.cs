@@ -6,6 +6,7 @@ using GeoscientistToolkit.Business;
 using GeoscientistToolkit.Business.GIS;
 using GeoscientistToolkit.Data;
 using GeoscientistToolkit.Data.GIS;
+using GeoscientistToolkit.UI.GIS.Tools;
 using GeoscientistToolkit.UI.Interfaces;
 using GeoscientistToolkit.UI.Utils;
 using GeoscientistToolkit.Util;
@@ -106,6 +107,18 @@ public class GISTools : IDatasetTools
                         Name = "Create From Metadata",
                         Description = "Create a new point layer from other datasets' coordinates.",
                         Tool = new CreateFromMetadataTool()
+                    },
+                    new()
+                    {
+                        Name = "Raster Calculator",
+                        Description = "Perform mathematical operations on raster layers using expressions.",
+                        Tool = new RasterCalculatorTool()
+                    },
+                    new()
+                    {
+                        Name = "Georeference Raster",
+                        Description = "Re-georeference or georeference raster layers with ground control points.",
+                        Tool = new GeoreferenceTool()
                     }
                 }
             },
@@ -258,235 +271,140 @@ public class GISTools : IDatasetTools
             {
                 var layer = gisDataset.Layers[i];
                 ImGui.PushID(i);
-                var visible = layer.IsVisible;
-                if (ImGui.Checkbox("##Visible", ref visible)) layer.IsVisible = visible;
-                ImGui.SameLine();
-                if (ImGui.TreeNode(layer.Name))
+
+                var isVisible = layer.IsVisible;
+                if (ImGui.Checkbox($"##Vis{i}", ref isVisible))
                 {
-                    ImGui.Text($"Type: {layer.Type}");
-                    if (layer.Type == LayerType.Vector)
-                    {
-                        ImGui.Text($"Features: {layer.Features.Count}");
-                        var color = layer.Color;
-                        if (ImGui.ColorEdit4("Color", ref color)) layer.Color = color;
-                        var lineWidth = layer.LineWidth;
-                        if (ImGui.SliderFloat("Line Width", ref lineWidth, 0.5f, 10.0f)) layer.LineWidth = lineWidth;
-                        var pointSize = layer.PointSize;
-                        if (ImGui.SliderFloat("Point Size", ref pointSize, 1.0f, 20.0f)) layer.PointSize = pointSize;
-                        var editable = layer.IsEditable;
-                        if (ImGui.Checkbox("Editable", ref editable)) layer.IsEditable = editable;
-                    }
-                    else if (layer is GISRasterLayer rasterLayer)
-                    {
-                        ImGui.Text($"Resolution: {rasterLayer.Width}x{rasterLayer.Height}");
-                        if (ImGui.Button("Set as Basemap"))
-                        {
-                            gisDataset.ActiveBasemapLayerName = rasterLayer.Name;
-                            Logger.Log($"Set '{rasterLayer.Name}' as active basemap.");
-                        }
-                    }
-        
-                    ImGui.TreePop();
+                    layer.IsVisible = isVisible;
                 }
-        
+                ImGui.SameLine();
+                if (layer.Type == LayerType.Raster)
+                {
+                    ImGui.Text("[R]");
+                    if (ImGui.IsItemHovered())
+                        ImGui.SetTooltip("Raster Layer");
+                }
+                else
+                {
+                    ImGui.Text("[V]");
+                    if (ImGui.IsItemHovered())
+                        ImGui.SetTooltip("Vector Layer");
+                }
+
+                ImGui.SameLine();
+                ImGui.Text(layer.Name);
+
+                ImGui.SameLine();
+                var regionAvail = ImGui.GetContentRegionAvail().X;
+                ImGui.SetCursorPosX(ImGui.GetCursorPosX() + regionAvail - 120);
+                if (ImGui.SmallButton("Set as Basemap") && layer is GISRasterLayer)
+                {
+                    gisDataset.SetLayerAsBasemap(layer.Name);
+                }
+
                 ImGui.PopID();
             }
-        
+
+            ImGui.Spacing();
             ImGui.Separator();
-            ImGui.Text("Add Layer:");
-            ImGui.SetNextItemWidth(150);
-            ImGui.InputText("##NewLayerName", ref _newLayerName, 64);
+            ImGui.Text("Add New Layer:");
+            ImGui.InputText("##NewLayerName", ref _newLayerName, 128);
             ImGui.SameLine();
-            if (ImGui.Button("Add"))
+            if (ImGui.Button("Add Vector Layer"))
             {
                 var newLayer = new GISLayer
                 {
-                    Name = _newLayerName, Type = LayerType.Vector, IsVisible = true, IsEditable = true,
-                    Color = new Vector4(Random.Shared.NextSingle(), Random.Shared.NextSingle(),
-                        Random.Shared.NextSingle(), 1.0f)
+                    Name = _newLayerName,
+                    Type = LayerType.Vector,
+                    IsVisible = true,
+                    IsEditable = true,
+                    Color = new Vector4(0.2f, 0.5f, 1.0f, 1.0f)
                 };
                 gisDataset.Layers.Add(newLayer);
-                _newLayerName = $"Layer {gisDataset.Layers.Count + 1}";
-                Logger.Log($"Added new layer: {newLayer.Name}");
+                _newLayerName = "New Layer";
             }
         }
     }
 
     private class TagManagerTool : IDatasetTools
     {
-        private readonly Dictionary<string, bool> _tagCategoryExpanded =
-            new() { { "Format", true }, { "Geometry", true }, { "Purpose", true } };
-
-        private bool _showTagPicker;
-        private string _tagSearchFilter = "";
-
         public void Draw(Dataset dataset)
         {
             if (dataset is not GISDataset gisDataset) return;
-            ImGui.Text("Active Tags:");
-            if (gisDataset.Tags == GISTag.None)
+
+            ImGui.Text("Current Tags:");
+            ImGui.Separator();
+
+            var currentTags = gisDataset.Tags.GetFlags().ToList();
+            if (currentTags.Count == 0)
             {
                 ImGui.TextDisabled("No tags assigned");
             }
             else
             {
-                var activeTags = gisDataset.Tags.GetFlags().ToList();
-                var toRemove = new List<GISTag>();
-                foreach (var tag in activeTags)
+                foreach (var tag in currentTags)
                 {
-                    ImGui.PushID(tag.GetHashCode());
-                    ImGui.PushStyleColor(ImGuiCol.Button, GetTagColor(tag));
-                    if (ImGui.Button($"{tag.GetDisplayName()} ×")) toRemove.Add(tag);
-                    ImGui.PopStyleColor();
-                    if (ImGui.IsItemHovered()) ImGui.SetTooltip(tag.GetCategoryDescription());
-                    ImGui.SameLine();
-                    ImGui.PopID();
-                }
-
-                ImGui.NewLine();
-                foreach (var tag in toRemove) gisDataset.RemoveTag(tag);
-            }
-
-            ImGui.Separator();
-            if (ImGui.Button("Add Tags...")) _showTagPicker = true;
-            ImGui.SameLine();
-            if (ImGui.Button("Auto-Detect Tags")) AutoDetectTags(gisDataset);
-            ImGui.SameLine();
-            if (ImGui.Button("Clear All Tags")) gisDataset.ClearTags();
-            if (_showTagPicker) DrawTagPickerWindow(gisDataset);
-        }
-
-        private void DrawTagPickerWindow(GISDataset dataset)
-        {
-            ImGui.SetNextWindowSize(new Vector2(600, 500), ImGuiCond.FirstUseEver);
-            if (ImGui.Begin("Add Tags", ref _showTagPicker))
-            {
-                ImGui.InputText("Search", ref _tagSearchFilter, 256);
-                ImGui.Separator();
-                if (ImGui.BeginChild("TagCategories"))
-                {
-                    DrawTagCategory(dataset, "Format",
-                        new[]
-                        {
-                            GISTag.Shapefile, GISTag.GeoJSON, GISTag.KML, GISTag.KMZ, GISTag.GeoTIFF, GISTag.GeoPackage,
-                            GISTag.FileGDB
-                        });
-                    DrawTagCategory(dataset, "Geometry",
-                        new[] { GISTag.VectorData, GISTag.RasterData, GISTag.PointCloud, GISTag.TIN });
-                    DrawTagCategory(dataset, "Purpose",
-                        new[]
-                        {
-                            GISTag.Topography, GISTag.Basemap, GISTag.LandRegister, GISTag.Cadastral, GISTag.Satellite,
-                            GISTag.Aerial, GISTag.Geological, GISTag.GeologicalMap, GISTag.StructuralData,
-                            GISTag.Geophysical, GISTag.Administrative, GISTag.Infrastructure, GISTag.Hydrography,
-                            GISTag.Vegetation, GISTag.LandUse, GISTag.Bathymetry, GISTag.Seismic
-                        });
-                    DrawTagCategory(dataset, "Analysis",
-                        new[]
-                        {
-                            GISTag.DEM, GISTag.DSM, GISTag.DTM, GISTag.Slope, GISTag.Aspect, GISTag.Hillshade,
-                            GISTag.Contours, GISTag.Watershed, GISTag.FlowDirection
-                        });
-                    DrawTagCategory(dataset, "Properties",
-                        new[]
-                        {
-                            GISTag.Georeferenced, GISTag.Projected, GISTag.MultiLayer, GISTag.Editable, GISTag.Cached,
-                            GISTag.Validated, GISTag.Cleaned, GISTag.Attributed, GISTag.Styled, GISTag.TimeSeries,
-                            GISTag.Multispectral, GISTag.ThreeDimensional
-                        });
-                    DrawTagCategory(dataset, "Source",
-                        new[]
-                        {
-                            GISTag.Survey, GISTag.RemoteSensing, GISTag.Generated, GISTag.Imported, GISTag.OpenData,
-                            GISTag.Commercial, GISTag.FieldData, GISTag.LiDAR, GISTag.UAV, GISTag.GPS
-                        });
-                }
-
-                ImGui.EndChild();
-                ImGui.End();
-            }
-        }
-
-        private void DrawTagCategory(GISDataset dataset, string categoryName, GISTag[] tags)
-        {
-            if (!_tagCategoryExpanded.TryGetValue(categoryName, out var isExpanded)) isExpanded = false;
-            if (ImGui.CollapsingHeader(categoryName, ref isExpanded))
-            {
-                _tagCategoryExpanded[categoryName] = true;
-                foreach (var tag in tags)
-                {
-                    if (!string.IsNullOrEmpty(_tagSearchFilter) && !tag.GetDisplayName()
-                            .Contains(_tagSearchFilter, StringComparison.OrdinalIgnoreCase)) continue;
-                    var hasTag = dataset.HasTag(tag);
-                    if (ImGui.Checkbox($"##{tag}", ref hasTag))
+                    ImGui.BulletText(tag.GetDisplayName());
+                    ImGui.SameLine(ImGui.GetContentRegionAvail().X - 80);
+                    if (ImGui.SmallButton($"Remove##{tag}"))
                     {
-                        if (hasTag) dataset.AddTag(tag);
-                        else dataset.RemoveTag(tag);
+                        gisDataset.Tags &= ~tag;
+                        ProjectManager.Instance.HasUnsavedChanges = true;
                     }
-
-                    ImGui.SameLine();
-                    ImGui.Text(tag.GetDisplayName());
-                    if (ImGui.IsItemHovered()) ImGui.SetTooltip(tag.GetCategoryDescription());
                 }
             }
-            else
+
+            ImGui.Spacing();
+            ImGui.Separator();
+            ImGui.Text("Add Tags:");
+
+            if (ImGui.TreeNode("Format Tags"))
             {
-                _tagCategoryExpanded[categoryName] = false;
+                DrawTagCheckbox(gisDataset, GISTag.Shapefile);
+                DrawTagCheckbox(gisDataset, GISTag.GeoJSON);
+                DrawTagCheckbox(gisDataset, GISTag.KML);
+                DrawTagCheckbox(gisDataset, GISTag.GeoTIFF);
+                ImGui.TreePop();
+            }
+
+            if (ImGui.TreeNode("Geometry Types"))
+            {
+                DrawTagCheckbox(gisDataset, GISTag.VectorData);
+                DrawTagCheckbox(gisDataset, GISTag.RasterData);
+                DrawTagCheckbox(gisDataset, GISTag.PointCloud);
+                ImGui.TreePop();
+            }
+
+            if (ImGui.TreeNode("Content Types"))
+            {
+                DrawTagCheckbox(gisDataset, GISTag.Topography);
+                DrawTagCheckbox(gisDataset, GISTag.Geological);
+                DrawTagCheckbox(gisDataset, GISTag.Satellite);
+                DrawTagCheckbox(gisDataset, GISTag.Hydrography);
+                ImGui.TreePop();
+            }
+
+            if (ImGui.TreeNode("Analysis Types"))
+            {
+                DrawTagCheckbox(gisDataset, GISTag.DEM);
+                DrawTagCheckbox(gisDataset, GISTag.Slope);
+                DrawTagCheckbox(gisDataset, GISTag.Aspect);
+                DrawTagCheckbox(gisDataset, GISTag.Hillshade);
+                ImGui.TreePop();
             }
         }
 
-        private void AutoDetectTags(GISDataset dataset)
+        private void DrawTagCheckbox(GISDataset dataset, GISTag tag)
         {
-            var recommended = GISTagExtensions.GetRecommendedTags(dataset.FilePath ?? "",
-                dataset.Layers.FirstOrDefault()?.Type ?? LayerType.Vector);
-            var addedCount = 0;
-
-            // Correctly iterate and add tags
-            foreach (var tag in recommended)
-                if (!dataset.HasTag(tag))
-                {
-                    dataset.AddTag(tag);
-                    addedCount++;
-                }
-
-            if (dataset.Layers.Any(l => l.Features.Any(f => f.Properties.Count > 0)) &&
-                !dataset.HasTag(GISTag.Attributed))
+            var hasTag = dataset.Tags.HasFlag(tag);
+            if (ImGui.Checkbox(tag.GetDisplayName(), ref hasTag))
             {
-                dataset.AddTag(GISTag.Attributed);
-                addedCount++;
+                if (hasTag)
+                    dataset.Tags |= tag;
+                else
+                    dataset.Tags &= ~tag;
+                ProjectManager.Instance.HasUnsavedChanges = true;
             }
-
-            if (dataset.Layers.Count > 1 && !dataset.HasTag(GISTag.MultiLayer))
-            {
-                dataset.AddTag(GISTag.MultiLayer);
-                addedCount++;
-            }
-
-            if (!string.IsNullOrEmpty(dataset.Projection.EPSG))
-            {
-                if (!dataset.HasTag(GISTag.Georeferenced))
-                {
-                    dataset.AddTag(GISTag.Georeferenced);
-                    addedCount++;
-                }
-
-                if (dataset.Projection.EPSG != "EPSG:4326" && !dataset.HasTag(GISTag.Projected))
-                {
-                    dataset.AddTag(GISTag.Projected);
-                    addedCount++;
-                }
-            }
-
-            Logger.Log($"Auto-detected and added {addedCount} new tags.");
-        }
-
-        private Vector4 GetTagColor(GISTag tag)
-        {
-            if (tag.IsFormatTag()) return new Vector4(0.5f, 0.8f, 1.0f, 1.0f);
-            if (tag.IsGeometryTypeTag()) return new Vector4(0.8f, 0.5f, 1.0f, 1.0f);
-            if (tag.IsAnalysisTag()) return new Vector4(1.0f, 0.8f, 0.3f, 1.0f);
-            if (tag.IsSourceTag()) return new Vector4(0.5f, 1.0f, 0.5f, 1.0f);
-            return new Vector4(0.7f, 0.7f, 0.7f, 1.0f);
         }
     }
 
@@ -495,105 +413,105 @@ public class GISTools : IDatasetTools
         public void Draw(Dataset dataset)
         {
             if (dataset is not GISDataset gisDataset) return;
-            ImGui.Text($"Projection: {gisDataset.Projection.Name}");
+
+            ImGui.Text("Projection Information:");
+            ImGui.Separator();
+
             ImGui.Text($"EPSG: {gisDataset.Projection.EPSG}");
+            ImGui.Text($"Name: {gisDataset.Projection.Name}");
             ImGui.Text($"Type: {gisDataset.Projection.Type}");
+
             ImGui.Spacing();
-            ImGui.Text("Bounds:");
+            ImGui.Text("Bounding Box:");
+            ImGui.Separator();
+
             ImGui.Text($"Min: ({gisDataset.Bounds.Min.X:F6}, {gisDataset.Bounds.Min.Y:F6})");
             ImGui.Text($"Max: ({gisDataset.Bounds.Max.X:F6}, {gisDataset.Bounds.Max.Y:F6})");
-            ImGui.Text($"Center: ({gisDataset.Center.X:F6}, {gisDataset.Center.Y:F6})");
+            ImGui.Text($"Width: {gisDataset.Bounds.Width:F6}");
+            ImGui.Text($"Height: {gisDataset.Bounds.Height:F6}");
+            ImGui.Text($"Center: ({gisDataset.Bounds.Center.X:F6}, {gisDataset.Bounds.Center.Y:F6})");
         }
     }
 
     private class OperationsTool : IDatasetTools
     {
-        private float _bufferDistance = 10.0f;
-        private bool _showBufferPopup;
+        private float _bufferDistance = 100.0f;
 
         public void Draw(Dataset dataset)
         {
             if (dataset is not GISDataset gisDataset) return;
-            var operations = gisDataset.GetAvailableOperations();
-            if (operations.Length == 0)
+
+            ImGui.TextWrapped("Perform spatial operations based on dataset tags.");
+            ImGui.Separator();
+            ImGui.Spacing();
+
+            // Buffer operation (available for vector data)
+            if (gisDataset.HasTag(GISTag.VectorData))
             {
-                ImGui.TextDisabled("Add tags to unlock specialized operations.");
-                return;
+                ImGui.Text("Buffer Operation:");
+                ImGui.SetNextItemWidth(200);
+                ImGui.InputFloat("Distance", ref _bufferDistance, 1.0f, 10.0f);
+
+                if (ImGui.Button("Create Buffer"))
+                {
+                    PerformBuffer(gisDataset, _bufferDistance);
+                }
+
+                ImGui.Spacing();
             }
 
-            var categories = new Dictionary<string, List<string>>
+            // Show available operations based on tags
+            ImGui.Text("Available Operations:");
+            var operations = gisDataset.Tags.GetAvailableOperations();
+            foreach (var op in operations.Take(10))
             {
-                { "Terrain Analysis", new List<string>() }, { "Vector Operations", new List<string>() },
-                { "Other", new List<string>() }
-            };
-            foreach (var op in operations)
-                if (op.Contains("Slope") || op.Contains("Aspect") || op.Contains("Hillshade"))
-                    categories["Terrain Analysis"].Add(op);
-                else if (op.Contains("Buffer") || op.Contains("Clip") || op.Contains("Intersect"))
-                    categories["Vector Operations"].Add(op);
-                else categories["Other"].Add(op);
-            foreach (var category in categories.Where(c => c.Value.Any()))
-                if (ImGui.TreeNode(category.Key))
-                {
-                    foreach (var operation in category.Value)
-                    {
-                        if (ImGui.Button(operation)) ExecuteOperation(gisDataset, operation);
-                        if (ImGui.IsItemHovered() && (operation.Contains("Slope") || operation.Contains("Aspect") ||
-                                                      operation.Contains("Hillshade")))
-                            ImGui.SetTooltip("Note: Requires a DEM loaded as raster data.");
-                    }
+                ImGui.BulletText(op);
+            }
 
-                    ImGui.TreePop();
-                }
-
-            if (_showBufferPopup)
+            if (operations.Length > 10)
             {
-                ImGui.OpenPopup("Buffer Operation");
-                if (ImGui.BeginPopupModal("Buffer Operation", ref _showBufferPopup, ImGuiWindowFlags.AlwaysAutoResize))
-                {
-                    ImGui.InputFloat("Buffer Distance", ref _bufferDistance);
-                    if (ImGui.Button("Apply"))
-                    {
-                        PerformBufferOperation(gisDataset, _bufferDistance);
-                        _showBufferPopup = false;
-                    }
-
-                    ImGui.SameLine();
-                    if (ImGui.Button("Cancel")) _showBufferPopup = false;
-                    ImGui.EndPopup();
-                }
+                ImGui.TextDisabled($"... and {operations.Length - 10} more");
             }
         }
 
-        private void ExecuteOperation(GISDataset dataset, string operationName)
-        {
-            if (operationName == "Buffer")
-            {
-                _bufferDistance = 10.0f;
-                _showBufferPopup = true;
-            }
-            else
-            {
-                Logger.LogWarning($"Operation '{operationName}' is not fully implemented.");
-            }
-        }
-
-        private void PerformBufferOperation(GISDataset dataset, float distance)
+        private void PerformBuffer(GISDataset dataset, float distance)
         {
             try
             {
-                var newLayer = new GISLayer { Name = $"{dataset.Name} Buffered ({distance})", IsVisible = true };
-                foreach (var feature in dataset.Layers.Where(l => l.Type == LayerType.Vector)
-                             .SelectMany(l => l.Features))
+                var firstVectorLayer = dataset.Layers.FirstOrDefault(l => l.Type == LayerType.Vector);
+                if (firstVectorLayer == null || firstVectorLayer.Features.Count == 0)
                 {
-                    var ntsGeom = dataset.ConvertToNTSGeometry(feature);
-                    if (ntsGeom == null) continue;
-                    var bufferedGeom = GISOperationsImpl.BufferGeometry(ntsGeom, distance);
-                    var newFeature = GISDataset.ConvertNTSGeometry(bufferedGeom, feature.Properties);
-                    if (newFeature != null) newLayer.Features.Add(newFeature);
+                    Logger.LogWarning("No vector features to buffer.");
+                    return;
                 }
 
-                if (!newLayer.Features.Any())
+                var bufferedFeatures = new List<GISFeature>();
+                foreach (var feature in firstVectorLayer.Features)
+                {
+                    var ntsGeometry = dataset.ConvertToNTSGeometry(feature);
+                    if (ntsGeometry == null) continue;
+
+                    var bufferedGeometry = GISOperationsImpl.BufferGeometry(ntsGeometry, distance);
+                    if (bufferedGeometry == null || bufferedGeometry.IsEmpty) continue;
+
+                    var bufferedFeature = GISDataset.ConvertNTSGeometry(bufferedGeometry, feature.Properties);
+                    if (bufferedFeature != null)
+                    {
+                        bufferedFeatures.Add(bufferedFeature);
+                    }
+                }
+                
+                var newLayer = new GISLayer
+                {
+                    Features = bufferedFeatures,
+                    Type = LayerType.Vector,
+                    IsVisible = true,
+                    Color = new Vector4(0.8f, 0.2f, 0.8f, 1.0f) 
+                };
+                
+                newLayer.Name = $"{firstVectorLayer.Name}_Buffer_{distance}m";
+
+                if (newLayer.Features.Count == 0)
                 {
                     Logger.LogWarning("Buffer operation resulted in no features.");
                     return;
@@ -720,7 +638,7 @@ public class GISTools : IDatasetTools
             if (_geoJsonExportDialog.Submit())
             {
                 dataset.SaveAsGeoJSON(_geoJsonExportDialog.SelectedPath);
-                Logger.Log($"Exported to GeoJSON: {_geoJsonExportDialog.SelectedPath}");
+                Logger.Log($"Exported to GeoJSON: {_geoJsonExportDialog.SelectedPath.ToString()}");
             }
 
             if (_csvExportDialog.Submit())
@@ -733,7 +651,7 @@ public class GISTools : IDatasetTools
 
         private void SaveLayerAsCsv(GISLayer layer, string path)
         {
-            Logger.Log($"Exporting attributes for layer '{layer.Name}' to CSV: {path}");
+            Logger.Log($"Exporting attributes for layer '{layer.Name}' to CSV: {path.ToString()}");
             try
             {
                 var headers = layer.Features.SelectMany(f => f.Properties.Keys).Distinct().OrderBy(h => h).ToList();
@@ -755,11 +673,11 @@ public class GISTools : IDatasetTools
                 }
 
                 File.WriteAllText(path, csv.ToString());
-                Logger.Log($"Successfully exported {layer.Features.Count} records to {path}");
+                Logger.Log($"Successfully exported {layer.Features.Count.ToString()} records to {path.ToString()}");
             }
             catch (Exception ex)
             {
-                Logger.LogError($"Failed to export layer attributes to CSV: {ex.Message}");
+                Logger.LogError($"Failed to export layer attributes to CSV: {ex.Message.ToString()}");
             }
         }
 
@@ -770,7 +688,7 @@ public class GISTools : IDatasetTools
             exportTask.ContinueWith(t =>
             {
                 if (t.IsCanceled) Logger.Log("Export was canceled.");
-                else if (t.Exception != null) Logger.LogError($"Export failed: {t.Exception.InnerException?.Message}");
+                else if (t.Exception != null) Logger.LogError($"Export failed: {t.Exception.InnerException?.Message?.ToString()}");
                 _exportProgressDialog.Close();
                 _exportCts?.Dispose();
                 _exportCts = null;

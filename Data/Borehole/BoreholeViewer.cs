@@ -3,29 +3,53 @@
 using System.Numerics;
 using GeoscientistToolkit.Data.Borehole;
 using GeoscientistToolkit.UI.Interfaces;
-using GeoscientistToolkit.Util;
 using ImGuiNET;
 
 namespace GeoscientistToolkit.UI.Borehole;
 
 /// <summary>
-///     Viewer for displaying borehole/well log data with lithology column and parameter tracks
+///     Borehole/well log viewer:
+///     - Bottom horizontal scrollbar drives X for header & body.
+///     - Right-side PROXY vertical scrollbar drives visible depth range (virtual scroll).
+///     - Body drawing window itself never scrolls vertically; only the range changes.
+///     - Legend is a separate floating ImGui window.
+///     - Default is FULL LOG view (0..TotalDepth); auto-range adapts to dataset changes.
+///     - Proxy vertical scrollbar is disabled while the shown range spans the entire log.
+///     - Optional hover tooltips for lithologies and tracks (controlled by "Enable Tooltip").
 /// </summary>
-public class BoreholeViewer : IDatasetViewer
+public class BoreholeViewer : IDatasetViewer, IDisposable
 {
+    // layout
+    private const float HeaderHeight = 30f;
+    private const float DepthScaleWidth = 56f; // label padding included
+    private const float BottomBarHeight = 18f;
     private readonly BoreholeDataset _dataset;
-    private readonly Vector4 _depthTextColor = new(0.7f, 0.7f, 0.7f, 1.0f);
+    private readonly Vector4 _depthTextColor = new(0.85f, 0.85f, 0.85f, 1.00f);
+    private readonly Vector4 _gridColor = new(0.30f, 0.30f, 0.30f, 0.50f);
+    private readonly Vector2 _legendInitPos = new(60f, 60f);
+    private readonly Vector2 _legendInitSize = new(320f, 240f);
 
-    // Colors
-    private readonly Vector4 _gridColor = new(0.3f, 0.3f, 0.3f, 0.5f);
-    private readonly int _gridInterval = 10; // meters
     private readonly float _lithologyColumnWidth = 150f;
-    private readonly Vector4 _textColor = new(0.9f, 0.9f, 0.9f, 1.0f);
+    private readonly Vector4 _mutedText = new(0.75f, 0.75f, 0.75f, 1.00f);
+
+    // colors
+    private readonly Vector4 _textColor = new(0.90f, 0.90f, 0.90f, 1.00f);
     private readonly float _trackSpacing = 10f;
+
+    // depth range (in meters)
     private bool _autoScaleDepth = true;
     private float _depthEnd;
     private float _depthStart;
+    private bool _enableTooltip = true; // <--- NEW
+    private bool _isRenderingLegend; // Re-entry guard
+    private int _lastLegendFrame = -1; // Track which frame legend was last rendered
+
+    // Legend window initial placement (first frame only)
+    private bool _legendInit;
+
+    // toggles
     private bool _showDepthGrid = true;
+    private bool _showLegend = true;
     private bool _showLithologyNames = true;
     private bool _showParameterValues = true;
 
@@ -33,540 +57,816 @@ public class BoreholeViewer : IDatasetViewer
     {
         _dataset = dataset ?? throw new ArgumentNullException(nameof(dataset));
 
-        // Initialize depth range
-        if (_dataset.LithologyUnits.Any())
-        {
-            _depthStart = _dataset.LithologyUnits.Min(u => u.DepthFrom);
-            _depthEnd = _dataset.LithologyUnits.Max(u => u.DepthTo);
-        }
-        else
-        {
-            _depthStart = 0;
-            _depthEnd = _dataset.TotalDepth;
-        }
+        // Default to FULL LOG view (0..TotalDepth).
+        _depthStart = 0f;
+        _depthEnd = Math.Max(_dataset.TotalDepth, 1f);
     }
+
+    /// <summary>
+    ///     Callback invocato quando l'utente clicca su una formazione litologica nel viewer.
+    ///     Per collegarlo automaticamente con BoreholeTools per l'editing:
+    ///     <code>
+    /// var viewer = new BoreholeViewer(dataset);
+    /// var tools = new BoreholeTools();
+    /// viewer.OnLithologyClicked = tools.EditUnit;
+    /// </code>
+    ///     Questo permetterÃ  all'utente di cliccare su una formazione nel viewer e passare
+    ///     automaticamente alla pagina di editing in BoreholeTools.
+    /// </summary>
+    public Action<LithologyUnit>? OnLithologyClicked { get; set; }
 
     public void DrawToolbarControls()
     {
-        // View controls
         ImGui.Text("Depth Range:");
         ImGui.SameLine();
 
         if (ImGui.Checkbox("Auto", ref _autoScaleDepth))
-            if (_autoScaleDepth && _dataset.LithologyUnits.Any())
+            if (_autoScaleDepth)
             {
-                _depthStart = _dataset.LithologyUnits.Min(u => u.DepthFrom);
-                _depthEnd = _dataset.LithologyUnits.Max(u => u.DepthTo);
+                _depthStart = 0f;
+                _depthEnd = Math.Max(_dataset.TotalDepth, 1f);
             }
 
         if (!_autoScaleDepth)
         {
             ImGui.SameLine();
             ImGui.SetNextItemWidth(80);
-            ImGui.DragFloat("##StartDepth", ref _depthStart, 0.1f, 0, _dataset.TotalDepth, "%.1f m");
+            if (ImGui.DragFloat("##StartDepth", ref _depthStart, 0.1f, 0, _dataset.TotalDepth, "%.1f m"))
+            {
+                _depthStart = Math.Clamp(_depthStart, 0f, Math.Max(0f, _dataset.TotalDepth - 0.001f));
+                if (_depthEnd <= _depthStart) _depthEnd = Math.Min(_dataset.TotalDepth, _depthStart + 0.001f);
+            }
 
             ImGui.SameLine();
             ImGui.Text("to");
 
             ImGui.SameLine();
             ImGui.SetNextItemWidth(80);
-            ImGui.DragFloat("##EndDepth", ref _depthEnd, 0.1f, _depthStart, _dataset.TotalDepth, "%.1f m");
+            if (ImGui.DragFloat("##EndDepth", ref _depthEnd, 0.1f, 0, _dataset.TotalDepth, "%.1f m"))
+            {
+                _depthEnd = Math.Clamp(_depthEnd, 0.001f, Math.Max(0.001f, _dataset.TotalDepth));
+                if (_depthEnd <= _depthStart) _depthStart = Math.Max(0f, _depthEnd - 0.001f);
+            }
         }
 
         ImGui.SameLine();
         ImGui.Separator();
-
-        // Display options
         ImGui.SameLine();
         ImGui.Checkbox("Grid", ref _showDepthGrid);
-
         ImGui.SameLine();
         ImGui.Checkbox("Names", ref _showLithologyNames);
-
         ImGui.SameLine();
         ImGui.Checkbox("Values", ref _showParameterValues);
-
         ImGui.SameLine();
-        ImGui.Separator();
-
-        // Export options
+        ImGui.Checkbox("Legend (window)", ref _showLegend);
         ImGui.SameLine();
-        if (ImGui.Button("Export Log...")) Logger.Log("Export borehole log functionality to be implemented");
+        ImGui.Checkbox("Enable Tooltip", ref _enableTooltip); // <--- NEW
     }
 
     public void DrawContent(ref float zoom, ref Vector2 pan)
     {
-        var drawList = ImGui.GetWindowDrawList();
-        var canvasPos = ImGui.GetCursorScreenPos();
-        var canvasSize = ImGui.GetContentRegionAvail();
-
-        if (canvasSize.X <= 0 || canvasSize.Y <= 0)
-            return;
-
-        // Apply pan offset
-        canvasPos += pan;
-
-        // Calculate dimensions
-        var depthRange = _depthEnd - _depthStart;
-        if (depthRange <= 0)
-            depthRange = 1;
-
-        var pixelsPerMeter = (canvasSize.Y - 50) / depthRange * zoom; // Reserve 50px for header
-
-        // Calculate visible tracks
-        var visibleTracks = _dataset.ParameterTracks.Values.Where(t => t.IsVisible).ToList();
-        var trackWidth = _dataset.TrackWidth;
-
-        // Start drawing
-        var currentX = canvasPos.X + 50; // Reserve 50px for depth scale
-        var startY = canvasPos.Y + 30; // Reserve 30px for header
-
-        // Draw depth scale
-        DrawDepthScale(drawList, new Vector2(canvasPos.X, startY), canvasSize.Y - 30, pixelsPerMeter);
-
-        // Draw lithology column
-        DrawLithologyColumn(drawList, new Vector2(currentX, startY), _lithologyColumnWidth, canvasSize.Y - 30,
-            pixelsPerMeter);
-        currentX += _lithologyColumnWidth + _trackSpacing;
-
-        // Draw parameter tracks
-        foreach (var track in visibleTracks)
+        if (_autoScaleDepth)
         {
-            DrawParameterTrack(drawList, track, new Vector2(currentX, startY), trackWidth, canvasSize.Y - 30,
-                pixelsPerMeter);
-            currentX += trackWidth + _trackSpacing;
+            _depthStart = 0f;
+            _depthEnd = Math.Max(_dataset.TotalDepth, 1f);
         }
 
-        // Draw legend
-        DrawLegend(drawList, canvasPos, canvasSize);
+        var availAll = ImGui.GetContentRegionAvail();
+        if (availAll.X < 5 || availAll.Y < 5) return;
 
-        // Handle mouse input for pan/zoom
-        HandleInput(ref zoom, ref pan, canvasPos, canvasSize);
+        var reset = ImGui.IsKeyPressed(ImGuiKey.R);
+        if (reset) zoom = 1f;
+
+        var visibleTracks = _dataset.ParameterTracks.Values.Where(t => t.IsVisible).ToList();
+        var trackWidth = _dataset.TrackWidth;
+        var tracksWidth = visibleTracks.Count > 0
+            ? visibleTracks.Count * trackWidth + (visibleTracks.Count - 1) * _trackSpacing
+            : 0f;
+        var contentWidthX = _lithologyColumnWidth + (tracksWidth > 0 ? _trackSpacing : 0f) + tracksWidth;
+
+        var row2Height = availAll.Y - HeaderHeight - BottomBarHeight;
+        if (row2Height < 1f) row2Height = 1f;
+
+        var rangeMeters = Math.Max(0.001f, _depthEnd - _depthStart);
+        var pixelsPerMeter = Math.Max(1e-4f, (row2Height - 20f) / rangeMeters * zoom);
+        var gridInterval = GetAdaptiveGridInterval(pixelsPerMeter);
+        var totalDepth = Math.Max(_dataset.TotalDepth, 1f);
+        var isFullRangeView = rangeMeters >= totalDepth - 1e-3f;
+
+        ImGui.PushStyleVar(ImGuiStyleVar.WindowPadding, Vector2.Zero);
+
+        var origin = ImGui.GetCursorScreenPos();
+        var fullSize = availAll;
+
+        // Frozen backgrounds
+        var dlRoot = ImGui.GetWindowDrawList();
+        dlRoot.AddRectFilled(origin, origin + new Vector2(fullSize.X, HeaderHeight),
+            ImGui.GetColorU32(new Vector4(0.20f, 0.20f, 0.20f, 1)));
+        dlRoot.AddRectFilled(origin, origin + new Vector2(DepthScaleWidth, fullSize.Y),
+            ImGui.GetColorU32(new Vector4(0.15f, 0.15f, 0.15f, 1)));
+
+        // ---------------- Bottom horizontal scrollbar ----------------
+        ImGui.SetCursorScreenPos(origin + new Vector2(DepthScaleWidth, HeaderHeight + row2Height));
+        ImGui.BeginChild("BottomHSB",
+            new Vector2(fullSize.X - DepthScaleWidth, BottomBarHeight),
+            ImGuiChildFlags.None,
+            ImGuiWindowFlags.AlwaysHorizontalScrollbar | ImGuiWindowFlags.NoScrollbar |
+            ImGuiWindowFlags.NoScrollWithMouse);
+
+        if (reset) ImGui.SetScrollX(0);
+
+        var bottomAvail = ImGui.GetContentRegionAvail();
+        var bottomContentW = Math.Max(contentWidthX, bottomAvail.X + 1f);
+        ImGui.Dummy(new Vector2(bottomContentW, 1f));
+        var globalScrollX = ImGui.GetScrollX();
+        ImGui.EndChild();
+
+        // ---------------- Header (reads X from bottom; no scrollbars) ----------------
+        // Corner
+        ImGui.SetCursorScreenPos(origin);
+        ImGui.BeginChild("CornerFrozen", new Vector2(DepthScaleWidth, HeaderHeight), ImGuiChildFlags.None,
+            ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse);
+        ImGui.EndChild();
+
+        // Header row
+        ImGui.SetCursorScreenPos(origin + new Vector2(DepthScaleWidth, 0));
+        ImGui.BeginChild("HeaderView",
+            new Vector2(fullSize.X - DepthScaleWidth, HeaderHeight),
+            ImGuiChildFlags.None,
+            ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse);
+
+        var headerPos = ImGui.GetCursorScreenPos();
+        var headerViewport = ImGui.GetContentRegionAvail();
+        {
+            var dl = ImGui.GetWindowDrawList();
+            var clipMin = headerPos;
+            var clipMax = headerPos + new Vector2(headerViewport.X, HeaderHeight);
+            dl.PushClipRect(clipMin, clipMax, true);
+
+            var x = headerPos.X - globalScrollX;
+            DrawLithologyHeader(dl, new Vector2(x, headerPos.Y), _lithologyColumnWidth);
+            x += _lithologyColumnWidth;
+
+            if (tracksWidth > 0)
+            {
+                x += _trackSpacing;
+                foreach (var t in visibleTracks)
+                {
+                    DrawTrackHeader(dl, t, new Vector2(x, headerPos.Y), _dataset.TrackWidth);
+                    x += _dataset.TrackWidth + _trackSpacing;
+                }
+            }
+
+            dl.PopClipRect();
+        }
+        ImGui.EndChild();
+
+        // ---------------- Body + PROXY vertical scrollbar ----------------
+        var vScrollbarW = ImGui.GetStyle().ScrollbarSize;
+        var bodyW = fullSize.X - DepthScaleWidth - vScrollbarW;
+
+        ImGui.SetCursorScreenPos(origin + new Vector2(DepthScaleWidth, HeaderHeight));
+        ImGui.BeginChild("BodyView",
+            new Vector2(bodyW, row2Height),
+            ImGuiChildFlags.None,
+            ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse);
+
+        var bodyPos = ImGui.GetCursorScreenPos();
+        var bodyViewport = ImGui.GetContentRegionAvail();
+
+        {
+            var dl = ImGui.GetWindowDrawList();
+            var clipMin = bodyPos;
+            var clipMax = bodyPos + bodyViewport;
+            dl.PushClipRect(clipMin, clipMax, true);
+
+            var xLeft = bodyPos.X - globalScrollX;
+            var xRight = xLeft + contentWidthX;
+            dl.AddRectFilled(new Vector2(xLeft, bodyPos.Y),
+                new Vector2(xRight, bodyPos.Y + bodyViewport.Y),
+                ImGui.GetColorU32(new Vector4(0.10f, 0.10f, 0.10f, 1.0f)));
+
+            var originX = xLeft;
+            var originY = bodyPos.Y;
+
+            var topDepth = _depthStart;
+            var bottomDepth = _depthEnd;
+
+            // lithology column
+            DrawLithologyVisible(dl, new Vector2(originX, originY),
+                _lithologyColumnWidth, pixelsPerMeter, gridInterval, topDepth, bottomDepth, clipMin, clipMax);
+
+            var x = originX + _lithologyColumnWidth;
+
+            // tracks
+            if (tracksWidth > 0)
+            {
+                x += _trackSpacing;
+                foreach (var t in visibleTracks)
+                {
+                    DrawTrackVisible(dl, t, new Vector2(x, originY),
+                        _dataset.TrackWidth, pixelsPerMeter, gridInterval, topDepth, bottomDepth, clipMin, clipMax);
+                    x += _dataset.TrackWidth + _trackSpacing;
+                }
+            }
+
+            dl.PopClipRect();
+        }
+        ImGui.EndChild();
+
+        // Depth scale (left)
+        ImGui.SetCursorScreenPos(origin + new Vector2(0, HeaderHeight));
+        ImGui.BeginChild("DepthView",
+            new Vector2(DepthScaleWidth, row2Height),
+            ImGuiChildFlags.None,
+            ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse);
+
+        var depthInnerPos = ImGui.GetCursorScreenPos();
+        var depthViewport = ImGui.GetContentRegionAvail();
+        ImGui.Dummy(new Vector2(1f, depthViewport.Y));
+        {
+            var dl = ImGui.GetWindowDrawList();
+            var clipMin = depthInnerPos;
+            var clipMax = depthInnerPos + depthViewport;
+            dl.PushClipRect(clipMin, clipMax, true);
+
+            DrawDepthVisible(dl, new Vector2(depthInnerPos.X, depthInnerPos.Y),
+                pixelsPerMeter, gridInterval, _depthStart, _depthEnd);
+
+            dl.PopClipRect();
+        }
+        ImGui.EndChild();
+
+        // -------- PROXY vertical scrollbar (separate child so body never scrolls) --------
+        ImGui.SetCursorScreenPos(origin + new Vector2(DepthScaleWidth + bodyW, HeaderHeight));
+        var proxyFlags = isFullRangeView
+            ? ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse
+            : ImGuiWindowFlags.AlwaysVerticalScrollbar;
+        ImGui.BeginChild("VScrollProxy",
+            new Vector2(vScrollbarW, row2Height),
+            ImGuiChildFlags.None,
+            proxyFlags);
+
+        var proxyAvail = ImGui.GetContentRegionAvail();
+
+        var virtualScrollMaxMeters = Math.Max(0f, totalDepth - rangeMeters);
+        var virtualContentPixels = isFullRangeView
+            ? proxyAvail.Y
+            : Math.Max(proxyAvail.Y + 1f, (virtualScrollMaxMeters + rangeMeters) * pixelsPerMeter);
+
+        ImGui.Dummy(new Vector2(1f, virtualContentPixels));
+
+        if (!_autoScaleDepth && !isFullRangeView)
+        {
+            var proxyScroll = ImGui.GetScrollY();
+            var topMeters = Math.Clamp(proxyScroll / Math.Max(1e-6f, pixelsPerMeter), 0f, virtualScrollMaxMeters);
+
+            _depthStart = topMeters;
+            _depthEnd = Math.Min(totalDepth, _depthStart + rangeMeters);
+
+            var desiredScroll = Math.Clamp(_depthStart * pixelsPerMeter, 0f,
+                Math.Max(0f, virtualContentPixels - proxyAvail.Y));
+            ImGui.SetScrollY(desiredScroll);
+        }
+        else
+        {
+            ImGui.SetScrollY(0f);
+            _depthStart = 0f;
+            _depthEnd = totalDepth;
+        }
+
+        // frozen separators
+        var dlSep = ImGui.GetWindowDrawList();
+        dlSep.AddLine(origin + new Vector2(DepthScaleWidth - 1, 0),
+            origin + new Vector2(DepthScaleWidth - 1, fullSize.Y), ImGui.GetColorU32(ImGuiCol.Separator));
+        dlSep.AddLine(origin + new Vector2(0, HeaderHeight - 1), origin + new Vector2(fullSize.X, HeaderHeight - 1),
+            ImGui.GetColorU32(ImGuiCol.Separator));
+
+        ImGui.PopStyleVar();
+
+        // Legend is now rendered separately via DrawLegendWindow() to prevent docking flicker
+        // DO NOT render legend here - it causes circular dependency when docked
+
+        HandleInput(ref zoom, row2Height);
     }
 
     public void Dispose()
     {
-        // Nothing to dispose
     }
 
-    private void DrawDepthScale(ImDrawListPtr drawList, Vector2 pos, float height, float pixelsPerMeter)
+    /// <summary>
+    ///     Renders the legend window separately from DrawContent() to avoid docking feedback loops.
+    ///     This method should be called from outside the viewer's draw cycle.
+    /// </summary>
+    public void DrawLegendWindow()
     {
-        var scaleWidth = 40f;
+        if (!_showLegend || _isRenderingLegend) return;
 
-        // Draw scale background
-        drawList.AddRectFilled(pos, pos + new Vector2(scaleWidth, height),
-            ImGui.GetColorU32(new Vector4(0.15f, 0.15f, 0.15f, 1.0f)));
+        var currentFrame = ImGui.GetFrameCount();
+        if (_lastLegendFrame == currentFrame) return; // Already rendered this frame
 
-        // Draw depth markers
-        var interval = _gridInterval;
-        var startDepth = (int)Math.Ceiling(_depthStart / interval) * interval;
+        _isRenderingLegend = true;
+        _lastLegendFrame = currentFrame;
 
-        for (var depth = startDepth; depth <= _depthEnd; depth += interval)
+        try
         {
-            var y = pos.Y + (depth - _depthStart) * pixelsPerMeter;
+            // CRITICAL: Use unique window ID per dataset to prevent docking conflicts
+            // This makes ImGui treat it as a completely separate window
+            var uniqueWindowName = $"Borehole Legend###{_dataset.GetHashCode()}";
 
-            if (y < pos.Y || y > pos.Y + height)
-                continue;
+            if (!_legendInit)
+            {
+                ImGui.SetNextWindowPos(_legendInitPos, ImGuiCond.FirstUseEver);
+                ImGui.SetNextWindowSize(_legendInitSize, ImGuiCond.FirstUseEver);
+                _legendInit = true;
+            }
 
-            // Draw tick
-            drawList.AddLine(
-                new Vector2(pos.X + scaleWidth - 10, y),
-                new Vector2(pos.X + scaleWidth, y),
-                ImGui.GetColorU32(_textColor), 2f);
+            // CRITICAL: Prevent docking to avoid feedback loop entirely
+            var flags = ImGuiWindowFlags.NoCollapse | ImGuiWindowFlags.NoDocking;
+            var legendOpen = _showLegend;
 
-            // Draw depth text
-            var depthText = $"{depth}m";
-            var textSize = ImGui.CalcTextSize(depthText);
-            drawList.AddText(
-                new Vector2(pos.X + scaleWidth - textSize.X - 12, y - textSize.Y * 0.5f),
-                ImGui.GetColorU32(_depthTextColor),
-                depthText);
+            if (ImGui.Begin(uniqueWindowName, ref legendOpen, flags))
+            {
+                // Show a note that docking is disabled to prevent flickering
+                ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(1f, 0.8f, 0.3f, 1f));
+                ImGui.TextWrapped("âš  Docking disabled for this window to prevent UI flickering");
+                ImGui.PopStyleColor();
+                ImGui.Separator();
+
+                var visibleTracks = _dataset.ParameterTracks.Values.Where(t => t.IsVisible).ToList();
+
+                if (visibleTracks.Count > 0)
+                {
+                    ImGui.TextColored(_mutedText, "Tracks");
+                    if (ImGui.BeginTable("tbl_tracks", 2, ImGuiTableFlags.SizingFixedFit))
+                    {
+                        ImGui.TableSetupColumn("Swatch", ImGuiTableColumnFlags.WidthFixed, 20);
+                        ImGui.TableSetupColumn("Label", ImGuiTableColumnFlags.WidthStretch);
+
+                        foreach (var t in visibleTracks)
+                        {
+                            ImGui.TableNextRow();
+                            ImGui.TableSetColumnIndex(0);
+                            DrawColorSwatch(t.Color);
+                            ImGui.TableSetColumnIndex(1);
+                            var label = string.IsNullOrWhiteSpace(t.Unit) ? t.Name : $"{t.Name} [{t.Unit}]";
+                            ImGui.TextUnformatted(label);
+                        }
+
+                        ImGui.EndTable();
+                    }
+                }
+
+                var lithoTypes = _dataset.LithologyUnits
+                    .Select(u => u.LithologyType)
+                    .Where(s => !string.IsNullOrWhiteSpace(s))
+                    .Distinct()
+                    .OrderBy(s => s)
+                    .ToList();
+
+                if (lithoTypes.Count > 0)
+                {
+                    if (visibleTracks.Count > 0) ImGui.Separator();
+                    ImGui.TextColored(_mutedText, "Lithologies");
+
+                    if (ImGui.BeginTable("tbl_litho", 2, ImGuiTableFlags.SizingFixedFit))
+                    {
+                        ImGui.TableSetupColumn("Swatch", ImGuiTableColumnFlags.WidthFixed, 20);
+                        ImGui.TableSetupColumn("Label", ImGuiTableColumnFlags.WidthStretch);
+
+                        foreach (var lt in lithoTypes)
+                        {
+                            var first = _dataset.LithologyUnits.FirstOrDefault(u => u.LithologyType == lt);
+                            var col = first != null ? first.Color : GetDefaultLithologyColor(lt);
+
+                            ImGui.TableNextRow();
+                            ImGui.TableSetColumnIndex(0);
+                            DrawColorSwatch(col, true);
+                            ImGui.TableSetColumnIndex(1);
+                            ImGui.TextUnformatted(lt);
+                        }
+
+                        ImGui.EndTable();
+                    }
+                }
+            }
+
+            ImGui.End();
+
+            _showLegend = legendOpen;
+        }
+        finally
+        {
+            _isRenderingLegend = false;
         }
     }
 
-    private void DrawLithologyColumn(ImDrawListPtr drawList, Vector2 pos, float width, float height,
-        float pixelsPerMeter)
+    private float GetAdaptiveGridInterval(float ppm)
     {
-        // Draw column header
-        var headerHeight = 25f;
-        drawList.AddRectFilled(pos - new Vector2(0, headerHeight), pos + new Vector2(width, 0),
-            ImGui.GetColorU32(new Vector4(0.2f, 0.2f, 0.2f, 1.0f)));
+        if (ppm <= 0) return 1000f;
+        const float targetPx = 80f;
+        var d = targetPx / ppm;
+        var p10 = Math.Pow(10, Math.Floor(Math.Log10(d)));
+        var n = d / p10;
+        if (n < 1.5) return (float)(1 * p10);
+        if (n < 3.5) return (float)(2 * p10);
+        if (n < 7.5) return (float)(5 * p10);
+        return (float)(10 * p10);
+    }
 
-        var headerText = "Lithology";
-        var textSize = ImGui.CalcTextSize(headerText);
-        drawList.AddText(
-            pos - new Vector2(0, headerHeight) +
-            new Vector2((width - textSize.X) * 0.5f, (headerHeight - textSize.Y) * 0.5f),
-            ImGui.GetColorU32(_textColor),
-            headerText);
+    // ---------------- Legend helpers ----------------
 
-        // Draw column border
-        drawList.AddRect(pos, pos + new Vector2(width, height),
-            ImGui.GetColorU32(new Vector4(0.5f, 0.5f, 0.5f, 1.0f)), 0, ImDrawFlags.None, 2f);
+    private void DrawColorSwatch(Vector4 col, bool hatch = false)
+    {
+        var dl = ImGui.GetWindowDrawList();
+        var p = ImGui.GetCursorScreenPos();
+        var sz = new Vector2(14f, 12f);
 
-        // Draw lithology units
-        foreach (var unit in _dataset.LithologyUnits)
+        dl.AddRectFilled(p, p + sz, ImGui.GetColorU32(col), 2f);
+        dl.AddRect(p, p + sz, ImGui.GetColorU32(new Vector4(0, 0, 0, 1)), 2f);
+
+        if (hatch)
+            for (var xx = p.X; xx < p.X + sz.X; xx += 4f)
+                dl.AddLine(new Vector2(xx, p.Y), new Vector2(xx + 4f, p.Y + sz.Y),
+                    ImGui.GetColorU32(new Vector4(0, 0, 0, 0.25f)));
+
+        ImGui.Dummy(sz);
+    }
+
+    private Vector4 GetDefaultLithologyColor(string lithologyType)
+    {
+        return lithologyType switch
         {
-            var unitStartY = pos.Y + (unit.DepthFrom - _depthStart) * pixelsPerMeter;
-            var unitEndY = pos.Y + (unit.DepthTo - _depthStart) * pixelsPerMeter;
+            "Sandstone" => new Vector4(0.80f, 0.70f, 0.55f, 1.0f),
+            "Shale" => new Vector4(0.45f, 0.45f, 0.40f, 1.0f),
+            "Limestone" => new Vector4(0.85f, 0.85f, 0.80f, 1.0f),
+            "Clay" => new Vector4(0.65f, 0.55f, 0.45f, 1.0f),
+            "Siltstone" => new Vector4(0.70f, 0.65f, 0.55f, 1.0f),
+            "Conglomerate" => new Vector4(0.65f, 0.65f, 0.60f, 1.0f),
+            "Granite" => new Vector4(0.65f, 0.60f, 0.55f, 1.0f),
+            "Basalt" => new Vector4(0.40f, 0.35f, 0.30f, 1.0f),
+            "Dolomite" => new Vector4(0.80f, 0.75f, 0.70f, 1.0f),
+            "Sand" => new Vector4(0.85f, 0.80f, 0.65f, 1.0f),
+            "Soil" => new Vector4(0.55f, 0.45f, 0.35f, 1.0f),
+            _ => new Vector4(0.60f, 0.60f, 0.60f, 1.0f)
+        };
+    }
 
-            // Skip if outside visible range
-            if (unitEndY < pos.Y || unitStartY > pos.Y + height)
-                continue;
+    // ---------------- drawing helpers (all use current visible window top/bottom) ----------------
 
-            // Clamp to visible area
-            unitStartY = Math.Max(unitStartY, pos.Y);
-            unitEndY = Math.Min(unitEndY, pos.Y + height);
+    private void DrawDepthVisible(ImDrawListPtr dl, Vector2 pos, float ppm, float step, float top, float bottom)
+    {
+        var start = (float)Math.Floor(top / step) * step - step;
+        var end = (float)Math.Ceiling(bottom / step) * step + step;
 
-            var unitHeight = unitEndY - unitStartY;
+        for (var d = Math.Max(0, start); d <= end; d += step)
+        {
+            var y = pos.Y + (d - top) * ppm;
 
-            if (unitHeight < 1)
-                continue;
+            dl.AddLine(new Vector2(pos.X + DepthScaleWidth - 12, y),
+                new Vector2(pos.X + DepthScaleWidth - 2, y),
+                ImGui.GetColorU32(_textColor), 1f);
 
-            // Draw unit background with pattern
-            DrawLithologyPattern(drawList,
-                new Vector2(pos.X, unitStartY),
-                new Vector2(width, unitHeight),
-                unit.Color,
-                GetPatternForLithology(unit.LithologyType));
+            var label = step >= 1000 ? $"{d / 1000f:F1} km" : $"{d:0} m";
+            var ts = ImGui.CalcTextSize(label);
+            dl.AddText(new Vector2(pos.X + DepthScaleWidth - ts.X - 14, y - ts.Y * 0.5f),
+                ImGui.GetColorU32(_depthTextColor),
+                label);
+        }
+    }
 
-            // Draw unit border
-            drawList.AddRect(
-                new Vector2(pos.X, unitStartY),
-                new Vector2(pos.X + width, unitEndY),
-                ImGui.GetColorU32(new Vector4(0.3f, 0.3f, 0.3f, 1.0f)), 0, ImDrawFlags.None, 1f);
+    private void DrawLithologyHeader(ImDrawListPtr dl, Vector2 pos, float width)
+    {
+        var t = "Lithology";
+        var s = ImGui.CalcTextSize(t);
+        dl.AddText(pos + new Vector2((width - s.X) * 0.5f, (HeaderHeight - s.Y) * 0.5f),
+            ImGui.GetColorU32(_textColor), t);
+    }
 
-            // Draw unit name if space permits and option enabled
-            if (_showLithologyNames && unitHeight > 20)
+    private void DrawTrackHeader(ImDrawListPtr dl, ParameterTrack track, Vector2 pos, float width)
+    {
+        var t = track.Name;
+        var ts = ImGui.CalcTextSize(t);
+        dl.AddText(pos + new Vector2((width - ts.X) * 0.5f, 2), ImGui.GetColorU32(_textColor), t);
+        var u = string.IsNullOrWhiteSpace(track.Unit) ? "" : $"({track.Unit})";
+        if (!string.IsNullOrEmpty(u))
+        {
+            var us = ImGui.CalcTextSize(u);
+            dl.AddText(pos + new Vector2((width - us.X) * 0.5f, 14),
+                ImGui.GetColorU32(new Vector4(0.6f, 0.6f, 0.6f, 1)), u);
+        }
+    }
+
+    private void DrawLithologyVisible(ImDrawListPtr dl, Vector2 origin, float width,
+        float ppm, float step, float top, float bottom, Vector2 clipMin, Vector2 clipMax)
+    {
+        var yTop = origin.Y;
+        var yBot = origin.Y + (bottom - top) * ppm;
+
+        dl.AddRect(origin + new Vector2(0, 0),
+            origin + new Vector2(width, yBot - origin.Y),
+            ImGui.GetColorU32(new Vector4(0.5f, 0.5f, 0.5f, 1)), 0, ImDrawFlags.None, 1f);
+
+        foreach (var u in _dataset.LithologyUnits)
+        {
+            if (u.DepthTo < top || u.DepthFrom > bottom) continue;
+
+            var y1 = origin.Y + (u.DepthFrom - top) * ppm;
+            var y2 = origin.Y + (u.DepthTo - top) * ppm;
+
+            var y1c = Math.Max(y1, yTop);
+            var y2c = Math.Min(y2, yBot);
+            if (y2c <= y1c + 0.5f) continue;
+
+            // draw pattern
+            DrawLithologyPattern(dl, new Vector2(origin.X, y1c),
+                new Vector2(width, y2c - y1c),
+                u.Color, GetPatternForLithology(u.LithologyType));
+
+            // outline of full unit extent
+            dl.AddRect(new Vector2(origin.X, y1), new Vector2(origin.X + width, y2),
+                ImGui.GetColorU32(new Vector4(0.3f, 0.3f, 0.3f, 1)), 0, ImDrawFlags.None, 1f);
+
+            if (_showLithologyNames && y2 - y1 > 20f)
             {
-                var unitText = unit.Name;
-                var unitTextSize = ImGui.CalcTextSize(unitText);
+                var name = u.Name;
+                var ts = ImGui.CalcTextSize(name);
+                if (ts.Y < y2 - y1 - 4f)
+                    dl.AddText(new Vector2(origin.X + (width - ts.X) * 0.5f, y1 + (y2 - y1 - ts.Y) * 0.5f),
+                        ImGui.GetColorU32(new Vector4(0, 0, 0, 1)), name);
+            }
 
-                if (unitTextSize.Y < unitHeight - 4)
-                    drawList.AddText(
-                        new Vector2(pos.X + (width - unitTextSize.X) * 0.5f,
-                            unitStartY + (unitHeight - unitTextSize.Y) * 0.5f),
-                        ImGui.GetColorU32(new Vector4(0, 0, 0, 1)),
-                        unitText);
+            // --------- TOOLTIP and CLICK for lithology ---------
+            if (_enableTooltip || OnLithologyClicked != null)
+            {
+                var mouse = ImGui.GetIO().MousePos;
+
+                // CRITICAL FIX: Check if mouse is within visible window bounds first
+                // clipMin and clipMax define the actual visible viewport area
+                var isMouseInVisibleArea = mouse.X >= clipMin.X && mouse.X <= clipMax.X &&
+                                           mouse.Y >= clipMin.Y && mouse.Y <= clipMax.Y;
+
+                if (isMouseInVisibleArea)
+                {
+                    var rectMin = new Vector2(origin.X, y1c);
+                    var rectMax = new Vector2(origin.X + width, y2c);
+
+                    if (mouse.X >= rectMin.X && mouse.X <= rectMax.X && mouse.Y >= rectMin.Y && mouse.Y <= rectMax.Y)
+                    {
+                        // Show tooltip if enabled - ONLY if the window is actually hovered
+                        if (_enableTooltip && ImGui.IsWindowHovered(ImGuiHoveredFlags.ChildWindows))
+                        {
+                            ImGui.BeginTooltip();
+                            ImGui.TextUnformatted(string.IsNullOrWhiteSpace(u.Name) ? "Lithology unit" : u.Name);
+                            if (!string.IsNullOrWhiteSpace(u.LithologyType))
+                                ImGui.TextUnformatted($"Type: {u.LithologyType}");
+                            ImGui.TextUnformatted($"From: {u.DepthFrom:0.###} m");
+                            ImGui.TextUnformatted($"To:   {u.DepthTo:0.###} m");
+                            ImGui.TextUnformatted($"Thk:  {Math.Max(0, u.DepthTo - u.DepthFrom):0.###} m");
+                            ImGui.TextUnformatted("(Click to edit)");
+                            ImGui.EndTooltip();
+                        }
+
+                        // Handle click to edit - ONLY if the window is actually hovered/focused
+                        if (OnLithologyClicked != null && ImGui.IsMouseClicked(ImGuiMouseButton.Left))
+                            // CRITICAL: Check if the parent child window is hovered before processing clicks
+                            // This prevents the viewer from intercepting clicks when it's in the background
+                            if (ImGui.IsWindowHovered(ImGuiHoveredFlags.ChildWindows))
+                                OnLithologyClicked.Invoke(u);
+                    }
+                }
             }
         }
 
-        // Draw depth grid lines if enabled
         if (_showDepthGrid)
         {
-            var interval = _gridInterval;
-            var startDepth = (int)Math.Ceiling(_depthStart / interval) * interval;
-
-            for (var depth = startDepth; depth <= _depthEnd; depth += interval)
+            var start = (float)Math.Floor(top / step) * step - step;
+            var end = (float)Math.Ceiling(bottom / step) * step + step;
+            for (var d = Math.Max(0, start); d <= end; d += step)
             {
-                var y = pos.Y + (depth - _depthStart) * pixelsPerMeter;
-
-                if (y < pos.Y || y > pos.Y + height)
-                    continue;
-
-                drawList.AddLine(
-                    new Vector2(pos.X, y),
-                    new Vector2(pos.X + width, y),
-                    ImGui.GetColorU32(_gridColor), 1f);
+                var y = origin.Y + (d - top) * ppm;
+                dl.AddLine(new Vector2(origin.X, y), new Vector2(origin.X + width, y), ImGui.GetColorU32(_gridColor),
+                    1f);
             }
         }
     }
 
-    private void DrawParameterTrack(ImDrawListPtr drawList, ParameterTrack track, Vector2 pos, float width,
-        float height, float pixelsPerMeter)
+    private void DrawTrackVisible(ImDrawListPtr dl, ParameterTrack track, Vector2 origin,
+        float width, float ppm, float step, float top, float bottom, Vector2 clipMin, Vector2 clipMax)
     {
-        // Draw track header
-        var headerHeight = 25f;
-        drawList.AddRectFilled(pos - new Vector2(0, headerHeight), pos + new Vector2(width, 0),
-            ImGui.GetColorU32(new Vector4(0.2f, 0.2f, 0.2f, 1.0f)));
+        var yTop = origin.Y;
+        var yBot = origin.Y + (bottom - top) * ppm;
 
-        var headerText = $"{track.Name}\n({track.Unit})";
-        var textSize = ImGui.CalcTextSize(track.Name);
-        drawList.AddText(
-            pos - new Vector2(0, headerHeight) + new Vector2((width - textSize.X) * 0.5f, 2),
-            ImGui.GetColorU32(_textColor),
-            track.Name);
+        // background + border
+        dl.AddRectFilled(new Vector2(origin.X, yTop), new Vector2(origin.X + width, yBot),
+            ImGui.GetColorU32(new Vector4(0.10f, 0.10f, 0.10f, 1)));
+        dl.AddRect(new Vector2(origin.X, yTop), new Vector2(origin.X + width, yBot),
+            ImGui.GetColorU32(new Vector4(0.5f, 0.5f, 0.5f, 1)), 0, ImDrawFlags.None, 1f);
 
-        var unitSize = ImGui.CalcTextSize($"({track.Unit})");
-        drawList.AddText(
-            pos - new Vector2(0, headerHeight) + new Vector2((width - unitSize.X) * 0.5f, 14),
-            ImGui.GetColorU32(new Vector4(0.6f, 0.6f, 0.6f, 1.0f)),
-            $"({track.Unit})");
-
-        // Draw track background
-        drawList.AddRectFilled(pos, pos + new Vector2(width, height),
-            ImGui.GetColorU32(new Vector4(0.1f, 0.1f, 0.1f, 1.0f)));
-
-        // Draw track border
-        drawList.AddRect(pos, pos + new Vector2(width, height),
-            ImGui.GetColorU32(new Vector4(0.5f, 0.5f, 0.5f, 1.0f)), 0, ImDrawFlags.None, 2f);
-
-        // Draw scale labels
-        var minText = track.MinValue.ToString("F2");
-        var maxText = track.MaxValue.ToString("F2");
-
-        drawList.AddText(
-            pos + new Vector2(2, height - 15),
-            ImGui.GetColorU32(_depthTextColor),
-            minText);
-
-        drawList.AddText(
-            pos + new Vector2(2, 2),
-            ImGui.GetColorU32(_depthTextColor),
-            maxText);
-
-        // Draw parameter curve
         if (track.Points.Count >= 2)
         {
-            var points = track.Points.OrderBy(p => p.Depth).ToList();
+            var pts = track.Points.OrderBy(p => p.Depth).ToList();
+            var margin = (bottom - top) * 0.2f;
+            var fromD = Math.Max(0, top - margin);
+            var toD = bottom + margin;
 
-            for (var i = 0; i < points.Count - 1; i++)
+            for (var i = 0; i < pts.Count - 1; i++)
             {
-                var p1 = points[i];
-                var p2 = points[i + 1];
+                var p1 = pts[i];
+                var p2 = pts[i + 1];
+                if (Math.Max(p1.Depth, p2.Depth) < fromD || Math.Min(p1.Depth, p2.Depth) > toD) continue;
 
-                var y1 = pos.Y + (p1.Depth - _depthStart) * pixelsPerMeter;
-                var y2 = pos.Y + (p2.Depth - _depthStart) * pixelsPerMeter;
+                var y1 = origin.Y + (p1.Depth - top) * ppm;
+                var y2 = origin.Y + (p2.Depth - top) * ppm;
 
-                // Skip if completely outside visible range
-                if ((y1 < pos.Y && y2 < pos.Y) || (y1 > pos.Y + height && y2 > pos.Y + height))
-                    continue;
-
-                // Calculate X positions based on normalized values
                 float x1, x2;
-
                 if (track.IsLogarithmic)
                 {
-                    var logMin = (float)Math.Log10(Math.Max(track.MinValue, 0.001));
-                    var logMax = (float)Math.Log10(track.MaxValue);
-                    var logVal1 = (float)Math.Log10(Math.Max(p1.Value, 0.001));
-                    var logVal2 = (float)Math.Log10(Math.Max(p2.Value, 0.001));
-
-                    var norm1 = (logVal1 - logMin) / (logMax - logMin);
-                    var norm2 = (logVal2 - logMin) / (logMax - logMin);
-
-                    x1 = pos.X + norm1 * width;
-                    x2 = pos.X + norm2 * width;
+                    var logMin = (float)Math.Log10(Math.Max(track.MinValue, 0.001f));
+                    var logMax = (float)Math.Log10(Math.Max(track.MaxValue, 0.001f));
+                    var v1 = (float)Math.Log10(Math.Max(p1.Value, 0.001f));
+                    var v2 = (float)Math.Log10(Math.Max(p2.Value, 0.001f));
+                    x1 = origin.X + (v1 - logMin) / Math.Max(1e-6f, logMax - logMin) * width;
+                    x2 = origin.X + (v2 - logMin) / Math.Max(1e-6f, logMax - logMin) * width;
                 }
                 else
                 {
-                    var norm1 = (p1.Value - track.MinValue) / (track.MaxValue - track.MinValue);
-                    var norm2 = (p2.Value - track.MinValue) / (track.MaxValue - track.MinValue);
-
-                    x1 = pos.X + norm1 * width;
-                    x2 = pos.X + norm2 * width;
+                    x1 = origin.X + (p1.Value - track.MinValue) / Math.Max(1e-6f, track.MaxValue - track.MinValue) *
+                        width;
+                    x2 = origin.X + (p2.Value - track.MinValue) / Math.Max(1e-6f, track.MaxValue - track.MinValue) *
+                        width;
                 }
 
-                // Clamp to track bounds
-                x1 = Math.Clamp(x1, pos.X, pos.X + width);
-                x2 = Math.Clamp(x2, pos.X, pos.X + width);
+                x1 = Math.Clamp(x1, origin.X, origin.X + width);
+                x2 = Math.Clamp(x2, origin.X, origin.X + width);
 
-                // Draw line segment
-                drawList.AddLine(
-                    new Vector2(x1, y1),
-                    new Vector2(x2, y2),
-                    ImGui.GetColorU32(track.Color), 2f);
-
-                // Draw value labels if enabled and space permits
-                if (_showParameterValues && Math.Abs(y2 - y1) > 20)
-                {
-                    var valueText = p1.Value.ToString("F2");
-                    var valueSize = ImGui.CalcTextSize(valueText);
-
-                    if (x1 + valueSize.X < pos.X + width - 5)
-                        drawList.AddText(
-                            new Vector2(x1 + 3, y1 - valueSize.Y * 0.5f),
-                            ImGui.GetColorU32(track.Color),
-                            valueText);
-                }
-            }
-
-            // Draw data points
-            foreach (var point in points)
-            {
-                var y = pos.Y + (point.Depth - _depthStart) * pixelsPerMeter;
-
-                if (y < pos.Y || y > pos.Y + height)
-                    continue;
-
-                float x;
-                if (track.IsLogarithmic)
-                {
-                    var logMin = (float)Math.Log10(Math.Max(track.MinValue, 0.001));
-                    var logMax = (float)Math.Log10(track.MaxValue);
-                    var logVal = (float)Math.Log10(Math.Max(point.Value, 0.001));
-                    var norm = (logVal - logMin) / (logMax - logMin);
-                    x = pos.X + norm * width;
-                }
-                else
-                {
-                    var norm = (point.Value - track.MinValue) / (track.MaxValue - track.MinValue);
-                    x = pos.X + norm * width;
-                }
-
-                x = Math.Clamp(x, pos.X, pos.X + width);
-
-                drawList.AddCircleFilled(new Vector2(x, y), 3f, ImGui.GetColorU32(track.Color));
+                dl.AddLine(new Vector2(x1, y1), new Vector2(x2, y2), ImGui.GetColorU32(track.Color), 2f);
             }
         }
 
-        // Draw depth grid lines if enabled
         if (_showDepthGrid)
         {
-            var interval = _gridInterval;
-            var startDepth = (int)Math.Ceiling(_depthStart / interval) * interval;
-
-            for (var depth = startDepth; depth <= _depthEnd; depth += interval)
+            var start = (float)Math.Floor(top / step) * step - step;
+            var end = (float)Math.Ceiling(bottom / step) * step + step;
+            for (var d = Math.Max(0, start); d <= end; d += step)
             {
-                var y = pos.Y + (depth - _depthStart) * pixelsPerMeter;
+                var y = origin.Y + (d - top) * ppm;
+                dl.AddLine(new Vector2(origin.X, y), new Vector2(origin.X + width, y), ImGui.GetColorU32(_gridColor),
+                    1f);
+            }
+        }
 
-                if (y < pos.Y || y > pos.Y + height)
-                    continue;
+        // --------- TOOLTIP for tracks/graphs ---------
+        if (_enableTooltip)
+        {
+            var io = ImGui.GetIO();
+            var mouse = io.MousePos;
 
-                drawList.AddLine(
-                    new Vector2(pos.X, y),
-                    new Vector2(pos.X + width, y),
-                    ImGui.GetColorU32(_gridColor), 1f);
+            // CRITICAL FIX: Check if mouse is within visible window bounds first
+            // clipMin and clipMax define the actual visible viewport area
+            var isMouseInVisibleArea = mouse.X >= clipMin.X && mouse.X <= clipMax.X &&
+                                       mouse.Y >= clipMin.Y && mouse.Y <= clipMax.Y;
+
+            if (isMouseInVisibleArea)
+            {
+                var rectMin = new Vector2(origin.X, yTop);
+                var rectMax = new Vector2(origin.X + width, yBot);
+
+                if (mouse.X >= rectMin.X && mouse.X <= rectMax.X && mouse.Y >= rectMin.Y && mouse.Y <= rectMax.Y)
+                {
+                    // depth under mouse:
+                    var tY = mouse.Y - origin.Y;
+                    var depth = top + tY / Math.Max(1e-6f, ppm);
+                    depth = Math.Clamp(depth, top, bottom);
+
+                    // interpolate value at depth
+                    var (hasVal, value) = EvaluateTrackAtDepth(track, depth);
+
+                    // CRITICAL: Only show tooltip if the window is actually hovered
+                    if (ImGui.IsWindowHovered(ImGuiHoveredFlags.ChildWindows))
+                    {
+                        ImGui.BeginTooltip();
+                        var label = string.IsNullOrWhiteSpace(track.Unit) ? track.Name : $"{track.Name} [{track.Unit}]";
+                        ImGui.TextUnformatted(label);
+                        ImGui.TextUnformatted($"Depth: {depth:0.###} m");
+                        if (hasVal)
+                            ImGui.TextUnformatted($"Value: {value:0.###}");
+                        else
+                            ImGui.TextUnformatted("Value: n/a");
+                        ImGui.TextUnformatted($"Range: {track.MinValue:0.###} - {track.MaxValue:0.###}");
+                        ImGui.EndTooltip();
+                    }
+                }
             }
         }
     }
 
-    private void DrawLegend(ImDrawListPtr drawList, Vector2 canvasPos, Vector2 canvasSize)
+    private (bool ok, float v) EvaluateTrackAtDepth(ParameterTrack track, float depth)
     {
-        if (!_dataset.ShowLegend || !_dataset.LithologyUnits.Any())
-            return;
+        if (track?.Points == null || track.Points.Count == 0) return (false, 0f);
+        var pts = track.Points.OrderBy(p => p.Depth).ToList();
 
-        // Get unique lithology types
-        var uniqueLithologies = _dataset.LithologyUnits
-            .GroupBy(u => u.LithologyType)
-            .Select(g => g.First())
-            .ToList();
+        // handle before/after ends
+        if (depth <= pts[0].Depth) return (true, pts[0].Value);
+        if (depth >= pts[^1].Depth) return (true, pts[^1].Value);
 
-        var legendWidth = 200f;
-        var legendHeight = 30f + uniqueLithologies.Count * 25f;
-        var legendPos = canvasPos + new Vector2(canvasSize.X - legendWidth - 10, 10);
-
-        // Draw legend background
-        drawList.AddRectFilled(legendPos, legendPos + new Vector2(legendWidth, legendHeight),
-            ImGui.GetColorU32(new Vector4(0.15f, 0.15f, 0.15f, 0.9f)), 5f);
-
-        drawList.AddRect(legendPos, legendPos + new Vector2(legendWidth, legendHeight),
-            ImGui.GetColorU32(new Vector4(0.5f, 0.5f, 0.5f, 1.0f)), 5f, ImDrawFlags.None, 2f);
-
-        // Draw legend title
-        var titleText = "Legend";
-        var titleSize = ImGui.CalcTextSize(titleText);
-        drawList.AddText(
-            legendPos + new Vector2((legendWidth - titleSize.X) * 0.5f, 5),
-            ImGui.GetColorU32(_textColor),
-            titleText);
-
-        // Draw legend items
-        var itemY = legendPos.Y + 25f;
-        foreach (var unit in uniqueLithologies)
+        // binary search for segment
+        int lo = 0, hi = pts.Count - 1;
+        while (hi - lo > 1)
         {
-            var swatchSize = 20f;
-            var swatchPos = legendPos + new Vector2(10, itemY);
-
-            // Draw lithology swatch with pattern
-            DrawLithologyPattern(drawList, swatchPos, new Vector2(swatchSize, swatchSize),
-                unit.Color, GetPatternForLithology(unit.LithologyType));
-
-            drawList.AddRect(swatchPos, swatchPos + new Vector2(swatchSize, swatchSize),
-                ImGui.GetColorU32(new Vector4(0.3f, 0.3f, 0.3f, 1.0f)));
-
-            // Draw lithology name
-            var nameText = unit.LithologyType;
-            drawList.AddText(
-                swatchPos + new Vector2(swatchSize + 10, (swatchSize - ImGui.CalcTextSize(nameText).Y) * 0.5f),
-                ImGui.GetColorU32(_textColor),
-                nameText);
-
-            itemY += 25f;
+            var mid = (lo + hi) >> 1;
+            if (pts[mid].Depth <= depth) lo = mid;
+            else hi = mid;
         }
+
+        var p1 = pts[lo];
+        var p2 = pts[hi];
+        var span = Math.Max(1e-6f, p2.Depth - p1.Depth);
+        var a = (depth - p1.Depth) / span;
+
+        if (track.IsLogarithmic)
+        {
+            var v1 = (float)Math.Log10(Math.Max(p1.Value, 1e-6f));
+            var v2 = (float)Math.Log10(Math.Max(p2.Value, 1e-6f));
+            var vLog = v1 + a * (v2 - v1);
+            return (true, (float)Math.Pow(10, vLog));
+        }
+
+        return (true, p1.Value + a * (p2.Value - p1.Value));
     }
 
-    private void DrawLithologyPattern(ImDrawListPtr drawList, Vector2 pos, Vector2 size, Vector4 color,
+    private void DrawLithologyPattern(ImDrawListPtr dl, Vector2 pos, Vector2 size, Vector4 color,
         LithologyPattern pattern)
     {
-        var colorU32 = ImGui.GetColorU32(color);
-        var patternColorU32 = ImGui.GetColorU32(new Vector4(color.X * 0.7f, color.Y * 0.7f, color.Z * 0.7f, color.W));
+        var c = ImGui.GetColorU32(color);
+        var pc = ImGui.GetColorU32(new Vector4(color.X * 0.7f, color.Y * 0.7f, color.Z * 0.7f, color.W));
+        dl.AddRectFilled(pos, pos + size, c);
 
-        // Draw base color
-        drawList.AddRectFilled(pos, pos + size, colorU32);
-
-        // Draw pattern
         switch (pattern)
         {
             case LithologyPattern.Dots:
-                for (var y = 0f; y < size.Y; y += 8)
-                for (var x = 0f; x < size.X; x += 8)
-                    drawList.AddCircleFilled(pos + new Vector2(x + 4, y + 4), 1.5f, patternColorU32);
+                for (float yy = 0; yy < size.Y; yy += 8)
+                for (float xx = 0; xx < size.X; xx += 8)
+                    dl.AddCircleFilled(pos + new Vector2(xx + 4, yy + 4), 1.5f, pc);
                 break;
-
             case LithologyPattern.HorizontalLines:
-                for (var y = 0f; y < size.Y; y += 6)
-                    drawList.AddLine(pos + new Vector2(0, y), pos + new Vector2(size.X, y), patternColorU32, 1.5f);
+                for (float yy = 0; yy < size.Y; yy += 6)
+                    dl.AddLine(pos + new Vector2(0, yy), pos + new Vector2(size.X, yy), pc, 1.5f);
                 break;
-
             case LithologyPattern.VerticalLines:
-                for (var x = 0f; x < size.X; x += 6)
-                    drawList.AddLine(pos + new Vector2(x, 0), pos + new Vector2(x, size.Y), patternColorU32, 1.5f);
+                for (float xx = 0; xx < size.X; xx += 6)
+                    dl.AddLine(pos + new Vector2(xx, 0), pos + new Vector2(xx, size.Y), pc, 1.5f);
                 break;
-
             case LithologyPattern.Diagonal:
                 for (var i = -size.Y; i < size.X + size.Y; i += 8)
-                {
-                    var p1 = pos + new Vector2(i, 0);
-                    var p2 = pos + new Vector2(i + size.Y, size.Y);
-                    drawList.AddLine(p1, p2, patternColorU32, 1.5f);
-                }
-
+                    dl.AddLine(pos + new Vector2(i, 0), pos + new Vector2(i + size.Y, size.Y), pc, 1.5f);
                 break;
-
             case LithologyPattern.Crosses:
-                for (var y = 0f; y < size.Y; y += 10)
-                for (var x = 0f; x < size.X; x += 10)
+                for (float yy = 0; yy < size.Y; yy += 10)
+                for (float xx = 0; xx < size.X; xx += 10)
                 {
-                    var center = pos + new Vector2(x + 5, y + 5);
-                    drawList.AddLine(center - new Vector2(3, 0), center + new Vector2(3, 0), patternColorU32, 1.5f);
-                    drawList.AddLine(center - new Vector2(0, 3), center + new Vector2(0, 3), patternColorU32, 1.5f);
+                    var c0 = pos + new Vector2(xx + 5, yy + 5);
+                    dl.AddLine(c0 - new Vector2(3, 0), c0 + new Vector2(3, 0), pc, 1.5f);
+                    dl.AddLine(c0 - new Vector2(0, 3), c0 + new Vector2(0, 3), pc, 1.5f);
                 }
 
                 break;
-
             case LithologyPattern.Sand:
-                var random = new Random(0);
+            {
+                var rnd = new Random(0);
                 for (var i = 0; i < (int)(size.X * size.Y / 20); i++)
                 {
-                    var x = (float)random.NextDouble() * size.X;
-                    var y = (float)random.NextDouble() * size.Y;
-                    drawList.AddCircleFilled(pos + new Vector2(x, y), 1f, patternColorU32);
+                    var xx = (float)rnd.NextDouble() * size.X;
+                    var yy = (float)rnd.NextDouble() * size.Y;
+                    dl.AddCircleFilled(pos + new Vector2(xx, yy), 1f, pc);
                 }
 
                 break;
-
+            }
             case LithologyPattern.Bricks:
-                for (var y = 0f; y < size.Y; y += 10)
+                for (float yy = 0; yy < size.Y; yy += 10)
                 {
-                    var offset = (int)(y / 10) % 2 == 0 ? 0f : 15f;
-                    for (var x = -15f; x < size.X; x += 30)
-                        drawList.AddRect(pos + new Vector2(x + offset, y),
-                            pos + new Vector2(x + offset + 28, y + 8), patternColorU32);
+                    var off = (int)(yy / 10) % 2 == 0 ? 0f : 15f;
+                    for (var xx = -15f; xx < size.X; xx += 30)
+                        dl.AddRect(pos + new Vector2(xx + off, yy), pos + new Vector2(xx + off + 28, yy + 8), pc);
                 }
 
                 break;
-
             case LithologyPattern.Limestone:
-                random = new Random(1);
+            {
+                var rnd = new Random(1);
                 for (var i = 0; i < (int)(size.X * size.Y / 30); i++)
                 {
-                    var x = (float)random.NextDouble() * size.X;
-                    var y = (float)random.NextDouble() * size.Y;
-                    var r = (float)random.NextDouble() * 2 + 1;
-                    drawList.AddCircle(pos + new Vector2(x, y), r, patternColorU32);
+                    var xx = (float)rnd.NextDouble() * size.X;
+                    var yy = (float)rnd.NextDouble() * size.Y;
+                    var r = (float)rnd.NextDouble() * 2 + 1;
+                    dl.AddCircle(pos + new Vector2(xx, yy), r, pc);
                 }
 
+                break;
+            }
+            case LithologyPattern.Solid:
+            default:
                 break;
         }
     }
@@ -575,37 +875,54 @@ public class BoreholeViewer : IDatasetViewer
     {
         if (_dataset.LithologyPatterns.TryGetValue(lithologyType, out var pattern))
             return pattern;
-
         return LithologyPattern.Solid;
     }
 
-    private void HandleInput(ref float zoom, ref Vector2 pan, Vector2 canvasPos, Vector2 canvasSize)
+    // ---------------- input & zoom ----------------
+    private void HandleInput(ref float zoom, float bodyHeightPx)
     {
         var io = ImGui.GetIO();
+        if (!ImGui.IsWindowHovered()) return;
 
-        if (!ImGui.IsWindowHovered())
-            return;
-
-        // Mouse wheel zoom
+        // Zoom with wheel; Ctrl accelerates.
         if (io.MouseWheel != 0)
         {
-            var zoomFactor = 1.1f;
-            if (io.MouseWheel > 0)
-                zoom *= zoomFactor;
-            else
-                zoom /= zoomFactor;
+            var mouseY = io.MousePos.Y;
+            var viewTopY = ImGui.GetCursorScreenPos().Y + HeaderHeight; // approx top of drawing area
+            var t = Math.Clamp((mouseY - viewTopY) / Math.Max(1f, bodyHeightPx), 0f, 1f);
+            var focusDepth = _depthStart + t * Math.Max(1e-3f, _depthEnd - _depthStart);
 
-            zoom = Math.Clamp(zoom, 0.1f, 10f);
+            var zfBase = 1.2f;
+            var zf = io.KeyCtrl ? zfBase * 1.25f : zfBase;
+            var newZoom = io.MouseWheel > 0 ? zoom * zf : zoom / zf;
+            newZoom = Math.Clamp(newZoom, 0.01f, 20f);
+
+            if (!_autoScaleDepth)
+            {
+                var currentRange = Math.Max(1e-3f, _depthEnd - _depthStart);
+                var newRange = Math.Max(1e-3f, currentRange * (zoom / newZoom)); // inverse with zoom
+                var newStart = Math.Clamp(focusDepth - t * newRange, 0f, Math.Max(0f, _dataset.TotalDepth - newRange));
+                _depthStart = newStart;
+                _depthEnd = Math.Min(Math.Max(_dataset.TotalDepth, 1f), _depthStart + newRange);
+            }
+
+            zoom = newZoom;
         }
 
-        // Middle mouse button pan
-        if (ImGui.IsMouseDragging(ImGuiMouseButton.Middle)) pan += io.MouseDelta;
-
-        // Reset view with 'R'
+        // Reset zoom
         if (ImGui.IsKeyPressed(ImGuiKey.R))
         {
             zoom = 1f;
-            pan = Vector2.Zero;
+            if (_autoScaleDepth)
+            {
+                _depthStart = 0f;
+                _depthEnd = Math.Max(_dataset.TotalDepth, 1f);
+            }
         }
+    }
+
+    private static bool NearlyEqual(float a, float b, float eps = 1e-3f)
+    {
+        return Math.Abs(a - b) <= eps;
     }
 }

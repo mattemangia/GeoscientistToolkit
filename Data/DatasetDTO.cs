@@ -5,10 +5,6 @@ using GeoscientistToolkit.Data.Materials;
 using GeoscientistToolkit.Data.GIS;
 using GeoscientistToolkit.Business.GIS;
 
-// ADDED: For enums used in ChemicalCompoundDTO
-
-// Added for DateTime
-
 namespace GeoscientistToolkit.Data;
 
 // Base DTO
@@ -41,6 +37,8 @@ public class DatasetMetadataDTO
     public string LocationName { get; set; }
     public double? Latitude { get; set; }
     public double? Longitude { get; set; }
+    public float? CoordinatesX { get; set; } // ADDED
+    public float? CoordinatesY { get; set; } // ADDED
     public double? Depth { get; set; }
     public float? SizeX { get; set; }
     public float? SizeY { get; set; }
@@ -93,18 +91,15 @@ public class CtImageStackDatasetDTO : DatasetDTO
     public string Unit { get; set; }
     public int BinningSize { get; set; }
     public List<MaterialDTO> Materials { get; set; } = new();
-
-    // NEW: Properties for storing simulation results
     public ThermalResultsDTO ThermalResults { get; set; }
     public NMRResultsDTO NmrResults { get; set; }
 }
 
-public class DatasetGroupDTO : DatasetDTO
+public partial class DatasetGroupDTO : DatasetDTO
 {
     public List<DatasetDTO> Datasets { get; set; } = new();
 }
 
-// --- MODIFIED ---
 public class AcousticVolumeDatasetDTO : DatasetDTO
 {
     public double PWaveVelocity { get; set; }
@@ -120,18 +115,15 @@ public class AcousticVolumeDatasetDTO : DatasetDTO
     public string SourceDatasetPath { get; set; }
     public string SourceMaterialName { get; set; }
     public bool HasTimeSeries { get; set; }
-    public bool HasDamageField { get; set; } // ADDED
-    public bool HasCalibration { get; set; } // ADDED
+    public bool HasDamageField { get; set; }
+    public bool HasCalibration { get; set; }
 }
 
 public class ProjectFileDTO
 {
     public string ProjectName { get; set; }
     public List<DatasetDTO> Datasets { get; set; } = new();
-
     public ProjectMetadataDTO ProjectMetadata { get; set; } = new();
-
-    // ADDED: To store user-defined compounds in the project file.
     public List<ChemicalCompoundDTO> CustomCompounds { get; set; } = new();
 }
 
@@ -166,13 +158,10 @@ public class PNMDatasetDTO : DatasetDTO
     public float DarcyPermeability { get; set; }
     public float NavierStokesPermeability { get; set; }
     public float LatticeBoltzmannPermeability { get; set; }
-
-    // --- NEW: Diffusivity Results ---
     public float BulkDiffusivity { get; set; }
     public float EffectiveDiffusivity { get; set; }
     public float FormationFactor { get; set; }
     public float TransportTortuosity { get; set; }
-
     public List<PoreDTO> Pores { get; set; } = new();
     public List<ThroatDTO> Throats { get; set; } = new();
     public int ImageWidth { get; set; }
@@ -180,19 +169,12 @@ public class PNMDatasetDTO : DatasetDTO
     public int ImageDepth { get; set; }
 }
 
-// --- NEW DTOS FOR SIMULATION RESULTS ---
-
-/// <summary>
-///     DTO for serializing ThermalResults.
-/// </summary>
 public class ThermalResultsDTO
 {
-    // For flattened 3D temperature field
     public int TempField_W { get; set; }
     public int TempField_H { get; set; }
     public int TempField_D { get; set; }
     public float[] TemperatureFieldData { get; set; }
-
     public double EffectiveConductivity { get; set; }
     public Dictionary<byte, double> MaterialConductivities { get; set; }
     public Dictionary<string, double> AnalyticalEstimates { get; set; }
@@ -201,9 +183,6 @@ public class ThermalResultsDTO
     public double FinalError { get; set; }
 }
 
-/// <summary>
-///     DTO for serializing NMRResults.
-/// </summary>
 public class NMRResultsDTO
 {
     public double[] TimePoints { get; set; }
@@ -212,13 +191,10 @@ public class NMRResultsDTO
     public double[] T2HistogramBins { get; set; }
     public double[] T1Histogram { get; set; }
     public double[] T1HistogramBins { get; set; }
-
-    // For flattened 2D T1T2Map
     public int T1T2Map_T1Count { get; set; }
     public int T1T2Map_T2Count { get; set; }
     public double[] T1T2MapData { get; set; }
     public bool HasT1T2Data { get; set; }
-
     public double[] PoreSizes { get; set; }
     public double[] PoreSizeDistribution { get; set; }
     public double MeanT2 { get; set; }
@@ -233,11 +209,6 @@ public class NMRResultsDTO
     public string ComputationMethod { get; set; }
 }
 
-// --- NEW DTO FOR CHEMICAL COMPOUNDS ---
-
-/// <summary>
-///     DTO for serializing a user-defined ChemicalCompound.
-/// </summary>
 public class ChemicalCompoundDTO
 {
     public string Name { get; set; } = "Unnamed";
@@ -275,21 +246,12 @@ public class ChemicalCompoundDTO
     public Dictionary<string, double> CustomParams { get; set; } = new();
 }
 
-// --- NEW AND MODIFIED DTOS FOR GIS ---
-
-/// <summary>
-/// DTO for serializing both standard and geological features.
-/// If GeologicalType is not null, it's treated as a GeologicalFeature.
-/// </summary>
 public class GISFeatureDTO
 {
-    // Base properties
     public FeatureType Type { get; set; }
     public List<Vector2> Coordinates { get; set; }
     public Dictionary<string, object> Properties { get; set; }
     public string Id { get; set; }
-
-    // Nullable geological properties
     public GeologicalMapping.GeologicalFeatureType? GeologicalType { get; set; }
     public float? Strike { get; set; }
     public float? Dip { get; set; }
@@ -308,7 +270,6 @@ public class GISFeatureDTO
     public bool? IsCovered { get; set; }
 }
 
-
 public class GISLayerDTO
 {
     public string Name { get; set; }
@@ -319,7 +280,52 @@ public class GISLayerDTO
     public List<GISFeatureDTO> Features { get; set; } = new();
 }
 
+// AGGIUNTO: DTO per TwoDGeology
+/// <summary>
+/// DTO for serializing TwoDGeologyDataset (2D geological profiles)
+/// NOTE: The actual CrossSection data is stored/loaded separately via TwoDGeologySerializer
+/// </summary>
 public class TwoDGeologyDatasetDTO : DatasetDTO
 {
-    // All data is stored in the binary file, so only base properties are needed for project serialization.
+    // Base properties from DatasetDTO are inherited (TypeName, Name, FilePath, Metadata)
+    // The actual CrossSection data is stored/loaded separately via TwoDGeologySerializer
+}
+// DTO for SubsurfaceGISDataset
+public class SubsurfaceVoxelDTO
+{
+    public Vector3 Position { get; set; }
+    public string LithologyType { get; set; }
+    public Dictionary<string, float> Parameters { get; set; } = new();
+    public float Confidence { get; set; }
+}
+
+public class SubsurfaceLayerBoundaryDTO
+{
+    public string LayerName { get; set; }
+    public List<Vector3> Points { get; set; } = new();
+    public float[,] ElevationGrid { get; set; }
+    public BoundingBoxDTO GridBounds { get; set; }
+}
+
+public class BoundingBoxDTO
+{
+    public Vector2 Min { get; set; }
+    public Vector2 Max { get; set; }
+}
+
+public class SubsurfaceGISDatasetDTO : GISDatasetDTO
+{
+    public List<string> SourceBoreholeNames { get; set; } = new();
+    public List<SubsurfaceVoxelDTO> VoxelGrid { get; set; } = new();
+    public List<SubsurfaceLayerBoundaryDTO> LayerBoundaries { get; set; } = new();
+    public Vector3 GridOrigin { get; set; }
+    public Vector3 GridSize { get; set; }
+    public Vector3 VoxelSize { get; set; }
+    public int GridResolutionX { get; set; }
+    public int GridResolutionY { get; set; }
+    public int GridResolutionZ { get; set; }
+    public float InterpolationRadius { get; set; }
+    public int InterpolationMethod { get; set; }
+    public float IDWPower { get; set; }
+    public string HeightmapDatasetName { get; set; }
 }

@@ -12,6 +12,31 @@ using System.IO;
 namespace GeoscientistToolkit.Data.Borehole;
 
 /// <summary>
+///     Contact type between lithological units
+///     References: Tucker, M. E. (2011). Sedimentary Petrology (3rd ed.). Wiley-Blackwell.
+///     Boggs, S. (2012). Principles of Sedimentology and Stratigraphy (5th ed.). Pearson.
+/// </summary>
+public enum ContactType
+{
+    /// <summary>Sharp, linear contact with no transition zone</summary>
+    Sharp,
+    /// <summary>Erosive contact indicating erosion before deposition</summary>
+    Erosive,
+    /// <summary>Gradational contact with transitional zone</summary>
+    Gradational,
+    /// <summary>Conformable contact representing continuous deposition</summary>
+    Conformable,
+    /// <summary>Unconformity representing a time gap</summary>
+    Unconformity,
+    /// <summary>Fault contact from tectonic activity</summary>
+    Faulted,
+    /// <summary>Intrusive contact from igneous intrusion</summary>
+    Intrusive,
+    /// <summary>Indistinct or poorly defined contact</summary>
+    Indistinct
+}
+
+/// <summary>
 ///     Represents a lithological unit in the borehole with depth range
 /// </summary>
 public class LithologyUnit
@@ -19,8 +44,20 @@ public class LithologyUnit
     public string ID { get; set; } = Guid.NewGuid().ToString();
     public string Name { get; set; } = "Unknown";
     public string LithologyType { get; set; } = "Sandstone"; // Sandstone, Shale, Limestone, etc.
+
+    // Compatibility aliases
+    public string Lithology => LithologyType; // Alias for LithologyType
+    public string RockType => LithologyType; // Alias for LithologyType
+
     public float DepthFrom { get; set; }
     public float DepthTo { get; set; }
+    
+    /// <summary>Upper contact type (between this unit and the one above)</summary>
+    public ContactType UpperContactType { get; set; } = ContactType.Sharp;
+    
+    /// <summary>Lower contact type (between this unit and the one below)</summary>
+    public ContactType LowerContactType { get; set; } = ContactType.Sharp;
+    
     public Vector4 Color { get; set; } = new(0.8f, 0.8f, 0.8f, 1.0f);
     public string Description { get; set; } = "";
     public string GrainSize { get; set; } = "Medium"; // Clay, Silt, Fine, Medium, Coarse, etc.
@@ -86,6 +123,18 @@ public enum LithologyPattern
 }
 
 /// <summary>
+///     Represents a fracture detected in the borehole
+/// </summary>
+public class FractureData
+{
+    public float Depth { get; set; }
+    public float? Strike { get; set; }
+    public float? Dip { get; set; }
+    public float? Aperture { get; set; }
+    public string Description { get; set; } = "";
+}
+
+/// <summary>
 ///     Dataset representing a borehole/well log with geological and petrophysical data
 /// </summary>
 public class BoreholeDataset : Dataset, ISerializableDataset
@@ -107,8 +156,44 @@ public class BoreholeDataset : Dataset, ISerializableDataset
     public Vector2 SurfaceCoordinates { get; set; } // X, Y in project coordinates
     public float Elevation { get; set; } // meters above sea level
 
+
+    // Alias properties for compatibility with geothermal tools
+    public float Diameter => WellDiameter; // Alias for WellDiameter (in meters)
+    public float WaterTableDepth { get; set; } = 5.0f; // Depth to water table in meters
+
     // Lithology units
     public List<LithologyUnit> LithologyUnits { get; set; } = new();
+
+    // Alias for compatibility
+    public List<LithologyUnit> Lithology => LithologyUnits;
+
+    // Compatibility properties for serialization and metadata
+    public Vector2 Coordinates
+    {
+        get => SurfaceCoordinates;
+        set => SurfaceCoordinates = value;
+    }
+
+    public float CoordinatesX
+    {
+        get => SurfaceCoordinates.X;
+        set => SurfaceCoordinates = new Vector2(value, SurfaceCoordinates.Y);
+    }
+
+    public float CoordinatesY
+    {
+        get => SurfaceCoordinates.Y;
+        set => SurfaceCoordinates = new Vector2(SurfaceCoordinates.X, value);
+    }
+
+    public float Depth
+    {
+        get => TotalDepth;
+        set => TotalDepth = value;
+    }
+
+    // Fractures collection
+    public List<FractureData> Fractures { get; set; } = new();
 
     // Parameter tracks
     public Dictionary<string, ParameterTrack> ParameterTracks { get; set; } = new();
@@ -133,11 +218,31 @@ public class BoreholeDataset : Dataset, ISerializableDataset
 
     public object ToSerializableObject()
     {
+        var metadata = new DatasetMetadataDTO
+        {
+            SampleName = DatasetMetadata.SampleName,
+            LocationName = DatasetMetadata.LocationName,
+            Latitude = DatasetMetadata.Latitude,
+            Longitude = DatasetMetadata.Longitude,
+            CoordinatesX = DatasetMetadata.Coordinates?.X,
+            CoordinatesY = DatasetMetadata.Coordinates?.Y,
+            Depth = DatasetMetadata.Depth,
+            SizeX = DatasetMetadata.Size?.X,
+            SizeY = DatasetMetadata.Size?.Y,
+            SizeZ = DatasetMetadata.Size?.Z,
+            SizeUnit = DatasetMetadata.SizeUnit,
+            CollectionDate = DatasetMetadata.CollectionDate,
+            Collector = DatasetMetadata.Collector,
+            Notes = DatasetMetadata.Notes,
+            CustomFields = DatasetMetadata.CustomFields
+        };
+
         return new BoreholeDatasetDTO
         {
-            TypeName = nameof(BoreholeDataset),
+            TypeName = "Borehole",
             Name = Name,
             FilePath = FilePath,
+            Metadata = metadata,
             WellName = WellName,
             Field = Field,
             TotalDepth = TotalDepth,
@@ -148,18 +253,18 @@ public class BoreholeDataset : Dataset, ISerializableDataset
             ShowGrid = ShowGrid,
             ShowLegend = ShowLegend,
             TrackWidth = TrackWidth,
-            LithologyUnits = LithologyUnits.Select(u => new LithologyUnitDTO
+            LithologyUnits = LithologyUnits.Select(unit => new LithologyUnitDTO
             {
-                ID = u.ID,
-                Name = u.Name,
-                LithologyType = u.LithologyType,
-                DepthFrom = u.DepthFrom,
-                DepthTo = u.DepthTo,
-                Color = u.Color,
-                Description = u.Description,
-                GrainSize = u.GrainSize,
-                Parameters = u.Parameters,
-                ParameterSources = u.ParameterSources
+                ID = unit.ID,
+                Name = unit.Name,
+                LithologyType = unit.LithologyType,
+                DepthFrom = unit.DepthFrom,
+                DepthTo = unit.DepthTo,
+                Color = unit.Color,
+                Description = unit.Description,
+                GrainSize = unit.GrainSize,
+                Parameters = unit.Parameters,
+                ParameterSources = unit.ParameterSources
             }).ToList(),
             ParameterTracks = ParameterTracks.ToDictionary(
                 kvp => kvp.Key,
@@ -211,11 +316,20 @@ public class BoreholeDataset : Dataset, ISerializableDataset
             ["Thermal Conductivity"] = new()
             {
                 Name = "Thermal Conductivity",
-                Unit = "W/m·K",
+                Unit = "W/mÂ·K",
                 MinValue = 0.1f,
                 MaxValue = 5,
                 Color = new Vector4(1.0f, 0.6f, 0.2f, 1.0f),
                 IsLogarithmic = false
+            },
+            ["Thermal Diffusivity"] = new() // ADDED
+            {
+                Name = "Thermal Diffusivity",
+                Unit = "mÂ²/s",
+                MinValue = 1e-7f,
+                MaxValue = 5e-6f,
+                Color = new Vector4(0.0f, 0.8f, 0.8f, 1.0f), // Cyan
+                IsLogarithmic = true
             },
             ["Young's Modulus"] = new()
             {
@@ -619,6 +733,8 @@ public class BoreholeDataset : Dataset, ISerializableDataset
                 writer.Write(unit.Color.X); writer.Write(unit.Color.Y); writer.Write(unit.Color.Z); writer.Write(unit.Color.W);
                 writer.Write(unit.Description ?? "");
                 writer.Write(unit.GrainSize ?? "");
+                writer.Write((int)unit.UpperContactType);
+                writer.Write((int)unit.LowerContactType);
 
                 writer.Write(unit.Parameters.Count);
                 foreach (var param in unit.Parameters)
@@ -713,7 +829,9 @@ public class BoreholeDataset : Dataset, ISerializableDataset
                     DepthTo = reader.ReadSingle(),
                     Color = new Vector4(reader.ReadSingle(), reader.ReadSingle(), reader.ReadSingle(), reader.ReadSingle()),
                     Description = reader.ReadString(),
-                    GrainSize = reader.ReadString()
+                    GrainSize = reader.ReadString(),
+                    UpperContactType = (ContactType)reader.ReadInt32(),
+                    LowerContactType = (ContactType)reader.ReadInt32()
                 };
 
                 var paramCount = reader.ReadInt32();
@@ -804,6 +922,8 @@ public class BoreholeDataset : Dataset, ISerializableDataset
                 Color = unitDto.Color,
                 Description = unitDto.Description,
                 GrainSize = unitDto.GrainSize,
+                UpperContactType = unitDto.UpperContactType,
+                LowerContactType = unitDto.LowerContactType,
                 Parameters = unitDto.Parameters,
                 ParameterSources = unitDto.ParameterSources
             });
@@ -821,6 +941,15 @@ public class BoreholeDataset : Dataset, ISerializableDataset
                 IsVisible = kvp.Value.IsVisible,
                 Points = kvp.Value.Points
             };
+    }
+
+    public void SyncMetadata()
+    {
+        DatasetMetadata.SampleName = WellName;
+        DatasetMetadata.LocationName = Field;
+        DatasetMetadata.Coordinates = SurfaceCoordinates;
+        DatasetMetadata.Elevation = Elevation;
+        DatasetMetadata.Depth = TotalDepth;
     }
 }
 
@@ -851,6 +980,8 @@ public class LithologyUnitDTO
     public Vector4 Color { get; set; }
     public string Description { get; set; }
     public string GrainSize { get; set; }
+    public ContactType UpperContactType { get; set; }
+    public ContactType LowerContactType { get; set; }
     public Dictionary<string, float> Parameters { get; set; }
     public Dictionary<string, ParameterSource> ParameterSources { get; set; }
 }

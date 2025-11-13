@@ -19,8 +19,6 @@
         <Compile Remove="AddInExtractor\**"/>
         <EmbeddedResource Remove="AddInExtractor\**"/>
         <None Remove="AddInExtractor\**"/>
-        <Compile Remove="Data\GIS\RasterTools\IsolineCreatorTool.cs" />
-        <Compile Remove="Data\GIS\RasterTools\RasterCalculatorTool.cs" />
     </ItemGroup>
 
     <!-- FIX 2: All PackageReference items are correctly placed within a single ItemGroup -->
@@ -32,6 +30,7 @@
         <PackageReference Include="ImGui.NET.Branches.Docking" Version="1.88.0"/>
         <PackageReference Include="MathNet.Numerics" Version="6.0.0-beta2"/>
         <PackageReference Include="MaxRev.Gdal.MacosRuntime.Minimal" Version="3.11.4.376"/>
+        <PackageReference Include="MetadataExtractor" Version="2.9.0" />
         <PackageReference Include="NCalc" Version="1.3.8"/>
         <PackageReference Include="NetTopologySuite" Version="2.6.0"/>
         <PackageReference Include="NetTopologySuite.Features" Version="2.2.0"/>
@@ -68,7 +67,7 @@
         <Compile Remove="AddIns\Development\**\*.cs"/>
     </ItemGroup>
     <ItemGroup>
-      <Folder Include="Data\GIS\RasterTools\" />
+      <Folder Include="LASExample\" />
     </ItemGroup>
 
     <!-- First, ensure the AddInExtractor is built -->

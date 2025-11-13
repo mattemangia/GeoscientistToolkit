@@ -14,12 +14,12 @@ using GeoscientistToolkit.Data.Materials;
 using GeoscientistToolkit.Data.Mesh3D;
 using GeoscientistToolkit.Data.Pnm;
 using GeoscientistToolkit.Data.Table;
-using GeoscientistToolkit.Data.TwoDGeology;
 using GeoscientistToolkit.Settings;
 using GeoscientistToolkit.Util;
 using GeoscientistToolkit.Business.GIS;
 // ADDED: To access CompoundLibrary and ChemicalCompound
 using AcousticVolumeDatasetDTO = GeoscientistToolkit.Data.AcousticVolumeDatasetDTO;
+using SubsurfaceGISDatasetDTO = GeoscientistToolkit.Data.GIS.SubsurfaceGISDatasetDTO;
 
 namespace GeoscientistToolkit.Business;
 
@@ -318,7 +318,7 @@ public class ProjectManager
                     ShowGrid = boreholeDto.ShowGrid,
                     ShowLegend = boreholeDto.ShowLegend,
                     TrackWidth = boreholeDto.TrackWidth,
-                    IsMissing = !File.Exists(boreholeDto.FilePath)
+                    IsMissing = !string.IsNullOrEmpty(boreholeDto.FilePath) && !File.Exists(boreholeDto.FilePath)
                 };
 
                 // Restore lithology units
@@ -363,7 +363,20 @@ public class ProjectManager
                 if (boreholeDataset.IsMissing)
                     Logger.LogWarning(
                         $"Source file not found for Borehole dataset: {boreholeDto.Name} at {boreholeDto.FilePath}");
-
+                if (!boreholeDataset.IsMissing && !string.IsNullOrEmpty(boreholeDataset.FilePath))
+                {
+                    var ext = Path.GetExtension(boreholeDataset.FilePath)?.ToLowerInvariant();
+                    try
+                    {
+                        if (ext == ".bhb") boreholeDataset.LoadFromBinaryFile(boreholeDataset.FilePath);
+                        else if (ext == ".borehole" || ext == ".json") boreholeDataset.Load();
+                        Logger.Log($"Reloaded borehole data from source: {boreholeDataset.FilePath}");
+                    }
+                    catch (Exception ex)
+                    {
+                        Logger.LogWarning($"Falling back to DTO data for '{boreholeDataset.Name}': {ex.Message}");
+                    }
+                }
                 dataset = boreholeDataset;
                 break;
             }
@@ -561,18 +574,15 @@ public class ProjectManager
                 dataset = pnmDataset;
                 break;
             }
-            case TwoDGeologyDatasetDTO geo2dDto:
+                
+            case Data.SubsurfaceGISDatasetDTO subsurfaceDto:
             {
-                var geo2dDataset = new TwoDGeologyDataset(geo2dDto.Name, geo2dDto.FilePath)
-                {
-                    IsMissing = !File.Exists(geo2dDto.FilePath)
-                };
-                if (geo2dDataset.IsMissing)
-                    Logger.LogWarning(
-                        $"Source file not found for 2D Geology dataset: {geo2dDto.Name} at {geo2dDto.FilePath}");
-                dataset = geo2dDataset;
+                var subsurfaceDataset = new SubsurfaceGISDataset(subsurfaceDto);
+                dataset = subsurfaceDataset;
+                Logger.Log($"Loaded subsurface GIS dataset: {subsurfaceDto.Name} with {subsurfaceDto.VoxelGrid?.Count ?? 0} voxels");
                 break;
             }
+
 
             case GISDatasetDTO gisDto:
             {
@@ -690,72 +700,7 @@ public class ProjectManager
 
         return dataset;
     }
-/// <summary>
-/// Creates a new, empty 2D Geology Profile, saves its initial file, and adds it to the current project.
-/// </summary>
-/// <returns>The newly created Dataset, or null if creation failed.</returns>
-public Dataset CreateNew2DGeologyProfile()
-{
-    try
-    {
-        var timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
-        var profileName = $"CrossSection_{timestamp}";
 
-        // Get user's documents folder as default location
-        var documentsPath = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
-        var defaultPath = Path.Combine(documentsPath, "2D Geology");
-
-        // Create the directory if it doesn't exist
-        if (!Directory.Exists(defaultPath))
-        {
-            try
-            {
-                Directory.CreateDirectory(defaultPath);
-            }
-            catch
-            {
-                // If we can't create it, just use documents folder
-                defaultPath = documentsPath;
-            }
-        }
-
-        var filePath = Path.Combine(defaultPath, $"{profileName}.2dgeo");
-
-        // --- All the logic that was in MainWindow is now here ---
-        var twoDGeo = TwoDGeologyDataset.CreateEmpty(profileName, filePath);
-
-        if (twoDGeo == null)
-        {
-            Logger.LogError("Failed to create empty 2D geology profile (CreateEmpty returned null)");
-            return null;
-        }
-
-        // Save the initial profile to the selected location
-        try
-        {
-            TwoDGeologySerializer.Write(filePath, twoDGeo.ProfileData);
-            Logger.Log($"Saved initial 2D geology profile to {filePath}");
-        }
-        catch (Exception saveEx)
-        {
-            Logger.LogError($"Failed to save initial 2D geology profile: {saveEx.Message}");
-            // We can still proceed, the dataset is in memory
-        }
-
-        // Add to project (this class's responsibility)
-        this.AddDataset(twoDGeo);
-        Logger.Log($"Created new 2D geology profile: {profileName}");
-
-        // Return the created dataset so the UI can select it
-        return twoDGeo;
-    }
-    catch (Exception ex)
-    {
-        Logger.LogError($"Failed to create empty 2D geology profile: {ex.Message}");
-        Logger.LogError($"Stack trace: {ex.StackTrace}");
-        return null;
-    }
-}
     private DatasetMetadata ConvertFromDatasetMetadataDTO(DatasetMetadataDTO dto)
     {
         if (dto == null) return new DatasetMetadata();
@@ -773,6 +718,10 @@ public Dataset CreateNew2DGeologyProfile()
             Notes = dto.Notes,
             CustomFields = new Dictionary<string, string>(dto.CustomFields ?? new Dictionary<string, string>())
         };
+
+        if (dto.CoordinatesX.HasValue && dto.CoordinatesY.HasValue)
+            meta.Coordinates = new Vector2(dto.CoordinatesX.Value, dto.CoordinatesY.Value);
+
 
         if (dto.SizeX.HasValue && dto.SizeY.HasValue && dto.SizeZ.HasValue)
             meta.Size = new Vector3(dto.SizeX.Value, dto.SizeY.Value, dto.SizeZ.Value);

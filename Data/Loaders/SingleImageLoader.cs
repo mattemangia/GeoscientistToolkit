@@ -51,6 +51,24 @@ public class SingleImageLoader : IDataLoader
                     dataset.Unit = "µm";
                 }
 
+                progressReporter?.Report((0.6f, "Extracting EXIF metadata..."));
+
+                // Extract GPS metadata from EXIF if available
+                var gpsMetadata = ImageLoader.ExtractGPSMetadata(ImagePath);
+                if (gpsMetadata.HasGPSData)
+                {
+                    dataset.DatasetMetadata.Latitude = gpsMetadata.Latitude;
+                    dataset.DatasetMetadata.Longitude = gpsMetadata.Longitude;
+                    if (gpsMetadata.Altitude.HasValue)
+                    {
+                        dataset.DatasetMetadata.Elevation = gpsMetadata.Altitude;
+                    }
+                    
+                    Logger.Log($"[SingleImageLoader] Applied GPS coordinates to dataset: " +
+                              $"Lat={gpsMetadata.Latitude:F6}, Lon={gpsMetadata.Longitude:F6}" +
+                              (gpsMetadata.Altitude.HasValue ? $", Elevation={gpsMetadata.Altitude:F2}m" : ""));
+                }
+
                 progressReporter?.Report((1.0f, "Single image imported successfully!"));
 
                 return dataset;

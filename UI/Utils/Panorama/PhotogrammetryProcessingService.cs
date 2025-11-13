@@ -1,0 +1,592 @@
+﻿// GeoscientistToolkit/Business/Photogrammetry/PhotogrammetryProcessingService.cs
+
+using System;
+using System.Collections.Concurrent;
+using System.Collections.Generic;
+using System.Linq;
+using System.Numerics;
+using System.Threading;
+using System.Threading.Tasks;
+using GeoscientistToolkit.Business.Panorama;
+using GeoscientistToolkit.Business.Photogrammetry;
+using GeoscientistToolkit.Data;
+using GeoscientistToolkit.Data.Image;
+using GeoscientistToolkit.Data.Mesh3D;
+using GeoscientistToolkit.Util;
+
+namespace GeoscientistToolkit
+{
+    /// <summary>
+    /// Main service for photogrammetry processing pipeline
+    /// </summary>
+    public class PhotogrammetryProcessingService
+    {
+        #region Properties
+
+        public PhotogrammetryState State { get; private set; } = PhotogrammetryState.Idle;
+        public float Progress { get; private set; }
+        public string StatusMessage { get; private set; }
+        public ConcurrentQueue<string> Logs { get; } = new();
+        public List<PhotogrammetryImage> Images { get; } = new();
+        public PhotogrammetryGraph Graph { get; private set; }
+        public List<PhotogrammetryImageGroup> ImageGroups => Graph?.FindConnectedComponents() ?? new List<PhotogrammetryImageGroup>();
+
+        public PhotogrammetryPointCloud SparseCloud { get; private set; }
+        public PhotogrammetryPointCloud DenseCloud { get; private set; }
+        public Mesh3DDataset GeneratedMesh { get; private set; }
+        public bool EnableGeoreferencing { get; set; } = true;
+
+        #endregion
+
+        #region Fields
+
+        private readonly List<ImageDataset> _datasets;
+        private readonly FeatureProcessor _featureProcessor;
+        private readonly ReconstructionEngine _reconstructionEngine;
+        private readonly GeoreferencingService _georeferencingService;
+        private readonly MeshGenerator _meshGenerator;
+        private readonly ProductGenerator _productGenerator;
+        private CancellationTokenSource _cancellationTokenSource;
+
+        #endregion
+
+        #region Constructor
+
+        public PhotogrammetryProcessingService(List<ImageDataset> datasets)
+        {
+            _datasets = datasets ?? throw new ArgumentNullException(nameof(datasets));
+            _featureProcessor = new FeatureProcessor(this);
+            _reconstructionEngine = new ReconstructionEngine(this);
+            _georeferencingService = new GeoreferencingService(this);
+            _meshGenerator = new MeshGenerator(this);
+            _productGenerator = new ProductGenerator(this);
+        }
+
+        #endregion
+
+        #region Public Methods - Main Processing Pipeline
+
+        /// <summary>
+        /// Starts the photogrammetry processing pipeline asynchronously
+        /// </summary>
+        public async Task StartProcessingAsync()
+        {
+            _cancellationTokenSource = new CancellationTokenSource();
+            var token = _cancellationTokenSource.Token;
+
+            try
+            {
+                await InitializeProcessingAsync(token);
+                await _featureProcessor.DetectFeaturesAsync(Images, token, UpdateProgress);
+                await _featureProcessor.MatchFeaturesAsync(Images, Graph, token, UpdateProgress);
+                AnalyzeConnectivity();
+            }
+            catch (OperationCanceledException)
+            {
+                HandleCancellation();
+            }
+            catch (Exception ex)
+            {
+                HandleError(ex);
+            }
+        }
+
+        /// <summary>
+        /// Cancels the current processing operation
+        /// </summary>
+        public void Cancel()
+        {
+            _cancellationTokenSource?.Cancel();
+            Log("Cancellation requested.");
+        }
+
+        #endregion
+
+        #region Public Methods - Image Management
+
+        /// <summary>
+        /// Removes an image from the reconstruction
+        /// </summary>
+        public void RemoveImage(PhotogrammetryImage image)
+        {
+            Images.Remove(image);
+            Graph?.RemoveNode(image.Id);
+            Log($"Removed image: {image.Dataset.Name}");
+            AnalyzeConnectivity();
+        }
+
+        /// <summary>
+        /// Adds a manual link between two images and reanalyzes connectivity
+        /// </summary>
+        public void ManuallyLinkImages(PhotogrammetryImage img1, PhotogrammetryImage img2)
+        {
+            Log($"Manually linking {img1.Dataset.Name} and {img2.Dataset.Name}...");
+            
+            var points = new List<(Vector2 P1, Vector2 P2)>();
+            
+            // Generate a grid of correspondence points across the images
+            for (int i = 0; i < 3; i++)
+            {
+                for (int j = 0; j < 3; j++)
+                {
+                    float x = (i + 1) * img1.Dataset.Width / 4f;
+                    float y = (j + 1) * img1.Dataset.Height / 4f;
+                    points.Add((new Vector2(x, y), new Vector2(x, y)));
+                }
+            }
+            
+            if (points.Count >= 8)
+            {
+                AddManualLinkAndRecompute(img1, img2, points);
+                Log($"Successfully created manual link with {points.Count} correspondence points.");
+            }
+            else
+            {
+                Log($"Failed to create manual link: insufficient correspondence points.");
+            }
+        }
+        
+        /// <summary>
+        /// Continues processing after manual input resolution
+        /// </summary>
+        public void ContinueAfterManualInput()
+        {
+            Log("Continuing processing after manual input...");
+            
+            var groups = ImageGroups;
+            if (groups.Count == 1)
+            {
+                Log("All images connected. Computing global camera poses...");
+                _reconstructionEngine.ComputeGlobalPoses(groups.First(), Images, Graph);
+                
+                State = PhotogrammetryState.ComputingSparseReconstruction;
+                StatusMessage = "Ready for sparse reconstruction.";
+                Log("Camera alignment complete. Ready to build sparse cloud.");
+                UpdateProgress(0.7f, "Alignment complete. Ready for reconstruction.");
+            }
+            else
+            {
+                Log($"Warning: Still have {groups.Count} disconnected groups. Link them first.");
+                State = PhotogrammetryState.AwaitingManualInput;
+                StatusMessage = $"Still have {groups.Count} groups. Link them or force continue.";
+            }
+        }
+        
+        /// <summary>
+        /// Forces continuation with the largest connected group, discarding isolated images
+        /// </summary>
+        public void ForceContinueProcessing()
+        {
+            Log("Force continuing with largest group...");
+            
+            var groups = ImageGroups;
+            if (groups.Count == 0)
+            {
+                Log("Error: No image groups found.");
+                State = PhotogrammetryState.Failed;
+                return;
+            }
+            
+            // Find the largest group
+            var largestGroup = groups.OrderByDescending(g => g.Images.Count).First();
+            Log($"Using largest group with {largestGroup.Images.Count} images, discarding {Images.Count - largestGroup.Images.Count} images");
+            
+            // Remove images not in the largest group
+            var imagesToRemove = Images.Where(img => !largestGroup.Images.Contains(img)).ToList();
+            foreach (var img in imagesToRemove)
+            {
+                RemoveImage(img);
+            }
+            
+            // Now continue with single group
+            _reconstructionEngine.ComputeGlobalPoses(largestGroup, Images, Graph);
+            
+            State = PhotogrammetryState.ComputingSparseReconstruction;
+            StatusMessage = "Ready for sparse reconstruction (partial dataset).";
+            Log("Camera alignment complete with partial dataset.");
+            UpdateProgress(0.7f, "Alignment complete with largest group.");
+        }
+
+        /// <summary>
+        /// Adds a manual link between two images
+        /// </summary>
+        public void AddManualLinkAndRecompute(PhotogrammetryImage img1, PhotogrammetryImage img2, 
+            List<(Vector2 P1, Vector2 P2)> points)
+        {
+            if (points.Count < 8)
+            {
+                Log("Manual link failed: At least 8 point pairs are required.");
+                return;
+            }
+
+            var relativePose = _featureProcessor.ComputeManualPose(img1, img2, points);
+            if (relativePose.HasValue)
+            {
+                Graph.AddEdge(img1, img2, new List<FeatureMatch>(), relativePose.Value);
+                Log($"Successfully added manual link between {img1.Dataset.Name} and {img2.Dataset.Name}.");
+                AnalyzeConnectivity();
+            }
+            else
+            {
+                Log($"Failed to compute a valid link. Points may be degenerate.");
+            }
+        }
+
+        #endregion
+
+        #region Public Methods - Ground Control Points
+
+        /// <summary>
+        /// Adds or updates a ground control point
+        /// </summary>
+        public void AddOrUpdateGroundControlPoint(PhotogrammetryImage image, GroundControlPoint gcp)
+        {
+            var existing = image.GroundControlPoints.FirstOrDefault(g => g.Id == gcp.Id);
+            if (existing != null)
+            {
+                image.GroundControlPoints.Remove(existing);
+            }
+            image.GroundControlPoints.Add(gcp);
+            Log($"Updated GCP '{gcp.Name}' on {image.Dataset.Name}");
+        }
+
+        /// <summary>
+        /// Removes a ground control point
+        /// </summary>
+        public void RemoveGroundControlPoint(PhotogrammetryImage image, GroundControlPoint gcp)
+        {
+            image.GroundControlPoints.Remove(gcp);
+            Log($"Removed GCP '{gcp.Name}' from {image.Dataset.Name}");
+        }
+        
+        #endregion
+
+        #region Public Methods - Reconstruction
+
+        /// <summary>
+        /// Builds sparse point cloud from feature matches
+        /// </summary>
+        public async Task BuildSparseCloudAsync()
+        {
+            State = PhotogrammetryState.ComputingSparseReconstruction;
+            Log("Building sparse point cloud from feature matches...");
+            UpdateProgress(0.75f, "Computing 3D structure...");
+
+            SparseCloud = await _reconstructionEngine.BuildSparseCloudAsync(
+                Images, Graph, EnableGeoreferencing, UpdateProgress);
+            
+            // Check if reconstruction is very poor (suggests calibration issues)
+            if (SparseCloud.Points.Count < 50 && Images.Count >= 3)
+            {
+                Log("⚠ Warning: Very sparse reconstruction detected. This often indicates incorrect camera calibration.");
+                
+                int imagesWithoutExif = Images.Count(img => !img.FocalLengthMm.HasValue || !img.SensorWidthMm.HasValue);
+                if (imagesWithoutExif > 0)
+                {
+                    Log($"⚠ {imagesWithoutExif}/{Images.Count} images are using estimated focal length.");
+                    Log("  Recommendation: Try adjusting focal length multiplier in CameraCalibration.cs");
+                    Log("  Common values: 0.8× (wide angle), 1.0× (normal), 1.3× (telephoto)");
+                    Log("  Or capture images with a camera that saves EXIF data.");
+                }
+            }
+
+            if (EnableGeoreferencing)
+            {
+                await _georeferencingService.ApplyGeoreferencingAsync(SparseCloud, Images);
+            }
+
+            Log($"Sparse reconstruction complete with {SparseCloud.Points.Count} points.");
+            UpdateProgress(0.85f, $"Sparse cloud complete: {SparseCloud.Points.Count} points");
+            State = PhotogrammetryState.Completed;
+            StatusMessage = "Sparse reconstruction complete. Use Build options for further processing.";
+        }
+
+        /// <summary>
+        /// Builds dense point cloud
+        /// </summary>
+        public async Task BuildDenseCloudAsync(DenseCloudOptions options)
+        {
+            if (SparseCloud == null)
+            {
+                Log("Error: Sparse cloud must be built first.");
+                return;
+            }
+
+            State = PhotogrammetryState.BuildingDenseCloud;
+            Log($"Building dense point cloud (Quality: {options.Quality})...");
+            
+            DenseCloud = await _reconstructionEngine.BuildDenseCloudAsync(
+                SparseCloud, Images, options, UpdateProgress);
+            
+            UpdateProgress(1.0f, "Dense cloud complete");
+            State = PhotogrammetryState.Completed;
+        }
+
+        /// <summary>
+        /// Builds 3D mesh from point cloud
+        /// </summary>
+        public async Task BuildMeshAsync(MeshOptions options, string outputPath)
+        {
+            var sourceCloud = options.Source == MeshOptions.SourceData.DenseCloud ? DenseCloud : SparseCloud;
+            if (sourceCloud == null)
+            {
+                Log("Error: Point cloud is required for mesh generation.");
+                return;
+            }
+
+            State = PhotogrammetryState.BuildingMesh;
+            GeneratedMesh = await _meshGenerator.BuildMeshAsync(sourceCloud, options, outputPath, UpdateProgress);
+            State = PhotogrammetryState.Completed;
+        }
+
+        /// <summary>
+        /// Builds texture for mesh
+        /// </summary>
+        public async Task BuildTextureAsync(TextureOptions options, string outputPath)
+        {
+            if (GeneratedMesh == null)
+            {
+                Log("Error: Mesh must be built before generating texture.");
+                return;
+            }
+
+            State = PhotogrammetryState.BuildingTexture;
+            await _meshGenerator.BuildTextureAsync(GeneratedMesh, Images, options, outputPath, UpdateProgress);
+            State = PhotogrammetryState.Completed;
+        }
+
+        #endregion
+
+        #region Public Methods - Products
+
+        /// <summary>
+        /// Builds orthomosaic from reconstructed scene
+        /// </summary>
+        public async Task BuildOrthomosaicAsync(OrthomosaicOptions options, string outputPath)
+        {
+            State = PhotogrammetryState.BuildingOrthomosaic;
+            await _productGenerator.BuildOrthomosaicAsync(
+                DenseCloud ?? SparseCloud, GeneratedMesh, Images, options, outputPath, UpdateProgress);
+            State = PhotogrammetryState.Completed;
+        }
+
+        /// <summary>
+        /// Builds digital elevation model (DEM)
+        /// </summary>
+        public async Task BuildDEMAsync(DEMOptions options, string outputPath)
+        {
+            State = PhotogrammetryState.BuildingDEM;
+            await _productGenerator.BuildDEMAsync(
+                DenseCloud ?? SparseCloud, GeneratedMesh, options, outputPath, UpdateProgress);
+            State = PhotogrammetryState.Completed;
+        }
+
+        #endregion
+
+        #region Internal Methods
+
+        internal void Log(string message)
+        {
+            var logMsg = $"[{DateTime.Now:HH:mm:ss}] {message}";
+            Logs.Enqueue(logMsg);
+            Logger.Log(logMsg);
+        }
+
+        internal void UpdateProgress(float progress, string message)
+        {
+            Progress = progress;
+            StatusMessage = message;
+        }
+
+        #endregion
+
+        #region Private Methods
+
+        private async Task InitializeProcessingAsync(CancellationToken token)
+        {
+            Log("Starting photogrammetry processing...");
+            State = PhotogrammetryState.Initializing;
+            UpdateProgress(0, "Initializing...");
+
+            Images.Clear();
+            State = PhotogrammetryState.ExtractingMetadata;
+            UpdateProgress(0.05f, "Extracting image metadata...");
+
+            await Task.Run(() => LoadImages(token), token);
+            
+            Graph = new PhotogrammetryGraph(Images);
+            ComputeIntrinsicsForAllImages();
+        }
+
+        private void LoadImages(CancellationToken token)
+        {
+            Log($"Loading {_datasets.Count} image datasets...");
+            
+            foreach (var ds in _datasets)
+            {
+                token.ThrowIfCancellationRequested();
+                
+                Log($"Loading image: {ds.Name}");
+                ds.Load();
+                if (ds.ImageData == null)
+                {
+                    Log($"⚠ Warning: Could not load image data for {ds.Name}. Skipping.");
+                    continue;
+                }
+
+                var pgImage = new PhotogrammetryImage(ds);
+                ExtractMetadata(pgImage);
+                Images.Add(pgImage);
+                
+                Log($"  ✓ Loaded {ds.Name} - Size: {ds.Width}x{ds.Height}");
+            }
+
+            Log($"Successfully loaded {Images.Count} of {_datasets.Count} images.");
+            
+            if (Images.Count < _datasets.Count)
+            {
+                Log($"⚠ Warning: {_datasets.Count - Images.Count} images failed to load.");
+            }
+        }
+
+        private void ExtractMetadata(PhotogrammetryImage image)
+        {
+            if (image.IsGeoreferenced)
+            {
+                Log($"{image.Dataset.Name}: Lat={image.Latitude:F6}, Lon={image.Longitude:F6}, " +
+                    $"Alt={image.Altitude?.ToString("F2") ?? "N/A"}");
+            }
+        }
+
+        private void ComputeIntrinsicsForAllImages()
+        {
+            Log("Computing camera intrinsic parameters...");
+            int imagesWithExif = 0;
+            int imagesWithDefault = 0;
+            
+            foreach (var image in Images)
+            {
+                image.IntrinsicMatrix = CameraCalibration.ComputeIntrinsics(image);
+                
+                if (image.FocalLengthMm.HasValue && image.SensorWidthMm.HasValue)
+                {
+                    imagesWithExif++;
+                    Log($"  {image.Dataset.Name}: f={image.IntrinsicMatrix.M11:F1}px (from EXIF: {image.FocalLengthMm.Value:F1}mm)");
+                }
+                else
+                {
+                    imagesWithDefault++;
+                    Log($"  {image.Dataset.Name}: f={image.IntrinsicMatrix.M11:F1}px (default estimate, no EXIF)");
+                }
+            }
+            
+            Log($"Intrinsics summary: {imagesWithExif} with EXIF, {imagesWithDefault} with default estimates");
+            
+            if (imagesWithDefault > 0)
+            {
+                Log($"⚠ Warning: {imagesWithDefault} images are using estimated focal length. " +
+                    $"Consider capturing images with EXIF data or performing camera calibration for better accuracy.");
+            }
+        }
+
+        private void AnalyzeConnectivity()
+        {
+            Log("Analyzing image connectivity...");
+            
+            if (Images.Count < 2)
+            {
+                State = PhotogrammetryState.Failed;
+                StatusMessage = "Not enough images for photogrammetry.";
+                Log("Error: At least two images are required.");
+                return;
+            }
+
+            var imagesWithNoFeatures = Images.Where(img => img.SiftFeatures?.KeyPoints.Count < 20).ToList();
+            var imageGroups = ImageGroups;
+            
+            Log($"Connectivity analysis complete:");
+            Log($"  - Total images: {Images.Count}");
+            Log($"  - Images with insufficient features: {imagesWithNoFeatures.Count}");
+            Log($"  - Number of connected groups: {imageGroups.Count}");
+            
+            for (int i = 0; i < imageGroups.Count; i++)
+            {
+                var group = imageGroups[i];
+                Log($"  - Group {i + 1}: {group.Images.Count} images");
+                foreach (var img in group.Images)
+                {
+                    Log($"      • {img.Dataset.Name}");
+                }
+            }
+
+            if (imagesWithNoFeatures.Any() || imageGroups.Count > 1)
+            {
+                State = PhotogrammetryState.AwaitingManualInput;
+                StatusMessage = "User input required to proceed.";
+                
+                if (imagesWithNoFeatures.Any())
+                {
+                    Log($"⚠ {imagesWithNoFeatures.Count} images have insufficient features (<20 keypoints):");
+                    foreach (var img in imagesWithNoFeatures)
+                    {
+                        Log($"    - {img.Dataset.Name}: {img.SiftFeatures?.KeyPoints.Count ?? 0} keypoints");
+                    }
+                }
+                
+                if (imageGroups.Count > 1)
+                {
+                    Log($"⚠ Images are in {imageGroups.Count} disconnected groups.");
+                    Log("  Manual linking required to connect groups or discard isolated images.");
+                }
+                
+                Log("Process paused. Please resolve unmatched images or groups.");
+            }
+            else
+            {
+                Log("✓ All images successfully matched into a single group.");
+                Log($"  Group contains {imageGroups.First().Images.Count} images");
+                Log("Computing global camera poses...");
+                
+                _reconstructionEngine.ComputeGlobalPoses(imageGroups.First(), Images, Graph);
+                
+                State = PhotogrammetryState.ComputingSparseReconstruction;
+                StatusMessage = "Ready for sparse reconstruction.";
+                Log("Global camera poses computed successfully.");
+                UpdateProgress(0.7f, "Alignment complete. Ready for reconstruction.");
+            }
+        }
+
+        private void HandleCancellation()
+        {
+            State = PhotogrammetryState.Failed;
+            Log("Process was canceled by the user.");
+        }
+
+        private void HandleError(Exception ex)
+        {
+            State = PhotogrammetryState.Failed;
+            StatusMessage = "An error occurred.";
+            Log($"FATAL ERROR: {ex.Message}\n{ex.StackTrace}");
+            Logger.LogError($"[PhotogrammetryService] {ex.Message}");
+        }
+
+        #endregion
+    }
+
+    /// <summary>
+    /// Represents a photogrammetry processing job
+    /// </summary>
+    public class PhotogrammetryJob
+    {
+        public DatasetGroup ImageGroup { get; }
+        public PhotogrammetryProcessingService Service { get; }
+        public Guid Id { get; } = Guid.NewGuid();
+
+        public PhotogrammetryJob(DatasetGroup imageGroup)
+        {
+            ImageGroup = imageGroup ?? throw new ArgumentNullException(nameof(imageGroup));
+            Service = new PhotogrammetryProcessingService(
+                imageGroup.Datasets.Cast<ImageDataset>().ToList());
+        }
+    }
+}

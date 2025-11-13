@@ -1,5 +1,6 @@
 // GeoscientistToolkit/UI/TableTools.cs
 
+using System;
 using System.Data;
 using System.Globalization;
 using System.Numerics;
@@ -37,6 +38,7 @@ public class TableTools : IDatasetTools
             { ToolCategory.Scripting, "Scripting" },
             { ToolCategory.DataTransformation, "Data Transformation" },
             { ToolCategory.ColumnOperations, "Column Operations" },
+            { ToolCategory.RowOperations, "Row Operations" },
             { ToolCategory.Analysis, "Analysis & Aggregation" },
             { ToolCategory.Join, "Join Tables" },
             { ToolCategory.Thermodynamics, "Thermodynamics" },
@@ -48,6 +50,7 @@ public class TableTools : IDatasetTools
             { ToolCategory.Scripting, "Automate tasks with the GeoScript Editor" },
             { ToolCategory.DataTransformation, "Filter, sort, sample, and clean data" },
             { ToolCategory.ColumnOperations, "Add, remove, or rename columns" },
+            { ToolCategory.RowOperations, "Add or remove rows from the table" },
             { ToolCategory.Analysis, "Aggregate data and generate statistics" },
             { ToolCategory.Join, "Combine this table with another" },
             { ToolCategory.Thermodynamics, "Generate thermodynamic phase diagrams" },
@@ -91,8 +94,19 @@ public class TableTools : IDatasetTools
                     new()
                     {
                         Name = "Manage Columns",
-                        Description = "Add calculated columns, remove, or rename existing columns.",
+                        Description = "Add, remove, or rename columns.",
                         Tool = new ColumnManagementTool()
+                    }
+                }
+            },
+            {
+                ToolCategory.RowOperations, new List<ToolEntry>
+                {
+                    new()
+                    {
+                        Name = "Manage Rows",
+                        Description = "Add or remove rows.",
+                        Tool = new RowManagementTool()
                     }
                 }
             },
@@ -245,6 +259,7 @@ public class TableTools : IDatasetTools
         Scripting,
         DataTransformation,
         ColumnOperations,
+        RowOperations,
         Analysis,
         Join,
         Thermodynamics,
@@ -445,7 +460,7 @@ public class TableTools : IDatasetTools
             }
         }
     }
-
+    
     /// <summary>
     ///     Handles adding, removing, and renaming columns.
     /// </summary>
@@ -453,6 +468,9 @@ public class TableTools : IDatasetTools
     {
         private string _columnFormula = "";
         private string _newColumnName = "";
+        private string _newEmptyColumnName = "NewColumn";
+        private int _newEmptyColumnTypeIndex = 0;
+        private readonly string[] _columnTypes = { "Text (string)", "Numeric (double)", "Boolean", "DateTime" };
         private string _newRenameColumnName = "";
         private int _renameColumnIndex;
         private bool[] _selectedColumns;
@@ -461,13 +479,20 @@ public class TableTools : IDatasetTools
         {
             if (dataset is not TableDataset tableDataset) return;
 
+            if (ImGui.CollapsingHeader("Add Empty Column", ImGuiTreeNodeFlags.DefaultOpen))
+            {
+                ImGui.InputTextWithHint("##NewEmptyColumnName", "Column Name", ref _newEmptyColumnName, 64);
+                ImGui.Combo("Data Type", ref _newEmptyColumnTypeIndex, _columnTypes, _columnTypes.Length);
+                if (ImGui.Button("Add Empty Column")) AddEmptyColumn(tableDataset);
+            }
+
             if (ImGui.CollapsingHeader("Add Calculated Column", ImGuiTreeNodeFlags.DefaultOpen))
             {
                 ImGui.InputTextWithHint("Column Name", "NewColumn", ref _newColumnName, 64);
                 ImGui.InputTextWithHint("Formula", "e.g., [Column1] + [Column2]", ref _columnFormula, 256);
-                if (ImGui.Button("Add Column")) AddCalculatedColumn(tableDataset);
+                if (ImGui.Button("Add Calculated Column")) AddCalculatedColumn(tableDataset);
             }
-
+            
             if (ImGui.CollapsingHeader("Remove Columns", ImGuiTreeNodeFlags.DefaultOpen))
             {
                 var columnNames = tableDataset.ColumnNames.ToArray();
@@ -482,7 +507,7 @@ public class TableTools : IDatasetTools
                 }
             }
 
-            if (ImGui.CollapsingHeader("Rename Columns", ImGuiTreeNodeFlags.DefaultOpen))
+            if (ImGui.CollapsingHeader("Rename Column", ImGuiTreeNodeFlags.DefaultOpen))
             {
                 var columnNames = tableDataset.ColumnNames.ToArray();
                 if (columnNames.Length > 0)
@@ -506,6 +531,45 @@ public class TableTools : IDatasetTools
             }
         }
 
+        private void AddEmptyColumn(TableDataset tableDataset)
+        {
+            try
+            {
+                if (string.IsNullOrWhiteSpace(_newEmptyColumnName))
+                {
+                    Logger.LogWarning("Column name is required.");
+                    return;
+                }
+
+                var dataTable = tableDataset.GetDataTable() ??
+                                throw new InvalidOperationException("DataTable not available.");
+                
+                if (dataTable.Columns.Contains(_newEmptyColumnName))
+                {
+                    Logger.LogWarning($"A column named '{_newEmptyColumnName}' already exists.");
+                    return;
+                }
+                
+                Type colType = _newEmptyColumnTypeIndex switch
+                {
+                    1 => typeof(double),
+                    2 => typeof(bool),
+                    3 => typeof(DateTime),
+                    _ => typeof(string)
+                };
+                
+                dataTable.Columns.Add(_newEmptyColumnName, colType);
+                
+                tableDataset.UpdateDataTable(dataTable);
+                Logger.Log($"Added new empty column '{_newEmptyColumnName}'");
+                _newEmptyColumnName = "NewColumn";
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError($"Failed to add empty column: {ex.Message}");
+            }
+        }
+        
         private void AddCalculatedColumn(TableDataset tableDataset)
         {
             try
@@ -518,23 +582,18 @@ public class TableTools : IDatasetTools
 
                 var dataTable = tableDataset.GetDataTable() ??
                                 throw new InvalidOperationException("DataTable not available.");
-                var newTable = dataTable.Copy();
-                var expression = _columnFormula;
-                foreach (DataColumn col in dataTable.Columns)
-                    expression = expression.Replace($"[{col.ColumnName}]", $"[{col.ColumnName}]");
 
                 try
                 {
-                    newTable.Columns.Add(_newColumnName, typeof(double), expression);
+                    dataTable.Columns.Add(_newColumnName, typeof(double), _columnFormula);
                 }
                 catch (Exception exprEx)
                 {
                     Logger.LogError($"Invalid expression: {exprEx.Message}");
                     return;
                 }
-
-                var newDataset = new TableDataset($"{tableDataset.Name}_Calculated", newTable);
-                ProjectManager.Instance.AddDataset(newDataset);
+                
+                tableDataset.UpdateDataTable(dataTable);
                 Logger.Log($"Added calculated column '{_newColumnName}'");
                 _newColumnName = "";
                 _columnFormula = "";
@@ -551,13 +610,22 @@ public class TableTools : IDatasetTools
             {
                 var dataTable = tableDataset.GetDataTable() ??
                                 throw new InvalidOperationException("DataTable not available.");
-                var newTable = dataTable.Copy();
+                
+                int removedCount = 0;
                 for (var i = selectedColumns.Length - 1; i >= 0; i--)
+                {
                     if (selectedColumns[i])
-                        newTable.Columns.RemoveAt(i);
-                var newDataset = new TableDataset($"{tableDataset.Name}_Reduced", newTable);
-                ProjectManager.Instance.AddDataset(newDataset);
-                Logger.Log($"Created table with {newTable.Columns.Count} columns");
+                    {
+                        dataTable.Columns.RemoveAt(i);
+                        removedCount++;
+                    }
+                }
+                
+                if(removedCount > 0)
+                {
+                    tableDataset.UpdateDataTable(dataTable);
+                    Logger.Log($"Removed {removedCount} columns");
+                }
             }
             catch (Exception ex)
             {
@@ -573,15 +641,113 @@ public class TableTools : IDatasetTools
                 var dataTable = tableDataset.GetDataTable() ??
                                 throw new InvalidOperationException("DataTable not available.");
                 if (columnIndex >= dataTable.Columns.Count) return;
-                var newTable = dataTable.Copy();
-                newTable.Columns[columnIndex].ColumnName = newName;
-                var newDataset = new TableDataset($"{tableDataset.Name}_Renamed", newTable);
-                ProjectManager.Instance.AddDataset(newDataset);
-                Logger.Log($"Renamed column to '{newName}'");
+
+                var oldName = dataTable.Columns[columnIndex].ColumnName;
+                dataTable.Columns[columnIndex].ColumnName = newName;
+                
+                tableDataset.UpdateDataTable(dataTable);
+                Logger.Log($"Renamed column '{oldName}' to '{newName}'");
             }
             catch (Exception ex)
             {
                 Logger.LogError($"Failed to rename column: {ex.Message}");
+            }
+        }
+    }
+    
+    /// <summary>
+    ///     Handles adding and removing rows.
+    /// </summary>
+    private class RowManagementTool : IDatasetTools
+    {
+        private int _rowsToAdd = 1;
+        private int _rowsToRemove = 1;
+
+        public void Draw(Dataset dataset)
+        {
+            if (dataset is not TableDataset tableDataset) return;
+            
+            if (ImGui.CollapsingHeader("Add Empty Rows", ImGuiTreeNodeFlags.DefaultOpen))
+            {
+                ImGui.SetNextItemWidth(100);
+                ImGui.InputInt("Rows to Add", ref _rowsToAdd);
+                _rowsToAdd = Math.Max(1, _rowsToAdd);
+                ImGui.SameLine();
+                if (ImGui.Button("Add Rows")) AddEmptyRows(tableDataset);
+            }
+            
+            if (ImGui.CollapsingHeader("Remove Rows", ImGuiTreeNodeFlags.DefaultOpen))
+            {
+                ImGui.SetNextItemWidth(100);
+                ImGui.InputInt("Rows to Remove", ref _rowsToRemove);
+                _rowsToRemove = Math.Max(1, Math.Min(_rowsToRemove, tableDataset.RowCount));
+                ImGui.Text("Removes rows from the end of the table.");
+                if (ImGui.Button("Remove Rows")) RemoveRows(tableDataset);
+                ImGui.SameLine();
+                if (ImGui.Button("Clear All Rows")) ClearAllRows(tableDataset);
+            }
+        }
+
+        private void AddEmptyRows(TableDataset tableDataset)
+        {
+            try
+            {
+                var dataTable = tableDataset.GetDataTable() ??
+                                throw new InvalidOperationException("DataTable not available.");
+                
+                for(int i = 0; i < _rowsToAdd; i++)
+                {
+                    dataTable.Rows.Add();
+                }
+
+                tableDataset.UpdateDataTable(dataTable);
+                Logger.Log($"Added {_rowsToAdd} empty rows");
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError($"Failed to add empty rows: {ex.Message}");
+            }
+        }
+        
+        private void RemoveRows(TableDataset tableDataset)
+        {
+            try
+            {
+                var dataTable = tableDataset.GetDataTable() ??
+                                throw new InvalidOperationException("DataTable not available.");
+
+                int count = dataTable.Rows.Count;
+                for(int i = 0; i < _rowsToRemove; i++)
+                {
+                    if (count - 1 - i < 0) break;
+                    dataTable.Rows[count - 1 - i].Delete();
+                }
+                dataTable.AcceptChanges();
+
+                tableDataset.UpdateDataTable(dataTable);
+                Logger.Log($"Removed {_rowsToRemove} rows from the end");
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError($"Failed to remove rows: {ex.Message}");
+            }
+        }
+
+        private void ClearAllRows(TableDataset tableDataset)
+        {
+            try
+            {
+                var dataTable = tableDataset.GetDataTable() ??
+                                throw new InvalidOperationException("DataTable not available.");
+                
+                dataTable.Clear();
+                
+                tableDataset.UpdateDataTable(dataTable);
+                Logger.Log($"Cleared all rows from the table");
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError($"Failed to clear all rows: {ex.Message}");
             }
         }
     }

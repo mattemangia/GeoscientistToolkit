@@ -8,29 +8,31 @@ using GeoscientistToolkit.Data.Borehole;
 using GeoscientistToolkit.Data.GIS;
 using GeoscientistToolkit.Data.Mesh3D;
 using GeoscientistToolkit.Data.Table;
+using GeoscientistToolkit.Data.TwoDGeology;
 using GeoscientistToolkit.Settings;
 using GeoscientistToolkit.UI.GIS;
 using GeoscientistToolkit.UI.Utils;
 using GeoscientistToolkit.UI.Windows;
 using GeoscientistToolkit.Util;
+using GeoscientistToolkit.Analysis.Geothermal;
 using ImGuiNET;
 
 namespace GeoscientistToolkit.UI;
 
 public class MainWindow
 {
-    // ──────────────────────────────────────────────────────────────────────
+    // ----------------------------------------------------------------------
     // Events
-    // ──────────────────────────────────────────────────────────────────────
+    // ----------------------------------------------------------------------
     /// <summary>
     ///     Event raised when the user confirms they want to exit the application.
     ///     Application.cs subscribes to this to know when to stop the main loop.
     /// </summary>
     public event Action OnExitConfirmed;
 
-    // ──────────────────────────────────────────────────────────────────────
+    // ----------------------------------------------------------------------
     // Fields & state
-    // ──────────────────────────────────────────────────────────────────────
+    // ----------------------------------------------------------------------
     private readonly DatasetPanel _datasets = new();
     private readonly PropertiesPanel _properties = new();
     private readonly LogPanel _log = new();
@@ -99,9 +101,9 @@ public class MainWindow
         );
     }
 
-    // ──────────────────────────────────────────────────────────────────────
+    // ----------------------------------------------------------------------
     // Dataset removal handler
-    // ──────────────────────────────────────────────────────────────────────
+    // ----------------------------------------------------------------------
     private void OnDatasetRemoved(Dataset dataset)
     {
         // Close any viewers showing this dataset
@@ -125,9 +127,9 @@ public class MainWindow
         if (_selectedDataset == dataset) _selectedDataset = null;
     }
 
-    // ──────────────────────────────────────────────────────────────────────
+    // ----------------------------------------------------------------------
     // Per-frame entry
-    // ──────────────────────────────────────────────────────────────────────
+    // ----------------------------------------------------------------------
     public void SubmitUI(bool windowCloseRequested = false)
     {
         VeldridManager.ProcessMainThreadActions();
@@ -271,9 +273,9 @@ public class MainWindow
         }
     }
 
-    // ──────────────────────────────────────────────────────────────────────
+    // ----------------------------------------------------------------------
     // DockBuilder (conditional)
-    // ──────────────────────────────────────────────────────────────────────
+    // ----------------------------------------------------------------------
     private static void TryBuildDockLayout(uint rootId, Vector2 size)
     {
         var io = ImGui.GetIO();
@@ -316,9 +318,9 @@ public class MainWindow
     }
 #endif
 
-    // ──────────────────────────────────────────────────────────────────────
+    // ----------------------------------------------------------------------
     // Menu-bar
-    // ──────────────────────────────────────────────────────────────────────
+    // ----------------------------------------------------------------------
     private void SubmitMainMenu()
     {
         if (!ImGui.BeginMenuBar()) return;
@@ -393,6 +395,24 @@ public class MainWindow
                 };
                 ProjectManager.Instance.AddDataset(emptyGIS);
                 Logger.Log("Created new empty GIS map");
+            }
+
+            if (ImGui.MenuItem("New 2D Geology Profile..."))
+            {
+                // Generate a unique name with timestamp
+                var timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
+                var profileName = $"New_Profile_{timestamp}";
+                var filePath = Path.Combine(Path.GetTempPath(), $"{profileName}.2dgeo");
+                
+                // Create empty 2D geology dataset
+                var emptyProfile = TwoDGeologyDataset.CreateEmpty(profileName, filePath);
+                
+                // Add to project
+                ProjectManager.Instance.AddDataset(emptyProfile);
+                Logger.Log($"Created new empty 2D geology profile: {profileName}");
+                
+                // Optionally, select it
+                OnDatasetSelected(emptyProfile);
             }
 
             if (ImGui.MenuItem("New Empty Table..."))
@@ -488,6 +508,9 @@ public class MainWindow
 
             ImGui.Separator();
             if (ImGui.MenuItem("3D Volume Debug...")) _volume3DDebugWindow.Show();
+            
+            ImGui.Separator();
+            if (ImGui.MenuItem("Create Debug Geothermal Boreholes")) OnCreateDebugGeothermalBoreholes();
 
             ImGui.EndMenu();
         }
@@ -496,7 +519,7 @@ public class MainWindow
         {
             // Space to the far right
             var frameH = ImGui.GetTextLineHeight() + ImGui.GetStyle().FramePadding.Y * 2f;
-            var icon = VeldridManager.IsFullScreen ? "🗗" : "⛶";
+            var icon = VeldridManager.IsFullScreen ? "🗗" : "🗖";
 
             var iconSize = ImGui.CalcTextSize(icon);
             var btnW = iconSize.X + ImGui.GetStyle().FramePadding.X * 2f;
@@ -516,9 +539,9 @@ public class MainWindow
         ImGui.EndMenuBar();
     }
 
-    // ──────────────────────────────────────────────────────────────────────
+    // ----------------------------------------------------------------------
     // Pop-ups & callbacks
-    // ──────────────────────────────────────────────────────────────────────
+    // ----------------------------------------------------------------------
     private void TryOnNewProject()
     {
         CheckForUnsavedChanges(OnNewProject);
@@ -662,6 +685,38 @@ public class MainWindow
         catch (Exception ex)
         {
             Logger.LogError($"Failed to open create mesh dialog: {ex.Message}");
+        }
+    }
+
+    private void OnCreateDebugGeothermalBoreholes()
+    {
+        try
+        {
+            Logger.Log("Creating debug deep geothermal boreholes...");
+
+            // Create multiple test boreholes
+            var boreholes = SubsurfaceGeothermalTools.CreateDebugDeepGeothermalBoreholes();
+
+            // Add all boreholes to the project
+            foreach (var borehole in boreholes)
+            {
+                ProjectManager.Instance.AddDataset(borehole);
+                Logger.Log($"Added borehole {borehole.WellName} to project");
+            }
+
+            Logger.Log($"Successfully created {boreholes.Count} debug geothermal boreholes");
+            Logger.Log("Select multiple boreholes with Ctrl+Click, then right-click and choose 'Group Selected'");
+            Logger.Log("Select the group to access Multi-Borehole Tools in the Tools panel!");
+
+            // Optionally, select the first borehole
+            if (boreholes.Count > 0)
+            {
+                OnDatasetSelected(boreholes[0]);
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError($"Failed to create debug geothermal boreholes: {ex.Message}");
         }
     }
 

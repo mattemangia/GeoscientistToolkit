@@ -744,7 +744,7 @@ public class GeologicalMappingViewer : GISViewer
             var drawList = ImGui.GetWindowDrawList();
             var canvasPos = ImGui.GetCursorScreenPos();
             var canvasSize = ImGui.GetContentRegionAvail();
-            drawList.AddRectFilled(canvasPos, canvasPos + canvasSize, ImGui.GetColorU32(ImGuiCol.FrameBg));
+            drawList.AddRectFilled(canvasPos, canvasPos + canvasSize, ImGui.ColorConvertFloat4ToU32(new Vector4(0.1f, 0.1f, 0.12f, 1.0f)));
             
             var margin = new Vector2(50, 40);
             var plotSize = canvasSize - margin * 2;
@@ -798,7 +798,7 @@ public class GeologicalMappingViewer : GISViewer
             var drawList = ImGui.GetWindowDrawList();
             var canvasPos = ImGui.GetCursorScreenPos();
             var canvasSize = ImGui.GetContentRegionAvail();
-            drawList.AddRectFilled(canvasPos, canvasPos + canvasSize, ImGui.GetColorU32(ImGuiCol.FrameBg));
+            drawList.AddRectFilled(canvasPos, canvasPos + canvasSize, ImGui.ColorConvertFloat4ToU32(new Vector4(0.1f, 0.1f, 0.12f, 1.0f)));
 
             var margin = new Vector2(50, 40);
             var plotSize = canvasSize - margin * 2;

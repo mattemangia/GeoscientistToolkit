@@ -1,5 +1,6 @@
 ﻿// GeoscientistToolkit/UI/DatasetUIFactory.cs
 
+using System.Numerics;
 using GeoscientistToolkit.Data;
 using GeoscientistToolkit.Data.AcousticVolume;
 using GeoscientistToolkit.Data.Borehole;
@@ -15,186 +16,292 @@ using GeoscientistToolkit.UI.GIS;
 using GeoscientistToolkit.UI.Interfaces;
 using GeoscientistToolkit.UI.Tools;
 using ImGuiNET;
-
-// Added for PNM
-// Added for CompositeTool
+using GeoscientistToolkit.Analysis.Geothermal;
 
 namespace GeoscientistToolkit.UI;
 
 public static class DatasetUIFactory
 {
+    // Static cache to track BoreholeViewer instances for callback connection
+    private static readonly Dictionary<BoreholeDataset, BoreholeViewer> _boreholeViewers = new();
+
     public static IDatasetViewer CreateViewer(Dataset dataset)
+{
+return dataset switch
+{
+// CT Volume datasets
+StreamingCtVolumeDataset streamingDataset =>
+streamingDataset.EditablePartner != null
+? new CtCombinedViewer(streamingDataset.EditablePartner)
+: new CtVolume3DViewer(streamingDataset),
+CtImageStackDataset ctDataset => new CtCombinedViewer(ctDataset),
+
+        // Image datasets
+        ImageDataset imageDataset => new ImageViewer(imageDataset),
+
+        // 3D Mesh datasets
+        Mesh3DDataset mesh3DDataset => new Mesh3DViewer(mesh3DDataset),
+
+        // Table datasets
+        TableDataset tableDataset => new TableViewer(tableDataset),
+
+        // GIS datasets
+        SubsurfaceGISDataset subsurfaceGisDataset => new GISViewer(subsurfaceGisDataset),
+        GISDataset gisDataset => new GISViewer(gisDataset),
+        DatasetGroup group when group.Datasets.All(d => d is GISDataset) =>
+            new GISViewer(group.Datasets.Cast<GISDataset>().ToList()),
+        
+        // Acoustic Volume datasets
+        AcousticVolumeDataset acousticDataset => new AcousticVolumeViewer(acousticDataset),
+
+        // PNM Dataset
+        PNMDataset pnmDataset => new PNMViewer(pnmDataset),
+
+        // Borehole Dataset
+        BoreholeDataset boreholeDataset => CreateBoreholeViewer(boreholeDataset),
+
+        // 2D Geology Dataset
+        TwoDGeologyDataset twoDGeologyDataset => new TwoDGeologyViewerWrapper(twoDGeologyDataset),
+
+        // Dataset groups cannot be opened in a viewer
+        DatasetGroup => throw new InvalidOperationException(
+            "Cannot open a DatasetGroup in a viewer. Please open individual datasets."),
+
+        _ => throw new NotSupportedException($"No viewer available for dataset type: {dataset.GetType().Name}")
+    };
+}
+
+private static BoreholeViewer CreateBoreholeViewer(BoreholeDataset dataset)
+{
+    var viewer = new BoreholeViewer(dataset);
+    _boreholeViewers[dataset] = viewer;
+    return viewer;
+}
+
+private static BoreholeTools CreateBoreholeTools(BoreholeDataset dataset)
+{
+    var tools = new BoreholeTools();
+    
+    // Connect the viewer's OnLithologyClicked callback to the tools' EditUnit method
+    // if a viewer for this dataset has been created
+    if (_boreholeViewers.TryGetValue(dataset, out var viewer))
     {
-        return dataset switch
-        {
-            // CT Volume datasets
-            StreamingCtVolumeDataset streamingDataset =>
-                streamingDataset.EditablePartner != null
-                    ? new CtCombinedViewer(streamingDataset.EditablePartner)
-                    : new CtVolume3DViewer(streamingDataset),
+        viewer.OnLithologyClicked = tools.EditUnit;
+    }
+    
+    return tools;
+}
 
-            CtImageStackDataset ctDataset => new CtCombinedViewer(ctDataset),
+public static IDatasetPropertiesRenderer CreatePropertiesRenderer(Dataset dataset)
+{
+    return dataset switch
+    {
+        ImageDataset => new ImagePropertiesRenderer(),
+        CtImageStackDataset or StreamingCtVolumeDataset => new CtImageStackPropertiesRenderer(),
+        Mesh3DDataset => new Mesh3DProperties(),
+        TableDataset => new TableProperties(),
+        SubsurfaceGISDataset => new GISProperties(),
+        GISDataset => new GISProperties(),
+        AcousticVolumeDataset => new AcousticVolumeProperties(),
+        PNMDataset => new PNMPropertiesRenderer(),
+        DatasetGroup => new DatasetGroupProperties(),
+        BoreholeDataset => new BoreholePropertiesRenderer(),
+        TwoDGeologyDataset => new TwoDGeologyProperties(),
+        _ => new DefaultPropertiesRenderer()
+    };
+}
 
-            // Image datasets
-            ImageDataset imageDataset => new ImageViewer(imageDataset),
+public static IDatasetTools CreateTools(Dataset dataset)
+{
+    return dataset switch
+    {
+        // --- MODIFIED: Use the composite tool for all CT-related tools ---
+        CtImageStackDataset => new CtImageStackCompositeTool(),
+        StreamingCtVolumeDataset sds when sds.EditablePartner != null => new CtImageStackCompositeTool(),
+        // --- END MODIFICATION ---
 
-            // 3D Mesh datasets
-            Mesh3DDataset mesh3DDataset => new Mesh3DViewer(mesh3DDataset),
+        Mesh3DDataset => new Mesh3DTools(),
+        TableDataset => new TableTools(),
+        SubsurfaceGISDataset => new SubsurfaceGISTools(),
+        GISDataset => new GISTools(),
+        AcousticVolumeDataset => new AcousticVolumeTools(),
+        PNMDataset => new PNMTools(),
+        ImageDataset => new ImageTools(),
+        BoreholeDataset boreholeDataset => CreateBoreholeTools(boreholeDataset),
+        TwoDGeologyDataset => new TwoDGeologyToolsWrapper(),
+        // --- MODIFIED: Changed .All to .Any to make tool appear even if non-borehole datasets are in the group ---
+        DatasetGroup group when group.Datasets.Any(d => d is BoreholeDataset) => new MultiBoreholeTools(),
+        _ => new DefaultTools(),
+    };
+}
 
-            // Table datasets
-            TableDataset tableDataset => new TableViewer(tableDataset),
-
-            // GIS datasets
-            GISDataset gisDataset => new GISViewer(gisDataset),
-            DatasetGroup group when group.Datasets.All(d => d is GISDataset) =>
-                new GISViewer(group.Datasets.Cast<GISDataset>().ToList()),
-            // Acoustic Volume datasets
-            AcousticVolumeDataset acousticDataset => new AcousticVolumeViewer(acousticDataset),
-
-            // PNM Dataset
-            PNMDataset pnmDataset => new PNMViewer(pnmDataset),
-
-            // Borehole Dataset
-            BoreholeDataset boreholeDataset => new BoreholeViewer(boreholeDataset),
-
-            // 2DGeology
-            TwoDGeologyDataset geology2DDataset => new TwoDGeologyViewer(geology2DDataset),
-
-            // Dataset groups cannot be opened in a viewer
-            DatasetGroup => throw new InvalidOperationException(
-                "Cannot open a DatasetGroup in a viewer. Please open individual datasets."),
-
-            _ => throw new NotSupportedException($"No viewer available for dataset type: {dataset.GetType().Name}")
-        };
+// Default implementations for datasets without specific UI components
+private class DefaultPropertiesRenderer : IDatasetPropertiesRenderer
+{
+    public void Draw(Dataset dataset)
+    {
+        ImGui.TextDisabled("No properties available for this dataset type.");
+        ImGui.Separator();
+        ImGui.Text($"Type: {dataset.Type}");
+        ImGui.Text($"Name: {dataset.Name}");
+        if (!string.IsNullOrEmpty(dataset.FilePath)) ImGui.Text($"Path: {dataset.FilePath}");
+        ImGui.Text($"Size: {FormatBytes(dataset.GetSizeInBytes())}");
     }
 
-    public static IDatasetPropertiesRenderer CreatePropertiesRenderer(Dataset dataset)
+    private string FormatBytes(long bytes)
     {
-        return dataset switch
+        string[] sizes = { "B", "KB", "MB", "GB", "TB" };
+        var order = 0;
+        double size = bytes;
+        while (size >= 1024 && order < sizes.Length - 1)
         {
-            ImageDataset => new ImagePropertiesRenderer(),
-            CtImageStackDataset or StreamingCtVolumeDataset => new CtImageStackPropertiesRenderer(),
-            Mesh3DDataset => new Mesh3DProperties(),
-            TableDataset => new TableProperties(),
-            GISDataset => new GISProperties(),
-            AcousticVolumeDataset => new AcousticVolumeProperties(),
-            PNMDataset => new PNMPropertiesRenderer(), // Added for PNM
-            DatasetGroup => new DatasetGroupProperties(),
-            BoreholeDataset => new BoreholePropertiesRenderer(),
-            TwoDGeologyDataset => new TwoDGeologyProperties(),
-            _ => new DefaultPropertiesRenderer()
-        };
-    }
+            order++;
+            size /= 1024;
+        }
 
-    public static IDatasetTools CreateTools(Dataset dataset)
-    {
-        return dataset switch
-        {
-            CtImageStackDataset => new CtImageStackCompositeTool(),
-            StreamingCtVolumeDataset sds when sds.EditablePartner != null => new CtImageStackCompositeTool(),
-            Mesh3DDataset => new Mesh3DTools(),
-            TableDataset => new TableTools(),
-            GISDataset => new GISTools(),
-            AcousticVolumeDataset => new AcousticVolumeTools(),
-            PNMDataset => new PNMTools(), // Added for PNM
-            ImageDataset => new ImageTools(),
-            BoreholeDataset => new BoreholeTools(),
-            TwoDGeologyDataset => new TwoDGeologyTools(),
-            _ => new DefaultTools()
-        };
+        return $"{size:0.##} {sizes[order]}";
     }
+}
 
-    // Default implementations for datasets without specific UI components
-    private class DefaultPropertiesRenderer : IDatasetPropertiesRenderer
+private class DefaultTools : IDatasetTools
+{
+    public void Draw(Dataset dataset)
     {
-        public void Draw(Dataset dataset)
+        ImGui.TextDisabled("No tools available for this dataset type.");
+    }
+}
+
+// Properties renderer for dataset groups
+private class DatasetGroupProperties : IDatasetPropertiesRenderer
+{
+    public void Draw(Dataset dataset)
+    {
+        if (dataset is DatasetGroup group)
         {
-            ImGui.TextDisabled("No properties available for this dataset type.");
+            ImGui.Text($"Group Name: {group.Name}");
+            ImGui.Text($"Datasets: {group.Datasets.Count}");
+            ImGui.Text($"Total Size: {FormatBytes(group.GetSizeInBytes())}");
+
             ImGui.Separator();
-            ImGui.Text($"Type: {dataset.Type}");
-            ImGui.Text($"Name: {dataset.Name}");
-            if (!string.IsNullOrEmpty(dataset.FilePath)) ImGui.Text($"Path: {dataset.FilePath}");
-            ImGui.Text($"Size: {FormatBytes(dataset.GetSizeInBytes())}");
-        }
-
-        private string FormatBytes(long bytes)
-        {
-            string[] sizes = { "B", "KB", "MB", "GB", "TB" };
-            var order = 0;
-            double size = bytes;
-            while (size >= 1024 && order < sizes.Length - 1)
-            {
-                order++;
-                size /= 1024;
-            }
-
-            return $"{size:0.##} {sizes[order]}";
+            ImGui.Text("Contents:");
+            foreach (var child in group.Datasets) ImGui.BulletText($"{child.Name} ({child.Type})");
         }
     }
 
-    private class DefaultTools : IDatasetTools
+    private string FormatBytes(long bytes)
     {
-        public void Draw(Dataset dataset)
+        string[] sizes = { "B", "KB", "MB", "GB", "TB" };
+        var order = 0;
+        double size = bytes;
+        while (size >= 1024 && order < sizes.Length - 1)
         {
-            ImGui.TextDisabled("No tools available for this dataset type.");
+            order++;
+            size /= 1024;
         }
-    }
 
-    // Properties renderer for dataset groups
-    private class DatasetGroupProperties : IDatasetPropertiesRenderer
+        return $"{size:0.##} {sizes[order]}";
+    }
+}
+
+// Image tools implementation
+private class ImageTools : IDatasetTools
+{
+    public void Draw(Dataset dataset)
     {
-        public void Draw(Dataset dataset)
+        if (dataset is ImageDataset image)
         {
-            if (dataset is DatasetGroup group)
-            {
-                ImGui.Text($"Group Name: {group.Name}");
-                ImGui.Text($"Datasets: {group.Datasets.Count}");
-                ImGui.Text($"Total Size: {FormatBytes(group.GetSizeInBytes())}");
+            ImGui.Text("Image Tools");
+            ImGui.Separator();
 
-                ImGui.Separator();
-                ImGui.Text("Contents:");
-                foreach (var child in group.Datasets) ImGui.BulletText($"{child.Name} ({child.Type})");
-            }
-        }
-
-        private string FormatBytes(long bytes)
-        {
-            string[] sizes = { "B", "KB", "MB", "GB", "TB" };
-            var order = 0;
-            double size = bytes;
-            while (size >= 1024 && order < sizes.Length - 1)
+            if (ImGui.Button("Show Histogram"))
             {
-                order++;
-                size /= 1024;
+                // Implementation pending
             }
 
-            return $"{size:0.##} {sizes[order]}";
+            if (ImGui.Button("Export"))
+            {
+                // Implementation pending
+            }
+
+            ImGui.Separator();
+            ImGui.TextDisabled("Additional image tools coming soon");
         }
     }
+}
 
-    // Image tools implementation
-    private class ImageTools : IDatasetTools
+// Wrapper for TwoDGeologyTools to conform to IDatasetTools interface
+private class TwoDGeologyToolsWrapper : IDatasetTools
+{
+    private TwoDGeologyTools _tools;
+    private TwoDGeologyViewer _viewer;
+    
+    public void Draw(Dataset dataset)
     {
-        public void Draw(Dataset dataset)
+        if (dataset is not TwoDGeologyDataset twoDGeoDataset)
         {
-            if (dataset is ImageDataset image)
+            ImGui.TextDisabled("Invalid dataset type for 2D Geology tools.");
+            return;
+        }
+
+        // Get or create the viewer reference
+        if (_viewer == null)
+        {
+            _viewer = twoDGeoDataset.GetViewer();
+            
+            if (_viewer == null)
             {
-                ImGui.Text("Image Tools");
-                ImGui.Separator();
-
-                if (ImGui.Button("Show Histogram"))
-                {
-                    // Implementation pending
-                }
-
-                if (ImGui.Button("Export"))
-                {
-                    // Implementation pending
-                }
-
-                ImGui.Separator();
-                ImGui.TextDisabled("Additional image tools coming soon");
+                ImGui.TextWrapped("Please open the dataset in a viewer first to access editing tools.");
+                return;
             }
         }
+
+        // Initialize tools if needed
+        if (_tools == null && _viewer != null)
+        {
+            _tools = new TwoDGeologyTools(_viewer, twoDGeoDataset);
+        }
+
+        // Draw the tools panel
+        if (_tools != null)
+        {
+            _tools.RenderToolsPanel();
+        }
+        else
+        {
+            ImGui.TextWrapped("2D Geology tools are available when viewing the dataset.");
+        }
     }
+}
+
+// Wrapper for TwoDGeologyViewer to conform to IDatasetViewer interface
+private class TwoDGeologyViewerWrapper : IDatasetViewer
+{
+    private readonly TwoDGeologyViewer _viewer;
+    private readonly TwoDGeologyDataset _dataset;
+
+    public TwoDGeologyViewerWrapper(TwoDGeologyDataset dataset)
+    {
+        _dataset = dataset ?? throw new ArgumentNullException(nameof(dataset));
+        _viewer = new TwoDGeologyViewer(dataset);
+    }
+
+    public void DrawToolbarControls()
+    {
+        // The TwoDGeologyViewer's toolbar is rendered as part of its Render() method
+        // We don't need separate toolbar controls here
+    }
+
+    public void DrawContent(ref float zoom, ref Vector2 pan)
+    {
+        // The TwoDGeologyViewer manages its own zoom and pan internally
+        // Just render the viewer
+        _viewer.Render();
+    }
+
+    public void Dispose()
+    {
+        _viewer?.Dispose();
+    }
+}
+
 }

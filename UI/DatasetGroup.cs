@@ -1,5 +1,8 @@
 ﻿// GeoscientistToolkit/Data/DatasetGroup.cs
 
+using System.Collections.Generic;
+using System.Linq;
+
 namespace GeoscientistToolkit.Data;
 
 public class DatasetGroup : Dataset, ISerializableDataset
@@ -7,10 +10,10 @@ public class DatasetGroup : Dataset, ISerializableDataset
     public DatasetGroup(string name, List<Dataset> datasets) : base(name, string.Empty)
     {
         Type = DatasetType.Group;
-        Datasets = new List<Dataset>(datasets);
+        Datasets = new List<Dataset>(datasets ?? new List<Dataset>());
 
-        // Set the file path to a descriptive string
-        FilePath = $"Group of {datasets.Count} datasets";
+        // Set the file path to a descriptive string that won't be mistaken for a real file
+        FilePath = $"[Group:{Name}]";
     }
 
     public List<Dataset> Datasets { get; }
@@ -22,17 +25,17 @@ public class DatasetGroup : Dataset, ISerializableDataset
             TypeName = nameof(DatasetGroup),
             Name = Name,
             FilePath = FilePath
-            // Metadata will be handled by ProjectSerializer
         };
 
         foreach (var dataset in Datasets)
+        {
             if (dataset is ISerializableDataset serializable)
             {
+                // The ProjectSerializer will handle attaching metadata to this child DTO
                 var childDto = (DatasetDTO)serializable.ToSerializableObject();
-                // Child metadata will be handled by ProjectSerializer
                 dto.Datasets.Add(childDto);
             }
-
+        }
         return dto;
     }
 
@@ -43,12 +46,12 @@ public class DatasetGroup : Dataset, ISerializableDataset
 
     public override void Load()
     {
-        // Groups don't load directly - individual datasets are loaded when needed
+        // Groups don't load data directly; their child datasets are loaded individually.
     }
 
     public override void Unload()
     {
-        // Groups don't unload directly - individual datasets are unloaded when needed
+        // Child datasets are managed and unloaded by the ProjectManager.
     }
 
     public void AddDataset(Dataset dataset)

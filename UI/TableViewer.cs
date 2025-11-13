@@ -1,5 +1,6 @@
 // GeoscientistToolkit/UI/TableViewer.cs
 
+using System;
 using System.Data;
 using System.Numerics;
 using System.Text;
@@ -8,10 +9,12 @@ using GeoscientistToolkit.UI.Interfaces;
 using GeoscientistToolkit.UI.Utils;
 using GeoscientistToolkit.Util;
 using ImGuiNET;
+using System.Linq;
+using System.Collections.Generic;
 
 namespace GeoscientistToolkit.UI;
 
-public class TableViewer : IDatasetViewer
+public class TableViewer : IDatasetViewer, IDisposable
 {
     private const float MIN_COLUMN_WIDTH = 50f;
     private const float DEFAULT_COLUMN_WIDTH = 120f;
@@ -27,10 +30,13 @@ public class TableViewer : IDatasetViewer
     private int _currentSortColumn = -1;
     private DataTable _dataTable;
     private bool _exportFiltered;
-    private int _exportFormat; // 0 = CSV, 1 = TSV
 
-    // Export dialog state
-    private string _exportPath = "";
+    // Cell editing state
+    private (int Row, int Col) _editingCell = (-1, -1);
+    private string _editBuffer = "";
+    private bool _startEditing;
+
+    // Export/dialog/filter state
     private List<DataRow> _filteredRows;
     private bool _includeHeaders = true;
     private int _rowsPerPage = 100;
@@ -39,9 +45,26 @@ public class TableViewer : IDatasetViewer
     private int _selectedRow = -1;
     private bool _showStatistics;
 
+    // Header/row context menu state
+    private int _headerCtxColumn = -1;
+    private bool _showRenameModal = false;
+    private string _renameBuffer = "";
+    private bool _addLeftRequested = false;
+    private bool _addRightRequested = false;
+    private bool _deleteColRequested = false;
+
+    private int _rowCtxIndex = -1;
+    private bool _insertAboveRequested = false;
+    private bool _insertBelowRequested = false;
+    private bool _deleteRowRequested = false;
+
+    // ❗ Last-row deletion warning
+    private bool _showLastRowWarning = false;
+
     public TableViewer(TableDataset dataset)
     {
         _dataset = dataset;
+        _dataset.DataChanged += OnDatasetChanged; // live updates
         RefreshData();
         _csvExportDialog = new ImGuiExportFileDialog($"{_dataset.Name}_ExportCSV", "Export table to CSV");
         _csvExportDialog.SetExtensions((".csv", "CSV (Comma-separated values)"));
@@ -52,9 +75,20 @@ public class TableViewer : IDatasetViewer
             (".txt", "Text file"));
     }
 
+    private void OnDatasetChanged(TableDataset _)
+    {
+        var filterBackup = _searchFilter;
+        var pageBackup = _currentPage;
+
+        RefreshData();
+        _searchFilter = filterBackup;
+        ApplyFilter();
+        _currentPage = Math.Min(pageBackup, Math.Max(0, (int)Math.Ceiling(_filteredRows.Count / (double)_rowsPerPage) - 1));
+    }
+
     public void DrawToolbarControls()
     {
-        // ───────────────────────── SEARCH ─────────────────────────
+        // SEARCH
         ImGui.SetNextItemWidth(200);
         if (ImGui.InputTextWithHint("##Search", "Search…", ref _searchFilter, 256))
             ApplyFilter();
@@ -70,14 +104,14 @@ public class TableViewer : IDatasetViewer
         ImGui.Separator();
         ImGui.SameLine();
 
-        // ──────────────────── STATISTICS TOGGLE ───────────────────
+        // STATISTICS TOGGLE
         ImGui.Checkbox("Show Statistics", ref _showStatistics);
 
         ImGui.SameLine();
         ImGui.Separator();
         ImGui.SameLine();
 
-        // ──────────────────────── EXPORTS ─────────────────────────
+        // EXPORTS
         if (ImGui.Button("Export CSV…"))
             _csvExportDialog.Open($"{_dataset.Name}_export");
 
@@ -91,7 +125,7 @@ public class TableViewer : IDatasetViewer
         ImGui.SameLine();
         ImGui.Checkbox("Filtered only", ref _exportFiltered);
 
-        // ───────────────────── PAGINATION ─────────────────────────
+        // PAGINATION
         ImGui.SameLine();
         ImGui.Separator();
         ImGui.SameLine();
@@ -111,7 +145,6 @@ public class TableViewer : IDatasetViewer
             ImGui.EndCombo();
         }
 
-        // ──────────────── HANDLE SAVE-FILE DIALOGS ────────────────
         HandleExportDialogs();
     }
 
@@ -133,42 +166,35 @@ public class TableViewer : IDatasetViewer
             availableHeight = ImGui.GetContentRegionAvail().Y;
         }
 
-        // Calculate table height
         var paginationHeight = 40f;
         var tableHeight = availableHeight - paginationHeight;
 
-        // Draw table - Fixed ImGui API call
-        ImGui.BeginChild("TableScrollRegion", new Vector2(0, tableHeight),
-            ImGuiChildFlags.Border);
-
+        ImGui.BeginChild("TableScrollRegion", new Vector2(0, tableHeight), ImGuiChildFlags.Border);
         DrawTable();
-
         ImGui.EndChild();
 
-        // Draw pagination
         DrawPagination();
+
+        ProcessHeaderContextActions();
+        ProcessRowContextActions();
+
+        // Render the fullscreen warning modal if needed
+        RenderLastRowWarningModal();
     }
 
     public void Dispose()
     {
+        _dataset.DataChanged -= OnDatasetChanged;
         _dataTable?.Dispose();
         _filteredRows?.Clear();
     }
 
-    /// <summary>
-    ///     Opens native save-file dialogs (CSV / TSV) and calls ExportTable()
-    ///     when the user confirms.  Follows the same pattern as TableTools.
-    /// </summary>
     private void HandleExportDialogs()
     {
-        // ── CSV ────────────────────────────────────────────────────────────────────
         if (_csvExportDialog.Submit())
-            // Use comma as delimiter
             ExportTable(_csvExportDialog.SelectedPath, ",", _includeHeaders, _exportFiltered);
 
-        // ── TSV ────────────────────────────────────────────────────────────────────
         if (_tsvExportDialog.Submit())
-            // Use tab as delimiter
             ExportTable(_tsvExportDialog.SelectedPath, "\t", _includeHeaders, _exportFiltered);
     }
 
@@ -189,11 +215,9 @@ public class TableViewer : IDatasetViewer
         _columnWidths.Clear();
         for (var i = 0; i < _dataTable.Columns.Count; i++)
         {
-            // Calculate initial width based on column name and sample data
             var nameWidth = ImGui.CalcTextSize(_dataTable.Columns[i].ColumnName).X + 20;
             var dataWidth = DEFAULT_COLUMN_WIDTH;
 
-            // Sample first 10 rows to estimate width
             var samplesToCheck = Math.Min(10, _dataTable.Rows.Count);
             for (var row = 0; row < samplesToCheck; row++)
             {
@@ -204,6 +228,19 @@ public class TableViewer : IDatasetViewer
 
             _columnWidths[i] = Math.Max(nameWidth, Math.Min(dataWidth, 300f));
         }
+    }
+
+    private void StopEditing(bool commitChange)
+    {
+        if (commitChange)
+        {
+            var dataRow = _filteredRows[_editingCell.Row];
+            var originalRowIndex = _dataTable.Rows.IndexOf(dataRow);
+
+            if (originalRowIndex != -1)
+                _dataset.UpdateCellValue(originalRowIndex, _editingCell.Col, _editBuffer);
+        }
+        _editingCell = (-1, -1);
     }
 
     private void DrawTable()
@@ -242,16 +279,57 @@ public class TableViewer : IDatasetViewer
                 ImGui.TableSetupColumn(column.ColumnName, columnFlags, width);
             }
 
-            ImGui.TableSetupScrollFreeze(1, 1); // Freeze first column and header row
-            ImGui.TableHeadersRow();
+            ImGui.TableSetupScrollFreeze(1, 1);
 
-            // Handle sorting - Fixed the Specs indexing
+            // Headers with right-click menus
+            ImGui.TableNextRow(ImGuiTableRowFlags.Headers);
+
+            ImGui.TableSetColumnIndex(0);
+            ImGui.TableHeader("#");
+
+            for (int i = 0; i < _dataTable.Columns.Count; i++)
+            {
+                ImGui.TableSetColumnIndex(i + 1);
+                var label = _dataTable.Columns[i].ColumnName;
+                ImGui.TableHeader(label);
+
+                // Right-click header => column operations
+                if (ImGui.BeginPopupContextItem()) // bind to last header item
+                {
+                    _headerCtxColumn = i;
+
+                    if (ImGui.MenuItem("Rename Column…"))
+                    {
+                        _renameBuffer = label;
+                        _showRenameModal = true;
+                        ImGui.CloseCurrentPopup();
+                    }
+                    if (ImGui.MenuItem("Add Column Left"))
+                    {
+                        _addLeftRequested = true;
+                        ImGui.CloseCurrentPopup();
+                    }
+                    if (ImGui.MenuItem("Add Column Right"))
+                    {
+                        _addRightRequested = true;
+                        ImGui.CloseCurrentPopup();
+                    }
+                    if (ImGui.MenuItem("Delete Column"))
+                    {
+                        _deleteColRequested = true;
+                        ImGui.CloseCurrentPopup();
+                    }
+
+                    ImGui.EndPopup();
+                }
+            }
+
+            // Handle sorting
             unsafe
             {
                 var sortSpecs = ImGui.TableGetSortSpecs();
                 if (sortSpecs.NativePtr != null && sortSpecs.SpecsDirty)
                 {
-                    // Raw pointer to the first ImGuiTableColumnSortSpecs struct
                     var specs = sortSpecs.Specs.NativePtr;
 
                     for (var i = 0; i < sortSpecs.SpecsCount; ++i)
@@ -270,7 +348,6 @@ public class TableViewer : IDatasetViewer
                 }
             }
 
-
             // Draw rows
             var startRow = _currentPage * _rowsPerPage;
             var endRow = Math.Min(startRow + _rowsPerPage, _filteredRows.Count);
@@ -281,49 +358,121 @@ public class TableViewer : IDatasetViewer
 
                 ImGui.TableNextRow();
 
-                // Row number column
+                // Row index column (right-click shows row menu)
                 ImGui.TableNextColumn();
-                ImGui.Text((row + 1).ToString());
+                ImGui.PushID(row);
+                bool dummySelected = _selectedRow == row && _selectedColumn == -1;
+                if (ImGui.Selectable((row + 1).ToString(), dummySelected, ImGuiSelectableFlags.SpanAllColumns))
+                {
+                    _selectedRow = row;
+                    _selectedColumn = -1;
+                }
+                ImGui.OpenPopupOnItemClick("RowMenu", ImGuiPopupFlags.MouseButtonRight);
+                if (ImGui.BeginPopup("RowMenu"))
+                {
+                    _rowCtxIndex = row;
+                    if (ImGui.MenuItem("Insert Row Above")) _insertAboveRequested = true;
+                    if (ImGui.MenuItem("Insert Row Below")) _insertBelowRequested = true;
+                    if (ImGui.MenuItem("Delete Row")) _deleteRowRequested = true;
+                    ImGui.EndPopup();
+                }
+                ImGui.PopID();
 
                 // Data columns
                 for (var col = 0; col < _dataTable.Columns.Count; col++)
                 {
                     ImGui.TableNextColumn();
-
-                    var isSelected = _selectedRow == row && _selectedColumn == col;
-
-                    if (isSelected) ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(1.0f, 1.0f, 0.0f, 1.0f));
-
-                    var cellValue = dataRow[col]?.ToString() ?? "";
-
-                    // Make cell selectable
                     ImGui.PushID($"cell_{row}_{col}");
-                    if (ImGui.Selectable(cellValue, isSelected, ImGuiSelectableFlags.SpanAllColumns))
-                    {
-                        _selectedRow = row;
-                        _selectedColumn = col;
-                    }
 
+                    bool isEditingThisCell = _editingCell.Row == row && _editingCell.Col == col;
+
+                    if (isEditingThisCell)
+                    {
+                        if (_startEditing)
+                        {
+                            _editBuffer = dataRow[col]?.ToString() ?? "";
+                            ImGui.SetKeyboardFocusHere();
+                            _startEditing = false;
+                        }
+
+                        ImGui.SetNextItemWidth(-1);
+                        bool enterPressed = ImGui.InputText("##edit", ref _editBuffer, 256, ImGuiInputTextFlags.EnterReturnsTrue | ImGuiInputTextFlags.AutoSelectAll);
+
+                        if (ImGui.IsKeyPressed(ImGuiKey.Escape))
+                        {
+                            StopEditing(false); // Cancel edit
+                        }
+                        else if (enterPressed || ImGui.IsItemDeactivated())
+                        {
+                            StopEditing(true); // Commit edit
+                        }
+                    }
+                    else
+                    {
+                        var isSelected = _selectedRow == row && _selectedColumn == col;
+                        var cellValue = dataRow[col]?.ToString() ?? "";
+
+                        if (ImGui.Selectable(cellValue, isSelected, ImGuiSelectableFlags.SpanAllColumns | ImGuiSelectableFlags.AllowDoubleClick))
+                        {
+                            _selectedRow = row;
+                            _selectedColumn = col;
+                            if (ImGui.IsMouseDoubleClicked(ImGuiMouseButton.Left))
+                            {
+                                _editingCell = (row, col);
+                                _startEditing = true;
+                            }
+                        }
+
+                        if (ImGui.IsItemHovered() && ImGui.CalcTextSize(cellValue).X > _columnWidths.GetValueOrDefault(col, DEFAULT_COLUMN_WIDTH))
+                            ImGui.SetTooltip(cellValue);
+
+                        // Cell context menu — includes row actions
+                        if (ImGui.BeginPopupContextItem())
+                        {
+                            if (ImGui.MenuItem("Copy Cell")) ImGui.SetClipboardText(cellValue);
+                            if (ImGui.MenuItem("Copy Row")) CopyRowToClipboard(dataRow);
+                            if (ImGui.MenuItem("Copy Column")) CopyColumnToClipboard(col);
+                            ImGui.Separator();
+                            _rowCtxIndex = row;
+                            if (ImGui.MenuItem("Insert Row Above")) _insertAboveRequested = true;
+                            if (ImGui.MenuItem("Insert Row Below")) _insertBelowRequested = true;
+                            if (ImGui.MenuItem("Delete Row")) _deleteRowRequested = true;
+                            ImGui.EndPopup();
+                        }
+                    }
                     ImGui.PopID();
-
-                    // Show tooltip for truncated text
-                    if (ImGui.IsItemHovered() && ImGui.CalcTextSize(cellValue).X >
-                        _columnWidths.GetValueOrDefault(col, DEFAULT_COLUMN_WIDTH)) ImGui.SetTooltip(cellValue);
-
-                    // Context menu for cell
-                    if (ImGui.BeginPopupContextItem($"cell_context_{row}_{col}"))
-                    {
-                        if (ImGui.MenuItem("Copy Cell")) ImGui.SetClipboardText(cellValue);
-                        if (ImGui.MenuItem("Copy Row")) CopyRowToClipboard(dataRow);
-                        if (ImGui.MenuItem("Copy Column")) CopyColumnToClipboard(col);
-                        ImGui.EndPopup();
-                    }
-
-                    if (isSelected) ImGui.PopStyleColor();
                 }
             }
 
             ImGui.EndTable();
+        }
+
+        // Rename modal
+        if (_showRenameModal)
+        {
+            ImGui.OpenPopup("Rename Column");
+            _showRenameModal = false;
+        }
+        if (ImGui.BeginPopupModal("Rename Column", ImGuiWindowFlags.AlwaysAutoResize))
+        {
+            ImGui.InputText("New name", ref _renameBuffer, 128);
+            ImGui.Separator();
+            if (ImGui.Button("OK", new Vector2(100, 0)))
+            {
+                if (_headerCtxColumn >= 0 && _headerCtxColumn < _dataTable.Columns.Count && !string.IsNullOrWhiteSpace(_renameBuffer))
+                {
+                    var dt = _dataset.GetDataTable();
+                    dt.Columns[_headerCtxColumn].ColumnName = _renameBuffer;
+                    _dataset.UpdateDataTable(dt);
+                }
+                ImGui.CloseCurrentPopup();
+            }
+            ImGui.SameLine();
+            if (ImGui.Button("Cancel", new Vector2(100, 0)))
+            {
+                ImGui.CloseCurrentPopup();
+            }
+            ImGui.EndPopup();
         }
     }
 
@@ -331,7 +480,6 @@ public class TableViewer : IDatasetViewer
     {
         if (_dataTable == null) return;
 
-        // Fixed ImGui API call
         ImGui.BeginChild("Statistics", new Vector2(0, 200), ImGuiChildFlags.Border);
 
         if (ImGui.BeginTable("StatsTable", 8,
@@ -392,19 +540,16 @@ public class TableViewer : IDatasetViewer
 
         ImGui.Separator();
 
-        // Previous button
         if (_currentPage <= 0) ImGui.BeginDisabled();
         if (ImGui.Button("Previous")) _currentPage--;
         if (_currentPage <= 0) ImGui.EndDisabled();
 
         ImGui.SameLine();
 
-        // Page info
         ImGui.Text($"Page {_currentPage + 1} of {Math.Max(1, totalPages)}");
 
         ImGui.SameLine();
 
-        // Next button
         if (_currentPage >= totalPages - 1) ImGui.BeginDisabled();
         if (ImGui.Button("Next")) _currentPage++;
         if (_currentPage >= totalPages - 1) ImGui.EndDisabled();
@@ -491,42 +636,6 @@ public class TableViewer : IDatasetViewer
         ImGui.SetClipboardText(string.Join("\n", values));
     }
 
-    private void DrawExportPopup()
-    {
-        if (ImGui.BeginPopupModal("ExportTablePopup", ImGuiWindowFlags.AlwaysAutoResize))
-        {
-            ImGui.Text("Export Table");
-            ImGui.Separator();
-
-            ImGui.InputTextWithHint("File Path", "path/to/export.csv", ref _exportPath, 260);
-            ImGui.SameLine();
-            if (ImGui.Button("Browse..."))
-                // In a real implementation, you'd open a file save dialog here
-                _exportPath = Path.Combine(
-                    Environment.GetFolderPath(Environment.SpecialFolder.Desktop),
-                    $"{_dataset.Name}_export.csv");
-
-            ImGui.Combo("Format", ref _exportFormat, "CSV (Comma-separated)\0TSV (Tab-separated)\0");
-            ImGui.Checkbox("Include Headers", ref _includeHeaders);
-            ImGui.Checkbox("Export Filtered Rows Only", ref _exportFiltered);
-
-            ImGui.Separator();
-
-            if (ImGui.Button("Export", new Vector2(120, 0)))
-                if (!string.IsNullOrEmpty(_exportPath))
-                {
-                    ExportTable(_exportPath, _exportFormat == 1 ? "\t" : ",", _includeHeaders, _exportFiltered);
-                    ImGui.CloseCurrentPopup();
-                }
-
-            ImGui.SameLine();
-
-            if (ImGui.Button("Cancel", new Vector2(120, 0))) ImGui.CloseCurrentPopup();
-
-            ImGui.EndPopup();
-        }
-    }
-
     private void ExportTable(string path, string delimiter, bool includeHeaders, bool filteredOnly)
     {
         try
@@ -535,7 +644,6 @@ public class TableViewer : IDatasetViewer
 
             using (var writer = new StreamWriter(path, false, Encoding.UTF8))
             {
-                // Write headers
                 if (includeHeaders)
                 {
                     var headers = _dataTable.Columns.Cast<DataColumn>()
@@ -543,7 +651,6 @@ public class TableViewer : IDatasetViewer
                     writer.WriteLine(string.Join(delimiter, headers));
                 }
 
-                // Write data
                 foreach (var row in rowsToExport)
                 {
                     var values = row.ItemArray.Select(field => EscapeCsvField(field?.ToString() ?? "", delimiter[0]));
@@ -564,5 +671,131 @@ public class TableViewer : IDatasetViewer
         if (field.Contains(delimiter) || field.Contains("\"") || field.Contains("\n") || field.Contains("\r"))
             return $"\"{field.Replace("\"", "\"\"")}\"";
         return field;
+    }
+
+    // ───────────────────────────── Context actions ─────────────────────────────
+
+    private void ProcessHeaderContextActions()
+    {
+        if (_headerCtxColumn < 0 || _headerCtxColumn >= (_dataTable?.Columns.Count ?? 0))
+            return;
+
+        if (_addLeftRequested || _addRightRequested || _deleteColRequested)
+        {
+            var dt = _dataset.GetDataTable();
+
+            if (_deleteColRequested && dt.Columns.Count > 0)
+            {
+                dt.Columns.RemoveAt(_headerCtxColumn);
+            }
+            else
+            {
+                string baseName = "NewColumn";
+                string name = baseName;
+                int suffix = 1;
+                while (dt.Columns.Contains(name))
+                    name = $"{baseName}{suffix++}";
+
+                var newCol = dt.Columns.Add(name, typeof(string));
+
+                if (_addLeftRequested)
+                    newCol.SetOrdinal(Math.Max(0, _headerCtxColumn));
+                else if (_addRightRequested)
+                    newCol.SetOrdinal(Math.Min(dt.Columns.Count - 1, _headerCtxColumn + 1));
+            }
+
+            _dataset.UpdateDataTable(dt);
+        }
+
+        _addLeftRequested = _addRightRequested = _deleteColRequested = false;
+        _headerCtxColumn = -1;
+    }
+
+    private void ProcessRowContextActions()
+    {
+        if (_rowCtxIndex < 0 || _rowCtxIndex >= _filteredRows?.Count)
+            return;
+
+        if (_insertAboveRequested || _insertBelowRequested || _deleteRowRequested)
+        {
+            // Map the filtered row back to the original index using THIS viewer's _dataTable
+            var dataRow = _filteredRows[_rowCtxIndex];
+            int originalRowIndex = _dataTable.Rows.IndexOf(dataRow);
+
+            if (originalRowIndex >= 0)
+            {
+                var dt = _dataset.GetDataTable();
+
+                if (_deleteRowRequested)
+                {
+                    // 🔒 Prevent deleting the last remaining row
+                    if (dt.Rows.Count <= 1)
+                    {
+                        _showLastRowWarning = true; // show modal instead of deleting
+                    }
+                    else
+                    {
+                        dt.Rows.RemoveAt(originalRowIndex);
+                        _dataset.UpdateDataTable(dt);
+                    }
+                }
+                else
+                {
+                    var newRow = dt.NewRow();
+                    int insertIndex = originalRowIndex + (_insertBelowRequested ? 1 : 0);
+                    insertIndex = Math.Clamp(insertIndex, 0, dt.Rows.Count);
+                    dt.Rows.InsertAt(newRow, insertIndex);
+                    _dataset.UpdateDataTable(dt);
+                }
+            }
+        }
+
+        _insertAboveRequested = _insertBelowRequested = _deleteRowRequested = false;
+        _rowCtxIndex = -1;
+    }
+
+    // ───────────────────────────── Fullscreen warning modal ─────────────────────────────
+
+    private void RenderLastRowWarningModal()
+    {
+        if (!_showLastRowWarning) return;
+
+        // Open the popup if not already open
+        ImGui.OpenPopup("Cannot delete last row");
+
+        // Make it fullscreen and immovable
+        var io = ImGui.GetIO();
+        ImGui.SetNextWindowPos(new Vector2(0, 0));
+        ImGui.SetNextWindowSize(io.DisplaySize);
+
+        // Red title bar
+        ImGui.PushStyleColor(ImGuiCol.TitleBg, new Vector4(0.55f, 0.00f, 0.00f, 1.00f));
+        ImGui.PushStyleColor(ImGuiCol.TitleBgActive, new Vector4(0.75f, 0.00f, 0.00f, 1.00f));
+        ImGui.PushStyleColor(ImGuiCol.TitleBgCollapsed, new Vector4(0.40f, 0.00f, 0.00f, 1.00f));
+
+        if (ImGui.BeginPopupModal("Cannot delete last row",
+            ImGuiWindowFlags.NoResize | ImGuiWindowFlags.NoMove | ImGuiWindowFlags.NoCollapse | ImGuiWindowFlags.NoSavedSettings))
+        {
+            ImGui.Dummy(new Vector2(0, 20));
+            ImGui.SetCursorPosX((io.DisplaySize.X - ImGui.CalcTextSize("⚠  The last row cannot be deleted.").X) * 0.5f);
+            ImGui.Text("⚠  The last row cannot be deleted.");
+
+            ImGui.Dummy(new Vector2(0, 10));
+            ImGui.SetCursorPosX((io.DisplaySize.X - ImGui.CalcTextSize("A table must contain at least one row.").X) * 0.5f);
+            ImGui.TextDisabled("A table must contain at least one row.");
+
+            ImGui.Dummy(new Vector2(0, 30));
+            var buttonSize = new Vector2(120, 0);
+            ImGui.SetCursorPosX((io.DisplaySize.X - buttonSize.X) * 0.5f);
+            if (ImGui.Button("OK", buttonSize))
+            {
+                ImGui.CloseCurrentPopup();
+                _showLastRowWarning = false;
+            }
+
+            ImGui.EndPopup();
+        }
+
+        ImGui.PopStyleColor(3);
     }
 }

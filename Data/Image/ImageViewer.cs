@@ -15,11 +15,13 @@ public class ImageViewer : IDatasetViewer
     // Scale calibration tool
     private readonly ScaleCalibrationTool _calibrationTool = new();
     private readonly ImageDataset _dataset;
+
     private Vector2 _dragOffset;
 
     // Stored pixel size for editing
     private float _editablePixelSize;
     private string _editableUnit;
+    private ImageTools _imageToolsController;
     private bool _isDraggingScaleBar;
     private bool _pixelSizeChanged;
     private Vector4 _scaleBarBgColor = new(0, 0, 0, 0.5f);
@@ -104,7 +106,9 @@ public class ImageViewer : IDatasetViewer
         var isMouseOverImage = io.MousePos.X >= imagePos.X && io.MousePos.X < imagePos.X + displaySize.X &&
                                io.MousePos.Y >= imagePos.Y && io.MousePos.Y < imagePos.Y + displaySize.Y;
 
-        // Handle calibration tool clicks
+        // --- START: INPUT HANDLING SECTION ---
+
+        // Handle calibration tool clicks (highest priority)
         if (_calibrationTool.IsActive && ImGui.IsMouseClicked(ImGuiMouseButton.Left))
             _calibrationTool.HandleMouseClick(imagePos, displaySize, _dataset.Width, _dataset.Height, io.MousePos);
 
@@ -125,21 +129,37 @@ public class ImageViewer : IDatasetViewer
         if (isMouseOverImage && ImGui.IsMouseDragging(ImGuiMouseButton.Middle) && !_calibrationTool.IsActive)
             pan += io.MouseDelta;
 
-        // FIXED: Handle segmentation tool interaction
-        // Just call the HandleMouseClick directly on every frame when mouse is over image
-        // The method internally checks for clicks and drag states
-        if (_segmentationTools != null && isMouseOverImage && !_calibrationTool.IsActive)
+        // --- NEW: Calculate image coordinate from mouse position ---
+        var imageCoord = Vector2.Zero;
+        if (isMouseOverImage)
         {
             var relativePos = io.MousePos - imagePos;
-            var imageX = (int)(relativePos.X / displaySize.X * _dataset.Width);
-            var imageY = (int)(relativePos.Y / displaySize.Y * _dataset.Height);
-
-            imageX = Math.Clamp(imageX, 0, _dataset.Width - 1);
-            imageY = Math.Clamp(imageY, 0, _dataset.Height - 1);
-
-            // Call HandleMouseClick directly - it handles all the mouse state internally
-            _segmentationTools.HandleMouseClick(imageX, imageY);
+            imageCoord = new Vector2(
+                relativePos.X / displaySize.X * _dataset.Width,
+                relativePos.Y / displaySize.Y * _dataset.Height
+            );
+            imageCoord.X = Math.Clamp(imageCoord.X, 0, _dataset.Width - 1);
+            imageCoord.Y = Math.Clamp(imageCoord.Y, 0, _dataset.Height - 1);
         }
+
+        // --- NEW: Handle clicks for interactive tools like Point Counting ---
+        if (isMouseOverImage && ImGui.IsMouseClicked(ImGuiMouseButton.Left) && !_calibrationTool.IsActive)
+        {
+            // The 'worldPositionOfClick' for an image is its pixel coordinate.
+            var worldPositionOfClick = imageCoord;
+
+            // Check if the Point Counting tool is active and pass the click to it.
+            var pointCountingTool = _imageToolsController?.GetCurrentActiveTool() as ImageTools.PointCountingTool;
+            if (pointCountingTool != null) pointCountingTool.HandlePointCountClick(worldPositionOfClick);
+        }
+
+        // Handle segmentation tool interaction (for painting, which needs continuous updates)
+        if (_segmentationTools != null && isMouseOverImage && !_calibrationTool.IsActive)
+            // The segmentation tool handles its own click/drag state internally
+            _segmentationTools.HandleMouseClick((int)imageCoord.X, (int)imageCoord.Y);
+
+        // --- END: INPUT HANDLING SECTION ---
+
 
         // 1. Draw the main image
         if (_dataset.ImageData != null)
@@ -171,7 +191,7 @@ public class ImageViewer : IDatasetViewer
         // 2b. Brush preview ring (only when Brush tool active and mouse over image)
         DrawBrushPreviewOverlay(dl, imagePos, displaySize, isMouseOverImage);
 
-        // keep the rest as-is:
+        // (The rest of the method remains the same)
         _calibrationTool.DrawOverlay(dl, imagePos, displaySize, _dataset.Width, _dataset.Height);
         if (_calibrationTool.DrawCalibrationDialog(out var newPixelSize, out var newUnit))
         {
@@ -195,6 +215,11 @@ public class ImageViewer : IDatasetViewer
             GlobalPerformanceManager.Instance.TextureCache.Invalidate(_dataset.FilePath);
             GlobalPerformanceManager.Instance.TextureCache.Invalidate(_dataset.FilePath + "_segmentation");
         }
+    }
+
+    public void SetImageToolsController(ImageTools controller)
+    {
+        _imageToolsController = controller;
     }
 
     private string GetTagsDisplay()

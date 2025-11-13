@@ -172,7 +172,7 @@ public class ThermodynamicSolver
         _reactionGenerator = new ReactionGenerator(_compoundLibrary);
     }
 
-    /// <summary>
+   /// <summary>
     ///     Solve for chemical equilibrium by minimizing total Gibbs energy.
     ///     Uses constrained optimization with element conservation constraints.
     ///     Algorithm: Interior point method with Newton steps
@@ -189,14 +189,35 @@ public class ThermodynamicSolver
         // Step 2: Set up optimization problem - minimize G = Σ(n_i * μ_i)
         // where μ_i = μ_i° + RT ln(a_i) is the chemical potential
         var species = GetAllSpecies(initialState, reactions);
-        var elementMatrix = BuildElementMatrix(species, initialState.ElementalComposition.Keys.ToList());
+        
+        // --- FIX START: Create a comprehensive list of ALL elements in the system ---
+        // The original code only considered elements from the initialState, which is the
+        // source of the bug. By considering all possible elements from all species,
+        // we can enforce a mass balance of zero for elements not initially present.
+        var allElementsInSystem = new HashSet<string>();
+        foreach (var speciesName in species)
+        {
+            var compound = _compoundLibrary.Find(speciesName);
+            if (compound != null)
+            {
+                var elementsInCompound = _reactionGenerator.ParseChemicalFormula(compound.ChemicalFormula).Keys;
+                foreach (var element in elementsInCompound)
+                {
+                    allElementsInSystem.Add(element);
+                }
+            }
+        }
+        var comprehensiveElementList = allElementsInSystem.ToList();
+        // --- FIX END ---
+
+        var elementMatrix = BuildElementMatrix(species, comprehensiveElementList);
 
         // Step 3: Initial guess - use input moles or small positive values
         var x0 = CreateInitialGuess(species, initialState);
 
-        // Step 4: Solve using Newton-Raphson with line search
+        // Step 4: Solve using Newton-Raphson with line search, now passing the comprehensive element list
         // Source: Bethke, 2008. Geochemical Reaction Modeling, Chapter 4
-        var solution = SolveGibbsMinimization(x0, species, elementMatrix, initialState);
+        var solution = SolveGibbsMinimization(x0, species, elementMatrix, comprehensiveElementList, initialState);
 
         // Step 5: Calculate final properties
         var finalState = BuildFinalState(solution, species, initialState);
@@ -679,19 +700,26 @@ public class ThermodynamicSolver
     ///     Implements the algorithm from Smith & Missen (1982), Chapter 5.
     /// </summary>
     private Vector<double> SolveGibbsMinimization(Vector<double> x0, List<string> species,
-        Matrix<double> elementMatrix, ThermodynamicState state)
+        Matrix<double> elementMatrix, List<string> comprehensiveElementList, ThermodynamicState state)
     {
         var n = species.Count;
-        var m = elementMatrix.RowCount; // Number of elements
+        var m = elementMatrix.RowCount; // Number of elements (now the comprehensive count)
         var x = x0.Clone();
 
-        // Element totals (constraints)
+        // --- FIX START: Build the constraint vector 'b' using the comprehensive element list ---
+        // The original code failed to create zero-constraints for elements not in the
+        // initial state. This fix ensures that if an element (e.g., Na, K, Cl) was not
+        // in the input, its total final amount in the system MUST be zero.
         var b = Vector<double>.Build.Dense(m);
         for (var i = 0; i < m; i++)
         {
-            var element = state.ElementalComposition.Keys.ToList()[i];
-            b[i] = state.ElementalComposition[element];
+            var element = comprehensiveElementList[i];
+            
+            // Get the initial moles of this element. If it wasn't in the initial state,
+            // GetValueOrDefault correctly returns 0.0, creating the necessary constraint.
+            b[i] = state.ElementalComposition.GetValueOrDefault(element, 0.0);
         }
+        // --- FIX END ---
 
         var converged = false;
         var iteration = 0;

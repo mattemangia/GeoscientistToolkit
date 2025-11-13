@@ -1,6 +1,8 @@
 // GeoscientistToolkit/Data/Table/TableDataset.cs
 
+using System;
 using System.Data;
+using System.Globalization;
 using System.Text;
 using ClosedXML.Excel;
 using GeoscientistToolkit.Util;
@@ -9,6 +11,9 @@ namespace GeoscientistToolkit.Data.Table;
 
 public class TableDataset : Dataset, ISerializableDataset
 {
+    // Notify listeners when data changes (viewer, stats, etc.)
+    public event Action<TableDataset>? DataChanged;
+
     // Statistics cache
     private readonly Dictionary<string, ColumnStatistics> _columnStats = new();
 
@@ -91,8 +96,14 @@ public class TableDataset : Dataset, ISerializableDataset
     public override void Load()
     {
         if (string.IsNullOrEmpty(FilePath))
-            // Generated table, already loaded
+        {
+            // For generated tables, ensure metadata and stats are correct
+            UpdateMetadata();
+            CalculateStatistics();
+            DataChanged?.Invoke(this);
             return;
+        }
+
 
         if (!File.Exists(FilePath))
         {
@@ -129,6 +140,7 @@ public class TableDataset : Dataset, ISerializableDataset
             UpdateMetadata();
             CalculateStatistics();
             Logger.Log($"Loaded table dataset: {Name} ({RowCount} rows, {ColumnCount} columns)");
+            DataChanged?.Invoke(this);
         }
         catch (Exception ex)
         {
@@ -201,7 +213,6 @@ public class TableDataset : Dataset, ISerializableDataset
     private void LoadExcelFile()
     {
         _dataTable = new DataTable(Name);
-
 
         using (var workbook = new XLWorkbook(FilePath))
         {
@@ -325,7 +336,7 @@ public class TableDataset : Dataset, ISerializableDataset
                         if (columnTypes[i] == typeof(int))
                             newRow[i] = int.Parse(value);
                         else if (columnTypes[i] == typeof(double))
-                            newRow[i] = double.Parse(value);
+                            newRow[i] = double.Parse(value, CultureInfo.InvariantCulture);
                         else if (columnTypes[i] == typeof(bool))
                             newRow[i] = bool.Parse(value);
                         else if (columnTypes[i] == typeof(DateTime))
@@ -393,7 +404,7 @@ public class TableDataset : Dataset, ISerializableDataset
                             stats.NonNullCount++;
                             stats.UniqueCount.Add(row[column]);
 
-                            if (double.TryParse(row[column].ToString(), out var val)) numericValues.Add(val);
+                            if (double.TryParse(row[column].ToString(), NumberStyles.Any, CultureInfo.InvariantCulture, out var val)) numericValues.Add(val);
                         }
 
                     if (numericValues.Count > 0)
@@ -441,6 +452,7 @@ public class TableDataset : Dataset, ISerializableDataset
             _dataTable = null;
             _columnStats.Clear();
         }
+        DataChanged?.Invoke(this);
     }
 
     public DataTable GetDataTable()
@@ -454,6 +466,57 @@ public class TableDataset : Dataset, ISerializableDataset
     public ColumnStatistics GetColumnStatistics(string columnName)
     {
         return _columnStats.ContainsKey(columnName) ? _columnStats[columnName] : null;
+    }
+
+    public void UpdateDataTable(DataTable newTable)
+    {
+        lock (_dataLock)
+        {
+            _dataTable?.Dispose();
+            _dataTable = newTable;
+            UpdateMetadata();
+            CalculateStatistics();
+            Logger.Log($"Dataset '{Name}' was updated.");
+        }
+        DataChanged?.Invoke(this);
+    }
+    
+    public void UpdateCellValue(int rowIndex, int colIndex, object newValue)
+    {
+        lock (_dataLock)
+        {
+            if (_dataTable == null || rowIndex >= _dataTable.Rows.Count || colIndex >= _dataTable.Columns.Count)
+            {
+                Logger.LogError("UpdateCellValue failed: Index out of bounds.");
+                return;
+            }
+
+            try
+            {
+                var column = _dataTable.Columns[colIndex];
+                object convertedValue = DBNull.Value;
+                
+                string newStrValue = newValue?.ToString();
+
+                if (!string.IsNullOrEmpty(newStrValue))
+                {
+                     convertedValue = Convert.ChangeType(newStrValue, column.DataType, CultureInfo.InvariantCulture);
+                }
+               
+                _dataTable.Rows[rowIndex][colIndex] = convertedValue;
+                
+                // Recalculate stats for the changed column
+                CalculateStatistics(); 
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError($"Failed to update cell value: {ex.Message}");
+                // Optionally revert the change or handle the error
+            }
+        }
+
+        // Notify listeners so UI refreshes immediately
+        DataChanged?.Invoke(this);
     }
 
     public void SaveAsCsv(string filePath, string delimiter = ",", bool includeHeaders = true)

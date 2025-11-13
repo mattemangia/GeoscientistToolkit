@@ -1,5 +1,6 @@
 // GeoscientistToolkit/Data/Loaders/ImageFolderLoader.cs
 
+using GeoscientistToolkit.Data.Image;
 using GeoscientistToolkit.Util;
 
 namespace GeoscientistToolkit.Data.Loaders;
@@ -71,5 +72,27 @@ public class ImageFolderLoader : IDataLoader
         public int ImageCount { get; set; }
         public long TotalSize { get; set; }
         public string FolderName { get; set; }
+    }
+
+    /// <summary>
+    ///     Helper method to extract GPS metadata for a single image file.
+    ///     This can be used by the ImageStackOrganizerDialog or other components
+    ///     when creating ImageDataset instances from folder images.
+    /// </summary>
+    public static void PopulateGPSMetadata(ImageDataset dataset, string imagePath)
+    {
+        if (dataset == null || string.IsNullOrEmpty(imagePath) || !File.Exists(imagePath))
+            return;
+
+        var gpsMetadata = ImageLoader.ExtractGPSMetadata(imagePath);
+        if (gpsMetadata.HasGPSData)
+        {
+            dataset.DatasetMetadata.Latitude = gpsMetadata.Latitude;
+            dataset.DatasetMetadata.Longitude = gpsMetadata.Longitude;
+            if (gpsMetadata.Altitude.HasValue)
+            {
+                dataset.DatasetMetadata.Elevation = gpsMetadata.Altitude;
+            }
+        }
     }
 }

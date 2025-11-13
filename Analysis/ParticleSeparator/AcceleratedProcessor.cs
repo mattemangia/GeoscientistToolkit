@@ -545,7 +545,7 @@ public class AcceleratedProcessor : IDisposable
         if (err != (int)CLEnum.Success)
         {
             nuint logSize;
-            // DEFINITIVE FIX: Use the raw integer value for CL_PROGRAM_BUILD_LOG (0x1183) to bypass symbol resolution issues.
+            // FIX: Use the raw integer value for CL_PROGRAM_BUILD_LOG (0x1183) to bypass symbol resolution issues.
             const int clProgramBuildLog = 0x1183;
             _cl.GetProgramBuildInfo(_program, selectedDevice, (ProgramBuildInfo)clProgramBuildLog, 0, null, &logSize);
             if (logSize > 1)

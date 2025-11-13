@@ -1,6 +1,8 @@
 // GeoscientistToolkit/UI/Borehole/BoreholeTools.cs
 
 using System.Numerics;
+using System.Text;
+using GeoscientistToolkit.Analysis.Geothermal;
 using GeoscientistToolkit.Business;
 using GeoscientistToolkit.Data;
 using GeoscientistToolkit.Data.AcousticVolume;
@@ -8,33 +10,48 @@ using GeoscientistToolkit.Data.Borehole;
 using GeoscientistToolkit.Data.CtImageStack;
 using GeoscientistToolkit.Data.Pnm;
 using GeoscientistToolkit.UI.Interfaces;
+using GeoscientistToolkit.UI.Utils;
 using GeoscientistToolkit.Util;
 using ImGuiNET;
-using GeoscientistToolkit.UI.Utils;
 
+// Added for ImGuiExportFileDialog
 
 namespace GeoscientistToolkit.UI.Borehole;
 
 /// <summary>
-///     Tools for creating and editing borehole/well log data
+///     Categorized tools for creating, editing, and analyzing borehole/well log data
 /// </summary>
 public class BoreholeTools : IDatasetTools
 {
-    private readonly string[] _grainSizes = new[]
+    private readonly Dictionary<ToolCategory, string> _categoryDescriptions;
+
+    private readonly Dictionary<ToolCategory, string> _categoryNames;
+
+    // Export dialogs
+    private readonly ImGuiExportFileDialog _exportBinaryDialog;
+    private readonly ImGuiExportFileDialog _exportCsvDialog;
+    private readonly ImGuiExportFileDialog _exportLasDialog;
+
+    private readonly GeothermalSimulationTools _geothermalTool;
+
+    private readonly string[] _grainSizes =
+        { "Clay", "Silt", "Very Fine", "Fine", "Medium", "Coarse", "Very Coarse", "Gravel" };
+
+    private readonly string[] _lithologyTypes =
     {
-        "Clay", "Silt", "Very Fine", "Fine", "Medium", "Coarse", "Very Coarse", "Gravel"
+        "Sandstone", "Shale", "Limestone", "Clay", "Siltstone", "Conglomerate", "Basement", "Coal", "Dolomite",
+        "Mudstone", "Marl", "Chalk", "Granite", "Basalt", "Anhydrite"
     };
 
-    private readonly string[] _lithologyTypes = new[]
+    private readonly string[] _contactTypes =
     {
-        "Sandstone", "Shale", "Limestone", "Clay", "Siltstone",
-        "Conglomerate", "Basement", "Coal", "Dolomite", "Mudstone",
-        "Marl", "Chalk", "Granite", "Basalt", "Anhydrite"
+        "Sharp", "Erosive", "Gradational", "Conformable", "Unconformity", "Faulted", "Intrusive", "Indistinct"
     };
+
+    private readonly Dictionary<ToolCategory, List<ToolEntry>> _toolsByCategory;
 
     private string[] _availableParameters;
-
-    private LithologyUnit _editingUnit = new();
+    private LithologyUnit _editingUnit;
     private float _importDepthFrom;
     private float _importDepthTo = 10f;
     private Vector4 _newColor = new(0.8f, 0.7f, 0.5f, 1.0f);
@@ -43,21 +60,122 @@ public class BoreholeTools : IDatasetTools
     private string _newDescription = "";
     private string _newGrainSize = "Medium";
     private string _newLithologyType = "Sandstone";
-
     private string _newUnitName = "New Unit";
+    private ContactType _newUpperContactType = ContactType.Sharp;
+    private ContactType _newLowerContactType = ContactType.Sharp;
+    private ToolCategory _selectedCategory = ToolCategory.Management;
     private bool[] _selectedParameters;
-
     private Dataset _selectedSourceDataset;
-    private LithologyUnit _selectedUnit;
     private bool _showAddUnitDialog;
     private bool _showEditUnitDialog;
     private bool _showImportParametersDialog;
-    private readonly ImGuiExportFileDialog _exportBinaryDialog;
 
     public BoreholeTools()
     {
-        _exportBinaryDialog = new ImGuiExportFileDialog("ExportBoreholeBinary", "Export Borehole to Binary");
+        // GeothermalSimulationTools now uses VeldridManager.GraphicsDevice directly
+        _geothermalTool = new GeothermalSimulationTools();
+
+        // Initialize export dialogs
+        _exportBinaryDialog = new ImGuiExportFileDialog("exportBoreholeBinary", "Export to Binary (.bhb)");
         _exportBinaryDialog.SetExtensions(new ImGuiExportFileDialog.ExtensionOption(".bhb", "Borehole Binary File"));
+
+        _exportCsvDialog = new ImGuiExportFileDialog("exportBoreholeCsv", "Export to CSV");
+        _exportCsvDialog.SetExtensions(new ImGuiExportFileDialog.ExtensionOption(".csv", "Comma-Separated Values"));
+
+        _exportLasDialog = new ImGuiExportFileDialog("exportBoreholeLas", "Export to LAS");
+        _exportLasDialog.SetExtensions(new ImGuiExportFileDialog.ExtensionOption(".las", "Log ASCII Standard"));
+
+        _categoryNames = new Dictionary<ToolCategory, string>
+        {
+            { ToolCategory.Management, "Management" },
+            { ToolCategory.Parameters, "Parameters" },
+            { ToolCategory.Analysis, "Analysis" },
+            { ToolCategory.Display, "Display" },
+            { ToolCategory.Export, "Export" },
+            { ToolCategory.Debug, "Debug" }
+        };
+
+        _categoryDescriptions = new Dictionary<ToolCategory, string>
+        {
+            { ToolCategory.Management, "Define well properties and lithological units." },
+            { ToolCategory.Parameters, "Import log data and parameters from other datasets." },
+            { ToolCategory.Analysis, "Run simulations and quantitative analysis." },
+            { ToolCategory.Display, "Control track visibility, scaling, and appearance." },
+            { ToolCategory.Export, "Save borehole data to various industry formats." },
+            { ToolCategory.Debug, "Generate test data and perform data validation." }
+        };
+
+        _toolsByCategory = new Dictionary<ToolCategory, List<ToolEntry>>
+        {
+            {
+                ToolCategory.Management,
+                new List<ToolEntry>
+                {
+                    new()
+                    {
+                        Name = "Lithology Editor", Description = "Add, edit, and manage lithological units.",
+                        DrawAction = DrawLithologyEditor
+                    }
+                }
+            },
+            {
+                ToolCategory.Parameters,
+                new List<ToolEntry>
+                {
+                    new()
+                    {
+                        Name = "Parameter Import", Description = "Import log parameters from other datasets.",
+                        DrawAction = DrawParameterTools
+                    }
+                }
+            },
+            {
+                ToolCategory.Analysis,
+                new List<ToolEntry>
+                {
+                    new()
+                    {
+                        Name = "Geothermal Simulation",
+                        Description = "Configure and run geothermal simulations on the borehole.",
+                        DrawAction = ds => _geothermalTool.Draw(ds)
+                    }
+                }
+            },
+            {
+                ToolCategory.Display,
+                new List<ToolEntry>
+                {
+                    new()
+                    {
+                        Name = "Display Settings", Description = "Adjust track visibility, grid, legend, and scaling.",
+                        DrawAction = DrawDisplayTools
+                    }
+                }
+            },
+            {
+                ToolCategory.Export,
+                new List<ToolEntry>
+                {
+                    new()
+                    {
+                        Name = "Data Export", Description = "Save the borehole data to .bhb, .csv, or .las files.",
+                        DrawAction = DrawExportTools
+                    }
+                }
+            },
+            {
+                ToolCategory.Debug,
+                new List<ToolEntry>
+                {
+                    new()
+                    {
+                        Name = "Test Data Generator",
+                        Description = "Generate realistic test borehole data for simulation testing.",
+                        DrawAction = DrawDebugTools
+                    }
+                }
+            }
+        };
     }
 
     public void Draw(Dataset dataset)
@@ -65,613 +183,689 @@ public class BoreholeTools : IDatasetTools
         if (dataset is not BoreholeDataset borehole)
             return;
 
-        ImGui.Text("Borehole Builder");
-        ImGui.Separator();
-
-        // Well information section
         if (ImGui.CollapsingHeader("Well Information", ImGuiTreeNodeFlags.DefaultOpen))
         {
             ImGui.Text($"Well Name: {borehole.WellName}");
             ImGui.Text($"Total Depth: {borehole.TotalDepth:F2} m");
             ImGui.Text($"Units Defined: {borehole.LithologyUnits.Count}");
-            ImGui.Separator();
         }
 
-        // Lithology units section
-        if (ImGui.CollapsingHeader("Lithology Units", ImGuiTreeNodeFlags.DefaultOpen))
-        {
-            if (ImGui.Button("Add Unit", new Vector2(-1, 0)))
-            {
-                _newDepthFrom = borehole.LithologyUnits.Any()
-                    ? borehole.LithologyUnits.Max(u => u.DepthTo)
-                    : 0f;
-                _newDepthTo = _newDepthFrom + 10f;
-                _showAddUnitDialog = true;
-            }
+        ImGui.Separator();
 
-            ImGui.Spacing();
+        DrawCategorizedToolsUI(borehole);
 
-            // List existing units
-            for (var i = 0; i < borehole.LithologyUnits.Count; i++)
-            {
-                var unit = borehole.LithologyUnits[i];
-
-                ImGui.PushID(i);
-
-                // Color indicator
-                var colorBox = unit.Color;
-                if (ImGui.ColorButton("##color", colorBox, ImGuiColorEditFlags.NoAlpha, new Vector2(20, 20)))
-                {
-                    // Could open color picker
-                }
-
-                ImGui.SameLine();
-
-                // Unit info
-                var isSelected = _selectedUnit == unit;
-                if (ImGui.Selectable($"{unit.Name} ({unit.DepthFrom:F1}-{unit.DepthTo:F1}m)", isSelected))
-                    _selectedUnit = unit;
-
-                // Context menu
-                if (ImGui.BeginPopupContextItem())
-                {
-                    if (ImGui.MenuItem("Edit"))
-                    {
-                        _selectedUnit = unit;
-                        _editingUnit = new LithologyUnit
-                        {
-                            ID = unit.ID,
-                            Name = unit.Name,
-                            LithologyType = unit.LithologyType,
-                            DepthFrom = unit.DepthFrom,
-                            DepthTo = unit.DepthTo,
-                            Color = unit.Color,
-                            Description = unit.Description,
-                            GrainSize = unit.GrainSize
-                        };
-                        _showEditUnitDialog = true;
-                    }
-
-                    if (ImGui.MenuItem("Delete"))
-                    {
-                        borehole.LithologyUnits.Remove(unit);
-                        if (_selectedUnit == unit)
-                            _selectedUnit = null;
-                    }
-
-                    ImGui.EndPopup();
-                }
-
-                ImGui.PopID();
-            }
-        }
-
-        // Parameters section
-        if (ImGui.CollapsingHeader("Parameters", ImGuiTreeNodeFlags.DefaultOpen))
-        {
-            if (_selectedUnit != null)
-            {
-                ImGui.Text($"Selected: {_selectedUnit.Name}");
-                ImGui.Separator();
-
-                if (ImGui.Button("Import from Dataset...", new Vector2(-1, 0)))
-                {
-                    _importDepthFrom = _selectedUnit.DepthFrom;
-                    _importDepthTo = _selectedUnit.DepthTo;
-                    _showImportParametersDialog = true;
-                }
-
-                ImGui.Spacing();
-
-                // Show current parameters
-                if (_selectedUnit.Parameters.Any())
-                {
-                    ImGui.Text("Current Parameters:");
-                    foreach (var param in _selectedUnit.Parameters)
-                    {
-                        ImGui.BulletText($"{param.Key}: {param.Value:F3}");
-
-                        // Show source if available
-                        if (_selectedUnit.ParameterSources.TryGetValue(param.Key, out var source))
-                        {
-                            ImGui.SameLine();
-                            ImGui.TextDisabled($"(from {source.DatasetName})");
-                        }
-                    }
-                }
-                else
-                {
-                    ImGui.TextDisabled("No parameters defined");
-                }
-            }
-            else
-            {
-                ImGui.TextDisabled("Select a unit to import parameters");
-            }
-        }
-        
-        // Export section
-        if (ImGui.CollapsingHeader("Export"))
-        {
-            if (ImGui.Button("Export to Binary (.bhb)..."))
-            {
-                _exportBinaryDialog.Open(borehole.Name);
-            }
-        }
-
-        if (_exportBinaryDialog.Submit())
-        {
-            borehole.SaveToBinaryFile(_exportBinaryDialog.SelectedPath);
-        }
-
-        // Parameter tracks visibility
-        if (ImGui.CollapsingHeader("Track Visibility"))
-            foreach (var track in borehole.ParameterTracks.Values)
-            {
-                var visible = track.IsVisible;
-                if (ImGui.Checkbox(track.Name, ref visible)) track.IsVisible = visible;
-            }
-
-        // Display settings
-        if (ImGui.CollapsingHeader("Display Settings"))
-        {
-            var showGrid = borehole.ShowGrid;
-            if (ImGui.Checkbox("Show Grid", ref showGrid))
-                borehole.ShowGrid = showGrid;
-
-            var showLegend = borehole.ShowLegend;
-            if (ImGui.Checkbox("Show Legend", ref showLegend))
-                borehole.ShowLegend = showLegend;
-
-            var trackWidth = borehole.TrackWidth;
-            if (ImGui.DragFloat("Track Width", ref trackWidth, 1f, 50f, 500f, "%.0f px"))
-                borehole.TrackWidth = trackWidth;
-
-            var depthScale = borehole.DepthScaleFactor;
-            if (ImGui.DragFloat("Depth Scale", ref depthScale, 0.1f, 0.1f, 10f, "%.1f"))
-                borehole.DepthScaleFactor = depthScale;
-        }
-
-        // Draw dialogs
         DrawAddUnitDialog(borehole);
         DrawEditUnitDialog(borehole);
         DrawImportParametersDialog(borehole);
+
+        // Handle export dialog submissions
+        if (_exportBinaryDialog.Submit())
+            ExportToBinary(borehole, _exportBinaryDialog.SelectedPath);
+        if (_exportCsvDialog.Submit())
+            ExportToCSV(borehole, _exportCsvDialog.SelectedPath);
+        if (_exportLasDialog.Submit())
+            ExportToLAS(borehole, _exportLasDialog.SelectedPath);
+    }
+
+    /// <summary>
+    ///     Apre la dialog di editing per una specifica formazione litologica e porta automaticamente
+    ///     l'utente alla categoria Management. Questo metodo puÃƒÂ² essere collegato al callback
+    ///     OnLithologyClicked del BoreholeViewer per permettere l'editing diretto cliccando sulla
+    ///     formazione nel viewer.
+    /// </summary>
+    /// <param name="unit">L'unitÃƒÂ  litologica da editare</param>
+    public void EditUnit(LithologyUnit unit)
+    {
+        if (unit == null) return;
+
+        _editingUnit = unit;
+        _showEditUnitDialog = true;
+        _selectedCategory = ToolCategory.Management;
+    }
+
+    private void DrawCategorizedToolsUI(BoreholeDataset borehole)
+    {
+        ImGui.Text("Category:");
+        ImGui.SameLine();
+
+        var currentCategoryName = _categoryNames[_selectedCategory];
+        ImGui.SetNextItemWidth(ImGui.GetContentRegionAvail().X);
+        if (ImGui.BeginCombo("##CategorySelector", currentCategoryName))
+        {
+            foreach (var category in (ToolCategory[])Enum.GetValues(typeof(ToolCategory)))
+            {
+                if (ImGui.Selectable(_categoryNames[category], _selectedCategory == category))
+                    _selectedCategory = category;
+
+                if (ImGui.IsItemHovered())
+                    ImGui.SetTooltip(_categoryDescriptions[category]);
+            }
+
+            ImGui.EndCombo();
+        }
+
+        ImGui.TextColored(new Vector4(0.7f, 0.7f, 0.7f, 1), _categoryDescriptions[_selectedCategory]);
+        ImGui.Separator();
+
+        var tools = _toolsByCategory[_selectedCategory];
+        if (ImGui.BeginTabBar($"Tools_{_selectedCategory}", ImGuiTabBarFlags.None))
+        {
+            foreach (var tool in tools)
+                if (ImGui.BeginTabItem(tool.Name))
+                {
+                    ImGui.TextColored(new Vector4(0.6f, 0.6f, 0.6f, 1), tool.Description);
+                    ImGui.Separator();
+                    ImGui.Spacing();
+
+                    ImGui.BeginChild($"ToolContent_{tool.Name}", Vector2.Zero, ImGuiChildFlags.None,
+                        ImGuiWindowFlags.HorizontalScrollbar);
+                    tool.DrawAction?.Invoke(borehole);
+                    ImGui.EndChild();
+
+                    ImGui.EndTabItem();
+                }
+
+            ImGui.EndTabBar();
+        }
+    }
+
+    private void DrawLithologyEditor(Dataset dataset)
+    {
+        if (dataset is not BoreholeDataset borehole) return;
+
+        if (ImGui.BeginTable("LithologyTable", 7,
+                ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.ScrollY | ImGuiTableFlags.ScrollX,
+                new Vector2(0, 200)))
+        {
+            ImGui.TableSetupColumn("Name", ImGuiTableColumnFlags.WidthFixed, 150);
+            ImGui.TableSetupColumn("Lithology", ImGuiTableColumnFlags.WidthFixed, 100);
+            ImGui.TableSetupColumn("From (m)", ImGuiTableColumnFlags.WidthFixed, 80);
+            ImGui.TableSetupColumn("To (m)", ImGuiTableColumnFlags.WidthFixed, 80);
+            ImGui.TableSetupColumn("Upper Contact", ImGuiTableColumnFlags.WidthFixed, 100);
+            ImGui.TableSetupColumn("Lower Contact", ImGuiTableColumnFlags.WidthFixed, 100);
+            ImGui.TableSetupColumn("Actions", ImGuiTableColumnFlags.WidthFixed, 140);
+            ImGui.TableHeadersRow();
+
+            foreach (var unit in borehole.LithologyUnits.ToList())
+            {
+                ImGui.TableNextRow();
+                ImGui.PushID(unit.ID);
+
+                ImGui.TableNextColumn();
+                ImGui.Text(unit.Name);
+
+                ImGui.TableNextColumn();
+                ImGui.Text(unit.LithologyType);
+
+                ImGui.TableNextColumn();
+                ImGui.Text($"{unit.DepthFrom:F2}");
+
+                ImGui.TableNextColumn();
+                ImGui.Text($"{unit.DepthTo:F2}");
+
+                ImGui.TableNextColumn();
+                ImGui.Text(unit.UpperContactType.ToString());
+
+                ImGui.TableNextColumn();
+                ImGui.Text(unit.LowerContactType.ToString());
+
+                ImGui.TableNextColumn();
+                if (ImGui.Button("Edit"))
+                {
+                    _editingUnit = unit;
+                    _showEditUnitDialog = true;
+                }
+
+                ImGui.SameLine();
+                if (ImGui.Button("Delete")) borehole.LithologyUnits.Remove(unit);
+
+                ImGui.PopID();
+            }
+
+            ImGui.EndTable();
+        }
+
+        if (ImGui.Button("Add New Unit")) _showAddUnitDialog = true;
+        ImGui.SameLine();
+        if (ImGui.Button("Sort by Depth")) borehole.LithologyUnits.Sort((a, b) => a.DepthFrom.CompareTo(b.DepthFrom));
+    }
+
+    private void DrawParameterTools(Dataset dataset)
+    {
+        if (dataset is not BoreholeDataset borehole) return;
+
+        ImGui.Text("Import Parameters from Other Datasets");
+        ImGui.Separator();
+
+        ImGui.Text("Select Source Dataset:");
+        var availableDatasets = ProjectManager.Instance.LoadedDatasets
+            .Where(d => d != dataset && (d is CtImageStackDataset || d is PNMDataset || d is AcousticVolumeDataset))
+            .ToList();
+
+        if (availableDatasets.Any())
+        {
+            if (ImGui.BeginCombo("##SourceDataset", _selectedSourceDataset?.Name ?? "Select dataset..."))
+            {
+                foreach (var d in availableDatasets)
+                    if (ImGui.Selectable(d.Name ?? "Unnamed", _selectedSourceDataset == d))
+                        _selectedSourceDataset = d;
+                ImGui.EndCombo();
+            }
+
+            if (_selectedSourceDataset != null)
+            {
+                ImGui.Text($"Type: {_selectedSourceDataset.Type}");
+                ImGui.DragFloatRange2("Depth Range", ref _importDepthFrom, ref _importDepthTo, 1.0f, 0,
+                    borehole.TotalDepth, "%.1f m");
+
+                if (ImGui.Button("Select Parameters to Import"))
+                    _showImportParametersDialog = true;
+            }
+        }
+        else
+        {
+            ImGui.TextDisabled("No compatible source datasets available in project.");
+        }
+
+        ImGui.Separator();
+        ImGui.Text($"Current Parameter Tracks: {borehole.ParameterTracks.Count}");
+        foreach (var track in borehole.ParameterTracks.Values)
+            ImGui.BulletText($"{track.Name} ({track.Unit}): {track.Points.Count} points");
+    }
+
+    private void DrawDisplayTools(Dataset dataset)
+    {
+        if (dataset is not BoreholeDataset borehole) return;
+
+        var showGrid = borehole.ShowGrid;
+        if (ImGui.Checkbox("Show Grid", ref showGrid)) borehole.ShowGrid = showGrid;
+
+        var showLegend = borehole.ShowLegend;
+        if (ImGui.Checkbox("Show Legend", ref showLegend)) borehole.ShowLegend = showLegend;
+
+        var trackWidth = borehole.TrackWidth;
+        if (ImGui.SliderFloat("Track Width", ref trackWidth, 50, 300, "%.0f px")) borehole.TrackWidth = trackWidth;
+
+        var depthScale = borehole.DepthScaleFactor;
+        if (ImGui.SliderFloat("Depth Scale", ref depthScale, 0.5f, 5.0f, "%.2fx"))
+            borehole.DepthScaleFactor = depthScale;
+
+        ImGui.Separator();
+        ImGui.Text("Parameter Track Visibility:");
+
+        foreach (var track in borehole.ParameterTracks.Values.ToList())
+        {
+            var visible = track.IsVisible;
+            if (ImGui.Checkbox($"{track.Name}##vis_{track.Name}", ref visible))
+                track.IsVisible = visible;
+
+            ImGui.SameLine();
+            var color = track.Color;
+            if (ImGui.ColorEdit4($"##color_{track.Name}", ref color,
+                    ImGuiColorEditFlags.NoInputs | ImGuiColorEditFlags.NoLabel))
+                track.Color = color;
+
+            if (track.IsLogarithmic)
+            {
+                ImGui.SameLine();
+                ImGui.TextDisabled("(log)");
+            }
+        }
+    }
+
+    private void DrawExportTools(Dataset dataset)
+    {
+        if (dataset is not BoreholeDataset borehole) return;
+
+        var defaultName = Path.GetFileNameWithoutExtension(borehole.FilePath ?? borehole.Name);
+        var defaultPath = Path.GetDirectoryName(borehole.FilePath);
+
+        if (ImGui.Button("Export to Binary (.bhb)", new Vector2(-1, 0)))
+            _exportBinaryDialog.Open(defaultName, defaultPath);
+
+        ImGui.TextWrapped(
+            "Custom binary format for quick loading within the toolkit. Includes all lithology, parameters, and display settings.");
+
+        ImGui.Spacing();
+        ImGui.Separator();
+        ImGui.Spacing();
+
+        if (ImGui.Button("Export to CSV", new Vector2(-1, 0)))
+            _exportCsvDialog.Open(defaultName, defaultPath);
+
+        ImGui.TextWrapped(
+            "Exports interpolated parameter track data to a comma-separated values file, suitable for spreadsheets.");
+
+        ImGui.Spacing();
+        ImGui.Separator();
+        ImGui.Spacing();
+
+        if (ImGui.Button("Export to LAS", new Vector2(-1, 0)))
+            _exportLasDialog.Open(defaultName, defaultPath);
+
+        ImGui.TextWrapped(
+            "Exports parameter track data to Log ASCII Standard format, compatible with well logging software.");
+    }
+
+    private void DrawDebugTools(Dataset dataset)
+    {
+        if (dataset is not BoreholeDataset borehole) return;
+
+        BoreholeDebugTools.DrawDebugTools(borehole);
+        ImGui.Separator();
+
+        if (ImGui.CollapsingHeader("Debug Information"))
+        {
+            ImGui.Text($"Memory Usage (Approx): {borehole.GetSizeInBytes() / 1024.0:F2} KB");
+            ImGui.Text($"Total Parameters in Units: {borehole.LithologyUnits.Sum(u => u.Parameters.Count)}");
+            if (borehole.ParameterTracks.Any())
+                ImGui.Text($"Total Points in Tracks: {borehole.ParameterTracks.Values.Sum(t => t.Points.Count)}");
+
+            if (ImGui.Button("Validate Data Integrity"))
+                ValidateBoreholeData(borehole);
+
+            if (ImGui.Button("Generate Console Report"))
+                GenerateTestReport(borehole);
+        }
+    }
+
+    private void ValidateBoreholeData(BoreholeDataset borehole)
+    {
+        var issues = new List<string>();
+        var sortedUnits = borehole.LithologyUnits.OrderBy(u => u.DepthFrom).ToList();
+        for (var i = 0; i < sortedUnits.Count - 1; i++)
+        {
+            var unit1 = sortedUnits[i];
+            var unit2 = sortedUnits[i + 1];
+            if (unit1.DepthTo > unit2.DepthFrom)
+                issues.Add($"Overlapping units: {unit1.Name} ({unit1.DepthTo}m) and {unit2.Name} ({unit2.DepthFrom}m)");
+            if (Math.Abs(unit1.DepthTo - unit2.DepthFrom) > 0.01f)
+                issues.Add($"Gap between units: {unit1.Name} ({unit1.DepthTo}m) and {unit2.Name} ({unit2.DepthFrom}m)");
+        }
+
+        foreach (var unit in borehole.LithologyUnits)
+        foreach (var param in unit.Parameters)
+            if (float.IsNaN(param.Value) || float.IsInfinity(param.Value))
+                issues.Add($"Invalid parameter value in {unit.Name}: {param.Key} = {param.Value}");
+
+        Logger.Log(issues.Any()
+            ? $"Found {issues.Count} issues:\n{string.Join("\n", issues.Take(10))}"
+            : "Borehole data validated successfully!");
+    }
+
+    private void GenerateTestReport(BoreholeDataset borehole)
+    {
+        var report = new StringBuilder();
+        report.AppendLine($"Test Report for {borehole.WellName} generated on {DateTime.Now}");
+        report.AppendLine(
+            $"Total Depth: {borehole.TotalDepth} m, Units: {borehole.LithologyUnits.Count}, Tracks: {borehole.ParameterTracks.Count}");
+        foreach (var unit in borehole.LithologyUnits.OrderBy(u => u.DepthFrom))
+        {
+            report.AppendLine($"{unit.Name} ({unit.LithologyType}): {unit.DepthFrom:F1}-{unit.DepthTo:F1}m");
+            foreach (var param in unit.Parameters.Take(5))
+                report.AppendLine($"  {param.Key}: {param.Value:F3}");
+        }
+
+        var reportPath = Path.Combine(Path.GetDirectoryName(borehole.FilePath) ?? Environment.CurrentDirectory,
+            $"{borehole.WellName}_TestReport.txt");
+        File.WriteAllText(reportPath, report.ToString());
+        Logger.Log($"Test report saved to {reportPath}");
     }
 
     private void DrawAddUnitDialog(BoreholeDataset borehole)
     {
-        if (!_showAddUnitDialog)
-            return;
-
+        if (!_showAddUnitDialog) return;
         ImGui.OpenPopup("Add Lithology Unit");
-
-        ImGui.SetNextWindowSize(new Vector2(400, 500), ImGuiCond.FirstUseEver);
-        if (ImGui.BeginPopupModal("Add Lithology Unit", ref _showAddUnitDialog))
+        var isOpen = true;
+        if (ImGui.BeginPopupModal("Add Lithology Unit", ref isOpen, ImGuiWindowFlags.AlwaysAutoResize))
         {
-            ImGui.InputText("Name", ref _newUnitName, 128);
-
-            ImGui.Spacing();
-
-            // Lithology type combo
+            ImGui.InputText("Name", ref _newUnitName, 256);
             if (ImGui.BeginCombo("Lithology Type", _newLithologyType))
             {
                 foreach (var type in _lithologyTypes)
-                {
-                    var isSelected = _newLithologyType == type;
-                    if (ImGui.Selectable(type, isSelected))
-                    {
+                    if (ImGui.Selectable(type, _newLithologyType == type))
                         _newLithologyType = type;
-                        _newColor = GetDefaultColorForLithology(type);
-                    }
-
-                    if (isSelected)
-                        ImGui.SetItemDefaultFocus();
-                }
-
                 ImGui.EndCombo();
             }
 
-            ImGui.Spacing();
-
-            // Grain size combo
+            ImGui.DragFloatRange2("Depth Range", ref _newDepthFrom, ref _newDepthTo, 1.0f, 0, borehole.TotalDepth,
+                "%.2f m");
             if (ImGui.BeginCombo("Grain Size", _newGrainSize))
             {
                 foreach (var size in _grainSizes)
-                {
-                    var isSelected = _newGrainSize == size;
-                    if (ImGui.Selectable(size, isSelected))
+                    if (ImGui.Selectable(size, _newGrainSize == size))
                         _newGrainSize = size;
-
-                    if (isSelected)
-                        ImGui.SetItemDefaultFocus();
-                }
-
                 ImGui.EndCombo();
             }
 
-            ImGui.Spacing();
+            ImGui.ColorEdit4("Color", ref _newColor);
+            
+            if (ImGui.BeginCombo("Upper Contact", _newUpperContactType.ToString()))
+            {
+                foreach (var type in _contactTypes)
+                    if (ImGui.Selectable(type, _newUpperContactType.ToString() == type))
+                        _newUpperContactType = Enum.Parse<ContactType>(type);
+                ImGui.EndCombo();
+            }
+            
+            if (ImGui.BeginCombo("Lower Contact", _newLowerContactType.ToString()))
+            {
+                foreach (var type in _contactTypes)
+                    if (ImGui.Selectable(type, _newLowerContactType.ToString() == type))
+                        _newLowerContactType = Enum.Parse<ContactType>(type);
+                ImGui.EndCombo();
+            }
+            
+            ImGui.InputTextMultiline("Description", ref _newDescription, 1024, new Vector2(300, 100));
             ImGui.Separator();
-            ImGui.Spacing();
-
-            // Depth range
-            ImGui.Text("Depth Range (m):");
-            ImGui.DragFloat("From", ref _newDepthFrom, 0.1f, 0, borehole.TotalDepth, "%.2f");
-            ImGui.DragFloat("To", ref _newDepthTo, 0.1f, _newDepthFrom, borehole.TotalDepth, "%.2f");
-
-            ImGui.Spacing();
-            ImGui.Separator();
-            ImGui.Spacing();
-
-            // Color
-            ImGui.Text("Color:");
-            ImGui.ColorEdit4("##unitcolor", ref _newColor, ImGuiColorEditFlags.NoAlpha);
-
-            ImGui.Spacing();
-
-            // Description
-            ImGui.InputTextMultiline("Description", ref _newDescription, 512, new Vector2(-1, 80));
-
-            ImGui.Spacing();
-            ImGui.Separator();
-
-            // Buttons
             if (ImGui.Button("Add", new Vector2(120, 0)))
             {
-                var newUnit = new LithologyUnit
+                borehole.AddLithologyUnit(new LithologyUnit
                 {
-                    Name = _newUnitName,
-                    LithologyType = _newLithologyType,
-                    GrainSize = _newGrainSize,
+                    Name = _newUnitName, 
+                    LithologyType = _newLithologyType, 
                     DepthFrom = _newDepthFrom,
-                    DepthTo = _newDepthTo,
-                    Color = _newColor,
-                    Description = _newDescription
-                };
-
-                borehole.AddLithologyUnit(newUnit);
-
-                // Reset for next unit
-                _newUnitName = "New Unit";
-                _newDepthFrom = _newDepthTo;
-                _newDepthTo = _newDepthFrom + 10f;
-                _newDescription = "";
-
+                    DepthTo = _newDepthTo, 
+                    GrainSize = _newGrainSize, 
+                    Color = _newColor, 
+                    Description = _newDescription,
+                    UpperContactType = _newUpperContactType,
+                    LowerContactType = _newLowerContactType
+                });
                 _showAddUnitDialog = false;
             }
 
             ImGui.SameLine();
-
             if (ImGui.Button("Cancel", new Vector2(120, 0))) _showAddUnitDialog = false;
-
             ImGui.EndPopup();
         }
+
+        if (!isOpen) _showAddUnitDialog = false;
     }
 
     private void DrawEditUnitDialog(BoreholeDataset borehole)
     {
-        if (!_showEditUnitDialog || _selectedUnit == null)
-            return;
-
+        if (!_showEditUnitDialog || _editingUnit == null) return;
         ImGui.OpenPopup("Edit Lithology Unit");
-
-        ImGui.SetNextWindowSize(new Vector2(400, 500), ImGuiCond.FirstUseEver);
-        if (ImGui.BeginPopupModal("Edit Lithology Unit", ref _showEditUnitDialog))
+        var isOpen = true;
+        if (ImGui.BeginPopupModal("Edit Lithology Unit", ref isOpen, ImGuiWindowFlags.AlwaysAutoResize))
         {
-            var unitName = _editingUnit.Name;
-            if (ImGui.InputText("Name", ref unitName, 128))
-                _editingUnit.Name = unitName;
-
-            ImGui.Spacing();
-
-            // Lithology type combo
+            var name = _editingUnit.Name;
+            if (ImGui.InputText("Name", ref name, 256)) _editingUnit.Name = name;
             if (ImGui.BeginCombo("Lithology Type", _editingUnit.LithologyType))
             {
                 foreach (var type in _lithologyTypes)
-                {
-                    var isSelected = _editingUnit.LithologyType == type;
-                    if (ImGui.Selectable(type, isSelected))
+                    if (ImGui.Selectable(type, _editingUnit.LithologyType == type))
                         _editingUnit.LithologyType = type;
-
-                    if (isSelected)
-                        ImGui.SetItemDefaultFocus();
-                }
-
                 ImGui.EndCombo();
             }
 
-            ImGui.Spacing();
+            var depthFrom = _editingUnit.DepthFrom;
+            var depthTo = _editingUnit.DepthTo;
+            if (ImGui.DragFloatRange2("Depth Range", ref depthFrom, ref depthTo, 1.0f, 0, borehole.TotalDepth,
+                    "%.2f m"))
+            {
+                _editingUnit.DepthFrom = depthFrom;
+                _editingUnit.DepthTo = depthTo;
+            }
 
-            // Grain size combo
             if (ImGui.BeginCombo("Grain Size", _editingUnit.GrainSize))
             {
                 foreach (var size in _grainSizes)
-                {
-                    var isSelected = _editingUnit.GrainSize == size;
-                    if (ImGui.Selectable(size, isSelected))
+                    if (ImGui.Selectable(size, _editingUnit.GrainSize == size))
                         _editingUnit.GrainSize = size;
-
-                    if (isSelected)
-                        ImGui.SetItemDefaultFocus();
-                }
-
                 ImGui.EndCombo();
             }
 
-            ImGui.Spacing();
-            ImGui.Separator();
-            ImGui.Spacing();
-
-            // Depth range
-            ImGui.Text("Depth Range (m):");
-            var depthFrom = _editingUnit.DepthFrom;
-            if (ImGui.DragFloat("From", ref depthFrom, 0.1f, 0, borehole.TotalDepth, "%.2f"))
-                _editingUnit.DepthFrom = depthFrom;
-
-            var depthTo = _editingUnit.DepthTo;
-            if (ImGui.DragFloat("To", ref depthTo, 0.1f, _editingUnit.DepthFrom, borehole.TotalDepth, "%.2f"))
-                _editingUnit.DepthTo = depthTo;
-
-            ImGui.Spacing();
-            ImGui.Separator();
-            ImGui.Spacing();
-
-            // Color
-            ImGui.Text("Color:");
             var color = _editingUnit.Color;
-            if (ImGui.ColorEdit4("##editunitcolor", ref color, ImGuiColorEditFlags.NoAlpha))
-                _editingUnit.Color = color;
-
-            ImGui.Spacing();
-
-            // Description
-            var description = _editingUnit.Description;
-            if (ImGui.InputTextMultiline("Description", ref description, 512, new Vector2(-1, 80)))
-                _editingUnit.Description = description;
-
-            ImGui.Spacing();
-            ImGui.Separator();
-
-            // Buttons
-            if (ImGui.Button("Save", new Vector2(120, 0)))
+            if (ImGui.ColorEdit4("Color", ref color)) _editingUnit.Color = color;
+            
+            var upperContact = _editingUnit.UpperContactType.ToString();
+            if (ImGui.BeginCombo("Upper Contact", upperContact))
             {
-                _selectedUnit.Name = _editingUnit.Name;
-                _selectedUnit.LithologyType = _editingUnit.LithologyType;
-                _selectedUnit.GrainSize = _editingUnit.GrainSize;
-                _selectedUnit.DepthFrom = _editingUnit.DepthFrom;
-                _selectedUnit.DepthTo = _editingUnit.DepthTo;
-                _selectedUnit.Color = _editingUnit.Color;
-                _selectedUnit.Description = _editingUnit.Description;
+                foreach (var type in _contactTypes)
+                    if (ImGui.Selectable(type, upperContact == type))
+                        _editingUnit.UpperContactType = Enum.Parse<ContactType>(type);
+                ImGui.EndCombo();
+            }
+            
+            var lowerContact = _editingUnit.LowerContactType.ToString();
+            if (ImGui.BeginCombo("Lower Contact", lowerContact))
+            {
+                foreach (var type in _contactTypes)
+                    if (ImGui.Selectable(type, lowerContact == type))
+                        _editingUnit.LowerContactType = Enum.Parse<ContactType>(type);
+                ImGui.EndCombo();
+            }
+            
+            var description = _editingUnit.Description;
+            if (ImGui.InputTextMultiline("Description", ref description, 1024, new Vector2(300, 100)))
+                _editingUnit.Description = description;
+            if (ImGui.CollapsingHeader("Parameters"))
+                foreach (var param in _editingUnit.Parameters.ToList())
+                {
+                    var value = param.Value;
+                    if (ImGui.DragFloat($"{param.Key}", ref value, 0.01f)) _editingUnit.Parameters[param.Key] = value;
+                }
 
-                // Re-sort units by depth
-                borehole.LithologyUnits.Sort((a, b) => a.DepthFrom.CompareTo(b.DepthFrom));
-
+            ImGui.Separator();
+            if (ImGui.Button("Save", new Vector2(120, 0))) _showEditUnitDialog = false;
+            ImGui.SameLine();
+            if (ImGui.Button("Cancel", new Vector2(120, 0)))
+            {
                 _showEditUnitDialog = false;
+                _editingUnit = null;
             }
 
-            ImGui.SameLine();
-
-            if (ImGui.Button("Cancel", new Vector2(120, 0))) _showEditUnitDialog = false;
-
             ImGui.EndPopup();
+        }
+
+        if (!isOpen)
+        {
+            _showEditUnitDialog = false;
+            _editingUnit = null;
         }
     }
 
     private void DrawImportParametersDialog(BoreholeDataset borehole)
     {
-        if (!_showImportParametersDialog)
-            return;
-
+        if (!_showImportParametersDialog || _selectedSourceDataset == null) return;
         ImGui.OpenPopup("Import Parameters");
-
-        ImGui.SetNextWindowSize(new Vector2(500, 600), ImGuiCond.FirstUseEver);
-        if (ImGui.BeginPopupModal("Import Parameters", ref _showImportParametersDialog))
+        var isOpen = true;
+        if (ImGui.BeginPopupModal("Import Parameters", ref isOpen, ImGuiWindowFlags.AlwaysAutoResize))
         {
-            ImGui.Text($"Importing to: {_selectedUnit?.Name ?? "Unknown"}");
+            ImGui.Text($"Importing from: {_selectedSourceDataset.Name}");
+            ImGui.Text($"Depth range: {_importDepthFrom:F1} - {_importDepthTo:F1} m");
             ImGui.Separator();
-            ImGui.Spacing();
 
-            // Depth range
-            ImGui.Text("Depth Range (m):");
-            ImGui.DragFloat("From##import", ref _importDepthFrom, 0.1f, 0, borehole.TotalDepth, "%.2f");
-            ImGui.DragFloat("To##import", ref _importDepthTo, 0.1f, _importDepthFrom, borehole.TotalDepth, "%.2f");
+            _availableParameters = GetAvailableParameters(_selectedSourceDataset);
+            if (_selectedParameters == null || _selectedParameters.Length != _availableParameters.Length)
+                _selectedParameters = new bool[_availableParameters.Length];
 
-            ImGui.Spacing();
-            ImGui.Separator();
-            ImGui.Spacing();
-
-            // Dataset selection
-            ImGui.Text("Source Dataset:");
-
-            var availableDatasets = ProjectManager.Instance.LoadedDatasets
-                .Where(d => d is CtImageStackDataset or PNMDataset or AcousticVolumeDataset)
-                .ToList();
-
-            var currentDatasetName = _selectedSourceDataset?.Name ?? "Select dataset...";
-
-            if (ImGui.BeginCombo("##sourcedataset", currentDatasetName))
-            {
-                foreach (var ds in availableDatasets)
-                {
-                    var isSelected = _selectedSourceDataset == ds;
-
-                    var label = $"{ds.Name} ({ds.Type})";
-                    if (ImGui.Selectable(label, isSelected))
-                    {
-                        _selectedSourceDataset = ds;
-                        UpdateAvailableParameters();
-                    }
-
-                    if (isSelected)
-                        ImGui.SetItemDefaultFocus();
-                }
-
-                ImGui.EndCombo();
-            }
-
-            ImGui.Spacing();
-
-            // Parameter selection
-            if (_selectedSourceDataset != null && _availableParameters != null)
-            {
-                ImGui.Text("Available Parameters:");
-                ImGui.BeginChild("ParamList", new Vector2(0, 200), ImGuiChildFlags.Border);
-
+            ImGui.Text("Select parameters to import:");
+            if (_availableParameters.Length > 0)
                 for (var i = 0; i < _availableParameters.Length; i++)
-                {
-                    var selected = _selectedParameters[i];
-                    if (ImGui.Checkbox(_availableParameters[i], ref selected)) _selectedParameters[i] = selected;
-                }
-
-                ImGui.EndChild();
-
-                if (ImGui.Button("Select All"))
-                    for (var i = 0; i < _selectedParameters.Length; i++)
-                        _selectedParameters[i] = true;
-
-                ImGui.SameLine();
-
-                if (ImGui.Button("Deselect All"))
-                    for (var i = 0; i < _selectedParameters.Length; i++)
-                        _selectedParameters[i] = false;
-            }
+                    ImGui.Checkbox(_availableParameters[i], ref _selectedParameters[i]);
             else
-            {
-                ImGui.TextDisabled("Select a dataset to see available parameters");
-            }
+                ImGui.TextDisabled("No importable parameters found for this dataset type.");
 
-            ImGui.Spacing();
             ImGui.Separator();
 
-            // Info about dataset
-            if (_selectedSourceDataset != null)
-            {
-                ImGui.Text("Dataset Information:");
-
-                if (_selectedSourceDataset is CtImageStackDataset ct)
-                {
-                    ImGui.BulletText($"Voxel Size: {ct.PixelSize} {ct.Unit}");
-                    ImGui.BulletText($"Dimensions: {ct.Width}x{ct.Height}x{ct.Depth}");
-                }
-                else if (_selectedSourceDataset is PNMDataset pnm)
-                {
-                    ImGui.BulletText($"Voxel Size: {pnm.VoxelSize} µm");
-                    ImGui.BulletText($"Pores: {pnm.Pores.Count}");
-                }
-                else if (_selectedSourceDataset is AcousticVolumeDataset acoustic)
-                {
-                    ImGui.BulletText($"Vp: {acoustic.PWaveVelocity:F1} m/s");
-                    ImGui.BulletText($"Vs: {acoustic.SWaveVelocity:F1} m/s");
-                }
-            }
-
-            ImGui.Spacing();
-            ImGui.Separator();
-
-            // Buttons
-            var canImport = _selectedSourceDataset != null &&
-                            _selectedParameters != null &&
-                            _selectedParameters.Any(p => p);
-
+            var canImport = _availableParameters.Length > 0 && _selectedParameters.Any(p => p);
+            if (!canImport) ImGui.BeginDisabled();
             if (ImGui.Button("Import", new Vector2(120, 0)))
-                if (canImport)
-                {
-                    var paramsToImport = _availableParameters
-                        .Where((p, i) => _selectedParameters[i])
-                        .ToArray();
-
-                    borehole.ImportParametersFromDataset(
-                        _selectedSourceDataset,
-                        _importDepthFrom,
-                        _importDepthTo,
-                        paramsToImport);
-
-                    Logger.Log($"Imported {paramsToImport.Length} parameters from {_selectedSourceDataset.Name}");
-
-                    _showImportParametersDialog = false;
-                }
-
-            if (!canImport)
             {
-                ImGui.SameLine();
-                ImGui.TextDisabled("Select dataset and parameters");
+                ImportParameters(borehole, _selectedSourceDataset, _importDepthFrom, _importDepthTo,
+                    _selectedParameters);
+                _showImportParametersDialog = false;
             }
+
+            if (!canImport) ImGui.EndDisabled();
 
             ImGui.SameLine();
-
             if (ImGui.Button("Cancel", new Vector2(120, 0))) _showImportParametersDialog = false;
-
             ImGui.EndPopup();
         }
+
+        if (!isOpen) _showImportParametersDialog = false;
     }
 
-    private void UpdateAvailableParameters()
+    private string[] GetAvailableParameters(Dataset dataset)
     {
-        if (_selectedSourceDataset == null)
+        // This logic correctly identifies parameters that BoreholeDataset knows how to import.
+        return dataset switch
         {
-            _availableParameters = null;
-            _selectedParameters = null;
-            return;
-        }
-
-        var paramList = new List<string>();
-
-        if (_selectedSourceDataset is CtImageStackDataset ct)
-        {
-            if (ct.ThermalResults != null)
-                paramList.Add("Thermal Conductivity");
-
-            if (ct.NmrResults != null)
-                paramList.Add("Porosity");
-        }
-        else if (_selectedSourceDataset is PNMDataset pnm)
-        {
-            paramList.Add("Permeability");
-            paramList.Add("Porosity");
-            paramList.Add("Tortuosity");
-
-            if (pnm.BulkDiffusivity > 0)
-            {
-                paramList.Add("Bulk Diffusivity");
-                paramList.Add("Effective Diffusivity");
-                paramList.Add("Formation Factor");
-            }
-        }
-        else if (_selectedSourceDataset is AcousticVolumeDataset acoustic)
-        {
-            paramList.Add("P-Wave Velocity");
-            paramList.Add("S-Wave Velocity");
-            paramList.Add("Young's Modulus");
-            paramList.Add("Poisson's Ratio");
-        }
-
-        _availableParameters = paramList.ToArray();
-        _selectedParameters = new bool[_availableParameters.Length];
-
-        // Auto-select all by default
-        for (var i = 0; i < _selectedParameters.Length; i++)
-            _selectedParameters[i] = true;
-    }
-
-    private Vector4 GetDefaultColorForLithology(string lithologyType)
-    {
-        return lithologyType switch
-        {
-            "Sandstone" => new Vector4(0.9f, 0.85f, 0.6f, 1.0f),
-            "Shale" => new Vector4(0.4f, 0.4f, 0.4f, 1.0f),
-            "Limestone" => new Vector4(0.8f, 0.8f, 0.9f, 1.0f),
-            "Clay" => new Vector4(0.6f, 0.5f, 0.4f, 1.0f),
-            "Siltstone" => new Vector4(0.7f, 0.65f, 0.5f, 1.0f),
-            "Conglomerate" => new Vector4(0.75f, 0.7f, 0.65f, 1.0f),
-            "Basement" => new Vector4(0.5f, 0.3f, 0.3f, 1.0f),
-            "Coal" => new Vector4(0.2f, 0.2f, 0.2f, 1.0f),
-            "Dolomite" => new Vector4(0.85f, 0.75f, 0.7f, 1.0f),
-            "Mudstone" => new Vector4(0.5f, 0.45f, 0.4f, 1.0f),
-            "Marl" => new Vector4(0.7f, 0.7f, 0.65f, 1.0f),
-            "Chalk" => new Vector4(0.95f, 0.95f, 0.95f, 1.0f),
-            "Granite" => new Vector4(0.7f, 0.6f, 0.5f, 1.0f),
-            "Basalt" => new Vector4(0.3f, 0.3f, 0.35f, 1.0f),
-            "Anhydrite" => new Vector4(0.9f, 0.9f, 0.95f, 1.0f),
-            _ => new Vector4(0.7f, 0.7f, 0.7f, 1.0f)
+            CtImageStackDataset => new[] { "Thermal Conductivity", "Porosity" },
+            PNMDataset => new[] { "Permeability", "Porosity", "Tortuosity" },
+            AcousticVolumeDataset => new[]
+                { "P-Wave Velocity", "S-Wave Velocity", "Young's Modulus", "Poisson's Ratio" },
+            _ => Array.Empty<string>()
         };
+    }
+
+    private void ImportParameters(BoreholeDataset borehole, Dataset source, float depthFrom, float depthTo,
+        bool[] selectedParams)
+    {
+        // Get the list of all possible parameters for the source dataset type
+        var allPossibleParams = GetAvailableParameters(source);
+
+        // Build a list of only the parameter names the user has checked
+        var selectedParamNames = new List<string>();
+        for (var i = 0; i < selectedParams.Length; i++)
+            if (selectedParams[i])
+                selectedParamNames.Add(allPossibleParams[i]);
+
+        // Call the correct method on the BoreholeDataset itself
+        if (selectedParamNames.Any())
+        {
+            borehole.ImportParametersFromDataset(source, depthFrom, depthTo, selectedParamNames.ToArray());
+            Logger.Log($"Successfully imported {selectedParamNames.Count} parameter(s) from '{source.Name}'.");
+        }
+    }
+
+    private void ExportToBinary(BoreholeDataset borehole, string path)
+    {
+        try
+        {
+            // Use the method on the dataset itself for consistency
+            borehole.SaveToBinaryFile(path);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError($"Failed to export to binary file: {ex.Message}");
+        }
+    }
+
+    private void ExportToCSV(BoreholeDataset borehole, string path)
+    {
+        try
+        {
+            using var writer = new StreamWriter(path, false, Encoding.UTF8);
+            writer.WriteLine($"# Well Name: {borehole.WellName}");
+            writer.WriteLine($"# Field: {borehole.Field}");
+            writer.WriteLine($"# Total Depth: {borehole.TotalDepth}");
+
+            var tracks = borehole.ParameterTracks.Values.Where(t => t.Points.Any()).ToList();
+            if (!tracks.Any())
+            {
+                writer.WriteLine("# No parameter data to export.");
+                return;
+            }
+
+            var headers = "Depth (m)," + string.Join(",",
+                tracks.Select(t => $"{t.Name.Replace(',', ' ')} ({t.Unit.Replace(',', ' ')})"));
+            writer.WriteLine(headers);
+
+            var allDepths = tracks.SelectMany(t => t.Points.Select(p => p.Depth)).Distinct().OrderBy(d => d).ToList();
+            var step = 1.0f; // Interpolate every 1 meter, for example
+            var startDepth = allDepths.Min();
+            var endDepth = allDepths.Max();
+
+            for (var depth = startDepth; depth <= endDepth; depth += step)
+            {
+                var values = new List<string> { depth.ToString("F4") };
+                foreach (var track in tracks)
+                {
+                    var interpolatedValue = borehole.GetParameterValueAtDepth(track.Name, depth);
+                    values.Add(interpolatedValue.HasValue ? interpolatedValue.Value.ToString("F4") : "");
+                }
+
+                writer.WriteLine(string.Join(",", values));
+            }
+
+            Logger.Log($"Exported borehole data to CSV: {path}");
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError($"Failed to export to CSV: {ex.Message}");
+        }
+    }
+
+    private void ExportToLAS(BoreholeDataset borehole, string path)
+    {
+        try
+        {
+            using var writer = new StreamWriter(path, false, Encoding.UTF8);
+            writer.WriteLine("~VERSION INFORMATION");
+            writer.WriteLine(" VERS.                2.0 : CWLS LOG ASCII STANDARD - VERSION 2.0");
+            writer.WriteLine(" WRAP.                 NO : ONE LINE PER DEPTH STEP");
+            writer.WriteLine("~WELL INFORMATION");
+            var tracks = borehole.ParameterTracks.Values.Where(t => t.Points.Any()).ToList();
+            var startDepth = tracks.Any() ? tracks.SelectMany(t => t.Points).Min(p => (float?)p.Depth) ?? 0.0f : 0.0f;
+            writer.WriteLine($" STRT.M {startDepth:F4} : START DEPTH");
+            writer.WriteLine($" STOP.M {borehole.TotalDepth:F4} : STOP DEPTH");
+            writer.WriteLine(" STEP.M              -999.25 : STEP (VARIABLE)");
+            writer.WriteLine(" NULL.              -999.25 : NULL VALUE");
+            writer.WriteLine($" WELL.   {borehole.WellName,-20} : WELL NAME");
+            writer.WriteLine($" FLD.    {borehole.Field,-20} : FIELD NAME");
+            writer.WriteLine("~CURVE INFORMATION");
+            foreach (var track in tracks)
+            {
+                var mnemonic = new string(track.Name.Replace(" ", "_").Take(8).ToArray()).ToUpper();
+                writer.WriteLine($" {mnemonic,-8}.{track.Unit,-15}       : {track.Name}");
+            }
+
+            writer.WriteLine("~PARAMETER INFORMATION");
+            writer.WriteLine("~A  DEPTH" + string.Concat(tracks.Select(t =>
+                $" {new string(t.Name.Replace(" ", "_").Take(8).ToArray()).ToUpper(),-15}")));
+
+            var allDepths = tracks.SelectMany(t => t.Points.Select(p => p.Depth)).Distinct().OrderBy(d => d).ToList();
+
+            foreach (var depth in allDepths)
+            {
+                var line = new StringBuilder();
+                line.Append($"{depth,-16:F4}");
+                foreach (var track in tracks)
+                {
+                    var val = borehole.GetParameterValueAtDepth(track.Name, depth);
+                    line.Append(val.HasValue ? $"{val.Value,-16:F4}" : $"{"-999.25",-16}");
+                }
+
+                writer.WriteLine(line.ToString());
+            }
+
+            Logger.Log($"Exported borehole data to LAS: {path}");
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError($"Failed to export to LAS: {ex.Message}");
+        }
+    }
+
+    private enum ToolCategory
+    {
+        Management,
+        Parameters,
+        Analysis,
+        Display,
+        Export,
+        Debug
+    }
+
+    private class ToolEntry
+    {
+        public string Name { get; set; }
+        public string Description { get; set; }
+        public Action<Dataset> DrawAction { get; set; }
     }
 }

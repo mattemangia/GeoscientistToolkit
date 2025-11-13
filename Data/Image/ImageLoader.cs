@@ -2,6 +2,8 @@
 
 using BitMiracle.LibTiff.Classic;
 using StbImageSharp;
+using MetadataExtractor;
+using MetadataExtractor.Formats.Exif;
 
 namespace GeoscientistToolkit.Util;
 
@@ -593,5 +595,73 @@ public static class ImageLoader
         public int Channels { get; set; }
         public int BitsPerChannel { get; set; }
         public byte[] Data { get; set; }
+    }
+
+    /// <summary>
+    ///     GPS metadata extracted from image EXIF data
+    /// </summary>
+    public class GPSMetadata
+    {
+        public double? Latitude { get; set; }
+        public double? Longitude { get; set; }
+        public double? Altitude { get; set; }
+        public bool HasGPSData => Latitude.HasValue && Longitude.HasValue;
+    }
+
+    /// <summary>
+    ///     Extract GPS coordinates from image EXIF metadata if available
+    /// </summary>
+    public static GPSMetadata ExtractGPSMetadata(string path)
+    {
+        var gpsData = new GPSMetadata();
+
+        if (!File.Exists(path))
+            return gpsData;
+
+        try
+        {
+            // Use MetadataExtractor library to read EXIF data
+            var directories = MetadataExtractor.ImageMetadataReader.ReadMetadata(path);
+            
+            var gpsDirectory = directories.OfType<MetadataExtractor.Formats.Exif.GpsDirectory>().FirstOrDefault();
+            if (gpsDirectory == null)
+                return gpsData;
+
+            // Extract latitude and longitude using TryGetGeoLocation
+            if (gpsDirectory.TryGetGeoLocation(out var geoLocation))
+            {
+                gpsData.Latitude = geoLocation.Latitude;
+                gpsData.Longitude = geoLocation.Longitude;
+            }
+
+            // Extract altitude
+            if (gpsDirectory.TryGetDouble(MetadataExtractor.Formats.Exif.GpsDirectory.TagAltitude, out var altitude))
+            {
+                // Check altitude reference (0 = above sea level, 1 = below sea level)
+                if (gpsDirectory.TryGetInt32(MetadataExtractor.Formats.Exif.GpsDirectory.TagAltitudeRef, out var altitudeRef))
+                {
+                    gpsData.Altitude = altitudeRef == 1 ? -altitude : altitude;
+                }
+                else
+                {
+                    // Default to above sea level if no reference is specified
+                    gpsData.Altitude = altitude;
+                }
+            }
+
+            if (gpsData.HasGPSData)
+            {
+                Logger.Log($"[ImageLoader] Extracted GPS metadata from {Path.GetFileName(path)}: " +
+                          $"Lat={gpsData.Latitude:F6}, Lon={gpsData.Longitude:F6}" +
+                          (gpsData.Altitude.HasValue ? $", Alt={gpsData.Altitude:F2}m" : ""));
+            }
+        }
+        catch (Exception ex)
+        {
+            // Not all images have EXIF data, this is normal
+            Logger.LogWarning($"[ImageLoader] Could not extract EXIF metadata from {Path.GetFileName(path)}: {ex.Message}");
+        }
+
+        return gpsData;
     }
 }

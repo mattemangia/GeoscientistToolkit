@@ -13,6 +13,8 @@ public class DatasetMetadata
     public string LocationName { get; set; } = "";
     public double? Latitude { get; set; } // WGS 84 decimal degrees
     public double? Longitude { get; set; } // WGS 84 decimal degrees
+    public double? Elevation { get; set; } // Elevation above sea level in meters
+    public Vector2? Coordinates { get; set; } // Project coordinate system (X, Y)
     public double? Depth { get; set; } // Depth in meters
     public Vector3? Size { get; set; } // Physical size (x, y, z)
     public string SizeUnit { get; set; } = "mm";

@@ -29,7 +29,10 @@ public class ImportDataModal
         "Acoustic Volume (Simulation Results)",
         "Segmentation/Labels (Standalone)",
         "Pore Network Model (PNM)",
-        "Borehole Log (Binary)"
+        "Borehole Log (Binary)",
+        "Borehole Log (LAS Format)",
+        "2D Geology Profile (.2dgeo)",
+        "Subsurface GIS Model (.subgis)"
     };
 
     private readonly ImGuiFileDialog _fileDialog;
@@ -56,6 +59,12 @@ public class ImportDataModal
     private readonly ImGuiFileDialog _tiffDialog;
     private readonly BoreholeBinaryLoader _boreholeBinaryLoader;
     private readonly ImGuiFileDialog _boreholeBinaryDialog;
+    private readonly TwoDGeologyLoader _twoDGeologyLoader;
+    private readonly ImGuiFileDialog _twoDGeologyDialog;
+    private readonly SubsurfaceGISLoader _subsurfaceGisLoader;
+    private readonly ImGuiFileDialog _subsurfaceGisDialog;
+    private readonly LASLoader _lasLoader;
+    private readonly ImGuiFileDialog _lasDialog;
     private ImportState _currentState = ImportState.Idle;
     private Task<Dataset> _importTask;
     private Dataset _pendingDataset;
@@ -81,6 +90,9 @@ public class ImportDataModal
         _pnmDialog =
             new ImGuiFileDialog("ImportPNMDialog", FileDialogType.OpenFile, "Select PNM File"); // Added for PNM
         _boreholeBinaryDialog = new ImGuiFileDialog("ImportBoreholeBinaryDialog", FileDialogType.OpenFile, "Select Borehole Binary File");
+        _lasDialog = new ImGuiFileDialog("ImportLASDialog", FileDialogType.OpenFile, "Select LAS Log File");
+        _twoDGeologyDialog = new ImGuiFileDialog("Import2DGeologyDialog", FileDialogType.OpenFile, "Select 2D Geology File");
+        _subsurfaceGisDialog = new ImGuiFileDialog("ImportSubsurfaceGISDialog", FileDialogType.OpenFile, "Select Subsurface GIS File");
         _organizerDialog = new ImageStackOrganizerDialog();
 
         // Initialize loaders
@@ -95,6 +107,9 @@ public class ImportDataModal
         _segmentationLoader = new SegmentationLoader();
         _pnmLoader = new PNMLoader(); // Added for PNM
         _boreholeBinaryLoader = new BoreholeBinaryLoader();
+        _lasLoader = new LASLoader();
+        _twoDGeologyLoader = new TwoDGeologyLoader();
+        _subsurfaceGisLoader = new SubsurfaceGISLoader();
     }
 
     public void Open()
@@ -168,6 +183,8 @@ public class ImportDataModal
         if (_fileDialog.Submit()) _singleImageLoader.ImagePath = _fileDialog.SelectedPath;
         
         if (_boreholeBinaryDialog.Submit()) _boreholeBinaryLoader.FilePath = _boreholeBinaryDialog.SelectedPath;
+        
+        if (_lasDialog.Submit()) _lasLoader.FilePath = _lasDialog.SelectedPath;
 
         if (_tiffDialog.Submit())
             switch (_selectedDatasetTypeIndex)
@@ -191,6 +208,12 @@ public class ImportDataModal
 
         // Added for PNM
         if (_pnmDialog.Submit()) _pnmLoader.FilePath = _pnmDialog.SelectedPath;
+        
+        // Added for 2D Geology
+        if (_twoDGeologyDialog.Submit()) _twoDGeologyLoader.FilePath = _twoDGeologyDialog.SelectedPath;
+        
+        // Added for Subsurface GIS
+        if (_subsurfaceGisDialog.Submit()) _subsurfaceGisLoader.FilePath = _subsurfaceGisDialog.SelectedPath;
     }
 
     private void DrawOptions()
@@ -241,6 +264,15 @@ public class ImportDataModal
             case 11: // Borehole Binary
                 DrawBoreholeBinaryOptions();
                 break;
+            case 12: // LAS Log Data
+                DrawLASOptions();
+                break;
+            case 13: // 2D Geology Profile
+                DrawTwoDGeologyOptions();
+                break;
+            case 14: // Subsurface GIS Model
+                DrawSubsurfaceGISOptions();
+                break;
         }
 
         ImGui.SetCursorPosY(ImGui.GetWindowHeight() - ImGui.GetFrameHeightWithSpacing() * 1.5f);
@@ -277,6 +309,177 @@ public class ImportDataModal
             ImGui.BulletText($"File: {info.Name}");
             ImGui.BulletText($"Size: {info.Length / 1024} KB");
             ImGui.TextColored(new Vector4(0.0f, 1.0f, 0.5f, 1.0f), "✓ Ready to import borehole dataset");
+        }
+    }
+
+    private void DrawLASOptions()
+    {
+        ImGui.TextWrapped("Import well log data from LAS (Log ASCII Standard) format files. " +
+                          "LAS files contain curves such as gamma ray, resistivity, density, and other well logging measurements.");
+
+        ImGui.Spacing();
+        ImGui.Separator();
+        ImGui.Spacing();
+
+        ImGui.Text("LAS File (.las):");
+        var path = _lasLoader.FilePath ?? "";
+        ImGui.InputText("##LASPath", ref path, 260, ImGuiInputTextFlags.ReadOnly);
+        ImGui.SameLine();
+        if (ImGui.Button("Browse...##LASFile"))
+        {
+            string[] lasExtensions = { ".las", ".LAS" };
+            _lasDialog.Open(null, lasExtensions);
+        }
+
+        if (_lasLoader.ParsedData != null)
+        {
+            ImGui.Spacing();
+            ImGui.Separator();
+            ImGui.Spacing();
+
+            if (_lasLoader.CanImport)
+            {
+                ImGui.Text("LAS File Information:");
+                
+                var lasData = _lasLoader.ParsedData;
+                
+                // Version info
+                ImGui.BulletText($"Version: {lasData.Version}");
+                ImGui.BulletText($"Wrap Mode: {(lasData.Wrap ? "Yes" : "No")}");
+                
+                // Well information
+                if (lasData.WellInfo.TryGetValue("WELL", out var wellName))
+                    ImGui.BulletText($"Well: {wellName}");
+                
+                if (lasData.WellInfo.TryGetValue("FLD", out var field))
+                    ImGui.BulletText($"Field: {field}");
+                
+                if (lasData.WellInfo.TryGetValue("LOC", out var location))
+                    ImGui.BulletText($"Location: {location}");
+                
+                // Data statistics
+                ImGui.Spacing();
+                ImGui.Text("Log Data:");
+                ImGui.BulletText($"Curves: {lasData.Curves.Count}");
+                ImGui.BulletText($"Data Points: {lasData.DataRows.Count}");
+                
+                // Show some curve names
+                if (lasData.Curves.Count > 0)
+                {
+                    ImGui.Spacing();
+                    ImGui.Text("Available Curves:");
+                    var curvesToShow = Math.Min(8, lasData.Curves.Count);
+                    for (int i = 0; i < curvesToShow; i++)
+                    {
+                        var curve = lasData.Curves[i];
+                        var curveText = string.IsNullOrEmpty(curve.Unit) 
+                            ? curve.Mnemonic 
+                            : $"{curve.Mnemonic} ({curve.Unit})";
+                        ImGui.BulletText(curveText);
+                    }
+                    
+                    if (lasData.Curves.Count > curvesToShow)
+                        ImGui.BulletText($"... and {lasData.Curves.Count - curvesToShow} more");
+                }
+                
+                ImGui.Spacing();
+                ImGui.TextColored(new Vector4(0.0f, 1.0f, 0.5f, 1.0f), _lasLoader.ValidationMessage);
+            }
+            else
+            {
+                ImGui.TextColored(new Vector4(1.0f, 0.5f, 0.0f, 1.0f), _lasLoader.ValidationMessage);
+            }
+        }
+    }
+
+    private void DrawTwoDGeologyOptions()
+    {
+        ImGui.TextWrapped("Import or create a 2D geological cross-section profile (.2dgeo format). " +
+                          "This displays geological formations, faults, and topography in a cross-sectional view.");
+
+        ImGui.Spacing();
+        ImGui.Separator();
+        ImGui.Spacing();
+
+        ImGui.Text("2D Geology File (.2dgeo):");
+        var path = _twoDGeologyLoader.FilePath ?? "";
+        ImGui.InputText("##2DGeoPath", ref path, 260, ImGuiInputTextFlags.ReadOnly);
+        ImGui.SameLine();
+        if (ImGui.Button("Browse...##2DGeoFile"))
+        {
+            string[] geoExtensions = { ".2dgeo" };
+            _twoDGeologyDialog.Open(null, geoExtensions);
+        }
+
+        ImGui.Spacing();
+        ImGui.TextWrapped("Note: You can also create a new empty 2D geology profile from the GIS Tools menu.");
+
+        if (!string.IsNullOrEmpty(_twoDGeologyLoader.FilePath) && File.Exists(_twoDGeologyLoader.FilePath))
+        {
+            ImGui.Spacing();
+            ImGui.Separator();
+            ImGui.Spacing();
+            ImGui.Text("File Information:");
+            var info = new FileInfo(_twoDGeologyLoader.FilePath);
+            ImGui.BulletText($"File: {info.Name}");
+            ImGui.BulletText($"Size: {info.Length / 1024} KB");
+            ImGui.TextColored(new Vector4(0.0f, 1.0f, 0.5f, 1.0f), "✓ Ready to import 2D geology profile");
+        }
+    }
+
+    private void DrawSubsurfaceGISOptions()
+    {
+        ImGui.TextWrapped("Import a 3D subsurface geological model (.subgis format). " +
+                          "This contains voxel grids with lithology, layer boundaries, and interpolated properties " +
+                          "from borehole data including geothermal simulation results.");
+
+        ImGui.Spacing();
+        ImGui.Separator();
+        ImGui.Spacing();
+
+        ImGui.Text("Subsurface GIS File (.subgis):");
+        var path = _subsurfaceGisLoader.FilePath ?? "";
+        ImGui.InputText("##SubsurfaceGISPath", ref path, 260, ImGuiInputTextFlags.ReadOnly);
+        ImGui.SameLine();
+        if (ImGui.Button("Browse...##SubsurfaceGISFile"))
+        {
+            string[] subsurfaceExtensions = { ".subgis", ".json" };
+            _subsurfaceGisDialog.Open(null, subsurfaceExtensions);
+        }
+
+        ImGui.Spacing();
+        ImGui.TextWrapped("Note: Subsurface GIS models are typically generated from borehole datasets " +
+                          "using the Multi-Borehole Tools. You can create them from the Tools panel when " +
+                          "multiple boreholes are loaded.");
+
+        if (!string.IsNullOrEmpty(_subsurfaceGisLoader.FilePath) && File.Exists(_subsurfaceGisLoader.FilePath))
+        {
+            ImGui.Spacing();
+            ImGui.Separator();
+            ImGui.Spacing();
+            ImGui.Text("File Information:");
+            var info = new FileInfo(_subsurfaceGisLoader.FilePath);
+            ImGui.BulletText($"File: {info.Name}");
+            ImGui.BulletText($"Size: {info.Length / 1024} KB");
+            
+            var fileInfo = _subsurfaceGisLoader.GetFileInfo();
+            if (fileInfo != null)
+            {
+                var infoObj = fileInfo as dynamic;
+                if (infoObj != null)
+                {
+                    try
+                    {
+                        ImGui.BulletText($"Valid: {(infoObj.IsValid ? "Yes" : "No")}");
+                    }
+                    catch
+                    {
+                        // If dynamic access fails, just show basic info
+                    }
+                }
+            }
+            
+            ImGui.TextColored(new Vector4(0.0f, 1.0f, 0.5f, 1.0f), "✓ Ready to import subsurface GIS model");
         }
     }
 
@@ -908,6 +1111,9 @@ public class ImportDataModal
             9 => _segmentationLoader,
             10 => _pnmLoader, // Added for PNM
             11 => _boreholeBinaryLoader,
+            12 => _lasLoader,
+            13 => _twoDGeologyLoader,
+            14 => _subsurfaceGisLoader,
             _ => null
         };
     }
@@ -976,6 +1182,9 @@ public class ImportDataModal
         _segmentationLoader.Reset();
         _pnmLoader.Reset(); // Added for PNM
         _boreholeBinaryLoader.Reset();
+        _lasLoader.Reset();
+        _twoDGeologyLoader.Reset();
+        _subsurfaceGisLoader.Reset();
 
         // Reset state
         _importTask = null;
