@@ -2,6 +2,7 @@
 
 using System.Collections.Concurrent;
 using GeoscientistToolkit.Analysis.Pnm;
+using GeoscientistToolkit.Analysis.Thermodynamic;
 using GeoscientistToolkit.Business;
 using GeoscientistToolkit.Business.Thermodynamics;
 using GeoscientistToolkit.Data.Borehole;
@@ -123,7 +124,7 @@ public class GeothermalThermodynamicsIntegration
         foreach (var component in options.FluidComposition.Keys)
         {
             var field = new float[nr, ntheta, nz];
-            double concentration = options.FluidComposition[component];
+            double concentration = options.FluidComposition[component].Concentration_mol_L;
 
             for (int i = 0; i < nr; i++)
             for (int j = 0; j < ntheta; j++)
@@ -263,14 +264,14 @@ public class GeothermalThermodynamicsIntegration
 
         for (int i = 0; i < nr; i++)
         for (int j = 0; j < ntheta; j++)
-        for (int k = 0; k < nz; k++)
+        for (int kk = 0; kk < nz; kk++)
         {
-            double k0 = _flowData.InitialPermeability[i, j, k];
-            double k = _flowData.Permeability[i, j, k];
+            double k0 = _flowData.InitialPermeability[i, j, kk];
+            double k_perm = _flowData.Permeability[i, j, kk];
 
             if (k0 > 0)
             {
-                sum_ratio += k / k0;
+                sum_ratio += k_perm / k0;
                 count++;
             }
         }

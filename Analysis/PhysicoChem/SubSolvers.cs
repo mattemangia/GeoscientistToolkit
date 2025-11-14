@@ -27,10 +27,10 @@ public class HeatTransferSolver
         var T_new = new float[nx, ny, nz];
 
         // Material properties (simplified - should come from domains)
-        double k = 2.0; // W/(m·K) thermal conductivity
+        double k_thermal = 2.0; // W/(m·K) thermal conductivity
         double rho = 2500.0; // kg/m³ density
         double Cp = 1000.0; // J/(kg·K) specific heat
-        double alpha = k / (rho * Cp); // m²/s thermal diffusivity
+        double alpha = k_thermal / (rho * Cp); // m²/s thermal diffusivity
 
         // Grid spacing (should come from mesh)
         double dx = 0.01; // m

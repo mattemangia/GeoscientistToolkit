@@ -47,7 +47,7 @@ public class PhysicoChemDataset
     /// Generated 3D mesh from domains
     /// </summary>
     [JsonIgnore]
-    public Mesh3DDataset GeneratedMesh { get; set; }
+    public GridMesh3D GeneratedMesh { get; set; }
 
     /// <summary>
     /// Current simulation state

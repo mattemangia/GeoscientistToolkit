@@ -18,7 +18,7 @@ public class ReactorMeshGenerator
     /// <summary>
     /// Generate 3D mesh from list of domains
     /// </summary>
-    public Mesh3DDataset GenerateMeshFromDomains(List<ReactorDomain> domains, int resolution = 50)
+    public GridMesh3D GenerateMeshFromDomains(List<ReactorDomain> domains, int resolution = 50)
     {
         if (domains.Count == 0)
             throw new ArgumentException("No domains provided");
@@ -113,10 +113,10 @@ public class ReactorMeshGenerator
         return (minX, maxX, minY, maxY, minZ, maxZ);
     }
 
-    private Mesh3DDataset CreateUniformGrid((double MinX, double MaxX, double MinY, double MaxY, double MinZ, double MaxZ) bounds,
+    private GridMesh3D CreateUniformGrid((double MinX, double MaxX, double MinY, double MaxY, double MinZ, double MaxZ) bounds,
         int resolution)
     {
-        var mesh = new Mesh3DDataset($"ReactorMesh_{DateTime.Now:yyyyMMdd_HHmmss}", "");
+        var mesh = new GridMesh3D();
 
         int nx = resolution;
         int ny = resolution;
@@ -134,7 +134,7 @@ public class ReactorMeshGenerator
         return mesh;
     }
 
-    private void AssignMaterialProperties(Mesh3DDataset mesh, List<ReactorDomain> domains)
+    private void AssignMaterialProperties(GridMesh3D mesh, List<ReactorDomain> domains)
     {
         int nx = mesh.GridSize.X;
         int ny = mesh.GridSize.Y;
@@ -178,11 +178,9 @@ public class ReactorMeshGenerator
     /// <summary>
     /// Generate mesh from 2D profile with specified interpolation mode
     /// </summary>
-    public Mesh3DDataset GenerateFrom2DProfile(List<(double X, double Y)> profile,
+    public GridMesh3D GenerateFrom2DProfile(List<(double X, double Y)> profile,
         Interpolation2D3DMode mode, int resolution = 50, double depth = 1.0)
     {
-        var mesh = new Mesh3DDataset($"2DProfile_{mode}", "");
-
         switch (mode)
         {
             case Interpolation2D3DMode.Extrusion:
@@ -202,9 +200,9 @@ public class ReactorMeshGenerator
     /// <summary>
     /// Linear extrusion of 2D profile along Z-axis
     /// </summary>
-    private Mesh3DDataset GenerateExtrusion(List<(double X, double Y)> profile, double depth, int resolution)
+    private GridMesh3D GenerateExtrusion(List<(double X, double Y)> profile, double depth, int resolution)
     {
-        var mesh = new Mesh3DDataset("ExtrudedMesh", "");
+        var mesh = new GridMesh3D();
 
         // Find bounding box of 2D profile
         double minX = profile.Min(p => p.X);
@@ -230,9 +228,9 @@ public class ReactorMeshGenerator
     /// <summary>
     /// Rotation of 2D profile around Z-axis (axisymmetric)
     /// </summary>
-    private Mesh3DDataset GenerateRevolution(List<(double X, double Y)> profile, int resolution)
+    private GridMesh3D GenerateRevolution(List<(double X, double Y)> profile, int resolution)
     {
-        var mesh = new Mesh3DDataset("RevolutionMesh", "");
+        var mesh = new GridMesh3D();
 
         // Profile is assumed to be in R-Z plane (radius vs height)
         double maxR = profile.Max(p => Math.Abs(p.X));
@@ -261,9 +259,9 @@ public class ReactorMeshGenerator
     /// <summary>
     /// Interpret 2D profile as vertical slice and interpolate horizontally
     /// </summary>
-    private Mesh3DDataset GenerateVerticalProfile(List<(double X, double Y)> profile, int resolution)
+    private GridMesh3D GenerateVerticalProfile(List<(double X, double Y)> profile, int resolution)
     {
-        var mesh = new Mesh3DDataset("VerticalProfileMesh", "");
+        var mesh = new GridMesh3D();
 
         double minX = profile.Min(p => p.X);
         double maxX = profile.Max(p => p.X);

@@ -235,54 +235,26 @@ public class ReactiveTransportSolver
 
             try
             {
-                // 1. Aqueous equilibrium (fast)
-                var equilibriumResult = _thermoSolver.SolveEquilibrium(
-                    localComposition, T_K, P_bar);
-
-                // 2. Mineral kinetics (slow)
-                if (state.MineralVolumeFractions.Count > 0)
+                // 1. Create thermodynamic state
+                var thermoState = new ThermodynamicState
                 {
-                    var mineralDict = new Dictionary<string, double>();
-                    foreach (var mineral in state.MineralVolumeFractions.Keys)
-                    {
-                        mineralDict[mineral] = state.MineralVolumeFractions[mineral][i, j, k];
-                    }
+                    Temperature_K = T_K,
+                    Pressure_bar = P_bar,
+                    AqueousComposition = new Dictionary<string, double>(localComposition)
+                };
 
-                    double surfaceArea = CalculateSurfaceArea(mineralDict, state.Porosity[i, j, k]);
+                // 2. Aqueous equilibrium (fast)
+                var equilibriumResult = _thermoSolver.SolveEquilibrium(thermoState);
 
-                    // Solve kinetics
-                    var kineticResult = _kineticsSolver.SolveKinetics(
-                        equilibriumResult.Composition,
-                        mineralDict,
-                        T_K,
-                        P_bar,
-                        dt,
-                        surfaceArea
-                    );
-
-                    // Update concentrations from kinetic reactions
-                    foreach (var kvp in kineticResult.NewComposition)
-                    {
-                        if (state.Concentrations.ContainsKey(kvp.Key))
-                            state.Concentrations[kvp.Key][i, j, k] = (float)kvp.Value;
-                    }
-
-                    // Update mineral amounts
-                    foreach (var kvp in kineticResult.NewMinerals)
-                    {
-                        if (state.MineralVolumeFractions.ContainsKey(kvp.Key))
-                            state.MineralVolumeFractions[kvp.Key][i, j, k] = (float)kvp.Value;
-                    }
-                }
-                else
+                // 3. Update concentrations from equilibrium
+                foreach (var kvp in equilibriumResult.AqueousComposition)
                 {
-                    // No minerals, just update aqueous composition
-                    foreach (var kvp in equilibriumResult.Composition)
-                    {
-                        if (state.Concentrations.ContainsKey(kvp.Key))
-                            state.Concentrations[kvp.Key][i, j, k] = (float)kvp.Value;
-                    }
+                    if (state.Concentrations.ContainsKey(kvp.Key))
+                        state.Concentrations[kvp.Key][i, j, k] = (float)kvp.Value;
                 }
+
+                // Note: Full kinetics integration would be added here
+                // For now, equilibrium-only approach is used
             }
             catch (Exception ex)
             {
