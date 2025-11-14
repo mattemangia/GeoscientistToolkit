@@ -852,16 +852,6 @@ public class BoreholeTools : IDatasetTools
             writer.WriteLine("~A  DEPTH" + string.Concat(tracks.Select(t =>
                 $" {new string(t.Name.Replace(" ", "_").Take(8).ToArray()).ToUpper(),-15}")));
 
-
-    private void DrawBoreholeToSeismicTools(Dataset dataset)
-    {
-        _boreholeSeismicTools.DrawBoreholeToSeismic();
-    }
-
-    private void DrawWellTieTools(Dataset dataset)
-    {
-        _boreholeSeismicTools.DrawWellTie();
-    }
             var allDepths = tracks.SelectMany(t => t.Points.Select(p => p.Depth)).Distinct().OrderBy(d => d).ToList();
 
             foreach (var depth in allDepths)
@@ -883,6 +873,16 @@ public class BoreholeTools : IDatasetTools
         {
             Logger.LogError($"Failed to export to LAS: {ex.Message}");
         }
+    }
+
+    private void DrawBoreholeToSeismicTools(Dataset dataset)
+    {
+        _boreholeSeismicTools.DrawBoreholeToSeismic();
+    }
+
+    private void DrawWellTieTools(Dataset dataset)
+    {
+        _boreholeSeismicTools.DrawWellTie();
     }
 
     private enum ToolCategory
