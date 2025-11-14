@@ -516,17 +516,20 @@ public class SeismicViewer : IDatasetViewer
 
             if (extension == ".png")
             {
-                success = StbImageWriteSharp.ImageWriter.WritePng(pixelData, numTraces, numSamples, StbImageWriteSharp.ColorComponents.RedGreenBlueAlpha, filePath);
+                using var stream = File.Create(filePath);
+                success = StbImageWriteSharp.ImageWriter.WritePng(pixelData, numTraces, numSamples, StbImageWriteSharp.ColorComponents.RedGreenBlueAlpha, stream);
             }
             else if (extension == ".jpg" || extension == ".jpeg")
             {
-                success = StbImageWriteSharp.ImageWriter.WriteJpg(pixelData, numTraces, numSamples, StbImageWriteSharp.ColorComponents.RedGreenBlueAlpha, filePath, 95);
+                using var stream = File.Create(filePath);
+                success = StbImageWriteSharp.ImageWriter.WriteJpg(pixelData, numTraces, numSamples, StbImageWriteSharp.ColorComponents.RedGreenBlueAlpha, stream, 95);
             }
             else if (extension == ".tiff" || extension == ".tif")
             {
                 // TGA as fallback since StbImageWrite doesn't support TIFF
                 var tgaPath = Path.ChangeExtension(filePath, ".tga");
-                success = StbImageWriteSharp.ImageWriter.WriteTga(pixelData, numTraces, numSamples, StbImageWriteSharp.ColorComponents.RedGreenBlueAlpha, tgaPath);
+                using var stream = File.Create(tgaPath);
+                success = StbImageWriteSharp.ImageWriter.WriteTga(pixelData, numTraces, numSamples, StbImageWriteSharp.ColorComponents.RedGreenBlueAlpha, stream);
                 if (success)
                 {
                     Logger.LogWarning($"[SeismicViewer] TIFF not supported by StbImageWrite, saved as TGA instead: {tgaPath}");
@@ -535,7 +538,8 @@ public class SeismicViewer : IDatasetViewer
             else
             {
                 // Default to PNG
-                success = StbImageWriteSharp.ImageWriter.WritePng(pixelData, numTraces, numSamples, StbImageWriteSharp.ColorComponents.RedGreenBlueAlpha, filePath);
+                using var stream = File.Create(filePath);
+                success = StbImageWriteSharp.ImageWriter.WritePng(pixelData, numTraces, numSamples, StbImageWriteSharp.ColorComponents.RedGreenBlueAlpha, stream);
             }
 
             if (success)
