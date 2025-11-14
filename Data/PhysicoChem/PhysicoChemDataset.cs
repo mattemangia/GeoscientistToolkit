@@ -17,11 +17,8 @@ namespace GeoscientistToolkit.Data.PhysicoChem;
 /// Combines geometry, materials, boundary conditions, initial conditions,
 /// and simulation parameters for TOUGH-like multiphysics experiments.
 /// </summary>
-public class PhysicoChemDataset
+public class PhysicoChemDataset : Dataset
 {
-    [JsonProperty]
-    public string Name { get; set; }
-
     [JsonProperty]
     public string Description { get; set; }
 
