@@ -9,6 +9,7 @@ using GeoscientistToolkit.Data.AcousticVolume;
 using GeoscientistToolkit.Data.Borehole;
 using GeoscientistToolkit.Data.CtImageStack;
 using GeoscientistToolkit.Data.Pnm;
+using GeoscientistToolkit.Tools.BoreholeSeismic;
 using GeoscientistToolkit.UI.Interfaces;
 using GeoscientistToolkit.UI.Utils;
 using GeoscientistToolkit.Util;
@@ -33,6 +34,7 @@ public class BoreholeTools : IDatasetTools
     private readonly ImGuiExportFileDialog _exportLasDialog;
 
     private readonly GeothermalSimulationTools _geothermalTool;
+    private readonly BoreholeSeismicToolsPanel _boreholeSeismicTools;
 
     private readonly string[] _grainSizes =
         { "Clay", "Silt", "Very Fine", "Fine", "Medium", "Coarse", "Very Coarse", "Gravel" };
@@ -74,6 +76,7 @@ public class BoreholeTools : IDatasetTools
     {
         // GeothermalSimulationTools now uses VeldridManager.GraphicsDevice directly
         _geothermalTool = new GeothermalSimulationTools();
+        _boreholeSeismicTools = new BoreholeSeismicToolsPanel();
 
         // Initialize export dialogs
         _exportBinaryDialog = new ImGuiExportFileDialog("exportBoreholeBinary", "Export to Binary (.bhb)");
@@ -90,6 +93,7 @@ public class BoreholeTools : IDatasetTools
             { ToolCategory.Management, "Management" },
             { ToolCategory.Parameters, "Parameters" },
             { ToolCategory.Analysis, "Analysis" },
+            { ToolCategory.Seismic, "Seismic" },
             { ToolCategory.Display, "Display" },
             { ToolCategory.Export, "Export" },
             { ToolCategory.Debug, "Debug" }
@@ -100,6 +104,7 @@ public class BoreholeTools : IDatasetTools
             { ToolCategory.Management, "Define well properties and lithological units." },
             { ToolCategory.Parameters, "Import log data and parameters from other datasets." },
             { ToolCategory.Analysis, "Run simulations and quantitative analysis." },
+            { ToolCategory.Seismic, "Generate synthetic seismic, tie wells to seismic sections." },
             { ToolCategory.Display, "Control track visibility, scaling, and appearance." },
             { ToolCategory.Export, "Save borehole data to various industry formats." },
             { ToolCategory.Debug, "Generate test data and perform data validation." }
@@ -138,6 +143,24 @@ public class BoreholeTools : IDatasetTools
                         Name = "Geothermal Simulation",
                         Description = "Configure and run geothermal simulations on the borehole.",
                         DrawAction = ds => _geothermalTool.Draw(ds)
+                    }
+                }
+            },
+            {
+                ToolCategory.Seismic,
+                new List<ToolEntry>
+                {
+                    new()
+                    {
+                        Name = "Borehole to Seismic",
+                        Description = "Generate synthetic seismic from borehole acoustic impedance.",
+                        DrawAction = DrawBoreholeToSeismicTools
+                    },
+                    new()
+                    {
+                        Name = "Well Tie",
+                        Description = "Correlate borehole with seismic section.",
+                        DrawAction = DrawWellTieTools
                     }
                 }
             },
@@ -209,11 +232,11 @@ public class BoreholeTools : IDatasetTools
 
     /// <summary>
     ///     Apre la dialog di editing per una specifica formazione litologica e porta automaticamente
-    ///     l'utente alla categoria Management. Questo metodo puÃƒÂ² essere collegato al callback
+    ///     l'utente alla categoria Management. Questo metodo puo essere collegato al callback
     ///     OnLithologyClicked del BoreholeViewer per permettere l'editing diretto cliccando sulla
     ///     formazione nel viewer.
     /// </summary>
-    /// <param name="unit">L'unitÃƒÂ  litologica da editare</param>
+    /// <param name="unit">L'unita litologica da editare</param>
     public void EditUnit(LithologyUnit unit)
     {
         if (unit == null) return;
@@ -829,6 +852,16 @@ public class BoreholeTools : IDatasetTools
             writer.WriteLine("~A  DEPTH" + string.Concat(tracks.Select(t =>
                 $" {new string(t.Name.Replace(" ", "_").Take(8).ToArray()).ToUpper(),-15}")));
 
+
+    private void DrawBoreholeToSeismicTools(Dataset dataset)
+    {
+        _boreholeSeismicTools.DrawBoreholeToSeismic();
+    }
+
+    private void DrawWellTieTools(Dataset dataset)
+    {
+        _boreholeSeismicTools.DrawWellTie();
+    }
             var allDepths = tracks.SelectMany(t => t.Points.Select(p => p.Depth)).Distinct().OrderBy(d => d).ToList();
 
             foreach (var depth in allDepths)
@@ -857,6 +890,7 @@ public class BoreholeTools : IDatasetTools
         Management,
         Parameters,
         Analysis,
+        Seismic,
         Display,
         Export,
         Debug

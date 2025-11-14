@@ -70,7 +70,7 @@ public class BoreholeViewer : IDatasetViewer, IDisposable
     /// var tools = new BoreholeTools();
     /// viewer.OnLithologyClicked = tools.EditUnit;
     /// </code>
-    ///     Questo permetterÃ  all'utente di cliccare su una formazione nel viewer e passare
+    ///     Questo permettera all'utente di cliccare su una formazione nel viewer e passare
     ///     automaticamente alla pagina di editing in BoreholeTools.
     /// </summary>
     public Action<LithologyUnit>? OnLithologyClicked { get; set; }
@@ -389,7 +389,7 @@ public class BoreholeViewer : IDatasetViewer, IDisposable
             {
                 // Show a note that docking is disabled to prevent flickering
                 ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(1f, 0.8f, 0.3f, 1f));
-                ImGui.TextWrapped("âš  Docking disabled for this window to prevent UI flickering");
+                ImGui.TextWrapped("(!!) Docking disabled for this window to prevent UI flickering");
                 ImGui.PopStyleColor();
                 ImGui.Separator();
 

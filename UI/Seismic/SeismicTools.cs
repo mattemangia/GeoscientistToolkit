@@ -3,6 +3,7 @@
 using System.Numerics;
 using GeoscientistToolkit.Data;
 using GeoscientistToolkit.Data.Seismic;
+using GeoscientistToolkit.Tools.BoreholeSeismic;
 using GeoscientistToolkit.UI.Interfaces;
 using GeoscientistToolkit.Util;
 using ImGuiNET;
@@ -34,6 +35,9 @@ public class SeismicTools : IDatasetTools
     private float _amplitudeThreshold = 0.5f;
     private int _minTracesPerPackage = 10;
     private bool _showAutoDetectSettings = false;
+
+    // Borehole-Seismic integration
+    private BoreholeSeismicToolsPanel _boreholeSeismicTools = new();
 
     public void SetViewer(SeismicViewer viewer)
     {
@@ -114,6 +118,13 @@ public class SeismicTools : IDatasetTools
 
         // Analysis tools
         DrawAnalysisTools(seismicDataset);
+
+        ImGui.Spacing();
+        ImGui.Separator();
+        ImGui.Spacing();
+
+        // Borehole-Seismic integration
+        DrawBoreholeSeismicIntegration();
     }
 
     private void DrawPackageList(SeismicDataset dataset)
@@ -497,5 +508,30 @@ public class SeismicTools : IDatasetTools
         var rms = (float)Math.Sqrt(sumSquares / allSamples.Length);
 
         return (min, max, mean, rms);
+    }
+
+    private void DrawBoreholeSeismicIntegration()
+    {
+        if (ImGui.CollapsingHeader("Borehole Integration", ImGuiTreeNodeFlags.DefaultOpen))
+        {
+            ImGui.Spacing();
+
+            if (ImGui.BeginTabBar("BoreholeSeismicTabs"))
+            {
+                if (ImGui.BeginTabItem("Seismic -> Borehole"))
+                {
+                    _boreholeSeismicTools.DrawSeismicToBorehole();
+                    ImGui.EndTabItem();
+                }
+
+                if (ImGui.BeginTabItem("Well Tie"))
+                {
+                    _boreholeSeismicTools.DrawWellTie();
+                    ImGui.EndTabItem();
+                }
+
+                ImGui.EndTabBar();
+            }
+        }
     }
 }
