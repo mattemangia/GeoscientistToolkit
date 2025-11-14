@@ -16,13 +16,35 @@ namespace GeoscientistToolkit.Tools.CtImageStack.AISegmentation
     public class AISegmentationSettingsTool : IDatasetTools
     {
         private readonly AISegmentationSettings _settings;
-        private ImGuiExportFileDialog _fileDialog;
-        private string _currentSettingKey;
+        private ImGuiExportFileDialog _sam2EncoderDialog;
+        private ImGuiExportFileDialog _sam2DecoderDialog;
+        private ImGuiExportFileDialog _microSamEncoderDialog;
+        private ImGuiExportFileDialog _microSamDecoderDialog;
+        private ImGuiExportFileDialog _gdinoModelDialog;
+        private ImGuiExportFileDialog _gdinoVocabDialog;
 
         public AISegmentationSettingsTool()
         {
             _settings = AISegmentationSettings.Instance;
-            _fileDialog = new ImGuiExportFileDialog();
+
+            // Initialize file dialogs
+            _sam2EncoderDialog = new ImGuiExportFileDialog("sam2_encoder", "Select SAM2 Encoder Model");
+            _sam2EncoderDialog.SetExtensions((".onnx", "ONNX Model"));
+
+            _sam2DecoderDialog = new ImGuiExportFileDialog("sam2_decoder", "Select SAM2 Decoder Model");
+            _sam2DecoderDialog.SetExtensions((".onnx", "ONNX Model"));
+
+            _microSamEncoderDialog = new ImGuiExportFileDialog("microsam_encoder", "Select MicroSAM Encoder Model");
+            _microSamEncoderDialog.SetExtensions((".onnx", "ONNX Model"));
+
+            _microSamDecoderDialog = new ImGuiExportFileDialog("microsam_decoder", "Select MicroSAM Decoder Model");
+            _microSamDecoderDialog.SetExtensions((".onnx", "ONNX Model"));
+
+            _gdinoModelDialog = new ImGuiExportFileDialog("gdino_model", "Select Grounding DINO Model");
+            _gdinoModelDialog.SetExtensions((".onnx", "ONNX Model"));
+
+            _gdinoVocabDialog = new ImGuiExportFileDialog("gdino_vocab", "Select Vocabulary File");
+            _gdinoVocabDialog.SetExtensions((".txt", "Text File"));
         }
 
         public void Draw(Dataset dataset)
@@ -39,8 +61,8 @@ namespace GeoscientistToolkit.Tools.CtImageStack.AISegmentation
             // SAM2 Section
             if (ImGui.CollapsingHeader("SAM2 (Segment Anything Model 2)", ImGuiTreeNodeFlags.DefaultOpen))
             {
-                DrawModelPathSetting("SAM2 Encoder", _settings.Sam2EncoderPath, "sam2_encoder");
-                DrawModelPathSetting("SAM2 Decoder", _settings.Sam2DecoderPath, "sam2_decoder");
+                DrawModelPathSetting("SAM2 Encoder", _settings.Sam2EncoderPath, _sam2EncoderDialog);
+                DrawModelPathSetting("SAM2 Decoder", _settings.Sam2DecoderPath, _sam2DecoderDialog);
 
                 ImGui.Spacing();
                 var status = _settings.ValidateSam2Models();
@@ -52,8 +74,8 @@ namespace GeoscientistToolkit.Tools.CtImageStack.AISegmentation
             // MicroSAM Section
             if (ImGui.CollapsingHeader("MicroSAM (Microscopy SAM)", ImGuiTreeNodeFlags.DefaultOpen))
             {
-                DrawModelPathSetting("MicroSAM Encoder", _settings.MicroSamEncoderPath, "microsam_encoder");
-                DrawModelPathSetting("MicroSAM Decoder", _settings.MicroSamDecoderPath, "microsam_decoder");
+                DrawModelPathSetting("MicroSAM Encoder", _settings.MicroSamEncoderPath, _microSamEncoderDialog);
+                DrawModelPathSetting("MicroSAM Decoder", _settings.MicroSamDecoderPath, _microSamDecoderDialog);
 
                 ImGui.Spacing();
                 var status = _settings.ValidateMicroSamModels();
@@ -65,8 +87,8 @@ namespace GeoscientistToolkit.Tools.CtImageStack.AISegmentation
             // Grounding DINO Section
             if (ImGui.CollapsingHeader("Grounding DINO (Text-Prompted Detection)", ImGuiTreeNodeFlags.DefaultOpen))
             {
-                DrawModelPathSetting("Grounding DINO Model", _settings.GroundingDinoModelPath, "gdino_model");
-                DrawModelPathSetting("Vocabulary File", _settings.GroundingDinoVocabPath, "gdino_vocab");
+                DrawModelPathSetting("Grounding DINO Model", _settings.GroundingDinoModelPath, _gdinoModelDialog);
+                DrawModelPathSetting("Vocabulary File", _settings.GroundingDinoVocabPath, _gdinoVocabDialog);
 
                 ImGui.Spacing();
                 var status = _settings.ValidateGroundingDinoModel();
@@ -149,18 +171,45 @@ namespace GeoscientistToolkit.Tools.CtImageStack.AISegmentation
                 ImGui.EndPopup();
             }
 
-            // Handle file dialog
-            _fileDialog.Draw();
-
-            if (_fileDialog.IsFileSelected())
+            // Handle file dialog submissions
+            if (_sam2EncoderDialog.Submit())
             {
-                var selectedPath = _fileDialog.SelectedPath;
-                UpdateSettingPath(_currentSettingKey, selectedPath);
-                _fileDialog.Reset();
+                _settings.Sam2EncoderPath = _sam2EncoderDialog.SelectedPath;
+                _settings.Save();
+            }
+
+            if (_sam2DecoderDialog.Submit())
+            {
+                _settings.Sam2DecoderPath = _sam2DecoderDialog.SelectedPath;
+                _settings.Save();
+            }
+
+            if (_microSamEncoderDialog.Submit())
+            {
+                _settings.MicroSamEncoderPath = _microSamEncoderDialog.SelectedPath;
+                _settings.Save();
+            }
+
+            if (_microSamDecoderDialog.Submit())
+            {
+                _settings.MicroSamDecoderPath = _microSamDecoderDialog.SelectedPath;
+                _settings.Save();
+            }
+
+            if (_gdinoModelDialog.Submit())
+            {
+                _settings.GroundingDinoModelPath = _gdinoModelDialog.SelectedPath;
+                _settings.Save();
+            }
+
+            if (_gdinoVocabDialog.Submit())
+            {
+                _settings.GroundingDinoVocabPath = _gdinoVocabDialog.SelectedPath;
+                _settings.Save();
             }
         }
 
-        private void DrawModelPathSetting(string label, string currentPath, string settingKey)
+        private void DrawModelPathSetting(string label, string currentPath, ImGuiExportFileDialog dialog)
         {
             ImGui.Text(label + ":");
             ImGui.SameLine();
@@ -177,43 +226,18 @@ namespace GeoscientistToolkit.Tools.CtImageStack.AISegmentation
             if (!exists) ImGui.PopStyleColor();
 
             ImGui.SameLine();
-            if (ImGui.SmallButton($"Browse##{settingKey}"))
+            if (ImGui.SmallButton($"Browse##{dialog}"))
             {
-                _currentSettingKey = settingKey;
-                _fileDialog.Open("Select ONNX Model", Path.GetDirectoryName(currentPath) ?? "ONNX",
-                    settingKey.Contains("vocab") ? ".txt" : ".onnx");
+                var startDir = Path.GetDirectoryName(currentPath);
+                if (string.IsNullOrEmpty(startDir) || !Directory.Exists(startDir))
+                    startDir = "ONNX";
+                dialog.Open(Path.GetFileName(currentPath), startDir);
             }
 
             if (!exists && ImGui.IsItemHovered())
             {
                 ImGui.SetTooltip("File not found!");
             }
-        }
-
-        private void UpdateSettingPath(string settingKey, string newPath)
-        {
-            switch (settingKey)
-            {
-                case "sam2_encoder":
-                    _settings.Sam2EncoderPath = newPath;
-                    break;
-                case "sam2_decoder":
-                    _settings.Sam2DecoderPath = newPath;
-                    break;
-                case "microsam_encoder":
-                    _settings.MicroSamEncoderPath = newPath;
-                    break;
-                case "microsam_decoder":
-                    _settings.MicroSamDecoderPath = newPath;
-                    break;
-                case "gdino_model":
-                    _settings.GroundingDinoModelPath = newPath;
-                    break;
-                case "gdino_vocab":
-                    _settings.GroundingDinoVocabPath = newPath;
-                    break;
-            }
-            _settings.Save();
         }
 
         private void DrawStatusIndicator(string label, bool isValid)

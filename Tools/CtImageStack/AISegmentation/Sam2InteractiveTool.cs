@@ -35,6 +35,10 @@ namespace GeoscientistToolkit.Tools.CtImageStack.AISegmentation
         // Performance tracking
         private float _lastInferenceTime;
 
+        // Error handling
+        private string _initializationError;
+        private bool _showErrorModal;
+
         private enum PointMode
         {
             Positive,
@@ -51,10 +55,23 @@ namespace GeoscientistToolkit.Tools.CtImageStack.AISegmentation
                 {
                     _segmenter = new Sam2Segmenter();
                 }
+                else
+                {
+                    _initializationError = "SAM2 model files not found.\n\n" +
+                        "Please configure model paths in AI Settings:\n" +
+                        $"- Encoder: {_settings.Sam2EncoderPath}\n" +
+                        $"- Decoder: {_settings.Sam2DecoderPath}";
+                    _showErrorModal = true;
+                }
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"Failed to initialize SAM2: {ex.Message}");
+                _initializationError = $"Failed to initialize SAM2:\n\n{ex.Message}\n\n" +
+                    "Please check:\n" +
+                    "- Model files are valid ONNX format\n" +
+                    "- ONNX Runtime is properly installed\n" +
+                    "- GPU drivers (if using GPU acceleration)";
+                _showErrorModal = true;
             }
         }
 
@@ -62,12 +79,22 @@ namespace GeoscientistToolkit.Tools.CtImageStack.AISegmentation
         {
             if (dataset is not CtImageStackDataset ct) return;
 
+            // Draw error modal if needed
+            DrawErrorModal();
+
             ImGui.SeparatorText("SAM2 Interactive Segmentation");
 
             if (_segmenter == null)
             {
                 ImGui.TextColored(new Vector4(1, 0.3f, 0.3f, 1),
-                    "SAM2 not available. Check model paths in settings.");
+                    "SAM2 not available. Check model paths in AI Settings.");
+
+                if (ImGui.Button("Open AI Settings"))
+                {
+                    // User can switch to settings tool manually
+                    ImGui.SetTooltip("Switch to 'AI Settings' tool to configure model paths");
+                }
+
                 return;
             }
 
@@ -338,6 +365,41 @@ namespace GeoscientistToolkit.Tools.CtImageStack.AISegmentation
         public List<SegmentationPoint> GetCurrentPoints() => _points;
 
         public bool IsActive => _isActive;
+
+        private void DrawErrorModal()
+        {
+            if (_showErrorModal)
+            {
+                ImGui.OpenPopup("SAM2 Initialization Error");
+                _showErrorModal = false; // Open once
+            }
+
+            // Set red title bar color
+            ImGui.PushStyleColor(ImGuiCol.TitleBg, new Vector4(0.7f, 0.1f, 0.1f, 1.0f));
+            ImGui.PushStyleColor(ImGuiCol.TitleBgActive, new Vector4(0.9f, 0.1f, 0.1f, 1.0f));
+
+            if (ImGui.BeginPopupModal("SAM2 Initialization Error", ref _showErrorModal,
+                ImGuiWindowFlags.AlwaysAutoResize | ImGuiWindowFlags.NoSavedSettings))
+            {
+                ImGui.PopStyleColor(2);
+
+                ImGui.TextWrapped(_initializationError);
+                ImGui.Spacing();
+                ImGui.Separator();
+                ImGui.Spacing();
+
+                if (ImGui.Button("OK", new Vector2(120, 0)))
+                {
+                    ImGui.CloseCurrentPopup();
+                }
+
+                ImGui.EndPopup();
+            }
+            else
+            {
+                ImGui.PopStyleColor(2);
+            }
+        }
 
         public void Dispose()
         {

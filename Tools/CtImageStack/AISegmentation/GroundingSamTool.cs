@@ -35,6 +35,10 @@ namespace GeoscientistToolkit.Tools.CtImageStack.AISegmentation
         private byte _targetMaterialId = 1;
         private bool _showResults;
 
+        // Error handling
+        private string _initializationError;
+        private bool _showErrorModal;
+
         public GroundingSamTool()
         {
             _settings = AISegmentationSettings.Instance;
@@ -42,14 +46,43 @@ namespace GeoscientistToolkit.Tools.CtImageStack.AISegmentation
 
             try
             {
-                if (_settings.ValidateGroundingDinoModel() && _settings.ValidateSam2Models())
+                bool hasDino = _settings.ValidateGroundingDinoModel();
+                bool hasSam2 = _settings.ValidateSam2Models();
+                bool hasMicroSam = _settings.ValidateMicroSamModels();
+
+                if (!hasDino)
                 {
-                    _pipeline = new GroundingSamPipeline(GroundingSamPipeline.SegmenterType.SAM2);
+                    _initializationError = "Grounding DINO model files not found.\n\n" +
+                        "Please configure model paths in AI Settings:\n" +
+                        $"- Model: {_settings.GroundingDinoModelPath}\n" +
+                        $"- Vocabulary: {_settings.GroundingDinoVocabPath}";
+                    _showErrorModal = true;
+                }
+                else if (!hasSam2 && !hasMicroSam)
+                {
+                    _initializationError = "No segmentation model found.\n\n" +
+                        "Please configure either SAM2 or MicroSAM models in AI Settings.";
+                    _showErrorModal = true;
+                }
+                else
+                {
+                    // Initialize with SAM2 if available, else MicroSAM
+                    var segmenterType = hasSam2
+                        ? GroundingSamPipeline.SegmenterType.SAM2
+                        : GroundingSamPipeline.SegmenterType.MicroSAM;
+
+                    _pipeline = new GroundingSamPipeline(segmenterType);
+                    _segmenterType = segmenterType;
                 }
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"Failed to initialize Grounding-SAM pipeline: {ex.Message}");
+                _initializationError = $"Failed to initialize pipeline:\n\n{ex.Message}\n\n" +
+                    "Please check:\n" +
+                    "- Model files are valid ONNX format\n" +
+                    "- ONNX Runtime is properly installed\n" +
+                    "- GPU drivers (if using GPU acceleration)";
+                _showErrorModal = true;
             }
         }
 
@@ -57,12 +90,20 @@ namespace GeoscientistToolkit.Tools.CtImageStack.AISegmentation
         {
             if (dataset is not CtImageStackDataset ct) return;
 
+            // Draw error modal if needed
+            DrawErrorModal();
+
             ImGui.SeparatorText("Grounding DINO + SAM Pipeline");
 
             if (_pipeline == null)
             {
                 ImGui.TextColored(new Vector4(1, 0.3f, 0.3f, 1),
-                    "Pipeline not available. Check model paths in settings.");
+                    "Pipeline not available. Check model paths in AI Settings.");
+
+                if (ImGui.Button("Open AI Settings"))
+                {
+                    ImGui.SetTooltip("Switch to 'AI Settings' tool to configure model paths");
+                }
 
                 ImGui.Spacing();
                 DrawRequirementsInfo();
@@ -384,6 +425,41 @@ namespace GeoscientistToolkit.Tools.CtImageStack.AISegmentation
         /// Get current results for rendering as overlay
         /// </summary>
         public List<SegmentationResult> GetCurrentResults() => _results;
+
+        private void DrawErrorModal()
+        {
+            if (_showErrorModal)
+            {
+                ImGui.OpenPopup("Pipeline Initialization Error");
+                _showErrorModal = false; // Open once
+            }
+
+            // Set red title bar color
+            ImGui.PushStyleColor(ImGuiCol.TitleBg, new Vector4(0.7f, 0.1f, 0.1f, 1.0f));
+            ImGui.PushStyleColor(ImGuiCol.TitleBgActive, new Vector4(0.9f, 0.1f, 0.1f, 1.0f));
+
+            if (ImGui.BeginPopupModal("Pipeline Initialization Error", ref _showErrorModal,
+                ImGuiWindowFlags.AlwaysAutoResize | ImGuiWindowFlags.NoSavedSettings))
+            {
+                ImGui.PopStyleColor(2);
+
+                ImGui.TextWrapped(_initializationError);
+                ImGui.Spacing();
+                ImGui.Separator();
+                ImGui.Spacing();
+
+                if (ImGui.Button("OK", new Vector2(120, 0)))
+                {
+                    ImGui.CloseCurrentPopup();
+                }
+
+                ImGui.EndPopup();
+            }
+            else
+            {
+                ImGui.PopStyleColor(2);
+            }
+        }
 
         public void Dispose()
         {
