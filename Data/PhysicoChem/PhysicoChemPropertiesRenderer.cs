@@ -133,7 +133,7 @@ public class PhysicoChemPropertiesRenderer : IDatasetPropertiesRenderer
 
                 ImGui.Indent();
                 ImGui.Text($"Porosity: {porosityRange.Item1:F3} - {porosityRange.Item2:F3}");
-                ImGui.Text($"Permeability: {permRange.Item1:E2} - {permRange.Item2:E2} m²");
+                ImGui.Text($"Permeability: {permRange.Item1.ToString("E2")} - {permRange.Item2.ToString("E2")} m²");
                 ImGui.Text($"Density: {densityRange.Item1:F0} - {densityRange.Item2:F0} kg/m³");
                 ImGui.Unindent();
             }
@@ -156,7 +156,7 @@ public class PhysicoChemPropertiesRenderer : IDatasetPropertiesRenderer
 
                 ImGui.Indent();
                 ImGui.Text($"Temperature: {tempRange.Item1:F2} - {tempRange.Item2:F2} K");
-                ImGui.Text($"Pressure: {pressRange.Item1:E2} - {pressRange.Item2:E2} Pa");
+                ImGui.Text($"Pressure: {pressRange.Item1.ToString("E2")} - {pressRange.Item2.ToString("E2")} Pa");
                 ImGui.Unindent();
             }
         }
@@ -252,12 +252,13 @@ public class PhysicoChemPropertiesRenderer : IDatasetPropertiesRenderer
         var spacing = mesh.Spacing;
         ImGui.Text($"Cell Spacing: {spacing.X:F4} × {spacing.Y:F4} × {spacing.Z:F4} m");
 
-        var bounds = mesh.BoundingBox;
+        var domainSize = mesh.GetDomainSize();
+        var origin = mesh.Origin;
         ImGui.Text($"Bounds:");
         ImGui.Indent();
-        ImGui.Text($"X: [{bounds.Min.X:F3}, {bounds.Max.X:F3}]");
-        ImGui.Text($"Y: [{bounds.Min.Y:F3}, {bounds.Max.Y:F3}]");
-        ImGui.Text($"Z: [{bounds.Min.Z:F3}, {bounds.Max.Z:F3}]");
+        ImGui.Text($"X: [{origin.X:F3}, {(origin.X + domainSize.X):F3}]");
+        ImGui.Text($"Y: [{origin.Y:F3}, {(origin.Y + domainSize.Y):F3}]");
+        ImGui.Text($"Z: [{origin.Z:F3}, {(origin.Z + domainSize.Z):F3}]");
         ImGui.Unindent();
 
         // Memory estimate
@@ -344,11 +345,11 @@ public class PhysicoChemPropertiesRenderer : IDatasetPropertiesRenderer
 
             // Pressure
             var (pressMin, pressMax, pressAvg) = GetFieldStats(lastState.Pressure);
-            ImGui.Text($"Pressure: {pressMin:E2} - {pressMax:E2} Pa (avg: {pressAvg:E2} Pa)");
+            ImGui.Text($"Pressure: {pressMin.ToString("E2")} - {pressMax.ToString("E2")} Pa (avg: {pressAvg.ToString("E2")} Pa)");
 
             // Velocity magnitude
             var velStats = GetVelocityStats(lastState);
-            ImGui.Text($"Velocity: {velStats.min:E2} - {velStats.max:E2} m/s (avg: {velStats.avg:E2} m/s)");
+            ImGui.Text($"Velocity: {velStats.min.ToString("E2")} - {velStats.max.ToString("E2")} m/s (avg: {velStats.avg.ToString("E2")} m/s)");
 
             ImGui.Unindent();
 

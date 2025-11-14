@@ -156,10 +156,13 @@ public class PhysicoChemTools : IDatasetTools
         }
 
         // Handle export dialog
-        _exportDialog.Draw();
-        if (_exportDialog.IsFileSelected(out var selectedPath))
+        if (_exportDialog.IsOpen)
         {
-            ExportResults(pcDataset, selectedPath);
+            if (_exportDialog.Submit())
+            {
+                var selectedPath = _exportDialog.SelectedPath;
+                ExportResults(pcDataset, selectedPath);
+            }
         }
     }
 
@@ -185,7 +188,7 @@ public class PhysicoChemTools : IDatasetTools
                 {
                     dataset.Domains.RemoveAt(i);
                     _selectedDomainIndex = -1;
-                    ProjectManager.Instance.NotifyDatasetChanged(dataset);
+                    ProjectManager.Instance.NotifyDatasetDataChanged(dataset);
                 }
                 ImGui.EndPopup();
             }
@@ -273,7 +276,7 @@ public class PhysicoChemTools : IDatasetTools
             };
 
             dataset.AddDomain(domain);
-            ProjectManager.Instance.NotifyDatasetChanged(dataset);
+            ProjectManager.Instance.NotifyDatasetDataChanged(dataset);
             Logger.Log($"Added domain: {_newDomainName}");
 
             // Reset for next domain
@@ -288,7 +291,7 @@ public class PhysicoChemTools : IDatasetTools
             {
                 dataset.GenerateMesh(resolution: 50);
                 Logger.Log($"Generated mesh: {dataset.GeneratedMesh.GridSize.X}x{dataset.GeneratedMesh.GridSize.Y}x{dataset.GeneratedMesh.GridSize.Z}");
-                ProjectManager.Instance.NotifyDatasetChanged(dataset);
+                ProjectManager.Instance.NotifyDatasetDataChanged(dataset);
             }
             catch (Exception ex)
             {
@@ -345,7 +348,7 @@ public class PhysicoChemTools : IDatasetTools
             if (ImGui.Checkbox($"##bc_active{i}", ref isActive))
             {
                 bc.IsActive = isActive;
-                ProjectManager.Instance.NotifyDatasetChanged(dataset);
+                ProjectManager.Instance.NotifyDatasetDataChanged(dataset);
             }
 
             ImGui.SameLine();
@@ -361,7 +364,7 @@ public class PhysicoChemTools : IDatasetTools
                 {
                     dataset.BoundaryConditions.RemoveAt(i);
                     _selectedBCIndex = -1;
-                    ProjectManager.Instance.NotifyDatasetChanged(dataset);
+                    ProjectManager.Instance.NotifyDatasetDataChanged(dataset);
                 }
                 ImGui.EndPopup();
             }
@@ -402,7 +405,7 @@ public class PhysicoChemTools : IDatasetTools
             };
 
             dataset.BoundaryConditions.Add(bc);
-            ProjectManager.Instance.NotifyDatasetChanged(dataset);
+            ProjectManager.Instance.NotifyDatasetDataChanged(dataset);
             Logger.Log($"Added boundary condition: {_newBCName}");
 
             _newBCName = "BC" + (dataset.BoundaryConditions.Count + 1);
@@ -424,7 +427,7 @@ public class PhysicoChemTools : IDatasetTools
             if (ImGui.Checkbox($"##force_active{i}", ref isActive))
             {
                 force.IsActive = isActive;
-                ProjectManager.Instance.NotifyDatasetChanged(dataset);
+                ProjectManager.Instance.NotifyDatasetDataChanged(dataset);
             }
 
             ImGui.SameLine();
@@ -440,7 +443,7 @@ public class PhysicoChemTools : IDatasetTools
                 {
                     dataset.Forces.RemoveAt(i);
                     _selectedForceIndex = -1;
-                    ProjectManager.Instance.NotifyDatasetChanged(dataset);
+                    ProjectManager.Instance.NotifyDatasetDataChanged(dataset);
                 }
                 ImGui.EndPopup();
             }
@@ -486,7 +489,7 @@ public class PhysicoChemTools : IDatasetTools
             }
 
             dataset.Forces.Add(force);
-            ProjectManager.Instance.NotifyDatasetChanged(dataset);
+            ProjectManager.Instance.NotifyDatasetDataChanged(dataset);
             Logger.Log($"Added force field: {_newForceName}");
 
             _newForceName = "Force" + (dataset.Forces.Count + 1);
@@ -508,7 +511,7 @@ public class PhysicoChemTools : IDatasetTools
             if (ImGui.Checkbox($"##nuc_active{i}", ref isActive))
             {
                 site.IsActive = isActive;
-                ProjectManager.Instance.NotifyDatasetChanged(dataset);
+                ProjectManager.Instance.NotifyDatasetDataChanged(dataset);
             }
 
             ImGui.SameLine();
@@ -524,7 +527,7 @@ public class PhysicoChemTools : IDatasetTools
                 {
                     dataset.NucleationSites.RemoveAt(i);
                     _selectedNucleationIndex = -1;
-                    ProjectManager.Instance.NotifyDatasetChanged(dataset);
+                    ProjectManager.Instance.NotifyDatasetDataChanged(dataset);
                 }
                 ImGui.EndPopup();
             }
@@ -550,7 +553,7 @@ public class PhysicoChemTools : IDatasetTools
             };
 
             dataset.NucleationSites.Add(site);
-            ProjectManager.Instance.NotifyDatasetChanged(dataset);
+            ProjectManager.Instance.NotifyDatasetDataChanged(dataset);
             Logger.Log($"Added nucleation site: {_newNucleationName}");
 
             _newNucleationName = "Nucleation" + (dataset.NucleationSites.Count + 1);
@@ -578,20 +581,35 @@ public class PhysicoChemTools : IDatasetTools
 
         ImGui.Separator();
 
-        ImGui.Checkbox("Enable Reactive Transport", ref simParams.EnableReactiveTransport);
-        ImGui.Checkbox("Enable Heat Transfer", ref simParams.EnableHeatTransfer);
-        ImGui.Checkbox("Enable Flow", ref simParams.EnableFlow);
-        ImGui.Checkbox("Enable Forces", ref simParams.EnableForces);
-        ImGui.Checkbox("Enable Nucleation", ref simParams.EnableNucleation);
+        bool enableReactiveTransport = simParams.EnableReactiveTransport;
+        bool enableHeatTransfer = simParams.EnableHeatTransfer;
+        bool enableFlow = simParams.EnableFlow;
+        bool enableForces = simParams.EnableForces;
+        bool enableNucleation = simParams.EnableNucleation;
+        bool useGPU = simParams.UseGPU;
+        int maxIterations = simParams.MaxIterations;
+
+        if (ImGui.Checkbox("Enable Reactive Transport", ref enableReactiveTransport))
+            simParams.EnableReactiveTransport = enableReactiveTransport;
+        if (ImGui.Checkbox("Enable Heat Transfer", ref enableHeatTransfer))
+            simParams.EnableHeatTransfer = enableHeatTransfer;
+        if (ImGui.Checkbox("Enable Flow", ref enableFlow))
+            simParams.EnableFlow = enableFlow;
+        if (ImGui.Checkbox("Enable Forces", ref enableForces))
+            simParams.EnableForces = enableForces;
+        if (ImGui.Checkbox("Enable Nucleation", ref enableNucleation))
+            simParams.EnableNucleation = enableNucleation;
 
         ImGui.Separator();
 
-        ImGui.Checkbox("Use GPU", ref simParams.UseGPU);
+        if (ImGui.Checkbox("Use GPU", ref useGPU))
+            simParams.UseGPU = useGPU;
 
         if (ImGui.InputFloat("Convergence Tolerance", ref convergenceTolerance, 0, 0, "%.2e"))
             simParams.ConvergenceTolerance = convergenceTolerance;
 
-        ImGui.InputInt("Max Iterations", ref simParams.MaxIterations);
+        if (ImGui.InputInt("Max Iterations", ref maxIterations))
+            simParams.MaxIterations = maxIterations;
     }
 
     private void DrawSimulationControls(PhysicoChemDataset dataset)
@@ -660,21 +678,24 @@ public class PhysicoChemTools : IDatasetTools
             dataset.InitializeState();
             _simulationStatus = "Running simulation...";
 
-            // Create solver
-            var solver = new PhysicoChemSolver();
-
-            // Run simulation (simplified - in reality this would be async)
-            var result = solver.RunSimulation(dataset, (progress, status) =>
+            // Create progress reporter
+            var progress = new Progress<(float, string)>(report =>
             {
-                _simulationProgress = (float)progress;
-                _simulationStatus = status;
+                _simulationProgress = report.Item1;
+                _simulationStatus = report.Item2;
             });
+
+            // Create solver
+            var solver = new PhysicoChemSolver(dataset, progress);
+
+            // Run simulation
+            solver.RunSimulation();
 
             _isSimulating = false;
             _simulationProgress = 1.0f;
-            _simulationStatus = $"Completed in {result.ComputeTime:F2}s";
+            _simulationStatus = "Simulation completed";
 
-            ProjectManager.Instance.NotifyDatasetChanged(dataset);
+            ProjectManager.Instance.NotifyDatasetDataChanged(dataset);
             Logger.Log($"Simulation completed: {dataset.ResultHistory.Count} timesteps");
         }
         catch (Exception ex)
