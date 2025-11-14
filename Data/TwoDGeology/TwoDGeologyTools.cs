@@ -287,68 +287,97 @@ public class TwoDGeologyTools
         }
         
         ImGui.Separator();
-        
+
         ImGui.Text("Structural Restoration:");
-        if (ImGui.Button("Restore Section...", buttonSize))
+
+        // Show interactive controls if restoration is active
+        if (_viewer.GetResturationProcessor() != null)
         {
-            ImGui.OpenPopup("StructuralRestoration");
+            ImGui.TextColored(new Vector4(0.5f, 1f, 0.5f, 1f), "Restoration Active");
+
+            var percentage = _viewer.GetRestorationPercentage();
+            ImGui.Text("Restoration:");
+            ImGui.SetNextItemWidth(-1);
+            if (ImGui.SliderFloat("##RestorePercentage", ref percentage, 0f, 100f, "%.0f%%"))
+            {
+                _viewer.SetRestorationPercentage(percentage);
+            }
+
+            if (ImGui.IsItemHovered())
+            {
+                ImGui.SetTooltip("0%% = Original (fully deformed)\n100%% = Fully restored (undeformed)");
+            }
+
+            ImGui.Spacing();
+
+            if (ImGui.Button("Apply Restoration", buttonSize))
+            {
+                _viewer.ApplyCurrentRestoration();
+                Logger.Log("Applied current restoration to section");
+            }
+
+            if (ImGui.Button("Clear Restoration", buttonSize))
+            {
+                _viewer.ClearRestoration();
+                Logger.Log("Cleared restoration overlay");
+            }
         }
-        
+        else
+        {
+            if (ImGui.Button("Restore Section...", buttonSize))
+            {
+                ImGui.OpenPopup("StructuralRestoration");
+            }
+        }
+
         if (ImGui.BeginPopup("StructuralRestoration"))
         {
             ImGui.Text("Structural Restoration & Forward Modeling");
             ImGui.Separator();
-            
-            ImGui.TextWrapped("Unfold and unfault geological structures to their pre-deformation state, or forward model deformation.");
+
+            ImGui.TextWrapped("Unfold and unfault geological structures to their pre-deformation state.");
             ImGui.Separator();
-            
-            if (ImGui.MenuItem("Restore (Unfold/Unfault)"))
+
+            if (ImGui.MenuItem("Start Interactive Restoration"))
+            {
+                StartInteractiveRestoration();
+                ImGui.CloseCurrentPopup();
+            }
+
+            if (ImGui.IsItemHovered())
+                ImGui.SetTooltip("Start interactive restoration with live preview slider");
+
+            ImGui.Separator();
+
+            if (ImGui.MenuItem("Quick Restore (100%)"))
             {
                 PerformRestoration(100f);
                 ImGui.CloseCurrentPopup();
             }
-            
+
             if (ImGui.IsItemHovered())
-                ImGui.SetTooltip("Restore the section to its undeformed state (100% restoration)");
-            
-            if (ImGui.MenuItem("Partial Restore (50%)"))
+                ImGui.SetTooltip("Immediately restore to completely undeformed state");
+
+            if (ImGui.MenuItem("Quick Restore (50%)"))
             {
                 PerformRestoration(50f);
                 ImGui.CloseCurrentPopup();
             }
-            
+
             if (ImGui.IsItemHovered())
-                ImGui.SetTooltip("Partially restore the section (50% of total deformation removed)");
-            
-            if (ImGui.MenuItem("Forward Model (Re-deform)"))
-            {
-                PerformForwardModeling(100f);
-                ImGui.CloseCurrentPopup();
-            }
-            
-            if (ImGui.IsItemHovered())
-                ImGui.SetTooltip("Apply deformation to an undeformed or partially restored section");
-            
+                ImGui.SetTooltip("Partially restore the section");
+
             ImGui.Separator();
-            
+
             if (ImGui.MenuItem("Create Flat Reference"))
             {
                 CreateFlatReference();
                 ImGui.CloseCurrentPopup();
             }
-            
+
             if (ImGui.IsItemHovered())
-                ImGui.SetTooltip("Create a completely undeformed reference state");
-            
-            ImGui.Separator();
-            
-            if (ImGui.MenuItem("Clear Restoration Overlay"))
-            {
-                _dataset.ClearRestorationData();
-                Logger.Log("Cleared restoration overlay");
-                ImGui.CloseCurrentPopup();
-            }
-            
+                ImGui.SetTooltip("Create a completely flattened reference state");
+
             ImGui.EndPopup();
         }
         
@@ -1175,16 +1204,16 @@ public class TwoDGeologyTools
                 Logger.LogError("No cross-section data available");
                 return;
             }
-            
+
             // Create restoration object
             var restoration = new StructuralRestoration(_dataset.ProfileData);
-            
+
             // Create flat reference
             restoration.CreateFlatReference();
-            
+
             // Set the flat reference as overlay
             _dataset.SetRestorationData(restoration.RestoredSection);
-            
+
             Logger.Log("Created flat reference state");
             Logger.Log("Completely undeformed section is displayed as overlay");
         }
@@ -1193,6 +1222,26 @@ public class TwoDGeologyTools
             Logger.LogError($"Failed to create flat reference: {ex.Message}");
         }
     }
-    
+
+    private void StartInteractiveRestoration()
+    {
+        try
+        {
+            if (_dataset.ProfileData == null)
+            {
+                Logger.LogError("No cross-section data available for restoration");
+                return;
+            }
+
+            _viewer.StartInteractiveRestoration();
+            Logger.Log("Started interactive restoration mode");
+            Logger.Log("Use the slider to adjust restoration percentage in real-time");
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError($"Failed to start interactive restoration: {ex.Message}");
+        }
+    }
+
     #endregion
 }

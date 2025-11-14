@@ -208,7 +208,7 @@ public class TwoDGeologyViewer : IDisposable
         _restorationData = restorationData;
         _showRestorationOverlay = restorationData != null;
     }
-    
+
     public void ClearRestorationData()
     {
         _restorationData = null;
@@ -216,6 +216,83 @@ public class TwoDGeologyViewer : IDisposable
         _restorationPercentage = 0f;
         _restorationHistory.Clear();
         _currentRestorationStep = -1;
+        _restorationInitialized = false;
+    }
+
+    // Interactive restoration methods
+    public void StartInteractiveRestoration()
+    {
+        if (_crossSection == null)
+        {
+            Logger.LogError("No cross-section data available");
+            return;
+        }
+
+        _restorationProcessor = new StructuralRestoration(_crossSection);
+        _restorationPercentage = 0f;
+        _restorationInitialized = true;
+        _showRestorationOverlay = true;
+
+        // Initial state (0% = original)
+        UpdateRestorationOverlay();
+    }
+
+    public StructuralRestoration GetRestorationProcessor()
+    {
+        return _restorationProcessor;
+    }
+
+    public float GetRestorationPercentage()
+    {
+        return _restorationPercentage;
+    }
+
+    public void SetRestorationPercentage(float percentage)
+    {
+        _restorationPercentage = Math.Clamp(percentage, 0f, 100f);
+
+        if (_restorationProcessor != null)
+        {
+            UpdateRestorationOverlay();
+        }
+    }
+
+    private void UpdateRestorationOverlay()
+    {
+        if (_restorationProcessor == null) return;
+
+        // Perform restoration at current percentage
+        _restorationProcessor.Restore(_restorationPercentage);
+
+        // Update overlay with new restored state
+        _restorationData = _restorationProcessor.RestoredSection;
+        _showRestorationOverlay = true;
+    }
+
+    public void ApplyCurrentRestoration()
+    {
+        if (_restorationData == null)
+        {
+            Logger.LogError("No restoration data to apply");
+            return;
+        }
+
+        // Replace the current cross-section with the restored version
+        _crossSection = DeepCopySection(_restorationData);
+        _dataset.ProfileData = _crossSection;
+
+        // Clear restoration state
+        ClearRestoration();
+
+        Logger.Log($"Applied restoration at {_restorationPercentage:F1}% to section");
+    }
+
+    public void ClearRestoration()
+    {
+        _restorationProcessor = null;
+        _restorationData = null;
+        _showRestorationOverlay = false;
+        _restorationPercentage = 0f;
         _restorationInitialized = false;
     }
     
@@ -426,28 +503,28 @@ public class TwoDGeologyViewer : IDisposable
             DrawGrid(drawList, screenPos, availSize);
         }
         
-        // Draw formations
-        if (_showFormations)
+        // Draw formations (hide if restoration overlay is active)
+        if (_showFormations && !_showRestorationOverlay)
         {
             DrawFormations(drawList, screenPos, availSize);
         }
-        
-        // Draw faults
-        if (_showFaults)
+
+        // Draw faults (hide if restoration overlay is active)
+        if (_showFaults && !_showRestorationOverlay)
         {
             DrawFaults(drawList, screenPos, availSize);
         }
-        
-        // Draw topography
-        if (_showTopography)
-        {
-            DrawTopography(drawList, screenPos, availSize);
-        }
-        
-        // Draw restoration overlay
+
+        // Draw restoration overlay (replaces normal rendering)
         if (_showRestorationOverlay && _restorationData != null)
         {
             DrawRestorationOverlay(drawList, screenPos, availSize);
+        }
+
+        // Draw topography (always visible)
+        if (_showTopography)
+        {
+            DrawTopography(drawList, screenPos, availSize);
         }
         
         // Draw tool overlays
@@ -1118,13 +1195,16 @@ public class TwoDGeologyViewer : IDisposable
     private void DrawRestorationOverlay(ImDrawListPtr drawList, Vector2 screenPos, Vector2 availSize)
     {
         if (_restorationData == null) return;
-        
-        var overlayColor = new Vector4(0.5f, 0.8f, 1f, 0.3f);
-        
+
+        // Draw formations with their original colors (more opaque)
         foreach (var formation in _restorationData.Formations)
         {
-            var color = ImGui.ColorConvertFloat4ToU32(overlayColor);
-            
+            if (!formation.GetIsVisible()) continue;
+
+            var color = formation.Color;
+            color.W = 0.8f; // More opaque than before
+            var fillColor = ImGui.ColorConvertFloat4ToU32(color);
+
             if (formation.TopBoundary.Count > 1 && formation.BottomBoundary.Count > 1)
             {
                 var vertices = new List<Vector2>();
@@ -1136,10 +1216,55 @@ public class TwoDGeologyViewer : IDisposable
                 {
                     vertices.Add(WorldToScreen(formation.BottomBoundary[i], screenPos, availSize));
                 }
-                
-                var vertexArray = vertices.ToArray();
-                drawList.AddConvexPolyFilled(ref vertexArray[0], vertices.Count, color);
+
+                if (vertices.Count >= 3)
+                {
+                    var vertexArray = vertices.ToArray();
+                    drawList.AddConvexPolyFilled(ref vertexArray[0], vertices.Count, fillColor);
+                }
             }
+
+            // Draw top and bottom boundaries
+            var boundaryColor = ImGui.ColorConvertFloat4ToU32(new Vector4(0.2f, 0.2f, 0.2f, 1f));
+            DrawPolyline(drawList, formation.TopBoundary, screenPos, availSize, boundaryColor, 1.5f);
+            DrawPolyline(drawList, formation.BottomBoundary, screenPos, availSize, boundaryColor, 1.5f);
+        }
+
+        // Draw faults
+        var faultColor = ImGui.ColorConvertFloat4ToU32(new Vector4(1f, 0.2f, 0.2f, 1f));
+        foreach (var fault in _restorationData.Faults)
+        {
+            DrawPolyline(drawList, fault.FaultTrace, screenPos, availSize, faultColor, 2.5f);
+        }
+
+        // Add overlay indicator text
+        var indicatorPos = screenPos + new Vector2(10, 10);
+        var indicatorBg = ImGui.ColorConvertFloat4ToU32(new Vector4(0f, 0f, 0f, 0.7f));
+        var indicatorText = ImGui.ColorConvertFloat4ToU32(new Vector4(1f, 1f, 0f, 1f));
+
+        var text = $"RESTORATION OVERLAY ({_restorationPercentage:F0}%)";
+        var textSize = ImGui.CalcTextSize(text);
+        var padding = new Vector2(8, 4);
+
+        drawList.AddRectFilled(
+            indicatorPos - padding,
+            indicatorPos + textSize + padding,
+            indicatorBg,
+            4f
+        );
+
+        drawList.AddText(indicatorPos, indicatorText, text);
+    }
+
+    private void DrawPolyline(ImDrawListPtr drawList, List<Vector2> points, Vector2 screenPos, Vector2 availSize, uint color, float thickness)
+    {
+        if (points.Count < 2) return;
+
+        for (int i = 0; i < points.Count - 1; i++)
+        {
+            var p1 = WorldToScreen(points[i], screenPos, availSize);
+            var p2 = WorldToScreen(points[i + 1], screenPos, availSize);
+            drawList.AddLine(p1, p2, color, thickness);
         }
     }
     
