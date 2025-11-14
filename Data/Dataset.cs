@@ -18,7 +18,8 @@ public enum DatasetType
     PNM,
     Borehole,
     TwoDGeology,
-    SubsurfaceGIS
+    SubsurfaceGIS,
+    Earthquake
 }
 
 public abstract class Dataset
