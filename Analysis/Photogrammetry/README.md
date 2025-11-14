@@ -1,8 +1,8 @@
 # Real-time Photogrammetry Pipeline
 
-Sistema completo di fotogrammetria real-time per GeoscientistToolkit.
+Sistema completo di fotogrammetria real-time per GeoscientistToolkit con gestione automatica dei modelli ONNX e esportazione avanzata.
 
-## Caratteristiche
+## 🎯 Caratteristiche Principali
 
 - **Stima della profondità**: Supporto per modelli ONNX (MiDaS, DPT, ZoeDepth)
 - **Rilevamento keypoint**: SuperPoint con descrittori deep learning
@@ -54,21 +54,75 @@ I modelli ONNX devono essere scaricati separatamente:
 
 **Nota**: Se LightGlue non è disponibile, il sistema usa automaticamente brute-force matching.
 
-## Configurazione
+## 🚀 Quick Start (Nuovo!)
 
-### 1. Posizionare i modelli
+### Metodo 1: Download Automatico (Consigliato)
 
-Creare una cartella `models` nel progetto e copiare i file ONNX:
+1. **Apri le Impostazioni**:
+   ```
+   Menu: Edit → Settings → Photogrammetry
+   ```
 
-```
-GeoscientistToolkit/
-├── models/
-│   ├── midas_small.onnx
-│   ├── superpoint.onnx
-│   └── lightglue.onnx (opzionale)
-```
+2. **Download Automatico dei Modelli**:
+   - Clicca "Download MiDaS Small (Depth)" - scarica automaticamente il modello di profondità (~20 MB)
+   - Clicca "Download SuperPoint" - scarica automaticamente il rilevatore di keypoint (~5 MB)
+   - (Opzionale) "Download LightGlue" se disponibile
 
-### 2. Configurare la pipeline
+3. **Configura Pipeline**:
+   - Abilita GPU se disponibile (richiede CUDA)
+   - Imposta risoluzione target (640x480 consigliato)
+   - Configura camera intrinsics (o usa auto-stima)
+   - Clicca "Apply" per salvare
+
+4. **Avvia Fotogrammetria**:
+   ```
+   Menu: Tools → Real-time Photogrammetry
+   Tab Configuration → Initialize Pipeline
+   Tab Capture → Start Capture
+   ```
+
+### Metodo 2: Selezione Manuale
+
+1. **Scarica i modelli** manualmente (vedi `ModelDownloadGuide.md`)
+
+2. **Configura percorsi nelle Settings**:
+   ```
+   Edit → Settings → Photogrammetry
+   ```
+   - Usa il pulsante "Browse..." per selezionare ogni modello ONNX
+   - Imposta la cartella Models Directory
+
+3. **Salva e inizializza** la pipeline
+
+## ⚙️ Configurazione Avanzata
+
+### Settings → Photogrammetry
+
+Le impostazioni di fotogrammetria sono completamente integrate nel sistema di configurazione:
+
+#### **Model Paths**
+- `Depth Model`: Percorso al modello ONNX per depth estimation
+- `SuperPoint Model`: Percorso al modello per keypoint detection
+- `LightGlue Model`: (Opzionale) Percorso al matcher
+- `Models Directory`: Cartella di default per i modelli
+
+#### **Pipeline Settings**
+- `Use GPU Acceleration`: Abilita CUDA se disponibile
+- `Depth Model Type`: MiDaS Small / DPT Small / ZoeDepth
+- `Keyframe Interval`: Crea keyframe ogni N frame (1-30)
+- `Target Width/Height`: Risoluzione elaborazione (320-1920 / 240-1080)
+
+#### **Camera Intrinsics**
+- `Focal Length X/Y`: Lunghezza focale in pixel
+- `Principal Point X/Y`: Centro ottico
+- Pulsante "Auto-estimate": Calcola da risoluzione
+
+#### **Export Settings**
+- `Default Export Format`: PLY / XYZ / OBJ
+- `Export Textured Mesh`: Include texture (quando disponibile)
+- `Export Camera Path`: Esporta traiettoria camera
+
+### Configurare la Pipeline dalla Finestra RT Photogrammetry
 
 Dalla finestra "Real-time Photogrammetry":
 
@@ -81,19 +135,81 @@ Dalla finestra "Real-time Photogrammetry":
    - Cliccare "Initialize Pipeline"
 
 2. **Tab Capture**:
-   - Selezionare sorgente video (webcam o file)
+   - Selezionare sorgente video:
+     - **Webcam**: Scegli dalla lista di telecamere rilevate
+     - **File Video**: Usa "Browse..." per selezionare file (.mp4, .avi, .mov, ecc.)
    - Cliccare "Start Capture"
+   - Visualizzazione live di frame e depth map
    - Il sistema processerà i frame in tempo reale
 
 3. **Tab Keyframes**:
-   - Visualizzare i keyframe creati automaticamente
-   - Eseguire bundle adjustment per raffinare
+   - Tabella con tutti i keyframe creati
+   - Informazioni: Frame ID, Timestamp, Numero punti 3D
+   - Pulsante "Perform Bundle Adjustment" per raffinamento
 
 4. **Tab Georeferencing**:
-   - Aggiungere almeno 3 Ground Control Points (GCP)
-   - Inserire coordinate locali e mondiali
-   - Calcolare la trasformazione di georeferenziazione
-   - Opzionale: refinement con altitudine
+   - **Aggiungere GCP**:
+     - Nome del punto
+     - Posizione locale (x,y,z) nel sistema della ricostruzione
+     - Posizione mondo (E,N,Alt) in coordinate reali (UTM, lat/lon, ecc.)
+     - Accuratezza in metri
+   - **Gestione GCP**:
+     - Tabella con tutti i GCP
+     - Checkbox per attivare/disattivare
+     - Pulsante "Remove" per eliminare
+   - **Calcolo Transform**:
+     - Richiede minimo 3 GCP attivi
+     - Checkbox "Refine with Altitude" per accuratezza verticale
+     - Mostra risultati: GCP usati, errore RMS, scala, traslazione, rotazione
+
+5. **Tab Statistics**:
+   - Frames processati totali
+   - Tempo medio di elaborazione
+   - FPS corrente
+   - Grafico processing time
+   - Totale keyframes e GCP
+
+## 📤 Esportazione
+
+### Menu File → Export
+
+Tutte le esportazioni supportano georeferenziazione automatica se ≥3 GCP sono disponibili:
+
+#### **Export Point Cloud**
+Formati disponibili:
+- **PLY (Polygon File Format)**:
+  - ASCII format
+  - Include coordinate XYZ e colori RGB
+  - Compatibile con MeshLab, CloudCompare, Blender
+
+- **XYZ (Simple Text)**:
+  - Formato testo semplice
+  - Una riga per punto: `X Y Z R G B`
+  - Facile import in software GIS
+
+- **OBJ (Wavefront)**:
+  - Solo vertici (point cloud)
+  - File .mtl separato per colori
+  - Compatibile con tutti i software 3D
+
+**Come esportare**:
+1. Menu File → Export Point Cloud...
+2. Scegli nome file e formato (.ply, .xyz, .obj)
+3. Il sistema esporta automaticamente tutti i punti 3D dai keyframes
+4. Se GCP disponibili, applica georeferenziazione
+
+#### **Export Mesh**
+- Attualmente esporta come point cloud in formato OBJ
+- Nota: TSDF fusion per mesh densa non ancora implementato
+- Roadmap futura: marching cubes, texturing
+
+#### **Export Camera Path**
+- Esporta traiettoria completa della camera
+- Formato: `FrameID X Y Z QuatX QuatY QuatZ QuatW Timestamp`
+- Utile per:
+  - Visualizzazione percorso
+  - Import in software animazione
+  - Analisi movimento camera
 
 ## Workflow consigliato
 
