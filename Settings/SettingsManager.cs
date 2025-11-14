@@ -105,7 +105,18 @@ public class SettingsManager
     public static string[] GetAvailableGpuNames()
     {
         var gpus = new List<string> { "Auto" };
-        gpus.AddRange(GraphicsAdapterUtil.GetGpuList());
+
+        // Get OpenCL compute devices from the device manager
+        try
+        {
+            var openclDevices = GeoscientistToolkit.OpenCL.OpenCLDeviceManager.GetAvailableDevices();
+            gpus.AddRange(openclDevices.Select(d => d.Name));
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning($"Failed to enumerate OpenCL devices: {ex.Message}");
+        }
+
         return gpus.ToArray();
     }
 

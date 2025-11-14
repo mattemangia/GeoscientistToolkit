@@ -613,25 +613,23 @@ __kernel void thermal_diffusion(
             _cl = CL.GetApi();
             unsafe
             {
-                uint nPlatforms;
-                _cl.GetPlatformIDs(0, null, &nPlatforms);
-                if (nPlatforms == 0) return false;
-                var platforms = stackalloc nint[(int)nPlatforms];
-                _cl.GetPlatformIDs(nPlatforms, platforms, null);
-                nint device = 0;
-                for (var i = 0; i < nPlatforms; i++)
+                // Use centralized device manager to get the device from settings
+                nint device = GeoscientistToolkit.OpenCL.OpenCLDeviceManager.GetComputeDevice();
+
+                if (device == 0)
                 {
-                    uint nDevices;
-                    if (_cl.GetDeviceIDs(platforms[i], DeviceType.Gpu, 0, null, &nDevices) == 0 && nDevices > 0)
-                    {
-                        var devices = stackalloc nint[(int)nDevices];
-                        _cl.GetDeviceIDs(platforms[i], DeviceType.Gpu, nDevices, devices, null);
-                        device = devices[0];
-                        break;
-                    }
+                    Logger.LogWarning("No OpenCL device available from OpenCLDeviceManager.");
+                    return false;
                 }
 
-                if (device == 0) return false;
+                // Get device info from the centralized manager
+                var deviceInfo = GeoscientistToolkit.OpenCL.OpenCLDeviceManager.GetDeviceInfo();
+                var DeviceName = deviceInfo.Name;
+                var DeviceVendor = deviceInfo.Vendor;
+                var DeviceGlobalMemory = deviceInfo.GlobalMemory;
+
+                Logger.Log($"ThermalConductivitySolver: Using device: {DeviceName} ({DeviceVendor})");
+                Logger.Log($"ThermalConductivitySolver: Global Memory: {DeviceGlobalMemory / (1024 * 1024)} MB");
 
                 int err;
                 _ctx = _cl.CreateContext(null, 1, &device, null, null, &err);

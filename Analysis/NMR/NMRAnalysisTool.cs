@@ -54,22 +54,21 @@ public class NMRAnalysisTool : IDatasetTools
             (".txt", "Text Report")
         );
 
-        // Check GPU availability
+        // Check GPU availability using centralized device manager
         try
         {
-            var cl = CL.GetApi();
-            uint numPlatforms = 0;
-            unsafe
-            {
-                cl.GetPlatformIDs(0, null, &numPlatforms);
-            }
-
-            _gpuAvailable = numPlatforms > 0;
+            var device = GeoscientistToolkit.OpenCL.OpenCLDeviceManager.GetComputeDevice();
+            _gpuAvailable = device != 0;
 
             if (_gpuAvailable)
-                Logger.Log("[NMRAnalysisTool] OpenCL GPU available");
+            {
+                var deviceInfo = GeoscientistToolkit.OpenCL.OpenCLDeviceManager.GetDeviceInfo();
+                Logger.Log($"[NMRAnalysisTool] OpenCL device available: {deviceInfo.Name} ({deviceInfo.Vendor})");
+            }
             else
-                Logger.LogWarning("[NMRAnalysisTool] No OpenCL GPU found, using CPU");
+            {
+                Logger.LogWarning("[NMRAnalysisTool] No OpenCL device available, using CPU");
+            }
         }
         catch (Exception ex)
         {

@@ -191,33 +191,20 @@ public unsafe class NMRSimulationOpenCL : IDisposable
 
     private void InitializeOpenCL()
     {
-        // Get platform
-        uint numPlatforms = 0;
-        _cl.GetPlatformIDs(0, null, &numPlatforms);
+        Logger.Log("NMRSimulationOpenCL: Initializing OpenCL...");
 
-        if (numPlatforms == 0) throw new InvalidOperationException("No OpenCL platforms found");
+        // Use centralized device manager to get the device from settings
+        var device = GeoscientistToolkit.OpenCL.OpenCLDeviceManager.GetComputeDevice();
 
-        var platforms = stackalloc nint[(int)numPlatforms];
-        _cl.GetPlatformIDs(numPlatforms, platforms, null);
-
-        var platform = platforms[0];
-
-        // Get GPU device
-        uint numDevices = 0;
-        _cl.GetDeviceIDs(platform, DeviceType.Gpu, 0, null, &numDevices);
-
-        if (numDevices == 0)
+        if (device == 0)
         {
-            Logger.LogWarning("[NMRSimulationOpenCL] No GPU found, falling back to CPU");
-            _cl.GetDeviceIDs(platform, DeviceType.Cpu, 0, null, &numDevices);
+            throw new InvalidOperationException("No OpenCL device available from OpenCLDeviceManager.");
         }
 
-        var devices = stackalloc nint[(int)numDevices];
-        _cl.GetDeviceIDs(platform, numDevices > 0 ? DeviceType.Gpu : DeviceType.Cpu, numDevices, devices, null);
-
-        var device = devices[0];
-
-        LogDeviceInfo(device);
+        // Get device info from the centralized manager
+        var deviceInfo = GeoscientistToolkit.OpenCL.OpenCLDeviceManager.GetDeviceInfo();
+        Logger.Log($"NMRSimulationOpenCL: Using device: {deviceInfo.Name} ({deviceInfo.Vendor})");
+        Logger.Log($"NMRSimulationOpenCL: Global Memory: {deviceInfo.GlobalMemory / (1024 * 1024)} MB");
 
         // Create context
         int errorCode;

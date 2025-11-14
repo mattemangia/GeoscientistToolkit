@@ -30,50 +30,27 @@ public static class OpenCLService
         {
             _cl = CL.GetApi();
 
-            uint platformCount = 0;
-            _cl.GetPlatformIDs(0, null, &platformCount);
+            // Use centralized device manager to get the device from settings
+            _device = GeoscientistToolkit.OpenCL.OpenCLDeviceManager.GetComputeDevice();
 
-            if (platformCount == 0)
+            if (_device == 0)
             {
+                Util.Logger.LogWarning("No OpenCL device available from OpenCLDeviceManager.");
                 IsInitialized = false;
                 return;
             }
 
-            IntPtr* platforms = stackalloc IntPtr[(int)platformCount];
-            _cl.GetPlatformIDs(platformCount, platforms, null);
-
-            uint deviceCount = 0;
-            _cl.GetDeviceIDs(platforms[0], DeviceType.Gpu, 0, null, &deviceCount);
-
-            if (deviceCount == 0)
-            {
-                _cl.GetDeviceIDs(platforms[0], DeviceType.Cpu, 0, null, &deviceCount);
-            }
-
-            if (deviceCount == 0)
-            {
-                IsInitialized = false;
-                return;
-            }
-
-            IntPtr* devices = stackalloc IntPtr[(int)deviceCount];
-            _cl.GetDeviceIDs(platforms[0], DeviceType.Gpu, deviceCount, devices, null);
-
-            if (deviceCount == 0)
-            {
-                _cl.GetDeviceIDs(platforms[0], DeviceType.Cpu, deviceCount, devices, null);
-            }
-
-            _device = devices[0];
+            var deviceInfo = GeoscientistToolkit.OpenCL.OpenCLDeviceManager.GetDeviceInfo();
+            Util.Logger.Log($"[OpenCLService]: Using device: {deviceInfo.Name} ({deviceInfo.Vendor})");
 
             int err;
-            
+
             // Fixed statement for device pointer for CreateContext
             fixed (IntPtr* pDevice = &_device)
             {
                 _context = _cl.CreateContext(null, 1, pDevice, null, null, &err);
             }
-            
+
             if (err != 0)
             {
                 IsInitialized = false;

@@ -610,43 +610,21 @@ public class StackRegistration
         {
             _cl = CL.GetApi();
 
-            // Get platform
-            uint numPlatforms;
-            _cl.GetPlatformIDs(0, null, &numPlatforms);
-            if (numPlatforms == 0)
+            // Use centralized device manager to get the device from settings
+            _device = GeoscientistToolkit.OpenCL.OpenCLDeviceManager.GetComputeDevice();
+
+            if (_device == 0)
             {
-                Logger.LogWarning("[StackRegistration] No OpenCL platforms found. Falling back to CPU.");
+                Logger.LogWarning("[StackRegistration] No OpenCL device available from OpenCLDeviceManager. Falling back to CPU.");
                 return;
             }
 
-            var platforms = new nint[numPlatforms];
-            fixed (nint* pPlatforms = platforms)
-            {
-                _cl.GetPlatformIDs(numPlatforms, pPlatforms, null);
-            }
-
-            // Get GPU device
-            uint numDevices;
-            // FIX: Removed the incorrect (ulong) cast. Pass the enum directly.
-            _cl.GetDeviceIDs(platforms[0], DeviceType.Gpu, 0, null, &numDevices);
-            if (numDevices == 0)
-            {
-                Logger.LogWarning("[StackRegistration] No GPU devices found. Falling back to CPU.");
-                return;
-            }
-
-            var devices = new nint[numDevices];
-            fixed (nint* pDevices = devices)
-            {
-                // FIX: Removed the incorrect (ulong) cast here as well.
-                _cl.GetDeviceIDs(platforms[0], DeviceType.Gpu, numDevices, pDevices, null);
-            }
-
-            _device = devices[0];
+            // Get device info from the centralized manager
+            var deviceInfo = GeoscientistToolkit.OpenCL.OpenCLDeviceManager.GetDeviceInfo();
+            Logger.Log($"[StackRegistration] Using device: {deviceInfo.Name} ({deviceInfo.Vendor})");
 
             // Create context
             int error;
-            // FIX: The address of _device must be taken inside a 'fixed' block to prevent the GC from moving it.
             fixed (nint* pDevice = &_device)
             {
                 _context = _cl.CreateContext(null, 1, pDevice, null, null, &error);

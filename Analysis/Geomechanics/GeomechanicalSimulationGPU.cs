@@ -361,50 +361,28 @@ public unsafe class GeomechanicalSimulatorGPU : IDisposable
     {
         try
         {
-            Logger.Log("[GeomechGPU] Querying OpenCL platforms...");
+            // Use centralized device manager to get the device from settings
+            _device = GeoscientistToolkit.OpenCL.OpenCLDeviceManager.GetComputeDevice();
 
-            // Get platform and device
-            uint numPlatforms;
-            _cl.GetPlatformIDs(0, null, &numPlatforms);
-            if (numPlatforms == 0) throw new Exception("No OpenCL platforms found");
-
-            Logger.Log($"[GeomechGPU] Found {numPlatforms} OpenCL platform(s)");
-
-            var platforms = stackalloc nint[(int)numPlatforms];
-            _cl.GetPlatformIDs(numPlatforms, platforms, null);
-
-            Logger.Log("[GeomechGPU] Querying devices on platform 0...");
-            uint numDevices;
-            _cl.GetDeviceIDs(platforms[0], DeviceType.Gpu, 0, null, &numDevices);
-            if (numDevices == 0)
+            if (_device == 0)
             {
-                Logger.LogWarning("[GeomechGPU] No GPU devices found, trying all device types...");
-                _cl.GetDeviceIDs(platforms[0], DeviceType.All, 0, null, &numDevices);
+                Logger.LogWarning("[GeomechGPU] No OpenCL device available from OpenCLDeviceManager.");
+                throw new Exception("No OpenCL device available from OpenCLDeviceManager");
             }
 
-            if (numDevices == 0)
-                throw new Exception("No OpenCL devices found");
+            // Get device info from the centralized manager
+            var deviceInfo = GeoscientistToolkit.OpenCL.OpenCLDeviceManager.GetDeviceInfo();
+            var deviceName = deviceInfo.Name;
+            var deviceVendor = deviceInfo.Vendor;
+            var deviceGlobalMemory = deviceInfo.GlobalMemory;
 
-            Logger.Log($"[GeomechGPU] Found {numDevices} device(s)");
-
-            var devices = stackalloc nint[(int)numDevices];
-            _cl.GetDeviceIDs(platforms[0], DeviceType.Gpu, numDevices, devices, null);
-            _device = devices[0];
-
-            // Get device name
-            nuint nameSize;
-            _cl.GetDeviceInfo(_device, DeviceInfo.Name, 0, null, &nameSize);
-            var nameBytes = new byte[nameSize];
-            fixed (byte* namePtr = nameBytes)
-            {
-                _cl.GetDeviceInfo(_device, DeviceInfo.Name, nameSize, namePtr, null);
-            }
-
-            var deviceName = Encoding.UTF8.GetString(nameBytes).TrimEnd('\0');
-            Logger.Log($"[GeomechGPU] Using device: {deviceName}");
+            Logger.Log($"[GeomechGPU] Using device: {deviceName} ({deviceVendor})");
+            Logger.Log($"[GeomechGPU] Global Memory: {deviceGlobalMemory / (1024 * 1024)} MB");
 
             Logger.Log("[GeomechGPU] Creating OpenCL context...");
             int error;
+            var devices = stackalloc nint[1];
+            devices[0] = _device;
             _context = _cl.CreateContext(null, 1, devices, null, null, &error);
             CheckError(error, "CreateContext");
 

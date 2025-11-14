@@ -502,31 +502,17 @@ public class AcceleratedProcessor : IDisposable
         _cl = CL.GetApi();
         int err;
 
-        // 1. Get Platform
-        uint numPlatforms;
-        CheckErr(_cl.GetPlatformIDs(0, null, &numPlatforms), "GetPlatformIDs");
-        if (numPlatforms == 0) throw new InvalidOperationException("No OpenCL platforms found.");
-        var platforms = stackalloc nint[(int)numPlatforms];
-        CheckErr(_cl.GetPlatformIDs(numPlatforms, platforms, null), "GetPlatformIDs");
+        // Use centralized device manager to get the device from settings
+        var selectedDevice = GeoscientistToolkit.OpenCL.OpenCLDeviceManager.GetComputeDevice();
 
-        // 2. Get GPU Device
-        nint selectedDevice = 0;
-        for (var i = 0; i < numPlatforms; i++)
-        {
-            uint numDevices;
-            if (_cl.GetDeviceIDs(platforms[i], DeviceType.Gpu, 0, null, &numDevices) == (int)CLEnum.Success &&
-                numDevices > 0)
-            {
-                var devices = stackalloc nint[(int)numDevices];
-                CheckErr(_cl.GetDeviceIDs(platforms[i], DeviceType.Gpu, numDevices, devices, null), "GetDeviceIDs");
-                selectedDevice = devices[0];
-                break;
-            }
-        }
+        if (selectedDevice == 0)
+            throw new InvalidOperationException("No OpenCL device available from OpenCLDeviceManager.");
 
-        if (selectedDevice == 0) throw new InvalidOperationException("No OpenCL-compatible GPU found.");
+        // Get device info from the centralized manager
+        var deviceInfo = GeoscientistToolkit.OpenCL.OpenCLDeviceManager.GetDeviceInfo();
+        Logger.Log($"[AcceleratedProcessor] Using device: {deviceInfo.Name} ({deviceInfo.Vendor})");
 
-        // 3. Create Context and Command Queue
+        // Create Context and Command Queue
         _context = _cl.CreateContext(null, 1, &selectedDevice, null, null, &err);
         CheckErr(err, "CreateContext");
 
