@@ -1,6 +1,7 @@
 // GeoscientistToolkit/UI/Windows/RealtimePhotogrammetryWindow.cs
 
 using GeoscientistToolkit.Analysis.Photogrammetry;
+using GeoscientistToolkit.Settings;
 using ImGuiNET;
 using OpenCvSharp;
 using System;
@@ -63,14 +64,49 @@ public class RealtimePhotogrammetryWindow : IDisposable
     private List<float> _processingTimes = new();
     private const int MaxStatsSamples = 100;
 
+    // File dialogs
+    private readonly ImGuiFileDialog _videoFileDialog;
+    private readonly ImGuiExportFileDialog _exportPointCloudDialog;
+    private readonly ImGuiExportFileDialog _exportMeshDialog;
+    private readonly ImGuiExportFileDialog _exportCameraPathDialog;
+
     public RealtimePhotogrammetryWindow()
     {
+        // Initialize file dialogs
+        _videoFileDialog = new ImGuiFileDialog("SelectVideoFile", FileDialogType.OpenFile, "Select Video File");
+        _exportPointCloudDialog = new ImGuiExportFileDialog("ExportPointCloud", "Export Point Cloud");
+        _exportPointCloudDialog.SetExtensions(
+            new ImGuiExportFileDialog.ExtensionOption(".ply", "PLY Format"),
+            new ImGuiExportFileDialog.ExtensionOption(".xyz", "XYZ Format"),
+            new ImGuiExportFileDialog.ExtensionOption(".obj", "OBJ Format")
+        );
+
+        _exportMeshDialog = new ImGuiExportFileDialog("ExportMesh", "Export Mesh");
+        _exportMeshDialog.SetExtensions(
+            new ImGuiExportFileDialog.ExtensionOption(".obj", "Wavefront OBJ")
+        );
+
+        _exportCameraPathDialog = new ImGuiExportFileDialog("ExportCameraPath", "Export Camera Path");
+        _exportCameraPathDialog.SetExtensions(
+            new ImGuiExportFileDialog.ExtensionOption(".txt", "Text File"),
+            new ImGuiExportFileDialog.ExtensionOption(".csv", "CSV File")
+        );
+
+        LoadFromSettings();
+
         _config = new PhotogrammetryPipeline.PipelineConfig
         {
             TargetWidth = _targetWidth,
             TargetHeight = _targetHeight,
             UseGpu = _useGpu,
-            KeyframeInterval = _keyframeInterval
+            KeyframeInterval = _keyframeInterval,
+            DepthModelPath = _depthModelPath,
+            SuperPointModelPath = _superPointModelPath,
+            LightGlueModelPath = _lightGlueModelPath,
+            FocalLengthX = _focalLengthX,
+            FocalLengthY = _focalLengthY,
+            PrincipalPointX = _principalPointX,
+            PrincipalPointY = _principalPointY
         };
     }
 
@@ -132,9 +168,61 @@ public class RealtimePhotogrammetryWindow : IDisposable
         }
         ImGui.End();
 
+        // Handle file dialogs
+        HandleFileDialogs();
+
         if (!_isOpen)
         {
             StopCapture();
+        }
+    }
+
+    private void LoadFromSettings()
+    {
+        var settings = SettingsManager.Instance.Settings.Photogrammetry;
+
+        _depthModelPath = settings.DepthModelPath;
+        _superPointModelPath = settings.SuperPointModelPath;
+        _lightGlueModelPath = settings.LightGlueModelPath;
+        _useGpu = settings.UseGpuAcceleration;
+        _depthModelType = settings.DepthModelType;
+        _keyframeInterval = settings.KeyframeInterval;
+        _targetWidth = settings.TargetWidth;
+        _targetHeight = settings.TargetHeight;
+        _focalLengthX = settings.FocalLengthX;
+        _focalLengthY = settings.FocalLengthY;
+        _principalPointX = settings.PrincipalPointX;
+        _principalPointY = settings.PrincipalPointY;
+    }
+
+    private void HandleFileDialogs()
+    {
+        if (_videoFileDialog.Submit())
+        {
+            _videoFilePath = _videoFileDialog.SelectedPath;
+        }
+
+        if (_exportPointCloudDialog.Submit())
+        {
+            var format = Path.GetExtension(_exportPointCloudDialog.SelectedPath).ToLower() switch
+            {
+                ".ply" => PointCloudExporter.ExportFormat.PLY,
+                ".xyz" => PointCloudExporter.ExportFormat.XYZ,
+                ".obj" => PointCloudExporter.ExportFormat.OBJ,
+                _ => PointCloudExporter.ExportFormat.PLY
+            };
+
+            ExportPointCloudInternal(_exportPointCloudDialog.SelectedPath, format);
+        }
+
+        if (_exportMeshDialog.Submit())
+        {
+            ExportMeshInternal(_exportMeshDialog.SelectedPath);
+        }
+
+        if (_exportCameraPathDialog.Submit())
+        {
+            ExportCameraPathInternal(_exportCameraPathDialog.SelectedPath);
         }
     }
 
@@ -158,12 +246,20 @@ public class RealtimePhotogrammetryWindow : IDisposable
 
                 if (ImGui.MenuItem("Export Point Cloud..."))
                 {
-                    ExportPointCloud();
+                    var defaultPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "pointcloud.ply");
+                    _exportPointCloudDialog.Open("pointcloud", Path.GetDirectoryName(defaultPath));
                 }
 
                 if (ImGui.MenuItem("Export Mesh..."))
                 {
-                    ExportMesh();
+                    var defaultPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "mesh.obj");
+                    _exportMeshDialog.Open("mesh", Path.GetDirectoryName(defaultPath));
+                }
+
+                if (ImGui.MenuItem("Export Camera Path..."))
+                {
+                    var defaultPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "camera_path.txt");
+                    _exportCameraPathDialog.Open("camera_path", Path.GetDirectoryName(defaultPath));
                 }
 
                 ImGui.EndMenu();
@@ -197,26 +293,10 @@ public class RealtimePhotogrammetryWindow : IDisposable
 
         // Model paths
         ImGui.Text("Model Paths:");
-        ImGui.InputText("Depth Model (ONNX)", ref _depthModelPath, 512);
-        ImGui.SameLine();
-        if (ImGui.Button("Browse##Depth"))
-        {
-            // TODO: File dialog
-        }
-
-        ImGui.InputText("SuperPoint Model (ONNX)", ref _superPointModelPath, 512);
-        ImGui.SameLine();
-        if (ImGui.Button("Browse##SuperPoint"))
-        {
-            // TODO: File dialog
-        }
-
-        ImGui.InputText("LightGlue Model (ONNX)", ref _lightGlueModelPath, 512);
-        ImGui.SameLine();
-        if (ImGui.Button("Browse##LightGlue"))
-        {
-            // TODO: File dialog
-        }
+        ImGui.Text("Models are configured in Settings (Edit → Settings → Photogrammetry)");
+        ImGui.Text($"Depth Model: {(string.IsNullOrEmpty(_depthModelPath) ? "Not set" : Path.GetFileName(_depthModelPath))}");
+        ImGui.Text($"SuperPoint: {(string.IsNullOrEmpty(_superPointModelPath) ? "Not set" : Path.GetFileName(_superPointModelPath))}");
+        ImGui.Text($"LightGlue: {(string.IsNullOrEmpty(_lightGlueModelPath) ? "Not set (optional)" : Path.GetFileName(_lightGlueModelPath))}");
 
         ImGui.Separator();
 
@@ -325,7 +405,7 @@ public class RealtimePhotogrammetryWindow : IDisposable
             ImGui.SameLine();
             if (ImGui.Button("Browse..."))
             {
-                // TODO: File dialog
+                _videoFileDialog.Open(Path.GetDirectoryName(_videoFilePath), new[] { ".mp4", ".avi", ".mov", ".mkv", ".wmv" });
             }
         }
 
@@ -732,7 +812,7 @@ public class RealtimePhotogrammetryWindow : IDisposable
         ImGui.EndChild();
     }
 
-    private void ExportPointCloud()
+    private void ExportPointCloudInternal(string filePath, PointCloudExporter.ExportFormat format)
     {
         if (_pipeline == null || _pipeline.KeyframeManager.Keyframes.Count == 0)
         {
@@ -740,14 +820,88 @@ public class RealtimePhotogrammetryWindow : IDisposable
             return;
         }
 
-        // TODO: Implement point cloud export (PLY/XYZ format)
-        Logger.Log("Point cloud export not yet implemented");
+        try
+        {
+            var geoTransform = _pipeline.Georeferencing.GroundControlPoints.Count >= 3
+                ? _pipeline.Georeferencing.ComputeTransform()
+                : null;
+
+            bool success = PointCloudExporter.ExportKeyframes(
+                _pipeline.KeyframeManager.Keyframes,
+                filePath,
+                format,
+                exportColors: true,
+                geoTransform: geoTransform);
+
+            if (success)
+            {
+                Logger.Log($"Successfully exported point cloud to {filePath}");
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError($"Failed to export point cloud: {ex.Message}");
+        }
     }
 
-    private void ExportMesh()
+    private void ExportMeshInternal(string filePath)
     {
-        // TODO: Implement mesh export
-        Logger.Log("Mesh export not yet implemented");
+        if (_pipeline == null || _pipeline.KeyframeManager.Keyframes.Count == 0)
+        {
+            Logger.LogWarning("No keyframes to export as mesh");
+            return;
+        }
+
+        try
+        {
+            // For now, export as point cloud in OBJ format
+            // Full mesh reconstruction would require TSDF fusion or similar
+            var geoTransform = _pipeline.Georeferencing.GroundControlPoints.Count >= 3
+                ? _pipeline.Georeferencing.ComputeTransform()
+                : null;
+
+            bool success = PointCloudExporter.ExportKeyframes(
+                _pipeline.KeyframeManager.Keyframes,
+                filePath,
+                PointCloudExporter.ExportFormat.OBJ,
+                exportColors: true,
+                geoTransform: geoTransform);
+
+            if (success)
+            {
+                Logger.Log($"Successfully exported mesh to {filePath}");
+                Logger.LogWarning("Note: Full mesh reconstruction (TSDF fusion) not yet implemented. Exported as point cloud.");
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError($"Failed to export mesh: {ex.Message}");
+        }
+    }
+
+    private void ExportCameraPathInternal(string filePath)
+    {
+        if (_pipeline == null || _pipeline.KeyframeManager.Keyframes.Count == 0)
+        {
+            Logger.LogWarning("No keyframes to export camera path");
+            return;
+        }
+
+        try
+        {
+            bool success = PointCloudExporter.ExportCameraPath(
+                _pipeline.KeyframeManager.Keyframes,
+                filePath);
+
+            if (success)
+            {
+                Logger.Log($"Successfully exported camera path to {filePath}");
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError($"Failed to export camera path: {ex.Message}");
+        }
     }
 
     public void Dispose()
