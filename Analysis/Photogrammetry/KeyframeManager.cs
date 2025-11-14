@@ -135,7 +135,7 @@ public class KeyframeManager
             tvec = new Mat();
             var inliers = new Mat();
 
-            bool success = Cv2.SolvePnPRansac(
+            Cv2.SolvePnPRansac(
                 InputArray.Create(objectPoints.ToArray()),
                 InputArray.Create(imagePoints.ToArray()),
                 cameraMatrix,
@@ -148,7 +148,8 @@ public class KeyframeManager
                 0.99, // confidence
                 inliers);
 
-            if (success && inliers.Height >= 4)
+            // Check if PnP succeeded by verifying output matrices are valid
+            if (!rvec.Empty() && !tvec.Empty() && inliers.Height >= 4)
             {
                 Logger.Log($"KeyframeManager: PnP solved with {inliers.Height} inliers");
                 return true;
