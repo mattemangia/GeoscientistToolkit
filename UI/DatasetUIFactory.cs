@@ -229,8 +229,9 @@ private class ImageTools : IDatasetTools
         // Image Information
         if (ImGui.CollapsingHeader("Image Information", ImGuiTreeNodeFlags.DefaultOpen))
         {
+            var channels = GetChannelCount(image);
             ImGui.Text($"Dimensions: {image.Width} x {image.Height}");
-            ImGui.Text($"Channels: {image.NumberOfChannels}");
+            ImGui.Text($"Channels: {channels}");
             ImGui.Text($"Bit Depth: {image.BitDepth}-bit");
             ImGui.Text($"Size: {FormatBytes(image.GetSizeInBytes())}");
         }
@@ -289,17 +290,17 @@ private class ImageTools : IDatasetTools
         _histogram = new int[256];
         _histogramMax = 1;
 
-        if (image.PixelDataPointer == IntPtr.Zero || image.PixelDataLength == 0)
+        if (image.ImageData == null || image.ImageData.Length == 0)
             return;
 
-        var data = new byte[image.PixelDataLength];
-        System.Runtime.InteropServices.Marshal.Copy(image.PixelDataPointer, data, 0, (int)image.PixelDataLength);
+        var channels = GetChannelCount(image);
+        var data = image.ImageData;
 
-        for (int i = 0; i < data.Length; i += image.NumberOfChannels)
+        for (int i = 0; i < data.Length; i += channels)
         {
             // Average RGB if color image, otherwise just use grayscale
             int value = 0;
-            if (image.NumberOfChannels >= 3)
+            if (channels >= 3)
             {
                 value = (data[i] + data[i + 1] + data[i + 2]) / 3;
             }
@@ -312,6 +313,29 @@ private class ImageTools : IDatasetTools
             if (_histogram[value] > _histogramMax)
                 _histogramMax = _histogram[value];
         }
+    }
+
+    private int GetChannelCount(ImageDataset image)
+    {
+        if (image.ImageData == null || image.Width == 0 || image.Height == 0)
+            return 0;
+
+        var totalPixels = image.Width * image.Height;
+        return totalPixels > 0 ? image.ImageData.Length / totalPixels : 0;
+    }
+
+    private string FormatBytes(long bytes)
+    {
+        string[] sizes = { "B", "KB", "MB", "GB", "TB" };
+        var order = 0;
+        double size = bytes;
+        while (size >= 1024 && order < sizes.Length - 1)
+        {
+            order++;
+            size /= 1024;
+        }
+
+        return $"{size:0.##} {sizes[order]}";
     }
 
     private void DrawHistogram(int[] histogram, int maxValue)
