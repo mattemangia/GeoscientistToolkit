@@ -405,17 +405,19 @@ public class MainWindow
                 var timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
                 var profileName = $"New_Profile_{timestamp}";
                 var filePath = Path.Combine(Path.GetTempPath(), $"{profileName}.2dgeo");
-                
+
                 // Create empty 2D geology dataset
                 var emptyProfile = TwoDGeologyDataset.CreateEmpty(profileName, filePath);
-                
+
                 // Add to project
                 ProjectManager.Instance.AddDataset(emptyProfile);
                 Logger.Log($"Created new empty 2D geology profile: {profileName}");
-                
+
                 // Optionally, select it
                 OnDatasetSelected(emptyProfile);
             }
+
+            if (ImGui.MenuItem("New PHYSICOCHEM Reactor...")) OnCreateEmptyPhysicoChem();
 
             if (ImGui.MenuItem("New Empty Table..."))
             {
@@ -676,6 +678,71 @@ public class MainWindow
         catch (Exception ex)
         {
             Logger.LogError($"Failed to open create mesh dialog: {ex.Message}");
+        }
+    }
+
+    private void OnCreateEmptyPhysicoChem()
+    {
+        try
+        {
+            var timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
+            var reactorName = $"Reactor_{timestamp}";
+
+            // Create empty PHYSICOCHEM dataset with a simple cube reactor as template
+            var dataset = new Data.PhysicoChem.PhysicoChemDataset(reactorName,
+                "Multiphysics reactor simulation");
+
+            // Add a simple box reactor as starting point
+            var box = new Data.PhysicoChem.ReactorDomain("MainReactor", new Data.PhysicoChem.ReactorGeometry
+            {
+                Type = Data.PhysicoChem.GeometryType.Box,
+                Center = (0.5, 0.5, 0.5),
+                Dimensions = (1.0, 1.0, 1.0)
+            });
+
+            box.Material = new Data.PhysicoChem.MaterialProperties
+            {
+                Porosity = 0.3,
+                Permeability = 1e-12
+            };
+
+            box.InitialConditions = new Data.PhysicoChem.InitialConditions
+            {
+                Temperature = 298.15,
+                Pressure = 101325.0,
+                Concentrations = new Dictionary<string, double>
+                {
+                    {"H+", 1e-7},
+                    {"OH-", 1e-7}
+                }
+            };
+
+            dataset.AddDomain(box);
+
+            // Add gravity force
+            var gravity = new Data.PhysicoChem.ForceField("Gravity", Data.PhysicoChem.ForceType.Gravity)
+            {
+                GravityVector = (0, 0, -9.81)
+            };
+            dataset.Forces.Add(gravity);
+
+            // Set default simulation parameters
+            dataset.SimulationParams.TotalTime = 3600.0; // 1 hour
+            dataset.SimulationParams.TimeStep = 1.0;
+            dataset.SimulationParams.EnableReactiveTransport = true;
+            dataset.SimulationParams.EnableFlow = true;
+            dataset.SimulationParams.EnableHeatTransfer = true;
+
+            // Add to project
+            ProjectManager.Instance.AddDataset(dataset);
+            Logger.Log($"Created new PHYSICOCHEM reactor: {reactorName}");
+
+            // Select it
+            OnDatasetSelected(dataset);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError($"Failed to create PHYSICOCHEM reactor: {ex.Message}");
         }
     }
 

@@ -2,6 +2,7 @@
 
 using System.Collections.Concurrent;
 using GeoscientistToolkit.Analysis.Pnm;
+using GeoscientistToolkit.Analysis.Thermodynamic;
 using GeoscientistToolkit.Business;
 using GeoscientistToolkit.Business.Thermodynamics;
 using GeoscientistToolkit.Data.Borehole;
@@ -58,6 +59,10 @@ public class GeothermalThermodynamicsIntegration
         return pnm;
     }
 
+    private ReactiveTransportSolver _reactiveTransportSolver;
+    private ReactiveTransportState _transportState;
+    private FlowFieldData _flowData;
+
     /// <summary>
     /// Calculate precipitation/dissolution at each pore location
     /// </summary>
@@ -76,18 +81,82 @@ public class GeothermalThermodynamicsIntegration
             return;
         }
 
-        progress?.Report($"Calculating thermodynamics at t={currentTime/86400:F2} days...");
+        progress?.Report($"Calculating reactive transport at t={currentTime/86400:F2} days...");
 
-        // This is a simplified placeholder
-        // Full implementation would:
-        // 1. Map pores to grid cells
-        // 2. Get T,P at each pore
-        // 3. Run equilibrium solver
-        // 4. Calculate kinetic rates
-        // 5. Update pore radii
-        // 6. Recalculate permeability
+        // Initialize reactive transport state if needed
+        if (_transportState == null)
+        {
+            InitializeReactiveTransport(temperatureField, pressureField, options);
+        }
 
-        Logger.Log($"[ThermodynamicsIntegration] Thermodynamic calculation at {currentTime:F0} s (simplified)");
+        // Update temperature and pressure fields
+        _transportState.Temperature = temperatureField;
+        _transportState.Pressure = pressureField;
+
+        // Solve reactive transport for this time step
+        if (_reactiveTransportSolver == null)
+        {
+            _reactiveTransportSolver = new ReactiveTransportSolver();
+        }
+
+        _transportState = _reactiveTransportSolver.SolveTimeStep(_transportState, timeStep, _flowData);
+
+        Logger.Log($"[ThermodynamicsIntegration] Reactive transport solved at t={currentTime:F0} s");
+    }
+
+    private void InitializeReactiveTransport(float[,,] temperatureField, float[,,] pressureField,
+        GeothermalSimulationOptions options)
+    {
+        int nr = temperatureField.GetLength(0);
+        int ntheta = temperatureField.GetLength(1);
+        int nz = temperatureField.GetLength(2);
+
+        _transportState = new ReactiveTransportState
+        {
+            GridDimensions = (nr, ntheta, nz),
+            Temperature = (float[,,])temperatureField.Clone(),
+            Pressure = (float[,,])pressureField.Clone(),
+            Porosity = new float[nr, ntheta, nz],
+            InitialPorosity = new float[nr, ntheta, nz]
+        };
+
+        // Initialize concentrations from fluid composition
+        foreach (var entry in options.FluidComposition)
+        {
+            var field = new float[nr, ntheta, nz];
+            double concentration = entry.Concentration_mol_L;
+
+            for (int i = 0; i < nr; i++)
+            for (int j = 0; j < ntheta; j++)
+            for (int k = 0; k < nz; k++)
+            {
+                field[i, j, k] = (float)concentration;
+                _transportState.Porosity[i, j, k] = 0.15f; // Default porosity
+                _transportState.InitialPorosity[i, j, k] = 0.15f;
+            }
+
+            _transportState.Concentrations[entry.SpeciesName] = field;
+        }
+
+        // Initialize flow field data (will be updated from simulation)
+        _flowData = new FlowFieldData
+        {
+            GridSpacing = (1.0, 0.1, 1.0), // Will be updated with actual grid spacing
+            VelocityX = new float[nr, ntheta, nz],
+            VelocityY = new float[nr, ntheta, nz],
+            VelocityZ = new float[nr, ntheta, nz],
+            Permeability = new float[nr, ntheta, nz],
+            InitialPermeability = new float[nr, ntheta, nz],
+            Dispersivity = 0.1 // m
+        };
+
+        for (int i = 0; i < nr; i++)
+        for (int j = 0; j < ntheta; j++)
+        for (int k = 0; k < nz; k++)
+        {
+            _flowData.Permeability[i, j, k] = 1e-13f; // 1e-13 m² = 100 mD
+            _flowData.InitialPermeability[i, j, k] = 1e-13f;
+        }
     }
 
     /// <summary>
@@ -98,11 +167,21 @@ public class GeothermalThermodynamicsIntegration
         float[,,] permeabilityField,
         int nr, int ntheta, int nz)
     {
-        // Kozeny-Carman relationship: k ∝ r²
-        // This would update the permeability field based on pore radius changes
-        // Simplified placeholder for now
+        if (_flowData == null || _transportState == null)
+        {
+            Logger.Log("[ThermodynamicsIntegration] No reactive transport data available");
+            return;
+        }
 
-        Logger.Log("[ThermodynamicsIntegration] Permeability update (simplified)");
+        // Copy updated permeability from reactive transport solver
+        for (int i = 0; i < nr; i++)
+        for (int j = 0; j < ntheta; j++)
+        for (int k = 0; k < nz; k++)
+        {
+            permeabilityField[i, j, k] = _flowData.Permeability[i, j, k];
+        }
+
+        Logger.Log("[ThermodynamicsIntegration] Permeability updated from porosity changes");
     }
 
     /// <summary>
@@ -110,7 +189,31 @@ public class GeothermalThermodynamicsIntegration
     /// </summary>
     public Dictionary<string, float[,,]> GetPrecipitationFields(int nr, int ntheta, int nz)
     {
-        return new Dictionary<string, float[,,]>();
+        if (_transportState == null || _transportState.MineralVolumeFractions.Count == 0)
+            return new Dictionary<string, float[,,]>();
+
+        var precipitation = new Dictionary<string, float[,,]>();
+
+        foreach (var mineral in _transportState.MineralVolumeFractions.Keys)
+        {
+            var field = new float[nr, ntheta, nz];
+
+            if (_transportState.InitialMineralVolumeFractions.ContainsKey(mineral))
+            {
+                for (int i = 0; i < nr; i++)
+                for (int j = 0; j < ntheta; j++)
+                for (int k = 0; k < nz; k++)
+                {
+                    double delta = _transportState.MineralVolumeFractions[mineral][i, j, k] -
+                                  _transportState.InitialMineralVolumeFractions[mineral][i, j, k];
+                    field[i, j, k] = (float)Math.Max(0, delta); // Only positive = precipitation
+                }
+            }
+
+            precipitation[mineral] = field;
+        }
+
+        return precipitation;
     }
 
     /// <summary>
@@ -118,7 +221,31 @@ public class GeothermalThermodynamicsIntegration
     /// </summary>
     public Dictionary<string, float[,,]> GetDissolutionFields(int nr, int ntheta, int nz)
     {
-        return new Dictionary<string, float[,,]>();
+        if (_transportState == null || _transportState.MineralVolumeFractions.Count == 0)
+            return new Dictionary<string, float[,,]>();
+
+        var dissolution = new Dictionary<string, float[,,]>();
+
+        foreach (var mineral in _transportState.MineralVolumeFractions.Keys)
+        {
+            var field = new float[nr, ntheta, nz];
+
+            if (_transportState.InitialMineralVolumeFractions.ContainsKey(mineral))
+            {
+                for (int i = 0; i < nr; i++)
+                for (int j = 0; j < ntheta; j++)
+                for (int k = 0; k < nz; k++)
+                {
+                    double delta = _transportState.MineralVolumeFractions[mineral][i, j, k] -
+                                  _transportState.InitialMineralVolumeFractions[mineral][i, j, k];
+                    field[i, j, k] = (float)Math.Max(0, -delta); // Only negative = dissolution
+                }
+            }
+
+            dissolution[mineral] = field;
+        }
+
+        return dissolution;
     }
 
     /// <summary>
@@ -126,8 +253,30 @@ public class GeothermalThermodynamicsIntegration
     /// </summary>
     public double GetAveragePermeabilityRatio()
     {
-        // Return 1.0 (no change) for simplified version
-        return 1.0;
+        if (_flowData == null) return 1.0;
+
+        double sum_ratio = 0.0;
+        int count = 0;
+
+        int nr = _flowData.Permeability.GetLength(0);
+        int ntheta = _flowData.Permeability.GetLength(1);
+        int nz = _flowData.Permeability.GetLength(2);
+
+        for (int i = 0; i < nr; i++)
+        for (int j = 0; j < ntheta; j++)
+        for (int kk = 0; kk < nz; kk++)
+        {
+            double k0 = _flowData.InitialPermeability[i, j, kk];
+            double k_perm = _flowData.Permeability[i, j, kk];
+
+            if (k0 > 0)
+            {
+                sum_ratio += k_perm / k0;
+                count++;
+            }
+        }
+
+        return count > 0 ? sum_ratio / count : 1.0;
     }
 
     /// <summary>
@@ -135,7 +284,33 @@ public class GeothermalThermodynamicsIntegration
     /// </summary>
     public Dictionary<string, double> GetTotalPrecipitation()
     {
-        return new Dictionary<string, double>();
+        var totals = new Dictionary<string, double>();
+
+        if (_transportState == null || _transportState.MineralVolumeFractions.Count == 0)
+            return totals;
+
+        foreach (var mineral in _transportState.MineralVolumeFractions.Keys)
+        {
+            double total = 0.0;
+
+            if (_transportState.InitialMineralVolumeFractions.ContainsKey(mineral))
+            {
+                var current = _transportState.MineralVolumeFractions[mineral];
+                var initial = _transportState.InitialMineralVolumeFractions[mineral];
+
+                for (int i = 0; i < current.GetLength(0); i++)
+                for (int j = 0; j < current.GetLength(1); j++)
+                for (int k = 0; k < current.GetLength(2); k++)
+                {
+                    double delta = current[i, j, k] - initial[i, j, k];
+                    if (delta > 0) total += delta;
+                }
+            }
+
+            totals[mineral] = total;
+        }
+
+        return totals;
     }
 
     /// <summary>
@@ -143,6 +318,32 @@ public class GeothermalThermodynamicsIntegration
     /// </summary>
     public Dictionary<string, double> GetTotalDissolution()
     {
-        return new Dictionary<string, double>();
+        var totals = new Dictionary<string, double>();
+
+        if (_transportState == null || _transportState.MineralVolumeFractions.Count == 0)
+            return totals;
+
+        foreach (var mineral in _transportState.MineralVolumeFractions.Keys)
+        {
+            double total = 0.0;
+
+            if (_transportState.InitialMineralVolumeFractions.ContainsKey(mineral))
+            {
+                var current = _transportState.MineralVolumeFractions[mineral];
+                var initial = _transportState.InitialMineralVolumeFractions[mineral];
+
+                for (int i = 0; i < current.GetLength(0); i++)
+                for (int j = 0; j < current.GetLength(1); j++)
+                for (int k = 0; k < current.GetLength(2); k++)
+                {
+                    double delta = current[i, j, k] - initial[i, j, k];
+                    if (delta < 0) total += -delta;
+                }
+            }
+
+            totals[mineral] = total;
+        }
+
+        return totals;
     }
 }
