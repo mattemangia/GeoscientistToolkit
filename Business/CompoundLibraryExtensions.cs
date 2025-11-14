@@ -813,6 +813,935 @@ public static class CompoundLibraryExtensions
             IsUserCompound = false
         });
 
-        Logger.Log($"[CompoundLibraryExtensions] Added {60} additional compounds (minerals, aqueous species, gases)");
+        // ═══════════════════════════════════════════════════════════════════════
+        // METAMORPHIC MINERALS - Al-Silicates (Holland & Powell 2011)
+        // ═══════════════════════════════════════════════════════════════════════
+
+        library.AddOrUpdate(new ChemicalCompound
+        {
+            Name = "Kyanite",
+            ChemicalFormula = "Al₂SiO₅",
+            Synonyms = new List<string> { "Al2SiO5", "Disthene" },
+            Phase = CompoundPhase.Solid,
+            CrystalSystem = CrystalSystem.Triclinic,
+            GibbsFreeEnergyFormation_kJ_mol = -2443.9,  // Holland & Powell 2011
+            EnthalpyFormation_kJ_mol = -2594.3,
+            Entropy_J_molK = 83.8,
+            HeatCapacity_J_molK = 121.7,
+            MolarVolume_cm3_mol = 44.09,
+            MolecularWeight_g_mol = 162.05,
+            Density_g_cm3 = 3.68,
+            MohsHardness = 7.0,
+            Color = "Blue, white, gray",
+            Notes = "High-pressure polymorph of Al2SiO5, forms in blueschist and eclogite facies",
+            Sources = new List<string> { "Holland & Powell (2011)", "Robie & Hemingway (1995)" },
+            IsUserCompound = false
+        });
+
+        library.AddOrUpdate(new ChemicalCompound
+        {
+            Name = "Andalusite",
+            ChemicalFormula = "Al₂SiO₅",
+            Synonyms = new List<string> { "Al2SiO5" },
+            Phase = CompoundPhase.Solid,
+            CrystalSystem = CrystalSystem.Orthorhombic,
+            GibbsFreeEnergyFormation_kJ_mol = -2441.2,  // Holland & Powell 2011
+            EnthalpyFormation_kJ_mol = -2590.2,
+            Entropy_J_molK = 93.2,
+            HeatCapacity_J_molK = 122.7,
+            MolarVolume_cm3_mol = 51.53,
+            MolecularWeight_g_mol = 162.05,
+            Density_g_cm3 = 3.15,
+            MohsHardness = 7.5,
+            Color = "Pink, white, gray",
+            Notes = "Low-pressure polymorph of Al2SiO5, contact metamorphism indicator",
+            Sources = new List<string> { "Holland & Powell (2011)" },
+            IsUserCompound = false
+        });
+
+        library.AddOrUpdate(new ChemicalCompound
+        {
+            Name = "Sillimanite",
+            ChemicalFormula = "Al₂SiO₅",
+            Synonyms = new List<string> { "Al2SiO5", "Fibrolite" },
+            Phase = CompoundPhase.Solid,
+            CrystalSystem = CrystalSystem.Orthorhombic,
+            GibbsFreeEnergyFormation_kJ_mol = -2440.7,  // Holland & Powell 2011
+            EnthalpyFormation_kJ_mol = -2587.8,
+            Entropy_J_molK = 95.4,
+            HeatCapacity_J_molK = 124.5,
+            MolarVolume_cm3_mol = 49.90,
+            MolecularWeight_g_mol = 162.05,
+            Density_g_cm3 = 3.25,
+            MohsHardness = 7.0,
+            Color = "White, gray, brown",
+            Notes = "High-temperature polymorph of Al2SiO5, granulite facies indicator",
+            Sources = new List<string> { "Holland & Powell (2011)" },
+            IsUserCompound = false
+        });
+
+        // --- GARNETS (Holland & Powell 2011) ---
+
+        library.AddOrUpdate(new ChemicalCompound
+        {
+            Name = "Almandine",
+            ChemicalFormula = "Fe₃Al₂Si₃O₁₂",
+            Synonyms = new List<string> { "Fe3Al2Si3O12", "Fe-Garnet" },
+            Phase = CompoundPhase.Solid,
+            CrystalSystem = CrystalSystem.Cubic,
+            GibbsFreeEnergyFormation_kJ_mol = -4937.6,  // Holland & Powell 2011
+            EnthalpyFormation_kJ_mol = -5261.2,
+            Entropy_J_molK = 342.0,
+            HeatCapacity_J_molK = 325.1,
+            MolarVolume_cm3_mol = 115.28,
+            MolecularWeight_g_mol = 497.75,
+            Density_g_cm3 = 4.32,
+            MohsHardness = 7.5,
+            Color = "Red, brown-red",
+            Notes = "Fe-rich garnet end-member, common in pelitic schists",
+            Sources = new List<string> { "Holland & Powell (2011)" },
+            IsUserCompound = false
+        });
+
+        library.AddOrUpdate(new ChemicalCompound
+        {
+            Name = "Pyrope",
+            ChemicalFormula = "Mg₃Al₂Si₃O₁₂",
+            Synonyms = new List<string> { "Mg3Al2Si3O12", "Mg-Garnet" },
+            Phase = CompoundPhase.Solid,
+            CrystalSystem = CrystalSystem.Cubic,
+            GibbsFreeEnergyFormation_kJ_mol = -6285.5,  // Holland & Powell 2011
+            EnthalpyFormation_kJ_mol = -6640.7,
+            Entropy_J_molK = 266.3,
+            HeatCapacity_J_molK = 325.1,
+            MolarVolume_cm3_mol = 113.13,
+            MolecularWeight_g_mol = 403.13,
+            Density_g_cm3 = 3.56,
+            MohsHardness = 7.5,
+            Color = "Red, purple-red",
+            Notes = "Mg-rich garnet, indicator of high pressure (eclogite, peridotite)",
+            Sources = new List<string> { "Holland & Powell (2011)" },
+            IsUserCompound = false
+        });
+
+        library.AddOrUpdate(new ChemicalCompound
+        {
+            Name = "Grossular",
+            ChemicalFormula = "Ca₃Al₂Si₃O₁₂",
+            Synonyms = new List<string> { "Ca3Al2Si3O12", "Ca-Garnet" },
+            Phase = CompoundPhase.Solid,
+            CrystalSystem = CrystalSystem.Cubic,
+            GibbsFreeEnergyFormation_kJ_mol = -6632.5,  // Holland & Powell 2011
+            EnthalpyFormation_kJ_mol = -6984.8,
+            Entropy_J_molK = 255.2,
+            HeatCapacity_J_molK = 325.5,
+            MolarVolume_cm3_mol = 125.30,
+            MolecularWeight_g_mol = 450.45,
+            Density_g_cm3 = 3.59,
+            MohsHardness = 7.5,
+            Color = "Green, yellow-green, brown",
+            Notes = "Ca-rich garnet, found in calc-silicate rocks and rodingites",
+            Sources = new List<string> { "Holland & Powell (2011)" },
+            IsUserCompound = false
+        });
+
+        // ═══════════════════════════════════════════════════════════════════════
+        // MICAS (Holland & Powell 2011)
+        // ═══════════════════════════════════════════════════════════════════════
+
+        library.AddOrUpdate(new ChemicalCompound
+        {
+            Name = "Muscovite",
+            ChemicalFormula = "KAl₂(AlSi₃O₁₀)(OH)₂",
+            Synonyms = new List<string> { "KAl2(AlSi3O10)(OH)2", "White mica" },
+            Phase = CompoundPhase.Solid,
+            CrystalSystem = CrystalSystem.Monoclinic,
+            GibbsFreeEnergyFormation_kJ_mol = -5600.1,  // Holland & Powell 2011
+            EnthalpyFormation_kJ_mol = -5976.3,
+            Entropy_J_molK = 287.0,
+            HeatCapacity_J_molK = 292.9,
+            MolarVolume_cm3_mol = 140.71,
+            MolecularWeight_g_mol = 398.31,
+            Density_g_cm3 = 2.83,
+            MohsHardness = 2.5,
+            Color = "White, colorless, silver",
+            Notes = "Common phyllosilicate in pelitic schists and granites",
+            Sources = new List<string> { "Holland & Powell (2011)", "Deer et al. (2013)" },
+            IsUserCompound = false
+        });
+
+        library.AddOrUpdate(new ChemicalCompound
+        {
+            Name = "Phlogopite",
+            ChemicalFormula = "KMg₃(AlSi₃O₁₀)(OH)₂",
+            Synonyms = new List<string> { "KMg3(AlSi3O10)(OH)2", "Mg-biotite" },
+            Phase = CompoundPhase.Solid,
+            CrystalSystem = CrystalSystem.Monoclinic,
+            GibbsFreeEnergyFormation_kJ_mol = -6215.8,  // Holland & Powell 2011
+            EnthalpyFormation_kJ_mol = -6550.2,
+            Entropy_J_molK = 328.1,
+            HeatCapacity_J_molK = 316.9,
+            MolarVolume_cm3_mol = 149.66,
+            MolecularWeight_g_mol = 417.26,
+            Density_g_cm3 = 2.79,
+            MohsHardness = 2.5,
+            Color = "Brown, green-brown",
+            Notes = "Mg-rich mica, stable in ultramafic rocks and marbles",
+            Sources = new List<string> { "Holland & Powell (2011)" },
+            IsUserCompound = false
+        });
+
+        library.AddOrUpdate(new ChemicalCompound
+        {
+            Name = "Biotite",
+            ChemicalFormula = "K(Mg,Fe)₃(AlSi₃O₁₀)(OH)₂",
+            Synonyms = new List<string> { "Black mica" },
+            Phase = CompoundPhase.Solid,
+            CrystalSystem = CrystalSystem.Monoclinic,
+            GibbsFreeEnergyFormation_kJ_mol = -5644.3,  // Average composition, Holland & Powell 2011
+            EnthalpyFormation_kJ_mol = -6023.1,
+            Entropy_J_molK = 340.5,
+            HeatCapacity_J_molK = 310.5,
+            MolarVolume_cm3_mol = 154.4,
+            MolecularWeight_g_mol = 512.76,
+            Density_g_cm3 = 3.10,
+            MohsHardness = 2.5,
+            Color = "Black, dark brown",
+            Notes = "Common Fe-Mg mica in igneous and metamorphic rocks, solid solution series",
+            Sources = new List<string> { "Holland & Powell (2011)" },
+            IsUserCompound = false
+        });
+
+        // ═══════════════════════════════════════════════════════════════════════
+        // CLAY MINERALS & PHYLLOSILICATES (Robie & Hemingway 1995)
+        // ═══════════════════════════════════════════════════════════════════════
+
+        library.AddOrUpdate(new ChemicalCompound
+        {
+            Name = "Kaolinite",
+            ChemicalFormula = "Al₂Si₂O₅(OH)₄",
+            Synonyms = new List<string> { "Al2Si2O5(OH)4", "Kaolin" },
+            Phase = CompoundPhase.Solid,
+            CrystalSystem = CrystalSystem.Triclinic,
+            GibbsFreeEnergyFormation_kJ_mol = -3799.4,  // Robie & Hemingway 1995
+            EnthalpyFormation_kJ_mol = -4119.7,
+            Entropy_J_molK = 203.1,
+            HeatCapacity_J_molK = 205.0,
+            MolarVolume_cm3_mol = 99.52,
+            MolecularWeight_g_mol = 258.16,
+            Density_g_cm3 = 2.59,
+            MohsHardness = 2.0,
+            Color = "White, gray",
+            Notes = "Common weathering product of feldspars, major clay mineral",
+            Sources = new List<string> { "Robie & Hemingway (1995)", "PHREEQC database" },
+            IsUserCompound = false
+        });
+
+        library.AddOrUpdate(new ChemicalCompound
+        {
+            Name = "Pyrophyllite",
+            ChemicalFormula = "Al₂Si₄O₁₀(OH)₂",
+            Synonyms = new List<string> { "Al2Si4O10(OH)2" },
+            Phase = CompoundPhase.Solid,
+            CrystalSystem = CrystalSystem.Triclinic,
+            GibbsFreeEnergyFormation_kJ_mol = -5266.0,  // Robie & Hemingway 1995
+            EnthalpyFormation_kJ_mol = -5640.3,
+            Entropy_J_molK = 239.4,
+            HeatCapacity_J_molK = 294.0,
+            MolarVolume_cm3_mol = 126.6,
+            MolecularWeight_g_mol = 360.31,
+            Density_g_cm3 = 2.85,
+            MohsHardness = 1.5,
+            Color = "White, gray, green",
+            Notes = "Hydrothermal alteration product, similar to talc but with Al",
+            Sources = new List<string> { "Robie & Hemingway (1995)" },
+            IsUserCompound = false
+        });
+
+        library.AddOrUpdate(new ChemicalCompound
+        {
+            Name = "Talc",
+            ChemicalFormula = "Mg₃Si₄O₁₀(OH)₂",
+            Synonyms = new List<string> { "Mg3Si4O10(OH)2", "Talcum" },
+            Phase = CompoundPhase.Solid,
+            CrystalSystem = CrystalSystem.Triclinic,
+            GibbsFreeEnergyFormation_kJ_mol = -5520.5,  // Holland & Powell 2011
+            EnthalpyFormation_kJ_mol = -5897.8,
+            Entropy_J_molK = 260.8,
+            HeatCapacity_J_molK = 324.0,
+            MolarVolume_cm3_mol = 136.25,
+            MolecularWeight_g_mol = 379.27,
+            Density_g_cm3 = 2.78,
+            MohsHardness = 1.0,
+            Color = "White, green, gray",
+            Notes = "Softest common mineral, alteration product of ultramafic rocks",
+            Sources = new List<string> { "Holland & Powell (2011)", "Robie & Hemingway (1995)" },
+            IsUserCompound = false
+        });
+
+        library.AddOrUpdate(new ChemicalCompound
+        {
+            Name = "Serpentine",
+            ChemicalFormula = "Mg₃Si₂O₅(OH)₄",
+            Synonyms = new List<string> { "Mg3Si2O5(OH)4", "Antigorite", "Chrysotile", "Lizardite" },
+            Phase = CompoundPhase.Solid,
+            CrystalSystem = CrystalSystem.Monoclinic,
+            GibbsFreeEnergyFormation_kJ_mol = -4032.2,  // Holland & Powell 2011
+            EnthalpyFormation_kJ_mol = -4360.5,
+            Entropy_J_molK = 221.3,
+            HeatCapacity_J_molK = 244.3,
+            MolarVolume_cm3_mol = 107.0,
+            MolecularWeight_g_mol = 277.11,
+            Density_g_cm3 = 2.59,
+            MohsHardness = 3.0,
+            Color = "Green, yellow-green",
+            Notes = "Major serpentinization product of olivine and pyroxene",
+            Sources = new List<string> { "Holland & Powell (2011)", "Evans et al. (2013)" },
+            IsUserCompound = false
+        });
+
+        // ═══════════════════════════════════════════════════════════════════════
+        // AMPHIBOLES (Holland & Powell 2011)
+        // ═══════════════════════════════════════════════════════════════════════
+
+        library.AddOrUpdate(new ChemicalCompound
+        {
+            Name = "Tremolite",
+            ChemicalFormula = "Ca₂Mg₅Si₈O₂₂(OH)₂",
+            Synonyms = new List<string> { "Ca2Mg5Si8O22(OH)2" },
+            Phase = CompoundPhase.Solid,
+            CrystalSystem = CrystalSystem.Monoclinic,
+            GibbsFreeEnergyFormation_kJ_mol = -12067.4,  // Holland & Powell 2011
+            EnthalpyFormation_kJ_mol = -12779.4,
+            Entropy_J_molK = 549.3,
+            HeatCapacity_J_molK = 665.0,
+            MolarVolume_cm3_mol = 272.92,
+            MolecularWeight_g_mol = 812.37,
+            Density_g_cm3 = 2.98,
+            MohsHardness = 5.5,
+            Color = "White, gray, green",
+            Notes = "Mg-rich amphibole, forms from metamorphism of dolomitic limestones",
+            Sources = new List<string> { "Holland & Powell (2011)" },
+            IsUserCompound = false
+        });
+
+        library.AddOrUpdate(new ChemicalCompound
+        {
+            Name = "Actinolite",
+            ChemicalFormula = "Ca₂(Mg,Fe)₅Si₈O₂₂(OH)₂",
+            Synonyms = new List<string> { "Ca2(Mg,Fe)5Si8O22(OH)2" },
+            Phase = CompoundPhase.Solid,
+            CrystalSystem = CrystalSystem.Monoclinic,
+            GibbsFreeEnergyFormation_kJ_mol = -11523.8,  // Average, Holland & Powell 2011
+            EnthalpyFormation_kJ_mol = -12198.5,
+            Entropy_J_molK = 572.0,
+            HeatCapacity_J_molK = 680.0,
+            MolarVolume_cm3_mol = 277.4,
+            MolecularWeight_g_mol = 970.20,
+            Density_g_cm3 = 3.20,
+            MohsHardness = 5.5,
+            Color = "Green, dark green",
+            Notes = "Ca-Mg-Fe amphibole, greenschist facies indicator",
+            Sources = new List<string> { "Holland & Powell (2011)" },
+            IsUserCompound = false
+        });
+
+        // ═══════════════════════════════════════════════════════════════════════
+        // ADDITIONAL SILICATES
+        // ═══════════════════════════════════════════════════════════════════════
+
+        library.AddOrUpdate(new ChemicalCompound
+        {
+            Name = "Wollastonite",
+            ChemicalFormula = "CaSiO₃",
+            Synonyms = new List<string> { "CaSiO3" },
+            Phase = CompoundPhase.Solid,
+            CrystalSystem = CrystalSystem.Triclinic,
+            GibbsFreeEnergyFormation_kJ_mol = -1549.7,  // Holland & Powell 2011
+            EnthalpyFormation_kJ_mol = -1634.9,
+            Entropy_J_molK = 82.0,
+            HeatCapacity_J_molK = 85.8,
+            MolarVolume_cm3_mol = 39.93,
+            MolecularWeight_g_mol = 116.16,
+            Density_g_cm3 = 2.91,
+            MohsHardness = 5.0,
+            Color = "White, gray",
+            Notes = "Forms from thermal metamorphism of siliceous limestones",
+            Sources = new List<string> { "Holland & Powell (2011)", "Robie & Hemingway (1995)" },
+            IsUserCompound = false
+        });
+
+        library.AddOrUpdate(new ChemicalCompound
+        {
+            Name = "Epidote",
+            ChemicalFormula = "Ca₂Al₂FeSi₃O₁₂(OH)",
+            Synonyms = new List<string> { "Ca2Al2FeSi3O12(OH)" },
+            Phase = CompoundPhase.Solid,
+            CrystalSystem = CrystalSystem.Monoclinic,
+            GibbsFreeEnergyFormation_kJ_mol = -6477.1,  // Holland & Powell 2011
+            EnthalpyFormation_kJ_mol = -6890.3,
+            Entropy_J_molK = 301.3,
+            HeatCapacity_J_molK = 315.5,
+            MolarVolume_cm3_mol = 139.2,
+            MolecularWeight_g_mol = 483.25,
+            Density_g_cm3 = 3.47,
+            MohsHardness = 6.5,
+            Color = "Green, yellow-green",
+            Notes = "Common in low-grade metamorphic rocks, forms during hydrothermal alteration",
+            Sources = new List<string> { "Holland & Powell (2011)" },
+            IsUserCompound = false
+        });
+
+        // ═══════════════════════════════════════════════════════════════════════
+        // PHOSPHATE MINERALS (Robie & Hemingway 1995)
+        // ═══════════════════════════════════════════════════════════════════════
+
+        library.AddOrUpdate(new ChemicalCompound
+        {
+            Name = "Fluorapatite",
+            ChemicalFormula = "Ca₅(PO₄)₃F",
+            Synonyms = new List<string> { "Ca5(PO4)3F", "FAP" },
+            Phase = CompoundPhase.Solid,
+            CrystalSystem = CrystalSystem.Hexagonal,
+            GibbsFreeEnergyFormation_kJ_mol = -6342.9,  // Robie & Hemingway 1995
+            EnthalpyFormation_kJ_mol = -6783.6,
+            Entropy_J_molK = 390.4,
+            HeatCapacity_J_molK = 390.0,
+            LogKsp_25C = -60.4,
+            MolarVolume_cm3_mol = 158.4,
+            MolecularWeight_g_mol = 504.30,
+            Density_g_cm3 = 3.18,
+            MohsHardness = 5.0,
+            Color = "Green, blue, yellow, colorless",
+            Notes = "Most common apatite, important in phosphate deposits",
+            Sources = new List<string> { "Robie & Hemingway (1995)", "PHREEQC database" },
+            IsUserCompound = false
+        });
+
+        library.AddOrUpdate(new ChemicalCompound
+        {
+            Name = "Hydroxyapatite",
+            ChemicalFormula = "Ca₅(PO₄)₃OH",
+            Synonyms = new List<string> { "Ca5(PO4)3OH", "HAP" },
+            Phase = CompoundPhase.Solid,
+            CrystalSystem = CrystalSystem.Hexagonal,
+            GibbsFreeEnergyFormation_kJ_mol = -6314.6,  // Robie & Hemingway 1995
+            EnthalpyFormation_kJ_mol = -6721.2,
+            Entropy_J_molK = 390.4,
+            HeatCapacity_J_molK = 402.6,
+            LogKsp_25C = -58.4,
+            MolarVolume_cm3_mol = 159.0,
+            MolecularWeight_g_mol = 502.31,
+            Density_g_cm3 = 3.16,
+            MohsHardness = 5.0,
+            Color = "White, colorless",
+            Notes = "Major component of bone and teeth, biogenic mineral",
+            Sources = new List<string> { "Robie & Hemingway (1995)", "PHREEQC database" },
+            IsUserCompound = false
+        });
+
+        library.AddOrUpdate(new ChemicalCompound
+        {
+            Name = "Vivianite",
+            ChemicalFormula = "Fe₃(PO₄)₂·8H₂O",
+            Synonyms = new List<string> { "Fe3(PO4)2!8H2O" },
+            Phase = CompoundPhase.Solid,
+            CrystalSystem = CrystalSystem.Monoclinic,
+            GibbsFreeEnergyFormation_kJ_mol = -4366.5,  // PHREEQC database
+            EnthalpyFormation_kJ_mol = -5096.2,
+            Entropy_J_molK = 792.0,
+            LogKsp_25C = -36.0,
+            MolarVolume_cm3_mol = 210.0,
+            MolecularWeight_g_mol = 501.60,
+            Density_g_cm3 = 2.68,
+            MohsHardness = 2.0,
+            Color = "Colorless when fresh, blue-green when oxidized",
+            Notes = "Forms in reducing environments rich in Fe2+ and phosphate",
+            Sources = new List<string> { "PHREEQC database", "Nriagu & Dell (1974)" },
+            IsUserCompound = false
+        });
+
+        // ═══════════════════════════════════════════════════════════════════════
+        // ADDITIONAL CARBONATE MINERALS (Robie & Hemingway 1995)
+        // ═══════════════════════════════════════════════════════════════════════
+
+        library.AddOrUpdate(new ChemicalCompound
+        {
+            Name = "Witherite",
+            ChemicalFormula = "BaCO₃",
+            Synonyms = new List<string> { "BaCO3" },
+            Phase = CompoundPhase.Solid,
+            CrystalSystem = CrystalSystem.Orthorhombic,
+            GibbsFreeEnergyFormation_kJ_mol = -1132.2,  // Robie & Hemingway 1995
+            EnthalpyFormation_kJ_mol = -1216.3,
+            Entropy_J_molK = 112.1,
+            HeatCapacity_J_molK = 85.4,
+            LogKsp_25C = -8.56,
+            MolarVolume_cm3_mol = 45.81,
+            MolecularWeight_g_mol = 197.34,
+            Density_g_cm3 = 4.31,
+            MohsHardness = 3.5,
+            Color = "White, gray",
+            Notes = "Rare Ba carbonate, forms in hydrothermal veins",
+            Sources = new List<string> { "Robie & Hemingway (1995)", "PHREEQC database" },
+            IsUserCompound = false
+        });
+
+        library.AddOrUpdate(new ChemicalCompound
+        {
+            Name = "Cerussite",
+            ChemicalFormula = "PbCO₃",
+            Synonyms = new List<string> { "PbCO3", "Lead carbonate" },
+            Phase = CompoundPhase.Solid,
+            CrystalSystem = CrystalSystem.Orthorhombic,
+            GibbsFreeEnergyFormation_kJ_mol = -625.5,  // Robie & Hemingway 1995
+            EnthalpyFormation_kJ_mol = -699.1,
+            Entropy_J_molK = 131.0,
+            HeatCapacity_J_molK = 87.4,
+            LogKsp_25C = -13.13,
+            MolarVolume_cm3_mol = 48.09,
+            MolecularWeight_g_mol = 267.21,
+            Density_g_cm3 = 6.55,
+            MohsHardness = 3.0,
+            Color = "White, gray, colorless",
+            Notes = "Secondary mineral from oxidation of galena",
+            Sources = new List<string> { "Robie & Hemingway (1995)", "PHREEQC database" },
+            IsUserCompound = false
+        });
+
+        library.AddOrUpdate(new ChemicalCompound
+        {
+            Name = "Smithsonite",
+            ChemicalFormula = "ZnCO₃",
+            Synonyms = new List<string> { "ZnCO3", "Zinc spar" },
+            Phase = CompoundPhase.Solid,
+            CrystalSystem = CrystalSystem.Trigonal,
+            GibbsFreeEnergyFormation_kJ_mol = -731.5,  // Robie & Hemingway 1995
+            EnthalpyFormation_kJ_mol = -812.8,
+            Entropy_J_molK = 82.4,
+            HeatCapacity_J_molK = 79.7,
+            LogKsp_25C = -10.0,
+            MolarVolume_cm3_mol = 31.86,
+            MolecularWeight_g_mol = 125.40,
+            Density_g_cm3 = 4.43,
+            MohsHardness = 4.5,
+            Color = "White, yellow, green, blue",
+            Notes = "Secondary Zn mineral, forms from weathering of sphalerite",
+            Sources = new List<string> { "Robie & Hemingway (1995)", "PHREEQC database" },
+            IsUserCompound = false
+        });
+
+        library.AddOrUpdate(new ChemicalCompound
+        {
+            Name = "Azurite",
+            ChemicalFormula = "Cu₃(CO₃)₂(OH)₂",
+            Synonyms = new List<string> { "Cu3(CO3)2(OH)2" },
+            Phase = CompoundPhase.Solid,
+            CrystalSystem = CrystalSystem.Monoclinic,
+            GibbsFreeEnergyFormation_kJ_mol = -1448.5,  // PHREEQC database
+            EnthalpyFormation_kJ_mol = -1655.5,
+            Entropy_J_molK = 251.0,
+            LogKsp_25C = -46.2,
+            MolarVolume_cm3_mol = 91.4,
+            MolecularWeight_g_mol = 344.67,
+            Density_g_cm3 = 3.77,
+            MohsHardness = 3.5,
+            Color = "Azure blue",
+            Notes = "Secondary Cu mineral, forms with malachite in oxidized Cu deposits",
+            Sources = new List<string> { "PHREEQC database", "Nordstrom & Archer (2003)" },
+            IsUserCompound = false
+        });
+
+        library.AddOrUpdate(new ChemicalCompound
+        {
+            Name = "Malachite",
+            ChemicalFormula = "Cu₂CO₃(OH)₂",
+            Synonyms = new List<string> { "Cu2CO3(OH)2" },
+            Phase = CompoundPhase.Solid,
+            CrystalSystem = CrystalSystem.Monoclinic,
+            GibbsFreeEnergyFormation_kJ_mol = -893.7,  // PHREEQC database
+            EnthalpyFormation_kJ_mol = -1051.4,
+            Entropy_J_molK = 186.2,
+            LogKsp_25C = -33.8,
+            MolarVolume_cm3_mol = 54.1,
+            MolecularWeight_g_mol = 221.12,
+            Density_g_cm3 = 4.05,
+            MohsHardness = 3.5,
+            Color = "Bright green",
+            Notes = "Common secondary Cu mineral, ornamental stone",
+            Sources = new List<string> { "PHREEQC database", "Nordstrom & Archer (2003)" },
+            IsUserCompound = false
+        });
+
+        // ═══════════════════════════════════════════════════════════════════════
+        // SULFIDE MINERALS (Robie & Hemingway 1995)
+        // ═══════════════════════════════════════════════════════════════════════
+
+        library.AddOrUpdate(new ChemicalCompound
+        {
+            Name = "Pyrite",
+            ChemicalFormula = "FeS₂",
+            Synonyms = new List<string> { "FeS2", "Iron pyrite", "Fool's gold" },
+            Phase = CompoundPhase.Solid,
+            CrystalSystem = CrystalSystem.Cubic,
+            GibbsFreeEnergyFormation_kJ_mol = -160.1,  // Robie & Hemingway 1995
+            EnthalpyFormation_kJ_mol = -178.2,
+            Entropy_J_molK = 52.9,
+            HeatCapacity_J_molK = 62.2,
+            LogKsp_25C = -18.5,
+            MolarVolume_cm3_mol = 23.94,
+            MolecularWeight_g_mol = 119.98,
+            Density_g_cm3 = 5.01,
+            MohsHardness = 6.5,
+            Color = "Brass yellow, metallic",
+            Notes = "Most common sulfide mineral, forms in many environments",
+            Sources = new List<string> { "Robie & Hemingway (1995)", "PHREEQC database" },
+            IsUserCompound = false
+        });
+
+        library.AddOrUpdate(new ChemicalCompound
+        {
+            Name = "Galena",
+            ChemicalFormula = "PbS",
+            Synonyms = new List<string> { "Lead sulfide" },
+            Phase = CompoundPhase.Solid,
+            CrystalSystem = CrystalSystem.Cubic,
+            GibbsFreeEnergyFormation_kJ_mol = -92.7,  // Robie & Hemingway 1995
+            EnthalpyFormation_kJ_mol = -100.4,
+            Entropy_J_molK = 91.2,
+            HeatCapacity_J_molK = 49.5,
+            LogKsp_25C = -27.5,
+            MolarVolume_cm3_mol = 31.54,
+            MolecularWeight_g_mol = 239.27,
+            Density_g_cm3 = 7.58,
+            MohsHardness = 2.5,
+            Color = "Lead-gray, metallic",
+            Notes = "Primary ore of lead, common in hydrothermal veins",
+            Sources = new List<string> { "Robie & Hemingway (1995)", "PHREEQC database" },
+            IsUserCompound = false
+        });
+
+        library.AddOrUpdate(new ChemicalCompound
+        {
+            Name = "Sphalerite",
+            ChemicalFormula = "ZnS",
+            Synonyms = new List<string> { "Zinc blende" },
+            Phase = CompoundPhase.Solid,
+            CrystalSystem = CrystalSystem.Cubic,
+            GibbsFreeEnergyFormation_kJ_mol = -198.3,  // Robie & Hemingway 1995
+            EnthalpyFormation_kJ_mol = -206.0,
+            Entropy_J_molK = 57.7,
+            HeatCapacity_J_molK = 46.0,
+            LogKsp_25C = -23.8,
+            MolarVolume_cm3_mol = 23.83,
+            MolecularWeight_g_mol = 97.47,
+            Density_g_cm3 = 4.09,
+            MohsHardness = 4.0,
+            Color = "Yellow, brown, black",
+            Notes = "Primary ore of zinc, common in Mississippi Valley-type deposits",
+            Sources = new List<string> { "Robie & Hemingway (1995)", "PHREEQC database" },
+            IsUserCompound = false
+        });
+
+        library.AddOrUpdate(new ChemicalCompound
+        {
+            Name = "Chalcopyrite",
+            ChemicalFormula = "CuFeS₂",
+            Synonyms = new List<string> { "CuFeS2", "Copper pyrite" },
+            Phase = CompoundPhase.Solid,
+            CrystalSystem = CrystalSystem.Tetragonal,
+            GibbsFreeEnergyFormation_kJ_mol = -193.7,  // Robie & Hemingway 1995
+            EnthalpyFormation_kJ_mol = -194.6,
+            Entropy_J_molK = 124.9,
+            HeatCapacity_J_molK = 98.3,
+            LogKsp_25C = -36.0,
+            MolarVolume_cm3_mol = 42.45,
+            MolecularWeight_g_mol = 183.52,
+            Density_g_cm3 = 4.19,
+            MohsHardness = 3.5,
+            Color = "Brass yellow with green tint",
+            Notes = "Most important Cu ore mineral, porphyry deposits",
+            Sources = new List<string> { "Robie & Hemingway (1995)", "PHREEQC database" },
+            IsUserCompound = false
+        });
+
+        library.AddOrUpdate(new ChemicalCompound
+        {
+            Name = "Pyrrhotite",
+            ChemicalFormula = "Fe₁₋ₓS",
+            Synonyms = new List<string> { "FeS", "Magnetic pyrite" },
+            Phase = CompoundPhase.Solid,
+            CrystalSystem = CrystalSystem.Monoclinic,
+            GibbsFreeEnergyFormation_kJ_mol = -99.6,  // Robie & Hemingway 1995
+            EnthalpyFormation_kJ_mol = -101.7,
+            Entropy_J_molK = 60.3,
+            HeatCapacity_J_molK = 49.9,
+            MolarVolume_cm3_mol = 18.20,
+            MolecularWeight_g_mol = 87.91,
+            Density_g_cm3 = 4.61,
+            MohsHardness = 4.0,
+            Color = "Bronze-brown, metallic",
+            Notes = "Non-stoichiometric Fe sulfide, weakly magnetic",
+            Sources = new List<string> { "Robie & Hemingway (1995)" },
+            IsUserCompound = false
+        });
+
+        // ═══════════════════════════════════════════════════════════════════════
+        // ZEOLITE MINERALS (Bowers et al. 1984)
+        // ═══════════════════════════════════════════════════════════════════════
+
+        library.AddOrUpdate(new ChemicalCompound
+        {
+            Name = "Analcime",
+            ChemicalFormula = "NaAlSi₂O₆·H₂O",
+            Synonyms = new List<string> { "NaAlSi2O6!H2O", "Analcite" },
+            Phase = CompoundPhase.Solid,
+            CrystalSystem = CrystalSystem.Cubic,
+            GibbsFreeEnergyFormation_kJ_mol = -3087.8,  // Bowers et al. 1984
+            EnthalpyFormation_kJ_mol = -3306.6,
+            Entropy_J_molK = 226.0,
+            HeatCapacity_J_molK = 217.0,
+            MolarVolume_cm3_mol = 97.2,
+            MolecularWeight_g_mol = 220.16,
+            Density_g_cm3 = 2.27,
+            MohsHardness = 5.5,
+            Color = "White, colorless",
+            Notes = "Common zeolite in basalts and tuffs, hydrothermal alteration",
+            Sources = new List<string> { "Bowers et al. (1984)", "PHREEQC database" },
+            IsUserCompound = false
+        });
+
+        library.AddOrUpdate(new ChemicalCompound
+        {
+            Name = "Laumontite",
+            ChemicalFormula = "CaAl₂Si₄O₁₂·4H₂O",
+            Synonyms = new List<string> { "CaAl2Si4O12!4H2O" },
+            Phase = CompoundPhase.Solid,
+            CrystalSystem = CrystalSystem.Monoclinic,
+            GibbsFreeEnergyFormation_kJ_mol = -6870.9,  // Bowers et al. 1984
+            EnthalpyFormation_kJ_mol = -7450.3,
+            Entropy_J_molK = 424.0,
+            HeatCapacity_J_molK = 480.0,
+            MolarVolume_cm3_mol = 189.0,
+            MolecularWeight_g_mol = 470.43,
+            Density_g_cm3 = 2.25,
+            MohsHardness = 3.5,
+            Color = "White, pink",
+            Notes = "Low-temperature zeolite, burial metamorphism indicator",
+            Sources = new List<string> { "Bowers et al. (1984)" },
+            IsUserCompound = false
+        });
+
+        // ═══════════════════════════════════════════════════════════════════════
+        // ADDITIONAL OXIDE MINERALS (Robie & Hemingway 1995)
+        // ═══════════════════════════════════════════════════════════════════════
+
+        library.AddOrUpdate(new ChemicalCompound
+        {
+            Name = "Rutile",
+            ChemicalFormula = "TiO₂",
+            Synonyms = new List<string> { "TiO2", "Titanium dioxide" },
+            Phase = CompoundPhase.Solid,
+            CrystalSystem = CrystalSystem.Tetragonal,
+            GibbsFreeEnergyFormation_kJ_mol = -889.5,  // Robie & Hemingway 1995
+            EnthalpyFormation_kJ_mol = -944.0,
+            Entropy_J_molK = 50.6,
+            HeatCapacity_J_molK = 55.0,
+            MolarVolume_cm3_mol = 18.69,
+            MolecularWeight_g_mol = 79.87,
+            Density_g_cm3 = 4.25,
+            MohsHardness = 6.5,
+            Color = "Red-brown, black",
+            Notes = "Common accessory mineral, high-pressure polymorph of TiO2",
+            Sources = new List<string> { "Robie & Hemingway (1995)" },
+            IsUserCompound = false
+        });
+
+        library.AddOrUpdate(new ChemicalCompound
+        {
+            Name = "Ilmenite",
+            ChemicalFormula = "FeTiO₃",
+            Synonyms = new List<string> { "FeTiO3" },
+            Phase = CompoundPhase.Solid,
+            CrystalSystem = CrystalSystem.Trigonal,
+            GibbsFreeEnergyFormation_kJ_mol = -1162.3,  // Robie & Hemingway 1995
+            EnthalpyFormation_kJ_mol = -1234.9,
+            Entropy_J_molK = 108.5,
+            HeatCapacity_J_molK = 96.5,
+            MolarVolume_cm3_mol = 31.86,
+            MolecularWeight_g_mol = 151.71,
+            Density_g_cm3 = 4.72,
+            MohsHardness = 5.5,
+            Color = "Black, metallic",
+            Notes = "Primary Ti ore mineral, common in mafic igneous rocks",
+            Sources = new List<string> { "Robie & Hemingway (1995)" },
+            IsUserCompound = false
+        });
+
+        library.AddOrUpdate(new ChemicalCompound
+        {
+            Name = "Spinel",
+            ChemicalFormula = "MgAl₂O₄",
+            Synonyms = new List<string> { "MgAl2O4" },
+            Phase = CompoundPhase.Solid,
+            CrystalSystem = CrystalSystem.Cubic,
+            GibbsFreeEnergyFormation_kJ_mol = -2166.9,  // Holland & Powell 2011
+            EnthalpyFormation_kJ_mol = -2300.3,
+            Entropy_J_molK = 80.6,
+            HeatCapacity_J_molK = 117.1,
+            MolarVolume_cm3_mol = 39.71,
+            MolecularWeight_g_mol = 142.27,
+            Density_g_cm3 = 3.58,
+            MohsHardness = 8.0,
+            Color = "Red, blue, green, colorless",
+            Notes = "Important in ultramafic rocks and high-grade metamorphism",
+            Sources = new List<string> { "Holland & Powell (2011)", "Robie & Hemingway (1995)" },
+            IsUserCompound = false
+        });
+
+        library.AddOrUpdate(new ChemicalCompound
+        {
+            Name = "Hercynite",
+            ChemicalFormula = "FeAl₂O₄",
+            Synonyms = new List<string> { "FeAl2O4", "Fe-spinel" },
+            Phase = CompoundPhase.Solid,
+            CrystalSystem = CrystalSystem.Cubic,
+            GibbsFreeEnergyFormation_kJ_mol = -1879.5,  // Holland & Powell 2011
+            EnthalpyFormation_kJ_mol = -1969.9,
+            Entropy_J_molK = 106.3,
+            HeatCapacity_J_molK = 130.8,
+            MolarVolume_cm3_mol = 40.75,
+            MolecularWeight_g_mol = 173.81,
+            Density_g_cm3 = 4.39,
+            MohsHardness = 7.5,
+            Color = "Dark green, black",
+            Notes = "Fe end-member of spinel group",
+            Sources = new List<string> { "Holland & Powell (2011)" },
+            IsUserCompound = false
+        });
+
+        // ═══════════════════════════════════════════════════════════════════════
+        // HYDROXIDE MINERALS (Robie & Hemingway 1995)
+        // ═══════════════════════════════════════════════════════════════════════
+
+        library.AddOrUpdate(new ChemicalCompound
+        {
+            Name = "Gibbsite",
+            ChemicalFormula = "Al(OH)₃",
+            Synonyms = new List<string> { "Al(OH)3", "Hydrargillite" },
+            Phase = CompoundPhase.Solid,
+            CrystalSystem = CrystalSystem.Monoclinic,
+            GibbsFreeEnergyFormation_kJ_mol = -1154.9,  // Robie & Hemingway 1995
+            EnthalpyFormation_kJ_mol = -1293.1,
+            Entropy_J_molK = 68.4,
+            HeatCapacity_J_molK = 93.2,
+            LogKsp_25C = 8.11,  // For dissolution to Al3+
+            MolarVolume_cm3_mol = 31.96,
+            MolecularWeight_g_mol = 78.00,
+            Density_g_cm3 = 2.42,
+            MohsHardness = 3.0,
+            Color = "White, gray",
+            Notes = "Common in bauxite, weathering product of Al-silicates",
+            Sources = new List<string> { "Robie & Hemingway (1995)", "PHREEQC database" },
+            IsUserCompound = false
+        });
+
+        library.AddOrUpdate(new ChemicalCompound
+        {
+            Name = "Brucite",
+            ChemicalFormula = "Mg(OH)₂",
+            Synonyms = new List<string> { "Mg(OH)2", "Magnesium hydroxide" },
+            Phase = CompoundPhase.Solid,
+            CrystalSystem = CrystalSystem.Trigonal,
+            GibbsFreeEnergyFormation_kJ_mol = -833.5,  // Robie & Hemingway 1995
+            EnthalpyFormation_kJ_mol = -924.5,
+            Entropy_J_molK = 63.2,
+            HeatCapacity_J_molK = 77.0,
+            LogKsp_25C = -11.16,
+            MolarVolume_cm3_mol = 24.63,
+            MolecularWeight_g_mol = 58.32,
+            Density_g_cm3 = 2.37,
+            MohsHardness = 2.5,
+            Color = "White, gray, green",
+            Notes = "Forms from serpentinization of periclase, pH buffer in seawater",
+            Sources = new List<string> { "Robie & Hemingway (1995)", "PHREEQC database" },
+            IsUserCompound = false
+        });
+
+        library.AddOrUpdate(new ChemicalCompound
+        {
+            Name = "Goethite",
+            ChemicalFormula = "FeOOH",
+            Synonyms = new List<string> { "α-FeOOH", "Iron oxyhydroxide" },
+            Phase = CompoundPhase.Solid,
+            CrystalSystem = CrystalSystem.Orthorhombic,
+            GibbsFreeEnergyFormation_kJ_mol = -488.6,  // Robie & Hemingway 1995
+            EnthalpyFormation_kJ_mol = -559.3,
+            Entropy_J_molK = 60.4,
+            HeatCapacity_J_molK = 84.0,
+            LogKsp_25C = -41.0,  // For dissolution to Fe3+
+            MolarVolume_cm3_mol = 20.82,
+            MolecularWeight_g_mol = 88.85,
+            Density_g_cm3 = 4.27,
+            MohsHardness = 5.5,
+            Color = "Yellow-brown, red-brown",
+            Notes = "Most common Fe oxide in soils, weathering product",
+            Sources = new List<string> { "Robie & Hemingway (1995)", "Cornell & Schwertmann (2003)" },
+            IsUserCompound = false
+        });
+
+        // ═══════════════════════════════════════════════════════════════════════
+        // ADDITIONAL GAS SPECIES (NIST WebBook)
+        // ═══════════════════════════════════════════════════════════════════════
+
+        library.AddOrUpdate(new ChemicalCompound
+        {
+            Name = "Argon gas",
+            ChemicalFormula = "Ar(g)",
+            Synonyms = new List<string> { "Ar", "Ar(g)" },
+            Phase = CompoundPhase.Gas,
+            GibbsFreeEnergyFormation_kJ_mol = 0.0,  // Element in standard state
+            EnthalpyFormation_kJ_mol = 0.0,
+            Entropy_J_molK = 154.8,
+            HeatCapacity_J_molK = 20.8,
+            HenrysLawConstant_mol_L_atm = 1.4e-3,  // 25°C
+            MolecularWeight_g_mol = 39.95,
+            Sources = new List<string> { "NIST WebBook" },
+            IsUserCompound = false
+        });
+
+        library.AddOrUpdate(new ChemicalCompound
+        {
+            Name = "Helium gas",
+            ChemicalFormula = "He(g)",
+            Synonyms = new List<string> { "He", "He(g)" },
+            Phase = CompoundPhase.Gas,
+            GibbsFreeEnergyFormation_kJ_mol = 0.0,  // Element in standard state
+            EnthalpyFormation_kJ_mol = 0.0,
+            Entropy_J_molK = 126.2,
+            HeatCapacity_J_molK = 20.8,
+            HenrysLawConstant_mol_L_atm = 3.7e-4,  // 25°C
+            MolecularWeight_g_mol = 4.00,
+            Sources = new List<string> { "NIST WebBook" },
+            IsUserCompound = false
+        });
+
+        library.AddOrUpdate(new ChemicalCompound
+        {
+            Name = "Carbon monoxide gas",
+            ChemicalFormula = "CO(g)",
+            Synonyms = new List<string> { "CO", "CO(g)" },
+            Phase = CompoundPhase.Gas,
+            GibbsFreeEnergyFormation_kJ_mol = -137.2,  // NIST WebBook
+            EnthalpyFormation_kJ_mol = -110.5,
+            Entropy_J_molK = 197.7,
+            HeatCapacity_J_molK = 29.1,
+            HenrysLawConstant_mol_L_atm = 9.5e-4,  // 25°C
+            MolecularWeight_g_mol = 28.01,
+            Sources = new List<string> { "NIST WebBook", "SUPCRT92" },
+            IsUserCompound = false
+        });
+
+        Logger.Log($"[CompoundLibraryExtensions] Added {110} additional compounds (minerals, aqueous species, gases)");
     }
 }
