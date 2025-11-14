@@ -8,9 +8,9 @@ using System;
 using System.Collections.Generic;
 using System.Numerics;
 using System.IO;
+using System.Text.Json;
 using Veldrid;
 using GeoscientistToolkit.UI.Utils;
-
 using GeoscientistToolkit.Util;
 namespace GeoscientistToolkit.UI.Windows;
 
@@ -46,6 +46,11 @@ public class RealtimePhotogrammetryWindow : IDisposable
     private float _principalPointX = 320;
     private float _principalPointY = 240;
 
+    // Memory management
+    private bool _enableMemoryManagement = true;
+    private int _memoryThresholdMB = 2048;
+    private int _maxKeyframesInMemory = 50;
+
     // Georeferencing
     private bool _showGeoreferencing;
     private string _gcpName = "GCP_";
@@ -55,10 +60,14 @@ public class RealtimePhotogrammetryWindow : IDisposable
     private bool _refineWithAltitude = false;
 
     // Visualization
-    private IntPtr _frameTextureId = IntPtr.Zero;
-    private IntPtr _depthTextureId = IntPtr.Zero;
+    private TextureManager _frameTexture;
+    private TextureManager _depthTexture;
     private Mat _currentFrameDisplay;
     private Mat _currentDepthDisplay;
+
+    // Keyframe viewer
+    private KeyframeManager.Keyframe _selectedKeyframe;
+    private bool _showKeyframeViewer;
 
     // Statistics
     private List<float> _processingTimes = new();
@@ -69,6 +78,8 @@ public class RealtimePhotogrammetryWindow : IDisposable
     private readonly ImGuiExportFileDialog _exportPointCloudDialog;
     private readonly ImGuiExportFileDialog _exportMeshDialog;
     private readonly ImGuiExportFileDialog _exportCameraPathDialog;
+    private readonly ImGuiFileDialog _loadConfigDialog;
+    private readonly ImGuiExportFileDialog _saveConfigDialog;
 
     public RealtimePhotogrammetryWindow()
     {
@@ -90,6 +101,12 @@ public class RealtimePhotogrammetryWindow : IDisposable
         _exportCameraPathDialog.SetExtensions(
             new ImGuiExportFileDialog.ExtensionOption(".txt", "Text File"),
             new ImGuiExportFileDialog.ExtensionOption(".csv", "CSV File")
+        );
+
+        _loadConfigDialog = new ImGuiFileDialog("LoadConfig", FileDialogType.OpenFile, "Load Configuration");
+        _saveConfigDialog = new ImGuiExportFileDialog("SaveConfig", "Save Configuration");
+        _saveConfigDialog.SetExtensions(
+            new ImGuiExportFileDialog.ExtensionOption(".json", "JSON Configuration")
         );
 
         LoadFromSettings();
@@ -171,6 +188,9 @@ public class RealtimePhotogrammetryWindow : IDisposable
         // Handle file dialogs
         HandleFileDialogs();
 
+        // Handle keyframe viewer modal
+        DrawKeyframeViewer();
+
         if (!_isOpen)
         {
             StopCapture();
@@ -193,6 +213,9 @@ public class RealtimePhotogrammetryWindow : IDisposable
         _focalLengthY = settings.FocalLengthY;
         _principalPointX = settings.PrincipalPointX;
         _principalPointY = settings.PrincipalPointY;
+        _enableMemoryManagement = settings.EnableMemoryManagement;
+        _memoryThresholdMB = settings.MemoryThresholdMB;
+        _maxKeyframesInMemory = settings.MaxKeyframesInMemory;
     }
 
     private void HandleFileDialogs()
@@ -224,6 +247,16 @@ public class RealtimePhotogrammetryWindow : IDisposable
         {
             ExportCameraPathInternal(_exportCameraPathDialog.SelectedPath);
         }
+
+        if (_loadConfigDialog.Submit())
+        {
+            LoadConfigurationFromFile(_loadConfigDialog.SelectedPath);
+        }
+
+        if (_saveConfigDialog.Submit())
+        {
+            SaveConfigurationToFile(_saveConfigDialog.SelectedPath);
+        }
     }
 
     private void DrawMenuBar()
@@ -234,12 +267,13 @@ public class RealtimePhotogrammetryWindow : IDisposable
             {
                 if (ImGui.MenuItem("Load Configuration..."))
                 {
-                    // TODO: Load config from file
+                    _loadConfigDialog.Open(null, new[] { ".json" });
                 }
 
                 if (ImGui.MenuItem("Save Configuration..."))
                 {
-                    // TODO: Save config to file
+                    var defaultPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "photogrammetry_config");
+                    _saveConfigDialog.Open("photogrammetry_config", Path.GetDirectoryName(defaultPath));
                 }
 
                 ImGui.Separator();
@@ -347,6 +381,51 @@ public class RealtimePhotogrammetryWindow : IDisposable
 
         ImGui.Separator();
 
+        // Memory Management
+        ImGui.Text("Memory Management:");
+        bool memorySettingsChanged = ImGui.Checkbox("Enable Memory Management", ref _enableMemoryManagement);
+        if (ImGui.IsItemHovered())
+        {
+            ImGui.SetTooltip("Automatically clean up old keyframe images to prevent OOM errors");
+        }
+
+        if (_enableMemoryManagement)
+        {
+            memorySettingsChanged |= ImGui.SliderInt("Memory Threshold (MB)", ref _memoryThresholdMB, 512, 8192);
+            if (ImGui.IsItemHovered())
+            {
+                ImGui.SetTooltip("Cleanup will trigger when memory usage exceeds this threshold");
+            }
+
+            memorySettingsChanged |= ImGui.SliderInt("Max Keyframes in Memory", ref _maxKeyframesInMemory, 10, 200);
+            if (ImGui.IsItemHovered())
+            {
+                ImGui.SetTooltip("Maximum number of keyframes to keep with full images");
+            }
+
+            // Apply settings to pipeline in real-time
+            if (_pipeline != null && memorySettingsChanged)
+            {
+                _pipeline.MemoryManager.IsEnabled = _enableMemoryManagement;
+                _pipeline.MemoryManager.MemoryThresholdMB = _memoryThresholdMB;
+                _pipeline.MemoryManager.MaxKeyframesInMemory = _maxKeyframesInMemory;
+            }
+
+            // Display current memory usage
+            if (_pipeline != null)
+            {
+                var memStatus = _pipeline.MemoryManager.GetStatusString();
+                ImGui.TextWrapped($"Status: {memStatus}");
+            }
+        }
+        else if (_pipeline != null && memorySettingsChanged)
+        {
+            // Disable memory management if checkbox was unchecked
+            _pipeline.MemoryManager.IsEnabled = false;
+        }
+
+        ImGui.Separator();
+
         // Initialize button
         if (ImGui.Button("Initialize Pipeline", new Vector2(200, 40)))
         {
@@ -441,7 +520,7 @@ public class RealtimePhotogrammetryWindow : IDisposable
 
         if (_currentFrameDisplay != null && !_currentFrameDisplay.Empty())
         {
-            DisplayMat("Frame", _currentFrameDisplay, new Vector2(640, 480));
+            DisplayMat("Frame", _currentFrameDisplay, new Vector2(640, 480), _frameTexture);
         }
         else
         {
@@ -452,7 +531,7 @@ public class RealtimePhotogrammetryWindow : IDisposable
 
         if (_currentDepthDisplay != null && !_currentDepthDisplay.Empty())
         {
-            DisplayMat("Depth", _currentDepthDisplay, new Vector2(640, 480));
+            DisplayMat("Depth", _currentDepthDisplay, new Vector2(640, 480), _depthTexture);
         }
 
         // Process frames if capturing
@@ -502,7 +581,8 @@ public class RealtimePhotogrammetryWindow : IDisposable
                 ImGui.TableNextColumn();
                 if (ImGui.SmallButton($"View##{kf.FrameId}"))
                 {
-                    // TODO: View keyframe
+                    _selectedKeyframe = kf;
+                    _showKeyframeViewer = true;
                 }
             }
 
@@ -679,6 +759,29 @@ public class RealtimePhotogrammetryWindow : IDisposable
 
         ImGui.Separator();
 
+        // Memory statistics
+        ImGui.Text("Memory Usage:");
+        var (currentBytes, thresholdBytes, keyframeCount, maxKeyframes) = _pipeline.MemoryManager.GetStats();
+        double currentMB = currentBytes / (1024.0 * 1024.0);
+        double thresholdMB = thresholdBytes / (1024.0 * 1024.0);
+        double usagePercent = (currentBytes / (double)thresholdBytes) * 100.0;
+
+        ImGui.Text($"Current: {currentMB:F0} MB / {thresholdMB:F0} MB ({usagePercent:F0}%)");
+        ImGui.ProgressBar((float)(usagePercent / 100.0), new Vector2(-1, 0));
+
+        ImGui.Text($"Keyframes with images: {keyframeCount} / {maxKeyframes}");
+
+        if (_pipeline.MemoryManager.IsEnabled)
+        {
+            ImGui.TextColored(new Vector4(0.0f, 1.0f, 0.0f, 1.0f), "Memory Management: Enabled");
+        }
+        else
+        {
+            ImGui.TextColored(new Vector4(1.0f, 0.5f, 0.0f, 1.0f), "Memory Management: Disabled");
+        }
+
+        ImGui.Separator();
+
         // Processing time plot
         if (_processingTimes.Count > 0)
         {
@@ -709,6 +812,11 @@ public class RealtimePhotogrammetryWindow : IDisposable
 
             _pipeline?.Dispose();
             _pipeline = new PhotogrammetryPipeline(_config);
+
+            // Configure memory management
+            _pipeline.MemoryManager.IsEnabled = _enableMemoryManagement;
+            _pipeline.MemoryManager.MemoryThresholdMB = _memoryThresholdMB;
+            _pipeline.MemoryManager.MaxKeyframesInMemory = _maxKeyframesInMemory;
 
             Logger.Log("Photogrammetry pipeline initialized successfully");
         }
@@ -781,6 +889,10 @@ public class RealtimePhotogrammetryWindow : IDisposable
                     _currentDepthDisplay = NormalizeDepthForDisplay(result.DepthMap);
                 }
 
+                // Convert to GPU textures for display
+                _frameTexture = MatTextureConverter.UpdateTexture(_frameTexture, _currentFrameDisplay);
+                _depthTexture = MatTextureConverter.UpdateTexture(_depthTexture, _currentDepthDisplay);
+
                 // Update statistics
                 _processingTimes.Add((float)result.ProcessingTimeMs);
                 if (_processingTimes.Count > MaxStatsSamples)
@@ -802,13 +914,57 @@ public class RealtimePhotogrammetryWindow : IDisposable
         return normalized;
     }
 
-    private void DisplayMat(string label, Mat image, Vector2 size)
+    private void DisplayMat(string label, Mat image, Vector2 size, TextureManager texture)
     {
-        // This is a placeholder - you'll need to implement texture upload to GPU
-        // using your graphics backend (Veldrid in this case)
         ImGui.BeginChild(label, size, true);
-        ImGui.Text($"{label}: {image.Width}x{image.Height}");
-        // TODO: Display image texture
+
+        if (texture != null && texture.IsValid)
+        {
+            var textureId = texture.GetImGuiTextureId();
+            if (textureId != IntPtr.Zero)
+            {
+                // Display the texture
+                var availSize = ImGui.GetContentRegionAvail();
+
+                // Calculate aspect ratio to fit the image
+                float imageAspect = (float)image.Width / image.Height;
+                float availAspect = availSize.X / availSize.Y;
+
+                Vector2 displaySize;
+                if (availAspect > imageAspect)
+                {
+                    // Constrained by height
+                    displaySize = new Vector2(availSize.Y * imageAspect, availSize.Y);
+                }
+                else
+                {
+                    // Constrained by width
+                    displaySize = new Vector2(availSize.X, availSize.X / imageAspect);
+                }
+
+                // Center the image
+                var cursor = ImGui.GetCursorPos();
+                cursor.X += (availSize.X - displaySize.X) * 0.5f;
+                cursor.Y += (availSize.Y - displaySize.Y) * 0.5f;
+                ImGui.SetCursorPos(cursor);
+
+                ImGui.Image(textureId, displaySize);
+            }
+            else
+            {
+                ImGui.Text($"{label}: Failed to get texture");
+            }
+        }
+        else if (image != null && !image.Empty())
+        {
+            ImGui.Text($"{label}: {image.Width}x{image.Height}");
+            ImGui.TextWrapped("Converting to texture...");
+        }
+        else
+        {
+            ImGui.Text($"{label}: No image");
+        }
+
         ImGui.EndChild();
     }
 
@@ -904,11 +1060,167 @@ public class RealtimePhotogrammetryWindow : IDisposable
         }
     }
 
+    private void DrawKeyframeViewer()
+    {
+        if (!_showKeyframeViewer || _selectedKeyframe == null)
+            return;
+
+        ImGui.OpenPopup("Keyframe Viewer");
+        ImGui.SetNextWindowSize(new Vector2(600, 400), ImGuiCond.Appearing);
+
+        if (ImGui.BeginPopupModal("Keyframe Viewer", ref _showKeyframeViewer, ImGuiWindowFlags.None))
+        {
+            var kf = _selectedKeyframe;
+
+            ImGui.TextColored(new Vector4(0.3f, 0.8f, 1.0f, 1.0f), $"Keyframe #{kf.FrameId}");
+            ImGui.Separator();
+            ImGui.Spacing();
+
+            // Basic info
+            ImGui.Text($"Timestamp: {kf.Timestamp:yyyy-MM-dd HH:mm:ss.fff}");
+            ImGui.Text($"3D Points: {kf.Points3D.Count}");
+            ImGui.Text($"Keypoints: {kf.Keypoints.Count}");
+
+            if (kf.Image != null)
+            {
+                ImGui.Text($"Image: {kf.Image.Width}x{kf.Image.Height}");
+            }
+            else
+            {
+                ImGui.TextColored(new Vector4(1.0f, 0.5f, 0.0f, 1.0f), "Image: Disposed (memory cleanup)");
+            }
+
+            ImGui.Spacing();
+            ImGui.Separator();
+            ImGui.Spacing();
+
+            // Pose matrix
+            ImGui.Text("Camera Pose:");
+            var pose = kf.Pose;
+            ImGui.Text($"[{pose.M11:F3}, {pose.M12:F3}, {pose.M13:F3}, {pose.M14:F3}]");
+            ImGui.Text($"[{pose.M21:F3}, {pose.M22:F3}, {pose.M23:F3}, {pose.M24:F3}]");
+            ImGui.Text($"[{pose.M31:F3}, {pose.M32:F3}, {pose.M33:F3}, {pose.M34:F3}]");
+            ImGui.Text($"[{pose.M41:F3}, {pose.M42:F3}, {pose.M43:F3}, {pose.M44:F3}]");
+
+            ImGui.Spacing();
+            ImGui.Separator();
+            ImGui.Spacing();
+
+            // Position
+            Matrix4x4.Decompose(kf.Pose, out var scale, out var rotation, out var translation);
+            ImGui.Text($"Position: ({translation.X:F3}, {translation.Y:F3}, {translation.Z:F3})");
+
+            ImGui.Spacing();
+            ImGui.Spacing();
+
+            if (ImGui.Button("Close", new Vector2(120, 0)))
+            {
+                _showKeyframeViewer = false;
+                ImGui.CloseCurrentPopup();
+            }
+
+            ImGui.EndPopup();
+        }
+    }
+
+    private void LoadConfigurationFromFile(string filePath)
+    {
+        try
+        {
+            string json = File.ReadAllText(filePath);
+            var config = JsonSerializer.Deserialize<PhotogrammetryConfiguration>(json);
+
+            if (config != null)
+            {
+                // Apply all configuration settings
+                _depthModelPath = config.DepthModelPath ?? "";
+                _superPointModelPath = config.SuperPointModelPath ?? "";
+                _lightGlueModelPath = config.LightGlueModelPath ?? "";
+                _useGpu = config.UseGpu;
+                _depthModelType = config.DepthModelType;
+                _keyframeInterval = config.KeyframeInterval;
+                _targetWidth = config.TargetWidth;
+                _targetHeight = config.TargetHeight;
+                _focalLengthX = config.FocalLengthX;
+                _focalLengthY = config.FocalLengthY;
+                _principalPointX = config.PrincipalPointX;
+                _principalPointY = config.PrincipalPointY;
+                _enableMemoryManagement = config.EnableMemoryManagement;
+                _memoryThresholdMB = config.MemoryThresholdMB;
+                _maxKeyframesInMemory = config.MaxKeyframesInMemory;
+
+                Logger.Log($"Configuration loaded from {filePath}");
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError($"Failed to load configuration: {ex.Message}");
+        }
+    }
+
+    private void SaveConfigurationToFile(string filePath)
+    {
+        try
+        {
+            var config = new PhotogrammetryConfiguration
+            {
+                DepthModelPath = _depthModelPath,
+                SuperPointModelPath = _superPointModelPath,
+                LightGlueModelPath = _lightGlueModelPath,
+                UseGpu = _useGpu,
+                DepthModelType = _depthModelType,
+                KeyframeInterval = _keyframeInterval,
+                TargetWidth = _targetWidth,
+                TargetHeight = _targetHeight,
+                FocalLengthX = _focalLengthX,
+                FocalLengthY = _focalLengthY,
+                PrincipalPointX = _principalPointX,
+                PrincipalPointY = _principalPointY,
+                EnableMemoryManagement = _enableMemoryManagement,
+                MemoryThresholdMB = _memoryThresholdMB,
+                MaxKeyframesInMemory = _maxKeyframesInMemory
+            };
+
+            string json = JsonSerializer.Serialize(config, new JsonSerializerOptions { WriteIndented = true });
+            File.WriteAllText(filePath, json);
+
+            Logger.Log($"Configuration saved to {filePath}");
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError($"Failed to save configuration: {ex.Message}");
+        }
+    }
+
     public void Dispose()
     {
         StopCapture();
         _pipeline?.Dispose();
         _currentFrameDisplay?.Dispose();
         _currentDepthDisplay?.Dispose();
+        _frameTexture?.Dispose();
+        _depthTexture?.Dispose();
     }
+}
+
+/// <summary>
+/// Configuration data for saving/loading photogrammetry settings.
+/// </summary>
+public class PhotogrammetryConfiguration
+{
+    public string DepthModelPath { get; set; } = "";
+    public string SuperPointModelPath { get; set; } = "";
+    public string LightGlueModelPath { get; set; } = "";
+    public bool UseGpu { get; set; } = false;
+    public int DepthModelType { get; set; } = 0;
+    public int KeyframeInterval { get; set; } = 10;
+    public int TargetWidth { get; set; } = 640;
+    public int TargetHeight { get; set; } = 480;
+    public float FocalLengthX { get; set; } = 500;
+    public float FocalLengthY { get; set; } = 500;
+    public float PrincipalPointX { get; set; } = 320;
+    public float PrincipalPointY { get; set; } = 240;
+    public bool EnableMemoryManagement { get; set; } = true;
+    public int MemoryThresholdMB { get; set; } = 2048;
+    public int MaxKeyframesInMemory { get; set; } = 50;
 }

@@ -21,6 +21,7 @@ public class PhotogrammetryPipeline : IDisposable
     private readonly KeyframeManager _keyframeManager;
     private readonly VideoCaptureManager _videoCapture;
     private readonly GeoreferencingManager _georeferencing;
+    private readonly MemoryManager _memoryManager;
 
     // State
     private Mat _previousFrame;
@@ -55,6 +56,7 @@ public class PhotogrammetryPipeline : IDisposable
     public VideoCaptureManager VideoCapture => _videoCapture;
     public KeyframeManager KeyframeManager => _keyframeManager;
     public GeoreferencingManager Georeferencing => _georeferencing;
+    public MemoryManager MemoryManager => _memoryManager;
     public int FrameCount => _frameCount;
     public double AverageProcessingTime => _frameCount > 0 ? _processingTime / _frameCount : 0;
     public bool IsInitialized => _isInitialized;
@@ -65,6 +67,7 @@ public class PhotogrammetryPipeline : IDisposable
         _keyframeManager = new KeyframeManager(config.KeyframeInterval);
         _videoCapture = new VideoCaptureManager();
         _georeferencing = new GeoreferencingManager();
+        _memoryManager = new MemoryManager(_keyframeManager);
 
         // Initialize camera matrix
         _cameraMatrix = new Mat(3, 3, MatType.CV_64FC1);
@@ -208,6 +211,9 @@ public class PhotogrammetryPipeline : IDisposable
 
             result.ProcessingTimeMs = elapsed;
             result.Success = true;
+
+            // Check memory and cleanup if needed
+            _memoryManager.CheckAndCleanup();
         }
         catch (Exception ex)
         {

@@ -231,4 +231,9 @@ public class PhotogrammetrySettings
     public float MatchingRatioThreshold { get; set; } = 0.8f;
     public double ReprojectionThreshold { get; set; } = 1.0;
     public int MinMatchesForPose { get; set; } = 8;
+
+    // Memory management
+    public bool EnableMemoryManagement { get; set; } = true;
+    public int MemoryThresholdMB { get; set; } = 2048; // 2 GB default
+    public int MaxKeyframesInMemory { get; set; } = 50;
 }
