@@ -5,9 +5,6 @@ using GeoscientistToolkit.UI.Interfaces;
 using GeoscientistToolkit.UI.Utils;
 using GeoscientistToolkit.Util;
 using ImGuiNET;
-using SixLabors.ImageSharp;
-using SixLabors.ImageSharp.PixelFormats;
-using SixLabors.ImageSharp.Processing;
 
 namespace GeoscientistToolkit.Data.Seismic;
 
@@ -50,7 +47,7 @@ public class SeismicViewer : IDatasetViewer
     {
         _dataset = dataset ?? throw new ArgumentNullException(nameof(dataset));
         _exportDialog = new ImGuiExportFileDialog("SeismicExport", "Export Seismic Image");
-        _exportDialog.SetExtensions(new[] { ".png", ".jpg", ".tiff" });
+        _exportDialog.SetExtensions((".png", "PNG Image"), (".jpg", "JPEG Image"), (".tiff", "TIFF Image"));
 
         Logger.Log($"[SeismicViewer] Created viewer for: {_dataset.Name}");
     }
@@ -67,16 +64,28 @@ public class SeismicViewer : IDatasetViewer
         ImGui.Text("Display:");
         ImGui.SameLine();
 
-        if (ImGui.Checkbox("Wiggle", ref _dataset.ShowWiggleTrace))
+        bool showWiggle = _dataset.ShowWiggleTrace;
+        if (ImGui.Checkbox("Wiggle", ref showWiggle))
+        {
+            _dataset.ShowWiggleTrace = showWiggle;
             _needsRedraw = true;
+        }
 
         ImGui.SameLine();
-        if (ImGui.Checkbox("Variable Area", ref _dataset.ShowVariableArea))
+        bool showVariableArea = _dataset.ShowVariableArea;
+        if (ImGui.Checkbox("Variable Area", ref showVariableArea))
+        {
+            _dataset.ShowVariableArea = showVariableArea;
             _needsRedraw = true;
+        }
 
         ImGui.SameLine();
-        if (ImGui.Checkbox("Color Map", ref _dataset.ShowColorMap))
+        bool showColorMap = _dataset.ShowColorMap;
+        if (ImGui.Checkbox("Color Map", ref showColorMap))
+        {
+            _dataset.ShowColorMap = showColorMap;
             _needsRedraw = true;
+        }
 
         ImGui.SameLine();
         ImGui.Separator();
@@ -88,8 +97,12 @@ public class SeismicViewer : IDatasetViewer
             ImGui.Text("ColorMap:");
             ImGui.SameLine();
             ImGui.SetNextItemWidth(100);
-            if (ImGui.Combo("##ColorMap", ref _dataset.ColorMapIndex, _colorMapNames, _colorMapNames.Length))
+            int colorMapIndex = _dataset.ColorMapIndex;
+            if (ImGui.Combo("##ColorMap", ref colorMapIndex, _colorMapNames, _colorMapNames.Length))
+            {
+                _dataset.ColorMapIndex = colorMapIndex;
                 _needsRedraw = true;
+            }
 
             ImGui.SameLine();
         }
@@ -98,8 +111,12 @@ public class SeismicViewer : IDatasetViewer
         ImGui.Text("Gain:");
         ImGui.SameLine();
         ImGui.SetNextItemWidth(100);
-        if (ImGui.SliderFloat("##Gain", ref _dataset.GainValue, 0.1f, 10.0f, "%.1f"))
+        float gainValue = _dataset.GainValue;
+        if (ImGui.SliderFloat("##Gain", ref gainValue, 0.1f, 10.0f, "%.1f"))
+        {
+            _dataset.GainValue = gainValue;
             _needsRedraw = true;
+        }
 
         ImGui.SameLine();
         ImGui.Separator();
@@ -139,9 +156,9 @@ public class SeismicViewer : IDatasetViewer
         // Handle export dialog
         if (_showExportDialog)
         {
-            _exportDialog.Submit();
+            bool selectionMade = _exportDialog.Submit();
 
-            if (_exportDialog.SubmitPressed())
+            if (selectionMade)
             {
                 ExportImage(_exportDialog.SelectedPath);
                 _showExportDialog = false;
@@ -162,7 +179,7 @@ public class SeismicViewer : IDatasetViewer
             _needsRedraw = false;
         }
 
-        if (_seismicTexture != null)
+        if (_seismicTexture != null && _seismicTexture.IsValid)
         {
             var imageSize = new Vector2(_renderedImageWidth, _renderedImageHeight);
             var scaledSize = imageSize * zoom;
@@ -171,11 +188,15 @@ public class SeismicViewer : IDatasetViewer
             var drawList = ImGui.GetWindowDrawList();
 
             // Draw the seismic image
-            drawList.AddImage(
-                (IntPtr)_seismicTexture.TextureId,
-                cursorPos + pan,
-                cursorPos + pan + scaledSize
-            );
+            var textureId = _seismicTexture.GetImGuiTextureId();
+            if (textureId != IntPtr.Zero)
+            {
+                drawList.AddImage(
+                    textureId,
+                    cursorPos + pan,
+                    cursorPos + pan + scaledSize
+                );
+            }
 
             // Draw overlays
             if (_showPackageOverlays && _dataset.LinePackages.Count > 0)
@@ -202,8 +223,8 @@ public class SeismicViewer : IDatasetViewer
             if (numTraces == 0 || numSamples == 0)
                 return;
 
-            // Create image
-            using var image = new Image<Rgba32>(numTraces, numSamples);
+            // Create RGBA byte array
+            var pixelData = new byte[numTraces * numSamples * 4];
 
             // Get amplitude range
             var (minAmp, maxAmp, rms) = _dataset.GetAmplitudeStatistics();
@@ -230,14 +251,15 @@ public class SeismicViewer : IDatasetViewer
                     normalized = Math.Clamp(normalized, 0.0f, 1.0f);
 
                     var color = GetColorForValue(normalized, _dataset.ColorMapIndex);
-                    image[traceIdx, sampleIdx] = color;
+
+                    // Set pixel in RGBA format
+                    var pixelIdx = (sampleIdx * numTraces + traceIdx) * 4;
+                    pixelData[pixelIdx] = color.r;
+                    pixelData[pixelIdx + 1] = color.g;
+                    pixelData[pixelIdx + 2] = color.b;
+                    pixelData[pixelIdx + 3] = color.a;
                 }
             }
-
-            // Convert to bytes
-            using var ms = new MemoryStream();
-            image.SaveAsPng(ms);
-            var imageData = ms.ToArray();
 
             // Upload to GPU
             if (_seismicTexture != null)
@@ -245,7 +267,7 @@ public class SeismicViewer : IDatasetViewer
                 _seismicTexture.Dispose();
             }
 
-            _seismicTexture = TextureManager.LoadFromMemory(imageData);
+            _seismicTexture = TextureManager.CreateFromPixelData(pixelData, (uint)numTraces, (uint)numSamples);
             _renderedImageWidth = numTraces;
             _renderedImageHeight = numSamples;
 
@@ -257,7 +279,7 @@ public class SeismicViewer : IDatasetViewer
         }
     }
 
-    private Rgba32 GetColorForValue(float value, int colorMapIndex)
+    private (byte r, byte g, byte b, byte a) GetColorForValue(float value, int colorMapIndex)
     {
         // Ensure value is in [0, 1]
         value = Math.Clamp(value, 0.0f, 1.0f);
@@ -274,13 +296,13 @@ public class SeismicViewer : IDatasetViewer
         };
     }
 
-    private Rgba32 GetGrayscaleColor(float value)
+    private (byte r, byte g, byte b, byte a) GetGrayscaleColor(float value)
     {
         var gray = (byte)(value * 255);
-        return new Rgba32(gray, gray, gray, 255);
+        return (gray, gray, gray, 255);
     }
 
-    private Rgba32 GetSeismicColor(float value)
+    private (byte r, byte g, byte b, byte a) GetSeismicColor(float value)
     {
         // Blue-White-Red colormap (common in seismic)
         if (value < 0.5f)
@@ -289,51 +311,51 @@ public class SeismicViewer : IDatasetViewer
             var t = value * 2.0f;
             var r = (byte)(t * 255);
             var g = (byte)(t * 255);
-            var b = 255;
-            return new Rgba32(r, g, b, 255);
+            var b = (byte)255;
+            return (r, g, b, 255);
         }
         else
         {
             // White to red
             var t = (value - 0.5f) * 2.0f;
-            var r = 255;
+            var r = (byte)255;
             var g = (byte)((1.0f - t) * 255);
             var b = (byte)((1.0f - t) * 255);
-            return new Rgba32(r, g, b, 255);
+            return (r, g, b, 255);
         }
     }
 
-    private Rgba32 GetViridisColor(float value)
+    private (byte r, byte g, byte b, byte a) GetViridisColor(float value)
     {
         // Simplified Viridis approximation
         var r = (byte)(255 * Math.Clamp(0.267 + 1.000 * value - 0.267 * value * value, 0, 1));
         var g = (byte)(255 * Math.Clamp(0.005 + 1.400 * value - 0.500 * value * value, 0, 1));
         var b = (byte)(255 * Math.Clamp(0.329 + 1.114 * value - 1.443 * value * value, 0, 1));
-        return new Rgba32(r, g, b, 255);
+        return (r, g, b, 255);
     }
 
-    private Rgba32 GetJetColor(float value)
+    private (byte r, byte g, byte b, byte a) GetJetColor(float value)
     {
         var r = (byte)(255 * Math.Clamp(1.5f - Math.Abs(4.0f * value - 3.0f), 0, 1));
         var g = (byte)(255 * Math.Clamp(1.5f - Math.Abs(4.0f * value - 2.0f), 0, 1));
         var b = (byte)(255 * Math.Clamp(1.5f - Math.Abs(4.0f * value - 1.0f), 0, 1));
-        return new Rgba32(r, g, b, 255);
+        return (r, g, b, 255);
     }
 
-    private Rgba32 GetHotColor(float value)
+    private (byte r, byte g, byte b, byte a) GetHotColor(float value)
     {
         var r = (byte)(255 * Math.Clamp(3.0f * value, 0, 1));
         var g = (byte)(255 * Math.Clamp(3.0f * value - 1.0f, 0, 1));
         var b = (byte)(255 * Math.Clamp(3.0f * value - 2.0f, 0, 1));
-        return new Rgba32(r, g, b, 255);
+        return (r, g, b, 255);
     }
 
-    private Rgba32 GetCoolColor(float value)
+    private (byte r, byte g, byte b, byte a) GetCoolColor(float value)
     {
         var r = (byte)(255 * value);
         var g = (byte)(255 * (1.0f - value));
-        var b = 255;
-        return new Rgba32(r, g, b, 255);
+        var b = (byte)255;
+        return (r, g, b, 255);
     }
 
     private void DrawPackageOverlays(ImDrawListPtr drawList, Vector2 cursorPos, Vector2 pan, Vector2 scaledSize, Vector2 imageSize)
@@ -459,8 +481,8 @@ public class SeismicViewer : IDatasetViewer
             var numTraces = _dataset.GetTraceCount();
             var numSamples = _dataset.GetSampleCount();
 
-            // Create high-resolution export image
-            using var image = new Image<Rgba32>(numTraces, numSamples);
+            // Create RGBA pixel data for export
+            var pixelData = new byte[numTraces * numSamples * 4];
 
             // Render same as display
             var (minAmp, maxAmp, rms) = _dataset.GetAmplitudeStatistics();
@@ -479,22 +501,51 @@ public class SeismicViewer : IDatasetViewer
                     normalized = Math.Clamp(normalized, 0.0f, 1.0f);
 
                     var color = GetColorForValue(normalized, _dataset.ColorMapIndex);
-                    image[traceIdx, sampleIdx] = color;
+
+                    var pixelIdx = (sampleIdx * numTraces + traceIdx) * 4;
+                    pixelData[pixelIdx] = color.r;
+                    pixelData[pixelIdx + 1] = color.g;
+                    pixelData[pixelIdx + 2] = color.b;
+                    pixelData[pixelIdx + 3] = color.a;
                 }
             }
 
-            // Save based on extension
+            // Use StbImageWrite to save the image
             var extension = Path.GetExtension(filePath).ToLowerInvariant();
-            if (extension == ".png")
-                image.SaveAsPng(filePath);
-            else if (extension == ".jpg" || extension == ".jpeg")
-                image.SaveAsJpeg(filePath);
-            else if (extension == ".tiff" || extension == ".tif")
-                image.SaveAsTiff(filePath);
-            else
-                image.SaveAsPng(filePath);
+            bool success = false;
 
-            Logger.Log($"[SeismicViewer] Successfully exported image to: {filePath}");
+            if (extension == ".png")
+            {
+                success = StbImageWriteSharp.ImageWriter.WritePng(pixelData, numTraces, numSamples, StbImageWriteSharp.ColorComponents.RedGreenBlueAlpha, filePath);
+            }
+            else if (extension == ".jpg" || extension == ".jpeg")
+            {
+                success = StbImageWriteSharp.ImageWriter.WriteJpg(pixelData, numTraces, numSamples, StbImageWriteSharp.ColorComponents.RedGreenBlueAlpha, filePath, 95);
+            }
+            else if (extension == ".tiff" || extension == ".tif")
+            {
+                // TGA as fallback since StbImageWrite doesn't support TIFF
+                var tgaPath = Path.ChangeExtension(filePath, ".tga");
+                success = StbImageWriteSharp.ImageWriter.WriteTga(pixelData, numTraces, numSamples, StbImageWriteSharp.ColorComponents.RedGreenBlueAlpha, tgaPath);
+                if (success)
+                {
+                    Logger.LogWarning($"[SeismicViewer] TIFF not supported by StbImageWrite, saved as TGA instead: {tgaPath}");
+                }
+            }
+            else
+            {
+                // Default to PNG
+                success = StbImageWriteSharp.ImageWriter.WritePng(pixelData, numTraces, numSamples, StbImageWriteSharp.ColorComponents.RedGreenBlueAlpha, filePath);
+            }
+
+            if (success)
+            {
+                Logger.Log($"[SeismicViewer] Successfully exported image to: {filePath}");
+            }
+            else
+            {
+                Logger.LogError($"[SeismicViewer] Failed to export image to: {filePath}");
+            }
         }
         catch (Exception ex)
         {

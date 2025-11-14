@@ -126,7 +126,7 @@ public class SeismicTools : IDatasetTools
             return;
         }
 
-        ImGui.BeginChild("PackageList", new Vector2(0, 200), true);
+        ImGui.BeginChild("PackageList", new Vector2(0, 200), ImGuiChildFlags.Border);
 
         for (int i = 0; i < dataset.LinePackages.Count; i++)
         {

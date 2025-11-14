@@ -84,7 +84,7 @@ public class SeismicProperties : IDatasetPropertiesRenderer
             {
                 ImGui.SeparatorText("SEG-Y Textual Header");
 
-                if (ImGui.BeginChild("TextualHeader", new System.Numerics.Vector2(0, 200), true))
+                if (ImGui.BeginChild("TextualHeader", new System.Numerics.Vector2(0, 200), ImGuiChildFlags.Border))
                 {
                     ImGui.TextWrapped(header.TextualHeader);
                 }
@@ -98,7 +98,7 @@ public class SeismicProperties : IDatasetPropertiesRenderer
 
             if (seismicDataset.LinePackages.Count > 0)
             {
-                if (ImGui.BeginChild("PackagesList", new System.Numerics.Vector2(0, 150), true))
+                if (ImGui.BeginChild("PackagesList", new System.Numerics.Vector2(0, 150), ImGuiChildFlags.Border))
                 {
                     foreach (var package in seismicDataset.LinePackages)
                     {
