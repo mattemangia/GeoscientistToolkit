@@ -149,9 +149,9 @@ public static class TableExporter
             table.Columns.Add("Fill Ratio (%)", typeof(double));
 
             // Calculate statistics for each slice in parallel
+            int numSlices = ctDataset.Depth;
             var sliceStats = new (int min, int max, double mean, double stdDev, int nonZero, double fillRatio)[numSlices];
 
-            int numSlices = ctDataset.Depth;
             Parallel.For(0, numSlices, z =>
             {
                 // Get slice data

@@ -291,7 +291,7 @@ public class TwoDGeologyTools
         ImGui.Text("Structural Restoration:");
 
         // Show interactive controls if restoration is active
-        if (_viewer.GetResturationProcessor() != null)
+        if (_viewer.GetRestorationProcessor() != null)
         {
             ImGui.TextColored(new Vector4(0.5f, 1f, 0.5f, 1f), "Restoration Active");
 
