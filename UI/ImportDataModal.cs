@@ -33,7 +33,8 @@ public class ImportDataModal
         "Borehole Log (LAS Format)",
         "2D Geology Profile (.2dgeo)",
         "Subsurface GIS Model (.subgis)",
-        "Seismic Dataset (SEG-Y)"
+        "Seismic Dataset (SEG-Y)",
+        "PhysicoChem Reactor"
     };
 
     private readonly ImGuiFileDialog _fileDialog;
@@ -68,6 +69,8 @@ public class ImportDataModal
     private readonly ImGuiFileDialog _lasDialog;
     private readonly SeismicLoader _seismicLoader;
     private readonly ImGuiFileDialog _seismicDialog;
+    private readonly PhysicoChemLoader _physicoChemLoader;
+    private readonly ImGuiFileDialog _physicoChemDialog;
     private ImportState _currentState = ImportState.Idle;
     private Task<Dataset> _importTask;
     private Dataset _pendingDataset;
@@ -97,6 +100,7 @@ public class ImportDataModal
         _twoDGeologyDialog = new ImGuiFileDialog("Import2DGeologyDialog", FileDialogType.OpenFile, "Select 2D Geology File");
         _subsurfaceGisDialog = new ImGuiFileDialog("ImportSubsurfaceGISDialog", FileDialogType.OpenFile, "Select Subsurface GIS File");
         _seismicDialog = new ImGuiFileDialog("ImportSeismicDialog", FileDialogType.OpenFile, "Select SEG-Y File");
+        _physicoChemDialog = new ImGuiFileDialog("ImportPhysicoChemDialog", FileDialogType.OpenFile, "Select PhysicoChem File");
         _organizerDialog = new ImageStackOrganizerDialog();
 
         // Initialize loaders
@@ -115,6 +119,7 @@ public class ImportDataModal
         _twoDGeologyLoader = new TwoDGeologyLoader();
         _subsurfaceGisLoader = new SubsurfaceGISLoader();
         _seismicLoader = new SeismicLoader();
+        _physicoChemLoader = new PhysicoChemLoader();
     }
 
     public void Open()
@@ -213,7 +218,10 @@ public class ImportDataModal
 
         // Added for PNM
         if (_pnmDialog.Submit()) _pnmLoader.FilePath = _pnmDialog.SelectedPath;
-        
+
+        // Added for PhysicoChem
+        if (_physicoChemDialog.Submit()) _physicoChemLoader.FilePath = _physicoChemDialog.SelectedPath;
+
         // Added for 2D Geology
         if (_twoDGeologyDialog.Submit()) _twoDGeologyLoader.FilePath = _twoDGeologyDialog.SelectedPath;
 
@@ -283,6 +291,9 @@ public class ImportDataModal
                 break;
             case 15: // Seismic Dataset (SEG-Y)
                 DrawSeismicOptions();
+                break;
+            case 16: // PhysicoChem Reactor
+                DrawPhysicoChemOptions();
                 break;
         }
 
@@ -533,6 +544,49 @@ public class ImportDataModal
             ImGui.BulletText($"Size: {info.Length / (1024 * 1024)} MB");
 
             ImGui.TextColored(new Vector4(0.0f, 1.0f, 0.5f, 1.0f), "✓ Ready to import SEG-Y dataset");
+        }
+    }
+
+    private void DrawPhysicoChemOptions()
+    {
+        ImGui.TextWrapped("Import a PhysicoChem reactor simulation dataset. This contains reactor geometry, " +
+                          "material properties, boundary conditions, force fields, and simulation results.");
+
+        ImGui.Spacing();
+        ImGui.Separator();
+        ImGui.Spacing();
+
+        ImGui.Text("PhysicoChem File (.physicochem):");
+        var path = _physicoChemLoader.FilePath ?? "";
+        ImGui.InputText("##PhysicoChemPath", ref path, 260, ImGuiInputTextFlags.ReadOnly);
+        ImGui.SameLine();
+        if (ImGui.Button("Browse...##PhysicoChemFile"))
+        {
+            string[] pcExtensions = { ".physicochem", ".json" };
+            _physicoChemDialog.Open(null, pcExtensions);
+        }
+
+        ImGui.Spacing();
+        ImGui.TextWrapped("Features:");
+        ImGui.BulletText("3D reactor domain visualization with multiple geometries");
+        ImGui.BulletText("Material properties and initial conditions");
+        ImGui.BulletText("Boundary conditions (Fixed Value, Flux, Inlet/Outlet)");
+        ImGui.BulletText("Force fields (Gravity, Vortex, Centrifugal)");
+        ImGui.BulletText("Nucleation sites for mineral precipitation");
+        ImGui.BulletText("Multiphysics simulation (Reactive Transport, Heat Transfer, Flow)");
+        ImGui.BulletText("GPU-accelerated solver with OpenCL");
+
+        if (!string.IsNullOrEmpty(_physicoChemLoader.FilePath) && File.Exists(_physicoChemLoader.FilePath))
+        {
+            ImGui.Spacing();
+            ImGui.Separator();
+            ImGui.Spacing();
+            ImGui.Text("File Information:");
+            var info = new FileInfo(_physicoChemLoader.FilePath);
+            ImGui.BulletText($"File: {info.Name}");
+            ImGui.BulletText($"Size: {info.Length / 1024} KB");
+
+            ImGui.TextColored(new Vector4(0.0f, 1.0f, 0.5f, 1.0f), "✓ Ready to import PhysicoChem dataset");
         }
     }
 
@@ -1168,6 +1222,7 @@ public class ImportDataModal
             13 => _twoDGeologyLoader,
             14 => _subsurfaceGisLoader,
             15 => _seismicLoader,
+            16 => _physicoChemLoader,
             _ => null
         };
     }
@@ -1240,6 +1295,7 @@ public class ImportDataModal
         _twoDGeologyLoader.Reset();
         _subsurfaceGisLoader.Reset();
         _seismicLoader.Reset();
+        _physicoChemLoader.Reset();
 
         // Reset state
         _importTask = null;

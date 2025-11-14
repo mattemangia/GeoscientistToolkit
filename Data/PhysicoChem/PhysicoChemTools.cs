@@ -21,6 +21,7 @@ namespace GeoscientistToolkit.Data.PhysicoChem;
 public class PhysicoChemTools : IDatasetTools
 {
     private readonly ImGuiExportFileDialog _exportDialog;
+    private readonly ImGuiExportFileDialog _datasetExportDialog;
 
     // Domain creation state
     private string _newDomainName = "Domain";
@@ -87,6 +88,11 @@ public class PhysicoChemTools : IDatasetTools
             (".csv", "CSV File"),
             (".vtk", "VTK File"),
             (".json", "JSON Results")
+        );
+
+        _datasetExportDialog = new ImGuiExportFileDialog("ExportPhysicoChemDatasetDialog", "Export Dataset");
+        _datasetExportDialog.SetExtensions(
+            (".physicochem", "PhysicoChem Dataset")
         );
     }
 
@@ -155,13 +161,22 @@ public class PhysicoChemTools : IDatasetTools
             DrawExportOptions(pcDataset);
         }
 
-        // Handle export dialog
+        // Handle export dialogs
         if (_exportDialog.IsOpen)
         {
             if (_exportDialog.Submit())
             {
                 var selectedPath = _exportDialog.SelectedPath;
                 ExportResults(pcDataset, selectedPath);
+            }
+        }
+
+        if (_datasetExportDialog.IsOpen)
+        {
+            if (_datasetExportDialog.Submit())
+            {
+                var selectedPath = _datasetExportDialog.SelectedPath;
+                ExportDatasetToBinary(pcDataset, selectedPath);
             }
         }
     }
@@ -708,13 +723,27 @@ public class PhysicoChemTools : IDatasetTools
 
     private void DrawExportOptions(PhysicoChemDataset dataset)
     {
+        ImGui.Text("Export options:");
+
+        // Export full dataset (always available)
+        if (ImGui.Button("Export Dataset...", new Vector2(ImGui.GetContentRegionAvail().X, 0)))
+        {
+            _datasetExportDialog.Open();
+        }
+        ImGui.SameLine();
+        ImGui.TextDisabled("(Full dataset with all configuration)");
+
+        ImGui.Spacing();
+        ImGui.Separator();
+        ImGui.Spacing();
+
         ImGui.Text("Export simulation results:");
 
         bool hasResults = dataset.ResultHistory != null && dataset.ResultHistory.Count > 0;
 
         if (!hasResults) ImGui.BeginDisabled();
 
-        if (ImGui.Button("Export Results..."))
+        if (ImGui.Button("Export Results...", new Vector2(ImGui.GetContentRegionAvail().X, 0)))
         {
             _exportDialog.Open();
         }
@@ -780,6 +809,35 @@ public class PhysicoChemTools : IDatasetTools
         var json = Newtonsoft.Json.JsonConvert.SerializeObject(dataset.ResultHistory,
             Newtonsoft.Json.Formatting.Indented);
         System.IO.File.WriteAllText(path, json);
+    }
+
+    private void ExportDatasetToBinary(PhysicoChemDataset dataset, string path)
+    {
+        try
+        {
+            // Use the ISerializableDataset interface to get the DTO
+            var dto = dataset.ToSerializableObject() as PhysicoChemDatasetDTO;
+
+            if (dto == null)
+                throw new InvalidOperationException("Failed to serialize dataset to DTO");
+
+            // Serialize to JSON
+            var options = new System.Text.Json.JsonSerializerOptions
+            {
+                WriteIndented = true,
+                PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase
+            };
+
+            var json = System.Text.Json.JsonSerializer.Serialize(dto, options);
+            System.IO.File.WriteAllText(path, json);
+
+            Logger.Log($"Exported dataset to: {path}");
+            ProjectManager.Instance.NotifyDatasetDataChanged(dataset);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError($"Failed to export dataset: {ex.Message}");
+        }
     }
 
     private float CalculateAverage(float[,,] field)

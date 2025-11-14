@@ -377,3 +377,172 @@ public class SeismicDatasetDTO : DatasetDTO
     public float MaxAmplitude { get; set; }
     public float RmsAmplitude { get; set; }
 }
+
+// PhysicoChem dataset DTO
+public class PhysicoChemDatasetDTO : DatasetDTO
+{
+    public string Description { get; set; }
+    public List<ReactorDomainDTO> Domains { get; set; } = new();
+    public List<BoundaryConditionDTO> BoundaryConditions { get; set; } = new();
+    public List<ForceFieldDTO> Forces { get; set; } = new();
+    public List<NucleationSiteDTO> NucleationSites { get; set; } = new();
+    public SimulationParametersDTO SimulationParams { get; set; } = new();
+    public ParameterSweepConfigDTO ParameterSweep { get; set; }
+    public GridMesh3DDTO GeneratedMesh { get; set; }
+    public List<PhysicoChemStateDTO> ResultHistory { get; set; } = new();
+    public bool CoupleWithGeothermal { get; set; }
+    public string GeothermalDatasetPath { get; set; }
+}
+
+public class ReactorDomainDTO
+{
+    public string Name { get; set; }
+    public ReactorGeometryDTO Geometry { get; set; }
+    public MaterialPropertiesDTO Material { get; set; }
+    public InitialConditionsDTO InitialConditions { get; set; }
+    public string BooleanOperation { get; set; } // Serialize as string
+    public bool IsActive { get; set; }
+    public bool AllowInteraction { get; set; }
+}
+
+public class ReactorGeometryDTO
+{
+    public string GeometryType { get; set; } // Serialize enum as string
+    public string InterpolationMode { get; set; }
+    public Vector3 Center { get; set; }
+    public Vector3 Dimensions { get; set; }
+    public double Radius { get; set; }
+    public double InnerRadius { get; set; }
+    public double Height { get; set; }
+    public List<Vector2> Profile2D { get; set; } = new();
+    public double ExtrusionDepth { get; set; }
+    public int RadialSegments { get; set; }
+    public List<Vector3> CustomPoints { get; set; } = new();
+    public string MeshFilePath { get; set; }
+}
+
+public class MaterialPropertiesDTO
+{
+    public double Porosity { get; set; }
+    public double Permeability { get; set; }
+    public double ThermalConductivity { get; set; }
+    public double SpecificHeat { get; set; }
+    public double Density { get; set; }
+    public string MineralComposition { get; set; }
+    public Dictionary<string, double> MineralFractions { get; set; } = new();
+}
+
+public class InitialConditionsDTO
+{
+    public double Temperature { get; set; }
+    public double Pressure { get; set; }
+    public Dictionary<string, double> Concentrations { get; set; } = new();
+    public Vector3 InitialVelocity { get; set; }
+    public double LiquidSaturation { get; set; }
+    public string FluidType { get; set; }
+}
+
+public class BoundaryConditionDTO
+{
+    public string Name { get; set; }
+    public string Type { get; set; } // Enum as string
+    public string Location { get; set; } // Enum as string
+    public string Variable { get; set; } // Enum as string
+    public double Value { get; set; }
+    public double FluxValue { get; set; }
+    public bool IsTimeDependendent { get; set; }
+    public string TimeExpression { get; set; }
+    public string SpeciesName { get; set; }
+    public Vector3 CustomRegionCenter { get; set; }
+    public double CustomRegionRadius { get; set; }
+    public bool IsActive { get; set; }
+}
+
+public class ForceFieldDTO
+{
+    public string Name { get; set; }
+    public string Type { get; set; } // Enum as string
+    public bool IsActive { get; set; }
+    public Vector3 GravityVector { get; set; }
+    public Vector3 VortexCenter { get; set; }
+    public Vector3 VortexAxis { get; set; }
+    public double VortexStrength { get; set; }
+    public double VortexRadius { get; set; }
+    public bool IsTimeDependendent { get; set; }
+}
+
+public class NucleationSiteDTO
+{
+    public string Name { get; set; }
+    public Vector3 Position { get; set; }
+    public string MineralType { get; set; }
+    public double NucleationRate { get; set; }
+    public double InitialRadius { get; set; }
+    public double ActivationEnergy { get; set; }
+    public double CriticalSupersaturation { get; set; }
+    public bool IsActive { get; set; }
+}
+
+public class SimulationParametersDTO
+{
+    public double TotalTime { get; set; }
+    public double TimeStep { get; set; }
+    public double OutputInterval { get; set; }
+    public bool EnableReactiveTransport { get; set; }
+    public bool EnableHeatTransfer { get; set; }
+    public bool EnableFlow { get; set; }
+    public bool EnableForces { get; set; }
+    public bool EnableNucleation { get; set; }
+    public double ConvergenceTolerance { get; set; }
+    public int MaxIterations { get; set; }
+    public bool UseGPU { get; set; }
+    public string SolverType { get; set; }
+}
+
+public class ParameterSweepConfigDTO
+{
+    public bool Enabled { get; set; }
+    public string ParameterName { get; set; }
+    public double MinValue { get; set; }
+    public double MaxValue { get; set; }
+    public int Steps { get; set; }
+}
+
+public class GridMesh3DDTO
+{
+    public Vector3Int GridSize { get; set; }
+    public Vector3 Origin { get; set; }
+    public Vector3 Spacing { get; set; }
+    public Dictionary<string, object> Metadata { get; set; } = new();
+}
+
+public class Vector3Int
+{
+    public int X { get; set; }
+    public int Y { get; set; }
+    public int Z { get; set; }
+}
+
+public class PhysicoChemStateDTO
+{
+    public double CurrentTime { get; set; }
+    // Note: Large 3D arrays are NOT serialized by default to keep file size manageable
+    // Only final state statistics or compressed data should be saved
+    public int GridSizeX { get; set; }
+    public int GridSizeY { get; set; }
+    public int GridSizeZ { get; set; }
+    public float TemperatureAvg { get; set; }
+    public float PressureAvg { get; set; }
+    public int ActiveNucleiCount { get; set; }
+    public List<NucleusDTO> ActiveNuclei { get; set; } = new();
+}
+
+public class NucleusDTO
+{
+    public int Id { get; set; }
+    public Vector3 Position { get; set; }
+    public double Radius { get; set; }
+    public string MineralType { get; set; }
+    public double GrowthRate { get; set; }
+    public double BirthTime { get; set; }
+}

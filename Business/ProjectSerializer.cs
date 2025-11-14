@@ -10,6 +10,7 @@ using GeoscientistToolkit.Data.CtImageStack;
 using GeoscientistToolkit.Data.GIS;
 using GeoscientistToolkit.Data.Image;
 using GeoscientistToolkit.Data.Mesh3D;
+using GeoscientistToolkit.Data.PhysicoChem;
 using GeoscientistToolkit.Data.Pnm;
 using GeoscientistToolkit.Data.Table;
 using GeoscientistToolkit.Data.TwoDGeology;
@@ -205,6 +206,7 @@ public class DatasetDTOConverter : JsonConverter<DatasetDTO>
                     nameof(SubsurfaceGISDataset) => JsonSerializer.Deserialize<SubsurfaceGISDatasetDTO>(rawText, options),
                     nameof(GISDataset) => JsonSerializer.Deserialize<GISDatasetDTO>(rawText, options),
                     nameof(TwoDGeologyDataset) => JsonSerializer.Deserialize<TwoDGeologyDatasetDTO>(rawText, options),
+                    nameof(PhysicoChemDataset) => JsonSerializer.Deserialize<PhysicoChemDatasetDTO>(rawText, options),
 
                     _ => throw new JsonException($"Unknown dataset type: {typeName}")
                 };

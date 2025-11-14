@@ -30,6 +30,8 @@ namespace GeoscientistToolkit.Business;
 public class ProjectManager
 {
     private static ProjectManager _instance;
+    private System.Threading.Timer _autoBackupTimer;
+    private readonly object _backupLock = new object();
 
     private ProjectManager()
     {
@@ -66,6 +68,9 @@ public class ProjectManager
         HasUnsavedChanges = false;
 
         ProjectMetadata = new ProjectMetadata();
+
+        // Stop auto backup for new projects (no path yet)
+        StopAutoBackup();
 
         Logger.Log("Created new project");
     }
@@ -137,6 +142,9 @@ public class ProjectManager
         HasUnsavedChanges = false;
 
         UpdateRecentProjects(path);
+
+        // Start auto backup timer if enabled
+        StartAutoBackup();
     }
 
     public void BackupProject()
@@ -191,6 +199,50 @@ public class ProjectManager
         catch (Exception ex)
         {
             Logger.LogError($"Failed to create project backup: {ex.Message}");
+        }
+    }
+
+    public void StartAutoBackup()
+    {
+        StopAutoBackup(); // Stop existing timer if any
+
+        var settings = SettingsManager.Instance.Settings.Backup;
+        if (!settings.EnableAutoBackup || settings.BackupInterval <= 0)
+        {
+            return;
+        }
+
+        var intervalMs = settings.BackupInterval * 60 * 1000; // Convert minutes to milliseconds
+        _autoBackupTimer = new System.Threading.Timer(
+            callback: _ =>
+            {
+                lock (_backupLock)
+                {
+                    try
+                    {
+                        BackupProject();
+                    }
+                    catch (Exception ex)
+                    {
+                        Logger.LogError($"Auto backup failed: {ex.Message}");
+                    }
+                }
+            },
+            state: null,
+            dueTime: intervalMs,
+            period: intervalMs
+        );
+
+        Logger.Log($"Auto backup enabled (interval: {settings.BackupInterval} minutes)");
+    }
+
+    public void StopAutoBackup()
+    {
+        if (_autoBackupTimer != null)
+        {
+            _autoBackupTimer.Dispose();
+            _autoBackupTimer = null;
+            Logger.Log("Auto backup disabled");
         }
     }
 
@@ -271,6 +323,9 @@ public class ProjectManager
         HasUnsavedChanges = false;
         Logger.Log($"Project '{ProjectName}' loaded from: {path}");
         UpdateRecentProjects(path);
+
+        // Start auto backup timer if enabled
+        StartAutoBackup();
     }
 
     private Dataset CreateDatasetFromDTO(DatasetDTO dto, IReadOnlyDictionary<string, Dataset> partners)

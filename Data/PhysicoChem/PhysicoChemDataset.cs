@@ -17,7 +17,7 @@ namespace GeoscientistToolkit.Data.PhysicoChem;
 /// Combines geometry, materials, boundary conditions, initial conditions,
 /// and simulation parameters for TOUGH-like multiphysics experiments.
 /// </summary>
-public class PhysicoChemDataset : Dataset
+public class PhysicoChemDataset : Dataset, ISerializableDataset
 {
     [JsonProperty]
     public string Description { get; set; }
@@ -198,6 +198,367 @@ public class PhysicoChemDataset : Dataset
         CurrentState = null;
         ResultHistory?.Clear();
         GeneratedMesh = null;
+    }
+
+    /// <summary>
+    /// Serialize dataset to DTO for saving
+    /// </summary>
+    public object ToSerializableObject()
+    {
+        var dto = new PhysicoChemDatasetDTO
+        {
+            TypeName = nameof(PhysicoChemDataset),
+            Name = Name,
+            FilePath = FilePath,
+            Description = Description,
+            CoupleWithGeothermal = CoupleWithGeothermal,
+            GeothermalDatasetPath = GeothermalDatasetPath
+        };
+
+        // Serialize domains
+        foreach (var domain in Domains)
+        {
+            dto.Domains.Add(new ReactorDomainDTO
+            {
+                Name = domain.Name,
+                IsActive = domain.IsActive,
+                AllowInteraction = domain.AllowInteraction,
+                BooleanOperation = domain.BooleanOperation?.ToString(),
+                Geometry = domain.Geometry != null ? new ReactorGeometryDTO
+                {
+                    GeometryType = domain.Geometry.Type.ToString(),
+                    InterpolationMode = domain.Geometry.InterpolationMode.ToString(),
+                    Center = new System.Numerics.Vector3((float)domain.Geometry.Center.X, (float)domain.Geometry.Center.Y, (float)domain.Geometry.Center.Z),
+                    Dimensions = new System.Numerics.Vector3((float)domain.Geometry.Dimensions.Width, (float)domain.Geometry.Dimensions.Height, (float)domain.Geometry.Dimensions.Depth),
+                    Radius = domain.Geometry.Radius,
+                    InnerRadius = domain.Geometry.InnerRadius,
+                    Height = domain.Geometry.Height,
+                    Profile2D = domain.Geometry.Profile2D?.Select(p => new System.Numerics.Vector2((float)p.X, (float)p.Y)).ToList(),
+                    ExtrusionDepth = domain.Geometry.ExtrusionDepth,
+                    RadialSegments = domain.Geometry.RadialSegments,
+                    CustomPoints = domain.Geometry.CustomPoints?.Select(p => new System.Numerics.Vector3((float)p.X, (float)p.Y, (float)p.Z)).ToList(),
+                    MeshFilePath = domain.Geometry.MeshFilePath
+                } : null,
+                Material = domain.Material != null ? new MaterialPropertiesDTO
+                {
+                    Porosity = domain.Material.Porosity,
+                    Permeability = domain.Material.Permeability,
+                    ThermalConductivity = domain.Material.ThermalConductivity,
+                    SpecificHeat = domain.Material.SpecificHeat,
+                    Density = domain.Material.Density,
+                    MineralComposition = domain.Material.MineralComposition,
+                    MineralFractions = new Dictionary<string, double>(domain.Material.MineralFractions)
+                } : null,
+                InitialConditions = domain.InitialConditions != null ? new InitialConditionsDTO
+                {
+                    Temperature = domain.InitialConditions.Temperature,
+                    Pressure = domain.InitialConditions.Pressure,
+                    Concentrations = new Dictionary<string, double>(domain.InitialConditions.Concentrations),
+                    InitialVelocity = new System.Numerics.Vector3((float)domain.InitialConditions.InitialVelocity.Vx, (float)domain.InitialConditions.InitialVelocity.Vy, (float)domain.InitialConditions.InitialVelocity.Vz),
+                    LiquidSaturation = domain.InitialConditions.LiquidSaturation,
+                    FluidType = domain.InitialConditions.FluidType
+                } : null
+            });
+        }
+
+        // Serialize boundary conditions
+        foreach (var bc in BoundaryConditions)
+        {
+            dto.BoundaryConditions.Add(new BoundaryConditionDTO
+            {
+                Name = bc.Name,
+                Type = bc.Type.ToString(),
+                Location = bc.Location.ToString(),
+                Variable = bc.Variable.ToString(),
+                Value = bc.Value,
+                FluxValue = bc.FluxValue,
+                IsTimeDependendent = bc.IsTimeDependendent,
+                TimeExpression = bc.TimeExpression,
+                SpeciesName = bc.SpeciesName,
+                CustomRegionCenter = new System.Numerics.Vector3((float)bc.CustomRegionCenter.X, (float)bc.CustomRegionCenter.Y, (float)bc.CustomRegionCenter.Z),
+                CustomRegionRadius = bc.CustomRegionRadius,
+                IsActive = bc.IsActive
+            });
+        }
+
+        // Serialize forces
+        foreach (var force in Forces)
+        {
+            dto.Forces.Add(new ForceFieldDTO
+            {
+                Name = force.Name,
+                Type = force.Type.ToString(),
+                IsActive = force.IsActive,
+                GravityVector = new System.Numerics.Vector3((float)force.GravityVector.X, (float)force.GravityVector.Y, (float)force.GravityVector.Z),
+                VortexCenter = new System.Numerics.Vector3((float)force.VortexCenter.X, (float)force.VortexCenter.Y, (float)force.VortexCenter.Z),
+                VortexAxis = new System.Numerics.Vector3((float)force.VortexAxis.X, (float)force.VortexAxis.Y, (float)force.VortexAxis.Z),
+                VortexStrength = force.VortexStrength,
+                VortexRadius = force.VortexRadius,
+                IsTimeDependendent = force.IsTimeDependendent
+            });
+        }
+
+        // Serialize nucleation sites
+        foreach (var site in NucleationSites)
+        {
+            dto.NucleationSites.Add(new NucleationSiteDTO
+            {
+                Name = site.Name,
+                Position = new System.Numerics.Vector3((float)site.Position.X, (float)site.Position.Y, (float)site.Position.Z),
+                MineralType = site.MineralType,
+                NucleationRate = site.NucleationRate,
+                InitialRadius = site.InitialRadius,
+                ActivationEnergy = site.ActivationEnergy,
+                CriticalSupersaturation = site.CriticalSupersaturation,
+                IsActive = site.IsActive
+            });
+        }
+
+        // Serialize simulation parameters
+        dto.SimulationParams = new SimulationParametersDTO
+        {
+            TotalTime = SimulationParams.TotalTime,
+            TimeStep = SimulationParams.TimeStep,
+            OutputInterval = SimulationParams.OutputInterval,
+            EnableReactiveTransport = SimulationParams.EnableReactiveTransport,
+            EnableHeatTransfer = SimulationParams.EnableHeatTransfer,
+            EnableFlow = SimulationParams.EnableFlow,
+            EnableForces = SimulationParams.EnableForces,
+            EnableNucleation = SimulationParams.EnableNucleation,
+            ConvergenceTolerance = SimulationParams.ConvergenceTolerance,
+            MaxIterations = SimulationParams.MaxIterations,
+            UseGPU = SimulationParams.UseGPU,
+            SolverType = SimulationParams.SolverType
+        };
+
+        // Serialize mesh if present
+        if (GeneratedMesh != null)
+        {
+            dto.GeneratedMesh = new GridMesh3DDTO
+            {
+                GridSize = new Vector3Int { X = GeneratedMesh.GridSize.X, Y = GeneratedMesh.GridSize.Y, Z = GeneratedMesh.GridSize.Z },
+                Origin = new System.Numerics.Vector3((float)GeneratedMesh.Origin.X, (float)GeneratedMesh.Origin.Y, (float)GeneratedMesh.Origin.Z),
+                Spacing = new System.Numerics.Vector3((float)GeneratedMesh.Spacing.X, (float)GeneratedMesh.Spacing.Y, (float)GeneratedMesh.Spacing.Z),
+                Metadata = new Dictionary<string, object>(GeneratedMesh.Metadata)
+            };
+        }
+
+        // Serialize result history (lightweight version - only statistics, not full 3D arrays)
+        if (ResultHistory != null && ResultHistory.Count > 0)
+        {
+            foreach (var state in ResultHistory)
+            {
+                var stateDto = new PhysicoChemStateDTO
+                {
+                    CurrentTime = state.CurrentTime,
+                    GridSizeX = state.Temperature.GetLength(0),
+                    GridSizeY = state.Temperature.GetLength(1),
+                    GridSizeZ = state.Temperature.GetLength(2),
+                    TemperatureAvg = CalculateAverage(state.Temperature),
+                    PressureAvg = CalculateAverage(state.Pressure),
+                    ActiveNucleiCount = state.ActiveNuclei.Count
+                };
+
+                // Serialize active nuclei
+                foreach (var nucleus in state.ActiveNuclei)
+                {
+                    stateDto.ActiveNuclei.Add(new NucleusDTO
+                    {
+                        Id = nucleus.Id,
+                        Position = new System.Numerics.Vector3((float)nucleus.Position.X, (float)nucleus.Position.Y, (float)nucleus.Position.Z),
+                        Radius = nucleus.Radius,
+                        MineralType = nucleus.MineralType,
+                        GrowthRate = nucleus.GrowthRate,
+                        BirthTime = nucleus.BirthTime
+                    });
+                }
+
+                dto.ResultHistory.Add(stateDto);
+            }
+        }
+
+        return dto;
+    }
+
+    /// <summary>
+    /// Import dataset from DTO
+    /// </summary>
+    public void ImportFromDTO(PhysicoChemDatasetDTO dto)
+    {
+        Description = dto.Description;
+        CoupleWithGeothermal = dto.CoupleWithGeothermal;
+        GeothermalDatasetPath = dto.GeothermalDatasetPath;
+
+        // Import domains
+        Domains.Clear();
+        foreach (var domainDto in dto.Domains)
+        {
+            var domain = new ReactorDomain
+            {
+                Name = domainDto.Name,
+                IsActive = domainDto.IsActive,
+                AllowInteraction = domainDto.AllowInteraction
+            };
+
+            if (!string.IsNullOrEmpty(domainDto.BooleanOperation))
+                domain.BooleanOperation = Enum.Parse<BooleanOp>(domainDto.BooleanOperation);
+
+            if (domainDto.Geometry != null)
+            {
+                domain.Geometry = new ReactorGeometry
+                {
+                    Type = Enum.Parse<GeometryType>(domainDto.Geometry.GeometryType),
+                    InterpolationMode = Enum.Parse<Interpolation2D3DMode>(domainDto.Geometry.InterpolationMode),
+                    Center = (domainDto.Geometry.Center.X, domainDto.Geometry.Center.Y, domainDto.Geometry.Center.Z),
+                    Dimensions = (domainDto.Geometry.Dimensions.X, domainDto.Geometry.Dimensions.Y, domainDto.Geometry.Dimensions.Z),
+                    Radius = domainDto.Geometry.Radius,
+                    InnerRadius = domainDto.Geometry.InnerRadius,
+                    Height = domainDto.Geometry.Height,
+                    Profile2D = domainDto.Geometry.Profile2D?.Select(p => (p.X, p.Y)).ToList() ?? new List<(double, double)>(),
+                    ExtrusionDepth = domainDto.Geometry.ExtrusionDepth,
+                    RadialSegments = domainDto.Geometry.RadialSegments,
+                    CustomPoints = domainDto.Geometry.CustomPoints?.Select(p => (p.X, p.Y, p.Z)).ToList() ?? new List<(double, double, double)>(),
+                    MeshFilePath = domainDto.Geometry.MeshFilePath
+                };
+            }
+
+            if (domainDto.Material != null)
+            {
+                domain.Material = new MaterialProperties
+                {
+                    Porosity = domainDto.Material.Porosity,
+                    Permeability = domainDto.Material.Permeability,
+                    ThermalConductivity = domainDto.Material.ThermalConductivity,
+                    SpecificHeat = domainDto.Material.SpecificHeat,
+                    Density = domainDto.Material.Density,
+                    MineralComposition = domainDto.Material.MineralComposition,
+                    MineralFractions = new Dictionary<string, double>(domainDto.Material.MineralFractions)
+                };
+            }
+
+            if (domainDto.InitialConditions != null)
+            {
+                domain.InitialConditions = new InitialConditions
+                {
+                    Temperature = domainDto.InitialConditions.Temperature,
+                    Pressure = domainDto.InitialConditions.Pressure,
+                    Concentrations = new Dictionary<string, double>(domainDto.InitialConditions.Concentrations),
+                    InitialVelocity = (domainDto.InitialConditions.InitialVelocity.X, domainDto.InitialConditions.InitialVelocity.Y, domainDto.InitialConditions.InitialVelocity.Z),
+                    LiquidSaturation = domainDto.InitialConditions.LiquidSaturation,
+                    FluidType = domainDto.InitialConditions.FluidType
+                };
+            }
+
+            Domains.Add(domain);
+        }
+
+        // Import boundary conditions
+        BoundaryConditions.Clear();
+        foreach (var bcDto in dto.BoundaryConditions)
+        {
+            var bc = new BoundaryCondition
+            {
+                Name = bcDto.Name,
+                Type = Enum.Parse<BoundaryType>(bcDto.Type),
+                Location = Enum.Parse<BoundaryLocation>(bcDto.Location),
+                Variable = Enum.Parse<BoundaryVariable>(bcDto.Variable),
+                Value = bcDto.Value,
+                FluxValue = bcDto.FluxValue,
+                IsTimeDependendent = bcDto.IsTimeDependendent,
+                TimeExpression = bcDto.TimeExpression,
+                SpeciesName = bcDto.SpeciesName,
+                CustomRegionCenter = (bcDto.CustomRegionCenter.X, bcDto.CustomRegionCenter.Y, bcDto.CustomRegionCenter.Z),
+                CustomRegionRadius = bcDto.CustomRegionRadius,
+                IsActive = bcDto.IsActive
+            };
+            BoundaryConditions.Add(bc);
+        }
+
+        // Import forces
+        Forces.Clear();
+        foreach (var forceDto in dto.Forces)
+        {
+            var force = new ForceField
+            {
+                Name = forceDto.Name,
+                Type = Enum.Parse<ForceType>(forceDto.Type),
+                IsActive = forceDto.IsActive,
+                GravityVector = (forceDto.GravityVector.X, forceDto.GravityVector.Y, forceDto.GravityVector.Z),
+                VortexCenter = (forceDto.VortexCenter.X, forceDto.VortexCenter.Y, forceDto.VortexCenter.Z),
+                VortexAxis = (forceDto.VortexAxis.X, forceDto.VortexAxis.Y, forceDto.VortexAxis.Z),
+                VortexStrength = forceDto.VortexStrength,
+                VortexRadius = forceDto.VortexRadius,
+                IsTimeDependendent = forceDto.IsTimeDependendent
+            };
+            Forces.Add(force);
+        }
+
+        // Import nucleation sites
+        NucleationSites.Clear();
+        foreach (var siteDto in dto.NucleationSites)
+        {
+            var site = new NucleationSite
+            {
+                Name = siteDto.Name,
+                Position = (siteDto.Position.X, siteDto.Position.Y, siteDto.Position.Z),
+                MineralType = siteDto.MineralType,
+                NucleationRate = siteDto.NucleationRate,
+                InitialRadius = siteDto.InitialRadius,
+                ActivationEnergy = siteDto.ActivationEnergy,
+                CriticalSupersaturation = siteDto.CriticalSupersaturation,
+                IsActive = siteDto.IsActive
+            };
+            NucleationSites.Add(site);
+        }
+
+        // Import simulation parameters
+        SimulationParams.TotalTime = dto.SimulationParams.TotalTime;
+        SimulationParams.TimeStep = dto.SimulationParams.TimeStep;
+        SimulationParams.OutputInterval = dto.SimulationParams.OutputInterval;
+        SimulationParams.EnableReactiveTransport = dto.SimulationParams.EnableReactiveTransport;
+        SimulationParams.EnableHeatTransfer = dto.SimulationParams.EnableHeatTransfer;
+        SimulationParams.EnableFlow = dto.SimulationParams.EnableFlow;
+        SimulationParams.EnableForces = dto.SimulationParams.EnableForces;
+        SimulationParams.EnableNucleation = dto.SimulationParams.EnableNucleation;
+        SimulationParams.ConvergenceTolerance = dto.SimulationParams.ConvergenceTolerance;
+        SimulationParams.MaxIterations = dto.SimulationParams.MaxIterations;
+        SimulationParams.UseGPU = dto.SimulationParams.UseGPU;
+        SimulationParams.SolverType = dto.SimulationParams.SolverType;
+
+        // Import mesh if present
+        if (dto.GeneratedMesh != null)
+        {
+            GeneratedMesh = new GridMesh3D
+            {
+                GridSize = (dto.GeneratedMesh.GridSize.X, dto.GeneratedMesh.GridSize.Y, dto.GeneratedMesh.GridSize.Z),
+                Origin = (dto.GeneratedMesh.Origin.X, dto.GeneratedMesh.Origin.Y, dto.GeneratedMesh.Origin.Z),
+                Spacing = (dto.GeneratedMesh.Spacing.X, dto.GeneratedMesh.Spacing.Y, dto.GeneratedMesh.Spacing.Z),
+                Metadata = new Dictionary<string, object>(dto.GeneratedMesh.Metadata)
+            };
+        }
+
+        // Note: Full result history with 3D arrays is NOT imported
+        // Only statistics are available from the DTO
+    }
+
+    private static float CalculateAverage(float[,,] field)
+    {
+        int nx = field.GetLength(0);
+        int ny = field.GetLength(1);
+        int nz = field.GetLength(2);
+
+        float sum = 0;
+        int count = 0;
+
+        for (int i = 0; i < nx; i++)
+        for (int j = 0; j < ny; j++)
+        for (int k = 0; k < nz; k++)
+        {
+            sum += field[i, j, k];
+            count++;
+        }
+
+        return count > 0 ? sum / count : 0;
     }
 }
 
