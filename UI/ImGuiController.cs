@@ -1,4 +1,4 @@
-﻿// GeoscientistToolkit/ImGuiController.cs (Fixed Unicode Ranges for Scientific Characters)
+﻿// GeoscientistToolkit/UI/ImGuiController.cs (Fixed Unicode Ranges for Scientific Characters)
 
 using System.Numerics;
 using System.Runtime.CompilerServices;

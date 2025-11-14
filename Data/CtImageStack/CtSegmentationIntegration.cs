@@ -302,11 +302,14 @@ public class CtSegmentationIntegration : IDisposable
 
     private void DrawLassoIcon(ImDrawListPtr dl, Vector2 p, Vector2 s, uint c, bool a)
     {
-        var p1 = p + new Vector2(s.X * 0.2f, s.Y * 0.2f);
-        var p2 = p + new Vector2(s.X * 0.8f, s.Y * 0.3f);
-        var p3 = p + new Vector2(s.X * 0.7f, s.Y * 0.8f);
-        var p4 = p + new Vector2(s.X * 0.3f, s.Y * 0.7f);
-        dl.AddPolyline(ref p1, 4, c, ImDrawFlags.Closed, 2f);
+        var points = new Vector2[]
+        {
+            p + new Vector2(s.X * 0.2f, s.Y * 0.2f),
+            p + new Vector2(s.X * 0.8f, s.Y * 0.3f),
+            p + new Vector2(s.X * 0.7f, s.Y * 0.8f),
+            p + new Vector2(s.X * 0.3f, s.Y * 0.7f)
+        };
+        dl.AddPolyline(ref points[0], points.Length, c, ImDrawFlags.Closed, 2f);
     }
 
     private void DrawWandIcon(ImDrawListPtr dl, Vector2 p, Vector2 s, uint c, bool a)

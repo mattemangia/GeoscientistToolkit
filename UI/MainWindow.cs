@@ -523,7 +523,7 @@ public class MainWindow
         {
             // Space to the far right
             var frameH = ImGui.GetTextLineHeight() + ImGui.GetStyle().FramePadding.Y * 2f;
-            var icon = VeldridManager.IsFullScreen ? "🗗" : "🗖";
+            var icon = VeldridManager.IsFullScreen ? "[=]" : "[ ]";
 
             var iconSize = ImGui.CalcTextSize(icon);
             var btnW = iconSize.X + ImGui.GetStyle().FramePadding.X * 2f;
