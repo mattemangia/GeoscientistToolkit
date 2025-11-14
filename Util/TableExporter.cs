@@ -149,9 +149,10 @@ public static class TableExporter
             table.Columns.Add("Fill Ratio (%)", typeof(double));
 
             // Calculate statistics for each slice in parallel
-            var sliceStats = new (int min, int max, double mean, double stdDev, int nonZero, double fillRatio)[ctDataset.Depth];
+            var sliceStats = new (int min, int max, double mean, double stdDev, int nonZero, double fillRatio)[numSlices];
 
-            Parallel.For(0, (int)ctDataset.Depth, z =>
+            int numSlices = ctDataset.Depth;
+            Parallel.For(0, numSlices, z =>
             {
                 // Get slice data
                 byte[] sliceData = null;
@@ -160,7 +161,7 @@ public static class TableExporter
                     if (ctDataset.VolumeData != null)
                     {
                         sliceData = new byte[ctDataset.Width * ctDataset.Height];
-                        ctDataset.VolumeData.GetSlice(z, sliceData);
+                        ctDataset.VolumeData.ReadSliceZ(z, sliceData);
                     }
                 }
                 catch

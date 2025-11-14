@@ -97,7 +97,7 @@ public static class BoreholeSeismicIntegration
         {
             var depth = i * depthInterval;
             var amplitude = trace.Samples[i];
-            amplitudeTrack.Values.Add(new ParameterValue { Depth = depth, Value = amplitude });
+            amplitudeTrack.Points.Add(new ParameterPoint { Depth = depth, Value = amplitude });
         }
 
         borehole.ParameterTracks["Seismic Amplitude"] = amplitudeTrack;
@@ -115,7 +115,7 @@ public static class BoreholeSeismicIntegration
         for (int i = 0; i < numSamples; i++)
         {
             var depth = i * depthInterval;
-            envelopeTrack.Values.Add(new ParameterValue { Depth = depth, Value = envelope[i] });
+            envelopeTrack.Points.Add(new ParameterPoint { Depth = depth, Value = envelope[i] });
         }
 
         borehole.ParameterTracks["Seismic Envelope"] = envelopeTrack;
@@ -172,13 +172,13 @@ public static class BoreholeSeismicIntegration
         };
 
         // Match depths and multiply Vp * Density
-        foreach (var vpValue in vpTrack.Values)
+        foreach (var vpValue in vpTrack.Points)
         {
-            var densityValue = densityTrack.Values.FirstOrDefault(d => Math.Abs(d.Depth - vpValue.Depth) < 0.01f);
+            var densityValue = densityTrack.Points.FirstOrDefault(d => Math.Abs(d.Depth - vpValue.Depth) < 0.01f);
             if (densityValue != null)
             {
                 var ai = vpValue.Value * densityValue.Value;
-                aiTrack.Values.Add(new ParameterValue { Depth = vpValue.Depth, Value = ai });
+                aiTrack.Points.Add(new ParameterPoint { Depth = vpValue.Depth, Value = ai });
             }
         }
 
@@ -187,12 +187,12 @@ public static class BoreholeSeismicIntegration
 
     private static float[] CalculateReflectivity(ParameterTrack aiTrack)
     {
-        var reflectivity = new float[aiTrack.Values.Count - 1];
+        var reflectivity = new float[aiTrack.Points.Count - 1];
 
-        for (int i = 0; i < aiTrack.Values.Count - 1; i++)
+        for (int i = 0; i < aiTrack.Points.Count - 1; i++)
         {
-            var ai1 = aiTrack.Values[i].Value;
-            var ai2 = aiTrack.Values[i + 1].Value;
+            var ai1 = aiTrack.Points[i].Value;
+            var ai2 = aiTrack.Points[i + 1].Value;
 
             // Reflection coefficient: RC = (AI2 - AI1) / (AI2 + AI1)
             if (Math.Abs(ai1 + ai2) > 1e-6)

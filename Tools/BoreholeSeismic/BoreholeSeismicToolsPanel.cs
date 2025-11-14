@@ -239,7 +239,7 @@ public class BoreholeSeismicToolsPanel
             var depthInterval = borehole.TotalDepth / synthetic.Length;
             for (int i = 0; i < synthetic.Length; i++)
             {
-                syntheticTrack.Values.Add(new ParameterValue
+                syntheticTrack.Points.Add(new ParameterPoint
                 {
                     Depth = i * depthInterval,
                     Value = synthetic[i]
@@ -247,7 +247,7 @@ public class BoreholeSeismicToolsPanel
             }
 
             borehole.ParameterTracks["Synthetic Seismic"] = syntheticTrack;
-            ProjectManager.Instance.MarkDatasetChanged(borehole);
+            ProjectManager.Instance.NotifyDatasetDataChanged(borehole);
 
             Logger.Log($"[BoreholeSeismicTools] Generated {synthetic.Length} synthetic seismic samples");
         }
