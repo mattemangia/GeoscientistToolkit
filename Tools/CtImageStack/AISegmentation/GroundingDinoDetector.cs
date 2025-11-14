@@ -51,13 +51,10 @@ namespace GeoscientistToolkit.Tools.CtImageStack.AISegmentation
 
         private void InitializeSession()
         {
-            var options = new SessionOptions
-            {
-                GraphOptimizationLevel = GraphOptimizationLevel.ORT_ENABLE_ALL,
-                EnableMemPattern = true,
-                EnableCpuMemArena = true,
-                IntraOpNumThreads = Math.Max(1, _settings.CpuThreads / 2)
-            };
+            var options = new SessionOptions();
+            options.GraphOptimizationLevel = GraphOptimizationLevel.ORT_ENABLE_ALL;
+            options.EnableCpuMemArena = true;
+            options.IntraOpNumThreads = Math.Max(1, _settings.CpuThreads / 2);
 
             if (_settings.UseGpu)
             {

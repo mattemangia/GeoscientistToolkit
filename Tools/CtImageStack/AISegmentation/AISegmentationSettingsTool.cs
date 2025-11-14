@@ -4,7 +4,7 @@ using System.Numerics;
 using GeoscientistToolkit.Data;
 using GeoscientistToolkit.Data.CtImageStack;
 using GeoscientistToolkit.UI.Interfaces;
-using GeoscientistToolkit.UI.Dialogs;
+using GeoscientistToolkit.UI.Utils;
 using ImGuiNET;
 
 namespace GeoscientistToolkit.Tools.CtImageStack.AISegmentation

@@ -238,7 +238,8 @@ namespace GeoscientistToolkit.Tools.CtImageStack.AISegmentation
                 var startTime = DateTime.Now;
 
                 // Get slice as bitmap
-                var slice = dataset.GetSlice(sliceIndex, DataOrientation.XY);
+                var slice = new byte[dataset.Width * dataset.Height];
+                dataset.VolumeData.ReadSliceZ(sliceIndex, slice);
                 using var bitmap = ConvertSliceToBitmap(slice, dataset.Width, dataset.Height);
 
                 // Run pipeline
@@ -264,7 +265,6 @@ namespace GeoscientistToolkit.Tools.CtImageStack.AISegmentation
         {
             if (result.Mask == null || _currentSliceIndex < 0) return;
 
-            var labels = dataset.Labels;
             int width = dataset.Width;
             int height = dataset.Height;
 
@@ -274,13 +274,12 @@ namespace GeoscientistToolkit.Tools.CtImageStack.AISegmentation
                 {
                     if (result.Mask[y, x] > 0)
                     {
-                        int idx = _currentSliceIndex * width * height + y * width + x;
-                        labels[idx] = _targetMaterialId;
+                        dataset.LabelData[x, y, _currentSliceIndex] = _targetMaterialId;
                     }
                 }
             }
 
-            ProjectManager.Instance.TriggerDatasetDataChanged(dataset);
+            ProjectManager.Instance.NotifyDatasetDataChanged(dataset);
         }
 
         private void ApplyAllResultsToMaterial(CtImageStackDataset dataset)
@@ -311,9 +310,9 @@ namespace GeoscientistToolkit.Tools.CtImageStack.AISegmentation
                 foreach (var material in materials)
                 {
                     bool isSelected = _targetMaterialId == material.ID;
-                    var color = material.Color.ToVector4();
+                    var colorU32 = ImGui.ColorConvertFloat4ToU32(material.Color);
 
-                    ImGui.PushStyleColor(ImGuiCol.Text, color);
+                    ImGui.PushStyleColor(ImGuiCol.Text, colorU32);
                     if (ImGui.Selectable($"{material.Name} (ID: {material.ID})", isSelected))
                     {
                         _targetMaterialId = material.ID;
@@ -333,7 +332,7 @@ namespace GeoscientistToolkit.Tools.CtImageStack.AISegmentation
             return material != null ? $"{material.Name} (ID: {materialId})" : "Select Material";
         }
 
-        private SKBitmap ConvertSliceToBitmap(ushort[] slice, int width, int height)
+        private SKBitmap ConvertSliceToBitmap(byte[] slice, int width, int height)
         {
             var bitmap = new SKBitmap(width, height, SKColorType.Rgb888x, SKAlphaType.Opaque);
 
@@ -342,7 +341,7 @@ namespace GeoscientistToolkit.Tools.CtImageStack.AISegmentation
                 for (int x = 0; x < width; x++)
                 {
                     int idx = y * width + x;
-                    byte gray = (byte)(slice[idx] >> 8);
+                    byte gray = slice[idx];
                     bitmap.SetPixel(x, y, new SKColor(gray, gray, gray));
                 }
             }
