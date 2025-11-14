@@ -84,11 +84,12 @@ public class ThermodynamicsOpenCL : IDisposable
 
             // Create context
             int errorCode;
-            _context = _cl.CreateContext(null, 1, &_device, null, null, &errorCode);
+            var device = _device;
+            _context = _cl.CreateContext(null, 1, &device, null, null, &errorCode);
             CheckError(errorCode, "CreateContext");
 
             // Create command queue
-            _commandQueue = _cl.CreateCommandQueue(_context, _device, (CommandQueueProperties)0, &errorCode);
+            _commandQueue = _cl.CreateCommandQueue(_context, device, (CommandQueueProperties)0, &errorCode);
             CheckError(errorCode, "CreateCommandQueue");
 
             // Create and build program

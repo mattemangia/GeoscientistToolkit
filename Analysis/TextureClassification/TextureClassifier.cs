@@ -411,7 +411,7 @@ public class TextureClassifier : IDisposable
                     if (logSize > 0)
                     {
                         var log = stackalloc byte[(int)logSize];
-                        _cl.GetProgramBuildInfo(_program, devices[0], (uint)ProgramBuildInfo.BuildLog, logSize, log,
+                        _cl.GetProgramBuildInfo(_program, device, (uint)ProgramBuildInfo.BuildLog, logSize, log,
                             null);
                         var logStr = Encoding.ASCII.GetString(log, (int)logSize);
                         Logger.LogError($"[TextureClassifier] Build log: {logStr}");

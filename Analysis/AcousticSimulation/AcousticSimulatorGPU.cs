@@ -268,17 +268,18 @@ public unsafe class AcousticSimulatorGPU : IAcousticKernel
         var deviceInfo = GeoscientistToolkit.OpenCL.OpenCLDeviceManager.GetDeviceInfo();
         DeviceName = deviceInfo.Name;
         DeviceVendor = deviceInfo.Vendor;
-        DeviceGlobalMemory = deviceInfo.GlobalMemory;
+        DeviceGlobalMemory = (nuint)deviceInfo.GlobalMemory;
 
         Logger.Log($"AcousticSimulatorGPU: Using device: {DeviceName} ({DeviceVendor})");
         Logger.Log($"AcousticSimulatorGPU: Global Memory: {DeviceGlobalMemory / (1024 * 1024)} MB");
 
         // Create context with the device from centralized manager
-        _context = _cl.CreateContext(null, 1, &_device, null, null, &error);
+        var device = _device;
+        _context = _cl.CreateContext(null, 1, &device, null, null, &error);
         CheckError(error, "CreateContext");
 
         // Create command queue with the device from centralized manager
-        _commandQueue = _cl.CreateCommandQueue(_context, _device, (CommandQueueProperties)0, &error);
+        _commandQueue = _cl.CreateCommandQueue(_context, device, (CommandQueueProperties)0, &error);
         CheckError(error, "CreateCommandQueue");
 
         BuildProgram();
