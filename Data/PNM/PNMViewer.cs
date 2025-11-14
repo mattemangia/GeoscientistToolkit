@@ -26,7 +26,11 @@ public class PNMViewer : IDatasetViewer
         "Pressure (Pores)",
         "Pressure Drop (Throats)",
         "Local Tortuosity",
-        "Effective Diffusivity" // NEW
+        "Effective Diffusivity",
+        "Temperature", // NEW
+        "Species Concentration", // NEW
+        "Mineral Precipitation", // NEW
+        "Reaction Rate" // NEW
     };
 
     // Dataset & Veldrid Resources
@@ -42,6 +46,13 @@ public class PNMViewer : IDatasetViewer
     // NEW: Diffusivity visualization data
     private readonly ConcurrentDictionary<int, float> _localDiffusivity = new();
     private readonly ConcurrentDictionary<int, float> _localTortuosity = new();
+
+    // NEW: Reactive transport visualization data
+    private volatile bool _hasReactiveTransportData;
+    private string _selectedSpecies = "";
+    private string _selectedMineral = "";
+    private readonly List<string> _availableSpecies = new();
+    private readonly List<string> _availableMinerals = new();
     private readonly ConcurrentBag<int> _outletPoreIds = new();
 
     // Flow visualization data
@@ -132,6 +143,7 @@ public class PNMViewer : IDatasetViewer
                     _pendingGeometryRebuild = true;
                     UpdateFlowData();
                     UpdateDiffusivityData(); // NEW
+                    UpdateReactiveTransportData(); // NEW
                 });
         };
 
@@ -146,6 +158,7 @@ public class PNMViewer : IDatasetViewer
         InitializeVeldridResources();
         UpdateFlowData();
         UpdateDiffusivityData(); // NEW
+        UpdateReactiveTransportData(); // NEW
         RebuildGeometryFromDataset();
         ResetCamera();
     }
@@ -221,6 +234,62 @@ public class PNMViewer : IDatasetViewer
             else
             {
                 _hasDiffusivityData = false;
+            }
+        }
+    }
+
+    // NEW: Update reactive transport data from dataset
+    private void UpdateReactiveTransportData()
+    {
+        lock (_flowDataLock)
+        {
+            if (_dataset.ReactiveTransportState != null)
+            {
+                _hasReactiveTransportData = true;
+
+                // Get list of available species
+                _availableSpecies.Clear();
+                var speciesSet = new HashSet<string>();
+
+                foreach (var poreConc in _dataset.ReactiveTransportState.PoreConcentrations.Values)
+                {
+                    foreach (var species in poreConc.Keys)
+                        speciesSet.Add(species);
+                }
+
+                _availableSpecies.AddRange(speciesSet.OrderBy(s => s));
+
+                if (!string.IsNullOrEmpty(_selectedSpecies) && !_availableSpecies.Contains(_selectedSpecies))
+                    _selectedSpecies = _availableSpecies.FirstOrDefault() ?? "";
+
+                if (string.IsNullOrEmpty(_selectedSpecies) && _availableSpecies.Count > 0)
+                    _selectedSpecies = _availableSpecies[0];
+
+                // Get list of available minerals
+                _availableMinerals.Clear();
+                var mineralSet = new HashSet<string>();
+
+                foreach (var poreMinerals in _dataset.ReactiveTransportState.PoreMinerals.Values)
+                {
+                    foreach (var mineral in poreMinerals.Keys)
+                        mineralSet.Add(mineral);
+                }
+
+                _availableMinerals.AddRange(mineralSet.OrderBy(m => m));
+
+                if (!string.IsNullOrEmpty(_selectedMineral) && !_availableMinerals.Contains(_selectedMineral))
+                    _selectedMineral = _availableMinerals.FirstOrDefault() ?? "";
+
+                if (string.IsNullOrEmpty(_selectedMineral) && _availableMinerals.Count > 0)
+                    _selectedMineral = _availableMinerals[0];
+
+                Logger.Log($"[PNMViewer] Loaded reactive transport data: {_availableSpecies.Count} species, {_availableMinerals.Count} minerals");
+            }
+            else
+            {
+                _hasReactiveTransportData = false;
+                _availableSpecies.Clear();
+                _availableMinerals.Clear();
             }
         }
     }
@@ -985,6 +1054,19 @@ void main()
             optionIndices.Add(6);
         }
 
+        // NEW: Add reactive transport options if data available
+        if (_hasReactiveTransportData)
+        {
+            availableOptions.Add("Temperature");
+            optionIndices.Add(7);
+            availableOptions.Add("Species Concentration");
+            optionIndices.Add(8);
+            availableOptions.Add("Mineral Precipitation");
+            optionIndices.Add(9);
+            availableOptions.Add("Reaction Rate");
+            optionIndices.Add(10);
+        }
+
         var localIndex = optionIndices.IndexOf(_colorByIndex);
         if (localIndex < 0) localIndex = 0;
 
@@ -994,6 +1076,30 @@ void main()
             _colorByIndex = optionIndices[localIndex];
             CreateColorRampTexture(VeldridManager.Factory);
             RebuildGeometryFromDataset();
+        }
+
+        // NEW: Show species/mineral selector if relevant mode is active
+        if (_colorByIndex == 8 && _availableSpecies.Count > 0)
+        {
+            ImGui.SameLine();
+            ImGui.SetNextItemWidth(150);
+            var speciesIndex = Math.Max(0, _availableSpecies.IndexOf(_selectedSpecies));
+            if (ImGui.Combo("##Species", ref speciesIndex, _availableSpecies.ToArray(), _availableSpecies.Count))
+            {
+                _selectedSpecies = _availableSpecies[speciesIndex];
+                RebuildGeometryFromDataset();
+            }
+        }
+        else if (_colorByIndex == 9 && _availableMinerals.Count > 0)
+        {
+            ImGui.SameLine();
+            ImGui.SetNextItemWidth(150);
+            var mineralIndex = Math.Max(0, _availableMinerals.IndexOf(_selectedMineral));
+            if (ImGui.Combo("##Mineral", ref mineralIndex, _availableMinerals.ToArray(), _availableMinerals.Count))
+            {
+                _selectedMineral = _availableMinerals[mineralIndex];
+                RebuildGeometryFromDataset();
+            }
         }
 
         ImGui.SameLine();
@@ -1019,6 +1125,7 @@ void main()
         {
             UpdateFlowData();
             UpdateDiffusivityData(); // NEW
+            UpdateReactiveTransportData(); // NEW
             RebuildGeometryFromDataset();
             _pendingGeometryRebuild = false;
         }
@@ -1237,8 +1344,27 @@ void main()
                         return MathF.Log10(diff);
                     return -20f; // Floor value for zero/invalid
                 }
-
                 return -20f;
+            case 7: // Temperature
+                if (_hasReactiveTransportData && _dataset.ReactiveTransportState.PoreTemperatures.TryGetValue(p.ID, out var temp))
+                    return temp;
+                return 298.15f; // Room temperature default
+            case 8: // Species Concentration
+                if (_hasReactiveTransportData && !string.IsNullOrEmpty(_selectedSpecies) &&
+                    _dataset.ReactiveTransportState.PoreConcentrations.TryGetValue(p.ID, out var concs) &&
+                    concs.TryGetValue(_selectedSpecies, out var conc))
+                    return conc;
+                return 0;
+            case 9: // Mineral Precipitation
+                if (_hasReactiveTransportData && !string.IsNullOrEmpty(_selectedMineral) &&
+                    _dataset.ReactiveTransportState.PoreMinerals.TryGetValue(p.ID, out var minerals) &&
+                    minerals.TryGetValue(_selectedMineral, out var mineralVol))
+                    return mineralVol;
+                return 0;
+            case 10: // Reaction Rate
+                if (_hasReactiveTransportData && _dataset.ReactiveTransportState.ReactionRates.TryGetValue(p.ID, out var rate))
+                    return Math.Abs(rate); // Use absolute value for coloring
+                return 0;
             default: return p.Radius;
         }
     }
@@ -1263,6 +1389,21 @@ void main()
                 if (avgDiff > 0)
                     return MathF.Log10(avgDiff);
                 return -20f;
+            case 7: // Temperature
+                if (_hasReactiveTransportData)
+                {
+                    var temp1 = _dataset.ReactiveTransportState.PoreTemperatures.GetValueOrDefault(p1.ID, 298.15f);
+                    var temp2 = _dataset.ReactiveTransportState.PoreTemperatures.GetValueOrDefault(p2.ID, 298.15f);
+                    return (temp1 + temp2) / 2.0f;
+                }
+                return 298.15f;
+            case 8: // Species concentration
+            case 9: // Mineral precipitation
+            case 10: // Reaction rate
+                // Average the pore values for throats
+                var val1 = GetPoreColorValue(p1);
+                var val2 = GetPoreColorValue(p2);
+                return (val1 + val2) / 2.0f;
             default:
                 return t.Radius;
         }

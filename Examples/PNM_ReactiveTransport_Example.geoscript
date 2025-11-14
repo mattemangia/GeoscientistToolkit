@@ -1,0 +1,45 @@
+# Example: PNM Reactive Transport Simulation
+# This script demonstrates running reactive transport through a pore network
+# with calcite precipitation/dissolution
+
+# Assumptions:
+# 1. You have already generated a PNM from a CT scan
+# 2. The PNM dataset is loaded and active
+
+# Step 1: Set initial species concentrations
+# Ca2+ and CO3^2- will react to form/dissolve calcite
+SET_PNM_SPECIES Ca2+ 0.01 0.005
+# Args: species_name inlet_concentration(mol/L) initial_concentration(mol/L)
+
+SET_PNM_SPECIES CO3^2- 0.01 0.005
+# High inlet concentrations will cause precipitation
+
+# Step 2: Set initial mineral content (optional)
+SET_PNM_MINERALS Calcite 0.05
+# Args: mineral_name volume_fraction (5% of pore volume initially filled with calcite)
+
+# Step 3: Run reactive transport simulation
+RUN_PNM_REACTIVE_TRANSPORT 3600 1.0 298.15 2.0 0.0
+# Args: total_time(s) time_step(s) inlet_temp(K) inlet_pressure(Pa) outlet_pressure(Pa)
+# This runs for 1 hour with 1 second time steps
+# Temperature is 25°C (298.15K)
+# Pressure gradient drives flow from 2 Pa to 0 Pa
+
+# Step 4: Export results
+EXPORT_PNM_RESULTS ./pnm_reactive_transport_results
+# Exports:
+#   - summary.csv: Overall metrics
+#   - time_series.csv: Permeability evolution over time
+#   - final_pores.csv: Final state of all pores (T, P, concentrations, minerals)
+
+# Results will show:
+# - How permeability changes as calcite precipitates (decreases) or dissolves (increases)
+# - Temperature and pressure fields through the network
+# - Species concentration distributions
+# - Precipitation patterns in 3D
+
+# To visualize in the viewer:
+# 1. Select "Temperature" from color mode to see heat distribution
+# 2. Select "Species Concentration" and choose Ca2+ to see concentration field
+# 3. Select "Mineral Precipitation" and choose Calcite to see where minerals formed
+# 4. Select "Reaction Rate" to see where reactions are most active

@@ -185,7 +185,13 @@ public static class CommandRegistry
             new CreateReactorCommand(),
             new AddDomainCommand(),
             new SetMineralsCommand(),
-            new RunSimulationCommand()
+            new RunSimulationCommand(),
+
+            // PNM Reactive Transport Commands
+            new RunPNMReactiveTransportCommand(),
+            new SetPNMSpeciesCommand(),
+            new SetPNMMineralsCommand(),
+            new ExportPNMResultsCommand()
         };
         Commands = commandList.ToDictionary(c => c.Name.ToUpper(), c => c);
     }

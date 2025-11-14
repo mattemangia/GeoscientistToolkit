@@ -90,6 +90,10 @@ public class PNMDataset : Dataset, ISerializableDataset
     public float FormationFactor { get; set; }
     public float TransportTortuosity { get; set; }
 
+    // --- NEW: Reactive Transport State ---
+    public Analysis.Pnm.PNMReactiveTransportState ReactiveTransportState { get; set; }
+    public Analysis.Pnm.PNMReactiveTransportResults ReactiveTransportResults { get; set; }
+
     /// <summary> Visible pores after filtering. </summary>
     public List<Pore> Pores { get; private set; } = new();
 
