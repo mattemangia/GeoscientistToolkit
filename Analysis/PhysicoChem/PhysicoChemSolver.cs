@@ -7,6 +7,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using GeoscientistToolkit.Analysis.Thermodynamic;
+using GeoscientistToolkit.Data.Mesh3D;
 using GeoscientistToolkit.Data.PhysicoChem;
 using GeoscientistToolkit.Util;
 
