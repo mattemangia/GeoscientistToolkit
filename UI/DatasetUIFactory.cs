@@ -8,6 +8,7 @@ using GeoscientistToolkit.Data.CtImageStack;
 using GeoscientistToolkit.Data.GIS;
 using GeoscientistToolkit.Data.Image;
 using GeoscientistToolkit.Data.Mesh3D;
+using GeoscientistToolkit.Data.PhysicoChem;
 using GeoscientistToolkit.Data.Pnm;
 using GeoscientistToolkit.Data.Table;
 using GeoscientistToolkit.Data.TwoDGeology;
@@ -68,6 +69,9 @@ CtImageStackDataset ctDataset => new CtCombinedViewer(ctDataset),
         // Seismic Dataset
         SeismicDataset seismicDataset => new SeismicViewer(seismicDataset),
 
+        // PhysicoChem Dataset
+        PhysicoChemDataset physicoChemDataset => new PhysicoChemViewer(physicoChemDataset),
+
         // Dataset groups cannot be opened in a viewer
         DatasetGroup => throw new InvalidOperationException(
             "Cannot open a DatasetGroup in a viewer. Please open individual datasets."),
@@ -113,6 +117,7 @@ public static IDatasetPropertiesRenderer CreatePropertiesRenderer(Dataset datase
         BoreholeDataset => new BoreholePropertiesRenderer(),
         TwoDGeologyDataset => new TwoDGeologyProperties(),
         SeismicDataset => new SeismicProperties(),
+        PhysicoChemDataset => new PhysicoChemPropertiesRenderer(),
         _ => new DefaultPropertiesRenderer()
     };
 }
@@ -136,6 +141,7 @@ public static IDatasetTools CreateTools(Dataset dataset)
         BoreholeDataset boreholeDataset => CreateBoreholeTools(boreholeDataset),
         TwoDGeologyDataset => new TwoDGeologyToolsWrapper(),
         SeismicDataset => new SeismicTools(),
+        PhysicoChemDataset => new PhysicoChemTools(),
         // --- MODIFIED: Changed .All to .Any to make tool appear even if non-borehole datasets are in the group ---
         DatasetGroup group when group.Datasets.Any(d => d is BoreholeDataset) => new MultiBoreholeTools(),
         _ => new DefaultTools(),
