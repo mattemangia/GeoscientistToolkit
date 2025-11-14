@@ -414,10 +414,10 @@ public class PhysicoChemDataset : Dataset, ISerializableDataset
                     Radius = domainDto.Geometry.Radius,
                     InnerRadius = domainDto.Geometry.InnerRadius,
                     Height = domainDto.Geometry.Height,
-                    Profile2D = domainDto.Geometry.Profile2D?.Select(p => (p.X, p.Y)).ToList() ?? new List<(double, double)>(),
+                    Profile2D = domainDto.Geometry.Profile2D?.Select(p => ((double)p.X, (double)p.Y)).ToList() ?? new List<(double, double)>(),
                     ExtrusionDepth = domainDto.Geometry.ExtrusionDepth,
                     RadialSegments = domainDto.Geometry.RadialSegments,
-                    CustomPoints = domainDto.Geometry.CustomPoints?.Select(p => (p.X, p.Y, p.Z)).ToList() ?? new List<(double, double, double)>(),
+                    CustomPoints = domainDto.Geometry.CustomPoints?.Select(p => ((double)p.X, (double)p.Y, (double)p.Z)).ToList() ?? new List<(double, double, double)>(),
                     MeshFilePath = domainDto.Geometry.MeshFilePath
                 };
             }

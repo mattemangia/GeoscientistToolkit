@@ -7,6 +7,7 @@ using System.Numerics;
 using GeoscientistToolkit.Analysis.PhysicoChem;
 using GeoscientistToolkit.Business;
 using GeoscientistToolkit.Data;
+using GeoscientistToolkit.Data.Materials;
 using GeoscientistToolkit.UI.Interfaces;
 using GeoscientistToolkit.UI.Utils;
 using GeoscientistToolkit.Util;
@@ -80,6 +81,11 @@ public class PhysicoChemTools : IDatasetTools
     private int _selectedBCIndex = -1;
     private int _selectedForceIndex = -1;
     private int _selectedNucleationIndex = -1;
+
+    // Material/compound selection
+    private string _mineralSearchFilter = "";
+    private List<string> _selectedMinerals = new();
+    private Dictionary<string, float> _mineralFractions = new();
 
     public PhysicoChemTools()
     {
@@ -249,11 +255,20 @@ public class PhysicoChemTools : IDatasetTools
         // Material properties
         if (ImGui.TreeNode("Material Properties##domain"))
         {
+            ImGui.Text("Physical Properties:");
+            ImGui.Indent();
             ImGui.DragFloat("Porosity", ref _porosity, 0.01f, 0.0f, 1.0f);
             ImGui.InputFloat("Permeability (m²)", ref _permeability, 0, 0, "%.2e");
             ImGui.DragFloat("Thermal Conductivity (W/m·K)", ref _thermalConductivity, 0.1f, 0.1f, 100.0f);
             ImGui.DragFloat("Specific Heat (J/kg·K)", ref _specificHeat, 10.0f, 100.0f, 5000.0f);
             ImGui.DragFloat("Density (kg/m³)", ref _density, 10.0f, 100.0f, 10000.0f);
+            ImGui.Unindent();
+
+            ImGui.Spacing();
+            ImGui.Separator();
+            ImGui.Text("Mineral Composition:");
+            DrawMineralSelector();
+
             ImGui.TreePop();
         }
 
@@ -275,7 +290,9 @@ public class PhysicoChemTools : IDatasetTools
                 Permeability = _permeability,
                 ThermalConductivity = _thermalConductivity,
                 SpecificHeat = _specificHeat,
-                Density = _density
+                Density = _density,
+                MineralComposition = string.Join(", ", _selectedMinerals),
+                MineralFractions = new Dictionary<string, double>(_mineralFractions.ToDictionary(kvp => kvp.Key, kvp => (double)kvp.Value))
             };
 
             var initialConditions = new InitialConditions
@@ -881,5 +898,122 @@ public class PhysicoChemTools : IDatasetTools
         }
 
         return count > 0 ? sum / count : 0;
+    }
+
+    private void DrawMineralSelector()
+    {
+        var compoundLib = CompoundLibrary.Instance;
+        var minerals = compoundLib.Compounds
+            .Where(c => c.Phase == CompoundPhase.Solid && !string.IsNullOrEmpty(c.Name))
+            .OrderBy(c => c.Name)
+            .ToList();
+
+        ImGui.Indent();
+
+        // Search filter
+        ImGui.InputText("Search##minerals", ref _mineralSearchFilter, 128);
+
+        // Filtered mineral list
+        var filteredMinerals = string.IsNullOrWhiteSpace(_mineralSearchFilter)
+            ? minerals
+            : minerals.Where(m => m.Name.Contains(_mineralSearchFilter, StringComparison.OrdinalIgnoreCase) ||
+                                  (m.ChemicalFormula?.Contains(_mineralSearchFilter, StringComparison.OrdinalIgnoreCase) ?? false)).ToList();
+
+        ImGui.BeginChild("mineral_list", new Vector2(0, 150), true);
+
+        foreach (var mineral in filteredMinerals.Take(20)) // Limit to 20 for performance
+        {
+            bool isSelected = _selectedMinerals.Contains(mineral.Name);
+
+            if (ImGui.Checkbox($"##{mineral.Name}_check", ref isSelected))
+            {
+                if (isSelected)
+                {
+                    if (!_selectedMinerals.Contains(mineral.Name))
+                    {
+                        _selectedMinerals.Add(mineral.Name);
+                        _mineralFractions[mineral.Name] = 1.0f / (_selectedMinerals.Count); // Equal distribution
+
+                        // Renormalize fractions
+                        RenormalizeMineralFractions();
+                    }
+                }
+                else
+                {
+                    _selectedMinerals.Remove(mineral.Name);
+                    _mineralFractions.Remove(mineral.Name);
+                    RenormalizeMineralFractions();
+                }
+            }
+
+            ImGui.SameLine();
+            ImGui.Text($"{mineral.Name}");
+            if (!string.IsNullOrEmpty(mineral.ChemicalFormula))
+            {
+                ImGui.SameLine();
+                ImGui.TextDisabled($"({mineral.ChemicalFormula})");
+            }
+        }
+
+        ImGui.EndChild();
+
+        // Show selected minerals with fractions
+        if (_selectedMinerals.Count > 0)
+        {
+            ImGui.Spacing();
+            ImGui.Text("Selected Minerals:");
+            ImGui.Indent();
+
+            var mineralsCopy = _selectedMinerals.ToList(); // Avoid modification during iteration
+            foreach (var mineralName in mineralsCopy)
+            {
+                if (!_mineralFractions.ContainsKey(mineralName))
+                    _mineralFractions[mineralName] = 0.1f;
+
+                float fraction = _mineralFractions[mineralName];
+                if (ImGui.SliderFloat($"{mineralName}##fraction", ref fraction, 0.0f, 1.0f, "%.3f"))
+                {
+                    _mineralFractions[mineralName] = fraction;
+                    RenormalizeMineralFractions();
+                }
+            }
+
+            ImGui.Unindent();
+
+            // Show total
+            float total = _mineralFractions.Values.Sum();
+            if (Math.Abs(total - 1.0f) > 0.01f)
+            {
+                ImGui.TextColored(new Vector4(1, 0.5f, 0, 1), $"Warning: Total = {total:F3} (should be 1.0)");
+            }
+            else
+            {
+                ImGui.TextColored(new Vector4(0, 1, 0, 1), $"Total: {total:F3}");
+            }
+
+            if (ImGui.Button("Normalize Fractions"))
+            {
+                RenormalizeMineralFractions();
+            }
+        }
+        else
+        {
+            ImGui.TextDisabled("No minerals selected");
+        }
+
+        ImGui.Unindent();
+    }
+
+    private void RenormalizeMineralFractions()
+    {
+        float total = _mineralFractions.Values.Sum();
+        if (total > 0)
+        {
+            var keys = _mineralFractions.Keys.ToList();
+            foreach (var key in keys)
+            {
+                _mineralFractions[key] /= total;
+            }
+        }
     }
 }

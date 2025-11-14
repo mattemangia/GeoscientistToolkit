@@ -179,7 +179,13 @@ public static class CommandRegistry
             // Petrology Commands (Igneous & Metamorphic)
             new FractionateMagmaCommand(),
             new LiquidusSolidusCommand(),
-            new MetamorphicPTCommand()
+            new MetamorphicPTCommand(),
+
+            // PhysicoChem Reactor Commands
+            new CreateReactorCommand(),
+            new AddDomainCommand(),
+            new SetMineralsCommand(),
+            new RunSimulationCommand()
         };
         Commands = commandList.ToDictionary(c => c.Name.ToUpper(), c => c);
     }
