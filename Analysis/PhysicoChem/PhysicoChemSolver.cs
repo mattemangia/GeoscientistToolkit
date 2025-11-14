@@ -267,7 +267,7 @@ public class PhysicoChemSolver
     }
 
     private void ApplySingleBoundaryCondition(PhysicoChemState state, BoundaryCondition bc,
-        Data.Mesh3D.Mesh3DDataset mesh)
+        GridMesh3D mesh)
     {
         int nx = state.Temperature.GetLength(0);
         int ny = state.Temperature.GetLength(1);

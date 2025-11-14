@@ -240,14 +240,14 @@ public class ReactiveTransportSolver
                 {
                     Temperature_K = T_K,
                     Pressure_bar = P_bar,
-                    AqueousComposition = new Dictionary<string, double>(localComposition)
+                    SpeciesMoles = new Dictionary<string, double>(localComposition)
                 };
 
                 // 2. Aqueous equilibrium (fast)
                 var equilibriumResult = _thermoSolver.SolveEquilibrium(thermoState);
 
                 // 3. Update concentrations from equilibrium
-                foreach (var kvp in equilibriumResult.AqueousComposition)
+                foreach (var kvp in equilibriumResult.SpeciesMoles)
                 {
                     if (state.Concentrations.ContainsKey(kvp.Key))
                         state.Concentrations[kvp.Key][i, j, k] = (float)kvp.Value;

@@ -14,7 +14,7 @@ public class GridMesh3D
     public (int X, int Y, int Z) GridSize { get; set; }
     public (double X, double Y, double Z) Origin { get; set; }
     public (double X, double Y, double Z) Spacing { get; set; }
-    public object Metadata { get; set; }
+    public Dictionary<string, object> Metadata { get; set; } = new();
 
     public GridMesh3D()
     {

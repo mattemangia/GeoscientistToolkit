@@ -121,10 +121,10 @@ public class GeothermalThermodynamicsIntegration
         };
 
         // Initialize concentrations from fluid composition
-        foreach (var component in options.FluidComposition.Keys)
+        foreach (var entry in options.FluidComposition)
         {
             var field = new float[nr, ntheta, nz];
-            double concentration = options.FluidComposition[component].Concentration_mol_L;
+            double concentration = entry.Concentration_mol_L;
 
             for (int i = 0; i < nr; i++)
             for (int j = 0; j < ntheta; j++)
@@ -135,7 +135,7 @@ public class GeothermalThermodynamicsIntegration
                 _transportState.InitialPorosity[i, j, k] = 0.15f;
             }
 
-            _transportState.Concentrations[component] = field;
+            _transportState.Concentrations[entry.SpeciesName] = field;
         }
 
         // Initialize flow field data (will be updated from simulation)
