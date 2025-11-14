@@ -67,9 +67,9 @@ public class PhysicoChemDataset : Dataset
     [JsonProperty]
     public string GeothermalDatasetPath { get; set; }
 
-    public PhysicoChemDataset(string name, string description = "")
+    public PhysicoChemDataset(string name, string description = "") : base(name, "")
     {
-        Name = name;
+        Type = DatasetType.Group; // Use Group type for now, can add PhysicoChem type later
         Description = description;
     }
 
@@ -147,6 +147,57 @@ public class PhysicoChemDataset : Dataset
         }
 
         return errors;
+    }
+
+    /// <summary>
+    /// Get estimated memory size of dataset
+    /// </summary>
+    public override long GetSizeInBytes()
+    {
+        long size = 0;
+
+        // Estimate mesh size if generated
+        if (GeneratedMesh != null)
+        {
+            var gridSize = GeneratedMesh.GridSize;
+            var totalCells = gridSize.X * gridSize.Y * gridSize.Z;
+
+            // Each cell has: temperature, pressure, velocity (3D), concentration fields
+            // Assuming ~10 fields per cell, 4 bytes per float
+            size += totalCells * 10 * sizeof(float);
+        }
+
+        // Estimate result history size
+        if (ResultHistory != null && ResultHistory.Count > 0)
+        {
+            var gridSize = ResultHistory[0].Temperature.GetLength(0) *
+                          ResultHistory[0].Temperature.GetLength(1) *
+                          ResultHistory[0].Temperature.GetLength(2);
+            size += ResultHistory.Count * gridSize * 10 * sizeof(float);
+        }
+
+        return size;
+    }
+
+    /// <summary>
+    /// Load/initialize the dataset
+    /// </summary>
+    public override void Load()
+    {
+        // For PHYSICOCHEM datasets, most initialization happens in InitializeState()
+        // This method is called when the dataset is added to a project
+        // No file loading needed as this is a computational dataset
+    }
+
+    /// <summary>
+    /// Unload dataset and free memory
+    /// </summary>
+    public override void Unload()
+    {
+        // Clear simulation state and history to free memory
+        CurrentState = null;
+        ResultHistory?.Clear();
+        GeneratedMesh = null;
     }
 }
 
