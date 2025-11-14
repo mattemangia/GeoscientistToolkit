@@ -919,7 +919,7 @@ public class PhysicoChemTools : IDatasetTools
             : minerals.Where(m => m.Name.Contains(_mineralSearchFilter, StringComparison.OrdinalIgnoreCase) ||
                                   (m.ChemicalFormula?.Contains(_mineralSearchFilter, StringComparison.OrdinalIgnoreCase) ?? false)).ToList();
 
-        ImGui.BeginChild("mineral_list", new Vector2(0, 150), true);
+        ImGui.BeginChild("mineral_list", new Vector2(0, 150), ImGuiChildFlags.Border);
 
         foreach (var mineral in filteredMinerals.Take(20)) // Limit to 20 for performance
         {

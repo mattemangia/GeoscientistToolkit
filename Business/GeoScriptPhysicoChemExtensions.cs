@@ -8,6 +8,7 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
 using System.Numerics;
+using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using GeoscientistToolkit.Analysis.PhysicoChem;
 using GeoscientistToolkit.Business.GeoScript;
@@ -30,14 +31,17 @@ public class CreateReactorCommand : IGeoScriptCommand
 
     public Task<Dataset> ExecuteAsync(GeoScriptContext context, AstNode node)
     {
-        var args = GeoScriptUtil.GetFunctionArguments(node);
-        if (args.Count < 4)
+        var cmd = (CommandNode)node;
+
+        // Parse: CREATE_REACTOR name width height depth
+        var match = Regex.Match(cmd.FullText, @"CREATE_REACTOR\s+(\S+)\s+([\d\.]+)\s+([\d\.]+)\s+([\d\.]+)", RegexOptions.IgnoreCase);
+        if (!match.Success)
             throw new ArgumentException("CREATE_REACTOR requires 4 arguments: name, width, height, depth");
 
-        string reactorName = args[0];
-        double width = double.Parse(args[1], CultureInfo.InvariantCulture);
-        double height = double.Parse(args[2], CultureInfo.InvariantCulture);
-        double depth = double.Parse(args[3], CultureInfo.InvariantCulture);
+        string reactorName = match.Groups[1].Value;
+        double width = double.Parse(match.Groups[2].Value, CultureInfo.InvariantCulture);
+        double height = double.Parse(match.Groups[3].Value, CultureInfo.InvariantCulture);
+        double depth = double.Parse(match.Groups[4].Value, CultureInfo.InvariantCulture);
 
         var dataset = new PhysicoChemDataset(reactorName, null)
         {
@@ -96,15 +100,19 @@ public class AddDomainCommand : IGeoScriptCommand
         if (context.InputDataset is not PhysicoChemDataset dataset)
             throw new NotSupportedException("ADD_DOMAIN only works on PhysicoChem datasets");
 
-        var args = GeoScriptUtil.GetFunctionArguments(node);
-        if (args.Count < 5)
-            throw new ArgumentException("ADD_DOMAIN requires at least 5 arguments");
+        var cmd = (CommandNode)node;
 
-        string domainName = args[0];
-        string geomTypeStr = args[1];
-        double x = double.Parse(args[2], CultureInfo.InvariantCulture);
-        double y = double.Parse(args[3], CultureInfo.InvariantCulture);
-        double z = double.Parse(args[4], CultureInfo.InvariantCulture);
+        // Parse: ADD_DOMAIN name type x y z [params...]
+        // Example: ADD_DOMAIN myDomain Box 0 0 0 1 1 1
+        var parts = cmd.FullText.Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries);
+        if (parts.Length < 6)
+            throw new ArgumentException("ADD_DOMAIN requires at least 5 arguments: name, type, x, y, z");
+
+        string domainName = parts[1];
+        string geomTypeStr = parts[2];
+        double x = double.Parse(parts[3], CultureInfo.InvariantCulture);
+        double y = double.Parse(parts[4], CultureInfo.InvariantCulture);
+        double z = double.Parse(parts[5], CultureInfo.InvariantCulture);
 
         if (!Enum.TryParse<GeometryType>(geomTypeStr, true, out var geomType))
             throw new ArgumentException($"Invalid geometry type: {geomTypeStr}. Use Box, Sphere, or Cylinder");
@@ -113,38 +121,38 @@ public class AddDomainCommand : IGeoScriptCommand
         switch (geomType)
         {
             case GeometryType.Box:
-                if (args.Count < 8)
+                if (parts.Length < 9)
                     throw new ArgumentException("Box requires width, height, depth parameters");
                 geometry = new ReactorGeometry
                 {
                     Type = GeometryType.Box,
                     Center = (x, y, z),
-                    Dimensions = (double.Parse(args[5], CultureInfo.InvariantCulture),
-                                  double.Parse(args[6], CultureInfo.InvariantCulture),
-                                  double.Parse(args[7], CultureInfo.InvariantCulture))
+                    Dimensions = (double.Parse(parts[6], CultureInfo.InvariantCulture),
+                                  double.Parse(parts[7], CultureInfo.InvariantCulture),
+                                  double.Parse(parts[8], CultureInfo.InvariantCulture))
                 };
                 break;
 
             case GeometryType.Sphere:
-                if (args.Count < 6)
+                if (parts.Length < 7)
                     throw new ArgumentException("Sphere requires radius parameter");
                 geometry = new ReactorGeometry
                 {
                     Type = GeometryType.Sphere,
                     Center = (x, y, z),
-                    Radius = double.Parse(args[5], CultureInfo.InvariantCulture)
+                    Radius = double.Parse(parts[6], CultureInfo.InvariantCulture)
                 };
                 break;
 
             case GeometryType.Cylinder:
-                if (args.Count < 7)
+                if (parts.Length < 8)
                     throw new ArgumentException("Cylinder requires radius and height parameters");
                 geometry = new ReactorGeometry
                 {
                     Type = GeometryType.Cylinder,
                     Center = (x, y, z),
-                    Radius = double.Parse(args[5], CultureInfo.InvariantCulture),
-                    Height = double.Parse(args[6], CultureInfo.InvariantCulture)
+                    Radius = double.Parse(parts[6], CultureInfo.InvariantCulture),
+                    Height = double.Parse(parts[7], CultureInfo.InvariantCulture)
                 };
                 break;
 
@@ -198,17 +206,20 @@ public class SetMineralsCommand : IGeoScriptCommand
         if (dataset.Domains.Count == 0)
             throw new InvalidOperationException("No domains found. Add a domain first.");
 
-        var args = GeoScriptUtil.GetFunctionArguments(node);
-        if (args.Count % 2 != 0)
+        var cmd = (CommandNode)node;
+
+        // Parse: SET_MINERALS mineral1 fraction1 mineral2 fraction2 ...
+        var parts = cmd.FullText.Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries);
+        if ((parts.Length - 1) % 2 != 0)
             throw new ArgumentException("SET_MINERALS requires pairs of mineral name and fraction");
 
         var mineralFractions = new Dictionary<string, double>();
         var mineralNames = new List<string>();
 
-        for (int i = 0; i < args.Count; i += 2)
+        for (int i = 1; i < parts.Length; i += 2)
         {
-            string mineralName = args[i];
-            double fraction = double.Parse(args[i + 1], CultureInfo.InvariantCulture);
+            string mineralName = parts[i];
+            double fraction = double.Parse(parts[i + 1], CultureInfo.InvariantCulture);
 
             // Verify mineral exists in library
             var compound = CompoundLibrary.Instance.Compounds
@@ -263,12 +274,15 @@ public class RunSimulationCommand : IGeoScriptCommand
         if (context.InputDataset is not PhysicoChemDataset dataset)
             throw new NotSupportedException("RUN_SIMULATION only works on PhysicoChem datasets");
 
-        var args = GeoScriptUtil.GetFunctionArguments(node);
-        if (args.Count < 2)
+        var cmd = (CommandNode)node;
+
+        // Parse: RUN_SIMULATION total_time time_step
+        var parts = cmd.FullText.Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries);
+        if (parts.Length < 3)
             throw new ArgumentException("RUN_SIMULATION requires 2 arguments: total_time, time_step");
 
-        double totalTime = double.Parse(args[0], CultureInfo.InvariantCulture);
-        double timeStep = double.Parse(args[1], CultureInfo.InvariantCulture);
+        double totalTime = double.Parse(parts[1], CultureInfo.InvariantCulture);
+        double timeStep = double.Parse(parts[2], CultureInfo.InvariantCulture);
 
         dataset.SimulationParams.TotalTime = totalTime;
         dataset.SimulationParams.TimeStep = timeStep;
