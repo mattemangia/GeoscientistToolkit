@@ -213,25 +213,183 @@ private class DatasetGroupProperties : IDatasetPropertiesRenderer
 // Image tools implementation
 private class ImageTools : IDatasetTools
 {
+    private bool _showHistogram = false;
+    private int[] _histogram;
+    private int _histogramMax = 1;
+    private string _exportPath = "";
+
     public void Draw(Dataset dataset)
     {
-        if (dataset is ImageDataset image)
+        if (dataset is not ImageDataset image)
+            return;
+
+        ImGui.Text("Image Tools");
+        ImGui.Separator();
+
+        // Image Information
+        if (ImGui.CollapsingHeader("Image Information", ImGuiTreeNodeFlags.DefaultOpen))
         {
-            ImGui.Text("Image Tools");
-            ImGui.Separator();
+            ImGui.Text($"Dimensions: {image.Width} x {image.Height}");
+            ImGui.Text($"Channels: {image.NumberOfChannels}");
+            ImGui.Text($"Bit Depth: {image.BitDepth}-bit");
+            ImGui.Text($"Size: {FormatBytes(image.GetSizeInBytes())}");
+        }
 
-            if (ImGui.Button("Show Histogram"))
+        ImGui.Spacing();
+
+        // Histogram
+        if (ImGui.CollapsingHeader("Histogram"))
+        {
+            if (ImGui.Button(_showHistogram ? "Hide Histogram" : "Calculate Histogram", new Vector2(-1, 0)))
             {
-                // Implementation pending
+                if (!_showHistogram)
+                {
+                    CalculateHistogram(image);
+                }
+                _showHistogram = !_showHistogram;
             }
 
-            if (ImGui.Button("Export"))
+            if (_showHistogram && _histogram != null)
             {
-                // Implementation pending
+                ImGui.Spacing();
+                DrawHistogram(_histogram, _histogramMax);
+            }
+        }
+
+        ImGui.Spacing();
+
+        // Export
+        if (ImGui.CollapsingHeader("Export"))
+        {
+            ImGui.Text("Export image to file:");
+            ImGui.SetNextItemWidth(-1);
+            ImGui.InputText("##ExportPath", ref _exportPath, 512);
+
+            ImGui.Spacing();
+
+            if (ImGui.Button("Export as PNG", new Vector2(-1, 0)))
+            {
+                ExportImage(image, _exportPath, "png");
             }
 
-            ImGui.Separator();
-            ImGui.TextDisabled("Additional image tools coming soon");
+            if (ImGui.Button("Export as JPG", new Vector2(-1, 0)))
+            {
+                ExportImage(image, _exportPath, "jpg");
+            }
+
+            if (ImGui.Button("Export as BMP", new Vector2(-1, 0)))
+            {
+                ExportImage(image, _exportPath, "bmp");
+            }
+        }
+    }
+
+    private void CalculateHistogram(ImageDataset image)
+    {
+        _histogram = new int[256];
+        _histogramMax = 1;
+
+        if (image.PixelDataPointer == IntPtr.Zero || image.PixelDataLength == 0)
+            return;
+
+        var data = new byte[image.PixelDataLength];
+        System.Runtime.InteropServices.Marshal.Copy(image.PixelDataPointer, data, 0, (int)image.PixelDataLength);
+
+        for (int i = 0; i < data.Length; i += image.NumberOfChannels)
+        {
+            // Average RGB if color image, otherwise just use grayscale
+            int value = 0;
+            if (image.NumberOfChannels >= 3)
+            {
+                value = (data[i] + data[i + 1] + data[i + 2]) / 3;
+            }
+            else
+            {
+                value = data[i];
+            }
+
+            _histogram[value]++;
+            if (_histogram[value] > _histogramMax)
+                _histogramMax = _histogram[value];
+        }
+    }
+
+    private void DrawHistogram(int[] histogram, int maxValue)
+    {
+        var plotSize = new Vector2(-1, 150);
+        var dl = ImGui.GetWindowDrawList();
+        var plotPos = ImGui.GetCursorScreenPos();
+        var regionAvail = ImGui.GetContentRegionAvail();
+        plotSize.X = regionAvail.X;
+
+        // Background
+        dl.AddRectFilled(plotPos, plotPos + plotSize,
+            ImGui.GetColorU32(new Vector4(0.1f, 0.1f, 0.1f, 1.0f)));
+
+        // Draw bars
+        var barWidth = plotSize.X / 256f;
+        for (int i = 0; i < 256; i++)
+        {
+            if (histogram[i] == 0) continue;
+
+            var barHeight = (histogram[i] / (float)maxValue) * plotSize.Y;
+            var barPos = new Vector2(plotPos.X + i * barWidth, plotPos.Y + plotSize.Y - barHeight);
+            var barSize = new Vector2(barWidth, barHeight);
+
+            dl.AddRectFilled(barPos, barPos + barSize,
+                ImGui.GetColorU32(new Vector4(0.3f, 0.7f, 1.0f, 0.8f)));
+        }
+
+        // Border
+        dl.AddRect(plotPos, plotPos + plotSize,
+            ImGui.GetColorU32(new Vector4(0.5f, 0.5f, 0.5f, 1.0f)));
+
+        // Labels
+        dl.AddText(new Vector2(plotPos.X + 5, plotPos.Y + 5),
+            ImGui.GetColorU32(new Vector4(1, 1, 1, 1)), $"Max: {maxValue} pixels");
+        dl.AddText(new Vector2(plotPos.X + 5, plotPos.Y + plotSize.Y - 20),
+            ImGui.GetColorU32(new Vector4(1, 1, 1, 1)), "0");
+        dl.AddText(new Vector2(plotPos.X + plotSize.X - 30, plotPos.Y + plotSize.Y - 20),
+            ImGui.GetColorU32(new Vector4(1, 1, 1, 1)), "255");
+
+        ImGui.Dummy(plotSize);
+    }
+
+    private void ExportImage(ImageDataset image, string path, string format)
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(path))
+            {
+                GeoscientistToolkit.Util.Logger.LogError("Export path is empty");
+                return;
+            }
+
+            // Ensure correct extension
+            var extension = $".{format}";
+            if (!path.EndsWith(extension, StringComparison.OrdinalIgnoreCase))
+            {
+                path += extension;
+            }
+
+            // Use StbImageWrite to save
+            if (image.PixelDataPointer == IntPtr.Zero)
+            {
+                GeoscientistToolkit.Util.Logger.LogError("No pixel data available for export");
+                return;
+            }
+
+            GeoscientistToolkit.Util.Logger.Log($"Exporting image to {path}...");
+
+            // Note: This assumes StbImageWrite is available in the project
+            // The actual implementation would depend on how images are stored
+            GeoscientistToolkit.Util.Logger.Log($"Image export to {format.ToUpper()} - feature in progress");
+
+            // TODO: Implement actual export using StbImageWrite or similar
+        }
+        catch (Exception ex)
+        {
+            GeoscientistToolkit.Util.Logger.LogError($"Failed to export image: {ex.Message}");
         }
     }
 }

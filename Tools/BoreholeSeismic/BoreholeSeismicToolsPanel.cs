@@ -25,6 +25,11 @@ public class BoreholeSeismicToolsPanel
     private float _newBoreholeY = 0;
     private float _newBoreholeElevation = 0;
 
+    // Well tie results
+    private float[] _correlationResults;
+    private int _bestTraceIndex = -1;
+    private float _bestCorrelation = 0;
+
     public void DrawBoreholeToSeismic()
     {
         ImGui.TextColored(new Vector4(0.5f, 0.8f, 1.0f, 1.0f), "Create Synthetic Seismic from Borehole");
@@ -181,6 +186,31 @@ public class BoreholeSeismicToolsPanel
         {
             ImGui.SetTooltip("Correlates synthetic seismic from borehole with actual seismic traces\nFinds the trace with best correlation");
         }
+
+        // Show correlation results if available
+        if (_correlationResults != null && _correlationResults.Length > 0)
+        {
+            ImGui.Spacing();
+            ImGui.Separator();
+            ImGui.TextColored(new Vector4(0.5f, 1.0f, 0.5f, 1.0f), "Correlation Results");
+
+            ImGui.Text($"Best match: Trace {_bestTraceIndex}");
+            ImGui.Text($"Correlation: {_bestCorrelation:F3}");
+
+            ImGui.Spacing();
+            if (ImGui.BeginChild("CorrelationPlot", new Vector2(-1, 200), ImGuiChildFlags.Border))
+            {
+                DrawCorrelationPlot(_correlationResults);
+            }
+            ImGui.EndChild();
+
+            if (ImGui.Button("Clear Results", new Vector2(-1, 0)))
+            {
+                _correlationResults = null;
+                _bestTraceIndex = -1;
+                _bestCorrelation = 0;
+            }
+        }
     }
 
     private void GenerateSyntheticSeismic(BoreholeDataset borehole)
@@ -257,22 +287,111 @@ public class BoreholeSeismicToolsPanel
     {
         try
         {
-            var bestTrace = BoreholeSeismicIntegration.TieWellToSeismic(borehole, seismic, _dominantFrequency);
-
-            if (bestTrace < 0)
+            var synthetic = BoreholeSeismicIntegration.GenerateSyntheticSeismic(borehole, _dominantFrequency);
+            if (synthetic.Length == 0)
             {
-                Logger.LogError("[BoreholeSeismicTools] Failed to tie well to seismic");
+                Logger.LogError("[BoreholeSeismicTools] Failed to generate synthetic seismic");
                 return;
             }
 
-            Logger.Log($"[BoreholeSeismicTools] Best correlation found at trace {bestTrace}");
-            _selectedTraceIndex = bestTrace;
+            // Calculate correlation for all traces
+            _correlationResults = new float[seismic.GetTraceCount()];
+            _bestCorrelation = float.MinValue;
+            _bestTraceIndex = -1;
 
-            // TODO: Could add visualization of the correlation results
+            for (int i = 0; i < seismic.GetTraceCount(); i++)
+            {
+                var trace = seismic.SegyData.Traces[i];
+                _correlationResults[i] = CalculateCorrelation(synthetic, trace.Samples);
+
+                if (_correlationResults[i] > _bestCorrelation)
+                {
+                    _bestCorrelation = _correlationResults[i];
+                    _bestTraceIndex = i;
+                }
+            }
+
+            Logger.Log($"[BoreholeSeismicTools] Best correlation: {_bestCorrelation:F3} at trace {_bestTraceIndex}");
+            _selectedTraceIndex = _bestTraceIndex;
         }
         catch (Exception ex)
         {
             Logger.LogError($"[BoreholeSeismicTools] Error in well tie: {ex.Message}");
         }
+    }
+
+    private float CalculateCorrelation(float[] signal1, float[] signal2)
+    {
+        var minLength = Math.Min(signal1.Length, signal2.Length);
+        float sum1 = 0, sum2 = 0, sum12 = 0, sum1Sq = 0, sum2Sq = 0;
+
+        for (int i = 0; i < minLength; i++)
+        {
+            sum1 += signal1[i];
+            sum2 += signal2[i];
+            sum12 += signal1[i] * signal2[i];
+            sum1Sq += signal1[i] * signal1[i];
+            sum2Sq += signal2[i] * signal2[i];
+        }
+
+        var n = minLength;
+        var numerator = n * sum12 - sum1 * sum2;
+        var denominator = Math.Sqrt((n * sum1Sq - sum1 * sum1) * (n * sum2Sq - sum2 * sum2));
+
+        if (Math.Abs(denominator) < 1e-10)
+            return 0;
+
+        return (float)(numerator / denominator);
+    }
+
+    private void DrawCorrelationPlot(float[] correlations)
+    {
+        var dl = ImGui.GetWindowDrawList();
+        var plotPos = ImGui.GetCursorScreenPos();
+        var plotSize = ImGui.GetContentRegionAvail();
+
+        if (plotSize.X < 10 || plotSize.Y < 10) return;
+
+        // Background
+        dl.AddRectFilled(plotPos, plotPos + plotSize, ImGui.GetColorU32(new Vector4(0.1f, 0.1f, 0.1f, 1.0f)));
+
+        // Find min/max for scaling
+        var minCorr = correlations.Min();
+        var maxCorr = correlations.Max();
+        var range = maxCorr - minCorr;
+        if (range < 0.001f) range = 1.0f;
+
+        // Draw correlation line
+        for (int i = 0; i < correlations.Length - 1; i++)
+        {
+            var x1 = plotPos.X + (i / (float)(correlations.Length - 1)) * plotSize.X;
+            var y1 = plotPos.Y + plotSize.Y - ((correlations[i] - minCorr) / range) * plotSize.Y;
+            var x2 = plotPos.X + ((i + 1) / (float)(correlations.Length - 1)) * plotSize.X;
+            var y2 = plotPos.Y + plotSize.Y - ((correlations[i + 1] - minCorr) / range) * plotSize.Y;
+
+            dl.AddLine(new Vector2(x1, y1), new Vector2(x2, y2),
+                ImGui.GetColorU32(new Vector4(0.3f, 0.8f, 1.0f, 1.0f)), 2.0f);
+        }
+
+        // Mark best correlation
+        if (_bestTraceIndex >= 0 && _bestTraceIndex < correlations.Length)
+        {
+            var xBest = plotPos.X + (_bestTraceIndex / (float)(correlations.Length - 1)) * plotSize.X;
+            var yBest = plotPos.Y + plotSize.Y - ((correlations[_bestTraceIndex] - minCorr) / range) * plotSize.Y;
+
+            dl.AddCircleFilled(new Vector2(xBest, yBest), 5.0f,
+                ImGui.GetColorU32(new Vector4(1.0f, 0.0f, 0.0f, 1.0f)));
+        }
+
+        // Border
+        dl.AddRect(plotPos, plotPos + plotSize, ImGui.GetColorU32(new Vector4(0.5f, 0.5f, 0.5f, 1.0f)));
+
+        // Labels
+        dl.AddText(new Vector2(plotPos.X + 5, plotPos.Y + 5),
+            ImGui.GetColorU32(new Vector4(1, 1, 1, 1)), $"Max: {maxCorr:F3}");
+        dl.AddText(new Vector2(plotPos.X + 5, plotPos.Y + plotSize.Y - 20),
+            ImGui.GetColorU32(new Vector4(1, 1, 1, 1)), $"Min: {minCorr:F3}");
+
+        ImGui.Dummy(plotSize);
     }
 }
