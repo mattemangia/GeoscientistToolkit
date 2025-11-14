@@ -9,6 +9,7 @@ using GeoscientistToolkit.Business.GeoScript;
 using GeoscientistToolkit.Data;
 using GeoscientistToolkit.Data.GIS;
 using GeoscientistToolkit.Data.Table;
+using GeoscientistToolkit.UI.Utils;
 using GeoscientistToolkit.Util;
 using ImGuiNET;
 
@@ -37,6 +38,17 @@ public class GeoScriptEditor
     private bool _needsToSetFocus;
     private string _scriptText = "";
     private bool _showSuggestionsPopup;
+
+    // Import/Export dialogs
+    private readonly ImGuiFileDialog _importDialog;
+    private readonly ImGuiExportFileDialog _exportDialog;
+
+    public GeoScriptEditor()
+    {
+        _importDialog = new ImGuiFileDialog("##ImportGeoScript", FileDialogType.OpenFile, "Import GeoScript");
+        _exportDialog = new ImGuiExportFileDialog("##ExportGeoScript", "Export GeoScript");
+        _exportDialog.SetExtensions((".geoscript", "GeoScript File"));
+    }
 
     /// <summary>
     ///     Sets the dataset this editor is currently working with, which is crucial for context-aware suggestions.
@@ -132,6 +144,24 @@ public class GeoScriptEditor
             _lastError = "";
             _lastSuccessMessage = "";
         }
+
+        ImGui.SameLine();
+        if (ImGui.Button("Import Script..."))
+        {
+            _importDialog.Open(null, new[] { ".geoscript" });
+        }
+
+        ImGui.SameLine();
+        if (ImGui.Button("Export Script..."))
+        {
+            var defaultName = !string.IsNullOrEmpty(_associatedDataset?.Name)
+                ? $"{_associatedDataset.Name}_script.geoscript"
+                : "script.geoscript";
+            _exportDialog.Open(defaultName);
+        }
+
+        // --- HANDLE IMPORT/EXPORT DIALOGS ---
+        HandleImportExportDialogs();
 
         // --- RESULT DISPLAY ---
         ImGui.Spacing();
@@ -414,6 +444,54 @@ public class GeoScriptEditor
             SuggestionType.DatasetName => new Vector4(1.0f, 0.8f, 0.5f, 1.0f),
             _ => new Vector4(1, 1, 1, 1)
         };
+    }
+
+    /// <summary>
+    ///     Handles the import and export file dialogs.
+    /// </summary>
+    private void HandleImportExportDialogs()
+    {
+        // Handle import dialog
+        if (_importDialog.Submit())
+        {
+            if (!string.IsNullOrEmpty(_importDialog.SelectedPath))
+            {
+                try
+                {
+                    _scriptText = File.ReadAllText(_importDialog.SelectedPath);
+                    _lastSuccessMessage = $"Script imported from {Path.GetFileName(_importDialog.SelectedPath)}";
+                    _lastError = "";
+                    Logger.Log($"[GeoScriptEditor] Imported script from {_importDialog.SelectedPath}");
+                }
+                catch (Exception ex)
+                {
+                    _lastError = $"Failed to import script: {ex.Message}";
+                    _lastSuccessMessage = "";
+                    Logger.LogError($"[GeoScriptEditor] Import failed: {ex.Message}");
+                }
+            }
+        }
+
+        // Handle export dialog
+        if (_exportDialog.Submit())
+        {
+            if (!string.IsNullOrEmpty(_exportDialog.SelectedPath))
+            {
+                try
+                {
+                    File.WriteAllText(_exportDialog.SelectedPath, _scriptText);
+                    _lastSuccessMessage = $"Script exported to {Path.GetFileName(_exportDialog.SelectedPath)}";
+                    _lastError = "";
+                    Logger.Log($"[GeoScriptEditor] Exported script to {_exportDialog.SelectedPath}");
+                }
+                catch (Exception ex)
+                {
+                    _lastError = $"Failed to export script: {ex.Message}";
+                    _lastSuccessMessage = "";
+                    Logger.LogError($"[GeoScriptEditor] Export failed: {ex.Message}");
+                }
+            }
+        }
     }
 
     /// <summary>
