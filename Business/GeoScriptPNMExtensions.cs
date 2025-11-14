@@ -328,18 +328,5 @@ public class ExportPNMResultsCommand : IGeoScriptCommand
     }
 }
 
-/// <summary>
-/// Registration class for PNM GeoScript extensions
-/// </summary>
-public static class PNMGeoScriptExtensions
-{
-    public static void Register(GeoScriptInterpreter interpreter)
-    {
-        interpreter.RegisterCommand(new RunPNMReactiveTransportCommand());
-        interpreter.RegisterCommand(new SetPNMSpeciesCommand());
-        interpreter.RegisterCommand(new SetPNMMineralsCommand());
-        interpreter.RegisterCommand(new ExportPNMResultsCommand());
-
-        Logger.Log("[PNMGeoScriptExtensions] Registered PNM reactive transport commands");
-    }
-}
+// Note: Commands are registered in Business/GeoScript.cs in the GeoScriptCommands static constructor
+// No additional registration needed here
