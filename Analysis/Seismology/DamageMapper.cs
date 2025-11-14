@@ -132,7 +132,7 @@ namespace GeoscientistToolkit.Analysis.Seismology
             }
 
             // Determine damage severity
-            DamageSeverity severity = DetermineS severity(fragilities);
+            DamageSeverity severity = DetermineSeverity(fragilities);
 
             // Calculate damage ratio (0-1)
             double damageRatio = CalculateDamageRatio(severity, fragilities);
