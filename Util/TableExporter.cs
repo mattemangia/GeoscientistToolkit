@@ -151,27 +151,21 @@ public static class TableExporter
             // Calculate statistics for each slice in parallel
             var sliceStats = new (int min, int max, double mean, double stdDev, int nonZero, double fillRatio)[ctDataset.Depth];
 
-            Parallel.For(0, ctDataset.Depth, z =>
+            Parallel.For(0, (int)ctDataset.Depth, z =>
             {
                 // Get slice data
-                ushort[,] sliceData = null;
+                byte[] sliceData = null;
                 try
                 {
-                    if (ctDataset.ImageData != null)
+                    if (ctDataset.VolumeData != null)
                     {
-                        sliceData = new ushort[ctDataset.Width, ctDataset.Height];
-                        for (var y = 0; y < ctDataset.Height; y++)
-                        {
-                            for (var x = 0; x < ctDataset.Width; x++)
-                            {
-                                sliceData[x, y] = ctDataset.ImageData[x, y, z];
-                            }
-                        }
+                        sliceData = new byte[ctDataset.Width * ctDataset.Height];
+                        ctDataset.VolumeData.GetSlice(z, sliceData);
                     }
                 }
                 catch
                 {
-                    // If ImageData access fails, use default values
+                    // If VolumeData access fails, use default values
                 }
 
                 int minValue = int.MaxValue;
@@ -183,20 +177,17 @@ public static class TableExporter
 
                 if (sliceData != null)
                 {
-                    for (var y = 0; y < ctDataset.Height; y++)
+                    for (var i = 0; i < sliceData.Length; i++)
                     {
-                        for (var x = 0; x < ctDataset.Width; x++)
-                        {
-                            var value = sliceData[x, y];
+                        var value = sliceData[i];
 
-                            if (value < minValue) minValue = value;
-                            if (value > maxValue) maxValue = value;
+                        if (value < minValue) minValue = value;
+                        if (value > maxValue) maxValue = value;
 
-                            sum += value;
-                            sumSquares += (long)value * value;
+                        sum += value;
+                        sumSquares += (long)value * value;
 
-                            if (value > 0) nonZeroPixels++;
-                        }
+                        if (value > 0) nonZeroPixels++;
                     }
                 }
                 else
