@@ -30,6 +30,10 @@ public unsafe class AcousticSimulatorGPU : IAcousticKernel
 
     private int _width, _height, _depth;
 
+    private string DeviceName;
+    private string DeviceVendor;
+    private nuint DeviceGlobalMemory;
+
     public AcousticSimulatorGPU(SimulationParameters parameters)
     {
         _params = parameters;
@@ -251,30 +255,30 @@ public unsafe class AcousticSimulatorGPU : IAcousticKernel
     {
         int error;
 
-        uint numPlatforms;
-        _cl.GetPlatformIDs(0, null, &numPlatforms);
-        if (numPlatforms == 0)
-            throw new Exception("No OpenCL platforms found");
+        // Use centralized device manager to get the device from settings
+        nint _device = GeoscientistToolkit.OpenCL.OpenCLDeviceManager.GetComputeDevice();
 
-        var platforms = stackalloc nint[(int)numPlatforms];
-        _cl.GetPlatformIDs(numPlatforms, platforms, null);
+        if (_device == 0)
+        {
+            Logger.LogWarning("No OpenCL device available from OpenCLDeviceManager.");
+            throw new Exception("OpenCL device not available");
+        }
 
-        uint numDevices;
-        _cl.GetDeviceIDs(platforms[0], DeviceType.Gpu, 0, null, &numDevices);
-        if (numDevices == 0)
-            _cl.GetDeviceIDs(platforms[0], DeviceType.All, 0, null, &numDevices);
-        if (numDevices == 0)
-            throw new Exception("No OpenCL devices found");
+        // Get device info from the centralized manager
+        var deviceInfo = GeoscientistToolkit.OpenCL.OpenCLDeviceManager.GetDeviceInfo();
+        DeviceName = deviceInfo.Name;
+        DeviceVendor = deviceInfo.Vendor;
+        DeviceGlobalMemory = deviceInfo.GlobalMemory;
 
-        var devices = stackalloc nint[(int)numDevices];
-        _cl.GetDeviceIDs(platforms[0], DeviceType.Gpu, numDevices, devices, null);
-        if (devices[0] == 0)
-            _cl.GetDeviceIDs(platforms[0], DeviceType.All, numDevices, devices, null);
+        Logger.Log($"AcousticSimulatorGPU: Using device: {DeviceName} ({DeviceVendor})");
+        Logger.Log($"AcousticSimulatorGPU: Global Memory: {DeviceGlobalMemory / (1024 * 1024)} MB");
 
-        _context = _cl.CreateContext(null, 1, devices, null, null, &error);
+        // Create context with the device from centralized manager
+        _context = _cl.CreateContext(null, 1, &_device, null, null, &error);
         CheckError(error, "CreateContext");
 
-        _commandQueue = _cl.CreateCommandQueue(_context, devices[0], (CommandQueueProperties)0, &error);
+        // Create command queue with the device from centralized manager
+        _commandQueue = _cl.CreateCommandQueue(_context, _device, (CommandQueueProperties)0, &error);
         CheckError(error, "CreateCommandQueue");
 
         BuildProgram();

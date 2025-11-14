@@ -823,46 +823,15 @@ internal unsafe class GpuProcessor : IDisposable
     {
         _cl = CL.GetApi();
 
-        // Platforms
-        uint numPlatforms = 0;
-        _cl.GetPlatformIDs(0, null, &numPlatforms);
-        if (numPlatforms == 0) throw new DllNotFoundException("No OpenCL platforms found.");
+        // Use centralized device manager to get the device from settings
+        _device = GeoscientistToolkit.OpenCL.OpenCLDeviceManager.GetComputeDevice();
 
-        var platforms = new nint[numPlatforms];
-        fixed (nint* pPlatforms = platforms)
-        {
-            _cl.GetPlatformIDs(numPlatforms, pPlatforms, null);
-        }
+        if (_device == 0)
+            throw new DllNotFoundException("No OpenCL device available from OpenCLDeviceManager.");
 
-        var platform = platforms[0];
-
-        // Devices (prefer GPU)
-        uint numDevices = 0;
-        _cl.GetDeviceIDs(platform, DeviceType.Gpu, 0, null, &numDevices);
-        if (numDevices == 0)
-        {
-            Logger.LogWarning("[GpuProcessor] No OpenCL GPU found, trying CPU.");
-            _cl.GetDeviceIDs(platform, DeviceType.Cpu, 0, null, &numDevices);
-            if (numDevices == 0) throw new DllNotFoundException("No OpenCL devices found.");
-
-            var devices = new nint[numDevices];
-            fixed (nint* pDevices = devices)
-            {
-                _cl.GetDeviceIDs(platform, DeviceType.Cpu, numDevices, pDevices, null);
-            }
-
-            _device = devices[0];
-        }
-        else
-        {
-            var devices = new nint[numDevices];
-            fixed (nint* pDevices = devices)
-            {
-                _cl.GetDeviceIDs(platform, DeviceType.Gpu, numDevices, pDevices, null);
-            }
-
-            _device = devices[0];
-        }
+        // Get device info from the centralized manager
+        var deviceInfo = GeoscientistToolkit.OpenCL.OpenCLDeviceManager.GetDeviceInfo();
+        Logger.Log($"[GpuProcessor/FilterUI] Using device: {deviceInfo.Name} ({deviceInfo.Vendor})");
 
         // Context
         _context = _cl.CreateContext(null, 1, in _device, null, null, out var err);

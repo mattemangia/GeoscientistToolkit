@@ -169,36 +169,17 @@ internal class UnifiedAcousticSimulator : IDisposable
 
     private unsafe void InitializeOpenCL()
     {
-        // Get platform
-        uint platformCount = 0;
-        _cl.GetPlatformIDs(0, null, &platformCount);
-        if (platformCount == 0)
-            throw new Exception("No OpenCL platforms available");
+        // Use centralized device manager to get the device from settings
+        _device = GeoscientistToolkit.OpenCL.OpenCLDeviceManager.GetComputeDevice();
 
-        var platforms = new nint[platformCount];
-        fixed (nint* platformsPtr = platforms)
+        if (_device == 0)
         {
-            _cl.GetPlatformIDs(platformCount, platformsPtr, null);
+            Logger.LogWarning("No OpenCL device available from OpenCLDeviceManager.");
+            throw new Exception("No OpenCL device available.");
         }
 
-        // Get GPU device
-        uint deviceCount = 0;
-        _cl.GetDeviceIDs(platforms[0], DeviceType.Gpu, 0, null, &deviceCount);
-        if (deviceCount == 0)
-        {
-            // Try CPU as fallback
-            _cl.GetDeviceIDs(platforms[0], DeviceType.Cpu, 0, null, &deviceCount);
-            if (deviceCount == 0)
-                throw new Exception("No OpenCL devices available");
-        }
-
-        var devices = new nint[deviceCount];
-        fixed (nint* devicesPtr = devices)
-        {
-            _cl.GetDeviceIDs(platforms[0], DeviceType.Default, deviceCount, devicesPtr, null);
-        }
-
-        _device = devices[0];
+        var deviceInfo = GeoscientistToolkit.OpenCL.OpenCLDeviceManager.GetDeviceInfo();
+        Logger.Log($"[AcousticSimulator]: Using device: {deviceInfo.Name} ({deviceInfo.Vendor})");
 
         // Create context
         var errNum = 0;

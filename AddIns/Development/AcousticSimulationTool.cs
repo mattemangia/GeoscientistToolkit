@@ -1265,36 +1265,17 @@ internal class ChunkedAcousticSimulator : IDisposable
     // ================================================================
     private unsafe void InitOpenCL()
     {
-        // Platform
-        uint nplat = 0;
-        _cl.GetPlatformIDs(0, null, &nplat);
-        if (nplat == 0) throw new InvalidOperationException("OpenCL: no platforms.");
-        Span<nint> plats = stackalloc nint[(int)nplat];
-        fixed (nint* pPlats = plats)
+        // Use centralized device manager to get the device from settings
+        _device = GeoscientistToolkit.OpenCL.OpenCLDeviceManager.GetComputeDevice();
+
+        if (_device == 0)
         {
-            _cl.GetPlatformIDs(nplat, pPlats, null);
+            Logger.LogWarning("No OpenCL device available from OpenCLDeviceManager.");
+            throw new InvalidOperationException("No OpenCL device available.");
         }
 
-        _platform = plats[0];
-
-        // Device (prefer GPU, fallback CPU)
-        uint ndev = 0;
-        _cl.GetDeviceIDs(_platform, DeviceType.Gpu, 0, null, &ndev);
-        var chosen = DeviceType.Gpu;
-        if (ndev == 0)
-        {
-            _cl.GetDeviceIDs(_platform, DeviceType.Cpu, 0, null, &ndev);
-            if (ndev == 0) throw new InvalidOperationException("OpenCL: no devices.");
-            chosen = DeviceType.Cpu;
-        }
-
-        Span<nint> devs = stackalloc nint[(int)ndev];
-        fixed (nint* pDevs = devs)
-        {
-            _cl.GetDeviceIDs(_platform, chosen, ndev, pDevs, null);
-        }
-
-        _device = devs[0];
+        var deviceInfo = GeoscientistToolkit.OpenCL.OpenCLDeviceManager.GetDeviceInfo();
+        Logger.Log($"[AcousticSimulationTool]: Using device: {deviceInfo.Name} ({deviceInfo.Vendor})");
 
         // Context & queue
         int err;

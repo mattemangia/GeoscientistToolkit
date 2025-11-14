@@ -1326,37 +1326,18 @@ internal static class OpenCLContext
 
             unsafe
             {
-                // Get platforms
-                uint numPlatforms;
-                _cl.GetPlatformIDs(0, null, &numPlatforms);
-                if (numPlatforms == 0) return;
+                // Use centralized device manager to get the device from settings
+                _device = GeoscientistToolkit.OpenCL.OpenCLDeviceManager.GetComputeDevice();
 
-                var platforms = stackalloc nint[(int)numPlatforms];
-                _cl.GetPlatformIDs(numPlatforms, platforms, null);
-
-                // Find a device (prefer GPU)
-                nint selectedPlatform = 0;
-                _device = 0;
-
-                for (var i = 0; i < numPlatforms; i++)
+                if (_device == 0)
                 {
-                    uint numDevices;
-                    _cl.GetDeviceIDs(platforms[i], DeviceType.Gpu, 0, null, &numDevices);
-
-                    if (numDevices == 0)
-                        _cl.GetDeviceIDs(platforms[i], DeviceType.Cpu, 0, null, &numDevices);
-
-                    if (numDevices > 0)
-                    {
-                        selectedPlatform = platforms[i];
-                        var devices = stackalloc nint[(int)numDevices];
-                        _cl.GetDeviceIDs(selectedPlatform, DeviceType.All, numDevices, devices, null);
-                        _device = devices[0];
-                        break;
-                    }
+                    Logger.LogWarning("[OpenCL] No OpenCL device available from OpenCLDeviceManager.");
+                    return;
                 }
 
-                if (_device == 0) return;
+                // Get device info from the centralized manager
+                var deviceInfo = GeoscientistToolkit.OpenCL.OpenCLDeviceManager.GetDeviceInfo();
+                Logger.Log($"[OpenCL/AbsolutePermeability] Using device: {deviceInfo.Name} ({deviceInfo.Vendor})");
 
                 // Create context and command queue
                 int err;

@@ -69,45 +69,22 @@ public class ThermodynamicsOpenCL : IDisposable
     {
         try
         {
-            // Get platform
-            uint numPlatforms = 0;
-            _cl.GetPlatformIDs(0, null, &numPlatforms);
+            // Use centralized device manager to get the device from settings
+            _device = GeoscientistToolkit.OpenCL.OpenCLDeviceManager.GetComputeDevice();
 
-            if (numPlatforms == 0)
+            if (_device == 0)
             {
-                Logger.LogWarning("[ThermodynamicsOpenCL] No OpenCL platforms found");
+                Logger.LogWarning("[ThermodynamicsOpenCL] No OpenCL device available from OpenCLDeviceManager.");
                 return;
             }
 
-            var platforms = stackalloc nint[(int)numPlatforms];
-            _cl.GetPlatformIDs(numPlatforms, platforms, null);
-            var platform = platforms[0];
-
-            // Get device (prefer GPU)
-            uint numDevices = 0;
-            _cl.GetDeviceIDs(platform, DeviceType.Gpu, 0, null, &numDevices);
-
-            if (numDevices == 0)
-            {
-                // Fall back to CPU
-                _cl.GetDeviceIDs(platform, DeviceType.Cpu, 0, null, &numDevices);
-                if (numDevices == 0)
-                {
-                    Logger.LogWarning("[ThermodynamicsOpenCL] No OpenCL devices found");
-                    return;
-                }
-            }
-
-            var devices = stackalloc nint[(int)numDevices];
-            _cl.GetDeviceIDs(platform, DeviceType.Gpu, numDevices, devices, null);
-            _device = devices[0];
-
-            // Log device info
-            LogDeviceInfo(_device);
+            // Get device info from the centralized manager
+            var deviceInfo = GeoscientistToolkit.OpenCL.OpenCLDeviceManager.GetDeviceInfo();
+            Logger.Log($"[ThermodynamicsOpenCL] Using device: {deviceInfo.Name} ({deviceInfo.Vendor})");
 
             // Create context
             int errorCode;
-            _context = _cl.CreateContext(null, 1, devices, null, null, &errorCode);
+            _context = _cl.CreateContext(null, 1, &_device, null, null, &errorCode);
             CheckError(errorCode, "CreateContext");
 
             // Create command queue

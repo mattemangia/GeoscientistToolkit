@@ -1700,33 +1700,17 @@ public static class PNMGenerator
 
         unsafe
         {
-            uint nPlatforms = 0;
-            _cl.GetPlatformIDs(0, null, &nPlatforms);
-            if (nPlatforms == 0) throw new Exception("No OpenCL platforms found.");
+            // Use centralized device manager to get the device from settings
+            var device = GeoscientistToolkit.OpenCL.OpenCLDeviceManager.GetComputeDevice();
 
-            var platforms = stackalloc nint[(int)nPlatforms];
-            _cl.GetPlatformIDs(nPlatforms, platforms, null);
-
-            nint device = 0;
-            nint platform = 0;
-
-            for (var i = 0; i < nPlatforms; i++)
+            if (device == 0)
             {
-                platform = platforms[i];
-
-                uint nDevices = 0;
-                _cl.GetDeviceIDs(platform, DeviceType.Gpu, 0, null, &nDevices);
-                if (nDevices == 0)
-                    _cl.GetDeviceIDs(platform, DeviceType.Cpu, 0, null, &nDevices);
-                if (nDevices == 0) continue;
-
-                var devices = stackalloc nint[(int)nDevices];
-                _cl.GetDeviceIDs(platform, DeviceType.All, nDevices, devices, null);
-                device = devices[0];
-                if (device != 0) break;
+                Logger.LogWarning("No OpenCL device available from OpenCLDeviceManager.");
+                throw new Exception("No OpenCL device available.");
             }
 
-            if (device == 0) throw new Exception("No OpenCL devices found.");
+            var deviceInfo = GeoscientistToolkit.OpenCL.OpenCLDeviceManager.GetDeviceInfo();
+            Logger.Log($"[PNMGenerator]: Using device: {deviceInfo.Name} ({deviceInfo.Vendor})");
 
             int err;
             _ctx = _cl.CreateContext(null, 1, &device, null, null, &err);

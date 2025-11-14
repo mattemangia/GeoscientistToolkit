@@ -201,89 +201,26 @@ public class GeothermalOpenCLSolver : IDisposable
     {
         try
         {
-            Logger.Log("Attempting to initialize OpenCL...");
+            Logger.Log("GeothermalOpenCLSolver: Initializing OpenCL...");
 
-            // Get platform
-            uint numPlatforms;
-            _cl.GetPlatformIDs(0, null, &numPlatforms);
+            // Use centralized device manager to get the device from settings
+            _device = GeoscientistToolkit.OpenCL.OpenCLDeviceManager.GetComputeDevice();
 
-            if (numPlatforms == 0)
+            if (_device == 0)
             {
-                Logger.LogWarning("No OpenCL platforms found.");
+                Logger.LogWarning("No OpenCL device available from OpenCLDeviceManager.");
                 Logger.LogWarning("Please ensure GPU drivers with OpenCL support are installed.");
                 return false;
             }
 
-            Logger.Log($"Found {numPlatforms} OpenCL platform(s)");
+            // Get device info from the centralized manager
+            var deviceInfo = GeoscientistToolkit.OpenCL.OpenCLDeviceManager.GetDeviceInfo();
+            DeviceName = deviceInfo.Name;
+            DeviceVendor = deviceInfo.Vendor;
+            DeviceGlobalMemory = deviceInfo.GlobalMemory;
 
-            var platforms = new nint[numPlatforms];
-            fixed (nint* platformsPtr = platforms)
-            {
-                _cl.GetPlatformIDs(numPlatforms, platformsPtr, null);
-            }
-
-            // Get device (prefer GPU)
-            foreach (var platform in platforms)
-            {
-                uint numDevices;
-                _cl.GetDeviceIDs(platform, DeviceType.Gpu, 0, null, &numDevices);
-
-                if (numDevices > 0)
-                {
-                    var devices = new nint[numDevices];
-                    fixed (nint* devicesPtr = devices)
-                    {
-                        _cl.GetDeviceIDs(platform, DeviceType.Gpu, numDevices, devicesPtr, null);
-                    }
-
-                    _device = devices[0];
-
-                    // Get device info
-                    nuint paramSize;
-                    var nameBuffer = new byte[256];
-                    fixed (byte* namePtr = nameBuffer)
-                    {
-                        _cl.GetDeviceInfo(_device, (uint)DeviceInfo.Name, 256, namePtr, &paramSize);
-                        DeviceName = Encoding.UTF8.GetString(nameBuffer, 0, (int)paramSize - 1);
-
-                        _cl.GetDeviceInfo(_device, (uint)DeviceInfo.Vendor, 256, namePtr, &paramSize);
-                        DeviceVendor = Encoding.UTF8.GetString(nameBuffer, 0, (int)paramSize - 1);
-                    }
-
-                    ulong globalMem;
-                    _cl.GetDeviceInfo(_device, (uint)DeviceInfo.GlobalMemSize, sizeof(ulong), &globalMem, null);
-                    DeviceGlobalMemory = globalMem;
-
-                    Console.WriteLine($"OpenCL Device: {DeviceName} ({DeviceVendor})");
-                    Console.WriteLine($"Global Memory: {DeviceGlobalMemory / (1024 * 1024)} MB");
-
-                    break;
-                }
-            }
-
-            // Fallback to CPU if no GPU found
-            if (_device == 0)
-            {
-                uint numDevices;
-                _cl.GetDeviceIDs(platforms[0], DeviceType.Cpu, 0, null, &numDevices);
-
-                if (numDevices > 0)
-                {
-                    var devices = new nint[numDevices];
-                    fixed (nint* devicesPtr = devices)
-                    {
-                        _cl.GetDeviceIDs(platforms[0], DeviceType.Cpu, numDevices, devicesPtr, null);
-                    }
-
-                    _device = devices[0];
-                    Console.WriteLine("Using OpenCL CPU device");
-                }
-                else
-                {
-                    Console.WriteLine("No OpenCL devices found.");
-                    return false;
-                }
-            }
+            Logger.Log($"GeothermalOpenCLSolver: Using device: {DeviceName} ({DeviceVendor})");
+            Logger.Log($"GeothermalOpenCLSolver: Global Memory: {DeviceGlobalMemory / (1024 * 1024)} MB");
 
             // Create context
             int errCode;

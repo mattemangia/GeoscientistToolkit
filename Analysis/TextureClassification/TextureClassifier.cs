@@ -51,13 +51,9 @@ public class TextureClassifier : IDisposable
     {
         try
         {
-            var cl = CL.GetApi();
-            unsafe
-            {
-                uint numPlatforms;
-                cl.GetPlatformIDs(0, null, &numPlatforms);
-                return numPlatforms > 0;
-            }
+            // Use centralized device manager to check availability
+            var device = GeoscientistToolkit.OpenCL.OpenCLDeviceManager.GetComputeDevice();
+            return device != 0;
         }
         catch
         {
@@ -351,32 +347,21 @@ public class TextureClassifier : IDisposable
             _cl = CL.GetApi();
             unsafe
             {
-                uint numPlatforms;
-                _cl.GetPlatformIDs(0, null, &numPlatforms);
+                // Use centralized device manager to get the device from settings
+                var device = GeoscientistToolkit.OpenCL.OpenCLDeviceManager.GetComputeDevice();
 
-                if (numPlatforms == 0)
+                if (device == 0)
                 {
-                    Logger.LogWarning("[TextureClassifier] No OpenCL platforms found");
+                    Logger.LogWarning("[TextureClassifier] No OpenCL device available from OpenCLDeviceManager.");
                     return;
                 }
 
-                var platforms = stackalloc nint[(int)numPlatforms];
-                _cl.GetPlatformIDs(numPlatforms, platforms, null);
-
-                uint numDevices;
-                _cl.GetDeviceIDs(platforms[0], DeviceType.Gpu, 0, null, &numDevices);
-
-                if (numDevices == 0)
-                {
-                    Logger.LogWarning("[TextureClassifier] No GPU devices found");
-                    return;
-                }
-
-                var devices = stackalloc nint[(int)numDevices];
-                _cl.GetDeviceIDs(platforms[0], DeviceType.Gpu, numDevices, devices, null);
+                // Get device info from the centralized manager
+                var deviceInfo = GeoscientistToolkit.OpenCL.OpenCLDeviceManager.GetDeviceInfo();
+                Logger.Log($"[TextureClassifier] Using device: {deviceInfo.Name} ({deviceInfo.Vendor})");
 
                 int errorCode;
-                _context = _cl.CreateContext(null, 1, devices, null, null, &errorCode);
+                _context = _cl.CreateContext(null, 1, &device, null, null, &errorCode);
 
                 if (errorCode != 0)
                 {
@@ -384,7 +369,7 @@ public class TextureClassifier : IDisposable
                     return;
                 }
 
-                _commandQueue = _cl.CreateCommandQueue(_context, devices[0], CommandQueueProperties.None, &errorCode);
+                _commandQueue = _cl.CreateCommandQueue(_context, device, CommandQueueProperties.None, &errorCode);
 
                 if (errorCode != 0)
                 {
@@ -413,7 +398,7 @@ public class TextureClassifier : IDisposable
                 }
 
                 // Build program using byte* version
-                errorCode = _cl.BuildProgram(_program, 1, devices, (byte*)null, null, null);
+                errorCode = _cl.BuildProgram(_program, 1, &device, (byte*)null, null, null);
 
                 if (errorCode != 0)
                 {
@@ -421,7 +406,7 @@ public class TextureClassifier : IDisposable
 
                     // Get build log
                     nuint logSize;
-                    _cl.GetProgramBuildInfo(_program, devices[0], (uint)ProgramBuildInfo.BuildLog, 0, null, &logSize);
+                    _cl.GetProgramBuildInfo(_program, device, (uint)ProgramBuildInfo.BuildLog, 0, null, &logSize);
 
                     if (logSize > 0)
                     {
