@@ -76,8 +76,7 @@ public static class BoreholeSeismicIntegration
         // Create new borehole
         var borehole = new BoreholeDataset(boreholeName, "")
         {
-            X = x,
-            Y = y,
+            SurfaceCoordinates = new Vector2(x, y),
             Elevation = elevation,
             TotalDepth = numSamples * sampleInterval * 1500.0f // Assume average velocity of 1500 m/s for depth conversion
         };
