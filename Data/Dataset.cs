@@ -19,7 +19,8 @@ public enum DatasetType
     Borehole,
     TwoDGeology,
     SubsurfaceGIS,
-    Earthquake
+    Earthquake,
+    Seismic
 }
 
 public abstract class Dataset

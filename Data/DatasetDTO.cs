@@ -329,3 +329,51 @@ public class SubsurfaceGISDatasetDTO : GISDatasetDTO
     public float IDWPower { get; set; }
     public string HeightmapDatasetName { get; set; }
 }
+
+// Seismic line package DTO
+public class SeismicLinePackageDTO
+{
+    public string Name { get; set; } = "";
+    public int StartTrace { get; set; }
+    public int EndTrace { get; set; }
+    public bool IsVisible { get; set; } = true;
+    public Vector4 Color { get; set; } = new Vector4(1, 1, 0, 1);
+    public string Notes { get; set; } = "";
+}
+
+// Seismic dataset DTO
+public class SeismicDatasetDTO : DatasetDTO
+{
+    // SEG-Y format information
+    public int SampleFormat { get; set; } // 1=IBM float, 5=IEEE float, etc.
+    public int NumTraces { get; set; }
+    public int NumSamples { get; set; }
+    public float SampleInterval { get; set; } // in microseconds
+    public float TraceInterval { get; set; } // spacing between traces in meters
+
+    // Survey information
+    public string SurveyName { get; set; } = "";
+    public string LineNumber { get; set; } = "";
+    public int CoordinateUnits { get; set; } // 1=length, 2=arc seconds
+    public int MeasurementSystem { get; set; } // 1=meters, 2=feet
+
+    // Processing information
+    public string ProcessingHistory { get; set; } = "";
+    public bool IsStack { get; set; }
+    public bool IsMigrated { get; set; }
+    public string DataType { get; set; } = ""; // "amplitude", "velocity", "depth", etc.
+
+    // Display settings
+    public float GainValue { get; set; } = 1.0f;
+    public int ColorMapIndex { get; set; } = 0;
+    public bool ShowWiggleTrace { get; set; } = true;
+    public bool ShowVariableArea { get; set; } = true;
+
+    // Line packages for grouping traces
+    public List<SeismicLinePackageDTO> LinePackages { get; set; } = new();
+
+    // Statistics
+    public float MinAmplitude { get; set; }
+    public float MaxAmplitude { get; set; }
+    public float RmsAmplitude { get; set; }
+}
