@@ -512,44 +512,34 @@ public class SeismicViewer : IDatasetViewer
 
             // Use StbImageWrite to save the image
             var extension = Path.GetExtension(filePath).ToLowerInvariant();
-            bool success = false;
             var writer = new StbImageWriteSharp.ImageWriter();
 
             if (extension == ".png")
             {
                 using var stream = File.Create(filePath);
-                success = writer.WritePng(pixelData, numTraces, numSamples, StbImageWriteSharp.ColorComponents.RedGreenBlueAlpha, stream);
+                writer.WritePng(pixelData, numTraces, numSamples, StbImageWriteSharp.ColorComponents.RedGreenBlueAlpha, stream);
+                Logger.Log($"[SeismicViewer] Successfully exported PNG to: {filePath}");
             }
             else if (extension == ".jpg" || extension == ".jpeg")
             {
                 using var stream = File.Create(filePath);
-                success = writer.WriteJpg(pixelData, numTraces, numSamples, StbImageWriteSharp.ColorComponents.RedGreenBlueAlpha, stream, 95);
+                writer.WriteJpg(pixelData, numTraces, numSamples, StbImageWriteSharp.ColorComponents.RedGreenBlueAlpha, stream, 95);
+                Logger.Log($"[SeismicViewer] Successfully exported JPEG to: {filePath}");
             }
             else if (extension == ".tiff" || extension == ".tif")
             {
                 // TGA as fallback since StbImageWrite doesn't support TIFF
                 var tgaPath = Path.ChangeExtension(filePath, ".tga");
                 using var stream = File.Create(tgaPath);
-                success = writer.WriteTga(pixelData, numTraces, numSamples, StbImageWriteSharp.ColorComponents.RedGreenBlueAlpha, stream);
-                if (success)
-                {
-                    Logger.LogWarning($"[SeismicViewer] TIFF not supported by StbImageWrite, saved as TGA instead: {tgaPath}");
-                }
+                writer.WriteTga(pixelData, numTraces, numSamples, StbImageWriteSharp.ColorComponents.RedGreenBlueAlpha, stream);
+                Logger.LogWarning($"[SeismicViewer] TIFF not supported by StbImageWrite, saved as TGA instead: {tgaPath}");
             }
             else
             {
                 // Default to PNG
                 using var stream = File.Create(filePath);
-                success = writer.WritePng(pixelData, numTraces, numSamples, StbImageWriteSharp.ColorComponents.RedGreenBlueAlpha, stream);
-            }
-
-            if (success)
-            {
-                Logger.Log($"[SeismicViewer] Successfully exported image to: {filePath}");
-            }
-            else
-            {
-                Logger.LogError($"[SeismicViewer] Failed to export image to: {filePath}");
+                writer.WritePng(pixelData, numTraces, numSamples, StbImageWriteSharp.ColorComponents.RedGreenBlueAlpha, stream);
+                Logger.Log($"[SeismicViewer] Successfully exported PNG to: {filePath}");
             }
         }
         catch (Exception ex)
