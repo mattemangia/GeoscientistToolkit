@@ -17,6 +17,7 @@ public class AppSettings
     public NetworkSettings Network { get; set; } = new();
     public FileAssociationSettings FileAssociations { get; set; } = new();
     public BackupSettings Backup { get; set; } = new();
+    public PhotogrammetrySettings Photogrammetry { get; set; } = new();
 
     /// <summary>
     ///     Creates a new instance with default values
@@ -185,4 +186,54 @@ public class BackupSettings
     public bool CompressBackups { get; set; } = true;
     public bool BackupOnProjectClose { get; set; } = true;
     public bool EnableCrashRecovery { get; set; } = true;
+}
+
+/// <summary>
+///     Photogrammetry-related settings
+/// </summary>
+public class PhotogrammetrySettings
+{
+    // Model paths
+    public string DepthModelPath { get; set; } = "";
+    public string SuperPointModelPath { get; set; } = "";
+    public string LightGlueModelPath { get; set; } = "";
+
+    // Model directory
+    public string ModelsDirectory { get; set; } = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+        "GeoscientistToolkit", "Models", "Photogrammetry");
+
+    // Pipeline settings
+    public bool UseGpuAcceleration { get; set; } = false;
+    public int DepthModelType { get; set; } = 0; // 0=MiDaS Small, 1=DPT Small, 2=ZoeDepth
+    public int KeyframeInterval { get; set; } = 10;
+    public int TargetWidth { get; set; } = 640;
+    public int TargetHeight { get; set; } = 480;
+
+    // Camera intrinsics
+    public float FocalLengthX { get; set; } = 500;
+    public float FocalLengthY { get; set; } = 500;
+    public float PrincipalPointX { get; set; } = 320;
+    public float PrincipalPointY { get; set; } = 240;
+
+    // Export settings
+    public string DefaultExportFormat { get; set; } = "PLY"; // PLY, XYZ, OBJ
+    public bool ExportTexturedMesh { get; set; } = true;
+    public bool ExportCameraPath { get; set; } = true;
+
+    // Model download URLs
+    public string MidasSmallUrl { get; set; } = "https://github.com/PINTO0309/PINTO_model_zoo/raw/main/142_midas/01_float32/midas_v21_small_256.onnx";
+    public string SuperPointUrl { get; set; } = "https://github.com/PINTO0309/PINTO_model_zoo/raw/main/144_SuperPoint/superpoint.onnx";
+    public string LightGlueUrl { get; set; } = ""; // To be filled with actual URL when available
+
+    // Advanced settings
+    public float ConfidenceThreshold { get; set; } = 0.015f;
+    public float MatchingRatioThreshold { get; set; } = 0.8f;
+    public double ReprojectionThreshold { get; set; } = 1.0;
+    public int MinMatchesForPose { get; set; } = 8;
+
+    // Memory management
+    public bool EnableMemoryManagement { get; set; } = true;
+    public int MemoryThresholdMB { get; set; } = 2048; // 2 GB default
+    public int MaxKeyframesInMemory { get; set; } = 50;
 }

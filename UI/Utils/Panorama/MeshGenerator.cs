@@ -203,14 +203,70 @@ namespace GeoscientistToolkit
             var triangulator = new BallPivotingTriangulator(_service);
             faces = triangulator.Triangulate(vertices, targetFaceCount);
 
-            if (faces.Count < targetFaceCount / 10)
+            _service.Log($"Ball-pivoting generated {faces.Count} faces (target: {targetFaceCount})");
+
+            // Validate and filter out degenerate faces
+            var validFaces = FilterDegenerateFaces(faces, vertices);
+            _service.Log($"After filtering: {validFaces.Count} valid faces (removed {faces.Count - validFaces.Count} degenerate)");
+
+            if (validFaces.Count < Math.Min(targetFaceCount / 10, 100))
             {
-                _service.Log("Ball-pivoting generated too few faces, using supplementary triangulation");
-                faces.AddRange(GenerateSupplementaryFaces(vertices, faces, targetFaceCount));
+                _service.Log("Too few valid faces, using supplementary Delaunay-like triangulation");
+                validFaces.AddRange(GenerateSupplementaryFaces(vertices, validFaces, targetFaceCount));
             }
 
-            _service.Log($"Generated {faces.Count} faces using ball-pivoting algorithm");
-            return faces;
+            _service.Log($"Final mesh: {validFaces.Count} faces");
+            return validFaces;
+        }
+
+        /// <summary>
+        /// Filters out degenerate triangles (zero area, extreme aspect ratios, etc.)
+        /// </summary>
+        private List<int[]> FilterDegenerateFaces(List<int[]> faces, List<Vector3> vertices)
+        {
+            var validFaces = new List<int[]>();
+            const float MIN_AREA = 1e-6f;  // Minimum triangle area
+            const float MAX_EDGE_RATIO = 100.0f;  // Maximum ratio between longest and shortest edge
+
+            foreach (var face in faces)
+            {
+                if (face.Length < 3)
+                    continue;
+
+                var v0 = vertices[face[0]];
+                var v1 = vertices[face[1]];
+                var v2 = vertices[face[2]];
+
+                // Compute edge lengths
+                float e01 = Vector3.Distance(v0, v1);
+                float e12 = Vector3.Distance(v1, v2);
+                float e20 = Vector3.Distance(v2, v0);
+
+                // Skip if any edge is too small
+                if (e01 < 1e-6f || e12 < 1e-6f || e20 < 1e-6f)
+                    continue;
+
+                // Compute triangle area
+                var cross = Vector3.Cross(v1 - v0, v2 - v0);
+                float area = cross.Length() * 0.5f;
+
+                // Skip zero-area triangles
+                if (area < MIN_AREA)
+                    continue;
+
+                // Compute aspect ratio
+                float maxEdge = Math.Max(e01, Math.Max(e12, e20));
+                float minEdge = Math.Min(e01, Math.Min(e12, e20));
+                float ratio = maxEdge / minEdge;
+
+                // Skip slivers (very elongated triangles)
+                if (ratio > MAX_EDGE_RATIO)
+                    continue;
+
+                validFaces.Add(face);
+            }
+
+            return validFaces;
         }
 
         private List<int[]> GenerateSupplementaryFaces(
@@ -220,7 +276,7 @@ namespace GeoscientistToolkit
         {
             var supplementary = new List<int[]>();
             var used = new HashSet<int>();
-            
+
             foreach (var face in existingFaces)
             {
                 foreach (var vertex in face)
@@ -230,22 +286,68 @@ namespace GeoscientistToolkit
             var available = Enumerable.Range(0, vertices.Count)
                 .Where(i => !used.Contains(i))
                 .ToList();
-            
-            if (available.Count < 3)
-                return supplementary;
 
-            // Generate simple triangles from unused vertices
-            for (int i = 0; i < available.Count - 2 && supplementary.Count < targetCount - existingFaces.Count; i++)
+            if (available.Count < 3)
             {
-                for (int j = i + 1; j < available.Count - 1 && supplementary.Count < targetCount - existingFaces.Count; j++)
+                _service.Log($"  Cannot generate supplementary faces: only {available.Count} unused vertices");
+                return supplementary;
+            }
+
+            _service.Log($"  Generating supplementary faces from {available.Count} unused vertices");
+
+            // Use a more intelligent greedy approach: connect nearest neighbors
+            // This creates a better mesh than brute force enumeration
+            var addedEdges = new HashSet<(int, int)>();
+
+            // Build a k-NN graph (k=6 nearest neighbors)
+            int k = Math.Min(6, available.Count - 1);
+            for (int i = 0; i < available.Count && supplementary.Count < targetCount - existingFaces.Count; i++)
+            {
+                var vi = available[i];
+                var neighbors = available
+                    .Where(vj => vj != vi)
+                    .OrderBy(vj => Vector3.Distance(vertices[vi], vertices[vj]))
+                    .Take(k)
+                    .ToList();
+
+                // Try to form triangles with nearest neighbors
+                for (int j = 0; j < neighbors.Count - 1 && supplementary.Count < targetCount - existingFaces.Count; j++)
                 {
-                    for (int k = j + 1; k < available.Count && supplementary.Count < targetCount - existingFaces.Count; k++)
+                    for (int k_idx = j + 1; k_idx < neighbors.Count && supplementary.Count < targetCount - existingFaces.Count; k_idx++)
                     {
-                        supplementary.Add(new[] { available[i], available[j], available[k] });
+                        int vj = neighbors[j];
+                        int vk = neighbors[k_idx];
+
+                        // Check if this triangle would be valid
+                        var v0 = vertices[vi];
+                        var v1 = vertices[vj];
+                        var v2 = vertices[vk];
+
+                        // Compute triangle normal and area
+                        var cross = Vector3.Cross(v1 - v0, v2 - v0);
+                        float area = cross.Length() * 0.5f;
+
+                        // Only add if it has reasonable area
+                        if (area > 1e-5f)
+                        {
+                            // Check if we haven't already added a conflicting face
+                            var edge01 = (Math.Min(vi, vj), Math.Max(vi, vj));
+                            var edge12 = (Math.Min(vj, vk), Math.Max(vj, vk));
+                            var edge20 = (Math.Min(vk, vi), Math.Max(vk, vi));
+
+                            if (!addedEdges.Contains(edge01) || !addedEdges.Contains(edge12) || !addedEdges.Contains(edge20))
+                            {
+                                supplementary.Add(new[] { vi, vj, vk });
+                                addedEdges.Add(edge01);
+                                addedEdges.Add(edge12);
+                                addedEdges.Add(edge20);
+                            }
+                        }
                     }
                 }
             }
 
+            _service.Log($"  Generated {supplementary.Count} supplementary faces");
             return supplementary;
         }
 
@@ -909,39 +1011,55 @@ namespace GeoscientistToolkit
             var extent = max - min;
             float sceneSize = Math.Max(extent.X, Math.Max(extent.Y, extent.Z));
 
-            // Sample nearest neighbor distances
-            int samples = Math.Min(100, vertices.Count / 2);
-            float totalNearestDist = 0;
-            var random = new Random();
+            // Sample nearest neighbor distances more thoroughly
+            int samples = Math.Min(200, vertices.Count);
+            var nearestDistances = new List<float>();
+            var random = new Random(42); // Use fixed seed for reproducibility
 
             for (int i = 0; i < samples; i++)
             {
-                int idx = random.Next(vertices.Count);
+                int idx = i < vertices.Count ? i : random.Next(vertices.Count);
                 var point = vertices[idx];
-                
-                // Find nearest neighbor
-                float minDist = float.MaxValue;
-                for (int j = 0; j < Math.Min(50, vertices.Count); j++)
+
+                // Find k nearest neighbors (k=5) instead of just the nearest
+                var distances = new List<float>();
+                for (int j = 0; j < vertices.Count; j++)
                 {
-                    int candidateIdx = random.Next(vertices.Count);
-                    if (candidateIdx != idx)
+                    if (j != idx)
                     {
-                        float dist = Vector3.Distance(point, vertices[candidateIdx]);
-                        if (dist < minDist)
-                            minDist = dist;
+                        float dist = Vector3.Distance(point, vertices[j]);
+                        distances.Add(dist);
                     }
                 }
-                totalNearestDist += minDist;
+
+                if (distances.Count > 0)
+                {
+                    distances.Sort();
+                    // Take median of 5 nearest neighbors for robustness
+                    int k = Math.Min(5, distances.Count);
+                    nearestDistances.Add(distances[k / 2]);
+                }
             }
 
-            float avgNearestDist = totalNearestDist / samples;
-            
-            // Ball radius should be 2-3x the average nearest neighbor distance
-            // but constrained relative to scene size
-            float radius = Math.Clamp(avgNearestDist * 2.5f, sceneSize / 1000.0f, sceneSize / 10.0f);
-            
-            _service.Log($"Scene size: {sceneSize:F2}, Avg nearest dist: {avgNearestDist:F4}, Ball radius: {radius:F4}");
-            
+            if (nearestDistances.Count == 0)
+                return sceneSize / 50.0f; // Fallback
+
+            // Use median instead of average for robustness against outliers
+            nearestDistances.Sort();
+            float medianNearestDist = nearestDistances[nearestDistances.Count / 2];
+
+            // Ball radius should be 2-3x the median nearest neighbor distance
+            // IMPROVED: Use more conservative scaling
+            float radius = medianNearestDist * 2.0f;
+
+            // Clamp to reasonable bounds
+            float minRadius = sceneSize / 500.0f;
+            float maxRadius = sceneSize / 20.0f;
+            radius = Math.Clamp(radius, minRadius, maxRadius);
+
+            _service.Log($"Scene size: {sceneSize:F3}, Median nearest dist: {medianNearestDist:F5}, Ball radius: {radius:F5}");
+            _service.Log($"Radius bounds: [{minRadius:F5}, {maxRadius:F5}]");
+
             return radius;
         }
 
@@ -972,33 +1090,79 @@ namespace GeoscientistToolkit
             float ballRadius,
             float maxEdgeLength)
         {
-            for (int i = 0; i < Math.Min(vertices.Count, 100); i++)
+            // Improved seed triangle finding: try to find a well-conditioned triangle
+            // near the center of the point cloud
+            var center = Vector3.Zero;
+            foreach (var v in vertices)
+                center += v;
+            center /= vertices.Count;
+
+            // Find vertices closest to center
+            var centralIndices = vertices
+                .Select((v, idx) => (idx, dist: Vector3.Distance(v, center)))
+                .OrderBy(x => x.dist)
+                .Take(Math.Min(200, vertices.Count))
+                .Select(x => x.idx)
+                .ToList();
+
+            _service.Log($"  Searching for seed triangle among {centralIndices.Count} central vertices...");
+
+            // Try to find a good quality triangle (not too flat, reasonable size)
+            (int, int, int)? bestSeed = null;
+            float bestQuality = 0;
+
+            for (int ii = 0; ii < Math.Min(centralIndices.Count, 50); ii++)
             {
-                for (int j = i + 1; j < Math.Min(vertices.Count, 100); j++)
+                int i = centralIndices[ii];
+                for (int jj = ii + 1; jj < Math.Min(centralIndices.Count, 50); jj++)
                 {
+                    int j = centralIndices[jj];
                     float edge1 = Vector3.Distance(vertices[i], vertices[j]);
-                    if (edge1 < maxEdgeLength && edge1 < ballRadius * 2.0f)
+
+                    if (edge1 > 1e-6f && edge1 < maxEdgeLength && edge1 < ballRadius * 2.0f)
                     {
-                        for (int k = j + 1; k < Math.Min(vertices.Count, 100); k++)
+                        for (int kk = jj + 1; kk < Math.Min(centralIndices.Count, 50); kk++)
                         {
+                            int k = centralIndices[kk];
                             float edge2 = Vector3.Distance(vertices[i], vertices[k]);
                             float edge3 = Vector3.Distance(vertices[j], vertices[k]);
-                            
-                            if (edge2 < maxEdgeLength && edge3 < maxEdgeLength &&
+
+                            if (edge2 > 1e-6f && edge3 > 1e-6f &&
+                                edge2 < maxEdgeLength && edge3 < maxEdgeLength &&
                                 edge2 < ballRadius * 2.0f && edge3 < ballRadius * 2.0f)
                             {
                                 var cross = Vector3.Cross(
                                     vertices[j] - vertices[i],
                                     vertices[k] - vertices[i]);
-                                
-                                if (cross.Length() > 0.001f)
-                                    return (i, j, k);
+
+                                float area = cross.Length() * 0.5f;
+
+                                if (area > 1e-5f)
+                                {
+                                    // Compute triangle quality (aspect ratio)
+                                    float maxEdge = Math.Max(edge1, Math.Max(edge2, edge3));
+                                    float minEdge = Math.Min(edge1, Math.Min(edge2, edge3));
+                                    float quality = minEdge / maxEdge; // Higher is better (equilateral = 1.0)
+
+                                    if (quality > bestQuality)
+                                    {
+                                        bestQuality = quality;
+                                        bestSeed = (i, j, k);
+                                    }
+                                }
                             }
                         }
                     }
                 }
             }
 
+            if (bestSeed.HasValue)
+            {
+                _service.Log($"  Found seed triangle with quality {bestQuality:F3}");
+                return bestSeed;
+            }
+
+            _service.Log($"  [Warning] No suitable seed triangle found");
             return null;
         }
 

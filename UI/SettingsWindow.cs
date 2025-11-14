@@ -18,6 +18,12 @@ public class SettingsWindow
     private readonly ImGuiFileDialog _loadSettingsDialog;
     private readonly ImGuiFileDialog _logPathDialog;
     private readonly ImGuiFileDialog _saveSettingsDialog;
+
+    // Photogrammetry file dialogs
+    private readonly ImGuiFileDialog _depthModelDialog;
+    private readonly ImGuiFileDialog _superPointModelDialog;
+    private readonly ImGuiFileDialog _lightGlueModelDialog;
+    private readonly ImGuiFileDialog _modelsDirectoryDialog;
     private readonly SettingsManager _settingsManager;
     private AppSettings _editingSettings;
     private bool _isOpen;
@@ -38,6 +44,12 @@ public class SettingsWindow
         _logPathDialog = new ImGuiFileDialog("SelectLogPath", FileDialogType.OpenDirectory, "Select Log Directory");
         _backupPathDialog =
             new ImGuiFileDialog("SelectBackupPath", FileDialogType.OpenDirectory, "Select Backup Directory");
+
+        // Photogrammetry dialogs
+        _depthModelDialog = new ImGuiFileDialog("SelectDepthModel", FileDialogType.OpenFile, "Select Depth Model (ONNX)");
+        _superPointModelDialog = new ImGuiFileDialog("SelectSuperPointModel", FileDialogType.OpenFile, "Select SuperPoint Model (ONNX)");
+        _lightGlueModelDialog = new ImGuiFileDialog("SelectLightGlueModel", FileDialogType.OpenFile, "Select LightGlue Model (ONNX)");
+        _modelsDirectoryDialog = new ImGuiFileDialog("SelectModelsDirectory", FileDialogType.OpenDirectory, "Select Models Directory");
     }
 
     public void Open()
@@ -119,6 +131,7 @@ public class SettingsWindow
             case SettingsCategory.Performance: DrawPerformanceSettings(); break;
             case SettingsCategory.FileAssociations: DrawFileAssociationSettings(); break;
             case SettingsCategory.Backup: DrawBackupSettings(); break;
+            case SettingsCategory.Photogrammetry: DrawPhotogrammetrySettings(); break;
         }
 
         ImGui.PopItemWidth();
@@ -330,6 +343,210 @@ public class SettingsWindow
         if (ImGui.Checkbox("Backup on Project Close", ref backupOnClose)) backup.BackupOnProjectClose = backupOnClose;
     }
 
+    private void DrawPhotogrammetrySettings()
+    {
+        var photo = _editingSettings.Photogrammetry;
+        ImGui.TextColored(new Vector4(0.26f, 0.59f, 0.98f, 1.0f), "Photogrammetry Settings");
+        ImGui.Separator();
+
+        // Model paths section
+        ImGui.TextColored(new Vector4(0.8f, 0.8f, 0.2f, 1.0f), "Model Paths");
+        ImGui.Spacing();
+
+        var modelsDir = photo.ModelsDirectory;
+        if (ImGui.InputText("Models Directory", ref modelsDir, 512)) photo.ModelsDirectory = modelsDir;
+        ImGui.SameLine();
+        if (ImGui.Button("Browse...##ModelsDir")) _modelsDirectoryDialog.Open(photo.ModelsDirectory);
+
+        var depthPath = photo.DepthModelPath;
+        if (ImGui.InputText("Depth Model (ONNX)", ref depthPath, 512)) photo.DepthModelPath = depthPath;
+        ImGui.SameLine();
+        if (ImGui.Button("Browse...##DepthModel")) _depthModelDialog.Open(Path.GetDirectoryName(photo.DepthModelPath), new[] { ".onnx" });
+
+        var spPath = photo.SuperPointModelPath;
+        if (ImGui.InputText("SuperPoint Model (ONNX)", ref spPath, 512)) photo.SuperPointModelPath = spPath;
+        ImGui.SameLine();
+        if (ImGui.Button("Browse...##SuperPoint")) _superPointModelDialog.Open(Path.GetDirectoryName(photo.SuperPointModelPath), new[] { ".onnx" });
+
+        var lgPath = photo.LightGlueModelPath;
+        if (ImGui.InputText("LightGlue Model (ONNX)", ref lgPath, 512)) photo.LightGlueModelPath = lgPath;
+        ImGui.SameLine();
+        if (ImGui.Button("Browse...##LightGlue")) _lightGlueModelDialog.Open(Path.GetDirectoryName(photo.LightGlueModelPath), new[] { ".onnx" });
+
+        ImGui.Spacing();
+        ImGui.Separator();
+
+        // Model download section
+        ImGui.TextColored(new Vector4(0.8f, 0.8f, 0.2f, 1.0f), "Download Models");
+        ImGui.Spacing();
+
+        if (ImGui.Button("Download MiDaS Small (Depth)", new Vector2(250, 0)))
+        {
+            DownloadModel("MiDaS Small", photo.MidasSmallUrl, Path.Combine(photo.ModelsDirectory, "midas_small.onnx"));
+        }
+        ImGui.SameLine();
+        HelpMarker("Downloads MiDaS Small depth estimation model (~20 MB)");
+
+        if (ImGui.Button("Download SuperPoint", new Vector2(250, 0)))
+        {
+            DownloadModel("SuperPoint", photo.SuperPointUrl, Path.Combine(photo.ModelsDirectory, "superpoint.onnx"));
+        }
+        ImGui.SameLine();
+        HelpMarker("Downloads SuperPoint keypoint detection model (~5 MB)");
+
+        if (!string.IsNullOrEmpty(photo.LightGlueUrl))
+        {
+            if (ImGui.Button("Download LightGlue", new Vector2(250, 0)))
+            {
+                DownloadModel("LightGlue", photo.LightGlueUrl, Path.Combine(photo.ModelsDirectory, "lightglue.onnx"));
+            }
+            ImGui.SameLine();
+            HelpMarker("Downloads LightGlue feature matching model (~30 MB)");
+        }
+
+        ImGui.Spacing();
+        ImGui.Separator();
+
+        // Pipeline settings
+        ImGui.TextColored(new Vector4(0.8f, 0.8f, 0.2f, 1.0f), "Pipeline Settings");
+        ImGui.Spacing();
+
+        var useGpu = photo.UseGpuAcceleration;
+        if (ImGui.Checkbox("Use GPU Acceleration (CUDA)", ref useGpu)) photo.UseGpuAcceleration = useGpu;
+        HelpMarker("Requires CUDA-capable GPU and CUDA Toolkit 11.x or 12.x");
+
+        string[] depthModels = { "MiDaS Small (Fast)", "DPT Small (Balanced)", "ZoeDepth (Metric, Slow)" };
+        var depthModelType = photo.DepthModelType;
+        if (ImGui.Combo("Depth Model Type", ref depthModelType, depthModels, depthModels.Length))
+            photo.DepthModelType = depthModelType;
+
+        var kfInterval = photo.KeyframeInterval;
+        if (ImGui.SliderInt("Keyframe Interval", ref kfInterval, 1, 30)) photo.KeyframeInterval = kfInterval;
+        HelpMarker("Create a keyframe every N frames");
+
+        var targetW = photo.TargetWidth;
+        if (ImGui.SliderInt("Target Width", ref targetW, 320, 1920)) photo.TargetWidth = targetW;
+
+        var targetH = photo.TargetHeight;
+        if (ImGui.SliderInt("Target Height", ref targetH, 240, 1080)) photo.TargetHeight = targetH;
+
+        ImGui.Spacing();
+        ImGui.Separator();
+
+        // Camera intrinsics
+        ImGui.TextColored(new Vector4(0.8f, 0.8f, 0.2f, 1.0f), "Camera Intrinsics");
+        ImGui.Spacing();
+
+        var fxValue = photo.FocalLengthX;
+        if (ImGui.DragFloat("Focal Length X", ref fxValue, 1.0f, 100, 2000)) photo.FocalLengthX = fxValue;
+
+        var fyValue = photo.FocalLengthY;
+        if (ImGui.DragFloat("Focal Length Y", ref fyValue, 1.0f, 100, 2000)) photo.FocalLengthY = fyValue;
+
+        var pxValue = photo.PrincipalPointX;
+        if (ImGui.DragFloat("Principal Point X", ref pxValue, 1.0f, 0, 2000)) photo.PrincipalPointX = pxValue;
+
+        var pyValue = photo.PrincipalPointY;
+        if (ImGui.DragFloat("Principal Point Y", ref pyValue, 1.0f, 0, 2000)) photo.PrincipalPointY = pyValue;
+
+        if (ImGui.Button("Auto-estimate from resolution"))
+        {
+            photo.FocalLengthX = photo.TargetWidth * 0.8f;
+            photo.FocalLengthY = photo.TargetHeight * 0.8f;
+            photo.PrincipalPointX = photo.TargetWidth / 2.0f;
+            photo.PrincipalPointY = photo.TargetHeight / 2.0f;
+        }
+
+        ImGui.Spacing();
+        ImGui.Separator();
+
+        // Export settings
+        ImGui.TextColored(new Vector4(0.8f, 0.8f, 0.2f, 1.0f), "Export Settings");
+        ImGui.Spacing();
+
+        string[] exportFormats = { "PLY", "XYZ", "OBJ" };
+        var exportFormat = photo.DefaultExportFormat;
+        var currentIdx = Array.IndexOf(exportFormats, exportFormat);
+        if (currentIdx == -1) currentIdx = 0;
+        if (ImGui.Combo("Default Export Format", ref currentIdx, exportFormats, exportFormats.Length))
+            photo.DefaultExportFormat = exportFormats[currentIdx];
+
+        var exportTextured = photo.ExportTexturedMesh;
+        if (ImGui.Checkbox("Export Textured Mesh", ref exportTextured)) photo.ExportTexturedMesh = exportTextured;
+
+        var exportCamera = photo.ExportCameraPath;
+        if (ImGui.Checkbox("Export Camera Path", ref exportCamera)) photo.ExportCameraPath = exportCamera;
+    }
+
+    private void DownloadModel(string modelName, string url, string savePath)
+    {
+        if (string.IsNullOrEmpty(url))
+        {
+            Logger.LogError($"No download URL configured for {modelName}");
+            return;
+        }
+
+        // Start download in background
+        Task.Run(async () =>
+        {
+            try
+            {
+                Logger.Log($"Downloading {modelName} from {url}...");
+
+                // Create directory if it doesn't exist
+                var directory = Path.GetDirectoryName(savePath);
+                if (!Directory.Exists(directory))
+                    Directory.CreateDirectory(directory);
+
+                using var client = new HttpClient();
+                client.Timeout = TimeSpan.FromMinutes(10);
+
+                using var response = await client.GetAsync(url, HttpCompletionOption.ResponseHeadersRead);
+                response.EnsureSuccessStatusCode();
+
+                var totalBytes = response.Content.Headers.ContentLength ?? 0;
+                var buffer = new byte[8192];
+                var totalBytesRead = 0L;
+
+                using var contentStream = await response.Content.ReadAsStreamAsync();
+                using var fileStream = new FileStream(savePath, FileMode.Create, FileAccess.Write, FileShare.None, 8192, true);
+
+                int bytesRead;
+                while ((bytesRead = await contentStream.ReadAsync(buffer, 0, buffer.Length)) > 0)
+                {
+                    await fileStream.WriteAsync(buffer, 0, bytesRead);
+                    totalBytesRead += bytesRead;
+
+                    if (totalBytes > 0)
+                    {
+                        var progress = (float)totalBytesRead / totalBytes;
+                        Logger.Log($"Downloading {modelName}: {progress * 100:F1}%");
+                    }
+                }
+
+                Logger.Log($"Successfully downloaded {modelName} to {savePath}");
+
+                // Auto-set path in settings if empty
+                if (modelName.Contains("MiDaS") && string.IsNullOrEmpty(_editingSettings.Photogrammetry.DepthModelPath))
+                {
+                    _editingSettings.Photogrammetry.DepthModelPath = savePath;
+                }
+                else if (modelName.Contains("SuperPoint") && string.IsNullOrEmpty(_editingSettings.Photogrammetry.SuperPointModelPath))
+                {
+                    _editingSettings.Photogrammetry.SuperPointModelPath = savePath;
+                }
+                else if (modelName.Contains("LightGlue") && string.IsNullOrEmpty(_editingSettings.Photogrammetry.LightGlueModelPath))
+                {
+                    _editingSettings.Photogrammetry.LightGlueModelPath = savePath;
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError($"Failed to download {modelName}: {ex.Message}");
+            }
+        });
+    }
+
     private void DrawBottomButtons()
     {
         if (ImGui.Button("Restore Defaults"))
@@ -430,6 +647,12 @@ public class SettingsWindow
     {
         if (_logPathDialog.Submit()) _editingSettings.Logging.LogFilePath = _logPathDialog.SelectedPath;
         if (_backupPathDialog.Submit()) _editingSettings.Backup.BackupDirectory = _backupPathDialog.SelectedPath;
+
+        // Photogrammetry dialogs
+        if (_modelsDirectoryDialog.Submit()) _editingSettings.Photogrammetry.ModelsDirectory = _modelsDirectoryDialog.SelectedPath;
+        if (_depthModelDialog.Submit()) _editingSettings.Photogrammetry.DepthModelPath = _depthModelDialog.SelectedPath;
+        if (_superPointModelDialog.Submit()) _editingSettings.Photogrammetry.SuperPointModelPath = _superPointModelDialog.SelectedPath;
+        if (_lightGlueModelDialog.Submit()) _editingSettings.Photogrammetry.LightGlueModelPath = _lightGlueModelDialog.SelectedPath;
     }
 
     private bool HasUnsavedChanges()
@@ -470,6 +693,7 @@ public class SettingsWindow
         Logging,
         Performance,
         FileAssociations,
-        Backup
+        Backup,
+        Photogrammetry
     }
 }

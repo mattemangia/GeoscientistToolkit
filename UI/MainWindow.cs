@@ -49,6 +49,9 @@ public class MainWindow
     private readonly GeoScriptTerminalWindow _geoScriptTerminalWindow = new();
     private readonly ImGuiWindowScreenshotTool _screenshotTool;
 
+    // Real-time photogrammetry window
+    private readonly Windows.RealtimePhotogrammetryWindow _realtimePhotogrammetryWindow = new();
+
     // File Dialogs
     private readonly ImGuiFileDialog
         _loadProjectDialog = new("LoadProjectDlg", FileDialogType.OpenFile, "Load Project");
@@ -229,6 +232,7 @@ public class MainWindow
         _compoundLibraryEditorWindow.Draw();
         _geoScriptTerminalWindow.Draw();
         _stratigraphyViewer.Draw();
+        _realtimePhotogrammetryWindow.Draw();
         // Handle create mesh dialog
         HandleCreateMeshDialog();
 
@@ -478,6 +482,8 @@ public class MainWindow
         {
             if (ImGui.MenuItem("GeoScript Terminal")) _geoScriptTerminalWindow.Show();
             if (ImGui.MenuItem("Stratigraphy Correlation Viewer")) _stratigraphyViewer.Show();
+            ImGui.Separator();
+            if (ImGui.MenuItem("Real-time Photogrammetry")) _realtimePhotogrammetryWindow.Show();
             ImGui.Separator();
             if (ImGui.MenuItem("Screenshot Fullscreen")) _screenshotTool.TakeFullScreenshot();
             if (ImGui.MenuItem("Screenshot Window...")) _screenshotTool.StartSelection();
