@@ -31,8 +31,26 @@ namespace GeoscientistToolkit.Analysis.Seismology
     }
 
     /// <summary>
-    /// Spectral element method engine for wave propagation
-    /// Simplified version inspired by SpecFEM
+    /// Finite difference engine for 3D seismic wave propagation
+    /// Simplified version inspired by SpecFEM methodology
+    ///
+    /// ALGORITHM: 3D Elastic Wave Propagation with Moment Tensor Sources
+    ///
+    /// Implements numerical solution of the elastic wave equation using finite differences.
+    /// Supports double-couple moment tensor sources for earthquake simulation.
+    ///
+    /// References:
+    /// - Komatitsch, D., & Vilotte, J.P. (1998). "The spectral element method: An efficient
+    ///   tool to simulate the seismic response of 2D and 3D geological structures."
+    ///   Bulletin of the Seismological Society of America, 88(2), 368-392.
+    ///
+    /// - Aki, K., & Richards, P.G. (2002). "Quantitative Seismology," 2nd ed.
+    ///   University Science Books. (Chapters 2-4 for wave theory and moment tensors)
+    ///
+    /// - Jost, M.L., & Herrmann, R.B. (1989). "A student's guide to and review of moment
+    ///   tensors." Seismological Research Letters, 60(2), 37-57.
+    ///
+    /// - Shearer, P.M. (2009). "Introduction to Seismology," 2nd ed. Cambridge University Press.
     /// </summary>
     public class WavePropagationEngine
     {

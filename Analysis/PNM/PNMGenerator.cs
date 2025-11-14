@@ -353,6 +353,25 @@ public static class PNMGenerator
         return pnm;
     }
 
+    // ALGORITHM: Watershed Segmentation with Seeded Region Growing
+    //
+    // Expands labeled seed regions (from eroded pore centers) back to full pore volumes by
+    // wavefront propagation. Each unlabeled voxel is assigned to the nearest seed region,
+    // effectively partitioning the pore space into distinct pore bodies.
+    //
+    // References:
+    // - Vincent, L., & Soille, P. (1991). "Watersheds in digital spaces: An efficient algorithm
+    //   based on immersion simulations." IEEE Transactions on Pattern Analysis and Machine
+    //   Intelligence, 13(6), 583-598.
+    //   DOI: 10.1109/34.87344
+    //
+    // - Beucher, S., & Lantuéjoul, C. (1979). "Use of watersheds in contour detection."
+    //   International Workshop on Image Processing: Real-time Edge and Motion Detection/Estimation.
+    //
+    // - Meyer, F., & Beucher, S. (1990). "Morphological segmentation." Journal of Visual
+    //   Communication and Image Representation, 1(1), 21-46.
+    //   DOI: 10.1016/1047-3203(90)90014-M
+    //
     // NEW: Watershed expansion to recover full pore volumes
     private static int[] WatershedExpansion(int[] seedLabels, byte[] mask, int W, int H, int D,
         DetailedProgressReporter progress, float startProgress, float endProgress)
@@ -603,6 +622,26 @@ public static class PNMGenerator
         public int[] Labels;
     }
 
+    // ALGORITHM: 3D Connected Component Labeling with Union-Find
+    //
+    // Identifies and labels distinct connected regions in a 3D binary volume using a two-pass
+    // algorithm with union-find data structure for efficient equivalence resolution. Supports
+    // 6-, 18-, and 26-connectivity neighborhoods.
+    //
+    // References:
+    // - Rosenfeld, A., & Pfaltz, J.L. (1966). "Sequential operations in digital picture processing."
+    //   Journal of the ACM (JACM), 13(4), 471-494.
+    //   DOI: 10.1145/321356.321357
+    //
+    // - Samet, H., & Tamminen, M. (1988). "Efficient component labeling of images of arbitrary
+    //   dimension represented by linear bintrees." IEEE Transactions on Pattern Analysis and
+    //   Machine Intelligence, 10(4), 579-586.
+    //   DOI: 10.1109/34.3918
+    //
+    // - Wu, K., Otoo, E., & Suzuki, K. (2009). "Optimizing two-pass connected-component labeling
+    //   algorithms." Pattern Analysis and Applications, 12(2), 117-135.
+    //   DOI: 10.1007/s10044-008-0109-y
+    //
     private static LabelResult ConnectedComponents3D(byte[] mask, int W, int H, int D, Neighborhood3D nbh)
     {
         var labels = new int[mask.Length];
@@ -746,6 +785,26 @@ public static class PNMGenerator
         }
     }
 
+    // ALGORITHM: 3D Euclidean Distance Transform (EDT)
+    //
+    // Computes the distance from each voxel to the nearest background voxel using a two-pass
+    // relaxation algorithm. The EDT is used to estimate pore radii and throat radii by finding
+    // the maximum inscribed sphere radius at each point in the pore space.
+    //
+    // References:
+    // - Rosenfeld, A., & Pfaltz, J.L. (1968). "Distance functions on digital pictures."
+    //   Pattern Recognition, 1(1), 33-61.
+    //   DOI: 10.1016/0031-3203(68)90013-7
+    //
+    // - Borgefors, G. (1986). "Distance transformations in digital images." Computer Vision,
+    //   Graphics, and Image Processing, 34(3), 344-371.
+    //   DOI: 10.1016/S0734-189X(86)80047-0
+    //
+    // - Maurer, C.R., Qi, R., & Raghavan, V. (2003). "A linear time algorithm for computing
+    //   exact Euclidean distance transforms of binary images in arbitrary dimensions."
+    //   IEEE Transactions on Pattern Analysis and Machine Intelligence, 25(2), 265-270.
+    //   DOI: 10.1109/TPAMI.2003.1177156
+    //
     private static float[] DistanceTransformApproxCPU(byte[] mask, int W, int H, int D)
     {
         var dist = new float[mask.Length];

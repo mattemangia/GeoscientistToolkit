@@ -1,5 +1,25 @@
 // GeoscientistToolkit/Analysis/AcousticSimulation/AcousticSimulatorCPU.cs
 // OPTIMIZED VERSION - Better parallelization and reduced overhead
+//
+// ALGORITHM: Staggered-Grid Finite Difference for Elastic Wave Propagation
+//
+// Implements velocity-stress formulation for 3D elastic wave propagation in heterogeneous media.
+// Uses second-order spatial and temporal accuracy with staggered grid arrangement.
+//
+// References:
+// - Virieux, J. (1986). "P-SV wave propagation in heterogeneous media: Velocity-stress
+//   finite-difference method." Geophysics, 51(4), 889-901.
+//   https://doi.org/10.1190/1.1442147
+//
+// - Graves, R.W. (1996). "Simulating seismic wave propagation in 3D elastic media using
+//   staggered-grid finite differences." Bulletin of the Seismological Society of America,
+//   86(4), 1091-1106.
+//
+// - Moczo, P., Kristek, J., & Halada, L. (2004). "The Finite-Difference Method for
+//   Seismologists: An Introduction." Comenius University, Bratislava.
+//
+// Grid arrangement: Velocities and stresses are stored at different spatial locations
+// to minimize numerical dispersion and improve stability (Yee grid concept).
 
 using System.Runtime.CompilerServices;
 

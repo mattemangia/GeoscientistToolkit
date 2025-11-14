@@ -68,6 +68,20 @@ public class MagicWandTool : ISegmentationTool
         _selectionMask = null;
     }
 
+    // ALGORITHM: Seeded Region Growing
+    //
+    // This method implements a flood-fill region growing algorithm based on intensity similarity.
+    // Starting from a seed point, it expands the selection to 4-connected neighbors whose intensity
+    // values fall within the tolerance threshold.
+    //
+    // References:
+    // - Adams, R., & Bischof, L. (1994). "Seeded region growing." IEEE Transactions on Pattern
+    //   Analysis and Machine Intelligence, 16(6), 641-647.
+    //   DOI: 10.1109/34.295913
+    //
+    // - Gonzalez, R.C., & Woods, R.E. (2018). "Digital Image Processing," 4th ed. Pearson.
+    //   Chapter 10: Image Segmentation (Region Growing)
+    //
     private void RunRegionGrowing(int startX, int startY)
     {
         if (startX < 0 || startX >= _width || startY < 0 || startY >= _height) return;

@@ -372,20 +372,58 @@ private class ImageTools : IDatasetTools
                 path += extension;
             }
 
-            // Use StbImageWrite to save
-            if (image.PixelDataPointer == IntPtr.Zero)
+            // Check if we have image data
+            if (image.ImageData == null || image.ImageData.Length == 0)
             {
                 GeoscientistToolkit.Util.Logger.LogError("No pixel data available for export");
                 return;
             }
 
-            GeoscientistToolkit.Util.Logger.Log($"Exporting image to {path}...");
+            // Determine number of channels from data size
+            var totalPixels = image.Width * image.Height;
+            var channels = image.ImageData.Length / totalPixels;
 
-            // Note: This assumes StbImageWrite is available in the project
-            // The actual implementation would depend on how images are stored
-            GeoscientistToolkit.Util.Logger.Log($"Image export to {format.ToUpper()} - feature in progress");
+            if (channels < 1 || channels > 4)
+            {
+                GeoscientistToolkit.Util.Logger.LogError($"Invalid channel count: {channels}");
+                return;
+            }
 
-            // TODO: Implement actual export using StbImageWrite or similar
+            var colorComponents = channels switch
+            {
+                1 => StbImageWriteSharp.ColorComponents.Grey,
+                2 => StbImageWriteSharp.ColorComponents.GreyAlpha,
+                3 => StbImageWriteSharp.ColorComponents.RedGreenBlue,
+                4 => StbImageWriteSharp.ColorComponents.RedGreenBlueAlpha,
+                _ => StbImageWriteSharp.ColorComponents.RedGreenBlue
+            };
+
+            GeoscientistToolkit.Util.Logger.Log($"Exporting {image.Width}x{image.Height} image ({channels} channels) to {path}...");
+
+            var writer = new StbImageWriteSharp.ImageWriter();
+            using var stream = File.Create(path);
+
+            switch (format.ToLower())
+            {
+                case "png":
+                    writer.WritePng(image.ImageData, image.Width, image.Height, colorComponents, stream);
+                    break;
+
+                case "jpg":
+                case "jpeg":
+                    writer.WriteJpg(image.ImageData, image.Width, image.Height, colorComponents, stream, 90); // Quality: 90
+                    break;
+
+                case "bmp":
+                    writer.WriteBmp(image.ImageData, image.Width, image.Height, colorComponents, stream);
+                    break;
+
+                default:
+                    GeoscientistToolkit.Util.Logger.LogError($"Unsupported format: {format}");
+                    return;
+            }
+
+            GeoscientistToolkit.Util.Logger.Log($"Successfully exported image to: {path}");
         }
         catch (Exception ex)
         {

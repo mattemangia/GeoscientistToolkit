@@ -1,5 +1,6 @@
 // GeoscientistToolkit/Data/Table/TableExporter.cs
 
+using System.Collections.Concurrent;
 using System.Data;
 using System.Numerics;
 using GeoscientistToolkit.Data.CtImageStack;
@@ -50,14 +51,46 @@ public static class TableExporter
             var materialCounts = new Dictionary<byte, long>();
             long totalVoxels = 0;
 
-            // This would typically iterate through the actual volume data
-            // For demonstration, we'll use placeholder calculations
-            foreach (var material in ctDataset.Materials)
+            // Count actual voxels from label data
+            if (ctDataset.LabelData != null)
             {
-                // In real implementation, count actual voxels
-                long voxelCount = 0; // This would be calculated from actual data
-                materialCounts[material.ID] = voxelCount;
-                totalVoxels += voxelCount;
+                // Initialize counts for all materials
+                foreach (var material in ctDataset.Materials)
+                {
+                    materialCounts[material.ID] = 0;
+                }
+
+                // Count voxels in parallel
+                var localCounts = new ConcurrentDictionary<byte, long>();
+                Parallel.For(0, ctDataset.Depth, z =>
+                {
+                    for (var y = 0; y < ctDataset.Height; y++)
+                    {
+                        for (var x = 0; x < ctDataset.Width; x++)
+                        {
+                            var label = ctDataset.LabelData[x, y, z];
+                            localCounts.AddOrUpdate(label, 1, (key, oldValue) => oldValue + 1);
+                        }
+                    }
+                });
+
+                // Merge parallel results
+                foreach (var kvp in localCounts)
+                {
+                    if (materialCounts.ContainsKey(kvp.Key))
+                    {
+                        materialCounts[kvp.Key] = kvp.Value;
+                        totalVoxels += kvp.Value;
+                    }
+                }
+            }
+            else
+            {
+                Logger.LogWarning("No label data available for material statistics");
+                foreach (var material in ctDataset.Materials)
+                {
+                    materialCounts[material.ID] = 0;
+                }
             }
 
             // Add rows for each material
@@ -115,31 +148,93 @@ public static class TableExporter
             table.Columns.Add("Non-Zero Pixels", typeof(int));
             table.Columns.Add("Fill Ratio (%)", typeof(double));
 
-            // Calculate statistics for each slice
+            // Calculate statistics for each slice in parallel
+            var sliceStats = new (int min, int max, double mean, double stdDev, int nonZero, double fillRatio)[ctDataset.Depth];
+
+            Parallel.For(0, ctDataset.Depth, z =>
+            {
+                // Get slice data
+                ushort[,] sliceData = null;
+                try
+                {
+                    if (ctDataset.ImageData != null)
+                    {
+                        sliceData = new ushort[ctDataset.Width, ctDataset.Height];
+                        for (var y = 0; y < ctDataset.Height; y++)
+                        {
+                            for (var x = 0; x < ctDataset.Width; x++)
+                            {
+                                sliceData[x, y] = ctDataset.ImageData[x, y, z];
+                            }
+                        }
+                    }
+                }
+                catch
+                {
+                    // If ImageData access fails, use default values
+                }
+
+                int minValue = int.MaxValue;
+                int maxValue = int.MinValue;
+                long sum = 0;
+                long sumSquares = 0;
+                int nonZeroPixels = 0;
+                int totalPixels = ctDataset.Width * ctDataset.Height;
+
+                if (sliceData != null)
+                {
+                    for (var y = 0; y < ctDataset.Height; y++)
+                    {
+                        for (var x = 0; x < ctDataset.Width; x++)
+                        {
+                            var value = sliceData[x, y];
+
+                            if (value < minValue) minValue = value;
+                            if (value > maxValue) maxValue = value;
+
+                            sum += value;
+                            sumSquares += (long)value * value;
+
+                            if (value > 0) nonZeroPixels++;
+                        }
+                    }
+                }
+                else
+                {
+                    // Fallback if no slice data available
+                    minValue = 0;
+                    maxValue = 0;
+                }
+
+                double meanValue = totalPixels > 0 ? (double)sum / totalPixels : 0;
+                double variance = totalPixels > 0
+                    ? (double)sumSquares / totalPixels - meanValue * meanValue
+                    : 0;
+                double stdDev = Math.Sqrt(Math.Max(0, variance));
+                double fillRatio = totalPixels > 0 ? 100.0 * nonZeroPixels / totalPixels : 0;
+
+                sliceStats[z] = (minValue, maxValue, meanValue, stdDev, nonZeroPixels, fillRatio);
+            });
+
+            // Add rows to table
             for (var z = 0; z < ctDataset.Depth; z++)
             {
                 double zPosition = 0;
                 if (ctDataset.Unit == "µm")
                     zPosition = z * ctDataset.SliceThickness / 1000.0; // Convert to mm
-                else if (ctDataset.Unit == "mm") zPosition = z * ctDataset.SliceThickness;
+                else if (ctDataset.Unit == "mm")
+                    zPosition = z * ctDataset.SliceThickness;
 
-                // In real implementation, calculate actual statistics from slice data
-                var minValue = 0;
-                var maxValue = 255;
-                double meanValue = 128;
-                double stdDev = 30;
-                var nonZeroPixels = ctDataset.Width * ctDataset.Height / 2; // Placeholder
-                var fillRatio = 50.0; // Placeholder
-
+                var stats = sliceStats[z];
                 table.Rows.Add(
                     z,
                     zPosition,
-                    minValue,
-                    maxValue,
-                    meanValue,
-                    stdDev,
-                    nonZeroPixels,
-                    fillRatio
+                    stats.min,
+                    stats.max,
+                    stats.mean,
+                    stats.stdDev,
+                    stats.nonZero,
+                    stats.fillRatio
                 );
             }
 

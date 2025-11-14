@@ -71,6 +71,19 @@ public class MagneticLassoTool : LassoTool, ISegmentationTool
         for (var i = 0; i < path.Count - 1; i++) DrawLine(path[i], path[i + 1]);
     }
 
+    // ALGORITHM: Sobel Edge Detection
+    //
+    // Computes image gradients using Sobel operators for edge detection. The gradient magnitude
+    // and direction are used to guide the magnetic lasso path along high-contrast edges.
+    //
+    // References:
+    // - Sobel, I., & Feldman, G. (1968). "A 3x3 isotropic gradient operator for image processing."
+    //   Stanford Artificial Intelligence Project (SAIL).
+    //
+    // - Kanopoulos, N., Vasanthavada, N., & Baker, R.L. (1988). "Design of an image edge detection
+    //   filter using the Sobel operator." IEEE Journal of Solid-State Circuits, 23(2), 358-367.
+    //   DOI: 10.1109/4.996
+    //
     private void ComputeGradients()
     {
         // --- CORRECTED: Use public properties from the base class ---
@@ -104,6 +117,26 @@ public class MagneticLassoTool : LassoTool, ISegmentationTool
         });
     }
 
+    // ALGORITHM: Dijkstra's Shortest Path Algorithm (Intelligent Scissors)
+    //
+    // Finds the optimal path between two points by minimizing edge cost. The cost function is
+    // inversely proportional to edge strength, causing the path to follow high-gradient regions
+    // (edges). This technique is known as "Intelligent Scissors" or "Live Wire" in image editing.
+    //
+    // References:
+    // - Dijkstra, E.W. (1959). "A note on two problems in connexion with graphs."
+    //   Numerische Mathematik, 1(1), 269-271.
+    //   DOI: 10.1007/BF01386390
+    //
+    // - Mortensen, E.N., & Barrett, W.A. (1995). "Intelligent scissors for image composition."
+    //   Proceedings of the 22nd Annual Conference on Computer Graphics and Interactive Techniques
+    //   (SIGGRAPH '95), 191-198.
+    //   DOI: 10.1145/218380.218442
+    //
+    // - Mortensen, E.N., & Barrett, W.A. (1998). "Interactive segmentation with intelligent scissors."
+    //   Graphical Models and Image Processing, 60(5), 349-384.
+    //   DOI: 10.1006/gmip.1998.0480
+    //
     private List<Vector2> FindOptimalPath(Vector2 start, Vector2 end)
     {
         var path = new List<Vector2>();
