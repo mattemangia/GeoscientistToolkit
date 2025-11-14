@@ -55,8 +55,15 @@ public class DepthAwareRansac
         var points2 = matches.Select(m => m.Point2).ToArray();
 
         // Estimate Essential matrix using RANSAC
-        var E = Cv2.FindEssentialMat(points1, points2, cameraMatrix,
-            FundamentalMatMethods.Ransac, _confidence, _reprojectionThreshold, out var mask);
+        var mask = new Mat();
+        var E = Cv2.FindEssentialMat(
+            InputArray.Create(points1),
+            InputArray.Create(points2),
+            InputArray.Create(cameraMatrix),
+            EssentialMatMethod.Ransac,
+            _confidence,
+            _reprojectionThreshold,
+            mask);
 
         if (E.Empty())
         {
@@ -67,7 +74,14 @@ public class DepthAwareRansac
         // Recover pose from Essential matrix
         var R = new Mat();
         var t = new Mat();
-        int numInliers = Cv2.RecoverPose(E, points1, points2, cameraMatrix, R, t, mask);
+        int numInliers = Cv2.RecoverPose(
+            InputArray.Create(E),
+            InputArray.Create(points1),
+            InputArray.Create(points2),
+            InputArray.Create(cameraMatrix),
+            OutputArray.Create(R),
+            OutputArray.Create(t),
+            mask);
 
         if (numInliers < 8)
         {

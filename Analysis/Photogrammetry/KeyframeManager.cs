@@ -136,8 +136,8 @@ public class KeyframeManager
             var inliers = new Mat();
 
             bool success = Cv2.SolvePnPRansac(
-                objectPoints,
-                imagePoints,
+                InputArray.Create(objectPoints.ToArray()),
+                InputArray.Create(imagePoints.ToArray()),
                 cameraMatrix,
                 null, // No distortion
                 rvec,

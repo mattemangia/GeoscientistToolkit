@@ -185,7 +185,11 @@ public class GeoreferencingManager
         );
 
         Quaternion rotation;
-        if (!Quaternion.TryCreateFromRotationMatrix(rotMat, out rotation))
+        try
+        {
+            rotation = Quaternion.CreateFromRotationMatrix(rotMat);
+        }
+        catch
         {
             rotation = Quaternion.Identity;
         }

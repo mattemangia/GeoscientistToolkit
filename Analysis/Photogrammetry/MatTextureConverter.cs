@@ -87,7 +87,7 @@ public static class MatTextureConverter
             {
                 for (int x = 0; x < width; x++)
                 {
-                    int srcIdx = y * mat.Step() + x;
+                    int srcIdx = (int)(y * mat.Step() + x);
                     int dstIdx = (y * width + x) * 4;
 
                     byte gray = src[srcIdx];
@@ -116,7 +116,7 @@ public static class MatTextureConverter
             {
                 for (int x = 0; x < width; x++)
                 {
-                    int srcIdx = y * mat.Step() + x * 3;
+                    int srcIdx = (int)(y * mat.Step() + x * 3);
                     int dstIdx = (y * width + x) * 4;
 
                     pixelData[dstIdx + 0] = src[srcIdx + 2]; // R (from B)
@@ -144,7 +144,7 @@ public static class MatTextureConverter
             {
                 for (int x = 0; x < width; x++)
                 {
-                    int srcIdx = y * mat.Step() + x * 4;
+                    int srcIdx = (int)(y * mat.Step() + x * 4);
                     int dstIdx = (y * width + x) * 4;
 
                     pixelData[dstIdx + 0] = src[srcIdx + 2]; // R (from B)

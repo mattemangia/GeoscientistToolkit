@@ -28,7 +28,7 @@ public class RealtimePhotogrammetryWindow : IDisposable
     private bool _isPaused;
     private int _selectedCameraIndex;
     private string _videoFilePath = "";
-    private bool _useVideoFile;
+    private int _useVideoFile; // 0 = webcam, 1 = file
 
     // Configuration UI
     private string _depthModelPath = "";
@@ -446,13 +446,13 @@ public class RealtimePhotogrammetryWindow : IDisposable
 
         // Video source selection
         ImGui.Text("Video Source:");
-        ImGui.RadioButton("Webcam/Camera", ref _useVideoFile, false);
+        ImGui.RadioButton("Webcam/Camera", ref _useVideoFile, 0);
         ImGui.SameLine();
-        ImGui.RadioButton("Video File", ref _useVideoFile, true);
+        ImGui.RadioButton("Video File", ref _useVideoFile, 1);
 
         ImGui.Separator();
 
-        if (!_useVideoFile)
+        if (_useVideoFile == 0)
         {
             // Camera selection
             if (_pipeline != null && _pipeline.VideoCapture != null)
@@ -836,7 +836,7 @@ public class RealtimePhotogrammetryWindow : IDisposable
 
         bool success = false;
 
-        if (_useVideoFile)
+        if (_useVideoFile == 1)
         {
             success = _pipeline.VideoCapture.OpenFile(_videoFilePath);
         }
@@ -916,7 +916,7 @@ public class RealtimePhotogrammetryWindow : IDisposable
 
     private void DisplayMat(string label, Mat image, Vector2 size, TextureManager texture)
     {
-        ImGui.BeginChild(label, size, true);
+        ImGui.BeginChild(label, size, ImGuiChildFlags.Border);
 
         if (texture != null && texture.IsValid)
         {
