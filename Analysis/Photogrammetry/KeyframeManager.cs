@@ -148,9 +148,9 @@ public class KeyframeManager
                 0.99, // confidence
                 inliers);
 
-            if (success && inliers.Rows >= 4)
+            if (success && inliers.Height >= 4)
             {
-                Logger.Log($"KeyframeManager: PnP solved with {inliers.Rows} inliers");
+                Logger.Log($"KeyframeManager: PnP solved with {inliers.Height} inliers");
                 return true;
             }
         }

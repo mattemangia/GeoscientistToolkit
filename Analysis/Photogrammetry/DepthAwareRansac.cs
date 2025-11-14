@@ -91,7 +91,7 @@ public class DepthAwareRansac
 
         // Extract inlier indices
         var inlierIndices = new List<int>();
-        for (int i = 0; i < mask.Rows; i++)
+        for (int i = 0; i < mask.Height; i++)
         {
             if (mask.At<byte>(i) > 0)
                 inlierIndices.Add(i);

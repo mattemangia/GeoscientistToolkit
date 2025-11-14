@@ -242,18 +242,19 @@ public class PhotogrammetryPipeline : IDisposable
     {
         // Fallback: use ORB features
         var orb = ORB.Create(1000);
-        orb.DetectAndCompute(image, null, out var cvKeypoints, out var descriptors);
+        var descriptors = new Mat();
+        orb.DetectAndCompute(image, null, out var cvKeypoints, descriptors);
 
         var keypoints = new List<KeypointDetector.DetectedKeypoint>();
 
-        if (cvKeypoints != null && descriptors.Rows > 0)
+        if (cvKeypoints != null && descriptors.Height > 0)
         {
             for (int i = 0; i < cvKeypoints.Length; i++)
             {
                 var kp = cvKeypoints[i];
-                var desc = new float[descriptors.Cols];
+                var desc = new float[descriptors.Width];
 
-                for (int j = 0; j < descriptors.Cols; j++)
+                for (int j = 0; j < descriptors.Width; j++)
                 {
                     desc[j] = descriptors.At<byte>(i, j);
                 }
