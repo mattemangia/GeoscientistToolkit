@@ -13,6 +13,7 @@ using GeoscientistToolkit.Analysis.ThermalConductivity;
 using GeoscientistToolkit.Analysis.Transform;
 using GeoscientistToolkit.Data;
 using GeoscientistToolkit.Data.CtImageStack;
+using GeoscientistToolkit.Tools.CtImageStack.AISegmentation;
 using GeoscientistToolkit.UI.Interfaces;
 using ImGuiNET;
 
@@ -53,6 +54,7 @@ public partial class CtImageStackCompositeTool : IDatasetTools, IDisposable
         {
             { ToolCategory.Preprocessing, "Preprocessing" },
             { ToolCategory.Segmentation, "Segmentation" },
+            { ToolCategory.AI, "AI Segmentation" },
             { ToolCategory.PhysicalProperties, "Physical Properties" },
             { ToolCategory.Analysis, "Analysis" },
             { ToolCategory.Export, "Export" }
@@ -62,6 +64,7 @@ public partial class CtImageStackCompositeTool : IDatasetTools, IDisposable
         {
             { ToolCategory.Preprocessing, "Data preparation and enhancement" },
             { ToolCategory.Segmentation, "Material identification and labeling" },
+            { ToolCategory.AI, "AI-powered segmentation with SAM2, MicroSAM, and Grounding DINO" },
             { ToolCategory.PhysicalProperties, "Assign density and other physical material properties" },
             { ToolCategory.Analysis, "Quantitative analysis and measurements" },
             { ToolCategory.Export, "3D model and simulation data generation" }
@@ -142,6 +145,33 @@ public partial class CtImageStackCompositeTool : IDatasetTools, IDisposable
                         Description = "Separate touching particles using watershed algorithms",
                         Tool = new ParticleSeparatorTool(),
                         Category = ToolCategory.Segmentation
+                    }
+                }
+            },
+            {
+                ToolCategory.AI,
+                new List<ToolEntry>
+                {
+                    new()
+                    {
+                        Name = "AI Settings",
+                        Description = "Configure ONNX model paths and AI segmentation parameters",
+                        Tool = new AISegmentationSettingsTool(),
+                        Category = ToolCategory.AI
+                    },
+                    new()
+                    {
+                        Name = "SAM2 Interactive",
+                        Description = "Segment Anything Model 2 - Interactive point-based segmentation",
+                        Tool = new Sam2InteractiveTool(),
+                        Category = ToolCategory.AI
+                    },
+                    new()
+                    {
+                        Name = "Grounding DINO + SAM",
+                        Description = "Text-prompted object detection and automatic segmentation pipeline",
+                        Tool = new GroundingSamTool(),
+                        Category = ToolCategory.AI
                     }
                 }
             },

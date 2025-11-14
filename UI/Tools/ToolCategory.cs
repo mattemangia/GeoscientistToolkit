@@ -6,6 +6,7 @@ public partial class CtImageStackCompositeTool
     {
         Preprocessing,
         Segmentation,
+        AI,
         PhysicalProperties,
         Analysis,
         Export
