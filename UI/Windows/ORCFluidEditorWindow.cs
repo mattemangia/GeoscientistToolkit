@@ -225,6 +225,9 @@ public class ORCFluidEditorWindow
 
         var fluid = _selectedFluid;
 
+        // Header with name and user badge
+        ImGui.BeginChild("FluidDetailsHeader", new Vector2(-1, 70), ImGuiChildFlags.None);
+
         ImGui.TextColored(new Vector4(0.2f, 1.0f, 0.4f, 1.0f), fluid.Name);
         ImGui.SameLine();
         if (fluid.IsUserFluid)
@@ -260,8 +263,12 @@ public class ORCFluidEditorWindow
             SetStatusMessage($"Created copy: {copy.Name}");
         }
 
-        ImGui.Spacing();
+        ImGui.EndChild();
+
         ImGui.Separator();
+
+        // Scrollable content area for tabs
+        ImGui.BeginChild("FluidDetailsContent", new Vector2(-1, -1), ImGuiChildFlags.None);
 
         // Tabs for different property categories
         if (ImGui.BeginTabBar("FluidDetailsTabs"))
@@ -292,6 +299,8 @@ public class ORCFluidEditorWindow
 
             ImGui.EndTabBar();
         }
+
+        ImGui.EndChild();
     }
 
     private void DrawOverviewTab(ORCFluid fluid)
