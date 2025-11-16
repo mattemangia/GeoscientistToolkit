@@ -133,18 +133,19 @@ namespace GeoscientistToolkit.Analysis.Geothermal
             }
 
             // Build program
-            errorCode = _cl.BuildProgram(_program, 1, &_device, null, null, null);
+            nint device = _device; // Create local copy to take address
+            errorCode = _cl.BuildProgram(_program, 1, &device, null, null, null);
             if (errorCode != (int)ErrorCodes.Success)
             {
                 Console.WriteLine($"Failed to build program: {errorCode}");
 
                 // Get build log
                 nuint logSize;
-                _cl.GetProgramBuildInfo(_program, _device, (uint)ProgramBuildInfo.Log, 0, null, &logSize);
+                _cl.GetProgramBuildInfo(_program, _device, (uint)ProgramBuildInfo.BuildLog, 0, null, &logSize);
                 if (logSize > 0)
                 {
                     byte* log = stackalloc byte[(int)logSize];
-                    _cl.GetProgramBuildInfo(_program, _device, (uint)ProgramBuildInfo.Log, logSize, log, null);
+                    _cl.GetProgramBuildInfo(_program, _device, (uint)ProgramBuildInfo.BuildLog, logSize, log, null);
                     string logString = Marshal.PtrToStringAnsi((nint)log);
                     Console.WriteLine($"Build log:\n{logString}");
                 }

@@ -687,7 +687,8 @@ public class GeomechanicsSolver : IDisposable
                 if (err != 0) return false;
             }
 
-            err = _cl.BuildProgram(_program, 1, &_device, null, null, null);
+            nint device = _device; // Create local copy to take address
+            err = _cl.BuildProgram(_program, 1, &device, null, null, null);
             if (err != 0)
             {
                 // Get build log for debugging

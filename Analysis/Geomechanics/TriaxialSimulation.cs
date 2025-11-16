@@ -202,7 +202,8 @@ public unsafe class TriaxialSimulation : IDisposable
         if (err != 0)
             throw new Exception($"Failed to create program: {err}");
 
-        err = (int)_cl.BuildProgram(_program, 1, &_device, null, null, null);
+        nint device = _device; // Create local copy to take address
+        err = (int)_cl.BuildProgram(_program, 1, &device, null, null, null);
         if (err != 0)
         {
             nuint logSize;
