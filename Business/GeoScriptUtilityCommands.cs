@@ -122,7 +122,6 @@ public class DispTypeCommand : IGeoScriptCommand
         Logger.Log($"Created:      {dataset.DateCreated}");
         Logger.Log($"Modified:     {dataset.DateModified}");
         Logger.Log($"Size:         {FormatBytes(dataset.GetSizeInBytes())}");
-        Logger.Log($"Loaded:       {dataset.IsLoaded}");
 
         // Type-specific information
         if (dataset is Data.Image.ImageDataset imgDs)
@@ -203,15 +202,8 @@ public class UnloadCommand : IGeoScriptCommand
         if (context.InputDataset == null)
             throw new InvalidOperationException("No input dataset provided");
 
-        if (context.InputDataset.IsLoaded)
-        {
-            context.InputDataset.Unload();
-            Logger.Log($"Unloaded dataset: {context.InputDataset.Name}");
-        }
-        else
-        {
-            Logger.Log($"Dataset {context.InputDataset.Name} is already unloaded");
-        }
+        context.InputDataset.Unload();
+        Logger.Log($"Unloaded dataset: {context.InputDataset.Name}");
 
         return Task.FromResult(context.InputDataset);
     }
@@ -233,7 +225,7 @@ public class InfoCommand : IGeoScriptCommand
             throw new InvalidOperationException("No input dataset provided");
 
         var dataset = context.InputDataset;
-        Logger.Log($"{dataset.Name} ({dataset.Type}) - {FormatBytes(dataset.GetSizeInBytes())} - {(dataset.IsLoaded ? "Loaded" : "Unloaded")}");
+        Logger.Log($"{dataset.Name} ({dataset.Type}) - {FormatBytes(dataset.GetSizeInBytes())}");
 
         return Task.FromResult(dataset);
     }

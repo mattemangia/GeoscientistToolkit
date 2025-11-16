@@ -31,7 +31,7 @@ public class BrightnessContrastCommand : IGeoScriptCommand
         if (context.InputDataset is not ImageDataset imageDataset)
             throw new NotSupportedException("BRIGHTNESS_CONTRAST only works with image datasets");
 
-        if (!imageDataset.ImageData != null)
+        if (imageDataset.ImageData == null)
             imageDataset.Load();
 
         var cmd = (CommandNode)node;
@@ -105,7 +105,7 @@ public class FilterCommand : IGeoScriptCommand
         if (context.InputDataset is not ImageDataset imageDataset)
             throw new NotSupportedException("FILTER only works with image datasets");
 
-        if (!imageDataset.ImageData != null)
+        if (imageDataset.ImageData == null)
             imageDataset.Load();
 
         var cmd = (CommandNode)node;
@@ -283,7 +283,7 @@ public class ThresholdCommand : IGeoScriptCommand
         if (context.InputDataset is not ImageDataset imageDataset)
             throw new NotSupportedException("THRESHOLD only works with image datasets");
 
-        if (!imageDataset.ImageData != null)
+        if (imageDataset.ImageData == null)
             imageDataset.Load();
 
         var cmd = (CommandNode)node;
@@ -344,7 +344,7 @@ public class BinarizeCommand : IGeoScriptCommand
         if (context.InputDataset is not ImageDataset imageDataset)
             throw new NotSupportedException("BINARIZE only works with image datasets");
 
-        if (!imageDataset.ImageData != null)
+        if (imageDataset.ImageData == null)
             imageDataset.Load();
 
         var cmd = (CommandNode)node;
@@ -456,7 +456,7 @@ public class GrayscaleCommand : IGeoScriptCommand
         if (context.InputDataset is not ImageDataset imageDataset)
             throw new NotSupportedException("GRAYSCALE only works with image datasets");
 
-        if (!imageDataset.ImageData != null)
+        if (imageDataset.ImageData == null)
             imageDataset.Load();
 
         var output = new ImageDataset(imageDataset.Name + "_gray", "")
@@ -504,7 +504,7 @@ public class InvertCommand : IGeoScriptCommand
         if (context.InputDataset is not ImageDataset imageDataset)
             throw new NotSupportedException("INVERT only works with image datasets");
 
-        if (!imageDataset.ImageData != null)
+        if (imageDataset.ImageData == null)
             imageDataset.Load();
 
         var output = new ImageDataset(imageDataset.Name + "_inverted", "")
@@ -551,7 +551,7 @@ public class NormalizeCommand : IGeoScriptCommand
         if (context.InputDataset is not ImageDataset imageDataset)
             throw new NotSupportedException("NORMALIZE only works with image datasets");
 
-        if (!imageDataset.ImageData != null)
+        if (imageDataset.ImageData == null)
             imageDataset.Load();
 
         var output = new ImageDataset(imageDataset.Name + "_normalized", "")

@@ -32,7 +32,7 @@ public class GisAddLayerCommand : IGeoScriptCommand
         var newLayer = new GISLayer
         {
             Name = name,
-            Visible = true
+            IsVisible = true
         };
 
         gisDs.Layers.Add(newLayer);
