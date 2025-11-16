@@ -30,7 +30,6 @@ public class AudioDatasetViewer : IDatasetViewer
     private bool _loop = false;
     private float _waveformZoom = 1.0f;
     private float _waveformScroll = 0.0f;
-    private Vector4 _waveformColor = new Vector4(0.2f, 0.8f, 1.0f, 1.0f);
 
     // Display modes
     private enum DisplayMode
@@ -164,8 +163,9 @@ public class AudioDatasetViewer : IDatasetViewer
             var dl = ImGui.GetWindowDrawList();
             var io = ImGui.GetIO();
 
-            // Draw background
-            dl.AddRectFilled(canvasPos, canvasPos + canvasSize, 0xFF1A1A1A);
+            // Draw background (theme-aware)
+            var bgColor = ImGui.ColorConvertFloat4ToU32(ImGui.GetStyle().Colors[(int)ImGuiCol.WindowBg]);
+            dl.AddRectFilled(canvasPos, canvasPos + canvasSize, bgColor);
 
             // Draw based on display mode
             switch (_displayMode)
@@ -223,9 +223,9 @@ public class AudioDatasetViewer : IDatasetViewer
         startSample = Math.Clamp(startSample, 0, totalSamples - visibleSamples);
         var endSample = Math.Min(startSample + visibleSamples, totalSamples);
 
-        // Draw waveform
+        // Draw waveform (theme-aware)
         var samplesPerPixel = Math.Max(1, visibleSamples / (int)canvasSize.X);
-        var color = ImGui.ColorConvertFloat4ToU32(_waveformColor);
+        var color = ImGui.ColorConvertFloat4ToU32(ImGui.GetStyle().Colors[(int)ImGuiCol.PlotLines]);
 
         for (int x = 0; x < (int)canvasSize.X; x++)
         {
@@ -248,8 +248,9 @@ public class AudioDatasetViewer : IDatasetViewer
             dl.AddLine(new Vector2(x1, y1), new Vector2(x1, y2), color, 1.0f);
         }
 
-        // Draw center line
-        dl.AddLine(new Vector2(canvasPos.X, centerY), new Vector2(canvasPos.X + canvasSize.X, centerY), 0xFF404040);
+        // Draw center line (theme-aware)
+        var centerLineColor = ImGui.ColorConvertFloat4ToU32(ImGui.GetStyle().Colors[(int)ImGuiCol.Separator]);
+        dl.AddLine(new Vector2(canvasPos.X, centerY), new Vector2(canvasPos.X + canvasSize.X, centerY), centerLineColor);
 
         dl.PopClipRect();
 
@@ -325,12 +326,15 @@ public class AudioDatasetViewer : IDatasetViewer
             else
             {
                 var textPos = canvasPos + spectrogramRect * 0.5f - new Vector2(80, 10);
-                dl.AddText(textPos, 0xFFFFFFFF, "Spectrogram View");
-                dl.AddText(textPos + new Vector2(0, 20), 0xFFAAAAAA, "(Play to see spectrogram)");
+                var textColor = ImGui.ColorConvertFloat4ToU32(ImGui.GetStyle().Colors[(int)ImGuiCol.Text]);
+                var textDisabledColor = ImGui.ColorConvertFloat4ToU32(ImGui.GetStyle().Colors[(int)ImGuiCol.TextDisabled]);
+                dl.AddText(textPos, textColor, "Spectrogram View");
+                dl.AddText(textPos + new Vector2(0, 20), textDisabledColor, "(Play to see spectrogram)");
             }
         }
 
-        // Draw frequency labels
+        // Draw frequency labels (theme-aware)
+        var labelColor = ImGui.ColorConvertFloat4ToU32(ImGui.GetStyle().Colors[(int)ImGuiCol.TextDisabled]);
         var maxFreq = _dataset.SampleRate / 2; // Nyquist frequency
         var freqSteps = 5;
         for (int i = 0; i <= freqSteps; i++)
@@ -338,7 +342,7 @@ public class AudioDatasetViewer : IDatasetViewer
             var freq = (maxFreq / freqSteps) * i;
             var y = canvasPos.Y + waveformHeight - (waveformHeight / freqSteps) * i;
             var freqText = freq >= 1000 ? $"{freq / 1000:F1}kHz" : $"{freq:F0}Hz";
-            dl.AddText(new Vector2(canvasPos.X + 5, y - 10), 0xFF808080, freqText);
+            dl.AddText(new Vector2(canvasPos.X + 5, y - 10), labelColor, freqText);
         }
 
         dl.PopClipRect();
@@ -406,11 +410,11 @@ public class AudioDatasetViewer : IDatasetViewer
             UpdateSpectrum();
         }
 
-        // Draw spectrum
+        // Draw spectrum (theme-aware)
         if (_spectrumData != null && _spectrumData.Length > 0)
         {
             var centerY = canvasPos.Y + waveformHeight;
-            var color = ImGui.ColorConvertFloat4ToU32(new Vector4(0.2f, 1.0f, 0.4f, 1.0f));
+            var color = ImGui.ColorConvertFloat4ToU32(ImGui.GetStyle().Colors[(int)ImGuiCol.PlotHistogram]);
 
             for (int i = 0; i < _spectrumData.Length && i < (int)canvasSize.X; i++)
             {
@@ -433,7 +437,9 @@ public class AudioDatasetViewer : IDatasetViewer
                 );
             }
 
-            // Draw frequency labels
+            // Draw frequency labels (theme-aware)
+            var gridColor = ImGui.ColorConvertFloat4ToU32(ImGui.GetStyle().Colors[(int)ImGuiCol.Separator] * 0.3f);
+            var labelColor2 = ImGui.ColorConvertFloat4ToU32(ImGui.GetStyle().Colors[(int)ImGuiCol.TextDisabled]);
             var maxFreq = _dataset.SampleRate / 2;
             var freqMarkers = new[] { 100, 500, 1000, 2000, 5000, 10000, 20000 };
             foreach (var freq in freqMarkers)
@@ -441,15 +447,17 @@ public class AudioDatasetViewer : IDatasetViewer
                 if (freq > maxFreq) break;
                 var x = canvasPos.X + (canvasSize.X * freq / maxFreq);
                 var label = freq >= 1000 ? $"{freq / 1000}k" : $"{freq}";
-                dl.AddLine(new Vector2(x, canvasPos.Y), new Vector2(x, canvasPos.Y + waveformHeight), 0x40FFFFFF);
-                dl.AddText(new Vector2(x - 15, canvasPos.Y + 5), 0xFF808080, label);
+                dl.AddLine(new Vector2(x, canvasPos.Y), new Vector2(x, canvasPos.Y + waveformHeight), gridColor);
+                dl.AddText(new Vector2(x - 15, canvasPos.Y + 5), labelColor2, label);
             }
         }
         else
         {
             var textPos = canvasPos + spectrumRect * 0.5f - new Vector2(100, 10);
-            dl.AddText(textPos, 0xFFFFFFFF, "Frequency Spectrum");
-            dl.AddText(textPos + new Vector2(0, 20), 0xFFAAAAAA, "(Play to see spectrum)");
+            var textColor2 = ImGui.ColorConvertFloat4ToU32(ImGui.GetStyle().Colors[(int)ImGuiCol.Text]);
+            var textDisabledColor2 = ImGui.ColorConvertFloat4ToU32(ImGui.GetStyle().Colors[(int)ImGuiCol.TextDisabled]);
+            dl.AddText(textPos, textColor2, "Frequency Spectrum");
+            dl.AddText(textPos + new Vector2(0, 20), textDisabledColor2, "(Play to see spectrum)");
         }
 
         dl.PopClipRect();
@@ -466,14 +474,15 @@ public class AudioDatasetViewer : IDatasetViewer
             DrawWaveform(canvasPos, waveformSize, dl, io);
         }
 
-        // Draw spectrum on bottom half
+        // Draw spectrum on bottom half (theme-aware)
         var spectrumPos = canvasPos + new Vector2(0, halfHeight);
         var spectrumSize = new Vector2(canvasSize.X, halfHeight);
 
+        var separatorColor = ImGui.ColorConvertFloat4ToU32(ImGui.GetStyle().Colors[(int)ImGuiCol.Separator]);
         dl.AddLine(
             new Vector2(canvasPos.X, spectrumPos.Y),
             new Vector2(canvasPos.X + canvasSize.X, spectrumPos.Y),
-            0xFF404040,
+            separatorColor,
             2.0f
         );
 
@@ -616,10 +625,11 @@ public class AudioDatasetViewer : IDatasetViewer
         progress = Math.Clamp(progress, 0f, 1f);
 
         var indicatorX = canvasPos.X + canvasSize.X * progress;
+        var indicatorColor = ImGui.ColorConvertFloat4ToU32(ImGui.GetStyle().Colors[(int)ImGuiCol.SliderGrabActive]);
         dl.AddLine(
             new Vector2(indicatorX, canvasPos.Y),
             new Vector2(indicatorX, canvasPos.Y + canvasSize.Y - 40),
-            0xFFFF0000,
+            indicatorColor,
             2.0f
         );
     }
@@ -630,27 +640,31 @@ public class AudioDatasetViewer : IDatasetViewer
         var timelineHeight = 30f;
         var timelinePos = new Vector2(canvasPos.X, timelineY);
 
-        // Timeline background
-        dl.AddRectFilled(timelinePos, timelinePos + new Vector2(canvasSize.X, timelineHeight), 0xFF252525);
+        // Timeline background (theme-aware)
+        var timelineBgColor = ImGui.ColorConvertFloat4ToU32(ImGui.GetStyle().Colors[(int)ImGuiCol.FrameBg]);
+        dl.AddRectFilled(timelinePos, timelinePos + new Vector2(canvasSize.X, timelineHeight), timelineBgColor);
 
-        // Timeline progress
+        // Timeline progress (theme-aware)
         var progress = _dataset.DurationSeconds > 0 ? (float)(_currentTime / _dataset.DurationSeconds) : 0f;
         progress = Math.Clamp(progress, 0f, 1f);
 
-        dl.AddRectFilled(timelinePos, timelinePos + new Vector2(canvasSize.X * progress, timelineHeight), 0xFF3060A0);
+        var progressColor = ImGui.ColorConvertFloat4ToU32(ImGui.GetStyle().Colors[(int)ImGuiCol.SliderGrab]);
+        dl.AddRectFilled(timelinePos, timelinePos + new Vector2(canvasSize.X * progress, timelineHeight), progressColor);
 
-        // Time markers
+        // Time markers (theme-aware)
+        var markerLineColor = ImGui.ColorConvertFloat4ToU32(ImGui.GetStyle().Colors[(int)ImGuiCol.TextDisabled]);
+        var timeTextColor = ImGui.ColorConvertFloat4ToU32(ImGui.GetStyle().Colors[(int)ImGuiCol.TextDisabled]);
         var markerCount = 10;
         for (int i = 0; i <= markerCount; i++)
         {
             var markerX = timelinePos.X + (canvasSize.X / markerCount) * i;
             var markerTime = (_dataset.DurationSeconds / markerCount) * i;
-            dl.AddLine(new Vector2(markerX, timelinePos.Y + timelineHeight - 5), new Vector2(markerX, timelinePos.Y + timelineHeight), 0xFF606060);
+            dl.AddLine(new Vector2(markerX, timelinePos.Y + timelineHeight - 5), new Vector2(markerX, timelinePos.Y + timelineHeight), markerLineColor);
 
             if (i % 2 == 0)
             {
                 var timeStr = FormatTime(markerTime);
-                dl.AddText(new Vector2(markerX - 20, timelinePos.Y + 2), 0xFFAAAAAA, timeStr);
+                dl.AddText(new Vector2(markerX - 20, timelinePos.Y + 2), timeTextColor, timeStr);
             }
         }
 

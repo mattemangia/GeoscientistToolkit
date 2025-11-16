@@ -130,8 +130,9 @@ public class VideoDatasetViewer : IDatasetViewer
             var dl = ImGui.GetWindowDrawList();
             var io = ImGui.GetIO();
 
-            // Draw background
-            dl.AddRectFilled(canvasPos, canvasPos + canvasSize, 0xFF101010);
+            // Draw background (theme-aware)
+            var bgColor = ImGui.ColorConvertFloat4ToU32(ImGui.GetStyle().Colors[(int)ImGuiCol.WindowBg]);
+            dl.AddRectFilled(canvasPos, canvasPos + canvasSize, bgColor);
             dl.PushClipRect(canvasPos, canvasPos + canvasSize, true);
 
             // Calculate display size maintaining aspect ratio
@@ -206,14 +207,16 @@ public class VideoDatasetViewer : IDatasetViewer
                     if (thumbTexture != null)
                     {
                         dl.AddImage(thumbTexture.ImGuiHandle, imagePos, imagePos + displaySize);
-                        dl.AddText(imagePos + new Vector2(10, 10), 0xFFFFFFFF, "Loading frame...");
+                        var textColor = ImGui.ColorConvertFloat4ToU32(ImGui.GetStyle().Colors[(int)ImGuiCol.Text]);
+                        dl.AddText(imagePos + new Vector2(10, 10), textColor, "Loading frame...");
                     }
                 }
                 else
                 {
                     // No frame data available
                     var center = imagePos + displaySize * 0.5f;
-                    dl.AddText(center - new Vector2(50, 10), 0xFFFFFFFF, "No frame data");
+                    var textColor = ImGui.ColorConvertFloat4ToU32(ImGui.GetStyle().Colors[(int)ImGuiCol.Text]);
+                    dl.AddText(center - new Vector2(50, 10), textColor, "No frame data");
                 }
             }
 
@@ -241,31 +244,36 @@ public class VideoDatasetViewer : IDatasetViewer
         var timelineHeight = 30f;
         var dl = ImGui.GetWindowDrawList();
 
-        // Timeline background
-        dl.AddRectFilled(cursorPos, cursorPos + new Vector2(width, timelineHeight), 0xFF303030);
+        // Timeline background (theme-aware)
+        var timelineBg = ImGui.ColorConvertFloat4ToU32(ImGui.GetStyle().Colors[(int)ImGuiCol.FrameBg]);
+        dl.AddRectFilled(cursorPos, cursorPos + new Vector2(width, timelineHeight), timelineBg);
 
         // Timeline progress
         var progress = _dataset.DurationSeconds > 0 ? (float)(_currentTime / _dataset.DurationSeconds) : 0f;
         progress = Math.Clamp(progress, 0f, 1f);
 
-        dl.AddRectFilled(cursorPos, cursorPos + new Vector2(width * progress, timelineHeight), 0xFF4070C0);
+        var progressColor = ImGui.ColorConvertFloat4ToU32(ImGui.GetStyle().Colors[(int)ImGuiCol.SliderGrab]);
+        dl.AddRectFilled(cursorPos, cursorPos + new Vector2(width * progress, timelineHeight), progressColor);
 
         // Playhead
         var playheadX = cursorPos.X + width * progress;
-        dl.AddLine(new Vector2(playheadX, cursorPos.Y), new Vector2(playheadX, cursorPos.Y + timelineHeight), 0xFFFFFFFF, 2);
+        var playheadColor = ImGui.ColorConvertFloat4ToU32(ImGui.GetStyle().Colors[(int)ImGuiCol.Text]);
+        dl.AddLine(new Vector2(playheadX, cursorPos.Y), new Vector2(playheadX, cursorPos.Y + timelineHeight), playheadColor, 2);
 
-        // Time markers
+        // Time markers (theme-aware)
+        var markerColor = ImGui.ColorConvertFloat4ToU32(ImGui.GetStyle().Colors[(int)ImGuiCol.TextDisabled]);
+        var textDisabledColor = ImGui.ColorConvertFloat4ToU32(ImGui.GetStyle().Colors[(int)ImGuiCol.Text] * 0.8f);
         var markerCount = 10;
         for (int i = 0; i <= markerCount; i++)
         {
             var markerX = cursorPos.X + (width / markerCount) * i;
             var markerTime = (_dataset.DurationSeconds / markerCount) * i;
-            dl.AddLine(new Vector2(markerX, cursorPos.Y + timelineHeight - 5), new Vector2(markerX, cursorPos.Y + timelineHeight), 0xFF808080);
+            dl.AddLine(new Vector2(markerX, cursorPos.Y + timelineHeight - 5), new Vector2(markerX, cursorPos.Y + timelineHeight), markerColor);
 
             if (i % 2 == 0) // Show time label for every other marker
             {
                 var timeStr = FormatTime(markerTime);
-                dl.AddText(new Vector2(markerX - 20, cursorPos.Y + 2), 0xFFCCCCCC, timeStr);
+                dl.AddText(new Vector2(markerX - 20, cursorPos.Y + 2), textDisabledColor, timeStr);
             }
         }
 
