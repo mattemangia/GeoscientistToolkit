@@ -138,7 +138,7 @@ public class DualPNMGeneratorTool
         ImGui.TextWrapped("Step 1: Select CT dataset for macro-pore network extraction");
         ImGui.Spacing();
 
-        var ctDatasets = projectManager.Datasets
+        var ctDatasets = projectManager.LoadedDatasets
             .Where(d => d.Type == DatasetType.CtImageStack)
             .ToList();
 
@@ -201,14 +201,14 @@ public class DualPNMGeneratorTool
         {
             ImGui.Text("Material ID:");
             ImGui.SameLine();
-            if (ImGui.BeginCombo("##MaterialID", $"Material {_macroOptions.MaterialID}"))
+            if (ImGui.BeginCombo("##MaterialID", $"Material {_macroOptions.MaterialId}"))
             {
                 foreach (var material in _ctDataset.Materials)
                 {
-                    bool isSelected = _macroOptions.MaterialID == material.ID;
+                    bool isSelected = _macroOptions.MaterialId == material.ID;
                     if (ImGui.Selectable($"{material.Name} (ID: {material.ID})", isSelected))
                     {
-                        _macroOptions.MaterialID = material.ID;
+                        _macroOptions.MaterialId = material.ID;
                     }
                 }
                 ImGui.EndCombo();
@@ -221,7 +221,7 @@ public class DualPNMGeneratorTool
         int modeIndex = (int)_macroOptions.Mode;
         if (ImGui.Combo("##GenMode", ref modeIndex, new[] { "Conservative", "Aggressive" }, 2))
         {
-            _macroOptions.Mode = (PNMGenerationMode)modeIndex;
+            _macroOptions.Mode = (GenerationMode)modeIndex;
         }
 
         // Neighborhood
@@ -230,7 +230,7 @@ public class DualPNMGeneratorTool
         int nbhIndex = (int)_macroOptions.Neighborhood;
         if (ImGui.Combo("##Neighborhood", ref nbhIndex, new[] { "6-connected", "18-connected", "26-connected" }, 3))
         {
-            _macroOptions.Neighborhood = (NeighborhoodType)nbhIndex;
+            _macroOptions.Neighborhood = (Neighborhood3D)nbhIndex;
         }
 
         ImGui.Spacing();
@@ -265,7 +265,7 @@ public class DualPNMGeneratorTool
 
         try
         {
-            _macroPNM = PNMGenerator.Generate(_ctDataset, _macroOptions, null);
+            _macroPNM = PNMGenerator.Generate(_ctDataset, _macroOptions, null, CancellationToken.None);
 
             if (_macroPNM != null)
             {
@@ -291,7 +291,7 @@ public class DualPNMGeneratorTool
         ImGui.TextWrapped("Step 3: Select SEM images for micro-pore network extraction");
         ImGui.Spacing();
 
-        var imageDatasets = projectManager.Datasets
+        var imageDatasets = projectManager.LoadedDatasets
             .Where(d => d.Type == DatasetType.SingleImage)
             .Select(d => d as ImageDataset)
             .Where(d => d != null)

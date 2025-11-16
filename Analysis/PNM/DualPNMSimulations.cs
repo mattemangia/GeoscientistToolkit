@@ -27,27 +27,32 @@ public static class DualPNMSimulations
         Logger.Log($"Calculating dual PNM permeability using {method} method...");
 
         // Calculate macro-scale permeability (uses existing PNM as base)
-        float macroPermeability = 0;
-
-        switch (method)
+        var options = new PermeabilityOptions
         {
-            case PNMPermeabilityMethod.Darcy:
-                macroPermeability = AbsolutePermeability.CalculateDarcyPermeability(
-                    dataset, pressureDiffPa, viscosityPas);
-                break;
+            Dataset = dataset,
+            InletPressure = pressureDiffPa,
+            OutletPressure = 0,
+            FluidViscosity = viscosityPas,
+            CalculateDarcy = method == PNMPermeabilityMethod.Darcy,
+            CalculateNavierStokes = method == PNMPermeabilityMethod.NavierStokes || method == PNMPermeabilityMethod.LatticeBoltzmann,
+            CalculateLatticeBoltzmann = method == PNMPermeabilityMethod.LatticeBoltzmann
+        };
 
-            case PNMPermeabilityMethod.NavierStokes:
-                macroPermeability = AbsolutePermeability.CalculateNavierStokesPermeability(
-                    dataset, pressureDiffPa, viscosityPas);
-                break;
-
-            case PNMPermeabilityMethod.LatticeBoltzmann:
-                // LBM not directly supported for dual PNM in this implementation
-                Logger.LogWarning("Lattice Boltzmann not yet implemented for dual PNM. Using Navier-Stokes instead.");
-                macroPermeability = AbsolutePermeability.CalculateNavierStokesPermeability(
-                    dataset, pressureDiffPa, viscosityPas);
-                break;
+        if (method == PNMPermeabilityMethod.LatticeBoltzmann)
+        {
+            Logger.LogWarning("Lattice Boltzmann not yet implemented for dual PNM. Using Navier-Stokes instead.");
         }
+
+        AbsolutePermeability.Calculate(options);
+        var results = AbsolutePermeability.GetLastResults();
+
+        float macroPermeability = method switch
+        {
+            PNMPermeabilityMethod.Darcy => results.DarcyCorrected,
+            PNMPermeabilityMethod.NavierStokes => results.NavierStokesCorrected,
+            PNMPermeabilityMethod.LatticeBoltzmann => results.NavierStokesCorrected,
+            _ => 0
+        };
 
         dataset.DarcyPermeability = macroPermeability;
         dataset.Coupling.EffectiveMacroPermeability = macroPermeability;
@@ -136,12 +141,12 @@ public static class DualPNMSimulations
             var modifiedOptions = AdjustOptionsForDualPorosity(options, dataset);
 
             // Run simulation on macro-network with modified parameters
-            PNMReactiveTransport.RunSimulation(dataset, modifiedOptions, progressCallback);
+            PNMReactiveTransport.Solve(dataset, modifiedOptions, progressCallback);
         }
         else
         {
             // Parallel mode: run simulation on macro-network directly
-            PNMReactiveTransport.RunSimulation(dataset, options, progressCallback);
+            PNMReactiveTransport.Solve(dataset, options, progressCallback);
         }
 
         Logger.Log("Dual PNM reactive transport simulation complete");
@@ -158,19 +163,20 @@ public static class DualPNMSimulations
             TotalTime = baseOptions.TotalTime,
             TimeStep = baseOptions.TimeStep,
             OutputInterval = baseOptions.OutputInterval,
-            InletPressurePa = baseOptions.InletPressurePa,
-            OutletPressurePa = baseOptions.OutletPressurePa,
-            FluidViscosityPas = baseOptions.FluidViscosityPas,
-            FluidDensityKgM3 = baseOptions.FluidDensityKgM3,
-            InletTemperatureK = baseOptions.InletTemperatureK,
-            ThermalConductivityWmK = baseOptions.ThermalConductivityWmK,
-            SpecificHeatJkgK = baseOptions.SpecificHeatJkgK,
-            MolecularDiffusivityM2s = baseOptions.MolecularDiffusivityM2s,
-            DispersivityM = baseOptions.DispersivityM,
+            InletPressure = baseOptions.InletPressure,
+            OutletPressure = baseOptions.OutletPressure,
+            FluidViscosity = baseOptions.FluidViscosity,
+            FluidDensity = baseOptions.FluidDensity,
+            InletTemperature = baseOptions.InletTemperature,
+            ThermalConductivity = baseOptions.ThermalConductivity,
+            SpecificHeat = baseOptions.SpecificHeat,
+            MolecularDiffusivity = baseOptions.MolecularDiffusivity,
+            Dispersivity = baseOptions.Dispersivity,
             EnableReactions = baseOptions.EnableReactions,
-            MineralList = baseOptions.MineralList,
+            ReactionMinerals = baseOptions.ReactionMinerals,
             MinThroatRadius = baseOptions.MinThroatRadius,
-            Species = new List<PNMSpecies>(baseOptions.Species)
+            InitialConcentrations = new Dictionary<string, float>(baseOptions.InitialConcentrations),
+            InletConcentrations = new Dictionary<string, float>(baseOptions.InletConcentrations)
         };
 
         // Adjust time step to account for mass transfer between scales
@@ -185,8 +191,8 @@ public static class DualPNMSimulations
         float microPorosityFraction = dataset.Coupling.TotalMicroPorosity;
         if (microPorosityFraction > 0)
         {
-            options.DispersivityM *= (1.0f + microPorosityFraction);
-            Logger.Log($"  Adjusted dispersivity for dual porosity: {options.DispersivityM:E3} m");
+            options.Dispersivity *= (1.0f + microPorosityFraction);
+            Logger.Log($"  Adjusted dispersivity for dual porosity: {options.Dispersivity:E3} m");
         }
 
         return options;
@@ -207,7 +213,8 @@ public static class DualPNMSimulations
         Logger.Log("Calculating dual PNM molecular diffusivity...");
 
         // Calculate macro-scale diffusivity
-        var macroResults = MolecularDiffusivity.Calculate(dataset, options, progressCallback);
+        var diffOptions = new DiffusivityOptions { Dataset = dataset };
+        var macroResults = MolecularDiffusivity.Calculate(diffOptions, progressCallback);
 
         if (macroResults == null)
         {
