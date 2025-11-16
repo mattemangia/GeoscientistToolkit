@@ -19,6 +19,9 @@ namespace GeoscientistToolkit.UI.GIS.Tools;
 /// </summary>
 public class HydrologicalAnalysisToolEnhanced : IDatasetTools
 {
+    // Static reference to active tool instance for visualization integration
+    public static HydrologicalAnalysisToolEnhanced ActiveInstance { get; private set; }
+
     private GISRasterLayer _elevationLayer;
     private byte[,] _flowDirection;
     private int[,] _flowAccumulation;
@@ -46,6 +49,12 @@ public class HydrologicalAnalysisToolEnhanced : IDatasetTools
     private bool _trackWaterBodies = true;
     private List<float> _volumeHistory = new();
 
+    // Animation playback
+    private List<float[,]> _waterDepthHistory = new();
+    private bool _isPlaying = false;
+    private float _playbackSpeed = 1.0f;
+    private float _animationTimer = 0f;
+
     // Status
     private bool _isProcessing = false;
     private bool _isSimulating = false;
@@ -63,6 +72,7 @@ public class HydrologicalAnalysisToolEnhanced : IDatasetTools
     private bool _animateSimulation = false;
 
     // Visualization
+    private HydrologicalVisualization _visualization;
     private Vector4 _flowPathColor = new Vector4(0.2f, 0.6f, 1.0f, 1.0f);
     private Vector4 _watershedColor = new Vector4(0.3f, 0.8f, 0.3f, 0.3f);
     private Vector4 _waterColor = new Vector4(0.1f, 0.4f, 0.9f, 0.5f);
@@ -72,6 +82,10 @@ public class HydrologicalAnalysisToolEnhanced : IDatasetTools
 
     public HydrologicalAnalysisToolEnhanced()
     {
+        // Initialize visualization system
+        _visualization = new HydrologicalVisualization();
+        _visualization.SetTool(this);
+
         // Initialize rainfall curve editor with seasonal pattern
         var defaultRainfallCurve = CreateDefaultSeasonalRainfall();
         _rainfallCurveEditor = new ImGuiCurveEditor(
@@ -125,6 +139,9 @@ public class HydrologicalAnalysisToolEnhanced : IDatasetTools
 
     public void Draw(Dataset dataset)
     {
+        // Set this as the active instance for visualization integration
+        ActiveInstance = this;
+
         if (dataset is not GISDataset gisDataset)
         {
             ImGui.TextDisabled("Hydrological analysis is only available for GIS datasets.");
@@ -165,6 +182,12 @@ public class HydrologicalAnalysisToolEnhanced : IDatasetTools
                 ImGui.EndTabItem();
             }
 
+            if (ImGui.BeginTabItem("Visualization"))
+            {
+                _visualization?.DrawControls();
+                ImGui.EndTabItem();
+            }
+
             if (ImGui.BeginTabItem("Export"))
             {
                 DrawExportTab(gisDataset);
@@ -194,7 +217,15 @@ public class HydrologicalAnalysisToolEnhanced : IDatasetTools
         if (rasterLayers.Count == 0)
         {
             ImGui.TextColored(new Vector4(1, 0.5f, 0, 1), "No elevation data available.");
-            ImGui.TextWrapped("Load a DEM or select an online elevation basemap.");
+            ImGui.TextWrapped("Load a DEM, select an online elevation basemap, or extract elevation from basemap tiles.");
+
+            ImGui.Spacing();
+            if (ImGui.Button("Extract Elevation from Online Basemap", new Vector2(300, 30)))
+            {
+                ExtractElevationFromBasemap(gisDataset);
+            }
+            HelpMarker("Download and process ESRI World Hillshade tiles to create approximate elevation data");
+
             return;
         }
 
@@ -352,12 +383,53 @@ public class HydrologicalAnalysisToolEnhanced : IDatasetTools
             ImGui.TextColored(new Vector4(0.3f, 1.0f, 0.3f, 1.0f), "Simulation Complete!");
             ImGui.Text($"Final water volume: {_volumeHistory[_volumeHistory.Count - 1]:F2} m³");
 
+            // Animation playback controls
+            ImGui.Text("Animation Playback:");
+            if (!_isPlaying)
+            {
+                if (ImGui.Button("▶ Play"))
+                {
+                    _isPlaying = true;
+                }
+            }
+            else
+            {
+                if (ImGui.Button("⏸ Pause"))
+                {
+                    _isPlaying = false;
+                }
+            }
+            ImGui.SameLine();
+            if (ImGui.Button("⏹ Stop"))
+            {
+                _isPlaying = false;
+                _currentTimeStep = 0;
+            }
+            ImGui.SameLine();
+            ImGui.SetNextItemWidth(150);
+            ImGui.SliderFloat("Speed", ref _playbackSpeed, 0.1f, 10f, "%.1fx");
+
+            // Update animation if playing
+            if (_isPlaying)
+            {
+                _animationTimer += ImGui.GetIO().DeltaTime * _playbackSpeed;
+                if (_animationTimer >= 0.1f) // Update every 0.1 seconds (adjusted by speed)
+                {
+                    _animationTimer = 0;
+                    _currentTimeStep++;
+                    if (_currentTimeStep >= _volumeHistory.Count)
+                    {
+                        _currentTimeStep = 0; // Loop
+                    }
+                }
+            }
+
             // Time scrubber
             ImGui.Text("Timeline:");
             ImGui.SetNextItemWidth(400);
             if (ImGui.SliderInt("##TimeStep", ref _currentTimeStep, 0, _volumeHistory.Count - 1))
             {
-                // Could update visualization here
+                _isPlaying = false; // Stop playing when user manually scrubs
             }
 
             float currentVolume = _volumeHistory[Math.Min(_currentTimeStep, _volumeHistory.Count - 1)];
@@ -798,13 +870,122 @@ public class HydrologicalAnalysisToolEnhanced : IDatasetTools
         }
     }
 
+    private async void ExtractElevationFromBasemap(GISDataset gisDataset)
+    {
+        try
+        {
+            _isProcessing = true;
+            _statusMessage = "Extracting elevation from basemap tiles...";
+
+            var extractor = new BasemapElevationExtractor();
+
+            // Use dataset bounds if available, otherwise use a default region
+            var bounds = gisDataset.Bounds;
+            if (bounds.Width < 0.001f || bounds.Height < 0.001f)
+            {
+                // Default to a 10km region around center
+                var center = gisDataset.Center;
+                bounds = new BoundingBox
+                {
+                    Min = new Vector2(center.X - 0.05f, center.Y - 0.05f),
+                    Max = new Vector2(center.X + 0.05f, center.Y + 0.05f)
+                };
+            }
+
+            // Extract elevation at reasonable resolution
+            int resolution = Math.Min(1000, Math.Max(256, (int)(bounds.Width * 10000)));
+            var elevationLayer = await extractor.ExtractElevationFromBasemap(bounds, resolution, resolution, zoomLevel: 12);
+
+            if (elevationLayer != null)
+            {
+                elevationLayer.Name = "Extracted Elevation";
+                gisDataset.Layers.Add(elevationLayer);
+                _elevationLayer = elevationLayer;
+                _statusMessage = $"Elevation extracted: {resolution}x{resolution}";
+                Logger.Log($"Elevation layer extracted from basemap tiles");
+            }
+            else
+            {
+                _statusMessage = "Failed to extract elevation";
+                Logger.LogError("Elevation extraction returned null");
+            }
+        }
+        catch (Exception ex)
+        {
+            _statusMessage = $"Error: {ex.Message}";
+            Logger.LogError($"Failed to extract elevation from basemap: {ex.Message}");
+        }
+        finally
+        {
+            _isProcessing = false;
+        }
+    }
+
     // Public getters for visualization
     public List<(int row, int col)> GetCurrentFlowPath() => _currentFlowPath;
     public bool[,] GetCurrentWatershed() => _currentWatershed;
     public float[,] GetWaterDepth() => _waterDepth;
     public WaterBodyTracker GetWaterBodyTracker() => _waterBodyTracker;
-    public bool ShowFlowPath => _showFlowPath;
-    public bool ShowWatershed => _showWatershed;
-    public bool ShowWaterBodies => _showWaterBodies;
     public GISRasterLayer ElevationLayer => _elevationLayer;
+    public bool ShowWatershed => _showWatershed;
+    public bool ShowFlowPath => _showFlowPath;
+    public bool ShowWaterBodies => _showWaterBodies;
+
+    /// <summary>
+    /// Render hydrological visualization overlays on the map canvas
+    /// </summary>
+    public void RenderVisualization(ImDrawListPtr drawList, Vector2 canvasPos, Vector2 canvasSize, float zoom, Vector2 pan,
+        Func<Vector2, Vector2, Vector2, float, Vector2, Vector2> worldToScreen)
+    {
+        _visualization?.Render(drawList, canvasPos, canvasSize, zoom, pan, worldToScreen);
+    }
+
+    /// <summary>
+    /// Handle map click for flow path tracing and watershed delineation
+    /// </summary>
+    public void OnMapClick(Vector2 worldPos)
+    {
+        if (_elevationLayer == null || _flowDirection == null)
+        {
+            _statusMessage = "Please load elevation data first";
+            return;
+        }
+
+        _clickPoint = worldPos;
+        _hasClickedPoint = true;
+
+        // Convert world coordinates to raster cell coordinates
+        var bounds = _elevationLayer.Bounds;
+        var col = (int)((worldPos.X - bounds.Min.X) / (bounds.Max.X - bounds.Min.X) * _elevationLayer.Width);
+        var row = (int)((worldPos.Y - bounds.Min.Y) / (bounds.Max.Y - bounds.Min.Y) * _elevationLayer.Height);
+
+        // Clamp to valid range
+        row = Math.Clamp(row, 0, _elevationLayer.Height - 1);
+        col = Math.Clamp(col, 0, _elevationLayer.Width - 1);
+
+        // Snap to stream if enabled
+        if (_snapToStreams && _flowAccumulation != null)
+        {
+            var snapped = GISOperations.SnapToStream(_flowAccumulation, row, col, _snapRadius, _streamThreshold);
+            row = snapped.row;
+            col = snapped.col;
+        }
+
+        // Trace flow path
+        _currentFlowPath = GISOperations.TraceFlowPath(_flowDirection, row, col);
+        _statusMessage = $"Flow path: {_currentFlowPath.Count} cells";
+
+        // Delineate watershed if enabled
+        if (_showWatershed)
+        {
+            _currentWatershed = GISOperations.DelineateWatershed(_flowDirection, row, col);
+            var watershedCells = 0;
+            for (int r = 0; r < _currentWatershed.GetLength(0); r++)
+                for (int c = 0; c < _currentWatershed.GetLength(1); c++)
+                    if (_currentWatershed[r, c]) watershedCells++;
+            _statusMessage += $" | Watershed: {watershedCells} cells";
+        }
+
+        Logger.Log($"Click at ({worldPos.X:F4}, {worldPos.Y:F4}) -> Cell ({row}, {col})");
+    }
 }

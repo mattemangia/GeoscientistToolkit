@@ -254,9 +254,17 @@ public class GISViewer : IDatasetViewer
         }
     
         if (_currentDrawing.Count > 0) DrawCurrentDrawing(drawList, canvas_pos, canvas_size, zoom, pan);
+
+        // Render hydrological analysis visualization if active
+        if (Tools.HydrologicalAnalysisToolEnhanced.ActiveInstance != null)
+        {
+            Tools.HydrologicalAnalysisToolEnhanced.ActiveInstance.RenderVisualization(
+                drawList, canvas_pos, canvas_size, zoom, pan, WorldToScreen);
+        }
+
         if (_showScaleBar) DrawScaleBar(drawList, canvas_pos, canvas_size, zoom, pan);
         if (_showNorthArrow) DrawNorthArrow(drawList, canvas_pos, canvas_size);
-    
+
         drawList.PopClipRect();
     
         // Take screenshot if requested
@@ -507,6 +515,16 @@ public class GISViewer : IDatasetViewer
             {
                 var worldPos = ScreenToWorld(io.MousePos - canvas_pos, canvas_pos, canvas_size, zoom, pan);
                 HandleDrawClick(worldPos);
+            }
+
+            // Handle hydrological analysis clicks (when not in draw mode)
+            if (_editMode == EditMode.None && is_active && ImGui.IsMouseClicked(ImGuiMouseButton.Left))
+            {
+                if (Tools.HydrologicalAnalysisToolEnhanced.ActiveInstance != null)
+                {
+                    var worldPos = ScreenToWorld(io.MousePos - canvas_pos, canvas_pos, canvas_size, zoom, pan);
+                    Tools.HydrologicalAnalysisToolEnhanced.ActiveInstance.OnMapClick(worldPos);
+                }
             }
         }
     }
