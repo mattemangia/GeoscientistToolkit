@@ -563,6 +563,63 @@ public class GeothermalSimulationResults
     /// </summary>
     public Dictionary<string, List<(double time, double saturationIndex)>> SaturationIndexEvolution { get; set; } = new();
 
+    // ===== Geomechanics Results =====
+
+    /// <summary>
+    ///     Von Mises stress field [r, theta, z] (Pa) - indicates failure potential
+    /// </summary>
+    public float[,,] VonMisesStressField { get; set; }
+
+    /// <summary>
+    ///     Normal stress XX component [r, theta, z] (Pa)
+    /// </summary>
+    public float[,,] StressXXField { get; set; }
+
+    /// <summary>
+    ///     Normal stress YY component [r, theta, z] (Pa)
+    /// </summary>
+    public float[,,] StressYYField { get; set; }
+
+    /// <summary>
+    ///     Normal stress ZZ component [r, theta, z] (Pa)
+    /// </summary>
+    public float[,,] StressZZField { get; set; }
+
+    /// <summary>
+    ///     Volumetric displacement field [r, theta, z] (m) - ground deformation
+    /// </summary>
+    public float[,,] DisplacementField { get; set; }
+
+    /// <summary>
+    ///     Maximum von Mises stress in domain (Pa)
+    /// </summary>
+    public double MaxVonMisesStress { get; set; }
+
+    /// <summary>
+    ///     Maximum ground displacement (m)
+    /// </summary>
+    public double MaxDisplacement { get; set; }
+
+    /// <summary>
+    ///     Von Mises stress history over time
+    /// </summary>
+    public List<(double time, double maxStress)> StressHistory { get; set; } = new();
+
+    /// <summary>
+    ///     Displacement history over time
+    /// </summary>
+    public List<(double time, double maxDisplacement)> DisplacementHistory { get; set; } = new();
+
+    /// <summary>
+    ///     2D Von Mises stress slices at specified depths (for visualization)
+    /// </summary>
+    public Dictionary<double, float[,]> StressSlices { get; set; } = new();
+
+    /// <summary>
+    ///     2D displacement slices at specified depths (for visualization)
+    /// </summary>
+    public Dictionary<double, float[,]> DisplacementSlices { get; set; } = new();
+
     // Summary Report
 
     /// <summary>
@@ -645,6 +702,36 @@ public class GeothermalSimulationResults
             sb.AppendLine($"  - Longitudinal Dispersivity: {LongitudinalDispersivity:F3} m");
             sb.AppendLine($"  - Transverse Dispersivity: {TransverseDispersivity:F3} m");
             sb.AppendLine($"  - Pressure Drawdown: {PressureDrawdown:F0} Pa");
+            sb.AppendLine();
+        }
+
+        // Geomechanics results
+        if (Options.EnableGeomechanics)
+        {
+            sb.AppendLine("=== Geomechanics (Stress & Deformation) ===");
+            sb.AppendLine();
+
+            sb.AppendLine("Stress Analysis:");
+            sb.AppendLine($"  - Maximum von Mises Stress: {MaxVonMisesStress / 1e6:F2} MPa");
+            sb.AppendLine($"  - Maximum Displacement: {MaxDisplacement * 1000:F3} mm");
+            sb.AppendLine();
+
+            // Evaluate stress level relative to typical rock strength
+            double rockStrengthMPa = 50.0; // Typical tensile strength for granite ~5-25 MPa
+            double stressMPa = MaxVonMisesStress / 1e6;
+            double stressRatio = stressMPa / rockStrengthMPa;
+
+            sb.AppendLine("Risk Assessment:");
+            if (stressRatio < 0.1)
+                sb.AppendLine($"  - Stress Level: LOW ({stressRatio * 100:F1}% of typical rock strength)");
+            else if (stressRatio < 0.5)
+                sb.AppendLine($"  - Stress Level: MODERATE ({stressRatio * 100:F1}% of typical rock strength)");
+            else if (stressRatio < 1.0)
+                sb.AppendLine($"  - Stress Level: HIGH ({stressRatio * 100:F1}% of typical rock strength)");
+            else
+                sb.AppendLine($"  - Stress Level: CRITICAL ({stressRatio * 100:F1}% of typical rock strength) - FAILURE RISK!");
+
+            sb.AppendLine($"  - Displacement: {(MaxDisplacement < 0.001 ? "Negligible" : "Measurable")}");
             sb.AppendLine();
         }
 

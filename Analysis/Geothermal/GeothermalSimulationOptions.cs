@@ -341,6 +341,58 @@ public class GeothermalSimulationOptions
     /// </summary>
     public float MatrixPermeability { get; set; } = 1e-18f;
 
+    // ===== Geomechanics Parameters =====
+
+    /// <summary>
+    ///     Enable geomechanics simulation for stress, strain, and deformation analysis.
+    ///     WARNING: This is computationally expensive and may significantly increase simulation time.
+    /// </summary>
+    public bool EnableGeomechanics { get; set; } = false;
+
+    /// <summary>
+    ///     Young's modulus for rock (GPa) - Default: 50 GPa (granite)
+    /// </summary>
+    public float GeomechanicsYoungsModulus { get; set; } = 50.0f;
+
+    /// <summary>
+    ///     Poisson's ratio (dimensionless) - Default: 0.25
+    /// </summary>
+    public float GeomechanicsPoissonsRatio { get; set; } = 0.25f;
+
+    /// <summary>
+    ///     Thermal expansion coefficient (K⁻¹) - Default: 8×10⁻⁶ K⁻¹
+    /// </summary>
+    public float GeomechanicsThermalExpansion { get; set; } = 8e-6f;
+
+    /// <summary>
+    ///     Biot coefficient for pore pressure coupling (0-1) - Default: 0.7
+    /// </summary>
+    public float GeomechanicsBiotCoefficient { get; set; } = 0.7f;
+
+    /// <summary>
+    ///     Young's modulus by lithology layer (GPa)
+    ///     Maps rock type to Young's modulus for heterogeneous domains
+    /// </summary>
+    public Dictionary<string, float> LayerYoungsModulus { get; set; } = new();
+
+    /// <summary>
+    ///     Poisson's ratio by lithology layer (dimensionless, 0-0.5)
+    ///     Maps rock type to Poisson's ratio for heterogeneous domains
+    /// </summary>
+    public Dictionary<string, float> LayerPoissonsRatio { get; set; } = new();
+
+    /// <summary>
+    ///     Thermal expansion coefficient by lithology layer (K⁻¹)
+    ///     Maps rock type to thermal expansion for heterogeneous domains
+    /// </summary>
+    public Dictionary<string, float> LayerThermalExpansion { get; set; } = new();
+
+    /// <summary>
+    ///     Biot coefficient by lithology layer (0-1)
+    ///     Maps rock type to Biot coefficient for heterogeneous domains
+    /// </summary>
+    public Dictionary<string, float> LayerBiotCoefficient { get; set; } = new();
+
     /// <summary>
     ///     Initialize default seasonal curve for BTES mode.
     ///     Creates a sinusoidal curve with charging in summer and discharging in winter.
@@ -414,6 +466,35 @@ public class GeothermalSimulationOptions
                 { "Soil", 1e-12 }, { "Clay", 1e-15 }, { "Sand", 1e-11 }, { "Gravel", 1e-9 }, { "Sandstone", 1e-13 },
                 { "Limestone", 1e-14 }, { "Granite", 1e-16 }, { "Basalt", 1e-15 }
             };
+
+        // Geomechanics properties (if not already set)
+        if (!LayerYoungsModulus.Any())
+            LayerYoungsModulus = new Dictionary<string, float>
+            {
+                { "Soil", 0.01f }, { "Clay", 0.02f }, { "Sand", 0.03f }, { "Gravel", 0.05f },
+                { "Sandstone", 20f }, { "Limestone", 30f }, { "Granite", 50f }, { "Basalt", 60f }
+            }; // Values in GPa
+
+        if (!LayerPoissonsRatio.Any())
+            LayerPoissonsRatio = new Dictionary<string, float>
+            {
+                { "Soil", 0.35f }, { "Clay", 0.40f }, { "Sand", 0.30f }, { "Gravel", 0.25f },
+                { "Sandstone", 0.20f }, { "Limestone", 0.25f }, { "Granite", 0.25f }, { "Basalt", 0.28f }
+            }; // Dimensionless
+
+        if (!LayerThermalExpansion.Any())
+            LayerThermalExpansion = new Dictionary<string, float>
+            {
+                { "Soil", 15e-6f }, { "Clay", 18e-6f }, { "Sand", 12e-6f }, { "Gravel", 11e-6f },
+                { "Sandstone", 11e-6f }, { "Limestone", 8e-6f }, { "Granite", 8e-6f }, { "Basalt", 5e-6f }
+            }; // Values in K⁻¹
+
+        if (!LayerBiotCoefficient.Any())
+            LayerBiotCoefficient = new Dictionary<string, float>
+            {
+                { "Soil", 0.95f }, { "Clay", 0.90f }, { "Sand", 0.85f }, { "Gravel", 0.80f },
+                { "Sandstone", 0.75f }, { "Limestone", 0.70f }, { "Granite", 0.65f }, { "Basalt", 0.70f }
+            }; // Dimensionless (0-1)
     }
 
     public void ApplyPreset(GeothermalSimulationPreset preset)

@@ -125,6 +125,7 @@ public class GeothermalSimulationSolver : IDisposable
     private TimeVaryingBoundaryConditions _timeVaryingBC;
     private EnhancedHVACCalculator _hvacCalculator;
     private FracturedMediaSolver _fracturedMediaSolver;
+    private GeomechanicsSolver _geomechanicsSolver;
 
     // Stability parameters (ADDED)
     private float _adaptiveRelaxation = 0.4f; // Start more conservative to prevent oscillations
@@ -316,6 +317,18 @@ public class GeothermalSimulationSolver : IDisposable
             Logger.Log("Fractured media solver initialized (dual-continuum)");
         }
 
+        // Initialize Geomechanics solver
+        if (_options.EnableGeomechanics)
+        {
+            _geomechanicsSolver = new GeomechanicsSolver(_nr, _nth, _nz, _options.UseGPU);
+            _geomechanicsSolver.SetMaterialProperties("rock",
+                _options.GeomechanicsYoungsModulus,
+                _options.GeomechanicsPoissonsRatio,
+                _options.GeomechanicsThermalExpansion,
+                _options.GeomechanicsBiotCoefficient);
+            Logger.Log($"Geomechanics solver initialized (SIMD: {_options.UseSIMD}, GPU: {_geomechanicsSolver.IsOpenCLAvailable})");
+        }
+
         InitializeFields();
     }
 
@@ -429,6 +442,12 @@ public class GeothermalSimulationSolver : IDisposable
                     UpdateHeatExchanger();
                     await SolveHeatTransferAsync((float)actualTimeStep);
 
+                    // Solve geomechanics if enabled
+                    if (_options.EnableGeomechanics && _geomechanicsSolver != null)
+                    {
+                        await SolveGeomechanicsAsync((float)actualTimeStep);
+                    }
+
                     stepSuccessful = true; // Se arriviamo qui senza eccezioni, il passo è matematicamente valido.
                 }
                 catch (ArithmeticException ex) when (ex.Message.Contains("diverged"))
@@ -476,6 +495,12 @@ public class GeothermalSimulationSolver : IDisposable
         if (_options.EnableBTESMode)
         {
             CalculateBTESMetrics(results);
+        }
+
+        // Store geomechanics results if enabled
+        if (_options.EnableGeomechanics && _geomechanicsSolver != null)
+        {
+            StoreGeomechanicsResults(results);
         }
 
         await GenerateVisualizationDataAsync(results);
@@ -1164,6 +1189,61 @@ public class GeothermalSimulationSolver : IDisposable
 
             var solverType = _useBTESOpenCL ? "BTES GPU" : (_useOpenCL ? "GPU" : "CPU");
             ConvergenceStatus = $"Heat converged ({solverType}), final error: {maxChange:E3}, dt: {dt:E2}s";
+        });
+    }
+
+    /// <summary>
+    ///     Solve geomechanics (stress, strain, deformation) from temperature and pressure changes.
+    ///     Uses GPU acceleration if available, otherwise SIMD or scalar CPU implementation.
+    /// </summary>
+    private async Task SolveGeomechanicsAsync(float dt)
+    {
+        await Task.Run(() =>
+        {
+            try
+            {
+                // Flatten 3D temperature arrays to 1D for geomechanics solver
+                int totalSize = _nr * _nth * _nz;
+                float[] tempFlat = new float[totalSize];
+                float[] tempOldFlat = new float[totalSize];
+                float[] pressureFlat = new float[totalSize];
+
+                // Copy 3D arrays to 1D
+                for (int iz = 0; iz < _nz; iz++)
+                {
+                    for (int ith = 0; ith < _nth; ith++)
+                    {
+                        for (int ir = 0; ir < _nr; ir++)
+                        {
+                            int idx = ir + ith * _nr + iz * _nr * _nth;
+                            tempFlat[idx] = _temperature[ir, ith, iz];
+                            tempOldFlat[idx] = _temperatureOld[ir, ith, iz];
+                            pressureFlat[idx] = _pressure[ir, ith, iz];
+                        }
+                    }
+                }
+
+                // Call appropriate solver based on configuration
+                if (_options.UseGPU && _geomechanicsSolver.IsOpenCLAvailable)
+                {
+                    _geomechanicsSolver.SolveGPU(tempFlat, tempOldFlat, pressureFlat, dt);
+                }
+                else if (_options.UseSIMD && Avx2.IsSupported)
+                {
+                    _geomechanicsSolver.SolveSIMD(tempFlat, tempOldFlat, pressureFlat, dt);
+                }
+                else
+                {
+                    _geomechanicsSolver.SolveScalar(tempFlat, tempOldFlat, pressureFlat, dt);
+                }
+
+                // Results are stored in the geomechanics solver and can be accessed via:
+                // _geomechanicsSolver.VonMisesStress, _geomechanicsSolver.DisplacementField, etc.
+            }
+            catch (Exception ex)
+            {
+                Logger.LogWarning($"Geomechanics solver error: {ex.Message}. Skipping geomechanics for this timestep.");
+            }
         });
     }
 
@@ -2566,6 +2646,79 @@ public class GeothermalSimulationSolver : IDisposable
 
         Logger.Log($"BTES Metrics: Charged={totalCharged / 1e9:F2} GJ, Discharged={totalDischarged / 1e9:F2} GJ, Efficiency={results.BTESStorageEfficiency:F1}%");
         Logger.Log($"BTES: {cycleCount} cycles, Temp Swing={results.BTESTemperatureSwing:F1}K, SPF={results.BTESSeasonalPerformanceFactor:F2}");
+    }
+
+    /// <summary>
+    ///     Store geomechanics results (stress, strain, deformation) from the solver to results object.
+    /// </summary>
+    private void StoreGeomechanicsResults(GeothermalSimulationResults results)
+    {
+        Logger.Log("Storing geomechanics results...");
+
+        // Get 1D arrays from geomechanics solver
+        float[] vonMisesFlat = _geomechanicsSolver.VonMisesStress;
+        float[] displacementFlat = _geomechanicsSolver.DisplacementField;
+        float[] stressXXFlat = _geomechanicsSolver.StressXX;
+        float[] stressYYFlat = _geomechanicsSolver.StressYY;
+        float[] stressZZFlat = _geomechanicsSolver.StressZZ;
+
+        // Allocate 3D arrays
+        results.VonMisesStressField = new float[_nr, _nth, _nz];
+        results.DisplacementField = new float[_nr, _nth, _nz];
+        results.StressXXField = new float[_nr, _nth, _nz];
+        results.StressYYField = new float[_nr, _nth, _nz];
+        results.StressZZField = new float[_nr, _nth, _nz];
+
+        // Convert 1D arrays to 3D and find max values
+        double maxStress = 0;
+        double maxDisp = 0;
+
+        for (int iz = 0; iz < _nz; iz++)
+        {
+            for (int ith = 0; ith < _nth; ith++)
+            {
+                for (int ir = 0; ir < _nr; ir++)
+                {
+                    int idx = ir + ith * _nr + iz * _nr * _nth;
+
+                    results.VonMisesStressField[ir, ith, iz] = vonMisesFlat[idx];
+                    results.DisplacementField[ir, ith, iz] = displacementFlat[idx];
+                    results.StressXXField[ir, ith, iz] = stressXXFlat[idx];
+                    results.StressYYField[ir, ith, iz] = stressYYFlat[idx];
+                    results.StressZZField[ir, ith, iz] = stressZZFlat[idx];
+
+                    maxStress = Math.Max(maxStress, Math.Abs(vonMisesFlat[idx]));
+                    maxDisp = Math.Max(maxDisp, Math.Abs(displacementFlat[idx]));
+                }
+            }
+        }
+
+        results.MaxVonMisesStress = maxStress;
+        results.MaxDisplacement = maxDisp;
+
+        // Create 2D slices for visualization (at specified positions)
+        foreach (var slicePos in _options.SlicePositions)
+        {
+            int sliceZ = (int)(slicePos * (_nz - 1));
+            sliceZ = Math.Clamp(sliceZ, 0, _nz - 1);
+
+            float[,] stressSlice = new float[_nr, _nth];
+            float[,] dispSlice = new float[_nr, _nth];
+
+            for (int ith = 0; ith < _nth; ith++)
+            {
+                for (int ir = 0; ir < _nr; ir++)
+                {
+                    stressSlice[ir, ith] = results.VonMisesStressField[ir, ith, sliceZ];
+                    dispSlice[ir, ith] = results.DisplacementField[ir, ith, sliceZ];
+                }
+            }
+
+            results.StressSlices[slicePos] = stressSlice;
+            results.DisplacementSlices[slicePos] = dispSlice;
+        }
+
+        Logger.Log($"Geomechanics: Max von Mises stress = {maxStress / 1e6:F2} MPa, Max displacement = {maxDisp * 1000:F3} mm");
     }
 
     /// <summary>

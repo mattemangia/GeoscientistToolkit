@@ -1122,6 +1122,47 @@ public class GeothermalSimulationTools : IDatasetTools, IDisposable
                 var useGPU = _options.UseGPU;
                 if (ImGui.Checkbox("Use GPU", ref useGPU))
                     _options.UseGPU = useGPU;
+
+                ImGui.Separator();
+                ImGui.Spacing();
+                ImGui.TextColored(new Vector4(1.0f, 0.7f, 0.3f, 1.0f), "⚠️ Performance Warning:");
+                ImGui.TextWrapped("Geomechanics is computationally expensive and may significantly increase simulation time.");
+                ImGui.Spacing();
+
+                var enableGeomechanics = _options.EnableGeomechanics;
+                if (ImGui.Checkbox("Enable Geomechanics", ref enableGeomechanics))
+                    _options.EnableGeomechanics = enableGeomechanics;
+
+                ImGui.SetItemTooltip(
+                    "Enable geomechanics simulation for stress, strain, and ground deformation analysis.\n" +
+                    "Calculates thermal stress from temperature changes and pore pressure effects.\n" +
+                    "Uses SIMD and OpenCL acceleration when available.\n" +
+                    "WARNING: This is computationally expensive!");
+
+                if (_options.EnableGeomechanics)
+                {
+                    ImGui.Indent();
+                    ImGui.Spacing();
+                    ImGui.TextColored(new Vector4(0.7f, 0.9f, 1.0f, 1.0f), "Rock Properties:");
+
+                    var youngsModulus = _options.GeomechanicsYoungsModulus;
+                    if (ImGui.InputFloat("Young's Modulus (GPa)", ref youngsModulus))
+                        _options.GeomechanicsYoungsModulus = youngsModulus;
+
+                    var poissonsRatio = _options.GeomechanicsPoissonsRatio;
+                    if (ImGui.SliderFloat("Poisson's Ratio", ref poissonsRatio, 0.0f, 0.5f))
+                        _options.GeomechanicsPoissonsRatio = poissonsRatio;
+
+                    var thermalExpansion = _options.GeomechanicsThermalExpansion * 1e6f; // Display as ×10⁻⁶
+                    if (ImGui.InputFloat("Thermal Expansion (×10⁻⁶ K⁻¹)", ref thermalExpansion))
+                        _options.GeomechanicsThermalExpansion = thermalExpansion * 1e-6f;
+
+                    var biotCoeff = _options.GeomechanicsBiotCoefficient;
+                    if (ImGui.SliderFloat("Biot Coefficient", ref biotCoeff, 0.0f, 1.0f))
+                        _options.GeomechanicsBiotCoefficient = biotCoeff;
+
+                    ImGui.Unindent();
+                }
             }
 
             // Thermodynamics and Geochemistry Section
