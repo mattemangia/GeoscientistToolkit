@@ -626,6 +626,32 @@ public class SimulationParameters
 
     [JsonProperty]
     public double TrackingSampleInterval { get; set; } = 1.0; // seconds
+
+    // ==================== MULTIPHASE FLOW PARAMETERS ====================
+
+    [JsonProperty]
+    public bool EnableMultiphaseFlow { get; set; } = false; // Enable multiphase water-steam-NCG flow
+
+    [JsonProperty]
+    public string MultiphaseEOSType { get; set; } = "WaterCO2"; // WaterSteam, WaterCO2, WaterAir, WaterH2S, WaterMethane
+
+    [JsonProperty]
+    public double ResidualLiquidSaturation { get; set; } = 0.05; // S_lr
+
+    [JsonProperty]
+    public double ResidualGasSaturation { get; set; } = 0.01; // S_gr
+
+    [JsonProperty]
+    public double VanGenuchten_m { get; set; } = 0.5; // van Genuchten m parameter for kr
+
+    [JsonProperty]
+    public double VanGenuchten_alpha { get; set; } = 1e-4; // van Genuchten alpha (1/Pa) for Pc
+
+    [JsonProperty]
+    public string RelativePermeabilityModel { get; set; } = "VanGenuchten"; // VanGenuchten, Corey, Linear, Grant
+
+    [JsonProperty]
+    public string CapillaryPressureModel { get; set; } = "VanGenuchten"; // VanGenuchten, BrooksCorey, Linear, Leverett
 }
 
 /// <summary>
