@@ -53,7 +53,17 @@ private ImGuiExportFileDialog _exportDialog = null;
 private bool _isExporting = false;
 private float _exportProgress = 0.0f;
 private string _exportStatus = "";
-private float[] _depthSlices = new float[] { 500, 1000, 1500, 2000, 2500, 3000 };
+private List<float> _depthSlices = new List<float> { 500, 1000, 1500, 2000, 2500, 3000 };
+private float _newDepthSlice = 1000.0f;
+
+// Export options
+private bool _exportTemperature = true;
+private bool _exportThermalConductivity = true;
+private bool _exportPorosity = true;
+private bool _exportPermeability = true;
+private bool _exportConfidence = true;
+private bool _exportHeatFlowMaps = true;
+private bool _showExportPreview = false;
 
 public void Draw(Dataset dataset)
 {
@@ -743,42 +753,144 @@ private void DrawExportSection()
         "Export subsurface geothermal data for visualization and analysis");
 
     ImGui.Separator();
-    ImGui.Text("Export Formats:");
 
-    // VTK Export for 3D visualization
-    if (ImGui.Button("Export 3D Model to VTK (ParaView/Blender)", new Vector2(-1, 0)))
+    // Model statistics
+    if (ImGui.TreeNode("Subsurface Model Statistics"))
     {
-        if (_exportDialog == null)
+        ImGui.Text($"Voxels: {_createdSubsurfaceModel.VoxelGrid.Count:N0}");
+        ImGui.Text($"Grid: {_createdSubsurfaceModel.GridResolutionX}×{_createdSubsurfaceModel.GridResolutionY}×{_createdSubsurfaceModel.GridResolutionZ}");
+        ImGui.Text($"Bounds: {_createdSubsurfaceModel.GridSize.X:F0}×{_createdSubsurfaceModel.GridSize.Y:F0}×{_createdSubsurfaceModel.GridSize.Z:F0} m");
+        ImGui.Text($"Source boreholes: {_createdSubsurfaceModel.SourceBoreholeNames.Count}");
+
+        // Temperature statistics if available
+        var temps = _createdSubsurfaceModel.VoxelGrid
+            .Where(v => v.Parameters.ContainsKey("Temperature"))
+            .Select(v => v.Parameters["Temperature"])
+            .ToList();
+
+        if (temps.Count > 0)
         {
-            _exportDialog = new ImGuiExportFileDialog("export_vtk", "Export 3D Model to VTK");
-            _exportDialog.SetExtensions(
-                (".vtk", "VTK Structured Grid (ParaView, Blender)")
-            );
+            ImGui.Text($"Temperature range: {temps.Min():F1}°C - {temps.Max():F1}°C (avg: {temps.Average():F1}°C)");
         }
-        _exportDialog.IsOpen = true;
+
+        ImGui.TreePop();
     }
-    ImGui.TextDisabled("Exports full 3D voxel grid with temperature, conductivity, porosity");
 
     ImGui.Separator();
 
-    // Depth slices configuration
-    ImGui.Text("Geothermal Potential Maps (2D Depth Slices):");
-    ImGui.TextDisabled("Generate horizontal slices at specific depths showing temperature distribution");
-
-    ImGui.Text("Depth slices (m):");
-    for (int i = 0; i < _depthSlices.Length; i++)
+    // 3D VTK Export
+    if (ImGui.TreeNode("3D Model Export (VTK)"))
     {
-        ImGui.PushID(i);
-        ImGui.InputFloat($"##depth{i}", ref _depthSlices[i]);
-        ImGui.PopID();
-        if (i % 3 != 2) ImGui.SameLine();
+        ImGui.TextColored(new Vector4(0.7f, 0.9f, 1.0f, 1.0f), "VTK Structured Grid");
+        ImGui.TextDisabled("Compatible with ParaView, Blender, VisIt, MayaVi");
+
+        ImGui.Separator();
+        ImGui.Text("Fields to export:");
+        ImGui.Checkbox("Temperature", ref _exportTemperature);
+        ImGui.SameLine();
+        ImGui.Checkbox("Thermal Conductivity", ref _exportThermalConductivity);
+        ImGui.Checkbox("Porosity", ref _exportPorosity);
+        ImGui.SameLine();
+        ImGui.Checkbox("Permeability", ref _exportPermeability);
+        ImGui.Checkbox("Confidence", ref _exportConfidence);
+
+        ImGui.Separator();
+        if (ImGui.Button("Export 3D Model to VTK...", new Vector2(-1, 0)))
+        {
+            if (_exportDialog == null)
+            {
+                _exportDialog = new ImGuiExportFileDialog("export_vtk", "Export 3D Model to VTK");
+                _exportDialog.SetExtensions((".vtk", "VTK Structured Grid"));
+            }
+            _exportDialog.IsOpen = true;
+        }
+
+        ImGui.TreePop();
     }
 
-    if (ImGui.Button("Export Geothermal Maps to GeoTIFF", new Vector2(-1, 0)))
+    ImGui.Separator();
+
+    // 2D GeoTIFF Export
+    if (ImGui.TreeNode("Geothermal Potential Maps (GeoTIFF)"))
     {
-        ExportGeothermalMaps();
+        ImGui.TextColored(new Vector4(0.7f, 0.9f, 1.0f, 1.0f), "2D Horizontal Depth Slices");
+        ImGui.TextDisabled("Compatible with QGIS, ArcGIS, GDAL, Python");
+
+        ImGui.Separator();
+        ImGui.Text("Manage depth slices (meters below surface):");
+
+        // Display and edit existing slices
+        var toRemove = new List<int>();
+        for (int i = 0; i < _depthSlices.Count; i++)
+        {
+            ImGui.PushID(i);
+            float depth = _depthSlices[i];
+            if (ImGui.InputFloat($"##depth{i}", ref depth, 0, 0, "%.0f m"))
+            {
+                _depthSlices[i] = Math.Max(0, depth);
+            }
+            ImGui.SameLine();
+            if (ImGui.SmallButton("×"))
+            {
+                toRemove.Add(i);
+            }
+            ImGui.PopID();
+
+            if ((i + 1) % 3 != 0 && i < _depthSlices.Count - 1)
+                ImGui.SameLine();
+        }
+
+        // Remove marked slices
+        for (int i = toRemove.Count - 1; i >= 0; i--)
+        {
+            _depthSlices.RemoveAt(toRemove[i]);
+        }
+
+        // Add new slice
+        ImGui.Separator();
+        ImGui.InputFloat("New depth slice", ref _newDepthSlice, 100, 500, "%.0f m");
+        ImGui.SameLine();
+        if (ImGui.Button("Add Slice"))
+        {
+            if (_newDepthSlice > 0 && !_depthSlices.Contains(_newDepthSlice))
+            {
+                _depthSlices.Add(_newDepthSlice);
+                _depthSlices.Sort();
+            }
+        }
+
+        ImGui.Separator();
+        ImGui.Text("Export options:");
+        ImGui.Checkbox("Export heat flow maps", ref _exportHeatFlowMaps);
+        ImGui.TextDisabled("In addition to temperature maps");
+
+        ImGui.Separator();
+        if (ImGui.Button("Export Geothermal Maps to GeoTIFF", new Vector2(-1, 0)))
+        {
+            ExportGeothermalMaps();
+        }
+        ImGui.TextDisabled($"Will export {_depthSlices.Count} depth slices × {(_exportHeatFlowMaps ? 2 : 1)} map types");
+
+        ImGui.TreePop();
     }
-    ImGui.TextDisabled("Exports 2D temperature maps at each depth slice as GeoTIFF");
+
+    ImGui.Separator();
+
+    // CSV/ASCII Export
+    if (ImGui.TreeNode("Point Cloud Export (CSV)"))
+    {
+        ImGui.TextColored(new Vector4(0.7f, 0.9f, 1.0f, 1.0f), "Raw Voxel Data");
+        ImGui.TextDisabled("CSV format for Excel, Python, R, etc.");
+
+        ImGui.Separator();
+        if (ImGui.Button("Export Voxel Data to CSV...", new Vector2(-1, 0)))
+        {
+            ExportToCSV();
+        }
+        ImGui.TextDisabled($"Exports {_createdSubsurfaceModel.VoxelGrid.Count:N0} voxels with all properties");
+
+        ImGui.TreePop();
+    }
 
     // Export status
     if (_isExporting)
@@ -838,7 +950,17 @@ private async void ExportToVTK(string path)
             _exportStatus = p.Item2;
         });
 
-        await SubsurfaceExporter.ExportToVTKAsync(_createdSubsurfaceModel, path, progress);
+        // Create export options based on user selections
+        var exportOptions = new VTKExportOptions
+        {
+            ExportTemperature = _exportTemperature,
+            ExportThermalConductivity = _exportThermalConductivity,
+            ExportPorosity = _exportPorosity,
+            ExportPermeability = _exportPermeability,
+            ExportConfidence = _exportConfidence
+        };
+
+        await SubsurfaceExporter.ExportToVTKAsync(_createdSubsurfaceModel, path, exportOptions, progress);
 
         Logger.Log($"Successfully exported 3D model to: {path}");
         _exportStatus = $"Export complete: {path}";
@@ -862,6 +984,12 @@ private async void ExportGeothermalMaps()
         return;
     }
 
+    if (_depthSlices.Count == 0)
+    {
+        Logger.LogError("No depth slices configured");
+        return;
+    }
+
     _isExporting = true;
     _exportProgress = 0.0f;
     _exportStatus = "Generating geothermal maps...";
@@ -869,44 +997,98 @@ private async void ExportGeothermalMaps()
     try
     {
         // Generate maps
-        var maps = SubsurfaceExporter.GenerateGeothermalPotentialMaps(_createdSubsurfaceModel, _depthSlices);
+        var maps = SubsurfaceExporter.GenerateGeothermalPotentialMaps(
+            _createdSubsurfaceModel,
+            _depthSlices.ToArray());
+
+        var outputDir = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+            "GeothermalMaps");
+        Directory.CreateDirectory(outputDir);
 
         // Export each map
-        int count = 0;
+        int totalMaps = maps.Count * (_exportHeatFlowMaps ? 2 : 1);
+        int exportedMaps = 0;
+
         foreach (var kvp in maps)
         {
             var depth = kvp.Key;
             var map = kvp.Value;
 
-            _exportStatus = $"Exporting map at {depth}m depth...";
-            _exportProgress = (float)count / maps.Count;
-
-            var outputDir = Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-                "GeothermalMaps");
-            Directory.CreateDirectory(outputDir);
-
             // Export temperature map
+            _exportStatus = $"Exporting temperature map at {depth}m depth...";
+            _exportProgress = (float)exportedMaps / totalMaps;
+
             var tempPath = Path.Combine(outputDir, $"temperature_{depth}m.tif");
             var progress = new Progress<(float, string)>(p => { _exportStatus = p.Item2; });
             await SubsurfaceExporter.ExportGeothermalMapToGeoTiffAsync(
                 map, tempPath, GeothermalMapType.Temperature, progress);
+            exportedMaps++;
 
-            // Export heat flow map
-            var heatFlowPath = Path.Combine(outputDir, $"heatflow_{depth}m.tif");
-            await SubsurfaceExporter.ExportGeothermalMapToGeoTiffAsync(
-                map, heatFlowPath, GeothermalMapType.HeatFlow, progress);
+            // Export heat flow map if requested
+            if (_exportHeatFlowMaps)
+            {
+                _exportStatus = $"Exporting heat flow map at {depth}m depth...";
+                _exportProgress = (float)exportedMaps / totalMaps;
 
-            count++;
+                var heatFlowPath = Path.Combine(outputDir, $"heatflow_{depth}m.tif");
+                await SubsurfaceExporter.ExportGeothermalMapToGeoTiffAsync(
+                    map, heatFlowPath, GeothermalMapType.HeatFlow, progress);
+                exportedMaps++;
+            }
         }
 
         _exportProgress = 1.0f;
-        _exportStatus = $"Exported {count} depth slices to {Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "GeothermalMaps")}";
+        _exportStatus = $"Exported {exportedMaps} maps to {outputDir}";
         Logger.Log(_exportStatus);
+        Logger.Log($"  Temperature maps: {maps.Count}");
+        if (_exportHeatFlowMaps)
+            Logger.Log($"  Heat flow maps: {maps.Count}");
     }
     catch (Exception ex)
     {
         Logger.LogError($"Failed to export geothermal maps: {ex.Message}");
+        _exportStatus = $"Export failed: {ex.Message}";
+    }
+    finally
+    {
+        _isExporting = false;
+    }
+}
+
+private async void ExportToCSV()
+{
+    if (_createdSubsurfaceModel == null)
+    {
+        Logger.LogError("No subsurface model to export");
+        return;
+    }
+
+    _isExporting = true;
+    _exportProgress = 0.0f;
+    _exportStatus = "Exporting to CSV...";
+
+    try
+    {
+        var path = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+            "subsurface_voxels.csv");
+
+        var progress = new Progress<(float, string)>(p =>
+        {
+            _exportProgress = p.Item1;
+            _exportStatus = p.Item2;
+        });
+
+        await SubsurfaceExporter.ExportToCSVAsync(_createdSubsurfaceModel, path, progress);
+
+        _exportProgress = 1.0f;
+        _exportStatus = $"Exported to {path}";
+        Logger.Log(_exportStatus);
+    }
+    catch (Exception ex)
+    {
+        Logger.LogError($"Failed to export CSV: {ex.Message}");
         _exportStatus = $"Export failed: {ex.Message}";
     }
     finally

@@ -18,11 +18,13 @@ public static class SubsurfaceExporter
     /// </summary>
     /// <param name="dataset">The subsurface dataset to export</param>
     /// <param name="path">Output file path (.vtk)</param>
+    /// <param name="exportOptions">Options controlling which fields to export</param>
     /// <param name="progress">Progress reporting callback</param>
     /// <param name="token">Cancellation token</param>
     public static async Task ExportToVTKAsync(
         SubsurfaceGISDataset dataset,
         string path,
+        VTKExportOptions exportOptions = null,
         IProgress<(float progress, string message)> progress = null,
         CancellationToken token = default)
     {
@@ -102,129 +104,164 @@ public static class SubsurfaceExporter
                 voxelLookup[(i, j, k)] = voxel;
             }
 
-            progress?.Report((0.5f, "Writing temperature data..."));
-            token.ThrowIfCancellationRequested();
+            // Use default export options if not provided
+            if (exportOptions == null)
+            {
+                exportOptions = new VTKExportOptions();
+            }
+
+            var exportedFields = new List<string>();
+            float progressStep = 0.5f;
+            float currentProgress = 0.5f;
 
             // Export temperature scalar field
-            sb.AppendLine("SCALARS Temperature float 1");
-            sb.AppendLine("LOOKUP_TABLE default");
-            for (int k = 0; k < nz; k++)
+            if (exportOptions.ExportTemperature)
             {
-                for (int j = 0; j < ny; j++)
+                progress?.Report((currentProgress, "Writing temperature data..."));
+                token.ThrowIfCancellationRequested();
+
+                sb.AppendLine("SCALARS Temperature float 1");
+                sb.AppendLine("LOOKUP_TABLE default");
+                for (int k = 0; k < nz; k++)
                 {
-                    for (int i = 0; i < nx; i++)
+                    for (int j = 0; j < ny; j++)
                     {
-                        if (voxelLookup.TryGetValue((i, j, k), out var voxel) &&
-                            voxel.Parameters.TryGetValue("Temperature", out var temp))
+                        for (int i = 0; i < nx; i++)
                         {
-                            sb.AppendLine(temp.ToString("F2"));
-                        }
-                        else
-                        {
-                            sb.AppendLine("0.0");
+                            if (voxelLookup.TryGetValue((i, j, k), out var voxel) &&
+                                voxel.Parameters.TryGetValue("Temperature", out var temp))
+                            {
+                                sb.AppendLine(temp.ToString("F2"));
+                            }
+                            else
+                            {
+                                sb.AppendLine("0.0");
+                            }
                         }
                     }
                 }
+                exportedFields.Add("Temperature");
+                currentProgress += 0.1f;
             }
-
-            progress?.Report((0.6f, "Writing thermal conductivity data..."));
-            token.ThrowIfCancellationRequested();
 
             // Export thermal conductivity
-            sb.AppendLine("SCALARS ThermalConductivity float 1");
-            sb.AppendLine("LOOKUP_TABLE default");
-            for (int k = 0; k < nz; k++)
+            if (exportOptions.ExportThermalConductivity)
             {
-                for (int j = 0; j < ny; j++)
+                progress?.Report((currentProgress, "Writing thermal conductivity data..."));
+                token.ThrowIfCancellationRequested();
+
+                sb.AppendLine("SCALARS ThermalConductivity float 1");
+                sb.AppendLine("LOOKUP_TABLE default");
+                for (int k = 0; k < nz; k++)
                 {
-                    for (int i = 0; i < nx; i++)
+                    for (int j = 0; j < ny; j++)
                     {
-                        if (voxelLookup.TryGetValue((i, j, k), out var voxel) &&
-                            voxel.Parameters.TryGetValue("Thermal Conductivity", out var k_val))
+                        for (int i = 0; i < nx; i++)
                         {
-                            sb.AppendLine(k_val.ToString("F3"));
-                        }
-                        else
-                        {
-                            sb.AppendLine("0.0");
+                            if (voxelLookup.TryGetValue((i, j, k), out var voxel) &&
+                                voxel.Parameters.TryGetValue("Thermal Conductivity", out var k_val))
+                            {
+                                sb.AppendLine(k_val.ToString("F3"));
+                            }
+                            else
+                            {
+                                sb.AppendLine("0.0");
+                            }
                         }
                     }
                 }
+                exportedFields.Add("ThermalConductivity");
+                currentProgress += 0.1f;
             }
-
-            progress?.Report((0.7f, "Writing porosity data..."));
-            token.ThrowIfCancellationRequested();
 
             // Export porosity
-            sb.AppendLine("SCALARS Porosity float 1");
-            sb.AppendLine("LOOKUP_TABLE default");
-            for (int k = 0; k < nz; k++)
+            if (exportOptions.ExportPorosity)
             {
-                for (int j = 0; j < ny; j++)
+                progress?.Report((currentProgress, "Writing porosity data..."));
+                token.ThrowIfCancellationRequested();
+
+                sb.AppendLine("SCALARS Porosity float 1");
+                sb.AppendLine("LOOKUP_TABLE default");
+                for (int k = 0; k < nz; k++)
                 {
-                    for (int i = 0; i < nx; i++)
+                    for (int j = 0; j < ny; j++)
                     {
-                        if (voxelLookup.TryGetValue((i, j, k), out var voxel) &&
-                            voxel.Parameters.TryGetValue("Porosity", out var porosity))
+                        for (int i = 0; i < nx; i++)
                         {
-                            sb.AppendLine(porosity.ToString("F4"));
-                        }
-                        else
-                        {
-                            sb.AppendLine("0.0");
+                            if (voxelLookup.TryGetValue((i, j, k), out var voxel) &&
+                                voxel.Parameters.TryGetValue("Porosity", out var porosity))
+                            {
+                                sb.AppendLine(porosity.ToString("F4"));
+                            }
+                            else
+                            {
+                                sb.AppendLine("0.0");
+                            }
                         }
                     }
                 }
+                exportedFields.Add("Porosity");
+                currentProgress += 0.1f;
             }
-
-            progress?.Report((0.8f, "Writing permeability data..."));
-            token.ThrowIfCancellationRequested();
 
             // Export permeability (log scale for better visualization)
-            sb.AppendLine("SCALARS LogPermeability float 1");
-            sb.AppendLine("LOOKUP_TABLE default");
-            for (int k = 0; k < nz; k++)
+            if (exportOptions.ExportPermeability)
             {
-                for (int j = 0; j < ny; j++)
+                progress?.Report((currentProgress, "Writing permeability data..."));
+                token.ThrowIfCancellationRequested();
+
+                sb.AppendLine("SCALARS LogPermeability float 1");
+                sb.AppendLine("LOOKUP_TABLE default");
+                for (int k = 0; k < nz; k++)
                 {
-                    for (int i = 0; i < nx; i++)
+                    for (int j = 0; j < ny; j++)
                     {
-                        if (voxelLookup.TryGetValue((i, j, k), out var voxel) &&
-                            voxel.Parameters.TryGetValue("Permeability", out var perm))
+                        for (int i = 0; i < nx; i++)
                         {
-                            var logPerm = perm > 0 ? Math.Log10(perm) : -20.0;
-                            sb.AppendLine(logPerm.ToString("F2"));
-                        }
-                        else
-                        {
-                            sb.AppendLine("-20.0");
+                            if (voxelLookup.TryGetValue((i, j, k), out var voxel) &&
+                                voxel.Parameters.TryGetValue("Permeability", out var perm))
+                            {
+                                var logPerm = perm > 0 ? Math.Log10(perm) : -20.0;
+                                sb.AppendLine(logPerm.ToString("F2"));
+                            }
+                            else
+                            {
+                                sb.AppendLine("-20.0");
+                            }
                         }
                     }
                 }
+                exportedFields.Add("LogPermeability");
+                currentProgress += 0.1f;
             }
 
-            progress?.Report((0.9f, "Writing confidence data..."));
-            token.ThrowIfCancellationRequested();
-
             // Export confidence values
-            sb.AppendLine("SCALARS Confidence float 1");
-            sb.AppendLine("LOOKUP_TABLE default");
-            for (int k = 0; k < nz; k++)
+            if (exportOptions.ExportConfidence)
             {
-                for (int j = 0; j < ny; j++)
+                progress?.Report((currentProgress, "Writing confidence data..."));
+                token.ThrowIfCancellationRequested();
+
+                sb.AppendLine("SCALARS Confidence float 1");
+                sb.AppendLine("LOOKUP_TABLE default");
+                for (int k = 0; k < nz; k++)
                 {
-                    for (int i = 0; i < nx; i++)
+                    for (int j = 0; j < ny; j++)
                     {
-                        if (voxelLookup.TryGetValue((i, j, k), out var voxel))
+                        for (int i = 0; i < nx; i++)
                         {
-                            sb.AppendLine(voxel.Confidence.ToString("F3"));
-                        }
-                        else
-                        {
-                            sb.AppendLine("0.0");
+                            if (voxelLookup.TryGetValue((i, j, k), out var voxel))
+                            {
+                                sb.AppendLine(voxel.Confidence.ToString("F3"));
+                            }
+                            else
+                            {
+                                sb.AppendLine("0.0");
+                            }
                         }
                     }
                 }
+                exportedFields.Add("Confidence");
+                currentProgress += 0.1f;
             }
 
             // Write to file
@@ -236,7 +273,96 @@ public static class SubsurfaceExporter
             progress?.Report((1.0f, "VTK export complete"));
             Logger.Log($"Successfully exported subsurface model to VTK: {path}");
             Logger.Log($"  Grid dimensions: {nx}x{ny}x{nz} = {totalPoints} points");
-            Logger.Log($"  Exported fields: Temperature, ThermalConductivity, Porosity, LogPermeability, Confidence");
+            Logger.Log($"  Exported fields: {string.Join(", ", exportedFields)}");
+
+        }, token);
+    }
+
+    /// <summary>
+    /// Export subsurface voxel data to CSV format for analysis in Excel, Python, R, etc.
+    /// </summary>
+    public static async Task ExportToCSVAsync(
+        SubsurfaceGISDataset dataset,
+        string path,
+        IProgress<(float progress, string message)> progress = null,
+        CancellationToken token = default)
+    {
+        await Task.Run(() =>
+        {
+            progress?.Report((0.0f, "Preparing CSV export..."));
+            token.ThrowIfCancellationRequested();
+
+            if (dataset.VoxelGrid == null || dataset.VoxelGrid.Count == 0)
+            {
+                Logger.LogError("Cannot export: No voxel data available");
+                progress?.Report((1.0f, "Error: No voxel data"));
+                return;
+            }
+
+            Logger.Log($"Exporting {dataset.VoxelGrid.Count} voxels to CSV format...");
+
+            var sb = new StringBuilder();
+
+            // Header row - collect all unique parameter names
+            var allParameterNames = dataset.VoxelGrid
+                .SelectMany(v => v.Parameters.Keys)
+                .Distinct()
+                .OrderBy(k => k)
+                .ToList();
+
+            sb.Append("X,Y,Z,LithologyType,Confidence");
+            foreach (var param in allParameterNames)
+            {
+                sb.Append($",{param}");
+            }
+            sb.AppendLine();
+
+            progress?.Report((0.1f, "Writing voxel data..."));
+            token.ThrowIfCancellationRequested();
+
+            // Data rows
+            int processed = 0;
+            int total = dataset.VoxelGrid.Count;
+
+            foreach (var voxel in dataset.VoxelGrid)
+            {
+                sb.Append($"{voxel.Position.X:F2}");
+                sb.Append($",{voxel.Position.Y:F2}");
+                sb.Append($",{voxel.Position.Z:F2}");
+                sb.Append($",\"{voxel.LithologyType}\"");
+                sb.Append($",{voxel.Confidence:F4}");
+
+                foreach (var paramName in allParameterNames)
+                {
+                    if (voxel.Parameters.TryGetValue(paramName, out var value))
+                    {
+                        sb.Append($",{value}");
+                    }
+                    else
+                    {
+                        sb.Append(",");
+                    }
+                }
+                sb.AppendLine();
+
+                processed++;
+                if (processed % 1000 == 0)
+                {
+                    var prog = 0.1f + 0.8f * (float)processed / total;
+                    progress?.Report((prog, $"Writing voxels {processed}/{total}..."));
+                    token.ThrowIfCancellationRequested();
+                }
+            }
+
+            progress?.Report((0.9f, "Writing CSV file..."));
+            token.ThrowIfCancellationRequested();
+
+            File.WriteAllText(path, sb.ToString());
+
+            progress?.Report((1.0f, "CSV export complete"));
+            Logger.Log($"Successfully exported voxel data to CSV: {path}");
+            Logger.Log($"  Total voxels: {dataset.VoxelGrid.Count}");
+            Logger.Log($"  Columns: X, Y, Z, LithologyType, Confidence, {string.Join(", ", allParameterNames)}");
 
         }, token);
     }
@@ -515,4 +641,16 @@ public enum GeothermalMapType
     ThermalConductivity,
     HeatFlow,
     Confidence
+}
+
+/// <summary>
+/// Options for VTK export
+/// </summary>
+public class VTKExportOptions
+{
+    public bool ExportTemperature { get; set; } = true;
+    public bool ExportThermalConductivity { get; set; } = true;
+    public bool ExportPorosity { get; set; } = true;
+    public bool ExportPermeability { get; set; } = true;
+    public bool ExportConfidence { get; set; } = true;
 }
