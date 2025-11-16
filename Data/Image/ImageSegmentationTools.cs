@@ -2,6 +2,7 @@
 
 using System.Numerics;
 using GeoscientistToolkit.Business;
+using GeoscientistToolkit.Data.Image.AISegmentation;
 using GeoscientistToolkit.UI.Interfaces;
 using GeoscientistToolkit.UI.Utils;
 using ImGuiNET;
@@ -319,12 +320,16 @@ public class ImageSegmentationToolsUI : IDatasetTools
 {
     private readonly ImGuiExportFileDialog _exportDialog;
     private readonly ImGuiFileDialog _importDialog;
-    private readonly string[] _toolNames = { "Threshold", "Brush", "Magic Wand", "Top-Hat", "Watershed" };
+    private readonly string[] _toolNames = { "Threshold", "Brush", "Magic Wand", "Top-Hat", "Watershed", "AI: Grounding SAM", "AI: Interactive SAM" };
     private readonly List<(int x, int y, byte materialId)> _watershedSeeds = new();
     private bool _brushAddMode = true;
     private int _brushRadius = 10;
     private ImageDataset _dataset;
     private Action _invalidateTextureCallback;
+
+    // AI Tools
+    private ImageGroundingSamTool _groundingSamTool;
+    private ImageSam2InteractiveTool _sam2InteractiveTool;
     private bool _isPreviewingThreshold;
     private ImageDataset _lastDatasetForPreview;
     private float _magicWandTolerance = 0.1f;
@@ -377,6 +382,8 @@ public class ImageSegmentationToolsUI : IDatasetTools
             case 2: DrawMagicWandTool(); break;
             case 3: DrawTopHatTool(); break;
             case 4: DrawWatershedTool(); break;
+            case 5: DrawGroundingSamTool(); break;
+            case 6: DrawSam2InteractiveTool(); break;
         }
 
         ImGui.Separator();
@@ -634,6 +641,44 @@ public class ImageSegmentationToolsUI : IDatasetTools
         ImGui.TextWrapped("Click on the image to place seed points for each region.");
     }
 
+    private void DrawGroundingSamTool()
+    {
+        // Lazy initialization
+        if (_groundingSamTool == null)
+        {
+            try
+            {
+                _groundingSamTool = new ImageGroundingSamTool();
+            }
+            catch (Exception ex)
+            {
+                ImGui.TextColored(new Vector4(1, 0.3f, 0.3f, 1), $"Failed to initialize AI tool: {ex.Message}");
+                return;
+            }
+        }
+
+        _groundingSamTool.Draw(_dataset);
+    }
+
+    private void DrawSam2InteractiveTool()
+    {
+        // Lazy initialization
+        if (_sam2InteractiveTool == null)
+        {
+            try
+            {
+                _sam2InteractiveTool = new ImageSam2InteractiveTool();
+            }
+            catch (Exception ex)
+            {
+                ImGui.TextColored(new Vector4(1, 0.3f, 0.3f, 1), $"Failed to initialize AI tool: {ex.Message}");
+                return;
+            }
+        }
+
+        _sam2InteractiveTool.Draw(_dataset);
+    }
+
     private void DrawGeneralOperations(ImageSegmentationData segmentation)
     {
         ImGui.Text("Operations:");
@@ -763,6 +808,20 @@ public class ImageSegmentationToolsUI : IDatasetTools
                 {
                     if (_watershedSeeds.Count > 0)
                         _watershedSeeds.RemoveAt(_watershedSeeds.Count - 1);
+                    changed = true;
+                }
+
+                break;
+            }
+
+            case 5: // AI: Grounding SAM - no direct mouse interaction
+                break;
+
+            case 6: // AI: Interactive SAM - click to add points
+            {
+                if (lClicked && _sam2InteractiveTool != null)
+                {
+                    _sam2InteractiveTool.AddPoint(_dataset, x, y);
                     changed = true;
                 }
 
