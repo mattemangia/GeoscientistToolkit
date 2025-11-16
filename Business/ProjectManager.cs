@@ -14,6 +14,7 @@ using GeoscientistToolkit.Data.Materials;
 using GeoscientistToolkit.Data.Mesh3D;
 using GeoscientistToolkit.Data.Pnm;
 using GeoscientistToolkit.Data.Table;
+using GeoscientistToolkit.Data.Media;
 using GeoscientistToolkit.Settings;
 using GeoscientistToolkit.Util;
 using GeoscientistToolkit.Business.GIS;
@@ -743,6 +744,48 @@ public class ProjectManager
                 }
 
                 dataset = new DatasetGroup(groupDto.Name, childDatasets);
+                break;
+
+            case VideoDatasetDTO videoDto:
+                var videoDataset = new VideoDataset(videoDto.Name, videoDto.FilePath)
+                {
+                    Width = videoDto.Width,
+                    Height = videoDto.Height,
+                    DurationSeconds = videoDto.DurationSeconds,
+                    FrameRate = videoDto.FrameRate,
+                    TotalFrames = videoDto.TotalFrames,
+                    Codec = videoDto.Codec,
+                    Format = videoDto.Format,
+                    BitRate = videoDto.BitRate,
+                    VideoMetadata = videoDto.VideoMetadata != null ? new Dictionary<string, string>(videoDto.VideoMetadata) : new Dictionary<string, string>(),
+                    HasAudioTrack = videoDto.HasAudioTrack,
+                    AudioChannels = videoDto.AudioChannels,
+                    AudioSampleRate = videoDto.AudioSampleRate,
+                    AudioCodec = videoDto.AudioCodec,
+                    IsMissing = !File.Exists(videoDto.FilePath)
+                };
+                if (videoDataset.IsMissing)
+                    Logger.LogWarning($"Source file not found for video: {videoDto.Name} at {videoDto.FilePath}");
+                dataset = videoDataset;
+                break;
+
+            case AudioDatasetDTO audioDto:
+                var audioDataset = new AudioDataset(audioDto.Name, audioDto.FilePath)
+                {
+                    SampleRate = audioDto.SampleRate,
+                    Channels = audioDto.Channels,
+                    BitsPerSample = audioDto.BitsPerSample,
+                    DurationSeconds = audioDto.DurationSeconds,
+                    TotalSamples = audioDto.TotalSamples,
+                    Format = audioDto.Format,
+                    Encoding = audioDto.Encoding,
+                    BitRate = audioDto.BitRate,
+                    AudioMetadata = audioDto.AudioMetadata != null ? new Dictionary<string, string>(audioDto.AudioMetadata) : new Dictionary<string, string>(),
+                    IsMissing = !File.Exists(audioDto.FilePath)
+                };
+                if (audioDataset.IsMissing)
+                    Logger.LogWarning($"Source file not found for audio: {audioDto.Name} at {audioDto.FilePath}");
+                dataset = audioDataset;
                 break;
 
             default:

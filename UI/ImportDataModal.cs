@@ -34,7 +34,9 @@ public class ImportDataModal
         "2D Geology Profile (.2dgeo)",
         "Subsurface GIS Model (.subgis)",
         "Seismic Dataset (SEG-Y)",
-        "PhysicoChem Reactor"
+        "PhysicoChem Reactor",
+        "Video File (MP4/AVI/MOV)",
+        "Audio File (WAV/MP3/OGG)"
     };
 
     private readonly ImGuiFileDialog _fileDialog;
@@ -71,6 +73,10 @@ public class ImportDataModal
     private readonly ImGuiFileDialog _seismicDialog;
     private readonly PhysicoChemLoader _physicoChemLoader;
     private readonly ImGuiFileDialog _physicoChemDialog;
+    private readonly VideoLoader _videoLoader;
+    private readonly ImGuiFileDialog _videoDialog;
+    private readonly AudioLoader _audioLoader;
+    private readonly ImGuiFileDialog _audioDialog;
     private ImportState _currentState = ImportState.Idle;
     private Task<Dataset> _importTask;
     private Dataset _pendingDataset;
@@ -101,6 +107,8 @@ public class ImportDataModal
         _subsurfaceGisDialog = new ImGuiFileDialog("ImportSubsurfaceGISDialog", FileDialogType.OpenFile, "Select Subsurface GIS File");
         _seismicDialog = new ImGuiFileDialog("ImportSeismicDialog", FileDialogType.OpenFile, "Select SEG-Y File");
         _physicoChemDialog = new ImGuiFileDialog("ImportPhysicoChemDialog", FileDialogType.OpenFile, "Select PhysicoChem File");
+        _videoDialog = new ImGuiFileDialog("ImportVideoDialog", FileDialogType.OpenFile, "Select Video File");
+        _audioDialog = new ImGuiFileDialog("ImportAudioDialog", FileDialogType.OpenFile, "Select Audio File");
         _organizerDialog = new ImageStackOrganizerDialog();
 
         // Initialize loaders
@@ -120,6 +128,8 @@ public class ImportDataModal
         _subsurfaceGisLoader = new SubsurfaceGISLoader();
         _seismicLoader = new SeismicLoader();
         _physicoChemLoader = new PhysicoChemLoader();
+        _videoLoader = new VideoLoader();
+        _audioLoader = new AudioLoader();
     }
 
     public void Open()
@@ -230,6 +240,12 @@ public class ImportDataModal
 
         // Added for Seismic
         if (_seismicDialog.Submit()) _seismicLoader.FilePath = _seismicDialog.SelectedPath;
+
+        // Added for Video
+        if (_videoDialog.Submit()) _videoLoader.VideoPath = _videoDialog.SelectedPath;
+
+        // Added for Audio
+        if (_audioDialog.Submit()) _audioLoader.AudioPath = _audioDialog.SelectedPath;
     }
 
     private void DrawOptions()
@@ -294,6 +310,12 @@ public class ImportDataModal
                 break;
             case 16: // PhysicoChem Reactor
                 DrawPhysicoChemOptions();
+                break;
+            case 17: // Video File
+                DrawVideoOptions();
+                break;
+            case 18: // Audio File
+                DrawAudioOptions();
                 break;
         }
 
@@ -587,6 +609,92 @@ public class ImportDataModal
             ImGui.BulletText($"Size: {info.Length / 1024} KB");
 
             ImGui.TextColored(new Vector4(0.0f, 1.0f, 0.5f, 1.0f), "✓ Ready to import PhysicoChem dataset");
+        }
+    }
+
+    private void DrawVideoOptions()
+    {
+        ImGui.TextWrapped("Import video files for analysis and visualization. Supports MP4, AVI, MOV, MKV, and other common formats.");
+
+        ImGui.Spacing();
+        ImGui.Separator();
+        ImGui.Spacing();
+
+        ImGui.Text("Video File:");
+        var path = _videoLoader.VideoPath ?? "";
+        ImGui.InputText("##VideoPath", ref path, 260, ImGuiInputTextFlags.ReadOnly);
+        ImGui.SameLine();
+        if (ImGui.Button("Browse...##VideoFile"))
+        {
+            string[] videoExtensions = { ".mp4", ".avi", ".mov", ".mkv", ".webm", ".flv", ".wmv", ".m4v" };
+            _videoDialog.Open(null, videoExtensions);
+        }
+
+        ImGui.Spacing();
+        ImGui.Checkbox("Generate Thumbnail", ref _videoLoader.GenerateThumbnail);
+
+        if (!string.IsNullOrEmpty(_videoLoader.VideoPath) && File.Exists(_videoLoader.VideoPath))
+        {
+            var videoInfo = _videoLoader.GetVideoInfo();
+            if (videoInfo != null)
+            {
+                ImGui.Spacing();
+                ImGui.Separator();
+                ImGui.Spacing();
+                ImGui.Text("Video Information:");
+                ImGui.BulletText($"File: {videoInfo.FileName}");
+                ImGui.BulletText($"Resolution: {videoInfo.Width}x{videoInfo.Height}");
+                ImGui.BulletText($"Duration: {videoInfo.DurationSeconds:F2} seconds");
+                ImGui.BulletText($"Frame Rate: {videoInfo.FrameRate:F2} fps");
+                ImGui.BulletText($"Codec: {videoInfo.Codec}");
+                ImGui.BulletText($"Format: {videoInfo.Format}");
+                ImGui.BulletText($"Audio: {(videoInfo.HasAudio ? "Yes" : "No")}");
+                ImGui.BulletText($"File Size: {videoInfo.FileSize / 1024.0 / 1024.0:F2} MB");
+                ImGui.TextColored(new Vector4(0.0f, 1.0f, 0.5f, 1.0f), "✓ Ready to import video");
+            }
+        }
+    }
+
+    private void DrawAudioOptions()
+    {
+        ImGui.TextWrapped("Import audio files for analysis and visualization. Supports WAV, MP3, OGG, FLAC, and other common formats.");
+
+        ImGui.Spacing();
+        ImGui.Separator();
+        ImGui.Spacing();
+
+        ImGui.Text("Audio File:");
+        var path = _audioLoader.AudioPath ?? "";
+        ImGui.InputText("##AudioPath", ref path, 260, ImGuiInputTextFlags.ReadOnly);
+        ImGui.SameLine();
+        if (ImGui.Button("Browse...##AudioFile"))
+        {
+            string[] audioExtensions = { ".wav", ".mp3", ".ogg", ".flac", ".m4a", ".aac", ".wma" };
+            _audioDialog.Open(null, audioExtensions);
+        }
+
+        ImGui.Spacing();
+        ImGui.Checkbox("Generate Waveform", ref _audioLoader.GenerateWaveform);
+
+        if (!string.IsNullOrEmpty(_audioLoader.AudioPath) && File.Exists(_audioLoader.AudioPath))
+        {
+            var audioInfo = _audioLoader.GetAudioInfo();
+            if (audioInfo != null)
+            {
+                ImGui.Spacing();
+                ImGui.Separator();
+                ImGui.Spacing();
+                ImGui.Text("Audio Information:");
+                ImGui.BulletText($"File: {audioInfo.FileName}");
+                ImGui.BulletText($"Sample Rate: {audioInfo.SampleRate} Hz");
+                ImGui.BulletText($"Channels: {audioInfo.Channels}");
+                ImGui.BulletText($"Bit Depth: {audioInfo.BitsPerSample} bits");
+                ImGui.BulletText($"Duration: {audioInfo.DurationSeconds:F2} seconds");
+                ImGui.BulletText($"Encoding: {audioInfo.Encoding}");
+                ImGui.BulletText($"Format: {audioInfo.Format}");
+                ImGui.BulletText($"File Size: {audioInfo.FileSize / 1024.0 / 1024.0:F2} MB");
+                ImGui.TextColored(new Vector4(0.0f, 1.0f, 0.5f, 1.0f), "✓ Ready to import audio");
+            }
         }
     }
 
@@ -1223,6 +1331,8 @@ public class ImportDataModal
             14 => _subsurfaceGisLoader,
             15 => _seismicLoader,
             16 => _physicoChemLoader,
+            17 => _videoLoader, // Added for Video
+            18 => _audioLoader, // Added for Audio
             _ => null
         };
     }
