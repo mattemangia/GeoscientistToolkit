@@ -223,7 +223,7 @@ public class GeomechanicsSolver : IDisposable
         Dictionary<string, float> layerPoissonsRatio,
         Dictionary<string, float> layerThermalExpansion,
         Dictionary<string, float> layerBiotCoefficient,
-        GeothermalMeshGenerator.CylindricalMesh mesh)
+        GeothermalMesh mesh)
     {
         // Default values for unknown lithologies
         const float defaultYoungsGPa = 50.0f;
