@@ -2,12 +2,14 @@
 
 using System.Data;
 using System.Numerics;
+using System.Text;
 using GeoscientistToolkit.Business;
 using GeoscientistToolkit.Data;
 using GeoscientistToolkit.Data.Borehole;
 using GeoscientistToolkit.Data.GIS;
 using GeoscientistToolkit.Data.Mesh3D;
 using GeoscientistToolkit.Data.Table;
+using GeoscientistToolkit.Data.Text;
 using GeoscientistToolkit.Data.TwoDGeology;
 using GeoscientistToolkit.Settings;
 using GeoscientistToolkit.UI.GIS;
@@ -443,6 +445,35 @@ public class MainWindow
 
                 // Optionally, select it
                 OnDatasetSelected(newTableDataset);
+            }
+
+            if (ImGui.MenuItem("New Text Document..."))
+            {
+                // Generate a unique name with timestamp
+                var timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
+                var documentName = $"New_Document_{timestamp}";
+                var filePath = Path.Combine(Path.GetTempPath(), $"{documentName}.txt");
+
+                // Create empty text dataset
+                var newTextDataset = new TextDataset(documentName, filePath)
+                {
+                    Content = "# New Text Document\n\nStart writing here...",
+                    Format = "txt",
+                    LineCount = 3,
+                    CharacterCount = 44,
+                    WordCount = 7,
+                    FileEncoding = Encoding.UTF8
+                };
+
+                // Save the initial content to file
+                newTextDataset.Save();
+
+                // Add it to the project
+                ProjectManager.Instance.AddDataset(newTextDataset);
+                Logger.Log($"Created new text document: {documentName}");
+
+                // Optionally, select it
+                OnDatasetSelected(newTextDataset);
             }
 
             if (ImGui.MenuItem("GeoScript Editor..."))
