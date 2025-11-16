@@ -123,8 +123,8 @@ public class GISTools : IDatasetTools
                     new()
                     {
                         Name = "Hydrological Analysis",
-                        Description = "Trace flow paths like River Runner and simulate flooding/drainage.",
-                        Tool = new HydrologicalAnalysisTool()
+                        Description = "GPU-accelerated rainfall simulation, River Runner, and water body tracking.",
+                        Tool = new HydrologicalAnalysisToolEnhanced()
                     }
                 }
             },
