@@ -617,7 +617,6 @@ public class DatasetPanel : BasePanel
                 if (dataset is Data.Borehole.BoreholeDataset borehole)
                 {
                     info.Metadata["Total Depth"] = $"{borehole.TotalDepth} m";
-                    info.Metadata["Depth Interval"] = $"{borehole.DepthInterval} m";
                 }
                 else if (dataset is Data.Table.TableDataset table)
                 {
@@ -628,7 +627,7 @@ public class DatasetPanel : BasePanel
                 {
                     info.Metadata["Dimensions"] = $"{acoustic.Width}x{acoustic.Height}x{acoustic.Depth}";
                 }
-                else if (dataset is Data.PNM.PNMDataset pnm)
+                else if (dataset is Data.Pnm.PnmDataset pnm)
                 {
                     if (pnm.Permeability.HasValue)
                         info.Metadata["Permeability"] = $"{pnm.Permeability.Value:E2} m²";
@@ -651,7 +650,7 @@ public class DatasetPanel : BasePanel
 
             // Create a text dataset for the report
             var reportFileName = $"{group.Name}_Report_{DateTime.Now:yyyyMMdd_HHmmss}.txt";
-            var projectDir = System.IO.Path.GetDirectoryName(_datasets.FirstOrDefault()?.FilePath);
+            var projectDir = System.IO.Path.GetDirectoryName(ProjectManager.Instance.LoadedDatasets.FirstOrDefault()?.FilePath);
             if (string.IsNullOrEmpty(projectDir))
             {
                 projectDir = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
@@ -670,7 +669,7 @@ public class DatasetPanel : BasePanel
             if (reportDataset != null)
             {
                 // Add to the project
-                OnDatasetAdded?.Invoke(reportDataset);
+                ProjectManager.Instance.AddDataset(reportDataset);
                 Util.Logger.Log($"Report saved and added to project: {reportPath}");
             }
         }

@@ -206,6 +206,10 @@ public unsafe class NMRSimulationOpenCL : IDisposable
     {
         Logger.Log("NMRSimulationOpenCL: Initializing OpenCL...");
 
+        // Declare variables that will be used throughout the method
+        int errorCode;
+        nint device;
+
         // Check if multi-GPU mode is enabled
         _multiGPUMode = GeoscientistToolkit.OpenCL.OpenCLDeviceManager.IsMultiGPUEnabled();
 
@@ -274,8 +278,7 @@ public unsafe class NMRSimulationOpenCL : IDisposable
             Logger.Log($"NMRSimulationOpenCL: Global Memory: {deviceInfo.GlobalMemory / (1024 * 1024)} MB");
 
             // Create context
-            int errorCode;
-            var device = _device;
+            device = _device;
             _context = _cl.CreateContext(null, 1, &device, null, null, &errorCode);
             CheckError(errorCode, "CreateContext");
 
@@ -311,10 +314,11 @@ public unsafe class NMRSimulationOpenCL : IDisposable
             {
                 errorCode = _cl.BuildProgram(_program, (uint)_devices.Count, devicesPtr, (byte*)null, null, null);
             }
+            device = _device; // Use primary device for build log
         }
         else
         {
-            var device = _device;
+            device = _device;
             errorCode = _cl.BuildProgram(_program, 1, &device, (byte*)null, null, null);
         }
 

@@ -163,12 +163,10 @@ public class TextViewer : IDatasetViewer
         var availableSize = ImGui.GetContentRegionAvail();
 
         // Handle export dialog
-        _exportDialog.Submit();
-        if (_exportDialog.IsFileSelected)
+        if (_exportDialog.Submit())
         {
-            var exportPath = _exportDialog.GetSelectedFilePath();
+            var exportPath = _exportDialog.SelectedPath;
             _dataset.Export(exportPath);
-            _exportDialog.ClearSelection();
         }
 
         // Draw text editor

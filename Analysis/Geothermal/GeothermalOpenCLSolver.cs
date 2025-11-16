@@ -236,7 +236,7 @@ public class GeothermalOpenCLSolver : IDisposable
 
                 DeviceName = string.Join(", ", deviceInfos.Select(d => d.Name));
                 DeviceVendor = string.Join(", ", deviceInfos.Select(d => d.Vendor).Distinct());
-                DeviceGlobalMemory = deviceInfos.Sum(d => d.GlobalMemory);
+                DeviceGlobalMemory = (ulong)deviceInfos.Sum(d => (long)d.GlobalMemory);
 
                 Logger.Log($"GeothermalOpenCLSolver: Multi-GPU mode with {_devices.Count} devices:");
                 foreach (var info in deviceInfos)
