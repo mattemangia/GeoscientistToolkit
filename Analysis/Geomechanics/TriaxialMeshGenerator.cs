@@ -225,7 +225,7 @@ public class TriaxialMeshGenerator
                     // Check if all 8 corner nodes exist
                     bool allExist = true;
                     int[] cornerNodes = new int[8];
-                    int[] offsets = new[]
+                    (int, int, int)[] offsets = new[]
                     {
                         (0, 0, 0), (1, 0, 0), (1, 1, 0), (0, 1, 0),
                         (0, 0, 1), (1, 0, 1), (1, 1, 1), (0, 1, 1)

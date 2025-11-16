@@ -666,7 +666,7 @@ public class GeomechanicsSolver : IDisposable
             if (err != 0) return false;
 
             // Create command queue
-            _queue = _cl.CreateCommandQueue(_context, _device, 0, &err);
+            _queue = _cl.CreateCommandQueue(_context, _device, (CommandQueueProperties)0, &err);
             if (err != 0) return false;
 
             // Create and compile program
@@ -703,11 +703,11 @@ public class GeomechanicsSolver : IDisposable
             // Create buffers
             int totalSize = _nr * _nth * _nz;
 
-            _temperatureBuffer = _cl.CreateBuffer(_context, (ulong)MemFlags.ReadOnly,
+            _temperatureBuffer = _cl.CreateBuffer(_context, (MemFlags)MemFlags.ReadOnly,
                 (nuint)(totalSize * sizeof(float)), null, &err);
-            _temperatureOldBuffer = _cl.CreateBuffer(_context, (ulong)MemFlags.ReadOnly,
+            _temperatureOldBuffer = _cl.CreateBuffer(_context, (MemFlags)MemFlags.ReadOnly,
                 (nuint)(totalSize * sizeof(float)), null, &err);
-            _pressureBuffer = _cl.CreateBuffer(_context, (ulong)MemFlags.ReadOnly,
+            _pressureBuffer = _cl.CreateBuffer(_context, (MemFlags)MemFlags.ReadOnly,
                 (nuint)(totalSize * sizeof(float)), null, &err);
 
             // Material properties
@@ -717,27 +717,27 @@ public class GeomechanicsSolver : IDisposable
             fixed (float* pBiot = _biotCoefficient)
             {
                 _youngsModulusBuffer = _cl.CreateBuffer(_context,
-                    (ulong)(MemFlags.ReadOnly | MemFlags.CopyHostPtr),
+                    (MemFlags)(MemFlags.ReadOnly | MemFlags.CopyHostPtr),
                     (nuint)(totalSize * sizeof(float)), pYoungs, &err);
                 _poissonsRatioBuffer = _cl.CreateBuffer(_context,
-                    (ulong)(MemFlags.ReadOnly | MemFlags.CopyHostPtr),
+                    (MemFlags)(MemFlags.ReadOnly | MemFlags.CopyHostPtr),
                     (nuint)(totalSize * sizeof(float)), pPoisson, &err);
                 _thermalExpansionBuffer = _cl.CreateBuffer(_context,
-                    (ulong)(MemFlags.ReadOnly | MemFlags.CopyHostPtr),
+                    (MemFlags)(MemFlags.ReadOnly | MemFlags.CopyHostPtr),
                     (nuint)(totalSize * sizeof(float)), pThermalExp, &err);
                 _biotCoefficientBuffer = _cl.CreateBuffer(_context,
-                    (ulong)(MemFlags.ReadOnly | MemFlags.CopyHostPtr),
+                    (MemFlags)(MemFlags.ReadOnly | MemFlags.CopyHostPtr),
                     (nuint)(totalSize * sizeof(float)), pBiot, &err);
             }
 
             // Result buffers (stress stored as 3*totalSize: XX, YY, ZZ)
-            _stressBuffer = _cl.CreateBuffer(_context, (ulong)MemFlags.ReadWrite,
+            _stressBuffer = _cl.CreateBuffer(_context, (MemFlags)MemFlags.ReadWrite,
                 (nuint)(totalSize * 3 * sizeof(float)), null, &err);
-            _strainBuffer = _cl.CreateBuffer(_context, (ulong)MemFlags.ReadWrite,
+            _strainBuffer = _cl.CreateBuffer(_context, (MemFlags)MemFlags.ReadWrite,
                 (nuint)(totalSize * 3 * sizeof(float)), null, &err);
-            _vonMisesBuffer = _cl.CreateBuffer(_context, (ulong)MemFlags.WriteOnly,
+            _vonMisesBuffer = _cl.CreateBuffer(_context, (MemFlags)MemFlags.WriteOnly,
                 (nuint)(totalSize * sizeof(float)), null, &err);
-            _displacementBuffer = _cl.CreateBuffer(_context, (ulong)MemFlags.ReadWrite,
+            _displacementBuffer = _cl.CreateBuffer(_context, (MemFlags)MemFlags.ReadWrite,
                 (nuint)(totalSize * sizeof(float)), null, &err);
 
             _isOpenCLInitialized = true;

@@ -56,8 +56,7 @@ namespace GeoscientistToolkit.Analysis.Geothermal
             try
             {
                 // Get device from OpenCLDeviceManager
-                var deviceManager = OpenCLDeviceManager.Instance;
-                _device = deviceManager.GetDevice(_cl);
+                _device = OpenCLDeviceManager.GetComputeDevice();
 
                 if (_device == nint.Zero)
                 {
@@ -75,7 +74,7 @@ namespace GeoscientistToolkit.Analysis.Geothermal
                 }
 
                 // Create command queue (OpenCL 1.2)
-                _commandQueue = _cl.CreateCommandQueue(_context, _device, 0, &errorCode);
+                _commandQueue = _cl.CreateCommandQueue(_context, _device, (CommandQueueProperties)0, &errorCode);
                 if (errorCode != (int)ErrorCodes.Success)
                 {
                     Console.WriteLine($"Failed to create command queue: {errorCode}");
@@ -411,7 +410,7 @@ float entropy_liquid(float T) {{
 
 float entropy_vapor(float T) {{
     return {sVap[0]}f + {sVap[1]}f*T + {sVap[2]}f*T*T + {sVap[3]}f*T*T*T;
-}}"
+}}" + @"
 
 // Main ORC cycle kernel
 __kernel void orc_cycle_kernel(
@@ -445,14 +444,14 @@ __kernel void orc_cycle_kernel(
     float s1 = entropy_liquid(condTemp);
 
     // State 2: Pump outlet
-    const float rho_liquid = {rhoLiq}f; // kg/m³
+    const float rho_liquid = " + rhoLiq + @"f; // kg/m³
     float dh_pump = (evapPress - P1) / (rho_liquid * pumpEff);
     float h2 = h1 + dh_pump;
 
     // State 3: Turbine inlet (superheated vapor)
     float T_max_evap = T_geo - pinch;
     float T3 = T_max_evap - superheat;
-    T3 = fmin(T3, {tCrit}f - 10.0f); // Below critical temp
+    T3 = fmin(T3, " + tCrit + @"f - 10.0f); // Below critical temp
     float h3 = enthalpy_vapor(T3) + superheat * 1000.0f;
     float s3 = entropy_vapor(T3) + superheat * 2.0f;
 

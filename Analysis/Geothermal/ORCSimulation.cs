@@ -283,13 +283,22 @@ namespace GeoscientistToolkit.Analysis.Geothermal
             Span<float> h3 = stackalloc float[8];
             Span<float> h4 = stackalloc float[8];
 
-            Avx.Store((float*)netPower.GetPinnableReference(), vNetPower);
-            Avx.Store((float*)efficiency.GetPinnableReference(), vEfficiency);
-            Avx.Store((float*)orcMassFlow.GetPinnableReference(), vORCMassFlow);
-            Avx.Store((float*)h1.GetPinnableReference(), vH1);
-            Avx.Store((float*)h2.GetPinnableReference(), vH2);
-            Avx.Store((float*)h3.GetPinnableReference(), vH3);
-            Avx.Store((float*)h4.GetPinnableReference(), vH4);
+            fixed (float* pNetPower = netPower)
+            fixed (float* pEfficiency = efficiency)
+            fixed (float* pOrcMassFlow = orcMassFlow)
+            fixed (float* pH1 = h1)
+            fixed (float* pH2 = h2)
+            fixed (float* pH3 = h3)
+            fixed (float* pH4 = h4)
+            {
+                Avx.Store(pNetPower, vNetPower);
+                Avx.Store(pEfficiency, vEfficiency);
+                Avx.Store(pOrcMassFlow, vORCMassFlow);
+                Avx.Store(pH1, vH1);
+                Avx.Store(pH2, vH2);
+                Avx.Store(pH3, vH3);
+                Avx.Store(pH4, vH4);
+            }
 
             for (int i = 0; i < 8; i++)
             {

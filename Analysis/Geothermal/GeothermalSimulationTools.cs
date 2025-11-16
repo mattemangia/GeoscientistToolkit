@@ -1406,7 +1406,7 @@ public class GeothermalSimulationTools : IDatasetTools, IDisposable
                     // Working Fluid Selection from ORCFluidLibrary
                     ImGui.Spacing();
                     var fluids = GeoscientistToolkit.Business.ORCFluidLibrary.Instance.GetAllFluids();
-                    var fluidNames = fluids.Select(f => $"{f.Name} ({f.TemperatureRange_K_Min - 273.15f:F0}-{f.TemperatureRange_K_Max - 273.15f:F0}°C)").ToArray();
+                    var fluidNames = fluids.Select(f => $"{f.Name} ({f.MinimumTemperature_K - 273.15f:F0}-{f.MaximumTemperature_K - 273.15f:F0}°C)").ToArray();
                     var currentFluidIdx = -1;
                     for (int i = 0; i < fluids.Count; i++)
                     {

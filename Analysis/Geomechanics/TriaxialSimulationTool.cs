@@ -398,7 +398,9 @@ public class TriaxialSimulationTool : IDisposable
         }
         else
         {
-            ImGui.DragFloat("σ3 (MPa)", ref _loadParams.ConfiningPressure_MPa, 0.5f, 0f, 200f);
+            float confiningPressure = _loadParams.ConfiningPressure_MPa;
+            if (ImGui.DragFloat("σ3 (MPa)", ref confiningPressure, 0.5f, 0f, 200f))
+                _loadParams.ConfiningPressure_MPa = confiningPressure;
         }
 
         ImGui.Spacing();
@@ -406,13 +408,23 @@ public class TriaxialSimulationTool : IDisposable
         // Axial loading
         if (_loadParams.LoadingMode == TriaxialLoadingMode.StrainControlled)
         {
-            ImGui.DragFloat("Strain Rate (/s)", ref _loadParams.AxialStrainRate_per_s, 1e-6f, 1e-7f, 1e-3f, "%.2e");
-            ImGui.DragFloat("Max Axial Strain (%)", ref _loadParams.MaxAxialStrain_percent, 0.1f, 0.1f, 20f);
+            float strainRate = _loadParams.AxialStrainRate_per_s;
+            if (ImGui.DragFloat("Strain Rate (/s)", ref strainRate, 1e-6f, 1e-7f, 1e-3f, "%.2e"))
+                _loadParams.AxialStrainRate_per_s = strainRate;
+
+            float maxStrain = _loadParams.MaxAxialStrain_percent;
+            if (ImGui.DragFloat("Max Axial Strain (%)", ref maxStrain, 0.1f, 0.1f, 20f))
+                _loadParams.MaxAxialStrain_percent = maxStrain;
         }
         else
         {
-            ImGui.DragFloat("Stress Rate (MPa/s)", ref _loadParams.AxialStressRate_MPa_per_s, 0.01f, 0.001f, 10f);
-            ImGui.DragFloat("Max Axial Stress (MPa)", ref _loadParams.MaxAxialStress_MPa, 5f, 10f, 500f);
+            float stressRate = _loadParams.AxialStressRate_MPa_per_s;
+            if (ImGui.DragFloat("Stress Rate (MPa/s)", ref stressRate, 0.01f, 0.001f, 10f))
+                _loadParams.AxialStressRate_MPa_per_s = stressRate;
+
+            float maxStress = _loadParams.MaxAxialStress_MPa;
+            if (ImGui.DragFloat("Max Axial Stress (MPa)", ref maxStress, 5f, 10f, 500f))
+                _loadParams.MaxAxialStress_MPa = maxStress;
         }
 
         ImGui.Spacing();
@@ -426,13 +438,23 @@ public class TriaxialSimulationTool : IDisposable
 
         if (_loadParams.DrainageCondition == DrainageCondition.Undrained)
         {
-            ImGui.DragFloat("Fluid Bulk Modulus (GPa)", ref _loadParams.PoreFluidBulkModulus_GPa, 0.1f, 0.1f, 10f);
+            float bulkModulus = _loadParams.PoreFluidBulkModulus_GPa;
+            if (ImGui.DragFloat("Fluid Bulk Modulus (GPa)", ref bulkModulus, 0.1f, 0.1f, 10f))
+                _loadParams.PoreFluidBulkModulus_GPa = bulkModulus;
         }
 
         ImGui.Spacing();
-        ImGui.DragFloat("Total Time (s)", ref _loadParams.TotalTime_s, 1f, 1f, 1000f);
-        ImGui.DragFloat("Time Step (s)", ref _loadParams.TimeStep_s, 0.01f, 0.001f, 10f);
-        ImGui.DragFloat("Temperature (°C)", ref _loadParams.Temperature_C, 1f, -50f, 200f);
+        float totalTime = _loadParams.TotalTime_s;
+        if (ImGui.DragFloat("Total Time (s)", ref totalTime, 1f, 1f, 1000f))
+            _loadParams.TotalTime_s = totalTime;
+
+        float timeStep = _loadParams.TimeStep_s;
+        if (ImGui.DragFloat("Time Step (s)", ref timeStep, 0.01f, 0.001f, 10f))
+            _loadParams.TimeStep_s = timeStep;
+
+        float temperature = _loadParams.Temperature_C;
+        if (ImGui.DragFloat("Temperature (°C)", ref temperature, 1f, -50f, 200f))
+            _loadParams.Temperature_C = temperature;
     }
 
     private void DrawFailureCriterionSection()
@@ -800,8 +822,8 @@ public class TriaxialSimulationTool : IDisposable
     private void LoadDefaultMaterial()
     {
         // Try to load a rock material
-        _selectedMaterial = _materialLibrary.GetMaterialByName("Granite") ??
-                           _materialLibrary.GetMaterialByName("Sandstone") ??
+        _selectedMaterial = _materialLibrary.Find("Granite") ??
+                           _materialLibrary.Find("Sandstone") ??
                            new PhysicalMaterial
                            {
                                Name = "Default Rock",
@@ -817,7 +839,7 @@ public class TriaxialSimulationTool : IDisposable
 
     private void UpdateFilteredMaterials()
     {
-        var allMaterials = _materialLibrary.GetAllMaterials()
+        var allMaterials = _materialLibrary.Materials
             .Where(m => m.Phase == PhaseType.Solid)
             .ToList();
 
