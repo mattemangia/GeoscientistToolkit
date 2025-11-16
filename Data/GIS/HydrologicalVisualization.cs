@@ -119,7 +119,7 @@ public class HydrologicalVisualization
         Vector2 canvasPos, Vector2 canvasSize, float zoom, Vector2 pan,
         Func<Vector2, Vector2, Vector2, float, Vector2, Vector2> worldToScreen)
     {
-        if (flowPath.Count < 2) return;
+        if (flowPath == null || flowPath.Count < 2) return;
 
         float cellWidth = (bounds.Max.X - bounds.Min.X) / width;
         float cellHeight = (bounds.Max.Y - bounds.Min.Y) / height;
@@ -159,13 +159,18 @@ public class HydrologicalVisualization
         Vector2 canvasPos, Vector2 canvasSize, float zoom, Vector2 pan,
         Func<Vector2, Vector2, Vector2, float, Vector2, Vector2> worldToScreen)
     {
+        if (watershed == null) return;
+
         float cellWidth = (bounds.Max.X - bounds.Min.X) / width;
         float cellHeight = (bounds.Max.Y - bounds.Min.Y) / height;
 
+        int watershedRows = watershed.GetLength(0);
+        int watershedCols = watershed.GetLength(1);
+
         // Draw watershed cells
-        for (int r = 0; r < watershed.GetLength(0); r++)
+        for (int r = 0; r < Math.Min(watershedRows, height); r++)
         {
-            for (int c = 0; c < watershed.GetLength(1); c++)
+            for (int c = 0; c < Math.Min(watershedCols, width); c++)
             {
                 if (watershed[r, c])
                 {
@@ -186,21 +191,26 @@ public class HydrologicalVisualization
         Vector2 canvasPos, Vector2 canvasSize, float zoom, Vector2 pan,
         Func<Vector2, Vector2, Vector2, float, Vector2, Vector2> worldToScreen)
     {
+        if (waterDepth == null) return;
+
         float cellWidth = (bounds.Max.X - bounds.Min.X) / width;
         float cellHeight = (bounds.Max.Y - bounds.Min.Y) / height;
 
+        int depthRows = waterDepth.GetLength(0);
+        int depthCols = waterDepth.GetLength(1);
+
         // Find max depth for normalization
         float maxDepth = 0f;
-        for (int r = 0; r < waterDepth.GetLength(0); r++)
-            for (int c = 0; c < waterDepth.GetLength(1); c++)
+        for (int r = 0; r < depthRows; r++)
+            for (int c = 0; c < depthCols; c++)
                 maxDepth = Math.Max(maxDepth, waterDepth[r, c]);
 
         if (maxDepth < 0.001f) return; // No water
 
         // Draw water depth cells
-        for (int r = 0; r < waterDepth.GetLength(0); r++)
+        for (int r = 0; r < Math.Min(depthRows, height); r++)
         {
-            for (int c = 0; c < waterDepth.GetLength(1); c++)
+            for (int c = 0; c < Math.Min(depthCols, width); c++)
             {
                 float depth = waterDepth[r, c];
                 if (depth > 0.01f) // Only render if significant water

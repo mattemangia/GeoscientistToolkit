@@ -8,6 +8,7 @@ using GeoscientistToolkit.Analysis.Hydrological;
 using GeoscientistToolkit.Data;
 using GeoscientistToolkit.Data.GIS;
 using GeoscientistToolkit.UI;
+using GeoscientistToolkit.UI.GIS;
 using GeoscientistToolkit.UI.Interfaces;
 using GeoscientistToolkit.Util;
 using ImGuiNET;
@@ -50,7 +51,6 @@ public class HydrologicalAnalysisToolEnhanced : IDatasetTools
     private List<float> _volumeHistory = new();
 
     // Animation playback
-    private List<float[,]> _waterDepthHistory = new();
     private bool _isPlaying = false;
     private float _playbackSpeed = 1.0f;
     private float _animationTimer = 0f;
@@ -217,14 +217,43 @@ public class HydrologicalAnalysisToolEnhanced : IDatasetTools
         if (rasterLayers.Count == 0)
         {
             ImGui.TextColored(new Vector4(1, 0.5f, 0, 1), "No elevation data available.");
-            ImGui.TextWrapped("Load a DEM, select an online elevation basemap, or extract elevation from basemap tiles.");
+            ImGui.TextWrapped("Load a DEM, select an online elevation basemap, or extract/generate elevation data.");
 
             ImGui.Spacing();
-            if (ImGui.Button("Extract Elevation from Online Basemap", new Vector2(300, 30)))
+
+            if (!_isProcessing)
             {
-                ExtractElevationFromBasemap(gisDataset);
+                if (ImGui.Button("Extract Elevation from Online Basemap", new Vector2(300, 30)))
+                {
+                    ExtractElevationFromBasemap(gisDataset);
+                }
+                HelpMarker("Download and process ESRI World Hillshade tiles to create approximate elevation data");
+
+                ImGui.Spacing();
+
+                ImGui.Text("Or generate synthetic test terrain:");
+                ImGui.SetNextItemWidth(200);
+                string[] terrainTypes = { "Hills", "Mountain", "Valley", "Flat" };
+                int terrainIndex = 0;
+                if (ImGui.Combo("Terrain Type", ref terrainIndex, terrainTypes, terrainTypes.Length))
+                {
+                    var syntheticDEM = BasemapElevationExtractor.CreateSyntheticDEM(
+                        gisDataset.Bounds.Width > 0 ? gisDataset.Bounds : new BoundingBox
+                        {
+                            Min = new Vector2(-0.1f, -0.1f),
+                            Max = new Vector2(0.1f, 0.1f)
+                        },
+                        512, 512, terrainTypes[terrainIndex].ToLower());
+                    gisDataset.Layers.Add(syntheticDEM);
+                    _elevationLayer = syntheticDEM;
+                    _statusMessage = $"Generated synthetic {terrainTypes[terrainIndex]} terrain";
+                }
             }
-            HelpMarker("Download and process ESRI World Hillshade tiles to create approximate elevation data");
+            else
+            {
+                ImGui.TextColored(new Vector4(1, 1, 0, 1), "Extracting elevation...");
+                ImGui.ProgressBar(0.5f, new Vector2(300, 0));
+            }
 
             return;
         }
@@ -681,40 +710,6 @@ public class HydrologicalAnalysisToolEnhanced : IDatasetTools
         return month < _rainfallCurve[0].Point.X ? _rainfallCurve[0].Point.Y : _rainfallCurve[_rainfallCurve.Count - 1].Point.Y;
     }
 
-    public void OnMapClick(Vector2 worldPosition, GISDataset dataset)
-    {
-        if (_elevationLayer == null || _flowDirection == null) return;
-
-        _clickPoint = worldPosition;
-        _hasClickedPoint = true;
-
-        // Convert to raster coords
-        var bounds = _elevationLayer.Bounds;
-        float normalizedX = (worldPosition.X - bounds.Min.X) / (bounds.Max.X - bounds.Min.X);
-        float normalizedY = (worldPosition.Y - bounds.Min.Y) / (bounds.Max.Y - bounds.Min.Y);
-
-        int col = (int)(normalizedX * _elevationLayer.Width);
-        int row = (int)((1 - normalizedY) * _elevationLayer.Height);
-
-        col = Math.Clamp(col, 0, _elevationLayer.Width - 1);
-        row = Math.Clamp(row, 0, _elevationLayer.Height - 1);
-
-        if (_snapToStreams)
-        {
-            var snapped = GISOperations.SnapToStream(_flowAccumulation, row, col, _snapRadius, _streamThreshold);
-            row = snapped.row;
-            col = snapped.col;
-        }
-
-        _currentFlowPath = GISOperations.TraceFlowPath(_flowDirection, row, col);
-
-        if (_showWatershed)
-        {
-            _currentWatershed = GISOperations.DelineateWatershed(_flowDirection, row, col);
-        }
-
-        _statusMessage = $"Flow path traced: {_currentFlowPath.Count} cells";
-    }
 
     private void ExportFlowPath(GISDataset gisDataset)
     {
@@ -877,43 +872,61 @@ public class HydrologicalAnalysisToolEnhanced : IDatasetTools
             _isProcessing = true;
             _statusMessage = "Extracting elevation from basemap tiles...";
 
-            var extractor = new BasemapElevationExtractor();
-
-            // Use dataset bounds if available, otherwise use a default region
-            var bounds = gisDataset.Bounds;
-            if (bounds.Width < 0.001f || bounds.Height < 0.001f)
+            await Task.Run(async () =>
             {
-                // Default to a 10km region around center
-                var center = gisDataset.Center;
-                bounds = new BoundingBox
+                try
                 {
-                    Min = new Vector2(center.X - 0.05f, center.Y - 0.05f),
-                    Max = new Vector2(center.X + 0.05f, center.Y + 0.05f)
-                };
-            }
+                    var extractor = new BasemapElevationExtractor();
 
-            // Extract elevation at reasonable resolution
-            int resolution = Math.Min(1000, Math.Max(256, (int)(bounds.Width * 10000)));
-            var elevationLayer = await extractor.ExtractElevationFromBasemap(bounds, resolution, resolution, zoomLevel: 12);
+                    // Use dataset bounds if available, otherwise use a default region
+                    var bounds = gisDataset.Bounds;
+                    if (bounds.Width < 0.001f || bounds.Height < 0.001f)
+                    {
+                        // Default to a 10km region around center
+                        var center = gisDataset.Center;
+                        bounds = new BoundingBox
+                        {
+                            Min = new Vector2(center.X - 0.05f, center.Y - 0.05f),
+                            Max = new Vector2(center.X + 0.05f, center.Y + 0.05f)
+                        };
+                    }
 
-            if (elevationLayer != null)
-            {
-                elevationLayer.Name = "Extracted Elevation";
-                gisDataset.Layers.Add(elevationLayer);
-                _elevationLayer = elevationLayer;
-                _statusMessage = $"Elevation extracted: {resolution}x{resolution}";
-                Logger.Log($"Elevation layer extracted from basemap tiles");
-            }
-            else
-            {
-                _statusMessage = "Failed to extract elevation";
-                Logger.LogError("Elevation extraction returned null");
-            }
+                    // Extract elevation at reasonable resolution
+                    int resolution = Math.Min(1000, Math.Max(256, (int)(bounds.Width * 10000)));
+                    Logger.Log($"Starting elevation extraction: {resolution}x{resolution} @ zoom 12");
+
+                    var elevationLayer = await extractor.ExtractElevationFromBasemap(bounds, resolution, resolution, zoomLevel: 12);
+
+                    if (elevationLayer != null)
+                    {
+                        elevationLayer.Name = "Extracted Elevation";
+                        gisDataset.Layers.Add(elevationLayer);
+                        _elevationLayer = elevationLayer;
+                        _statusMessage = $"Elevation extracted: {resolution}x{resolution}";
+                        Logger.Log($"Elevation layer extracted successfully from basemap tiles");
+                    }
+                    else
+                    {
+                        _statusMessage = "Failed to extract elevation - no data returned";
+                        Logger.LogError("Elevation extraction returned null");
+                    }
+                }
+                catch (HttpRequestException httpEx)
+                {
+                    _statusMessage = $"Network error: {httpEx.Message}";
+                    Logger.LogError($"Network error during elevation extraction: {httpEx.Message}");
+                }
+                catch (Exception innerEx)
+                {
+                    _statusMessage = $"Error: {innerEx.Message}";
+                    Logger.LogError($"Failed to extract elevation: {innerEx.Message}\n{innerEx.StackTrace}");
+                }
+            });
         }
         catch (Exception ex)
         {
-            _statusMessage = $"Error: {ex.Message}";
-            Logger.LogError($"Failed to extract elevation from basemap: {ex.Message}");
+            _statusMessage = $"Unexpected error: {ex.Message}";
+            Logger.LogError($"Unexpected error in elevation extraction: {ex.Message}");
         }
         finally
         {
@@ -956,8 +969,12 @@ public class HydrologicalAnalysisToolEnhanced : IDatasetTools
 
         // Convert world coordinates to raster cell coordinates
         var bounds = _elevationLayer.Bounds;
-        var col = (int)((worldPos.X - bounds.Min.X) / (bounds.Max.X - bounds.Min.X) * _elevationLayer.Width);
-        var row = (int)((worldPos.Y - bounds.Min.Y) / (bounds.Max.Y - bounds.Min.Y) * _elevationLayer.Height);
+        float normalizedX = (worldPos.X - bounds.Min.X) / (bounds.Max.X - bounds.Min.X);
+        float normalizedY = (worldPos.Y - bounds.Min.Y) / (bounds.Max.Y - bounds.Min.Y);
+
+        // Note: Y-axis inversion for raster coordinates (origin is top-left)
+        int col = (int)(normalizedX * _elevationLayer.Width);
+        int row = (int)((1 - normalizedY) * _elevationLayer.Height);
 
         // Clamp to valid range
         row = Math.Clamp(row, 0, _elevationLayer.Height - 1);
@@ -986,6 +1003,6 @@ public class HydrologicalAnalysisToolEnhanced : IDatasetTools
             _statusMessage += $" | Watershed: {watershedCells} cells";
         }
 
-        Logger.Log($"Click at ({worldPos.X:F4}, {worldPos.Y:F4}) -> Cell ({row}, {col})");
+        Logger.Log($"Click at ({worldPos.X:F4}, {worldPos.Y:F4}) -> Cell (row:{row}, col:{col})");
     }
 }
