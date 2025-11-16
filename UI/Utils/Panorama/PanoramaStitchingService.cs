@@ -62,15 +62,37 @@ namespace GeoscientistToolkit
         public enum PanoramaProjection { Cylindrical = 0, Equirectangular = 1, Rectilinear = 2 }
 
         private readonly List<ImageDataset> _datasets;
+        private readonly object _ctsLock = new();
         private CancellationTokenSource _cts;
         private readonly Dictionary<Guid, CameraModel> _camera = new();
 
         public PanoramaStitchingService(List<ImageDataset> datasets) { _datasets = datasets; }
 
         public ProjectionSettings Projection { get; } = new();
-        public PanoramaState State { get; private set; } = PanoramaState.Idle;
-        public float Progress { get; private set; }
-        public string StatusMessage { get; private set; }
+
+        private readonly object _stateLock = new();
+        private PanoramaState _state = PanoramaState.Idle;
+        private float _progress;
+        private string _statusMessage;
+
+        public PanoramaState State
+        {
+            get { lock (_stateLock) { return _state; } }
+            private set { lock (_stateLock) { _state = value; } }
+        }
+
+        public float Progress
+        {
+            get { lock (_stateLock) { return _progress; } }
+            private set { lock (_stateLock) { _progress = value; } }
+        }
+
+        public string StatusMessage
+        {
+            get { lock (_stateLock) { return _statusMessage; } }
+            private set { lock (_stateLock) { _statusMessage = value; } }
+        }
+
         public ConcurrentQueue<string> Logs { get; } = new();
         public StitchGraph Graph { get; private set; }
         public List<StitchGroup> StitchGroups => Graph?.FindConnectedComponents() ?? new();
@@ -93,8 +115,12 @@ namespace GeoscientistToolkit
                     return _runningTask;
                 }
 
-                try { _cts?.Cancel(); } catch { }
-                _cts = new CancellationTokenSource();
+                lock (_ctsLock)
+                {
+                    try { _cts?.Cancel(); } catch { }
+                    _cts?.Dispose();
+                    _cts = new CancellationTokenSource();
+                }
                 var token = _cts.Token;
 
                 _runningTask = Task.Run(async () =>
@@ -944,7 +970,13 @@ namespace GeoscientistToolkit
             return ((byte)r, (byte)g, (byte)b, 255);
         }
 
-        public void Cancel() => _cts?.Cancel();
+        public void Cancel()
+        {
+            lock (_ctsLock)
+            {
+                _cts?.Cancel();
+            }
+        }
         private void UpdateProgress(float p, string m) { Progress = p; StatusMessage = m; }
         public void Log(string msg) { var m = $"[{DateTime.Now:HH:mm:ss}] {msg}"; Logs.Enqueue(m); Logger.Log(m); }
 
@@ -999,7 +1031,10 @@ namespace GeoscientistToolkit
             _disposed = true;
 
             // 1) Stop any running pipeline
-            try { _cts?.Cancel(); } catch { /* ignore */ }
+            lock (_ctsLock)
+            {
+                try { _cts?.Cancel(); } catch { /* ignore */ }
+            }
 
             // 2) Give the current run a brief chance to observe cancellation
             try { _runningTask?.Wait(250); } catch { /* ignore */ }
@@ -1008,10 +1043,11 @@ namespace GeoscientistToolkit
             try { ClearCaches(); } catch { /* ignore */ }
 
             // 4) Dispose CTS
-            try { _cts?.Dispose(); } catch { /* ignore */ }
-            _cts = null;
-
-            
+            lock (_ctsLock)
+            {
+                try { _cts?.Dispose(); } catch { /* ignore */ }
+                _cts = null;
+            }
         }
         public static void ForceGcCompaction()
         {
@@ -1062,7 +1098,11 @@ namespace GeoscientistToolkit
                     return Task.CompletedTask;
                 }
 
-                _cts = new CancellationTokenSource();
+                lock (_ctsLock)
+                {
+                    _cts?.Dispose();
+                    _cts = new CancellationTokenSource();
+                }
                 var token = _cts.Token;
 
                 _runningTask = Task.Run(async () =>

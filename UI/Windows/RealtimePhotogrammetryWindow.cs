@@ -20,6 +20,7 @@ namespace GeoscientistToolkit.UI.Windows;
 public class RealtimePhotogrammetryWindow : IDisposable
 {
     private bool _isOpen;
+    private readonly object _pipelineLock = new object();
     private PhotogrammetryPipeline _pipeline;
     private PhotogrammetryPipeline.PipelineConfig _config;
 
@@ -810,13 +811,16 @@ public class RealtimePhotogrammetryWindow : IDisposable
                 PrincipalPointY = _principalPointY
             };
 
-            _pipeline?.Dispose();
-            _pipeline = new PhotogrammetryPipeline(_config);
+            lock (_pipelineLock)
+            {
+                _pipeline?.Dispose();
+                _pipeline = new PhotogrammetryPipeline(_config);
 
-            // Configure memory management
-            _pipeline.MemoryManager.IsEnabled = _enableMemoryManagement;
-            _pipeline.MemoryManager.MemoryThresholdMB = _memoryThresholdMB;
-            _pipeline.MemoryManager.MaxKeyframesInMemory = _maxKeyframesInMemory;
+                // Configure memory management
+                _pipeline.MemoryManager.IsEnabled = _enableMemoryManagement;
+                _pipeline.MemoryManager.MemoryThresholdMB = _memoryThresholdMB;
+                _pipeline.MemoryManager.MaxKeyframesInMemory = _maxKeyframesInMemory;
+            }
 
             Logger.Log("Photogrammetry pipeline initialized successfully");
         }
@@ -873,9 +877,17 @@ public class RealtimePhotogrammetryWindow : IDisposable
 
     private void ProcessNextFrame()
     {
-        if (_pipeline.VideoCapture.CaptureFrame(out Mat frame))
+        PhotogrammetryPipeline pipeline;
+        lock (_pipelineLock)
         {
-            var result = _pipeline.ProcessFrame(frame);
+            pipeline = _pipeline;
+        }
+
+        if (pipeline == null) return;
+
+        if (pipeline.VideoCapture.CaptureFrame(out Mat frame))
+        {
+            var result = pipeline.ProcessFrame(frame);
 
             if (result != null && result.Success)
             {
@@ -890,7 +902,9 @@ public class RealtimePhotogrammetryWindow : IDisposable
                 }
 
                 // Convert to GPU textures for display
+                _frameTexture?.Dispose();
                 _frameTexture = MatTextureConverter.UpdateTexture(_frameTexture, _currentFrameDisplay);
+                _depthTexture?.Dispose();
                 _depthTexture = MatTextureConverter.UpdateTexture(_depthTexture, _currentDepthDisplay);
 
                 // Update statistics
@@ -1195,7 +1209,13 @@ public class RealtimePhotogrammetryWindow : IDisposable
     public void Dispose()
     {
         StopCapture();
-        _pipeline?.Dispose();
+
+        lock (_pipelineLock)
+        {
+            _pipeline?.Dispose();
+            _pipeline = null;
+        }
+
         _currentFrameDisplay?.Dispose();
         _currentDepthDisplay?.Dispose();
         _frameTexture?.Dispose();

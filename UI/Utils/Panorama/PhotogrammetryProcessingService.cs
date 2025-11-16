@@ -23,9 +23,29 @@ namespace GeoscientistToolkit
     {
         #region Properties
 
-        public PhotogrammetryState State { get; private set; } = PhotogrammetryState.Idle;
-        public float Progress { get; private set; }
-        public string StatusMessage { get; private set; }
+        private readonly object _stateLock = new object();
+        private PhotogrammetryState _state = PhotogrammetryState.Idle;
+        private float _progress;
+        private string _statusMessage;
+
+        public PhotogrammetryState State
+        {
+            get { lock (_stateLock) { return _state; } }
+            private set { lock (_stateLock) { _state = value; } }
+        }
+
+        public float Progress
+        {
+            get { lock (_stateLock) { return _progress; } }
+            private set { lock (_stateLock) { _progress = value; } }
+        }
+
+        public string StatusMessage
+        {
+            get { lock (_stateLock) { return _statusMessage; } }
+            private set { lock (_stateLock) { _statusMessage = value; } }
+        }
+
         public ConcurrentQueue<string> Logs { get; } = new();
         public List<PhotogrammetryImage> Images { get; } = new();
         public PhotogrammetryGraph Graph { get; private set; }
@@ -46,6 +66,7 @@ namespace GeoscientistToolkit
         private readonly GeoreferencingService _georeferencingService;
         private readonly MeshGenerator _meshGenerator;
         private readonly ProductGenerator _productGenerator;
+        private readonly object _cancellationLock = new object();
         private CancellationTokenSource _cancellationTokenSource;
 
         #endregion
@@ -71,8 +92,13 @@ namespace GeoscientistToolkit
         /// </summary>
         public async Task StartProcessingAsync()
         {
-            _cancellationTokenSource = new CancellationTokenSource();
-            var token = _cancellationTokenSource.Token;
+            CancellationToken token;
+            lock (_cancellationLock)
+            {
+                _cancellationTokenSource?.Dispose();
+                _cancellationTokenSource = new CancellationTokenSource();
+                token = _cancellationTokenSource.Token;
+            }
 
             try
             {
@@ -96,7 +122,10 @@ namespace GeoscientistToolkit
         /// </summary>
         public void Cancel()
         {
-            _cancellationTokenSource?.Cancel();
+            lock (_cancellationLock)
+            {
+                _cancellationTokenSource?.Cancel();
+            }
             Log("Cancellation requested.");
         }
 
