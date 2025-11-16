@@ -36,6 +36,7 @@ public class ImportDataModal
         "Subsurface GIS Model (.subgis)",
         "Seismic Dataset (SEG-Y)",
         "PhysicoChem Reactor",
+        "TOUGH2 Input File",
         "Video File (MP4/AVI/MOV)",
         "Audio File (WAV/MP3/OGG)"
     };
@@ -76,6 +77,8 @@ public class ImportDataModal
     private readonly ImGuiFileDialog _seismicDialog;
     private readonly PhysicoChemLoader _physicoChemLoader;
     private readonly ImGuiFileDialog _physicoChemDialog;
+    private readonly Tough2Loader _tough2Loader;
+    private readonly ImGuiFileDialog _tough2Dialog;
     private readonly VideoLoader _videoLoader;
     private readonly ImGuiFileDialog _videoDialog;
     private readonly AudioLoader _audioLoader;
@@ -112,6 +115,7 @@ public class ImportDataModal
         _subsurfaceGisDialog = new ImGuiFileDialog("ImportSubsurfaceGISDialog", FileDialogType.OpenFile, "Select Subsurface GIS File");
         _seismicDialog = new ImGuiFileDialog("ImportSeismicDialog", FileDialogType.OpenFile, "Select SEG-Y File");
         _physicoChemDialog = new ImGuiFileDialog("ImportPhysicoChemDialog", FileDialogType.OpenFile, "Select PhysicoChem File");
+        _tough2Dialog = new ImGuiFileDialog("ImportTough2Dialog", FileDialogType.OpenFile, "Select TOUGH2 File");
         _videoDialog = new ImGuiFileDialog("ImportVideoDialog", FileDialogType.OpenFile, "Select Video File");
         _audioDialog = new ImGuiFileDialog("ImportAudioDialog", FileDialogType.OpenFile, "Select Audio File");
         _organizerDialog = new ImageStackOrganizerDialog();
@@ -134,6 +138,7 @@ public class ImportDataModal
         _subsurfaceGisLoader = new SubsurfaceGISLoader();
         _seismicLoader = new SeismicLoader();
         _physicoChemLoader = new PhysicoChemLoader();
+        _tough2Loader = new Tough2Loader();
         _videoLoader = new VideoLoader();
         _audioLoader = new AudioLoader();
     }
@@ -241,6 +246,9 @@ public class ImportDataModal
         // Added for PhysicoChem
         if (_physicoChemDialog.Submit()) _physicoChemLoader.FilePath = _physicoChemDialog.SelectedPath;
 
+        // Added for TOUGH2
+        if (_tough2Dialog.Submit()) _tough2Loader.FilePath = _tough2Dialog.SelectedPath;
+
         // Added for 2D Geology
         if (_twoDGeologyDialog.Submit()) _twoDGeologyLoader.FilePath = _twoDGeologyDialog.SelectedPath;
 
@@ -323,10 +331,13 @@ public class ImportDataModal
             case 17: // PhysicoChem Reactor
                 DrawPhysicoChemOptions();
                 break;
-            case 18: // Video File
+            case 18: // TOUGH2 Input File
+                DrawTough2Options();
+                break;
+            case 19: // Video File
                 DrawVideoOptions();
                 break;
-            case 19: // Audio File
+            case 20: // Audio File
                 DrawAudioOptions();
                 break;
         }
@@ -621,6 +632,52 @@ public class ImportDataModal
             ImGui.BulletText($"Size: {info.Length / 1024} KB");
 
             ImGui.TextColored(new Vector4(0.0f, 1.0f, 0.5f, 1.0f), "✓ Ready to import PhysicoChem dataset");
+        }
+    }
+
+    private void DrawTough2Options()
+    {
+        ImGui.TextWrapped("Import a TOUGH2 multiphysics subsurface flow simulation input file. TOUGH2 is a widely used " +
+                          "numerical simulator for fluid and heat flow in porous and fractured media.");
+
+        ImGui.Spacing();
+        ImGui.Separator();
+        ImGui.Spacing();
+
+        ImGui.Text("TOUGH2 Input File:");
+        var path = _tough2Loader.FilePath ?? "";
+        ImGui.InputText("##Tough2Path", ref path, 260, ImGuiInputTextFlags.ReadOnly);
+        ImGui.SameLine();
+        if (ImGui.Button("Browse...##Tough2File"))
+        {
+            string[] tough2Extensions = { ".dat", ".inp", ".tough2", ".txt" };
+            _tough2Dialog.Open(null, tough2Extensions);
+        }
+
+        ImGui.Spacing();
+        ImGui.TextWrapped("TOUGH2 file contains:");
+        ImGui.BulletText("ROCKS - Material properties (porosity, permeability, density)");
+        ImGui.BulletText("ELEME - Mesh element definitions with coordinates");
+        ImGui.BulletText("CONNE - Element connections (grid topology)");
+        ImGui.BulletText("INCON - Initial conditions (pressure, temperature, saturation)");
+        ImGui.BulletText("GENER - Sources and sinks (boundary conditions)");
+        ImGui.BulletText("PARAM - Simulation parameters (time steps, convergence)");
+
+        ImGui.Spacing();
+        ImGui.TextWrapped("The imported data will be converted to a PhysicoChemDataset with equivalent domains, " +
+                          "materials, boundary conditions, and simulation parameters.");
+
+        if (!string.IsNullOrEmpty(_tough2Loader.FilePath) && File.Exists(_tough2Loader.FilePath))
+        {
+            ImGui.Spacing();
+            ImGui.Separator();
+            ImGui.Spacing();
+            ImGui.Text("File Information:");
+            var info = new FileInfo(_tough2Loader.FilePath);
+            ImGui.BulletText($"File: {info.Name}");
+            ImGui.BulletText($"Size: {info.Length / 1024} KB");
+
+            ImGui.TextColored(new Vector4(0.0f, 1.0f, 0.5f, 1.0f), "✓ Ready to import TOUGH2 dataset");
         }
     }
 
@@ -1392,8 +1449,9 @@ public class ImportDataModal
             15 => _subsurfaceGisLoader,
             16 => _seismicLoader,
             17 => _physicoChemLoader,
-            18 => _videoLoader, // Added for Video
-            19 => _audioLoader, // Added for Audio
+            18 => _tough2Loader, // Added for TOUGH2
+            19 => _videoLoader, // Added for Video
+            20 => _audioLoader, // Added for Audio
             _ => null
         };
     }

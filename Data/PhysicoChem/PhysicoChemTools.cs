@@ -7,6 +7,7 @@ using System.Numerics;
 using GeoscientistToolkit.Analysis.PhysicoChem;
 using GeoscientistToolkit.Business;
 using GeoscientistToolkit.Data;
+using GeoscientistToolkit.Data.Exporters;
 using GeoscientistToolkit.Data.Materials;
 using GeoscientistToolkit.UI.Interfaces;
 using GeoscientistToolkit.UI.Utils;
@@ -23,6 +24,7 @@ public class PhysicoChemTools : IDatasetTools
 {
     private readonly ImGuiExportFileDialog _exportDialog;
     private readonly ImGuiExportFileDialog _datasetExportDialog;
+    private readonly ImGuiExportFileDialog _tough2ExportDialog;
 
     // Domain creation state
     private string _newDomainName = "Domain";
@@ -99,6 +101,13 @@ public class PhysicoChemTools : IDatasetTools
         _datasetExportDialog = new ImGuiExportFileDialog("ExportPhysicoChemDatasetDialog", "Export Dataset");
         _datasetExportDialog.SetExtensions(
             (".physicochem", "PhysicoChem Dataset")
+        );
+
+        _tough2ExportDialog = new ImGuiExportFileDialog("ExportTough2Dialog", "Export to TOUGH2");
+        _tough2ExportDialog.SetExtensions(
+            (".dat", "TOUGH2 Input File"),
+            (".inp", "TOUGH2 Input File"),
+            (".tough2", "TOUGH2 Input File")
         );
     }
 
@@ -183,6 +192,15 @@ public class PhysicoChemTools : IDatasetTools
             {
                 var selectedPath = _datasetExportDialog.SelectedPath;
                 ExportDatasetToBinary(pcDataset, selectedPath);
+            }
+        }
+
+        if (_tough2ExportDialog.IsOpen)
+        {
+            if (_tough2ExportDialog.Submit())
+            {
+                var selectedPath = _tough2ExportDialog.SelectedPath;
+                ExportToTough2(pcDataset, selectedPath);
             }
         }
     }
@@ -751,6 +769,16 @@ public class PhysicoChemTools : IDatasetTools
         ImGui.TextDisabled("(Full dataset with all configuration)");
 
         ImGui.Spacing();
+
+        // Export to TOUGH2 format
+        if (ImGui.Button("Export to TOUGH2...", new Vector2(ImGui.GetContentRegionAvail().X, 0)))
+        {
+            _tough2ExportDialog.Open();
+        }
+        ImGui.SameLine();
+        ImGui.TextDisabled("(Multiphysics subsurface flow simulator)");
+
+        ImGui.Spacing();
         ImGui.Separator();
         ImGui.Spacing();
 
@@ -854,6 +882,24 @@ public class PhysicoChemTools : IDatasetTools
         catch (Exception ex)
         {
             Logger.LogError($"Failed to export dataset: {ex.Message}");
+        }
+    }
+
+    private void ExportToTough2(PhysicoChemDataset dataset, string path)
+    {
+        try
+        {
+            Logger.Log($"Exporting PhysicoChemDataset to TOUGH2 format: {path}");
+
+            var exporter = new Tough2Exporter();
+            exporter.Export(dataset, path);
+
+            Logger.Log($"Successfully exported to TOUGH2 format: {path}");
+            ProjectManager.Instance.NotifyDatasetDataChanged(dataset);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError($"Failed to export to TOUGH2: {ex.Message}");
         }
     }
 
