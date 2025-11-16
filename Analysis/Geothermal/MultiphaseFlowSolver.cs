@@ -105,9 +105,9 @@ public class MultiphaseFlowSolver : IDisposable
 
     private void InitializeFields()
     {
-        int nr = _mesh.Nr;
-        int ntheta = _mesh.Ntheta;
-        int nz = _mesh.Nz;
+        int nr = _mesh.RadialPoints;
+        int ntheta = _mesh.AngularPoints;
+        int nz = _mesh.VerticalPoints;
 
         _saturationWater = new float[nr, ntheta, nz];
         _saturationGas = new float[nr, ntheta, nz];
@@ -162,9 +162,9 @@ public class MultiphaseFlowSolver : IDisposable
 
     private void UpdatePhasePropertiesCPU(float[,,] pressure, float[,,] temperature, float dt)
     {
-        int nr = _mesh.Nr;
-        int ntheta = _mesh.Ntheta;
-        int nz = _mesh.Nz;
+        int nr = _mesh.RadialPoints;
+        int ntheta = _mesh.AngularPoints;
+        int nz = _mesh.VerticalPoints;
 
         for (int i = 0; i < nr; i++)
         for (int j = 0; j < ntheta; j++)
@@ -236,9 +236,9 @@ public class MultiphaseFlowSolver : IDisposable
     {
         // Saturation constraint: Sw + Sg + Sc = 1.0
         // Implicit update for stability
-        int nr = _mesh.Nr;
-        int ntheta = _mesh.Ntheta;
-        int nz = _mesh.Nz;
+        int nr = _mesh.RadialPoints;
+        int ntheta = _mesh.AngularPoints;
+        int nz = _mesh.VerticalPoints;
 
         for (int i = 1; i < nr - 1; i++)
         for (int j = 0; j < ntheta; j++)
@@ -268,9 +268,9 @@ public class MultiphaseFlowSolver : IDisposable
     private void UpdateRelativePermeabilities()
     {
         // Use Corey model for relative permeability
-        int nr = _mesh.Nr;
-        int ntheta = _mesh.Ntheta;
-        int nz = _mesh.Nz;
+        int nr = _mesh.RadialPoints;
+        int ntheta = _mesh.AngularPoints;
+        int nz = _mesh.VerticalPoints;
 
         float Swr = _options.ResidualWaterSaturation;  // Residual water saturation
         float Sgr = _options.ResidualGasSaturation;    // Residual gas saturation
@@ -295,9 +295,9 @@ public class MultiphaseFlowSolver : IDisposable
     private void UpdateCapillaryPressure(float[,,] pressure, float[,,] temperature)
     {
         // Van Genuchten model for capillary pressure
-        int nr = _mesh.Nr;
-        int ntheta = _mesh.Ntheta;
-        int nz = _mesh.Nz;
+        int nr = _mesh.RadialPoints;
+        int ntheta = _mesh.AngularPoints;
+        int nz = _mesh.VerticalPoints;
 
         float alpha = _options.VanGenuchtenAlpha;
         float n = _options.VanGenuchtenN;

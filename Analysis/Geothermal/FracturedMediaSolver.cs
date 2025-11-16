@@ -70,9 +70,9 @@ public class FracturedMediaSolver
 
     private void InitializeFields()
     {
-        int nr = _mesh.Nr;
-        int ntheta = _mesh.Ntheta;
-        int nz = _mesh.Nz;
+        int nr = _mesh.RadialPoints;
+        int ntheta = _mesh.AngularPoints;
+        int nz = _mesh.VerticalPoints;
 
         // Matrix fields
         _temperatureMatrix = new float[nr, ntheta, nz];
@@ -162,9 +162,9 @@ public class FracturedMediaSolver
     /// </summary>
     public void UpdateDualContinuum(float dt)
     {
-        int nr = _mesh.Nr;
-        int ntheta = _mesh.Ntheta;
-        int nz = _mesh.Nz;
+        int nr = _mesh.RadialPoints;
+        int ntheta = _mesh.AngularPoints;
+        int nz = _mesh.VerticalPoints;
 
         for (int i = 1; i < nr - 1; i++)
         for (int j = 0; j < ntheta; j++)
@@ -247,9 +247,9 @@ public class FracturedMediaSolver
     /// </summary>
     public void SetFractureNetwork(float[,,] aperture, float[,,] spacing, float[,,] density)
     {
-        int nr = _mesh.Nr;
-        int ntheta = _mesh.Ntheta;
-        int nz = _mesh.Nz;
+        int nr = _mesh.RadialPoints;
+        int ntheta = _mesh.AngularPoints;
+        int nz = _mesh.VerticalPoints;
 
         for (int i = 0; i < nr; i++)
         for (int j = 0; j < ntheta; j++)

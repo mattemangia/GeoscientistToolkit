@@ -55,9 +55,9 @@ public unsafe class MultiphaseCLSolver : IDisposable
     {
         try
         {
-            _nr = mesh.Nr;
-            _ntheta = mesh.Ntheta;
-            _nz = mesh.Nz;
+            _nr = mesh.RadialPoints;
+            _ntheta = mesh.AngularPoints;
+            _nz = mesh.VerticalPoints;
             _totalElements = (nuint)(_nr * _ntheta * _nz);
 
             // Get OpenCL device from centralized manager
@@ -85,7 +85,7 @@ public unsafe class MultiphaseCLSolver : IDisposable
             }
 
             // Create command queue (OpenCL 1.2 compatible)
-            _commandQueue = _cl.CreateCommandQueue(_context, _device, 0, &err);
+            _commandQueue = _cl.CreateCommandQueue(_context, _device, (ulong)0, &err);
             if (err != 0)
             {
                 Logger.LogError($"Failed to create command queue: {err}");
@@ -211,20 +211,26 @@ public unsafe class MultiphaseCLSolver : IDisposable
         }
 
         // Set kernel arguments
-        err = _cl.SetKernelArg(_kernelUpdatePhaseProperties, 0, (nuint)sizeof(nint), &_bufferPressure);
-        err |= _cl.SetKernelArg(_kernelUpdatePhaseProperties, 1, (nuint)sizeof(nint), &_bufferTemperature);
-        err |= _cl.SetKernelArg(_kernelUpdatePhaseProperties, 2, (nuint)sizeof(nint), &_bufferSalinity);
-        err |= _cl.SetKernelArg(_kernelUpdatePhaseProperties, 3, (nuint)sizeof(nint), &_bufferDensityWater);
-        err |= _cl.SetKernelArg(_kernelUpdatePhaseProperties, 4, (nuint)sizeof(nint), &_bufferDensityGas);
-        err |= _cl.SetKernelArg(_kernelUpdatePhaseProperties, 5, (nuint)sizeof(nint), &_bufferDensityCO2);
-        err |= _cl.SetKernelArg(_kernelUpdatePhaseProperties, 6, (nuint)sizeof(nint), &_bufferViscosityWater);
-        err |= _cl.SetKernelArg(_kernelUpdatePhaseProperties, 7, (nuint)sizeof(nint), &_bufferViscosityGas);
-        err |= _cl.SetKernelArg(_kernelUpdatePhaseProperties, 8, (nuint)sizeof(nint), &_bufferViscosityCO2);
-        err |= _cl.SetKernelArg(_kernelUpdatePhaseProperties, 9, (nuint)sizeof(nint), &_bufferBrineDensity);
-        err |= _cl.SetKernelArg(_kernelUpdatePhaseProperties, 10, (nuint)sizeof(nint), &_bufferDissolvedCO2);
-        err |= _cl.SetKernelArg(_kernelUpdatePhaseProperties, 11, sizeof(int), &_nr);
-        err |= _cl.SetKernelArg(_kernelUpdatePhaseProperties, 12, sizeof(int), &_ntheta);
-        err |= _cl.SetKernelArg(_kernelUpdatePhaseProperties, 13, sizeof(int), &_nz);
+        nint bufP = _bufferPressure, bufT = _bufferTemperature, bufS = _bufferSalinity;
+        nint bufDW = _bufferDensityWater, bufDG = _bufferDensityGas, bufDC = _bufferDensityCO2;
+        nint bufVW = _bufferViscosityWater, bufVG = _bufferViscosityGas, bufVC = _bufferViscosityCO2;
+        nint bufBD = _bufferBrineDensity, bufCO2 = _bufferDissolvedCO2;
+        int nr = _nr, ntheta = _ntheta, nz = _nz;
+
+        err = _cl.SetKernelArg(_kernelUpdatePhaseProperties, 0, (nuint)sizeof(nint), &bufP);
+        err |= _cl.SetKernelArg(_kernelUpdatePhaseProperties, 1, (nuint)sizeof(nint), &bufT);
+        err |= _cl.SetKernelArg(_kernelUpdatePhaseProperties, 2, (nuint)sizeof(nint), &bufS);
+        err |= _cl.SetKernelArg(_kernelUpdatePhaseProperties, 3, (nuint)sizeof(nint), &bufDW);
+        err |= _cl.SetKernelArg(_kernelUpdatePhaseProperties, 4, (nuint)sizeof(nint), &bufDG);
+        err |= _cl.SetKernelArg(_kernelUpdatePhaseProperties, 5, (nuint)sizeof(nint), &bufDC);
+        err |= _cl.SetKernelArg(_kernelUpdatePhaseProperties, 6, (nuint)sizeof(nint), &bufVW);
+        err |= _cl.SetKernelArg(_kernelUpdatePhaseProperties, 7, (nuint)sizeof(nint), &bufVG);
+        err |= _cl.SetKernelArg(_kernelUpdatePhaseProperties, 8, (nuint)sizeof(nint), &bufVC);
+        err |= _cl.SetKernelArg(_kernelUpdatePhaseProperties, 9, (nuint)sizeof(nint), &bufBD);
+        err |= _cl.SetKernelArg(_kernelUpdatePhaseProperties, 10, (nuint)sizeof(nint), &bufCO2);
+        err |= _cl.SetKernelArg(_kernelUpdatePhaseProperties, 11, sizeof(int), &nr);
+        err |= _cl.SetKernelArg(_kernelUpdatePhaseProperties, 12, sizeof(int), &ntheta);
+        err |= _cl.SetKernelArg(_kernelUpdatePhaseProperties, 13, sizeof(int), &nz);
 
         if (err != 0)
         {
@@ -234,7 +240,7 @@ public unsafe class MultiphaseCLSolver : IDisposable
 
         // Execute kernel
         nuint globalWorkSize = _totalElements;
-        err = _cl.EnqueueNDRangeKernel(_commandQueue, _kernelUpdatePhaseProperties, 1, null, &globalWorkSize, null, 0, null, null);
+        err = _cl.EnqueueNdrangeKernel(_commandQueue, _kernelUpdatePhaseProperties, 1, null, &globalWorkSize, null, 0, null, null);
         if (err != 0)
         {
             Logger.LogError($"Failed to execute kernel: {err}");
@@ -274,17 +280,20 @@ public unsafe class MultiphaseCLSolver : IDisposable
         }
 
         // Set kernel arguments
-        err = _cl.SetKernelArg(_kernelUpdateSaturations, 0, (nuint)sizeof(nint), &_bufferSaturationWater);
-        err |= _cl.SetKernelArg(_kernelUpdateSaturations, 1, (nuint)sizeof(nint), &_bufferSaturationGas);
-        err |= _cl.SetKernelArg(_kernelUpdateSaturations, 2, (nuint)sizeof(nint), &_bufferSaturationCO2);
+        nint bufSW = _bufferSaturationWater, bufSG = _bufferSaturationGas, bufSC = _bufferSaturationCO2;
+        int nr = _nr, ntheta = _ntheta, nz = _nz;
+
+        err = _cl.SetKernelArg(_kernelUpdateSaturations, 0, (nuint)sizeof(nint), &bufSW);
+        err |= _cl.SetKernelArg(_kernelUpdateSaturations, 1, (nuint)sizeof(nint), &bufSG);
+        err |= _cl.SetKernelArg(_kernelUpdateSaturations, 2, (nuint)sizeof(nint), &bufSC);
         err |= _cl.SetKernelArg(_kernelUpdateSaturations, 3, sizeof(float), &dt);
-        err |= _cl.SetKernelArg(_kernelUpdateSaturations, 4, sizeof(int), &_nr);
-        err |= _cl.SetKernelArg(_kernelUpdateSaturations, 5, sizeof(int), &_ntheta);
-        err |= _cl.SetKernelArg(_kernelUpdateSaturations, 6, sizeof(int), &_nz);
+        err |= _cl.SetKernelArg(_kernelUpdateSaturations, 4, sizeof(int), &nr);
+        err |= _cl.SetKernelArg(_kernelUpdateSaturations, 5, sizeof(int), &ntheta);
+        err |= _cl.SetKernelArg(_kernelUpdateSaturations, 6, sizeof(int), &nz);
 
         // Execute kernel
         nuint globalWorkSize = _totalElements;
-        err = _cl.EnqueueNDRangeKernel(_commandQueue, _kernelUpdateSaturations, 1, null, &globalWorkSize, null, 0, null, null);
+        err = _cl.EnqueueNdrangeKernel(_commandQueue, _kernelUpdateSaturations, 1, null, &globalWorkSize, null, 0, null, null);
 
         // Download results
         fixed (float* swPtr = saturationWater, sgPtr = saturationGas, scPtr = saturationCO2)

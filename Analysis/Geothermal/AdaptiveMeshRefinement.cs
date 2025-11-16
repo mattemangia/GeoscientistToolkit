@@ -57,9 +57,9 @@ public class AdaptiveMeshRefinement
 
     private void InitializeFields()
     {
-        int nr = _baseMesh.Nr;
-        int ntheta = _baseMesh.Ntheta;
-        int nz = _baseMesh.Nz;
+        int nr = _baseMesh.RadialPoints;
+        int ntheta = _baseMesh.AngularPoints;
+        int nz = _baseMesh.VerticalPoints;
 
         _refinementLevel = new int[nr, ntheta, nz];
         _temperatureGradient = new float[nr, ntheta, nz];
@@ -82,9 +82,9 @@ public class AdaptiveMeshRefinement
     /// </summary>
     public void AnalyzeRefinement(float[,,] temperature, float[,,] pressure, float[,,] saturation, double currentTime)
     {
-        int nr = _baseMesh.Nr;
-        int ntheta = _baseMesh.Ntheta;
-        int nz = _baseMesh.Nz;
+        int nr = _baseMesh.RadialPoints;
+        int ntheta = _baseMesh.AngularPoints;
+        int nz = _baseMesh.VerticalPoints;
 
         // Compute gradients
         ComputeGradients(temperature, pressure, saturation);
@@ -132,19 +132,19 @@ public class AdaptiveMeshRefinement
 
     private void ComputeGradients(float[,,] temperature, float[,,] pressure, float[,,] saturation)
     {
-        int nr = _baseMesh.Nr;
-        int ntheta = _baseMesh.Ntheta;
-        int nz = _baseMesh.Nz;
+        int nr = _baseMesh.RadialPoints;
+        int ntheta = _baseMesh.AngularPoints;
+        int nz = _baseMesh.VerticalPoints;
 
         for (int i = 1; i < nr - 1; i++)
         for (int j = 0; j < ntheta; j++)
         for (int k = 1; k < nz - 1; k++)
         {
             // Central difference gradients
-            float dr = _baseMesh.Dr;
-            float dz = _baseMesh.Dz;
             float r = _baseMesh.R[i];
-            float dtheta = _baseMesh.Dtheta;
+            float dr = (i < nr - 1) ? (_baseMesh.R[i + 1] - _baseMesh.R[i]) : (_baseMesh.R[i] - _baseMesh.R[i - 1]);
+            float dz = (k < nz - 1) ? (_baseMesh.Z[k + 1] - _baseMesh.Z[k]) : (_baseMesh.Z[k] - _baseMesh.Z[k - 1]);
+            float dtheta = (j < ntheta - 1) ? (_baseMesh.Theta[j + 1] - _baseMesh.Theta[j]) : (_baseMesh.Theta[j] - _baseMesh.Theta[j - 1]);
 
             // Temperature gradient magnitude
             float dT_dr = (temperature[i + 1, j, k] - temperature[i - 1, j, k]) / (2.0f * dr);
@@ -191,9 +191,9 @@ public class AdaptiveMeshRefinement
     private void SmoothRefinementFlags()
     {
         // Ensure smooth refinement level transitions (max 1 level difference between neighbors)
-        int nr = _baseMesh.Nr;
-        int ntheta = _baseMesh.Ntheta;
-        int nz = _baseMesh.Nz;
+        int nr = _baseMesh.RadialPoints;
+        int ntheta = _baseMesh.AngularPoints;
+        int nz = _baseMesh.VerticalPoints;
 
         bool changed = true;
         int iterations = 0;
@@ -246,9 +246,9 @@ public class AdaptiveMeshRefinement
     /// </summary>
     public void ApplyRefinement()
     {
-        int nr = _baseMesh.Nr;
-        int ntheta = _baseMesh.Ntheta;
-        int nz = _baseMesh.Nz;
+        int nr = _baseMesh.RadialPoints;
+        int ntheta = _baseMesh.AngularPoints;
+        int nz = _baseMesh.VerticalPoints;
 
         int refinedCells = 0;
         int coarsenedCells = 0;
@@ -283,7 +283,15 @@ public class AdaptiveMeshRefinement
         int level = _refinementLevel[i, j, k];
         float factor = (float)Math.Pow(2.0, -level); // Each level halves the spacing
 
-        return (_baseMesh.Dr * factor, _baseMesh.Dtheta * factor, _baseMesh.Dz * factor);
+        int nr = _baseMesh.RadialPoints;
+        int ntheta = _baseMesh.AngularPoints;
+        int nz = _baseMesh.VerticalPoints;
+
+        float dr = (i < nr - 1) ? (_baseMesh.R[i + 1] - _baseMesh.R[i]) : (_baseMesh.R[i] - _baseMesh.R[i - 1]);
+        float dz = (k < nz - 1) ? (_baseMesh.Z[k + 1] - _baseMesh.Z[k]) : (_baseMesh.Z[k] - _baseMesh.Z[k - 1]);
+        float dtheta = (j < ntheta - 1) ? (_baseMesh.Theta[j + 1] - _baseMesh.Theta[j]) : (_baseMesh.Theta[j] - _baseMesh.Theta[j - 1]);
+
+        return (dr * factor, dtheta * factor, dz * factor);
     }
 
     public int[,,] GetRefinementLevels() => _refinementLevel;
