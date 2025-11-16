@@ -163,40 +163,69 @@ public class OllamaService
     private string BuildReportPrompt(List<DatasetInfo> datasets)
     {
         var sb = new StringBuilder();
-        sb.AppendLine("You are a geoscientist expert. Based on the following datasets, generate a comprehensive project report.");
-        sb.AppendLine("The report should analyze the data, provide insights, and make recommendations.");
+
+        // System prompt
+        sb.AppendLine("You are an experienced geoscientist and technical report writer specializing in subsurface analysis, geothermal energy, and resource assessment.");
         sb.AppendLine();
-        sb.AppendLine("Available datasets:");
+        sb.AppendLine("TASK: Draft a comprehensive technical project report based on the datasets provided below.");
+        sb.AppendLine();
+
+        // Dataset inventory
+        sb.AppendLine("=== AVAILABLE DATASETS ===");
         sb.AppendLine();
 
         foreach (var dataset in datasets)
         {
-            sb.AppendLine($"- Dataset: {dataset.Name}");
-            sb.AppendLine($"  Type: {dataset.Type}");
+            sb.AppendLine($"Dataset: {dataset.Name}");
+            sb.AppendLine($"Type: {dataset.Type}");
 
             if (!string.IsNullOrEmpty(dataset.Description))
-                sb.AppendLine($"  Description: {dataset.Description}");
+                sb.AppendLine($"Description: {dataset.Description}");
 
             if (dataset.Metadata != null && dataset.Metadata.Count > 0)
             {
-                sb.AppendLine("  Metadata:");
+                sb.AppendLine("Properties:");
                 foreach (var kvp in dataset.Metadata)
                 {
-                    sb.AppendLine($"    {kvp.Key}: {kvp.Value}");
+                    sb.AppendLine($"  • {kvp.Key}: {kvp.Value}");
                 }
             }
             sb.AppendLine();
         }
 
+        // Report requirements
+        sb.AppendLine("=== REPORT REQUIREMENTS ===");
         sb.AppendLine();
-        sb.AppendLine("Please provide:");
-        sb.AppendLine("1. A summary of the available data");
-        sb.AppendLine("2. Analysis of the datasets and their interrelationships");
-        sb.AppendLine("3. Key findings and observations");
-        sb.AppendLine("4. If borehole data is present, assess suitability for repurposing (e.g., oil & gas to geothermal energy)");
-        sb.AppendLine("5. Recommendations for further analysis or actions");
+        sb.AppendLine("Your report must include the following sections:");
         sb.AppendLine();
-        sb.AppendLine("Format the report in a professional, structured manner with clear sections and headings.");
+        sb.AppendLine("1. EXECUTIVE SUMMARY");
+        sb.AppendLine("   - Brief overview of the project and available data");
+        sb.AppendLine("   - Key findings in 2-3 sentences");
+        sb.AppendLine();
+        sb.AppendLine("2. DATA INVENTORY");
+        sb.AppendLine("   - Summarize the types and quality of data available");
+        sb.AppendLine("   - Note any data gaps or limitations");
+        sb.AppendLine();
+        sb.AppendLine("3. TECHNICAL ANALYSIS");
+        sb.AppendLine("   - Analyze relationships between different datasets");
+        sb.AppendLine("   - Identify patterns, trends, or anomalies");
+        sb.AppendLine("   - For simulation data (permeability, acoustic, geothermal): interpret physical implications");
+        sb.AppendLine();
+        sb.AppendLine("4. BOREHOLE & GEOTHERMAL ASSESSMENT (if applicable)");
+        sb.AppendLine("   - If borehole data exists: evaluate depth, lithology, and geothermal potential");
+        sb.AppendLine("   - Assess suitability for repurposing from oil & gas to geothermal energy production");
+        sb.AppendLine("   - Specify potential geothermal technology types (e.g., direct use, binary cycle, enhanced geothermal systems)");
+        sb.AppendLine("   - Consider temperature gradients, permeability, and reservoir characteristics");
+        sb.AppendLine();
+        sb.AppendLine("5. RECOMMENDATIONS");
+        sb.AppendLine("   - Suggest further data collection or analysis");
+        sb.AppendLine("   - Propose next steps for project development");
+        sb.AppendLine("   - Highlight areas requiring expert review");
+        sb.AppendLine();
+        sb.AppendLine("FORMAT: Use clear headings, bullet points where appropriate, and professional technical language.");
+        sb.AppendLine("LENGTH: Aim for a comprehensive report of 500-1000 words.");
+        sb.AppendLine();
+        sb.AppendLine("Begin drafting the report now:");
 
         return sb.ToString();
     }
