@@ -13,9 +13,67 @@ public class BasemapManager
     private static BasemapManager _instance;
     private static readonly object _instanceLock = new object();
 
-    // Popular free basemap providers
+    // Free basemap providers (no API keys required)
+    // Organized by type: Satellite, Topographic, Elevation, Physical/Terrain
     public static readonly List<BasemapProvider> Providers = new()
     {
+        // === SATELLITE IMAGERY ===
+        new BasemapProvider
+        {
+            Name = "ESRI World Imagery (Satellite)",
+            Id = "esri_imagery",
+            UrlTemplate =
+                "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+            Attribution = "© Esri, Maxar, Earthstar Geographics",
+            MaxZoom = 19,
+            TileSize = 256
+        },
+
+        // === TOPOGRAPHIC MAPS ===
+        new BasemapProvider
+        {
+            Name = "OpenTopoMap (Topographic)",
+            Id = "opentopomap",
+            UrlTemplate = "https://tile.opentopomap.org/{z}/{x}/{y}.png",
+            Attribution = "© OpenTopoMap (CC-BY-SA)",
+            MaxZoom = 17,
+            TileSize = 256
+        },
+        new BasemapProvider
+        {
+            Name = "ESRI World Topo (Topographic)",
+            Id = "esri_topo",
+            UrlTemplate =
+                "https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}",
+            Attribution = "© Esri, HERE, Garmin, USGS, NGA",
+            MaxZoom = 19,
+            TileSize = 256
+        },
+
+        // === ELEVATION/HILLSHADE MAPS ===
+        new BasemapProvider
+        {
+            Name = "ESRI World Hillshade (Elevation)",
+            Id = "esri_hillshade",
+            UrlTemplate =
+                "https://server.arcgisonline.com/ArcGIS/rest/services/Elevation/World_Hillshade/MapServer/tile/{z}/{y}/{x}",
+            Attribution = "© Esri, Airbus DS, USGS, NGA, NASA, CGIAR",
+            MaxZoom = 13,
+            TileSize = 256
+        },
+
+        // === PHYSICAL/TERRAIN MAPS ===
+        new BasemapProvider
+        {
+            Name = "Stamen Terrain (Physical)",
+            Id = "stamen_terrain",
+            UrlTemplate = "https://tiles.stadiamaps.com/tiles/stamen_terrain/{z}/{x}/{y}.png",
+            Attribution = "© Stamen Design, © Stadia Maps, © OpenStreetMap contributors",
+            MaxZoom = 18,
+            TileSize = 256
+        },
+
+        // === ADDITIONAL BASEMAPS ===
         new BasemapProvider
         {
             Name = "OpenStreetMap",
@@ -27,19 +85,29 @@ public class BasemapManager
         },
         new BasemapProvider
         {
-            Name = "OpenTopoMap",
-            Id = "opentopomap",
-            UrlTemplate = "https://tile.opentopomap.org/{z}/{x}/{y}.png",
-            Attribution = "© OpenTopoMap (CC-BY-SA)",
-            MaxZoom = 17,
+            Name = "ESRI World Street Map",
+            Id = "esri_street",
+            UrlTemplate =
+                "https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}",
+            Attribution = "© Esri, HERE, Garmin, USGS, NGA",
+            MaxZoom = 19,
+            TileSize = 256
+        },
+        new BasemapProvider
+        {
+            Name = "CartoDB Voyager",
+            Id = "cartodb_voyager",
+            UrlTemplate = "https://a.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png",
+            Attribution = "© CartoDB, © OpenStreetMap contributors",
+            MaxZoom = 19,
             TileSize = 256
         },
         new BasemapProvider
         {
             Name = "CartoDB Light",
             Id = "cartodb_light",
-            UrlTemplate = "https://cartodb-basemaps-a.global.ssl.fastly.net/light_all/{z}/{x}/{y}.png",
-            Attribution = "© CartoDB",
+            UrlTemplate = "https://a.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png",
+            Attribution = "© CartoDB, © OpenStreetMap contributors",
             MaxZoom = 19,
             TileSize = 256
         },
@@ -47,68 +115,19 @@ public class BasemapManager
         {
             Name = "CartoDB Dark",
             Id = "cartodb_dark",
-            UrlTemplate = "https://cartodb-basemaps-a.global.ssl.fastly.net/dark_all/{z}/{x}/{y}.png",
-            Attribution = "© CartoDB",
+            UrlTemplate = "https://a.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png",
+            Attribution = "© CartoDB, © OpenStreetMap contributors",
             MaxZoom = 19,
-            TileSize = 256
-        },
-        new BasemapProvider
-        {
-            Name = "ESRI World Imagery",
-            Id = "esri_imagery",
-            UrlTemplate =
-                "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
-            Attribution = "© Esri",
-            MaxZoom = 19,
-            TileSize = 256
-        },
-        new BasemapProvider
-        {
-            Name = "ESRI World Street Map",
-            Id = "esri_street",
-            UrlTemplate =
-                "https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}",
-            Attribution = "© Esri",
-            MaxZoom = 19,
-            TileSize = 256
-        },
-        new BasemapProvider
-        {
-            Name = "ESRI World Topo",
-            Id = "esri_topo",
-            UrlTemplate =
-                "https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}",
-            Attribution = "© Esri",
-            MaxZoom = 19,
-            TileSize = 256
-        },
-        new BasemapProvider
-        {
-            Name = "Stamen Terrain",
-            Id = "stamen_terrain",
-            UrlTemplate = "https://stamen-tiles.a.ssl.fastly.net/terrain/{z}/{x}/{y}.png",
-            Attribution = "© Stamen Design",
-            MaxZoom = 18,
             TileSize = 256
         },
         new BasemapProvider
         {
             Name = "Stamen Watercolor",
             Id = "stamen_watercolor",
-            UrlTemplate = "https://stamen-tiles.a.ssl.fastly.net/watercolor/{z}/{x}/{y}.jpg",
-            Attribution = "© Stamen Design",
-            MaxZoom = 18,
+            UrlTemplate = "https://tiles.stadiamaps.com/tiles/stamen_watercolor/{z}/{x}/{y}.jpg",
+            Attribution = "© Stamen Design, © Stadia Maps, © OpenStreetMap contributors",
+            MaxZoom = 16,
             TileSize = 256
-        },
-        new BasemapProvider
-        {
-            Name = "OpenWeatherMap Clouds",
-            Id = "owm_clouds",
-            UrlTemplate = "https://tile.openweathermap.org/map/clouds_new/{z}/{x}/{y}.png?appid={apikey}",
-            Attribution = "© OpenWeatherMap",
-            MaxZoom = 19,
-            TileSize = 256,
-            RequiresApiKey = true
         }
     };
 

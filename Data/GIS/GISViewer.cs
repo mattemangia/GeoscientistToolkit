@@ -67,6 +67,9 @@ public class GISViewer : IDatasetViewer
 
         _screenshotDialog = new ImGuiExportFileDialog("GISScreenshot", "Save Screenshot");
         _screenshotDialog.SetExtensions((".bmp", "Bitmap Image"));
+
+        // Auto-initialize basemaps if enabled in settings
+        TryAutoInitializeBasemaps();
     }
 
     public GISViewer(List<GISDataset> datasets)
@@ -87,8 +90,11 @@ public class GISViewer : IDatasetViewer
 
         _screenshotDialog = new ImGuiExportFileDialog("GISScreenshot", "Save Screenshot");
         _screenshotDialog.SetExtensions((".bmp", "Bitmap Image"));
-        
+
         UpdateCombinedBounds();
+
+        // Auto-initialize basemaps if enabled in settings
+        TryAutoInitializeBasemaps();
     }
 
     public virtual void DrawToolbarControls()
@@ -248,9 +254,17 @@ public class GISViewer : IDatasetViewer
         }
     
         if (_currentDrawing.Count > 0) DrawCurrentDrawing(drawList, canvas_pos, canvas_size, zoom, pan);
+
+        // Render hydrological analysis visualization if active
+        if (Tools.HydrologicalAnalysisToolEnhanced.ActiveInstance != null)
+        {
+            Tools.HydrologicalAnalysisToolEnhanced.ActiveInstance.RenderVisualization(
+                drawList, canvas_pos, canvas_size, zoom, pan, WorldToScreen);
+        }
+
         if (_showScaleBar) DrawScaleBar(drawList, canvas_pos, canvas_size, zoom, pan);
         if (_showNorthArrow) DrawNorthArrow(drawList, canvas_pos, canvas_size);
-    
+
         drawList.PopClipRect();
     
         // Take screenshot if requested
@@ -310,6 +324,42 @@ public class GISViewer : IDatasetViewer
             _showGdalErrorDialog = true;
             Logger.LogError($"Failed to initialize BasemapManager: {ex.Message}");
             return false;
+        }
+    }
+
+    private void TryAutoInitializeBasemaps()
+    {
+        try
+        {
+            var settings = GeoscientistToolkit.Settings.SettingsManager.Instance.Settings;
+            if (settings?.GIS?.EnableOnlineBasemaps == true && settings.GIS.AutoLoadBasemaps)
+            {
+                if (InitializeBasemapManager())
+                {
+                    // Set the default provider based on settings
+                    var defaultProviderId = settings.GIS.DefaultBasemapProvider;
+                    var provider = BasemapManager.Providers.FirstOrDefault(p => p.Id == defaultProviderId);
+
+                    if (provider != null)
+                    {
+                        _basemapManager.CurrentProvider = provider;
+                        _selectedProviderIndex = BasemapManager.Providers.IndexOf(provider);
+                        _currentTileZoom = settings.GIS.DefaultTileZoom;
+                        Logger.Log($"Auto-initialized basemap with provider: {provider.Name}");
+                    }
+                    else
+                    {
+                        // Fallback to first provider if default not found
+                        _basemapManager.CurrentProvider = BasemapManager.Providers[0];
+                        _selectedProviderIndex = 0;
+                        Logger.LogWarning($"Default basemap provider '{defaultProviderId}' not found, using {BasemapManager.Providers[0].Name}");
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning($"Failed to auto-initialize basemaps: {ex.Message}");
         }
     }
 
@@ -465,6 +515,16 @@ public class GISViewer : IDatasetViewer
             {
                 var worldPos = ScreenToWorld(io.MousePos - canvas_pos, canvas_pos, canvas_size, zoom, pan);
                 HandleDrawClick(worldPos);
+            }
+
+            // Handle hydrological analysis clicks (when not in draw mode)
+            if (_editMode == EditMode.None && is_active && ImGui.IsMouseClicked(ImGuiMouseButton.Left))
+            {
+                if (Tools.HydrologicalAnalysisToolEnhanced.ActiveInstance != null)
+                {
+                    var worldPos = ScreenToWorld(io.MousePos - canvas_pos, canvas_pos, canvas_size, zoom, pan);
+                    Tools.HydrologicalAnalysisToolEnhanced.ActiveInstance.OnMapClick(worldPos);
+                }
             }
         }
     }

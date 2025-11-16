@@ -119,6 +119,12 @@ public class GISTools : IDatasetTools
                         Name = "Georeference Raster",
                         Description = "Re-georeference or georeference raster layers with ground control points.",
                         Tool = new GeoreferenceTool()
+                    },
+                    new()
+                    {
+                        Name = "Hydrological Analysis",
+                        Description = "GPU-accelerated rainfall simulation, River Runner, and water body tracking.",
+                        Tool = new HydrologicalAnalysisToolEnhanced()
                     }
                 }
             },

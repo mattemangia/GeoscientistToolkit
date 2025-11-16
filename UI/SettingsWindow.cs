@@ -132,6 +132,7 @@ public class SettingsWindow
             case SettingsCategory.FileAssociations: DrawFileAssociationSettings(); break;
             case SettingsCategory.Backup: DrawBackupSettings(); break;
             case SettingsCategory.Photogrammetry: DrawPhotogrammetrySettings(); break;
+            case SettingsCategory.GIS: DrawGISSettings(); break;
         }
 
         ImGui.PopItemWidth();
@@ -667,6 +668,112 @@ public class SettingsWindow
         return Regex.Replace(category.ToString(), "(\\B[A-Z])", " $1");
     }
 
+    private void DrawGISSettings()
+    {
+        var gis = _editingSettings.GIS;
+        ImGui.TextColored(new Vector4(0.26f, 0.59f, 0.98f, 1.0f), "GIS Settings");
+        ImGui.Separator();
+
+        // Online Basemaps section
+        ImGui.TextColored(new Vector4(0.8f, 0.8f, 0.2f, 1.0f), "Online Basemaps");
+        ImGui.Spacing();
+
+        var enableBasemaps = gis.EnableOnlineBasemaps;
+        if (ImGui.Checkbox("Enable Online Basemaps", ref enableBasemaps))
+            gis.EnableOnlineBasemaps = enableBasemaps;
+        HelpMarker("Allow GIS viewer to download and display online basemap tiles");
+
+        var autoLoad = gis.AutoLoadBasemaps;
+        if (ImGui.Checkbox("Auto-load Basemaps on Startup", ref autoLoad))
+            gis.AutoLoadBasemaps = autoLoad;
+        HelpMarker("Automatically initialize basemaps when opening GIS datasets");
+
+        ImGui.Spacing();
+        ImGui.Text("Default Basemap Provider:");
+
+        string[] providers = { "Satellite Imagery", "Topographic Map", "Elevation Map", "Physical/Terrain Map" };
+        string[] providerIds = { "esri_imagery", "opentopomap", "esri_hillshade", "stamen_terrain" };
+
+        var currentIndex = Array.IndexOf(providerIds, gis.DefaultBasemapProvider);
+        if (currentIndex < 0) currentIndex = 0;
+
+        if (ImGui.Combo("##DefaultProvider", ref currentIndex, providers, providers.Length))
+            gis.DefaultBasemapProvider = providerIds[currentIndex];
+        HelpMarker("The basemap that will be loaded by default");
+
+        ImGui.Spacing();
+        ImGui.Separator();
+
+        // Quick access provider settings
+        ImGui.TextColored(new Vector4(0.8f, 0.8f, 0.2f, 1.0f), "Basemap Providers");
+        ImGui.Spacing();
+
+        ImGui.Text("Satellite Imagery Provider:");
+        ImGui.SameLine();
+        ImGui.TextColored(new Vector4(0.5f, 0.8f, 0.5f, 1.0f), gis.SatelliteProvider);
+
+        ImGui.Text("Topographic Map Provider:");
+        ImGui.SameLine();
+        ImGui.TextColored(new Vector4(0.5f, 0.8f, 0.5f, 1.0f), gis.TopographicProvider);
+
+        ImGui.Text("Elevation Map Provider:");
+        ImGui.SameLine();
+        ImGui.TextColored(new Vector4(0.5f, 0.8f, 0.5f, 1.0f), gis.ElevationProvider);
+
+        ImGui.Text("Physical/Terrain Provider:");
+        ImGui.SameLine();
+        ImGui.TextColored(new Vector4(0.5f, 0.8f, 0.5f, 1.0f), gis.PhysicalProvider);
+
+        ImGui.Spacing();
+        ImGui.Separator();
+
+        // Cache and performance settings
+        ImGui.TextColored(new Vector4(0.8f, 0.8f, 0.2f, 1.0f), "Cache & Performance");
+        ImGui.Spacing();
+
+        var defaultZoom = gis.DefaultTileZoom;
+        if (ImGui.SliderInt("Default Tile Zoom Level", ref defaultZoom, 1, 15))
+            gis.DefaultTileZoom = defaultZoom;
+        HelpMarker("Initial zoom level for tile basemaps (1=world view, 15=detailed)");
+
+        var maxCache = gis.MaxTileCacheSize;
+        if (ImGui.SliderInt("Max Tile Cache Size (MB)", ref maxCache, 100, 2000))
+            gis.MaxTileCacheSize = maxCache;
+        HelpMarker("Maximum disk space for cached map tiles");
+
+        var tileCacheDir = gis.TileCacheDirectory;
+        ImGui.Text("Tile Cache Directory:");
+        ImGui.TextWrapped(tileCacheDir);
+
+        ImGui.Spacing();
+        ImGui.Separator();
+
+        // Display settings
+        ImGui.TextColored(new Vector4(0.8f, 0.8f, 0.2f, 1.0f), "Default Display Options");
+        ImGui.Spacing();
+
+        var showGrid = gis.ShowGridByDefault;
+        if (ImGui.Checkbox("Show Grid by Default", ref showGrid))
+            gis.ShowGridByDefault = showGrid;
+
+        var showScale = gis.ShowScaleBarByDefault;
+        if (ImGui.Checkbox("Show Scale Bar by Default", ref showScale))
+            gis.ShowScaleBarByDefault = showScale;
+
+        var showNorth = gis.ShowNorthArrowByDefault;
+        if (ImGui.Checkbox("Show North Arrow by Default", ref showNorth))
+            gis.ShowNorthArrowByDefault = showNorth;
+
+        var showCoords = gis.ShowCoordinatesByDefault;
+        if (ImGui.Checkbox("Show Coordinates by Default", ref showCoords))
+            gis.ShowCoordinatesByDefault = showCoords;
+
+        var showAttribution = gis.ShowAttribution;
+        if (ImGui.Checkbox("Show Basemap Attribution", ref showAttribution))
+            gis.ShowAttribution = showAttribution;
+        HelpMarker("Display attribution text for online basemap providers");
+    }
+
     private void HelpMarker(string desc)
     {
         ImGui.TextDisabled("(?)");
@@ -694,6 +801,7 @@ public class SettingsWindow
         Performance,
         FileAssociations,
         Backup,
-        Photogrammetry
+        Photogrammetry,
+        GIS
     }
 }

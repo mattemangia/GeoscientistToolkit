@@ -580,6 +580,213 @@ public static class GISOperationsImpl
         };
     }
 
+    /// <summary>
+    ///     Trace flow path from a starting point to the outlet (sea or edge)
+    /// </summary>
+    public static List<(int row, int col)> TraceFlowPath(byte[,] flowDirection, int startRow, int startCol, int maxSteps = 10000)
+    {
+        var path = new List<(int row, int col)>();
+        var rows = flowDirection.GetLength(0);
+        var cols = flowDirection.GetLength(1);
+
+        var currentRow = startRow;
+        var currentCol = startCol;
+        var visited = new HashSet<(int, int)>();
+
+        while (currentRow >= 0 && currentRow < rows && currentCol >= 0 && currentCol < cols && path.Count < maxSteps)
+        {
+            // Check for cycles
+            if (!visited.Add((currentRow, currentCol)))
+                break;
+
+            path.Add((currentRow, currentCol));
+
+            var dir = flowDirection[currentRow, currentCol];
+            if (dir == 0) // No flow direction (sink or flat area)
+                break;
+
+            var (nextRow, nextCol) = GetTargetCell(currentRow, currentCol, dir);
+
+            // Check if we've reached the edge (outlet to sea)
+            if (nextRow < 0 || nextRow >= rows || nextCol < 0 || nextCol >= cols)
+            {
+                path.Add((nextRow, nextCol)); // Add the outlet point
+                break;
+            }
+
+            currentRow = nextRow;
+            currentCol = nextCol;
+        }
+
+        return path;
+    }
+
+    /// <summary>
+    ///     Find nearest stream cell (high flow accumulation) near a point
+    /// </summary>
+    public static (int row, int col) SnapToStream(int[,] flowAccumulation, int row, int col, int searchRadius = 5, int threshold = 100)
+    {
+        var rows = flowAccumulation.GetLength(0);
+        var cols = flowAccumulation.GetLength(1);
+
+        int bestRow = row;
+        int bestCol = col;
+        int maxAcc = flowAccumulation[row, col];
+
+        for (int dr = -searchRadius; dr <= searchRadius; dr++)
+        {
+            for (int dc = -searchRadius; dc <= searchRadius; dc++)
+            {
+                int r = row + dr;
+                int c = col + dc;
+
+                if (r >= 0 && r < rows && c >= 0 && c < cols)
+                {
+                    if (flowAccumulation[r, c] > maxAcc && flowAccumulation[r, c] >= threshold)
+                    {
+                        maxAcc = flowAccumulation[r, c];
+                        bestRow = r;
+                        bestCol = c;
+                    }
+                }
+            }
+        }
+
+        return (bestRow, bestCol);
+    }
+
+    /// <summary>
+    ///     Calculate watershed/catchment area for a pour point
+    /// </summary>
+    public static bool[,] DelineateWatershed(byte[,] flowDirection, int pourRow, int pourCol)
+    {
+        var rows = flowDirection.GetLength(0);
+        var cols = flowDirection.GetLength(1);
+        var watershed = new bool[rows, cols];
+
+        // Reverse flow direction lookup
+        var contributingCells = new Queue<(int, int)>();
+        contributingCells.Enqueue((pourRow, pourCol));
+
+        while (contributingCells.Count > 0)
+        {
+            var (row, col) = contributingCells.Dequeue();
+            if (row < 0 || row >= rows || col < 0 || col >= cols)
+                continue;
+
+            if (watershed[row, col])
+                continue;
+
+            watershed[row, col] = true;
+
+            // Find cells that flow INTO this cell
+            for (int dr = -1; dr <= 1; dr++)
+            {
+                for (int dc = -1; dc <= 1; dc++)
+                {
+                    if (dr == 0 && dc == 0) continue;
+
+                    int r = row + dr;
+                    int c = col + dc;
+
+                    if (r >= 0 && r < rows && c >= 0 && c < cols && !watershed[r, c])
+                    {
+                        var (targetRow, targetCol) = GetTargetCell(r, c, flowDirection[r, c]);
+                        if (targetRow == row && targetCol == col)
+                        {
+                            contributingCells.Enqueue((r, c));
+                        }
+                    }
+                }
+            }
+        }
+
+        return watershed;
+    }
+
+    /// <summary>
+    ///     Simulate flooding from a starting elevation with drainage over time
+    /// </summary>
+    public static (float[,] waterDepth, List<FloodTimeStep> timeSteps) SimulateFlooding(
+        float[,] elevation,
+        byte[,] flowDirection,
+        float initialWaterDepth,
+        float drainageRate = 0.1f,
+        int timeSteps = 100)
+    {
+        var rows = elevation.GetLength(0);
+        var cols = elevation.GetLength(1);
+        var waterDepth = new float[rows, cols];
+        var floodHistory = new List<FloodTimeStep>();
+
+        // Initialize with water depth everywhere
+        for (int r = 0; r < rows; r++)
+            for (int c = 0; c < cols; c++)
+                waterDepth[r, c] = initialWaterDepth;
+
+        // Simulate drainage over time
+        for (int step = 0; step < timeSteps; step++)
+        {
+            var newWaterDepth = new float[rows, cols];
+            Array.Copy(waterDepth, newWaterDepth, waterDepth.Length);
+
+            float totalWater = 0;
+            int floodedCells = 0;
+
+            // Drain water following flow direction
+            for (int r = 1; r < rows - 1; r++)
+            {
+                for (int c = 1; c < cols - 1; c++)
+                {
+                    if (waterDepth[r, c] > 0.01f)
+                    {
+                        var dir = flowDirection[r, c];
+                        if (dir != 0)
+                        {
+                            var (targetRow, targetCol) = GetTargetCell(r, c, dir);
+
+                            // Calculate drainage based on slope and water depth
+                            float drainAmount = waterDepth[r, c] * drainageRate;
+
+                            if (targetRow >= 0 && targetRow < rows && targetCol >= 0 && targetCol < cols)
+                            {
+                                // Water drains to lower cell
+                                newWaterDepth[r, c] -= drainAmount;
+                                newWaterDepth[targetRow, targetCol] += drainAmount * 0.9f; // 10% loss to infiltration
+                            }
+                            else
+                            {
+                                // Water drains off the edge
+                                newWaterDepth[r, c] -= drainAmount;
+                            }
+                        }
+
+                        newWaterDepth[r, c] = Math.Max(0, newWaterDepth[r, c]);
+                        totalWater += newWaterDepth[r, c];
+                        if (newWaterDepth[r, c] > 0.01f) floodedCells++;
+                    }
+                }
+            }
+
+            waterDepth = newWaterDepth;
+
+            // Record this time step
+            floodHistory.Add(new FloodTimeStep
+            {
+                Step = step,
+                TotalWaterVolume = totalWater,
+                FloodedCellCount = floodedCells,
+                AverageDepth = floodedCells > 0 ? totalWater / floodedCells : 0
+            });
+
+            // Stop if fully drained
+            if (totalWater < 0.01f)
+                break;
+        }
+
+        return (waterDepth, floodHistory);
+    }
+
     #endregion
 
     #region Topology and Validation
@@ -645,4 +852,15 @@ public static class GISOperationsImpl
     }
 
     #endregion
+}
+
+/// <summary>
+///     Represents a time step in flood simulation
+/// </summary>
+public class FloodTimeStep
+{
+    public int Step { get; set; }
+    public float TotalWaterVolume { get; set; }
+    public int FloodedCellCount { get; set; }
+    public float AverageDepth { get; set; }
 }

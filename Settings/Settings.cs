@@ -18,6 +18,7 @@ public class AppSettings
     public FileAssociationSettings FileAssociations { get; set; } = new();
     public BackupSettings Backup { get; set; } = new();
     public PhotogrammetrySettings Photogrammetry { get; set; } = new();
+    public GISSettings GIS { get; set; } = new();
 
     /// <summary>
     ///     Creates a new instance with default values
@@ -236,4 +237,35 @@ public class PhotogrammetrySettings
     public bool EnableMemoryManagement { get; set; } = true;
     public int MemoryThresholdMB { get; set; } = 2048; // 2 GB default
     public int MaxKeyframesInMemory { get; set; } = 50;
+}
+
+/// <summary>
+///     GIS-related settings
+/// </summary>
+public class GISSettings
+{
+    // Basemap settings
+    public bool EnableOnlineBasemaps { get; set; } = true;
+    public string DefaultBasemapProvider { get; set; } = "esri_imagery"; // Satellite imagery by default
+    public int DefaultTileZoom { get; set; } = 5;
+    public int MaxTileCacheSize { get; set; } = 500; // MB
+    public bool AutoLoadBasemaps { get; set; } = true;
+
+    // Available basemap types (for quick access)
+    public string SatelliteProvider { get; set; } = "esri_imagery";
+    public string TopographicProvider { get; set; } = "opentopomap";
+    public string ElevationProvider { get; set; } = "esri_hillshade";
+    public string PhysicalProvider { get; set; } = "stamen_terrain";
+
+    // Tile cache directory
+    public string TileCacheDirectory { get; set; } = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+        "GeoscientistToolkit", "TileCache");
+
+    // Display settings
+    public bool ShowAttribution { get; set; } = true;
+    public bool ShowGridByDefault { get; set; } = true;
+    public bool ShowScaleBarByDefault { get; set; } = true;
+    public bool ShowNorthArrowByDefault { get; set; } = true;
+    public bool ShowCoordinatesByDefault { get; set; } = true;
 }
