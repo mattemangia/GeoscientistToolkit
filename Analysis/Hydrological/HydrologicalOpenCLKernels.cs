@@ -46,11 +46,12 @@ public unsafe class HydrologicalOpenCLKernels : IDisposable
         {
             // Create context
             int error;
-            _context = _cl.CreateContext(null, 1, &_device, null, null, &error);
+            var device = _device;
+            _context = _cl.CreateContext(null, 1, &device, null, null, &error);
             CheckError(error, "CreateContext");
 
             // Create command queue
-            _queue = _cl.CreateCommandQueue(_context, _device, 0, &error);
+            _queue = _cl.CreateCommandQueue(_context, _device, (CommandQueueProperties)0, &error);
             CheckError(error, "CreateCommandQueue");
 
             // Compile kernels
@@ -62,7 +63,7 @@ public unsafe class HydrologicalOpenCLKernels : IDisposable
             Marshal.FreeHGlobal((nint)sourcePtr);
             CheckError(error, "CreateProgramWithSource");
 
-            error = _cl.BuildProgram(_program, 1, &_device, null, null, null);
+            error = _cl.BuildProgram(_program, 1, &device, (byte*)null, null, null);
             if (error != (int)ErrorCodes.Success)
             {
                 // Get build log
@@ -119,11 +120,11 @@ public unsafe class HydrologicalOpenCLKernels : IDisposable
             int error;
 
             // Create buffers
-            var elevBuffer = _cl.CreateBuffer(_context, (ulong)MemFlags.ReadOnly | (ulong)MemFlags.CopyHostPtr,
+            var elevBuffer = _cl.CreateBuffer(_context, MemFlags.ReadOnly | MemFlags.CopyHostPtr,
                 (nuint)(rows * cols * sizeof(float)), elevPtr, &error);
             CheckError(error, "CreateBuffer elevation");
 
-            var flowDirBuffer = _cl.CreateBuffer(_context, (ulong)MemFlags.WriteOnly,
+            var flowDirBuffer = _cl.CreateBuffer(_context, MemFlags.WriteOnly,
                 (nuint)(rows * cols * sizeof(byte)), null, &error);
             CheckError(error, "CreateBuffer flowDir");
 
@@ -142,7 +143,7 @@ public unsafe class HydrologicalOpenCLKernels : IDisposable
                 CheckError(error, "EnqueueNDRangeKernel");
 
                 // Read results
-                error = _cl.EnqueueReadBuffer(_queue, flowDirBuffer, 1, 0, (nuint)(rows * cols * sizeof(byte)), flowDirPtr, 0, null, null);
+                error = _cl.EnqueueReadBuffer(_queue, flowDirBuffer, true, UIntPtr.Zero, (nuint)(rows * cols * sizeof(byte)), flowDirPtr, 0, null, null);
                 CheckError(error, "EnqueueReadBuffer");
 
                 _cl.Finish(_queue);
@@ -184,19 +185,19 @@ public unsafe class HydrologicalOpenCLKernels : IDisposable
             int error;
 
             // Create buffers
-            var elevBuffer = _cl.CreateBuffer(_context, (ulong)MemFlags.ReadOnly | (ulong)MemFlags.CopyHostPtr,
+            var elevBuffer = _cl.CreateBuffer(_context, MemFlags.ReadOnly | MemFlags.CopyHostPtr,
                 (nuint)(rows * cols * sizeof(float)), elevPtr, &error);
             CheckError(error, "CreateBuffer elevation");
 
-            var flowDirBuffer = _cl.CreateBuffer(_context, (ulong)MemFlags.ReadOnly | (ulong)MemFlags.CopyHostPtr,
+            var flowDirBuffer = _cl.CreateBuffer(_context, MemFlags.ReadOnly | MemFlags.CopyHostPtr,
                 (nuint)(rows * cols * sizeof(byte)), flowDirPtr, &error);
             CheckError(error, "CreateBuffer flowDir");
 
-            var waterBuffer = _cl.CreateBuffer(_context, (ulong)MemFlags.ReadWrite,
+            var waterBuffer = _cl.CreateBuffer(_context, MemFlags.ReadWrite,
                 (nuint)(rows * cols * sizeof(float)), null, &error);
             CheckError(error, "CreateBuffer water");
 
-            var waterTempBuffer = _cl.CreateBuffer(_context, (ulong)MemFlags.ReadWrite,
+            var waterTempBuffer = _cl.CreateBuffer(_context, MemFlags.ReadWrite,
                 (nuint)(rows * cols * sizeof(float)), null, &error);
             CheckError(error, "CreateBuffer waterTemp");
 
@@ -246,7 +247,7 @@ public unsafe class HydrologicalOpenCLKernels : IDisposable
                     var tempWater = new float[rows * cols];
                     fixed (float* tempPtr = tempWater)
                     {
-                        error = _cl.EnqueueReadBuffer(_queue, waterBuffer, 1, 0,
+                        error = _cl.EnqueueReadBuffer(_queue, waterBuffer, true, UIntPtr.Zero,
                             (nuint)(rows * cols * sizeof(float)), tempPtr, 0, null, null);
                         CheckError(error, "EnqueueReadBuffer");
                     }
@@ -259,7 +260,7 @@ public unsafe class HydrologicalOpenCLKernels : IDisposable
                 }
 
                 // Read final water depth
-                error = _cl.EnqueueReadBuffer(_queue, waterBuffer, 1, 0,
+                error = _cl.EnqueueReadBuffer(_queue, waterBuffer, true, UIntPtr.Zero,
                     (nuint)(rows * cols * sizeof(float)), waterPtr, 0, null, null);
                 CheckError(error, "EnqueueReadBuffer final");
 

@@ -7,6 +7,7 @@ using System.Collections.Generic;
 using System.Linq;
 using Newtonsoft.Json;
 using GeoscientistToolkit.UI.Utils;
+using GeoscientistToolkit.UI;
 
 namespace GeoscientistToolkit.Data.PhysicoChem;
 
@@ -125,7 +126,7 @@ public class ParameterSweep
     public double MaxValue { get; set; } = 100.0;
 
     [JsonProperty]
-    public List<ImGuiCurveEditor.CurvePoint> CurvePoints { get; set; } = new();
+    public List<CurvePoint> CurvePoints { get; set; } = new();
 
     [JsonProperty]
     public InterpolationType Interpolation { get; set; } = InterpolationType.Linear;
@@ -136,10 +137,10 @@ public class ParameterSweep
     public ParameterSweep()
     {
         // Initialize with default linear curve
-        CurvePoints = new List<ImGuiCurveEditor.CurvePoint>
+        CurvePoints = new List<CurvePoint>
         {
-            new ImGuiCurveEditor.CurvePoint { X = 0.0f, Y = 0.0f },
-            new ImGuiCurveEditor.CurvePoint { X = 1.0f, Y = 1.0f }
+            new CurvePoint(0.0f, 0.0f),
+            new CurvePoint(1.0f, 1.0f)
         };
     }
 
@@ -150,10 +151,10 @@ public class ParameterSweep
         MinValue = minValue;
         MaxValue = maxValue;
 
-        CurvePoints = new List<ImGuiCurveEditor.CurvePoint>
+        CurvePoints = new List<CurvePoint>
         {
-            new ImGuiCurveEditor.CurvePoint { X = 0.0f, Y = 0.0f },
-            new ImGuiCurveEditor.CurvePoint { X = 1.0f, Y = 1.0f }
+            new CurvePoint(0.0f, 0.0f),
+            new CurvePoint(1.0f, 1.0f)
         };
     }
 
@@ -169,33 +170,33 @@ public class ParameterSweep
         normalizedTime = Math.Max(0.0f, Math.Min(1.0f, normalizedTime));
 
         // Find the two points to interpolate between
-        if (normalizedTime <= CurvePoints[0].X)
-            return MinValue + CurvePoints[0].Y * (MaxValue - MinValue);
+        if (normalizedTime <= CurvePoints[0].Point.X)
+            return MinValue + CurvePoints[0].Point.Y * (MaxValue - MinValue);
 
-        if (normalizedTime >= CurvePoints[^1].X)
-            return MinValue + CurvePoints[^1].Y * (MaxValue - MinValue);
+        if (normalizedTime >= CurvePoints[^1].Point.X)
+            return MinValue + CurvePoints[^1].Point.Y * (MaxValue - MinValue);
 
         for (int i = 0; i < CurvePoints.Count - 1; i++)
         {
-            if (normalizedTime >= CurvePoints[i].X && normalizedTime <= CurvePoints[i + 1].X)
+            if (normalizedTime >= CurvePoints[i].Point.X && normalizedTime <= CurvePoints[i + 1].Point.X)
             {
-                float t = (normalizedTime - CurvePoints[i].X) / (CurvePoints[i + 1].X - CurvePoints[i].X);
+                float t = (normalizedTime - CurvePoints[i].Point.X) / (CurvePoints[i + 1].Point.X - CurvePoints[i].Point.X);
                 float curveValue = 0.0f;
 
                 switch (Interpolation)
                 {
                     case InterpolationType.Linear:
-                        curveValue = CurvePoints[i].Y + t * (CurvePoints[i + 1].Y - CurvePoints[i].Y);
+                        curveValue = CurvePoints[i].Point.Y + t * (CurvePoints[i + 1].Point.Y - CurvePoints[i].Point.Y);
                         break;
 
                     case InterpolationType.Smooth:
                         // Smoothstep interpolation
                         t = t * t * (3.0f - 2.0f * t);
-                        curveValue = CurvePoints[i].Y + t * (CurvePoints[i + 1].Y - CurvePoints[i].Y);
+                        curveValue = CurvePoints[i].Point.Y + t * (CurvePoints[i + 1].Point.Y - CurvePoints[i].Point.Y);
                         break;
 
                     case InterpolationType.Step:
-                        curveValue = CurvePoints[i].Y;
+                        curveValue = CurvePoints[i].Point.Y;
                         break;
                 }
 
@@ -213,13 +214,13 @@ public class ParameterSweep
     {
         if (_curveEditor == null)
         {
-            _curveEditor = new ImGuiCurveEditor();
-
-            // Load curve points
-            foreach (var point in CurvePoints)
-            {
-                _curveEditor.AddPoint(point.X, point.Y);
-            }
+            _curveEditor = new ImGuiCurveEditor(
+                $"sweep_{ParameterName}",
+                $"Parameter Sweep: {ParameterName}",
+                "Normalized Time",
+                "Normalized Value",
+                CurvePoints
+            );
         }
 
         return _curveEditor;
@@ -230,11 +231,8 @@ public class ParameterSweep
     /// </summary>
     public void UpdateFromEditor()
     {
-        if (_curveEditor != null)
-        {
-            CurvePoints = _curveEditor.GetCurveData(100).Select(p =>
-                new ImGuiCurveEditor.CurvePoint { X = p.X, Y = p.Y }).ToList();
-        }
+        // The curve editor maintains the curve points internally
+        // No need to sync back since we pass the list by reference
     }
 }
 
@@ -412,19 +410,22 @@ public class SimulationTrackingManager
     private double GetParameterValue(PhysicoChemDataset dataset, string parameterName)
     {
         // Extract parameter value based on name
+        if (dataset.CurrentState == null)
+            return 0.0;
+
         switch (parameterName)
         {
             case "AverageTemperature":
-                return dataset.AverageTemperature;
+                return dataset.CurrentState.AverageTemperature;
 
             case "AveragePressure":
-                return dataset.AveragePressure;
+                return dataset.CurrentState.AveragePressure;
 
             case "TotalMass":
-                return dataset.TotalMass;
+                return dataset.CurrentState.TotalMass;
 
             case "MaxVelocity":
-                return dataset.MaxVelocity;
+                return dataset.CurrentState.MaxVelocity;
 
             default:
                 return 0.0;

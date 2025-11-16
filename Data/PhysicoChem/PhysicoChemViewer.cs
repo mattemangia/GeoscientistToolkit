@@ -750,11 +750,11 @@ public class PhysicoChemViewer : IDatasetViewer
 
         if (_dataset.CurrentState == null)
         {
-            var textColor = ImGui.GetColorU32(new Vector4(0.7f, 0.7f, 0.7f, 1.0f));
+            var messageColor = ImGui.GetColorU32(new Vector4(0.7f, 0.7f, 0.7f, 1.0f));
             var message = "No simulation data available";
             var textSize = ImGui.CalcTextSize(message);
             var textPos = cursorPos + (availableSize - textSize) * 0.5f;
-            drawList.AddText(textPos, textColor, message);
+            drawList.AddText(textPos, messageColor, message);
             return;
         }
 

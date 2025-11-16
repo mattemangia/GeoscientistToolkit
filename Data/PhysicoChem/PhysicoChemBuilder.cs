@@ -145,7 +145,11 @@ public class PhysicoChemBuilder
 
             // Dataset-level properties
             ImGui.Text("Dataset:");
-            ImGui.InputText("Name", ref _dataset.Name, 256);
+            var datasetName = _dataset.Name ?? "";
+            if (ImGui.InputText("Name", ref datasetName, 256))
+            {
+                _dataset.Name = datasetName;
+            }
 
             if (ImGui.Button("Generate Mesh"))
             {
@@ -757,8 +761,16 @@ public class PhysicoChemBuilder
         }
 
         // Active checkbox
-        ImGui.Checkbox("Active", ref domain.IsActive);
-        ImGui.Checkbox("Allow Interaction", ref domain.AllowInteraction);
+        var isActive = domain.IsActive;
+        if (ImGui.Checkbox("Active", ref isActive))
+        {
+            domain.IsActive = isActive;
+        }
+        var allowInteraction = domain.AllowInteraction;
+        if (ImGui.Checkbox("Allow Interaction", ref allowInteraction))
+        {
+            domain.AllowInteraction = allowInteraction;
+        }
 
         ImGui.Spacing();
 
@@ -988,7 +1000,11 @@ public class PhysicoChemBuilder
             bc.Name = name;
         }
 
-        ImGui.Checkbox("Active", ref bc.IsActive);
+        var bcIsActive = bc.IsActive;
+        if (ImGui.Checkbox("Active", ref bcIsActive))
+        {
+            bc.IsActive = bcIsActive;
+        }
 
         // Type
         var bcTypes = Enum.GetNames(typeof(BoundaryType));

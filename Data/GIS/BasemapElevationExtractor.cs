@@ -7,8 +7,7 @@ using System.Numerics;
 using GeoscientistToolkit.Data.GIS;
 using GeoscientistToolkit.UI.GIS;
 using GeoscientistToolkit.Util;
-using SixLabors.ImageSharp;
-using SixLabors.ImageSharp.PixelFormats;
+using StbImageSharp;
 
 namespace GeoscientistToolkit.Data.GIS;
 
@@ -72,17 +71,12 @@ public class BasemapElevationExtractor
             var elevation = MosaicAndExtractElevation(tileDataList, bounds, targetWidth, targetHeight, zoomLevel);
 
             // Create raster layer
-            var layer = new GISRasterLayer
+            var layer = new GISRasterLayer(elevation, bounds)
             {
                 Name = "Extracted Elevation",
-                Width = targetWidth,
-                Height = targetHeight,
-                Bounds = bounds,
                 IsVisible = true,
                 RasterPath = null // In-memory only
             };
-
-            layer.SetPixelData(elevation);
 
             Logger.Log($"Elevation extraction complete: {targetWidth}x{targetHeight}");
             return layer;
@@ -150,32 +144,32 @@ public class BasemapElevationExtractor
 
     private float[,] HillshadeToElevation(byte[] imageData)
     {
-        // Load image
-        using var image = Image.Load<Rgb24>(imageData);
+        // Load image using StbImageSharp
+        var image = ImageResult.FromMemory(imageData, ColorComponents.RedGreenBlue);
         int width = image.Width;
         int height = image.Height;
         var elevation = new float[height, width];
 
         // Hillshade uses grayscale intensity to represent elevation
         // This is an approximation - true elevation would require DEM data
-        image.ProcessPixelRows(accessor =>
+        for (int y = 0; y < height; y++)
         {
-            for (int y = 0; y < accessor.Height; y++)
+            for (int x = 0; x < width; x++)
             {
-                var pixelRow = accessor.GetRowSpan(y);
-                for (int x = 0; x < pixelRow.Length; x++)
-                {
-                    var pixel = pixelRow[x];
-                    // Convert RGB to grayscale intensity
-                    float intensity = (pixel.R * 0.299f + pixel.G * 0.587f + pixel.B * 0.114f) / 255f;
+                int pixelIndex = (y * width + x) * 3; // RGB = 3 bytes per pixel
+                byte r = image.Data[pixelIndex];
+                byte g = image.Data[pixelIndex + 1];
+                byte b = image.Data[pixelIndex + 2];
 
-                    // Estimate elevation from hillshade intensity
-                    // This is approximate - darker areas are generally lower elevation
-                    // We'll map 0-255 to 0-5000m elevation range
-                    elevation[y, x] = intensity * 5000f;
-                }
+                // Convert RGB to grayscale intensity
+                float intensity = (r * 0.299f + g * 0.587f + b * 0.114f) / 255f;
+
+                // Estimate elevation from hillshade intensity
+                // This is approximate - darker areas are generally lower elevation
+                // We'll map 0-255 to 0-5000m elevation range
+                elevation[y, x] = intensity * 5000f;
             }
-        });
+        }
 
         return elevation;
     }
@@ -352,16 +346,12 @@ public class BasemapElevationExtractor
                 break;
         }
 
-        var layer = new GISRasterLayer
+        var layer = new GISRasterLayer(elevation, bounds)
         {
             Name = $"Synthetic DEM ({terrainType})",
-            Width = width,
-            Height = height,
-            Bounds = bounds,
             IsVisible = true
         };
 
-        layer.SetPixelData(elevation);
         return layer;
     }
 
