@@ -318,6 +318,221 @@ public class GeothermalSimulationResults
     /// </summary>
     public Dictionary<string, float[,,]> DissolutionFields { get; set; } = new();
 
+    // ===== Multiphase Flow Results =====
+
+    /// <summary>
+    ///     Water saturation field [r, theta, z] (0-1)
+    /// </summary>
+    public float[,,] WaterSaturationField { get; set; }
+
+    /// <summary>
+    ///     Gas saturation field [r, theta, z] (0-1)
+    /// </summary>
+    public float[,,] GasSaturationField { get; set; }
+
+    /// <summary>
+    ///     Liquid CO2 saturation field [r, theta, z] (0-1)
+    /// </summary>
+    public float[,,] CO2SaturationField { get; set; }
+
+    /// <summary>
+    ///     Brine density field with salinity effects [r, theta, z] (kg/m³)
+    /// </summary>
+    public float[,,] BrineDensityField { get; set; }
+
+    /// <summary>
+    ///     Dissolved CO2 concentration field [r, theta, z] (mass fraction)
+    /// </summary>
+    public float[,,] DissolvedCO2Field { get; set; }
+
+    /// <summary>
+    ///     Salinity field [r, theta, z] (mass fraction of NaCl)
+    /// </summary>
+    public float[,,] SalinityField { get; set; }
+
+    /// <summary>
+    ///     Capillary pressure field [r, theta, z] (Pa)
+    /// </summary>
+    public float[,,] CapillaryPressureField { get; set; }
+
+    /// <summary>
+    ///     Water relative permeability field [r, theta, z] (0-1)
+    /// </summary>
+    public float[,,] RelativePermeabilityWaterField { get; set; }
+
+    /// <summary>
+    ///     Gas relative permeability field [r, theta, z] (0-1)
+    /// </summary>
+    public float[,,] RelativePermeabilityGasField { get; set; }
+
+    /// <summary>
+    ///     Saturation history over time
+    /// </summary>
+    public Dictionary<double, (float[,,] water, float[,,] gas, float[,,] co2)> SaturationHistory { get; set; } = new();
+
+    // ===== Adaptive Mesh Refinement Results =====
+
+    /// <summary>
+    ///     Refinement level field [r, theta, z] (0 = base mesh, 1-3 = refined)
+    /// </summary>
+    public int[,,] RefinementLevelField { get; set; }
+
+    /// <summary>
+    ///     Temperature gradient magnitude field [r, theta, z] (K/m)
+    /// </summary>
+    public float[,,] TemperatureGradientField { get; set; }
+
+    /// <summary>
+    ///     Number of refinement operations performed
+    /// </summary>
+    public int TotalRefinementOperations { get; set; }
+
+    /// <summary>
+    ///     Number of coarsening operations performed
+    /// </summary>
+    public int TotalCoarseningOperations { get; set; }
+
+    /// <summary>
+    ///     Refinement history over time
+    /// </summary>
+    public List<(double time, int refinedCells, int coarsenedCells)> RefinementHistory { get; set; } = new();
+
+    // ===== Time-Varying Boundary Conditions Results =====
+
+    /// <summary>
+    ///     Outdoor temperature history (°C)
+    /// </summary>
+    public List<(double time, float temperature)> OutdoorTemperatureHistory { get; set; } = new();
+
+    /// <summary>
+    ///     Load demand history (W)
+    /// </summary>
+    public List<(double time, float load)> LoadDemandHistory { get; set; } = new();
+
+    /// <summary>
+    ///     Actual mass flow rate history (kg/s)
+    /// </summary>
+    public List<(double time, float flowRate)> ActualFlowRateHistory { get; set; } = new();
+
+    /// <summary>
+    ///     Inlet temperature history (°C)
+    /// </summary>
+    public List<(double time, float temperature)> InletTemperatureHistory { get; set; } = new();
+
+    // ===== Enhanced HVAC Results =====
+
+    /// <summary>
+    ///     Instantaneous COP accounting for part-load and temperature effects
+    /// </summary>
+    public List<(double time, float cop)> InstantaneousCOP { get; set; } = new();
+
+    /// <summary>
+    ///     Part-load ratio history (0-1)
+    /// </summary>
+    public List<(double time, float plr)> PartLoadRatioHistory { get; set; } = new();
+
+    /// <summary>
+    ///     Compressor power history (W)
+    /// </summary>
+    public List<(double time, float power)> CompressorPowerHistory { get; set; } = new();
+
+    /// <summary>
+    ///     Seasonal Performance Factor (SPF)
+    /// </summary>
+    public float SeasonalPerformanceFactor { get; set; }
+
+    /// <summary>
+    ///     Seasonal COP for heating mode (SCOP)
+    /// </summary>
+    public float SeasonalCOPHeating { get; set; }
+
+    /// <summary>
+    ///     Seasonal Energy Efficiency Ratio for cooling mode (SEER, BTU/Wh)
+    /// </summary>
+    public float SeasonalEER { get; set; }
+
+    /// <summary>
+    ///     Total heat delivered to building (J)
+    /// </summary>
+    public double TotalHeatDelivered { get; set; }
+
+    /// <summary>
+    ///     Total work input including auxiliaries (J)
+    /// </summary>
+    public double TotalWorkInput { get; set; }
+
+    /// <summary>
+    ///     Total heating hours
+    /// </summary>
+    public double TotalHeatingHours { get; set; }
+
+    /// <summary>
+    ///     Total cooling hours
+    /// </summary>
+    public double TotalCoolingHours { get; set; }
+
+    /// <summary>
+    ///     Entering water temperature history (°C)
+    /// </summary>
+    public List<(double time, float temperature)> EnteringWaterTemperatureHistory { get; set; } = new();
+
+    /// <summary>
+    ///     Supply temperature to building history (°C)
+    /// </summary>
+    public List<(double time, float temperature)> SupplyTemperatureHistory { get; set; } = new();
+
+    // ===== Fractured Media Results =====
+
+    /// <summary>
+    ///     Matrix temperature field for dual-continuum model [r, theta, z] (K)
+    /// </summary>
+    public float[,,] MatrixTemperatureField { get; set; }
+
+    /// <summary>
+    ///     Fracture temperature field for dual-continuum model [r, theta, z] (K)
+    /// </summary>
+    public float[,,] FractureTemperatureField { get; set; }
+
+    /// <summary>
+    ///     Matrix pressure field [r, theta, z] (Pa)
+    /// </summary>
+    public float[,,] MatrixPressureField { get; set; }
+
+    /// <summary>
+    ///     Fracture pressure field [r, theta, z] (Pa)
+    /// </summary>
+    public float[,,] FracturePressureField { get; set; }
+
+    /// <summary>
+    ///     Fracture aperture field [r, theta, z] (m)
+    /// </summary>
+    public float[,,] FractureApertureField { get; set; }
+
+    /// <summary>
+    ///     Fracture permeability field [r, theta, z] (m²)
+    /// </summary>
+    public float[,,] FracturePermeabilityField { get; set; }
+
+    /// <summary>
+    ///     Matrix-fracture heat transfer rate [r, theta, z] (W/m³)
+    /// </summary>
+    public float[,,] MatrixFractureHeatTransferField { get; set; }
+
+    /// <summary>
+    ///     Matrix-fracture mass transfer rate [r, theta, z] (kg/s/m³)
+    /// </summary>
+    public float[,,] MatrixFractureMassTransferField { get; set; }
+
+    /// <summary>
+    ///     Average matrix-fracture temperature difference (K)
+    /// </summary>
+    public double AverageMatrixFractureTempDifference { get; set; }
+
+    /// <summary>
+    ///     Total heat transfer between matrix and fractures (W)
+    /// </summary>
+    public double TotalMatrixFractureHeatTransfer { get; set; }
+
     /// <summary>
     ///     Pore/throat radius change over time due to precipitation/dissolution
     /// </summary>

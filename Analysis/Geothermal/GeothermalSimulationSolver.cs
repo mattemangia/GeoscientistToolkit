@@ -119,6 +119,13 @@ public class GeothermalSimulationSolver : IDisposable
     private readonly GeothermalSimulationOptions _options;
     private readonly IProgress<(float progress, string message)> _progress;
 
+    // New enhanced solvers
+    private MultiphaseFlowSolver _multiphaseSolver;
+    private AdaptiveMeshRefinement _amrSolver;
+    private TimeVaryingBoundaryConditions _timeVaryingBC;
+    private EnhancedHVACCalculator _hvacCalculator;
+    private FracturedMediaSolver _fracturedMediaSolver;
+
     // Stability parameters (ADDED)
     private float _adaptiveRelaxation = 0.4f; // Start more conservative to prevent oscillations
     private float[,,] _dispersionCoefficient; // Changed from _dispersivity
@@ -227,6 +234,88 @@ public class GeothermalSimulationSolver : IDisposable
                 _useBTESOpenCL = false;
             }
 
+        // Initialize Multiphase Flow solver
+        if (_options.EnableMultiphaseFlow)
+        {
+            var multiphaseOptions = new MultiphaseOptions
+            {
+                UseGPU = _options.UseGPU,
+                FluidType = _options.MultiphaseFluidType,
+                InitialSalinity = _options.InitialSalinity,
+                ResidualWaterSaturation = _options.ResidualWaterSaturation,
+                ResidualGasSaturation = _options.ResidualGasSaturation
+            };
+            _multiphaseSolver = new MultiphaseFlowSolver(mesh, multiphaseOptions);
+            Logger.Log($"Multiphase flow solver initialized: {_options.MultiphaseFluidType}");
+        }
+
+        // Initialize Adaptive Mesh Refinement
+        if (_options.EnableAdaptiveMeshRefinement)
+        {
+            var amrOptions = new AdaptiveMeshOptions
+            {
+                MaxRefinementLevel = _options.MaxRefinementLevel,
+                TemperatureGradientThreshold = _options.TemperatureGradientThreshold,
+                PressureGradientThreshold = _options.PressureGradientThreshold,
+                RefinementInterval = _options.RefinementInterval,
+                InitialTemperature = (float)(_options.SurfaceTemperature - 273.15),
+                InjectionTemperature = (float)(_options.FluidInletTemperature - 273.15)
+            };
+            _amrSolver = new AdaptiveMeshRefinement(mesh, amrOptions);
+            Logger.Log($"Adaptive mesh refinement initialized: Max level {_options.MaxRefinementLevel}");
+        }
+
+        // Initialize Time-Varying Boundary Conditions
+        if (_options.EnableTimeVaryingBC)
+        {
+            var tvbcOptions = new TimeVaryingBCOptions
+            {
+                UseTimeVaryingInletTemp = true,
+                UseTimeVaryingFlowRate = true,
+                UseSeasonalVariation = _options.UseSeasonalVariation,
+                UseDailyVariation = _options.UseDailyVariation,
+                BaseInletTemperature = (float)(_options.FluidInletTemperature - 273.15),
+                BaseMassFlowRate = (float)_options.FluidMassFlowRate,
+                AverageOutdoorTemp = _options.AverageOutdoorTemp,
+                SeasonalTempAmplitude = _options.SeasonalTempAmplitude,
+                PeakHeatingLoad = _options.PeakHeatingLoad,
+                PeakCoolingLoad = _options.PeakCoolingLoad
+            };
+            _timeVaryingBC = new TimeVaryingBoundaryConditions(tvbcOptions);
+            Logger.Log("Time-varying boundary conditions initialized");
+        }
+
+        // Initialize Enhanced HVAC Calculator
+        if (_options.EnableEnhancedHVAC)
+        {
+            var hvacOptions = new HVACOptions
+            {
+                CarnotEfficiency = _options.CarnotEfficiency,
+                BuildingUAValue = _options.BuildingUAValue,
+                DesignIndoorTemp = _options.DesignIndoorTemp,
+                DesignSupplyTemp = _options.DesignSupplyTemp
+            };
+            _hvacCalculator = new EnhancedHVACCalculator(hvacOptions);
+            Logger.Log("Enhanced HVAC calculator initialized");
+        }
+
+        // Initialize Fractured Media solver
+        if (_options.EnableDualContinuumFractures)
+        {
+            var fractureOptions = new FracturedMediaOptions
+            {
+                FractureAperture = _options.FractureAperture,
+                FractureSpacing = _options.FractureSpacing,
+                FractureDensity = _options.FractureDensity,
+                MatrixPermeability = _options.MatrixPermeability,
+                InitialTemperature = (float)(_options.SurfaceTemperature - 273.15),
+                InitialPressure = 1e7f,
+                EnableMultiphase = _options.EnableMultiphaseFlow
+            };
+            _fracturedMediaSolver = new FracturedMediaSolver(mesh, fractureOptions);
+            Logger.Log("Fractured media solver initialized (dual-continuum)");
+        }
+
         InitializeFields();
     }
 
@@ -240,12 +329,14 @@ public class GeothermalSimulationSolver : IDisposable
     public string ConvergenceStatus { get; private set; } = "Initializing...";
 
     /// <summary>
-    ///     Disposes OpenCL resources.
+    ///     Disposes OpenCL resources and enhanced solvers.
     /// </summary>
     public void Dispose()
     {
         _openCLSolver?.Dispose();
         _btesOpenCLSolver?.Dispose();
+        _multiphaseSolver?.Dispose();
+        // AMR, TimeVaryingBC, HVAC, and FracturedMedia don't have disposable resources
     }
 
     /// <summary>
