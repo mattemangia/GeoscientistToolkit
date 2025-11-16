@@ -64,9 +64,10 @@ namespace GeoscientistToolkit.Analysis.Geothermal
                     return false;
                 }
 
+                var device = _device;
                 // Create context
                 int errorCode;
-                _context = _cl.CreateContext(null, 1, &_device, null, null, &errorCode);
+                _context = _cl.CreateContext(null, 1, &device, null, null, &errorCode);
                 if (errorCode != (int)ErrorCodes.Success)
                 {
                     Console.WriteLine($"Failed to create OpenCL context: {errorCode}");
@@ -140,11 +141,11 @@ namespace GeoscientistToolkit.Analysis.Geothermal
 
                 // Get build log
                 nuint logSize;
-                _cl.GetProgramBuildInfo(_program, _device, (uint)ProgramBuildInfo.Log, 0, null, &logSize);
+                _cl.GetProgramBuildInfo(_program, _device, (uint)ProgramBuildInfo.BuildLog, 0, null, &logSize);
                 if (logSize > 0)
                 {
                     byte* log = stackalloc byte[(int)logSize];
-                    _cl.GetProgramBuildInfo(_program, _device, (uint)ProgramBuildInfo.Log, logSize, log, null);
+                    _cl.GetProgramBuildInfo(_program, _device, (uint)ProgramBuildInfo.BuildLog, logSize, log, null);
                     string logString = Marshal.PtrToStringAnsi((nint)log);
                     Console.WriteLine($"Build log:\n{logString}");
                 }
@@ -253,10 +254,17 @@ namespace GeoscientistToolkit.Analysis.Geothermal
             float superheat = _config.SuperheatDegrees;
             float geoCp = _config.GeothermalFluidCp;
             float maxORCFlow = _config.MaxORCMassFlowRate;
-
+            var bufferGeoTemp = _bufferGeoTemp;
+            var bufferGeoMassFlow = _bufferGeoMassFlow;
+            var bufferNetPower = _bufferNetPower;
+            var bufferPumpWork = _bufferPumpWork;
+            var bufferHeatInput = _bufferHeatInput;
+            var bufferEfficiency = _bufferEfficiency;
+            var bufferMassFlowRate = _bufferMassFlowRate;
+var bufferTurbineWork = _bufferTurbineWork;
             int argIdx = 0;
-            _cl.SetKernelArg(_kernelORCCycle, (uint)argIdx++, (nuint)sizeof(nint), &_bufferGeoTemp);
-            _cl.SetKernelArg(_kernelORCCycle, (uint)argIdx++, (nuint)sizeof(nint), &_bufferGeoMassFlow);
+            _cl.SetKernelArg(_kernelORCCycle, (uint)argIdx++, (nuint)sizeof(nint), &bufferGeoTemp);
+            _cl.SetKernelArg(_kernelORCCycle, (uint)argIdx++, (nuint)sizeof(nint), &bufferGeoMassFlow);
             _cl.SetKernelArg(_kernelORCCycle, (uint)argIdx++, (nuint)sizeof(float), &condTemp);
             _cl.SetKernelArg(_kernelORCCycle, (uint)argIdx++, (nuint)sizeof(float), &evapPress);
             _cl.SetKernelArg(_kernelORCCycle, (uint)argIdx++, (nuint)sizeof(float), &pumpEff);
@@ -265,12 +273,12 @@ namespace GeoscientistToolkit.Analysis.Geothermal
             _cl.SetKernelArg(_kernelORCCycle, (uint)argIdx++, (nuint)sizeof(float), &superheat);
             _cl.SetKernelArg(_kernelORCCycle, (uint)argIdx++, (nuint)sizeof(float), &geoCp);
             _cl.SetKernelArg(_kernelORCCycle, (uint)argIdx++, (nuint)sizeof(float), &maxORCFlow);
-            _cl.SetKernelArg(_kernelORCCycle, (uint)argIdx++, (nuint)sizeof(nint), &_bufferNetPower);
-            _cl.SetKernelArg(_kernelORCCycle, (uint)argIdx++, (nuint)sizeof(nint), &_bufferEfficiency);
-            _cl.SetKernelArg(_kernelORCCycle, (uint)argIdx++, (nuint)sizeof(nint), &_bufferMassFlowRate);
-            _cl.SetKernelArg(_kernelORCCycle, (uint)argIdx++, (nuint)sizeof(nint), &_bufferTurbineWork);
-            _cl.SetKernelArg(_kernelORCCycle, (uint)argIdx++, (nuint)sizeof(nint), &_bufferPumpWork);
-            _cl.SetKernelArg(_kernelORCCycle, (uint)argIdx++, (nuint)sizeof(nint), &_bufferHeatInput);
+            _cl.SetKernelArg(_kernelORCCycle, (uint)argIdx++, (nuint)sizeof(nint), &bufferNetPower);
+            _cl.SetKernelArg(_kernelORCCycle, (uint)argIdx++, (nuint)sizeof(nint), &bufferEfficiency);
+            _cl.SetKernelArg(_kernelORCCycle, (uint)argIdx++, (nuint)sizeof(nint), &bufferMassFlowRate);
+            _cl.SetKernelArg(_kernelORCCycle, (uint)argIdx++, (nuint)sizeof(nint), &bufferTurbineWork);
+            _cl.SetKernelArg(_kernelORCCycle, (uint)argIdx++, (nuint)sizeof(nint), &bufferPumpWork);
+            _cl.SetKernelArg(_kernelORCCycle, (uint)argIdx++, (nuint)sizeof(nint), &bufferHeatInput);
             _cl.SetKernelArg(_kernelORCCycle, (uint)argIdx++, (nuint)sizeof(int), &n);
 
             // Execute kernel
