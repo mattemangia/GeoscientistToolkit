@@ -199,6 +199,19 @@ public class GeomechanicsSolver : IDisposable
     public void SetMaterialProperties(string lithology, float youngsModulusGPa,
         float poissonsRatio, float thermalExpansionCoeff, float biotCoeff = 0.7f)
     {
+        // Validate material properties
+        if (youngsModulusGPa <= 0)
+            throw new ArgumentException($"Young's modulus must be positive, got {youngsModulusGPa} GPa");
+
+        if (poissonsRatio < 0.0f || poissonsRatio >= 0.5f)
+            throw new ArgumentException($"Poisson's ratio must be in range [0, 0.5), got {poissonsRatio}");
+
+        if (thermalExpansionCoeff < 0)
+            throw new ArgumentException($"Thermal expansion coefficient must be non-negative, got {thermalExpansionCoeff}");
+
+        if (biotCoeff < 0.0f || biotCoeff > 1.0f)
+            throw new ArgumentException($"Biot coefficient must be in range [0, 1], got {biotCoeff}");
+
         // This would map lithology to grid cells
         // For now, we'll apply to entire domain as example
         float youngsModulusPa = youngsModulusGPa * 1e9f;
@@ -244,6 +257,9 @@ public class GeomechanicsSolver : IDisposable
 
                     float E = _youngsModulus[idx];
                     float nu = _poissonsRatio[idx];
+
+                    // BUGFIX: Prevent division by zero when nu → 0.5 (incompressible material)
+                    nu = Math.Clamp(nu, 0.0f, 0.49f);
                     float factor = E / (1.0f - 2.0f * nu);
 
                     // Constrained thermal stress (rock is confined)
@@ -398,7 +414,7 @@ public class GeomechanicsSolver : IDisposable
                     float volumetricStrain = 3.0f * thermalStrain + pressureStrain;
 
                     float E = pYoungs[i];
-                    float nu = pPoisson[i];
+                    float nu = Math.Clamp(pPoisson[i], 0.0f, 0.49f); // BUGFIX: Prevent division by zero
                     float factor = E / (1.0f - 2.0f * nu);
 
                     float thermalStress = factor * nu * thermalStrain;
@@ -438,70 +454,117 @@ public class GeomechanicsSolver : IDisposable
         fixed (float* pTemp = temperature)
         fixed (float* pTempOld = temperatureOld)
         fixed (float* pPress = pressure)
+        fixed (float* pDisp = _displacement)
         {
             err = _cl.EnqueueWriteBuffer(_queue, _temperatureBuffer, true, 0,
                 (nuint)(totalSize * sizeof(float)), pTemp, 0, null, null);
+            CheckCLError(err, "Upload temperature buffer");
+
             err = _cl.EnqueueWriteBuffer(_queue, _temperatureOldBuffer, true, 0,
                 (nuint)(totalSize * sizeof(float)), pTempOld, 0, null, null);
+            CheckCLError(err, "Upload temperature_old buffer");
+
             err = _cl.EnqueueWriteBuffer(_queue, _pressureBuffer, true, 0,
                 (nuint)(totalSize * sizeof(float)), pPress, 0, null, null);
+            CheckCLError(err, "Upload pressure buffer");
+
+            // BUGFIX: Upload current displacement buffer (it's read-write, accumulates over time)
+            err = _cl.EnqueueWriteBuffer(_queue, _displacementBuffer, true, 0,
+                (nuint)(totalSize * sizeof(float)), pDisp, 0, null, null);
+            CheckCLError(err, "Upload displacement buffer");
         }
 
         // Set kernel arguments
         err = _cl.SetKernelArg(_geomechanicsKernel, 0, (nuint)sizeof(nint), &_temperatureBuffer);
+        CheckCLError(err, "Set kernel arg 0 (temperature)");
         err = _cl.SetKernelArg(_geomechanicsKernel, 1, (nuint)sizeof(nint), &_temperatureOldBuffer);
+        CheckCLError(err, "Set kernel arg 1 (temperature_old)");
         err = _cl.SetKernelArg(_geomechanicsKernel, 2, (nuint)sizeof(nint), &_pressureBuffer);
+        CheckCLError(err, "Set kernel arg 2 (pressure)");
         err = _cl.SetKernelArg(_geomechanicsKernel, 3, (nuint)sizeof(nint), &_youngsModulusBuffer);
+        CheckCLError(err, "Set kernel arg 3 (Young's modulus)");
         err = _cl.SetKernelArg(_geomechanicsKernel, 4, (nuint)sizeof(nint), &_poissonsRatioBuffer);
+        CheckCLError(err, "Set kernel arg 4 (Poisson's ratio)");
         err = _cl.SetKernelArg(_geomechanicsKernel, 5, (nuint)sizeof(nint), &_thermalExpansionBuffer);
+        CheckCLError(err, "Set kernel arg 5 (thermal expansion)");
         err = _cl.SetKernelArg(_geomechanicsKernel, 6, (nuint)sizeof(nint), &_biotCoefficientBuffer);
+        CheckCLError(err, "Set kernel arg 6 (Biot coefficient)");
         err = _cl.SetKernelArg(_geomechanicsKernel, 7, (nuint)sizeof(nint), &_stressBuffer);
+        CheckCLError(err, "Set kernel arg 7 (stress)");
         err = _cl.SetKernelArg(_geomechanicsKernel, 8, (nuint)sizeof(nint), &_strainBuffer);
+        CheckCLError(err, "Set kernel arg 8 (strain)");
         err = _cl.SetKernelArg(_geomechanicsKernel, 9, (nuint)sizeof(nint), &_vonMisesBuffer);
+        CheckCLError(err, "Set kernel arg 9 (von Mises)");
         err = _cl.SetKernelArg(_geomechanicsKernel, 10, (nuint)sizeof(nint), &_displacementBuffer);
+        CheckCLError(err, "Set kernel arg 10 (displacement)");
         err = _cl.SetKernelArg(_geomechanicsKernel, 11, (nuint)sizeof(float), &dt);
+        CheckCLError(err, "Set kernel arg 11 (dt)");
         err = _cl.SetKernelArg(_geomechanicsKernel, 12, (nuint)sizeof(int), &_nr);
+        CheckCLError(err, "Set kernel arg 12 (nr)");
         err = _cl.SetKernelArg(_geomechanicsKernel, 13, (nuint)sizeof(int), &_nth);
-        err = _cl.SetKernelArg(_geomechanicsKernel, 14, (nuint)sizeof(int), &_nz);
+        CheckCLError(err, "Set kernel arg 13 (nth)");
+        err = _cl.SetKernelArg(_geomechanicsKernel, 14, (nuint)sizeof(nint), &_nz);
+        CheckCLError(err, "Set kernel arg 14 (nz)");
 
         // Execute kernel
         nuint globalSize = (nuint)totalSize;
         nuint localSize = 256;
         err = _cl.EnqueueNdrangeKernel(_queue, _geomechanicsKernel, 1, null, &globalSize,
             &localSize, 0, null, null);
+        CheckCLError(err, "Execute geomechanics kernel");
 
-        // Read results back
-        fixed (float* pStress = _stressXX)
-        fixed (float* pStrain = _strainXX)
+        // BUGFIX: Read results from GPU into temporary packed buffers, then unpack
+        // GPU stores stress/strain as: [XX0, XX1, ..., YY0, YY1, ..., ZZ0, ZZ1, ...]
+        float[] stressPacked = new float[totalSize * 3];
+        float[] strainPacked = new float[totalSize * 3];
+
+        fixed (float* pStressPacked = stressPacked)
+        fixed (float* pStrainPacked = strainPacked)
         fixed (float* pVonMises = _vonMisesStress)
         fixed (float* pDisp = _displacement)
         {
-            // Read stress (packed as XX, YY, ZZ)
+            // Read packed stress and strain buffers
             err = _cl.EnqueueReadBuffer(_queue, _stressBuffer, true, 0,
-                (nuint)(totalSize * 3 * sizeof(float)), pStress, 0, null, null);
+                (nuint)(totalSize * 3 * sizeof(float)), pStressPacked, 0, null, null);
+            CheckCLError(err, "Read stress buffer");
 
-            // Read strain
             err = _cl.EnqueueReadBuffer(_queue, _strainBuffer, true, 0,
-                (nuint)(totalSize * 3 * sizeof(float)), pStrain, 0, null, null);
+                (nuint)(totalSize * 3 * sizeof(float)), pStrainPacked, 0, null, null);
+            CheckCLError(err, "Read strain buffer");
 
             // Read von Mises stress
             err = _cl.EnqueueReadBuffer(_queue, _vonMisesBuffer, true, 0,
                 (nuint)(totalSize * sizeof(float)), pVonMises, 0, null, null);
+            CheckCLError(err, "Read von Mises buffer");
 
             // Read displacement
             err = _cl.EnqueueReadBuffer(_queue, _displacementBuffer, true, 0,
                 (nuint)(totalSize * sizeof(float)), pDisp, 0, null, null);
+            CheckCLError(err, "Read displacement buffer");
         }
 
         _cl.Finish(_queue);
 
-        // Unpack stress components (GPU stores as interleaved)
+        // Unpack stress and strain components into separate arrays
         for (int i = 0; i < totalSize; i++)
         {
-            _stressYY[i] = _stressXX[totalSize + i];
-            _stressZZ[i] = _stressXX[2 * totalSize + i];
-            _strainYY[i] = _strainXX[totalSize + i];
-            _strainZZ[i] = _strainXX[2 * totalSize + i];
+            _stressXX[i] = stressPacked[i];
+            _stressYY[i] = stressPacked[totalSize + i];
+            _stressZZ[i] = stressPacked[2 * totalSize + i];
+            _strainXX[i] = strainPacked[i];
+            _strainYY[i] = strainPacked[totalSize + i];
+            _strainZZ[i] = strainPacked[2 * totalSize + i];
+        }
+    }
+
+    /// <summary>
+    ///     Check OpenCL error code and throw exception if error occurred.
+    /// </summary>
+    private void CheckCLError(int err, string operation)
+    {
+        if (err != 0)
+        {
+            throw new InvalidOperationException($"OpenCL error in {operation}: Error code {err}");
         }
     }
 
@@ -645,6 +708,9 @@ __kernel void geomechanics_kernel(
     float nu = poissons_ratio[gid];
     float alpha = thermal_expansion[gid];
     float biot = biot_coefficient[gid];
+
+    // BUGFIX: Clamp Poisson's ratio to prevent division by zero
+    nu = clamp(nu, 0.0f, 0.49f);
 
     // Calculate temperature change
     float dT = temperature[gid] - temperature_old[gid];
