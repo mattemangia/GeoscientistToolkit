@@ -1232,7 +1232,7 @@ public enum EvaporationModel
     Dalton,          // Dalton's law (mass transfer)
     Penman,          // Penman equation (energy balance)
     PenmanMonteith,  // Penman-Monteith (with surface resistance)
-    Priestley Taylor // Priestley-Taylor (simplified)
+    PriestleyTaylor // Priestley-Taylor (simplified)
 }
 
 /// <summary>
