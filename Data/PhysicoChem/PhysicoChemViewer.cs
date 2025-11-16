@@ -62,14 +62,46 @@ public class PhysicoChemViewer : IDatasetViewer
     private bool[] _trackerEnabled;
     private float _graphTimeRange = 60.0f; // seconds to show
 
+    // Builder mode
+    private bool _builderMode = false;
+    private PhysicoChemBuilder _builder;
+
+    // Rendering options
+    private RenderMode _renderMode = RenderMode.Solid;
+    private bool _showWireframe = true;
+    private bool _showNormals = false;
+
     public PhysicoChemViewer(PhysicoChemDataset dataset)
     {
         _dataset = dataset ?? throw new ArgumentNullException(nameof(dataset));
         _dataset.Load();
+        _builder = new PhysicoChemBuilder(_dataset);
     }
 
     public void DrawToolbarControls()
     {
+        // Builder mode toggle
+        if (ImGui.Checkbox("Builder Mode", ref _builderMode))
+        {
+            // Reset view to 3D when entering builder mode
+            if (_builderMode)
+                _viewMode = ViewMode.View3D;
+        }
+
+        ImGui.SameLine();
+        ImGui.Separator();
+        ImGui.SameLine();
+
+        // Builder tools (only visible in builder mode)
+        if (_builderMode)
+        {
+            _builder.DrawToolbar();
+
+            ImGui.SameLine();
+            ImGui.Separator();
+            ImGui.SameLine();
+        }
+
         // View mode selector
         ImGui.Text("View:");
         ImGui.SameLine();
@@ -85,6 +117,25 @@ public class PhysicoChemViewer : IDatasetViewer
         ImGui.SameLine();
         ImGui.Separator();
         ImGui.SameLine();
+
+        // Rendering mode (only for 3D view)
+        if (_viewMode == ViewMode.View3D && !_builderMode)
+        {
+            ImGui.Text("Render:");
+            ImGui.SameLine();
+            if (ImGui.RadioButton("Solid", _renderMode == RenderMode.Solid))
+                _renderMode = RenderMode.Solid;
+            ImGui.SameLine();
+            if (ImGui.RadioButton("Wireframe", _renderMode == RenderMode.Wireframe))
+                _renderMode = RenderMode.Wireframe;
+            ImGui.SameLine();
+            if (ImGui.RadioButton("Both", _renderMode == RenderMode.SolidWireframe))
+                _renderMode = RenderMode.SolidWireframe;
+
+            ImGui.SameLine();
+            ImGui.Separator();
+            ImGui.SameLine();
+        }
 
         // Reset camera (only for 3D view)
         if (_viewMode == ViewMode.View3D && ImGui.Button("Reset Camera"))
@@ -213,17 +264,47 @@ public class PhysicoChemViewer : IDatasetViewer
         ImGui.InvisibleButton("PhysicoChemViewArea", availableSize);
         var isHovered = ImGui.IsItemHovered();
         var isActive = ImGui.IsItemActive();
+        var isClicked = ImGui.IsMouseClicked(ImGuiMouseButton.Left) && isHovered;
+        var isMouseDragging = ImGui.IsMouseDragging(ImGuiMouseButton.Left);
 
-        if (isHovered || isActive || _isDragging || _isPanning)
+        // Handle builder interactions first
+        if (_builderMode)
+        {
+            var io = ImGui.GetIO();
+            bool handledByBuilder = _builder.HandleMouseInteraction(
+                io.MousePos, cursorPos, availableSize,
+                isClicked, isMouseDragging,
+                _cameraYaw, _cameraPitch
+            );
+
+            if (!handledByBuilder && (isHovered || isActive || _isDragging || _isPanning))
+            {
+                HandleMouseInput();
+            }
+        }
+        else if (isHovered || isActive || _isDragging || _isPanning)
         {
             HandleMouseInput();
         }
 
-        // Render 3D content
-        Render3DContent(drawList, cursorPos, availableSize);
+        // Render 3D content with render mode
+        Render3DContent(drawList, cursorPos, availableSize, _renderMode);
+
+        // Render builder handles if in builder mode
+        if (_builderMode)
+        {
+            _builder.RenderHandles(drawList, cursorPos, availableSize,
+                                  _cameraYaw, _cameraPitch, _cameraDistance);
+        }
 
         // Draw info overlay
         DrawInfoOverlay(cursorPos, availableSize);
+
+        // Builder properties panel
+        if (_builderMode)
+        {
+            _builder.DrawPropertiesPanel();
+        }
     }
 
     private void Draw2DSliceView(Vector2 cursorPos, Vector2 availableSize)
@@ -339,31 +420,31 @@ public class PhysicoChemViewer : IDatasetViewer
         }
     }
 
-    private void Render3DContent(ImDrawListPtr drawList, Vector2 screenPos, Vector2 size)
+    private void Render3DContent(ImDrawListPtr drawList, Vector2 screenPos, Vector2 size, RenderMode renderMode = RenderMode.Solid)
     {
         // For now, draw a simple 3D representation using ImGui primitives
         // In a full implementation, this would use Veldrid rendering like Mesh3DViewer
 
         var center = screenPos + size * 0.5f;
-        var gridSize = _dataset.GeneratedMesh.GridSize;
 
-        // Draw domain bounding boxes
-        if (_showDomains)
+        // Draw domain bounding boxes (unless in builder mode, builder handles rendering)
+        if (_showDomains && !_builderMode)
         {
             foreach (var domain in _dataset.Domains)
             {
-                DrawDomainBox(drawList, center, domain);
+                DrawDomainBox(drawList, center, domain, renderMode);
             }
         }
 
         // Draw mesh grid (simplified)
-        if (_showMesh)
+        if (_showMesh && _dataset.GeneratedMesh != null)
         {
-            DrawMeshGrid(drawList, center, gridSize);
+            var gridSize = _dataset.GeneratedMesh.GridSize;
+            DrawMeshGrid(drawList, center, gridSize, renderMode);
         }
 
-        // Draw boundary conditions markers
-        if (_showBoundaryConditions)
+        // Draw boundary conditions markers (unless in builder mode)
+        if (_showBoundaryConditions && !_builderMode)
         {
             foreach (var bc in _dataset.BoundaryConditions)
             {
@@ -375,22 +456,37 @@ public class PhysicoChemViewer : IDatasetViewer
         DrawAxes(drawList, center);
     }
 
-    private void DrawDomainBox(ImDrawListPtr drawList, Vector2 center, ReactorDomain domain)
+    private void DrawDomainBox(ImDrawListPtr drawList, Vector2 center, ReactorDomain domain, RenderMode renderMode)
     {
         if (domain.Geometry == null) return;
 
-        var color = ImGui.GetColorU32(new Vector4(0.3f, 0.6f, 0.9f, 0.5f));
+        var wireframeColor = ImGui.GetColorU32(new Vector4(0.3f, 0.6f, 0.9f, 0.8f));
+        var solidColor = ImGui.GetColorU32(new Vector4(0.3f, 0.6f, 0.9f, 0.3f));
         var scale = 80.0f;
 
         // Simple 2D projection of 3D box
         var corners = GetProjectedDomainCorners(domain, center, scale);
 
-        // Draw box edges
-        for (int i = 0; i < 4; i++)
+        // Draw solid fill if enabled
+        if (renderMode == RenderMode.Solid || renderMode == RenderMode.SolidWireframe)
         {
-            drawList.AddLine(corners[i], corners[(i + 1) % 4], color, 1.5f);
-            drawList.AddLine(corners[i + 4], corners[((i + 1) % 4) + 4], color, 1.5f);
-            drawList.AddLine(corners[i], corners[i + 4], color, 1.5f);
+            // Draw filled faces (simplified - just draw some quads)
+            // Front face
+            drawList.AddQuadFilled(corners[0], corners[1], corners[3], corners[2], solidColor);
+            // Top face
+            drawList.AddQuadFilled(corners[4], corners[5], corners[7], corners[6], solidColor);
+        }
+
+        // Draw wireframe if enabled
+        if (renderMode == RenderMode.Wireframe || renderMode == RenderMode.SolidWireframe)
+        {
+            // Draw box edges
+            for (int i = 0; i < 4; i++)
+            {
+                drawList.AddLine(corners[i], corners[(i + 1) % 4], wireframeColor, 1.5f);
+                drawList.AddLine(corners[i + 4], corners[((i + 1) % 4) + 4], wireframeColor, 1.5f);
+                drawList.AddLine(corners[i], corners[i + 4], wireframeColor, 1.5f);
+            }
         }
     }
 
@@ -448,8 +544,12 @@ public class PhysicoChemViewer : IDatasetViewer
         return corners;
     }
 
-    private void DrawMeshGrid(ImDrawListPtr drawList, Vector2 center, (int X, int Y, int Z) gridSize)
+    private void DrawMeshGrid(ImDrawListPtr drawList, Vector2 center, (int X, int Y, int Z) gridSize, RenderMode renderMode)
     {
+        // Only draw grid in wireframe modes
+        if (renderMode == RenderMode.Solid)
+            return;
+
         var gridColor = ImGui.GetColorU32(new Vector4(0.4f, 0.4f, 0.4f, 0.3f));
         var scale = 3.0f;
 
@@ -898,4 +998,14 @@ public enum ViewMode
     View3D,
     View2DSlice,
     ViewGraphs
+}
+
+/// <summary>
+/// Rendering mode for 3D visualization
+/// </summary>
+public enum RenderMode
+{
+    Solid,
+    Wireframe,
+    SolidWireframe
 }
