@@ -563,6 +563,63 @@ public class GeothermalSimulationResults
     /// </summary>
     public Dictionary<string, List<(double time, double saturationIndex)>> SaturationIndexEvolution { get; set; } = new();
 
+    // ===== Geomechanics Results =====
+
+    /// <summary>
+    ///     Von Mises stress field [r, theta, z] (Pa) - indicates failure potential
+    /// </summary>
+    public float[,,] VonMisesStressField { get; set; }
+
+    /// <summary>
+    ///     Normal stress XX component [r, theta, z] (Pa)
+    /// </summary>
+    public float[,,] StressXXField { get; set; }
+
+    /// <summary>
+    ///     Normal stress YY component [r, theta, z] (Pa)
+    /// </summary>
+    public float[,,] StressYYField { get; set; }
+
+    /// <summary>
+    ///     Normal stress ZZ component [r, theta, z] (Pa)
+    /// </summary>
+    public float[,,] StressZZField { get; set; }
+
+    /// <summary>
+    ///     Volumetric displacement field [r, theta, z] (m) - ground deformation
+    /// </summary>
+    public float[,,] DisplacementField { get; set; }
+
+    /// <summary>
+    ///     Maximum von Mises stress in domain (Pa)
+    /// </summary>
+    public double MaxVonMisesStress { get; set; }
+
+    /// <summary>
+    ///     Maximum ground displacement (m)
+    /// </summary>
+    public double MaxDisplacement { get; set; }
+
+    /// <summary>
+    ///     Von Mises stress history over time
+    /// </summary>
+    public List<(double time, double maxStress)> StressHistory { get; set; } = new();
+
+    /// <summary>
+    ///     Displacement history over time
+    /// </summary>
+    public List<(double time, double maxDisplacement)> DisplacementHistory { get; set; } = new();
+
+    /// <summary>
+    ///     2D Von Mises stress slices at specified depths (for visualization)
+    /// </summary>
+    public Dictionary<double, float[,]> StressSlices { get; set; } = new();
+
+    /// <summary>
+    ///     2D displacement slices at specified depths (for visualization)
+    /// </summary>
+    public Dictionary<double, float[,]> DisplacementSlices { get; set; } = new();
+
     // Summary Report
 
     /// <summary>

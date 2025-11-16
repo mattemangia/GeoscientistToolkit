@@ -341,6 +341,34 @@ public class GeothermalSimulationOptions
     /// </summary>
     public float MatrixPermeability { get; set; } = 1e-18f;
 
+    // ===== Geomechanics Parameters =====
+
+    /// <summary>
+    ///     Enable geomechanics simulation for stress, strain, and deformation analysis.
+    ///     WARNING: This is computationally expensive and may significantly increase simulation time.
+    /// </summary>
+    public bool EnableGeomechanics { get; set; } = false;
+
+    /// <summary>
+    ///     Young's modulus for rock (GPa) - Default: 50 GPa (granite)
+    /// </summary>
+    public float GeomechanicsYoungsModulus { get; set; } = 50.0f;
+
+    /// <summary>
+    ///     Poisson's ratio (dimensionless) - Default: 0.25
+    /// </summary>
+    public float GeomechanicsPoissonsRatio { get; set; } = 0.25f;
+
+    /// <summary>
+    ///     Thermal expansion coefficient (K⁻¹) - Default: 8×10⁻⁶ K⁻¹
+    /// </summary>
+    public float GeomechanicsThermalExpansion { get; set; } = 8e-6f;
+
+    /// <summary>
+    ///     Biot coefficient for pore pressure coupling (0-1) - Default: 0.7
+    /// </summary>
+    public float GeomechanicsBiotCoefficient { get; set; } = 0.7f;
+
     /// <summary>
     ///     Initialize default seasonal curve for BTES mode.
     ///     Creates a sinusoidal curve with charging in summer and discharging in winter.
