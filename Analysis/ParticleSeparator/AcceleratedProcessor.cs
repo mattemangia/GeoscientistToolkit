@@ -21,6 +21,12 @@ public enum AccelerationType
 public class AcceleratedProcessor : IDisposable
 {
     private readonly bool _gpuAvailable;
+    private readonly object _statsLock = new object();
+
+    private float _progress;
+    private string _currentStage = "";
+    private double _lastProcessingTime;
+    private long _voxelsPerSecond;
 
     public AcceleratedProcessor()
     {
@@ -36,10 +42,30 @@ public class AcceleratedProcessor : IDisposable
         }
     }
 
-    public float Progress { get; set; }
-    public string CurrentStage { get; set; } = "";
-    public double LastProcessingTime { get; set; }
-    public long VoxelsPerSecond { get; set; }
+    public float Progress
+    {
+        get { lock (_statsLock) { return _progress; } }
+        set { lock (_statsLock) { _progress = value; } }
+    }
+
+    public string CurrentStage
+    {
+        get { lock (_statsLock) { return _currentStage; } }
+        set { lock (_statsLock) { _currentStage = value; } }
+    }
+
+    public double LastProcessingTime
+    {
+        get { lock (_statsLock) { return _lastProcessingTime; } }
+        set { lock (_statsLock) { _lastProcessingTime = value; } }
+    }
+
+    public long VoxelsPerSecond
+    {
+        get { lock (_statsLock) { return _voxelsPerSecond; } }
+        set { lock (_statsLock) { _voxelsPerSecond = value; } }
+    }
+
     public int ThreadCount { get; set; } = Environment.ProcessorCount;
     public AccelerationType SelectedAcceleration { get; set; } = AccelerationType.Auto;
 
