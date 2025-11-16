@@ -19,6 +19,7 @@ public class AppSettings
     public BackupSettings Backup { get; set; } = new();
     public PhotogrammetrySettings Photogrammetry { get; set; } = new();
     public GISSettings GIS { get; set; } = new();
+    public OllamaSettings Ollama { get; set; } = new();
 
     /// <summary>
     ///     Creates a new instance with default values
@@ -268,4 +269,17 @@ public class GISSettings
     public bool ShowScaleBarByDefault { get; set; } = true;
     public bool ShowNorthArrowByDefault { get; set; } = true;
     public bool ShowCoordinatesByDefault { get; set; } = true;
+}
+
+/// <summary>
+///     Ollama LLM integration settings
+/// </summary>
+public class OllamaSettings
+{
+    public bool Enabled { get; set; } = false;
+    public string BaseUrl { get; set; } = "http://localhost:11434";
+    public string SelectedModel { get; set; } = "";
+    public int TimeoutSeconds { get; set; } = 300; // 5 minutes default for long report generation
+    public int MaxTokens { get; set; } = 4096;
+    public float Temperature { get; set; } = 0.7f;
 }

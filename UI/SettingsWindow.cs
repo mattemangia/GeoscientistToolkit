@@ -36,6 +36,10 @@ public class SettingsWindow
     private SettingsCategory _selectedCategory = SettingsCategory.Appearance;
     private bool _showUnsavedChangesDialog;
 
+    // Ollama state
+    private List<string> _availableOllamaModels = new();
+    private string _ollamaConnectionStatus;
+
     public SettingsWindow()
     {
         _settingsManager = SettingsManager.Instance;
@@ -133,6 +137,7 @@ public class SettingsWindow
             case SettingsCategory.Backup: DrawBackupSettings(); break;
             case SettingsCategory.Photogrammetry: DrawPhotogrammetrySettings(); break;
             case SettingsCategory.GIS: DrawGISSettings(); break;
+            case SettingsCategory.Ollama: DrawOllamaSettings(); break;
         }
 
         ImGui.PopItemWidth();
@@ -774,6 +779,133 @@ public class SettingsWindow
         HelpMarker("Display attribution text for online basemap providers");
     }
 
+    private void DrawOllamaSettings()
+    {
+        var ollama = _editingSettings.Ollama;
+        ImGui.TextColored(new Vector4(0.26f, 0.59f, 0.98f, 1.0f), "Ollama LLM Integration");
+        ImGui.Separator();
+
+        // Enable/Disable Ollama
+        var enabled = ollama.Enabled;
+        if (ImGui.Checkbox("Enable Ollama Integration", ref enabled))
+            ollama.Enabled = enabled;
+        HelpMarker("Enable integration with local Ollama for AI-powered report generation");
+
+        ImGui.Spacing();
+
+        // Base URL
+        ImGui.Text("Ollama Base URL:");
+        var baseUrl = ollama.BaseUrl;
+        if (ImGui.InputText("##BaseUrl", ref baseUrl, 256))
+            ollama.BaseUrl = baseUrl;
+        HelpMarker("URL of your Ollama server (default: http://localhost:11434)");
+
+        ImGui.Spacing();
+
+        // Test connection and fetch models
+        if (ImGui.Button("Test Connection & Fetch Models"))
+        {
+            _ = TestOllamaConnectionAndFetchModels();
+        }
+        ImGui.SameLine();
+        if (_ollamaConnectionStatus != null)
+        {
+            var color = _ollamaConnectionStatus.StartsWith("Success")
+                ? new Vector4(0.2f, 0.8f, 0.2f, 1.0f)  // Green
+                : new Vector4(0.8f, 0.2f, 0.2f, 1.0f); // Red
+            ImGui.TextColored(color, _ollamaConnectionStatus);
+        }
+
+        ImGui.Spacing();
+        ImGui.Separator();
+
+        // Model selection
+        ImGui.TextColored(new Vector4(0.8f, 0.8f, 0.2f, 1.0f), "Model Selection");
+        ImGui.Spacing();
+
+        if (_availableOllamaModels.Count > 0)
+        {
+            var currentModel = ollama.SelectedModel;
+            if (ImGui.BeginCombo("Selected Model", string.IsNullOrEmpty(currentModel) ? "Select a model..." : currentModel))
+            {
+                foreach (var model in _availableOllamaModels)
+                {
+                    var isSelected = model == currentModel;
+                    if (ImGui.Selectable(model, isSelected))
+                        ollama.SelectedModel = model;
+
+                    if (isSelected)
+                        ImGui.SetItemDefaultFocus();
+                }
+                ImGui.EndCombo();
+            }
+            HelpMarker("Select which Ollama model to use for report generation");
+        }
+        else
+        {
+            ImGui.TextColored(new Vector4(0.8f, 0.8f, 0.2f, 1.0f), "No models available. Click 'Test Connection & Fetch Models' first.");
+        }
+
+        ImGui.Spacing();
+        ImGui.Separator();
+
+        // Advanced settings
+        ImGui.TextColored(new Vector4(0.8f, 0.8f, 0.2f, 1.0f), "Advanced Settings");
+        ImGui.Spacing();
+
+        var timeout = ollama.TimeoutSeconds;
+        if (ImGui.SliderInt("Timeout (seconds)", ref timeout, 30, 600))
+            ollama.TimeoutSeconds = timeout;
+        HelpMarker("Maximum time to wait for LLM response");
+
+        var maxTokens = ollama.MaxTokens;
+        if (ImGui.SliderInt("Max Tokens", ref maxTokens, 512, 8192))
+            ollama.MaxTokens = maxTokens;
+        HelpMarker("Maximum length of generated report");
+
+        var temperature = ollama.Temperature;
+        if (ImGui.SliderFloat("Temperature", ref temperature, 0.0f, 2.0f, "%.2f"))
+            ollama.Temperature = temperature;
+        HelpMarker("Controls randomness (0.0 = deterministic, 2.0 = very creative)");
+    }
+
+    private async Task TestOllamaConnectionAndFetchModels()
+    {
+        _ollamaConnectionStatus = "Testing connection...";
+        var baseUrl = _editingSettings.Ollama.BaseUrl;
+
+        try
+        {
+            var ollamaService = Business.OllamaService.Instance;
+            var connected = await ollamaService.TestConnectionAsync(baseUrl, 10);
+
+            if (!connected)
+            {
+                _ollamaConnectionStatus = "Error: Cannot connect to Ollama";
+                _availableOllamaModels.Clear();
+                return;
+            }
+
+            var models = await ollamaService.GetAvailableModelsAsync(baseUrl, 10);
+
+            if (models.Count == 0)
+            {
+                _ollamaConnectionStatus = "Success: Connected, but no models found";
+                _availableOllamaModels.Clear();
+            }
+            else
+            {
+                _ollamaConnectionStatus = $"Success: Found {models.Count} model(s)";
+                _availableOllamaModels = models;
+            }
+        }
+        catch (Exception ex)
+        {
+            _ollamaConnectionStatus = $"Error: {ex.Message}";
+            _availableOllamaModels.Clear();
+        }
+    }
+
     private void HelpMarker(string desc)
     {
         ImGui.TextDisabled("(?)");
@@ -802,6 +934,7 @@ public class SettingsWindow
         FileAssociations,
         Backup,
         Photogrammetry,
-        GIS
+        GIS,
+        Ollama
     }
 }
