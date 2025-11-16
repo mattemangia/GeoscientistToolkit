@@ -627,7 +627,7 @@ public class DatasetPanel : BasePanel
                 {
                     info.Metadata["Dimensions"] = $"{acoustic.Width}x{acoustic.Height}x{acoustic.Depth}";
                 }
-                else if (dataset is Data.Pnm.PnmDataset pnm)
+                else if (dataset is Data.Pnm.PNMDataset pnm)
                 {
                     if (pnm.Permeability.HasValue)
                         info.Metadata["Permeability"] = $"{pnm.Permeability.Value:E2} m²";

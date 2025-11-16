@@ -208,7 +208,7 @@ public unsafe class NMRSimulationOpenCL : IDisposable
 
         // Declare variables that will be used throughout the method
         int errorCode;
-        nint device;
+        nint device1;
 
         // Check if multi-GPU mode is enabled
         _multiGPUMode = GeoscientistToolkit.OpenCL.OpenCLDeviceManager.IsMultiGPUEnabled();
@@ -278,11 +278,11 @@ public unsafe class NMRSimulationOpenCL : IDisposable
             Logger.Log($"NMRSimulationOpenCL: Global Memory: {deviceInfo.GlobalMemory / (1024 * 1024)} MB");
 
             // Create context
-            device = _device;
-            _context = _cl.CreateContext(null, 1, &device, null, null, &errorCode);
+            device1 = _device;
+            _context = _cl.CreateContext(null, 1, &device1, null, null, &errorCode);
             CheckError(errorCode, "CreateContext");
 
-            _commandQueue = _cl.CreateCommandQueue(_context, device, (CommandQueueProperties)0, &errorCode);
+            _commandQueue = _cl.CreateCommandQueue(_context, device1, (CommandQueueProperties)0, &errorCode);
             CheckError(errorCode, "CreateCommandQueue");
         }
 
@@ -314,24 +314,24 @@ public unsafe class NMRSimulationOpenCL : IDisposable
             {
                 errorCode = _cl.BuildProgram(_program, (uint)_devices.Count, devicesPtr, (byte*)null, null, null);
             }
-            device = _device; // Use primary device for build log
+            device1 = _device; // Use primary device for build log
         }
         else
         {
-            device = _device;
-            errorCode = _cl.BuildProgram(_program, 1, &device, (byte*)null, null, null);
+            device1 = _device;
+            errorCode = _cl.BuildProgram(_program, 1, &device1, (byte*)null, null, null);
         }
 
         // ALWAYS retrieve build log (even on success, for warnings)
         nuint logSize;
-        _cl.GetProgramBuildInfo(_program, device, (uint)ProgramBuildInfo.BuildLog, 0, null, &logSize);
+        _cl.GetProgramBuildInfo(_program, device1, (uint)ProgramBuildInfo.BuildLog, 0, null, &logSize);
 
         if (logSize > 1) // > 1 because it includes null terminator
         {
             var log = new byte[logSize];
             fixed (byte* logPtr = log)
             {
-                _cl.GetProgramBuildInfo(_program, device, (uint)ProgramBuildInfo.BuildLog, logSize, logPtr, null);
+                _cl.GetProgramBuildInfo(_program, device1, (uint)ProgramBuildInfo.BuildLog, logSize, logPtr, null);
             }
 
             var buildLog = Encoding.UTF8.GetString(log).TrimEnd('\0');
