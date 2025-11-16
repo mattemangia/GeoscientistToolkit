@@ -77,7 +77,10 @@ public unsafe class MultiphaseCLSolver : IDisposable
 
             // Create context
             int err;
-            _context = _cl.CreateContext(null, 1, &_device, null, null, &err);
+            fixed (nint* devicePtr = &_device)
+            {
+                _context = _cl.CreateContext(null, 1, devicePtr, null, null, &err);
+            }
             if (err != 0)
             {
                 Logger.LogError($"Failed to create OpenCL context: {err}");
@@ -85,7 +88,7 @@ public unsafe class MultiphaseCLSolver : IDisposable
             }
 
             // Create command queue (OpenCL 1.2 compatible)
-            _commandQueue = _cl.CreateCommandQueue(_context, _device, (ulong)0, &err);
+            _commandQueue = _cl.CreateCommandQueue(_context, _device, (CommandQueueProperties)0, &err);
             if (err != 0)
             {
                 Logger.LogError($"Failed to create command queue: {err}");
@@ -155,15 +158,18 @@ public unsafe class MultiphaseCLSolver : IDisposable
             }
         }
 
-        err = _cl.BuildProgram(_program, 1, &_device, null, null, null);
+        fixed (nint* devicePtr = &_device)
+        {
+            err = _cl.BuildProgram(_program, 1, devicePtr, (byte*)null, null, null);
+        }
         if (err != 0)
         {
             Logger.LogError($"Failed to build program: {err}");
             // Get build log
             nuint logSize;
-            _cl.GetProgramBuildInfo(_program, _device, (uint)ProgramBuildInfo.Log, 0, null, &logSize);
+            _cl.GetProgramBuildInfo(_program, _device, (uint)ProgramBuildInfo.BuildLog, 0, null, &logSize);
             byte* log = stackalloc byte[(int)logSize];
-            _cl.GetProgramBuildInfo(_program, _device, (uint)ProgramBuildInfo.Log, logSize, log, null);
+            _cl.GetProgramBuildInfo(_program, _device, (uint)ProgramBuildInfo.BuildLog, logSize, log, null);
             string logStr = Marshal.PtrToStringAnsi((nint)log);
             Logger.LogError($"Build log: {logStr}");
             return false;

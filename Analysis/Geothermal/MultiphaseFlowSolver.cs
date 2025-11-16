@@ -447,7 +447,7 @@ public class MultiphaseFlowSolver : IDisposable
             (float)(1.0 + 0.625 * Math.Exp(-206.0 / T_K)) * 1e-6f;
 
         // Excess viscosity (density contribution)
-        float mu_excess = 0.0;
+        float mu_excess = 0.0f;
         if (rho > 100.0f) // Dense phase
         {
             mu_excess = 1.5e-6f * (rho / 467.6f);
