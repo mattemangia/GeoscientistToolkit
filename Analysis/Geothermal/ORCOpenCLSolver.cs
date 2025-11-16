@@ -135,7 +135,7 @@ namespace GeoscientistToolkit.Analysis.Geothermal
 
             // Build program
             nint device = _device; // Create local copy to take address
-            errorCode = _cl.BuildProgram(_program, 1, &device, null, null, null);
+            errorCode = _cl.BuildProgram(_program, 1, &device, (byte*)null, null, null);
             if (errorCode != (int)ErrorCodes.Success)
             {
                 Console.WriteLine($"Failed to build program: {errorCode}");

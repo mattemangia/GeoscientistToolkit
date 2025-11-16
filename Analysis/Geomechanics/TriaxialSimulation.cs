@@ -203,7 +203,7 @@ var device = _device;
             throw new Exception($"Failed to create program: {err}");
 
         nint device = _device; // Create local copy to take address
-        err = (int)_cl.BuildProgram(_program, 1, &device, null, null, null);
+        err = (int)_cl.BuildProgram(_program, 1, &device, (byte*)null, null, null);
         if (err != 0)
         {
             nuint logSize;
