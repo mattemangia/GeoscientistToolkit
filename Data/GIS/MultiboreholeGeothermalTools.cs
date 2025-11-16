@@ -902,31 +902,21 @@ private void DrawExportSection()
 
 private void DrawExportDialog()
 {
-    if (_exportDialog != null && _exportDialog.IsOpen)
+    if (_exportDialog != null && _exportDialog.Submit())
     {
-        if (ImGui.Begin("Export Subsurface Model", ref _exportDialog.IsOpen))
+        // User selected a file
+        var path = _exportDialog.SelectedPath;
+
+        if (!string.IsNullOrEmpty(path))
         {
-            // Simple file path input for now
-            if (ImGui.Button("Select Export Path"))
+            // Ensure .vtk extension
+            if (!path.EndsWith(".vtk", StringComparison.OrdinalIgnoreCase))
             {
-                // Open native file dialog would be better, but for now use simple path
-                var path = _exportDialog.SelectedPath;
-                if (string.IsNullOrEmpty(path))
-                {
-                    path = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-                        "subsurface_model.vtk");
-                }
-                ExportToVTK(path);
-                _exportDialog.IsOpen = false;
+                path += ".vtk";
             }
 
-            ImGui.SameLine();
-            if (ImGui.Button("Cancel"))
-            {
-                _exportDialog.IsOpen = false;
-            }
+            ExportToVTK(path);
         }
-        ImGui.End();
     }
 }
 
@@ -1001,9 +991,10 @@ private async void ExportGeothermalMaps()
             _createdSubsurfaceModel,
             _depthSlices.ToArray());
 
-        var outputDir = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-            "GeothermalMaps");
+        // Create output directory in user's Documents folder
+        var documentsPath = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
+        var timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
+        var outputDir = Path.Combine(documentsPath, "GeoscientistToolkit", "GeothermalMaps", timestamp);
         Directory.CreateDirectory(outputDir);
 
         // Export each map
@@ -1070,9 +1061,15 @@ private async void ExportToCSV()
 
     try
     {
-        var path = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-            "subsurface_voxels.csv");
+        // Create output directory in user's Documents folder
+        var documentsPath = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
+        var outputDir = Path.Combine(documentsPath, "GeoscientistToolkit", "Exports");
+        Directory.CreateDirectory(outputDir);
+
+        // Generate filename with timestamp to avoid overwriting
+        var timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
+        var fileName = $"subsurface_voxels_{timestamp}.csv";
+        var path = Path.Combine(outputDir, fileName);
 
         var progress = new Progress<(float, string)>(p =>
         {
