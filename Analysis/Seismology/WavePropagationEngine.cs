@@ -1,6 +1,8 @@
 using System;
 using System.Numerics;
 using System.Threading.Tasks;
+using GeoscientistToolkit.Network;
+using GeoscientistToolkit.Util;
 
 namespace GeoscientistToolkit.Analysis.Seismology
 {
@@ -52,7 +54,7 @@ namespace GeoscientistToolkit.Analysis.Seismology
     ///
     /// - Shearer, P.M. (2009). "Introduction to Seismology," 2nd ed. Cambridge University Press.
     /// </summary>
-    public class WavePropagationEngine
+    public class WavePropagationEngine : SimulatorNodeSupport
     {
         private readonly CrustalModel _crustalModel;
         private readonly int _nx, _ny, _nz; // Grid dimensions
@@ -68,7 +70,16 @@ namespace GeoscientistToolkit.Analysis.Seismology
             CrustalModel crustalModel,
             int nx, int ny, int nz,
             double dx, double dy, double dz,
-            double dt)
+            double dt) : this(crustalModel, nx, ny, nz, dx, dy, dz, dt, null)
+        {
+        }
+
+        public WavePropagationEngine(
+            CrustalModel crustalModel,
+            int nx, int ny, int nz,
+            double dx, double dy, double dz,
+            double dt,
+            bool? useNodes) : base(useNodes)
         {
             _crustalModel = crustalModel;
             _nx = nx;
@@ -78,6 +89,11 @@ namespace GeoscientistToolkit.Analysis.Seismology
             _dy = dy;
             _dz = dz;
             _dt = dt;
+
+            if (_useNodes)
+            {
+                Logger.Log("WavePropagationEngine Node Manager integration: ENABLED");
+            }
 
             // Initialize arrays
             _ux = new double[nx, ny, nz];

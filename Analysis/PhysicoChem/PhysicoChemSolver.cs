@@ -9,6 +9,7 @@ using System.Linq;
 using GeoscientistToolkit.Analysis.Thermodynamic;
 using GeoscientistToolkit.Data.Mesh3D;
 using GeoscientistToolkit.Data.PhysicoChem;
+using GeoscientistToolkit.Network;
 using GeoscientistToolkit.Util;
 
 namespace GeoscientistToolkit.Analysis.PhysicoChem;
@@ -22,7 +23,7 @@ namespace GeoscientistToolkit.Analysis.PhysicoChem;
 /// - Force fields (gravity, vortex)
 /// - Nucleation and growth
 /// </summary>
-public class PhysicoChemSolver
+public class PhysicoChemSolver : SimulatorNodeSupport
 {
     private readonly PhysicoChemDataset _dataset;
     private readonly IProgress<(float progress, string message)> _progress;
@@ -36,7 +37,11 @@ public class PhysicoChemSolver
     // Coupling to geothermal simulation
     private object _geothermalSimulation; // Reference to coupled simulation
 
-    public PhysicoChemSolver(PhysicoChemDataset dataset, IProgress<(float, string)> progress = null)
+    public PhysicoChemSolver(PhysicoChemDataset dataset, IProgress<(float, string)> progress = null) : this(dataset, progress, null)
+    {
+    }
+
+    public PhysicoChemSolver(PhysicoChemDataset dataset, IProgress<(float, string)> progress, bool? useNodes) : base(useNodes)
     {
         _dataset = dataset ?? throw new ArgumentNullException(nameof(dataset));
         _progress = progress;
@@ -45,6 +50,11 @@ public class PhysicoChemSolver
         _heatTransfer = new HeatTransferSolver();
         _flowSolver = new FlowSolver();
         _nucleationSolver = new NucleationSolver();
+
+        if (_useNodes)
+        {
+            Logger.Log("[PhysicoChemSolver] Node Manager integration: ENABLED");
+        }
     }
 
     /// <summary>

@@ -13,6 +13,7 @@
 //   and kinetic precipitation/dissolution reactions. American Journal of Science, 294(5), 529-592.
 
 using GeoscientistToolkit.Data.Materials;
+using GeoscientistToolkit.Network;
 using GeoscientistToolkit.Util;
 using MathNet.Numerics.LinearAlgebra;
 
@@ -21,7 +22,7 @@ namespace GeoscientistToolkit.Business.Thermodynamics;
 /// <summary>
 ///     Solves time-dependent chemical kinetics for dissolution and precipitation.
 /// </summary>
-public class KineticsSolver
+public class KineticsSolver : SimulatorNodeSupport
 {
     private const double R = 8.314462618; // J/(mol·K)
 
@@ -29,10 +30,19 @@ public class KineticsSolver
     private readonly CompoundLibrary _compoundLibrary;
     private readonly ThermodynamicSolver _equilibriumSolver;
 
-    public KineticsSolver()
+    public KineticsSolver() : this(null)
+    {
+    }
+
+    public KineticsSolver(bool? useNodes) : base(useNodes)
     {
         _compoundLibrary = CompoundLibrary.Instance;
         _equilibriumSolver = new ThermodynamicSolver();
+
+        if (_useNodes)
+        {
+            Logger.Log("[KineticsSolver] Node Manager integration: ENABLED");
+        }
     }
 
     /// <summary>

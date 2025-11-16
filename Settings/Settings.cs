@@ -19,6 +19,7 @@ public class AppSettings
     public BackupSettings Backup { get; set; } = new();
     public PhotogrammetrySettings Photogrammetry { get; set; } = new();
     public GISSettings GIS { get; set; } = new();
+    public NodeManagerSettings NodeManager { get; set; } = new();
 
     /// <summary>
     ///     Creates a new instance with default values
@@ -269,4 +270,60 @@ public class GISSettings
     public bool ShowScaleBarByDefault { get; set; } = true;
     public bool ShowNorthArrowByDefault { get; set; } = true;
     public bool ShowCoordinatesByDefault { get; set; } = true;
+}
+
+/// <summary>
+///     Node Manager settings for distributed computing
+/// </summary>
+public class NodeManagerSettings
+{
+    // Node role configuration
+    public bool EnableNodeManager { get; set; } = false;
+    public NodeRole Role { get; set; } = NodeRole.Worker;
+
+    // Network settings
+    public string NodeName { get; set; } = Environment.MachineName;
+    public int ServerPort { get; set; } = 9876;
+    public string HostAddress { get; set; } = "localhost";
+
+    // Connection settings
+    public int ConnectionTimeout { get; set; } = 30; // seconds
+    public int HeartbeatInterval { get; set; } = 10; // seconds
+    public int MaxReconnectAttempts { get; set; } = 3;
+
+    // Performance settings
+    public int MaxConcurrentJobs { get; set; } = Environment.ProcessorCount;
+    public bool UseGpuForJobs { get; set; } = true;
+
+    // Auto-start settings
+    public bool AutoStartOnLaunch { get; set; } = false;
+    public bool AutoConnectToHost { get; set; } = false;
+
+    // Simulator integration
+    public bool UseNodesForSimulators { get; set; } = false;
+
+    // Resource limits
+    public int MaxMemoryUsagePercent { get; set; } = 80;
+    public int MaxCpuUsagePercent { get; set; } = 90;
+}
+
+/// <summary>
+///     Node role in the distributed computing network
+/// </summary>
+public enum NodeRole
+{
+    /// <summary>
+    /// Host node that distributes work to workers
+    /// </summary>
+    Host,
+
+    /// <summary>
+    /// Worker node that executes jobs
+    /// </summary>
+    Worker,
+
+    /// <summary>
+    /// Hybrid node that can act as both host and worker
+    /// </summary>
+    Hybrid
 }

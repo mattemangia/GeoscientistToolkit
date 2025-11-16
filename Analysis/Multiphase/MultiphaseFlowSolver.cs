@@ -15,6 +15,7 @@ using System.Collections.Generic;
 using System.Linq;
 using GeoscientistToolkit.Analysis.Thermodynamic;
 using GeoscientistToolkit.Business.Thermodynamics;
+using GeoscientistToolkit.Network;
 using GeoscientistToolkit.Util;
 
 namespace GeoscientistToolkit.Analysis.Multiphase;
@@ -24,7 +25,7 @@ namespace GeoscientistToolkit.Analysis.Multiphase;
 /// Solves coupled mass and energy conservation equations with phase equilibrium
 /// Similar to TOUGH2's EOS1 (water-steam), EOS2 (water-CO2), and EOS3 (water-air)
 /// </summary>
-public class MultiphaseFlowSolver
+public class MultiphaseFlowSolver : SimulatorNodeSupport
 {
     private const double R_GAS_CONSTANT = 8.314462618; // J/(mol·K)
     private const double MOLECULAR_WEIGHT_H2O = 18.015e-3; // kg/mol
@@ -58,10 +59,19 @@ public class MultiphaseFlowSolver
     private readonly EOSType _eosType;
     private readonly WaterPropertiesIAPWS _waterProps;
 
-    public MultiphaseFlowSolver(EOSType eosType = EOSType.WaterCO2)
+    public MultiphaseFlowSolver(EOSType eosType = EOSType.WaterCO2) : this(eosType, null)
+    {
+    }
+
+    public MultiphaseFlowSolver(EOSType eosType, bool? useNodes) : base(useNodes)
     {
         _eosType = eosType;
         _waterProps = new WaterPropertiesIAPWS();
+
+        if (_useNodes)
+        {
+            Logger.Log("[MultiphaseFlowSolver] Node Manager integration: ENABLED");
+        }
     }
 
     /// <summary>

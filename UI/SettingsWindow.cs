@@ -133,6 +133,7 @@ public class SettingsWindow
             case SettingsCategory.Backup: DrawBackupSettings(); break;
             case SettingsCategory.Photogrammetry: DrawPhotogrammetrySettings(); break;
             case SettingsCategory.GIS: DrawGISSettings(); break;
+            case SettingsCategory.NodeManager: DrawNodeManagerSettings(); break;
         }
 
         ImGui.PopItemWidth();
@@ -780,6 +781,146 @@ public class SettingsWindow
         HelpMarker("Display attribution text for online basemap providers");
     }
 
+    private void DrawNodeManagerSettings()
+    {
+        var nodeManager = _editingSettings.NodeManager;
+        ImGui.TextColored(new Vector4(0.26f, 0.59f, 0.98f, 1.0f), "Node Manager Settings");
+        ImGui.Separator();
+
+        // Enable/Disable section
+        ImGui.TextColored(new Vector4(0.8f, 0.8f, 0.2f, 1.0f), "General");
+        ImGui.Spacing();
+
+        var enabled = nodeManager.EnableNodeManager;
+        if (ImGui.Checkbox("Enable Node Manager", ref enabled))
+            nodeManager.EnableNodeManager = enabled;
+        HelpMarker("Enable distributed computing node manager for parallel processing");
+
+        var autoStart = nodeManager.AutoStartOnLaunch;
+        if (ImGui.Checkbox("Auto-start on Application Launch", ref autoStart))
+            nodeManager.AutoStartOnLaunch = autoStart;
+        HelpMarker("Automatically start the node manager when the application launches");
+
+        ImGui.Spacing();
+        ImGui.Separator();
+
+        // Role configuration
+        ImGui.TextColored(new Vector4(0.8f, 0.8f, 0.2f, 1.0f), "Node Role");
+        ImGui.Spacing();
+
+        var roleIndex = (int)nodeManager.Role;
+        string[] roles = { "Host", "Worker", "Hybrid" };
+        if (ImGui.Combo("Role", ref roleIndex, roles, roles.Length))
+        {
+            nodeManager.Role = (NodeRole)roleIndex;
+            _restartRequired = true;
+        }
+        HelpMarker("Host: Distributes jobs to workers\nWorker: Executes jobs from host\nHybrid: Can act as both host and worker");
+
+        ImGui.Spacing();
+        ImGui.Separator();
+
+        // Network settings
+        ImGui.TextColored(new Vector4(0.8f, 0.8f, 0.2f, 1.0f), "Network Configuration");
+        ImGui.Spacing();
+
+        var nodeName = nodeManager.NodeName;
+        if (ImGui.InputText("Node Name", ref nodeName, 256))
+            nodeManager.NodeName = nodeName;
+        HelpMarker("Unique identifier for this node in the network");
+
+        var serverPort = nodeManager.ServerPort;
+        if (ImGui.InputInt("Server Port", ref serverPort))
+        {
+            if (serverPort > 0 && serverPort <= 65535)
+                nodeManager.ServerPort = serverPort;
+        }
+        HelpMarker("Port number for host server (applies to Host and Hybrid roles)");
+
+        var hostAddress = nodeManager.HostAddress;
+        if (ImGui.InputText("Host Address", ref hostAddress, 256))
+            nodeManager.HostAddress = hostAddress;
+        HelpMarker("IP address or hostname of the host server (applies to Worker role)");
+
+        var autoConnect = nodeManager.AutoConnectToHost;
+        if (ImGui.Checkbox("Auto-connect to Host", ref autoConnect))
+            nodeManager.AutoConnectToHost = autoConnect;
+        HelpMarker("Automatically connect to host when starting in Worker mode");
+
+        ImGui.Spacing();
+        ImGui.Separator();
+
+        // Connection settings
+        ImGui.TextColored(new Vector4(0.8f, 0.8f, 0.2f, 1.0f), "Connection");
+        ImGui.Spacing();
+
+        var timeout = nodeManager.ConnectionTimeout;
+        if (ImGui.InputInt("Connection Timeout (seconds)", ref timeout))
+        {
+            if (timeout > 0)
+                nodeManager.ConnectionTimeout = timeout;
+        }
+        HelpMarker("Timeout for network connection attempts");
+
+        var heartbeat = nodeManager.HeartbeatInterval;
+        if (ImGui.InputInt("Heartbeat Interval (seconds)", ref heartbeat))
+        {
+            if (heartbeat > 0)
+                nodeManager.HeartbeatInterval = heartbeat;
+        }
+        HelpMarker("Interval for sending heartbeat messages to verify node connectivity");
+
+        var maxReconnect = nodeManager.MaxReconnectAttempts;
+        if (ImGui.InputInt("Max Reconnect Attempts", ref maxReconnect))
+        {
+            if (maxReconnect >= 0)
+                nodeManager.MaxReconnectAttempts = maxReconnect;
+        }
+        HelpMarker("Maximum number of reconnection attempts before giving up");
+
+        ImGui.Spacing();
+        ImGui.Separator();
+
+        // Performance settings
+        ImGui.TextColored(new Vector4(0.8f, 0.8f, 0.2f, 1.0f), "Performance");
+        ImGui.Spacing();
+
+        var maxJobs = nodeManager.MaxConcurrentJobs;
+        if (ImGui.InputInt("Max Concurrent Jobs", ref maxJobs))
+        {
+            if (maxJobs > 0)
+                nodeManager.MaxConcurrentJobs = maxJobs;
+        }
+        HelpMarker($"Maximum number of jobs to run simultaneously (CPU cores: {Environment.ProcessorCount})");
+
+        var useGpu = nodeManager.UseGpuForJobs;
+        if (ImGui.Checkbox("Use GPU for Jobs", ref useGpu))
+            nodeManager.UseGpuForJobs = useGpu;
+        HelpMarker("Enable GPU acceleration for compute jobs when available");
+
+        var useNodesForSims = nodeManager.UseNodesForSimulators;
+        if (ImGui.Checkbox("Use Nodes for Simulators", ref useNodesForSims))
+            nodeManager.UseNodesForSimulators = useNodesForSims;
+        HelpMarker("Enable distributed computing for CPU simulators via network nodes");
+
+        ImGui.Spacing();
+        ImGui.Separator();
+
+        // Resource limits
+        ImGui.TextColored(new Vector4(0.8f, 0.8f, 0.2f, 1.0f), "Resource Limits");
+        ImGui.Spacing();
+
+        var maxMemory = nodeManager.MaxMemoryUsagePercent;
+        if (ImGui.SliderInt("Max Memory Usage (%)", ref maxMemory, 1, 100))
+            nodeManager.MaxMemoryUsagePercent = maxMemory;
+        HelpMarker("Maximum percentage of system memory that can be used");
+
+        var maxCpu = nodeManager.MaxCpuUsagePercent;
+        if (ImGui.SliderInt("Max CPU Usage (%)", ref maxCpu, 1, 100))
+            nodeManager.MaxCpuUsagePercent = maxCpu;
+        HelpMarker("Maximum percentage of CPU that can be used");
+    }
+
     private void HelpMarker(string desc)
     {
         ImGui.TextDisabled("(?)");
@@ -808,6 +949,7 @@ public class SettingsWindow
         FileAssociations,
         Backup,
         Photogrammetry,
-        GIS
+        GIS,
+        NodeManager
     }
 }

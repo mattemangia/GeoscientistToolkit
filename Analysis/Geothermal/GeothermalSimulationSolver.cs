@@ -101,6 +101,7 @@ using System.Runtime.Intrinsics;
 using System.Runtime.Intrinsics.X86;
 using GeoscientistToolkit.Data.Mesh3D;
 using GeoscientistToolkit.Data.VolumeData;
+using GeoscientistToolkit.Network;
 using GeoscientistToolkit.Util;
 
 namespace GeoscientistToolkit.Analysis.Geothermal;
@@ -108,7 +109,7 @@ namespace GeoscientistToolkit.Analysis.Geothermal;
 /// <summary>
 ///     Implements the numerical solver for coupled heat transfer and groundwater flow in geothermal systems.
 /// </summary>
-public class GeothermalSimulationSolver : IDisposable
+public class GeothermalSimulationSolver : SimulatorNodeSupport, IDisposable
 {
     private readonly CancellationToken _cancellationToken;
     private readonly GeothermalMesh _mesh;
@@ -162,11 +163,27 @@ public class GeothermalSimulationSolver : IDisposable
         GeothermalMesh mesh,
         IProgress<(float, string)> progress,
         CancellationToken cancellationToken)
+        : this(options, mesh, progress, cancellationToken, null)
+    {
+    }
+
+    public GeothermalSimulationSolver(
+        GeothermalSimulationOptions options,
+        GeothermalMesh mesh,
+        IProgress<(float, string)> progress,
+        CancellationToken cancellationToken,
+        bool? useNodes)
+        : base(useNodes)
     {
         _options = options;
         _mesh = mesh;
         _progress = progress;
         _cancellationToken = cancellationToken;
+
+        if (_useNodes)
+        {
+            Logger.Log("GeothermalSimulationSolver Node Manager integration: ENABLED");
+        }
 
         // Initialize grid dimensions from options
         _nr = options.RadialGridPoints;

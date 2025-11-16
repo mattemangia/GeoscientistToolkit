@@ -2,6 +2,8 @@ using System;
 using System.Diagnostics;
 using System.Threading.Tasks;
 using System.Collections.Generic;
+using GeoscientistToolkit.Network;
+using GeoscientistToolkit.Util;
 
 namespace GeoscientistToolkit.Analysis.Seismology
 {
@@ -9,7 +11,7 @@ namespace GeoscientistToolkit.Analysis.Seismology
     /// Main earthquake simulation engine integrating all components
     /// Parallelized spectral element method inspired by SpecFEM
     /// </summary>
-    public class EarthquakeSimulationEngine
+    public class EarthquakeSimulationEngine : SimulatorNodeSupport
     {
         private readonly EarthquakeSimulationParameters _params;
         private CrustalModel? _crustalModel;
@@ -20,9 +22,18 @@ namespace GeoscientistToolkit.Analysis.Seismology
         // Progress reporting
         public event EventHandler<SimulationProgressEventArgs>? ProgressChanged;
 
-        public EarthquakeSimulationEngine(EarthquakeSimulationParameters parameters)
+        public EarthquakeSimulationEngine(EarthquakeSimulationParameters parameters) : this(parameters, null)
+        {
+        }
+
+        public EarthquakeSimulationEngine(EarthquakeSimulationParameters parameters, bool? useNodes) : base(useNodes)
         {
             _params = parameters;
+
+            if (_useNodes)
+            {
+                Logger.Log("EarthquakeSimulationEngine Node Manager integration: ENABLED");
+            }
         }
 
         /// <summary>

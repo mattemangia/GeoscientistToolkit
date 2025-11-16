@@ -5,11 +5,12 @@ using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Numerics;
 using System.Runtime.CompilerServices;
+using GeoscientistToolkit.Network;
 using GeoscientistToolkit.Util;
 
 namespace GeoscientistToolkit.Analysis.Geomechanics;
 
-public partial class GeomechanicalSimulatorCPU : IDisposable
+public partial class GeomechanicalSimulatorCPU : SimulatorNodeSupport, IDisposable
 {
     private readonly object[] _dofLocks = new object[1024];
     private readonly bool _isSimdAccelerated = Vector.IsHardwareAccelerated;
@@ -29,13 +30,19 @@ public partial class GeomechanicalSimulatorCPU : IDisposable
 
     private int _numNodes;
 
-    public GeomechanicalSimulatorCPU(GeomechanicalParameters parameters)
+    public GeomechanicalSimulatorCPU(GeomechanicalParameters parameters) : this(parameters, null)
+    {
+    }
+
+    public GeomechanicalSimulatorCPU(GeomechanicalParameters parameters, bool? useNodes) : base(useNodes)
     {
         Logger.Log("==========================================================");
         Logger.Log("[GeomechCPU] Initializing CPU Geomechanical Simulator");
         Logger.Log("==========================================================");
         _params = parameters ?? throw new ArgumentNullException(nameof(parameters));
         Logger.Log($"[GeomechCPU] SIMD Acceleration: {(_isSimdAccelerated ? "Enabled" : "Not Available")}");
+        if (_useNodes)
+            Logger.Log("[GeomechCPU] Node Manager integration: ENABLED");
         Logger.Log("[GeomechCPU] Validating parameters...");
         ValidateParameters();
         Logger.Log("[GeomechCPU] Initialization complete.");
