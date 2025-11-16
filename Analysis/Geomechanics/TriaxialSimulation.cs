@@ -172,35 +172,44 @@ public unsafe class TriaxialSimulation : IDisposable
             Dispose();
 
         // Get OpenCL device
-        var deviceManager = OpenCLDeviceManager.Instance;
-        _device = deviceManager.Device;
-        _context = deviceManager.Context;
+        _device = OpenCLDeviceManager.GetComputeDevice();
+
+        if (_device == 0)
+            throw new Exception("Failed to get OpenCL device");
+var device1 = _device;
+        // Create context
+        int err;
+        _context = _cl.CreateContext(null, 1, &device1, null, null, &err);
+        if (err != 0)
+            throw new Exception($"Failed to create context: {err}");
 
         // Create command queue
-        int err;
-        _queue = _cl.CreateCommandQueue(_context, _device, 0, &err);
+        _queue = _cl.CreateCommandQueue(_context, _device, (CommandQueueProperties)0, &err);
         if (err != 0)
             throw new Exception($"Failed to create command queue: {err}");
 
         // Load and compile kernels
         var kernelSource = LoadKernelSource();
-        var sourcePtr = Marshal.StringToHGlobalAnsi(kernelSource);
-        var sourcePtrPtr = stackalloc nint[1];
-        sourcePtrPtr[0] = sourcePtr;
+        byte[] sourceBytes = System.Text.Encoding.UTF8.GetBytes(kernelSource);
+        nuint sourceLength = (nuint)sourceBytes.Length;
 
-        _program = _cl.CreateProgramWithSource(_context, 1, sourcePtrPtr, null, &err);
-        Marshal.FreeHGlobal(sourcePtr);
+        fixed (byte* pSource = sourceBytes)
+        {
+            byte* pSourcePtr = pSource;
+            _program = _cl.CreateProgramWithSource(_context, 1, &pSourcePtr, &sourceLength, &err);
+        }
 
         if (err != 0)
             throw new Exception($"Failed to create program: {err}");
 
-        err = (int)_cl.BuildProgram(_program, 1, &_device, null, null, null);
+        nint device = _device; // Create local copy to take address
+        err = (int)_cl.BuildProgram(_program, 1, &device, (byte*)null, null, null);
         if (err != 0)
         {
             nuint logSize;
-            _cl.GetProgramBuildInfo(_program, _device, (uint)ProgramBuildInfo.Log, 0, null, &logSize);
+            _cl.GetProgramBuildInfo(_program, _device, (uint)ProgramBuildInfo.BuildLog, 0, null, &logSize);
             var log = stackalloc byte[(int)logSize];
-            _cl.GetProgramBuildInfo(_program, _device, (uint)ProgramBuildInfo.Log, logSize, log, null);
+            _cl.GetProgramBuildInfo(_program, _device, (uint)ProgramBuildInfo.BuildLog, logSize, log, null);
             var logStr = Marshal.PtrToStringAnsi((nint)log);
             throw new Exception($"Failed to build program: {logStr}");
         }
@@ -247,7 +256,7 @@ public unsafe class TriaxialSimulation : IDisposable
     private nint CreateBuffer(long size, MemFlags flags)
     {
         int err;
-        var buf = _cl.CreateBuffer(_context, (ulong)flags, (nuint)size, null, &err);
+        var buf = _cl.CreateBuffer(_context, flags, (nuint)size, null, &err);
         if (err != 0)
             throw new Exception($"Failed to create buffer: {err}");
         return buf;

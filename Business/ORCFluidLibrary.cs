@@ -233,8 +233,8 @@ public sealed class ORCFluidLibrary
             LiquidDensityCoeff_A_B_C = new float[] { 1500.0f, -2.5f, 0.0f },
             LiquidEnthalpyCoeff_A_B_C_D = new float[] { -200000f, 1400f, 0.5f, -0.001f },
             VaporEnthalpyCoeff_A_B_C_D = new float[] { 250000f, 400f, -0.2f, 0.0005f },
-            LiquidEntropyCoeff_A_B_C = new float[] { -1000f, 5.0f, 0.002f },
-            VaporEntropyCoeff_A_B_C = new float[] { 1200f, 2.5f, -0.001f },
+            LiquidEntropyCoeff_A_B_C_D = new float[] { -1000f, 5.0f, 0.002f, 0.0f },
+            VaporEntropyCoeff_A_B_C_D = new float[] { 1200f, 2.5f, -0.001f, 0.0f },
 
             RecommendedEvaporatorPressure_Pa = 1.5e6f, // 15 bar
             RecommendedCondenserTemperature_K = 303.15f, // 30°C
@@ -277,8 +277,8 @@ public sealed class ORCFluidLibrary
             LiquidDensityCoeff_A_B_C = new float[] { 730.0f, -1.8f, 0.0f },
             LiquidEnthalpyCoeff_A_B_C_D = new float[] { -150000f, 1800f, 0.4f, -0.0008f },
             VaporEnthalpyCoeff_A_B_C_D = new float[] { 300000f, 500f, -0.3f, 0.0006f },
-            LiquidEntropyCoeff_A_B_C = new float[] { -800f, 5.5f, 0.0018f },
-            VaporEntropyCoeff_A_B_C = new float[] { 1400f, 2.8f, -0.0012f },
+            LiquidEntropyCoeff_A_B_C_D = new float[] { -800f, 5.5f, 0.0018f, 0.0f },
+            VaporEntropyCoeff_A_B_C_D = new float[] { 1400f, 2.8f, -0.0012f, 0.0f },
 
             RecommendedEvaporatorPressure_Pa = 2.0e6f,
             RecommendedCondenserTemperature_K = 303.15f,
@@ -321,8 +321,8 @@ public sealed class ORCFluidLibrary
             LiquidDensityCoeff_A_B_C = new float[] { 690.0f, -1.6f, 0.0f },
             LiquidEnthalpyCoeff_A_B_C_D = new float[] { -120000f, 1600f, 0.45f, -0.0007f },
             VaporEnthalpyCoeff_A_B_C_D = new float[] { 320000f, 480f, -0.25f, 0.0005f },
-            LiquidEntropyCoeff_A_B_C = new float[] { -750f, 5.2f, 0.0016f },
-            VaporEntropyCoeff_A_B_C = new float[] { 1500f, 2.6f, -0.0011f },
+            LiquidEntropyCoeff_A_B_C_D = new float[] { -750f, 5.2f, 0.0016f, 0.0f },
+            VaporEntropyCoeff_A_B_C_D = new float[] { 1500f, 2.6f, -0.0011f, 0.0f },
 
             RecommendedEvaporatorPressure_Pa = 1.8e6f,
             RecommendedCondenserTemperature_K = 303.15f,
@@ -365,8 +365,8 @@ public sealed class ORCFluidLibrary
             LiquidDensityCoeff_A_B_C = new float[] { 1050.0f, -1.1f, 0.0f },
             LiquidEnthalpyCoeff_A_B_C_D = new float[] { -50000f, 1400f, 0.5f, -0.0005f },
             VaporEnthalpyCoeff_A_B_C_D = new float[] { 380000f, 450f, -0.18f, 0.0004f },
-            LiquidEntropyCoeff_A_B_C = new float[] { -600f, 4.8f, 0.0014f },
-            VaporEntropyCoeff_A_B_C = new float[] { 1600f, 2.4f, -0.001f },
+            LiquidEntropyCoeff_A_B_C_D = new float[] { -600f, 4.8f, 0.0014f, 0.0f },
+            VaporEntropyCoeff_A_B_C_D = new float[] { 1600f, 2.4f, -0.001f, 0.0f },
 
             RecommendedEvaporatorPressure_Pa = 2.5e6f,
             RecommendedCondenserTemperature_K = 313.15f,
@@ -409,8 +409,8 @@ public sealed class ORCFluidLibrary
             LiquidDensityCoeff_A_B_C = new float[] { 1450.0f, -3.0f, 0.0f },
             LiquidEnthalpyCoeff_A_B_C_D = new float[] { -180000f, 1500f, 0.55f, -0.0012f },
             VaporEnthalpyCoeff_A_B_C_D = new float[] { 280000f, 420f, -0.22f, 0.0007f },
-            LiquidEntropyCoeff_A_B_C = new float[] { -950f, 5.3f, 0.0021f },
-            VaporEntropyCoeff_A_B_C = new float[] { 1300f, 2.7f, -0.0013f },
+            LiquidEntropyCoeff_A_B_C_D = new float[] { -950f, 5.3f, 0.0021f, 0.0f },
+            VaporEntropyCoeff_A_B_C_D = new float[] { 1300f, 2.7f, -0.0013f, 0.0f },
 
             RecommendedEvaporatorPressure_Pa = 2.2e6f,
             RecommendedCondenserTemperature_K = 303.15f,
@@ -453,8 +453,8 @@ public sealed class ORCFluidLibrary
             LiquidDensityCoeff_A_B_C = new float[] { 650.0f, -2.0f, 0.0f },
             LiquidEnthalpyCoeff_A_B_C_D = new float[] { -180000f, 2000f, 0.6f, -0.001f },
             VaporEnthalpyCoeff_A_B_C_D = new float[] { 350000f, 550f, -0.35f, 0.0008f },
-            LiquidEntropyCoeff_A_B_C = new float[] { -900f, 6.0f, 0.0022f },
-            VaporEntropyCoeff_A_B_C = new float[] { 1500f, 3.0f, -0.0014f },
+            LiquidEntropyCoeff_A_B_C_D = new float[] { -900f, 6.0f, 0.0022f, 0.0f },
+            VaporEntropyCoeff_A_B_C_D = new float[] { 1500f, 3.0f, -0.0014f, 0.0f },
 
             RecommendedEvaporatorPressure_Pa = 2.4e6f,
             RecommendedCondenserTemperature_K = 303.15f,
@@ -497,8 +497,8 @@ public sealed class ORCFluidLibrary
             LiquidDensityCoeff_A_B_C = new float[] { 680.0f, -1.5f, 0.0f },
             LiquidEnthalpyCoeff_A_B_C_D = new float[] { -125000f, 1650f, 0.47f, -0.0007f },
             VaporEnthalpyCoeff_A_B_C_D = new float[] { 325000f, 490f, -0.27f, 0.0006f },
-            LiquidEntropyCoeff_A_B_C = new float[] { -760f, 5.3f, 0.0017f },
-            VaporEntropyCoeff_A_B_C = new float[] { 1520f, 2.65f, -0.0011f },
+            LiquidEntropyCoeff_A_B_C_D = new float[] { -760f, 5.3f, 0.0017f, 0.0f },
+            VaporEntropyCoeff_A_B_C_D = new float[] { 1520f, 2.65f, -0.0011f, 0.0f },
 
             RecommendedEvaporatorPressure_Pa = 1.7e6f,
             RecommendedCondenserTemperature_K = 303.15f,
@@ -541,8 +541,8 @@ public sealed class ORCFluidLibrary
             LiquidDensityCoeff_A_B_C = new float[] { 1380.0f, -2.8f, 0.0f },
             LiquidEnthalpyCoeff_A_B_C_D = new float[] { -185000f, 1480f, 0.52f, -0.0011f },
             VaporEnthalpyCoeff_A_B_C_D = new float[] { 270000f, 410f, -0.21f, 0.0007f },
-            LiquidEntropyCoeff_A_B_C = new float[] { -920f, 5.1f, 0.0020f },
-            VaporEntropyCoeff_A_B_C = new float[] { 1280f, 2.65f, -0.0012f },
+            LiquidEntropyCoeff_A_B_C_D = new float[] { -920f, 5.1f, 0.0020f, 0.0f },
+            VaporEntropyCoeff_A_B_C_D = new float[] { 1280f, 2.65f, -0.0012f, 0.0f },
 
             RecommendedEvaporatorPressure_Pa = 2.0e6f,
             RecommendedCondenserTemperature_K = 303.15f,
@@ -585,8 +585,8 @@ public sealed class ORCFluidLibrary
             LiquidDensityCoeff_A_B_C = new float[] { 1420.0f, -2.7f, 0.0f },
             LiquidEnthalpyCoeff_A_B_C_D = new float[] { -190000f, 1460f, 0.53f, -0.0010f },
             VaporEnthalpyCoeff_A_B_C_D = new float[] { 275000f, 415f, -0.22f, 0.0007f },
-            LiquidEntropyCoeff_A_B_C = new float[] { -930f, 5.2f, 0.0019f },
-            VaporEntropyCoeff_A_B_C = new float[] { 1290f, 2.7f, -0.0012f },
+            LiquidEntropyCoeff_A_B_C_D = new float[] { -930f, 5.2f, 0.0019f, 0.0f },
+            VaporEntropyCoeff_A_B_C_D = new float[] { 1290f, 2.7f, -0.0012f, 0.0f },
 
             RecommendedEvaporatorPressure_Pa = 2.1e6f,
             RecommendedCondenserTemperature_K = 303.15f,
@@ -629,8 +629,8 @@ public sealed class ORCFluidLibrary
             LiquidDensityCoeff_A_B_C = new float[] { 850.0f, -1.2f, 0.0f },
             LiquidEnthalpyCoeff_A_B_C_D = new float[] { -80000f, 1350f, 0.55f, -0.0006f },
             VaporEnthalpyCoeff_A_B_C_D = new float[] { 340000f, 440f, -0.20f, 0.0005f },
-            LiquidEntropyCoeff_A_B_C = new float[] { -650f, 4.9f, 0.0015f },
-            VaporEntropyCoeff_A_B_C = new float[] { 1550f, 2.5f, -0.0010f },
+            LiquidEntropyCoeff_A_B_C_D = new float[] { -650f, 4.9f, 0.0015f, 0.0f },
+            VaporEntropyCoeff_A_B_C_D = new float[] { 1550f, 2.5f, -0.0010f, 0.0f },
 
             RecommendedEvaporatorPressure_Pa = 2.2e6f,
             RecommendedCondenserTemperature_K = 313.15f,
@@ -673,8 +673,8 @@ public sealed class ORCFluidLibrary
             LiquidDensityCoeff_A_B_C = new float[] { 980.0f, -1.3f, 0.0f },
             LiquidEnthalpyCoeff_A_B_C_D = new float[] { -60000f, 1320f, 0.48f, -0.0005f },
             VaporEnthalpyCoeff_A_B_C_D = new float[] { 360000f, 430f, -0.19f, 0.0004f },
-            LiquidEntropyCoeff_A_B_C = new float[] { -620f, 4.7f, 0.0014f },
-            VaporEntropyCoeff_A_B_C = new float[] { 1580f, 2.45f, -0.0009f },
+            LiquidEntropyCoeff_A_B_C_D = new float[] { -620f, 4.7f, 0.0014f, 0.0f },
+            VaporEntropyCoeff_A_B_C_D = new float[] { 1580f, 2.45f, -0.0009f, 0.0f },
 
             RecommendedEvaporatorPressure_Pa = 2.6e6f,
             RecommendedCondenserTemperature_K = 313.15f,
@@ -717,8 +717,8 @@ public sealed class ORCFluidLibrary
             LiquidDensityCoeff_A_B_C = new float[] { 1650.0f, -3.2f, 0.0f },
             LiquidEnthalpyCoeff_A_B_C_D = new float[] { -210000f, 1350f, 0.48f, -0.0009f },
             VaporEnthalpyCoeff_A_B_C_D = new float[] { 240000f, 380f, -0.18f, 0.0006f },
-            LiquidEntropyCoeff_A_B_C = new float[] { -1020f, 4.9f, 0.0018f },
-            VaporEntropyCoeff_A_B_C = new float[] { 1180f, 2.55f, -0.0011f },
+            LiquidEntropyCoeff_A_B_C_D = new float[] { -1020f, 4.9f, 0.0018f, 0.0f },
+            VaporEntropyCoeff_A_B_C_D = new float[] { 1180f, 2.55f, -0.0011f, 0.0f },
 
             RecommendedEvaporatorPressure_Pa = 1.8e6f,
             RecommendedCondenserTemperature_K = 303.15f,
@@ -761,8 +761,8 @@ public sealed class ORCFluidLibrary
             LiquidDensityCoeff_A_B_C = new float[] { 1720.0f, -3.5f, 0.0f },
             LiquidEnthalpyCoeff_A_B_C_D = new float[] { -220000f, 1280f, 0.44f, -0.0008f },
             VaporEnthalpyCoeff_A_B_C_D = new float[] { 230000f, 360f, -0.17f, 0.0005f },
-            LiquidEntropyCoeff_A_B_C = new float[] { -1050f, 4.8f, 0.0017f },
-            VaporEntropyCoeff_A_B_C = new float[] { 1160f, 2.5f, -0.0010f },
+            LiquidEntropyCoeff_A_B_C_D = new float[] { -1050f, 4.8f, 0.0017f, 0.0f },
+            VaporEntropyCoeff_A_B_C_D = new float[] { 1160f, 2.5f, -0.0010f, 0.0f },
 
             RecommendedEvaporatorPressure_Pa = 1.6e6f,
             RecommendedCondenserTemperature_K = 303.15f,
@@ -805,8 +805,8 @@ public sealed class ORCFluidLibrary
             LiquidDensityCoeff_A_B_C = new float[] { 950.0f, -1.0f, 0.0f },
             LiquidEnthalpyCoeff_A_B_C_D = new float[] { -100000f, 2200f, 0.8f, -0.0015f },
             VaporEnthalpyCoeff_A_B_C_D = new float[] { 400000f, 600f, -0.4f, 0.001f },
-            LiquidEntropyCoeff_A_B_C = new float[] { -550f, 6.5f, 0.0025f },
-            VaporEntropyCoeff_A_B_C = new float[] { 1700f, 3.2f, -0.0016f },
+            LiquidEntropyCoeff_A_B_C_D = new float[] { -550f, 6.5f, 0.0025f, 0.0f },
+            VaporEntropyCoeff_A_B_C_D = new float[] { 1700f, 3.2f, -0.0016f, 0.0f },
 
             RecommendedEvaporatorPressure_Pa = 3.5e6f,
             RecommendedCondenserTemperature_K = 313.15f,
@@ -849,8 +849,8 @@ public sealed class ORCFluidLibrary
             LiquidDensityCoeff_A_B_C = new float[] { 730.0f, -1.8f, 0.0f },
             LiquidEnthalpyCoeff_A_B_C_D = new float[] { -140000f, 2500f, 1.0f, -0.002f },
             VaporEnthalpyCoeff_A_B_C_D = new float[] { 450000f, 700f, -0.5f, 0.0012f },
-            LiquidEntropyCoeff_A_B_C = new float[] { -500f, 7.0f, 0.003f },
-            VaporEntropyCoeff_A_B_C = new float[] { 1800f, 3.5f, -0.0018f },
+            LiquidEntropyCoeff_A_B_C_D = new float[] { -500f, 7.0f, 0.003f, 0.0f },
+            VaporEntropyCoeff_A_B_C_D = new float[] { 1800f, 3.5f, -0.0018f, 0.0f },
 
             RecommendedEvaporatorPressure_Pa = 4.5e6f,
             RecommendedCondenserTemperature_K = 303.15f,
@@ -893,8 +893,8 @@ public sealed class ORCFluidLibrary
             LiquidDensityCoeff_A_B_C = new float[] { 1100.0f, -0.6f, 0.0f },
             LiquidEnthalpyCoeff_A_B_C_D = new float[] { -50000f, 2800f, 1.2f, -0.0025f },
             VaporEnthalpyCoeff_A_B_C_D = new float[] { 500000f, 800f, -0.6f, 0.0015f },
-            LiquidEntropyCoeff_A_B_C = new float[] { -400f, 8.0f, 0.0035f },
-            VaporEntropyCoeff_A_B_C = new float[] { 2000f, 4.0f, -0.002f },
+            LiquidEntropyCoeff_A_B_C_D = new float[] { -400f, 8.0f, 0.0035f, 0.0f },
+            VaporEntropyCoeff_A_B_C_D = new float[] { 2000f, 4.0f, -0.002f, 0.0f },
 
             RecommendedEvaporatorPressure_Pa = 8.0e6f,
             RecommendedCondenserTemperature_K = 323.15f, // 50°C
@@ -937,8 +937,8 @@ public sealed class ORCFluidLibrary
             LiquidDensityCoeff_A_B_C = new float[] { 1200.0f, -4.0f, 0.0f },
             LiquidEnthalpyCoeff_A_B_C_D = new float[] { -160000f, 1100f, 0.3f, -0.0005f },
             VaporEnthalpyCoeff_A_B_C_D = new float[] { 220000f, 350f, -0.15f, 0.0004f },
-            LiquidEntropyCoeff_A_B_C = new float[] { -1100f, 4.5f, 0.0016f },
-            VaporEntropyCoeff_A_B_C = new float[] { 1100f, 2.3f, -0.0009f },
+            LiquidEntropyCoeff_A_B_C_D = new float[] { -1100f, 4.5f, 0.0016f, 0.0f },
+            VaporEntropyCoeff_A_B_C_D = new float[] { 1100f, 2.3f, -0.0009f, 0.0f },
 
             RecommendedEvaporatorPressure_Pa = 9.0e6f, // Supercritical!
             RecommendedCondenserTemperature_K = 298.15f,
@@ -981,8 +981,8 @@ public sealed class ORCFluidLibrary
             LiquidDensityCoeff_A_B_C = new float[] { 660.0f, -1.7f, 0.0f },
             LiquidEnthalpyCoeff_A_B_C_D = new float[] { -130000f, 1580f, 0.46f, -0.0007f },
             VaporEnthalpyCoeff_A_B_C_D = new float[] { 315000f, 470f, -0.26f, 0.0006f },
-            LiquidEntropyCoeff_A_B_C = new float[] { -770f, 5.15f, 0.0017f },
-            VaporEntropyCoeff_A_B_C = new float[] { 1480f, 2.6f, -0.0011f },
+            LiquidEntropyCoeff_A_B_C_D = new float[] { -770f, 5.15f, 0.0017f, 0.0f },
+            VaporEntropyCoeff_A_B_C_D = new float[] { 1480f, 2.6f, -0.0011f, 0.0f },
 
             RecommendedEvaporatorPressure_Pa = 1.9e6f,
             RecommendedCondenserTemperature_K = 303.15f,
@@ -1025,8 +1025,8 @@ public sealed class ORCFluidLibrary
             LiquidDensityCoeff_A_B_C = new float[] { 1550.0f, -3.1f, 0.0f },
             LiquidEnthalpyCoeff_A_B_C_D = new float[] { -205000f, 1390f, 0.50f, -0.0009f },
             VaporEnthalpyCoeff_A_B_C_D = new float[] { 250000f, 390f, -0.19f, 0.0006f },
-            LiquidEntropyCoeff_A_B_C = new float[] { -990f, 4.95f, 0.0018f },
-            VaporEntropyCoeff_A_B_C = new float[] { 1200f, 2.57f, -0.0011f },
+            LiquidEntropyCoeff_A_B_C_D = new float[] { -990f, 4.95f, 0.0018f, 0.0f },
+            VaporEntropyCoeff_A_B_C_D = new float[] { 1200f, 2.57f, -0.0011f, 0.0f },
 
             RecommendedEvaporatorPressure_Pa = 1.4e6f,
             RecommendedCondenserTemperature_K = 303.15f,

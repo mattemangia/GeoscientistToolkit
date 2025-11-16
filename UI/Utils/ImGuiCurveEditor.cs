@@ -486,6 +486,22 @@ public class ImGuiCurveEditor
         return p1.Point.Y + t * (p2.Point.Y - p1.Point.Y);
     }
 
+    /// <summary>
+    ///     Gets the raw control points of the curve.
+    /// </summary>
+    public List<CurvePoint> GetPoints()
+    {
+        return new List<CurvePoint>(_points);
+    }
+
+    /// <summary>
+    ///     Draws the curve editor window (convenience method that calls Submit).
+    /// </summary>
+    public void Draw()
+    {
+        Submit(out _, resolution: 256);
+    }
+
     public void ResetView()
     {
         _viewOffset = _rangeMin;
