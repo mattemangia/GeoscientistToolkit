@@ -75,8 +75,20 @@ public static class Logger
     // The default LogLevel is now correctly typed as Settings.LogLevel
     public static void Log(string message, LogLevel level = LogLevel.Information)
     {
+        // Capture settings and initialization state once to avoid race conditions
+        LoggingSettings currentSettings;
+        StreamWriter currentWriter;
+        bool isInitialized;
+
+        lock (_fileLock)
+        {
+            isInitialized = _isInitialized;
+            currentSettings = _settings;
+            currentWriter = _logWriter;
+        }
+
         // The comparison now works because both operands are of type Settings.LogLevel
-        if (!_isInitialized || level < _settings.MinimumLogLevel) return;
+        if (!isInitialized || currentSettings == null || level < currentSettings.MinimumLogLevel) return;
 
         var entry = new LogEntry
         {
@@ -88,15 +100,19 @@ public static class Logger
 
         _logEntries.Enqueue(entry);
 
-        var logString = BuildLogString(entry);
+        var logString = BuildLogString(entry, currentSettings);
 
         // Write to the log file in a thread-safe manner.
-        if (_settings.EnableFileLogging && _logWriter != null)
+        if (currentSettings.EnableFileLogging && currentWriter != null)
             lock (_fileLock)
             {
                 try
                 {
-                    _logWriter.WriteLine(logString);
+                    // Re-check writer in case it was disposed
+                    if (_logWriter != null)
+                    {
+                        _logWriter.WriteLine(logString);
+                    }
                 }
                 catch (Exception ex)
                 {
@@ -105,7 +121,7 @@ public static class Logger
             }
 
         // Write to console if enabled
-        if (_settings.EnableConsoleLogging) Console.WriteLine(logString);
+        if (currentSettings.EnableConsoleLogging) Console.WriteLine(logString);
 
         // Keep in-memory log size manageable.
         while (_logEntries.Count > MaxEntries) _logEntries.TryDequeue(out _);
@@ -113,11 +129,11 @@ public static class Logger
         OnLogAdded?.Invoke(entry);
     }
 
-    private static string BuildLogString(LogEntry entry)
+    private static string BuildLogString(LogEntry entry, LoggingSettings settings)
     {
         var sb = new StringBuilder();
-        if (_settings.IncludeTimestamp) sb.Append($"[{entry.Timestamp:yyyy-MM-dd HH:mm:ss.fff}] ");
-        if (_settings.IncludeThreadId) sb.Append($"[Thread:{entry.ThreadId}] ");
+        if (settings.IncludeTimestamp) sb.Append($"[{entry.Timestamp:yyyy-MM-dd HH:mm:ss.fff}] ");
+        if (settings.IncludeThreadId) sb.Append($"[Thread:{entry.ThreadId}] ");
         sb.Append($"[{entry.Level.ToString().ToUpper()}] {entry.Message}");
         return sb.ToString();
     }

@@ -30,14 +30,32 @@ namespace GeoscientistToolkit.Business;
 public class ProjectManager
 {
     private static ProjectManager _instance;
+    private static readonly object _instanceLock = new object();
     private System.Threading.Timer _autoBackupTimer;
     private readonly object _backupLock = new object();
+    private volatile bool _isDisposing = false;
 
     private ProjectManager()
     {
     }
 
-    public static ProjectManager Instance => _instance ??= new ProjectManager();
+    public static ProjectManager Instance
+    {
+        get
+        {
+            if (_instance == null)
+            {
+                lock (_instanceLock)
+                {
+                    if (_instance == null)
+                    {
+                        _instance = new ProjectManager();
+                    }
+                }
+            }
+            return _instance;
+        }
+    }
 
     public List<Dataset> LoadedDatasets { get; } = new();
     public string ProjectName { get; set; } = "Untitled Project";
@@ -206,8 +224,8 @@ public class ProjectManager
     {
         StopAutoBackup(); // Stop existing timer if any
 
-        var settings = SettingsManager.Instance.Settings.Backup;
-        if (!settings.EnableAutoBackup || settings.BackupInterval <= 0)
+        var settings = SettingsManager.Instance?.Settings?.Backup;
+        if (settings == null || !settings.EnableAutoBackup || settings.BackupInterval <= 0)
         {
             return;
         }
@@ -216,8 +234,14 @@ public class ProjectManager
         _autoBackupTimer = new System.Threading.Timer(
             callback: _ =>
             {
+                // Check if disposal is in progress
+                if (_isDisposing) return;
+
                 lock (_backupLock)
                 {
+                    // Double-check after acquiring lock
+                    if (_isDisposing) return;
+
                     try
                     {
                         BackupProject();
@@ -238,11 +262,16 @@ public class ProjectManager
 
     public void StopAutoBackup()
     {
-        if (_autoBackupTimer != null)
+        lock (_backupLock)
         {
-            _autoBackupTimer.Dispose();
-            _autoBackupTimer = null;
-            Logger.Log("Auto backup disabled");
+            _isDisposing = true;
+            if (_autoBackupTimer != null)
+            {
+                _autoBackupTimer.Dispose();
+                _autoBackupTimer = null;
+                Logger.Log("Auto backup disabled");
+            }
+            _isDisposing = false;
         }
     }
 
@@ -921,6 +950,9 @@ public class ProjectManager
 
     private string EscapeCSV(string field)
     {
+        if (string.IsNullOrEmpty(field))
+            return string.Empty;
+
         if (field.Contains(",") || field.Contains("\"") || field.Contains("\n") || field.Contains("\r"))
             return $"\"{field.Replace("\"", "\"\"")}\"";
         return field;

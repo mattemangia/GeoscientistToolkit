@@ -56,14 +56,26 @@ public class TextureManager : IDisposable
 
         try
         {
-            manager._texture = VeldridManager.Factory.CreateTexture(TextureDescription.Texture2D(
+            var factory = VeldridManager.Factory;
+            if (factory == null)
+            {
+                throw new InvalidOperationException("VeldridManager.Factory is not initialized");
+            }
+
+            var graphicsDevice = VeldridManager.GraphicsDevice;
+            if (graphicsDevice == null)
+            {
+                throw new InvalidOperationException("VeldridManager.GraphicsDevice is not initialized");
+            }
+
+            manager._texture = factory.CreateTexture(TextureDescription.Texture2D(
                 width, height, 1, 1, format, TextureUsage.Sampled));
 
-            VeldridManager.GraphicsDevice.UpdateTexture(
+            graphicsDevice.UpdateTexture(
                 manager._texture, pixelData,
                 0, 0, 0, width, height, 1, 0, 0);
 
-            manager._textureView = VeldridManager.Factory.CreateTextureView(manager._texture);
+            manager._textureView = factory.CreateTextureView(manager._texture);
             return manager;
         }
         catch
@@ -80,7 +92,14 @@ public class TextureManager : IDisposable
     {
         var manager = new TextureManager();
         manager._texture = texture;
-        manager._textureView = VeldridManager.Factory.CreateTextureView(texture);
+
+        var factory = VeldridManager.Factory;
+        if (factory == null)
+        {
+            throw new InvalidOperationException("VeldridManager.Factory is not initialized");
+        }
+
+        manager._textureView = factory.CreateTextureView(texture);
         return manager;
     }
 
@@ -102,8 +121,12 @@ public class TextureManager : IDisposable
             var controller = VeldridManager.GetCurrentImGuiController();
             if (controller == null) return IntPtr.Zero;
 
+            // Get factory and check for null
+            var factory = VeldridManager.Factory;
+            if (factory == null) return IntPtr.Zero;
+
             // Create texture binding for this controller
-            var textureId = controller.GetOrCreateImGuiBinding(VeldridManager.Factory, _textureView);
+            var textureId = controller.GetOrCreateImGuiBinding(factory, _textureView);
             _textureIdsByContext[currentContext] = textureId;
 
             return textureId;

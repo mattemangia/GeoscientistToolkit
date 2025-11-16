@@ -26,6 +26,7 @@ public class TextureBrickCache : IDisposable
     private readonly HashSet<int> _pendingRequests = new();
     private readonly BinaryReader _reader;
     private readonly Dictionary<int, int> _slotForBrickId;
+    private readonly object _cacheLock = new object(); // Lock for cache state modifications
     private volatile bool _isRunning = true;
     private int _lruTimestamp;
 
@@ -59,19 +60,22 @@ public class TextureBrickCache : IDisposable
     public void RequestBricks(IEnumerable<int> brickIds)
     {
         foreach (var id in brickIds)
-            if (!_slotForBrickId.ContainsKey(id) && !_pendingRequests.Contains(id))
+        {
+            lock (_cacheLock)
             {
-                lock (_pendingRequests)
+                // Check if brick is already loaded or pending
+                if (!_slotForBrickId.ContainsKey(id) && !_pendingRequests.Contains(id))
                 {
                     _pendingRequests.Add(id);
+                    _loadRequestQueue.Enqueue(id);
                 }
-
-                _loadRequestQueue.Enqueue(id);
+                else if (_slotForBrickId.TryGetValue(id, out var slot))
+                {
+                    // Update LRU timestamp atomically
+                    _lruCounterInSlot[slot] = Interlocked.Increment(ref _lruTimestamp);
+                }
             }
-            else if (_slotForBrickId.TryGetValue(id, out var slot))
-            {
-                _lruCounterInSlot[slot] = ++_lruTimestamp;
-            }
+        }
     }
 
     public bool TryGetNextLoadedBrick(out LoadedBrick brick)
@@ -84,30 +88,38 @@ public class TextureBrickCache : IDisposable
         while (_isRunning)
             if (_loadRequestQueue.TryDequeue(out var brickIdToLoad))
             {
-                // --- Find a slot in the cache ---
-                var cacheSlot = -1;
-                var minLru = int.MaxValue;
-                for (var i = 0; i < CacheSize; i++)
+                int cacheSlot;
+                int evictedBrickId;
+
+                // --- Find a slot in the cache (under lock) ---
+                lock (_cacheLock)
                 {
-                    if (_brickIdInSlot[i] == -1)
+                    cacheSlot = -1;
+                    var minLru = int.MaxValue;
+                    for (var i = 0; i < CacheSize; i++)
                     {
-                        cacheSlot = i;
-                        break;
+                        if (_brickIdInSlot[i] == -1)
+                        {
+                            cacheSlot = i;
+                            break;
+                        }
+
+                        if (_lruCounterInSlot[i] < minLru)
+                        {
+                            minLru = _lruCounterInSlot[i];
+                            cacheSlot = i;
+                        }
                     }
 
-                    if (_lruCounterInSlot[i] < minLru)
+                    // --- Evict old brick if necessary ---
+                    evictedBrickId = _brickIdInSlot[cacheSlot];
+                    if (evictedBrickId != -1)
                     {
-                        minLru = _lruCounterInSlot[i];
-                        cacheSlot = i;
+                        _slotForBrickId.Remove(evictedBrickId);
                     }
                 }
 
-                // --- Evict old brick if necessary ---
-                if (_brickIdInSlot[cacheSlot] != -1) _slotForBrickId.Remove(_brickIdInSlot[cacheSlot]);
-
-                // --- Read brick data from file ---
-                // This requires knowing the file format structure (offsets, brick size)
-                // For simplicity, we assume brickId maps directly to an offset.
+                // --- Read brick data from file (outside cache lock to avoid blocking) ---
                 var offset = 1024 + (long)brickIdToLoad * (64 * 64 * 64); // Placeholder offset
                 byte[] data;
                 lock (_reader)
@@ -116,19 +128,20 @@ public class TextureBrickCache : IDisposable
                     data = _reader.ReadBytes(64 * 64 * 64);
                 }
 
-                // --- Update cache state ---
-                _brickIdInSlot[cacheSlot] = brickIdToLoad;
-                _slotForBrickId[brickIdToLoad] = cacheSlot;
-                _lruCounterInSlot[cacheSlot] = ++_lruTimestamp;
-
-                // --- Enqueue for GPU upload ---
-                _loadedBrickQueue.Enqueue(new LoadedBrick
-                    { BrickID = brickIdToLoad, CacheSlot = cacheSlot, Data = data });
-
-                lock (_pendingRequests)
+                // --- Update cache state (under lock) ---
+                lock (_cacheLock)
                 {
+                    _brickIdInSlot[cacheSlot] = brickIdToLoad;
+                    _slotForBrickId[brickIdToLoad] = cacheSlot;
+                    _lruCounterInSlot[cacheSlot] = Interlocked.Increment(ref _lruTimestamp);
+
+                    // Remove from pending requests
                     _pendingRequests.Remove(brickIdToLoad);
                 }
+
+                // --- Enqueue for GPU upload (thread-safe queue, no lock needed) ---
+                _loadedBrickQueue.Enqueue(new LoadedBrick
+                    { BrickID = brickIdToLoad, CacheSlot = cacheSlot, Data = data });
             }
             else
             {

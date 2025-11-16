@@ -13,6 +13,7 @@ namespace GeoscientistToolkit.AddIns;
 public class AddInManager
 {
     private static AddInManager _instance;
+    private static readonly object _instanceLock = new object();
     private readonly Dictionary<string, AddInInfo> _addInInfos = new();
     private readonly List<IDataExporter> _exporters = new();
     private readonly List<IDataImporter> _importers = new();
@@ -27,7 +28,23 @@ public class AddInManager
         SettingsManager.Instance.SettingsChanged += OnSettingsChanged;
     }
 
-    public static AddInManager Instance => _instance ??= new AddInManager();
+    public static AddInManager Instance
+    {
+        get
+        {
+            if (_instance == null)
+            {
+                lock (_instanceLock)
+                {
+                    if (_instance == null)
+                    {
+                        _instance = new AddInManager();
+                    }
+                }
+            }
+            return _instance;
+        }
+    }
 
     public IReadOnlyDictionary<string, IAddIn> LoadedAddIns => _loadedAddIns;
     public IReadOnlyList<AddInMenuItem> MenuItems => _menuItems;

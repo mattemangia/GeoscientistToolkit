@@ -9,6 +9,7 @@ namespace GeoscientistToolkit.Settings;
 public class SettingsManager
 {
     private static SettingsManager _instance;
+    private static readonly object _instanceLock = new object();
 
     private readonly JsonSerializerOptions _jsonOptions = new()
     {
@@ -29,7 +30,23 @@ public class SettingsManager
         _settingsFilePath = Path.Combine(_settingsDirectory, "settings.json");
     }
 
-    public static SettingsManager Instance => _instance ??= new SettingsManager();
+    public static SettingsManager Instance
+    {
+        get
+        {
+            if (_instance == null)
+            {
+                lock (_instanceLock)
+                {
+                    if (_instance == null)
+                    {
+                        _instance = new SettingsManager();
+                    }
+                }
+            }
+            return _instance;
+        }
+    }
 
     public AppSettings Settings { get; private set; }
 

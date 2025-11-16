@@ -13,6 +13,7 @@ namespace GeoscientistToolkit.AddIns.CtSimulation;
 public class CtSimulationManager
 {
     private static CtSimulationManager _instance;
+    private static readonly object _instanceLock = new object();
     private readonly Dictionary<string, ICtSimulationProcessor> _activeProcessors = new();
     private readonly Dictionary<string, SimulationResult> _results = new();
 
@@ -25,7 +26,23 @@ public class CtSimulationManager
         AddInManager.Instance.AddInUnloaded += OnAddInUnloaded;
     }
 
-    public static CtSimulationManager Instance => _instance ??= new CtSimulationManager();
+    public static CtSimulationManager Instance
+    {
+        get
+        {
+            if (_instance == null)
+            {
+                lock (_instanceLock)
+                {
+                    if (_instance == null)
+                    {
+                        _instance = new CtSimulationManager();
+                    }
+                }
+            }
+            return _instance;
+        }
+    }
 
     public event Action<string, SimulationResult> ResultAvailable;
     public event Action<string, float> ProgressUpdated;

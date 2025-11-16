@@ -11,6 +11,7 @@ namespace GeoscientistToolkit.UI.GIS;
 public class BasemapManager
 {
     private static BasemapManager _instance;
+    private static readonly object _instanceLock = new object();
 
     // Popular free basemap providers
     public static readonly List<BasemapProvider> Providers = new()
@@ -140,7 +141,23 @@ public class BasemapManager
         Task.Run(CheckConnectivity);
     }
 
-    public static BasemapManager Instance => _instance ??= new BasemapManager();
+    public static BasemapManager Instance
+    {
+        get
+        {
+            if (_instance == null)
+            {
+                lock (_instanceLock)
+                {
+                    if (_instance == null)
+                    {
+                        _instance = new BasemapManager();
+                    }
+                }
+            }
+            return _instance;
+        }
+    }
 
     public BasemapProvider CurrentProvider { get; set; }
     public string ApiKey { get; set; } // For providers that require API keys

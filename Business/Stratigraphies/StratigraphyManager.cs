@@ -10,7 +10,25 @@ namespace GeoscientistToolkit.Business.Stratigraphies;
 public class StratigraphyManager
 {
     private static StratigraphyManager _instance;
-    public static StratigraphyManager Instance => _instance ??= new StratigraphyManager();
+    private static readonly object _instanceLock = new object();
+
+    public static StratigraphyManager Instance
+    {
+        get
+        {
+            if (_instance == null)
+            {
+                lock (_instanceLock)
+                {
+                    if (_instance == null)
+                    {
+                        _instance = new StratigraphyManager();
+                    }
+                }
+            }
+            return _instance;
+        }
+    }
 
     public List<IStratigraphy> AvailableStratigraphies { get; }
     public IStratigraphy CurrentStratigraphy { get; set; }
