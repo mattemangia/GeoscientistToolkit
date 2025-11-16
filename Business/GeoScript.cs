@@ -6,6 +6,8 @@ using System.Reflection;
 using System.Text.RegularExpressions;
 using GeoscientistToolkit.Business.GIS;
 using GeoscientistToolkit.Business.Thermodynamics;
+using GeoscientistToolkit.Business.GeoScriptImageCommands;
+using GeoscientistToolkit.Business.GeoScriptUtilityCommands;
 using GeoscientistToolkit.Data;
 using GeoscientistToolkit.Data.GIS;
 using GeoscientistToolkit.Data.Materials;
@@ -191,7 +193,22 @@ public static class CommandRegistry
             new RunPNMReactiveTransportCommand(),
             new SetPNMSpeciesCommand(),
             new SetPNMMineralsCommand(),
-            new ExportPNMResultsCommand()
+            new ExportPNMResultsCommand(),
+
+            // Image Processing Commands
+            new BrightnessContrastCommand(),
+            new FilterCommand(),
+            new ThresholdCommand(),
+            new BinarizeCommand(),
+            new GrayscaleCommand(),
+            new InvertCommand(),
+            new NormalizeCommand(),
+
+            // Utility Commands
+            new ListOpsCommand(),
+            new DispTypeCommand(),
+            new UnloadCommand(),
+            new InfoCommand()
         };
         Commands = commandList.ToDictionary(c => c.Name.ToUpper(), c => c);
     }

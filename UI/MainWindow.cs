@@ -48,6 +48,7 @@ public class MainWindow
     private readonly CompoundLibraryEditorWindow _compoundLibraryEditorWindow = new();
     private readonly ORCFluidEditorWindow _orcFluidEditorWindow = new();
     private readonly GeoScriptTerminalWindow _geoScriptTerminalWindow = new();
+    private readonly GeoScriptEditorWindow _geoScriptEditorWindow = new();
     private readonly ImGuiWindowScreenshotTool _screenshotTool;
 
     // Real-time photogrammetry window
@@ -244,6 +245,7 @@ public class MainWindow
         _compoundLibraryEditorWindow.Draw();
         _orcFluidEditorWindow.Draw();
         _geoScriptTerminalWindow.Draw();
+        _geoScriptEditorWindow.Draw();
         _stratigraphyViewer.Draw();
         _realtimePhotogrammetryWindow.Draw();
         _triaxialSimulationTool?.Draw();
@@ -441,6 +443,11 @@ public class MainWindow
 
                 // Optionally, select it
                 OnDatasetSelected(newTableDataset);
+            }
+
+            if (ImGui.MenuItem("GeoScript Editor..."))
+            {
+                _geoScriptEditorWindow.Show();
             }
 
             ImGui.Separator();
