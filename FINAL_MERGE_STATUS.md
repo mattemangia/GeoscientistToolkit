@@ -42,6 +42,11 @@ Successfully merged 5 feature branches and applied two batches of compilation fi
 
 2. **ORCFluidLibrary.cs** - Added `GetAllFluids()` method
 
+### ✅ Batch 3 (Committed: 14f60ef)
+1. **GeomechanicsSolver.cs** - Fixed type reference
+   - Changed `GeothermalMeshGenerator.CylindricalMesh` → `GeothermalMesh`
+   - Corrected parameter type in `SetPropertiesFromLithology` method
+
 ## Remaining Compilation Issues
 
 See `REMAINING_COMPILATION_ISSUES.md` for detailed analysis.

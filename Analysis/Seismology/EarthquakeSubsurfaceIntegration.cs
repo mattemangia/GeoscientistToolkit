@@ -412,13 +412,6 @@ namespace GeoscientistToolkit.Analysis.Seismology
                 if (sliceVoxels.Count == 0)
                     continue;
 
-                var layer = new GISRasterLayer
-                {
-                    Name = $"Seismic_Depth_{-targetDepth:F0}m_{parameterName}",
-                    Type = LayerType.Raster,
-                    Tags = GISTag.Seismic | GISTag.ThreeDimensional
-                };
-
                 // Create raster grid for this depth slice
                 int gridSize = 100;
                 float minX = sliceVoxels.Min(v => v.Position.X);
@@ -447,18 +440,20 @@ namespace GeoscientistToolkit.Analysis.Seismology
                     }
                 }
 
-                layer.Bounds = new Util.BoundingBox
+                var bounds = new Util.BoundingBox
                 {
                     Min = new Vector3(minX, minY, targetDepth),
                     Max = new Vector3(maxX, maxY, targetDepth)
                 };
 
-                layer.Width = gridSize;
-                layer.Height = gridSize;
-                layer.SetPixelData(rasterData);
+                var layer = new GISRasterLayer(rasterData, bounds)
+                {
+                    Name = $"Seismic_Depth_{-targetDepth:F0}m_{parameterName}"
+                };
 
-                layer.Metadata["Depth"] = $"{-targetDepth:F1}m";
-                layer.Metadata["Parameter"] = parameterName;
+                // Store metadata in Properties dictionary
+                layer.Properties["Depth"] = $"{-targetDepth:F1}m";
+                layer.Properties["Parameter"] = parameterName;
 
                 layers.Add(layer);
             }
