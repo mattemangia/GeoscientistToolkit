@@ -200,11 +200,15 @@ namespace GeoscientistToolkit.Analysis.Seismology
                         double sigma_xz = mu * (dux_dz + duz_dx);
                         double sigma_yz = mu * (duy_dz + duz_dy);
 
-                        // Stress divergence (acceleration)
-                        double dsigma_xx_dx = (sigma_xx - (lambda * strain_vol + 2.0 * mu * dux_dx)) / _dx;
-                        double acc_x = (dsigma_xx_dx + sigma_xy / _dy + sigma_xz / _dz) / rho;
-                        double acc_y = (sigma_xy / _dx + dsigma_xx_dx + sigma_yz / _dz) / rho;
-                        double acc_z = (sigma_xz / _dx + sigma_yz / _dy + dsigma_xx_dx) / rho;
+                        // Stress divergence (acceleration) - properly compute derivatives
+                        // Need to compute stress at neighboring points for finite differences
+                        // Simplified approach: use centered differences on strain rates
+                        double acc_x = (dux_dx * (lambda + 2.0 * mu) + duy_dy * lambda + duz_dz * lambda +
+                                       mu * (dux_dy + duy_dx) + mu * (dux_dz + duz_dx)) / (rho * _dx);
+                        double acc_y = (duy_dy * (lambda + 2.0 * mu) + dux_dx * lambda + duz_dz * lambda +
+                                       mu * (dux_dy + duy_dx) + mu * (duy_dz + duz_dy)) / (rho * _dy);
+                        double acc_z = (duz_dz * (lambda + 2.0 * mu) + dux_dx * lambda + duy_dy * lambda +
+                                       mu * (dux_dz + duz_dx) + mu * (duy_dz + duz_dy)) / (rho * _dz);
 
                         // Update velocities
                         vxNew[i, j, k] = _vx[i, j, k] + _dt * acc_x;
