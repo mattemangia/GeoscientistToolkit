@@ -222,7 +222,7 @@ namespace GeoscientistToolkit.Analysis.Geothermal
             }
         }
 
-        private void ProcessCycleVectorAVX2(
+        private unsafe void ProcessCycleVectorAVX2(
             Vector256<float> vGeoTemp,
             Vector256<float> vCondTemp,
             Vector256<float> vEvapPress,
@@ -340,9 +340,10 @@ namespace GeoscientistToolkit.Analysis.Geothermal
             float densityLiquid = _currentFluid.LiquidDensity_kgm3;
             float deltaH = (outletPressure - inlet.Pressure) / (densityLiquid * efficiency);
 
+            float liquidCp = _currentFluid.LiquidHeatCapacity_JkgK > 0 ? _currentFluid.LiquidHeatCapacity_JkgK : 1400.0f;
             return new ORCState
             {
-                Temperature = inlet.Temperature + deltaH / (_currentFluid.LiquidHeatCapacity_JkgK ?? 1400.0f), // Approximate heating
+                Temperature = inlet.Temperature + deltaH / liquidCp, // Approximate heating
                 Pressure = outletPressure,
                 Enthalpy = inlet.Enthalpy + deltaH,
                 Entropy = inlet.Entropy + deltaH / inlet.Temperature,
