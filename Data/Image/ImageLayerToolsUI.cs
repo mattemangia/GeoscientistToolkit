@@ -132,7 +132,7 @@ namespace GeoscientistToolkit.Data.Image
                 Array.Copy(image.ImageData, initialLayer.Data, image.ImageData.Length);
             }
 
-            _layerManager.AddLayer(initialLayer);
+            _layerManager.AddLayer(initialLayer.ToString());
         }
 
         #region Layers Tab
@@ -194,7 +194,7 @@ namespace GeoscientistToolkit.Data.Image
                 {
                     var newLayer = new ImageLayer($"Layer {_layerManager.Layers.Count + 1}",
                         _layerManager.Width, _layerManager.Height);
-                    _layerManager.AddLayer(newLayer);
+                    _layerManager.AddLayer(newLayer.ToString());
                 }
 
                 if (ImGui.Button("Duplicate Layer", new Vector2(-1, 0)))
@@ -469,7 +469,7 @@ namespace GeoscientistToolkit.Data.Image
             {
                 var newLayer = ImageClipboard.PasteAsNewLayer();
                 if (newLayer != null)
-                    _layerManager.AddLayer(newLayer);
+                    _layerManager.AddLayer(newLayer.ToString());
             }
 
             ImGui.Separator();
@@ -692,7 +692,7 @@ namespace GeoscientistToolkit.Data.Image
             newLayer.Opacity = layer.Opacity;
             newLayer.BlendMode = layer.BlendMode;
 
-            _layerManager.AddLayer(newLayer);
+            _layerManager.AddLayer(newLayer.ToString());
         }
 
         private void CropActiveLayer(int x, int y, int width, int height)
@@ -708,7 +708,7 @@ namespace GeoscientistToolkit.Data.Image
             newLayer.Opacity = layer.Opacity;
             newLayer.BlendMode = layer.BlendMode;
 
-            _layerManager.AddLayer(newLayer);
+            _layerManager.AddLayer(newLayer.ToString());
         }
 
         private void RotateActiveLayer(double angle)
@@ -724,7 +724,7 @@ namespace GeoscientistToolkit.Data.Image
             newLayer.Opacity = layer.Opacity;
             newLayer.BlendMode = layer.BlendMode;
 
-            _layerManager.AddLayer(newLayer);
+            _layerManager.AddLayer(newLayer.ToString());
         }
 
         private void FlipActiveLayer(ImageManipulation.FlipMode mode)

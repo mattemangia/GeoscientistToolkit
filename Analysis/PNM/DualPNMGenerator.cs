@@ -2,6 +2,7 @@
 
 using System.Numerics;
 using GeoscientistToolkit.Business;
+using GeoscientistToolkit.Data;
 using GeoscientistToolkit.Data.CtImageStack;
 using GeoscientistToolkit.Data.Image;
 using GeoscientistToolkit.Data.Pnm;
