@@ -8,6 +8,12 @@ using GeoscientistToolkit.Business.GIS;
 using GeoscientistToolkit.Business.Thermodynamics;
 using GeoscientistToolkit.Business.GeoScriptImageCommands;
 using GeoscientistToolkit.Business.GeoScriptUtilityCommands;
+using GeoscientistToolkit.Business.GeoScriptCtImageStackCommands;
+using GeoscientistToolkit.Business.GeoScriptBoreholeCommands;
+using GeoscientistToolkit.Business.GeoScriptGISExtendedCommands;
+using GeoscientistToolkit.Business.GeoScriptPNMCommands;
+using GeoscientistToolkit.Business.GeoScriptSeismicCommands;
+using GeoscientistToolkit.Business.GeoScriptMiscDatasetCommands;
 using GeoscientistToolkit.Data;
 using GeoscientistToolkit.Data.GIS;
 using GeoscientistToolkit.Data.Materials;
@@ -208,7 +214,77 @@ public static class CommandRegistry
             new ListOpsCommand(),
             new DispTypeCommand(),
             new UnloadCommand(),
-            new InfoCommand()
+            new InfoCommand(),
+
+            // CT Image Stack Commands
+            new CtSegmentCommand(),
+            new CtFilter3DCommand(),
+            new CtAddMaterialCommand(),
+            new CtRemoveMaterialCommand(),
+            new CtAnalyzePorosityCommand(),
+            new CtCropCommand(),
+            new CtExtractSliceCommand(),
+            new CtLabelAnalysisCommand(),
+
+            // Borehole Commands
+            new BhAddLithologyCommand(),
+            new BhRemoveLithologyCommand(),
+            new BhAddLogCommand(),
+            new BhCalculatePorosityCommand(),
+            new BhCalculateSaturationCommand(),
+            new BhDepthShiftCommand(),
+            new BhCorrelationCommand(),
+
+            // GIS Extended Commands
+            new GisAddLayerCommand(),
+            new GisRemoveLayerCommand(),
+            new GisIntersectCommand(),
+            new GisUnionCommand(),
+            new GisClipCommand(),
+            new GisCalculateAreaCommand(),
+            new GisCalculateLengthCommand(),
+            new GisReprojectCommand(),
+
+            // PNM Commands
+            new PnmFilterPoresCommand(),
+            new PnmFilterThroatsCommand(),
+            new PnmCalculatePermeabilityCommand(),
+            new PnmDrainageSimulationCommand(),
+            new PnmImbibitionSimulationCommand(),
+            new PnmExtractLargestClusterCommand(),
+            new PnmStatisticsCommand(),
+
+            // Seismic Commands
+            new SeisFilterCommand(),
+            new SeisAGCCommand(),
+            new SeisVelocityAnalysisCommand(),
+            new SeisNMOCorrectionCommand(),
+            new SeisStackCommand(),
+            new SeisMigrationCommand(),
+            new SeisPickHorizonCommand(),
+
+            // AcousticVolume Commands
+            new AcousticThresholdCommand(),
+            new AcousticExtractTargetsCommand(),
+
+            // Mesh3D Commands
+            new MeshSmoothCommand(),
+            new MeshDecimateCommand(),
+            new MeshRepairCommand(),
+            new MeshCalculateVolumeCommand(),
+
+            // Video Commands
+            new VideoExtractFrameCommand(),
+            new VideoStabilizeCommand(),
+
+            // Audio Commands
+            new AudioTrimCommand(),
+            new AudioNormalizeCommand(),
+
+            // Text Commands
+            new TextSearchCommand(),
+            new TextReplaceCommand(),
+            new TextStatisticsCommand()
         };
         Commands = commandList.ToDictionary(c => c.Name.ToUpper(), c => c);
     }

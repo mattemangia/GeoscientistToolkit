@@ -46,11 +46,45 @@ public class GeoScriptEditorWindow
         // Image commands
         "BRIGHTNESS_CONTRAST", "FILTER", "THRESHOLD", "BINARIZE", "GRAYSCALE", "INVERT", "NORMALIZE",
 
+        // CT Image Stack commands
+        "CT_SEGMENT", "CT_FILTER3D", "CT_ADD_MATERIAL", "CT_REMOVE_MATERIAL", "CT_ANALYZE_POROSITY",
+        "CT_CROP", "CT_EXTRACT_SLICE", "CT_LABEL_ANALYSIS",
+
+        // Borehole commands
+        "BH_ADD_LITHOLOGY", "BH_REMOVE_LITHOLOGY", "BH_ADD_LOG", "BH_CALCULATE_POROSITY",
+        "BH_CALCULATE_SATURATION", "BH_DEPTH_SHIFT", "BH_CORRELATION",
+
         // Table commands
         "SELECT", "CALCULATE", "SORTBY", "GROUPBY", "RENAME", "DROP", "TAKE", "UNIQUE", "JOIN",
 
         // GIS commands
         "BUFFER", "DISSOLVE", "EXPLODE", "CLEAN", "RECLASSIFY", "SLOPE", "ASPECT", "CONTOUR",
+        "GIS_ADD_LAYER", "GIS_REMOVE_LAYER", "GIS_INTERSECT", "GIS_UNION", "GIS_CLIP",
+        "GIS_CALCULATE_AREA", "GIS_CALCULATE_LENGTH", "GIS_REPROJECT",
+
+        // PNM commands
+        "PNM_FILTER_PORES", "PNM_FILTER_THROATS", "PNM_CALCULATE_PERMEABILITY",
+        "PNM_DRAINAGE_SIMULATION", "PNM_IMBIBITION_SIMULATION", "PNM_EXTRACT_LARGEST_CLUSTER", "PNM_STATISTICS",
+        "RUNPNMREACTIVETRANSPORT", "SETPNMSPECIES", "SETPNMMINERALS", "EXPORTPNMRESULTS",
+
+        // Seismic commands
+        "SEIS_FILTER", "SEIS_AGC", "SEIS_VELOCITY_ANALYSIS", "SEIS_NMO_CORRECTION",
+        "SEIS_STACK", "SEIS_MIGRATION", "SEIS_PICK_HORIZON",
+
+        // AcousticVolume commands
+        "ACOUSTIC_THRESHOLD", "ACOUSTIC_EXTRACT_TARGETS",
+
+        // Mesh3D commands
+        "MESH_SMOOTH", "MESH_DECIMATE", "MESH_REPAIR", "MESH_CALCULATE_VOLUME",
+
+        // Video commands
+        "VIDEO_EXTRACT_FRAME", "VIDEO_STABILIZE",
+
+        // Audio commands
+        "AUDIO_TRIM", "AUDIO_NORMALIZE",
+
+        // Text commands
+        "TEXT_SEARCH", "TEXT_REPLACE", "TEXT_STATISTICS",
 
         // Thermodynamics commands
         "CREATEDIAGRAM", "EQUILIBRATE", "SATURATION", "BALANCEREACTION", "EVAPORATE", "REACT",
@@ -62,17 +96,41 @@ public class GeoScriptEditorWindow
         // Reactor commands
         "CREATEREACTOR", "ADDDOMAIN", "SETMINERALS", "RUNSIMULATION",
 
-        // PNM commands
-        "RUNPNMREACTIVETRANSPORT", "SETPNMSPECIES", "SETPNMMINERALS", "EXPORTPNMRESULTS",
-
         // Utility commands
         "LISTOPS", "DISPTYPE", "UNLOAD", "INFO"
     };
 
     private static readonly string[] Parameters = new[]
     {
-        "brightness=", "contrast=", "type=", "size=", "min=", "max=", "threshold=",
-        "sigma=", "WHERE", "value=", "radius=", "distance=", "tolerance="
+        // Image/CT parameters
+        "brightness=", "contrast=", "type=", "size=", "min=", "max=", "threshold=", "sigma=",
+        "method=", "material=", "void_material=", "axis=", "index=",
+
+        // Borehole parameters
+        "name=", "top=", "bottom=", "color=", "unit=", "depth=", "density_log=", "neutron_log=",
+        "resistivity_log=", "porosity_log=", "a=", "m=", "n=", "offset=", "target=",
+
+        // GIS parameters
+        "layer=", "layer1=", "layer2=", "clip_layer=", "field=", "target_crs=",
+
+        // PNM parameters
+        "min_radius=", "max_radius=", "min_coord=", "max_length=", "direction=",
+        "contact_angle=", "interfacial_tension=",
+
+        // Seismic parameters
+        "low=", "high=", "window=", "velocity=", "velocity_file=", "aperture=",
+
+        // Media parameters
+        "time=", "frame=", "smoothness=", "start=", "end=", "target_db=",
+
+        // Mesh parameters
+        "iterations=", "lambda=", "target_percent=",
+
+        // Text parameters
+        "pattern=", "case_sensitive=", "find=", "replace=",
+
+        // General
+        "WHERE", "value=", "radius=", "distance=", "tolerance="
     };
 
     public void Show()
