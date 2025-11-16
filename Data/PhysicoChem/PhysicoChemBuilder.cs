@@ -41,6 +41,9 @@ public class PhysicoChemBuilder
     private float _brushStrength = 1.0f;
     private Vector3 _deformationDirection = new Vector3(0, 0, 1);
 
+    // Boolean operations state
+    private int _selectedOtherDomain = 0;
+
     public PhysicoChemBuilder(PhysicoChemDataset dataset)
     {
         _dataset = dataset ?? throw new ArgumentNullException(nameof(dataset));
@@ -673,6 +676,9 @@ public class PhysicoChemBuilder
 
     private void ApplyTranslation(ReactorGeometry geom, Vector2 delta, float sensitivity)
     {
+        if (geom == null)
+            return;
+
         switch (_activeAxis)
         {
             case GizmoAxis.X:
@@ -691,6 +697,9 @@ public class PhysicoChemBuilder
 
     private void ApplyRotation(ReactorGeometry geom, Vector2 delta, float sensitivity)
     {
+        if (geom == null)
+            return;
+
         // Rotation implementation would require quaternions or rotation matrices
         // For now, simplified rotation around axes
         float angle = delta.Length() * sensitivity;
@@ -701,7 +710,14 @@ public class PhysicoChemBuilder
 
     private void ApplyScale(ReactorGeometry geom, Vector2 delta, float sensitivity)
     {
+        if (geom == null)
+            return;
+
         float scaleFactor = 1.0f + delta.X * sensitivity;
+
+        // Prevent negative or zero scaling
+        if (scaleFactor <= 0.01f)
+            scaleFactor = 0.01f;
 
         switch (_activeAxis)
         {
@@ -824,26 +840,32 @@ public class PhysicoChemBuilder
                     otherDomains.Add($"{i}: {_dataset.Domains[i].Name}");
             }
 
-            int selectedOther = 0;
-            if (otherDomains.Count > 0 && ImGui.Combo("##OtherDomain", ref selectedOther, otherDomains.ToArray(), otherDomains.Count))
+            // Ensure selected index is within valid range
+            if (_selectedOtherDomain >= otherDomains.Count)
+                _selectedOtherDomain = 0;
+
+            if (otherDomains.Count > 0)
             {
-                // Store selected for boolean op
+                ImGui.Combo("##OtherDomain", ref _selectedOtherDomain, otherDomains.ToArray(), otherDomains.Count);
             }
 
             ImGui.Spacing();
-            if (ImGui.Button("Union"))
+            if (otherDomains.Count > 0)
             {
-                ApplyBooleanOperation(BooleanOp.Union, selectedOther);
-            }
-            ImGui.SameLine();
-            if (ImGui.Button("Subtract"))
-            {
-                ApplyBooleanOperation(BooleanOp.Subtract, selectedOther);
-            }
-            ImGui.SameLine();
-            if (ImGui.Button("Intersect"))
-            {
-                ApplyBooleanOperation(BooleanOp.Intersect, selectedOther);
+                if (ImGui.Button("Union"))
+                {
+                    ApplyBooleanOperation(BooleanOp.Union, _selectedOtherDomain);
+                }
+                ImGui.SameLine();
+                if (ImGui.Button("Subtract"))
+                {
+                    ApplyBooleanOperation(BooleanOp.Subtract, _selectedOtherDomain);
+                }
+                ImGui.SameLine();
+                if (ImGui.Button("Intersect"))
+                {
+                    ApplyBooleanOperation(BooleanOp.Intersect, _selectedOtherDomain);
+                }
             }
         }
         else
@@ -873,22 +895,44 @@ public class PhysicoChemBuilder
         if (_selectedDomainIndex < 0 || _selectedDomainIndex >= _dataset.Domains.Count)
             return;
 
-        // Convert relative index to absolute index (skipping selected)
-        int otherDomainIndex = otherDomainRelativeIndex >= _selectedDomainIndex
-            ? otherDomainRelativeIndex + 1
-            : otherDomainRelativeIndex;
+        if (_dataset.Domains.Count < 2)
+            return;
 
-        if (otherDomainIndex >= _dataset.Domains.Count)
+        // Convert relative index to absolute index (skipping selected)
+        int otherDomainIndex = otherDomainRelativeIndex;
+        int currentAbsoluteIndex = 0;
+        for (int i = 0; i < _dataset.Domains.Count; i++)
+        {
+            if (i == _selectedDomainIndex)
+                continue;
+
+            if (currentAbsoluteIndex == otherDomainRelativeIndex)
+            {
+                otherDomainIndex = i;
+                break;
+            }
+            currentAbsoluteIndex++;
+        }
+
+        // Validate the index
+        if (otherDomainIndex < 0 || otherDomainIndex >= _dataset.Domains.Count || otherDomainIndex == _selectedDomainIndex)
             return;
 
         var domain1 = _dataset.Domains[_selectedDomainIndex];
         var domain2 = _dataset.Domains[otherDomainIndex];
+
+        // Null safety check
+        if (domain1?.Geometry == null || domain2?.Geometry == null)
+            return;
 
         // Create boolean result
         var result = _dataset.BooleanOperation(domain1, domain2, operation);
         result.Name = $"{domain1.Name} {operation} {domain2.Name}";
 
         _dataset.Domains.Add(result);
+
+        // Reset selection to avoid out-of-bounds after adding
+        _selectedOtherDomain = 0;
     }
 
     private ReactorDomain CloneDomain(ReactorDomain source)
@@ -919,7 +963,15 @@ public class PhysicoChemBuilder
                 MineralComposition = source.Material.MineralComposition,
                 MineralFractions = new Dictionary<string, double>(source.Material.MineralFractions ?? new Dictionary<string, double>())
             } : null,
-            InitialConditions = source.InitialConditions,
+            InitialConditions = source.InitialConditions != null ? new InitialConditions
+            {
+                Temperature = source.InitialConditions.Temperature,
+                Pressure = source.InitialConditions.Pressure,
+                Concentrations = new Dictionary<string, double>(source.InitialConditions.Concentrations ?? new Dictionary<string, double>()),
+                InitialVelocity = source.InitialConditions.InitialVelocity,
+                LiquidSaturation = source.InitialConditions.LiquidSaturation,
+                FluidType = source.InitialConditions.FluidType
+            } : null,
             IsActive = source.IsActive,
             AllowInteraction = source.AllowInteraction
         };
