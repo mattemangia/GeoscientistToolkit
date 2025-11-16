@@ -262,7 +262,7 @@ public class SatelliteImageTools : IDatasetTools
     {
         try
         {
-            var blendMode = (global::BlendMode)_blendModeIndex;
+            var blendMode = (BlendMode)_blendModeIndex;
             ImageDataset stitched;
 
             if (geoRef)

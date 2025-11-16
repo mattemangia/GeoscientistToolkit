@@ -167,7 +167,7 @@ namespace GeoscientistToolkit.Data.Image.AISegmentation
                     _selectedImages[i] = _selectAll;
             }
 
-            ImGui.BeginChild("ImageList", new Vector2(0, 200), true);
+            ImGui.BeginChild("ImageList", new Vector2(0, 200), ImGuiChildFlags.Border);
 
             for (int i = 0; i < _availableImages.Count; i++)
             {
@@ -189,7 +189,7 @@ namespace GeoscientistToolkit.Data.Image.AISegmentation
                 ImGui.Text($"Current: {_currentProcessing}");
 
                 ImGui.Spacing();
-                ImGui.BeginChild("ProcessingLog", new Vector2(0, 100), true);
+                ImGui.BeginChild("ProcessingLog", new Vector2(0, 100), ImGuiChildFlags.Border);
                 foreach (var log in _processingLog.TakeLast(10))
                 {
                     ImGui.TextWrapped(log);
@@ -211,10 +211,10 @@ namespace GeoscientistToolkit.Data.Image.AISegmentation
 
         private void RefreshImageList()
         {
-            var allImages = ProjectManager.Instance.Project?.Datasets
+            var allImages = ProjectManager.Instance.LoadedDatasets
                 .OfType<ImageDataset>()
                 .Where(img => img.ImageData != null || System.IO.File.Exists(img.FilePath))
-                .ToList() ?? new List<ImageDataset>();
+                .ToList();
 
             if (_availableImages.Count != allImages.Count)
             {

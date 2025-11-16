@@ -643,7 +643,11 @@ public class ImportDataModal
         }
 
         ImGui.Spacing();
-        ImGui.Checkbox("Generate Thumbnail", ref _videoLoader.GenerateThumbnail);
+        bool generateThumbnail = _videoLoader.GenerateThumbnail;
+        if (ImGui.Checkbox("Generate Thumbnail", ref generateThumbnail))
+        {
+            _videoLoader.GenerateThumbnail = generateThumbnail;
+        }
 
         if (!string.IsNullOrEmpty(_videoLoader.VideoPath) && File.Exists(_videoLoader.VideoPath))
         {
@@ -686,7 +690,11 @@ public class ImportDataModal
         }
 
         ImGui.Spacing();
-        ImGui.Checkbox("Generate Waveform", ref _audioLoader.GenerateWaveform);
+        bool generateWaveform = _audioLoader.GenerateWaveform;
+        if (ImGui.Checkbox("Generate Waveform", ref generateWaveform))
+        {
+            _audioLoader.GenerateWaveform = generateWaveform;
+        }
 
         if (!string.IsNullOrEmpty(_audioLoader.AudioPath) && File.Exists(_audioLoader.AudioPath))
         {

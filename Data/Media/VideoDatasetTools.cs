@@ -65,9 +65,10 @@ public class VideoDatasetTools : IDatasetTools, IDisposable
 
         ImGui.Text("Extract Frame at Time:");
         ImGui.SetNextItemWidth(150);
-        if (ImGui.SliderFloat("##FrameTime", ref (float)_extractFrameTime, 0f, (float)videoDataset.DurationSeconds, "%.2fs"))
+        float tempTime = (float)_extractFrameTime;
+        if (ImGui.SliderFloat("##FrameTime", ref tempTime, 0f, (float)videoDataset.DurationSeconds, "%.2fs"))
         {
-            _extractFrameTime = Math.Clamp(_extractFrameTime, 0.0, videoDataset.DurationSeconds);
+            _extractFrameTime = Math.Clamp(tempTime, 0.0, videoDataset.DurationSeconds);
         }
 
         var frameNumber = (int)(_extractFrameTime * videoDataset.FrameRate);
@@ -85,7 +86,8 @@ public class VideoDatasetTools : IDatasetTools, IDisposable
         }
 
         // Confirmation popup for extract all
-        if (ImGui.BeginPopupModal("extract_all_confirm", ref var isOpen, ImGuiWindowFlags.AlwaysAutoResize))
+        bool isOpen = true;
+        if (ImGui.BeginPopupModal("extract_all_confirm", ref isOpen, ImGuiWindowFlags.AlwaysAutoResize))
         {
             ImGui.Text($"Extract all {videoDataset.TotalFrames} frames?");
             ImGui.Text("This may take a while and use significant disk space.");
