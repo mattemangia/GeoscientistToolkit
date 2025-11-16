@@ -50,8 +50,20 @@ public class AmbientOcclusionSettings
     /// <summary>
     /// Material intensity threshold (0-255)
     /// Voxels above this are considered material
+    /// (Only used when UseExistingMaterial = false)
     /// </summary>
     public byte MaterialThreshold { get; set; } = 128;
+
+    /// <summary>
+    /// Use existing material labels instead of grayscale threshold
+    /// </summary>
+    public bool UseExistingMaterial { get; set; } = false;
+
+    /// <summary>
+    /// Source material ID to analyze (when UseExistingMaterial = true)
+    /// Finds cavities within this material
+    /// </summary>
+    public byte SourceMaterialId { get; set; } = 1;
 
     /// <summary>
     /// AO threshold for segmentation (0.0-1.0)
@@ -323,6 +335,7 @@ public class AmbientOcclusionSegmentation : IDisposable
 // Compute ambient occlusion for each voxel
 __kernel void compute_ao(
     __global const uchar* volume,      // Input volume data
+    __global const uchar* labels,      // Label data (optional, can be null)
     __global float* ao_field,          // Output AO values
     __constant float* ray_dirs,        // Ray directions (3 * ray_count floats)
     const int width,
@@ -330,7 +343,9 @@ __kernel void compute_ao(
     const int depth,
     const int ray_count,
     const float ray_length,
-    const uchar material_threshold)
+    const uchar material_threshold,
+    const int use_labels,              // 0 = grayscale, 1 = labels
+    const uchar source_material_id)    // Material ID to analyze (if use_labels = 1)
 {
     int x = get_global_id(0);
     int y = get_global_id(1);
@@ -340,10 +355,22 @@ __kernel void compute_ao(
         return;
 
     int voxel_idx = z * (width * height) + y * width + x;
-    uchar voxel_value = volume[voxel_idx];
 
-    // If voxel is below threshold (air/pore), AO = 0
-    if (voxel_value < material_threshold)
+    // Check if voxel is material (based on mode)
+    int is_material;
+    if (use_labels)
+    {
+        uchar label = labels[voxel_idx];
+        is_material = (label == source_material_id) ? 1 : 0;
+    }
+    else
+    {
+        uchar voxel_value = volume[voxel_idx];
+        is_material = (voxel_value >= material_threshold) ? 1 : 0;
+    }
+
+    // If voxel is not material, AO = 0
+    if (!is_material)
     {
         ao_field[voxel_idx] = 0.0f;
         return;
@@ -378,8 +405,18 @@ __kernel void compute_ao(
 
             int ray_idx = rz * (width * height) + ry * width + rx;
 
-            // Check if ray hit material
-            if (volume[ray_idx] >= material_threshold)
+            // Check if ray hit material (based on mode)
+            int ray_hit_material;
+            if (use_labels)
+            {
+                ray_hit_material = (labels[ray_idx] == source_material_id) ? 1 : 0;
+            }
+            else
+            {
+                ray_hit_material = (volume[ray_idx] >= material_threshold) ? 1 : 0;
+            }
+
+            if (ray_hit_material)
             {
                 hit = true;
                 occluded_count++;
@@ -482,6 +519,24 @@ __kernel void threshold_ao(
             }
         }
 
+        // Extract label data if using existing material
+        byte[] labelData = null;
+        if (settings.UseExistingMaterial && dataset.LabelData != null)
+        {
+            labelData = new byte[totalVoxels];
+            idx = 0;
+            for (int z = region.MinZ; z < region.MaxZ; z++)
+            {
+                for (int y = region.MinY; y < region.MaxY; y++)
+                {
+                    for (int x = region.MinX; x < region.MaxX; x++)
+                    {
+                        labelData[idx++] = dataset.LabelData[x, y, z];
+                    }
+                }
+            }
+        }
+
         // Prepare ray directions for GPU
         var rayDirData = new float[_rayDirections.Length * 3];
         for (int i = 0; i < _rayDirections.Length; i++)
@@ -492,6 +547,7 @@ __kernel void threshold_ao(
         }
 
         nint volumeBuffer = 0;
+        nint labelBuffer = 0;
         nint aoBuffer = 0;
         nint rayDirBuffer = 0;
 
@@ -507,6 +563,23 @@ __kernel void threshold_ao(
                 CheckErr(err, "CreateBuffer (volume)");
             }
 
+            // Create label buffer if using existing material
+            if (labelData != null)
+            {
+                fixed (byte* pLabels = labelData)
+                {
+                    labelBuffer = _cl.CreateBuffer(_context, MemFlags.ReadOnly | MemFlags.CopyHostPtr,
+                        (nuint)totalVoxels, pLabels, &err);
+                    CheckErr(err, "CreateBuffer (labels)");
+                }
+            }
+            else
+            {
+                // Create dummy buffer (won't be used)
+                labelBuffer = _cl.CreateBuffer(_context, MemFlags.ReadOnly, 1, null, &err);
+                CheckErr(err, "CreateBuffer (labels dummy)");
+            }
+
             aoBuffer = _cl.CreateBuffer(_context, MemFlags.WriteOnly,
                 (nuint)(totalVoxels * sizeof(float)), null, &err);
             CheckErr(err, "CreateBuffer (ao)");
@@ -520,17 +593,22 @@ __kernel void threshold_ao(
 
             // Set kernel arguments
             CheckErr(_cl.SetKernelArg(_computeAoKernel, 0, (nuint)sizeof(nint), &volumeBuffer), "SetKernelArg 0");
-            CheckErr(_cl.SetKernelArg(_computeAoKernel, 1, (nuint)sizeof(nint), &aoBuffer), "SetKernelArg 1");
-            CheckErr(_cl.SetKernelArg(_computeAoKernel, 2, (nuint)sizeof(nint), &rayDirBuffer), "SetKernelArg 2");
-            CheckErr(_cl.SetKernelArg(_computeAoKernel, 3, (nuint)sizeof(int), &width), "SetKernelArg 3");
-            CheckErr(_cl.SetKernelArg(_computeAoKernel, 4, (nuint)sizeof(int), &height), "SetKernelArg 4");
-            CheckErr(_cl.SetKernelArg(_computeAoKernel, 5, (nuint)sizeof(int), &depth), "SetKernelArg 5");
+            CheckErr(_cl.SetKernelArg(_computeAoKernel, 1, (nuint)sizeof(nint), &labelBuffer), "SetKernelArg 1");
+            CheckErr(_cl.SetKernelArg(_computeAoKernel, 2, (nuint)sizeof(nint), &aoBuffer), "SetKernelArg 2");
+            CheckErr(_cl.SetKernelArg(_computeAoKernel, 3, (nuint)sizeof(nint), &rayDirBuffer), "SetKernelArg 3");
+            CheckErr(_cl.SetKernelArg(_computeAoKernel, 4, (nuint)sizeof(int), &width), "SetKernelArg 4");
+            CheckErr(_cl.SetKernelArg(_computeAoKernel, 5, (nuint)sizeof(int), &height), "SetKernelArg 5");
+            CheckErr(_cl.SetKernelArg(_computeAoKernel, 6, (nuint)sizeof(int), &depth), "SetKernelArg 6");
             int rayCount = settings.RayCount;
-            CheckErr(_cl.SetKernelArg(_computeAoKernel, 6, (nuint)sizeof(int), &rayCount), "SetKernelArg 6");
+            CheckErr(_cl.SetKernelArg(_computeAoKernel, 7, (nuint)sizeof(int), &rayCount), "SetKernelArg 7");
             float rayLength = settings.RayLength;
-            CheckErr(_cl.SetKernelArg(_computeAoKernel, 7, (nuint)sizeof(float), &rayLength), "SetKernelArg 7");
+            CheckErr(_cl.SetKernelArg(_computeAoKernel, 8, (nuint)sizeof(float), &rayLength), "SetKernelArg 8");
             byte threshold = settings.MaterialThreshold;
-            CheckErr(_cl.SetKernelArg(_computeAoKernel, 8, (nuint)sizeof(byte), &threshold), "SetKernelArg 8");
+            CheckErr(_cl.SetKernelArg(_computeAoKernel, 9, (nuint)sizeof(byte), &threshold), "SetKernelArg 9");
+            int useLabels = settings.UseExistingMaterial ? 1 : 0;
+            CheckErr(_cl.SetKernelArg(_computeAoKernel, 10, (nuint)sizeof(int), &useLabels), "SetKernelArg 10");
+            byte sourceMaterialId = settings.SourceMaterialId;
+            CheckErr(_cl.SetKernelArg(_computeAoKernel, 11, (nuint)sizeof(byte), &sourceMaterialId), "SetKernelArg 11");
 
             // Execute kernel
             nuint* globalWorkSize = stackalloc nuint[3];
@@ -571,6 +649,7 @@ __kernel void threshold_ao(
         finally
         {
             if (volumeBuffer != 0) _cl.ReleaseMemObject(volumeBuffer);
+            if (labelBuffer != 0) _cl.ReleaseMemObject(labelBuffer);
             if (aoBuffer != 0) _cl.ReleaseMemObject(aoBuffer);
             if (rayDirBuffer != 0) _cl.ReleaseMemObject(rayDirBuffer);
         }
@@ -606,9 +685,19 @@ __kernel void threshold_ao(
                     int gy = region.MinY + y;
                     int gz = region.MinZ + z;
 
-                    byte voxelValue = dataset.VolumeData[gx, gy, gz];
+                    // Check if voxel is material (based on mode)
+                    bool isMaterial;
+                    if (settings.UseExistingMaterial && dataset.LabelData != null)
+                    {
+                        isMaterial = dataset.LabelData[gx, gy, gz] == settings.SourceMaterialId;
+                    }
+                    else
+                    {
+                        byte voxelValue = dataset.VolumeData[gx, gy, gz];
+                        isMaterial = voxelValue >= settings.MaterialThreshold;
+                    }
 
-                    if (voxelValue < settings.MaterialThreshold)
+                    if (!isMaterial)
                     {
                         aoField[x, y, z] = 0f;
                         continue;
@@ -637,7 +726,18 @@ __kernel void threshold_ao(
                                 rz < 0 || rz >= dataset.Depth)
                                 break;
 
-                            if (dataset.VolumeData[rx, ry, rz] >= settings.MaterialThreshold)
+                            // Check if ray hit material (based on mode)
+                            bool rayHitMaterial;
+                            if (settings.UseExistingMaterial && dataset.LabelData != null)
+                            {
+                                rayHitMaterial = dataset.LabelData[rx, ry, rz] == settings.SourceMaterialId;
+                            }
+                            else
+                            {
+                                rayHitMaterial = dataset.VolumeData[rx, ry, rz] >= settings.MaterialThreshold;
+                            }
+
+                            if (rayHitMaterial)
                             {
                                 hit = true;
                                 occludedCount++;

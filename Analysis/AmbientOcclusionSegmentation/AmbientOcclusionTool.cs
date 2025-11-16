@@ -30,6 +30,16 @@ public class AmbientOcclusionTool : IDatasetTools, IDisposable
     private float _lastUpdateTime = 0;
     private const float AutoUpdateDelay = 1.0f; // 1 second delay for auto-update
 
+    // Binarization
+    private ThresholdMethod _thresholdMethod = ThresholdMethod.Otsu;
+    private int[] _histogram;
+    private HistogramStats _histogramStats;
+    private bool _showHistogram = false;
+
+    // Source material mode
+    private bool _useExistingMaterial = false;
+    private int _sourceMaterialIndex = 0;
+
     private CtImageStackDataset _lastDataset;
 
     public void Dispose()
@@ -146,8 +156,64 @@ public class AmbientOcclusionTool : IDatasetTools, IDisposable
         if (ImGui.IsItemHovered())
             ImGui.SetTooltip("Maximum ray length in voxels. Longer rays capture larger-scale features.");
 
-        // Material threshold
-        int materialThreshold = _settings.MaterialThreshold;
+        // Material threshold with auto-detection
+        ImGui.Spacing();
+        ImGui.TextColored(new Vector4(0.7f, 1.0f, 0.7f, 1), "Binarization");
+
+        // Mode selection: Grayscale threshold or existing material
+        bool useExisting = _useExistingMaterial;
+        if (ImGui.Checkbox("Analyze cavities in existing material", ref useExisting))
+        {
+            _useExistingMaterial = useExisting;
+        }
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip("Find empty spaces/pores within an already segmented material");
+
+        if (_useExistingMaterial)
+        {
+            // Select source material
+            ImGui.Text("Source Material:");
+            ImGui.SameLine();
+
+            if (dataset.Materials.Count > 0)
+            {
+                _sourceMaterialIndex = Math.Clamp(_sourceMaterialIndex, 0, dataset.Materials.Count - 1);
+                var sourceMaterial = dataset.Materials[_sourceMaterialIndex];
+
+                var color = sourceMaterial.Color;
+                ImGui.ColorButton("##srccolor", color, ImGuiColorEditFlags.NoAlpha, new Vector2(20, 20));
+                ImGui.SameLine();
+
+                if (ImGui.BeginCombo("##srcmaterial", sourceMaterial.Name))
+                {
+                    for (int i = 0; i < dataset.Materials.Count; i++)
+                    {
+                        var mat = dataset.Materials[i];
+                        bool isSelected = i == _sourceMaterialIndex;
+
+                        ImGui.ColorButton($"##srccolor{i}", mat.Color, ImGuiColorEditFlags.NoAlpha, new Vector2(20, 20));
+                        ImGui.SameLine();
+
+                        if (ImGui.Selectable(mat.Name, isSelected))
+                        {
+                            _sourceMaterialIndex = i;
+                        }
+
+                        if (isSelected)
+                            ImGui.SetItemDefaultFocus();
+                    }
+                    ImGui.EndCombo();
+                }
+            }
+            else
+            {
+                ImGui.TextColored(new Vector4(1, 0.5f, 0, 1), "No materials available");
+            }
+        }
+        else
+        {
+            // Grayscale threshold mode
+            int materialThreshold = _settings.MaterialThreshold;
         if (ImGui.SliderInt("Material Threshold", ref materialThreshold, 0, 255))
         {
             _settings.MaterialThreshold = (byte)materialThreshold;
@@ -155,6 +221,54 @@ public class AmbientOcclusionTool : IDatasetTools, IDisposable
         }
         if (ImGui.IsItemHovered())
             ImGui.SetTooltip("Grayscale threshold: voxels above this are considered material.");
+
+        // Auto-detect threshold button
+        ImGui.SameLine();
+        if (ImGui.Button("Auto##threshold"))
+        {
+            AutoDetectThreshold(dataset);
+        }
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip("Automatically detect optimal threshold");
+
+        // Threshold method dropdown
+        if (ImGui.BeginCombo("Method##threshold", _thresholdMethod.ToString()))
+        {
+            foreach (ThresholdMethod method in Enum.GetValues(typeof(ThresholdMethod)))
+            {
+                if (method == ThresholdMethod.Manual) continue;
+
+                bool isSelected = _thresholdMethod == method;
+                if (ImGui.Selectable(method.ToString(), isSelected))
+                {
+                    _thresholdMethod = method;
+                }
+                if (isSelected)
+                    ImGui.SetItemDefaultFocus();
+            }
+            ImGui.EndCombo();
+        }
+
+        // Show histogram button
+        ImGui.SameLine();
+        if (ImGui.Button(_showHistogram ? "Hide Histogram" : "Show Histogram"))
+        {
+            _showHistogram = !_showHistogram;
+            if (_showHistogram && _histogram == null)
+            {
+                ComputeHistogram(dataset);
+            }
+        }
+
+        // Draw histogram if visible
+        if (_showHistogram && _histogram != null)
+        {
+            DrawHistogram();
+        }
+
+        }
+
+        ImGui.Spacing();
 
         // AO threshold for segmentation
         float aoThreshold = _settings.SegmentationThreshold;
@@ -398,6 +512,14 @@ public class AmbientOcclusionTool : IDatasetTools, IDisposable
         _isProcessing = true;
         _statusMessage = "Computing...";
 
+        // Update settings based on mode
+        _settings.UseExistingMaterial = _useExistingMaterial;
+        if (_useExistingMaterial && dataset.Materials.Count > 0)
+        {
+            _sourceMaterialIndex = Math.Clamp(_sourceMaterialIndex, 0, dataset.Materials.Count - 1);
+            _settings.SourceMaterialId = dataset.Materials[_sourceMaterialIndex].ID;
+        }
+
         var token = _cts.Token;
 
         _computeTask = Task.Run(() =>
@@ -509,5 +631,109 @@ public class AmbientOcclusionTool : IDatasetTools, IDisposable
                 StartComputation(_lastDataset);
             }
         });
+    }
+
+    private void ComputeHistogram(CtImageStackDataset dataset)
+    {
+        try
+        {
+            _statusMessage = "Computing histogram...";
+            int sampleRate = Math.Max(1, dataset.Depth / 100); // Sample for speed
+            _histogram = BinarizationHelper.ComputeHistogram(dataset, sampleRate);
+            _histogramStats = BinarizationHelper.ComputeHistogramStats(_histogram);
+            _statusMessage = "Histogram computed";
+        }
+        catch (Exception ex)
+        {
+            _statusMessage = $"Error computing histogram: {ex.Message}";
+            Logger.LogError($"[AmbientOcclusion] {ex.Message}");
+        }
+    }
+
+    private void AutoDetectThreshold(CtImageStackDataset dataset)
+    {
+        try
+        {
+            if (_histogram == null)
+            {
+                ComputeHistogram(dataset);
+            }
+
+            byte threshold = _thresholdMethod switch
+            {
+                ThresholdMethod.Otsu => BinarizationHelper.ComputeOtsuThreshold(_histogram),
+                ThresholdMethod.Triangle => BinarizationHelper.ComputeTriangleThreshold(_histogram),
+                ThresholdMethod.Mean => BinarizationHelper.ComputeMeanThreshold(_histogram),
+                ThresholdMethod.Isodata => BinarizationHelper.ComputeIsodataThreshold(_histogram),
+                ThresholdMethod.Percentile95 => BinarizationHelper.ComputePercentileThreshold(_histogram, 95),
+                ThresholdMethod.Percentile99 => BinarizationHelper.ComputePercentileThreshold(_histogram, 99),
+                _ => _settings.MaterialThreshold
+            };
+
+            _settings.MaterialThreshold = threshold;
+            _statusMessage = $"Auto-detected threshold: {threshold} ({_thresholdMethod})";
+            Logger.Log($"[AmbientOcclusion] Auto-detected threshold: {threshold} using {_thresholdMethod}");
+
+            if (_autoUpdate)
+            {
+                TriggerAutoUpdate();
+            }
+        }
+        catch (Exception ex)
+        {
+            _statusMessage = $"Error detecting threshold: {ex.Message}";
+            Logger.LogError($"[AmbientOcclusion] {ex.Message}");
+        }
+    }
+
+    private void DrawHistogram()
+    {
+        if (_histogram == null)
+            return;
+
+        var stats = _histogramStats;
+
+        // Draw histogram stats
+        ImGui.Indent();
+        ImGui.TextColored(new Vector4(0.7f, 0.7f, 0.7f, 1), "Histogram Statistics:");
+        ImGui.Text($"Min: {stats.Min}, Max: {stats.Max}, Mean: {stats.Mean:F1}");
+        ImGui.Text($"StdDev: {stats.StdDev:F1}, Mode: {stats.Mode}");
+
+        // Normalize histogram for display
+        int maxCount = 0;
+        for (int i = 0; i < 256; i++)
+        {
+            if (_histogram[i] > maxCount)
+                maxCount = _histogram[i];
+        }
+
+        if (maxCount > 0)
+        {
+            float[] histogramFloats = new float[256];
+            for (int i = 0; i < 256; i++)
+            {
+                histogramFloats[i] = (float)_histogram[i] / maxCount;
+            }
+
+            // Draw histogram plot
+            ImGui.PlotHistogram("##histogram", ref histogramFloats[0], 256, 0, null, 0f, 1f, new Vector2(-1, 80));
+
+            // Draw current threshold line
+            var drawList = ImGui.GetWindowDrawList();
+            var plotPos = ImGui.GetItemRectMin();
+            var plotSize = ImGui.GetItemRectSize();
+
+            float thresholdX = plotPos.X + (_settings.MaterialThreshold / 255f) * plotSize.X;
+            var lineColor = ImGui.ColorConvertFloat4ToU32(new Vector4(1, 0, 0, 1));
+            drawList.AddLine(
+                new Vector2(thresholdX, plotPos.Y),
+                new Vector2(thresholdX, plotPos.Y + plotSize.Y),
+                lineColor, 2f);
+
+            // Label
+            ImGui.Text($"Threshold: {_settings.MaterialThreshold} (red line)");
+        }
+
+        ImGui.Unindent();
     }
 }
