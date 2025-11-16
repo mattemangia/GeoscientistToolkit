@@ -79,9 +79,8 @@ public class MainWindow
     private bool _showWindowCloseDialog;
     private bool _windowCloseDialogOpened;
 
-    // Timers for auto-save and backup
+    // Timer for auto-save
     private float _autoSaveTimer;
-    private float _autoBackupTimer;
 
     private Dataset? _selectedDataset;
 
@@ -260,19 +259,6 @@ public class MainWindow
                 }
 
                 _autoSaveTimer = 0f;
-            }
-        }
-
-        // Auto-backup timer
-        if (settings.Backup.EnableAutoBackup && settings.Backup.BackupInterval > 0 &&
-            !string.IsNullOrEmpty(ProjectManager.Instance.ProjectPath))
-        {
-            _autoBackupTimer += io.DeltaTime;
-            if (_autoBackupTimer >= settings.Backup.BackupInterval * 60)
-            {
-                Logger.Log("Auto-backing up project...");
-                ProjectManager.Instance.BackupProject();
-                _autoBackupTimer = 0f;
             }
         }
     }

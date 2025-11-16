@@ -32,7 +32,7 @@ public class ProjectManager
 {
     private static ProjectManager _instance;
     private static readonly object _instanceLock = new object();
-    private System.Threading.Timer _autoBackupTimer;
+    private volatile System.Threading.Timer _autoBackupTimer;
     private readonly object _backupLock = new object();
     private volatile bool _isDisposing = false;
 
@@ -168,14 +168,14 @@ public class ProjectManager
 
     public void BackupProject()
     {
-        var settings = SettingsManager.Instance.Settings.Backup;
-        if (string.IsNullOrEmpty(ProjectPath) || !settings.EnableAutoBackup) return;
+        var settings = SettingsManager.Instance?.Settings?.Backup;
+        if (settings == null || string.IsNullOrEmpty(ProjectPath) || !settings.EnableAutoBackup) return;
 
         try
         {
             Directory.CreateDirectory(settings.BackupDirectory);
 
-            var timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
+            var timestamp = DateTime.UtcNow.ToString("yyyyMMdd_HHmmss");
             var backupFileName = $"{ProjectName}_{timestamp}.bak";
             var backupFilePath = Path.Combine(settings.BackupDirectory, backupFileName);
 
@@ -186,14 +186,23 @@ public class ProjectManager
                 using var compressionStream = new GZipStream(backupFileStream, CompressionMode.Compress);
 
                 var tempPath = Path.GetTempFileName();
-                ProjectSerializer.SaveProject(this, tempPath);
-
-                using (var tempFileStream = File.OpenRead(tempPath))
+                try
                 {
-                    tempFileStream.CopyTo(compressionStream);
-                }
+                    ProjectSerializer.SaveProject(this, tempPath);
 
-                File.Delete(tempPath);
+                    using (var tempFileStream = File.OpenRead(tempPath))
+                    {
+                        tempFileStream.CopyTo(compressionStream);
+                    }
+                }
+                finally
+                {
+                    // Ensure temp file is deleted even if an exception occurs
+                    if (File.Exists(tempPath))
+                    {
+                        File.Delete(tempPath);
+                    }
+                }
             }
             else
             {
@@ -266,14 +275,23 @@ public class ProjectManager
         lock (_backupLock)
         {
             _isDisposing = true;
-            if (_autoBackupTimer != null)
+
+            var timer = _autoBackupTimer;
+            _autoBackupTimer = null;
+
+            if (timer != null)
             {
-                _autoBackupTimer.Dispose();
-                _autoBackupTimer = null;
                 Logger.Log("Auto backup disabled");
             }
-            _isDisposing = false;
+
+            // Dispose outside the lock to prevent deadlock
+            // The timer callback checks _autoBackupTimer != null and _isDisposing
+            timer?.Dispose();
         }
+
+        // Reset disposal flag after timer is fully disposed
+        // This allows StartAutoBackup to be called again
+        _isDisposing = false;
     }
 
     public void LoadProject(string path)
