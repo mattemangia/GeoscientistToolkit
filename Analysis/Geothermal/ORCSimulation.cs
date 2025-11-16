@@ -2,34 +2,40 @@ using System;
 using System.Numerics;
 using System.Runtime.Intrinsics;
 using System.Runtime.Intrinsics.X86;
+using GeoscientistToolkit.Business;
 
 namespace GeoscientistToolkit.Analysis.Geothermal
 {
     /// <summary>
     /// Organic Rankine Cycle (ORC) simulation for geothermal power generation
     /// Supports SIMD acceleration for batch calculations
+    /// Uses ORCFluidLibrary for comprehensive working fluid properties
     /// </summary>
     public class ORCSimulation
     {
-        #region Working Fluid Properties (R245fa - Pentafluoropropane)
+        #region Working Fluid Properties
 
-        // Critical properties for R245fa
-        private const float T_CRITICAL = 427.16f; // K
-        private const float P_CRITICAL = 3.651e6f; // Pa
-        private const float MW = 134.05f; // kg/kmol
-        private const float R_SPECIFIC = 8314.5f / MW; // J/(kg·K)
-
-        // Correlation coefficients for R245fa properties
-        private static readonly float[] H_LIQ_COEFF = { -200000f, 1400f, 0.5f, -0.001f }; // Enthalpy liquid [J/kg]
-        private static readonly float[] H_VAP_COEFF = { 250000f, 400f, -0.2f, 0.0005f }; // Enthalpy vapor [J/kg]
-        private static readonly float[] S_LIQ_COEFF = { -1000f, 5.0f, 0.002f, -0.000005f }; // Entropy liquid [J/(kg·K)]
-        private static readonly float[] S_VAP_COEFF = { 1200f, 2.5f, -0.001f, 0.000002f }; // Entropy vapor [J/(kg·K)]
+        private ORCFluid _currentFluid;
 
         #endregion
 
         #region Configuration
 
-        public ORCConfiguration Config { get; set; }
+        private ORCConfiguration _config;
+        public ORCConfiguration Config
+        {
+            get => _config;
+            set
+            {
+                _config = value;
+                if (_config != null)
+                {
+                    // Load fluid from library
+                    _currentFluid = ORCFluidLibrary.Instance.GetFluidByName(_config.FluidName)
+                                 ?? ORCFluidLibrary.Instance.GetFluidByName("R245fa"); // Default fallback
+                }
+            }
+        }
         public bool UseSIMD { get; set; } = true;
 
         #endregion
@@ -310,13 +316,13 @@ namespace GeoscientistToolkit.Analysis.Geothermal
                 Enthalpy = CalculateEnthalpy(temperature, 0.0f),
                 Entropy = CalculateEntropy(temperature, 0.0f),
                 Quality = 0.0f,
-                IsValid = temperature < T_CRITICAL
+                IsValid = temperature < _currentFluid.CriticalTemperature_K
             };
         }
 
         private ORCState CalculateSuperheatedVapor(float pressure, float temperature, float superheat)
         {
-            float actualTemp = Math.Min(temperature, T_CRITICAL - 10.0f);
+            float actualTemp = Math.Min(temperature, _currentFluid.CriticalTemperature_K - 10.0f);
             return new ORCState
             {
                 Temperature = actualTemp,
@@ -331,12 +337,12 @@ namespace GeoscientistToolkit.Analysis.Geothermal
         private ORCState CalculatePumpOutlet(ORCState inlet, float outletPressure, float efficiency)
         {
             // Incompressible liquid assumption
-            float densityLiquid = 1200.0f; // kg/m³ for R245fa liquid
+            float densityLiquid = _currentFluid.LiquidDensity_kgm3;
             float deltaH = (outletPressure - inlet.Pressure) / (densityLiquid * efficiency);
 
             return new ORCState
             {
-                Temperature = inlet.Temperature + deltaH / 1400.0f, // Approximate heating
+                Temperature = inlet.Temperature + deltaH / (_currentFluid.LiquidHeatCapacity_JkgK ?? 1400.0f), // Approximate heating
                 Pressure = outletPressure,
                 Enthalpy = inlet.Enthalpy + deltaH,
                 Entropy = inlet.Entropy + deltaH / inlet.Temperature,
@@ -365,33 +371,54 @@ namespace GeoscientistToolkit.Analysis.Geothermal
             };
         }
 
-        // Simplified correlations for R245fa
+        // Property correlations using current fluid from library
         private float CalculateSaturationPressure(float temperature)
         {
-            // Antoine equation approximation
-            float A = 20.0f, B = 3000.0f, C = -40.0f;
-            return MathF.Exp(A - B / (temperature + C)) * 1000.0f; // Pa
+            // Antoine equation: log10(P[Pa]) = A - B/(T[K] + C)
+            var coeffs = _currentFluid.AntoineCoefficients_A_B_C;
+            float A = coeffs[0], B = coeffs[1], C = coeffs[2];
+            float log10P = A - B / (temperature + C);
+            return MathF.Pow(10.0f, log10P); // Pa
         }
 
         private float CalculateSaturationTemperature(float pressure)
         {
-            // Inverse Antoine
-            float A = 20.0f, B = 3000.0f, C = -40.0f;
-            return B / (A - MathF.Log(pressure / 1000.0f)) - C;
+            // Inverse Antoine: T = B/(A - log10(P)) - C
+            var coeffs = _currentFluid.AntoineCoefficients_A_B_C;
+            float A = coeffs[0], B = coeffs[1], C = coeffs[2];
+            return B / (A - MathF.Log10(pressure)) - C;
         }
 
         private float CalculateEnthalpy(float temperature, float quality)
         {
-            float hLiq = H_LIQ_COEFF[0] + H_LIQ_COEFF[1] * temperature + H_LIQ_COEFF[2] * temperature * temperature;
-            float hVap = H_VAP_COEFF[0] + H_VAP_COEFF[1] * temperature + H_VAP_COEFF[2] * temperature * temperature;
+            var hLiqCoeff = _currentFluid.LiquidEnthalpyCoeff_A_B_C_D;
+            var hVapCoeff = _currentFluid.VaporEnthalpyCoeff_A_B_C_D;
+
+            float hLiq = EvaluatePolynomial(temperature, hLiqCoeff);
+            float hVap = EvaluatePolynomial(temperature, hVapCoeff);
             return hLiq + quality * (hVap - hLiq);
         }
 
         private float CalculateEntropy(float temperature, float quality)
         {
-            float sLiq = S_LIQ_COEFF[0] + S_LIQ_COEFF[1] * temperature + S_LIQ_COEFF[2] * temperature * temperature;
-            float sVap = S_VAP_COEFF[0] + S_VAP_COEFF[1] * temperature + S_VAP_COEFF[2] * temperature * temperature;
+            var sLiqCoeff = _currentFluid.LiquidEntropyCoeff_A_B_C_D;
+            var sVapCoeff = _currentFluid.VaporEntropyCoeff_A_B_C_D;
+
+            float sLiq = EvaluatePolynomial(temperature, sLiqCoeff);
+            float sVap = EvaluatePolynomial(temperature, sVapCoeff);
             return sLiq + quality * (sVap - sLiq);
+        }
+
+        private float EvaluatePolynomial(float x, float[] coeffs)
+        {
+            float result = coeffs[0];
+            float xPow = x;
+            for (int i = 1; i < coeffs.Length && i < 4; i++)
+            {
+                result += coeffs[i] * xPow;
+                xPow *= x;
+            }
+            return result;
         }
 
         #endregion
@@ -400,16 +427,16 @@ namespace GeoscientistToolkit.Analysis.Geothermal
 
         private (Vector256<float> h, Vector256<float> s, Vector256<float> p) CalculateSaturatedLiquidVec(Vector256<float> vTemp)
         {
-            var vH = EvaluatePolynomialVec(vTemp, H_LIQ_COEFF);
-            var vS = EvaluatePolynomialVec(vTemp, S_LIQ_COEFF);
+            var vH = EvaluatePolynomialVec(vTemp, _currentFluid.LiquidEnthalpyCoeff_A_B_C_D);
+            var vS = EvaluatePolynomialVec(vTemp, _currentFluid.LiquidEntropyCoeff_A_B_C_D);
             var vP = CalculateSaturationPressureVec(vTemp);
             return (vH, vS, vP);
         }
 
         private (Vector256<float> h, Vector256<float> s) CalculateSuperheatedVaporVec(Vector256<float> vPress, Vector256<float> vTemp)
         {
-            var vH = EvaluatePolynomialVec(vTemp, H_VAP_COEFF);
-            var vS = EvaluatePolynomialVec(vTemp, S_VAP_COEFF);
+            var vH = EvaluatePolynomialVec(vTemp, _currentFluid.VaporEnthalpyCoeff_A_B_C_D);
+            var vS = EvaluatePolynomialVec(vTemp, _currentFluid.VaporEntropyCoeff_A_B_C_D);
             return (vH, vS);
         }
 
@@ -417,32 +444,37 @@ namespace GeoscientistToolkit.Analysis.Geothermal
         {
             // Simplified: assume isentropic corresponds to saturation at outlet pressure
             var vTemp = CalculateSaturationTemperatureVec(vPress);
-            return EvaluatePolynomialVec(vTemp, H_VAP_COEFF);
+            return EvaluatePolynomialVec(vTemp, _currentFluid.VaporEnthalpyCoeff_A_B_C_D);
         }
 
         private Vector256<float> CalculateSaturationPressureVec(Vector256<float> vTemp)
         {
-            // Antoine equation: ln(P) = A - B/(T+C)
-            var vA = Vector256.Create(20.0f);
-            var vB = Vector256.Create(3000.0f);
-            var vC = Vector256.Create(-40.0f);
+            // Antoine equation: log10(P[Pa]) = A - B/(T[K] + C)
+            var coeffs = _currentFluid.AntoineCoefficients_A_B_C;
+            var vA = Vector256.Create(coeffs[0]);
+            var vB = Vector256.Create(coeffs[1]);
+            var vC = Vector256.Create(coeffs[2]);
 
             var vDenom = Avx.Add(vTemp, vC);
-            var vExp = Avx.Subtract(vA, Avx.Divide(vB, vDenom));
+            var vLog10P = Avx.Subtract(vA, Avx.Divide(vB, vDenom));
 
-            // Approximate exp using Taylor series for better SIMD performance
-            var vPressure = ExpApproxVec(vExp);
-            return Avx.Multiply(vPressure, Vector256.Create(1000.0f));
+            // Convert from log10 to actual pressure: P = 10^log10P
+            // Use exp approximation: 10^x = exp(x * ln(10))
+            var vLn10 = Vector256.Create(2.302585f);
+            var vExp = Avx.Multiply(vLog10P, vLn10);
+            return ExpApproxVec(vExp);
         }
 
         private Vector256<float> CalculateSaturationTemperatureVec(Vector256<float> vPress)
         {
-            var vA = Vector256.Create(20.0f);
-            var vB = Vector256.Create(3000.0f);
-            var vC = Vector256.Create(-40.0f);
+            // Inverse Antoine: T = B/(A - log10(P)) - C
+            var coeffs = _currentFluid.AntoineCoefficients_A_B_C;
+            var vA = Vector256.Create(coeffs[0]);
+            var vB = Vector256.Create(coeffs[1]);
+            var vC = Vector256.Create(coeffs[2]);
 
-            var vLogP = LogApproxVec(Avx.Divide(vPress, Vector256.Create(1000.0f)));
-            var vDenom = Avx.Subtract(vA, vLogP);
+            var vLog10P = Log10ApproxVec(vPress);
+            var vDenom = Avx.Subtract(vA, vLog10P);
             return Avx.Subtract(Avx.Divide(vB, vDenom), vC);
         }
 
@@ -496,6 +528,14 @@ namespace GeoscientistToolkit.Analysis.Geothermal
             return vResult;
         }
 
+        private Vector256<float> Log10ApproxVec(Vector256<float> vX)
+        {
+            // log10(x) = ln(x) / ln(10)
+            var vLnX = LogApproxVec(vX);
+            var vLn10 = Vector256.Create(2.302585f);
+            return Avx.Divide(vLnX, vLn10);
+        }
+
         #endregion
     }
 
@@ -532,16 +572,8 @@ namespace GeoscientistToolkit.Analysis.Geothermal
         public float GeothermalFluidCp { get; set; } = 4180.0f; // J/(kg·K) - water
         public float CoolingWaterCp { get; set; } = 4180.0f; // J/(kg·K)
 
-        // Working fluid selection
-        public WorkingFluid Fluid { get; set; } = WorkingFluid.R245fa;
-    }
-
-    public enum WorkingFluid
-    {
-        R245fa,      // Pentafluoropropane (low temp: 80-150°C)
-        Isobutane,   // Medium temp: 100-180°C
-        Isopentane,  // Medium-high temp: 120-200°C
-        Toluene      // High temp: 200-300°C
+        // Working fluid selection (from ORCFluidLibrary)
+        public string FluidName { get; set; } = "R245fa";
     }
 
     #endregion

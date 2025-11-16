@@ -1,5 +1,6 @@
 ﻿// GeoscientistToolkit/Analysis/Geothermal/GeothermalSimulationTools.cs
 
+using System.Linq;
 using System.Numerics;
 using GeoscientistToolkit.Data;
 using GeoscientistToolkit.Data.Borehole;
@@ -1361,13 +1362,15 @@ public class GeothermalSimulationTools : IDatasetTools, IDisposable
                     if (ImGui.SliderFloat("Generator Efficiency (%)", ref genEff, 90.0f, 98.0f))
                         _options.ORCGeneratorEfficiency = genEff / 100f;
 
-                    // Working Fluid Selection
+                    // Working Fluid Selection from ORCFluidLibrary
                     ImGui.Spacing();
-                    var workingFluidNames = new[] { "R245fa (80-150°C)", "Isobutane (100-180°C)", "Isopentane (120-200°C)", "Toluene (200-300°C)" };
-                    var currentFluid = (int)_options.ORCWorkingFluid;
-                    if (ImGui.Combo("Working Fluid", ref currentFluid, workingFluidNames, workingFluidNames.Length))
-                        _options.ORCWorkingFluid = (WorkingFluid)currentFluid;
-                    ImGui.SetItemTooltip("Select working fluid based on geothermal temperature range");
+                    var fluids = Business.ORCFluidLibrary.Instance.GetAllFluids();
+                    var fluidNames = fluids.Select(f => $"{f.Name} ({f.TemperatureRange_K_Min - 273.15f:F0}-{f.TemperatureRange_K_Max - 273.15f:F0}°C)").ToArray();
+                    var currentFluidIdx = fluids.FindIndex(f => f.Name == _options.ORCWorkingFluid);
+                    if (currentFluidIdx < 0) currentFluidIdx = 0; // Default to first fluid if not found
+                    if (ImGui.Combo("Working Fluid", ref currentFluidIdx, fluidNames, fluidNames.Length))
+                        _options.ORCWorkingFluid = fluids[currentFluidIdx].Name;
+                    ImGui.SetItemTooltip("Select working fluid based on geothermal temperature range. Use Edit→ORC Fluid Library to add/edit fluids.");
 
                     // Mass Flow Limit
                     var maxFlow = _options.ORCMaxMassFlowRate;
@@ -2658,7 +2661,7 @@ public class GeothermalSimulationTools : IDatasetTools, IDisposable
                                 MinPinchPointTemperature = _options.ORCMinPinchPoint,
                                 SuperheatDegrees = _options.ORCSuperheat,
                                 MaxORCMassFlowRate = _options.ORCMaxMassFlowRate,
-                                Fluid = _options.ORCWorkingFluid
+                                FluidName = _options.ORCWorkingFluid
                             };
 
                             // Run ORC simulation (CPU with SIMD or GPU with OpenCL)

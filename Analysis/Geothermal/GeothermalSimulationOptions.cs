@@ -394,9 +394,9 @@ public class GeothermalSimulationOptions
     public float ORCMaxMassFlowRate { get; set; } = 100.0f;
 
     /// <summary>
-    ///     ORC working fluid type
+    ///     ORC working fluid name (from ORCFluidLibrary)
     /// </summary>
-    public WorkingFluid ORCWorkingFluid { get; set; } = WorkingFluid.R245fa;
+    public string ORCWorkingFluid { get; set; } = "R245fa";
 
     // ===== Economic Analysis Parameters =====
 

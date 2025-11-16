@@ -3,12 +3,14 @@ using System.Runtime.InteropServices;
 using System.Text;
 using Silk.NET.OpenCL;
 using GeoscientistToolkit.OpenCL;
+using GeoscientistToolkit.Business;
 
 namespace GeoscientistToolkit.Analysis.Geothermal
 {
     /// <summary>
     /// GPU-accelerated ORC simulation using OpenCL 1.2 via Silk.NET
     /// Processes large batches of operating conditions in parallel
+    /// Uses ORCFluidLibrary for comprehensive working fluid properties
     /// </summary>
     public unsafe class ORCOpenCLSolver : IDisposable
     {
@@ -22,6 +24,7 @@ namespace GeoscientistToolkit.Analysis.Geothermal
 
         private bool _isInitialized = false;
         private ORCConfiguration _config;
+        private ORCFluid _currentFluid;
 
         #region OpenCL Buffers
 
@@ -42,6 +45,10 @@ namespace GeoscientistToolkit.Analysis.Geothermal
         {
             _config = config ?? new ORCConfiguration();
             _cl = CL.GetApi();
+
+            // Load fluid from library
+            _currentFluid = ORCFluidLibrary.Instance.GetFluidByName(_config.FluidName)
+                         ?? ORCFluidLibrary.Instance.GetFluidByName("R245fa"); // Default fallback
         }
 
         public bool Initialize()
@@ -360,38 +367,51 @@ namespace GeoscientistToolkit.Analysis.Geothermal
 
         private string GetKernelSource()
         {
-            return @"
-// R245fa property correlations (simplified)
-float sat_pressure(float T) {
-    // Antoine equation: ln(P) = A - B/(T+C)
-    const float A = 20.0f;
-    const float B = 3000.0f;
-    const float C = -40.0f;
-    return exp(A - B/(T+C)) * 1000.0f; // Pa
-}
+            // Generate dynamic kernel source based on current fluid properties
+            var antoine = _currentFluid.AntoineCoefficients_A_B_C;
+            var hLiq = _currentFluid.LiquidEnthalpyCoeff_A_B_C_D;
+            var hVap = _currentFluid.VaporEnthalpyCoeff_A_B_C_D;
+            var sLiq = _currentFluid.LiquidEntropyCoeff_A_B_C_D;
+            var sVap = _currentFluid.VaporEntropyCoeff_A_B_C_D;
+            var tCrit = _currentFluid.CriticalTemperature_K;
+            var rhoLiq = _currentFluid.LiquidDensity_kgm3;
 
-float sat_temperature(float P) {
-    const float A = 20.0f;
-    const float B = 3000.0f;
-    const float C = -40.0f;
-    return B / (A - log(P/1000.0f)) - C;
-}
+            return $@"
+// {_currentFluid.Name} property correlations from ORCFluidLibrary
+float sat_pressure(float T) {{
+    // Antoine equation: log10(P[Pa]) = A - B/(T[K]+C)
+    const float A = {antoine[0]}f;
+    const float B = {antoine[1]}f;
+    const float C = {antoine[2]}f;
+    float log10P = A - B/(T+C);
+    // Convert log10 to actual: P = 10^log10P = exp(log10P * ln(10))
+    return exp(log10P * 2.302585f);
+}}
 
-float enthalpy_liquid(float T) {
-    return -200000.0f + 1400.0f*T + 0.5f*T*T - 0.001f*T*T*T;
-}
+float sat_temperature(float P) {{
+    // Inverse Antoine: T = B/(A - log10(P)) - C
+    const float A = {antoine[0]}f;
+    const float B = {antoine[1]}f;
+    const float C = {antoine[2]}f;
+    float log10P = log(P) / 2.302585f; // log10(P) = ln(P)/ln(10)
+    return B / (A - log10P) - C;
+}}
 
-float enthalpy_vapor(float T) {
-    return 250000.0f + 400.0f*T - 0.2f*T*T + 0.0005f*T*T*T;
-}
+float enthalpy_liquid(float T) {{
+    return {hLiq[0]}f + {hLiq[1]}f*T + {hLiq[2]}f*T*T + {hLiq[3]}f*T*T*T;
+}}
 
-float entropy_liquid(float T) {
-    return -1000.0f + 5.0f*T + 0.002f*T*T - 0.000005f*T*T*T;
-}
+float enthalpy_vapor(float T) {{
+    return {hVap[0]}f + {hVap[1]}f*T + {hVap[2]}f*T*T + {hVap[3]}f*T*T*T;
+}}
 
-float entropy_vapor(float T) {
-    return 1200.0f + 2.5f*T - 0.001f*T*T + 0.000002f*T*T*T;
-}
+float entropy_liquid(float T) {{
+    return {sLiq[0]}f + {sLiq[1]}f*T + {sLiq[2]}f*T*T + {sLiq[3]}f*T*T*T;
+}}
+
+float entropy_vapor(float T) {{
+    return {sVap[0]}f + {sVap[1]}f*T + {sVap[2]}f*T*T + {sVap[3]}f*T*T*T;
+}}"
 
 // Main ORC cycle kernel
 __kernel void orc_cycle_kernel(
@@ -425,14 +445,14 @@ __kernel void orc_cycle_kernel(
     float s1 = entropy_liquid(condTemp);
 
     // State 2: Pump outlet
-    const float rho_liquid = 1200.0f; // kg/m³
+    const float rho_liquid = {rhoLiq}f; // kg/m³
     float dh_pump = (evapPress - P1) / (rho_liquid * pumpEff);
     float h2 = h1 + dh_pump;
 
     // State 3: Turbine inlet (superheated vapor)
     float T_max_evap = T_geo - pinch;
     float T3 = T_max_evap - superheat;
-    T3 = fmin(T3, 427.16f - 10.0f); // Below critical temp
+    T3 = fmin(T3, {tCrit}f - 10.0f); // Below critical temp
     float h3 = enthalpy_vapor(T3) + superheat * 1000.0f;
     float s3 = entropy_vapor(T3) + superheat * 2.0f;
 
