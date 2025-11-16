@@ -4,6 +4,7 @@
 using System.Numerics;
 using GeoscientistToolkit.Analysis;
 using GeoscientistToolkit.Analysis.AcousticSimulation;
+using GeoscientistToolkit.Analysis.AmbientOcclusionSegmentation;
 using GeoscientistToolkit.Analysis.RockCoreExtractor;
 using GeoscientistToolkit.Analysis.TextureClassification;
 using GeoscientistToolkit.Analysis.Transform;
@@ -971,6 +972,8 @@ public class CtCombinedViewer : IDatasetViewer, IDisposable
 
             TransformIntegration.DrawOverlay(dl, _dataset, viewIndex, imagePos, imageSize, width, height);
             TextureClassificationIntegration.DrawOverlay(_dataset, dl, viewIndex, imagePos, imageSize,
+                width, height, _sliceX, _sliceY, _sliceZ);
+            AmbientOcclusionIntegration.DrawOverlay(_dataset, dl, viewIndex, imagePos, imageSize,
                 width, height, _sliceX, _sliceY, _sliceZ);
         }
 

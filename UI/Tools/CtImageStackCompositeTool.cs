@@ -2,6 +2,7 @@
 
 using System.Numerics;
 using GeoscientistToolkit.Analysis.AcousticSimulation;
+using GeoscientistToolkit.Analysis.AmbientOcclusionSegmentation;
 using GeoscientistToolkit.Analysis.ImageAdjustment;
 using GeoscientistToolkit.Analysis.MaterialManager;
 using GeoscientistToolkit.Analysis.Materials;
@@ -144,6 +145,13 @@ public partial class CtImageStackCompositeTool : IDatasetTools, IDisposable
                         Name = "Particle Separator",
                         Description = "Separate touching particles using watershed algorithms",
                         Tool = new ParticleSeparatorTool(),
+                        Category = ToolCategory.Segmentation
+                    },
+                    new()
+                    {
+                        Name = "Ambient Occlusion",
+                        Description = "Segment pores and cavities using ambient occlusion (Baum & Titschack 2016)",
+                        Tool = new AmbientOcclusionTool(),
                         Category = ToolCategory.Segmentation
                     }
                 }
