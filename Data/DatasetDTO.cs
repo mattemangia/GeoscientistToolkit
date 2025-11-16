@@ -169,6 +169,37 @@ public class PNMDatasetDTO : DatasetDTO
     public int ImageDepth { get; set; }
 }
 
+public class MicroPoreNetworkDTO
+{
+    public int MacroPoreID { get; set; }
+    public List<PoreDTO> MicroPores { get; set; } = new();
+    public List<ThroatDTO> MicroThroats { get; set; } = new();
+    public float MicroPorosity { get; set; }
+    public float MicroPermeability { get; set; }
+    public float MicroSurfaceArea { get; set; }
+    public float MicroVolume { get; set; }
+    public float SEMPixelSize { get; set; }
+    public string SEMImagePath { get; set; }
+    public Vector2 SEMImagePosition { get; set; }
+}
+
+public class DualPNMCouplingDTO
+{
+    public float TotalMicroPorosity { get; set; }
+    public float EffectiveMacroPermeability { get; set; }
+    public float EffectiveMicroPermeability { get; set; }
+    public float CombinedPermeability { get; set; }
+    public string CouplingMode { get; set; }
+}
+
+public class DualPNMDatasetDTO : PNMDatasetDTO
+{
+    public List<MicroPoreNetworkDTO> MicroNetworks { get; set; } = new();
+    public DualPNMCouplingDTO Coupling { get; set; } = new();
+    public string CTDatasetPath { get; set; }
+    public List<string> SEMImagePaths { get; set; } = new();
+}
+
 public class ThermalResultsDTO
 {
     public int TempField_W { get; set; }

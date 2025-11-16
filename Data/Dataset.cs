@@ -16,6 +16,7 @@ public enum DatasetType
     GIS,
     AcousticVolume,
     PNM,
+    DualPNM,
     Borehole,
     TwoDGeology,
     SubsurfaceGIS,

@@ -29,6 +29,7 @@ public class ImportDataModal
         "Acoustic Volume (Simulation Results)",
         "Segmentation/Labels (Standalone)",
         "Pore Network Model (PNM)",
+        "Dual Pore Network Model (Dual PNM)",
         "Borehole Log (Binary)",
         "Borehole Log (LAS Format)",
         "2D Geology Profile (.2dgeo)",
@@ -53,6 +54,8 @@ public class ImportDataModal
     private readonly string[] _pixelSizeUnits = { "µm", "mm" };
     private readonly ImGuiFileDialog _pnmDialog; // Added for PNM
     private readonly PNMLoader _pnmLoader; // Added for PNM
+    private readonly ImGuiFileDialog _dualPnmDialog; // Added for Dual PNM
+    private readonly DualPNMLoader _dualPnmLoader; // Added for Dual PNM
     private readonly ImGuiFileDialog _segmentationDialog;
     private readonly SegmentationLoader _segmentationLoader;
 
@@ -101,6 +104,8 @@ public class ImportDataModal
             "Select Segmentation File");
         _pnmDialog =
             new ImGuiFileDialog("ImportPNMDialog", FileDialogType.OpenFile, "Select PNM File"); // Added for PNM
+        _dualPnmDialog =
+            new ImGuiFileDialog("ImportDualPNMDialog", FileDialogType.OpenFile, "Select Dual PNM File"); // Added for Dual PNM
         _boreholeBinaryDialog = new ImGuiFileDialog("ImportBoreholeBinaryDialog", FileDialogType.OpenFile, "Select Borehole Binary File");
         _lasDialog = new ImGuiFileDialog("ImportLASDialog", FileDialogType.OpenFile, "Select LAS Log File");
         _twoDGeologyDialog = new ImGuiFileDialog("Import2DGeologyDialog", FileDialogType.OpenFile, "Select 2D Geology File");
@@ -122,6 +127,7 @@ public class ImportDataModal
         _acousticVolumeLoader = new AcousticVolumeLoader();
         _segmentationLoader = new SegmentationLoader();
         _pnmLoader = new PNMLoader(); // Added for PNM
+        _dualPnmLoader = new DualPNMLoader(); // Added for Dual PNM
         _boreholeBinaryLoader = new BoreholeBinaryLoader();
         _lasLoader = new LASLoader();
         _twoDGeologyLoader = new TwoDGeologyLoader();
@@ -229,6 +235,9 @@ public class ImportDataModal
         // Added for PNM
         if (_pnmDialog.Submit()) _pnmLoader.FilePath = _pnmDialog.SelectedPath;
 
+        // Added for Dual PNM
+        if (_dualPnmDialog.Submit()) _dualPnmLoader.FilePath = _dualPnmDialog.SelectedPath;
+
         // Added for PhysicoChem
         if (_physicoChemDialog.Submit()) _physicoChemLoader.FilePath = _physicoChemDialog.SelectedPath;
 
@@ -293,28 +302,31 @@ public class ImportDataModal
             case 10: // PNM
                 DrawPNMOptions();
                 break;
-            case 11: // Borehole Binary
+            case 11: // Dual PNM
+                DrawDualPNMOptions();
+                break;
+            case 12: // Borehole Binary
                 DrawBoreholeBinaryOptions();
                 break;
-            case 12: // LAS Log Data
+            case 13: // LAS Log Data
                 DrawLASOptions();
                 break;
-            case 13: // 2D Geology Profile
+            case 14: // 2D Geology Profile
                 DrawTwoDGeologyOptions();
                 break;
-            case 14: // Subsurface GIS Model
+            case 15: // Subsurface GIS Model
                 DrawSubsurfaceGISOptions();
                 break;
-            case 15: // Seismic Dataset (SEG-Y)
+            case 16: // Seismic Dataset (SEG-Y)
                 DrawSeismicOptions();
                 break;
-            case 16: // PhysicoChem Reactor
+            case 17: // PhysicoChem Reactor
                 DrawPhysicoChemOptions();
                 break;
-            case 17: // Video File
+            case 18: // Video File
                 DrawVideoOptions();
                 break;
-            case 18: // Audio File
+            case 19: // Audio File
                 DrawAudioOptions();
                 break;
         }
@@ -727,6 +739,46 @@ public class ImportDataModal
             ImGui.BulletText($"File: {info.Name}");
             ImGui.BulletText($"Size: {info.Length / 1024} KB");
             ImGui.TextColored(new Vector4(0.0f, 1.0f, 0.5f, 1.0f), "✓ Ready to import PNM dataset");
+        }
+    }
+
+    private void DrawDualPNMOptions()
+    {
+        ImGui.TextWrapped("Import a Dual Pore Network Model that combines macro-scale (CT) and micro-scale (SEM) pore networks. " +
+                          "Based on the dual porosity approach from FOUBERT, DE BOEVER et al.");
+
+        ImGui.Spacing();
+        ImGui.Separator();
+        ImGui.Spacing();
+
+        ImGui.Text("Dual PNM File (.dualpnm.json or .json):");
+        var path = _dualPnmLoader.FilePath ?? "";
+        ImGui.InputText("##DualPNMPath", ref path, 260, ImGuiInputTextFlags.ReadOnly);
+        ImGui.SameLine();
+        if (ImGui.Button("Browse...##DualPNMFile"))
+        {
+            string[] dualPnmExtensions = { ".dualpnm.json", ".json" };
+            _dualPnmDialog.Open(null, dualPnmExtensions);
+        }
+
+        ImGui.Spacing();
+        ImGui.TextWrapped("Features:");
+        ImGui.BulletText("Macro-pore network from CT scans");
+        ImGui.BulletText("Micro-pore networks from SEM images");
+        ImGui.BulletText("Dual porosity coupling (Parallel/Series/Mass Transfer)");
+        ImGui.BulletText("Combined permeability calculations");
+        ImGui.BulletText("All standard PNM simulations supported");
+
+        if (!string.IsNullOrEmpty(_dualPnmLoader.FilePath) && File.Exists(_dualPnmLoader.FilePath))
+        {
+            ImGui.Spacing();
+            ImGui.Separator();
+            ImGui.Spacing();
+            ImGui.Text("File Information:");
+            var info = new FileInfo(_dualPnmLoader.FilePath);
+            ImGui.BulletText($"File: {info.Name}");
+            ImGui.BulletText($"Size: {info.Length / 1024} KB");
+            ImGui.TextColored(new Vector4(0.0f, 1.0f, 0.5f, 1.0f), "✓ Ready to import Dual PNM dataset");
         }
     }
 
@@ -1325,14 +1377,15 @@ public class ImportDataModal
             8 => _acousticVolumeLoader,
             9 => _segmentationLoader,
             10 => _pnmLoader, // Added for PNM
-            11 => _boreholeBinaryLoader,
-            12 => _lasLoader,
-            13 => _twoDGeologyLoader,
-            14 => _subsurfaceGisLoader,
-            15 => _seismicLoader,
-            16 => _physicoChemLoader,
-            17 => _videoLoader, // Added for Video
-            18 => _audioLoader, // Added for Audio
+            11 => _dualPnmLoader, // Added for Dual PNM
+            12 => _boreholeBinaryLoader,
+            13 => _lasLoader,
+            14 => _twoDGeologyLoader,
+            15 => _subsurfaceGisLoader,
+            16 => _seismicLoader,
+            17 => _physicoChemLoader,
+            18 => _videoLoader, // Added for Video
+            19 => _audioLoader, // Added for Audio
             _ => null
         };
     }
@@ -1400,12 +1453,15 @@ public class ImportDataModal
         _acousticVolumeLoader.Reset();
         _segmentationLoader.Reset();
         _pnmLoader.Reset(); // Added for PNM
+        _dualPnmLoader.Reset(); // Added for Dual PNM
         _boreholeBinaryLoader.Reset();
         _lasLoader.Reset();
         _twoDGeologyLoader.Reset();
         _subsurfaceGisLoader.Reset();
         _seismicLoader.Reset();
         _physicoChemLoader.Reset();
+        _videoLoader.Reset(); // Added for Video
+        _audioLoader.Reset(); // Added for Audio
 
         // Reset state
         _importTask = null;
