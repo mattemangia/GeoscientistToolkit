@@ -304,7 +304,7 @@ public class GeothermalSimulationSolver : IDisposable
         {
             var fractureOptions = new FracturedMediaOptions
             {
-                FractureAperture = _options.FractureAperture,
+                FractureAperture = (float)_options.FractureAperture,
                 FractureSpacing = _options.FractureSpacing,
                 FractureDensity = _options.FractureDensity,
                 MatrixPermeability = _options.MatrixPermeability,
