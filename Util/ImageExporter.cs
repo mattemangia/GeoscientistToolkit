@@ -113,6 +113,14 @@ public static class ImageExporter
     }
 
     /// <summary>
+    ///     Saves an RGBA image to a file (convenience method)
+    /// </summary>
+    public static void SaveImage(byte[] data, int width, int height, string filePath)
+    {
+        ExportColorSlice(data, width, height, filePath);
+    }
+
+    /// <summary>
     ///     Exports a color slice (RGBA) to a file
     /// </summary>
     public static void ExportColorSlice(byte[] data, int width, int height, string filePath)

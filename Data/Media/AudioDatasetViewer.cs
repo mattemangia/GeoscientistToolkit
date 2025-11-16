@@ -5,6 +5,7 @@ using GeoscientistToolkit.UI.Interfaces;
 using GeoscientistToolkit.Util;
 using ImGuiNET;
 using NAudio.Wave;
+using NAudio.Dsp;
 
 namespace GeoscientistToolkit.Data.Media;
 
@@ -46,6 +47,14 @@ public class AudioDatasetViewer : IDatasetViewer
     private int _fftSize = 2048;
     private float _spectrumScale = 1.0f;
     private bool _logScale = true;
+    private Complex[] _fftBuffer;
+    private float[] _sampleBuffer;
+    private int _sampleBufferPos = 0;
+
+    // Spectrogram data
+    private List<float[]> _spectrogramData;
+    private int _spectrogramMaxLines = 512;
+    private object _spectrogramLock = new object();
 
     // Volume control
     private float _volume = 0.7f;
@@ -53,6 +62,12 @@ public class AudioDatasetViewer : IDatasetViewer
     public AudioDatasetViewer(AudioDataset dataset)
     {
         _dataset = dataset ?? throw new ArgumentNullException(nameof(dataset));
+
+        // Initialize FFT buffers
+        _fftBuffer = new Complex[_fftSize];
+        _sampleBuffer = new float[_fftSize];
+        _spectrumData = new float[_fftSize / 2];
+        _spectrogramData = new List<float[]>();
     }
 
     public void DrawToolbarControls()
@@ -262,10 +277,58 @@ public class AudioDatasetViewer : IDatasetViewer
 
         dl.PushClipRect(canvasPos, canvasPos + spectrogramRect, true);
 
-        // Placeholder for spectrogram - requires FFT implementation
-        var textPos = canvasPos + spectrogramRect * 0.5f - new Vector2(80, 10);
-        dl.AddText(textPos, 0xFFFFFFFF, "Spectrogram View");
-        dl.AddText(textPos + new Vector2(0, 20), 0xFFAAAAAA, "(FFT Analysis)");
+        // Update spectrogram if playing
+        if (_isPlaying && _audioFileReader != null)
+        {
+            UpdateSpectrogram();
+        }
+
+        // Draw spectrogram data
+        lock (_spectrogramLock)
+        {
+            if (_spectrogramData != null && _spectrogramData.Count > 0)
+            {
+                var lineWidth = canvasSize.X / _spectrogramData.Count;
+                var freqBins = _spectrogramData[0].Length;
+                var binHeight = waveformHeight / freqBins;
+
+                for (int x = 0; x < _spectrogramData.Count; x++)
+                {
+                    var spectrum = _spectrogramData[x];
+                    for (int y = 0; y < freqBins; y++)
+                    {
+                        var magnitude = spectrum[y];
+
+                        if (_logScale)
+                        {
+                            magnitude = (float)Math.Log10(magnitude * 100 + 1) / 2.0f;
+                        }
+
+                        magnitude = Math.Clamp(magnitude, 0f, 1f);
+
+                        // Color mapping: blue (low) -> green -> yellow -> red (high)
+                        var color = GetSpectrogramColor(magnitude);
+
+                        var rectMin = new Vector2(
+                            canvasPos.X + x * lineWidth,
+                            canvasPos.Y + waveformHeight - (y + 1) * binHeight
+                        );
+                        var rectMax = new Vector2(
+                            canvasPos.X + (x + 1) * lineWidth,
+                            canvasPos.Y + waveformHeight - y * binHeight
+                        );
+
+                        dl.AddRectFilled(rectMin, rectMax, color);
+                    }
+                }
+            }
+            else
+            {
+                var textPos = canvasPos + spectrogramRect * 0.5f - new Vector2(80, 10);
+                dl.AddText(textPos, 0xFFFFFFFF, "Spectrogram View");
+                dl.AddText(textPos + new Vector2(0, 20), 0xFFAAAAAA, "(Play to see spectrogram)");
+            }
+        }
 
         // Draw frequency labels
         var maxFreq = _dataset.SampleRate / 2; // Nyquist frequency
@@ -279,6 +342,55 @@ public class AudioDatasetViewer : IDatasetViewer
         }
 
         dl.PopClipRect();
+    }
+
+    private uint GetSpectrogramColor(float magnitude)
+    {
+        // Color gradient: black -> blue -> cyan -> green -> yellow -> red
+        byte r, g, b;
+
+        if (magnitude < 0.2f)
+        {
+            // Black to blue
+            var t = magnitude / 0.2f;
+            r = 0;
+            g = 0;
+            b = (byte)(t * 255);
+        }
+        else if (magnitude < 0.4f)
+        {
+            // Blue to cyan
+            var t = (magnitude - 0.2f) / 0.2f;
+            r = 0;
+            g = (byte)(t * 255);
+            b = 255;
+        }
+        else if (magnitude < 0.6f)
+        {
+            // Cyan to green
+            var t = (magnitude - 0.4f) / 0.2f;
+            r = 0;
+            g = 255;
+            b = (byte)((1 - t) * 255);
+        }
+        else if (magnitude < 0.8f)
+        {
+            // Green to yellow
+            var t = (magnitude - 0.6f) / 0.2f;
+            r = (byte)(t * 255);
+            g = 255;
+            b = 0;
+        }
+        else
+        {
+            // Yellow to red
+            var t = (magnitude - 0.8f) / 0.2f;
+            r = 255;
+            g = (byte)((1 - t) * 255);
+            b = 0;
+        }
+
+        return 0xFF000000 | ((uint)b << 16) | ((uint)g << 8) | r;
     }
 
     private void DrawFrequencySpectrum(Vector2 canvasPos, Vector2 canvasSize, ImDrawListPtr dl, ImGuiIOPtr io)
@@ -370,19 +482,112 @@ public class AudioDatasetViewer : IDatasetViewer
 
     private void UpdateSpectrum()
     {
-        // Placeholder for real-time FFT spectrum analysis
-        // This would require reading current audio samples and performing FFT
-        // For now, initialize with dummy data
-        if (_spectrumData == null)
+        if (_audioFileReader == null) return;
+
+        try
         {
-            _spectrumData = new float[128];
-            var random = new Random();
-            for (int i = 0; i < _spectrumData.Length; i++)
+            // Read samples from current position
+            var buffer = new float[_fftSize];
+            var currentPos = _audioFileReader.Position;
+            var samplesRead = _audioFileReader.Read(buffer, 0, _fftSize);
+            _audioFileReader.Position = currentPos; // Reset position
+
+            if (samplesRead > 0)
             {
-                // Simulate frequency spectrum (higher frequencies typically have less energy)
-                _spectrumData[i] = (float)(random.NextDouble() * Math.Exp(-i / 30.0));
+                // Perform FFT
+                PerformFFT(buffer, samplesRead);
             }
         }
+        catch (Exception ex)
+        {
+            Logger.LogError($"[AudioViewer] FFT update failed: {ex.Message}");
+        }
+    }
+
+    private void UpdateSpectrogram()
+    {
+        if (_audioFileReader == null) return;
+
+        try
+        {
+            // Read samples from current position
+            var buffer = new float[_fftSize];
+            var currentPos = _audioFileReader.Position;
+            var samplesRead = _audioFileReader.Read(buffer, 0, _fftSize);
+            _audioFileReader.Position = currentPos; // Reset position
+
+            if (samplesRead > 0)
+            {
+                // Perform FFT and add to spectrogram
+                var spectrum = PerformFFTForSpectrogram(buffer, samplesRead);
+
+                lock (_spectrogramLock)
+                {
+                    _spectrogramData.Add(spectrum);
+
+                    // Limit spectrogram history
+                    if (_spectrogramData.Count > _spectrogramMaxLines)
+                    {
+                        _spectrogramData.RemoveAt(0);
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError($"[AudioViewer] Spectrogram update failed: {ex.Message}");
+        }
+    }
+
+    private void PerformFFT(float[] samples, int count)
+    {
+        // Prepare FFT buffer with Hanning window
+        for (int i = 0; i < _fftSize; i++)
+        {
+            var windowValue = i < count ? samples[i] : 0f;
+
+            // Apply Hanning window to reduce spectral leakage
+            var hannWindow = 0.5f * (1 - (float)Math.Cos(2 * Math.PI * i / _fftSize));
+            _fftBuffer[i] = new Complex(windowValue * hannWindow, 0);
+        }
+
+        // Perform FFT using NAudio's FastFourierTransform
+        FastFourierTransform.FFT(true, (int)Math.Log(_fftSize, 2), _fftBuffer);
+
+        // Calculate magnitude spectrum (only first half due to symmetry)
+        for (int i = 0; i < _fftSize / 2; i++)
+        {
+            var real = _fftBuffer[i].X;
+            var imag = _fftBuffer[i].Y;
+            _spectrumData[i] = (float)Math.Sqrt(real * real + imag * imag) / _fftSize;
+        }
+    }
+
+    private float[] PerformFFTForSpectrogram(float[] samples, int count)
+    {
+        var spectrum = new float[_fftSize / 2];
+        var fftBuffer = new Complex[_fftSize];
+
+        // Prepare FFT buffer with Hanning window
+        for (int i = 0; i < _fftSize; i++)
+        {
+            var windowValue = i < count ? samples[i] : 0f;
+            var hannWindow = 0.5f * (1 - (float)Math.Cos(2 * Math.PI * i / _fftSize));
+            fftBuffer[i] = new Complex(windowValue * hannWindow, 0);
+        }
+
+        // Perform FFT
+        FastFourierTransform.FFT(true, (int)Math.Log(_fftSize, 2), fftBuffer);
+
+        // Calculate magnitude spectrum
+        for (int i = 0; i < _fftSize / 2; i++)
+        {
+            var real = fftBuffer[i].X;
+            var imag = fftBuffer[i].Y;
+            spectrum[i] = (float)Math.Sqrt(real * real + imag * imag) / _fftSize;
+        }
+
+        return spectrum;
     }
 
     private void DrawAudioInfo(Vector2 canvasPos, Vector2 canvasSize)
@@ -548,6 +753,12 @@ public class AudioDatasetViewer : IDatasetViewer
             _isPlaying = false;
             DisposePlayback();
             SeekToStart();
+
+            // Clear spectrogram data on stop
+            lock (_spectrogramLock)
+            {
+                _spectrogramData.Clear();
+            }
         }
     }
 
