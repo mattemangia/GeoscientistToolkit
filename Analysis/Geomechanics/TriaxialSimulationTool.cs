@@ -28,7 +28,7 @@ public class TriaxialSimulationTool : IDisposable
     private PhysicalMaterial _selectedMaterial;
 
     // UI state
-    private bool _isOpen = true;
+    private bool _isOpen = false;
     private bool _showMaterialSelector;
     private bool _showMeshSettings = true;
     private bool _showLoadingParameters = true;
