@@ -48,7 +48,8 @@ namespace GeoscientistToolkit.Data.Image.AISegmentation
             TransparentBackground,
             WhiteBackground,
             BlackBackground,
-            CheckerboardBackground
+            CheckerboardBackground,
+            MaskOnly
         }
 
         public ImageObjectExtractorTool()
@@ -327,36 +328,66 @@ namespace GeoscientistToolkit.Data.Image.AISegmentation
 
             byte[] newImageData = new byte[width * height * 4];
 
-            // Fill background
-            FillBackground(newImageData, width, height);
-
-            // Copy pixels with mask
-            for (int y = 0; y < height; y++)
+            if (_extractionMode == ExtractionMode.MaskOnly)
             {
-                for (int x = 0; x < width; x++)
+                // Extract mask only as grayscale image
+                for (int y = 0; y < height; y++)
                 {
-                    int srcX = _cropToBounds ? x + x1 : x;
-                    int srcY = _cropToBounds ? y + y1 : y;
-
-                    if (srcX >= 0 && srcX < sourceDataset.Width && srcY >= 0 && srcY < sourceDataset.Height)
+                    for (int x = 0; x < width; x++)
                     {
-                        int srcIdx = srcY * sourceDataset.Width + srcX;
-                        int dstIdx = y * width + x;
+                        int srcX = _cropToBounds ? x + x1 : x;
+                        int srcY = _cropToBounds ? y + y1 : y;
 
-                        int srcPixelIdx = srcIdx * 4;
+                        int dstIdx = y * width + x;
                         int dstPixelIdx = dstIdx * 4;
 
-                        if (mask[srcY, srcX] > 0)
+                        byte maskValue = 0;
+                        if (srcX >= 0 && srcX < sourceDataset.Width && srcY >= 0 && srcY < sourceDataset.Height)
                         {
-                            // Copy pixel
-                            newImageData[dstPixelIdx] = sourceDataset.ImageData[srcPixelIdx];
-                            newImageData[dstPixelIdx + 1] = sourceDataset.ImageData[srcPixelIdx + 1];
-                            newImageData[dstPixelIdx + 2] = sourceDataset.ImageData[srcPixelIdx + 2];
+                            maskValue = mask[srcY, srcX];
+                        }
 
-                            if (_extractionMode == ExtractionMode.TransparentBackground)
-                                newImageData[dstPixelIdx + 3] = mask[srcY, srcX];
-                            else
-                                newImageData[dstPixelIdx + 3] = 255;
+                        // Grayscale mask
+                        newImageData[dstPixelIdx] = maskValue;
+                        newImageData[dstPixelIdx + 1] = maskValue;
+                        newImageData[dstPixelIdx + 2] = maskValue;
+                        newImageData[dstPixelIdx + 3] = 255;
+                    }
+                }
+            }
+            else
+            {
+                // Fill background
+                FillBackground(newImageData, width, height);
+
+                // Copy pixels with mask
+                for (int y = 0; y < height; y++)
+                {
+                    for (int x = 0; x < width; x++)
+                    {
+                        int srcX = _cropToBounds ? x + x1 : x;
+                        int srcY = _cropToBounds ? y + y1 : y;
+
+                        if (srcX >= 0 && srcX < sourceDataset.Width && srcY >= 0 && srcY < sourceDataset.Height)
+                        {
+                            int srcIdx = srcY * sourceDataset.Width + srcX;
+                            int dstIdx = y * width + x;
+
+                            int srcPixelIdx = srcIdx * 4;
+                            int dstPixelIdx = dstIdx * 4;
+
+                            if (mask[srcY, srcX] > 0)
+                            {
+                                // Copy pixel
+                                newImageData[dstPixelIdx] = sourceDataset.ImageData[srcPixelIdx];
+                                newImageData[dstPixelIdx + 1] = sourceDataset.ImageData[srcPixelIdx + 1];
+                                newImageData[dstPixelIdx + 2] = sourceDataset.ImageData[srcPixelIdx + 2];
+
+                                if (_extractionMode == ExtractionMode.TransparentBackground)
+                                    newImageData[dstPixelIdx + 3] = mask[srcY, srcX];
+                                else
+                                    newImageData[dstPixelIdx + 3] = 255;
+                            }
                         }
                     }
                 }
@@ -434,6 +465,7 @@ namespace GeoscientistToolkit.Data.Image.AISegmentation
                 ExtractionMode.WhiteBackground => "White",
                 ExtractionMode.BlackBackground => "Black",
                 ExtractionMode.CheckerboardBackground => "Checkerboard",
+                ExtractionMode.MaskOnly => "Mask Only (Grayscale)",
                 _ => mode.ToString()
             };
         }

@@ -41,6 +41,7 @@ namespace GeoscientistToolkit.Data.Image.AISegmentation
         private bool _addWhiteBorder = false;
         private int _borderWidth = 2;
         private bool _shadowEffect = false;
+        private bool _saveMaskToo = false;
 
         // Error handling
         private string _initializationError;
@@ -181,6 +182,7 @@ namespace GeoscientistToolkit.Data.Image.AISegmentation
             }
 
             ImGui.Checkbox("Drop shadow effect", ref _shadowEffect);
+            ImGui.Checkbox("Save mask as separate image", ref _saveMaskToo);
 
             ImGui.Separator();
 
@@ -380,9 +382,60 @@ namespace GeoscientistToolkit.Data.Image.AISegmentation
 
             Console.WriteLine($"Created cutout: {outputName}");
 
+            // Save mask if requested
+            if (_saveMaskToo)
+            {
+                CreateMaskDataset(sourceDataset, outputName, minX, minY, cropWidth, cropHeight);
+            }
+
             // Reset for next cutout
             if (_cutoutMode == CutoutMode.InstantCutout)
                 Reset();
+        }
+
+        private void CreateMaskDataset(ImageDataset sourceDataset, string baseName, int minX, int minY, int width, int height)
+        {
+            byte[] maskImageData = new byte[width * height * 4];
+
+            // Convert mask to grayscale image
+            for (int y = 0; y < height; y++)
+            {
+                for (int x = 0; x < width; x++)
+                {
+                    int srcX = minX + x;
+                    int srcY = minY + y;
+                    int dstIdx = (y * width + x) * 4;
+
+                    byte maskValue = 0;
+                    if (srcX >= 0 && srcX < sourceDataset.Width && srcY >= 0 && srcY < sourceDataset.Height)
+                    {
+                        maskValue = _currentMask[srcY, srcX];
+                    }
+
+                    // Grayscale mask
+                    maskImageData[dstIdx] = maskValue;
+                    maskImageData[dstIdx + 1] = maskValue;
+                    maskImageData[dstIdx + 2] = maskValue;
+                    maskImageData[dstIdx + 3] = 255;
+                }
+            }
+
+            // Create mask dataset
+            string maskName = $"{baseName}_mask";
+            var maskDataset = new ImageDataset(maskName, "");
+            maskDataset.Width = width;
+            maskDataset.Height = height;
+            maskDataset.BitDepth = 32;
+            maskDataset.ImageData = maskImageData;
+            maskDataset.PixelSize = sourceDataset.PixelSize;
+            maskDataset.Unit = sourceDataset.Unit;
+            maskDataset.Tags = sourceDataset.Tags;
+
+            maskDataset.ImageMetadata["MaskFrom"] = sourceDataset.Name;
+            maskDataset.ImageMetadata["AssociatedCutout"] = baseName;
+
+            ProjectManager.Instance.AddDataset(maskDataset);
+            Console.WriteLine($"Created mask: {maskName}");
         }
 
         private byte[] AddWhiteBorder(byte[] imageData, int width, int height)
