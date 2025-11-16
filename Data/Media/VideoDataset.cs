@@ -64,12 +64,12 @@ public class VideoDataset : Dataset, IDisposable, ISerializableDataset
                 LocationName = this.DatasetMetadata.LocationName,
                 Latitude = this.DatasetMetadata.Latitude,
                 Longitude = this.DatasetMetadata.Longitude,
-                CoordinatesX = this.DatasetMetadata.CoordinatesX,
-                CoordinatesY = this.DatasetMetadata.CoordinatesY,
+                CoordinatesX = this.DatasetMetadata.Coordinates?.X,
+                CoordinatesY = this.DatasetMetadata.Coordinates?.Y,
                 Depth = this.DatasetMetadata.Depth,
-                SizeX = this.DatasetMetadata.SizeX,
-                SizeY = this.DatasetMetadata.SizeY,
-                SizeZ = this.DatasetMetadata.SizeZ,
+                SizeX = this.DatasetMetadata.Size?.X,
+                SizeY = this.DatasetMetadata.Size?.Y,
+                SizeZ = this.DatasetMetadata.Size?.Z,
                 SizeUnit = this.DatasetMetadata.SizeUnit,
                 CollectionDate = this.DatasetMetadata.CollectionDate,
                 Collector = this.DatasetMetadata.Collector,
@@ -124,7 +124,7 @@ public class VideoDataset : Dataset, IDisposable, ISerializableDataset
                 TotalFrames = (int)(DurationSeconds * FrameRate);
                 Codec = _mediaInfo.PrimaryVideoStream?.CodecName ?? "unknown";
                 Format = _mediaInfo.Format.FormatName;
-                BitRate = _mediaInfo.Format.BitRate;
+                BitRate = (long)_mediaInfo.Format.BitRate;
 
                 // Audio information
                 HasAudioTrack = _mediaInfo.PrimaryAudioStream != null;

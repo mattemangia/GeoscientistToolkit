@@ -55,16 +55,18 @@ public class AudioDatasetTools : IDatasetTools
 
         ImGui.Text("Trim Audio:");
         ImGui.SetNextItemWidth(200);
-        if (ImGui.SliderFloat("Start##TrimStart", ref (float)_trimStart, 0f, (float)audioDataset.DurationSeconds, "%.2fs"))
+        float tempStart = (float)_trimStart;
+        if (ImGui.SliderFloat("Start##TrimStart", ref tempStart, 0f, (float)audioDataset.DurationSeconds, "%.2fs"))
         {
-            _trimStart = Math.Clamp(_trimStart, 0.0, audioDataset.DurationSeconds);
+            _trimStart = Math.Clamp(tempStart, 0.0, audioDataset.DurationSeconds);
             _trimEnd = Math.Max(_trimEnd, _trimStart);
         }
 
         ImGui.SetNextItemWidth(200);
-        if (ImGui.SliderFloat("End##TrimEnd", ref (float)_trimEnd, 0f, (float)audioDataset.DurationSeconds, "%.2fs"))
+        float tempEnd = (float)_trimEnd;
+        if (ImGui.SliderFloat("End##TrimEnd", ref tempEnd, 0f, (float)audioDataset.DurationSeconds, "%.2fs"))
         {
-            _trimEnd = Math.Clamp(_trimEnd, _trimStart, audioDataset.DurationSeconds);
+            _trimEnd = Math.Clamp(tempEnd, _trimStart, audioDataset.DurationSeconds);
         }
 
         ImGui.Checkbox("Normalize to 0 dB", ref _normalizeTo0dB);

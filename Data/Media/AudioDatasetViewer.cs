@@ -46,7 +46,7 @@ public class AudioDatasetViewer : IDatasetViewer
     private int _fftSize = 2048;
     private float _spectrumScale = 1.0f;
     private bool _logScale = true;
-    private Complex[] _fftBuffer;
+    private NAudio.Dsp.Complex[] _fftBuffer;
     private float[] _sampleBuffer;
     private int _sampleBufferPos = 0;
 
@@ -63,7 +63,7 @@ public class AudioDatasetViewer : IDatasetViewer
         _dataset = dataset ?? throw new ArgumentNullException(nameof(dataset));
 
         // Initialize FFT buffers
-        _fftBuffer = new Complex[_fftSize];
+        _fftBuffer = new NAudio.Dsp.Complex[_fftSize];
         _sampleBuffer = new float[_fftSize];
         _spectrumData = new float[_fftSize / 2];
         _spectrogramData = new List<float[]>();
@@ -557,7 +557,7 @@ public class AudioDatasetViewer : IDatasetViewer
 
             // Apply Hanning window to reduce spectral leakage
             var hannWindow = 0.5f * (1 - (float)Math.Cos(2 * Math.PI * i / _fftSize));
-            _fftBuffer[i] = new Complex(windowValue * hannWindow, 0);
+            _fftBuffer[i] = new NAudio.Dsp.Complex { X = windowValue * hannWindow, Y = 0 };
         }
 
         // Perform FFT using NAudio's FastFourierTransform
@@ -575,14 +575,14 @@ public class AudioDatasetViewer : IDatasetViewer
     private float[] PerformFFTForSpectrogram(float[] samples, int count)
     {
         var spectrum = new float[_fftSize / 2];
-        var fftBuffer = new Complex[_fftSize];
+        var fftBuffer = new NAudio.Dsp.Complex[_fftSize];
 
         // Prepare FFT buffer with Hanning window
         for (int i = 0; i < _fftSize; i++)
         {
             var windowValue = i < count ? samples[i] : 0f;
             var hannWindow = 0.5f * (1 - (float)Math.Cos(2 * Math.PI * i / _fftSize));
-            fftBuffer[i] = new Complex(windowValue * hannWindow, 0);
+            fftBuffer[i] = new NAudio.Dsp.Complex { X = windowValue * hannWindow, Y = 0 };
         }
 
         // Perform FFT
