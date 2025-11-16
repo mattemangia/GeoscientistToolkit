@@ -310,7 +310,7 @@ public class Tough2Parser
             return false;
 
         var potentialHeader = line.Substring(0, 5).ToUpperInvariant();
-        var validHeaders = new[] { "ROCKS", "PARAM", "ELEME", "CONNE", "INCON", "GENER", "TITLE", "MESHM", "MULTI", "START", "ENDCY", "FOFT", "COFT", "GOFT" };
+        var validHeaders = new[] { "ROCKS", "PARAM", "ELEME", "CONNE", "INCON", "GENER", "TITLE", "MESHM", "MULTI", "START", "ENDCY", "FOFT", "COFT", "GOFT", "TIMES", "MOMOP", "DIFFU", "SELEC", "ROFT", "LINEQ", "OUTPU" };
 
         return validHeaders.Contains(potentialHeader);
     }
@@ -336,6 +336,30 @@ public class Tough2Parser
                 break;
             case "GENER":
                 ParseGenerBlock(blockLines, data);
+                break;
+            case "FOFT":
+                ParseFoftBlock(blockLines, data);
+                break;
+            case "COFT":
+                ParseCoftBlock(blockLines, data);
+                break;
+            case "GOFT":
+                ParseGoftBlock(blockLines, data);
+                break;
+            case "TIMES":
+                ParseTimesBlock(blockLines, data);
+                break;
+            case "MOMOP":
+                ParseMomopBlock(blockLines, data);
+                break;
+            case "DIFFU":
+                ParseDiffuBlock(blockLines, data);
+                break;
+            case "SELEC":
+                ParseSelecBlock(blockLines, data);
+                break;
+            case "MESHM":
+                ParseMeshmBlock(blockLines, data);
                 break;
             case "TITLE":
                 data.Title = string.Join(" ", blockLines);
@@ -544,6 +568,227 @@ public class Tough2Parser
         }
     }
 
+    private void ParseFoftBlock(List<string> lines, Tough2Data data)
+    {
+        // FOFT specifies elements for which time series output is desired
+        foreach (var line in lines)
+        {
+            if (string.IsNullOrWhiteSpace(line))
+                continue;
+
+            // Element names are typically 5 characters
+            var elementName = ReadFixedString(line, 0, 5).Trim();
+            if (!string.IsNullOrEmpty(elementName))
+            {
+                data.ElementOutputs.Add(elementName);
+            }
+        }
+    }
+
+    private void ParseCoftBlock(List<string> lines, Tough2Data data)
+    {
+        // COFT specifies connections for which time series output is desired
+        foreach (var line in lines)
+        {
+            if (string.IsNullOrWhiteSpace(line))
+                continue;
+
+            // Connection names are element1 + element2
+            var elem1 = ReadFixedString(line, 0, 5).Trim();
+            var elem2 = ReadFixedString(line, 5, 5).Trim();
+
+            if (!string.IsNullOrEmpty(elem1) && !string.IsNullOrEmpty(elem2))
+            {
+                data.ConnectionOutputs.Add($"{elem1}-{elem2}");
+            }
+        }
+    }
+
+    private void ParseGoftBlock(List<string> lines, Tough2Data data)
+    {
+        // GOFT specifies generators for which time series output is desired
+        foreach (var line in lines)
+        {
+            if (string.IsNullOrWhiteSpace(line))
+                continue;
+
+            var generatorName = ReadFixedString(line, 0, 10).Trim();
+            if (!string.IsNullOrEmpty(generatorName))
+            {
+                data.GeneratorOutputs.Add(generatorName);
+            }
+        }
+    }
+
+    private void ParseTimesBlock(List<string> lines, Tough2Data data)
+    {
+        // TIMES specifies times at which output is desired
+        foreach (var line in lines)
+        {
+            if (string.IsNullOrWhiteSpace(line))
+                continue;
+
+            try
+            {
+                // Parse multiple times per line (typically 8 values per line, 10 chars each)
+                for (int i = 0; i < line.Length; i += 10)
+                {
+                    if (i + 10 > line.Length && i >= line.Length)
+                        break;
+
+                    var timeValue = ReadDouble(line, i, Math.Min(10, line.Length - i));
+                    if (timeValue > 0)
+                    {
+                        data.OutputTimes.Add(timeValue);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.LogWarning($"[Tough2Parser] Failed to parse TIMES line: {line} - {ex.Message}");
+            }
+        }
+    }
+
+    private void ParseMomopBlock(List<string> lines, Tough2Data data)
+    {
+        // MOMOP - More Output Options
+        if (lines.Count == 0)
+            return;
+
+        try
+        {
+            var momop = new MomopOptions();
+
+            // Line format varies, but typically contains integer flags
+            if (lines.Count > 0)
+            {
+                var line = lines[0];
+                momop.MOP = new List<int>();
+
+                // Parse up to 40 integers (5 chars each)
+                for (int i = 0; i < Math.Min(40, line.Length / 5); i++)
+                {
+                    var val = ReadInt(line, i * 5, 5);
+                    momop.MOP.Add(val);
+                }
+            }
+
+            data.MoreOptions = momop;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning($"[Tough2Parser] Failed to parse MOMOP block: {ex.Message}");
+        }
+    }
+
+    private void ParseDiffuBlock(List<string> lines, Tough2Data data)
+    {
+        // DIFFU - Diffusion coefficients
+        if (lines.Count == 0)
+            return;
+
+        try
+        {
+            var diffu = new DiffusionData();
+
+            if (lines.Count > 0)
+            {
+                var line = lines[0];
+                diffu.DiffusionCoefficients = new List<double>();
+
+                // Parse diffusion coefficients (typically 10 chars each)
+                for (int i = 0; i < line.Length; i += 10)
+                {
+                    if (i + 10 > line.Length)
+                        break;
+
+                    var coeff = ReadDouble(line, i, 10);
+                    diffu.DiffusionCoefficients.Add(coeff);
+                }
+            }
+
+            data.Diffusion = diffu;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning($"[Tough2Parser] Failed to parse DIFFU block: {ex.Message}");
+        }
+    }
+
+    private void ParseSelecBlock(List<string> lines, Tough2Data data)
+    {
+        // SELEC - Selection of various options (equation of state, etc.)
+        if (lines.Count == 0)
+            return;
+
+        try
+        {
+            var selec = new SelectionData();
+            selec.Options = new Dictionary<string, string>();
+
+            foreach (var line in lines)
+            {
+                if (string.IsNullOrWhiteSpace(line))
+                    continue;
+
+                // Parse key-value pairs or numbered options
+                // Format varies by EOS module
+                var trimmed = line.Trim();
+                selec.RawOptions.Add(trimmed);
+
+                // Try to parse as integer selection
+                if (int.TryParse(trimmed, out int selection))
+                {
+                    selec.IntegerSelections.Add(selection);
+                }
+            }
+
+            data.Selections = selec;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning($"[Tough2Parser] Failed to parse SELEC block: {ex.Message}");
+        }
+    }
+
+    private void ParseMeshmBlock(List<string> lines, Tough2Data data)
+    {
+        // MESHM - MESHMaker for automatic mesh generation
+        if (lines.Count == 0)
+            return;
+
+        try
+        {
+            var meshm = new MeshMakerData();
+            meshm.MeshType = "CUSTOM";
+            meshm.RawData = new List<string>();
+
+            foreach (var line in lines)
+            {
+                if (string.IsNullOrWhiteSpace(line))
+                    continue;
+
+                meshm.RawData.Add(line);
+
+                // Check for mesh type keywords
+                var upperLine = line.ToUpperInvariant();
+                if (upperLine.Contains("RZ2D"))
+                    meshm.MeshType = "RZ2D";
+                else if (upperLine.Contains("XYZ"))
+                    meshm.MeshType = "XYZ";
+                else if (upperLine.Contains("MINC"))
+                    meshm.MeshType = "MINC";
+            }
+
+            data.MeshMaker = meshm;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning($"[Tough2Parser] Failed to parse MESHM block: {ex.Message}");
+        }
+    }
+
     // Helper methods for parsing fixed-width fields
     private string ReadFixedString(string line, int start, int length)
     {
@@ -601,6 +846,14 @@ public class Tough2Data
     public List<Connection> Connections { get; set; } = new();
     public List<InitialCondition> InitialConditions { get; set; } = new();
     public List<Generator> Generators { get; set; } = new();
+    public List<string> ElementOutputs { get; set; } = new(); // FOFT
+    public List<string> ConnectionOutputs { get; set; } = new(); // COFT
+    public List<string> GeneratorOutputs { get; set; } = new(); // GOFT
+    public List<double> OutputTimes { get; set; } = new(); // TIMES
+    public MomopOptions MoreOptions { get; set; } // MOMOP
+    public DiffusionData Diffusion { get; set; } // DIFFU
+    public SelectionData Selections { get; set; } // SELEC
+    public MeshMakerData MeshMaker { get; set; } // MESHM
 }
 
 public class RockType
@@ -669,4 +922,27 @@ public class Generator
     public int LTAB { get; set; }
     public double GenerationRate { get; set; }
     public double SpecificEnthalpy { get; set; }
+}
+
+public class MomopOptions
+{
+    public List<int> MOP { get; set; } = new();
+}
+
+public class DiffusionData
+{
+    public List<double> DiffusionCoefficients { get; set; } = new();
+}
+
+public class SelectionData
+{
+    public Dictionary<string, string> Options { get; set; } = new();
+    public List<string> RawOptions { get; set; } = new();
+    public List<int> IntegerSelections { get; set; } = new();
+}
+
+public class MeshMakerData
+{
+    public string MeshType { get; set; } = "CUSTOM";
+    public List<string> RawData { get; set; } = new();
 }

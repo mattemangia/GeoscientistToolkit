@@ -37,6 +37,13 @@ public class Tough2Exporter
             WriteConneBlock();
             WriteInconBlock();
             WriteGenerBlock();
+            WriteFoftBlock();
+            WriteCoftBlock();
+            WriteGoftBlock();
+            WriteTimesBlock();
+            WriteDiffuBlock();
+            WriteSelecBlock();
+            WriteMomopBlock();
             WriteEndcy();
 
             // Write to file
@@ -380,6 +387,151 @@ public class Tough2Exporter
             generIndex++;
         }
 
+        _output.AppendLine();
+    }
+
+    private void WriteFoftBlock()
+    {
+        // FOFT - Element output times
+        // Export first 5 domains as elements to monitor
+        if (_dataset.Domains.Count == 0)
+            return;
+
+        _output.AppendLine("FOFT");
+        _output.AppendLine("----1----*----2----*----3----*----4----*----5----*----6----*----7----*----8");
+
+        int count = 0;
+        foreach (var domain in _dataset.Domains.Take(5))
+        {
+            var elementName = $"E{count:D4}";
+            _output.AppendLine(elementName.PadRight(5));
+            count++;
+        }
+
+        _output.AppendLine();
+    }
+
+    private void WriteCoftBlock()
+    {
+        // COFT - Connection output times
+        // Typically used for monitoring flow between elements
+        // We'll skip this for simplified export
+        _output.AppendLine();
+    }
+
+    private void WriteGoftBlock()
+    {
+        // GOFT - Generator output times
+        // Export generators for time series monitoring
+        if (_dataset.BoundaryConditions.Count == 0)
+            return;
+
+        _output.AppendLine("GOFT");
+        _output.AppendLine("----1----*----2----*----3----*----4----*----5----*----6----*----7----*----8");
+
+        int count = 0;
+        foreach (var bc in _dataset.BoundaryConditions.Take(10))
+        {
+            if (!bc.IsActive)
+                continue;
+
+            var elementName = $"E{count:D4}";
+            var generName = TruncateString(bc.Name, 5);
+            _output.AppendLine($"{elementName}{generName}");
+            count++;
+        }
+
+        _output.AppendLine();
+    }
+
+    private void WriteTimesBlock()
+    {
+        // TIMES - Specific times for output
+        // Generate output times based on simulation parameters
+        var param = _dataset.SimulationParams;
+        if (param.OutputInterval <= 0)
+            return;
+
+        _output.AppendLine("TIMES");
+        _output.AppendLine("----1----*----2----*----3----*----4----*----5----*----6----*----7----*----8");
+
+        var times = new List<double>();
+        double currentTime = param.OutputInterval;
+        while (currentTime <= param.TotalTime && times.Count < 100)
+        {
+            times.Add(currentTime);
+            currentTime += param.OutputInterval;
+        }
+
+        // Write 8 values per line
+        for (int i = 0; i < times.Count; i++)
+        {
+            _output.Append(FormatDouble(times[i], 10));
+
+            if ((i + 1) % 8 == 0 || i == times.Count - 1)
+            {
+                _output.AppendLine();
+            }
+        }
+
+        _output.AppendLine();
+    }
+
+    private void WriteDiffuBlock()
+    {
+        // DIFFU - Diffusion coefficients
+        // Write default diffusion coefficients for components
+        _output.AppendLine("DIFFU");
+        _output.AppendLine("----1----*----2----*----3----*----4----*----5----*----6----*----7----*----8");
+
+        // Default diffusion coefficients (e.g., for water and heat)
+        _output.Append(FormatDouble(2.13e-5, 10)); // Water diffusivity in air (m²/s)
+        _output.Append(FormatDouble(1.5e-7, 10));  // Thermal diffusivity
+        _output.AppendLine();
+
+        _output.AppendLine();
+    }
+
+    private void WriteSelecBlock()
+    {
+        // SELEC - Selection of various options
+        // Used for equation of state and other module selections
+        // We'll write basic EOS selection
+        _output.AppendLine("SELEC");
+        _output.AppendLine("----1----*----2----*----3----*----4----*----5----*----6----*----7----*----8");
+
+        // Default to EOS1 (water, single-phase)
+        _output.AppendLine("1");
+
+        _output.AppendLine();
+    }
+
+    private void WriteMomopBlock()
+    {
+        // MOMOP - More output options
+        // Control additional output parameters
+        _output.AppendLine("MOMOP");
+        _output.AppendLine("----1----*----2----*----3----*----4----*----5----*----6----*----7----*----8");
+
+        // Write default MOP array (40 integers, typically 0 or 1)
+        // MOP(1) through MOP(40) control various output and computational options
+        for (int i = 0; i < 40; i++)
+        {
+            int value = 0;
+
+            // Set some common options
+            if (i == 0) value = 1;  // MOP(1) - write results to SAVE file
+            if (i == 1) value = 1;  // MOP(2) - formatted output
+
+            _output.Append($"{value,5}");
+
+            if ((i + 1) % 8 == 0)
+            {
+                _output.AppendLine();
+            }
+        }
+
+        _output.AppendLine();
         _output.AppendLine();
     }
 
