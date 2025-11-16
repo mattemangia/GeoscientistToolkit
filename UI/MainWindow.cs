@@ -46,6 +46,7 @@ public class MainWindow
 
     // ADDED: Instance of the compound library editor window
     private readonly CompoundLibraryEditorWindow _compoundLibraryEditorWindow = new();
+    private readonly ORCFluidEditorWindow _orcFluidEditorWindow = new();
     private readonly GeoScriptTerminalWindow _geoScriptTerminalWindow = new();
     private readonly ImGuiWindowScreenshotTool _screenshotTool;
 
@@ -229,6 +230,7 @@ public class MainWindow
         _materialLibraryWindow.Submit();
         // ADDED: Draw the compound library editor window
         _compoundLibraryEditorWindow.Draw();
+        _orcFluidEditorWindow.Draw();
         _geoScriptTerminalWindow.Draw();
         _stratigraphyViewer.Draw();
         _realtimePhotogrammetryWindow.Draw();
@@ -446,6 +448,7 @@ public class MainWindow
             if (ImGui.MenuItem("Material Library...")) _materialLibraryWindow.Open();
             // ADDED: Menu item to open the Compound Library Editor
             if (ImGui.MenuItem("Compound Library...")) _compoundLibraryEditorWindow.Show();
+            if (ImGui.MenuItem("ORC Fluid Library...")) _orcFluidEditorWindow.Show();
             ImGui.EndMenu();
         }
 

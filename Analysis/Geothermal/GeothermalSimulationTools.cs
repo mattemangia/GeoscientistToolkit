@@ -1,5 +1,6 @@
 ﻿// GeoscientistToolkit/Analysis/Geothermal/GeothermalSimulationTools.cs
 
+using System.Linq;
 using System.Numerics;
 using GeoscientistToolkit.Data;
 using GeoscientistToolkit.Data.Borehole;
@@ -67,6 +68,11 @@ public class GeothermalSimulationTools : IDatasetTools, IDisposable
     private string _simulationMessage = "";
     private float _simulationProgress;
     private GeothermalVisualization3D _visualization3D;
+
+    // ORC power generation
+    private ORCVisualization _orcVisualization;
+    private ORCSimulation.ORCCycleResults[] _orcResults;
+    private EconomicResults _economicResults;
 
     public void Draw(Dataset dataset)
     {
@@ -149,6 +155,7 @@ public class GeothermalSimulationTools : IDatasetTools, IDisposable
     {
         _visualization3D?.Dispose();
         _meshPreview?.Dispose();
+        _orcVisualization?.Dispose();
         _cancellationTokenSource?.Dispose();
     }
 
@@ -1322,6 +1329,169 @@ public class GeothermalSimulationTools : IDatasetTools, IDisposable
             {
                 ImGui.PopStyleColor();
             }
+
+            // ORC Power Generation Section
+            ImGui.PushStyleColor(ImGuiCol.Header, new Vector4(0.2f, 0.7f, 0.3f, 1.0f));
+            if (ImGui.CollapsingHeader("⚡ ORC Power Generation & Economics"))
+            {
+                ImGui.PopStyleColor();
+
+                var enableORC = _options.EnableORCSimulation;
+                if (ImGui.Checkbox("Enable ORC Simulation", ref enableORC))
+                    _options.EnableORCSimulation = enableORC;
+
+                ImGui.SetItemTooltip(
+                    "Enable Organic Rankine Cycle power generation simulation.\n" +
+                    "Converts geothermal heat to electrical power using working fluid (R245fa, isobutane, etc.).");
+
+                if (_options.EnableORCSimulation)
+                {
+                    ImGui.Indent();
+
+                    // GPU/SIMD acceleration options
+                    ImGui.Spacing();
+                    ImGui.TextColored(new Vector4(0.7f, 0.9f, 1.0f, 1.0f), "Acceleration:");
+
+                    var useGPU = _options.UseORCGPU;
+                    if (ImGui.Checkbox("Use GPU (OpenCL) Acceleration", ref useGPU))
+                        _options.UseORCGPU = useGPU;
+                    ImGui.SetItemTooltip("GPU acceleration using OpenCL 1.2 via Silk.NET for batch ORC calculations");
+
+                    if (!useGPU)
+                    {
+                        ImGui.SameLine();
+                        ImGui.TextColored(new Vector4(0.7f, 0.7f, 0.7f, 1.0f), "(Using CPU with SIMD)");
+                    }
+
+                    // ORC Cycle Parameters
+                    ImGui.Spacing();
+                    ImGui.TextColored(new Vector4(0.7f, 0.9f, 1.0f, 1.0f), "Cycle Parameters:");
+
+                    var evapPressure = _options.ORCEvaporatorPressure / 1e5f; // Convert to bar
+                    if (ImGui.SliderFloat("Evaporator Pressure (bar)", ref evapPressure, 5.0f, 30.0f))
+                        _options.ORCEvaporatorPressure = evapPressure * 1e5f;
+                    ImGui.SetItemTooltip("High-side pressure (turbine inlet)");
+
+                    var condTempC = _options.ORCCondenserTemperature - 273.15f;
+                    if (ImGui.SliderFloat("Condenser Temperature (°C)", ref condTempC, 20.0f, 50.0f))
+                        _options.ORCCondenserTemperature = condTempC + 273.15f;
+                    ImGui.SetItemTooltip("Low-side temperature (cooling water temperature)");
+
+                    var pinch = _options.ORCMinPinchPoint;
+                    if (ImGui.SliderFloat("Min Pinch Point (K)", ref pinch, 5.0f, 20.0f))
+                        _options.ORCMinPinchPoint = pinch;
+                    ImGui.SetItemTooltip("Minimum temperature difference in heat exchangers");
+
+                    var superheat = _options.ORCSuperheat;
+                    if (ImGui.SliderFloat("Superheat (K)", ref superheat, 0.0f, 15.0f))
+                        _options.ORCSuperheat = superheat;
+                    ImGui.SetItemTooltip("Turbine inlet superheat above saturation");
+
+                    // Component Efficiencies
+                    ImGui.Spacing();
+                    ImGui.TextColored(new Vector4(0.7f, 0.9f, 1.0f, 1.0f), "Component Efficiencies:");
+
+                    var turbEff = _options.ORCTurbineEfficiency * 100f;
+                    if (ImGui.SliderFloat("Turbine Efficiency (%)", ref turbEff, 70.0f, 95.0f))
+                        _options.ORCTurbineEfficiency = turbEff / 100f;
+
+                    var pumpEff = _options.ORCPumpEfficiency * 100f;
+                    if (ImGui.SliderFloat("Pump Efficiency (%)", ref pumpEff, 60.0f, 85.0f))
+                        _options.ORCPumpEfficiency = pumpEff / 100f;
+
+                    var genEff = _options.ORCGeneratorEfficiency * 100f;
+                    if (ImGui.SliderFloat("Generator Efficiency (%)", ref genEff, 90.0f, 98.0f))
+                        _options.ORCGeneratorEfficiency = genEff / 100f;
+
+                    // Working Fluid Selection from ORCFluidLibrary
+                    ImGui.Spacing();
+                    var fluids = Business.ORCFluidLibrary.Instance.GetAllFluids();
+                    var fluidNames = fluids.Select(f => $"{f.Name} ({f.TemperatureRange_K_Min - 273.15f:F0}-{f.TemperatureRange_K_Max - 273.15f:F0}°C)").ToArray();
+                    var currentFluidIdx = fluids.FindIndex(f => f.Name == _options.ORCWorkingFluid);
+                    if (currentFluidIdx < 0) currentFluidIdx = 0; // Default to first fluid if not found
+                    if (ImGui.Combo("Working Fluid", ref currentFluidIdx, fluidNames, fluidNames.Length))
+                        _options.ORCWorkingFluid = fluids[currentFluidIdx].Name;
+                    ImGui.SetItemTooltip("Select working fluid based on geothermal temperature range. Use Edit→ORC Fluid Library to add/edit fluids.");
+
+                    // Mass Flow Limit
+                    var maxFlow = _options.ORCMaxMassFlowRate;
+                    if (ImGui.SliderFloat("Max Mass Flow (kg/s)", ref maxFlow, 10.0f, 200.0f))
+                        _options.ORCMaxMassFlowRate = maxFlow;
+
+                    ImGui.Unindent();
+                }
+
+                // Economic Analysis Section
+                ImGui.Spacing();
+                ImGui.Separator();
+
+                var enableEcon = _options.EnableEconomicAnalysis;
+                if (ImGui.Checkbox("Enable Economic Analysis", ref enableEcon))
+                    _options.EnableEconomicAnalysis = enableEcon;
+
+                ImGui.SetItemTooltip(
+                    "Calculate NPV, IRR, LCOE, and payback period for the geothermal power project.\n" +
+                    "Includes sensitivity analysis for key parameters.");
+
+                if (_options.EnableEconomicAnalysis)
+                {
+                    ImGui.Indent();
+
+                    ImGui.Spacing();
+                    ImGui.TextColored(new Vector4(0.7f, 0.9f, 1.0f, 1.0f), "Project Parameters:");
+
+                    var projectLifetime = _options.EconomicProjectLifetime;
+                    if (ImGui.SliderInt("Project Lifetime (years)", ref projectLifetime, 15, 50))
+                        _options.EconomicProjectLifetime = projectLifetime;
+
+                    var elecPrice = _options.ElectricityPrice;
+                    if (ImGui.SliderFloat("Electricity Price (USD/MWh)", ref elecPrice, 40.0f, 200.0f))
+                        _options.ElectricityPrice = elecPrice;
+
+                    var discountRate = _options.DiscountRate * 100f;
+                    if (ImGui.SliderFloat("Discount Rate (%)", ref discountRate, 3.0f, 15.0f))
+                        _options.DiscountRate = discountRate / 100f;
+                    ImGui.SetItemTooltip("WACC (Weighted Average Cost of Capital)");
+
+                    ImGui.Spacing();
+                    ImGui.TextColored(new Vector4(0.7f, 0.9f, 1.0f, 1.0f), "Well Configuration:");
+
+                    var prodWells = _options.NumberOfProductionWells;
+                    if (ImGui.SliderInt("Production Wells", ref prodWells, 1, 5))
+                        _options.NumberOfProductionWells = prodWells;
+
+                    var injWells = _options.NumberOfInjectionWells;
+                    if (ImGui.SliderInt("Injection Wells", ref injWells, 1, 5))
+                        _options.NumberOfInjectionWells = injWells;
+
+                    ImGui.Spacing();
+                    ImGui.TextColored(new Vector4(0.7f, 0.9f, 1.0f, 1.0f), "Cost Parameters:");
+
+                    var drillingCost = _options.DrillingCostPerMeter;
+                    if (ImGui.SliderFloat("Drilling Cost (USD/m)", ref drillingCost, 500.0f, 5000.0f))
+                        _options.DrillingCostPerMeter = drillingCost;
+
+                    var plantCost = _options.PowerPlantSpecificCost;
+                    if (ImGui.SliderFloat("Plant Specific Cost (USD/kW)", ref plantCost, 1500.0f, 5000.0f))
+                        _options.PowerPlantSpecificCost = plantCost;
+
+                    var omPercent = _options.AnnualOMPercentage * 100f;
+                    if (ImGui.SliderFloat("Annual O&M (%)", ref omPercent, 1.0f, 6.0f))
+                        _options.AnnualOMPercentage = omPercent / 100f;
+                    ImGui.SetItemTooltip("Operating & maintenance cost as % of capital cost");
+
+                    var capFactor = _options.EconomicCapacityFactor * 100f;
+                    if (ImGui.SliderFloat("Capacity Factor (%)", ref capFactor, 70.0f, 98.0f))
+                        _options.EconomicCapacityFactor = capFactor / 100f;
+                    ImGui.SetItemTooltip("Average annual plant availability and utilization");
+
+                    ImGui.Unindent();
+                }
+            }
+            else
+            {
+                ImGui.PopStyleColor();
+            }
         }
 
         // ALTERNATIVE RENDERING: Show preview directly in panel if requested
@@ -1597,6 +1767,13 @@ public class GeothermalSimulationTools : IDatasetTools, IDisposable
                 if (_options.EnableThermodynamics && ImGui.BeginTabItem("⚗️ Geochemistry & Precipitation"))
                 {
                     RenderThermodynamicsTab();
+                    ImGui.EndTabItem();
+                }
+
+                // ORC Power Generation & Economics Tab
+                if (_options.EnableORCSimulation && ImGui.BeginTabItem("⚡ ORC Power & Economics"))
+                {
+                    RenderORCTab();
                     ImGui.EndTabItem();
                 }
 
@@ -1930,6 +2107,116 @@ public class GeothermalSimulationTools : IDatasetTools, IDisposable
         else
         {
             ImGui.TextDisabled("No precipitation data available yet. Run simulation with thermodynamics enabled.");
+        }
+    }
+
+    private void RenderORCTab()
+    {
+        ImGui.TextColored(new Vector4(0.2f, 0.7f, 0.3f, 1.0f), "ORC Power Generation & Economic Analysis");
+        ImGui.Separator();
+        ImGui.Spacing();
+
+        // Check if ORC results are available
+        if (_orcResults == null || _orcResults.Length == 0)
+        {
+            ImGui.TextColored(new Vector4(1.0f, 0.7f, 0.2f, 1.0f), "⚠ No ORC simulation results available");
+            ImGui.TextWrapped("ORC analysis is performed after geothermal simulation completes.");
+            ImGui.TextWrapped("The simulation must complete successfully to generate ORC power data.");
+            return;
+        }
+
+        // Initialize ORC visualization if needed
+        if (_orcVisualization == null)
+        {
+            try
+            {
+                var graphicsDevice = GraphicsDeviceManager.Instance?.GraphicsDevice;
+                if (graphicsDevice != null)
+                {
+                    _orcVisualization = new ORCVisualization(graphicsDevice);
+
+                    // Extract temperature range from results
+                    float[] temps = new float[_orcResults.Length];
+                    for (int i = 0; i < _orcResults.Length; i++)
+                    {
+                        temps[i] = _orcResults[i].GeothermalFluidInletTemp;
+                    }
+
+                    _orcVisualization.UpdateResults(_orcResults, temps);
+
+                    if (_economicResults != null)
+                    {
+                        _orcVisualization.UpdateEconomics(_economicResults);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError($"Failed to initialize ORC visualization: {ex.Message}");
+            }
+        }
+
+        // Render ORC visualization UI
+        if (_orcVisualization != null)
+        {
+            _orcVisualization.RenderUI();
+        }
+        else
+        {
+            // Fallback: display simple text summary
+            ImGui.TextColored(new Vector4(0.3f, 1.0f, 0.5f, 1.0f), "✓ ORC Simulation Complete");
+            ImGui.Spacing();
+
+            // Find optimal operating point
+            int maxPowerIdx = 0;
+            float maxPower = 0;
+            for (int i = 0; i < _orcResults.Length; i++)
+            {
+                if (_orcResults[i].NetPower > maxPower)
+                {
+                    maxPower = _orcResults[i].NetPower;
+                    maxPowerIdx = i;
+                }
+            }
+
+            var optimalResult = _orcResults[maxPowerIdx];
+
+            ImGui.TextColored(new Vector4(0.7f, 0.9f, 1.0f, 1.0f), "Optimal Operating Point:");
+            ImGui.BulletText($"Geo Fluid Temp: {optimalResult.GeothermalFluidInletTemp - 273.15f:F1} °C");
+            ImGui.BulletText($"Net Power Output: {optimalResult.NetPower / 1e6f:F2} MW");
+            ImGui.BulletText($"Thermal Efficiency: {optimalResult.ThermalEfficiency * 100f:F2} %");
+            ImGui.BulletText($"ORC Mass Flow: {optimalResult.MassFlowRate:F2} kg/s");
+            ImGui.BulletText($"Turbine Work: {optimalResult.TurbineWork / 1e6f:F2} MW");
+            ImGui.BulletText($"Pump Work: {optimalResult.PumpWork / 1e6f:F2} MW");
+            ImGui.BulletText($"Heat Input: {optimalResult.HeatInput / 1e6f:F2} MW");
+
+            // Economic summary
+            if (_economicResults != null)
+            {
+                ImGui.Spacing();
+                ImGui.Separator();
+                ImGui.TextColored(new Vector4(0.2f, 1.0f, 1.0f, 1.0f), "Economic Summary:");
+                ImGui.BulletText($"Total CAPEX: ${_economicResults.TotalCapitalCostMUSD:F2} M");
+                ImGui.BulletText($"NPV (30 years): ${_economicResults.NPV_MUSD:F2} M");
+                ImGui.BulletText($"IRR: {_economicResults.IRR:F2} %");
+                ImGui.BulletText($"Payback Period: {_economicResults.PaybackPeriodYears:F1} years");
+                ImGui.BulletText($"LCOE: ${_economicResults.LCOE_USDperMWh:F2} /MWh");
+                ImGui.BulletText($"Annual Energy: {_economicResults.AnnualEnergyProductionMWh:F0} MWh");
+
+                ImGui.Spacing();
+                if (_economicResults.NPV_MUSD > 0 && _economicResults.IRR > 8.0f)
+                {
+                    ImGui.TextColored(new Vector4(0.2f, 1f, 0.2f, 1), "✓ Project appears economically viable");
+                }
+                else if (_economicResults.NPV_MUSD > 0)
+                {
+                    ImGui.TextColored(new Vector4(1f, 1f, 0.2f, 1), "⚠ Marginal project viability");
+                }
+                else
+                {
+                    ImGui.TextColored(new Vector4(1f, 0.2f, 0.2f, 1), "✗ Project not economically viable");
+                }
+            }
         }
     }
 
@@ -2381,6 +2668,109 @@ public class GeothermalSimulationTools : IDatasetTools, IDisposable
                 {
                     _crossSectionViewer.LoadResults(_results, _mesh, _options);
                     Logger.Log("BoreholeCrossSectionViewer updated with new simulation results.");
+                }
+
+                // Run ORC power generation analysis if enabled
+                if (_options.EnableORCSimulation)
+                {
+                    Logger.Log("Running ORC power generation analysis...");
+                    _simulationMessage = "Analyzing ORC power generation...";
+
+                    try
+                    {
+                        // Extract fluid outlet temperatures from simulation results
+                        var fluidTemperatures = _results.FluidTemperatureUp.LastOrDefault();
+                        if (fluidTemperatures != null && fluidTemperatures.temperatures != null && fluidTemperatures.temperatures.Any())
+                        {
+                            // Get outlet temperature range (vary by ±20K to analyze performance curve)
+                            float avgOutletTemp = fluidTemperatures.temperatures.Average();
+                            int numPoints = 50;
+                            float[] tempRange = new float[numPoints];
+                            for (int i = 0; i < numPoints; i++)
+                            {
+                                tempRange[i] = avgOutletTemp - 10f + (20f * i / (numPoints - 1));
+                            }
+
+                            // Create ORC configuration from options
+                            var orcConfig = new ORCConfiguration
+                            {
+                                EvaporatorPressure = _options.ORCEvaporatorPressure,
+                                CondenserTemperature = _options.ORCCondenserTemperature,
+                                TurbineEfficiency = _options.ORCTurbineEfficiency,
+                                PumpEfficiency = _options.ORCPumpEfficiency,
+                                GeneratorEfficiency = _options.ORCGeneratorEfficiency,
+                                MinPinchPointTemperature = _options.ORCMinPinchPoint,
+                                SuperheatDegrees = _options.ORCSuperheat,
+                                MaxORCMassFlowRate = _options.ORCMaxMassFlowRate,
+                                FluidName = _options.ORCWorkingFluid
+                            };
+
+                            // Run ORC simulation (CPU with SIMD or GPU with OpenCL)
+                            if (_options.UseORCGPU)
+                            {
+                                Logger.Log("Using OpenCL GPU acceleration for ORC simulation...");
+                                using (var orcSolver = new ORCOpenCLSolver(orcConfig))
+                                {
+                                    if (orcSolver.Initialize())
+                                    {
+                                        _orcResults = orcSolver.SimulateBatch(tempRange, (float)_options.FluidMassFlowRate);
+                                        Logger.Log("ORC GPU simulation completed successfully.");
+                                    }
+                                    else
+                                    {
+                                        Logger.LogWarning("GPU initialization failed, falling back to CPU...");
+                                        goto UseCPU;
+                                    }
+                                }
+                            }
+                            else
+                            {
+                                UseCPU:
+                                Logger.Log("Using CPU with SIMD for ORC simulation...");
+                                var orcSim = new ORCSimulation
+                                {
+                                    Config = orcConfig,
+                                    UseSIMD = _options.UseSIMD
+                                };
+                                _orcResults = orcSim.SimulateCycleBatch(tempRange, (float)_options.FluidMassFlowRate);
+                                Logger.Log("ORC CPU simulation completed successfully.");
+                            }
+
+                            // Run economic analysis if enabled
+                            if (_options.EnableEconomicAnalysis && _orcResults != null && _orcResults.Length > 0)
+                            {
+                                Logger.Log("Running economic analysis...");
+                                _simulationMessage = "Calculating project economics...";
+
+                                var economics = new GeothermalEconomics
+                                {
+                                    Parameters = new EconomicParameters
+                                    {
+                                        NumberOfWells = _options.NumberOfProductionWells + _options.NumberOfInjectionWells,
+                                        WellDepthMeters = _options.BoreholeDataset?.TotalDepth ?? 2000f,
+                                        CapacityFactor = _options.EconomicCapacityFactor,
+                                        DrillingCostPerMeter = _options.DrillingCostPerMeter,
+                                        PowerPlantSpecificCost = _options.PowerPlantSpecificCost,
+                                        ElectricityPrice = _options.ElectricityPrice,
+                                        DiscountRate = _options.DiscountRate,
+                                        FixedOMCostPerMW = _options.PowerPlantSpecificCost * 1000f * _options.AnnualOMPercentage
+                                    }
+                                };
+
+                                _economicResults = economics.CalculateEconomics(_orcResults, _options.EconomicProjectLifetime);
+                                Logger.Log($"Economic analysis complete - NPV: ${_economicResults.NPV_MUSD:F2}M, IRR: {_economicResults.IRR:F2}%");
+                            }
+                        }
+                        else
+                        {
+                            Logger.LogWarning("No fluid temperature data available for ORC analysis.");
+                        }
+                    }
+                    catch (Exception orcEx)
+                    {
+                        Logger.LogError($"ORC simulation failed: {orcEx.Message}");
+                        Logger.LogError($"Stack trace: {orcEx.StackTrace}");
+                    }
                 }
 
                 _isSimulationRunning = false;

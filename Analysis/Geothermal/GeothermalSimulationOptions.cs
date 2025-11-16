@@ -393,6 +393,115 @@ public class GeothermalSimulationOptions
     /// </summary>
     public Dictionary<string, float> LayerBiotCoefficient { get; set; } = new();
 
+    // ===== ORC (Organic Rankine Cycle) Power Generation Parameters =====
+
+    /// <summary>
+    ///     Enable ORC power generation simulation
+    /// </summary>
+    public bool EnableORCSimulation { get; set; } = false;
+
+    /// <summary>
+    ///     Use GPU (OpenCL) acceleration for ORC calculations
+    /// </summary>
+    public bool UseORCGPU { get; set; } = false;
+
+    /// <summary>
+    ///     ORC evaporator pressure (Pa)
+    /// </summary>
+    public float ORCEvaporatorPressure { get; set; } = 1.5e6f; // 15 bar
+
+    /// <summary>
+    ///     ORC condenser temperature (K)
+    /// </summary>
+    public float ORCCondenserTemperature { get; set; } = 303.15f; // 30°C
+
+    /// <summary>
+    ///     ORC turbine isentropic efficiency (0-1)
+    /// </summary>
+    public float ORCTurbineEfficiency { get; set; } = 0.85f; // 85%
+
+    /// <summary>
+    ///     ORC pump isentropic efficiency (0-1)
+    /// </summary>
+    public float ORCPumpEfficiency { get; set; } = 0.75f; // 75%
+
+    /// <summary>
+    ///     ORC generator efficiency (0-1)
+    /// </summary>
+    public float ORCGeneratorEfficiency { get; set; } = 0.95f; // 95%
+
+    /// <summary>
+    ///     Minimum pinch point temperature in evaporator (K)
+    /// </summary>
+    public float ORCMinPinchPoint { get; set; } = 10.0f; // 10K
+
+    /// <summary>
+    ///     Superheat degrees (K)
+    /// </summary>
+    public float ORCSuperheat { get; set; } = 5.0f; // 5K
+
+    /// <summary>
+    ///     Maximum ORC working fluid mass flow rate (kg/s)
+    /// </summary>
+    public float ORCMaxMassFlowRate { get; set; } = 100.0f;
+
+    /// <summary>
+    ///     ORC working fluid name (from ORCFluidLibrary)
+    /// </summary>
+    public string ORCWorkingFluid { get; set; } = "R245fa";
+
+    // ===== Economic Analysis Parameters =====
+
+    /// <summary>
+    ///     Enable economic analysis for geothermal power project
+    /// </summary>
+    public bool EnableEconomicAnalysis { get; set; } = false;
+
+    /// <summary>
+    ///     Project lifetime for economic analysis (years)
+    /// </summary>
+    public int EconomicProjectLifetime { get; set; } = 30;
+
+    /// <summary>
+    ///     Electricity price (USD/MWh)
+    /// </summary>
+    public float ElectricityPrice { get; set; } = 80.0f;
+
+    /// <summary>
+    ///     Discount rate for NPV calculations (fraction, e.g., 0.08 = 8%)
+    /// </summary>
+    public float DiscountRate { get; set; } = 0.08f;
+
+    /// <summary>
+    ///     Number of production wells
+    /// </summary>
+    public int NumberOfProductionWells { get; set; } = 1;
+
+    /// <summary>
+    ///     Number of injection wells
+    /// </summary>
+    public int NumberOfInjectionWells { get; set; } = 1;
+
+    /// <summary>
+    ///     Drilling cost per meter (USD/m)
+    /// </summary>
+    public float DrillingCostPerMeter { get; set; } = 1500.0f;
+
+    /// <summary>
+    ///     Power plant specific cost (USD/kW)
+    /// </summary>
+    public float PowerPlantSpecificCost { get; set; } = 3000.0f;
+
+    /// <summary>
+    ///     Annual O&M cost as percentage of capital cost
+    /// </summary>
+    public float AnnualOMPercentage { get; set; } = 0.03f; // 3%
+
+    /// <summary>
+    ///     Capacity factor for economic analysis (0-1)
+    /// </summary>
+    public float EconomicCapacityFactor { get; set; } = 0.90f; // 90%
+
     /// <summary>
     ///     Initialize default seasonal curve for BTES mode.
     ///     Creates a sinusoidal curve with charging in summer and discharging in winter.
