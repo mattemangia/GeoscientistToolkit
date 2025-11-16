@@ -52,6 +52,9 @@ public class MainWindow
     // Real-time photogrammetry window
     private readonly Windows.RealtimePhotogrammetryWindow _realtimePhotogrammetryWindow = new();
 
+    // Triaxial simulation tool
+    private Analysis.Geomechanics.TriaxialSimulationTool _triaxialSimulationTool;
+
     // File Dialogs
     private readonly ImGuiFileDialog
         _loadProjectDialog = new("LoadProjectDlg", FileDialogType.OpenFile, "Load Project");
@@ -96,6 +99,9 @@ public class MainWindow
         _datasets.OnCreateEmptyShapefile += gis => _shapefileCreationDialog.OpenEmpty(gis);
         // Initialize the screenshot tool
         _screenshotTool = new ImGuiWindowScreenshotTool();
+
+        // Initialize triaxial simulation tool
+        _triaxialSimulationTool = new Analysis.Geomechanics.TriaxialSimulationTool();
 
         // Configure the create mesh dialog
         _createMeshDialog.SetExtensions(
@@ -232,6 +238,7 @@ public class MainWindow
         _geoScriptTerminalWindow.Draw();
         _stratigraphyViewer.Draw();
         _realtimePhotogrammetryWindow.Draw();
+        _triaxialSimulationTool?.Draw();
         // Handle create mesh dialog
         HandleCreateMeshDialog();
 
@@ -470,6 +477,8 @@ public class MainWindow
         {
             if (ImGui.MenuItem("GeoScript Terminal")) _geoScriptTerminalWindow.Show();
             if (ImGui.MenuItem("Stratigraphy Correlation Viewer")) _stratigraphyViewer.Show();
+            ImGui.Separator();
+            if (ImGui.MenuItem("Triaxial Simulation")) _triaxialSimulationTool.Show();
             ImGui.Separator();
             if (ImGui.MenuItem("Real-time Photogrammetry")) _realtimePhotogrammetryWindow.Show();
             ImGui.Separator();
