@@ -11,10 +11,10 @@ namespace GeoscientistToolkit.Data.Image.Selection
     /// </summary>
     public class ImageSelection
     {
-        public byte[] Mask { get; private set; } // 0-255 for partial selections
+        public byte[] Mask { get; set; } // 0-255 for partial selections
         public int Width { get; private set; }
         public int Height { get; private set; }
-        public bool HasSelection { get; private set; }
+        public bool HasSelection { get; set; }
 
         // Selection bounds for optimization
         public int MinX { get; private set; }

@@ -141,9 +141,9 @@ namespace GeoscientistToolkit.Data.Image
         {
             ImGui.Text("Layer Stack:");
 
-            for (int i = _layerManager.LayerCount - 1; i >= 0; i--)
+            for (int i = _layerManager.Layers.Count - 1; i >= 0; i--)
             {
-                var layer = _layerManager.GetLayer(i);
+                var layer = _layerManager.Layers[i];
                 bool isActive = i == _layerManager.ActiveLayerIndex;
 
                 ImGui.PushID(i);
@@ -153,7 +153,7 @@ namespace GeoscientistToolkit.Data.Image
 
                 if (ImGui.Button($"{(layer.Visible ? "👁" : "  ")} {layer.Name}##layer{i}", new Vector2(-1, 0)))
                 {
-                    _layerManager.SetActiveLayer(i);
+                    _layerManager.ActiveLayerIndex = i;
                 }
 
                 if (isActive)
@@ -177,9 +177,9 @@ namespace GeoscientistToolkit.Data.Image
                 }
 
                 int blendMode = (int)layer.BlendMode;
-                if (ImGui.Combo("Blend Mode", ref blendMode, string.Join('\0', Enum.GetNames<BlendMode>())))
+                if (ImGui.Combo("Blend Mode", ref blendMode, string.Join('\0', Enum.GetNames<LayerBlendMode>())))
                 {
-                    layer.BlendMode = (BlendMode)blendMode;
+                    layer.BlendMode = (LayerBlendMode)blendMode;
                 }
 
                 bool visible = layer.Visible;
@@ -192,7 +192,7 @@ namespace GeoscientistToolkit.Data.Image
 
                 if (ImGui.Button("New Layer", new Vector2(-1, 0)))
                 {
-                    var newLayer = new ImageLayer($"Layer {_layerManager.LayerCount + 1}",
+                    var newLayer = new ImageLayer($"Layer {_layerManager.Layers.Count + 1}",
                         _layerManager.Width, _layerManager.Height);
                     _layerManager.AddLayer(newLayer);
                 }
@@ -202,7 +202,7 @@ namespace GeoscientistToolkit.Data.Image
                     _layerManager.DuplicateLayer(_layerManager.ActiveLayerIndex);
                 }
 
-                if (ImGui.Button("Delete Layer", new Vector2(-1, 0)) && _layerManager.LayerCount > 1)
+                if (ImGui.Button("Delete Layer", new Vector2(-1, 0)) && _layerManager.Layers.Count > 1)
                 {
                     _layerManager.RemoveLayer(_layerManager.ActiveLayerIndex);
                 }

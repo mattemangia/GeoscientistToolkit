@@ -15,7 +15,7 @@ namespace GeoscientistToolkit.Data.Image
         public int Width { get; private set; }
         public int Height { get; private set; }
         public float Opacity { get; set; } = 1.0f;
-        public BlendMode BlendMode { get; set; } = BlendMode.Normal;
+        public LayerBlendMode BlendMode { get; set; } = LayerBlendMode.Normal;
         public bool Visible { get; set; } = true;
         public bool Locked { get; set; } = false;
 
@@ -82,7 +82,7 @@ namespace GeoscientistToolkit.Data.Image
     /// <summary>
     /// Layer blending modes
     /// </summary>
-    public enum BlendMode
+    public enum LayerBlendMode
     {
         Normal,
         Multiply,
@@ -185,28 +185,28 @@ namespace GeoscientistToolkit.Data.Image
         private static (byte r, byte g, byte b) ApplyBlendMode(
             byte br, byte bg, byte bb,
             byte tr, byte tg, byte tb,
-            BlendMode mode)
+            LayerBlendMode mode)
         {
             return mode switch
             {
-                BlendMode.Normal => (tr, tg, tb),
-                BlendMode.Multiply => BlendMultiply(br, bg, bb, tr, tg, tb),
-                BlendMode.Screen => BlendScreen(br, bg, bb, tr, tg, tb),
-                BlendMode.Overlay => BlendOverlay(br, bg, bb, tr, tg, tb),
-                BlendMode.HardLight => BlendHardLight(br, bg, bb, tr, tg, tb),
-                BlendMode.SoftLight => BlendSoftLight(br, bg, bb, tr, tg, tb),
-                BlendMode.Darken => BlendDarken(br, bg, bb, tr, tg, tb),
-                BlendMode.Lighten => BlendLighten(br, bg, bb, tr, tg, tb),
-                BlendMode.ColorDodge => BlendColorDodge(br, bg, bb, tr, tg, tb),
-                BlendMode.ColorBurn => BlendColorBurn(br, bg, bb, tr, tg, tb),
-                BlendMode.LinearDodge => BlendLinearDodge(br, bg, bb, tr, tg, tb),
-                BlendMode.LinearBurn => BlendLinearBurn(br, bg, bb, tr, tg, tb),
-                BlendMode.Difference => BlendDifference(br, bg, bb, tr, tg, tb),
-                BlendMode.Exclusion => BlendExclusion(br, bg, bb, tr, tg, tb),
-                BlendMode.Hue => BlendHue(br, bg, bb, tr, tg, tb),
-                BlendMode.Saturation => BlendSaturation(br, bg, bb, tr, tg, tb),
-                BlendMode.Color => BlendColor(br, bg, bb, tr, tg, tb),
-                BlendMode.Luminosity => BlendLuminosity(br, bg, bb, tr, tg, tb),
+                LayerBlendMode.Normal => (tr, tg, tb),
+                LayerBlendMode.Multiply => BlendMultiply(br, bg, bb, tr, tg, tb),
+                LayerBlendMode.Screen => BlendScreen(br, bg, bb, tr, tg, tb),
+                LayerBlendMode.Overlay => BlendOverlay(br, bg, bb, tr, tg, tb),
+                LayerBlendMode.HardLight => BlendHardLight(br, bg, bb, tr, tg, tb),
+                LayerBlendMode.SoftLight => BlendSoftLight(br, bg, bb, tr, tg, tb),
+                LayerBlendMode.Darken => BlendDarken(br, bg, bb, tr, tg, tb),
+                LayerBlendMode.Lighten => BlendLighten(br, bg, bb, tr, tg, tb),
+                LayerBlendMode.ColorDodge => BlendColorDodge(br, bg, bb, tr, tg, tb),
+                LayerBlendMode.ColorBurn => BlendColorBurn(br, bg, bb, tr, tg, tb),
+                LayerBlendMode.LinearDodge => BlendLinearDodge(br, bg, bb, tr, tg, tb),
+                LayerBlendMode.LinearBurn => BlendLinearBurn(br, bg, bb, tr, tg, tb),
+                LayerBlendMode.Difference => BlendDifference(br, bg, bb, tr, tg, tb),
+                LayerBlendMode.Exclusion => BlendExclusion(br, bg, bb, tr, tg, tb),
+                LayerBlendMode.Hue => BlendHue(br, bg, bb, tr, tg, tb),
+                LayerBlendMode.Saturation => BlendSaturation(br, bg, bb, tr, tg, tb),
+                LayerBlendMode.Color => BlendColor(br, bg, bb, tr, tg, tb),
+                LayerBlendMode.Luminosity => BlendLuminosity(br, bg, bb, tr, tg, tb),
                 _ => (tr, tg, tb)
             };
         }
