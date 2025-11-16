@@ -27,6 +27,7 @@
 
 using System;
 using GeoscientistToolkit.Data.Mesh3D;
+using GeoscientistToolkit.Network;
 using GeoscientistToolkit.Util;
 
 namespace GeoscientistToolkit.Analysis.Geothermal;
@@ -35,7 +36,7 @@ namespace GeoscientistToolkit.Analysis.Geothermal;
 /// Dual-continuum solver for fractured geothermal reservoirs
 /// Implements Warren-Root and MINC (Multiple INteracting Continua) models
 /// </summary>
-public class FracturedMediaSolver
+public class FracturedMediaSolver : SimulatorNodeSupport
 {
     private readonly GeothermalMesh _mesh;
     private readonly FracturedMediaOptions _options;
@@ -61,7 +62,18 @@ public class FracturedMediaSolver
     private float[,,] _fractureDensity;       // Fracture density (fractures/m)
 
     public FracturedMediaSolver(GeothermalMesh mesh, FracturedMediaOptions options)
+        : this(mesh, options, null)
     {
+    }
+
+    public FracturedMediaSolver(GeothermalMesh mesh, FracturedMediaOptions options, bool? useNodes)
+        : base(useNodes)
+    {
+        if (_useNodes)
+        {
+            Logger.Log("FracturedMediaSolver Node Manager integration: ENABLED");
+        }
+
         _mesh = mesh;
         _options = options;
 

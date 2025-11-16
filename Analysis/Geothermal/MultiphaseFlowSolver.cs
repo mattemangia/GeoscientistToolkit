@@ -31,6 +31,7 @@
 using System;
 using System.Numerics;
 using GeoscientistToolkit.Data.Mesh3D;
+using GeoscientistToolkit.Network;
 using GeoscientistToolkit.Util;
 
 namespace GeoscientistToolkit.Analysis.Geothermal;
@@ -38,7 +39,7 @@ namespace GeoscientistToolkit.Analysis.Geothermal;
 /// <summary>
 /// Multiphase flow solver supporting water-steam-CO2 systems with salinity effects
 /// </summary>
-public class MultiphaseFlowSolver : IDisposable
+public class MultiphaseFlowSolver : SimulatorNodeSupport, IDisposable
 {
     private readonly GeothermalMesh _mesh;
     private readonly MultiphaseOptions _options;
@@ -76,7 +77,18 @@ public class MultiphaseFlowSolver : IDisposable
     private bool _useOpenCL;
 
     public MultiphaseFlowSolver(GeothermalMesh mesh, MultiphaseOptions options)
+        : this(mesh, options, null)
     {
+    }
+
+    public MultiphaseFlowSolver(GeothermalMesh mesh, MultiphaseOptions options, bool? useNodes)
+        : base(useNodes)
+    {
+        if (_useNodes)
+        {
+            Logger.Log("MultiphaseFlowSolver Node Manager integration: ENABLED");
+        }
+
         _mesh = mesh;
         _options = options;
 

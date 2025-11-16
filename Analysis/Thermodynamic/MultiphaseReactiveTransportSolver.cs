@@ -13,6 +13,7 @@ using System.Collections.Generic;
 using System.Linq;
 using GeoscientistToolkit.Analysis.Multiphase;
 using GeoscientistToolkit.Business.Thermodynamics;
+using GeoscientistToolkit.Network;
 using GeoscientistToolkit.Util;
 
 namespace GeoscientistToolkit.Analysis.Thermodynamic;
@@ -24,7 +25,7 @@ namespace GeoscientistToolkit.Analysis.Thermodynamic;
 /// - Heat transport
 /// - Porosity/permeability evolution
 /// </summary>
-public class MultiphaseReactiveTransportSolver
+public class MultiphaseReactiveTransportSolver : SimulatorNodeSupport
 {
     private readonly MultiphaseFlowSolver _multiphaseFlow;
     private readonly ReactiveTransportSolver _reactiveTransport;
@@ -33,11 +34,20 @@ public class MultiphaseReactiveTransportSolver
     private const int MAX_OUTER_ITERATIONS = 20;
     private const double CONVERGENCE_TOLERANCE = 1e-5;
 
-    public MultiphaseReactiveTransportSolver(MultiphaseFlowSolver.EOSType eosType = MultiphaseFlowSolver.EOSType.WaterCO2)
+    public MultiphaseReactiveTransportSolver(MultiphaseFlowSolver.EOSType eosType = MultiphaseFlowSolver.EOSType.WaterCO2) : this(eosType, null)
+    {
+    }
+
+    public MultiphaseReactiveTransportSolver(MultiphaseFlowSolver.EOSType eosType, bool? useNodes) : base(useNodes)
     {
         _multiphaseFlow = new MultiphaseFlowSolver(eosType);
         _reactiveTransport = new ReactiveTransportSolver();
         _thermodynamicSolver = new ThermodynamicSolver();
+
+        if (_useNodes)
+        {
+            Logger.Log("[MultiphaseReactiveTransportSolver] Node Manager integration: ENABLED");
+        }
     }
 
     /// <summary>

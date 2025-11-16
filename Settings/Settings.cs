@@ -298,6 +298,9 @@ public class NodeManagerSettings
     public bool AutoStartOnLaunch { get; set; } = false;
     public bool AutoConnectToHost { get; set; } = false;
 
+    // Simulator integration
+    public bool UseNodesForSimulators { get; set; } = false;
+
     // Resource limits
     public int MaxMemoryUsagePercent { get; set; } = 80;
     public int MaxCpuUsagePercent { get; set; } = 90;

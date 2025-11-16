@@ -15,6 +15,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using GeoscientistToolkit.Business.Thermodynamics;
+using GeoscientistToolkit.Network;
 using GeoscientistToolkit.Util;
 
 namespace GeoscientistToolkit.Analysis.Thermodynamic;
@@ -27,7 +28,7 @@ namespace GeoscientistToolkit.Analysis.Thermodynamic;
 ///
 /// Similar to TOUGHREACT's Sequential Iterative Approach (SIA)
 /// </summary>
-public class ReactiveTransportSolver
+public class ReactiveTransportSolver : SimulatorNodeSupport
 {
     private readonly ThermodynamicSolver _thermoSolver;
     private readonly KineticsSolver _kineticsSolver;
@@ -36,10 +37,19 @@ public class ReactiveTransportSolver
     private const int MAX_OUTER_ITERATIONS = 10;
     private const double CONVERGENCE_TOLERANCE = 1e-6;
 
-    public ReactiveTransportSolver()
+    public ReactiveTransportSolver() : this(null)
+    {
+    }
+
+    public ReactiveTransportSolver(bool? useNodes) : base(useNodes)
     {
         _thermoSolver = new ThermodynamicSolver();
         _kineticsSolver = new KineticsSolver();
+
+        if (_useNodes)
+        {
+            Logger.Log("[ReactiveTransportSolver] Node Manager integration: ENABLED");
+        }
     }
 
     /// <summary>

@@ -892,6 +892,11 @@ public class SettingsWindow
             nodeManager.UseGpuForJobs = useGpu;
         HelpMarker("Enable GPU acceleration for compute jobs when available");
 
+        var useNodesForSims = nodeManager.UseNodesForSimulators;
+        if (ImGui.Checkbox("Use Nodes for Simulators", ref useNodesForSims))
+            nodeManager.UseNodesForSimulators = useNodesForSims;
+        HelpMarker("Enable distributed computing for CPU simulators via network nodes");
+
         ImGui.Spacing();
         ImGui.Separator();
 

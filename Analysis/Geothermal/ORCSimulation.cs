@@ -3,6 +3,8 @@ using System.Numerics;
 using System.Runtime.Intrinsics;
 using System.Runtime.Intrinsics.X86;
 using GeoscientistToolkit.Business;
+using GeoscientistToolkit.Network;
+using GeoscientistToolkit.Util;
 
 namespace GeoscientistToolkit.Analysis.Geothermal
 {
@@ -11,11 +13,27 @@ namespace GeoscientistToolkit.Analysis.Geothermal
     /// Supports SIMD acceleration for batch calculations
     /// Uses ORCFluidLibrary for comprehensive working fluid properties
     /// </summary>
-    public class ORCSimulation
+    public class ORCSimulation : SimulatorNodeSupport
     {
         #region Working Fluid Properties
 
         private ORCFluid _currentFluid;
+
+        #endregion
+
+        #region Constructors
+
+        public ORCSimulation() : this(null)
+        {
+        }
+
+        public ORCSimulation(bool? useNodes) : base(useNodes)
+        {
+            if (_useNodes)
+            {
+                Logger.Log("ORCSimulation Node Manager integration: ENABLED");
+            }
+        }
 
         #endregion
 

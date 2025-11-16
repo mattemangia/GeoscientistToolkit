@@ -15,6 +15,7 @@
 
 using System.Text.RegularExpressions;
 using GeoscientistToolkit.Data.Materials;
+using GeoscientistToolkit.Network;
 using GeoscientistToolkit.Util;
 using MathNet.Numerics.LinearAlgebra;
 
@@ -152,7 +153,7 @@ public enum ReactionType
 /// <summary>
 ///     Main thermodynamic equilibrium solver using Gibbs energy minimization.
 /// </summary>
-public class ThermodynamicSolver
+public class ThermodynamicSolver : SimulatorNodeSupport
 {
     // Convergence criteria from PHREEQC (Parkhurst & Appelo, 2013)
     private const double TOLERANCE_MOLES = 1e-12;
@@ -165,11 +166,20 @@ public class ThermodynamicSolver
     private readonly CompoundLibrary _compoundLibrary;
     private readonly ReactionGenerator _reactionGenerator;
 
-    public ThermodynamicSolver()
+    public ThermodynamicSolver() : this(null)
+    {
+    }
+
+    public ThermodynamicSolver(bool? useNodes) : base(useNodes)
     {
         _compoundLibrary = CompoundLibrary.Instance;
         _activityCalculator = new ActivityCoefficientCalculator();
         _reactionGenerator = new ReactionGenerator(_compoundLibrary);
+
+        if (_useNodes)
+        {
+            Logger.Log("[ThermodynamicSolver] Node Manager integration: ENABLED");
+        }
     }
 
    /// <summary>

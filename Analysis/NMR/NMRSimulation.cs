@@ -7,6 +7,7 @@ using System.Runtime.Intrinsics.Arm;
 using System.Runtime.Intrinsics.X86;
 using GeoscientistToolkit.Data.CtImageStack;
 using GeoscientistToolkit.Data.VolumeData;
+using GeoscientistToolkit.Network;
 using GeoscientistToolkit.Util;
 
 namespace GeoscientistToolkit.Analysis.NMR;
@@ -19,7 +20,7 @@ namespace GeoscientistToolkit.Analysis.NMR;
 ///     - Pore radius from T2: r = shape_factor * ρ₂ * T2
 ///     - Shape factors: Sphere=3, Cylinder=2, Slit=1
 /// </summary>
-public class NMRSimulation
+public class NMRSimulation : SimulatorNodeSupport
 {
     // Random walk step vectors (6 directions: ±X, ±Y, ±Z)
     private static readonly (int dx, int dy, int dz)[] Directions =
@@ -36,7 +37,11 @@ public class NMRSimulation
     private readonly Random _random;
     private readonly int _width;
 
-    public NMRSimulation(CtImageStackDataset dataset, NMRSimulationConfig config)
+    public NMRSimulation(CtImageStackDataset dataset, NMRSimulationConfig config) : this(dataset, config, null)
+    {
+    }
+
+    public NMRSimulation(CtImageStackDataset dataset, NMRSimulationConfig config, bool? useNodes) : base(useNodes)
     {
         _config = config ?? throw new ArgumentNullException(nameof(config));
         _labelVolume = dataset?.LabelData ?? throw new ArgumentNullException(nameof(dataset));
@@ -47,6 +52,11 @@ public class NMRSimulation
 
         // UNIT VERIFICATION: Ensure voxel size is in reasonable range for meters
         VerifyVoxelSizeUnits(config.VoxelSize);
+
+        if (_useNodes)
+        {
+            Logger.Log("[NMRSimulation] Node Manager integration: ENABLED");
+        }
 
         Logger.Log($"[NMRSimulation] Initialized: {_width}x{_height}x{_depth}, {config.NumberOfWalkers} walkers");
         Logger.Log($"[NMRSimulation] Voxel size: {config.VoxelSize:E6} m = {config.VoxelSize * 1e6f:F2} µm");

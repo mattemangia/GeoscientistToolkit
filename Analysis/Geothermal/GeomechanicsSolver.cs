@@ -68,6 +68,7 @@ using System.Runtime.InteropServices;
 using System.Runtime.Intrinsics;
 using System.Runtime.Intrinsics.X86;
 using System.Text;
+using GeoscientistToolkit.Network;
 using GeoscientistToolkit.OpenCL;
 using GeoscientistToolkit.Util;
 using Silk.NET.OpenCL;
@@ -79,7 +80,7 @@ namespace GeoscientistToolkit.Analysis.Geothermal;
 ///     Calculates stress, strain, and deformation from temperature and pressure changes.
 ///     Supports SIMD (AVX2) CPU optimization and OpenCL 1.2 GPU acceleration.
 /// </summary>
-public class GeomechanicsSolver : IDisposable
+public class GeomechanicsSolver : SimulatorNodeSupport, IDisposable
 {
     private readonly CL? _cl;
     private readonly int _nr, _nth, _nz;
@@ -130,7 +131,18 @@ public class GeomechanicsSolver : IDisposable
     private bool _isOpenCLInitialized;
 
     public GeomechanicsSolver(int nr, int nth, int nz, bool useGPU = false)
+        : this(nr, nth, nz, useGPU, null)
     {
+    }
+
+    public GeomechanicsSolver(int nr, int nth, int nz, bool useGPU, bool? useNodes)
+        : base(useNodes)
+    {
+        if (_useNodes)
+        {
+            Logger.Log("GeomechanicsSolver Node Manager integration: ENABLED");
+        }
+
         _nr = nr;
         _nth = nth;
         _nz = nz;
