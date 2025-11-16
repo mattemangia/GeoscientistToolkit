@@ -546,3 +546,34 @@ public class NucleusDTO
     public double GrowthRate { get; set; }
     public double BirthTime { get; set; }
 }
+
+// Media dataset DTOs
+public class VideoDatasetDTO : DatasetDTO
+{
+    public int Width { get; set; }
+    public int Height { get; set; }
+    public double DurationSeconds { get; set; }
+    public double FrameRate { get; set; }
+    public int TotalFrames { get; set; }
+    public string Codec { get; set; }
+    public string Format { get; set; }
+    public long BitRate { get; set; }
+    public Dictionary<string, string> VideoMetadata { get; set; } = new();
+    public bool HasAudioTrack { get; set; }
+    public int AudioChannels { get; set; }
+    public int AudioSampleRate { get; set; }
+    public string AudioCodec { get; set; }
+}
+
+public class AudioDatasetDTO : DatasetDTO
+{
+    public int SampleRate { get; set; }
+    public int Channels { get; set; }
+    public int BitsPerSample { get; set; }
+    public double DurationSeconds { get; set; }
+    public long TotalSamples { get; set; }
+    public string Format { get; set; }
+    public string Encoding { get; set; }
+    public long BitRate { get; set; }
+    public Dictionary<string, string> AudioMetadata { get; set; } = new();
+}

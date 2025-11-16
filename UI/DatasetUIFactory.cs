@@ -13,6 +13,7 @@ using GeoscientistToolkit.Data.Pnm;
 using GeoscientistToolkit.Data.Table;
 using GeoscientistToolkit.Data.TwoDGeology;
 using GeoscientistToolkit.Data.Seismic;
+using GeoscientistToolkit.Data.Media;
 using GeoscientistToolkit.UI.Borehole;
 using GeoscientistToolkit.UI.GIS;
 using GeoscientistToolkit.UI.Seismic;
@@ -72,6 +73,10 @@ CtImageStackDataset ctDataset => new CtCombinedViewer(ctDataset),
         // PhysicoChem Dataset
         PhysicoChemDataset physicoChemDataset => new PhysicoChemViewer(physicoChemDataset),
 
+        // Media Datasets
+        VideoDataset videoDataset => new VideoDatasetViewer(videoDataset),
+        AudioDataset audioDataset => new AudioDatasetViewer(audioDataset),
+
         // Dataset groups cannot be opened in a viewer
         DatasetGroup => throw new InvalidOperationException(
             "Cannot open a DatasetGroup in a viewer. Please open individual datasets."),
@@ -118,6 +123,8 @@ public static IDatasetPropertiesRenderer CreatePropertiesRenderer(Dataset datase
         TwoDGeologyDataset => new TwoDGeologyProperties(),
         SeismicDataset => new SeismicProperties(),
         PhysicoChemDataset => new PhysicoChemPropertiesRenderer(),
+        VideoDataset => new VideoDatasetProperties(),
+        AudioDataset => new AudioDatasetProperties(),
         _ => new DefaultPropertiesRenderer()
     };
 }
@@ -142,6 +149,8 @@ public static IDatasetTools CreateTools(Dataset dataset)
         TwoDGeologyDataset => new TwoDGeologyToolsWrapper(),
         SeismicDataset => new SeismicTools(),
         PhysicoChemDataset => new PhysicoChemTools(),
+        VideoDataset => new VideoDatasetTools(),
+        AudioDataset => new AudioDatasetTools(),
         // --- MODIFIED: Changed .All to .Any to make tool appear even if non-borehole datasets are in the group ---
         DatasetGroup group when group.Datasets.Any(d => d is BoreholeDataset) => new MultiBoreholeTools(),
         _ => new DefaultTools(),

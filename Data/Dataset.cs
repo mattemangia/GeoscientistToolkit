@@ -20,7 +20,9 @@ public enum DatasetType
     TwoDGeology,
     SubsurfaceGIS,
     Earthquake,
-    Seismic
+    Seismic,
+    Video,
+    Audio
 }
 
 public abstract class Dataset

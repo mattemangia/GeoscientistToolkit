@@ -68,6 +68,10 @@
         <!-- Ubuntu/Debian: sudo apt-get install libopencv-dev -->
         <!-- macOS: brew install opencv -->
         <PackageReference Include="Newtonsoft.Json" Version="13.0.3"/>
+        <!-- Media handling for audio/video datasets -->
+        <PackageReference Include="NAudio" Version="2.2.1"/>
+        <PackageReference Include="NAudio.Vorbis" Version="1.5.0"/>
+        <PackageReference Include="FFMpegCore" Version="5.1.0"/>
     </ItemGroup>
 
     <!-- The ProjectReference to the extractor tool, correctly in its own ItemGroup -->
