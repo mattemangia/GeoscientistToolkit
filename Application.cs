@@ -379,10 +379,17 @@ public class Application
                 // Pass the window close request to MainWindow so it can show the dialog
                 _mainWindow.SubmitUI(_windowWantedToClose);
 
+                // SCREENSHOT FIX: Prepare screenshot capture BEFORE rendering
+                ScreenshotUtility.BeginFrame();
+
                 _commandList.Begin();
                 _commandList.SetFramebuffer(_graphicsDevice.MainSwapchain.Framebuffer);
                 _commandList.ClearColorTarget(0, new RgbaFloat(clearColor.X, clearColor.Y, clearColor.Z, clearColor.W));
                 _imGuiController.Render(_graphicsDevice, _commandList);
+
+                // SCREENSHOT FIX: Copy backbuffer to capture texture BEFORE ending the command list
+                ScreenshotUtility.EndFrame(_commandList);
+
                 _commandList.End();
 
                 _graphicsDevice.SubmitCommands(_commandList);
@@ -408,6 +415,10 @@ public class Application
         GlobalPerformanceManager.Instance.Shutdown();
 
         _graphicsDevice.WaitForIdle();
+
+        // SCREENSHOT FIX: Cleanup screenshot resources
+        ScreenshotUtility.Cleanup();
+
         _imGuiController.Dispose();
         _commandList.Dispose();
         _graphicsDevice.Dispose();
