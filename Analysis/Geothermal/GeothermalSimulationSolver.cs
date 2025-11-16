@@ -113,6 +113,11 @@ public class GeothermalSimulationSolver : IDisposable
     private readonly CancellationToken _cancellationToken;
     private readonly GeothermalMesh _mesh;
 
+    // Grid dimensions
+    private int _nr;   // Radial grid points
+    private int _nth;  // Angular grid points
+    private int _nz;   // Vertical grid points
+
     // OpenCL acceleration
     private readonly GeothermalOpenCLSolver _openCLSolver;
     private readonly BTESOpenCLSolver _btesOpenCLSolver;
@@ -162,6 +167,11 @@ public class GeothermalSimulationSolver : IDisposable
         _mesh = mesh;
         _progress = progress;
         _cancellationToken = cancellationToken;
+
+        // Initialize grid dimensions from options
+        _nr = options.RadialGridPoints;
+        _nth = options.AngularGridPoints;
+        _nz = options.VerticalGridPoints;
 
         ValidateAndSanitizeMesh(); // ADDED
 

@@ -160,6 +160,8 @@ public sealed class ORCFluidLibrary
 
     public IReadOnlyList<ORCFluid> AllFluids => _fluids.AsReadOnly();
 
+    public IReadOnlyList<ORCFluid> GetAllFluids() => _fluids.AsReadOnly();
+
     public ORCFluid? GetFluidByName(string name) =>
         _fluids.FirstOrDefault(f => f.Name.Equals(name, StringComparison.OrdinalIgnoreCase));
 
