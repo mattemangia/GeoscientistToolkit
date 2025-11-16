@@ -88,6 +88,11 @@ public class ImageTools : IDatasetTools
                     },
                     new()
                     {
+                        Name = "Pore Segmentation", Description = "Automated pore detection and porosity analysis for SEM images.",
+                        Tool = new PoreSegmentationTool()
+                    },
+                    new()
+                    {
                         Name = "Point Counting", Description = "Modal analysis tool for thin sections.",
                         Tool = new PointCountingTool()
                     }
@@ -886,6 +891,626 @@ public class ImageTools : IDatasetTools
         }
     }
 
+    private class PoreSegmentationTool : IDatasetTools
+    {
+        private readonly List<PoreData> _detectedPores = new();
+        private float _thresholdValue = 128;
+        private bool _useAdaptiveThreshold;
+        private bool _invertThreshold = true;  // Pores are typically dark regions
+        private float _poreMinSize = 5;
+        private float _poreMaxSize = 10000;
+        private float _circularityThreshold = 0.3f;
+        private int _morphologyIterations = 1;
+        private bool _applyMorphologicalClosing = true;
+        private bool _applyMorphologicalOpening = true;
+
+        // Visualization
+        private bool _showOverlay = true;
+        private bool _colorBySize = true;
+        private bool _showHistogram = true;
+
+        // Statistics
+        private float _totalPorosity;
+        private float _meanPoreSize;
+        private float _medianPoreSize;
+        private Dictionary<string, int> _poreSizeDistribution = new();
+
+        public void Draw(Dataset dataset)
+        {
+            if (dataset is not ImageDataset imageDataset) return;
+
+            ImGui.TextWrapped("Automated pore detection and porosity analysis for SEM images of foraminifera and porous materials.");
+            ImGui.Spacing();
+
+            if (ImGui.CollapsingHeader("Detection Parameters", ImGuiTreeNodeFlags.DefaultOpen))
+            {
+                ImGui.SliderFloat("Threshold", ref _thresholdValue, 0, 255);
+                ImGui.Checkbox("Use Adaptive Threshold", ref _useAdaptiveThreshold);
+                ImGui.Checkbox("Invert Threshold (Dark Pores)", ref _invertThreshold);
+
+                ImGui.Separator();
+                ImGui.Text("Size Filters:");
+                ImGui.SliderFloat("Min Pore Size (pixels²)", ref _poreMinSize, 1, 500);
+                ImGui.SliderFloat("Max Pore Size (pixels²)", ref _poreMaxSize, 100, 50000);
+                ImGui.SliderFloat("Min Circularity", ref _circularityThreshold, 0, 1);
+
+                ImGui.Separator();
+                ImGui.Text("Morphological Operations:");
+                ImGui.Checkbox("Apply Opening (Remove Noise)", ref _applyMorphologicalOpening);
+                ImGui.Checkbox("Apply Closing (Fill Holes)", ref _applyMorphologicalClosing);
+                ImGui.SliderInt("Morphology Iterations", ref _morphologyIterations, 1, 5);
+            }
+
+            if (ImGui.CollapsingHeader("Visualization", ImGuiTreeNodeFlags.DefaultOpen))
+            {
+                ImGui.Checkbox("Show Overlay", ref _showOverlay);
+                ImGui.Checkbox("Color by Size", ref _colorBySize);
+                ImGui.Checkbox("Show Size Histogram", ref _showHistogram);
+            }
+
+            ImGui.Spacing();
+            if (ImGui.Button("Detect Pores", new Vector2(-1, 0)))
+            {
+                Logger.Log($"Pore segmentation started for {imageDataset.Name}");
+                PerformPoreSegmentation(imageDataset);
+            }
+
+            ImGui.Separator();
+
+            if (_detectedPores.Count > 0)
+            {
+                DrawPoreStatistics(imageDataset);
+
+                if (ImGui.CollapsingHeader("Pore Details"))
+                    DrawPoreDetailsTable();
+
+                ImGui.Spacing();
+                if (ImGui.Button("Export Results", new Vector2(-1, 0)))
+                    ExportPoreAnalysisResults(imageDataset);
+                ImGui.SameLine();
+                if (ImGui.Button("Export Binary Mask", new Vector2(-1, 0)))
+                    ExportBinaryMask(imageDataset);
+            }
+            else
+            {
+                ImGui.TextDisabled("No pores detected. Click 'Detect Pores' to start analysis.");
+            }
+        }
+
+        private void DrawPoreStatistics(ImageDataset imageDataset)
+        {
+            ImGui.Text($"Total Pores Detected: {_detectedPores.Count.ToString()}");
+            ImGui.Text($"Total Porosity: {_totalPorosity.ToString("F2")}%");
+            ImGui.Separator();
+
+            var totalArea = _detectedPores.Sum(p => p.Area);
+            _meanPoreSize = _detectedPores.Average(p => p.Area);
+            var sortedAreas = _detectedPores.Select(p => p.Area).OrderBy(a => a).ToList();
+            _medianPoreSize = sortedAreas[sortedAreas.Count / 2];
+
+            var avgDiameter = _detectedPores.Average(p => (double)p.EquivalentDiameter);
+            var avgCircularity = _detectedPores.Average(p => (double)p.Circularity);
+            var avgAspectRatio = _detectedPores.Average(p => (double)p.AspectRatio);
+
+            if (ImGui.BeginTable("PoreStatsTable", 2, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg))
+            {
+                ImGui.TableSetupColumn("Metric", ImGuiTableColumnFlags.WidthFixed, 200);
+                ImGui.TableSetupColumn("Value", ImGuiTableColumnFlags.WidthStretch);
+                ImGui.TableHeadersRow();
+
+                DrawStatRow("Total Pore Area", $"{totalArea.ToString("F1")} pixels²");
+                DrawStatRow("Mean Pore Area", $"{_meanPoreSize.ToString("F2")} pixels²");
+                DrawStatRow("Median Pore Area", $"{_medianPoreSize.ToString("F2")} pixels²");
+                DrawStatRow("Min Pore Area", $"{sortedAreas.First().ToString("F1")} pixels²");
+                DrawStatRow("Max Pore Area", $"{sortedAreas.Last().ToString("F1")} pixels²");
+                DrawStatRow("Mean Pore Diameter", $"{avgDiameter.ToString("F2")} pixels");
+                DrawStatRow("Mean Circularity", $"{avgCircularity.ToString("F3")}");
+                DrawStatRow("Mean Aspect Ratio", $"{avgAspectRatio.ToString("F3")}");
+
+                ImGui.EndTable();
+            }
+
+            // Size distribution histogram
+            if (_showHistogram)
+            {
+                ImGui.Spacing();
+                ImGui.Text("Pore Size Distribution:");
+                DrawPoreSizeDistribution();
+            }
+        }
+
+        private void DrawStatRow(string metric, string value)
+        {
+            ImGui.TableNextRow();
+            ImGui.TableNextColumn();
+            ImGui.Text(metric);
+            ImGui.TableNextColumn();
+            ImGui.Text(value);
+        }
+
+        private void DrawPoreSizeDistribution()
+        {
+            // Create histogram bins
+            var bins = new Dictionary<string, int>
+            {
+                {"< 10", 0},
+                {"10-50", 0},
+                {"50-100", 0},
+                {"100-500", 0},
+                {"500-1000", 0},
+                {"1000-5000", 0},
+                {"> 5000", 0}
+            };
+
+            foreach (var pore in _detectedPores)
+            {
+                if (pore.Area < 10) bins["< 10"]++;
+                else if (pore.Area < 50) bins["10-50"]++;
+                else if (pore.Area < 100) bins["50-100"]++;
+                else if (pore.Area < 500) bins["100-500"]++;
+                else if (pore.Area < 1000) bins["500-1000"]++;
+                else if (pore.Area < 5000) bins["1000-5000"]++;
+                else bins["> 5000"]++;
+            }
+
+            if (ImGui.BeginTable("HistogramTable", 3, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg))
+            {
+                ImGui.TableSetupColumn("Size Range (pixels²)");
+                ImGui.TableSetupColumn("Count");
+                ImGui.TableSetupColumn("Percentage");
+                ImGui.TableHeadersRow();
+
+                foreach (var kvp in bins)
+                {
+                    ImGui.TableNextRow();
+                    ImGui.TableNextColumn();
+                    ImGui.Text(kvp.Key);
+                    ImGui.TableNextColumn();
+                    ImGui.Text($"{kvp.Value.ToString()}");
+                    ImGui.TableNextColumn();
+                    var percentage = _detectedPores.Count > 0 ? kvp.Value * 100f / _detectedPores.Count : 0;
+                    ImGui.Text($"{percentage.ToString("F1")}%");
+                }
+
+                ImGui.EndTable();
+            }
+
+            _poreSizeDistribution = bins;
+        }
+
+        private void DrawPoreDetailsTable()
+        {
+            if (ImGui.BeginTable("PoreDetailsTable", 7, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.ScrollY))
+            {
+                ImGui.TableSetupColumn("ID");
+                ImGui.TableSetupColumn("Area (px²)");
+                ImGui.TableSetupColumn("Diameter (px)");
+                ImGui.TableSetupColumn("Perimeter (px)");
+                ImGui.TableSetupColumn("Circularity");
+                ImGui.TableSetupColumn("Aspect Ratio");
+                ImGui.TableSetupColumn("Center (x,y)");
+                ImGui.TableHeadersRow();
+
+                for (var i = 0; i < Math.Min(_detectedPores.Count, 100); i++)
+                {
+                    var p = _detectedPores[i];
+                    ImGui.TableNextRow();
+                    ImGui.TableNextColumn();
+                    ImGui.Text($"{p.Id.ToString()}");
+                    ImGui.TableNextColumn();
+                    ImGui.Text($"{p.Area.ToString("F1")}");
+                    ImGui.TableNextColumn();
+                    ImGui.Text($"{p.EquivalentDiameter.ToString("F1")}");
+                    ImGui.TableNextColumn();
+                    ImGui.Text($"{p.Perimeter.ToString("F1")}");
+                    ImGui.TableNextColumn();
+                    ImGui.Text($"{p.Circularity.ToString("F3")}");
+                    ImGui.TableNextColumn();
+                    ImGui.Text($"{p.AspectRatio.ToString("F3")}");
+                    ImGui.TableNextColumn();
+                    ImGui.Text($"({p.CenterX.ToString("F0")},{p.CenterY.ToString("F0")})");
+                }
+
+                if (_detectedPores.Count > 100)
+                    ImGui.TextDisabled($"... and {(_detectedPores.Count - 100).ToString()} more pores");
+
+                ImGui.EndTable();
+            }
+        }
+
+        private void PerformPoreSegmentation(ImageDataset imageDataset)
+        {
+            if (imageDataset.ImageData == null) imageDataset.Load();
+            _detectedPores.Clear();
+
+            // Convert to grayscale
+            var grayscale = ConvertToGrayscale(imageDataset.ImageData, imageDataset.Width, imageDataset.Height);
+
+            // Apply threshold
+            var binary = _useAdaptiveThreshold
+                ? ApplyAdaptiveThreshold(grayscale, imageDataset.Width, imageDataset.Height, _invertThreshold)
+                : ApplyThreshold(grayscale, _thresholdValue, _invertThreshold);
+
+            // Apply morphological operations
+            if (_applyMorphologicalOpening)
+                binary = MorphologicalOpening(binary, imageDataset.Width, imageDataset.Height, _morphologyIterations);
+
+            if (_applyMorphologicalClosing)
+                binary = MorphologicalClosing(binary, imageDataset.Width, imageDataset.Height, _morphologyIterations);
+
+            // Find connected components (pores)
+            var components = FindConnectedComponents(binary, imageDataset.Width, imageDataset.Height);
+
+            // Analyze each pore
+            var poreId = 1;
+            foreach (var component in components)
+            {
+                float area = component.Count;
+                if (area < _poreMinSize || area > _poreMaxSize) continue;
+
+                var pore = AnalyzePore(component, poreId++, imageDataset.Width);
+                if (pore.Circularity < _circularityThreshold) continue;
+
+                _detectedPores.Add(pore);
+            }
+
+            // Calculate total porosity
+            var totalImageArea = imageDataset.Width * imageDataset.Height;
+            var totalPoreArea = _detectedPores.Sum(p => p.Area);
+            _totalPorosity = (totalPoreArea / totalImageArea) * 100f;
+
+            // Store binary mask in metadata for visualization
+            imageDataset.ImageMetadata["PoreBinaryMask"] = binary;
+
+            // Create overlay visualization
+            if (_showOverlay)
+                CreatePoreOverlay(imageDataset, binary);
+
+            Logger.Log($"Detected {_detectedPores.Count.ToString()} pores with total porosity {_totalPorosity.ToString("F2")}%");
+        }
+
+        private byte[] ConvertToGrayscale(byte[] imageData, int width, int height)
+        {
+            var grayscale = new byte[width * height];
+            for (var i = 0; i < width * height; i++)
+            {
+                var idx = i * 4;
+                grayscale[i] = (byte)(0.299f * imageData[idx] + 0.587f * imageData[idx + 1] + 0.114f * imageData[idx + 2]);
+            }
+            return grayscale;
+        }
+
+        private byte[] ApplyThreshold(byte[] grayscale, float threshold, bool invert)
+        {
+            var binary = new byte[grayscale.Length];
+            for (var i = 0; i < grayscale.Length; i++)
+            {
+                if (invert)
+                    binary[i] = (byte)(grayscale[i] < threshold ? 255 : 0);  // Dark regions are pores
+                else
+                    binary[i] = (byte)(grayscale[i] > threshold ? 255 : 0);  // Bright regions are pores
+            }
+            return binary;
+        }
+
+        private byte[] ApplyAdaptiveThreshold(byte[] grayscale, int width, int height, bool invert)
+        {
+            var binary = new byte[grayscale.Length];
+            var windowSize = 15;
+            var k = 0.15f;
+
+            for (var y = 0; y < height; y++)
+            for (var x = 0; x < width; x++)
+            {
+                var idx = y * width + x;
+                float sum = 0;
+                var count = 0;
+
+                for (var dy = -windowSize / 2; dy <= windowSize / 2; dy++)
+                for (var dx = -windowSize / 2; dx <= windowSize / 2; dx++)
+                {
+                    var nx = x + dx;
+                    var ny = y + dy;
+                    if (nx >= 0 && nx < width && ny >= 0 && ny < height)
+                    {
+                        sum += grayscale[ny * width + nx];
+                        count++;
+                    }
+                }
+
+                var localMean = sum / count;
+                var threshold = localMean * (1 - k);
+
+                if (invert)
+                    binary[idx] = (byte)(grayscale[idx] < threshold ? 255 : 0);
+                else
+                    binary[idx] = (byte)(grayscale[idx] > threshold ? 255 : 0);
+            }
+
+            return binary;
+        }
+
+        private byte[] MorphologicalOpening(byte[] binary, int width, int height, int iterations)
+        {
+            var result = binary;
+            for (int i = 0; i < iterations; i++)
+            {
+                result = Erode(result, width, height);
+                result = Dilate(result, width, height);
+            }
+            return result;
+        }
+
+        private byte[] MorphologicalClosing(byte[] binary, int width, int height, int iterations)
+        {
+            var result = binary;
+            for (int i = 0; i < iterations; i++)
+            {
+                result = Dilate(result, width, height);
+                result = Erode(result, width, height);
+            }
+            return result;
+        }
+
+        private byte[] Erode(byte[] binary, int width, int height)
+        {
+            var result = new byte[binary.Length];
+            for (var y = 1; y < height - 1; y++)
+            for (var x = 1; x < width - 1; x++)
+            {
+                var idx = y * width + x;
+                var allWhite = true;
+                for (var dy = -1; dy <= 1; dy++)
+                for (var dx = -1; dx <= 1; dx++)
+                {
+                    if (binary[(y + dy) * width + (x + dx)] != 255)
+                        allWhite = false;
+                }
+                result[idx] = (byte)(allWhite ? 255 : 0);
+            }
+            return result;
+        }
+
+        private byte[] Dilate(byte[] binary, int width, int height)
+        {
+            var result = new byte[binary.Length];
+            for (var y = 1; y < height - 1; y++)
+            for (var x = 1; x < width - 1; x++)
+            {
+                var idx = y * width + x;
+                var anyWhite = false;
+                for (var dy = -1; dy <= 1; dy++)
+                for (var dx = -1; dx <= 1; dx++)
+                {
+                    if (binary[(y + dy) * width + (x + dx)] == 255)
+                        anyWhite = true;
+                }
+                result[idx] = (byte)(anyWhite ? 255 : 0);
+            }
+            return result;
+        }
+
+        private List<List<int>> FindConnectedComponents(byte[] binary, int width, int height)
+        {
+            var components = new List<List<int>>();
+            var visited = new bool[binary.Length];
+
+            for (var i = 0; i < binary.Length; i++)
+            {
+                if (binary[i] == 255 && !visited[i])
+                {
+                    var component = new List<int>();
+                    var stack = new Stack<int>();
+                    stack.Push(i);
+
+                    while (stack.Count > 0)
+                    {
+                        var pixel = stack.Pop();
+                        if (visited[pixel]) continue;
+                        visited[pixel] = true;
+                        component.Add(pixel);
+
+                        var x = pixel % width;
+                        var y = pixel / width;
+
+                        for (var dy = -1; dy <= 1; dy++)
+                        for (var dx = -1; dx <= 1; dx++)
+                        {
+                            if (dx == 0 && dy == 0) continue;
+                            var nx = x + dx;
+                            var ny = y + dy;
+                            if (nx >= 0 && nx < width && ny >= 0 && ny < height)
+                            {
+                                var nidx = ny * width + nx;
+                                if (binary[nidx] == 255 && !visited[nidx])
+                                    stack.Push(nidx);
+                            }
+                        }
+                    }
+
+                    components.Add(component);
+                }
+            }
+
+            return components;
+        }
+
+        private PoreData AnalyzePore(List<int> pixels, int id, int imageWidth)
+        {
+            var pore = new PoreData { Id = id };
+            float sumX = 0, sumY = 0;
+            float minX = float.MaxValue, maxX = float.MinValue;
+            float minY = float.MaxValue, maxY = float.MinValue;
+
+            foreach (var pixel in pixels)
+            {
+                var x = pixel % imageWidth;
+                var y = pixel / imageWidth;
+                sumX += x;
+                sumY += y;
+                minX = Math.Min(minX, x);
+                maxX = Math.Max(maxX, x);
+                minY = Math.Min(minY, y);
+                maxY = Math.Max(maxY, y);
+            }
+
+            pore.Area = pixels.Count;
+            pore.CenterX = sumX / pixels.Count;
+            pore.CenterY = sumY / pixels.Count;
+            pore.EquivalentDiameter = (float)Math.Sqrt(4 * pore.Area / Math.PI);
+            pore.Perimeter = CalculatePerimeter(pixels, imageWidth);
+            pore.Circularity = pore.Perimeter > 0 ? (float)(4 * Math.PI * pore.Area / (pore.Perimeter * pore.Perimeter)) : 0;
+            pore.Circularity = Math.Min(1.0f, pore.Circularity);
+
+            var width = maxX - minX + 1;
+            var height = maxY - minY + 1;
+            pore.AspectRatio = width / Math.Max(height, 1);
+            pore.BoundingBoxWidth = width;
+            pore.BoundingBoxHeight = height;
+
+            return pore;
+        }
+
+        private float CalculatePerimeter(List<int> pixels, int width)
+        {
+            var pixelSet = new HashSet<int>(pixels);
+            float perimeter = 0;
+
+            foreach (var pixel in pixels)
+            {
+                var x = pixel % width;
+                var y = pixel / width;
+                var neighbors = 0;
+
+                if (pixelSet.Contains(pixel - 1)) neighbors++;
+                if (pixelSet.Contains(pixel + 1)) neighbors++;
+                if (pixelSet.Contains(pixel - width)) neighbors++;
+                if (pixelSet.Contains(pixel + width)) neighbors++;
+
+                if (neighbors < 4) perimeter += 4 - neighbors;
+            }
+
+            return perimeter;
+        }
+
+        private void CreatePoreOverlay(ImageDataset imageDataset, byte[] binary)
+        {
+            var overlay = new byte[imageDataset.Width * imageDataset.Height * 4];
+            Array.Copy(imageDataset.ImageData, overlay, overlay.Length);
+
+            // Create color map for different pore sizes if color by size is enabled
+            var maxPoreSize = _detectedPores.Max(p => p.Area);
+            var minPoreSize = _detectedPores.Min(p => p.Area);
+
+            foreach (var pore in _detectedPores)
+            {
+                // Get color based on size or use default red
+                var color = _colorBySize
+                    ? GetColorForSize(pore.Area, minPoreSize, maxPoreSize)
+                    : new Vector3(255, 0, 0); // Red
+
+                // Color the pore pixels
+                var porePixels = new List<int>();
+                for (int i = 0; i < binary.Length; i++)
+                {
+                    if (binary[i] == 255)
+                    {
+                        int x = i % imageDataset.Width;
+                        int y = i / imageDataset.Width;
+
+                        // Check if this pixel belongs to current pore (approximate by distance to center)
+                        var distToCenterSq = (x - pore.CenterX) * (x - pore.CenterX) + (y - pore.CenterY) * (y - pore.CenterY);
+                        var maxDistSq = pore.EquivalentDiameter * pore.EquivalentDiameter;
+
+                        if (distToCenterSq < maxDistSq)
+                        {
+                            var idx = i * 4;
+                            // Blend with original image
+                            overlay[idx] = (byte)((overlay[idx] * 0.5f) + (color.X * 0.5f));
+                            overlay[idx + 1] = (byte)((overlay[idx + 1] * 0.5f) + (color.Y * 0.5f));
+                            overlay[idx + 2] = (byte)((overlay[idx + 2] * 0.5f) + (color.Z * 0.5f));
+                        }
+                    }
+                }
+            }
+
+            imageDataset.ImageMetadata["PoreOverlay"] = overlay;
+        }
+
+        private Vector3 GetColorForSize(float size, float minSize, float maxSize)
+        {
+            // Map size to color gradient: blue (small) -> green -> yellow -> red (large)
+            var normalized = (size - minSize) / Math.Max(maxSize - minSize, 1);
+
+            if (normalized < 0.33f)
+                return new Vector3(0, (byte)(normalized * 3 * 255), 255); // Blue to Cyan
+            else if (normalized < 0.66f)
+                return new Vector3(0, 255, (byte)((1 - (normalized - 0.33f) * 3) * 255)); // Cyan to Green
+            else
+                return new Vector3((byte)((normalized - 0.66f) * 3 * 255), 255, 0); // Green to Yellow to Red
+        }
+
+        private void ExportPoreAnalysisResults(ImageDataset imageDataset)
+        {
+            var outputPath = Path.ChangeExtension(imageDataset.FilePath, ".pores.csv");
+            using (var writer = new StreamWriter(outputPath))
+            {
+                writer.WriteLine("ID,Area,Diameter,Perimeter,Circularity,AspectRatio,CenterX,CenterY,BoundingBoxWidth,BoundingBoxHeight");
+                foreach (var p in _detectedPores)
+                {
+                    writer.WriteLine($"{p.Id},{p.Area:F2},{p.EquivalentDiameter:F2},{p.Perimeter:F2},{p.Circularity:F4},{p.AspectRatio:F4},{p.CenterX:F2},{p.CenterY:F2},{p.BoundingBoxWidth:F2},{p.BoundingBoxHeight:F2}");
+                }
+                writer.WriteLine();
+                writer.WriteLine($"# Summary Statistics");
+                writer.WriteLine($"# Total Pores,{_detectedPores.Count}");
+                writer.WriteLine($"# Total Porosity (%),{_totalPorosity:F2}");
+                writer.WriteLine($"# Mean Pore Area (pixels²),{_meanPoreSize:F2}");
+                writer.WriteLine($"# Median Pore Area (pixels²),{_medianPoreSize:F2}");
+                writer.WriteLine();
+                writer.WriteLine("# Pore Size Distribution");
+                writer.WriteLine("Size Range (pixels²),Count,Percentage");
+                foreach (var kvp in _poreSizeDistribution)
+                {
+                    var percentage = _detectedPores.Count > 0 ? kvp.Value * 100f / _detectedPores.Count : 0;
+                    writer.WriteLine($"{kvp.Key},{kvp.Value},{percentage:F2}");
+                }
+            }
+
+            Logger.Log($"Exported pore analysis results to {outputPath}");
+        }
+
+        private void ExportBinaryMask(ImageDataset imageDataset)
+        {
+            if (!imageDataset.ImageMetadata.TryGetValue("PoreBinaryMask", out var maskObj) || maskObj is not byte[] binary)
+            {
+                Logger.LogError("No binary mask available. Run pore detection first.");
+                return;
+            }
+
+            var outputPath = Path.ChangeExtension(imageDataset.FilePath, ".pore_mask.png");
+
+            // Convert binary to RGBA
+            var rgba = new byte[imageDataset.Width * imageDataset.Height * 4];
+            for (int i = 0; i < binary.Length; i++)
+            {
+                var idx = i * 4;
+                rgba[idx] = binary[i];     // R
+                rgba[idx + 1] = binary[i]; // G
+                rgba[idx + 2] = binary[i]; // B
+                rgba[idx + 3] = 255;       // A
+            }
+
+            var info = new SKImageInfo(imageDataset.Width, imageDataset.Height, SKColorType.Rgba8888, SKAlphaType.Unpremul);
+            using var bmp = new SKBitmap(info);
+            Marshal.Copy(rgba, 0, bmp.GetPixels(), rgba.Length);
+            using var img = SKImage.FromBitmap(bmp);
+            using var fs = File.Open(outputPath, FileMode.Create, FileAccess.Write);
+            img.Encode(SKEncodedImageFormat.Png, 100).SaveTo(fs);
+
+            Logger.Log($"Exported binary mask to {outputPath}");
+        }
+    }
+
     private class RemoteSensingTool : IDatasetTools
     {
         private readonly ImGuiExportFileDialog
@@ -1285,6 +1910,20 @@ public class ParticleData
     public float AspectRatio { get; set; }
     public float CenterX { get; set; }
     public float CenterY { get; set; }
+}
+
+public class PoreData
+{
+    public int Id { get; set; }
+    public float Area { get; set; }
+    public float EquivalentDiameter { get; set; }
+    public float Perimeter { get; set; }
+    public float Circularity { get; set; }
+    public float AspectRatio { get; set; }
+    public float CenterX { get; set; }
+    public float CenterY { get; set; }
+    public float BoundingBoxWidth { get; set; }
+    public float BoundingBoxHeight { get; set; }
 }
 
 public class PointCountData
