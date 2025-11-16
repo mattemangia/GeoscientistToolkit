@@ -68,6 +68,7 @@ using System.Runtime.InteropServices;
 using System.Runtime.Intrinsics;
 using System.Runtime.Intrinsics.X86;
 using System.Text;
+using GeoscientistToolkit.OpenCL;
 using GeoscientistToolkit.Util;
 using Silk.NET.OpenCL;
 
@@ -554,28 +555,39 @@ public class GeomechanicsSolver : IDisposable
         int nr = _nr;
         int nth = _nth;
         int nz = _nz;
-
-        err = _cl.SetKernelArg(_geomechanicsKernel, 0, (nuint)sizeof(nint), &_temperatureBuffer);
+        var temperatureBuffer = _temperatureBuffer;
+        var temperatureOldBuffer = _temperatureOldBuffer;
+        var pressureBuffer = _pressureBuffer;
+        var youngsModulusBuffer = _youngsModulusBuffer;
+        var poissonsRatioBuffer= _poissonsRatioBuffer;
+        var thermalExpansionBuffer = _thermalExpansionBuffer;
+        var biotCoefficientBuffer = _biotCoefficientBuffer;
+        var stressBuffer = _stressBuffer;
+        var strainBuffer = _strainBuffer;
+        var vonMisesBuffer = _vonMisesBuffer;
+        var displacementBuffer = _displacementBuffer;
+        
+        err = _cl.SetKernelArg(_geomechanicsKernel, 0, (nuint)sizeof(nint), &temperatureBuffer);
         CheckCLError(err, "Set kernel arg 0 (temperature)");
-        err = _cl.SetKernelArg(_geomechanicsKernel, 1, (nuint)sizeof(nint), &_temperatureOldBuffer);
+        err = _cl.SetKernelArg(_geomechanicsKernel, 1, (nuint)sizeof(nint), &temperatureOldBuffer);
         CheckCLError(err, "Set kernel arg 1 (temperature_old)");
-        err = _cl.SetKernelArg(_geomechanicsKernel, 2, (nuint)sizeof(nint), &_pressureBuffer);
+        err = _cl.SetKernelArg(_geomechanicsKernel, 2, (nuint)sizeof(nint), &pressureBuffer);
         CheckCLError(err, "Set kernel arg 2 (pressure)");
-        err = _cl.SetKernelArg(_geomechanicsKernel, 3, (nuint)sizeof(nint), &_youngsModulusBuffer);
+        err = _cl.SetKernelArg(_geomechanicsKernel, 3, (nuint)sizeof(nint), &youngsModulusBuffer);
         CheckCLError(err, "Set kernel arg 3 (Young's modulus)");
-        err = _cl.SetKernelArg(_geomechanicsKernel, 4, (nuint)sizeof(nint), &_poissonsRatioBuffer);
+        err = _cl.SetKernelArg(_geomechanicsKernel, 4, (nuint)sizeof(nint), &poissonsRatioBuffer);
         CheckCLError(err, "Set kernel arg 4 (Poisson's ratio)");
-        err = _cl.SetKernelArg(_geomechanicsKernel, 5, (nuint)sizeof(nint), &_thermalExpansionBuffer);
+        err = _cl.SetKernelArg(_geomechanicsKernel, 5, (nuint)sizeof(nint), &thermalExpansionBuffer);
         CheckCLError(err, "Set kernel arg 5 (thermal expansion)");
-        err = _cl.SetKernelArg(_geomechanicsKernel, 6, (nuint)sizeof(nint), &_biotCoefficientBuffer);
+        err = _cl.SetKernelArg(_geomechanicsKernel, 6, (nuint)sizeof(nint), &biotCoefficientBuffer);
         CheckCLError(err, "Set kernel arg 6 (Biot coefficient)");
-        err = _cl.SetKernelArg(_geomechanicsKernel, 7, (nuint)sizeof(nint), &_stressBuffer);
+        err = _cl.SetKernelArg(_geomechanicsKernel, 7, (nuint)sizeof(nint), &stressBuffer);
         CheckCLError(err, "Set kernel arg 7 (stress)");
-        err = _cl.SetKernelArg(_geomechanicsKernel, 8, (nuint)sizeof(nint), &_strainBuffer);
+        err = _cl.SetKernelArg(_geomechanicsKernel, 8, (nuint)sizeof(nint), &strainBuffer);
         CheckCLError(err, "Set kernel arg 8 (strain)");
-        err = _cl.SetKernelArg(_geomechanicsKernel, 9, (nuint)sizeof(nint), &_vonMisesBuffer);
+        err = _cl.SetKernelArg(_geomechanicsKernel, 9, (nuint)sizeof(nint), &vonMisesBuffer);
         CheckCLError(err, "Set kernel arg 9 (von Mises)");
-        err = _cl.SetKernelArg(_geomechanicsKernel, 10, (nuint)sizeof(nint), &_displacementBuffer);
+        err = _cl.SetKernelArg(_geomechanicsKernel, 10, (nuint)sizeof(nint), &displacementBuffer);
         CheckCLError(err, "Set kernel arg 10 (displacement)");
         err = _cl.SetKernelArg(_geomechanicsKernel, 11, (nuint)sizeof(float), &dt);
         CheckCLError(err, "Set kernel arg 11 (dt)");
@@ -654,9 +666,8 @@ public class GeomechanicsSolver : IDisposable
 
         try
         {
-            // Get device from OpenCLDeviceManager
-            var deviceManager = OpenCLDeviceManager.Instance;
-            _device = deviceManager.GetComputeDevice();
+            
+            _device = OpenCLDeviceManager.GetComputeDevice();
 
             if (_device == nint.Zero)
                 return false;
@@ -664,10 +675,10 @@ public class GeomechanicsSolver : IDisposable
             int err;
 
             // Get device info
-            DeviceName = deviceManager.DeviceName;
-
+            DeviceName = OpenCLDeviceManager.GetDeviceInfo().Name;
+            var device = _device;
             // Create context
-            _context = _cl.CreateContext(null, 1, &_device, null, null, &err);
+            _context = _cl.CreateContext(null, 1, &device, null, null, &err);
             if (err != 0) return false;
 
             // Create command queue

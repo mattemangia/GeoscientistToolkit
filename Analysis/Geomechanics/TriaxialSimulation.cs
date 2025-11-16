@@ -176,10 +176,10 @@ public unsafe class TriaxialSimulation : IDisposable
 
         if (_device == 0)
             throw new Exception("Failed to get OpenCL device");
-
+var device = _device;
         // Create context
         int err;
-        _context = _cl.CreateContext(null, 1, &_device, null, null, &err);
+        _context = _cl.CreateContext(null, 1, &device, null, null, &err);
         if (err != 0)
             throw new Exception($"Failed to create context: {err}");
 
