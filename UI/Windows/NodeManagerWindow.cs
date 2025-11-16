@@ -24,6 +24,9 @@ public class NodeManagerWindow
     private string _testJobName = "Test Job";
     private bool _testJobRequiresGpu;
 
+    // Callback for opening settings window
+    public Action OnOpenSettings { get; set; }
+
     public NodeManagerWindow()
     {
         // Subscribe to node manager events
@@ -162,8 +165,7 @@ public class NodeManagerWindow
         ImGui.SetCursorPosX(ImGui.GetWindowWidth() - 120);
         if (ImGui.Button("Settings", new Vector2(100, 30)))
         {
-            // Open settings window
-            Logger.Log("Opening settings...");
+            OnOpenSettings?.Invoke();
         }
     }
 

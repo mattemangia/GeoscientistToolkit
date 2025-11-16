@@ -107,6 +107,9 @@ public class MainWindow
         // Initialize triaxial simulation tool
         _triaxialSimulationTool = new Analysis.Geomechanics.TriaxialSimulationTool();
 
+        // Wire up node manager settings callback
+        _nodeManagerWindow.OnOpenSettings = () => _settingsWindow.Open();
+
         // Configure the create mesh dialog
         _createMeshDialog.SetExtensions(
             new ImGuiExportFileDialog.ExtensionOption(".obj", "Wavefront OBJ")
