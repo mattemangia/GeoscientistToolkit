@@ -40,6 +40,12 @@ public class PhysicoChemDataset : Dataset, ISerializableDataset
     [JsonProperty]
     public ParameterSweepConfig ParameterSweep { get; set; }
 
+    [JsonProperty]
+    public ParameterSweepManager ParameterSweepManager { get; set; } = new();
+
+    [JsonProperty]
+    public SimulationTrackingManager TrackingManager { get; set; } = new();
+
     /// <summary>
     /// Generated 3D mesh from domains
     /// </summary>
@@ -568,13 +574,22 @@ public class PhysicoChemDataset : Dataset, ISerializableDataset
 public class SimulationParameters
 {
     [JsonProperty]
-    public double TotalTime { get; set; } = 3600.0; // seconds
+    public SimulationMode Mode { get; set; } = SimulationMode.TimeBased;
+
+    [JsonProperty]
+    public double TotalTime { get; set; } = 3600.0; // seconds (for time-based mode)
+
+    [JsonProperty]
+    public int MaxSteps { get; set; } = 1000; // maximum steps (for step-based mode)
 
     [JsonProperty]
     public double TimeStep { get; set; } = 1.0; // seconds
 
     [JsonProperty]
     public double OutputInterval { get; set; } = 60.0; // seconds
+
+    [JsonProperty]
+    public int OutputEveryNSteps { get; set; } = 10; // for step-based mode
 
     [JsonProperty]
     public bool EnableReactiveTransport { get; set; } = true;
@@ -602,6 +617,31 @@ public class SimulationParameters
 
     [JsonProperty]
     public string SolverType { get; set; } = "SequentialIterative"; // or "FullyCoupled"
+
+    [JsonProperty]
+    public bool EnableParameterSweep { get; set; } = false;
+
+    [JsonProperty]
+    public bool EnableTracking { get; set; } = true;
+
+    [JsonProperty]
+    public double TrackingSampleInterval { get; set; } = 1.0; // seconds
+}
+
+/// <summary>
+/// Simulation execution mode
+/// </summary>
+public enum SimulationMode
+{
+    /// <summary>
+    /// Run simulation for a fixed amount of time (use TotalTime)
+    /// </summary>
+    TimeBased,
+
+    /// <summary>
+    /// Run simulation for a fixed number of steps (use MaxSteps)
+    /// </summary>
+    StepBased
 }
 
 /// <summary>
@@ -640,6 +680,12 @@ public class PhysicoChemState
 
     // Nucleation tracking
     public List<Nucleus> ActiveNuclei { get; set; } = new();
+
+    // Computed properties for tracking
+    public double AverageTemperature => CalculateAverage(Temperature);
+    public double AveragePressure => CalculateAverage(Pressure);
+    public double TotalMass { get; set; }
+    public double MaxVelocity { get; set; }
 
     public PhysicoChemState((int x, int y, int z) gridSize)
     {
@@ -696,6 +742,22 @@ public class PhysicoChemState
         clone.ActiveNuclei = new List<Nucleus>(ActiveNuclei);
 
         return clone;
+    }
+
+    private double CalculateAverage(float[,,] field)
+    {
+        if (field == null) return 0.0;
+
+        double sum = 0;
+        int count = 0;
+
+        foreach (var value in field)
+        {
+            sum += value;
+            count++;
+        }
+
+        return count > 0 ? sum / count : 0.0;
     }
 }
 

@@ -54,6 +54,14 @@ public class PhysicoChemViewer : IDatasetViewer
     private int _currentTimeStep = 0;
     private float _animationSpeed = 1.0f;
 
+    // View mode
+    private ViewMode _viewMode = ViewMode.View3D;
+    private bool _showGraphPanel = false;
+
+    // Graph tracking
+    private bool[] _trackerEnabled;
+    private float _graphTimeRange = 60.0f; // seconds to show
+
     public PhysicoChemViewer(PhysicoChemDataset dataset)
     {
         _dataset = dataset ?? throw new ArgumentNullException(nameof(dataset));
@@ -62,52 +70,79 @@ public class PhysicoChemViewer : IDatasetViewer
 
     public void DrawToolbarControls()
     {
-        // Reset camera
-        if (ImGui.Button("Reset Camera"))
+        // View mode selector
+        ImGui.Text("View:");
+        ImGui.SameLine();
+        if (ImGui.RadioButton("3D", _viewMode == ViewMode.View3D))
+            _viewMode = ViewMode.View3D;
+        ImGui.SameLine();
+        if (ImGui.RadioButton("2D Slice", _viewMode == ViewMode.View2DSlice))
+            _viewMode = ViewMode.View2DSlice;
+        ImGui.SameLine();
+        if (ImGui.RadioButton("Graphs", _viewMode == ViewMode.ViewGraphs))
+            _viewMode = ViewMode.ViewGraphs;
+
+        ImGui.SameLine();
+        ImGui.Separator();
+        ImGui.SameLine();
+
+        // Reset camera (only for 3D view)
+        if (_viewMode == ViewMode.View3D && ImGui.Button("Reset Camera"))
         {
             ResetCamera();
         }
 
-        ImGui.SameLine();
-
-        // Field selector
-        ImGui.SetNextItemWidth(150);
-        if (ImGui.Combo("Field", ref _selectedFieldIndex, _fieldOptions, _fieldOptions.Length))
+        if (_viewMode != ViewMode.ViewGraphs)
         {
-            // Field changed
+            ImGui.SameLine();
+
+            // Field selector
+            ImGui.SetNextItemWidth(150);
+            if (ImGui.Combo("Field", ref _selectedFieldIndex, _fieldOptions, _fieldOptions.Length))
+            {
+                // Field changed
+            }
         }
 
         ImGui.SameLine();
         ImGui.Separator();
         ImGui.SameLine();
 
-        // Visualization toggles
-        ImGui.Checkbox("Mesh", ref _showMesh);
-        ImGui.SameLine();
-        ImGui.Checkbox("Domains", ref _showDomains);
-        ImGui.SameLine();
-        ImGui.Checkbox("BC", ref _showBoundaryConditions);
-        ImGui.SameLine();
-        ImGui.Checkbox("Vectors", ref _showVectorField);
-
-        ImGui.SameLine();
-        ImGui.Separator();
-        ImGui.SameLine();
-
-        // Slice controls
-        ImGui.Checkbox("Slice", ref _showSlice);
-        if (_showSlice)
+        // Visualization toggles (only for 3D and 2D slice views)
+        if (_viewMode != ViewMode.ViewGraphs)
         {
-            ImGui.SameLine();
-            ImGui.SetNextItemWidth(80);
-            string[] axes = { "X", "Y", "Z" };
-            if (ImGui.Combo("##SliceAxis", ref _sliceAxis, axes, axes.Length))
+            if (_viewMode == ViewMode.View3D)
             {
-                // Axis changed
+                ImGui.Checkbox("Mesh", ref _showMesh);
+                ImGui.SameLine();
+                ImGui.Checkbox("Domains", ref _showDomains);
+                ImGui.SameLine();
+                ImGui.Checkbox("BC", ref _showBoundaryConditions);
+                ImGui.SameLine();
+                ImGui.Checkbox("Vectors", ref _showVectorField);
             }
-            ImGui.SameLine();
-            ImGui.SetNextItemWidth(100);
-            ImGui.SliderFloat("##SlicePos", ref _slicePosition, 0.0f, 1.0f, "%.2f");
+
+            // Slice controls (only for 2D slice mode)
+            if (_viewMode == ViewMode.View2DSlice)
+            {
+                ImGui.Text("Slice:");
+                ImGui.SameLine();
+                ImGui.SetNextItemWidth(80);
+                string[] axes = { "X", "Y", "Z" };
+                if (ImGui.Combo("##SliceAxis", ref _sliceAxis, axes, axes.Length))
+                {
+                    // Axis changed
+                }
+                ImGui.SameLine();
+                ImGui.SetNextItemWidth(150);
+                ImGui.SliderFloat("##SlicePos", ref _slicePosition, 0.0f, 1.0f, "%.2f");
+            }
+        }
+        else
+        {
+            // Graph controls
+            ImGui.SetNextItemWidth(150);
+            ImGui.SliderFloat("Time Range", ref _graphTimeRange, 10.0f, 300.0f, "%.0f s");
         }
 
         // Animation controls (if simulation has run)
@@ -140,8 +175,8 @@ public class PhysicoChemViewer : IDatasetViewer
         var availableSize = ImGui.GetContentRegionAvail();
         var cursorPos = ImGui.GetCursorScreenPos();
 
-        // Check if mesh is generated
-        if (_dataset.GeneratedMesh == null)
+        // Check if mesh is generated (not needed for graph view)
+        if (_dataset.GeneratedMesh == null && _viewMode != ViewMode.ViewGraphs)
         {
             DrawNoMeshMessage();
             return;
@@ -153,7 +188,23 @@ public class PhysicoChemViewer : IDatasetViewer
             _currentTimeStep = (_currentTimeStep + 1) % _dataset.ResultHistory.Count;
         }
 
-        // Draw 3D visualization area
+        // Draw based on view mode
+        switch (_viewMode)
+        {
+            case ViewMode.View3D:
+                Draw3DView(cursorPos, availableSize);
+                break;
+            case ViewMode.View2DSlice:
+                Draw2DSliceView(cursorPos, availableSize);
+                break;
+            case ViewMode.ViewGraphs:
+                DrawGraphsView(cursorPos, availableSize);
+                break;
+        }
+    }
+
+    private void Draw3DView(Vector2 cursorPos, Vector2 availableSize)
+    {
         var drawList = ImGui.GetWindowDrawList();
         var bgColor = ImGui.GetColorU32(new Vector4(0.1f, 0.1f, 0.12f, 1.0f));
         drawList.AddRectFilled(cursorPos, cursorPos + availableSize, bgColor);
@@ -168,11 +219,52 @@ public class PhysicoChemViewer : IDatasetViewer
             HandleMouseInput();
         }
 
-        // Render 3D content (simplified for now)
+        // Render 3D content
         Render3DContent(drawList, cursorPos, availableSize);
 
         // Draw info overlay
         DrawInfoOverlay(cursorPos, availableSize);
+    }
+
+    private void Draw2DSliceView(Vector2 cursorPos, Vector2 availableSize)
+    {
+        var drawList = ImGui.GetWindowDrawList();
+        var bgColor = ImGui.GetColorU32(new Vector4(0.1f, 0.1f, 0.12f, 1.0f));
+        drawList.AddRectFilled(cursorPos, cursorPos + availableSize, bgColor);
+
+        // Draw 2D slice visualization
+        DrawSliceVisualization(drawList, cursorPos, availableSize);
+
+        // Draw info overlay
+        DrawInfoOverlay(cursorPos, availableSize);
+    }
+
+    private void DrawGraphsView(Vector2 cursorPos, Vector2 availableSize)
+    {
+        if (_dataset.TrackingManager == null || _dataset.TrackingManager.Trackers.Count == 0)
+        {
+            DrawNoTrackingDataMessage(cursorPos, availableSize);
+            return;
+        }
+
+        // Initialize tracker enabled array if needed
+        if (_trackerEnabled == null || _trackerEnabled.Length != _dataset.TrackingManager.Trackers.Count)
+        {
+            _trackerEnabled = new bool[_dataset.TrackingManager.Trackers.Count];
+            for (int i = 0; i < _trackerEnabled.Length; i++)
+                _trackerEnabled[i] = _dataset.TrackingManager.Trackers[i].Enabled;
+        }
+
+        var drawList = ImGui.GetWindowDrawList();
+
+        // Draw tracker selection panel on the left
+        float panelWidth = 200;
+        DrawTrackerSelectionPanel(cursorPos, new Vector2(panelWidth, availableSize.Y));
+
+        // Draw graphs on the right
+        var graphPos = cursorPos + new Vector2(panelWidth + 10, 0);
+        var graphSize = new Vector2(availableSize.X - panelWidth - 10, availableSize.Y);
+        DrawTrackedParameterGraphs(graphPos, graphSize);
     }
 
     public void Dispose()
@@ -550,6 +642,245 @@ public class PhysicoChemViewer : IDatasetViewer
         drawList.AddText(textPos, textColor, message);
     }
 
+    private void DrawSliceVisualization(ImDrawListPtr drawList, Vector2 cursorPos, Vector2 availableSize)
+    {
+        // Draw 2D slice of the selected field
+        var bgColor = ImGui.GetColorU32(new Vector4(0.05f, 0.05f, 0.07f, 1.0f));
+        drawList.AddRectFilled(cursorPos, cursorPos + availableSize, bgColor);
+
+        if (_dataset.CurrentState == null)
+        {
+            var textColor = ImGui.GetColorU32(new Vector4(0.7f, 0.7f, 0.7f, 1.0f));
+            var message = "No simulation data available";
+            var textSize = ImGui.CalcTextSize(message);
+            var textPos = cursorPos + (availableSize - textSize) * 0.5f;
+            drawList.AddText(textPos, textColor, message);
+            return;
+        }
+
+        var state = _dataset.CurrentState;
+        var gridSize = _dataset.GeneratedMesh.GridSize;
+
+        // Get slice index based on position
+        int sliceIndex = (int)(_slicePosition * (_sliceAxis == 0 ? gridSize.X : _sliceAxis == 1 ? gridSize.Y : gridSize.Z));
+
+        // Draw colored grid representing field values
+        float cellSize = Math.Min(availableSize.X / 100, availableSize.Y / 100);
+        var startPos = cursorPos + new Vector2(10, 10);
+
+        int width = _sliceAxis == 0 ? gridSize.Y : gridSize.X;
+        int height = _sliceAxis == 2 ? gridSize.Y : gridSize.Z;
+
+        for (int i = 0; i < Math.Min(width, 50); i++)
+        for (int j = 0; j < Math.Min(height, 50); j++)
+        {
+            float value = GetSliceFieldValue(state, i, j, sliceIndex);
+            var (min, max) = GetFieldRange();
+            float normalizedValue = (value - min) / (max - min + 0.0001f);
+            normalizedValue = Math.Clamp(normalizedValue, 0.0f, 1.0f);
+
+            var color = GetColorForValue(normalizedValue);
+            var p1 = startPos + new Vector2(i * cellSize, j * cellSize);
+            var p2 = p1 + new Vector2(cellSize, cellSize);
+            drawList.AddRectFilled(p1, p2, color);
+        }
+
+        // Draw axis labels
+        var textColor = ImGui.GetColorU32(new Vector4(1, 1, 1, 0.9f));
+        string[] axisNames = { "X", "Y", "Z" };
+        string sliceInfo = $"Slice: {axisNames[_sliceAxis]} = {_slicePosition:F2}";
+        drawList.AddText(cursorPos + new Vector2(10, availableSize.Y - 30), textColor, sliceInfo);
+    }
+
+    private float GetSliceFieldValue(PhysicoChemState state, int i, int j, int sliceIndex)
+    {
+        var gridSize = _dataset.GeneratedMesh.GridSize;
+
+        // Map 2D coordinates to 3D grid based on slice axis
+        int x = 0, y = 0, z = 0;
+        switch (_sliceAxis)
+        {
+            case 0: // X slice
+                x = Math.Min(sliceIndex, gridSize.X - 1);
+                y = Math.Min(i, gridSize.Y - 1);
+                z = Math.Min(j, gridSize.Z - 1);
+                break;
+            case 1: // Y slice
+                x = Math.Min(i, gridSize.X - 1);
+                y = Math.Min(sliceIndex, gridSize.Y - 1);
+                z = Math.Min(j, gridSize.Z - 1);
+                break;
+            case 2: // Z slice
+                x = Math.Min(i, gridSize.X - 1);
+                y = Math.Min(j, gridSize.Y - 1);
+                z = Math.Min(sliceIndex, gridSize.Z - 1);
+                break;
+        }
+
+        return _selectedFieldIndex switch
+        {
+            0 => state.Temperature[x, y, z],
+            1 => state.Pressure[x, y, z],
+            2 => state.Porosity[x, y, z],
+            3 => state.Permeability[x, y, z],
+            4 => MathF.Sqrt(state.VelocityX[x, y, z] * state.VelocityX[x, y, z] +
+                           state.VelocityY[x, y, z] * state.VelocityY[x, y, z] +
+                           state.VelocityZ[x, y, z] * state.VelocityZ[x, y, z]),
+            5 => state.LiquidSaturation[x, y, z],
+            6 => state.VaporSaturation[x, y, z],
+            7 => state.GasSaturation[x, y, z],
+            _ => 0.0f
+        };
+    }
+
+    private void DrawTrackerSelectionPanel(Vector2 cursorPos, Vector2 size)
+    {
+        var drawList = ImGui.GetWindowDrawList();
+        var bgColor = ImGui.GetColorU32(new Vector4(0.15f, 0.15f, 0.17f, 1.0f));
+        drawList.AddRectFilled(cursorPos, cursorPos + size, bgColor);
+
+        // Draw panel title
+        var textColor = ImGui.GetColorU32(new Vector4(1, 1, 1, 0.9f));
+        var titlePos = cursorPos + new Vector2(10, 10);
+        drawList.AddText(titlePos, textColor, "Tracked Parameters:");
+
+        // Draw checkboxes for each tracker
+        ImGui.SetCursorScreenPos(cursorPos + new Vector2(10, 35));
+        for (int i = 0; i < _dataset.TrackingManager.Trackers.Count; i++)
+        {
+            var tracker = _dataset.TrackingManager.Trackers[i];
+            ImGui.Checkbox(tracker.DisplayName, ref _trackerEnabled[i]);
+        }
+    }
+
+    private void DrawTrackedParameterGraphs(Vector2 cursorPos, Vector2 size)
+    {
+        var drawList = ImGui.GetWindowDrawList();
+
+        // Count enabled trackers
+        int enabledCount = 0;
+        for (int i = 0; i < _trackerEnabled.Length; i++)
+            if (_trackerEnabled[i])
+                enabledCount++;
+
+        if (enabledCount == 0)
+        {
+            var textColor = ImGui.GetColorU32(new Vector4(0.7f, 0.7f, 0.7f, 1.0f));
+            var message = "No parameters selected for tracking";
+            var textSize = ImGui.CalcTextSize(message);
+            var textPos = cursorPos + (size - textSize) * 0.5f;
+            drawList.AddText(textPos, textColor, message);
+            return;
+        }
+
+        // Calculate graph size
+        float graphHeight = (size.Y - 20 * (enabledCount + 1)) / enabledCount;
+        float yOffset = 10;
+
+        // Draw each enabled tracker's graph
+        for (int i = 0; i < _dataset.TrackingManager.Trackers.Count; i++)
+        {
+            if (!_trackerEnabled[i]) continue;
+
+            var tracker = _dataset.TrackingManager.Trackers[i];
+            var graphPos = cursorPos + new Vector2(0, yOffset);
+            var graphSize = new Vector2(size.X, graphHeight);
+
+            DrawSingleParameterGraph(drawList, graphPos, graphSize, tracker);
+
+            yOffset += graphHeight + 20;
+        }
+    }
+
+    private void DrawSingleParameterGraph(ImDrawListPtr drawList, Vector2 cursorPos, Vector2 size, ParameterTracker tracker)
+    {
+        // Draw background
+        var bgColor = ImGui.GetColorU32(new Vector4(0.1f, 0.1f, 0.12f, 1.0f));
+        drawList.AddRectFilled(cursorPos, cursorPos + size, bgColor);
+
+        // Draw border
+        var borderColor = ImGui.GetColorU32(new Vector4(0.3f, 0.3f, 0.3f, 1.0f));
+        drawList.AddRect(cursorPos, cursorPos + size, borderColor, 0, 0, 1.0f);
+
+        // Draw title
+        var textColor = ImGui.GetColorU32(new Vector4(1, 1, 1, 0.9f));
+        var titleText = $"{tracker.DisplayName} ({tracker.Unit})";
+        drawList.AddText(cursorPos + new Vector2(10, 5), textColor, titleText);
+
+        if (tracker.TimePoints.Count < 2)
+        {
+            var noDataColor = ImGui.GetColorU32(new Vector4(0.6f, 0.6f, 0.6f, 1.0f));
+            drawList.AddText(cursorPos + new Vector2(10, size.Y * 0.5f), noDataColor, "No data available");
+            return;
+        }
+
+        // Get time range to display
+        double currentTime = _dataset.CurrentState?.CurrentTime ?? tracker.TimePoints[^1];
+        double minTime = Math.Max(0, currentTime - _graphTimeRange);
+        double maxTime = currentTime;
+
+        // Get value range
+        var stats = tracker.GetStatistics();
+        double minValue = stats.Min;
+        double maxValue = stats.Max;
+        double valueRange = maxValue - minValue;
+        if (valueRange < 1e-10) valueRange = 1.0;
+
+        // Draw grid lines
+        var gridColor = ImGui.GetColorU32(new Vector4(0.25f, 0.25f, 0.25f, 0.5f));
+        for (int i = 0; i <= 4; i++)
+        {
+            float y = cursorPos.Y + 30 + (size.Y - 50) * i / 4.0f;
+            drawList.AddLine(new Vector2(cursorPos.X + 40, y),
+                           new Vector2(cursorPos.X + size.X - 10, y), gridColor);
+        }
+
+        // Draw data points
+        var lineColor = ImGui.GetColorU32(new Vector4(0.3f, 0.7f, 1.0f, 1.0f));
+        var graphArea = new Vector2(size.X - 50, size.Y - 50);
+        var graphStart = cursorPos + new Vector2(40, 30);
+
+        Vector2? lastPoint = null;
+        for (int i = 0; i < tracker.TimePoints.Count; i++)
+        {
+            double time = tracker.TimePoints[i];
+            if (time < minTime || time > maxTime) continue;
+
+            double value = tracker.Values[i];
+            float x = graphStart.X + (float)((time - minTime) / (maxTime - minTime)) * graphArea.X;
+            float y = graphStart.Y + graphArea.Y - (float)((value - minValue) / valueRange) * graphArea.Y;
+
+            var point = new Vector2(x, y);
+
+            if (lastPoint.HasValue)
+            {
+                drawList.AddLine(lastPoint.Value, point, lineColor, 2.0f);
+            }
+
+            lastPoint = point;
+        }
+
+        // Draw axis labels
+        var labelColor = ImGui.GetColorU32(new Vector4(0.8f, 0.8f, 0.8f, 1.0f));
+        drawList.AddText(cursorPos + new Vector2(5, 30), labelColor, $"{maxValue:F2}");
+        drawList.AddText(cursorPos + new Vector2(5, size.Y - 25), labelColor, $"{minValue:F2}");
+        drawList.AddText(cursorPos + new Vector2(40, size.Y - 20), labelColor, $"{minTime:F1}s");
+        drawList.AddText(cursorPos + new Vector2(size.X - 50, size.Y - 20), labelColor, $"{maxTime:F1}s");
+    }
+
+    private void DrawNoTrackingDataMessage(Vector2 cursorPos, Vector2 size)
+    {
+        var drawList = ImGui.GetWindowDrawList();
+        var bgColor = ImGui.GetColorU32(new Vector4(0.15f, 0.15f, 0.17f, 1.0f));
+        drawList.AddRectFilled(cursorPos, cursorPos + size, bgColor);
+
+        var textColor = ImGui.GetColorU32(new Vector4(0.7f, 0.7f, 0.7f, 1.0f));
+        var message = "No tracking data available.\nRun a simulation with tracking enabled.";
+        var textSize = ImGui.CalcTextSize(message);
+        var textPos = cursorPos + (size - textSize) * 0.5f;
+        drawList.AddText(textPos, textColor, message);
+    }
+
     private double GetCurrentTime()
     {
         if (_dataset.ResultHistory == null || _currentTimeStep >= _dataset.ResultHistory.Count)
@@ -557,4 +888,14 @@ public class PhysicoChemViewer : IDatasetViewer
 
         return _dataset.ResultHistory[_currentTimeStep].CurrentTime;
     }
+}
+
+/// <summary>
+/// View mode for PhysicoChem viewer
+/// </summary>
+public enum ViewMode
+{
+    View3D,
+    View2DSlice,
+    ViewGraphs
 }

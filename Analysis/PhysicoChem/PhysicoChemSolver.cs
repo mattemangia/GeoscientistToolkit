@@ -69,22 +69,60 @@ public class PhysicoChemSolver
         int step = 0;
         int outputStep = 0;
 
-        Logger.Log($"[PhysicoChemSolver] Starting simulation: {simParams.TotalTime} s, dt={dt} s");
+        // Initialize tracking if enabled
+        if (simParams.EnableTracking && _dataset.TrackingManager != null)
+        {
+            _dataset.TrackingManager.Enabled = true;
+            _dataset.TrackingManager.SamplingInterval = simParams.TrackingSampleInterval;
 
-        // Main time loop
-        while (t < simParams.TotalTime)
+            // Add default trackers if none exist
+            if (_dataset.TrackingManager.Trackers.Count == 0)
+            {
+                _dataset.TrackingManager.AddTracker("AverageTemperature", "Average Temperature", "K", TrackerType.Scalar);
+                _dataset.TrackingManager.AddTracker("AveragePressure", "Average Pressure", "Pa", TrackerType.Scalar);
+                _dataset.TrackingManager.AddTracker("TotalMass", "Total Mass", "kg", TrackerType.Scalar);
+                _dataset.TrackingManager.AddTracker("MaxVelocity", "Max Velocity", "m/s", TrackerType.Scalar);
+            }
+        }
+
+        Logger.Log($"[PhysicoChemSolver] Starting simulation ({simParams.Mode}): {simParams.TotalTime} s, dt={dt} s");
+
+        // Main time loop - support both time-based and step-based modes
+        bool shouldContinue = true;
+        while (shouldContinue)
         {
             step++;
             t += dt;
             state.CurrentTime = t;
 
-            _progress?.Report(((float)(t / simParams.TotalTime), $"Step {step}: t = {t:F2} s"));
+            // Check termination condition based on mode
+            if (simParams.Mode == SimulationMode.TimeBased)
+            {
+                shouldContinue = t < simParams.TotalTime;
+                _progress?.Report(((float)(t / simParams.TotalTime), $"Step {step}: t = {t:F2} s"));
+            }
+            else // StepBased
+            {
+                shouldContinue = step < simParams.MaxSteps;
+                _progress?.Report(((float)step / simParams.MaxSteps, $"Step {step}/{simParams.MaxSteps}: t = {t:F2} s"));
+            }
+
+            if (!shouldContinue) break;
 
             // Operator splitting approach (like TOUGHREACT)
             var newState = state.Clone();
 
             try
             {
+                // 0. Apply parameter sweeps if enabled
+                if (simParams.EnableParameterSweep && _dataset.ParameterSweepManager != null)
+                {
+                    double normalizedTime = simParams.Mode == SimulationMode.TimeBased
+                        ? t / simParams.TotalTime
+                        : (double)step / simParams.MaxSteps;
+                    _dataset.ParameterSweepManager.ApplyToSimulation(_dataset, normalizedTime);
+                }
+
                 // 1. Apply forces
                 if (simParams.EnableForces && _dataset.Forces.Count > 0)
                 {
@@ -132,12 +170,31 @@ public class PhysicoChemSolver
                 state = newState;
                 _dataset.CurrentState = state;
 
-                // Output results
-                if (t >= outputStep * simParams.OutputInterval)
+                // Update computed properties for tracking
+                UpdateComputedProperties(state);
+
+                // Record tracked parameters
+                if (simParams.EnableTracking && _dataset.TrackingManager != null)
+                {
+                    _dataset.TrackingManager.RecordValues(t, _dataset);
+                }
+
+                // Output results based on mode
+                bool shouldOutput = false;
+                if (simParams.Mode == SimulationMode.TimeBased)
+                {
+                    shouldOutput = t >= outputStep * simParams.OutputInterval;
+                }
+                else // StepBased
+                {
+                    shouldOutput = step % simParams.OutputEveryNSteps == 0;
+                }
+
+                if (shouldOutput)
                 {
                     _dataset.ResultHistory.Add(state.Clone());
                     outputStep++;
-                    Logger.Log($"[PhysicoChemSolver] t={t:F2} s, saved output #{outputStep}");
+                    Logger.Log($"[PhysicoChemSolver] t={t:F2} s, step={step}, saved output #{outputStep}");
                 }
             }
             catch (Exception ex)
@@ -468,5 +525,40 @@ public class PhysicoChemSolver
         }
 
         return count > 0 ? sum / count : 0;
+    }
+
+    private void UpdateComputedProperties(PhysicoChemState state)
+    {
+        // Update max velocity
+        double maxVelocity = 0;
+        for (int i = 0; i < state.VelocityX.GetLength(0); i++)
+        for (int j = 0; j < state.VelocityX.GetLength(1); j++)
+        for (int k = 0; k < state.VelocityX.GetLength(2); k++)
+        {
+            double v = Math.Sqrt(
+                state.VelocityX[i, j, k] * state.VelocityX[i, j, k] +
+                state.VelocityY[i, j, k] * state.VelocityY[i, j, k] +
+                state.VelocityZ[i, j, k] * state.VelocityZ[i, j, k]
+            );
+            maxVelocity = Math.Max(maxVelocity, v);
+        }
+        state.MaxVelocity = maxVelocity;
+
+        // Calculate total mass (simplified - assumes uniform density and porosity)
+        double totalMass = 0;
+        double cellVolume = _dataset.GeneratedMesh.Spacing.X *
+                          _dataset.GeneratedMesh.Spacing.Y *
+                          _dataset.GeneratedMesh.Spacing.Z;
+        double fluidDensity = 1000.0; // kg/m³ (water)
+
+        for (int i = 0; i < state.Porosity.GetLength(0); i++)
+        for (int j = 0; j < state.Porosity.GetLength(1); j++)
+        for (int k = 0; k < state.Porosity.GetLength(2); k++)
+        {
+            double porosity = state.Porosity[i, j, k];
+            double saturation = state.LiquidSaturation[i, j, k];
+            totalMass += cellVolume * porosity * saturation * fluidDensity;
+        }
+        state.TotalMass = totalMass;
     }
 }
