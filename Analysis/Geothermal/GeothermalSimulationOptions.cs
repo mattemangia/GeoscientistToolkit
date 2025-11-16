@@ -201,6 +201,146 @@ public class GeothermalSimulationOptions
     /// </summary>
     public double PrecipitationVisualizationThreshold { get; set; } = 1e-6;
 
+    // ===== Multiphase Flow Parameters =====
+
+    /// <summary>
+    ///     Enable multiphase flow simulation (water-steam-CO2)
+    /// </summary>
+    public bool EnableMultiphaseFlow { get; set; } = false;
+
+    /// <summary>
+    ///     Multiphase fluid type (WaterOnly, WaterSteam, WaterCO2, WaterSteamCO2)
+    /// </summary>
+    public MultiphaseFluidType MultiphaseFluidType { get; set; } = MultiphaseFluidType.WaterCO2;
+
+    /// <summary>
+    ///     Initial salinity (mass fraction of NaCl)
+    /// </summary>
+    public float InitialSalinity { get; set; } = 0.035f; // 3.5% (seawater)
+
+    /// <summary>
+    ///     Residual water saturation for relative permeability
+    /// </summary>
+    public float ResidualWaterSaturation { get; set; } = 0.2f;
+
+    /// <summary>
+    ///     Residual gas saturation for relative permeability
+    /// </summary>
+    public float ResidualGasSaturation { get; set; } = 0.05f;
+
+    // ===== Adaptive Mesh Refinement Parameters =====
+
+    /// <summary>
+    ///     Enable adaptive mesh refinement
+    /// </summary>
+    public bool EnableAdaptiveMeshRefinement { get; set; } = false;
+
+    /// <summary>
+    ///     Maximum refinement level (0 = base mesh, 1-3 = refined)
+    /// </summary>
+    public int MaxRefinementLevel { get; set; } = 2;
+
+    /// <summary>
+    ///     Temperature gradient threshold for refinement (K/m)
+    /// </summary>
+    public float TemperatureGradientThreshold { get; set; } = 5.0f;
+
+    /// <summary>
+    ///     Pressure gradient threshold for refinement (Pa/m)
+    /// </summary>
+    public float PressureGradientThreshold { get; set; } = 1e5f;
+
+    /// <summary>
+    ///     Refinement interval (refine every N timesteps)
+    /// </summary>
+    public int RefinementInterval { get; set; } = 10;
+
+    // ===== Time-Varying Boundary Conditions Parameters =====
+
+    /// <summary>
+    ///     Enable time-varying boundary conditions
+    /// </summary>
+    public bool EnableTimeVaryingBC { get; set; } = false;
+
+    /// <summary>
+    ///     Use seasonal variation in temperature and load
+    /// </summary>
+    public bool UseSeasonalVariation { get; set; } = true;
+
+    /// <summary>
+    ///     Use daily load variation
+    /// </summary>
+    public bool UseDailyVariation { get; set; } = true;
+
+    /// <summary>
+    ///     Average outdoor temperature for seasonal variation (°C)
+    /// </summary>
+    public float AverageOutdoorTemp { get; set; } = 10.0f;
+
+    /// <summary>
+    ///     Seasonal temperature amplitude (°C)
+    /// </summary>
+    public float SeasonalTempAmplitude { get; set; } = 15.0f;
+
+    /// <summary>
+    ///     Peak heating load (W)
+    /// </summary>
+    public float PeakHeatingLoad { get; set; } = 50000.0f;
+
+    /// <summary>
+    ///     Peak cooling load (W)
+    /// </summary>
+    public float PeakCoolingLoad { get; set; } = 30000.0f;
+
+    // ===== Enhanced HVAC Parameters =====
+
+    /// <summary>
+    ///     Enable enhanced HVAC calculations
+    /// </summary>
+    public bool EnableEnhancedHVAC { get; set; } = false;
+
+    /// <summary>
+    ///     Carnot efficiency (fraction of ideal Carnot COP)
+    /// </summary>
+    public float CarnotEfficiency { get; set; } = 0.45f;
+
+    /// <summary>
+    ///     Building UA value (heat loss coefficient, W/K)
+    /// </summary>
+    public float BuildingUAValue { get; set; } = 300.0f;
+
+    /// <summary>
+    ///     Design indoor temperature (°C)
+    /// </summary>
+    public float DesignIndoorTemp { get; set; } = 20.0f;
+
+    /// <summary>
+    ///     Design supply temperature (°C)
+    /// </summary>
+    public float DesignSupplyTemp { get; set; } = 35.0f;
+
+    // ===== Fractured Media Parameters (Enhanced) =====
+
+    /// <summary>
+    ///     Enable dual-continuum fractured media model
+    /// </summary>
+    public bool EnableDualContinuumFractures { get; set; } = false;
+
+    /// <summary>
+    ///     Fracture spacing (m)
+    /// </summary>
+    public float FractureSpacing { get; set; } = 1.0f;
+
+    /// <summary>
+    ///     Fracture density (fractures/m)
+    /// </summary>
+    public float FractureDensity { get; set; } = 3.0f;
+
+    /// <summary>
+    ///     Matrix permeability (m²)
+    /// </summary>
+    public float MatrixPermeability { get; set; } = 1e-18f;
+
     /// <summary>
     ///     Initialize default seasonal curve for BTES mode.
     ///     Creates a sinusoidal curve with charging in summer and discharging in winter.
