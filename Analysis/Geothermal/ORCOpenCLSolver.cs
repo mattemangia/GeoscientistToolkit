@@ -18,6 +18,9 @@ namespace GeoscientistToolkit.Analysis.Geothermal
         private nint _context;
         private nint _commandQueue;
         private nint _device;
+        private List<nint> _devices; // Multi-GPU support: all devices in context
+        private List<nint> _queues; // Multi-GPU support: command queue per device
+        private bool _multiGPUMode;
         private nint _program;
         private nint _kernelORCCycle;
         private nint _kernelReduction;
@@ -55,31 +58,91 @@ namespace GeoscientistToolkit.Analysis.Geothermal
         {
             try
             {
-                // Get device from OpenCLDeviceManager
-                _device = OpenCLDeviceManager.GetComputeDevice();
+                Console.WriteLine("ORCOpenCLSolver: Initializing OpenCL...");
 
-                if (_device == nint.Zero)
+                // Check if multi-GPU mode is enabled
+                _multiGPUMode = GeoscientistToolkit.OpenCL.OpenCLDeviceManager.IsMultiGPUEnabled();
+
+                if (_multiGPUMode)
                 {
-                    Console.WriteLine("Failed to get OpenCL device");
-                    return false;
+                    // Multi-GPU mode: get all GPU devices
+                    var deviceInfos = GeoscientistToolkit.OpenCL.OpenCLDeviceManager.GetAllComputeDevices();
+
+                    if (deviceInfos == null || deviceInfos.Count == 0)
+                    {
+                        Console.WriteLine("No OpenCL devices available from OpenCLDeviceManager.");
+                        return false;
+                    }
+
+                    _devices = deviceInfos.Select(d => d.Device).ToList();
+                    _device = _devices[0]; // Primary device for reporting
+
+                    Console.WriteLine($"ORCOpenCLSolver: Multi-GPU mode with {_devices.Count} devices:");
+                    foreach (var info in deviceInfos)
+                    {
+                        Console.WriteLine($"  - {info.Name} ({info.Vendor}) - {info.GlobalMemory / (1024 * 1024)} MB");
+                    }
+
+                    // Create context with all devices
+                    int errCode;
+                    fixed (nint* devicesPtr = _devices.ToArray())
+                    {
+                        _context = _cl.CreateContext(null, (uint)_devices.Count, devicesPtr, null, null, &errCode);
+                    }
+                    if (errCode != 0)
+                    {
+                        Console.WriteLine($"Failed to create multi-device OpenCL context: {errCode}");
+                        return false;
+                    }
+
+                    // Create command queue for each device
+                    _queues = new List<nint>();
+                    foreach (var device in _devices)
+                    {
+                        var dev = device;
+                        var queue = _cl.CreateCommandQueue(_context, dev, (CommandQueueProperties)0, &errCode);
+                        if (errCode != 0)
+                        {
+                            Console.WriteLine($"Failed to create command queue for device: {errCode}");
+                            return false;
+                        }
+                        _queues.Add(queue);
+                    }
+
+                    // Use first queue as primary
+                    _commandQueue = _queues[0];
                 }
-
-                var device = _device;
-                // Create context
-                int errorCode;
-                _context = _cl.CreateContext(null, 1, &device, null, null, &errorCode);
-                if (errorCode != (int)ErrorCodes.Success)
+                else
                 {
-                    Console.WriteLine($"Failed to create OpenCL context: {errorCode}");
-                    return false;
-                }
+                    // Single GPU mode
+                    _device = OpenCLDeviceManager.GetComputeDevice();
 
-                // Create command queue (OpenCL 1.2)
-                _commandQueue = _cl.CreateCommandQueue(_context, _device, (CommandQueueProperties)0, &errorCode);
-                if (errorCode != (int)ErrorCodes.Success)
-                {
-                    Console.WriteLine($"Failed to create command queue: {errorCode}");
-                    return false;
+                    if (_device == nint.Zero)
+                    {
+                        Console.WriteLine("Failed to get OpenCL device");
+                        return false;
+                    }
+
+                    var deviceInfo = GeoscientistToolkit.OpenCL.OpenCLDeviceManager.GetDeviceInfo();
+                    Console.WriteLine($"ORCOpenCLSolver: Using device: {deviceInfo.Name} ({deviceInfo.Vendor})");
+
+                    // Create context
+                    int errorCode;
+                    var device = _device;
+                    _context = _cl.CreateContext(null, 1, &device, null, null, &errorCode);
+                    if (errorCode != (int)ErrorCodes.Success)
+                    {
+                        Console.WriteLine($"Failed to create OpenCL context: {errorCode}");
+                        return false;
+                    }
+
+                    // Create command queue (OpenCL 1.2)
+                    _commandQueue = _cl.CreateCommandQueue(_context, _device, (CommandQueueProperties)0, &errorCode);
+                    if (errorCode != (int)ErrorCodes.Success)
+                    {
+                        Console.WriteLine($"Failed to create command queue: {errorCode}");
+                        return false;
+                    }
                 }
 
                 // Build program
@@ -89,17 +152,18 @@ namespace GeoscientistToolkit.Analysis.Geothermal
                 }
 
                 // Create kernels
-                _kernelORCCycle = _cl.CreateKernel(_program, "orc_cycle_kernel", &errorCode);
-                if (errorCode != (int)ErrorCodes.Success)
+                int errCode2;
+                _kernelORCCycle = _cl.CreateKernel(_program, "orc_cycle_kernel", &errCode2);
+                if (errCode2 != (int)ErrorCodes.Success)
                 {
-                    Console.WriteLine($"Failed to create ORC cycle kernel: {errorCode}");
+                    Console.WriteLine($"Failed to create ORC cycle kernel: {errCode2}");
                     return false;
                 }
 
-                _kernelReduction = _cl.CreateKernel(_program, "reduction_sum_kernel", &errorCode);
-                if (errorCode != (int)ErrorCodes.Success)
+                _kernelReduction = _cl.CreateKernel(_program, "reduction_sum_kernel", &errCode2);
+                if (errCode2 != (int)ErrorCodes.Success)
                 {
-                    Console.WriteLine($"Failed to create reduction kernel: {errorCode}");
+                    Console.WriteLine($"Failed to create reduction kernel: {errCode2}");
                     return false;
                 }
 
@@ -133,9 +197,20 @@ namespace GeoscientistToolkit.Analysis.Geothermal
                 return false;
             }
 
-            // Build program
-            nint device = _device; // Create local copy to take address
-            errorCode = _cl.BuildProgram(_program, 1, &device, (byte*)null, null, null);
+            // Build program for all devices in context
+            if (_multiGPUMode && _devices != null)
+            {
+                fixed (nint* devicesPtr = _devices.ToArray())
+                {
+                    errorCode = _cl.BuildProgram(_program, (uint)_devices.Count, devicesPtr, (byte*)null, null, null);
+                }
+            }
+            else
+            {
+                var device = _device;
+                errorCode = _cl.BuildProgram(_program, 1, &device, (byte*)null, null, null);
+            }
+
             if (errorCode != (int)ErrorCodes.Success)
             {
                 Console.WriteLine($"Failed to build program: {errorCode}");
@@ -541,6 +616,15 @@ __kernel void reduction_sum_kernel(
             if (_kernelORCCycle != nint.Zero) _cl.ReleaseKernel(_kernelORCCycle);
             if (_kernelReduction != nint.Zero) _cl.ReleaseKernel(_kernelReduction);
             if (_program != nint.Zero) _cl.ReleaseProgram(_program);
+
+            // Multi-GPU: Release all command queues
+            if (_queues != null)
+            {
+                foreach (var queue in _queues)
+                {
+                    if (queue != 0) _cl.ReleaseCommandQueue(queue);
+                }
+            }
             if (_commandQueue != nint.Zero) _cl.ReleaseCommandQueue(_commandQueue);
             if (_context != nint.Zero) _cl.ReleaseContext(_context);
 

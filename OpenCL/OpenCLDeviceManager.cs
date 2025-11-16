@@ -159,6 +159,73 @@ public static class OpenCLDeviceManager
     }
 
     /// <summary>
+    ///     Gets all GPU devices for multi-GPU parallelization if enabled in settings.
+    ///     Returns a list with the single selected device if multi-GPU is disabled or only one GPU is available.
+    /// </summary>
+    public static List<OpenCLDeviceInfo> GetAllComputeDevices()
+    {
+        lock (_lock)
+        {
+            if (!_isInitialized)
+                GetComputeDevice();
+
+            var settings = SettingsManager.Instance?.Settings?.Hardware;
+            var enableMultiGPU = settings?.EnableMultiGPUParallelization ?? false;
+
+            if (!enableMultiGPU || _availableDevices == null)
+            {
+                // Multi-GPU disabled or not initialized - return single device
+                if (_cachedDevice != 0 && _availableDevices != null)
+                {
+                    var singleDevice = _availableDevices.FirstOrDefault(d => d.Device == _cachedDevice);
+                    if (singleDevice != null)
+                        return new List<OpenCLDeviceInfo> { singleDevice };
+                }
+                return new List<OpenCLDeviceInfo>();
+            }
+
+            // Multi-GPU enabled - return all GPU devices
+            var gpuDevices = _availableDevices.Where(d => d.Type == DeviceType.Gpu).ToList();
+
+            if (gpuDevices.Count > 1)
+            {
+                Logger.Log($"OpenCLDeviceManager: Multi-GPU mode enabled with {gpuDevices.Count} GPUs");
+                foreach (var gpu in gpuDevices)
+                {
+                    Logger.Log($"  - {gpu.Name} ({gpu.Vendor}) - {gpu.GlobalMemory / (1024 * 1024)} MB");
+                }
+            }
+            else if (gpuDevices.Count == 1)
+            {
+                Logger.Log("OpenCLDeviceManager: Only one GPU available, using single-GPU mode");
+            }
+
+            return gpuDevices.Count > 0 ? gpuDevices : new List<OpenCLDeviceInfo> { _availableDevices.FirstOrDefault(d => d.Device == _cachedDevice) }.Where(d => d != null).ToList();
+        }
+    }
+
+    /// <summary>
+    ///     Checks if multi-GPU mode is enabled and multiple GPUs are available.
+    /// </summary>
+    public static bool IsMultiGPUEnabled()
+    {
+        lock (_lock)
+        {
+            var settings = SettingsManager.Instance?.Settings?.Hardware;
+            var enableMultiGPU = settings?.EnableMultiGPUParallelization ?? false;
+
+            if (!enableMultiGPU)
+                return false;
+
+            if (!_isInitialized)
+                GetComputeDevice();
+
+            var gpuDevices = _availableDevices?.Where(d => d.Type == DeviceType.Gpu).ToList();
+            return gpuDevices != null && gpuDevices.Count > 1;
+        }
+    }
+
+    /// <summary>
     ///     Resets the device cache. Call this when settings change to force device reselection.
     /// </summary>
     public static void Reset()

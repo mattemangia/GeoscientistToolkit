@@ -67,6 +67,9 @@ public unsafe class GeomechanicalSimulatorGPU : IDisposable
     // GPU buffers (persistent)
     private nint _bufNodeX, _bufNodeY, _bufNodeZ;
     private nint _context, _queue, _program, _device;
+    private List<nint> _devices; // Multi-GPU support: all devices in context
+    private List<nint> _queues; // Multi-GPU support: command queue per device
+    private bool _multiGPUMode;
     private float[] _dirichletValue;
 
     // Solution vector (CPU)
@@ -144,6 +147,14 @@ public unsafe class GeomechanicalSimulatorGPU : IDisposable
             _program = 0;
         }
 
+        // Multi-GPU: Release all command queues
+        if (_queues != null)
+        {
+            foreach (var queue in _queues)
+            {
+                if (queue != 0) _cl.ReleaseCommandQueue(queue);
+            }
+        }
         if (_queue != 0)
         {
             _cl.ReleaseCommandQueue(_queue);
@@ -361,34 +372,91 @@ public unsafe class GeomechanicalSimulatorGPU : IDisposable
     {
         try
         {
-            // Use centralized device manager to get the device from settings
-            _device = GeoscientistToolkit.OpenCL.OpenCLDeviceManager.GetComputeDevice();
+            Logger.Log("[GeomechGPU] Initializing OpenCL...");
 
-            if (_device == 0)
+            // Check if multi-GPU mode is enabled
+            _multiGPUMode = GeoscientistToolkit.OpenCL.OpenCLDeviceManager.IsMultiGPUEnabled();
+
+            if (_multiGPUMode)
             {
-                Logger.LogWarning("[GeomechGPU] No OpenCL device available from OpenCLDeviceManager.");
-                throw new Exception("No OpenCL device available from OpenCLDeviceManager");
+                // Multi-GPU mode: get all GPU devices
+                var deviceInfos = GeoscientistToolkit.OpenCL.OpenCLDeviceManager.GetAllComputeDevices();
+
+                if (deviceInfos == null || deviceInfos.Count == 0)
+                {
+                    Logger.LogWarning("[GeomechGPU] No OpenCL devices available from OpenCLDeviceManager.");
+                    throw new Exception("No OpenCL device available from OpenCLDeviceManager");
+                }
+
+                _devices = deviceInfos.Select(d => d.Device).ToList();
+                _device = _devices[0]; // Primary device for reporting
+
+                Logger.Log($"[GeomechGPU] Multi-GPU mode with {_devices.Count} devices:");
+                foreach (var info in deviceInfos)
+                {
+                    Logger.Log($"  - {info.Name} ({info.Vendor}) - {info.GlobalMemory / (1024 * 1024)} MB");
+                }
+
+                // Create context with all devices
+                int errCode;
+                fixed (nint* devicesPtr = _devices.ToArray())
+                {
+                    _context = _cl.CreateContext(null, (uint)_devices.Count, devicesPtr, null, null, &errCode);
+                }
+                if (errCode != 0)
+                {
+                    Logger.LogError($"[GeomechGPU] Failed to create multi-device OpenCL context: {errCode}");
+                    throw new Exception($"Failed to create multi-device OpenCL context: {errCode}");
+                }
+
+                // Create command queue for each device
+                _queues = new List<nint>();
+                foreach (var device in _devices)
+                {
+                    var dev = device;
+                    var queue = _cl.CreateCommandQueue(_context, dev, CommandQueueProperties.None, &errCode);
+                    if (errCode != 0)
+                    {
+                        Logger.LogError($"[GeomechGPU] Failed to create command queue for device: {errCode}");
+                        throw new Exception($"Failed to create command queue for device: {errCode}");
+                    }
+                    _queues.Add(queue);
+                }
+
+                // Use first queue as primary
+                _queue = _queues[0];
             }
+            else
+            {
+                // Single GPU mode
+                _device = GeoscientistToolkit.OpenCL.OpenCLDeviceManager.GetComputeDevice();
 
-            // Get device info from the centralized manager
-            var deviceInfo = GeoscientistToolkit.OpenCL.OpenCLDeviceManager.GetDeviceInfo();
-            var deviceName = deviceInfo.Name;
-            var deviceVendor = deviceInfo.Vendor;
-            var deviceGlobalMemory = deviceInfo.GlobalMemory;
+                if (_device == 0)
+                {
+                    Logger.LogWarning("[GeomechGPU] No OpenCL device available from OpenCLDeviceManager.");
+                    throw new Exception("No OpenCL device available from OpenCLDeviceManager");
+                }
 
-            Logger.Log($"[GeomechGPU] Using device: {deviceName} ({deviceVendor})");
-            Logger.Log($"[GeomechGPU] Global Memory: {deviceGlobalMemory / (1024 * 1024)} MB");
+                // Get device info from the centralized manager
+                var deviceInfo = GeoscientistToolkit.OpenCL.OpenCLDeviceManager.GetDeviceInfo();
+                var deviceName = deviceInfo.Name;
+                var deviceVendor = deviceInfo.Vendor;
+                var deviceGlobalMemory = deviceInfo.GlobalMemory;
 
-            Logger.Log("[GeomechGPU] Creating OpenCL context...");
-            int error;
-            var devices = stackalloc nint[1];
-            devices[0] = _device;
-            _context = _cl.CreateContext(null, 1, devices, null, null, &error);
-            CheckError(error, "CreateContext");
+                Logger.Log($"[GeomechGPU] Using device: {deviceName} ({deviceVendor})");
+                Logger.Log($"[GeomechGPU] Global Memory: {deviceGlobalMemory / (1024 * 1024)} MB");
 
-            Logger.Log("[GeomechGPU] Creating command queue...");
-            _queue = _cl.CreateCommandQueue(_context, _device, CommandQueueProperties.None, &error);
-            CheckError(error, "CreateCommandQueue");
+                Logger.Log("[GeomechGPU] Creating OpenCL context...");
+                int error;
+                var devices = stackalloc nint[1];
+                devices[0] = _device;
+                _context = _cl.CreateContext(null, 1, devices, null, null, &error);
+                CheckError(error, "CreateContext");
+
+                Logger.Log("[GeomechGPU] Creating command queue...");
+                _queue = _cl.CreateCommandQueue(_context, _device, CommandQueueProperties.None, &error);
+                CheckError(error, "CreateCommandQueue");
+            }
 
             Logger.Log("[GeomechGPU] Building OpenCL kernels...");
             BuildKernels();
@@ -445,9 +513,21 @@ public unsafe class GeomechanicalSimulatorGPU : IDisposable
         }
 
         Logger.Log("[GeomechGPU] Building program...");
-        var devices = stackalloc nint[1];
-        devices[0] = _device;
-        error = _cl.BuildProgram(_program, 1, devices, (byte*)null, null, null);
+
+        // Build program for all devices in context
+        if (_multiGPUMode && _devices != null)
+        {
+            fixed (nint* devicesPtr = _devices.ToArray())
+            {
+                error = _cl.BuildProgram(_program, (uint)_devices.Count, devicesPtr, (byte*)null, null, null);
+            }
+        }
+        else
+        {
+            var devices = stackalloc nint[1];
+            devices[0] = _device;
+            error = _cl.BuildProgram(_program, 1, devices, (byte*)null, null, null);
+        }
 
         if (error != 0)
         {

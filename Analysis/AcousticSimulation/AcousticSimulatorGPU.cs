@@ -19,6 +19,10 @@ public unsafe class AcousticSimulatorGPU : IAcousticKernel
 
     private nint _commandQueue;
     private nint _context;
+    private nint _device;
+    private List<nint> _devices; // Multi-GPU support: all devices in context
+    private List<nint> _queues; // Multi-GPU support: command queue per device
+    private bool _multiGPUMode;
     private nuint _currentBufferSize;
 
     private int _currentBufferWidth, _currentBufferHeight, _currentBufferDepth;
@@ -123,6 +127,15 @@ public unsafe class AcousticSimulatorGPU : IAcousticKernel
         if (_kernelUpdateStress != 0) _cl.ReleaseKernel(_kernelUpdateStress);
         if (_kernelUpdateVelocity != 0) _cl.ReleaseKernel(_kernelUpdateVelocity);
         if (_program != 0) _cl.ReleaseProgram(_program);
+
+        // Multi-GPU: Release all command queues
+        if (_queues != null)
+        {
+            foreach (var queue in _queues)
+            {
+                if (queue != 0) _cl.ReleaseCommandQueue(queue);
+            }
+        }
         if (_commandQueue != 0) _cl.ReleaseCommandQueue(_commandQueue);
         if (_context != 0) _cl.ReleaseContext(_context);
     }
@@ -255,32 +268,93 @@ public unsafe class AcousticSimulatorGPU : IAcousticKernel
     {
         int error;
 
-        // Use centralized device manager to get the device from settings
-        nint _device = GeoscientistToolkit.OpenCL.OpenCLDeviceManager.GetComputeDevice();
+        Logger.Log("AcousticSimulatorGPU: Initializing OpenCL...");
 
-        if (_device == 0)
+        // Check if multi-GPU mode is enabled
+        _multiGPUMode = GeoscientistToolkit.OpenCL.OpenCLDeviceManager.IsMultiGPUEnabled();
+
+        if (_multiGPUMode)
         {
-            Logger.LogWarning("No OpenCL device available from OpenCLDeviceManager.");
-            throw new Exception("OpenCL device not available");
+            // Multi-GPU mode: get all GPU devices
+            var deviceInfos = GeoscientistToolkit.OpenCL.OpenCLDeviceManager.GetAllComputeDevices();
+
+            if (deviceInfos == null || deviceInfos.Count == 0)
+            {
+                Logger.LogWarning("No OpenCL devices available from OpenCLDeviceManager.");
+                throw new Exception("OpenCL device not available");
+            }
+
+            _devices = deviceInfos.Select(d => d.Device).ToList();
+            _device = _devices[0]; // Primary device for reporting
+
+            DeviceName = string.Join(", ", deviceInfos.Select(d => d.Name));
+            DeviceVendor = string.Join(", ", deviceInfos.Select(d => d.Vendor).Distinct());
+            DeviceGlobalMemory = (nuint)deviceInfos.Sum(d => (long)d.GlobalMemory);
+
+            Logger.Log($"AcousticSimulatorGPU: Multi-GPU mode with {_devices.Count} devices:");
+            foreach (var info in deviceInfos)
+            {
+                Logger.Log($"  - {info.Name} ({info.Vendor}) - {info.GlobalMemory / (1024 * 1024)} MB");
+            }
+
+            // Create context with all devices
+            int errCode;
+            fixed (nint* devicesPtr = _devices.ToArray())
+            {
+                _context = _cl.CreateContext(null, (uint)_devices.Count, devicesPtr, null, null, &errCode);
+            }
+            if (errCode != 0)
+            {
+                Logger.LogError($"Failed to create multi-device OpenCL context: {errCode}");
+                throw new Exception($"Failed to create multi-device OpenCL context: {errCode}");
+            }
+
+            // Create command queue for each device
+            _queues = new List<nint>();
+            foreach (var device in _devices)
+            {
+                var dev = device;
+                var queue = _cl.CreateCommandQueue(_context, dev, (CommandQueueProperties)0, &errCode);
+                if (errCode != 0)
+                {
+                    Logger.LogError($"Failed to create command queue for device: {errCode}");
+                    throw new Exception($"Failed to create command queue for device: {errCode}");
+                }
+                _queues.Add(queue);
+            }
+
+            // Use first queue as primary
+            _commandQueue = _queues[0];
         }
+        else
+        {
+            // Single GPU mode
+            _device = GeoscientistToolkit.OpenCL.OpenCLDeviceManager.GetComputeDevice();
 
-        // Get device info from the centralized manager
-        var deviceInfo = GeoscientistToolkit.OpenCL.OpenCLDeviceManager.GetDeviceInfo();
-        DeviceName = deviceInfo.Name;
-        DeviceVendor = deviceInfo.Vendor;
-        DeviceGlobalMemory = (nuint)deviceInfo.GlobalMemory;
+            if (_device == 0)
+            {
+                Logger.LogWarning("No OpenCL device available from OpenCLDeviceManager.");
+                throw new Exception("OpenCL device not available");
+            }
 
-        Logger.Log($"AcousticSimulatorGPU: Using device: {DeviceName} ({DeviceVendor})");
-        Logger.Log($"AcousticSimulatorGPU: Global Memory: {DeviceGlobalMemory / (1024 * 1024)} MB");
+            // Get device info from the centralized manager
+            var deviceInfo = GeoscientistToolkit.OpenCL.OpenCLDeviceManager.GetDeviceInfo();
+            DeviceName = deviceInfo.Name;
+            DeviceVendor = deviceInfo.Vendor;
+            DeviceGlobalMemory = (nuint)deviceInfo.GlobalMemory;
 
-        // Create context with the device from centralized manager
-        var device = _device;
-        _context = _cl.CreateContext(null, 1, &device, null, null, &error);
-        CheckError(error, "CreateContext");
+            Logger.Log($"AcousticSimulatorGPU: Using device: {DeviceName} ({DeviceVendor})");
+            Logger.Log($"AcousticSimulatorGPU: Global Memory: {DeviceGlobalMemory / (1024 * 1024)} MB");
 
-        // Create command queue with the device from centralized manager
-        _commandQueue = _cl.CreateCommandQueue(_context, device, (CommandQueueProperties)0, &error);
-        CheckError(error, "CreateCommandQueue");
+            // Create context with the device from centralized manager
+            var device = _device;
+            _context = _cl.CreateContext(null, 1, &device, null, null, &error);
+            CheckError(error, "CreateContext");
+
+            // Create command queue with the device from centralized manager
+            _commandQueue = _cl.CreateCommandQueue(_context, device, (CommandQueueProperties)0, &error);
+            CheckError(error, "CreateCommandQueue");
+        }
 
         BuildProgram();
         Logger.Log("[GPU] OpenCL initialized successfully");
@@ -302,7 +376,20 @@ public unsafe class AcousticSimulatorGPU : IAcousticKernel
             CheckError(error, "CreateProgramWithSource");
         }
 
-        error = _cl.BuildProgram(_program, 0, null, (byte*)null, null, null);
+        // Build program for all devices in context
+        if (_multiGPUMode && _devices != null)
+        {
+            fixed (nint* devicesPtr = _devices.ToArray())
+            {
+                error = _cl.BuildProgram(_program, (uint)_devices.Count, devicesPtr, (byte*)null, null, null);
+            }
+        }
+        else
+        {
+            var device = _device;
+            error = _cl.BuildProgram(_program, 1, &device, (byte*)null, null, null);
+        }
+
         if (error != 0)
         {
             nuint logSize;

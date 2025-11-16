@@ -38,6 +38,10 @@ public unsafe class NMRSimulationOpenCL : IDisposable
     private nint _commandQueue;
 
     private nint _context;
+    private nint _device;
+    private List<nint> _devices; // Multi-GPU support: all devices in context
+    private List<nint> _queues; // Multi-GPU support: command queue per device
+    private bool _multiGPUMode;
 
     private bool _disposed;
     private nint _kernelCountActive;
@@ -85,6 +89,15 @@ public unsafe class NMRSimulationOpenCL : IDisposable
         _cl.ReleaseKernel(_kernelInitialize);
 
         _cl.ReleaseProgram(_program);
+
+        // Multi-GPU: Release all command queues
+        if (_queues != null)
+        {
+            foreach (var queue in _queues)
+            {
+                if (queue != 0) _cl.ReleaseCommandQueue(queue);
+            }
+        }
         _cl.ReleaseCommandQueue(_commandQueue);
         _cl.ReleaseContext(_context);
 
@@ -193,26 +206,82 @@ public unsafe class NMRSimulationOpenCL : IDisposable
     {
         Logger.Log("NMRSimulationOpenCL: Initializing OpenCL...");
 
-        // Use centralized device manager to get the device from settings
-        var device = GeoscientistToolkit.OpenCL.OpenCLDeviceManager.GetComputeDevice();
+        // Check if multi-GPU mode is enabled
+        _multiGPUMode = GeoscientistToolkit.OpenCL.OpenCLDeviceManager.IsMultiGPUEnabled();
 
-        if (device == 0)
+        if (_multiGPUMode)
         {
-            throw new InvalidOperationException("No OpenCL device available from OpenCLDeviceManager.");
+            // Multi-GPU mode: get all GPU devices
+            var deviceInfos = GeoscientistToolkit.OpenCL.OpenCLDeviceManager.GetAllComputeDevices();
+
+            if (deviceInfos == null || deviceInfos.Count == 0)
+            {
+                Logger.LogWarning("No OpenCL devices available from OpenCLDeviceManager.");
+                throw new InvalidOperationException("No OpenCL device available from OpenCLDeviceManager.");
+            }
+
+            _devices = deviceInfos.Select(d => d.Device).ToList();
+            _device = _devices[0]; // Primary device for reporting
+
+            Logger.Log($"NMRSimulationOpenCL: Multi-GPU mode with {_devices.Count} devices:");
+            foreach (var info in deviceInfos)
+            {
+                Logger.Log($"  - {info.Name} ({info.Vendor}) - {info.GlobalMemory / (1024 * 1024)} MB");
+            }
+
+            // Create context with all devices
+            int errCode;
+            fixed (nint* devicesPtr = _devices.ToArray())
+            {
+                _context = _cl.CreateContext(null, (uint)_devices.Count, devicesPtr, null, null, &errCode);
+            }
+            if (errCode != 0)
+            {
+                Logger.LogError($"Failed to create multi-device OpenCL context: {errCode}");
+                throw new InvalidOperationException($"Failed to create multi-device OpenCL context: {errCode}");
+            }
+
+            // Create command queue for each device
+            _queues = new List<nint>();
+            foreach (var device in _devices)
+            {
+                var dev = device;
+                var queue = _cl.CreateCommandQueue(_context, dev, (CommandQueueProperties)0, &errCode);
+                if (errCode != 0)
+                {
+                    Logger.LogError($"Failed to create command queue for device: {errCode}");
+                    throw new InvalidOperationException($"Failed to create command queue for device: {errCode}");
+                }
+                _queues.Add(queue);
+            }
+
+            // Use first queue as primary
+            _commandQueue = _queues[0];
         }
+        else
+        {
+            // Single GPU mode
+            _device = GeoscientistToolkit.OpenCL.OpenCLDeviceManager.GetComputeDevice();
 
-        // Get device info from the centralized manager
-        var deviceInfo = GeoscientistToolkit.OpenCL.OpenCLDeviceManager.GetDeviceInfo();
-        Logger.Log($"NMRSimulationOpenCL: Using device: {deviceInfo.Name} ({deviceInfo.Vendor})");
-        Logger.Log($"NMRSimulationOpenCL: Global Memory: {deviceInfo.GlobalMemory / (1024 * 1024)} MB");
+            if (_device == 0)
+            {
+                throw new InvalidOperationException("No OpenCL device available from OpenCLDeviceManager.");
+            }
 
-        // Create context
-        int errorCode;
-        _context = _cl.CreateContext(null, 1, &device, null, null, &errorCode);
-        CheckError(errorCode, "CreateContext");
+            // Get device info from the centralized manager
+            var deviceInfo = GeoscientistToolkit.OpenCL.OpenCLDeviceManager.GetDeviceInfo();
+            Logger.Log($"NMRSimulationOpenCL: Using device: {deviceInfo.Name} ({deviceInfo.Vendor})");
+            Logger.Log($"NMRSimulationOpenCL: Global Memory: {deviceInfo.GlobalMemory / (1024 * 1024)} MB");
 
-        _commandQueue = _cl.CreateCommandQueue(_context, device, (CommandQueueProperties)0, &errorCode);
-        CheckError(errorCode, "CreateCommandQueue");
+            // Create context
+            int errorCode;
+            var device = _device;
+            _context = _cl.CreateContext(null, 1, &device, null, null, &errorCode);
+            CheckError(errorCode, "CreateContext");
+
+            _commandQueue = _cl.CreateCommandQueue(_context, device, (CommandQueueProperties)0, &errorCode);
+            CheckError(errorCode, "CreateCommandQueue");
+        }
 
         // Load and compile kernel
         var kernelSource = LoadKernelSource();
@@ -234,7 +303,20 @@ public unsafe class NMRSimulationOpenCL : IDisposable
 
         // Build with better error handling
         Logger.Log("[NMRSimulationOpenCL] Compiling OpenCL kernels...");
-        errorCode = _cl.BuildProgram(_program, 1, &device, (byte*)null, null, null);
+
+        // Build program for all devices in context
+        if (_multiGPUMode && _devices != null)
+        {
+            fixed (nint* devicesPtr = _devices.ToArray())
+            {
+                errorCode = _cl.BuildProgram(_program, (uint)_devices.Count, devicesPtr, (byte*)null, null, null);
+            }
+        }
+        else
+        {
+            var device = _device;
+            errorCode = _cl.BuildProgram(_program, 1, &device, (byte*)null, null, null);
+        }
 
         // ALWAYS retrieve build log (even on success, for warnings)
         nuint logSize;

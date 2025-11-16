@@ -70,6 +70,7 @@ public class HardwareSettings
     public int TextureMemoryLimit { get; set; } = 2048; // MB
     public bool EnableVSync { get; set; } = true;
     public int TargetFrameRate { get; set; } = 60;
+    public bool EnableMultiGPUParallelization { get; set; } = false; // Enable multi-GPU compute when multiple GPUs available
 }
 
 /// <summary>

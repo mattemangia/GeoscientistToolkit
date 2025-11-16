@@ -116,6 +116,9 @@ public class GeothermalOpenCLSolver : IDisposable
     private nint _context;
     private nint _densityBuffer;
     private nint _device;
+    private List<nint> _devices; // Multi-GPU support: all devices in context
+    private List<nint> _queues; // Multi-GPU support: command queue per device
+    private bool _multiGPUMode;
     private nint _dispersionBuffer;
     private nint _fluidTempDownBuffer; // Downward fluid temperatures
 
@@ -188,7 +191,17 @@ public class GeothermalOpenCLSolver : IDisposable
         if (_heatTransferKernel != 0) _cl.ReleaseKernel(_heatTransferKernel);
 
         if (_program != 0) _cl.ReleaseProgram(_program);
+
+        // Multi-GPU: Release all command queues
+        if (_queues != null)
+        {
+            foreach (var queue in _queues)
+            {
+                if (queue != 0) _cl.ReleaseCommandQueue(queue);
+            }
+        }
         if (_queue != 0) _cl.ReleaseCommandQueue(_queue);
+
         if (_context != 0) _cl.ReleaseContext(_context);
 
         _cl?.Dispose();
@@ -196,6 +209,7 @@ public class GeothermalOpenCLSolver : IDisposable
 
     /// <summary>
     ///     Initializes OpenCL context and compiles kernels.
+    ///     Supports multi-GPU mode when enabled in settings.
     /// </summary>
     private unsafe bool InitializeOpenCL()
     {
@@ -203,42 +217,100 @@ public class GeothermalOpenCLSolver : IDisposable
         {
             Logger.Log("GeothermalOpenCLSolver: Initializing OpenCL...");
 
-            // Use centralized device manager to get the device from settings
-            _device = GeoscientistToolkit.OpenCL.OpenCLDeviceManager.GetComputeDevice();
+            // Check if multi-GPU mode is enabled
+            _multiGPUMode = GeoscientistToolkit.OpenCL.OpenCLDeviceManager.IsMultiGPUEnabled();
 
-            if (_device == 0)
+            if (_multiGPUMode)
             {
-                Logger.LogWarning("No OpenCL device available from OpenCLDeviceManager.");
-                Logger.LogWarning("Please ensure GPU drivers with OpenCL support are installed.");
-                return false;
+                // Multi-GPU mode: get all GPU devices
+                var deviceInfos = GeoscientistToolkit.OpenCL.OpenCLDeviceManager.GetAllComputeDevices();
+
+                if (deviceInfos == null || deviceInfos.Count == 0)
+                {
+                    Logger.LogWarning("No OpenCL devices available from OpenCLDeviceManager.");
+                    return false;
+                }
+
+                _devices = deviceInfos.Select(d => d.Device).ToList();
+                _device = _devices[0]; // Primary device for reporting
+
+                DeviceName = string.Join(", ", deviceInfos.Select(d => d.Name));
+                DeviceVendor = string.Join(", ", deviceInfos.Select(d => d.Vendor).Distinct());
+                DeviceGlobalMemory = deviceInfos.Sum(d => d.GlobalMemory);
+
+                Logger.Log($"GeothermalOpenCLSolver: Multi-GPU mode with {_devices.Count} devices:");
+                foreach (var info in deviceInfos)
+                {
+                    Logger.Log($"  - {info.Name} ({info.Vendor}) - {info.GlobalMemory / (1024 * 1024)} MB");
+                }
+
+                // Create context with all devices
+                int errCode;
+                fixed (nint* devicesPtr = _devices.ToArray())
+                {
+                    _context = _cl.CreateContext(null, (uint)_devices.Count, devicesPtr, null, null, &errCode);
+                }
+                if (errCode != 0)
+                {
+                    Logger.LogError($"Failed to create multi-device OpenCL context: {errCode}");
+                    return false;
+                }
+
+                // Create command queue for each device
+                _queues = new List<nint>();
+                foreach (var device in _devices)
+                {
+                    var dev = device;
+                    var queue = _cl.CreateCommandQueue(_context, dev, (CommandQueueProperties)0, &errCode);
+                    if (errCode != 0)
+                    {
+                        Logger.LogError($"Failed to create command queue for device: {errCode}");
+                        return false;
+                    }
+                    _queues.Add(queue);
+                }
+
+                // Use first queue as primary
+                _queue = _queues[0];
             }
-
-            // Get device info from the centralized manager
-            var deviceInfo = GeoscientistToolkit.OpenCL.OpenCLDeviceManager.GetDeviceInfo();
-            DeviceName = deviceInfo.Name;
-            DeviceVendor = deviceInfo.Vendor;
-            DeviceGlobalMemory = deviceInfo.GlobalMemory;
-
-            Logger.Log($"GeothermalOpenCLSolver: Using device: {DeviceName} ({DeviceVendor})");
-            Logger.Log($"GeothermalOpenCLSolver: Global Memory: {DeviceGlobalMemory / (1024 * 1024)} MB");
-
-            // Create context
-            int errCode;
-            var device = _device;
-            _context = _cl.CreateContext(null, 1, &device, null, null, &errCode);
-            if (errCode != 0)
+            else
             {
-                Console.WriteLine($"Failed to create OpenCL context: {errCode}");
-                return false;
-            }
+                // Single GPU mode
+                _device = GeoscientistToolkit.OpenCL.OpenCLDeviceManager.GetComputeDevice();
 
-            // Create command queue
-            device = _device;
-            _queue = _cl.CreateCommandQueue(_context, device, (CommandQueueProperties)0, &errCode);
-            if (errCode != 0)
-            {
-                Console.WriteLine($"Failed to create command queue: {errCode}");
-                return false;
+                if (_device == 0)
+                {
+                    Logger.LogWarning("No OpenCL device available from OpenCLDeviceManager.");
+                    Logger.LogWarning("Please ensure GPU drivers with OpenCL support are installed.");
+                    return false;
+                }
+
+                var deviceInfo = GeoscientistToolkit.OpenCL.OpenCLDeviceManager.GetDeviceInfo();
+                DeviceName = deviceInfo.Name;
+                DeviceVendor = deviceInfo.Vendor;
+                DeviceGlobalMemory = deviceInfo.GlobalMemory;
+
+                Logger.Log($"GeothermalOpenCLSolver: Using device: {DeviceName} ({DeviceVendor})");
+                Logger.Log($"GeothermalOpenCLSolver: Global Memory: {DeviceGlobalMemory / (1024 * 1024)} MB");
+
+                // Create context
+                int errCode;
+                var device = _device;
+                _context = _cl.CreateContext(null, 1, &device, null, null, &errCode);
+                if (errCode != 0)
+                {
+                    Console.WriteLine($"Failed to create OpenCL context: {errCode}");
+                    return false;
+                }
+
+                // Create command queue
+                device = _device;
+                _queue = _cl.CreateCommandQueue(_context, device, (CommandQueueProperties)0, &errCode);
+                if (errCode != 0)
+                {
+                    Console.WriteLine($"Failed to create command queue: {errCode}");
+                    return false;
+                }
             }
 
             // Compile kernels
@@ -277,13 +349,25 @@ public class GeothermalOpenCLSolver : IDisposable
                 return false;
             }
 
-            // Build program
-            var device = _device;
-            errCode = _cl.BuildProgram(_program, 1, &device, (byte*)null, null, null);
+            // Build program for all devices in context
+            if (_multiGPUMode && _devices != null)
+            {
+                fixed (nint* devicesPtr = _devices.ToArray())
+                {
+                    errCode = _cl.BuildProgram(_program, (uint)_devices.Count, devicesPtr, (byte*)null, null, null);
+                }
+            }
+            else
+            {
+                var device = _device;
+                errCode = _cl.BuildProgram(_program, 1, &device, (byte*)null, null, null);
+            }
+
             if (errCode != 0)
             {
-                // Get build log
+                // Get build log for first device
                 nuint logSize;
+                var device = _device;
                 _cl.GetProgramBuildInfo(_program, device, (uint)ProgramBuildInfo.BuildLog, 0, null, &logSize);
 
                 var log = new byte[logSize];

@@ -199,6 +199,12 @@ public class SettingsWindow
 
         HelpMarker("Preference for calculations. Takes effect immediately.");
 
+        var enableMultiGPU = hardware.EnableMultiGPUParallelization;
+        if (ImGui.Checkbox("Enable Multi-GPU Parallelization", ref enableMultiGPU))
+            hardware.EnableMultiGPUParallelization = enableMultiGPU;
+
+        HelpMarker("Distribute OpenCL workloads across all available GPUs for better performance. Only effective when multiple GPUs are available.");
+
         var backends = SettingsManager.GetAvailableBackends();
         var backend = hardware.PreferredGraphicsBackend;
         if (ImGui.BeginCombo("Graphics Backend", backend))
