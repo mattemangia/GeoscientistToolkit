@@ -194,12 +194,88 @@ public class GeomechanicsSolver : IDisposable
     }
 
     /// <summary>
-    ///     Set material properties for a specific lithology layer.
+    ///     Set uniform material properties across the entire domain.
+    ///     Use this for homogeneous rock formations.
     /// </summary>
-    public void SetMaterialProperties(string lithology, float youngsModulusGPa,
-        float poissonsRatio, float thermalExpansionCoeff, float biotCoeff = 0.7f)
+    public void SetUniformProperties(float youngsModulusGPa, float poissonsRatio,
+        float thermalExpansionCoeff, float biotCoeff = 0.7f)
     {
-        // Validate material properties
+        ValidateMaterialProperties(youngsModulusGPa, poissonsRatio, thermalExpansionCoeff, biotCoeff);
+
+        float youngsModulusPa = youngsModulusGPa * 1e9f;
+
+        for (int i = 0; i < _youngsModulus.Length; i++)
+        {
+            _youngsModulus[i] = youngsModulusPa;
+            _poissonsRatio[i] = poissonsRatio;
+            _thermalExpansion[i] = thermalExpansionCoeff;
+            _biotCoefficient[i] = biotCoeff;
+        }
+    }
+
+    /// <summary>
+    ///     Set material properties mapped from lithology layers.
+    ///     Properties vary with depth according to geological stratification.
+    /// </summary>
+    public void SetPropertiesFromLithology(
+        Data.Borehole.BoreholeDataset borehole,
+        Dictionary<string, float> layerYoungsModulus,
+        Dictionary<string, float> layerPoissonsRatio,
+        Dictionary<string, float> layerThermalExpansion,
+        Dictionary<string, float> layerBiotCoefficient,
+        GeothermalMeshGenerator.CylindricalMesh mesh)
+    {
+        // Default values for unknown lithologies
+        const float defaultYoungsGPa = 50.0f;
+        const float defaultPoissons = 0.25f;
+        const float defaultThermalExp = 8e-6f;
+        const float defaultBiot = 0.7f;
+
+        for (int iz = 0; iz < _nz; iz++)
+        {
+            for (int ith = 0; ith < _nth; ith++)
+            {
+                for (int ir = 0; ir < _nr; ir++)
+                {
+                    int idx = ir + ith * _nr + iz * _nr * _nth;
+
+                    // Get depth from mesh Z coordinate
+                    float depth = -mesh.Z[iz]; // Z is negative below surface
+
+                    // Find lithology layer at this depth
+                    var layer = borehole.Lithology?.FirstOrDefault(l =>
+                        depth >= l.DepthFrom && depth < l.DepthTo);
+
+                    string layerName = layer?.RockType ?? "Unknown";
+
+                    // Get properties from dictionaries or use defaults
+                    float youngsGPa = layerYoungsModulus.GetValueOrDefault(layerName, defaultYoungsGPa);
+                    float poissons = layerPoissonsRatio.GetValueOrDefault(layerName, defaultPoissons);
+                    float thermalExp = layerThermalExpansion.GetValueOrDefault(layerName, defaultThermalExp);
+                    float biot = layerBiotCoefficient.GetValueOrDefault(layerName, defaultBiot);
+
+                    // Validate and clamp to safe ranges
+                    youngsGPa = Math.Max(0.1f, youngsGPa); // Min 0.1 GPa
+                    poissons = Math.Clamp(poissons, 0.0f, 0.49f);
+                    thermalExp = Math.Max(0.0f, thermalExp);
+                    biot = Math.Clamp(biot, 0.0f, 1.0f);
+
+                    // Assign to arrays
+                    _youngsModulus[idx] = youngsGPa * 1e9f; // Convert GPa to Pa
+                    _poissonsRatio[idx] = poissons;
+                    _thermalExpansion[idx] = thermalExp;
+                    _biotCoefficient[idx] = biot;
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    ///     Validate material property ranges.
+    /// </summary>
+    private void ValidateMaterialProperties(float youngsModulusGPa, float poissonsRatio,
+        float thermalExpansionCoeff, float biotCoeff)
+    {
         if (youngsModulusGPa <= 0)
             throw new ArgumentException($"Young's modulus must be positive, got {youngsModulusGPa} GPa");
 
@@ -211,18 +287,17 @@ public class GeomechanicsSolver : IDisposable
 
         if (biotCoeff < 0.0f || biotCoeff > 1.0f)
             throw new ArgumentException($"Biot coefficient must be in range [0, 1], got {biotCoeff}");
+    }
 
-        // This would map lithology to grid cells
-        // For now, we'll apply to entire domain as example
-        float youngsModulusPa = youngsModulusGPa * 1e9f;
-
-        for (int i = 0; i < _youngsModulus.Length; i++)
-        {
-            _youngsModulus[i] = youngsModulusPa;
-            _poissonsRatio[i] = poissonsRatio;
-            _thermalExpansion[i] = thermalExpansionCoeff;
-            _biotCoefficient[i] = biotCoeff;
-        }
+    /// <summary>
+    ///     DEPRECATED: Use SetUniformProperties() instead.
+    ///     Kept for backward compatibility.
+    /// </summary>
+    [Obsolete("Use SetUniformProperties() for uniform properties or SetPropertiesFromLithology() for layered properties")]
+    public void SetMaterialProperties(string lithology, float youngsModulusGPa,
+        float poissonsRatio, float thermalExpansionCoeff, float biotCoeff = 0.7f)
+    {
+        SetUniformProperties(youngsModulusGPa, poissonsRatio, thermalExpansionCoeff, biotCoeff);
     }
 
     /// <summary>
