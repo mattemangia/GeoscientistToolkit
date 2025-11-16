@@ -12,6 +12,8 @@ using GeoscientistToolkit.UI.GIS;
 using GeoscientistToolkit.UI.Interfaces;
 using GeoscientistToolkit.Util;
 using ImGuiNET;
+using GISOperations = GeoscientistToolkit.Business.GIS.GISOperationsImpl;
+using GeoscientistToolkit.Business.GIS;
 
 namespace GeoscientistToolkit.UI.GIS.Tools;
 
@@ -356,12 +358,8 @@ public class HydrologicalAnalysisToolEnhanced : IDatasetTools
                 new Vector2(0, 0), new Vector2(12, 3));
         }
 
-        _rainfallCurveEditor.DrawWindow();
-        var curvePoints = _rainfallCurveEditor.GetPoints();
-        if (curvePoints != null && curvePoints.Count > 0)
-        {
-            _rainfallCurve = curvePoints;
-        }
+        // Submit the curve editor (this shows the window if it's open)
+        _rainfallCurveEditor.Submit(out _);
 
         ImGui.Spacing();
         ImGui.Separator();
@@ -495,7 +493,7 @@ public class HydrologicalAnalysisToolEnhanced : IDatasetTools
         // List water bodies
         ImGui.TextColored(new Vector4(0.7f, 0.7f, 0.2f, 1.0f), "Detected Water Bodies:");
 
-        if (ImGui.BeginChild("WaterBodyList", new Vector2(0, 300), true))
+        if (ImGui.BeginChild("WaterBodyList", new Vector2(0, 300), ImGuiChildFlags.Border))
         {
             foreach (var waterBody in _waterBodyTracker.WaterBodies.OrderByDescending(w => w.Volume))
             {
@@ -785,16 +783,12 @@ public class HydrologicalAnalysisToolEnhanced : IDatasetTools
     {
         if (_waterDepth == null) return;
 
-        var layer = new GISRasterLayer
+        var layer = new GISRasterLayer(_waterDepth, _elevationLayer.Bounds)
         {
             Name = "Water Depth",
-            Width = _waterDepth.GetLength(1),
-            Height = _waterDepth.GetLength(0),
-            Bounds = _elevationLayer.Bounds,
             IsVisible = true
         };
 
-        layer.SetPixelData(_waterDepth);
         gisDataset.Layers.Add(layer);
         _exportableLayers.Add(layer);
         _statusMessage = "Water depth raster exported!";

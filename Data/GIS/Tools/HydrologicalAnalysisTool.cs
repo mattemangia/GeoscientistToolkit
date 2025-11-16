@@ -6,6 +6,8 @@ using GeoscientistToolkit.Data.GIS;
 using GeoscientistToolkit.UI.Interfaces;
 using GeoscientistToolkit.Util;
 using ImGuiNET;
+using GISOperations = GeoscientistToolkit.Business.GIS.GISOperationsImpl;
+using GeoscientistToolkit.Business.GIS;
 
 namespace GeoscientistToolkit.UI.GIS.Tools;
 

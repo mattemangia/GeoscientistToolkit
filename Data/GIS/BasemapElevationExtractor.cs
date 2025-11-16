@@ -72,17 +72,12 @@ public class BasemapElevationExtractor
             var elevation = MosaicAndExtractElevation(tileDataList, bounds, targetWidth, targetHeight, zoomLevel);
 
             // Create raster layer
-            var layer = new GISRasterLayer
+            var layer = new GISRasterLayer(elevation, bounds)
             {
                 Name = "Extracted Elevation",
-                Width = targetWidth,
-                Height = targetHeight,
-                Bounds = bounds,
                 IsVisible = true,
                 RasterPath = null // In-memory only
             };
-
-            layer.SetPixelData(elevation);
 
             Logger.Log($"Elevation extraction complete: {targetWidth}x{targetHeight}");
             return layer;
@@ -352,16 +347,12 @@ public class BasemapElevationExtractor
                 break;
         }
 
-        var layer = new GISRasterLayer
+        var layer = new GISRasterLayer(elevation, bounds)
         {
             Name = $"Synthetic DEM ({terrainType})",
-            Width = width,
-            Height = height,
-            Bounds = bounds,
             IsVisible = true
         };
 
-        layer.SetPixelData(elevation);
         return layer;
     }
 
