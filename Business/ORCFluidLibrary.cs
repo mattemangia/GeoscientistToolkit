@@ -49,7 +49,7 @@ public class ORCFluid
 {
     public string Name { get; set; } = string.Empty;
     public string ChemicalFormula { get; set; } = string.Empty;
-    public string Refrigerant Code { get; set; } = string.Empty; // e.g., "R245fa", "R134a"
+    public string RefrigerantCode { get; set; } = string.Empty; // e.g., "R245fa", "R134a"
 
     // Classification
     public FluidCategory Category { get; set; }
@@ -75,11 +75,13 @@ public class ORCFluid
     public float AtmosphericLifetime_years { get; set; }
 
     // Saturation pressure correlation (Antoine equation): log10(P[Pa]) = A - B/(T[K] + C)
-    public float[] AntoinCoefficients_A_B_C { get; set; } = new float[3];
+    public float[] AntoineCoefficients_A_B_C { get; set; } = new float[3];
     public float[] AntoineValidRange_K { get; set; } = new float[2]; // [Tmin, Tmax]
 
     // Liquid density correlation: ρ[kg/m³] = A + B*T + C*T²
     public float[] LiquidDensityCoeff_A_B_C { get; set; } = new float[3];
+    // Reference liquid density at 25°C [kg/m³]
+    public float LiquidDensity_kgm3 { get; set; }
 
     // Vapor density correlation: ρ[kg/m³] = P*MW/(R*T*Z) where Z = compressibility factor
     public float[] CompressibilityCoeff { get; set; } = new float[3]; // Z = a + b*Tr + c*Pr
@@ -91,14 +93,16 @@ public class ORCFluid
     public float[] VaporEnthalpyCoeff_A_B_C_D { get; set; } = new float[4];
 
     // Entropy correlations
-    // Liquid: s[J/(kg·K)] = A + B*T + C*T²
-    public float[] LiquidEntropyCoeff_A_B_C { get; set; } = new float[3];
-    // Vapor: s[J/(kg·K)] = A + B*T + C*T²
-    public float[] VaporEntropyCoeff_A_B_C { get; set; } = new float[3];
+    // Liquid: s[J/(kg·K)] = A + B*T + C*T² + D*T³
+    public float[] LiquidEntropyCoeff_A_B_C_D { get; set; } = new float[4];
+    // Vapor: s[J/(kg·K)] = A + B*T + C*T² + D*T³
+    public float[] VaporEntropyCoeff_A_B_C_D { get; set; } = new float[4];
 
     // Specific heat capacity at constant pressure
     // Liquid: Cp[J/(kg·K)] = A + B*T + C*T²
     public float[] LiquidCpCoeff_A_B_C { get; set; } = new float[3];
+    // Reference liquid heat capacity at 25°C [J/(kg·K)]
+    public float LiquidHeatCapacity_JkgK { get; set; }
     // Vapor (ideal gas): Cp[J/(kg·K)] = A + B*T + C*T² + D*T³
     public float[] VaporCpCoeff_A_B_C_D { get; set; } = new float[4];
 

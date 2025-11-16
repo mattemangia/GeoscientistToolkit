@@ -313,9 +313,10 @@ namespace GeoscientistToolkit.Analysis.Geothermal
 
             // Vary discount rate (3% to 12%)
             sensitivity.DiscountRateVariation = new List<(float parameter, float npv)>();
+            float annualRevenue = energyMWh * Parameters.ElectricityPrice;
             for (float rate = 0.03f; rate <= 0.12f; rate += 0.01f)
             {
-                var cashFlows = BuildCashFlows(capex, opex, energyMWh, years);
+                var cashFlows = BuildCashFlows(capex, opex, annualRevenue, years);
                 float npv = CalculateNPV(cashFlows, rate);
                 sensitivity.DiscountRateVariation.Add((rate * 100.0f, npv));
             }
@@ -373,12 +374,6 @@ namespace GeoscientistToolkit.Analysis.Geothermal
             }
 
             return cashFlows;
-        }
-
-        private float[] BuildCashFlows(float capex, float opex, float energyMWh, int years)
-        {
-            float annualRevenue = energyMWh * Parameters.ElectricityPrice;
-            return BuildCashFlows(capex, opex, annualRevenue, years);
         }
 
         #endregion

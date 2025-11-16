@@ -201,7 +201,7 @@ namespace GeoscientistToolkit.Analysis.Geothermal
             Vector2 plotSize = new Vector2(ImGui.GetContentRegionAvail().X - 20, 300);
 
             // Create colored plot with gradient
-            ImGui.BeginChild("ORCPlot", plotSize, true);
+            ImGui.BeginChild("ORCPlot", plotSize, ImGuiChildFlags.Border);
 
             var drawList = ImGui.GetWindowDrawList();
             Vector2 plotMin = ImGui.GetCursorScreenPos();
@@ -415,7 +415,7 @@ namespace GeoscientistToolkit.Analysis.Geothermal
         {
             Vector2 plotSize = new Vector2(400, 150);
 
-            ImGui.BeginChild($"SensPlot_{xLabel}", plotSize, true);
+            ImGui.BeginChild($"SensPlot_{xLabel}", plotSize, ImGuiChildFlags.Border);
 
             var drawList = ImGui.GetWindowDrawList();
             Vector2 plotMin = ImGui.GetCursorScreenPos();
