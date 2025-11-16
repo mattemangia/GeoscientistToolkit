@@ -625,12 +625,15 @@ public class DatasetPanel : BasePanel
                 }
                 else if (dataset is Data.AcousticVolume.AcousticVolumeDataset acoustic)
                 {
-                    info.Metadata["Dimensions"] = $"{acoustic.Width}x{acoustic.Height}x{acoustic.Depth}";
+                    if (acoustic.PWaveField != null)
+                    {
+                        info.Metadata["Dimensions"] = $"{acoustic.PWaveField.Width}x{acoustic.PWaveField.Height}x{acoustic.PWaveField.Depth}";
+                    }
                 }
                 else if (dataset is Data.Pnm.PNMDataset pnm)
                 {
-                    if (pnm.Permeability.HasValue)
-                        info.Metadata["Permeability"] = $"{pnm.Permeability.Value:E2} m²";
+                    if (pnm.DarcyPermeability > 0)
+                        info.Metadata["Permeability"] = $"{pnm.DarcyPermeability:E2} mD";
                 }
 
                 datasetInfos.Add(info);
