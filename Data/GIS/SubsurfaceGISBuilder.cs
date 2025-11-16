@@ -36,6 +36,15 @@ public static class SubsurfaceGISBuilder
         int resolutionZ = 30,
         DepthLayeringModel layerThicknessModel = DepthLayeringModel.Uniform)
     {
+        if (geologicalMap == null)
+            throw new ArgumentNullException(nameof(geologicalMap));
+        if (rectangle == null)
+            throw new ArgumentNullException(nameof(rectangle));
+        if (depthRange.minDepth < 0 || depthRange.maxDepth <= depthRange.minDepth)
+            throw new ArgumentException("Invalid depth range. Must be: 0 <= minDepth < maxDepth");
+        if (resolutionX < 1 || resolutionY < 1 || resolutionZ < 1)
+            throw new ArgumentException("Resolution values must be at least 1");
+
         var dataset = new SubsurfaceGISDataset(
             $"3D_Geology_{geologicalMap.Name}",
             $"3d_geology_{geologicalMap.Name.ToLower().Replace(" ", "_")}.subgis"
@@ -142,7 +151,7 @@ public static class SubsurfaceGISBuilder
                     voxelsProcessed++;
 
                     // Log progress every 10%
-                    if (voxelsProcessed % (totalVoxels / 10) == 0)
+                    if (totalVoxels >= 10 && voxelsProcessed % (totalVoxels / 10) == 0)
                     {
                         float progress = (float)voxelsProcessed / totalVoxels * 100;
                         Logger.Log($"3D geology grid progress: {progress:F1}% ({voxelsCreated} voxels created)");
@@ -346,6 +355,10 @@ public static class SubsurfaceGISBuilder
         if (x < bounds.Min.X || x > bounds.Max.X || y < bounds.Min.Y || y > bounds.Max.Y)
             return null;
 
+        // Avoid division by zero
+        if (bounds.Width <= 0 || bounds.Height <= 0)
+            return null;
+
         // Convert world coordinates to pixel coordinates
         float normalizedX = (x - bounds.Min.X) / bounds.Width;
         float normalizedY = (y - bounds.Min.Y) / bounds.Height;
@@ -433,6 +446,10 @@ public static class SubsurfaceGISBuilder
         var bounds = heightmap.Bounds;
 
         if (x < bounds.Min.X || x > bounds.Max.X || y < bounds.Min.Y || y > bounds.Max.Y)
+            return null;
+
+        // Avoid division by zero
+        if (bounds.Width <= 0 || bounds.Height <= 0)
             return null;
 
         float normalizedX = (x - bounds.Min.X) / bounds.Width;

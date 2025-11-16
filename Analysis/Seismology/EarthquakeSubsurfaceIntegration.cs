@@ -41,6 +41,13 @@ namespace GeoscientistToolkit.Analysis.Seismology
             int subsurfaceResolutionY = 50,
             int subsurfaceResolutionZ = 30)
         {
+            if (parameters == null)
+                throw new ArgumentNullException(nameof(parameters));
+            if (results == null)
+                throw new ArgumentNullException(nameof(results));
+            if (subsurfaceResolutionX < 1 || subsurfaceResolutionY < 1 || subsurfaceResolutionZ < 1)
+                throw new ArgumentException("Resolution values must be at least 1");
+
             var dataset = new SubsurfaceGISDataset(
                 $"Earthquake_M{parameters.MomentMagnitude:F1}_Subsurface",
                 $"earthquake_subsurface_M{parameters.MomentMagnitude:F1}.subgis"
@@ -256,8 +263,9 @@ namespace GeoscientistToolkit.Analysis.Seismology
                     if (snapshot.SurfaceDisplacement != null && k == 0)
                     {
                         // For surface voxels, use surface displacement
-                        int gridI = Math.Clamp(i * parameters.GridNX / parameters.GridNX, 0, parameters.GridNX - 1);
-                        int gridJ = Math.Clamp(j * parameters.GridNY / parameters.GridNY, 0, parameters.GridNY - 1);
+                        // Map subsurface grid indices to simulation grid indices
+                        int gridI = Math.Clamp(i * parameters.GridNX / Math.Max(1, dataset.GridResolutionX), 0, parameters.GridNX - 1);
+                        int gridJ = Math.Clamp(j * parameters.GridNY / Math.Max(1, dataset.GridResolutionY), 0, parameters.GridNY - 1);
 
                         if (gridI < snapshot.SurfaceDisplacement.GetLength(0) &&
                             gridJ < snapshot.SurfaceDisplacement.GetLength(1))
@@ -284,6 +292,11 @@ namespace GeoscientistToolkit.Analysis.Seismology
             EarthquakeSimulationParameters parameters,
             EarthquakeSimulationResults results)
         {
+            if (parameters == null)
+                throw new ArgumentNullException(nameof(parameters));
+            if (results == null)
+                throw new ArgumentNullException(nameof(results));
+
             var data = new SeismicVoxelData
             {
                 Position = position
@@ -346,12 +359,17 @@ namespace GeoscientistToolkit.Analysis.Seismology
             {
                 var accelerations = new List<double>();
                 double dt = results.WaveSnapshots[1].TimeSeconds - results.WaveSnapshots[0].TimeSeconds;
-                for (int idx = 1; idx < velocities.Count; idx++)
+
+                // Avoid division by zero
+                if (Math.Abs(dt) > 1e-10)
                 {
-                    accelerations.Add((velocities[idx] - velocities[idx - 1]) / dt);
+                    for (int idx = 1; idx < velocities.Count; idx++)
+                    {
+                        accelerations.Add((velocities[idx] - velocities[idx - 1]) / dt);
+                    }
+                    data.AccelerationHistory = accelerations.ToArray();
+                    data.PeakAcceleration = accelerations.Count > 0 ? accelerations.Max(Math.Abs) : 0;
                 }
-                data.AccelerationHistory = accelerations.ToArray();
-                data.PeakAcceleration = accelerations.Count > 0 ? accelerations.Max(Math.Abs) : 0;
             }
 
             return data;
@@ -365,6 +383,13 @@ namespace GeoscientistToolkit.Analysis.Seismology
             string parameterName = "P_Wave_Amplitude_m",
             int numberOfDepthSlices = 5)
         {
+            if (seismicDataset == null)
+                throw new ArgumentNullException(nameof(seismicDataset));
+            if (string.IsNullOrWhiteSpace(parameterName))
+                throw new ArgumentException("Parameter name cannot be null or empty", nameof(parameterName));
+            if (numberOfDepthSlices < 1)
+                throw new ArgumentException("Number of depth slices must be at least 1", nameof(numberOfDepthSlices));
+
             var layers = new List<GISRasterLayer>();
 
             if (seismicDataset.VoxelGrid.Count == 0)
@@ -407,8 +432,8 @@ namespace GeoscientistToolkit.Analysis.Seismology
                 {
                     for (int j = 0; j < gridSize; j++)
                     {
-                        float x = minX + (i / (float)(gridSize - 1)) * (maxX - minX);
-                        float y = minY + (j / (float)(gridSize - 1)) * (maxY - minY);
+                        float x = minX + (i / (float)Math.Max(1, gridSize - 1)) * (maxX - minX);
+                        float y = minY + (j / (float)Math.Max(1, gridSize - 1)) * (maxY - minY);
 
                         // Find nearest voxel
                         var nearestVoxel = sliceVoxels
@@ -427,6 +452,10 @@ namespace GeoscientistToolkit.Analysis.Seismology
                     Min = new Vector3(minX, minY, targetDepth),
                     Max = new Vector3(maxX, maxY, targetDepth)
                 };
+
+                layer.Width = gridSize;
+                layer.Height = gridSize;
+                layer.SetPixelData(rasterData);
 
                 layer.Metadata["Depth"] = $"{-targetDepth:F1}m";
                 layer.Metadata["Parameter"] = parameterName;
