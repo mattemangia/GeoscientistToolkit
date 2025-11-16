@@ -68,6 +68,7 @@ using System.Runtime.InteropServices;
 using System.Runtime.Intrinsics;
 using System.Runtime.Intrinsics.X86;
 using System.Text;
+using GeoscientistToolkit.OpenCL;
 using GeoscientistToolkit.Util;
 using Silk.NET.OpenCL;
 
@@ -550,35 +551,51 @@ public class GeomechanicsSolver : IDisposable
         }
 
         // Set kernel arguments
-        err = _cl.SetKernelArg(_geomechanicsKernel, 0, (nuint)sizeof(nint), &_temperatureBuffer);
+        // BUGFIX: Create local copies of readonly fields to take their address
+        int nr = _nr;
+        int nth = _nth;
+        int nz = _nz;
+        var temperatureBuffer = _temperatureBuffer;
+        var temperatureOldBuffer = _temperatureOldBuffer;
+        var pressureBuffer = _pressureBuffer;
+        var youngsModulusBuffer = _youngsModulusBuffer;
+        var poissonsRatioBuffer= _poissonsRatioBuffer;
+        var thermalExpansionBuffer = _thermalExpansionBuffer;
+        var biotCoefficientBuffer = _biotCoefficientBuffer;
+        var stressBuffer = _stressBuffer;
+        var strainBuffer = _strainBuffer;
+        var vonMisesBuffer = _vonMisesBuffer;
+        var displacementBuffer = _displacementBuffer;
+        
+        err = _cl.SetKernelArg(_geomechanicsKernel, 0, (nuint)sizeof(nint), &temperatureBuffer);
         CheckCLError(err, "Set kernel arg 0 (temperature)");
-        err = _cl.SetKernelArg(_geomechanicsKernel, 1, (nuint)sizeof(nint), &_temperatureOldBuffer);
+        err = _cl.SetKernelArg(_geomechanicsKernel, 1, (nuint)sizeof(nint), &temperatureOldBuffer);
         CheckCLError(err, "Set kernel arg 1 (temperature_old)");
-        err = _cl.SetKernelArg(_geomechanicsKernel, 2, (nuint)sizeof(nint), &_pressureBuffer);
+        err = _cl.SetKernelArg(_geomechanicsKernel, 2, (nuint)sizeof(nint), &pressureBuffer);
         CheckCLError(err, "Set kernel arg 2 (pressure)");
-        err = _cl.SetKernelArg(_geomechanicsKernel, 3, (nuint)sizeof(nint), &_youngsModulusBuffer);
+        err = _cl.SetKernelArg(_geomechanicsKernel, 3, (nuint)sizeof(nint), &youngsModulusBuffer);
         CheckCLError(err, "Set kernel arg 3 (Young's modulus)");
-        err = _cl.SetKernelArg(_geomechanicsKernel, 4, (nuint)sizeof(nint), &_poissonsRatioBuffer);
+        err = _cl.SetKernelArg(_geomechanicsKernel, 4, (nuint)sizeof(nint), &poissonsRatioBuffer);
         CheckCLError(err, "Set kernel arg 4 (Poisson's ratio)");
-        err = _cl.SetKernelArg(_geomechanicsKernel, 5, (nuint)sizeof(nint), &_thermalExpansionBuffer);
+        err = _cl.SetKernelArg(_geomechanicsKernel, 5, (nuint)sizeof(nint), &thermalExpansionBuffer);
         CheckCLError(err, "Set kernel arg 5 (thermal expansion)");
-        err = _cl.SetKernelArg(_geomechanicsKernel, 6, (nuint)sizeof(nint), &_biotCoefficientBuffer);
+        err = _cl.SetKernelArg(_geomechanicsKernel, 6, (nuint)sizeof(nint), &biotCoefficientBuffer);
         CheckCLError(err, "Set kernel arg 6 (Biot coefficient)");
-        err = _cl.SetKernelArg(_geomechanicsKernel, 7, (nuint)sizeof(nint), &_stressBuffer);
+        err = _cl.SetKernelArg(_geomechanicsKernel, 7, (nuint)sizeof(nint), &stressBuffer);
         CheckCLError(err, "Set kernel arg 7 (stress)");
-        err = _cl.SetKernelArg(_geomechanicsKernel, 8, (nuint)sizeof(nint), &_strainBuffer);
+        err = _cl.SetKernelArg(_geomechanicsKernel, 8, (nuint)sizeof(nint), &strainBuffer);
         CheckCLError(err, "Set kernel arg 8 (strain)");
-        err = _cl.SetKernelArg(_geomechanicsKernel, 9, (nuint)sizeof(nint), &_vonMisesBuffer);
+        err = _cl.SetKernelArg(_geomechanicsKernel, 9, (nuint)sizeof(nint), &vonMisesBuffer);
         CheckCLError(err, "Set kernel arg 9 (von Mises)");
-        err = _cl.SetKernelArg(_geomechanicsKernel, 10, (nuint)sizeof(nint), &_displacementBuffer);
+        err = _cl.SetKernelArg(_geomechanicsKernel, 10, (nuint)sizeof(nint), &displacementBuffer);
         CheckCLError(err, "Set kernel arg 10 (displacement)");
         err = _cl.SetKernelArg(_geomechanicsKernel, 11, (nuint)sizeof(float), &dt);
         CheckCLError(err, "Set kernel arg 11 (dt)");
-        err = _cl.SetKernelArg(_geomechanicsKernel, 12, (nuint)sizeof(int), &_nr);
+        err = _cl.SetKernelArg(_geomechanicsKernel, 12, (nuint)sizeof(int), &nr);
         CheckCLError(err, "Set kernel arg 12 (nr)");
-        err = _cl.SetKernelArg(_geomechanicsKernel, 13, (nuint)sizeof(int), &_nth);
+        err = _cl.SetKernelArg(_geomechanicsKernel, 13, (nuint)sizeof(int), &nth);
         CheckCLError(err, "Set kernel arg 13 (nth)");
-        err = _cl.SetKernelArg(_geomechanicsKernel, 14, (nuint)sizeof(nint), &_nz);
+        err = _cl.SetKernelArg(_geomechanicsKernel, 14, (nuint)sizeof(int), &nz);
         CheckCLError(err, "Set kernel arg 14 (nz)");
 
         // Execute kernel
@@ -649,9 +666,8 @@ public class GeomechanicsSolver : IDisposable
 
         try
         {
-            // Get device from OpenCLDeviceManager
-            var deviceManager = OpenCLDeviceManager.Instance;
-            _device = deviceManager.GetComputeDevice();
+            
+            _device = OpenCLDeviceManager.GetComputeDevice();
 
             if (_device == nint.Zero)
                 return false;
@@ -659,14 +675,14 @@ public class GeomechanicsSolver : IDisposable
             int err;
 
             // Get device info
-            DeviceName = deviceManager.DeviceName;
-
+            DeviceName = OpenCLDeviceManager.GetDeviceInfo().Name;
+            var device1 = _device;
             // Create context
-            _context = _cl.CreateContext(null, 1, &_device, null, null, &err);
+            _context = _cl.CreateContext(null, 1, &device1, null, null, &err);
             if (err != 0) return false;
 
             // Create command queue
-            _queue = _cl.CreateCommandQueue(_context, _device, 0, &err);
+            _queue = _cl.CreateCommandQueue(_context, _device, (CommandQueueProperties)0, &err);
             if (err != 0) return false;
 
             // Create and compile program
@@ -682,16 +698,17 @@ public class GeomechanicsSolver : IDisposable
                 if (err != 0) return false;
             }
 
-            err = _cl.BuildProgram(_program, 1, &_device, null, null, null);
+            nint device = _device; // Create local copy to take address
+            err = _cl.BuildProgram(_program, 1, &device, (byte*)null, null, null);
             if (err != 0)
             {
                 // Get build log for debugging
                 nuint logSize;
-                _cl.GetProgramBuildInfo(_program, _device, (uint)ProgramBuildInfo.Log, 0, null, &logSize);
+                _cl.GetProgramBuildInfo(_program, _device, (uint)ProgramBuildInfo.BuildLog, 0, null, &logSize);
                 byte[] log = new byte[logSize];
                 fixed (byte* pLog = log)
                 {
-                    _cl.GetProgramBuildInfo(_program, _device, (uint)ProgramBuildInfo.Log, logSize, pLog, null);
+                    _cl.GetProgramBuildInfo(_program, _device, (uint)ProgramBuildInfo.BuildLog, logSize, pLog, null);
                 }
                 return false;
             }
@@ -703,11 +720,11 @@ public class GeomechanicsSolver : IDisposable
             // Create buffers
             int totalSize = _nr * _nth * _nz;
 
-            _temperatureBuffer = _cl.CreateBuffer(_context, (ulong)MemFlags.ReadOnly,
+            _temperatureBuffer = _cl.CreateBuffer(_context, (MemFlags)MemFlags.ReadOnly,
                 (nuint)(totalSize * sizeof(float)), null, &err);
-            _temperatureOldBuffer = _cl.CreateBuffer(_context, (ulong)MemFlags.ReadOnly,
+            _temperatureOldBuffer = _cl.CreateBuffer(_context, (MemFlags)MemFlags.ReadOnly,
                 (nuint)(totalSize * sizeof(float)), null, &err);
-            _pressureBuffer = _cl.CreateBuffer(_context, (ulong)MemFlags.ReadOnly,
+            _pressureBuffer = _cl.CreateBuffer(_context, (MemFlags)MemFlags.ReadOnly,
                 (nuint)(totalSize * sizeof(float)), null, &err);
 
             // Material properties
@@ -717,27 +734,27 @@ public class GeomechanicsSolver : IDisposable
             fixed (float* pBiot = _biotCoefficient)
             {
                 _youngsModulusBuffer = _cl.CreateBuffer(_context,
-                    (ulong)(MemFlags.ReadOnly | MemFlags.CopyHostPtr),
+                    (MemFlags)(MemFlags.ReadOnly | MemFlags.CopyHostPtr),
                     (nuint)(totalSize * sizeof(float)), pYoungs, &err);
                 _poissonsRatioBuffer = _cl.CreateBuffer(_context,
-                    (ulong)(MemFlags.ReadOnly | MemFlags.CopyHostPtr),
+                    (MemFlags)(MemFlags.ReadOnly | MemFlags.CopyHostPtr),
                     (nuint)(totalSize * sizeof(float)), pPoisson, &err);
                 _thermalExpansionBuffer = _cl.CreateBuffer(_context,
-                    (ulong)(MemFlags.ReadOnly | MemFlags.CopyHostPtr),
+                    (MemFlags)(MemFlags.ReadOnly | MemFlags.CopyHostPtr),
                     (nuint)(totalSize * sizeof(float)), pThermalExp, &err);
                 _biotCoefficientBuffer = _cl.CreateBuffer(_context,
-                    (ulong)(MemFlags.ReadOnly | MemFlags.CopyHostPtr),
+                    (MemFlags)(MemFlags.ReadOnly | MemFlags.CopyHostPtr),
                     (nuint)(totalSize * sizeof(float)), pBiot, &err);
             }
 
             // Result buffers (stress stored as 3*totalSize: XX, YY, ZZ)
-            _stressBuffer = _cl.CreateBuffer(_context, (ulong)MemFlags.ReadWrite,
+            _stressBuffer = _cl.CreateBuffer(_context, (MemFlags)MemFlags.ReadWrite,
                 (nuint)(totalSize * 3 * sizeof(float)), null, &err);
-            _strainBuffer = _cl.CreateBuffer(_context, (ulong)MemFlags.ReadWrite,
+            _strainBuffer = _cl.CreateBuffer(_context, (MemFlags)MemFlags.ReadWrite,
                 (nuint)(totalSize * 3 * sizeof(float)), null, &err);
-            _vonMisesBuffer = _cl.CreateBuffer(_context, (ulong)MemFlags.WriteOnly,
+            _vonMisesBuffer = _cl.CreateBuffer(_context, (MemFlags)MemFlags.WriteOnly,
                 (nuint)(totalSize * sizeof(float)), null, &err);
-            _displacementBuffer = _cl.CreateBuffer(_context, (ulong)MemFlags.ReadWrite,
+            _displacementBuffer = _cl.CreateBuffer(_context, (MemFlags)MemFlags.ReadWrite,
                 (nuint)(totalSize * sizeof(float)), null, &err);
 
             _isOpenCLInitialized = true;

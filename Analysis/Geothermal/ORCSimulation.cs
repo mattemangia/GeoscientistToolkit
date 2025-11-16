@@ -222,7 +222,7 @@ namespace GeoscientistToolkit.Analysis.Geothermal
             }
         }
 
-        private void ProcessCycleVectorAVX2(
+        private unsafe void ProcessCycleVectorAVX2(
             Vector256<float> vGeoTemp,
             Vector256<float> vCondTemp,
             Vector256<float> vEvapPress,
@@ -283,13 +283,22 @@ namespace GeoscientistToolkit.Analysis.Geothermal
             Span<float> h3 = stackalloc float[8];
             Span<float> h4 = stackalloc float[8];
 
-            Avx.Store((float*)netPower.GetPinnableReference(), vNetPower);
-            Avx.Store((float*)efficiency.GetPinnableReference(), vEfficiency);
-            Avx.Store((float*)orcMassFlow.GetPinnableReference(), vORCMassFlow);
-            Avx.Store((float*)h1.GetPinnableReference(), vH1);
-            Avx.Store((float*)h2.GetPinnableReference(), vH2);
-            Avx.Store((float*)h3.GetPinnableReference(), vH3);
-            Avx.Store((float*)h4.GetPinnableReference(), vH4);
+            fixed (float* pNetPower = netPower)
+            fixed (float* pEfficiency = efficiency)
+            fixed (float* pOrcMassFlow = orcMassFlow)
+            fixed (float* pH1 = h1)
+            fixed (float* pH2 = h2)
+            fixed (float* pH3 = h3)
+            fixed (float* pH4 = h4)
+            {
+                Avx.Store(pNetPower, vNetPower);
+                Avx.Store(pEfficiency, vEfficiency);
+                Avx.Store(pOrcMassFlow, vORCMassFlow);
+                Avx.Store(pH1, vH1);
+                Avx.Store(pH2, vH2);
+                Avx.Store(pH3, vH3);
+                Avx.Store(pH4, vH4);
+            }
 
             for (int i = 0; i < 8; i++)
             {
@@ -340,9 +349,10 @@ namespace GeoscientistToolkit.Analysis.Geothermal
             float densityLiquid = _currentFluid.LiquidDensity_kgm3;
             float deltaH = (outletPressure - inlet.Pressure) / (densityLiquid * efficiency);
 
+            float liquidCp = _currentFluid.LiquidHeatCapacity_JkgK > 0 ? _currentFluid.LiquidHeatCapacity_JkgK : 1400.0f;
             return new ORCState
             {
-                Temperature = inlet.Temperature + deltaH / (_currentFluid.LiquidHeatCapacity_JkgK ?? 1400.0f), // Approximate heating
+                Temperature = inlet.Temperature + deltaH / liquidCp, // Approximate heating
                 Pressure = outletPressure,
                 Enthalpy = inlet.Enthalpy + deltaH,
                 Entropy = inlet.Entropy + deltaH / inlet.Temperature,

@@ -116,7 +116,7 @@ namespace GeoscientistToolkit.Analysis.Seismology
                             dataset.GridOrigin.Z + (k + 0.5f) * dataset.VoxelSize.Z
                         );
 
-                        var voxel = CreateSeismicVoxel(position, i, j, k, parameters, results);
+                        var voxel = CreateSeismicVoxel(position, i, j, k, parameters, results, dataset.GridResolutionX, dataset.GridResolutionY);
                         if (voxel != null)
                         {
                             dataset.VoxelGrid.Add(voxel);
@@ -243,7 +243,9 @@ namespace GeoscientistToolkit.Analysis.Seismology
             Vector3 position,
             int i, int j, int k,
             EarthquakeSimulationParameters parameters,
-            EarthquakeSimulationResults results)
+            EarthquakeSimulationResults results,
+            int gridResolutionX,
+            int gridResolutionY)
         {
             var voxel = new SubsurfaceVoxel
             {
@@ -264,8 +266,8 @@ namespace GeoscientistToolkit.Analysis.Seismology
                     {
                         // For surface voxels, use surface displacement
                         // Map subsurface grid indices to simulation grid indices
-                        int gridI = Math.Clamp(i * parameters.GridNX / Math.Max(1, dataset.GridResolutionX), 0, parameters.GridNX - 1);
-                        int gridJ = Math.Clamp(j * parameters.GridNY / Math.Max(1, dataset.GridResolutionY), 0, parameters.GridNY - 1);
+                        int gridI = Math.Clamp(i * parameters.GridNX / Math.Max(1, gridResolutionX), 0, parameters.GridNX - 1);
+                        int gridJ = Math.Clamp(j * parameters.GridNY / Math.Max(1, gridResolutionY), 0, parameters.GridNY - 1);
 
                         if (gridI < snapshot.SurfaceDisplacement.GetLength(0) &&
                             gridJ < snapshot.SurfaceDisplacement.GetLength(1))
@@ -440,10 +442,10 @@ namespace GeoscientistToolkit.Analysis.Seismology
                     }
                 }
 
-                var bounds = new Util.BoundingBox
+                var bounds = new BoundingBox
                 {
-                    Min = new Vector3(minX, minY, targetDepth),
-                    Max = new Vector3(maxX, maxY, targetDepth)
+                    Min = new Vector2(minX, minY),
+                    Max = new Vector2(maxX, maxY)
                 };
 
                 var layer = new GISRasterLayer(rasterData, bounds)
@@ -454,6 +456,7 @@ namespace GeoscientistToolkit.Analysis.Seismology
                 // Store metadata in Properties dictionary
                 layer.Properties["Depth"] = $"{-targetDepth:F1}m";
                 layer.Properties["Parameter"] = parameterName;
+                layer.Properties["TargetDepth"] = targetDepth;
 
                 layers.Add(layer);
             }

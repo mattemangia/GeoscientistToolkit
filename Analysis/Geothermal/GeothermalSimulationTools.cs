@@ -1405,11 +1405,19 @@ public class GeothermalSimulationTools : IDatasetTools, IDisposable
 
                     // Working Fluid Selection from ORCFluidLibrary
                     ImGui.Spacing();
-                    var fluids = Business.ORCFluidLibrary.Instance.GetAllFluids();
-                    var fluidNames = fluids.Select(f => $"{f.Name} ({f.TemperatureRange_K_Min - 273.15f:F0}-{f.TemperatureRange_K_Max - 273.15f:F0}°C)").ToArray();
-                    var currentFluidIdx = fluids.FindIndex(f => f.Name == _options.ORCWorkingFluid);
+                    var fluids = GeoscientistToolkit.Business.ORCFluidLibrary.Instance.GetAllFluids();
+                    var fluidNames = fluids.Select(f => $"{f.Name} ({f.MinimumTemperature_K - 273.15f:F0}-{f.MaximumTemperature_K - 273.15f:F0}°C)").ToArray();
+                    var currentFluidIdx = -1;
+                    for (int i = 0; i < fluids.Count; i++)
+                    {
+                        if (fluids[i].Name == _options.ORCWorkingFluid)
+                        {
+                            currentFluidIdx = i;
+                            break;
+                        }
+                    }
                     if (currentFluidIdx < 0) currentFluidIdx = 0; // Default to first fluid if not found
-                    if (ImGui.Combo("Working Fluid", ref currentFluidIdx, fluidNames, fluidNames.Length))
+                    if (ImGui.Combo("Working Fluid", ref currentFluidIdx, fluidNames.ToArray(), fluidNames.Length))
                         _options.ORCWorkingFluid = fluids[currentFluidIdx].Name;
                     ImGui.SetItemTooltip("Select working fluid based on geothermal temperature range. Use Edit→ORC Fluid Library to add/edit fluids.");
 
@@ -2130,25 +2138,30 @@ public class GeothermalSimulationTools : IDatasetTools, IDisposable
         {
             try
             {
-                var graphicsDevice = GraphicsDeviceManager.Instance?.GraphicsDevice;
-                if (graphicsDevice != null)
-                {
-                    _orcVisualization = new ORCVisualization(graphicsDevice);
+                // Note: GraphicsDeviceManager not available in this context
+                // ORC visualization will use fallback text-based display
+                _orcVisualization = null;
 
-                    // Extract temperature range from results
-                    float[] temps = new float[_orcResults.Length];
-                    for (int i = 0; i < _orcResults.Length; i++)
-                    {
-                        temps[i] = _orcResults[i].GeothermalFluidInletTemp;
-                    }
-
-                    _orcVisualization.UpdateResults(_orcResults, temps);
-
-                    if (_economicResults != null)
-                    {
-                        _orcVisualization.UpdateEconomics(_economicResults);
-                    }
-                }
+                // TODO: Implement graphics device access when available
+                // var graphicsDevice = GraphicsDeviceManager.Instance?.GraphicsDevice;
+                // if (graphicsDevice != null)
+                // {
+                //     _orcVisualization = new ORCVisualization(graphicsDevice);
+                //
+                //     // Extract temperature range from results
+                //     float[] temps = new float[_orcResults.Length];
+                //     for (int i = 0; i < _orcResults.Length; i++)
+                //     {
+                //         temps[i] = _orcResults[i].GeothermalFluidInletTemp;
+                //     }
+                //
+                //     _orcVisualization.UpdateResults(_orcResults, temps);
+                //
+                //     if (_economicResults != null)
+                //     {
+                //         _orcVisualization.UpdateEconomics(_economicResults);
+                //     }
+                // }
             }
             catch (Exception ex)
             {
@@ -2679,11 +2692,11 @@ public class GeothermalSimulationTools : IDatasetTools, IDisposable
                     try
                     {
                         // Extract fluid outlet temperatures from simulation results
-                        var fluidTemperatures = _results.FluidTemperatureUp.LastOrDefault();
-                        if (fluidTemperatures != null && fluidTemperatures.temperatures != null && fluidTemperatures.temperatures.Any())
+                        if (_results.OutletTemperature != null && _results.OutletTemperature.Any())
                         {
                             // Get outlet temperature range (vary by ±20K to analyze performance curve)
-                            float avgOutletTemp = fluidTemperatures.temperatures.Average();
+                            var lastOutletTemp = _results.OutletTemperature.Last();
+                            float avgOutletTemp = (float)lastOutletTemp.temperature;
                             int numPoints = 50;
                             float[] tempRange = new float[numPoints];
                             for (int i = 0; i < numPoints; i++)
@@ -2706,7 +2719,10 @@ public class GeothermalSimulationTools : IDatasetTools, IDisposable
                             };
 
                             // Run ORC simulation (CPU with SIMD or GPU with OpenCL)
-                            if (_options.UseORCGPU)
+                            bool useGPU = _options.UseORCGPU;
+                            bool gpuInitialized = false;
+
+                            if (useGPU)
                             {
                                 Logger.Log("Using OpenCL GPU acceleration for ORC simulation...");
                                 using (var orcSolver = new ORCOpenCLSolver(orcConfig))
@@ -2715,17 +2731,18 @@ public class GeothermalSimulationTools : IDatasetTools, IDisposable
                                     {
                                         _orcResults = orcSolver.SimulateBatch(tempRange, (float)_options.FluidMassFlowRate);
                                         Logger.Log("ORC GPU simulation completed successfully.");
+                                        gpuInitialized = true;
                                     }
                                     else
                                     {
                                         Logger.LogWarning("GPU initialization failed, falling back to CPU...");
-                                        goto UseCPU;
+                                        gpuInitialized = false;
                                     }
                                 }
                             }
-                            else
+
+                            if (!useGPU || !gpuInitialized)
                             {
-                                UseCPU:
                                 Logger.Log("Using CPU with SIMD for ORC simulation...");
                                 var orcSim = new ORCSimulation
                                 {

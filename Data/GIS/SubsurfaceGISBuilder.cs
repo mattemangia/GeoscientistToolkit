@@ -337,9 +337,9 @@ public static class SubsurfaceGISBuilder
         {
             return GetLithologyFromRaster(rasterLayer, x, y);
         }
-        else if (layer is GISPolygonLayer polygonLayer)
+        else if (layer.Type == LayerType.Vector && layer.Features.Any(f => f.Type == FeatureType.Polygon))
         {
-            return GetLithologyFromPolygons(polygonLayer, x, y);
+            return GetLithologyFromPolygons(layer, x, y);
         }
 
         return null;
@@ -370,14 +370,14 @@ public static class SubsurfaceGISBuilder
         pixelY = Math.Clamp(pixelY, 0, raster.Height - 1);
 
         // Get pixel value and map to lithology
-        // Assuming raster has metadata mapping pixel values to lithology names
+        // Assuming raster has properties mapping pixel values to lithology names
         var pixelData = raster.GetPixelData();
         float pixelValue = pixelData[pixelX, pixelY];
 
-        // Try to get lithology from metadata
-        if (raster.Metadata.ContainsKey($"Lithology_{(int)pixelValue}"))
+        // Try to get lithology from properties
+        if (raster.Properties.ContainsKey($"Lithology_{(int)pixelValue}"))
         {
-            return raster.Metadata[$"Lithology_{(int)pixelValue}"];
+            return raster.Properties[$"Lithology_{(int)pixelValue}"]?.ToString();
         }
 
         // Default: use pixel value as lithology ID
@@ -387,26 +387,26 @@ public static class SubsurfaceGISBuilder
     /// <summary>
     /// Get lithology from polygon layer
     /// </summary>
-    private static string? GetLithologyFromPolygons(GISPolygonLayer polygonLayer, float x, float y)
+    private static string? GetLithologyFromPolygons(GISLayer polygonLayer, float x, float y)
     {
         var point = new Vector2(x, y);
 
-        foreach (var feature in polygonLayer.Features)
+        foreach (var feature in polygonLayer.Features.Where(f => f.Type == FeatureType.Polygon))
         {
-            if (IsPointInPolygon(point, feature.Points))
+            if (IsPointInPolygon(point, feature.Coordinates))
             {
                 // Check for lithology attribute
-                if (feature.Attributes.ContainsKey("Lithology"))
+                if (feature.Properties.ContainsKey("Lithology"))
                 {
-                    return feature.Attributes["Lithology"];
+                    return feature.Properties["Lithology"]?.ToString();
                 }
-                else if (feature.Attributes.ContainsKey("Type"))
+                else if (feature.Properties.ContainsKey("Type"))
                 {
-                    return feature.Attributes["Type"];
+                    return feature.Properties["Type"]?.ToString();
                 }
-                else if (feature.Attributes.ContainsKey("Formation"))
+                else if (feature.Properties.ContainsKey("Formation"))
                 {
-                    return feature.Attributes["Formation"];
+                    return feature.Properties["Formation"]?.ToString();
                 }
 
                 return "Unknown_Lithology";

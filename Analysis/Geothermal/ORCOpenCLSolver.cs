@@ -56,8 +56,7 @@ namespace GeoscientistToolkit.Analysis.Geothermal
             try
             {
                 // Get device from OpenCLDeviceManager
-                var deviceManager = OpenCLDeviceManager.Instance;
-                _device = deviceManager.GetDevice(_cl);
+                _device = OpenCLDeviceManager.GetComputeDevice();
 
                 if (_device == nint.Zero)
                 {
@@ -65,9 +64,10 @@ namespace GeoscientistToolkit.Analysis.Geothermal
                     return false;
                 }
 
+                var device = _device;
                 // Create context
                 int errorCode;
-                _context = _cl.CreateContext(null, 1, &_device, null, null, &errorCode);
+                _context = _cl.CreateContext(null, 1, &device, null, null, &errorCode);
                 if (errorCode != (int)ErrorCodes.Success)
                 {
                     Console.WriteLine($"Failed to create OpenCL context: {errorCode}");
@@ -75,7 +75,7 @@ namespace GeoscientistToolkit.Analysis.Geothermal
                 }
 
                 // Create command queue (OpenCL 1.2)
-                _commandQueue = _cl.CreateCommandQueue(_context, _device, 0, &errorCode);
+                _commandQueue = _cl.CreateCommandQueue(_context, _device, (CommandQueueProperties)0, &errorCode);
                 if (errorCode != (int)ErrorCodes.Success)
                 {
                     Console.WriteLine($"Failed to create command queue: {errorCode}");
@@ -134,18 +134,19 @@ namespace GeoscientistToolkit.Analysis.Geothermal
             }
 
             // Build program
-            errorCode = _cl.BuildProgram(_program, 1, &_device, null, null, null);
+            nint device = _device; // Create local copy to take address
+            errorCode = _cl.BuildProgram(_program, 1, &device, (byte*)null, null, null);
             if (errorCode != (int)ErrorCodes.Success)
             {
                 Console.WriteLine($"Failed to build program: {errorCode}");
 
                 // Get build log
                 nuint logSize;
-                _cl.GetProgramBuildInfo(_program, _device, (uint)ProgramBuildInfo.Log, 0, null, &logSize);
+                _cl.GetProgramBuildInfo(_program, _device, (uint)ProgramBuildInfo.BuildLog, 0, null, &logSize);
                 if (logSize > 0)
                 {
                     byte* log = stackalloc byte[(int)logSize];
-                    _cl.GetProgramBuildInfo(_program, _device, (uint)ProgramBuildInfo.Log, logSize, log, null);
+                    _cl.GetProgramBuildInfo(_program, _device, (uint)ProgramBuildInfo.BuildLog, logSize, log, null);
                     string logString = Marshal.PtrToStringAnsi((nint)log);
                     Console.WriteLine($"Build log:\n{logString}");
                 }
@@ -241,7 +242,7 @@ namespace GeoscientistToolkit.Analysis.Geothermal
             CheckError(errorCode, "Upload geoMassFlow");
         }
 
-        private void ExecuteKernels(int n)
+        private unsafe void ExecuteKernels(int n)
         {
             int errorCode;
 
@@ -254,10 +255,17 @@ namespace GeoscientistToolkit.Analysis.Geothermal
             float superheat = _config.SuperheatDegrees;
             float geoCp = _config.GeothermalFluidCp;
             float maxORCFlow = _config.MaxORCMassFlowRate;
-
+            var bufferGeoTemp = _bufferGeoTemp;
+            var bufferGeoMassFlow = _bufferGeoMassFlow;
+            var bufferNetPower = _bufferNetPower;
+            var bufferPumpWork = _bufferPumpWork;
+            var bufferHeatInput = _bufferHeatInput;
+            var bufferEfficiency = _bufferEfficiency;
+            var bufferMassFlowRate = _bufferMassFlowRate;
+var bufferTurbineWork = _bufferTurbineWork;
             int argIdx = 0;
-            _cl.SetKernelArg(_kernelORCCycle, (uint)argIdx++, (nuint)sizeof(nint), &_bufferGeoTemp);
-            _cl.SetKernelArg(_kernelORCCycle, (uint)argIdx++, (nuint)sizeof(nint), &_bufferGeoMassFlow);
+            _cl.SetKernelArg(_kernelORCCycle, (uint)argIdx++, (nuint)sizeof(nint), &bufferGeoTemp);
+            _cl.SetKernelArg(_kernelORCCycle, (uint)argIdx++, (nuint)sizeof(nint), &bufferGeoMassFlow);
             _cl.SetKernelArg(_kernelORCCycle, (uint)argIdx++, (nuint)sizeof(float), &condTemp);
             _cl.SetKernelArg(_kernelORCCycle, (uint)argIdx++, (nuint)sizeof(float), &evapPress);
             _cl.SetKernelArg(_kernelORCCycle, (uint)argIdx++, (nuint)sizeof(float), &pumpEff);
@@ -266,12 +274,12 @@ namespace GeoscientistToolkit.Analysis.Geothermal
             _cl.SetKernelArg(_kernelORCCycle, (uint)argIdx++, (nuint)sizeof(float), &superheat);
             _cl.SetKernelArg(_kernelORCCycle, (uint)argIdx++, (nuint)sizeof(float), &geoCp);
             _cl.SetKernelArg(_kernelORCCycle, (uint)argIdx++, (nuint)sizeof(float), &maxORCFlow);
-            _cl.SetKernelArg(_kernelORCCycle, (uint)argIdx++, (nuint)sizeof(nint), &_bufferNetPower);
-            _cl.SetKernelArg(_kernelORCCycle, (uint)argIdx++, (nuint)sizeof(nint), &_bufferEfficiency);
-            _cl.SetKernelArg(_kernelORCCycle, (uint)argIdx++, (nuint)sizeof(nint), &_bufferMassFlowRate);
-            _cl.SetKernelArg(_kernelORCCycle, (uint)argIdx++, (nuint)sizeof(nint), &_bufferTurbineWork);
-            _cl.SetKernelArg(_kernelORCCycle, (uint)argIdx++, (nuint)sizeof(nint), &_bufferPumpWork);
-            _cl.SetKernelArg(_kernelORCCycle, (uint)argIdx++, (nuint)sizeof(nint), &_bufferHeatInput);
+            _cl.SetKernelArg(_kernelORCCycle, (uint)argIdx++, (nuint)sizeof(nint), &bufferNetPower);
+            _cl.SetKernelArg(_kernelORCCycle, (uint)argIdx++, (nuint)sizeof(nint), &bufferEfficiency);
+            _cl.SetKernelArg(_kernelORCCycle, (uint)argIdx++, (nuint)sizeof(nint), &bufferMassFlowRate);
+            _cl.SetKernelArg(_kernelORCCycle, (uint)argIdx++, (nuint)sizeof(nint), &bufferTurbineWork);
+            _cl.SetKernelArg(_kernelORCCycle, (uint)argIdx++, (nuint)sizeof(nint), &bufferPumpWork);
+            _cl.SetKernelArg(_kernelORCCycle, (uint)argIdx++, (nuint)sizeof(nint), &bufferHeatInput);
             _cl.SetKernelArg(_kernelORCCycle, (uint)argIdx++, (nuint)sizeof(int), &n);
 
             // Execute kernel
@@ -411,7 +419,7 @@ float entropy_liquid(float T) {{
 
 float entropy_vapor(float T) {{
     return {sVap[0]}f + {sVap[1]}f*T + {sVap[2]}f*T*T + {sVap[3]}f*T*T*T;
-}}"
+}}" + @"
 
 // Main ORC cycle kernel
 __kernel void orc_cycle_kernel(
@@ -445,14 +453,14 @@ __kernel void orc_cycle_kernel(
     float s1 = entropy_liquid(condTemp);
 
     // State 2: Pump outlet
-    const float rho_liquid = {rhoLiq}f; // kg/m³
+    const float rho_liquid = " + rhoLiq + @"f; // kg/m³
     float dh_pump = (evapPress - P1) / (rho_liquid * pumpEff);
     float h2 = h1 + dh_pump;
 
     // State 3: Turbine inlet (superheated vapor)
     float T_max_evap = T_geo - pinch;
     float T3 = T_max_evap - superheat;
-    T3 = fmin(T3, {tCrit}f - 10.0f); // Below critical temp
+    T3 = fmin(T3, " + tCrit + @"f - 10.0f); // Below critical temp
     float h3 = enthalpy_vapor(T3) + superheat * 1000.0f;
     float s3 = entropy_vapor(T3) + superheat * 2.0f;
 

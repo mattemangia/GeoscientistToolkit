@@ -532,7 +532,7 @@ public class TriaxialVisualization3D : IDisposable
         var textPos = new Vector2(canvasPos.X + 10, canvasPos.Y + 10);
         var white = ImGui.GetColorU32(new Vector4(1, 1, 1, 1));
 
-        drawList = ImGui.GetWindowDrawList();
+        var drawList = ImGui.GetWindowDrawList();
         drawList.AddText(textPos, white, $"Nodes: {mesh.TotalNodes:N0}");
         drawList.AddText(textPos + new Vector2(0, 20), white, $"Elements: {mesh.TotalElements:N0}");
 
