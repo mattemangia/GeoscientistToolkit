@@ -5,6 +5,7 @@ using System.Reflection;
 using System.Runtime.InteropServices;
 using BitMiracle.LibTiff.Classic;
 using GeoscientistToolkit.Business;
+using GeoscientistToolkit.Data.Image.AISegmentation;
 using GeoscientistToolkit.Data.Image.Segmentation;
 using GeoscientistToolkit.UI;
 using GeoscientistToolkit.UI.GIS.Tools;
@@ -35,6 +36,8 @@ public class ImageTools : IDatasetTools
             { ToolCategory.Properties, "Properties" },
             { ToolCategory.Adjustments, "Adjustments" },
             { ToolCategory.Analysis, "Analysis" },
+            { ToolCategory.Editing, "Editing" },
+            { ToolCategory.AI, "AI Tools" },
             { ToolCategory.Spatial, "Spatial & Remote Sensing" }
         };
 
@@ -43,6 +46,8 @@ public class ImageTools : IDatasetTools
             { ToolCategory.Properties, "Manage descriptive tags and metadata." },
             { ToolCategory.Adjustments, "Apply basic color and brightness adjustments." },
             { ToolCategory.Analysis, "Perform segmentation, particle analysis, and point counting." },
+            { ToolCategory.Editing, "Layers, drawing tools, selections, and image manipulation with SAM integration." },
+            { ToolCategory.AI, "SAM-powered AI tools for image matting, object extraction, and smart cutouts." },
             { ToolCategory.Spatial, "Georeference images and perform remote sensing analysis." }
         };
 
@@ -85,6 +90,41 @@ public class ImageTools : IDatasetTools
                     {
                         Name = "Point Counting", Description = "Modal analysis tool for thin sections.",
                         Tool = new PointCountingTool()
+                    }
+                }
+            },
+            {
+                ToolCategory.Editing, new List<ToolEntry>
+                {
+                    new()
+                    {
+                        Name = "Layers & Drawing", Description = "Layer management, drawing tools, selections, and transformations with SAM integration.",
+                        Tool = new ImageLayerToolsUI()
+                    }
+                }
+            },
+            {
+                ToolCategory.AI, new List<ToolEntry>
+                {
+                    new()
+                    {
+                        Name = "Image Matting", Description = "Extract foreground/background with SAM-powered transparency.",
+                        Tool = new ImageMattingTool()
+                    },
+                    new()
+                    {
+                        Name = "Object Extractor", Description = "Extract multiple objects as separate transparent images.",
+                        Tool = new ImageObjectExtractorTool()
+                    },
+                    new()
+                    {
+                        Name = "Smart Cutout", Description = "One-click object isolation and cutout tool.",
+                        Tool = new ImageSmartCutoutTool()
+                    },
+                    new()
+                    {
+                        Name = "Batch Processor", Description = "Process multiple images with SAM operations.",
+                        Tool = new ImageBatchProcessorTool()
                     }
                 }
             },
@@ -262,6 +302,8 @@ public class ImageTools : IDatasetTools
         Properties,
         Adjustments,
         Analysis,
+        Editing,
+        AI,
         Spatial
     }
 
