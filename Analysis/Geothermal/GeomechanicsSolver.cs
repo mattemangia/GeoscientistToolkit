@@ -550,6 +550,11 @@ public class GeomechanicsSolver : IDisposable
         }
 
         // Set kernel arguments
+        // BUGFIX: Create local copies of readonly fields to take their address
+        int nr = _nr;
+        int nth = _nth;
+        int nz = _nz;
+
         err = _cl.SetKernelArg(_geomechanicsKernel, 0, (nuint)sizeof(nint), &_temperatureBuffer);
         CheckCLError(err, "Set kernel arg 0 (temperature)");
         err = _cl.SetKernelArg(_geomechanicsKernel, 1, (nuint)sizeof(nint), &_temperatureOldBuffer);
@@ -574,11 +579,11 @@ public class GeomechanicsSolver : IDisposable
         CheckCLError(err, "Set kernel arg 10 (displacement)");
         err = _cl.SetKernelArg(_geomechanicsKernel, 11, (nuint)sizeof(float), &dt);
         CheckCLError(err, "Set kernel arg 11 (dt)");
-        err = _cl.SetKernelArg(_geomechanicsKernel, 12, (nuint)sizeof(int), &_nr);
+        err = _cl.SetKernelArg(_geomechanicsKernel, 12, (nuint)sizeof(int), &nr);
         CheckCLError(err, "Set kernel arg 12 (nr)");
-        err = _cl.SetKernelArg(_geomechanicsKernel, 13, (nuint)sizeof(int), &_nth);
+        err = _cl.SetKernelArg(_geomechanicsKernel, 13, (nuint)sizeof(int), &nth);
         CheckCLError(err, "Set kernel arg 13 (nth)");
-        err = _cl.SetKernelArg(_geomechanicsKernel, 14, (nuint)sizeof(nint), &_nz);
+        err = _cl.SetKernelArg(_geomechanicsKernel, 14, (nuint)sizeof(int), &nz);
         CheckCLError(err, "Set kernel arg 14 (nz)");
 
         // Execute kernel
@@ -687,11 +692,11 @@ public class GeomechanicsSolver : IDisposable
             {
                 // Get build log for debugging
                 nuint logSize;
-                _cl.GetProgramBuildInfo(_program, _device, (uint)ProgramBuildInfo.Log, 0, null, &logSize);
+                _cl.GetProgramBuildInfo(_program, _device, (uint)ProgramBuildInfo.BuildLog, 0, null, &logSize);
                 byte[] log = new byte[logSize];
                 fixed (byte* pLog = log)
                 {
-                    _cl.GetProgramBuildInfo(_program, _device, (uint)ProgramBuildInfo.Log, logSize, pLog, null);
+                    _cl.GetProgramBuildInfo(_program, _device, (uint)ProgramBuildInfo.BuildLog, logSize, pLog, null);
                 }
                 return false;
             }

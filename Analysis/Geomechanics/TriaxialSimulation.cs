@@ -206,9 +206,9 @@ public unsafe class TriaxialSimulation : IDisposable
         if (err != 0)
         {
             nuint logSize;
-            _cl.GetProgramBuildInfo(_program, _device, (uint)ProgramBuildInfo.Log, 0, null, &logSize);
+            _cl.GetProgramBuildInfo(_program, _device, (uint)ProgramBuildInfo.BuildLog, 0, null, &logSize);
             var log = stackalloc byte[(int)logSize];
-            _cl.GetProgramBuildInfo(_program, _device, (uint)ProgramBuildInfo.Log, logSize, log, null);
+            _cl.GetProgramBuildInfo(_program, _device, (uint)ProgramBuildInfo.BuildLog, logSize, log, null);
             var logStr = Marshal.PtrToStringAnsi((nint)log);
             throw new Exception($"Failed to build program: {logStr}");
         }

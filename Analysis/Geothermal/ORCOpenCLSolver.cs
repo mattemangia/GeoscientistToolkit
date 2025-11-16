@@ -240,7 +240,7 @@ namespace GeoscientistToolkit.Analysis.Geothermal
             CheckError(errorCode, "Upload geoMassFlow");
         }
 
-        private void ExecuteKernels(int n)
+        private unsafe void ExecuteKernels(int n)
         {
             int errorCode;
 
