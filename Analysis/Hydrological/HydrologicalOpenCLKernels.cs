@@ -46,7 +46,8 @@ public unsafe class HydrologicalOpenCLKernels : IDisposable
         {
             // Create context
             int error;
-            _context = _cl.CreateContext(null, 1, &_device, null, null, &error);
+            var device = _device;
+            _context = _cl.CreateContext(null, 1, &device, null, null, &error);
             CheckError(error, "CreateContext");
 
             // Create command queue
@@ -62,7 +63,7 @@ public unsafe class HydrologicalOpenCLKernels : IDisposable
             Marshal.FreeHGlobal((nint)sourcePtr);
             CheckError(error, "CreateProgramWithSource");
 
-            error = _cl.BuildProgram(_program, 1, &_device, (byte*)null, null, null);
+            error = _cl.BuildProgram(_program, 1, &device, (byte*)null, null, null);
             if (error != (int)ErrorCodes.Success)
             {
                 // Get build log

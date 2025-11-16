@@ -410,19 +410,22 @@ public class SimulationTrackingManager
     private double GetParameterValue(PhysicoChemDataset dataset, string parameterName)
     {
         // Extract parameter value based on name
+        if (dataset.CurrentState == null)
+            return 0.0;
+
         switch (parameterName)
         {
             case "AverageTemperature":
-                return dataset.AverageTemperature;
+                return dataset.CurrentState.AverageTemperature;
 
             case "AveragePressure":
-                return dataset.AveragePressure;
+                return dataset.CurrentState.AveragePressure;
 
             case "TotalMass":
-                return dataset.TotalMass;
+                return dataset.CurrentState.TotalMass;
 
             case "MaxVelocity":
-                return dataset.MaxVelocity;
+                return dataset.CurrentState.MaxVelocity;
 
             default:
                 return 0.0;
