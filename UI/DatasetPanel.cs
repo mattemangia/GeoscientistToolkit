@@ -364,6 +364,28 @@ public class DatasetPanel : BasePanel
             {
                 ImGui.SetTooltip("Group must contain at least two single image datasets.");
             }
+
+            ImGui.Separator();
+
+            // Generate Report with Ollama
+            var ollamaSettings = GeoscientistToolkit.Settings.SettingsManager.Instance.Settings.Ollama;
+            bool ollamaConfigured = ollamaSettings.Enabled && !string.IsNullOrEmpty(ollamaSettings.SelectedModel);
+
+            if (ImGui.MenuItem("Generate Project Report with AI...", null, false, ollamaConfigured))
+            {
+                _ = GenerateProjectReportAsync(group);
+            }
+            if (ImGui.IsItemHovered())
+            {
+                if (!ollamaConfigured)
+                {
+                    ImGui.SetTooltip("Ollama is not configured. Please configure it in Settings > Ollama.");
+                }
+                else
+                {
+                    ImGui.SetTooltip("Use AI to generate a comprehensive project report based on the datasets in this group.");
+                }
+            }
         }
 
         if (dataset is AcousticVolumeDataset acousticDataset)
@@ -538,7 +560,123 @@ public class DatasetPanel : BasePanel
             DatasetType.Borehole => "[WELL]",
             DatasetType.TwoDGeology => "[2DGEOL]",
             DatasetType.SubsurfaceGIS => "[SUBSGIS]",
+            DatasetType.Text => "[TEXT]",
             _ => "[DATA]"
         };
+    }
+
+    private async Task GenerateProjectReportAsync(DatasetGroup group)
+    {
+        try
+        {
+            var ollamaSettings = GeoscientistToolkit.Settings.SettingsManager.Instance.Settings.Ollama;
+
+            if (!ollamaSettings.Enabled)
+            {
+                Util.Logger.LogError("Ollama is not enabled in settings");
+                return;
+            }
+
+            if (string.IsNullOrEmpty(ollamaSettings.SelectedModel))
+            {
+                Util.Logger.LogError("No Ollama model selected");
+                return;
+            }
+
+            Util.Logger.Log($"Generating project report for group '{group.Name}' with {group.Datasets.Count} datasets...");
+
+            // Collect dataset information
+            var datasetInfos = new List<Business.DatasetInfo>();
+
+            foreach (var dataset in group.Datasets)
+            {
+                var info = new Business.DatasetInfo
+                {
+                    Name = dataset.Name,
+                    Type = dataset.Type.ToString(),
+                    Description = "",
+                    Metadata = new Dictionary<string, string>()
+                };
+
+                // Add metadata
+                if (dataset.DatasetMetadata != null)
+                {
+                    if (!string.IsNullOrEmpty(dataset.DatasetMetadata.SampleName))
+                        info.Metadata["Sample"] = dataset.DatasetMetadata.SampleName;
+                    if (!string.IsNullOrEmpty(dataset.DatasetMetadata.LocationName))
+                        info.Metadata["Location"] = dataset.DatasetMetadata.LocationName;
+                    if (dataset.DatasetMetadata.Depth.HasValue)
+                        info.Metadata["Depth"] = $"{dataset.DatasetMetadata.Depth.Value} m";
+                    if (dataset.DatasetMetadata.CollectionDate.HasValue)
+                        info.Metadata["Collection Date"] = dataset.DatasetMetadata.CollectionDate.Value.ToShortDateString();
+                    if (!string.IsNullOrEmpty(dataset.DatasetMetadata.Notes))
+                        info.Description = dataset.DatasetMetadata.Notes;
+                }
+
+                // Add type-specific information
+                if (dataset is Data.Borehole.BoreholeDataset borehole)
+                {
+                    info.Metadata["Total Depth"] = $"{borehole.TotalDepth} m";
+                    info.Metadata["Depth Interval"] = $"{borehole.DepthInterval} m";
+                }
+                else if (dataset is Data.Table.TableDataset table)
+                {
+                    info.Metadata["Rows"] = table.RowCount.ToString();
+                    info.Metadata["Columns"] = table.ColumnCount.ToString();
+                }
+                else if (dataset is Data.AcousticVolume.AcousticVolumeDataset acoustic)
+                {
+                    info.Metadata["Dimensions"] = $"{acoustic.Width}x{acoustic.Height}x{acoustic.Depth}";
+                }
+                else if (dataset is Data.PNM.PNMDataset pnm)
+                {
+                    if (pnm.Permeability.HasValue)
+                        info.Metadata["Permeability"] = $"{pnm.Permeability.Value:E2} m²";
+                }
+
+                datasetInfos.Add(info);
+            }
+
+            // Generate report
+            var ollamaService = Business.OllamaService.Instance;
+            var report = await ollamaService.GenerateProjectReportAsync(datasetInfos, ollamaSettings);
+
+            if (string.IsNullOrEmpty(report))
+            {
+                Util.Logger.LogError("Failed to generate report - Ollama returned empty response");
+                return;
+            }
+
+            Util.Logger.Log($"Successfully generated report ({report.Length} characters)");
+
+            // Create a text dataset for the report
+            var reportFileName = $"{group.Name}_Report_{DateTime.Now:yyyyMMdd_HHmmss}.txt";
+            var projectDir = System.IO.Path.GetDirectoryName(_datasets.FirstOrDefault()?.FilePath);
+            if (string.IsNullOrEmpty(projectDir))
+            {
+                projectDir = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
+            }
+
+            var reportPath = System.IO.Path.Combine(projectDir, reportFileName);
+
+            var textLoader = new Data.Loaders.TextLoader();
+            var reportDataset = textLoader.CreateFromContent(
+                $"{group.Name} - AI Report",
+                reportPath,
+                report,
+                $"Ollama:{ollamaSettings.SelectedModel}"
+            );
+
+            if (reportDataset != null)
+            {
+                // Add to the project
+                OnDatasetAdded?.Invoke(reportDataset);
+                Util.Logger.Log($"Report saved and added to project: {reportPath}");
+            }
+        }
+        catch (Exception ex)
+        {
+            Util.Logger.LogError($"Failed to generate project report: {ex.Message}");
+        }
     }
 }

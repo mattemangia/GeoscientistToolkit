@@ -38,7 +38,8 @@ public class ImportDataModal
         "PhysicoChem Reactor",
         "TOUGH2 Input File",
         "Video File (MP4/AVI/MOV)",
-        "Audio File (WAV/MP3/OGG)"
+        "Audio File (WAV/MP3/OGG)",
+        "Text Document (TXT/RTF)"
     };
 
     private readonly ImGuiFileDialog _fileDialog;
@@ -83,6 +84,8 @@ public class ImportDataModal
     private readonly ImGuiFileDialog _videoDialog;
     private readonly AudioLoader _audioLoader;
     private readonly ImGuiFileDialog _audioDialog;
+    private readonly TextLoader _textLoader;
+    private readonly ImGuiFileDialog _textDialog;
     private ImportState _currentState = ImportState.Idle;
     private Task<Dataset> _importTask;
     private Dataset _pendingDataset;
@@ -118,6 +121,7 @@ public class ImportDataModal
         _tough2Dialog = new ImGuiFileDialog("ImportTough2Dialog", FileDialogType.OpenFile, "Select TOUGH2 File");
         _videoDialog = new ImGuiFileDialog("ImportVideoDialog", FileDialogType.OpenFile, "Select Video File");
         _audioDialog = new ImGuiFileDialog("ImportAudioDialog", FileDialogType.OpenFile, "Select Audio File");
+        _textDialog = new ImGuiFileDialog("ImportTextDialog", FileDialogType.OpenFile, "Select Text File");
         _organizerDialog = new ImageStackOrganizerDialog();
 
         // Initialize loaders
@@ -141,6 +145,7 @@ public class ImportDataModal
         _tough2Loader = new Tough2Loader();
         _videoLoader = new VideoLoader();
         _audioLoader = new AudioLoader();
+        _textLoader = new TextLoader();
     }
 
     public void Open()
@@ -263,6 +268,7 @@ public class ImportDataModal
 
         // Added for Audio
         if (_audioDialog.Submit()) _audioLoader.AudioPath = _audioDialog.SelectedPath;
+        if (_textDialog.Submit()) _textLoader.TextPath = _textDialog.SelectedPath;
     }
 
     private void DrawOptions()
@@ -339,6 +345,9 @@ public class ImportDataModal
                 break;
             case 20: // Audio File
                 DrawAudioOptions();
+                break;
+            case 21: // Text Document
+                DrawTextOptions();
                 break;
         }
 
@@ -772,6 +781,38 @@ public class ImportDataModal
                 ImGui.BulletText($"File Size: {audioInfo.FileSize / 1024.0 / 1024.0:F2} MB");
                 ImGui.TextColored(new Vector4(0.0f, 1.0f, 0.5f, 1.0f), "✓ Ready to import audio");
             }
+        }
+    }
+
+    private void DrawTextOptions()
+    {
+        ImGui.TextWrapped("Import text documents for viewing and editing. Supports plain text (TXT) and rich text format (RTF).");
+
+        ImGui.Spacing();
+        ImGui.Separator();
+        ImGui.Spacing();
+
+        ImGui.Text("Text File:");
+        var path = _textLoader.TextPath ?? "";
+        ImGui.InputText("##TextPath", ref path, 260, ImGuiInputTextFlags.ReadOnly);
+        ImGui.SameLine();
+        if (ImGui.Button("Browse...##TextFile"))
+        {
+            string[] textExtensions = { ".txt", ".rtf" };
+            _textDialog.Open(null, textExtensions);
+        }
+
+        if (!string.IsNullOrEmpty(_textLoader.TextPath) && File.Exists(_textLoader.TextPath))
+        {
+            var fileInfo = new FileInfo(_textLoader.TextPath);
+            ImGui.Spacing();
+            ImGui.Separator();
+            ImGui.Spacing();
+            ImGui.Text("File Information:");
+            ImGui.BulletText($"File: {fileInfo.Name}");
+            ImGui.BulletText($"Format: {Path.GetExtension(_textLoader.TextPath).TrimStart('.').ToUpperInvariant()}");
+            ImGui.BulletText($"File Size: {fileInfo.Length / 1024.0:F2} KB");
+            ImGui.TextColored(new Vector4(0.0f, 1.0f, 0.5f, 1.0f), "✓ Ready to import text document");
         }
     }
 

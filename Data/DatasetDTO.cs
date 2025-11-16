@@ -608,3 +608,14 @@ public class AudioDatasetDTO : DatasetDTO
     public long BitRate { get; set; }
     public Dictionary<string, string> AudioMetadata { get; set; } = new();
 }
+
+public class TextDatasetDTO : DatasetDTO
+{
+    public string Format { get; set; } // "txt" or "rtf"
+    public int LineCount { get; set; }
+    public int CharacterCount { get; set; }
+    public int WordCount { get; set; }
+    public string GeneratedBy { get; set; }
+    public DateTime? GeneratedDate { get; set; }
+    public bool IsGeneratedReport { get; set; }
+}

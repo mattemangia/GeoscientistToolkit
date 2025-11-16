@@ -23,7 +23,8 @@ public enum DatasetType
     Earthquake,
     Seismic,
     Video,
-    Audio
+    Audio,
+    Text
 }
 
 public abstract class Dataset
