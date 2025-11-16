@@ -49,8 +49,7 @@ namespace GeoscientistToolkit.Data.Image.AISegmentation
         public enum CutoutMode
         {
             InstantCutout,      // Single click creates cutout
-            RefinableCutout,    // Click to refine before extracting
-            BoundingBoxCutout   // Click-drag bounding box
+            RefinableCutout     // Click to refine before extracting
         }
 
         public ImageSmartCutoutTool()
@@ -430,9 +429,107 @@ namespace GeoscientistToolkit.Data.Image.AISegmentation
 
         private byte[] AddDropShadow(byte[] imageData, int width, int height)
         {
-            // Simple drop shadow effect
-            // TODO: Implement proper gaussian blur shadow
-            return imageData;
+            // Create shadow layer
+            int shadowOffset = 4;
+            int shadowBlur = 6;
+            byte shadowAlpha = 128;
+
+            // Extract alpha channel to create shadow mask
+            byte[] shadowMask = new byte[width * height];
+            for (int y = 0; y < height; y++)
+            {
+                for (int x = 0; x < width; x++)
+                {
+                    int idx = (y * width + x) * 4;
+                    shadowMask[y * width + x] = imageData[idx + 3];
+                }
+            }
+
+            // Blur the shadow mask using box blur (approximation of gaussian)
+            shadowMask = BoxBlur(shadowMask, width, height, shadowBlur);
+
+            // Create new image with shadow
+            byte[] withShadow = new byte[width * height * 4];
+
+            for (int y = 0; y < height; y++)
+            {
+                for (int x = 0; x < width; x++)
+                {
+                    int idx = (y * width + x) * 4;
+
+                    // Check if there's a shadow at this offset position
+                    int shadowX = x - shadowOffset;
+                    int shadowY = y - shadowOffset;
+
+                    if (shadowX >= 0 && shadowX < width && shadowY >= 0 && shadowY < height)
+                    {
+                        int shadowIdx = shadowY * width + shadowX;
+                        byte shadowValue = shadowMask[shadowIdx];
+
+                        if (shadowValue > 0 && imageData[idx + 3] == 0)
+                        {
+                            // Draw shadow (dark gray with reduced alpha)
+                            withShadow[idx] = 0;
+                            withShadow[idx + 1] = 0;
+                            withShadow[idx + 2] = 0;
+                            withShadow[idx + 3] = (byte)((shadowValue * shadowAlpha) / 255);
+                        }
+                        else
+                        {
+                            // Copy original pixel
+                            withShadow[idx] = imageData[idx];
+                            withShadow[idx + 1] = imageData[idx + 1];
+                            withShadow[idx + 2] = imageData[idx + 2];
+                            withShadow[idx + 3] = imageData[idx + 3];
+                        }
+                    }
+                    else
+                    {
+                        // Copy original pixel
+                        withShadow[idx] = imageData[idx];
+                        withShadow[idx + 1] = imageData[idx + 1];
+                        withShadow[idx + 2] = imageData[idx + 2];
+                        withShadow[idx + 3] = imageData[idx + 3];
+                    }
+                }
+            }
+
+            return withShadow;
+        }
+
+        private byte[] BoxBlur(byte[] data, int width, int height, int radius)
+        {
+            if (radius <= 0) return data;
+
+            byte[] blurred = new byte[width * height];
+
+            for (int y = 0; y < height; y++)
+            {
+                for (int x = 0; x < width; x++)
+                {
+                    int sum = 0;
+                    int count = 0;
+
+                    for (int dy = -radius; dy <= radius; dy++)
+                    {
+                        for (int dx = -radius; dx <= radius; dx++)
+                        {
+                            int nx = x + dx;
+                            int ny = y + dy;
+
+                            if (nx >= 0 && nx < width && ny >= 0 && ny < height)
+                            {
+                                sum += data[ny * width + nx];
+                                count++;
+                            }
+                        }
+                    }
+
+                    blurred[y * width + x] = (byte)(sum / count);
+                }
+            }
+
+            return blurred;
         }
 
         private void Reset()
@@ -450,7 +547,6 @@ namespace GeoscientistToolkit.Data.Image.AISegmentation
             {
                 CutoutMode.InstantCutout => "Instant (one-click cutout)",
                 CutoutMode.RefinableCutout => "Refinable (multi-point)",
-                CutoutMode.BoundingBoxCutout => "Bounding box",
                 _ => mode.ToString()
             };
         }
