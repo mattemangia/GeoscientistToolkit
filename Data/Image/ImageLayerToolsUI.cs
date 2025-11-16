@@ -447,22 +447,22 @@ namespace GeoscientistToolkit.Data.Image
             if (ImGui.Button("Copy", new Vector2(-1, 0)))
             {
                 if (_selection != null && _selection.HasSelection)
-                    ImageClipboard.CopyLayer(_layerManager.ActiveLayer, _layerManager.Width, _layerManager.Height, _selection);
+                    ImageClipboard.CopyLayer(_layerManager.ActiveLayer.Name, _layerManager.ActiveLayer.Data, _layerManager.Width, _layerManager.Height, _selection);
                 else
-                    ImageClipboard.CopyLayer(_layerManager.ActiveLayer, _layerManager.Width, _layerManager.Height);
+                    ImageClipboard.CopyLayer(_layerManager.ActiveLayer.Name, _layerManager.ActiveLayer.Data, _layerManager.Width, _layerManager.Height);
             }
 
             if (ImGui.Button("Cut", new Vector2(-1, 0)))
             {
                 if (_selection != null && _selection.HasSelection)
-                    ImageClipboard.CutLayer(_layerManager.ActiveLayer, _layerManager.Width, _layerManager.Height, _selection);
+                    ImageClipboard.CutLayer(_layerManager.ActiveLayer.Name, _layerManager.ActiveLayer.Data, _layerManager.Width, _layerManager.Height, _selection);
                 else
-                    ImageClipboard.CutLayer(_layerManager.ActiveLayer, _layerManager.Width, _layerManager.Height);
+                    ImageClipboard.CutLayer(_layerManager.ActiveLayer.Name, _layerManager.ActiveLayer.Data, _layerManager.Width, _layerManager.Height);
             }
 
             if (ImGui.Button("Paste", new Vector2(-1, 0)) && ImageClipboard.HasData)
             {
-                ImageClipboard.PasteToLayer(_layerManager.ActiveLayer, _layerManager.Width, _layerManager.Height);
+                ImageClipboard.PasteToLayer(_layerManager.ActiveLayer.Name, _layerManager.ActiveLayer.Data, _layerManager.Width, _layerManager.Height);
             }
 
             if (ImGui.Button("Paste as New Layer", new Vector2(-1, 0)) && ImageClipboard.HasData)

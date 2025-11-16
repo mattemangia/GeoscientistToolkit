@@ -77,27 +77,27 @@ namespace GeoscientistToolkit.Data.Image
         }
 
         /// <summary>
-        /// Copy from layer
+        /// Copy from layer (string-based overload)
         /// </summary>
-        public static void CopyLayer(ImageLayer layer, int width, int height)
+        public static void CopyLayer(string name, byte[] data, int width, int height)
         {
-            if (layer?.Data == null) return;
+            if (data == null) return;
 
             _clipboardWidth = width;
             _clipboardHeight = height;
-            _clipboardData = new byte[layer.Data.Length];
-            Array.Copy(layer.Data, _clipboardData, layer.Data.Length);
+            _clipboardData = new byte[data.Length];
+            Array.Copy(data, _clipboardData, data.Length);
             _hasData = true;
         }
 
         /// <summary>
-        /// Copy from layer with selection
+        /// Copy from layer (string-based overload with selection)
         /// </summary>
-        public static void CopyLayer(ImageLayer layer, int width, int height, ImageSelection selection)
+        public static void CopyLayer(string name, byte[] data, int width, int height, ImageSelection selection)
         {
-            if (layer?.Data == null || selection == null || !selection.HasSelection)
+            if (data == null || selection == null || !selection.HasSelection)
             {
-                CopyLayer(layer, width, height);
+                CopyLayer(name, data, width, height);
                 return;
             }
 
@@ -121,15 +121,33 @@ namespace GeoscientistToolkit.Data.Image
 
                     if (maskValue > 0)
                     {
-                        _clipboardData[dstIdx] = layer.Data[srcIdx];
-                        _clipboardData[dstIdx + 1] = layer.Data[srcIdx + 1];
-                        _clipboardData[dstIdx + 2] = layer.Data[srcIdx + 2];
-                        _clipboardData[dstIdx + 3] = (byte)((layer.Data[srcIdx + 3] * maskValue) / 255);
+                        _clipboardData[dstIdx] = data[srcIdx];
+                        _clipboardData[dstIdx + 1] = data[srcIdx + 1];
+                        _clipboardData[dstIdx + 2] = data[srcIdx + 2];
+                        _clipboardData[dstIdx + 3] = (byte)((data[srcIdx + 3] * maskValue) / 255);
                     }
                 }
             }
 
             _hasData = true;
+        }
+
+        /// <summary>
+        /// Copy from layer
+        /// </summary>
+        public static void CopyLayer(ImageLayer layer, int width, int height)
+        {
+            if (layer?.Data == null) return;
+            CopyLayer(layer.Name, layer.Data, width, height);
+        }
+
+        /// <summary>
+        /// Copy from layer with selection
+        /// </summary>
+        public static void CopyLayer(ImageLayer layer, int width, int height, ImageSelection selection)
+        {
+            if (layer?.Data == null) return;
+            CopyLayer(layer.Name, layer.Data, width, height, selection);
         }
 
         /// <summary>
@@ -175,22 +193,22 @@ namespace GeoscientistToolkit.Data.Image
         }
 
         /// <summary>
-        /// Cut from layer
+        /// Cut from layer (string-based overload)
         /// </summary>
-        public static void CutLayer(ImageLayer layer, int width, int height)
+        public static void CutLayer(string name, byte[] data, int width, int height)
         {
-            CopyLayer(layer, width, height);
-            Array.Clear(layer.Data, 0, layer.Data.Length);
+            CopyLayer(name, data, width, height);
+            Array.Clear(data, 0, data.Length);
         }
 
         /// <summary>
-        /// Cut from layer with selection
+        /// Cut from layer with selection (string-based overload)
         /// </summary>
-        public static void CutLayer(ImageLayer layer, int width, int height, ImageSelection selection)
+        public static void CutLayer(string name, byte[] data, int width, int height, ImageSelection selection)
         {
-            if (layer?.Data == null) return;
+            if (data == null) return;
 
-            CopyLayer(layer, width, height, selection);
+            CopyLayer(name, data, width, height, selection);
 
             if (selection != null && selection.HasSelection)
             {
@@ -205,15 +223,33 @@ namespace GeoscientistToolkit.Data.Image
                             if (maskValue > 0)
                             {
                                 int idx = (y * width + x) * 4;
-                                layer.Data[idx] = 0;
-                                layer.Data[idx + 1] = 0;
-                                layer.Data[idx + 2] = 0;
-                                layer.Data[idx + 3] = 0;
+                                data[idx] = 0;
+                                data[idx + 1] = 0;
+                                data[idx + 2] = 0;
+                                data[idx + 3] = 0;
                             }
                         }
                     }
                 }
             }
+        }
+
+        /// <summary>
+        /// Cut from layer
+        /// </summary>
+        public static void CutLayer(ImageLayer layer, int width, int height)
+        {
+            if (layer?.Data == null) return;
+            CutLayer(layer.Name, layer.Data, width, height);
+        }
+
+        /// <summary>
+        /// Cut from layer with selection
+        /// </summary>
+        public static void CutLayer(ImageLayer layer, int width, int height, ImageSelection selection)
+        {
+            if (layer?.Data == null) return;
+            CutLayer(layer.Name, layer.Data, width, height, selection);
         }
 
         /// <summary>
@@ -274,12 +310,12 @@ namespace GeoscientistToolkit.Data.Image
         }
 
         /// <summary>
-        /// Paste clipboard data to layer at specified position
+        /// Paste clipboard data to layer at specified position (string-based overload)
         /// </summary>
-        public static void PasteToLayer(ImageLayer layer, int width, int height,
+        public static void PasteToLayer(string name, byte[] data, int width, int height,
             int offsetX = 0, int offsetY = 0, float opacity = 1.0f)
         {
-            if (!_hasData || layer?.Data == null) return;
+            if (!_hasData || data == null) return;
 
             for (int y = 0; y < _clipboardHeight; y++)
             {
@@ -296,15 +332,15 @@ namespace GeoscientistToolkit.Data.Image
                         byte srcAlpha = (byte)((_clipboardData[srcIdx + 3] * opacity));
                         if (srcAlpha == 0) continue;
 
-                        byte dstAlpha = layer.Data[dstIdx + 3];
+                        byte dstAlpha = data[dstIdx + 3];
 
                         if (srcAlpha == 255)
                         {
                             // Opaque paste - replace
-                            layer.Data[dstIdx] = _clipboardData[srcIdx];
-                            layer.Data[dstIdx + 1] = _clipboardData[srcIdx + 1];
-                            layer.Data[dstIdx + 2] = _clipboardData[srcIdx + 2];
-                            layer.Data[dstIdx + 3] = srcAlpha;
+                            data[dstIdx] = _clipboardData[srcIdx];
+                            data[dstIdx + 1] = _clipboardData[srcIdx + 1];
+                            data[dstIdx + 2] = _clipboardData[srcIdx + 2];
+                            data[dstIdx + 3] = srcAlpha;
                         }
                         else
                         {
@@ -318,17 +354,27 @@ namespace GeoscientistToolkit.Data.Image
                                 for (int c = 0; c < 3; c++)
                                 {
                                     float srcC = _clipboardData[srcIdx + c] / 255.0f;
-                                    float dstC = layer.Data[dstIdx + c] / 255.0f;
+                                    float dstC = data[dstIdx + c] / 255.0f;
                                     float outC = (srcC * srcA + dstC * dstA * (1 - srcA)) / outA;
-                                    layer.Data[dstIdx + c] = (byte)(outC * 255);
+                                    data[dstIdx + c] = (byte)(outC * 255);
                                 }
 
-                                layer.Data[dstIdx + 3] = (byte)(outA * 255);
+                                data[dstIdx + 3] = (byte)(outA * 255);
                             }
                         }
                     }
                 }
             }
+        }
+
+        /// <summary>
+        /// Paste clipboard data to layer at specified position
+        /// </summary>
+        public static void PasteToLayer(ImageLayer layer, int width, int height,
+            int offsetX = 0, int offsetY = 0, float opacity = 1.0f)
+        {
+            if (!_hasData || layer?.Data == null) return;
+            PasteToLayer(layer.Name, layer.Data, width, height, offsetX, offsetY, opacity);
         }
 
         /// <summary>
