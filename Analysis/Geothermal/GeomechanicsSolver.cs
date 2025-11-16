@@ -676,9 +676,9 @@ public class GeomechanicsSolver : IDisposable
 
             // Get device info
             DeviceName = OpenCLDeviceManager.GetDeviceInfo().Name;
-            var device = _device;
+            var device1 = _device;
             // Create context
-            _context = _cl.CreateContext(null, 1, &device, null, null, &err);
+            _context = _cl.CreateContext(null, 1, &device1, null, null, &err);
             if (err != 0) return false;
 
             // Create command queue
