@@ -378,7 +378,7 @@ public class AmbientOcclusionTool : IDatasetTools, IDisposable
             if (showMask)
             {
                 Vector4 overlayColor = _preview.OverlayColor;
-                if (ImGui.ColorEdit3("Overlay Color", ref overlayColor))
+                if (ImGui.ColorEdit4("Overlay Color", ref overlayColor))
                 {
                     _preview.OverlayColor = overlayColor;
                 }

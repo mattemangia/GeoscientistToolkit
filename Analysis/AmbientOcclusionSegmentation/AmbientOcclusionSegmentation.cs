@@ -279,7 +279,7 @@ public class AmbientOcclusionSegmentation : IDisposable
         {
             dataset.LabelData = new Data.VolumeData.ChunkedLabelVolume(
                 dataset.Width, dataset.Height, dataset.Depth, 256, false,
-                dataset.FolderPath + "/" + dataset.Name + ".Labels.bin");
+                dataset.FilePath + "/" + dataset.Name + ".Labels.bin");
         }
 
         var mask = result.SegmentationMask;
