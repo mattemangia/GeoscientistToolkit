@@ -1,6 +1,7 @@
 // GeoscientistToolkit/Analysis/PNM/DualPNMGenerator.cs
 
 using System.Numerics;
+using GeoscientistToolkit.Business;
 using GeoscientistToolkit.Data.CtImageStack;
 using GeoscientistToolkit.Data.Image;
 using GeoscientistToolkit.Data.Pnm;
@@ -57,8 +58,10 @@ public class DualPNMGeneratorTool
         if (!IsOpen) return;
 
         ImGui.SetNextWindowSize(new Vector2(900, 700), ImGuiCond.FirstUseEver);
-        if (ImGui.Begin("Dual PNM Generator", ref IsOpen))
+        bool isOpen = IsOpen;
+        if (ImGui.Begin("Dual PNM Generator", ref isOpen))
         {
+            IsOpen = isOpen;
             DrawHeader();
             ImGui.Separator();
 
@@ -146,7 +149,7 @@ public class DualPNMGeneratorTool
         }
 
         ImGui.Text("Available CT Datasets:");
-        ImGui.BeginChild("CTList", new Vector2(0, 200), true);
+        ImGui.BeginChild("CTList", new Vector2(0, 200), ImGuiChildFlags.Border);
 
         for (int i = 0; i < ctDatasets.Count; i++)
         {
@@ -295,7 +298,7 @@ public class DualPNMGeneratorTool
             .ToList();
 
         ImGui.Text("Available Image Datasets:");
-        ImGui.BeginChild("ImageList", new Vector2(0, 200), true);
+        ImGui.BeginChild("ImageList", new Vector2(0, 200), ImGuiChildFlags.Border);
 
         for (int i = 0; i < imageDatasets.Count; i++)
         {
@@ -351,7 +354,7 @@ public class DualPNMGeneratorTool
         ImGui.Spacing();
 
         ImGui.Text("SEM Images:");
-        ImGui.BeginChild("SEMCalibList", new Vector2(0, 300), true);
+        ImGui.BeginChild("SEMCalibList", new Vector2(0, 300), ImGuiChildFlags.Border);
 
         for (int i = 0; i < _semImages.Count; i++)
         {
@@ -419,7 +422,7 @@ public class DualPNMGeneratorTool
         ImGui.Text("For each SEM image, specify which macro-pore it represents:");
         ImGui.Separator();
 
-        ImGui.BeginChild("AssociationList", new Vector2(0, 300), true);
+        ImGui.BeginChild("AssociationList", new Vector2(0, 300), ImGuiChildFlags.Border);
 
         for (int i = 0; i < _semImages.Count; i++)
         {
@@ -431,7 +434,11 @@ public class DualPNMGeneratorTool
             ImGui.Text("Macro-Pore ID:");
             ImGui.SameLine();
             ImGui.SetNextItemWidth(100);
-            ImGui.InputInt($"##poreID{i}", ref semInfo.MacroPoreID);
+            int macroPoreId = semInfo.MacroPoreID;
+            if (ImGui.InputInt($"##poreID{i}", ref macroPoreId))
+            {
+                _semImages[i].MacroPoreID = macroPoreId;
+            }
 
             if (semInfo.MacroPoreID > 0 && _macroPNM != null)
             {
@@ -641,9 +648,13 @@ public class DualPNMGeneratorTool
         ImGui.Spacing();
 
         ImGui.Text("Coupling Mode:");
-        ImGui.RadioButton("Parallel (Separate flow paths)", ref _couplingMode, DualPorosityCouplingMode.Parallel);
-        ImGui.RadioButton("Series (Embedded micropores)", ref _couplingMode, DualPorosityCouplingMode.Series);
-        ImGui.RadioButton("Mass Transfer (Advanced)", ref _couplingMode, DualPorosityCouplingMode.MassTransfer);
+        int couplingModeInt = (int)_couplingMode;
+        if (ImGui.RadioButton("Parallel (Separate flow paths)", ref couplingModeInt, (int)DualPorosityCouplingMode.Parallel))
+            _couplingMode = (DualPorosityCouplingMode)couplingModeInt;
+        if (ImGui.RadioButton("Series (Embedded micropores)", ref couplingModeInt, (int)DualPorosityCouplingMode.Series))
+            _couplingMode = (DualPorosityCouplingMode)couplingModeInt;
+        if (ImGui.RadioButton("Mass Transfer (Advanced)", ref couplingModeInt, (int)DualPorosityCouplingMode.MassTransfer))
+            _couplingMode = (DualPorosityCouplingMode)couplingModeInt;
 
         ImGui.Spacing();
         ImGui.Separator();
