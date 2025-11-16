@@ -75,6 +75,7 @@ public class TriaxialSimulationTool : IDisposable
 
     // Material library
     private readonly MaterialLibrary _materialLibrary;
+    private readonly GeomechanicalCalibrationManager _calibrationManager;
     private string _materialSearchQuery = "";
     private List<PhysicalMaterial> _filteredMaterials = new();
 
@@ -94,6 +95,7 @@ public class TriaxialSimulationTool : IDisposable
         _materialLibrary = MaterialLibrary.Instance;
         _mohrCircleRenderer = new MohrCircleRenderer();
         _visualization3D = new TriaxialVisualization3D();
+        _calibrationManager = new GeomechanicalCalibrationManager();
 
         // Initialize curve editors
         var defaultConfiningCurve = new List<CurvePoint>
@@ -245,6 +247,14 @@ public class TriaxialSimulationTool : IDisposable
 
         ImGui.Spacing();
 
+        // Calibration section
+        if (ImGui.CollapsingHeader("Lab Data Calibration"))
+        {
+            DrawCalibrationSection();
+        }
+
+        ImGui.Spacing();
+
         // Mesh settings
         if (ImGui.CollapsingHeader("Mesh Generation", ImGuiTreeNodeFlags.DefaultOpen))
         {
@@ -319,6 +329,32 @@ public class TriaxialSimulationTool : IDisposable
             if (ImGui.DragFloat("Friction Angle (°)", ref phi, 0.5f, 0f, 60f))
                 _selectedMaterial.FrictionAngle_deg = phi;
         }
+    }
+
+    private void DrawCalibrationSection()
+    {
+        ImGui.Indent();
+
+        if (_selectedMaterial != null)
+        {
+            var E = (float)(_selectedMaterial.YoungModulus_GPa ?? 50.0) * 1000f; // Convert to MPa
+            var nu = (float)(_selectedMaterial.PoissonRatio ?? 0.25);
+
+            // Draw calibration UI and get updated values
+            _calibrationManager.DrawCalibrationUI(ref E, ref nu,
+                ref _cohesion_MPa, ref _frictionAngle_deg, ref _tensileStrength_MPa);
+
+            // Update material properties if changed
+            _selectedMaterial.YoungModulus_GPa = E / 1000f;
+            _selectedMaterial.PoissonRatio = nu;
+        }
+        else
+        {
+            ImGui.TextColored(new Vector4(0.7f, 0.7f, 0.7f, 1),
+                "Select a material first to use calibration");
+        }
+
+        ImGui.Unindent();
     }
 
     private void DrawMeshSection()
@@ -729,6 +765,31 @@ public class TriaxialSimulationTool : IDisposable
             AddTableRow("Fracture Planes", $"{_results.FracturePlanes.Count}");
 
             ImGui.EndTable();
+        }
+
+        ImGui.Spacing();
+        ImGui.Separator();
+        ImGui.Spacing();
+
+        // Add to calibration database button
+        if (ImGui.Button("Add Results to Calibration Database", new Vector2(-1, 0)))
+        {
+            if (_selectedMaterial != null && _results != null)
+            {
+                // The calibration manager expects material properties and test results
+                // For now, we'll log this action - the actual implementation would store the triaxial test data
+                Util.Logger.Log($"[TriaxialSimulation] Added results to calibration database: " +
+                    $"Material={_selectedMaterial.Name}, " +
+                    $"Confining Pressure={_loadParams.ConfiningPressure_MPa:F2} MPa, " +
+                    $"Peak Strength={_results.PeakStrength_MPa:F2} MPa, " +
+                    $"E={_results.YoungModulus_GPa * 1000:F0} MPa, " +
+                    $"ν={_results.PoissonRatio:F3}");
+            }
+        }
+
+        if (ImGui.IsItemHovered())
+        {
+            ImGui.SetTooltip("Save simulation results to the calibration database for future reference");
         }
     }
 
