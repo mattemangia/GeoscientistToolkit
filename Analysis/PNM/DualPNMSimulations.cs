@@ -122,7 +122,7 @@ public static class DualPNMSimulations
     /// Simulates transport in macro-network with micro-porosity as embedded storage.
     /// </summary>
     public static void RunDualReactiveTransport(DualPNMDataset dataset, PNMReactiveTransportOptions options,
-        Action<float> progressCallback = null)
+        IProgress<(float progress, string message)> progressCallback = null)
     {
         if (dataset == null)
         {
@@ -202,7 +202,7 @@ public static class DualPNMSimulations
     /// Calculate molecular diffusivity for dual PNM considering both scales.
     /// </summary>
     public static DiffusivityResults CalculateDualDiffusivity(DualPNMDataset dataset,
-        DiffusivityOptions options, Action<float> progressCallback = null)
+        DiffusivityOptions options, Action<string> progressCallback = null)
     {
         if (dataset == null)
         {
