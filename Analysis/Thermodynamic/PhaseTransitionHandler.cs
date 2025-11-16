@@ -196,7 +196,7 @@ public class PhaseTransitionHandler
     /// Get saturated liquid enthalpy at given temperature.
     /// Simplified correlation for speed.
     /// </summary>
-    private static double GetSaturatedLiquidEnthalpy(double T_K)
+    public static double GetSaturatedLiquidEnthalpy(double T_K)
     {
         // Simple polynomial fit: h_f ≈ Cp * (T - T_ref)
         const double C_p = 4.18; // kJ/(kg·K) - approximate

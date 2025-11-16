@@ -5,9 +5,11 @@
 
 using System;
 using System.Globalization;
+using System.Linq;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using GeoscientistToolkit.Analysis.Multiphase;
+using GeoscientistToolkit.Analysis.Thermodynamic;
 using GeoscientistToolkit.Business.GeoScript;
 using GeoscientistToolkit.Data;
 using GeoscientistToolkit.Data.PhysicoChem;
@@ -272,7 +274,7 @@ public class SetTwoPhaseConditionsCommand : IGeoScriptCommand
         domain.InitialConditions.Temperature = temperature_K;
 
         // Get saturation pressure at this temperature
-        double P_sat = WaterPropertiesIAPWS.SaturationPressure(temperature_K);
+        double P_sat = PhaseTransitionHandler.GetSaturationPressure(temperature_K) * 1e6; // MPa to Pa
         domain.InitialConditions.Pressure = P_sat; // Set to saturation pressure
 
         // Calculate vapor saturation from quality

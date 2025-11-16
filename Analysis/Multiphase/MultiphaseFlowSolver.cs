@@ -13,6 +13,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using GeoscientistToolkit.Analysis.Thermodynamic;
 using GeoscientistToolkit.Business.Thermodynamics;
 using GeoscientistToolkit.Util;
 
@@ -126,7 +127,7 @@ public class MultiphaseFlowSolver
             double P_Pa = state.Pressure[i, j, k];
 
             // Get water saturation pressure (phase transition)
-            double P_sat = WaterPropertiesIAPWS.SaturationPressure(T_K);
+            double P_sat = PhaseTransitionHandler.GetSaturationPressure(T_K) * 1e6; // MPa to Pa
 
             // Determine phase state
             if (P_Pa >= P_sat)
@@ -166,7 +167,7 @@ public class MultiphaseFlowSolver
         double enthalpy = state.Enthalpy[i, j, k];
 
         // Get saturation properties
-        var (h_liquid, h_vapor, rho_liquid, rho_vapor) = WaterPropertiesIAPWS.GetSaturationProperties(T_K);
+        var (h_liquid, h_vapor, rho_liquid, rho_vapor) = GetSaturationProperties(T_K);
 
         if (enthalpy < h_liquid)
         {
@@ -206,7 +207,7 @@ public class MultiphaseFlowSolver
         double P_Pa = state.Pressure[i, j, k];
 
         // Get partial pressure of water vapor
-        double P_sat = WaterPropertiesIAPWS.SaturationPressure(T_K);
+        double P_sat = PhaseTransitionHandler.GetSaturationPressure(T_K) * 1e6; // MPa to Pa
         double P_steam = Math.Min(P_Pa, P_sat);
 
         // Partial pressure of NCG
@@ -345,7 +346,7 @@ public class MultiphaseFlowSolver
             double dP_dz = (state.Pressure[i, j, k + 1] - state.Pressure[i, j, k - 1]) / (2 * dz);
 
             // Permeability
-            double k = state.Permeability[i, j, k];
+            double k_perm = state.Permeability[i, j, k];
             double phi = state.Porosity[i, j, k];
 
             // Flow term: ∇·(k*λ_t*∇P)
@@ -355,7 +356,7 @@ public class MultiphaseFlowSolver
 
             double laplacian_P = d2P_dx2 + d2P_dy2 + d2P_dz2;
 
-            double flow = k * mobility_total * laplacian_P;
+            double flow = k_perm * mobility_total * laplacian_P;
 
             // Accumulation term (simplified)
             double compressibility = 1e-9; // Pa^-1 (typical for water)
@@ -384,8 +385,8 @@ public class MultiphaseFlowSolver
         double P_Pa = state.Pressure[i, j, k];
 
         // Get fluid viscosities
-        double mu_liquid = WaterPropertiesIAPWS.GetViscosity(T_K, P_Pa / 1e5); // Pa·s
-        double mu_vapor = WaterPropertiesIAPWS.GetSteamViscosity(T_K, P_Pa / 1e5);
+        double mu_liquid = GetWaterViscosity(T_K, P_Pa); // Pa·s
+        double mu_vapor = GetSteamViscosity(T_K, P_Pa);
         double mu_gas = GetGasViscosity(T_K, P_Pa);
 
         // Get relative permeabilities
@@ -493,8 +494,8 @@ public class MultiphaseFlowSolver
         var (rho_l, rho_v) = WaterPropertiesIAPWS.GetWaterPropertiesCached(T_K, P / 1e5);
         double rho_g = GetGasDensity(T_K, P);
 
-        double mu_l = WaterPropertiesIAPWS.GetViscosity(T_K, P / 1e5);
-        double mu_v = WaterPropertiesIAPWS.GetSteamViscosity(T_K, P / 1e5);
+        double mu_l = GetWaterViscosity(T_K, P);
+        double mu_v = GetSteamViscosity(T_K, P);
         double mu_g = GetGasViscosity(T_K, P);
 
         // Get relative permeabilities
@@ -622,7 +623,7 @@ public class MultiphaseFlowSolver
             state.GasDensity[i, j, k] = (float)GetGasDensity(T_K, P_Pa);
 
             // Get enthalpy
-            var (h_l, h_v, _, _) = WaterPropertiesIAPWS.GetSaturationProperties(T_K);
+            var (h_l, h_v, _, _) = GetSaturationProperties(T_K);
 
             double S_l = state.LiquidSaturation[i, j, k];
             double S_v = state.VaporSaturation[i, j, k];
@@ -658,6 +659,69 @@ public class MultiphaseFlowSolver
         }
 
         return maxChange;
+    }
+
+    /// <summary>
+    /// Get saturation properties (enthalpy and density) for liquid and vapor water at given temperature
+    /// </summary>
+    private static (double h_liquid, double h_vapor, double rho_liquid, double rho_vapor) GetSaturationProperties(double T_K)
+    {
+        // Get saturation pressure
+        double P_sat_MPa = PhaseTransitionHandler.GetSaturationPressure(T_K);
+        double P_sat_bar = P_sat_MPa * 10.0; // MPa to bar
+
+        // Get liquid and vapor properties at saturation
+        var (_, rho_liquid) = WaterPropertiesIAPWS.GetWaterPropertiesCached(T_K, P_sat_bar);
+
+        // For vapor, use simplified correlation
+        // Ideal gas approximation: ρ = P·M/(R·T)
+        const double M_H2O = 18.015e-3; // kg/mol
+        const double R = 8.314462618; // J/(mol·K)
+        double rho_vapor = (P_sat_MPa * 1e6 * M_H2O) / (R * T_K);
+
+        // Get enthalpies
+        double h_liquid = PhaseTransitionHandler.GetSaturatedLiquidEnthalpy(T_K);
+        double h_fg = PhaseTransitionHandler.GetLatentHeat(T_K);
+        double h_vapor = h_liquid + h_fg;
+
+        return (h_liquid, h_vapor, rho_liquid, rho_vapor);
+    }
+
+    /// <summary>
+    /// Get water (liquid) viscosity at given temperature and pressure
+    /// </summary>
+    private static double GetWaterViscosity(double T_K, double P_Pa)
+    {
+        // Simplified correlation for water viscosity (IAPWS formulation simplified)
+        // μ(T) = μ_ref * exp(B / T)
+        // Valid for liquid water at moderate pressures
+
+        double T_C = T_K - 273.15;
+
+        // Vogel-Fulcher-Tammann equation (simplified)
+        double A = 2.414e-5; // Pa·s
+        double B = 247.8; // K
+        double C = 140.0; // K
+
+        double mu = A * Math.Pow(10.0, B / (T_C + C));
+
+        return mu; // Pa·s
+    }
+
+    /// <summary>
+    /// Get steam (vapor) viscosity at given temperature and pressure
+    /// </summary>
+    private static double GetSteamViscosity(double T_K, double P_Pa)
+    {
+        // Simplified correlation for steam viscosity
+        // μ = μ_0 * (T/T_0)^0.7
+
+        const double mu_0 = 1.0e-5; // Pa·s at T_0 = 373.15 K
+        const double T_0 = 373.15; // K
+
+        double mu = mu_0 * Math.Pow(T_K / T_0, 0.7);
+
+        return mu; // Pa·s
     }
 }
 
