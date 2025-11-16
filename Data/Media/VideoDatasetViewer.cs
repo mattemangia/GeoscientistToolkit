@@ -195,7 +195,7 @@ public class VideoDatasetViewer : IDatasetViewer
                 if (_currentFrameData != null && _frameTexture != null)
                 {
                     dl.AddImage(
-                        _frameTexture.ImGuiHandle,
+                        _frameTexture.GetImGuiTextureId(),
                         imagePos,
                         imagePos + displaySize
                     );
@@ -206,7 +206,7 @@ public class VideoDatasetViewer : IDatasetViewer
                     var thumbTexture = GetThumbnailTexture();
                     if (thumbTexture != null)
                     {
-                        dl.AddImage(thumbTexture.ImGuiHandle, imagePos, imagePos + displaySize);
+                        dl.AddImage(thumbTexture.GetImGuiTextureId(), imagePos, imagePos + displaySize);
                         var textColor = ImGui.ColorConvertFloat4ToU32(ImGui.GetStyle().Colors[(int)ImGuiCol.Text]);
                         dl.AddText(imagePos + new Vector2(10, 10), textColor, "Loading frame...");
                     }
@@ -367,7 +367,7 @@ public class VideoDatasetViewer : IDatasetViewer
         try
         {
             _frameTexture?.Dispose();
-            _frameTexture = new TextureManager(_currentFrameData, _dataset.Width, _dataset.Height);
+            _frameTexture = TextureManager.CreateFromPixelData(_currentFrameData, (uint)_dataset.Width, (uint)_dataset.Height);
         }
         catch (Exception ex)
         {
@@ -381,7 +381,7 @@ public class VideoDatasetViewer : IDatasetViewer
 
         try
         {
-            return new TextureManager(_dataset.ThumbnailData, _dataset.ThumbnailWidth, _dataset.ThumbnailHeight);
+            return TextureManager.CreateFromPixelData(_dataset.ThumbnailData, (uint)_dataset.ThumbnailWidth, (uint)_dataset.ThumbnailHeight);
         }
         catch
         {
