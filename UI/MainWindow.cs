@@ -56,6 +56,9 @@ public class MainWindow
     // Triaxial simulation tool
     private Analysis.Geomechanics.TriaxialSimulationTool _triaxialSimulationTool;
 
+    // Node Manager window
+    private readonly Windows.NodeManagerWindow _nodeManagerWindow = new();
+
     // File Dialogs
     private readonly ImGuiFileDialog
         _loadProjectDialog = new("LoadProjectDlg", FileDialogType.OpenFile, "Load Project");
@@ -241,6 +244,7 @@ public class MainWindow
         _stratigraphyViewer.Draw();
         _realtimePhotogrammetryWindow.Draw();
         _triaxialSimulationTool?.Draw();
+        _nodeManagerWindow.Submit(ImGui.GetIO().DeltaTime);
         // Handle create mesh dialog
         HandleCreateMeshDialog();
 
@@ -484,6 +488,8 @@ public class MainWindow
             if (ImGui.MenuItem("Triaxial Simulation")) _triaxialSimulationTool.Show();
             ImGui.Separator();
             if (ImGui.MenuItem("Real-time Photogrammetry")) _realtimePhotogrammetryWindow.Show();
+            ImGui.Separator();
+            if (ImGui.MenuItem("Node Manager")) _nodeManagerWindow.Show();
             ImGui.Separator();
             if (ImGui.MenuItem("Screenshot Fullscreen")) _screenshotTool.TakeFullScreenshot();
             if (ImGui.MenuItem("Screenshot Window...")) _screenshotTool.StartSelection();
