@@ -28,17 +28,17 @@ public class ListOpsCommand : IGeoScriptCommand
         var datasetType = context.InputDataset.Type;
         var availableCommands = GetAvailableCommandsForType(datasetType);
 
-        Logger.LogInfo($"Available operations for {datasetType}:");
-        Logger.LogInfo("─────────────────────────────────────────");
+        Logger.Log($"Available operations for {datasetType}:");
+        Logger.Log("─────────────────────────────────────────");
 
         foreach (var command in availableCommands.OrderBy(c => c.Name))
         {
-            Logger.LogInfo($"  {command.Name,-25} - {command.HelpText}");
+            Logger.Log($"  {command.Name,-25} - {command.HelpText}");
             if (!string.IsNullOrEmpty(command.Usage))
-                Logger.LogInfo($"    Usage: {command.Usage}");
+                Logger.Log($"    Usage: {command.Usage}");
         }
 
-        Logger.LogInfo($"\nTotal: {availableCommands.Count} operations available");
+        Logger.Log($"\nTotal: {availableCommands.Count} operations available");
 
         // Return the same dataset (utility command doesn't modify it)
         return Task.FromResult(context.InputDataset);
@@ -114,57 +114,57 @@ public class DispTypeCommand : IGeoScriptCommand
 
         var dataset = context.InputDataset;
 
-        Logger.LogInfo($"Dataset Information");
-        Logger.LogInfo($"══════════════════════════════════════════════");
-        Logger.LogInfo($"Name:         {dataset.Name}");
-        Logger.LogInfo($"Type:         {dataset.Type}");
-        Logger.LogInfo($"File Path:    {dataset.FilePath}");
-        Logger.LogInfo($"Created:      {dataset.DateCreated}");
-        Logger.LogInfo($"Modified:     {dataset.DateModified}");
-        Logger.LogInfo($"Size:         {FormatBytes(dataset.GetSizeInBytes())}");
-        Logger.LogInfo($"Loaded:       {dataset.IsLoaded}");
+        Logger.Log($"Dataset Information");
+        Logger.Log($"══════════════════════════════════════════════");
+        Logger.Log($"Name:         {dataset.Name}");
+        Logger.Log($"Type:         {dataset.Type}");
+        Logger.Log($"File Path:    {dataset.FilePath}");
+        Logger.Log($"Created:      {dataset.DateCreated}");
+        Logger.Log($"Modified:     {dataset.DateModified}");
+        Logger.Log($"Size:         {FormatBytes(dataset.GetSizeInBytes())}");
+        Logger.Log($"Loaded:       {dataset.IsLoaded}");
 
         // Type-specific information
         if (dataset is Data.Image.ImageDataset imgDs)
         {
-            Logger.LogInfo($"\nImage Properties:");
-            Logger.LogInfo($"  Dimensions:   {imgDs.Width} x {imgDs.Height}");
-            Logger.LogInfo($"  Bit Depth:    {imgDs.BitDepth}");
-            Logger.LogInfo($"  Pixel Size:   {imgDs.PixelSize} {imgDs.Unit}");
-            Logger.LogInfo($"  Tags:         {imgDs.Tags}");
-            Logger.LogInfo($"  Segmentation: {imgDs.HasSegmentation}");
+            Logger.Log($"\nImage Properties:");
+            Logger.Log($"  Dimensions:   {imgDs.Width} x {imgDs.Height}");
+            Logger.Log($"  Bit Depth:    {imgDs.BitDepth}");
+            Logger.Log($"  Pixel Size:   {imgDs.PixelSize} {imgDs.Unit}");
+            Logger.Log($"  Tags:         {imgDs.Tags}");
+            Logger.Log($"  Segmentation: {imgDs.HasSegmentation}");
         }
         else if (dataset is Data.CtImageStack.CtImageStackDataset ctDs)
         {
-            Logger.LogInfo($"\nCT Image Stack Properties:");
-            Logger.LogInfo($"  Dimensions:   {ctDs.Width} x {ctDs.Height} x {ctDs.Depth}");
-            Logger.LogInfo($"  Bit Depth:    {ctDs.BitDepth}");
-            Logger.LogInfo($"  Voxel Size:   {ctDs.VoxelSize} {ctDs.Unit}");
-            Logger.LogInfo($"  Materials:    {ctDs.Materials?.Count ?? 0}");
+            Logger.Log($"\nCT Image Stack Properties:");
+            Logger.Log($"  Dimensions:   {ctDs.Width} x {ctDs.Height} x {ctDs.Depth}");
+            Logger.Log($"  Bit Depth:    {ctDs.BitDepth}");
+            Logger.Log($"  Pixel Size:   {ctDs.PixelSize} {ctDs.Unit}");
+            Logger.Log($"  Materials:    {ctDs.Materials?.Count ?? 0}");
         }
         else if (dataset is Data.Table.TableDataset tableDs)
         {
             var dt = tableDs.GetDataTable();
-            Logger.LogInfo($"\nTable Properties:");
-            Logger.LogInfo($"  Rows:         {dt.Rows.Count}");
-            Logger.LogInfo($"  Columns:      {dt.Columns.Count}");
-            Logger.LogInfo($"  Column Names: {string.Join(", ", dt.Columns.Cast<System.Data.DataColumn>().Select(c => c.ColumnName))}");
+            Logger.Log($"\nTable Properties:");
+            Logger.Log($"  Rows:         {dt.Rows.Count}");
+            Logger.Log($"  Columns:      {dt.Columns.Count}");
+            Logger.Log($"  Column Names: {string.Join(", ", dt.Columns.Cast<System.Data.DataColumn>().Select(c => c.ColumnName))}");
         }
         else if (dataset is Data.GIS.GISDataset gisDs)
         {
-            Logger.LogInfo($"\nGIS Properties:");
-            Logger.LogInfo($"  Layers:       {gisDs.Layers.Count}");
-            Logger.LogInfo($"  Features:     {gisDs.Layers.Sum(l => l.Features.Count)}");
-            Logger.LogInfo($"  CRS:          {gisDs.CoordinateSystem ?? "Not set"}");
+            Logger.Log($"\nGIS Properties:");
+            Logger.Log($"  Layers:       {gisDs.Layers.Count}");
+            Logger.Log($"  Features:     {gisDs.Layers.Sum(l => l.Features.Count)}");
+            Logger.Log($"  CRS:          {gisDs.Projection?.EPSG ?? "Not set"}");
         }
 
         // Metadata
         if (dataset.Metadata != null && dataset.Metadata.Count > 0)
         {
-            Logger.LogInfo($"\nMetadata:");
+            Logger.Log($"\nMetadata:");
             foreach (var kvp in dataset.Metadata)
             {
-                Logger.LogInfo($"  {kvp.Key}: {kvp.Value}");
+                Logger.Log($"  {kvp.Key}: {kvp.Value}");
             }
         }
 
@@ -206,11 +206,11 @@ public class UnloadCommand : IGeoScriptCommand
         if (context.InputDataset.IsLoaded)
         {
             context.InputDataset.Unload();
-            Logger.LogInfo($"Unloaded dataset: {context.InputDataset.Name}");
+            Logger.Log($"Unloaded dataset: {context.InputDataset.Name}");
         }
         else
         {
-            Logger.LogInfo($"Dataset {context.InputDataset.Name} is already unloaded");
+            Logger.Log($"Dataset {context.InputDataset.Name} is already unloaded");
         }
 
         return Task.FromResult(context.InputDataset);
@@ -233,7 +233,7 @@ public class InfoCommand : IGeoScriptCommand
             throw new InvalidOperationException("No input dataset provided");
 
         var dataset = context.InputDataset;
-        Logger.LogInfo($"{dataset.Name} ({dataset.Type}) - {FormatBytes(dataset.GetSizeInBytes())} - {(dataset.IsLoaded ? "Loaded" : "Unloaded")}");
+        Logger.Log($"{dataset.Name} ({dataset.Type}) - {FormatBytes(dataset.GetSizeInBytes())} - {(dataset.IsLoaded ? "Loaded" : "Unloaded")}");
 
         return Task.FromResult(dataset);
     }

@@ -36,7 +36,7 @@ public class GisAddLayerCommand : IGeoScriptCommand
         };
 
         gisDs.Layers.Add(newLayer);
-        Logger.LogInfo($"Added layer '{name}' of type {type}");
+        Logger.Log($"Added layer '{name}' of type {type}");
 
         return Task.FromResult<Dataset>(gisDs);
     }
@@ -70,7 +70,7 @@ public class GisRemoveLayerCommand : IGeoScriptCommand
         if (layer != null)
         {
             gisDs.Layers.Remove(layer);
-            Logger.LogInfo($"Removed layer '{name}'");
+            Logger.Log($"Removed layer '{name}'");
         }
 
         return Task.FromResult<Dataset>(gisDs);
@@ -102,8 +102,8 @@ public class GisIntersectCommand : IGeoScriptCommand
         string layer1 = ParseStringParameter(cmd.FullText, "layer1", "");
         string layer2 = ParseStringParameter(cmd.FullText, "layer2", "");
 
-        Logger.LogInfo($"Computing intersection between '{layer1}' and '{layer2}'");
-        Logger.LogInfo($"Created intersection layer");
+        Logger.Log($"Computing intersection between '{layer1}' and '{layer2}'");
+        Logger.Log($"Created intersection layer");
 
         return Task.FromResult<Dataset>(gisDs);
     }
@@ -133,7 +133,7 @@ public class GisUnionCommand : IGeoScriptCommand
         var cmd = (CommandNode)node;
         string layerName = ParseStringParameter(cmd.FullText, "layer", "");
 
-        Logger.LogInfo($"Merging all features in layer '{layerName}'");
+        Logger.Log($"Merging all features in layer '{layerName}'");
 
         return Task.FromResult<Dataset>(gisDs);
     }
@@ -164,7 +164,7 @@ public class GisClipCommand : IGeoScriptCommand
         string layer = ParseStringParameter(cmd.FullText, "layer", "");
         string clipLayer = ParseStringParameter(cmd.FullText, "clip_layer", "");
 
-        Logger.LogInfo($"Clipping '{layer}' using boundary from '{clipLayer}'");
+        Logger.Log($"Clipping '{layer}' using boundary from '{clipLayer}'");
 
         return Task.FromResult<Dataset>(gisDs);
     }
@@ -195,7 +195,7 @@ public class GisCalculateAreaCommand : IGeoScriptCommand
         string layer = ParseStringParameter(cmd.FullText, "layer", "");
         string field = ParseStringParameter(cmd.FullText, "field", "Area");
 
-        Logger.LogInfo($"Calculating areas for layer '{layer}' into field '{field}'");
+        Logger.Log($"Calculating areas for layer '{layer}' into field '{field}'");
 
         return Task.FromResult<Dataset>(gisDs);
     }
@@ -226,7 +226,7 @@ public class GisCalculateLengthCommand : IGeoScriptCommand
         string layer = ParseStringParameter(cmd.FullText, "layer", "");
         string field = ParseStringParameter(cmd.FullText, "field", "Length");
 
-        Logger.LogInfo($"Calculating lengths for layer '{layer}' into field '{field}'");
+        Logger.Log($"Calculating lengths for layer '{layer}' into field '{field}'");
 
         return Task.FromResult<Dataset>(gisDs);
     }
@@ -256,8 +256,10 @@ public class GisReprojectCommand : IGeoScriptCommand
         var cmd = (CommandNode)node;
         string targetCrs = ParseStringParameter(cmd.FullText, "target_crs", "EPSG:4326");
 
-        Logger.LogInfo($"Reprojecting from {gisDs.CoordinateSystem ?? "unknown"} to {targetCrs}");
-        gisDs.CoordinateSystem = targetCrs;
+        Logger.Log($"Reprojecting from {gisDs.Projection?.EPSG ?? "unknown"} to {targetCrs}");
+        if (gisDs.Projection == null)
+            gisDs.Projection = new GISProjection();
+        gisDs.Projection.EPSG = targetCrs;
 
         return Task.FromResult<Dataset>(gisDs);
     }

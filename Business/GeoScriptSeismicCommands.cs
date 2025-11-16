@@ -30,7 +30,7 @@ public class SeisFilterCommand : IGeoScriptCommand
         float lowFreq = ParseFloatParameter(cmd.FullText, "low", 10);
         float highFreq = ParseFloatParameter(cmd.FullText, "high", 80);
 
-        Logger.LogInfo($"Applying {filterType} filter: {lowFreq}-{highFreq} Hz");
+        Logger.Log($"Applying {filterType} filter: {lowFreq}-{highFreq} Hz");
 
         return Task.FromResult<Dataset>(seisDs);
     }
@@ -66,7 +66,7 @@ public class SeisAGCCommand : IGeoScriptCommand
         var cmd = (CommandNode)node;
         float window = ParseFloatParameter(cmd.FullText, "window", 500);
 
-        Logger.LogInfo($"Applying AGC with {window}ms window");
+        Logger.Log($"Applying AGC with {window}ms window");
 
         return Task.FromResult<Dataset>(seisDs);
     }
@@ -96,8 +96,8 @@ public class SeisVelocityAnalysisCommand : IGeoScriptCommand
         var cmd = (CommandNode)node;
         string method = ParseStringParameter(cmd.FullText, "method", "semblance");
 
-        Logger.LogInfo($"Performing velocity analysis using {method} method...");
-        Logger.LogInfo($"Velocity model generated");
+        Logger.Log($"Performing velocity analysis using {method} method...");
+        Logger.Log($"Velocity model generated");
 
         return Task.FromResult<Dataset>(seisDs);
     }
@@ -127,7 +127,7 @@ public class SeisNMOCorrectionCommand : IGeoScriptCommand
         var cmd = (CommandNode)node;
         float velocity = ParseFloatParameter(cmd.FullText, "velocity", 2000);
 
-        Logger.LogInfo($"Applying NMO correction with velocity {velocity} m/s");
+        Logger.Log($"Applying NMO correction with velocity {velocity} m/s");
 
         return Task.FromResult<Dataset>(seisDs);
     }
@@ -157,8 +157,8 @@ public class SeisStackCommand : IGeoScriptCommand
         var cmd = (CommandNode)node;
         string method = ParseStringParameter(cmd.FullText, "method", "mean");
 
-        Logger.LogInfo($"Stacking traces using {method} method...");
-        Logger.LogInfo($"Stack complete");
+        Logger.Log($"Stacking traces using {method} method...");
+        Logger.Log($"Stack complete");
 
         return Task.FromResult<Dataset>(seisDs);
     }
@@ -189,8 +189,8 @@ public class SeisMigrationCommand : IGeoScriptCommand
         string method = ParseStringParameter(cmd.FullText, "method", "kirchhoff");
         float aperture = ParseFloatParameter(cmd.FullText, "aperture", 1000);
 
-        Logger.LogInfo($"Performing {method} migration with {aperture}m aperture...");
-        Logger.LogInfo($"Migration complete");
+        Logger.Log($"Performing {method} migration with {aperture}m aperture...");
+        Logger.Log($"Migration complete");
 
         return Task.FromResult<Dataset>(seisDs);
     }
@@ -227,8 +227,8 @@ public class SeisPickHorizonCommand : IGeoScriptCommand
         string name = ParseStringParameter(cmd.FullText, "name", "Horizon_1");
         string method = ParseStringParameter(cmd.FullText, "method", "auto");
 
-        Logger.LogInfo($"Picking horizon '{name}' using {method} method...");
-        Logger.LogInfo($"Horizon picked successfully");
+        Logger.Log($"Picking horizon '{name}' using {method} method...");
+        Logger.Log($"Horizon picked successfully");
 
         return Task.FromResult<Dataset>(seisDs);
     }

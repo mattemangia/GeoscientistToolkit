@@ -31,7 +31,7 @@ public class BrightnessContrastCommand : IGeoScriptCommand
         if (context.InputDataset is not ImageDataset imageDataset)
             throw new NotSupportedException("BRIGHTNESS_CONTRAST only works with image datasets");
 
-        if (!imageDataset.IsLoaded)
+        if (!imageDataset.ImageData != null)
             imageDataset.Load();
 
         var cmd = (CommandNode)node;
@@ -53,7 +53,7 @@ public class BrightnessContrastCommand : IGeoScriptCommand
 
         ApplyBrightnessContrast(output.ImageData, brightness, contrast);
 
-        Logger.LogInfo($"Applied brightness={brightness}, contrast={contrast} to {imageDataset.Name}");
+        Logger.Log($"Applied brightness={brightness}, contrast={contrast} to {imageDataset.Name}");
         return Task.FromResult<Dataset>(output);
     }
 
@@ -105,7 +105,7 @@ public class FilterCommand : IGeoScriptCommand
         if (context.InputDataset is not ImageDataset imageDataset)
             throw new NotSupportedException("FILTER only works with image datasets");
 
-        if (!imageDataset.IsLoaded)
+        if (!imageDataset.ImageData != null)
             imageDataset.Load();
 
         var cmd = (CommandNode)node;
@@ -140,7 +140,7 @@ public class FilterCommand : IGeoScriptCommand
                 throw new ArgumentException($"Unsupported filter type: {filterType}");
         }
 
-        Logger.LogInfo($"Applied {filterType} filter to {imageDataset.Name}");
+        Logger.Log($"Applied {filterType} filter to {imageDataset.Name}");
         return Task.FromResult<Dataset>(output);
     }
 
@@ -283,7 +283,7 @@ public class ThresholdCommand : IGeoScriptCommand
         if (context.InputDataset is not ImageDataset imageDataset)
             throw new NotSupportedException("THRESHOLD only works with image datasets");
 
-        if (!imageDataset.IsLoaded)
+        if (!imageDataset.ImageData != null)
             imageDataset.Load();
 
         var cmd = (CommandNode)node;
@@ -303,7 +303,7 @@ public class ThresholdCommand : IGeoScriptCommand
 
         ApplyThreshold(imageDataset.ImageData, output.ImageData, minValue, maxValue);
 
-        Logger.LogInfo($"Applied threshold [{minValue}, {maxValue}] to {imageDataset.Name}");
+        Logger.Log($"Applied threshold [{minValue}, {maxValue}] to {imageDataset.Name}");
         return Task.FromResult<Dataset>(output);
     }
 
@@ -344,7 +344,7 @@ public class BinarizeCommand : IGeoScriptCommand
         if (context.InputDataset is not ImageDataset imageDataset)
             throw new NotSupportedException("BINARIZE only works with image datasets");
 
-        if (!imageDataset.IsLoaded)
+        if (!imageDataset.ImageData != null)
             imageDataset.Load();
 
         var cmd = (CommandNode)node;
@@ -355,7 +355,7 @@ public class BinarizeCommand : IGeoScriptCommand
         if (thresholdStr.Equals("auto", StringComparison.OrdinalIgnoreCase))
         {
             threshold = CalculateOtsuThreshold(imageDataset.ImageData);
-            Logger.LogInfo($"Auto-calculated Otsu threshold: {threshold}");
+            Logger.Log($"Auto-calculated Otsu threshold: {threshold}");
         }
         else
         {
@@ -374,7 +374,7 @@ public class BinarizeCommand : IGeoScriptCommand
 
         ApplyBinarization(imageDataset.ImageData, output.ImageData, threshold);
 
-        Logger.LogInfo($"Binarized {imageDataset.Name} with threshold={threshold}");
+        Logger.Log($"Binarized {imageDataset.Name} with threshold={threshold}");
         return Task.FromResult<Dataset>(output);
     }
 
@@ -456,7 +456,7 @@ public class GrayscaleCommand : IGeoScriptCommand
         if (context.InputDataset is not ImageDataset imageDataset)
             throw new NotSupportedException("GRAYSCALE only works with image datasets");
 
-        if (!imageDataset.IsLoaded)
+        if (!imageDataset.ImageData != null)
             imageDataset.Load();
 
         var output = new ImageDataset(imageDataset.Name + "_gray", "")
@@ -477,7 +477,7 @@ public class GrayscaleCommand : IGeoScriptCommand
             output.ImageData[i + 2] = gray;
         }
 
-        Logger.LogInfo($"Converted {imageDataset.Name} to grayscale");
+        Logger.Log($"Converted {imageDataset.Name} to grayscale");
         return Task.FromResult<Dataset>(output);
     }
 
@@ -504,7 +504,7 @@ public class InvertCommand : IGeoScriptCommand
         if (context.InputDataset is not ImageDataset imageDataset)
             throw new NotSupportedException("INVERT only works with image datasets");
 
-        if (!imageDataset.IsLoaded)
+        if (!imageDataset.ImageData != null)
             imageDataset.Load();
 
         var output = new ImageDataset(imageDataset.Name + "_inverted", "")
@@ -524,7 +524,7 @@ public class InvertCommand : IGeoScriptCommand
             output.ImageData[i + 2] = (byte)(255 - output.ImageData[i + 2]);
         }
 
-        Logger.LogInfo($"Inverted {imageDataset.Name}");
+        Logger.Log($"Inverted {imageDataset.Name}");
         return Task.FromResult<Dataset>(output);
     }
 
@@ -551,7 +551,7 @@ public class NormalizeCommand : IGeoScriptCommand
         if (context.InputDataset is not ImageDataset imageDataset)
             throw new NotSupportedException("NORMALIZE only works with image datasets");
 
-        if (!imageDataset.IsLoaded)
+        if (!imageDataset.ImageData != null)
             imageDataset.Load();
 
         var output = new ImageDataset(imageDataset.Name + "_normalized", "")
@@ -586,7 +586,7 @@ public class NormalizeCommand : IGeoScriptCommand
                 output.ImageData[i + 2] = (byte)(((output.ImageData[i + 2] - minB) * 255) / (maxB - minB));
         }
 
-        Logger.LogInfo($"Normalized {imageDataset.Name}");
+        Logger.Log($"Normalized {imageDataset.Name}");
         return Task.FromResult<Dataset>(output);
     }
 

@@ -32,19 +32,19 @@ public class BhAddLithologyCommand : IGeoScriptCommand
         float top = ParseFloatParameter(cmd.FullText, "top", 0);
         float bottom = ParseFloatParameter(cmd.FullText, "bottom", 10);
 
-        if (bhDs.Lithologies == null)
-            bhDs.Lithologies = new List<LithologyInterval>();
+        if (bhDs.LithologyUnits == null)
+            bhDs.LithologyUnits = new List<LithologyUnit>();
 
-        var lithology = new LithologyInterval
+        var lithology = new LithologyUnit
         {
             Name = name,
-            TopDepth = top,
-            BottomDepth = bottom,
+            DepthFrom = top,
+            DepthTo = bottom,
             Description = $"Added via GeoScript"
         };
 
-        bhDs.Lithologies.Add(lithology);
-        Logger.LogInfo($"Added lithology '{name}' from {top}m to {bottom}m");
+        bhDs.LithologyUnits.Add(lithology);
+        Logger.Log($"Added lithology '{name}' from {top}m to {bottom}m");
 
         return Task.FromResult<Dataset>(bhDs);
     }
@@ -80,10 +80,10 @@ public class BhRemoveLithologyCommand : IGeoScriptCommand
         var cmd = (CommandNode)node;
         string name = ParseStringParameter(cmd.FullText, "name", null);
 
-        if (bhDs.Lithologies != null && !string.IsNullOrEmpty(name))
+        if (bhDs.LithologyUnits != null && !string.IsNullOrEmpty(name))
         {
-            var removed = bhDs.Lithologies.RemoveAll(l => l.Name.Equals(name, StringComparison.OrdinalIgnoreCase));
-            Logger.LogInfo($"Removed {removed} lithology layer(s) named '{name}'");
+            var removed = bhDs.LithologyUnits.RemoveAll(l => l.Name.Equals(name, StringComparison.OrdinalIgnoreCase));
+            Logger.Log($"Removed {removed} lithology layer(s) named '{name}'");
         }
 
         return Task.FromResult<Dataset>(bhDs);
@@ -116,19 +116,10 @@ public class BhAddLogCommand : IGeoScriptCommand
         string name = ParseStringParameter(cmd.FullText, "name", type);
         string unit = ParseStringParameter(cmd.FullText, "unit", "");
 
-        if (bhDs.Logs == null)
-            bhDs.Logs = new List<WellLog>();
-
-        var log = new WellLog
-        {
-            Name = name,
-            LogType = type,
-            Unit = unit,
-            Data = new List<LogDataPoint>()
-        };
-
-        bhDs.Logs.Add(log);
-        Logger.LogInfo($"Added well log '{name}' (Type: {type}, Unit: {unit})");
+        // NOTE: Well logs are stored in ParameterTracks in the current implementation
+        // The Logs/WellLog classes do not exist yet in the codebase
+        Logger.Log($"BH_ADD_LOG command not fully implemented - well log storage needs ParameterTracks integration");
+        Logger.Log($"Would add well log '{name}' (Type: {type}, Unit: {unit})");
 
         return Task.FromResult<Dataset>(bhDs);
     }
@@ -159,8 +150,8 @@ public class BhCalculatePorosityCommand : IGeoScriptCommand
         string densityLog = ParseStringParameter(cmd.FullText, "density_log", "RHOB");
         string neutronLog = ParseStringParameter(cmd.FullText, "neutron_log", "NPHI");
 
-        Logger.LogInfo($"Calculating porosity from {densityLog} and {neutronLog}...");
-        Logger.LogInfo($"Created porosity log: PHI");
+        Logger.Log($"Calculating porosity from {densityLog} and {neutronLog}...");
+        Logger.Log($"Created porosity log: PHI");
 
         return Task.FromResult<Dataset>(bhDs);
     }
@@ -192,8 +183,8 @@ public class BhCalculateSaturationCommand : IGeoScriptCommand
         float m = ParseFloatParameter(cmd.FullText, "m", 2.0f);
         float n = ParseFloatParameter(cmd.FullText, "n", 2.0f);
 
-        Logger.LogInfo($"Calculating water saturation using Archie's equation (a={a}, m={m}, n={n})...");
-        Logger.LogInfo($"Created saturation log: SW");
+        Logger.Log($"Calculating water saturation using Archie's equation (a={a}, m={m}, n={n})...");
+        Logger.Log($"Created saturation log: SW");
 
         return Task.FromResult<Dataset>(bhDs);
     }
@@ -223,14 +214,14 @@ public class BhDepthShiftCommand : IGeoScriptCommand
         var cmd = (CommandNode)node;
         float offset = ParseFloatParameter(cmd.FullText, "offset", 0);
 
-        Logger.LogInfo($"Shifting all depths by {offset} meters");
+        Logger.Log($"Shifting all depths by {offset} meters");
 
-        if (bhDs.Lithologies != null)
+        if (bhDs.LithologyUnits != null)
         {
-            foreach (var lith in bhDs.Lithologies)
+            foreach (var lith in bhDs.LithologyUnits)
             {
-                lith.TopDepth += offset;
-                lith.BottomDepth += offset;
+                lith.DepthFrom += offset;
+                lith.DepthTo += offset;
             }
         }
 
@@ -263,8 +254,8 @@ public class BhCorrelationCommand : IGeoScriptCommand
         string target = ParseStringParameter(cmd.FullText, "target", "");
         string method = ParseStringParameter(cmd.FullText, "method", "litho");
 
-        Logger.LogInfo($"Correlating with {target} using {method} method");
-        Logger.LogInfo($"Correlation results: (would show correlation coefficient and matches)");
+        Logger.Log($"Correlating with {target} using {method} method");
+        Logger.Log($"Correlation results: (would show correlation coefficient and matches)");
 
         return Task.FromResult<Dataset>(bhDs);
     }

@@ -32,7 +32,7 @@ public class CtSegmentCommand : IGeoScriptCommand
         string method = ParseStringParameter(cmd.FullText, "method", "threshold");
         int materialId = (int)ParseFloatParameter(cmd.FullText, "material", 1);
 
-        Logger.LogInfo($"Segmenting CT stack using {method} method...");
+        Logger.Log($"Segmenting CT stack using {method} method...");
 
         // Create a copy for output
         var output = ctDs; // In real implementation, would create a proper copy
@@ -42,16 +42,16 @@ public class CtSegmentCommand : IGeoScriptCommand
             case "threshold":
                 int min = (int)ParseFloatParameter(cmd.FullText, "min", 0);
                 int max = (int)ParseFloatParameter(cmd.FullText, "max", 255);
-                Logger.LogInfo($"Threshold segmentation: [{min}, {max}] -> Material {materialId}");
+                Logger.Log($"Threshold segmentation: [{min}, {max}] -> Material {materialId}");
                 // Actual implementation would call segmentation code
                 break;
 
             case "otsu":
-                Logger.LogInfo($"Otsu automatic thresholding -> Material {materialId}");
+                Logger.Log($"Otsu automatic thresholding -> Material {materialId}");
                 break;
 
             case "watershed":
-                Logger.LogInfo($"Watershed segmentation -> Material {materialId}");
+                Logger.Log($"Watershed segmentation -> Material {materialId}");
                 break;
         }
 
@@ -90,7 +90,7 @@ public class CtFilter3DCommand : IGeoScriptCommand
         string filterType = ParseStringParameter(cmd.FullText, "type", "gaussian");
         int kernelSize = (int)ParseFloatParameter(cmd.FullText, "size", 5);
 
-        Logger.LogInfo($"Applying 3D {filterType} filter with kernel size {kernelSize}...");
+        Logger.Log($"Applying 3D {filterType} filter with kernel size {kernelSize}...");
 
         return Task.FromResult<Dataset>(ctDs);
     }
@@ -127,17 +127,12 @@ public class CtAddMaterialCommand : IGeoScriptCommand
         string name = ParseStringParameter(cmd.FullText, "name", "New Material");
 
         if (ctDs.Materials == null)
-            ctDs.Materials = new List<CtMaterial>();
+            ctDs.Materials = new List<Material>();
 
-        var newMaterial = new CtMaterial
-        {
-            Id = (byte)(ctDs.Materials.Count + 1),
-            Name = name,
-            Color = System.Drawing.Color.FromArgb(255, 200, 100)
-        };
+        var newMaterial = new Material((byte)(ctDs.Materials.Count + 1), name, new System.Numerics.Vector4(1.0f, 0.78f, 0.39f, 1.0f));
 
         ctDs.Materials.Add(newMaterial);
-        Logger.LogInfo($"Added material: {name} (ID: {newMaterial.Id})");
+        Logger.Log($"Added material: {name} (ID: {newMaterial.ID})");
 
         return Task.FromResult<Dataset>(ctDs);
     }
@@ -169,11 +164,11 @@ public class CtRemoveMaterialCommand : IGeoScriptCommand
 
         if (ctDs.Materials != null)
         {
-            var material = ctDs.Materials.FirstOrDefault(m => m.Id == materialId);
+            var material = ctDs.Materials.FirstOrDefault(m => m.ID == materialId);
             if (material != null)
             {
                 ctDs.Materials.Remove(material);
-                Logger.LogInfo($"Removed material ID {materialId}");
+                Logger.Log($"Removed material ID {materialId}");
             }
         }
 
@@ -205,11 +200,11 @@ public class CtAnalyzePorosityCommand : IGeoScriptCommand
         var cmd = (CommandNode)node;
         int voidMaterialId = (int)ParseFloatParameter(cmd.FullText, "void_material", 1);
 
-        Logger.LogInfo($"Analyzing porosity using material ID {voidMaterialId}...");
-        Logger.LogInfo($"Porosity calculation complete");
-        Logger.LogInfo($"Total Porosity: (would show calculated value)");
-        Logger.LogInfo($"Connected Porosity: (would show calculated value)");
-        Logger.LogInfo($"Isolated Porosity: (would show calculated value)");
+        Logger.Log($"Analyzing porosity using material ID {voidMaterialId}...");
+        Logger.Log($"Porosity calculation complete");
+        Logger.Log($"Total Porosity: (would show calculated value)");
+        Logger.Log($"Connected Porosity: (would show calculated value)");
+        Logger.Log($"Isolated Porosity: (would show calculated value)");
 
         return Task.FromResult<Dataset>(ctDs);
     }
@@ -244,7 +239,7 @@ public class CtCropCommand : IGeoScriptCommand
         int height = (int)ParseFloatParameter(cmd.FullText, "height", 100);
         int depth = (int)ParseFloatParameter(cmd.FullText, "depth", 100);
 
-        Logger.LogInfo($"Cropping CT volume: ({x},{y},{z}) size ({width},{height},{depth})");
+        Logger.Log($"Cropping CT volume: ({x},{y},{z}) size ({width},{height},{depth})");
 
         return Task.FromResult<Dataset>(ctDs);
     }
@@ -275,7 +270,7 @@ public class CtExtractSliceCommand : IGeoScriptCommand
         string axis = ParseStringParameter(cmd.FullText, "axis", "z");
         int index = (int)ParseFloatParameter(cmd.FullText, "index", 0);
 
-        Logger.LogInfo($"Extracting {axis}-axis slice at index {index}");
+        Logger.Log($"Extracting {axis}-axis slice at index {index}");
 
         return Task.FromResult<Dataset>(ctDs);
     }
@@ -311,10 +306,10 @@ public class CtLabelAnalysisCommand : IGeoScriptCommand
         var cmd = (CommandNode)node;
         int materialId = (int)ParseFloatParameter(cmd.FullText, "material", 1);
 
-        Logger.LogInfo($"Analyzing connected components for material {materialId}...");
-        Logger.LogInfo($"Found components: (would show count)");
-        Logger.LogInfo($"Largest component volume: (would show value)");
-        Logger.LogInfo($"Average component volume: (would show value)");
+        Logger.Log($"Analyzing connected components for material {materialId}...");
+        Logger.Log($"Found components: (would show count)");
+        Logger.Log($"Largest component volume: (would show value)");
+        Logger.Log($"Average component volume: (would show value)");
 
         return Task.FromResult<Dataset>(ctDs);
     }

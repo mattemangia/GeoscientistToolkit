@@ -55,7 +55,7 @@ namespace GeoscientistToolkit.Scripting.GeoScript.Operations
             if (inputDataset is not ImageDataset imageDataset)
                 throw new InvalidOperationException($"BRIGHTNESS_CONTRAST can only be applied to image datasets");
 
-            if (!imageDataset.IsLoaded)
+            if (!imageDataset.ImageData != null)
                 imageDataset.Load();
 
             // Parse parameters
@@ -136,7 +136,7 @@ namespace GeoscientistToolkit.Scripting.GeoScript.Operations
             if (inputDataset is not ImageDataset imageDataset)
                 throw new InvalidOperationException("THRESHOLD can only be applied to image datasets");
 
-            if (!imageDataset.IsLoaded)
+            if (!imageDataset.ImageData != null)
                 imageDataset.Load();
 
             if (parameters.Count < 2)
@@ -199,7 +199,7 @@ namespace GeoscientistToolkit.Scripting.GeoScript.Operations
             if (inputDataset is not ImageDataset imageDataset)
                 throw new InvalidOperationException("BINARIZE can only be applied to image datasets");
 
-            if (!imageDataset.IsLoaded)
+            if (!imageDataset.ImageData != null)
                 imageDataset.Load();
 
             if (parameters.Count < 1)
@@ -320,7 +320,7 @@ namespace GeoscientistToolkit.Scripting.GeoScript.Operations
             if (inputDataset is not ImageDataset imageDataset)
                 throw new InvalidOperationException("FILTER can only be applied to image datasets");
 
-            if (!imageDataset.IsLoaded)
+            if (!imageDataset.ImageData != null)
                 imageDataset.Load();
 
             if (parameters.Count < 1)
@@ -498,7 +498,7 @@ namespace GeoscientistToolkit.Scripting.GeoScript.Operations
             if (inputDataset is not ImageDataset imageDataset)
                 throw new InvalidOperationException("GRAYSCALE can only be applied to image datasets");
 
-            if (!imageDataset.IsLoaded)
+            if (!imageDataset.ImageData != null)
                 imageDataset.Load();
 
             var output = new ImageDataset(inputDataset.Name + "_gray", "")
@@ -534,7 +534,7 @@ namespace GeoscientistToolkit.Scripting.GeoScript.Operations
             if (inputDataset is not ImageDataset imageDataset)
                 throw new InvalidOperationException("INVERT can only be applied to image datasets");
 
-            if (!imageDataset.IsLoaded)
+            if (!imageDataset.ImageData != null)
                 imageDataset.Load();
 
             var output = new ImageDataset(inputDataset.Name + "_inverted", "")
@@ -569,7 +569,7 @@ namespace GeoscientistToolkit.Scripting.GeoScript.Operations
             if (inputDataset is not ImageDataset imageDataset)
                 throw new InvalidOperationException("NORMALIZE can only be applied to image datasets");
 
-            if (!imageDataset.IsLoaded)
+            if (!imageDataset.ImageData != null)
                 imageDataset.Load();
 
             var output = new ImageDataset(inputDataset.Name + "_normalized", "")
@@ -623,7 +623,7 @@ namespace GeoscientistToolkit.Scripting.GeoScript.Operations
             if (inputDataset is not ImageDataset imageDataset)
                 throw new InvalidOperationException("HISTOGRAM_EQUALIZE can only be applied to image datasets");
 
-            if (!imageDataset.IsLoaded)
+            if (!imageDataset.ImageData != null)
                 imageDataset.Load();
 
             var output = new ImageDataset(inputDataset.Name + "_equalized", "")

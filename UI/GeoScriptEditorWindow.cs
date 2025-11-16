@@ -477,7 +477,7 @@ public class GeoScriptEditorWindow
             }
 
             _output.AppendLine($"=== Execution Complete ===");
-            Logger.LogInfo("GeoScript execution completed");
+            Logger.Log("GeoScript execution completed");
         }
         catch (Exception ex)
         {

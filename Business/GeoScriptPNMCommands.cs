@@ -30,10 +30,10 @@ public class PnmFilterPoresCommand : IGeoScriptCommand
         float maxRadius = ParseFloatParameter(cmd.FullText, "max_radius", float.MaxValue);
         int minCoord = (int)ParseFloatParameter(cmd.FullText, "min_coord", 0);
 
-        Logger.LogInfo($"Filtering pores: radius [{minRadius}, {maxRadius}], min coordination: {minCoord}");
+        Logger.Log($"Filtering pores: radius [{minRadius}, {maxRadius}], min coordination: {minCoord}");
 
         int originalCount = pnmDs.Pores?.Count ?? 0;
-        Logger.LogInfo($"Filtered from {originalCount} pores");
+        Logger.Log($"Filtered from {originalCount} pores");
 
         return Task.FromResult<Dataset>(pnmDs);
     }
@@ -64,10 +64,10 @@ public class PnmFilterThroatsCommand : IGeoScriptCommand
         float minRadius = ParseFloatParameter(cmd.FullText, "min_radius", 0);
         float maxRadius = ParseFloatParameter(cmd.FullText, "max_radius", float.MaxValue);
 
-        Logger.LogInfo($"Filtering throats: radius [{minRadius}, {maxRadius}]");
+        Logger.Log($"Filtering throats: radius [{minRadius}, {maxRadius}]");
 
         int originalCount = pnmDs.Throats?.Count ?? 0;
-        Logger.LogInfo($"Filtered from {originalCount} throats");
+        Logger.Log($"Filtered from {originalCount} throats");
 
         return Task.FromResult<Dataset>(pnmDs);
     }
@@ -97,8 +97,8 @@ public class PnmCalculatePermeabilityCommand : IGeoScriptCommand
         var cmd = (CommandNode)node;
         string direction = ParseStringParameter(cmd.FullText, "direction", "x");
 
-        Logger.LogInfo($"Calculating permeability in {direction} direction...");
-        Logger.LogInfo($"Absolute permeability: (would show calculated value) mD");
+        Logger.Log($"Calculating permeability in {direction} direction...");
+        Logger.Log($"Absolute permeability: (would show calculated value) mD");
 
         return Task.FromResult<Dataset>(pnmDs);
     }
@@ -129,8 +129,8 @@ public class PnmDrainageSimulationCommand : IGeoScriptCommand
         float contactAngle = ParseFloatParameter(cmd.FullText, "contact_angle", 30);
         float ift = ParseFloatParameter(cmd.FullText, "interfacial_tension", 0.03f);
 
-        Logger.LogInfo($"Running drainage simulation (θ={contactAngle}°, IFT={ift} N/m)...");
-        Logger.LogInfo($"Drainage complete. Capillary pressure curve generated.");
+        Logger.Log($"Running drainage simulation (θ={contactAngle}°, IFT={ift} N/m)...");
+        Logger.Log($"Drainage complete. Capillary pressure curve generated.");
 
         return Task.FromResult<Dataset>(pnmDs);
     }
@@ -161,8 +161,8 @@ public class PnmImbibitionSimulationCommand : IGeoScriptCommand
         float contactAngle = ParseFloatParameter(cmd.FullText, "contact_angle", 60);
         float ift = ParseFloatParameter(cmd.FullText, "interfacial_tension", 0.03f);
 
-        Logger.LogInfo($"Running imbibition simulation (θ={contactAngle}°, IFT={ift} N/m)...");
-        Logger.LogInfo($"Imbibition complete. Capillary pressure curve generated.");
+        Logger.Log($"Running imbibition simulation (θ={contactAngle}°, IFT={ift} N/m)...");
+        Logger.Log($"Imbibition complete. Capillary pressure curve generated.");
 
         return Task.FromResult<Dataset>(pnmDs);
     }
@@ -189,8 +189,8 @@ public class PnmExtractLargestClusterCommand : IGeoScriptCommand
         if (context.InputDataset is not PNMDataset pnmDs)
             throw new NotSupportedException("PNM_EXTRACT_LARGEST_CLUSTER only works with PNM datasets");
 
-        Logger.LogInfo($"Extracting largest connected cluster...");
-        Logger.LogInfo($"Cluster size: (would show pore count)");
+        Logger.Log($"Extracting largest connected cluster...");
+        Logger.Log($"Cluster size: (would show pore count)");
 
         return Task.FromResult<Dataset>(pnmDs);
     }
@@ -211,13 +211,13 @@ public class PnmStatisticsCommand : IGeoScriptCommand
         if (context.InputDataset is not PNMDataset pnmDs)
             throw new NotSupportedException("PNM_STATISTICS only works with PNM datasets");
 
-        Logger.LogInfo($"Network Statistics:");
-        Logger.LogInfo($"  Total pores: {pnmDs.Pores?.Count ?? 0}");
-        Logger.LogInfo($"  Total throats: {pnmDs.Throats?.Count ?? 0}");
-        Logger.LogInfo($"  Average coordination: (would calculate)");
-        Logger.LogInfo($"  Average pore radius: (would calculate)");
-        Logger.LogInfo($"  Average throat radius: (would calculate)");
-        Logger.LogInfo($"  Network porosity: (would calculate)");
+        Logger.Log($"Network Statistics:");
+        Logger.Log($"  Total pores: {pnmDs.Pores?.Count ?? 0}");
+        Logger.Log($"  Total throats: {pnmDs.Throats?.Count ?? 0}");
+        Logger.Log($"  Average coordination: (would calculate)");
+        Logger.Log($"  Average pore radius: (would calculate)");
+        Logger.Log($"  Average throat radius: (would calculate)");
+        Logger.Log($"  Network porosity: (would calculate)");
 
         return Task.FromResult<Dataset>(pnmDs);
     }

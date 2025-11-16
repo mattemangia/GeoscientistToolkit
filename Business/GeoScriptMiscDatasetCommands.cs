@@ -34,7 +34,7 @@ public class AcousticThresholdCommand : IGeoScriptCommand
         float minAmp = ParseFloatParameter(cmd.FullText, "min_amplitude", -60);
         float maxAmp = ParseFloatParameter(cmd.FullText, "max_amplitude", -20);
 
-        Logger.LogInfo($"Thresholding acoustic data: [{minAmp}, {maxAmp}] dB");
+        Logger.Log($"Thresholding acoustic data: [{minAmp}, {maxAmp}] dB");
 
         return Task.FromResult<Dataset>(acousticDs);
     }
@@ -64,8 +64,8 @@ public class AcousticExtractTargetsCommand : IGeoScriptCommand
         var cmd = (CommandNode)node;
         float threshold = ParseFloatParameter(cmd.FullText, "threshold", -40);
 
-        Logger.LogInfo($"Extracting acoustic targets above {threshold} dB...");
-        Logger.LogInfo($"Found targets: (would show count)");
+        Logger.Log($"Extracting acoustic targets above {threshold} dB...");
+        Logger.Log($"Found targets: (would show count)");
 
         return Task.FromResult<Dataset>(acousticDs);
     }
@@ -100,7 +100,7 @@ public class MeshSmoothCommand : IGeoScriptCommand
         int iterations = (int)ParseFloatParameter(cmd.FullText, "iterations", 5);
         float lambda = ParseFloatParameter(cmd.FullText, "lambda", 0.5f);
 
-        Logger.LogInfo($"Smoothing mesh: {iterations} iterations, λ={lambda}");
+        Logger.Log($"Smoothing mesh: {iterations} iterations, λ={lambda}");
 
         return Task.FromResult<Dataset>(meshDs);
     }
@@ -130,7 +130,7 @@ public class MeshDecimateCommand : IGeoScriptCommand
         var cmd = (CommandNode)node;
         float targetPercent = ParseFloatParameter(cmd.FullText, "target_percent", 50);
 
-        Logger.LogInfo($"Decimating mesh to {targetPercent}% of original complexity");
+        Logger.Log($"Decimating mesh to {targetPercent}% of original complexity");
 
         return Task.FromResult<Dataset>(meshDs);
     }
@@ -157,8 +157,8 @@ public class MeshRepairCommand : IGeoScriptCommand
         if (context.InputDataset is not Mesh3DDataset meshDs)
             throw new NotSupportedException("MESH_REPAIR only works with Mesh3D datasets");
 
-        Logger.LogInfo($"Repairing mesh defects...");
-        Logger.LogInfo($"Repair complete");
+        Logger.Log($"Repairing mesh defects...");
+        Logger.Log($"Repair complete");
 
         return Task.FromResult<Dataset>(meshDs);
     }
@@ -179,9 +179,9 @@ public class MeshCalculateVolumeCommand : IGeoScriptCommand
         if (context.InputDataset is not Mesh3DDataset meshDs)
             throw new NotSupportedException("MESH_CALCULATE_VOLUME only works with Mesh3D datasets");
 
-        Logger.LogInfo($"Calculating mesh volume...");
-        Logger.LogInfo($"Volume: (would show calculated value) cubic units");
-        Logger.LogInfo($"Surface Area: (would show calculated value) square units");
+        Logger.Log($"Calculating mesh volume...");
+        Logger.Log($"Volume: (would show calculated value) cubic units");
+        Logger.Log($"Surface Area: (would show calculated value) square units");
 
         return Task.FromResult<Dataset>(meshDs);
     }
@@ -209,8 +209,8 @@ public class VideoExtractFrameCommand : IGeoScriptCommand
         var cmd = (CommandNode)node;
         float time = ParseFloatParameter(cmd.FullText, "time", 0);
 
-        Logger.LogInfo($"Extracting frame at {time}s");
-        Logger.LogInfo($"Frame extracted as image dataset");
+        Logger.Log($"Extracting frame at {time}s");
+        Logger.Log($"Frame extracted as image dataset");
 
         return Task.FromResult<Dataset>(videoDs);
     }
@@ -240,8 +240,8 @@ public class VideoStabilizeCommand : IGeoScriptCommand
         var cmd = (CommandNode)node;
         float smoothness = ParseFloatParameter(cmd.FullText, "smoothness", 0.8f);
 
-        Logger.LogInfo($"Stabilizing video (smoothness={smoothness})...");
-        Logger.LogInfo($"Stabilization complete");
+        Logger.Log($"Stabilizing video (smoothness={smoothness})...");
+        Logger.Log($"Stabilization complete");
 
         return Task.FromResult<Dataset>(videoDs);
     }
@@ -276,7 +276,7 @@ public class AudioTrimCommand : IGeoScriptCommand
         float start = ParseFloatParameter(cmd.FullText, "start", 0);
         float end = ParseFloatParameter(cmd.FullText, "end", 10);
 
-        Logger.LogInfo($"Trimming audio from {start}s to {end}s");
+        Logger.Log($"Trimming audio from {start}s to {end}s");
 
         return Task.FromResult<Dataset>(audioDs);
     }
@@ -306,7 +306,7 @@ public class AudioNormalizeCommand : IGeoScriptCommand
         var cmd = (CommandNode)node;
         float targetDb = ParseFloatParameter(cmd.FullText, "target_db", -14);
 
-        Logger.LogInfo($"Normalizing audio to {targetDb} dB");
+        Logger.Log($"Normalizing audio to {targetDb} dB");
 
         return Task.FromResult<Dataset>(audioDs);
     }
@@ -340,8 +340,8 @@ public class TextSearchCommand : IGeoScriptCommand
         var cmd = (CommandNode)node;
         string pattern = ParseStringParameter(cmd.FullText, "pattern", "");
 
-        Logger.LogInfo($"Searching for: {pattern}");
-        Logger.LogInfo($"Found matches: (would show count and lines)");
+        Logger.Log($"Searching for: {pattern}");
+        Logger.Log($"Found matches: (would show count and lines)");
 
         return Task.FromResult<Dataset>(textDs);
     }
@@ -372,8 +372,8 @@ public class TextReplaceCommand : IGeoScriptCommand
         string find = ParseStringParameter(cmd.FullText, "find", "");
         string replace = ParseStringParameter(cmd.FullText, "replace", "");
 
-        Logger.LogInfo($"Replacing '{find}' with '{replace}'");
-        Logger.LogInfo($"Replacements made: (would show count)");
+        Logger.Log($"Replacing '{find}' with '{replace}'");
+        Logger.Log($"Replacements made: (would show count)");
 
         return Task.FromResult<Dataset>(textDs);
     }
@@ -400,11 +400,11 @@ public class TextStatisticsCommand : IGeoScriptCommand
         if (context.InputDataset is not TextDataset textDs)
             throw new NotSupportedException("TEXT_STATISTICS only works with Text datasets");
 
-        Logger.LogInfo($"Text Statistics:");
-        Logger.LogInfo($"  Lines: {textDs.LineCount}");
-        Logger.LogInfo($"  Words: {textDs.WordCount}");
-        Logger.LogInfo($"  Characters: {textDs.CharacterCount}");
-        Logger.LogInfo($"  Encoding: {textDs.Encoding?.EncodingName ?? "Unknown"}");
+        Logger.Log($"Text Statistics:");
+        Logger.Log($"  Lines: {textDs.LineCount}");
+        Logger.Log($"  Words: {textDs.WordCount}");
+        Logger.Log($"  Characters: {textDs.CharacterCount}");
+        Logger.Log($"  Encoding: {textDs.FileEncoding?.EncodingName ?? "Unknown"}");
 
         return Task.FromResult<Dataset>(textDs);
     }
