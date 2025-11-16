@@ -2,6 +2,7 @@
 
 using System.Numerics;
 using GeoscientistToolkit.Data;
+using GeoscientistToolkit.Data.Media.AISegmentation;
 using GeoscientistToolkit.UI.Interfaces;
 using GeoscientistToolkit.Util;
 using ImGuiNET;
@@ -9,14 +10,21 @@ using ImGuiNET;
 namespace GeoscientistToolkit.Data.Media;
 
 /// <summary>
-/// Tools panel for video datasets with frame extraction and analysis
+/// Tools panel for video datasets with frame extraction, analysis, and AI segmentation
 /// </summary>
-public class VideoDatasetTools : IDatasetTools
+public class VideoDatasetTools : IDatasetTools, IDisposable
 {
     private double _extractFrameTime = 0.0;
     private string _exportPath = "";
     private bool _isExtracting = false;
     private Task _extractTask;
+
+    // AI Segmentation tool
+    private VideoSam2InteractiveTool _sam2Tool;
+    private bool _sam2ToolInitialized;
+
+    // Tab selection
+    private int _selectedTab = 0;
 
     public void Draw(Dataset dataset)
     {
@@ -32,6 +40,27 @@ public class VideoDatasetTools : IDatasetTools
             return;
         }
 
+        // Tab bar
+        if (ImGui.BeginTabBar("VideoToolsTabs"))
+        {
+            if (ImGui.BeginTabItem("Frame Extraction"))
+            {
+                DrawFrameExtractionTab(videoDataset);
+                ImGui.EndTabItem();
+            }
+
+            if (ImGui.BeginTabItem("AI Segmentation"))
+            {
+                DrawAISegmentationTab(videoDataset);
+                ImGui.EndTabItem();
+            }
+
+            ImGui.EndTabBar();
+        }
+    }
+
+    private void DrawFrameExtractionTab(VideoDataset videoDataset)
+    {
         ImGui.SeparatorText("Frame Extraction");
 
         ImGui.Text("Extract Frame at Time:");
@@ -175,5 +204,33 @@ public class VideoDatasetTools : IDatasetTools
         {
             _isExtracting = false;
         }
+    }
+
+    private void DrawAISegmentationTab(VideoDataset videoDataset)
+    {
+        // Lazy initialize SAM2 tool
+        if (!_sam2ToolInitialized)
+        {
+            try
+            {
+                _sam2Tool = new VideoSam2InteractiveTool();
+                _sam2ToolInitialized = true;
+            }
+            catch (Exception ex)
+            {
+                ImGui.TextColored(new Vector4(1, 0, 0, 1), $"Failed to initialize SAM2 tool: {ex.Message}");
+                return;
+            }
+        }
+
+        if (_sam2Tool != null)
+        {
+            _sam2Tool.Draw(videoDataset);
+        }
+    }
+
+    public void Dispose()
+    {
+        _sam2Tool?.Dispose();
     }
 }

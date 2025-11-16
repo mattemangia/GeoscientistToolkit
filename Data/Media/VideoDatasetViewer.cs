@@ -1,6 +1,7 @@
 // GeoscientistToolkit/Data/Media/VideoDatasetViewer.cs
 
 using System.Numerics;
+using GeoscientistToolkit.Data.Media.AISegmentation;
 using GeoscientistToolkit.UI.Interfaces;
 using GeoscientistToolkit.Util;
 using ImGuiNET;
@@ -33,6 +34,9 @@ public class VideoDatasetViewer : IDatasetViewer
     private bool _loop = false;
     private bool _showTimeline = true;
     private bool _isLoadingFrame = false;
+
+    // Click handler for AI tools (e.g., SAM2 point selection)
+    public Action<float, float> OnFrameClick;
 
     public VideoDatasetViewer(VideoDataset dataset)
     {
@@ -160,6 +164,28 @@ public class VideoDatasetViewer : IDatasetViewer
             if (isMouseOverImage && ImGui.IsMouseDragging(ImGuiMouseButton.Middle))
             {
                 pan += io.MouseDelta;
+            }
+
+            // Handle left click for AI tools (e.g., SAM2 point selection)
+            if (isMouseOverImage && ImGui.IsMouseClicked(ImGuiMouseButton.Left))
+            {
+                // Convert screen coordinates to image coordinates
+                var relativePos = io.MousePos - imagePos;
+                var imageX = (relativePos.X / displaySize.X) * _dataset.Width;
+                var imageY = (relativePos.Y / displaySize.Y) * _dataset.Height;
+
+                // Clamp to image bounds
+                imageX = Math.Clamp(imageX, 0, _dataset.Width - 1);
+                imageY = Math.Clamp(imageY, 0, _dataset.Height - 1);
+
+                // Call active SAM2 tool if available
+                if (VideoSam2InteractiveTool.ActiveTool != null)
+                {
+                    VideoSam2InteractiveTool.ActiveTool.AddPoint(_dataset, imageX, imageY);
+                }
+
+                // Also invoke callback if registered (for other tools)
+                OnFrameClick?.Invoke(imageX, imageY);
             }
 
             // Draw frame
