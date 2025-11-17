@@ -52,7 +52,7 @@ public class AppearanceSettings
     public bool ShowToolTips { get; set; } = true;
     public bool AnimateWindows { get; set; } = true;
     public float AnimationSpeed { get; set; } = 1.0f;
-    public bool ShowWelcomeOnStartup { get; set; } = true;
+    public bool ShowWelcomeOnStartup { get; set; } = false;
     public string ColorScheme { get; set; } = "Blue";
     public bool UseSystemTitleBar { get; set; } = false;
     public int MaxRecentProjects { get; set; } = 10;

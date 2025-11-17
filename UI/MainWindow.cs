@@ -2,6 +2,7 @@
 
 using System.Data;
 using System.Numerics;
+using System.Reflection;
 using System.Text;
 using GeoscientistToolkit.Business;
 using GeoscientistToolkit.Data;
@@ -18,6 +19,8 @@ using GeoscientistToolkit.UI.Windows;
 using GeoscientistToolkit.Util;
 using GeoscientistToolkit.Analysis.Geothermal;
 using ImGuiNET;
+using StbImageSharp;
+using Veldrid;
 
 namespace GeoscientistToolkit.UI;
 
@@ -97,6 +100,10 @@ public class MainWindow
     private readonly ProjectMetadataEditor _projectMetadataEditor = new();
     private readonly MetadataTableViewer _metadataTableViewer = new();
 
+    // Logo texture for About window
+    private IntPtr _logoTextureId;
+    private Vector2 _logoSize;
+
     public MainWindow()
     {
         // Subscribe to dataset removal events
@@ -117,6 +124,69 @@ public class MainWindow
         _createMeshDialog.SetExtensions(
             new ImGuiExportFileDialog.ExtensionOption(".obj", "Wavefront OBJ")
         );
+    }
+
+    private void LoadLogoTexture()
+    {
+        if (_logoTextureId != IntPtr.Zero)
+            return; // Already loaded
+
+        try
+        {
+            // Load embedded image resource
+            var assembly = Assembly.GetExecutingAssembly();
+            var resourceName = "GeoscientistToolkit.image.png";
+
+            using var stream = assembly.GetManifestResourceStream(resourceName);
+            if (stream == null)
+            {
+                Logger.LogWarning($"Could not find embedded resource '{resourceName}'");
+                return;
+            }
+
+            // Load image using StbImageSharp
+            var image = ImageResult.FromStream(stream, ColorComponents.RedGreenBlueAlpha);
+
+            // Get graphics device and ImGui controller from VeldridManager
+            var graphicsDevice = VeldridManager.GraphicsDevice;
+            var imGuiController = VeldridManager.ImGuiController;
+
+            if (graphicsDevice == null || imGuiController == null)
+            {
+                Logger.LogWarning("Graphics device or ImGui controller not available for logo loading");
+                return;
+            }
+
+            // Create texture
+            var texture = graphicsDevice.ResourceFactory.CreateTexture(TextureDescription.Texture2D(
+                (uint)image.Width,
+                (uint)image.Height,
+                1,
+                1,
+                PixelFormat.R8_G8_B8_A8_UNorm,
+                TextureUsage.Sampled));
+
+            graphicsDevice.UpdateTexture(
+                texture,
+                image.Data,
+                0, 0, 0,
+                (uint)image.Width,
+                (uint)image.Height,
+                1,
+                0,
+                0);
+
+            // Create texture view
+            var textureView = graphicsDevice.ResourceFactory.CreateTextureView(texture);
+
+            // Bind to ImGui
+            _logoTextureId = imGuiController.GetOrCreateImGuiBinding(graphicsDevice.ResourceFactory, textureView);
+            _logoSize = new Vector2(image.Width, image.Height);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError($"Error loading logo texture: {ex.Message}");
+        }
     }
 
     // ----------------------------------------------------------------------
@@ -1092,16 +1162,58 @@ public class MainWindow
         // ============================================================================
         // About popup
         // ============================================================================
-        if (_showAboutPopup) ImGui.OpenPopup("About GeoscientistToolkit");
+        if (_showAboutPopup)
+        {
+            ImGui.OpenPopup("About GeoscientistToolkit");
+            LoadLogoTexture(); // Ensure logo is loaded when showing About
+        }
 
         ImGui.SetNextWindowPos(ImGui.GetMainViewport().GetCenter(), ImGuiCond.Appearing, new Vector2(0.5f, 0.5f));
         if (ImGui.BeginPopupModal("About GeoscientistToolkit", ref _showAboutPopup, ImGuiWindowFlags.AlwaysAutoResize))
         {
-            ImGui.Text("GeoscientistToolkit – Preview Build");
+            // Display logo if loaded
+            if (_logoTextureId != IntPtr.Zero)
+            {
+                // Scale logo to fit nicely (max 300px width)
+                var maxWidth = 300f;
+                var scale = Math.Min(maxWidth / _logoSize.X, 1.0f);
+                var displaySize = _logoSize * scale;
+
+                // Center the logo
+                var windowWidth = ImGui.GetWindowWidth();
+                var cursorX = (windowWidth - displaySize.X) * 0.5f;
+                if (cursorX > 0) ImGui.SetCursorPosX(cursorX);
+
+                ImGui.Image(_logoTextureId, displaySize);
+                ImGui.Spacing();
+            }
+
+            ImGui.Text("GeoscientistToolkit");
+            ImGui.Spacing();
+
+            ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(0.7f, 0.7f, 0.75f, 1.0f));
+            ImGui.Text("Research Preview");
+            ImGui.PopStyleColor();
             ImGui.Separator();
+
             ImGui.TextWrapped(
                 "Open-source toolkit for geoscience data visualisation and analysis, built with Veldrid + ImGui.NET.");
             ImGui.Spacing();
+
+            ImGui.Separator();
+            ImGui.Spacing();
+
+            // Author information
+            ImGui.Text("Author Information");
+            ImGui.Spacing();
+            ImGui.BulletText("Matteo Mangiagalli - 2025");
+            ImGui.BulletText("Università degli Studi di Urbino Carlo Bo");
+            ImGui.BulletText("m.mangiagalli@campus.uniurb.it");
+            ImGui.Spacing();
+
+            ImGui.Separator();
+            ImGui.Spacing();
+
             if (ImGui.Button("OK", new Vector2(100, 0)))
             {
                 _showAboutPopup = false;
