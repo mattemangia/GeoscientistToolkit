@@ -163,7 +163,44 @@ public class Program
 
         tuiManager.Run();
 
-        // Wait for the app to finish (if the TUI exits)
+        // Check if restart was requested
+        if (tuiManager.RestartRequested)
+        {
+            Console.WriteLine("Restarting application...");
+
+            // Get the current process executable path
+            var processPath = Environment.ProcessPath ?? Process.GetCurrentProcess().MainModule?.FileName;
+
+            if (processPath != null)
+            {
+                // Start a new instance of the application
+                var startInfo = new ProcessStartInfo
+                {
+                    FileName = processPath,
+                    UseShellExecute = true,
+                    WorkingDirectory = AppDomain.CurrentDomain.BaseDirectory
+                };
+
+                try
+                {
+                    Process.Start(startInfo);
+                    Console.WriteLine("New instance started successfully");
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"Failed to start new instance: {ex.Message}");
+                }
+            }
+            else
+            {
+                Console.WriteLine("Could not determine process path for restart");
+            }
+
+            // Exit the current instance
+            Environment.Exit(0);
+        }
+
+        // Wait for the app to finish (if the TUI exits normally)
         appTask.Wait();
     }
 }

@@ -83,6 +83,9 @@ public class TuiManager
     private int _selectedJobIndex = -1;
     private int _selectedNodeIndex = -1;
 
+    // Restart flag
+    public bool RestartRequested { get; private set; }
+
     private class LogEntry
     {
         public DateTime Timestamp { get; set; }
@@ -1746,13 +1749,21 @@ public class TuiManager
                     // Save new config
                     File.WriteAllText(_configPath, newConfig);
 
-                    AddLog("INFO", "Configuration saved successfully");
-                    MessageBox.Query("Success",
+                    AddLog("INFO", "Configuration saved successfully - restarting...");
+
+                    var restartResult = MessageBox.Query("Configuration Saved",
                         "Configuration saved successfully!\n\n" +
-                        "Restart the application for changes to take effect.\n\n" +
-                        $"Backup created: {Path.GetFileName(backupPath)}", "OK");
+                        $"Backup created: {Path.GetFileName(backupPath)}\n\n" +
+                        "Restart now to apply changes?", "Restart", "Exit");
 
                     configDoc.Dispose();
+
+                    if (restartResult == 0)
+                    {
+                        // User chose to restart
+                        RestartRequested = true;
+                    }
+
                     Application.RequestStop();
                 }
                 catch (Exception ex)
@@ -2373,13 +2384,15 @@ public class TuiManager
     private void ReloadConfiguration()
     {
         var result = MessageBox.Query("Reload Configuration",
-            "This will reload the configuration from appsettings.json.\n\n" +
-            "The application needs to restart for changes to take effect.\n\n" +
+            "This will restart the application to reload the configuration\n" +
+            "from appsettings.json.\n\n" +
+            "Any unsaved work will be lost.\n\n" +
             "Continue?", "Yes", "No");
 
         if (result == 0)
         {
-            AddLog("INFO", "Configuration reload requested - restarting...");
+            AddLog("INFO", "Configuration reload requested - restarting application...");
+            RestartRequested = true;
             Application.RequestStop();
         }
     }
