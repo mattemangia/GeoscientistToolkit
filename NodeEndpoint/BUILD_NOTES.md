@@ -1,12 +1,24 @@
 # NodeEndpoint Build Notes
 
-## Compilation Error Fixes (766 Errors Resolved)
+## Final State: Headless Server with Core Simulations
 
-This document explains the compilation issues that were resolved and how to build the NodeEndpoint server.
+The NodeEndpoint is now a **fully headless REST API server** with **zero UI dependencies**. It includes only computational simulations that can run without graphics.
+
+### Available Simulations
+- **Geomechanical** (FEM-based CPU path with plasticity and damage)
+- **Acoustic** (wave propagation CPU simulator)
+- **Triaxial** (compression/extension lab tests)
+
+### Excluded Simulations
+These remain in the main application due to complex dependencies:
+- **Geothermal** (requires Mesh3D, Borehole, GIS datasets)
+- **Seismic/Earthquake** (requires CrustalModel, WavePropagationEngine)
+- **NMR** (requires CtImageStack, VolumeData)
+- **PNM Generation** (directly uses ImGuiNET for UI progress)
 
 ---
 
-## Problems Fixed
+## Compilation Error Fixes (766 → 0 Errors)
 
 ### Problem 1: Duplicate Assembly Attributes (Main Project)
 **Error Count**: 7 errors
@@ -185,6 +197,36 @@ curl -X POST http://localhost:5000/api/simulation/nmr \
 
 ## Architecture Overview
 
+### Available REST API Endpoints
+
+**Simulation Controller** (`/api/simulation`):
+- `POST /api/simulation/geomechanical` - Submit FEM geomechanical simulation
+- `POST /api/simulation/acoustic` - Submit acoustic wave propagation simulation
+- `POST /api/simulation/triaxial` - Submit triaxial compression/extension test
+- `GET /api/simulation/types` - List available simulation types
+
+**Job Controller** (`/api/job`):
+- `GET /api/job/{id}` - Get job status
+- `GET /api/job/{id}/result` - Get job result
+- `POST /api/job/cancel/{id}` - Cancel a job
+- `GET /api/job/all` - List all jobs
+
+**Node Controller** (`/api/node`):
+- `GET /api/node` - Get NodeManager status and connected nodes
+- `GET /api/node/info` - Get this endpoint's information
+
+**Partitioned Job Controller** (`/api/partitionedjob`):
+- `POST /api/partitionedjob/register-data` - Register large dataset
+- `POST /api/partitionedjob/submit` - Submit distributed job
+- `GET /api/partitionedjob/{id}/status` - Track distributed job progress
+- `GET /api/partitionedjob/{id}/result` - Get aggregated results
+
+**Filtering Controller** (`/api/filtering`):
+- `POST /api/filtering/apply` - Apply CT volume filter
+- `POST /api/filtering/pipeline` - Apply filter pipeline
+- `POST /api/filtering/edge-detection` - Edge detection
+- `POST /api/filtering/segmentation` - Volume segmentation
+
 ### Design Philosophy
 The NodeEndpoint is a **headless REST API server** designed to:
 - Run on servers without graphics/display
@@ -198,8 +240,9 @@ The NodeEndpoint is a **headless REST API server** designed to:
 - No real-time visualization
 - No interactive rendering
 - No ImGui/Veldrid dependencies
+- No complex simulations requiring advanced data types (Geothermal, Seismic, NMR, PNM Generation)
 
-The main GeoscientistToolkit application handles all UI/visualization, while NodeEndpoint handles headless computation and job distribution.
+The main GeoscientistToolkit application handles all UI/visualization and complex simulations, while NodeEndpoint handles headless computation and job distribution.
 
 ---
 
