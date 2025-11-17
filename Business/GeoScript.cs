@@ -176,6 +176,7 @@ public static class CommandRegistry
             new CreateDiagramCommand(),
             new EquilibrateCommand(),
             new SaturationCommand(),
+            new SaturationIndexCommand(),
             new BalanceReactionCommand(),
             new EvaporateCommand(),
             new ReactCommand(),
@@ -1144,6 +1145,65 @@ public abstract class ThermoCommandBase
     }
 }
 
+internal static class GeoScriptThermoHelper
+{
+    public static (string Name, double Moles) ParseComponentToken(string rawToken, double defaultMoles = 0.001)
+    {
+        if (string.IsNullOrWhiteSpace(rawToken)) return (string.Empty, defaultMoles);
+
+        var trimmed = rawToken.Trim();
+        var amount = defaultMoles;
+        var name = trimmed;
+
+        var leadingMatch = Regex.Match(trimmed, @"^(?<amt>[-+]?\d*\.?\d+(?:[eE][-+]?\d+)?)\s*(?<name>.+)$");
+        if (leadingMatch.Success)
+        {
+            amount = double.Parse(leadingMatch.Groups["amt"].Value, CultureInfo.InvariantCulture);
+            name = leadingMatch.Groups["name"].Value.Trim();
+        }
+        else
+        {
+            var trailingMatch = Regex.Match(trimmed, @"(?<name>.+?)\s+(?<amt>[-+]?\d*\.?\d+(?:[eE][-+]?\d+)?)$");
+            if (trailingMatch.Success)
+            {
+                amount = double.Parse(trailingMatch.Groups["amt"].Value, CultureInfo.InvariantCulture);
+                name = trailingMatch.Groups["name"].Value.Trim();
+            }
+        }
+
+        return (name, amount);
+    }
+
+    public static ChemicalCompound FindCompoundFlexible(CompoundLibrary library, string input)
+    {
+        if (string.IsNullOrWhiteSpace(input)) return null;
+
+        var trimmed = input.Trim();
+        var compound = library.FindFlexible(trimmed);
+        if (compound != null) return compound;
+
+        var normalized = CompoundLibrary.NormalizeFormulaInput(trimmed);
+        compound = library.FindFlexible(normalized);
+        return compound ?? library.Find(trimmed);
+    }
+
+    public static void AddCompoundToState(ThermodynamicState state, ReactionGenerator reactionGenerator,
+        ChemicalCompound compound, double moles)
+    {
+        if (compound == null || moles <= 0) return;
+
+        state.SpeciesMoles[compound.Name] = state.SpeciesMoles.GetValueOrDefault(compound.Name, 0) + moles;
+
+        var composition = reactionGenerator.ParseChemicalFormula(compound.ChemicalFormula);
+        foreach (var (element, stoichiometry) in composition)
+        {
+            var addition = moles * stoichiometry;
+            state.ElementalComposition[element] =
+                state.ElementalComposition.GetValueOrDefault(element, 0) + addition;
+        }
+    }
+}
+
 public class CreateDiagramCommand : IGeoScriptCommand
 {
     public string Name => "CREATE_DIAGRAM";
@@ -1390,61 +1450,180 @@ public class CreateDiagramCommand : IGeoScriptCommand
     #endregion
 }
 
-public class EquilibrateCommand : ThermoCommandBase, IGeoScriptCommand
+public class EquilibrateCommand : IGeoScriptCommand
 {
     public string Name => "EQUILIBRATE";
-    public string HelpText => "Solves for aqueous speciation for each row in a table.";
-    public string Usage => "EQUILIBRATE";
+    public string HelpText => "Calculate chemical equilibrium for a system";
+    public string Usage => "EQUILIBRATE <Compounds> [TEMP <val> C|K] [PRES <val> BAR|ATM] [pH <val>]";
 
     public Task<Dataset> ExecuteAsync(GeoScriptContext context, AstNode node)
     {
-        if (context.InputDataset is not TableDataset tableDs)
-            throw new NotSupportedException("EQUILIBRATE only works on Table Datasets.");
-
+        var cmd = (CommandNode)node;
+        var compoundLib = CompoundLibrary.Instance;
+        var reactionGenerator = new ReactionGenerator(compoundLib);
         var solver = new ThermodynamicSolver();
-        var sourceTable = tableDs.GetDataTable();
-        var resultTable = sourceTable.Copy();
 
-        // Add columns for standard outputs
-        if (!resultTable.Columns.Contains("pH")) resultTable.Columns.Add("pH", typeof(double));
-        if (!resultTable.Columns.Contains("IonicStrength_molkg"))
-            resultTable.Columns.Add("IonicStrength_molkg", typeof(double));
+        var pattern =
+            @"EQUILIBRATE\s+(?<compounds>.+?)(?:\s+TEMP\s+(?<tempval>[\d\.]+)\s*(?<tempunit>C|K))?(?:\s+PRES\s+(?<presval>[\d\.]+)\s*(?<presunit>BAR|ATM))?(?:\s+pH\s+(?<ph>[\d\.]+))?$";
+        var match = Regex.Match(cmd.FullText, pattern, RegexOptions.IgnoreCase);
 
-        var allSpecies = new HashSet<string>();
+        if (!match.Success)
+            throw new ArgumentException($"Invalid syntax. Usage: {Usage}");
 
-        // First pass to determine all possible species to create columns
-        foreach (DataRow row in sourceTable.Rows)
+        var compoundsStr = match.Groups["compounds"].Value.Trim();
+        var compoundInputs = compoundsStr.Split('+', StringSplitOptions.RemoveEmptyEntries)
+            .Select(c => c.Trim())
+            .Where(c => !string.IsNullOrWhiteSpace(c))
+            .ToList();
+
+        if (compoundInputs.Count == 0)
+            throw new ArgumentException("You must provide at least one compound to equilibrate.");
+
+        var temperatureK = 298.15;
+        if (match.Groups["tempval"].Success)
         {
-            var initialState = CreateStateFromDataRow(row);
-            var finalState = solver.SolveSpeciation(initialState);
-            foreach (var species in finalState.Activities.Keys) allSpecies.Add(species);
+            var tempVal = double.Parse(match.Groups["tempval"].Value, CultureInfo.InvariantCulture);
+            temperatureK = match.Groups["tempunit"].Value.Equals("K", StringComparison.OrdinalIgnoreCase)
+                ? tempVal
+                : tempVal + 273.15;
         }
 
-        // Add columns for activities of all species found
-        foreach (var species in allSpecies)
+        var pressureBar = 1.0;
+        if (match.Groups["presval"].Success)
         {
-            var colName = $"act_{species.Replace("⁺", "+").Replace("⁻", "-")}";
-            if (!resultTable.Columns.Contains(colName)) resultTable.Columns.Add(colName, typeof(double));
+            var presVal = double.Parse(match.Groups["presval"].Value, CultureInfo.InvariantCulture);
+            pressureBar = match.Groups["presunit"].Value.Equals("ATM", StringComparison.OrdinalIgnoreCase)
+                ? presVal * 1.01325
+                : presVal;
         }
 
-        // Second pass to run simulation and populate the table
-        for (var i = 0; i < sourceTable.Rows.Count; i++)
+        double? targetPh = null;
+        if (match.Groups["ph"].Success)
+            targetPh = double.Parse(match.Groups["ph"].Value, CultureInfo.InvariantCulture);
+
+        var initialState = new ThermodynamicState
         {
-            var initialState = CreateStateFromDataRow(sourceTable.Rows[i]);
-            var finalState = solver.SolveSpeciation(initialState);
+            Temperature_K = temperatureK,
+            Pressure_bar = pressureBar,
+            Volume_L = 1.0
+        };
 
-            var resultRow = resultTable.Rows[i];
-            resultRow["pH"] = finalState.pH;
-            resultRow["IonicStrength_molkg"] = finalState.IonicStrength_molkg;
+        if (targetPh.HasValue)
+        {
+            initialState.pH = targetPh.Value;
+            var hActivity = Math.Pow(10, -targetPh.Value);
+            var ohActivity = Math.Max(1e-30, 1e-14 / hActivity);
 
-            foreach (var (species, activity) in finalState.Activities)
+            initialState.Activities["H⁺"] = hActivity;
+            initialState.Activities["H+"] = hActivity;
+            initialState.Activities["OH⁻"] = ohActivity;
+            initialState.Activities["OH-"] = ohActivity;
+        }
+
+        // Always include liquid water as solvent
+        var water = GeoScriptThermoHelper.FindCompoundFlexible(compoundLib, "H2O") ??
+                    GeoScriptThermoHelper.FindCompoundFlexible(compoundLib, "Water");
+        if (water != null)
+        {
+            var waterMoles = 55.508; // ~1 kg of water at 25 °C
+            GeoScriptThermoHelper.AddCompoundToState(initialState, reactionGenerator, water, waterMoles);
+        }
+        else
+        {
+            Logger.LogWarning("[EQUILIBRATE] Unable to locate water in the compound library.");
+        }
+
+        var parsedCompounds = new List<(ChemicalCompound compound, double moles, string token)>();
+        foreach (var input in compoundInputs)
+        {
+            var (cleanName, moles) = GeoScriptThermoHelper.ParseComponentToken(input);
+            var compound = GeoScriptThermoHelper.FindCompoundFlexible(compoundLib, cleanName);
+            if (compound == null)
             {
-                var colName = $"act_{species.Replace("⁺", "+").Replace("⁻", "-")}";
-                resultRow[colName] = activity;
+                Logger.LogWarning($"[EQUILIBRATE] Compound '{cleanName}' not found in library");
+                continue;
             }
+
+            parsedCompounds.Add((compound, moles, input));
+            GeoScriptThermoHelper.AddCompoundToState(initialState, reactionGenerator, compound, moles);
         }
 
-        return Task.FromResult<Dataset>(new TableDataset($"{tableDs.Name}_Equilibrated", resultTable));
+        if (parsedCompounds.Count == 0)
+            throw new ArgumentException("No valid compounds were provided for EQUILIBRATE.");
+
+        Logger.Log($"[EQUILIBRATE] Building system at {temperatureK:F2} K and {pressureBar:F2} bar");
+        foreach (var (compound, moles, token) in parsedCompounds)
+            Logger.Log($"  - {token} → {compound.Name} ({compound.ChemicalFormula}) : {moles:E3} mol");
+
+        var finalState = solver.SolveEquilibrium(initialState);
+
+        Logger.Log("\n=== EQUILIBRATION RESULTS ===");
+        Logger.Log($"Temperature: {finalState.Temperature_K:F2} K");
+        Logger.Log($"Pressure: {finalState.Pressure_bar:F2} bar");
+        Logger.Log($"pH: {finalState.pH:F2}");
+        Logger.Log($"pe: {finalState.pe:F2}");
+        Logger.Log($"Ionic Strength: {finalState.IonicStrength_molkg:F4} mol/kg\n");
+
+        var resultTable = new DataTable("Equilibrium_State");
+        resultTable.Columns.Add("Species", typeof(string));
+        resultTable.Columns.Add("Formula", typeof(string));
+        resultTable.Columns.Add("Phase", typeof(string));
+        resultTable.Columns.Add("Moles", typeof(double));
+        resultTable.Columns.Add("Mass_g", typeof(double));
+        resultTable.Columns.Add("Activity", typeof(double));
+        resultTable.Columns.Add("LogActivity", typeof(double));
+
+        var sortedSpecies = finalState.SpeciesMoles
+            .Where(kvp => kvp.Value > 1e-15)
+            .OrderBy(kvp => GetPhaseOrder(GeoScriptThermoHelper.FindCompoundFlexible(compoundLib, kvp.Key)?.Phase))
+            .ThenByDescending(kvp => kvp.Value)
+            .ToList();
+
+        foreach (var (speciesName, moles) in sortedSpecies)
+        {
+            var compound = GeoScriptThermoHelper.FindCompoundFlexible(compoundLib, speciesName);
+            var lookupName = compound?.Name ?? speciesName;
+            var phase = compound?.Phase ?? CompoundPhase.Aqueous;
+            var formula = compound?.ChemicalFormula ?? speciesName;
+            var molarMass = compound?.MolecularWeight_g_mol;
+            var mass = molarMass.HasValue ? moles * molarMass.Value : double.NaN;
+
+            double defaultActivity;
+            if (phase == CompoundPhase.Aqueous)
+                defaultActivity = moles / Math.Max(finalState.Volume_L, 1e-12);
+            else
+                defaultActivity = 1.0;
+
+            var activity = finalState.Activities.GetValueOrDefault(lookupName, defaultActivity);
+            var logActivity = activity > 0 ? Math.Log10(activity) : double.NegativeInfinity;
+
+            resultTable.Rows.Add(
+                lookupName,
+                formula,
+                phase.ToString(),
+                moles,
+                mass,
+                activity,
+                logActivity
+            );
+
+            Logger.Log(
+                $"{phase,-10} {lookupName,-20} {formula,-15} {moles,10:E3} mol  a = {activity,10:E3} (log10 a = {logActivity,6:F2})");
+        }
+
+        return Task.FromResult<Dataset>(new TableDataset(resultTable.TableName, resultTable));
+    }
+
+    private static int GetPhaseOrder(CompoundPhase? phase)
+    {
+        return phase switch
+        {
+            CompoundPhase.Solid => 0,
+            CompoundPhase.Aqueous => 1,
+            CompoundPhase.Gas => 2,
+            CompoundPhase.Liquid => 3,
+            _ => 4
+        };
     }
 }
 
@@ -1486,6 +1665,113 @@ public class SaturationCommand : ThermoCommandBase, IGeoScriptCommand
         }
 
         return Task.FromResult<Dataset>(new TableDataset($"{tableDs.Name}_Saturation", resultTable));
+    }
+}
+
+public class SaturationIndexCommand : IGeoScriptCommand
+{
+    public string Name => "SATURATION_INDEX";
+    public string HelpText => "Calculate saturation indices for minerals";
+    public string Usage => "SATURATION_INDEX <Solution> WITH <Minerals>";
+
+    public Task<Dataset> ExecuteAsync(GeoScriptContext context, AstNode node)
+    {
+        var cmd = (CommandNode)node;
+        var compoundLib = CompoundLibrary.Instance;
+        var reactionGenerator = new ReactionGenerator(compoundLib);
+        var solver = new ThermodynamicSolver();
+
+        var pattern = @"SATURATION_INDEX\s+(?<solution>.+?)\s+WITH\s+(?<minerals>.+)$";
+        var match = Regex.Match(cmd.FullText, pattern, RegexOptions.IgnoreCase);
+
+        if (!match.Success) throw new ArgumentException($"Invalid syntax. Usage: {Usage}");
+
+        var solutionInputs = match.Groups["solution"].Value
+            .Split('+', StringSplitOptions.RemoveEmptyEntries)
+            .Select(s => s.Trim())
+            .Where(s => !string.IsNullOrWhiteSpace(s))
+            .ToList();
+        if (solutionInputs.Count == 0)
+            throw new ArgumentException("You must provide at least one solute in the solution portion.");
+
+        var mineralInputs = match.Groups["minerals"].Value
+            .Split('+', StringSplitOptions.RemoveEmptyEntries)
+            .Select(s => s.Trim())
+            .Where(s => !string.IsNullOrWhiteSpace(s))
+            .ToList();
+        if (mineralInputs.Count == 0)
+            throw new ArgumentException("You must provide at least one mineral after WITH.");
+
+        var initialState = new ThermodynamicState
+        {
+            Temperature_K = 298.15,
+            Pressure_bar = 1.0,
+            Volume_L = 1.0
+        };
+
+        var water = GeoScriptThermoHelper.FindCompoundFlexible(compoundLib, "H2O") ??
+                    GeoScriptThermoHelper.FindCompoundFlexible(compoundLib, "Water");
+        if (water != null)
+            GeoScriptThermoHelper.AddCompoundToState(initialState, reactionGenerator, water, 55.508);
+
+        foreach (var input in solutionInputs)
+        {
+            var (cleanName, moles) = GeoScriptThermoHelper.ParseComponentToken(input);
+            var compound = GeoScriptThermoHelper.FindCompoundFlexible(compoundLib, cleanName);
+            if (compound == null)
+            {
+                Logger.LogWarning($"[SATURATION_INDEX] Solution species '{cleanName}' not found");
+                continue;
+            }
+
+            GeoScriptThermoHelper.AddCompoundToState(initialState, reactionGenerator, compound, moles);
+        }
+
+        var equilibratedState = solver.SolveEquilibrium(initialState);
+        var saturationIndices = solver.CalculateSaturationIndices(equilibratedState);
+
+        Logger.Log("\n=== SATURATION INDEX RESULTS ===");
+        Logger.Log($"Temperature: {equilibratedState.Temperature_K:F2} K");
+        Logger.Log($"Pressure: {equilibratedState.Pressure_bar:F2} bar");
+        Logger.Log($"pH: {equilibratedState.pH:F2}\n");
+
+        var resultTable = new DataTable("SaturationIndices");
+        resultTable.Columns.Add("Mineral", typeof(string));
+        resultTable.Columns.Add("Formula", typeof(string));
+        resultTable.Columns.Add("SaturationIndex", typeof(double));
+        resultTable.Columns.Add("Status", typeof(string));
+
+        foreach (var input in mineralInputs)
+        {
+            var mineral = GeoScriptThermoHelper.FindCompoundFlexible(compoundLib, input);
+            if (mineral == null)
+            {
+                Logger.LogWarning($"[SATURATION_INDEX] Mineral '{input}' not found");
+                continue;
+            }
+
+            if (mineral.Phase != CompoundPhase.Solid)
+            {
+                Logger.LogWarning($"[SATURATION_INDEX] {mineral.Name} is not a solid mineral. Skipping.");
+                continue;
+            }
+
+            var hasValue = saturationIndices.TryGetValue(mineral.Name, out var siValue);
+            var status = DescribeSaturationStatus(hasValue ? siValue : double.NaN);
+            resultTable.Rows.Add(mineral.Name, mineral.ChemicalFormula, hasValue ? siValue : double.NaN, status);
+
+            Logger.Log($"{mineral.Name,-20} SI = {(hasValue ? siValue : double.NaN):F3}  → {status}");
+        }
+
+        return Task.FromResult<Dataset>(new TableDataset(resultTable.TableName, resultTable));
+    }
+
+    private static string DescribeSaturationStatus(double value)
+    {
+        if (double.IsNaN(value)) return "Not available";
+        if (value > 0.1) return "Supersaturated";
+        if (value < -0.1) return "Undersaturated";
+        return "At equilibrium";
     }
 }
 

@@ -1432,10 +1432,13 @@ public List<ChemicalReaction> GenerateSolubleCompoundDissociationReactions(List<
     
     foreach (var compoundName in compoundNames)
     {
-        var compound = _compoundLibrary.Find(compoundName);
-        if (compound == null) 
+        var normalized = CompoundLibrary.NormalizeFormulaInput(compoundName);
+        var compound = _compoundLibrary.FindFlexible(compoundName) ??
+                       _compoundLibrary.FindFlexible(normalized);
+        if (compound == null)
         {
-            Logger.LogWarning($"[ReactionGenerator] Compound '{compoundName}' not found in library");
+            Logger.LogWarning(
+                $"[ReactionGenerator] Compound '{compoundName}' (normalized: '{normalized}') not found in library");
             continue;
         }
         
@@ -1670,17 +1673,20 @@ public List<ChemicalReaction> GenerateSolubleCompoundDissociationReactions(
     
     foreach (var compoundName in compoundNames)
     {
-        var compound = _compoundLibrary.Find(compoundName);
-        if (compound == null) 
+        var normalized = CompoundLibrary.NormalizeFormulaInput(compoundName);
+        var compound = _compoundLibrary.FindFlexible(compoundName) ??
+                       _compoundLibrary.FindFlexible(normalized);
+        if (compound == null)
         {
-            Logger.LogWarning($"[ReactionGenerator] Compound '{compoundName}' not found in library");
+            Logger.LogWarning(
+                $"[ReactionGenerator] Compound '{compoundName}' (normalized: '{normalized}') not found in library");
             continue;
         }
         
         // Skip if already an aqueous ion
         if (compound.Phase == CompoundPhase.Aqueous && compound.IonicCharge.HasValue)
         {
-            Logger.Log($"[ReactionGenerator] {compoundName} is already an aqueous ion");
+            Logger.Log($"[ReactionGenerator] {compound.Name} is already an aqueous ion");
             continue;
         }
         
@@ -1712,7 +1718,7 @@ public List<ChemicalReaction> GenerateSolubleCompoundDissociationReactions(
             Logger.Log($"[ReactionGenerator] Generated reaction: {reaction.Name}");
         }
     }
-    
+
     return reactions;
 }
 /// <summary>
