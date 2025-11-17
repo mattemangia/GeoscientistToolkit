@@ -2,6 +2,7 @@ using GeoscientistToolkit.Installer.Models;
 using GeoscientistToolkit.InstallerPackager.Models;
 using GeoscientistToolkit.InstallerPackager.Services;
 using GeoscientistToolkit.InstallerPackager.Utilities;
+using NStack;
 using Terminal.Gui;
 
 namespace GeoscientistToolkit.InstallerPackager.UI;
@@ -89,7 +90,7 @@ internal sealed class PackagerTui
         };
         _window.Add(configLabel);
 
-        _configRadio = new RadioGroup(new[] { "Release", "Debug" })
+        _configRadio = new RadioGroup(new ustring[] { "Release", "Debug" })
         {
             X = 3,
             Y = yOffset,
