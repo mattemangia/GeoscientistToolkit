@@ -1,0 +1,112 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <RootNamespace>GeoscientistToolkit.NodeEndpoint</RootNamespace>
+    <AssemblyName>NodeEndpoint</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Only include core computation files, exclude ALL UI/rendering files -->
+
+    <!-- Network (needed for NodeManager) -->
+    <Compile Include="..\Network\**\*.cs" LinkBase="Network" />
+
+    <!-- Settings (needed for configuration) -->
+    <Compile Include="..\Settings\Settings.cs" Link="Settings\Settings.cs" />
+    <Compile Include="..\Settings\SettingsManager.cs" Link="Settings\SettingsManager.cs" />
+    <Compile Include="..\Settings\GraphicsFailsafe.cs" Link="Settings\GraphicsFailsafe.cs" />
+
+    <!-- OpenCL (needed for GPU compute) -->
+    <Compile Include="..\OpenCL\OpenCLDeviceManager.cs" Link="OpenCL\OpenCLDeviceManager.cs" />
+
+    <!-- Core simulation files only (no UI dependencies) -->
+    <!-- Geomechanics - CPU path only (fluid/geothermal parameters included but implementation excluded) -->
+    <Compile Include="..\Analysis\Geomechanics\GeomechanicalSimulationCPU.cs" Link="Analysis\Geomechanics\GeomechanicalSimulationCPU.cs" />
+    <Compile Include="..\Analysis\Geomechanics\GeomechanicalSimulationCPU_plasticity.cs" Link="Analysis\Geomechanics\GeomechanicalSimulationCPU_plasticity.cs" />
+    <Compile Include="..\Analysis\Geomechanics\GeomechanicSimulationCPU_damage.cs" Link="Analysis\Geomechanics\GeomechanicSimulationCPU_damage.cs" />
+    <Compile Include="..\Analysis\Geomechanics\TriaxialSimulation.cs" Link="Analysis\Geomechanics\TriaxialSimulation.cs" />
+    <Compile Include="..\Analysis\Geomechanics\TriaxialMeshGenerator.cs" Link="Analysis\Geomechanics\TriaxialMeshGenerator.cs" />
+    <Compile Include="..\Analysis\Geomechanics\GeomechanicalParameters.cs" Link="Analysis\Geomechanics\GeomechanicalParameters.cs" />
+    <Compile Include="..\Analysis\Geomechanics\GeomechanicalParametersExtended.cs" Link="Analysis\Geomechanics\GeomechanicalParametersExtended.cs" />
+    <Compile Include="..\Analysis\Geomechanics\GeomechanicalResults.cs" Link="Analysis\Geomechanics\GeomechanicalResults.cs" />
+    <Compile Include="..\Analysis\Geomechanics\ArrayWrapper.cs" Link="Analysis\Geomechanics\ArrayWrapper.cs" />
+    <Compile Include="..\Analysis\Geomechanics\DamageModel.cs" Link="Analysis\Geomechanics\DamageModel.cs" />
+
+    <!-- Acoustic - CPU path only -->
+    <Compile Include="..\Analysis\AcousticSimulation\IAcousticKernel.cs" Link="Analysis\AcousticSimulation\IAcousticKernel.cs" />
+    <Compile Include="..\Analysis\AcousticSimulation\AcousticSimulatorCPU.cs" Link="Analysis\AcousticSimulation\AcousticSimulatorCPU.cs" />
+    <Compile Include="..\Analysis\AcousticSimulation\SimulationData.cs" Link="Analysis\AcousticSimulation\SimulationData.cs" />
+    <Compile Include="..\Analysis\AcousticSimulation\SimulationParameters.cs" Link="Analysis\AcousticSimulation\SimulationParameters.cs" />
+
+    <!-- NOTE: Geothermal, Seismic, NMR, and PNM are EXCLUDED - they have complex dependencies on:
+         - UI libraries (ImGuiNET, ProgressBarDialog)
+         - Advanced data types (Mesh3D, VolumeData, CtImageStack, Borehole, GIS, PNMDataset)
+         - Complex simulation infrastructure (CrustalModel, WavePropagationEngine, etc.)
+         These simulations are better suited for the main application with full UI support.
+         For headless distributed computing, focus on geomechanics and acoustic simulations. -->
+
+    <!-- PNM - EXCLUDED (AbsolutePermeability needs PNMDataset which has 91+ errors) -->
+
+    <!-- Essential data types (no UI) -->
+    <Compile Include="..\Data\Dataset.cs" Link="Data\Dataset.cs" />
+    <Compile Include="..\Data\IserializableDataset.cs" Link="Data\IserializableDataset.cs" />
+    <Compile Include="..\Data\Metadata.cs" Link="Data\Metadata.cs" />
+    <Compile Include="..\Data\Table\TableDataset.cs" Link="Data\Table\TableDataset.cs" />
+    <Compile Include="..\Data\Materials\PhysicalMaterial.cs" Link="Data\Materials\PhysicalMaterial.cs" />
+    <!-- PNMDataset.cs EXCLUDED - has 91 errors due to missing TableDataset UI dependencies -->
+
+    <!-- Essential business logic (no UI) -->
+    <Compile Include="..\Business\MaterialLibrary.cs" Link="Business\MaterialLibrary.cs" />
+    <Compile Include="..\Business\Element.cs" Link="Business\Element.cs" />
+
+    <!-- Minimal utilities (no UI) -->
+    <Compile Include="..\Util\Logger.cs" Link="Util\Logger.cs" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- ASP.NET Core for REST API -->
+    <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="8.0.0" />
+    <PackageReference Include="Microsoft.AspNetCore.Mvc.NewtonsoftJson" Version="8.0.0" />
+    <PackageReference Include="Swashbuckle.AspNetCore" Version="6.5.0" />
+
+    <!-- Math and Numerics -->
+    <PackageReference Include="MathNet.Numerics" Version="5.0.0" />
+    <PackageReference Include="MathNet.Numerics.MKL.Win-x64" Version="3.0.0" />
+
+    <!-- OpenCL for GPU compute -->
+    <PackageReference Include="Silk.NET.OpenCL" Version="2.21.0" />
+    <PackageReference Include="Silk.NET.OpenCL.Extensions.KHR" Version="2.21.0" />
+
+    <!-- Image processing -->
+    <PackageReference Include="SixLabors.ImageSharp" Version="3.1.5" />
+    <PackageReference Include="OpenCvSharp4" Version="4.9.0.20240103" />
+    <PackageReference Include="OpenCvSharp4.runtime.win" Version="4.9.0.20240103" Condition="$([MSBuild]::IsOSPlatform('Windows'))" />
+    <PackageReference Include="OpenCvSharp4.runtime.osx" Version="4.9.0.20240103" Condition="$([MSBuild]::IsOSPlatform('OSX'))" />
+    <PackageReference Include="OpenCvSharp4.runtime.linux-x64" Version="4.9.0.20240103" Condition="$([MSBuild]::IsOSPlatform('Linux'))" />
+
+    <!-- Geospatial -->
+    <PackageReference Include="GDAL" Version="3.9.1" />
+    <PackageReference Include="GDAL.Native" Version="3.9.1" />
+    <PackageReference Include="NetTopologySuite" Version="2.5.0" />
+    <PackageReference Include="ProjNET" Version="2.0.0" />
+
+    <!-- Data handling -->
+    <PackageReference Include="CsvHelper" Version="33.0.1" />
+    <PackageReference Include="ClosedXML" Version="0.104.1" />
+    <PackageReference Include="MetadataExtractor" Version="2.8.1" />
+
+    <!-- ML/AI -->
+    <PackageReference Include="Microsoft.ML.OnnxRuntime" Version="1.19.2" />
+
+    <!-- Chemistry -->
+    <PackageReference Include="Chemistry" Version="1.0.3" />
+
+    <!-- JSON serialization -->
+    <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
+  </ItemGroup>
+
+</Project>
