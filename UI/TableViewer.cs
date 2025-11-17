@@ -423,13 +423,73 @@ public class TableViewer : IDatasetViewer, IDisposable
                             }
                         }
 
+                        // Handle keyboard shortcuts for clipboard operations on selected cell
+                        // Check if this is the selected cell and keyboard shortcuts are pressed
+                        if (isSelected)
+                        {
+                            var io = ImGui.GetIO();
+                            if (io.KeyCtrl && !io.WantTextInput)
+                            {
+                                // Ctrl+C - Copy cell
+                                if (ImGui.IsKeyPressed(ImGuiKey.C))
+                                {
+                                    ImGui.SetClipboardText(cellValue);
+                                }
+                                // Ctrl+X - Cut cell (copy and clear)
+                                else if (ImGui.IsKeyPressed(ImGuiKey.X))
+                                {
+                                    ImGui.SetClipboardText(cellValue);
+                                    var originalRowIndex = _dataTable.Rows.IndexOf(dataRow);
+                                    if (originalRowIndex != -1)
+                                    {
+                                        _dataset.UpdateCellValue(originalRowIndex, col, "");
+                                    }
+                                }
+                                // Ctrl+V - Paste into cell
+                                else if (ImGui.IsKeyPressed(ImGuiKey.V))
+                                {
+                                    var clipboardText = ImGui.GetClipboardText();
+                                    if (!string.IsNullOrEmpty(clipboardText))
+                                    {
+                                        var originalRowIndex = _dataTable.Rows.IndexOf(dataRow);
+                                        if (originalRowIndex != -1)
+                                        {
+                                            _dataset.UpdateCellValue(originalRowIndex, col, clipboardText);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
                         if (ImGui.IsItemHovered() && ImGui.CalcTextSize(cellValue).X > _columnWidths.GetValueOrDefault(col, DEFAULT_COLUMN_WIDTH))
                             ImGui.SetTooltip(cellValue);
 
                         // Cell context menu — includes row actions
                         if (ImGui.BeginPopupContextItem())
                         {
-                            if (ImGui.MenuItem("Copy Cell")) ImGui.SetClipboardText(cellValue);
+                            if (ImGui.MenuItem("Copy Cell", "Ctrl+C")) ImGui.SetClipboardText(cellValue);
+                            if (ImGui.MenuItem("Cut Cell", "Ctrl+X"))
+                            {
+                                ImGui.SetClipboardText(cellValue);
+                                var originalRowIndex = _dataTable.Rows.IndexOf(dataRow);
+                                if (originalRowIndex != -1)
+                                {
+                                    _dataset.UpdateCellValue(originalRowIndex, col, "");
+                                }
+                            }
+                            if (ImGui.MenuItem("Paste Cell", "Ctrl+V"))
+                            {
+                                var clipboardText = ImGui.GetClipboardText();
+                                if (!string.IsNullOrEmpty(clipboardText))
+                                {
+                                    var originalRowIndex = _dataTable.Rows.IndexOf(dataRow);
+                                    if (originalRowIndex != -1)
+                                    {
+                                        _dataset.UpdateCellValue(originalRowIndex, col, clipboardText);
+                                    }
+                                }
+                            }
+                            ImGui.Separator();
                             if (ImGui.MenuItem("Copy Row")) CopyRowToClipboard(dataRow);
                             if (ImGui.MenuItem("Copy Column")) CopyColumnToClipboard(col);
                             ImGui.Separator();

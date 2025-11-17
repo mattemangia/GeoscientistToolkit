@@ -194,6 +194,71 @@ public class TextViewer : IDatasetViewer
             }
         }
 
+        // Note: ImGui's InputTextMultiline has native support for clipboard shortcuts:
+        // - Ctrl+C: Copy selected text
+        // - Ctrl+X: Cut selected text (when not read-only)
+        // - Ctrl+V: Paste text at cursor (when not read-only)
+        // - Ctrl+A: Select all text
+
+        // Right-click context menu for additional clipboard operations
+        if (ImGui.BeginPopupContextItem("##TextContextMenu"))
+        {
+            if (ImGui.MenuItem("Copy", "Ctrl+C"))
+            {
+                // Copy entire buffer to clipboard
+                if (!string.IsNullOrEmpty(_editBuffer))
+                {
+                    ImGui.SetClipboardText(_editBuffer);
+                }
+            }
+
+            if (!_readOnly)
+            {
+                if (ImGui.MenuItem("Cut", "Ctrl+X"))
+                {
+                    // Copy to clipboard and clear buffer
+                    if (!string.IsNullOrEmpty(_editBuffer))
+                    {
+                        ImGui.SetClipboardText(_editBuffer);
+                        _editBuffer = "";
+                        _hasUnsavedChanges = true;
+                        UpdateStatistics();
+                    }
+                }
+
+                if (ImGui.MenuItem("Paste", "Ctrl+V"))
+                {
+                    // Get text from clipboard
+                    var clipboardText = ImGui.GetClipboardText();
+                    if (!string.IsNullOrEmpty(clipboardText))
+                    {
+                        _editBuffer = clipboardText;
+                        _hasUnsavedChanges = true;
+                        UpdateStatistics();
+                    }
+                }
+
+                ImGui.Separator();
+
+                if (ImGui.MenuItem("Select All", "Ctrl+A"))
+                {
+                    // This would require additional implementation
+                    // ImGui handles Ctrl+A internally when the input is focused
+                }
+
+                ImGui.Separator();
+
+                if (ImGui.MenuItem("Clear All"))
+                {
+                    _editBuffer = "";
+                    _hasUnsavedChanges = true;
+                    UpdateStatistics();
+                }
+            }
+
+            ImGui.EndPopup();
+        }
+
         // Reset font scale
         ImGui.SetWindowFontScale(1.0f);
 

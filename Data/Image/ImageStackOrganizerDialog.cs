@@ -161,23 +161,36 @@ public class ImageStackOrganizerDialog
                 ImGui.Separator();
 
                 var bottomBarHeight = ImGui.GetFrameHeightWithSpacing() + 10f;
-                ImGui.BeginChild("MainContentRegion", new Vector2(0, -bottomBarHeight));
+                var availableHeight = ImGui.GetContentRegionAvail().Y - bottomBarHeight;
 
-                ImGui.Columns(3, "OrganizerColumns", true);
-                ImGui.SetColumnWidth(0, 300);
-                ImGui.SetColumnWidth(1, 250);
+                // Use modern Table API instead of old Columns API
+                var tableFlags = ImGuiTableFlags.Resizable |
+                                 ImGuiTableFlags.BordersInnerV |
+                                 ImGuiTableFlags.SizingFixedFit;
 
-                DrawAvailableImages();
-                ImGui.NextColumn();
+                if (ImGui.BeginTable("OrganizerTable", 3, tableFlags, new Vector2(0, availableHeight)))
+                {
+                    // Setup columns with initial widths
+                    ImGui.TableSetupColumn("Available Images", ImGuiTableColumnFlags.WidthFixed, 300);
+                    ImGui.TableSetupColumn("Groups", ImGuiTableColumnFlags.WidthFixed, 250);
+                    ImGui.TableSetupColumn("Group Contents", ImGuiTableColumnFlags.WidthStretch);
 
-                DrawGroups();
-                ImGui.NextColumn();
+                    ImGui.TableNextRow();
 
-                DrawGroupDetails();
+                    // Column 1: Available Images
+                    ImGui.TableSetColumnIndex(0);
+                    DrawAvailableImages();
 
-                ImGui.Columns(1);
+                    // Column 2: Groups
+                    ImGui.TableSetColumnIndex(1);
+                    DrawGroups();
 
-                ImGui.EndChild();
+                    // Column 3: Group Details
+                    ImGui.TableSetColumnIndex(2);
+                    DrawGroupDetails();
+
+                    ImGui.EndTable();
+                }
 
                 ImGui.Separator();
 
@@ -241,12 +254,13 @@ public class ImageStackOrganizerDialog
 
     private void DrawAvailableImages()
     {
-        ImGui.Text("Available Images");
+        ImGui.TextColored(new Vector4(0.8f, 0.8f, 1.0f, 1.0f), "Available Images");
         ImGui.Separator();
 
         var ungroupedImages = GetUngroupedImages();
+        var availableHeight = ImGui.GetContentRegionAvail().Y - ImGui.GetTextLineHeightWithSpacing() - ImGui.GetStyle().ItemSpacing.Y;
 
-        if (ImGui.BeginChild("AvailableImagesChild", new Vector2(0, -30), ImGuiChildFlags.Border))
+        if (ImGui.BeginChild("AvailableImagesChild", new Vector2(0, availableHeight), ImGuiChildFlags.Border))
         {
             if (ImGui.IsMouseClicked(ImGuiMouseButton.Left) &&
                 ImGui.IsWindowHovered() && !ImGui.IsAnyItemHovered())
@@ -291,12 +305,12 @@ public class ImageStackOrganizerDialog
             ImGui.EndChild();
         }
 
-        ImGui.Text($"{ungroupedImages.Count} ungrouped images");
+        ImGui.TextDisabled($"{ungroupedImages.Count} ungrouped images");
     }
 
     private void DrawGroups()
     {
-        ImGui.Text("Groups");
+        ImGui.TextColored(new Vector4(0.8f, 1.0f, 0.8f, 1.0f), "Groups");
         ImGui.Separator();
 
         ImGui.SetNextItemWidth(-50);
@@ -312,7 +326,9 @@ public class ImageStackOrganizerDialog
 
         ImGui.Separator();
 
-        if (ImGui.BeginChild("GroupsChild", new Vector2(0, -30), ImGuiChildFlags.Border))
+        var availableHeight = ImGui.GetContentRegionAvail().Y - ImGui.GetTextLineHeightWithSpacing() - ImGui.GetStyle().ItemSpacing.Y;
+
+        if (ImGui.BeginChild("GroupsChild", new Vector2(0, availableHeight), ImGuiChildFlags.Border))
         {
             foreach (var group in _groups.ToList())
             {
@@ -367,19 +383,20 @@ public class ImageStackOrganizerDialog
             ImGui.EndChild();
         }
 
-        ImGui.Text($"{_groups.Count} groups");
+        ImGui.TextDisabled($"{_groups.Count} groups");
     }
 
     private void DrawGroupDetails()
     {
-        ImGui.Text("Group Contents");
+        ImGui.TextColored(new Vector4(1.0f, 0.8f, 0.8f, 1.0f), "Group Contents");
         ImGui.Separator();
 
         if (_selectedGroup != null && _groups.ContainsKey(_selectedGroup))
         {
             var group = _groups[_selectedGroup];
+            var availableHeight = ImGui.GetContentRegionAvail().Y - ImGui.GetTextLineHeightWithSpacing() - ImGui.GetStyle().ItemSpacing.Y;
 
-            if (ImGui.BeginChild("GroupContentsChild", new Vector2(0, -30), ImGuiChildFlags.Border))
+            if (ImGui.BeginChild("GroupContentsChild", new Vector2(0, availableHeight), ImGuiChildFlags.Border))
             {
                 for (var i = 0; i < group.Count; i++)
                 {
@@ -389,6 +406,14 @@ public class ImageStackOrganizerDialog
                     if (ImGui.Selectable(img.FileName))
                     {
                         // Could open preview
+                    }
+
+                    if (ImGui.IsItemHovered())
+                    {
+                        ImGui.BeginTooltip();
+                        ImGui.Text($"Size: {img.Width}x{img.Height}");
+                        ImGui.Text($"File Size: {img.FileSize / 1024} KB");
+                        ImGui.EndTooltip();
                     }
 
                     if (ImGui.BeginPopupContextItem())
@@ -403,11 +428,23 @@ public class ImageStackOrganizerDialog
                 ImGui.EndChild();
             }
 
-            ImGui.Text($"{group.Count} images in group");
+            ImGui.TextDisabled($"{group.Count} images in group");
         }
         else
         {
+            var availableHeight = ImGui.GetContentRegionAvail().Y - ImGui.GetTextLineHeightWithSpacing() - ImGui.GetStyle().ItemSpacing.Y;
+            ImGui.BeginChild("GroupContentsChildEmpty", new Vector2(0, availableHeight), ImGuiChildFlags.Border);
+
+            // Center the text vertically and horizontally
+            var textSize = ImGui.CalcTextSize("Select a group to view contents");
+            var windowSize = ImGui.GetWindowSize();
+            ImGui.SetCursorPos(new Vector2(
+                (windowSize.X - textSize.X) * 0.5f,
+                (windowSize.Y - textSize.Y) * 0.5f
+            ));
             ImGui.TextDisabled("Select a group to view contents");
+
+            ImGui.EndChild();
         }
     }
 
