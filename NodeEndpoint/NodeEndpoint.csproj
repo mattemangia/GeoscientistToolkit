@@ -20,17 +20,19 @@
     <Compile Include="..\Util\**\*.cs" LinkBase="Util" />
     <Compile Include="..\OpenCL\**\*.cs" LinkBase="OpenCL" />
 
-    <!-- Exclude UI-related files that won't work in a headless server -->
+    <!-- Exclude UI-related files and main program entry point -->
     <Compile Remove="..\**\*UI.cs" />
     <Compile Remove="..\**\*Window.cs" />
     <Compile Remove="..\**\*Tool.cs" />
     <Compile Remove="..\UI\**\*.cs" />
     <Compile Remove="..\AddIns\**\*.cs" />
+    <Compile Remove="..\Program.cs" />
+    <Compile Remove="..\Application.cs" />
   </ItemGroup>
-
   <ItemGroup>
     <!-- ASP.NET Core for REST API -->
     <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="8.0.0" />
+    <PackageReference Include="Microsoft.AspNetCore.Mvc.NewtonsoftJson" Version="8.0.0" />
     <PackageReference Include="Swashbuckle.AspNetCore" Version="6.5.0" />
 
     <!-- Math and Numerics -->
@@ -43,8 +45,10 @@
 
     <!-- Image processing -->
     <PackageReference Include="SixLabors.ImageSharp" Version="3.1.5" />
-    <PackageReference Include="OpenCvSharp4" Version="4.10.0.20240616" />
-    <PackageReference Include="OpenCvSharp4.runtime.ubuntu.22.04-x64" Version="4.10.0.20240616" />
+    <PackageReference Include="OpenCvSharp4" Version="4.9.0.20240103" />
+    <PackageReference Include="OpenCvSharp4.runtime.win" Version="4.9.0.20240103" Condition="$([MSBuild]::IsOSPlatform('Windows'))" />
+    <PackageReference Include="OpenCvSharp4.runtime.osx" Version="4.9.0.20240103" Condition="$([MSBuild]::IsOSPlatform('OSX'))" />
+    <PackageReference Include="OpenCvSharp4.runtime.linux-x64" Version="4.9.0.20240103" Condition="$([MSBuild]::IsOSPlatform('Linux'))" />
 
     <!-- Geospatial -->
     <PackageReference Include="GDAL" Version="3.9.1" />

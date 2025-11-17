@@ -15,9 +15,55 @@ public class DataReferenceService
 
     public DataReferenceService(string? sharedStoragePath = null)
     {
-        _sharedStoragePath = sharedStoragePath ?? Path.Combine(Path.GetTempPath(), "GTK_SharedData");
-        Directory.CreateDirectory(_sharedStoragePath);
-        Console.WriteLine($"[DataReferenceService] Shared storage path: {_sharedStoragePath}");
+        _sharedStoragePath = sharedStoragePath ?? GetDefaultSharedPath();
+
+        // Try to create directory, but don't fail if it's a network path
+        try
+        {
+            if (!Directory.Exists(_sharedStoragePath))
+            {
+                Directory.CreateDirectory(_sharedStoragePath);
+            }
+            Console.WriteLine($"[DataReferenceService] Shared storage path: {_sharedStoragePath}");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[DataReferenceService] Warning: Could not create shared storage path: {ex.Message}");
+            Console.WriteLine($"[DataReferenceService] Ensure network storage is accessible at: {_sharedStoragePath}");
+        }
+    }
+
+    private static string GetDefaultSharedPath()
+    {
+        // Platform-specific default shared storage paths
+        if (OperatingSystem.IsWindows())
+        {
+            // Windows: Try network share first, fallback to local temp
+            var networkPath = @"\\SharedStorage\GTK_SharedData";
+            if (Directory.Exists(@"\\SharedStorage"))
+                return networkPath;
+            return Path.Combine(Path.GetTempPath(), "GTK_SharedData");
+        }
+        else if (OperatingSystem.IsMacOS())
+        {
+            // macOS: Try /Volumes/Shared first, fallback to local temp
+            var networkPath = "/Volumes/Shared/GTK_SharedData";
+            if (Directory.Exists("/Volumes/Shared"))
+                return networkPath;
+            return Path.Combine(Path.GetTempPath(), "GTK_SharedData");
+        }
+        else if (OperatingSystem.IsLinux())
+        {
+            // Linux: Try /mnt/shared first, fallback to local temp
+            var networkPath = "/mnt/shared/GTK_SharedData";
+            if (Directory.Exists("/mnt/shared"))
+                return networkPath;
+            return Path.Combine(Path.GetTempPath(), "GTK_SharedData");
+        }
+        else
+        {
+            return Path.Combine(Path.GetTempPath(), "GTK_SharedData");
+        }
     }
 
     /// <summary>
