@@ -75,7 +75,7 @@
     <PackageReference Include="Swashbuckle.AspNetCore" Version="6.5.0" />
 
     <!-- Math and Numerics -->
-    <PackageReference Include="MathNet.Numerics" Version="5.0.0" />
+    <PackageReference Include="MathNet.Numerics" Version="6.0.0-beta2" />
     <PackageReference Include="MathNet.Numerics.MKL.Win-x64" Version="3.0.0" />
 
     <!-- OpenCL for GPU compute -->
@@ -84,21 +84,25 @@
 
     <!-- Image processing -->
     <PackageReference Include="SixLabors.ImageSharp" Version="3.1.5" />
-    <PackageReference Include="OpenCvSharp4" Version="4.9.0.20240103" />
-    <PackageReference Include="OpenCvSharp4.runtime.win" Version="4.9.0.20240103" Condition="$([MSBuild]::IsOSPlatform('Windows'))" />
-    <PackageReference Include="OpenCvSharp4.runtime.osx_arm64" Version="4.9.0.20240103" Condition="$([MSBuild]::IsOSPlatform('OSX'))" />
-    <PackageReference Include="OpenCvSharp4.runtime.linux-x64" Version="4.9.0.20240103" Condition="$([MSBuild]::IsOSPlatform('Linux'))" />
+
+    <!-- OpenCvSharp4 - Core package -->
+    <PackageReference Include="OpenCvSharp4" Version="4.10.0.20240616" />
+
+    <!-- OpenCvSharp4 - Platform-specific runtime packages -->
+    <PackageReference Include="OpenCvSharp4.runtime.win" Version="4.10.0.20240616" Condition="$([MSBuild]::IsOSPlatform('Windows'))" />
+    <PackageReference Include="OpenCvSharp4.runtime.osx_arm64" Version="4.8.1-rc" Condition="$([MSBuild]::IsOSPlatform('OSX'))" />
+    <PackageReference Include="OpenCvSharp4_.runtime.ubuntu.20.04-x64" Version="4.10.0.20240616" Condition="$([MSBuild]::IsOSPlatform('Linux'))" />
 
     <!-- Geospatial -->
-    <PackageReference Include="GDAL" Version="3.9.1" />
-    <PackageReference Include="GDAL.Native" Version="3.9.1" />
-    <PackageReference Include="NetTopologySuite" Version="2.5.0" />
+    <PackageReference Include="GDAL" Version="3.11.3" />
+    <PackageReference Include="GDAL.Native" Version="3.11.3" />
+    <PackageReference Include="NetTopologySuite" Version="2.6.0" />
     <PackageReference Include="ProjNET" Version="2.0.0" />
 
     <!-- Data handling -->
     <PackageReference Include="CsvHelper" Version="33.0.1" />
-    <PackageReference Include="ClosedXML" Version="0.104.1" />
-    <PackageReference Include="MetadataExtractor" Version="2.8.1" />
+    <PackageReference Include="ClosedXML" Version="0.105.0" />
+    <PackageReference Include="MetadataExtractor" Version="2.9.0" />
 
     <!-- ML/AI -->
     <PackageReference Include="Microsoft.ML.OnnxRuntime" Version="1.19.2" />
