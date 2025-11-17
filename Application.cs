@@ -2,12 +2,14 @@
 
 using System.Diagnostics;
 using System.Numerics;
+using System.Reflection;
 using System.Runtime.InteropServices;
 using GeoscientistToolkit.Business;
 using GeoscientistToolkit.Settings;
 using GeoscientistToolkit.UI;
 using GeoscientistToolkit.Util;
 using ImGuiNET;
+using StbImageSharp;
 using Veldrid;
 using Veldrid.Sdl2;
 using Veldrid.StartupUtilities;
@@ -133,11 +135,20 @@ public class Application
             VeldridManager.MainWindow = _window;
             _commandList = _graphicsDevice.ResourceFactory.CreateCommandList();
 
-            // Create minimal ImGui controller for loading screen
+            // Set window icon
+            SetWindowIcon();
+
+            // Create minimal ImGui controller for splash and loading screens
             _imGuiController = new ImGuiController(
                 _graphicsDevice,
                 _graphicsDevice.MainSwapchain.Framebuffer.OutputDescription,
                 _window.Width, _window.Height);
+
+            // Show splash screen with logo
+            using (var splashScreen = new SplashScreen(_graphicsDevice, _commandList, _imGuiController, _window))
+            {
+                splashScreen.Show(2000); // Show for 2 seconds
+            }
 
             // Create and show loading screen
             _loadingScreen = new LoadingScreen(_graphicsDevice, _commandList, _imGuiController, _window);
@@ -246,6 +257,10 @@ public class Application
                         $"User preferred GPU '{hardwareSettings.VisualizationGPU}' but Veldrid selected '{_graphicsDevice.DeviceName}'. This may depend on the selected backend.");
 
                 _commandList = _graphicsDevice.ResourceFactory.CreateCommandList();
+
+                // Set window icon again after recreation
+                SetWindowIcon();
+
                 _imGuiController = new ImGuiController(
                     _graphicsDevice,
                     _graphicsDevice.MainSwapchain.Framebuffer.OutputDescription,
@@ -445,4 +460,85 @@ public class Application
 
         Logger.Log("Runtime settings applied");
     }
+
+    private void SetWindowIcon()
+    {
+        try
+        {
+            // Load embedded image resource
+            var assembly = Assembly.GetExecutingAssembly();
+            var resourceName = "GeoscientistToolkit.image.png";
+
+            using var stream = assembly.GetManifestResourceStream(resourceName);
+            if (stream == null)
+            {
+                Logger.LogWarning($"Could not find embedded resource '{resourceName}' for window icon");
+                return;
+            }
+
+            // Load image using StbImageSharp
+            var image = ImageResult.FromStream(stream, ColorComponents.RedGreenBlueAlpha);
+
+            // Get SDL window handle
+            var sdlWindowHandle = _window.SdlWindowHandle;
+
+            // Create SDL surface from the image data
+            unsafe
+            {
+                fixed (byte* pixelPtr = image.Data)
+                {
+                    // Create an SDL_Surface from the raw pixel data
+                    var surface = SDL_CreateRGBSurfaceFrom(
+                        (IntPtr)pixelPtr,
+                        image.Width,
+                        image.Height,
+                        32, // bits per pixel (RGBA = 32)
+                        image.Width * 4, // pitch (bytes per row)
+                        0x000000FF, // R mask
+                        0x0000FF00, // G mask
+                        0x00FF0000, // B mask
+                        0xFF000000  // A mask
+                    );
+
+                    if (surface != IntPtr.Zero)
+                    {
+                        // Set the window icon
+                        SDL_SetWindowIcon(sdlWindowHandle, surface);
+
+                        // Free the surface
+                        SDL_FreeSurface(surface);
+
+                        Logger.Log("Window icon set successfully");
+                    }
+                    else
+                    {
+                        Logger.LogWarning("Failed to create SDL surface for window icon");
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError($"Error setting window icon: {ex.Message}");
+        }
+    }
+
+    // SDL2 interop for setting window icon
+    [DllImport("SDL2", CallingConvention = CallingConvention.Cdecl)]
+    private static extern IntPtr SDL_CreateRGBSurfaceFrom(
+        IntPtr pixels,
+        int width,
+        int height,
+        int depth,
+        int pitch,
+        uint Rmask,
+        uint Gmask,
+        uint Bmask,
+        uint Amask);
+
+    [DllImport("SDL2", CallingConvention = CallingConvention.Cdecl)]
+    private static extern void SDL_SetWindowIcon(IntPtr window, IntPtr icon);
+
+    [DllImport("SDL2", CallingConvention = CallingConvention.Cdecl)]
+    private static extern void SDL_FreeSurface(IntPtr surface);
 }
