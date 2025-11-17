@@ -192,49 +192,160 @@ public class ThermodynamicSolver : SimulatorNodeSupport
     {
         Logger.Log("[ThermodynamicSolver] Starting equilibrium calculation");
 
-        // Step 1: Generate all possible reactions for the system
-        var reactions = _reactionGenerator.GenerateReactions(initialState);
-        Logger.Log($"[ThermodynamicSolver] Generated {reactions.Count} possible reactions");
+        // CRITICAL: Get ONLY the elements actually present in the system
+        var systemElements = new HashSet<string>();
+        foreach (var (element, moles) in initialState.ElementalComposition)
+        {
+            if (moles > 1e-15) // Only elements with significant amounts
+            {
+                systemElements.Add(element);
+            }
+        }
 
-        // Step 2: Set up optimization problem - minimize G = Σ(n_i * μ_i)
-        // where μ_i = μ_i° + RT ln(a_i) is the chemical potential
-        var species = GetAllSpecies(initialState, reactions);
-        
-        // --- FIX START: Create a comprehensive list of ALL elements in the system ---
-        // The original code only considered elements from the initialState, which is the
-        // source of the bug. By considering all possible elements from all species,
-        // we can enforce a mass balance of zero for elements not initially present.
-        var allElementsInSystem = new HashSet<string>();
-        foreach (var speciesName in species)
+        Logger.Log($"[ThermodynamicSolver] System elements: {string.Join(", ", systemElements)}");
+
+        // Generate reactions ONLY for species that can form from available elements
+        var reactions = new List<ChemicalReaction>();
+
+        // Only add dissolution reactions for minerals containing ONLY system elements
+        var dissolutionReactions = _reactionGenerator.GenerateDissolutionReactions(initialState);
+        foreach (var reaction in dissolutionReactions)
+        {
+            if (IsReactionPossible(reaction, systemElements))
+                reactions.Add(reaction);
+        }
+
+        // Only add other reactions if elements are present
+        if (systemElements.Contains("C") || systemElements.Contains("H"))
+        {
+            var complexationReactions = _reactionGenerator.GenerateComplexationReactions(initialState);
+            foreach (var reaction in complexationReactions)
+            {
+                if (IsReactionPossible(reaction, systemElements))
+                    reactions.Add(reaction);
+            }
+        }
+
+        // Only add acid-base if H is present
+        if (systemElements.Contains("H"))
+        {
+            var acidBaseReactions = _reactionGenerator.GenerateAcidBaseReactions(initialState);
+            foreach (var reaction in acidBaseReactions)
+            {
+                if (IsReactionPossible(reaction, systemElements))
+                    reactions.Add(reaction);
+            }
+        }
+
+        // Only add redox if multiple oxidation states possible
+        var redoxReactions = _reactionGenerator.GenerateRedoxReactions(initialState);
+        foreach (var reaction in redoxReactions)
+        {
+            if (IsReactionPossible(reaction, systemElements))
+                reactions.Add(reaction);
+        }
+
+        Logger.Log($"[ThermodynamicSolver] Generated {reactions.Count} valid reactions");
+
+        // Get species list - ONLY those that can form from available elements
+        var species = GetAllSpeciesForElements(initialState, reactions, systemElements);
+
+        Logger.Log($"[ThermodynamicSolver] Species in system: {string.Join(", ", species)}");
+
+        // Create comprehensive element list
+        var comprehensiveElementList = systemElements.ToList();
+
+        var elementMatrix = BuildElementMatrix(species, comprehensiveElementList);
+        var x0 = CreateInitialGuess(species, initialState);
+        var solution = SolveGibbsMinimization(x0, species, elementMatrix, comprehensiveElementList, initialState);
+
+        // Build final state
+        var finalState = BuildFinalState(solution, species, initialState);
+        CalculateAqueousProperties(finalState);
+
+        // CRITICAL: Remove species with negligible concentrations
+        var speciesToRemove = new List<string>();
+        foreach (var (speciesName, moles) in finalState.SpeciesMoles)
+        {
+            if (moles < 1e-15)
+            {
+                speciesToRemove.Add(speciesName);
+            }
+        }
+
+        foreach (var species_name in speciesToRemove)
+        {
+            finalState.SpeciesMoles.Remove(species_name);
+            finalState.Activities.Remove(species_name);
+        }
+
+        Logger.Log("[ThermodynamicSolver] Equilibrium calculation complete");
+        return finalState;
+    }
+
+    /// <summary>
+    /// Check if a reaction can occur with available elements.
+    /// </summary>
+    private bool IsReactionPossible(ChemicalReaction reaction, HashSet<string> systemElements)
+    {
+        foreach (var speciesName in reaction.Stoichiometry.Keys)
         {
             var compound = _compoundLibrary.Find(speciesName);
             if (compound != null)
             {
-                var elementsInCompound = _reactionGenerator.ParseChemicalFormula(compound.ChemicalFormula).Keys;
-                foreach (var element in elementsInCompound)
+                var elements = _reactionGenerator.ParseChemicalFormula(compound.ChemicalFormula);
+                foreach (var element in elements.Keys)
                 {
-                    allElementsInSystem.Add(element);
+                    if (!systemElements.Contains(element))
+                        return false;
                 }
             }
         }
-        var comprehensiveElementList = allElementsInSystem.ToList();
-        // --- FIX END ---
+        return true;
+    }
 
-        var elementMatrix = BuildElementMatrix(species, comprehensiveElementList);
+    /// <summary>
+    /// Get only species that can form from available elements.
+    /// </summary>
+    private List<string> GetAllSpeciesForElements(
+        ThermodynamicState state,
+        List<ChemicalReaction> reactions,
+        HashSet<string> systemElements)
+    {
+        var species = new HashSet<string>();
 
-        // Step 3: Initial guess - use input moles or small positive values
-        var x0 = CreateInitialGuess(species, initialState);
+        // Add species from initial state if they contain only system elements
+        foreach (var s in state.SpeciesMoles.Keys)
+        {
+            var compound = _compoundLibrary.Find(s);
+            if (compound != null)
+            {
+                var elements = _reactionGenerator.ParseChemicalFormula(compound.ChemicalFormula);
+                if (elements.Keys.All(e => systemElements.Contains(e)))
+                {
+                    species.Add(s);
+                }
+            }
+        }
 
-        // Step 4: Solve using Newton-Raphson with line search, now passing the comprehensive element list
-        // Source: Bethke, 2008. Geochemical Reaction Modeling, Chapter 4
-        var solution = SolveGibbsMinimization(x0, species, elementMatrix, comprehensiveElementList, initialState);
+        // Add species from reactions if they contain only system elements
+        foreach (var reaction in reactions)
+        {
+            foreach (var s in reaction.Stoichiometry.Keys)
+            {
+                var compound = _compoundLibrary.Find(s);
+                if (compound != null)
+                {
+                    var elements = _reactionGenerator.ParseChemicalFormula(compound.ChemicalFormula);
+                    if (elements.Keys.All(e => systemElements.Contains(e)))
+                    {
+                        species.Add(s);
+                    }
+                }
+            }
+        }
 
-        // Step 5: Calculate final properties
-        var finalState = BuildFinalState(solution, species, initialState);
-        CalculateAqueousProperties(finalState);
-
-        Logger.Log("[ThermodynamicSolver] Equilibrium calculation complete");
-        return finalState;
+        return species.ToList();
     }
 
     /// <summary>
