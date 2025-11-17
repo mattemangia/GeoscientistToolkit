@@ -222,11 +222,18 @@ private void UpdateSelectedBoreholes(List<BoreholeDataset> allBoreholes)
 
 private void DrawCoupledSimulationOptions()
 {
-    ImGui.TextColored(new Vector4(0.4f, 1.0f, 0.6f, 1.0f), 
+    ImGui.TextColored(new Vector4(0.4f, 1.0f, 0.6f, 1.0f),
         "Enable multi-borehole coupled simulation with aquifer flow and thermal interference");
-    
+
     ImGui.Checkbox("Use Coupled Simulation (Aquifer + Thermal Interference)", ref _useCoupledSimulation);
-    
+
+    if (!_useCoupledSimulation)
+    {
+        ImGui.TextColored(new Vector4(0.6f, 0.9f, 1.0f, 1.0f),
+            "→ Individual mode: Each borehole simulated independently");
+        ImGui.TextDisabled("Create interpolated subsurface maps in Section 7");
+    }
+
     if (_useCoupledSimulation)
     {
         ImGui.Indent();
@@ -599,8 +606,24 @@ private void DrawSubsurfaceModelSection()
     if (_simulationResults.Count == 0)
     {
         ImGui.TextColored(new Vector4(1, 0.7f, 0, 1), "Please run simulations first.");
+        ImGui.TextDisabled("Run individual or coupled simulations in Section 6");
         return;
     }
+
+    // Show info about data source
+    if (_useCoupledSimulation && _coupledResults != null)
+    {
+        ImGui.TextColored(new Vector4(0.4f, 1.0f, 0.6f, 1.0f),
+            $"Data source: Coupled simulation ({_simulationResults.Count} boreholes)");
+    }
+    else
+    {
+        ImGui.TextColored(new Vector4(0.6f, 0.9f, 1.0f, 1.0f),
+            $"Data source: Individual simulations ({_simulationResults.Count} boreholes)");
+    }
+    ImGui.TextDisabled("Subsurface model will interpolate between borehole results");
+
+    ImGui.Separator();
 
     ImGui.Text("Grid Resolution:");
     ImGui.InputInt("X Resolution##gridx", ref _gridResolutionX);
