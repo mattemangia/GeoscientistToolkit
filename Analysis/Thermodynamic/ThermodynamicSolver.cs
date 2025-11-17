@@ -616,6 +616,9 @@ public class ThermodynamicSolver : SimulatorNodeSupport
     {
         var species = new HashSet<string>();
 
+        // Get available elements from the system
+        var availableElements = state.ElementalComposition.Keys.ToHashSet();
+
         foreach (var s in state.SpeciesMoles.Keys)
         {
             var compound = _compoundLibrary.Find(s);
@@ -628,7 +631,16 @@ public class ThermodynamicSolver : SimulatorNodeSupport
         {
             var compound = _compoundLibrary.Find(s);
             if (compound?.Phase == CompoundPhase.Aqueous || compound?.Phase == CompoundPhase.Surface)
-                species.Add(s);
+            {
+                // Check if this species contains ONLY elements present in the system
+                var speciesElements = _reactionGenerator.ParseChemicalFormula(compound.ChemicalFormula);
+                var canBeFormed = speciesElements.Keys.All(element => availableElements.Contains(element));
+
+                if (canBeFormed)
+                {
+                    species.Add(s);
+                }
+            }
         }
 
         return species.ToList();
@@ -639,14 +651,35 @@ public class ThermodynamicSolver : SimulatorNodeSupport
     {
         var species = new HashSet<string>();
 
+        // Get available elements from the system
+        var availableElements = state.ElementalComposition.Keys.ToHashSet();
+
         // Add species from initial state
         foreach (var s in state.SpeciesMoles.Keys)
             species.Add(s);
 
-        // Add species from reactions
+        // Add species from reactions - BUT ONLY if they can be formed from available elements
         foreach (var reaction in reactions)
         foreach (var s in reaction.Stoichiometry.Keys)
-            species.Add(s);
+        {
+            var compound = _compoundLibrary.Find(s);
+            if (compound != null)
+            {
+                // Check if this species contains ONLY elements present in the system
+                var speciesElements = _reactionGenerator.ParseChemicalFormula(compound.ChemicalFormula);
+                var canBeFormed = speciesElements.Keys.All(element => availableElements.Contains(element));
+
+                if (canBeFormed)
+                {
+                    species.Add(s);
+                }
+                else
+                {
+                    Logger.LogWarning($"[ThermodynamicSolver] Skipping species '{s}' - contains elements not in system: " +
+                                     $"{string.Join(", ", speciesElements.Keys.Where(e => !availableElements.Contains(e)))}");
+                }
+            }
+        }
 
         return species.ToList();
     }
