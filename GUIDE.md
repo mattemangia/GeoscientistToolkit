@@ -1,6 +1,6 @@
-# GeoscientistToolkit User Guide
+# Geoscientist's Toolkit User Guide
 
-![GeoscientistToolkit Logo](image.png)
+![Geoscientist's Toolkit Logo](image.png)
 
 ## Table of Contents
 
@@ -18,9 +18,9 @@
 
 ## Introduction
 
-### What is GeoscientistToolkit?
+### What is Geoscientist's Toolkit?
 
-GeoscientistToolkit is a comprehensive desktop application for advanced geoscientific data analysis and simulation. Built on .NET 8.0, it provides an integrated environment for working with diverse geophysical and geochemical datasets, from seismic surveys to microscale rock analysis.
+Geoscientist's Toolkit is a comprehensive desktop application for advanced geoscientific data analysis and simulation. Built on .NET 8.0, it provides an integrated environment for working with diverse geophysical and geochemical datasets, from seismic surveys to microscale rock analysis.
 
 The application combines interactive 3D visualization, GPU-accelerated simulations, and a domain-specific scripting language to enable sophisticated workflows across multiple geoscience disciplines.
 
@@ -566,7 +566,7 @@ Display system capabilities:
 
 ## Analysis Modules
 
-GeoscientistToolkit includes 22 specialized analysis modules for different geoscience domains.
+Geoscientist's Toolkit includes 22 specialized analysis modules for different geoscience domains.
 
 ### Pore Network Modeling
 
@@ -1107,7 +1107,7 @@ Error at line 15: Dataset "NonExistentData" not found in project
 
 #### OpenCL Support
 
-GeoscientistToolkit can leverage GPU compute for performance-critical simulations.
+Geoscientist's Toolkit can leverage GPU compute for performance-critical simulations.
 
 **Supported operations:**
 - Geothermal heat transport
@@ -1664,7 +1664,7 @@ Typical performance (reference hardware: Intel i7, 16GB RAM, NVIDIA GTX 1660):
 
 ## Conclusion
 
-GeoscientistToolkit provides a comprehensive platform for multi-scale geoscience analysis, from micro-CT pore imaging to basin-scale geothermal modeling. The combination of interactive visualization, GPU-accelerated simulation, and scriptable workflows enables sophisticated research and engineering applications.
+Geoscientist's Toolkit provides a comprehensive platform for multi-scale geoscience analysis, from micro-CT pore imaging to basin-scale geothermal modeling. The combination of interactive visualization, GPU-accelerated simulation, and scriptable workflows enables sophisticated research and engineering applications.
 
 ### Learning Resources
 
@@ -1698,10 +1698,10 @@ UI: ImGui.NET 1.90.8.1
 
 ## Citation
 
-If you use GeoscientistToolkit in your research or projects, please cite:
+If you use Geoscientist's Toolkit in your research or projects, please cite:
 
 ```
-Mangiagalli, M. (2025). GeoscientistToolkit: A Comprehensive Platform for
+Mangiagalli, M. (2025). Geoscientist's Toolkit: A Comprehensive Platform for
 Geoscientific Data Analysis and Simulation. Università degli Studi di Urbino
 Carlo Bo. Available at: https://github.com/mattemangia/GeoscientistToolkit
 ```
@@ -1710,7 +1710,7 @@ BibTeX format:
 ```bibtex
 @software{mangiagalli2025geoscientist,
   author = {Mangiagalli, Matteo},
-  title = {GeoscientistToolkit: A Comprehensive Platform for Geoscientific Data Analysis and Simulation},
+  title = {Geoscientist's Toolkit: A Comprehensive Platform for Geoscientific Data Analysis and Simulation},
   year = {2025},
   institution = {Università degli Studi di Urbino Carlo Bo},
   email = {m.mangiagalli@campus.uniurb.it},
@@ -1721,5 +1721,5 @@ BibTeX format:
 ---
 
 **Document Generated:** 2025-11-17
-**Software:** GeoscientistToolkit
+**Software:** Geoscientist's Toolkit
 **License:** See LICENSE file in repository
