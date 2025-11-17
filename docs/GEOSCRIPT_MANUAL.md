@@ -472,7 +472,7 @@ BUFFER 50 |> DISSOLVE 'Type'
 
 #### DISSOLVE
 
-Merges adjacent features based on a common attribute.
+Merges adjacent features based on a common attribute (GIS operation).
 
 **Syntax:**
 ```geoscript
@@ -754,28 +754,28 @@ Table showing products organized by phase (solid, aqueous, gas) with moles, mass
 
 ---
 
-#### DISSOLVE
+#### SPECIATE
 
 Shows the dissociation and speciation products when compounds dissolve in water. For gases, uses Henry's Law to calculate dissolution based on pressure.
 
 **Syntax:**
 ```geoscript
-DISSOLVE <Compounds> [TEMP <val> C|K] [PRES <val> BAR|ATM]
+SPECIATE <Compounds> [TEMP <val> C|K] [PRES <val> BAR|ATM]
 ```
 
 **Examples:**
 ```geoscript
 # Dissolve salt in water
-DISSOLVE H2O + NaCl
+SPECIATE H2O + NaCl
 
 # Dissolve multiple compounds
-DISSOLVE H2O + NaCl + CaCl2
+SPECIATE H2O + NaCl + CaCl2
 
 # Dissolve gas at specific pressure (uses Henry's Law)
-DISSOLVE H2O + CO2 TEMP 25 C PRES 2 BAR
+SPECIATE H2O + CO2 TEMP 25 C PRES 2 BAR
 
 # Dissolve gas at high pressure
-DISSOLVE H2O + O2 TEMP 300 K PRES 10 ATM
+SPECIATE H2O + O2 TEMP 300 K PRES 10 ATM
 ```
 
 **Note:**

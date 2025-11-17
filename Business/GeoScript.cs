@@ -179,7 +179,7 @@ public static class CommandRegistry
             new BalanceReactionCommand(),
             new EvaporateCommand(),
             new ReactCommand(),
-            new DissolveCommand(),
+            new SpeciateCommand(),
 
             // Thermodynamics Extensions
             new CalculatePhasesCommand(),
@@ -1790,11 +1790,11 @@ public class ReactCommand : IGeoScriptCommand
     }
 }
 
-public class DissolveCommand : IGeoScriptCommand
+public class SpeciateCommand : IGeoScriptCommand
 {
-    public string Name => "DISSOLVE";
+    public string Name => "SPECIATE";
     public string HelpText => "Shows dissociation/speciation products when compounds (solids, liquids, gases) dissolve in water. Gases use Henry's Law.";
-    public string Usage => "DISSOLVE <Compounds> [TEMP <val> C|K] [PRES <val> BAR|ATM]";
+    public string Usage => "SPECIATE <Compounds> [TEMP <val> C|K] [PRES <val> BAR|ATM]";
 
     /// <summary>
     ///     Normalizes a chemical formula by converting plain numbers to subscripts.
@@ -1821,10 +1821,10 @@ public class DissolveCommand : IGeoScriptCommand
         var cmd = (CommandNode)node;
 
         // Parse the command string
-        var pattern = @"DISSOLVE\s+(?<compounds>.+?)(?:\s+TEMP\s+(?<tempval>[\d\.]+)\s*(?<tempunit>C|K))?(?:\s+PRES\s+(?<presval>[\d\.]+)\s*(?<presunit>BAR|ATM))?$";
+        var pattern = @"SPECIATE\s+(?<compounds>.+?)(?:\s+TEMP\s+(?<tempval>[\d\.]+)\s*(?<tempunit>C|K))?(?:\s+PRES\s+(?<presval>[\d\.]+)\s*(?<presunit>BAR|ATM))?$";
         var match = Regex.Match(cmd.FullText, pattern, RegexOptions.IgnoreCase);
 
-        if (!match.Success) throw new ArgumentException($"Invalid DISSOLVE syntax. Usage: {Usage}");
+        if (!match.Success) throw new ArgumentException($"Invalid SPECIATE syntax. Usage: {Usage}");
 
         var compoundsStr = match.Groups["compounds"].Value.Trim();
 
@@ -1858,7 +1858,7 @@ public class DissolveCommand : IGeoScriptCommand
 
         var compounds = compoundsStr.Split('+').Select(c => c.Trim()).ToList();
 
-        Logger.Log($"[DISSOLVE] Dissolving compounds in water at {temperatureK:F2} K, {pressureBar:F2} bar:");
+        Logger.Log($"[SPECIATE] Dissolving compounds in water at {temperatureK:F2} K, {pressureBar:F2} bar:");
 
         foreach (var compoundName in compounds)
         {
