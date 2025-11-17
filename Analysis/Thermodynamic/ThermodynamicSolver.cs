@@ -552,11 +552,36 @@ public class ThermodynamicSolver : SimulatorNodeSupport
     {
         // I = 0.5 * Σ(m_i * z_i²)
         var I = 0.0;
-        var solventMass_kg = state.Volume_L; // Approximation
+        var solventMass_kg = state.Volume_L; // Initial approximation (1 L ~ 1 kg for water)
 
-        // Get better solvent mass estimate
-        var (_, rho_water) = WaterPropertiesIAPWS.GetWaterPropertiesCached(state.Temperature_K, state.Pressure_bar);
-        solventMass_kg = state.Volume_L * (rho_water / 1000.0);
+        // Get better solvent mass estimate from water density
+        try
+        {
+            var (_, rho_water) = WaterPropertiesIAPWS.GetWaterPropertiesCached(state.Temperature_K, state.Pressure_bar);
+
+            // Validate water density
+            if (!double.IsNaN(rho_water) && !double.IsInfinity(rho_water) && rho_water > 0)
+            {
+                solventMass_kg = state.Volume_L * (rho_water / 1000.0);
+            }
+            else
+            {
+                Logger.LogWarning($"[ThermodynamicSolver] Invalid water density: {rho_water}. Using 1 kg/L approximation.");
+                solventMass_kg = state.Volume_L; // Fallback to 1 kg/L
+            }
+        }
+        catch
+        {
+            Logger.LogWarning("[ThermodynamicSolver] Failed to get water properties. Using 1 kg/L approximation.");
+            solventMass_kg = state.Volume_L; // Fallback to 1 kg/L
+        }
+
+        // Ensure we have valid solvent mass
+        if (solventMass_kg <= 0 || double.IsNaN(solventMass_kg) || double.IsInfinity(solventMass_kg))
+        {
+            Logger.LogWarning($"[ThermodynamicSolver] Invalid solvent mass: {solventMass_kg}. Using 1 kg.");
+            solventMass_kg = 1.0;
+        }
 
         foreach (var (species, moles) in state.SpeciesMoles)
         {
@@ -565,8 +590,21 @@ public class ThermodynamicSolver : SimulatorNodeSupport
             {
                 var molality = moles / solventMass_kg;
                 var z = compound.IonicCharge.Value;
-                I += 0.5 * molality * z * z;
+                var contribution = 0.5 * molality * z * z;
+
+                // Validate contribution
+                if (!double.IsNaN(contribution) && !double.IsInfinity(contribution) && contribution >= 0)
+                {
+                    I += contribution;
+                }
             }
+        }
+
+        // Validate final ionic strength
+        if (double.IsNaN(I) || double.IsInfinity(I) || I < 0)
+        {
+            Logger.LogWarning($"[ThermodynamicSolver] Invalid ionic strength calculated: {I}. Setting to 1e-10.");
+            I = 1e-10;
         }
 
         // For very dilute solutions, add minimum ionic strength for numerical stability
