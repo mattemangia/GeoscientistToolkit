@@ -23,6 +23,12 @@
         <Compile Remove="NodeEndpoint\**"/>
         <EmbeddedResource Remove="NodeEndpoint\**"/>
         <None Remove="NodeEndpoint\**"/>
+        <Compile Remove="InstallerPackager\**" />
+        <EmbeddedResource Remove="InstallerPackager\**" />
+        <None Remove="InstallerPackager\**" />
+        <Compile Remove="InstallerWizard\**" />
+        <EmbeddedResource Remove="InstallerWizard\**" />
+        <None Remove="InstallerWizard\**" />
     </ItemGroup>
 
     <!-- Main PackageReference items -->
