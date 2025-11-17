@@ -1839,6 +1839,138 @@ public class SpeciateCommand : IGeoScriptCommand
         return normalized;
     }
 
+    /// <summary>
+    ///     Get the ionic dissociation products for a salt/mineral formula.
+    ///     E.g., NaCl → Na+ (1) + Cl- (1), CaCl₂ → Ca²⁺ (1) + Cl⁻ (2)
+    /// </summary>
+    private Dictionary<string, double> GetDissociationProducts(string formula, CompoundLibrary lib)
+    {
+        var products = new Dictionary<string, double>();
+
+        // Comprehensive salt/mineral dissociation table
+        // Format: Formula → (Cation, Cation Count, Anion, Anion Count)
+        var dissociations = new Dictionary<string, (string cation, double cationCount, string anion, double anionCount)>
+        {
+            // ═══ CHLORIDES ═══
+            { "NaCl", ("Sodium Ion", 1, "Chloride Ion", 1) },              // Halite
+            { "KCl", ("Potassium Ion", 1, "Chloride Ion", 1) },            // Sylvite
+            { "CaCl₂", ("Calcium Ion", 1, "Chloride Ion", 2) },            // Calcium chloride
+            { "MgCl₂", ("Magnesium Ion", 1, "Chloride Ion", 2) },          // Bischofite
+            { "FeCl₂", ("Ferrous Iron", 1, "Chloride Ion", 2) },           // Ferrous chloride
+            { "FeCl₃", ("Ferric Iron", 1, "Chloride Ion", 3) },            // Ferric chloride
+            { "AlCl₃", ("Aluminum Ion", 1, "Chloride Ion", 3) },           // Aluminum chloride
+            { "LiCl", ("Lithium Ion", 1, "Chloride Ion", 1) },             // Lithium chloride
+            { "NH₄Cl", ("Ammonium Ion", 1, "Chloride Ion", 1) },           // Ammonium chloride
+
+            // ═══ SULFATES ═══
+            { "Na₂SO₄", ("Sodium Ion", 2, "Sulfate Ion", 1) },             // Thenardite
+            { "K₂SO₄", ("Potassium Ion", 2, "Sulfate Ion", 1) },           // Arcanite
+            { "CaSO₄", ("Calcium Ion", 1, "Sulfate Ion", 1) },             // Anhydrite
+            { "CaSO₄·2H₂O", ("Calcium Ion", 1, "Sulfate Ion", 1) },        // Gypsum
+            { "CaSO₄·½H₂O", ("Calcium Ion", 1, "Sulfate Ion", 1) },        // Bassanite
+            { "MgSO₄", ("Magnesium Ion", 1, "Sulfate Ion", 1) },           // Kieserite
+            { "MgSO₄·7H₂O", ("Magnesium Ion", 1, "Sulfate Ion", 1) },      // Epsomite
+            { "FeSO₄", ("Ferrous Iron", 1, "Sulfate Ion", 1) },            // Ferrous sulfate
+            { "Fe₂(SO₄)₃", ("Ferric Iron", 2, "Sulfate Ion", 3) },         // Ferric sulfate
+            { "Al₂(SO₄)₃", ("Aluminum Ion", 2, "Sulfate Ion", 3) },        // Aluminum sulfate
+            { "(NH₄)₂SO₄", ("Ammonium Ion", 2, "Sulfate Ion", 1) },        // Ammonium sulfate
+            { "Li₂SO₄", ("Lithium Ion", 2, "Sulfate Ion", 1) },            // Lithium sulfate
+
+            // ═══ CARBONATES ═══
+            { "Na₂CO₃", ("Sodium Ion", 2, "Carbonate Ion", 1) },           // Natron/Soda ash
+            { "NaHCO₃", ("Sodium Ion", 1, "Bicarbonate Ion", 1) },         // Nahcolite
+            { "CaCO₃", ("Calcium Ion", 1, "Carbonate Ion", 1) },           // Calcite/Aragonite
+            { "MgCO₃", ("Magnesium Ion", 1, "Carbonate Ion", 1) },         // Magnesite
+            { "FeCO₃", ("Ferrous Iron", 1, "Carbonate Ion", 1) },          // Siderite
+            { "K₂CO₃", ("Potassium Ion", 2, "Carbonate Ion", 1) },         // Potassium carbonate
+            { "KHCO₃", ("Potassium Ion", 1, "Bicarbonate Ion", 1) },       // Potassium bicarbonate
+            { "Ca(HCO₃)₂", ("Calcium Ion", 1, "Bicarbonate Ion", 2) },     // Calcium bicarbonate
+            { "Mg(HCO₃)₂", ("Magnesium Ion", 1, "Bicarbonate Ion", 2) },   // Magnesium bicarbonate
+            { "Li₂CO₃", ("Lithium Ion", 2, "Carbonate Ion", 1) },          // Lithium carbonate
+            { "(NH₄)₂CO₃", ("Ammonium Ion", 2, "Carbonate Ion", 1) },      // Ammonium carbonate
+
+            // ═══ NITRATES ═══
+            { "NaNO₃", ("Sodium Ion", 1, "Nitrate Ion", 1) },              // Nitratine/Soda niter
+            { "KNO₃", ("Potassium Ion", 1, "Nitrate Ion", 1) },            // Niter
+            { "Ca(NO₃)₂", ("Calcium Ion", 1, "Nitrate Ion", 2) },          // Calcium nitrate
+            { "Mg(NO₃)₂", ("Magnesium Ion", 1, "Nitrate Ion", 2) },        // Magnesium nitrate
+            { "Fe(NO₃)₂", ("Ferrous Iron", 1, "Nitrate Ion", 2) },         // Ferrous nitrate
+            { "Fe(NO₃)₃", ("Ferric Iron", 1, "Nitrate Ion", 3) },          // Ferric nitrate
+            { "Al(NO₃)₃", ("Aluminum Ion", 1, "Nitrate Ion", 3) },         // Aluminum nitrate
+            { "NH₄NO₃", ("Ammonium Ion", 1, "Nitrate Ion", 1) },           // Ammonium nitrate
+            { "LiNO₃", ("Lithium Ion", 1, "Nitrate Ion", 1) },             // Lithium nitrate
+
+            // ═══ PHOSPHATES ═══
+            { "Na₃PO₄", ("Sodium Ion", 3, "Phosphate Ion", 1) },           // Sodium phosphate
+            { "K₃PO₄", ("Potassium Ion", 3, "Phosphate Ion", 1) },         // Potassium phosphate
+            { "Ca₃(PO₄)₂", ("Calcium Ion", 3, "Phosphate Ion", 2) },       // Calcium phosphate
+            { "AlPO₄", ("Aluminum Ion", 1, "Phosphate Ion", 1) },          // Aluminum phosphate
+
+            // ═══ HYDROXIDES ═══
+            { "NaOH", ("Sodium Ion", 1, "Hydroxide Ion", 1) },             // Sodium hydroxide
+            { "KOH", ("Potassium Ion", 1, "Hydroxide Ion", 1) },           // Potassium hydroxide
+            { "Ca(OH)₂", ("Calcium Ion", 1, "Hydroxide Ion", 2) },         // Portlandite
+            { "Mg(OH)₂", ("Magnesium Ion", 1, "Hydroxide Ion", 2) },       // Brucite
+            { "Fe(OH)₂", ("Ferrous Iron", 1, "Hydroxide Ion", 2) },        // Ferrous hydroxide
+            { "Fe(OH)₃", ("Ferric Iron", 1, "Hydroxide Ion", 3) },         // Ferric hydroxide
+            { "Al(OH)₃", ("Aluminum Ion", 1, "Hydroxide Ion", 3) },        // Gibbsite
+            { "LiOH", ("Lithium Ion", 1, "Hydroxide Ion", 1) },            // Lithium hydroxide
+            { "NH₄OH", ("Ammonium Ion", 1, "Hydroxide Ion", 1) },          // Ammonium hydroxide
+
+            // ═══ BROMIDES ═══
+            { "NaBr", ("Sodium Ion", 1, "Bromide Ion", 1) },               // Sodium bromide
+            { "KBr", ("Potassium Ion", 1, "Bromide Ion", 1) },             // Potassium bromide
+            { "CaBr₂", ("Calcium Ion", 1, "Bromide Ion", 2) },             // Calcium bromide
+            { "MgBr₂", ("Magnesium Ion", 1, "Bromide Ion", 2) },           // Magnesium bromide
+            { "LiBr", ("Lithium Ion", 1, "Bromide Ion", 1) },              // Lithium bromide
+
+            // ═══ IODIDES ═══
+            { "NaI", ("Sodium Ion", 1, "Iodide Ion", 1) },                 // Sodium iodide
+            { "KI", ("Potassium Ion", 1, "Iodide Ion", 1) },               // Potassium iodide
+            { "CaI₂", ("Calcium Ion", 1, "Iodide Ion", 2) },               // Calcium iodide
+            { "MgI₂", ("Magnesium Ion", 1, "Iodide Ion", 2) },             // Magnesium iodide
+            { "LiI", ("Lithium Ion", 1, "Iodide Ion", 1) },                // Lithium iodide
+
+            // ═══ FLUORIDES ═══
+            { "NaF", ("Sodium Ion", 1, "Fluoride Ion", 1) },               // Sodium fluoride
+            { "KF", ("Potassium Ion", 1, "Fluoride Ion", 1) },             // Potassium fluoride
+            { "CaF₂", ("Calcium Ion", 1, "Fluoride Ion", 2) },             // Fluorite
+            { "MgF₂", ("Magnesium Ion", 1, "Fluoride Ion", 2) },           // Sellaite
+            { "AlF₃", ("Aluminum Ion", 1, "Fluoride Ion", 3) },            // Aluminum fluoride
+            { "LiF", ("Lithium Ion", 1, "Fluoride Ion", 1) },              // Lithium fluoride
+
+            // ═══ ACETATES ═══
+            { "NaCH₃COO", ("Sodium Ion", 1, "Acetate Ion", 1) },           // Sodium acetate
+            { "KCH₃COO", ("Potassium Ion", 1, "Acetate Ion", 1) },         // Potassium acetate
+            { "Ca(CH₃COO)₂", ("Calcium Ion", 1, "Acetate Ion", 2) },       // Calcium acetate
+            { "Mg(CH₃COO)₂", ("Magnesium Ion", 1, "Acetate Ion", 2) },     // Magnesium acetate
+
+            // ═══ PERCHLORATES ═══
+            { "NaClO₄", ("Sodium Ion", 1, "Perchlorate Ion", 1) },         // Sodium perchlorate
+            { "KClO₄", ("Potassium Ion", 1, "Perchlorate Ion", 1) },       // Potassium perchlorate
+            { "Mg(ClO₄)₂", ("Magnesium Ion", 1, "Perchlorate Ion", 2) },   // Magnesium perchlorate
+
+            // ═══ CHROMATES ═══
+            { "Na₂CrO₄", ("Sodium Ion", 2, "Chromate Ion", 1) },           // Sodium chromate
+            { "K₂CrO₄", ("Potassium Ion", 2, "Chromate Ion", 1) },         // Potassium chromate
+        };
+
+        if (dissociations.TryGetValue(formula, out var dissociation))
+        {
+            // Verify ions exist in library
+            var cation = lib.Find(dissociation.cation);
+            var anion = lib.Find(dissociation.anion);
+
+            if (cation != null && anion != null)
+            {
+                products[dissociation.cation] = dissociation.cationCount;
+                products[dissociation.anion] = dissociation.anionCount;
+            }
+        }
+
+        return products;
+    }
+
     public Task<Dataset> ExecuteAsync(GeoScriptContext context, AstNode node)
     {
         var cmd = (CommandNode)node;
@@ -1928,8 +2060,37 @@ public class SpeciateCommand : IGeoScriptCommand
                 Logger.Log($"  - {compound.Name} ({compound.ChemicalFormula}): {moles:F3} moles");
             }
 
-            initialState.SpeciesMoles[compound.Name] =
-                initialState.SpeciesMoles.GetValueOrDefault(compound.Name, 0) + moles;
+            // For salts/minerals that dissolve into ions, add the ions directly
+            // This ensures proper speciation output (e.g., NaCl → Na+ + Cl-)
+            if (compound.Phase == CompoundPhase.Solid && !isWater)
+            {
+                // Get the dissociation products
+                var dissociationProducts = GetDissociationProducts(compound.ChemicalFormula, compoundLib);
+
+                if (dissociationProducts.Count > 0)
+                {
+                    Logger.Log($"  - Dissolving {compound.Name} → {string.Join(" + ", dissociationProducts.Keys)}");
+
+                    // Add dissociated ions instead of the solid
+                    foreach (var (ionName, ionMoles) in dissociationProducts)
+                    {
+                        initialState.SpeciesMoles[ionName] =
+                            initialState.SpeciesMoles.GetValueOrDefault(ionName, 0) + (ionMoles * moles);
+                    }
+                }
+                else
+                {
+                    // No known dissociation, add the compound as-is
+                    initialState.SpeciesMoles[compound.Name] =
+                        initialState.SpeciesMoles.GetValueOrDefault(compound.Name, 0) + moles;
+                }
+            }
+            else
+            {
+                // For liquids, gases, and already-aqueous species, add directly
+                initialState.SpeciesMoles[compound.Name] =
+                    initialState.SpeciesMoles.GetValueOrDefault(compound.Name, 0) + moles;
+            }
 
             // Add elemental composition
             var composition = reactionGenerator.ParseChemicalFormula(compound.ChemicalFormula);
