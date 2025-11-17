@@ -79,6 +79,7 @@ public class TuiManager
     private readonly ConcurrentQueue<LogEntry> _logs = new();
     private readonly List<MetricSnapshot> _metricHistory = new();
     private string _logFilter = "";
+    private string _jobFilter = "";
     private int _selectedJobIndex = -1;
     private int _selectedNodeIndex = -1;
 
@@ -490,10 +491,73 @@ public class TuiManager
             Height = Dim.Fill()
         };
 
+        // Job filter controls
+        var filterLabel = new Label("Filter:")
+        {
+            X = 0,
+            Y = 0
+        };
+
+        var jobFilterField = new TextField("")
+        {
+            X = Pos.Right(filterLabel) + 1,
+            Y = 0,
+            Width = 20
+        };
+
+        jobFilterField.TextChanged += (oldValue) => {
+            _jobFilter = jobFilterField.Text?.ToString() ?? "";
+            UpdateJobsList();
+        };
+
+        var allButton = new Button("All")
+        {
+            X = Pos.Right(jobFilterField) + 2,
+            Y = 0
+        };
+        allButton.Clicked += () => {
+            _jobFilter = "";
+            jobFilterField.Text = "";
+            UpdateJobsList();
+        };
+
+        var pendingButton = new Button("Pending")
+        {
+            X = Pos.Right(allButton) + 1,
+            Y = 0
+        };
+        pendingButton.Clicked += () => {
+            _jobFilter = "Pending";
+            jobFilterField.Text = "Pending";
+            UpdateJobsList();
+        };
+
+        var runningButton = new Button("Running")
+        {
+            X = Pos.Right(pendingButton) + 1,
+            Y = 0
+        };
+        runningButton.Clicked += () => {
+            _jobFilter = "Running";
+            jobFilterField.Text = "Running";
+            UpdateJobsList();
+        };
+
+        var completedButton = new Button("Completed")
+        {
+            X = Pos.Right(runningButton) + 1,
+            Y = 0
+        };
+        completedButton.Clicked += () => {
+            _jobFilter = "Completed";
+            jobFilterField.Text = "Completed";
+            UpdateJobsList();
+        };
+
         var jobsFrame = new FrameView("Job Queue")
         {
             X = 0,
-            Y = 0,
+            Y = 1,
             Width = Dim.Percent(60),
             Height = Dim.Fill()
         };
@@ -516,7 +580,7 @@ public class TuiManager
         var detailsFrame = new FrameView("Job Details")
         {
             X = Pos.Right(jobsFrame),
-            Y = 0,
+            Y = 1,
             Width = Dim.Fill(),
             Height = Dim.Fill()
         };
@@ -532,7 +596,7 @@ public class TuiManager
 
         detailsFrame.Add(_jobDetailsView);
 
-        jobsView.Add(jobsFrame, detailsFrame);
+        jobsView.Add(filterLabel, jobFilterField, allButton, pendingButton, runningButton, completedButton, jobsFrame, detailsFrame);
         jobsTab.View = jobsView;
         _tabView.AddTab(jobsTab, false);
     }
@@ -1038,11 +1102,22 @@ public class TuiManager
     private void UpdateJobsList()
     {
         var jobs = _jobTracker.GetAllJobs();
+
+        // Apply filter if set
+        if (!string.IsNullOrWhiteSpace(_jobFilter))
+        {
+            jobs = jobs.Where(j =>
+                j.Status.ToString().Contains(_jobFilter, StringComparison.OrdinalIgnoreCase) ||
+                j.JobId.Contains(_jobFilter, StringComparison.OrdinalIgnoreCase) ||
+                j.JobMessage.JobType.Contains(_jobFilter, StringComparison.OrdinalIgnoreCase)
+            ).ToList();
+        }
+
         var jobLines = new List<string>();
 
         if (jobs.Any())
         {
-            jobLines.Add("╔═══ Job Queue ═══");
+            jobLines.Add($"╔═══ Job Queue ({jobs.Count} jobs) ═══");
             foreach (var job in jobs)
             {
                 var statusIcon = job.Status switch
@@ -1065,7 +1140,7 @@ public class TuiManager
         }
         else
         {
-            jobLines.Add("No jobs in queue");
+            jobLines.Add(_jobFilter.Length > 0 ? $"No jobs match filter: '{_jobFilter}'" : "No jobs in queue");
         }
 
         _jobsListView.SetSource(jobLines);
@@ -1898,16 +1973,112 @@ public class TuiManager
 
     private void ShowKeyboardShortcuts()
     {
-        MessageBox.Query("Keyboard Shortcuts",
-            "F1        - Show this help\n" +
-            "F5        - Run CPU benchmark\n" +
-            "Ctrl+Q    - Quit application\n" +
-            "Ctrl+R    - Refresh all data\n" +
-            "Ctrl+E    - Edit configuration\n" +
-            "Ctrl+F    - Focus log filter\n\n" +
-            "Tab/Shift+Tab - Navigate between tabs\n" +
-            "Arrow Keys    - Navigate lists\n" +
-            "Enter         - Select item", "OK");
+        var dialog = new Dialog("Keyboard Shortcuts & Quick Reference", 80, 24);
+
+        var helpText = new TextView()
+        {
+            X = 1,
+            Y = 0,
+            Width = Dim.Fill(1),
+            Height = Dim.Fill(2),
+            ReadOnly = true,
+            Text = BuildKeyboardShortcutsText()
+        };
+
+        var okButton = new Button("OK")
+        {
+            X = Pos.Center(),
+            Y = Pos.AnchorEnd(1)
+        };
+
+        okButton.Clicked += () => {
+            Application.RequestStop();
+        };
+
+        dialog.Add(helpText, okButton);
+        Application.Run(dialog);
+    }
+
+    private string BuildKeyboardShortcutsText()
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine("═══════════════════════════════════════════════════════════════════");
+        sb.AppendLine("                    KEYBOARD SHORTCUTS & QUICK REFERENCE");
+        sb.AppendLine("═══════════════════════════════════════════════════════════════════");
+        sb.AppendLine();
+        sb.AppendLine("═══ GLOBAL SHORTCUTS ═══");
+        sb.AppendLine();
+        sb.AppendLine("F1             Show this help dialog");
+        sb.AppendLine("F5             Run CPU benchmark");
+        sb.AppendLine("Ctrl+Q         Quit application (with confirmation)");
+        sb.AppendLine("Ctrl+R         Refresh all data immediately");
+        sb.AppendLine("Ctrl+E         Edit configuration (opens JSON editor)");
+        sb.AppendLine("Ctrl+F         Focus log filter (switches to Logs tab)");
+        sb.AppendLine();
+        sb.AppendLine("═══ NAVIGATION ═══");
+        sb.AppendLine();
+        sb.AppendLine("Tab            Move to next UI element");
+        sb.AppendLine("Shift+Tab      Move to previous UI element");
+        sb.AppendLine("Arrow Keys     Navigate lists and menus");
+        sb.AppendLine("Enter          Select item / Activate button");
+        sb.AppendLine("Esc            Close dialog / Cancel operation");
+        sb.AppendLine();
+        sb.AppendLine("═══ MENU ACCESS ═══");
+        sb.AppendLine();
+        sb.AppendLine("Alt+F          File menu (Export, Quit)");
+        sb.AppendLine("Alt+V          View menu (Navigate tabs)");
+        sb.AppendLine("Alt+T          Tools menu (Benchmark, Clear)");
+        sb.AppendLine("Alt+C          Configuration menu (Edit, Settings)");
+        sb.AppendLine("Alt+S          Services menu (Network, Nodes)");
+        sb.AppendLine("Alt+H          Help menu (About, System Info)");
+        sb.AppendLine();
+        sb.AppendLine("═══ TAB FEATURES ═══");
+        sb.AppendLine();
+        sb.AppendLine("Dashboard Tab:");
+        sb.AppendLine("  • Real-time system metrics (CPU, Memory, Disk)");
+        sb.AppendLine("  • Network statistics and bandwidth");
+        sb.AppendLine("  • Active connections and discovered nodes");
+        sb.AppendLine();
+        sb.AppendLine("Jobs Tab:");
+        sb.AppendLine("  • Filter jobs by status (All, Pending, Running, Completed)");
+        sb.AppendLine("  • View detailed job information");
+        sb.AppendLine("  • Monitor execution time");
+        sb.AppendLine();
+        sb.AppendLine("Logs Tab:");
+        sb.AppendLine("  • Filter logs with Ctrl+F");
+        sb.AppendLine("  • Clear logs with Clear button");
+        sb.AppendLine("  • Export logs via File menu");
+        sb.AppendLine();
+        sb.AppendLine("Statistics Tab:");
+        sb.AppendLine("  • View historical performance data");
+        sb.AppendLine("  • Export statistics to JSON");
+        sb.AppendLine();
+        sb.AppendLine("Nodes Tab:");
+        sb.AppendLine("  • View connected nodes");
+        sb.AppendLine("  • Select node for detailed information");
+        sb.AppendLine("  • Monitor node capabilities");
+        sb.AppendLine();
+        sb.AppendLine("Benchmark Tab:");
+        sb.AppendLine("  • Run CPU benchmark with F5");
+        sb.AppendLine("  • View GFLOPS performance rating");
+        sb.AppendLine();
+        sb.AppendLine("═══ STATUS BAR INDICATORS ═══");
+        sb.AppendLine();
+        sb.AppendLine("KEEPALIVE      Application is running (blinks green)");
+        sb.AppendLine("TX ▲          Network transmit active (shows KB/s)");
+        sb.AppendLine("RX ▼          Network receive active (shows KB/s)");
+        sb.AppendLine("JOBS: X/Y      Active jobs / Total jobs");
+        sb.AppendLine();
+        sb.AppendLine("═══ QUICK TIPS ═══");
+        sb.AppendLine();
+        sb.AppendLine("• Updates occur every 500ms for real-time monitoring");
+        sb.AppendLine("• Metrics history is retained for 1 hour (720 snapshots)");
+        sb.AppendLine("• Logs capacity: 10,000 entries");
+        sb.AppendLine("• Configuration changes require application restart");
+        sb.AppendLine("• All exports include timestamps in filename");
+        sb.AppendLine();
+        sb.AppendLine("═══════════════════════════════════════════════════════════════════");
+        return sb.ToString();
     }
 
     private void ShowSystemInfo()
