@@ -93,6 +93,9 @@ Geoscientist's Toolkit is an advanced, cross-platform desktop application built 
 
 ### Quick Start
 
+#### Installer multi-piattaforma
+Gli eseguibili del wizard TUI `InstallerWizard` permettono di installare e aggiornare automaticamente il toolkit su Windows, Linux e macOS (Intel/Apple Silicon). Il tool `InstallerPackager` comprime i build `dotnet publish`, include i modelli ONNX e il server Node endpoint e aggiorna il manifest per l'auto-update. Tutte le istruzioni pratiche sono descritte in [docs/installers.md](docs/installers.md).
+
 #### Clone and Build
 ```bash
 git clone https://github.com/mattemangia/GeoscientistToolkit.git

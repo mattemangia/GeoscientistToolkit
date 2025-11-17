@@ -1,0 +1,130 @@
+{
+  "version": "1.0.0",
+  "releaseNotesUrl": "https://github.com/example/GeoscientistToolkit/releases",
+  "minimumDotnetSdk": "8.0.100",
+  "prerequisites": [
+    {
+      "id": "disk-space",
+      "description": "Assicurarsi di avere spazio sufficiente sul disco di destinazione",
+      "command": "echo ok"
+    }
+  ],
+  "packages": [
+    {
+      "runtimeIdentifier": "win-x64",
+      "transport": "Archive",
+      "selfContained": true,
+      "description": "Windows 64 bit",
+      "packageUrl": "https://example.com/installers/GeoscientistToolkit-win-x64.zip",
+      "sha256": "",
+      "sizeBytes": 0,
+      "components": [
+        {
+          "id": "app",
+          "displayName": "Applicazione principale",
+          "relativePath": "app",
+          "targetSubdirectory": "",
+          "entryExecutable": "GeoscientistToolkit.exe",
+          "defaultSelected": true,
+          "supportsDesktopShortcut": true
+        },
+        {
+          "id": "node-endpoint",
+          "displayName": "Server endpoint Node",
+          "relativePath": "node-endpoint",
+          "targetSubdirectory": "NodeEndpoint",
+          "entryExecutable": "start-endpoint.cmd",
+          "defaultSelected": false,
+          "supportsDesktopShortcut": false
+        }
+      ]
+    },
+    {
+      "runtimeIdentifier": "linux-x64",
+      "transport": "Archive",
+      "selfContained": true,
+      "description": "Linux 64 bit",
+      "packageUrl": "https://example.com/installers/GeoscientistToolkit-linux-x64.zip",
+      "sha256": "",
+      "sizeBytes": 0,
+      "components": [
+        {
+          "id": "app",
+          "displayName": "Applicazione principale",
+          "relativePath": "app",
+          "targetSubdirectory": "",
+          "entryExecutable": "GeoscientistToolkit",
+          "defaultSelected": true,
+          "supportsDesktopShortcut": true
+        },
+        {
+          "id": "node-endpoint",
+          "displayName": "Server endpoint Node",
+          "relativePath": "node-endpoint",
+          "targetSubdirectory": "NodeEndpoint",
+          "entryExecutable": "start-endpoint.sh",
+          "defaultSelected": false,
+          "supportsDesktopShortcut": false
+        }
+      ]
+    },
+    {
+      "runtimeIdentifier": "osx-x64",
+      "transport": "Archive",
+      "selfContained": true,
+      "description": "macOS Intel",
+      "packageUrl": "https://example.com/installers/GeoscientistToolkit-osx-x64.zip",
+      "sha256": "",
+      "sizeBytes": 0,
+      "components": [
+        {
+          "id": "app",
+          "displayName": "Applicazione principale",
+          "relativePath": "app",
+          "targetSubdirectory": "",
+          "entryExecutable": "GeoscientistToolkit",
+          "defaultSelected": true,
+          "supportsDesktopShortcut": true
+        },
+        {
+          "id": "node-endpoint",
+          "displayName": "Server endpoint Node",
+          "relativePath": "node-endpoint",
+          "targetSubdirectory": "NodeEndpoint",
+          "entryExecutable": "start-endpoint.command",
+          "defaultSelected": false,
+          "supportsDesktopShortcut": false
+        }
+      ]
+    },
+    {
+      "runtimeIdentifier": "osx-arm64",
+      "transport": "Archive",
+      "selfContained": true,
+      "description": "macOS Apple Silicon",
+      "packageUrl": "https://example.com/installers/GeoscientistToolkit-osx-arm64.zip",
+      "sha256": "",
+      "sizeBytes": 0,
+      "components": [
+        {
+          "id": "app",
+          "displayName": "Applicazione principale",
+          "relativePath": "app",
+          "targetSubdirectory": "",
+          "entryExecutable": "GeoscientistToolkit",
+          "defaultSelected": true,
+          "supportsDesktopShortcut": true
+        },
+        {
+          "id": "node-endpoint",
+          "displayName": "Server endpoint Node",
+          "relativePath": "node-endpoint",
+          "targetSubdirectory": "NodeEndpoint",
+          "entryExecutable": "start-endpoint.command",
+          "defaultSelected": false,
+          "supportsDesktopShortcut": false
+        }
+      ]
+    }
+  ]
+}
