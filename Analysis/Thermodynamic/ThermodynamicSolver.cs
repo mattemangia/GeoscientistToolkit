@@ -1316,8 +1316,24 @@ public class ThermodynamicSolver : SimulatorNodeSupport
     private void UpdateSecondarySpecies(ThermodynamicState state, List<ChemicalReaction> reactions,
         List<string> secondarySpecies)
     {
+        var systemElements = state.ElementalComposition
+            .Where(kvp => kvp.Value > 1e-15)
+            .Select(kvp => kvp.Key)
+            .ToHashSet();
+
         foreach (var speciesName in secondarySpecies)
         {
+            var compound = _compoundLibrary.Find(speciesName);
+            if (compound == null) continue;
+
+            var speciesElements = _reactionGenerator.ParseChemicalFormula(compound.ChemicalFormula);
+            if (!speciesElements.Keys.All(e => systemElements.Contains(e)))
+            {
+                state.SpeciesMoles[speciesName] = 0;
+                state.Activities[speciesName] = 0;
+                continue;
+            }
+
             // Find the reaction that forms this species from basis species
             var formationReaction = reactions.FirstOrDefault(r =>
                 r.Stoichiometry.ContainsKey(speciesName) && r.Stoichiometry[speciesName] > 0 &&
