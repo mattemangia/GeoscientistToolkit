@@ -1,0 +1,13 @@
+{
+  "ManifestPath": "docs/installer-manifest.json",
+  "PackagesOutputDirectory": "artifacts/installers",
+  "PackageBaseUrl": "https://example.com/installers",
+  "ProjectPath": "../GeoscientistToolkit.csproj",
+  "NodeProjectPath": "../NodeEndpoint/NodeEndpoint.csproj",
+  "PublishConfiguration": "Release",
+  "OnnxDirectory": "../ONNX",
+  "PackageName": "GeoscientistToolkit",
+  "NodeExecutableName": "NodeEndpoint",
+  "AdditionalPublishArguments": "",
+  "NodeAdditionalPublishArguments": ""
+}
