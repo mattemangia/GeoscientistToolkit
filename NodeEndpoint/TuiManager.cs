@@ -464,7 +464,7 @@ public class TuiManager
             Height = Dim.Fill()
         };
 
-        _connectionsListView = new ListView(new List<string> { "No active connections" })
+        _connectionsListView = new ListView(new List<string> { "Loading..." })
         {
             X = 0,
             Y = 0,
@@ -563,7 +563,7 @@ public class TuiManager
             Height = Dim.Fill()
         };
 
-        _jobsListView = new ListView(new List<string> { "No jobs" })
+        _jobsListView = new ListView(new List<string> { "Loading..." })
         {
             X = 0,
             Y = 0,
@@ -648,7 +648,7 @@ public class TuiManager
             Height = Dim.Fill()
         };
 
-        _logsListView = new ListView(new List<string>())
+        _logsListView = new ListView(new List<string> { " " })
         {
             X = 0,
             Y = 0,
@@ -720,7 +720,7 @@ public class TuiManager
             Height = Dim.Fill()
         };
 
-        _nodesListView = new ListView(new List<string> { "No connected nodes" })
+        _nodesListView = new ListView(new List<string> { "Loading..." })
         {
             X = 0,
             Y = 0,
@@ -896,7 +896,7 @@ public class TuiManager
                 connections.Add("Network discovery is running");
             }
 
-            _connectionsListView.SetSource(connections);
+            SafeSetListViewSource(_connectionsListView, connections);
         }
         catch (Exception ex)
         {
@@ -904,34 +904,97 @@ public class TuiManager
             connections.Clear();
             connections.Add("Error loading connections");
             connections.Add($"  {ex.Message}");
-            _connectionsListView.SetSource(connections);
+            SafeSetListViewSource(_connectionsListView, connections);
         }
     }
 
     /// <summary>
-    /// Sanitizes a string for safe rendering in Terminal.Gui ListView
+    /// Sanitizes a string for safe rendering in Terminal.Gui ListView.
+    /// This method aggressively removes problematic characters to prevent rendering crashes.
     /// </summary>
     private string SanitizeString(string input)
     {
         if (string.IsNullOrEmpty(input))
             return " "; // Return single space instead of empty string
 
-        // Normalize the string to ensure proper Unicode handling
-        var normalized = input.Normalize(NormalizationForm.FormC);
-
-        // Remove any control characters that might cause rendering issues
-        var cleaned = new StringBuilder(normalized.Length);
-        foreach (char c in normalized)
+        try
         {
-            // Keep printable characters, spaces, and common formatting
-            if (!char.IsControl(c) || c == '\t' || c == '\n')
+            // Convert to ASCII-safe string by removing all non-ASCII characters
+            // This is the most reliable way to prevent Unicode-related rendering issues
+            var cleaned = new StringBuilder(input.Length);
+
+            foreach (char c in input)
             {
-                cleaned.Append(c);
+                // Only keep basic printable ASCII characters and spaces
+                if (c >= 32 && c <= 126)
+                {
+                    cleaned.Append(c);
+                }
+                else if (c == '\t')
+                {
+                    cleaned.Append("    "); // Replace tabs with spaces
+                }
+                else if (c == '\n' || c == '\r')
+                {
+                    // Skip newlines - ListView doesn't handle them well
+                    continue;
+                }
+                // Skip all other characters (including Unicode, control chars, etc.)
+            }
+
+            var result = cleaned.ToString().Trim();
+
+            // Ensure we never return an empty string
+            if (string.IsNullOrEmpty(result))
+                return " ";
+
+            // Ensure string isn't too long (prevent buffer overruns)
+            if (result.Length > 500)
+                result = result.Substring(0, 497) + "...";
+
+            return result;
+        }
+        catch
+        {
+            // If anything goes wrong, return a safe fallback
+            return " ";
+        }
+    }
+
+    /// <summary>
+    /// Safely sets the source of a ListView with sanitized strings.
+    /// This prevents crashes caused by problematic strings in Terminal.Gui.
+    /// </summary>
+    private void SafeSetListViewSource(ListView listView, IEnumerable<string> items)
+    {
+        try
+        {
+            var safeItems = items
+                .Select(item => SanitizeString(item))
+                .Where(item => !string.IsNullOrWhiteSpace(item))
+                .ToList();
+
+            // Ensure we always have at least one item
+            if (!safeItems.Any())
+            {
+                safeItems.Add(" ");
+            }
+
+            listView.SetSource(safeItems);
+        }
+        catch (Exception ex)
+        {
+            // If SetSource fails, try with a minimal safe list
+            try
+            {
+                listView.SetSource(new List<string> { "Error loading data", $"Details: {SanitizeString(ex.Message)}" });
+            }
+            catch
+            {
+                // Last resort: set a single space
+                listView.SetSource(new List<string> { " " });
             }
         }
-
-        var result = cleaned.ToString();
-        return string.IsNullOrEmpty(result) ? " " : result;
     }
 
     private void UpdateCpuUsage()
@@ -1183,7 +1246,7 @@ public class TuiManager
             jobLines.Add(filterMsg.Length > 80 ? filterMsg.Substring(0, 80) : filterMsg);
         }
 
-        _jobsListView.SetSource(jobLines);
+        SafeSetListViewSource(_jobsListView, jobLines);
     }
 
     private void UpdateJobDetails()
@@ -1255,7 +1318,7 @@ public class TuiManager
             nodeLines.Add("No connected nodes");
         }
 
-        _nodesListView.SetSource(nodeLines);
+        SafeSetListViewSource(_nodesListView, nodeLines);
     }
 
     private void UpdateNodeDetails()
@@ -1330,7 +1393,7 @@ public class TuiManager
             logLines.Add("No logs match the filter");
         }
 
-        _logsListView.SetSource(logLines);
+        SafeSetListViewSource(_logsListView, logLines);
     }
 
     private void CaptureMetrics()
@@ -1878,7 +1941,7 @@ public class TuiManager
             return;
         }
 
-        var nodeNames = nodes.Select(n => n.NodeName).ToList();
+        var nodeNames = nodes.Select(n => SanitizeString(n.NodeName)).ToList();
 
         var dialog = new Dialog("Disconnect Node", 50, 15);
 
