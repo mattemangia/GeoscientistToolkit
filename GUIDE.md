@@ -1687,6 +1687,39 @@ UI: ImGui.NET 1.90.8.1
 
 ---
 
+## Author Information
+
+**Author:** Matteo Mangiagalli
+**Institution:** Università degli Studi di Urbino Carlo Bo
+**Email:** m.mangiagalli@campus.uniurb.it
+**Year:** 2025
+
+---
+
+## Citation
+
+If you use GeoscientistToolkit in your research or projects, please cite:
+
+```
+Mangiagalli, M. (2025). GeoscientistToolkit: A Comprehensive Platform for
+Geoscientific Data Analysis and Simulation. Università degli Studi di Urbino
+Carlo Bo. Available at: https://github.com/mattemangia/GeoscientistToolkit
+```
+
+BibTeX format:
+```bibtex
+@software{mangiagalli2025geoscientist,
+  author = {Mangiagalli, Matteo},
+  title = {GeoscientistToolkit: A Comprehensive Platform for Geoscientific Data Analysis and Simulation},
+  year = {2025},
+  institution = {Università degli Studi di Urbino Carlo Bo},
+  email = {m.mangiagalli@campus.uniurb.it},
+  url = {https://github.com/mattemangia/GeoscientistToolkit}
+}
+```
+
+---
+
 **Document Generated:** 2025-11-17
 **Software:** GeoscientistToolkit
 **License:** See LICENSE file in repository
