@@ -216,6 +216,7 @@ public class TuiManager
             {
                 new MenuItem("_Keyboard Shortcuts", "Show keyboard shortcuts", ShowKeyboardShortcuts),
                 new MenuItem("_System Info", "Show detailed system information", ShowSystemInfo),
+                new MenuItem("System _Health", "Show system health summary", ShowSystemHealth),
                 new MenuItem("_About", "About this application", ShowAbout)
             })
         });
@@ -2099,6 +2100,215 @@ public class TuiManager
         sb.AppendLine($".NET Version: {Environment.Version}");
 
         MessageBox.Query("System Information", sb.ToString(), "OK");
+    }
+
+    private void ShowSystemHealth()
+    {
+        var dialog = new Dialog("System Health Summary", 80, 26);
+
+        var healthText = new TextView()
+        {
+            X = 1,
+            Y = 0,
+            Width = Dim.Fill(1),
+            Height = Dim.Fill(2),
+            ReadOnly = true,
+            Text = BuildSystemHealthText()
+        };
+
+        var refreshButton = new Button("Refresh")
+        {
+            X = Pos.Center() - 8,
+            Y = Pos.AnchorEnd(1)
+        };
+
+        refreshButton.Clicked += () => {
+            healthText.Text = BuildSystemHealthText();
+        };
+
+        var okButton = new Button("OK")
+        {
+            X = Pos.Center() + 4,
+            Y = Pos.AnchorEnd(1)
+        };
+
+        okButton.Clicked += () => {
+            Application.RequestStop();
+        };
+
+        dialog.Add(healthText, refreshButton, okButton);
+        Application.Run(dialog);
+    }
+
+    private string BuildSystemHealthText()
+    {
+        var sb = new StringBuilder();
+        var uptime = DateTime.Now - _startTime;
+        var jobs = _jobTracker.GetAllJobs();
+        var nodes = _nodeManager.GetConnectedNodes();
+        var discoveredNodes = _networkDiscovery.GetDiscoveredNodes();
+
+        sb.AppendLine("═══════════════════════════════════════════════════════════════════");
+        sb.AppendLine("                        SYSTEM HEALTH SUMMARY");
+        sb.AppendLine("═══════════════════════════════════════════════════════════════════");
+        sb.AppendLine();
+        sb.AppendLine($"Generated: {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
+        sb.AppendLine($"Uptime:    {uptime.Days}d {uptime.Hours:D2}h {uptime.Minutes:D2}m {uptime.Seconds:D2}s");
+        sb.AppendLine();
+
+        // Overall Status
+        var healthStatus = "HEALTHY";
+        var healthIndicator = "✓";
+
+        if (_currentCpuUsage > 90 || _currentMemoryUsage > 90)
+        {
+            healthStatus = "WARNING - High Resource Usage";
+            healthIndicator = "⚠";
+        }
+
+        var failedJobs = jobs.Count(j => j.Status == JobTracker.JobStatus.Failed);
+        if (failedJobs > 0)
+        {
+            healthStatus = "WARNING - Failed Jobs Detected";
+            healthIndicator = "⚠";
+        }
+
+        sb.AppendLine("═══ OVERALL STATUS ═══");
+        sb.AppendLine();
+        sb.AppendLine($"{healthIndicator} {healthStatus}");
+        sb.AppendLine();
+
+        // Resource Health
+        sb.AppendLine("═══ RESOURCE HEALTH ═══");
+        sb.AppendLine();
+        sb.AppendLine($"CPU Usage:        {_currentCpuUsage:F1}% {(_currentCpuUsage < 70 ? "✓ Normal" : _currentCpuUsage < 90 ? "⚠ High" : "✗ Critical")}");
+        sb.AppendLine($"Memory Usage:     {_currentMemoryUsage:F1}% {(_currentMemoryUsage < 70 ? "✓ Normal" : _currentMemoryUsage < 90 ? "⚠ High" : "✗ Critical")}");
+
+        try
+        {
+            var driveInfo = new DriveInfo(Path.GetPathRoot(Environment.CurrentDirectory) ?? "/");
+            var diskUsedPercent = 100.0 - (driveInfo.AvailableFreeSpace * 100.0 / driveInfo.TotalSize);
+            sb.AppendLine($"Disk Usage:       {diskUsedPercent:F1}% {(diskUsedPercent < 80 ? "✓ Normal" : diskUsedPercent < 95 ? "⚠ High" : "✗ Critical")}");
+        }
+        catch
+        {
+            sb.AppendLine("Disk Usage:       N/A");
+        }
+
+        sb.AppendLine($"Network TX:       {_currentBytesPerSecSent / 1024.0:F2} KB/s");
+        sb.AppendLine($"Network RX:       {_currentBytesPerSecReceived / 1024.0:F2} KB/s");
+        sb.AppendLine();
+
+        // Job Queue Health
+        sb.AppendLine("═══ JOB QUEUE HEALTH ═══");
+        sb.AppendLine();
+        var pendingJobs = jobs.Count(j => j.Status == JobTracker.JobStatus.Pending);
+        var runningJobs = jobs.Count(j => j.Status == JobTracker.JobStatus.Running);
+        var completedJobs = jobs.Count(j => j.Status == JobTracker.JobStatus.Completed);
+        var cancelledJobs = jobs.Count(j => j.Status == JobTracker.JobStatus.Cancelled);
+
+        sb.AppendLine($"Total Jobs:       {jobs.Count}");
+        sb.AppendLine($"  Pending:        {pendingJobs}");
+        sb.AppendLine($"  Running:        {runningJobs}");
+        sb.AppendLine($"  Completed:      {completedJobs} ✓");
+        sb.AppendLine($"  Failed:         {failedJobs} {(failedJobs > 0 ? "⚠" : "")}");
+        sb.AppendLine($"  Cancelled:      {cancelledJobs}");
+        sb.AppendLine();
+
+        if (jobs.Any())
+        {
+            var avgDuration = jobs
+                .Where(j => j.CompletedAt.HasValue)
+                .Select(j => (j.CompletedAt!.Value - j.SubmittedAt).TotalSeconds)
+                .DefaultIfEmpty(0)
+                .Average();
+            sb.AppendLine($"Avg Completion:   {avgDuration:F1}s");
+        }
+
+        sb.AppendLine();
+
+        // Network Health
+        sb.AppendLine("═══ NETWORK HEALTH ═══");
+        sb.AppendLine();
+        sb.AppendLine($"NodeManager:      {_nodeManager.Status}");
+        sb.AppendLine($"Connected Nodes:  {nodes.Count}");
+        sb.AppendLine($"Discovered Nodes: {discoveredNodes.Count}");
+
+        if (nodes.Any())
+        {
+            var activeNodes = nodes.Count(n => n.Status == NodeStatus.Connected);
+            sb.AppendLine($"  Active:         {activeNodes} / {nodes.Count}");
+            sb.AppendLine($"  Avg CPU:        {nodes.Average(n => n.CpuUsage):F1}%");
+            sb.AppendLine($"  Avg Memory:     {nodes.Average(n => n.MemoryUsage):F1}%");
+            sb.AppendLine($"  Total Jobs:     {nodes.Sum(n => n.ActiveJobs)}");
+        }
+        else
+        {
+            sb.AppendLine("  No nodes connected");
+        }
+
+        sb.AppendLine();
+
+        // Performance Metrics
+        if (_metricHistory.Any())
+        {
+            sb.AppendLine("═══ PERFORMANCE TRENDS (Last Hour) ═══");
+            sb.AppendLine();
+            sb.AppendLine($"CPU Average:      {_metricHistory.Average(m => m.CpuUsage):F1}%");
+            sb.AppendLine($"CPU Peak:         {_metricHistory.Max(m => m.CpuUsage):F1}%");
+            sb.AppendLine($"Memory Average:   {_metricHistory.Average(m => m.MemoryUsage):F1}%");
+            sb.AppendLine($"Memory Peak:      {_metricHistory.Max(m => m.MemoryUsage):F1}%");
+            sb.AppendLine($"Max Connections:  {_metricHistory.Max(m => m.ActiveConnections)}");
+            sb.AppendLine($"Peak Jobs:        {_metricHistory.Max(m => m.ActiveJobs)}");
+            sb.AppendLine();
+        }
+
+        // Recommendations
+        sb.AppendLine("═══ RECOMMENDATIONS ═══");
+        sb.AppendLine();
+
+        var recommendations = new List<string>();
+
+        if (_currentCpuUsage > 80)
+        {
+            recommendations.Add("⚠ CPU usage is high - consider distributing load to more nodes");
+        }
+
+        if (_currentMemoryUsage > 80)
+        {
+            recommendations.Add("⚠ Memory usage is high - run garbage collection or restart service");
+        }
+
+        if (failedJobs > 0)
+        {
+            recommendations.Add($"⚠ {failedJobs} job(s) failed - review logs for details");
+        }
+
+        if (pendingJobs > 10)
+        {
+            recommendations.Add($"⚠ {pendingJobs} job(s) pending - consider adding worker nodes");
+        }
+
+        if (nodes.Count == 0 && discoveredNodes.Count > 0)
+        {
+            recommendations.Add($"ℹ {discoveredNodes.Count} node(s) discovered but not connected");
+        }
+
+        if (!recommendations.Any())
+        {
+            recommendations.Add("✓ System is operating normally");
+            recommendations.Add("✓ No issues detected");
+        }
+
+        foreach (var rec in recommendations)
+        {
+            sb.AppendLine(rec);
+        }
+
+        sb.AppendLine();
+        sb.AppendLine("═══════════════════════════════════════════════════════════════════");
+
+        return sb.ToString();
     }
 
     private void ShowAbout()
