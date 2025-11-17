@@ -733,6 +733,47 @@ private void DrawResultsSection()
 
             if (result != null)
             {
+                // Display inlet and outlet temperatures
+                if (result.Options != null)
+                {
+                    double inletTempC = result.Options.FluidInletTemperature - 273.15;
+                    ImGui.TextColored(new Vector4(0.6f, 0.9f, 1.0f, 1.0f),
+                        $"Inlet Temperature (T_in): {inletTempC:F2}°C");
+                }
+
+                if (result.OutletTemperature != null && result.OutletTemperature.Any())
+                {
+                    // Get outlet temperature statistics
+                    var outletTemps = result.OutletTemperature.Select(t => t.temperature - 273.15).ToList();
+                    double finalOutletC = outletTemps.Last();
+                    double avgOutletC = outletTemps.Average();
+                    double minOutletC = outletTemps.Min();
+                    double maxOutletC = outletTemps.Max();
+
+                    ImGui.TextColored(new Vector4(1.0f, 0.8f, 0.4f, 1.0f),
+                        $"Outlet Temperature (T_out): {finalOutletC:F2}°C (final)");
+                    ImGui.SameLine();
+                    ImGui.TextDisabled($"[avg: {avgOutletC:F2}°C, range: {minOutletC:F2}-{maxOutletC:F2}°C]");
+
+                    // Calculate temperature change
+                    if (result.Options != null)
+                    {
+                        double inletTempC = result.Options.FluidInletTemperature - 273.15;
+                        double deltaT = finalOutletC - inletTempC;
+                        var deltaTColor = deltaT > 0 ? new Vector4(1.0f, 0.4f, 0.4f, 1.0f) : // Heating
+                                         deltaT < 0 ? new Vector4(0.4f, 0.8f, 1.0f, 1.0f) : // Cooling
+                                         new Vector4(0.7f, 0.7f, 0.7f, 1.0f); // No change
+                        ImGui.TextColored(deltaTColor, $"ΔT (T_out - T_in): {deltaT:F2}°C");
+                    }
+                }
+                else
+                {
+                    ImGui.TextColored(new Vector4(1, 0.5f, 0, 1),
+                        "WARNING: No outlet temperature data available!");
+                }
+
+                ImGui.Separator();
+
                 var energyKWh = result.TotalExtractedEnergy / 3.6e6; // Joules to kWh
                 var avgCop = result.CoefficientOfPerformance.Any() ? result.CoefficientOfPerformance.Average(c => c.cop) : 0;
 
@@ -747,7 +788,7 @@ private void DrawResultsSection()
                     var maxTemp = temps.Max();
                     var minTemp = temps.Min();
 
-                    ImGui.Text($"Temperature Range: {minTemp:F1}°C - {maxTemp:F1}°C (avg: {avgTemp:F1}°C)");
+                    ImGui.Text($"Ground Temperature Range: {minTemp:F1}°C - {maxTemp:F1}°C (avg: {avgTemp:F1}°C)");
                 }
                 
                 // Show if this is part of a doublet
