@@ -106,20 +106,20 @@ internal sealed class InstallerWizardApp
             Height = Dim.Fill()
         };
 
-        wizard.AddPage(CreateWelcomePage());
-        wizard.AddPage(CreateRuntimePage());
-        wizard.AddPage(CreateReviewPage());
-        wizard.AddPage(CreateProgressPage());
+        wizard.AddStep(CreateWelcomePage());
+        wizard.AddStep(CreateRuntimePage());
+        wizard.AddStep(CreateReviewPage());
+        wizard.AddStep(CreateProgressPage());
 
         wizard.Finished += _ => Application.RequestStop();
-        wizard.Canceled += _ => Application.RequestStop();
+        wizard.Cancelled += _ => Application.RequestStop();
 
         return wizard;
     }
 
-    private WizardPage CreateWelcomePage()
+    private Wizard.WizardStep CreateWelcomePage()
     {
-        var page = new WizardPage("Benvenuto", "Preparazione dell'installazione");
+        var page = new Wizard.WizardStep("Benvenuto", "Preparazione dell'installazione");
 
         _welcomeLabel = new Label
         {
@@ -164,9 +164,9 @@ internal sealed class InstallerWizardApp
         return page;
     }
 
-    private WizardPage CreateRuntimePage()
+    private Wizard.WizardStep CreateRuntimePage()
     {
-        var page = new WizardPage("Opzioni", "Seleziona runtime e cartella di installazione");
+        var page = new Wizard.WizardStep("Opzioni", "Seleziona runtime e cartella di installazione");
 
         var packages = _manifest?.Packages ?? new List<RuntimePackage>();
         var items = packages.Select(p => $"{p.RuntimeIdentifier} · {(p.Description ?? "")}").ToList();
@@ -231,7 +231,7 @@ internal sealed class InstallerWizardApp
         _componentsFrame.RemoveAll();
         var runtime = GetSelectedRuntime();
         var package = _manifest.Packages.FirstOrDefault(p => string.Equals(p.RuntimeIdentifier, runtime, StringComparison.OrdinalIgnoreCase));
-        _currentComponents = package?.Components ?? Array.Empty<RuntimeComponent>();
+        _currentComponents = (IReadOnlyList<RuntimeComponent>?)package?.Components ?? Array.Empty<RuntimeComponent>();
 
         if (_currentComponents.Count == 0)
         {
@@ -273,9 +273,9 @@ internal sealed class InstallerWizardApp
         _componentsFrame.Height = Math.Max(5, _currentComponents.Count + 2);
     }
 
-    private WizardPage CreateReviewPage()
+    private Wizard.WizardStep CreateReviewPage()
     {
-        var page = new WizardPage("Riepilogo", "Conferma i parametri scelti");
+        var page = new Wizard.WizardStep("Riepilogo", "Conferma i parametri scelti");
 
         _reviewText = new TextView
         {
@@ -315,9 +315,9 @@ internal sealed class InstallerWizardApp
         return page;
     }
 
-    private WizardPage CreateProgressPage()
+    private Wizard.WizardStep CreateProgressPage()
     {
-        var page = new WizardPage("Installazione", "Esecuzione attività");
+        var page = new Wizard.WizardStep("Installazione", "Esecuzione attività");
 
         _progressBar = new ProgressBar
         {
@@ -388,7 +388,10 @@ internal sealed class InstallerWizardApp
         if (!OperatingSystem.IsWindows())
         {
             _elevationLabel.Text = "Privilegi amministratore non necessari su questo sistema.";
-            _elevateButton?.Hide();
+            if (_elevateButton is not null)
+            {
+                _elevateButton.Visible = false;
+            }
             return;
         }
 
@@ -436,7 +439,7 @@ internal sealed class InstallerWizardApp
         }
 
         _installationCompleted = true;
-        Task.Run(async () =>
+        _ = Task.Run(async () =>
         {
             try
             {
@@ -449,9 +452,9 @@ internal sealed class InstallerWizardApp
                     }
                     if (_wizard is not null)
                     {
-                        _wizard.NextButton.Visible = true;
-                        _wizard.NextButton.Text = "Fine";
-                        _wizard.NextButton.Enabled = true;
+                        _wizard.NextFinishButton.Visible = true;
+                        _wizard.NextFinishButton.Text = "Fine";
+                        _wizard.NextFinishButton.Enabled = true;
                     }
                 });
             }
@@ -463,9 +466,9 @@ internal sealed class InstallerWizardApp
                     _logView?.InsertText($"\n{ex}\n");
                     if (_wizard is not null)
                     {
-                        _wizard.NextButton.Visible = true;
-                        _wizard.NextButton.Text = "Chiudi";
-                        _wizard.NextButton.Enabled = true;
+                        _wizard.NextFinishButton.Visible = true;
+                        _wizard.NextFinishButton.Text = "Chiudi";
+                        _wizard.NextFinishButton.Enabled = true;
                     }
                 });
             }
