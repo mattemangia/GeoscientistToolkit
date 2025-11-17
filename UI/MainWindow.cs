@@ -269,7 +269,7 @@ public class MainWindow
             _showProperties = true;
             _showLog = true;
             _showTools = true;
-            _showWelcome = SettingsManager.Instance.Settings.Appearance.ShowWelcomeOnStartup;
+            _showWelcome = false; // Disabled - welcome popup no longer used
 
             TryBuildDockLayout(dockspaceId, vp.WorkSize);
             _layoutBuilt = true;
