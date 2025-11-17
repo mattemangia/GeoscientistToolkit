@@ -1755,6 +1755,17 @@ public class ReactCommand : IGeoScriptCommand
             })
             .ThenByDescending(kvp => kvp.Value);
 
+        // Build output string for terminal display
+        var terminalOutput = new System.Text.StringBuilder();
+        terminalOutput.AppendLine("\n╔════════════════════════════════════════════════════════════════════════════════╗");
+        terminalOutput.AppendLine("║                           REACTION EQUILIBRIUM RESULTS                         ║");
+        terminalOutput.AppendLine("╠════════════════════════════════════════════════════════════════════════════════╣");
+        terminalOutput.AppendLine($"║ Temperature: {temperatureK,6:F1} K          pH: {finalState.pH,5:F2}          pe: {finalState.pe,6:F2}        ║");
+        terminalOutput.AppendLine($"║ Pressure:    {pressureBar,6:F2} bar        Ionic Strength: {finalState.IonicStrength_molkg,8:E2} mol/kg   ║");
+        terminalOutput.AppendLine("╠════════════════════════════════════════════════════════════════════════════════╣");
+        terminalOutput.AppendLine("║ Phase      Species              Formula          Moles          Mass (g)        ║");
+        terminalOutput.AppendLine("╠════════════════════════════════════════════════════════════════════════════════╣");
+
         foreach (var (speciesName, moles) in sortedProducts)
         {
             var compound = compoundLib.Find(speciesName);
@@ -1776,15 +1787,27 @@ public class ReactCommand : IGeoScriptCommand
                 mass,
                 moleFraction
             );
+
+            // Add to terminal output
+            var phaseLabel = compound.Phase == CompoundPhase.Solid ? "[SOLID]" :
+                            compound.Phase == CompoundPhase.Aqueous ? "[AQUE] " :
+                            compound.Phase == CompoundPhase.Gas ? "[GAS]  " :
+                            compound.Phase == CompoundPhase.Liquid ? "[LIQU] " : "[    ] ";
+
+            terminalOutput.AppendLine(
+                $"║ {phaseLabel} {speciesName,-18} {compound.ChemicalFormula,-14} {moles,12:E2}   {mass,12:E2}   ║");
         }
 
-        // Add summary row showing phase totals
-        Logger.Log("=== REACTION SUMMARY ===");
-        Logger.Log($"Temperature: {temperatureK:F2} K, Pressure: {pressureBar:F2} bar");
-        Logger.Log($"Final pH: {finalState.pH:F2}, pe: {finalState.pe:F2}");
-        Logger.Log($"Ionic Strength: {finalState.IonicStrength_molkg:E2} mol/kg");
+        terminalOutput.AppendLine("╠════════════════════════════════════════════════════════════════════════════════╣");
+        terminalOutput.AppendLine("║ PHASE TOTALS:                                                                  ║");
         foreach (var (phase, totalMoles) in phaseGroups.OrderBy(kvp => kvp.Key))
-            Logger.Log($"{phase} phase: {totalMoles:E3} total moles");
+        {
+            terminalOutput.AppendLine($"║   {phase,-20} {totalMoles,12:E2} moles                                  ║");
+        }
+        terminalOutput.AppendLine("╚════════════════════════════════════════════════════════════════════════════════╝");
+
+        // Print to terminal
+        Console.WriteLine(terminalOutput.ToString());
 
         return Task.FromResult<Dataset>(new TableDataset("Reaction_Products", resultTable));
     }
@@ -1915,8 +1938,9 @@ public class SpeciateCommand : IGeoScriptCommand
                     initialState.ElementalComposition.GetValueOrDefault(element, 0) + moles * stoichiometry;
         }
 
-        // Solve for speciation (not full equilibrium, just dissociation)
-        var finalState = solver.SolveSpeciation(initialState);
+        // Solve for equilibrium to get proper dissociation/speciation
+        // This handles dissolution of solids AND dissociation into ions
+        var finalState = solver.SolveEquilibrium(initialState);
 
         // Create output table
         var resultTable = new DataTable("Dissolved_Species");
@@ -1927,11 +1951,11 @@ public class SpeciateCommand : IGeoScriptCommand
         resultTable.Columns.Add("Concentration_M", typeof(double));
         resultTable.Columns.Add("Activity", typeof(double));
 
-        Logger.Log("\n=== DISSOLUTION PRODUCTS ===");
-        Logger.Log($"Temperature: {temperatureK:F2} K");
-        Logger.Log($"pH: {finalState.pH:F2}");
+        Logger.Log("\n=== AQUEOUS SPECIATION ===");
+        Logger.Log($"Temperature: {temperatureK:F2} K, Pressure: {pressureBar:F2} bar");
+        Logger.Log($"pH: {finalState.pH:F2}, pe: {finalState.pe:F2}");
         Logger.Log($"Ionic Strength: {finalState.IonicStrength_molkg:E2} mol/kg");
-        Logger.Log("\nSpecies:");
+        Logger.Log("\nDissolved Species (ions and complexes):");
 
         // Sort by phase and then by moles
         var sortedSpecies = finalState.SpeciesMoles
@@ -1950,6 +1974,17 @@ public class SpeciateCommand : IGeoScriptCommand
             })
             .ThenByDescending(kvp => kvp.Value);
 
+        // Build output string for terminal display
+        var terminalOutput = new System.Text.StringBuilder();
+        terminalOutput.AppendLine("\n╔════════════════════════════════════════════════════════════════════════════╗");
+        terminalOutput.AppendLine("║                         AQUEOUS SPECIATION RESULTS                         ║");
+        terminalOutput.AppendLine("╠════════════════════════════════════════════════════════════════════════════╣");
+        terminalOutput.AppendLine($"║ Temperature: {temperatureK,6:F1} K          pH: {finalState.pH,5:F2}          pe: {finalState.pe,6:F2}      ║");
+        terminalOutput.AppendLine($"║ Pressure:    {pressureBar,6:F2} bar        Ionic Strength: {finalState.IonicStrength_molkg,8:E2} mol/kg ║");
+        terminalOutput.AppendLine("╠════════════════════════════════════════════════════════════════════════════╣");
+        terminalOutput.AppendLine("║ Species              Formula        Moles          Conc (M)       Activity ║");
+        terminalOutput.AppendLine("╠════════════════════════════════════════════════════════════════════════════╣");
+
         foreach (var (speciesName, moles) in sortedSpecies)
         {
             var compound = compoundLib.Find(speciesName);
@@ -1967,8 +2002,19 @@ public class SpeciateCommand : IGeoScriptCommand
                 activity
             );
 
-            Logger.Log($"  {speciesName,-20} ({compound.ChemicalFormula,-10}): {moles:E3} moles, {concentration:E3} M");
+            // Add to terminal output with proper formatting
+            var phaseMark = compound.Phase == CompoundPhase.Aqueous ? "  " :
+                           compound.Phase == CompoundPhase.Gas ? "(g)" :
+                           compound.Phase == CompoundPhase.Solid ? "(s)" : "  ";
+
+            terminalOutput.AppendLine(
+                $"║ {speciesName,-18} {phaseMark} {compound.ChemicalFormula,-12} {moles,12:E2}   {concentration,12:E2}   {activity,8:E2} ║");
         }
+
+        terminalOutput.AppendLine("╚════════════════════════════════════════════════════════════════════════════╝");
+
+        // Print to terminal
+        Console.WriteLine(terminalOutput.ToString());
 
         return Task.FromResult<Dataset>(new TableDataset("Dissolved_Species", resultTable));
     }
