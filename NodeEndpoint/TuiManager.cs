@@ -1799,7 +1799,7 @@ public class TuiManager
             Y = y,
             Width = 10
         };
-        httpPortField.Tag = "HttpPort";
+        httpPortField.Data = "HttpPort";
         view.Add(httpPortLabel, httpPortField);
         y += 2;
 
@@ -1811,7 +1811,7 @@ public class TuiManager
             Y = y,
             Width = 15
         };
-        keepAliveField.Tag = "KeepAliveTimeout";
+        keepAliveField.Data = "KeepAliveTimeout";
         var keepAliveHelp = new Label("(HH:MM:SS)") { X = 41, Y = y };
         view.Add(keepAliveLabel, keepAliveField, keepAliveHelp);
         y += 2;
@@ -1824,7 +1824,7 @@ public class TuiManager
             Y = y,
             Width = 15
         };
-        headersField.Tag = "RequestHeadersTimeout";
+        headersField.Data = "RequestHeadersTimeout";
         var headersHelp = new Label("(HH:MM:SS)") { X = 46, Y = y };
         view.Add(headersLabel, headersField, headersHelp);
         y += 2;
@@ -1837,7 +1837,7 @@ public class TuiManager
             Y = y,
             Width = 10
         };
-        maxConnField.Tag = "MaxConcurrentConnections";
+        maxConnField.Data = "MaxConcurrentConnections";
         view.Add(maxConnLabel, maxConnField);
         y += 2;
 
@@ -1849,7 +1849,7 @@ public class TuiManager
             Y = y,
             Width = 15
         };
-        maxBodyField.Tag = "MaxRequestBodySize";
+        maxBodyField.Data = "MaxRequestBodySize";
         var maxBodyHelp = new Label("(1 GB = 1073741824)") { X = 51, Y = y };
         view.Add(maxBodyLabel, maxBodyField, maxBodyHelp);
 
@@ -1879,7 +1879,7 @@ public class TuiManager
             X = 28,
             Y = y
         };
-        enableCheck.Tag = "EnableNodeManager";
+        enableCheck.Data = "EnableNodeManager";
         view.Add(enableLabel, enableCheck);
         y += 2;
 
@@ -1895,7 +1895,7 @@ public class TuiManager
         roleCombo.SetSource(new List<string> { "Hybrid", "Worker", "Coordinator" });
         var roleValue = GetJsonValue(configDoc, "NodeManager.Role", "Hybrid");
         roleCombo.SelectedItem = roleValue == "Worker" ? 1 : roleValue == "Coordinator" ? 2 : 0;
-        roleCombo.Tag = "Role";
+        roleCombo.Data = "Role";
         view.Add(roleLabel, roleCombo);
         y += 2;
 
@@ -1907,7 +1907,7 @@ public class TuiManager
             Y = y,
             Width = 35
         };
-        nodeNameField.Tag = "NodeName";
+        nodeNameField.Data = "NodeName";
         view.Add(nodeNameLabel, nodeNameField);
         y += 2;
 
@@ -1919,7 +1919,7 @@ public class TuiManager
             Y = y,
             Width = 10
         };
-        portField.Tag = "ServerPort";
+        portField.Data = "ServerPort";
         view.Add(portLabel, portField);
         y += 2;
 
@@ -1931,7 +1931,7 @@ public class TuiManager
             Y = y,
             Width = 25
         };
-        hostField.Tag = "HostAddress";
+        hostField.Data = "HostAddress";
         var hostHelp = new Label("(use 'auto' for auto-detect)") { X = 54, Y = y };
         view.Add(hostLabel, hostField, hostHelp);
         y += 2;
@@ -1944,7 +1944,7 @@ public class TuiManager
             Y = y,
             Width = 10
         };
-        heartbeatField.Tag = "HeartbeatInterval";
+        heartbeatField.Data = "HeartbeatInterval";
         view.Add(heartbeatLabel, heartbeatField);
         y += 2;
 
@@ -1956,7 +1956,7 @@ public class TuiManager
             Y = y,
             Width = 10
         };
-        reconnectField.Tag = "MaxReconnectAttempts";
+        reconnectField.Data = "MaxReconnectAttempts";
         view.Add(reconnectLabel, reconnectField);
         y += 2;
 
@@ -1967,7 +1967,7 @@ public class TuiManager
             X = 32,
             Y = y
         };
-        useNodesCheck.Tag = "UseNodesForSimulators";
+        useNodesCheck.Data = "UseNodesForSimulators";
         view.Add(useNodesLabel, useNodesCheck);
         y += 2;
 
@@ -1978,7 +1978,7 @@ public class TuiManager
             X = 32,
             Y = y
         };
-        useGpuCheck.Tag = "UseGpuForJobs";
+        useGpuCheck.Data = "UseGpuForJobs";
         view.Add(useGpuLabel, useGpuCheck);
 
         tab.View = view;
@@ -2007,7 +2007,7 @@ public class TuiManager
             X = 32,
             Y = y
         };
-        enabledCheck.Tag = "DiscoveryEnabled";
+        enabledCheck.Data = "DiscoveryEnabled";
         view.Add(enabledLabel, enabledCheck);
         y += 2;
 
@@ -2019,7 +2019,7 @@ public class TuiManager
             Y = y,
             Width = 10
         };
-        intervalField.Tag = "BroadcastInterval";
+        intervalField.Data = "BroadcastInterval";
         view.Add(intervalLabel, intervalField);
         y += 2;
 
@@ -2031,7 +2031,7 @@ public class TuiManager
             Y = y,
             Width = 10
         };
-        portField.Tag = "DiscoveryPort";
+        portField.Data = "DiscoveryPort";
         view.Add(portLabel, portField);
         y += 3;
 
@@ -2075,7 +2075,7 @@ public class TuiManager
             Y = y,
             Width = 50
         };
-        pathField.Tag = "StoragePath";
+        pathField.Data = "StoragePath";
         view.Add(pathLabel, pathField);
         y++;
 
@@ -2094,7 +2094,7 @@ public class TuiManager
             X = 25,
             Y = y
         };
-        networkCheck.Tag = "UseNetworkStorage";
+        networkCheck.Data = "UseNetworkStorage";
         view.Add(networkLabel, networkCheck);
         y += 3;
 
@@ -2147,7 +2147,7 @@ public class TuiManager
         defaultCombo.SetSource(logLevels);
         var defaultLevel = GetJsonValue(configDoc, "Logging.LogLevel.Default", "Information");
         defaultCombo.SelectedItem = logLevels.IndexOf(defaultLevel);
-        defaultCombo.Tag = "DefaultLogLevel";
+        defaultCombo.Data = "DefaultLogLevel";
         view.Add(defaultLabel, defaultCombo);
         y += 2;
 
@@ -2163,7 +2163,7 @@ public class TuiManager
         aspCombo.SetSource(logLevels);
         var aspLevel = GetJsonValue(configDoc, "Logging.LogLevel.Microsoft.AspNetCore", "Warning");
         aspCombo.SelectedItem = logLevels.IndexOf(aspLevel);
-        aspCombo.Tag = "AspNetCoreLogLevel";
+        aspCombo.Data = "AspNetCoreLogLevel";
         view.Add(aspLabel, aspCombo);
         y += 3;
 
@@ -2334,7 +2334,7 @@ public class TuiManager
     {
         foreach (var subview in view.Subviews)
         {
-            if (subview is TextField textField && textField.Tag?.ToString() == tag)
+            if (subview is TextField textField && textField.Data?.ToString() == tag)
             {
                 return SanitizeString(textField.Text.ToString() ?? "");
             }
@@ -2346,7 +2346,7 @@ public class TuiManager
     {
         foreach (var subview in view.Subviews)
         {
-            if (subview is CheckBox checkBox && checkBox.Tag?.ToString() == tag)
+            if (subview is CheckBox checkBox && checkBox.Data?.ToString() == tag)
             {
                 return checkBox.Checked;
             }
@@ -2358,7 +2358,7 @@ public class TuiManager
     {
         foreach (var subview in view.Subviews)
         {
-            if (subview is ComboBox comboBox && comboBox.Tag?.ToString() == tag)
+            if (subview is ComboBox comboBox && comboBox.Data?.ToString() == tag)
             {
                 var index = comboBox.SelectedItem;
                 if (index >= 0 && index < options.Count)
