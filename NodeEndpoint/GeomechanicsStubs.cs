@@ -17,12 +17,13 @@ public partial class GeomechanicalSimulatorCPU
         Logger.Log("For geothermal/fluid simulations, use the main GeoscientistToolkit application with full UI support.", Settings.LogLevel.Warning);
     }
 
-    private void SimulateFluidInjectionAndFracturing()
+    private void SimulateFluidInjectionAndFracturing(object results, object labels, object progress, object token)
     {
         // No-op stub - fluid injection not implemented in headless server
+        Logger.Log("WARNING: Fluid injection simulation is not available in NodeEndpoint.", Settings.LogLevel.Warning);
     }
 
-    private void PopulateGeothermalAndFluidResults()
+    private void PopulateGeothermalAndFluidResults(object results)
     {
         // No-op stub - fluid results not implemented in headless server
     }

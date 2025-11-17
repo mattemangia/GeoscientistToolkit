@@ -43,15 +43,14 @@
     <Compile Include="..\Analysis\AcousticSimulation\SimulationData.cs" Link="Analysis\AcousticSimulation\SimulationData.cs" />
     <Compile Include="..\Analysis\AcousticSimulation\SimulationParameters.cs" Link="Analysis\AcousticSimulation\SimulationParameters.cs" />
 
-    <!-- NOTE: Geothermal, Seismic, NMR, and PNM Generator are EXCLUDED - they have complex dependencies on:
+    <!-- NOTE: Geothermal, Seismic, NMR, and PNM are EXCLUDED - they have complex dependencies on:
          - UI libraries (ImGuiNET, ProgressBarDialog)
-         - Advanced data types (Mesh3D, VolumeData, CtImageStack, Borehole, GIS)
+         - Advanced data types (Mesh3D, VolumeData, CtImageStack, Borehole, GIS, PNMDataset)
          - Complex simulation infrastructure (CrustalModel, WavePropagationEngine, etc.)
          These simulations are better suited for the main application with full UI support.
          For headless distributed computing, focus on geomechanics and acoustic simulations. -->
 
-    <!-- PNM - Only computational algorithms, no generation (requires UI) -->
-    <Compile Include="..\Analysis\PNM\AbsolutePermeability.cs" Link="Analysis\PNM\AbsolutePermeability.cs" />
+    <!-- PNM - EXCLUDED (AbsolutePermeability needs PNMDataset which has 91+ errors) -->
 
     <!-- Essential data types (no UI) -->
     <Compile Include="..\Data\Dataset.cs" Link="Data\Dataset.cs" />
