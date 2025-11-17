@@ -640,4 +640,4 @@ For questions, issues, or feature requests, please contact the GeoscientistToolk
 
 ---
 
-**© 2025 Geoscientist's Toolkit Project**
+**© 2025 The Geoscientist's Toolkit Project**
