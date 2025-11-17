@@ -365,8 +365,8 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## Authors
 
-**Matteo Mangia**
-- Email: matteo.mangia@gmail.com
+**Matteo Mangiagalli**
+- Email: m.mangiagalli@campus.uniurb.it
 
 ### Citation
 
