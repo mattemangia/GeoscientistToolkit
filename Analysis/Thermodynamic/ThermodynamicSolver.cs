@@ -417,7 +417,13 @@ public class ThermodynamicSolver : SimulatorNodeSupport
     {
         foreach (var speciesName in basisSpecies)
         {
-            var compound = _compoundLibrary.Find(speciesName);
+            var compound = _compoundLibrary.FindFlexible(speciesName);
+            if (compound == null)
+            {
+                compound = _compoundLibrary.FindFlexible(
+                    CompoundLibrary.NormalizeFormulaInput(speciesName));
+            }
+
             if (compound == null) continue;
 
             // Check if activity already exists from previous calculations
