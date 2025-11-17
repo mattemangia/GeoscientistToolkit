@@ -598,7 +598,11 @@ public class PhotogrammetryWizardPanel : BasePanel
                         ImGui.Text($"  {gcp.Name} {status}");
                     }
                     if (ImGui.Button($"Edit GCPs##{image.Id}"))
+                    {
+                        // Ensure image is loaded before opening GCP editor
+                        image.Dataset.Load();
                         _gcpEditor.Open(image);
+                    }
                     ImGui.TreePop();
                 }
             }
@@ -1113,7 +1117,10 @@ public class PhotogrammetryWizardPanel : BasePanel
                 ImGui.TableNextColumn();
                 if (ImGui.SmallButton($"Edit##{kvp.Key}"))
                 {
-                    _gcpEditor.Open(kvp.Value.First().img);
+                    var image = kvp.Value.First().img;
+                    // Ensure image is loaded before opening GCP editor
+                    image.Dataset.Load();
+                    _gcpEditor.Open(image);
                 }
             }
             
