@@ -1611,6 +1611,28 @@ public class ReactCommand : IGeoScriptCommand
     public string HelpText => "Calculates the equilibrium products of a set of reactants at given T and P.";
     public string Usage => "REACT <Reactants> [TEMP <val> C|K] [PRES <val> BAR|ATM]";
 
+    /// <summary>
+    ///     Normalizes a chemical formula by converting plain numbers to subscripts.
+    ///     E.g., "H2O" -> "H₂O", "CaCO3" -> "CaCO₃", "H2S" -> "H₂S"
+    /// </summary>
+    private string NormalizeChemicalFormula(string formula)
+    {
+        // Convert regular digits to subscript Unicode characters
+        var normalized = formula
+            .Replace('0', '₀')
+            .Replace('1', '₁')
+            .Replace('2', '₂')
+            .Replace('3', '₃')
+            .Replace('4', '₄')
+            .Replace('5', '₅')
+            .Replace('6', '₆')
+            .Replace('7', '₇')
+            .Replace('8', '₈')
+            .Replace('9', '₉');
+
+        return normalized;
+    }
+
     public Task<Dataset> ExecuteAsync(GeoScriptContext context, AstNode node)
     {
         var cmd = (CommandNode)node;
@@ -1657,16 +1679,35 @@ public class ReactCommand : IGeoScriptCommand
         {
             // Handle custom hydration character '!' -> '·'
             var cleanedName = reactantName.Replace('!', '·');
-            var compound = compoundLib.Find(cleanedName);
+
+            // Normalize chemical formula: convert plain numbers to subscripts
+            // This allows users to type "H2O" and it will match "H₂O"
+            var normalizedName = NormalizeChemicalFormula(cleanedName);
+
+            // Try to find the compound, first with normalized name, then with original
+            var compound = compoundLib.Find(normalizedName) ?? compoundLib.Find(cleanedName);
 
             if (compound == null)
             {
-                Logger.LogError($"Reactant '{reactantName}' not found in the chemical database.");
+                Logger.LogError($"Reactant '{reactantName}' (normalized: '{normalizedName}') not found in the chemical database.");
                 throw new ArgumentException($"Unknown reactant: {reactantName}");
             }
 
             // Assume 1 mole of each reactant, except for water which is the solvent.
-            var moles = compound.Name.ToUpper() == "WATER" || compound.ChemicalFormula == "H₂O" ? 55.509 : 1.0;
+            // For water, calculate moles in 1 L: 1000 g / molar_mass
+            double moles;
+            var isWater = compound.Name.ToUpper() == "WATER" || compound.ChemicalFormula == "H₂O";
+            if (isWater)
+            {
+                var waterMolarMass = compound.MolecularWeight_g_mol ?? 18.015; // g/mol
+                moles = 1000.0 / waterMolarMass; // moles in 1 L of water
+            }
+            else
+            {
+                moles = 1.0; // 1 mole for non-water reactants
+            }
+
+            Logger.Log($"[REACT] Adding reactant: {compound.Name} (formula: {compound.ChemicalFormula}) - {moles:F3} moles");
 
             initialState.SpeciesMoles[compound.Name] =
                 initialState.SpeciesMoles.GetValueOrDefault(compound.Name, 0) + moles;

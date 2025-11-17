@@ -886,15 +886,22 @@ REACT <Reactants> [TEMP <val> C|K] [PRES <val> BAR|ATM]
 
 **Examples**:
 ```geoscript
-# Simple reaction at standard conditions
+# Water equilibrium (automatically uses 55.5 moles for 1 L)
+REACT H2O
+
+# Simple salts (plain number notation works!)
+REACT NaCl
 REACT CaCl2 + Na2CO3
 
-# With temperature and pressure
+# Minerals and acids
 REACT CaCO3 + HCl TEMP 25 C PRES 1 BAR
-
-# Complex reaction
 REACT Fe2O3 + H2SO4 + H2O TEMP 350 K PRES 2 BAR
+
+# Complex species
+REACT Al2Si2O5(OH)4 + H2SO4 TEMP 350 K
 ```
+
+**Note**: Chemical formulas can be entered with plain numbers (e.g., "H2O", "NaCl", "CaCO3", "H2SO4") or subscripts (e.g., "H₂O", "NaCl", "CaCO₃", "H₂SO₄"). The system automatically normalizes ALL formulas to match the database.
 
 **Output**: Table showing products organized by phase (solid, aqueous, gas) with moles, mass, and mole fractions
 
