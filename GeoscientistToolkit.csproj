@@ -11,14 +11,19 @@
         <DefineConstants>IMGUI_HAS_DOCK_BUILDER;$(DefineConstants)</DefineConstants>
     </PropertyGroup>
 
-    <!-- 
-      FIX 1: Exclude the nested AddInExtractor project's source code 
+    <!--
+      FIX 1: Exclude the nested projects' source code
       from the main project's compilation. This resolves the duplicate attribute errors.
     -->
     <ItemGroup>
         <Compile Remove="AddInExtractor\**"/>
         <EmbeddedResource Remove="AddInExtractor\**"/>
         <None Remove="AddInExtractor\**"/>
+
+        <!-- Exclude NodeEndpoint to prevent duplicate assembly attributes -->
+        <Compile Remove="NodeEndpoint\**"/>
+        <EmbeddedResource Remove="NodeEndpoint\**"/>
+        <None Remove="NodeEndpoint\**"/>
     </ItemGroup>
 
     <!-- FIX 2: All PackageReference items are correctly placed within a single ItemGroup -->
