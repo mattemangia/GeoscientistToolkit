@@ -71,9 +71,7 @@
         <PackageReference Include="SkiaSharp.HarfBuzz" Version="2.88.8"/>
 
         <!-- Photogrammetry Dependencies (non-ONNX) -->
-        <PackageReference Include="OpenCvSharp4" Version="4.10.0.20240616"/>
-        <PackageReference Include="OpenCvSharp4.runtime.win" Version="4.10.0.20240616" Condition="'$(RuntimeIdentifier)' == 'win-x64'"/>
-        <!-- Note: For Linux and macOS, use system-installed OpenCV libraries -->
+         <!-- Note: For Linux and macOS, use system-installed OpenCV libraries -->
         <!-- OpenCV can be installed via: -->
         <!-- Ubuntu/Debian: sudo apt-get install libopencv-dev -->
         <!-- macOS: brew install opencv -->
@@ -88,6 +86,9 @@
     <!-- GPU version for x64 platforms only (CUDA support) -->
     <ItemGroup Condition="'$(RuntimeIdentifier)' == 'win-x64' or '$(RuntimeIdentifier)' == 'linux-x64'">
         <PackageReference Include="Microsoft.ML.OnnxRuntime.Gpu" Version="1.19.2"/>
+        <PackageReference Include="OpenCvSharp4" Version="4.10.0.20240616"/>
+        <PackageReference Include="OpenCvSharp4.runtime.win" Version="4.10.0.20240616" Condition="'$(RuntimeIdentifier)' == 'win-x64'"/>
+
     </ItemGroup>
 
     <!-- CPU version for ARM64 and macOS platforms (no CUDA support) -->
