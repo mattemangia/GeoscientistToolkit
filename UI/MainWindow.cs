@@ -111,6 +111,8 @@ public class MainWindow
         // Subscribe to Create GIS Shapefile events
         _datasets.OnCreateShapefileFromTable += gis => _shapefileCreationDialog.OpenFromTable(gis);
         _datasets.OnCreateEmptyShapefile += gis => _shapefileCreationDialog.OpenEmpty(gis);
+        // Subscribe to Multi-Borehole Geothermal Tools
+        _datasets.OnOpenMultiBoreholeGeothermalTools += group => OnDatasetSelected(group);
         // Initialize the screenshot tool
         _screenshotTool = new ImGuiWindowScreenshotTool();
 

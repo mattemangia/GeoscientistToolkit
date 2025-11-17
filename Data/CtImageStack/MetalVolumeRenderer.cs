@@ -246,7 +246,7 @@ fragment float4 fragment_main(VertexOut in [[stage_in]],
     float4 color = float4(0.0);
     float stepSize = 0.01 * constants.ThresholdParams.z;
     int maxSteps = 768;
-    float opacityScale = 40.0;
+    float opacityScale = 80.0;
     
     // Get colormap index from RenderParams.x
     int colorMapIndex = int(constants.RenderParams.x);
@@ -257,7 +257,7 @@ fragment float4 fragment_main(VertexOut in [[stage_in]],
     
     for (int i = 0; i < maxSteps; i++) {
         float t = tNear + float(i) * stepSize;
-        if (t > tFar || color.a > 0.95) break;
+        if (t > tFar || color.a > 0.98) break;
         
         float3 pos = rayOrigin + t * rayDir;
         if (any(pos < 0.0) || any(pos > 1.0)) continue;
@@ -328,7 +328,7 @@ fragment float4 fragment_main(VertexOut in [[stage_in]],
                     texCoord.y = (float(colorMapIndex) + 0.5) / 4.0; // Y coordinate selects the colormap
                     float4 colorMapColor = colorMapTex.sample(volumeSampler, texCoord);
                     
-                    sampleColor = float4(colorMapColor.rgb, normalizedDensity * 0.3);
+                    sampleColor = float4(colorMapColor.rgb, normalizedDensity);
                 }
             }
 

@@ -47,6 +47,25 @@ private float _injectionTemperature = 12.0f; // °C
 private Dictionary<string, string> _doubletPairs = new(); // injection -> production
 private MultiBoreholeSimulationResults _coupledResults = null;
 
+// Solver options
+private double _simulationTime = 30 * 365.25 * 24 * 3600; // 30 years in seconds
+private double _timeStep = 3600 * 6; // 6 hours in seconds
+private double _convergenceTolerance = 5e-3;
+private int _maxIterationsPerStep = 200;
+private bool _useSIMD = true;
+private bool _useGPU = false;
+
+// Heat exchanger configuration
+private bool _useFullBoreholeDepth = true; // Use full depth by default
+private float _heatExchangerDepth = 100.0f; // meters (if not using full depth)
+
+// Per-borehole temperature configuration
+private Dictionary<string, float> _boreholeInletTemperatures = new(); // borehole -> inlet temp (°C)
+
+// Doublet pair selection indices (persistent for UI)
+private int _selectedInjectionIdx = -1;
+private int _selectedProductionIdx = -1;
+
 // Export functionality
 private SubsurfaceGISDataset _createdSubsurfaceModel = null;
 private ImGuiExportFileDialog _exportDialog = null;
@@ -99,21 +118,35 @@ public void Draw(Dataset dataset)
 
     ImGui.Separator();
 
-    if (ImGui.CollapsingHeader("4. Run Simulations"))
+    if (ImGui.CollapsingHeader("4. Per-Borehole Inlet Temperatures"))
+    {
+        DrawPerBoreholeTemperatureConfiguration();
+    }
+
+    ImGui.Separator();
+
+    if (ImGui.CollapsingHeader("5. Advanced Solver Options"))
+    {
+        DrawSolverOptions();
+    }
+
+    ImGui.Separator();
+
+    if (ImGui.CollapsingHeader("6. Run Simulations"))
     {
         DrawSimulationSection();
     }
 
     ImGui.Separator();
 
-    if (ImGui.CollapsingHeader("5. Create Subsurface Model"))
+    if (ImGui.CollapsingHeader("7. Create Subsurface Model"))
     {
         DrawSubsurfaceModelSection();
     }
 
     ImGui.Separator();
 
-    if (ImGui.CollapsingHeader("6. Export Geothermal Maps"))
+    if (ImGui.CollapsingHeader("8. Export Geothermal Maps"))
     {
         DrawExportSection();
     }
@@ -189,11 +222,18 @@ private void UpdateSelectedBoreholes(List<BoreholeDataset> allBoreholes)
 
 private void DrawCoupledSimulationOptions()
 {
-    ImGui.TextColored(new Vector4(0.4f, 1.0f, 0.6f, 1.0f), 
+    ImGui.TextColored(new Vector4(0.4f, 1.0f, 0.6f, 1.0f),
         "Enable multi-borehole coupled simulation with aquifer flow and thermal interference");
-    
+
     ImGui.Checkbox("Use Coupled Simulation (Aquifer + Thermal Interference)", ref _useCoupledSimulation);
-    
+
+    if (!_useCoupledSimulation)
+    {
+        ImGui.TextColored(new Vector4(0.6f, 0.9f, 1.0f, 1.0f),
+            "→ Individual mode: Each borehole simulated independently");
+        ImGui.TextDisabled("Create interpolated subsurface maps in Section 7");
+    }
+
     if (_useCoupledSimulation)
     {
         ImGui.Indent();
@@ -294,39 +334,42 @@ private void DrawDoubletConfiguration()
     
     ImGui.Separator();
     ImGui.Text("Add New Doublet:");
-    
+
     if (_selectedBoreholes.Count >= 2)
     {
         var boreholeNames = _selectedBoreholes.Select(b => b.WellName).ToArray();
-        
-        int injectionIdx = -1;
-        int productionIdx = -1;
-        
-        ImGui.Combo("Injection Well", ref injectionIdx, boreholeNames, boreholeNames.Length);
-        ImGui.Combo("Production Well", ref productionIdx, boreholeNames, boreholeNames.Length);
-        
-        if (injectionIdx >= 0 && productionIdx >= 0 && injectionIdx != productionIdx)
+
+        // Use persistent fields for combo selections
+        ImGui.Combo("Injection Well", ref _selectedInjectionIdx, boreholeNames, boreholeNames.Length);
+        ImGui.Combo("Production Well", ref _selectedProductionIdx, boreholeNames, boreholeNames.Length);
+
+        if (_selectedInjectionIdx >= 0 && _selectedProductionIdx >= 0 && _selectedInjectionIdx != _selectedProductionIdx)
         {
             if (ImGui.Button("Add Doublet Pair"))
             {
-                string injWell = boreholeNames[injectionIdx];
-                string prodWell = boreholeNames[productionIdx];
-                
+                string injWell = boreholeNames[_selectedInjectionIdx];
+                string prodWell = boreholeNames[_selectedProductionIdx];
+
                 if (!_doubletPairs.ContainsKey(injWell))
                 {
                     _doubletPairs[injWell] = prodWell;
                     Logger.Log($"Added doublet pair: {injWell} (injection) -> {prodWell} (production)");
+
+                    // Reset selections after adding
+                    _selectedInjectionIdx = -1;
+                    _selectedProductionIdx = -1;
                 }
             }
-            
+
             // Show well spacing
-            if (injectionIdx >= 0 && productionIdx >= 0)
-            {
-                var injBh = _selectedBoreholes[injectionIdx];
-                var prodBh = _selectedBoreholes[productionIdx];
-                double spacing = CalculateWellSpacing(injBh, prodBh);
-                ImGui.TextDisabled($"Well spacing: {spacing:F0} m");
-            }
+            var injBh = _selectedBoreholes[_selectedInjectionIdx];
+            var prodBh = _selectedBoreholes[_selectedProductionIdx];
+            double spacing = CalculateWellSpacing(injBh, prodBh);
+            ImGui.TextDisabled($"Well spacing: {spacing:F0} m");
+        }
+        else if (_selectedInjectionIdx >= 0 && _selectedProductionIdx >= 0 && _selectedInjectionIdx == _selectedProductionIdx)
+        {
+            ImGui.TextColored(new Vector4(1, 0.5f, 0, 1), "Injection and production wells must be different!");
         }
     }
     else
@@ -341,15 +384,182 @@ private double CalculateWellSpacing(BoreholeDataset bh1, BoreholeDataset bh2)
     double lon1 = bh1.DatasetMetadata.Longitude ?? 0;
     double lat2 = bh2.DatasetMetadata.Latitude ?? 0;
     double lon2 = bh2.DatasetMetadata.Longitude ?? 0;
-    
+
     double metersPerDegreeLat = 111111.0;
     double avgLat = (lat1 + lat2) / 2.0;
     double metersPerDegreeLon = 111111.0 * Math.Cos(avgLat * Math.PI / 180.0);
-    
+
     double dx = (lon2 - lon1) * metersPerDegreeLon;
     double dy = (lat2 - lat1) * metersPerDegreeLat;
-    
+
     return Math.Sqrt(dx * dx + dy * dy);
+}
+
+private void DrawPerBoreholeTemperatureConfiguration()
+{
+    if (_selectedBoreholes.Count == 0)
+    {
+        ImGui.TextColored(new Vector4(1, 0.7f, 0, 1), "Please select boreholes first.");
+        return;
+    }
+
+    ImGui.TextColored(new Vector4(0.4f, 0.8f, 1.0f, 1.0f),
+        "Configure individual inlet temperatures for each borehole");
+    ImGui.TextDisabled("Outlet temperatures will vary based on geological conditions and flow");
+
+    ImGui.Separator();
+
+    foreach (var borehole in _selectedBoreholes)
+    {
+        // Initialize default temperature if not set
+        if (!_boreholeInletTemperatures.ContainsKey(borehole.WellName))
+        {
+            // Set default based on doublet role
+            if (_doubletPairs.ContainsKey(borehole.WellName))
+            {
+                // Injection well - use cooler temperature
+                _boreholeInletTemperatures[borehole.WellName] = _injectionTemperature;
+            }
+            else if (_doubletPairs.ContainsValue(borehole.WellName))
+            {
+                // Production well - use warmer temperature (from ground)
+                _boreholeInletTemperatures[borehole.WellName] = 15.0f; // °C
+            }
+            else
+            {
+                // Standard extraction well
+                _boreholeInletTemperatures[borehole.WellName] = 5.0f; // °C (typical heat pump inlet)
+            }
+        }
+
+        float temp = _boreholeInletTemperatures[borehole.WellName];
+
+        // Show role indicator
+        string roleIndicator = "";
+        if (_doubletPairs.ContainsKey(borehole.WellName))
+        {
+            roleIndicator = " [INJECTION]";
+        }
+        else if (_doubletPairs.ContainsValue(borehole.WellName))
+        {
+            roleIndicator = " [PRODUCTION]";
+        }
+
+        if (ImGui.InputFloat($"{borehole.WellName}{roleIndicator} (°C)", ref temp))
+        {
+            _boreholeInletTemperatures[borehole.WellName] = Math.Clamp(temp, -10.0f, 40.0f);
+        }
+
+        // Show typical range hint
+        ImGui.SameLine();
+        ImGui.TextDisabled("(Typical: 5-15°C for extraction, 8-12°C for injection)");
+    }
+
+    ImGui.Separator();
+
+    if (ImGui.Button("Reset to Defaults"))
+    {
+        _boreholeInletTemperatures.Clear();
+    }
+
+    ImGui.SameLine();
+    ImGui.TextDisabled("Will reset based on doublet configuration");
+}
+
+private void DrawSolverOptions()
+{
+    ImGui.TextColored(new Vector4(0.6f, 1.0f, 0.8f, 1.0f),
+        "Advanced solver and simulation parameters");
+    ImGui.TextDisabled("These affect convergence, accuracy, and simulation duration");
+
+    ImGui.Separator();
+    ImGui.Text("Time Parameters:");
+
+    // Simulation time - show in years for user convenience
+    float simYears = (float)(_simulationTime / (365.25 * 24 * 3600));
+    if (ImGui.InputFloat("Simulation Duration (years)", ref simYears))
+    {
+        _simulationTime = Math.Clamp(simYears, 0.1, 50.0) * 365.25 * 24 * 3600;
+    }
+    ImGui.TextDisabled($"Total time: {_simulationTime / (365.25 * 24 * 3600):F1} years ({_simulationTime / 86400:F0} days)");
+
+    // Time step - show in hours for user convenience
+    float timeStepHours = (float)(_timeStep / 3600);
+    if (ImGui.InputFloat("Time Step (hours)", ref timeStepHours))
+    {
+        _timeStep = Math.Clamp(timeStepHours, 0.1, 24.0) * 3600;
+    }
+    ImGui.TextDisabled($"Time step: {_timeStep / 3600:F1} hours ({_timeStep:F0} seconds)");
+
+    ImGui.Separator();
+    ImGui.Text("Convergence Parameters:");
+
+    // Convergence tolerance
+    float convergenceTol = (float)_convergenceTolerance;
+    if (ImGui.InputFloat("Convergence Tolerance", ref convergenceTol, 0, 0, "%.1e"))
+    {
+        _convergenceTolerance = Math.Clamp(convergenceTol, 1e-5, 1e-1);
+    }
+    ImGui.TextDisabled("Lower = more accurate but slower (typical: 1e-3 to 5e-3)");
+
+    // Max iterations
+    if (ImGui.InputInt("Max Iterations per Step", ref _maxIterationsPerStep))
+    {
+        _maxIterationsPerStep = Math.Clamp(_maxIterationsPerStep, 50, 1000);
+    }
+    ImGui.TextDisabled("Higher = better convergence for complex problems (typical: 100-200)");
+
+    ImGui.Separator();
+    ImGui.Text("Heat Exchanger Configuration:");
+
+    ImGui.Checkbox("Use Full Borehole Depth", ref _useFullBoreholeDepth);
+    ImGui.SameLine();
+    ImGui.TextDisabled("(Heat exchanger extends to bottom of each borehole)");
+
+    if (!_useFullBoreholeDepth)
+    {
+        ImGui.Indent();
+        if (ImGui.InputFloat("Heat Exchanger Depth (m)", ref _heatExchangerDepth))
+        {
+            _heatExchangerDepth = Math.Max(10.0f, _heatExchangerDepth);
+        }
+        ImGui.TextDisabled("Active heat exchange region from surface");
+        ImGui.Unindent();
+    }
+    else
+    {
+        ImGui.TextDisabled("Heat exchanger depth will match each borehole's total depth");
+    }
+
+    ImGui.Separator();
+    ImGui.Text("Performance Options:");
+
+    ImGui.Checkbox("Use SIMD Optimization", ref _useSIMD);
+    ImGui.SameLine();
+    ImGui.TextDisabled("(Vector CPU instructions)");
+
+    ImGui.Checkbox("Use GPU Acceleration", ref _useGPU);
+    ImGui.SameLine();
+    ImGui.TextDisabled("(OpenCL/Compute - experimental)");
+
+    ImGui.Separator();
+
+    // Estimated computation info
+    double estimatedSteps = _simulationTime / _timeStep;
+    int totalBoreholes = _selectedBoreholes.Count;
+    ImGui.TextColored(new Vector4(1.0f, 1.0f, 0.6f, 1.0f), "Estimated Computation:");
+    ImGui.Text($"  Time steps: ~{estimatedSteps:F0}");
+    ImGui.Text($"  Boreholes: {totalBoreholes}");
+    ImGui.Text($"  Total iterations: ~{estimatedSteps * totalBoreholes:F0}");
+
+    // Rough time estimate
+    double estimatedMinutes = (estimatedSteps * totalBoreholes) / 10.0; // Very rough: ~10 steps per second
+    if (estimatedMinutes < 60)
+        ImGui.TextDisabled($"  Estimated runtime: ~{estimatedMinutes:F0} minutes");
+    else if (estimatedMinutes < 1440)
+        ImGui.TextDisabled($"  Estimated runtime: ~{estimatedMinutes / 60:F1} hours");
+    else
+        ImGui.TextDisabled($"  Estimated runtime: ~{estimatedMinutes / 1440:F1} days");
 }
 
 private void DrawSimulationSection()
@@ -396,8 +606,24 @@ private void DrawSubsurfaceModelSection()
     if (_simulationResults.Count == 0)
     {
         ImGui.TextColored(new Vector4(1, 0.7f, 0, 1), "Please run simulations first.");
+        ImGui.TextDisabled("Run individual or coupled simulations in Section 6");
         return;
     }
+
+    // Show info about data source
+    if (_useCoupledSimulation && _coupledResults != null)
+    {
+        ImGui.TextColored(new Vector4(0.4f, 1.0f, 0.6f, 1.0f),
+            $"Data source: Coupled simulation ({_simulationResults.Count} boreholes)");
+    }
+    else
+    {
+        ImGui.TextColored(new Vector4(0.6f, 0.9f, 1.0f, 1.0f),
+            $"Data source: Individual simulations ({_simulationResults.Count} boreholes)");
+    }
+    ImGui.TextDisabled("Subsurface model will interpolate between borehole results");
+
+    ImGui.Separator();
 
     ImGui.Text("Grid Resolution:");
     ImGui.InputInt("X Resolution##gridx", ref _gridResolutionX);
@@ -556,6 +782,47 @@ private void DrawResultsSection()
 
             if (result != null)
             {
+                // Display inlet and outlet temperatures
+                if (result.Options != null)
+                {
+                    double inletTempC = result.Options.FluidInletTemperature - 273.15;
+                    ImGui.TextColored(new Vector4(0.6f, 0.9f, 1.0f, 1.0f),
+                        $"Inlet Temperature (T_in): {inletTempC:F2}°C");
+                }
+
+                if (result.OutletTemperature != null && result.OutletTemperature.Any())
+                {
+                    // Get outlet temperature statistics
+                    var outletTemps = result.OutletTemperature.Select(t => t.temperature - 273.15).ToList();
+                    double finalOutletC = outletTemps.Last();
+                    double avgOutletC = outletTemps.Average();
+                    double minOutletC = outletTemps.Min();
+                    double maxOutletC = outletTemps.Max();
+
+                    ImGui.TextColored(new Vector4(1.0f, 0.8f, 0.4f, 1.0f),
+                        $"Outlet Temperature (T_out): {finalOutletC:F2}°C (final)");
+                    ImGui.SameLine();
+                    ImGui.TextDisabled($"[avg: {avgOutletC:F2}°C, range: {minOutletC:F2}-{maxOutletC:F2}°C]");
+
+                    // Calculate temperature change
+                    if (result.Options != null)
+                    {
+                        double inletTempC = result.Options.FluidInletTemperature - 273.15;
+                        double deltaT = finalOutletC - inletTempC;
+                        var deltaTColor = deltaT > 0 ? new Vector4(1.0f, 0.4f, 0.4f, 1.0f) : // Heating
+                                         deltaT < 0 ? new Vector4(0.4f, 0.8f, 1.0f, 1.0f) : // Cooling
+                                         new Vector4(0.7f, 0.7f, 0.7f, 1.0f); // No change
+                        ImGui.TextColored(deltaTColor, $"ΔT (T_out - T_in): {deltaT:F2}°C");
+                    }
+                }
+                else
+                {
+                    ImGui.TextColored(new Vector4(1, 0.5f, 0, 1),
+                        "WARNING: No outlet temperature data available!");
+                }
+
+                ImGui.Separator();
+
                 var energyKWh = result.TotalExtractedEnergy / 3.6e6; // Joules to kWh
                 var avgCop = result.CoefficientOfPerformance.Any() ? result.CoefficientOfPerformance.Average(c => c.cop) : 0;
 
@@ -570,7 +837,7 @@ private void DrawResultsSection()
                     var maxTemp = temps.Max();
                     var minTemp = temps.Min();
 
-                    ImGui.Text($"Temperature Range: {minTemp:F1}°C - {maxTemp:F1}°C (avg: {avgTemp:F1}°C)");
+                    ImGui.Text($"Ground Temperature Range: {minTemp:F1}°C - {maxTemp:F1}°C (avg: {avgTemp:F1}°C)");
                 }
                 
                 // Show if this is part of a doublet
@@ -616,6 +883,13 @@ private void StartSimulations()
                 // NEW: Run coupled multi-borehole simulation with aquifer flow and thermal interference
                 Logger.Log("=== RUNNING COUPLED MULTI-BOREHOLE SIMULATION ===");
                 
+                // Convert per-borehole temperatures from Celsius to Kelvin
+                var boreholeTempsKelvin = new Dictionary<string, double>();
+                foreach (var kvp in _boreholeInletTemperatures)
+                {
+                    boreholeTempsKelvin[kvp.Key] = kvp.Value + 273.15;
+                }
+
                 var config = new MultiBoreholeSimulationConfig
                 {
                     Boreholes = _selectedBoreholes,
@@ -627,9 +901,17 @@ private void StartSimulations()
                     AquiferThickness = _aquiferThickness,
                     AquiferPorosity = _aquiferPorosity,
                     AnisotropyRatio = _anisotropyRatio,
-                    SimulationDuration = 30 * 365.25 * 24 * 3600, // 30 years for doublet systems
+                    SimulationDuration = _simulationTime, // Use UI-configured simulation time
                     InjectionTemperature = _injectionTemperature + 273.15, // Convert to Kelvin
-                    DoubletFlowRate = _doubletFlowRate
+                    DoubletFlowRate = _doubletFlowRate,
+                    BoreholeInletTemperatures = boreholeTempsKelvin, // Per-borehole temperatures
+                    TimeStep = _timeStep,
+                    ConvergenceTolerance = _convergenceTolerance,
+                    MaxIterationsPerStep = _maxIterationsPerStep,
+                    UseSIMD = _useSIMD,
+                    UseGPU = _useGPU,
+                    UseFullBoreholeDepth = _useFullBoreholeDepth,
+                    HeatExchangerDepth = _heatExchangerDepth
                 };
                 
                 _coupledResults = MultiBoreholeCoupledSimulation.RunCoupledSimulation(

@@ -117,9 +117,9 @@ internal sealed class InstallerWizardApp
         return wizard;
     }
 
-    private Wizard.WizardPage CreateWelcomePage()
+    private WizardPage CreateWelcomePage()
     {
-        var page = new Wizard.WizardPage("Benvenuto", "Preparazione dell'installazione");
+        var page = new WizardPage("Benvenuto", "Preparazione dell'installazione");
 
         _welcomeLabel = new Label
         {
@@ -164,9 +164,9 @@ internal sealed class InstallerWizardApp
         return page;
     }
 
-    private Wizard.WizardPage CreateRuntimePage()
+    private WizardPage CreateRuntimePage()
     {
-        var page = new Wizard.WizardPage("Opzioni", "Seleziona runtime e cartella di installazione");
+        var page = new WizardPage("Opzioni", "Seleziona runtime e cartella di installazione");
 
         var packages = _manifest?.Packages ?? new List<RuntimePackage>();
         var items = packages.Select(p => $"{p.RuntimeIdentifier} · {(p.Description ?? "")}").ToList();
@@ -273,9 +273,9 @@ internal sealed class InstallerWizardApp
         _componentsFrame.Height = Math.Max(5, _currentComponents.Count + 2);
     }
 
-    private Wizard.WizardPage CreateReviewPage()
+    private WizardPage CreateReviewPage()
     {
-        var page = new Wizard.WizardPage("Riepilogo", "Conferma i parametri scelti");
+        var page = new WizardPage("Riepilogo", "Conferma i parametri scelti");
 
         _reviewText = new TextView
         {
@@ -315,9 +315,9 @@ internal sealed class InstallerWizardApp
         return page;
     }
 
-    private Wizard.WizardPage CreateProgressPage()
+    private WizardPage CreateProgressPage()
     {
-        var page = new Wizard.WizardPage("Installazione", "Esecuzione attività");
+        var page = new WizardPage("Installazione", "Esecuzione attività");
 
         _progressBar = new ProgressBar
         {

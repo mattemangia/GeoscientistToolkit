@@ -4,6 +4,7 @@ using System.Numerics;
 using GeoscientistToolkit.Business;
 using GeoscientistToolkit.Data;
 using GeoscientistToolkit.Data.AcousticVolume;
+using GeoscientistToolkit.Data.Borehole;
 using GeoscientistToolkit.Data.CtImageStack;
 using GeoscientistToolkit.Data.GIS;
 using GeoscientistToolkit.Data.Image;
@@ -47,6 +48,7 @@ public class DatasetPanel : BasePanel
     public event Action<DatasetGroup> OnOpenThumbnailViewer;
     public event Action<DatasetGroup> OnComposePanorama;
     public event Action<DatasetGroup> OnProcessPhotogrammetry; // Added for Photogrammetry
+    public event Action<DatasetGroup> OnOpenMultiBoreholeGeothermalTools; // Added for geothermal analysis
 
     // RESTORED: Original Submit method signature
     public void Submit(ref bool pOpen, Action<Dataset> onDatasetSelected, Action onImportClicked)
@@ -363,6 +365,23 @@ public class DatasetPanel : BasePanel
             if (ImGui.IsItemHovered() && !canProcessImages)
             {
                 ImGui.SetTooltip("Group must contain at least two single image datasets.");
+            }
+
+            ImGui.Separator();
+
+            // Multi-Borehole Geothermal Analysis
+            bool hasBoreholes = group.Datasets.Any(d => d is BoreholeDataset);
+            if (ImGui.MenuItem("Multi-Borehole Geothermal Analysis...", null, false, hasBoreholes))
+            {
+                OnOpenMultiBoreholeGeothermalTools?.Invoke(group);
+            }
+            if (ImGui.IsItemHovered() && !hasBoreholes)
+            {
+                ImGui.SetTooltip("This group contains no borehole datasets.");
+            }
+            else if (ImGui.IsItemHovered())
+            {
+                ImGui.SetTooltip("Run individual geothermal simulations and create interpolated subsurface heat maps.");
             }
 
             ImGui.Separator();

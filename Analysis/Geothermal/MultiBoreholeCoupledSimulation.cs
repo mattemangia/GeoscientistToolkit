@@ -142,6 +142,49 @@ public class MultiBoreholeSimulationConfig
     ///     Production/injection flow rate for doublet systems (kg/s)
     /// </summary>
     public double DoubletFlowRate { get; set; } = 15.0; // ~15 L/s for water
+
+    /// <summary>
+    ///     Per-borehole inlet temperatures (K). Key: borehole name, Value: inlet temperature
+    ///     If not specified for a borehole, defaults will be used based on borehole role
+    /// </summary>
+    public Dictionary<string, double> BoreholeInletTemperatures { get; set; } = new();
+
+    /// <summary>
+    ///     Time step for simulation (seconds)
+    /// </summary>
+    public double TimeStep { get; set; } = 3600 * 6; // 6 hours
+
+    /// <summary>
+    ///     Convergence tolerance for solver
+    /// </summary>
+    public double ConvergenceTolerance { get; set; } = 5e-3;
+
+    /// <summary>
+    ///     Maximum iterations per time step
+    /// </summary>
+    public int MaxIterationsPerStep { get; set; } = 200;
+
+    /// <summary>
+    ///     Use SIMD optimization
+    /// </summary>
+    public bool UseSIMD { get; set; } = true;
+
+    /// <summary>
+    ///     Use GPU acceleration
+    /// </summary>
+    public bool UseGPU { get; set; } = false;
+
+    /// <summary>
+    ///     Use full borehole depth for heat exchanger
+    ///     If true, HeatExchangerDepth is set to each borehole's total depth
+    ///     If false, uses the fixed HeatExchangerDepth value
+    /// </summary>
+    public bool UseFullBoreholeDepth { get; set; } = true;
+
+    /// <summary>
+    ///     Fixed heat exchanger depth (meters) when not using full borehole depth
+    /// </summary>
+    public double HeatExchangerDepth { get; set; } = 100.0;
 }
 
 /// <summary>
@@ -629,25 +672,49 @@ public static class MultiBoreholeCoupledSimulation
                 {
                     BoreholeDataset = borehole,
                     SimulationTime = config.SimulationDuration,
-                    HeatExchangerType = HeatExchangerType.UTube
+                    TimeStep = config.TimeStep,
+                    ConvergenceTolerance = config.ConvergenceTolerance,
+                    MaxIterationsPerStep = config.MaxIterationsPerStep,
+                    UseSIMD = config.UseSIMD,
+                    UseGPU = config.UseGPU,
+                    HeatExchangerType = HeatExchangerType.UTube,
+                    HeatExchangerDepth = config.UseFullBoreholeDepth
+                        ? (float)borehole.TotalDepth
+                        : (float)config.HeatExchangerDepth
                 };
                 options.SetDefaultValues();
+
+                Logger.Log($"  Heat exchanger depth: {options.HeatExchangerDepth:F1}m " +
+                           $"({(config.UseFullBoreholeDepth ? "full borehole" : "fixed depth")})");
+
 
                 // Check if this is an injection well in a doublet
                 var isInjectionWell = config.DoubletPairs.ContainsKey(borehole.WellName);
 
-                if (isInjectionWell)
+                // Set inlet temperature from per-borehole configuration or defaults
+                if (config.BoreholeInletTemperatures.TryGetValue(borehole.WellName, out var inletTemp))
+                {
+                    // Use per-borehole configured temperature
+                    options.FluidInletTemperature = inletTemp;
+                    Logger.Log($"  Using configured inlet temperature: {inletTemp - 273.15:F1}°C");
+                }
+                else if (isInjectionWell)
                 {
                     // Configure as injection well (lower temperature)
                     options.FluidInletTemperature = config.InjectionTemperature;
-                    options.FluidMassFlowRate = config.DoubletFlowRate;
                     Logger.Log($"  Configured as INJECTION well at {config.InjectionTemperature - 273.15:F1}°C");
                 }
                 else if (config.DoubletPairs.ContainsValue(borehole.WellName))
                 {
-                    // Configure as production well
-                    options.FluidMassFlowRate = config.DoubletFlowRate;
+                    // Configure as production well - use default
                     Logger.Log("  Configured as PRODUCTION well");
+                }
+
+                // Set flow rate
+                if (isInjectionWell || config.DoubletPairs.ContainsValue(borehole.WellName))
+                {
+                    // Doublet wells use doublet flow rate
+                    options.FluidMassFlowRate = config.DoubletFlowRate;
                 }
                 else
                 {
