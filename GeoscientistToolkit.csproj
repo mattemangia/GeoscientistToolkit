@@ -82,20 +82,41 @@
         <PackageReference Include="FFMpegCore" Version="5.1.0"/>
     </ItemGroup>
 
+    <!-- OpenCvSharp4 - Core package for all platforms -->
+    <ItemGroup>
+        <PackageReference Include="OpenCvSharp4" Version="4.10.0.20240616" />
+    </ItemGroup>
+
+    <!-- OpenCvSharp4 - Platform-specific runtime packages -->
+    <ItemGroup Condition="'$(RuntimeIdentifier)' == 'win-x64' OR $([MSBuild]::IsOSPlatform('Windows'))">
+        <PackageReference Include="OpenCvSharp4.runtime.win" Version="4.10.0.20240616" />
+    </ItemGroup>
+
+    <ItemGroup Condition="'$(RuntimeIdentifier)' == 'linux-x64'">
+        <PackageReference Include="OpenCvSharp4.runtime.linux" Version="4.10.0.20240616" />
+    </ItemGroup>
+
+    <ItemGroup Condition="'$(RuntimeIdentifier)' == 'linux-arm64'">
+        <PackageReference Include="OpenCvSharp4.runtime.linux-arm64" Version="4.10.0.20240616" />
+    </ItemGroup>
+
+    <ItemGroup Condition="'$(RuntimeIdentifier)' == 'osx-x64'">
+        <PackageReference Include="OpenCvSharp4.runtime.osx.x64" Version="4.10.0.20240616" />
+    </ItemGroup>
+
+    <ItemGroup Condition="'$(RuntimeIdentifier)' == 'osx-arm64' OR ($([MSBuild]::IsOSPlatform('OSX')) AND '$(RuntimeIdentifier)' == '')">
+        <PackageReference Include="OpenCvSharp4.runtime.osx.arm64" Version="4.10.0.20240616" />
+    </ItemGroup>
+
     <!-- ONNX Runtime - Platform-specific to avoid ARM64 issues -->
     <!-- GPU version for x64 platforms only (CUDA support) -->
     <ItemGroup Condition="'$(RuntimeIdentifier)' == 'win-x64' or '$(RuntimeIdentifier)' == 'linux-x64'">
         <PackageReference Include="Microsoft.ML.OnnxRuntime.Gpu" Version="1.19.2"/>
-        <PackageReference Include="OpenCvSharp4" Version="4.11.0.20250507" />
-        <PackageReference Include="OpenCvSharp4.runtime.win" Version="4.10.0.20240616" Condition="'$(RuntimeIdentifier)' == 'win-x64'"/>
-
     </ItemGroup>
 
     <!-- CPU version for ARM64 and macOS platforms (no CUDA support) -->
     <ItemGroup Condition="'$(RuntimeIdentifier)' == 'linux-arm64' or '$(RuntimeIdentifier)' == 'osx-x64' or '$(RuntimeIdentifier)' == 'osx-arm64'">
         <PackageReference Include="Microsoft.ML.OnnxRuntime" Version="1.19.2"/>
-        <PackageReference Include="OpenCvSharp4.runtime.osx_arm64" Version="4.9.0.20240103" Condition="$([MSBuild]::IsOSPlatform('OSX'))" />
-
     </ItemGroup>
 
     <!-- Fallback for development/debugging when no RID is specified -->
