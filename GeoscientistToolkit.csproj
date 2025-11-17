@@ -91,22 +91,11 @@
       <EmbeddedResource Include="image.png" />
     </ItemGroup>
 
-    <!-- First, ensure the AddInExtractor is built -->
-    <Target Name="BuildAddInExtractor" BeforeTargets="ExtractAddIns" Condition="'$(Configuration)' == 'Release'">
-        <MSBuild Projects="AddInExtractor\AddInExtractor.csproj" Properties="Configuration=$(Configuration)" Targets="Build"/>
-    </Target>
+  
 
     <!-- Target to extract add-ins after build in Release mode -->
     <Target Name="ExtractAddIns" AfterTargets="Build" Condition="'$(Configuration)' == 'Release'">
-        <PropertyGroup>
-            <!-- Determine the extractor executable path based on OS -->
-            <ExtractorPath>$([MSBuild]::NormalizePath('$(MSBuildProjectDirectory)', 'AddInExtractor', 'bin', '$(Configuration)', 'net8.0', 'AddInExtractor'))</ExtractorPath>
-            <ExtractorPath Condition="'$(OS)' == 'Windows_NT'">$(ExtractorPath).exe</ExtractorPath>
-
-            <!-- Use dotnet run if the extractor exe doesn't exist yet -->
-            <ExtractorCommand Condition="Exists('$(ExtractorPath)')">"$(ExtractorPath)" --source "$(MSBuildProjectDirectory)\AddIns\Development" --output "$(OutputPath)AddIns" --core "$(OutputPath)GeoscientistToolkit.dll" --main "$(OutputPath)$(AssemblyName).exe" --verbose</ExtractorCommand>
-            <ExtractorCommand Condition="!Exists('$(ExtractorPath)')">dotnet run --project "$(MSBuildProjectDirectory)\AddInExtractor\AddInExtractor.csproj" -c $(Configuration) -- --source "$(MSBuildProjectDirectory)\AddIns\Development" --output "$(OutputPath)AddIns" --core "$(OutputPath)GeoscientistToolkit.dll" --main "$(OutputPath)$(AssemblyName).exe" --verbose</ExtractorCommand>
-        </PropertyGroup>
+        
 
         <ItemGroup>
             <AddInSourceFiles Include="$(MSBuildProjectDirectory)\AddIns\Development\*.cs"/>
