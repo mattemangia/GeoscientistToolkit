@@ -101,7 +101,7 @@ public class Program
 
         // Auto-detect local IP if needed
         var localIp = Services.NetworkDiscoveryService.GetLocalIPAddress();
-        var nodeManagerSettings = GeoscientistToolkit.Settings.SettingsManager.Instance.GetSettings().NodeManager;
+        var nodeManagerSettings = GeoscientistToolkit.Settings.SettingsManager.Instance.Settings.NodeManager;
 
         if (nodeManagerSettings != null && (nodeManagerSettings.HostAddress == "auto" || nodeManagerSettings.HostAddress == "localhost"))
         {

@@ -32,7 +32,7 @@ public class NodeEndpointService
         Console.WriteLine("Initializing NodeEndpointService...");
 
         // Load settings - create default if none exist
-        var settings = SettingsManager.Instance.GetSettings();
+        var settings = SettingsManager.Instance.Settings;
         if (settings.NodeManager == null)
         {
             settings.NodeManager = new NodeManagerSettings
@@ -58,8 +58,8 @@ public class NodeEndpointService
         try
         {
             _nodeManager.Start();
-            Console.WriteLine($"NodeManager started in {settings.NodeManager.Role} mode");
-            Console.WriteLine($"Server port: {settings.NodeManager.ServerPort}");
+            Console.WriteLine($"NodeManager started in {settings.NodeManager.Role.ToString()} mode");
+            Console.WriteLine($"Server port: {settings.NodeManager.ServerPort.ToString()}");
             Console.WriteLine($"Node name: {settings.NodeManager.NodeName}");
         }
         catch (Exception ex)

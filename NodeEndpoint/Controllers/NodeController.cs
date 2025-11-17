@@ -97,7 +97,7 @@ public class NodeController : ControllerBase
     [HttpGet("status")]
     public IActionResult GetStatus()
     {
-        var settings = GeoscientistToolkit.Settings.SettingsManager.Instance.GetSettings().NodeManager;
+        var settings = GeoscientistToolkit.Settings.SettingsManager.Instance.Settings.NodeManager;
         var nodes = _nodeManager.GetNodes();
 
         return Ok(new
