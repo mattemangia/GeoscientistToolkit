@@ -88,24 +88,29 @@
     </ItemGroup>
 
     <!-- OpenCvSharp4 - Platform-specific runtime packages -->
-    <ItemGroup Condition="'$(RuntimeIdentifier)' == 'win-x64' OR $([MSBuild]::IsOSPlatform('Windows'))">
+    <!-- Windows x64 - Official runtime package -->
+    <ItemGroup Condition="'$(RuntimeIdentifier)' == 'win-x64' OR ($([MSBuild]::IsOSPlatform('Windows')) AND '$(RuntimeIdentifier)' == '')">
         <PackageReference Include="OpenCvSharp4.runtime.win" Version="4.10.0.20240616" />
     </ItemGroup>
 
-    <ItemGroup Condition="'$(RuntimeIdentifier)' == 'linux-x64'">
-        <PackageReference Include="OpenCvSharp4.runtime.linux" Version="4.10.0.20240616" />
+    <!-- Linux x64 - Ubuntu 20.04 runtime (note the underscore after OpenCvSharp4) -->
+    <ItemGroup Condition="'$(RuntimeIdentifier)' == 'linux-x64' OR ($([MSBuild]::IsOSPlatform('Linux')) AND '$(RuntimeIdentifier)' == '' AND '$(PlatformTarget)' != 'ARM64')">
+        <PackageReference Include="OpenCvSharp4_.runtime.ubuntu.20.04-x64" Version="4.10.0.20240616" />
     </ItemGroup>
 
-    <ItemGroup Condition="'$(RuntimeIdentifier)' == 'linux-arm64'">
-        <PackageReference Include="OpenCvSharp4.runtime.linux-arm64" Version="4.10.0.20240616" />
+    <!-- Linux ARM64 - Third-party package (no official ARM64 package available) -->
+    <ItemGroup Condition="'$(RuntimeIdentifier)' == 'linux-arm64' OR ($([MSBuild]::IsOSPlatform('Linux')) AND ('$(RuntimeIdentifier)' == '' AND '$(PlatformTarget)' == 'ARM64'))">
+        <PackageReference Include="Citms.OpenCvSharp4.runtime.linux-ubuntu20.04-arm64" Version="4.9.0" />
     </ItemGroup>
 
+    <!-- macOS x64 - Official runtime for Intel Macs -->
     <ItemGroup Condition="'$(RuntimeIdentifier)' == 'osx-x64'">
-        <PackageReference Include="OpenCvSharp4.runtime.osx.x64" Version="4.10.0.20240616" />
+        <PackageReference Include="OpenCvSharp4.runtime.osx.10.15-x64" Version="4.6.0.20230105" />
     </ItemGroup>
 
+    <!-- macOS ARM64 - Prerelease runtime for Apple Silicon (note the underscore) -->
     <ItemGroup Condition="'$(RuntimeIdentifier)' == 'osx-arm64' OR ($([MSBuild]::IsOSPlatform('OSX')) AND '$(RuntimeIdentifier)' == '')">
-        <PackageReference Include="OpenCvSharp4.runtime.osx.arm64" Version="4.10.0.20240616" />
+        <PackageReference Include="OpenCvSharp4.runtime.osx_arm64" Version="4.8.1-rc" />
     </ItemGroup>
 
     <!-- ONNX Runtime - Platform-specific to avoid ARM64 issues -->
