@@ -531,7 +531,7 @@ solver.RunSimulation();
 
 ## Advanced Features
 
-### Nucleation Control
+### Nucleation Control 
 
 ```csharp
 var site = new NucleationSite("Site1", position, "Calcite");
