@@ -29,6 +29,7 @@
         <Compile Remove="InstallerWizard\**" />
         <EmbeddedResource Remove="InstallerWizard\**" />
         <None Remove="InstallerWizard\**" />
+        <None Remove="..\..\.nuget\packages\naudio.vorbis\1.5.0\contentFiles\any\netstandard2.0\README.md" />
     </ItemGroup>
 
     <!-- Main PackageReference items -->
