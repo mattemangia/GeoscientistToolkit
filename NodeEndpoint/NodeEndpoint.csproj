@@ -107,6 +107,9 @@
 
     <!-- JSON serialization -->
     <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
+
+    <!-- Terminal UI -->
+    <PackageReference Include="Terminal.Gui" Version="1.17.1" />
   </ItemGroup>
 
 </Project>
