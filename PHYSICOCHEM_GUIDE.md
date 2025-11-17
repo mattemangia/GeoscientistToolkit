@@ -11,15 +11,15 @@
 
 The **PHYSICOCHEM** dataset system provides a comprehensive framework for building and simulating multiphysics reactor experiments with TOUGH-like capabilities. It features:
 
-- ✅ 2D-to-3D geometry interpolation (extrusion, revolution, vertical profile)
-- ✅ Multiple reactor types (box, sphere, cylinder, cone, custom shapes)
-- ✅ Boolean operations on domains (union, subtract, intersect)
-- ✅ Comprehensive boundary conditions (Dirichlet, Neumann, Robin, etc.)
-- ✅ Force fields (gravity, vortex, centrifugal, custom)
-- ✅ Nucleation and crystal growth
-- ✅ Full reactive transport coupling (TOUGHREACT-like)
-- ✅ Parameter sweep with sensitivity analysis
-- ✅ Optional coupling with geothermal simulations
+-  2D-to-3D geometry interpolation (extrusion, revolution, vertical profile)
+-  Multiple reactor types (box, sphere, cylinder, cone, custom shapes)
+-  Boolean operations on domains (union, subtract, intersect)
+-  Comprehensive boundary conditions (Dirichlet, Neumann, Robin, etc.)
+-  Force fields (gravity, vortex, centrifugal, custom)
+-  Nucleation and crystal growth
+-  Full reactive transport coupling (TOUGHREACT-like)
+-  Parameter sweep with sensitivity analysis
+-  Optional coupling with geothermal simulations
 
 ---
 
