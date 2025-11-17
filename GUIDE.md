@@ -31,7 +31,7 @@ The application combines interactive 3D visualization, GPU-accelerated simulatio
 - GPU-accelerated simulations for geomechanics, geothermal systems, and reactive transport
 - Comprehensive thermodynamic and chemical databases
 - Automated workflows through GeoScript programming language
-- Support for industry-standard formats (SEGY, LAS, Shapefiles, Excel, TIFF)
+- Support for industry-standard formats (SEGY, LAS, Shapefiles, Excel, TIFF, PNG)
 
 ### Target Users
 
