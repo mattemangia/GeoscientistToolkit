@@ -15,7 +15,7 @@ internal sealed class PackagerApp
         try
         {
             var settings = PackagerSettingsLoader.Load();
-            var manifest = await ManifestPersistence.LoadAsync(settings.ManifestPath).ConfigureAwait(false);
+            var manifest = await ManifestPersistence.LoadOrCreateAsync(settings.ManifestPath).ConfigureAwait(false);
             var publisher = new PublishService();
             foreach (var package in manifest.Packages)
             {
