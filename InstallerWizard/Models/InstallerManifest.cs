@@ -12,11 +12,11 @@ public sealed record InstallerManifest
 public sealed record RuntimePackage
 {
     public string RuntimeIdentifier { get; init; } = "win-x64";
-    public PackageTransport Transport { get; init; } = PackageTransport.Archive;
+    public PackageTransport Transport { get; set; } = PackageTransport.Archive;
     public bool SelfContained { get; init; } = true;
-    public string? PackageUrl { get; init; }
-    public string? Sha256 { get; init; }
-    public long SizeBytes { get; init; }
+    public string? PackageUrl { get; set; }
+    public string? Sha256 { get; set; }
+    public long SizeBytes { get; set; }
     public string? Description { get; init; }
     public string? AdditionalPublishArguments { get; init; }
     public List<RuntimeComponent> Components { get; init; } = new();
