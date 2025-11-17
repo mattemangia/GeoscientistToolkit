@@ -7,9 +7,11 @@
         <Nullable>disable</Nullable>
         <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
         <ShaderVariantDef>shader-variants.json</ShaderVariantDef>
-        <RuntimeIdentifiers>osx-arm64;osx-x64;win-x64;linux-x64</RuntimeIdentifiers>
+        <RuntimeIdentifiers>win-x64;linux-x64;linux-arm64;osx-x64;osx-arm64</RuntimeIdentifiers>
         <DefineConstants>IMGUI_HAS_DOCK_BUILDER;$(DefineConstants)</DefineConstants>
         <ApplicationIcon>image.ico</ApplicationIcon>
+        <!-- Fix for ONNX Runtime duplicate files -->
+        <ErrorOnDuplicatePublishOutputFiles>false</ErrorOnDuplicatePublishOutputFiles>
     </PropertyGroup>
 
     <!--
@@ -17,7 +19,7 @@
       from the main project's compilation. This resolves the duplicate attribute errors.
     -->
     <ItemGroup>
-                <!-- Exclude NodeEndpoint to prevent duplicate assembly attributes -->
+        <!-- Exclude NodeEndpoint to prevent duplicate assembly attributes -->
         <Compile Remove="NodeEndpoint\**"/>
         <EmbeddedResource Remove="NodeEndpoint\**"/>
         <None Remove="NodeEndpoint\**"/>
@@ -61,7 +63,7 @@
         <PackageReference Include="SkiaSharp.NativeAssets.Linux" Version="2.88.8"/>
         <PackageReference Include="SkiaSharp.HarfBuzz" Version="2.88.8"/>
         <!-- Photogrammetry Dependencies -->
-        <PackageReference Include="Microsoft.ML.OnnxRuntime" Version="1.19.2"/>
+        <!-- Using only GPU version which includes CPU fallback -->
         <PackageReference Include="Microsoft.ML.OnnxRuntime.Gpu" Version="1.19.2"/>
         <PackageReference Include="OpenCvSharp4" Version="4.10.0.20240616"/>
         <PackageReference Include="OpenCvSharp4.runtime.win" Version="4.10.0.20240616"/>
@@ -83,14 +85,12 @@
         <Compile Remove="AddIns\Development\**\*.cs"/>
     </ItemGroup>
     <ItemGroup>
-      <Folder Include="LASExample\" />
+        <Folder Include="LASExample\" />
     </ItemGroup>
 
     <!-- Embed logo image as resource -->
     <ItemGroup>
-      <EmbeddedResource Include="image.png" />
+        <EmbeddedResource Include="image.png" />
     </ItemGroup>
-
-  
 
 </Project>
