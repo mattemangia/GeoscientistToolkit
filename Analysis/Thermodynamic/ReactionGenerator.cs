@@ -1898,14 +1898,8 @@ private ChemicalReaction GenerateGasDissolutionReaction(ChemicalCompound gas, do
     return reaction;
 }
 
-/// <summary>
-/// Generate dissolution reaction for solid compounds with temperature dependence.
-/// </summary>
 private ChemicalReaction GenerateSolidDissolutionReaction(ChemicalCompound solid, double temperature_K)
 {
-    // Check solubility at given temperature
-    double solubility = CalculateSolubilityAtTemperature(solid, temperature_K);
-    
     var elementalComp = ParseChemicalFormula(solid.ChemicalFormula);
     
     var reaction = new ChemicalReaction
@@ -1916,46 +1910,296 @@ private ChemicalReaction GenerateSolidDissolutionReaction(ChemicalCompound solid
     
     reaction.Stoichiometry[solid.Name] = -1.0;
     
-    // Determine dissolution type based on solubility
-    if (solubility > 10.0) // g/100mL - Highly soluble
+    // Check solubility to determine dissolution type
+    double solubility = CalculateSolubilityAtTemperature(solid, temperature_K);
+    
+    Logger.Log($"[ReactionGenerator] {solid.Name} solubility: {solubility} g/100mL at {temperature_K}K");
+    
+    // For highly soluble salts, find the constituent ions
+    if (solubility > 1.0 || solid.LogKsp_25C.HasValue && solid.LogKsp_25C.Value > -2.0)
     {
-        // Complete dissociation into ions
-        var products = FindCompleteIonicProducts(solid, elementalComp);
-        foreach (var (ion, stoich) in products)
-        {
-            reaction.Stoichiometry[ion.Name] = stoich;
-        }
+        // Find ions based on elemental composition
+        var ions = FindConstituetIons(solid, elementalComp);
         
-        // Adjust LogK for temperature
-        if (solid.DissolutionEnthalpy_kJ_mol.HasValue)
+        if (ions.Count > 0)
         {
-            reaction.LogK_25C = CalculateLogKsp(solid, 298.15);
-            var logK_T = CalculateLogKAtTemperature(reaction, temperature_K);
-            reaction.LogK_25C = logK_T; // Override with temperature-corrected value
+            foreach (var (ion, stoich) in ions)
+            {
+                reaction.Stoichiometry[ion.Name] = stoich;
+                Logger.Log($"  Product: {stoich} {ion.Name} ({ion.ChemicalFormula})");
+            }
+            
+            // Set high LogK for complete dissociation
+            reaction.LogK_25C = Math.Max(5.0, solid.LogKsp_25C ?? 5.0);
+        }
+        else
+        {
+            Logger.LogWarning($"[ReactionGenerator] Could not find ions for {solid.Name}");
+            return null;
         }
     }
-    else if (solubility > 0.01) // Moderately soluble
+    else
     {
-        // Equilibrium dissolution
-        var products = FindEquilibriumProducts(solid, elementalComp);
-        foreach (var (species, stoich) in products)
-        {
-            reaction.Stoichiometry[species.Name] = stoich;
-        }
-        
-        if (solid.LogKsp_25C.HasValue)
-        {
-            reaction.LogK_25C = solid.LogKsp_25C.Value;
-        }
-    }
-    else // Sparingly soluble
-    {
-        // Minimal dissolution with potential complexation
+        // For sparingly soluble, use equilibrium dissolution
         return GenerateSingleDissolutionReaction(solid);
     }
     
     CalculateReactionThermodynamics(reaction);
     return reaction;
+}
+
+/// <summary>
+/// Find constituent ions for a solid compound based on its composition.
+/// </summary>
+private List<(ChemicalCompound ion, double stoich)> FindConstituetIons(
+    ChemicalCompound solid, Dictionary<string, int> elementalComp)
+{
+    var ions = new List<(ChemicalCompound, double)>();
+    
+    // Strategy: Look for primary ions that match the elemental composition
+    
+    // First, check if it's a simple binary compound
+    if (elementalComp.Count == 2)
+    {
+        return FindBinaryIons(elementalComp);
+    }
+    
+    // Check for oxyanion compounds (carbonates, sulfates, etc.)
+    if (elementalComp.ContainsKey("O"))
+    {
+        var oxyanionIons = FindOxyanionIons(elementalComp);
+        if (oxyanionIons.Count > 0)
+            return oxyanionIons;
+    }
+    
+    // For complex compounds, try to identify cations and anions
+    return FindComplexIons(elementalComp);
+}
+
+/// <summary>
+/// Find ions for binary compounds (e.g., NaCl, KBr, CaF2).
+/// </summary>
+private List<(ChemicalCompound, double)> FindBinaryIons(Dictionary<string, int> elementalComp)
+{
+    var ions = new List<(ChemicalCompound, double)>();
+    
+    foreach (var (element, count) in elementalComp)
+    {
+        // Find the primary ion for this element
+        var primaryIons = _compoundLibrary.Compounds
+            .Where(c => c.Phase == CompoundPhase.Aqueous &&
+                       c.IsPrimaryElementSpecies &&
+                       c.IonicCharge.HasValue)
+            .ToList();
+        
+        // Find ion that contains ONLY this element
+        var ion = primaryIons.FirstOrDefault(c =>
+        {
+            var ionComp = ParseChemicalFormula(c.ChemicalFormula);
+            return ionComp.Count == 1 && ionComp.ContainsKey(element);
+        });
+        
+        if (ion != null)
+        {
+            ions.Add((ion, count));
+        }
+    }
+    
+    return ions;
+}
+
+/// <summary>
+/// Find ions for oxyanion compounds.
+/// </summary>
+private List<(ChemicalCompound, double)> FindOxyanionIons(Dictionary<string, int> elementalComp)
+{
+    var ions = new List<(ChemicalCompound, double)>();
+    
+    // Check for common oxyanions by looking at element ratios
+    
+    // Carbonate: C:O = 1:3
+    if (elementalComp.ContainsKey("C") && elementalComp.ContainsKey("O"))
+    {
+        var cCount = elementalComp["C"];
+        var oCount = elementalComp["O"];
+        
+        if (oCount >= cCount * 3)
+        {
+            var carbonate = _compoundLibrary.Compounds
+                .FirstOrDefault(c => c.ChemicalFormula == "CO₃²⁻" || 
+                                   c.Name == "Carbonate");
+            if (carbonate != null)
+            {
+                ions.Add((carbonate, cCount));
+                
+                // Adjust remaining oxygen
+                var remainingO = oCount - (cCount * 3);
+                var remainingElements = new Dictionary<string, int>(elementalComp);
+                remainingElements.Remove("C");
+                remainingElements["O"] = remainingO;
+                if (remainingO == 0) remainingElements.Remove("O");
+                
+                // Find cations for remaining elements
+                ions.AddRange(FindCations(remainingElements));
+                return ions;
+            }
+        }
+    }
+    
+    // Sulfate: S:O = 1:4
+    if (elementalComp.ContainsKey("S") && elementalComp.ContainsKey("O"))
+    {
+        var sCount = elementalComp["S"];
+        var oCount = elementalComp["O"];
+        
+        if (oCount >= sCount * 4)
+        {
+            var sulfate = _compoundLibrary.Compounds
+                .FirstOrDefault(c => c.ChemicalFormula == "SO₄²⁻" || 
+                                   c.Name == "Sulfate Ion");
+            if (sulfate != null)
+            {
+                ions.Add((sulfate, sCount));
+                
+                var remainingElements = new Dictionary<string, int>(elementalComp);
+                remainingElements.Remove("S");
+                remainingElements["O"] -= sCount * 4;
+                if (remainingElements["O"] == 0) remainingElements.Remove("O");
+                
+                ions.AddRange(FindCations(remainingElements));
+                return ions;
+            }
+        }
+    }
+    
+    // Phosphate: P:O = 1:4
+    if (elementalComp.ContainsKey("P") && elementalComp.ContainsKey("O"))
+    {
+        var pCount = elementalComp["P"];
+        var oCount = elementalComp["O"];
+        
+        if (oCount >= pCount * 4)
+        {
+            var phosphate = _compoundLibrary.Compounds
+                .FirstOrDefault(c => c.ChemicalFormula == "PO₄³⁻" || 
+                                   c.Name == "Phosphate");
+            if (phosphate != null)
+            {
+                ions.Add((phosphate, pCount));
+                
+                var remainingElements = new Dictionary<string, int>(elementalComp);
+                remainingElements.Remove("P");
+                remainingElements["O"] -= pCount * 4;
+                if (remainingElements["O"] == 0) remainingElements.Remove("O");
+                
+                ions.AddRange(FindCations(remainingElements));
+                return ions;
+            }
+        }
+    }
+    
+    // Nitrate: N:O = 1:3
+    if (elementalComp.ContainsKey("N") && elementalComp.ContainsKey("O"))
+    {
+        var nCount = elementalComp["N"];
+        var oCount = elementalComp["O"];
+        
+        if (oCount >= nCount * 3)
+        {
+            var nitrate = _compoundLibrary.Compounds
+                .FirstOrDefault(c => c.ChemicalFormula == "NO₃⁻" || 
+                                   c.Name == "Nitrate");
+            if (nitrate != null)
+            {
+                ions.Add((nitrate, nCount));
+                
+                var remainingElements = new Dictionary<string, int>(elementalComp);
+                remainingElements.Remove("N");
+                remainingElements["O"] -= nCount * 3;
+                if (remainingElements["O"] == 0) remainingElements.Remove("O");
+                
+                ions.AddRange(FindCations(remainingElements));
+                return ions;
+            }
+        }
+    }
+    
+    return ions;
+}
+
+/// <summary>
+/// Find cations for given elements.
+/// </summary>
+private List<(ChemicalCompound, double)> FindCations(Dictionary<string, int> elements)
+{
+    var cations = new List<(ChemicalCompound, double)>();
+    
+    foreach (var (element, count) in elements)
+    {
+        if (element == "O" || element == "H") continue; // Skip O and H
+        
+        // Find primary cation for this element
+        var cation = _compoundLibrary.Compounds
+            .FirstOrDefault(c => c.Phase == CompoundPhase.Aqueous &&
+                               c.IsPrimaryElementSpecies &&
+                               c.IonicCharge.HasValue && 
+                               c.IonicCharge.Value > 0 &&
+                               ParseChemicalFormula(c.ChemicalFormula).ContainsKey(element) &&
+                               ParseChemicalFormula(c.ChemicalFormula).Count == 1);
+        
+        if (cation != null)
+        {
+            cations.Add((cation, count));
+        }
+    }
+    
+    return cations;
+}
+
+/// <summary>
+/// Find ions for complex compounds.
+/// </summary>
+private List<(ChemicalCompound, double)> FindComplexIons(Dictionary<string, int> elementalComp)
+{
+    var ions = new List<(ChemicalCompound, double)>();
+    
+    // Try to match the compound formula with known dissociation patterns
+    // This is still generic - we're looking for ions that together make up the formula
+    
+    var possibleIons = _compoundLibrary.Compounds
+        .Where(c => c.Phase == CompoundPhase.Aqueous && 
+                   c.IonicCharge.HasValue)
+        .ToList();
+    
+    // Try to find a combination of ions that matches the elemental composition
+    // This is a simplified approach - a full implementation would use 
+    // stoichiometric matrix solving
+    
+    foreach (var (element, count) in elementalComp)
+    {
+        if (element == "O" || element == "H") continue;
+        
+        var matchingIon = possibleIons
+            .Where(ion => 
+            {
+                var ionComp = ParseChemicalFormula(ion.ChemicalFormula);
+                return ionComp.ContainsKey(element);
+            })
+            .OrderBy(ion => 
+            {
+                // Prefer simpler ions (fewer elements)
+                var ionComp = ParseChemicalFormula(ion.ChemicalFormula);
+                return ionComp.Count;
+            })
+            .FirstOrDefault();
+        
+        if (matchingIon != null && !ions.Any(i => i.Item1.Name == matchingIon.Name))
+        {
+            ions.Add((matchingIon, count));
+        }
+    }
+    
+    return ions;
 }
 
 /// <summary>
