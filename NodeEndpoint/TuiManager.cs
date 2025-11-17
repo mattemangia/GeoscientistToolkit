@@ -857,44 +857,81 @@ public class TuiManager
     {
         var connections = new List<string>();
 
-        // Get discovered nodes from network discovery
-        var discoveredNodes = _networkDiscovery.GetDiscoveredNodes();
-
-        if (discoveredNodes.Any())
+        try
         {
-            connections.Add($"Discovered Nodes: {discoveredNodes.Count}");
-            foreach (var node in discoveredNodes)
+            // Get discovered nodes from network discovery
+            var discoveredNodes = _networkDiscovery.GetDiscoveredNodes();
+
+            if (discoveredNodes.Any())
             {
-                var nodeType = node.NodeType.Length > 15 ? node.NodeType.Substring(0, 15) : node.NodeType;
-                var platform = node.Platform.Length > 10 ? node.Platform.Substring(0, 10) : node.Platform;
-                connections.Add($"  {nodeType} - {node.IPAddress}:{node.HttpPort} ({platform})");
+                connections.Add(SanitizeString($"Discovered Nodes: {discoveredNodes.Count}"));
+                foreach (var node in discoveredNodes)
+                {
+                    var nodeType = node.NodeType.Length > 15 ? node.NodeType.Substring(0, 15) : node.NodeType;
+                    var platform = node.Platform.Length > 10 ? node.Platform.Substring(0, 10) : node.Platform;
+                    connections.Add(SanitizeString($"  {nodeType} - {node.IPAddress}:{node.HttpPort} ({platform})"));
+                }
+                connections.Add("");
             }
-            connections.Add("");
-        }
 
-        // Get connected nodes from NodeManager
-        var connectedNodes = _nodeManager.GetConnectedNodes();
-        if (connectedNodes.Any())
-        {
-            connections.Add($"Connected Nodes: {connectedNodes.Count}");
-            foreach (var node in connectedNodes)
+            // Get connected nodes from NodeManager
+            var connectedNodes = _nodeManager.GetConnectedNodes();
+            if (connectedNodes.Any())
             {
-                var statusIcon = node.Status == NodeStatus.Connected ? "*" : "-";
-                var uptime = DateTime.Now - node.ConnectedAt;
-                var nodeName = node.NodeName.Length > 25 ? node.NodeName.Substring(0, 25) : node.NodeName;
-                connections.Add($"  [{statusIcon}] {nodeName} - {node.IpAddress} - {node.Status}");
-                connections.Add($"      CPU: {node.CpuUsage:F1}% | Mem: {node.MemoryUsage:F1}% | Jobs: {node.ActiveJobs} | Up: {uptime:hh\\:mm\\:ss}");
+                connections.Add(SanitizeString($"Connected Nodes: {connectedNodes.Count}"));
+                foreach (var node in connectedNodes)
+                {
+                    var statusIcon = node.Status == NodeStatus.Connected ? "*" : "-";
+                    var uptime = DateTime.Now - node.ConnectedAt;
+                    var nodeName = node.NodeName.Length > 25 ? node.NodeName.Substring(0, 25) : node.NodeName;
+                    connections.Add(SanitizeString($"  [{statusIcon}] {nodeName} - {node.IpAddress} - {node.Status}"));
+                    connections.Add(SanitizeString($"      CPU: {node.CpuUsage:F1}% | Mem: {node.MemoryUsage:F1}% | Jobs: {node.ActiveJobs} | Up: {uptime:hh\\:mm\\:ss}"));
+                }
+            }
+
+            if (!connections.Any())
+            {
+                connections.Add("No active connections or discovered nodes");
+                connections.Add("");
+                connections.Add("Network discovery is running");
+            }
+
+            _connectionsListView.SetSource(connections);
+        }
+        catch (Exception ex)
+        {
+            // If there's an error updating connections, show a safe fallback
+            connections.Clear();
+            connections.Add("Error loading connections");
+            connections.Add($"  {ex.Message}");
+            _connectionsListView.SetSource(connections);
+        }
+    }
+
+    /// <summary>
+    /// Sanitizes a string for safe rendering in Terminal.Gui ListView
+    /// </summary>
+    private string SanitizeString(string input)
+    {
+        if (string.IsNullOrEmpty(input))
+            return " "; // Return single space instead of empty string
+
+        // Normalize the string to ensure proper Unicode handling
+        var normalized = input.Normalize(NormalizationForm.FormC);
+
+        // Remove any control characters that might cause rendering issues
+        var cleaned = new StringBuilder(normalized.Length);
+        foreach (char c in normalized)
+        {
+            // Keep printable characters, spaces, and common formatting
+            if (!char.IsControl(c) || c == '\t' || c == '\n')
+            {
+                cleaned.Append(c);
             }
         }
 
-        if (!connections.Any())
-        {
-            connections.Add("No active connections or discovered nodes");
-            connections.Add("");
-            connections.Add("Network discovery is running");
-        }
-
-        _connectionsListView.SetSource(connections);
+        var result = cleaned.ToString();
+        return string.IsNullOrEmpty(result) ? " " : result;
     }
 
     private void UpdateCpuUsage()
