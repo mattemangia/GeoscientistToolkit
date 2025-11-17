@@ -203,6 +203,50 @@ public class SimulationController : ControllerBase
     }
 
     /// <summary>
+    /// Submit a triaxial compression/extension test simulation
+    /// </summary>
+    [HttpPost("triaxial")]
+    public IActionResult SubmitTriaxialSimulation([FromBody] TriaxialSimulationRequest request)
+    {
+        try
+        {
+            var jobId = Guid.NewGuid().ToString();
+            var job = new JobMessage
+            {
+                JobId = jobId,
+                JobType = "TriaxialSimulation",
+                Parameters = new Dictionary<string, object>
+                {
+                    ["sampleHeight"] = request.SampleHeight,
+                    ["sampleDiameter"] = request.SampleDiameter,
+                    ["meshResolution"] = request.MeshResolution,
+                    ["materialProperties"] = request.MaterialProperties ?? new Dictionary<string, object>(),
+                    ["confiningPressure"] = request.ConfiningPressure_MPa,
+                    ["loadingMode"] = request.LoadingMode ?? "StrainControlled",
+                    ["axialStrainRate"] = request.AxialStrainRate_per_s,
+                    ["maxAxialStrain"] = request.MaxAxialStrain_percent,
+                    ["axialStressRate"] = request.AxialStressRate_MPa_per_s,
+                    ["maxAxialStress"] = request.MaxAxialStress_MPa,
+                    ["drainageCondition"] = request.DrainageCondition ?? "Drained",
+                    ["temperature"] = request.Temperature_C,
+                    ["totalTime"] = request.TotalTime_s,
+                    ["timeStep"] = request.TimeStep_s,
+                    ["outputPath"] = request.OutputPath ?? ""
+                }
+            };
+
+            _nodeManager.SubmitJob(job);
+            _jobTracker.RegisterJob(job);
+
+            return Ok(new { jobId, message = "Triaxial simulation job submitted", status = "pending" });
+        }
+        catch (Exception ex)
+        {
+            return BadRequest(new { error = ex.Message });
+        }
+    }
+
+    /// <summary>
     /// Get available simulation types
     /// </summary>
     [HttpGet("types")]
@@ -214,7 +258,8 @@ public class SimulationController : ControllerBase
             new { type = "AcousticSimulation", description = "Acoustic wave propagation simulation" },
             new { type = "GeothermalSimulation", description = "Geothermal reservoir simulation" },
             new { type = "SeismicSimulation", description = "Earthquake and fault slip simulation" },
-            new { type = "NMRSimulation", description = "Nuclear Magnetic Resonance pore-scale simulation" }
+            new { type = "NMRSimulation", description = "Nuclear Magnetic Resonance pore-scale simulation" },
+            new { type = "TriaxialSimulation", description = "Triaxial compression/extension test with multiple failure criteria" }
         };
 
         return Ok(types);
@@ -275,5 +320,38 @@ public class NMRSimulationRequest
     public double EchoTime { get; set; }
     public int NumberOfEchoes { get; set; }
     public bool UseOpenCL { get; set; }
+    public string? OutputPath { get; set; }
+}
+
+public class TriaxialSimulationRequest
+{
+    // Sample geometry
+    public double SampleHeight { get; set; } = 0.1;  // meters
+    public double SampleDiameter { get; set; } = 0.05;  // meters
+    public int MeshResolution { get; set; } = 20;  // elements along height
+
+    // Material properties
+    public Dictionary<string, object>? MaterialProperties { get; set; }
+
+    // Loading parameters
+    public double ConfiningPressure_MPa { get; set; } = 10.0;
+    public string? LoadingMode { get; set; } = "StrainControlled";  // StrainControlled or StressControlled
+
+    // Strain-controlled parameters
+    public double AxialStrainRate_per_s { get; set; } = 1e-5;
+    public double MaxAxialStrain_percent { get; set; } = 5.0;
+
+    // Stress-controlled parameters
+    public double AxialStressRate_MPa_per_s { get; set; } = 0.1;
+    public double MaxAxialStress_MPa { get; set; } = 200.0;
+
+    // Drainage condition
+    public string? DrainageCondition { get; set; } = "Drained";  // Drained or Undrained
+
+    // Test conditions
+    public double Temperature_C { get; set; } = 20.0;
+    public double TotalTime_s { get; set; } = 100.0;
+    public double TimeStep_s { get; set; } = 0.1;
+
     public string? OutputPath { get; set; }
 }

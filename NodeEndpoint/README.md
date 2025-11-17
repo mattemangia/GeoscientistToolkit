@@ -345,6 +345,13 @@ This means:
 - **GeothermalSimulation** - Thermal reservoir simulation
 - **SeismicSimulation** - Earthquake and fault mechanics
 - **NMRSimulation** - Pore-scale NMR (CPU/OpenCL)
+- **TriaxialSimulation** - Triaxial compression/extension test with failure analysis
+
+### PNM Operations
+- **PNMGeneration** - Generate pore network model from CT scan
+- **PermeabilityCalculation** - Calculate absolute permeability (Darcy's law)
+- **DiffusivityCalculation** - Calculate molecular diffusivity (random walk)
+- **PNMReactiveTransport** - Reactive transport with mineral dissolution/precipitation
 
 ### CT Operations
 - **CTFiltering** - Apply filters (Gaussian, Median, Bilateral, etc.)
@@ -360,6 +367,147 @@ All operations support GPU acceleration where available and automatically fall b
 - Job cleanup after 1 hour for completed jobs
 - Thread-safe job tracking with ConcurrentDictionary
 - Efficient node load balancing via GetLoadScore()
+
+## Advanced Features
+
+### Data References (Efficient Large Dataset Handling)
+
+Instead of transmitting large CT volumes or meshes over the network, use data references:
+
+1. **Register Data** (one time):
+```bash
+curl -X POST http://localhost:5000/api/partitionedjob/register-data \
+  -H "Content-Type: application/json" \
+  -d '{
+    "filePath": "/data/ct_scan_10GB.raw",
+    "dataType": "CTVolume",
+    "width": 2000,
+    "height": 2000,
+    "depth": 2000,
+    "copyToSharedStorage": true
+  }'
+# Returns: {"referenceId": "a1b2c3d4e5f6", "sharedPath": "/tmp/GTK_SharedData/..."}
+```
+
+2. **Use Reference in Jobs**:
+```bash
+curl -X POST http://localhost:5000/api/partitionedjob/submit \
+  -H "Content-Type: application/json" \
+  -d '{
+    "jobType": "CTFiltering",
+    "dataReferenceId": "a1b2c3d4e5f6",
+    "partitionStrategy": "SpatialZ",
+    "partitionCount": 8,
+    "parameters": {
+      "filterType": "Gaussian",
+      "kernelSize": 5
+    }
+  }'
+```
+
+**Benefits:**
+- No network transmission of large files
+- Shared storage accessible by all nodes
+- Automatic cleanup of old references
+
+### Job Partitioning (Multi-Node Parallelism)
+
+Large jobs are automatically split across multiple worker nodes:
+
+**Partitioning Strategies:**
+- `SpatialZ`: Split along Z axis (depth slices) - best for volumetric CT data
+- `SpatialXY`: Split in XY plane (tiles) - best for 2D image processing
+- `SpatialOctree`: Octree-based spatial partitioning - best for irregular geometries
+- `Temporal`: Split by time steps - best for time-series simulations
+- `Random`: Random distribution - best for independent samples
+
+**Result Aggregation:**
+- `Concatenate`: Join results sequentially (e.g., volume slices)
+- `Merge`: Merge results (e.g., simulation timesteps)
+- `Sum`: Sum numerical results
+- `Average`: Average numerical results
+- `Custom`: Return raw results for custom aggregation
+
+**Example - Process 10GB CT Volume Across 8 Nodes:**
+```bash
+# 1. Register the large CT volume
+curl -X POST http://localhost:5000/api/partitionedjob/register-data \
+  -d '{
+    "filePath": "/data/large_ct.raw",
+    "dataType": "CTVolume",
+    "width": 2048, "height": 2048, "depth": 2048
+  }'
+# Returns: {"referenceId": "abc123"}
+
+# 2. Submit partitioned filtering job
+curl -X POST http://localhost:5000/api/partitionedjob/submit \
+  -d '{
+    "jobType": "CTFiltering",
+    "dataReferenceId": "abc123",
+    "partitionStrategy": "SpatialZ",
+    "partitionCount": 8,
+    "aggregationStrategy": "Concatenate",
+    "parameters": {
+      "filterType": "Gaussian",
+      "sigma": 1.5
+    }
+  }'
+# Returns: {"parentJobId": "xyz789"}
+
+# 3. Check progress
+curl http://localhost:5000/api/partitionedjob/xyz789/status
+# Returns: {"completedPartitions": 5, "totalPartitions": 8, "progress": 62.5}
+
+# 4. Get aggregated result
+curl http://localhost:5000/api/partitionedjob/xyz789/result
+```
+
+**Performance Gains:**
+- 8 nodes = ~8x speedup for embarrassingly parallel jobs
+- Automatic load balancing (2x oversubscription)
+- Fault tolerance (individual partitions can be retried)
+
+### PNM Endpoints
+
+#### Generate PNM from CT
+```bash
+curl -X POST http://localhost:5000/api/pnm/generate \
+  -d '{
+    "ctVolumePath": "/data/ct_scan.raw",
+    "materialId": 1,
+    "neighborhood": "N26",
+    "generationMode": "Conservative",
+    "enforceInletOutletConnectivity": true,
+    "flowAxis": "Z"
+  }'
+```
+
+#### Calculate Permeability
+```bash
+curl -X POST http://localhost:5000/api/pnm/permeability \
+  -d '{
+    "pnmDatasetPath": "/data/pnm.json",
+    "method": "DirectSolver",
+    "flowAxis": "Z",
+    "pressureDifference_Pa": 100000,
+    "fluidViscosity_Pas": 0.001
+  }'
+```
+
+### Triaxial Simulation Endpoint
+
+```bash
+curl -X POST http://localhost:5000/api/simulation/triaxial \
+  -d '{
+    "sampleHeight": 0.1,
+    "sampleDiameter": 0.05,
+    "confiningPressure_MPa": 10.0,
+    "loadingMode": "StrainControlled",
+    "axialStrainRate_per_s": 1e-5,
+    "maxAxialStrain_percent": 5.0,
+    "drainageCondition": "Drained"
+  }'
+```
 
 ## Security Notes
 

@@ -52,6 +52,8 @@ public class Program
         // Register endpoint services
         builder.Services.AddSingleton<NodeEndpointService>();
         builder.Services.AddSingleton<JobTracker>();
+        builder.Services.AddSingleton<Services.DataReferenceService>();
+        builder.Services.AddSingleton<Services.JobPartitioner>();
 
         // Add CORS for cross-origin requests
         builder.Services.AddCors(options =>
