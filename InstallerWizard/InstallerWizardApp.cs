@@ -131,6 +131,20 @@ internal sealed class InstallerWizardApp
 
         wizard.Finished += _ => SafeRequestStop();
         wizard.Cancelled += _ => SafeRequestStop();
+        
+        // Add step changed handler to ensure proper refresh
+        wizard.StepChanged += (args) =>
+        {
+            Application.MainLoop.Invoke(() =>
+            {
+                wizard.SetNeedsDisplay();
+                Application.Refresh();
+                if (Application.Driver != null)
+                {
+                    Application.Driver.Refresh();
+                }
+            });
+        };
 
         return wizard;
     }
@@ -148,7 +162,7 @@ internal sealed class InstallerWizardApp
             Y = 0,
             Width = Dim.Fill(),
             Height = 1,
-            Text = $"╔══════════════════════════════════════════════════════════════╗",
+            Text = $"╔════════════════════════════════════════════════════════════╗",
             ColorScheme = new ColorScheme
             {
                 Normal = Terminal.Gui.Attribute.Make(Color.BrightCyan, Color.Black)
@@ -174,7 +188,7 @@ internal sealed class InstallerWizardApp
             Y = 2,
             Width = Dim.Fill(),
             Height = 1,
-            Text = $"╚══════════════════════════════════════════════════════════════╝",
+            Text = $"╚════════════════════════════════════════════════════════════╝",
             ColorScheme = new ColorScheme
             {
                 Normal = Terminal.Gui.Attribute.Make(Color.BrightCyan, Color.Black)
@@ -580,14 +594,71 @@ internal sealed class InstallerWizardApp
 
     private void RefreshWizardPage(Wizard.WizardStep page)
     {
+        // Force layout recalculation
         page.LayoutSubviews();
         page.SetNeedsDisplay();
+        
         if (_wizard is not null)
         {
             _wizard.LayoutSubviews();
             _wizard.SetNeedsDisplay();
+            
+            // Use MainLoop.Invoke to ensure UI updates happen on the main thread
+            Application.MainLoop.Invoke(() =>
+            {
+                // Force the wizard to update its focus
+                _wizard.SetFocus();
+                
+                // Find and focus the first focusable view
+                var firstFocusable = FindFirstFocusableView(page);
+                if (firstFocusable != null)
+                {
+                    firstFocusable.SetFocus();
+                }
+                
+                // Force complete redraw
+                page.SetNeedsDisplay();
+                _wizard.SetNeedsDisplay();
+                Application.Refresh();
+                
+                // Force driver refresh if available
+                if (Application.Driver != null)
+                {
+                    try
+                    {
+                        Application.Driver.Refresh();
+                    }
+                    catch
+                    {
+                        // Ignore any driver refresh errors
+                    }
+                }
+            });
         }
-        Application.Refresh();
+        else
+        {
+            // Fallback if wizard is null
+            Application.Refresh();
+        }
+    }
+
+    private View? FindFirstFocusableView(View parent)
+    {
+        if (parent.CanFocus)
+        {
+            return parent;
+        }
+        
+        foreach (var view in parent.Subviews)
+        {
+            var focusable = FindFirstFocusableView(view);
+            if (focusable != null)
+            {
+                return focusable;
+            }
+        }
+        
+        return null;
     }
 
     private void UpdateReview()
@@ -613,9 +684,9 @@ internal sealed class InstallerWizardApp
             : "non richiesti";
 
         var reviewText = $@"
-╔══════════════════════════════════════════════════════════════╗
+╔═══════════════════════════════════════════════════════════════╗
 ║  RIEPILOGO INSTALLAZIONE                                     ║
-╚══════════════════════════════════════════════════════════════╝
+╚═══════════════════════════════════════════════════════════════╝
 
   [*] Prodotto:                 {_settings.ProductName}
   [#] Versione manifest:        {_manifest.Version}
@@ -1014,7 +1085,7 @@ internal sealed class InstallerWizardApp
             }
             if (_statusLabel is not null)
             {
-                var icon = percentage >= 1.0f ? "[√]" : percentage > 0.8f ? "[*]" : percentage > 0.5f ? "[+]" : percentage > 0.1f ? "[↓]" : "[.]";
+                var icon = percentage >= 1.0f ? "[√]" : percentage > 0.8f ? "[*]" : percentage > 0.5f ? "[+]" : percentage > 0.1f ? "[→]" : "[.]";
                 _statusLabel.Text = $"{icon} {status}";
                 _statusLabel.SetNeedsDisplay();
             }
