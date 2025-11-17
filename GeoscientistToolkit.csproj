@@ -93,27 +93,4 @@
 
   
 
-    <!-- Target to extract add-ins after build in Release mode -->
-    <Target Name="ExtractAddIns" AfterTargets="Build" Condition="'$(Configuration)' == 'Release'">
-        
-
-        <ItemGroup>
-            <AddInSourceFiles Include="$(MSBuildProjectDirectory)\AddIns\Development\*.cs"/>
-        </ItemGroup>
-
-        <Message Text="Checking for add-ins to extract..." Importance="high"/>
-        <Message Text="Core assembly: $(OutputPath)GeoscientistToolkit.dll" Importance="high"/>
-        <Message Text="Extractor command: $(ExtractorCommand)" Importance="normal" Condition="'@(AddInSourceFiles)' != ''"/>
-
-        <Exec Condition="'@(AddInSourceFiles)' != ''" Command="$(ExtractorCommand)" WorkingDirectory="$(MSBuildProjectDirectory)"/>
-
-        <Message Condition="'@(AddInSourceFiles)' != ''" Text="Add-in extraction complete!" Importance="high"/>
-        <Message Condition="'@(AddInSourceFiles)' == ''" Text="No add-ins found in AddIns\Development directory." Importance="high"/>
-    </Target>
-
-    <!-- Optional: Create the add-in development directory structure on first build -->
-    <Target Name="EnsureAddInDirectory" BeforeTargets="BeforeBuild">
-        <MakeDir Directories="$(MSBuildProjectDirectory)\AddIns\Development" Condition="!Exists('$(MSBuildProjectDirectory)\AddIns\Development')"/>
-    </Target>
-
 </Project>
