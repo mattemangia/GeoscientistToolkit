@@ -129,6 +129,11 @@ public class JobResultMessage : NodeMessage
 
     [JsonPropertyName("executionTimeMs")]
     public long ExecutionTimeMs { get; set; }
+
+    // Additional properties for NodeEndpoint API compatibility
+    public string Status => Success ? "Completed" : "Failed";
+    public Dictionary<string, object> Result => Results;
+    public long ExecutionTime => ExecutionTimeMs;
 }
 
 /// <summary>
@@ -177,5 +182,8 @@ public enum NodeStatus
     Idle,
     Busy,
     Error,
-    Disconnected
+    Disconnected,
+    Connected,
+    Hosting,
+    Hybrid
 }

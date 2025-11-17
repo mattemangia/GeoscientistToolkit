@@ -21,6 +21,10 @@ public class NodeInfo
     public int ActiveJobs { get; set; }
     public TcpClient Connection { get; set; }
 
+    // API compatibility properties
+    public float CpuUsagePercent => CpuUsage;
+    public float MemoryUsagePercent => MemoryUsage;
+
     /// <summary>
     ///     Checks if the node is considered alive based on last heartbeat
     /// </summary>

@@ -55,6 +55,9 @@ public class NodeManager
     public NodeStatus CurrentStatus { get; private set; } = NodeStatus.Idle;
     public int ConnectedNodeCount => _connectedNodes.Count;
 
+    // API compatibility properties
+    public NodeStatus Status => CurrentStatus;
+
     // Events
     public event Action<NodeInfo> NodeConnected;
     public event Action<NodeInfo> NodeDisconnected;
@@ -736,6 +739,19 @@ public class NodeManager
         {
             return new List<NodeInfo>(_connectedNodes.Values);
         }
+    }
+
+    /// <summary>
+    ///     Get list of connected nodes (API compatibility alias)
+    /// </summary>
+    public List<NodeInfo> GetNodes() => GetConnectedNodes();
+
+    /// <summary>
+    ///     Get NodeManager settings (API compatibility)
+    /// </summary>
+    public NodeManagerSettings GetSettings()
+    {
+        return SettingsManager.Instance.Settings.NodeManager;
     }
 
     /// <summary>
