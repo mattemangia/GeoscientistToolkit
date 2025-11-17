@@ -862,12 +862,13 @@ public class TuiManager
 
         if (discoveredNodes.Any())
         {
-            connections.Add($"╔═══ Discovered Nodes ({discoveredNodes.Count}) ═══");
+            connections.Add($"Discovered Nodes ({discoveredNodes.Count}):");
             foreach (var node in discoveredNodes)
             {
-                connections.Add($"║ {node.NodeType,-12} │ {node.IPAddress}:{node.HttpPort,-21} │ {node.Platform}");
+                var nodeType = node.NodeType.Length > 12 ? node.NodeType.Substring(0, 12) : node.NodeType;
+                var platform = node.Platform.Length > 10 ? node.Platform.Substring(0, 10) : node.Platform;
+                connections.Add($"  {nodeType,-12} {node.IPAddress}:{node.HttpPort} {platform}");
             }
-            connections.Add("╚" + new string('═', 60));
             connections.Add("");
         }
 
@@ -875,22 +876,22 @@ public class TuiManager
         var connectedNodes = _nodeManager.GetConnectedNodes();
         if (connectedNodes.Any())
         {
-            connections.Add($"╔═══ Connected Nodes ({connectedNodes.Count}) ═══");
+            connections.Add($"Connected Nodes ({connectedNodes.Count}):");
             foreach (var node in connectedNodes)
             {
-                var statusIcon = node.Status == NodeStatus.Connected ? "●" : "○";
+                var statusIcon = node.Status == NodeStatus.Connected ? "*" : "-";
                 var uptime = DateTime.Now - node.ConnectedAt;
-                connections.Add($"║ {statusIcon} {node.NodeName,-20} │ {node.IpAddress,-15} │ [{node.Status}]");
-                connections.Add($"║   CPU: {node.CpuUsage,5:F1}% │ Mem: {node.MemoryUsage,5:F1}% │ Jobs: {node.ActiveJobs,3} │ Uptime: {uptime:hh\\:mm\\:ss}");
+                var nodeName = node.NodeName.Length > 20 ? node.NodeName.Substring(0, 20) : node.NodeName;
+                connections.Add($"  {statusIcon} {nodeName,-20} {node.IpAddress,-15} [{node.Status}]");
+                connections.Add($"     CPU: {node.CpuUsage:F1}% Mem: {node.MemoryUsage:F1}% Jobs: {node.ActiveJobs} Up: {uptime:hh\\:mm\\:ss}");
             }
-            connections.Add("╚" + new string('═', 60));
         }
 
         if (!connections.Any())
         {
             connections.Add("No active connections or discovered nodes");
             connections.Add("");
-            connections.Add("Network discovery is " + (_networkDiscovery != null ? "running" : "stopped"));
+            connections.Add("Network discovery is running");
         }
 
         _connectionsListView.SetSource(connections);
@@ -1118,16 +1119,16 @@ public class TuiManager
 
         if (jobs.Any())
         {
-            jobLines.Add($"╔═══ Job Queue ({jobs.Count} jobs) ═══");
+            jobLines.Add($"Job Queue ({jobs.Count} jobs):");
             foreach (var job in jobs)
             {
                 var statusIcon = job.Status switch
                 {
-                    JobTracker.JobStatus.Pending => "⧗",
-                    JobTracker.JobStatus.Running => "▶",
-                    JobTracker.JobStatus.Completed => "✓",
-                    JobTracker.JobStatus.Failed => "✗",
-                    JobTracker.JobStatus.Cancelled => "⊘",
+                    JobTracker.JobStatus.Pending => "P",
+                    JobTracker.JobStatus.Running => "R",
+                    JobTracker.JobStatus.Completed => "C",
+                    JobTracker.JobStatus.Failed => "F",
+                    JobTracker.JobStatus.Cancelled => "X",
                     _ => "?"
                 };
 
@@ -1135,9 +1136,9 @@ public class TuiManager
                     ? (job.CompletedAt.Value - job.SubmittedAt).TotalSeconds.ToString("F1") + "s"
                     : (DateTime.UtcNow - job.SubmittedAt).TotalSeconds.ToString("F1") + "s";
 
-                jobLines.Add($"║ {statusIcon} {job.JobId,-36} │ {job.Status,-10} │ {duration,8}");
+                var jobId = job.JobId.Length > 36 ? job.JobId.Substring(0, 36) : job.JobId;
+                jobLines.Add($"  [{statusIcon}] {jobId,-36} {job.Status,-10} {duration,8}");
             }
-            jobLines.Add("╚" + new string('═', 70));
         }
         else
         {
@@ -1203,13 +1204,13 @@ public class TuiManager
 
         if (nodes.Any())
         {
-            nodeLines.Add("╔═══ Connected Nodes ═══");
+            nodeLines.Add($"Connected Nodes ({nodes.Count}):");
             foreach (var node in nodes)
             {
-                var statusIcon = node.Status == NodeStatus.Connected ? "●" : "○";
-                nodeLines.Add($"║ {statusIcon} {node.NodeName,-25} │ {node.IpAddress,-15} │ Jobs: {node.ActiveJobs,3}");
+                var statusIcon = node.Status == NodeStatus.Connected ? "*" : "-";
+                var nodeName = node.NodeName.Length > 25 ? node.NodeName.Substring(0, 25) : node.NodeName;
+                nodeLines.Add($"  {statusIcon} {nodeName,-25} {node.IpAddress,-15} Jobs: {node.ActiveJobs}");
             }
-            nodeLines.Add("╚" + new string('═', 60));
         }
         else
         {
