@@ -2113,4 +2113,6 @@ This documentation is part of the Geoscientist's Toolkit application, licensed u
 
 ---
 
+For any help or information please contact the author.
+
 **End of GEOSCRIPT Language Manual**
