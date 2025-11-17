@@ -204,7 +204,7 @@ public class TuiManager
                     AddLog("INFO", "Network discovery started");
                 }),
                 new MenuItem("S_top Network Discovery", "Stop network discovery service", () => {
-                    _networkDiscovery.StopBroadcasting();
+                    _networkDiscovery.Stop();
                     AddLog("INFO", "Network discovery stopped");
                 }),
                 null!, // Separator
@@ -813,9 +813,10 @@ public class TuiManager
             connections.Add($"╔═══ Connected Nodes ({connectedNodes.Count}) ═══");
             foreach (var node in connectedNodes)
             {
-                var statusIcon = node.Status == NodeConnectionStatus.Connected ? "●" : "○";
+                var statusIcon = node.Status == NodeStatus.Connected ? "●" : "○";
+                var uptime = DateTime.Now - node.ConnectedAt;
                 connections.Add($"║ {statusIcon} {node.NodeName,-20} │ {node.IpAddress,-15} │ [{node.Status}]");
-                connections.Add($"║   CPU: {node.CpuUsage,5:F1}% │ Mem: {node.MemoryUsage,5:F1}% │ Jobs: {node.ActiveJobs,3} │ Uptime: {node.Uptime}");
+                connections.Add($"║   CPU: {node.CpuUsage,5:F1}% │ Mem: {node.MemoryUsage,5:F1}% │ Jobs: {node.ActiveJobs,3} │ Uptime: {uptime:hh\\:mm\\:ss}");
             }
             connections.Add("╚" + new string('═', 60));
         }
@@ -1129,7 +1130,7 @@ public class TuiManager
             nodeLines.Add("╔═══ Connected Nodes ═══");
             foreach (var node in nodes)
             {
-                var statusIcon = node.Status == NodeConnectionStatus.Connected ? "●" : "○";
+                var statusIcon = node.Status == NodeStatus.Connected ? "●" : "○";
                 nodeLines.Add($"║ {statusIcon} {node.NodeName,-25} │ {node.IpAddress,-15} │ Jobs: {node.ActiveJobs,3}");
             }
             nodeLines.Add("╚" + new string('═', 60));
@@ -1160,13 +1161,16 @@ public class TuiManager
         var node = nodes[_selectedNodeIndex];
         var sb = new StringBuilder();
 
+        var uptime = DateTime.Now - node.ConnectedAt;
         sb.AppendLine("═══ NODE DETAILS ═══");
         sb.AppendLine();
         sb.AppendLine($"Node ID:         {node.NodeId}");
         sb.AppendLine($"Node Name:       {node.NodeName}");
         sb.AppendLine($"IP Address:      {node.IpAddress}");
         sb.AppendLine($"Status:          {node.Status}");
-        sb.AppendLine($"Uptime:          {node.Uptime}");
+        sb.AppendLine($"Connected At:    {node.ConnectedAt:yyyy-MM-dd HH:mm:ss}");
+        sb.AppendLine($"Uptime:          {uptime.Days}d {uptime.Hours:D2}h {uptime.Minutes:D2}m {uptime.Seconds:D2}s");
+        sb.AppendLine($"Last Heartbeat:  {node.LastHeartbeat:yyyy-MM-dd HH:mm:ss}");
         sb.AppendLine();
         sb.AppendLine("═══ RESOURCES ═══");
         sb.AppendLine($"CPU Usage:       {node.CpuUsage:F1}%");
@@ -1176,11 +1180,11 @@ public class TuiManager
         sb.AppendLine("═══ CAPABILITIES ═══");
         sb.AppendLine($"CPU Cores:       {node.Capabilities.CpuCores}");
         sb.AppendLine($"Total Memory:    {node.Capabilities.TotalMemoryMb:N0} MB");
+        sb.AppendLine($"Operating System: {node.Capabilities.OperatingSystem}");
         sb.AppendLine($"Has GPU:         {node.Capabilities.HasGpu}");
         if (node.Capabilities.HasGpu)
         {
             sb.AppendLine($"GPU Name:        {node.Capabilities.GpuName}");
-            sb.AppendLine($"GPU Memory:      {node.Capabilities.GpuMemoryMb:N0} MB");
         }
         sb.AppendLine($"Supports Jobs:   {string.Join(", ", node.Capabilities.SupportedJobTypes)}");
 
