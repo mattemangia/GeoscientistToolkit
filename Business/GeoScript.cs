@@ -3,6 +3,7 @@
 using System.Data;
 using System.Globalization;
 using System.Reflection;
+using System.Text;
 using System.Text.RegularExpressions;
 using GeoscientistToolkit.Business.GIS;
 using GeoscientistToolkit.Business.Thermodynamics;
@@ -2147,7 +2148,7 @@ public class SpeciateCommand : IGeoScriptCommand
         // Parse and normalize compound inputs
         var compoundInputs = compoundsStr.Split('+').Select(c => c.Trim()).ToList();
         var compounds = new List<string>();
-        
+
         foreach (var input in compoundInputs)
         {
             var normalized = CompoundLibrary.NormalizeFormulaInput(input);
@@ -2157,10 +2158,10 @@ public class SpeciateCommand : IGeoScriptCommand
         Logger.Log($"[SPECIATE] Processing compounds: {string.Join(", ", compounds)} at {temperatureK:F2} K, {pressureBar:F2} bar");
 
         // Always add water to the system for aqueous solutions - use flexible find
-        var water = compoundLib.FindFlexible("H2O") ?? 
+        var water = compoundLib.FindFlexible("H2O") ??
                     compoundLib.FindFlexible("Water") ??
                     compoundLib.FindFlexible("H₂O");
-                    
+
         if (water != null)
         {
             var waterMoles = 55.508; // 1L of water at 25°C
@@ -2175,7 +2176,7 @@ public class SpeciateCommand : IGeoScriptCommand
         // Generate dissociation reactions for input compounds
         var dissociationReactions = reactionGenerator.GenerateSolubleCompoundDissociationReactions(
             compounds, temperatureK, pressureBar);
-        
+
         // Process each compound based on its dissociation behavior
         foreach (var compoundInput in compounds)
         {
@@ -2188,7 +2189,7 @@ public class SpeciateCommand : IGeoScriptCommand
             }
 
             double moles = 0.001; // Default 1 mmol
-            
+
             // Check if user specified amount (e.g., "0.1 NaCl" or "NaCl 0.1")
             var amountMatch = Regex.Match(compoundInput, @"([\d\.]+)\s*(\w+)|(\w+)\s+([\d\.]+)");
             if (amountMatch.Success)
@@ -2202,16 +2203,16 @@ public class SpeciateCommand : IGeoScriptCommand
                     moles = double.Parse(amountMatch.Groups[4].Value, CultureInfo.InvariantCulture);
                 }
             }
-            
+
             // Check if there's a dissociation reaction for this compound
-            var dissociationReaction = dissociationReactions.FirstOrDefault(r => 
+            var dissociationReaction = dissociationReactions.FirstOrDefault(r =>
                 r.Stoichiometry.ContainsKey(compound.Name) && r.Stoichiometry[compound.Name] < 0);
-            
+
             if (dissociationReaction != null)
             {
                 // For compounds with dissociation reactions, add the products directly
                 Logger.Log($"[SPECIATE] {compound.Name} will dissociate");
-                
+
                 foreach (var (product, stoich) in dissociationReaction.Stoichiometry)
                 {
                     if (stoich > 0) // Products only
@@ -2219,18 +2220,18 @@ public class SpeciateCommand : IGeoScriptCommand
                         var productCompound = compoundLib.FindFlexible(product);
                         if (productCompound != null)
                         {
-                            initialState.SpeciesMoles[productCompound.Name] = 
+                            initialState.SpeciesMoles[productCompound.Name] =
                                 initialState.SpeciesMoles.GetValueOrDefault(productCompound.Name, 0) + moles * stoich;
-                            
+
                             // Update elemental composition
                             var productComp = reactionGenerator.ParseChemicalFormula(productCompound.ChemicalFormula);
                             foreach (var (element, elemStoich) in productComp)
                             {
                                 initialState.ElementalComposition[element] =
-                                    initialState.ElementalComposition.GetValueOrDefault(element, 0) + 
+                                    initialState.ElementalComposition.GetValueOrDefault(element, 0) +
                                     moles * stoich * elemStoich;
                             }
-                            
+
                             Logger.Log($"  → {productCompound.Name}: {moles * stoich:E3} moles");
                         }
                     }
@@ -2241,14 +2242,14 @@ public class SpeciateCommand : IGeoScriptCommand
                 // For compounds without dissociation (or already aqueous), add directly
                 initialState.SpeciesMoles[compound.Name] =
                     initialState.SpeciesMoles.GetValueOrDefault(compound.Name, 0) + moles;
-                
+
                 var composition = reactionGenerator.ParseChemicalFormula(compound.ChemicalFormula);
                 foreach (var (element, stoichiometry) in composition)
                 {
                     initialState.ElementalComposition[element] =
                         initialState.ElementalComposition.GetValueOrDefault(element, 0) + moles * stoichiometry;
                 }
-                
+
                 Logger.Log($"  - {compound.Name}: {moles:E3} moles (no dissociation)");
             }
         }
@@ -2256,41 +2257,57 @@ public class SpeciateCommand : IGeoScriptCommand
         // Now solve for equilibrium with the properly dissociated species
         var finalState = solver.SolveEquilibrium(initialState);
 
-        // Create output table
-        var resultTable = new DataTable("Dissolved_Species");
+        // Create output table with all necessary columns
+        var resultTable = new DataTable("Speciation_Results");
+        resultTable.Columns.Add("#", typeof(int));
         resultTable.Columns.Add("Species", typeof(string));
         resultTable.Columns.Add("Formula", typeof(string));
         resultTable.Columns.Add("Phase", typeof(string));
         resultTable.Columns.Add("Moles", typeof(double));
-        resultTable.Columns.Add("Concentration_M", typeof(double));
+        resultTable.Columns.Add("Conc_M", typeof(double));
         resultTable.Columns.Add("Activity", typeof(double));
-        resultTable.Columns.Add("Activity_Coefficient", typeof(double));
+        resultTable.Columns.Add("γ", typeof(double)); // Activity coefficient
 
-        Logger.Log("\n=== AQUEOUS SPECIATION RESULTS ===");
-        Logger.Log($"Temperature: {temperatureK:F2} K ({temperatureK - 273.15:F2} °C)");
-        Logger.Log($"Pressure: {pressureBar:F2} bar");
-        Logger.Log($"pH: {finalState.pH:F2}");
-        Logger.Log($"pe: {finalState.pe:F2}");
-        Logger.Log($"Ionic Strength: {finalState.IonicStrength_molkg:F4} mol/kg\n");
+        // Create terminal output
+        var terminalOutput = new StringBuilder();
+        terminalOutput.AppendLine("\n╔════════════════════════════════════════════════════════════════════════╗");
+        terminalOutput.AppendLine("║                    AQUEOUS SPECIATION RESULTS                          ║");
+        terminalOutput.AppendLine("╠════════════════════════════════════════════════════════════════════════╣");
+        terminalOutput.AppendLine($"║ Temperature: {finalState.Temperature_K:F2} K ({finalState.Temperature_K - 273.15:F2} °C)");
+        terminalOutput.AppendLine($"║ Pressure:    {finalState.Pressure_bar:F2} bar");
+        terminalOutput.AppendLine($"║ pH:          {finalState.pH:F2}");
+        terminalOutput.AppendLine($"║ pe:          {finalState.pe:F2}");
+        terminalOutput.AppendLine($"║ Ionic Str:   {finalState.IonicStrength_molkg:F4} mol/kg");
+        terminalOutput.AppendLine("╠════════════════════════════════════════════════════════════════════════╣");
+        terminalOutput.AppendLine("║ Species        Formula    Conc(M)      Activity    Moles       γ       ║");
+        terminalOutput.AppendLine("╠════════════════════════════════════════════════════════════════════════╣");
 
-        // Sort species by concentration
+        // Sort species by concentration (descending)
         var sortedSpecies = finalState.SpeciesMoles
+            .Where(kvp => kvp.Value > 1e-15) // Only significant species
             .OrderByDescending(kvp => kvp.Value)
             .ToList();
 
+        int rowNum = 1;
         foreach (var (speciesName, moles) in sortedSpecies)
         {
-            if (moles < 1e-15) continue; // Skip negligible species
-            
             var species = compoundLib.FindFlexible(speciesName);
-            if (species == null || species.Phase != CompoundPhase.Aqueous) continue;
-            
+            if (species == null) continue;
+
+            // Only show aqueous species in speciation results
+            if (species.Phase != CompoundPhase.Aqueous) continue;
+
             var concentration = moles / finalState.Volume_L;
             var activity = finalState.Activities.GetValueOrDefault(speciesName, concentration);
             var activityCoeff = concentration > 0 ? activity / concentration : 1.0;
-            
+
+            // Skip very low concentrations unless it's a major component
+            if (concentration < 1e-10 && !IsImportantSpecies(speciesName))
+                continue;
+
             resultTable.Rows.Add(
-                speciesName,
+                rowNum++,
+                species.Name,
                 species.ChemicalFormula,
                 "Aqueous",
                 moles,
@@ -2298,11 +2315,63 @@ public class SpeciateCommand : IGeoScriptCommand
                 activity,
                 activityCoeff
             );
-            
-            Logger.Log($"{species.ChemicalFormula,-15} {concentration:E3} M  Activity: {activity:E3}  γ: {activityCoeff:F3}");
+
+            terminalOutput.AppendLine(
+                $"║ {species.Name,-14} {species.ChemicalFormula,-10} {concentration,10:E2} {activity,10:E2} {moles,10:E2} {activityCoeff,7:F3} ║");
         }
 
+        terminalOutput.AppendLine("╚════════════════════════════════════════════════════════════════════════╝");
+
+        // Show predominant species summary
+        terminalOutput.AppendLine("\n=== PREDOMINANT SPECIES ===");
+
+        // Group by element and show main species
+        var elementSpecies = new Dictionary<string, List<(string species, double conc)>>();
+
+        foreach (var (speciesName, moles) in sortedSpecies)
+        {
+            var species = compoundLib.FindFlexible(speciesName);
+            if (species == null || species.Phase != CompoundPhase.Aqueous) continue;
+
+            var elements = reactionGenerator.ParseChemicalFormula(species.ChemicalFormula);
+            var concentration = moles / finalState.Volume_L;
+
+            foreach (var element in elements.Keys)
+            {
+                if (element == "H" || element == "O") continue; // Skip H and O
+
+                if (!elementSpecies.ContainsKey(element))
+                    elementSpecies[element] = new List<(string, double)>();
+
+                elementSpecies[element].Add((species.ChemicalFormula, concentration));
+            }
+        }
+
+        foreach (var (element, speciesList) in elementSpecies)
+        {
+            var topSpecies = speciesList.OrderByDescending(s => s.conc).Take(3).ToList();
+            terminalOutput.AppendLine($"{element}: {string.Join(", ", topSpecies.Select(s => $"{s.species} ({s.conc:E2} M)"))}");
+        }
+
+        // Print to console
+        Console.WriteLine(terminalOutput.ToString());
+
         return Task.FromResult<Dataset>(new TableDataset("Speciation_Results", resultTable));
+    }
+
+    /// <summary>
+    /// Check if a species is important to always show.
+    /// </summary>
+    private bool IsImportantSpecies(string speciesName)
+    {
+        var importantSpecies = new HashSet<string>
+        {
+            "H⁺", "Proton", "OH⁻", "Hydroxide",
+            "H₂O", "Water",
+            "e⁻", "Electron"
+        };
+
+        return importantSpecies.Contains(speciesName);
     }
 }
 

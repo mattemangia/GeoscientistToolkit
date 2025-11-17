@@ -1104,11 +1104,41 @@ public class ReactionGenerator
     {
         var reactions = new List<ChemicalReaction>();
 
-        // Common acid-base systems
-        reactions.AddRange(GenerateCarbonateSys());
-        reactions.AddRange(GenerateWaterDissociation());
-        reactions.AddRange(GeneratePhosphateSys());
-        reactions.AddRange(GenerateSulfideSys());
+        // Get available elements
+        var availableElements = state.ElementalComposition
+            .Where(kvp => kvp.Value > 1e-15)
+            .Select(kvp => kvp.Key)
+            .ToHashSet();
+
+        // Only generate water dissociation if H and O are present
+        if (availableElements.Contains("H") && availableElements.Contains("O"))
+        {
+            reactions.AddRange(GenerateWaterDissociation());
+        }
+
+        // Only generate carbonate system if C is present
+        if (availableElements.Contains("C") && availableElements.Contains("O"))
+        {
+            reactions.AddRange(GenerateCarbonateSys());
+        }
+
+        // Only generate phosphate system if P is present
+        if (availableElements.Contains("P") && availableElements.Contains("O"))
+        {
+            reactions.AddRange(GeneratePhosphateSys());
+        }
+
+        // Only generate sulfide system if S is present
+        if (availableElements.Contains("S"))
+        {
+            reactions.AddRange(GenerateSulfideSys());
+        }
+
+        // Only generate ammonia system if N is present
+        if (availableElements.Contains("N") && availableElements.Contains("H"))
+        {
+            reactions.AddRange(GenerateAmmoniaSys());
+        }
 
         return reactions;
     }
