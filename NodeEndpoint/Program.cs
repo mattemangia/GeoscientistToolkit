@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using GeoscientistToolkit.Network;
 using Microsoft.AspNetCore.Server.Kestrel.Core;
 using System.Net;
