@@ -90,9 +90,9 @@ public class NodeEndpointService
         Console.WriteLine($"  GPU: {(node.Capabilities.HasGpu ? node.Capabilities.GpuName : "None")}");
     }
 
-    private void OnNodeDisconnected(string nodeId)
+    private void OnNodeDisconnected(NodeInfo node)
     {
-        Console.WriteLine($"Node disconnected: {nodeId}");
+        Console.WriteLine($"Node disconnected: {node.NodeId} - {node.NodeName}");
     }
 
     public NodeManager GetNodeManager() => _nodeManager;

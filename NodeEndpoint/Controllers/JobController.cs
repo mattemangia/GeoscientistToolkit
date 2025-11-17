@@ -104,7 +104,7 @@ public class JobController : ControllerBase
             await Task.Delay(1000); // Poll every second
         }
 
-        return RequestTimeout(new
+        return StatusCode(408, new
         {
             error = "Job did not complete within timeout",
             jobId,
