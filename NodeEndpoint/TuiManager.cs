@@ -862,12 +862,12 @@ public class TuiManager
 
         if (discoveredNodes.Any())
         {
-            connections.Add($"Discovered Nodes ({discoveredNodes.Count}):");
+            connections.Add($"Discovered Nodes: {discoveredNodes.Count}");
             foreach (var node in discoveredNodes)
             {
-                var nodeType = node.NodeType.Length > 12 ? node.NodeType.Substring(0, 12) : node.NodeType;
+                var nodeType = node.NodeType.Length > 15 ? node.NodeType.Substring(0, 15) : node.NodeType;
                 var platform = node.Platform.Length > 10 ? node.Platform.Substring(0, 10) : node.Platform;
-                connections.Add($"  {nodeType,-12} {node.IPAddress}:{node.HttpPort} {platform}");
+                connections.Add($"  {nodeType} - {node.IPAddress}:{node.HttpPort} ({platform})");
             }
             connections.Add("");
         }
@@ -876,14 +876,14 @@ public class TuiManager
         var connectedNodes = _nodeManager.GetConnectedNodes();
         if (connectedNodes.Any())
         {
-            connections.Add($"Connected Nodes ({connectedNodes.Count}):");
+            connections.Add($"Connected Nodes: {connectedNodes.Count}");
             foreach (var node in connectedNodes)
             {
                 var statusIcon = node.Status == NodeStatus.Connected ? "*" : "-";
                 var uptime = DateTime.Now - node.ConnectedAt;
-                var nodeName = node.NodeName.Length > 20 ? node.NodeName.Substring(0, 20) : node.NodeName;
-                connections.Add($"  {statusIcon} {nodeName,-20} {node.IpAddress,-15} [{node.Status}]");
-                connections.Add($"     CPU: {node.CpuUsage:F1}% Mem: {node.MemoryUsage:F1}% Jobs: {node.ActiveJobs} Up: {uptime:hh\\:mm\\:ss}");
+                var nodeName = node.NodeName.Length > 25 ? node.NodeName.Substring(0, 25) : node.NodeName;
+                connections.Add($"  [{statusIcon}] {nodeName} - {node.IpAddress} - {node.Status}");
+                connections.Add($"      CPU: {node.CpuUsage:F1}% | Mem: {node.MemoryUsage:F1}% | Jobs: {node.ActiveJobs} | Up: {uptime:hh\\:mm\\:ss}");
             }
         }
 
@@ -1119,7 +1119,7 @@ public class TuiManager
 
         if (jobs.Any())
         {
-            jobLines.Add($"Job Queue ({jobs.Count} jobs):");
+            jobLines.Add($"Job Queue: {jobs.Count} jobs");
             foreach (var job in jobs)
             {
                 var statusIcon = job.Status switch
@@ -1137,12 +1137,13 @@ public class TuiManager
                     : (DateTime.UtcNow - job.SubmittedAt).TotalSeconds.ToString("F1") + "s";
 
                 var jobId = job.JobId.Length > 36 ? job.JobId.Substring(0, 36) : job.JobId;
-                jobLines.Add($"  [{statusIcon}] {jobId,-36} {job.Status,-10} {duration,8}");
+                jobLines.Add($"  [{statusIcon}] {jobId} - {job.Status} - {duration}");
             }
         }
         else
         {
-            jobLines.Add(_jobFilter.Length > 0 ? $"No jobs match filter: '{_jobFilter}'" : "No jobs in queue");
+            var filterMsg = _jobFilter.Length > 0 ? $"No jobs match filter: {_jobFilter}" : "No jobs in queue";
+            jobLines.Add(filterMsg.Length > 80 ? filterMsg.Substring(0, 80) : filterMsg);
         }
 
         _jobsListView.SetSource(jobLines);
@@ -1204,12 +1205,12 @@ public class TuiManager
 
         if (nodes.Any())
         {
-            nodeLines.Add($"Connected Nodes ({nodes.Count}):");
+            nodeLines.Add($"Connected Nodes: {nodes.Count}");
             foreach (var node in nodes)
             {
                 var statusIcon = node.Status == NodeStatus.Connected ? "*" : "-";
-                var nodeName = node.NodeName.Length > 25 ? node.NodeName.Substring(0, 25) : node.NodeName;
-                nodeLines.Add($"  {statusIcon} {nodeName,-25} {node.IpAddress,-15} Jobs: {node.ActiveJobs}");
+                var nodeName = node.NodeName.Length > 30 ? node.NodeName.Substring(0, 30) : node.NodeName;
+                nodeLines.Add($"  [{statusIcon}] {nodeName} - {node.IpAddress} - Jobs: {node.ActiveJobs}");
             }
         }
         else
