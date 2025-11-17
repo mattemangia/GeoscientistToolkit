@@ -19,6 +19,7 @@ public class NetworkDiscoveryService
     private readonly string _nodeEndpointAddress;
     private readonly int _nodeEndpointPort;
     private readonly int _nodeManagerPort;
+    private readonly Dictionary<string, DiscoveryMessage> _discoveredNodes = new();
 
     public NetworkDiscoveryService(string nodeEndpointAddress, int nodeEndpointPort, int nodeManagerPort)
     {
@@ -153,6 +154,13 @@ public class NetworkDiscoveryService
                             // Don't discover ourselves
                             if (message.HostName != Environment.MachineName)
                             {
+                                // Track discovered node
+                                var nodeKey = $"{message.IPAddress}:{message.HttpPort}";
+                                lock (_discoveredNodes)
+                                {
+                                    _discoveredNodes[nodeKey] = message;
+                                }
+
                                 Console.WriteLine($"[NetworkDiscovery] Discovered {message.NodeType} at {message.IPAddress}:{message.HttpPort}");
                                 onNodeDiscovered(message);
                             }
@@ -183,6 +191,28 @@ public class NetworkDiscoveryService
         _cancellationTokenSource?.Cancel();
         _broadcastClient?.Close();
         _listenClient?.Close();
+    }
+
+    /// <summary>
+    /// Get list of discovered nodes
+    /// </summary>
+    public List<DiscoveryMessage> GetDiscoveredNodes()
+    {
+        lock (_discoveredNodes)
+        {
+            // Clean up stale nodes (not seen in last 30 seconds)
+            var staleKeys = _discoveredNodes
+                .Where(kvp => (DateTime.UtcNow - kvp.Value.Timestamp).TotalSeconds > 30)
+                .Select(kvp => kvp.Key)
+                .ToList();
+
+            foreach (var key in staleKeys)
+            {
+                _discoveredNodes.Remove(key);
+            }
+
+            return new List<DiscoveryMessage>(_discoveredNodes.Values);
+        }
     }
 
     private static string GetPlatform()

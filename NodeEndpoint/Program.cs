@@ -11,6 +11,7 @@ public class Program
         var builder = WebApplication.CreateBuilder(args);
 
         // Configure Kestrel for keepalive connections
+        // NOTE: Port binding is configured in appsettings.json under Kestrel:Endpoints
         builder.WebHost.ConfigureKestrel(options =>
         {
             // Enable keepalive
@@ -21,12 +22,6 @@ public class Program
             options.Limits.MaxConcurrentConnections = 100;
             options.Limits.MaxConcurrentUpgradedConnections = 100;
             options.Limits.MaxRequestBodySize = 1_073_741_824; // 1GB for large CT volumes
-
-            // Listen on all interfaces (port 8500 to avoid conflicts with main app on 5000)
-            options.Listen(IPAddress.Any, 8500, listenOptions =>
-            {
-                listenOptions.Protocols = HttpProtocols.Http1AndHttp2;
-            });
         });
 
         // Add services to the container
@@ -64,8 +59,8 @@ public class Program
         builder.Services.AddSingleton<Services.JobPartitioner>();
         builder.Services.AddSingleton<Services.NetworkDiscoveryService>(sp =>
         {
-            // Use the hardcoded HTTP port that matches the Kestrel configuration (line 26)
-            var httpPort = 8500;
+            // Get the HTTP port from configuration (appsettings.json)
+            var httpPort = builder.Configuration.GetValue<int>("HttpPort", 8500);
             var nodeManagerPort = builder.Configuration.GetValue<int>("NodeManager:ServerPort", 9876);
             var localIp = Services.NetworkDiscoveryService.GetLocalIPAddress();
             return new Services.NetworkDiscoveryService($"http://{localIp}", httpPort, nodeManagerPort);
@@ -112,11 +107,14 @@ public class Program
             nodeManagerSettings.HostAddress = localIp;
         }
 
+        var httpPort = builder.Configuration.GetValue<int>("HttpPort", 8500);
+        var nodeManagerPort = builder.Configuration.GetValue<int>("NodeManager:ServerPort", 9876);
+
         Console.WriteLine("=== GeoscientistToolkit Node Endpoint Server ===");
         Console.WriteLine($"Platform: {(OperatingSystem.IsWindows() ? "Windows" : OperatingSystem.IsMacOS() ? "macOS" : OperatingSystem.IsLinux() ? "Linux" : "Unknown")}");
         Console.WriteLine($"Local IP: {localIp}");
-        Console.WriteLine($"HTTP API: http://{localIp}:8500");
-        Console.WriteLine($"NodeManager: {localIp}:9876");
+        Console.WriteLine($"HTTP API: http://{localIp}:{httpPort}");
+        Console.WriteLine($"NodeManager: {localIp}:{nodeManagerPort}");
         Console.WriteLine($"Keepalive timeout: 10 minutes");
         Console.WriteLine($"");
 
@@ -139,9 +137,29 @@ public class Program
 
         Console.WriteLine("");
         Console.WriteLine("Ready to accept connections!");
-        Console.WriteLine("Swagger UI: http://localhost:8500/swagger");
+        Console.WriteLine($"Swagger UI: http://localhost:{httpPort}/swagger");
+        Console.WriteLine("");
+        Console.WriteLine("Starting Terminal UI...");
         Console.WriteLine("");
 
-        app.Run();
+        // Run the web app in a background thread
+        var appTask = Task.Run(() => app.Run());
+
+        // Give the web app a moment to fully start
+        Thread.Sleep(1000);
+
+        // Run the TUI on the main thread
+        var tuiManager = new TuiManager(
+            nodeManager,
+            networkDiscovery,
+            httpPort,
+            nodeManagerPort,
+            localIp
+        );
+
+        tuiManager.Run();
+
+        // Wait for the app to finish (if the TUI exits)
+        appTask.Wait();
     }
 }
