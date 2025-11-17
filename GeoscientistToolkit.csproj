@@ -17,11 +17,7 @@
       from the main project's compilation. This resolves the duplicate attribute errors.
     -->
     <ItemGroup>
-        <Compile Remove="AddInExtractor\**"/>
-        <EmbeddedResource Remove="AddInExtractor\**"/>
-        <None Remove="AddInExtractor\**"/>
-
-        <!-- Exclude NodeEndpoint to prevent duplicate assembly attributes -->
+                <!-- Exclude NodeEndpoint to prevent duplicate assembly attributes -->
         <Compile Remove="NodeEndpoint\**"/>
         <EmbeddedResource Remove="NodeEndpoint\**"/>
         <None Remove="NodeEndpoint\**"/>
