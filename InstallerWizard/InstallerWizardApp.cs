@@ -43,6 +43,7 @@ internal sealed class InstallerWizardApp
     private IReadOnlyList<RuntimeComponent> _currentComponents = Array.Empty<RuntimeComponent>();
     private bool _createDesktopShortcut = true;
     private bool _isElevated;
+    private bool _isStopping;
 
     public InstallerWizardApp(
         InstallerSettings settings,
@@ -73,6 +74,16 @@ internal sealed class InstallerWizardApp
         {
             Application.Shutdown();
         }
+    }
+
+    private void SafeRequestStop()
+    {
+        if (_isStopping)
+        {
+            return;
+        }
+        _isStopping = true;
+        Application.RequestStop();
     }
 
     private void LoadState()
@@ -111,8 +122,8 @@ internal sealed class InstallerWizardApp
         wizard.AddStep(CreateReviewPage());
         wizard.AddStep(CreateProgressPage());
 
-        wizard.Finished += _ => Application.RequestStop();
-        wizard.Cancelled += _ => Application.RequestStop();
+        wizard.Finished += _ => SafeRequestStop();
+        wizard.Cancelled += _ => SafeRequestStop();
 
         return wizard;
     }
@@ -124,45 +135,114 @@ internal sealed class InstallerWizardApp
             HelpText = "Preparazione dell'installazione"
         };
 
-        _welcomeLabel = new Label
+        var titleLabel = new Label
+        {
+            X = 0,
+            Y = 0,
+            Width = Dim.Fill(),
+            Height = 1,
+            Text = $"╔══════════════════════════════════════════════════════════════╗",
+            ColorScheme = new ColorScheme
+            {
+                Normal = Terminal.Gui.Attribute.Make(Color.BrightCyan, Color.Black)
+            }
+        };
+
+        var titleLabel2 = new Label
         {
             X = 0,
             Y = 1,
             Width = Dim.Fill(),
-            Height = 2,
-            Text = _manifest is null
-                ? "Manifest non disponibile"
-                : $"Versione disponibile: {_manifest.Version}"
+            Height = 1,
+            Text = $"║   {_settings.ProductName,-56} ║",
+            ColorScheme = new ColorScheme
+            {
+                Normal = Terminal.Gui.Attribute.Make(Color.BrightCyan, Color.Black)
+            }
         };
 
-        var installedVersionText = _metadata is not null ? $"Versione installata: {_metadata.Version}. " : string.Empty;
+        var titleLabel3 = new Label
+        {
+            X = 0,
+            Y = 2,
+            Width = Dim.Fill(),
+            Height = 1,
+            Text = $"╚══════════════════════════════════════════════════════════════╝",
+            ColorScheme = new ColorScheme
+            {
+                Normal = Terminal.Gui.Attribute.Make(Color.BrightCyan, Color.Black)
+            }
+        };
+
+        _welcomeLabel = new Label
+        {
+            X = 0,
+            Y = 4,
+            Width = Dim.Fill(),
+            Height = 2,
+            Text = _manifest is null
+                ? "[!] Manifest non disponibile"
+                : $"[*] Versione disponibile: {_manifest.Version}",
+            ColorScheme = new ColorScheme
+            {
+                Normal = Terminal.Gui.Attribute.Make(Color.BrightYellow, Color.Black)
+            }
+        };
+
+        var installedVersionText = _metadata is not null ? $"[#] Versione installata: {_metadata.Version}\n" : string.Empty;
+        var updateIcon = _hasUpdate ? "[+]" : "[√]";
+        var updateText = _hasUpdate
+            ? "È disponibile un aggiornamento. Procedere per installarlo."
+            : "Nessun aggiornamento necessario.";
 
         _updateLabel = new Label
         {
             X = 0,
             Y = Pos.Bottom(_welcomeLabel) + 1,
             Width = Dim.Fill(),
-            Height = 2,
-            Text = installedVersionText + (_hasUpdate
-                ? "È disponibile un aggiornamento. Procedere per installarlo."
-                : "Nessun aggiornamento necessario.")
+            Height = 3,
+            Text = installedVersionText + $"{updateIcon} {updateText}",
+            ColorScheme = new ColorScheme
+            {
+                Normal = Terminal.Gui.Attribute.Make(_hasUpdate ? Color.BrightGreen : Color.White, Color.Black)
+            }
         };
+
+        page.Add(titleLabel);
+        page.Add(titleLabel2);
+        page.Add(titleLabel3);
+        page.Add(_welcomeLabel);
+        page.Add(_updateLabel);
 
         if (_manifest?.Prerequisites.Any() == true)
         {
-            var prereqText = string.Join('\n', _manifest.Prerequisites.Select(p => $"- {p.Description}"));
-            var prereqLabel = new Label
+            var prereqFrame = new FrameView("Prerequisiti")
             {
                 X = 0,
                 Y = Pos.Bottom(_updateLabel) + 1,
                 Width = Dim.Fill(),
-                Text = "Prerequisiti:\n" + prereqText
+                Height = _manifest.Prerequisites.Count + 2,
+                ColorScheme = new ColorScheme
+                {
+                    Normal = Terminal.Gui.Attribute.Make(Color.Cyan, Color.Black)
+                }
             };
-            page.Add(prereqLabel);
-        }
 
-        page.Add(_welcomeLabel);
-        page.Add(_updateLabel);
+            var y = 0;
+            foreach (var prereq in _manifest.Prerequisites)
+            {
+                var prereqLabel = new Label
+                {
+                    X = 0,
+                    Y = y++,
+                    Width = Dim.Fill(),
+                    Text = $"  - {prereq.Description}"
+                };
+                prereqFrame.Add(prereqLabel);
+            }
+
+            page.Add(prereqFrame);
+        }
 
         return page;
     }
@@ -174,31 +254,57 @@ internal sealed class InstallerWizardApp
             HelpText = "Seleziona runtime e cartella di installazione"
         };
 
+        var runtimeLabel = new Label("[>] Seleziona Runtime:")
+        {
+            X = 0,
+            Y = 0,
+            ColorScheme = new ColorScheme
+            {
+                Normal = Terminal.Gui.Attribute.Make(Color.BrightCyan, Color.Black)
+            }
+        };
+
         var packages = _manifest?.Packages ?? new List<RuntimePackage>();
-        var items = packages.Select(p => $"{p.RuntimeIdentifier} · {(p.Description ?? "")}").ToList();
+        var items = packages.Select(p => $"  {p.RuntimeIdentifier} · {(p.Description ?? "")}").ToList();
 
         _runtimeList = new ListView(items)
         {
+            X = 0,
+            Y = Pos.Bottom(runtimeLabel) + 1,
             Width = Dim.Fill(),
             Height = 6,
-            AllowsMarking = false
+            AllowsMarking = false,
+            ColorScheme = new ColorScheme
+            {
+                Normal = Terminal.Gui.Attribute.Make(Color.White, Color.Black),
+                Focus = Terminal.Gui.Attribute.Make(Color.Black, Color.BrightCyan)
+            }
         };
 
         var defaultIndex = Math.Max(0, packages.FindIndex(p => string.Equals(p.RuntimeIdentifier, _selectedRuntime, StringComparison.OrdinalIgnoreCase)));
         _runtimeList.SelectedItem = defaultIndex >= 0 ? defaultIndex : 0;
         _runtimeList.SelectedItemChanged += _ => RefreshComponentOptions();
 
-        var pathLabel = new Label("Percorso di installazione:")
+        var pathLabel = new Label("[/] Percorso di installazione:")
         {
             X = 0,
-            Y = Pos.Bottom(_runtimeList) + 1
+            Y = Pos.Bottom(_runtimeList) + 1,
+            ColorScheme = new ColorScheme
+            {
+                Normal = Terminal.Gui.Attribute.Make(Color.BrightCyan, Color.Black)
+            }
         };
 
         _installPathField = new TextField(_installPath)
         {
             X = 0,
             Y = Pos.Bottom(pathLabel) + 1,
-            Width = Dim.Fill()
+            Width = Dim.Fill(),
+            ColorScheme = new ColorScheme
+            {
+                Normal = Terminal.Gui.Attribute.Make(Color.White, Color.Black),
+                Focus = Terminal.Gui.Attribute.Make(Color.Black, Color.BrightYellow)
+            }
         };
 
         _componentsFrame = new FrameView("Componenti")
@@ -206,7 +312,11 @@ internal sealed class InstallerWizardApp
             X = 0,
             Y = Pos.Bottom(_installPathField) + 1,
             Width = Dim.Fill(),
-            Height = 7
+            Height = 7,
+            ColorScheme = new ColorScheme
+            {
+                Normal = Terminal.Gui.Attribute.Make(Color.BrightGreen, Color.Black)
+            }
         };
 
         _shortcutCheckbox = new CheckBox("Crea collegamento sul desktop", _createDesktopShortcut)
@@ -214,8 +324,14 @@ internal sealed class InstallerWizardApp
             X = 0,
             Y = Pos.Bottom(_componentsFrame) + 1
         };
-        _shortcutCheckbox.Toggled += _ => _createDesktopShortcut = _shortcutCheckbox.Checked;
+        _shortcutCheckbox.Toggled += _ =>
+        {
+            _createDesktopShortcut = _shortcutCheckbox.Checked;
+            _shortcutCheckbox.SetNeedsDisplay();
+            Application.Refresh();
+        };
 
+        page.Add(runtimeLabel);
         page.Add(_runtimeList);
         page.Add(pathLabel);
         page.Add(_installPathField);
@@ -248,6 +364,7 @@ internal sealed class InstallerWizardApp
                 Width = Dim.Fill()
             });
             _componentsFrame.Height = 3;
+            _componentsFrame.SetNeedsDisplay();
             return;
         }
 
@@ -272,11 +389,18 @@ internal sealed class InstallerWizardApp
                 X = 0,
                 Y = y++
             };
-            checkBox.Toggled += _ => _componentSelections[component.Id] = checkBox.Checked;
+            checkBox.Toggled += _ =>
+            {
+                _componentSelections[component.Id] = checkBox.Checked;
+                checkBox.SetNeedsDisplay();
+                Application.Refresh();
+            };
             _componentsFrame.Add(checkBox);
         }
 
         _componentsFrame.Height = Math.Max(5, _currentComponents.Count + 2);
+        _componentsFrame.SetNeedsDisplay();
+        Application.Refresh();
     }
 
     private Wizard.WizardStep CreateReviewPage()
@@ -286,30 +410,59 @@ internal sealed class InstallerWizardApp
             HelpText = "Conferma i parametri scelti"
         };
 
+        var reviewFrame = new FrameView("Configurazione")
+        {
+            X = 0,
+            Y = 0,
+            Width = Dim.Fill(),
+            Height = Dim.Fill() - 5,
+            ColorScheme = new ColorScheme
+            {
+                Normal = Terminal.Gui.Attribute.Make(Color.BrightYellow, Color.Black)
+            }
+        };
+
         _reviewText = new TextView
         {
+            X = 0,
+            Y = 0,
             ReadOnly = true,
             Width = Dim.Fill(),
-            Height = Dim.Fill() - 3
+            Height = Dim.Fill(),
+            ColorScheme = new ColorScheme
+            {
+                Normal = Terminal.Gui.Attribute.Make(Color.White, Color.Black)
+            }
         };
+
+        reviewFrame.Add(_reviewText);
 
         _elevationLabel = new Label
         {
             X = 0,
-            Y = Pos.Bottom(_reviewText) + 1,
+            Y = Pos.Bottom(reviewFrame) + 1,
             Width = Dim.Fill(),
-            Text = string.Empty
+            Text = string.Empty,
+            ColorScheme = new ColorScheme
+            {
+                Normal = Terminal.Gui.Attribute.Make(Color.BrightCyan, Color.Black)
+            }
         };
 
-        page.Add(_reviewText);
+        page.Add(reviewFrame);
         page.Add(_elevationLabel);
 
         if (OperatingSystem.IsWindows())
         {
-            _elevateButton = new Button("Richiedi privilegi amministratore")
+            _elevateButton = new Button("[!] Richiedi privilegi amministratore")
             {
                 X = 0,
-                Y = Pos.Bottom(_elevationLabel) + 1
+                Y = Pos.Bottom(_elevationLabel) + 1,
+                ColorScheme = new ColorScheme
+                {
+                    Normal = Terminal.Gui.Attribute.Make(Color.Black, Color.BrightYellow),
+                    Focus = Terminal.Gui.Attribute.Make(Color.Black, Color.BrightRed)
+                }
             };
             _elevateButton.Clicked += RequestElevation;
             page.Add(_elevateButton);
@@ -331,11 +484,27 @@ internal sealed class InstallerWizardApp
             HelpText = "Esecuzione attività"
         };
 
+        var progressFrame = new FrameView("Avanzamento")
+        {
+            X = 0,
+            Y = 0,
+            Width = Dim.Fill(),
+            Height = 5,
+            ColorScheme = new ColorScheme
+            {
+                Normal = Terminal.Gui.Attribute.Make(Color.BrightGreen, Color.Black)
+            }
+        };
+
         _progressBar = new ProgressBar
         {
             X = 0,
             Y = 0,
-            Width = Dim.Fill()
+            Width = Dim.Fill(),
+            ColorScheme = new ColorScheme
+            {
+                Normal = Terminal.Gui.Attribute.Make(Color.BrightGreen, Color.Black)
+            }
         };
 
         _statusLabel = new Label
@@ -343,22 +512,46 @@ internal sealed class InstallerWizardApp
             X = 0,
             Y = Pos.Bottom(_progressBar) + 1,
             Width = Dim.Fill(),
-            Text = "In attesa"
+            Text = "[...] In attesa...",
+            ColorScheme = new ColorScheme
+            {
+                Normal = Terminal.Gui.Attribute.Make(Color.BrightYellow, Color.Black)
+            }
+        };
+
+        progressFrame.Add(_progressBar);
+        progressFrame.Add(_statusLabel);
+
+        var logFrame = new FrameView("Registro attività")
+        {
+            X = 0,
+            Y = Pos.Bottom(progressFrame) + 1,
+            Width = Dim.Fill(),
+            Height = Dim.Fill(),
+            ColorScheme = new ColorScheme
+            {
+                Normal = Terminal.Gui.Attribute.Make(Color.Cyan, Color.Black)
+            }
         };
 
         _logView = new TextView
         {
             X = 0,
-            Y = Pos.Bottom(_statusLabel) + 1,
+            Y = 0,
             Width = Dim.Fill(),
             Height = Dim.Fill(),
             ReadOnly = true,
-            WordWrap = true
+            WordWrap = true,
+            ColorScheme = new ColorScheme
+            {
+                Normal = Terminal.Gui.Attribute.Make(Color.White, Color.Black)
+            }
         };
 
-        page.Add(_progressBar);
-        page.Add(_statusLabel);
-        page.Add(_logView);
+        logFrame.Add(_logView);
+
+        page.Add(progressFrame);
+        page.Add(logFrame);
 
         page.Enter += _ => StartInstallation();
 
@@ -387,7 +580,24 @@ internal sealed class InstallerWizardApp
             ? (_isElevated ? "attivi" : "non attivi")
             : "non richiesti";
 
-        _reviewText.Text = $"Prodotto: {_settings.ProductName}\nVersione manifest: {_manifest.Version}\nRuntime: {runtime}\nPercorso: {path}\nComponenti: {componentNames}\nCollegamento desktop: {desktopShortcut}\nPrivilegi amministratore: {adminStatus}";
+        var reviewText = $@"
+╔══════════════════════════════════════════════════════════════╗
+║  RIEPILOGO INSTALLAZIONE                                     ║
+╚══════════════════════════════════════════════════════════════╝
+
+  [*] Prodotto:                 {_settings.ProductName}
+  [#] Versione manifest:        {_manifest.Version}
+  [>] Runtime:                  {runtime}
+  [/] Percorso:                 {path}
+  [+] Componenti:               {componentNames}
+  [~] Collegamento desktop:     {desktopShortcut}
+  [!] Privilegi amministratore: {adminStatus}
+
+";
+
+        _reviewText.Text = reviewText;
+        _reviewText.SetNeedsDisplay();
+        Application.Refresh();
     }
 
     private void UpdateElevationLabel()
@@ -403,7 +613,10 @@ internal sealed class InstallerWizardApp
             if (_elevateButton is not null)
             {
                 _elevateButton.Visible = false;
+                _elevateButton.SetNeedsDisplay();
             }
+            _elevationLabel.SetNeedsDisplay();
+            Application.Refresh();
             return;
         }
 
@@ -414,7 +627,11 @@ internal sealed class InstallerWizardApp
         if (_elevateButton is not null)
         {
             _elevateButton.Visible = !_isElevated;
+            _elevateButton.SetNeedsDisplay();
         }
+
+        _elevationLabel.SetNeedsDisplay();
+        Application.Refresh();
     }
 
     private string GetSelectedRuntime()
@@ -460,28 +677,46 @@ internal sealed class InstallerWizardApp
                 {
                     if (_statusLabel is not null)
                     {
-                        _statusLabel.Text = "Installazione completata";
+                        _statusLabel.Text = "[√] Installazione completata con successo!";
+                        _statusLabel.ColorScheme = new ColorScheme
+                        {
+                            Normal = Terminal.Gui.Attribute.Make(Color.BrightGreen, Color.Black)
+                        };
+                        _statusLabel.SetNeedsDisplay();
                     }
                     if (_wizard is not null)
                     {
                         _wizard.NextFinishButton.Visible = true;
                         _wizard.NextFinishButton.Text = "Fine";
                         _wizard.NextFinishButton.Enabled = true;
+                        _wizard.SetNeedsDisplay();
                     }
+                    Application.Refresh();
                 });
             }
             catch (Exception ex)
             {
                 Application.MainLoop.Invoke(() =>
                 {
-                    _statusLabel!.Text = $"Errore: {ex.Message}";
-                    _logView?.InsertText($"\n{ex}\n");
+                    if (_statusLabel is not null)
+                    {
+                        _statusLabel.Text = $"[X] Errore: {ex.Message}";
+                        _statusLabel.ColorScheme = new ColorScheme
+                        {
+                            Normal = Terminal.Gui.Attribute.Make(Color.BrightRed, Color.Black)
+                        };
+                        _statusLabel.SetNeedsDisplay();
+                    }
+                    _logView?.InsertText($"\n[X] ERRORE DETTAGLIATO:\n{ex}\n");
+                    _logView?.SetNeedsDisplay();
                     if (_wizard is not null)
                     {
                         _wizard.NextFinishButton.Visible = true;
                         _wizard.NextFinishButton.Text = "Chiudi";
                         _wizard.NextFinishButton.Enabled = true;
+                        _wizard.SetNeedsDisplay();
                     }
+                    Application.Refresh();
                 });
             }
         });
@@ -509,7 +744,7 @@ internal sealed class InstallerWizardApp
                 WorkingDirectory = Environment.CurrentDirectory,
                 Verb = "runas"
             });
-            Application.RequestStop();
+            SafeRequestStop();
         }
         catch (Win32Exception ex)
         {
@@ -743,11 +978,15 @@ internal sealed class InstallerWizardApp
             if (_progressBar is not null)
             {
                 _progressBar.Fraction = percentage;
+                _progressBar.SetNeedsDisplay();
             }
             if (_statusLabel is not null)
             {
-                _statusLabel.Text = status;
+                var icon = percentage >= 1.0f ? "[√]" : percentage > 0.8f ? "[*]" : percentage > 0.5f ? "[+]" : percentage > 0.1f ? "[↓]" : "[.]";
+                _statusLabel.Text = $"{icon} {status}";
+                _statusLabel.SetNeedsDisplay();
             }
+            Application.Refresh();
         });
     }
 
@@ -758,7 +997,9 @@ internal sealed class InstallerWizardApp
             if (_logView is not null)
             {
                 _logView.InsertText(message + Environment.NewLine);
+                _logView.SetNeedsDisplay();
             }
+            Application.Refresh();
         });
     }
 
