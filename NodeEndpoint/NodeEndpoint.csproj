@@ -110,7 +110,7 @@
     <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
 
     <!-- Terminal UI -->
-    <PackageReference Include="Terminal.Gui" Version="1.17.1" />
+    <PackageReference Include="Terminal.Gui" Version="1.19.0" />
   </ItemGroup>
 
 </Project>
