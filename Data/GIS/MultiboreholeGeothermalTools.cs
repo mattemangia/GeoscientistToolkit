@@ -55,6 +55,10 @@ private int _maxIterationsPerStep = 200;
 private bool _useSIMD = true;
 private bool _useGPU = false;
 
+// Heat exchanger configuration
+private bool _useFullBoreholeDepth = true; // Use full depth by default
+private float _heatExchangerDepth = 100.0f; // meters (if not using full depth)
+
 // Per-borehole temperature configuration
 private Dictionary<string, float> _boreholeInletTemperatures = new(); // borehole -> inlet temp (°C)
 
@@ -499,6 +503,28 @@ private void DrawSolverOptions()
     ImGui.TextDisabled("Higher = better convergence for complex problems (typical: 100-200)");
 
     ImGui.Separator();
+    ImGui.Text("Heat Exchanger Configuration:");
+
+    ImGui.Checkbox("Use Full Borehole Depth", ref _useFullBoreholeDepth);
+    ImGui.SameLine();
+    ImGui.TextDisabled("(Heat exchanger extends to bottom of each borehole)");
+
+    if (!_useFullBoreholeDepth)
+    {
+        ImGui.Indent();
+        if (ImGui.InputFloat("Heat Exchanger Depth (m)", ref _heatExchangerDepth))
+        {
+            _heatExchangerDepth = Math.Max(10.0f, _heatExchangerDepth);
+        }
+        ImGui.TextDisabled("Active heat exchange region from surface");
+        ImGui.Unindent();
+    }
+    else
+    {
+        ImGui.TextDisabled("Heat exchanger depth will match each borehole's total depth");
+    }
+
+    ImGui.Separator();
     ImGui.Text("Performance Options:");
 
     ImGui.Checkbox("Use SIMD Optimization", ref _useSIMD);
@@ -860,7 +886,9 @@ private void StartSimulations()
                     ConvergenceTolerance = _convergenceTolerance,
                     MaxIterationsPerStep = _maxIterationsPerStep,
                     UseSIMD = _useSIMD,
-                    UseGPU = _useGPU
+                    UseGPU = _useGPU,
+                    UseFullBoreholeDepth = _useFullBoreholeDepth,
+                    HeatExchangerDepth = _heatExchangerDepth
                 };
                 
                 _coupledResults = MultiBoreholeCoupledSimulation.RunCoupledSimulation(

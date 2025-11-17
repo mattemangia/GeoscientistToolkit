@@ -173,6 +173,18 @@ public class MultiBoreholeSimulationConfig
     ///     Use GPU acceleration
     /// </summary>
     public bool UseGPU { get; set; } = false;
+
+    /// <summary>
+    ///     Use full borehole depth for heat exchanger
+    ///     If true, HeatExchangerDepth is set to each borehole's total depth
+    ///     If false, uses the fixed HeatExchangerDepth value
+    /// </summary>
+    public bool UseFullBoreholeDepth { get; set; } = true;
+
+    /// <summary>
+    ///     Fixed heat exchanger depth (meters) when not using full borehole depth
+    /// </summary>
+    public double HeatExchangerDepth { get; set; } = 100.0;
 }
 
 /// <summary>
@@ -666,9 +678,15 @@ public static class MultiBoreholeCoupledSimulation
                     UseSIMD = config.UseSIMD,
                     UseGPU = config.UseGPU,
                     HeatExchangerType = HeatExchangerType.UTube,
-                    HeatExchangerDepth = (float)borehole.TotalDepth // CRITICAL FIX: Set heat exchanger depth!
+                    HeatExchangerDepth = config.UseFullBoreholeDepth
+                        ? (float)borehole.TotalDepth
+                        : (float)config.HeatExchangerDepth
                 };
                 options.SetDefaultValues();
+
+                Logger.Log($"  Heat exchanger depth: {options.HeatExchangerDepth:F1}m " +
+                           $"({(config.UseFullBoreholeDepth ? "full borehole" : "fixed depth")})");
+
 
                 // Check if this is an injection well in a doublet
                 var isInjectionWell = config.DoubletPairs.ContainsKey(borehole.WellName);
