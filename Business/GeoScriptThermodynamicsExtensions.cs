@@ -367,7 +367,71 @@ public class CalculateCarbonateAlkalinityCommand : IGeoScriptCommand
         return pKa2;
     }
 }
-
+public static class ThermodynamicsInputHelper
+{
+    /// <summary>
+    /// Parse compound input with amounts and flexible formula recognition.
+    /// Handles formats like "0.1 NaCl", "Fe+3", "SO4-2", etc.
+    /// </summary>
+    public static List<(ChemicalCompound compound, double moles)> ParseCompoundInput(
+        string input, CompoundLibrary library)
+    {
+        var results = new List<(ChemicalCompound, double)>();
+        
+        // Split by + but preserve charges like Fe+3
+        var parts = Regex.Split(input, @"\+(?![0-9])");
+        
+        foreach (var part in parts)
+        {
+            var trimmed = part.Trim();
+            if (string.IsNullOrEmpty(trimmed)) continue;
+            
+            double moles = 0.001; // Default 1 mmol
+            string compoundStr = trimmed;
+            
+            // Check for amount specification
+            var amountMatch = Regex.Match(trimmed, @"^([\d\.]+)\s*(\S+)$");
+            if (amountMatch.Success)
+            {
+                moles = double.Parse(amountMatch.Groups[1].Value, CultureInfo.InvariantCulture);
+                compoundStr = amountMatch.Groups[2].Value;
+            }
+            
+            // Normalize and find compound
+            var normalized = CompoundLibrary.NormalizeFormulaInput(compoundStr);
+            var compound = library.FindFlexible(normalized);
+            
+            if (compound != null)
+            {
+                results.Add((compound, moles));
+            }
+            else
+            {
+                Logger.LogWarning($"Compound not found: '{compoundStr}' (normalized: '{normalized}')");
+            }
+        }
+        
+        return results;
+    }
+    
+    /// <summary>
+    /// Parse temperature input with units.
+    /// </summary>
+    public static double ParseTemperature(string value, string unit)
+    {
+        var temp = double.Parse(value, CultureInfo.InvariantCulture);
+        return unit.ToUpper() == "K" ? temp : temp + 273.15;
+    }
+    
+    /// <summary>
+    /// Parse pressure input with units.
+    /// </summary>
+    public static double ParsePressure(string value, string unit)
+    {
+        var pres = double.Parse(value, CultureInfo.InvariantCulture);
+        return unit.ToUpper() == "ATM" ? pres * 1.01325 : pres;
+    }
+}
 /// <summary>
 ///     Extension to register the new commands in the CommandRegistry.
 /// </summary>

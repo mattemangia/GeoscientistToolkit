@@ -13,8 +13,10 @@
 // - Holland & Powell (2011): Updated thermodynamic dataset
 //
 
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Text.RegularExpressions;
 using GeoscientistToolkit.Business;
 using GeoscientistToolkit.Util;
 
@@ -65,6 +67,7 @@ public class SolidSolution
 /// </summary>
 public sealed class ChemicalCompound
 {
+    
     public string Name { get; set; } = "Unnamed";
     public string ChemicalFormula { get; set; } = "";
     public CompoundPhase Phase { get; set; } = CompoundPhase.Solid;
@@ -82,6 +85,18 @@ public sealed class ChemicalCompound
 
     /// <summary>Standard entropy (J/mol·K)</summary>
     public double? Entropy_J_molK { get; set; }
+    
+    /// <summary>Acid dissociation constant (negative log)</summary>
+    public double? pKa { get; set; }
+    
+    /// <summary>Base dissociation constant (negative log)</summary>
+    public double? pKb { get; set; }
+    
+    /// <summary>Enthalpy of dissociation for acids/bases (kJ/mol)</summary>
+    public double? DissociationEnthalpy_kJ_mol { get; set; }
+    
+    /// <summary>Henry's law constant (mol/(L·atm)) at 25°C</summary>
+    public double? HenryConstant_mol_L_atm { get; set; }
 
     /// <summary>Heat capacity at constant pressure (J/mol·K)</summary>
     public double? HeatCapacity_J_molK { get; set; }
@@ -261,7 +276,131 @@ public sealed class CompoundLibrary
             string.Equals(c.ChemicalFormula, nameOrFormula, StringComparison.OrdinalIgnoreCase) ||
             c.Synonyms.Any(s => string.Equals(s, nameOrFormula, StringComparison.OrdinalIgnoreCase)));
     }
+/// <summary>
+/// Normalize chemical formula input to handle various user input formats.
+/// Converts plain text representations to proper Unicode subscripts/superscripts.
+/// </summary>
+public static string NormalizeFormulaInput(string input)
+{
+    if (string.IsNullOrWhiteSpace(input)) return input;
+    
+    var normalized = input;
+    
+    // Handle charge notation: + and - to superscripts
+    // Must be done before number replacements
+    normalized = Regex.Replace(normalized, @"(\d*)\+", m =>
+    {
+        var num = m.Groups[1].Value;
+        if (string.IsNullOrEmpty(num)) return "⁺";
+        return ConvertToSuperscript(num) + "⁺";
+    });
+    
+    normalized = Regex.Replace(normalized, @"(\d*)\-", m =>
+    {
+        var num = m.Groups[1].Value;
+        if (string.IsNullOrEmpty(num)) return "⁻";
+        return ConvertToSuperscript(num) + "⁻";
+    });
+    
+    // Handle parentheses with numbers: (OH)2 -> (OH)₂
+    normalized = Regex.Replace(normalized, @"\)(\d+)", m => ")" + ConvertToSubscript(m.Groups[1].Value));
+    
+    // Handle element-number patterns: H2O -> H₂O, but not 2H2O
+    normalized = Regex.Replace(normalized, @"(?<![0-9])([A-Z][a-z]?)(\d+)", m =>
+        m.Groups[1].Value + ConvertToSubscript(m.Groups[2].Value));
+    
+    // Handle hydration dot: *nH2O or .nH2O -> ·nH₂O
+    normalized = normalized.Replace("*", "·").Replace(".H", "·H");
+    
+    // Handle (aq), (s), (l), (g) phase indicators - keep as is
+    // They're already handled properly
+    
+    return normalized;
+}
 
+/// <summary>
+/// Convert regular numbers to subscript Unicode characters.
+/// </summary>
+private static string ConvertToSubscript(string numbers)
+{
+    if (string.IsNullOrEmpty(numbers)) return "";
+    
+    var subscriptMap = new Dictionary<char, char>
+    {
+        {'0', '₀'}, {'1', '₁'}, {'2', '₂'}, {'3', '₃'}, {'4', '₄'},
+        {'5', '₅'}, {'6', '₆'}, {'7', '₇'}, {'8', '₈'}, {'9', '₉'}
+    };
+    
+    var result = new StringBuilder();
+    foreach (char c in numbers)
+    {
+        result.Append(subscriptMap.TryGetValue(c, out var sub) ? sub : c);
+    }
+    return result.ToString();
+}
+
+/// <summary>
+/// Convert regular numbers to superscript Unicode characters.
+/// </summary>
+private static string ConvertToSuperscript(string numbers)
+{
+    if (string.IsNullOrEmpty(numbers)) return "";
+    
+    var superscriptMap = new Dictionary<char, char>
+    {
+        {'0', '⁰'}, {'1', '¹'}, {'2', '²'}, {'3', '³'}, {'4', '⁴'},
+        {'5', '⁵'}, {'6', '⁶'}, {'7', '⁷'}, {'8', '⁸'}, {'9', '⁹'}
+    };
+    
+    var result = new StringBuilder();
+    foreach (char c in numbers)
+    {
+        result.Append(superscriptMap.TryGetValue(c, out var sup) ? sup : c);
+    }
+    return result.ToString();
+}
+
+/// <summary>
+/// Enhanced Find method that handles multiple input formats.
+/// </summary>
+public ChemicalCompound FindFlexible(string name)
+{
+    if (string.IsNullOrWhiteSpace(name)) return null;
+    
+    // First try exact match
+    var compound = Find(name);
+    if (compound != null) return compound;
+    
+    // Try normalized version
+    var normalized = NormalizeFormulaInput(name);
+    compound = Find(normalized);
+    if (compound != null) return compound;
+    
+    // Try to find by matching normalized formulas
+    compound = _compounds.FirstOrDefault(c => 
+        NormalizeFormulaInput(c.ChemicalFormula) == normalized ||
+        NormalizeFormulaInput(c.Name) == normalized);
+    if (compound != null) return compound;
+    
+    // Try synonyms
+    compound = _compounds.FirstOrDefault(c => 
+        c.Synonyms != null && c.Synonyms.Any(s => 
+            s.Equals(name, StringComparison.OrdinalIgnoreCase) ||
+            NormalizeFormulaInput(s) == normalized));
+    if (compound != null) return compound;
+    
+    // Try case-insensitive name match
+    compound = _compounds.FirstOrDefault(c =>
+        c.Name.Equals(name, StringComparison.OrdinalIgnoreCase));
+    if (compound != null) return compound;
+    
+    // Try removing phase indicators and search again
+    var nameWithoutPhase = Regex.Replace(name, @"\((aq|s|l|g)\)", "", RegexOptions.IgnoreCase).Trim();
+    if (nameWithoutPhase != name)
+        return FindFlexible(nameWithoutPhase);
+    
+    return null;
+}
     public Element? FindElement(string symbolOrName)
     {
         return _elements.FirstOrDefault(e =>

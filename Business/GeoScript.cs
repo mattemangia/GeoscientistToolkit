@@ -1812,182 +1812,11 @@ public class ReactCommand : IGeoScriptCommand
         return Task.FromResult<Dataset>(new TableDataset("Reaction_Products", resultTable));
     }
 }
-
 public class SpeciateCommand : IGeoScriptCommand
 {
     public string Name => "SPECIATE";
-    public string HelpText => "Shows dissociation/speciation products when compounds (solids, liquids, gases) dissolve in water. Gases use Henry's Law.";
+    public string HelpText => "Shows dissociation/speciation products when compounds dissolve in water.";
     public string Usage => "SPECIATE <Compounds> [TEMP <val> C|K] [PRES <val> BAR|ATM]";
-
-    /// <summary>
-    ///     Normalizes a chemical formula by converting plain numbers to subscripts.
-    /// </summary>
-    private string NormalizeChemicalFormula(string formula)
-    {
-        var normalized = formula
-            .Replace('0', '₀')
-            .Replace('1', '₁')
-            .Replace('2', '₂')
-            .Replace('3', '₃')
-            .Replace('4', '₄')
-            .Replace('5', '₅')
-            .Replace('6', '₆')
-            .Replace('7', '₇')
-            .Replace('8', '₈')
-            .Replace('9', '₉');
-
-        return normalized;
-    }
-
-    /// <summary>
-    ///     Dynamically determines the ionic dissociation products for any compound
-    ///     based on the compound library's available ions and thermodynamic feasibility.
-    /// </summary>
-    private Dictionary<string, double> GetDissociationProducts(ChemicalCompound compound, CompoundLibrary lib, ReactionGenerator reactionGen)
-    {
-        var products = new Dictionary<string, double>();
-
-        // If it's not a solid phase compound, return empty (doesn't dissociate)
-        if (compound.Phase != CompoundPhase.Solid)
-            return products;
-
-        // Try to generate a dissolution reaction for this compound
-        var dissolution = reactionGen.GenerateSingleDissolutionReaction(compound);
-        if (dissolution != null)
-        {
-            Logger.Log($"  - Generated dissolution reaction: {dissolution.Name}");
-            
-            // Extract the products from the dissolution reaction
-            foreach (var (species, stoich) in dissolution.Stoichiometry)
-            {
-                // Skip the solid (negative stoichiometry)
-                if (stoich > 0)
-                {
-                    var speciesCompound = lib.Find(species);
-                    if (speciesCompound != null && speciesCompound.Phase == CompoundPhase.Aqueous)
-                    {
-                        products[species] = stoich;
-                        Logger.Log($"    + {species}: {stoich:F2} moles");
-                    }
-                }
-            }
-        }
-        
-        // If we couldn't generate a dissolution reaction, try a simple approach
-        // Parse the formula to find elemental composition and match with primary ions
-        if (products.Count == 0)
-        {
-            Logger.Log($"  - No dissolution reaction generated, trying direct ion mapping for {compound.ChemicalFormula}");
-            var elementComp = reactionGen.ParseChemicalFormula(compound.ChemicalFormula);
-            
-            // Find primary aqueous ions for each element
-            foreach (var (element, count) in elementComp)
-            {
-                if (element == "O" || element == "H") continue;
-                
-                // Find the primary ion for this element
-                var primaryIon = lib.Compounds
-                    .Where(c => c.Phase == CompoundPhase.Aqueous && 
-                                c.IsPrimaryElementSpecies &&
-                                reactionGen.ParseChemicalFormula(c.ChemicalFormula).ContainsKey(element))
-                    .FirstOrDefault();
-                    
-                if (primaryIon != null)
-                {
-                    products[primaryIon.Name] = count;
-                    Logger.Log($"    + {primaryIon.Name} ({primaryIon.ChemicalFormula}): {count} moles");
-                }
-            }
-            
-            // Balance with common anions/cations if needed
-            var totalCharge = products.Sum(p => 
-            {
-                var ion = lib.Find(p.Key);
-                return p.Value * (ion?.IonicCharge ?? 0);
-            });
-            
-            Logger.Log($"    Total charge before balancing: {totalCharge}");
-            
-            // Add counter-ions to balance charge
-            if (Math.Abs(totalCharge) > 0.01)
-            {
-                if (totalCharge > 0)
-                {
-                    // Need anions - try common ones
-                    var anions = new[] { "Chloride Ion", "Hydroxide Ion", "Sulfate Ion", "Carbonate Ion" };
-                    foreach (var anionName in anions)
-                    {
-                        var anion = lib.Find(anionName);
-                        if (anion != null && anion.IonicCharge.HasValue && anion.IonicCharge < 0)
-                        {
-                            var needed = Math.Abs(totalCharge / anion.IonicCharge.Value);
-                            if (needed > 0)
-                            {
-                                products[anionName] = needed;
-                                Logger.Log($"    + {anionName} (for charge balance): {needed:F2} moles");
-                                break;
-                            }
-                        }
-                    }
-                }
-                else if (totalCharge < 0)
-                {
-                    // Need cations - try common ones
-                    var cations = new[] { "Hydrogen Ion", "Sodium Ion", "Calcium Ion", "Potassium Ion" };
-                    foreach (var cationName in cations)
-                    {
-                        var cation = lib.Find(cationName);
-                        if (cation != null && cation.IonicCharge.HasValue && cation.IonicCharge > 0)
-                        {
-                            var needed = Math.Abs(totalCharge / cation.IonicCharge.Value);
-                            if (needed > 0)
-                            {
-                                products[cationName] = needed;
-                                Logger.Log($"    + {cationName} (for charge balance): {needed:F2} moles");
-                                break;
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        return products;
-    }
-
-    /// <summary>
-    ///     Try to find a compound by various formula formats
-    /// </summary>
-    private ChemicalCompound FindCompound(string input, CompoundLibrary lib)
-    {
-        // Clean the input
-        var cleanedInput = input.Trim();
-        
-        // Try direct match
-        var compound = lib.Find(cleanedInput);
-        if (compound != null) return compound;
-        
-        // Try with normalized subscripts
-        var normalized = NormalizeChemicalFormula(cleanedInput);
-        compound = lib.Find(normalized);
-        if (compound != null) return compound;
-        
-        // Try by name (case-insensitive)
-        compound = lib.Compounds.FirstOrDefault(c => 
-            string.Equals(c.Name, cleanedInput, StringComparison.OrdinalIgnoreCase));
-        if (compound != null) return compound;
-        
-        // Try by formula (case-sensitive for elements)
-        compound = lib.Compounds.FirstOrDefault(c => 
-            c.ChemicalFormula == cleanedInput || c.ChemicalFormula == normalized);
-        if (compound != null) return compound;
-        
-        // Try synonyms
-        compound = lib.Compounds.FirstOrDefault(c => 
-            c.Synonyms.Any(s => string.Equals(s, cleanedInput, StringComparison.OrdinalIgnoreCase)));
-        
-        return compound;
-    }
 
     public Task<Dataset> ExecuteAsync(GeoScriptContext context, AstNode node)
     {
@@ -2021,7 +1850,7 @@ public class SpeciateCommand : IGeoScriptCommand
         var reactionGenerator = new ReactionGenerator(compoundLib);
         var solver = new ThermodynamicSolver();
 
-        // Build initial state with compounds
+        // Build initial state
         var initialState = new ThermodynamicState
         {
             Temperature_K = temperatureK,
@@ -2029,18 +1858,27 @@ public class SpeciateCommand : IGeoScriptCommand
             Volume_L = 1.0
         };
 
-        var compounds = compoundsStr.Split('+').Select(c => c.Trim()).ToList();
+        // Parse and normalize compound inputs
+        var compoundInputs = compoundsStr.Split('+').Select(c => c.Trim()).ToList();
+        var compounds = new List<string>();
+        
+        foreach (var input in compoundInputs)
+        {
+            var normalized = CompoundLibrary.NormalizeFormulaInput(input);
+            compounds.Add(normalized);
+        }
 
-        Logger.Log($"[SPECIATE] Dissolving compounds in water at {temperatureK:F2} K, {pressureBar:F2} bar:");
+        Logger.Log($"[SPECIATE] Processing compounds: {string.Join(", ", compounds)} at {temperatureK:F2} K, {pressureBar:F2} bar");
 
-        // Always ensure water is present for aqueous solutions
-        var water = compoundLib.Find("H₂O") ?? compoundLib.Find("Water");
+        // Always add water to the system for aqueous solutions - use flexible find
+        var water = compoundLib.FindFlexible("H2O") ?? 
+                    compoundLib.FindFlexible("Water") ??
+                    compoundLib.FindFlexible("H₂O");
+                    
         if (water != null)
         {
-            var waterMoles = 1000.0 / (water.MolecularWeight_g_mol ?? 18.015); // 1L of water
-            initialState.SpeciesMoles["Water"] = waterMoles;
-            
-            // Add water's elemental composition
+            var waterMoles = 55.508; // 1L of water at 25°C
+            initialState.SpeciesMoles[water.Name] = waterMoles;
             var waterComp = reactionGenerator.ParseChemicalFormula(water.ChemicalFormula);
             foreach (var (element, stoichiometry) in waterComp)
             {
@@ -2048,104 +1886,88 @@ public class SpeciateCommand : IGeoScriptCommand
             }
         }
 
-        foreach (var compoundName in compounds)
+        // Generate dissociation reactions for input compounds
+        var dissociationReactions = reactionGenerator.GenerateSolubleCompoundDissociationReactions(
+            compounds, temperatureK, pressureBar);
+        
+        // Process each compound based on its dissociation behavior
+        foreach (var compoundInput in compounds)
         {
-            var cleanedName = compoundName.Replace('!', '·');
-            
-            // Use improved compound finding
-            var compound = FindCompound(cleanedName, compoundLib);
-
+            // Use flexible find
+            var compound = compoundLib.FindFlexible(compoundInput);
             if (compound == null)
             {
-                Logger.LogError($"Compound '{compoundName}' not found in library.");
-                Logger.Log($"  Tried: original='{compoundName}', cleaned='{cleanedName}', normalized='{NormalizeChemicalFormula(cleanedName)}'");
-                throw new ArgumentException($"Unknown compound: {compoundName}");
-            }
-
-            Logger.Log($"Found compound: {compound.Name} ({compound.ChemicalFormula})");
-
-            double moles;
-
-            // Handle different phases
-            var isWater = compound.Name.ToUpper() == "WATER" || compound.ChemicalFormula == "H₂O";
-            if (isWater)
-            {
-                // Water already added above
+                Logger.LogWarning($"[SPECIATE] Compound '{compoundInput}' not found in library");
                 continue;
             }
-            else if (compound.Phase == CompoundPhase.Gas)
+
+            double moles = 0.001; // Default 1 mmol
+            
+            // Check if user specified amount (e.g., "0.1 NaCl" or "NaCl 0.1")
+            var amountMatch = Regex.Match(compoundInput, @"([\d\.]+)\s*(\w+)|(\w+)\s+([\d\.]+)");
+            if (amountMatch.Success)
             {
-                // For gases, use Henry's Law to calculate dissolved amount
-                // C = K_H * P_gas (where K_H is Henry's law constant in mol/(L·atm))
-                if (compound.HenrysLawConstant_mol_L_atm.HasValue)
+                if (!string.IsNullOrEmpty(amountMatch.Groups[1].Value))
                 {
-                    var partialPressure_atm = pressureBar / 1.01325; // Assume gas is at system pressure
-                    var henryConstant = compound.HenrysLawConstant_mol_L_atm.Value;
-                    moles = henryConstant * partialPressure_atm * initialState.Volume_L;
-                    Logger.Log($"  - {compound.Name} ({compound.ChemicalFormula}) [GAS]: {moles:E3} moles (Henry's Law: Kh={henryConstant:E2}, P={partialPressure_atm:F2} atm)");
+                    moles = double.Parse(amountMatch.Groups[1].Value, CultureInfo.InvariantCulture);
                 }
-                else
+                else if (!string.IsNullOrEmpty(amountMatch.Groups[4].Value))
                 {
-                    Logger.LogWarning($"  - {compound.Name} ({compound.ChemicalFormula}) [GAS]: No Henry's Law constant available, using 0.01 moles");
-                    moles = 0.01; // Small default amount for gases without Henry constant
+                    moles = double.Parse(amountMatch.Groups[4].Value, CultureInfo.InvariantCulture);
                 }
             }
-            else
+            
+            // Check if there's a dissociation reaction for this compound
+            var dissociationReaction = dissociationReactions.FirstOrDefault(r => 
+                r.Stoichiometry.ContainsKey(compound.Name) && r.Stoichiometry[compound.Name] < 0);
+            
+            if (dissociationReaction != null)
             {
-                // Solids and other compounds - use 1 mole
-                moles = 1.0;
-                Logger.Log($"  - {compound.Name} ({compound.ChemicalFormula}): {moles:F3} moles");
-            }
-
-            // For salts/minerals that dissolve into ions, add the ions directly
-            // This ensures proper speciation output (e.g., NaCl → Na+ + Cl-)
-            if (compound.Phase == CompoundPhase.Solid && !isWater)
-            {
-                // Get the dissociation products using the dynamic method
-                var dissociationProducts = GetDissociationProducts(compound, compoundLib, reactionGenerator);
-
-                if (dissociationProducts.Count > 0)
+                // For compounds with dissociation reactions, add the products directly
+                Logger.Log($"[SPECIATE] {compound.Name} will dissociate");
+                
+                foreach (var (product, stoich) in dissociationReaction.Stoichiometry)
                 {
-                    Logger.Log($"  - Dissolving {compound.Name} → {string.Join(" + ", dissociationProducts.Select(p => $"{p.Value:F1} {p.Key}"))}");
-
-                    // Add dissociated ions instead of the solid
-                    foreach (var (ionName, ionMoles) in dissociationProducts)
+                    if (stoich > 0) // Products only
                     {
-                        initialState.SpeciesMoles[ionName] =
-                            initialState.SpeciesMoles.GetValueOrDefault(ionName, 0) + (ionMoles * moles);
+                        var productCompound = compoundLib.FindFlexible(product);
+                        if (productCompound != null)
+                        {
+                            initialState.SpeciesMoles[productCompound.Name] = 
+                                initialState.SpeciesMoles.GetValueOrDefault(productCompound.Name, 0) + moles * stoich;
+                            
+                            // Update elemental composition
+                            var productComp = reactionGenerator.ParseChemicalFormula(productCompound.ChemicalFormula);
+                            foreach (var (element, elemStoich) in productComp)
+                            {
+                                initialState.ElementalComposition[element] =
+                                    initialState.ElementalComposition.GetValueOrDefault(element, 0) + 
+                                    moles * stoich * elemStoich;
+                            }
+                            
+                            Logger.Log($"  → {productCompound.Name}: {moles * stoich:E3} moles");
+                        }
                     }
                 }
-                else
-                {
-                    // No known dissociation, add the compound as-is
-                    Logger.LogWarning($"  - Could not determine dissociation products for {compound.Name}, adding as-is");
-                    initialState.SpeciesMoles[compound.Name] =
-                        initialState.SpeciesMoles.GetValueOrDefault(compound.Name, 0) + moles;
-                }
             }
             else
             {
-                // For liquids, gases, and already-aqueous species, add directly
+                // For compounds without dissociation (or already aqueous), add directly
                 initialState.SpeciesMoles[compound.Name] =
                     initialState.SpeciesMoles.GetValueOrDefault(compound.Name, 0) + moles;
+                
+                var composition = reactionGenerator.ParseChemicalFormula(compound.ChemicalFormula);
+                foreach (var (element, stoichiometry) in composition)
+                {
+                    initialState.ElementalComposition[element] =
+                        initialState.ElementalComposition.GetValueOrDefault(element, 0) + moles * stoichiometry;
+                }
+                
+                Logger.Log($"  - {compound.Name}: {moles:E3} moles (no dissociation)");
             }
-
-            // Add elemental composition
-            var composition = reactionGenerator.ParseChemicalFormula(compound.ChemicalFormula);
-            foreach (var (element, stoichiometry) in composition)
-                initialState.ElementalComposition[element] =
-                    initialState.ElementalComposition.GetValueOrDefault(element, 0) + moles * stoichiometry;
         }
 
-        Logger.Log("\nInitial species added to system:");
-        foreach (var (species, moles) in initialState.SpeciesMoles)
-        {
-            Logger.Log($"  {species}: {moles:E3} moles");
-        }
-
-        // Solve for equilibrium to get proper dissociation/speciation
-        // This handles dissolution of solids AND dissociation into ions
-        Logger.Log("\nSolving equilibrium...");
+        // Now solve for equilibrium with the properly dissociated species
         var finalState = solver.SolveEquilibrium(initialState);
 
         // Create output table
@@ -2156,74 +1978,47 @@ public class SpeciateCommand : IGeoScriptCommand
         resultTable.Columns.Add("Moles", typeof(double));
         resultTable.Columns.Add("Concentration_M", typeof(double));
         resultTable.Columns.Add("Activity", typeof(double));
+        resultTable.Columns.Add("Activity_Coefficient", typeof(double));
 
-        Logger.Log("\n=== AQUEOUS SPECIATION ===");
-        Logger.Log($"Temperature: {temperatureK:F2} K, Pressure: {pressureBar:F2} bar");
-        Logger.Log($"pH: {finalState.pH:F2}, pe: {finalState.pe:F2}");
-        Logger.Log($"Ionic Strength: {finalState.IonicStrength_molkg:E2} mol/kg");
-        Logger.Log("\nDissolved Species (ions and complexes):");
+        Logger.Log("\n=== AQUEOUS SPECIATION RESULTS ===");
+        Logger.Log($"Temperature: {temperatureK:F2} K ({temperatureK - 273.15:F2} °C)");
+        Logger.Log($"Pressure: {pressureBar:F2} bar");
+        Logger.Log($"pH: {finalState.pH:F2}");
+        Logger.Log($"pe: {finalState.pe:F2}");
+        Logger.Log($"Ionic Strength: {finalState.IonicStrength_molkg:F4} mol/kg\n");
 
-        // Sort by phase and then by moles
+        // Sort species by concentration
         var sortedSpecies = finalState.SpeciesMoles
-            .Where(kvp => kvp.Value > 1e-12)
-            .OrderBy(kvp =>
-            {
-                var phase = compoundLib.Find(kvp.Key)?.Phase;
-                return phase switch
-                {
-                    CompoundPhase.Aqueous => 0,
-                    CompoundPhase.Liquid => 1,
-                    CompoundPhase.Gas => 2,
-                    CompoundPhase.Solid => 3,
-                    _ => 4
-                };
-            })
-            .ThenByDescending(kvp => kvp.Value);
-
-        // Build output string for terminal display
-        var terminalOutput = new System.Text.StringBuilder();
-        terminalOutput.AppendLine("\n╔═══════════════════════════════════════════════════════════════════════════╗");
-        terminalOutput.AppendLine("║                         AQUEOUS SPECIATION RESULTS                         ║");
-        terminalOutput.AppendLine("╠═══════════════════════════════════════════════════════════════════════════╣");
-        terminalOutput.AppendLine($"║ Temperature: {temperatureK,6:F1} K          pH: {finalState.pH,5:F2}          pe: {finalState.pe,6:F2}      ║");
-        terminalOutput.AppendLine($"║ Pressure:    {pressureBar,6:F2} bar        Ionic Strength: {finalState.IonicStrength_molkg,8:E2} mol/kg ║");
-        terminalOutput.AppendLine("╠═══════════════════════════════════════════════════════════════════════════╣");
-        terminalOutput.AppendLine("║ Species              Formula        Moles          Conc (M)       Activity ║");
-        terminalOutput.AppendLine("╠═══════════════════════════════════════════════════════════════════════════╣");
+            .OrderByDescending(kvp => kvp.Value)
+            .ToList();
 
         foreach (var (speciesName, moles) in sortedSpecies)
         {
-            var compound = compoundLib.Find(speciesName);
-            if (compound == null) continue;
-
+            if (moles < 1e-15) continue; // Skip negligible species
+            
+            var species = compoundLib.FindFlexible(speciesName);
+            if (species == null || species.Phase != CompoundPhase.Aqueous) continue;
+            
             var concentration = moles / finalState.Volume_L;
-            var activity = finalState.Activities.GetValueOrDefault(speciesName, 0.0);
-
+            var activity = finalState.Activities.GetValueOrDefault(speciesName, concentration);
+            var activityCoeff = concentration > 0 ? activity / concentration : 1.0;
+            
             resultTable.Rows.Add(
                 speciesName,
-                compound.ChemicalFormula,
-                compound.Phase.ToString(),
+                species.ChemicalFormula,
+                "Aqueous",
                 moles,
                 concentration,
-                activity
+                activity,
+                activityCoeff
             );
-
-            // Add to terminal output with proper formatting
-            var phaseMark = compound.Phase == CompoundPhase.Aqueous ? "  " :
-                           compound.Phase == CompoundPhase.Gas ? "(g)" :
-                           compound.Phase == CompoundPhase.Solid ? "(s)" : "  ";
-
-            terminalOutput.AppendLine(
-                $"║ {speciesName,-18} {phaseMark} {compound.ChemicalFormula,-12} {moles,12:E2}   {concentration,12:E2}   {activity,8:E2} ║");
+            
+            Logger.Log($"{species.ChemicalFormula,-15} {concentration:E3} M  Activity: {activity:E3}  γ: {activityCoeff:F3}");
         }
 
-        terminalOutput.AppendLine("╚═══════════════════════════════════════════════════════════════════════════╝");
-
-        // Print to terminal
-        Console.WriteLine(terminalOutput.ToString());
-
-        return Task.FromResult<Dataset>(new TableDataset("Dissolved_Species", resultTable));
+        return Task.FromResult<Dataset>(new TableDataset("Speciation_Results", resultTable));
     }
 }
+
 
 #endregion
