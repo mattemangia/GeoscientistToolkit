@@ -1237,6 +1237,24 @@ public class MainWindow
             ImGui.Separator();
             ImGui.Spacing();
 
+            // License information
+            ImGui.Text("License");
+            ImGui.Spacing();
+            ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(0.6f, 0.8f, 0.9f, 1.0f));
+            ImGui.TextWrapped("MIT License - Copyright (c) 2025 Matteo Mangiagalli");
+            ImGui.PopStyleColor();
+            ImGui.Spacing();
+            ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(0.75f, 0.75f, 0.75f, 1.0f));
+            ImGui.TextWrapped(
+                "Permission is hereby granted, free of charge, to any person obtaining a copy of this software " +
+                "to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software. " +
+                "See the LICENSE file for full terms.");
+            ImGui.PopStyleColor();
+            ImGui.Spacing();
+
+            ImGui.Separator();
+            ImGui.Spacing();
+
             if (ImGui.Button("OK", new Vector2(100, 0)))
             {
                 _showAboutPopup = false;
