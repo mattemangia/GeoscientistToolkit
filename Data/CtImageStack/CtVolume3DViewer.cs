@@ -601,7 +601,7 @@ void main()
     float step = baseStepSize * ThresholdParams.z;
     
     int maxSteps = int((tFar - tNear) / step);
-    float opacityScalar = 40.0;
+    float opacityScalar = 80.0;
     float t = tNear;
 
     // Get colormap index from RenderParams.x
@@ -609,7 +609,7 @@ void main()
 
     for (int i = 0; i < 768; i++)
     {
-        if (i >= maxSteps || t > tFar || accumulatedColor.a > 0.95) break;
+        if (i >= maxSteps || t > tFar || accumulatedColor.a > 0.98) break;
 
         vec3 currentPos = rayOrigin + t * rayDir;
         if (any(lessThan(currentPos, vec3(0.0))) || any(greaterThan(currentPos, vec3(1.0))) || IsCutByPlanes(currentPos))
@@ -630,7 +630,7 @@ void main()
                 
                 // FIXED: Always apply colormap, colormap index 0 is grayscale
                 sampledColor = ApplyColorMap(normIntensity, colorMapIndex);
-                sampledColor.a = pow(sampledColor.a, 2.0);
+                sampledColor.a = normIntensity;
             }
         }
 
