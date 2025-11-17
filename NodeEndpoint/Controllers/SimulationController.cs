@@ -2,9 +2,6 @@ using Microsoft.AspNetCore.Mvc;
 using GeoscientistToolkit.Network;
 using GeoscientistToolkit.Analysis.Geomechanics;
 using GeoscientistToolkit.Analysis.AcousticSimulation;
-using GeoscientistToolkit.Analysis.Geothermal;
-using GeoscientistToolkit.Analysis.Seismology;
-using GeoscientistToolkit.Analysis.NMR;
 
 namespace GeoscientistToolkit.NodeEndpoint.Controllers;
 
@@ -96,113 +93,6 @@ public class SimulationController : ControllerBase
     }
 
     /// <summary>
-    /// Submit a geothermal simulation job
-    /// </summary>
-    [HttpPost("geothermal")]
-    public IActionResult SubmitGeothermalSimulation([FromBody] GeothermalSimulationRequest request)
-    {
-        try
-        {
-            var jobId = Guid.NewGuid().ToString();
-            var job = new JobMessage
-            {
-                JobId = jobId,
-                JobType = "GeothermalSimulation",
-                Parameters = new Dictionary<string, object>
-                {
-                    ["meshFile"] = request.MeshFile ?? "",
-                    ["fluidProperties"] = request.FluidProperties ?? new Dictionary<string, object>(),
-                    ["thermalProperties"] = request.ThermalProperties ?? new Dictionary<string, object>(),
-                    ["boreholeConfiguration"] = request.BoreholeConfiguration ?? new Dictionary<string, object>(),
-                    ["simulationTime"] = request.SimulationTime,
-                    ["timeStepSize"] = request.TimeStepSize,
-                    ["multiBoreholeMode"] = request.MultiBoreholeMode,
-                    ["outputPath"] = request.OutputPath ?? ""
-                }
-            };
-
-            _nodeManager.SubmitJob(job);
-            _jobTracker.RegisterJob(job);
-
-            return Ok(new { jobId, message = "Geothermal simulation job submitted", status = "pending" });
-        }
-        catch (Exception ex)
-        {
-            return BadRequest(new { error = ex.Message });
-        }
-    }
-
-    /// <summary>
-    /// Submit a seismic/earthquake simulation job
-    /// </summary>
-    [HttpPost("seismic")]
-    public IActionResult SubmitSeismicSimulation([FromBody] SeismicSimulationRequest request)
-    {
-        try
-        {
-            var jobId = Guid.NewGuid().ToString();
-            var job = new JobMessage
-            {
-                JobId = jobId,
-                JobType = "SeismicSimulation",
-                Parameters = new Dictionary<string, object>
-                {
-                    ["faultGeometry"] = request.FaultGeometry ?? new Dictionary<string, object>(),
-                    ["stressField"] = request.StressField ?? new Dictionary<string, object>(),
-                    ["faultFriction"] = request.FaultFriction,
-                    ["slipRate"] = request.SlipRate,
-                    ["duration"] = request.Duration,
-                    ["outputPath"] = request.OutputPath ?? ""
-                }
-            };
-
-            _nodeManager.SubmitJob(job);
-            _jobTracker.RegisterJob(job);
-
-            return Ok(new { jobId, message = "Seismic simulation job submitted", status = "pending" });
-        }
-        catch (Exception ex)
-        {
-            return BadRequest(new { error = ex.Message });
-        }
-    }
-
-    /// <summary>
-    /// Submit an NMR simulation job
-    /// </summary>
-    [HttpPost("nmr")]
-    public IActionResult SubmitNMRSimulation([FromBody] NMRSimulationRequest request)
-    {
-        try
-        {
-            var jobId = Guid.NewGuid().ToString();
-            var job = new JobMessage
-            {
-                JobId = jobId,
-                JobType = "NMRSimulation",
-                Parameters = new Dictionary<string, object>
-                {
-                    ["poreStructure"] = request.PoreStructure ?? new Dictionary<string, object>(),
-                    ["fluidProperties"] = request.FluidProperties ?? new Dictionary<string, object>(),
-                    ["echoTime"] = request.EchoTime,
-                    ["numberOfEchoes"] = request.NumberOfEchoes,
-                    ["useOpenCL"] = request.UseOpenCL,
-                    ["outputPath"] = request.OutputPath ?? ""
-                }
-            };
-
-            _nodeManager.SubmitJob(job);
-            _jobTracker.RegisterJob(job);
-
-            return Ok(new { jobId, message = "NMR simulation job submitted", status = "pending" });
-        }
-        catch (Exception ex)
-        {
-            return BadRequest(new { error = ex.Message });
-        }
-    }
-
-    /// <summary>
     /// Submit a triaxial compression/extension test simulation
     /// </summary>
     [HttpPost("triaxial")]
@@ -256,9 +146,6 @@ public class SimulationController : ControllerBase
         {
             new { type = "GeomechanicalSimulation", description = "FEM-based geomechanical analysis with plasticity and damage" },
             new { type = "AcousticSimulation", description = "Acoustic wave propagation simulation" },
-            new { type = "GeothermalSimulation", description = "Geothermal reservoir simulation" },
-            new { type = "SeismicSimulation", description = "Earthquake and fault slip simulation" },
-            new { type = "NMRSimulation", description = "Nuclear Magnetic Resonance pore-scale simulation" },
             new { type = "TriaxialSimulation", description = "Triaxial compression/extension test with multiple failure criteria" }
         };
 
@@ -288,38 +175,6 @@ public class AcousticSimulationRequest
     public List<double[]>? ReceiverPositions { get; set; }
     public Dictionary<string, object>? MaterialProperties { get; set; }
     public bool UseGPU { get; set; }
-    public string? OutputPath { get; set; }
-}
-
-public class GeothermalSimulationRequest
-{
-    public string? MeshFile { get; set; }
-    public Dictionary<string, object>? FluidProperties { get; set; }
-    public Dictionary<string, object>? ThermalProperties { get; set; }
-    public Dictionary<string, object>? BoreholeConfiguration { get; set; }
-    public double SimulationTime { get; set; }
-    public double TimeStepSize { get; set; }
-    public bool MultiBoreholeMode { get; set; }
-    public string? OutputPath { get; set; }
-}
-
-public class SeismicSimulationRequest
-{
-    public Dictionary<string, object>? FaultGeometry { get; set; }
-    public Dictionary<string, object>? StressField { get; set; }
-    public double FaultFriction { get; set; }
-    public double SlipRate { get; set; }
-    public double Duration { get; set; }
-    public string? OutputPath { get; set; }
-}
-
-public class NMRSimulationRequest
-{
-    public Dictionary<string, object>? PoreStructure { get; set; }
-    public Dictionary<string, object>? FluidProperties { get; set; }
-    public double EchoTime { get; set; }
-    public int NumberOfEchoes { get; set; }
-    public bool UseOpenCL { get; set; }
     public string? OutputPath { get; set; }
 }
 

@@ -25,10 +25,10 @@
     <Compile Include="..\OpenCL\OpenCLDeviceManager.cs" Link="OpenCL\OpenCLDeviceManager.cs" />
 
     <!-- Core simulation files only (no UI dependencies) -->
+    <!-- Geomechanics - CPU path only, no fluid coupling (has complex dependencies) -->
     <Compile Include="..\Analysis\Geomechanics\GeomechanicalSimulationCPU.cs" Link="Analysis\Geomechanics\GeomechanicalSimulationCPU.cs" />
     <Compile Include="..\Analysis\Geomechanics\GeomechanicalSimulationCPU_plasticity.cs" Link="Analysis\Geomechanics\GeomechanicalSimulationCPU_plasticity.cs" />
     <Compile Include="..\Analysis\Geomechanics\GeomechanicSimulationCPU_damage.cs" Link="Analysis\Geomechanics\GeomechanicSimulationCPU_damage.cs" />
-    <Compile Include="..\Analysis\Geomechanics\GeomechanicalSimulatorCPU_FluidGeothermal.cs" Link="Analysis\Geomechanics\GeomechanicalSimulatorCPU_FluidGeothermal.cs" />
     <Compile Include="..\Analysis\Geomechanics\TriaxialSimulation.cs" Link="Analysis\Geomechanics\TriaxialSimulation.cs" />
     <Compile Include="..\Analysis\Geomechanics\TriaxialMeshGenerator.cs" Link="Analysis\Geomechanics\TriaxialMeshGenerator.cs" />
     <Compile Include="..\Analysis\Geomechanics\GeomechanicalParameters.cs" Link="Analysis\Geomechanics\GeomechanicalParameters.cs" />
@@ -36,29 +36,28 @@
     <Compile Include="..\Analysis\Geomechanics\ArrayWrapper.cs" Link="Analysis\Geomechanics\ArrayWrapper.cs" />
     <Compile Include="..\Analysis\Geomechanics\DamageModel.cs" Link="Analysis\Geomechanics\DamageModel.cs" />
 
+    <!-- Acoustic - CPU path only -->
+    <Compile Include="..\Analysis\AcousticSimulation\IAcousticKernel.cs" Link="Analysis\AcousticSimulation\IAcousticKernel.cs" />
     <Compile Include="..\Analysis\AcousticSimulation\AcousticSimulatorCPU.cs" Link="Analysis\AcousticSimulation\AcousticSimulatorCPU.cs" />
     <Compile Include="..\Analysis\AcousticSimulation\SimulationData.cs" Link="Analysis\AcousticSimulation\SimulationData.cs" />
     <Compile Include="..\Analysis\AcousticSimulation\SimulationParameters.cs" Link="Analysis\AcousticSimulation\SimulationParameters.cs" />
 
-    <Compile Include="..\Analysis\Geothermal\GeothermalSimulationSolver.cs" Link="Analysis\Geothermal\GeothermalSimulationSolver.cs" />
-    <Compile Include="..\Analysis\Geothermal\GeothermalSimulationOptions.cs" Link="Analysis\Geothermal\GeothermalSimulationOptions.cs" />
-    <Compile Include="..\Analysis\Geothermal\GeothermalSimulationResults.cs" Link="Analysis\Geothermal\GeothermalSimulationResults.cs" />
-    <Compile Include="..\Analysis\Geothermal\MultiBoreholeCoupledSimulation.cs" Link="Analysis\Geothermal\MultiBoreholeCoupledSimulation.cs" />
+    <!-- NOTE: Geothermal, Seismic, NMR, and PNM Generator are EXCLUDED - they have complex dependencies on:
+         - UI libraries (ImGuiNET, ProgressBarDialog)
+         - Advanced data types (Mesh3D, VolumeData, CtImageStack, Borehole, GIS)
+         - Complex simulation infrastructure (CrustalModel, WavePropagationEngine, etc.)
+         These simulations are better suited for the main application with full UI support.
+         For headless distributed computing, focus on geomechanics and acoustic simulations. -->
 
-    <Compile Include="..\Analysis\Seismology\EarthquakeSimulationEngine.cs" Link="Analysis\Seismology\EarthquakeSimulationEngine.cs" />
-    <Compile Include="..\Analysis\Seismology\EarthquakeSimulationParameters.cs" Link="Analysis\Seismology\EarthquakeSimulationParameters.cs" />
-    <Compile Include="..\Analysis\Seismology\EarthquakeSimulationResults.cs" Link="Analysis\Seismology\EarthquakeSimulationResults.cs" />
-
-    <Compile Include="..\Analysis\NMR\NMRSimulation.cs" Link="Analysis\NMR\NMRSimulation.cs" />
-    <Compile Include="..\Analysis\NMR\NMRResults.cs" Link="Analysis\NMR\NMRResults.cs" />
-
-    <Compile Include="..\Analysis\PNM\PNMGenerator.cs" Link="Analysis\PNM\PNMGenerator.cs" />
+    <!-- PNM - Only computational algorithms, no generation (requires UI) -->
     <Compile Include="..\Analysis\PNM\AbsolutePermeability.cs" Link="Analysis\PNM\AbsolutePermeability.cs" />
-    <Compile Include="..\Analysis\PNM\PNMReactiveTransport.cs" Link="Analysis\PNM\PNMReactiveTransport.cs" />
 
     <!-- Essential data types (no UI) -->
     <Compile Include="..\Data\Dataset.cs" Link="Data\Dataset.cs" />
+    <Compile Include="..\Data\IserializableDataset.cs" Link="Data\IserializableDataset.cs" />
+    <Compile Include="..\Data\Metadata.cs" Link="Data\Metadata.cs" />
     <Compile Include="..\Data\PNM\PNMDataset.cs" Link="Data\PNM\PNMDataset.cs" />
+    <Compile Include="..\Data\Table\TableDataset.cs" Link="Data\Table\TableDataset.cs" />
     <Compile Include="..\Data\Materials\PhysicalMaterial.cs" Link="Data\Materials\PhysicalMaterial.cs" />
 
     <!-- Essential business logic (no UI) -->
