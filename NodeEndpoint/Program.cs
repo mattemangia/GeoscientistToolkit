@@ -64,7 +64,8 @@ public class Program
         builder.Services.AddSingleton<Services.JobPartitioner>();
         builder.Services.AddSingleton<Services.NetworkDiscoveryService>(sp =>
         {
-            var httpPort = builder.Configuration.GetValue<int>("Kestrel:Endpoints:Http:Url", 5000);
+            // Use the hardcoded HTTP port that matches the Kestrel configuration (line 26)
+            var httpPort = 5000;
             var nodeManagerPort = builder.Configuration.GetValue<int>("NodeManager:ServerPort", 9876);
             var localIp = Services.NetworkDiscoveryService.GetLocalIPAddress();
             return new Services.NetworkDiscoveryService($"http://{localIp}", httpPort, nodeManagerPort);
