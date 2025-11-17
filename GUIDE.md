@@ -1,5 +1,7 @@
 # GeoscientistToolkit User Guide
 
+![GeoscientistToolkit Logo](image.png)
+
 ## Table of Contents
 
 1. [Introduction](#introduction)
