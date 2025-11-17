@@ -119,7 +119,10 @@ internal sealed class InstallerWizardApp
 
     private Wizard.WizardStep CreateWelcomePage()
     {
-        var page = new Wizard.WizardStep("Benvenuto", "Preparazione dell'installazione");
+        var page = new Wizard.WizardStep("Benvenuto")
+        {
+            HelpText = "Preparazione dell'installazione"
+        };
 
         _welcomeLabel = new Label
         {
@@ -166,7 +169,10 @@ internal sealed class InstallerWizardApp
 
     private Wizard.WizardStep CreateRuntimePage()
     {
-        var page = new Wizard.WizardStep("Opzioni", "Seleziona runtime e cartella di installazione");
+        var page = new Wizard.WizardStep("Opzioni")
+        {
+            HelpText = "Seleziona runtime e cartella di installazione"
+        };
 
         var packages = _manifest?.Packages ?? new List<RuntimePackage>();
         var items = packages.Select(p => $"{p.RuntimeIdentifier} · {(p.Description ?? "")}").ToList();
@@ -275,7 +281,10 @@ internal sealed class InstallerWizardApp
 
     private Wizard.WizardStep CreateReviewPage()
     {
-        var page = new Wizard.WizardStep("Riepilogo", "Conferma i parametri scelti");
+        var page = new Wizard.WizardStep("Riepilogo")
+        {
+            HelpText = "Conferma i parametri scelti"
+        };
 
         _reviewText = new TextView
         {
@@ -317,7 +326,10 @@ internal sealed class InstallerWizardApp
 
     private Wizard.WizardStep CreateProgressPage()
     {
-        var page = new Wizard.WizardStep("Installazione", "Esecuzione attività");
+        var page = new Wizard.WizardStep("Installazione")
+        {
+            HelpText = "Esecuzione attività"
+        };
 
         _progressBar = new ProgressBar
         {
