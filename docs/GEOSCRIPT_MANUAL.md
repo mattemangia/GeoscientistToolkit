@@ -754,6 +754,40 @@ Table showing products organized by phase (solid, aqueous, gas) with moles, mass
 
 ---
 
+#### DISSOLVE
+
+Shows the dissociation and speciation products when compounds dissolve in water. For gases, uses Henry's Law to calculate dissolution based on pressure.
+
+**Syntax:**
+```geoscript
+DISSOLVE <Compounds> [TEMP <val> C|K] [PRES <val> BAR|ATM]
+```
+
+**Examples:**
+```geoscript
+# Dissolve salt in water
+DISSOLVE H2O + NaCl
+
+# Dissolve multiple compounds
+DISSOLVE H2O + NaCl + CaCl2
+
+# Dissolve gas at specific pressure (uses Henry's Law)
+DISSOLVE H2O + CO2 TEMP 25 C PRES 2 BAR
+
+# Dissolve gas at high pressure
+DISSOLVE H2O + O2 TEMP 300 K PRES 10 ATM
+```
+
+**Note:**
+- For **gases**, the command uses Henry's Law (C = K_H × P) to calculate dissolved concentration
+- For **salts/minerals**, assumes 1 mole unless it's water (solvent)
+- Chemical formulas work with plain numbers (H2O, CO2, etc.) or subscripts (H₂O, CO₂)
+
+**Output:**
+Table showing all dissolved species with moles, concentration (M), and activity
+
+---
+
 ### Image Processing Commands (7 commands)
 
 #### BRIGHTNESS_CONTRAST

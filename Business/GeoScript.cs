@@ -179,6 +179,7 @@ public static class CommandRegistry
             new BalanceReactionCommand(),
             new EvaporateCommand(),
             new ReactCommand(),
+            new DissolveCommand(),
 
             // Thermodynamics Extensions
             new CalculatePhasesCommand(),
@@ -1786,6 +1787,190 @@ public class ReactCommand : IGeoScriptCommand
             Logger.Log($"{phase} phase: {totalMoles:E3} total moles");
 
         return Task.FromResult<Dataset>(new TableDataset("Reaction_Products", resultTable));
+    }
+}
+
+public class DissolveCommand : IGeoScriptCommand
+{
+    public string Name => "DISSOLVE";
+    public string HelpText => "Shows dissociation/speciation products when compounds (solids, liquids, gases) dissolve in water. Gases use Henry's Law.";
+    public string Usage => "DISSOLVE <Compounds> [TEMP <val> C|K] [PRES <val> BAR|ATM]";
+
+    /// <summary>
+    ///     Normalizes a chemical formula by converting plain numbers to subscripts.
+    /// </summary>
+    private string NormalizeChemicalFormula(string formula)
+    {
+        var normalized = formula
+            .Replace('0', '₀')
+            .Replace('1', '₁')
+            .Replace('2', '₂')
+            .Replace('3', '₃')
+            .Replace('4', '₄')
+            .Replace('5', '₅')
+            .Replace('6', '₆')
+            .Replace('7', '₇')
+            .Replace('8', '₈')
+            .Replace('9', '₉');
+
+        return normalized;
+    }
+
+    public Task<Dataset> ExecuteAsync(GeoScriptContext context, AstNode node)
+    {
+        var cmd = (CommandNode)node;
+
+        // Parse the command string
+        var pattern = @"DISSOLVE\s+(?<compounds>.+?)(?:\s+TEMP\s+(?<tempval>[\d\.]+)\s*(?<tempunit>C|K))?(?:\s+PRES\s+(?<presval>[\d\.]+)\s*(?<presunit>BAR|ATM))?$";
+        var match = Regex.Match(cmd.FullText, pattern, RegexOptions.IgnoreCase);
+
+        if (!match.Success) throw new ArgumentException($"Invalid DISSOLVE syntax. Usage: {Usage}");
+
+        var compoundsStr = match.Groups["compounds"].Value.Trim();
+
+        // Set temperature
+        var temperatureK = 298.15; // Default 25 C
+        if (match.Groups["tempval"].Success)
+        {
+            var tempVal = double.Parse(match.Groups["tempval"].Value, CultureInfo.InvariantCulture);
+            temperatureK = match.Groups["tempunit"].Value.ToUpper() == "K" ? tempVal : tempVal + 273.15;
+        }
+
+        // Set pressure
+        var pressureBar = 1.0; // Default 1 bar
+        if (match.Groups["presval"].Success)
+        {
+            var presVal = double.Parse(match.Groups["presval"].Value, CultureInfo.InvariantCulture);
+            pressureBar = match.Groups["presunit"].Value.ToUpper() == "ATM" ? presVal * 1.01325 : presVal;
+        }
+
+        var compoundLib = CompoundLibrary.Instance;
+        var reactionGenerator = new ReactionGenerator(compoundLib);
+        var solver = new ThermodynamicSolver();
+
+        // Build initial state with compounds
+        var initialState = new ThermodynamicState
+        {
+            Temperature_K = temperatureK,
+            Pressure_bar = pressureBar,
+            Volume_L = 1.0
+        };
+
+        var compounds = compoundsStr.Split('+').Select(c => c.Trim()).ToList();
+
+        Logger.Log($"[DISSOLVE] Dissolving compounds in water at {temperatureK:F2} K, {pressureBar:F2} bar:");
+
+        foreach (var compoundName in compounds)
+        {
+            var cleanedName = compoundName.Replace('!', '·');
+            var normalizedName = NormalizeChemicalFormula(cleanedName);
+            var compound = compoundLib.Find(normalizedName) ?? compoundLib.Find(cleanedName);
+
+            if (compound == null)
+            {
+                Logger.LogError($"Compound '{compoundName}' (normalized: '{normalizedName}') not found.");
+                throw new ArgumentException($"Unknown compound: {compoundName}");
+            }
+
+            double moles;
+
+            // Handle different phases
+            var isWater = compound.Name.ToUpper() == "WATER" || compound.ChemicalFormula == "H₂O";
+            if (isWater)
+            {
+                // Water is the solvent - use mass to calculate moles
+                moles = 1000.0 / (compound.MolecularWeight_g_mol ?? 18.015);
+            }
+            else if (compound.Phase == CompoundPhase.Gas)
+            {
+                // For gases, use Henry's Law to calculate dissolved amount
+                // C = K_H * P_gas (where K_H is Henry's law constant in mol/(L·atm))
+                if (compound.HenrysLawConstant_mol_L_atm.HasValue)
+                {
+                    var partialPressure_atm = pressureBar / 1.01325; // Assume gas is at system pressure
+                    var henryConstant = compound.HenrysLawConstant_mol_L_atm.Value;
+                    moles = henryConstant * partialPressure_atm * initialState.Volume_L;
+                    Logger.Log($"  - {compound.Name} ({compound.ChemicalFormula}) [GAS]: {moles:E3} moles (Henry's Law: Kh={henryConstant:E2}, P={partialPressure_atm:F2} atm)");
+                }
+                else
+                {
+                    Logger.LogWarning($"  - {compound.Name} ({compound.ChemicalFormula}) [GAS]: No Henry's Law constant available, using 0.01 moles");
+                    moles = 0.01; // Small default amount for gases without Henry constant
+                }
+            }
+            else
+            {
+                // Solids and other compounds - use 1 mole
+                moles = 1.0;
+                Logger.Log($"  - {compound.Name} ({compound.ChemicalFormula}): {moles:F3} moles");
+            }
+
+            initialState.SpeciesMoles[compound.Name] =
+                initialState.SpeciesMoles.GetValueOrDefault(compound.Name, 0) + moles;
+
+            // Add elemental composition
+            var composition = reactionGenerator.ParseChemicalFormula(compound.ChemicalFormula);
+            foreach (var (element, stoichiometry) in composition)
+                initialState.ElementalComposition[element] =
+                    initialState.ElementalComposition.GetValueOrDefault(element, 0) + moles * stoichiometry;
+        }
+
+        // Solve for speciation (not full equilibrium, just dissociation)
+        var finalState = solver.SolveSpeciation(initialState);
+
+        // Create output table
+        var resultTable = new DataTable("Dissolved_Species");
+        resultTable.Columns.Add("Species", typeof(string));
+        resultTable.Columns.Add("Formula", typeof(string));
+        resultTable.Columns.Add("Phase", typeof(string));
+        resultTable.Columns.Add("Moles", typeof(double));
+        resultTable.Columns.Add("Concentration_M", typeof(double));
+        resultTable.Columns.Add("Activity", typeof(double));
+
+        Logger.Log("\n=== DISSOLUTION PRODUCTS ===");
+        Logger.Log($"Temperature: {temperatureK:F2} K");
+        Logger.Log($"pH: {finalState.pH:F2}");
+        Logger.Log($"Ionic Strength: {finalState.IonicStrength_molkg:E2} mol/kg");
+        Logger.Log("\nSpecies:");
+
+        // Sort by phase and then by moles
+        var sortedSpecies = finalState.SpeciesMoles
+            .Where(kvp => kvp.Value > 1e-12)
+            .OrderBy(kvp =>
+            {
+                var phase = compoundLib.Find(kvp.Key)?.Phase;
+                return phase switch
+                {
+                    CompoundPhase.Aqueous => 0,
+                    CompoundPhase.Liquid => 1,
+                    CompoundPhase.Gas => 2,
+                    CompoundPhase.Solid => 3,
+                    _ => 4
+                };
+            })
+            .ThenByDescending(kvp => kvp.Value);
+
+        foreach (var (speciesName, moles) in sortedSpecies)
+        {
+            var compound = compoundLib.Find(speciesName);
+            if (compound == null) continue;
+
+            var concentration = moles / finalState.Volume_L;
+            var activity = finalState.Activities.GetValueOrDefault(speciesName, 0.0);
+
+            resultTable.Rows.Add(
+                speciesName,
+                compound.ChemicalFormula,
+                compound.Phase.ToString(),
+                moles,
+                concentration,
+                activity
+            );
+
+            Logger.Log($"  {speciesName,-20} ({compound.ChemicalFormula,-10}): {moles:E3} moles, {concentration:E3} M");
+        }
+
+        return Task.FromResult<Dataset>(new TableDataset("Dissolved_Species", resultTable));
     }
 }
 
