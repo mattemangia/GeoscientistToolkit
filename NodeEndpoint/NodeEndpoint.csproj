@@ -8,6 +8,7 @@
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <RootNamespace>GeoscientistToolkit.NodeEndpoint</RootNamespace>
     <AssemblyName>NodeEndpoint</AssemblyName>
+    <ApplicationIcon>image.ico</ApplicationIcon>
   </PropertyGroup>
 
   <ItemGroup>

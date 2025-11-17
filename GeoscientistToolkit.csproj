@@ -9,6 +9,7 @@
         <ShaderVariantDef>shader-variants.json</ShaderVariantDef>
         <RuntimeIdentifiers>osx-arm64;osx-x64;win-x64;linux-x64</RuntimeIdentifiers>
         <DefineConstants>IMGUI_HAS_DOCK_BUILDER;$(DefineConstants)</DefineConstants>
+        <ApplicationIcon>image.ico</ApplicationIcon>
     </PropertyGroup>
 
     <!--
