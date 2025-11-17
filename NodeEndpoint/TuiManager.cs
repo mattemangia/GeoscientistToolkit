@@ -2,6 +2,7 @@ using Terminal.Gui;
 using GeoscientistToolkit.Network;
 using System.Diagnostics;
 using System.Text;
+using System.Net.NetworkInformation;
 
 namespace GeoscientistToolkit.NodeEndpoint;
 
@@ -24,10 +25,21 @@ public class TuiManager
     private FrameView _connectionsFrame = null!;
     private FrameView _statusFrame = null!;
     private FrameView _benchmarkFrame = null!;
+    private ProgressBar _cpuUsageBar = null!;
+    private Label _cpuUsageLabel = null!;
+    private Label _keepaliveIndicator = null!;
+    private Label _txIndicator = null!;
+    private Label _rxIndicator = null!;
 
     private DateTime _startTime;
     private System.Timers.Timer? _updateTimer;
     private bool _isRunning;
+    private float _currentCpuUsage;
+    private long _lastBytesSent;
+    private long _lastBytesReceived;
+    private bool _txActive;
+    private bool _rxActive;
+    private int _keepaliveCounter;
 
     public TuiManager(
         NodeManager nodeManager,
@@ -133,7 +145,7 @@ public class TuiManager
             X = 0,
             Y = 0,
             Width = Dim.Fill(),
-            Height = 8
+            Height = 10
         };
 
         var platform = OperatingSystem.IsWindows() ? "Windows" :
@@ -176,7 +188,22 @@ public class TuiManager
             Y = 5
         };
 
-        _statusFrame.Add(_platformLabel, _httpApiLabel, _nodeManagerLabel, _statusLabel, _uptimeLabel, swaggerLabel);
+        // CPU Usage bar
+        _cpuUsageLabel = new Label("CPU Usage: 0.0%")
+        {
+            X = 1,
+            Y = 6
+        };
+
+        _cpuUsageBar = new ProgressBar()
+        {
+            X = 1,
+            Y = 7,
+            Width = Dim.Percent(80),
+            Height = 1
+        };
+
+        _statusFrame.Add(_platformLabel, _httpApiLabel, _nodeManagerLabel, _statusLabel, _uptimeLabel, swaggerLabel, _cpuUsageLabel, _cpuUsageBar);
 
         // Connections frame (middle section)
         _connectionsFrame = new FrameView("Active Connections")
@@ -217,7 +244,39 @@ public class TuiManager
         _benchmarkFrame.Add(_cpuBenchmarkLabel);
 
         _mainWindow.Add(_statusFrame, _connectionsFrame, _benchmarkFrame);
-        top.Add(_mainWindow);
+
+        // Bottom right corner indicators (added to top level, not mainWindow)
+        _keepaliveIndicator = new Label("KEEPALIVE")
+        {
+            X = Pos.AnchorEnd(30),
+            Y = Pos.AnchorEnd(1),
+            ColorScheme = new ColorScheme()
+            {
+                Normal = Terminal.Gui.Attribute.Make(Color.BrightGreen, Color.Black)
+            }
+        };
+
+        _txIndicator = new Label("TX")
+        {
+            X = Pos.AnchorEnd(18),
+            Y = Pos.AnchorEnd(1),
+            ColorScheme = new ColorScheme()
+            {
+                Normal = Terminal.Gui.Attribute.Make(Color.Gray, Color.Black)
+            }
+        };
+
+        _rxIndicator = new Label("RX")
+        {
+            X = Pos.AnchorEnd(12),
+            Y = Pos.AnchorEnd(1),
+            ColorScheme = new ColorScheme()
+            {
+                Normal = Terminal.Gui.Attribute.Make(Color.Gray, Color.Black)
+            }
+        };
+
+        top.Add(_mainWindow, _keepaliveIndicator, _txIndicator, _rxIndicator);
 
         // Add keyboard shortcuts
         top.KeyPress += (e) =>
@@ -243,7 +302,7 @@ public class TuiManager
 
     private void SetupUpdateTimer()
     {
-        _updateTimer = new System.Timers.Timer(1000); // Update every second
+        _updateTimer = new System.Timers.Timer(500); // Update every 500ms for smoother indicators
         _updateTimer.Elapsed += (sender, e) =>
         {
             if (_isRunning)
@@ -253,6 +312,9 @@ public class TuiManager
                     UpdateUptime();
                     UpdateConnections();
                     UpdateStatus();
+                    UpdateCpuUsage();
+                    UpdateNetworkIndicators();
+                    UpdateKeepaliveIndicator();
                 });
             }
         };
@@ -313,6 +375,135 @@ public class TuiManager
         UpdateUptime();
         UpdateStatus();
         UpdateConnections();
+        UpdateCpuUsage();
+        UpdateNetworkIndicators();
+        UpdateKeepaliveIndicator();
+    }
+
+    private void UpdateCpuUsage()
+    {
+        try
+        {
+            using var process = Process.GetCurrentProcess();
+            var startTime = DateTime.UtcNow;
+            var startCpuUsage = process.TotalProcessorTime;
+
+            Thread.Sleep(100);
+
+            var endTime = DateTime.UtcNow;
+            var endCpuUsage = process.TotalProcessorTime;
+
+            var cpuUsedMs = (endCpuUsage - startCpuUsage).TotalMilliseconds;
+            var totalMsPassed = (endTime - startTime).TotalMilliseconds;
+
+            var cpuUsageTotal = cpuUsedMs / (Environment.ProcessorCount * totalMsPassed);
+            _currentCpuUsage = (float)(cpuUsageTotal * 100);
+
+            _cpuUsageLabel.Text = $"CPU Usage: {_currentCpuUsage:F1}%";
+            _cpuUsageBar.Fraction = Math.Min(_currentCpuUsage / 100f, 1.0f);
+        }
+        catch
+        {
+            _currentCpuUsage = 0;
+            _cpuUsageLabel.Text = "CPU Usage: N/A";
+        }
+    }
+
+    private void UpdateNetworkIndicators()
+    {
+        try
+        {
+            long totalBytesSent = 0;
+            long totalBytesReceived = 0;
+
+            // Get network statistics from all interfaces
+            var interfaces = NetworkInterface.GetAllNetworkInterfaces();
+            foreach (var ni in interfaces)
+            {
+                if (ni.OperationalStatus == OperationalStatus.Up &&
+                    ni.NetworkInterfaceType != NetworkInterfaceType.Loopback)
+                {
+                    var stats = ni.GetIPv4Statistics();
+                    totalBytesSent += stats.BytesSent;
+                    totalBytesReceived += stats.BytesReceived;
+                }
+            }
+
+            // Check if there's activity since last check
+            if (_lastBytesSent > 0)
+            {
+                _txActive = totalBytesSent > _lastBytesSent;
+                _rxActive = totalBytesReceived > _lastBytesReceived;
+            }
+
+            _lastBytesSent = totalBytesSent;
+            _lastBytesReceived = totalBytesReceived;
+
+            // Update TX indicator
+            if (_txActive)
+            {
+                _txIndicator.Text = "TX▲";
+                _txIndicator.ColorScheme = new ColorScheme()
+                {
+                    Normal = Terminal.Gui.Attribute.Make(Color.BrightYellow, Color.Black)
+                };
+            }
+            else
+            {
+                _txIndicator.Text = "TX";
+                _txIndicator.ColorScheme = new ColorScheme()
+                {
+                    Normal = Terminal.Gui.Attribute.Make(Color.Gray, Color.Black)
+                };
+            }
+
+            // Update RX indicator
+            if (_rxActive)
+            {
+                _rxIndicator.Text = "RX▼";
+                _rxIndicator.ColorScheme = new ColorScheme()
+                {
+                    Normal = Terminal.Gui.Attribute.Make(Color.BrightCyan, Color.Black)
+                };
+            }
+            else
+            {
+                _rxIndicator.Text = "RX";
+                _rxIndicator.ColorScheme = new ColorScheme()
+                {
+                    Normal = Terminal.Gui.Attribute.Make(Color.Gray, Color.Black)
+                };
+            }
+
+            // Reset activity flags (will be set again on next check if still active)
+            _txActive = false;
+            _rxActive = false;
+        }
+        catch
+        {
+            // Ignore network stats errors
+        }
+    }
+
+    private void UpdateKeepaliveIndicator()
+    {
+        _keepaliveCounter++;
+
+        // Blink the keepalive indicator every 2 seconds (4 updates at 500ms)
+        if (_keepaliveCounter % 4 == 0)
+        {
+            _keepaliveIndicator.ColorScheme = new ColorScheme()
+            {
+                Normal = Terminal.Gui.Attribute.Make(Color.BrightGreen, Color.Black)
+            };
+        }
+        else if (_keepaliveCounter % 4 == 2)
+        {
+            _keepaliveIndicator.ColorScheme = new ColorScheme()
+            {
+                Normal = Terminal.Gui.Attribute.Make(Color.Green, Color.Black)
+            };
+        }
     }
 
     private void RunCpuBenchmark()
