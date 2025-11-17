@@ -40,9 +40,43 @@ Network discovery enabled - other nodes can find this endpoint automatically
 
 Ready to accept connections!
 Swagger UI: http://localhost:5000/swagger
+
+Starting Terminal UI...
 ```
 
-### 3. Connect from Another Node
+Then the **Terminal User Interface (TUI)** will launch automatically, showing a comprehensive monitoring dashboard.
+
+### 3. Using the Terminal UI
+
+The TUI provides a production-ready monitoring interface with:
+
+**Six Main Tabs:**
+1. **Dashboard** - Real-time system metrics, network stats, connections
+2. **Jobs** - Job queue monitoring with detailed status
+3. **Logs** - Live log viewer with filtering
+4. **Statistics** - Historical performance metrics
+5. **Nodes** - Connected nodes with capabilities
+6. **Benchmark** - CPU performance testing
+
+**Key Features:**
+- Live configuration editing (Ctrl+E)
+- Real-time job monitoring
+- Network activity indicators
+- Export logs and statistics
+- CPU and memory monitoring
+- Disk usage tracking
+- Network bandwidth display
+
+**Quick Actions:**
+- Press **F1** for keyboard shortcuts
+- Press **F5** to run CPU benchmark
+- Press **Ctrl+E** to edit configuration
+- Press **Ctrl+R** to refresh all data
+- Press **Ctrl+Q** to quit
+
+The TUI updates every 500ms, providing real-time insights into your node's performance.
+
+### 4. Connect from Another Node
 
 On a different machine on the same network:
 

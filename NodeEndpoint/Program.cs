@@ -148,10 +148,14 @@ public class Program
         // Give the web app a moment to fully start
         Thread.Sleep(1000);
 
+        // Get the JobTracker service
+        var jobTracker = app.Services.GetRequiredService<JobTracker>();
+
         // Run the TUI on the main thread
         var tuiManager = new TuiManager(
             nodeManager,
             networkDiscovery,
+            jobTracker,
             httpPort,
             nodeManagerPort,
             localIp

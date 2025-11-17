@@ -1,15 +1,128 @@
 # GeoscientistToolkit Node Endpoint
 
-A REST API server that exposes the GeoscientistToolkit's simulation and CT processing capabilities through HTTP endpoints with keepalive connections for distributed computing.
+A production-ready REST API server that exposes the GeoscientistToolkit's simulation and CT processing capabilities through HTTP endpoints with an advanced Terminal User Interface (TUI) for monitoring and management.
 
 ## Overview
 
 This node endpoint server provides:
+- **Advanced Terminal UI (TUI)** - Production-ready monitoring dashboard with real-time metrics
 - **HTTP REST API** for submitting simulations and CT operations
+- **Configuration Management** - Live editing of settings with JSON validation
+- **Job Monitoring** - Real-time tracking of job queue and execution
+- **Performance Statistics** - Historical metrics with export capabilities
 - **Keepalive connections** ensuring the node manager always sees active endpoints
 - **Distributed computing** leveraging the existing NodeManager architecture
 - **Async job processing** with result retrieval endpoints
 - **Swagger/OpenAPI documentation** for easy integration
+
+## Terminal User Interface (TUI)
+
+The node endpoint includes a comprehensive TUI built with Terminal.Gui that provides:
+
+### Dashboard Tab
+- Real-time system information (platform, uptime, API endpoints)
+- CPU and memory usage with progress bars
+- Disk usage monitoring
+- Network statistics (send/receive rates, total bandwidth)
+- Active connections and discovered nodes
+- Live network activity indicators (TX/RX with bandwidth display)
+
+### Jobs Tab
+- Job queue visualization with status icons (⧗ pending, ▶ running, ✓ completed, ✗ failed)
+- Detailed job information view
+- Job execution timing and duration
+- JSON-formatted job details and results
+
+### Logs Tab
+- Real-time log viewer with up to 10,000 entries
+- Live filtering/searching capabilities
+- Color-coded log levels
+- Export functionality
+
+### Statistics Tab
+- Historical performance metrics (last hour)
+- CPU usage statistics (current, average, min, max)
+- Memory usage trends
+- Network activity totals
+- Connection and job statistics
+- Export to JSON
+
+### Nodes Tab
+- Connected nodes list with status
+- Detailed node information (capabilities, resources, uptime)
+- CPU cores, memory, GPU information
+- Support job types per node
+
+### Benchmark Tab
+- CPU benchmark tool (matrix multiplication)
+- Performance rating (GFLOPS calculation)
+- Progress bar with real-time updates
+- System information display
+
+### Menu System
+
+**File Menu:**
+- Export Logs - Save logs to timestamped text file
+- Export Statistics - Save metrics to JSON
+- Export Configuration - Backup current settings
+- Quit - Exit application
+
+**View Menu:**
+- Quick navigation to all tabs
+- Refresh All - Update all data displays
+
+**Tools Menu:**
+- Run CPU Benchmark - Performance testing
+- Clear Logs - Reset log viewer
+- Clear Completed Jobs - Clean up job tracker
+- Test Network Discovery - Send discovery broadcast
+- Collect Garbage - Force GC
+
+**Configuration Menu:**
+- Edit Configuration - Live JSON editor with validation
+- Reload Configuration - Restart with new settings
+- Network Discovery Settings
+- NodeManager Settings
+- HTTP/API Settings
+- Shared Storage Settings
+
+**Services Menu:**
+- Start/Stop Network Discovery
+- Connect to Node - Manual node connection
+- Disconnect Node - Remove node connection
+
+**Help Menu:**
+- Keyboard Shortcuts - Quick reference
+- System Info - Detailed system information
+- About - Version and feature information
+
+### Keyboard Shortcuts
+
+- **F1** - Show help
+- **F5** - Run CPU benchmark
+- **Ctrl+Q** - Quit application
+- **Ctrl+R** - Refresh all data
+- **Ctrl+E** - Edit configuration
+- **Ctrl+F** - Focus log filter
+- **Tab/Shift+Tab** - Navigate between tabs
+- **Arrow Keys** - Navigate lists
+- **Enter** - Select item
+
+### Bottom Status Bar
+
+- **KEEPALIVE** - Blinks to show application is running
+- **TX** - Network transmit indicator (shows KB/s when active)
+- **RX** - Network receive indicator (shows KB/s when active)
+- **JOBS: X/Y** - Active jobs / total jobs (yellow when jobs are running)
+
+### Configuration Editor
+
+The TUI includes a built-in configuration editor with:
+- Full JSON editing capabilities
+- Syntax validation before saving
+- Automatic backup creation
+- Real-time error reporting
+- Restart prompt for applying changes
 
 ## Architecture
 
