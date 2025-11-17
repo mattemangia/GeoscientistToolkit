@@ -25,13 +25,14 @@
     <Compile Include="..\OpenCL\OpenCLDeviceManager.cs" Link="OpenCL\OpenCLDeviceManager.cs" />
 
     <!-- Core simulation files only (no UI dependencies) -->
-    <!-- Geomechanics - CPU path only, no fluid coupling (has complex dependencies) -->
+    <!-- Geomechanics - CPU path only (fluid/geothermal parameters included but implementation excluded) -->
     <Compile Include="..\Analysis\Geomechanics\GeomechanicalSimulationCPU.cs" Link="Analysis\Geomechanics\GeomechanicalSimulationCPU.cs" />
     <Compile Include="..\Analysis\Geomechanics\GeomechanicalSimulationCPU_plasticity.cs" Link="Analysis\Geomechanics\GeomechanicalSimulationCPU_plasticity.cs" />
     <Compile Include="..\Analysis\Geomechanics\GeomechanicSimulationCPU_damage.cs" Link="Analysis\Geomechanics\GeomechanicSimulationCPU_damage.cs" />
     <Compile Include="..\Analysis\Geomechanics\TriaxialSimulation.cs" Link="Analysis\Geomechanics\TriaxialSimulation.cs" />
     <Compile Include="..\Analysis\Geomechanics\TriaxialMeshGenerator.cs" Link="Analysis\Geomechanics\TriaxialMeshGenerator.cs" />
     <Compile Include="..\Analysis\Geomechanics\GeomechanicalParameters.cs" Link="Analysis\Geomechanics\GeomechanicalParameters.cs" />
+    <Compile Include="..\Analysis\Geomechanics\GeomechanicalParametersExtended.cs" Link="Analysis\Geomechanics\GeomechanicalParametersExtended.cs" />
     <Compile Include="..\Analysis\Geomechanics\GeomechanicalResults.cs" Link="Analysis\Geomechanics\GeomechanicalResults.cs" />
     <Compile Include="..\Analysis\Geomechanics\ArrayWrapper.cs" Link="Analysis\Geomechanics\ArrayWrapper.cs" />
     <Compile Include="..\Analysis\Geomechanics\DamageModel.cs" Link="Analysis\Geomechanics\DamageModel.cs" />
@@ -56,9 +57,9 @@
     <Compile Include="..\Data\Dataset.cs" Link="Data\Dataset.cs" />
     <Compile Include="..\Data\IserializableDataset.cs" Link="Data\IserializableDataset.cs" />
     <Compile Include="..\Data\Metadata.cs" Link="Data\Metadata.cs" />
-    <Compile Include="..\Data\PNM\PNMDataset.cs" Link="Data\PNM\PNMDataset.cs" />
     <Compile Include="..\Data\Table\TableDataset.cs" Link="Data\Table\TableDataset.cs" />
     <Compile Include="..\Data\Materials\PhysicalMaterial.cs" Link="Data\Materials\PhysicalMaterial.cs" />
+    <!-- PNMDataset.cs EXCLUDED - has 91 errors due to missing TableDataset UI dependencies -->
 
     <!-- Essential business logic (no UI) -->
     <Compile Include="..\Business\MaterialLibrary.cs" Link="Business\MaterialLibrary.cs" />

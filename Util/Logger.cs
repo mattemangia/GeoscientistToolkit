@@ -4,6 +4,9 @@ using System.Collections.Concurrent;
 using System.Text;
 using GeoscientistToolkit.Settings;
 
+// Alias to avoid ambiguity with Microsoft.Extensions.Logging.LogLevel in ASP.NET Core projects
+using LogLevel = GeoscientistToolkit.Settings.LogLevel;
+
 // Using the shared LogLevel enum
 
 namespace GeoscientistToolkit.Util;
