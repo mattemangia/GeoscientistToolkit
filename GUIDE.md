@@ -519,6 +519,7 @@ Color-coded for quick identification. Messages include timestamps and can be fil
 **Help Menu:**
 - Documentation
 - About
+- Debug Systems
 
 ### Specialized Windows
 

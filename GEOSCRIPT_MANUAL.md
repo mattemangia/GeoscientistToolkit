@@ -2103,7 +2103,7 @@ SEIS_FILTER type=bandpass low=10 high=80 |> SEIS_AGC window=500
 ## License and Copyright
 
 GEOSCRIPT Language Manual
-Copyright (c) 2025 Geoscientist's Toolkit Project
+Copyright (c) 2025 The Geoscientist's Toolkit Project
 
 This documentation is part of the Geoscientist's Toolkit application, licensed under the MIT License.
 
