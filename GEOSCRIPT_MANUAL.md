@@ -1,0 +1,2116 @@
+# GEOSCRIPT Language Manual
+
+**Version 1.0**
+**Official Documentation for Geoscientist's Toolkit**
+
+---
+
+## Table of Contents
+
+1. [Introduction](#1-introduction)
+2. [Language Overview](#2-language-overview)
+3. [Syntax and Grammar](#3-syntax-and-grammar)
+4. [Data Types and Datasets](#4-data-types-and-datasets)
+5. [Command Reference](#5-command-reference)
+6. [Advanced Features](#6-advanced-features)
+7. [Practical Examples](#7-practical-examples)
+8. [Best Practices](#8-best-practices)
+9. [Troubleshooting](#9-troubleshooting)
+10. [API Reference](#10-api-reference)
+
+---
+
+## 1. Introduction
+
+### 1.1 What is GEOSCRIPT?
+
+GEOSCRIPT is a domain-specific scripting language (DSL) designed specifically for geoscientific data analysis and manipulation within the Geoscientist's Toolkit application. It provides a powerful, intuitive syntax for automating complex workflows involving CT scans, seismic data, well logs, GIS datasets, and more.
+
+### 1.2 Key Features
+
+- **Pipeline-based syntax** using the `|>` operator for elegant operation chaining
+- **Type-aware operations** that automatically adapt to different dataset types
+- **Non-destructive processing** preserving original data integrity
+- **Integrated scientific computing** combining image processing, thermodynamics, and GIS analysis
+- **Interactive REPL** (Read-Eval-Print-Loop) for rapid prototyping
+- **Script file support** for reproducible workflows
+
+### 1.3 Design Philosophy
+
+GEOSCRIPT follows a functional programming paradigm where:
+
+- Each operation receives a dataset as input and produces a new dataset as output
+- Operations can be composed into pipelines for complex transformations
+- All operations are explicit, reproducible, and auditable
+- The system handles type checking and compatibility automatically
+
+### 1.4 Getting Started
+
+Access GEOSCRIPT through two interfaces:
+
+**GeoScript Editor** (for script files):
+- Navigate to `File → GeoScript Editor...`
+- Select a dataset from the dropdown
+- Write your script and click `Run Script`
+
+**GeoScript Terminal** (for interactive use):
+- Navigate to `Tools → GeoScript Terminal...`
+- Type commands interactively
+- Use Arrow keys for command history
+- Use Tab for auto-completion
+
+---
+
+## 2. Language Overview
+
+### 2.1 Basic Concepts
+
+#### 2.1.1 Datasets
+
+All GEOSCRIPT operations work on datasets. A dataset is any data structure loaded into the Geoscientist's Toolkit, including:
+
+- Images (2D raster data)
+- CT image stacks (3D volumetric data)
+- Tables (tabular data from CSV, Excel, etc.)
+- GIS layers (vector and raster geographic data)
+- Seismic data (SEG-Y files)
+- Borehole data (well logs)
+- Pore network models
+- 3D meshes
+
+#### 2.1.2 Operations
+
+Operations are functions that transform datasets. Each operation:
+
+- Takes zero or more parameters
+- Receives an input dataset
+- Produces an output dataset
+- Preserves the original input (non-destructive)
+
+#### 2.1.3 Pipeline Execution
+
+The pipeline operator `|>` chains operations together:
+
+```geoscript
+INPUT |> OPERATION1 |> OPERATION2 |> OPERATION3
+```
+
+This is equivalent to: `OPERATION3(OPERATION2(OPERATION1(INPUT)))`
+
+### 2.2 Language Paradigm
+
+GEOSCRIPT is:
+
+- **Declarative**: You specify what you want, not how to do it
+- **Functional**: Operations are pure functions without side effects
+- **Type-safe**: Operations validate dataset types at execution time
+- **Expression-oriented**: Everything is an expression that returns a value
+
+---
+
+## 3. Syntax and Grammar
+
+### 3.1 Lexical Elements
+
+#### 3.1.1 Comments
+
+```geoscript
+# This is a single-line comment
+// This is also a comment
+```
+
+#### 3.1.2 Keywords
+
+Reserved words in GEOSCRIPT:
+
+- `WITH` - Specify input dataset (classic syntax)
+- `DO` - Begin operation sequence (classic syntax)
+- `TO` - Specify output dataset name
+- `THEN` - Chain multiple operations (classic syntax)
+- `LISTOPS` - List available operations
+- `DISPTYPE` - Display dataset type information
+- `UNLOAD` - Remove dataset from memory
+
+#### 3.1.3 Operators
+
+- `|>` - Pipeline operator (operation chaining)
+- `,` - Parameter separator
+- `=` - Parameter assignment or equality test
+
+#### 3.1.4 Literals
+
+**String Literals**:
+```geoscript
+"dataset_name"
+'column_name'
+```
+
+**Numeric Literals**:
+```geoscript
+42          # Integer
+3.14159     # Float
+-273.15     # Negative number
+1.5e-10     # Scientific notation
+```
+
+**Identifiers**:
+```geoscript
+FILTER      # Operation name
+gaussian    # Parameter value
+size        # Parameter name
+```
+
+### 3.2 Syntax Forms
+
+#### 3.2.1 Pipeline Syntax (Recommended)
+
+The modern, recommended syntax for GEOSCRIPT:
+
+```geoscript
+# Single operation
+OPERATION param1=value1 param2=value2
+
+# Chained operations
+OPERATION1 param=value |> OPERATION2 param=value |> OPERATION3
+```
+
+**Examples**:
+```geoscript
+# Image processing
+GRAYSCALE |> THRESHOLD min=100 max=200 |> INVERT
+
+# Multi-step filtering
+FILTER type=gaussian size=5 |> BRIGHTNESS_CONTRAST brightness=10 contrast=1.2
+
+# Table analysis
+SELECT WHERE 'Temperature' > 25 |> SORTBY 'Value' DESC |> TAKE 10
+```
+
+#### 3.2.2 Classic WITH-DO-TO Syntax
+
+The original syntax, still supported for explicit dataset specification:
+
+```geoscript
+WITH "dataset_name" DO OPERATION params TO "output_name"
+```
+
+**Multiple operations**:
+```geoscript
+WITH "dataset_name" DO
+  OPERATION1 params TO "output1"
+  THEN OPERATION2 params TO "output2"
+```
+
+**Example**:
+```geoscript
+WITH "my_image" DO FILTER type=gaussian size=5 TO "filtered_image"
+```
+
+#### 3.2.3 Utility Command Syntax
+
+Special commands for metadata and management:
+
+```geoscript
+# In classic syntax
+WITH "dataset_name" LISTOPS
+WITH "dataset_name" DISPTYPE
+WITH "dataset_name" UNLOAD
+
+# In pipeline syntax
+LISTOPS
+DISPTYPE
+INFO
+UNLOAD
+```
+
+### 3.3 Parameter Syntax
+
+#### 3.3.1 Named Parameters (Recommended)
+
+```geoscript
+FILTER type=gaussian size=5 sigma=1.5
+BRIGHTNESS_CONTRAST brightness=10 contrast=1.2
+THRESHOLD min=100 max=200
+```
+
+#### 3.3.2 Positional Parameters (Legacy)
+
+Some commands accept positional parameters:
+
+```geoscript
+BRIGHTNESS_CONTRAST 128, 256    # brightness, contrast
+THRESHOLD 100, 200              # min, max
+```
+
+#### 3.3.3 Optional Parameters
+
+Use empty values to skip optional parameters:
+
+```geoscript
+BRIGHTNESS_CONTRAST 128,        # brightness only
+BRIGHTNESS_CONTRAST ,256        # contrast only
+```
+
+### 3.4 String Handling
+
+#### 3.4.1 Field and Column References
+
+Use single quotes for field/column names:
+
+```geoscript
+CALCULATE 'NewField' = 'OldField' * 2
+SELECT WHERE 'Value' > 100
+RENAME 'OldName' TO 'NewName'
+```
+
+#### 3.4.2 Dataset References
+
+Reference other datasets using the `@` symbol:
+
+```geoscript
+JOIN @'OtherDataset' ON 'LeftKey' = 'RightKey'
+SELECT INTERSECTS @'PolygonLayer'
+```
+
+### 3.5 Expression Evaluation
+
+GEOSCRIPT uses NCalc for mathematical and logical expressions:
+
+#### 3.5.1 Arithmetic Expressions
+
+```geoscript
+CALCULATE 'Result' = 'Field1' + 'Field2'
+CALCULATE 'Ratio' = 'Numerator' / ('Denominator' + 0.001)
+CALCULATE 'Power' = Pow('Base', 2)
+```
+
+#### 3.5.2 Logical Expressions
+
+```geoscript
+SELECT WHERE 'Temperature' > 25 AND 'Pressure' < 100
+SELECT WHERE 'Status' = 'Active' OR 'Priority' > 5
+SELECT WHERE NOT ('Flag' = 1)
+```
+
+#### 3.5.3 Geometric Properties (GIS)
+
+For GIS datasets, special geometric properties are available:
+
+```geoscript
+CALCULATE 'AreaKm2' = AREA / 1000000
+CALCULATE 'LengthMiles' = LENGTH * 0.000621371
+CALCULATE 'CentroidX' = X
+CALCULATE 'CentroidY' = Y
+```
+
+Available geometric properties:
+- `AREA` - Feature area (for polygons)
+- `LENGTH` - Feature length (for lines)
+- `X` - Centroid X coordinate
+- `Y` - Centroid Y coordinate
+
+---
+
+## 4. Data Types and Datasets
+
+### 4.1 Supported Dataset Types
+
+| Dataset Type | Description | File Formats | Common Operations |
+|--------------|-------------|--------------|-------------------|
+| **ImageDataset** | Single 2D raster images | PNG, JPG, BMP, TIFF | FILTER, THRESHOLD, GRAYSCALE |
+| **CtImageStack** | 3D CT scan volumes | DICOM, TIFF stack, .ctstack | CT_SEGMENT, CT_FILTER3D |
+| **TableDataset** | Tabular data | CSV, Excel, TXT | SELECT, GROUPBY, CALCULATE |
+| **GISDataset** | Geographic data | Shapefile, GeoJSON | BUFFER, DISSOLVE, SELECT |
+| **SeismicDataset** | Seismic survey data | SEG-Y | SEIS_FILTER, SEIS_STACK |
+| **BoreholeDataset** | Well log data | LAS, .bhb | BH_ADD_LOG, BH_CALCULATE_POROSITY |
+| **PNMDataset** | Pore network models | Custom format | PNM_CALCULATE_PERMEABILITY |
+| **Mesh3D** | 3D surface meshes | OBJ, STL | MESH_SMOOTH, MESH_DECIMATE |
+| **AcousticVolume** | 3D acoustic data | Custom format | ACOUSTIC_THRESHOLD |
+| **VideoDataset** | Video files | MP4, AVI | VIDEO_EXTRACT_FRAME |
+| **AudioDataset** | Audio files | WAV, MP3 | AUDIO_NORMALIZE |
+| **TextDataset** | Text documents | TXT | TEXT_SEARCH, TEXT_REPLACE |
+
+### 4.2 Type Checking
+
+GEOSCRIPT automatically validates that operations are compatible with dataset types:
+
+```geoscript
+# This works - GRAYSCALE supports images
+GRAYSCALE
+
+# This fails if dataset is not an image
+CT_SEGMENT   # Error: Operation not supported for this dataset type
+```
+
+### 4.3 Type Conversion
+
+Some operations automatically convert between types:
+
+```geoscript
+# CT stack to image (extracts single slice)
+CT_EXTRACT_SLICE index=50
+
+# Image to table (histogram)
+CALCULATE_HISTOGRAM
+```
+
+---
+
+## 5. Command Reference
+
+### 5.1 Table Operations
+
+#### 5.1.1 SELECT
+
+Filters rows based on attribute or spatial conditions.
+
+**Syntax**:
+```geoscript
+SELECT WHERE <expression>
+SELECT <spatial_operator> @'OtherLayer'
+```
+
+**Parameters**:
+- `WHERE` - Attribute query expression
+- Spatial operators: `INTERSECTS`, `CONTAINS`, `WITHIN`
+
+**Examples**:
+```geoscript
+# Simple attribute filter
+SELECT WHERE 'Temperature' > 25
+
+# Complex boolean logic
+SELECT WHERE 'Value' > 100 AND 'Type' = 'Active'
+
+# Spatial query (GIS only)
+SELECT INTERSECTS @'PolygonLayer'
+SELECT CONTAINS @'PointLayer'
+SELECT WITHIN @'BoundaryLayer'
+```
+
+**Returns**: Filtered dataset with matching rows/features
+
+---
+
+#### 5.1.2 CALCULATE
+
+Creates a new column from an expression.
+
+**Syntax**:
+```geoscript
+CALCULATE 'NewColumn' = <expression>
+```
+
+**Parameters**:
+- Column name (string literal)
+- Expression using existing columns
+
+**Examples**:
+```geoscript
+# Simple arithmetic
+CALCULATE 'DoubleValue' = 'Value' * 2
+
+# Temperature conversion
+CALCULATE 'TempF' = 'TempC' * 1.8 + 32
+
+# Geometric calculation (GIS)
+CALCULATE 'AreaKm2' = AREA / 1000000
+
+# Complex expression
+CALCULATE 'Ratio' = 'Field1' / ('Field2' + 0.001)
+```
+
+**Supported Functions**:
+- Arithmetic: `+`, `-`, `*`, `/`, `%`, `^`
+- Math: `Abs()`, `Sqrt()`, `Pow()`, `Log()`, `Exp()`
+- Trigonometry: `Sin()`, `Cos()`, `Tan()`, `Asin()`, `Acos()`, `Atan()`
+- Rounding: `Round()`, `Floor()`, `Ceiling()`
+- Min/Max: `Min()`, `Max()`
+
+**Returns**: Dataset with new calculated column
+
+---
+
+#### 5.1.3 SORTBY
+
+Sorts table rows by a column.
+
+**Syntax**:
+```geoscript
+SORTBY 'ColumnName' [ASC|DESC]
+```
+
+**Parameters**:
+- Column name (string literal)
+- Sort direction: `ASC` (ascending, default) or `DESC` (descending)
+
+**Examples**:
+```geoscript
+# Sort ascending (default)
+SORTBY 'Name' ASC
+
+# Sort descending
+SORTBY 'Value' DESC
+
+# Pipeline: filter then sort
+SELECT WHERE 'Active' = 1 |> SORTBY 'Score' DESC
+```
+
+**Returns**: Sorted dataset
+
+---
+
+#### 5.1.4 GROUPBY
+
+Groups rows and calculates aggregate values.
+
+**Syntax**:
+```geoscript
+GROUPBY 'GroupColumn' AGGREGATE <aggregations>
+```
+
+**Aggregate Functions**:
+- `COUNT('Column')` - Count non-null values
+- `SUM('Column')` - Sum of values
+- `AVG('Column')` - Average of values
+- `MIN('Column')` - Minimum value
+- `MAX('Column')` - Maximum value
+
+**Examples**:
+```geoscript
+# Simple count
+GROUPBY 'Category' AGGREGATE COUNT('ID') AS 'Count'
+
+# Multiple aggregations
+GROUPBY 'Location' AGGREGATE
+  SUM('Volume') AS 'TotalVolume',
+  AVG('Temperature') AS 'AvgTemp'
+
+# Statistical summary
+GROUPBY 'Type' AGGREGATE
+  COUNT('ID') AS 'N',
+  AVG('Value') AS 'Mean',
+  MIN('Value') AS 'Min',
+  MAX('Value') AS 'Max'
+```
+
+**Returns**: Grouped dataset with aggregate columns
+
+---
+
+#### 5.1.5 RENAME
+
+Renames a column.
+
+**Syntax**:
+```geoscript
+RENAME 'OldName' TO 'NewName'
+```
+
+**Examples**:
+```geoscript
+RENAME 'Temp' TO 'Temperature'
+RENAME 'Val' TO 'Value'
+```
+
+**Returns**: Dataset with renamed column
+
+---
+
+#### 5.1.6 DROP
+
+Removes one or more columns.
+
+**Syntax**:
+```geoscript
+DROP 'Column1', 'Column2', ...
+```
+
+**Examples**:
+```geoscript
+# Drop single column
+DROP 'UnusedField'
+
+# Drop multiple columns
+DROP 'Field1', 'Field2', 'Field3'
+```
+
+**Returns**: Dataset without dropped columns
+
+---
+
+#### 5.1.7 TAKE
+
+Selects the first N rows.
+
+**Syntax**:
+```geoscript
+TAKE <count>
+```
+
+**Examples**:
+```geoscript
+# Get first 10 rows
+TAKE 10
+
+# Pipeline: sort then take top 5
+SORTBY 'Value' DESC |> TAKE 5
+```
+
+**Returns**: Dataset with first N rows
+
+---
+
+#### 5.1.8 UNIQUE
+
+Extracts unique values from a column.
+
+**Syntax**:
+```geoscript
+UNIQUE 'ColumnName'
+```
+
+**Examples**:
+```geoscript
+UNIQUE 'Category'
+UNIQUE 'Location'
+```
+
+**Returns**: New dataset with unique values
+
+---
+
+#### 5.1.9 JOIN
+
+Merges attributes from another dataset based on a key.
+
+**Syntax**:
+```geoscript
+JOIN @'OtherDataset' ON 'LeftKey' = 'RightKey'
+```
+
+**Examples**:
+```geoscript
+# Join table to GIS layer
+JOIN @'AttributeTable' ON 'ID' = 'FeatureID'
+
+# Join with different key names
+JOIN @'LookupTable' ON 'Code' = 'LookupCode'
+```
+
+**Returns**: Joined dataset with combined attributes
+
+---
+
+### 5.2 GIS Vector Operations
+
+#### 5.2.1 BUFFER
+
+Creates a buffer zone around features.
+
+**Syntax**:
+```geoscript
+BUFFER <distance>
+```
+
+**Parameters**:
+- Distance in map units
+
+**Examples**:
+```geoscript
+# Create 100-unit buffer
+BUFFER 100
+
+# Buffer then dissolve
+BUFFER 50 |> DISSOLVE 'Type'
+```
+
+**Returns**: Buffered features
+
+---
+
+#### 5.2.2 DISSOLVE
+
+Merges adjacent features with common attributes.
+
+**Syntax**:
+```geoscript
+DISSOLVE 'FieldName'
+```
+
+**Examples**:
+```geoscript
+DISSOLVE 'LandUse'
+DISSOLVE 'District'
+```
+
+**Returns**: Dissolved features
+
+---
+
+#### 5.2.3 EXPLODE
+
+Converts multi-part features to single-part features.
+
+**Syntax**:
+```geoscript
+EXPLODE
+```
+
+**Examples**:
+```geoscript
+EXPLODE |> CALCULATE 'PartArea' = AREA
+```
+
+**Returns**: Single-part features
+
+---
+
+#### 5.2.4 CLEAN
+
+Fixes invalid geometries.
+
+**Syntax**:
+```geoscript
+CLEAN
+```
+
+**Examples**:
+```geoscript
+CLEAN |> BUFFER 0.1
+```
+
+**Returns**: Cleaned geometries
+
+---
+
+### 5.3 GIS Raster Operations
+
+#### 5.3.1 RECLASSIFY
+
+Reclassifies raster values into new categories.
+
+**Syntax**:
+```geoscript
+RECLASSIFY INTO 'NewLayer' RANGES(min-max: new_val, ...)
+```
+
+**Examples**:
+```geoscript
+RECLASSIFY INTO 'Classes' RANGES(0-50: 1, 50-100: 2, 100-255: 3)
+```
+
+**Returns**: Reclassified raster layer
+
+---
+
+#### 5.3.2 SLOPE
+
+Calculates slope from a Digital Elevation Model.
+
+**Syntax**:
+```geoscript
+SLOPE AS 'NewLayerName'
+```
+
+**Examples**:
+```geoscript
+SLOPE AS 'SlopeMap'
+```
+
+**Returns**: Slope raster in degrees
+
+---
+
+#### 5.3.3 ASPECT
+
+Calculates aspect (slope direction) from a DEM.
+
+**Syntax**:
+```geoscript
+ASPECT AS 'NewLayerName'
+```
+
+**Returns**: Aspect raster in degrees (0-360)
+
+---
+
+#### 5.3.4 CONTOUR
+
+Generates contour lines from a raster.
+
+**Syntax**:
+```geoscript
+CONTOUR INTERVAL <value> AS 'NewLayerName'
+```
+
+**Examples**:
+```geoscript
+CONTOUR INTERVAL 10 AS 'Contours10m'
+```
+
+**Returns**: Vector contour lines
+
+---
+
+### 5.4 Thermodynamics Operations
+
+#### 5.4.1 CREATE_DIAGRAM
+
+Generates thermodynamic phase diagrams.
+
+**Syntax**:
+```geoscript
+CREATE_DIAGRAM BINARY FROM '<c1>' AND '<c2>' TEMP <val> K PRES <val> BAR
+CREATE_DIAGRAM TERNARY FROM '<c1>', '<c2>', '<c3>' TEMP <val> K PRES <val> BAR
+CREATE_DIAGRAM PT FOR COMP('<c1>'=<m1>,...) T_RANGE(<min>-<max>) K P_RANGE(<min>-<max>) BAR
+CREATE_DIAGRAM ENERGY FROM '<c1>' AND '<c2>' TEMP <val> K PRES <val> BAR
+```
+
+**Examples**:
+```geoscript
+# Binary phase diagram
+CREATE_DIAGRAM BINARY FROM 'NaCl' AND 'H2O' TEMP 298 K PRES 1 BAR
+
+# Ternary diagram
+CREATE_DIAGRAM TERNARY FROM 'SiO2', 'Al2O3', 'CaO' TEMP 1500 K PRES 1 BAR
+
+# Pressure-Temperature diagram
+CREATE_DIAGRAM PT FOR COMP('H2O'=1.0,'CO2'=0.1) T_RANGE(273-373) K P_RANGE(1-100) BAR
+```
+
+**Returns**: Phase diagram dataset
+
+---
+
+#### 5.4.2 EQUILIBRATE
+
+Calculates aqueous speciation equilibrium.
+
+**Syntax**:
+```geoscript
+EQUILIBRATE
+```
+
+**Description**:
+Solves for pH, ionic strength, and species activities for each row in a water chemistry table. Automatically converts concentration units (mg/L, ppm, mol/L) to moles.
+
+**Output Columns**:
+- `pH` - Calculated pH
+- `IonicStrength_molkg` - Ionic strength
+- `act_<species>` - Activity coefficients for all species
+
+**Examples**:
+```geoscript
+EQUILIBRATE |> SATURATION MINERALS 'Calcite', 'Dolomite'
+```
+
+**Returns**: Table with equilibrium speciation
+
+---
+
+#### 5.4.3 SATURATION
+
+Calculates mineral saturation indices.
+
+**Syntax**:
+```geoscript
+SATURATION MINERALS 'Mineral1', 'Mineral2', ...
+```
+
+**Examples**:
+```geoscript
+SATURATION MINERALS 'Calcite', 'Dolomite', 'Gypsum', 'Halite'
+```
+
+**Output**: Adds `SI_<mineral>` columns where:
+- SI > 0: Supersaturated (mineral will precipitate)
+- SI = 0: At equilibrium
+- SI < 0: Undersaturated (mineral will dissolve)
+
+**Returns**: Table with saturation indices
+
+---
+
+#### 5.4.4 BALANCE_REACTION
+
+Generates a balanced dissolution reaction.
+
+**Syntax**:
+```geoscript
+BALANCE_REACTION 'MineralName'
+```
+
+**Examples**:
+```geoscript
+BALANCE_REACTION 'Calcite'
+BALANCE_REACTION 'Dolomite'
+```
+
+**Returns**: Table showing balanced reaction equation and equilibrium constant
+
+---
+
+#### 5.4.5 EVAPORATE
+
+Simulates evaporation and mineral precipitation.
+
+**Syntax**:
+```geoscript
+EVAPORATE UPTO <factor>x STEPS <count> MINERALS 'Mineral1', 'Mineral2', ...
+```
+
+**Examples**:
+```geoscript
+# Simulate 10x evaporation in 50 steps
+EVAPORATE UPTO 10x STEPS 50 MINERALS 'Halite', 'Gypsum', 'Calcite'
+
+# Seawater evaporation
+EVAPORATE UPTO 100x STEPS 100 MINERALS 'Halite', 'Gypsum', 'Calcite', 'Dolomite'
+```
+
+**Output**: Table showing evaporation factor, remaining volume, pH, ionic strength, and precipitated mineral amounts
+
+**Returns**: Evaporation sequence dataset
+
+---
+
+#### 5.4.6 REACT
+
+Calculates equilibrium products of reactants.
+
+**Syntax**:
+```geoscript
+REACT <Reactants> [TEMP <val> C|K] [PRES <val> BAR|ATM]
+```
+
+**Examples**:
+```geoscript
+# Simple reaction at standard conditions
+REACT CaCl2 + Na2CO3
+
+# With temperature and pressure
+REACT CaCO3 + HCl TEMP 25 C PRES 1 BAR
+
+# Complex reaction
+REACT Fe2O3 + H2SO4 + H2O TEMP 350 K PRES 2 BAR
+```
+
+**Output**: Table showing products organized by phase (solid, aqueous, gas) with moles, mass, and mole fractions
+
+**Returns**: Reaction products dataset
+
+---
+
+### 5.5 Image Processing Operations
+
+#### 5.5.1 BRIGHTNESS_CONTRAST
+
+Adjusts image brightness and contrast.
+
+**Syntax**:
+```geoscript
+BRIGHTNESS_CONTRAST brightness=<-100 to 100> contrast=<0.1 to 3.0>
+```
+
+**Parameters**:
+- `brightness`: Brightness offset (-100 to +100)
+- `contrast`: Contrast multiplier (0.1 to 3.0, where 1.0 = no change)
+
+**Examples**:
+```geoscript
+# Increase brightness
+BRIGHTNESS_CONTRAST brightness=20
+
+# Increase contrast
+BRIGHTNESS_CONTRAST contrast=1.5
+
+# Adjust both
+BRIGHTNESS_CONTRAST brightness=10 contrast=1.2
+```
+
+**Returns**: Adjusted image
+
+---
+
+#### 5.5.2 FILTER
+
+Applies image filters.
+
+**Syntax**:
+```geoscript
+FILTER type=<filterType> [size=<kernelSize>] [sigma=<value>]
+```
+
+**Filter Types**:
+- `gaussian` - Gaussian blur (smooth averaging)
+- `median` - Median filter (noise reduction, preserves edges)
+- `mean` / `box` - Box filter (simple averaging)
+- `sobel` - Sobel edge detection
+
+**Parameters**:
+- `type`: Filter type (required)
+- `size`: Kernel size in pixels (default: 5)
+- `sigma`: Sigma value for Gaussian (optional)
+
+**Examples**:
+```geoscript
+# Denoise with median filter
+FILTER type=median size=3
+
+# Gaussian blur
+FILTER type=gaussian size=7 sigma=2.0
+
+# Edge detection
+FILTER type=sobel
+
+# Chained filtering
+FILTER type=median size=3 |> FILTER type=gaussian size=5
+```
+
+**Returns**: Filtered image
+
+---
+
+#### 5.5.3 THRESHOLD
+
+Applies threshold segmentation.
+
+**Syntax**:
+```geoscript
+THRESHOLD min=<0-255> max=<0-255>
+```
+
+**Parameters**:
+- `min`: Minimum threshold value (0-255)
+- `max`: Maximum threshold value (0-255)
+
+**Examples**:
+```geoscript
+# Threshold mid-range values
+THRESHOLD min=100 max=200
+
+# Segment bright regions
+THRESHOLD min=180 max=255
+
+# Pipeline with preprocessing
+GRAYSCALE |> THRESHOLD min=128 max=255
+```
+
+**Returns**: Binary mask image
+
+---
+
+#### 5.5.4 BINARIZE
+
+Converts image to binary using a threshold.
+
+**Syntax**:
+```geoscript
+BINARIZE threshold=<0-255 or 'auto'>
+```
+
+**Parameters**:
+- `threshold`: Threshold value (0-255) or 'auto' for Otsu's automatic thresholding
+
+**Examples**:
+```geoscript
+# Manual threshold
+BINARIZE threshold=128
+
+# Automatic Otsu thresholding
+BINARIZE threshold=auto
+
+# Pipeline with preprocessing
+FILTER type=gaussian size=3 |> BINARIZE threshold=auto
+```
+
+**Returns**: Binary image (black/white)
+
+---
+
+#### 5.5.5 GRAYSCALE
+
+Converts image to grayscale.
+
+**Syntax**:
+```geoscript
+GRAYSCALE
+```
+
+**Examples**:
+```geoscript
+# Convert to grayscale
+GRAYSCALE
+
+# Grayscale then process
+GRAYSCALE |> THRESHOLD min=100 max=200
+```
+
+**Returns**: Grayscale image
+
+---
+
+#### 5.5.6 INVERT
+
+Inverts image colors (creates negative).
+
+**Syntax**:
+```geoscript
+INVERT
+```
+
+**Examples**:
+```geoscript
+# Invert colors
+INVERT
+
+# Create negative of binary mask
+BINARIZE threshold=128 |> INVERT
+```
+
+**Returns**: Inverted image
+
+---
+
+#### 5.5.7 NORMALIZE
+
+Normalizes image to full intensity range.
+
+**Syntax**:
+```geoscript
+NORMALIZE
+```
+
+**Description**: Stretches the histogram to use the full dynamic range (0-255).
+
+**Examples**:
+```geoscript
+# Enhance low-contrast image
+NORMALIZE
+
+# Pipeline with normalization
+FILTER type=median size=3 |> NORMALIZE
+```
+
+**Returns**: Normalized image
+
+---
+
+### 5.6 CT Image Stack Operations
+
+#### 5.6.1 CT_SEGMENT
+
+Performs 3D segmentation of CT volumes.
+
+**Syntax**:
+```geoscript
+CT_SEGMENT method=<method> [parameters]
+```
+
+**Methods**:
+- `threshold` - Threshold-based segmentation
+- `region_growing` - Region growing algorithm
+- `watershed` - Watershed segmentation
+
+**Returns**: Segmented CT volume
+
+---
+
+#### 5.6.2 CT_FILTER3D
+
+Applies 3D filters to CT stacks.
+
+**Syntax**:
+```geoscript
+CT_FILTER3D type=<filterType> [size=<value>]
+```
+
+**Filter Types**:
+- `gaussian3d` - 3D Gaussian blur
+- `median3d` - 3D median filter
+
+**Returns**: Filtered CT volume
+
+---
+
+#### 5.6.3 CT_ADD_MATERIAL
+
+Defines material properties for segmented phases.
+
+**Syntax**:
+```geoscript
+CT_ADD_MATERIAL name='<name>' density=<value> [color=<hex>]
+```
+
+**Returns**: Updated CT volume with material definition
+
+---
+
+#### 5.6.4 CT_ANALYZE_POROSITY
+
+Calculates porosity from segmented volumes.
+
+**Syntax**:
+```geoscript
+CT_ANALYZE_POROSITY material='<name>'
+```
+
+**Returns**: Porosity analysis results
+
+---
+
+#### 5.6.5 CT_CROP
+
+Crops a sub-volume from the CT stack.
+
+**Syntax**:
+```geoscript
+CT_CROP x=<start> y=<start> z=<start> width=<w> height=<h> depth=<d>
+```
+
+**Returns**: Cropped CT volume
+
+---
+
+#### 5.6.6 CT_EXTRACT_SLICE
+
+Extracts a 2D slice from the 3D volume.
+
+**Syntax**:
+```geoscript
+CT_EXTRACT_SLICE index=<sliceNumber> [axis=<x|y|z>]
+```
+
+**Returns**: 2D image slice
+
+---
+
+### 5.7 Pore Network Model (PNM) Operations
+
+#### 5.7.1 PNM_FILTER_PORES
+
+Filters pores based on geometric criteria.
+
+**Syntax**:
+```geoscript
+PNM_FILTER_PORES [min_radius=<value>] [max_radius=<value>] [min_coord=<value>]
+```
+
+**Parameters**:
+- `min_radius`: Minimum pore radius (micrometers)
+- `max_radius`: Maximum pore radius (micrometers)
+- `min_coord`: Minimum coordination number
+
+**Examples**:
+```geoscript
+PNM_FILTER_PORES min_radius=1.0 max_radius=100.0 min_coord=2
+```
+
+**Returns**: Filtered pore network
+
+---
+
+#### 5.7.2 PNM_FILTER_THROATS
+
+Filters throats based on geometric criteria.
+
+**Syntax**:
+```geoscript
+PNM_FILTER_THROATS [min_radius=<value>] [max_radius=<value>] [max_length=<value>]
+```
+
+**Examples**:
+```geoscript
+PNM_FILTER_THROATS min_radius=0.5 max_length=50.0
+```
+
+**Returns**: Filtered pore network
+
+---
+
+#### 5.7.3 PNM_CALCULATE_PERMEABILITY
+
+Calculates absolute permeability using network simulation.
+
+**Syntax**:
+```geoscript
+PNM_CALCULATE_PERMEABILITY direction=<x|y|z|all>
+```
+
+**Examples**:
+```geoscript
+PNM_CALCULATE_PERMEABILITY direction=x
+PNM_CALCULATE_PERMEABILITY direction=all
+```
+
+**Returns**: Permeability results table
+
+---
+
+#### 5.7.4 PNM_DRAINAGE_SIMULATION
+
+Runs drainage capillary pressure simulation.
+
+**Syntax**:
+```geoscript
+PNM_DRAINAGE_SIMULATION [contact_angle=<degrees>] [interfacial_tension=<N/m>]
+```
+
+**Examples**:
+```geoscript
+PNM_DRAINAGE_SIMULATION contact_angle=30 interfacial_tension=0.03
+```
+
+**Returns**: Drainage curve data
+
+---
+
+#### 5.7.5 PNM_IMBIBITION_SIMULATION
+
+Runs imbibition capillary pressure simulation.
+
+**Syntax**:
+```geoscript
+PNM_IMBIBITION_SIMULATION [contact_angle=<degrees>] [interfacial_tension=<N/m>]
+```
+
+**Examples**:
+```geoscript
+PNM_IMBIBITION_SIMULATION contact_angle=60 interfacial_tension=0.03
+```
+
+**Returns**: Imbibition curve data
+
+---
+
+#### 5.7.6 PNM_EXTRACT_LARGEST_CLUSTER
+
+Extracts the largest connected cluster of pores.
+
+**Syntax**:
+```geoscript
+PNM_EXTRACT_LARGEST_CLUSTER
+```
+
+**Returns**: Largest cluster pore network
+
+---
+
+#### 5.7.7 PNM_STATISTICS
+
+Calculates comprehensive network statistics.
+
+**Syntax**:
+```geoscript
+PNM_STATISTICS
+```
+
+**Output**:
+- Total pores and throats
+- Average coordination number
+- Pore and throat size distributions
+- Network porosity
+
+**Returns**: Statistics table
+
+---
+
+### 5.8 Seismic Data Operations
+
+#### 5.8.1 SEIS_FILTER
+
+Applies frequency filters to seismic data.
+
+**Syntax**:
+```geoscript
+SEIS_FILTER type=<bandpass|lowpass|highpass|fxdecon> [low=<Hz>] [high=<Hz>]
+```
+
+**Examples**:
+```geoscript
+# Bandpass filter
+SEIS_FILTER type=bandpass low=10 high=80
+
+# Lowpass filter
+SEIS_FILTER type=lowpass high=60
+
+# Highpass filter
+SEIS_FILTER type=highpass low=15
+```
+
+**Returns**: Filtered seismic data
+
+---
+
+#### 5.8.2 SEIS_AGC
+
+Applies automatic gain control.
+
+**Syntax**:
+```geoscript
+SEIS_AGC window=<milliseconds>
+```
+
+**Examples**:
+```geoscript
+SEIS_AGC window=500
+```
+
+**Returns**: Gain-controlled seismic data
+
+---
+
+#### 5.8.3 SEIS_VELOCITY_ANALYSIS
+
+Performs velocity analysis for NMO correction.
+
+**Syntax**:
+```geoscript
+SEIS_VELOCITY_ANALYSIS method=<semblance|cvs|cmp>
+```
+
+**Examples**:
+```geoscript
+SEIS_VELOCITY_ANALYSIS method=semblance
+```
+
+**Returns**: Velocity model
+
+---
+
+#### 5.8.4 SEIS_NMO_CORRECTION
+
+Applies normal moveout correction.
+
+**Syntax**:
+```geoscript
+SEIS_NMO_CORRECTION [velocity_file=<path>] [velocity=<constant>]
+```
+
+**Examples**:
+```geoscript
+SEIS_NMO_CORRECTION velocity=2000
+```
+
+**Returns**: NMO-corrected seismic data
+
+---
+
+#### 5.8.5 SEIS_STACK
+
+Stacks seismic traces.
+
+**Syntax**:
+```geoscript
+SEIS_STACK method=<mean|median|weighted>
+```
+
+**Examples**:
+```geoscript
+SEIS_STACK method=mean
+```
+
+**Returns**: Stacked seismic data
+
+---
+
+#### 5.8.6 SEIS_MIGRATION
+
+Performs seismic migration.
+
+**Syntax**:
+```geoscript
+SEIS_MIGRATION method=<kirchhoff|fk|rtm> [aperture=<meters>]
+```
+
+**Examples**:
+```geoscript
+SEIS_MIGRATION method=kirchhoff aperture=1000
+```
+
+**Returns**: Migrated seismic data
+
+---
+
+#### 5.8.7 SEIS_PICK_HORIZON
+
+Picks seismic horizons.
+
+**Syntax**:
+```geoscript
+SEIS_PICK_HORIZON name=<horizonName> method=<auto|manual|tracking>
+```
+
+**Examples**:
+```geoscript
+SEIS_PICK_HORIZON name=Top_Reservoir method=auto
+```
+
+**Returns**: Horizon pick dataset
+
+---
+
+### 5.9 Utility Operations
+
+#### 5.9.1 LISTOPS
+
+Lists all available operations for the current dataset type.
+
+**Syntax**:
+```geoscript
+LISTOPS
+```
+
+**Description**: Displays all commands applicable to the current dataset.
+
+**Returns**: Operation list (printed to console)
+
+---
+
+#### 5.9.2 DISPTYPE
+
+Displays detailed dataset type information.
+
+**Syntax**:
+```geoscript
+DISPTYPE
+```
+
+**Description**: Shows dataset type, supported operations, and metadata.
+
+**Returns**: Type information (printed to console)
+
+---
+
+#### 5.9.3 INFO
+
+Shows dataset summary information.
+
+**Syntax**:
+```geoscript
+INFO
+```
+
+**Description**: Quick summary of dataset properties (dimensions, size, type, etc.)
+
+**Returns**: Dataset information (printed to console)
+
+---
+
+#### 5.9.4 UNLOAD
+
+Unloads dataset from memory.
+
+**Syntax**:
+```geoscript
+UNLOAD
+```
+
+**Description**: Removes dataset from memory while keeping it in the project.
+
+**Returns**: None (frees memory)
+
+---
+
+## 6. Advanced Features
+
+### 6.1 Pipeline Composition
+
+Complex pipelines can be built by chaining multiple operations:
+
+```geoscript
+# Multi-stage image processing
+FILTER type=median size=3 |>
+  GRAYSCALE |>
+  NORMALIZE |>
+  THRESHOLD min=100 max=200 |>
+  INVERT |>
+  INFO
+```
+
+### 6.2 Conditional Execution
+
+Use SELECT to conditionally process data:
+
+```geoscript
+# Process only high-temperature samples
+SELECT WHERE 'Temperature' > 100 |>
+  CALCULATE 'Converted' = 'Temperature' * 1.8 + 32 |>
+  SORTBY 'Converted' DESC
+```
+
+### 6.3 Cross-Dataset Operations
+
+Reference multiple datasets in a single operation:
+
+```geoscript
+# Spatial join
+SELECT INTERSECTS @'BufferZone' |>
+  JOIN @'AttributeData' ON 'ID' = 'FeatureID' |>
+  CALCULATE 'Density' = 'Population' / AREA
+```
+
+### 6.4 Unit Conversion (Thermodynamics)
+
+The thermodynamics engine automatically converts concentration units:
+
+| Unit | Type | Conversion |
+|------|------|-----------|
+| mg/L, ppm | Mass | to mol/L using molar mass |
+| ug/L, ppb | Mass | to mol/L using molar mass |
+| g/L | Mass | to mol/L using molar mass |
+| mol/L, M | Molar | No conversion |
+| mmol/L | Molar | / 1000 |
+| umol/L | Molar | / 1,000,000 |
+
+Column headers must include units:
+```geoscript
+"Ca (mg/L)" or "Na [ppm]" or "Cl (mol/L)"
+```
+
+### 6.5 Expression Functions (NCalc)
+
+Full list of supported mathematical functions:
+
+**Arithmetic**:
+- `Abs(x)` - Absolute value
+- `Sign(x)` - Sign of number (-1, 0, 1)
+- `Sqrt(x)` - Square root
+- `Pow(x, y)` - x raised to power y
+
+**Trigonometry**:
+- `Sin(x)`, `Cos(x)`, `Tan(x)`
+- `Asin(x)`, `Acos(x)`, `Atan(x)`, `Atan2(y, x)`
+
+**Logarithms**:
+- `Log(x)` - Natural logarithm
+- `Log10(x)` - Base-10 logarithm
+- `Exp(x)` - e raised to power x
+
+**Rounding**:
+- `Round(x)` - Round to nearest integer
+- `Floor(x)` - Round down
+- `Ceiling(x)` - Round up
+- `Truncate(x)` - Remove decimal part
+
+**Min/Max**:
+- `Min(x, y, ...)` - Minimum value
+- `Max(x, y, ...)` - Maximum value
+
+**Conditional**:
+- `if(condition, true_value, false_value)`
+
+---
+
+## 7. Practical Examples
+
+### 7.1 Image Processing Workflows
+
+#### 7.1.1 Basic Image Enhancement
+
+```geoscript
+# Denoise and enhance a noisy image
+FILTER type=median size=3 |>
+  BRIGHTNESS_CONTRAST brightness=10 contrast=1.3 |>
+  NORMALIZE
+```
+
+#### 7.1.2 Edge Detection Pipeline
+
+```geoscript
+# Prepare image for edge analysis
+GRAYSCALE |>
+  FILTER type=gaussian size=3 |>
+  FILTER type=sobel
+```
+
+#### 7.1.3 Complete Segmentation Workflow
+
+```geoscript
+# Full segmentation pipeline
+FILTER type=median size=3 |>
+  GRAYSCALE |>
+  NORMALIZE |>
+  BINARIZE threshold=auto |>
+  INFO
+```
+
+### 7.2 Table Data Analysis
+
+#### 7.2.1 Data Filtering and Aggregation
+
+```geoscript
+# Filter, aggregate, and sort data
+SELECT WHERE 'Temperature' > 25 |>
+  CALCULATE 'TempF' = 'Temperature' * 1.8 + 32 |>
+  GROUPBY 'Location' AGGREGATE AVG('TempF') AS 'AvgTempF', COUNT('ID') AS 'Count' |>
+  SORTBY 'AvgTempF' DESC |>
+  TAKE 10
+```
+
+#### 7.2.2 Statistical Summary
+
+```geoscript
+# Create summary statistics by category
+GROUPBY 'Category' AGGREGATE
+  COUNT('ID') AS 'N',
+  SUM('Volume') AS 'TotalVol',
+  AVG('Concentration') AS 'MeanConc',
+  MIN('Value') AS 'Min',
+  MAX('Value') AS 'Max'
+```
+
+### 7.3 GIS Spatial Analysis
+
+#### 7.3.1 Buffer and Dissolve
+
+```geoscript
+# Create 100m buffer zones and dissolve by type
+BUFFER 100 |>
+  DISSOLVE 'LandUseType' |>
+  CALCULATE 'AreaHectares' = AREA / 10000
+```
+
+#### 7.3.2 Spatial Query and Calculation
+
+```geoscript
+# Find features in polygon and calculate properties
+SELECT WITHIN @'StudyArea' |>
+  CALCULATE 'AreaHectares' = AREA / 10000 |>
+  SORTBY 'AreaHectares' DESC
+```
+
+### 7.4 Thermodynamic Modeling
+
+#### 7.4.1 Water Chemistry Analysis
+
+```geoscript
+# Complete water chemistry workflow
+EQUILIBRATE |>
+  SATURATION MINERALS 'Calcite', 'Dolomite', 'Gypsum', 'Halite'
+```
+
+#### 7.4.2 Evaporation Sequence
+
+```geoscript
+# Simulate seawater evaporation
+EVAPORATE UPTO 100x STEPS 100 MINERALS
+  'Halite', 'Gypsum', 'Calcite', 'Dolomite'
+```
+
+#### 7.4.3 Chemical Reaction
+
+```geoscript
+# Simulate mineral dissolution
+REACT CaCO3 + HCl + H2O TEMP 25 C PRES 1 BAR
+```
+
+### 7.5 Seismic Data Processing
+
+#### 7.5.1 Standard Processing Flow
+
+```geoscript
+# Complete seismic processing pipeline
+SEIS_FILTER type=bandpass low=10 high=80 |>
+  SEIS_AGC window=500 |>
+  SEIS_NMO_CORRECTION velocity=2000 |>
+  SEIS_STACK method=mean |>
+  SEIS_MIGRATION method=kirchhoff aperture=1000
+```
+
+### 7.6 Pore Network Analysis
+
+#### 7.6.1 Network Characterization
+
+```geoscript
+# Clean and analyze pore network
+PNM_EXTRACT_LARGEST_CLUSTER |>
+  PNM_FILTER_PORES min_radius=1.0 min_coord=2 |>
+  PNM_STATISTICS
+```
+
+#### 7.6.2 Capillary Pressure Curve
+
+```geoscript
+# Generate drainage and imbibition curves
+PNM_DRAINAGE_SIMULATION contact_angle=30 interfacial_tension=0.03
+```
+
+---
+
+## 8. Best Practices
+
+### 8.1 General Principles
+
+1. **Always check dataset type first**
+   ```geoscript
+   DISPTYPE  # Check what operations are available
+   ```
+
+2. **Use LISTOPS to discover available operations**
+   ```geoscript
+   LISTOPS  # See all commands for this dataset type
+   ```
+
+3. **Verify results with INFO**
+   ```geoscript
+   OPERATION params |> INFO
+   ```
+
+4. **Prefer pipeline syntax for readability**
+   ```geoscript
+   # Good: Clear pipeline
+   FILTER type=median |> GRAYSCALE |> THRESHOLD min=100
+
+   # Avoid: Hard-to-read nested operations
+   ```
+
+### 8.2 Image Processing
+
+1. **Always preprocess before segmentation**
+   ```geoscript
+   FILTER type=median size=3 |> BINARIZE threshold=auto
+   ```
+
+2. **Use grayscale for most analysis**
+   ```geoscript
+   GRAYSCALE |> THRESHOLD min=100 max=200
+   ```
+
+3. **Normalize low-contrast images**
+   ```geoscript
+   NORMALIZE |> BINARIZE threshold=128
+   ```
+
+4. **Chain filters for better results**
+   ```geoscript
+   FILTER type=median size=3 |> FILTER type=gaussian size=5
+   ```
+
+### 8.3 Table Operations
+
+1. **Filter before aggregation**
+   ```geoscript
+   SELECT WHERE 'Valid' = 1 |> GROUPBY 'Category' AGGREGATE COUNT('ID')
+   ```
+
+2. **Sort after aggregation**
+   ```geoscript
+   GROUPBY 'Type' AGGREGATE SUM('Value') AS 'Total' |> SORTBY 'Total' DESC
+   ```
+
+3. **Use TAKE for large datasets**
+   ```geoscript
+   SORTBY 'Score' DESC |> TAKE 100
+   ```
+
+### 8.4 Thermodynamics
+
+1. **Equilibrate before saturation calculations**
+   ```geoscript
+   EQUILIBRATE |> SATURATION MINERALS 'Calcite', 'Gypsum'
+   ```
+
+2. **Check units in column headers**
+   - System auto-converts: mg/L, ppm, ug/L, mol/L, etc.
+   - Format: "Ca (mg/L)" or "Na [ppm]"
+
+3. **Verify mass balance**
+   - Use INFO to check element totals
+
+### 8.5 Performance
+
+1. **Unload unused datasets**
+   ```geoscript
+   UNLOAD
+   ```
+
+2. **Process large images in steps**
+   ```geoscript
+   # Better: Two simple operations
+   FILTER type=median size=3
+   GRAYSCALE
+
+   # Avoid: One complex operation on very large images
+   ```
+
+3. **Use appropriate filter sizes**
+   ```geoscript
+   # For noise: small kernel
+   FILTER type=median size=3
+
+   # For smoothing: larger kernel
+   FILTER type=gaussian size=7
+   ```
+
+---
+
+## 9. Troubleshooting
+
+### 9.1 Common Errors
+
+#### 9.1.1 Type Mismatch
+
+**Error**: "Operation not supported for this dataset type"
+
+**Solution**: Check dataset type with `DISPTYPE` and use `LISTOPS` to see available operations.
+
+```geoscript
+DISPTYPE    # Check current dataset type
+LISTOPS     # See what operations are available
+```
+
+#### 9.1.2 Invalid Parameters
+
+**Error**: "Parameter out of range" or "Invalid parameter value"
+
+**Solution**: Check parameter ranges in command reference. Common issues:
+- Brightness: must be -100 to 100
+- Contrast: must be 0.1 to 3.0
+- Threshold: must be 0 to 255
+
+#### 9.1.3 Missing Dataset Reference
+
+**Error**: "Referenced dataset not found"
+
+**Solution**: Ensure dataset exists before referencing with `@`:
+
+```geoscript
+# This will fail if 'OtherDataset' doesn't exist
+JOIN @'OtherDataset' ON 'ID' = 'Key'
+```
+
+#### 9.1.4 Parse Errors
+
+**Error**: "Invalid command syntax"
+
+**Solution**: Check syntax:
+- Ensure operation name is spelled correctly
+- Use quotes for string literals
+- Check parameter format (name=value)
+
+### 9.2 Debugging Tips
+
+1. **Test operations incrementally**
+   ```geoscript
+   # Test each step separately
+   FILTER type=median size=3
+   # Then add next operation
+   FILTER type=median size=3 |> GRAYSCALE
+   ```
+
+2. **Use INFO to inspect intermediate results**
+   ```geoscript
+   OPERATION1 |> INFO |> OPERATION2
+   ```
+
+3. **Check the output log**
+   All errors and warnings are logged to the output window.
+
+---
+
+## 10. API Reference
+
+### 10.1 Core Classes
+
+#### 10.1.1 GeoScriptEngine
+
+Main execution engine for GEOSCRIPT.
+
+**Methods**:
+- `ExecuteAsync(string script, Dataset inputDataset, Dictionary<string, Dataset> contextDatasets)` - Execute script
+
+#### 10.1.2 GeoScriptParser
+
+Parses GEOSCRIPT syntax into Abstract Syntax Tree (AST).
+
+**Methods**:
+- `Parse(string script)` - Parse script into AST
+
+#### 10.1.3 GeoScriptContext
+
+Execution context containing datasets and environment.
+
+**Properties**:
+- `InputDataset` - Current dataset being processed
+- `AvailableDatasets` - Dictionary of datasets accessible by name
+
+### 10.2 AST Nodes
+
+#### 10.2.1 CommandNode
+
+Represents a single operation.
+
+**Properties**:
+- `CommandName` - Name of the operation
+- `FullText` - Full command text with parameters
+
+#### 10.2.2 PipelineNode
+
+Represents a pipeline of operations.
+
+**Properties**:
+- `Left` - Left-hand operation
+- `Right` - Right-hand operation
+
+### 10.3 Command Interface
+
+All operations implement `IGeoScriptCommand`:
+
+```csharp
+public interface IGeoScriptCommand
+{
+    string Name { get; }
+    string HelpText { get; }
+    string Usage { get; }
+    Task<Dataset> ExecuteAsync(GeoScriptContext context, AstNode node);
+}
+```
+
+### 10.4 Operation Registry
+
+#### 10.4.1 OperationRegistry
+
+Manages available operations for each dataset type.
+
+**Methods**:
+- `GetOperationsForType(DatasetType type)` - Get operations for a dataset type
+- `GetOperation(string name)` - Get operation by name
+- `HasOperation(string name)` - Check if operation exists
+- `GetAllOperationNames()` - Get all operation names
+
+### 10.5 Token Types
+
+GEOSCRIPT lexer recognizes the following token types:
+
+- `WITH`, `DO`, `TO`, `THEN` - Statement keywords
+- `LISTOPS`, `DISPTYPE`, `UNLOAD` - Utility keywords
+- `PIPE` (`|>`) - Pipeline operator
+- `COMMA` (`,`) - Parameter separator
+- `STRING` - String literal
+- `NUMBER` - Numeric literal
+- `IDENTIFIER` - Operation/parameter name
+- `NEWLINE` - Line terminator
+- `EOF` - End of file
+
+---
+
+## Appendix A: Complete Command List
+
+### Table Operations (9 commands)
+SELECT, CALCULATE, SORTBY, GROUPBY, RENAME, DROP, TAKE, UNIQUE, JOIN
+
+### GIS Vector (4 commands)
+BUFFER, DISSOLVE, EXPLODE, CLEAN
+
+### GIS Raster (4 commands)
+RECLASSIFY, SLOPE, ASPECT, CONTOUR
+
+### GIS Extended (8 commands)
+GIS_ADD_LAYER, GIS_REMOVE_LAYER, GIS_INTERSECT, GIS_UNION, GIS_CLIP, GIS_CALCULATE_AREA, GIS_CALCULATE_LENGTH, GIS_REPROJECT
+
+### Thermodynamics (6 commands)
+CREATE_DIAGRAM, EQUILIBRATE, SATURATION, BALANCE_REACTION, EVAPORATE, REACT
+
+### Image Processing (7 commands)
+BRIGHTNESS_CONTRAST, FILTER, THRESHOLD, BINARIZE, GRAYSCALE, INVERT, NORMALIZE
+
+### CT Image Stack (8 commands)
+CT_SEGMENT, CT_FILTER3D, CT_ADD_MATERIAL, CT_REMOVE_MATERIAL, CT_ANALYZE_POROSITY, CT_CROP, CT_EXTRACT_SLICE, CT_LABEL_ANALYSIS
+
+### PNM (7 commands)
+PNM_FILTER_PORES, PNM_FILTER_THROATS, PNM_CALCULATE_PERMEABILITY, PNM_DRAINAGE_SIMULATION, PNM_IMBIBITION_SIMULATION, PNM_EXTRACT_LARGEST_CLUSTER, PNM_STATISTICS
+
+### PNM Reactive Transport (4 commands)
+RUN_PNM_REACTIVE_TRANSPORT, SET_PNM_SPECIES, SET_PNM_MINERALS, EXPORT_PNM_RESULTS
+
+### Seismic (7 commands)
+SEIS_FILTER, SEIS_AGC, SEIS_VELOCITY_ANALYSIS, SEIS_NMO_CORRECTION, SEIS_STACK, SEIS_MIGRATION, SEIS_PICK_HORIZON
+
+### Borehole (7 commands)
+BH_ADD_LITHOLOGY, BH_REMOVE_LITHOLOGY, BH_ADD_LOG, BH_CALCULATE_POROSITY, BH_CALCULATE_SATURATION, BH_DEPTH_SHIFT, BH_CORRELATION
+
+### Miscellaneous (12 commands)
+ACOUSTIC_THRESHOLD, ACOUSTIC_EXTRACT_TARGETS, MESH_SMOOTH, MESH_DECIMATE, MESH_REPAIR, MESH_CALCULATE_VOLUME, VIDEO_EXTRACT_FRAME, VIDEO_STABILIZE, AUDIO_TRIM, AUDIO_NORMALIZE, TEXT_SEARCH, TEXT_REPLACE, TEXT_STATISTICS
+
+### Utility (4 commands)
+LISTOPS, DISPTYPE, INFO, UNLOAD
+
+**Total: 85+ Commands**
+
+---
+
+## Appendix B: Quick Reference Card
+
+### Common Patterns
+
+```geoscript
+# Image enhancement
+FILTER type=median size=3 |> NORMALIZE |> BRIGHTNESS_CONTRAST contrast=1.2
+
+# Segmentation
+GRAYSCALE |> NORMALIZE |> BINARIZE threshold=auto
+
+# Edge detection
+GRAYSCALE |> FILTER type=gaussian size=3 |> FILTER type=sobel
+
+# Table analysis
+SELECT WHERE 'Value' > 100 |> SORTBY 'Value' DESC |> TAKE 10
+
+# Aggregation
+GROUPBY 'Category' AGGREGATE COUNT('ID') AS 'Count', AVG('Value') AS 'Mean'
+
+# GIS buffer
+BUFFER 100 |> DISSOLVE 'Type' |> CALCULATE 'AreaHectares' = AREA / 10000
+
+# Water chemistry
+EQUILIBRATE |> SATURATION MINERALS 'Calcite', 'Dolomite'
+
+# Seismic processing
+SEIS_FILTER type=bandpass low=10 high=80 |> SEIS_AGC window=500
+```
+
+---
+
+## Appendix C: Glossary
+
+**AST** - Abstract Syntax Tree, the internal representation of parsed code
+
+**Dataset** - Any data structure loaded into Geoscientist's Toolkit
+
+**DSL** - Domain-Specific Language
+
+**NCalc** - Expression evaluation library used for calculations
+
+**Non-destructive** - Operations that preserve original data
+
+**Pipeline** - Chain of operations connected by `|>` operator
+
+**REPL** - Read-Eval-Print-Loop, interactive command interface
+
+**Saturation Index** - Log(Q/K), measure of mineral supersaturation
+
+---
+
+## License and Copyright
+
+GEOSCRIPT Language Manual
+Copyright (c) 2025 Geoscientist's Toolkit Project
+
+This documentation is part of the Geoscientist's Toolkit application, licensed under the MIT License.
+
+---
+
+## Version History
+
+**Version 1.0** (2025)
+- Complete language specification
+- Comprehensive command reference
+- Detailed examples and workflows
+- Best practices guide
+- Full API documentation
+
+---
+
+**End of GEOSCRIPT Language Manual**
