@@ -73,6 +73,9 @@ public class ReactionGenerator
     {
         var reactions = new List<ChemicalReaction>();
 
+        // Get available elements from the initial state
+        var availableElements = state.ElementalComposition.Keys.ToHashSet();
+
         // Get all solid phase compounds that are not part of a solid solution
         var pureMinerals = _compoundLibrary.Compounds
             .Where(c => c.Phase == CompoundPhase.Solid &&
@@ -82,6 +85,14 @@ public class ReactionGenerator
 
         foreach (var mineral in pureMinerals)
         {
+            // FIX: Only consider minerals that can be formed from available elements
+            var mineralElements = ParseChemicalFormula(mineral.ChemicalFormula);
+            if (!mineralElements.Keys.All(element => availableElements.Contains(element)))
+            {
+                // Skip this mineral if it contains elements not present in the system
+                continue;
+            }
+
             var reaction = GenerateSingleDissolutionReaction(mineral);
             if (reaction != null)
                 reactions.Add(reaction);
