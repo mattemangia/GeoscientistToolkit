@@ -1143,47 +1143,6 @@ public class ReactionGenerator
         return reactions;
     }
 
-    private List<ChemicalReaction> GenerateAmmoniaSys()
-    {
-        var reactions = new List<ChemicalReaction>();
-
-        var ammonium = _compoundLibrary.Find("NH₄⁺");
-        var ammoniaAqueous = _compoundLibrary.Find("NH₃(aq)") ?? _compoundLibrary.Find("NH₃");
-        var hPlus = _compoundLibrary.Find("H⁺");
-        var water = _compoundLibrary.Find("H₂O");
-        var hydroxide = _compoundLibrary.Find("OH⁻");
-
-        if (ammonium == null || ammoniaAqueous == null)
-            return reactions;
-
-        if (hPlus != null)
-        {
-            reactions.Add(CreateAcidBaseReaction("Ammonium Dissociation", ammonium.Name, ammoniaAqueous.Name,
-                hPlus.Name));
-        }
-
-        if (water != null && hydroxide != null)
-        {
-            var reaction = new ChemicalReaction
-            {
-                Name = "Ammonia Protonation",
-                Type = ReactionType.AcidBase,
-                Stoichiometry =
-                {
-                    [ammoniaAqueous.Name] = -1.0,
-                    [water.Name] = -1.0,
-                    [ammonium.Name] = 1.0,
-                    [hydroxide.Name] = 1.0
-                }
-            };
-
-            CalculateReactionThermodynamics(reaction);
-            reactions.Add(reaction);
-        }
-
-        return reactions;
-    }
-
     private List<ChemicalReaction> GenerateCarbonateSys()
     {
         var reactions = new List<ChemicalReaction>();
