@@ -1104,11 +1104,82 @@ public class ReactionGenerator
     {
         var reactions = new List<ChemicalReaction>();
 
-        // Common acid-base systems
-        reactions.AddRange(GenerateCarbonateSys());
-        reactions.AddRange(GenerateWaterDissociation());
-        reactions.AddRange(GeneratePhosphateSys());
-        reactions.AddRange(GenerateSulfideSys());
+        // Get available elements
+        var availableElements = state.ElementalComposition
+            .Where(kvp => kvp.Value > 1e-15)
+            .Select(kvp => kvp.Key)
+            .ToHashSet();
+
+        // Only generate water dissociation if H and O are present
+        if (availableElements.Contains("H") && availableElements.Contains("O"))
+        {
+            reactions.AddRange(GenerateWaterDissociation());
+        }
+
+        // Only generate carbonate system if C is present
+        if (availableElements.Contains("C") && availableElements.Contains("O"))
+        {
+            reactions.AddRange(GenerateCarbonateSys());
+        }
+
+        // Only generate phosphate system if P is present
+        if (availableElements.Contains("P") && availableElements.Contains("O"))
+        {
+            reactions.AddRange(GeneratePhosphateSys());
+        }
+
+        // Only generate sulfide system if S is present
+        if (availableElements.Contains("S"))
+        {
+            reactions.AddRange(GenerateSulfideSys());
+        }
+
+        // Only generate ammonia system if N is present
+        if (availableElements.Contains("N") && availableElements.Contains("H"))
+        {
+            reactions.AddRange(GenerateAmmoniaSys());
+        }
+
+        return reactions;
+    }
+
+    private List<ChemicalReaction> GenerateAmmoniaSys()
+    {
+        var reactions = new List<ChemicalReaction>();
+
+        var ammonium = _compoundLibrary.Find("NH₄⁺");
+        var ammoniaAqueous = _compoundLibrary.Find("NH₃(aq)") ?? _compoundLibrary.Find("NH₃");
+        var hPlus = _compoundLibrary.Find("H⁺");
+        var water = _compoundLibrary.Find("H₂O");
+        var hydroxide = _compoundLibrary.Find("OH⁻");
+
+        if (ammonium == null || ammoniaAqueous == null)
+            return reactions;
+
+        if (hPlus != null)
+        {
+            reactions.Add(CreateAcidBaseReaction("Ammonium Dissociation", ammonium.Name, ammoniaAqueous.Name,
+                hPlus.Name));
+        }
+
+        if (water != null && hydroxide != null)
+        {
+            var reaction = new ChemicalReaction
+            {
+                Name = "Ammonia Protonation",
+                Type = ReactionType.AcidBase,
+                Stoichiometry =
+                {
+                    [ammoniaAqueous.Name] = -1.0,
+                    [water.Name] = -1.0,
+                    [ammonium.Name] = 1.0,
+                    [hydroxide.Name] = 1.0
+                }
+            };
+
+            CalculateReactionThermodynamics(reaction);
+            reactions.Add(reaction);
+        }
 
         return reactions;
     }
