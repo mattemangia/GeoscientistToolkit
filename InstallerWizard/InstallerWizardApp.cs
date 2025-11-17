@@ -114,7 +114,14 @@ internal sealed class InstallerWizardApp
         var wizard = new Wizard($"Installer {_settings.ProductName}")
         {
             Width = Dim.Fill(),
-            Height = Dim.Fill()
+            Height = Dim.Fill(),
+            ColorScheme = new ColorScheme
+            {
+                Normal = Terminal.Gui.Attribute.Make(Color.White, Color.Black),
+                Focus = Terminal.Gui.Attribute.Make(Color.BrightYellow, Color.Black),
+                HotNormal = Terminal.Gui.Attribute.Make(Color.BrightCyan, Color.Black),
+                HotFocus = Terminal.Gui.Attribute.Make(Color.BrightYellow, Color.Black)
+            }
         };
 
         wizard.AddStep(CreateWelcomePage());
@@ -244,6 +251,8 @@ internal sealed class InstallerWizardApp
             page.Add(prereqFrame);
         }
 
+        page.Enter += _ => RefreshWizardPage(page);
+
         return page;
     }
 
@@ -337,6 +346,12 @@ internal sealed class InstallerWizardApp
         page.Add(_installPathField);
         page.Add(_componentsFrame);
         page.Add(_shortcutCheckbox);
+
+        page.Enter += _ =>
+        {
+            RefreshComponentOptions();
+            RefreshWizardPage(page);
+        };
 
         RefreshComponentOptions();
 
@@ -472,6 +487,7 @@ internal sealed class InstallerWizardApp
         {
             UpdateReview();
             UpdateElevationLabel();
+            RefreshWizardPage(page);
         };
 
         return page;
@@ -553,9 +569,25 @@ internal sealed class InstallerWizardApp
         page.Add(progressFrame);
         page.Add(logFrame);
 
-        page.Enter += _ => StartInstallation();
+        page.Enter += _ =>
+        {
+            RefreshWizardPage(page);
+            StartInstallation();
+        };
 
         return page;
+    }
+
+    private void RefreshWizardPage(Wizard.WizardStep page)
+    {
+        page.LayoutSubviews();
+        page.SetNeedsDisplay();
+        if (_wizard is not null)
+        {
+            _wizard.LayoutSubviews();
+            _wizard.SetNeedsDisplay();
+        }
+        Application.Refresh();
     }
 
     private void UpdateReview()
