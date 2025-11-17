@@ -1915,8 +1915,9 @@ public class SpeciateCommand : IGeoScriptCommand
                     initialState.ElementalComposition.GetValueOrDefault(element, 0) + moles * stoichiometry;
         }
 
-        // Solve for speciation (not full equilibrium, just dissociation)
-        var finalState = solver.SolveSpeciation(initialState);
+        // Solve for equilibrium to get proper dissociation/speciation
+        // This handles dissolution of solids AND dissociation into ions
+        var finalState = solver.SolveEquilibrium(initialState);
 
         // Create output table
         var resultTable = new DataTable("Dissolved_Species");
@@ -1927,11 +1928,11 @@ public class SpeciateCommand : IGeoScriptCommand
         resultTable.Columns.Add("Concentration_M", typeof(double));
         resultTable.Columns.Add("Activity", typeof(double));
 
-        Logger.Log("\n=== DISSOLUTION PRODUCTS ===");
-        Logger.Log($"Temperature: {temperatureK:F2} K");
-        Logger.Log($"pH: {finalState.pH:F2}");
+        Logger.Log("\n=== AQUEOUS SPECIATION ===");
+        Logger.Log($"Temperature: {temperatureK:F2} K, Pressure: {pressureBar:F2} bar");
+        Logger.Log($"pH: {finalState.pH:F2}, pe: {finalState.pe:F2}");
         Logger.Log($"Ionic Strength: {finalState.IonicStrength_molkg:E2} mol/kg");
-        Logger.Log("\nSpecies:");
+        Logger.Log("\nDissolved Species (ions and complexes):");
 
         // Sort by phase and then by moles
         var sortedSpecies = finalState.SpeciesMoles
