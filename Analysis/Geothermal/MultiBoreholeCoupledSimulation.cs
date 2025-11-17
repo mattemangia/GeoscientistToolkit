@@ -665,7 +665,8 @@ public static class MultiBoreholeCoupledSimulation
                     MaxIterationsPerStep = config.MaxIterationsPerStep,
                     UseSIMD = config.UseSIMD,
                     UseGPU = config.UseGPU,
-                    HeatExchangerType = HeatExchangerType.UTube
+                    HeatExchangerType = HeatExchangerType.UTube,
+                    HeatExchangerDepth = (float)borehole.TotalDepth // CRITICAL FIX: Set heat exchanger depth!
                 };
                 options.SetDefaultValues();
 
