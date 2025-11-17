@@ -788,6 +788,26 @@ Table showing all dissolved species with moles, concentration (M), and activity
 
 ---
 
+#### DIAGNOSE_SPECIATE
+
+Runs the `SPECIATE` workflow but prints **every intermediate step** to the console so you can troubleshoot missing products or parsing issues.
+
+**Syntax:**
+```geoscript
+DIAGNOSE_SPECIATE <Compounds> [TEMP <val> C|K] [PRES <val> BAR|ATM]
+```
+
+**When to use it:**
+- The regular `SPECIATE` command returns no rows or unexpected values.
+- You need to verify which dissociation reactions, moles, or solver inputs are being created.
+- You want to confirm temperature/pressure parsing and water initialization.
+
+**Output:**
+- Same result table as `SPECIATE`.
+- Additional console trace showing parsing, normalization, dissociation products, and solver status.
+
+---
+
 ### Image Processing Commands (7 commands)
 
 #### BRIGHTNESS_CONTRAST

@@ -182,6 +182,7 @@ public static class CommandRegistry
             new EvaporateCommand(),
             new ReactCommand(),
             new SpeciateCommand(),
+            new DiagnoseSpeciateCommand(),
 
             // Thermodynamics Extensions
             new CalculatePhasesCommand(),
@@ -2099,23 +2100,30 @@ public class ReactCommand : IGeoScriptCommand
         return Task.FromResult<Dataset>(new TableDataset("Reaction_Products", resultTable));
     }
 }
-public class SpeciateCommand : IGeoScriptCommand
+internal static class SpeciateCommandExecutor
 {
-    public string Name => "SPECIATE";
-    public string HelpText => "Shows dissociation/speciation products when compounds dissolve in water.";
-    public string Usage => "SPECIATE <Compounds> [TEMP <val> C|K] [PRES <val> BAR|ATM]";
-
-    public Task<Dataset> ExecuteAsync(GeoScriptContext context, AstNode node)
+    public static Task<Dataset> ExecuteAsync(GeoScriptContext context, CommandNode cmd, bool enableDiagnostics)
     {
-        var cmd = (CommandNode)node;
+        var label = enableDiagnostics ? "DIAGNOSE_SPECIATE" : "SPECIATE";
+        void Trace(string message)
+        {
+            if (enableDiagnostics)
+                Logger.Log($"[{label}] {message}");
+        }
+
+        void Log(string message) => Logger.Log($"[{label}] {message}");
+        void Warn(string message) => Logger.LogWarning($"[{label}] {message}");
+
+        Trace($"Command text: {cmd.FullText}");
 
         // Parse the command string
         var pattern = @"SPECIATE\s+(?<compounds>.+?)(?:\s+TEMP\s+(?<tempval>[\d\.]+)\s*(?<tempunit>C|K))?(?:\s+PRES\s+(?<presval>[\d\.]+)\s*(?<presunit>BAR|ATM))?$";
         var match = Regex.Match(cmd.FullText, pattern, RegexOptions.IgnoreCase);
 
-        if (!match.Success) throw new ArgumentException($"Invalid SPECIATE syntax. Usage: {Usage}");
+        if (!match.Success) throw new ArgumentException("Invalid SPECIATE syntax. Usage: SPECIATE <Compounds> [TEMP <val> C|K] [PRES <val> BAR|ATM]");
 
         var compoundsStr = match.Groups["compounds"].Value.Trim();
+        Trace($"Normalized compound string: '{compoundsStr}'");
 
         // Set temperature
         var temperatureK = 298.15; // Default 25 C
@@ -2123,6 +2131,11 @@ public class SpeciateCommand : IGeoScriptCommand
         {
             var tempVal = double.Parse(match.Groups["tempval"].Value, CultureInfo.InvariantCulture);
             temperatureK = match.Groups["tempunit"].Value.ToUpper() == "K" ? tempVal : tempVal + 273.15;
+            Trace($"User-specified temperature detected -> {temperatureK:F2} K");
+        }
+        else
+        {
+            Trace("Using default temperature (298.15 K)");
         }
 
         // Set pressure
@@ -2131,6 +2144,11 @@ public class SpeciateCommand : IGeoScriptCommand
         {
             var presVal = double.Parse(match.Groups["presval"].Value, CultureInfo.InvariantCulture);
             pressureBar = match.Groups["presunit"].Value.ToUpper() == "ATM" ? presVal * 1.01325 : presVal;
+            Trace($"User-specified pressure detected -> {pressureBar:F2} bar");
+        }
+        else
+        {
+            Trace("Using default pressure (1.00 bar)");
         }
 
         var compoundLib = CompoundLibrary.Instance;
@@ -2144,6 +2162,7 @@ public class SpeciateCommand : IGeoScriptCommand
             Pressure_bar = pressureBar,
             Volume_L = 1.0
         };
+        Trace($"Initialized thermodynamic state: T={temperatureK:F2} K, P={pressureBar:F2} bar, V=1 L");
 
         // Parse and normalize compound inputs
         var compoundInputs = compoundsStr.Split('+').Select(c => c.Trim()).ToList();
@@ -2155,7 +2174,7 @@ public class SpeciateCommand : IGeoScriptCommand
             compounds.Add(normalized);
         }
 
-        Logger.Log($"[SPECIATE] Processing compounds: {string.Join(", ", compounds)} at {temperatureK:F2} K, {pressureBar:F2} bar");
+        Log($"Processing compounds: {string.Join(", ", compounds)} at {temperatureK:F2} K, {pressureBar:F2} bar");
 
         // Always add water to the system for aqueous solutions - use flexible find
         var water = compoundLib.FindFlexible("H2O") ??
@@ -2171,20 +2190,29 @@ public class SpeciateCommand : IGeoScriptCommand
             {
                 initialState.ElementalComposition[element] = waterMoles * stoichiometry;
             }
+
+            Trace($"Added bulk water ({waterMoles} mol) as solvent");
+        }
+        else
+        {
+            Warn("Unable to resolve water reference. Speciation may be inaccurate.");
         }
 
         // Generate dissociation reactions for input compounds
         var dissociationReactions = reactionGenerator.GenerateSolubleCompoundDissociationReactions(
             compounds, temperatureK, pressureBar);
+        Trace($"Generated {dissociationReactions.Count} dissociation reactions from library data");
 
         // Process each compound based on its dissociation behavior
         foreach (var compoundInput in compounds)
         {
+            Trace($"Evaluating compound token '{compoundInput}'");
+
             // Use flexible find
             var compound = compoundLib.FindFlexible(compoundInput);
             if (compound == null)
             {
-                Logger.LogWarning($"[SPECIATE] Compound '{compoundInput}' not found in library");
+                Warn($"Compound '{compoundInput}' not found in library");
                 continue;
             }
 
@@ -2202,6 +2230,12 @@ public class SpeciateCommand : IGeoScriptCommand
                 {
                     moles = double.Parse(amountMatch.Groups[4].Value, CultureInfo.InvariantCulture);
                 }
+
+                Trace($"User specified {moles:E3} mol for {compound.Name}");
+            }
+            else
+            {
+                Trace($"Using default quantity ({moles:E3} mol) for {compound.Name}");
             }
 
             // Check if there's a dissociation reaction for this compound
@@ -2211,7 +2245,7 @@ public class SpeciateCommand : IGeoScriptCommand
             if (dissociationReaction != null)
             {
                 // For compounds with dissociation reactions, add the products directly
-                Logger.Log($"[SPECIATE] {compound.Name} will dissociate");
+                Log($"{compound.Name} will dissociate");
 
                 foreach (var (product, stoich) in dissociationReaction.Stoichiometry)
                 {
@@ -2223,16 +2257,19 @@ public class SpeciateCommand : IGeoScriptCommand
                             initialState.SpeciesMoles[productCompound.Name] =
                                 initialState.SpeciesMoles.GetValueOrDefault(productCompound.Name, 0) + moles * stoich;
 
-                            // Update elemental composition
-                            var productComp = reactionGenerator.ParseChemicalFormula(productCompound.ChemicalFormula);
-                            foreach (var (element, elemStoich) in productComp)
+                            var composition = reactionGenerator.ParseChemicalFormula(productCompound.ChemicalFormula);
+                            foreach (var (element, elemStoich) in composition)
                             {
                                 initialState.ElementalComposition[element] =
                                     initialState.ElementalComposition.GetValueOrDefault(element, 0) +
                                     moles * stoich * elemStoich;
                             }
 
-                            Logger.Log($"  → {productCompound.Name}: {moles * stoich:E3} moles");
+                            Log($"  → {productCompound.Name}: {moles * stoich:E3} moles");
+                        }
+                        else
+                        {
+                            Warn($"Unable to resolve dissociation product '{product}' for {compound.Name}");
                         }
                     }
                 }
@@ -2250,12 +2287,15 @@ public class SpeciateCommand : IGeoScriptCommand
                         initialState.ElementalComposition.GetValueOrDefault(element, 0) + moles * stoichiometry;
                 }
 
-                Logger.Log($"  - {compound.Name}: {moles:E3} moles (no dissociation)");
+                Log($"  - {compound.Name}: {moles:E3} moles (no dissociation)");
             }
         }
 
+        Trace($"Species count passed to solver: {initialState.SpeciesMoles.Count}");
+
         // Now solve for equilibrium with the properly dissociated species
         var finalState = solver.SolveEquilibrium(initialState);
+        Trace($"Solver converged -> pH={finalState.pH:F2}, pe={finalState.pe:F2}, IonicStrength={finalState.IonicStrength_molkg:E2}");
 
         // Create output table with all necessary columns
         var resultTable = new DataTable("Speciation_Results");
@@ -2270,7 +2310,7 @@ public class SpeciateCommand : IGeoScriptCommand
 
         // Create terminal output
         var terminalOutput = new StringBuilder();
-        terminalOutput.AppendLine("\n╔════════════════════════════════════════════════════════════════════════╗");
+        terminalOutput.AppendLine("╔════════════════════════════════════════════════════════════════════════╗");
         terminalOutput.AppendLine("║                    AQUEOUS SPECIATION RESULTS                          ║");
         terminalOutput.AppendLine("╠════════════════════════════════════════════════════════════════════════╣");
         terminalOutput.AppendLine($"║ Temperature: {finalState.Temperature_K:F2} K ({finalState.Temperature_K - 273.15:F2} °C)");
@@ -2323,7 +2363,7 @@ public class SpeciateCommand : IGeoScriptCommand
         terminalOutput.AppendLine("╚════════════════════════════════════════════════════════════════════════╝");
 
         // Show predominant species summary
-        terminalOutput.AppendLine("\n=== PREDOMINANT SPECIES ===");
+        terminalOutput.AppendLine("=== PREDOMINANT SPECIES ===");
 
         // Group by element and show main species
         var elementSpecies = new Dictionary<string, List<(string species, double conc)>>();
@@ -2356,13 +2396,19 @@ public class SpeciateCommand : IGeoScriptCommand
         // Print to console
         Console.WriteLine(terminalOutput.ToString());
 
+        if (enableDiagnostics)
+        {
+            Trace($"Result table rows: {resultTable.Rows.Count}");
+            Trace("Diagnostic speciation run complete");
+        }
+
         return Task.FromResult<Dataset>(new TableDataset("Speciation_Results", resultTable));
     }
 
     /// <summary>
     /// Check if a species is important to always show.
     /// </summary>
-    private bool IsImportantSpecies(string speciesName)
+    private static bool IsImportantSpecies(string speciesName)
     {
         var importantSpecies = new HashSet<string>
         {
@@ -2375,5 +2421,28 @@ public class SpeciateCommand : IGeoScriptCommand
     }
 }
 
+public class SpeciateCommand : IGeoScriptCommand
+{
+    public string Name => "SPECIATE";
+    public string HelpText => "Shows dissociation/speciation products when compounds dissolve in water.";
+    public string Usage => "SPECIATE <Compounds> [TEMP <val> C|K] [PRES <val> BAR|ATM]";
+
+    public Task<Dataset> ExecuteAsync(GeoScriptContext context, AstNode node)
+    {
+        return SpeciateCommandExecutor.ExecuteAsync(context, (CommandNode)node, enableDiagnostics: false);
+    }
+}
+
+public class DiagnoseSpeciateCommand : IGeoScriptCommand
+{
+    public string Name => "DIAGNOSE_SPECIATE";
+    public string HelpText => "Runs SPECIATE with verbose tracing information for debugging.";
+    public string Usage => "DIAGNOSE_SPECIATE <Compounds> [TEMP <val> C|K] [PRES <val> BAR|ATM]";
+
+    public Task<Dataset> ExecuteAsync(GeoScriptContext context, AstNode node)
+    {
+        return SpeciateCommandExecutor.ExecuteAsync(context, (CommandNode)node, enableDiagnostics: true);
+    }
+}
 
 #endregion
