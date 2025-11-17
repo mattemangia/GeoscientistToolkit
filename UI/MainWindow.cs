@@ -1228,7 +1228,7 @@ public class MainWindow
             ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(0.85f, 0.85f, 0.85f, 1.0f));
             ImGui.TextWrapped("@software{geoscientist_toolkit,");
             ImGui.TextWrapped("  title = {Geoscientist's Toolkit: Integrated Geoscientific Analysis Platform},");
-            ImGui.TextWrapped("  author = {Mangia, Matteo},");
+            ImGui.TextWrapped("  author = {Mangiagalli, Matteo},");
             ImGui.TextWrapped("  year = {2025},");
             ImGui.TextWrapped("  url = {https://github.com/mattemangia/GeoscientistToolkit}");
             ImGui.TextWrapped("}");
