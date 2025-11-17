@@ -94,6 +94,8 @@
     <!-- CPU version for ARM64 and macOS platforms (no CUDA support) -->
     <ItemGroup Condition="'$(RuntimeIdentifier)' == 'linux-arm64' or '$(RuntimeIdentifier)' == 'osx-x64' or '$(RuntimeIdentifier)' == 'osx-arm64'">
         <PackageReference Include="Microsoft.ML.OnnxRuntime" Version="1.19.2"/>
+        <PackageReference Include="OpenCvSharp4.runtime.osx_arm64" Version="4.9.0.20240103" Condition="$([MSBuild]::IsOSPlatform('OSX'))" />
+
     </ItemGroup>
 
     <!-- Fallback for development/debugging when no RID is specified -->
