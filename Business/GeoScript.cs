@@ -1840,135 +1840,153 @@ public class SpeciateCommand : IGeoScriptCommand
     }
 
     /// <summary>
-    ///     Get the ionic dissociation products for a salt/mineral formula.
-    ///     E.g., NaCl → Na+ (1) + Cl- (1), CaCl₂ → Ca²⁺ (1) + Cl⁻ (2)
+    ///     Dynamically determines the ionic dissociation products for any compound
+    ///     based on the compound library's available ions and thermodynamic feasibility.
     /// </summary>
-    private Dictionary<string, double> GetDissociationProducts(string formula, CompoundLibrary lib)
+    private Dictionary<string, double> GetDissociationProducts(ChemicalCompound compound, CompoundLibrary lib, ReactionGenerator reactionGen)
     {
         var products = new Dictionary<string, double>();
 
-        // Comprehensive salt/mineral dissociation table
-        // Format: Formula → (Cation, Cation Count, Anion, Anion Count)
-        var dissociations = new Dictionary<string, (string cation, double cationCount, string anion, double anionCount)>
+        // If it's not a solid phase compound, return empty (doesn't dissociate)
+        if (compound.Phase != CompoundPhase.Solid)
+            return products;
+
+        // Try to generate a dissolution reaction for this compound
+        var dissolution = reactionGen.GenerateSingleDissolutionReaction(compound);
+        if (dissolution != null)
         {
-            // ═══ CHLORIDES ═══
-            { "NaCl", ("Sodium Ion", 1, "Chloride Ion", 1) },              // Halite
-            { "KCl", ("Potassium Ion", 1, "Chloride Ion", 1) },            // Sylvite
-            { "CaCl₂", ("Calcium Ion", 1, "Chloride Ion", 2) },            // Calcium chloride
-            { "MgCl₂", ("Magnesium Ion", 1, "Chloride Ion", 2) },          // Bischofite
-            { "FeCl₂", ("Ferrous Iron", 1, "Chloride Ion", 2) },           // Ferrous chloride
-            { "FeCl₃", ("Ferric Iron", 1, "Chloride Ion", 3) },            // Ferric chloride
-            { "AlCl₃", ("Aluminum Ion", 1, "Chloride Ion", 3) },           // Aluminum chloride
-            { "LiCl", ("Lithium Ion", 1, "Chloride Ion", 1) },             // Lithium chloride
-            { "NH₄Cl", ("Ammonium Ion", 1, "Chloride Ion", 1) },           // Ammonium chloride
-
-            // ═══ SULFATES ═══
-            { "Na₂SO₄", ("Sodium Ion", 2, "Sulfate Ion", 1) },             // Thenardite
-            { "K₂SO₄", ("Potassium Ion", 2, "Sulfate Ion", 1) },           // Arcanite
-            { "CaSO₄", ("Calcium Ion", 1, "Sulfate Ion", 1) },             // Anhydrite
-            { "CaSO₄·2H₂O", ("Calcium Ion", 1, "Sulfate Ion", 1) },        // Gypsum
-            { "CaSO₄·½H₂O", ("Calcium Ion", 1, "Sulfate Ion", 1) },        // Bassanite
-            { "MgSO₄", ("Magnesium Ion", 1, "Sulfate Ion", 1) },           // Kieserite
-            { "MgSO₄·7H₂O", ("Magnesium Ion", 1, "Sulfate Ion", 1) },      // Epsomite
-            { "FeSO₄", ("Ferrous Iron", 1, "Sulfate Ion", 1) },            // Ferrous sulfate
-            { "Fe₂(SO₄)₃", ("Ferric Iron", 2, "Sulfate Ion", 3) },         // Ferric sulfate
-            { "Al₂(SO₄)₃", ("Aluminum Ion", 2, "Sulfate Ion", 3) },        // Aluminum sulfate
-            { "(NH₄)₂SO₄", ("Ammonium Ion", 2, "Sulfate Ion", 1) },        // Ammonium sulfate
-            { "Li₂SO₄", ("Lithium Ion", 2, "Sulfate Ion", 1) },            // Lithium sulfate
-
-            // ═══ CARBONATES ═══
-            { "Na₂CO₃", ("Sodium Ion", 2, "Carbonate Ion", 1) },           // Natron/Soda ash
-            { "NaHCO₃", ("Sodium Ion", 1, "Bicarbonate Ion", 1) },         // Nahcolite
-            { "CaCO₃", ("Calcium Ion", 1, "Carbonate Ion", 1) },           // Calcite/Aragonite
-            { "MgCO₃", ("Magnesium Ion", 1, "Carbonate Ion", 1) },         // Magnesite
-            { "FeCO₃", ("Ferrous Iron", 1, "Carbonate Ion", 1) },          // Siderite
-            { "K₂CO₃", ("Potassium Ion", 2, "Carbonate Ion", 1) },         // Potassium carbonate
-            { "KHCO₃", ("Potassium Ion", 1, "Bicarbonate Ion", 1) },       // Potassium bicarbonate
-            { "Ca(HCO₃)₂", ("Calcium Ion", 1, "Bicarbonate Ion", 2) },     // Calcium bicarbonate
-            { "Mg(HCO₃)₂", ("Magnesium Ion", 1, "Bicarbonate Ion", 2) },   // Magnesium bicarbonate
-            { "Li₂CO₃", ("Lithium Ion", 2, "Carbonate Ion", 1) },          // Lithium carbonate
-            { "(NH₄)₂CO₃", ("Ammonium Ion", 2, "Carbonate Ion", 1) },      // Ammonium carbonate
-
-            // ═══ NITRATES ═══
-            { "NaNO₃", ("Sodium Ion", 1, "Nitrate Ion", 1) },              // Nitratine/Soda niter
-            { "KNO₃", ("Potassium Ion", 1, "Nitrate Ion", 1) },            // Niter
-            { "Ca(NO₃)₂", ("Calcium Ion", 1, "Nitrate Ion", 2) },          // Calcium nitrate
-            { "Mg(NO₃)₂", ("Magnesium Ion", 1, "Nitrate Ion", 2) },        // Magnesium nitrate
-            { "Fe(NO₃)₂", ("Ferrous Iron", 1, "Nitrate Ion", 2) },         // Ferrous nitrate
-            { "Fe(NO₃)₃", ("Ferric Iron", 1, "Nitrate Ion", 3) },          // Ferric nitrate
-            { "Al(NO₃)₃", ("Aluminum Ion", 1, "Nitrate Ion", 3) },         // Aluminum nitrate
-            { "NH₄NO₃", ("Ammonium Ion", 1, "Nitrate Ion", 1) },           // Ammonium nitrate
-            { "LiNO₃", ("Lithium Ion", 1, "Nitrate Ion", 1) },             // Lithium nitrate
-
-            // ═══ PHOSPHATES ═══
-            { "Na₃PO₄", ("Sodium Ion", 3, "Phosphate Ion", 1) },           // Sodium phosphate
-            { "K₃PO₄", ("Potassium Ion", 3, "Phosphate Ion", 1) },         // Potassium phosphate
-            { "Ca₃(PO₄)₂", ("Calcium Ion", 3, "Phosphate Ion", 2) },       // Calcium phosphate
-            { "AlPO₄", ("Aluminum Ion", 1, "Phosphate Ion", 1) },          // Aluminum phosphate
-
-            // ═══ HYDROXIDES ═══
-            { "NaOH", ("Sodium Ion", 1, "Hydroxide Ion", 1) },             // Sodium hydroxide
-            { "KOH", ("Potassium Ion", 1, "Hydroxide Ion", 1) },           // Potassium hydroxide
-            { "Ca(OH)₂", ("Calcium Ion", 1, "Hydroxide Ion", 2) },         // Portlandite
-            { "Mg(OH)₂", ("Magnesium Ion", 1, "Hydroxide Ion", 2) },       // Brucite
-            { "Fe(OH)₂", ("Ferrous Iron", 1, "Hydroxide Ion", 2) },        // Ferrous hydroxide
-            { "Fe(OH)₃", ("Ferric Iron", 1, "Hydroxide Ion", 3) },         // Ferric hydroxide
-            { "Al(OH)₃", ("Aluminum Ion", 1, "Hydroxide Ion", 3) },        // Gibbsite
-            { "LiOH", ("Lithium Ion", 1, "Hydroxide Ion", 1) },            // Lithium hydroxide
-            { "NH₄OH", ("Ammonium Ion", 1, "Hydroxide Ion", 1) },          // Ammonium hydroxide
-
-            // ═══ BROMIDES ═══
-            { "NaBr", ("Sodium Ion", 1, "Bromide Ion", 1) },               // Sodium bromide
-            { "KBr", ("Potassium Ion", 1, "Bromide Ion", 1) },             // Potassium bromide
-            { "CaBr₂", ("Calcium Ion", 1, "Bromide Ion", 2) },             // Calcium bromide
-            { "MgBr₂", ("Magnesium Ion", 1, "Bromide Ion", 2) },           // Magnesium bromide
-            { "LiBr", ("Lithium Ion", 1, "Bromide Ion", 1) },              // Lithium bromide
-
-            // ═══ IODIDES ═══
-            { "NaI", ("Sodium Ion", 1, "Iodide Ion", 1) },                 // Sodium iodide
-            { "KI", ("Potassium Ion", 1, "Iodide Ion", 1) },               // Potassium iodide
-            { "CaI₂", ("Calcium Ion", 1, "Iodide Ion", 2) },               // Calcium iodide
-            { "MgI₂", ("Magnesium Ion", 1, "Iodide Ion", 2) },             // Magnesium iodide
-            { "LiI", ("Lithium Ion", 1, "Iodide Ion", 1) },                // Lithium iodide
-
-            // ═══ FLUORIDES ═══
-            { "NaF", ("Sodium Ion", 1, "Fluoride Ion", 1) },               // Sodium fluoride
-            { "KF", ("Potassium Ion", 1, "Fluoride Ion", 1) },             // Potassium fluoride
-            { "CaF₂", ("Calcium Ion", 1, "Fluoride Ion", 2) },             // Fluorite
-            { "MgF₂", ("Magnesium Ion", 1, "Fluoride Ion", 2) },           // Sellaite
-            { "AlF₃", ("Aluminum Ion", 1, "Fluoride Ion", 3) },            // Aluminum fluoride
-            { "LiF", ("Lithium Ion", 1, "Fluoride Ion", 1) },              // Lithium fluoride
-
-            // ═══ ACETATES ═══
-            { "NaCH₃COO", ("Sodium Ion", 1, "Acetate Ion", 1) },           // Sodium acetate
-            { "KCH₃COO", ("Potassium Ion", 1, "Acetate Ion", 1) },         // Potassium acetate
-            { "Ca(CH₃COO)₂", ("Calcium Ion", 1, "Acetate Ion", 2) },       // Calcium acetate
-            { "Mg(CH₃COO)₂", ("Magnesium Ion", 1, "Acetate Ion", 2) },     // Magnesium acetate
-
-            // ═══ PERCHLORATES ═══
-            { "NaClO₄", ("Sodium Ion", 1, "Perchlorate Ion", 1) },         // Sodium perchlorate
-            { "KClO₄", ("Potassium Ion", 1, "Perchlorate Ion", 1) },       // Potassium perchlorate
-            { "Mg(ClO₄)₂", ("Magnesium Ion", 1, "Perchlorate Ion", 2) },   // Magnesium perchlorate
-
-            // ═══ CHROMATES ═══
-            { "Na₂CrO₄", ("Sodium Ion", 2, "Chromate Ion", 1) },           // Sodium chromate
-            { "K₂CrO₄", ("Potassium Ion", 2, "Chromate Ion", 1) },         // Potassium chromate
-        };
-
-        if (dissociations.TryGetValue(formula, out var dissociation))
-        {
-            // Verify ions exist in library
-            var cation = lib.Find(dissociation.cation);
-            var anion = lib.Find(dissociation.anion);
-
-            if (cation != null && anion != null)
+            Logger.Log($"  - Generated dissolution reaction: {dissolution.Name}");
+            
+            // Extract the products from the dissolution reaction
+            foreach (var (species, stoich) in dissolution.Stoichiometry)
             {
-                products[dissociation.cation] = dissociation.cationCount;
-                products[dissociation.anion] = dissociation.anionCount;
+                // Skip the solid (negative stoichiometry)
+                if (stoich > 0)
+                {
+                    var speciesCompound = lib.Find(species);
+                    if (speciesCompound != null && speciesCompound.Phase == CompoundPhase.Aqueous)
+                    {
+                        products[species] = stoich;
+                        Logger.Log($"    + {species}: {stoich:F2} moles");
+                    }
+                }
+            }
+        }
+        
+        // If we couldn't generate a dissolution reaction, try a simple approach
+        // Parse the formula to find elemental composition and match with primary ions
+        if (products.Count == 0)
+        {
+            Logger.Log($"  - No dissolution reaction generated, trying direct ion mapping for {compound.ChemicalFormula}");
+            var elementComp = reactionGen.ParseChemicalFormula(compound.ChemicalFormula);
+            
+            // Find primary aqueous ions for each element
+            foreach (var (element, count) in elementComp)
+            {
+                if (element == "O" || element == "H") continue;
+                
+                // Find the primary ion for this element
+                var primaryIon = lib.Compounds
+                    .Where(c => c.Phase == CompoundPhase.Aqueous && 
+                                c.IsPrimaryElementSpecies &&
+                                reactionGen.ParseChemicalFormula(c.ChemicalFormula).ContainsKey(element))
+                    .FirstOrDefault();
+                    
+                if (primaryIon != null)
+                {
+                    products[primaryIon.Name] = count;
+                    Logger.Log($"    + {primaryIon.Name} ({primaryIon.ChemicalFormula}): {count} moles");
+                }
+            }
+            
+            // Balance with common anions/cations if needed
+            var totalCharge = products.Sum(p => 
+            {
+                var ion = lib.Find(p.Key);
+                return p.Value * (ion?.IonicCharge ?? 0);
+            });
+            
+            Logger.Log($"    Total charge before balancing: {totalCharge}");
+            
+            // Add counter-ions to balance charge
+            if (Math.Abs(totalCharge) > 0.01)
+            {
+                if (totalCharge > 0)
+                {
+                    // Need anions - try common ones
+                    var anions = new[] { "Chloride Ion", "Hydroxide Ion", "Sulfate Ion", "Carbonate Ion" };
+                    foreach (var anionName in anions)
+                    {
+                        var anion = lib.Find(anionName);
+                        if (anion != null && anion.IonicCharge.HasValue && anion.IonicCharge < 0)
+                        {
+                            var needed = Math.Abs(totalCharge / anion.IonicCharge.Value);
+                            if (needed > 0)
+                            {
+                                products[anionName] = needed;
+                                Logger.Log($"    + {anionName} (for charge balance): {needed:F2} moles");
+                                break;
+                            }
+                        }
+                    }
+                }
+                else if (totalCharge < 0)
+                {
+                    // Need cations - try common ones
+                    var cations = new[] { "Hydrogen Ion", "Sodium Ion", "Calcium Ion", "Potassium Ion" };
+                    foreach (var cationName in cations)
+                    {
+                        var cation = lib.Find(cationName);
+                        if (cation != null && cation.IonicCharge.HasValue && cation.IonicCharge > 0)
+                        {
+                            var needed = Math.Abs(totalCharge / cation.IonicCharge.Value);
+                            if (needed > 0)
+                            {
+                                products[cationName] = needed;
+                                Logger.Log($"    + {cationName} (for charge balance): {needed:F2} moles");
+                                break;
+                            }
+                        }
+                    }
+                }
             }
         }
 
         return products;
+    }
+
+    /// <summary>
+    ///     Try to find a compound by various formula formats
+    /// </summary>
+    private ChemicalCompound FindCompound(string input, CompoundLibrary lib)
+    {
+        // Clean the input
+        var cleanedInput = input.Trim();
+        
+        // Try direct match
+        var compound = lib.Find(cleanedInput);
+        if (compound != null) return compound;
+        
+        // Try with normalized subscripts
+        var normalized = NormalizeChemicalFormula(cleanedInput);
+        compound = lib.Find(normalized);
+        if (compound != null) return compound;
+        
+        // Try by name (case-insensitive)
+        compound = lib.Compounds.FirstOrDefault(c => 
+            string.Equals(c.Name, cleanedInput, StringComparison.OrdinalIgnoreCase));
+        if (compound != null) return compound;
+        
+        // Try by formula (case-sensitive for elements)
+        compound = lib.Compounds.FirstOrDefault(c => 
+            c.ChemicalFormula == cleanedInput || c.ChemicalFormula == normalized);
+        if (compound != null) return compound;
+        
+        // Try synonyms
+        compound = lib.Compounds.FirstOrDefault(c => 
+            c.Synonyms.Any(s => string.Equals(s, cleanedInput, StringComparison.OrdinalIgnoreCase)));
+        
+        return compound;
     }
 
     public Task<Dataset> ExecuteAsync(GeoScriptContext context, AstNode node)
@@ -2015,17 +2033,36 @@ public class SpeciateCommand : IGeoScriptCommand
 
         Logger.Log($"[SPECIATE] Dissolving compounds in water at {temperatureK:F2} K, {pressureBar:F2} bar:");
 
+        // Always ensure water is present for aqueous solutions
+        var water = compoundLib.Find("H₂O") ?? compoundLib.Find("Water");
+        if (water != null)
+        {
+            var waterMoles = 1000.0 / (water.MolecularWeight_g_mol ?? 18.015); // 1L of water
+            initialState.SpeciesMoles["Water"] = waterMoles;
+            
+            // Add water's elemental composition
+            var waterComp = reactionGenerator.ParseChemicalFormula(water.ChemicalFormula);
+            foreach (var (element, stoichiometry) in waterComp)
+            {
+                initialState.ElementalComposition[element] = waterMoles * stoichiometry;
+            }
+        }
+
         foreach (var compoundName in compounds)
         {
             var cleanedName = compoundName.Replace('!', '·');
-            var normalizedName = NormalizeChemicalFormula(cleanedName);
-            var compound = compoundLib.Find(normalizedName) ?? compoundLib.Find(cleanedName);
+            
+            // Use improved compound finding
+            var compound = FindCompound(cleanedName, compoundLib);
 
             if (compound == null)
             {
-                Logger.LogError($"Compound '{compoundName}' (normalized: '{normalizedName}') not found.");
+                Logger.LogError($"Compound '{compoundName}' not found in library.");
+                Logger.Log($"  Tried: original='{compoundName}', cleaned='{cleanedName}', normalized='{NormalizeChemicalFormula(cleanedName)}'");
                 throw new ArgumentException($"Unknown compound: {compoundName}");
             }
+
+            Logger.Log($"Found compound: {compound.Name} ({compound.ChemicalFormula})");
 
             double moles;
 
@@ -2033,8 +2070,8 @@ public class SpeciateCommand : IGeoScriptCommand
             var isWater = compound.Name.ToUpper() == "WATER" || compound.ChemicalFormula == "H₂O";
             if (isWater)
             {
-                // Water is the solvent - use mass to calculate moles
-                moles = 1000.0 / (compound.MolecularWeight_g_mol ?? 18.015);
+                // Water already added above
+                continue;
             }
             else if (compound.Phase == CompoundPhase.Gas)
             {
@@ -2064,12 +2101,12 @@ public class SpeciateCommand : IGeoScriptCommand
             // This ensures proper speciation output (e.g., NaCl → Na+ + Cl-)
             if (compound.Phase == CompoundPhase.Solid && !isWater)
             {
-                // Get the dissociation products
-                var dissociationProducts = GetDissociationProducts(compound.ChemicalFormula, compoundLib);
+                // Get the dissociation products using the dynamic method
+                var dissociationProducts = GetDissociationProducts(compound, compoundLib, reactionGenerator);
 
                 if (dissociationProducts.Count > 0)
                 {
-                    Logger.Log($"  - Dissolving {compound.Name} → {string.Join(" + ", dissociationProducts.Keys)}");
+                    Logger.Log($"  - Dissolving {compound.Name} → {string.Join(" + ", dissociationProducts.Select(p => $"{p.Value:F1} {p.Key}"))}");
 
                     // Add dissociated ions instead of the solid
                     foreach (var (ionName, ionMoles) in dissociationProducts)
@@ -2081,6 +2118,7 @@ public class SpeciateCommand : IGeoScriptCommand
                 else
                 {
                     // No known dissociation, add the compound as-is
+                    Logger.LogWarning($"  - Could not determine dissociation products for {compound.Name}, adding as-is");
                     initialState.SpeciesMoles[compound.Name] =
                         initialState.SpeciesMoles.GetValueOrDefault(compound.Name, 0) + moles;
                 }
@@ -2099,8 +2137,15 @@ public class SpeciateCommand : IGeoScriptCommand
                     initialState.ElementalComposition.GetValueOrDefault(element, 0) + moles * stoichiometry;
         }
 
+        Logger.Log("\nInitial species added to system:");
+        foreach (var (species, moles) in initialState.SpeciesMoles)
+        {
+            Logger.Log($"  {species}: {moles:E3} moles");
+        }
+
         // Solve for equilibrium to get proper dissociation/speciation
         // This handles dissolution of solids AND dissociation into ions
+        Logger.Log("\nSolving equilibrium...");
         var finalState = solver.SolveEquilibrium(initialState);
 
         // Create output table
@@ -2137,14 +2182,14 @@ public class SpeciateCommand : IGeoScriptCommand
 
         // Build output string for terminal display
         var terminalOutput = new System.Text.StringBuilder();
-        terminalOutput.AppendLine("\n╔════════════════════════════════════════════════════════════════════════════╗");
+        terminalOutput.AppendLine("\n╔═══════════════════════════════════════════════════════════════════════════╗");
         terminalOutput.AppendLine("║                         AQUEOUS SPECIATION RESULTS                         ║");
-        terminalOutput.AppendLine("╠════════════════════════════════════════════════════════════════════════════╣");
+        terminalOutput.AppendLine("╠═══════════════════════════════════════════════════════════════════════════╣");
         terminalOutput.AppendLine($"║ Temperature: {temperatureK,6:F1} K          pH: {finalState.pH,5:F2}          pe: {finalState.pe,6:F2}      ║");
         terminalOutput.AppendLine($"║ Pressure:    {pressureBar,6:F2} bar        Ionic Strength: {finalState.IonicStrength_molkg,8:E2} mol/kg ║");
-        terminalOutput.AppendLine("╠════════════════════════════════════════════════════════════════════════════╣");
+        terminalOutput.AppendLine("╠═══════════════════════════════════════════════════════════════════════════╣");
         terminalOutput.AppendLine("║ Species              Formula        Moles          Conc (M)       Activity ║");
-        terminalOutput.AppendLine("╠════════════════════════════════════════════════════════════════════════════╣");
+        terminalOutput.AppendLine("╠═══════════════════════════════════════════════════════════════════════════╣");
 
         foreach (var (speciesName, moles) in sortedSpecies)
         {
@@ -2172,7 +2217,7 @@ public class SpeciateCommand : IGeoScriptCommand
                 $"║ {speciesName,-18} {phaseMark} {compound.ChemicalFormula,-12} {moles,12:E2}   {concentration,12:E2}   {activity,8:E2} ║");
         }
 
-        terminalOutput.AppendLine("╚════════════════════════════════════════════════════════════════════════════╝");
+        terminalOutput.AppendLine("╚═══════════════════════════════════════════════════════════════════════════╝");
 
         // Print to terminal
         Console.WriteLine(terminalOutput.ToString());
