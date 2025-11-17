@@ -1673,40 +1673,75 @@ public class TuiManager
             }
 
             var configJson = File.ReadAllText(_configPath);
+            JsonDocument configDoc;
 
-            var dialog = new Dialog("Edit Configuration", 100, 30);
+            try
+            {
+                configDoc = JsonDocument.Parse(configJson);
+            }
+            catch (JsonException ex)
+            {
+                MessageBox.ErrorQuery("Error", "Failed to parse configuration file:\n\n" + ex.Message, "OK");
+                return;
+            }
 
-            var textView = new TextView()
+            var dialog = new Dialog("Configuration Editor", 100, 35);
+
+            // Create TabView for different configuration sections
+            var tabView = new TabView()
             {
                 X = 0,
                 Y = 0,
                 Width = Dim.Fill(),
-                Height = Dim.Fill() - 1,
-                Text = configJson
+                Height = Dim.Fill() - 2
             };
 
-            var saveButton = new Button("Save")
+            // ============= HTTP/API Tab =============
+            var httpTab = CreateHttpConfigTab(configDoc);
+            tabView.AddTab(httpTab, false);
+
+            // ============= NodeManager Tab =============
+            var nodeTab = CreateNodeManagerConfigTab(configDoc);
+            tabView.AddTab(nodeTab, false);
+
+            // ============= Network Discovery Tab =============
+            var discoveryTab = CreateNetworkDiscoveryConfigTab(configDoc);
+            tabView.AddTab(discoveryTab, false);
+
+            // ============= Storage Tab =============
+            var storageTab = CreateStorageConfigTab(configDoc);
+            tabView.AddTab(storageTab, false);
+
+            // ============= Logging Tab =============
+            var loggingTab = CreateLoggingConfigTab(configDoc);
+            tabView.AddTab(loggingTab, false);
+
+            // Save and Cancel buttons
+            var saveButton = new Button("Save Configuration")
             {
-                X = Pos.Center() - 10,
+                X = Pos.Center() - 15,
                 Y = Pos.AnchorEnd(1)
             };
 
             var cancelButton = new Button("Cancel")
             {
-                X = Pos.Center() + 2,
+                X = Pos.Center() + 5,
                 Y = Pos.AnchorEnd(1)
             };
 
             saveButton.Clicked += () => {
                 try
                 {
-                    var newConfig = textView.Text.ToString();
+                    var newConfig = BuildConfigFromForm(
+                        httpTab, nodeTab, discoveryTab, storageTab, loggingTab);
 
                     // Validate JSON
-                    JsonDocument.Parse(newConfig!);
+                    var testDoc = JsonDocument.Parse(newConfig);
+                    testDoc.Dispose();
 
                     // Backup current config
-                    File.Copy(_configPath, _configPath + ".backup", true);
+                    var backupPath = _configPath + ".backup";
+                    File.Copy(_configPath, backupPath, true);
 
                     // Save new config
                     File.WriteAllText(_configPath, newConfig);
@@ -1714,15 +1749,11 @@ public class TuiManager
                     AddLog("INFO", "Configuration saved successfully");
                     MessageBox.Query("Success",
                         "Configuration saved successfully!\n\n" +
-                        "Restart the application for changes to take effect.\n" +
-                        "A backup was created at: " + _configPath + ".backup", "OK");
+                        "Restart the application for changes to take effect.\n\n" +
+                        $"Backup created: {Path.GetFileName(backupPath)}", "OK");
 
+                    configDoc.Dispose();
                     Application.RequestStop();
-                }
-                catch (JsonException ex)
-                {
-                    MessageBox.ErrorQuery("JSON Error",
-                        "Invalid JSON format:\n\n" + ex.Message, "OK");
                 }
                 catch (Exception ex)
                 {
@@ -1732,16 +1763,611 @@ public class TuiManager
             };
 
             cancelButton.Clicked += () => {
+                configDoc.Dispose();
                 Application.RequestStop();
             };
 
-            dialog.Add(textView, saveButton, cancelButton);
+            dialog.Add(tabView, saveButton, cancelButton);
             Application.Run(dialog);
         }
         catch (Exception ex)
         {
             MessageBox.ErrorQuery("Error", "Failed to open configuration:\n\n" + ex.Message, "OK");
         }
+    }
+
+    private TabView.Tab CreateHttpConfigTab(JsonDocument configDoc)
+    {
+        var tab = new TabView.Tab();
+        tab.Text = "HTTP/API";
+
+        var view = new View()
+        {
+            X = 0,
+            Y = 0,
+            Width = Dim.Fill(),
+            Height = Dim.Fill()
+        };
+
+        int y = 1;
+
+        // HTTP Port
+        var httpPortLabel = new Label("HTTP Port:") { X = 2, Y = y };
+        var httpPortField = new TextField(GetJsonValue(configDoc, "HttpPort", "8500"))
+        {
+            X = 25,
+            Y = y,
+            Width = 10
+        };
+        httpPortField.Tag = "HttpPort";
+        view.Add(httpPortLabel, httpPortField);
+        y += 2;
+
+        // Keep Alive Timeout
+        var keepAliveLabel = new Label("Keep Alive Timeout:") { X = 2, Y = y };
+        var keepAliveField = new TextField(GetJsonValue(configDoc, "Kestrel.Limits.KeepAliveTimeout", "00:10:00"))
+        {
+            X = 25,
+            Y = y,
+            Width = 15
+        };
+        keepAliveField.Tag = "KeepAliveTimeout";
+        var keepAliveHelp = new Label("(HH:MM:SS)") { X = 41, Y = y };
+        view.Add(keepAliveLabel, keepAliveField, keepAliveHelp);
+        y += 2;
+
+        // Request Headers Timeout
+        var headersLabel = new Label("Request Headers Timeout:") { X = 2, Y = y };
+        var headersField = new TextField(GetJsonValue(configDoc, "Kestrel.Limits.RequestHeadersTimeout", "00:05:00"))
+        {
+            X = 30,
+            Y = y,
+            Width = 15
+        };
+        headersField.Tag = "RequestHeadersTimeout";
+        var headersHelp = new Label("(HH:MM:SS)") { X = 46, Y = y };
+        view.Add(headersLabel, headersField, headersHelp);
+        y += 2;
+
+        // Max Concurrent Connections
+        var maxConnLabel = new Label("Max Concurrent Connections:") { X = 2, Y = y };
+        var maxConnField = new TextField(GetJsonValue(configDoc, "Kestrel.Limits.MaxConcurrentConnections", "100"))
+        {
+            X = 32,
+            Y = y,
+            Width = 10
+        };
+        maxConnField.Tag = "MaxConcurrentConnections";
+        view.Add(maxConnLabel, maxConnField);
+        y += 2;
+
+        // Max Request Body Size
+        var maxBodyLabel = new Label("Max Request Body Size (bytes):") { X = 2, Y = y };
+        var maxBodyField = new TextField(GetJsonValue(configDoc, "Kestrel.Limits.MaxRequestBodySize", "1073741824"))
+        {
+            X = 35,
+            Y = y,
+            Width = 15
+        };
+        maxBodyField.Tag = "MaxRequestBodySize";
+        var maxBodyHelp = new Label("(1 GB = 1073741824)") { X = 51, Y = y };
+        view.Add(maxBodyLabel, maxBodyField, maxBodyHelp);
+
+        tab.View = view;
+        return tab;
+    }
+
+    private TabView.Tab CreateNodeManagerConfigTab(JsonDocument configDoc)
+    {
+        var tab = new TabView.Tab();
+        tab.Text = "NodeManager";
+
+        var view = new View()
+        {
+            X = 0,
+            Y = 0,
+            Width = Dim.Fill(),
+            Height = Dim.Fill()
+        };
+
+        int y = 1;
+
+        // Enable NodeManager
+        var enableLabel = new Label("Enable NodeManager:") { X = 2, Y = y };
+        var enableCheck = new CheckBox("", GetJsonBool(configDoc, "NodeManager.EnableNodeManager", true))
+        {
+            X = 28,
+            Y = y
+        };
+        enableCheck.Tag = "EnableNodeManager";
+        view.Add(enableLabel, enableCheck);
+        y += 2;
+
+        // Role
+        var roleLabel = new Label("Role:") { X = 2, Y = y };
+        var roleCombo = new ComboBox()
+        {
+            X = 28,
+            Y = y,
+            Width = 20,
+            Height = 4
+        };
+        roleCombo.SetSource(new List<string> { "Hybrid", "Worker", "Coordinator" });
+        var roleValue = GetJsonValue(configDoc, "NodeManager.Role", "Hybrid");
+        roleCombo.SelectedItem = roleValue == "Worker" ? 1 : roleValue == "Coordinator" ? 2 : 0;
+        roleCombo.Tag = "Role";
+        view.Add(roleLabel, roleCombo);
+        y += 2;
+
+        // Node Name
+        var nodeNameLabel = new Label("Node Name:") { X = 2, Y = y };
+        var nodeNameField = new TextField(GetJsonValue(configDoc, "NodeManager.NodeName", "GeoscientistToolkit_Endpoint"))
+        {
+            X = 28,
+            Y = y,
+            Width = 35
+        };
+        nodeNameField.Tag = "NodeName";
+        view.Add(nodeNameLabel, nodeNameField);
+        y += 2;
+
+        // Server Port
+        var portLabel = new Label("Server Port:") { X = 2, Y = y };
+        var portField = new TextField(GetJsonValue(configDoc, "NodeManager.ServerPort", "9876"))
+        {
+            X = 28,
+            Y = y,
+            Width = 10
+        };
+        portField.Tag = "ServerPort";
+        view.Add(portLabel, portField);
+        y += 2;
+
+        // Host Address
+        var hostLabel = new Label("Host Address:") { X = 2, Y = y };
+        var hostField = new TextField(GetJsonValue(configDoc, "NodeManager.HostAddress", "auto"))
+        {
+            X = 28,
+            Y = y,
+            Width = 25
+        };
+        hostField.Tag = "HostAddress";
+        var hostHelp = new Label("(use 'auto' for auto-detect)") { X = 54, Y = y };
+        view.Add(hostLabel, hostField, hostHelp);
+        y += 2;
+
+        // Heartbeat Interval
+        var heartbeatLabel = new Label("Heartbeat Interval (sec):") { X = 2, Y = y };
+        var heartbeatField = new TextField(GetJsonValue(configDoc, "NodeManager.HeartbeatInterval", "30"))
+        {
+            X = 32,
+            Y = y,
+            Width = 10
+        };
+        heartbeatField.Tag = "HeartbeatInterval";
+        view.Add(heartbeatLabel, heartbeatField);
+        y += 2;
+
+        // Max Reconnect Attempts
+        var reconnectLabel = new Label("Max Reconnect Attempts:") { X = 2, Y = y };
+        var reconnectField = new TextField(GetJsonValue(configDoc, "NodeManager.MaxReconnectAttempts", "5"))
+        {
+            X = 32,
+            Y = y,
+            Width = 10
+        };
+        reconnectField.Tag = "MaxReconnectAttempts";
+        view.Add(reconnectLabel, reconnectField);
+        y += 2;
+
+        // Use Nodes For Simulators
+        var useNodesLabel = new Label("Use Nodes For Simulators:") { X = 2, Y = y };
+        var useNodesCheck = new CheckBox("", GetJsonBool(configDoc, "NodeManager.UseNodesForSimulators", true))
+        {
+            X = 32,
+            Y = y
+        };
+        useNodesCheck.Tag = "UseNodesForSimulators";
+        view.Add(useNodesLabel, useNodesCheck);
+        y += 2;
+
+        // Use GPU For Jobs
+        var useGpuLabel = new Label("Use GPU For Jobs:") { X = 2, Y = y };
+        var useGpuCheck = new CheckBox("", GetJsonBool(configDoc, "NodeManager.UseGpuForJobs", true))
+        {
+            X = 32,
+            Y = y
+        };
+        useGpuCheck.Tag = "UseGpuForJobs";
+        view.Add(useGpuLabel, useGpuCheck);
+
+        tab.View = view;
+        return tab;
+    }
+
+    private TabView.Tab CreateNetworkDiscoveryConfigTab(JsonDocument configDoc)
+    {
+        var tab = new TabView.Tab();
+        tab.Text = "Network Discovery";
+
+        var view = new View()
+        {
+            X = 0,
+            Y = 0,
+            Width = Dim.Fill(),
+            Height = Dim.Fill()
+        };
+
+        int y = 1;
+
+        // Enabled
+        var enabledLabel = new Label("Enable Network Discovery:") { X = 2, Y = y };
+        var enabledCheck = new CheckBox("", GetJsonBool(configDoc, "NetworkDiscovery.Enabled", true))
+        {
+            X = 32,
+            Y = y
+        };
+        enabledCheck.Tag = "DiscoveryEnabled";
+        view.Add(enabledLabel, enabledCheck);
+        y += 2;
+
+        // Broadcast Interval
+        var intervalLabel = new Label("Broadcast Interval (ms):") { X = 2, Y = y };
+        var intervalField = new TextField(GetJsonValue(configDoc, "NetworkDiscovery.BroadcastInterval", "5000"))
+        {
+            X = 32,
+            Y = y,
+            Width = 10
+        };
+        intervalField.Tag = "BroadcastInterval";
+        view.Add(intervalLabel, intervalField);
+        y += 2;
+
+        // Discovery Port
+        var portLabel = new Label("Discovery Port:") { X = 2, Y = y };
+        var portField = new TextField(GetJsonValue(configDoc, "NetworkDiscovery.DiscoveryPort", "9877"))
+        {
+            X = 32,
+            Y = y,
+            Width = 10
+        };
+        portField.Tag = "DiscoveryPort";
+        view.Add(portLabel, portField);
+        y += 3;
+
+        // Info text
+        var infoLabel = new Label(
+            "Network Discovery allows nodes to automatically\n" +
+            "find each other on the local network without\n" +
+            "manual configuration.")
+        {
+            X = 2,
+            Y = y,
+            Width = Dim.Fill() - 4,
+            Height = 3
+        };
+        view.Add(infoLabel);
+
+        tab.View = view;
+        return tab;
+    }
+
+    private TabView.Tab CreateStorageConfigTab(JsonDocument configDoc)
+    {
+        var tab = new TabView.Tab();
+        tab.Text = "Storage";
+
+        var view = new View()
+        {
+            X = 0,
+            Y = 0,
+            Width = Dim.Fill(),
+            Height = Dim.Fill()
+        };
+
+        int y = 1;
+
+        // Storage Path
+        var pathLabel = new Label("Storage Path:") { X = 2, Y = y };
+        var pathField = new TextField(GetJsonValue(configDoc, "SharedStorage.Path", "auto"))
+        {
+            X = 25,
+            Y = y,
+            Width = 50
+        };
+        pathField.Tag = "StoragePath";
+        view.Add(pathLabel, pathField);
+        y++;
+
+        var pathHelp = new Label("(use 'auto' for default location or specify full path)")
+        {
+            X = 25,
+            Y = y
+        };
+        view.Add(pathHelp);
+        y += 3;
+
+        // Use Network Storage
+        var networkLabel = new Label("Use Network Storage:") { X = 2, Y = y };
+        var networkCheck = new CheckBox("", GetJsonBool(configDoc, "SharedStorage.UseNetworkStorage", true))
+        {
+            X = 25,
+            Y = y
+        };
+        networkCheck.Tag = "UseNetworkStorage";
+        view.Add(networkLabel, networkCheck);
+        y += 3;
+
+        // Info text
+        var infoLabel = new Label(
+            "Shared Storage Configuration:\n\n" +
+            "Network Storage: Allows sharing datasets and results\n" +
+            "between distributed nodes for collaborative processing.\n\n" +
+            "Path: Location where shared data will be stored.\n" +
+            "Use 'auto' to let the system choose an appropriate\n" +
+            "location based on the platform.")
+        {
+            X = 2,
+            Y = y,
+            Width = Dim.Fill() - 4,
+            Height = 8
+        };
+        view.Add(infoLabel);
+
+        tab.View = view;
+        return tab;
+    }
+
+    private TabView.Tab CreateLoggingConfigTab(JsonDocument configDoc)
+    {
+        var tab = new TabView.Tab();
+        tab.Text = "Logging";
+
+        var view = new View()
+        {
+            X = 0,
+            Y = 0,
+            Width = Dim.Fill(),
+            Height = Dim.Fill()
+        };
+
+        int y = 1;
+
+        var logLevels = new List<string> { "Trace", "Debug", "Information", "Warning", "Error", "Critical" };
+
+        // Default Log Level
+        var defaultLabel = new Label("Default Log Level:") { X = 2, Y = y };
+        var defaultCombo = new ComboBox()
+        {
+            X = 28,
+            Y = y,
+            Width = 20,
+            Height = 6
+        };
+        defaultCombo.SetSource(logLevels);
+        var defaultLevel = GetJsonValue(configDoc, "Logging.LogLevel.Default", "Information");
+        defaultCombo.SelectedItem = logLevels.IndexOf(defaultLevel);
+        defaultCombo.Tag = "DefaultLogLevel";
+        view.Add(defaultLabel, defaultCombo);
+        y += 2;
+
+        // ASP.NET Core Log Level
+        var aspLabel = new Label("ASP.NET Core Log Level:") { X = 2, Y = y };
+        var aspCombo = new ComboBox()
+        {
+            X = 28,
+            Y = y,
+            Width = 20,
+            Height = 6
+        };
+        aspCombo.SetSource(logLevels);
+        var aspLevel = GetJsonValue(configDoc, "Logging.LogLevel.Microsoft.AspNetCore", "Warning");
+        aspCombo.SelectedItem = logLevels.IndexOf(aspLevel);
+        aspCombo.Tag = "AspNetCoreLogLevel";
+        view.Add(aspLabel, aspCombo);
+        y += 3;
+
+        // Info text
+        var infoLabel = new Label(
+            "Log Levels (from most to least verbose):\n\n" +
+            "  Trace      - Very detailed logs, may include sensitive data\n" +
+            "  Debug      - Debugging information\n" +
+            "  Information - General informational messages\n" +
+            "  Warning    - Warning messages for potentially harmful situations\n" +
+            "  Error      - Error messages for failures\n" +
+            "  Critical   - Critical failures requiring immediate attention")
+        {
+            X = 2,
+            Y = y,
+            Width = Dim.Fill() - 4,
+            Height = 9
+        };
+        view.Add(infoLabel);
+
+        tab.View = view;
+        return tab;
+    }
+
+    private string GetJsonValue(JsonDocument doc, string path, string defaultValue)
+    {
+        try
+        {
+            var parts = path.Split('.');
+            JsonElement current = doc.RootElement;
+
+            foreach (var part in parts)
+            {
+                if (current.TryGetProperty(part, out var element))
+                {
+                    current = element;
+                }
+                else
+                {
+                    return defaultValue;
+                }
+            }
+
+            return current.ValueKind == JsonValueKind.String
+                ? current.GetString() ?? defaultValue
+                : current.ToString();
+        }
+        catch
+        {
+            return defaultValue;
+        }
+    }
+
+    private bool GetJsonBool(JsonDocument doc, string path, bool defaultValue)
+    {
+        try
+        {
+            var parts = path.Split('.');
+            JsonElement current = doc.RootElement;
+
+            foreach (var part in parts)
+            {
+                if (current.TryGetProperty(part, out var element))
+                {
+                    current = element;
+                }
+                else
+                {
+                    return defaultValue;
+                }
+            }
+
+            return current.ValueKind == JsonValueKind.True || current.ValueKind == JsonValueKind.False
+                ? current.GetBoolean()
+                : defaultValue;
+        }
+        catch
+        {
+            return defaultValue;
+        }
+    }
+
+    private string BuildConfigFromForm(TabView.Tab httpTab, TabView.Tab nodeTab,
+        TabView.Tab discoveryTab, TabView.Tab storageTab, TabView.Tab loggingTab)
+    {
+        var config = new Dictionary<string, object>();
+
+        // Build Logging section
+        var loggingView = loggingTab.View;
+        var defaultLogLevel = GetComboBoxValue(loggingView, "DefaultLogLevel", new List<string> { "Trace", "Debug", "Information", "Warning", "Error", "Critical" });
+        var aspLogLevel = GetComboBoxValue(loggingView, "AspNetCoreLogLevel", new List<string> { "Trace", "Debug", "Information", "Warning", "Error", "Critical" });
+
+        config["Logging"] = new Dictionary<string, object>
+        {
+            ["LogLevel"] = new Dictionary<string, string>
+            {
+                ["Default"] = defaultLogLevel,
+                ["Microsoft.AspNetCore"] = aspLogLevel
+            }
+        };
+
+        config["AllowedHosts"] = "*";
+
+        // Build HTTP section
+        var httpView = httpTab.View;
+        var httpPort = GetTextFieldValue(httpView, "HttpPort");
+        config["HttpPort"] = int.Parse(httpPort);
+
+        config["Kestrel"] = new Dictionary<string, object>
+        {
+            ["Endpoints"] = new Dictionary<string, object>
+            {
+                ["Http"] = new Dictionary<string, string>
+                {
+                    ["Url"] = $"http://0.0.0.0:{httpPort}"
+                }
+            },
+            ["Limits"] = new Dictionary<string, object>
+            {
+                ["KeepAliveTimeout"] = GetTextFieldValue(httpView, "KeepAliveTimeout"),
+                ["RequestHeadersTimeout"] = GetTextFieldValue(httpView, "RequestHeadersTimeout"),
+                ["MaxConcurrentConnections"] = int.Parse(GetTextFieldValue(httpView, "MaxConcurrentConnections")),
+                ["MaxRequestBodySize"] = long.Parse(GetTextFieldValue(httpView, "MaxRequestBodySize"))
+            }
+        };
+
+        // Build NodeManager section
+        var nodeView = nodeTab.View;
+        config["NodeManager"] = new Dictionary<string, object>
+        {
+            ["EnableNodeManager"] = GetCheckBoxValue(nodeView, "EnableNodeManager"),
+            ["Role"] = GetComboBoxValue(nodeView, "Role", new List<string> { "Hybrid", "Worker", "Coordinator" }),
+            ["NodeName"] = GetTextFieldValue(nodeView, "NodeName"),
+            ["ServerPort"] = int.Parse(GetTextFieldValue(nodeView, "ServerPort")),
+            ["HostAddress"] = GetTextFieldValue(nodeView, "HostAddress"),
+            ["HeartbeatInterval"] = int.Parse(GetTextFieldValue(nodeView, "HeartbeatInterval")),
+            ["MaxReconnectAttempts"] = int.Parse(GetTextFieldValue(nodeView, "MaxReconnectAttempts")),
+            ["UseNodesForSimulators"] = GetCheckBoxValue(nodeView, "UseNodesForSimulators"),
+            ["UseGpuForJobs"] = GetCheckBoxValue(nodeView, "UseGpuForJobs")
+        };
+
+        // Build NetworkDiscovery section
+        var discoveryView = discoveryTab.View;
+        config["NetworkDiscovery"] = new Dictionary<string, object>
+        {
+            ["Enabled"] = GetCheckBoxValue(discoveryView, "DiscoveryEnabled"),
+            ["BroadcastInterval"] = int.Parse(GetTextFieldValue(discoveryView, "BroadcastInterval")),
+            ["DiscoveryPort"] = int.Parse(GetTextFieldValue(discoveryView, "DiscoveryPort"))
+        };
+
+        // Build SharedStorage section
+        var storageView = storageTab.View;
+        config["SharedStorage"] = new Dictionary<string, object>
+        {
+            ["Path"] = GetTextFieldValue(storageView, "StoragePath"),
+            ["UseNetworkStorage"] = GetCheckBoxValue(storageView, "UseNetworkStorage")
+        };
+
+        var options = new JsonSerializerOptions
+        {
+            WriteIndented = true
+        };
+
+        return JsonSerializer.Serialize(config, options);
+    }
+
+    private string GetTextFieldValue(View view, string tag)
+    {
+        foreach (var subview in view.Subviews)
+        {
+            if (subview is TextField textField && textField.Tag?.ToString() == tag)
+            {
+                return SanitizeString(textField.Text.ToString() ?? "");
+            }
+        }
+        return "";
+    }
+
+    private bool GetCheckBoxValue(View view, string tag)
+    {
+        foreach (var subview in view.Subviews)
+        {
+            if (subview is CheckBox checkBox && checkBox.Tag?.ToString() == tag)
+            {
+                return checkBox.Checked;
+            }
+        }
+        return false;
+    }
+
+    private string GetComboBoxValue(View view, string tag, List<string> options)
+    {
+        foreach (var subview in view.Subviews)
+        {
+            if (subview is ComboBox comboBox && comboBox.Tag?.ToString() == tag)
+            {
+                var index = comboBox.SelectedItem;
+                if (index >= 0 && index < options.Count)
+                {
+                    return options[index];
+                }
+            }
+        }
+        return options.Count > 0 ? options[0] : "";
     }
 
     private void ReloadConfiguration()
