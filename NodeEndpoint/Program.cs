@@ -100,6 +100,9 @@ public class Program
         var nodeEndpointService = app.Services.GetRequiredService<NodeEndpointService>();
         var networkDiscovery = app.Services.GetRequiredService<Services.NetworkDiscoveryService>();
 
+        // Load settings before accessing them
+        GeoscientistToolkit.Settings.SettingsManager.Instance.LoadSettings();
+
         // Auto-detect local IP if needed
         var localIp = Services.NetworkDiscoveryService.GetLocalIPAddress();
         var nodeManagerSettings = GeoscientistToolkit.Settings.SettingsManager.Instance.Settings.NodeManager;
