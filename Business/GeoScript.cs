@@ -1839,6 +1839,50 @@ public class SpeciateCommand : IGeoScriptCommand
         return normalized;
     }
 
+    /// <summary>
+    ///     Get the ionic dissociation products for a salt/mineral formula.
+    ///     E.g., NaCl → Na+ (1) + Cl- (1), CaCl₂ → Ca²⁺ (1) + Cl⁻ (2)
+    /// </summary>
+    private Dictionary<string, double> GetDissociationProducts(string formula, CompoundLibrary lib)
+    {
+        var products = new Dictionary<string, double>();
+
+        // Common salt dissociations
+        var dissociations = new Dictionary<string, (string cation, double cationCount, string anion, double anionCount)>
+        {
+            { "NaCl", ("Sodium Ion", 1, "Chloride Ion", 1) },
+            { "KCl", ("Potassium Ion", 1, "Chloride Ion", 1) },
+            { "CaCl₂", ("Calcium Ion", 1, "Chloride Ion", 2) },
+            { "MgCl₂", ("Magnesium Ion", 1, "Chloride Ion", 2) },
+            { "Na₂SO₄", ("Sodium Ion", 2, "Sulfate Ion", 1) },
+            { "K₂SO₄", ("Potassium Ion", 2, "Sulfate Ion", 1) },
+            { "CaSO₄", ("Calcium Ion", 1, "Sulfate Ion", 1) },
+            { "MgSO₄", ("Magnesium Ion", 1, "Sulfate Ion", 1) },
+            { "NaHCO₃", ("Sodium Ion", 1, "Bicarbonate Ion", 1) },
+            { "Na₂CO₃", ("Sodium Ion", 2, "Carbonate Ion", 1) },
+            { "CaCO₃", ("Calcium Ion", 1, "Carbonate Ion", 1) },
+            { "MgCO₃", ("Magnesium Ion", 1, "Carbonate Ion", 1) },
+            { "NaNO₃", ("Sodium Ion", 1, "Nitrate Ion", 1) },
+            { "KNO₃", ("Potassium Ion", 1, "Nitrate Ion", 1) },
+            { "Ca(NO₃)₂", ("Calcium Ion", 1, "Nitrate Ion", 2) }
+        };
+
+        if (dissociations.TryGetValue(formula, out var dissociation))
+        {
+            // Verify ions exist in library
+            var cation = lib.Find(dissociation.cation);
+            var anion = lib.Find(dissociation.anion);
+
+            if (cation != null && anion != null)
+            {
+                products[dissociation.cation] = dissociation.cationCount;
+                products[dissociation.anion] = dissociation.anionCount;
+            }
+        }
+
+        return products;
+    }
+
     public Task<Dataset> ExecuteAsync(GeoScriptContext context, AstNode node)
     {
         var cmd = (CommandNode)node;
@@ -1928,8 +1972,37 @@ public class SpeciateCommand : IGeoScriptCommand
                 Logger.Log($"  - {compound.Name} ({compound.ChemicalFormula}): {moles:F3} moles");
             }
 
-            initialState.SpeciesMoles[compound.Name] =
-                initialState.SpeciesMoles.GetValueOrDefault(compound.Name, 0) + moles;
+            // For salts/minerals that dissolve into ions, add the ions directly
+            // This ensures proper speciation output (e.g., NaCl → Na+ + Cl-)
+            if (compound.Phase == CompoundPhase.Solid && !isWater)
+            {
+                // Get the dissociation products
+                var dissociationProducts = GetDissociationProducts(compound.ChemicalFormula, compoundLib);
+
+                if (dissociationProducts.Count > 0)
+                {
+                    Logger.Log($"  - Dissolving {compound.Name} → {string.Join(" + ", dissociationProducts.Keys)}");
+
+                    // Add dissociated ions instead of the solid
+                    foreach (var (ionName, ionMoles) in dissociationProducts)
+                    {
+                        initialState.SpeciesMoles[ionName] =
+                            initialState.SpeciesMoles.GetValueOrDefault(ionName, 0) + (ionMoles * moles);
+                    }
+                }
+                else
+                {
+                    // No known dissociation, add the compound as-is
+                    initialState.SpeciesMoles[compound.Name] =
+                        initialState.SpeciesMoles.GetValueOrDefault(compound.Name, 0) + moles;
+                }
+            }
+            else
+            {
+                // For liquids, gases, and already-aqueous species, add directly
+                initialState.SpeciesMoles[compound.Name] =
+                    initialState.SpeciesMoles.GetValueOrDefault(compound.Name, 0) + moles;
+            }
 
             // Add elemental composition
             var composition = reactionGenerator.ParseChemicalFormula(compound.ChemicalFormula);
