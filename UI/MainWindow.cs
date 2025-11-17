@@ -1214,6 +1214,29 @@ public class MainWindow
             ImGui.Separator();
             ImGui.Spacing();
 
+            // Citation information
+            ImGui.Text("Citation");
+            ImGui.Spacing();
+            ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(0.6f, 0.8f, 0.6f, 1.0f));
+            ImGui.TextWrapped("If you use Geoscientist's Toolkit in your research, please cite:");
+            ImGui.PopStyleColor();
+            ImGui.Spacing();
+
+            ImGui.PushFont(ImGui.GetIO().Fonts.Fonts[0]); // Use monospace-like default font
+            ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(0.85f, 0.85f, 0.85f, 1.0f));
+            ImGui.TextWrapped("@software{geoscientist_toolkit,");
+            ImGui.TextWrapped("  title = {Geoscientist's Toolkit: Integrated Geoscientific Analysis Platform},");
+            ImGui.TextWrapped("  author = {Mangia, Matteo},");
+            ImGui.TextWrapped("  year = {2025},");
+            ImGui.TextWrapped("  url = {https://github.com/mattemangia/GeoscientistToolkit}");
+            ImGui.TextWrapped("}");
+            ImGui.PopStyleColor();
+            ImGui.PopFont();
+            ImGui.Spacing();
+
+            ImGui.Separator();
+            ImGui.Spacing();
+
             if (ImGui.Button("OK", new Vector2(100, 0)))
             {
                 _showAboutPopup = false;
