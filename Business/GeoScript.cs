@@ -183,6 +183,7 @@ public static class CommandRegistry
             new ReactCommand(),
             new SpeciateCommand(),
             new DiagnoseSpeciateCommand(),
+            new DiagnosticThermodynamicCommand(),
 
             // Thermodynamics Extensions
             new CalculatePhasesCommand(),
@@ -2442,6 +2443,150 @@ public class DiagnoseSpeciateCommand : IGeoScriptCommand
     public Task<Dataset> ExecuteAsync(GeoScriptContext context, AstNode node)
     {
         return SpeciateCommandExecutor.ExecuteAsync(context, (CommandNode)node, enableDiagnostics: true);
+    }
+}
+
+public class DiagnosticThermodynamicCommand : IGeoScriptCommand
+{
+    public string Name => "DIAGNOSTIC_THERMODYNAMIC";
+    public string HelpText =>
+        "Runs a NaCl dissolution benchmark and logs every step to verify the thermodynamic simulator.";
+
+    public string Usage => "DIAGNOSTIC_THERMODYNAMIC";
+
+    public Task<Dataset> ExecuteAsync(GeoScriptContext context, AstNode node)
+    {
+        const string prefix = "[DIAGNOSTIC_THERMODYNAMIC]";
+        Logger.Log($"{prefix} Step 1/4: Resolving reference compounds for NaCl dissolution benchmark.");
+
+        var compoundLib = CompoundLibrary.Instance;
+        var reactionGenerator = new ReactionGenerator(compoundLib);
+        var solver = new ThermodynamicSolver();
+
+        var water = compoundLib.FindFlexible("H2O") ??
+                    compoundLib.FindFlexible("Water") ??
+                    compoundLib.FindFlexible("H₂O");
+        var halite = compoundLib.FindFlexible("NaCl") ??
+                     compoundLib.FindFlexible("Halite");
+        var sodiumIon = compoundLib.FindFlexible("Na+") ??
+                        compoundLib.FindFlexible("Sodium Ion");
+        var chlorideIon = compoundLib.FindFlexible("Cl-") ??
+                          compoundLib.FindFlexible("Chloride Ion");
+
+        var missing = new List<string>();
+        if (water == null) missing.Add("H2O");
+        if (halite == null) missing.Add("NaCl");
+        if (sodiumIon == null) missing.Add("Na+");
+        if (chlorideIon == null) missing.Add("Cl-");
+
+        if (missing.Count > 0)
+        {
+            var message = $"{prefix} Missing required reference compounds: {string.Join(", ", missing)}";
+            Logger.LogError(message);
+            throw new InvalidOperationException(message);
+        }
+
+        Logger.Log(
+            $"{prefix} Step 2/4: Constructing initial state (1 L water + 1 mol halite at 25°C, 1 bar).");
+
+        var benchmarkState = new ThermodynamicState
+        {
+            Temperature_K = 298.15,
+            Pressure_bar = 1.0,
+            Volume_L = 1.0
+        };
+
+        void AddCompound(ChemicalCompound compound, double moles, string reason)
+        {
+            Logger.Log(
+                $"{prefix} Adding {moles:F3} mol of {compound.Name} ({compound.ChemicalFormula}) [{reason}]");
+            benchmarkState.SpeciesMoles[compound.Name] =
+                benchmarkState.SpeciesMoles.GetValueOrDefault(compound.Name, 0) + moles;
+
+            var composition = reactionGenerator.ParseChemicalFormula(compound.ChemicalFormula);
+            foreach (var (element, stoichiometry) in composition)
+            {
+                var contribution = moles * stoichiometry;
+                benchmarkState.ElementalComposition[element] =
+                    benchmarkState.ElementalComposition.GetValueOrDefault(element, 0) + contribution;
+                Logger.Log(
+                    $"{prefix} -> {element}: +{contribution:F3} mol (total {benchmarkState.ElementalComposition[element]:F3} mol)");
+            }
+        }
+
+        const double waterMoles = 55.508; // 1 L of water
+        AddCompound(water, waterMoles, "bulk solvent");
+
+        const double haliteMoles = 1.0; // Benchmark solute
+        AddCompound(halite, haliteMoles, "solid benchmark solute");
+
+        var elementSummary = string.Join(", ",
+            benchmarkState.ElementalComposition.Select(kvp => $"{kvp.Key}={kvp.Value:F3} mol"));
+        Logger.Log($"{prefix} Element totals before equilibration: {elementSummary}");
+
+        Logger.Log($"{prefix} Step 3/4: Running thermodynamic solver...");
+        var finalState = solver.SolveEquilibrium(benchmarkState);
+        Logger.Log(
+            $"{prefix} Solver finished. pH={finalState.pH:F2}, pe={finalState.pe:F2}, IonicStrength={finalState.IonicStrength_molkg:F4} mol/kg");
+
+        Logger.Log($"{prefix} Step 4/4: Comparing results with theoretical NaCl dissolution.");
+
+        double GetFinalMoles(ChemicalCompound compound)
+        {
+            return compound != null && finalState.SpeciesMoles.TryGetValue(compound.Name, out var moles)
+                ? moles
+                : 0.0;
+        }
+
+        var actualNa = GetFinalMoles(sodiumIon);
+        var actualCl = GetFinalMoles(chlorideIon);
+        var actualHalite = GetFinalMoles(halite);
+
+        const double expectedNa = 1.0;
+        const double expectedCl = 1.0;
+        const double expectedHalite = 0.0;
+        const double tolerance = 0.05;
+
+        var resultTable = new DataTable("ThermodynamicDiagnostic");
+        resultTable.Columns.Add("Species", typeof(string));
+        resultTable.Columns.Add("ExpectedMoles", typeof(double));
+        resultTable.Columns.Add("ActualMoles", typeof(double));
+        resultTable.Columns.Add("AbsoluteDifference", typeof(double));
+        resultTable.Columns.Add("Pass", typeof(bool));
+
+        void AddResultRow(string label, double expected, double actual)
+        {
+            var difference = Math.Abs(actual - expected);
+            var pass = difference <= tolerance;
+            var row = resultTable.NewRow();
+            row["Species"] = label;
+            row["ExpectedMoles"] = expected;
+            row["ActualMoles"] = actual;
+            row["AbsoluteDifference"] = difference;
+            row["Pass"] = pass;
+            resultTable.Rows.Add(row);
+            Logger.Log(
+                $"{prefix} {label}: expected {expected:F3} mol, got {actual:F3} mol (Δ={difference:E2}) -> {(pass ? "PASS" : "FAIL")}");
+        }
+
+        AddResultRow($"{sodiumIon.Name} (aq)", expectedNa, actualNa);
+        AddResultRow($"{chlorideIon.Name} (aq)", expectedCl, actualCl);
+        AddResultRow($"{halite.Name} (s)", expectedHalite, actualHalite);
+
+        var diagnosticPass = Math.Abs(actualNa - expectedNa) <= tolerance &&
+                             Math.Abs(actualCl - expectedCl) <= tolerance &&
+                             Math.Abs(actualHalite - expectedHalite) <= tolerance;
+        Logger.Log(
+            $"{prefix} Diagnostic verdict: {(diagnosticPass ? "PASS" : "FAIL")} within ±{tolerance:F3} mol tolerance.");
+
+        Logger.Log(
+            $"{prefix} expected results: Na⁺={expectedNa:F3} mol, Cl⁻={expectedCl:F3} mol, Halite(s)={expectedHalite:F3} mol");
+        Logger.Log(
+            $"{prefix} Got: Na⁺={actualNa:F3} mol, Cl⁻={actualCl:F3} mol, Halite(s)={actualHalite:F3} mol");
+
+        Logger.Log($"{prefix} Diagnostic complete. Results table ready for inspection.");
+
+        return Task.FromResult<Dataset>(new TableDataset("ThermodynamicDiagnostic", resultTable));
     }
 }
 
