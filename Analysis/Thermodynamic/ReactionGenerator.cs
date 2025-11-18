@@ -244,9 +244,9 @@ public class ReactionGenerator
         // Add water, H+, OH- as they are always present and needed for balancing
         var water = _compoundLibrary.Find("H2O");
         if (water != null) products.Add(water);
-        var hIon = _compoundLibrary.Find("H⁺");
+        var hIon = _compoundLibrary.Find("H^+");
         if (hIon != null) products.Add(hIon);
-        var ohIon = _compoundLibrary.Find("OH⁻");
+        var ohIon = _compoundLibrary.Find("OH^-");
         if (ohIon != null) products.Add(ohIon);
 
         return products.Distinct().ToList();
@@ -321,7 +321,7 @@ public class ReactionGenerator
                 if (singularValues[i] > tolerance)
                     S_inv[i, i] = 1.0 / singularValues[i];
 
-            // x = V * S⁽⁻¹⁾ * Uᵀ * b
+            // x = V * S^(-1) * U^T * b
             var VT = svd.VT;
             var U = svd.U;
             stoichiometry = VT.Transpose().Multiply(S_inv).Multiply(U.Transpose()).Multiply(b);
@@ -574,25 +574,25 @@ public class ReactionGenerator
 
         // Step 4: Systematically add H2O, H+, or OH- to balance
         var water = _compoundLibrary.Find("H2O");
-        var hPlus = _compoundLibrary.Find("H⁺");
-        var ohMinus = _compoundLibrary.Find("OH⁻");
+        var hPlus = _compoundLibrary.Find("H^+");
+        var ohMinus = _compoundLibrary.Find("OH^-");
 
         // Determine balancing strategy based on mineral type
         if (IsOxideMiner(mineral))
-            // Oxide minerals: MxOy + H2O -> cations + OH⁻
-            // Example: CaO + H2O -> Ca²⁺ + 2OH⁻
+            // Oxide minerals: MxOy + H2O -> cations + OH^-
+            // Example: CaO + H2O -> Ca^2^+ + 2OH^-
             BalanceOxideMineral(reaction, mineral, water, hPlus, ohMinus, H_deficit, O_deficit);
         else if (IsHydroxideMiner(mineral))
-            // Hydroxide minerals: M(OH)n -> Mⁿ⁺ + nOH⁻
-            // Example: Ca(OH)2 -> Ca²⁺ + 2OH⁻
+            // Hydroxide minerals: M(OH)n -> M^n^+ + nOH^-
+            // Example: Ca(OH)2 -> Ca^2^+ + 2OH^-
             BalanceHydroxideMineral(reaction, mineral, water, hPlus, ohMinus, H_deficit, O_deficit);
         else if (IsSilicateMineral(mineral))
             // Silicate minerals: complex, produce silicic acid
-            // Example: Mg2SiO4 + 4H⁺ -> 2Mg²⁺ + H4SiO4
+            // Example: Mg2SiO4 + 4H^+ -> 2Mg^2^+ + H4SiO4
             BalanceSilicateMineral(reaction, mineral, water, hPlus, ohMinus, H_deficit, O_deficit);
         else if (IsOxyanioncMineral(mineral))
             // Minerals with oxyanions (carbonates, sulfates, phosphates)
-            // Example: CaCO3 -> Ca²⁺ + CO3²⁻
+            // Example: CaCO3 -> Ca^2^+ + CO3^2^-
             BalanceOxyanionMineral(reaction, mineral, water, hPlus, ohMinus, H_deficit, O_deficit);
         else
             // Generic balancing
@@ -620,7 +620,7 @@ public class ReactionGenerator
     }
 
     /// <summary>
-    ///     Balance oxide mineral dissolution: MxOy + yH2O -> xMⁿ⁺ + 2yOH⁻
+    ///     Balance oxide mineral dissolution: MxOy + yH2O -> xM^n^+ + 2yOH^-
     /// </summary>
     private void BalanceOxideMineral(ChemicalReaction reaction, ChemicalCompound mineral,
         ChemicalCompound water, ChemicalCompound hPlus, ChemicalCompound ohMinus,
@@ -633,13 +633,13 @@ public class ReactionGenerator
         {
             // Add water
             reaction.Stoichiometry[water.Name] = O_count;
-            // Add hydroxide (2 per O²⁻)
+            // Add hydroxide (2 per O^2^-)
             reaction.Stoichiometry[ohMinus.Name] = 2.0 * O_count;
         }
     }
 
     /// <summary>
-    ///     Balance hydroxide mineral dissolution: M(OH)n -> Mⁿ⁺ + nOH⁻
+    ///     Balance hydroxide mineral dissolution: M(OH)n -> M^n^+ + nOH^-
     /// </summary>
     private void BalanceHydroxideMineral(ChemicalReaction reaction, ChemicalCompound mineral,
         ChemicalCompound water, ChemicalCompound hPlus, ChemicalCompound ohMinus,
@@ -653,7 +653,7 @@ public class ReactionGenerator
 
     /// <summary>
     ///     Balance silicate mineral dissolution: produces H4SiO4 (silicic acid)
-    ///     Example: Mg2SiO4 + 4H⁺ -> 2Mg²⁺ + H4SiO4
+    ///     Example: Mg2SiO4 + 4H^+ -> 2Mg^2^+ + H4SiO4
     /// </summary>
     private void BalanceSilicateMineral(ChemicalReaction reaction, ChemicalCompound mineral,
         ChemicalCompound water, ChemicalCompound hPlus, ChemicalCompound ohMinus,
@@ -782,7 +782,7 @@ public class ReactionGenerator
     }
 
     /// <summary>
-    ///     Check if mineral contains oxyanions (CO3²⁻, SO4²⁻, PO4³⁻)
+    ///     Check if mineral contains oxyanions (CO3^2^-, SO4^2^-, PO4^3^-)
     /// </summary>
     private bool IsOxyanioncMineral(ChemicalCompound mineral)
     {
@@ -1040,7 +1040,7 @@ public class ReactionGenerator
         var fixedValues = new List<double>();
 
         // Check if we need H+ for protonation/deprotonation
-        var h_index = basisSpecies.FindIndex(b => b.Name == "H⁺" || b.Name == "H+");
+        var h_index = basisSpecies.FindIndex(b => b.Name == "H^+" || b.Name == "H+");
         var water_index = basisSpecies.FindIndex(b => b.Name == "H2O" || b.Name == "H2O");
 
         var secondaryComp = ParseChemicalFormula(secondary.ChemicalFormula);
@@ -1200,11 +1200,11 @@ public class ReactionGenerator
     {
         var reactions = new List<ChemicalReaction>();
 
-        var ammonium = _compoundLibrary.Find("NH4⁺");
+        var ammonium = _compoundLibrary.Find("NH4^+");
         var ammoniaAqueous = _compoundLibrary.Find("NH3(aq)") ?? _compoundLibrary.Find("NH3");
-        var hPlus = _compoundLibrary.Find("H⁺");
+        var hPlus = _compoundLibrary.Find("H^+");
         var water = _compoundLibrary.Find("H2O");
-        var hydroxide = _compoundLibrary.Find("OH⁻");
+        var hydroxide = _compoundLibrary.Find("OH^-");
 
         if (ammonium == null || ammoniaAqueous == null)
             return reactions;
@@ -1245,11 +1245,11 @@ public class ReactionGenerator
         {
             var co2_aq = _compoundLibrary.Find("CO2(aq)");
             var h2co3 = _compoundLibrary.Find("H2CO3");
-            var hco3 = _compoundLibrary.Find("HCO3⁻");
-            var co3 = _compoundLibrary.Find("CO3²⁻");
-            var h_plus = _compoundLibrary.Find("H⁺");
+            var hco3 = _compoundLibrary.Find("HCO3^-");
+            var co3 = _compoundLibrary.Find("CO3^2^-");
+            var h_plus = _compoundLibrary.Find("H^+");
 
-            // H2CO3* <-> HCO3⁻ + H⁺ (pKa1 ~ 6.35)
+            // H2CO3* <-> HCO3^- + H^+ (pKa1 ~ 6.35)
             // Note: H2CO3* represents the sum of CO2(aq) and H2CO3. We use CO2(aq) as the primary species.
             if (co2_aq != null && hco3 != null && h_plus != null)
             {
@@ -1262,7 +1262,7 @@ public class ReactionGenerator
                 reactions.Add(reaction);
             }
 
-            // HCO3⁻ <-> CO3²⁻ + H⁺ (pKa2 ~ 10.33)
+            // HCO3^- <-> CO3^2^- + H^+ (pKa2 ~ 10.33)
             if (hco3 != null && co3 != null && h_plus != null)
             {
                 var reaction = new ChemicalReaction { Name = "Bicarbonate Dissociation" };
@@ -1287,8 +1287,8 @@ public class ReactionGenerator
         var reactions = new List<ChemicalReaction>();
 
         var water = _compoundLibrary.Find("H2O");
-        var hPlus = _compoundLibrary.Find("H⁺");
-        var ohMinus = _compoundLibrary.Find("OH⁻");
+        var hPlus = _compoundLibrary.Find("H^+");
+        var ohMinus = _compoundLibrary.Find("OH^-");
 
         if (water != null && hPlus != null && ohMinus != null)
         {
@@ -1314,18 +1314,18 @@ public class ReactionGenerator
     {
         var reactions = new List<ChemicalReaction>();
         var h3po4 = _compoundLibrary.Find("H3PO4");
-        var h2po4 = _compoundLibrary.Find("H2PO4⁻");
-        var hpo4 = _compoundLibrary.Find("HPO4²⁻");
-        var po4 = _compoundLibrary.Find("PO4³⁻");
-        var h_plus = _compoundLibrary.Find("H⁺");
+        var h2po4 = _compoundLibrary.Find("H2PO4^-");
+        var hpo4 = _compoundLibrary.Find("HPO4^2^-");
+        var po4 = _compoundLibrary.Find("PO4^3^-");
+        var h_plus = _compoundLibrary.Find("H^+");
 
         if (h3po4 == null || h2po4 == null || hpo4 == null || po4 == null || h_plus == null) return reactions;
 
-        // H3PO4 <-> H2PO4⁻ + H⁺
+        // H3PO4 <-> H2PO4^- + H^+
         reactions.Add(CreateAcidBaseReaction("Phosphoric Acid pKa1", h3po4.Name, h2po4.Name, h_plus.Name));
-        // H2PO4⁻ <-> HPO4²⁻ + H⁺
+        // H2PO4^- <-> HPO4^2^- + H^+
         reactions.Add(CreateAcidBaseReaction("Phosphoric Acid pKa2", h2po4.Name, hpo4.Name, h_plus.Name));
-        // HPO4²⁻ <-> PO4³⁻ + H⁺
+        // HPO4^2^- <-> PO4^3^- + H^+
         reactions.Add(CreateAcidBaseReaction("Phosphoric Acid pKa3", hpo4.Name, po4.Name, h_plus.Name));
 
         return reactions;
@@ -1335,15 +1335,15 @@ public class ReactionGenerator
     {
         var reactions = new List<ChemicalReaction>();
         var h2s = _compoundLibrary.Find("H2S(aq)");
-        var hs = _compoundLibrary.Find("HS⁻");
-        var s2 = _compoundLibrary.Find("S²⁻");
-        var h_plus = _compoundLibrary.Find("H⁺");
+        var hs = _compoundLibrary.Find("HS^-");
+        var s2 = _compoundLibrary.Find("S^2^-");
+        var h_plus = _compoundLibrary.Find("H^+");
 
         if (h2s == null || hs == null || s2 == null || h_plus == null) return reactions;
 
-        // H2S <-> HS⁻ + H⁺
+        // H2S <-> HS^- + H^+
         reactions.Add(CreateAcidBaseReaction("Hydrogen Sulfide pKa1", h2s.Name, hs.Name, h_plus.Name));
-        // HS⁻ <-> S²⁻ + H⁺
+        // HS^- <-> S^2^- + H^+
         reactions.Add(CreateAcidBaseReaction("Hydrogen Sulfide pKa2", hs.Name, s2.Name, h_plus.Name));
 
         return reactions;
@@ -1372,11 +1372,11 @@ public class ReactionGenerator
     public List<ChemicalReaction> GenerateRedoxReactions(ThermodynamicState state)
     {
         var reactions = new List<ChemicalReaction>();
-        var electron = _compoundLibrary.Find("e⁻");
+        var electron = _compoundLibrary.Find("e^-");
         if (electron == null)
         {
             Logger.LogWarning(
-                "[ReactionGenerator] Electron (e⁻) not defined in library. Cannot generate redox reactions.");
+                "[ReactionGenerator] Electron (e^-) not defined in library. Cannot generate redox reactions.");
             return reactions;
         }
 
@@ -1466,7 +1466,7 @@ public class ReactionGenerator
         var surfaceSpecies = _compoundLibrary.Compounds.Where(c => c.Phase == CompoundPhase.Surface).ToList();
         var aqueousIons = _compoundLibrary.Compounds
             .Where(c => c.Phase == CompoundPhase.Aqueous && c.IonicCharge.HasValue).ToList();
-        var hPlus = _compoundLibrary.Find("H⁺");
+        var hPlus = _compoundLibrary.Find("H^+");
 
         if (hPlus == null) return reactions;
 
@@ -1477,20 +1477,20 @@ public class ReactionGenerator
         {
             // Protonation/deprotonation reactions
             // >SOH + H+ <=> >SOH2+
-            var protonated = surfaceSpecies.FirstOrDefault(s => s.ChemicalFormula == site.ChemicalFormula + "2⁺");
+            var protonated = surfaceSpecies.FirstOrDefault(s => s.ChemicalFormula == site.ChemicalFormula + "2^+");
             if (protonated != null)
                 reactions.Add(CreateSurfaceReaction($"{site.Name} Protonation", new[] { site.Name, hPlus.Name },
                     new[] { protonated.Name }));
 
             // >SOH <=> >SO- + H+
             var deprotonated =
-                surfaceSpecies.FirstOrDefault(s => s.ChemicalFormula == site.ChemicalFormula.Replace("OH", "O⁻"));
+                surfaceSpecies.FirstOrDefault(s => s.ChemicalFormula == site.ChemicalFormula.Replace("OH", "O^-"));
             if (deprotonated != null)
                 reactions.Add(CreateSurfaceReaction($"{site.Name} Deprotonation", new[] { site.Name },
                     new[] { deprotonated.Name, hPlus.Name }));
 
             // Cation binding reactions
-            // >SOH + Catⁿ⁺ <=> >SOCat⁽ⁿ⁻¹⁾ + H+
+            // >SOH + Cat^n+ <=> >SOCat^(n-1) + H+
             foreach (var cation in aqueousIons.Where(i => i.IonicCharge > 0))
             {
                 var cationComplex = surfaceSpecies.FirstOrDefault(s => s.Name == $"{site.Name}-{cation.Name}");
@@ -1548,7 +1548,7 @@ public class ReactionGenerator
     }
 /// <summary>
 /// Generate dissociation reactions for highly soluble compounds (salts).
-/// For example: NaCl(s) -> Na⁺⁽aq) + Cl⁻⁽aq)
+/// For example: NaCl(s) -> Na^+(aq) + Cl^-(aq)
 /// </summary>
 public List<ChemicalReaction> GenerateSolubleCompoundDissociationReactions(List<string> compoundNames)
 {
@@ -1570,6 +1570,14 @@ public List<ChemicalReaction> GenerateSolubleCompoundDissociationReactions(List<
         if (compound.Phase == CompoundPhase.Aqueous)
         {
             Logger.Log($"[ReactionGenerator] {compoundName} is already an aqueous species, skipping dissociation");
+            continue;
+        }
+        
+        // SURGICAL FIX: Skip water (liquid phase) - it's the solvent and should not dissociate
+        if (compound.Phase == CompoundPhase.Liquid && 
+            (compound.Name == "Water" || compound.ChemicalFormula.Contains("H2O") || compound.ChemicalFormula.Contains("H₂O")))
+        {
+            Logger.Log($"[ReactionGenerator] {compoundName} is water (solvent), skipping dissociation");
             continue;
         }
         
@@ -1695,10 +1703,10 @@ private void CheckForPolyatomicIons(Dictionary<string, int> elementalComp,
     ref List<(ChemicalCompound, int)> anions,
     ref List<(ChemicalCompound, int)> cations)
 {
-    // Check for carbonate (CO3²⁻)
+    // Check for carbonate (CO3^2^-)
     if (elementalComp.ContainsKey("C") && elementalComp.ContainsKey("O") && elementalComp["O"] >= 3)
     {
-        var carbonate = _compoundLibrary.Find("CO3²⁻") ?? _compoundLibrary.Find("Carbonate");
+        var carbonate = _compoundLibrary.Find("CO3^2^-") ?? _compoundLibrary.Find("Carbonate");
         if (carbonate != null)
         {
             int carbonateCount = elementalComp["C"];
@@ -1709,10 +1717,10 @@ private void CheckForPolyatomicIons(Dictionary<string, int> elementalComp,
         }
     }
     
-    // Check for sulfate (SO4²⁻)
+    // Check for sulfate (SO4^2^-)
     if (elementalComp.ContainsKey("S") && elementalComp.ContainsKey("O") && elementalComp["O"] >= 4)
     {
-        var sulfate = _compoundLibrary.Find("SO4²⁻") ?? _compoundLibrary.Find("Sulfate Ion");
+        var sulfate = _compoundLibrary.Find("SO4^2^-") ?? _compoundLibrary.Find("Sulfate Ion");
         if (sulfate != null)
         {
             int sulfateCount = elementalComp["S"];
@@ -1722,10 +1730,10 @@ private void CheckForPolyatomicIons(Dictionary<string, int> elementalComp,
         }
     }
     
-    // Check for phosphate (PO4³⁻)
+    // Check for phosphate (PO4^3^-)
     if (elementalComp.ContainsKey("P") && elementalComp.ContainsKey("O") && elementalComp["O"] >= 4)
     {
-        var phosphate = _compoundLibrary.Find("PO4³⁻") ?? _compoundLibrary.Find("Phosphate");
+        var phosphate = _compoundLibrary.Find("PO4^3^-") ?? _compoundLibrary.Find("Phosphate");
         if (phosphate != null)
         {
             int phosphateCount = elementalComp["P"];
@@ -1735,10 +1743,10 @@ private void CheckForPolyatomicIons(Dictionary<string, int> elementalComp,
         }
     }
     
-    // Check for nitrate (NO3⁻)
+    // Check for nitrate (NO3^-)
     if (elementalComp.ContainsKey("N") && elementalComp.ContainsKey("O") && elementalComp["O"] >= 3)
     {
-        var nitrate = _compoundLibrary.Find("NO3⁻") ?? _compoundLibrary.Find("Nitrate");
+        var nitrate = _compoundLibrary.Find("NO3^-") ?? _compoundLibrary.Find("Nitrate");
         if (nitrate != null)
         {
             int nitrateCount = elementalComp["N"];
@@ -1859,7 +1867,7 @@ private ChemicalReaction GenerateAcidDissociationReaction(ChemicalCompound acid,
     reaction.Stoichiometry[acid.Name] = -1.0;
     
     // Find conjugate base and H+
-    var hIon = _compoundLibrary.Find("H⁺") ?? _compoundLibrary.Find("Proton");
+    var hIon = _compoundLibrary.Find("H^+") ?? _compoundLibrary.Find("Proton");
     if (hIon != null)
     {
         reaction.Stoichiometry[hIon.Name] = 1.0;
@@ -2079,7 +2087,7 @@ private List<(ChemicalCompound, double)> FindOxyanionIons(Dictionary<string, int
         if (oCount >= cCount * 3)
         {
             var carbonate = _compoundLibrary.Compounds
-                .FirstOrDefault(c => c.ChemicalFormula == "CO3²⁻" || 
+                .FirstOrDefault(c => c.ChemicalFormula == "CO3^2^-" || 
                                    c.Name == "Carbonate");
             if (carbonate != null)
             {
@@ -2108,7 +2116,7 @@ private List<(ChemicalCompound, double)> FindOxyanionIons(Dictionary<string, int
         if (oCount >= sCount * 4)
         {
             var sulfate = _compoundLibrary.Compounds
-                .FirstOrDefault(c => c.ChemicalFormula == "SO4²⁻" || 
+                .FirstOrDefault(c => c.ChemicalFormula == "SO4^2^-" || 
                                    c.Name == "Sulfate Ion");
             if (sulfate != null)
             {
@@ -2134,7 +2142,7 @@ private List<(ChemicalCompound, double)> FindOxyanionIons(Dictionary<string, int
         if (oCount >= pCount * 4)
         {
             var phosphate = _compoundLibrary.Compounds
-                .FirstOrDefault(c => c.ChemicalFormula == "PO4³⁻" || 
+                .FirstOrDefault(c => c.ChemicalFormula == "PO4^3^-" || 
                                    c.Name == "Phosphate");
             if (phosphate != null)
             {
@@ -2160,7 +2168,7 @@ private List<(ChemicalCompound, double)> FindOxyanionIons(Dictionary<string, int
         if (oCount >= nCount * 3)
         {
             var nitrate = _compoundLibrary.Compounds
-                .FirstOrDefault(c => c.ChemicalFormula == "NO3⁻" || 
+                .FirstOrDefault(c => c.ChemicalFormula == "NO3^-" || 
                                    c.Name == "Nitrate");
             if (nitrate != null)
             {
@@ -2426,19 +2434,19 @@ private ChemicalCompound FindConjugateBase(ChemicalCompound acid)
     // Common acid-base pairs
     var acidBasePairs = new Dictionary<string, string>
     {
-        { "H2CO3", "HCO3⁻" },
-        { "HCO3⁻", "CO3²⁻" },
-        { "H3PO4", "H2PO4⁻" },
-        { "H2PO4⁻", "HPO4²⁻" },
-        { "HPO4²⁻", "PO4³⁻" },
-        { "H2SO4", "HSO4⁻" },
-        { "HSO4⁻", "SO4²⁻" },
-        { "HNO3", "NO3⁻" },
-        { "HCl", "Cl⁻" },
-        { "NH4⁺", "NH3" },
-        { "H2S", "HS⁻" },
-        { "HS⁻", "S²⁻" },
-        { "HF", "F⁻" }
+        { "H2CO3", "HCO3^-" },
+        { "HCO3^-", "CO3^2^-" },
+        { "H3PO4", "H2PO4^-" },
+        { "H2PO4^-", "HPO4^2^-" },
+        { "HPO4^2^-", "PO4^3^-" },
+        { "H2SO4", "HSO4^-" },
+        { "HSO4^-", "SO4^2^-" },
+        { "HNO3", "NO3^-" },
+        { "HCl", "Cl^-" },
+        { "NH4^+", "NH3" },
+        { "H2S", "HS^-" },
+        { "HS^-", "S^2^-" },
+        { "HF", "F^-" }
     };
     
     if (acidBasePairs.TryGetValue(acidFormula, out var baseFormula))
@@ -2495,7 +2503,7 @@ private ChemicalReaction GenerateBaseDissociationReaction(ChemicalCompound baseC
     reaction.Stoichiometry[baseCompound.Name] = -1.0;
     
     // Find OH- and conjugate acid
-    var ohIon = _compoundLibrary.Find("OH⁻") ?? _compoundLibrary.Find("Hydroxide");
+    var ohIon = _compoundLibrary.Find("OH^-") ?? _compoundLibrary.Find("Hydroxide");
     if (ohIon != null)
     {
         reaction.Stoichiometry[ohIon.Name] = 1.0;
@@ -2536,12 +2544,12 @@ private ChemicalCompound FindConjugateAcid(ChemicalCompound baseCompound)
     // Common base-acid pairs
     var baseAcidPairs = new Dictionary<string, string>
     {
-        { "NH3", "NH4⁺" },
-        { "OH⁻", "H2O" },
-        { "CO3²⁻", "HCO3⁻" },
-        { "PO4³⁻", "HPO4²⁻" },
-        { "SO4²⁻", "HSO4⁻" },
-        { "S²⁻", "HS⁻" }
+        { "NH3", "NH4^+" },
+        { "OH^-", "H2O" },
+        { "CO3^2^-", "HCO3^-" },
+        { "PO4^3^-", "HPO4^2^-" },
+        { "SO4^2^-", "HSO4^-" },
+        { "S^2^-", "HS^-" }
     };
     
     if (baseAcidPairs.TryGetValue(baseCompound.ChemicalFormula, out var acidFormula))
@@ -2573,7 +2581,7 @@ private ChemicalCompound FindAqueousFormOfGas(ChemicalCompound gas)
         { "CO2", "H2CO3" }, // CO2 forms carbonic acid
         { "SO2", "H2SO3" }, // SO2 forms sulfurous acid  
         { "NH3", "NH3(aq)" }, // Ammonia
-        { "HCl", "Cl⁻" }, // HCl gas dissociates completely
+        { "HCl", "Cl^-" }, // HCl gas dissociates completely
         { "H2S", "H2S(aq)" }, // Hydrogen sulfide
         { "O2", "O2(aq)" }, // Dissolved oxygen
         { "N2", "N2(aq)" }, // Dissolved nitrogen
@@ -2790,22 +2798,22 @@ private List<(ChemicalCompound, double)> FindOxyanionProducts(
     
     if (formula.Contains("CO3") || formula.Contains("CO3"))
     {
-        oxyanion = _compoundLibrary.Find("CO3²⁻") ?? _compoundLibrary.Find("Carbonate");
+        oxyanion = _compoundLibrary.Find("CO3^2^-") ?? _compoundLibrary.Find("Carbonate");
         oxyanionCount = elementalComp.GetValueOrDefault("C", 1);
     }
     else if (formula.Contains("SO4") || formula.Contains("SO4"))
     {
-        oxyanion = _compoundLibrary.Find("SO4²⁻") ?? _compoundLibrary.Find("Sulfate Ion");
+        oxyanion = _compoundLibrary.Find("SO4^2^-") ?? _compoundLibrary.Find("Sulfate Ion");
         oxyanionCount = elementalComp.GetValueOrDefault("S", 1);
     }
     else if (formula.Contains("PO4") || formula.Contains("PO4"))
     {
-        oxyanion = _compoundLibrary.Find("PO4³⁻") ?? _compoundLibrary.Find("Phosphate");
+        oxyanion = _compoundLibrary.Find("PO4^3^-") ?? _compoundLibrary.Find("Phosphate");
         oxyanionCount = elementalComp.GetValueOrDefault("P", 1);
     }
     else if (formula.Contains("NO3") || formula.Contains("NO3"))
     {
-        oxyanion = _compoundLibrary.Find("NO3⁻") ?? _compoundLibrary.Find("Nitrate");
+        oxyanion = _compoundLibrary.Find("NO3^-") ?? _compoundLibrary.Find("Nitrate");
         oxyanionCount = elementalComp.GetValueOrDefault("N", 1);
     }
     
@@ -3090,28 +3098,28 @@ private List<string> GetIronComplexes(HashSet<string> ligands)
     var complexes = new List<string>();
     
     // Hydroxo complexes (always form in water)
-    complexes.AddRange(new[] { "FeOH²⁺", "Fe(OH)2⁺", "Fe(OH)3", "Fe(OH)4⁻" });
+    complexes.AddRange(new[] { "FeOH^2^+", "Fe(OH)2^+", "Fe(OH)3", "Fe(OH)4^-" });
     
     // For Fe(III)
-    complexes.AddRange(new[] { "FeOH²⁺", "Fe(OH)2⁺", "Fe(OH)4⁻" });
+    complexes.AddRange(new[] { "FeOH^2^+", "Fe(OH)2^+", "Fe(OH)4^-" });
     
     if (ligands.Contains("Cl-"))
     {
-        complexes.AddRange(new[] { "FeCl²⁺", "FeCl2⁺", "FeCl3", "FeCl4⁻" });
+        complexes.AddRange(new[] { "FeCl^2^+", "FeCl2^+", "FeCl3", "FeCl4^-" });
         // Fe(III) chloro complexes
-        complexes.AddRange(new[] { "FeCl²⁺", "FeCl2⁺", "FeCl4⁻", "FeCl6³⁻" });
+        complexes.AddRange(new[] { "FeCl^2^+", "FeCl2^+", "FeCl4^-", "FeCl6^3^-" });
     }
     
     if (ligands.Contains("SO4-2"))
     {
-        complexes.AddRange(new[] { "FeSO4", "Fe(SO4)2⁻" });
-        complexes.AddRange(new[] { "FeSO4⁺", "Fe(SO4)2⁻" }); // Fe(III)
+        complexes.AddRange(new[] { "FeSO4", "Fe(SO4)2^-" });
+        complexes.AddRange(new[] { "FeSO4^+", "Fe(SO4)2^-" }); // Fe(III)
     }
     
     if (ligands.Contains("CN-"))
     {
-        complexes.Add("[Fe(CN)6]⁴⁻"); // Ferrocyanide
-        complexes.Add("[Fe(CN)6]³⁻"); // Ferricyanide
+        complexes.Add("[Fe(CN)6]^4^-"); // Ferrocyanide
+        complexes.Add("[Fe(CN)6]^3^-"); // Ferricyanide
     }
     
     return complexes;
@@ -3125,25 +3133,25 @@ private List<string> GetCopperComplexes(HashSet<string> ligands)
     var complexes = new List<string>();
     
     // Hydroxo complexes
-    complexes.AddRange(new[] { "CuOH⁺", "Cu(OH)2", "Cu(OH)3⁻", "Cu(OH)4²⁻" });
+    complexes.AddRange(new[] { "CuOH^+", "Cu(OH)2", "Cu(OH)3^-", "Cu(OH)4^2^-" });
     
     if (ligands.Contains("Cl-"))
     {
-        complexes.AddRange(new[] { "CuCl⁺", "CuCl2", "CuCl3⁻", "CuCl4²⁻" });
+        complexes.AddRange(new[] { "CuCl^+", "CuCl2", "CuCl3^-", "CuCl4^2^-" });
     }
     
     if (ligands.Contains("NH3"))
     {
         complexes.AddRange(new[] 
         { 
-            "Cu(NH3)²⁺", "Cu(NH3)2²⁺", "Cu(NH3)3²⁺", 
-            "Cu(NH3)4²⁺", "[Cu(NH3)4(H2O)2]²⁺" 
+            "Cu(NH3)^2^+", "Cu(NH3)2^2^+", "Cu(NH3)3^2^+", 
+            "Cu(NH3)4^2^+", "[Cu(NH3)4(H2O)2]^2^+" 
         });
     }
     
     if (ligands.Contains("CO3-2"))
     {
-        complexes.AddRange(new[] { "CuCO3", "Cu(CO3)2²⁻" });
+        complexes.AddRange(new[] { "CuCO3", "Cu(CO3)2^2^-" });
     }
     
     if (ligands.Contains("SO4-2"))
@@ -3162,30 +3170,30 @@ private List<string> GetZincComplexes(HashSet<string> ligands)
     var complexes = new List<string>();
     
     // Hydroxo complexes
-    complexes.AddRange(new[] { "ZnOH⁺", "Zn(OH)2", "Zn(OH)3⁻", "Zn(OH)4²⁻" });
+    complexes.AddRange(new[] { "ZnOH^+", "Zn(OH)2", "Zn(OH)3^-", "Zn(OH)4^2^-" });
     
     if (ligands.Contains("Cl-"))
     {
-        complexes.AddRange(new[] { "ZnCl⁺", "ZnCl2", "ZnCl3⁻", "ZnCl4²⁻" });
+        complexes.AddRange(new[] { "ZnCl^+", "ZnCl2", "ZnCl3^-", "ZnCl4^2^-" });
     }
     
     if (ligands.Contains("NH3"))
     {
         complexes.AddRange(new[] 
         { 
-            "Zn(NH3)²⁺", "Zn(NH3)2²⁺", 
-            "Zn(NH3)3²⁺", "Zn(NH3)4²⁺" 
+            "Zn(NH3)^2^+", "Zn(NH3)2^2^+", 
+            "Zn(NH3)3^2^+", "Zn(NH3)4^2^+" 
         });
     }
     
     if (ligands.Contains("CO3-2"))
     {
-        complexes.AddRange(new[] { "ZnCO3", "Zn(CO3)2²⁻" });
+        complexes.AddRange(new[] { "ZnCO3", "Zn(CO3)2^2^-" });
     }
     
     if (ligands.Contains("SO4-2"))
     {
-        complexes.AddRange(new[] { "ZnSO4", "Zn(SO4)2²⁻" });
+        complexes.AddRange(new[] { "ZnSO4", "Zn(SO4)2^2^-" });
     }
     
     return complexes;
@@ -3199,26 +3207,26 @@ private List<string> GetSilverComplexes(HashSet<string> ligands)
     var complexes = new List<string>();
     
     // Hydroxo complexes
-    complexes.AddRange(new[] { "AgOH", "Ag(OH)2⁻" });
+    complexes.AddRange(new[] { "AgOH", "Ag(OH)2^-" });
     
     if (ligands.Contains("Cl-"))
     {
-        complexes.AddRange(new[] { "AgCl", "AgCl2⁻", "AgCl3²⁻", "AgCl4³⁻" });
+        complexes.AddRange(new[] { "AgCl", "AgCl2^-", "AgCl3^2^-", "AgCl4^3^-" });
     }
     
     if (ligands.Contains("NH3"))
     {
-        complexes.AddRange(new[] { "Ag(NH3)⁺", "Ag(NH3)2⁺" }); // Diammine silver(I)
+        complexes.AddRange(new[] { "Ag(NH3)^+", "Ag(NH3)2^+" }); // Diammine silver(I)
     }
     
     if (ligands.Contains("CN-"))
     {
-        complexes.AddRange(new[] { "Ag(CN)2⁻", "Ag(CN)3²⁻", "Ag(CN)4³⁻" });
+        complexes.AddRange(new[] { "Ag(CN)2^-", "Ag(CN)3^2^-", "Ag(CN)4^3^-" });
     }
     
     if (ligands.Contains("S2O3-2"))
     {
-        complexes.AddRange(new[] { "Ag(S2O3)⁻", "Ag(S2O3)2³⁻" }); // Photography fixer
+        complexes.AddRange(new[] { "Ag(S2O3)^-", "Ag(S2O3)2^3^-" }); // Photography fixer
     }
     
     return complexes;
@@ -3233,17 +3241,17 @@ private List<string> GetGoldComplexes(HashSet<string> ligands)
     
     if (ligands.Contains("Cl-"))
     {
-        complexes.AddRange(new[] { "AuCl2⁻", "AuCl4⁻" }); // Au(I) and Au(III)
+        complexes.AddRange(new[] { "AuCl2^-", "AuCl4^-" }); // Au(I) and Au(III)
     }
     
     if (ligands.Contains("CN-"))
     {
-        complexes.AddRange(new[] { "Au(CN)2⁻", "Au(CN)4⁻" }); // Used in gold extraction
+        complexes.AddRange(new[] { "Au(CN)2^-", "Au(CN)4^-" }); // Used in gold extraction
     }
     
     if (ligands.Contains("S2O3-2"))
     {
-        complexes.Add("Au(S2O3)2³⁻"); // Alternative gold leaching
+        complexes.Add("Au(S2O3)2^3^-"); // Alternative gold leaching
     }
     
     return complexes;
@@ -3257,26 +3265,26 @@ private List<string> GetMercuryComplexes(HashSet<string> ligands)
     var complexes = new List<string>();
     
     // Hydroxo complexes
-    complexes.AddRange(new[] { "HgOH⁺", "Hg(OH)2" });
+    complexes.AddRange(new[] { "HgOH^+", "Hg(OH)2" });
     
     if (ligands.Contains("Cl-"))
     {
-        complexes.AddRange(new[] { "HgCl⁺", "HgCl2", "HgCl3⁻", "HgCl4²⁻" });
+        complexes.AddRange(new[] { "HgCl^+", "HgCl2", "HgCl3^-", "HgCl4^2^-" });
     }
     
     if (ligands.Contains("Br-"))
     {
-        complexes.AddRange(new[] { "HgBr⁺", "HgBr2", "HgBr3⁻", "HgBr4²⁻" });
+        complexes.AddRange(new[] { "HgBr^+", "HgBr2", "HgBr3^-", "HgBr4^2^-" });
     }
     
     if (ligands.Contains("I-"))
     {
-        complexes.AddRange(new[] { "HgI⁺", "HgI2", "HgI3⁻", "HgI4²⁻" });
+        complexes.AddRange(new[] { "HgI^+", "HgI2", "HgI3^-", "HgI4^2^-" });
     }
     
     if (ligands.Contains("CN-"))
     {
-        complexes.AddRange(new[] { "Hg(CN)2", "Hg(CN)3⁻", "Hg(CN)4²⁻" });
+        complexes.AddRange(new[] { "Hg(CN)2", "Hg(CN)3^-", "Hg(CN)4^2^-" });
     }
     
     return complexes;
@@ -3290,21 +3298,21 @@ private List<string> GetLeadComplexes(HashSet<string> ligands)
     var complexes = new List<string>();
     
     // Hydroxo complexes
-    complexes.AddRange(new[] { "PbOH⁺", "Pb(OH)2", "Pb(OH)3⁻", "Pb(OH)4²⁻" });
+    complexes.AddRange(new[] { "PbOH^+", "Pb(OH)2", "Pb(OH)3^-", "Pb(OH)4^2^-" });
     
     if (ligands.Contains("Cl-"))
     {
-        complexes.AddRange(new[] { "PbCl⁺", "PbCl2", "PbCl3⁻", "PbCl4²⁻" });
+        complexes.AddRange(new[] { "PbCl^+", "PbCl2", "PbCl3^-", "PbCl4^2^-" });
     }
     
     if (ligands.Contains("CO3-2"))
     {
-        complexes.AddRange(new[] { "PbCO3", "Pb(CO3)2²⁻" });
+        complexes.AddRange(new[] { "PbCO3", "Pb(CO3)2^2^-" });
     }
     
     if (ligands.Contains("SO4-2"))
     {
-        complexes.AddRange(new[] { "PbSO4", "Pb(SO4)2²⁻" });
+        complexes.AddRange(new[] { "PbSO4", "Pb(SO4)2^2^-" });
     }
     
     return complexes;
@@ -3318,26 +3326,26 @@ private List<string> GetCadmiumComplexes(HashSet<string> ligands)
     var complexes = new List<string>();
     
     // Hydroxo complexes
-    complexes.AddRange(new[] { "CdOH⁺", "Cd(OH)2", "Cd(OH)3⁻", "Cd(OH)4²⁻" });
+    complexes.AddRange(new[] { "CdOH^+", "Cd(OH)2", "Cd(OH)3^-", "Cd(OH)4^2^-" });
     
     if (ligands.Contains("Cl-"))
     {
-        complexes.AddRange(new[] { "CdCl⁺", "CdCl2", "CdCl3⁻", "CdCl4²⁻" });
+        complexes.AddRange(new[] { "CdCl^+", "CdCl2", "CdCl3^-", "CdCl4^2^-" });
     }
     
     if (ligands.Contains("NH3"))
     {
         complexes.AddRange(new[] 
         { 
-            "Cd(NH3)²⁺", "Cd(NH3)2²⁺", 
-            "Cd(NH3)3²⁺", "Cd(NH3)4²⁺", 
-            "Cd(NH3)5²⁺", "Cd(NH3)6²⁺" 
+            "Cd(NH3)^2^+", "Cd(NH3)2^2^+", 
+            "Cd(NH3)3^2^+", "Cd(NH3)4^2^+", 
+            "Cd(NH3)5^2^+", "Cd(NH3)6^2^+" 
         });
     }
     
     if (ligands.Contains("CN-"))
     {
-        complexes.AddRange(new[] { "Cd(CN)3⁻", "Cd(CN)4²⁻" });
+        complexes.AddRange(new[] { "Cd(CN)3^-", "Cd(CN)4^2^-" });
     }
     
     return complexes;
@@ -3351,21 +3359,21 @@ private List<string> GetNickelComplexes(HashSet<string> ligands)
     var complexes = new List<string>();
     
     // Hydroxo complexes
-    complexes.AddRange(new[] { "NiOH⁺", "Ni(OH)2", "Ni(OH)3⁻" });
+    complexes.AddRange(new[] { "NiOH^+", "Ni(OH)2", "Ni(OH)3^-" });
     
     if (ligands.Contains("NH3"))
     {
         complexes.AddRange(new[] 
         { 
-            "Ni(NH3)²⁺", "Ni(NH3)2²⁺", 
-            "Ni(NH3)3²⁺", "Ni(NH3)4²⁺", 
-            "Ni(NH3)5²⁺", "Ni(NH3)6²⁺" 
+            "Ni(NH3)^2^+", "Ni(NH3)2^2^+", 
+            "Ni(NH3)3^2^+", "Ni(NH3)4^2^+", 
+            "Ni(NH3)5^2^+", "Ni(NH3)6^2^+" 
         });
     }
     
     if (ligands.Contains("Cl-"))
     {
-        complexes.AddRange(new[] { "NiCl⁺", "NiCl2" });
+        complexes.AddRange(new[] { "NiCl^+", "NiCl2" });
     }
     
     if (ligands.Contains("SO4-2"))
@@ -3384,24 +3392,24 @@ private List<string> GetCobaltComplexes(HashSet<string> ligands)
     var complexes = new List<string>();
     
     // Hydroxo complexes
-    complexes.AddRange(new[] { "CoOH⁺", "Co(OH)2", "Co(OH)3⁻" });
+    complexes.AddRange(new[] { "CoOH^+", "Co(OH)2", "Co(OH)3^-" });
     
     if (ligands.Contains("NH3"))
     {
         // Co(II) complexes
-        complexes.AddRange(new[] { "Co(NH3)²⁺", "Co(NH3)2²⁺" });
+        complexes.AddRange(new[] { "Co(NH3)^2^+", "Co(NH3)2^2^+" });
         // Co(III) complexes
-        complexes.AddRange(new[] { "[Co(NH3)6]³⁺", "[Co(NH3)5Cl]²⁺" });
+        complexes.AddRange(new[] { "[Co(NH3)6]^3^+", "[Co(NH3)5Cl]^2^+" });
     }
     
     if (ligands.Contains("Cl-"))
     {
-        complexes.AddRange(new[] { "CoCl⁺", "CoCl2", "CoCl4²⁻" });
+        complexes.AddRange(new[] { "CoCl^+", "CoCl2", "CoCl4^2^-" });
     }
     
     if (ligands.Contains("CN-"))
     {
-        complexes.Add("[Co(CN)6]³⁻"); // Hexacyanocobaltate(III)
+        complexes.Add("[Co(CN)6]^3^-"); // Hexacyanocobaltate(III)
     }
     
     return complexes;
@@ -3415,19 +3423,19 @@ private List<string> GetChromiumComplexes(HashSet<string> ligands)
     var complexes = new List<string>();
     
     // Cr(III) hydroxo complexes
-    complexes.AddRange(new[] { "CrOH²⁺", "Cr(OH)2⁺", "Cr(OH)3", "Cr(OH)4⁻" });
+    complexes.AddRange(new[] { "CrOH^2^+", "Cr(OH)2^+", "Cr(OH)3", "Cr(OH)4^-" });
     
     // Cr(VI) species (chromate/dichromate)
-    complexes.AddRange(new[] { "CrO4²⁻", "Cr2O7²⁻", "HCrO4⁻" });
+    complexes.AddRange(new[] { "CrO4^2^-", "Cr2O7^2^-", "HCrO4^-" });
     
     if (ligands.Contains("Cl-"))
     {
-        complexes.AddRange(new[] { "CrCl²⁺", "CrCl2⁺" });
+        complexes.AddRange(new[] { "CrCl^2^+", "CrCl2^+" });
     }
     
     if (ligands.Contains("SO4-2"))
     {
-        complexes.AddRange(new[] { "CrSO4⁺", "Cr(SO4)2⁻" });
+        complexes.AddRange(new[] { "CrSO4^+", "Cr(SO4)2^-" });
     }
     
     return complexes;
@@ -3443,22 +3451,22 @@ private List<string> GetAluminumComplexes(HashSet<string> ligands)
     // Hydroxo complexes - very important for Al
     complexes.AddRange(new[] 
     { 
-        "AlOH²⁺", "Al(OH)2⁺", "Al(OH)3", "Al(OH)4⁻",
-        "Al2(OH)2⁴⁺", "Al3(OH)4⁵⁺" // Polynuclear species
+        "AlOH^2^+", "Al(OH)2^+", "Al(OH)3", "Al(OH)4^-",
+        "Al2(OH)2^4^+", "Al3(OH)4^5^+" // Polynuclear species
     });
     
     if (ligands.Contains("F-"))
     {
         complexes.AddRange(new[] 
         { 
-            "AlF²⁺", "AlF2⁺", "AlF3", 
-            "AlF4⁻", "AlF5²⁻", "AlF6³⁻" 
+            "AlF^2^+", "AlF2^+", "AlF3", 
+            "AlF4^-", "AlF5^2^-", "AlF6^3^-" 
         });
     }
     
     if (ligands.Contains("SO4-2"))
     {
-        complexes.AddRange(new[] { "AlSO4⁺", "Al(SO4)2⁻" });
+        complexes.AddRange(new[] { "AlSO4^+", "Al(SO4)2^-" });
     }
     
     return complexes;
@@ -3568,10 +3576,10 @@ private List<(ChemicalCompound ion, double stoichiometry)> FindIonicDissociation
     {
         // SURGICAL FIX: Use correct ion formulas
         var naIon = _compoundLibrary.Find("Na+") ?? 
-                    _compoundLibrary.Find("Na⁺") ?? 
+                    _compoundLibrary.Find("Na^+") ?? 
                     _compoundLibrary.Find("Sodium Ion");
         var clIon = _compoundLibrary.Find("Cl-") ?? 
-                    _compoundLibrary.Find("Cl⁻") ?? 
+                    _compoundLibrary.Find("Cl^-") ?? 
                     _compoundLibrary.Find("Chloride Ion");
         if (naIon != null && clIon != null)
         {

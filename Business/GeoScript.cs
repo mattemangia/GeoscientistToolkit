@@ -1517,9 +1517,9 @@ public class EquilibrateCommand : IGeoScriptCommand
             var hActivity = Math.Pow(10, -targetPh.Value);
             var ohActivity = Math.Max(1e-30, 1e-14 / hActivity);
 
-            initialState.Activities["H⁺"] = hActivity;
+            initialState.Activities["Hâº"] = hActivity;
             initialState.Activities["H+"] = hActivity;
-            initialState.Activities["OH⁻"] = ohActivity;
+            initialState.Activities["OHâ»"] = ohActivity;
             initialState.Activities["OH-"] = ohActivity;
         }
 
@@ -1528,7 +1528,7 @@ public class EquilibrateCommand : IGeoScriptCommand
                     GeoScriptThermoHelper.FindCompoundFlexible(compoundLib, "Water");
         if (water != null)
         {
-            var waterMoles = 55.508; // ~1 kg of water at 25 °C
+            var waterMoles = 55.508; // ~1 kg of water at 25 Â°C
             GeoScriptThermoHelper.AddCompoundToState(initialState, reactionGenerator, water, waterMoles);
         }
         else
@@ -1556,7 +1556,7 @@ public class EquilibrateCommand : IGeoScriptCommand
 
         Logger.Log($"[EQUILIBRATE] Building system at {temperatureK:F2} K and {pressureBar:F2} bar");
         foreach (var (compound, moles, token) in parsedCompounds)
-            Logger.Log($"  - {token} → {compound.Name} ({compound.ChemicalFormula}) : {moles:E3} mol");
+            Logger.Log($"  - {token} â†’ {compound.Name} ({compound.ChemicalFormula}) : {moles:E3} mol");
 
         var finalState = solver.SolveEquilibrium(initialState);
 
@@ -1763,7 +1763,7 @@ public class SaturationIndexCommand : IGeoScriptCommand
             var status = DescribeSaturationStatus(hasValue ? siValue : double.NaN);
             resultTable.Rows.Add(mineral.Name, mineral.ChemicalFormula, hasValue ? siValue : double.NaN, status);
 
-            Logger.Log($"{mineral.Name,-20} SI = {(hasValue ? siValue : double.NaN):F3}  → {status}");
+            Logger.Log($"{mineral.Name,-20} SI = {(hasValue ? siValue : double.NaN):F3}  â†’ {status}");
         }
 
         return Task.FromResult<Dataset>(new TableDataset(resultTable.TableName, resultTable));
@@ -1903,22 +1903,22 @@ public class ReactCommand : IGeoScriptCommand
 
     /// <summary>
     ///     Normalizes a chemical formula by converting plain numbers to subscripts.
-    ///     E.g., "H2O" -> "H₂O", "CaCO3" -> "CaCO₃", "H2S" -> "H₂S"
+    ///     E.g., "H2O" -> "Hâ‚‚O", "CaCO3" -> "CaCOâ‚ƒ", "H2S" -> "Hâ‚‚S"
     /// </summary>
     private string NormalizeChemicalFormula(string formula)
     {
         // Convert regular digits to subscript Unicode characters
         var normalized = formula
-            .Replace('0', '₀')
-            .Replace('1', '₁')
-            .Replace('2', '₂')
-            .Replace('3', '₃')
-            .Replace('4', '₄')
-            .Replace('5', '₅')
-            .Replace('6', '₆')
-            .Replace('7', '₇')
-            .Replace('8', '₈')
-            .Replace('9', '₉');
+            .Replace('0', 'â‚€')
+            .Replace('1', 'â‚')
+            .Replace('2', 'â‚‚')
+            .Replace('3', 'â‚ƒ')
+            .Replace('4', 'â‚„')
+            .Replace('5', 'â‚…')
+            .Replace('6', 'â‚†')
+            .Replace('7', 'â‚‡')
+            .Replace('8', 'â‚ˆ')
+            .Replace('9', 'â‚‰');
 
         return normalized;
     }
@@ -1967,11 +1967,11 @@ public class ReactCommand : IGeoScriptCommand
 
         foreach (var reactantName in reactants)
         {
-            // Handle custom hydration character '!' -> '·'
-            var cleanedName = reactantName.Replace('!', '·');
+            // Handle custom hydration character '!' -> 'Â·'
+            var cleanedName = reactantName.Replace('!', 'Â·');
 
             // Normalize chemical formula: convert plain numbers to subscripts
-            // This allows users to type "H2O" and it will match "H₂O"
+            // This allows users to type "H2O" and it will match "Hâ‚‚O"
             var normalizedName = NormalizeChemicalFormula(cleanedName);
 
             // Try to find the compound, first with normalized name, then with original
@@ -1986,7 +1986,7 @@ public class ReactCommand : IGeoScriptCommand
             // Assume 1 mole of each reactant, except for water which is the solvent.
             // For water, calculate moles in 1 L: 1000 g / molar_mass
             double moles;
-            var isWater = compound.Name.ToUpper() == "WATER" || compound.ChemicalFormula == "H₂O";
+            var isWater = compound.Name.ToUpper() == "WATER" || compound.ChemicalFormula == "Hâ‚‚O";
             if (isWater)
             {
                 var waterMolarMass = compound.MolecularWeight_g_mol ?? 18.015; // g/mol
@@ -2046,14 +2046,14 @@ public class ReactCommand : IGeoScriptCommand
 
         // Build output string for terminal display
         var terminalOutput = new System.Text.StringBuilder();
-        terminalOutput.AppendLine("\n╔════════════════════════════════════════════════════════════════════════════════╗");
-        terminalOutput.AppendLine("║                           REACTION EQUILIBRIUM RESULTS                         ║");
-        terminalOutput.AppendLine("╠════════════════════════════════════════════════════════════════════════════════╣");
-        terminalOutput.AppendLine($"║ Temperature: {temperatureK,6:F1} K          pH: {finalState.pH,5:F2}          pe: {finalState.pe,6:F2}        ║");
-        terminalOutput.AppendLine($"║ Pressure:    {pressureBar,6:F2} bar        Ionic Strength: {finalState.IonicStrength_molkg,8:E2} mol/kg   ║");
-        terminalOutput.AppendLine("╠════════════════════════════════════════════════════════════════════════════════╣");
-        terminalOutput.AppendLine("║ Phase      Species              Formula          Moles          Mass (g)        ║");
-        terminalOutput.AppendLine("╠════════════════════════════════════════════════════════════════════════════════╣");
+        terminalOutput.AppendLine("\nâ•”â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•—");
+        terminalOutput.AppendLine("â•‘                           REACTION EQUILIBRIUM RESULTS                         â•‘");
+        terminalOutput.AppendLine("â• â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•£");
+        terminalOutput.AppendLine($"â•‘ Temperature: {temperatureK,6:F1} K          pH: {finalState.pH,5:F2}          pe: {finalState.pe,6:F2}        â•‘");
+        terminalOutput.AppendLine($"â•‘ Pressure:    {pressureBar,6:F2} bar        Ionic Strength: {finalState.IonicStrength_molkg,8:E2} mol/kg   â•‘");
+        terminalOutput.AppendLine("â• â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•£");
+        terminalOutput.AppendLine("â•‘ Phase      Species              Formula          Moles          Mass (g)        â•‘");
+        terminalOutput.AppendLine("â• â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•£");
 
         foreach (var (speciesName, moles) in sortedProducts)
         {
@@ -2084,16 +2084,16 @@ public class ReactCommand : IGeoScriptCommand
                             compound.Phase == CompoundPhase.Liquid ? "[LIQU] " : "[    ] ";
 
             terminalOutput.AppendLine(
-                $"║ {phaseLabel} {speciesName,-18} {compound.ChemicalFormula,-14} {moles,12:E2}   {mass,12:E2}   ║");
+                $"â•‘ {phaseLabel} {speciesName,-18} {compound.ChemicalFormula,-14} {moles,12:E2}   {mass,12:E2}   â•‘");
         }
 
-        terminalOutput.AppendLine("╠════════════════════════════════════════════════════════════════════════════════╣");
-        terminalOutput.AppendLine("║ PHASE TOTALS:                                                                  ║");
+        terminalOutput.AppendLine("â• â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•£");
+        terminalOutput.AppendLine("â•‘ PHASE TOTALS:                                                                  â•‘");
         foreach (var (phase, totalMoles) in phaseGroups.OrderBy(kvp => kvp.Key))
         {
-            terminalOutput.AppendLine($"║   {phase,-20} {totalMoles,12:E2} moles                                  ║");
+            terminalOutput.AppendLine($"â•‘   {phase,-20} {totalMoles,12:E2} moles                                  â•‘");
         }
-        terminalOutput.AppendLine("╚════════════════════════════════════════════════════════════════════════════════╝");
+        terminalOutput.AppendLine("â•šâ•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•");
 
         // Print to terminal
         Console.WriteLine(terminalOutput.ToString());
@@ -2180,11 +2180,11 @@ internal static class SpeciateCommandExecutor
         // Always add water to the system for aqueous solutions - use flexible find
         var water = compoundLib.FindFlexible("H2O") ??
                     compoundLib.FindFlexible("Water") ??
-                    compoundLib.FindFlexible("H₂O");
+                    compoundLib.FindFlexible("Hâ‚‚O");
 
         if (water != null)
         {
-            var waterMoles = 55.508; // 1L of water at 25°C
+            var waterMoles = 55.508; // 1L of water at 25Â°C
             initialState.SpeciesMoles[water.Name] = waterMoles;
             var waterComp = reactionGenerator.ParseChemicalFormula(water.ChemicalFormula);
             foreach (var (element, stoichiometry) in waterComp)
@@ -2214,6 +2214,14 @@ internal static class SpeciateCommandExecutor
             if (compound == null)
             {
                 Warn($"Compound '{compoundInput}' not found in library");
+                continue;
+            }
+            
+            // SURGICAL FIX: Skip water if it's in the compound list - we already added it as solvent
+            if ((compound.Phase == CompoundPhase.Liquid || compound.Phase == CompoundPhase.Aqueous) && 
+                (compound.Name == "Water" || compound.ChemicalFormula.Contains("H2O") || compound.ChemicalFormula.Contains("H₂O")))
+            {
+                Trace($"Skipping {compound.Name} - already added as solvent");
                 continue;
             }
 
@@ -2266,7 +2274,7 @@ internal static class SpeciateCommandExecutor
                                     moles * stoich * elemStoich;
                             }
 
-                            Log($"  → {productCompound.Name}: {moles * stoich:E3} moles");
+                            Log($"  â†’ {productCompound.Name}: {moles * stoich:E3} moles");
                         }
                         else
                         {
@@ -2307,21 +2315,21 @@ internal static class SpeciateCommandExecutor
         resultTable.Columns.Add("Moles", typeof(double));
         resultTable.Columns.Add("Conc_M", typeof(double));
         resultTable.Columns.Add("Activity", typeof(double));
-        resultTable.Columns.Add("γ", typeof(double)); // Activity coefficient
+        resultTable.Columns.Add("Î³", typeof(double)); // Activity coefficient
 
         // Create terminal output
         var terminalOutput = new StringBuilder();
-        terminalOutput.AppendLine("╔════════════════════════════════════════════════════════════════════════╗");
-        terminalOutput.AppendLine("║                    AQUEOUS SPECIATION RESULTS                          ║");
-        terminalOutput.AppendLine("╠════════════════════════════════════════════════════════════════════════╣");
-        terminalOutput.AppendLine($"║ Temperature: {finalState.Temperature_K:F2} K ({finalState.Temperature_K - 273.15:F2} °C)");
-        terminalOutput.AppendLine($"║ Pressure:    {finalState.Pressure_bar:F2} bar");
-        terminalOutput.AppendLine($"║ pH:          {finalState.pH:F2}");
-        terminalOutput.AppendLine($"║ pe:          {finalState.pe:F2}");
-        terminalOutput.AppendLine($"║ Ionic Str:   {finalState.IonicStrength_molkg:F4} mol/kg");
-        terminalOutput.AppendLine("╠════════════════════════════════════════════════════════════════════════╣");
-        terminalOutput.AppendLine("║ Species        Formula    Conc(M)      Activity    Moles       γ       ║");
-        terminalOutput.AppendLine("╠════════════════════════════════════════════════════════════════════════╣");
+        terminalOutput.AppendLine("â•”â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•—");
+        terminalOutput.AppendLine("â•‘                    AQUEOUS SPECIATION RESULTS                          â•‘");
+        terminalOutput.AppendLine("â• â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•£");
+        terminalOutput.AppendLine($"â•‘ Temperature: {finalState.Temperature_K:F2} K ({finalState.Temperature_K - 273.15:F2} Â°C)");
+        terminalOutput.AppendLine($"â•‘ Pressure:    {finalState.Pressure_bar:F2} bar");
+        terminalOutput.AppendLine($"â•‘ pH:          {finalState.pH:F2}");
+        terminalOutput.AppendLine($"â•‘ pe:          {finalState.pe:F2}");
+        terminalOutput.AppendLine($"â•‘ Ionic Str:   {finalState.IonicStrength_molkg:F4} mol/kg");
+        terminalOutput.AppendLine("â• â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•£");
+        terminalOutput.AppendLine("â•‘ Species        Formula    Conc(M)      Activity    Moles       Î³       â•‘");
+        terminalOutput.AppendLine("â• â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•£");
 
         // Sort species by concentration (descending)
         var sortedSpecies = finalState.SpeciesMoles
@@ -2358,10 +2366,10 @@ internal static class SpeciateCommandExecutor
             );
 
             terminalOutput.AppendLine(
-                $"║ {species.Name,-14} {species.ChemicalFormula,-10} {concentration,10:E2} {activity,10:E2} {moles,10:E2} {activityCoeff,7:F3} ║");
+                $"â•‘ {species.Name,-14} {species.ChemicalFormula,-10} {concentration,10:E2} {activity,10:E2} {moles,10:E2} {activityCoeff,7:F3} â•‘");
         }
 
-        terminalOutput.AppendLine("╚════════════════════════════════════════════════════════════════════════╝");
+        terminalOutput.AppendLine("â•šâ•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•");
 
         // Show predominant species summary
         terminalOutput.AppendLine("=== PREDOMINANT SPECIES ===");
@@ -2413,9 +2421,9 @@ internal static class SpeciateCommandExecutor
     {
         var importantSpecies = new HashSet<string>
         {
-            "H⁺", "Proton", "OH⁻", "Hydroxide",
-            "H₂O", "Water",
-            "e⁻", "Electron"
+            "Hâº", "Proton", "OHâ»", "Hydroxide",
+            "Hâ‚‚O", "Water",
+            "eâ»", "Electron"
         };
 
         return importantSpecies.Contains(speciesName);
@@ -2465,7 +2473,7 @@ public class DiagnosticThermodynamicCommand : IGeoScriptCommand
 
         var water = compoundLib.FindFlexible("H2O") ??
                     compoundLib.FindFlexible("Water") ??
-                    compoundLib.FindFlexible("H₂O");
+                    compoundLib.FindFlexible("Hâ‚‚O");
         var halite = compoundLib.FindFlexible("NaCl") ??
                      compoundLib.FindFlexible("Halite");
         var sodiumIon = compoundLib.FindFlexible("Na+") ??
@@ -2487,7 +2495,7 @@ public class DiagnosticThermodynamicCommand : IGeoScriptCommand
         }
 
         Logger.Log(
-            $"{prefix} Step 2/4: Constructing initial state (1 L water + 1 mol halite at 25°C, 1 bar).");
+            $"{prefix} Step 2/4: Constructing initial state (1 L water + 1 mol halite at 25Â°C, 1 bar).");
 
         var benchmarkState = new ThermodynamicState
         {
@@ -2566,7 +2574,7 @@ public class DiagnosticThermodynamicCommand : IGeoScriptCommand
             row["Pass"] = pass;
             resultTable.Rows.Add(row);
             Logger.Log(
-                $"{prefix} {label}: expected {expected:F3} mol, got {actual:F3} mol (Δ={difference:E2}) -> {(pass ? "PASS" : "FAIL")}");
+                $"{prefix} {label}: expected {expected:F3} mol, got {actual:F3} mol (Î”={difference:E2}) -> {(pass ? "PASS" : "FAIL")}");
         }
 
         AddResultRow($"{sodiumIon.Name} (aq)", expectedNa, actualNa);
@@ -2577,12 +2585,12 @@ public class DiagnosticThermodynamicCommand : IGeoScriptCommand
                              Math.Abs(actualCl - expectedCl) <= tolerance &&
                              Math.Abs(actualHalite - expectedHalite) <= tolerance;
         Logger.Log(
-            $"{prefix} Diagnostic verdict: {(diagnosticPass ? "PASS" : "FAIL")} within ±{tolerance:F3} mol tolerance.");
+            $"{prefix} Diagnostic verdict: {(diagnosticPass ? "PASS" : "FAIL")} within Â±{tolerance:F3} mol tolerance.");
 
         Logger.Log(
-            $"{prefix} expected results: Na⁺={expectedNa:F3} mol, Cl⁻={expectedCl:F3} mol, Halite(s)={expectedHalite:F3} mol");
+            $"{prefix} expected results: Naâº={expectedNa:F3} mol, Clâ»={expectedCl:F3} mol, Halite(s)={expectedHalite:F3} mol");
         Logger.Log(
-            $"{prefix} Got: Na⁺={actualNa:F3} mol, Cl⁻={actualCl:F3} mol, Halite(s)={actualHalite:F3} mol");
+            $"{prefix} Got: Naâº={actualNa:F3} mol, Clâ»={actualCl:F3} mol, Halite(s)={actualHalite:F3} mol");
 
         Logger.Log($"{prefix} Diagnostic complete. Results table ready for inspection.");
 
