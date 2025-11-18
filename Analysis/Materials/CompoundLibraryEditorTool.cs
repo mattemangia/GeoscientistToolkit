@@ -353,16 +353,16 @@ public class CompoundLibraryEditorWindow
                     }
 
                     if (e.MeltingPoint_K.HasValue)
-                        AddRow("Melting Point", $"{e.MeltingPoint_K:F2} K ({e.MeltingPoint_K - 273.15:F2} °C)");
+                        AddRow("Melting Point", $"{e.MeltingPoint_K:F2} K ({e.MeltingPoint_K - 273.15:F2} degC)");
 
                     if (e.BoilingPoint_K.HasValue)
-                        AddRow("Boiling Point", $"{e.BoilingPoint_K:F2} K ({e.BoilingPoint_K - 273.15:F2} °C)");
+                        AddRow("Boiling Point", $"{e.BoilingPoint_K:F2} K ({e.BoilingPoint_K - 273.15:F2} degC)");
 
                     if (e.Density_g_cm3.HasValue)
-                        AddRow("Density", $"{e.Density_g_cm3:F3} g/cm³");
+                        AddRow("Density", $"{e.Density_g_cm3:F3} g/cm3");
 
                     if (e.ThermalConductivity_W_mK.HasValue)
-                        AddRow("Thermal Conductivity", $"{e.ThermalConductivity_W_mK:F2} W/m·K");
+                        AddRow("Thermal Conductivity", $"{e.ThermalConductivity_W_mK:F2} W/m*K");
 
                     ImGui.EndTable();
                 }
@@ -576,25 +576,25 @@ public class CompoundLibraryEditorWindow
             }
 
             if (c.GibbsFreeEnergyFormation_kJ_mol.HasValue)
-                AddRow("ΔG°f", $"{c.GibbsFreeEnergyFormation_kJ_mol:F2} kJ/mol");
+                AddRow("DeltaGdegf", $"{c.GibbsFreeEnergyFormation_kJ_mol:F2} kJ/mol");
 
             if (c.EnthalpyFormation_kJ_mol.HasValue)
-                AddRow("ΔH°f", $"{c.EnthalpyFormation_kJ_mol:F2} kJ/mol");
+                AddRow("DeltaHdegf", $"{c.EnthalpyFormation_kJ_mol:F2} kJ/mol");
 
             if (c.Entropy_J_molK.HasValue)
-                AddRow("S°", $"{c.Entropy_J_molK:F2} J/mol·K");
+                AddRow("Sdeg", $"{c.Entropy_J_molK:F2} J/mol*K");
 
             if (c.HeatCapacity_J_molK.HasValue)
-                AddRow("Cp", $"{c.HeatCapacity_J_molK:F2} J/mol·K");
+                AddRow("Cp", $"{c.HeatCapacity_J_molK:F2} J/mol*K");
 
             if (c.MolarVolume_cm3_mol.HasValue)
-                AddRow("Vm", $"{c.MolarVolume_cm3_mol:F3} cm³/mol");
+                AddRow("Vm", $"{c.MolarVolume_cm3_mol:F3} cm3/mol");
 
             if (c.MolecularWeight_g_mol.HasValue)
                 AddRow("Molecular Weight", $"{c.MolecularWeight_g_mol:F2} g/mol");
 
             if (c.Density_g_cm3.HasValue)
-                AddRow("Density", $"{c.Density_g_cm3:F3} g/cm³");
+                AddRow("Density", $"{c.Density_g_cm3:F3} g/cm3");
 
             if (c.HeatCapacityPolynomial_a_b_c_d != null && c.HeatCapacityPolynomial_a_b_c_d.Length >= 4)
             {
@@ -634,22 +634,22 @@ public class CompoundLibraryEditorWindow
 
             if (c.LogKsp_25C.HasValue)
             {
-                AddRow("log Ksp (25°C)", $"{c.LogKsp_25C:F2}");
+                AddRow("log Ksp (25degC)", $"{c.LogKsp_25C:F2}");
                 var ksp = Math.Pow(10, c.LogKsp_25C.Value);
                 AddRow("Ksp", $"{ksp:E3}");
             }
 
             if (c.Solubility_g_100mL_25C.HasValue)
-                AddRow("Solubility (25°C)", $"{c.Solubility_g_100mL_25C:F4} g/100mL");
+                AddRow("Solubility (25degC)", $"{c.Solubility_g_100mL_25C:F4} g/100mL");
 
             if (c.DissolutionEnthalpy_kJ_mol.HasValue)
-                AddRow("ΔHdissolution", $"{c.DissolutionEnthalpy_kJ_mol:F2} kJ/mol");
+                AddRow("DeltaHdissolution", $"{c.DissolutionEnthalpy_kJ_mol:F2} kJ/mol");
 
             if (c.IonicCharge.HasValue)
                 AddRow("Ionic Charge", $"{c.IonicCharge:+#;-#;0}");
 
             if (c.IonicConductivity_S_cm2_mol.HasValue)
-                AddRow("Ionic Conductivity", $"{c.IonicConductivity_S_cm2_mol:F2} S·cm²/mol");
+                AddRow("Ionic Conductivity", $"{c.IonicConductivity_S_cm2_mol:F2} S*cm2/mol");
 
             ImGui.EndTable();
         }
@@ -682,16 +682,16 @@ public class CompoundLibraryEditorWindow
                 AddRow("Ea (precipitation)", $"{c.ActivationEnergy_Precipitation_kJ_mol:F2} kJ/mol");
 
             if (c.RateConstant_Dissolution_mol_m2_s.HasValue)
-                AddRow("k (dissolution)", $"{c.RateConstant_Dissolution_mol_m2_s:E3} mol/m²/s");
+                AddRow("k (dissolution)", $"{c.RateConstant_Dissolution_mol_m2_s:E3} mol/m2/s");
 
             if (c.RateConstant_Precipitation_mol_m2_s.HasValue)
-                AddRow("k (precipitation)", $"{c.RateConstant_Precipitation_mol_m2_s:E3} mol/m²/s");
+                AddRow("k (precipitation)", $"{c.RateConstant_Precipitation_mol_m2_s:E3} mol/m2/s");
 
             if (c.ReactionOrder_Dissolution.HasValue)
                 AddRow("Reaction Order", $"{c.ReactionOrder_Dissolution:F2}");
 
             if (c.SpecificSurfaceArea_m2_g.HasValue)
-                AddRow("Specific Surface Area", $"{c.SpecificSurfaceArea_m2_g:F3} m²/g");
+                AddRow("Specific Surface Area", $"{c.SpecificSurfaceArea_m2_g:F3} m2/g");
 
             ImGui.EndTable();
         }
@@ -812,17 +812,17 @@ public class CompoundLibraryEditorWindow
             DrawOptionalFloatInput("Gibbs Free Energy (kJ/mol)", ref _editGibbsEnergy, ref _hasGibbsEnergy);
             DrawOptionalFloatInput("Enthalpy of Formation (kJ/mol)", ref _editEnthalpyFormation,
                 ref _hasEnthalpyFormation);
-            DrawOptionalFloatInput("Entropy (J/mol·K)", ref _editEntropy, ref _hasEntropy);
-            DrawOptionalFloatInput("Heat Capacity (J/mol·K)", ref _editHeatCapacity, ref _hasHeatCapacity);
-            DrawOptionalFloatInput("Molar Volume (cm³/mol)", ref _editMolarVolume, ref _hasMolarVolume);
+            DrawOptionalFloatInput("Entropy (J/mol*K)", ref _editEntropy, ref _hasEntropy);
+            DrawOptionalFloatInput("Heat Capacity (J/mol*K)", ref _editHeatCapacity, ref _hasHeatCapacity);
+            DrawOptionalFloatInput("Molar Volume (cm3/mol)", ref _editMolarVolume, ref _hasMolarVolume);
             DrawOptionalFloatInput("Molecular Weight (g/mol)", ref _editMolecularWeight, ref _hasMolecularWeight);
-            DrawOptionalFloatInput("Density (g/cm³)", ref _editDensity, ref _hasDensity);
+            DrawOptionalFloatInput("Density (g/cm3)", ref _editDensity, ref _hasDensity);
 
             // Solubility
             ImGui.Spacing();
             ImGui.SeparatorText("Solubility & Equilibrium");
-            DrawOptionalFloatInput("log Ksp (25°C)", ref _editLogKsp, ref _hasLogKsp);
-            DrawOptionalFloatInput("Solubility (g/100mL, 25°C)", ref _editSolubility, ref _hasSolubility);
+            DrawOptionalFloatInput("log Ksp (25degC)", ref _editLogKsp, ref _hasLogKsp);
+            DrawOptionalFloatInput("Solubility (g/100mL, 25degC)", ref _editSolubility, ref _hasSolubility);
 
             if (_editPhase == 1) // Aqueous
                 DrawOptionalIntInput("Ionic Charge", ref _editIonicCharge, ref _hasIonicCharge);

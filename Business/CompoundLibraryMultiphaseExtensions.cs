@@ -93,14 +93,14 @@ public static class CompoundLibraryMultiphaseExtensions
         library.AddOrUpdate(new ChemicalCompound
         {
             Name = "Carbon Dioxide (gas)",
-            ChemicalFormula = "CO₂(g)",
+            ChemicalFormula = "CO2(g)",
             Phase = CompoundPhase.Gas,
             MolecularWeight_g_mol = 44.01,
             GibbsFreeEnergyFormation_kJ_mol = -394.36, // at 298.15 K, 1 bar
             EnthalpyFormation_kJ_mol = -393.51,
             Entropy_J_molK = 213.79,
             HeatCapacity_J_molK = 37.13,
-            HenrysLawConstant_mol_L_atm = 0.034, // at 25°C
+            HenrysLawConstant_mol_L_atm = 0.034, // at 25degC
             SetchenowCoefficient = 0.1, // for salting-out effect
             Sources = new List<string> { "NIST Chemistry WebBook", "Duan & Sun (2003)" },
             IsUserCompound = false,
@@ -113,14 +113,14 @@ public static class CompoundLibraryMultiphaseExtensions
         library.AddOrUpdate(new ChemicalCompound
         {
             Name = "Methane (gas)",
-            ChemicalFormula = "CH₄(g)",
+            ChemicalFormula = "CH4(g)",
             Phase = CompoundPhase.Gas,
             MolecularWeight_g_mol = 16.04,
             GibbsFreeEnergyFormation_kJ_mol = -50.72,
             EnthalpyFormation_kJ_mol = -74.87,
             Entropy_J_molK = 186.25,
             HeatCapacity_J_molK = 35.69,
-            HenrysLawConstant_mol_L_atm = 0.0014, // at 25°C
+            HenrysLawConstant_mol_L_atm = 0.0014, // at 25degC
             SetchenowCoefficient = 0.12,
             Sources = new List<string> { "NIST Chemistry WebBook" },
             IsUserCompound = false
@@ -132,14 +132,14 @@ public static class CompoundLibraryMultiphaseExtensions
         library.AddOrUpdate(new ChemicalCompound
         {
             Name = "Hydrogen Sulfide (gas)",
-            ChemicalFormula = "H₂S(g)",
+            ChemicalFormula = "H2S(g)",
             Phase = CompoundPhase.Gas,
             MolecularWeight_g_mol = 34.08,
             GibbsFreeEnergyFormation_kJ_mol = -33.56,
             EnthalpyFormation_kJ_mol = -20.6,
             Entropy_J_molK = 205.79,
             HeatCapacity_J_molK = 34.23,
-            HenrysLawConstant_mol_L_atm = 0.102, // at 25°C - much more soluble than CO2
+            HenrysLawConstant_mol_L_atm = 0.102, // at 25degC - much more soluble than CO2
             SetchenowCoefficient = 0.08,
             Sources = new List<string> { "NIST Chemistry WebBook" },
             IsUserCompound = false
@@ -151,14 +151,14 @@ public static class CompoundLibraryMultiphaseExtensions
         library.AddOrUpdate(new ChemicalCompound
         {
             Name = "Nitrogen (gas)",
-            ChemicalFormula = "N₂(g)",
+            ChemicalFormula = "N2(g)",
             Phase = CompoundPhase.Gas,
             MolecularWeight_g_mol = 28.01,
             GibbsFreeEnergyFormation_kJ_mol = 0.0,
             EnthalpyFormation_kJ_mol = 0.0,
             Entropy_J_molK = 191.61,
             HeatCapacity_J_molK = 29.12,
-            HenrysLawConstant_mol_L_atm = 0.00065, // at 25°C
+            HenrysLawConstant_mol_L_atm = 0.00065, // at 25degC
             SetchenowCoefficient = 0.14,
             Sources = new List<string> { "NIST Chemistry WebBook" },
             IsUserCompound = false
@@ -170,14 +170,14 @@ public static class CompoundLibraryMultiphaseExtensions
         library.AddOrUpdate(new ChemicalCompound
         {
             Name = "Oxygen (gas)",
-            ChemicalFormula = "O₂(g)",
+            ChemicalFormula = "O2(g)",
             Phase = CompoundPhase.Gas,
             MolecularWeight_g_mol = 32.00,
             GibbsFreeEnergyFormation_kJ_mol = 0.0,
             EnthalpyFormation_kJ_mol = 0.0,
             Entropy_J_molK = 205.15,
             HeatCapacity_J_molK = 29.38,
-            HenrysLawConstant_mol_L_atm = 0.0013, // at 25°C
+            HenrysLawConstant_mol_L_atm = 0.0013, // at 25degC
             SetchenowCoefficient = 0.12,
             Sources = new List<string> { "NIST Chemistry WebBook" },
             IsUserCompound = false,
@@ -191,14 +191,14 @@ public static class CompoundLibraryMultiphaseExtensions
         library.AddOrUpdate(new ChemicalCompound
         {
             Name = "Hydrogen (gas)",
-            ChemicalFormula = "H₂(g)",
+            ChemicalFormula = "H2(g)",
             Phase = CompoundPhase.Gas,
             MolecularWeight_g_mol = 2.016,
             GibbsFreeEnergyFormation_kJ_mol = 0.0,
             EnthalpyFormation_kJ_mol = 0.0,
             Entropy_J_molK = 130.68,
             HeatCapacity_J_molK = 28.82,
-            HenrysLawConstant_mol_L_atm = 0.00078, // at 25°C
+            HenrysLawConstant_mol_L_atm = 0.00078, // at 25degC
             Sources = new List<string> { "NIST Chemistry WebBook" },
             IsUserCompound = false
         });
@@ -209,14 +209,14 @@ public static class CompoundLibraryMultiphaseExtensions
         library.AddOrUpdate(new ChemicalCompound
         {
             Name = "Ammonia (gas)",
-            ChemicalFormula = "NH₃(g)",
+            ChemicalFormula = "NH3(g)",
             Phase = CompoundPhase.Gas,
             MolecularWeight_g_mol = 17.03,
             GibbsFreeEnergyFormation_kJ_mol = -16.45,
             EnthalpyFormation_kJ_mol = -45.94,
             Entropy_J_molK = 192.77,
             HeatCapacity_J_molK = 35.06,
-            HenrysLawConstant_mol_L_atm = 58.0, // at 25°C - very soluble
+            HenrysLawConstant_mol_L_atm = 58.0, // at 25degC - very soluble
             Sources = new List<string> { "NIST Chemistry WebBook" },
             IsUserCompound = false
         });
@@ -229,7 +229,7 @@ public static class CompoundLibraryMultiphaseExtensions
         library.AddOrUpdate(new ChemicalCompound
         {
             Name = "Dissolved CO2",
-            ChemicalFormula = "CO₂(aq)",
+            ChemicalFormula = "CO2(aq)",
             Phase = CompoundPhase.Aqueous,
             MolecularWeight_g_mol = 44.01,
             GibbsFreeEnergyFormation_kJ_mol = -385.98,
@@ -245,7 +245,7 @@ public static class CompoundLibraryMultiphaseExtensions
         library.AddOrUpdate(new ChemicalCompound
         {
             Name = "Carbonic Acid",
-            ChemicalFormula = "H₂CO₃",
+            ChemicalFormula = "H2CO3",
             Phase = CompoundPhase.Aqueous,
             MolecularWeight_g_mol = 62.03,
             GibbsFreeEnergyFormation_kJ_mol = -623.16,
@@ -261,7 +261,7 @@ public static class CompoundLibraryMultiphaseExtensions
         library.AddOrUpdate(new ChemicalCompound
         {
             Name = "Bicarbonate Ion",
-            ChemicalFormula = "HCO₃⁻",
+            ChemicalFormula = "HCO3-",
             Phase = CompoundPhase.Aqueous,
             MolecularWeight_g_mol = 61.02,
             IonicCharge = -1,
@@ -280,7 +280,7 @@ public static class CompoundLibraryMultiphaseExtensions
         library.AddOrUpdate(new ChemicalCompound
         {
             Name = "Carbonate Ion",
-            ChemicalFormula = "CO₃²⁻",
+            ChemicalFormula = "CO32-",
             Phase = CompoundPhase.Aqueous,
             MolecularWeight_g_mol = 60.01,
             IonicCharge = -2,
@@ -299,7 +299,7 @@ public static class CompoundLibraryMultiphaseExtensions
         library.AddOrUpdate(new ChemicalCompound
         {
             Name = "Dissolved H2S",
-            ChemicalFormula = "H₂S(aq)",
+            ChemicalFormula = "H2S(aq)",
             Phase = CompoundPhase.Aqueous,
             MolecularWeight_g_mol = 34.08,
             GibbsFreeEnergyFormation_kJ_mol = -27.87,
@@ -315,7 +315,7 @@ public static class CompoundLibraryMultiphaseExtensions
         library.AddOrUpdate(new ChemicalCompound
         {
             Name = "Bisulfide Ion",
-            ChemicalFormula = "HS⁻",
+            ChemicalFormula = "HS-",
             Phase = CompoundPhase.Aqueous,
             MolecularWeight_g_mol = 33.07,
             IonicCharge = -1,
@@ -332,7 +332,7 @@ public static class CompoundLibraryMultiphaseExtensions
         library.AddOrUpdate(new ChemicalCompound
         {
             Name = "Sulfide Ion",
-            ChemicalFormula = "S²⁻",
+            ChemicalFormula = "S2-",
             Phase = CompoundPhase.Aqueous,
             MolecularWeight_g_mol = 32.06,
             IonicCharge = -2,
@@ -349,7 +349,7 @@ public static class CompoundLibraryMultiphaseExtensions
         library.AddOrUpdate(new ChemicalCompound
         {
             Name = "Dissolved Ammonia",
-            ChemicalFormula = "NH₃(aq)",
+            ChemicalFormula = "NH3(aq)",
             Phase = CompoundPhase.Aqueous,
             MolecularWeight_g_mol = 17.03,
             GibbsFreeEnergyFormation_kJ_mol = -26.50,
@@ -365,7 +365,7 @@ public static class CompoundLibraryMultiphaseExtensions
         library.AddOrUpdate(new ChemicalCompound
         {
             Name = "Ammonium Ion",
-            ChemicalFormula = "NH₄⁺",
+            ChemicalFormula = "NH4+",
             Phase = CompoundPhase.Aqueous,
             MolecularWeight_g_mol = 18.04,
             IonicCharge = 1,
@@ -383,7 +383,7 @@ public static class CompoundLibraryMultiphaseExtensions
         library.AddOrUpdate(new ChemicalCompound
         {
             Name = "Dissolved Oxygen",
-            ChemicalFormula = "O₂(aq)",
+            ChemicalFormula = "O2(aq)",
             Phase = CompoundPhase.Aqueous,
             MolecularWeight_g_mol = 32.00,
             GibbsFreeEnergyFormation_kJ_mol = 16.32,
@@ -399,7 +399,7 @@ public static class CompoundLibraryMultiphaseExtensions
         library.AddOrUpdate(new ChemicalCompound
         {
             Name = "Dissolved Nitrogen",
-            ChemicalFormula = "N₂(aq)",
+            ChemicalFormula = "N2(aq)",
             Phase = CompoundPhase.Aqueous,
             MolecularWeight_g_mol = 28.01,
             GibbsFreeEnergyFormation_kJ_mol = 18.7,
@@ -415,7 +415,7 @@ public static class CompoundLibraryMultiphaseExtensions
         library.AddOrUpdate(new ChemicalCompound
         {
             Name = "Dissolved Methane",
-            ChemicalFormula = "CH₄(aq)",
+            ChemicalFormula = "CH4(aq)",
             Phase = CompoundPhase.Aqueous,
             MolecularWeight_g_mol = 16.04,
             GibbsFreeEnergyFormation_kJ_mol = -34.33,
@@ -433,7 +433,7 @@ public static class CompoundLibraryMultiphaseExtensions
         library.AddOrUpdate(new ChemicalCompound
         {
             Name = "Sulfate Ion",
-            ChemicalFormula = "SO₄²⁻",
+            ChemicalFormula = "SO42-",
             Phase = CompoundPhase.Aqueous,
             MolecularWeight_g_mol = 96.06,
             IonicCharge = -2,
@@ -452,7 +452,7 @@ public static class CompoundLibraryMultiphaseExtensions
         library.AddOrUpdate(new ChemicalCompound
         {
             Name = "Bisulfate Ion",
-            ChemicalFormula = "HSO₄⁻",
+            ChemicalFormula = "HSO4-",
             Phase = CompoundPhase.Aqueous,
             MolecularWeight_g_mol = 97.07,
             IonicCharge = -1,
@@ -469,7 +469,7 @@ public static class CompoundLibraryMultiphaseExtensions
         library.AddOrUpdate(new ChemicalCompound
         {
             Name = "Nitrate Ion",
-            ChemicalFormula = "NO₃⁻",
+            ChemicalFormula = "NO3-",
             Phase = CompoundPhase.Aqueous,
             MolecularWeight_g_mol = 62.00,
             IonicCharge = -1,
@@ -488,7 +488,7 @@ public static class CompoundLibraryMultiphaseExtensions
         library.AddOrUpdate(new ChemicalCompound
         {
             Name = "Nitrite Ion",
-            ChemicalFormula = "NO₂⁻",
+            ChemicalFormula = "NO2-",
             Phase = CompoundPhase.Aqueous,
             MolecularWeight_g_mol = 46.01,
             IonicCharge = -1,
@@ -506,7 +506,7 @@ public static class CompoundLibraryMultiphaseExtensions
         library.AddOrUpdate(new ChemicalCompound
         {
             Name = "Phosphate Ion",
-            ChemicalFormula = "PO₄³⁻",
+            ChemicalFormula = "PO43-",
             Phase = CompoundPhase.Aqueous,
             MolecularWeight_g_mol = 94.97,
             IonicCharge = -3,
@@ -523,7 +523,7 @@ public static class CompoundLibraryMultiphaseExtensions
         library.AddOrUpdate(new ChemicalCompound
         {
             Name = "Hydrogen Phosphate Ion",
-            ChemicalFormula = "HPO₄²⁻",
+            ChemicalFormula = "HPO42-",
             Phase = CompoundPhase.Aqueous,
             MolecularWeight_g_mol = 95.98,
             IonicCharge = -2,
@@ -540,7 +540,7 @@ public static class CompoundLibraryMultiphaseExtensions
         library.AddOrUpdate(new ChemicalCompound
         {
             Name = "Dihydrogen Phosphate Ion",
-            ChemicalFormula = "H₂PO₄⁻",
+            ChemicalFormula = "H2PO4-",
             Phase = CompoundPhase.Aqueous,
             MolecularWeight_g_mol = 96.99,
             IonicCharge = -1,
@@ -557,7 +557,7 @@ public static class CompoundLibraryMultiphaseExtensions
         library.AddOrUpdate(new ChemicalCompound
         {
             Name = "Ferrous Iron Ion",
-            ChemicalFormula = "Fe²⁺",
+            ChemicalFormula = "Fe2+",
             Phase = CompoundPhase.Aqueous,
             MolecularWeight_g_mol = 55.85,
             IonicCharge = 2,
@@ -576,7 +576,7 @@ public static class CompoundLibraryMultiphaseExtensions
         library.AddOrUpdate(new ChemicalCompound
         {
             Name = "Ferric Iron Ion",
-            ChemicalFormula = "Fe³⁺",
+            ChemicalFormula = "Fe3+",
             Phase = CompoundPhase.Aqueous,
             MolecularWeight_g_mol = 55.85,
             IonicCharge = 3,
@@ -595,7 +595,7 @@ public static class CompoundLibraryMultiphaseExtensions
         library.AddOrUpdate(new ChemicalCompound
         {
             Name = "Manganese Ion",
-            ChemicalFormula = "Mn²⁺",
+            ChemicalFormula = "Mn2+",
             Phase = CompoundPhase.Aqueous,
             MolecularWeight_g_mol = 54.94,
             IonicCharge = 2,
@@ -613,7 +613,7 @@ public static class CompoundLibraryMultiphaseExtensions
         library.AddOrUpdate(new ChemicalCompound
         {
             Name = "Aluminum Ion",
-            ChemicalFormula = "Al³⁺",
+            ChemicalFormula = "Al3+",
             Phase = CompoundPhase.Aqueous,
             MolecularWeight_g_mol = 26.98,
             IonicCharge = 3,
@@ -631,7 +631,7 @@ public static class CompoundLibraryMultiphaseExtensions
         library.AddOrUpdate(new ChemicalCompound
         {
             Name = "Lead Ion",
-            ChemicalFormula = "Pb²⁺",
+            ChemicalFormula = "Pb2+",
             Phase = CompoundPhase.Aqueous,
             MolecularWeight_g_mol = 207.2,
             IonicCharge = 2,
@@ -649,7 +649,7 @@ public static class CompoundLibraryMultiphaseExtensions
         library.AddOrUpdate(new ChemicalCompound
         {
             Name = "Zinc Ion",
-            ChemicalFormula = "Zn²⁺",
+            ChemicalFormula = "Zn2+",
             Phase = CompoundPhase.Aqueous,
             MolecularWeight_g_mol = 65.38,
             IonicCharge = 2,
@@ -667,7 +667,7 @@ public static class CompoundLibraryMultiphaseExtensions
         library.AddOrUpdate(new ChemicalCompound
         {
             Name = "Copper Ion",
-            ChemicalFormula = "Cu²⁺",
+            ChemicalFormula = "Cu2+",
             Phase = CompoundPhase.Aqueous,
             MolecularWeight_g_mol = 63.55,
             IonicCharge = 2,
@@ -687,7 +687,7 @@ public static class CompoundLibraryMultiphaseExtensions
         library.AddOrUpdate(new ChemicalCompound
         {
             Name = "Pyrite",
-            ChemicalFormula = "FeS₂",
+            ChemicalFormula = "FeS2",
             Phase = CompoundPhase.Solid,
             CrystalSystem = CrystalSystem.Cubic,
             MolecularWeight_g_mol = 119.98,
@@ -709,7 +709,7 @@ public static class CompoundLibraryMultiphaseExtensions
         library.AddOrUpdate(new ChemicalCompound
         {
             Name = "Marcasite",
-            ChemicalFormula = "FeS₂",
+            ChemicalFormula = "FeS2",
             Phase = CompoundPhase.Solid,
             CrystalSystem = CrystalSystem.Orthorhombic,
             MolecularWeight_g_mol = 119.98,
@@ -727,7 +727,7 @@ public static class CompoundLibraryMultiphaseExtensions
         library.AddOrUpdate(new ChemicalCompound
         {
             Name = "Anhydrite",
-            ChemicalFormula = "CaSO₄",
+            ChemicalFormula = "CaSO4",
             Phase = CompoundPhase.Solid,
             CrystalSystem = CrystalSystem.Orthorhombic,
             MolecularWeight_g_mol = 136.14,
@@ -746,7 +746,7 @@ public static class CompoundLibraryMultiphaseExtensions
         library.AddOrUpdate(new ChemicalCompound
         {
             Name = "Gypsum",
-            ChemicalFormula = "CaSO₄·2H₂O",
+            ChemicalFormula = "CaSO4*2H2O",
             Phase = CompoundPhase.Solid,
             CrystalSystem = CrystalSystem.Monoclinic,
             MolecularWeight_g_mol = 172.17,
@@ -766,7 +766,7 @@ public static class CompoundLibraryMultiphaseExtensions
         library.AddOrUpdate(new ChemicalCompound
         {
             Name = "Hydroxyapatite",
-            ChemicalFormula = "Ca₅(PO₄)₃OH",
+            ChemicalFormula = "Ca5(PO4)3OH",
             Phase = CompoundPhase.Solid,
             CrystalSystem = CrystalSystem.Hexagonal,
             MolecularWeight_g_mol = 502.31,
@@ -785,7 +785,7 @@ public static class CompoundLibraryMultiphaseExtensions
         library.AddOrUpdate(new ChemicalCompound
         {
             Name = "Magnetite",
-            ChemicalFormula = "Fe₃O₄",
+            ChemicalFormula = "Fe3O4",
             Phase = CompoundPhase.Solid,
             CrystalSystem = CrystalSystem.Cubic,
             MolecularWeight_g_mol = 231.53,
@@ -805,7 +805,7 @@ public static class CompoundLibraryMultiphaseExtensions
         library.AddOrUpdate(new ChemicalCompound
         {
             Name = "Hematite",
-            ChemicalFormula = "Fe₂O₃",
+            ChemicalFormula = "Fe2O3",
             Phase = CompoundPhase.Solid,
             CrystalSystem = CrystalSystem.Trigonal,
             MolecularWeight_g_mol = 159.69,
@@ -847,7 +847,7 @@ public static class CompoundLibraryMultiphaseExtensions
         library.AddOrUpdate(new ChemicalCompound
         {
             Name = "Ferrihydrite",
-            ChemicalFormula = "Fe₅HO₈·4H₂O",
+            ChemicalFormula = "Fe5HO8*4H2O",
             Phase = CompoundPhase.Solid,
             CrystalSystem = CrystalSystem.Amorphous,
             MolecularWeight_g_mol = 481.58,
@@ -865,7 +865,7 @@ public static class CompoundLibraryMultiphaseExtensions
         library.AddOrUpdate(new ChemicalCompound
         {
             Name = "Siderite",
-            ChemicalFormula = "FeCO₃",
+            ChemicalFormula = "FeCO3",
             Phase = CompoundPhase.Solid,
             CrystalSystem = CrystalSystem.Trigonal,
             MolecularWeight_g_mol = 115.86,
@@ -885,7 +885,7 @@ public static class CompoundLibraryMultiphaseExtensions
         library.AddOrUpdate(new ChemicalCompound
         {
             Name = "Rhodochrosite",
-            ChemicalFormula = "MnCO₃",
+            ChemicalFormula = "MnCO3",
             Phase = CompoundPhase.Solid,
             CrystalSystem = CrystalSystem.Trigonal,
             MolecularWeight_g_mol = 114.95,

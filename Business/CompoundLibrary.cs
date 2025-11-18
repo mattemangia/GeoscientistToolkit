@@ -83,7 +83,7 @@ public sealed class ChemicalCompound
     /// <summary>Standard enthalpy of formation (kJ/mol)</summary>
     public double? EnthalpyFormation_kJ_mol { get; set; }
 
-    /// <summary>Standard entropy (J/mol·K)</summary>
+    /// <summary>Standard entropy (J/mol*K)</summary>
     public double? Entropy_J_molK { get; set; }
     
     /// <summary>Acid dissociation constant (negative log)</summary>
@@ -95,27 +95,27 @@ public sealed class ChemicalCompound
     /// <summary>Enthalpy of dissociation for acids/bases (kJ/mol)</summary>
     public double? DissociationEnthalpy_kJ_mol { get; set; }
     
-    /// <summary>Henry's law constant (mol/(L·atm)) at 25°C</summary>
+    /// <summary>Henry's law constant (mol/(L*atm)) at 25degC</summary>
     public double? HenryConstant_mol_L_atm { get; set; }
 
-    /// <summary>Heat capacity at constant pressure (J/mol·K)</summary>
+    /// <summary>Heat capacity at constant pressure (J/mol*K)</summary>
     public double? HeatCapacity_J_molK { get; set; }
 
-    /// <summary>Molar volume (cm³/mol)</summary>
+    /// <summary>Molar volume (cm3/mol)</summary>
     public double? MolarVolume_cm3_mol { get; set; }
 
     /// <summary>Molecular weight (g/mol)</summary>
     public double? MolecularWeight_g_mol { get; set; }
 
-    /// <summary>Density (g/cm³) - for solids</summary>
+    /// <summary>Density (g/cm3) - for solids</summary>
     public double? Density_g_cm3 { get; set; }
 
     // --- Solubility & Equilibrium Properties ---
 
-    /// <summary>Solubility product constant (Ksp) at 25°C - log10(Ksp)</summary>
+    /// <summary>Solubility product constant (Ksp) at 25degC - log10(Ksp)</summary>
     public double? LogKsp_25C { get; set; }
 
-    /// <summary>Solubility in water (g/100mL) at 25°C</summary>
+    /// <summary>Solubility in water (g/100mL) at 25degC</summary>
     public double? Solubility_g_100mL_25C { get; set; }
 
     /// <summary>Dissolution enthalpy (kJ/mol) - heat absorbed during dissolution</summary>
@@ -129,16 +129,16 @@ public sealed class ChemicalCompound
     /// <summary>Activation energy for precipitation (kJ/mol)</summary>
     public double? ActivationEnergy_Precipitation_kJ_mol { get; set; }
 
-    /// <summary>Pre-exponential factor for dissolution rate (mol/m²/s)</summary>
+    /// <summary>Pre-exponential factor for dissolution rate (mol/m2/s)</summary>
     public double? RateConstant_Dissolution_mol_m2_s { get; set; }
 
-    /// <summary>Pre-exponential factor for precipitation rate (mol/m²/s)</summary>
+    /// <summary>Pre-exponential factor for precipitation rate (mol/m2/s)</summary>
     public double? RateConstant_Precipitation_mol_m2_s { get; set; }
 
     /// <summary>Reaction order for dissolution (dimensionless)</summary>
     public double? ReactionOrder_Dissolution { get; set; }
 
-    /// <summary>Specific surface area (m²/g) - typical for reactive transport</summary>
+    /// <summary>Specific surface area (m2/g) - typical for reactive transport</summary>
     public double? SpecificSurfaceArea_m2_g { get; set; }
 
     // ENHANCEMENT: Additional kinetic parameters from Steefel & Lasaga (1994)
@@ -148,16 +148,16 @@ public sealed class ChemicalCompound
     /// <summary>Order of the base (OH-) catalysis term in the rate law</summary>
     public double? BaseCatalysisOrder { get; set; }
 
-    /// <summary>Exponent 'p' in the thermodynamic driving force term [1 - Ω^p]^q</summary>
+    /// <summary>Exponent 'p' in the thermodynamic driving force term [1 - Omega^p]^q</summary>
     public double? ReactionOrder_p { get; set; }
 
-    /// <summary>Exponent 'q' in the thermodynamic driving force term [1 - Ω^p]^q</summary>
+    /// <summary>Exponent 'q' in the thermodynamic driving force term [1 - Omega^p]^q</summary>
     public double? ReactionOrder_q { get; set; }
 
 
     // --- Temperature-Dependent Parameters ---
 
-    /// <summary>Heat capacity polynomial coefficients: Cp = a + bT + cT² + dT⁻²</summary>
+    /// <summary>Heat capacity polynomial coefficients: Cp = a + bT + cT2 + dT-2</summary>
     public double[]? HeatCapacityPolynomial_a_b_c_d { get; set; }
 
     /// <summary>Temperature range validity (K) [min, max]</summary>
@@ -171,7 +171,7 @@ public sealed class ChemicalCompound
     /// <summary>Activity coefficient model parameters</summary>
     public Dictionary<string, double>? ActivityCoefficientParams { get; set; }
 
-    /// <summary>Limiting ionic conductivity (S·cm²/mol) at 25°C</summary>
+    /// <summary>Limiting ionic conductivity (S*cm2/mol) at 25degC</summary>
     public double? IonicConductivity_S_cm2_mol { get; set; }
 
     // ENHANCEMENT: Properties for reaction generation and speciation
@@ -181,7 +181,7 @@ public sealed class ChemicalCompound
     /// <summary>Oxidation state of the primary element in the species</summary>
     public int? OxidationState { get; set; }
 
-    /// <summary>Henry's Law constant (mol·L⁻¹·atm⁻¹) for gas dissolution</summary>
+    /// <summary>Henry's Law constant (mol*L-1*atm-1) for gas dissolution</summary>
     public double? HenrysLawConstant_mol_L_atm { get; set; }
 
     /// <summary>Is this a primary surface site (e.g., >SOH) from which others are derived?</summary>
@@ -193,7 +193,7 @@ public sealed class ChemicalCompound
     /// <summary>Inner-sphere vs outer-sphere complex flag for Stern Layer modeling.</summary>
     public bool? IsInnerSphereComplex { get; set; }
 
-    /// <summary>Capacitance of the mineral surface (F/m²) for advanced surface models.</summary>
+    /// <summary>Capacitance of the mineral surface (F/m2) for advanced surface models.</summary>
     public double? SurfaceCapacitance_F_m2 { get; set; }
 
     /// <summary>Thickness of the Stern layer (nm) for surface complexation models.</summary>
@@ -291,26 +291,26 @@ public static string NormalizeFormulaInput(string input)
     normalized = Regex.Replace(normalized, @"(\d*)\+", m =>
     {
         var num = m.Groups[1].Value;
-        if (string.IsNullOrEmpty(num)) return "⁺";
-        return ConvertToSuperscript(num) + "⁺";
+        if (string.IsNullOrEmpty(num)) return "+";
+        return ConvertToSuperscript(num) + "+";
     });
     
     normalized = Regex.Replace(normalized, @"(\d*)\-", m =>
     {
         var num = m.Groups[1].Value;
-        if (string.IsNullOrEmpty(num)) return "⁻";
-        return ConvertToSuperscript(num) + "⁻";
+        if (string.IsNullOrEmpty(num)) return "-";
+        return ConvertToSuperscript(num) + "-";
     });
     
-    // Handle parentheses with numbers: (OH)2 -> (OH)₂
+    // Handle parentheses with numbers: (OH)2 -> (OH)2
     normalized = Regex.Replace(normalized, @"\)(\d+)", m => ")" + ConvertToSubscript(m.Groups[1].Value));
     
-    // Handle element-number patterns: H2O -> H₂O, but not 2H2O
+    // Handle element-number patterns: H2O -> H2O, but not 2H2O
     normalized = Regex.Replace(normalized, @"(?<![0-9])([A-Z][a-z]?)(\d+)", m =>
         m.Groups[1].Value + ConvertToSubscript(m.Groups[2].Value));
     
-    // Handle hydration dot: *nH2O or .nH2O -> ·nH₂O
-    normalized = normalized.Replace("*", "·").Replace(".H", "·H");
+    // Handle hydration dot: *nH2O or .nH2O -> *nH2O
+    normalized = normalized.Replace("*", "*").Replace(".H", "*H");
     
     // Handle (aq), (s), (l), (g) phase indicators - keep as is
     // They're already handled properly
@@ -327,8 +327,8 @@ private static string ConvertToSubscript(string numbers)
     
     var subscriptMap = new Dictionary<char, char>
     {
-        {'0', '₀'}, {'1', '₁'}, {'2', '₂'}, {'3', '₃'}, {'4', '₄'},
-        {'5', '₅'}, {'6', '₆'}, {'7', '₇'}, {'8', '₈'}, {'9', '₉'}
+        {'0', '0'}, {'1', '1'}, {'2', '2'}, {'3', '3'}, {'4', '4'},
+        {'5', '5'}, {'6', '6'}, {'7', '7'}, {'8', '8'}, {'9', '9'}
     };
     
     var result = new StringBuilder();
@@ -348,8 +348,8 @@ private static string ConvertToSuperscript(string numbers)
     
     var superscriptMap = new Dictionary<char, char>
     {
-        {'0', '⁰'}, {'1', '¹'}, {'2', '²'}, {'3', '³'}, {'4', '⁴'},
-        {'5', '⁵'}, {'6', '⁶'}, {'7', '⁷'}, {'8', '⁸'}, {'9', '⁹'}
+        {'0', '0'}, {'1', '1'}, {'2', '2'}, {'3', '3'}, {'4', '4'},
+        {'5', '5'}, {'6', '6'}, {'7', '7'}, {'8', '8'}, {'9', '9'}
     };
     
     var result = new StringBuilder();
@@ -511,13 +511,13 @@ public ChemicalCompound FindFlexible(string name)
     {
         _compounds.Clear();
 
-        // ═══════════════════════════════════════════════════════════════════════
+        // =======================================================================
         // FUNDAMENTAL AQUEOUS SPECIES
-        // ═══════════════════════════════════════════════════════════════════════
+        // =======================================================================
         _compounds.Add(new ChemicalCompound
         {
             Name = "Water",
-            ChemicalFormula = "H₂O",
+            ChemicalFormula = "H2O",
             Synonyms = new List<string> { "H2O" },
             Phase = CompoundPhase.Liquid,
             GibbsFreeEnergyFormation_kJ_mol = -237.1,
@@ -535,7 +535,7 @@ public ChemicalCompound FindFlexible(string name)
         _compounds.Add(new ChemicalCompound
         {
             Name = "Proton",
-            ChemicalFormula = "H⁺",
+            ChemicalFormula = "H+",
             Synonyms = new List<string> { "H+" },
             Phase = CompoundPhase.Aqueous,
             GibbsFreeEnergyFormation_kJ_mol = 0.0,
@@ -553,7 +553,7 @@ public ChemicalCompound FindFlexible(string name)
         _compounds.Add(new ChemicalCompound
         {
             Name = "Hydroxide",
-            ChemicalFormula = "OH⁻",
+            ChemicalFormula = "OH-",
             Synonyms = new List<string> { "OH-" },
             Phase = CompoundPhase.Aqueous,
             GibbsFreeEnergyFormation_kJ_mol = -157.2,
@@ -568,7 +568,7 @@ public ChemicalCompound FindFlexible(string name)
         _compounds.Add(new ChemicalCompound
         {
             Name = "Electron",
-            ChemicalFormula = "e⁻",
+            ChemicalFormula = "e-",
             Synonyms = new List<string> { "e-" },
             Phase = CompoundPhase.Aqueous,
             GibbsFreeEnergyFormation_kJ_mol = 0.0,
@@ -582,14 +582,14 @@ public ChemicalCompound FindFlexible(string name)
             IsUserCompound = false
         });
 
-        // ═══════════════════════════════════════════════════════════════════════
+        // =======================================================================
         // CARBONATES - Critical for reservoir geochemistry
-        // ═══════════════════════════════════════════════════════════════════════
+        // =======================================================================
 
         _compounds.Add(new ChemicalCompound
         {
             Name = "Calcite",
-            ChemicalFormula = "CaCO₃",
+            ChemicalFormula = "CaCO3",
             Phase = CompoundPhase.Solid,
             CrystalSystem = CrystalSystem.Trigonal,
             GibbsFreeEnergyFormation_kJ_mol = -1128.8,
@@ -609,7 +609,7 @@ public ChemicalCompound FindFlexible(string name)
             SpecificSurfaceArea_m2_g = 0.2,
             MohsHardness = 3.0,
             Color = "Colorless to white",
-            Cleavage = "Perfect rhombohedral {10̄14}",
+            Cleavage = "Perfect rhombohedral {10-14}",
             HeatCapacityPolynomial_a_b_c_d = new[] { 104.52, 0.02192, -2617800, 0.0 },
             TemperatureRange_K = new[] { 298.0, 1200.0 },
             Notes = "Most common carbonate mineral in sedimentary rocks. Shows retrograde solubility with temperature.",
@@ -625,7 +625,7 @@ public ChemicalCompound FindFlexible(string name)
         _compounds.Add(new ChemicalCompound
         {
             Name = "Dolomite",
-            ChemicalFormula = "CaMg(CO₃)₂",
+            ChemicalFormula = "CaMg(CO3)2",
             Phase = CompoundPhase.Solid,
             CrystalSystem = CrystalSystem.Trigonal,
             GibbsFreeEnergyFormation_kJ_mol = -2161.7,
@@ -644,7 +644,7 @@ public ChemicalCompound FindFlexible(string name)
             SpecificSurfaceArea_m2_g = 0.15,
             MohsHardness = 3.5,
             Color = "White to pink",
-            Cleavage = "Perfect rhombohedral {10̄14}",
+            Cleavage = "Perfect rhombohedral {10-14}",
             Notes = "Dissolves ~50x slower than calcite. Important in dolomitization processes.",
             Sources = new List<string>
             {
@@ -658,7 +658,7 @@ public ChemicalCompound FindFlexible(string name)
         _compounds.Add(new ChemicalCompound
         {
             Name = "Magnesite",
-            ChemicalFormula = "MgCO₃",
+            ChemicalFormula = "MgCO3",
             Phase = CompoundPhase.Solid,
             CrystalSystem = CrystalSystem.Trigonal,
             GibbsFreeEnergyFormation_kJ_mol = -1027.9,
@@ -672,7 +672,7 @@ public ChemicalCompound FindFlexible(string name)
             Solubility_g_100mL_25C = 0.0106,
             MohsHardness = 4.0,
             Color = "White to yellowish",
-            Notes = "CO₂ sequestration mineral. Slow precipitation kinetics.",
+            Notes = "CO2 sequestration mineral. Slow precipitation kinetics.",
             Sources = new List<string>
             {
                 "Robie & Hemingway (1995): USGS Bulletin 2131, p.283",
@@ -684,7 +684,7 @@ public ChemicalCompound FindFlexible(string name)
         _compounds.Add(new ChemicalCompound
         {
             Name = "Siderite",
-            ChemicalFormula = "FeCO₃",
+            ChemicalFormula = "FeCO3",
             Phase = CompoundPhase.Solid,
             CrystalSystem = CrystalSystem.Trigonal,
             GibbsFreeEnergyFormation_kJ_mol = -680.1,
@@ -709,7 +709,7 @@ public ChemicalCompound FindFlexible(string name)
         _compounds.Add(new ChemicalCompound
         {
             Name = "Aragonite",
-            ChemicalFormula = "CaCO₃",
+            ChemicalFormula = "CaCO3",
             Phase = CompoundPhase.Solid,
             CrystalSystem = CrystalSystem.Orthorhombic,
             GibbsFreeEnergyFormation_kJ_mol = -1127.8,
@@ -722,7 +722,7 @@ public ChemicalCompound FindFlexible(string name)
             LogKsp_25C = -8.34,
             MohsHardness = 3.5,
             Color = "Colorless to white",
-            Notes = "Metastable CaCO₃ polymorph. Transforms to calcite. Common in biogenic carbonates.",
+            Notes = "Metastable CaCO3 polymorph. Transforms to calcite. Common in biogenic carbonates.",
             Sources = new List<string>
             {
                 "Robie & Hemingway (1995): USGS Bulletin 2131, p.84",
@@ -732,14 +732,14 @@ public ChemicalCompound FindFlexible(string name)
         });
 
 
-        // ═══════════════════════════════════════════════════════════════════════
+        // =======================================================================
         // SULFATES - Important in evaporite sequences
-        // ═══════════════════════════════════════════════════════════════════════
+        // =======================================================================
 
         _compounds.Add(new ChemicalCompound
         {
             Name = "Gypsum",
-            ChemicalFormula = "CaSO₄·2H₂O",
+            ChemicalFormula = "CaSO4*2H2O",
             Phase = CompoundPhase.Solid,
             CrystalSystem = CrystalSystem.Monoclinic,
             GibbsFreeEnergyFormation_kJ_mol = -1797.2,
@@ -768,7 +768,7 @@ public ChemicalCompound FindFlexible(string name)
         _compounds.Add(new ChemicalCompound
         {
             Name = "Anhydrite",
-            ChemicalFormula = "CaSO₄",
+            ChemicalFormula = "CaSO4",
             Phase = CompoundPhase.Solid,
             CrystalSystem = CrystalSystem.Orthorhombic,
             GibbsFreeEnergyFormation_kJ_mol = -1321.8,
@@ -794,7 +794,7 @@ public ChemicalCompound FindFlexible(string name)
         _compounds.Add(new ChemicalCompound
         {
             Name = "Barite",
-            ChemicalFormula = "BaSO₄",
+            ChemicalFormula = "BaSO4",
             Phase = CompoundPhase.Solid,
             CrystalSystem = CrystalSystem.Orthorhombic,
             GibbsFreeEnergyFormation_kJ_mol = -1362.2,
@@ -821,7 +821,7 @@ public ChemicalCompound FindFlexible(string name)
         _compounds.Add(new ChemicalCompound
         {
             Name = "Celestite",
-            ChemicalFormula = "SrSO₄",
+            ChemicalFormula = "SrSO4",
             Phase = CompoundPhase.Solid,
             CrystalSystem = CrystalSystem.Orthorhombic,
             GibbsFreeEnergyFormation_kJ_mol = -1341.0,
@@ -841,9 +841,9 @@ public ChemicalCompound FindFlexible(string name)
             IsUserCompound = false
         });
 
-        // ═══════════════════════════════════════════════════════════════════════
+        // =======================================================================
         // HALIDES - Evaporite minerals
-        // ═══════════════════════════════════════════════════════════════════════
+        // =======================================================================
 
         _compounds.Add(new ChemicalCompound
         {
@@ -900,14 +900,14 @@ public ChemicalCompound FindFlexible(string name)
             IsUserCompound = false
         });
 
-        // ═══════════════════════════════════════════════════════════════════════
+        // =======================================================================
         // SILICATES - Dominant rock-forming minerals
-        // ═══════════════════════════════════════════════════════════════════════
+        // =======================================================================
 
         _compounds.Add(new ChemicalCompound
         {
             Name = "Quartz",
-            ChemicalFormula = "SiO₂",
+            ChemicalFormula = "SiO2",
             Phase = CompoundPhase.Solid,
             CrystalSystem = CrystalSystem.Trigonal,
             GibbsFreeEnergyFormation_kJ_mol = -856.3,
@@ -938,7 +938,7 @@ public ChemicalCompound FindFlexible(string name)
         _compounds.Add(new ChemicalCompound
         {
             Name = "Amorphous Silica",
-            ChemicalFormula = "SiO₂",
+            ChemicalFormula = "SiO2",
             Phase = CompoundPhase.Solid,
             CrystalSystem = CrystalSystem.Amorphous,
             GibbsFreeEnergyFormation_kJ_mol = -849.0,
@@ -951,7 +951,7 @@ public ChemicalCompound FindFlexible(string name)
             Sources = new List<string>
             {
                 "Rimstidt (1997): Geochim. Cosmochim. Acta 61, 2553-2558",
-                "Gunnarsson & Arnórsson (2000): Geochim. Cosmochim. Acta 64, 2295-2307"
+                "Gunnarsson & Arnorsson (2000): Geochim. Cosmochim. Acta 64, 2295-2307"
             },
             IsUserCompound = false
         });
@@ -959,7 +959,7 @@ public ChemicalCompound FindFlexible(string name)
         _compounds.Add(new ChemicalCompound
         {
             Name = "Kaolinite",
-            ChemicalFormula = "Al₂Si₂O₅(OH)₄",
+            ChemicalFormula = "Al2Si2O5(OH)4",
             Phase = CompoundPhase.Solid,
             CrystalSystem = CrystalSystem.Triclinic,
             GibbsFreeEnergyFormation_kJ_mol = -3799.4,
@@ -985,7 +985,7 @@ public ChemicalCompound FindFlexible(string name)
         _compounds.Add(new ChemicalCompound
         {
             Name = "Albite",
-            ChemicalFormula = "NaAlSi₃O₈",
+            ChemicalFormula = "NaAlSi3O8",
             Phase = CompoundPhase.Solid,
             CrystalSystem = CrystalSystem.Triclinic,
             GibbsFreeEnergyFormation_kJ_mol = -3711.5,
@@ -1011,7 +1011,7 @@ public ChemicalCompound FindFlexible(string name)
         {
             Name = "K-Feldspar",
             Synonyms = new List<string> { "Microcline" },
-            ChemicalFormula = "KAlSi₃O₈",
+            ChemicalFormula = "KAlSi3O8",
             Phase = CompoundPhase.Solid,
             CrystalSystem = CrystalSystem.Triclinic,
             GibbsFreeEnergyFormation_kJ_mol = -3744.1,
@@ -1034,7 +1034,7 @@ public ChemicalCompound FindFlexible(string name)
         _compounds.Add(new ChemicalCompound
         {
             Name = "Muscovite",
-            ChemicalFormula = "KAl₂(AlSi₃O₁₀)(OH)₂",
+            ChemicalFormula = "KAl2(AlSi3O10)(OH)2",
             Phase = CompoundPhase.Solid,
             CrystalSystem = CrystalSystem.Monoclinic,
             GibbsFreeEnergyFormation_kJ_mol = -5608.0,
@@ -1051,14 +1051,14 @@ public ChemicalCompound FindFlexible(string name)
         });
 
 
-        // ═══════════════════════════════════════════════════════════════════════
+        // =======================================================================
         // OXIDES & HYDROXIDES - Alteration products
-        // ═══════════════════════════════════════════════════════════════════════
+        // =======================================================================
 
         _compounds.Add(new ChemicalCompound
         {
             Name = "Hematite",
-            ChemicalFormula = "Fe₂O₃",
+            ChemicalFormula = "Fe2O3",
             Phase = CompoundPhase.Solid,
             CrystalSystem = CrystalSystem.Trigonal,
             GibbsFreeEnergyFormation_kJ_mol = -742.2,
@@ -1109,7 +1109,7 @@ public ChemicalCompound FindFlexible(string name)
         _compounds.Add(new ChemicalCompound
         {
             Name = "Magnetite",
-            ChemicalFormula = "Fe₃O₄",
+            ChemicalFormula = "Fe3O4",
             Phase = CompoundPhase.Solid,
             CrystalSystem = CrystalSystem.Cubic,
             GibbsFreeEnergyFormation_kJ_mol = -1015.4,
@@ -1128,7 +1128,7 @@ public ChemicalCompound FindFlexible(string name)
         _compounds.Add(new ChemicalCompound
         {
             Name = "Gibbsite",
-            ChemicalFormula = "Al(OH)₃",
+            ChemicalFormula = "Al(OH)3",
             Phase = CompoundPhase.Solid,
             CrystalSystem = CrystalSystem.Monoclinic,
             GibbsFreeEnergyFormation_kJ_mol = -1154.9,
@@ -1150,14 +1150,14 @@ public ChemicalCompound FindFlexible(string name)
             IsUserCompound = false
         });
 
-        // ═══════════════════════════════════════════════════════════════════════
+        // =======================================================================
         // AQUEOUS IONS - Essential for solution chemistry
-        // ═══════════════════════════════════════════════════════════════════════
+        // =======================================================================
 
         _compounds.Add(new ChemicalCompound
         {
             Name = "Calcium Ion",
-            ChemicalFormula = "Ca²⁺",
+            ChemicalFormula = "Ca2+",
             Synonyms = { "Ca+2" },
             Phase = CompoundPhase.Aqueous,
             GibbsFreeEnergyFormation_kJ_mol = -553.5,
@@ -1177,7 +1177,7 @@ public ChemicalCompound FindFlexible(string name)
         _compounds.Add(new ChemicalCompound
         {
             Name = "Magnesium Ion",
-            ChemicalFormula = "Mg²⁺",
+            ChemicalFormula = "Mg2+",
             Synonyms = { "Mg+2" },
             Phase = CompoundPhase.Aqueous,
             GibbsFreeEnergyFormation_kJ_mol = -454.8,
@@ -1197,7 +1197,7 @@ public ChemicalCompound FindFlexible(string name)
         _compounds.Add(new ChemicalCompound
         {
             Name = "Sulfate Ion",
-            ChemicalFormula = "SO₄²⁻",
+            ChemicalFormula = "SO42-",
             Synonyms = { "SO4-2" },
             Phase = CompoundPhase.Aqueous,
             GibbsFreeEnergyFormation_kJ_mol = -744.0,
@@ -1217,7 +1217,7 @@ public ChemicalCompound FindFlexible(string name)
         _compounds.Add(new ChemicalCompound
         {
             Name = "Chloride Ion",
-            ChemicalFormula = "Cl⁻",
+            ChemicalFormula = "Cl-",
             Synonyms = { "Cl-" },
             Phase = CompoundPhase.Aqueous,
             GibbsFreeEnergyFormation_kJ_mol = -131.2,
@@ -1237,7 +1237,7 @@ public ChemicalCompound FindFlexible(string name)
         _compounds.Add(new ChemicalCompound
         {
             Name = "Sodium Ion",
-            ChemicalFormula = "Na⁺",
+            ChemicalFormula = "Na+",
             Synonyms = { "Na+" },
             Phase = CompoundPhase.Aqueous,
             GibbsFreeEnergyFormation_kJ_mol = -261.9,
@@ -1257,7 +1257,7 @@ public ChemicalCompound FindFlexible(string name)
         _compounds.Add(new ChemicalCompound
         {
             Name = "Potassium Ion",
-            ChemicalFormula = "K⁺",
+            ChemicalFormula = "K+",
             Synonyms = { "K+" },
             Phase = CompoundPhase.Aqueous,
             GibbsFreeEnergyFormation_kJ_mol = -282.5,
@@ -1275,7 +1275,7 @@ public ChemicalCompound FindFlexible(string name)
         _compounds.Add(new ChemicalCompound
         {
             Name = "Ferrous Iron",
-            ChemicalFormula = "Fe²⁺",
+            ChemicalFormula = "Fe2+",
             Synonyms = { "Fe+2" },
             Phase = CompoundPhase.Aqueous,
             GibbsFreeEnergyFormation_kJ_mol = -90.5,
@@ -1293,7 +1293,7 @@ public ChemicalCompound FindFlexible(string name)
         _compounds.Add(new ChemicalCompound
         {
             Name = "Ferric Iron",
-            ChemicalFormula = "Fe³⁺",
+            ChemicalFormula = "Fe3+",
             Synonyms = { "Fe+3" },
             Phase = CompoundPhase.Aqueous,
             GibbsFreeEnergyFormation_kJ_mol = -16.7,
@@ -1310,7 +1310,7 @@ public ChemicalCompound FindFlexible(string name)
         _compounds.Add(new ChemicalCompound
         {
             Name = "Aluminum Ion",
-            ChemicalFormula = "Al³⁺",
+            ChemicalFormula = "Al3+",
             Synonyms = { "Al+3" },
             Phase = CompoundPhase.Aqueous,
             GibbsFreeEnergyFormation_kJ_mol = -489.4,
@@ -1328,7 +1328,7 @@ public ChemicalCompound FindFlexible(string name)
         _compounds.Add(new ChemicalCompound
         {
             Name = "Silicic Acid",
-            ChemicalFormula = "H₄SiO₄",
+            ChemicalFormula = "H4SiO4",
             Synonyms = { "Si(OH)4" },
             Phase = CompoundPhase.Aqueous,
             GibbsFreeEnergyFormation_kJ_mol = -1308.0,
@@ -1344,14 +1344,14 @@ public ChemicalCompound FindFlexible(string name)
         });
 
 
-        // ═══════════════════════════════════════════════════════════════════════
+        // =======================================================================
         // AQUEOUS COMPLEXES AND DISSOLVED GASES
-        // ═══════════════════════════════════════════════════════════════════════
+        // =======================================================================
 
         _compounds.Add(new ChemicalCompound
         {
             Name = "Aqueous Carbon Dioxide",
-            ChemicalFormula = "CO₂(aq)",
+            ChemicalFormula = "CO2(aq)",
             Synonyms = { "CO2(aq)" },
             Phase = CompoundPhase.Aqueous,
             GibbsFreeEnergyFormation_kJ_mol = -385.9,
@@ -1369,7 +1369,7 @@ public ChemicalCompound FindFlexible(string name)
         _compounds.Add(new ChemicalCompound
         {
             Name = "Bicarbonate",
-            ChemicalFormula = "HCO₃⁻",
+            ChemicalFormula = "HCO3-",
             Synonyms = { "HCO3-" },
             Phase = CompoundPhase.Aqueous,
             GibbsFreeEnergyFormation_kJ_mol = -586.8,
@@ -1387,7 +1387,7 @@ public ChemicalCompound FindFlexible(string name)
         _compounds.Add(new ChemicalCompound
         {
             Name = "Carbonate",
-            ChemicalFormula = "CO₃²⁻",
+            ChemicalFormula = "CO32-",
             Synonyms = { "CO3-2" },
             Phase = CompoundPhase.Aqueous,
             GibbsFreeEnergyFormation_kJ_mol = -527.8,
@@ -1403,7 +1403,7 @@ public ChemicalCompound FindFlexible(string name)
         _compounds.Add(new ChemicalCompound
         {
             Name = "Aqueous Hydrogen Sulfide",
-            ChemicalFormula = "H₂S(aq)",
+            ChemicalFormula = "H2S(aq)",
             Synonyms = { "H2S(aq)" },
             Phase = CompoundPhase.Aqueous,
             GibbsFreeEnergyFormation_kJ_mol = -27.8,
@@ -1421,7 +1421,7 @@ public ChemicalCompound FindFlexible(string name)
         _compounds.Add(new ChemicalCompound
         {
             Name = "Bisulfide",
-            ChemicalFormula = "HS⁻",
+            ChemicalFormula = "HS-",
             Synonyms = { "HS-" },
             Phase = CompoundPhase.Aqueous,
             GibbsFreeEnergyFormation_kJ_mol = 12.1,
@@ -1438,7 +1438,7 @@ public ChemicalCompound FindFlexible(string name)
         _compounds.Add(new ChemicalCompound
         {
             Name = "Sulfide",
-            ChemicalFormula = "S²⁻",
+            ChemicalFormula = "S2-",
             Synonyms = { "S-2" },
             Phase = CompoundPhase.Aqueous,
             GibbsFreeEnergyFormation_kJ_mol = 85.8,
@@ -1452,14 +1452,14 @@ public ChemicalCompound FindFlexible(string name)
             IsUserCompound = false
         });
 
-        // ═══════════════════════════════════════════════════════════════════════
+        // =======================================================================
         // GAS PHASE SPECIES
-        // ═══════════════════════════════════════════════════════════════════════
+        // =======================================================================
 
         _compounds.Add(new ChemicalCompound
         {
             Name = "Carbon Dioxide (g)",
-            ChemicalFormula = "CO₂(g)",
+            ChemicalFormula = "CO2(g)",
             Phase = CompoundPhase.Gas,
             GibbsFreeEnergyFormation_kJ_mol = -394.38,
             EnthalpyFormation_kJ_mol = -393.5,
@@ -1472,7 +1472,7 @@ public ChemicalCompound FindFlexible(string name)
         _compounds.Add(new ChemicalCompound
         {
             Name = "Oxygen (g)",
-            ChemicalFormula = "O₂(g)",
+            ChemicalFormula = "O2(g)",
             Phase = CompoundPhase.Gas,
             GibbsFreeEnergyFormation_kJ_mol = 0.0,
             EnthalpyFormation_kJ_mol = 0.0,
@@ -1485,7 +1485,7 @@ public ChemicalCompound FindFlexible(string name)
         _compounds.Add(new ChemicalCompound
         {
             Name = "Hydrogen Sulfide (g)",
-            ChemicalFormula = "H₂S(g)",
+            ChemicalFormula = "H2S(g)",
             Phase = CompoundPhase.Gas,
             GibbsFreeEnergyFormation_kJ_mol = -33.5,
             EnthalpyFormation_kJ_mol = -20.6,
@@ -1496,9 +1496,9 @@ public ChemicalCompound FindFlexible(string name)
         });
 
 
-        // ═══════════════════════════════════════════════════════════════════════
+        // =======================================================================
         // SURFACE SPECIES (using generic >SOH for HFO - Hydrous Ferric Oxide)
-        // ═══════════════════════════════════════════════════════════════════════
+        // =======================================================================
         _compounds.Add(new ChemicalCompound
         {
             Name = ">SOH",
@@ -1514,8 +1514,8 @@ public ChemicalCompound FindFlexible(string name)
 
         _compounds.Add(new ChemicalCompound
         {
-            Name = ">SOH₂⁺",
-            ChemicalFormula = ">SOH₂⁺",
+            Name = ">SOH2+",
+            ChemicalFormula = ">SOH2+",
             Synonyms = { ">SOH2+" },
             Phase = CompoundPhase.Surface,
             IonicCharge = 1,
@@ -1526,8 +1526,8 @@ public ChemicalCompound FindFlexible(string name)
 
         _compounds.Add(new ChemicalCompound
         {
-            Name = ">SO⁻",
-            ChemicalFormula = ">SO⁻",
+            Name = ">SO-",
+            ChemicalFormula = ">SO-",
             Synonyms = { ">SO-" },
             Phase = CompoundPhase.Surface,
             IonicCharge = -1,
@@ -1537,14 +1537,14 @@ public ChemicalCompound FindFlexible(string name)
             IsUserCompound = false
         });
 
-        // ═══════════════════════════════════════════════════════════════════════
+        // =======================================================================
         // ADDITIONAL PETROPHYSICALLY RELEVANT MINERALS
-        // ═══════════════════════════════════════════════════════════════════════
+        // =======================================================================
 
         _compounds.Add(new ChemicalCompound
         {
             Name = "Pyrite",
-            ChemicalFormula = "FeS₂",
+            ChemicalFormula = "FeS2",
             Phase = CompoundPhase.Solid,
             CrystalSystem = CrystalSystem.Cubic,
             GibbsFreeEnergyFormation_kJ_mol = -166.9,
@@ -1569,7 +1569,7 @@ public ChemicalCompound FindFlexible(string name)
         _compounds.Add(new ChemicalCompound
         {
             Name = "Illite",
-            ChemicalFormula = "K₀.₆₅Al₂.₀[Al₀.₆₅Si₃.₃₅O₁₀](OH)₂",
+            ChemicalFormula = "K0.65Al2.0[Al0.65Si3.35O10](OH)2",
             Phase = CompoundPhase.Solid,
             CrystalSystem = CrystalSystem.Monoclinic,
             GibbsFreeEnergyFormation_kJ_mol = -5301.8,
@@ -1618,15 +1618,15 @@ public ChemicalCompound FindFlexible(string name)
     {
         _elements.Clear();
 
-        // ═══════════════════════════════════════════════════════════════════════
+        // =======================================================================
         // PERIOD 1
-        // ═══════════════════════════════════════════════════════════════════════
+        // =======================================================================
 
         _elements.Add(new Element
         {
             Name = "Hydrogen", Symbol = "H", AtomicNumber = 1, AtomicMass = 1.008,
             ElementType = ElementType.Nonmetal, Group = 1, Period = 1,
-            ElectronConfiguration = "1s¹", ValenceElectrons = 1,
+            ElectronConfiguration = "1s1", ValenceElectrons = 1,
             Electronegativity = 2.20, OxidationStates = new List<int> { -1, 1 },
             FirstIonizationEnergy_kJ_mol = 1312.0, ElectronAffinity_kJ_mol = 72.8,
             CovalentRadius_pm = 31, VanDerWaalsRadius_pm = 120,
@@ -1640,7 +1640,7 @@ public ChemicalCompound FindFlexible(string name)
         {
             Name = "Helium", Symbol = "He", AtomicNumber = 2, AtomicMass = 4.0026,
             ElementType = ElementType.NobleGas, Group = 18, Period = 1,
-            ElectronConfiguration = "1s²", ValenceElectrons = 0,
+            ElectronConfiguration = "1s2", ValenceElectrons = 0,
             FirstIonizationEnergy_kJ_mol = 2372.3,
             CovalentRadius_pm = 28, VanDerWaalsRadius_pm = 140,
             MeltingPoint_K = 0.95, BoilingPoint_K = 4.222, Density_g_cm3 = 0.0001785,
@@ -1648,15 +1648,15 @@ public ChemicalCompound FindFlexible(string name)
             Sources = new List<string> { "IUPAC", "CRC Handbook" }
         });
 
-        // ═══════════════════════════════════════════════════════════════════════
+        // =======================================================================
         // PERIOD 2
-        // ═══════════════════════════════════════════════════════════════════════
+        // =======================================================================
 
         _elements.Add(new Element
         {
             Name = "Lithium", Symbol = "Li", AtomicNumber = 3, AtomicMass = 6.94,
             ElementType = ElementType.AlkaliMetal, Group = 1, Period = 2,
-            ElectronConfiguration = "[He] 2s¹", ValenceElectrons = 1,
+            ElectronConfiguration = "[He] 2s1", ValenceElectrons = 1,
             Electronegativity = 0.98, OxidationStates = new List<int> { 1 },
             FirstIonizationEnergy_kJ_mol = 520.2, ElectronAffinity_kJ_mol = 59.6,
             AtomicRadius_pm = 152, CovalentRadius_pm = 128, IonicRadii = new Dictionary<int, int> { { 1, 76 } },
@@ -1669,7 +1669,7 @@ public ChemicalCompound FindFlexible(string name)
         {
             Name = "Beryllium", Symbol = "Be", AtomicNumber = 4, AtomicMass = 9.0122,
             ElementType = ElementType.AlkalineEarthMetal, Group = 2, Period = 2,
-            ElectronConfiguration = "[He] 2s²", ValenceElectrons = 2,
+            ElectronConfiguration = "[He] 2s2", ValenceElectrons = 2,
             Electronegativity = 1.57, OxidationStates = new List<int> { 2 },
             FirstIonizationEnergy_kJ_mol = 899.5, AtomicRadius_pm = 112, CovalentRadius_pm = 96,
             IonicRadii = new Dictionary<int, int> { { 2, 45 } },
@@ -1682,7 +1682,7 @@ public ChemicalCompound FindFlexible(string name)
         {
             Name = "Boron", Symbol = "B", AtomicNumber = 5, AtomicMass = 10.81,
             ElementType = ElementType.Metalloid, Group = 13, Period = 2,
-            ElectronConfiguration = "[He] 2s² 2p¹", ValenceElectrons = 3,
+            ElectronConfiguration = "[He] 2s2 2p1", ValenceElectrons = 3,
             Electronegativity = 2.04, OxidationStates = new List<int> { -5, -1, 1, 2, 3 },
             FirstIonizationEnergy_kJ_mol = 800.6, ElectronAffinity_kJ_mol = 26.7,
             AtomicRadius_pm = 85, CovalentRadius_pm = 84, VanDerWaalsRadius_pm = 192,
@@ -1695,7 +1695,7 @@ public ChemicalCompound FindFlexible(string name)
         {
             Name = "Carbon", Symbol = "C", AtomicNumber = 6, AtomicMass = 12.011,
             ElementType = ElementType.Nonmetal, Group = 14, Period = 2,
-            ElectronConfiguration = "[He] 2s² 2p²", ValenceElectrons = 4,
+            ElectronConfiguration = "[He] 2s2 2p2", ValenceElectrons = 4,
             Electronegativity = 2.55, OxidationStates = new List<int> { -4, -3, -2, -1, 0, 1, 2, 3, 4 },
             FirstIonizationEnergy_kJ_mol = 1086.5, ElectronAffinity_kJ_mol = 121.9,
             CovalentRadius_pm = 76, VanDerWaalsRadius_pm = 170,
@@ -1708,7 +1708,7 @@ public ChemicalCompound FindFlexible(string name)
         {
             Name = "Nitrogen", Symbol = "N", AtomicNumber = 7, AtomicMass = 14.007,
             ElementType = ElementType.Nonmetal, Group = 15, Period = 2,
-            ElectronConfiguration = "[He] 2s² 2p³", ValenceElectrons = 5,
+            ElectronConfiguration = "[He] 2s2 2p3", ValenceElectrons = 5,
             Electronegativity = 3.04, OxidationStates = new List<int> { -3, -2, -1, 1, 2, 3, 4, 5 },
             FirstIonizationEnergy_kJ_mol = 1402.3, ElectronAffinity_kJ_mol = 7.0,
             CovalentRadius_pm = 71, VanDerWaalsRadius_pm = 155,
@@ -1721,7 +1721,7 @@ public ChemicalCompound FindFlexible(string name)
         {
             Name = "Oxygen", Symbol = "O", AtomicNumber = 8, AtomicMass = 15.999,
             ElementType = ElementType.Nonmetal, Group = 16, Period = 2,
-            ElectronConfiguration = "[He] 2s² 2p⁴", ValenceElectrons = 6,
+            ElectronConfiguration = "[He] 2s2 2p4", ValenceElectrons = 6,
             Electronegativity = 3.44, OxidationStates = new List<int> { -2, -1, 0, 1, 2 },
             FirstIonizationEnergy_kJ_mol = 1313.9, ElectronAffinity_kJ_mol = 141.0,
             CovalentRadius_pm = 66, VanDerWaalsRadius_pm = 152,
@@ -1735,7 +1735,7 @@ public ChemicalCompound FindFlexible(string name)
         {
             Name = "Fluorine", Symbol = "F", AtomicNumber = 9, AtomicMass = 18.998,
             ElementType = ElementType.Halogen, Group = 17, Period = 2,
-            ElectronConfiguration = "[He] 2s² 2p⁵", ValenceElectrons = 7,
+            ElectronConfiguration = "[He] 2s2 2p5", ValenceElectrons = 7,
             Electronegativity = 3.98, OxidationStates = new List<int> { -1 },
             FirstIonizationEnergy_kJ_mol = 1681.0, ElectronAffinity_kJ_mol = 328.0,
             CovalentRadius_pm = 57, VanDerWaalsRadius_pm = 147,
@@ -1749,7 +1749,7 @@ public ChemicalCompound FindFlexible(string name)
         {
             Name = "Neon", Symbol = "Ne", AtomicNumber = 10, AtomicMass = 20.180,
             ElementType = ElementType.NobleGas, Group = 18, Period = 2,
-            ElectronConfiguration = "[He] 2s² 2p⁶", ValenceElectrons = 0,
+            ElectronConfiguration = "[He] 2s2 2p6", ValenceElectrons = 0,
             FirstIonizationEnergy_kJ_mol = 2080.7,
             CovalentRadius_pm = 58, VanDerWaalsRadius_pm = 154,
             MeltingPoint_K = 24.56, BoilingPoint_K = 27.104, Density_g_cm3 = 0.0009,
@@ -1757,15 +1757,15 @@ public ChemicalCompound FindFlexible(string name)
             Sources = new List<string> { "IUPAC", "CRC" }
         });
 
-        // ═══════════════════════════════════════════════════════════════════════
+        // =======================================================================
         // PERIOD 3
-        // ═══════════════════════════════════════════════════════════════════════
+        // =======================================================================
 
         _elements.Add(new Element
         {
             Name = "Sodium", Symbol = "Na", AtomicNumber = 11, AtomicMass = 22.990,
             ElementType = ElementType.AlkaliMetal, Group = 1, Period = 3,
-            ElectronConfiguration = "[Ne] 3s¹", ValenceElectrons = 1,
+            ElectronConfiguration = "[Ne] 3s1", ValenceElectrons = 1,
             Electronegativity = 0.93, OxidationStates = new List<int> { 1 },
             FirstIonizationEnergy_kJ_mol = 495.8, ElectronAffinity_kJ_mol = 52.8,
             AtomicRadius_pm = 186, CovalentRadius_pm = 166, IonicRadii = new Dictionary<int, int> { { 1, 102 } },
@@ -1778,7 +1778,7 @@ public ChemicalCompound FindFlexible(string name)
         {
             Name = "Magnesium", Symbol = "Mg", AtomicNumber = 12, AtomicMass = 24.305,
             ElementType = ElementType.AlkalineEarthMetal, Group = 2, Period = 3,
-            ElectronConfiguration = "[Ne] 3s²", ValenceElectrons = 2,
+            ElectronConfiguration = "[Ne] 3s2", ValenceElectrons = 2,
             Electronegativity = 1.31, OxidationStates = new List<int> { 2 },
             FirstIonizationEnergy_kJ_mol = 737.7, ElectronAffinity_kJ_mol = 0.0,
             AtomicRadius_pm = 160, CovalentRadius_pm = 141, IonicRadii = new Dictionary<int, int> { { 2, 72 } },
@@ -1791,7 +1791,7 @@ public ChemicalCompound FindFlexible(string name)
         {
             Name = "Aluminum", Symbol = "Al", AtomicNumber = 13, AtomicMass = 26.982,
             ElementType = ElementType.PostTransitionMetal, Group = 13, Period = 3,
-            ElectronConfiguration = "[Ne] 3s² 3p¹", ValenceElectrons = 3,
+            ElectronConfiguration = "[Ne] 3s2 3p1", ValenceElectrons = 3,
             Electronegativity = 1.61, OxidationStates = new List<int> { 3 },
             FirstIonizationEnergy_kJ_mol = 577.5, ElectronAffinity_kJ_mol = 42.5,
             AtomicRadius_pm = 143, CovalentRadius_pm = 121, IonicRadii = new Dictionary<int, int> { { 3, 54 } },
@@ -1804,7 +1804,7 @@ public ChemicalCompound FindFlexible(string name)
         {
             Name = "Silicon", Symbol = "Si", AtomicNumber = 14, AtomicMass = 28.085,
             ElementType = ElementType.Metalloid, Group = 14, Period = 3,
-            ElectronConfiguration = "[Ne] 3s² 3p²", ValenceElectrons = 4,
+            ElectronConfiguration = "[Ne] 3s2 3p2", ValenceElectrons = 4,
             Electronegativity = 1.90, OxidationStates = new List<int> { -4, 2, 4 },
             FirstIonizationEnergy_kJ_mol = 786.5, ElectronAffinity_kJ_mol = 133.6,
             AtomicRadius_pm = 118, CovalentRadius_pm = 111, IonicRadii = new Dictionary<int, int> { { 4, 40 } },
@@ -1817,7 +1817,7 @@ public ChemicalCompound FindFlexible(string name)
         {
             Name = "Phosphorus", Symbol = "P", AtomicNumber = 15, AtomicMass = 30.974,
             ElementType = ElementType.Nonmetal, Group = 15, Period = 3,
-            ElectronConfiguration = "[Ne] 3s² 3p³", ValenceElectrons = 5,
+            ElectronConfiguration = "[Ne] 3s2 3p3", ValenceElectrons = 5,
             Electronegativity = 2.19, OxidationStates = new List<int> { -3, 3, 5 },
             FirstIonizationEnergy_kJ_mol = 1011.8, ElectronAffinity_kJ_mol = 72.0,
             CovalentRadius_pm = 107, VanDerWaalsRadius_pm = 180,
@@ -1830,7 +1830,7 @@ public ChemicalCompound FindFlexible(string name)
         {
             Name = "Sulfur", Symbol = "S", AtomicNumber = 16, AtomicMass = 32.06,
             ElementType = ElementType.Nonmetal, Group = 16, Period = 3,
-            ElectronConfiguration = "[Ne] 3s² 3p⁴", ValenceElectrons = 6,
+            ElectronConfiguration = "[Ne] 3s2 3p4", ValenceElectrons = 6,
             Electronegativity = 2.58, OxidationStates = new List<int> { -2, 0, 2, 4, 6 },
             FirstIonizationEnergy_kJ_mol = 999.6, ElectronAffinity_kJ_mol = 200.0,
             CovalentRadius_pm = 105, VanDerWaalsRadius_pm = 180,
@@ -1844,7 +1844,7 @@ public ChemicalCompound FindFlexible(string name)
         {
             Name = "Chlorine", Symbol = "Cl", AtomicNumber = 17, AtomicMass = 35.45,
             ElementType = ElementType.Halogen, Group = 17, Period = 3,
-            ElectronConfiguration = "[Ne] 3s² 3p⁵", ValenceElectrons = 7,
+            ElectronConfiguration = "[Ne] 3s2 3p5", ValenceElectrons = 7,
             Electronegativity = 3.16, OxidationStates = new List<int> { -1, 1, 3, 5, 7 },
             FirstIonizationEnergy_kJ_mol = 1251.2, ElectronAffinity_kJ_mol = 349.0,
             CovalentRadius_pm = 102, VanDerWaalsRadius_pm = 175, IonicRadii = new Dictionary<int, int> { { -1, 181 } },
@@ -1857,7 +1857,7 @@ public ChemicalCompound FindFlexible(string name)
         {
             Name = "Argon", Symbol = "Ar", AtomicNumber = 18, AtomicMass = 39.948,
             ElementType = ElementType.NobleGas, Group = 18, Period = 3,
-            ElectronConfiguration = "[Ne] 3s² 3p⁶", ValenceElectrons = 0,
+            ElectronConfiguration = "[Ne] 3s2 3p6", ValenceElectrons = 0,
             FirstIonizationEnergy_kJ_mol = 1520.6,
             CovalentRadius_pm = 106, VanDerWaalsRadius_pm = 188,
             MeltingPoint_K = 83.81, BoilingPoint_K = 87.302, Density_g_cm3 = 0.001784,
@@ -1865,15 +1865,15 @@ public ChemicalCompound FindFlexible(string name)
             Sources = new List<string> { "IUPAC", "CRC" }
         });
 
-        // ═══════════════════════════════════════════════════════════════════════
+        // =======================================================================
         // PERIOD 4
-        // ═══════════════════════════════════════════════════════════════════════
+        // =======================================================================
 
         _elements.Add(new Element
         {
             Name = "Potassium", Symbol = "K", AtomicNumber = 19, AtomicMass = 39.098,
             ElementType = ElementType.AlkaliMetal, Group = 1, Period = 4,
-            ElectronConfiguration = "[Ar] 4s¹", ValenceElectrons = 1,
+            ElectronConfiguration = "[Ar] 4s1", ValenceElectrons = 1,
             Electronegativity = 0.82, OxidationStates = new List<int> { 1 },
             FirstIonizationEnergy_kJ_mol = 418.8, ElectronAffinity_kJ_mol = 48.4,
             AtomicRadius_pm = 227, CovalentRadius_pm = 203, IonicRadii = new Dictionary<int, int> { { 1, 138 } },
@@ -1886,7 +1886,7 @@ public ChemicalCompound FindFlexible(string name)
         {
             Name = "Calcium", Symbol = "Ca", AtomicNumber = 20, AtomicMass = 40.078,
             ElementType = ElementType.AlkalineEarthMetal, Group = 2, Period = 4,
-            ElectronConfiguration = "[Ar] 4s²", ValenceElectrons = 2,
+            ElectronConfiguration = "[Ar] 4s2", ValenceElectrons = 2,
             Electronegativity = 1.00, OxidationStates = new List<int> { 2 },
             FirstIonizationEnergy_kJ_mol = 589.8, ElectronAffinity_kJ_mol = 2.37,
             AtomicRadius_pm = 197, CovalentRadius_pm = 176, IonicRadii = new Dictionary<int, int> { { 2, 100 } },
@@ -1899,7 +1899,7 @@ public ChemicalCompound FindFlexible(string name)
         {
             Name = "Scandium", Symbol = "Sc", AtomicNumber = 21, AtomicMass = 44.956,
             ElementType = ElementType.TransitionMetal, Group = 3, Period = 4,
-            ElectronConfiguration = "[Ar] 3d¹ 4s²", ValenceElectrons = 2,
+            ElectronConfiguration = "[Ar] 3d1 4s2", ValenceElectrons = 2,
             Electronegativity = 1.36, OxidationStates = new List<int> { 3 },
             FirstIonizationEnergy_kJ_mol = 633.1, AtomicRadius_pm = 162, CovalentRadius_pm = 170,
             IonicRadii = new Dictionary<int, int> { { 3, 75 } },
@@ -1912,7 +1912,7 @@ public ChemicalCompound FindFlexible(string name)
         {
             Name = "Titanium", Symbol = "Ti", AtomicNumber = 22, AtomicMass = 47.867,
             ElementType = ElementType.TransitionMetal, Group = 4, Period = 4,
-            ElectronConfiguration = "[Ar] 3d² 4s²", ValenceElectrons = 2,
+            ElectronConfiguration = "[Ar] 3d2 4s2", ValenceElectrons = 2,
             Electronegativity = 1.54, OxidationStates = new List<int> { 2, 3, 4 },
             FirstIonizationEnergy_kJ_mol = 658.8, ElectronAffinity_kJ_mol = 7.6,
             AtomicRadius_pm = 147, CovalentRadius_pm = 160,
@@ -1926,7 +1926,7 @@ public ChemicalCompound FindFlexible(string name)
         {
             Name = "Vanadium", Symbol = "V", AtomicNumber = 23, AtomicMass = 50.942,
             ElementType = ElementType.TransitionMetal, Group = 5, Period = 4,
-            ElectronConfiguration = "[Ar] 3d³ 4s²", ValenceElectrons = 2,
+            ElectronConfiguration = "[Ar] 3d3 4s2", ValenceElectrons = 2,
             Electronegativity = 1.63, OxidationStates = new List<int> { 2, 3, 4, 5 },
             FirstIonizationEnergy_kJ_mol = 650.9, ElectronAffinity_kJ_mol = 50.6,
             AtomicRadius_pm = 134, CovalentRadius_pm = 153,
@@ -1940,7 +1940,7 @@ public ChemicalCompound FindFlexible(string name)
         {
             Name = "Chromium", Symbol = "Cr", AtomicNumber = 24, AtomicMass = 51.996,
             ElementType = ElementType.TransitionMetal, Group = 6, Period = 4,
-            ElectronConfiguration = "[Ar] 3d⁵ 4s¹", ValenceElectrons = 1,
+            ElectronConfiguration = "[Ar] 3d5 4s1", ValenceElectrons = 1,
             Electronegativity = 1.66, OxidationStates = new List<int> { 2, 3, 6 },
             FirstIonizationEnergy_kJ_mol = 652.9, ElectronAffinity_kJ_mol = 64.3,
             AtomicRadius_pm = 128, CovalentRadius_pm = 139,
@@ -1954,7 +1954,7 @@ public ChemicalCompound FindFlexible(string name)
         {
             Name = "Manganese", Symbol = "Mn", AtomicNumber = 25, AtomicMass = 54.938,
             ElementType = ElementType.TransitionMetal, Group = 7, Period = 4,
-            ElectronConfiguration = "[Ar] 3d⁵ 4s²", ValenceElectrons = 2,
+            ElectronConfiguration = "[Ar] 3d5 4s2", ValenceElectrons = 2,
             Electronegativity = 1.55, OxidationStates = new List<int> { 2, 3, 4, 6, 7 },
             FirstIonizationEnergy_kJ_mol = 717.3, AtomicRadius_pm = 127, CovalentRadius_pm = 139,
             IonicRadii = new Dictionary<int, int> { { 2, 83 }, { 4, 53 } },
@@ -1967,7 +1967,7 @@ public ChemicalCompound FindFlexible(string name)
         {
             Name = "Iron", Symbol = "Fe", AtomicNumber = 26, AtomicMass = 55.845,
             ElementType = ElementType.TransitionMetal, Group = 8, Period = 4,
-            ElectronConfiguration = "[Ar] 3d⁶ 4s²", ValenceElectrons = 2,
+            ElectronConfiguration = "[Ar] 3d6 4s2", ValenceElectrons = 2,
             Electronegativity = 1.83, OxidationStates = new List<int> { -2, -1, 1, 2, 3, 4, 5, 6 },
             FirstIonizationEnergy_kJ_mol = 762.5, ElectronAffinity_kJ_mol = 15.7,
             AtomicRadius_pm = 126, CovalentRadius_pm = 132,
@@ -1981,7 +1981,7 @@ public ChemicalCompound FindFlexible(string name)
         {
             Name = "Cobalt", Symbol = "Co", AtomicNumber = 27, AtomicMass = 58.933,
             ElementType = ElementType.TransitionMetal, Group = 9, Period = 4,
-            ElectronConfiguration = "[Ar] 3d⁷ 4s²", ValenceElectrons = 2,
+            ElectronConfiguration = "[Ar] 3d7 4s2", ValenceElectrons = 2,
             Electronegativity = 1.88, OxidationStates = new List<int> { 2, 3 },
             FirstIonizationEnergy_kJ_mol = 760.4, ElectronAffinity_kJ_mol = 63.7,
             AtomicRadius_pm = 125, CovalentRadius_pm = 126,
@@ -1995,7 +1995,7 @@ public ChemicalCompound FindFlexible(string name)
         {
             Name = "Nickel", Symbol = "Ni", AtomicNumber = 28, AtomicMass = 58.693,
             ElementType = ElementType.TransitionMetal, Group = 10, Period = 4,
-            ElectronConfiguration = "[Ar] 3d⁸ 4s²", ValenceElectrons = 2,
+            ElectronConfiguration = "[Ar] 3d8 4s2", ValenceElectrons = 2,
             Electronegativity = 1.91, OxidationStates = new List<int> { 2, 3 },
             FirstIonizationEnergy_kJ_mol = 737.1, ElectronAffinity_kJ_mol = 112.0,
             AtomicRadius_pm = 124, CovalentRadius_pm = 124, IonicRadii = new Dictionary<int, int> { { 2, 69 } },
@@ -2008,7 +2008,7 @@ public ChemicalCompound FindFlexible(string name)
         {
             Name = "Copper", Symbol = "Cu", AtomicNumber = 29, AtomicMass = 63.546,
             ElementType = ElementType.TransitionMetal, Group = 11, Period = 4,
-            ElectronConfiguration = "[Ar] 3d¹⁰ 4s¹", ValenceElectrons = 1,
+            ElectronConfiguration = "[Ar] 3d10 4s1", ValenceElectrons = 1,
             Electronegativity = 1.90, OxidationStates = new List<int> { 1, 2 },
             FirstIonizationEnergy_kJ_mol = 745.5, ElectronAffinity_kJ_mol = 118.4,
             AtomicRadius_pm = 128, CovalentRadius_pm = 132,
@@ -2022,7 +2022,7 @@ public ChemicalCompound FindFlexible(string name)
         {
             Name = "Zinc", Symbol = "Zn", AtomicNumber = 30, AtomicMass = 65.38,
             ElementType = ElementType.TransitionMetal, Group = 12, Period = 4,
-            ElectronConfiguration = "[Ar] 3d¹⁰ 4s²", ValenceElectrons = 2,
+            ElectronConfiguration = "[Ar] 3d10 4s2", ValenceElectrons = 2,
             Electronegativity = 1.65, OxidationStates = new List<int> { 2 },
             FirstIonizationEnergy_kJ_mol = 906.4, AtomicRadius_pm = 134, CovalentRadius_pm = 122,
             IonicRadii = new Dictionary<int, int> { { 2, 74 } },
@@ -2035,7 +2035,7 @@ public ChemicalCompound FindFlexible(string name)
         {
             Name = "Gallium", Symbol = "Ga", AtomicNumber = 31, AtomicMass = 69.723,
             ElementType = ElementType.PostTransitionMetal, Group = 13, Period = 4,
-            ElectronConfiguration = "[Ar] 3d¹⁰ 4s² 4p¹", ValenceElectrons = 3,
+            ElectronConfiguration = "[Ar] 3d10 4s2 4p1", ValenceElectrons = 3,
             Electronegativity = 1.81, OxidationStates = new List<int> { 3 },
             FirstIonizationEnergy_kJ_mol = 578.8, ElectronAffinity_kJ_mol = 41.0,
             AtomicRadius_pm = 135, CovalentRadius_pm = 122, IonicRadii = new Dictionary<int, int> { { 3, 62 } },
@@ -2048,7 +2048,7 @@ public ChemicalCompound FindFlexible(string name)
         {
             Name = "Germanium", Symbol = "Ge", AtomicNumber = 32, AtomicMass = 72.630,
             ElementType = ElementType.Metalloid, Group = 14, Period = 4,
-            ElectronConfiguration = "[Ar] 3d¹⁰ 4s² 4p²", ValenceElectrons = 4,
+            ElectronConfiguration = "[Ar] 3d10 4s2 4p2", ValenceElectrons = 4,
             Electronegativity = 2.01, OxidationStates = new List<int> { 2, 4 },
             FirstIonizationEnergy_kJ_mol = 762.0, ElectronAffinity_kJ_mol = 119.0,
             AtomicRadius_pm = 125, CovalentRadius_pm = 120,
@@ -2061,7 +2061,7 @@ public ChemicalCompound FindFlexible(string name)
         {
             Name = "Arsenic", Symbol = "As", AtomicNumber = 33, AtomicMass = 74.922,
             ElementType = ElementType.Metalloid, Group = 15, Period = 4,
-            ElectronConfiguration = "[Ar] 3d¹⁰ 4s² 4p³", ValenceElectrons = 5,
+            ElectronConfiguration = "[Ar] 3d10 4s2 4p3", ValenceElectrons = 5,
             Electronegativity = 2.18, OxidationStates = new List<int> { -3, 3, 5 },
             FirstIonizationEnergy_kJ_mol = 947.0, ElectronAffinity_kJ_mol = 78.0,
             AtomicRadius_pm = 115, CovalentRadius_pm = 119, VanDerWaalsRadius_pm = 185,
@@ -2074,7 +2074,7 @@ public ChemicalCompound FindFlexible(string name)
         {
             Name = "Selenium", Symbol = "Se", AtomicNumber = 34, AtomicMass = 78.971,
             ElementType = ElementType.Nonmetal, Group = 16, Period = 4,
-            ElectronConfiguration = "[Ar] 3d¹⁰ 4s² 4p⁴", ValenceElectrons = 6,
+            ElectronConfiguration = "[Ar] 3d10 4s2 4p4", ValenceElectrons = 6,
             Electronegativity = 2.55, OxidationStates = new List<int> { -2, 2, 4, 6 },
             FirstIonizationEnergy_kJ_mol = 941.0, ElectronAffinity_kJ_mol = 195.0,
             CovalentRadius_pm = 120, VanDerWaalsRadius_pm = 190,
@@ -2087,7 +2087,7 @@ public ChemicalCompound FindFlexible(string name)
         {
             Name = "Bromine", Symbol = "Br", AtomicNumber = 35, AtomicMass = 79.904,
             ElementType = ElementType.Halogen, Group = 17, Period = 4,
-            ElectronConfiguration = "[Ar] 3d¹⁰ 4s² 4p⁵", ValenceElectrons = 7,
+            ElectronConfiguration = "[Ar] 3d10 4s2 4p5", ValenceElectrons = 7,
             Electronegativity = 2.96, OxidationStates = new List<int> { -1, 1, 3, 5, 7 },
             FirstIonizationEnergy_kJ_mol = 1139.9, ElectronAffinity_kJ_mol = 324.6,
             CovalentRadius_pm = 120, VanDerWaalsRadius_pm = 185, IonicRadii = new Dictionary<int, int> { { -1, 196 } },
@@ -2100,7 +2100,7 @@ public ChemicalCompound FindFlexible(string name)
         {
             Name = "Krypton", Symbol = "Kr", AtomicNumber = 36, AtomicMass = 83.798,
             ElementType = ElementType.NobleGas, Group = 18, Period = 4,
-            ElectronConfiguration = "[Ar] 3d¹⁰ 4s² 4p⁶", ValenceElectrons = 0,
+            ElectronConfiguration = "[Ar] 3d10 4s2 4p6", ValenceElectrons = 0,
             FirstIonizationEnergy_kJ_mol = 1350.8,
             CovalentRadius_pm = 116, VanDerWaalsRadius_pm = 202,
             MeltingPoint_K = 115.78, BoilingPoint_K = 119.93, Density_g_cm3 = 0.003733,
@@ -2108,15 +2108,15 @@ public ChemicalCompound FindFlexible(string name)
             Sources = new List<string> { "IUPAC", "CRC" }
         });
 
-        // ═══════════════════════════════════════════════════════════════════════
+        // =======================================================================
         // PERIOD 5 - Adding all elements 37-54
-        // ═══════════════════════════════════════════════════════════════════════
+        // =======================================================================
 
         _elements.Add(new Element
         {
             Name = "Rubidium", Symbol = "Rb", AtomicNumber = 37, AtomicMass = 85.468,
             ElementType = ElementType.AlkaliMetal, Group = 1, Period = 5,
-            ElectronConfiguration = "[Kr] 5s¹", ValenceElectrons = 1,
+            ElectronConfiguration = "[Kr] 5s1", ValenceElectrons = 1,
             Electronegativity = 0.82, OxidationStates = new List<int> { 1 },
             FirstIonizationEnergy_kJ_mol = 403.0, ElectronAffinity_kJ_mol = 46.9,
             AtomicRadius_pm = 248, CovalentRadius_pm = 220, IonicRadii = new Dictionary<int, int> { { 1, 152 } },
@@ -2129,7 +2129,7 @@ public ChemicalCompound FindFlexible(string name)
         {
             Name = "Strontium", Symbol = "Sr", AtomicNumber = 38, AtomicMass = 87.62,
             ElementType = ElementType.AlkalineEarthMetal, Group = 2, Period = 5,
-            ElectronConfiguration = "[Kr] 5s²", ValenceElectrons = 2,
+            ElectronConfiguration = "[Kr] 5s2", ValenceElectrons = 2,
             Electronegativity = 0.95, OxidationStates = new List<int> { 2 },
             FirstIonizationEnergy_kJ_mol = 549.5, ElectronAffinity_kJ_mol = 5.03,
             AtomicRadius_pm = 215, CovalentRadius_pm = 195, IonicRadii = new Dictionary<int, int> { { 2, 118 } },
@@ -2142,7 +2142,7 @@ public ChemicalCompound FindFlexible(string name)
         {
             Name = "Yttrium", Symbol = "Y", AtomicNumber = 39, AtomicMass = 88.906,
             ElementType = ElementType.TransitionMetal, Group = 3, Period = 5,
-            ElectronConfiguration = "[Kr] 4d¹ 5s²", ValenceElectrons = 2,
+            ElectronConfiguration = "[Kr] 4d1 5s2", ValenceElectrons = 2,
             Electronegativity = 1.22, OxidationStates = new List<int> { 3 },
             FirstIonizationEnergy_kJ_mol = 600.0, AtomicRadius_pm = 180, CovalentRadius_pm = 190,
             IonicRadii = new Dictionary<int, int> { { 3, 90 } },
@@ -2155,7 +2155,7 @@ public ChemicalCompound FindFlexible(string name)
         {
             Name = "Zirconium", Symbol = "Zr", AtomicNumber = 40, AtomicMass = 91.224,
             ElementType = ElementType.TransitionMetal, Group = 4, Period = 5,
-            ElectronConfiguration = "[Kr] 4d² 5s²", ValenceElectrons = 2,
+            ElectronConfiguration = "[Kr] 4d2 5s2", ValenceElectrons = 2,
             Electronegativity = 1.33, OxidationStates = new List<int> { 4 },
             FirstIonizationEnergy_kJ_mol = 640.1, ElectronAffinity_kJ_mol = 41.1,
             AtomicRadius_pm = 160, CovalentRadius_pm = 175, IonicRadii = new Dictionary<int, int> { { 4, 72 } },
@@ -2168,7 +2168,7 @@ public ChemicalCompound FindFlexible(string name)
         {
             Name = "Niobium", Symbol = "Nb", AtomicNumber = 41, AtomicMass = 92.906,
             ElementType = ElementType.TransitionMetal, Group = 5, Period = 5,
-            ElectronConfiguration = "[Kr] 4d⁴ 5s¹", ValenceElectrons = 1,
+            ElectronConfiguration = "[Kr] 4d4 5s1", ValenceElectrons = 1,
             Electronegativity = 1.6, OxidationStates = new List<int> { 3, 5 },
             FirstIonizationEnergy_kJ_mol = 652.1, ElectronAffinity_kJ_mol = 86.1,
             AtomicRadius_pm = 146, CovalentRadius_pm = 164, IonicRadii = new Dictionary<int, int> { { 5, 64 } },
@@ -2181,7 +2181,7 @@ public ChemicalCompound FindFlexible(string name)
         {
             Name = "Molybdenum", Symbol = "Mo", AtomicNumber = 42, AtomicMass = 95.95,
             ElementType = ElementType.TransitionMetal, Group = 6, Period = 5,
-            ElectronConfiguration = "[Kr] 4d⁵ 5s¹", ValenceElectrons = 1,
+            ElectronConfiguration = "[Kr] 4d5 5s1", ValenceElectrons = 1,
             Electronegativity = 2.16, OxidationStates = new List<int> { 2, 3, 4, 5, 6 },
             FirstIonizationEnergy_kJ_mol = 684.3, ElectronAffinity_kJ_mol = 71.9,
             AtomicRadius_pm = 139, CovalentRadius_pm = 154, IonicRadii = new Dictionary<int, int> { { 6, 59 } },
@@ -2194,7 +2194,7 @@ public ChemicalCompound FindFlexible(string name)
         {
             Name = "Technetium", Symbol = "Tc", AtomicNumber = 43, AtomicMass = 98,
             ElementType = ElementType.TransitionMetal, Group = 7, Period = 5,
-            ElectronConfiguration = "[Kr] 4d⁵ 5s²", ValenceElectrons = 2,
+            ElectronConfiguration = "[Kr] 4d5 5s2", ValenceElectrons = 2,
             Electronegativity = 1.9, OxidationStates = new List<int> { 4, 6, 7 },
             FirstIonizationEnergy_kJ_mol = 702.0, AtomicRadius_pm = 136, CovalentRadius_pm = 147,
             MeltingPoint_K = 2430, BoilingPoint_K = 4538, Density_g_cm3 = 11.0,
@@ -2205,7 +2205,7 @@ public ChemicalCompound FindFlexible(string name)
         {
             Name = "Ruthenium", Symbol = "Ru", AtomicNumber = 44, AtomicMass = 101.07,
             ElementType = ElementType.TransitionMetal, Group = 8, Period = 5,
-            ElectronConfiguration = "[Kr] 4d⁷ 5s¹", ValenceElectrons = 1,
+            ElectronConfiguration = "[Kr] 4d7 5s1", ValenceElectrons = 1,
             Electronegativity = 2.2, OxidationStates = new List<int> { 2, 3, 4, 6, 8 },
             FirstIonizationEnergy_kJ_mol = 710.2, ElectronAffinity_kJ_mol = 101.3,
             AtomicRadius_pm = 134, CovalentRadius_pm = 146,
@@ -2218,7 +2218,7 @@ public ChemicalCompound FindFlexible(string name)
         {
             Name = "Rhodium", Symbol = "Rh", AtomicNumber = 45, AtomicMass = 102.91,
             ElementType = ElementType.TransitionMetal, Group = 9, Period = 5,
-            ElectronConfiguration = "[Kr] 4d⁸ 5s¹", ValenceElectrons = 1,
+            ElectronConfiguration = "[Kr] 4d8 5s1", ValenceElectrons = 1,
             Electronegativity = 2.28, OxidationStates = new List<int> { 2, 3, 4 },
             FirstIonizationEnergy_kJ_mol = 719.7, ElectronAffinity_kJ_mol = 110.0,
             AtomicRadius_pm = 134, CovalentRadius_pm = 142,
@@ -2231,7 +2231,7 @@ public ChemicalCompound FindFlexible(string name)
         {
             Name = "Palladium", Symbol = "Pd", AtomicNumber = 46, AtomicMass = 106.42,
             ElementType = ElementType.TransitionMetal, Group = 10, Period = 5,
-            ElectronConfiguration = "[Kr] 4d¹⁰", ValenceElectrons = 0,
+            ElectronConfiguration = "[Kr] 4d10", ValenceElectrons = 0,
             Electronegativity = 2.20, OxidationStates = new List<int> { 2, 4 },
             FirstIonizationEnergy_kJ_mol = 804.4, ElectronAffinity_kJ_mol = 54.24,
             AtomicRadius_pm = 137, CovalentRadius_pm = 139, IonicRadii = new Dictionary<int, int> { { 2, 86 } },
@@ -2244,7 +2244,7 @@ public ChemicalCompound FindFlexible(string name)
         {
             Name = "Silver", Symbol = "Ag", AtomicNumber = 47, AtomicMass = 107.87,
             ElementType = ElementType.TransitionMetal, Group = 11, Period = 5,
-            ElectronConfiguration = "[Kr] 4d¹⁰ 5s¹", ValenceElectrons = 1,
+            ElectronConfiguration = "[Kr] 4d10 5s1", ValenceElectrons = 1,
             Electronegativity = 1.93, OxidationStates = new List<int> { 1 },
             FirstIonizationEnergy_kJ_mol = 731.0, ElectronAffinity_kJ_mol = 125.6,
             AtomicRadius_pm = 144, CovalentRadius_pm = 145, IonicRadii = new Dictionary<int, int> { { 1, 115 } },
@@ -2257,7 +2257,7 @@ public ChemicalCompound FindFlexible(string name)
         {
             Name = "Cadmium", Symbol = "Cd", AtomicNumber = 48, AtomicMass = 112.41,
             ElementType = ElementType.TransitionMetal, Group = 12, Period = 5,
-            ElectronConfiguration = "[Kr] 4d¹⁰ 5s²", ValenceElectrons = 2,
+            ElectronConfiguration = "[Kr] 4d10 5s2", ValenceElectrons = 2,
             Electronegativity = 1.69, OxidationStates = new List<int> { 2 },
             FirstIonizationEnergy_kJ_mol = 867.8, AtomicRadius_pm = 151, CovalentRadius_pm = 144,
             IonicRadii = new Dictionary<int, int> { { 2, 95 } },
@@ -2270,7 +2270,7 @@ public ChemicalCompound FindFlexible(string name)
         {
             Name = "Indium", Symbol = "In", AtomicNumber = 49, AtomicMass = 114.82,
             ElementType = ElementType.PostTransitionMetal, Group = 13, Period = 5,
-            ElectronConfiguration = "[Kr] 4d¹⁰ 5s² 5p¹", ValenceElectrons = 3,
+            ElectronConfiguration = "[Kr] 4d10 5s2 5p1", ValenceElectrons = 3,
             Electronegativity = 1.78, OxidationStates = new List<int> { 3 },
             FirstIonizationEnergy_kJ_mol = 558.3, ElectronAffinity_kJ_mol = 37.043,
             AtomicRadius_pm = 167, CovalentRadius_pm = 142, IonicRadii = new Dictionary<int, int> { { 3, 80 } },
@@ -2283,7 +2283,7 @@ public ChemicalCompound FindFlexible(string name)
         {
             Name = "Tin", Symbol = "Sn", AtomicNumber = 50, AtomicMass = 118.71,
             ElementType = ElementType.PostTransitionMetal, Group = 14, Period = 5,
-            ElectronConfiguration = "[Kr] 4d¹⁰ 5s² 5p²", ValenceElectrons = 4,
+            ElectronConfiguration = "[Kr] 4d10 5s2 5p2", ValenceElectrons = 4,
             Electronegativity = 1.96, OxidationStates = new List<int> { 2, 4 },
             FirstIonizationEnergy_kJ_mol = 708.6, ElectronAffinity_kJ_mol = 107.3,
             AtomicRadius_pm = 158, CovalentRadius_pm = 139, IonicRadii = new Dictionary<int, int> { { 4, 69 } },
@@ -2296,7 +2296,7 @@ public ChemicalCompound FindFlexible(string name)
         {
             Name = "Antimony", Symbol = "Sb", AtomicNumber = 51, AtomicMass = 121.76,
             ElementType = ElementType.Metalloid, Group = 15, Period = 5,
-            ElectronConfiguration = "[Kr] 4d¹⁰ 5s² 5p³", ValenceElectrons = 5,
+            ElectronConfiguration = "[Kr] 4d10 5s2 5p3", ValenceElectrons = 5,
             Electronegativity = 2.05, OxidationStates = new List<int> { -3, 3, 5 },
             FirstIonizationEnergy_kJ_mol = 834.0, ElectronAffinity_kJ_mol = 103.2,
             AtomicRadius_pm = 145, CovalentRadius_pm = 139,
@@ -2309,7 +2309,7 @@ public ChemicalCompound FindFlexible(string name)
         {
             Name = "Tellurium", Symbol = "Te", AtomicNumber = 52, AtomicMass = 127.60,
             ElementType = ElementType.Metalloid, Group = 16, Period = 5,
-            ElectronConfiguration = "[Kr] 4d¹⁰ 5s² 5p⁴", ValenceElectrons = 6,
+            ElectronConfiguration = "[Kr] 4d10 5s2 5p4", ValenceElectrons = 6,
             Electronegativity = 2.1, OxidationStates = new List<int> { -2, 2, 4, 6 },
             FirstIonizationEnergy_kJ_mol = 869.3, ElectronAffinity_kJ_mol = 190.2,
             CovalentRadius_pm = 138, VanDerWaalsRadius_pm = 206,
@@ -2322,7 +2322,7 @@ public ChemicalCompound FindFlexible(string name)
         {
             Name = "Iodine", Symbol = "I", AtomicNumber = 53, AtomicMass = 126.90,
             ElementType = ElementType.Halogen, Group = 17, Period = 5,
-            ElectronConfiguration = "[Kr] 4d¹⁰ 5s² 5p⁵", ValenceElectrons = 7,
+            ElectronConfiguration = "[Kr] 4d10 5s2 5p5", ValenceElectrons = 7,
             Electronegativity = 2.66, OxidationStates = new List<int> { -1, 1, 3, 5, 7 },
             FirstIonizationEnergy_kJ_mol = 1008.4, ElectronAffinity_kJ_mol = 295.2,
             CovalentRadius_pm = 139, VanDerWaalsRadius_pm = 198, IonicRadii = new Dictionary<int, int> { { -1, 220 } },
@@ -2335,7 +2335,7 @@ public ChemicalCompound FindFlexible(string name)
         {
             Name = "Xenon", Symbol = "Xe", AtomicNumber = 54, AtomicMass = 131.29,
             ElementType = ElementType.NobleGas, Group = 18, Period = 5,
-            ElectronConfiguration = "[Kr] 4d¹⁰ 5s² 5p⁶", ValenceElectrons = 0,
+            ElectronConfiguration = "[Kr] 4d10 5s2 5p6", ValenceElectrons = 0,
             FirstIonizationEnergy_kJ_mol = 1170.4,
             CovalentRadius_pm = 140, VanDerWaalsRadius_pm = 216,
             MeltingPoint_K = 161.40, BoilingPoint_K = 165.051, Density_g_cm3 = 0.005894,
@@ -2343,15 +2343,15 @@ public ChemicalCompound FindFlexible(string name)
             Sources = new List<string> { "IUPAC", "CRC" }
         });
 
-        // ═══════════════════════════════════════════════════════════════════════
+        // =======================================================================
         // PERIOD 6 - Key elements (55-86)
-        // ═══════════════════════════════════════════════════════════════════════
+        // =======================================================================
 
         _elements.Add(new Element
         {
             Name = "Cesium", Symbol = "Cs", AtomicNumber = 55, AtomicMass = 132.91,
             ElementType = ElementType.AlkaliMetal, Group = 1, Period = 6,
-            ElectronConfiguration = "[Xe] 6s¹", ValenceElectrons = 1,
+            ElectronConfiguration = "[Xe] 6s1", ValenceElectrons = 1,
             Electronegativity = 0.79, OxidationStates = new List<int> { 1 },
             FirstIonizationEnergy_kJ_mol = 375.7, ElectronAffinity_kJ_mol = 45.5,
             AtomicRadius_pm = 265, CovalentRadius_pm = 244, IonicRadii = new Dictionary<int, int> { { 1, 167 } },
@@ -2364,7 +2364,7 @@ public ChemicalCompound FindFlexible(string name)
         {
             Name = "Barium", Symbol = "Ba", AtomicNumber = 56, AtomicMass = 137.33,
             ElementType = ElementType.AlkalineEarthMetal, Group = 2, Period = 6,
-            ElectronConfiguration = "[Xe] 6s²", ValenceElectrons = 2,
+            ElectronConfiguration = "[Xe] 6s2", ValenceElectrons = 2,
             Electronegativity = 0.89, OxidationStates = new List<int> { 2 },
             FirstIonizationEnergy_kJ_mol = 502.9, ElectronAffinity_kJ_mol = 13.95,
             AtomicRadius_pm = 222, CovalentRadius_pm = 215, IonicRadii = new Dictionary<int, int> { { 2, 135 } },
@@ -2378,7 +2378,7 @@ public ChemicalCompound FindFlexible(string name)
         {
             Name = "Lanthanum", Symbol = "La", AtomicNumber = 57, AtomicMass = 138.91,
             ElementType = ElementType.Lanthanide, Group = 3, Period = 6,
-            ElectronConfiguration = "[Xe] 5d¹ 6s²", ValenceElectrons = 2,
+            ElectronConfiguration = "[Xe] 5d1 6s2", ValenceElectrons = 2,
             Electronegativity = 1.10, OxidationStates = new List<int> { 3 },
             FirstIonizationEnergy_kJ_mol = 538.1, AtomicRadius_pm = 195, CovalentRadius_pm = 207,
             IonicRadii = new Dictionary<int, int> { { 3, 103 } },
@@ -2391,7 +2391,7 @@ public ChemicalCompound FindFlexible(string name)
         {
             Name = "Cerium", Symbol = "Ce", AtomicNumber = 58, AtomicMass = 140.12,
             ElementType = ElementType.Lanthanide, Group = 3, Period = 6,
-            ElectronConfiguration = "[Xe] 4f¹ 5d¹ 6s²", ValenceElectrons = 2,
+            ElectronConfiguration = "[Xe] 4f1 5d1 6s2", ValenceElectrons = 2,
             Electronegativity = 1.12, OxidationStates = new List<int> { 3, 4 },
             FirstIonizationEnergy_kJ_mol = 534.4, IonicRadii = new Dictionary<int, int> { { 3, 102 }, { 4, 87 } },
             MeltingPoint_K = 1068, BoilingPoint_K = 3716, Density_g_cm3 = 6.770, ThermalConductivity_W_mK = 11.3,
@@ -2403,7 +2403,7 @@ public ChemicalCompound FindFlexible(string name)
         {
             Name = "Neodymium", Symbol = "Nd", AtomicNumber = 60, AtomicMass = 144.24,
             ElementType = ElementType.Lanthanide, Group = 3, Period = 6,
-            ElectronConfiguration = "[Xe] 4f⁴ 6s²", ValenceElectrons = 2,
+            ElectronConfiguration = "[Xe] 4f4 6s2", ValenceElectrons = 2,
             Electronegativity = 1.14, OxidationStates = new List<int> { 3 },
             FirstIonizationEnergy_kJ_mol = 533.1, IonicRadii = new Dictionary<int, int> { { 3, 98 } },
             MeltingPoint_K = 1297, BoilingPoint_K = 3347, Density_g_cm3 = 7.007, ThermalConductivity_W_mK = 16.5,
@@ -2416,7 +2416,7 @@ public ChemicalCompound FindFlexible(string name)
         {
             Name = "Gold", Symbol = "Au", AtomicNumber = 79, AtomicMass = 196.97,
             ElementType = ElementType.TransitionMetal, Group = 11, Period = 6,
-            ElectronConfiguration = "[Xe] 4f¹⁴ 5d¹⁰ 6s¹", ValenceElectrons = 1,
+            ElectronConfiguration = "[Xe] 4f14 5d10 6s1", ValenceElectrons = 1,
             Electronegativity = 2.54, OxidationStates = new List<int> { 1, 3 },
             FirstIonizationEnergy_kJ_mol = 890.1, ElectronAffinity_kJ_mol = 222.8,
             AtomicRadius_pm = 144, CovalentRadius_pm = 136, IonicRadii = new Dictionary<int, int> { { 1, 137 } },
@@ -2429,7 +2429,7 @@ public ChemicalCompound FindFlexible(string name)
         {
             Name = "Mercury", Symbol = "Hg", AtomicNumber = 80, AtomicMass = 200.59,
             ElementType = ElementType.TransitionMetal, Group = 12, Period = 6,
-            ElectronConfiguration = "[Xe] 4f¹⁴ 5d¹⁰ 6s²", ValenceElectrons = 2,
+            ElectronConfiguration = "[Xe] 4f14 5d10 6s2", ValenceElectrons = 2,
             Electronegativity = 2.00, OxidationStates = new List<int> { 1, 2 },
             FirstIonizationEnergy_kJ_mol = 1007.1, AtomicRadius_pm = 151, CovalentRadius_pm = 132,
             IonicRadii = new Dictionary<int, int> { { 2, 102 } },
@@ -2442,7 +2442,7 @@ public ChemicalCompound FindFlexible(string name)
         {
             Name = "Lead", Symbol = "Pb", AtomicNumber = 82, AtomicMass = 207.2,
             ElementType = ElementType.PostTransitionMetal, Group = 14, Period = 6,
-            ElectronConfiguration = "[Xe] 4f¹⁴ 5d¹⁰ 6s² 6p²", ValenceElectrons = 4,
+            ElectronConfiguration = "[Xe] 4f14 5d10 6s2 6p2", ValenceElectrons = 4,
             Electronegativity = 2.33, OxidationStates = new List<int> { 2, 4 },
             FirstIonizationEnergy_kJ_mol = 715.6, ElectronAffinity_kJ_mol = 35.1,
             AtomicRadius_pm = 175, CovalentRadius_pm = 146, IonicRadii = new Dictionary<int, int> { { 2, 119 } },
@@ -2455,7 +2455,7 @@ public ChemicalCompound FindFlexible(string name)
         {
             Name = "Uranium", Symbol = "U", AtomicNumber = 92, AtomicMass = 238.03,
             ElementType = ElementType.Actinide, Group = 3, Period = 7,
-            ElectronConfiguration = "[Rn] 5f³ 6d¹ 7s²", ValenceElectrons = 2,
+            ElectronConfiguration = "[Rn] 5f3 6d1 7s2", ValenceElectrons = 2,
             Electronegativity = 1.38, OxidationStates = new List<int> { 3, 4, 5, 6 },
             FirstIonizationEnergy_kJ_mol = 597.6, AtomicRadius_pm = 175, CovalentRadius_pm = 196,
             IonicRadii = new Dictionary<int, int> { { 4, 89 }, { 6, 73 } },
@@ -2468,7 +2468,7 @@ public ChemicalCompound FindFlexible(string name)
         {
             Name = "Thorium", Symbol = "Th", AtomicNumber = 90, AtomicMass = 232.04,
             ElementType = ElementType.Actinide, Group = 3, Period = 7,
-            ElectronConfiguration = "[Rn] 6d² 7s²", ValenceElectrons = 2,
+            ElectronConfiguration = "[Rn] 6d2 7s2", ValenceElectrons = 2,
             Electronegativity = 1.3, OxidationStates = new List<int> { 4 },
             FirstIonizationEnergy_kJ_mol = 587.0, CovalentRadius_pm = 206,
             IonicRadii = new Dictionary<int, int> { { 4, 94 } },

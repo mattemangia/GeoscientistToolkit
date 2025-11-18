@@ -3,12 +3,12 @@
 // Singleton service that stores materials, handles I/O, and seeds realistic values.
 //
 // SOURCES (general; see per-material comments in SeedDefaults()):
-// - Engineering Toolbox (common material properties: ρ, k, E, ν, η, c_s)
-// - CRC Handbook / NIST data for fluids & gases (η, k, ρ, speed of sound)
-// - Rock physics & geotechnical handbooks for typical rock E, ν, φ, Vp/Vs, friction angles
-//   (e.g., Schön 2015 "Physical Properties of Rocks"; Carmichael 1982; Jaeger et al. "Rock Mechanics")
+// - Engineering Toolbox (common material properties: rho, k, E, nu, eta, c_s)
+// - CRC Handbook / NIST data for fluids & gases (eta, k, rho, speed of sound)
+// - Rock physics & geotechnical handbooks for typical rock E, nu, phi, Vp/Vs, friction angles
+//   (e.g., Schon 2015 "Physical Properties of Rocks"; Carmichael 1982; Jaeger et al. "Rock Mechanics")
 // - Online databases and publications for specific material properties.
-// - Typical values consolidated to SI; ranges exist—these are representative midpoints.
+// - Typical values consolidated to SI; ranges exist--these are representative midpoints.
 //   Always validate for your specimen, T, P, saturation, fabric, anisotropy.
 //
 
@@ -144,36 +144,36 @@ public sealed class MaterialLibrary
         // --- WATER ------------------------------------------------
         _materials.Add(new PhysicalMaterial
         {
-            Name = "Water (20°C)",
+            Name = "Water (20degC)",
             Phase = PhaseType.Liquid,
-            Viscosity_Pa_s = 1.0e-3, // Pa·s @ ~20°C
-            Density_kg_m3 = 998, // kg/m3 @ ~20°C
-            ThermalConductivity_W_mK = 0.6, // W/mK @ ~25°C
+            Viscosity_Pa_s = 1.0e-3, // Pa*s @ ~20degC
+            Density_kg_m3 = 998, // kg/m3 @ ~20degC
+            ThermalConductivity_W_mK = 0.6, // W/mK @ ~25degC
             SpecificHeatCapacity_J_kgK = 4182,
             PoissonRatio = 0.5, // incompressible fluid limit (for reference)
             TypicalWettability_contactAngle_deg = 0, // water on clean hydrophilic solids
-            Vp_m_s = 1480, // speed of sound @20°C
+            Vp_m_s = 1480, // speed of sound @20degC
             AcousticImpedance_MRayl = 1.48,
             ElectricalResistivity_Ohm_m = 1.8e5, // for pure water
             Notes = "Liquid water at ambient conditions.",
             Sources = new List<string>
             {
-                "CRC/NIST water properties; common engineering tables (η≈1e-3 Pa·s at 20°C, ρ≈998 kg/m³, k≈0.6 W/mK, c≈1480 m/s)."
+                "CRC/NIST water properties; common engineering tables (eta~1e-3 Pa*s at 20degC, rho~998 kg/m3, k~0.6 W/mK, c~1480 m/s)."
             },
             IsUserMaterial = false
         });
 // --- OIL -------------------------------------------------
         _materials.Add(new PhysicalMaterial
         {
-            Name = "Crude Oil (medium, 20°C)",
+            Name = "Crude Oil (medium, 20degC)",
             Phase = PhaseType.Liquid,
-            Viscosity_Pa_s = 1.0e-2, // Pa·s (~10 cP for medium crude)
-            Density_kg_m3 = 850, // kg/m³ (typical for ~35° API gravity)
+            Viscosity_Pa_s = 1.0e-2, // Pa*s (~10 cP for medium crude)
+            Density_kg_m3 = 850, // kg/m3 (typical for ~35deg API gravity)
             ThermalConductivity_W_mK = 0.135, // W/mK
             SpecificHeatCapacity_J_kgK = 2090, // J/kgK
             PoissonRatio = 0.5, // incompressible fluid approximation
             Vp_m_s = 1350, // speed of sound in liquid oil
-            AcousticImpedance_MRayl = 1.15, // ρ × Vp
+            AcousticImpedance_MRayl = 1.15, // rho x Vp
             ElectricalResistivity_Ohm_m = 1e12, // Very high, good insulator
             Notes =
                 "Medium crude oil at ambient conditions. Properties vary significantly with API gravity, temperature, dissolved gas, and composition.",
@@ -188,7 +188,7 @@ public sealed class MaterialLibrary
         // --- GASES -----------------------------------------------
         _materials.Add(new PhysicalMaterial
         {
-            Name = "Nitrogen (N2, 20°C, 1 atm)",
+            Name = "Nitrogen (N2, 20degC, 1 atm)",
             Phase = PhaseType.Gas,
             Density_kg_m3 = 1.2,
             Viscosity_Pa_s = 1.8e-5,
@@ -196,12 +196,12 @@ public sealed class MaterialLibrary
             SpecificHeatCapacity_J_kgK = 1040,
             Vp_m_s = 350, Vs_m_s = null, VpVsRatio = null,
             Notes = "Dry nitrogen at ambient conditions.",
-            Sources = new List<string> { "NIST/Engineering Toolbox typical gas properties at ~20°C." },
+            Sources = new List<string> { "NIST/Engineering Toolbox typical gas properties at ~20degC." },
             IsUserMaterial = false
         });
         _materials.Add(new PhysicalMaterial
         {
-            Name = "Oxygen (O2, 20°C, 1 atm)",
+            Name = "Oxygen (O2, 20degC, 1 atm)",
             Phase = PhaseType.Gas,
             Density_kg_m3 = 1.33,
             Viscosity_Pa_s = 2.0e-5,
@@ -209,20 +209,20 @@ public sealed class MaterialLibrary
             SpecificHeatCapacity_J_kgK = 919,
             Vp_m_s = 330,
             Notes = "Dry oxygen at ambient conditions.",
-            Sources = new List<string> { "NIST/Engineering Toolbox typical gas properties at ~20°C." },
+            Sources = new List<string> { "NIST/Engineering Toolbox typical gas properties at ~20degC." },
             IsUserMaterial = false
         });
         _materials.Add(new PhysicalMaterial
         {
-            Name = "Carbon Dioxide (CO2, 20°C, 1 atm)",
+            Name = "Carbon Dioxide (CO2, 20degC, 1 atm)",
             Phase = PhaseType.Gas,
             Density_kg_m3 = 1.8,
             Viscosity_Pa_s = 1.5e-5,
             ThermalConductivity_W_mK = 0.017,
             SpecificHeatCapacity_J_kgK = 844,
             Vp_m_s = 270,
-            Notes = "Dry CO₂ at ambient conditions.",
-            Sources = new List<string> { "NIST data for CO₂; Engineering Toolbox." },
+            Notes = "Dry CO2 at ambient conditions.",
+            Sources = new List<string> { "NIST data for CO2; Engineering Toolbox." },
             IsUserMaterial = false
         });
 
@@ -244,10 +244,10 @@ public sealed class MaterialLibrary
             Vp_m_s = 4000, Vs_m_s = 2200, VpVsRatio = 1.82,
             AcousticImpedance_MRayl = 9.6,
             ElectricalResistivity_Ohm_m = 1e3, // Highly variable
-            Notes = "Dry, compact sandstone; properties vary strongly with φ, cement, saturation.",
+            Notes = "Dry, compact sandstone; properties vary strongly with phi, cement, saturation.",
             Sources = new List<string>
             {
-                "Rock property compilations: Schön, Jaeger, Carmichael; Eng. tables.",
+                "Rock property compilations: Schon, Jaeger, Carmichael; Eng. tables.",
                 "MakeItFrom.com for tensile strength [5]"
             },
             IsUserMaterial = false

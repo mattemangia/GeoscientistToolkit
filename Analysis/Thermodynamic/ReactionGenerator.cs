@@ -1574,8 +1574,8 @@ public List<ChemicalReaction> GenerateSolubleCompoundDissociationReactions(List<
         }
         
         // SURGICAL FIX: Skip water (liquid phase) - it's the solvent and should not dissociate
-        if (compound.Phase == CompoundPhase.Liquid && 
-            (compound.Name == "Water" || compound.ChemicalFormula.Contains("H2O") || compound.ChemicalFormula.Contains("H₂O")))
+        if (compound.Phase == CompoundPhase.Liquid &&
+            (compound.Name == "Water" || compound.ChemicalFormula.Contains("H2O")))
         {
             Logger.Log($"[ReactionGenerator] {compoundName} is water (solvent), skipping dissociation");
             continue;

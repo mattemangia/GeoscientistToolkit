@@ -6,7 +6,7 @@ public class RockMaterial
 {
     public string Name { get; set; }
     public string Category { get; set; }
-    public float Density { get; set; } // kg/m³
+    public float Density { get; set; } // kg/m3
     public float Vp { get; set; } // P-wave velocity m/s
     public float Vs { get; set; } // S-wave velocity m/s
     public float PoissonRatio { get; set; }

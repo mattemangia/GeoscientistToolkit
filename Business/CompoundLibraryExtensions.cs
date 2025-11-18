@@ -32,15 +32,15 @@ public static class CompoundLibraryExtensions
     /// </summary>
     public static void SeedAdditionalCompounds(this CompoundLibrary library)
     {
-        // ═══════════════════════════════════════════════════════════════════════
+        // =======================================================================
         // ADDITIONAL SILICATE MINERALS (Holland & Powell 2011)
-        // ═══════════════════════════════════════════════════════════════════════
+        // =======================================================================
 
         // --- OLIVINES ---
         library.AddOrUpdate(new ChemicalCompound
         {
             Name = "Forsterite",
-            ChemicalFormula = "Mg₂SiO₄",
+            ChemicalFormula = "Mg2SiO4",
             Synonyms = new List<string> { "Mg2SiO4", "Mg-Olivine" },
             Phase = CompoundPhase.Solid,
             CrystalSystem = CrystalSystem.Orthorhombic,
@@ -60,7 +60,7 @@ public static class CompoundLibraryExtensions
         library.AddOrUpdate(new ChemicalCompound
         {
             Name = "Fayalite",
-            ChemicalFormula = "Fe₂SiO₄",
+            ChemicalFormula = "Fe2SiO4",
             Synonyms = new List<string> { "Fe2SiO4", "Fe-Olivine" },
             Phase = CompoundPhase.Solid,
             CrystalSystem = CrystalSystem.Orthorhombic,
@@ -81,7 +81,7 @@ public static class CompoundLibraryExtensions
         library.AddOrUpdate(new ChemicalCompound
         {
             Name = "Enstatite",
-            ChemicalFormula = "MgSiO₃",
+            ChemicalFormula = "MgSiO3",
             Synonyms = new List<string> { "MgSiO3", "Mg-Pyroxene" },
             Phase = CompoundPhase.Solid,
             CrystalSystem = CrystalSystem.Orthorhombic,
@@ -101,7 +101,7 @@ public static class CompoundLibraryExtensions
         library.AddOrUpdate(new ChemicalCompound
         {
             Name = "Ferrosilite",
-            ChemicalFormula = "FeSiO₃",
+            ChemicalFormula = "FeSiO3",
             Synonyms = new List<string> { "FeSiO3", "Fe-Pyroxene" },
             Phase = CompoundPhase.Solid,
             CrystalSystem = CrystalSystem.Orthorhombic,
@@ -121,7 +121,7 @@ public static class CompoundLibraryExtensions
         library.AddOrUpdate(new ChemicalCompound
         {
             Name = "Diopside",
-            ChemicalFormula = "CaMgSi₂O₆",
+            ChemicalFormula = "CaMgSi2O6",
             Synonyms = new List<string> { "CaMgSi2O6" },
             Phase = CompoundPhase.Solid,
             CrystalSystem = CrystalSystem.Monoclinic,
@@ -142,7 +142,7 @@ public static class CompoundLibraryExtensions
         library.AddOrUpdate(new ChemicalCompound
         {
             Name = "Albite",
-            ChemicalFormula = "NaAlSi₃O₈",
+            ChemicalFormula = "NaAlSi3O8",
             Synonyms = new List<string> { "NaAlSi3O8", "Na-Feldspar" },
             Phase = CompoundPhase.Solid,
             CrystalSystem = CrystalSystem.Triclinic,
@@ -162,7 +162,7 @@ public static class CompoundLibraryExtensions
         library.AddOrUpdate(new ChemicalCompound
         {
             Name = "Anorthite",
-            ChemicalFormula = "CaAl₂Si₂O₈",
+            ChemicalFormula = "CaAl2Si2O8",
             Synonyms = new List<string> { "CaAl2Si2O8", "Ca-Feldspar" },
             Phase = CompoundPhase.Solid,
             CrystalSystem = CrystalSystem.Triclinic,
@@ -182,7 +182,7 @@ public static class CompoundLibraryExtensions
         library.AddOrUpdate(new ChemicalCompound
         {
             Name = "Orthoclase",
-            ChemicalFormula = "KAlSi₃O₈",
+            ChemicalFormula = "KAlSi3O8",
             Synonyms = new List<string> { "KAlSi3O8", "K-Feldspar" },
             Phase = CompoundPhase.Solid,
             CrystalSystem = CrystalSystem.Monoclinic,
@@ -199,14 +199,14 @@ public static class CompoundLibraryExtensions
             IsUserCompound = false
         });
 
-        // ═══════════════════════════════════════════════════════════════════════
+        // =======================================================================
         // ADDITIONAL CARBONATE MINERALS
-        // ═══════════════════════════════════════════════════════════════════════
+        // =======================================================================
 
         library.AddOrUpdate(new ChemicalCompound
         {
             Name = "Magnesite",
-            ChemicalFormula = "MgCO₃",
+            ChemicalFormula = "MgCO3",
             Synonyms = new List<string> { "MgCO3" },
             Phase = CompoundPhase.Solid,
             CrystalSystem = CrystalSystem.Trigonal,
@@ -227,7 +227,7 @@ public static class CompoundLibraryExtensions
         library.AddOrUpdate(new ChemicalCompound
         {
             Name = "Siderite",
-            ChemicalFormula = "FeCO₃",
+            ChemicalFormula = "FeCO3",
             Synonyms = new List<string> { "FeCO3" },
             Phase = CompoundPhase.Solid,
             CrystalSystem = CrystalSystem.Trigonal,
@@ -248,7 +248,7 @@ public static class CompoundLibraryExtensions
         library.AddOrUpdate(new ChemicalCompound
         {
             Name = "Rhodochrosite",
-            ChemicalFormula = "MnCO₃",
+            ChemicalFormula = "MnCO3",
             Synonyms = new List<string> { "MnCO3" },
             Phase = CompoundPhase.Solid,
             CrystalSystem = CrystalSystem.Trigonal,
@@ -269,7 +269,7 @@ public static class CompoundLibraryExtensions
         library.AddOrUpdate(new ChemicalCompound
         {
             Name = "Strontianite",
-            ChemicalFormula = "SrCO₃",
+            ChemicalFormula = "SrCO3",
             Synonyms = new List<string> { "SrCO3" },
             Phase = CompoundPhase.Solid,
             CrystalSystem = CrystalSystem.Orthorhombic,
@@ -287,14 +287,14 @@ public static class CompoundLibraryExtensions
             IsUserCompound = false
         });
 
-        // ═══════════════════════════════════════════════════════════════════════
+        // =======================================================================
         // ADDITIONAL SULFATE MINERALS
-        // ═══════════════════════════════════════════════════════════════════════
+        // =======================================================================
 
         library.AddOrUpdate(new ChemicalCompound
         {
             Name = "Anhydrite",
-            ChemicalFormula = "CaSO₄",
+            ChemicalFormula = "CaSO4",
             Synonyms = new List<string> { "CaSO4" },
             Phase = CompoundPhase.Solid,
             CrystalSystem = CrystalSystem.Orthorhombic,
@@ -315,7 +315,7 @@ public static class CompoundLibraryExtensions
         library.AddOrUpdate(new ChemicalCompound
         {
             Name = "Barite",
-            ChemicalFormula = "BaSO₄",
+            ChemicalFormula = "BaSO4",
             Synonyms = new List<string> { "BaSO4", "Baryte" },
             Phase = CompoundPhase.Solid,
             CrystalSystem = CrystalSystem.Orthorhombic,
@@ -336,7 +336,7 @@ public static class CompoundLibraryExtensions
         library.AddOrUpdate(new ChemicalCompound
         {
             Name = "Celestite",
-            ChemicalFormula = "SrSO₄",
+            ChemicalFormula = "SrSO4",
             Synonyms = new List<string> { "SrSO4", "Celestine" },
             Phase = CompoundPhase.Solid,
             CrystalSystem = CrystalSystem.Orthorhombic,
@@ -357,7 +357,7 @@ public static class CompoundLibraryExtensions
         library.AddOrUpdate(new ChemicalCompound
         {
             Name = "Anglesite",
-            ChemicalFormula = "PbSO₄",
+            ChemicalFormula = "PbSO4",
             Synonyms = new List<string> { "PbSO4" },
             Phase = CompoundPhase.Solid,
             CrystalSystem = CrystalSystem.Orthorhombic,
@@ -375,9 +375,9 @@ public static class CompoundLibraryExtensions
             IsUserCompound = false
         });
 
-        // ═══════════════════════════════════════════════════════════════════════
+        // =======================================================================
         // ADDITIONAL CHLORIDE MINERALS AND SALTS
-        // ═══════════════════════════════════════════════════════════════════════
+        // =======================================================================
 
         library.AddOrUpdate(new ChemicalCompound
         {
@@ -404,8 +404,8 @@ public static class CompoundLibraryExtensions
         library.AddOrUpdate(new ChemicalCompound
         {
             Name = "Carnallite",
-            ChemicalFormula = "KMgCl₃·6H₂O",
-            Synonyms = new List<string> { "KMgCl3!6H2O" },
+            ChemicalFormula = "KMgCl3*6H2O",
+            Synonyms = new List<string> { "KMgCl3*6H2O" },
             Phase = CompoundPhase.Solid,
             CrystalSystem = CrystalSystem.Orthorhombic,
             GibbsFreeEnergyFormation_kJ_mol = -3434.3,  // Estimated
@@ -424,8 +424,8 @@ public static class CompoundLibraryExtensions
         library.AddOrUpdate(new ChemicalCompound
         {
             Name = "Bischofite",
-            ChemicalFormula = "MgCl₂·6H₂O",
-            Synonyms = new List<string> { "MgCl2!6H2O" },
+            ChemicalFormula = "MgCl2*6H2O",
+            Synonyms = new List<string> { "MgCl2*6H2O" },
             Phase = CompoundPhase.Solid,
             CrystalSystem = CrystalSystem.Monoclinic,
             GibbsFreeEnergyFormation_kJ_mol = -2114.8,  // PHREEQC database
@@ -440,14 +440,14 @@ public static class CompoundLibraryExtensions
             IsUserCompound = false
         });
 
-        // ═══════════════════════════════════════════════════════════════════════
+        // =======================================================================
         // ADDITIONAL OXIDE MINERALS
-        // ═══════════════════════════════════════════════════════════════════════
+        // =======================================================================
 
         library.AddOrUpdate(new ChemicalCompound
         {
             Name = "Corundum",
-            ChemicalFormula = "Al₂O₃",
+            ChemicalFormula = "Al2O3",
             Synonyms = new List<string> { "Al2O3", "Alumina" },
             Phase = CompoundPhase.Solid,
             CrystalSystem = CrystalSystem.Trigonal,
@@ -501,7 +501,7 @@ public static class CompoundLibraryExtensions
             Density_g_cm3 = 5.99,
             MohsHardness = 5.5,
             Color = "Black, gray",
-            Notes = "Non-stoichiometric, stable only above 570°C",
+            Notes = "Non-stoichiometric, stable only above 570degC",
             Sources = new List<string> { "Robie & Hemingway (1995)" },
             IsUserCompound = false
         });
@@ -509,7 +509,7 @@ public static class CompoundLibraryExtensions
         library.AddOrUpdate(new ChemicalCompound
         {
             Name = "Magnetite",
-            ChemicalFormula = "Fe₃O₄",
+            ChemicalFormula = "Fe3O4",
             Synonyms = new List<string> { "Fe3O4" },
             Phase = CompoundPhase.Solid,
             CrystalSystem = CrystalSystem.Cubic,
@@ -530,7 +530,7 @@ public static class CompoundLibraryExtensions
         library.AddOrUpdate(new ChemicalCompound
         {
             Name = "Chromite",
-            ChemicalFormula = "FeCr₂O₄",
+            ChemicalFormula = "FeCr2O4",
             Synonyms = new List<string> { "FeCr2O4" },
             Phase = CompoundPhase.Solid,
             CrystalSystem = CrystalSystem.Cubic,
@@ -548,14 +548,14 @@ public static class CompoundLibraryExtensions
             IsUserCompound = false
         });
 
-        // ═══════════════════════════════════════════════════════════════════════
+        // =======================================================================
         // ADDITIONAL AQUEOUS SPECIES (PHREEQC database)
-        // ═══════════════════════════════════════════════════════════════════════
+        // =======================================================================
 
         library.AddOrUpdate(new ChemicalCompound
         {
             Name = "Strontium ion",
-            ChemicalFormula = "Sr²⁺",
+            ChemicalFormula = "Sr2+",
             Synonyms = new List<string> { "Sr2+", "Sr+2" },
             Phase = CompoundPhase.Aqueous,
             IonicCharge = 2,
@@ -571,7 +571,7 @@ public static class CompoundLibraryExtensions
         library.AddOrUpdate(new ChemicalCompound
         {
             Name = "Barium ion",
-            ChemicalFormula = "Ba²⁺",
+            ChemicalFormula = "Ba2+",
             Synonyms = new List<string> { "Ba2+", "Ba+2" },
             Phase = CompoundPhase.Aqueous,
             IonicCharge = 2,
@@ -587,7 +587,7 @@ public static class CompoundLibraryExtensions
         library.AddOrUpdate(new ChemicalCompound
         {
             Name = "Manganese(II) ion",
-            ChemicalFormula = "Mn²⁺",
+            ChemicalFormula = "Mn2+",
             Synonyms = new List<string> { "Mn2+", "Mn+2" },
             Phase = CompoundPhase.Aqueous,
             IonicCharge = 2,
@@ -604,7 +604,7 @@ public static class CompoundLibraryExtensions
         library.AddOrUpdate(new ChemicalCompound
         {
             Name = "Zinc ion",
-            ChemicalFormula = "Zn²⁺",
+            ChemicalFormula = "Zn2+",
             Synonyms = new List<string> { "Zn2+", "Zn+2" },
             Phase = CompoundPhase.Aqueous,
             IonicCharge = 2,
@@ -620,7 +620,7 @@ public static class CompoundLibraryExtensions
         library.AddOrUpdate(new ChemicalCompound
         {
             Name = "Lead(II) ion",
-            ChemicalFormula = "Pb²⁺",
+            ChemicalFormula = "Pb2+",
             Synonyms = new List<string> { "Pb2+", "Pb+2" },
             Phase = CompoundPhase.Aqueous,
             IonicCharge = 2,
@@ -636,7 +636,7 @@ public static class CompoundLibraryExtensions
         library.AddOrUpdate(new ChemicalCompound
         {
             Name = "Aluminum ion",
-            ChemicalFormula = "Al³⁺",
+            ChemicalFormula = "Al3+",
             Synonyms = new List<string> { "Al3+", "Al+3" },
             Phase = CompoundPhase.Aqueous,
             IonicCharge = 3,
@@ -652,7 +652,7 @@ public static class CompoundLibraryExtensions
         library.AddOrUpdate(new ChemicalCompound
         {
             Name = "Nitrate ion",
-            ChemicalFormula = "NO₃⁻",
+            ChemicalFormula = "NO3-",
             Synonyms = new List<string> { "NO3-", "NO3^-" },
             Phase = CompoundPhase.Aqueous,
             IonicCharge = -1,
@@ -668,7 +668,7 @@ public static class CompoundLibraryExtensions
         library.AddOrUpdate(new ChemicalCompound
         {
             Name = "Phosphate ion",
-            ChemicalFormula = "PO₄³⁻",
+            ChemicalFormula = "PO43-",
             Synonyms = new List<string> { "PO4^3-", "PO43-" },
             Phase = CompoundPhase.Aqueous,
             IonicCharge = -3,
@@ -684,7 +684,7 @@ public static class CompoundLibraryExtensions
         library.AddOrUpdate(new ChemicalCompound
         {
             Name = "Fluoride ion",
-            ChemicalFormula = "F⁻",
+            ChemicalFormula = "F-",
             Synonyms = new List<string> { "F-", "F^-" },
             Phase = CompoundPhase.Aqueous,
             IonicCharge = -1,
@@ -700,7 +700,7 @@ public static class CompoundLibraryExtensions
         library.AddOrUpdate(new ChemicalCompound
         {
             Name = "Bromide ion",
-            ChemicalFormula = "Br⁻",
+            ChemicalFormula = "Br-",
             Synonyms = new List<string> { "Br-", "Br^-" },
             Phase = CompoundPhase.Aqueous,
             IonicCharge = -1,
@@ -713,21 +713,21 @@ public static class CompoundLibraryExtensions
             IsUserCompound = false
         });
 
-        // ═══════════════════════════════════════════════════════════════════════
+        // =======================================================================
         // ADDITIONAL GAS SPECIES (SUPCRT92)
-        // ═══════════════════════════════════════════════════════════════════════
+        // =======================================================================
 
         library.AddOrUpdate(new ChemicalCompound
         {
             Name = "Nitrogen gas",
-            ChemicalFormula = "N₂(g)",
+            ChemicalFormula = "N2(g)",
             Synonyms = new List<string> { "N2(g)", "N2" },
             Phase = CompoundPhase.Gas,
             GibbsFreeEnergyFormation_kJ_mol = 0.0,  // Element in standard state
             EnthalpyFormation_kJ_mol = 0.0,
             Entropy_J_molK = 191.6,
             HeatCapacity_J_molK = 29.1,
-            HenrysLawConstant_mol_L_atm = 6.1e-4,  // 25°C
+            HenrysLawConstant_mol_L_atm = 6.1e-4,  // 25degC
             MolecularWeight_g_mol = 28.01,
             Sources = new List<string> { "NIST WebBook", "PHREEQC database" },
             IsUserCompound = false
@@ -736,14 +736,14 @@ public static class CompoundLibraryExtensions
         library.AddOrUpdate(new ChemicalCompound
         {
             Name = "Oxygen gas",
-            ChemicalFormula = "O₂(g)",
+            ChemicalFormula = "O2(g)",
             Synonyms = new List<string> { "O2(g)", "O2" },
             Phase = CompoundPhase.Gas,
             GibbsFreeEnergyFormation_kJ_mol = 0.0,  // Element in standard state
             EnthalpyFormation_kJ_mol = 0.0,
             Entropy_J_molK = 205.2,
             HeatCapacity_J_molK = 29.4,
-            HenrysLawConstant_mol_L_atm = 1.3e-3,  // 25°C
+            HenrysLawConstant_mol_L_atm = 1.3e-3,  // 25degC
             MolecularWeight_g_mol = 32.00,
             Sources = new List<string> { "NIST WebBook", "PHREEQC database" },
             IsUserCompound = false
@@ -752,14 +752,14 @@ public static class CompoundLibraryExtensions
         library.AddOrUpdate(new ChemicalCompound
         {
             Name = "Methane gas",
-            ChemicalFormula = "CH₄(g)",
+            ChemicalFormula = "CH4(g)",
             Synonyms = new List<string> { "CH4(g)", "CH4" },
             Phase = CompoundPhase.Gas,
             GibbsFreeEnergyFormation_kJ_mol = -50.5,  // SUPCRT92
             EnthalpyFormation_kJ_mol = -74.6,
             Entropy_J_molK = 186.3,
             HeatCapacity_J_molK = 35.7,
-            HenrysLawConstant_mol_L_atm = 1.4e-3,  // 25°C
+            HenrysLawConstant_mol_L_atm = 1.4e-3,  // 25degC
             MolecularWeight_g_mol = 16.04,
             Sources = new List<string> { "NIST WebBook", "SUPCRT92" },
             IsUserCompound = false
@@ -768,14 +768,14 @@ public static class CompoundLibraryExtensions
         library.AddOrUpdate(new ChemicalCompound
         {
             Name = "Hydrogen gas",
-            ChemicalFormula = "H₂(g)",
+            ChemicalFormula = "H2(g)",
             Synonyms = new List<string> { "H2(g)", "H2" },
             Phase = CompoundPhase.Gas,
             GibbsFreeEnergyFormation_kJ_mol = 0.0,  // Element in standard state
             EnthalpyFormation_kJ_mol = 0.0,
             Entropy_J_molK = 130.7,
             HeatCapacity_J_molK = 28.8,
-            HenrysLawConstant_mol_L_atm = 7.8e-4,  // 25°C
+            HenrysLawConstant_mol_L_atm = 7.8e-4,  // 25degC
             MolecularWeight_g_mol = 2.02,
             Sources = new List<string> { "NIST WebBook" },
             IsUserCompound = false
@@ -784,14 +784,14 @@ public static class CompoundLibraryExtensions
         library.AddOrUpdate(new ChemicalCompound
         {
             Name = "Hydrogen sulfide gas",
-            ChemicalFormula = "H₂S(g)",
+            ChemicalFormula = "H2S(g)",
             Synonyms = new List<string> { "H2S(g)", "H2S" },
             Phase = CompoundPhase.Gas,
             GibbsFreeEnergyFormation_kJ_mol = -33.4,  // NIST
             EnthalpyFormation_kJ_mol = -20.6,
             Entropy_J_molK = 205.8,
             HeatCapacity_J_molK = 34.2,
-            HenrysLawConstant_mol_L_atm = 0.102,  // 25°C
+            HenrysLawConstant_mol_L_atm = 0.102,  // 25degC
             MolecularWeight_g_mol = 34.08,
             Sources = new List<string> { "NIST WebBook", "PHREEQC database" },
             IsUserCompound = false
@@ -800,27 +800,27 @@ public static class CompoundLibraryExtensions
         library.AddOrUpdate(new ChemicalCompound
         {
             Name = "Ammonia gas",
-            ChemicalFormula = "NH₃(g)",
+            ChemicalFormula = "NH3(g)",
             Synonyms = new List<string> { "NH3(g)", "NH3" },
             Phase = CompoundPhase.Gas,
             GibbsFreeEnergyFormation_kJ_mol = -16.4,  // NIST
             EnthalpyFormation_kJ_mol = -45.9,
             Entropy_J_molK = 192.8,
             HeatCapacity_J_molK = 35.1,
-            HenrysLawConstant_mol_L_atm = 58.0,  // 25°C - very soluble
+            HenrysLawConstant_mol_L_atm = 58.0,  // 25degC - very soluble
             MolecularWeight_g_mol = 17.03,
             Sources = new List<string> { "NIST WebBook" },
             IsUserCompound = false
         });
 
-        // ═══════════════════════════════════════════════════════════════════════
+        // =======================================================================
         // METAMORPHIC MINERALS - Al-Silicates (Holland & Powell 2011)
-        // ═══════════════════════════════════════════════════════════════════════
+        // =======================================================================
 
         library.AddOrUpdate(new ChemicalCompound
         {
             Name = "Kyanite",
-            ChemicalFormula = "Al₂SiO₅",
+            ChemicalFormula = "Al2SiO5",
             Synonyms = new List<string> { "Al2SiO5", "Disthene" },
             Phase = CompoundPhase.Solid,
             CrystalSystem = CrystalSystem.Triclinic,
@@ -841,7 +841,7 @@ public static class CompoundLibraryExtensions
         library.AddOrUpdate(new ChemicalCompound
         {
             Name = "Andalusite",
-            ChemicalFormula = "Al₂SiO₅",
+            ChemicalFormula = "Al2SiO5",
             Synonyms = new List<string> { "Al2SiO5" },
             Phase = CompoundPhase.Solid,
             CrystalSystem = CrystalSystem.Orthorhombic,
@@ -862,7 +862,7 @@ public static class CompoundLibraryExtensions
         library.AddOrUpdate(new ChemicalCompound
         {
             Name = "Sillimanite",
-            ChemicalFormula = "Al₂SiO₅",
+            ChemicalFormula = "Al2SiO5",
             Synonyms = new List<string> { "Al2SiO5", "Fibrolite" },
             Phase = CompoundPhase.Solid,
             CrystalSystem = CrystalSystem.Orthorhombic,
@@ -885,7 +885,7 @@ public static class CompoundLibraryExtensions
         library.AddOrUpdate(new ChemicalCompound
         {
             Name = "Almandine",
-            ChemicalFormula = "Fe₃Al₂Si₃O₁₂",
+            ChemicalFormula = "Fe3Al2Si3O12",
             Synonyms = new List<string> { "Fe3Al2Si3O12", "Fe-Garnet" },
             Phase = CompoundPhase.Solid,
             CrystalSystem = CrystalSystem.Cubic,
@@ -906,7 +906,7 @@ public static class CompoundLibraryExtensions
         library.AddOrUpdate(new ChemicalCompound
         {
             Name = "Pyrope",
-            ChemicalFormula = "Mg₃Al₂Si₃O₁₂",
+            ChemicalFormula = "Mg3Al2Si3O12",
             Synonyms = new List<string> { "Mg3Al2Si3O12", "Mg-Garnet" },
             Phase = CompoundPhase.Solid,
             CrystalSystem = CrystalSystem.Cubic,
@@ -927,7 +927,7 @@ public static class CompoundLibraryExtensions
         library.AddOrUpdate(new ChemicalCompound
         {
             Name = "Grossular",
-            ChemicalFormula = "Ca₃Al₂Si₃O₁₂",
+            ChemicalFormula = "Ca3Al2Si3O12",
             Synonyms = new List<string> { "Ca3Al2Si3O12", "Ca-Garnet" },
             Phase = CompoundPhase.Solid,
             CrystalSystem = CrystalSystem.Cubic,
@@ -945,14 +945,14 @@ public static class CompoundLibraryExtensions
             IsUserCompound = false
         });
 
-        // ═══════════════════════════════════════════════════════════════════════
+        // =======================================================================
         // MICAS (Holland & Powell 2011)
-        // ═══════════════════════════════════════════════════════════════════════
+        // =======================================================================
 
         library.AddOrUpdate(new ChemicalCompound
         {
             Name = "Muscovite",
-            ChemicalFormula = "KAl₂(AlSi₃O₁₀)(OH)₂",
+            ChemicalFormula = "KAl2(AlSi3O10)(OH)2",
             Synonyms = new List<string> { "KAl2(AlSi3O10)(OH)2", "White mica" },
             Phase = CompoundPhase.Solid,
             CrystalSystem = CrystalSystem.Monoclinic,
@@ -973,7 +973,7 @@ public static class CompoundLibraryExtensions
         library.AddOrUpdate(new ChemicalCompound
         {
             Name = "Phlogopite",
-            ChemicalFormula = "KMg₃(AlSi₃O₁₀)(OH)₂",
+            ChemicalFormula = "KMg3(AlSi3O10)(OH)2",
             Synonyms = new List<string> { "KMg3(AlSi3O10)(OH)2", "Mg-biotite" },
             Phase = CompoundPhase.Solid,
             CrystalSystem = CrystalSystem.Monoclinic,
@@ -994,7 +994,7 @@ public static class CompoundLibraryExtensions
         library.AddOrUpdate(new ChemicalCompound
         {
             Name = "Biotite",
-            ChemicalFormula = "K(Mg,Fe)₃(AlSi₃O₁₀)(OH)₂",
+            ChemicalFormula = "K(Mg,Fe)3(AlSi3O10)(OH)2",
             Synonyms = new List<string> { "Black mica" },
             Phase = CompoundPhase.Solid,
             CrystalSystem = CrystalSystem.Monoclinic,
@@ -1012,14 +1012,14 @@ public static class CompoundLibraryExtensions
             IsUserCompound = false
         });
 
-        // ═══════════════════════════════════════════════════════════════════════
+        // =======================================================================
         // CLAY MINERALS & PHYLLOSILICATES (Robie & Hemingway 1995)
-        // ═══════════════════════════════════════════════════════════════════════
+        // =======================================================================
 
         library.AddOrUpdate(new ChemicalCompound
         {
             Name = "Kaolinite",
-            ChemicalFormula = "Al₂Si₂O₅(OH)₄",
+            ChemicalFormula = "Al2Si2O5(OH)4",
             Synonyms = new List<string> { "Al2Si2O5(OH)4", "Kaolin" },
             Phase = CompoundPhase.Solid,
             CrystalSystem = CrystalSystem.Triclinic,
@@ -1040,7 +1040,7 @@ public static class CompoundLibraryExtensions
         library.AddOrUpdate(new ChemicalCompound
         {
             Name = "Pyrophyllite",
-            ChemicalFormula = "Al₂Si₄O₁₀(OH)₂",
+            ChemicalFormula = "Al2Si4O10(OH)2",
             Synonyms = new List<string> { "Al2Si4O10(OH)2" },
             Phase = CompoundPhase.Solid,
             CrystalSystem = CrystalSystem.Triclinic,
@@ -1061,7 +1061,7 @@ public static class CompoundLibraryExtensions
         library.AddOrUpdate(new ChemicalCompound
         {
             Name = "Talc",
-            ChemicalFormula = "Mg₃Si₄O₁₀(OH)₂",
+            ChemicalFormula = "Mg3Si4O10(OH)2",
             Synonyms = new List<string> { "Mg3Si4O10(OH)2", "Talcum" },
             Phase = CompoundPhase.Solid,
             CrystalSystem = CrystalSystem.Triclinic,
@@ -1082,7 +1082,7 @@ public static class CompoundLibraryExtensions
         library.AddOrUpdate(new ChemicalCompound
         {
             Name = "Serpentine",
-            ChemicalFormula = "Mg₃Si₂O₅(OH)₄",
+            ChemicalFormula = "Mg3Si2O5(OH)4",
             Synonyms = new List<string> { "Mg3Si2O5(OH)4", "Antigorite", "Chrysotile", "Lizardite" },
             Phase = CompoundPhase.Solid,
             CrystalSystem = CrystalSystem.Monoclinic,
@@ -1100,14 +1100,14 @@ public static class CompoundLibraryExtensions
             IsUserCompound = false
         });
 
-        // ═══════════════════════════════════════════════════════════════════════
+        // =======================================================================
         // AMPHIBOLES (Holland & Powell 2011)
-        // ═══════════════════════════════════════════════════════════════════════
+        // =======================================================================
 
         library.AddOrUpdate(new ChemicalCompound
         {
             Name = "Tremolite",
-            ChemicalFormula = "Ca₂Mg₅Si₈O₂₂(OH)₂",
+            ChemicalFormula = "Ca2Mg5Si8O22(OH)2",
             Synonyms = new List<string> { "Ca2Mg5Si8O22(OH)2" },
             Phase = CompoundPhase.Solid,
             CrystalSystem = CrystalSystem.Monoclinic,
@@ -1128,7 +1128,7 @@ public static class CompoundLibraryExtensions
         library.AddOrUpdate(new ChemicalCompound
         {
             Name = "Actinolite",
-            ChemicalFormula = "Ca₂(Mg,Fe)₅Si₈O₂₂(OH)₂",
+            ChemicalFormula = "Ca2(Mg,Fe)5Si8O22(OH)2",
             Synonyms = new List<string> { "Ca2(Mg,Fe)5Si8O22(OH)2" },
             Phase = CompoundPhase.Solid,
             CrystalSystem = CrystalSystem.Monoclinic,
@@ -1146,14 +1146,14 @@ public static class CompoundLibraryExtensions
             IsUserCompound = false
         });
 
-        // ═══════════════════════════════════════════════════════════════════════
+        // =======================================================================
         // ADDITIONAL SILICATES
-        // ═══════════════════════════════════════════════════════════════════════
+        // =======================================================================
 
         library.AddOrUpdate(new ChemicalCompound
         {
             Name = "Wollastonite",
-            ChemicalFormula = "CaSiO₃",
+            ChemicalFormula = "CaSiO3",
             Synonyms = new List<string> { "CaSiO3" },
             Phase = CompoundPhase.Solid,
             CrystalSystem = CrystalSystem.Triclinic,
@@ -1174,7 +1174,7 @@ public static class CompoundLibraryExtensions
         library.AddOrUpdate(new ChemicalCompound
         {
             Name = "Epidote",
-            ChemicalFormula = "Ca₂Al₂FeSi₃O₁₂(OH)",
+            ChemicalFormula = "Ca2Al2FeSi3O12(OH)",
             Synonyms = new List<string> { "Ca2Al2FeSi3O12(OH)" },
             Phase = CompoundPhase.Solid,
             CrystalSystem = CrystalSystem.Monoclinic,
@@ -1192,14 +1192,14 @@ public static class CompoundLibraryExtensions
             IsUserCompound = false
         });
 
-        // ═══════════════════════════════════════════════════════════════════════
+        // =======================================================================
         // PHOSPHATE MINERALS (Robie & Hemingway 1995)
-        // ═══════════════════════════════════════════════════════════════════════
+        // =======================================================================
 
         library.AddOrUpdate(new ChemicalCompound
         {
             Name = "Fluorapatite",
-            ChemicalFormula = "Ca₅(PO₄)₃F",
+            ChemicalFormula = "Ca5(PO4)3F",
             Synonyms = new List<string> { "Ca5(PO4)3F", "FAP" },
             Phase = CompoundPhase.Solid,
             CrystalSystem = CrystalSystem.Hexagonal,
@@ -1221,7 +1221,7 @@ public static class CompoundLibraryExtensions
         library.AddOrUpdate(new ChemicalCompound
         {
             Name = "Hydroxyapatite",
-            ChemicalFormula = "Ca₅(PO₄)₃OH",
+            ChemicalFormula = "Ca5(PO4)3OH",
             Synonyms = new List<string> { "Ca5(PO4)3OH", "HAP" },
             Phase = CompoundPhase.Solid,
             CrystalSystem = CrystalSystem.Hexagonal,
@@ -1243,8 +1243,8 @@ public static class CompoundLibraryExtensions
         library.AddOrUpdate(new ChemicalCompound
         {
             Name = "Vivianite",
-            ChemicalFormula = "Fe₃(PO₄)₂·8H₂O",
-            Synonyms = new List<string> { "Fe3(PO4)2!8H2O" },
+            ChemicalFormula = "Fe3(PO4)2*8H2O",
+            Synonyms = new List<string> { "Fe3(PO4)2*8H2O" },
             Phase = CompoundPhase.Solid,
             CrystalSystem = CrystalSystem.Monoclinic,
             GibbsFreeEnergyFormation_kJ_mol = -4366.5,  // PHREEQC database
@@ -1261,14 +1261,14 @@ public static class CompoundLibraryExtensions
             IsUserCompound = false
         });
 
-        // ═══════════════════════════════════════════════════════════════════════
+        // =======================================================================
         // ADDITIONAL CARBONATE MINERALS (Robie & Hemingway 1995)
-        // ═══════════════════════════════════════════════════════════════════════
+        // =======================================================================
 
         library.AddOrUpdate(new ChemicalCompound
         {
             Name = "Witherite",
-            ChemicalFormula = "BaCO₃",
+            ChemicalFormula = "BaCO3",
             Synonyms = new List<string> { "BaCO3" },
             Phase = CompoundPhase.Solid,
             CrystalSystem = CrystalSystem.Orthorhombic,
@@ -1290,7 +1290,7 @@ public static class CompoundLibraryExtensions
         library.AddOrUpdate(new ChemicalCompound
         {
             Name = "Cerussite",
-            ChemicalFormula = "PbCO₃",
+            ChemicalFormula = "PbCO3",
             Synonyms = new List<string> { "PbCO3", "Lead carbonate" },
             Phase = CompoundPhase.Solid,
             CrystalSystem = CrystalSystem.Orthorhombic,
@@ -1312,7 +1312,7 @@ public static class CompoundLibraryExtensions
         library.AddOrUpdate(new ChemicalCompound
         {
             Name = "Smithsonite",
-            ChemicalFormula = "ZnCO₃",
+            ChemicalFormula = "ZnCO3",
             Synonyms = new List<string> { "ZnCO3", "Zinc spar" },
             Phase = CompoundPhase.Solid,
             CrystalSystem = CrystalSystem.Trigonal,
@@ -1334,7 +1334,7 @@ public static class CompoundLibraryExtensions
         library.AddOrUpdate(new ChemicalCompound
         {
             Name = "Azurite",
-            ChemicalFormula = "Cu₃(CO₃)₂(OH)₂",
+            ChemicalFormula = "Cu3(CO3)2(OH)2",
             Synonyms = new List<string> { "Cu3(CO3)2(OH)2" },
             Phase = CompoundPhase.Solid,
             CrystalSystem = CrystalSystem.Monoclinic,
@@ -1355,7 +1355,7 @@ public static class CompoundLibraryExtensions
         library.AddOrUpdate(new ChemicalCompound
         {
             Name = "Malachite",
-            ChemicalFormula = "Cu₂CO₃(OH)₂",
+            ChemicalFormula = "Cu2CO3(OH)2",
             Synonyms = new List<string> { "Cu2CO3(OH)2" },
             Phase = CompoundPhase.Solid,
             CrystalSystem = CrystalSystem.Monoclinic,
@@ -1373,14 +1373,14 @@ public static class CompoundLibraryExtensions
             IsUserCompound = false
         });
 
-        // ═══════════════════════════════════════════════════════════════════════
+        // =======================================================================
         // SULFIDE MINERALS (Robie & Hemingway 1995)
-        // ═══════════════════════════════════════════════════════════════════════
+        // =======================================================================
 
         library.AddOrUpdate(new ChemicalCompound
         {
             Name = "Pyrite",
-            ChemicalFormula = "FeS₂",
+            ChemicalFormula = "FeS2",
             Synonyms = new List<string> { "FeS2", "Iron pyrite", "Fool's gold" },
             Phase = CompoundPhase.Solid,
             CrystalSystem = CrystalSystem.Cubic,
@@ -1446,7 +1446,7 @@ public static class CompoundLibraryExtensions
         library.AddOrUpdate(new ChemicalCompound
         {
             Name = "Chalcopyrite",
-            ChemicalFormula = "CuFeS₂",
+            ChemicalFormula = "CuFeS2",
             Synonyms = new List<string> { "CuFeS2", "Copper pyrite" },
             Phase = CompoundPhase.Solid,
             CrystalSystem = CrystalSystem.Tetragonal,
@@ -1468,7 +1468,7 @@ public static class CompoundLibraryExtensions
         library.AddOrUpdate(new ChemicalCompound
         {
             Name = "Pyrrhotite",
-            ChemicalFormula = "Fe₁₋ₓS",
+            ChemicalFormula = "Fe1-xS",
             Synonyms = new List<string> { "FeS", "Magnetic pyrite" },
             Phase = CompoundPhase.Solid,
             CrystalSystem = CrystalSystem.Monoclinic,
@@ -1486,15 +1486,15 @@ public static class CompoundLibraryExtensions
             IsUserCompound = false
         });
 
-        // ═══════════════════════════════════════════════════════════════════════
+        // =======================================================================
         // ZEOLITE MINERALS (Bowers et al. 1984)
-        // ═══════════════════════════════════════════════════════════════════════
+        // =======================================================================
 
         library.AddOrUpdate(new ChemicalCompound
         {
             Name = "Analcime",
-            ChemicalFormula = "NaAlSi₂O₆·H₂O",
-            Synonyms = new List<string> { "NaAlSi2O6!H2O", "Analcite" },
+            ChemicalFormula = "NaAlSi2O6*H2O",
+            Synonyms = new List<string> { "NaAlSi2O6*H2O", "Analcite" },
             Phase = CompoundPhase.Solid,
             CrystalSystem = CrystalSystem.Cubic,
             GibbsFreeEnergyFormation_kJ_mol = -3087.8,  // Bowers et al. 1984
@@ -1514,8 +1514,8 @@ public static class CompoundLibraryExtensions
         library.AddOrUpdate(new ChemicalCompound
         {
             Name = "Laumontite",
-            ChemicalFormula = "CaAl₂Si₄O₁₂·4H₂O",
-            Synonyms = new List<string> { "CaAl2Si4O12!4H2O" },
+            ChemicalFormula = "CaAl2Si4O12*4H2O",
+            Synonyms = new List<string> { "CaAl2Si4O12*4H2O" },
             Phase = CompoundPhase.Solid,
             CrystalSystem = CrystalSystem.Monoclinic,
             GibbsFreeEnergyFormation_kJ_mol = -6870.9,  // Bowers et al. 1984
@@ -1532,14 +1532,14 @@ public static class CompoundLibraryExtensions
             IsUserCompound = false
         });
 
-        // ═══════════════════════════════════════════════════════════════════════
+        // =======================================================================
         // ADDITIONAL OXIDE MINERALS (Robie & Hemingway 1995)
-        // ═══════════════════════════════════════════════════════════════════════
+        // =======================================================================
 
         library.AddOrUpdate(new ChemicalCompound
         {
             Name = "Rutile",
-            ChemicalFormula = "TiO₂",
+            ChemicalFormula = "TiO2",
             Synonyms = new List<string> { "TiO2", "Titanium dioxide" },
             Phase = CompoundPhase.Solid,
             CrystalSystem = CrystalSystem.Tetragonal,
@@ -1560,7 +1560,7 @@ public static class CompoundLibraryExtensions
         library.AddOrUpdate(new ChemicalCompound
         {
             Name = "Ilmenite",
-            ChemicalFormula = "FeTiO₃",
+            ChemicalFormula = "FeTiO3",
             Synonyms = new List<string> { "FeTiO3" },
             Phase = CompoundPhase.Solid,
             CrystalSystem = CrystalSystem.Trigonal,
@@ -1581,7 +1581,7 @@ public static class CompoundLibraryExtensions
         library.AddOrUpdate(new ChemicalCompound
         {
             Name = "Spinel",
-            ChemicalFormula = "MgAl₂O₄",
+            ChemicalFormula = "MgAl2O4",
             Synonyms = new List<string> { "MgAl2O4" },
             Phase = CompoundPhase.Solid,
             CrystalSystem = CrystalSystem.Cubic,
@@ -1602,7 +1602,7 @@ public static class CompoundLibraryExtensions
         library.AddOrUpdate(new ChemicalCompound
         {
             Name = "Hercynite",
-            ChemicalFormula = "FeAl₂O₄",
+            ChemicalFormula = "FeAl2O4",
             Synonyms = new List<string> { "FeAl2O4", "Fe-spinel" },
             Phase = CompoundPhase.Solid,
             CrystalSystem = CrystalSystem.Cubic,
@@ -1620,14 +1620,14 @@ public static class CompoundLibraryExtensions
             IsUserCompound = false
         });
 
-        // ═══════════════════════════════════════════════════════════════════════
+        // =======================================================================
         // HYDROXIDE MINERALS (Robie & Hemingway 1995)
-        // ═══════════════════════════════════════════════════════════════════════
+        // =======================================================================
 
         library.AddOrUpdate(new ChemicalCompound
         {
             Name = "Gibbsite",
-            ChemicalFormula = "Al(OH)₃",
+            ChemicalFormula = "Al(OH)3",
             Synonyms = new List<string> { "Al(OH)3", "Hydrargillite" },
             Phase = CompoundPhase.Solid,
             CrystalSystem = CrystalSystem.Monoclinic,
@@ -1649,7 +1649,7 @@ public static class CompoundLibraryExtensions
         library.AddOrUpdate(new ChemicalCompound
         {
             Name = "Brucite",
-            ChemicalFormula = "Mg(OH)₂",
+            ChemicalFormula = "Mg(OH)2",
             Synonyms = new List<string> { "Mg(OH)2", "Magnesium hydroxide" },
             Phase = CompoundPhase.Solid,
             CrystalSystem = CrystalSystem.Trigonal,
@@ -1672,7 +1672,7 @@ public static class CompoundLibraryExtensions
         {
             Name = "Goethite",
             ChemicalFormula = "FeOOH",
-            Synonyms = new List<string> { "α-FeOOH", "Iron oxyhydroxide" },
+            Synonyms = new List<string> { "alpha-FeOOH", "Iron oxyhydroxide" },
             Phase = CompoundPhase.Solid,
             CrystalSystem = CrystalSystem.Orthorhombic,
             GibbsFreeEnergyFormation_kJ_mol = -488.6,  // Robie & Hemingway 1995
@@ -1690,9 +1690,9 @@ public static class CompoundLibraryExtensions
             IsUserCompound = false
         });
 
-        // ═══════════════════════════════════════════════════════════════════════
+        // =======================================================================
         // ADDITIONAL GAS SPECIES (NIST WebBook)
-        // ═══════════════════════════════════════════════════════════════════════
+        // =======================================================================
 
         library.AddOrUpdate(new ChemicalCompound
         {
@@ -1704,7 +1704,7 @@ public static class CompoundLibraryExtensions
             EnthalpyFormation_kJ_mol = 0.0,
             Entropy_J_molK = 154.8,
             HeatCapacity_J_molK = 20.8,
-            HenrysLawConstant_mol_L_atm = 1.4e-3,  // 25°C
+            HenrysLawConstant_mol_L_atm = 1.4e-3,  // 25degC
             MolecularWeight_g_mol = 39.95,
             Sources = new List<string> { "NIST WebBook" },
             IsUserCompound = false
@@ -1720,7 +1720,7 @@ public static class CompoundLibraryExtensions
             EnthalpyFormation_kJ_mol = 0.0,
             Entropy_J_molK = 126.2,
             HeatCapacity_J_molK = 20.8,
-            HenrysLawConstant_mol_L_atm = 3.7e-4,  // 25°C
+            HenrysLawConstant_mol_L_atm = 3.7e-4,  // 25degC
             MolecularWeight_g_mol = 4.00,
             Sources = new List<string> { "NIST WebBook" },
             IsUserCompound = false
@@ -1736,7 +1736,7 @@ public static class CompoundLibraryExtensions
             EnthalpyFormation_kJ_mol = -110.5,
             Entropy_J_molK = 197.7,
             HeatCapacity_J_molK = 29.1,
-            HenrysLawConstant_mol_L_atm = 9.5e-4,  // 25°C
+            HenrysLawConstant_mol_L_atm = 9.5e-4,  // 25degC
             MolecularWeight_g_mol = 28.01,
             Sources = new List<string> { "NIST WebBook", "SUPCRT92" },
             IsUserCompound = false

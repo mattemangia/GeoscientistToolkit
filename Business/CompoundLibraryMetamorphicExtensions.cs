@@ -17,15 +17,15 @@ public static class CompoundLibraryMetamorphicExtensions
 {
     public static void SeedMetamorphicMinerals(this CompoundLibrary library)
     {
-        // ═══════════════════════════════════════════════════════════════════════
+        // =======================================================================
         // Al2SiO5 POLYMORPHS - The classic metamorphic P-T indicator minerals
-        // ═══════════════════════════════════════════════════════════════════════
+        // =======================================================================
 
         // KYANITE - High pressure polymorph
         library.AddOrUpdate(new ChemicalCompound
         {
             Name = "Kyanite",
-            ChemicalFormula = "Al₂SiO₅",
+            ChemicalFormula = "Al2SiO5",
             Synonyms = new List<string> { "Al2SiO5", "Cyanite", "Disthene" },
             Phase = CompoundPhase.Solid,
             CrystalSystem = CrystalSystem.Triclinic,
@@ -38,7 +38,7 @@ public static class CompoundLibraryMetamorphicExtensions
             Density_g_cm3 = 3.67,
             MohsHardness = 5.5,
             Color = "Blue, white, gray",
-            Notes = "High P polymorph of Al2SiO5. Triple point: ~500°C, 3.8 kbar",
+            Notes = "High P polymorph of Al2SiO5. Triple point: ~500degC, 3.8 kbar",
             Sources = new List<string> { "Holland & Powell (2011)", "Robie & Hemingway (1995)" },
             IsUserCompound = false
         });
@@ -47,7 +47,7 @@ public static class CompoundLibraryMetamorphicExtensions
         library.AddOrUpdate(new ChemicalCompound
         {
             Name = "Andalusite",
-            ChemicalFormula = "Al₂SiO₅",
+            ChemicalFormula = "Al2SiO5",
             Synonyms = new List<string> { "Al2SiO5", "Chiastolite" },
             Phase = CompoundPhase.Solid,
             CrystalSystem = CrystalSystem.Orthorhombic,
@@ -69,7 +69,7 @@ public static class CompoundLibraryMetamorphicExtensions
         library.AddOrUpdate(new ChemicalCompound
         {
             Name = "Sillimanite",
-            ChemicalFormula = "Al₂SiO₅",
+            ChemicalFormula = "Al2SiO5",
             Synonyms = new List<string> { "Al2SiO5", "Fibrolite" },
             Phase = CompoundPhase.Solid,
             CrystalSystem = CrystalSystem.Orthorhombic,
@@ -87,14 +87,14 @@ public static class CompoundLibraryMetamorphicExtensions
             IsUserCompound = false
         });
 
-        // ═══════════════════════════════════════════════════════════════════════
+        // =======================================================================
         // OTHER KEY METAMORPHIC INDEX MINERALS
-        // ═══════════════════════════════════════════════════════════════════════
+        // =======================================================================
 
         library.AddOrUpdate(new ChemicalCompound
         {
             Name = "Staurolite",
-            ChemicalFormula = "Fe₂Al₉Si₄O₂₃(OH)",
+            ChemicalFormula = "Fe2Al9Si4O23(OH)",
             Synonyms = new List<string> { "Fe2Al9Si4O23(OH)" },
             Phase = CompoundPhase.Solid,
             CrystalSystem = CrystalSystem.Monoclinic,
@@ -115,7 +115,7 @@ public static class CompoundLibraryMetamorphicExtensions
         library.AddOrUpdate(new ChemicalCompound
         {
             Name = "Cordierite",
-            ChemicalFormula = "Mg₂Al₄Si₅O₁₈",
+            ChemicalFormula = "Mg2Al4Si5O18",
             Synonyms = new List<string> { "Mg2Al4Si5O18", "Iolite" },
             Phase = CompoundPhase.Solid,
             CrystalSystem = CrystalSystem.Orthorhombic,
@@ -136,7 +136,7 @@ public static class CompoundLibraryMetamorphicExtensions
         library.AddOrUpdate(new ChemicalCompound
         {
             Name = "Chloritoid",
-            ChemicalFormula = "FeAl₂SiO₅(OH)₂",
+            ChemicalFormula = "FeAl2SiO5(OH)2",
             Synonyms = new List<string> { "FeAl2SiO5(OH)2" },
             Phase = CompoundPhase.Solid,
             CrystalSystem = CrystalSystem.Monoclinic,
