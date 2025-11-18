@@ -27,6 +27,7 @@ public sealed class MaterialLibrary
     {
         // Seed with defaults so the software "can pick stuff if needed".
         SeedDefaults();
+        this.SeedExtendedPhysicalMaterials();
     }
 
     public static MaterialLibrary Instance => _lazy.Value;
