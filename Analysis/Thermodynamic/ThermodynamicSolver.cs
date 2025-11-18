@@ -91,10 +91,10 @@ public class ChemicalReaction
     /// <summary>Standard enthalpy change (kJ/mol) at 298.15 K</summary>
     public double DeltaH0_kJ_mol { get; set; }
 
-    /// <summary>Standard entropy change (J/molÂ·K) at 298.15 K</summary>
+    /// <summary>Standard entropy change (J/mol·K) at 298.15 K</summary>
     public double DeltaS0_J_molK { get; set; }
 
-    /// <summary>Standard heat capacity change (J/molÂ·K) at 298.15K</summary>
+    /// <summary>Standard heat capacity change (J/mol·K) at 298.15K</summary>
     public double DeltaCp0_J_molK { get; set; }
 
     /// <summary>Equilibrium constant at standard conditions (log10 K)</summary>
@@ -106,12 +106,12 @@ public class ChemicalReaction
     /// <summary>
     ///     ENHANCEMENT: Calculate equilibrium constant at a given temperature using the integrated van't Hoff equation.
     ///     This form includes the effect of heat capacity and is more accurate over wide temperature ranges.
-    ///     logK(T) = logK(Tr) - (Î”HÂ°/R) * (1/T - 1/Tr) / ln(10) + (Î”CpÂ°/R) * [(Tr/T - 1) - ln(Tr/T)] / ln(10)
+    ///     logK(T) = logK(Tr) - (ΔH°/R) * (1/T - 1/Tr) / ln(10) + (ΔCp°/R) * [(Tr/T - 1) - ln(Tr/T)] / ln(10)
     ///     Source: Anderson & Crerar, 1993. Thermodynamics in Geochemistry, Oxford University Press.
     /// </summary>
     public double CalculateLogK(double temperature_K)
     {
-        const double R = 8.314462618; // J/(molÂ·K) - CODATA 2018
+        const double R = 8.314462618; // J/(mol·K) - CODATA 2018
         const double T_ref = 298.15; // K
 
         if (Math.Abs(temperature_K - T_ref) < 1e-6)
@@ -161,7 +161,7 @@ public class ThermodynamicSolver : SimulatorNodeSupport
     private const int MAX_ITERATIONS = 100;
 
 
-    internal static readonly double R_GAS_CONSTANT = 8.314462618e-3; // kJ/(molÂ·K)
+    internal static readonly double R_GAS_CONSTANT = 8.314462618e-3; // kJ/(mol·K)
     private readonly ActivityCoefficientCalculator _activityCalculator;
     private readonly CompoundLibrary _compoundLibrary;
     private readonly ReactionGenerator _reactionGenerator;
@@ -453,11 +453,56 @@ public class ThermodynamicSolver : SimulatorNodeSupport
         {
             var compound = _compoundLibrary.Find(speciesName);
             if (compound != null)
+            {
                 // A species is chosen for the basis if it is designated as a "primary"
                 // representative for an element (e.g., Na+, Ca2+, H+, e-) or if it is a
                 // primary surface site (e.g., >SOH).
                 if (compound.IsPrimaryElementSpecies || compound.IsPrimarySurfaceSite)
+                {
                     basisSpecies.Add(speciesName);
+                }
+                // SURGICAL FIX: Ensure common primary ions are included as basis species
+                else if (compound.Phase == CompoundPhase.Aqueous && compound.IonicCharge.HasValue)
+                {
+                    // Check if this is a simple ion
+                    var elements = _reactionGenerator.ParseChemicalFormula(compound.ChemicalFormula);
+                    var nonHOElements = elements.Where(e => e.Key != "H" && e.Key != "O").ToList();
+                    
+                    // Simple ions like Na+, Cl-, Ca2+ should be basis species
+                    if (nonHOElements.Count == 1)
+                    {
+                        var element = nonHOElements[0].Key;
+                        bool isSimplestForm = true;
+                        
+                        // Check if this is the simplest ionic form of this element
+                        foreach (var otherSpecies in allSpecies)
+                        {
+                            if (otherSpecies == speciesName) continue;
+                            var otherCompound = _compoundLibrary.Find(otherSpecies);
+                            if (otherCompound?.Phase == CompoundPhase.Aqueous && otherCompound.IonicCharge.HasValue)
+                            {
+                                var otherElements = _reactionGenerator.ParseChemicalFormula(otherCompound.ChemicalFormula);
+                                if (otherElements.ContainsKey(element))
+                                {
+                                    var thisAtomCount = elements.Values.Sum();
+                                    var otherAtomCount = otherElements.Values.Sum();
+                                    if (otherAtomCount < thisAtomCount)
+                                    {
+                                        isSimplestForm = false;
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                        
+                        if (isSimplestForm)
+                        {
+                            basisSpecies.Add(speciesName);
+                            Logger.Log($"[ThermodynamicSolver] Auto-selected {speciesName} as basis species");
+                        }
+                    }
+                }
+            }
         }
 
         // If no basis species are found, the system is ill-defined, and the solver cannot proceed.
@@ -558,25 +603,25 @@ public class ThermodynamicSolver : SimulatorNodeSupport
                 continue;
 
             // Use chemically informed initial guesses
-            if (speciesName == "Hâº" || speciesName == "H+")
+            if (speciesName == "H⁺" || speciesName == "H+")
             {
                 // Initialize from pH (if available) or assume neutral
                 var pH = state.pH > 0 ? state.pH : 7.0;
                 state.Activities[speciesName] = Math.Pow(10, -pH);
             }
-            else if (speciesName == "OHâ»" || speciesName == "OH-")
+            else if (speciesName == "OH⁻" || speciesName == "OH-")
             {
                 // From water dissociation: Kw = [H+][OH-] = 10^-14
-                var h_activity = state.Activities.GetValueOrDefault("Hâº", 1e-7);
+                var h_activity = state.Activities.GetValueOrDefault("H⁺", 1e-7);
                 state.Activities[speciesName] = 1e-14 / h_activity;
             }
-            else if (speciesName == "eâ»" || speciesName == "e-")
+            else if (speciesName == "e⁻" || speciesName == "e-")
             {
                 // Initialize from pe (if available) or assume oxidizing
                 var pe = state.pe > 0 ? state.pe : 4.0;
                 state.Activities[speciesName] = Math.Pow(10, -pe);
             }
-            else if (speciesName == "Hâ‚‚O" || speciesName == "H2O")
+            else if (speciesName == "H₂O" || speciesName == "H2O")
             {
                 // Water activity ~ 1
                 state.Activities[speciesName] = 1.0;
@@ -595,11 +640,31 @@ public class ThermodynamicSolver : SimulatorNodeSupport
 
                     // Start with assumption that primary ion has 50% of total element
                     state.Activities[speciesName] = molality * 0.5;
+                    
+                    // SURGICAL FIX: Ensure valid activity for numeric stability
+                    if (state.Activities[speciesName] <= 0 || double.IsNaN(state.Activities[speciesName]) || 
+                        double.IsInfinity(state.Activities[speciesName]))
+                    {
+                        // If calculation failed, use a reasonable default based on total moles
+                        state.Activities[speciesName] = Math.Min(0.1, Math.Max(1e-8, totalMoles * 0.1));
+                        Logger.Log($"[ThermodynamicSolver] Initialized {speciesName} with fallback activity {state.Activities[speciesName]:E3}");
+                    }
                 }
                 else
                 {
-                    // Generic low concentration
-                    state.Activities[speciesName] = 1e-8;
+                    // SURGICAL FIX: For ions without matching elements in composition,
+                    // try to initialize from species moles if available
+                    if (state.SpeciesMoles.ContainsKey(speciesName) && state.SpeciesMoles[speciesName] > 0)
+                    {
+                        var molality = state.SpeciesMoles[speciesName] / state.Volume_L;
+                        state.Activities[speciesName] = molality;
+                        Logger.Log($"[ThermodynamicSolver] Initialized {speciesName} from species moles: {state.Activities[speciesName]:E3}");
+                    }
+                    else
+                    {
+                        // Generic low concentration
+                        state.Activities[speciesName] = 1e-8;
+                    }
                 }
             }
             else
@@ -683,7 +748,7 @@ public class ThermodynamicSolver : SimulatorNodeSupport
     /// </summary>
     private void UpdateIonicStrength(ThermodynamicState state)
     {
-        // I = 0.5 * Î£(m_i * z_iÂ²)
+        // I = 0.5 * Σ(m_i * z_i²)
         var I = 0.0;
         var solventMass_kg = state.Volume_L; // Initial approximation (1 L ~ 1 kg for water)
 
@@ -756,7 +821,7 @@ public class ThermodynamicSolver : SimulatorNodeSupport
     private void CalculateAqueousProperties(ThermodynamicState state)
     {
         // Calculate pH from H+ activity
-        var hActivity = state.Activities.GetValueOrDefault("Hâº",
+        var hActivity = state.Activities.GetValueOrDefault("H⁺",
             state.Activities.GetValueOrDefault("H+", 1e-7));
 
         state.pH = -Math.Log10(Math.Max(hActivity, 1e-14));
@@ -766,7 +831,7 @@ public class ThermodynamicSolver : SimulatorNodeSupport
             Logger.LogWarning($"[ThermodynamicSolver] pH out of normal range: {state.pH:F2}");
 
         // Calculate pe from e- activity
-        var eActivity = state.Activities.GetValueOrDefault("eâ»",
+        var eActivity = state.Activities.GetValueOrDefault("e⁻",
             state.Activities.GetValueOrDefault("e-", 1e-4));
 
         state.pe = -Math.Log10(Math.Max(eActivity, 1e-20));
@@ -959,18 +1024,18 @@ public class ThermodynamicSolver : SimulatorNodeSupport
 
         while (!converged && iteration < maxIter)
         {
-            // Calculate chemical potentials Î¼_i = Î¼_iÂ° + RT ln(a_i)
+            // Calculate chemical potentials μ_i = μ_i° + RT ln(a_i)
             var mu = CalculateChemicalPotentials(x, species, state);
 
-            // Calculate gradient of Gibbs energy: âˆ‡G = Î¼
+            // Calculate gradient of Gibbs energy: ∇G = μ
             var grad = mu.Clone();
 
             // Calculate constraint residuals: A*x - b = 0
             var constraintResidual = elementMatrix.Multiply(x) - b;
 
             // Build KKT system:
-            // [ H   A^T ] [ Î”x ] = [ -âˆ‡G ]
-            // [ A    0  ] [ Î»  ]   [ -r  ]
+            // [ H   A^T ] [ Δx ] = [ -∇G ]
+            // [ A    0  ] [ λ  ]   [ -r  ]
             // where H is Hessian (approximated as identity for simplicity)
 
             var kktSize = n + m;
@@ -1066,14 +1131,14 @@ public class ThermodynamicSolver : SimulatorNodeSupport
 
     /// <summary>
     ///     Calculate chemical potentials for all species.
-    ///     Î¼_i = Î¼_iÂ° + RT ln(a_i)
+    ///     μ_i = μ_i° + RT ln(a_i)
     /// </summary>
     private Vector<double> CalculateChemicalPotentials(Vector<double> moles, List<string> species,
         ThermodynamicState state)
     {
         var n = species.Count;
         var mu = Vector<double>.Build.Dense(n);
-        const double R = 8.314462618; // J/(molÂ·K)
+        const double R = 8.314462618; // J/(mol·K)
         var T = state.Temperature_K;
 
         for (var i = 0; i < n; i++)
@@ -1099,7 +1164,7 @@ public class ThermodynamicSolver : SimulatorNodeSupport
     }
 
     /// <summary>
-    ///     Calculate total Gibbs energy G = Î£(n_i * Î¼_i)
+    ///     Calculate total Gibbs energy G = Σ(n_i * μ_i)
     /// </summary>
     private double CalculateTotalGibbsEnergy(Vector<double> moles, List<string> species, ThermodynamicState state)
     {
@@ -1198,7 +1263,7 @@ public class ThermodynamicSolver : SimulatorNodeSupport
     ///     Residual (r_i) = T_i - C_i
     ///     where T_i is the known total moles of basis component i, and
     ///     C_i is the calculated total moles based on the current activity guess.
-    ///     Jacobian (J_ij) = - âˆ‚C_i / âˆ‚(ln a_j)
+    ///     Jacobian (J_ij) = - ∂C_i / ∂(ln a_j)
     ///     where a_j is the activity of basis species j.
     ///     Source: Bethke, C.M., 2008. Geochemical and Biogeochemical Reaction Modeling, Chapter 4.
     /// </summary>
@@ -1340,7 +1405,27 @@ public class ThermodynamicSolver : SimulatorNodeSupport
                 // We approximate gamma from the activity calculator for the previous step.
                 var gamma = _activityCalculator.CalculateSingleIonActivityCoefficient(speciesName, state);
                 var molality = activity / Math.Max(gamma, 1e-9);
-                state.SpeciesMoles[speciesName] = molality * solventMass_kg;
+                
+                // SURGICAL FIX: Check for NaN or invalid values
+                if (double.IsNaN(molality) || double.IsInfinity(molality) || molality < 0)
+                {
+                    // If activity calculation failed, try to use existing species moles or a minimal value
+                    if (state.SpeciesMoles.ContainsKey(speciesName) && state.SpeciesMoles[speciesName] > 0)
+                    {
+                        // Keep existing value
+                        Logger.LogWarning($"[ThermodynamicSolver] Invalid molality for {speciesName}, keeping existing moles");
+                    }
+                    else
+                    {
+                        // Set minimal value
+                        state.SpeciesMoles[speciesName] = 1e-10 * solventMass_kg;
+                        Logger.LogWarning($"[ThermodynamicSolver] Invalid molality for {speciesName}, setting minimal moles");
+                    }
+                }
+                else
+                {
+                    state.SpeciesMoles[speciesName] = molality * solventMass_kg;
+                }
             }
             // Moles of surface species are updated during the secondary species update
         }
@@ -1376,19 +1461,46 @@ public class ThermodynamicSolver : SimulatorNodeSupport
             {
                 var logK = formationReaction.CalculateLogK(state.Temperature_K);
                 var logActivitySum = 0.0;
+                bool canCalculate = true;
+                
                 foreach (var (reactant, stoich) in formationReaction.Stoichiometry)
                     if (reactant != speciesName)
                     {
                         if (state.Activities.TryGetValue(reactant, out var activity))
+                        {
                             logActivitySum += -stoich * Math.Log10(Math.Max(activity, 1e-30));
+                        }
                         else
-                            logActivitySum = double.NaN; // Cannot calculate if a reactant is missing
+                        {
+                            // SURGICAL FIX: Use default activity for missing reactants instead of NaN
+                            // This allows the calculation to proceed with reasonable defaults
+                            var defaultActivity = 1e-8; // Default low activity for missing species
+                            logActivitySum += -stoich * Math.Log10(defaultActivity);
+                            Logger.LogWarning($"[ThermodynamicSolver] Missing activity for {reactant} in formation of {speciesName}, using default {defaultActivity:E3}");
+                        }
                     }
 
-                if (!double.IsNaN(logActivitySum))
+                if (canCalculate && !double.IsNaN(logActivitySum))
                 {
                     var logActivity = logK + logActivitySum;
+                    // SURGICAL FIX: Clamp the calculated activity to reasonable bounds
+                    logActivity = Math.Max(-30, Math.Min(10, logActivity)); // Between 1e-30 and 1e10
                     state.Activities[speciesName] = Math.Pow(10, logActivity);
+                    
+                    // Also ensure the species has valid moles
+                    if (!state.SpeciesMoles.ContainsKey(speciesName) || state.SpeciesMoles[speciesName] <= 0)
+                    {
+                        // Convert activity to moles using approximate gamma = 1
+                        var molality = state.Activities[speciesName];
+                        state.SpeciesMoles[speciesName] = molality * state.Volume_L;
+                    }
+                }
+                else
+                {
+                    // Set minimal activity if calculation failed
+                    state.Activities[speciesName] = 1e-10;
+                    state.SpeciesMoles[speciesName] = 1e-10 * state.Volume_L;
+                    Logger.LogWarning($"[ThermodynamicSolver] Failed to calculate activity for {speciesName}, using minimal value");
                 }
             }
         }

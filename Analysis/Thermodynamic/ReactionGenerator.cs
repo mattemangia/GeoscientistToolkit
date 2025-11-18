@@ -208,13 +208,37 @@ public class ReactionGenerator
         // Add the most common, simple, free aqueous ion for each element
         foreach (var element in elements.Where(e => e != "O" && e != "H"))
         {
+            // SURGICAL FIX: First try to find primary ions
             var primaryIon = _compoundLibrary.Compounds
                 .Where(c => c.Phase == CompoundPhase.Aqueous &&
                             c.IsPrimaryElementSpecies &&
                             ParseChemicalFormula(c.ChemicalFormula).ContainsKey(element))
                 .FirstOrDefault();
 
-            if (primaryIon != null) products.Add(primaryIon);
+            if (primaryIon != null) 
+            {
+                products.Add(primaryIon);
+            }
+            else
+            {
+                // SURGICAL FIX: If no primary ion marked, find the simplest aqueous ion for this element
+                var simpleIons = _compoundLibrary.Compounds
+                    .Where(c => c.Phase == CompoundPhase.Aqueous &&
+                                c.IonicCharge.HasValue &&
+                                ParseChemicalFormula(c.ChemicalFormula).ContainsKey(element))
+                    .ToList();
+                
+                if (simpleIons.Any())
+                {
+                    // Choose the simplest ion (fewest total atoms)
+                    var simplestIon = simpleIons
+                        .OrderBy(ion => ParseChemicalFormula(ion.ChemicalFormula).Values.Sum())
+                        .First();
+                    
+                    products.Add(simplestIon);
+                    Logger.Log($"[ReactionGenerator] Auto-selected {simplestIon.Name} as dissolution product for element {element}");
+                }
+            }
         }
 
         // Add water, H+, OH- as they are always present and needed for balancing
@@ -850,11 +874,40 @@ public class ReactionGenerator
         var basisSpecies = _compoundLibrary.Compounds
             .Where(c => c.Phase == CompoundPhase.Aqueous && c.IsPrimaryElementSpecies)
             .ToList();
+        
+        // SURGICAL FIX: Also include simple ions that should be basis species
+        var simpleIons = _compoundLibrary.Compounds
+            .Where(c => c.Phase == CompoundPhase.Aqueous && 
+                       c.IonicCharge.HasValue &&
+                       !c.IsPrimaryElementSpecies)
+            .ToList();
+        
+        foreach (var ion in simpleIons)
+        {
+            // Check if this is a simple ion (only one element besides H and O)
+            var elements = ParseChemicalFormula(ion.ChemicalFormula);
+            var nonHOElements = elements.Where(e => e.Key != "H" && e.Key != "O").ToList();
+            
+            if (nonHOElements.Count == 1)
+            {
+                // Check if we already have a basis species for this element
+                var element = nonHOElements[0].Key;
+                bool alreadyHaveBasis = basisSpecies.Any(b => 
+                    ParseChemicalFormula(b.ChemicalFormula).ContainsKey(element));
+                
+                if (!alreadyHaveBasis)
+                {
+                    // This is likely a primary ion that wasn't marked as such
+                    basisSpecies.Add(ion);
+                    Logger.Log($"[ReactionGenerator] Auto-included {ion.Name} as basis species");
+                }
+            }
+        }
 
         // Step 2: Identify secondary species (complexes formed from basis)
         var secondarySpecies = _compoundLibrary.Compounds
             .Where(c => c.Phase == CompoundPhase.Aqueous &&
-                        !c.IsPrimaryElementSpecies &&
+                        !basisSpecies.Contains(c) &&  // SURGICAL FIX: Exclude all basis species (including auto-added)
                         c.GibbsFreeEnergyFormation_kJ_mol.HasValue)
             .ToList();
 
@@ -3513,13 +3566,22 @@ private List<(ChemicalCompound ion, double stoichiometry)> FindIonicDissociation
     // Special case for common salts
     if (compound.Name == "Halite" || compound.ChemicalFormula == "NaCl")
     {
-        var naIon = _compoundLibrary.Find("Na deg") ?? _compoundLibrary.Find("Sodium Ion");
-        var clIon = _compoundLibrary.Find("Cl^-") ?? _compoundLibrary.Find("Chloride Ion");
+        // SURGICAL FIX: Use correct ion formulas
+        var naIon = _compoundLibrary.Find("Na+") ?? 
+                    _compoundLibrary.Find("Na^+") ?? 
+                    _compoundLibrary.Find("Sodium Ion");
+        var clIon = _compoundLibrary.Find("Cl-") ?? 
+                    _compoundLibrary.Find("Cl^-") ?? 
+                    _compoundLibrary.Find("Chloride Ion");
         if (naIon != null && clIon != null)
         {
             products.Add((naIon, 1.0));
             products.Add((clIon, 1.0));
             return products;
+        }
+        else
+        {
+            Logger.LogWarning($"[ReactionGenerator] Could not find Na+ ({naIon == null}) or Cl- ({clIon == null}) for NaCl dissociation");
         }
     }
     
@@ -3532,13 +3594,33 @@ private List<(ChemicalCompound ion, double stoichiometry)> FindIonicDissociation
     {
         if (element == "O" || element == "H") continue;
         
-        // Find primary aqueous ion for this element
+        // SURGICAL FIX: First try to find primary ions, then fall back to any simple ion
         var primaryIon = _compoundLibrary.Compounds
             .Where(c => c.Phase == CompoundPhase.Aqueous &&
                        c.IsPrimaryElementSpecies &&
                        c.IonicCharge.HasValue &&
                        ParseChemicalFormula(c.ChemicalFormula).ContainsKey(element))
             .FirstOrDefault();
+        
+        // If no primary ion found, look for the simplest aqueous ion
+        if (primaryIon == null)
+        {
+            var simpleIons = _compoundLibrary.Compounds
+                .Where(c => c.Phase == CompoundPhase.Aqueous &&
+                           c.IonicCharge.HasValue &&
+                           ParseChemicalFormula(c.ChemicalFormula).ContainsKey(element))
+                .ToList();
+            
+            if (simpleIons.Any())
+            {
+                // Choose the simplest ion (fewest atoms)
+                primaryIon = simpleIons
+                    .OrderBy(ion => ParseChemicalFormula(ion.ChemicalFormula).Values.Sum())
+                    .First();
+                    
+                Logger.Log($"[ReactionGenerator] Auto-selected {primaryIon.Name} as dissociation product for element {element}");
+            }
+        }
         
         if (primaryIon != null)
         {
