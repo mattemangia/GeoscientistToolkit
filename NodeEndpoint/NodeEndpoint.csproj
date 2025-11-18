@@ -63,6 +63,7 @@
 
     <!-- Essential business logic (no UI) -->
     <Compile Include="..\Business\MaterialLibrary.cs" Link="Business\MaterialLibrary.cs" />
+    <Compile Include="..\Business\MaterialLibraryExtensions.cs" Link="Business\MaterialLibraryExtensions.cs" />
     <Compile Include="..\Business\Element.cs" Link="Business\Element.cs" />
 
     <!-- Minimal utilities (no UI) -->
