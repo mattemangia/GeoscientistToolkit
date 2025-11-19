@@ -6,3 +6,5 @@
 /.vs
 /.vs/GeoscientistToolkit
 /.vs/GeoscientistToolkit/CopilotIndices
+[Bb]in/
+[Oo]bj/

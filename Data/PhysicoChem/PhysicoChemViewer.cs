@@ -164,9 +164,7 @@ public class PhysicoChemViewer : IDatasetViewer
         {
             if (_viewMode == ViewMode.View3D)
             {
-                ImGui.Checkbox("Mesh", ref _showMesh);
-                ImGui.SameLine();
-                ImGui.Checkbox("Domains", ref _showDomains);
+                ImGui.Checkbox("Cells", ref _showMesh);
                 ImGui.SameLine();
                 ImGui.Checkbox("BC", ref _showBoundaryConditions);
                 ImGui.SameLine();
@@ -227,7 +225,7 @@ public class PhysicoChemViewer : IDatasetViewer
         var cursorPos = ImGui.GetCursorScreenPos();
 
         // Check if mesh is generated (not needed for graph view)
-        if (_dataset.GeneratedMesh == null && _viewMode != ViewMode.ViewGraphs)
+        if (_dataset.Mesh.Cells.Count == 0 && _viewMode != ViewMode.ViewGraphs)
         {
             DrawNoMeshMessage();
             return;
@@ -427,20 +425,13 @@ public class PhysicoChemViewer : IDatasetViewer
 
         var center = screenPos + size * 0.5f;
 
-        // Draw domain bounding boxes (unless in builder mode, builder handles rendering)
-        if (_showDomains && !_builderMode)
+        // Draw cells
+        if (_showMesh && !_builderMode)
         {
-            foreach (var domain in _dataset.Domains)
+            foreach (var cell in _dataset.Mesh.Cells.Values)
             {
-                DrawDomainBox(drawList, center, domain, renderMode);
+                DrawCellBox(drawList, center, cell, renderMode);
             }
-        }
-
-        // Draw mesh grid (simplified)
-        if (_showMesh && _dataset.GeneratedMesh != null)
-        {
-            var gridSize = _dataset.GeneratedMesh.GridSize;
-            DrawMeshGrid(drawList, center, gridSize, renderMode);
         }
 
         // Draw boundary conditions markers (unless in builder mode)
@@ -456,16 +447,36 @@ public class PhysicoChemViewer : IDatasetViewer
         DrawAxes(drawList, center);
     }
 
-    private void DrawDomainBox(ImDrawListPtr drawList, Vector2 center, ReactorDomain domain, RenderMode renderMode)
-    {
-        if (domain.Geometry == null) return;
 
-        var wireframeColor = ImGui.GetColorU32(new Vector4(0.3f, 0.6f, 0.9f, 0.8f));
-        var solidColor = ImGui.GetColorU32(new Vector4(0.3f, 0.6f, 0.9f, 0.3f));
+
+    private void DrawBoundaryCondition(ImDrawListPtr drawList, Vector2 center, BoundaryCondition bc)
+    {
+        var color = bc.Type switch
+        {
+            BoundaryType.FixedValue => ImGui.GetColorU32(new Vector4(1.0f, 0.3f, 0.3f, 0.8f)),
+            BoundaryType.FixedFlux => ImGui.GetColorU32(new Vector4(0.3f, 1.0f, 0.3f, 0.8f)),
+            BoundaryType.Inlet => ImGui.GetColorU32(new Vector4(0.3f, 0.3f, 1.0f, 0.8f)),
+            BoundaryType.Outlet => ImGui.GetColorU32(new Vector4(1.0f, 0.5f, 0.0f, 0.8f)),
+            _ => ImGui.GetColorU32(new Vector4(1.0f, 1.0f, 0.3f, 0.8f))
+        };
+
+        // Draw marker at BC location (use custom region center if available)
+        float x = bc.Location == BoundaryLocation.Custom ? (float)bc.CustomRegionCenter.X : 0;
+        float y = bc.Location == BoundaryLocation.Custom ? (float)bc.CustomRegionCenter.Y : 0;
+        var pos = center + new Vector2(x * 2, y * 2);
+        drawList.AddCircleFilled(pos, 5, color);
+        drawList.AddCircle(pos, 6, ImGui.GetColorU32(new Vector4(1, 1, 1, 0.8f)), 0, 1.5f);
+    }
+
+    private void DrawCellBox(ImDrawListPtr drawList, Vector2 center, Cell cell, RenderMode renderMode)
+    {
+        var material = _dataset.Materials.FirstOrDefault(m => m.MaterialID == cell.MaterialID);
+        var wireframeColor = material != null ? ImGui.GetColorU32(new Vector4(material.Color.X, material.Color.Y, material.Color.Z, 1.0f)) : ImGui.GetColorU32(new Vector4(0.8f, 0.8f, 0.8f, 1.0f));
+        var solidColor = material != null ? ImGui.GetColorU32(new Vector4(material.Color.X, material.Color.Y, material.Color.Z, 0.3f)) : ImGui.GetColorU32(new Vector4(0.8f, 0.8f, 0.8f, 0.3f));
         var scale = 80.0f;
 
         // Simple 2D projection of 3D box
-        var corners = GetProjectedDomainCorners(domain, center, scale);
+        var corners = GetProjectedCellCorners(cell, center, scale);
 
         // Draw solid fill if enabled
         if (renderMode == RenderMode.Solid || renderMode == RenderMode.SolidWireframe)
@@ -490,34 +501,19 @@ public class PhysicoChemViewer : IDatasetViewer
         }
     }
 
-    private Vector2[] GetProjectedDomainCorners(ReactorDomain domain, Vector2 center, float scale)
+    private Vector2[] GetProjectedCellCorners(Cell cell, Vector2 center, float scale)
     {
         // Simple orthographic projection for now
-        var geom = domain.Geometry;
         var corners = new Vector2[8];
 
-        float x = (float)geom.Center.X;
-        float y = (float)geom.Center.Y;
-        float z = (float)geom.Center.Z;
+        float x = (float)cell.Center.X;
+        float y = (float)cell.Center.Y;
+        float z = (float)cell.Center.Z;
 
-        // Get dimensions based on geometry type
-        float w = 0.5f, h = 0.5f, d = 0.5f;
-
-        switch (geom.Type)
-        {
-            case GeometryType.Box:
-                w = (float)geom.Dimensions.Width * 0.5f;
-                h = (float)geom.Dimensions.Height * 0.5f;
-                d = (float)geom.Dimensions.Depth * 0.5f;
-                break;
-            case GeometryType.Sphere:
-                w = h = d = (float)geom.Radius;
-                break;
-            case GeometryType.Cylinder:
-                w = d = (float)geom.Radius;
-                h = (float)geom.Height * 0.5f;
-                break;
-        }
+        // Get dimensions based on cell volume
+        float w = (float)Math.Pow(cell.Volume, 1.0 / 3.0) * 0.5f;
+        float h = w;
+        float d = w;
 
         // Apply camera rotation
         float cosYaw = MathF.Cos(_cameraYaw);
@@ -542,56 +538,6 @@ public class PhysicoChemViewer : IDatasetViewer
         }
 
         return corners;
-    }
-
-    private void DrawMeshGrid(ImDrawListPtr drawList, Vector2 center, (int X, int Y, int Z) gridSize, RenderMode renderMode)
-    {
-        // Only draw grid in wireframe modes
-        if (renderMode == RenderMode.Solid)
-            return;
-
-        var gridColor = ImGui.GetColorU32(new Vector4(0.4f, 0.4f, 0.4f, 0.3f));
-        var scale = 3.0f;
-
-        // Draw simple grid overlay
-        int step = Math.Max(1, gridSize.X / 10);
-        for (int i = 0; i <= gridSize.X; i += step)
-        {
-            float x = (i - gridSize.X * 0.5f) * scale;
-            drawList.AddLine(
-                center + new Vector2(x, -50),
-                center + new Vector2(x, 50),
-                gridColor);
-        }
-
-        step = Math.Max(1, gridSize.Y / 10);
-        for (int j = 0; j <= gridSize.Y; j += step)
-        {
-            float y = (j - gridSize.Y * 0.5f) * scale;
-            drawList.AddLine(
-                center + new Vector2(-50, y),
-                center + new Vector2(50, y),
-                gridColor);
-        }
-    }
-
-    private void DrawBoundaryCondition(ImDrawListPtr drawList, Vector2 center, BoundaryCondition bc)
-    {
-        var color = bc.Type switch
-        {
-            BoundaryType.FixedValue => ImGui.GetColorU32(new Vector4(1.0f, 0.3f, 0.3f, 0.8f)),
-            BoundaryType.FixedFlux => ImGui.GetColorU32(new Vector4(0.3f, 1.0f, 0.3f, 0.8f)),
-            BoundaryType.Inlet => ImGui.GetColorU32(new Vector4(0.3f, 0.3f, 1.0f, 0.8f)),
-            BoundaryType.Outlet => ImGui.GetColorU32(new Vector4(1.0f, 0.5f, 0.0f, 0.8f)),
-            _ => ImGui.GetColorU32(new Vector4(1.0f, 1.0f, 0.3f, 0.8f))
-        };
-
-        // Draw marker at BC location (use custom region center if available)
-        float x = bc.Location == BoundaryLocation.Custom ? (float)bc.CustomRegionCenter.X : 0;
-        float y = bc.Location == BoundaryLocation.Custom ? (float)bc.CustomRegionCenter.Y : 0;
-        var pos = center + new Vector2(x * 2, y * 2);
-        drawList.AddCircleFilled(pos, 5, color);
-        drawList.AddCircle(pos, 6, ImGui.GetColorU32(new Vector4(1, 1, 1, 0.8f)), 0, 1.5f);
     }
 
     private void DrawAxes(ImDrawListPtr drawList, Vector2 center)
@@ -621,9 +567,7 @@ public class PhysicoChemViewer : IDatasetViewer
         var textColor = ImGui.GetColorU32(new Vector4(1, 1, 1, 0.9f));
         var bgColor = ImGui.GetColorU32(new Vector4(0, 0, 0, 0.5f));
 
-        var gridSize = _dataset.GeneratedMesh.GridSize;
-        string info = $"Grid: {gridSize.X} x {gridSize.Y} x {gridSize.Z}\n";
-        info += $"Domains: {_dataset.Domains.Count}\n";
+        string info = $"Cells: {_dataset.Mesh.Cells.Count}\n";
         info += $"BCs: {_dataset.BoundaryConditions.Count}\n";
         info += $"Field: {_fieldOptions[_selectedFieldIndex]}";
 
@@ -759,17 +703,17 @@ public class PhysicoChemViewer : IDatasetViewer
         }
 
         var state = _dataset.CurrentState;
-        var gridSize = _dataset.GeneratedMesh.GridSize;
+        var gridSize = (state.Temperature.GetLength(0), state.Temperature.GetLength(1), state.Temperature.GetLength(2));
 
         // Get slice index based on position
-        int sliceIndex = (int)(_slicePosition * (_sliceAxis == 0 ? gridSize.X : _sliceAxis == 1 ? gridSize.Y : gridSize.Z));
+        int sliceIndex = (int)(_slicePosition * (_sliceAxis == 0 ? gridSize.Item1 : _sliceAxis == 1 ? gridSize.Item2 : gridSize.Item3));
 
         // Draw colored grid representing field values
         float cellSize = Math.Min(availableSize.X / 100, availableSize.Y / 100);
         var startPos = cursorPos + new Vector2(10, 10);
 
-        int width = _sliceAxis == 0 ? gridSize.Y : gridSize.X;
-        int height = _sliceAxis == 2 ? gridSize.Y : gridSize.Z;
+        int width = _sliceAxis == 0 ? gridSize.Item2 : gridSize.Item1;
+        int height = _sliceAxis == 2 ? gridSize.Item2 : gridSize.Item3;
 
         for (int i = 0; i < Math.Min(width, 50); i++)
         for (int j = 0; j < Math.Min(height, 50); j++)
@@ -794,26 +738,26 @@ public class PhysicoChemViewer : IDatasetViewer
 
     private float GetSliceFieldValue(PhysicoChemState state, int i, int j, int sliceIndex)
     {
-        var gridSize = _dataset.GeneratedMesh.GridSize;
+        var gridSize = (state.Temperature.GetLength(0), state.Temperature.GetLength(1), state.Temperature.GetLength(2));
 
         // Map 2D coordinates to 3D grid based on slice axis
         int x = 0, y = 0, z = 0;
         switch (_sliceAxis)
         {
             case 0: // X slice
-                x = Math.Min(sliceIndex, gridSize.X - 1);
-                y = Math.Min(i, gridSize.Y - 1);
-                z = Math.Min(j, gridSize.Z - 1);
+                x = Math.Min(sliceIndex, gridSize.Item1 - 1);
+                y = Math.Min(i, gridSize.Item2 - 1);
+                z = Math.Min(j, gridSize.Item3 - 1);
                 break;
             case 1: // Y slice
-                x = Math.Min(i, gridSize.X - 1);
-                y = Math.Min(sliceIndex, gridSize.Y - 1);
-                z = Math.Min(j, gridSize.Z - 1);
+                x = Math.Min(i, gridSize.Item1 - 1);
+                y = Math.Min(sliceIndex, gridSize.Item2 - 1);
+                z = Math.Min(j, gridSize.Item3 - 1);
                 break;
             case 2: // Z slice
-                x = Math.Min(i, gridSize.X - 1);
-                y = Math.Min(j, gridSize.Y - 1);
-                z = Math.Min(sliceIndex, gridSize.Z - 1);
+                x = Math.Min(i, gridSize.Item1 - 1);
+                y = Math.Min(j, gridSize.Item2 - 1);
+                z = Math.Min(sliceIndex, gridSize.Item3 - 1);
                 break;
         }
 

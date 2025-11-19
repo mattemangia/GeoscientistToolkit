@@ -47,8 +47,8 @@ public class Tough2Loader : IDataLoader
 
                 progressReporter?.Report((0.5f, "Converting mesh data..."));
 
-                // Convert mesh (ELEME block) to domains
-                ConvertMeshToDomains(tough2Data, dataset);
+                // Convert mesh (ELEME block) to cells
+                ConvertMesh(tough2Data, dataset);
 
                 progressReporter?.Report((0.6f, "Converting material properties..."));
 
@@ -87,71 +87,44 @@ public class Tough2Loader : IDataLoader
         FilePath = "";
     }
 
-    private void ConvertMeshToDomains(Tough2Data tough2Data, PhysicoChemDataset dataset)
+    private void ConvertMesh(Tough2Data tough2Data, PhysicoChemDataset dataset)
     {
         if (tough2Data.Elements.Count == 0)
             return;
 
-        // Group elements by rock type to create domains
-        var elementsByRock = tough2Data.Elements
-            .GroupBy(e => e.RockType)
-            .ToList();
-
-        foreach (var group in elementsByRock)
+        foreach (var element in tough2Data.Elements)
         {
-            var rockName = group.Key;
-            var elements = group.ToList();
-
-            // Calculate bounding box for this domain
-            var minX = elements.Min(e => e.X);
-            var maxX = elements.Max(e => e.X);
-            var minY = elements.Min(e => e.Y);
-            var maxY = elements.Max(e => e.Y);
-            var minZ = elements.Min(e => e.Z);
-            var maxZ = elements.Max(e => e.Z);
-
-            var centerX = (minX + maxX) / 2.0;
-            var centerY = (minY + maxY) / 2.0;
-            var centerZ = (minZ + maxZ) / 2.0;
-
-            var width = maxX - minX;
-            var height = maxY - minY;
-            var depth = maxZ - minZ;
-
-            // Create domain with box geometry
-            var domain = new ReactorDomain
+            var cell = new Cell
             {
-                Name = rockName,
-                Geometry = new ReactorGeometry
-                {
-                    Type = GeometryType.Box,
-                    Center = (centerX, centerY, centerZ),
-                    Dimensions = (width, height, depth)
-                },
+                ID = element.Name,
+                MaterialID = element.RockType,
+                Center = (element.X, element.Y, element.Z),
+                Volume = element.Volume,
                 IsActive = true
             };
+            dataset.Mesh.Cells[element.Name] = cell;
+        }
 
-            dataset.AddDomain(domain);
+        foreach (var connection in tough2Data.Connections)
+        {
+            dataset.Mesh.Connections.Add((connection.Element1, connection.Element2));
         }
     }
 
     private void ConvertRocksToMaterials(Tough2Data tough2Data, PhysicoChemDataset dataset)
     {
-        foreach (var domain in dataset.Domains)
+        foreach (var rock in tough2Data.Rocks)
         {
-            // Find corresponding rock type
-            var rock = tough2Data.Rocks.FirstOrDefault(r => r.Name == domain.Name);
-            if (rock != null)
+            var material = new MaterialProperties
             {
-                domain.Material = new MaterialProperties
-                {
-                    Porosity = rock.Porosity,
-                    Permeability = rock.Permeability,
-                    Density = rock.Density,
-                    SpecificHeat = rock.SpecificHeat,
-                    ThermalConductivity = rock.ThermalConductivity
-                };
-            }
+                MaterialID = rock.Name,
+                Porosity = rock.Porosity,
+                Permeability = rock.Permeability,
+                Density = rock.Density,
+                SpecificHeat = rock.SpecificHeat,
+                ThermalConductivity = rock.ThermalConductivity
+            };
+            dataset.Materials.Add(material);
         }
     }
 
@@ -160,38 +133,17 @@ public class Tough2Loader : IDataLoader
         if (tough2Data.InitialConditions.Count == 0)
             return;
 
-        // Use first initial condition as global default
-        var firstIC = tough2Data.InitialConditions.FirstOrDefault();
-        if (firstIC != null)
-        {
-            foreach (var domain in dataset.Domains)
-            {
-                if (domain.InitialConditions == null)
-                {
-                    domain.InitialConditions = new InitialConditions
-                    {
-                        Temperature = firstIC.Temperature,
-                        Pressure = firstIC.Pressure,
-                        LiquidSaturation = firstIC.LiquidSaturation
-                    };
-                }
-            }
-        }
-
         // Apply element-specific initial conditions
         foreach (var ic in tough2Data.InitialConditions)
         {
-            // Find element and corresponding domain
-            var element = tough2Data.Elements.FirstOrDefault(e => e.Name == ic.ElementName);
-            if (element != null)
+            if (dataset.Mesh.Cells.TryGetValue(ic.ElementName, out var cell))
             {
-                var domain = dataset.Domains.FirstOrDefault(d => d.Name == element.RockType);
-                if (domain != null && domain.InitialConditions != null)
+                cell.InitialConditions = new InitialConditions
                 {
-                    domain.InitialConditions.Temperature = ic.Temperature;
-                    domain.InitialConditions.Pressure = ic.Pressure;
-                    domain.InitialConditions.LiquidSaturation = ic.LiquidSaturation;
-                }
+                    Temperature = ic.Temperature,
+                    Pressure = ic.Pressure,
+                    LiquidSaturation = ic.LiquidSaturation
+                };
             }
         }
     }

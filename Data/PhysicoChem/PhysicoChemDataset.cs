@@ -23,7 +23,10 @@ public class PhysicoChemDataset : Dataset, ISerializableDataset
     public string Description { get; set; }
 
     [JsonProperty]
-    public List<ReactorDomain> Domains { get; set; } = new();
+    public PhysicoChemMesh Mesh { get; set; } = new();
+
+    [JsonProperty]
+    public List<MaterialProperties> Materials { get; set; } = new();
 
     [JsonProperty]
     public List<BoundaryCondition> BoundaryConditions { get; set; } = new();
@@ -79,28 +82,7 @@ public class PhysicoChemDataset : Dataset, ISerializableDataset
         Description = description;
     }
 
-    /// <summary>
-    /// Add a new reactor domain
-    /// </summary>
-    public void AddDomain(ReactorDomain domain)
-    {
-        Domains.Add(domain);
-    }
 
-    /// <summary>
-    /// Perform boolean operation between domains
-    /// </summary>
-    public ReactorDomain BooleanOperation(ReactorDomain domain1, ReactorDomain domain2, BooleanOp operation)
-    {
-        var result = new ReactorDomain
-        {
-            Name = $"{domain1.Name}_{operation}_{domain2.Name}",
-            BooleanOperation = operation,
-            ParentDomains = new List<ReactorDomain> { domain1, domain2 }
-        };
-
-        return result;
-    }
 
     /// <summary>
     /// Generate 3D mesh from all domains
@@ -108,7 +90,7 @@ public class PhysicoChemDataset : Dataset, ISerializableDataset
     public void GenerateMesh(int resolution = 50)
     {
         var meshGenerator = new ReactorMeshGenerator();
-        GeneratedMesh = meshGenerator.GenerateMeshFromDomains(Domains, resolution);
+        GeneratedMesh = meshGenerator.GenerateMeshFromDomains(new List<ReactorDomain>(), resolution);
     }
 
     /// <summary>
@@ -127,12 +109,12 @@ public class PhysicoChemDataset : Dataset, ISerializableDataset
 
     private void ApplyInitialConditions()
     {
-        foreach (var domain in Domains)
+        foreach (var cell in Mesh.Cells.Values)
         {
-            if (domain.InitialConditions == null) continue;
+            if (cell.InitialConditions == null) continue;
 
-            // Apply ICs to cells within this domain
-            // (Implementation depends on mesh structure)
+            // Apply ICs to the cell
+            // (Further implementation will be needed in the solver)
         }
     }
 
@@ -143,14 +125,8 @@ public class PhysicoChemDataset : Dataset, ISerializableDataset
     {
         var errors = new List<string>();
 
-        if (Domains.Count == 0)
-            errors.Add("No domains defined");
-
-        foreach (var domain in Domains)
-        {
-            if (domain.Geometry == null)
-                errors.Add($"Domain '{domain.Name}' has no geometry");
-        }
+        if (Mesh == null || Mesh.Cells.Count == 0)
+            errors.Add("Mesh has not been generated or is empty");
 
         return errors;
     }
@@ -221,51 +197,6 @@ public class PhysicoChemDataset : Dataset, ISerializableDataset
             GeothermalDatasetPath = GeothermalDatasetPath
         };
 
-        // Serialize domains
-        foreach (var domain in Domains)
-        {
-            dto.Domains.Add(new ReactorDomainDTO
-            {
-                Name = domain.Name,
-                IsActive = domain.IsActive,
-                AllowInteraction = domain.AllowInteraction,
-                BooleanOperation = domain.BooleanOperation?.ToString(),
-                Geometry = domain.Geometry != null ? new ReactorGeometryDTO
-                {
-                    GeometryType = domain.Geometry.Type.ToString(),
-                    InterpolationMode = domain.Geometry.InterpolationMode.ToString(),
-                    Center = new System.Numerics.Vector3((float)domain.Geometry.Center.X, (float)domain.Geometry.Center.Y, (float)domain.Geometry.Center.Z),
-                    Dimensions = new System.Numerics.Vector3((float)domain.Geometry.Dimensions.Width, (float)domain.Geometry.Dimensions.Height, (float)domain.Geometry.Dimensions.Depth),
-                    Radius = domain.Geometry.Radius,
-                    InnerRadius = domain.Geometry.InnerRadius,
-                    Height = domain.Geometry.Height,
-                    Profile2D = domain.Geometry.Profile2D?.Select(p => new System.Numerics.Vector2((float)p.X, (float)p.Y)).ToList(),
-                    ExtrusionDepth = domain.Geometry.ExtrusionDepth,
-                    RadialSegments = domain.Geometry.RadialSegments,
-                    CustomPoints = domain.Geometry.CustomPoints?.Select(p => new System.Numerics.Vector3((float)p.X, (float)p.Y, (float)p.Z)).ToList(),
-                    MeshFilePath = domain.Geometry.MeshFilePath
-                } : null,
-                Material = domain.Material != null ? new MaterialPropertiesDTO
-                {
-                    Porosity = domain.Material.Porosity,
-                    Permeability = domain.Material.Permeability,
-                    ThermalConductivity = domain.Material.ThermalConductivity,
-                    SpecificHeat = domain.Material.SpecificHeat,
-                    Density = domain.Material.Density,
-                    MineralComposition = domain.Material.MineralComposition,
-                    MineralFractions = new Dictionary<string, double>(domain.Material.MineralFractions)
-                } : null,
-                InitialConditions = domain.InitialConditions != null ? new InitialConditionsDTO
-                {
-                    Temperature = domain.InitialConditions.Temperature,
-                    Pressure = domain.InitialConditions.Pressure,
-                    Concentrations = new Dictionary<string, double>(domain.InitialConditions.Concentrations),
-                    InitialVelocity = new System.Numerics.Vector3((float)domain.InitialConditions.InitialVelocity.Vx, (float)domain.InitialConditions.InitialVelocity.Vy, (float)domain.InitialConditions.InitialVelocity.Vz),
-                    LiquidSaturation = domain.InitialConditions.LiquidSaturation,
-                    FluidType = domain.InitialConditions.FluidType
-                } : null
-            });
-        }
 
         // Serialize boundary conditions
         foreach (var bc in BoundaryConditions)
@@ -337,17 +268,7 @@ public class PhysicoChemDataset : Dataset, ISerializableDataset
             SolverType = SimulationParams.SolverType
         };
 
-        // Serialize mesh if present
-        if (GeneratedMesh != null)
-        {
-            dto.GeneratedMesh = new GridMesh3DDTO
-            {
-                GridSize = new Vector3Int { X = GeneratedMesh.GridSize.X, Y = GeneratedMesh.GridSize.Y, Z = GeneratedMesh.GridSize.Z },
-                Origin = new System.Numerics.Vector3((float)GeneratedMesh.Origin.X, (float)GeneratedMesh.Origin.Y, (float)GeneratedMesh.Origin.Z),
-                Spacing = new System.Numerics.Vector3((float)GeneratedMesh.Spacing.X, (float)GeneratedMesh.Spacing.Y, (float)GeneratedMesh.Spacing.Z),
-                Metadata = new Dictionary<string, object>(GeneratedMesh.Metadata)
-            };
-        }
+        dto.Mesh = Mesh;
 
         // Serialize result history (lightweight version - only statistics, not full 3D arrays)
         if (ResultHistory != null && ResultHistory.Count > 0)
@@ -395,68 +316,6 @@ public class PhysicoChemDataset : Dataset, ISerializableDataset
         CoupleWithGeothermal = dto.CoupleWithGeothermal;
         GeothermalDatasetPath = dto.GeothermalDatasetPath;
 
-        // Import domains
-        Domains.Clear();
-        foreach (var domainDto in dto.Domains)
-        {
-            var domain = new ReactorDomain
-            {
-                Name = domainDto.Name,
-                IsActive = domainDto.IsActive,
-                AllowInteraction = domainDto.AllowInteraction
-            };
-
-            if (!string.IsNullOrEmpty(domainDto.BooleanOperation))
-                domain.BooleanOperation = Enum.Parse<BooleanOp>(domainDto.BooleanOperation);
-
-            if (domainDto.Geometry != null)
-            {
-                domain.Geometry = new ReactorGeometry
-                {
-                    Type = Enum.Parse<GeometryType>(domainDto.Geometry.GeometryType),
-                    InterpolationMode = Enum.Parse<Interpolation2D3DMode>(domainDto.Geometry.InterpolationMode),
-                    Center = (domainDto.Geometry.Center.X, domainDto.Geometry.Center.Y, domainDto.Geometry.Center.Z),
-                    Dimensions = (domainDto.Geometry.Dimensions.X, domainDto.Geometry.Dimensions.Y, domainDto.Geometry.Dimensions.Z),
-                    Radius = domainDto.Geometry.Radius,
-                    InnerRadius = domainDto.Geometry.InnerRadius,
-                    Height = domainDto.Geometry.Height,
-                    Profile2D = domainDto.Geometry.Profile2D?.Select(p => ((double)p.X, (double)p.Y)).ToList() ?? new List<(double, double)>(),
-                    ExtrusionDepth = domainDto.Geometry.ExtrusionDepth,
-                    RadialSegments = domainDto.Geometry.RadialSegments,
-                    CustomPoints = domainDto.Geometry.CustomPoints?.Select(p => ((double)p.X, (double)p.Y, (double)p.Z)).ToList() ?? new List<(double, double, double)>(),
-                    MeshFilePath = domainDto.Geometry.MeshFilePath
-                };
-            }
-
-            if (domainDto.Material != null)
-            {
-                domain.Material = new MaterialProperties
-                {
-                    Porosity = domainDto.Material.Porosity,
-                    Permeability = domainDto.Material.Permeability,
-                    ThermalConductivity = domainDto.Material.ThermalConductivity,
-                    SpecificHeat = domainDto.Material.SpecificHeat,
-                    Density = domainDto.Material.Density,
-                    MineralComposition = domainDto.Material.MineralComposition,
-                    MineralFractions = new Dictionary<string, double>(domainDto.Material.MineralFractions)
-                };
-            }
-
-            if (domainDto.InitialConditions != null)
-            {
-                domain.InitialConditions = new InitialConditions
-                {
-                    Temperature = domainDto.InitialConditions.Temperature,
-                    Pressure = domainDto.InitialConditions.Pressure,
-                    Concentrations = new Dictionary<string, double>(domainDto.InitialConditions.Concentrations),
-                    InitialVelocity = (domainDto.InitialConditions.InitialVelocity.X, domainDto.InitialConditions.InitialVelocity.Y, domainDto.InitialConditions.InitialVelocity.Z),
-                    LiquidSaturation = domainDto.InitialConditions.LiquidSaturation,
-                    FluidType = domainDto.InitialConditions.FluidType
-                };
-            }
-
-            Domains.Add(domain);
-        }
 
         // Import boundary conditions
         BoundaryConditions.Clear();
@@ -531,17 +390,7 @@ public class PhysicoChemDataset : Dataset, ISerializableDataset
         SimulationParams.UseGPU = dto.SimulationParams.UseGPU;
         SimulationParams.SolverType = dto.SimulationParams.SolverType;
 
-        // Import mesh if present
-        if (dto.GeneratedMesh != null)
-        {
-            GeneratedMesh = new GridMesh3D
-            {
-                GridSize = (dto.GeneratedMesh.GridSize.X, dto.GeneratedMesh.GridSize.Y, dto.GeneratedMesh.GridSize.Z),
-                Origin = (dto.GeneratedMesh.Origin.X, dto.GeneratedMesh.Origin.Y, dto.GeneratedMesh.Origin.Z),
-                Spacing = (dto.GeneratedMesh.Spacing.X, dto.GeneratedMesh.Spacing.Y, dto.GeneratedMesh.Spacing.Z),
-                Metadata = new Dictionary<string, object>(dto.GeneratedMesh.Metadata)
-            };
-        }
+        Mesh = dto.Mesh;
 
         // Note: Full result history with 3D arrays is NOT imported
         // Only statistics are available from the DTO

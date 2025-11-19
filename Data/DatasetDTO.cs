@@ -4,6 +4,7 @@ using System.Numerics;
 using GeoscientistToolkit.Data.Materials;
 using GeoscientistToolkit.Data.GIS;
 using GeoscientistToolkit.Business.GIS;
+using GeoscientistToolkit.Data.PhysicoChem;
 
 namespace GeoscientistToolkit.Data;
 
@@ -413,7 +414,7 @@ public class SeismicDatasetDTO : DatasetDTO
 public class PhysicoChemDatasetDTO : DatasetDTO
 {
     public string Description { get; set; }
-    public List<ReactorDomainDTO> Domains { get; set; } = new();
+    public PhysicoChemMesh Mesh { get; set; }
     public List<BoundaryConditionDTO> BoundaryConditions { get; set; } = new();
     public List<ForceFieldDTO> Forces { get; set; } = new();
     public List<NucleationSiteDTO> NucleationSites { get; set; } = new();

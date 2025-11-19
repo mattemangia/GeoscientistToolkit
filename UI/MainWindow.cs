@@ -809,32 +809,34 @@ public class MainWindow
             var dataset = new Data.PhysicoChem.PhysicoChemDataset(reactorName,
                 "Multiphysics reactor simulation");
 
-            // Add a simple box reactor as starting point
-            var box = new Data.PhysicoChem.ReactorDomain("MainReactor", new Data.PhysicoChem.ReactorGeometry
+            // Create a default material
+            var material = new Data.PhysicoChem.MaterialProperties
             {
-                Type = Data.PhysicoChem.GeometryType.Box,
-                Center = (0.5, 0.5, 0.5),
-                Dimensions = (1.0, 1.0, 1.0)
-            });
-
-            box.Material = new Data.PhysicoChem.MaterialProperties
-            {
+                MaterialID = "Default",
                 Porosity = 0.3,
                 Permeability = 1e-12
             };
+            dataset.Materials.Add(material);
 
-            box.InitialConditions = new Data.PhysicoChem.InitialConditions
+            // Create a single cell to represent the reactor
+            var cell = new Data.PhysicoChem.Cell
             {
-                Temperature = 298.15,
-                Pressure = 101325.0,
-                Concentrations = new Dictionary<string, double>
+                ID = "C1",
+                MaterialID = "Default",
+                Center = (0.5, 0.5, 0.5),
+                Volume = 1.0,
+                InitialConditions = new Data.PhysicoChem.InitialConditions
                 {
-                    {"H+", 1e-7},
-                    {"OH-", 1e-7}
+                    Temperature = 298.15,
+                    Pressure = 101325.0,
+                    Concentrations = new Dictionary<string, double>
+                    {
+                        {"H+", 1e-7},
+                        {"OH-", 1e-7}
+                    }
                 }
             };
-
-            dataset.AddDomain(box);
+            dataset.Mesh.Cells["C1"] = cell;
 
             // Add gravity force
             var gravity = new Data.PhysicoChem.ForceField("Gravity", Data.PhysicoChem.ForceType.Gravity)

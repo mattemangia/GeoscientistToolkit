@@ -7,8 +7,10 @@ using System.Numerics;
 using GeoscientistToolkit.Analysis.PhysicoChem;
 using GeoscientistToolkit.Business;
 using GeoscientistToolkit.Data;
+using GeoscientistToolkit.Data.Borehole;
 using GeoscientistToolkit.Data.Exporters;
 using GeoscientistToolkit.Data.Materials;
+using GeoscientistToolkit.Data.Mesh3D;
 using GeoscientistToolkit.UI.Interfaces;
 using GeoscientistToolkit.UI.Utils;
 using GeoscientistToolkit.Util;
@@ -88,6 +90,24 @@ public class PhysicoChemTools : IDatasetTools
     private string _mineralSearchFilter = "";
     private List<string> _selectedMinerals = new();
     private Dictionary<string, float> _mineralFractions = new();
+
+    // Cell splitting state
+    private int _xDivisions = 10;
+    private int _yDivisions = 10;
+    private int _zDivisions = 10;
+
+    // Cell selection state
+    private string _selectedCellID = null;
+
+    // Voronoi meshing state
+    private int _selectedBoreholeIndex = 0;
+    private int _voronoiLayers = 5;
+    private float _voronoiRadius = 100.0f;
+    private float _voronoiHeight = 10.0f;
+
+    // Mesh import state
+    private int _selectedMeshIndex = 0;
+    private float _meshHeight = 10.0f;
 
     public PhysicoChemTools()
     {
@@ -207,133 +227,75 @@ public class PhysicoChemTools : IDatasetTools
 
     private void DrawDomainManagement(PhysicoChemDataset dataset)
     {
-        // List existing domains
-        ImGui.Text($"Existing Domains: {dataset.Domains.Count}");
+        ImGui.Text($"Total Cells: {dataset.Mesh.Cells.Count}");
+        ImGui.Text($"Total Materials: {dataset.Materials.Count}");
         ImGui.Separator();
 
-        for (int i = 0; i < dataset.Domains.Count; i++)
-        {
-            var domain = dataset.Domains[i];
-            bool isSelected = i == _selectedDomainIndex;
+        ImGui.Text("Cell Management");
+        ImGui.Separator();
 
-            if (ImGui.Selectable($"{domain.Name}##domain{i}", isSelected))
+        // Cell list
+        ImGui.BeginChild("cell_list", new Vector2(200, 200), ImGuiChildFlags.Border);
+        foreach (var cell in dataset.Mesh.Cells.Values)
+        {
+            if (ImGui.Selectable(cell.ID, cell.ID == _selectedCellID))
             {
-                _selectedDomainIndex = i;
+                _selectedCellID = cell.ID;
+            }
+        }
+        ImGui.EndChild();
+
+        ImGui.SameLine();
+
+        // Cell properties
+        ImGui.BeginChild("cell_properties", new Vector2(0, 200), ImGuiChildFlags.Border);
+        if (_selectedCellID != null && dataset.Mesh.Cells.TryGetValue(_selectedCellID, out var selectedCell))
+        {
+            ImGui.Text($"Properties for Cell: {selectedCell.ID}");
+            ImGui.Separator();
+
+            bool isActive = selectedCell.IsActive;
+            if (ImGui.Checkbox("Is Active", ref isActive))
+            {
+                selectedCell.IsActive = isActive;
             }
 
-            if (ImGui.BeginPopupContextItem($"domain_ctx_{i}"))
+            var materialIDs = dataset.Materials.Select(m => m.MaterialID).ToArray();
+            var currentMaterialIndex = Array.IndexOf(materialIDs, selectedCell.MaterialID);
+            if (ImGui.Combo("Material", ref currentMaterialIndex, materialIDs, materialIDs.Length))
             {
-                if (ImGui.MenuItem("Delete"))
-                {
-                    dataset.Domains.RemoveAt(i);
-                    _selectedDomainIndex = -1;
-                    ProjectManager.Instance.NotifyDatasetDataChanged(dataset);
-                }
-                ImGui.EndPopup();
+                selectedCell.MaterialID = materialIDs[currentMaterialIndex];
+            }
+        }
+        else
+        {
+            ImGui.Text("Select a cell to view its properties.");
+        }
+        ImGui.EndChild();
+
+        ImGui.Spacing();
+        ImGui.Separator();
+        ImGui.Text("Split Mesh into Grid:");
+
+        ImGui.InputInt("X Divisions", ref _xDivisions);
+        ImGui.InputInt("Y Divisions", ref _yDivisions);
+        ImGui.InputInt("Z Divisions", ref _zDivisions);
+
+        if (ImGui.Button("Split"))
+        {
+            try
+            {
+                dataset.Mesh.SplitIntoGrid(_xDivisions, _yDivisions, _zDivisions);
+                Logger.Log($"Split mesh into a {_xDivisions}x{_yDivisions}x{_zDivisions} grid.");
+                ProjectManager.Instance.NotifyDatasetDataChanged(dataset);
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError($"Failed to split mesh: {ex.Message}");
             }
         }
 
         ImGui.Spacing();
-        ImGui.Separator();
-        ImGui.Text("Add New Domain:");
-
-        // Domain name
-        ImGui.InputText("Name##domain", ref _newDomainName, 64);
-
-        // Geometry type
-        ImGui.Combo("Geometry##domain", ref _geometryTypeIndex, _geometryTypes, _geometryTypes.Length);
-
-        var geomType = (GeometryType)_geometryTypeIndex;
-
-        // Geometry parameters based on type
-        ImGui.DragFloat3("Center##domain", ref _domainCenter, 0.1f);
-
-        switch (geomType)
-        {
-            case GeometryType.Box:
-                ImGui.DragFloat3("Size##domain", ref _domainSize, 0.1f, 0.01f, 100.0f);
-                break;
-
-            case GeometryType.Sphere:
-                ImGui.DragFloat("Radius##domain", ref _domainRadius, 0.05f, 0.01f, 50.0f);
-                break;
-
-            case GeometryType.Cylinder:
-                ImGui.DragFloat("Radius##domain", ref _domainRadius, 0.05f, 0.01f, 50.0f);
-                ImGui.DragFloat("Height##domain", ref _domainHeight, 0.1f, 0.01f, 100.0f);
-                ImGui.DragFloat("Inner Radius##domain", ref _domainInnerRadius, 0.05f, 0.0f, _domainRadius);
-                break;
-
-            case GeometryType.Cone:
-                ImGui.DragFloat("Base Radius##domain", ref _domainRadius, 0.05f, 0.01f, 50.0f);
-                ImGui.DragFloat("Height##domain", ref _domainHeight, 0.1f, 0.01f, 100.0f);
-                break;
-        }
-
-        // Material properties
-        if (ImGui.TreeNode("Material Properties##domain"))
-        {
-            ImGui.Text("Physical Properties:");
-            ImGui.Indent();
-            ImGui.DragFloat("Porosity", ref _porosity, 0.01f, 0.0f, 1.0f);
-            ImGui.InputFloat("Permeability (m²)", ref _permeability, 0, 0, "%.2e");
-            ImGui.DragFloat("Thermal Conductivity (W/m·K)", ref _thermalConductivity, 0.1f, 0.1f, 100.0f);
-            ImGui.DragFloat("Specific Heat (J/kg·K)", ref _specificHeat, 10.0f, 100.0f, 5000.0f);
-            ImGui.DragFloat("Density (kg/m³)", ref _density, 10.0f, 100.0f, 10000.0f);
-            ImGui.Unindent();
-
-            ImGui.Spacing();
-            ImGui.Separator();
-            ImGui.Text("Mineral Composition:");
-            DrawMineralSelector();
-
-            ImGui.TreePop();
-        }
-
-        // Initial conditions
-        if (ImGui.TreeNode("Initial Conditions##domain"))
-        {
-            ImGui.DragFloat("Temperature (K)", ref _initialTemp, 1.0f, 200.0f, 1500.0f);
-            ImGui.InputFloat("Pressure (Pa)", ref _initialPressure, 0, 0, "%.2e");
-            ImGui.TreePop();
-        }
-
-        // Add domain button
-        if (ImGui.Button("Add Domain"))
-        {
-            var geometry = CreateGeometry(geomType);
-            var material = new MaterialProperties
-            {
-                Porosity = _porosity,
-                Permeability = _permeability,
-                ThermalConductivity = _thermalConductivity,
-                SpecificHeat = _specificHeat,
-                Density = _density,
-                MineralComposition = string.Join(", ", _selectedMinerals),
-                MineralFractions = new Dictionary<string, double>(_mineralFractions.ToDictionary(kvp => kvp.Key, kvp => (double)kvp.Value))
-            };
-
-            var initialConditions = new InitialConditions
-            {
-                Temperature = _initialTemp,
-                Pressure = _initialPressure
-            };
-
-            var domain = new ReactorDomain(_newDomainName, geometry)
-            {
-                Material = material,
-                InitialConditions = initialConditions
-            };
-
-            dataset.AddDomain(domain);
-            ProjectManager.Instance.NotifyDatasetDataChanged(dataset);
-            Logger.Log($"Added domain: {_newDomainName}");
-
-            // Reset for next domain
-            _newDomainName = "Domain" + (dataset.Domains.Count + 1);
-        }
-
-        ImGui.SameLine();
 
         if (ImGui.Button("Generate Mesh"))
         {
@@ -348,40 +310,72 @@ public class PhysicoChemTools : IDatasetTools
                 Logger.LogError($"Failed to generate mesh: {ex.Message}");
             }
         }
-    }
 
-    private ReactorGeometry CreateGeometry(GeometryType type)
-    {
-        var geometry = new ReactorGeometry
+        ImGui.Spacing();
+        ImGui.Separator();
+        ImGui.Text("Generate Voronoi Mesh around Well:");
+
+        var boreholes = ProjectManager.Instance.LoadedDatasets.OfType<BoreholeDataset>().ToList();
+        if (boreholes.Any())
         {
-            Type = type,
-            Center = (_domainCenter.X, _domainCenter.Y, _domainCenter.Z)
-        };
+            var boreholeNames = boreholes.Select(b => b.WellName).ToArray();
+            ImGui.Combo("Borehole", ref _selectedBoreholeIndex, boreholeNames, boreholeNames.Length);
+            ImGui.InputInt("Layers", ref _voronoiLayers);
+            ImGui.InputFloat("Radius", ref _voronoiRadius);
+            ImGui.InputFloat("Height", ref _voronoiHeight);
 
-        switch (type)
+            if (ImGui.Button("Generate Voronoi Mesh"))
+            {
+                try
+                {
+                    var selectedBorehole = boreholes[_selectedBoreholeIndex];
+                    dataset.Mesh.GenerateVoronoiMesh(selectedBorehole, _voronoiLayers, _voronoiRadius, _voronoiHeight);
+                    Logger.Log($"Generated Voronoi mesh with {_voronoiLayers} layers and a radius of {_voronoiRadius} around {selectedBorehole.WellName}.");
+                    ProjectManager.Instance.NotifyDatasetDataChanged(dataset);
+                }
+                catch (Exception ex)
+                {
+                    Logger.LogError($"Failed to generate Voronoi mesh: {ex.Message}");
+                }
+            }
+        }
+        else
         {
-            case GeometryType.Box:
-                geometry.Dimensions = (_domainSize.X, _domainSize.Y, _domainSize.Z);
-                break;
-
-            case GeometryType.Sphere:
-                geometry.Radius = _domainRadius;
-                break;
-
-            case GeometryType.Cylinder:
-                geometry.Radius = _domainRadius;
-                geometry.Height = _domainHeight;
-                geometry.InnerRadius = _domainInnerRadius;
-                break;
-
-            case GeometryType.Cone:
-                geometry.Radius = _domainRadius;
-                geometry.Height = _domainHeight;
-                break;
+            ImGui.TextDisabled("No boreholes found in the project. Add a borehole to generate a Voronoi mesh.");
         }
 
-        return geometry;
+        ImGui.Spacing();
+        ImGui.Separator();
+        ImGui.Text("Import Mesh from Mesh3DDataset:");
+
+        var meshes = ProjectManager.Instance.LoadedDatasets.OfType<Mesh3DDataset>().ToList();
+        if (meshes.Any())
+        {
+            var meshNames = meshes.Select(m => m.Name).ToArray();
+            ImGui.Combo("Mesh", ref _selectedMeshIndex, meshNames, meshNames.Length);
+            ImGui.InputFloat("Height##mesh", ref _meshHeight);
+
+            if (ImGui.Button("Import Mesh"))
+            {
+                try
+                {
+                    var selectedMesh = meshes[_selectedMeshIndex];
+                    dataset.Mesh.FromMesh3DDataset(selectedMesh, _meshHeight);
+                    Logger.Log($"Imported mesh from {selectedMesh.Name}.");
+                    ProjectManager.Instance.NotifyDatasetDataChanged(dataset);
+                }
+                catch (Exception ex)
+                {
+                    Logger.LogError($"Failed to import mesh: {ex.Message}");
+                }
+            }
+        }
+        else
+        {
+            ImGui.TextDisabled("No 3D meshes found in the project. Add a 3D mesh to import it.");
+        }
     }
+
 
     private void DrawBoundaryConditions(PhysicoChemDataset dataset)
     {

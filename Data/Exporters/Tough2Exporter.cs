@@ -76,13 +76,9 @@ public class Tough2Exporter
         _output.AppendLine("ROCKS");
         _output.AppendLine("----1----*----2----*----3----*----4----*----5----*----6----*----7----*----8");
 
-        foreach (var domain in _dataset.Domains)
+        foreach (var mat in _dataset.Materials)
         {
-            if (domain.Material == null)
-                continue;
-
-            var mat = domain.Material;
-            var rockName = TruncateString(domain.Name, 5);
+            var rockName = TruncateString(mat.MaterialID, 5);
 
             // ROCKS block format:
             // MAT   NAD   DENSITY  POROSITY  K(1)     K(2)     K(3)     CWET    SPHT
@@ -168,56 +164,21 @@ public class Tough2Exporter
         _output.AppendLine("ELEME");
         _output.AppendLine("----1----*----2----*----3----*----4----*----5----*----6----*----7----*----8");
 
-        if (_dataset.GeneratedMesh == null)
-        {
-            // Generate simple mesh from domains
-            GenerateSimpleMeshElements();
-        }
-        else
-        {
-            // Use existing mesh
-            GenerateMeshElements();
-        }
+        GenerateMeshElements();
 
         _output.AppendLine();
     }
 
-    private void GenerateSimpleMeshElements()
+    private void GenerateMeshElements()
     {
-        int elementIndex = 0;
-
-        foreach (var domain in _dataset.Domains)
+        foreach (var cell in _dataset.Mesh.Cells.Values)
         {
-            if (domain.Geometry == null)
-                continue;
-
-            var rockType = TruncateString(domain.Name, 5);
-            var center = domain.Geometry.Center;
-            var dims = domain.Geometry.Dimensions;
-
-            // Calculate approximate volume
-            double volume = 0;
-            switch (domain.Geometry.Type)
-            {
-                case GeometryType.Box:
-                    volume = dims.Width * dims.Height * dims.Depth;
-                    break;
-                case GeometryType.Sphere:
-                    volume = (4.0 / 3.0) * Math.PI * Math.Pow(domain.Geometry.Radius, 3);
-                    break;
-                case GeometryType.Cylinder:
-                    volume = Math.PI * Math.Pow(domain.Geometry.Radius, 2) * domain.Geometry.Height;
-                    break;
-                default:
-                    volume = dims.Width * dims.Height * dims.Depth;
-                    break;
-            }
-
-            // Create single element for this domain
-            var elementName = $"E{elementIndex:D4}";
+            var rockType = TruncateString(cell.MaterialID, 5);
+            var center = cell.Center;
+            var volume = cell.Volume;
 
             _output.AppendLine(
-                $"{elementName,-5}" +
+                $"{TruncateString(cell.ID, 5),-5}" +
                 $"{0,5}" +  // NSEQ
                 $"{0,5}" +  // NADD
                 $"{rockType,-5}" +
@@ -227,74 +188,7 @@ public class Tough2Exporter
                 $"{FormatDouble(center.Y, 10)}" +
                 $"{FormatDouble(center.Z, 10)}"
             );
-
-            elementIndex++;
         }
-    }
-
-    private void GenerateMeshElements()
-    {
-        var mesh = _dataset.GeneratedMesh;
-        var gridSize = mesh.GridSize;
-        var origin = mesh.Origin;
-        var spacing = mesh.Spacing;
-
-        int elementIndex = 0;
-
-        // Generate elements for each grid cell
-        for (int i = 0; i < gridSize.X; i++)
-        {
-            for (int j = 0; j < gridSize.Y; j++)
-            {
-                for (int k = 0; k < gridSize.Z; k++)
-                {
-                    var x = origin.X + i * spacing.X + spacing.X / 2.0;
-                    var y = origin.Y + j * spacing.Y + spacing.Y / 2.0;
-                    var z = origin.Z + k * spacing.Z + spacing.Z / 2.0;
-
-                    var volume = spacing.X * spacing.Y * spacing.Z;
-
-                    // Find which domain this cell belongs to
-                    var domain = FindDomainAtPoint(x, y, z);
-                    var rockType = domain != null ? TruncateString(domain.Name, 5) : "DEFLT";
-
-                    var elementName = $"{i:D2}{j:D2}{k:D1}";
-
-                    _output.AppendLine(
-                        $"{elementName,-5}" +
-                        $"{0,5}" +  // NSEQ
-                        $"{0,5}" +  // NADD
-                        $"{rockType,-5}" +
-                        $"{FormatDouble(volume, 10)}" +
-                        $"{FormatDouble(0.0, 10)}" +  // Heat exchange area
-                        $"{FormatDouble(x, 10)}" +
-                        $"{FormatDouble(y, 10)}" +
-                        $"{FormatDouble(z, 10)}"
-                    );
-
-                    elementIndex++;
-
-                    // Limit elements for performance
-                    if (elementIndex > 10000)
-                    {
-                        Logger.LogWarning("TOUGH2 export limited to 10000 elements");
-                        return;
-                    }
-                }
-            }
-        }
-    }
-
-    private ReactorDomain FindDomainAtPoint(double x, double y, double z)
-    {
-        foreach (var domain in _dataset.Domains)
-        {
-            if (domain.Geometry != null && domain.Geometry.ContainsPoint(x, y, z))
-            {
-                return domain;
-            }
-        }
-        return null;
     }
 
     private void WriteConneBlock()
@@ -313,30 +207,27 @@ public class Tough2Exporter
         _output.AppendLine("INCON");
         _output.AppendLine("----1----*----2----*----3----*----4----*----5----*----6----*----7----*----8");
 
-        int elementIndex = 0;
-
-        foreach (var domain in _dataset.Domains)
+        foreach (var cell in _dataset.Mesh.Cells.Values)
         {
-            if (domain.InitialConditions == null)
+            if (cell.InitialConditions == null)
                 continue;
 
-            var ic = domain.InitialConditions;
-            var elementName = $"E{elementIndex:D4}";
+            var ic = cell.InitialConditions;
+            var material = _dataset.Materials.FirstOrDefault(m => m.MaterialID == cell.MaterialID);
+            var porosity = material?.Porosity ?? 0.3;
 
             // INCON format: ELEM, POROSITY, conditions
-            _output.AppendLine($"{elementName,-5}");
+            _output.AppendLine($"{TruncateString(cell.ID, 5),-5}");
 
             // Second line: porosity and initial conditions
             // For TOUGH2: we need to specify primary variables
             // For 2-component (water+heat): P, T, Sg (or Sl)
             _output.AppendLine(
-                $"{FormatDouble(domain.Material?.Porosity ?? 0.3, 15)}" +
+                $"{FormatDouble(porosity, 15)}" +
                 $"{FormatDouble(ic.Pressure, 15)}" +
                 $"{FormatDouble(ic.Temperature, 15)}" +
                 $"{FormatDouble(1.0 - ic.LiquidSaturation, 15)}"  // Gas saturation
             );
-
-            elementIndex++;
         }
 
         _output.AppendLine();
@@ -393,19 +284,16 @@ public class Tough2Exporter
     private void WriteFoftBlock()
     {
         // FOFT - Element output times
-        // Export first 5 domains as elements to monitor
-        if (_dataset.Domains.Count == 0)
+        // Export first 5 cells as elements to monitor
+        if (_dataset.Mesh.Cells.Count == 0)
             return;
 
         _output.AppendLine("FOFT");
         _output.AppendLine("----1----*----2----*----3----*----4----*----5----*----6----*----7----*----8");
 
-        int count = 0;
-        foreach (var domain in _dataset.Domains.Take(5))
+        foreach (var cell in _dataset.Mesh.Cells.Values.Take(5))
         {
-            var elementName = $"E{count:D4}";
-            _output.AppendLine(elementName.PadRight(5));
-            count++;
+            _output.AppendLine(TruncateString(cell.ID, 5).PadRight(5));
         }
 
         _output.AppendLine();

@@ -99,31 +99,23 @@ public class PhysicoChemPropertiesRenderer : IDatasetPropertiesRenderer
 
     private void DrawDomainStatistics(PhysicoChemDataset dataset)
     {
-        ImGui.Text($"Total Domains: {dataset.Domains.Count}");
+        ImGui.Text($"Total Cells: {dataset.Mesh.Cells.Count}");
+        ImGui.Text($"Total Materials: {dataset.Materials.Count}");
 
-        if (dataset.Domains.Count == 0)
+        if (dataset.Mesh.Cells.Count == 0)
         {
-            ImGui.TextDisabled("No domains defined");
+            ImGui.TextDisabled("No cells defined");
             return;
         }
 
         ImGui.Spacing();
 
-        // Count by geometry type
-        var geometryGroups = dataset.Domains.GroupBy(d => d.Geometry?.Type ?? GeometryType.Box);
-        foreach (var group in geometryGroups)
-        {
-            ImGui.BulletText($"{group.Key}: {group.Count()}");
-        }
-
-        ImGui.Spacing();
-
         // Material property ranges
-        if (dataset.Domains.Any(d => d.Material != null))
+        if (dataset.Materials.Any())
         {
             ImGui.Text("Material Property Ranges:");
 
-            var materials = dataset.Domains.Where(d => d.Material != null).Select(d => d.Material).ToList();
+            var materials = dataset.Materials;
 
             if (materials.Count > 0)
             {
@@ -142,12 +134,12 @@ public class PhysicoChemPropertiesRenderer : IDatasetPropertiesRenderer
         ImGui.Spacing();
 
         // Initial conditions ranges
-        if (dataset.Domains.Any(d => d.InitialConditions != null))
+        if (dataset.Mesh.Cells.Values.Any(c => c.InitialConditions != null))
         {
             ImGui.Text("Initial Conditions Ranges:");
 
-            var ics = dataset.Domains.Where(d => d.InitialConditions != null)
-                .Select(d => d.InitialConditions).ToList();
+            var ics = dataset.Mesh.Cells.Values.Where(c => c.InitialConditions != null)
+                .Select(c => c.InitialConditions).ToList();
 
             if (ics.Count > 0)
             {
