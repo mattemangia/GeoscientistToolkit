@@ -258,6 +258,10 @@ public class PhysicoChemViewer : IDatasetViewer
         var bgColor = ImGui.GetColorU32(new Vector4(0.1f, 0.1f, 0.12f, 1.0f));
         drawList.AddRectFilled(cursorPos, cursorPos + availableSize, bgColor);
 
+        // CRITICAL: Set cursor position to match background before creating button
+        // This ensures the InvisibleButton is positioned exactly where we want to capture input
+        ImGui.SetCursorScreenPos(cursorPos);
+
         // Invisible button for capturing mouse input
         ImGui.InvisibleButton("PhysicoChemViewArea", availableSize,
             ImGuiButtonFlags.MouseButtonLeft | ImGuiButtonFlags.MouseButtonRight | ImGuiButtonFlags.MouseButtonMiddle);
