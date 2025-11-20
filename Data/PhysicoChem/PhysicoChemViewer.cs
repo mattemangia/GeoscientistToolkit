@@ -258,21 +258,23 @@ public class PhysicoChemViewer : IDatasetViewer
         var bgColor = ImGui.GetColorU32(new Vector4(0.1f, 0.1f, 0.12f, 1.0f));
         drawList.AddRectFilled(cursorPos, cursorPos + availableSize, bgColor);
 
-        // Get mouse position and check bounds directly
+        // Invisible button for capturing mouse input
+        ImGui.InvisibleButton("PhysicoChemViewArea", availableSize,
+            ImGuiButtonFlags.MouseButtonLeft | ImGuiButtonFlags.MouseButtonRight | ImGuiButtonFlags.MouseButtonMiddle);
+
+        // Get mouse position and manually check if it's in bounds
         var io = ImGui.GetIO();
         var mousePos = io.MousePos;
         var isMouseInBounds = mousePos.X >= cursorPos.X && mousePos.X <= cursorPos.X + availableSize.X &&
                               mousePos.Y >= cursorPos.Y && mousePos.Y <= cursorPos.Y + availableSize.Y;
 
-        // Don't rely on ImGui hover - just use direct bounds check
-        var isHovered = isMouseInBounds && !io.WantCaptureMouse;
-
-        // Simple dummy to reserve space (no interaction needed)
-        ImGui.Dummy(availableSize);
+        // Use manual bounds check OR ImGui's hover (whichever works)
+        var isButtonHovered = ImGui.IsItemHovered();
+        var isHovered = isButtonHovered || (isMouseInBounds && !io.WantCaptureMouse);
 
         var isClicked = ImGui.IsMouseClicked(ImGuiMouseButton.Left) && isHovered;
         var isMouseDragging = ImGui.IsMouseDragging(ImGuiMouseButton.Left);
-        var isActive = _isDragging || _isPanning;
+        var isActive = ImGui.IsItemActive();
 
         // Handle builder interactions first
         if (_builderMode)
